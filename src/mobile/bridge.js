@@ -145,6 +145,33 @@ const booting = new Set();
 let syncUpdates = [];
 const mutationReplies = new Map();
 const transportEpoch = new Map();
+// Native edits are monotonic per qualified owner, independent of focus.
+const nativeDraftEdits = new Map();
+const nativeSubmits = new Map();
+function nativeOwner(thread) {
+  if (typeof thread !== "string") return null;
+  const hub = [...thin.paired].find(key => thread.startsWith(key + "|"));
+  const raw = hub ? thread.slice(hub.length + 1) : "";
+  return hub && raw ? { hub, raw } : null;
+}
+function privateDraft(thread, text, edit) {
+  const owner = nativeOwner(thread), old = nativeDraftEdits.get(thread);
+  if (!owner || typeof text !== "string" || !Number.isSafeInteger(edit) || edit < 0 ||
+      (old && (edit < old.edit || (edit === old.edit && text !== old.text)))) return { accepted: false, cmds: [] };
+  if (old && edit === old.edit) return { accepted: true, cmds: [{ type: "draft-kept", thread, edit }] };
+  nativeDraftEdits.set(thread, { edit, text });
+  const cmds = [{ type: "draft-kept", thread, edit }];
+  if (thin.thin(owner.hub)) thin.draftAt(owner.hub, owner.raw, text);
+  else {
+    const link = recent.links.get(owner.hub), session = link?.session || plain(App.session(hubs, owner.hub));
+    const next = plain(App.session_draft(JSON.stringify({ ...session, sel: owner.raw }), text));
+    const installed = { ...session, drafts: next.drafts };
+    if (link) link.session = installed;
+    hubs = App.session_adopt(hubs, owner.hub, JSON.stringify(installed), foregroundHub());
+    cmds.push({ type: "keep", thread, text });
+  }
+  return { accepted: true, cmds };
+}
 
 const foregroundHub = () => previewCur || thin.current || App.current(hubs);
 const waitingForForeground = () => foregroundPending(booting, foregroundHub());
@@ -271,6 +298,8 @@ const thin = new NativeThinHost307265({
   drafts: key => Object.fromEntries(Object.entries(kept).filter(([qualified]) => qualified.startsWith(key + "|")).map(([qualified, text]) => [qualified.slice(key.length + 1), text])),
   target: session => plain(App.thin_target(JSON.stringify(session))),
   intent: thinIntent,
+  focus: key => { previewCur = key; },
+  firstProject: () => bubMovingScreen()?.projects?.[0]?.id || '',
   prepare: (session, input, action) => thinRoute(plain(App.session_prepare(JSON.stringify(session), JSON.stringify(input), action)), input),
   ack: (session, envelope) => thinRoute(plain(App.session_reply(JSON.stringify(session), envelope.bend || bendJson(envelope))), session),
   send: sendWire,
@@ -316,11 +345,14 @@ function direct(cmds, draw, updates = []) {
     else delete kept[c.thread];
   }
   const canDraw = draw && (!thin.thin(foregroundHub()) || thin.views() !== null);
-  return JSON.stringify({ screen: canDraw ? bubMovingScreen() : null, cmds, sync: syncUpdates.splice(0).concat(updates), deadline: currentDeadline() });
+  const screen = canDraw ? bubMovingScreen() : null;
+  const composerEdit = nativeDraftEdits.get(screen?.thread?.id)?.edit;
+  return JSON.stringify({ screen, cmds, sync: syncUpdates.splice(0).concat(updates), deadline: currentDeadline(),
+    ...(composerEdit === undefined ? {} : { composerEdit }) });
 }
 
-function expired() {
-  thin.expire();
+function expired(followups = false) {
+  thin.expire(followups);
   const cs = [];
   for (const failure of recent.expire()) {
     cs.push(...failure.cmds);
@@ -437,6 +469,9 @@ function screenText() {
     if (!overlays) return "null";
     const drafts = overlays.map(overlay => plain(App.thin_shown_draft(bendJson(overlay), JSON.stringify(thin.state(overlay.key).session))));
     const screen = plain(App.thin_presentation(hubs, bendJson(drafts), cur));
+    // Negotiation markers belong to each validated hub reply. A merged
+    // client screen exposes the per-hub descriptors, never a global offer.
+    delete screen.nativeSidebar;
     screen.locale = nativeLocale;
     // paged up into the history: how many pages lie below (the native
     // list's bottom trigger asks for "later"; the host keeps the trail)
@@ -519,6 +554,7 @@ globalThis.Backplane = {
   // drafts: the drafts it kept, as JSON {"<hub>|<thread>": text}
   start(cid, drafts) {
     thin.reset();
+    nativeDraftEdits.clear(); nativeSubmits.clear();
     clientID = cid;
     hubs = App.init(secs(Date.now() / 1000), cid);
     try {
@@ -531,6 +567,8 @@ globalThis.Backplane = {
   // the hubs paired, as their keys (host:port) in order
   hubs(keys) {
     thin.hubs(keys);
+    for (const thread of nativeDraftEdits.keys()) if (!keys.some(key => thread.startsWith(key + "|"))) nativeDraftEdits.delete(thread);
+    for (const thread of nativeSubmits.keys()) if (!keys.some(key => thread.startsWith(key + "|"))) nativeSubmits.delete(thread);
     if (previewCur && !keys.includes(previewCur)) previewCur = thin.current;
     for (const key of recent.links.keys()) if (!keys.includes(key)) recent.close(key);
     for (const key of booting) if (!keys.includes(key)) booting.delete(key);
@@ -539,6 +577,26 @@ globalThis.Backplane = {
     restoreLocal();
     restore();
     return out(null);
+  },
+  // Explicit pairing retirement; ordinary socket reconnects do not call it.
+  forgetHub(key) {
+    thin.forgetHub(key);
+    for (const thread of nativeDraftEdits.keys()) if (thread.startsWith(key + "|")) nativeDraftEdits.delete(thread);
+    for (const thread of nativeSubmits.keys()) if (thread.startsWith(key + "|")) nativeSubmits.delete(thread);
+    // Remove the compact Bend client as well; a new pairing at the same
+    // address starts from a new client, not the previous account's choices.
+    hubs = App.hubs(hubs, JSON.stringify([...thin.paired]));
+    if (previewCur === key) previewCur = thin.current;
+    for (const draft of Object.keys(kept)) if (draft.startsWith(key + "|")) delete kept[draft];
+    recent.close(key);
+    booting.delete(key);
+    transportEpoch.delete(key);
+    bubLive.delete(key);
+    bubMoves.disconnect(key);
+    syncUpdates = syncUpdates.filter(s => s.hub !== key);
+    // Do not drain another hub's queued commands or status into a discarded
+    // retirement reply; the next ordinary bridge call delivers those.
+    return JSON.stringify({ screen: null, cmds: [], sync: [], deadline: currentDeadline() });
   },
   // a choice that belongs to this device, not the hub (the thread list's
   // "view": "projects" or "active"; "" leaves it to the hub's setting)
@@ -720,7 +778,94 @@ globalThis.Backplane = {
     if (thin.register(hub, [platform, token, kind, thread, env, bundle])) return direct([], false);
     return step(App.register_at(hubs, hub, platform, token, kind, thread, env, bundle), true);
   },
+  draftAt(thread, text, edit) {
+    return direct(privateDraft(thread, text, edit).cmds, false);
+  },
+  sendAt(thread, action, text, edit) {
+    const owner = nativeOwner(thread);
+    if (!owner || !['send', 'send-alt', 'interrupt'].includes(action) || typeof text !== 'string' ||
+        !Number.isSafeInteger(edit) || edit < 0 || edit >= Number.MAX_SAFE_INTEGER) return direct([], false);
+    if (action !== 'interrupt' && (nativeSubmits.get(thread) ?? -1) >= edit) return direct([], false);
+    const reject = () => direct([{ type: 'send-failed', thread, text, edit, action }], false);
+    if (foregroundHub() !== owner.hub) return reject();
+    const saved = nativeDraftEdits.get(thread);
+    const cmds = [];
+    if (action !== 'interrupt' && (!saved || saved.edit <= edit)) cmds.push(...privateDraft(thread, text, edit).cmds);
+    let accepted;
+    if (thin.thin(owner.hub)) {
+      accepted = thin.sendAt(owner.hub, owner.raw, action, text, !saved || saved.edit <= edit);
+    } else {
+      const link = recent.links.get(owner.hub), session = link?.session || plain(App.session(hubs, owner.hub));
+      if (session.sel !== owner.raw || link?.flight) return reject();
+      const r = JSON.parse(this.act(action, ''));
+      cmds.push(...(r.cmds || []));
+      syncUpdates.push(...(r.sync || []));
+      accepted = true;
+    }
+    if (!accepted) return reject();
+    if (action !== 'interrupt') {
+      nativeSubmits.set(thread, edit);
+    }
+    return direct(cmds, false);
+  },
+  composerAction(thread, action, value) {
+    const owner = nativeOwner(thread);
+    if (!owner || foregroundHub() !== owner.hub || typeof action !== 'string' || typeof value !== 'string') return direct([], false);
+    if (thin.thin(owner.hub)) {
+      if (action === 'attach-end') {
+        thin.attachmentEnd(owner.hub, owner.raw, value);
+        return direct([], false);
+      }
+      const state = thin.states.get(owner.hub);
+      if (!state?.ready || state.active || state.session.sel !== owner.raw) return direct([], false);
+    } else {
+      const link = recent.links.get(owner.hub), session = link?.session || plain(App.session(hubs, owner.hub));
+      if (session.sel !== owner.raw || link?.flight) return direct([], false);
+    }
+    return this.act(action, value);
+  },
+  viewerAction(hub, nav, serial, value) {
+    if (thin.thin(hub)) {
+      thin.viewerAction(hub, nav, serial, value);
+      return direct([], true);
+    }
+    // An explicitly chosen older lane keeps its existing action protocol.
+    // Never reroute a late close through another hub's foreground session.
+    const session = recent.links.get(hub)?.session || plain(App.session(hubs, hub));
+    if (Number.isSafeInteger(serial) && serial > 0 && typeof value === "string" &&
+        foregroundHub() === hub && thin.paired.has(hub) && nav === hub + "|" + session.sel)
+      return this.act("view", value);
+    return direct([], false);
+  },
+  projectSearchQuery(scope, edit, text) {
+    thin.projectSearchQuery(scope, edit, text);
+    return direct([], true);
+  },
+  projectSearchEnd(scope) {
+    thin.projectSearchEnd(scope);
+    return direct([], false);
+  },
+  projectSearchGo(scope, edit, text, project) {
+    thin.projectSearchGo(scope, edit, text, project);
+    return direct([], true);
+  },
+  // Native-only local admission. It does not grant presentation authority.
+  navigation(action, value, expectedHub = undefined, expectedEpoch = undefined, presentedNav = null) {
+    if (!['select', 'bot', 'room', 'remote', 'uber', 'uber-bot'].includes(action) || typeof value !== 'string')
+      return JSON.stringify({ ...JSON.parse(direct([], false)), navigationAccepted: false });
+    const key = App.session_target(hubs, previewCur || App.current(hubs), action, value);
+    if ((expectedHub !== undefined || expectedEpoch !== undefined) &&
+        (expectedHub !== key || typeof expectedEpoch !== "string" || thin.states.get(key)?.epoch !== expectedEpoch))
+      return JSON.stringify({ ...JSON.parse(direct([], false)), navigationAccepted: false });
+    const accepted = thin.thin(key) && thin.navigation(key, action, value, presentedNav);
+    if (accepted) previewCur = key;
+    return JSON.stringify({ ...JSON.parse(direct([], true)), navigationAccepted: !!accepted });
+  },
   act(action, value) {
+    if (action === "native-sidebar-page") {
+      thin.sidebarPage(value);
+      return direct([], true);
+    }
     const key = App.session_target(hubs, previewCur || App.current(hubs), action, value);
     if (thin.thin(key)) {
       previewCur = key;
@@ -833,8 +978,17 @@ globalThis.Backplane = {
   liveHalves(text) {
     return JSON.stringify({ kept: liveNodes(String(text)), whole: plain(App.live_nodes(String(text))) });
   },
+  reflowDefaults() { return App.reflow_defaults(); },
+  reflowAlloys() { return App.reflow_alloys(); },
+  reflow(profile, alloy) { return App.reflow_plan(String(profile), String(alloy)); },
   headerKeys() { return JSON.stringify({ keys: KEYS, words: WORDS }); },
-  pulse() { return direct(expired(), false); },
+  // Older native engines retain the existing immediate-refresh protocol.
+  publicationAck() { thin.publicationAck = true; },
+  // App-side opt-in, deliberately absent from older engines and Android.
+  nativeSidebar(version) { if (version !== 1) return false; thin.nativeSidebar = true; return true; },
+  // Engine calls this only after it hands a decoded current screen out.
+  published() { return thin.published(); },
+  pulse() { return direct(expired(true), false); },
   connection(key, epoch, mode) {
     bubLive.delete(key);bubMoves.disconnect(key);
     thin.connection(key, String(epoch), mode);

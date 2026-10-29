@@ -47,6 +47,8 @@ struct Project: Decodable, Identifiable {
     let archived: [Row]?
     // no live thread: its header shows faded, after the live ones
     let quiet: Bool?
+    let settledCount, archivedCount: NativeSidebarCount?
+    let threadsPage, snoozedPage, settledPage, archivedPage: NativeSidebarPager?
 }
 
 // the folded shelf of older projects at the end of the list ("side-older"),
@@ -887,6 +889,7 @@ struct Screen: Decodable {
     let usageMachines: [MachineUsage]?
     let found: [Found]
     let projects: [Project]
+    let sidebarPages: [NativeSidebarHubPage]?
     // "projects" (sections) or "active" (one flat list of rows, active)
     let lang: Settings?
     let view: String?
@@ -963,6 +966,7 @@ struct Cmd: Decodable {
     // later: an action (with its value) to send after ms; jump: the entry to show
     let ms: Double?
     let action, value, id: String?
+    let edit: UInt64?
 }
 
 struct Resume: Decodable {
@@ -974,6 +978,7 @@ struct SyncUpdate: Decodable, Sendable {
     let detail: String?
     let mode, viewId, viewRevision: String?
     let requestRevision: UInt32?
+    let viewerIntent: UInt64?
     let remoteReady: Bool?
     var thinPresenting: Bool {
         phase == "presenting" && detail == "view-v1" && mode == "view-v1" && remoteReady == false
@@ -992,12 +997,16 @@ struct Out: Decodable, @unchecked Sendable {
     var sync: [SyncUpdate]? = nil
     var deadline: Double? = nil
     var inert = false
+    var composerEdit: UInt64? = nil
+    var navigationAccepted: Bool? = nil
 
     private struct Cmds: Decodable {
         let cmds: [Cmd]
         let sync: [SyncUpdate]?
         let deadline: Double?
         let inert: Bool?
+        let composerEdit: UInt64?
+        let navigationAccepted: Bool?
     }
 
     // an answer; with screen false only its commands (a newer screen follows)
@@ -1008,16 +1017,16 @@ struct Out: Decodable, @unchecked Sendable {
         let d = Data(text.utf8)
         let answer: Cmds
         do { answer = try JSONDecoder().decode(Cmds.self, from: d) } catch {
-            NSLog("Backplane answer unreadable: %@", String(describing: error))
+            NSLog("Backplane decode answer %@", WireDecodeDiagnostic.summary(error))
             return nil
         }
-        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true) }
+        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted) }
         do {
             let s = try JSONDecoder().decode(ScreenOnly.self, from: d)
-            return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true)
+            return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted)
         } catch {
-            NSLog("Backplane screen unreadable: %@", String(describing: error))
-            return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true)
+            NSLog("Backplane decode screen %@", WireDecodeDiagnostic.summary(error))
+            return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted)
         }
     }
 
@@ -1032,8 +1041,7 @@ struct Lossy<T: Decodable>: Decodable {
     let value: T?
     init(from decoder: Decoder) throws {
         do { value = try T(from: decoder) } catch {
-            NSLog("Backplane skipped %@ at %@: %@", String(describing: T.self),
-                  decoder.codingPath.map(\.stringValue).joined(separator: "."), String(describing: error))
+            NSLog("Backplane decode skipped %@ %@", String(describing: T.self), WireDecodeDiagnostic.summary(error))
             value = nil
         }
     }
@@ -1055,7 +1063,7 @@ extension KeyedDecodingContainer {
 // costs that field, never the whole screen (a blank app).
 extension Screen {
     private enum K: String, CodingKey {
-        case bubMove, locale, online, version, error, note, sel, empty, hub, hubs, usageMachines, found, projects, lang, view, making, active, legacy, older, settled,
+        case bubMove, locale, online, version, error, note, sel, empty, hub, hubs, usageMachines, found, projects, sidebarPages, lang, view, making, active, legacy, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
              folders, settings, find, island, islands, thread, theme, tabs
     }
@@ -1074,7 +1082,23 @@ extension Screen {
         hubs = c.lossyList(.hubs)
         usageMachines = c.lossyList(.usageMachines)
         found = c.lossyList(.found)
+        // Reject malformed negotiated metadata without changing legacy row decoding.
+        let sidebarProjects: [NativeSidebarProjectValidation]
+        if (try? c.nestedUnkeyedContainer(forKey: .projects)) != nil {
+            sidebarProjects = try c.decode([NativeSidebarProjectValidation].self, forKey: .projects)
+        } else { sidebarProjects = [] }
         projects = c.lossyList(.projects)
+        sidebarPages = try c.decodeIfPresent([NativeSidebarHubPage].self, forKey: .sidebarPages)
+        if let sidebarPages, Set(sidebarPages.map(\.hub)).count != sidebarPages.count {
+            throw DecodingError.dataCorruptedError(forKey: .sidebarPages, in: c, debugDescription: "Duplicate sidebar owner")
+        }
+        let sidebarOwners = Set((sidebarPages ?? []).map(\.hub))
+        for project in sidebarProjects {
+            if project.hasMetadata && !sidebarOwners.contains(project.owner ?? "") ||
+                project.owner.map({ sidebarOwners.contains($0) }) == true && !project.hasMetadata {
+                throw DecodingError.dataCorruptedError(forKey: .projects, in: c, debugDescription: "Unnegotiated sidebar project")
+            }
+        }
         lang = c.lossy(.lang)
         view = c.lossy(.view)
         making = c.lossy(.making)

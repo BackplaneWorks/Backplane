@@ -12,8 +12,21 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func setUp() {
         let c = UNUserNotificationCenter.current()
         c.delegate = self
-        c.requestAuthorization(options: [.alert, .sound, .badge]) { ok, _ in
-            if ok { DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() } }
+        // Pairing and cold launch should reach content before an optional OS
+        // permission dialog. Existing permission still registers this launch.
+        Task {
+            let status = await c.notificationSettings().authorizationStatus
+            if status == .authorized || status == .provisional || status == .ephemeral {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    func enable() async {
+        let c = UNUserNotificationCenter.current()
+        c.delegate = self
+        if (try? await c.requestAuthorization(options: [.alert, .sound, .badge])) == true {
+            UIApplication.shared.registerForRemoteNotifications()
         }
     }
 

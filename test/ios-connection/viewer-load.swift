@@ -1,0 +1,60 @@
+import Foundation
+
+@main struct ViewerLoadStateTests {
+    static func main() {
+        func check(_ condition: @autoclosure () -> Bool, _ name: String) {
+            guard condition() else { fputs("FAIL \(name)\n", stderr); exit(1) }
+            print("PASS \(name)")
+        }
+        let id = ViewerLoadState.Identity(hub: "hub", navigation: "hub|thread", kind: "3d", key: "mesh", layers: "board", pairing: 1, epoch: 2, presentation: 3)
+        var load = ViewerLoadState(timeoutMilliseconds: 30_000)
+        let first = load.start(id, geometry: true, mesh: true, now: 1_000)
+        check(load.status(first, now: 30_999) == .loading, "healthy connection cannot extend missing plot deadline")
+        check(load.status(first, now: 31_000) == .timedOut, "missing geometry reaches deadline")
+        load.geometryReady(first)
+        check(load.status(first, now: 31_001) == .timedOut, "base geometry alone does not satisfy mesh")
+        load.meshReady(first)
+        check(load.status(first, now: 31_002) == .ready, "late current mesh can complete")
+        let retry = load.start(id, geometry: true, mesh: true, now: 40_000)
+        load.geometryReady(first); load.meshReady(first)
+        check(load.status(first, now: 100_000) == .idle && load.status(retry, now: 40_001) == .loading, "old completion and timer cannot satisfy retry")
+        load.geometryReady(retry)
+        check(load.status(retry, now: 40_002) == .loading, "base without mesh remains loading")
+        load.reset()
+        load.meshReady(retry)
+        check(load.status(retry, now: 100_000) == .idle, "close cancels pending deadline")
+        let nextID = ViewerLoadState.Identity(hub: "hub", navigation: "hub|other", kind: "board", key: "", layers: "other", pairing: 1, epoch: 2, presentation: 4)
+        let next = load.start(nextID, geometry: true, mesh: false, now: 100_000)
+        load.geometryReady(retry)
+        check(load.status(next, now: 100_001) == .loading, "late old owner cannot satisfy new source")
+        load.geometryReady(next)
+        check(load.status(next, now: 100_002) == .ready, "board completes without mesh")
+        var budget = ViewerLoadState()
+        let a = budget.start(id, geometry: true, mesh: true, now: 0)
+        budget.geometryReady(a)
+        let b = budget.start(id, geometry: true, mesh: true, now: 8_000, preservingDeadline: true)
+        budget.geometryReady(a); budget.meshReady(a); budget.meshReady(b)
+        check(budget.remainingMilliseconds(a, now: 8_000) == 0 && budget.status(a, now: 8_000) == .idle, "retired ticket cannot complete or sleep")
+        check(budget.status(b, now: 8_001) == .loading && budget.remainingMilliseconds(b, now: 8_000) == 22_000, "continuation clears prior availability")
+        let c = budget.start(id, geometry: true, mesh: true, now: 16_000, preservingDeadline: true)
+        let resumedID = ViewerLoadState.Identity(hub: id.hub, navigation: id.navigation, kind: id.kind,
+            key: id.key, layers: id.layers, pairing: id.pairing, epoch: id.epoch + 1, presentation: id.presentation + 1)
+        let d = budget.start(resumedID, geometry: true, mesh: true, now: 24_000, preservingDeadline: true)
+        budget.geometryReady(c); budget.meshReady(c)
+        check(budget.remainingMilliseconds(c, now: 24_000) == 0 && budget.status(c, now: 24_000) == .idle,
+              "automatic restore retires previous presentation ticket")
+        check(budget.remainingMilliseconds(d, now: 29_999) == 1 && budget.status(d, now: 29_999) == .loading, "reconnects retain original deadline")
+        check(budget.remainingMilliseconds(d, now: 30_000) == 0 && budget.status(d, now: 30_000) == .timedOut, "reconnects time out at thirty seconds")
+        let fresh = budget.start(id, geometry: true, mesh: true, now: 31_000)
+        check(budget.remainingMilliseconds(fresh, now: 31_000) == 30_000, "explicit retry gets fresh budget")
+        budget.geometryReady(fresh); budget.meshReady(fresh)
+        check(budget.status(fresh, now: 31_001) == .ready, "current data completes attempt")
+        let afterReady = budget.start(id, geometry: true, mesh: true, now: 100_000)
+        check(budget.remainingMilliseconds(afterReady, now: 100_000) == 30_000 && budget.status(afterReady, now: 100_000) == .loading, "new attempt after completion gets fresh budget")
+        budget.reset()
+        let afterClose = budget.start(nextID, geometry: true, mesh: false, now: 110_000, preservingDeadline: true)
+        check(budget.remainingMilliseconds(afterClose, now: 110_000) == 30_000, "close clears continuation budget")
+        let newSource = budget.start(id, geometry: true, mesh: true, now: 120_000)
+        check(budget.remainingMilliseconds(newSource, now: 120_000) == 30_000, "new presentation starts fresh budget")
+    }
+}

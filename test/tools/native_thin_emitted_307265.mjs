@@ -19,18 +19,133 @@ function client(epoch='1'){
  const out=(method,...args)=>JSON.parse(call(method,...args));
  const dictionaries=JSON.parse(call('headerKeys'));checked(dictionaries.keys.length>0&&dictionaries.words.length>0,'real emitted dictionaries required');
  const requests=o=>o.cmds.filter(c=>c.type==='send').map(c=>plain(cbor(new Uint8Array(Buffer.from(c.data,'base64')),dictionaries.keys,dictionaries.words)));
- const recv=(message,tag=epoch)=>out('recv',hub,encode(message).toString('base64'),tag,false,false);
+ const recv=(message,tag=epoch,quiet=false)=>out('recv',hub,encode(message).toString('base64'),tag,quiet,false);
  return{call,out,requests,recv,epoch};
 }
 const greeting=fixture.greeting||{t:'view',version:1,renderer:'mobile',generation:'1',epoch:'origin',limits:{replyBytes:262144,entries:32,recent:24,searchResults:25,searchCandidates:128,chunkBytes:65536}};
 function start(c,drafts={}){c.call('start','native-emitted-test',JSON.stringify(drafts));c.call('hubs',[hub]);c.call('local','mailroom-renderer','ios-v1');c.call('connection',hub,c.epoch,'view-v1');const selected=c.out('act','select','h|t');checked(c.requests(selected).length===0,'pre-greeting selection has no effects');}
 function begin(c){const o=c.recv(greeting),requests=c.requests(o);checked(o.sync.some(s=>s.phase==='presenting'&&s.mode==='view-v1'&&s.remoteReady===false),'presenting emitted before current request');checked(requests.length===1&&requests[0].m==='view.open','only bounded view.open on startup');checked(requests[0].p.target.id==='t','actual selected target');return requests[0];}
-function respond(c,request,payload){
+function respond(c,request,payload,quiet=false){
  const result={...payload,version:1,hub,generation:greeting.generation,epoch:greeting.epoch,target:request.p.target,requestRevision:request.p.requestRevision,viewId:request.p.viewId||'fixture-view',viewRevision:payload.viewRevision||'1',renderer:'mobile'};
- return c.recv({t:'reply',id:request.id,ok:true,result});
+ return c.recv({t:'reply',id:request.id,ok:true,result},c.epoch,quiet);
+}
+// Actual emitted local admission must distinguish a held read-navigation
+// action from an intentionally dropped pre-greeting or busy action.
+{
+ const n=client();start(n);const opened=begin(n);respond(n,opened,fixture.open);
+ // Hold the native prime completion while its wire reply is already consumed.
+ const primed=n.out('navigation','select','h|t',hub,n.epoch);
+ const primeRequest=n.requests(primed)[0],revision=primeRequest.p.requestRevision;
+ checked(primed.navigationAccepted===true&&primeRequest.m==='view.open','emitted prime issues a real qualified selection');
+ const delivered=respond(n,primeRequest,fixture.open);
+ checked(delivered.sync.some(s=>s.phase==='presented'&&s.requestRevision===revision),'prime presentation arrives before native prime completion is applied');
+ const stale=n.out('navigation','uber','h|bub',hub,n.epoch,'h|other');
+ checked(stale.navigationAccepted===false&&n.requests(stale).length===0,'wrong presented owner cannot authorize post-finish continuation');
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:primeRequest.p.target,viewRevision:'2'};
+ const refresh=n.requests(n.recv(changed))[0];
+ checked(refresh?.m==='view.update','prime presentation may be superseded by an actual refresh during native await');
+ const busy=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(busy.navigationAccepted===false&&n.requests(busy).length===0,'old shown presentation cannot authorize post-prime busy retention');
+ const refreshed=respond(n,refresh,{...fixture.open,viewRevision:'2'});
+ checked(refreshed.sync.some(s=>s.phase==='presented'&&s.requestRevision===refresh.p.requestRevision)&&n.requests(refreshed).length===0,'newer refresh settles at its advertised view revision before continuation');
+ const resumed=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(resumed.navigationAccepted===true&&n.requests(resumed).length===1&&n.requests(resumed)[0].p.action==='uber','newer current prime-owner presentation permits one exact original action');
+ const repeated=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(repeated.navigationAccepted===false&&n.requests(repeated).length===0,'consumed presentation cannot authorize a duplicate or busy retention');
+}
+{
+ const n=client();start(n);
+ const coalesced=n.out('navigation','select','h|t',hub,n.epoch);
+ checked(coalesced.navigationAccepted===true&&!coalesced.sync.some(s=>s.phase==='presenting'),'coalesced pre-greeting prime has no presentation revision');
+ const early=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(early.navigationAccepted===false&&n.requests(early).length===0,'coalesced prime cannot borrow a pre-greeting presentation');
+ const opened=begin(n);respond(n,opened,fixture.open);
+ const resumed=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(resumed.navigationAccepted===true&&n.requests(resumed).length===1&&n.requests(resumed)[0].p.action==='uber','greeting presented before coalesced-prime native completion still permits exact continuation');
+}
+{
+ const n=client();n.call('start','native-admission-test','{}');n.call('hubs',[hub]);n.call('connection',hub,n.epoch,'view-v1');
+ const wrongHub=n.out('navigation','select','h|t','other',n.epoch);
+ checked(wrongHub.navigationAccepted===false&&n.requests(wrongHub).length===0,'emitted navigation rejects a mismatched captured hub');
+ const oldEpoch=n.out('navigation','select','h|t',hub,'old');
+ checked(oldEpoch.navigationAccepted===false&&n.requests(oldEpoch).length===0,'emitted navigation rejects a retired captured socket epoch');
+ const selected=n.out('navigation','select','h|t',hub,n.epoch);
+ checked(selected.navigationAccepted===true&&n.requests(selected).length===0,'emitted select is admitted before greeting without sending');
+ const early=n.out('navigation','uber','h|bub');
+ checked(early.navigationAccepted===false&&n.requests(early).length===0,'emitted pre-greeting bot action is explicitly rejected');
+ const mutation=n.out('navigation','send','fixture');
+ checked(mutation.navigationAccepted===false&&n.requests(mutation).length===0,'emitted navigation cannot admit a message send');
+ const malformed=n.out('navigation','select',{});
+ checked(malformed.navigationAccepted===false&&n.requests(malformed).length===0,'emitted malformed navigation is rejected');
+ const opened=begin(n);respond(n,opened,fixture.open);
+ const immediate=n.out('navigation','uber','h|bub'),requests=n.requests(immediate);
+ checked(immediate.navigationAccepted===true&&requests.length===1&&requests[0].m==='view.action'&&requests[0].p.action==='uber'&&requests[0].p.value==='h|bub','emitted ready host admits exact bot read action once');
+}
+{
+ const n=client();start(n);const opened=begin(n);respond(n,opened,fixture.open);
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:opened.p.target,viewRevision:'2'};
+ const update=n.requests(n.recv(changed))[0];checked(update?.m==='view.update','emitted admission test starts a real refresh');
+ const held=n.out('navigation','uber','h|bub');
+ checked(held.navigationAccepted===true&&n.requests(held).length===0,'emitted busy same-owner bot tap is admitted by retention');
+ const blocked=n.out('navigation','room','h|room');
+ checked(blocked.navigationAccepted===false&&n.requests(blocked).length===0,'emitted busy room is explicitly rejected without replacing held bot');
+ const completed=n.requests(respond(n,update,fixture.open));
+ checked(completed.length===1&&completed[0].m==='view.action'&&completed[0].p.action==='uber'&&completed[0].p.value==='h|bub','emitted retained bot read dispatches exactly once after current presentation');
+}
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};
+ const update=p.requests(p.recv(changed))[0];
+ checked(p.requests(p.out('projectSearchQuery',1,1,'older')).length===0,'busy query waits for current presentation');
+ checked(p.requests(p.out('projectSearchQuery',1,2,'')).length===0,'empty query replaces old pending query');
+ const resumed=p.requests(respond(p,update,fixture.open));
+ checked(resumed.length===1&&resumed[0].m==='view.action'&&resumed[0].p.action==='proj-find-q'&&resumed[0].p.value==='','actual emitted bridge sends latest full empty query once');
+}
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ const query=p.requests(p.out('projectSearchQuery',1,1,''))[0];
+ checked(query?.p.action==='proj-find-q','actual emitted empty full query requests filter');
+ checked(p.requests(p.out('projectSearchGo',1,1,'','h|missing')).length===0,'actual emitted Go waits its accepted query');
+ const result=respond(p,query,fixture.open);
+ checked(!p.requests(result).some(r=>r.p.action==='proj-go'),'actual emitted missing project cannot invoke creating fallback');
+ p.out('projectSearchEnd',2);
+ checked(p.requests(p.out('projectSearchQuery',1,3,'stale')).length===0,'actual emitted scope tombstone refuses old edit');
+}
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ checked(p.requests(p.out('viewerAction',hub,'h|other',1,'board')).length===0,'emitted viewer rejects stale native owner');
+ const out=p.out('viewerAction',hub,'h|t',2,'board'),request=p.requests(out)[0];
+ checked(request?.p.action==='view'&&request.p.value==='board','emitted viewer requests exact owned source');
+ checked(!out.sync.some(s=>s.viewerIntent!==undefined),'invocation is not viewer acceptance');
+ const accepted=respond(p,request,fixture.open,true);
+ checked(accepted.screen===null&&accepted.sync.some(s=>s.phase==='presented'&&s.viewerIntent===2),'quiet accepted viewer receipt survives without decoded picture');
+}
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ const old=p.out('draftAt','h|other','private-other',1);
+ checked(old.cmds.some(x=>x.type==='keep'&&x.thread==='h|other'&&x.text==='private-other'),'emitted draft retains captured other owner');
+ checked(p.requests(old).length===0,'other owner draft emits no wire request');
+ const failed=p.out('sendAt','h|other','send','private-message',1);
+ checked(failed.cmds.some(x=>x.type==='send-failed'&&x.thread==='h|other'&&x.text==='private-message'),'emitted stale owner send returns captured text');
+ checked(p.requests(failed).length===0,'emitted stale owner send does not target current thread');
+ p.out('draftAt','h|t','latest',2);p.out('draftAt','h|t','older',1);
+ checked(p.out('screen').screen?.thread?.draft==='latest','emitted stale serial cannot replace current draft');
+}
+for(const quiet of [false,true]) {
+ const p=client();p.call('publicationAck');start(p);const first=begin(p);respond(p,first,fixture.open);
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};
+ const update=p.requests(p.recv(changed))[0];checked(update?.m==='view.update','actual emitted change requests bounded update');
+ checked(p.requests(p.recv({...changed,viewRevision:'3'})).length===0,'actual emitted newer change coalesces');
+ const picture=respond(p,update,{...fixture.open,viewRevision:'1'},quiet);
+ checked(p.requests(picture).length===0&&!picture.sync.some(x=>x.phase==='presenting'),'actual emitted accepted picture precedes follow-up');
+ checked(quiet ? picture.screen===null : !!picture.screen?.thread,'actual emitted current picture draw honors quiet');
+ checked(p.requests(p.out('pulse')).length===0,'actual emitted unacknowledged picture prevents follow-up');
+ if(quiet){const flushed=p.out('flush',false);checked(!!flushed.screen?.thread&&p.requests(flushed).length===0,'actual emitted flush publishes withheld picture without retiring it');}
+ p.call('published');const follow=p.requests(p.out('pulse'));checked(follow.length===1&&follow[0].m==='view.update','actual emitted acknowledgment schedules one follow-up');
+ const completed=respond(p,follow[0],{...fixture.open,viewRevision:'3'});checked(p.requests(completed).length===0,'actual emitted newest revision ends refresh');
 }
 const c=client();start(c,{'h|t':'private draft','h|other':'other draft'});const open=begin(c);
-const ancillary=[{t:'info',info:{pair:'','pair.qr':''}},{t:'hb'},
+const ancillary=[{t:'info',info:{pair:'','pair.qr':''}},{t:'hb'},{t:'plotrevision',key:'2|fixture-root|',revision:'fixture-revision'},
  {t:'info',info:{pair:'sanitized-fixture-link','pair.qr':'sanitized-fixture-qr'}}];
 const pendingDeadline=c.out('pulse').deadline, pendingCompact=c.call('savePresentation');
 for(const frame of ancillary){const inert=c.recv(frame);

@@ -6,7 +6,7 @@ export async function registerBridgeChecks(check,stage,root){
  const stub=path.join(stage,'src/mobile/app-stub.mjs');fs.copyFileSync(path.join(root,'test/tools/native_thin_app_stub_307265.mjs'),stub);
  const code=fs.readFileSync(process.env.BP_NATIVE_BRIDGE_SOURCE||path.join(root,'src/mobile/bridge.js'),'utf8').replace('import App from "./app.bend";','import App from "./app-stub.mjs";');
  fs.writeFileSync(path.join(stage,'src/mobile/bridge.js'),code);await import(pathToFileURL(path.join(stage,'src/mobile/bridge.js')));
- const {observed,screen}=await import(pathToFileURL(stub));const B=globalThis.Backplane;
+ const {observed,screen,j,default:stubApp}=await import(pathToFileURL(stub));const B=globalThis.Backplane;
  const bhead=(major,n)=>n<24?Buffer.from([(major<<5)|n]):n<256?Buffer.from([(major<<5)|24,n]):n<65536?Buffer.from([(major<<5)|25,n>>8,n&255]):Buffer.from([(major<<5)|26,n>>>24,(n>>>16)&255,(n>>>8)&255,n&255]);
  const encode=v=>v===null?Buffer.from([246]):typeof v==='boolean'?Buffer.from([v?245:244]):typeof v==='number'?(v>4294967295?Buffer.concat([Buffer.from([199]),encode(String(v))]):bhead(0,v)):typeof v==='string'?Buffer.concat([bhead(3,Buffer.byteLength(v)),Buffer.from(v)]):Array.isArray(v)?Buffer.concat([bhead(4,v.length),...v.map(encode)]):Buffer.concat([bhead(5,Object.keys(v).length),...Object.entries(v).flatMap(([k,x])=>[encode(k),encode(x)])]);
  const read=text=>JSON.parse(text),receive=(o,quiet=false)=>read(B.recv('h',encode(o).toString('base64'),'1',quiet,false));
@@ -14,11 +14,86 @@ export async function registerBridgeChecks(check,stage,root){
  const greeting={t:'view',version:1,renderer:'mobile',generation:'1',epoch:'origin',limits:{replyBytes:262144,entries:32,recent:24,searchResults:25,searchCandidates:128,chunkBytes:65536}};
  let last;
  function boot(drafts={}){B.start('install',JSON.stringify(drafts));B.hubs(['h']);B.local('mailroom-renderer','ios-v1');B.connection('h','1','view-v1');B.act('select','h|a');const out=receive(greeting);last=request(out);return out;}
- function answer(req=last,changes={},quiet=false){const local=screen('h',req.p.session?.sel||'a');if(local.thread)local.thread.id='h|'+local.thread.id;const shown={...local,sel:'h|'+local.sel};const result={version:1,hub:'h',generation:'1',epoch:'origin',requestRevision:req.p.requestRevision,target:req.p.target,viewId:req.p.viewId||'view',viewRevision:'1',renderer:'mobile',remoteReady:true,session:req.p.session||{sel:'a',drafts:{},rid:1,open:{},info:{},adding:false,panel:false},shown,overlay:{key:'h',name:'hub',j:local},window:{ids:['e'],older:'older',hasMore:true,anchor:{id:'e',offset:0},partial:[]},cmds:[],...changes};return receive({t:'reply',id:req.id,ok:true,result},quiet);}
+ function answer(req=last,changes={},quiet=false,epoch='1'){const local=screen('h',req.p.session?.sel||'a');if(local.thread)local.thread.id='h|'+local.thread.id;const shown={...local,sel:'h|'+local.sel};const result={version:1,hub:'h',generation:'1',epoch:'origin',requestRevision:req.p.requestRevision,target:req.p.target,viewId:req.p.viewId||'view',viewRevision:'1',renderer:'mobile',remoteReady:true,session:req.p.session||{sel:'a',drafts:{},rid:1,open:{},info:{},adding:false,panel:false},shown,overlay:{key:'h',name:'hub',j:local},window:{ids:['e'],older:'older',hasMore:true,anchor:{id:'e',offset:0},partial:[]},cmds:[],...changes};return read(B.recv('h',encode({t:'reply',id:req.id,ok:true,result}).toString('base64'),epoch,quiet,false));}
+ function selectB(){const changed=read(B.act('select','h|b'));const call=request(changed);answer(call);return call;}
+ function failures(out,owner,text){return out.cmds.some(c=>c.type==='send-failed'&&c.thread===owner&&c.text===text);}
+ function busyComposer(){boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};return request(receive(changed));}
+ check('bridge navigation reports actual local admission without changing act',()=>{
+  B.start('install','{}');B.hubs(['h']);B.connection('h','1','view-v1');
+  assert.equal(read(B.navigation('uber','bot')).navigationAccepted,false);
+  assert.equal(read(B.navigation('select','h|a')).navigationAccepted,true);
+  const root=read(B.recv('h',encode(greeting).toString('base64'),'1',false,false));last=request(root);answer();
+  const admitted=read(B.navigation('uber','bot'));assert.equal(admitted.navigationAccepted,true);assert.equal(request(admitted).p.action,'uber');
+  assert.equal(read(B.navigation('send','x')).navigationAccepted,false);
+  assert.equal(Object.hasOwn(read(B.act('draft','x')),'navigationAccepted'),false);
+ });
+ check('same-owner upload completion waits for refresh and identical completion coalesces',()=>{
+  const update=busyComposer(),value='{"id":"fixture-upload"}';
+  assert.equal(read(B.composerAction('h|a','attach-end',value)).cmds.length,0);
+  assert.equal(read(B.composerAction('h|a','attach-end',value)).cmds.length,0);
+  const next=request(answer(update));assert.equal(next.p.action,'attach-end');assert.equal(next.p.value,value);
+  const done=answer(next);assert(!done.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));
+ });
+ check('pending upload completion is cancelled on selection connection or forget',()=>{
+  for(const change of ['select','connection','forget']){
+   const update=busyComposer();B.composerAction('h|a','attach-end','{"id":"fixture-upload"}');
+   if(change==='select'){const selected=request(read(B.act('select','h|b')));const result=answer(selected);assert(!result.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));answer(update);}
+   else {if(change==='forget'){B.forgetHub('h');B.hubs(['h']);}B.connection('h','2','view-v1');B.act('select','h|a');const opened=read(B.recv('h',encode(greeting).toString('base64'),'2',false,false));const presented=answer(request(opened),{},false,'2');assert(!presented.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));}
+  }
+ });
+ check('busy upload completions are bounded and generic actions are not replayed',()=>{
+  const update=busyComposer();for(let i=0;i<11;i++)B.composerAction('h|a','attach-end',JSON.stringify({id:'fixture-'+i}));
+  B.composerAction('h|a','skill','fixture');let out=answer(update),values=[];
+  while(out.cmds.some(c=>c.type==='send')) {const next=request(out);if(next.m==='view.update')break;assert.equal(next.p.action,'attach-end');values.push(next.p.value);assert(values.length<=10);out=answer(next);}
+  assert.equal(values.length,10);assert.equal(new Set(values).size,10);
+ });
+ check('captured draft follows A after B becomes foreground without changing focus',()=>{
+  boot();answer();selectB();const saved=read(B.draftAt('h|a','draft A',2));
+  assert(saved.cmds.some(c=>c.type==='keep'&&c.thread==='h|a'&&c.text==='draft A'));
+  assert(!saved.cmds.some(c=>c.type==='send'));assert.equal(read(B.screen()).screen.sel,'h|b');
+  const selected=request(read(B.act('select','h|a')));const shown=answer(selected);assert.equal(shown.screen.thread.draft,'draft A');
+ });
+ check('captured send to A after switching to B fails for A with original text',()=>{
+  boot();answer();selectB();const out=read(B.sendAt('h|a','send','text A',1));
+  assert(failures(out,'h|a','text A'));assert(!out.cmds.some(c=>c.type==='send'));assert.equal(read(B.screen()).screen.sel,'h|b');
+ });
+ check('stale draft serial cannot replace the latest full draft',()=>{
+  boot();answer();B.draftAt('h|a','newer',4);const stale=read(B.draftAt('h|a','older',3));
+  assert(!stale.cmds.some(c=>c.type==='keep'&&c.text==='older'));assert.equal(read(B.screen()).screen.thread.draft,'newer');
+ });
+ check('newer draft survives delayed send completion and duplicate submit',()=>{
+  boot();answer();B.draftAt('h|a','old',1);const first=read(B.sendAt('h|a','send','old',1));const sent=request(first);
+  assert.equal(sent.p.action,'send');assert.equal(sent.p.session.drafts.a,'old');
+  const duplicate=read(B.sendAt('h|a','send','old',1));assert(!duplicate.cmds.some(c=>c.type==='send'));
+  B.draftAt('h|a','newer',2);const completed=answer(sent,{cmds:[{type:'keep',thread:'h|a',text:''}]});
+  assert(!completed.cmds.some(c=>c.type==='keep'&&c.thread==='h|a'&&c.text===''));assert.equal(read(B.screen()).screen.thread.draft,'newer');
+ });
+ check('pairing retirement clears the old owner draft before same-address rejoin',()=>{
+  boot();answer();B.draftAt('h|a','old account draft',3);B.forgetHub('h');B.hubs(['h']);B.connection('h','2','view-v1');B.act('select','h|a');
+  const opened=read(B.recv('h',encode(greeting).toString('base64'),'2',false,false));const req=request(opened);
+  assert(!JSON.stringify(req).includes('old account draft'));
+ });
+ check('project search API retains only latest full query through busy presentation',()=>{boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};const update=request(receive(changed));assert.equal(read(B.projectSearchQuery(1,1,'older')).cmds.length,0);assert.equal(read(B.projectSearchQuery(1,2,'')).cmds.length,0);const next=request(answer(update));assert.equal(next.p.action,'proj-find-q');assert.equal(next.p.value,'');});
+ check('ending a scope retires an unissued committed project go',()=>{boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};const update=request(receive(changed));B.projectSearchQuery(1,1,'wanted');B.projectSearchGo(1,1,'wanted','h|p');B.projectSearchEnd(1);const done=answer(update);assert(!done.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='proj-go'));});
+ check('same-edit go rejects changed submitted text',()=>{boot();answer();B.projectSearchQuery(1,1,'wanted');const out=read(B.projectSearchGo(1,1,'different','h|p'));assert(!out.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='proj-go'));});
+ check('owned legacy viewer retains open and close action path',()=>{
+  B.start('install','{}');B.hubs(['h']);B.connection('h','1');
+  const session=stubApp.session,act=stubApp.act,actions=[];
+  stubApp.session=()=>j({sel:'a',drafts:{},open:{},info:{},adding:false,panel:false,rid:1,outbox:{}});
+  stubApp.act=(hubs,action,value)=>{actions.push([action,value]);return{hubs,cmds:null};};
+  try {
+   B.viewerAction('h','h|other',1,'');assert.equal(actions.length,0);
+   B.viewerAction('h','h|a',2,'board');B.viewerAction('h','h|a',3,'');
+   assert.deepEqual(actions,[['view','board'],['view','']]);
+  } finally {stubApp.session=session;stubApp.act=act;}
+ });
  check('actual bridge ordinary cold route never calls canonical recv/online/tick',()=>{const o=boot();assert.equal(o.sync[0].phase,'presenting');assert.equal(o.screen,null);const ready=answer();assert.equal(ready.screen.thread.entries[0].text,'current');B.online('h',true,true,'1');B.tick(1000);assert.equal(observed.recv,0);assert.equal(observed.tick,0);assert.equal(observed.act,0);});
  check('actual bridge keeps all drafts local on read and only captures selected draft on action',()=>{boot({'h|a':'selected secret','h|b':'other secret'});assert(!JSON.stringify(last).includes('secret'));answer();const action=request(read(B.act('send','')));assert.equal(action.p.session.drafts.a,'selected secret');assert(!JSON.stringify(action).includes('other secret'));});
  check('actual bridge quiet draft avoids stale screen and later screen projects current local composer',()=>{boot();answer();const changed=read(B.quiet('draft','new local'));assert.equal(changed.screen,null);assert(changed.cmds.some(c=>c.type==='keep'&&c.thread==='h|a'&&c.text==='new local'));assert.equal(read(B.screen()).screen.thread.draft,'new local');});
  check('actual withheld current frame flushes without another socket frame',()=>{boot();const o=answer(last,{},true);assert.equal(o.screen,null);assert(o.sync.some(s=>s.phase==='presented'));assert.equal(read(B.flush(false)).screen.thread.entries[0].text,'current');});
+ function coalescedUpdate(){boot();B.publicationAck();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};const update=request(receive(changed));receive({...changed,viewRevision:'3'});return update;}
+ check('actual accepted picture is delivered before coalesced follow-up',()=>{const update=coalescedUpdate();const out=answer(update,{viewRevision:'1'});assert(out.screen?.thread);assert.equal(out.cmds.length,0);assert(!out.sync.some(s=>s.phase==='presenting'));assert.equal(read(B.pulse()).cmds.length,0);assert.equal(typeof B.published(),'number');assert.equal(request(read(B.pulse())).m,'view.update');});
+ check('quiet accepted picture survives flush before follow-up',()=>{const update=coalescedUpdate();const out=answer(update,{viewRevision:'1'},true);assert.equal(out.screen,null);assert.equal(out.cmds.length,0);assert.equal(read(B.pulse()).cmds.length,0);const flush=read(B.flush(false));assert(flush.screen?.thread);assert.equal(flush.cmds.length,0);assert.equal(read(B.pulse()).cmds.length,0,'a dropped flush is not acknowledged');const retry=read(B.flush(true));assert(retry.screen?.thread);B.published();assert.equal(request(read(B.pulse())).m,'view.update');});
  check('actual bridge oversized thin frame is rejected before canonical decoder path',()=>{boot();const o=read(B.recv('h','A'.repeat(400000),'1',false,false));assert.equal(o.sync[0].phase,'failed');assert.equal(o.cmds.length,0);assert.equal(observed.recv,0);});
  check('actual bridge scroll position persists anchor without page request',()=>{boot();answer();const o=read(B.reading('h|a','e',10,true));assert.equal(o.cmds.length,0);const saved=JSON.parse(B.savePresentation());assert.equal(saved.hubs[0].anchor.id,'e');});
  check('actual bridge Find opens locally then queries hub without changing readiness',()=>{boot();answer();const opened=read(B.act('find-open','search'));assert.equal(opened.cmds.length,0);assert.equal(opened.screen.find.mode,'search');const queried=read(B.act('find-q','needle'));assert.equal(queried.sync.length,0);const req=request(queried);assert.equal(req.m,'view.search');const got=answer(req,{search:{query:'needle',rows:[{id:'e',thread:'a',ordinal:'1',kind:'message',text:'match',partial:false}],cursor:'',hasMore:false,visited:1}});assert.equal(got.screen.find.rows[0].value,'h|a');});
@@ -32,4 +107,5 @@ export async function registerBridgeChecks(check,stage,root){
  check('actual bridge foreign message owner cannot change visible text or poison retry cursor',()=>{const req=partial();const got=answer(req,{message:{id:'e',thread:'other|a',version:'1',text:'foreign',cursor:'poison',hasMore:true,complete:false}});assert.equal(got.screen.thread.entries[0].text,'current');const retry=request(read(B.act('thin-message-more',JSON.stringify({entryId:'e',cursor:'partial'}))));assert.equal(retry.p.cursor,'');});
  check('actual bridge stale message version cannot change visible text or poison retry cursor',()=>{const req=partial();const got=answer(req,{message:{id:'e',thread:'a',version:'2',text:'stale',cursor:'poison',hasMore:true,complete:false}});assert.equal(got.screen.thread.entries[0].text,'current');const retry=request(read(B.act('thin-message-more',JSON.stringify({entryId:'e',cursor:'partial'}))));assert.equal(retry.p.cursor,'');});
  check('actual bridge compact restore rejects current running replacement and has no state/outbox',()=>{boot();answer();const text=B.savePresentation();const o=read(B.loadPresentation(text));assert.deepEqual(o,{screen:null,cmds:[],sync:[],deadline:null});const saved=JSON.parse(B.savePresentation());assert(!Object.hasOwn(saved.hubs[0].session,'outbox'));assert(!Object.hasOwn(saved.hubs[0].session,'drafts'));});
+ check('actual bridge retirement removes the old hub draft and produces no effects',()=>{boot({'h|a':'old draft'});answer();const o=read(B.forgetHub('h'));assert.equal(o.screen,null);assert.deepEqual(o.cmds,[]);assert.deepEqual(o.sync,[]);B.hubs(['h']);B.connection('h','2','view-v1');B.act('select','h|a');const opened=read(B.recv('h',encode(greeting).toString('base64'),'2',false,false));const req=request(opened);assert.equal(req.m,'view.open');assert(!JSON.stringify(req).includes('old draft'));});
 }

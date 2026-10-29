@@ -15,12 +15,155 @@ const ordinaryKey = (hub, id) => JSON.stringify([hub, id]);
 const fieldName = value => { const i = typeof value === 'string' ? value.indexOf('\u001f') : -1; return i > 0 ? value.slice(0, i) : null; };
 const rawThread = (hub, qualified) => qualified.startsWith(hub + '|') ? qualified.slice(hub.length + 1) : null;
 const plainObject = value => object(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+const sidebarLists = ['threads', 'snoozed', 'settled', 'archived'];
+const sidebarProjectKeys = ['settledCount', 'archivedCount', ...sidebarLists.map(k => k + 'Page')];
+const exactKeys = (value, keys) => plainObject(value) && Reflect.ownKeys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));
+const safeCount = value => Number.isSafeInteger(value) && value >= 0;
+const sidebarString = (value, max) => typeof value === 'string' && value.length > 0 && utf8Bytes(value) <= max;
+const qualifiedSidebarID = (value, hub) => sidebarString(value, 2049) && value.startsWith(hub + '|') && value.length > hub.length + 1;
+const sidebarStable = value => JSON.stringify(value, (_, v) => plainObject(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
+const hasSidebarMetadata = screen => object(screen) && (Object.hasOwn(screen, 'nativeSidebar') || Object.hasOwn(screen, 'sidebarPages') ||
+  (Array.isArray(screen.projects) && screen.projects.some(p => object(p) && sidebarProjectKeys.some(k => Object.hasOwn(p, k)))));
+
+function sidebarControl(control, hub) {
+  return control === null || exactKeys(control, ['label', 'action', 'value']) &&
+    sidebarString(control.label, 1024) && control.action === 'native-sidebar-page' &&
+    typeof control.value === 'string' && control.value.startsWith(hub + '|') &&
+    sidebarString(control.value.slice(hub.length + 1), 2048);
+}
+
+// These checks concern only a negotiated display extension. Tokens remain
+// opaque; the server authenticates their canonical membership and signature.
+function sidebarRange(page, rows, hub, selected, projects = false) {
+  if (!Array.isArray(rows)) throw Error('Invalid sidebar rows');
+  const ids = rows.map(row => row?.id);
+  if (ids.some(id => !qualifiedSidebarID(id, hub)) || new Set(ids).size !== ids.length) throw Error('Invalid sidebar identities');
+  if (page === null) {
+    if (rows.length) throw Error('Unpaged sidebar rows');
+    return { ordinary: 0, extra: 0 };
+  }
+  if (!exactKeys(page, ['version', 'total', 'offset', 'limit', 'selectedOutside', 'previous', 'next']) || page.version !== 1 ||
+      !safeCount(page.total) || page.total === 0 || !safeCount(page.offset) || page.offset >= page.total ||
+      !safeCount(page.limit) || page.limit < 1 || page.limit > (projects ? 8 : 48) ||
+      typeof page.selectedOutside !== 'boolean' || !sidebarControl(page.previous, hub) || !sidebarControl(page.next, hub))
+    throw Error('Invalid sidebar page');
+  const ordinary = Math.min(page.limit, page.total - page.offset), extra = page.selectedOutside ? 1 : 0;
+  if (rows.length !== ordinary + extra || (page.previous !== null) !== (page.offset > 0) ||
+      (page.next !== null) !== (ordinary < page.total - page.offset) ||
+      (extra && (!selected || (!projects && !ids.includes(selected))))) throw Error('Invalid sidebar range');
+  return { ordinary, extra };
+}
+
+function sidebarPicture(screen, hub, selected) {
+  if (!Array.isArray(screen.sidebarPages) || screen.sidebarPages.length !== 1) throw Error('Invalid sidebar owners');
+  const descriptor = screen.sidebarPages[0];
+  if (!exactKeys(descriptor, ['version', 'hub', 'projects', 'active', 'legacy']) || descriptor.version !== 1 || descriptor.hub !== hub)
+    throw Error('Invalid sidebar owner');
+  const projects = screen.projects, active = screen.active, legacy = screen.legacy;
+  const projectRange = sidebarRange(descriptor.projects, projects, hub, selected, true);
+  let ordinary = 0, extras = 0;
+  const allIDs = new Set(), projectShape = [];
+  const countRows = (page, rows) => {
+    const range = sidebarRange(page, rows, hub, selected);
+    ordinary += range.ordinary; extras += range.extra;
+    for (const row of rows) {
+      if (allIDs.has(row.id)) throw Error('Duplicate sidebar row');
+      allIDs.add(row.id);
+    }
+  };
+  let selectedProject = null;
+  for (const project of projects) {
+    if (!sidebarProjectKeys.every(k => Object.hasOwn(project, k)) ||
+        !safeCount(project.settledCount) || !safeCount(project.archivedCount) ||
+        typeof project.open !== 'boolean' || typeof project.archOpen !== 'boolean') throw Error('Invalid sidebar counts');
+    if (!project.open && (project.settledPage !== null || project.settled?.length !== 0) ||
+        !project.archOpen && (project.archivedPage !== null || project.archived?.length !== 0)) throw Error('Closed sidebar rows');
+    if (project.archivedCount > 0 && !qualifiedSidebarID(project.value, hub)) throw Error('Missing archive control');
+    for (const list of sidebarLists) {
+      countRows(project[list + 'Page'], project[list]);
+      if (project[list].some(row => row.id === selected)) selectedProject = project.id;
+    }
+    // Shelf counts describe source roots; expanded descendant totals can differ.
+    if (project.settledCount === 0 && project.settled.length || project.archivedCount === 0 && project.archived.length)
+      throw Error('Sidebar count mismatch');
+    projectShape.push([project.id, project.open, project.archOpen, project.settledCount, project.archivedCount,
+      ...sidebarLists.map(list => [project[list].map(row => row.id), project[list + 'Page']])]);
+  }
+  countRows(descriptor.active, active); countRows(descriptor.legacy, legacy);
+  if (ordinary > 48 || extras > 1 || projectRange.ordinary > 8 || projectRange.extra > 1 ||
+      (projectRange.extra && selectedProject && !projects.some(project => project.id === selectedProject))) throw Error('Sidebar budget exceeded');
+  // If the selected thread lives in a closed shelf, its project membership is
+  // known only to the authoritative planner. Do not invent a row to prove it.
+  return { descriptor, projects: projectShape, active: active.map(row => row.id), legacy: legacy.map(row => row.id) };
+}
+
+export function validateNativeSidebar307265(result, input, offered = false) {
+  try {
+    const shown = result.shown, overlay = result.overlay?.j;
+    const metadata = hasSidebarMetadata(shown) || hasSidebarMetadata(overlay);
+    if (!metadata) return true; // Older hubs keep their existing arrays.
+    if (!offered || !object(shown) || !object(overlay) || shown.nativeSidebar !== 1 || overlay.nativeSidebar !== 1)
+      return false;
+    const selected = typeof shown.sel === 'string' && shown.sel ? (shown.sel.startsWith(input.hub + '|') ? shown.sel : input.hub + '|' + shown.sel) : '';
+    const a = sidebarPicture(shown, input.hub, selected), b = sidebarPicture(overlay, input.hub, selected);
+    return sidebarStable(a) === sidebarStable(b);
+  } catch { return false; }
+}
+
+function sidebarPreservedMap(actual, captured, normalized = {}, known = {}) {
+  return plainObject(actual) && plainObject(captured) &&
+    Object.entries(captured).every(([key, value]) => Object.hasOwn(actual, key) && actual[key] === value) &&
+    Object.entries(actual).every(([key, value]) => Object.hasOwn(captured, key) ? value === captured[key] :
+      Object.hasOwn(normalized, key) ? value === normalized[key] :
+        Object.hasOwn(known, key) && value === known[key]);
+}
+
+// A sidebar read does not inherit the mutation/redirect permissions of other
+// view.action replies. Run this inside ThinViews' atomic validation callback,
+// before it installs a picture or returns any command dispatch descriptors.
+export function validateNativeSidebarAction307265(result, input, known = {}) {
+  if (input.action !== 'native-sidebar-page') return true;
+  try {
+    const session = result.session, captured = input.session;
+    if (!Array.isArray(result.cmds) || result.cmds.length || Object.hasOwn(result, 'nextTarget') ||
+        result.remoteReady !== true || !plainObject(session) || !plainObject(captured) ||
+        Object.keys(session).some(key => !['sel', 'drafts', 'open', 'adding', 'panel', 'rid', 'wantNew', 'error', 'note', 'info', 'outbox', 'route'].includes(key)) ||
+        session.sel !== captured.sel || session.rid !== captured.rid || session.adding !== captured.adding ||
+        session.panel !== captured.panel || session.wantNew !== captured.wantNew ||
+        sidebarStable(session.route) !== sidebarStable(captured.route) || sidebarStable(session.open) !== sidebarStable(captured.open) ||
+        !plainObject(session.outbox) || !Object.entries(session.outbox).every(([key, value]) =>
+          typeof value === 'string' && Object.hasOwn(known.outbox || {}, key) && known.outbox[key] === value)) return false;
+    // P.Session.input/Ui.online and the actor selector add these scratch
+    // values. Selector values are derived from the captured target/route;
+    // an arbitrary new @btab or @bot is not an allowed normalization.
+    const target = input.target, selectors = { '@presentation': '', '@bot': target?.kind === 'bot' ? target.id : '',
+      '@room': target?.kind === 'room' ? target.id : '', '@remote': '', '@btab': captured.route?.tab || '' };
+    if (!sidebarPreservedMap(session.drafts, captured.drafts,
+      { '@boot': '', '@sync': '1', '@mech.at': '', '@solid.at': '', '@desk': '', ...selectors }, known.drafts) ||
+        !sidebarPreservedMap(session.info, captured.info, {}, known.info)) return false;
+    const qualified = id => typeof id !== 'string' ? null : !id ? '' : id.startsWith(input.hub + '|') ? id : input.hub + '|' + id;
+    const selected = qualified(captured.sel);
+    for (const screen of [result.shown, result.overlay?.j]) {
+      if (!object(screen) || screen.nativeSidebar !== 1 || qualified(screen.sel) !== selected ||
+          (screen.thread != null && qualified(screen.thread.id) !== selected) ||
+          (input.target?.kind === 'bot' && screen.bot != null && qualified(screen.bot.id) !== qualified(input.target.id))) return false;
+    }
+    return true;
+  } catch { return false; }
+}
 // Ordinary transport side channels are not presentation authority. Never
 // retain, copy or log their values: pair/pair.qr can contain credentials.
 export function inertAncillary307265(envelope) {
   if (!plainObject(envelope)) return false;
   const keys = Reflect.ownKeys(envelope);
   if (envelope.t === 'hb') return keys.length === 1 && keys[0] === 't';
+  // Server source revision is a plot side channel, not a presentation or
+  // geometry frame. Do not retain it or let it affect a pending deadline.
+  if (envelope.t === 'plotrevision') return keys.length === 3 &&
+    keys.includes('t') && keys.includes('key') && keys.includes('revision') &&
+    typeof envelope.key === 'string' && /^[0-4]\|[^|]+\|/.test(envelope.key) &&
+    typeof envelope.revision === 'string' && envelope.revision.length > 0 &&
+    utf8Bytes(JSON.stringify(envelope)) <= 65536;
   // a 3D model's note (server plot.bend's Pv.note: parts with no model) to
   // the phones watching it: not a view frame. Taken for a stray frame it
   // failed the view once a model loaded, and every tap after was dropped.
@@ -89,6 +232,16 @@ export class NativeThinHost307265 {
     this.api = api;
     this.states = new Map(); this.paired = new Set(); this.current = '';
     this.pending = new Map(); this.ordinary = new Map(); this.commands = []; this.sync = [];
+    this.commandOwners = new WeakMap();
+    // Opted in only by a native engine that acknowledges delivered screens.
+    this.publicationAck = false;
+    // Offered only by an engine whose native views implement shelf counts
+    // and paging controls. Keep each offer tied to its exact request; enabling
+    // support cannot authorize metadata on an earlier in-flight response.
+    this.nativeSidebar = false;
+    this.sidebarOffers = new WeakSet();
+    this.sidebarCaptures = new WeakMap();
+    this.projectSearch = null;
     // The outbox: a message sent is kept until its hub answers. A drop
     // before the answer (or a send while the socket is down, which the app
     // cannot deliver) leaves it here; each view connection that presents
@@ -99,8 +252,20 @@ export class NativeThinHost307265 {
     this.client = new ThinViews({
       now: api.now,
       // Renderer hints are device-owned and never select another hub or owner.
-      send: (hub, request) => ({ type: 'request', hub, request: { ...request,
-        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target) } : {}), nativeRenderer: api.renderer() } } }),
+      send: (hub, request) => {
+        const sidebar = this.nativeSidebar && presentation(request.m);
+        const input = this.client.calls.get(request.id).input;
+        if (sidebar) this.sidebarOffers.add(input);
+        if (request.p.action === 'native-sidebar-page') {
+          const session = this.states.get(hub).session;
+          // Optional actor-owned fields may be echoed, never changed. This
+          // private baseline is not sent on the wire or persisted.
+          this.sidebarCaptures.set(input, { drafts: copy(session.drafts), info: copy(session.info), outbox: copy(session.outbox || {}) });
+        }
+        return { type: 'request', hub, request: { ...request,
+          p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target) } : {}),
+            nativeRenderer: api.renderer(), ...(sidebar ? { nativeSidebar: 1 } : {}) } } };
+      },
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: (result, input) => this.validate(result, input),
     }, next);
@@ -115,30 +280,50 @@ export class NativeThinHost307265 {
       const drafts = new Map(Object.entries(this.api.drafts?.(hub) || {}).map(([thread, text]) => [thread, { revision: 0, text }]));
       session.drafts = { ...session.drafts, ...Object.fromEntries([...drafts].map(([thread, d]) => [thread, d.text])) };
       value = { hub, session, target: this.api.target(session), anchor: { id: '', offset: 0 },
-        mode: '', epoch: '', greeted: false, ready: false, shown: null, window: null,
+        mode: '', epoch: '', greeted: false, ready: false, presentedRevision: 0, shown: null, window: null,
         // history pages (as the web's thin-host): the cursor shown ('' the
         // newest), the cursors that led here, the one page on its way, and
         // pages a send overtook (their replies are dropped)
         cursor: '', back: [], paging: null, overtaken: new Set(),
-        revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map() };
+        revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map(),
+        shownTarget: null, deferredNavigation: null, attachmentEnds: [], projectQuery: null, projectApplied: null, followup: null };
       this.states.set(hub, value);
     }
     return value;
   }
 
   hubs(keys) {
-    this.paired = new Set(keys);
-    for (const key of this.states.keys()) if (!this.paired.has(key)) {
-      this.disconnect(key); this.states.delete(key);
-    }
+    const next = new Set(keys);
+    for (const key of new Set([...this.paired, ...this.states.keys(), ...[...this.outbox.values()].map(o => o.hub)]))
+      if (!next.has(key)) this.forgetHub(key);
+    this.paired = next;
     if (!this.paired.has(this.current)) this.current = keys[0] || '';
+  }
+
+  // A pairing change is an identity boundary, unlike a network reconnect.
+  // Never carry pending sends or local presentation state to a new pairing at
+  // the same address. No credential is passed into this adapter.
+  forgetHub(hub) {
+    this.disconnect(hub);
+    this.states.delete(hub);
+    this.paired.delete(hub);
+    for (const [msg, item] of this.outbox) if (item.hub === hub) this.outbox.delete(msg);
+    this.commands = this.commands.filter(c => this.commandOwners.get(c) !== hub);
+    this.sync = this.sync.filter(s => s.hub !== hub);
+    if (this.current === hub) this.current = '';
   }
 
   reset() {
     for (const key of this.states.keys()) this.client.disconnect(key);
     this.states.clear(); this.paired.clear(); this.current = '';
+    this.projectSearch = null;
     this.pending.clear(); this.ordinary.clear(); this.commands = []; this.sync = [];
     this.outbox.clear();
+  }
+
+  enqueue(hub, ...commands) {
+    for (const command of commands) this.commandOwners.set(command, hub);
+    this.commands.push(...commands);
   }
 
   outboxKeep(hub, rpc) {
@@ -154,7 +339,7 @@ export class NativeThinHost307265 {
       if (envelope.ok === false) {
         const thread = String(o.rpc.p.thread || ''), s = this.states.get(hub);
         if (thread && s && !s.session.drafts[thread]) {
-          this.commands.push({ type: 'keep', thread: hub + '|' + thread, text: String(o.rpc.p.text || '') });
+          this.enqueue(hub, { type: 'keep', thread: hub + '|' + thread, text: String(o.rpc.p.text || '') });
           s.session.drafts = { ...s.session.drafts, [thread]: String(o.rpc.p.text || '') };
         }
       }
@@ -169,13 +354,14 @@ export class NativeThinHost307265 {
     for (const [msg, o] of this.outbox) {
       if (o.hub !== hub) continue;
       if (now - o.at > 86400000) { this.outbox.delete(msg); continue; }
-      this.commands.push(this.api.command(hub, { type: 'send', text: JSON.stringify(o.rpc) }, {}, false));
+      this.enqueue(hub, this.api.command(hub, { type: 'send', text: JSON.stringify(o.rpc) }, {}, false));
     }
   }
 
 
   connection(hub, epoch, mode) {
     if (!this.paired.has(hub)) return;
+    if (this.projectSearch && !this.projectSearch.ended) this.projectSearchEnd(this.projectSearch.scope);
     this.disconnect(hub);
     const s = this.state(hub);
     s.mode = mode === 'view-v1' ? 'view-v1' : mode === undefined ? 'compatibility' : 'blocked';
@@ -216,19 +402,22 @@ export class NativeThinHost307265 {
   }
 
   disconnect(hub) {
+    if (this.projectSearch?.owners.has(hub)) this.projectSearchEnd(this.projectSearch.scope);
     const s = this.states.get(hub);
     this.client.disconnect(hub);
     for (const [id, call] of this.pending) if (call.hub === hub) this.pending.delete(id);
     for (const [id, call] of this.ordinary) if (call.hub === hub) this.ordinary.delete(id);
     if (s) {
       s.ready = false; s.greeted = false; s.active = null; s.queue = []; s.messages.clear();
+      s.deferredNavigation = null; s.attachmentEnds = []; s.projectQuery = null; s.projectApplied = null; s.shownTarget = null; s.followup = null;
       s.registrations.clear();
     }
   }
 
   fail(hub, reason) {
+    if (this.projectSearch?.owners.has(hub)) this.projectSearchEnd(this.projectSearch.scope);
     const s = this.states.get(hub);
-    if (s) { s.ready = false; s.queue = []; }
+    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; s.attachmentEnds = []; s.projectQuery = null; s.followup = null; }
     this.sync.push({ hub, phase: 'failed', mode: 'view-v1', detail: String(reason), remoteReady: false });
   }
 
@@ -239,6 +428,7 @@ export class NativeThinHost307265 {
     if (!call) { this.fail(s.hub, 'Missing shared request'); return false; }
     this.pending.set(result.id, { hub: s.hub, epoch: s.epoch, revision: s.revision, input: copy(call.input), acks: [], ...extra });
     if (presentation(call.method)) {
+      s.followup = null;
       s.ready = false;
       this.sync.push({ hub: s.hub, phase: 'presenting', detail: 'view-v1', mode: 'view-v1',
         requestRevision: call.revision, remoteReady: false });
@@ -249,7 +439,7 @@ export class NativeThinHost307265 {
       this.fail(s.hub, 'Invalid request adapter'); return false;
     }
     const descriptors = result.cmds.map(c => this.api.send(c.hub, c.request));
-    this.commands.push(...descriptors);
+    this.enqueue(s.hub, ...descriptors);
     return true;
   }
 
@@ -273,27 +463,81 @@ export class NativeThinHost307265 {
   }
 
   select(s, target, session) {
+    if (this.projectSearch?.owners.has(s.hub)) this.projectSearchEnd(this.projectSearch.scope);
+    s.deferredNavigation = null; s.attachmentEnds = [];
+    s.projectQuery = null;
+    s.projectApplied = null;
+    s.followup = null;
     s.target = copy(target); s.session = copy(session); s.window = null;
     s.cursor = ''; s.back = []; s.paging = null;
     s.queue = []; s.messages.clear();
     return this.issue(s, this.client.select(s.hub, s.target, this.requestSession(s.session, 'view.open', s.target), this.api.cid()));
   }
 
-  request(hub, action, value) {
+  // Atomic local admission for native read-navigation; no wire/schema change.
+  navigation(hub, action, value, presentedNav = null) {
+    if (!['select', 'bot', 'room', 'remote', 'uber', 'uber-bot'].includes(action) ||
+        typeof value !== 'string' || utf8Bytes(value) > 1024 || !this.paired.has(hub)) return false;
+    if (presentedNav !== null) {
+      const s = this.states.get(hub), link = this.client.links.get(hub);
+      // Post-prime continuation is authorized by the current validated host
+      // presentation, never a consumed native callback or cached shown view.
+      if (typeof presentedNav !== 'string' || presentedNav !== hub + '|' + s?.session.sel ||
+          !s?.ready || !s.greeted || !s.shown || !same(s.target, s.shownTarget) ||
+          !link || link.revision !== s.presentedRevision || !same(link.target, s.target)) return false;
+    }
+    return this.request(hub, action, value, false, undefined, null, true);
+  }
+
+  sidebarPage(value) {
+    if (!this.nativeSidebar || typeof value !== 'string') return false;
+    const separator = value.indexOf('|'), hub = value.slice(0, separator);
+    const s = this.states.get(hub), link = this.client.links.get(hub);
+    if (separator < 1 || !this.paired.has(hub) || !s?.ready || !s.greeted || s.mode !== 'view-v1' ||
+        !s.shown || !same(s.target, s.shownTarget) || s.active || s.queue.length || !link ||
+        link.revision !== s.presentedRevision || s.overlay?.j?.nativeSidebar !== 1) return false;
+    const screen = s.overlay.j, pages = screen.sidebarPages.flatMap(d => [d.projects, d.active, d.legacy]);
+    for (const project of screen.projects) for (const list of sidebarLists) pages.push(project[list + 'Page']);
+    if (!pages.some(page => page && [page.previous, page.next].some(control => control?.value === value))) return false;
+    // Only an actually offered current control may issue a read. A different
+    // hub's sidebar page must not replace foreground selection or held intent.
+    return this.request(hub, 'native-sidebar-page', value, true);
+  }
+
+  request(hub, action, value, keepFocus = false, viewerIntent = undefined, capture = null, admission = false) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
-    this.current = hub;
+    // For admission, validate without changing focus or cancelling held work.
+    // Legacy request retains its original ordering of those side effects.
+    let intent = admission ? this.api.intent(hub, copy(s.session), copy(s.target), action, value) : null;
+    if (admission && (!intent || intent.kind !== (action === 'select' ? 'select' : 'action'))) return false;
+    if (admission && intent.kind === 'action') {
+      if (!s.greeted) return false;
+      if (!s.ready && !(s.shown && same(s.target, s.shownTarget) && ['bot', 'uber', 'uber-bot'].includes(action))) return false;
+      if (s.ready && s.queue.length >= 7) return false;
+    }
+    // An explicit new owner or a hub switch supersedes any held tap, even
+    // one belonging to a different hub whose refresh is still in flight.
+    if (!keepFocus && (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action)))
+      for (const state of this.states.values()) { state.deferredNavigation = null; state.attachmentEnds = []; }
+    if (!keepFocus) this.current = hub;
+    if (['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action) && this.projectSearch) this.projectSearchEnd(this.projectSearch.scope);
     if (action === 'bfield' && fieldName(value) !== null) {
       if (!s.typed) s.typed = new Map();
       s.typed.set(fieldName(value), value.slice(fieldName(value).length + 1));
     }
-    const intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
+    if (!admission) intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
     if (!intent || intent.kind === 'blocked') return true;
+    if (action === 'proj-find-q' && intent.kind === 'action' && typeof value === 'string' && utf8Bytes(value) <= 4096) {
+      s.projectQuery = { value, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
+      this.pumpProjectQuery(s);
+      return true;
+    }
     if (intent.kind === 'draft') {
       s.revision++;
       s.session = copy(intent.session);
       s.drafts.set(s.session.sel, { revision: s.revision, text: value });
-      this.commands.push({ type: 'keep', thread: hub + '|' + s.session.sel, text: value });
+      this.enqueue(hub, { type: 'keep', thread: hub + '|' + s.session.sel, text: value });
       return true;
     }
     if (intent.kind === 'find') {
@@ -306,13 +550,17 @@ export class NativeThinHost307265 {
       return true;
     }
     if (intent.kind === 'select') {
+      s.deferredNavigation = null; s.attachmentEnds = [];
       const unchanged = s.session.sel === intent.session.sel;
       // Bootstrap preselect of the restored owner is no-effect and preserves
       // the compact route/open choices. A real selection after greeting opens.
       if (!s.greeted && unchanged) return true;
       s.revision++; s.target = copy(intent.target); s.session = copy(intent.session);
       s.ready = false; s.window = null; s.messages.clear(); s.queue = [];
-      if (s.greeted) this.select(s, s.target, s.session);
+      if (s.greeted) {
+        const selected = this.select(s, s.target, s.session);
+        if (admission && !selected) return false;
+      }
       return true;
     }
     if (s.greeted && intent.kind === 'cancel') {
@@ -320,12 +568,17 @@ export class NativeThinHost307265 {
       if (pending && pending.hub === hub && !pending.operation) this.issue(s, this.client.request(hub, 'view.cancel', intent.args));
       return true;
     }
-    // An action asked for while the page's own last action or update is on
-    // its way waits its turn (pump sends it once that is answered), and a
-    // search goes at once. Both were dropped: a field typed faster than the
-    // hub answered kept only its first letter (an API key named "E2E_KEY"
-    // saved as "E").
-    if (!s.greeted || (!s.ready && !((intent.kind === 'action' || intent.kind === 'search') && this.presenting(s)))) return true;
+    if (!s.greeted || !s.ready) {
+      // Preserve read navigation during refresh, while main's presenting-owner
+      // queue still admits ordinary actions and latest typed-field edits.
+      const retain = s.greeted && s.shown && same(s.target, s.shownTarget) && intent.kind === 'action' &&
+          ['view', 'bot-tab', 'bot', 'uber', 'uber-bot'].includes(action) && typeof value === 'string' && utf8Bytes(value) <= 1024;
+      if (retain) {
+        s.deferredNavigation = { action, value, viewerIntent, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
+        return true;
+      }
+      if (!s.greeted || !((intent.kind === 'action' || intent.kind === 'search') && this.presenting(s))) return !admission;
+    }
     // One page request at a time, each taken from the page shown. 'later'
     // retraces the trail back down to the newest: without it a phone that
     // paged up could never page back down (the list ended on the old page)
@@ -356,7 +609,7 @@ export class NativeThinHost307265 {
           (expected === undefined && intent.args.cursor !== part.cursor && intent.args.cursor !== '')) return true;
       this.issue(s, this.client.request(hub, 'view.message', { ...intent.args, cursor: expected === undefined ? '' : expected })); return true;
     }
-    if (intent.kind !== 'action') return true;
+    if (intent.kind !== 'action') return !admission;
     // a field's edits not sent yet are one, its newest text (as the web's
     // thin-host): a burst of keys never fills the queue
     const tail = s.queue[s.queue.length - 1];
@@ -365,7 +618,7 @@ export class NativeThinHost307265 {
       tail.value = value; tail.input = copy(s.session); tail.revision = s.revision;
       return true;
     }
-    if (s.queue.length >= 7) return true;
+    if (s.queue.length >= 7) return !admission;
     const thread = s.session.sel;
     if (['send', 'send-alt'].includes(action)) {
       if (s.paging) s.overtaken.add(s.paging.id);
@@ -376,8 +629,57 @@ export class NativeThinHost307265 {
     }
     // Keep the latest intended route separately from display authority.
     if (intent.session) { s.revision++; s.session = copy(intent.session); }
-    s.queue.push({ action, value, input: copy(s.session), revision: s.revision });
-    this.pump(s); return true;
+    const input = copy(s.session);
+    if (capture) input.drafts = { ...input.drafts, [thread]: capture.text };
+    const operation = { action, value, viewerIntent, input, revision: capture ? capture.revision : s.revision };
+    s.queue.push(operation);
+    this.pump(s);
+    return admission ? s.queue.includes(operation) || this.pending.get(s.active)?.operation === operation : true;
+  }
+
+  attachmentEnd(hub, thread, value) {
+    const s = this.states.get(hub);
+    if (!s || this.current !== hub || !this.paired.has(hub) || s.mode !== 'view-v1' || s.session.sel !== thread ||
+        !s.greeted || !s.shown || !same(s.target, s.shownTarget) || typeof value !== 'string' || utf8Bytes(value) > 65536) return false;
+    if (s.attachmentEnds.some(x => x.value === value) || s.queue.some(x => x.action === 'attach-end' && x.value === value) ||
+        (this.pending.get(s.active)?.operation?.action === 'attach-end' && this.pending.get(s.active)?.operation?.value === value)) return true;
+    if (s.attachmentEnds.length >= 10) return false;
+    s.attachmentEnds.push({ epoch: s.epoch, sel: thread, target: copy(s.target), value });
+    this.pumpAttachmentEnd(s);
+    return true;
+  }
+
+  pumpAttachmentEnd(s) {
+    if (s.active || !s.ready || this.current !== s.hub || s.queue.length >= 7) return;
+    const completion = s.attachmentEnds.shift();
+    if (!completion) return;
+    if (completion.epoch === s.epoch && completion.sel === s.session.sel && same(completion.target, s.target))
+      this.request(s.hub, 'attach-end', completion.value);
+  }
+
+  draftAt(hub, thread, text) {
+    const s = this.states.get(hub);
+    if (!s || !this.paired.has(hub) || s.mode !== 'view-v1') return false;
+    s.revision++;
+    s.drafts.set(thread, { revision: s.revision, text });
+    s.session.drafts = { ...s.session.drafts, [thread]: text };
+    this.enqueue(hub, { type: 'keep', thread: hub + '|' + thread, text });
+    return true;
+  }
+
+  sendAt(hub, thread, action, text, currentDraft) {
+    const s = this.states.get(hub);
+    if (!s || this.current !== hub || !this.paired.has(hub) || s.mode !== 'view-v1' || s.session.sel !== thread ||
+        !s.greeted || !s.ready || s.active || s.queue.length >= 7) return false;
+    const revision = currentDraft ? s.drafts.get(thread)?.revision ?? 0 : 0;
+    return this.request(hub, action, '', false, undefined, action === 'interrupt' ? null : { text, revision });
+  }
+
+  viewerAction(hub, nav, serial, value) {
+    const s = this.states.get(hub);
+    if (!s || !this.paired.has(hub) || s.mode !== 'view-v1' || typeof nav !== 'string' ||
+        nav !== hub + '|' + s.session.sel || !Number.isSafeInteger(serial) || serial < 1 || typeof value !== 'string') return false;
+    return this.request(hub, 'view', value, false, serial);
   }
 
   // what was typed last in a field of hub's forms (its "bfield" text), sent
@@ -409,12 +711,102 @@ export class NativeThinHost307265 {
   }
 
   pump(s) {
+    if (!s.active && s.ready && s.projectQuery) { this.pumpProjectQuery(s); return; }
     if (s.active || !s.ready || !s.queue.length) return;
     const operation = s.queue.shift();
     const session = this.api.prepare(s.session, operation.input, operation.action);
     const result = this.client.request(s.hub, 'view.action', { session: this.requestSession(session, 'view.action', s.target), action: operation.action, value: operation.value });
     s.active = result.id || null;
     this.issue(s, result, { operation, revision: operation.revision });
+  }
+
+  pumpProjectQuery(s) {
+    const pending = s.projectQuery;
+    if (!pending || !s.greeted || !s.ready || s.active) return;
+    s.projectQuery = null;
+    if (pending.epoch !== s.epoch || pending.sel !== s.session.sel || !same(pending.target, s.target)) { this.pump(s); return; }
+    s.queue = s.queue.filter(op => op.projectScope === undefined);
+    s.queue.unshift({ action: 'proj-find-q', value: pending.value, projectScope: pending.scope, projectEdit: pending.edit,
+      input: copy(s.session), revision: s.revision });
+    this.pump(s);
+  }
+
+  projectSearchEnd(scope) {
+    if (!Number.isSafeInteger(scope) || scope < 1) return;
+    if (!this.projectSearch || scope > this.projectSearch.scope)
+      this.projectSearch = { scope, edit: -1, text: '', ended: true, owners: new Map(), go: null };
+    else if (scope === this.projectSearch.scope) { this.projectSearch.ended = true; this.projectSearch.go = null; }
+    for (const s of this.states.values()) {
+      if (s.projectQuery?.scope <= scope) s.projectQuery = null;
+      s.queue = s.queue.filter(op => op.projectScope === undefined || op.projectScope > scope);
+    }
+  }
+
+  projectSearchQuery(scope, edit, text) {
+    if (!Number.isSafeInteger(scope) || scope < 1 || !Number.isSafeInteger(edit) || edit < 0 ||
+        typeof text !== 'string' || utf8Bytes(text) > 4096) return false;
+    let q = this.projectSearch;
+    if (q && (scope < q.scope || (scope === q.scope && (q.ended || edit < q.edit || (edit === q.edit && text !== q.text))))) return false;
+    if (q && scope === q.scope && edit === q.edit) return true;
+    if (!q || scope > q.scope) {
+      if (q) this.projectSearchEnd(q.scope);
+      q = { scope, edit, text, ended: false, owners: new Map(), go: null };
+      for (const hub of this.paired) {
+        const s = this.states.get(hub);
+        if (s?.mode === 'view-v1') q.owners.set(hub, { epoch: s.epoch, sel: s.session.sel, target: copy(s.target) });
+      }
+      this.projectSearch = q;
+    }
+    q.edit = edit; q.text = text; q.go = null;
+    for (const hub of this.paired) {
+      const s = this.states.get(hub);
+      if (s?.mode === 'view-v1' && !q.owners.has(hub))
+        q.owners.set(hub, { epoch: s.epoch, sel: s.session.sel, target: copy(s.target) });
+    }
+    for (const [hub, owner] of q.owners) {
+      const s = this.states.get(hub);
+      if (!s || s.epoch !== owner.epoch || s.session.sel !== owner.sel || !same(s.target, owner.target)) { this.projectSearchEnd(scope); return false; }
+      s.projectApplied = null;
+      s.projectQuery = { scope, edit, value: text, ...copy(owner) };
+      s.queue = s.queue.filter(op => op.projectScope === undefined);
+      this.pumpProjectQuery(s);
+    }
+    return true;
+  }
+
+  projectSearchGo(scope, edit, text, project) {
+    if (!this.projectSearchQuery(scope, edit, text)) return false;
+    const q = this.projectSearch;
+    if (typeof project !== 'string' || (project !== '' && ![...q.owners.keys()].some(hub => project.startsWith(hub + '|')))) return false;
+    q.go = { project };
+    this.pumpProjectGo();
+    return true;
+  }
+
+  pumpProjectGo() {
+    const q = this.projectSearch;
+    if (!q || q.ended || !q.go || !q.owners.size) return;
+    for (const [hub, owner] of q.owners) {
+      const s = this.states.get(hub), accepted = s?.projectApplied;
+      if (!s || s.epoch !== owner.epoch || s.session.sel !== owner.sel || !same(s.target, owner.target)) { this.projectSearchEnd(q.scope); return; }
+      if (!s.ready || s.active || s.projectQuery || s.queue.length || accepted?.scope !== q.scope || accepted.edit !== q.edit ||
+          accepted.epoch !== owner.epoch || !same(accepted.target, owner.target) || s.shown?.search?.query !== q.text) return;
+    }
+    const first = this.api.firstProject ? this.api.firstProject() : [...q.owners.keys()].flatMap(hub =>
+      (this.states.get(hub).shown.projects || []).map(p => p.id.startsWith(hub + '|') ? p.id : hub + '|' + p.id))[0];
+    const project = q.go.project || first;
+    const hub = typeof project === 'string' && [...q.owners.keys()].find(key => project.startsWith(key + '|'));
+    if (!hub || project !== first) { q.go = null; return; }
+    const s = this.states.get(hub), raw = project.slice(hub.length + 1);
+    // Never pass an earlier-prefix or missing project to Find.go: its fallback
+    // can create a thread. Only the exact freshly filtered project is eligible.
+    if (!s.shown.projects?.some(p => p.id === project || p.id === raw)) { q.go = null; return; }
+    q.ended = true;
+    q.go = null;
+    for (const other of q.owners.keys()) if (other !== hub) this.request(other, 'proj-find', 'off', true);
+    this.current = hub;
+    this.api.focus?.(hub);
+    this.request(hub, 'proj-go', raw);
   }
 
   validate(result, input) {
@@ -424,7 +816,9 @@ export class NativeThinHost307265 {
       return thread?.id === input.hub + '|' + message.thread && thread.entries.some(e => e.id === message.id && e.partial?.version === message.version);
     }
     if ('query' in input || 'requestId' in input) return validateThinResult(result, input);
-    return validateNativeResult307265(result, input) && (!this.api.validate || this.api.validate(result, input) === true);
+    return validateNativeSidebarAction307265(result, input, this.sidebarCaptures.get(input)) && validateNativeResult307265(result, input) &&
+      validateNativeSidebar307265(result, input, this.sidebarOffers.has(input)) &&
+      (!this.api.validate || this.api.validate(result, input) === true);
   }
 
   receive(hub, envelope, epoch) {
@@ -433,7 +827,8 @@ export class NativeThinHost307265 {
     if (this.inert(hub, envelope, epoch)) return true;
     if (envelope?.t === 'view') return this.greeting(hub, envelope, epoch);
     if (envelope?.t === 'view.changed') {
-      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target), s.anchor));
+      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target), s.anchor,
+        !!s.active || !!s.deferredNavigation || s.queue.length > 0 || !!s.followup));
       return true;
     }
     if (envelope?.t !== 'reply') {
@@ -470,10 +865,18 @@ export class NativeThinHost307265 {
           } catch { this.api.warning?.(hub, 'Message continuation is stale'); }
         }
       }
-      if (result.refreshDue) this.update(s);
+      if (result.refreshDue && s.ready && !s.active && !s.deferredNavigation && !s.queue.length) this.deferRefresh(s);
       return true;
     }
     let response = copy(r.session);
+    if (metadata.operation?.action === 'native-sidebar-page') {
+      // Paging cannot clear or replace local status, including a legitimate
+      // update that arrived after dispatch. Preserve absence as well as values.
+      for (const key of ['error', 'note']) {
+        if (Object.hasOwn(s.session, key)) response[key] = s.session[key];
+        else delete response[key];
+      }
+    }
     for (const ack of metadata.acks) response = this.api.ack(response, ack);
     if (!counter(response.rid)) { this.fail(hub, 'Invalid ordinary counter'); return true; }
     s.session.rid = Math.max(s.session.rid, response.rid);
@@ -513,25 +916,40 @@ export class NativeThinHost307265 {
         s.drafts.set(thread, { revision: metadata.revision, text: c.text });
       }
     }
-    this.commands.push(...commands);
+    this.enqueue(hub, ...commands);
     if (result.current && r.nextTarget) { this.select(s, r.nextTarget, s.session); return true; }
     if (result.current && result.remoteReady) {
       for (const old of s.window?.partial || []) if (!result.window.partial.some(p => p.id === old.id && p.version === old.version)) s.messages.reset(old.id);
+      s.presentedRevision = r.requestRevision;
       s.ready = true; s.window = copy(result.window); s.anchor = copy(result.window.anchor);
       for (const entry of view.shown.thread?.entries || []) {
         const old = s.shown?.thread?.entries?.find(e => e.id === entry.id);
         if (old?.partial?.version !== entry.partial?.version) s.messages.reset(entry.id);
       }
       if (view.shown?.thread) view.shown.thread.later = s.back.length;
-      s.shown = view.shown; s.overlay = view.overlay;
+      s.shown = view.shown; s.overlay = view.overlay; s.shownTarget = copy(s.target);
+      if (metadata.operation?.projectScope !== undefined)
+        s.projectApplied = { scope: metadata.operation.projectScope, edit: metadata.operation.projectEdit, epoch: s.epoch, target: copy(s.target) };
       if (!s.flushed) { s.flushed = true; this.outboxFlush(hub); }
       this.sync.push({ hub, phase: 'presented', detail: 'view-v1', mode: 'view-v1', viewId: r.viewId,
-        requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true });
+        requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true,
+        ...(metadata.operation?.viewerIntent === undefined ? {} : { viewerIntent: metadata.operation.viewerIntent }) });
       for (const args of s.registrations.values()) this.sendRegistration(s, args);
       s.registrations.clear();
     } else if (result.current) this.fail(hub, 'Current view is not ready');
-    if (result.refreshDue) this.update(s);
-    this.pump(s); return true;
+    this.pumpProjectQuery(s);
+    if (s.ready && s.deferredNavigation) {
+      const pending = s.deferredNavigation; s.deferredNavigation = null;
+      if (pending.epoch === s.epoch && pending.sel === s.session.sel && same(pending.target, s.target))
+        this.request(hub, pending.action, pending.value, false, pending.viewerIntent);
+    }
+    this.pumpAttachmentEnd(s);
+    this.pump(s);
+    this.pumpProjectGo();
+    // Person work gets the next request; ThinViews retains invalidation until
+    // a later accepted picture covers it, or a new selection retires it.
+    if (result.refreshDue && s.ready) this.deferRefresh(s);
+    return true;
   }
 
   ack(hub, envelope) {
@@ -543,7 +961,7 @@ export class NativeThinHost307265 {
     s.session.rid = Math.max(s.session.rid, acknowledged.rid);
     if (original.thread && (s.drafts.get(original.thread)?.revision || 0) <= original.revision) {
       const text = acknowledged.drafts[original.thread] || '';
-      if (text !== s.session.drafts[original.thread]) this.commands.push({ type: 'keep', thread: hub + '|' + original.thread, text });
+      if (text !== s.session.drafts[original.thread]) this.enqueue(hub, { type: 'keep', thread: hub + '|' + original.thread, text });
       s.session.drafts = { ...s.session.drafts, [original.thread]: text };
       s.drafts.set(original.thread, { revision: original.revision, text });
     }
@@ -577,6 +995,24 @@ export class NativeThinHost307265 {
     if (s.greeted && l?.viewId) this.issue(s, this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target), anchor: s.anchor, viewRevision: l.viewRevision }));
   }
 
+  // Do not retire an accepted picture until the native worker has handed a
+  // screen out. A quiet or discarded screen waits for the next real flush.
+  deferRefresh(s) {
+    if (!this.publicationAck) { this.update(s); return; }
+    const link = this.client.links.get(s.hub);
+    if (s.followup && s.followup.epoch === s.epoch && same(s.followup.target, s.target) && s.followup.revision === link?.revision) return;
+    if (link && s.ready) s.followup = { epoch: s.epoch, target: copy(s.target), revision: link.revision, at: null };
+  }
+
+  published() {
+    for (const s of this.states.values()) {
+      const f = s.followup, link = this.client.links.get(s.hub);
+      if (f && f.at === null && s.ready && s.epoch === f.epoch && same(s.target, f.target) && link?.revision === f.revision)
+        f.at = this.api.now();
+    }
+    return this.deadline();
+  }
+
   register(hub, args) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
@@ -597,10 +1033,10 @@ export class NativeThinHost307265 {
         this.ordinary.size >= 128 || this.ordinary.has(ordinaryKey(s.hub, rpc.id))) return;
     s.session.rid = Math.max(s.session.rid, prepared.session.rid);
     this.ordinary.set(ordinaryKey(s.hub, rpc.id), { hub: s.hub, epoch: s.epoch, revision: s.revision, thread: '', session: { ...s.session, outbox: {} } });
-    this.commands.push(this.api.command(s.hub, command, {}, false));
+    this.enqueue(s.hub, this.api.command(s.hub, command, {}, false));
   }
 
-  expire() {
+  expire(followups = false) {
     for (const call of this.client.expire()) {
       const metadata = this.pending.get(call.id), s = this.states.get(call.hub);
       this.pending.delete(call.id);
@@ -609,11 +1045,20 @@ export class NativeThinHost307265 {
       if (metadata && presentation(call.method) && this.isCurrent(metadata)) this.fail(call.hub, 'View request timed out; not resent');
       else if (s) this.pump(s);
     }
+    if (followups) for (const s of this.states.values()) {
+      const f = s.followup, link = this.client.links.get(s.hub);
+      if (!f || f.at === null || f.at > this.api.now()) continue;
+      s.followup = null;
+      if (s.ready && !s.active && !s.deferredNavigation && !s.queue.length && s.epoch === f.epoch &&
+          same(s.target, f.target) && link?.revision === f.revision && link.invalidated) this.update(s);
+    }
   }
 
   deadline() {
     const calls = [...this.client.calls.values()];
-    return calls.length ? Math.min(...calls.map(c => c.began + 5000)) : null;
+    const deadlines = calls.map(c => c.began + 5000);
+    for (const s of this.states.values()) if (s.followup?.at != null) deadlines.push(s.followup.at);
+    return deadlines.length ? Math.min(...deadlines) : null;
   }
 
   savePresentation() {
