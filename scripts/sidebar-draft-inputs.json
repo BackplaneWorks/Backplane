@@ -86,7 +86,7 @@
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
-    "src/core/order.bend": "5cfc8109b5628b120927f79c68a354816aa78cf27b545d2146050e154b203048",
+    "src/core/order.bend": "52c5c591c444256bd2fba6322495d454e7b7b4199cc609541b1263956747f301",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
@@ -336,5 +336,5 @@
       "scope": "Owner-scoped private lanes hidden via existing RunSet plus shared run lookup; no changes to draft/image extraction or render/view bodies.24 full-output freshness checks passed; explicit private-context/publication tests passed. No native/device acceptance inherited."
     }
   },
-  "reviewNote": "viewer refresh: the board picker re-reads boards on open (Bd.look, boards.list); Mech re-picks from a fresh listing (Mpage.to3d, Mech.after) and lists its parts when it comes on screen (reselect/toggle_panel clear @mech.at; the thin actor drops @mech.at on a move, runs Mpage.sync.m before renders and sends mech.list as a read); no sidebar row, draft or order logic changed; 24 sidebar draft image checks pass"
+  "reviewNote": "viewer refresh (merged with main's board kinds): the board picker re-reads boards on open (Bd.look, boards.list); Mech re-picks from a fresh listing (Mpage.to3d, Mech.after) and lists its parts when it comes on screen (reselect/toggle_panel clear @mech.at; the thin actor drops @mech.at on a move, runs Mpage.sync.m before renders, sends mech.list as a read); no sidebar row, draft or order logic changed; 24 sidebar draft image checks pass"
 }

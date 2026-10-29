@@ -27,12 +27,14 @@ PADS = "X1000000Y1000000D03*\nX2000000Y1000000D03*\nX3000000Y1000000D03*\n"
 DRILL = "M48\n;TYPE=PLATED\nMETRIC\nT1C0.300\n%\nT1\nX5.0Y5.0\nX6.0Y5.0\nM30\n"
 
 
-def board_zip():
+def board_zip(layers=2):
     b = io.BytesIO()
     with zipfile.ZipFile(b, "w") as z:
         z.writestr("b-Edge_Cuts.gm1", gerber("Profile,NP", OUTLINE))
         z.writestr("b-F_Cu.gtl", gerber("Copper,L1,Top", ""))
-        z.writestr("b-B_Cu.gbl", gerber("Copper,L2,Bot", ""))
+        for i in range(2, layers):
+            z.writestr(f"b-In{i - 1}_Cu.g{i}", gerber(f"Copper,L{i},Inr", ""))
+        z.writestr("b-B_Cu.gbl", gerber(f"Copper,L{layers},Bot", ""))
         z.writestr("b-F_Paste.gtp", gerber("Paste,Top", PADS))
         z.writestr("b-PTH.drl", DRILL)
     return b.getvalue()
@@ -68,7 +70,8 @@ def test_health_and_catalog():
     with client() as c:
         assert c.get("/v1/health").json()["pricing"] is True
         kinds = c.get("/v1/catalog").json()["kinds"]
-        assert set(kinds) == {"pcb", "3dp", "cnc", "sheetmetal"}
+        assert set(kinds) == {"pcb", "flex", "hdi", "aluminum", "copper_core", "rogers", "ptfe", "3dp", "cnc", "sheetmetal"}
+        assert all(kinds[k]["min_qty"] == 5 for k in ("pcb", "flex", "hdi", "aluminum", "copper_core", "rogers", "ptfe"))
 
 
 def test_estimate_prices_parts_and_names_problems():
@@ -79,6 +82,89 @@ def test_estimate_prices_parts_and_names_problems():
         assert r["parts"][0]["qty"] == 5 and r["label"].startswith("from $")
         assert any("unknown option" in p for p in r["parts"][1]["problems"])
         assert c.post("/v1/estimate", json={"parts": []}).status_code == 400  # no install id
+
+
+BOARD = {"width_mm": 20, "height_mm": 15}
+
+
+def test_every_board_kind_is_estimated():
+    with client() as c:
+        kinds = ["pcb", "flex", "hdi", "aluminum", "copper_core", "rogers", "ptfe"]
+        r = c.post("/v1/estimate", headers=INSTALL, json={"parts": [
+            {"name": k, "kind": k, "options": {}, "features": BOARD} for k in kinds]}).json()
+        assert [p.get("qty") for p in r["parts"]] == [5] * len(kinds), r
+        assert all("from" in p and not p.get("problems") for p in r["parts"]), r
+
+
+def test_board_kind_rules():
+    from fabsrv import catalog
+    # a flex board's thickness follows its layers; left out, it is the layer count's own
+    opts, _, probs = catalog.clean("flex", {"layers": 1}, BOARD)
+    assert not probs and opts["thickness_mm"] == 0.07
+    assert catalog.clean("flex", {"layers": 4, "thickness_mm": 0.11}, BOARD)[2] == [
+        "a 4-layer flex board is 0.2, 0.25, 0.3, 0.35, 0.45 mm thick, not 0.11"]
+    # many-layer HDI: what the person didn't choose follows the board; what they did is a problem
+    opts, _, probs = catalog.clean("hdi", {"layers": 8}, BOARD)
+    assert not probs and (opts["finish"], opts["via_fill"], opts["laminate"]) == ("enig", "epoxy_filled", "s1000_2m")
+    assert catalog.clean("hdi", {"layers": 8, "finish": "hasl"}, BOARD)[2] == [
+        "an 8-layer HDI board's finish is enig or osp, not hasl"]
+    assert catalog.clean("hdi", {"layers": 4, "steps": 2}, BOARD)[2] == ["a 4-layer HDI board has 1 build-up step, not 2"]
+    # 0.8 mm aluminium only comes lead-free
+    assert catalog.clean("aluminum", {"thickness_mm": 0.8}, BOARD)[0]["finish"] == "hasl_lead_free"
+    # rigid FR-4 is as it was
+    assert catalog.clean("pcb", {}, BOARD)[0] == {"layers": 2, "thickness_mm": 1.6, "color": "green", "finish": "hasl",
+                                                  "copper_oz": 1, "castellated": False, "gold_fingers": False}
+
+
+def quote_of(c, man, files):
+    r = upload(c, man, files)
+    assert r.status_code == 202, r.text
+    up = r.json()
+    return wait_ready(c, up["id"], up["token"])
+
+
+def test_flex_board_quoted_from_its_files():
+    files = {"flex/gerbers.zip": board_zip()}
+    man = manifest(files, name="Tail", kind="flex", options={"layers": 2, "stiffener": "fr4_0.2"},
+                   files={"gerbers": "flex/gerbers.zip"})
+    with client() as c:
+        q = quote_of(c, man, files)
+        assert q["status"] == "ready", q
+        quote = q["quote"]
+        assert quote["parts"][0]["summary"] == "2-layer flex board, 20×15 mm, 0.11 mm thick, yellow coverlay, 0.2 mm FR-4 stiffener"
+        assert quote["lines"][0]["detail"] == "Boards" and not quote["problems"]
+
+
+def test_board_kinds_check_their_layers():
+    files = {"al/gerbers.zip": board_zip()}  # two copper layers
+    with client() as c:
+        q = quote_of(c, manifest(files, name="Lamp", kind="aluminum", options={}, files={"gerbers": "al/gerbers.zip"}), files)
+        assert q["quote"]["problems"] == ["Lamp: the gerbers have 2 copper layers, and an aluminium board has 1"], q
+        # HDI said 4 layers and the gerbers have 2: 2 can't be HDI
+        q = quote_of(c, manifest(files, name="Hdi", kind="hdi", options={"layers": 4}, files={"gerbers": "al/gerbers.zip"}), files)
+        assert q["quote"]["problems"] == ["Hdi: the gerbers have 2 copper layers, and an HDI board has 4 to 16"], q
+        # HDI said 4 layers and the gerbers have 6: priced as 6, with what 6 layers come with
+        six = {"hdi/gerbers.zip": board_zip(6)}
+        q = quote_of(c, manifest(six, name="Hdi", kind="hdi", options={"layers": 4}, files={"gerbers": "hdi/gerbers.zip"}), six)
+        quote = q["quote"]
+        assert not quote["problems"] and quote["parts"][0]["summary"].startswith("6-layer HDI board (1-step)"), q
+        assert "Hdi: at 6 layers it comes with finish ENIG, via fill epoxy-filled and capped" in quote["warnings"], quote["warnings"]
+        # a flex thickness left out follows the layers the gerbers have; one chosen that can't be is a problem
+        two = {"flex/gerbers.zip": board_zip(2)}
+        q = quote_of(c, manifest(two, name="Tail", kind="flex", options={"layers": 1}, files={"gerbers": "flex/gerbers.zip"}), two)
+        assert not q["quote"]["problems"] and "Tail: at 2 layers it comes with 0.11 mm thickness" in q["quote"]["warnings"], q
+        q = quote_of(c, manifest(two, name="Tail", kind="flex", options={"layers": 1, "thickness_mm": 0.07},
+                                 files={"gerbers": "flex/gerbers.zip"}), two)
+        assert q["quote"]["problems"] == ["Tail: a 2-layer flex board is 0.11, 0.12, 0.19, 0.2, 0.24 mm thick, not 0.07"], q
+
+
+def test_only_rigid_boards_are_assembled():
+    files = {"flex/gerbers.zip": board_zip(), "flex/bom.csv": BOM, "flex/pos.csv": POS}
+    man = manifest(files, kind="flex", options={"layers": 2}, assemble=2,
+                   files={"gerbers": "flex/gerbers.zip", "bom": "flex/bom.csv", "positions": "flex/pos.csv"})
+    with client() as c:
+        r = upload(c, man, files)
+        assert r.status_code == 400 and "only rigid FR-4 boards (pcb) are assembled" in r.text, r.text
 
 
 def test_quote_from_files_with_assembly():

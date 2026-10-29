@@ -488,7 +488,7 @@ def analyse(root):
     for p in m["parts"]:
         name, kind, roles = p["name"], p["kind"], p["files"]
         got, probs = {}, []
-        if kind == "pcb":
+        if "gerbers" in roles:  # a board, of any kind
             b, probs = board(files, roles["gerbers"])
             got.update(b or {})
             if p.get("assemble"):
