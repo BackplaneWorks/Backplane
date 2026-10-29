@@ -9,10 +9,34 @@ A part is {kind, qty, options, features}:
 - features: what the design measures (size, volume, cut length, ...); for an
   estimate the client sends them, for a quote the server measures the files
   and its numbers win.
+
+Boards come in several kinds (BOARDS): rigid FR-4 ("pcb"), flex, HDI,
+aluminium and copper core, and the high-frequency Rogers and PTFE. They
+share the board's features and files; only rigid FR-4 boards are assembled.
 """
 
 BOARD_COLORS = ["green", "black", "white", "blue", "red", "yellow", "purple"]
 BOARD_FINISHES = ["hasl", "hasl_lead_free", "enig", "osp"]
+
+# the kinds that are boards (made from gerbers), and the one that is assembled
+BOARDS = ("pcb", "flex", "hdi", "aluminum", "copper_core", "rogers", "ptfe")
+ASSEMBLED = ("pcb",)
+
+# flex: the total thickness each layer count comes in (it sets the substrate
+# and the copper; the first is the default)
+FLEX_THICKNESS = {1: [0.07, 0.11, 0.12, 0.14], 2: [0.11, 0.12, 0.19, 0.2, 0.24], 4: [0.2, 0.25, 0.3, 0.35, 0.45]}
+FLEX_STIFFENERS = ["none", "polyimide_0.1", "polyimide_0.15", "polyimide_0.2", "polyimide_0.225", "polyimide_0.25",
+                   "fr4_0.1", "fr4_0.2", "fr4_0.4", "fr4_0.6", "fr4_0.8", "fr4_1.0", "fr4_1.2", "fr4_1.6",
+                   "steel_0.1", "steel_0.2", "steel_0.3", "tape_3m468", "tape_tesa8854", "tape_3m9077"]
+# HDI: the thicknesses each layer count comes in (1.6 mm by default), and
+# its build-up steps (1 at 4 layers, up to 2 at 6, up to 3 from 8)
+HDI_THICKNESS = {4: [0.8, 1.0, 1.2, 1.6, 2.0], 6: [0.6, 0.8, 1.0, 1.2, 1.6, 1.8, 2.0, 2.5, 3.0],
+                 8: [0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.5, 3.0], 10: [0.8, 1.0, 1.2, 1.6, 1.8, 2.0, 2.5, 3.0],
+                 12: [1.0, 1.2, 1.6, 2.0, 2.5, 3.0], 14: [1.2, 1.6, 2.0], 16: [1.6, 1.8, 2.0, 2.5, 3.0]}
+
+
+def hdi_steps(layers):
+    return [1] if layers <= 4 else ([1, 2] if layers == 6 else [1, 2, 3])
 
 PRINT_MATERIALS = {
     "sla": ["standard_resin", "black_resin", "tough_resin", "high_temp_resin", "clear_resin"],
@@ -54,6 +78,10 @@ def _bool(key, default=False):
     return {"key": key, "type": "bool", "default": default}
 
 
+# what every board kind measures: its Edge.Cuts box and smallest plated hole
+BOARD_FEATURES = [_num("width_mm", 5, 1200, unit="mm"), _num("height_mm", 5, 1200, unit="mm"),
+                  _num("min_drill_mm", 0.1, 6.5, 0.3, "mm")]
+
 KINDS = {
     "pcb": {
         "label": "Circuit board",
@@ -66,8 +94,81 @@ KINDS = {
             _bool("castellated"),
             _bool("gold_fingers"),
         ],
-        "features": [_num("width_mm", 5, 1200, unit="mm"), _num("height_mm", 5, 1200, unit="mm"),
-                     _num("min_drill_mm", 0.1, 6.5, 0.3, "mm")],
+        "features": BOARD_FEATURES,
+    },
+    "flex": {
+        "label": "Flex board",
+        "options": [
+            _choice("layers", [1, 2, 4], 2),
+            _choice("thickness_mm", sorted({t for ts in FLEX_THICKNESS.values() for t in ts}), None),
+            _choice("coverlay", ["yellow", "black", "white"], "yellow"),
+            _choice("stiffener", FLEX_STIFFENERS, "none"),
+            _choice("emi_shield", ["none", "one_side", "both_sides"], "none"),
+            _choice("gold_uin", [1, 2], 1),
+            _bool("gold_fingers"),
+        ],
+        "features": BOARD_FEATURES,
+    },
+    "hdi": {
+        "label": "HDI board",
+        "options": [
+            _choice("layers", [4, 6, 8, 10, 12, 14, 16], 4),
+            _choice("thickness_mm", sorted({t for ts in HDI_THICKNESS.values() for t in ts}), 1.6),
+            _choice("steps", [1, 2, 3], 1),
+            _choice("laminate", ["np175f", "s1000_2m"], "np175f"),
+            _choice("color", BOARD_COLORS, "green"),
+            _choice("finish", BOARD_FINISHES, "hasl"),
+            _choice("via_fill", ["plugged", "untented", "epoxy_filled", "copper_filled"], "plugged"),
+            _bool("castellated"),
+            _bool("gold_fingers"),
+            _bool("edge_plating"),
+        ],
+        "features": BOARD_FEATURES,
+    },
+    "aluminum": {
+        "label": "Aluminium board",
+        "options": [
+            _choice("layers", [1], 1),
+            _choice("thickness_mm", [1.6, 0.8, 1.0, 1.2], 1.6),
+            _choice("color", ["white", "black"], "white"),
+            _choice("finish", ["hasl", "hasl_lead_free"], "hasl"),
+        ],
+        "features": BOARD_FEATURES,
+    },
+    "copper_core": {
+        "label": "Copper-core board",
+        "options": [
+            _choice("layers", [1], 1),
+            _choice("thickness_mm", [1.6, 1.0, 1.2], 1.6),
+            _choice("color", ["white", "black"], "white"),
+            _choice("finish", ["osp"], "osp"),
+        ],
+        "features": BOARD_FEATURES,
+    },
+    "rogers": {
+        "label": "Rogers board",
+        "options": [
+            _choice("layers", [2], 2),
+            _choice("thickness_mm", [0.51, 0.76, 1.52], 0.51),
+            _choice("color", ["green", "purple"], "green"),
+            _choice("finish", ["enig", "osp"], "enig"),
+            _choice("gold_uin", [1, 2], 1),
+            _choice("via_fill", ["tented", "untented"], "tented"),
+        ],
+        "features": BOARD_FEATURES,
+    },
+    "ptfe": {
+        "label": "PTFE board",
+        "options": [
+            _choice("layers", [2], 2),
+            _choice("thickness_mm", [0.76, 1.52], 0.76),
+            _choice("laminate", ["dk2.94", "dk3.0", "dk2.65", "dk2.55"], "dk2.94"),
+            _choice("color", ["green"], "green"),
+            _choice("finish", ["enig", "osp"], "enig"),
+            _choice("gold_uin", [1, 2], 1),
+            _choice("via_fill", ["tented", "untented"], "tented"),
+        ],
+        "features": BOARD_FEATURES,
     },
     "3dp": {
         "label": "3D print",
@@ -105,7 +206,7 @@ KINDS = {
 }
 
 # the smallest order a fab takes, per kind (a pack can raise these)
-MIN_QTY = {"pcb": 5, "3dp": 1, "cnc": 1, "sheetmetal": 1}
+MIN_QTY = {**{k: 5 for k in BOARDS}, "3dp": 1, "cnc": 1, "sheetmetal": 1}
 # fewest boards assembled in one order
 MIN_ASSEMBLED = 2
 
@@ -154,6 +255,11 @@ def clean(kind, options, features, need_features=True):
             vals[f["key"]] = v
         out.append(vals)
     opts, feats = out
+    if kind in ("flex", "hdi"):
+        problems += board_rules(kind, opts, options if isinstance(options, dict) else {})[0]
+    # 0.8 mm aluminium only comes lead-free (the quote's summary says so)
+    if kind == "aluminum" and opts.get("thickness_mm") == 0.8 and opts.get("finish") == "hasl":
+        opts["finish"] = "hasl_lead_free"
     if kind == "3dp":
         proc = opts.get("process", "mjf")
         mats = PRINT_MATERIALS[proc]
@@ -167,3 +273,62 @@ def clean(kind, options, features, need_features=True):
         if opts.get("color") not in cols:
             opts["color"] = cols[0]
     return opts, feats, problems
+
+
+def _a(layers):
+    return "an" if str(layers).startswith("8") or layers in (11, 18) else "a"
+
+
+def _words(vals):
+    return " or ".join(str(v).replace("_", " ") for v in vals)
+
+
+def hdi_only(layers):
+    """What a many-layer HDI board is made with, where fewer layers have a choice."""
+    only = {}
+    if layers >= 6:
+        only["finish"] = ["enig", "osp"]
+        only["via_fill"] = ["epoxy_filled"]
+    if layers >= 8:
+        only["laminate"] = ["s1000_2m"]
+    return only
+
+
+def board_rules(kind, opts, given=()):
+    """What a flex or HDI board's layer count allows: its thickness and HDI's
+    steps must fit (problems otherwise); a value it can't have that the
+    person didn't choose (not in given) becomes the first it can. Returns
+    (problems, [(key, was, now)]). Run again once the gerbers have said how many
+    layers there are."""
+    layers = opts.get("layers")
+    problems, changed = [], []
+    if kind == "flex":
+        ts = FLEX_THICKNESS.get(layers)
+        if ts is None:
+            return problems, changed
+        opts.setdefault("thickness_mm", ts[0])
+        if opts["thickness_mm"] not in ts and "thickness_mm" not in given:
+            changed.append(("thickness_mm", opts["thickness_mm"], ts[0]))
+            opts["thickness_mm"] = ts[0]
+        if opts["thickness_mm"] not in ts:
+            problems.append(f"{_a(layers)} {layers}-layer flex board is {', '.join(f'{t:g}' for t in ts)} mm thick, not {opts['thickness_mm']:g}")
+        return problems, changed
+    ts = HDI_THICKNESS.get(layers)
+    if ts is None:
+        return problems, changed
+    if opts.get("thickness_mm") not in ts:
+        problems.append(f"{_a(layers)} {layers}-layer HDI board is {', '.join(f'{t:g}' for t in ts)} mm thick, not {opts.get('thickness_mm')}")
+    steps = hdi_steps(layers)
+    if opts.get("steps") not in steps:
+        problems.append(f"{_a(layers)} {layers}-layer HDI board has {_words(steps)} build-up "
+                        f"step{'' if steps == [1] else 's'}, not {opts.get('steps')}")
+    for key, only in hdi_only(layers).items():
+        if opts.get(key) in only:
+            continue
+        if key in given:
+            problems.append(f"{_a(layers)} {layers}-layer HDI board's {key.replace('_', ' ')} is {_words(only)}, "
+                            f"not {_words([opts.get(key)])}")
+        else:
+            changed.append((key, opts.get(key), only[0]))
+            opts[key] = only[0]
+    return problems, changed

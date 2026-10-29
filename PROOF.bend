@@ -11483,6 +11483,12 @@ def Laws.order_off_says_where():
 def Laws.order_on_says_buy_it():
   {==}
 
+def Laws.order_fab_board_kinds():
+  {==}
+
+def Laws.order_buy_assembles_rigid_only():
+  {==}
+
 def Laws.order_on_when_asked():
   {==}
 

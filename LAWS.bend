@@ -9714,6 +9714,14 @@ law order_off_says_where:
 law order_on_says_buy_it:
   {Bool.and(String.contains(ORD.Order.prompt.project.k(True{}), "presses Buy it"), String.contains(ORD.Order.prompt.project.k(True{}), "Never order yourself")) == True{} : Bool}
 
+# every board kind the order server makes is in the agents' fab-file
+# instructions, and only rigid FR-4 boards come assembled
+law order_fab_board_kinds:
+  {Bool.and(String.contains(ORD.Order.prompt.project.k(True{}), "\"pcb\" | \"flex\" | \"hdi\" | \"aluminum\" | \"copper_core\" | \"rogers\" | \"ptfe\""), String.contains(ORD.Order.prompt.project.k(True{}), "only pcb boards come assembled")) == True{} : Bool}
+
+law order_buy_assembles_rigid_only:
+  {String.contains(ORD.Order.prompt.buy(), "for each rigid board (kind pcb) whether it comes assembled or bare; other board kinds come bare") == True{} : Bool}
+
 # ...unless the person asks for it in their message; never their payment details
 law order_on_when_asked:
   {Bool.and(String.contains(ORD.Order.prompt.project.k(True{}), "unless the person specifically asks for it in their message"), String.contains(ORD.Order.prompt.project.k(True{}), "Never ask for their payment details")) == True{} : Bool}

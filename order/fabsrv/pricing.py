@@ -19,6 +19,8 @@ DENSITY = {"aluminum": 2.7, "stainless": 7.95, "steel": 7.85, "brass": 8.5, "cop
            "abs": 1.05, "asa": 1.07, "pla": 1.24, "tpu": 1.2, "pa12": 1.01, "pa11": 1.03, "pc": 1.2, "peek": 1.3,
            "pom": 1.41, "pmma": 1.18, "nylon": 1.14, "polycarbonate": 1.2, "fr4": 1.85, "resin": 1.15, "metal": 7.95}
 BOARD_DENSITY = 1.85
+# a board's own, where it isn't FR-4's (polyimide, aluminium and copper cores, PTFE)
+BOARD_DENSITIES = {"flex": 1.42, "aluminum": 2.7, "copper_core": 8.9, "ptfe": 2.2}
 
 
 
@@ -32,7 +34,7 @@ def made_of(parts):
     and 3D prints", "3D prints", ..."""
     kinds = [p.get("kind") for p in parts]
     words = []
-    if "pcb" in kinds:
+    if any(k in catalog.BOARDS for k in kinds):
         words.append("boards, assembly and components" if any(p.get("assembled") for p in parts) else "boards")
     for k, w in (("3dp", "3D prints"), ("cnc", "CNC parts"), ("sheetmetal", "sheet metal")):
         if k in kinds:
@@ -53,11 +55,42 @@ def density(material):
     return 1.2
 
 
+FINISH = {"hasl": "HASL", "hasl_lead_free": "lead-free HASL", "enig": "ENIG", "osp": "OSP"}
+# what each board kind is called in a quote's summary (rigid FR-4 is just a board)
+A_BOARD = {"pcb": "a board", "flex": "a flex board", "hdi": "an HDI board", "aluminum": "an aluminium board",
+           "copper_core": "a copper-core board", "rogers": "a Rogers board", "ptfe": "a PTFE board"}
+BOARD_WORD = {"pcb": "board", "flex": "flex board", "hdi": "HDI board", "aluminum": "aluminium board",
+              "copper_core": "copper-core board", "rogers": "Rogers RO4350B board", "ptfe": "PTFE board"}
+
+
+def board_summary(kind, opts, feats):
+    size = f"{feats.get('width_mm', 0):g}×{feats.get('height_mm', 0):g} mm"
+    thick = f"{opts['thickness_mm']:g} mm thick"
+    if kind == "flex":
+        stiff = "" if opts["stiffener"] == "none" else ", " + stiffener(opts["stiffener"]) + " stiffener"
+        emi = {"none": "", "one_side": ", EMI shield on one side", "both_sides": ", EMI shield on both sides"}[opts["emi_shield"]]
+        return f"{opts['layers']}-layer flex board, {size}, {thick}, {opts['coverlay']} coverlay{stiff}{emi}"
+    if kind == "hdi":
+        return (f"{opts['layers']}-layer HDI board ({opts['steps']}-step), {size}, {thick}, {opts['color']}, "
+                f"{FINISH[opts['finish']]}")
+    if kind == "ptfe":
+        return f"PTFE board (Dk {opts['laminate'][2:]}), {size}, {thick}, {opts['color']}, {FINISH[opts['finish']]}"
+    if kind in ("aluminum", "copper_core", "rogers"):
+        return f"{BOARD_WORD[kind][0].upper()}{BOARD_WORD[kind][1:]}, {size}, {thick}, {opts['color']}, {FINISH[opts['finish']]}"
+    return f"{opts['layers']}-layer board, {size}, {thick}, {opts['color']}, {FINISH[opts['finish']]}"
+
+
+def stiffener(v):
+    """A flex stiffener in words: "fr4_0.2" is "0.2 mm FR-4", "tape_3m468" is "3M 468 tape"."""
+    what, _, mm = v.partition("_")
+    if what == "tape":
+        return {"3m468": "3M 468", "tesa8854": "tesa 8854", "3m9077": "3M 9077"}.get(mm, mm) + " tape"
+    return f"{mm} mm " + {"polyimide": "polyimide", "fr4": "FR-4", "steel": "stainless steel"}.get(what, what)
+
+
 def summary(kind, opts, feats):
-    if kind == "pcb":
-        finish = {"hasl": "HASL", "hasl_lead_free": "lead-free HASL", "enig": "ENIG", "osp": "OSP"}[opts["finish"]]
-        return (f"{opts['layers']}-layer board, {feats.get('width_mm', 0):g}×{feats.get('height_mm', 0):g} mm, "
-                f"{opts['thickness_mm']:g} mm thick, {opts['color']}, {finish}")
+    if kind in catalog.BOARDS:
+        return board_summary(kind, opts, feats)
     if kind == "3dp":
         return f"3D print, {opts['process'].upper()} {pretty(opts['material'])}, {opts['color']}"
     if kind == "cnc":
@@ -78,7 +111,8 @@ NAMES = {"pa12": "PA12 nylon", "pa11": "PA11 nylon", "pa12_glass": "glass-filled
          "steel_cold_rolled": "cold-rolled steel", "steel_galvanized": "galvanized steel", "powder_coat": "powder coat",
          "anodize": "anodized", "bead_blast": "bead blasted", "bead_blast_anodize": "bead blasted and anodized",
          "hard_anodize": "hard anodized", "conductive_anodize": "conductive anodized", "brushed": "brushed",
-         "brushed_anodize": "brushed and anodized", "laser_mark": "laser marked"}
+         "brushed_anodize": "brushed and anodized", "laser_mark": "laser marked",
+         "epoxy_filled": "epoxy-filled and capped", "s1000_2m": "S1000-2M laminate"}
 
 
 def pretty(v):
@@ -86,15 +120,26 @@ def pretty(v):
 
 
 def _board(v, p, f, problems, warnings):
+    kind = p["kind"]
     opts = dict(p["options"])
     layers = f.get("layers")
     if layers and layers != opts["layers"]:
-        allowed = catalog.KINDS["pcb"]["options"][0]["choices"]
+        allowed = catalog.KINDS[kind]["options"][0]["choices"]
         if layers in allowed:
             warnings.append(f"{p['name']}: the gerbers have {layers} copper layers (you said {opts['layers']}); priced as {layers}")
             opts["layers"] = layers
-        else:
+            if kind in ("flex", "hdi"):
+                probs, changed = catalog.board_rules(kind, opts, p.get("given", ()))
+                problems += [f"{p['name']}: {x}" for x in probs]
+                if changed:
+                    warnings.append(f"{p['name']}: at {layers} layers it comes with " + ", ".join(
+                        (f"{now:g} mm thickness" if key == "thickness_mm" else f"{key.replace('_', ' ')} {FINISH.get(now) or pretty(now)}")
+                        for key, _, now in changed))
+        elif kind == "pcb":
             problems.append(f"{p['name']}: {layers} copper layers can't be made")
+        else:
+            has = " or ".join(str(x) for x in allowed) if len(allowed) <= 2 else f"{allowed[0]} to {allowed[-1]}"
+            problems.append(f"{p['name']}: the gerbers have {layers} copper layers, and {A_BOARD[kind]} has {has}")
     feats = {"width_mm": f.get("width_mm"), "height_mm": f.get("height_mm"), "min_drill_mm": f.get("min_drill_mm") or 0.3}
     if not feats["width_mm"]:
         return None
@@ -103,10 +148,10 @@ def _board(v, p, f, problems, warnings):
         return None
     if f.get("min_drill_mm") is not None and f["min_drill_mm"] < 0.15:
         problems.append(f"{p['name']}: a {f['min_drill_mm']} mm drill is smaller than the 0.15 mm minimum")
-    qty = max(p["qty"], v.min_qty("pcb", opts), catalog.MIN_QTY["pcb"])
+    qty = max(p["qty"], v.min_qty(kind, opts), catalog.MIN_QTY[kind])
     if qty != p["qty"]:
         warnings.append(f"{p['name']}: boards come in at least {qty}; priced for {qty}")
-    pr = v.estimate("pcb", opts, feats, qty)
+    pr = v.estimate(kind, opts, feats, qty)
     warnings += [f"{p['name']}: {w}" for w in pr.get("warnings", [])]
     return opts, feats, qty, pr
 
@@ -121,7 +166,7 @@ def price(manifest, measured):
     for p in manifest["parts"]:
         f = measured.get("parts", {}).get(p["name"], {})
         kind = p["kind"]
-        if kind == "pcb":
+        if kind in catalog.BOARDS:
             b = _board(v, p, f, problems, warnings)
             if b is None:
                 continue
@@ -145,7 +190,8 @@ def price(manifest, measured):
                 out["sourcing"] = comp["lines"]
                 part_lines.append({"label": f"{p['name']}: assembly of {n} and parts", "amount": round(float(asm["total"]) + comp["total"], 2)})
             part_lines.append({"label": f"{p['name']}: {qty} boards", "amount": round(float(pr["total"]), 2)})
-            grams = feats["width_mm"] * feats["height_mm"] / 100 * opts["thickness_mm"] / 10 * BOARD_DENSITY * qty
+            grams = (feats["width_mm"] * feats["height_mm"] / 100 * opts["thickness_mm"] / 10
+                     * BOARD_DENSITIES.get(kind, BOARD_DENSITY) * qty)
             parcels.append({"kind": kind, "weight_kg": grams / 1000 * (1.3 if p.get("assemble") else 1.0), "value_usd": cost})
             mfg += cost
             parts_out.append(out)
