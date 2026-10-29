@@ -11,7 +11,7 @@ writeFileSync(join(home, "events.jsonl"), ["mail.on", "restart.continue"].map((k
 const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = listener.port; listener.stop(true); if (port === 3787) throw new Error("live port");
 const hub = Bun.spawn([resolve(binary), "--home", home, "--port", String(port), "--host", "127.0.0.1", "--foreground", "--no-tailscale"], {
-  env: { ...process.env, HOME: root, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_PEERS: "", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "deploy-locks") }, stdout: Bun.file(join(root, "stdout")), stderr: Bun.file(join(root, "stderr")),
+  env: { ...process.env, HOME: root, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_PEERS: "", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "deploy-locks") }, stdout: Bun.file(join(root, "stdout")), stderr: Bun.file(join(root, "stderr")),
 });
 const sleep = (n: number) => new Promise((r) => setTimeout(r, n));
 const sourceAt = process.argv.indexOf("--server-source-sha");

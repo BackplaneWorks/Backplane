@@ -45,7 +45,7 @@ const home = mkdtempSync(join(tmpdir(), "bp-tokstats-e2e-"));
 const root = mkdtempSync(join(tmpdir(), "bp-tokstats-proj-"));
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--headless"], {
-  env: { ...process.env, DISPLAY: "", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9" },
+  env: { ...process.env, DISPLAY: "", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9" },
   stdout: "ignore",
   stderr: "ignore",
 });

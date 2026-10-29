@@ -58,7 +58,7 @@ try {
   throw new Error("test port already occupied");
 } catch (e: any) { if (e.message === "test port already occupied") throw e; }
 const hub = Bun.spawn([bin, "--foreground", "--home", home, "--port", String(port), "--no-tailscale", "--web", web], {
-  cwd: process.cwd(), env: { ...process.env, PATH: `${stubs}:${process.env.PATH || ""}`, DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_TEST_PROVIDER_INVOKED: invoked },
+  cwd: process.cwd(), env: { ...process.env, PATH: `${stubs}:${process.env.PATH || ""}`, DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_NO_UPDATE: "1", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_TEST_PROVIDER_INVOKED: invoked },
   stdout: Bun.file(join(root, "hub.log")), stderr: Bun.file(join(root, "hub.err")),
 });
 let browser: any;

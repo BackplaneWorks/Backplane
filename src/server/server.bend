@@ -3774,6 +3774,18 @@ def Think.codex(think: Bool) -> List<&2, String>:
     case False{}:
       Nil{}
 
+# the KiStack folders Claude threads get (Main.dirs at boot; Claude.job
+# swaps in the synced copy once there is one)
+def Cfg.dirs(c: Cfg) -> List<&2, String>:
+  match c:
+    case Cfg{_, _, _, _, _, ds, _, _, +tcfg, +views, +accountInfo}:
+      ds
+
+def Cfg.with_dirs(c: Cfg, ds: List<&2, String>) -> Cfg:
+  match c:
+    case Cfg{h, w, ho, p, pr, _, v, nt, tm, views, accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, nt, tm, views, accountInfo}
+
 def Hub.agent_args(+cfg: Cfg, +thread: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, prompt: String, +effort: String, +gen: String, think: Bool) -> List<&2, String>:
   match cfg:
     case Cfg{+home, _, _, _, _, +dirs, _, _, +tcfg, +views, +accountInfo}:
@@ -4576,11 +4588,14 @@ def Skills.scan.k(+home: String, +cwd: String) -> IO(List<&2, AG.USkill>):
     us : List<&2, AG.USkill> <- Skills.dir(home ++ "/.claude/skills")
     ps : List<&2, AG.USkill> <- Skills.dir(cwd ++ "/.claude/skills")
     exe : String <- H.Sys.exe_dir()
-    ks : List<&2, AG.USkill> <- Skills.dir(K.KiStack.dir(exe) ++ "/skills")
+    hub : String <- Env.get("BACKPLANE_HOME", "")
+    kd : String <- K.KiStack.live(hub, exe)
+    ks : List<&2, AG.USkill> <- Skills.dir(kd ++ "/skills")
     return AG.USkill.merge(AG.USkill.merge(us, ps), ks)
 
 # ~/.claude/skills, then <cwd>/.claude/skills (the user's win a clash),
-# then KiStack's
+# then KiStack's: the hub home's synced copy once it is complete, else the
+# bundled one (K.KiStack.live; Main.boot sets BACKPLANE_HOME to the home)
 def Skills.scan(+cwd: String) -> IO(List<&2, AG.USkill>):
   IO.bind(String, List<&2, AG.USkill>, Env.get("HOME", "/nonexistent"), home => Skills.scan.k(home, cwd))
 
@@ -5562,7 +5577,8 @@ def Skills.kistack.dir(+dir: String) -> IO(String & List<&2, Q.Skill>):
     return (dir, ss)
 
 # the bundled KiStack (K.KiStack.dir), or none ("": no --plugin-dir) when
-# this build carries none
+# this build carries none; the synced copy in the home wins once there is
+# one (Claude.job, Skills.scan)
 def Skills.kistack.k(have: Bool, +dir: String) -> IO(String & List<&2, Q.Skill>):
   match have:
     case True{}:
@@ -6251,8 +6267,9 @@ def Main.has(r: P.Ran) -> Bool:
     case _:
       False{}
 
-# KiStack as the build bundled it (K.KiStack.dir), the KiCad CLI,
-# and which providers and models are installed
+# KiStack as the build bundled it (K.KiStack.dir; the synced copy comes
+# later, KSync.*), the KiCad CLI, and which providers and models are
+# installed
 # What each provider is: its CLI's version, and a label per model. This
 # table is only for a Claude CLI too old to answer the probe.
 def About.claude() -> List<&2, J.KV>:
@@ -6623,6 +6640,28 @@ def AccountsJob.request(+inbox: Chan(Msg), +home: String, +client: U32, +id: Str
     Self.post(inbox, AccountsFound{snapshot})
     GitJob.reply(inbox, client, id, String.is_empty(J.Json.get_str(ACCT.Accounts.parse(snapshot), "error", "")), ACCT.Accounts.parse(snapshot))
 
+# KiStack's newest commit synced into <home>/kistack (K.KiStack.sync) once
+# the hub serves: in the background, never before the window opens, one
+# log line; not on a copied log or a test hub (K.KiStack.off)
+def KSync.go(go: Bool, +why: String, +home: String, +src: String) -> IO(Unit):
+  match go:
+    case True{}:
+      IO.bind(String, Unit, K.KiStack.sync(home, src), line => Log.info(line))
+    case False{}:
+      Log.info("kistack sync: off (" ++ why ++ ")")
+
+def KSync.run(+home: String) -> IO(Unit):
+  do IO<Unit>:
+    +on : String <- Env.get("BACKPLANE_KISTACK_SYNC", "")
+    +src : String <- Env.get("BACKPLANE_KISTACK_SOURCE", "")
+    +agents : String <- Env.get("BACKPLANE_AGENTS", "")
+    copy : Bool <- P.Proc.copy()
+    +why : String = K.KiStack.off(on, copy, agents, src)
+    KSync.go(String.is_empty(why), why, home, src)
+
+def KSync.start(+home: String) -> IO(Unit):
+  IO.spawn(Unit, KSync.run(home))
+
 def Refresh.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   do IO<Unit>:
     +user : String <- Env.get("HOME", "")
@@ -6644,7 +6683,8 @@ def Main.where(+user: String, args: List<String>) -> Cfg:
   Main.args(args, Cfg{user ++ "/.backplane-bend", "", "127.0.0.1", 3787, "", Nil{}, "", Net{True{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", "", None{}}, TI.Tio.empty(False{}), Nil{}, ""})
 
 # the directories Claude threads get (--add-dir, --plugin-dir): the bundled
-# KiStack, none when the build carries none
+# KiStack, none when the build carries none (Claude.job takes the synced
+# copy in the home instead once it is complete)
 def Main.dirs(+kdir: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.is_empty(kdir), Nil{}, [kdir])
 
@@ -9502,7 +9542,10 @@ def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: S
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
-    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, AccountSpawn.run(Cfg.home(cfg), st, thread, "claude", Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen, M.Think.on(st)), cwd, 3),
+    # KiStack as it is now: the synced copy once a sync completed it
+    synced : Bool <- K.KiStack.ready(Cfg.home(cfg))
+    +kcfg : Cfg = Cfg.with_dirs(cfg, K.KiStack.dirs(synced, Cfg.home(cfg), Cfg.dirs(cfg)))
+    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, AccountSpawn.run(Cfg.home(cfg), st, thread, "claude", Hub.agent_args(kcfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen, M.Think.on(st)), cwd, 3),
       res => Claude.started(res, thread, gen, cwd, input, inbox)), Claude.fail(thread, gen, KR.Keyring.refusal("claude"), inbox))
 
 def Agents.pid.k(same: Bool, a: Agent, +pid: U32) -> Agent:
@@ -17579,6 +17622,7 @@ def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front:
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
     Refresh.start(inbox, cfg)
+    KSync.start(Cfg.home(cfg))
     IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})
@@ -17594,6 +17638,7 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
     Refresh.start(inbox, cfg)
+    KSync.start(Cfg.home(cfg))
     IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})

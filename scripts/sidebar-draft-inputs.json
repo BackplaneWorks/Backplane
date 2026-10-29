@@ -85,7 +85,7 @@
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
-    "src/core/prompt.bend": "51daa5edc75e68b2e1c0769459348abc84b1dcb8f67e95fbb9027e308e6001f6",
+    "src/core/prompt.bend": "de79af86187f72df680c127125514b3ce03fbeeae83238c696179e6c3c134882",
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
     "src/core/ref-origin.bend": "933dae7741d19f4c68b3d34de827fe42f490deb222282e4e185640a0eb4677fa",
     "src/core/ref.bend": "fa2dd3c0a4e9865ac9b185680361c681ce187f625a315e560f3a289e651e90f7",
@@ -104,7 +104,7 @@
     "src/core/sidebar-drafts.bend": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
     "src/core/sidebar-read.bend": "8b9952dbbe0c9ae89bf808e995b8ce643f20102587238724c9156076dd21419d",
     "src/core/sign.bend": "f6c4b636f7be64f7a4a03e8cc4d0b19eae2696e8c08a92236ad7e378d7120edc",
-    "src/core/signal.bend": "81dc20314358ed3f1e31eb1714e6e900dd6d3112818623dbbbd8c088c2ab3725",
+    "src/core/signal.bend": "1b60221d3dc1e17fe1f900403829482409ed47eb0f5845be51525f208785352f",
     "src/core/slash.bend": "4b88f73566a9b3694a888ede21f2117157df9449c50c52806648e4795d298932",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "feda431038cc6399db63a943d1475f54b67efb76e8b02984bb14f0f8bc2a8c64",
@@ -320,5 +320,5 @@
       "limits": "Guard-only; no whole-feature/auth/native/runtime acceptance. Earlier source/build receipts retained as historical."
     }
   },
-  "reviewNote": "signal: a thread whose turn is over while work it started is out is 'waiting' (Signal value 6) and its last reply says 'Waiting since' (stamp.bend); display words only, no draft reader touched (sidebar_draft_image_test 24 ok)"
+  "reviewNote": "signal: a thread whose turn is over while work it started is out is 'waiting' (Signal values 6/7) and its last reply says 'Waiting since' (stamp.bend); merged with main's KiStack sync; display words only, no draft reader touched (sidebar_draft_image_test 24 ok)"
 }

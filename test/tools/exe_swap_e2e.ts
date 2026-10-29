@@ -85,7 +85,7 @@ Bun.spawnSync(["chmod", "+x", exe]);
 
 const port = freePort();
 const proc = Bun.spawn([exe, "--home", home, "--port", String(port), "--no-tailscale"], {
-  env: { ...process.env, DISPLAY: "", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9" },
+  env: { ...process.env, DISPLAY: "", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9" },
   stdout: "ignore",
   stderr: "ignore",
 });
