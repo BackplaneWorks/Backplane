@@ -378,6 +378,8 @@ stamp.finished = Finished {clock}
 stamp.finished.took = Finished {clock} · {took}
 stamp.stopped = Stopped {clock}
 stamp.stopped.took = Stopped {clock} · {took}
+stamp.waiting = Waiting since {clock}
+stamp.waiting.took = Waiting since {clock} · {took}
 
 # subagent states
 state.running = running

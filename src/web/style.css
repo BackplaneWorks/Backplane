@@ -1194,12 +1194,14 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 /* Thread activity: the shared Signal projection supplies these classes. */
 .dot.blocked { background: var(--st-need); border-radius: 0; }
 .dot.active { background: var(--st-work); border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
+.dot.waiting { background: var(--waiting); border-radius: 50%; animation: pulse 2.4s ease-in-out infinite; }
 .dot.finished { background: var(--st-done); border-radius: 50%; }
 .dot.inactive { background: var(--st-idle); border-radius: 50%; }
 .dot.settled { background: var(--st-idle); border-radius: 50%; }
-@media (prefers-reduced-motion: reduce) { .dot.active { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .dot.active, .dot.waiting { animation: none; } }
 
 .sub-signal-active .state { color: var(--st-work); }
+.sub-signal-waiting .state { color: var(--waiting); }
 .sub-signal-finished .state { color: var(--st-done); }
 .sub-signal-inactive .state { color: var(--st-idle); }
 .sub-signal-blocked .state { color: var(--st-need); }

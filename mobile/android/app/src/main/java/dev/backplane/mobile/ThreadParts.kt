@@ -179,8 +179,9 @@ private val corner = RoundedCornerShape(4.dp)
 private val mono = FontFamily.Monospace
 
 // the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend);
-// a thread's activity: working accent (blue), finished ok (green), wanting
-// you bad (red), stopped, idle or settled faint (grey) (style.css's --st-*)
+// a thread's activity: working accent (blue), waiting on work it started
+// waiting (violet), finished ok (green), wanting you bad (red), stopped,
+// idle or settled faint (grey) (style.css's --st-*, --waiting)
 object PhaseColor {
     val accent = Color(0xFF5FB3FF)
     val ok = Color(0xFF58C28A)
@@ -192,12 +193,14 @@ object PhaseColor {
     val faint = Color(0xFF5C6473)
 }
 
-// The projected activity wins over the legacy turn fallback. Waiting/queued
-// data alone never proves a worker is running.
+// The projected activity wins over the legacy turn fallback. "waiting" is
+// the signal's own (its turn is over, work it started is still out);
+// queued data alone never proves a worker is running.
 private fun threadStatusSignal(state: String, status: String): String = when (status) {
     "" -> when (state) { "run" -> "active"; "fail" -> "blocked"; else -> "inactive" }
     "blocked", "needs you", "approval", "input", "failed" -> "blocked"
     "active", "running", "watching", "cancelling", "working", "monitoring" -> "active"
+    "waiting" -> "waiting"
     "finished", "complete" -> "finished"
     "settled", "done", "completed", "cancelled" -> "settled"
     else -> "inactive"
@@ -211,6 +214,7 @@ fun StatusDot(state: String, status: String) {
         "blocked" -> if (lang == "ja") "対応が必要です" else "Blocked: needs interaction"
         "active" -> if (lang == "ja") "作業中" else "Working: agent or owned work active"
         "settled" -> if (lang == "ja") "完了済み" else "Settled"
+        "waiting" -> if (lang == "ja") "サブエージェントや開始した作業の完了待ちです" else "Waiting: on subagents or work it started"
         "finished" -> if (lang == "ja") "完了しました" else "Finished: ready for you to look at"
         else -> if (lang == "ja") "非稼働・実行中の作業は未確認です" else "Inactive: no confirmed active work"
     }
@@ -218,6 +222,7 @@ fun StatusDot(state: String, status: String) {
         when (signal) {
             "blocked" -> Icon(Icons.Filled.Error, null, Modifier.size(18.dp), tint = PhaseColor.bad)
             "active" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.accent, strokeWidth = 2.dp)
+            "waiting" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.waiting, strokeWidth = 2.dp)
             "finished" -> Icon(Icons.Filled.CheckCircle, null, Modifier.size(16.dp), tint = PhaseColor.ok)
             "settled" -> Icon(Icons.Filled.CheckCircleOutline, null, Modifier.size(16.dp), tint = PhaseColor.faint)
             else -> Icon(Icons.Filled.Pause, null, Modifier.size(16.dp), tint = PhaseColor.faint)
@@ -494,6 +499,7 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
 private fun subColor(state: String) = when (state) {
     "active", "running", "watching", "cancelling" -> PhaseColor.accent
     "blocked", "needs you" -> PhaseColor.bad
+    "waiting" -> PhaseColor.waiting
     "finished" -> PhaseColor.ok
     else -> PhaseColor.faint
 }

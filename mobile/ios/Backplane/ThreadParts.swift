@@ -19,13 +19,15 @@ enum PhaseColor {
     static let input = rgb(0xb48cff), queued = rgb(0x4fc1c9), waiting = rgb(0xe07bd0), faint = rgb(0x5c6473)
 }
 
-// Current activity wins over the legacy turn fallback. A queued/waiting
+// Current activity wins over the legacy turn fallback. "waiting" is the
+// signal's own (its turn is over, work it started is still out); a queued
 // presentation from an older hub is inactive, never proof of a worker.
 private func threadStatusSignal(_ state: String, _ status: String?) -> String {
     switch status ?? "" {
     case "": return state == "run" ? "active" : state == "fail" ? "blocked" : "inactive"
     case "blocked", "needs you", "approval", "input", "failed": return "blocked"
     case "active", "running", "watching", "cancelling", "working", "monitoring": return "active"
+    case "waiting": return "waiting"
     case "finished", "complete": return "finished"
     case "settled", "done", "completed", "cancelled": return "settled"
     default: return "inactive"
@@ -44,6 +46,7 @@ struct StatusDot: View {
         case "blocked": return lang == "ja" ? "対応が必要です" : "Blocked: needs interaction"
         case "active": return lang == "ja" ? "作業中" : "Working: agent or owned work active"
         case "settled": return lang == "ja" ? "完了済み" : "Settled"
+        case "waiting": return lang == "ja" ? "サブエージェントや開始した作業の完了待ちです" : "Waiting: on subagents or work it started"
         case "finished": return lang == "ja" ? "完了しました" : "Finished: ready for you to look at"
         default: return lang == "ja" ? "非稼働・実行中の作業は未確認です" : "Inactive: no confirmed active work"
         }
@@ -54,6 +57,7 @@ struct StatusDot: View {
             switch signal {
             case "blocked": Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(PhaseColor.bad).font(.caption)
             case "active": ProgressView().controlSize(.mini).tint(PhaseColor.accent)
+            case "waiting": ProgressView().controlSize(.mini).tint(PhaseColor.waiting)
             case "finished": Image(systemName: "checkmark.circle.fill").foregroundStyle(PhaseColor.ok).font(.caption)
             case "settled": Image(systemName: "checkmark.circle.fill").foregroundStyle(PhaseColor.faint).font(.caption)
             default: Image(systemName: "pause.circle.fill").foregroundStyle(PhaseColor.faint).font(.caption)
@@ -334,6 +338,7 @@ private func subColor(_ state: String) -> Color {
     switch state {
     case "active", "running", "watching", "cancelling": PhaseColor.accent
     case "blocked", "needs you": PhaseColor.bad
+    case "waiting": PhaseColor.waiting
     case "finished": PhaseColor.ok
     default: PhaseColor.faint
     }

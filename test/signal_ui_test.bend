@@ -58,10 +58,10 @@ def main() -> IO(Unit):
   +unknown = sub("unknown", "watch")
   +running = sub("watching", "watch")
   do IO<Unit>:
-    C.Check.str("sidebar index actual child active", S.Signal.name(U.Side.signal.ix(ix, t)), "active")
+    C.Check.str("sidebar index: a parent of an actual child waits", S.Signal.name(U.Side.signal.ix(ix, t)), "waiting")
     C.Check.str("ordinary work count preserved", Nat.show(U.SIx.work(ix, "p")), Nat.show(U.SIx.work(U.Side.ix(U.Ui.state(u)), "p")))
     C.Check.str("display projection appends no events", Nat.show(U.Ui.seq(u)), Nat.show(U.Ui.seq(ui(child(), True{}))))
-    C.Check.str("phone selected parent blue", screen(ui(child(), True{})), "active")
+    C.Check.str("phone selected parent waiting", screen(ui(child(), True{})), "waiting")
     C.Check.str("phone offline active neutralized", screen(ui(child(), False{})), "inactive")
     C.Check.str("phone settled gray", screen(ui([M.ThreadSettled{"p", True{}, 5n}], True{})), "settled")
     C.Check.str("phone interaction red", screen(ui([M.AskOpened{"q", "c", "input", "", "Choose", "", 5n}], True{})), "blocked")
@@ -75,12 +75,13 @@ def main() -> IO(Unit):
     C.Check.str("blocked accessible label", V.View.attr(attrs(V.View.dot(I.En{}, "blocked")), "aria-label"), "Blocked: needs interaction")
     C.Check.str("active accessible label", V.View.attr(attrs(V.View.dot(I.En{}, "active")), "aria-label"), "Working: agent or owned work active")
     C.Check.str("finished accessible label", V.View.attr(attrs(V.View.dot(I.En{}, "finished")), "aria-label"), "Finished: ready for you to look at")
-    C.Check.str("phone finished green", screen(ui([M.TurnChanged{"p", M.Completed{}, 3n}], True{})), "finished")
+    C.Check.str("phone finished green", screen(ui([M.TaskStateSet{"task", M.TaskDone{}, "done", 3n}, M.TurnChanged{"p", M.Completed{}, 3n}], True{})), "finished")
+    C.Check.str("phone: finished turn, its subagent queued, waits", screen(ui([M.TurnChanged{"p", M.Completed{}, 3n}], True{})), "waiting")
     # a failed turn says failed and why on the phone too, not "Blocked: needs interaction"
     C.Check.str("phone failed says why", working(U.Side.with_signals(ui([M.MessagePosted{"p", "u2", M.User{}, "go", 2n}, M.ActivityLogged{"p", "e3", "error", "codex", "codex exited (exit 127)", 3n}, M.TurnChanged{"p", M.Failed{}, 3n}], True{}))),
       "Failed: codex exited (exit 127)")
     C.Check.str("phone failed still red", screen(ui([M.TurnChanged{"p", M.Failed{}, 3n}], True{})), "blocked")
-    C.Check.str("phone stopped gray", screen(ui([M.TurnChanged{"p", M.Interrupted{}, 3n}], True{})), "inactive")
+    C.Check.str("phone stopped gray", screen(ui([M.TaskStateSet{"task", M.TaskCancelled{}, "", 3n}, M.TurnChanged{"p", M.Interrupted{}, 3n}], True{})), "inactive")
     C.Check.str("plane finished row", P.Plane.signal.state(5n), "finished")
     C.Check.str("held lock gray", SB.Subs.signal.of(info, held), "inactive")
     C.Check.str("reporting gray", SB.Subs.signal.of(info, sub("reporting", "subagent")), "inactive")

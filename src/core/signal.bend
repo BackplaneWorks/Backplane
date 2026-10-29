@@ -30,6 +30,13 @@ def SignalInput.asks(st: SignalInput) -> List<&2, M.Ask>:
 # unresolved interaction; 4 is settled only when neither bit is present, and
 # 5 finished: neither bit, not settled, and its last turn completed (done,
 # for the person to look at; Signal.done). A stopped or idle thread is 0.
+# 6 and 7 waiting: its own turn is not running but work it started is
+# out. 6: active (bit 1, Signal.bits) only through confirmed owned work or
+# its children's (Signal.waits); 7: finished or idle with something still
+# out that the hub waits on but none of it confirmed at work (Signal.out:
+# M.Work.busy's delegated tasks, background rows, watched work), so no
+# activity bit (the island, the plane's run, offline hiding and its
+# parents read it as before). Both are named "waiting", never "finished".
 # The index is transient: do not persist it or change the event/state codecs.
 
 def Signal.compose(blocked: Bool, active: Bool, settled: Bool) -> Nat:
@@ -47,7 +54,11 @@ def Signal.done(finished: Bool, +n: Nat) -> Nat:
   Bool.pick(Nat, Bool.and(finished, Nat.is_eq(n, 0n)), 5n, n)
 
 def Signal.bits(+n: Nat) -> Nat:
-  Bool.pick(Nat, Nat.is_lt(n, 4n), n, 0n)
+  Bool.pick(Nat, Nat.is_lt(n, 4n), n, Bool.pick(Nat, Nat.is_eq(n, 6n), 1n, 0n))
+
+# either waiting value (6 or 7)
+def Signal.waits.is(+n: Nat) -> Bool:
+  Bool.or(Nat.is_eq(n, 6n), Nat.is_eq(n, 7n))
 
 def Signal.active(+n: Nat) -> Bool:
   Nat.is_eq(Nat.mod(Signal.bits(n), 2n), 1n)
@@ -61,20 +72,21 @@ def Signal.merge(+a: Nat, +b: Nat) -> Nat:
 
 # the word for a value, which is also its colour everywhere (style.css's
 # --st-*, the phones' PhaseColor): blocked red (an approval, a question, a
-# failure: it wants the person), active blue (working), finished green
+# failure: it wants the person), active blue (working), waiting violet
+# (its turn is over, work it started is not: --waiting), finished green
 # (done), settled and inactive grey (stopped, idle, put away)
 def Signal.name(+n: Nat) -> String:
-  Bool.pick(String, Signal.blocked(n), "blocked", Bool.pick(String, Signal.active(n), "active", Bool.pick(String, Nat.is_eq(n, 4n), "settled",
-    Bool.pick(String, Nat.is_eq(n, 5n), "finished", "inactive"))))
+  Bool.pick(String, Signal.blocked(n), "blocked", Bool.pick(String, Signal.waits.is(n), "waiting", Bool.pick(String, Signal.active(n), "active", Bool.pick(String, Nat.is_eq(n, 4n), "settled",
+    Bool.pick(String, Nat.is_eq(n, 5n), "finished", "inactive")))))
 
 def Signal.label.loc(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
       Bool.pick(String, String.eq(name, "blocked"), "対応が必要です", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了済み",
-        Bool.pick(String, String.eq(name, "finished"), "完了しました", "非稼働・実行中の作業は未確認です"))))
+        Bool.pick(String, String.eq(name, "waiting"), "サブエージェントや開始した作業の完了待ちです", Bool.pick(String, String.eq(name, "finished"), "完了しました", "非稼働・実行中の作業は未確認です")))))
     case _:
       Bool.pick(String, String.eq(name, "blocked"), "Blocked: needs interaction", Bool.pick(String, String.eq(name, "active"), "Working: agent or owned work active", Bool.pick(String, String.eq(name, "settled"), "Settled",
-        Bool.pick(String, String.eq(name, "finished"), "Finished: ready for you to look at", "Inactive: no confirmed active work"))))
+        Bool.pick(String, String.eq(name, "waiting"), "Waiting: on subagents or work it started", Bool.pick(String, String.eq(name, "finished"), "Finished: ready for you to look at", "Inactive: no confirmed active work")))))
 
 def Signal.label(+lc: I.Loc, +n: Nat) -> String:
   Signal.label.loc(lc, Signal.name(n)) ++ Bool.pick(String, Bool.and(Signal.blocked(n), Signal.active(n)),
@@ -186,19 +198,31 @@ def Signal.shelf(s: M.Shelf) -> Bool:
     case M.Settled{}: True{}
     case _: False{}
 
-def Signal.own(+st: SignalInput, +asks: Map<&2, Nat>, +t: M.Thread) -> Nat:
+# what the hub still waits on for a thread, confirmed running or not
+# (M.Work.busy, from the signal's own input): its delegated tasks not
+# finished (kids: M.Work.kids.fold), its background rows (ended ones too:
+# their outcome is still owed) and its watched work
+def Signal.out(+st: SignalInput, +kids: Map<&2, Nat>, +id: String) -> Bool:
+  Bool.or(Nat.is_gt(Signal.at(kids, id), 0n), Bool.or(Nat.is_gt(M.Bg.live(M.Bg.lines(SignalInput.setting(st, M.Bg.key(id)))), 0n),
+    Nat.is_gt(M.Bg.live(M.Bg.lines(SignalInput.setting(st, M.Work.watch.key(id)))), 0n)))
+
+# idle (0) or finished (5) with work out waits (7)
+def Signal.out.k(out: Bool, +n: Nat) -> Nat:
+  Bool.pick(Nat, Bool.and(out, Bool.or(Nat.is_eq(n, 0n), Nat.is_eq(n, 5n))), 7n, n)
+
+def Signal.own(+st: SignalInput, +asks: Map<&2, Nat>, +kids: Map<&2, Nat>, +t: M.Thread) -> Nat:
   match t:
     case M.Thread{+id, _, _, _, _, +turn, +pending, _, _, _, _, _, _, _, _, _, _, _, _, _, deleted}:
       +owned = Bool.or(Nat.is_gt(M.Bg.running(M.Bg.lines(SignalInput.setting(st, M.Bg.key(id)))), 0n), Signal.watch(M.Bg.lines(SignalInput.setting(st, M.Work.watch.key(id)))))
       +blocked = Bool.or(Signal.failed(turn), Bool.or(Nat.is_gt(pending, 0n), Bool.or(Signal.blocked(Signal.at(asks, id)),
         Bool.or(Bool.not(String.is_empty(SignalInput.setting(st, "auth.wait." ++ id))), Signal.held(SignalInput.queue(st, id))))))
-      Bool.pick(Nat, deleted, 0n, Signal.done(Bool.and(Signal.completed(turn), List.is_empty(&2, M.QItem, SignalInput.queue(st, id))), Signal.compose(blocked, Bool.or(owned, Bool.and(M.State.running.k(t), Bool.not(blocked))), Signal.shelf(M.Shelf.of(t)))))
+      Bool.pick(Nat, deleted, 0n, Signal.out.k(Signal.out(st, kids, id), Signal.done(Bool.and(Signal.completed(turn), List.is_empty(&2, M.QItem, SignalInput.queue(st, id))), Signal.compose(blocked, Bool.or(owned, Bool.and(M.State.running.k(t), Bool.not(blocked))), Signal.shelf(M.Shelf.of(t))))))
 
-def Signal.owns(ts: List<&2, M.Thread>, +st: SignalInput, +asks: Map<&2, Nat>, m: Map<&2, Nat>) -> Map<&2, Nat>:
+def Signal.owns(ts: List<&2, M.Thread>, +st: SignalInput, +asks: Map<&2, Nat>, +kids: Map<&2, Nat>, m: Map<&2, Nat>) -> Map<&2, Nat>:
   match ts:
     case Nil{}: m
     case +t <> rest:
-      Signal.owns(rest, st, asks, Map.set(&2, Nat, m, M.Thread.id(t), Signal.own(st, asks, t)))
+      Signal.owns(rest, st, asks, kids, Map.set(&2, Nat, m, M.Thread.id(t), Signal.own(st, asks, kids, t)))
 
 def Signal.parents.get.k(r: Map<&2, List<&2, String>> & List<&2, String>) -> List<&2, String>:
   (_, xs) = r
@@ -283,8 +307,19 @@ def Signal.index.owns(+st: SignalInput, +ts: List<&2, M.Thread>, tasks: List<&2,
   Signal.values(Signal.drain(Nat.mul(3n, List.length(&2, M.Thread, ts)), SignalStep{known, Signal.ids(ts)},
     Signal.launch.edges(ts, st, known, Signal.task.edges(tasks, known, Map.new(&2, List<&2, String>)))))
 
-def Signal.index.k(+st: SignalInput, +ts: List<&2, M.Thread>, tasks: List<&2, M.Task>) -> Map<&2, Nat>:
-  Signal.index.owns(st, ts, tasks, Signal.owns(ts, st, Signal.asks(SignalInput.asks(st), Map.new(&2, Nat)), Map.new(&2, Nat)))
+# active (1, not blocked) with its own turn not running: waiting (6) on
+# the work it started or its children's
+def Signal.waits(+n: Nat, running: Bool) -> Nat:
+  Bool.pick(Nat, Bool.and(Nat.is_eq(n, 1n), Bool.not(running)), 6n, n)
+
+def Signal.wait.all(ts: List<&2, M.Thread>, +m: Map<&2, Nat>) -> Map<&2, Nat>:
+  match ts:
+    case Nil{}: m
+    case +t <> rest:
+      Signal.wait.all(rest, Map.set(&2, Nat, m, M.Thread.id(t), Signal.waits(Signal.at(m, M.Thread.id(t)), M.State.running.k(t))))
+
+def Signal.index.k(+st: SignalInput, +ts: List<&2, M.Thread>, +tasks: List<&2, M.Task>) -> Map<&2, Nat>:
+  Signal.wait.all(ts, Signal.index.owns(st, ts, tasks, Signal.owns(ts, st, Signal.asks(SignalInput.asks(st), Map.new(&2, Nat)), M.Work.kids.fold(tasks, Map.new(&2, Nat)), Map.new(&2, Nat))))
 
 def Signal.index.inputs(+st: SignalInput) -> Map<&2, Nat>:
   match st:
@@ -351,6 +386,12 @@ def Signal.cached.k(r: Map<&2, String> & String) -> Nat:
 
 def Signal.cached(+info: Map<&2, String>, +id: String) -> Nat:
   Signal.cached.k(Map.get(String, "0", info, Signal.key(id)))
+
+# whether an open thread waits on work it started, for what its page says
+# (the last reply's "Waiting since", stamp.bend): its signal says so when
+# the client has it, else its turn is over with work the hub still waits on
+def Signal.waiting(+info: Map<&2, String>, +st: M.State, +id: String, running: Bool) -> Bool:
+  Bool.or(Signal.waits.is(Signal.cached(info, id)), Bool.and(Bool.not(running), Nat.is_gt(M.Work.busy(st, id), 0n)))
 
 # The server may pass raw bits directly to the display index. Fall back to
 # the original info parser if its input was already decorated or has an
