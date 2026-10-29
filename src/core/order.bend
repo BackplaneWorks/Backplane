@@ -680,6 +680,33 @@ def Boards.cap(xs: List<&2, String>, +n: Nat) -> List<&2, String>:
 def Boards.pick(+all: List<&2, String>, +bd: String) -> List<&2, String>:
   Boards.cap(Boards.lead(bd, Boards.or(Boards.real(all, all), Boards.or(Boards.outside(all), Boards.pcbs(all)))), Boards.most())
 
+# The picker reads the boards again each time it opens (boards.list, the
+# hub's job "boards": a rescan of the thread's folder, none of the card's
+# other work; client.bend's Bd.look). Its answer: {thread, board_list: the
+# boards Boards.pick offers, board_default}, kept where the card keeps
+# them ("fab.boards:<t>", "fab.board:<t>"), one path a line (laws
+# boards_list_*)
+def Boards.strs(xs: List<&2, String>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      J.Str{x} <> Boards.strs(t)
+
+def Boards.list.j(+thread: String, bs: List<&2, String>, +bd: String) -> J.Json:
+  J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"board_list", J.Json.arr(Boards.strs(bs))}, J.KV{"board_default", J.Str{bd}}])
+
+# (the hub found: its board and project files; bd: the folder's own board)
+def Boards.list(+thread: String, +found: List<&2, String>, +bd: String) -> J.Json:
+  Boards.list.j(thread, Boards.pick(found, bd), bd)
+
+# an answer to boards.list (not the card's, whose list is "board_files")
+def Boards.listed(+r: J.Json) -> Bool:
+  Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(r, "board_list"), J.Null{})), "null"))
+
+def Boards.text(+r: J.Json) -> String:
+  String.join(Card.strs(J.Json.elems(J.Json.get_obj(r, "board_list"))), "\n")
+
 # the project's boards, one path a line (from the hub's card)
 def Card.boards.j(+j: J.Json) -> String:
   String.join(Card.strs(J.Json.elems(J.Json.get_obj(j, "board_files"))), "\n")

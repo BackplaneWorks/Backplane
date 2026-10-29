@@ -600,6 +600,15 @@ function holdBottom() {
   if (thin && thin.atNewest?.() === false) { thin.newest();return; }
   timelineList()?.scrollToEnd();
 }
+// a <details> that asks for something each time it opens (view.bend's
+// board selector, data-on-open "board-list": its boards read again); not
+// the person's own act, so offline it says nothing (dispatch's timer)
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  const action = d?.open && d.getAttribute?.("data-on-open");
+  if (action) dispatch(action, d.getAttribute("data-value") ?? "", true);
+}, true);
+
 // a viewer's Layers list opens leftward from its button (style.css: the
 // button sits at the bar's right end); where that would leave the window,
 // the button wrapped to the start of a narrow bar, it opens rightward

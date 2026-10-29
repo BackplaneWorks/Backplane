@@ -808,7 +808,7 @@ def Hub.methods.fs() -> List<&2, String>:
 
 # sidebar and navigation
 def Hub.methods.nav() -> List<&2, String>:
-  ["thread.snooze", "thread.reorder", "files.list", "kicad.open", "project.reorder", "mech.list", "mech.render", "file.open", "files.dir", "pdf.page", "kicad.export10"]
+  ["thread.snooze", "thread.reorder", "files.list", "kicad.open", "project.reorder", "mech.list", "mech.render", "file.open", "files.dir", "pdf.page", "kicad.export10", "boards.list"]
 
 # snooze a thread: {thread, for: "1h" | "1w" | "tomorrow" | "off"} or
 # {thread, until}. Tomorrow 9:00 is local time, which the server knows:
@@ -2384,6 +2384,10 @@ def Hub.nav(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Jso
       Step.outs([Git{client, id, "pdf", "", "/", J.Json.get_str(p, "path", ""), J.Json.as_raw(J.Json.get(p, "page"), "1")}])
     case 10n:
       Step.outs([Git{client, id, "kexport", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), J.Json.show(p), ""}])
+    # the board picker opened: the project's boards read again, {thread}
+    # (core/order.bend's Boards.list; server.bend's BoardsJob)
+    case 11n:
+      Step.outs([Git{client, id, "boards", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
     case _:
       Hub.agentm(C.Codec.pos(Hub.methods.agent(), m), s, now, client, id, p, m)
 

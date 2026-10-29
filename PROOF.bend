@@ -4774,6 +4774,7 @@ def Laws.mech_default_assembly():
 def Laws.mech_default_first():
   {==}
 
+
 def Laws.mech_gui_linux():
   {==}
 
@@ -11349,6 +11350,18 @@ def Laws.bd_shown_default():
   {==}
 
 def Laws.bd_shown_picked(root, own):
+  {==}
+
+def Laws.bd_look_here():
+  {==}
+
+def Laws.bd_look_far():
+  {==}
+
+def Laws.bd_look_none():
+  {==}
+
+def Laws.boards_list_offered():
   {==}
 
 def Laws.buy_title_first(t):

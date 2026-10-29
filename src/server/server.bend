@@ -2991,6 +2991,24 @@ def Mech.render(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +
     l : P.Ran <- P.Proc.run("sh", ["-c", Mech.cmd()], cwd)
     Mech.rendered(Mech.said(r), l, inbox, client, id, thread, cwd, path)
 
+# the board picker opened (boards.list, hub.bend's Hub.nav): the
+# project's boards read again, as the card finds them (orderio.bend's
+# Od.boards, its default from the folder's own project), and nothing of
+# the card's other work (no fab files, intent or order server); the answer
+# is core/order.bend's Boards.list. A thread with no folder lists none.
+def BoardsJob.list(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
+  do IO<Unit>:
+    b : P.Ran <- P.Proc.run("sh", ["-c", ODI.Od.boards()], cwd)
+    kf : K.Files <- K.Files.read(cwd)
+    GitJob.reply(inbox, client, id, True{}, OR.Boards.list(thread, ODI.Od.lines(String.lines(ODI.Od.ran(b))), ODI.Od.pcb(cwd, kf)))
+
+def BoardsJob.run(none: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
+  match none:
+    case True{}:
+      GitJob.reply(inbox, client, id, True{}, OR.Boards.list(thread, Nil{}, ""))
+    case False{}:
+      BoardsJob.list(inbox, client, id, thread, cwd)
+
 def Snooze.tz(r: P.Ran) -> String:
   match r:
     case P.Ran{0, out}:
@@ -3232,6 +3250,8 @@ def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clien
       IO.bind(J.Json, Unit, ODI.Od.look(home, cwd, thread, a), r => GitJob.reply(inbox, client, id, True{}, r))
     case 17n:
       IO.bind(J.Json, Unit, ODI.Od.intent(home, cwd, thread, a, b), r => GitJob.reply(inbox, client, id, True{}, r))
+    case 18n:
+      BoardsJob.run(String.is_empty(cwd), inbox, client, id, thread, cwd)
     case _:
       GitJob.run.git(tx, job, inbox, client, id, thread, cwd, a, b, home)
 
@@ -3254,7 +3274,7 @@ def GitJob.run.r(rv: Bool, +tx: TextScope, +job: String, +inbox: Chan(Msg), +cli
     case True{}:
       IO.bind(RVS.Res, Unit, RVS.RvJob.run(job, thread, cwd, a, b, home), r => RvJob.reply(r, inbox, client, id))
     case False{}:
-      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
+      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent", "boards"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
 
 # a job the hub asked for: a git job, or one of the sidebar's
 def GitJob.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):

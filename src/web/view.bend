@@ -3511,13 +3511,16 @@ def View.board.chips(+fs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
   View.board.rows(fs, View.board.current(fs, cur), "", Nil{})
 
 # (a design-history step or a comparison names its board by the live file
-# it is a version of, HS.Hist.family, never by its raw version path)
+# it is a version of, HS.Hist.family, never by its raw version path). Each
+# time it opens it reads the project's boards again (host.js runs its
+# data-on-open, "board-list": client.bend's Bd.look); the rows are keyed by
+# their paths, so a list that came back the same leaves them as they are
 def View.boards.selector(fs: List<&2, String>, +path: String, +own: String, +root: String) -> List<&2, D.Node>:
   match fs:
     case Nil{}: [D.Dom.span("what", MC.Mech.last(HS.Hist.family(path)))]
     case +f <> +t:
       +cur = View.board.current(f <> t, View.board.relative(HS.Hist.family(path), root))
-      [D.El{"details", "board-selector", [D.At{"class", "local-menu board-selector"}], [
+      [D.El{"details", "board-selector", [D.At{"class", "local-menu board-selector"}, D.On{"open", "board-list"}], [
         D.El{"summary", "", [D.At{"aria-label", "Select board"}, D.At{"title", cur}], [WI.WIcon.svg("circuit-board", 16),
           D.El{"span", "", [D.At{"class", "board-current"}], [D.Dom.span("", Bool.pick(String, String.is_empty(cur), "Select board", MC.Mech.stem(cur))), D.El{"small", "", Nil{}, [D.Txt{MC.Mech.parent(cur)}]}]}, WI.WIcon.svg("chevron-down", 14)]},
         D.El{"div", "", [D.At{"class", "local-menu-body"}], [

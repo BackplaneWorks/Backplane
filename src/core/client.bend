@@ -5890,6 +5890,42 @@ def Bd.tree.k(+cur: String, +root: String) -> String:
 def Bd.tree(+u: Ui, +path: String) -> String:
   Bool.pick(String, Bd.many(u), Bd.tree.k(Bd.cur(Bd.files(u), Bd.shown(u, path)), Ui.root(u)), "")
 
+# The card is asked again only when the thread or its turn moves on (Fab.sync),
+# so a board added or removed meanwhile never reached the picker. Each time
+# the picker opens ("board-list": the web's board selector as it opens,
+# data-on-open; a phone's viewer opening on a board, mobile/view.bend's
+# View.open.k) the boards are read again (boards.list, one rescan of the
+# thread's folder: core/order.bend's Boards.list) and kept where the card
+# keeps them, so the picker shows what is there; an answer that found the
+# same boards changes nothing on screen. Never for a thread elsewhere (its
+# hub has the files) or with none selected (laws bd_look_*).
+def Bd.can(+th: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(th)), Bool.not(FR.Fr.is(th)))
+
+def Bd.look.k(ask: Bool, +u: Ui) -> Act:
+  match ask:
+    case True{}:
+      Ui.rpc(u, "boards.list", [J.KV{"thread", J.Str{Ui.sel(u)}}])
+    case False{}:
+      Act{u, Nil{}}
+
+def Bd.look(+u: Ui) -> Act:
+  Bd.look.k(Bd.can(Ui.sel(u)), u)
+
+# (an answer to boards.list: OR.Boards.listed)
+def Bd.has(+o: J.Json) -> Bool:
+  OR.Boards.listed(J.Json.get_obj(o, "result"))
+
+def Bd.got(u: Ui, +r: J.Json) -> Ui:
+  Ui.info_set(Ui.info_set(u, "fab.boards:" ++ J.Json.get_str(r, "thread", ""), OR.Boards.text(r)), "fab.board:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "board_default", ""))
+
+def Bd.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
+  match has:
+    case True{}:
+      Bd.got(u, J.Json.get_obj(o, "result"))
+    case False{}:
+      u
+
 # The combined view
 # -----------------
 # Kind "split": the schematic beside the board and its 3D model at once,
@@ -9616,7 +9652,7 @@ def Rv.act(+u: Ui, +action: String, +value: String) -> Act:
   Rv.act.c(Nat.is_lt(C.Codec.pos(Rc.actions(), action), 7n), u, action, value)
 
 def Ui.reply.skills(u: Ui, +o: J.Json) -> Ui:
-  Rp.reply(Rp.reply.has(o), Rv.reply(Rv.reply.has(o), Fv.reply(Fm.has(J.Json.get_obj(o, "result"), "farView"), Skills.got(Skills.has(o), Mpage.reply(Mpage.has(o), Hs.refs.store(Hs.refs.has(o), Ui.reply.body(u, o), o), o), o), J.Json.get_obj(o, "result")), o), o)
+  Bd.reply(Bd.has(o), Rp.reply(Rp.reply.has(o), Rv.reply(Rv.reply.has(o), Fv.reply(Fm.has(J.Json.get_obj(o, "result"), "farView"), Skills.got(Skills.has(o), Mpage.reply(Mpage.has(o), Hs.refs.store(Hs.refs.has(o), Ui.reply.body(u, o), o), o), o), J.Json.get_obj(o, "result")), o), o), o)
 
 # The bar
 # -------
@@ -15009,12 +15045,20 @@ def Ui.act.fab(fab: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.us(C.Codec.pos(["usage-refresh", "usage-open", "usage-period", "usage-metric", "usage-model-page", "usage-project-page", "usage-provider"], action), u, action, value)
 
+# (the board picker opened: Bd.look)
+def Ui.act.bd(look: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match look:
+    case True{}:
+      Bd.look(u)
+    case False{}:
+      Ui.act.fab(Fab.is(action), u, action, value)
+
 def Ui.act.z(tz: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match tz:
     case True{}:
       Tzs.act(u, action, value)
     case False{}:
-      Ui.act.fab(Fab.is(action), u, action, value)
+      Ui.act.bd(String.eq(action, "board-list"), u, action, value)
 
 def Ui.act.subs(shut: Bool, open: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match shut open:

@@ -1775,6 +1775,7 @@ law mech_default_assembly:
 law mech_default_first:
   {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.default(MCH.Mech.parts("1 9 mech/bracket.step\n3 9 mech/lid.step")), MCH.MPart{"", "", Nil{}})) == "mech/bracket.step" : String}
 
+
 # agents are pointed at FreeCAD's GUI beside its console build (the only
 # one that writes a STEP's colours), on Linux and in the macOS app
 law mech_gui_linux:
@@ -9539,6 +9540,23 @@ law bd_shown_picked:
   for root: String
   for own: String
   {U.Bd.shown.k("/x.kicad_pcb", root, own) == "/x.kicad_pcb" : String}
+
+# the board picker reads the boards again as it opens (client.bend's
+# Bd.look): for a thread here, never for one elsewhere (its hub has the
+# files) or with none chosen
+law bd_look_here:
+  {U.Bd.can("t1") == True{} : Bool}
+
+law bd_look_far:
+  {U.Bd.can("mate~t1") == False{} : Bool}
+
+law bd_look_none:
+  {U.Bd.can("") == False{} : Bool}
+
+# its answer is the boards the picker offers (core/order.bend's
+# Boards.list: copies left out), one path a line, as the card's are kept
+law boards_list_offered:
+  {ORD.Boards.text(ORD.Boards.list("t1", ["a/a.kicad_pcb", "a/a.kicad_pro", "archive/a/a.kicad_pcb", "archive/a/a.kicad_pro", "b/b.kicad_pcb", "b/b.kicad_pro"], "")) == "a/a.kicad_pcb\nb/b.kicad_pcb" : String}
 
 # a project's second buy thread is numbered, the first is not
 law buy_title_first:
