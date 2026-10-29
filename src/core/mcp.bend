@@ -835,7 +835,7 @@ def Mcp.tools() -> J.Json:
       "List the providers and models this Backplane can run, the delegation depth limit, and this thread's own provider, model and depth.",
       Nil{}, Nil{}),
     Tool.def("delegate_task",
-      "Delegate one task to a child agent of THIS thread, on any provider/model (see orchestrator_capabilities). The child sees only `prompt` (no conversation history) and works in this thread's directory. Its result arrives in this thread as a message when it finishes, so end your turn instead of polling; use task_status only when you need it mid-turn. Delegation is limited in depth; children of children are allowed up to the limit.",
+      "Delegate one task to a child agent of THIS thread, on any provider/model (see orchestrator_capabilities). The child sees only `prompt` of this conversation (no history) and works in this thread's directory; like every thread it has Backplane's instructions and the installed skills (KiStack's KiCad skills, the person's) and uses the one its task matches, so name a skill rather than pasting it. Its result arrives in this thread as a message when it finishes, so end your turn instead of polling; use task_status only when you need it mid-turn. Delegation is limited in depth; children of children are allowed up to the limit.",
       [Tool.prop("prompt", "string", "The complete task for the child, with every detail it needs."),
        Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity, opencode, pi or omp (default: this thread's)."),
        Tool.prop("model", "string", "Model for the child (default: this thread's)."),

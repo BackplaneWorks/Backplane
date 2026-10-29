@@ -65,6 +65,51 @@ def Front.stop(ls: List<&2, String>) -> Bool:
     case Nil{}:
       True{}
 
+# a value carried on to indented lines (`description: >` and its block, or a
+# long value wrapped): the line it continues, with a `>`/`|` marker dropped
+def Front.join.k(one: Bool, two: Bool, +h: String, +s: String) -> String:
+  match one two:
+    case True{} _:
+      String.take(h, Nat.sub(String.length(h), 1n)) ++ s
+    case False{} True{}:
+      String.take(h, Nat.sub(String.length(h), 2n)) ++ s
+    case False{} False{}:
+      h ++ " " ++ s
+
+def Front.join(+h: String, +s: String) -> String:
+  Front.join.k(Bool.or(String.ends_with(h, ": >"), String.ends_with(h, ": |")), Bool.or(Bool.or(String.ends_with(h, ": >-"), String.ends_with(h, ": |-")), Bool.or(String.ends_with(h, ": >+"), String.ends_with(h, ": |+"))), h, s)
+
+# an indented, non-blank frontmatter line: part of the value above it
+def Front.cont(+l: String) -> Bool:
+  Bool.and(Bool.or(String.starts_with(l, " "), String.starts_with(l, "\t")), Bool.and(Bool.not(String.is_empty(String.trim(l))), Bool.not(String.eq(String.trim(l), "---"))))
+
+def Front.push(c: Bool, +h: String, +l: String, t: List<&2, String>) -> List<&2, String>:
+  match c:
+    case True{}:
+      Front.join(String.trim_end(h), String.trim(l)) <> t
+    case False{}:
+      l <> h <> t
+
+def Front.push.k(c: Bool, +l: String, acc: List<&2, String>) -> List<&2, String>:
+  match acc:
+    case Nil{}:
+      [l]
+    case +h <> t:
+      Front.push(c, h, l, t)
+
+def Front.fold.go(ls: List<&2, String>, +open: Bool, acc: List<&2, String>) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      List.reverse(&2, String, acc)
+    case +l <> t:
+      Front.fold.go(t, Bool.and(open, Bool.not(String.eq(String.trim(l), "---"))), Front.push.k(Bool.and(open, Front.cont(l)), l, acc))
+
+# the lines after the opening ---, each value whole on its key's line (a
+# folded `description: >` block read as its text, not ">"); from the
+# closing --- on, the lines as they are
+def Front.fold(ls: List<&2, String>) -> List<&2, String>:
+  Front.fold.go(ls, True{}, Nil{})
+
 # fold frontmatter lines until the closing ---; `stop` is the head's verdict
 def Front.go(ls: List<&2, String>, stop: Bool, f: Front) -> Front:
   match ls stop:
@@ -73,10 +118,13 @@ def Front.go(ls: List<&2, String>, stop: Bool, f: Front) -> Front:
     case _ _:
       f
 
+def Skill.front.from(+t: List<&2, String>, +dflt: String) -> Front:
+  Front.go(t, Front.stop(t), Front{dflt, ""})
+
 def Skill.front.open(open: Bool, +t: List<&2, String>, +dflt: String) -> Front:
   match open:
     case True{}:
-      Front.go(t, Front.stop(t), Front{dflt, ""})
+      Skill.front.from(Front.fold(t), dflt)
     case False{}:
       Front{dflt, ""}
 
@@ -244,7 +292,7 @@ def Prompt.orchestration.k(may: Bool, +models: String) -> String:
   match may:
     case True{}:
       "You may delegate well-scoped, independent pieces of work (footprint or symbol generation, part lookup, ERC/DRC review, mechanical checks) to other models with the backplane MCP tool `delegate_task`; `orchestrator_capabilities` lists them. Models available: " ++ models
-      ++ ". A child sees only the prompt you give it, so include paths and acceptance criteria, and say whether it may write the canonical board or schematic: only one agent writes a file at a time. Each result reaches you exactly once as a message when the child finishes; end your turn rather than polling. Finished tasks never restart, and delegation depth is limited. For work the user should see as a thread of its own, `thread_launch` starts one in this project, and its reports reach you the same way (each turn end, and at once when it asks the person something); `thread_send` (mode auto, queue or steer), `thread_wait`, `thread_read`, `thread_interrupt` and `thread_update` (rename, or regenerate a title) work on any thread of this project. The person's other machines running Backplane are linked to this one: `machine_list` shows them and their projects; `thread_list` and `thread_launch` take a `machine`, and a thread there has an id like `<link>~<id>` that `thread_send`, `thread_wait`, `thread_read`, `thread_interrupt` and `thread_update` take, so you can start work on another machine or hand it a message. A `>machine:slug` in a message names such a thread."
+      ++ ". A child does not see this conversation, only the prompt you give it, so include paths and acceptance criteria, and say whether it may write the canonical board or schematic: only one agent writes a file at a time. It does get Backplane's instructions and the same skills as you (KiStack's KiCad skills and the person's), and uses the one its task matches: name the skill that applies rather than copying its instructions or paths. Each result reaches you exactly once as a message when the child finishes; end your turn rather than polling. Finished tasks never restart, and delegation depth is limited. For work the user should see as a thread of its own, `thread_launch` starts one in this project, and its reports reach you the same way (each turn end, and at once when it asks the person something); `thread_send` (mode auto, queue or steer), `thread_wait`, `thread_read`, `thread_interrupt` and `thread_update` (rename, or regenerate a title) work on any thread of this project. The person's other machines running Backplane are linked to this one: `machine_list` shows them and their projects; `thread_list` and `thread_launch` take a `machine`, and a thread there has an id like `<link>~<id>` that `thread_send`, `thread_wait`, `thread_read`, `thread_interrupt` and `thread_update` take, so you can start work on another machine or hand it a message. A `>machine:slug` in a message names such a thread."
     case False{}:
       "You are a delegated task at the depth limit: do not delegate further. Finish the task and put the result in your final message."
 

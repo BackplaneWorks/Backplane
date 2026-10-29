@@ -350,3 +350,13 @@ closes the viewer. Open the terminal (`): Esc stays in the shell, Shift+Esc
 hides it and the composer has the keyboard. Click in the timeline, press
 "/": the keyboard is at the end of the draft and no "/" was typed. A rename
 field or a Settings field keeps the keyboard while you type in it.
+
+**S46 Every thread has KiStack's skills** (W D)
+Type `$` in a thread's composer: KiStack's skills are offered (kicad-pcb,
+kicad-schematic, layout-placement, …) with their descriptions, a folded
+YAML one (`description: >`) as its text, never ">". On D the hub is the
+desktop app's own (`desktop/runtime/resources/backplane-service`, KiStack in
+the install's `kistack/` beside `desktop/`): the same list. A Claude thread's
+agent runs with `--plugin-dir <install>/kistack` (the stand-in's arguments);
+a delegated child and a launched thread offer the same `$` list as their
+parent.

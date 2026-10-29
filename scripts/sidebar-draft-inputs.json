@@ -19,7 +19,7 @@
   "files": {
     "src/core/accounts.bend": "522ef105ac2dac3664aa3cbfad4b1c05ac845399af81851ef1bf065992bb2764",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
-    "src/core/agent.bend": "c9494b806dac38e3f37a246872a196508069a0f6801ac4444319bc6a87b5efa3",
+    "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
     "src/core/agy.bend": "ec8c54a6e7d6fc9abd27476b48d76669393fc59d5ee8141bff3c699e3d476fab",
     "src/core/apikeys.bend": "f825918814d94d15afbec4056ca7dce297d59ab70ef390ef916abe751d911237",
     "src/core/attach.bend": "d455a495d29974fee95a5daa4c0eb1058b6c5de212c4088fc0374c927bd03fd8",
@@ -85,7 +85,7 @@
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
-    "src/core/prompt.bend": "6ecdb20260b8d54caeb63233b7c5568eddbe827cbca74fff54d2ed6dcfb78774",
+    "src/core/prompt.bend": "51daa5edc75e68b2e1c0769459348abc84b1dcb8f67e95fbb9027e308e6001f6",
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
     "src/core/ref-origin.bend": "933dae7741d19f4c68b3d34de827fe42f490deb222282e4e185640a0eb4677fa",
     "src/core/ref.bend": "fa2dd3c0a4e9865ac9b185680361c681ce187f625a315e560f3a289e651e90f7",
@@ -320,5 +320,5 @@
       "limits": "Guard-only; no whole-feature/auth/native/runtime acceptance. Earlier source/build receipts retained as historical."
     }
   },
-  "reviewNote": "Search: a subagent's step opens its own thread (hits.bend Hits.owner/jump; thin.bend hides a deleted thread's subagent log); sidebar drafts unaffected"
+  "reviewNote": "skills: SKILL.md frontmatter folds YAML block/wrapped values (Front.fold) and the delegation wording names inherited skills; no draft reader touched (sidebar_draft_image_test 24 ok)"
 }
