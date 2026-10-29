@@ -35,10 +35,13 @@ def UFront.go(ls: List<&2, String>, stop: Bool, f: UFront) -> UFront:
     case _ _:
       f
 
+def UFront.from(+t: List<&2, String>, +dflt: String) -> UFront:
+  UFront.go(t, Q.Front.stop(t), UFront{dflt, "", "", ""})
+
 def UFront.open(open: Bool, +t: List<&2, String>, +dflt: String) -> UFront:
   match open:
     case True{}:
-      UFront.go(t, Q.Front.stop(t), UFront{dflt, "", "", ""})
+      UFront.from(Q.Front.fold(t), dflt)
     case False{}:
       UFront{dflt, "", "", ""}
 

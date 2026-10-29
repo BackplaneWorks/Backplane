@@ -549,8 +549,21 @@ def Files.read(+root: String) -> IO(Files):
 # loads with --plugin-dir. The hub never fetches KiStack (it took the
 # repository's newest commit at each start, its own plugin manifest too, so
 # a hook or an .mcp.json there would have run in every Claude session).
+# The desktop app's own hub runs from <prefix>/desktop/runtime/resources/
+# backplane-service in a Linux install (scripts/install-release.sh), which
+# puts KiStack in <prefix>/kistack, beside the classic hub: that one is its.
+def KiStack.desktop() -> String:
+  "/desktop/runtime/resources/backplane-service"
+
+def KiStack.dir.k(desk: Bool, +exe: String) -> String:
+  match desk:
+    case True{}:
+      String.take(exe, Nat.sub(String.length(exe), String.length(KiStack.desktop()))) ++ "/kistack"
+    case False{}:
+      exe ++ "/kistack"
+
 def KiStack.dir(+exe: String) -> String:
-  exe ++ "/kistack"
+  KiStack.dir.k(String.ends_with(exe, KiStack.desktop()), exe)
 
 def KiCad.install.k(r: P.Ran) -> String:
   match r:

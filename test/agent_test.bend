@@ -2,6 +2,8 @@ import Base
 import ./check.bend as C
 import ../src/core/agent.bend as A
 import ../src/core/json.bend as J
+import ../src/core/prompt.bend as P
+import ../src/server/kicad.bend as K
 
 # Skills (SKILL.md frontmatter, scopes, the prompt block), `$skill`
 # mentions per provider, reasoning effort flags, and the one-shot answers.
@@ -21,6 +23,11 @@ def show(s: A.USkill) -> String:
     case A.USkill{n, d, p, m, u}:
       n ++ "|" ++ d ++ "|" ++ p ++ "|" ++ Bool.pick(String, m, "model", "-") ++ "|" ++ Bool.pick(String, u, "user", "-")
 
+def qshow(s: P.Skill) -> String:
+  match s:
+    case P.Skill{n, d, p}:
+      n ++ "|" ++ d ++ "|" ++ p
+
 def tx(t: A.Tx) -> String:
   match t:
     case A.Tx{p, m}:
@@ -39,6 +46,17 @@ def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("skill frontmatter", show(full), "pcb-review|Review a board|/p/SKILL.md|-|-")
     C.Check.str("skill defaults", show(bare), "dir||/p/SKILL.md|model|user")
+    # YAML's folded and literal blocks and wrapped values: the text, not ">"
+    C.Check.str("skill folded description", show(A.USkill.parse("---\nname: diagnose-crash\ndescription: >\n  Diagnose why a program crashed.\n  Use when a process dumped core.\nuser-invocable: false\n---\n  indented body", "dir", "/p")), "diagnose-crash|Diagnose why a program crashed. Use when a process dumped core.|/p|model|-")
+    C.Check.str("skill literal description", show(A.USkill.parse("---\ndescription: |-\n\tOne\n\ttwo\nname: lit\n---\n", "dir", "/p")), "lit|One two|/p|model|user")
+    C.Check.str("skill wrapped description", show(A.USkill.parse("---\nname: w\ndescription: \"Place parts\n  where they belong\"\n---\n", "dir", "/p")), "w|Place parts where they belong|/p|model|user")
+    C.Check.str("skill nested key not a field", show(A.USkill.parse("---\nname: n\nmetadata:\n  description: inner\n---\n", "dir", "/p")), "n||/p|model|user")
+    C.Check.str("skill one-line description", show(A.USkill.parse("---\nname: one\ndescription: Just this.\n---\n  body: x", "dir", "/p")), "one|Just this.|/p|model|user")
+    C.Check.str("kistack skill folded description", qshow(P.Skill.parse("---\nname: kicad-layout\ndescription: >-\n  Route a board.\n  Check DRC.\n---\nbody", "dir", "/k")), "kicad-layout|Route a board. Check DRC.|/k")
+    # KiStack beside the hub, or the install's for the desktop app's own hub
+    C.Check.str("kistack beside the hub", K.KiStack.dir("/home/u/.local/share/backplane"), "/home/u/.local/share/backplane/kistack")
+    C.Check.str("kistack for the desktop's hub", K.KiStack.dir("/home/u/.local/share/backplane/desktop/runtime/resources/backplane-service"), "/home/u/.local/share/backplane/kistack")
+    C.Check.str("kistack for another service folder", K.KiStack.dir("/opt/x/resources/backplane-service"), "/opt/x/resources/backplane-service/kistack")
     C.Check.str("user scope wins", String.join(names(all), ","), "a,b,c,hidden")
     C.Check.str("user b kept", yes(String.contains(A.USkill.prompt(all), "does b")), "yes")
     C.Check.str("prompt lists model skills", yes(String.contains(A.USkill.prompt(all), "- a: does a Read \"/s/a/SKILL.md\"")), "yes")
