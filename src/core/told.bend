@@ -556,9 +556,9 @@ def Told.alert(+s: M.State, +now: Nat, +thread: String, +state: String) -> List<
 # Examples the laws read
 # ----------------------
 
-# one record, marked at 1000: key "  Lunch: Kane!!  ", the text, channel digest
+# one record, marked at 1000: key "  Lunch: Dana!!  ", the text, channel digest
 def Told.demo.marked() -> M.State:
-  M.State.replay(Told.mark(M.State.empty(), 1000n, "  Lunch: Kane!!  ", "Kane lunch in ATL Wed 10/28", "digest", ""), M.State.empty())
+  M.State.replay(Told.mark(M.State.empty(), 1000n, "  Lunch: Dana!!  ", "Dana lunch in NYC Wed 10/28", "digest", ""), M.State.empty())
 
 def Told.demo.first(+s: M.State) -> Told:
   Maybe.default(&2, Told, List.head(&2, Told, Told.all(s)), Told{"", "", "", "", "", 0n})

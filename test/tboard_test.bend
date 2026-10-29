@@ -154,7 +154,7 @@ def after(+s: M.State, +thread: String, +tool: String, +args: String) -> M.State
   more(s, step.cs(mcp(s, thread, tool, args)))
 
 def sample() -> String:
-  "# Todo board (Bub, chief of staff)\nImported 2026-09-26 ...\n## Work / hardware\n- [ ] PoE in PVC pipe (existing Backplane thread / PoE_LoRa_Tube project)\n- [~] FioMet CAD / BiometCat (Mon 10am reminder)\n## Outbound (email / invoices / admin)\n- [x] Invoices: June–Aug re-sent to Scott 10/12\n- [ ] Kane Hsieh: lunch in ATL Wed 10/28 12–1 ET (due 2026-10-28)\n## Never nag (email)\n- rsync.net account de4835\n## Done recently\nAaron @ Atmospheric Intelligence: Kostas scheduled it"
+  "# Todo board (Bub, chief of staff)\nImported 2026-09-26 ...\n## Work / hardware\n- [ ] Sensor in a garden pipe (existing Backplane thread / Garden_Sensor project)\n- [~] Enclosure CAD / lid rework (Mon 10am reminder)\n## Outbound (email / invoices / admin)\n- [x] Invoices: June–Aug re-sent to Robin 10/12\n- [ ] Dana Lee: lunch in NYC Wed 10/28 12–1 ET (due 2026-10-28)\n## Never nag (email)\n- backup service account\n## Done recently\nPat @ Example Labs: call scheduled"
 
 def rep(+st: B.Step) -> String:
   match st:
@@ -201,11 +201,11 @@ def main() -> IO(Unit):
     # the real file's excerpt
     +real : M.State = imported(s, 2000n, sample())
     C.Check.str("sample: four items", n(TB.Tb.all(real)), "4")
-    C.Check.str("sample: todo", line(by.title(real, "PoE in PVC pipe (existing Backplane thread / PoE_LoRa_Tube project)")), "todo/Work / hardware///")
-    C.Check.str("sample: doing", line(by.title(real, "FioMet CAD / BiometCat (Mon 10am reminder)")), "doing/Work / hardware///")
-    C.Check.str("sample: done, non-ascii", line(by.title(real, "Invoices: June–Aug re-sent to Scott 10/12")), "done/Outbound (email / invoices / admin)///")
-    C.Check.str("sample: due taken out of the title", line(by.title(real, "Kane Hsieh: lunch in ATL Wed 10/28 12–1 ET")), "todo/Outbound (email / invoices / admin)/2026-10-28//")
-    C.Check.str("sample: skipped three", imp.skipped(TB.Tb.import(s, 2000n, "person", sample(), "", "")), "Imported 2026-09-26 ... / - rsync.net account de4835 / Aaron @ Atmospheric Intelligence: Kostas scheduled it")
+    C.Check.str("sample: todo", line(by.title(real, "Sensor in a garden pipe (existing Backplane thread / Garden_Sensor project)")), "todo/Work / hardware///")
+    C.Check.str("sample: doing", line(by.title(real, "Enclosure CAD / lid rework (Mon 10am reminder)")), "doing/Work / hardware///")
+    C.Check.str("sample: done, non-ascii", line(by.title(real, "Invoices: June–Aug re-sent to Robin 10/12")), "done/Outbound (email / invoices / admin)///")
+    C.Check.str("sample: due taken out of the title", line(by.title(real, "Dana Lee: lunch in NYC Wed 10/28 12–1 ET")), "todo/Outbound (email / invoices / admin)/2026-10-28//")
+    C.Check.str("sample: skipped three", imp.skipped(TB.Tb.import(s, 2000n, "person", sample(), "", "")), "Imported 2026-09-26 ... / - backup service account / Pat @ Example Labs: call scheduled")
     C.Check.str("sample: again adds nothing", Nat.show(imp.added(TB.Tb.import(real, 2200n, "person", sample(), "", ""))), "0")
     # checkbox kinds
     +kinds : M.State = imported(s, 2000n, "- [ ] a1\n* [x] a2\n+ [X] a3\n1. [~] a4\n12. [/] a5\n- [!] a6\n- [-] a7\n- [?] a8\n-[ ] a9\n- [ ]\n- [ ]x")
@@ -333,20 +333,20 @@ def main() -> IO(Unit):
     C.Check.str("tool import: no markdown", yes(failed(s, miso, "task_board_import", "{}")), "yes")
     C.Check.str("tool import: unknown project", has(text(s, miso, "task_board_import", "{\"markdown\":\"- [ ] a\",\"project\":\"Nope\"}"), "no project"), "yes")
     # ledger: told_mark and told_check
-    C.Check.str("mark: answer", J.Json.show(ans(s, miso, "told_mark", "{\"key\":\"Lunch Kane\",\"text\":\"Kane lunch Wed\",\"channel\":\"digest\"}")), "{\"key\":\"lunch-kane\"}")
-    C.Check.str("mark: key from text", J.Json.show(ans(s, miso, "told_mark", "{\"text\":\"Kane lunch in ATL Wed\"}")), "{\"key\":\"kane-lunch-atl-wed\"}")
+    C.Check.str("mark: answer", J.Json.show(ans(s, miso, "told_mark", "{\"key\":\"Lunch Dana\",\"text\":\"Dana lunch Wed\",\"channel\":\"digest\"}")), "{\"key\":\"lunch-dana\"}")
+    C.Check.str("mark: key from text", J.Json.show(ans(s, miso, "told_mark", "{\"text\":\"Dana lunch in NYC Wed\"}")), "{\"key\":\"dana-lunch-nyc-wed\"}")
     C.Check.str("mark: needs text", yes(failed(s, miso, "told_mark", "{\"key\":\"k\"}")), "yes")
     C.Check.str("mark: one change", Nat.show(List.length(&2, M.Change, step.cs(mcp(s, miso, "told_mark", "{\"text\":\"x y z\"}")))), "1")
-    +tm : M.State = after(s, miso, "told_mark", "{\"key\":\"lunch-kane\",\"text\":\"Kane lunch in ATL Wed 10/28\",\"channel\":\"digest\"}")
+    +tm : M.State = after(s, miso, "told_mark", "{\"key\":\"lunch-dana\",\"text\":\"Dana lunch in NYC Wed 10/28\",\"channel\":\"digest\"}")
     C.Check.str("mark: the bot", TD.Told.bot(Maybe.default(&2, TD.Told, List.head(&2, TD.Told, TD.Told.all(tm)), TD.Told{"", "", "", "", "", 0n})), id.of(s, "Miso"))
     C.Check.str("mark: from a plain thread no bot", TD.Told.bot(Maybe.default(&2, TD.Told, List.head(&2, TD.Told, TD.Told.all(after(s, "t-pb", "told_mark", "{\"text\":\"abc def\"}"))), TD.Told{"", "", "", "", "", 0n})), "")
-    C.Check.str("check: found by key", has(J.Json.show(ans(tm, tofu, "told_check", "{\"key\":\"lunch-kane\"}")), "{\"told\":true,\"matches\":[{\"key\":\"lunch-kane\",\"text\":\"Kane lunch in ATL Wed 10/28\",\"channel\":\"digest\",\"bot\":\"Miso\","), "yes")
-    C.Check.str("check: ago", has(J.Json.show(ans(tm, tofu, "told_check", "{\"key\":\"lunch-kane\"}")), "\"ago\":\"just now\""), "yes")
-    C.Check.str("check: found by text", has(J.Json.show(ans(tm, tofu, "told_check", "{\"text\":\"lunch with Kane in ATL on 10/28\"}")), "\"told\":true"), "yes")
+    C.Check.str("check: found by key", has(J.Json.show(ans(tm, tofu, "told_check", "{\"key\":\"lunch-dana\"}")), "{\"told\":true,\"matches\":[{\"key\":\"lunch-dana\",\"text\":\"Dana lunch in NYC Wed 10/28\",\"channel\":\"digest\",\"bot\":\"Miso\","), "yes")
+    C.Check.str("check: ago", has(J.Json.show(ans(tm, tofu, "told_check", "{\"key\":\"lunch-dana\"}")), "\"ago\":\"just now\""), "yes")
+    C.Check.str("check: found by text", has(J.Json.show(ans(tm, tofu, "told_check", "{\"text\":\"lunch with Dana in NYC on 10/28\"}")), "\"told\":true"), "yes")
     C.Check.str("check: nothing", J.Json.show(ans(tm, tofu, "told_check", "{\"key\":\"dentist\"}")), "{\"told\":false,\"matches\":[]}")
     C.Check.str("check: needs one", yes(failed(tm, tofu, "told_check", "{}")), "yes")
-    C.Check.str("check: days", has(J.Json.show(ans(tm, tofu, "told_check", "{\"key\":\"lunch-kane\",\"days\":1}")), "\"told\":true"), "yes")
-    C.Check.str("check: no changes", Nat.show(List.length(&2, M.Change, step.cs(mcp(tm, tofu, "told_check", "{\"key\":\"lunch-kane\"}")))), "0")
+    C.Check.str("check: days", has(J.Json.show(ans(tm, tofu, "told_check", "{\"key\":\"lunch-dana\",\"days\":1}")), "\"told\":true"), "yes")
+    C.Check.str("check: no changes", Nat.show(List.length(&2, M.Change, step.cs(mcp(tm, tofu, "told_check", "{\"key\":\"lunch-dana\"}")))), "0")
     # routing and definitions
     C.Check.str("is: a ledger call", yes(LG.Ledger.is(pj("{\"method\":\"tools/call\",\"params\":{\"name\":\"told_check\"}}"))), "yes")
     C.Check.str("is: another tool", yes(LG.Ledger.is(pj("{\"method\":\"tools/call\",\"params\":{\"name\":\"bot_send\"}}"))), "no")
