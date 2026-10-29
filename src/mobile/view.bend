@@ -197,15 +197,35 @@ def View.far.k(far: Bool, a: U.Act) -> U.Act:
     case False{} +x:
       x
 
+# (and to a Mech listing: the part it gives may be another, client.bend's
+# Mpage.to3d, and the viewer watches the one on show)
 def View.far(+o: J.Json, a: U.Act) -> U.Act:
-  View.far.k(Bool.or(U.Fm.has(J.Json.get_obj(o, "result"), "farView"), U.Rv.reply.has(o)), a)
+  View.far.k(Bool.or(Bool.or(U.Fm.has(J.Json.get_obj(o, "result"), "farView"), U.Rv.reply.has(o)), U.Mpage.has(o)), a)
+
+# a view whose Sheet menu lists the project's boards (View.board.list)
+def View.boards.on(+v: String) -> Bool:
+  Bool.or(Bool.or(String.eq(v, "board"), String.eq(v, "schematic")), String.eq(v, "3d"))
+
+# the viewer opened on one of those from anything else (shut, Files, Mech):
+# the boards are read again for its menu (client.bend's Bd.look), as the
+# web's picker does each time it opens; a native menu says nothing as it
+# opens, so the viewer's opening is the phones' moment
+def View.open.bd(look: Bool, a: U.Act) -> U.Act:
+  match look a:
+    case True{} U.Act{+u, cs}:
+      View.join(U.Bd.look(u), cs)
+    case False{} _:
+      a
 
 # open a viewer ("board", "schematic", "3d") or close it (""); what was
 # picked is let go
 # (in a project with several boards, another tab stays on the board picked:
 # client.bend's Bd.keep)
-def View.open.k(+u: U.Ui, +v: String) -> U.Act:
+def View.open.s(+u: U.Ui, +v: String) -> U.Act:
   View.sync(U.Act{U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@view.file:" ++ U.Ui.sel(u), U.Bd.keep(u, v, U.Bd.shown(u, View.file(u)))), View.slot(u), v), "@pick", ""), "@card", ""), "@pick.rid", ""), Nil{}})
+
+def View.open.k(+u: U.Ui, +v: String) -> U.Act:
+  View.open.bd(Bool.and(View.boards.on(v), Bool.not(View.boards.on(View.kind(u)))), View.open.s(u, v))
 
 # The Files tab (client.bend's Fm): its actions are the client's; the
 # phone's view follows them: the folder ("files"), or a file opened in the
@@ -264,16 +284,6 @@ def View.hist.act.r(shows: Bool, +u: U.Ui, +action: String, +value: String) -> U
 def View.hist.act(+u: U.Ui, +action: String, +value: String) -> U.Act:
   View.hist.act.r(View.rv.shows(action), u, action, value)
 
-# (the Mechanical page, "mech", is the client's: its view is set there,
-# and the parts asked for; a view picked by hand shows the project's own
-# board, not a part)
-def View.open.mech(mech: Bool, a: U.Act) -> U.Act:
-  match mech a:
-    case True{} U.Act{u, cs}:
-      View.join(U.Ui.act(u, "mech", ""), cs)
-    case False{} _:
-      a
-
 # (back from the Review tab to the board or schematic, the client's view
 # comes back too, with a comparison still open: client.bend's Rv.back)
 def View.open.back.k(a: U.Act, +v: String) -> U.Act:
@@ -288,8 +298,20 @@ def View.open.back(back: Bool, +u: U.Ui, +v: String) -> U.Act:
     case False{}:
       View.open.k(u, v)
 
+# (the Mechanical page, "mech", is the client's: its view is set there and
+# the parts asked for, client.bend's Mpage.open, before the phone's own
+# view follows it, which then has nothing more to ask: it asked first, and
+# Mech asked again, at every first opening; a view picked by hand shows
+# the project's own board, not a part)
+def View.open.go.k(mech: Bool, +u: U.Ui, +v: String) -> U.Act:
+  match mech:
+    case True{}:
+      View.open.back.k(U.Ui.act(u, "mech", ""), v)
+    case False{}:
+      View.open.back(Bool.and(String.eq(U.Ui.view_get(u, "view.kind"), "review"), Bool.or(String.eq(v, "board"), String.eq(v, "schematic"))), u, v)
+
 def View.open.go(+u: U.Ui, +v: String) -> U.Act:
-  View.open.mech(String.eq(v, "mech"), View.open.back(Bool.and(String.eq(U.Ui.view_get(u, "view.kind"), "review"), Bool.or(String.eq(v, "board"), String.eq(v, "schematic"))), u, v))
+  View.open.go.k(String.eq(v, "mech"), u, v)
 
 # (Files asks the hub for the folder last shown)
 def View.open.rv(rv: Bool, +u: U.Ui, +v: String) -> U.Act:
