@@ -570,7 +570,7 @@ function historyRow(node) {
   const attrs = [...each(node.attrs)];
   const classes = attrs.find(a => is(a, "At") && a.name === "class")?.value.split(/\s+/) || [];
   if (classes.includes("live") || classes.includes("sending")) return "";
-  return attrs.find(a => is(a, "At") && a.name === "data-id")?.value || "";
+  return attrs.find(a => is(a, "At") && ["data-id", "data-timeline-entry"].includes(a.name))?.value || "";
 }
 function anchorOf(tl) {
   const position = timelineList(tl)?.position();

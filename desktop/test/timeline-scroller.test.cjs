@@ -114,6 +114,30 @@ test('timeline DOM effects preserve nodes, measure, forward commands and detach'
   assert.deepEqual(commands, { missing: false, found: true, key: { mode: 'key', key: 'b', align: 'center', offset: 3 },
     bottom: 'bottom', restored: { anchor: 'a', offset: -16, top: 0, atEnd: false } });
 
+  const cache = await page.evaluate(() => {
+    const measured = scroller.sizes.b;
+    output = { ...output, visible: [output.items[0]] };
+    scroller.update([rows[0]]);
+    return { measured, retained: scroller.sizes.b };
+  });
+  assert.equal(cache.retained, cache.measured, 'absent page keys keep their measured size');
+
+  const stream = await page.evaluate(() => {
+    const live = { key: '@live:t', height: 150 };
+    const item = { key: live.key, index: 0, start: 0, size: 150, keepHeight: true };
+    output = { ...output, items: [item], visible: [item] };
+    scroller.update([live]);
+    const grown = scroller.sizes[live.key];
+    scroller.update([{ ...live, height: 80 }]);
+    const wrapper = scroller.mounted.get(live.key).wrapper;
+    const retained = scroller.sizes[live.key], height = wrapper.getBoundingClientRect().height;
+    const alignment = wrapper.style.justifyContent;
+    output = { ...output, items: [], visible: [] };
+    scroller.update([]);
+    return { grown, retained, height, alignment, cleared: scroller.sizes[live.key] === undefined };
+  });
+  assert.deepEqual(stream, { grown: 150, retained: 150, height: 150, alignment: 'flex-end', cleared: true }, 'live tail shrink retains space until the stream ends');
+
   const destroyed = await page.evaluate(async () => {
     scroller.destroy();
     const count = calls.length;

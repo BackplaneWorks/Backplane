@@ -54,7 +54,12 @@ export class TimelineScroller {
     this.rows = snapshot;
     this._keys = keys;
     this._byKey = byKey;
-    for (const key of Object.keys(this.sizes)) if (!byKey.has(key)) delete this.sizes[key];
+    // A temporarily absent page must not erase measured geometry for its keys.
+    // The cache belongs to this list lifetime and is released on destroy.
+    // A completed stream is the exception: its next turn reuses the live key.
+    for (const item of this.lastPlan?.items || []) {
+      if (item.keepHeight && !byKey.has(item.key)) delete this.sizes[item.key];
+    }
     if (changed || followChanged) this._request('update');
     return this;
   }
@@ -118,6 +123,15 @@ export class TimelineScroller {
         this.lastPlan = plan;
         this._initialized = true;
         this._render(plan);
+        // Mount and measure before applying the scroll command. An estimated
+        // track can be much shorter than the measured rows, especially during
+        // streaming. Feeding that temporary browser clamp into readback used
+        // to translate the entire track by hundreds of pixels.
+        if (this._readSizes()) {
+          this._pending = { mode: 'measure', top: plan.top };
+          continue;
+        }
+        if (this.el.scrollTop !== plan.top) this.el.scrollTop = plan.top;
         // Browser scroll readback can quantize a fractional command. Bend
         // decides the track correction; the adapter only returns the reading.
         // Resize measurements are collected once the command has settled.
@@ -125,7 +139,7 @@ export class TimelineScroller {
           const readbackAttempt = (request.readbackAttempt || 0) + 1;
           if (readbackAttempt > 4) throw new Error('Timeline scroll readback did not settle');
           this._pending = { mode: 'readback', readbackAttempt };
-        } else if (this._readSizes() && !this._pending) this._pending = { mode: 'measure' };
+        }
       }
       if (!this._destroyed) {
         this.lastMode = changeMode;
@@ -169,14 +183,17 @@ export class TimelineScroller {
       }
       row.wrapper.dataset.index = String(item.index);
       row.wrapper.dataset.virtualKey = item.key;
+      // Bend marks bounded live previews. Their tail window can shrink while
+      // the reply grows; retain measured space and keep the newest line at its
+      // foot instead of repeatedly shrinking/growing the entire scroll track.
+      row.wrapper.style.minHeight = item.keepHeight && this.sizes[item.key] !== undefined ? `${this.sizes[item.key]}px` : '';
+      row.wrapper.style.justifyContent = item.keepHeight ? 'flex-end' : '';
       row.wrapper.style.transform = `translateY(${item.start}px)`;
       const at = this.track.childNodes[i];
       if (at !== row.wrapper) this.track.insertBefore(row.wrapper, at ?? null);
     }
     this.track.style.height = `${plan.physicalTotal ?? plan.total}px`;
     this.track.style.transform = `translateY(${plan.trackOffset ?? 0}px)`;
-    // This is an effect of the plan, never a DOM-derived compensation.
-    if (this.el.scrollTop !== plan.top) this.el.scrollTop = plan.top;
   }
 
   atEnd() { return this.lastPlan?.atEnd ?? true; }
