@@ -3,6 +3,9 @@ import SwiftUI
 struct RootView: View {
     @Bindable var model: AppModel
     @State private var pairing = false
+    @State private var recoveryKey: String?
+    @State private var recoverySheet = false
+    @State private var recoverySheetKey: String?
     // the delete (or remove) just answered: its dialog stays down until the screen drops it
     @State private var answered = ""
     @State private var removed = ""
@@ -20,13 +23,66 @@ struct RootView: View {
             .overlay(alignment: .top) { BubMoveOverlay(move: model.contentReady ? model.screen?.bubMove : nil) }
             .environment(\.backplaneLanguage, model.screen?.locale ?? "en")
             .environment(\.locale, Locale(identifier: model.screen?.locale ?? "en"))
+            .onChange(of: authKey, initial: true) { _, key in
+                if let key, recoveryKey == nil, !hasUsableContent { recoveryKey = key }
+            }
+            .onChange(of: model.contentReady) { _, ready in
+                if ready { recoveryKey = nil; recoverySheet = false }
+            }
+            .onChange(of: model.links) { _, links in
+                let keys = links.compactMap(Pairing.key)
+                if let key = recoveryKey, !keys.contains(key) { recoveryKey = nil }
+                if let key = recoverySheetKey, !keys.contains(key) {
+                    recoverySheetKey = nil
+                    recoverySheet = false
+                }
+            }
+    }
+
+    private var authKey: String? {
+        guard !model.contentReady else { return nil }
+        let keys = model.links.compactMap(Pairing.key)
+        if let focused = model.screen?.hub, !focused.isEmpty {
+            return keys.contains(focused) && model.conn[focused]?.failure == .authentication ? focused : nil
+        }
+        return keys.first { model.conn[$0]?.failure == .authentication }
+    }
+
+    private var hasUsableContent: Bool {
+        guard let s = model.screen else { return false }
+        let shown = !s.projects.isEmpty || !(s.active ?? []).isEmpty || !(s.legacy ?? []).isEmpty ||
+                    !s.bots.isEmpty || !s.rooms.isEmpty || s.thread != nil || s.bot != nil || s.uber != nil
+        let otherOnline = model.links.compactMap(Pairing.key).contains { key in
+            key != authKey && (model.conn[key]?.phase == .online || model.conn[key]?.phase == .syncing)
+        }
+        return shown || otherOnline
     }
 
     @ViewBuilder private var content: some View {
         if model.links.isEmpty {
-            NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "") { model.pair($0) } }
+            NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "") { _ = model.pair($0) } }
+        } else if !hasUsableContent, let key = recoveryKey ?? authKey {
+            ConnectionStartupView(model: model, initialKey: key)
         } else if let s = model.screen {
             asked(s)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let key = authKey {
+                        Button {
+                            recoverySheetKey = key
+                            recoverySheet = true
+                        } label: {
+                            HStack {
+                                Text(NativeMessages.native_hub_failure(s.locale ?? "en", "authentication", ""))
+                                Spacer()
+                                Text(s.locale == "ja" ? "再試行" : "Retry")
+                            }.padding(12)
+                        }
+                        .accessibilityIdentifier("pair.connection.error")
+                    }
+                }
+                .sheet(isPresented: $recoverySheet) {
+                    ConnectionStartupView(model: model, initialKey: recoverySheetKey)
+                }
                 .sheet(isPresented: findShown) {
                     if let f = model.screen?.find { FindSheet(model: model, find: f) }
                 }
@@ -41,7 +97,7 @@ struct RootView: View {
                 }
                 .task(id: "\(model.screen?.tour != nil)|\(pairing)") { await tourWait() }
         } else {
-            ProgressView()
+            ConnectionStartupView(model: model, initialKey: authKey)
         }
     }
 
@@ -107,33 +163,162 @@ struct RootView: View {
     }
 }
 
+// First connection stays actionable while the hub is loading or retrying.
+private struct ConnectionStartupView: View {
+    let model: AppModel
+    var initialKey: String? = nil
+    @State private var addingAddress = false
+    @State private var chosenKey: String?
+    private var pairedKeys: [String] { model.links.compactMap(Pairing.key) }
+    private var failedKeys: [String] { pairedKeys.filter { model.conn[$0]?.failure == .authentication } }
+    private var key: String {
+        if let chosenKey, pairedKeys.contains(chosenKey) { return chosenKey }
+        if let initialKey, pairedKeys.contains(initialKey) { return initialKey }
+        return failedKeys.first ?? pairedKeys.first ?? ""
+    }
+    private var connection: HubConn { model.conn[key] ?? HubConn() }
+    private var tag: String { model.screen?.locale ?? "en" }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("BACKPLANE").font(.system(.caption, design: .monospaced).weight(.bold))
+                        .tracking(2).foregroundStyle(BackplaneDesign.accent)
+                    Text(HubDot.word(connection.phase, tag))
+                        .font(.title2.weight(.semibold))
+                    Text(key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                    if failedKeys.count > 1 {
+                        Menu(NativeMessages.native_settings_hubs(tag)) {
+                            ForEach(failedKeys, id: \.self) { failed in
+                                Button(failed) { chosenKey = failed }
+                                    .accessibilityIdentifier("pair.connection.hub." + failed)
+                            }
+                        }
+                        .accessibilityIdentifier("pair.connection.hubs")
+                    }
+                    if let failure = connection.failure {
+                        Text(NativeMessages.native_hub_failure(tag, failure.reason, failure.code))
+                            .foregroundStyle(PhaseColor.bad)
+                            .accessibilityIdentifier("pair.connection.error")
+                    } else if model.startup[key] == .compatibilityRequired {
+                        Text(tag == "ja" ? "このハブは更新が必要です。" : "This hub needs an update.")
+                            .foregroundStyle(PhaseColor.warn)
+                            .accessibilityIdentifier("pair.connection.updateRequired")
+                    } else {
+                        ProgressView().accessibilityIdentifier("pair.connection.progress")
+                    }
+                    Button(tag == "ja" ? "再試行" : "Retry") { model.retryConnection(key) }
+                        .buttonStyle(PairActionStyle())
+                        .accessibilityIdentifier("pair.connection.retry")
+                    Button(NativeMessages.native_pair_another(tag)) { addingAddress = true }
+                        .accessibilityIdentifier("pair.connection.change")
+                }
+                .frame(maxWidth: 520, alignment: .leading)
+                .padding(24)
+            }
+            .background(BackplaneDesign.background)
+            .sheet(isPresented: $addingAddress) {
+                NavigationStack {
+                    PairView(tag: tag, link: "") { address in
+                        chosenKey = Pairing.key(address)
+                        _ = model.pair(address)
+                        addingAddress = false
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(NativeMessages.common_cancel(tag)) { addingAddress = false }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PairActionStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .foregroundStyle(BackplaneDesign.onAccent)
+            .background(BackplaneDesign.accent.opacity(configuration.isPressed ? 0.7 : 1))
+            .contentShape(Rectangle())
+    }
+}
+
 struct PairView: View {
     let tag: String
     @State var link: String
     let done: (String) -> Void
     @State private var scanning = false
+    @State private var invalid = false
+
+    private func connect(_ text: String) {
+        guard Pairing.key(text) != nil else { invalid = true; return }
+        invalid = false
+        link = ""
+        done(text)
+    }
 
     var body: some View {
-        Form {
-            Section {
-                Button { scanning = true } label: { Label(NativeMessages.native_pair_scan(tag), systemImage: "qrcode.viewfinder") }
-            } footer: {
-                Text(NativeMessages.native_pair_computer(tag))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("BACKPLANE")
+                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                        .tracking(2).foregroundStyle(BackplaneDesign.accent)
+                    Text(NativeMessages.native_pair_title(tag)).font(.largeTitle.weight(.bold))
+                    Text(NativeMessages.native_pair_computer(tag)).foregroundStyle(.secondary)
+                }
+                Button { scanning = true } label: {
+                    Label(NativeMessages.native_pair_scan(tag), systemImage: "qrcode.viewfinder")
+                }
+                .buttonStyle(PairActionStyle())
+                .accessibilityIdentifier("pair.scan")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(tag == "ja" ? "コピーした接続リンクをペーストして接続します。" : "Paste a copied pairing link to connect.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    PasteButton(payloadType: String.self) { values in
+                        if let value = values.first { connect(value) } else { invalid = true }
+                    }
+                    .tint(BackplaneDesign.accent)
+                    .buttonBorderShape(.roundedRectangle(radius: 0))
+                    .accessibilityHint(tag == "ja" ? "ペーストしたリンクで接続します。" : "Connects using the pasted pairing link.")
+                    .accessibilityIdentifier("pair.paste")
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(NativeMessages.settings_pair(tag)).font(.headline)
+                    TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
+                        .privacySensitive()
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .submitLabel(.go)
+                        .onSubmit { connect(link) }
+                        .padding(14)
+                        .background(BackplaneDesign.panel)
+                        .overlay(Rectangle().stroke(invalid ? PhaseColor.bad : BackplaneDesign.line, lineWidth: 1))
+                        .accessibilityIdentifier("pair.address")
+                    Text(NativeMessages.native_pair_instructions(tag)).font(.footnote).foregroundStyle(.secondary)
+                    if invalid {
+                        Text(tag == "ja" ? "有効な接続アドレスを入力してください。" : "Enter a valid hub address or pairing link.")
+                            .font(.footnote).foregroundStyle(PhaseColor.bad)
+                            .accessibilityIdentifier("pair.address.error")
+                    }
+                }
+                Button(NativeMessages.native_pair_connect(tag)) { connect(link) }
+                    .buttonStyle(PairActionStyle())
+                    .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .opacity(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
+                    .accessibilityIdentifier("pair.connect")
             }
-            Section {
-                TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-            } header: {
-                Text(NativeMessages.settings_pair(tag))
-            } footer: {
-                Text(NativeMessages.native_pair_instructions(tag))
-            }
-            Button(NativeMessages.native_pair_connect(tag)) { done(link) }.disabled(link.trimmingCharacters(in: .whitespaces).isEmpty)
+            .frame(maxWidth: 520, alignment: .leading)
+            .padding(24)
         }
-        .navigationTitle(NativeMessages.native_pair_title(tag))
-        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { done($0) } }
+        .background(BackplaneDesign.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { connect($0) } }
     }
 }
 
@@ -145,6 +330,14 @@ struct HubsView: View {
     private var tag: String { screen.locale ?? "en" }
     @State private var link = ""
     @State private var scanning = false
+    @State private var invalid = false
+
+    private func add(_ text: String) {
+        guard Pairing.key(text) != nil else { invalid = true; return }
+        invalid = false
+        _ = model.pair(text)
+        link = ""
+    }
 
     var body: some View {
         Form {
@@ -179,11 +372,28 @@ struct HubsView: View {
                 }
             }
             Section {
+                Text(tag == "ja" ? "コピーした接続リンクをペーストして追加します。" : "Paste a copied pairing link to add a hub.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                PasteButton(payloadType: String.self) { values in
+                    if let value = values.first { add(value) } else { invalid = true }
+                }
+                .tint(BackplaneDesign.accent)
+                .buttonBorderShape(.roundedRectangle(radius: 0))
+                .accessibilityHint(tag == "ja" ? "ペーストしたリンクでハブを追加します。" : "Adds a hub using the pasted pairing link.")
+                .accessibilityIdentifier("hubs.paste")
                 TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
+                    .privacySensitive()
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                Button(NativeMessages.native_pair_add(tag)) { model.pair(link); link = "" }.disabled(link.trimmingCharacters(in: .whitespaces).isEmpty)
+                if invalid {
+                    Text(tag == "ja" ? "有効な接続アドレスを入力してください。" : "Enter a valid hub address or pairing link.")
+                        .foregroundStyle(PhaseColor.bad).font(.footnote)
+                        .accessibilityIdentifier("hubs.address.error")
+                }
+                Button(NativeMessages.native_pair_add(tag)) { add(link) }
+                    .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("hubs.add")
                 Button { scanning = true } label: { Label(NativeMessages.native_pair_scan(tag), systemImage: "qrcode.viewfinder") }
             } header: {
                 Text(NativeMessages.native_pair_another(tag))
@@ -192,7 +402,7 @@ struct HubsView: View {
             }
         }
         .navigationTitle(NativeMessages.native_settings_hubs(tag))
-        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { model.pair($0) } }
+        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { add($0) } }
     }
 
     // host:port · version · changes held · when it last said anything
@@ -254,8 +464,11 @@ struct HubsPill: View {
                 ForEach(hubs.prefix(4), id: \.key) { h in HubDot(phase: model.conn[h.key]?.phase ?? .connecting) }
                 if hubs.count > 4 { Text("+\(hubs.count - 4)") }
             }
-            .font(.system(size: 9))
+            .font(.system(size: 10))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .accessibilityIdentifier("navigation.hubs")
         .accessibilityLabel(hubs.map { NativeMessages.native_hub_accessibility(model.screen?.locale ?? "en", $0.name, HubDot.word(model.conn[$0.key]?.phase ?? .connecting, model.screen?.locale ?? "en")) }.joined(separator: ", "))
     }
 }
@@ -297,6 +510,7 @@ private struct SwipeButton: View {
 // gestures (not a NavigationLink) so a long press never also opens it.
 private struct ThreadRow: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.dynamicTypeSize) private var typeSize
     let model: AppModel
     let row: Row
     var hierarchy = true
@@ -324,24 +538,31 @@ private struct ThreadRow: View {
                 HStack(spacing: 10) {
                     StatusDot(state: row.state, status: row.status).frame(width: 18)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(row.title).lineLimit(1)
+                        Text(row.title).font(.body.weight(.medium))
+                            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
                         if let p = row.project, !p.isEmpty {
-                            Text(p).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(p).font(.caption).foregroundStyle(.secondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                        }
+                        if typeSize.isAccessibilitySize {
+                            Text(row.agents.flatMap { $0.isEmpty ? nil : $0 } ?? row.ago)
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(1)
-                    if row.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary) }
-                    if let n = row.agents, !n.isEmpty {
-                        Text(n).font(.caption).foregroundStyle(PhaseColor.accent).lineLimit(1)
-                            .frame(maxWidth: 80, alignment: .trailing)
-                    } else {
-                        Text(row.ago).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .frame(maxWidth: 72, alignment: .trailing)
+                    if row.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary).accessibilityLabel(lang == "ja" ? "ピン留め" : "Pinned") }
+                    if !typeSize.isAccessibilitySize {
+                        if let n = row.agents, !n.isEmpty {
+                            Text(n).font(.caption).foregroundStyle(PhaseColor.accent).lineLimit(1)
+                                .frame(maxWidth: 80, alignment: .trailing)
+                        } else {
+                            Text(row.ago).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .frame(maxWidth: 72, alignment: .trailing)
+                        }
                     }
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { model.open(nav: row.id, action: "select", value: row.id, title: row.title) }
                 .onLongPressGesture(minimumDuration: 0.4) {
@@ -350,7 +571,9 @@ private struct ThreadRow: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
+                .accessibilityAction { model.open(nav: row.id, action: "select", value: row.id, title: row.title) }
                 .accessibilityAction(named: NativeMessages.native_thread_menu(lang)) { model.act("row-menu", row.id) }
+                .accessibilityIdentifier("thread.row." + row.id)
             }
             if hierarchy && row.expanded == true && row.canChild == true {
                 Button { model.act("thread-child", row.id) } label: {
@@ -365,6 +588,8 @@ private struct ThreadRow: View {
             }
         }
         .padding(.leading, CGFloat(min(max(row.depth ?? 0, 0), 4) * 12))
+        .listRowBackground(BackplaneDesign.background)
+        .listRowSeparatorTint(BackplaneDesign.line)
         .opacity(row.faded == true ? 0.45 : 1)
         .swipeActions(edge: .leading) {
             ForEach(row.lead, id: \.self) { SwipeButton(model: model, swipe: $0, choose: choose) }
@@ -399,16 +624,48 @@ struct ProjectsView: View {
         }
     }
 
+    private func hasControls(_ page: NativeSidebarPager?) -> Bool {
+        page?.previous != nil || page?.next != nil
+    }
+
+    @ViewBuilder private func pageControls(_ page: NativeSidebarPager?, scope: String, context: String) -> some View {
+        if let page, hasControls(page) {
+            ForEach(["previous", "next"], id: \.self) { direction in
+                if let control = direction == "previous" ? page.previous : page.next {
+                    Button { model.act(control.action, control.value) } label: {
+                        HStack {
+                            Text(control.label)
+                            Spacer(minLength: 8)
+                            Text(context).font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .disabled(!model.contentReady)
+                    .accessibilityLabel(context + ", " + control.label)
+                    .accessibilityIdentifier("sidebar.page." + scope + "." + direction)
+                }
+            }
+        }
+    }
+
+    private func hubName(_ key: String) -> String {
+        screen.hubs.first(where: { $0.key == key })?.name ?? key
+    }
+
+    private var hasPageControls: Bool {
+        (screen.sidebarPages ?? []).contains { hasControls($0.projects) || hasControls($0.active) || hasControls($0.legacy) } ||
+        screen.projects.contains { hasControls($0.threadsPage) || hasControls($0.snoozedPage) || hasControls($0.settledPage) || hasControls($0.archivedPage) }
+    }
+
     var body: some View {
         List {
             // the search is always the list's first row (projects, or in the
             // active view threads by title or project)
             if let f = screen.search {
-                Section { SearchField(model: model, search: f, first: screen.projects.first?.id) }
+                Section { SearchField(model: model, search: f) }
             }
             if screen.view == "active" {
                 let rows = screen.active ?? []
-                if rows.isEmpty && screen.settled == nil {
+                if rows.isEmpty && screen.settled == nil && !(screen.sidebarPages ?? []).contains(where: { hasControls($0.active) }) {
                     if !screen.projects.isEmpty && (screen.search?.query ?? "").isEmpty {
                         ContentUnavailableView(NativeMessages.sidebar_nothing(lang), systemImage: "tray")
                             .listRowBackground(Color.clear)
@@ -430,28 +687,47 @@ struct ProjectsView: View {
                 ForEach(screen.projects) { p in projectSection(p) }
                 if let o = screen.older { foldRow(false, o, "side-older") }
             }
+            ForEach(screen.sidebarPages ?? [], id: \.hub) { hub in
+                if screen.view == "active", hasControls(hub.active) {
+                    Section { pageControls(hub.active, scope: hub.hub + ".active", context: hubName(hub.hub)) }
+                } else if screen.view != "active", hasControls(hub.projects) {
+                    Section { pageControls(hub.projects, scope: hub.hub + ".projects", context: hubName(hub.hub)) }
+                }
+            }
             if let legacy = screen.legacy, !legacy.isEmpty {
                 Section("Conversation history") {
                     ForEach(legacy) { ThreadRow(model: model, row: $0, hierarchy: false) { choosing = $0 } }
                 }
             }
+            ForEach(screen.sidebarPages ?? [], id: \.hub) { hub in
+                if hasControls(hub.legacy) {
+                    Section { pageControls(hub.legacy, scope: hub.hub + ".legacy", context: hubName(hub.hub)) }
+                }
+            }
         }
+        .modifier(BackplaneListSurface())
         .overlay {
-            if screen.projects.isEmpty && (screen.legacy ?? []).isEmpty && (screen.active ?? []).isEmpty {
+            if screen.projects.isEmpty && (screen.legacy ?? []).isEmpty && (screen.active ?? []).isEmpty && !hasPageControls {
                 // a hub still catching up has not said what there is yet
                 if let h = screen.hubs.first(where: { (model.conn[$0.key]?.phase ?? .connecting) != .online }), !screen.online {
                     VStack(spacing: 12) {
-                        ProgressView()
+                        if model.conn[h.key]?.failure == nil {
+                            ProgressView().accessibilityLabel(HubDot.word(model.conn[h.key]?.phase ?? .connecting, lang))
+                        }
                         Text(model.conn[h.key]?.failure.map { NativeMessages.native_hub_failure(lang, $0.reason, $0.code) }
                              ?? NativeMessages.native_hub_connection(lang, HubDot.word(model.conn[h.key]?.phase ?? .connecting, lang), h.name))
                             .foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
+                    .padding()
+                    .accessibilityIdentifier("projects.connection.status")
                 } else {
                     ContentUnavailableView(screen.empty, systemImage: "folder")
                 }
             }
         }
         .navigationTitle(NativeMessages.tour_title_threads(lang))
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("navigation.threads")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 HubsPill(model: model, hubs: screen.hubs) { pairing = true }
@@ -466,8 +742,7 @@ struct ProjectsView: View {
                 } else {
                     Button { model.act("picker-open") } label: { Image(systemName: "folder.badge.plus") }.accessibilityLabel(NativeMessages.sidebar_add_project(lang))
                 }
-                Button { pairing = true } label: { Image(systemName: "link") }.accessibilityLabel(NativeMessages.native_settings_hubs(lang))
-                Button { model.switchTab(.settings) } label: { Image(systemName: "gear") }
+                Button { model.chooseTab(.settings) } label: { Image(systemName: "gearshape") }
                     .accessibilityLabel(NativeMessages.palette_settings(lang))
                 Menu {
                     Button(NativeMessages.palette_search(lang), systemImage: "magnifyingglass") { model.act("find-open", "search") }
@@ -521,13 +796,16 @@ struct ProjectsView: View {
     // one; its header (faded when quiet) takes a long press for its menu
     @ViewBuilder
     private func projectSection(_ p: Project) -> some View {
+        let context = p.id.firstIndex(of: "|").map { hubName(String(p.id[..<$0])) + ", " + p.title } ?? p.title
         Section {
             ForEach(p.threads) { ThreadRow(model: model, row: $0) { choosing = $0 } }
-            if !p.snoozed.isEmpty {
+            pageControls(p.threadsPage, scope: p.id + ".threads", context: context)
+            if !p.snoozed.isEmpty || hasControls(p.snoozedPage) {
                 Text(p.snoozedShelf).font(.subheadline).foregroundStyle(.secondary)
                 ForEach(p.snoozed) { ThreadRow(model: model, row: $0) { choosing = $0 } }
+                pageControls(p.snoozedPage, scope: p.id + ".snoozed", context: context + ", " + p.snoozedShelf)
             }
-            if !p.settled.isEmpty {
+            if (p.settledCount?.value ?? p.settled.count) > 0 {
                 Button { model.act("toggle-settled", p.id) } label: {
                     HStack {
                         Text(p.shelf).font(.subheadline)
@@ -536,37 +814,52 @@ struct ProjectsView: View {
                     }
                 }
                 .tint(.secondary)
-                if p.open { ForEach(p.settled) { ThreadRow(model: model, row: $0) { choosing = $0 } } }
+                .accessibilityIdentifier("project.shelf.settled." + p.id)
+                if p.open {
+                    ForEach(p.settled) { ThreadRow(model: model, row: $0) { choosing = $0 } }
+                    pageControls(p.settledPage, scope: p.id + ".settled", context: context + ", " + p.shelf)
+                }
             }
-            if let arch = p.archived, !arch.isEmpty, let v = p.value {
+            if (p.archivedCount?.value ?? p.archived?.count ?? 0) > 0, let v = p.value {
                 Button { model.act("toggle-settled", v) } label: {
                     HStack {
-                        Text(NativeMessages.native_thread_archived(lang, String(arch.count))).font(.subheadline)
+                        Text(NativeMessages.native_thread_archived(lang, String(p.archivedCount?.value ?? p.archived?.count ?? 0))).font(.subheadline)
                         Spacer()
                         Image(systemName: p.archOpen == true ? "chevron.down" : "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
                 }
                 .tint(.secondary)
-                if p.archOpen == true { ForEach(arch) { ThreadRow(model: model, row: $0) { choosing = $0 } } }
+                .accessibilityIdentifier("project.shelf.archived." + p.id)
+                if p.archOpen == true {
+                    ForEach(p.archived ?? []) { ThreadRow(model: model, row: $0) { choosing = $0 } }
+                    pageControls(p.archivedPage, scope: p.id + ".archived", context: context)
+                }
             }
         } header: {
             HStack {
                 VStack(alignment: .leading) {
-                    Text(p.title)
+                    Text(p.title).font(.subheadline.weight(.semibold)).textCase(nil)
                     Text(p.machine.isEmpty ? p.root : p.machine + ": " + p.root)
                         .font(.caption2).textCase(nil).lineLimit(1).truncationMode(.head)
                 }
                 .opacity(p.quiet == true ? 0.5 : 1)
+                .accessibilityIdentifier("project.row." + p.id)
                 Spacer()
                 Button { model.act("new-thread", p.id) } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel(NativeMessages.thread_new(lang))
+                    .accessibilityIdentifier("project.new-thread." + p.id)
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(BackplaneDesign.panel)
+            .overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }
             .contentShape(Rectangle())
             .onLongPressGesture(minimumDuration: 0.4) {
                 Haptics.impact()
                 model.act("proj-menu", p.id)
             }
             .accessibilityAction(named: NativeMessages.native_thread_menu(lang)) { model.act("proj-menu", p.id) }
+            .accessibilityIdentifier("project.header." + p.id)
         }
     }
 }
@@ -578,33 +871,51 @@ private struct SearchField: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let search: Search
-    let first: String?
     @State private var text = ""
-    // what was typed here: a screen still echoing it never overwrites the field
-    @State private var typed: Set<String> = []
+    @State private var scope: UInt64?
+    @State private var edited = false
+
+    private func edit(_ value: String) {
+        text = value
+        edited = true
+        if let scope { self.scope = model.searchProjects(value, scope: scope) ?? scope }
+    }
 
     var body: some View {
         HStack {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(search.hint, text: $text)
+            TextField(search.hint, text: Binding(get: { text }, set: { edit($0) }), prompt: Text(search.hint).foregroundColor(BackplaneDesign.secondaryText))
+                .foregroundColor(.primary)
+                .accessibilityIdentifier("projects.search")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.go)
-                .onChange(of: text) { _, t in
-                    guard t != search.query else { return }
-                    typed.insert(t)
-                    model.act("proj-find-q", t)
-                }
-                .onSubmit { if let f = first { model.act("proj-go", f) } }
+                .onSubmit { if let scope { model.submitProjectSearch(text, scope: scope) } }
             if !text.isEmpty {
-                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                Button { edit("") } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
                     .accessibilityLabel(NativeMessages.native_thread_search_clear(lang))
             }
         }
-        .onAppear { text = search.query }
+        .onAppear {
+            let query = model.beginProjectSearch(search.query)
+            scope = query.scope
+            text = query.text
+            edited = edited || query.edit > 0 || text != search.query
+        }
+        .onDisappear { if let scope { model.endProjectSearch(scope: scope) }; scope = nil }
+        .onChange(of: model.contentReady) { _, ready in
+            if ready, text != search.query, let scope {
+                self.scope = model.resumeProjectSearch(text, scope: scope) ?? scope
+            }
+        }
+        .onChange(of: model.projectSearchRevision) { _, _ in
+            if model.contentReady, let scope {
+                self.scope = model.resumeProjectSearch(text, scope: scope) ?? scope
+            }
+        }
         .onChange(of: search.query) { _, q in
-            if !typed.contains(q) { typed = []; text = q }
+            if !edited { text = q }
         }
     }
 }
@@ -676,37 +987,150 @@ struct ThreadDestination: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let id: String
+    @State private var attempt = 0
+    @State private var timedOut = false
+
+    private struct WatchKey: Equatable {
+        let id: String
+        let attempt: Int
+        let active: Bool
+        let ready: Bool
+        let links: [String]
+    }
 
     private var selected: Bool { model.screen.map { AppModel.nav($0) == id } ?? false }
+    private var active: Bool { model.path.last == id }
+    private var ready: Bool {
+        selected && model.contentReady && (model.screen?.bot != nil || model.screen?.thread != nil)
+    }
+    private var watchKey: WatchKey {
+        WatchKey(id: id, attempt: attempt, active: active, ready: ready, links: model.links)
+    }
+    private var hub: String? {
+        model.links.compactMap(Pairing.key).first { id.hasPrefix($0 + "|") }
+            ?? (model.screen?.hub.isEmpty == false ? model.screen?.hub : nil)
+    }
+    private var failureMessage: String {
+        if let hub, let failure = model.conn[hub]?.failure {
+            return NativeMessages.native_hub_failure(lang, failure.reason, failure.code)
+        }
+        if id == AppModel.making {
+            return lang == "ja" ? "スレッドの作成に時間がかかっています。" : "Creating this thread timed out."
+        }
+        return lang == "ja" ? "会話を開くのに時間がかかっています。" : "Opening this conversation timed out."
+    }
+
+    private var composerThread: ThreadView? {
+        let bot = (selected ? model.screen?.bot : nil) ?? model.seenBots[id]
+        if let bot, bot.kind != "bot" || (bot.tab ?? "chat") != "chat" { return nil }
+        let thread = (selected ? model.screen?.thread : nil) ?? model.seen[id]
+        guard let thread, thread.id == id else { return nil }
+        return thread
+    }
 
     var body: some View {
-        if selected, let b = model.screen?.bot {
-            BotDestination(model: model, bot: b)
-        } else if !selected, let b = model.seenBots[id] {
-            BotDestination(model: model, bot: b, live: false, cachedThread: model.seen[id], cachedPlane: model.seenPlanes[id]).allowsHitTesting(false)
-        } else if let t = selected ? model.screen?.thread : model.seen[id] {
-            ThreadScreen(model: model, thread: t, live: selected).id(id).allowsHitTesting(selected)
-        } else {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 12) {
-                    if let d = model.destination, d.nav == id, !d.cat.isEmpty {
-                        BotCat(model: model, key: d.cat, size: 48)
+        VStack(spacing: 0) {
+        Group {
+            if let b = (selected ? model.screen?.bot : nil) ?? model.seenBots[id] {
+                let cachedThread = selected ? model.screen?.thread : model.seen[id]
+                let readableChat = b.kind == "bot" && (b.tab ?? "chat") == "chat" && cachedThread?.id == id
+                BotDestination(model: model, bot: b, live: ready,
+                               cachedThread: cachedThread,
+                               cachedPlane: selected ? model.screen.flatMap { model.plane($0) } : model.seenPlanes[id])
+                    .allowsHitTesting(ready || readableChat)
+                    .disabled(!(ready || readableChat))
+                    .overlay(alignment: .top) { if !ready { loadingStatus } }
+            } else if let t = (selected ? model.screen?.thread : nil) ?? model.seen[id] {
+                ThreadScreen(model: model, thread: t, live: ready).id(id)
+                    .overlay(alignment: .top) { if !ready { loadingStatus } }
+            } else {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 12) {
+                        if let d = model.destination, d.nav == id, !d.cat.isEmpty {
+                            BotCat(model: model, key: d.cat, size: 48)
+                        }
+                        Text(title).font(.headline)
                     }
-                    Text(title).font(.headline)
+                    loadingStatus
+                    if !timedOut {
+                        ForEach(0..<6) { _ in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(NativeMessages.native_thread_content(lang)).font(.headline)
+                                Text(NativeMessages.native_thread_content_note(lang))
+                            }.redacted(reason: .placeholder).accessibilityHidden(true)
+                        }
+                    }
+                    Spacer()
                 }
-                ForEach(0..<6) { _ in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(NativeMessages.native_thread_content(lang)).font(.headline)
-                        Text(NativeMessages.native_thread_content_note(lang))
-                    }.redacted(reason: .placeholder)
-                }
-                Spacer()
+                .padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
             }
-            .padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .allowsHitTesting(false)
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
         }
+        if let thread = composerThread {
+            ThreadComposer(model: model, thread: thread)
+        }
+        }
+        .modifier(ViewerPresentationHost(model: model, thread: id))
+        .task(id: watchKey) {
+            let started = watchKey
+            model.traceNavigation(.destinationStart, target: id, active: active, destinationReady: ready, known: hasKnownContent)
+            timedOut = false
+            guard started.active, !started.ready else { return }
+            do { try await Task.sleep(for: .seconds(20)) } catch {
+                model.traceNavigation(.destinationCancelled, target: id, active: active, destinationReady: ready, known: hasKnownContent)
+                return
+            }
+            guard !Task.isCancelled, watchKey == started, active, !ready else { return }
+            model.traceNavigation(.destinationTimeout, target: id, active: active, destinationReady: ready, known: hasKnownContent)
+            timedOut = true
+        }
+    }
+
+    private var loadingLabel: String {
+        if id == AppModel.making { return lang == "ja" ? "スレッドを作成中…" : "Creating thread…" }
+        if hasKnownContent {
+            if offline { return lang == "ja" ? "オフライン・前回の会話を表示中" : "Offline · showing previous conversation" }
+            return lang == "ja" ? "会話を更新しています…" : "Updating conversation…"
+        }
+        return lang == "ja" ? "会話を開いています…" : "Opening conversation…"
+    }
+
+    private var hasKnownContent: Bool {
+        if selected, let screen = model.screen, screen.thread?.id == id || screen.bot != nil { return true }
+        return model.seen[id] != nil || model.seenBots[id] != nil
+    }
+
+    private var offline: Bool {
+        let owner = model.links.compactMap(Pairing.key).first { id.hasPrefix($0 + "|") }
+            ?? (selected ? model.screen?.hub : nil)
+        return owner.flatMap { model.conn[$0] }?.phase == .offline
+    }
+
+    private var loadingStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if hasKnownContent && offline {
+                Label(loadingLabel, systemImage: "wifi.slash").accessibilityIdentifier("thread.loading.offline")
+            }
+            if timedOut {
+                Text(failureMessage).accessibilityIdentifier("thread.loading.error")
+                if id != AppModel.making {
+                    Button(lang == "ja" ? "再試行" : "Retry") {
+                        guard active, !ready, let hub, model.links.contains(where: { Pairing.key($0) == hub }) else { return }
+                        timedOut = false
+                        attempt += 1
+                        model.act("select", id)
+                    }
+                    .accessibilityIdentifier("thread.loading.retry")
+                }
+            } else if !(hasKnownContent && offline) {
+                ProgressView(loadingLabel).accessibilityIdentifier("thread.loading")
+            }
+        }
+        .font(.caption)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BackplaneDesign.panel)
     }
 
     // the row's title in the list, while nothing of the thread is known
@@ -744,12 +1168,12 @@ private struct SendingBubble: View {
 
 struct ThreadScreen: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var model: AppModel
     let thread: ThreadView
-    // the client has this thread selected (else it shows as last seen,
-    // for the moment the select takes, and takes no input)
+    // A last-seen thread remains scrollable while selection or reconnect is
+    // pending. Entry actions and hub controls require the fresh selection.
     var live = true
-    @FocusState private var focused: Bool
     // the image open in the lightbox
     @State private var shown: Shown?
     @State private var position = TimelinePosition()
@@ -759,12 +1183,16 @@ struct ThreadScreen: View {
     @State private var shutFile: RowMenu?
     // the subagents sheet (the top bar's button) is up
     @State private var showSubs = false
-    @State private var showPermissions = false
 
     var body: some View {
+      let displayRevision = model.performanceRevision
+      VStack(spacing: 0) {
         TimelineScroll(position: position, ids: thread.entries.map(\.id), earlier: thread.earlier ?? 0,
                        loadEarlier: { live && model.loadEarlier(thread.id) },
-                       earlierEnabled: live && model.contentReady && model.screen?.thread?.id == thread.id) {
+                       earlierEnabled: live && model.contentReady && model.screen?.thread?.id == thread.id,
+                       onDisplay: PerformanceTrace.shared.begin() == nil ? nil : {
+                           model.performanceDisplayed(thread: thread.id, fresh: live, revision: displayRevision)
+                       }) {
                 VStack(alignment: .leading, spacing: 14) {
                     if let p = thread.parent { EntryRow(model: model, entry: p) { shown = $0 } }
                     ForEach(thread.entries) { e in
@@ -789,7 +1217,7 @@ struct ThreadScreen: View {
                     // not answered yet, by place: one handed over keeps its place
                     ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
                         SendingBubble(text: text, note: sendNote)
-                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                            .transition(reduceMotion ? .identity : .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                     }
                     if !thread.live.isEmpty {
                         MarkdownView(blocks: thread.live)
@@ -804,7 +1232,12 @@ struct ThreadScreen: View {
                 }
                 .padding()
                 .environment(\.backplaneLanguage, lang)
+                // Gate the hosted controls, leaving the enclosing UIKit
+                // scroll view available for reading the matching cached thread.
+                .disabled(!live)
+                .allowsHitTesting(live)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
             if !position.following {
                 Button { position.latest?() } label: {
@@ -829,197 +1262,16 @@ struct ThreadScreen: View {
             lit = j.id
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(400))
-                withAnimation(.easeOut(duration: 2)) { if lit == j.id { lit = nil } }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 2)) { if lit == j.id { lit = nil } }
             }
         }
-        .safeAreaInset(edge: .bottom) {
-          VStack(spacing: 0) {
-            // the terminals pinned to the top of the thread
-            ForEach((thread.embs ?? []).filter { $0.pinned }, id: \.key) { e in
-                EmbView(model: model, emb: e, top: true).padding(.horizontal).padding(.top, 8)
-            }
-            ForEach(thread.asks ?? []) { a in
-                AskCard(model: model, ask: a).padding(.horizontal).padding(.top, 8)
-            }
-            if let td = thread.todos {
-                VStack(alignment: .leading, spacing: 2) {
-                    // the head opens and shuts the card
-                    Button { if let t = td.toggle, !t.isEmpty { model.act("fold", t) } } label: {
-                        HStack {
-                            Text(td.head).bold()
-                            Spacer(minLength: 0)
-                            Image(systemName: (td.open ?? true) ? "chevron.down" : "chevron.right").foregroundStyle(.secondary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    // every step scrolls within a third of the screen
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(td.lines.enumerated()), id: \.offset) { _, l in
-                                Text(l.text).lineLimit(1).foregroundStyle(l.status == "completed" ? .secondary : .primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 220)
-                    .fixedSize(horizontal: false, vertical: true)
-                    if let more = td.more, !more.isEmpty {
-                        Button(more) { model.act("fold", td.moreValue ?? "") }.buttonStyle(.borderless)
-                    }
-                }
-                .font(.caption)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal).padding(.top, 8)
-            }
-            ForEach(thread.queue ?? [], id: \.msg) { q in
-                HStack(spacing: 6) {
-                    Text(q.tag).bold()
-                    Text(q.text).lineLimit(1)
-                    Spacer(minLength: 0)
-                    ForEach(q.buttons, id: \.label) { b in
-                        Button(b.label) { model.act(b.action, b.value) }.buttonStyle(.borderless)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal).padding(.top, 8)
-            }
-            HStack {
-                Menu {
-                    Section(NativeMessages.native_thread_model(lang)) {
-                        ForEach(thread.picker.models, id: \.value) { c in
-                            Button { model.act("model", c.value) } label: {
-                                if c.on { Label(c.label, systemImage: "checkmark") } else { Text(c.label) }
-                            }
-                        }
-                    }
-                    if !thread.picker.efforts.isEmpty {
-                        Section(NativeMessages.native_thread_effort(lang)) {
-                            ForEach(thread.picker.efforts, id: \.value) { c in
-                                Button { model.act("effort", c.value) } label: {
-                                    if c.on { Label(c.label, systemImage: "checkmark") } else { Text(c.label) }
-                                }
-                            }
-                        }
-                    }
-                    if let ps = thread.picker.providers, !ps.isEmpty {
-                        Section(NativeMessages.native_bot_provider(lang)) {
-                            ForEach(ps, id: \.value) { c in
-                                Button { model.act("effort", c.value) } label: {
-                                    if c.on { Label(c.label, systemImage: "checkmark") } else { Text(c.label) }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(thread.picker.label).lineLimit(1)
-                        Image(systemName: "chevron.down")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel(NativeMessages.native_thread_model_effort(lang, thread.picker.label))
-                if let permissions = thread.permissions {
-                  HStack(spacing: 0) {
-                    Button {
-                        showPermissions = true
-                    } label: {
-                        Image(systemName: "lock.shield")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel(permissions.current)
-                    .accessibilityIdentifier("thread.permissions")
-                    .disabled(!live || !model.contentReady || model.conn[model.screen?.hub ?? ""]?.phase == .offline || model.conn[model.screen?.hub ?? ""]?.phase == .connecting)
-                  }
-                    .popover(isPresented: $showPermissions, arrowEdge: .bottom) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(permissions.choices, id: \.value) { choice in
-                                Button {
-                                    showPermissions = false
-                                    model.act("thread-permissions", choice.value)
-                                } label: {
-                                    HStack {
-                                        Text(choice.label)
-                                        Spacer()
-                                        if choice.on { Image(systemName: "checkmark") }
-                                    }
-                                    .padding(.horizontal, 16).padding(.vertical, 12)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("thread.permission.choice." + choice.value)
-                                .disabled(!live)
-                            }
-                        }
-                        .frame(width: 260)
-                        .presentationCompactAdaptation(.popover)
-                    }
-                }
-                // the link is down, or coming back after it was up (a reconnect,
-                // not the first connect): say so, not "loading"
-                if let status = model.conn[model.screen?.hub ?? ""], status.phase == .offline {
-                    HStack(spacing: 4) {
-                        HubDot(phase: .offline)
-                        Text(status.failure.map { NativeMessages.native_hub_failure(lang, $0.reason, $0.code) }
-                             ?? HubDot.word(.offline, lang)).lineLimit(2)
-                    }
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("thread.reconnecting")
-                } else if let status = model.conn[model.screen?.hub ?? ""], status.phase == .syncing || status.phase == .connecting {
-                    HStack(spacing: 4) {
-                        ProgressView().controlSize(.mini)
-                        Text(status.stage == "recent" || status.phase == .connecting ? NativeMessages.native_thread_loading_recent(lang) : NativeMessages.native_thread_loading_older(lang))
-                            .lineLimit(1)
-                    }
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("thread.loading")
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal).padding(.top, 8)
-            ComposerExtras(model: model, thread: thread)
-            if model.sendFailure == thread.id {
-                Text(NativeMessages.native_thread_send_failed(lang))
-                    .font(.caption).foregroundStyle(.red).padding(.horizontal)
-                    .accessibilityIdentifier("thread.send-failed")
-            }
-            HStack(alignment: .bottom, spacing: 8) {
-                AttachButton(model: model).disabled(!model.contentReady)
-                TextField(NativeMessages.native_thread_composer(lang), text: Binding(get: { model.composer }, set: { model.draft($0) }), axis: .vertical)
-                    .lineLimit(1...6)
-                    .focused($focused)
-                    .accessibilityIdentifier("thread.composer")
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 18))
-                // a long press sends with the other follow-up mode (queue or steer);
-                // while a turn runs with nothing typed the button stops it
-                let blank = model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                let stop = thread.sendAct == "interrupt" && blank
-                Image(systemName: stop ? "stop.circle.fill" : "arrow.up.circle.fill").font(.system(size: 32))
-                    .foregroundStyle(stop ? Color.red : blank ? Color.secondary : Color.accentColor)
-                    .onTapGesture {
-                        if stop { model.act("interrupt") } else if !blank { model.send() }
-                    }
-                    .onLongPressGesture {
-                        if !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { model.send("send-alt") }
-                    }
-                    .accessibilityLabel(thread.send)
-                    .accessibilityIdentifier("thread.send")
-                    .accessibilityAddTraits(.isButton)
-            }
-            .padding(.horizontal).padding(.vertical, 8)
-          }
-          .disabled(!live)
-          .background(.bar)
-        }
+      }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
         // a file link tapped in a message asks for its menu (Open and Show
         // in folder act on the hub's machine, Copy path here)
         .environment(\.openURL, OpenURLAction { url in
+            guard live else { return .discarded }
             if model.open(url, sourceHub: model.screen?.hub) { return .handled }
             guard let p = FileLink.path(url) else { return .systemAction }
             model.act("file-menu", p)
@@ -1027,26 +1279,24 @@ struct ThreadScreen: View {
         })
         .confirmationDialog(fileMenu?.title ?? "", isPresented: fileUp, titleVisibility: .visible, presenting: fileMenu) { m in
             ForEach(m.items, id: \.self) { i in
-                Button(i.label) { shutFile = m; model.act(i.action, i.value) }
+                Button(i.label) { shutFile = m; model.act(i.action, i.value) }.disabled(!live)
             }
             Button(NativeMessages.common_cancel(lang), role: .cancel) {}
         }
         .onChange(of: fileMenu) { _, m in if m == nil { shutFile = nil } }
-        .fullScreenCover(isPresented: Binding(get: { !thread.viewer.open.isEmpty }, set: { if !$0 { model.act("view", "") } })) {
-            if let v = model.screen?.thread?.viewer {
-                if v.open == "files", let f = v.files { FilesScreen(model: model, viewer: v, page: f) }
-                else if v.open == "image" || v.open == "pdf", let f = v.file { FileScreen(model: model, viewer: v, file: f) }
-                else if v.open == "review", let r = v.review { ReviewScreen(model: model, viewer: v, page: r) }
-                else if v.open == "renders", let p = v.mech { MechScreen(model: model, viewer: v, page: p) } else { PlotScreen(model: model, viewer: v) }
-            }
-        }
         .fullScreenCover(item: $shown) { s in Lightbox(shown: s) { shown = nil } }
-        .sheet(isPresented: $showSubs) { SubsSheet(model: model) }
-        .sheet(isPresented: Binding(get: { thread.diff != nil }, set: { if !$0, model.screen?.thread?.diff != nil { model.act("panel") } })) {
-            if let d = model.screen?.thread?.diff { DiffSheet(model: model, diff: d) }
+        .sheet(isPresented: $showSubs) { SubsSheet(model: model).disabled(!live) }
+        .sheet(isPresented: Binding(get: { thread.diff != nil }, set: {
+            if !$0, live, model.contentReady, model.screen?.thread?.id == thread.id,
+               model.screen?.thread?.diff != nil { model.act("panel") }
+        })) {
+            if let d = thread.diff { DiffSheet(model: model, diff: d).disabled(!live) }
         }
-        .sheet(isPresented: Binding(get: { thread.term != nil }, set: { if !$0, model.screen?.thread?.term != nil { model.act("term-toggle") } })) {
-            if let t = model.screen?.thread?.term { TermSheet(model: model, term: t).presentationDetents([.large]) }
+        .sheet(isPresented: Binding(get: { thread.term != nil }, set: {
+            if !$0, live, model.contentReady, model.screen?.thread?.id == thread.id,
+               model.screen?.thread?.term != nil { model.act("term-toggle") }
+        })) {
+            if let t = thread.term { TermSheet(model: model, term: t).disabled(!live).presentationDetents([.large]) }
         }
         .toolbar {
             if model.mailroomReturn != nil {
@@ -1054,6 +1304,7 @@ struct ThreadScreen: View {
                     Button { model.backToMailroom() } label: {
                         Label(NativeMessages.native_mailroom_title(lang), systemImage: "chevron.left")
                     }.accessibilityIdentifier("mailroom.return")
+                        .disabled(!live)
                 }
             }
             if !thread.branch.isEmpty || !(thread.boat ?? "").isEmpty {
@@ -1065,7 +1316,7 @@ struct ThreadScreen: View {
                         }
                         // the thread's Boat chip: a tap opens Settings (Usage)
                         if let b = thread.boat, !b.isEmpty {
-                            Button(b) { model.act("usage-open") }.font(.caption2).lineLimit(1)
+                            Button(b) { model.act("usage-open") }.font(.caption2).lineLimit(1).disabled(!live)
                         }
                     }
                 }
@@ -1082,19 +1333,12 @@ struct ThreadScreen: View {
                         .foregroundStyle(u.busy.isEmpty ? Color.secondary : PhaseColor.accent)
                     }
                     .accessibilityLabel(NativeMessages.native_thread_subagents(lang, u.word ?? u.busy))
-                }
-                if !thread.viewer.choices.isEmpty {
-                    Menu {
-                        ForEach(thread.viewer.choices, id: \.value) { c in
-                            Button(c.label) { model.act("view", c.value) }
-                        }
-                    } label: {
-                        Image(systemName: "cpu")
-                    }
-                    .accessibilityLabel(NativeMessages.native_thread_board(lang))
+                    .disabled(!live)
                 }
                 ForEach(thread.tools.filter { $0.action == "interrupt" }, id: \.self) { t in
                     Button(t.label, systemImage: "stop.fill") { model.act(t.action) }
+                        .disabled(!live)
+                        .accessibilityIdentifier("thread.interrupt")
                 }
                 Menu {
                     if thread.canChild == true {
@@ -1124,13 +1368,16 @@ struct ThreadScreen: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .disabled(!live)
+                .accessibilityIdentifier("thread.tools")
             }
         }
     }
 
     // the screen's menu when it is a file link's
     private var fileMenu: RowMenu? {
-        model.screen?.rowMenu.flatMap { $0.kind == "f" ? $0 : nil }
+        guard live, model.screen?.thread?.id == thread.id else { return nil }
+        return model.screen?.rowMenu.flatMap { $0.kind == "f" ? $0 : nil }
     }
 
     // shown until picked from or let go of; let go with no pick, it is closed
@@ -1138,9 +1385,10 @@ struct ThreadScreen: View {
         Binding(get: { fileMenu.map { $0 != shutFile } ?? false }, set: { up in
             guard !up, let m = fileMenu else { return }
             shutFile = m
-            let model = self.model
+            let model = self.model, owner = thread.id
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if model.screen?.rowMenu == m { model.act("menu-close", "") }
+                if model.contentReady, model.screen?.thread?.id == owner,
+                   model.screen?.rowMenu == m { model.act("menu-close", "") }
             }
         })
     }

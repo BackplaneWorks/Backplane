@@ -45,14 +45,21 @@ private final class Worker: Thread, @unchecked Sendable {
 final class Engine: @unchecked Sendable {
     private let queue = Worker()
     private let priority = WirePriority()
+    private let pairingFlush = PairingFlushGate()
+    private let navigationFlush = PairingFlushGate()
+    private let viewerDispatch = ViewerDispatchGate()
     private var ctx: JSContext?
 
     private func context() -> JSContext {
         if let ctx { return ctx }
+        let started = PerformanceTrace.shared.begin()
+        defer { PerformanceTrace.shared.end(.context, operation: .startup, started: started) }
         let c = JSContext()!
         c.exceptionHandler = { _, e in NSLog("bridge.js: %@", e?.toString() ?? "?") }
         let url = Bundle.main.url(forResource: "bridge", withExtension: "js")!
         c.evaluateScript(try! String(contentsOf: url, encoding: .utf8), withSourceURL: url)
+        c.objectForKeyedSubscript("Backplane")?.invokeMethod("publicationAck", withArguments: [])
+        c.objectForKeyedSubscript("Backplane")?.invokeMethod("nativeSidebar", withArguments: [1])
         if let text = c.objectForKeyedSubscript("Backplane")?.invokeMethod("headerKeys", withArguments: [])?.toString() {
             priority.install(text)
         }
@@ -74,7 +81,14 @@ final class Engine: @unchecked Sendable {
     private static let burst: UInt64 = 1_000_000_000
     private var built: UInt64 = 0
     private var flushPending = false
-    var onFlush: (@Sendable (Out?) -> Void)?
+    var onFlush: (@Sendable (Out?, UInt64) -> Void)?
+
+    // Called synchronously when the person's pairing changes. Reconciliation
+    // releases this generation only after retired state has been removed.
+    func invalidatePairing() -> UInt64 { pairingFlush.invalidate() }
+    func resumePairing(_ generation: UInt64) {
+        if pairingFlush.resume(generation) { scheduleFlush() }
+    }
 
     private func scheduleFlush() {
         let delay: UInt64? = lock.withLock {
@@ -98,35 +112,97 @@ final class Engine: @unchecked Sendable {
             return DispatchTime.now().uptimeNanoseconds &- built >= Self.window
         }
         guard ready, !queue.personWaiting else { scheduleFlush(); return }
+        // While reconciliation runs, leave bridge queues untouched. The
+        // matching resume schedules another attempt, even if this was the last.
+        guard let generation = pairingFlush.stamp() else { return }
         let began = DispatchTime.now().uptimeNanoseconds
         let forced = lock.withLock { owe }
-        let text = context().objectForKeyedSubscript("Backplane")?.invokeMethod("flush", withArguments: [forced])?.toString() ?? "{}"
-        let out = Out.decode(text, screen: true)
-        guard out?.screen != nil else { onFlush?(out); return }
+        let bridge = context().objectForKeyedSubscript("Backplane")
+        let invoked = PerformanceTrace.shared.begin()
+        let text = bridge?.invokeMethod("flush", withArguments: [forced])?.toString() ?? "{}"
+        PerformanceTrace.shared.end(.invoke, operation: .flush, started: invoked, bytes: UInt64(text.utf8.count))
+        let out = decode(text, screen: true, operation: .flush)
+        guard out?.screen != nil else { onFlush?(out, generation); return }
         let stale = queue.personWaiting
         lock.withLock { built = began; owe = stale }
         if stale { scheduleFlush() }
-        onFlush?(stale ? Out.decode(text, screen: false) : out)
+        let result = stale ? decode(text, screen: false, operation: .flush) : out
+        onFlush?(stale || pairingFlush.stamp() != generation ? result : published(result), generation)
     }
 
-    // late: the arguments decided on the queue, as the call runs
-    private func call<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, _ finish: @escaping (String) -> T) async -> T {
-        await withCheckedContinuation { k in
-            queue.async(person: person) {
-                let b = self.context().objectForKeyedSubscript("Backplane")!
-                let t0 = DispatchTime.now().uptimeNanoseconds
-                let text = b.invokeMethod(name, withArguments: late?() ?? args)?.toString() ?? "{}"
-                // a slow step of the Bend client, for finding what to make faster (as Android's)
-                let ms = (DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
-                if ms > 100 { NSLog("Backplane slow %@: %llu ms", name, ms) }
-                k.resume(returning: finish(text))
+    // On the engine worker, acknowledge only a decoded screen that is not
+    // being discarded. The bridge then exposes any on-demand follow-up in
+    // this same Out's deadline; quiet and discarded screens remain pending.
+    private func published(_ candidate: Out?) -> Out? {
+        guard var out = candidate, out.screen != nil, pairingFlush.stamp() != nil else { return candidate }
+        if let value = context().objectForKeyedSubscript("Backplane")?.invokeMethod("published", withArguments: []),
+           !value.isNull, !value.isUndefined {
+            let deadline = value.toDouble()
+            if deadline.isFinite { out.deadline = deadline }
+        }
+        return out
+    }
+
+    // Enqueue captured editor work synchronously with the main-actor edit.
+    // An async Task created for each keystroke could reorder draft/send calls.
+    private func enqueue<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, authorize: ((() -> String) -> String?)? = nil, _ finish: @escaping (String) -> T, completion: @escaping (T) -> Void) {
+        let queued = PerformanceTrace.shared.begin()
+        let operation = Self.performanceOperation(name)
+        queue.async(person: person) {
+            PerformanceTrace.shared.end(.queueWait, operation: operation, started: queued)
+            let b = self.context().objectForKeyedSubscript("Backplane")!
+            let t0 = DispatchTime.now().uptimeNanoseconds
+            let invoke = {
+                let arguments = late?() ?? args
+                let started = PerformanceTrace.shared.begin()
+                let text = b.invokeMethod(name, withArguments: arguments)?.toString() ?? "{}"
+                PerformanceTrace.shared.end(.invoke, operation: operation, started: started, bytes: UInt64(text.utf8.count))
+                return text
             }
+            let text: String
+            if let authorize {
+                guard let allowed = authorize(invoke) else { completion(finish("null")); return }
+                text = allowed
+            } else { text = invoke() }
+            let ms = (DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+            if ms > 100 { NSLog("Backplane slow %@: %llu ms", name, ms) }
+            completion(finish(text))
+        }
+    }
+    private static func performanceOperation(_ name: String) -> PerformanceTrace.Operation {
+        switch name {
+        case "start": .startup
+        case "loadPresentation": .loadPresentation
+        case "connection", "online", "hubs": .connection
+        case "recv": .receive
+        case "flush": .flush
+        case "act", "navigation": .navigation
+        case "viewerAction": .viewerRestore
+        case "local": .local
+        case "reading": .reading
+        case "pulse", "tick": .pulse
+        case "screen": .screen
+        default: .other
+        }
+    }
+
+    private func decode(_ text: String, screen: Bool, operation: PerformanceTrace.Operation) -> Out? {
+        let started = PerformanceTrace.shared.begin()
+        let result = Out.decode(text, screen: screen)
+        PerformanceTrace.shared.end(.decode, operation: operation, started: started,
+                                    bytes: UInt64(text.utf8.count), outcome: result == nil ? .failed : .success)
+        return result
+    }
+
+    private func call<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, authorize: ((() -> String) -> String?)? = nil, _ finish: @escaping (String) -> T) async -> T {
+        await withCheckedContinuation { k in
+            enqueue(name, args, person: person, late: late, authorize: authorize, finish, completion: { k.resume(returning: $0) })
         }
     }
 
     // Commands are always delivered. Screens become stale only for newer
     // person work, never because hub frames wait behind a tap.
-    private func out(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false) async -> Out? {
+    private func enqueueOut(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false, authorize: ((() -> String) -> String?)? = nil, completion: @escaping (Out?) -> Void) {
         if screen { lock.withLock { if person { personAhead += 1 } else { backgroundAhead += 1 } } }
         var withheld = false
         var began: UInt64 = 0
@@ -145,10 +221,14 @@ final class Engine: @unchecked Sendable {
                 return args + [withheld, o]
             }
         } : nil
-        return await call(name, args, person: person, late: late) { text in
+        enqueue(name, args, person: person, late: late, authorize: authorize, { text in
+            if text == "null" {
+                self.lock.withLock { if screen { if person { self.personAhead -= 1 } else { self.backgroundAhead -= 1 } } }
+                return nil
+            }
             // (bridge.js writes the screen first: a null one is cheap to see)
             let hasScreen = screen && !text.hasPrefix("{\"screen\":null")
-            let metadata = hasScreen ? nil : Out.decode(text, screen: false)
+            let metadata = hasScreen ? nil : self.decode(text, screen: false, operation: Self.performanceOperation(name))
             let stale = self.lock.withLock {
                 if screen { if person { self.personAhead -= 1 } else { self.backgroundAhead -= 1 } }
                 if metadata?.inert == true {
@@ -163,8 +243,41 @@ final class Engine: @unchecked Sendable {
                 return drop
             }
             if metadata?.inert != true && (withheld || stale) { self.scheduleFlush() }
-            return metadata ?? Out.decode(text, screen: !stale && screen)
+            let result = metadata ?? self.decode(text, screen: !stale && screen, operation: Self.performanceOperation(name))
+            return stale ? result : self.published(result)
+        }, completion: completion)
+    }
+
+    private func out(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false, authorize: ((() -> String) -> String?)? = nil) async -> Out? {
+        await withCheckedContinuation { k in
+            enqueueOut(name, args, screen: screen, person: person, quiet: quiet, authorize: authorize, completion: { k.resume(returning: $0) })
         }
+    }
+
+    func draftAtNow(_ thread: String, text: String, edit: UInt64, generation: UInt64, completion: @escaping (Out?) -> Void) {
+        enqueueOut("draftAt", [thread, text, edit], screen: false, person: true,
+                   authorize: { self.pairingFlush.perform(generation, $0) }, completion: completion)
+    }
+    func sendAtNow(_ thread: String, action: String, text: String, edit: UInt64, generation: UInt64, completion: @escaping (Out?) -> Void) {
+        enqueueOut("sendAt", [thread, action, text, edit], person: true,
+                   authorize: { self.pairingFlush.perform(generation, $0) }, completion: completion)
+    }
+    func composerActNow(_ thread: String, action: String, value: String, generation: UInt64, completion: @escaping (Out?) -> Void) {
+        enqueueOut("composerAction", [thread, action, value], person: true,
+                   authorize: { self.pairingFlush.perform(generation, $0) }, completion: completion)
+    }
+
+    func navigationPermitted(_ pairing: UInt64) -> Bool { pairingFlush.stamp() == pairing }
+    func invalidateNavigation() -> UInt64 { navigationFlush.invalidate() }
+    @discardableResult func resumeNavigation(_ generation: UInt64) -> Bool {
+        navigationFlush.stamp() == generation || navigationFlush.resume(generation)
+    }
+    func navigation(_ action: String, _ value: String, hub: String, epoch: String, pairing: UInt64, generation: UInt64, presentedNav: String? = nil) async -> Out? {
+        await out("navigation", [action, value, hub, epoch, presentedNav.map { $0 as Any } ?? NSNull()], person: true, authorize: { operation in
+            self.pairingFlush.perform(pairing) {
+                self.navigationFlush.perform(generation, operation) ?? "null"
+            }
+        })
     }
 
     func start(_ cid: String, _ drafts: String) async -> Out? { await out("start", [cid, drafts]) }
@@ -174,6 +287,7 @@ final class Engine: @unchecked Sendable {
         await out("reading", [thread, seen, count, away], screen: false, person: true)
     }
     func hubs(_ keys: [String]) async -> Out? { await out("hubs", [keys]) }
+    func forgetHub(_ key: String) async -> Out? { await out("forgetHub", [key], screen: false, person: true) }
     func connection(_ key: String, _ epoch: String, mode: String? = nil) async -> Out? {
         await out("connection", mode.map { [key, epoch, $0] } ?? [key, epoch], screen: false, person: true)
     }
@@ -196,7 +310,21 @@ final class Engine: @unchecked Sendable {
         let answer = await out("act", [action, value], person: true)
         return answer
     }
+    func viewerToken(_ token: ViewerCloseIntent.Token?, closing: Bool = false) { viewerDispatch.install(token, closing: closing) }
+    func viewerAct(_ value: String, token: ViewerCloseIntent.Token) async -> Out? {
+        await out("viewerAction", [token.owner.hub, token.owner.nav, Int(token.presentation), value], person: true,
+                  authorize: { self.viewerDispatch.perform(token, value: value, $0) })
+    }
     func quiet(_ action: String, _ value: String) async -> Out? { await out("quiet", [action, value], screen: false, person: true) }
+    func projectSearchQuery(scope: Int, edit: Int, text: String) async -> Out? {
+        await out("projectSearchQuery", [scope, edit, text], person: true)
+    }
+    func projectSearchEnd(scope: Int) async -> Out? {
+        await out("projectSearchEnd", [scope], screen: false, person: true)
+    }
+    func projectSearchGo(scope: Int, edit: Int, text: String, project: String) async -> Out? {
+        await out("projectSearchGo", [scope, edit, text, project], person: true)
+    }
     // the secret box's Save: the value goes in one request built by Bend
     // (bridge.js's Backplane.secret), never as an action or a form field
     func secret(_ packed: String) async -> Out? { await out("secret", [packed], person: true) }
@@ -204,6 +332,9 @@ final class Engine: @unchecked Sendable {
     // a hub marked offline with no screen of its own (after load())
     func offline(_ key: String) async -> Out? { await out("online", [key, false, true], screen: false) }
     func tick(_ now: Int) async -> Out? { await out("tick", [now]) }
+    func reflowDefaults() async -> String { await call("reflowDefaults", [], person: true) { $0 } }
+    func reflowAlloys() async -> String { await call("reflowAlloys", [], person: true) { $0 } }
+    func reflow(_ profile: String, alloy: String) async -> String { await call("reflow", [profile, alloy], person: true) { $0 } }
     // a catalog text by key, in the device's language
     func t(_ key: String) async -> String { await call("t", [key], person: true) { $0 } }
     // a cat's rig for its key ("look:mood")

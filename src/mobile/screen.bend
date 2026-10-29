@@ -679,13 +679,30 @@ def Mob.role(r: FO.Role, xs: List<&2, J.Json>, acc: List<&2, J.Json>) -> List<&2
         case False{}:
           Mob.fold(id, label, False{}) <> acc
 
+# Only materialize an entry when its nested role can actually show its body.
+# The role still emits every visible fold header through Mob.role.
+def Mob.role.body(r: FO.Role) -> Bool:
+  match r:
+    case FO.RShow{}: True{}
+    case FO.RHead{_, _, open}: open
+    case FO.RIn{open}: open
+    case FO.RWork{_, _, open, inner}:
+      match open:
+        case True{}: Mob.role.body(inner)
+        case False{}: False{}
+
+def Mob.entry.role(show: Bool, +lc: I.Loc, +e: M.Entry, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
+  match show:
+    case True{}: Mob.entry(lc, e, st, sel, dr, sp)
+    case False{}: Nil{}
+
 # a thread's entries, tail-recursive (a thread can hold thousands)
 def Mob.entries.go(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match es rs:
     case Nil{} _:
       acc
-    case e <> t r <> rt:
-      Mob.entries.go(lc, t, rt, st, sel, dr, sp, Mob.role(r, Mob.entry(lc, e, st, sel, dr, sp), acc))
+    case e <> t +r <> rt:
+      Mob.entries.go(lc, t, rt, st, sel, dr, sp, Mob.role(r, Mob.entry.role(Mob.role.body(r), lc, e, st, sel, dr, sp), acc))
     case e <> t Nil{}:
       Mob.entries.go(lc, t, Nil{}, st, sel, dr, sp, Mob.onto(Mob.entry(lc, e, st, sel, dr, sp), acc))
 

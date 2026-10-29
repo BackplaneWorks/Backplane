@@ -10,6 +10,8 @@ struct AppTabs: View {
     @Bindable var model: AppModel
     let screen: Screen
     @Binding var pairing: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private func badge(_ t: AppTab) -> Int {
         switch t {
@@ -46,9 +48,12 @@ struct AppTabs: View {
     }
 
     private var tabs: some View {
-        TabView(selection: Binding(get: { model.tab }, set: { model.switchTab($0) })) {
+        TabView(selection: Binding(get: { model.tab }, set: { next in
+            if next != model.tab { model.chooseTab(next) }
+        })) {
             ForEach(AppTab.allCases) { t in
                 stack(t)
+                    .toolbar(horizontalSizeClass == .compact ? .hidden : .automatic, for: .tabBar)
                     .tabItem { Label(t.title(screen.locale ?? "en"), systemImage: t.icon) }
                     .badge(badge(t))
                     .tag(t)
@@ -56,15 +61,78 @@ struct AppTabs: View {
         }
     }
 
-    var body: some View {
-        // (iPad, iOS 18: the same tabs as a sidebar)
+    private func tabButton(_ t: AppTab) -> some View {
+        let selected = model.tab == t
+        let count = badge(t)
+        let title = t.title(screen.locale ?? "en")
+        return Button { model.chooseTab(t) } label: {
+            VStack(spacing: 4) {
+                HStack(spacing: 3) {
+                    Image(systemName: t.icon).font(.body)
+                    if count > 0 {
+                        Text(String(count)).font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(BackplaneDesign.onAccent)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(BackplaneDesign.accent)
+                    }
+                }
+                Text(title).font(.caption2.weight(selected ? .semibold : .regular))
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(selected ? BackplaneDesign.accentText : Color.primary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .padding(.horizontal, 3).padding(.vertical, 5)
+            .foregroundStyle(selected ? BackplaneDesign.accent : Color.primary)
+            .background(selected ? BackplaneDesign.raised : BackplaneDesign.panel, ignoresSafeAreaEdges: [])
+            .overlay(alignment: .top) {
+                if selected { Rectangle().fill(BackplaneDesign.accent).frame(height: 2) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(count > 0 ? String(count) : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("tab." + t.rawValue)
+    }
+
+    private var tabStrip: some View {
         Group {
-            if #available(iOS 18.0, *) {
-                tabs.tabViewStyle(.sidebarAdaptable)
+            if typeSize.isAccessibilitySize {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 0) {
+                        ForEach(AppTab.allCases) { t in tabButton(t).frame(minWidth: 90) }
+                    }
+                }
+                .scrollIndicators(.hidden)
             } else {
-                tabs
+                HStack(spacing: 0) {
+                    ForEach(AppTab.allCases) { t in tabButton(t) }
+                }
             }
         }
+        .background(BackplaneDesign.panel, ignoresSafeAreaEdges: [])
+        .overlay(alignment: .top) { Rectangle().fill(BackplaneDesign.line).frame(height: 1) }
+        .background(BackplaneDesign.panel.ignoresSafeArea(edges: .bottom))
+    }
+
+    @ViewBuilder private var navigation: some View {
+        if horizontalSizeClass == .compact {
+            VStack(spacing: 0) {
+                tabs.frame(maxWidth: .infinity, maxHeight: .infinity)
+                tabStrip
+            }
+        } else if #available(iOS 18.0, *) {
+            tabs.tabViewStyle(.sidebarAdaptable)
+        } else {
+            tabs
+        }
+    }
+
+    var body: some View {
+        navigation
+        .tint(BackplaneDesign.accent)
         .sheet(isPresented: Binding(get: { screen.newBot != nil }, set: { if !$0 { model.act("form-close", "@bnew") } })) {
             if let f = model.screen?.newBot { NewBotSheet(model: model, form: f) }
         }
@@ -116,6 +184,7 @@ struct BotsTab: View {
                         // plain: a List's button tints its whole label (names read as links)
                         .buttonStyle(.plain)
                         .opacity(b.mood == "away" ? 0.5 : 1)
+                        .accessibilityIdentifier("bot.row." + b.id)
                     }
                 }
             } else {
@@ -136,6 +205,7 @@ struct BotsTab: View {
                 }
             }
         }
+        .modifier(BackplaneListSurface())
         .overlay {
             if part == "bots" && screen.bots.isEmpty {
                 ContentUnavailableView(NativeMessages.native_bot_empty(lang), systemImage: "pawprint", description: Text(NativeMessages.native_bot_create_hint(lang)))
@@ -211,6 +281,7 @@ struct RoutinesPage: View {
                 .opacity((r.away ?? false) || r.state == "off" || r.state == "done" ? 0.5 : 1)
             }
         }
+        .modifier(BackplaneListSurface())
         .overlay {
             if rows.isEmpty {
                 ContentUnavailableView(NativeMessages.native_routines_empty(lang), systemImage: "clock.arrow.circlepath", description: Text(NativeMessages.native_routines_note(lang)))
@@ -230,6 +301,8 @@ struct AppSettingsTab: View {
     let screen: Screen
     @Bindable private var settings = AppSettings.shared
     @State private var notifications: UNAuthorizationStatus = .notDetermined
+    @State private var notificationsLoaded = false
+    @State private var requestingNotifications = false
     @State private var cacheBytes = 0
     @State private var confirmClear = false
 
@@ -300,10 +373,23 @@ struct AppSettingsTab: View {
                 HStack {
                     Text(NativeMessages.native_settings_notifications(tag))
                     Spacer()
-                    Text(notificationWord).foregroundStyle(.secondary)
+                    if notificationsLoaded { Text(notificationWord).foregroundStyle(.secondary) }
                 }
-                Button(NativeMessages.native_settings_system_open(tag)) {
-                    if let u = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(u) }
+                if notificationsLoaded && notifications == .notDetermined {
+                    Button(tag == "ja" ? "通知を有効にする" : "Enable notifications") {
+                        requestingNotifications = true
+                        Task {
+                            await model.enableNotifications()
+                            notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+                            requestingNotifications = false
+                        }
+                    }
+                    .disabled(requestingNotifications)
+                    .accessibilityIdentifier("settings.notifications.enable")
+                } else if notificationsLoaded {
+                    Button(NativeMessages.native_settings_system_open(tag)) {
+                        if let u = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(u) }
+                    }
                 }
                 // what the hub alerts for: its settings, from the last screen that carried them
                 if let r = notifyRows { HubSettingsRows(model: model, rows: r, notify: true) }
@@ -374,7 +460,10 @@ struct AppSettingsTab: View {
             }
         }
         .navigationTitle(NativeMessages.palette_settings(tag))
-        .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
+        .task {
+            notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+            notificationsLoaded = true
+        }
         .onAppear {
             model.usage(true)
             cacheBytes = model.cacheSize()

@@ -1,0 +1,39 @@
+import Foundation
+
+// Shared by the main actor and the engine worker. A flush takes its stamp
+// before entering JS; an identity change makes that stamp stale immediately.
+final class PairingFlushGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation: UInt64 = 0
+    private var suspended = false
+
+    func invalidate() -> UInt64 {
+        lock.withLock {
+            generation &+= 1
+            suspended = true
+            return generation
+        }
+    }
+
+    func stamp() -> UInt64? {
+        lock.withLock { suspended ? nil : generation }
+    }
+
+    // Linearize a captured private edit/send against account invalidation.
+    // Hold the lock through the short JS call, not across network IO.
+    func perform(_ expected: UInt64, _ operation: () -> String) -> String? {
+        lock.withLock {
+            guard !suspended, generation == expected else { return nil }
+            return operation()
+        }
+    }
+
+    // An older reconcile cannot release a newer identity change.
+    func resume(_ expected: UInt64) -> Bool {
+        lock.withLock {
+            guard suspended, generation == expected else { return false }
+            suspended = false
+            return true
+        }
+    }
+}

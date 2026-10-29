@@ -1,0 +1,117 @@
+{
+  "state": "INTERNAL_TESTFLIGHT_AVAILABLE",
+  "appId": "6815381117",
+  "bundleId": "dev.backplane.works",
+  "version": "0.12.2",
+  "build": "202610280300",
+  "sourceCommit": "850f38850528b2abb4adc14a5f8a0fe6934cc7b7",
+  "sourceTree": "4c076d67cee8d84bfb798495cdd11f452215515d",
+  "sourceClosureSha256": "266afe2c1bf5d10853e849b329e9d448f692bdf6921f0dc11bf40ca49b563c6e",
+  "bridgeSha256": "bdcd72cd0bb365dc0396933f519c7450f305fb48ec17462a7d4aaa706baa2d34",
+  "ipaPath": "build/ios-qualification/Backplane-850f3885-202610280300.ipa",
+  "ipaSha256": "5eff669ed917fbce32bc322a04f7675daec75e83dd2c6a3ab02a347a8164fc10",
+  "parentIpaVerificationSha256": "5d631f9800b71f7a7700ff08bdbc45044bd95e3dc5fbd4553b5d6ca387a6d1dd",
+  "archiveMode": "Manual frozen Release archive and separate upload using existing distribution identity/profiles; no provisioning updates.",
+  "backendSha256": "fd0c7eed70c272a45902d8ce2985808847009c5bc2f937dcd3c46df66ca8ce2c",
+  "backendVersion": "0.12.4-dev.chat.ns.9697fb36",
+  "backendDeliverySha256": "ca66cb369d2aae9d8510ffba4b17bdcc2c053c39cdf88f06b0f29b14f3756744",
+  "runtimeScope": "Normal Release compact simulator with dev.backplane.works, no qualification or selection launch hooks; physical-device runtime unverified.",
+  "normalReleaseAcceptance": {
+    "freshPairDefaultHome": {
+      "work": "732785",
+      "harnessSha256": "619826d54377eca498b78e867cad3dcfef1488a7d589d20e5af79f6bfca681ee",
+      "xctestExit": 0,
+      "parentVisualReview": "Real Home card, metrics and running rows painted without tab gesture, overpaint, Open alert or pairing field."
+    },
+    "paintedTabsAndHomeLifecycle": {
+      "work": "732929",
+      "harnessSha256": "931ed4b4e4a8d6bdc590e5ddc8a6e1cc09d3be701564c47e94d4b85f1dd1cd3a",
+      "xctestExit": 0,
+      "parentReviewReceiptSha256": "79a3f36180b0a3d5a15c2a96dfda54ab822653006ecf14ba81a145eef923093d",
+      "stages": [
+        "Home",
+        "Threads",
+        "Bots",
+        "Routines",
+        "Settings",
+        "foreground Home",
+        "cold Home"
+      ]
+    },
+    "integrationThread": {
+      "work": "732514",
+      "xctestExit": 65,
+      "parentReviewReceiptSha256": "3aa4a9c1983fcded2586f4758435bd4eb0b7e563345153726172feaffc5498ec",
+      "classification": "Painted exact integration timeline and usable composer. Separate work732651 observed two enabled live-gated Tools/no-loading samples followed by refresh; no continuous freshness or atomic cross-field claim. Original failed capture retained."
+    },
+    "bubKeyboardAndReturn": {
+      "work": "733049",
+      "harnessSha256": "59b0b7e8a7aae4e4a0656386929b47a24d682fc860e8092694202de8d1f76aef",
+      "xctestExit": 0,
+      "classification": "Exact integration thread to actual Bub Chat, keyboard visible, same thread and usable composer on return. No text entered or sent; no Bub/draft screenshots exported."
+    },
+    "projectPaging": {
+      "works": [
+        "735063",
+        "735220"
+      ],
+      "harnessSha256": "ffcd1c827cdc82ee837dc2064f2a09b2cb98d8028534ed524855983debe6fe4a",
+      "xctestExit": 65,
+      "functionalEvidence": "Next and Previous each fully visible and enabled; both tap calls returned. Forward snapshot project IDs changed. Saved Projects offset advanced 0 to8 of12 and returned0 with original eight project hashes.",
+      "failedAssertion": "Final Next AX lookup absent after Previous; no final AX snapshot captured. Test remains failed. Parent accepted scoped round-trip evidence without claiming a green XCTest or exhaustive shelf pagination."
+    }
+  },
+  "uploadAuthorizedByUser": true,
+  "internalTestFlightAvailable": true,
+  "publicAppStoreSubmissionAuthorized": false,
+  "remainingLimitations": [
+    "Physical iPhone runtime remains unverified.",
+    "No whole-screen accessibility or native PBR material-parity acceptance.",
+    "Original failed harnesses remain failures; no continuous readiness claim.",
+    "Repository PROOF retains pre-existing Laws.post_running_delivers failure; no laws weakened."
+  ],
+  "repositoryProof": {
+    "work": "w-t1793120668-655983-735458",
+    "exitCode": 1,
+    "failure": "Existing Laws.post_running_delivers mismatch; no laws changed or weakened.",
+    "logSha256": "6b7edcd4656515102383138560387d5173eed929209cb61a5d3efbf52026f08d"
+  },
+  "uploadWork": "w-t1793120742-656174-735371",
+  "uploadCommandExitCode": 0,
+  "appleUploadId": "8fbeb878-24fd-4791-a7bd-52f087f7ab9c",
+  "appleProcessingState": "VALID",
+  "appleUploadErrors": [],
+  "appleUploadWarnings": [],
+  "appleProcessingRecord": {
+    "work": "w-t1793120742-656174-735532",
+    "sha256": "7fca4051bb139adbd90490a74306b229c570b045af9260d2b141afa1a9ea8b62",
+    "uploadedDate": "2026-10-27T22:58:03-07:00"
+  },
+  "appleValidRecord": {
+    "work": "w-t1793120742-656174-735575",
+    "sha256": "e6bb6f3ee831b3a91ff874d6136696dc34b540f010aa8ec586605b31e31853d3"
+  },
+  "internalBetaState": "IN_BETA_TESTING",
+  "appleBuildId": "8fbeb878-24fd-4791-a7bd-52f087f7ab9c",
+  "internalGroupId": "4cbc1cb8-b7e1-4d76-b629-92db2ab8d751",
+  "internalGroupMembershipConfirmed": true,
+  "externalBetaSubmissionMade": false,
+  "publicAppStoreSubmissionMade": false,
+  "internalAvailabilityEvidence": {
+    "work": "w-t1793120742-656174-735921",
+    "buildQueryHttpStatus": 200,
+    "matchingBuilds": 1,
+    "expired": false,
+    "internalBetaState": "IN_BETA_TESTING",
+    "groupBuildListHttpStatus": 200,
+    "groupReturnedBuilds": 87,
+    "matchingGroupBuilds": 1,
+    "limitation": "Direct build-to-group query returned403; reciprocal existing group build list verified exact build membership."
+  },
+  "sanitizedDeliveryProofs": {
+    "upload-0300.txt": "44056a5ccec05a533550a168a1da244b4533cabd29e056e08aa752595235bbe8",
+    "apple-upload-processing-0300.txt": "7fca4051bb139adbd90490a74306b229c570b045af9260d2b141afa1a9ea8b62",
+    "apple-delivery-valid-0300.txt": "e6bb6f3ee831b3a91ff874d6136696dc34b540f010aa8ec586605b31e31853d3",
+    "apple-internal-availability-0300.txt": "cc05f51382522cea76560f4e4ce2fefb082271fc4a0e6926855463af25117cbc"
+  }
+}

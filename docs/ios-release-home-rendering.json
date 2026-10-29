@@ -1,0 +1,303 @@
+{
+  "scope": "source-controlled Release simulator rendering comparison; not physical-device acceptance",
+  "bundleId": "dev.backplane.works",
+  "bridgeSha256": "c7aab6184cab1d8b5484fd22325797ff5d7325086292fea80f68961f34bebf4a",
+  "hubServiceSha256": "8981cff4d38ad92b76a2ee8e5dffc1e5f60f4282754ed1c5e01bdd0b946a15db",
+  "hubHelloCommit": "19dceb1b755523674fa358d43d5b38984d004c60",
+  "originalPhysicalFailureEnvironment": "occurred pre-swap ae735; cause not inferred from server version",
+  "observations": [
+    {
+      "source": "6612ba37074ebf386a7ef9eebaaeec1dfefc0963",
+      "image": "build/ios-qualification/release-home-repro/6612-postswap-home-blank.png",
+      "imageSha256": "5ae65a10aba0ad6b11fe538b7121c5647def5413062e3860ab8272eb861564af",
+      "paintCheck": {
+        "contentRectPixels": [
+          0,
+          200,
+          1170,
+          2058
+        ],
+        "distinctColors": 3,
+        "flatBody": true,
+        "nonBackgroundFraction": 0.000972,
+        "pixels": 2407860,
+        "scope": "blank-body rejection only; frames, visual and freshness checks remain required",
+        "screenshotSha256": "5ae65a10aba0ad6b11fe538b7121c5647def5413062e3860ab8272eb861564af"
+      },
+      "classification": "visual failure: blank Home and full-height selected-tab stripe; AX frame assertions passed falsely"
+    },
+    {
+      "source": "b3d2de545b299d2c042a5da897edbe2027b02f44",
+      "image": "build/ios-qualification/release-home-repro/b3d2-postswap-home-blank.png",
+      "imageSha256": "cec525f897dad832e68f51d54365c1d91452ca94fe9f157c843b77ed104b862c",
+      "paintCheck": {
+        "contentRectPixels": [
+          0,
+          200,
+          1170,
+          2058
+        ],
+        "distinctColors": 2,
+        "flatBody": true,
+        "nonBackgroundFraction": 0.0,
+        "pixels": 2407860,
+        "scope": "blank-body rejection only; frames, visual and freshness checks remain required",
+        "screenshotSha256": "cec525f897dad832e68f51d54365c1d91452ca94fe9f157c843b77ed104b862c"
+      },
+      "classification": "visual failure: selected-tab stripe removed but Home body remains blank; AX assertions insufficient"
+    },
+    {
+      "source": "81dbd1dbc3d7c5725fe9af4919f901ba010db596",
+      "image": "build/ios-qualification/release-home-repro/81db-postswap-home.png",
+      "imageSha256": "08eac885f14784a49729b59dc78e77699974484f326946574dd8eec159429522",
+      "paintCheck": {
+        "contentRectPixels": [
+          0,
+          200,
+          1170,
+          2056
+        ],
+        "distinctColors": 2399,
+        "flatBody": false,
+        "nonBackgroundFraction": 0.159217,
+        "pixels": 2405520,
+        "scope": "blank-body rejection only; frames, visual and freshness checks remain required",
+        "screenshotSha256": "08eac885f14784a49729b59dc78e77699974484f326946574dd8eec159429522"
+      },
+      "geometry": {
+        "appForeground": true,
+        "appFrame": {
+          "height": 844,
+          "width": 390,
+          "x": 0,
+          "y": 0
+        },
+        "appOpenAlert": false,
+        "homeContentFrames": [
+          {
+            "height": 70,
+            "width": 358,
+            "x": 16,
+            "y": 153
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 32,
+            "y": 277
+          },
+          {
+            "height": 13.333333333333314,
+            "width": 56.33333333333333,
+            "x": 32,
+            "y": 305.3333333333333
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 115.5,
+            "y": 277
+          },
+          {
+            "height": 13.333333333333314,
+            "width": 51.66666666666666,
+            "x": 115.5,
+            "y": 305.3333333333333
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 199,
+            "y": 277
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 53.33333333333334,
+            "x": 199,
+            "y": 305.3333333333333
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 282.5,
+            "y": 277
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 49,
+            "x": 282.5,
+            "y": 305.3333333333333
+          }
+        ],
+        "homeSelected": true,
+        "pairAddressVisible": false,
+        "screenshotPixelHeight": 2532,
+        "screenshotPixelWidth": 1170,
+        "screenshotScale": 3,
+        "springboardOpenAlert": false,
+        "tabHomeFrame": {
+          "height": 58,
+          "width": 78,
+          "x": 0,
+          "y": 752
+        },
+        "visibleContentCount": 9
+      },
+      "classification": "focused visual pass: actual Home card, metrics and running rows painted; parent independently reviewed"
+    }
+  ],
+  "nextCandidate": {
+    "source": "850f38850528b2abb4adc14a5f8a0fe6934cc7b7",
+    "bridgeSha256": "bdcd72cd0bb365dc0396933f519c7450f305fb48ec17462a7d4aaa706baa2d34",
+    "status": "Corrective0.12.2(202610280300) AppleVALID/IN_BETA_TESTING and exactexistinginternalgroupmembership confirmed; normalRelease simulator scopes accepted, physicaldevice runtime pending.",
+    "receipt": "docs/ios-testflight-202610280300.json"
+  },
+  "releaseQualified": true,
+  "conclusion": "Bounding only the tab button backgrounds removes the stripe; additionally bounding the strip background restores Home. Production data, geometry and bridge paths are unchanged.",
+  "regressionRecordProof": {
+    "work": "w-t1793120668-655983-714733",
+    "exitCode": 1,
+    "failure": "pre-existing Laws.post_running_delivers mismatch; no laws changed",
+    "logSha256": "6b7edcd4656515102383138560387d5173eed929209cb61a5d3efbf52026f08d"
+  },
+  "startupSelectionRegression": {
+    "source": "81dbd1dbc3d7c5725fe9af4919f901ba010db596",
+    "receipt": "build/ios-qualification/release-home-repro/81db-early-switch.json",
+    "receiptSha256": "39e0af9c8d7e38374541fc247a698e323aeb179f034ee8c0fae8e8536da7ff5e",
+    "observation": {
+      "homeSelectedAfterWait": true,
+      "homeSelectedImmediately": false,
+      "observationDurationSeconds": 21.641168291680515,
+      "rowsObserved": false,
+      "tapDurationSeconds": 1.209673916688189,
+      "tapPerformed": true,
+      "threadsSelectedAfterWait": false,
+      "threadsSelectedImmediately": true
+    },
+    "classification": "Threads choice reversed to Home without another input; corrective source 2a3df06e9 awaits runtime verification"
+  },
+  "freshColdPairCorrection": {
+    "source": "cc00c1bb03550c76553241f386797f8112e0ffc4",
+    "reviewReceipt": "build/ios-qualification/release-home-repro/cc00-cold-pair-parent-review.json",
+    "reviewReceiptSha256": "5e5f124c04f27928ab20f48162e32129d65518a0bd18d1c670d5e856fa4bc57c",
+    "work": "w-t1793120742-656174-717523",
+    "exitCode": 0,
+    "rootCause": "Provisional bootstrap and hub-catalog screens consumed startup defaults before real paired presentation; now gated by existing contentReady authority.",
+    "classification": "parent-reviewed real Home after fresh cold URL without Home tab gesture; not physical-device acceptance"
+  },
+  "finalSourceEarlyChoice": {
+    "source": "cc00c1bb03550c76553241f386797f8112e0ffc4",
+    "receipt": "build/ios-qualification/release-home-repro/cc00-postswap-early-selection.json",
+    "receiptSha256": "ce55d6a9f3650a2b3b63a6b535637898eed122f2b6c664e49af5ab2db53c84a5",
+    "image": "build/ios-qualification/release-home-repro/cc00-postswap-early-threads.png",
+    "imageSha256": "8a51acb1cf2debae2c2bb446e46dfb819d498c27d441cf68ed1cffa72cee6dc8",
+    "observation": {
+      "durationSeconds": 26.849808583268896,
+      "finalComposer": false,
+      "finalHome": false,
+      "finalRows": true,
+      "finalThreads": true,
+      "heldWithoutHomeReversal": true,
+      "immediateHome": false,
+      "immediateThreads": true,
+      "tapPerformed": true
+    },
+    "classification": "parent-reviewed painted root list after 26.85 seconds without another tab tap; post V14 web swap with unchanged8981 backend"
+  },
+  "navigationReleaseBlocker": {
+    "observedSource": "3d386708e7731455cfb02946f213e23df52354f4",
+    "observedWork": "w-t1793120742-656174-719418",
+    "process": 1334,
+    "classification": "Diagnostic completed, navigation failed: intended destination stayed pending and reached actionable timeout; repeated online/syncing did not adopt the requested screen. No decode-cause inference.",
+    "hubExecutableSha256": "8981cff4d38ad92b76a2ee8e5dffc1e5f60f4282754ed1c5e01bdd0b946a15db",
+    "hubPidBeforeAndAfter": 1463283,
+    "helloVerified": false,
+    "helloLimitation": "UnicodeDecodeError in diagnostic reader; not a hub failure finding.",
+    "correctionSource": "0fe686dc9265758d5b697a032f76b182d68caa79",
+    "sourceFixes": [
+      "Retain exact owner-bound latest read-navigation through reconnect instead of selecting cached previous screen.",
+      "Require displayed navigation to match freshness marker and pending destination.",
+      "Fence serialized navigation by pairing, epoch and navigation generation; preserve only positively owned unaffected-hub effects from stale drains.",
+      "Use explicit native local admission and one post-prime continuation admitted against the current validated host presentation, including coalesced select and newer refresh orderings."
+    ],
+    "localChecks": {
+      "work": "w-t1793120668-655983-721805",
+      "sourceAdapter": 130,
+      "emittedRealFixtures": 146,
+      "capturedHistory": 15,
+      "outboxIsolation": "PASS"
+    },
+    "macFoundation": {
+      "status": "PASS",
+      "checks": 105,
+      "navigationResume": 54,
+      "presentationReadiness": 9,
+      "commandPolicy": 12,
+      "admissionDecode": 5,
+      "flushGate": 13,
+      "composerDrafts": 12,
+      "runnerSource": "6a3bcab79def57f6b8caeaeda5c8207a95213e2d",
+      "appSource": "9a02e39f87766ef21933f97e75667df1bd56e5fc",
+      "note": "Earlier decoder attempts failed for test-only model dependencies, before SDK build."
+    },
+    "normalReleaseNavigation": {
+      "source": "0fe686dc9265758d5b697a032f76b182d68caa79",
+      "work": "w-t1793120742-656174-723061",
+      "status": "FAILED_LOADER_THEN_ERROR_RETRY",
+      "observations": {
+        "initialLoader": true,
+        "errorAndRetryAtSeconds": [
+          20,
+          45
+        ],
+        "timelineOrComposer": false
+      },
+      "traceCollection": "Old parser rejected new diagnostic keys/events; retained-session recovery pending. Zero filtered records does not establish absent app logs.",
+      "phaseArtifacts": "/tmp/backplane-release-private-655983/0fe-nav-LMnMxBIP",
+      "diagnosticExitZeroIsAcceptance": false
+    },
+    "replacementTestFlightAvailable": true,
+    "releaseBuild": {
+      "source": "9a02e39f87766ef21933f97e75667df1bd56e5fc",
+      "work": "w-t1793120742-656174-722641",
+      "status": "FAILED_DUPLICATE_TYPE_BEFORE_INSTALL",
+      "repair": "Rename new helper to NavigationPresentationReadiness; original cached readiness type unchanged. Add both actual types to decoder runner compilation.",
+      "repairSource": "0fe686dc9265758d5b697a032f76b182d68caa79",
+      "retry": {
+        "work": "w-t1793120742-656174-722936",
+        "source": "0fe686dc9265758d5b697a032f76b182d68caa79",
+        "status": "PASS_RELEASE_SDK_INSTALLED_OWNED_REPRO_DATA_PRESERVED",
+        "executableSha256": "622350aee523d982a17cc49158ad39633437d6dc89a9472eee7c0f39bfd2de1a",
+        "bridgeSha256": "ae413a3e1f59eff61148b8e50a6ec337d1cea2b0be6fef45e1a51f0b44b1fe2b",
+        "affectedFoundationChecks": 14,
+        "unmodifiedEarlierFoundationChecks": 91
+      }
+    },
+    "nativeLimitDiagnostic": {
+      "source": "f085e5a3bacf20bddab0f406d7a99a44af3c736c",
+      "work": "w-t1793120742-656174-724335",
+      "status": "FAILED_NATIVE_VIEW_LIMIT",
+      "summary": "build/ios-qualification/release-home-repro/f085-limit-parent-summary.json",
+      "summarySha256": "4d5b61edf5c0808671e5d617b7ed31b68263e5f42654e1fdc455ce0f37cf50cc",
+      "traceRecords": 120,
+      "limitRecords": 17,
+      "admittedCompletions": 17,
+      "incomingEvents": 0,
+      "classification": "Concrete native LIMIT; separate fresh logical-loopback bridge probes pass, logicalJSON/sessioncomparisonpending."
+    },
+    "resolution": {
+      "source": "850f38850528b2abb4adc14a5f8a0fe6934cc7b7",
+      "serviceSha256": "fd0c7eed70c272a45902d8ce2985808847009c5bc2f937dcd3c46df66ca8ce2c",
+      "cause": "Duplicated unbounded sidebar exceeded native JSON envelope limit; explicit negotiated bounded sidebar preserves reachable lists and strict reply validation.",
+      "normalReleaseEvidence": {
+        "work": "732514",
+        "xctestExit": 65,
+        "parentReviewReceiptSha256": "3aa4a9c1983fcded2586f4758435bd4eb0b7e563345153726172feaffc5498ec",
+        "classification": "Painted exact integration timeline and usable composer. Separate work732651 observed two enabled live-gated Tools/no-loading samples followed by refresh; no continuous freshness or atomic cross-field claim. Original failed capture retained."
+      },
+      "receipt": "docs/ios-testflight-202610280300.json",
+      "testFlightBuild": "202610280300"
+    }
+  },
+  "releaseQualifiedScope": "Scoped normal Release simulator behavior only; physical-device runtime and Apple availability remain separate."
+}

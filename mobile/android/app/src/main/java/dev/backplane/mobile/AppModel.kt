@@ -38,6 +38,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     val scrolls get() = core.scrolls
     val jump get() = core.jump
     val plots get() = core.plots
+    var reflowThermal: FloatArray
+        get() = core.reflowThermal
+        set(value) { core.reflowThermal = value }
+    suspend fun reflowDefaults() = core.reflowDefaults()
+    suspend fun reflowAlloys() = core.reflowAlloys()
+    suspend fun reflow(profile: String, alloy: String) = core.reflow(profile, alloy)
 
     fun pair(text: String) = core.pair(text)
     fun unpair(key: String) = core.unpair(key)

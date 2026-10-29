@@ -170,8 +170,10 @@ struct BotScreen: View {
     }
 
     var body: some View {
-        content
-            .safeAreaInset(edge: .top, spacing: 0) {
+        // Give the chat an explicitly smaller viewport. A top safe-area
+        // inset around its UIKit timeline can displace the bottom composer
+        // below the app's tab strip instead of reducing the timeline height.
+        VStack(spacing: 0) {
                 VStack(spacing: 6) {
                     BotHeader(model: model, bot: bot, size: 64).padding(.horizontal)
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -190,7 +192,8 @@ struct BotScreen: View {
                                         }
                                 }
                                 .foregroundStyle(on ? .primary : .secondary)
-                                .disabled(t.id == "mail" && mailWaiting)
+                                .disabled(!live || (t.id == "mail" && mailWaiting))
+                                .accessibilityAddTraits(on ? .isSelected : [])
                                 .accessibilityIdentifier("bot.tab." + t.id)
                             }
                         }
@@ -207,7 +210,8 @@ struct BotScreen: View {
                                             .padding(.horizontal, 12).padding(.vertical, 8)
                                     }
                                     .foregroundStyle(on ? .primary : .secondary)
-                                    .disabled(t.id == "mail" && mailWaiting)
+                                    .disabled(!live || (t.id == "mail" && mailWaiting))
+                                    .accessibilityAddTraits(on ? .isSelected : [])
                                     .accessibilityIdentifier("bot.section." + t.id)
                                 }
                             }.padding(.horizontal, 4)
@@ -217,16 +221,20 @@ struct BotScreen: View {
                 }
                 .padding(.top, 8)
                 .background(.bar)
-            }
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
             .toolbar {
-                if model.mailroomReturn != nil, bot.tab != "chat" {
+                if model.mailroomReturn != nil, (bot.tab ?? "chat") != "chat" {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { model.backToMailroom() } label: {
                             Label(NativeMessages.native_mailroom_title(model.screen?.locale ?? "en"), systemImage: "chevron.left")
                         }.accessibilityIdentifier("mailroom.return")
+                            .disabled(!live)
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("bot.screen." + bot.id)
     }
 
     @ViewBuilder private var content: some View {
@@ -550,6 +558,7 @@ private struct SettingsTab: View {
 // composer (field is its "bfield", send the action that posts it)
 struct TalkScreen: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let model: AppModel
     let bot: BotView
     let field: String
@@ -579,7 +588,7 @@ struct TalkScreen: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: bot.posts?.count) { withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
+            .onChange(of: bot.posts?.count) { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: model.scrolls) { proxy.scrollTo("end", anchor: .bottom) }
         }
         .overlay { if (bot.posts ?? []).isEmpty { ContentUnavailableView(NativeMessages.native_bot_messages_empty(lang), systemImage: "bubble.left.and.bubble.right") } }
