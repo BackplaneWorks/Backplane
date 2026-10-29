@@ -164,7 +164,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "db0bd627e00c02e65ba2d6133842e285d3dc4e599d69747a715c628e42526f5c"
+    "src/web/view.bend": "8367a6e32c0e769fe98fb61981b08acf00823e30fc3fc4edb49a5bb9f232a9bb"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -336,5 +336,5 @@
       "scope": "Owner-scoped private lanes hidden via existing RunSet plus shared run lookup; no changes to draft/image extraction or render/view bodies.24 full-output freshness checks passed; explicit private-context/publication tests passed. No native/device acceptance inherited."
     }
   },
-  "reviewNote": "viewer refresh (merged with main's board kinds): the board picker re-reads boards on open (Bd.look, boards.list); Mech re-picks from a fresh listing (Mpage.to3d, Mech.after) and lists its parts when it comes on screen (reselect/toggle_panel clear @mech.at; the thin actor drops @mech.at on a move, runs Mpage.sync.m before renders, sends mech.list as a read); no sidebar row, draft or order logic changed; 24 sidebar draft image checks pass"
+  "reviewNote": "view.bend's View.sidebar.find puts the sidebar's fold chevron before the project filter instead of after the add-project +, so it stays where the folded strip's unfold chevron is. Same nodes, same keys and the same filter input (proj-find/pq); no draft, IME, search or info reader touched; 24 full-output draft/IME/search/info fallback cases passed on current source."
 }

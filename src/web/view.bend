@@ -634,16 +634,18 @@ def View.sidebar.head(top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +open: Map<&
           D.El{"div", "", [D.At{"class", "sidebar-tools"}], WI.WIcon.button("settings-link", "flag", "settings", MSG.T.palette.settings(lc), "settings", 16, MSG.T.palette.settings(lc))
               <> View.machines.loc(lc, Nat.is_gt(List.length(&2, U.MRow, ms), 1n), U.Flag.get(open, "machines"), ms)}]
 
-# Under the top bar the sidebar starts with its filter, the add-project +
-# beside it and its own fold, a chevron like the rail's (host.js's
-# side-toggle, as the strip's chevron and Ctrl+B do); else the filter
+# Under the top bar the sidebar starts with its own fold, a chevron like
+# the rail's (host.js's side-toggle, as the strip's chevron and Ctrl+B
+# do), then its filter and the add-project + beside it. The fold comes
+# first so it stays where it is when the sidebar folds: the strip's
+# unfold chevron sits on the same spot (style.css); else the filter
 # follows the brand, Settings and the uberbot
 def View.sidebar.find(top: Bool, +lc: I.Loc, +active: Bool, +q: String) -> List<&2, D.Node> & List<&2, D.Node>:
   match top:
     case True{}:
-      ([D.El{"div", "", [D.At{"class", "find with-add"}], [WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"),
-        WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, ""),
-        WI.WIcon.button("icon side-fold", "side-toggle", "", "Fold the sidebar · Ctrl+B", "chevron-left", 16, "")]}], Nil{})
+      ([D.El{"div", "", [D.At{"class", "find with-add"}], [WI.WIcon.button("icon side-fold", "side-toggle", "", "Fold the sidebar · Ctrl+B", "chevron-left", 16, ""),
+        WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"),
+        WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, "")]}], Nil{})
     case False{}:
       (Nil{}, View.find.loc(lc, active, q))
 
