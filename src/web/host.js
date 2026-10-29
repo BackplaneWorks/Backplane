@@ -57,6 +57,7 @@ import { ThinHost, preservePresentationRoute, presentationTarget, refusedFallbac
 import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
 const modelFeedback = new ModelFeedback(() => later());
+import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
 import { ThinMailDraft, mailReplyField } from "./mail-drafts.js";
 import { ThinViews, viewCapability } from "./thin.js";
@@ -396,6 +397,7 @@ try {
 } catch {}
 let socket = null;
 const thinContinuations = new ThinContinuations();
+const bodyWindows = new BodyWindows({renderBody: node => App.make(node), request: (part, cursor, tail) => thin?.body(part, cursor, tail), changed: () => later()});
 let frontend = null, frontendNode = null, wantFrontend = true, fallbackIntent = null;
 let viewMode = "discovering", remoteReady = false, remoteEpoch = "", thinSession = null;
 let pairingAccepted = false;
@@ -948,15 +950,16 @@ function render() {
   queued = false;
   const tl = document.getElementById("timeline");
   const t0 = PERF ? pnow() : 0;
-  let page = frontendNode ? thinContinuations.project(App.presentation_overlay(frontendNode, presentationJson(modelFeedback.project(currentSession()))), expand)
+  let page = frontendNode ? thinContinuations.project(App.presentation_overlay(frontendNode, presentationJson(modelFeedback.project(currentSession()))), node => node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node))
     : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
   // A wheel/touch may have moved since the last scroll event or page request.
   // Capture at application time, before pruning or inserting any rows.
   if (held && tl) held = anchorOf(tl) || held;
   const beforeAnchor = held;
+  const bodyAnchor = frontendNode && held ? bodyWindows.anchor(tl) : null;
   historyKeep = held && tl ? historySpan(tl) : null;
-  if (frontendNode) page = historyProject(page);
+  if (frontendNode) page = bodyWindows.project(historyProject(page));
   // Projection may remap a fold head, but must not freeze an offset sampled
   // before that work. A compositor fling can advance while JS computes.
   if (held && beforeAnchor && tl) {
@@ -1008,6 +1011,8 @@ function render() {
   }
   if (viewMode === "view-v1") document.querySelector("main")?.setAttribute("aria-busy", String(!remoteReady));
   holdFix(tl2);
+  bodyWindows.restore(tl2, bodyAnchor);
+  bodyWindows.observe(tl2, remoteReady && !!frontendNode);
   holdWatch(tl2);
   if (historyStatus) historyPageState(historyStatus);
   scroll = false;
@@ -1310,7 +1315,7 @@ function dispatch(action, value, timer) {
       if (action === "earlier" || action === "view-page") return thin.page();
       if (action === "thin-search") return thin.search(value);
       if (action === "thin-message-more") {
-        try { const input = JSON.parse(value);return thin.message(input.entryId, input.cursor); } catch { return true; }
+        try { const input = JSON.parse(value);if (bodyWindows.parts.get(input.entryId)?.bodyPage === 1) return bodyWindows.open(input.entryId);return thin.message(input.entryId, input.cursor); } catch { return true; }
       }
       if (action === "thin-cancel") return thin.cancel(Number(value));
       if (action === "mail-send" && thinMailDraft.needsSubmit()) {
@@ -1943,6 +1948,7 @@ document.addEventListener("scroll", (e) => {
     if (tl.scrollTop > historyScrollTop && newerGestureUntil) { newerGestureUntil = performance.now() + 1200;olderGestureUntil = 0;stationaryPages = 0; }
   }
   historyScrollOwner = tl;historyScrollTop = tl.scrollTop;historyCheckSoon();
+  bodyWindows.observe(tl, remoteReady && !!frontendNode);
 }, true);
 // and back down: on an earlier page, within two screens of its bottom after
 // a downward gesture, the next newer page (thin-host's newer, retracing the
@@ -2627,7 +2633,7 @@ async function startThin(again = false, reason = "initial") {
     terminalOutput.clear();
     checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
-    thin?.disconnect();if (socket === s) socket = null;
+    bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
     if (!frontendNode) void restoreFocused(true);
     later();thinReconnect();
   };
@@ -2636,7 +2642,7 @@ async function startThin(again = false, reason = "initial") {
     const next = saved === null ? 2 ** 47 : /^(0|[1-9][0-9]*)$/.test(saved) ? Number(saved) : NaN;
     if (!Number.isSafeInteger(next) || next < 2 ** 47 || next >= 2 ** 48 - 1) throw Error("Invalid view counter");
     thin = new ThinHost({
-      hub: location.origin, cid, now: () => performance.now(), session: currentSession,
+      hub: location.origin, cid, bodyPages: true, now: () => performance.now(), session: currentSession,
       target: presentationTarget,
       counter: value => localStorage.setItem("backplane-view-request-id", String(value)),
       send: request => {
@@ -2650,7 +2656,7 @@ async function startThin(again = false, reason = "initial") {
       selection: (target, session) => {
         historyClear();
         modelFeedback.clear();
-        thinMailDraft.clear();thinContinuations.clear();
+        thinMailDraft.clear();thinContinuations.clear();bodyWindows.disconnect();
         if (target.kind === "thread") { ui = App.presentation_select(ui, target.id);void restoreFocused(); }
         else { focusedRequestedKey = null;focusedView.invalidate(); }
         restoreTransition(target);
@@ -2698,7 +2704,7 @@ async function startThin(again = false, reason = "initial") {
       warning: message => showViewStatus(message),
       pageState: historyPageState,
       refused: refusedView,
-      search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage,
+      search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage, body: (message, input) => bodyWindows.accept(message, input), bodyFailed: (input, reason) => bodyWindows.failed(input, reason),
       view: (node, detail) => {
         if (!current()) return;
         // the newest page at once (holdBottom): no bridge to it, its end
@@ -2711,6 +2717,7 @@ async function startThin(again = false, reason = "initial") {
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
         thinMailDraft.bind(detail.mailDraftContext, detail.epoch, accepted);
         thinContinuations.bind(location.origin, detail);
+        bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, !!held);
         if (detail.position) transitionPosition = detail.position;
         else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;

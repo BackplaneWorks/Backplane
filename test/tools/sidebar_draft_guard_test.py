@@ -123,6 +123,39 @@ class SidebarDraftGuard(unittest.TestCase):
                 self.assertFalse(invoked.exists())
                 self.assertFalse((root / "build").exists())
 
+    def test_loading_bridges_and_modules_fail_closed(self):
+        for name in ["src/server/thin-body.bend", "src/core/thinq.bend", "src/server/thin-splice.bend", "src/server/thinstore.bend", "src/core/view-page.bend", "src/web/list-windows.bend"]:
+            with self.subTest(path=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self.copy_review(root)
+                guard.check(root)
+                path = root / name
+                path.write_text(path.read_text() + "\n# changed loading dependency\n")
+                with self.assertRaises(guard.GuardError):
+                    guard.check(root)
+                self.copy_review(root)
+                manifest = root / guard.MANIFEST
+                reviewed = json.loads(manifest.read_text())
+                del reviewed["files"][name]
+                manifest.write_text(json.dumps(reviewed))
+                with self.assertRaisesRegex(guard.GuardError, "closure changed"):
+                    guard.check(root)
+                self.copy_review(root)
+                (root / name).unlink()
+                with self.assertRaises(guard.GuardError):
+                    guard.check(root)
+
+    def test_loading_bridge_scope_cannot_revert_silently(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.copy_review(root)
+            manifest = root / guard.MANIFEST
+            reviewed = json.loads(manifest.read_text())
+            reviewed["bridges"].remove("src/core/thinq.bend")
+            manifest.write_text(json.dumps(reviewed))
+            with self.assertRaisesRegex(guard.GuardError, "scope changed"):
+                guard.check(root)
+
     def test_required_local_gate_is_outside_optional_modes(self):
         source = (ROOT / "scripts/local-small.py").read_text()
         self.assertLess(source.index("'test/tools/sidebar_draft_guard_test.py'"),

@@ -23,6 +23,10 @@ BRIDGES = (
     "src/mobile/screen.bend",
     "src/mobile/hubs.bend",
     "src/core/thin-wire.bend",
+    "src/server/thin-body.bend",
+    "src/core/thinq.bend",
+    "src/server/thin-splice.bend",
+    "src/server/thinstore.bend",
 )
 MANIFEST = "scripts/sidebar-draft-inputs.json"
 

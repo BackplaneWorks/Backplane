@@ -63,8 +63,17 @@ def big(n: Nat, acc: String) -> String:
     case 1n+m:
       big(m, acc ++ "Line of a long streamed answer with some words, padding the block out to its size; ")
 
+def bounded.full(+s: TL.Stream) -> J.Json:
+  +input = V.Obj.put(p(True{}), "bodyPages", J.Num{"1"})
+  V.Render.acted_live(V.Action.run(True{}, V.Session.current(True{}, st(), info(), live(), now(), input), input, now()), True{}, st(), T.Index.of(st()), input, "1", now(), rows(), s)
+
+def bounded.same(+name: String, +a: TL.Stream, +b: TL.Stream) -> IO(Unit):
+  C.Check.str(name, shown(S.Splice.reply(True{}, bounded.full(a), b, "t1", "1", J.Json.get_obj(p(True{}), "target"), I.En{})), J.Json.show(bounded.full(b)))
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    bounded.same("bounded large live splice equals fresh complete picture", stream(big(400n, ""), False{}, 19n), stream(big(450n, "日本😀"), False{}, 20n))
+    bounded.same("bounded live crossing threshold keeps exact partial metadata", stream("small", False{}, 21n), stream(big(250n, ""), False{}, 22n))
     same("web: a longer live row", True{}, stream("Looking at", False{}, 1n), stream("Looking at the buck converter now.", False{}, 2n))
     same("mobile: a longer live row", False{}, stream("Looking at", False{}, 1n), stream("Looking at the buck converter now.", False{}, 2n))
     same("mobile: Markdown in the live row", False{}, stream("Plan:", False{}, 3n), stream("Plan:\n\n- move C12\n- reroute **VBUS**\n\n```\nnet USB_D+\n```\n日本 😀", False{}, 4n))

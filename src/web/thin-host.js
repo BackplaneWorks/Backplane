@@ -86,6 +86,7 @@ export class ThinHost {
     this.opening = false;
     this.client = new Views({ now: api.now,
       sidebarRegions: (api.renderer || 'web') === 'web',
+      bodyPages: api.bodyPages === true,
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
         p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action', request.p.target), away: this.awayOf(request.p.session.sel) } } : request }),
       command: (command, input) => ({ type: 'command', command, input }),
@@ -375,6 +376,10 @@ export class ThinHost {
     if (!this.ready) return false;
     return this.flush(this.client.request(this.hub, 'view.search', { query, cursor }));
   }
+  body(part, cursor, tail = false) {
+    if (!this.ready || this.active || this.paging || !part || part.bodyPage !== 1 || typeof cursor !== 'string' || !cursor) return false;
+    return this.flush(this.client.request(this.hub, 'view.message', { entryId: part.id, cursor, bodyPage: 1, bodyVersion: part.version, bodyThread: part.thread, bodyTail: tail }), { bodyRead: true });
+  }
   message(entryId, cursor) {
     if (!this.ready) return false;
     const partial = this.window?.partial?.find(p => p.id === entryId);
@@ -491,6 +496,7 @@ export class ThinHost {
       this.client.links.get(this.hub).invalidated = true;this.api.pageState?.(null);
     }
     if (result.failed) {
+      if (metadata?.bodyRead) { this.api.bodyFailed?.(metadata.input, result.failed);this.pump(true);return true; }
       metadata?.operation?.settled?.(false);
       // a search refused (a query the hub does not take) is the search's
       // to say, not the view's: the view stays
@@ -505,12 +511,14 @@ export class ThinHost {
       // a search answered after an update of the same view (a thread
       // streaming elsewhere) is still the search asked; another view's is not
       if (result.method === 'view.search') { if (result.current || this.sameTarget(metadata)) this.api.search?.(r.search); }
-      else if (result.current) {
-        if (result.method === 'view.message') {
+      else if (result.current || metadata?.bodyRead && this.sameTarget(metadata)) {
+        if (result.method === 'view.message' && metadata?.bodyRead) this.api.body?.(r.message, metadata.input);
+        else if (result.method === 'view.message') {
           try { this.api.message?.(this.messages.accept(r.message, metadata.input.cursor)); }
           catch { this.api.warning?.('Message continuation is unavailable; reopen it explicitly'); }
         } else this.api.cancelled?.(r.cancelled);
       }
+      if (metadata?.bodyRead && !result.current && !this.sameTarget(metadata)) this.api.bodyFailed?.(metadata.input, 'overtaken');
       if (result.refreshDue) this.refreshSoon();
       return true; // query results neither replace shown nor establish readiness
     }
@@ -652,6 +660,7 @@ export class ThinHost {
     let current = false, pageExpired = false;
     for (const call of expired) {
       const metadata = this.pending.get(call.id);
+      if (metadata?.bodyRead) { this.api.bodyFailed?.(metadata.input, 'timeout');this.pending.delete(call.id);continue; }
       if (this.paging?.id === call.id) {
         pageExpired = true;
         const page = this.paging;this.paging = null;

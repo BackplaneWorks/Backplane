@@ -1,4 +1,5 @@
 import Base
+import ./view-page.bend as VP
 import ./accounts.bend as ACCT
 import ./subthreads.bend as ST
 import ./fallback.bend as FB
@@ -15157,8 +15158,13 @@ def ThreadTree.dispatch(i: Nat, +u: Ui, +value: String, +action: String) -> Act:
     case 3n: Ui.toggle_settled(u, "conversation-history")
     case _: Mpk.dispatch(C.Codec.pos(["mp-key", "mp-agent", "mp-model", "mp-effort"], action), u, value, action)
 
+def Ui.act.list_page(on: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match on:
+    case True{}: Act{Ui.info_set(u, "local.view.pages", VP.Page.positions(Ui.info(u, "local.view.pages"), value)), Nil{}}
+    case False{}: ThreadTree.dispatch(C.Codec.pos(["thread-child", "thread-tree", "thread-detach", "thread-history"], action), u, value, action)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  ThreadTree.dispatch(C.Codec.pos(["thread-child", "thread-tree", "thread-detach", "thread-history"], action), u, value, action)
+  Ui.act.list_page(Bool.and(String.eq(action, "list-page"), String.eq(Ui.info(u, "local.view.lazy"), "1")), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

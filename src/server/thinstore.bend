@@ -89,6 +89,16 @@ def Ts.page.chat(enabled: Bool, +h: String, +th: String, +before: Nat, +limit: N
         +i : T.Index = T.Index.window(Q.Q.rows(xs), th, 0n, base)
         return Page{i, T.Index.page(i, th, before, limit)}
 
+# Web body-window capability only. The extra row remains a real chronology
+# lookahead and no large body is materialized by this ordinary page query.
+def Ts.page.body(+h: String, +th: String, +before: Nat, +base: T.Index, +hide: Bool) -> IO(Page):
+  do IO<Page>:
+    +s : Nat <- Ts.seq_at(h, before)
+    +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.page.body(Bool.pick(String, hide, Q.Q.sql.chat.keep(), "")), [th, Q.Q.n(s), Q.Q.n(33n)], 33)
+    +n : Nat <- Ts.below(Nat.is_eq(List.length(&2, List<&2, String>, xs), 33n), h, th, Q.Q.last_seq(xs, 0n))
+    +i : T.Index = T.Index.window(Q.Q.rows(xs), th, n, base)
+    return Page{i, T.Index.page(i, th, before, 32n)}
+
 # A message read whole: the rows the read may name (the cursor's ordinal,
 # or the entry `id` among the page's rows), whole, in the page's index
 def Ts.whole(+h: String, +th: String, +ord: Nat, +id: String, +p: Page) -> IO(Page):

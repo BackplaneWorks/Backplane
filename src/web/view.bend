@@ -1,4 +1,6 @@
 import Base
+import ../core/view-page.bend as VP
+import ./list-windows.bend as LW
 import ../core/accounts.bend as ACCT
 import ../core/bub-move.bend as HOP
 import ../core/subthreads.bend as ST
@@ -272,7 +274,7 @@ def View.tree.create(show: Bool, +id: String, +depth: Nat) -> List<&2, D.Node>:
 
 # (live: the rows of a live shelf, pinned or active, where a settled
 # thread's row says so)
-def View.tree.rows(+lc: I.Loc, rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +live: Bool) -> List<&2, D.Node>:
+def View.tree.rows.raw(+lc: I.Loc, rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +live: Bool) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
     case ST.TRow{+t, +depth, +expanded, +children} <> rest:
@@ -280,7 +282,11 @@ def View.tree.rows(+lc: I.Loc, rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.State, 
       +indent = Bool.pick(Nat, Nat.is_gt(depth, 4n), 4n, depth)
       List.concat(&2, D.Node, [[D.El{"div", "tree:" ++ id, [D.At{"class", "thread-tree-row"}, D.At{"style", "--depth:" ++ Nat.show(indent)}],
         [View.tree.expander(id, expanded, children), View.row.s(lc, t, ix, st, sel, now, Bool.and(movable, Nat.is_eq(depth, 0n)), M.Snooze.on(now, U.Side.until(st, id)), Bool.and(live, U.Side.settled(t)))]}],
-        View.tree.create(Bool.and(expanded, U.ThreadTree.can_create(st, id)), id, indent), View.tree.rows(lc, rest, ix, st, sel, now, movable, live)])
+        View.tree.create(Bool.and(expanded, U.ThreadTree.can_create(st, id)), id, indent), View.tree.rows.raw(lc, rest, ix, st, sel, now, movable, live)])
+
+def View.tree.rows(+lc: I.Loc, +rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +live: Bool) -> List<&2, D.Node>:
+  +p = VP.Page.of(st, "threads", ST.Tree.row_ids(rs), sel)
+  List.append(&2, D.Node, View.tree.rows.raw(lc, LW.Lists.tree(rs, VP.Page.ids(p)), ix, st, sel, now, movable, live), LW.Lists.pager(p))
 
 def View.rows_in(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> List<&2, D.Node>:
   View.tree.rows(lc, ST.Tree.rows(st, ts, sel), ix, st, sel, now, movable, movable)
@@ -437,17 +443,28 @@ def View.atree.anchor(step: ATreeStep) -> U.ARow:
   match step:
     case ATreeStep{_, anchor}: anchor
 
-def View.atree.rows(rs: List<&2, ST.TRow>, +lc: I.Loc, anchors: List<&2, U.ARow>, anchor: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
+def View.atree.row(show: Bool, +lc: I.Loc, +t: M.Thread, +depth: Nat, +expanded: Bool, +children: Nat, +at: U.ARow, +ix: U.SIx, +st: M.State, +sel: String, tail: List<&2, D.Node>) -> List<&2, D.Node>:
+  match show:
+    case False{}: tail
+    case True{}:
+      +id = M.Thread.id(t)
+      +indent = Bool.pick(Nat, Nat.is_gt(depth, 4n), 4n, depth)
+      List.concat(&2, D.Node, [[D.El{"div", "tree:" ++ id, [D.At{"class", "thread-tree-row"}, D.At{"style", "--depth:" ++ Nat.show(indent)}],
+        [View.tree.expander(id, expanded, children), View.atree.card(lc, t, at, ix, st, sel)]}],
+        View.tree.create(Bool.and(expanded, U.ThreadTree.can_create(st, id)), id, indent), tail])
+
+def View.atree.rows.raw(rs: List<&2, ST.TRow>, +lc: I.Loc, anchors: List<&2, U.ARow>, anchor: U.ARow, +ix: U.SIx, +st: M.State, +sel: String, +ids: List<&2, String>) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
     case ST.TRow{+t, +depth, +expanded, +children} <> rest:
-      +id = M.Thread.id(t)
-      +indent = Bool.pick(Nat, Nat.is_gt(depth, 4n), 4n, depth)
       +step = View.atree.data(View.atree.step(Nat.is_eq(depth, 0n), anchors, anchor))
       +at = View.atree.anchor(step)
-      List.concat(&2, D.Node, [[D.El{"div", "tree:" ++ id, [D.At{"class", "thread-tree-row"}, D.At{"style", "--depth:" ++ Nat.show(indent)}],
-        [View.tree.expander(id, expanded, children), View.atree.card(lc, t, at, ix, st, sel)]}],
-        View.tree.create(Bool.and(expanded, U.ThreadTree.can_create(st, id)), id, indent), View.atree.rows(rest, lc, View.atree.next(step), at, ix, st, sel)])
+      View.atree.row(VP.Page.has(ids, M.Thread.id(t)), lc, t, depth, expanded, children, at, ix, st, sel,
+        View.atree.rows.raw(rest, lc, View.atree.next(step), at, ix, st, sel, ids))
+
+def View.atree.rows(+rs: List<&2, ST.TRow>, +lc: I.Loc, anchors: List<&2, U.ARow>, anchor: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
+  +p = VP.Page.of(st, "active", ST.Tree.row_ids(rs), sel)
+  List.append(&2, D.Node, View.atree.rows.raw(rs, lc, anchors, anchor, ix, st, sel, VP.Page.ids(p)), LW.Lists.pager(p))
 
 def View.arows(+lc: I.Loc, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String, +q: String) -> List<&2, D.Node>:
   match rs:
@@ -763,8 +780,17 @@ def View.sidebar.frame.rows(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain
   View.sidebar.strip(View.sidebar.keys(View.sidebar.projected(lc, bots, WB.WB.uber(lc, u, signals), U.Machines.rows.loc(lc, u), U.Menu.items.loc(lc, u, True{}), signals, u, rows, raw),
     U.Side.pids(unfolded), View.sidebar.threads(u, plain, unfolded, raw)), View.strip(lc, U.Side.pids(unfolded), U.Ui.state(u), U.Side.cur(u)))
 
-def View.sidebar.frame.shown(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
+def View.sidebar.frame.shown.raw(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
   View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded.at(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u))), raw)
+
+def View.sidebar.frame.project_page(node: D.Node, p: VP.Page) -> D.Node:
+  match node:
+    case D.El{tag, key, attrs, kids}: D.El{tag, key, attrs, List.append(&2, D.Node, kids, LW.Lists.pager(p))}
+    case other: other
+
+def View.sidebar.frame.shown(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
+  +p = VP.Page.of(U.Ui.state(u), "projects", U.Side.pids(rows), U.Side.cur(u))
+  View.sidebar.frame.project_page(View.sidebar.frame.shown.raw(lc, bots, u, plain, signals, LW.Lists.projects(rows, VP.Page.ids(p)), raw), p)
 
 def View.sidebar.frame.raw(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +raw: List<&2, U.SRow>) -> D.Node:
   View.sidebar.frame.shown(lc, bots, u, plain, signals, U.Find.rows(raw, U.Ui.scratch(u, "@f.pq")), raw)
@@ -1235,9 +1261,14 @@ def View.sub.empty.loc(lc: I.Loc) -> String:
     case I.En{}: "No steps reported yet."
     case I.Ja{}: "まだ手順が報告されていません。"
 
-def View.sub.detail(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>) -> List<&2, D.Node>:
+def View.sub.detail.open(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, Bool.and(agent, Bool.and(open, Bool.and(Bool.not(String.starts_with(key, "subs.done:")), List.is_empty(&2, SB.SubStep, ss)))),
     [D.Dom.span("sub-empty", View.sub.empty.loc(lc))], View.sub.steps(ss))
+
+def View.sub.detail(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>) -> List<&2, D.Node>:
+  match open:
+    case False{}: Nil{}
+    case True{}: View.sub.detail.open(lc, agent, open, key, ss)
 
 def View.sub.signal.k(+lc: I.Loc, r: SB.SubRow, +act: String, +signal: String) -> D.Node:
   match r:
@@ -1253,10 +1284,14 @@ def View.sub.k(+lc: I.Loc, +r: SB.SubRow, +act: String) -> D.Node:
 def View.sub.signals(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>) -> D.Node:
   View.sub.signal.k(lc, r, SB.Subs.cancel(r), SB.Subs.signal.of(info, r))
 
-def View.subs.signals.go(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
+def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
-    case r <> rest: View.sub.signals(lc, r, info) <> View.subs.signals.go(lc, rest, info)
+    case r <> rest: View.sub.signals(lc, r, info) <> View.subs.signals.raw(lc, rest, info)
+
+def View.subs.signals.go(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
+  +p = VP.Page.info(info, "subagents", SB.Subs.keys(rs), "")
+  List.append(&2, D.Node, View.subs.signals.raw(lc, LW.Lists.subs(rs, VP.Page.ids(p)), info), LW.Lists.pager(p))
 
 def View.sub(+lc: I.Loc, +r: SB.SubRow) -> D.Node:
   View.sub.k(lc, r, SB.Subs.cancel(r))
@@ -2407,12 +2442,29 @@ def View.entry.k(+lc: I.Loc, mine: Bool, e: M.Entry, +st: M.State, +ec: U.Ec, +s
 def View.entry(+lc: I.Loc, +e: M.Entry, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps) -> List<&2, D.Node>:
   View.entry.k(lc, String.eq(View.entry_thread(e), sel), e, st, ec, sp)
 
+# Match before constructing an entry. A folded body must not parse Markdown,
+# build viewers or materialize a tool's detail only to discard it afterwards.
+def View.role.body(r: FO.Role) -> Bool:
+  match r:
+    case FO.RShow{}: True{}
+    case FO.RHead{_, _, open}: open
+    case FO.RIn{open}: open
+    case FO.RWork{_, _, open, inner}:
+      match open:
+        case True{}: View.role.body(inner)
+        case False{}: False{}
+
+def View.entry.role(show: Bool, +lc: I.Loc, +e: M.Entry, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps) -> List<&2, D.Node>:
+  match show:
+    case True{}: View.entry(lc, e, st, sel, ec, sp)
+    case False{}: Nil{}
+
 def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps) -> List<&2, D.Node>:
   match es rs:
     case Nil{} _:
       Nil{}
-    case e <> t r <> rt:
-      List.append(&2, D.Node, View.role.loc(lc, r, View.entry(lc, e, st, sel, ec, sp)), View.entries.r(lc, t, rt, st, sel, ec, sp))
+    case e <> t +r <> rt:
+      List.append(&2, D.Node, View.role.loc(lc, r, View.entry.role(View.role.body(r), lc, e, st, sel, ec, sp)), View.entries.r(lc, t, rt, st, sel, ec, sp))
     case e <> t Nil{}:
       List.append(&2, D.Node, View.entry(lc, e, st, sel, ec, sp), View.entries.r(lc, t, Nil{}, st, sel, ec, sp))
 
