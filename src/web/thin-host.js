@@ -613,7 +613,8 @@ export class ThinHost {
       }
       this.conversation = r.session.sel;
       if (paged) { this.pageError = null;this.api.pageState?.(null); }
-      if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.view(node, { epoch: this.epoch, target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
+      if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
+        target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
         page: paged && { direction: paged.direction, before: paged.before }, position });
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
       this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId });
