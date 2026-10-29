@@ -67,7 +67,7 @@ if (process.argv[2] === "--agent") { await agent(); } else {
   const port = listener.port; listener.stop(true);
   const agentLog = join(root, "agents.jsonl");
   writeFileSync(agentLog, "");
-  const proc = Bun.spawn([bin, "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], { env: { ...process.env, HOME: root, PATH: `${fake}:${process.env.PATH}`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", MAILRUN_AGENT_LOG: agentLog, BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "deploy-lock") }, stdout: Bun.file(join(root, "stdout")), stderr: Bun.file(join(root, "stderr")) });
+  const proc = Bun.spawn([bin, "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], { env: { ...process.env, HOME: root, PATH: `${fake}:${process.env.PATH}`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", MAILRUN_AGENT_LOG: agentLog, BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "deploy-lock") }, stdout: Bun.file(join(root, "stdout")), stderr: Bun.file(join(root, "stderr")) });
   const until = async (f: () => boolean, ms = 15000) => { const deadline = Date.now() + ms; while (Date.now() < deadline) { if (f()) return true; await sleep(50); } return false; };
   let ws: WebSocket | undefined;
   let failures = 0;

@@ -22,6 +22,9 @@
 #                 its top-level KiCad files are copied, nothing else
 # BP_E2E_ROOT     scratch root (default ${TMPDIR:-/tmp}/bp-e2e)
 # BP_E2E_STREAM   stand-in reply: "N [MS]", deltas per turn (60) and ms apart (50)
+# BACKPLANE_KISTACK_SOURCE  a KiStack (.tar.gz like GitHub's, or a folder) the
+#                 hub syncs into HOME_DIR/kistack at start; unset, it syncs
+#                 none (stand-in agents; BACKPLANE_KISTACK_SYNC=1: GitHub's newest)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
