@@ -2,7 +2,7 @@
 // jitter and a cap, Retry-After from a starting hub, one pending retry that
 // a wake runs at once, and telling a deploy from the bundle names.
 //   bun test/tools/reconnect_test.ts
-import { Backoff, Retry, retryAfterMs, bundleOf, bundleIn, deployed, probeHub, CAP_MS, RETRY_AFTER_CAP_MS } from "../../src/web/reconnect.js";
+import { Backoff, Retry, retryAfterMs, bundleOf, bundleIn, styleOf, stylesIn, deployed, probeHub, CAP_MS, RETRY_AFTER_CAP_MS } from "../../src/web/reconnect.js";
 
 let fail = 0;
 const check = (ok: boolean, what: string) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) fail++; };
@@ -47,6 +47,14 @@ check(bundleIn(index("chunk-rzyzmezk.js")) === "chunk-rzyzmezk.js", "bundle name
 check(!deployed("chunk-rzyzmezk.js", index("chunk-rzyzmezk.js")), "same build: no deploy");
 check(deployed("chunk-rzyzmezk.js", index("chunk-new12345.js")), "new chunk: a deploy");
 check(!deployed("chunk-rzyzmezk.js", "<html>offline</html>") && !deployed("", index("chunk-x.js")), "no evidence: no deploy");
+check(styleOf("http://h/chunk-old123.css?v=1") === "chunk-old123.css" && styleOf("http://h/style.css") === "", "only bundled stylesheet identities count");
+check(stylesIn(`<link href='./chunk-z.css' rel='stylesheet'><link rel="icon" href="./chunk-icon.css"><link rel="stylesheet" href="./chunk-a.css"><link rel="stylesheet" href="./chunk-z.css">`).join() === "chunk-a.css,chunk-z.css", "stylesheet identities ignore icons, duplicates and attribute order");
+check(!deployed("chunk-rzyzmezk.js", index("chunk-rzyzmezk.js"), ["chunk-eqswhk46.css"]), "same script and stylesheet do not reload");
+check(deployed("chunk-rzyzmezk.js", index("chunk-rzyzmezk.js"), ["chunk-old123.css"]), "stylesheet-only deploy reloads through the normal quiet path");
+check(!deployed("chunk-rzyzmezk.js", "<html>offline</html>", ["chunk-old123.css"]), "stylesheet evidence cannot replace a valid app index");
+check(!deployed("", index("chunk-rzyzmezk.js"), ["chunk-old123.css"]), "unbundled development page never reloads");
+check(!deployed("chunk-rzyzmezk.js", '<script src="./chunk-rzyzmezk.js"></script>', ["chunk-old123.css"]), "missing stylesheet evidence does not trigger a reload");
+check(!deployed("chunk-rzyzmezk.js", index("chunk-rzyzmezk.js"), []), "retained caller without stylesheet identity keeps its existing behavior");
 
 // the hub's state from /hello
 const res = (status: number, h: Record<string, string> = {}) => async () => ({ ok: status < 300, status, headers: new Headers(h) });
