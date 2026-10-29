@@ -37,6 +37,21 @@ test('a fold that gains an earlier head does not leave a duplicate out-of-order 
   const shown = f.show([row('0'), fold('A'), row('C'), row('D')], 'older');
   assert.deepEqual(f.ids(shown), ['0', 'A', 'C', 'D', 'E']);assert.equal(f.context.held.id, 'fold:A');assert.equal(f.context.held.off, 30);
 });
+test('a visible reheaded fold keeps its element key and never resurrects the obsolete head', () => {
+  const f = fixture();f.show([fold('B'), row('C'), row('D'), row('E')]);
+  f.context.held = { id: 'fold:B', off: 30 };vm.runInContext('historyKeep=["B","C"]', f.context);
+  const shown = f.show([row('0'), fold('A'), row('C'), row('D')], 'older');
+  assert.deepEqual(f.ids(shown), ['0', 'A', 'C', 'D', 'E']);
+  assert.equal([...each(shown.kids)].find(n => f.context.historyRow(n) === 'A').key, 'fold:B');
+  const refreshed = f.show([row('0'), fold('A'), row('C'), row('D')]);
+  assert.equal([...each(refreshed.kids)].find(n => f.context.historyRow(n) === 'A').key, 'fold:B');
+});
+test('an anchor in the visual bridge cannot be remapped to a different canonical fold', () => {
+  const f = fixture();f.show([fold('Z'), row('z-msg')]);f.show([fold('B'), row('C')], 'older');
+  f.context.held = { id: 'fold:Z', off: 30 };vm.runInContext('historyKeep=["Z","z-msg"]', f.context);
+  const shown = f.show([fold('A'), row('C')], 'older');
+  assert.equal(f.context.held.id, 'fold:Z');assert.deepEqual(f.ids(shown), ['A', 'C', 'Z', 'z-msg']);
+});
 test('a short page without a shared rendered row still keeps the outgoing message', () => {
   const f = fixture();f.show([row('z')]);assert.deepEqual(f.ids(f.show([fold('a')], 'older')), ['a', 'z']);
   assert.deepEqual(f.ids(f.show([fold('0')], 'older')), ['0', 'a'], 'only the outgoing canonical page survives');

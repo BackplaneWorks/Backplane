@@ -30,6 +30,16 @@
         }
         precondition(!gate.request(0, perform: accepted))
         precondition(calls == 2)
-        print("PASS production EarlierPageGate: declined not consumed, exactly one accepted page per real drag, reply/readiness/count changes cannot cascade, next drag permits next page")
+        gate.configure(enabled: true, page: "older-head")
+        precondition(gate.request(23904, perform: accepted), "a new displayed page permits continuing the real fling")
+        precondition(!gate.request(23904, perform: accepted), "only one request for that page")
+        gate.configure(enabled: false, page: "older-head")
+        gate.configure(enabled: true, page: "older-head")
+        precondition(!gate.request(23872, perform: accepted), "same-page reconnect/count changes cannot rearm")
+        precondition(calls == 3)
+        var fresh = EarlierPageGate()
+        fresh.configure(enabled: true, page: "first")
+        precondition(!fresh.request(100, perform: accepted), "a fresh ready page still needs a real drag")
+        print("PASS production EarlierPageGate: acceptance, same-page deduplication, continuing-fling next page, no readiness-only paging")
     }
 }

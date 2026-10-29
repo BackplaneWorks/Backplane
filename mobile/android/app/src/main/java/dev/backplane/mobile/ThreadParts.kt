@@ -288,7 +288,7 @@ fun HubPicture(m: AppModel, path: String, modifier: Modifier, show: (String) -> 
         Got.Failed -> Box(modifier.aspectRatio(4f / 3f), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.BrokenImage, NativeMessages.native_image_missing(lang), tint = MaterialTheme.colorScheme.outline)
         }
-        is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_render(lang), modifier.aspectRatio(g.b.width.toFloat() / maxOf(g.b.height, 1))
+        is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_render(lang), modifier.aspectRatio(4f / 3f)
             .clickable { show(u) }, contentScale = ContentScale.Fit)
     }
 }
@@ -299,13 +299,13 @@ fun Thumb(m: AppModel, path: String, show: (String) -> Unit) {
     val lang = LocalBackplaneLanguage.current
     val u = m.web(path) ?: return
     when (val g = hubImage(u, 720)) {
-        null -> Box(Modifier.size(80.dp, 60.dp), contentAlignment = Alignment.Center) {
+        null -> Box(Modifier.size(260.dp, 200.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         }
-        Got.Failed -> Box(Modifier.size(80.dp, 60.dp), contentAlignment = Alignment.Center) {
+        Got.Failed -> Box(Modifier.size(260.dp, 200.dp), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.BrokenImage, NativeMessages.native_image_missing(lang), tint = MaterialTheme.colorScheme.outline)
         }
-        is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_plain(lang), Modifier.widthIn(max = 260.dp).heightIn(max = 200.dp)
+        is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_plain(lang), Modifier.size(260.dp, 200.dp)
             .clip(corner).clickable { show(u) }, contentScale = ContentScale.Fit)
     }
 }

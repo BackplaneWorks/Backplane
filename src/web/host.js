@@ -211,8 +211,24 @@ function memoSweep() {
   for (const [id, m] of MEMO) if (memoGen - m.gen > 8) MEMO.delete(id);
 }
 
+function patchKey(v) {
+  if (!is(v, "El")) return "";
+  if (v.key) return v.key;
+  if (v.tag !== "button") return "";
+  // Fold controls are entries too. Their first value byte is the next
+  // open/closed state; the remaining entry id survives a toggle or prepend.
+  // Older hubs emitted these without a VNode key. Never recycle one for a
+  // different run merely because it is another unkeyed button.
+  const attrs = [...each(v.attrs)];
+  if (attrs.some(a => is(a, "At") && a.name === "class" && a.value.split(/\s+/).includes("fold"))
+    && attrs.some(a => !is(a, "At") && a.event === "click" && a.action === "fold")) {
+    const id = attrs.find(a => is(a, "At") && a.name === "data-value")?.value.slice(1);
+    if (id) return "fold:" + id;
+  }
+  return "";
+}
 function same(a, b) {
-  return a.$ === b.$ && (is(a, "Txt") || (a.tag === b.tag && a.key === b.key));
+  return a.$ === b.$ && (is(a, "Txt") || (a.tag === b.tag && patchKey(a) === patchKey(b)));
 }
 
 // make el (whose last vnode is el.__v) match v
@@ -225,7 +241,7 @@ function patch(el, v) {
   const byKey = new Map();
   const free = [];
   for (const p of prev) {
-    if (is(p.v, "El") && p.v.key) byKey.set(p.v.tag + "\u0000" + p.v.key, p);
+    if (patchKey(p.v)) byKey.set(p.v.tag + "\u0000" + patchKey(p.v), p);
     else free.push(p);
   }
   const next = [];
@@ -233,9 +249,10 @@ function patch(el, v) {
   for (let i = 0; i < kids.length; i += 1) {
     const k = kids[i];
     let hit = null;
-    if (is(k, "El") && k.key) {
-      hit = byKey.get(k.tag + "\u0000" + k.key) ?? null;
-      if (hit) byKey.delete(k.tag + "\u0000" + k.key);
+    const key = patchKey(k);
+    if (key) {
+      hit = byKey.get(k.tag + "\u0000" + key) ?? null;
+      if (hit) byKey.delete(k.tag + "\u0000" + key);
     } else {
       while (f < free.length && !same(free[f].v, k)) f += 1;
       if (f < free.length) hit = free[f++];
@@ -572,10 +589,19 @@ function historySnapshotRow(node) {
   if (classes.includes("live") || classes.includes("sending") || !historyRow(node)) return false;
   return classes.includes("msg") || attrs.some(a => !is(a, "At") && a.event === "click" && a.action === "fold");
 }
+function historyFoldKey(node) {
+  return is(node, "El") && node.tag === "button" && [...each(node.attrs)].some(a => !is(a, "At") && a.action === "fold")
+    ? node.key || "fold:" + historyRow(node) : "";
+}
 function historyProject(node) {
   if (!is(node, "El")) return node;
   const kids = [...each(node.kids)];
   if ([...each(node.attrs)].some(a => is(a, "At") && a.name === "id" && a.value === "timeline")) {
+    const foldKeys = new Map(historyShown.filter(historyFoldKey).map(n => [historyRow(n), historyFoldKey(n)]));
+    for (let i = 0; i < kids.length; i++) {
+      const key = historyFoldKey(kids[i]) && foldKeys.get(historyRow(kids[i]));
+      if (key) kids[i] = { ...kids[i], key };
+    }
     const ids = new Set(kids.map(historyRow).filter(Boolean));
     if (historyRestored) {
       const rows = historyRestored;historyRestored = null;
@@ -594,12 +620,20 @@ function historyProject(node) {
       // A run cut at the old page boundary can gain an earlier fold head.
       // Its following shared message identifies the same visible run.
       if (held?.id.startsWith("fold:") && !ids.has(held.id.slice(5)) && !historySpare.some(n => historyRow(n) === held.id.slice(5))) {
-        const at = previous.findIndex(n => historyRow(n) === held.id.slice(5));
-        const next = previous.slice(at + 1).find(n => ids.has(historyRow(n)));
+        const old = held.id.slice(5), at = previous.findIndex(n => historyRow(n) === old);
+        // An anchor in the visual bridge is not a run in this canonical
+        // page. slice(-1 + 1) used to match it to an unrelated older fold.
+        const next = at >= 0 && previous.slice(at + 1).find(n => ids.has(historyRow(n)));
         const end = next && kids.findIndex(n => historyRow(n) === historyRow(next));
         if (typeof end === "number") for (let i = end - 1; i >= 0; i--) {
           const id = historyRow(kids[i]);
-          if (id && [...each(kids[i].attrs)].some(a => !is(a, "At") && a.action === "fold")) { held = { ...held, id: "fold:" + id };break; }
+          if (id && historyFoldKey(kids[i])) {
+            kids[i] = { ...kids[i], key: historyFoldKey(previous[at]) };
+            held = { ...held, id: "fold:" + id };
+            // The new head represents this same visible run. Do not let
+            // historyHeld resurrect its obsolete head beside it.
+            ids.add(old);break;
+          }
           if (id) break;
         }
       }
@@ -665,12 +699,14 @@ function historySpan(tl) {
 // the entry at the top of the timeline's view, and where it is in the
 // window (so a header or panel above the timeline growing moves it not)
 function anchorOf(tl) {
-  const top = tl.getBoundingClientRect().top;
+  const box = tl.getBoundingClientRect(), visible = [];
   for (const el of tl.querySelectorAll("[data-id], button.fold")) {
     const r = el.getBoundingClientRect();
-    if (r.height > 0 && r.bottom > top + 1) return { id: el.getAttribute("data-id") || "fold:" + el.getAttribute("data-value").slice(1), off: r.top };
+    if (r.height <= 0 || r.bottom <= box.top + 1) continue;
+    if (r.top >= box.bottom && visible.length) break;
+    visible.push({ id: el.getAttribute("data-id") || "fold:" + el.getAttribute("data-value").slice(1), off: r.top });
   }
-  return null;
+  return visible.length ? { ...visible[0], retained: visible.slice(1) } : null;
 }
 function anchorElement(tl, id) {
   return id.startsWith("fold:") ? [...tl.querySelectorAll("button.fold")].find(el => el.getAttribute("data-value")?.slice(1) === id.slice(5))
@@ -687,13 +723,14 @@ function anchorElement(tl, id) {
 let held = null;
 // until when an upward gesture keeps the end from catching the view (leaveEnd)
 let leavingEndUntil = 0;
-// until when a downward gesture lets the end catch the view from near it
+// The last downward gesture (history direction; it does not enable following).
 let towardEndUntil = 0;
 let away = "";
 // where the last of our own corrections left the timeline: its scroll
 // event is ours, not the person's, and keeps the offset held (no drift)
 let fixedAt = -1;
 let heldSize = null;
+const holdInsets = new WeakMap();
 function holdSize(tl) {
   return { tl, height: tl.scrollHeight, view: tl.clientHeight, width: tl.clientWidth };
 }
@@ -708,10 +745,28 @@ function holdFix(tl) {
     if (tl.scrollTop < end) { tl.scrollTop = end; fixedAt = tl.scrollTop; }
     return;
   }
-  const el = anchorElement(tl, held.id);
+  let el = anchorElement(tl, held.id);
+  if (!el) {
+    const next = held.retained?.find(row => anchorElement(tl, row.id));
+    if (next) { held = { ...next, retained: held.retained };el = anchorElement(tl, next.id); }
+  }
   if (!el) return;
   const d = el.getBoundingClientRect().top - held.off;
   if (d) { tl.scrollTop += d; fixedAt = tl.scrollTop; }
+  // Some engines quantize scrollTop to a device pixel although text rows
+  // have fractional CSS heights. Keep the subpixel remainder in the track's
+  // top inset, rather than rounding the reading position on every page.
+  const remainder = el.getBoundingClientRect().top - held.off;
+  if (remainder && Math.abs(remainder) < 1) {
+    const old = holdInsets.get(tl) || 0;
+    // Keep this nonnegative: at scrollTop=0 a negative inset would need
+    // a negative scrollTop to make up the integral pixel, which is clamped.
+    const inset = ((old - remainder) % 1 + 1) % 1;
+    tl.style.setProperty("--anchor-inset", inset + "px");holdInsets.set(tl, inset);
+    const residual = el.getBoundingClientRect().top - held.off;
+    if (residual) tl.scrollTop += residual;
+    fixedAt = tl.scrollTop;heldSize = holdSize(tl);
+  }
 }
 // tell the client once each way; the thread is the one the view was away in
 function holdSay(now) {
@@ -753,26 +808,39 @@ function holdRead(tl) {
   // thread's: it holds like anywhere else, and newer rows come by scrolling
   // while an upward gesture lasts the end does not catch the view again:
   // a smooth scroll's first frames are still within the end's few px
-  // and while a reply streams in (its row: the page's "live", the hub's
-  // "@live:<thread>"), a downward gesture that brings it within a third of
-  // a screen of the end catches up (App.hold_catch_up): a reply
-  // streaming faster than the wheel moves left the view a few lines short
-  // of the end for good. Finished, the end is where the scroll lands: the
-  // catch-up's render yanked a slow scroll's last notch down mid-scroll
-  const nearEnd = holdEnd(tl) || (performance.now() < towardEndUntil
-    && App.hold_catch_up(BigInt(Math.max(0, Math.round(tl.scrollHeight - tl.scrollTop - tl.clientHeight))), BigInt(tl.clientHeight), !!tl.querySelector(':scope > .msg.live, :scope > [data-id^="@live:"]')));
+  // Streaming does not widen the end threshold. Near the bottom is still
+  // a reading position; only actually reaching it opts into following.
+  const nearEnd = holdEnd(tl);
   held = nearEnd && performance.now() > leavingEndUntil && !(thin && thin.atNewest?.() === false) ? null : anchorOf(tl);
   holdSay(held ? App.sel(ui) : "");
 }
-const holdSizes = typeof ResizeObserver === "function" ? new ResizeObserver(() => holdFix(document.getElementById("timeline"))) : null;
+const holdBoxes = new WeakMap(), holdObserved = new Set();
+function holdResize(entries = []) {
+  const tl = document.getElementById("timeline");
+  if (!tl) return;
+  const size = holdSize(tl);
+  let changed = heldSize?.tl !== tl || size.height !== heldSize.height || size.view !== heldSize.view || size.width !== heldSize.width;
+  for (const { target } of entries) {
+    const box = target.getBoundingClientRect(), old = holdBoxes.get(target);
+    if (old && (old.width !== box.width || old.height !== box.height)) changed = true;
+    holdBoxes.set(target, { width: box.width, height: box.height });
+  }
+  // Observing a row queues an initial notification even when its size is
+  // unchanged. It must not undo user/compositor motion since the render.
+  if (changed) holdFix(tl);
+}
+const holdSizes = typeof ResizeObserver === "function" ? new ResizeObserver(holdResize) : null;
 function holdWatch(tl) {
   if (!holdSizes) return;
-  holdSizes.disconnect();
+  const next = new Set(tl ? [tl, ...tl.children] : []);
+  for (const el of holdObserved) if (!next.has(el)) { holdSizes.unobserve(el);holdObserved.delete(el); }
   if (!tl) return;
   // Explicit message anchors own corrections, including scrollTop clamping.
   tl.style.overflowAnchor = "none";
-  holdSizes.observe(tl);
-  for (const c of tl.children) holdSizes.observe(c);
+  for (const el of next) {
+    const box = el.getBoundingClientRect();holdBoxes.set(el, { width: box.width, height: box.height });
+    if (!holdObserved.has(el)) { holdObserved.add(el);holdSizes.observe(el); }
+  }
 }
 document.addEventListener("scroll", (e) => holdRead(e.target), true);
 // a viewer's Layers list opens leftward from its button (style.css: the
@@ -886,8 +954,15 @@ function render() {
   // A wheel/touch may have moved since the last scroll event or page request.
   // Capture at application time, before pruning or inserting any rows.
   if (held && tl) held = anchorOf(tl) || held;
+  const beforeAnchor = held;
   historyKeep = held && tl ? historySpan(tl) : null;
   if (frontendNode) page = historyProject(page);
+  // Projection may remap a fold head, but must not freeze an offset sampled
+  // before that work. A compositor fling can advance while JS computes.
+  if (held && beforeAnchor && tl) {
+    const el = anchorElement(tl, beforeAnchor.id);
+    if (el) held = { ...held, off: el.getBoundingClientRect().top };
+  }
   const t1 = PERF ? pnow() : 0;
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
   bubMoveSync();
