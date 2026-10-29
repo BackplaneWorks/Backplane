@@ -99,10 +99,10 @@ def main() -> IO(Unit):
     C.Check.str("agent: block, blank line, text", RL.Rules.agent(a, "t-other", "hello"), "<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n- Reply in French\n</rules>\n\nhello")
     C.Check.str("for every bot too", has(RL.Rules.block(a, miso), "Reply in French"), "yes")
     # scoped to a bot, and to a project
-    +b : M.State = rule(a, 2001n, "{\"text\":\"Never email Scott\",\"bot\":\"miso\"}")
-    C.Check.str("bot rule in its thread", has(RL.Rules.block(b, miso), "Never email Scott"), "yes")
-    C.Check.str("bot rule not in another bot's", has(RL.Rules.block(b, tofu), "Never email Scott"), "no")
-    C.Check.str("bot rule not in a plain thread", has(RL.Rules.block(b, "t-other"), "Never email Scott"), "no")
+    +b : M.State = rule(a, 2001n, "{\"text\":\"Never email Robin\",\"bot\":\"miso\"}")
+    C.Check.str("bot rule in its thread", has(RL.Rules.block(b, miso), "Never email Robin"), "yes")
+    C.Check.str("bot rule not in another bot's", has(RL.Rules.block(b, tofu), "Never email Robin"), "no")
+    C.Check.str("bot rule not in a plain thread", has(RL.Rules.block(b, "t-other"), "Never email Robin"), "no")
     C.Check.str("bot name resolved to its id", RL.Rule.bot(Maybe.default(&2, RL.Rule, List.head(&2, RL.Rule, List.drop(&2, RL.Rule, RL.Rules.all(b), 1n)), RL.Rules.blank())), id.of(b, "Miso"))
     +c : M.State = rule(b, 2002n, "{\"text\":\"Check the 3D view\",\"project\":\"power BOARD\"}")
     C.Check.str("project rule in its thread", has(RL.Rules.block(c, "t-pb"), "Check the 3D view"), "yes")
@@ -180,7 +180,7 @@ def main() -> IO(Unit):
     C.Check.str("rules.drop", Nat.show(List.length(&2, RL.Rule, RL.Rules.all(run(e, LG.Ledger.request(e, 2200n, 1, req("rules.drop", "{\"id\":\"" ++ rid ++ "\"}")))))), "0")
     C.Check.str("rules.drop leaves no key", Nat.show(rule.keys(M.Setting.keys(run(e, LG.Ledger.request(e, 2200n, 1, req("rules.drop", "{\"id\":\"" ++ rid ++ "\"}")))))), "0")
     # the turn's text, for a bot's thread and a plain thread
-    C.Check.str("turn: bot thread", has(BH.Bots.turn(c, 3000n, miso, "hello"), "<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n- Reply in French\n- Never email Scott\n</rules>\n\n"), "yes")
+    C.Check.str("turn: bot thread", has(BH.Bots.turn(c, 3000n, miso, "hello"), "<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n- Reply in French\n- Never email Robin\n</rules>\n\n"), "yes")
     C.Check.str("turn: text after", yes(String.ends_with(BH.Bots.turn(c, 3000n, miso, "hello"), "hello")), "yes")
     C.Check.str("turn: plain thread", has(BH.Bots.turn(c, 3000n, "t-pb", "hello"), "- Reply in French\n- Check the 3D view\n</rules>\n\nhello"), "yes")
     C.Check.str("turn: rules outermost", yes(String.starts_with(BH.Bots.turn(c, 3000n, miso, "hello"), "<rules>")), "yes")

@@ -7662,15 +7662,15 @@ law told_setting_empty_removes:
 
 # a mark stores its key normalized
 law told_mark_key_norm:
-  {TLD.Told.key(TLD.Told.demo.first(TLD.Told.demo.marked())) == "lunch:-kane-" : String}
+  {TLD.Told.key(TLD.Told.demo.first(TLD.Told.demo.marked())) == "lunch:-dana-" : String}
 
 # a mark is found by its key
 law told_check_finds_marked:
-  {List.length(&2, TLD.Told, TLD.Told.check.d(10n, TLD.Told.demo.marked(), 1010n, "Lunch: Kane!!", "", 0n)) == 1n : Nat}
+  {List.length(&2, TLD.Told, TLD.Told.check.d(10n, TLD.Told.demo.marked(), 1010n, "Lunch: Dana!!", "", 0n)) == 1n : Nat}
 
 # and by the words of the same thing said differently
 law told_check_text_overlap:
-  {List.length(&2, TLD.Told, TLD.Told.check.d(10n, TLD.Told.demo.marked(), 1010n, "", "lunch with Kane in ATL on 10/28", 0n)) == 1n : Nat}
+  {List.length(&2, TLD.Told, TLD.Told.check.d(10n, TLD.Told.demo.marked(), 1010n, "", "lunch with Dana in NYC on 10/28", 0n)) == 1n : Nat}
 
 # a record 31 days old is pruned, one 29 days old is kept
 law told_prune_old:
