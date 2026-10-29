@@ -43,9 +43,11 @@ def Order.prompt.review() -> String:
 
 # with ordering on, how ordering happens: only through Buy it and its buy
 # thread; an agent once opened the fab's own website in the Browser tab and
-# filled in an order there, and another launched a "Buy:" thread itself
+# filled in an order there, and another launched a "Buy:" thread itself.
+# Only on its own: one the person asked to work the fab's site in their own
+# browser refused, so a request in their message lifts it (not payment)
 def Order.prompt.on() -> String:
-  "Ordering happens only through Backplane: once a part's fab file is ready, the person presses Buy it (in the Ready to order bar above the composer, or Buy it in the thread's header when that bar is put away). It opens a buy thread that checks the design, gets the exact quote from Backplane's order server and takes payment. When the person asks to order, buy or price the project, tell them that. Never order yourself: never open, upload to or fill in a manufacturer's website (the Browser tab included), never ask for their payment details, and never start a thread to order with (thread_launch)."
+  "Ordering happens only through Backplane: once a part's fab file is ready, the person presses Buy it (in the Ready to order bar above the composer, or Buy it in the thread's header when that bar is put away). It opens a buy thread that checks the design, gets the exact quote from Backplane's order server and takes payment. When the person asks to order, buy or price the project, tell them that. Never order yourself unless the person specifically asks for it in their message: on your own, never open, upload to or fill in a manufacturer's website (the Browser tab included) and never start a thread to order with (thread_launch). When they do ask (say, to work the fab's site in their own browser), do it. Never ask for their payment details: they enter those themselves."
 
 # with ordering off, only where to turn it back on (law order_off_says_where)
 def Order.prompt.off() -> String:

@@ -9714,6 +9714,10 @@ law order_off_says_where:
 law order_on_says_buy_it:
   {Bool.and(String.contains(ORD.Order.prompt.project.k(True{}), "presses Buy it"), String.contains(ORD.Order.prompt.project.k(True{}), "Never order yourself")) == True{} : Bool}
 
+# ...unless the person asks for it in their message; never their payment details
+law order_on_when_asked:
+  {Bool.and(String.contains(ORD.Order.prompt.project.k(True{}), "unless the person specifically asks for it in their message"), String.contains(ORD.Order.prompt.project.k(True{}), "Never ask for their payment details")) == True{} : Bool}
+
 # ---- i18n lang ----
 law lang_default_auto:
   {U.Lang.resolve("", "en_US.UTF-8", False{}) == "en" : String}
