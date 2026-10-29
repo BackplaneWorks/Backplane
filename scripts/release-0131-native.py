@@ -8,17 +8,20 @@ def sha(p):
  with pathlib.Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==commit
 assert not subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],text=True).strip()
-u=os.environ['COMPONENTS_URL']; assert u.startswith('https://')
+u=os.environ['COMPONENTS_URL'].replace('{target}',target); assert u.startswith('https://')
+expected=json.loads(os.environ['COMPONENTS_SHA'])[target]
 a=O/'components.tar.gz'
 with urllib.request.urlopen(u,timeout=120) as response,a.open('wb') as f:
  while block:=response.read(1024*1024):f.write(block)
-assert sha(a)==os.environ['COMPONENTS_SHA']
+assert sha(a)==expected
 with tarfile.open(a) as tar:tar.extractall(O/'inputs',filter='fully_trusted')
 services=list((S/'build/native-input').rglob('SERVICE.json')); assert len(services)==1
 service=services[0];meta=json.loads(service.read_text());tree=subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip()
 assert (meta['sourceCommit'],meta['sourceTree'],meta['version'],meta['target'])==(commit,tree,'0.13.1',target)
 run('node',S/'desktop/restore-modes.cjs',service,service.parent/'payload')
-run('npm','--prefix',S/'desktop','ci','--ignore-scripts','--no-audit','--no-fund')
+assert (S/'desktop/node_modules/ws/package.json').is_file(), 'npm ci must run in native shell before Python packaging'
+for name,directory in [('SHELL.json','shell-payload'),('ELECTRON.json','payload')]:
+ run('node',S/'desktop/restore-modes.cjs',O/'inputs/components'/target/name,O/'inputs/components'/target/directory)
 run(sys.executable,S/'desktop/freeze-target.py',S,O/'inputs/components'/target,service,O/'freeze')
 run('node',S/'desktop/produce-release.cjs','stage','--request',O/'freeze/stage.request.json','--output',O/'stage')
 env=dict(os.environ)
