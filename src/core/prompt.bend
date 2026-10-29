@@ -336,9 +336,9 @@ def Claude.dirs(ds: List<&2, String>) -> List<&2, String>:
     case d <> t:
       "--add-dir" <> d <> Claude.dirs(t)
 
-# the bundled KiStack loaded as a plugin (its manifest is ours, written at
-# build time by scripts/build-kistack.sh), so its skills are Claude's own
-# `kistack:<name>`
+# KiStack loaded as a plugin (the copy synced into the hub's home, else the
+# bundled one; either way its manifest is ours, server/kicad.bend's
+# KiStack.manifest), so its skills are Claude's own `kistack:<name>`
 def Claude.plugins(ds: List<&2, String>) -> List<&2, String>:
   match ds:
     case Nil{}:

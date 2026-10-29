@@ -85,7 +85,7 @@
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
-    "src/core/prompt.bend": "51daa5edc75e68b2e1c0769459348abc84b1dcb8f67e95fbb9027e308e6001f6",
+    "src/core/prompt.bend": "de79af86187f72df680c127125514b3ce03fbeeae83238c696179e6c3c134882",
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
     "src/core/ref-origin.bend": "933dae7741d19f4c68b3d34de827fe42f490deb222282e4e185640a0eb4677fa",
     "src/core/ref.bend": "fa2dd3c0a4e9865ac9b185680361c681ce187f625a315e560f3a289e651e90f7",
@@ -320,5 +320,5 @@
       "limits": "Guard-only; no whole-feature/auth/native/runtime acceptance. Earlier source/build receipts retained as historical."
     }
   },
-  "reviewNote": "skills: SKILL.md frontmatter folds YAML block/wrapped values (Front.fold) and the delegation wording names inherited skills; no draft reader touched (sidebar_draft_image_test 24 ok)"
+  "reviewNote": "KiStack sync: src/core/prompt.bend changed only the comment on Claude.plugins (no code); sidebar_draft_image_test 24 ok"
 }
