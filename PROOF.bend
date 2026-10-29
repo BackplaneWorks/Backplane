@@ -4774,6 +4774,14 @@ def Laws.mech_default_assembly():
 def Laws.mech_default_first():
   {==}
 
+def Laws.mech_after_kept():
+  {==}
+
+def Laws.mech_after_gone():
+  {==}
+
+def Laws.mech_after_none(shown, root):
+  {==}
 
 def Laws.mech_gui_linux():
   {==}

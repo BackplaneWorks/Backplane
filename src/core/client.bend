@@ -726,10 +726,13 @@ def Viewer.flag(b: Bool) -> String:
     case False{}:
       ""
 
+# (and a thread whose viewer is on Mech has its parts listed again when it
+# is chosen, as when Mech is opened: "@mech.at" forgets the last asked,
+# Mpage.sync; going back to a thread used to show the parts it had)
 def Ui.reselect.go(u: Ui, +old: String) -> Ui:
   match u:
     case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, String.eq(Str.get(nf, "panel:" ++ sel), "1"), v, rid, w, er, note,
+      Ui{st, sel, Map.set(&2, String, dr, "@mech.at", ""), live, op, on, now, ad, String.eq(Str.get(nf, "panel:" ++ sel), "1"), v, rid, w, er, note,
         Map.set(&2, String, nf, "panel:" ++ old, Viewer.flag(pa)), ob, tr}
 
 def Ui.reselect.k(same: Bool, u: Ui, +old: String) -> Ui:
@@ -1415,11 +1418,20 @@ def Ui.toggle_add(u: Ui) -> Act:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
       Act{Ui{st, sel, dr, live, op, on, now, Bool.not(ad), pa, v, rid, w, er, note, nf, ob, tr}, [Focus{"project-path"}]}
 
+# (the viewer opened by hand comes back on what it showed: on Mech, its
+# parts are listed again, as when Mech is opened, Mpage.sync)
+def Ui.panel.opened(shut: Bool, dr: Map<&2, String>) -> Map<&2, String>:
+  match shut:
+    case True{}:
+      Map.set(&2, String, dr, "@mech.at", "")
+    case False{}:
+      dr
+
 # opened or shut by hand: the hub's own view leaves it alone from now on
 def Ui.toggle_panel(u: Ui) -> Act:
   match u:
-    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Act{Ui{st, sel, dr, live, op, on, now, ad, Bool.not(pa), v, rid, w, er, note, Map.set(&2, String, nf, "panel.hand:" ++ sel, "1"), ob, tr}, Nil{}}
+    case Ui{st, +sel, dr, live, op, on, now, ad, +pa, v, rid, w, er, note, nf, ob, tr}:
+      Act{Ui{st, sel, Ui.panel.opened(Bool.not(pa), dr), live, op, on, now, ad, Bool.not(pa), v, rid, w, er, note, Map.set(&2, String, nf, "panel.hand:" ++ sel, "1"), ob, tr}, Nil{}}
 
 def Ui.toggle_settled(u: Ui, +pid: String) -> Act:
   match u:
@@ -5638,29 +5650,61 @@ def Fm.top(+u: Ui) -> Nat:
 def Fm.name(+u: Ui) -> String:
   FM.Fm.last(Ui.view_get(u, "view.path"))
 
-def Mpage.first.k(m: Maybe<&2, MC.MPart>, +root: String) -> String:
-  match m:
-    case Some{MC.MPart{+p, _, _}}:
-      MC.Mech.abs(root, p)
-    case None{}:
-      ""
+# Mech opened (Mpage.open marks "@mech.to3d:<t>"; it shows at once what
+# the parts last listed give, and asks for them again, Mpage.sync): once
+# the fresh listing is in, the thread's viewer shows what it gives
+# (MC.Mech.after: the part on show while it is still there, else the
+# assembly or the first part), or the page that says there are none, and
+# the next listing with parts opens one. Before, a part that had gone
+# stayed on show. The viewer only moves when that differs from what it
+# shows (a part still there stays as it is: no refit, no flicker), and only
+# while it is still on Mech, a part in 3D or the parts page (Renders or a
+# view picked meanwhile stay). A move leaves "@mech.at" at the view it
+# made, so the parts are not listed again for it.
+def Mpage.on.at(+u: Ui, +th: String) -> Bool:
+  Bool.or(Bool.and(String.eq(Ui.info(u, "view.kind:" ++ th), "3d"), MC.Mech.is_model(Ui.info(u, "view.path:" ++ th))),
+    Bool.and(String.eq(Ui.info(u, "view.kind:" ++ th), "mech"), String.is_empty(Ui.info(u, "view.path:" ++ th))))
 
-# the part Mech opens on: the assembly, else the first (MC.Mech.default)
-def Mpage.first(+ps: List<&2, MC.MPart>, +root: String) -> String:
-  Mpage.first.k(MC.Mech.default(ps), root)
+# what the thread's fresh listing gives (a path from its project root)
+def Mpage.after(+u: Ui, +th: String) -> String:
+  MC.Mech.after(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "view.path:" ++ th), Ui.info(u, "mech.root:" ++ th))
 
-# Mech opened before the parts were known: once they are, the first shows
-# in 3D ("@mech.to3d:<t>"); with none, the page says so
-def Mpage.to3d.k(go: Bool, u: Ui, +th: String, +path: String) -> Ui:
-  match go:
+def Mpage.seen.k(sel: Bool, +u: Ui) -> Ui:
+  match sel:
     case True{}:
-      Ui.view_put.at(Ui.scratch_set(u, "@mech.to3d:" ++ th, ""), th, "3d", path)
+      Ui.scratch_set(u, "@mech.at", Ui.sel(u) ++ "#" ++ Ui.view_get(u, "view.n"))
+    case False{}:
+      u
+
+def Mpage.moved(+u: Ui, +th: String, +kind: String, +path: String) -> Ui:
+  Mpage.seen.k(String.eq(th, Ui.sel(u)), Ui.view_put.at(u, th, kind, path))
+
+# (none left: a part still in 3D gives way to the parts page, which stays
+# marked; else the part, unless it is the one on show)
+def Mpage.to3d.go(none: Bool, +u: Ui, +th: String, +path: String) -> Ui:
+  match none:
+    case True{}:
+      Bool.pick(Ui, String.eq(Ui.info(u, "view.kind:" ++ th), "3d"), Mpage.moved(u, th, "mech", ""), u)
+    case False{}:
+      Bool.pick(Ui, Bool.and(String.eq(Ui.info(u, "view.kind:" ++ th), "3d"), String.eq(Ui.info(u, "view.path:" ++ th), path)),
+        Ui.scratch_set(u, "@mech.to3d:" ++ th, ""), Mpage.moved(Ui.scratch_set(u, "@mech.to3d:" ++ th, ""), th, "3d", path))
+
+def Mpage.to3d.k(on: Bool, +u: Ui, +th: String) -> Ui:
+  match on:
+    case True{}:
+      Mpage.to3d.go(String.is_empty(Mpage.after(u, th)), u, th, MC.Mech.abs(Ui.info(u, "mech.root:" ++ th), Mpage.after(u, th)))
+    case False{}:
+      Ui.scratch_set(u, "@mech.to3d:" ++ th, "")
+
+def Mpage.to3d.m(marked: Bool, +u: Ui, +th: String) -> Ui:
+  match marked:
+    case True{}:
+      Mpage.to3d.k(Mpage.on.at(u, th), u, th)
     case False{}:
       u
 
 def Mpage.to3d(+u: Ui, +th: String) -> Ui:
-  Mpage.to3d.k(Bool.and(String.eq(Ui.scratch(u, "@mech.to3d:" ++ th), "1"), Bool.not(String.is_empty(Mpage.first(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "mech.root:" ++ th))))),
-    u, th, Mpage.first(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "mech.root:" ++ th)))
+  Mpage.to3d.m(String.eq(Ui.scratch(u, "@mech.to3d:" ++ th), "1"), u, th)
 
 def Mpage.got(u: Ui, +r: J.Json) -> Ui:
   Mpage.to3d(Mpage.done.k(Bool.not(String.is_empty(J.Json.get_str(r, "rendered", ""))), Mpage.store(u, r), J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "error", "")), J.Json.get_str(r, "thread", ""))
@@ -5786,11 +5830,13 @@ def Mpage.render.label(+u: Ui) -> String:
 def Mpage.open.k(known: Bool, +u: Ui, +path: String) -> Ui:
   match known:
     case True{}:
-      Ui.view_put(u, "3d", path)
+      Ui.view_put(Ui.scratch_set(u, "@mech.to3d:" ++ Ui.sel(u), "1"), "3d", path)
     case False{}:
       Ui.view_put(Ui.scratch_set(u, "@mech.to3d:" ++ Ui.sel(u), "1"), "mech", "")
 
-# Mech: the part on show in 3D, once the parts are known
+# Mech: the part on show in 3D, once the parts are known; either way they
+# are listed again (Mpage.sync: a new view) and what that listing gives is
+# shown when it comes (Mpage.to3d)
 def Mpage.open(+u: Ui) -> Ui:
   Mpage.open.k(Nat.is_eq(Mpage.state(u), 2n), u, MC.Mech.abs(Mpage.root(u), Mpage.cur.path(u)))
 

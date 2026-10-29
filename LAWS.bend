@@ -1775,6 +1775,19 @@ law mech_default_assembly:
 law mech_default_first:
   {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.default(MCH.Mech.parts("1 9 mech/bracket.step\n3 9 mech/lid.step")), MCH.MPart{"", "", Nil{}})) == "mech/bracket.step" : String}
 
+# Mech opened again shows what the fresh listing gives (client.bend's
+# Mpage.to3d): the part on show while it is still there, else the assembly
+# (or the first), and nothing once none are left
+law mech_after_kept:
+  {MCH.Mech.after(MCH.Mech.parts("1 9 mech/a.step\n2 9 mech/b.step"), "/p/mech/b.step", "/p") == "mech/b.step" : String}
+
+law mech_after_gone:
+  {MCH.Mech.after(MCH.Mech.parts("1 9 mech/b.step\n2 9 mech/case-assembly.step"), "/p/mech/a.step", "/p") == "mech/case-assembly.step" : String}
+
+law mech_after_none:
+  for shown: String
+  for root: String
+  {MCH.Mech.after(Nil{}, shown, root) == "" : String}
 
 # agents are pointed at FreeCAD's GUI beside its console build (the only
 # one that writes a STEP's colours), on Linux and in the macOS app

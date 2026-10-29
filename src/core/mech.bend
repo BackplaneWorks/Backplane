@@ -237,6 +237,20 @@ def Mech.pick.or(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> Maybe<&2, MPart>:
 def Mech.pick(+ps: List<&2, MPart>, +want: String, +root: String) -> Maybe<&2, MPart>:
   Mech.pick.or(Mech.pick.k(ps, Bool.pick(String, String.starts_with(want, root ++ "/"), String.drop(want, 1n+String.length(root)), want)), ps)
 
+def Mech.after.k(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> String:
+  match m:
+    case Some{MPart{+p, _, _}}:
+      p
+    case None{}:
+      Mech.part.path(Maybe.default(&2, MPart, Mech.default(ps), MPart{"", "", Nil{}}))
+
+# what Mech shows once a fresh listing is in (client.bend's Mpage.to3d,
+# laws mech_after_*): the part on show (shown: a path from the project
+# root, or absolute under it) while the listing still has it, else the
+# assembly or the first part; "" when there are none left
+def Mech.after(+ps: List<&2, MPart>, +shown: String, +root: String) -> String:
+  Mech.after.k(Mech.pick.k(ps, Bool.pick(String, String.starts_with(shown, root ++ "/"), String.drop(shown, 1n+String.length(root)), shown)), ps)
+
 # Pictures
 # --------
 

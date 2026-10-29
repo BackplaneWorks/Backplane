@@ -197,8 +197,10 @@ def View.far.k(far: Bool, a: U.Act) -> U.Act:
     case False{} +x:
       x
 
+# (and to a Mech listing: the part it gives may be another, client.bend's
+# Mpage.to3d, and the viewer watches the one on show)
 def View.far(+o: J.Json, a: U.Act) -> U.Act:
-  View.far.k(Bool.or(U.Fm.has(J.Json.get_obj(o, "result"), "farView"), U.Rv.reply.has(o)), a)
+  View.far.k(Bool.or(Bool.or(U.Fm.has(J.Json.get_obj(o, "result"), "farView"), U.Rv.reply.has(o)), U.Mpage.has(o)), a)
 
 # a view whose Sheet menu lists the project's boards (View.board.list)
 def View.boards.on(+v: String) -> Bool:
@@ -282,16 +284,6 @@ def View.hist.act.r(shows: Bool, +u: U.Ui, +action: String, +value: String) -> U
 def View.hist.act(+u: U.Ui, +action: String, +value: String) -> U.Act:
   View.hist.act.r(View.rv.shows(action), u, action, value)
 
-# (the Mechanical page, "mech", is the client's: its view is set there,
-# and the parts asked for; a view picked by hand shows the project's own
-# board, not a part)
-def View.open.mech(mech: Bool, a: U.Act) -> U.Act:
-  match mech a:
-    case True{} U.Act{u, cs}:
-      View.join(U.Ui.act(u, "mech", ""), cs)
-    case False{} _:
-      a
-
 # (back from the Review tab to the board or schematic, the client's view
 # comes back too, with a comparison still open: client.bend's Rv.back)
 def View.open.back.k(a: U.Act, +v: String) -> U.Act:
@@ -306,8 +298,20 @@ def View.open.back(back: Bool, +u: U.Ui, +v: String) -> U.Act:
     case False{}:
       View.open.k(u, v)
 
+# (the Mechanical page, "mech", is the client's: its view is set there and
+# the parts asked for, client.bend's Mpage.open, before the phone's own
+# view follows it, which then has nothing more to ask: it asked first, and
+# Mech asked again, at every first opening; a view picked by hand shows
+# the project's own board, not a part)
+def View.open.go.k(mech: Bool, +u: U.Ui, +v: String) -> U.Act:
+  match mech:
+    case True{}:
+      View.open.back.k(U.Ui.act(u, "mech", ""), v)
+    case False{}:
+      View.open.back(Bool.and(String.eq(U.Ui.view_get(u, "view.kind"), "review"), Bool.or(String.eq(v, "board"), String.eq(v, "schematic"))), u, v)
+
 def View.open.go(+u: U.Ui, +v: String) -> U.Act:
-  View.open.mech(String.eq(v, "mech"), View.open.back(Bool.and(String.eq(U.Ui.view_get(u, "view.kind"), "review"), Bool.or(String.eq(v, "board"), String.eq(v, "schematic"))), u, v))
+  View.open.go.k(String.eq(v, "mech"), u, v)
 
 # (Files asks the hub for the folder last shown)
 def View.open.rv(rv: Bool, +u: U.Ui, +v: String) -> U.Act:
