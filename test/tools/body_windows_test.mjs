@@ -47,8 +47,33 @@ check('append-only live versions retain painted pages and refresh only their bou
 });
 check('message Markdown construction is once per fetched page and never for collapsed tools',()=>{
  const {b,requests}=setup();let count=0;b.renderBody=n=>{count++;return node('div','made',{},[node('div','',{class:'body'},[node('strong','',{},[text(read(n))])])])};
- b.observe(timeline(b),true);assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:7,total:7,text:'**bold**',hasMore:false,complete:true,cursor:'',previous:''},requests.at(-1)));
- const page=b.project(root());assert.equal(count,1);b.project(root());assert.equal(count,1);assert(JSON.stringify(page).includes('strong'));
+ b.observe(timeline(b),true);assert.equal(count,1,'preview Markdown rendered synchronously');assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:7,total:7,text:'**bold**',hasMore:false,complete:true,cursor:'',previous:''},requests.at(-1)));
+ const page=b.project(root());assert.equal(count,2);b.project(root());assert.equal(count,2);assert(JSON.stringify(page).includes('strong'));
  const closed=setup(false);closed.b.renderBody=()=>{throw Error('collapsed renderer executed')};closed.b.project(root(true));
+});
+check('preview is Markdown on its first frame and cached by entry version',()=>{
+ const {b}=setup();let renders=0;b.renderBody=n=>{renders++;return node('div','m',{},[node('div','',{class:'body'},[node('strong','',{},[text(read(n))])])])};
+ const first=b.project(root()),again=b.project(root());assert(JSON.stringify(first).includes('strong'));assert(!JSON.stringify(first).includes('"tag":"pre"'));assert.equal(renders,1);
+ assert.equal(elems(elems(first.kids)[0].kids)[0].kids.head,elems(elems(again.kids)[0].kids)[0].kids.head,'cached Markdown part identity survives projection');
+ b.bind('h',detail([{...part(),version:'8'}]),'owner',root());b.project(root());assert.equal(renders,2,'new version renders before publication');
+});
+check('already rendered message preview keeps structured Markdown nodes',()=>{
+ const {b}=setup();const made=node('div','timeline',{id:'timeline'},[node('div','m',{class:'msg assistant','data-id':'m'},[node('div','',{class:'body'},[node('strong','',{},[text('bold')]),node('a','',{href:'https://example.com'},[text('link')])])])]);
+ const projected=b.project(made);assert(JSON.stringify(projected).includes('strong'));assert(JSON.stringify(projected).includes('https://example.com'));assert(!JSON.stringify(projected).includes('"tag":"pre"'));
+});
+check('five simultaneous visible body readers settle without eviction/refetch flashing',()=>{
+ const requests=[],parts=Array.from({length:5},(_,i)=>({...part(),id:'m'+i})),rr=node('div','timeline',{id:'timeline'},parts.map(p=>node('bp-memo',p.id,{fn:'msg',who:'a'},[text('**preview**')])));
+ const b=new BodyWindows({request:(p,cursor)=>{requests.push({entryId:p.id,bodyVersion:p.version,bodyThread:p.thread,cursor,generation:b.generation,viewId:b.viewId,accountBinding:b.owner});return true}});
+ b.bind('h',detail(parts),'owner',rr);
+ for(let i=0;i<20;i++){
+  const n=requests.length;b.observe(timeline(b,false,'next',true,rr),true);
+  if(requests.length>n){const input=requests.at(-1);assert(b.accept({id:input.entryId,thread:'a',version:'7',bodyPage:1,start:0,end:7,total:7,text:'**full**',hasMore:false,complete:true,cursor:'',previous:''},input));}
+ }
+ assert.equal(requests.length,5,'each complete visible body is fetched once');assert.equal(b.scopes.get(b.scope).size,5);assert(b.retainedBytes()<=b.maxBytes);
+ const old=b.scope;b.bind('h',{...detail([]),target:{kind:'thread',id:'other'}},'owner',node('div','timeline',{id:'timeline'}));assert.equal(b.scopes.get(old).size,4,'parked scope retains only four readers');
+});
+check('an older retained timeline body is not invalidated by an adjacent hub page',()=>{
+ const {b,requests}=setup();b.observe(timeline(b),true);assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:4,total:4,text:'full',hasMore:false,complete:true,cursor:'',previous:''},requests.at(-1)));
+ const old=b.reader('m').pages[0];b.bind('h',{...detail([]),window:{ids:['newer'],partial:[]}},'owner',root());assert.equal(b.reader('m').pages[0],old);assert(read(b.project(root())).includes('full'));
 });
 console.log(JSON.stringify({pass:true,checks,scope:'Read-only body source, bounded retention and current owner/version fences; no service or DOM/anchor qualification'}));

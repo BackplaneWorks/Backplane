@@ -96,6 +96,27 @@ test('timeline DOM effects preserve nodes, measure, forward commands and detach'
   });
   assert.deepEqual(readback, { readback: true, top: 801, transform: 'translateY(0.5px)', logicalTop: 800.5 });
 
+  const intermediate = await page.evaluate(() => {
+    const keptWrapper = scroller.mounted.get('b').wrapper;
+    const keptNode = scroller.mounted.get('b').node;
+    const original = scroller.callbacks.plan;
+    let first = true;
+    scroller.callbacks.plan = input => {
+      const plan = original(input);
+      if (first) {
+        first = false;
+        return { ...plan, visible: [plan.items[0]] };
+      }
+      return plan;
+    };
+    // Measuring the newly patched a causes a second plan that includes b.
+    scroller.update([{ key: 'a', height: 65 }, { key: 'b', height: 125.5 }]);
+    scroller.callbacks.plan = original;
+    return { wrapper: keptWrapper === scroller.mounted.get('b').wrapper,
+      node: keptNode === scroller.mounted.get('b').node };
+  });
+  assert.deepEqual(intermediate, { wrapper: true, node: true }, 'measurement plans keep overlapping DOM until the range settles');
+
   const commands = await page.evaluate(() => {
     const missing = scroller.scrollToKey('missing');
     output = { ...output, visible: [output.items[0]] };

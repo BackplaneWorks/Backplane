@@ -10,19 +10,26 @@ const bytes = s => new TextEncoder().encode(s).length;
 const metadata = p => ({id:p.id,thread:p.thread,version:p.version,cursor:p.cursor,bodyPage:1,automatic:p.automatic, streamGeneration:p.streamGeneration, streamCut:p.streamCut, streamBlocks:p.streamBlocks});
 
 // Read-only body windows, independent of action/session authority. Six small
-// pages per body and four bodies per parked scope; at most eight scopes and
+// pages per body and four bodies per parked scope; the active scope can retain
+// its issued bodies under the same byte budget instead of evicting visible
+// readers in a four-body refetch loop. At most eight scopes and
 // 1MiB of serialized UTF-8 page envelopes; other metadata has fixed count/field bounds. There are no hidden mounted conversation trees.
 export class BodyWindows {
   constructor({ request, changed, renderBody, maxBytes = 1024 * 1024 } = {}) {
     this.request = request;this.changed = changed;this.renderBody = renderBody;this.maxBytes = maxBytes;
     this.scopes = new Map();this.scope = '';this.fence = '';this.parts = new Map();this.pending = null;
+    this.previews = new Map();this.previewBytes = 0;
   }
   bind(hub, detail, owner, currentNode, holding = false) {
     const scope = JSON.stringify([hub, owner, detail.epoch, detail.target]);
     const fence = JSON.stringify([scope, detail.generation, detail.viewId]);
     const changedFence = fence !== this.fence;
     if (changedFence) this.pending = null;
-    if (scope !== this.scope) this.parts.clear();
+    if (scope !== this.scope) {
+      const parked = this.scopes.get(this.scope);
+      while (parked?.size > 4) parked.delete(parked.keys().next().value);
+      this.parts.clear();this.previews.clear();this.previewBytes = 0;
+    }
     this.scope = scope;this.fence = fence;this.generation = detail.generation;this.viewId = detail.viewId;this.owner = owner;
     if (!this.scopes.has(scope)) this.scopes.set(scope, new Map());
     const saved = this.scopes.get(scope);this.scopes.delete(scope);this.scopes.set(scope, saved);
@@ -56,7 +63,11 @@ export class BodyWindows {
       for (const child of items(n.kids)) collect(child);
     };
     if (currentNode) collect(currentNode);
-    for (const id of currentMessages) if (!issued.has(id)) { this.parts.delete(id);saved.delete(id); }
+    // Retained older timeline rows are outside the newly authoritative hub
+    // page. Their cached bodies remain valid; only a current page can declare
+    // its own entry short and retire its body-page metadata.
+    const authoritative = new Set(detail.window.ids || currentMessages);
+    for (const id of currentMessages) if (authoritative.has(id) && !issued.has(id)) { this.parts.delete(id);saved.delete(id); }
     while (this.parts.size > 128) this.parts.delete(this.parts.keys().next().value);
     this.trim();
   }
@@ -87,12 +98,12 @@ export class BodyWindows {
     } catch { return ''; }
   }
   disconnect() { this.pending = null;this.fence = ''; }
-  clear() { this.disconnect();this.parts.clear();this.scope = '';this.scopes.clear(); }
+  clear() { this.disconnect();this.parts.clear();this.scope = '';this.scopes.clear();this.previews.clear();this.previewBytes = 0; }
   reader(id, create = false) {
     const saved = this.scopes.get(this.scope), part = this.parts.get(id);
     if (!saved || !part) return null;
     if (!saved.has(id) && create) {
-      if (saved.size >= 4) saved.delete(saved.keys().next().value);
+      if (saved.size >= 128) saved.delete(saved.keys().next().value);
       saved.set(id, { version: part.version, pages: [], heights: new Map(), before: 0, after: 0, error: '', explicit: false, streamGeneration:part.streamGeneration, streamCut:part.streamCut, streamBlocks:part.streamBlocks });
     }
     return saved.get(id) || null;
@@ -150,6 +161,31 @@ export class BodyWindows {
     if (r && reason !== 'overtaken') r.error = reason;
     this.changed?.();
   }
+  preview(n, part, memo, activity) {
+    const source = memo ? items(n.kids).filter(k => is(k, 'Txt')).map(k => k.text).join('') : '';
+    const prior = this.previews.get(part.id);
+    if (prior && prior.version === part.version && prior.source === source) {
+      this.previews.delete(part.id);this.previews.set(part.id, prior);return prior.rendered;
+    }
+    // Construct Markdown synchronously before this VNode can reach the DOM.
+    // Already rendered messages retain their structured body; flattening them
+    // to text here discarded strong/list/link nodes on every cache miss.
+    const made = !activity && (memo ? this.renderBody?.(n) : n);
+    const content = made ? items(made.kids).filter(k => !(is(k, 'El') && (attr(k, 'class') || '').split(/\s+/).some(c => c === 'stamp' || c === 'copy')))
+      : memo ? [text(source)] : items(n.kids).filter(k => is(k, 'El') && (attr(k, 'class') || '').split(/\s+/).includes('body'));
+    const rendered = node(activity ? 'pre' : 'div', 'body-part:' + part.id + ':0', {
+      class: 'body-message-part', 'data-body-id': part.id, 'data-body-start': 0,
+      style: activity ? 'white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;margin:0' : 'overflow-wrap:anywhere;max-width:100%'
+    }, content);
+    if (prior) this.previewBytes -= prior.bytes;
+    const size = bytes(source || JSON.stringify(content));
+    this.previews.delete(part.id);this.previews.set(part.id, {version:part.version,source,rendered,bytes:size});this.previewBytes += size;
+    while (this.previews.size > 128 || this.previewBytes > this.maxBytes) {
+      const first = this.previews.keys().next().value, old = this.previews.get(first);
+      this.previews.delete(first);this.previewBytes -= old.bytes;
+    }
+    return rendered;
+  }
   project(root) {
     const walk = n => {
       if (!is(n, 'El')) return n;
@@ -174,10 +210,7 @@ export class BodyWindows {
           body.push(p.rendered);
         }
         if (!pages.length) {
-          const collectText = x => is(x, 'Txt') ? x.text : items(x.kids).map(collectText).join('');
-          const source = memo ? items(n.kids).filter(k => is(k, 'Txt')).map(k => k.text).join('') : items(n.kids).filter(k => is(k, 'El') && (attr(k, 'class') || '').split(/\s+/).includes('body')).map(collectText).join('');
-          body.push(node('pre', 'body-part:' + id + ':0', { class: 'body-message-part', 'data-body-id': id, 'data-body-start': 0,
-            style: 'white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;margin:0' }, [text(source)]));
+          body.push(this.preview(n, part, memo, activity));
         }
         if (!pages.length || pages.at(-1).hasMore || r?.refreshTail) body.push(node('span', 'body-next:' + id, {
           class: 'muted', 'data-body-edge': 'next', 'data-body-id': id, role: 'status'

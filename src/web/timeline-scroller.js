@@ -92,6 +92,9 @@ export class TimelineScroller {
   _readSizes() {
     let changed = false;
     for (const [key, { wrapper }] of this.mounted) {
+      // A row awaiting final cleanup may already have left the snapshot.
+      // In particular, do not restore a completed stream's retired size.
+      if (!this._byKey.has(key)) continue;
       const height = wrapper.getBoundingClientRect().height;
       if (this.sizes[key] !== height) {
         this.sizes[key] = height;
@@ -142,6 +145,10 @@ export class TimelineScroller {
         }
       }
       if (!this._destroyed) {
+        // Intermediate measurement plans can briefly omit a row that the
+        // settled range includes again. Keep its DOM through this synchronous
+        // transaction and retire only rows outside the final range.
+        this._prune(this.lastPlan);
         this.lastMode = changeMode;
         this.callbacks.onChange(this);
       }
@@ -152,7 +159,7 @@ export class TimelineScroller {
     if (this._pending) this._request(this._pending.mode, this._pending);
   }
 
-  _render(plan) {
+  _prune(plan) {
     const wanted = new Set(plan.visible.map(item => item.key));
     for (const [key, row] of this.mounted) {
       if (!wanted.has(key)) {
@@ -161,6 +168,9 @@ export class TimelineScroller {
         this.mounted.delete(key);
       }
     }
+  }
+
+  _render(plan) {
     for (let i = 0; i < plan.visible.length; i++) {
       const item = plan.visible[i], vnode = this._byKey.get(item.key);
       let row = this.mounted.get(item.key);
