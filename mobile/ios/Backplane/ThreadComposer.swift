@@ -21,37 +21,6 @@ struct ThreadComposer: View {
             ForEach(thread.asks ?? []) { a in
                 AskCard(model: model, ask: a, owner: thread.id).padding(.horizontal).padding(.top, 8)
             }
-            if let td = thread.todos {
-                VStack(alignment: .leading, spacing: 2) {
-                    // the head opens and shuts the card
-                    Button { if let t = td.toggle, !t.isEmpty { perform("fold", t) } } label: {
-                        HStack {
-                            Text(td.head).bold()
-                            Spacer(minLength: 0)
-                            Image(systemName: (td.open ?? true) ? "chevron.down" : "chevron.right").foregroundStyle(.secondary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    // every step scrolls within a third of the screen
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(td.lines.enumerated()), id: \.offset) { _, l in
-                                Text(l.text).lineLimit(1).foregroundStyle(l.status == "completed" ? .secondary : .primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 220)
-                    .fixedSize(horizontal: false, vertical: true)
-                    if let more = td.more, !more.isEmpty {
-                        Button(more) { perform("fold", td.moreValue ?? "") }.buttonStyle(.borderless)
-                    }
-                }
-                .font(.caption)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal).padding(.top, 8)
-            }
             ForEach(thread.queue ?? [], id: \.msg) { q in
                 HStack(spacing: 6) {
                     Text(q.tag).bold()

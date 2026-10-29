@@ -482,8 +482,11 @@ struct TodoLine: Decodable {
 struct Todos: Decodable {
     let head: String
     let lines: [TodoLine]
-    // open, and a tap on the head sends fold with toggle; more: a long
-    // list's last line ("Show all 24", "Show fewer"; "" when it fits)
+    // in the top bar beside the subagents: its count ("2/5"); a tap sends
+    // fold with toggle, and only while open (shut until the person opens
+    // it) its lines show at the top of the thread; more: a long list's
+    // last line ("Show all 24", "Show fewer"; "" when it fits)
+    let count: String?
     let open: Bool?
     let toggle: String?
     let more: String?

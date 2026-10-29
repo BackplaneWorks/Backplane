@@ -345,6 +345,36 @@ private func subColor(_ state: String) -> Color {
     }
 }
 
+// the to-do list's steps at the top of the thread, while the person has it
+// open: every step scrolls within a third of the screen; a long list ends
+// in "Show all 24" or "Show fewer"
+struct TodosPanel: View {
+    let model: AppModel
+    let todos: Todos
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(todos.lines.enumerated()), id: \.offset) { _, l in
+                        Text(l.text).lineLimit(1).foregroundStyle(l.status == "completed" ? .secondary : .primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .frame(maxHeight: 220)
+            .fixedSize(horizontal: false, vertical: true)
+            if let more = todos.more, !more.isEmpty {
+                Button(more) { model.act("fold", todos.moreValue ?? "") }.buttonStyle(.borderless)
+            }
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal).padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground))
+    }
+}
+
 // the subagent panel: what this thread delegated (a tap opens its thread)
 // and the agent's own (a tap opens or shuts its steps); outlined in the
 // accent while any are at work
