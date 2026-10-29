@@ -8,9 +8,13 @@ assert(!fs.existsSync(out));fs.mkdirSync(out,{recursive:true,mode:0o700});
 const home=fs.mkdtempSync(path.join(os.tmpdir(),'bp-timeline-electron-')),project=path.join(home,'project'),agents=path.join(home,'agents');
 for(const p of [project,agents,path.join(home,'runtime')])fs.mkdirSync(p,{mode:0o700});
 for(const name of ['claude','codex','grok','muse','agy','opencode','pi','omp'])fs.writeFileSync(path.join(agents,name),'#!/bin/sh\nexit 127\n',{mode:0o755});
-const standin=fs.readFileSync(path.join(__dirname,'stream-agent.cjs'),'utf8').replace('i<120','i<480').replace('await delay(50)','await delay(70)');
+let standin=fs.readFileSync(path.join(__dirname,'stream-agent.cjs'),'utf8').replace('i<120','i<480').replace('await delay(50)','await delay(70)');
+const markdown=process.env.TIMELINE_MARKDOWN==='1';
+if(markdown)standin=standin.replace('const text=`sample-${i}(${Date.now()}) The board and the reply stay responsive. `;', 'const text=`\\n\\nsample-${i} **bold-${i}**\\n\\n- [link](https://example.com)\\n- inline \\`code\\`\\n\\n\\`\\`\\`js\\nconst value = ${i};\\n\\`\\`\\`\\n`;');
 fs.writeFileSync(path.join(agents,'stream.cjs'),standin);fs.writeFileSync(path.join(agents,'claude'),'#!/bin/sh\nexec '+JSON.stringify(process.execPath)+' '+JSON.stringify(path.join(agents,'stream.cjs'))+' "$@"\n',{mode:0o755});
 const copied=fs.readFileSync(entries,'utf8').trim().split('\n').map(JSON.parse).map(e=>({...e,thread:'history-copy'}));
+if(markdown)for(let i=0;i<5;i++)copied.push({$:'MessagePosted',thread:'history-copy',msg:'markdown-fixture-'+i,role:'assistant',at:1793298000+i,
+ text:`### Markdown fixture ${i}\n\n`+Array.from({length:12},(_,n)=>`**bold-${i}-${n}** with [a link](https://example.com), inline \`code\`, and enough text to exercise the negotiated message body preview.\n\n`).join('')+'- first list item\n- second list item\n\n```js\nconst value = 42;\n```\n'});
 const events=[{$:'ProjectCreated',id:'fixture',title:'Private timeline regression',root:project,at:1},{$:'ThreadCreated',id:'history-copy',project:'fixture',title:'Recorded conversation copy',env:'local',branch:'',worktree:project,provider:'claude',model:'sonnet',at:2},...copied,
  ...['restart.continue','mail.on','telemetry.share','order.enabled','order.estimates'].map(key=>({$:'SettingSet',key,value:'off',at:1})),
  ...['onboard.done','onboard.uber'].map(key=>({$:'SettingSet',key,value:'1',at:1}))];
@@ -23,10 +27,14 @@ let app,page,xvfb,video,service;
 function probe(){
  localStorage.setItem('backplane-selected','history-copy');window.__bpPerf={render:[],act:[],part:[],live:[],trace:[]};
  window.timelineRegression={phase:'startup',frames:[],events:[],last:null};
+ const identities=new WeakMap();let nextIdentity=0;
+ const identity=node=>{if(!identities.has(node))identities.set(node,++nextIdentity);return identities.get(node);};
  for(const type of ['wheel','scroll'])document.addEventListener(type,e=>{if(e.target.closest?.('#timeline')||e.target.id==='timeline')timelineRegression.events.push({type,ms:performance.now(),dy:e.deltaY,top:document.getElementById('timeline')?.scrollTop});},{capture:true,passive:true});
  function frame(ms){const tl=document.getElementById('timeline');if(tl){const b=tl.getBoundingClientRect(),track=tl.querySelector('.timeline-virtual-track');
- const rows=[...tl.querySelectorAll('.timeline-virtual-row')].map(e=>{const r=e.getBoundingClientRect();return {key:e.dataset.virtualKey,y:r.top-b.top,h:r.height,text:e.textContent.slice(0,80)};});
- timelineRegression.frames.push({ms,phase:timelineRegression.phase,top:tl.scrollTop,height:tl.scrollHeight,view:tl.clientHeight,track:track?.style.cssText,rows,status:document.getElementById('history-status')?.textContent,live:!!tl.querySelector('.live'),draft:document.getElementById('composer')?.value});}requestAnimationFrame(frame);}
+ const rows=[...tl.querySelectorAll('.timeline-virtual-row')].map(e=>{const r=e.getBoundingClientRect();return {key:e.dataset.virtualKey,y:r.top-b.top,h:r.height,wrapper:identity(e),node:e.firstChild?identity(e.firstChild):null,text:e.textContent.slice(0,80)};});
+ timelineRegression.frames.push({ms,phase:timelineRegression.phase,top:tl.scrollTop,height:tl.scrollHeight,view:tl.clientHeight,track:track?.style.cssText,rows,status:document.getElementById('history-status')?.textContent,live:!!tl.querySelector('.live'),draft:document.getElementById('composer')?.value,
+ rawMessageParts:tl.querySelectorAll('.msg pre.body-message-part').length,markdownParts:tl.querySelectorAll('.msg .body-message-part strong,.msg .body-message-part ul,.msg .body-message-part code').length,
+ streamMarkdown:tl.querySelectorAll('[data-virtual-key^="@live:"] strong,[data-virtual-key^="live:"] strong').length});}requestAnimationFrame(frame);}
  requestAnimationFrame(frame);
 }
 async function phase(name,run){result.phases.push({name,at:Date.now()});await page.evaluate(name=>timelineRegression.phase=name,name);await run();}
@@ -66,6 +74,12 @@ async function pause(ms){await page.waitForTimeout(ms);}
  await phase('stream-bottom-again',()=>pause(2200));
  result.observed=await page.evaluate(()=>({...timelineRegression,perf:__bpPerf,css:{overflowAnchor:getComputedStyle(document.getElementById('timeline')).overflowAnchor,scrollBehavior:getComputedStyle(document.getElementById('timeline')).scrollBehavior}}));
  await page.screenshot({path:out+'/electron.png'});assert.equal(result.errors.length,0,result.errors.join('\n'));assert(result.draftPreserved);result.state='captured';
+ if(markdown){
+  const frames=result.observed.frames.filter(f=>f.phase!=='startup');assert(frames.every(f=>f.rawMessageParts===0),'message body must never render a plain-text PRE fallback');assert(frames.some(f=>f.markdownParts>0),'Markdown semantics exercised');
+  assert(frames.some(f=>f.phase.startsWith('stream-')&&f.streamMarkdown>0),'streamed Markdown semantics exercised');
+  for(let i=1;i<frames.length;i++){const old=new Map(frames[i-1].rows.map(r=>[r.key,r]));for(const row of frames[i].rows){const prior=old.get(row.key);if(prior){assert.equal(row.wrapper,prior.wrapper,'overlapping row wrapper replaced: '+row.key);assert.equal(row.node,prior.node,'overlapping row node replaced: '+row.key);}}}
+  result.markdown={plainFallbackFrames:0,structuredFrames:frames.filter(f=>f.markdownParts>0).length,streamStructuredFrames:frames.filter(f=>f.streamMarkdown>0).length,overlappingRowIdentityKept:true};
+ }
 }catch(e){result.state='failed';result.error=e.stack;process.exitCode=1;if(page){result.observed=await page.evaluate(()=>window.timelineRegression).catch(()=>null);await page.screenshot({path:out+'/failure.png'}).catch(()=>{});}}
 finally{if(video&&video.exitCode===null){video.stdin.write('q');await Promise.race([once(video,'exit'),new Promise(r=>setTimeout(()=>{video.kill('SIGTERM');r();},3000).unref())]);}if(app)await app.close();if(service)await service.stop();if(xvfb&&xvfb.exitCode===null)xvfb.kill('SIGTERM');fs.writeFileSync(out+'/RESULT.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({state:result.state,error:result.error,frames:result.observed?.frames?.length,out}));}
 })();
