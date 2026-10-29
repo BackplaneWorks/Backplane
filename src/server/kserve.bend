@@ -168,12 +168,10 @@ def KServe.now() -> IO(Nat):
 def KServe.parse(+line: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})
 
-# the helper beside the hub's binary, else on PATH
+# the helper beside the hub's binary, at the install's top for the
+# desktop app's own hub, else on PATH (K.Helper.find)
 def KServe.exe() -> IO(String):
-  do IO<String>:
-    +d : String <- H.Sys.exe_dir()
-    ok : Bool <- K.Io.is_file(d ++ "/backplane-kipc")
-    return Bool.pick(String, ok, d ++ "/backplane-kipc", "backplane-kipc")
+  K.Helper.find("backplane-kipc")
 
 # Reading and writing the helper
 # ------------------------------

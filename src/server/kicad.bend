@@ -575,6 +575,31 @@ def KiStack.dir.k(desk: Bool, +exe: String) -> String:
 def KiStack.dir(+exe: String) -> String:
   KiStack.dir.k(String.ends_with(exe, KiStack.desktop()), exe)
 
+# A helper program the hub runs (backplane-step2glb, -kipc, -voice,
+# -browser): the one beside the hub's binary; else, for the desktop app's
+# own hub (exe in <prefix>/desktop/runtime/resources/backplane-service, as
+# KiStack.dir), the one at the install's top, beside the classic hub; else
+# its name, from PATH. The desktop's hub looked only beside itself, so a
+# STEP part not yet converted failed "env: 'backplane-step2glb': No such
+# file or directory" (laws helper_*).
+def Helper.top(+exe: String, +name: String) -> String:
+  Bool.pick(String, String.ends_with(exe, KiStack.desktop()),
+    String.take(exe, Nat.sub(String.length(exe), String.length(KiStack.desktop()))) ++ "/" ++ name, exe ++ "/" ++ name)
+
+def Helper.pick(here: Bool, top: Bool, +exe: String, +name: String) -> String:
+  match here:
+    case True{}:
+      exe ++ "/" ++ name
+    case False{}:
+      Bool.pick(String, top, Helper.top(exe, name), name)
+
+def Helper.find(+name: String) -> IO(String):
+  do IO<String>:
+    +d : String <- H.Sys.exe_dir()
+    here : Bool <- Io.is_file(d ++ "/" ++ name)
+    top : Bool <- Io.is_file(Helper.top(d, name))
+    return Helper.pick(here, top, d, name)
+
 # the synced copy, in the hub's home
 def KiStack.home(+home: String) -> String:
   home ++ "/kistack"
