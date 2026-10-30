@@ -75,7 +75,7 @@ def probe.watch(st: PV.PSt, client: U32, +stage: String) -> IO(PV.PSt):
   do IO<PV.PSt>:
     +q : Chan(PV.PMsg) <- Chan.new(PV.PMsg, 8)
     +out : Chan(PV.POut) <- Chan.new(PV.POut, 16)
-    +next : PV.PSt <- PV.Pv.watch.k(False{}, False{}, st, client, 0, probe.key(), "/unused", q, out)
+    +next : PV.PSt <- PV.Pv.watch.k(False{}, False{}, st, client, 0, probe.key(), "/unused", q, out, "/unused")
     Chan.close(PV.PMsg, q)
     Chan.close(PV.POut, out)
     probe.drain(17n, out, stage)
