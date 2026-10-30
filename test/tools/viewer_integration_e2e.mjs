@@ -382,7 +382,9 @@ try {
   record('actual requested browser GPU backend and shader readback verified',gpuEvidence);
   await page.locator('[data-on-click="select"][data-value="t1"]').first().waitFor({timeout:60000});
   await page.locator('[data-on-click="select"][data-value="t1"]').first().click();
-  const choose3d=()=>page.locator('.workspace-bar [data-on-click="view-kind"][data-value="3d"]').first().click();
+  // main's workspace menu repeats the bar's buttons while collapsed (hidden);
+  // a person clicks the visible one.
+  const choose3d=()=>page.locator('.workspace-bar [data-on-click="view-kind"][data-value="3d"]:visible').first().click();
   await choose3d();
   await page.waitForFunction(()=>window.__viewerAcceptance.draws.t1>0&&document.querySelector('#solid-workbench')?.dataset.scope==='t1'&&document.querySelector('#solid')?.parentElement.querySelector('.viewer-stat')?.textContent,{},{timeout:180000});
   assert.ok((await context.cookies(origin)).some(c=>c.name==='bp_token'&&c.httpOnly));

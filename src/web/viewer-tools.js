@@ -63,7 +63,10 @@ class Workbench {
       const token = selection ? `${selection.id}|${selection.sourceRevision}` : "";
       if (token !== this.selectionToken) { this.selectionToken = token; this.solid.setSelection?.(selection); }
       this.syncComponents();
-      if (component && !this.state.components) this.showComponents(true);
+      // A selection the person made opens the components pane; one restored by
+      // a metadata refresh (readComponents) must not take the inspector from
+      // whatever pane is open, such as the reflow preview.
+      if (component && !this.state.components && !this.restoring) this.showComponents(true);
     });
     this.sync();
     if (this.state.components) this.showComponents(true); else this.showReflow(this.state.reflow);
@@ -131,7 +134,10 @@ class Workbench {
       if (wanted && data.sourceRevision !== wanted) throw Error("Component metadata and the displayed PCB are different saved revisions. Refresh after the viewer finishes updating.");
       const saved = this.solid.cameraState?.()?.selection;
       this.components.setData(this.boardKey, data);
-      if (saved?.sourceRevision === data.sourceRevision && !this.components.selected) this.components.select(saved.id);
+      if (saved?.sourceRevision === data.sourceRevision && !this.components.selected) {
+        this.restoring = true;
+        try { this.components.select(saved.id); } finally { this.restoring = false; }
+      }
     } catch (e) {
       if (this.alive && generation === this.metadataGeneration) this.components.setData(this.boardKey, { error: e.message || "Saved component metadata is unavailable." });
     } finally {

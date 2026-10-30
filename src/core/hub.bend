@@ -1071,7 +1071,7 @@ def Desk.request(look: Bool, +client: U32, +id: String, +p: J.Json) -> Step:
 # reopened, edited or dropped (core/review.bend's Review.act), by the person;
 # review.release {thread, tag, publish, force}: a release (server/review.bend)
 def Rv.methods() -> List<&2, String>:
-  ["history.resolve", "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "zone.report", "zone.set"]
+  ["history.resolve", "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "zone.report", "zone.set", "kicad.components", "kicad.renderAsset"]
 
 # The person's time zone (core/sched.bend's Zone.*)
 # zone.report {zone}: a phone says where it is; kept as person.tz.device when
@@ -1132,6 +1132,14 @@ def Rv.request(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.
       Zone.report(s, now, client, id, String.trim(J.Json.get_str(p, "zone", "")))
     case 7n:
       Zone.set(s, now, client, id, String.trim(J.Json.get_str(p, "zone", "")))
+    case 8n:
+      Bool.pick(Step, Hub.owns(s, J.Json.get_str(p, "thread", "")),
+        Hub.git(s, client, id, "rv.components", J.Json.get_str(p, "thread", ""), J.Json.show(p), ""), Step.outs([Reply.err(client, id, "Unknown thread for component inspection")]))
+    case 9n:
+      Bool.pick(Step, Hub.owns(s, J.Json.get_str(p, "thread", "")),
+        Hub.git(s, client, id, "rv.renderAsset", J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "path", ""),
+          J.Json.show(J.Json.obj([J.KV{"kind", J.Str{J.Json.get_str(p, "kind", "2")}}, J.KV{"revision", J.Str{J.Json.get_str(p, "revision", "")}}]))),
+        Step.outs([Reply.err(client, id, "Unknown thread for model inspection")]))
     case _:
       Desk.request(String.eq(m, "desk.look"), client, id, p)
 
