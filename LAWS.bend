@@ -5355,6 +5355,23 @@ law settle_idle_off:
 law settle_idle_message_reopens:
   {M.Shelf.of(M.State.thread.get(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 1805n}, M.MessagePosted{"t1", "m2", M.User{}, "again", 1900n}]), "t1")) == M.Active{} : M.Shelf}
 
+# a limit with no reset in its words stays unknown (held until cleared),
+# never an invented time (hub.bend's Reset.words; test/reset_words_test.bend
+# reads Claude's "resets 4:10pm (America/New_York)")
+law reset_words_none:
+  {H.Reset.words(M.State.empty(), 5n, "usage limit reached") == 0n : Nat}
+
+# a pending limit whose reset has passed is stale: a later turn's end does
+# not act on it; one ahead, or one whose reset is unknown, still holds
+law pending_due_passed:
+  {H.Pending.due(FALL.Limit{"claude", "x", 5n}, 9n) == False{} : Bool}
+
+law pending_due_ahead:
+  {H.Pending.due(FALL.Limit{"claude", "x", 10n}, 9n) == True{} : Bool}
+
+law pending_due_unknown:
+  {H.Pending.due(FALL.Limit{"claude", "x", 0n}, 9n) == True{} : Bool}
+
 
 law scratch_busy_kept:
   for +now: Nat
