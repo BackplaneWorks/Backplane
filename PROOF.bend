@@ -1,3 +1,4 @@
+import ./test/fold_default_proof.bend as FOLDDEFAULT
 import ./test/timeline_virtual_proof.bend as TLVIRTUALPROOF
 import ./test/native_history_window_proof.bend as NATIVEHISTORYPROOF
 import ./src/server/thin-actor.bend as CHATSIDE
@@ -3680,6 +3681,9 @@ def Laws.fold_user_opened(live):
 
 def Laws.fold_user_shut(live):
   {==}
+
+def Laws.fold_run_default_closed(lc, es, last, running):
+  FOLDDEFAULT.default_closed(lc, es, last, running)
 
 def Laws.fold_default_live(live):
   {==}
