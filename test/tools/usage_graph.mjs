@@ -31,10 +31,15 @@ check('missing catalog retains project identity',list(lib.top_many()).slice(0,2)
 const today=lib.act(cx,'usage-period','today');
 check('today uses one UTC day',list(lib.days(today)).map(d=>d.date),['2026-10-18']);
 check('today never substitutes monthly projects',list(lib.projects(today)),[]);
-for (const iso of ['2026-11-01T00:00:00Z','2028-02-29T23:59:59Z','2026-12-31T23:59:59Z']) {
+for (const iso of ['2026-10-01T00:00:00Z','2026-10-09T23:59:59Z','2026-10-10T00:00:00Z','2026-11-01T00:00:00Z','2028-02-29T23:59:59Z','2026-12-31T23:59:59Z']) {
  const now=BigInt(Date.parse(iso)/1000), date=new Date(Number(now)*1000);
+ const first=Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)/1000;
+ const monthDays=list(lib.days_at(now,'month')), todayDays=list(lib.days_at(now,'today'));
+ check('zero-seeded UTC day offset '+iso,lib.month_offset(now),BigInt(date.getUTCDate()-1));
  check('UTC month boundary '+iso,lib.count(now,'month'),BigInt(date.getUTCDate()));
- check('UTC start '+iso,lib.start(now,'month'),BigInt(Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)/1000));
+ check('UTC start '+iso,lib.start(now,'month'),BigInt(first));
+ check('monthly graph dates stay inside UTC month '+iso,monthDays.map(d=>d.date),Array.from({length:date.getUTCDate()},(_,i)=>new Date((first+i*86400)*1000).toISOString().slice(0,10)));
+ check('Today graph is exactly the UTC date '+iso,todayDays.map(d=>d.date),[iso.slice(0,10)]);
 }
 const flatten=xs=>list(xs).flatMap(n=>[n,...flatten(n.kids)]);
 const text=nodes=>nodes.filter(n=>n.$?.endsWith('.Txt')).map(n=>n.text).join(' ');

@@ -17,9 +17,14 @@ def Ug.enabled(info: String) -> List<&2, String>:
 def Ug.selected(+ps: List<&2, String>, +wanted: String) -> String:
   Bool.pick(String, M.Tok.has(ps, wanted), wanted, Maybe.default(&2, String, List.head(&2, String, ps), ""))
 
+# Switch.num's second argument is a digit accumulator, not a fallback.
+# Starting at one would parse "01" as 101 and move the range back 100 days.
+def Ug.month.offset(now: Nat) -> Nat:
+  Nat.sub(M.Switch.num(String.drop(M.Tok.day(now), 8n), 0n), 1n)
+
 def Ug.start(+now: Nat, +period: String) -> Nat:
   +midnight = Nat.mul(Nat.div(now, 86400n), 86400n)
-  Nat.sub(midnight, Nat.mul(Bool.pick(Nat, String.eq(UP.Up.period(period), "today"), 0n, Nat.sub(M.Switch.num(String.drop(M.Tok.day(now), 8n), 0n), 1n)), 86400n))
+  Nat.sub(midnight, Nat.mul(Bool.pick(Nat, String.eq(UP.Up.period(period), "today"), 0n, Ug.month.offset(now)), 86400n))
 
 def Ug.count(+now: Nat, +period: String) -> Nat:
   Nat.add(Nat.div(Nat.sub(now, Ug.start(now, period)), 86400n), 1n)
