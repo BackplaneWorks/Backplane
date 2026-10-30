@@ -1,0 +1,12 @@
+{
+  "name": "backplane-viewer-renderer",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "three": "0.181.1",
+    "three-gpu-pathtracer": "0.0.24",
+    "three-mesh-bvh": "0.9.5",
+    "xatlas-web": "0.1.0"
+  },
+  "scripts": { "build": "bun build.mjs" }
+}

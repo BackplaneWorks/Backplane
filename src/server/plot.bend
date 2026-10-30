@@ -367,7 +367,7 @@ def Pv.plot(m: Maybe<&2, List<&2, B.Item>>, +kind: U32) -> Maybe<&2, P.Plot>:
     case None{}:
       None{}
 
-# Non-schematic sources retain their existing whole-second stamp.
+# The legacy stat stamp is kept for callers reading FS.stat's contract.
 def Pv.stamp.k(v: U32 & U32 & U32) -> U32 & String:
   (_, (sz, mt)) = v
   (sz, U32.show(mt))
@@ -382,12 +382,10 @@ def Pv.revision(r: Result<&1, &1, U32 & String, U32 & String>) -> U32 & String:
     case Done{v}: v
     case Fail{_}: (0, "")
 
-def Pv.stamp.read(sch: Bool, +path: String) -> IO(U32 & String):
-  match sch:
-    case True{}:
-      IO.bind(Result<&1, &1, U32 & String, U32 & String>, U32 & String, H.FS.revision(path), r => IO.pure(U32 & String, Pv.revision(r)))
-    case False{}:
-      IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, U32 & String, H.FS.stat(path), r => IO.pure(U32 & String, Pv.stamp(r)))
+# Every live viewer source needs exact revisions: a same-size save within one
+# second must invalidate boards, STEP and GLB assets as well as schematics.
+def Pv.stamp.read(+path: String) -> IO(U32 & String):
+  IO.bind(Result<&1, &1, U32 & String, U32 & String>, U32 & String, H.FS.revision(path), r => IO.pure(U32 & String, Pv.revision(r)))
 
 # The child
 # ---------
@@ -483,13 +481,22 @@ def Pv.glb.flags(+bare: Bool, +full: Bool, +out: String, +path: String) -> List<
   List.append(&2, String, ["pcb", "export", "glb"], List.append(&2, String, Bool.pick(List<&2, String>, bare, ["--no-components"], ["--subst-models"]),
     ["--include-pads", "--include-soldermask", "--include-silkscreen", "-f", "-o", out, path]))
 
-# a STEP's GLB is written beside and moved in whole: a reader never meets
-# half of one
+# Export success includes promoting the staging file. A failed rename must
+# not report a cache hit against an absent or older destination.
+def Pv.step.promoted(m: Result<&1, &1, U32 & String, Unit>, r: PR.Ran) -> PR.Ran:
+  match m:
+    case Done{_}: r
+    case Fail{_}: PR.Ran{3, "Unable to save the exported model"}
+
+# a STEP's GLB is written beside and moved in whole only after a successful
+# export: a reader never meets a partial or failed model.
 def Pv.step.ran.to(r: PR.Ran, +from: String, +out: String) -> IO(PR.Ran):
-  IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, r))
+  IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, Pv.step.promoted(m, r)))
 
 def Pv.step.ran(r: PR.Ran, +out: String) -> IO(PR.Ran):
-  Pv.step.ran.to(r, out ++ ".part", out)
+  match r:
+    case PR.Ran{0, log}: Pv.step.ran.to(PR.Ran{0, log}, out ++ ".part", out)
+    case _: IO.pure(PR.Ran, r)
 
 # a board's GLB is written beside and moved in whole only when KiCad
 # succeeded, so a half-written export is never taken for a cached one
@@ -618,20 +625,26 @@ def Pv.ver(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> String:
     case Fail{_}:
       "0"
 
+# Include the exact revision in the cache filename. Hash only the source path,
+# not its revision: a 32-bit revision hash must not silently reuse old geometry.
+def Pv.cache.revision(sm: U32 & String) -> String:
+  (_, rev) = sm
+  String.join(String.split(rev, ':'), ".")
+
 def Pv.step.out(+path: String) -> IO(String):
   do IO<String>:
     +dir : String <- Pv.cache()
-    st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
-    return dir ++ "/" ++ U32.show(P.Key.hash(path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
+    st : U32 & String <- Pv.stamp.read(path)
+    return dir ++ "/step3-" ++ U32.show(P.Key.hash(path, 2166136261)) ++ "." ++ Pv.cache.revision(st) ++ ".glb"
 
-# a board's model, cached per version of the board file (its size and
-# time) and per export (with its parts or bare): KiCad's export takes half a
+# a board's model, cached per exact revision of the board file and per
+# export (with its parts or bare): KiCad's export takes half a
 # minute on a full board, so it runs once per change, not on every view
 def Pv.board.out(+path: String, +bare: Bool) -> IO(String):
   do IO<String>:
     +dir : String <- Pv.cache()
-    st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
-    return dir ++ "/board-" ++ U32.show(P.Key.hash(Bool.pick(String, bare, "bare2|", "parts2|") ++ path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
+    st : U32 & String <- Pv.stamp.read(path)
+    return dir ++ "/board-" ++ U32.show(P.Key.hash(Bool.pick(String, bare, "bare3|", "parts3|") ++ path, 2166136261)) ++ "." ++ Pv.cache.revision(st) ++ ".glb"
 
 # where a model's GLB comes from: a .glb is its own; a STEP's and a board's
 # are cached per version
@@ -943,7 +956,7 @@ def Pv.stamp.fixed(+path: String) -> Bool:
 def Pv.stamp.one.k(live: Bool, +path: String) -> IO(U32 & String):
   match live:
     case True{}:
-      Pv.stamp.read(String.ends_with(path, ".kicad_sch"), path)
+      Pv.stamp.read(path)
     case False{}:
       IO.pure(U32 & String, (1, "fixed"))
 

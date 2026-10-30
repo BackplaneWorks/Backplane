@@ -1,4 +1,7 @@
 import App from "./app.bend";
+import { DepthOfField } from "./solid-dof.js";
+import { SolidAssets } from "./solid-assets.js";
+import { vertexShader as VS, fragmentShader as FS } from "./solid-materials.js";
 
 // A part in 3D on the web page.
 //
@@ -103,80 +106,35 @@ export function mesh(o) {
   return { pos: pos.subarray(0, w), nrm: nrm.subarray(0, w), col: col.subarray(0, w), count: w / 3, box };
 }
 
-// the newest model of each source, by its key
-const models = new Map();
-
-// why a source has no model ("" while it may yet come)
-const nones = new Map();
-
-// how each model came: its size on the wire, how long after it was asked
-// for, how long it took to build here, its triangles
-const stats = new Map();
-
+// One revision-aware bounded asset store shared by reopened canvases.
+const assets = new SolidAssets({ onChange(record) {
+  if (view && view.key === record.key) view.receive(record);
+} });
 const mb = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-// a 3D source's plot (key "2|..." or "3|..."): its model, or why there is
-// none. at: the size of the frame and when it arrived (host.js)
 export function got(o, at = { bytes: 0, t: performance.now() }) {
-  if (!o || typeof o.key !== "string") return;
-  if (typeof o.none === "string") {
-    nones.set(o.key, o.none);
-    if (view && view.key === o.key) view.later();
-    return;
+  if (view && view.key === o?.key && Array.isArray(o.box3) && o.box3.length === 6) {
+    const b = o.box3.map(x => x | 0);
+    view.expectedBox = [b[0],-b[4],b[2],b[3],-b[1],b[5]];
   }
-  if (!o.mesh) return; // a note about the model, not the model
-  nones.delete(o.key);
-  const key = o.key;
-  const waited = view && view.key === key && view.asked ? (at.t - view.asked) / 1000 : 0;
-  // say it came, and let the page paint that, before building (a big model
-  // takes a moment here too)
-  if (view && view.key === key) view.say(`Received ${mb(at.bytes)}, building the model…`);
-  setTimeout(() => {
-    const t0 = performance.now();
-    const m = mesh(o);
-    models.set(key, m);
-    stats.set(key, { bytes: at.bytes, waited, build: (performance.now() - t0) / 1000, tris: m.count / 3 });
-    if (view && view.key === key) view.show(m);
-  }, 30);
+  return assets.receive(o, at);
 }
-
 export function reset() {
-  models.clear();
-  nones.clear();
+  assets.reset();
+  if (view) { view.count = 0; view.box = null; view.expectedBox = null; view.restoreWanted = null; view.saying = false; view.ticking(true); view.later(); }
 }
 
 export function fit() {
   if (view && view.box) { view.fit(); view.later(); }
 }
 
-// a probed part (hon) lights the model within its box on the board (hl:
-// x0 y0 x1 y1, hz: its side's heights) and dims the rest
-const VS = `attribute vec3 p; attribute vec3 n; attribute vec3 c; uniform mat4 m; uniform vec3 eye;
-varying vec3 vc; varying float vl; varying vec3 vp; varying vec3 vn;
-void main() { gl_Position = m * vec4(p, 1.0); vc = c; vp = p; vn = n; vl = abs(dot(normalize(n), normalize(eye - p))); }`;
-const FS = `#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-varying vec3 vc; varying float vl; varying vec3 vp; varying vec3 vn; uniform vec4 hl; uniform vec2 hz; uniform float hon;
-void main() {
-  // a key light from above (z up, two-sided) over an ambient floor and the
-  // headlight; dark colours (a solder mask) lifted so the board reads
-  // against the background
-  float key = abs(dot(normalize(vn), normalize(vec3(-0.35, -0.45, 1.0))));
-  vec3 col = vc * (0.55 + 0.8 * key + 0.25 * vl);
-  col = min(mix(col, sqrt(max(col, 0.0)), 0.4), 1.0);
-  if (hon > 0.5) {
-    bool inb = vp.x >= hl.x && vp.x <= hl.z && vp.y >= hl.y && vp.y <= hl.w && vp.z >= hz.x && vp.z <= hz.y;
-    col = inb ? min(mix(col, vec3(1.0, 0.85, 0.4), 0.3) * 1.25, 1.0) : col * 0.4;
-  }
-  gl_FragColor = vec4(col, 1.0);
-}`;
-
 function persp(fov, a, near, far) {
   const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
   return [f / a, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0];
+}
+
+function ortho(half, aspect, near, far) {
+  return [1/(half*aspect),0,0,0,0,1/half,0,0,0,0,-2/(far-near),0,0,0,-(far+near)/(far-near),1];
 }
 
 function look(e, c, u) {
@@ -288,14 +246,28 @@ class View {
     this.count = 0;
     this.cam = new Orbit().aim(-0.6, 0.5);
     this.r = 1;
+    this.projection = "perspective"; this.exposure = 0;
+    this.thermal = { enabled: false, temperature: 25, liquid: 0 };
+    this.aperture = "off"; this.focusLocked = false; this.focusDistance = 0;
     if (!this.gl) return;
     const gl = this.gl;
-    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    this.events = new AbortController();
+    const listen = (type,fn,options={}) => canvas.addEventListener(type,fn,{...options,signal:this.events.signal});
+    const sh = (type, src) => {
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`3D shader: ${gl.getShaderInfoLog(s)}`);
+      return s;
+    };
     this.prog = gl.createProgram();
-    gl.attachShader(this.prog, sh(gl.VERTEX_SHADER, VS));
-    gl.attachShader(this.prog, sh(gl.FRAGMENT_SHADER, FS));
+    const vertex = sh(gl.VERTEX_SHADER, VS), fragment = sh(gl.FRAGMENT_SHADER, FS);
+    gl.attachShader(this.prog, vertex);
+    gl.attachShader(this.prog, fragment);
     gl.linkProgram(this.prog);
+    gl.deleteShader(vertex); gl.deleteShader(fragment);
+    if (!gl.getProgramParameter(this.prog, gl.LINK_STATUS)) throw new Error(`3D program: ${gl.getProgramInfoLog(this.prog)}`);
     this.bufs = ["p", "n", "c"].map((a) => ({ a: gl.getAttribLocation(this.prog, a), b: gl.createBuffer() }));
+    this.dof = new DepthOfField(gl);
+    if (!this.dof.available) console.info(`3D depth of field disabled: ${this.dof.reason}`);
     this.pts = new Map();
     this.drag = null;
     this.gesture = null;
@@ -305,9 +277,10 @@ class View {
       const [a, b] = [...this.pts.values()];
       return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y), a: Math.atan2(b.y - a.y, b.x - a.x) };
     };
-    canvas.addEventListener("pointerdown", (e) => {
+    listen("pointerdown", (e) => {
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       this.pts.set(e.pointerId, local(e));
+      canvas.focus({preventScroll:true});
       const p = local(e);
       // a press that stays put is a tap: it probes the part under it
       this.tap = this.pts.size === 1 && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
@@ -317,7 +290,7 @@ class View {
       this.gesture = this.pts.size === 2 ? two() : null;
       canvas.classList.add("dragging");
     });
-    canvas.addEventListener("pointermove", (e) => {
+    listen("pointermove", (e) => {
       if (!this.pts.has(e.pointerId)) return;
       this.pts.set(e.pointerId, local(e));
       const h = canvas.clientHeight;
@@ -351,9 +324,9 @@ class View {
       this.drag = rest ? { x: rest.x, y: rest.y, mode: "turn" } : null;
       if (!rest) canvas.classList.remove("dragging");
     };
-    canvas.addEventListener("pointerup", up);
-    canvas.addEventListener("pointercancel", up);
-    canvas.addEventListener("wheel", (e) => {
+    listen("pointerup", up);
+    listen("pointercancel", up);
+    listen("wheel", (e) => {
       e.preventDefault();
       const kind = wheelKind(e, this.wheelLast);
       this.wheelLast = { kind, t: e.timeStamp };
@@ -363,10 +336,23 @@ class View {
       else this.zoomAt(Math.exp(-e.deltaY * px * (kind === "pinch" ? 0.01 : 0.0015)), p.x, p.y);
       this.later();
     }, { passive: false });
-    canvas.addEventListener("dblclick", () => { this.fit(); this.later(); });
-    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    listen("dblclick", () => { this.fit(); this.later(); });
+    listen("contextmenu", (e) => e.preventDefault());
+    listen("keydown", (e) => {
+      const action = {f:"fit",F:"fit",Home:"fit",0:"iso",1:"top",2:"bottom",3:"front",4:"right",5:"back",6:"left"}[e.key];
+      if (action) cameraAction(action);
+      else if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) {
+        const dx = e.key === "ArrowLeft" ? -16 : e.key === "ArrowRight" ? 16 : 0;
+        const dy = e.key === "ArrowUp" ? -16 : e.key === "ArrowDown" ? 16 : 0;
+        if (e.shiftKey) this.cam.pan(dx,dy,this.cam.unit(canvas.clientHeight)); else this.cam.spin(dx,dy);
+        this.later();
+      } else if (["+","=","-","_"].includes(e.key)) { this.cam.zoom(e.key === "-" || e.key === "_" ? 1/1.15 : 1.15,0,0); this.later(); }
+      else return;
+      e.preventDefault();
+    });
     // a pane resized (the viewer's edge dragged) draws again at its new size
-    new ResizeObserver(() => this.later()).observe(canvas);
+    this.resize = new ResizeObserver(() => this.later());
+    this.resize.observe(canvas);
   }
 
   // closer by k (over 1 in), keeping the point under (x, y) on the canvas where it is
@@ -380,7 +366,9 @@ class View {
     this.r = Math.max(Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2, 1);
     // the field of view is vertical: a narrow canvas fits the width instead
     const a = this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1);
-    const cam = new Orbit().aim(-0.6, 0.5);
+    const cam = new Orbit();
+    for (const axis of ["r", "u", "f"]) cam[axis] = this.cam[axis].slice();
+    cam.fov = this.cam.fov;
     cam.pivot = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
     cam.dist = this.r / Math.sin(Math.atan(Math.tan(cam.fov / 2) * Math.min(a, 1))) * 1.05;
     cam.home = cam.dist;
@@ -450,49 +438,70 @@ class View {
     if (!this.gl || !m) return;
     this.pos = m.pos;
     const gl = this.gl;
-    [m.pos, m.nrm, m.col].forEach((d, k) => { gl.bindBuffer(gl.ARRAY_BUFFER, this.bufs[k].b); gl.bufferData(gl.ARRAY_BUFFER, d, gl.STATIC_DRAW); });
+    if (this.uploadedBuffer !== m.pos.buffer || this.uploadedCount !== m.count) {
+      [m.pos, m.nrm, m.col].forEach((d, k) => { gl.bindBuffer(gl.ARRAY_BUFFER, this.bufs[k].b); gl.bufferData(gl.ARRAY_BUFFER, d, gl.STATIC_DRAW); });
+      this.uploadedBuffer = m.pos.buffer; this.uploadedCount = m.count;
+    }
     const first = this.count === 0;
     this.count = m.count;
-    this.box = m.box;
-    if (first) this.fit();
+    this.box = this.expectedBox || m.box;
+    this.r = Math.max(Math.hypot(this.box[3]-this.box[0],this.box[4]-this.box[1],this.box[5]-this.box[2])/2,1);
+    if (first) {
+      if (this.restoreWanted) { this.restore(this.restoreWanted); this.restoreWanted = null; }
+      else this.fit();
+    }
     this.later();
   }
 
   later() {
+    if (!this.focusLocked) this.focusDistance = this.cam.dist / 100;
+    this.canvas.dispatchEvent(new CustomEvent("solid-camera-change", {bubbles:true}));
     if (this.queued) return;
     this.queued = true;
-    requestAnimationFrame(() => { this.queued = false; this.draw(); });
+    this.frame = requestAnimationFrame(() => { this.queued = false; this.draw(); });
   }
 
   draw() {
     const gl = this.gl, c = this.canvas;
-    if (!gl) return;
+    if (!gl) { if (this.note) this.note.textContent = "3D unavailable: WebGL could not start"; return; }
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     gl.viewport(0, 0, w, h);
+    const dof = this.count && this.projection === "perspective" && this.aperture !== "off" && this.dof?.begin(w,h);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    if (this.note && !this.saying) this.note.textContent = this.count ? "" : nones.get(this.key) || this.waiting();
-    if (this.stat) this.stat.textContent = this.count && stats.has(this.key) ? this.statLine(stats.get(this.key)) : "";
+    if (this.note && !this.saying) this.note.textContent = this.count ? "" : assets.get(this.key)?.error || this.waiting();
+    const record = assets.get(this.key);
+    if (this.stat) this.stat.textContent = this.count && record?.status === "ready" ? this.statLine({ ...record.stats, build: record.stats.build / 1000, waited: this.waited || 0, tris: this.count / 3 }) : "";
     if (!this.count) return;
     gl.enable(gl.DEPTH_TEST);
     gl.useProgram(this.prog);
     const cam = this.cam, eye = cam.eye();
     const reach = cam.dist + Math.hypot(cam.sx, cam.sy) + this.r * 4;
-    const m = mul(persp(cam.fov, w / h, Math.max(cam.dist / 100, this.r / 1000), reach), look(eye, cam.target(), cam.u));
+    const near = Math.max(cam.dist / 100, this.r / 1000);
+    const projection = this.projection === "orthographic"
+      ? ortho(cam.dist * Math.tan(cam.fov / 2), w / h, near, reach)
+      : persp(cam.fov, w / h, near, reach);
+    const m = mul(projection, look(eye, cam.target(), cam.u));
     gl.uniformMatrix4fv(gl.getUniformLocation(this.prog, "m"), false, m);
     gl.uniform3fv(gl.getUniformLocation(this.prog, "eye"), eye);
     const lit = this.lit();
     gl.uniform1f(gl.getUniformLocation(this.prog, "hon"), lit ? 1 : 0);
     gl.uniform4fv(gl.getUniformLocation(this.prog, "hl"), lit ? lit.box : [0, 0, 0, 0]);
     gl.uniform2fv(gl.getUniformLocation(this.prog, "hz"), lit ? lit.z : [0, 0]);
+    gl.uniform1f(gl.getUniformLocation(this.prog, "orthographic"), Number(this.projection === "orthographic"));
+    for (const [name, value] of [["right", cam.r], ["up", cam.u], ["forward", cam.f]]) gl.uniform3fv(gl.getUniformLocation(this.prog, name), value);
+    gl.uniform1f(gl.getUniformLocation(this.prog, "exposure"), this.exposure);
+    gl.uniform3fv(gl.getUniformLocation(this.prog, "thermal"), [Number(this.thermal.enabled), this.thermal.temperature, this.thermal.liquid]);
     for (const { a, b } of this.bufs) {
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.enableVertexAttribArray(a);
       gl.vertexAttribPointer(a, 3, gl.FLOAT, false, 0, 0);
     }
     gl.drawArrays(gl.TRIANGLES, 0, this.count);
+    if (dof) this.dof.finish(w,h,near,reach,this.focusDistance,12/Math.tan(cam.fov/2),this.aperture);
   }
 }
 
@@ -516,10 +525,38 @@ View.prototype.say = function (text) {
 
 // the seconds tick while a model is awaited, and stop once it is in
 View.prototype.ticking = function (on) {
-  if (on && !this.tick) this.tick = setInterval(() => { if (!this.count && !nones.has(this.key)) this.later(); else this.ticking(false); }, 1000);
+  if (on && !this.tick) this.tick = setInterval(() => { if (!this.count && assets.get(this.key)?.status !== "failed") this.later(); else this.ticking(false); }, 1000);
   if (!on && this.tick) { clearInterval(this.tick); this.tick = null; }
 };
 
+View.prototype.receive = function(record) {
+  this.record = record;
+  this.expectedBox = record.box || this.expectedBox;
+  if (record.model) this.show(record.model);
+  if (record.status === "decoding") {
+    const {completed,total} = record.progress;
+    this.say((completed ? `Building model ${Math.round(completed/Math.max(total,1)*100)}%` : `Received ${mb(record.stats.bytes)}, building the model…`) + (record.stale ? " — previous revision shown" : ""));
+  } else if (record.status === "failed") {
+    if (!record.model) this.count = 0;
+    this.say(record.error + (record.stale ? " — previous revision shown" : ""));
+  } else {
+    this.saying = false; this.waited = this.asked ? (performance.now()-this.asked)/1000 : 0;
+  }
+  this.ticking(false); this.later();
+};
+View.prototype.snapshot = function() {
+  return { cam: { ...this.cam }, projection: this.projection, exposure: this.exposure, thermal: { ...this.thermal }, aperture:this.aperture, focusDistance:this.focusDistance, focusLocked:this.focusLocked, selection:this.selection || null };
+};
+View.prototype.restore = function(state) {
+  this.cam = Object.assign(new Orbit(),state.cam);
+  this.projection = state.projection; this.exposure = state.exposure; this.thermal = { ...state.thermal };
+  this.aperture = state.aperture || "off"; this.focusDistance = state.focusDistance || this.cam.dist/100; this.focusLocked = !!state.focusLocked; this.selection = state.selection || null;
+};
+View.prototype.dispose = function() {
+  this.ticking(false); this.resize?.disconnect(); this.events?.abort(); this.canvas.classList.remove("dragging"); this.dof?.dispose();
+  if (this.frame) cancelAnimationFrame(this.frame);
+  if (this.gl) { for (const {b} of this.bufs || []) this.gl.deleteBuffer(b); this.gl.deleteProgram(this.prog); }
+};
 let view = null;
 
 // Cross-probing (probe.js): a board model's parts are found on the board's
@@ -571,23 +608,98 @@ export function setProbe(v) {
 }
 
 // after each render: the canvas on the page (if any) shows the model its
-// data-key names, once the hub has sent it
+// data-key names, once the hub has sent it. Each source keeps its own pose
+// when tabs/canvases are remounted.
 export function mount(canvas) {
-  if (!canvas) { view = null; return; }
-  if (!view || view.canvas !== canvas) { view = new View(canvas); view.probe = ""; }
+  if (!canvas || (view && view.canvas !== canvas)) {
+    if (view) { assets.saveState(view.stateKey,view.snapshot()); view.dispose(); }
+    view = null;
+  }
+  if (!canvas) { assets.pin(""); return; }
+  if (!view) { view = new View(canvas); view.probe = ""; }
   const probe = canvas.dataset.probe ?? "";
   if (probe !== view.hubProbe) { view.hubProbe = probe; view.probe = probe; view.later(); }
   view.note = canvas.parentElement?.querySelector(".viewer-note") ?? null;
   view.stat = canvas.parentElement?.querySelector(".viewer-stat") ?? null;
   const key = canvas.dataset.key || "";
-  if (key !== view.key) {
-    view.key = key;
-    view.count = 0;
-    view.saying = false;
-    view.asked = performance.now();
-    if (models.has(key)) view.show(models.get(key));
+  const stateKey = `${canvas.dataset.scope || ""}\0${key}`;
+  if (key !== view.key || stateKey !== view.stateKey) {
+    assets.saveState(view.stateKey,view.snapshot());
+    view.key = key; view.stateKey = stateKey; view.count = 0; view.saying = false; view.expectedBox = null;
+    view.box = null; view.restoreWanted = assets.getState(stateKey);
+    if (!view.restoreWanted) {
+      view.cam = new Orbit().aim(-0.6,0.5); view.projection = "perspective"; view.exposure = 0;
+      view.thermal = {enabled:false,temperature:25,liquid:0}; view.selection = null;
+      view.aperture = "off"; view.focusLocked = false;
+    }
+    view.asked = performance.now(); assets.pin(key);
+    const record = assets.reuse(key);
+    if (record) view.receive(record);
     else { view.ticking(true); view.later(); }
-  } else {
-    view.later();
-  }
+  } else view.later();
+}
+
+// Read-only status for the host: no transport buffers are exposed.
+export function assetState() {
+  const r = view && assets.get(view.key);
+  return r ? { key:r.key, status:r.status, progress:{...r.progress}, error:r.error, stale:r.stale, cached:r.cached } : null;
+}
+
+// Presentation hooks for the Bend-owned toolbar. No animation or CAD mutation.
+const bounded = (value, lo, hi, fallback) => Number.isFinite(Number(value)) ? Math.max(lo, Math.min(hi, Number(value))) : fallback;
+export function cameraAction(action, value) {
+  if (!view) return;
+  const poses = { iso: [-0.6,0.5], top: [0,Math.PI/2], bottom: [Math.PI,-Math.PI/2],
+    front: [0,0], back: [Math.PI,0], left: [-Math.PI/2,0], right: [Math.PI/2,0] };
+  if (action === "fit") { if(view.box) view.fit(); }
+  else if (poses[action]) view.cam.aim(...poses[action]);
+  else if (action === "projection") view.projection = value === "orthographic" ? value : "perspective";
+  else if (action === "exposure") view.exposure = bounded(value,-3,3,0);
+  else if (action === "aperture" && view.dof?.available) view.aperture = value === "off" ? "off" : bounded(value,1.4,32,14);
+  else if (action === "focus-lock" && view.dof?.available) view.focusLocked = !view.focusLocked;
+  else if (action === "focus" && view.dof?.available) { view.focusDistance = bounded(value,0.01,1e6,view.cam.dist/100); view.focusLocked = true; }
+  else if (action === "focal") {
+    const fov = 2*Math.atan(12/bounded(value,15,250,33));
+    const scale = Math.tan(view.cam.fov/2)/Math.tan(fov/2);
+    view.cam.dist *= scale; view.cam.home *= scale; view.cam.fov = fov;
+  } else return;
+  view.later();
+}
+export function setThermal(value = {}) {
+  if (!view) return;
+  view.thermal = { enabled: value.enabled === true, temperature: bounded(value.temperature,0,400,25), liquid: bounded(value.liquid,0,1,0) };
+  view.later();
+}
+export function cameraState() {
+  return view ? { projection: view.projection, focal: 12/Math.tan(view.cam.fov/2), exposure: view.exposure,
+    selection:view.selection || null, materialSource: "color-estimate", thermal: { ...view.thermal },
+    ...(view.dof?.available ? { aperture:view.aperture, focusDistance:view.focusDistance, focusLocked:view.focusLocked } : {}) } : null;
+}
+
+// Saved-PCB metadata overlays use board millimetres, while the mesh wire is
+// 10um and reflected in Y. These helpers do not infer component/triangle IDs.
+export function projectPoint(point) {
+  if (!view?.box || !Array.isArray(point) || point.length < 3 || !point.every(Number.isFinite)) return null;
+  const cam=view.cam,w=view.canvas.clientWidth,h=view.canvas.clientHeight;
+  const p=[point[0]*100,-point[1]*100,point[2]*100],eye=cam.eye(),d=p.map((v,i)=>v-eye[i]);
+  const dot=a=>d.reduce((s,v,i)=>s+v*a[i],0),depth=dot(cam.f);
+  if(depth<=0)return null;
+  const half=(view.projection==='orthographic'?cam.dist:depth)*Math.tan(cam.fov/2);
+  const x=w/2+dot(cam.r)*h/(2*half),y=h/2-dot(cam.u)*h/(2*half);
+  return {x,y,depth:depth/100,visible:x>=0&&x<=w&&y>=0&&y<=h};
+}
+export function rayToBoard(x,y,z=0) {
+  if(!view?.box || ![x,y,z].every(Number.isFinite))return null;
+  const cam=view.cam,w=view.canvas.clientWidth,h=Math.max(1,view.canvas.clientHeight),scale=Math.tan(cam.fov/2);
+  const nx=(x-w/2)*2/h,ny=(h/2-y)*2/h;
+  const orthographic=view.projection==='orthographic',eye=cam.eye();
+  const origin=orthographic?eye.map((v,i)=>v+cam.dist*scale*(cam.r[i]*nx+cam.u[i]*ny)):eye;
+  const dir=orthographic?cam.f:V3.norm(cam.f.map((v,i)=>v+scale*(cam.r[i]*nx+cam.u[i]*ny)));
+  if(Math.abs(dir[2])<1e-9)return null;
+  const distance=(z*100-origin[2])/dir[2];if(distance<0)return null;
+  const p=origin.map((v,i)=>v+dir[i]*distance);return [p[0]/100,-p[1]/100,p[2]/100];
+}
+export function setSelection(selection) {
+  if(!view)return;
+  view.selection=selection==null?null:structuredClone(selection);view.later();
 }

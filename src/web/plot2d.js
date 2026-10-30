@@ -27,6 +27,7 @@ import * as P from "./probe.js";
 // the page's own font (style.css's), for what is written on the canvas
 let family = "";
 const font = (el, px) => `${px}px ${family ||= getComputedStyle(el).fontFamily || "monospace"}`;
+import { hitComponent, padOutline } from "./components.js";
 
 // varints (7 bits a byte, low first) and zigzag, as the hub writes them
 function reader(bytes) {
@@ -111,6 +112,8 @@ export function reset() {
   plots.clear();
   lastKey = "";
   infos.clear();
+  componentSources.clear();
+  componentKey = '';
 }
 
 // how each plot came: its size on the wire and how long after it was asked for
@@ -427,7 +430,19 @@ class View {
       if (tap) {
         const s = this.sheetAt(e.clientX, e.clientY);
         if (s && sheeted) sheeted(s.value);
-        else this.pick(e.clientX, e.clientY);
+        else {
+          // Cross-probe (main) and saved-component inspection (viewer lane)
+          // both follow the same click.
+          this.pick(e.clientX, e.clientY);
+          const record = componentSources.get(this.key);
+          if (record) {
+            const b = canvas.getBoundingClientRect();
+            const x = (e.clientX-b.left-this.ox)/this.scale/1000, y = (e.clientY-b.top-this.oy)/this.scale/1000;
+            const selected = hitComponent(record.data,x,y,{off:this.off});
+            selectComponent(selected?.id || '',this.key);
+            record.onSelect?.(selected?.id || '');
+          }
+        }
       }
       this.pinch = null;
       // the finger left behind carries on panning from where it is
@@ -690,6 +705,19 @@ class View {
       }
     }
     g.globalAlpha = 1;
+    const components = componentSources.get(this.key);
+    const selected = components?.data?.components?.find(c=>c.id===components.selected);
+    if (selected) {
+      g.strokeStyle = '#d2f05a';g.fillStyle = 'rgba(210,240,90,.2)';g.lineWidth = 1.5/this.scale;
+      for (const pad of selected.pads || []) {
+        const layer=selected.layer==='B.Cu'?5:12;
+        if(!String(pad.type).includes('thru_hole')&&Math.floor(this.off/2**layer)%2)continue;
+        const ps=padOutline(selected,pad,true);if(!ps.length)continue;
+        g.beginPath();g.moveTo(ps[0][0]*1000,ps[0][1]*1000);
+        for(const [x,y] of ps.slice(1))g.lineTo(x*1000,y*1000);
+        g.closePath();g.fill();g.stroke();
+      }
+    }
     // only while something fades in does it ask for the next frame
     if (fading) this.later();
     // how it came, small in a corner, on the page's background so a board
@@ -835,4 +863,24 @@ export function setProbe(v) {
 // the probed part or net brought into view in each plot (the chip)
 export function showProbe() {
   for (const v of views.values()) v.show_probe();
+}
+
+// Explicit saved-source metadata. Selection only hits source copper pads;
+// empty board space and unsupported pad geometries never choose a nearest ref.
+const componentSources = new Map();
+let componentKey = '';
+export function setComponents(key,data,onSelect) {
+  const previous=componentSources.get(key);
+  componentKey=key;
+  if(!data||data.error||!Array.isArray(data.components)||data.components.some(c=>!c.id)||new Set(data.components.map(c=>c.id)).size!==data.components.length)componentSources.delete(key);
+  else {
+    componentSources.delete(key);
+    componentSources.set(key,{data,onSelect,selected:previous?.data?.fingerprint===data.fingerprint&&previous?.data?.sourceRevision===data.sourceRevision&&previous?.data?.schematicRevision===data.schematicRevision?previous.selected:''});
+    if(componentSources.size>8)componentSources.delete(componentSources.keys().next().value);
+  }
+  if(view?.key===key)view.later();
+}
+export function selectComponent(id,key=componentKey) {
+  const r=componentSources.get(key);
+  if(r){r.selected=r.data.components.some(c=>c.id===id)?id:'';if(view?.key===key)view.later();}
 }
