@@ -709,9 +709,14 @@ function render() {
   queued = false;
   const tl = document.getElementById("timeline");
   const t0 = PERF ? pnow() : 0;
-  let page = frontendNode ? thinContinuations.project(App.presentation_overlay(frontendNode, presentationJson(modelFeedback.project(currentSession()))), node => node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node))
+  let page = frontendNode ? App.presentation_overlay(frontendNode, presentationJson(modelFeedback.project(currentSession())))
     : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
+  // Saved transition/startup pictures contain the server's unprojected partial
+  // footer. Clean it before their first paint, without borrowing live readers
+  // or request authority from the currently selected conversation.
+  if (frontendNode || transitionNode || focusedNode) page = thinContinuations.project(page,
+    node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
   if (frontendNode) page = bodyWindows.project(page);
   const t1 = PERF ? pnow() : 0;
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
