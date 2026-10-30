@@ -12278,18 +12278,60 @@ def Hub.thin.web_fit.fits(rendered: TA.Rendered, +st: M.State, +revision: Nat, +
         Nat.is_le(J.Json.bytes(Hub.thin.web_fit.answer(st, revision, c, o, context, result)), 229376n),
         Hub.thin.web_fit.region(TSW.Region.output(True{}, [actor], result, J.Json.get_obj(o, "p")), st, revision, c, o, context)))
 
-def Hub.thin.web_fit.loop(fuel: Nat, fits: Bool, rendered: TA.Rendered, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat,
+# A view over the budget is shrunk by its two levers, the thread's window
+# (TBODY.Body.window halves it, down to one row) and the sidebar's
+# (TA.Acted.web_reduce halves its budget). Ten halvings bottom both out, so
+# the old loop of ten trials rendered the same view again and again once the
+# fixed chrome alone (a sidebar that never pages, a viewer) passed the
+# budget: eleven full renders in one hub step, five seconds and more on a
+# real catalog, past every client's view deadline (the page said
+# "Conversation unavailable" after each message). Now the second trial is
+# that floor itself, the very view the tenth trial made: over the budget it
+# goes as before, after two renders; within it, one halving is tried and
+# kept when it fits too (as the old second trial was). Three renders at most.
+def Hub.thin.web_fit.floor.acted(fuel: Nat, +acted: TA.Acted) -> TA.Acted:
+  match fuel:
+    case 0n: acted
+    case 1n+k: Hub.thin.web_fit.floor.acted(k, TA.Acted.web_reduce(acted))
+
+def Hub.thin.web_fit.floor.rows(fuel: Nat, +rows: List<&2, String>, +index: THIN.Index, +anchor: String) -> List<&2, String>:
+  match fuel:
+    case 0n: rows
+    case 1n+k: Hub.thin.web_fit.floor.rows(k, TBODY.Body.window(rows, index, anchor), index, anchor)
+
+def Hub.thin.web_fit.halvings() -> Nat:
+  10n
+
+# a fitted view goes out with how many renders it took (/debug/perf's
+# "thin.fit.renders": its max is at most three, test/tools/thin_fit_e2e.ts)
+def Hub.thin.web_fit.sent(+n: U32, rendered: TA.Rendered, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext) -> IO(Hub):
+  IO.bind(Unit, Hub, PS.Perf.add("thin.fit.renders", n), _ => Hub.thin.rendered(rendered, h, client, o, c, now, context))
+
+def Hub.thin.web_fit.pick(fits: Bool, +half: TA.Rendered, +floor: TA.Rendered, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext) -> IO(Hub):
+  match fits:
+    case True{}: Hub.thin.web_fit.sent(3, half, h, client, o, c, now, context)
+    case False{}: Hub.thin.web_fit.sent(3, floor, h, client, o, c, now, context)
+
+def Hub.thin.web_fit.half(floored: Bool, +floor: TA.Rendered, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat,
     +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat) -> IO(Hub):
-  match fuel fits h:
-    case 0n _ _: Hub.thin.rendered(rendered, h, client, o, c, now, context)
-    case _ True{} _: Hub.thin.rendered(rendered, h, client, o, c, now, context)
-    case 1n+k False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      +a2 = TA.Acted.web_reduce(acted)
-      +next = TBODY.Body.window(rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", ""))
+  match floored h:
+    case False{} _: Hub.thin.web_fit.sent(2, floor, h, client, o, c, now, context)
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +bounded = TV.Obj.put(p, "bodyBudget", J.Num{"1"})
-      +trial = TA.Rendered.remember.clock(TA.Actor.render.acted(a2, True{}, shown, index, bounded, epoch, now, next, stream, revision), key, ms, now, stream, True{}, bounded)
-      Hub.thin.web_fit.loop(k, Hub.thin.web_fit.fits(trial, st, Cfg.thin.revision(cfg), c, o, context), trial, a2, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, bounded,
-        key, ms, shown, index, epoch, next, stream, revision)
+      +trial = TA.Rendered.remember.clock(TA.Actor.render.acted(TA.Acted.web_reduce(acted), True{}, shown, index, bounded, epoch, now,
+        TBODY.Body.window(rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")), stream, revision), key, ms, now, stream, True{}, bounded)
+      Hub.thin.web_fit.pick(Hub.thin.web_fit.fits(trial, st, Cfg.thin.revision(cfg), c, o, context), trial, floor, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
+
+def Hub.thin.web_fit.floor(fits: Bool, +first: TA.Rendered, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat,
+    +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat) -> IO(Hub):
+  match fits h:
+    case True{} _: Hub.thin.web_fit.sent(1, first, h, client, o, c, now, context)
+    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +bounded = TV.Obj.put(p, "bodyBudget", J.Num{"1"})
+      +floor = TA.Rendered.remember.clock(TA.Actor.render.acted(Hub.thin.web_fit.floor.acted(Hub.thin.web_fit.halvings(), acted), True{}, shown, index, bounded, epoch, now,
+        Hub.thin.web_fit.floor.rows(Hub.thin.web_fit.halvings(), rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")), stream, revision), key, ms, now, stream, True{}, bounded)
+      Hub.thin.web_fit.half(Hub.thin.web_fit.fits(floor, st, Cfg.thin.revision(cfg), c, o, context), floor, acted, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
+        key, ms, shown, index, epoch, rows, stream, revision)
 
 def Hub.thin.web_fit.choose(on: Bool, +actor: TA.Actor, +web: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
     +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat) -> IO(Hub):
@@ -12299,7 +12341,7 @@ def Hub.thin.web_fit.choose(on: Bool, +actor: TA.Actor, +web: Bool, h: Hub, +cli
     case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +acted = TA.Actor.acted(actor, True{}, p, epoch, now)
       +trial = TA.Rendered.remember.clock(TA.Actor.render.acted(acted, True{}, shown, index, p, epoch, now, rows, stream, revision), key, ms, now, stream, True{}, p)
-      Hub.thin.web_fit.loop(10n, Hub.thin.web_fit.fits(trial, st, Cfg.thin.revision(cfg), c, o, context), trial, acted, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
+      Hub.thin.web_fit.floor(Hub.thin.web_fit.fits(trial, st, Cfg.thin.revision(cfg), c, o, context), trial, acted, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
         key, ms, shown, index, epoch, rows, stream, revision)
 
 def Hub.thin.native_fit.choose(native: Bool, actor: TA.Actor, +web: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
