@@ -1071,7 +1071,7 @@ def Desk.request(look: Bool, +client: U32, +id: String, +p: J.Json) -> Step:
 # reopened, edited or dropped (core/review.bend's Review.act), by the person;
 # review.release {thread, tag, publish, force}: a release (server/review.bend)
 def Rv.methods() -> List<&2, String>:
-  ["history.resolve", "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "zone.report", "zone.set"]
+  ["history.resolve", "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "zone.report", "zone.set", "kicad.components", "kicad.renderAsset"]
 
 # The person's time zone (core/sched.bend's Zone.*)
 # zone.report {zone}: a phone says where it is; kept as person.tz.device when
@@ -1132,6 +1132,14 @@ def Rv.request(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.
       Zone.report(s, now, client, id, String.trim(J.Json.get_str(p, "zone", "")))
     case 7n:
       Zone.set(s, now, client, id, String.trim(J.Json.get_str(p, "zone", "")))
+    case 8n:
+      Bool.pick(Step, Hub.owns(s, J.Json.get_str(p, "thread", "")),
+        Hub.git(s, client, id, "rv.components", J.Json.get_str(p, "thread", ""), J.Json.show(p), ""), Step.outs([Reply.err(client, id, "Unknown thread for component inspection")]))
+    case 9n:
+      Bool.pick(Step, Hub.owns(s, J.Json.get_str(p, "thread", "")),
+        Hub.git(s, client, id, "rv.renderAsset", J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "path", ""),
+          J.Json.show(J.Json.obj([J.KV{"kind", J.Str{J.Json.get_str(p, "kind", "2")}}, J.KV{"revision", J.Str{J.Json.get_str(p, "revision", "")}}]))),
+        Step.outs([Reply.err(client, id, "Unknown thread for model inspection")]))
     case _:
       Desk.request(String.eq(m, "desk.look"), client, id, p)
 
@@ -7227,6 +7235,13 @@ def Carry.fresh.go(es: List<&2, M.Entry>, skip: Bool) -> Bool:
 def Carry.fresh(+es: List<&2, M.Entry>) -> Bool:
   Carry.fresh.go(es, Carry.restart(es))
 
+# Ephemeral runs: a mail run or a coordinator's back office (mailrun.bend's
+# Run.is; their ids run... and mailcoord-...). One-shot by design: the
+# watchdog never watches them and nothing resumes them by itself (no restart
+# retry, no provider resume, no carry), and none is reported to the person.
+def Ephemeral.is(+s: M.State, +th: String) -> Bool:
+  Bool.or(MR.Run.is(s, th), Bool.or(String.starts_with(th, "run"), String.starts_with(th, "mailcoord-")))
+
 # an archived or deleted thread never carries on
 def Carry.live(t: M.Thread) -> Bool:
   match t:
@@ -9705,7 +9720,7 @@ def ProviderResume.interrupted(t: M.TurnState) -> Bool:
 def ProviderResume.ready(+s: M.State, +now: Nat, +th: String) -> Bool:
   +r = ProviderResume.record(s, th)
   +reset = J.Json.get_nat(r, "reset", 0n)
-  Bool.and(Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), Bool.not(M.Dormant.thread(s, th))), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
+  Bool.and(Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), Bool.not(Bool.or(M.Dormant.thread(s, th), Ephemeral.is(s, th)))), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
     Bool.and(Nat.is_gt(reset, 0n), Bool.and(Nat.is_ge(now, reset), Bool.and(Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n),
       String.eq(J.Json.get_str(r, "target", ""), FB.Target.key(Fallback.target(Hub.thread(s, th))))))))
 
