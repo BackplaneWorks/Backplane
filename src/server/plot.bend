@@ -1089,8 +1089,12 @@ def Pv.read.at(low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg
     +size : U32 <- Pv.solid.known(Pv.solid.kind(kind), kind, path)
     Pv.read.run(P.Solid.fits(size), size, st, low, key, kind, path, q, dir)
 
+# a 3D model's read (a board through kicad-cli's export, a STEP through
+# step2glb) runs at low priority (nice) too: it takes seconds of CPU, and a
+# desktop viewer loading the original model at the same moment draws it
+# sooner; a 2D plot keeps normal priority
 def Pv.read(+key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
-  Pv.read.at(False{}, key, kind, path, q, dir)
+  Pv.read.at(Pv.solid.kind(kind), key, kind, path, q, dir)
 
 # Polling
 # -------
