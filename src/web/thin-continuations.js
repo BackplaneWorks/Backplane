@@ -3,7 +3,8 @@ import { T, is } from './wire.js';
 const list = items => items.reduceRight((tail, head) => ({ $: 'Con', head, tail }), { $: 'Nil' });
 const items = xs => { const out = [];for (; xs && is(xs, 'Con'); xs = xs.tail) out.push(xs.head);return out; };
 const attr = (n, name) => items(n.attrs).find(a => is(a, 'At') && a.name === name)?.value;
-const action = n => items(n.attrs).find(a => !is(a, 'At') && a.event === 'click')?.action;
+const action = n => items(n.attrs).find(a => !is(a, 'At') && a.event === 'click')?.action || attr(n, 'data-on-click');
+const continuation = n => n.tag === 'button' && action(n) === 'thin-message-more';
 const classes = n => (attr(n, 'class') || '').split(/\s+/);
 const text = value => ({ $: T.Txt, text: value });
 const element = (tag, key, attrs, kids) => ({ $: T.El, tag, key,
@@ -29,7 +30,7 @@ export class ThinContinuations {
     if (!this.readers.has(message.id) && this.readers.size >= 4) this.readers.delete(this.readers.keys().next().value);
     this.readers.set(message.id, message);return true;
   }
-  project(root, expand) {
+  project(root, expand, interactive = true) {
     const walk = (node, visit) => {
       if (!is(node, 'El')) return node;
       const expanded = expand(node);
@@ -39,7 +40,7 @@ export class ThinContinuations {
     const timeline = node => {
       const rows = new Map(), controls = new Map();
       const control = n => {
-        if (n.tag !== 'button' || action(n) !== 'thin-message-more') return null;
+        if (!continuation(n)) return null;
         try {
           const p = JSON.parse(attr(n, 'data-value'));
           return Object.keys(p).sort().join(',') === 'cursor,entryId' && p.cursor === '' && this.partial.has(p.entryId) ? p.entryId : null;
@@ -71,16 +72,17 @@ export class ThinContinuations {
       };
       const rewrite = n => {
         if (!is(n, 'El')) return n;
-        const id = control(n);
-        if (id) {
+        if (continuation(n)) {
           // Folded or otherwise absent entries expose their reader only when
           // their own unique row is shown. Never add an orphan footer panel
           // or guess another row; issued partial metadata remains untouched.
+          // Saved pictures can belong to another scope and have no current
+          // partial metadata. Remove their raw footer controls as well.
           return null;
         }
         let kids = items(n.kids).map(rewrite).filter(Boolean);
         const row = attr(n, 'data-id'), button = controls.get(row);
-        if (rows.get(row)?.length === 1 && rows.get(row)[0] === n && button?.length === 1 && classes(n).includes('act'))
+        if (interactive && rows.get(row)?.length === 1 && rows.get(row)[0] === n && button?.length === 1 && classes(n).includes('act'))
           kids.push(...readerNodes(row, button[0]));
         if (n.tag === 'button' && action(n) === 'view-page' && classes(n).includes('earlier')) {
           return { ...label(n, 'Load earlier messages', 'thin-earlier'), attrs: list(items(n.attrs).filter(a => !is(a, 'At') || !['class', 'style', 'title'].includes(a.name)).concat([

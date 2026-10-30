@@ -27,3 +27,23 @@ test('a message row never gets a read-more control, even when the window names i
  assert.equal(all(shown).filter(n=>n.$==='Txt').map(n=>n.text).join(''),'whole message text');
  const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../../src/web/thin-continuations.js'),'utf8');assert(!src.includes('Read rest of message'));
 });
+test('saved opening pictures never show three More footer rows, even without matching partial metadata',async()=>{
+ const c=await setup(['other-scope']);
+ const transported=id=>el('button',{'class':'thin-message-more','data-on-click':'thin-message-more','data-value':JSON.stringify({entryId:id,cursor:''})},[{$:'Txt',text:'More'}]);
+ for(const controls of [[button('a'),button('b'),button('c')],[transported('a'),transported('b'),transported('c')],[button('a'),button('a'),button('a')]]){
+  const tree=timeline([msg('last'),...controls]),before=JSON.stringify(tree),shown=c.project(tree,n=>n,false);
+  assert.equal(kids(shown).length,1,'no continuation rows after the final live-end entry');
+  assert(!all(shown).some(n=>n.tag==='button'));assert.equal(JSON.stringify(tree),before,'saved picture is immutable');
+ }
+});
+test('read-only pictures never restore another live scope reader into a matching row ID',async()=>{
+ const c=await setup(['a']);assert(c.accept({id:'a',version:'1',text:'live scope private body',hasMore:true,cursor:'next'}));
+ const shown=c.project(timeline([row('a'),button('a')]),n=>n,false);
+ assert(!all(shown).some(n=>n.tag==='button'||n.tag==='pre'));assert(!all(shown).some(n=>n.text==='live scope private body'));
+ assert.equal(c.readers.size,1,'picture projection cannot mutate the current reader');
+ const live=c.project(timeline([row('a'),button('a')]),n=>n);assert(all(live).some(n=>n.tag==='pre'));assert(all(live).some(n=>n.tag==='button'),'current authoritative row retains its explicit reader');
+});
+test('unknown partial metadata cannot leave orphan controls in the authoritative timeline either',async()=>{
+ const c=await setup([]),shown=c.project(timeline([msg('last'),button('stale')]),n=>n);
+ assert.equal(kids(shown).length,1);assert.equal(c.partial.size,0);
+});
