@@ -13138,6 +13138,8 @@ def Laws.copy_file_open_told(): {==}
 def Laws.pair_msg_kept(): {==}
 def Laws.pair_msg_other_link(): {==}
 def Laws.pair_msg_no_link_qr(): {==}
+def Laws.thin_pair_told(): {==}
+def Laws.thin_pair_legacy(): {==}
 # ---- F1: far feed slices ----
 def Laws.far_feed_sliced(): {==}
 def Laws.far_feed_sliced_one(): {==}

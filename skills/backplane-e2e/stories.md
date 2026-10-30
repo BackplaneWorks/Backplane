@@ -114,6 +114,16 @@ it on a rule; click it again: they go, and none is left below the reply
 (the hub-drawn page too). Open it, send "tools:3 again", switch to another
 thread and back: the first run is still open, the new one shut.
 
+**S52 The pairing link in Settings** (W D)
+Start the hub with `BP_E2E_TAILNET=1` (hub.log: "Backplane on your tailnet:
+http://127.0.0.2:PORT/"). Open the page with its token and go to Settings ›
+Network and updates: "Pairing link" reads `http://127.0.0.2:PORT/#token=…`
+with QR code and Copy beside it, never "Shown once Backplane listens on your
+tailnet."; QR code shows the code. Reload, and open it from a second window:
+the same. Without `BP_E2E_TAILNET` the row says it is shown once Backplane
+listens on the tailnet, and a page opened without the token is refused
+("Pairing is required to reconnect").
+
 ## Seeing the design
 
 **S13 Board** (W D A)

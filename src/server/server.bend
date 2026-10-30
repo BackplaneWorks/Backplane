@@ -1974,6 +1974,26 @@ def Hub.pair_msg(c: Cfg) -> String:
     case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, +lk, _, _}, _, +views, +accountInfo}:
       Hub.pair_msg.from(BN.Bn.pair(bnx), lk)
 
+# The pairing link in a hub-drawn view (the web page, the desktop window
+# and the phones all draw Settings that way). Wire.pair reaches such a
+# client only through its open view (Client.thin.message folds the info
+# into the view's Ui; no info goes on a thin socket), and the link is found
+# at start, before any window joins and opens a view: a view made from
+# Hub.info alone never had it, and Settings said "Shown once Backplane
+# listens on your tailnet." on a hub that did. So a client that came with
+# the token takes the link with the info its view is made from; one let in
+# the legacy way never does (laws thin_pair_*).
+def Hub.thin.pair.put(+kv: J.Json, +info: J.Json) -> J.Json:
+  TV.Obj.put(TV.Obj.put(info, "pair", J.Str{J.Json.get_str(kv, "pair", "")}), "pair.qr", J.Str{J.Json.get_str(kv, "pair.qr", "")})
+
+def Hub.thin.pair.k(legacy: Bool, +msg: String, +info: J.Json) -> J.Json:
+  match legacy:
+    case True{}: info
+    case False{}: Hub.thin.pair.put(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(msg), J.Null{}), "info"), info)
+
+def Hub.thin.pair(legacy: Bool, c: Cfg, +info: J.Json) -> J.Json:
+  Hub.thin.pair.k(legacy, Hub.pair_msg(c), info)
+
 # A link change is handled after it has been stored, through the inbox,
 # so both sides of an invite refresh immediately (revokes prune rows).
 def Bot.dir.changed(c: M.Change, +inbox: Chan(Msg)) -> IO(Unit):
@@ -12284,7 +12304,7 @@ def Hub.thin.render.page.v(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, 
       +shown = Hub.thin.view_state(st, cfg, thread)
       +epoch = Hub.thin.view_epoch(st, cfg, thread)
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, SEC.Sec.json(v, Hub.info(cfg)),
+      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Hub.thin.pair(Client.legacy(c), cfg, SEC.Sec.json(v, Hub.info(cfg))),
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
       do IO<Hub>:
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
