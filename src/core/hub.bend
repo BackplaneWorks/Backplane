@@ -7214,6 +7214,13 @@ def Carry.fresh.go(es: List<&2, M.Entry>, skip: Bool) -> Bool:
 def Carry.fresh(+es: List<&2, M.Entry>) -> Bool:
   Carry.fresh.go(es, Carry.restart(es))
 
+# Ephemeral runs: a mail run or a coordinator's back office (mailrun.bend's
+# Run.is; their ids run... and mailcoord-...). One-shot by design: the
+# watchdog never watches them and nothing resumes them by itself (no restart
+# retry, no provider resume, no carry), and none is reported to the person.
+def Ephemeral.is(+s: M.State, +th: String) -> Bool:
+  Bool.or(MR.Run.is(s, th), Bool.or(String.starts_with(th, "run"), String.starts_with(th, "mailcoord-")))
+
 # an archived or deleted thread never carries on
 def Carry.live(t: M.Thread) -> Bool:
   match t:
@@ -9692,7 +9699,7 @@ def ProviderResume.interrupted(t: M.TurnState) -> Bool:
 def ProviderResume.ready(+s: M.State, +now: Nat, +th: String) -> Bool:
   +r = ProviderResume.record(s, th)
   +reset = J.Json.get_nat(r, "reset", 0n)
-  Bool.and(Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), Bool.not(M.Dormant.thread(s, th))), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
+  Bool.and(Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), Bool.not(Bool.or(M.Dormant.thread(s, th), Ephemeral.is(s, th)))), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
     Bool.and(Nat.is_gt(reset, 0n), Bool.and(Nat.is_ge(now, reset), Bool.and(Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n),
       String.eq(J.Json.get_str(r, "target", ""), FB.Target.key(Fallback.target(Hub.thread(s, th))))))))
 

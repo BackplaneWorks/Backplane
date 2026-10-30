@@ -16,16 +16,21 @@ def Watchdog.active.t(t: M.Thread) -> Bool:
   match t:
     case M.Thread{_, _, _, _, _, _, _, ar, _, _, _, _, _, _, _, _, _, _, _, _, de}: Bool.not(Bool.or(ar, de))
 
-# A quota hold without a reset needs attention; known reset times already
-# have an automatic continuation and are allowed to wait for that time.
-def Watchdog.provider.wait(+s: M.State, +th: String) -> Bool:
-  +record = M.Setting.get(s, "provider.resume." ++ th, "")
-  Bool.and(Bool.not(String.is_empty(record)), Nat.is_eq(J.Json.get_nat(Maybe.default(&2, J.Json, J.Json.parse(record), J.Null{}), "reset", 0n), 0n))
+# A thread held on a provider's limit (provider.resume.<thread>: its turn
+# ended on the limit) waits for the reset and is resumed then (hub.bend's
+# ProviderResume), whatever work it still owns: it is not stalled. When no
+# reset is known its "Action needed" line already says so.
+def Watchdog.held(+s: M.State, +th: String) -> Bool:
+  Bool.not(String.is_empty(M.Setting.get(s, "provider.resume." ++ th, "")))
 
+# watched: a live thread that is neither an ephemeral run (B.Ephemeral.is) nor
+# held on a provider's limit, and works, starts, owns work, waits on the
+# person or waits on another thread
 def Watchdog.active.ix(+kids: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
-  Bool.and(Watchdog.active.t(t), Bool.or(M.State.running.k(t), Bool.or(M.Queue.starting(s, M.Thread.id(t)),
-    Bool.or(Nat.is_gt(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n), Bool.or(Nat.is_gt(B.Hub.pending(t), 0n),
-      Bool.or(Watchdog.provider.wait(s, M.Thread.id(t)), Bool.not(List.is_empty(&2, String, M.Wake.ids(s, "wakes.by." ++ M.Thread.id(t))))))))))
+  Bool.and(Bool.and(Watchdog.active.t(t), Bool.not(Bool.or(B.Ephemeral.is(s, M.Thread.id(t)), Watchdog.held(s, M.Thread.id(t))))),
+    Bool.or(M.State.running.k(t), Bool.or(M.Queue.starting(s, M.Thread.id(t)),
+      Bool.or(Nat.is_gt(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n), Bool.or(Nat.is_gt(B.Hub.pending(t), 0n),
+        Bool.not(List.is_empty(&2, String, M.Wake.ids(s, "wakes.by." ++ M.Thread.id(t)))))))))
 
 def Watchdog.active(+s: M.State, +t: M.Thread) -> Bool:
   Watchdog.active.ix(M.Work.kids.map(s), s, t)
