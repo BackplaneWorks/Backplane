@@ -223,7 +223,7 @@ def Watchdog.threads(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State, +
   match ts:
     case Nil{}: step
     case +t <> rest:
-      +active = Watchdog.active.ix(kids, s, t)
+      +active = Bool.and(Watchdog.active.ix(kids, s, t), Bool.not(M.Dormant.of(s, t)))
       +one = Watchdog.keep(Bool.or(active, Nat.is_gt(L.Liveness.last(Watchdog.live(s, M.Thread.id(t))), 0n)), active, s, now, t)
       Watchdog.threads(rest, kids, M.State.replay(B.Queue.changes(one), s), now, B.Step.cat(step, one))
 

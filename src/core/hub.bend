@@ -7058,7 +7058,7 @@ def Shelve.tick.go(+on: Bool, ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +ki
     case Nil{}:
       Nil{}
     case +t <> rest:
-      Shelve.tick.k(M.Lifecycle.stale(kids, s, t), Shelve.done(on, kids, s, t, navs, M.Thread.id(t), now), t, now,
+      Shelve.tick.k(Bool.and(M.Lifecycle.stale(kids, s, t), Bool.not(M.Dormant.of(s, t))), Shelve.done(on, kids, s, t, navs, M.Thread.id(t), now), t, now,
         Shelve.tick.go(on, rest, navs, kids, s, now))
 
 # every thread's settle or wake that no step made: a settled thread that
@@ -7223,7 +7223,7 @@ def Carry.live(t: M.Thread) -> Bool:
 # whether a turn the restart cut short carries on: the setting is on, the
 # thread was running, is live, and made progress since the last carry
 def Carry.will(+before: M.State, +th: String) -> Bool:
-  Bool.and(Bool.not(MR.Run.is(before, th)), Bool.and(M.Carry.on(before), Bool.and(Bool.and(Hub.running(Hub.thread(before, th)), Carry.live(Hub.thread(before, th))), Carry.fresh(M.State.mine(before, th)))))
+  Bool.and(Bool.not(Bool.or(MR.Run.is(before, th), M.Dormant.thread(before, th))), Bool.and(M.Carry.on(before), Bool.and(Bool.and(Hub.running(Hub.thread(before, th)), Carry.live(Hub.thread(before, th))), Carry.fresh(M.State.mine(before, th)))))
 
 # A repeated continuation is delayed by restartretry.bend. Keep a delegated
 # task's ownership while it waits; Carry.will and immediate starts stay exact.
@@ -7235,7 +7235,7 @@ def Carry.prompt(es: List<&2, M.Entry>) -> Bool:
     case _: False{}
 
 def Carry.deferred(+before: M.State, +th: String) -> Bool:
-  Bool.and(Bool.not(MR.Run.is(before, th)), Bool.and(M.Carry.on(before),
+  Bool.and(Bool.not(Bool.or(MR.Run.is(before, th), M.Dormant.thread(before, th))), Bool.and(M.Carry.on(before),
     Bool.and(Hub.running(Hub.thread(before, th)), Bool.and(Carry.live(Hub.thread(before, th)),
       Bool.and(Bool.not(Carry.will(before, th)), Carry.prompt(M.State.mine(before, th)))))))
 
@@ -9675,7 +9675,7 @@ def WorkTimeout.threads(ts: List<&2, M.Thread>, +s: M.State, +now: Nat) -> Step:
   match ts:
     case Nil{}: Step.none()
     case +t <> rest:
-      +st = WorkTimeout.rows(Bool.pick(List<&2, String>, Lost.live(t), M.Bg.of(s, M.Thread.id(t)), Nil{}), s, now, M.Thread.id(t))
+      +st = WorkTimeout.rows(Bool.pick(List<&2, String>, Bool.and(Lost.live(t), Bool.not(M.Dormant.of(s, t))), M.Bg.of(s, M.Thread.id(t)), Nil{}), s, now, M.Thread.id(t))
       Step.cat(st, WorkTimeout.threads(rest, M.State.replay(Queue.changes(st), s), now))
 
 def WorkTimeout.tick(+s: M.State, now: Nat) -> Step:
@@ -9692,7 +9692,7 @@ def ProviderResume.interrupted(t: M.TurnState) -> Bool:
 def ProviderResume.ready(+s: M.State, +now: Nat, +th: String) -> Bool:
   +r = ProviderResume.record(s, th)
   +reset = J.Json.get_nat(r, "reset", 0n)
-  Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
+  Bool.and(Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), Bool.not(M.Dormant.thread(s, th))), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
     Bool.and(Nat.is_gt(reset, 0n), Bool.and(Nat.is_ge(now, reset), Bool.and(Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n),
       String.eq(J.Json.get_str(r, "target", ""), FB.Target.key(Fallback.target(Hub.thread(s, th))))))))
 
