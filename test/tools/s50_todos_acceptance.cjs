@@ -277,7 +277,8 @@ async function main() {
       started=true;await hub('start');
       const port=Number(fs.readFileSync(path.join(base,'port'),'utf8'));assert(port>=3799);
       const origin='http://127.0.0.1:'+port,token=fs.readFileSync(path.join(home,'token'),'utf8').trim();
-      report.build=(await(await fetch(origin+'/hello')).json()).backplane;
+      const hello = require(path.join(repo,'desktop/service.cjs')).hello;
+      report.build=hello(Buffer.from(await(await fetch(origin+'/hello')).arrayBuffer())).backplane;
       assert(report.build,'/hello must name its build');
       fs.writeFileSync(path.join(base,'fake/s50-standin.ts'),standin);
       const bun=process.env.S50_BUN||'bun';
