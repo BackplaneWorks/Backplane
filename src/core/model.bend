@@ -1545,11 +1545,12 @@ def Switch.seen(s: State, +th: String, +p: String) -> Nat:
 # ---------------
 # Conversations that belong to no project live in the built-in project
 # Scratch.id(), which the hub makes at start (rooted at <home>/scratch;
-# once removed it stays removed), each thread in a folder of its own. They
-# are ephemeral: one left alone for the "scratch.days" setting (1..90,
-# else 7) is deleted with its folder, unless it is pinned (kept) or busy
-# (laws scratch_*). "/give" hands one's conversation to threads, projects
-# and bots (bothub.bend's Give).
+# once removed it stays removed), each thread in a folder of its own.
+# Scratch is retired (docs/bots.md): new hubs no longer make it and its
+# chats never expire. Scratch.expired below says when one would have (left
+# alone for "scratch.days", 1..90, else 7, not pinned or busy; laws
+# scratch_*), but no tick acts on it. "/give" hands one's conversation to
+# threads, projects and bots (bothub.bend's Give).
 
 def Scratch.id() -> String:
   "scratch"

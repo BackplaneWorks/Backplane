@@ -6675,8 +6675,9 @@ def Drop.asks(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State, +now: Na
     case +t <> rest:
       Drop.k(M.Worktree.drop.w(s, t, now, w, M.Work.busy.at(kids, s, M.Thread.id(t))), s, t, Drop.asks(rest, kids, s, now, w))
 
-# Scratch threads left alone long enough (M.Scratch.expired) are deleted,
-# like thread.delete, and the server removes their folders
+# Scratch threads left alone long enough (M.Scratch.expired) would be
+# deleted, like thread.delete, with their folders. Scratch is retired and
+# its chats never expire, so Hub.tick.k does not call this
 def Scratch.gone.k(go: Bool, +th: String, +now: Nat, rest: Step) -> Step:
   match go:
     case True{}:
