@@ -584,10 +584,18 @@ def Ui.base(resume: Bool, st: M.State) -> M.State:
 # how many changes this client holds (a reconnect asks for the rest)
 # the log's read model handed over whole (the hub's own window: nothing
 # to parse or replay)
-def Ui.adopt.raw(u: Ui, st: M.State) -> Ui:
+def Todos.closed(done: Bool, info: Map<&2, String>, th: String) -> Map<&2, String>:
+  match done:
+    case False{}: info
+    case True{}: Map.set(&2, String, info, "fold:todos:" ++ th, "0")
+
+def Todos.autoclose(+old: M.State, +fresh: M.State, info: Map<&2, String>, +th: String) -> Map<&2, String>:
+  Todos.closed(Bool.and(Bool.not(TD.Todo.complete(M.Todos.of(old, th))), TD.Todo.complete(M.Todos.of(fresh, th))), info, th)
+
+def Ui.adopt.raw(u: Ui, +st: M.State) -> Ui:
   match u:
-    case Ui{_, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
+    case Ui{+old, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Todos.autoclose(old, st, nf, sel), ob, tr}
 
 def Ui.seq(u: Ui) -> Nat:
   match u:
@@ -7338,7 +7346,7 @@ def Todos.pick(show: Bool, ts: List<&2, TD.Todo>) -> List<&2, TD.Todo>:
       Nil{}
 
 def Todos.shown(+st: M.State, +th: String, +run: Bool) -> List<&2, TD.Todo>:
-  Todos.pick(TD.Todo.shown(Todos.of(st, th), run), Todos.of(st, th))
+  Todos.pick(Bool.and(M.Todos.visible(st, th), TD.Todo.shown(Todos.of(st, th), run)), Todos.of(st, th))
 
 # The list sits at the top of the thread beside its subagents, on all four
 # clients, as one line ("To-do 3/7"). Its two controls: that line opens or
@@ -13455,6 +13463,8 @@ def Touch.raw(c: M.Change) -> List<&2, String>:
       List.concat(&2, String, [[id], [source]])
     case M.ProviderSet{+id, _, _, _}:
       [id]
+    case M.TodosChanged{+thread, _, _, _}:
+      [thread]
     case M.TodosSet{+thread, _, _}:
       [thread]
     case M.UsageSet{+thread, _, _, _}:
@@ -14095,12 +14105,20 @@ def Mailv.see.room.members(c: M.Change, +u: Ui) -> Ui:
 def Mailv.see(+u: Ui, +c: M.Change) -> Ui:
   Mailv.plane_seen(Mailv.plane_event(c), Mailv.origin(c, Mailv.index.update(c, Mailv.see.body(c, Mailv.see.room.members(c, Mailv.see.mail(Bool.not(String.is_empty(Mailv.change_conv(c))), u, Mailv.change_conv(c)))))))
 
+def Todos.see(+pre: M.State, +c: M.Change, u: Ui) -> Ui:
+  match c u:
+    case M.TodosSet{+th, _, _} Ui{+st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, nf, ob, tr}:
+      Ui{st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, Todos.autoclose(pre, st, nf, th), ob, tr}
+    case M.TodosChanged{+th, _, _, _} Ui{+st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, nf, ob, tr}:
+      Ui{st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, Todos.autoclose(pre, st, nf, th), ob, tr}
+    case _ _: u
+
 def Ui.fold(cs: List<&2, M.Change>, u: Ui) -> Ui:
   match cs u:
     case Nil{} _:
       u
-    case +c <> t Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui.fold(t, Mailv.see(Ui.see(Ui{M.State.apply(st, c), sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, c), c))
+    case +c <> t Ui{+st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+      Ui.fold(t, Todos.see(st, c, Mailv.see(Ui.see(Ui{M.State.apply(st, c), sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, c), c)))
 
 def Ui.fold.d(d: Decoded, u: Ui) -> Ui:
   match d:
@@ -15265,8 +15283,30 @@ def Ui.act.list_page(on: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Act{Ui.info_set(u, "local.view.pages", VP.Page.positions(Ui.info(u, "local.view.pages"), value)), Nil{}}
     case False{}: ThreadTree.dispatch(C.Codec.pos(["thread-child", "thread-tree", "thread-detach", "thread-history"], action), u, value, action)
 
+def Todos.edit.rpc(+u: Ui, +p: J.Json) -> Act:
+  Ui.rpc(u, "todos.edit", [J.KV{"thread", J.Str{J.Json.get_str(p, "thread", "")}}, J.KV{"op", J.Str{J.Json.get_str(p, "op", "")}},
+    J.KV{"id", J.Str{J.Json.get_str(p, "id", "")}}, J.KV{"text", J.Str{J.Json.get_str(p, "text", "")}},
+    J.KV{"status", J.Str{J.Json.get_str(p, "status", "")}}, J.KV{"to", J.Num{Nat.show(J.Json.get_nat(p, "to", 0n))}}])
+
+def Todos.text.parts(xs: List<&2, String>, +u: Ui, +add: Bool) -> Act:
+  match xs:
+    case th <> id <> rest:
+      Todos.edit.rpc(u, Maybe.default(&2, J.Json, J.Json.parse(TD.Todo.ask(th, Bool.pick(String, add, "add", "set"), id, String.join(rest, "\u{1f}"), "", 0n)), J.Null{}))
+    case _: Act{u, Nil{}}
+
+def Todos.dispatch(edit: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match edit:
+    case True{}: Todos.edit.rpc(u, Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}))
+    case False{}: Todos.text.parts(String.split(value, '\u{1f}'), u, String.eq(action, "todo-add"))
+
+def Ui.act.todo(on: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match on:
+    case False{}: Ui.act.list_page(Bool.and(String.eq(action, "list-page"), String.eq(Ui.info(u, "local.view.lazy"), "1")), u, action, value)
+    case True{}:
+      Todos.dispatch(String.eq(action, "todo-edit"), u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.act.list_page(Bool.and(String.eq(action, "list-page"), String.eq(Ui.info(u, "local.view.lazy"), "1")), u, action, value)
+  Ui.act.todo(Nat.is_lt(C.Codec.pos(["todo-edit", "todo-text", "todo-add"], action), 3n), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

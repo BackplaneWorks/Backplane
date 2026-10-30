@@ -882,8 +882,18 @@ def Mob.tdlines(rs: List<&2, TD.TRow>) -> List<&2, J.Json>:
 # its lines (every step once shown all: the app scrolls them; none shut),
 # and a long list's last line ("Show all 24", "Show fewer"; "" when it fits)
 # and its value
+def Mob.todo.items(ts: List<&2, TD.Todo>, +th: String, +n: Nat) -> List<&2, J.Json>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> rest:
+      J.Json.obj([J.KV{"id", J.Str{TD.Todo.id(t)}}, J.KV{"text", J.Str{TD.Todo.text(t)}}, J.KV{"status", J.Str{TD.Todo.status(t)}},
+        J.KV{"scope", J.Str{th ++ "\u{1f}" ++ TD.Todo.id(t) ++ "\u{1f}"}}, J.KV{"check", J.Str{TD.Todo.check(th, t)}},
+        J.KV{"delete", J.Str{TD.Todo.ask(th, "delete", TD.Todo.id(t), "", "", 0n)}},
+        J.KV{"up", J.Str{TD.Todo.ask(th, "move", TD.Todo.id(t), "", "", Nat.sub(n, 1n))}},
+        J.KV{"down", J.Str{TD.Todo.ask(th, "move", TD.Todo.id(t), "", "", 1n+n)}}]) <> Mob.todo.items(rest, th, 1n+n)
+
 def Mob.todos.k(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> J.Json:
-  J.Json.obj([J.KV{"head", J.Json.str(TD.Todo.head(ts))}, J.KV{"count", J.Json.str(TD.Todo.count(ts))}, J.KV{"open", J.Json.bool(open)}, J.KV{"toggle", J.Json.str(U.Todos.toggle(open, th))},
+  J.Json.obj([J.KV{"items", J.Json.arr(Bool.pick(List<&2, J.Json>, open, Mob.todo.items(ts, th, 0n), Nil{}))}, J.KV{"addScope", J.Str{th ++ "\u{1f}\u{1f}"}}, J.KV{"head", J.Json.str(TD.Todo.head(ts))}, J.KV{"count", J.Json.str(TD.Todo.count(ts))}, J.KV{"open", J.Json.bool(open)}, J.KV{"toggle", J.Json.str(U.Todos.toggle(open, th))},
     J.KV{"lines", J.Json.arr(Mob.tdlines(U.Todos.rows(info, th, U.Todos.cap.all(), ts)))},
     J.KV{"more", J.Json.str(Bool.pick(String, open, U.Todos.more(lc, all, ts), ""))}, J.KV{"moreValue", J.Json.str(U.Todos.more.ask(all, th))}])
 

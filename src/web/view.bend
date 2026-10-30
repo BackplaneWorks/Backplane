@@ -1457,8 +1457,32 @@ def View.todo.more.if(open: Bool, +lc: I.Loc, +all: Bool, +th: String, +ts: List
     case False{}: Nil{}
 
 # the steps (none shut) and the last line
+def View.todo.item(+th: String, +t: TD.Todo, +n: Nat) -> D.Node:
+  D.El{"div", "todo:" ++ TD.Todo.id(t), [D.At{"class", "todo " ++ TD.Todo.status(t)}], [
+    D.Dom.button("todo-check", "todo-edit", TD.Todo.check(th, t), "Check or uncheck item", Bool.pick(String, String.eq(TD.Todo.status(t), "completed"), "☑", "☐")),
+    D.El{"input", "text", [D.At{"type", "text"}, D.At{"value", TD.Todo.text(t)}, D.At{"aria-label", "To-do text"}, D.At{"maxlength", "2000"},
+      D.At{"data-pre", th ++ "\u{1f}" ++ TD.Todo.id(t) ++ "\u{1f}"}, D.On{"change", "todo-text"}], Nil{}},
+    D.Dom.button("todo-up", "todo-edit", TD.Todo.ask(th, "move", TD.Todo.id(t), "", "", Nat.sub(n, 1n)), "Move item up", "↑"),
+    D.Dom.button("todo-down", "todo-edit", TD.Todo.ask(th, "move", TD.Todo.id(t), "", "", 1n+n), "Move item down", "↓"),
+    D.Dom.button("todo-delete", "todo-edit", TD.Todo.ask(th, "delete", TD.Todo.id(t), "", "", 0n), "Delete item", "×")]}
+
+def View.todo.items(ts: List<&2, TD.Todo>, +th: String, +n: Nat) -> List<&2, D.Node>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> rest: View.todo.item(th, t, n) <> View.todo.items(rest, th, 1n+n)
+
+def View.todo.add(+th: String) -> D.Node:
+  D.El{"div", "todo-add", [D.At{"class", "todo-add"}], [
+    D.El{"input", "new", [D.At{"id", "todo-new:" ++ th}, D.At{"type", "text"}, D.At{"aria-label", "New to-do"}, D.At{"placeholder", "Add an item"}, D.At{"maxlength", "2000"}], Nil{}},
+    D.El{"button", "add", [D.At{"type", "button"}, D.At{"data-field", "todo-new:" ++ th}, D.At{"data-space", th ++ "\u{1f}"}, D.On{"click", "todo-add"}], [D.Txt{"Add"}]}]}
+
+def View.todos.editable(open: Bool, +th: String, ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  match open:
+    case False{}: Nil{}
+    case True{}: List.append(&2, D.Node, View.todo.items(ts, th, 0n), [View.todo.add(th)])
+
 def View.todos.rows(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> List<&2, D.Node>:
-  List.append(&2, D.Node, View.tdlines(U.Todos.rows(info, th, U.Todos.cap.all(), ts)), View.todo.more.if(open, lc, all, th, ts))
+  View.todos.editable(open, th, ts)
 
 def View.todos.body(rows: List<&2, D.Node>) -> D.Node:
   D.El{"div", "todo-rows", [D.At{"id", "todo-rows"}, D.At{"class", "todos-body"}], rows}

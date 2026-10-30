@@ -1,5 +1,9 @@
 package dev.backplane.mobile
 
+import androidx.compose.material3.Checkbox
+
+import androidx.compose.runtime.key
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -514,15 +518,38 @@ private fun subColor(state: String) = when (state) {
 // "Show all 24" or "Show fewer"
 @Composable
 fun TodosPanel(m: AppModel, td: Todos) {
+    var added by remember(td.addScope) { mutableStateOf("") }
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-            for (l in td.lines) Text(l.text, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                color = if (l.status == "completed") MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface)
+            if (td.items != null) for (item in td.items) key(item.id) { TodoItemRow(m, item) }
+            else for (l in td.lines) Text(l.text, style = MaterialTheme.typography.labelSmall)
         }
-        if (td.more.isNotEmpty()) Text(td.more, Modifier.clickable { m.act("fold", td.moreValue) }.padding(vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        if (td.addScope.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+            TextField(value = added, onValueChange = { added = it.take(2000) }, placeholder = { Text("Add an item") }, modifier = Modifier.weight(1f), singleLine = true)
+            TextButton(onClick = { if (added.isNotBlank()) { m.act("todo-add", td.addScope + added); added = "" } }) { Text("Add") }
+        }
     }
     HorizontalDivider()
+}
+
+@Composable
+private fun TodoItemRow(m: AppModel, item: TodoItem) {
+    var text by remember(item.id, item.text) { mutableStateOf(item.text) }
+    var menu by remember { mutableStateOf(false) }
+    fun save() { if (text.isNotBlank() && text != item.text) m.act("todo-text", item.scope + text) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = item.status == "completed", onCheckedChange = { m.act("todo-edit", item.check) })
+        TextField(value = text, onValueChange = { text = it.take(2000) }, modifier = Modifier.weight(1f).onFocusChanged { if (!it.isFocused) save() }, singleLine = true)
+        Box {
+            TextButton(onClick = { menu = true }) { Text("⋮") }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Save text") }, onClick = { save(); menu = false })
+                DropdownMenuItem(text = { Text("Move up") }, onClick = { save(); m.act("todo-edit", item.up); menu = false })
+                DropdownMenuItem(text = { Text("Move down") }, onClick = { save(); m.act("todo-edit", item.down); menu = false })
+                DropdownMenuItem(text = { Text("Delete") }, onClick = { m.act("todo-edit", item.delete); menu = false })
+            }
+        }
+    }
 }
 
 // the subagent panel: what this thread delegated (a tap opens its thread)

@@ -479,7 +479,13 @@ struct TodoLine: Decodable {
     let text, status: String
 }
 
+struct TodoItem: Decodable, Identifiable {
+    let id, text, status, scope, check, delete, up, down: String
+}
+
 struct Todos: Decodable {
+    let items: [TodoItem]?
+    let addScope: String?
     let head: String
     let lines: [TodoLine]
     // in the top bar beside the subagents: its count ("2/5"); a tap sends

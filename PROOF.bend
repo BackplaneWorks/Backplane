@@ -12065,6 +12065,7 @@ def Laws.foh_clean(cs):
     case M.ThreadForked{_, _, _} <> +t: Laws.foh_clean(t)
     case M.ProviderSet{_, _, _, _} <> +t: Laws.foh_clean(t)
     case M.TodosSet{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.TodosChanged{_, _, _, _} <> +t: Laws.foh_clean(t)
     case M.UsageSet{_, _, _, _} <> +t: Laws.foh_clean(t)
     case M.BotSet{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
     case M.BotDeleted{_, _} <> +t: Laws.foh_clean(t)
@@ -13691,3 +13692,21 @@ def Laws.automatic_ride_no_process_effects(clear, state, now, thread, msg, role,
   match clear:
     case False{}: {==}
     case True{}: {==}
+def Laws.todo_person_field_survives(old, person):
+  %Equal.sym(Bool, String.eq(old, old), True{}, Laws.string_eq_refl(old)) : {Bool.pick(String, _, person, old) == person : String}
+  {==}
+
+def Laws.todo_person_item_survives_snapshot(person):
+  {==}
+
+def Laws.todo_person_delete_survives_snapshot():
+  {==}
+
+def Laws.todo_agent_explicit_change():
+  {==}
+
+def Laws.todo_complete_auto_clears():
+  {==}
+
+def Laws.todo_next_turn_hides_old():
+  {==}

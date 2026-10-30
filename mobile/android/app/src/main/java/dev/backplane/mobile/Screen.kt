@@ -298,7 +298,8 @@ data class TodoLine(val text: String, val status: String)
 // tap sends fold with toggle, and only while open (shut until the person
 // opens it) its lines show under the bar; more: a long list's last line
 // ("Show all 24", "Show fewer"; "" when it fits)
-data class Todos(val head: String, val lines: List<TodoLine>, val open: Boolean = false, val toggle: String = "", val more: String = "", val moreValue: String = "", val count: String = "")
+data class TodoItem(val id: String, val text: String, val status: String, val scope: String, val check: String, val delete: String, val up: String, val down: String)
+data class Todos(val head: String, val lines: List<TodoLine>, val open: Boolean = false, val toggle: String = "", val more: String = "", val moreValue: String = "", val count: String = "", val items: List<TodoItem>? = null, val addScope: String = "")
 
 data class ThreadView(
     val id: String, val title: String, val branch: String, val state: String,
@@ -593,7 +594,8 @@ private fun threadOf(o: JSONObject) = ThreadView(
             it.optJSONArray("buttons").map { b -> QButton(b.optString("label"), b.optString("action"), b.optString("value")) })
     },
     o.optJSONObject("todos")?.let { td -> Todos(td.optString("head"), td.optJSONArray("lines").map { TodoLine(it.optString("text"), it.optString("status")) },
-        td.optBoolean("open", false), td.optString("toggle"), td.optString("more"), td.optString("moreValue"), td.optString("count")) },
+        td.optBoolean("open", false), td.optString("toggle"), td.optString("more"), td.optString("moreValue"), td.optString("count"),
+            if (td.has("items")) td.optJSONArray("items").map { TodoItem(it.optString("id"), it.optString("text"), it.optString("status"), it.optString("scope"), it.optString("check"), it.optString("delete"), it.optString("up"), it.optString("down")) } else null, td.optString("addScope")) },
     canChild = o.optBoolean("canChild"),
 )
 

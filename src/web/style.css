@@ -1843,3 +1843,10 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .dot.stalled { background: var(--warn); border-radius: 0; transform: rotate(45deg); animation: none; }
 .plane-row .why.stalled { color: var(--warn); }
 .thread:has(.dot.stalled) .ago.agents { color: var(--warn); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.todos-body { max-height: min(35vh, 300px); overflow-y: auto; }
+.todos .todo, .todos .todo-add { display: flex; align-items: center; gap: 4px; min-height: 36px; }
+.todos .todo input, .todos .todo-add input { flex: 1; min-width: 0; border: 1px solid transparent; background: transparent; color: inherit; padding: 6px; }
+.todos .todo input:focus, .todos .todo-add input:focus { border-color: var(--accent); outline: none; }
+.todos .todo button, .todos .todo-add button { flex: 0 0 auto; min-width: 30px; min-height: 32px; cursor: pointer; }
+@media(max-width: 640px) { .todos .todo button { min-width: 36px; min-height: 44px; } }

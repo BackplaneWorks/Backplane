@@ -243,7 +243,7 @@ def Hot.plain(t: M.Thread) -> M.Thread:
       M.Thread{id, p, ti, c, a, tu, pe, ar, o, 0n, 0n, pi, en, br, wt, pv, mo, rm, im, "", de}
 
 def Hot.sets(+s: M.State, +id: String) -> String:
-  M.Setting.get(s, "todos." ++ id, "") ++ "\u{1}" ++ M.Setting.get(s, "bg." ++ id, "") ++ "\u{1}" ++ M.Setting.get(s, "watch." ++ id, "") ++ "\u{1}" ++
+  M.Todos.snapshot(s, id) ++ "\u{1}" ++ M.Setting.get(s, "bg." ++ id, "") ++ "\u{1}" ++ M.Setting.get(s, "watch." ++ id, "") ++ "\u{1}" ++
     M.Setting.get(s, M.Fork.key(id), "") ++ "\u{1}" ++ M.Setting.get(s, M.Launch.key(id), "")
 
 def Hot.v.thread(+s: M.State, +t: M.Thread, +k: Nat) -> HRow:

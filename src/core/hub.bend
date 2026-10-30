@@ -1157,7 +1157,7 @@ def Hub.methods() -> List<&2, String>:
    "thread.pin", "thread.unpin", "thread.rename", "thread.delete", "kicad.watch", "thread.modes", "app.update", "setting.set", "kicad.install",
    "ask.answer", "device.register", "device.drop", "kicad.info", "queue.resume",
    "queue.edit", "queue.remove", "queue.move", "queue.steer", "thread.fork", "thread.back", "thread.provider", "update.now", "work.cancel", "task.cancel", "wake.cancel", "deploy.restart", "deploy.cancel", "deploy.status", "lock.release", "lock.cancel", "kicad.retry", "mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send",
-   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach"]
+   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit"]
 
 # Agent output (Claude stream-json)
 # ---------------------------------
@@ -1432,18 +1432,33 @@ def Claude.todo.any(bs: List<&2, J.Json>) -> Bool:
       Bool.or(Nat.is_lt(Claude.todo.kind(b), 3n), Claude.todo.any(t))
 
 def Claude.todos.of(+s: M.State, +th: String) -> List<&2, TD.Todo>:
-  TD.Todo.read(M.Setting.get(s, "todos." ++ th, ""))
+  M.Todos.base(s, th)
 
 def Claude.todos.set(changed: Bool, +th: String, +now: Nat, +ts: String) -> List<&2, M.Change>:
   match changed:
     case True{}:
-      [M.TodosSet{th, ts, now}]
+      [M.TodosChanged{th, "agent", ts, now}]
     case False{}:
       Nil{}
 
+def Claude.todo.kept(hit: Bool, b: J.Json, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match hit:
+    case True{}: b <> rest
+    case False{}: rest
+
+def Claude.todo.inputs(bs: List<&2, J.Json>) -> List<&2, J.Json>:
+  match bs:
+    case Nil{}: Nil{}
+    case +b <> t: Claude.todo.kept(Nat.is_lt(Claude.todo.kind(b), 3n), b, Claude.todo.inputs(t))
+
+def Claude.todos.tools(any: Bool, th: String, now: Nat, bs: List<&2, J.Json>) -> List<&2, M.Change>:
+  match any:
+    case False{}: Nil{}
+    case True{}: [M.TodosChanged{th, "tools", J.Json.show(J.Json.arr(bs)), now}]
+
 # an assistant message's todo tools, folded over the thread's list
 def Claude.todos(+s: M.State, +th: String, +now: Nat, +bs: List<&2, J.Json>) -> List<&2, M.Change>:
-  Claude.todos.set(Claude.todo.any(bs), th, now, TD.Todo.show(Claude.todo.go(bs, Claude.todos.of(s, th))))
+  Claude.todos.tools(Claude.todo.any(bs), th, now, Claude.todo.inputs(bs))
 
 # Context usage (Claude)
 # ----------------------
@@ -1819,11 +1834,18 @@ def Claude.named.go(bs: List<&2, J.Json>, ts: List<&2, TD.Todo>) -> List<&2, TD.
     case +b <> t:
       Claude.named.go(t, TD.Todo.named(ts, J.Json.get_str(b, "tool_use_id", ""), TD.Todo.result(Claude.result.text(J.Json.get_obj(b, "content")))))
 
+def Claude.named.inputs(bs: List<&2, J.Json>) -> List<&2, J.Json>:
+  match bs:
+    case Nil{}: Nil{}
+    case +b <> t:
+      +n = TD.Todo.result(Claude.result.text(J.Json.get_obj(b, "content")))
+      Claude.todo.kept(Bool.not(String.is_empty(n)), J.Json.obj([J.KV{"name", J.Str{"TaskNamed"}}, J.KV{"use", J.Str{J.Json.get_str(b, "tool_use_id", "")}}, J.KV{"number", J.Str{n}}]), Claude.named.inputs(t))
+
 # a "user" line carries tool results: a TaskCreate's names its step
 def Claude.named(+s: M.State, +th: String, +now: Nat, +o: J.Json) -> Step:
-  +before = TD.Todo.show(Claude.todos.of(s, th))
-  +after = TD.Todo.show(Claude.named.go(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "message"), "content")), Claude.todos.of(s, th)))
-  Step{Claude.todos.set(Bool.not(String.eq(before, after)), th, now, after), Nil{}}
+  +bs = Claude.named.inputs(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "message"), "content")))
+  Step{Claude.todos.tools(Bool.not(List.is_empty(&2, J.Json, bs)), th, now, bs), Nil{}}
+
 
 def Claude.init.same(t: M.Thread, +sid: String) -> Bool:
   match t:
@@ -3487,7 +3509,7 @@ def Codex.item.k(i: Nat, +thread: String, +now: Nat, +seq: Nat, +it: J.Json, thi
     case 2n:
       Step{[M.ActivityLogged{thread, Hub.id("f", now, seq), "tool", "edit", J.Json.show(J.Json.get_obj(it, "changes")), now}], Nil{}}
     case 3n:
-      Step{[M.TodosSet{thread, TD.Todo.show(TD.Todo.codex(it)), now}], Nil{}}
+      Step{[M.TodosChanged{thread, "agent", TD.Todo.show(TD.Todo.codex(it)), now}], Nil{}}
     case 4n:
       Step{Think.act(think, thread, "think:" ++ J.Json.get_str(it, "id", Hub.id("r", now, seq)) ++ "-" ++ Nat.show(seq), J.Json.get_str(it, "text", ""), now), Nil{}}
     case _:
@@ -3498,7 +3520,7 @@ def Codex.item.k(i: Nat, +thread: String, +now: Nat, +seq: Nat, +it: J.Json, thi
 def Codex.todo(todo: Bool, +thread: String, +now: Nat, +it: J.Json) -> Step:
   match todo:
     case True{}:
-      Step{[M.TodosSet{thread, TD.Todo.show(TD.Todo.codex(it)), now}], Nil{}}
+      Step{[M.TodosChanged{thread, "agent", TD.Todo.show(TD.Todo.codex(it)), now}], Nil{}}
     case False{}:
       Step.none()
 
@@ -7088,6 +7110,8 @@ def Busy.inert(c: M.Change) -> Bool:
       True{}
     case M.DeployBuilt{_, _, _, _, _}:
       True{}
+    case M.TodosChanged{_, _, _, _}:
+      True{}
     case M.TodosSet{_, _, _}:
       True{}
     case M.SessionSet{_, _, _}:
@@ -9134,6 +9158,32 @@ def Archive.wake(+until: Nat, +now: Nat, +th: String) -> List<&2, M.Change>:
 def Archive.changes(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
   M.ThreadArchived{th, True{}, now} <> Archive.wake(M.Nav.until(M.Nav.get(M.State.navs(s), th)), now, th)
 
+def Todos.note(run: Bool, +s: M.State, +now: Nat, +th: String, +msg: String, +text: String) -> Step:
+  match run:
+    case True{}: Hub.deliver(True{}, False{}, s, now, th, msg, M.System{}, text)
+    case False{}: Step{[M.TurnQueued{th, msg, text, now}], Nil{}}
+
+def Todos.edit.valid(ok: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +th: String) -> Step:
+  match ok:
+    case False{}: Step.outs([Reply.err(client, id, "Invalid to-do edit")])
+    case True{}:
+      +edit = J.Json.obj([J.KV{"op", J.Str{J.Json.get_str(p, "op", "")}},
+        J.KV{"id", J.Str{Bool.pick(String, String.eq(J.Json.get_str(p, "op", ""), "add"), "h:" ++ Hub.id("todo", now, Hub.seq(s)), J.Json.get_str(p, "id", ""))}},
+        J.KV{"text", J.Str{J.Json.get_str(p, "text", "")}}, J.KV{"status", J.Str{J.Json.get_str(p, "status", "")}}, J.KV{"to", J.Num{Nat.show(J.Json.get_nat(p, "to", 0n))}}])
+      +change = {M.TodosChanged{th, "person", J.Json.show(edit), now} : M.Change}
+      +after = M.State.apply(s, change)
+      Step.before([change], [Reply.ok(client, id)], Todos.note(Hub.running(Hub.thread(s, th)), after, now, th, Hub.id("todo-note", now, Hub.seq(s)),
+        "The person updated your to-do list: " ++ J.Json.show(edit)))
+
+def Todos.edit(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Todos.edit.valid(Bool.and(Hub.owns(s, J.Json.get_str(p, "thread", "")),
+    Bool.and(Nat.is_lt(C.Codec.pos(["set", "add", "delete", "move"], J.Json.get_str(p, "op", "")), 4n),
+      Bool.and(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "add"), Maybe.is_some(&2, TD.Todo, TD.Todo.find(M.Todos.of(s, J.Json.get_str(p, "thread", "")), J.Json.get_str(p, "id", "")))),
+        Bool.and(Nat.is_le(String.length(J.Json.get_str(p, "text", "")), 2000n),
+          Bool.and(Bool.or(String.is_empty(J.Json.get_str(p, "status", "")), Nat.is_lt(C.Codec.pos(["pending", "in_progress", "completed"], J.Json.get_str(p, "status", "")), 3n)),
+            Bool.or(Bool.not(String.eq(J.Json.get_str(p, "op", ""), "add")), Bool.not(String.is_empty(String.trim(J.Json.get_str(p, "text", "")))))))))),
+    s, now, client, id, p, J.Json.get_str(p, "thread", ""))
+
 def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
   match i:
     case 0n:
@@ -9235,6 +9285,8 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     # the model picker opened on opencode: its models read again (about a second)
     case 49n:
       Step.outs([Reply.ok(client, id), ModelsRefresh{}])
+    case 51n:
+      Todos.edit(s, now, client, id, p)
     case 50n:
       Step.reply(client, id, [M.ThreadParentSet{J.Json.get_str(p, "thread", ""), "", now}])
     case _:

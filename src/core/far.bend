@@ -154,6 +154,8 @@ def Fr.change(+l: String, c: M.Change) -> Maybe<&2, M.Change>:
       Some{M.QueueTakenOne{Fr.id(l, thread), msg, at}}
     case M.ProviderSet{+id, provider, model, at}:
       Some{M.ProviderSet{Fr.id(l, id), provider, model, at}}
+    case M.TodosChanged{+thread, who, data, at}:
+      Some{M.TodosChanged{Fr.id(l, thread), who, data, at}}
     case M.TodosSet{+thread, todos, at}:
       Some{M.TodosSet{Fr.id(l, thread), todos, at}}
     case M.BotSet{+id, name, +thread, look, persona, at}:
@@ -311,6 +313,8 @@ def Fr.shared(+s: M.State, c: M.Change) -> Bool:
       Fr.thread.shared(s, thread)
     case M.ProviderSet{+id, _, _, _}:
       Fr.thread.shared(s, id)
+    case M.TodosChanged{+thread, _, _, _}:
+      Fr.thread.shared(s, thread)
     case M.TodosSet{+thread, _, _}:
       Fr.thread.shared(s, thread)
     case M.BotSet{_, _, _, _, _, _}:
@@ -429,6 +433,8 @@ def Fr.scope(+s: M.State, c: M.Change) -> String:
       Fr.scope.th(s, thread)
     case M.ProviderSet{+id, _, _, _}:
       Fr.scope.th(s, id)
+    case M.TodosChanged{+thread, _, _, _}:
+      Fr.scope.th(s, thread)
     case M.TodosSet{+thread, _, _}:
       Fr.scope.th(s, thread)
     case M.WorkSet{+thread, _, _, _}:
@@ -1241,7 +1247,7 @@ def Fr.methods() -> List<&2, String>:
   ["turn.start", "turn.interrupt", "ask.answer", "queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit",
    "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.provider", "thread.effort", "bots.space", "bots.routine_run",
    "thread.create", "thread.fork", "thread.archive", "thread.unarchive", "thread.pin", "thread.unpin",
-   "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach"]
+   "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach", "todos.edit"]
 
 def Fr.may.go(ms: List<&2, String>, +m: String) -> Bool:
   match ms:

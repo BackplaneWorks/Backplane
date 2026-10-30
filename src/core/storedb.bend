@@ -703,7 +703,7 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
     case M.MessagePosted{+th, _, _, _, _}:
       [RK{"thread", th}]
     case M.TurnChanged{+th, _, _}:
-      [RK{"thread", th}, RK{"run", th}]
+      [RK{"thread", th}, RK{"run", th}, K.set("todos." ++ th), K.set("todos.base." ++ th), K.set("todos.visible." ++ th)]
     case M.PendingChanged{+th, _, _}:
       [RK{"thread", th}]
     case M.ActivityLogged{_, _, _, _, _, _}:
@@ -771,8 +771,10 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
     case M.ProviderSet{+id, _, _, _}:
       +old = M.Switch.prov(M.State.thread.get(pre, id))
       [RK{"thread", id}, K.set(M.Switch.session.key(id, old)), K.set(M.Switch.seen.key(id, old))]
+    case M.TodosChanged{+th, _, _, _}:
+      [K.set("todos." ++ th), K.set("todos.base." ++ th), K.set("todos.visible." ++ th)]
     case M.TodosSet{+th, _, _}:
-      [K.set("todos." ++ th)]
+      [K.set("todos." ++ th), K.set("todos.base." ++ th), K.set("todos.visible." ++ th)]
     case M.UsageSet{+th, _, _, _}:
       [K.set(M.Usage.key(th))]
     case M.BotSet{+id, +name, _, _, _, _}:

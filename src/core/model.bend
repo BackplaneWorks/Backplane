@@ -5,6 +5,7 @@ import ./ubop.bend as UO
 import ./locks.bend as LK
 import ./mail.bend as ML
 import ./ship.bend as SH
+import ./todo.bend as TD
 
 # The product's state, event-sourced. Every change is a Change appended to
 # the log; the read model is `replay(log)`. Events are persisted forever:
@@ -221,6 +222,7 @@ type Change is Data:
   ProviderSet{id: String, provider: String, model: String, at: Nat}
   # an agent's todo list for its thread, as JSON [{text, status}] (todo.bend)
   TodosSet{thread: String, todos: String, at: Nat}
+  TodosChanged{thread: String, who: String, data: String, at: Nat}
   # how much of its model's context a thread's session holds (tokens), and\nthe model's window; 0 keeps what was known
   UsageSet{thread: String, used: Nat, window: Nat, at: Nat}
   # Bots (bot.bend, docs/bots.md). Secrets (webhooks, peers) never enter
@@ -2130,6 +2132,57 @@ def State.mail_post(+s: State, +id: String, +room: String, +from: String, +text:
   State.world((w => BT.World.posted(w, BT.Post{id, room, from, text, hop, at})),
     State.mail_post.box(String.eq(Setting.get(s, "mail.on", "off"), "on"), s, id, room, from, text, at))
 
+# To-do ownership and merge state are scoped by the exact thread id.
+def Todos.of(+s: State, +th: String) -> List<&2, TD.Todo>:
+  TD.Todo.read(Setting.get(s, "todos." ++ th, ""))
+
+def Todos.base(+s: State, +th: String) -> List<&2, TD.Todo>:
+  TD.Todo.read(Setting.get(s, "todos.base." ++ th, Setting.get(s, "todos." ++ th, "")))
+
+def Todos.visible(+s: State, +th: String) -> Bool:
+  Bool.not(String.eq(Setting.get(s, "todos.visible." ++ th, "1"), "0"))
+
+def Todos.put(+s: State, +th: String, +current: String, base: String, visible: String) -> State:
+  State.setting(State.setting(State.setting(s, "todos." ++ th, current), "todos.base." ++ th, base), "todos.visible." ++ th, visible)
+
+def Todos.agent(+s: State, +th: String, +raw: String) -> State:
+  Todos.put(s, th, TD.Todo.show(TD.Todo.merge(Todos.base(s, th), Todos.of(s, th), TD.Todo.read(raw))), raw, "1")
+
+def Todos.snapshot(+s: State, +th: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"current", J.Str{Setting.get(s, "todos." ++ th, "")}},
+    J.KV{"base", J.Str{Setting.get(s, "todos.base." ++ th, Setting.get(s, "todos." ++ th, ""))}},
+    J.KV{"visible", J.Str{Setting.get(s, "todos.visible." ++ th, "1")}}]))
+
+def Todos.plan(p: TD.TPlan, s: State, th: String) -> State:
+  match p:
+    case TD.TPlan{base, current, fresh}: Todos.put(s, th, TD.Todo.show(current), TD.Todo.show(base), Bool.pick(String, fresh, "1", "0"))
+
+def Todos.changed(+s: State, +th: String, who: String, +data: String) -> State:
+  match who:
+    case "tools":
+      Todos.plan(TD.TPlan.tools(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(data), J.Null{})), TD.TPlan{Todos.base(s, th), Todos.of(s, th), Todos.visible(s, th)}), s, th)
+    case "person":
+      Todos.put(s, th, TD.Todo.show(TD.Todo.edit(Todos.of(s, th), Maybe.default(&2, J.Json, J.Json.parse(data), J.Null{}))), TD.Todo.show(Todos.base(s, th)), "1")
+    case "snapshot":
+      +p = Maybe.default(&2, J.Json, J.Json.parse(data), J.Null{})
+      Todos.put(s, th, J.Json.get_str(p, "current", ""), J.Json.get_str(p, "base", ""), J.Json.get_str(p, "visible", "0"))
+    case _: Todos.agent(s, th, data)
+
+def Todos.turn.end(done: Bool, +s: State, +th: String) -> State:
+  match done:
+    case True{}: Todos.put(s, th, "", "", "0")
+    case False{}: s
+
+def Todos.turn.start(was: Bool, s: State, th: String) -> State:
+  match was:
+    case True{}: s
+    case False{}: State.setting(s, "todos.visible." ++ th, "0")
+
+def Todos.turn(st: TurnState, +s: State, +th: String) -> State:
+  match st:
+    case Running{}: Todos.turn.start(State.running.k(State.thread.get(s, th)), s, th)
+    case _: Todos.turn.end(TD.Todo.complete(Todos.of(s, th)), s, th)
+
 def State.apply.go(s: State, e: Change) -> State:
   match e:
     case ProjectCreated{id, title, root, at}:
@@ -2143,7 +2196,7 @@ def State.apply.go(s: State, e: Change) -> State:
     case MessagePosted{+thread, msg, role, text, +at}:
       State.message(s, thread, msg, role, text, at)
     case TurnChanged{+thread, +state, +at}:
-      State.mail_end(state, State.thread((t => Thread.turned(state, at, t)), s, thread), thread)
+      State.mail_end(state, State.thread((t => Thread.turned(state, at, t)), Todos.turn(state, s, thread), thread), thread)
     case PendingChanged{+thread, count, _}:
       State.thread((t => Thread.pending_set(count, t)), s, thread)
     case ActivityLogged{thread, act, tone, kind, summary, at}:
@@ -2280,8 +2333,10 @@ def State.apply.go(s: State, e: Change) -> State:
       State.world((w => BT.World.routine_done(w, id)), s)
     case Reminded{+id, _, thread, text, +at}:
       State.post(s, Act{"remind:" ++ id ++ ":" ++ Nat.show(at), thread, "remind", "reminder", text, at})
-    case TodosSet{+th, todos, _}:
-      State.setting(s, "todos." ++ th, todos)
+    case TodosSet{+th, +todos, _}:
+      Todos.put(s, th, todos, todos, "1")
+    case TodosChanged{th, who, data, _}:
+      Todos.changed(s, th, who, data)
     case ProviderSet{+id, +p, m, _}:
       State.switch(s, id, p, m)
     case ThreadForked{+id, +src, _}:

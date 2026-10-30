@@ -352,30 +352,72 @@ private func subColor(_ state: String) -> Color {
 // the to-do list's steps at the top of the thread, while the person has it
 // open: every step scrolls within a third of the screen; a long list ends
 // in "Show all 24" or "Show fewer"
+struct TodoItemRow: View {
+    let model: AppModel
+    let item: TodoItem
+    @State private var text = ""
+    @State private var dirty = false
+    @FocusState private var focused: Bool
+
+    private func save() {
+        guard dirty, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        model.act("todo-text", item.scope + text)
+        dirty = false
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button { model.act("todo-edit", item.check) } label: {
+                Image(systemName: item.status == "completed" ? "checkmark.square" : "square")
+            }.accessibilityLabel("Check or uncheck item").frame(minWidth: 36, minHeight: 44)
+            TextField("To-do text", text: $text)
+                .focused($focused).onSubmit(save)
+                .onChange(of: focused) { _, value in if !value { save() } }
+                .onChange(of: text) { _, value in dirty = value != item.text }
+                .onAppear { text = item.text }
+                .onChange(of: item.text) { _, value in if !dirty { text = value } }
+            Menu {
+                Button("Save text", action: save)
+                Button("Move up") { save(); model.act("todo-edit", item.up) }
+                Button("Move down") { save(); model.act("todo-edit", item.down) }
+                Button("Delete", role: .destructive) { model.act("todo-edit", item.delete) }
+            } label: { Image(systemName: "ellipsis").frame(minWidth: 36, minHeight: 44) }
+        }.buttonStyle(.borderless)
+    }
+}
+
 struct TodosPanel: View {
     let model: AppModel
     let todos: Todos
+    @State private var added = ""
+
+    private func add() {
+        guard let scope = todos.addScope, !added.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        model.act("todo-add", scope + added); added = ""
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(todos.lines.enumerated()), id: \.offset) { _, l in
-                        Text(l.text).lineLimit(1).foregroundStyle(l.status == "completed" ? .secondary : .primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    if let items = todos.items {
+                        ForEach(items) { item in TodoItemRow(model: model, item: item) }
+                    } else {
+                        ForEach(Array(todos.lines.enumerated()), id: \.offset) { _, l in
+                            Text(l.text).frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
-            }
-            .frame(maxHeight: 220)
-            .fixedSize(horizontal: false, vertical: true)
-            if let more = todos.more, !more.isEmpty {
-                Button(more) { model.act("fold", todos.moreValue ?? "") }.buttonStyle(.borderless)
+            }.frame(maxHeight: 220).fixedSize(horizontal: false, vertical: true)
+            if todos.addScope != nil {
+                HStack {
+                    TextField("Add an item", text: $added).onSubmit(add)
+                    Button("Add", action: add).frame(minHeight: 44)
+                }
             }
         }
-        .font(.caption)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal).padding(.vertical, 8)
-        .background(Color(.secondarySystemBackground))
+        .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal).padding(.vertical, 8).background(Color(.secondarySystemBackground))
     }
 }
 
