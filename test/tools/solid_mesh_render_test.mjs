@@ -20,6 +20,7 @@ const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(req){
   // production source; App only supplies the localized progress strings.
   if(p==='/solid.js')return new Response(solid+'\nexport {view as testView};',{headers:{'Content-Type':'application/javascript'}});
   if(p==='/solid-assets.js')return new Response(readFileSync('src/web/solid-assets.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
+  if(p==='/solid-framing.js')return new Response(readFileSync('src/web/solid-framing.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
   if(p==='/solid-dof.js')return new Response(readFileSync('src/web/solid-dof.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
   if(p==='/solid-materials.js')return new Response(readFileSync('src/web/solid-materials.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
   if(p==='/app.bend')return new Response('export default {solid_waiting:()=>"",solid_stats:()=>""};',{headers:{'Content-Type':'application/javascript'}});

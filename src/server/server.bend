@@ -41,6 +41,7 @@ import ./update.bend as UP
 import ../core/version.bend as VR
 import ./kicad.bend as K
 import ./kexport.bend as KEX
+import ./render-asset.bend as RENDERASSET
 import ../core/kexport.bend as KXP
 import ./browser.bend as BR
 import ./desktop-transport.bend as DT
@@ -6053,6 +6054,29 @@ def Img.serve(allowed: Bool, s: Socket, +path: String) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
+# Original GLB assets are private, content-addressed snapshots prepared by a
+# trusted thread job. This route never accepts a filesystem path.
+def RenderHTTP.found(ok: Bool, s: Socket, +path: String, +size: U32) -> IO(Unit):
+  match ok:
+    case False{}: Conn.finish(s, W.Http.text("404 Not Found", "Saved model asset unavailable"))
+    case True{}:
+      do IO<Unit>:
+        s2 : Socket <- Conn.send(s, U.Utf8.encode("HTTP/1.1 200 OK\r\nContent-Type: model/gltf-binary\r\nContent-Length: " ++ U32.show(size) ++ "\r\nCache-Control: private, max-age=31536000, immutable\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n"))
+        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_file(s2, path, 67108864)
+        s3 : Socket <- Conn.sent(sent)
+        Socket.close(s3)
+
+def RenderHTTP.lookup(s: Socket, +text: String) -> IO(Unit):
+  +o = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+  +path = J.Json.get_str(o, "path", "")
+  +size = J.Json.get_u32(o, "size", 0)
+  RenderHTTP.found(Bool.and(Bool.not(String.is_empty(path)), Bool.and(U32.is_gt(size, 0), U32.is_le(size, 67108864))), s, path, size)
+
+def RenderHTTP.serve(allowed: Bool, s: Socket, id: String) -> IO(Unit):
+  match allowed:
+    case False{}: Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+    case True{}: IO.bind(String, Unit, RENDERASSET.RenderAsset.lookup(id), text => RenderHTTP.lookup(s, text))
+
 # GET /hello says a Backplane hub runs here (and which version), so other
 # machines of the owner can find it; it needs no token and tells nothing more
 # the hub's last count of threads running or waiting on work (its gauge
@@ -6143,6 +6167,8 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
       Debug.serve(allowed, 4n, s)
     case 5n:
       Info.serve(allowed, s, W.Http.param(p, "h"))
+    case 6n:
+      RenderHTTP.serve(allowed, s, W.Http.param(p, "id"))
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), gz)
 
@@ -6157,7 +6183,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:

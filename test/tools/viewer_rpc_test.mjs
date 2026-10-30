@@ -70,6 +70,21 @@ try {
   const broken = new ViewerRpc(() => { throw new Error('socket closed'); }, {timeoutMs: 100});
   await assert.rejects(broken.components('source'), /socket closed/);
   assert.equal(broken.pending.size, 0);assert.equal(timers.size, 0);
+  const owner = new AbortController();
+  const abandoned = Array.from({length: 4}, (_, i) => rpc.components(`disposed-${i}`, {signal: owner.signal}));
+  const abandonedIDs = sent.slice(-4).map(x => x.id);
+  const aborted = abandoned.map(p => assert.rejects(p, {name: 'AbortError'}));
+  owner.abort();await Promise.all(aborted);
+  assert.equal(rpc.pending.size, 0, 'closing a viewer immediately releases all its request slots');
+  assert.equal(timers.size, 0);
+  const replacement = rpc.components('reopened');const replacementID = sent.at(-1).id;
+  for (const id of abandonedIDs) assert.equal(rpc.receive({t:'reply',id,result:{components:components(8)}}),false);
+  rpc.receive({t:'reply',id:replacementID,result:{components:components(5)}});
+  assert.deepEqual(await replacement,components(5));
+  const sentBefore = sent.length;
+  await assert.rejects(rpc.components('already-disposed',{signal:owner.signal}),{name:'AbortError'});
+  await assert.rejects(rpc.renderAsset('already-disposed','/saved/board',2,'rev',{signal:owner.signal}),{name:'AbortError'});
+  assert.equal(sent.length,sentBefore,'an already disposed owner cannot send another read');
   // A canceled/failed callback must not leave a timer that fires into a later
   // request, even after several whole timeout periods.
   advance(1000);assert.equal(timers.size, 0);

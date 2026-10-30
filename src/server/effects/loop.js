@@ -712,6 +712,10 @@ function bp_send_list(socket, data, k, at) {
     : bp_send_with(socket, b, k, io_list, at);
 }
 
+// Effect files have separate scopes. Binary file delivery uses this shared
+// entry point instead of referring to the loop's private bp_send_with helper.
+BP_H.sendBytes = (socket, bytes, continuation) => bp_send_with(socket, bytes, continuation, null);
+
 // Base TCP/Socket/Listener: a handle here, a descriptor to the old twin
 function bp_base(old) {
   // the old twin is taken now: $0eff[key] is about to be this wrapper

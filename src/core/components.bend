@@ -95,7 +95,7 @@ def Components.symbol.items(found: Bool, +s: S.Sx, +lib: List<&2, SC.Lib>, +sour
     case False{}: J.Null{}
     case True{}:
       J.Json.obj([J.KV{"source", J.Str{source}}, J.KV{"uuid", J.Str{S.Sx.attr(s, "uuid")}}, J.KV{"libId", J.Str{S.Sx.attr(s, "lib_id")}},
-        J.KV{"unit", J.Json.u32(SC.Sym.num(s, "unit"))}, J.KV{"items", J.Json.arr(Components.items(SC.Sch.symbol(s, S.Sx.attr(s, "uuid"), 0, lib)))}])
+        J.KV{"unit", J.Json.u32(SC.Sym.num(s, "unit"))}, J.KV{"items", J.Json.arr(Components.items(SC.Sch.symbol(s, S.Sx.attr(s, "uuid"), 0, lib, Map.new(&2, String))))}])
 
 def Components.symbol(m: Maybe<&2, S.Sx>, +lib: List<&2, SC.Lib>, +source: String) -> J.Json:
   match m:

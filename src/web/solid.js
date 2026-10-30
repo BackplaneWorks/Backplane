@@ -1,5 +1,6 @@
 import App from "./app.bend";
 import { DepthOfField } from "./solid-dof.js";
+import { fittedDistance } from "./solid-framing.js";
 import { SolidAssets } from "./solid-assets.js";
 import { vertexShader as VS, fragmentShader as FS } from "./solid-materials.js";
 
@@ -370,7 +371,7 @@ class View {
     for (const axis of ["r", "u", "f"]) cam[axis] = this.cam[axis].slice();
     cam.fov = this.cam.fov;
     cam.pivot = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
-    cam.dist = this.r / Math.sin(Math.atan(Math.tan(cam.fov / 2) * Math.min(a, 1))) * 1.05;
+    cam.dist = fittedDistance(this.box, cam, a, this.projection === "orthographic");
     cam.home = cam.dist;
     this.cam = cam;
   }
@@ -655,7 +656,7 @@ export function cameraAction(action, value) {
   else if (poses[action]) view.cam.aim(...poses[action]);
   else if (action === "projection") view.projection = value === "orthographic" ? value : "perspective";
   else if (action === "exposure") view.exposure = bounded(value,-3,3,0);
-  else if (action === "aperture" && view.dof?.available) view.aperture = value === "off" ? "off" : bounded(value,1.4,32,14);
+  else if (action === "aperture" && view.dof?.available) view.aperture = value === "off" ? "off" : bounded(value,1.4,64,14);
   else if (action === "focus-lock" && view.dof?.available) view.focusLocked = !view.focusLocked;
   else if (action === "focus" && view.dof?.available) { view.focusDistance = bounded(value,0.01,1e6,view.cam.dist/100); view.focusLocked = true; }
   else if (action === "focal") {
@@ -674,6 +675,20 @@ export function cameraState() {
   return view ? { projection: view.projection, focal: 12/Math.tan(view.cam.fov/2), exposure: view.exposure,
     selection:view.selection || null, materialSource: "color-estimate", thermal: { ...view.thermal },
     ...(view.dof?.available ? { aperture:view.aperture, focusDistance:view.focusDistance, focusLocked:view.focusLocked } : {}) } : null;
+}
+
+// A read-only pose for higher-quality renderers of the same saved geometry.
+export function cameraSnapshot() { return view ? structuredClone(view.snapshot()) : null; }
+
+// Fit verified original-model bounds without replacing the whole-scene box.
+// Board coordinates are millimetres, matching component metadata/projection.
+export function frameBounds(min, max) {
+  if (!view?.box || !Array.isArray(min) || !Array.isArray(max) || min.length !== 3 || max.length !== 3 || ![...min, ...max].every(Number.isFinite) || min.some((v, i) => v > max[i])) return;
+  const cam = view.cam, aspect = view.canvas.clientWidth / Math.max(1, view.canvas.clientHeight);
+  cam.pivot = [(min[0] + max[0]) * 50, -(min[1] + max[1]) * 50, (min[2] + max[2]) * 50];
+  const box = [min[0] * 100, -max[1] * 100, min[2] * 100, max[0] * 100, -min[1] * 100, max[2] * 100];
+  cam.sx = 0; cam.sy = 0; cam.dist = fittedDistance(box, cam, aspect, view.projection === "orthographic", 1.15); cam.home = cam.dist;
+  view.later();
 }
 
 // Saved-PCB metadata overlays use board millimetres, while the mesh wire is

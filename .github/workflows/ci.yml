@@ -152,7 +152,9 @@ jobs:
           BACKPLANE_LICENSES_STRICT=1 scripts/js-licenses.sh dist-js/licenses
       # the web client the hub serves (test/smoke.ts loads its page)
       - name: Web client
-        run: bend src/web/index.html -o build/web > /dev/null
+        run: |
+          bend src/web/index.html -o build/web > /dev/null
+          sh scripts/build-viewer.sh build/web/viewer/vendor
       - run: scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
       # the compiled hub's 4 GiB stack (scripts/js-stack-prelude.js), its
       # children back at 8 MiB

@@ -71,6 +71,7 @@ build_web() {
   python3 scripts/js-unmarshal.py ../core/client.Ui "$dev"/web.new/chunk-*.js
   python3 scripts/js-native.py "$dev"/web.new/chunk-*.js
   cp src/web/sw.js "$dev/web.new/sw.js"
+  sh scripts/build-viewer.sh "$dev/web.new/viewer/vendor"
   for f in "$dev"/web.new/*.js "$dev"/web.new/*.css "$dev"/web.new/*.html; do gzip -9 -k -n -f "$f"; done
   rm -rf "$dev/web" && mv "$dev/web.new" "$dev/web"
 }
@@ -165,6 +166,7 @@ build_web_dist() {
   python3 scripts/js-unmarshal.py ../core/client.Ui dist/web/chunk-*.js
   python3 scripts/js-native.py dist/web/chunk-*.js
   cp src/web/sw.js dist/web/sw.js
+  sh scripts/build-viewer.sh dist/web/viewer/vendor
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
   # kept only if nothing it read changed while it was built
   if [ -n "$wkey" ] && [ "$(scripts/web-key.sh 2>/dev/null || true)" = "$wkey" ]; then

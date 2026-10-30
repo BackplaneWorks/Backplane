@@ -42,6 +42,12 @@ def Sock.send_bytes(sock: Socket, data: List<&2, U32>) ->
   IO(Socket & Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
+# Stream an immutable bounded binary asset without a Bend list per byte.
+# The caller owns authorization, the HTTP header and a validated cache path.
+def Sock.send_file(sock: Socket, path: String, cap: U32) ->
+  IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
 # send_bytes with one deadline (ms) for all of it: a peer that stops
 # reading fails it (ETIMEDOUT) and the socket is shut both ways
 def Sock.send_until(sock: Socket, data: List<&2, U32>, ms: U32) ->

@@ -15,6 +15,8 @@ import ../core/checks.bend as CHK
 import ../core/release.bend as REL
 import ../core/sha256.bend as SH
 import ../core/utf8.bend as U8
+import ./components.bend as COMP
+import ./render-asset.bend as RA
 
 # Design review's jobs (docs/design-review.md): what the hub asks of a
 # thread's folder for comparisons, BOMs, checks and releases (core's
@@ -499,6 +501,12 @@ def Rvc.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
       Rvc.check.run(d, c, h, t)
     case "--review" <> "release" <> d <> t <> h <> _:
       Rvr.child(d, t, h)
+    case "--review" <> "components" <> d <> _:
+      COMP.Components.child(d)
+    case "--review" <> "components-page" <> d <> offset <> pcb <> sch <> _:
+      COMP.Components.page.child(d, Maybe.default(&2, Nat, Nat.read(offset), 0n), pcb, sch)
+    case "--review" <> "renderasset" <> d <> p <> k <> r <> _:
+      RA.RenderAsset.child(d, p, k, r)
     case +x:
       go(Rvc.args.back(x))
 
@@ -722,6 +730,23 @@ def RvJob.pr(+cwd: String, +url: String) -> IO(String):
     out : String <- RvJob.pr.k(r, Rvc.sch(f), cwd, url)
     return out
 
+# Component parsing runs in the same-version child, never in the hub's loop.
+# The child bounds the response before it crosses the viewer wire limit.
+def RvJob.components.done(r: P.Ran) -> Res:
+  match r:
+    case P.Ran{0, out}:
+      Res{True{}, Maybe.default(&2, J.Json, J.Json.parse(out), J.Json.obj([J.KV{"error", J.Str{"Could not decode saved component metadata"}}]))}
+    case P.Ran{_, _}:
+      Res.err("Could not read saved component metadata")
+
+def RvJob.components(+cwd: String, spec: String) -> IO(Res):
+  +o = Maybe.default(&2, J.Json, J.Json.parse(spec), J.Null{})
+  IO.bind(P.Ran, Res, Rvc.run(["--review", "components-page", cwd, Nat.show(J.Json.get_nat(o, "offset", 0n)), J.Json.get_str(o, "sourceRevision", ""), J.Json.get_str(o, "schematicRevision", "")]), r => IO.pure(Res, RvJob.components.done(r)))
+
+def RvJob.renderAsset(+cwd: String, path: String, +spec: String) -> IO(Res):
+  +o = Maybe.default(&2, J.Json, J.Json.parse(spec), J.Null{})
+  IO.bind(P.Ran, Res, Rvc.run(["--review", "renderasset", cwd, path, J.Json.get_str(o, "kind", "2"), J.Json.get_str(o, "revision", "")]), r => IO.pure(Res, RvJob.components.done(r)))
+
 def RvJob.go(i: Nat, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Res):
   match i:
     case 0n:
@@ -734,11 +759,15 @@ def RvJob.go(i: Nat, +thread: String, +cwd: String, +a: String, +b: String, +hom
       Bool.pick(IO(Res), String.is_empty(cwd), IO.pure(Res, Res.err("no project folder")), RvJob.tick(thread, cwd, a))
     case 4n:
       RvJob.release(thread, cwd, a, b, home)
+    case 5n:
+      Bool.pick(IO(Res), String.is_empty(cwd), IO.pure(Res, Res.err("No project folder for component inspection")), RvJob.components(cwd, a))
+    case 6n:
+      Bool.pick(IO(Res), String.is_empty(cwd), IO.pure(Res, Res.err("No project folder for model inspection")), RvJob.renderAsset(cwd, a, b))
     case _:
       IO.pure(Res, Res.err("unknown review job"))
 
 def RvJob.names() -> List<&2, String>:
-  ["rv.resolve", "rv.bom", "rv.checks", "rv.tick", "rv.release"]
+  ["rv.resolve", "rv.bom", "rv.checks", "rv.tick", "rv.release", "rv.components", "rv.renderAsset"]
 
 # a job by name ("rv.resolve", …)
 def RvJob.run(+job: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Res):

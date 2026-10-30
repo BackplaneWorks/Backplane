@@ -16,7 +16,16 @@ export class ComponentStore {
       if(!c.id||ids.has(c.id)) this.error ||= 'Component UUIDs are missing or ambiguous; selection unavailable.';
       ids.add(c.id);
     }
-    this.key=key;this.data=this.error?null:data;
+    // A repeated paged read creates a fresh object even for the exact same
+    // saved data. Keep the existing renderer binding in that case: replacing
+    // it unnecessarily rebuilds illustrative solder and cancels tracing.
+    // Compare the complete response, not just its fingerprint/revision; a
+    // changed model, pad, symbol or qualification field must still propagate.
+    const snapshot=this.error||!data?'':JSON.stringify(data);
+    // Consumers can hold mutable objects. An old cached snapshot alone does
+    // not prove that the currently retained object is still the same data.
+    const unchanged=same&&this.snapshot===snapshot&&JSON.stringify(this.data)===snapshot;
+    this.key=key;this.data=this.error?null:unchanged?this.data:data;this.snapshot=snapshot;
     // A saved revision change invalidates the selection, even if UUIDs survived.
     if(!same || !this.data?.components.some(c=>c.id===this.selected)) this.selected='';
     this.emit();

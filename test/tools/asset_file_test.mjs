@@ -25,9 +25,13 @@ function context({bun = false, parked = false, override = {}, absentHandles = fa
   const sandbox = {require: name => { assert.equal(name, 'fs');return shim; },
     io_tup: (socket, result) => ({socket, result}), io_done: value => ({ok: true, value}), io_fail: errno => ({ok: false, errno}),
     host_send: (socket, data, continuation) => { sent.push({backend:'posix', socket, data:Buffer.from(data), continuation});return {backend:'posix'}; },
-    bp_send_with: (socket, data, continuation, options) => { sent.push({backend:'bun', socket, data:Buffer.from(data), continuation, options});return parked ? undefined : {backend:'bun'}; },
   };
-  if (!absentHandles) sandbox.BP_H = {is: socket => bun && socket === 73};
+  // Deliberately no private loop function in this effect's scope: the real
+  // emitted effects are separate modules. Use only the public handle API.
+  if (!absentHandles) sandbox.BP_H = {
+    is: socket => bun && socket === 73,
+    sendBytes: (socket, data, continuation) => { sent.push({backend:'bun', socket, data:Buffer.from(data), continuation});return parked ? undefined : {backend:'bun'}; },
+  };
   return {send: runInNewContext(`(${effect})`, sandbox), sent, opened, closed, fileReads};
 }
 try {
@@ -37,7 +41,6 @@ try {
     assert.equal(c.sent.length, 1);assert.deepEqual(c.sent[0].data, bytes);
     assert.equal(c.sent[0].socket, 73);assert.equal(c.sent[0].continuation, continuation);
     assert.equal(c.sent[0].backend, options.bun ? 'bun' : 'posix');
-    if (options.bun) assert.equal(c.sent[0].options, null);
     if (options.parked) assert.equal(result, undefined, 'parking must return to the existing continuation owner');
     assert.equal(c.opened.size, 0);assert.equal(c.closed.length, 1);
   }

@@ -25,7 +25,7 @@ const server = Bun.serve({hostname: '127.0.0.1', port: 0, fetch(req) {
   const name = new URL(req.url).pathname.slice(1);
   if (name === 'solid.js') return new Response(solid, {headers: {'Content-Type': 'application/javascript'}});
   if (name === 'solid-assets.js') return new Response(assets, {headers: {'Content-Type': 'application/javascript'}});
-  if (['solid-materials.js', 'solid-dof.js'].includes(name)) return new Response(readFileSync(join(dirname(source), name)), {headers: {'Content-Type': 'application/javascript'}});
+  if (['solid-materials.js', 'solid-dof.js', 'solid-framing.js'].includes(name)) return new Response(readFileSync(join(dirname(source), name)), {headers: {'Content-Type': 'application/javascript'}});
   if (name === 'app.bend') return new Response('export default {solid_waiting:()=>"Preparing model…",solid_stats:()=>"Ready"};', {headers: {'Content-Type': 'application/javascript'}});
   if (name.endsWith('.mesh')) return new Response(fixtures[name.slice(0, -5)].mesh);
   return new Response(html, {headers: {'Content-Type': 'text/html'}});

@@ -4,8 +4,8 @@
 # src/web/app.bend (BP_KEY_ROOTS), every other file in src/web (the page,
 # its scripts, styles and icons) and the scripts that post-process it.
 # Fails closed: a reference in the page, a script or a style that does not
-# resolve to a file in src/web prints nothing and exits 1, so the web is
-# built afresh.
+# resolve to a web file or the explicit shared desktop module prints nothing
+# and exits 1, so the web is built afresh.
 #   scripts/web-key.sh
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -18,11 +18,13 @@ refs=$( { sed -n 's/.*\(src\|href\)="\([^"]*\)".*/\2/p' "$w/index.html"
 for r in $refs; do
   case $r in
     ./*) [ -f "$w/${r#./}" ] || exit 1 ;;
+    ../../desktop/connection-record.cjs) [ -f desktop/connection-record.cjs ] || exit 1 ;;
     data:*|http:*|https:*|\#*) ;;
     *) exit 1 ;;
   esac
 done
 files=$(find "$w" -type f ! -name '*.bend' | LC_ALL=C sort) || exit 1
+viewer_files=$(find tools/viewer -path '*/node_modules' -prune -o -type f -print | LC_ALL=C sort) || exit 1
 # shellcheck disable=SC2086
-BP_KEY_ROOTS=$w/app.bend scripts/inputs-key.sh web1 $files scripts/web-key.sh \
-  scripts/js-unmarshal.py scripts/js-native.py scripts/inputs-key.sh scripts/bend-closure.py
+BP_KEY_ROOTS=$w/app.bend scripts/inputs-key.sh web2 $files $viewer_files scripts/build-viewer.sh scripts/web-key.sh \
+  desktop/connection-record.cjs scripts/js-unmarshal.py scripts/js-native.py scripts/inputs-key.sh scripts/bend-closure.py

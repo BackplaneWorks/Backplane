@@ -4240,11 +4240,25 @@ def View.solid.what.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.solid.what(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   View.solid.what.loc(I.En{}, on, u)
 
+def View.solid.boardkey(+u: U.Ui) -> String:
+  Bool.pick(String, Bool.or(String.is_empty(U.Ui.view_get(u, "view.path")), String.ends_with(U.Ui.view_get(u, "view.path"), ".kicad_pcb")),
+    "0|" ++ U.Ui.root(u) ++ "|" ++ U.Ui.view_get(u, "view.path"), "")
+
 def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), MSG.T.viewer.orbit.tip(lc))
     <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))),
-      [D.El{"div", "", [D.At{"class", "viewer-stage"}], List.append(&2, D.Node, [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Solid.want(u)}, D.At{"data-probe", U.Probe.get(u)}], Nil{}},
-        D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}], View.probe.chip(u))}])
+      [D.El{"div", "solid-workbench", [D.At{"id", "solid-workbench"}, D.At{"class", "solid-workbench"}, D.At{"data-key", U.Solid.want(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-board-key", View.solid.boardkey(u)}],
+        [D.El{"div", "solid-toolbar", [D.At{"class", "solid-toolbar"}], Nil{}},
+         D.El{"div", "", [D.At{"class", "solid-layout"}],
+          [D.El{"div", "", [D.At{"class", "viewer-stage"}], List.append(&2, D.Node, [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Solid.want(u)}, D.At{"data-probe", U.Probe.get(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"tabindex", "0"}, D.At{"aria-label", "3D model. Drag or arrow keys to orbit; F fits the model."}], Nil{}},
+            D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}], View.probe.chip(u))},
+           D.El{"section", "solid-pcb", [D.At{"class", "solid-pcb viewer-stage"}, D.At{"aria-label", "PCB beside assembly"}],
+             [D.El{"div", "solid-pcb-controls", [D.At{"class", "solid-pcb-controls"}, D.At{"aria-label", "PCB layer controls"}], [View.layers.loc(lc, False{}, False{}, U.Solid.off(u), U.Lfocus.of(u))]},
+              D.El{"canvas", "solid-pcb-plot", List.append(&2, D.Attr, View.probe.attrs(u, False{}), [D.At{"id", "solid-pcb-plot"}, D.At{"class", "plot2d"}, D.At{"data-key", View.solid.boardkey(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))},
+                D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
+                D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"tabindex", "0"}, D.At{"aria-label", "Saved PCB. Drag to pan, wheel or pinch to zoom."}]), Nil{}},
+              D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]},
+           D.El{"aside", "solid-inspector", [D.At{"id", "solid-inspector"}, D.At{"class", "solid-inspector"}], Nil{}}]}]}])
 
 # The combined view (client.bend's Split): the schematic beside the board
 # and its 3D model, each pane under a head that names it, with a button

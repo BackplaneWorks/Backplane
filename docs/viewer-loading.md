@@ -65,10 +65,13 @@ renderer modules, stub localized strings, and read-only model bytes on loopback.
 It runs headless Chromium 156 with SwiftShader, at 1000×700 and touch 390×844 with
 reduced motion. No installed app, hub, live data or CAD document is changed.
 
-The real saved board GLB contains 95 component meshes: 77,216 triangles produce
+The real cached board GLB contains 95 component meshes: 77,216 triangles produce
 833,452 wire bytes. A real C5 ceramic capacitor selected from that scene has 284
 triangles and 3,124 wire bytes. GLB SHA-256:
 `702b15010a2622d580f5d6c139ceb74465a7a5d1b268f3fdacc2bec9e2c91d40`.
+Its originating saved board and exact source revision were not independently
+established for these fixture measurements. These captures do not prove that
+this cached asset represents the current canonical SMU board.
 The rendering child's test-only `solid_glb_fixture.mjs` adapter takes 105 ms for
 the full board and 5.3 ms for C5. Those times are fixture preparation, not a
 measurement of the hub's Bend GLB parser or CAD export.
@@ -92,6 +95,48 @@ took 5.4 ms after GPU shader caches had warmed. Context setup plus local fixture
 fetch plus GPU-visible board geometry was 213.4/49.1 ms. These are browser-stage
 measurements, not cold file-to-screen promises. Remote transfer, cold CAD export,
 and the hub's parse/wire generation are not measured here.
+
+Normal saved-source viewer, V5
+----------------------------
+
+The isolated production hub/web V5 focused gate passed on the actual RTX5080.
+The unchanged service and all eleven candidate artifacts, 392 source inputs,
+and five canonical CAD file hashes/revisions were checked before and after.
+Receipt: `build/viewer/qualification-v5/pane-loading-hardware/receipt.json`,
+SHA256 `adc929e5e65a232866f7b93fdd48c86530816fd67dd9cfde4e201c0f4aa1e546`.
+
+The export was explicitly prewarmed for 1,741.18 ms before creating a new browser
+context; that work is excluded from the following main-clock observation:
+
+| Milestone | Milliseconds after the 3D click |
+|---|---:|
+| Matching saved PCB revision | 958.5 |
+| Original asset preparation request | 958.9 |
+| Asset preparation reply | 1,290.3 |
+| Independent assembly revision | 1,666.7 |
+| Render-worker load | 1,759.9 |
+| Exact asset network body complete | 1,768.3 |
+| First verified original-model GPU frame | 2,063.8 |
+
+The PCB revision starts only authenticated asset preparation, for the same path
+and project. Loading and display still require independent assembly revision
+confirmation. The measured preparation request preceded that confirmation by
+707.8 ms; its reply preceded confirmation by 376.4 ms. This observation is not
+an instant-loading claim or a causal speedup benchmark against separate runs.
+The 1,666.7 ms revision wait remains. Worker initialization took 91.4 ms,
+including a directly measured 49.3 ms vendor fetch. The exact URL/digest-matched
+worker resource `responseEnd` is network completion, not a parsing/hash-check
+milestone; its interval to GPU visibility was 295.5 ms. Intermediate parsing
+status can be throttled and is optional timing evidence.
+
+The gate also deliberately scrolled the pane before Frame part at desktop,
+narrow and touch widths. Both actual canvas rectangles returned fully inside
+their own pane, with no document/window scroll. A real t1→t2→t1 switch while
+t2's asset request was outstanding restored the original same-revision Studio
+frame, UUID, camera and matrix, terminated the disposed worker, and did not leave
+the UI busy. This qualifies UI ownership/cancellation, not cancellation of an
+already-running backend export. Failed earlier test-only timing/navigation runs
+remain separate evidence. No installed/native app was changed.
 
 The actual browser checks also verify keyboard orbit, two-pointer pan/pinch,
 camera/projection/exposure restoration across canvas teardown, identical cached
