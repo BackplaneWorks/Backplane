@@ -285,7 +285,7 @@ def View.tree.rows.raw(+lc: I.Loc, rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.Sta
         View.tree.create(Bool.and(expanded, U.ThreadTree.can_create(st, id)), id, indent), View.tree.rows.raw(lc, rest, ix, st, sel, now, movable, live)])
 
 def View.tree.rows(+lc: I.Loc, +rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +live: Bool) -> List<&2, D.Node>:
-  +p = VP.Page.of(st, "threads", ST.Tree.row_ids(rs), sel)
+  +p = VP.Page.of(st, Bool.pick(String, live, "live", "threads"), ST.Tree.row_ids(rs), sel)
   List.append(&2, D.Node, View.tree.rows.raw(lc, LW.Lists.tree(rs, VP.Page.ids(p)), ix, st, sel, now, movable, live), LW.Lists.pager(p))
 
 def View.rows_in(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> List<&2, D.Node>:
@@ -462,29 +462,29 @@ def View.atree.rows.raw(rs: List<&2, ST.TRow>, +lc: I.Loc, anchors: List<&2, U.A
       View.atree.row(VP.Page.has(ids, M.Thread.id(t)), lc, t, depth, expanded, children, at, ix, st, sel,
         View.atree.rows.raw(rest, lc, View.atree.next(step), at, ix, st, sel, ids))
 
-def View.atree.rows(+rs: List<&2, ST.TRow>, +lc: I.Loc, anchors: List<&2, U.ARow>, anchor: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
-  +p = VP.Page.of(st, "active", ST.Tree.row_ids(rs), sel)
+def View.atree.rows(+rs: List<&2, ST.TRow>, +lc: I.Loc, anchors: List<&2, U.ARow>, anchor: U.ARow, +ix: U.SIx, +st: M.State, +sel: String, +kind: String) -> List<&2, D.Node>:
+  +p = VP.Page.of(st, kind, ST.Tree.row_ids(rs), sel)
   List.append(&2, D.Node, View.atree.rows.raw(rs, lc, anchors, anchor, ix, st, sel, VP.Page.ids(p)), LW.Lists.pager(p))
 
-def View.arows(+lc: I.Loc, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String, +q: String) -> List<&2, D.Node>:
+def View.arows(+lc: I.Loc, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String, +q: String, +kind: String) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
     case +r <> +rest:
-      View.atree.rows(ST.Tree.rows_search(st, U.Active.root_threads(r <> rest), sel, q), lc, r <> rest, r, ix, st, sel)
+      View.atree.rows(ST.Tree.rows_search(st, U.Active.root_threads(r <> rest), sel, q), lc, r <> rest, r, ix, st, sel, kind)
 
 def View.afaded.open(+lc: I.Loc, on: Bool, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String, +q: String) -> List<&2, D.Node>:
   match on:
     case True{}:
-      View.arows(lc, rs, ix, st, sel, q)
+      View.arows(lc, rs, ix, st, sel, q, "active")
     case False{}:
-      View.arows(lc, U.Active.sel(rs, sel), ix, st, sel, q)
+      View.arows(lc, U.Active.sel(rs, sel), ix, st, sel, q, "active")
 
 # the settled rows folded under one "Settled N" row, shown while it is
 # open or a search is on (core's Active.open)
 def View.afaded.k(+lc: I.Loc, searching: Bool, +open: Bool, +n: Nat, +rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
   match searching:
     case True{}:
-      View.arows(lc, rs, ix, st, sel, "search")
+      View.arows(lc, rs, ix, st, sel, "search", "active")
     case False{}:
       WI.WIcon.button(Bool.pick(String, open, "shelf older open", "shelf older"), "side-settled", "", MSG.T.sidebar.settled.note(lc),
           Bool.pick(String, open, "chevron-down", "chevron-right"), 14, Bool.pick(String, open, MSG.T.sidebar.settled.count(lc, Nat.show(n)), U.Shelf.words(lc, MSG.T.sidebar.settled.count(lc, Nat.show(n)), List.length(&2, U.ARow, U.Active.sel(rs, sel)))))
@@ -500,7 +500,7 @@ def View.afaded(+lc: I.Loc, rs: List<&2, U.ARow>, +q: String, +open: Map<&2, Boo
 def View.active.k(+lc: I.Loc, p: U.AParts, +q: String, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
   match p:
     case U.AParts{l, f}:
-      [D.El{"section", "", [D.At{"class", "project active"}], List.append(&2, D.Node, View.arows(lc, l, ix, st, sel, q), View.afaded(lc, f, q, open, ix, st, sel))}]
+      [D.El{"section", "", [D.At{"class", "project active"}], List.append(&2, D.Node, View.arows(lc, l, ix, st, sel, q, "live"), View.afaded(lc, f, q, open, ix, st, sel))}]
 
 def View.active(+lc: I.Loc, rs: List<&2, U.ARow>, +q: String, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
   match rs:

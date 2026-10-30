@@ -138,7 +138,7 @@
     "src/core/usage_graph.bend": "c4a30aff87e9a9ff0d9bea0ef11d0ab0655f816c4aeb904f667031a63b7745e5",
     "src/core/usage_page.bend": "05f675351e885ee368dd9db73b9e3739d04c9225a1f1c0d8ced43b53d98615f7",
     "src/core/utf8.bend": "0202c5087fd255df10413080cda57f2a4a00aa9b90b5b425a00a729f9563627b",
-    "src/core/view-page.bend": "d513098bef4d09553578002a29b6058e51d9249b009096b175f6c4ff67ea4d78",
+    "src/core/view-page.bend": "443174e2117ff541add79d873a7eaad90225eb0557247188e273e0dd00a2be73",
     "src/core/voice.bend": "d1efb9a32ce7cda16b1db170f1b9fa5059777fc97f3a4f8d080d1e37072e0213",
     "src/core/vt.bend": "931708652e96ec2db30f3a5a69dc4c90a98e15fc6e5fbbd8e441475626198581",
     "src/core/wake.bend": "074b0501f0db23a207e835beea1de5a5c11dc770287beef06c4d20be0da93a67",
@@ -165,7 +165,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "8e9746f74a63de7f6bff43112fdae498e12a3d94b97986e5251ae051c2bd4b94"
+    "src/web/view.bend": "c33782fe857d1d5bae1481c92986faae919f5ced881b05b9433b10cbe7d1ac55"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -358,5 +358,5 @@
       "integrationReview": "Preserved main tool-drawer, todo and workspace changes. Liveness reads canonical settings only; settings remain in full sidebar inputs. No scratch/draft filtering, image key or authority changes. Full sidebar-output freshness passes after integration."
     }
   },
-  "reviewNote": "Tool-call drawers on top of the to-do move: fold.bend (runs shut by default, live label, RHead live flag), msgs.bend (fold.running), view.bend (drawer head, run marks on timeline rows) and screen.bend (fold row live, run marks) touch only thread timeline entries; the sidebar draft is unaffected (sidebar_draft_image_test 24 ok)"
+  "reviewNote": "Tool-call drawers on top of the to-do move: fold.bend (runs shut by default, live label, RHead live flag), msgs.bend (fold.running), view.bend (drawer head, run marks on timeline rows) and screen.bend (fold row live, run marks) touch only thread timeline entries; the sidebar draft is unaffected (sidebar_draft_image_test 24 ok) Then: sidebar lists never page projects or live threads (view-page.bend Page.whole, view.bend live/active kinds); pager presence only, no draft reader or sidebar-image key changes."
 }
