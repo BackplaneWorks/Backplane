@@ -4254,7 +4254,7 @@ def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
             D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}], View.probe.chip(u))},
            D.El{"section", "solid-pcb", [D.At{"class", "solid-pcb viewer-stage"}, D.At{"aria-label", "PCB beside assembly"}],
              [D.El{"div", "solid-pcb-controls", [D.At{"class", "solid-pcb-controls"}, D.At{"aria-label", "PCB layer controls"}], [View.layers.loc(lc, False{}, False{}, U.Solid.off(u), U.Lfocus.of(u))]},
-              D.El{"canvas", "solid-pcb-plot", List.append(&2, D.Attr, View.probe.attrs(u, False{}), [D.At{"id", "solid-pcb-plot"}, D.At{"class", "plot2d"}, D.At{"data-key", View.solid.boardkey(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))},
+              D.El{"canvas", "solid-pcb-plot", List.append(&2, D.Attr, View.probe.attrs(u, False{}), [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", View.solid.boardkey(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))},
                 D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
                 D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"tabindex", "0"}, D.At{"aria-label", "Saved PCB. Drag to pan, wheel or pinch to zoom."}]), Nil{}},
               D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]},

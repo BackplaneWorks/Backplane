@@ -17,7 +17,10 @@
     "src/server/thin-body.bend",
     "src/core/thinq.bend",
     "src/server/thin-splice.bend",
-    "src/server/thinstore.bend"
+    "src/server/thinstore.bend",
+    "src/server/thin-signals.bend",
+    "src/server/thin-signal-text.bend",
+    "src/server/thin-side-index.bend"
   ],
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
@@ -80,7 +83,7 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "aed4b2df75b67f6ee8183f42ae6b06d918ea211324581b4a22e5f763c36abd73",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "34319cbe1b1b0d5cdcde714986b8d2d8f9bf2b6f4a9235e46e106bee08e05859",
+    "src/core/model.bend": "aafb51b90ada8b6d22134ac5b5d9c36e2b618344a175dc3dbadd272bef9ddfe6",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
     "src/core/msgs.bend": "a262ca34d05477192d33c4f5b8fc6351667c99c084d5ab1f21cdf5735a5108f5",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
@@ -146,10 +149,13 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
     "src/mobile/screen.bend": "dd0557ce798339414311e3ab697ac76f0cfe771dd830d217f6c60c850b1a9558",
-    "src/server/thin-actor.bend": "3adb274a8dc1d5accfaebf4e3bd2c25b7d8e49d2a1a5cb6352d742d189fcf555",
+    "src/server/thin-actor.bend": "69ca9a8d67b8b0ca068d5d2007e9c5d86e1872dc96cfcaa72ed81bfc583e1216",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
+    "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
     "src/server/thin-sidebar.bend": "3f4f103551054d92d10a3d7d355f1b8db948900b83e2942009cb7d0e1e1cf5c7",
+    "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
+    "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "f08bc9b41cab08e1d1d4f6931f1fb8f5a8a2edb81d2fd96231ee544649469eb0",
     "src/server/thin-view.bend": "d481b5b710328bcc1c1ae9d0d58feec0393ad5d8e90f6fcc16f2ae8da8a7aa6b",
     "src/server/thinstore.bend": "24f5e750eab6f52abfefeeca6884ed054ab0d8c9bea46c301fb384004b8d54a3",
@@ -165,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "e30f6a47aaa56025a60e75b3c7de49ea5ff47ffad6479567cfb7111b62cbc1db"
+    "src/web/view.bend": "e5e9f02f376f64a35e0c89f3dce655c45d2d93a5c7f51c3cc1b4914871f1233b"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -356,7 +362,19 @@
       "integratedMain": "56209ed8e7ec30da951d680186b9c373fb07861b",
       "integrationFullOutputEvidenceSha256": "c8b63dfad6ae44c4f98dc274fc0f2fe68817293e02fad7261a5d03c7a50602df",
       "integrationReview": "Preserved main tool-drawer, todo and workspace changes. Liveness reads canonical settings only; settings remain in full sidebar inputs. No scratch/draft filtering, image key or authority changes. Full sidebar-output freshness passes after integration."
+    },
+    "canonicalCacheV2": {
+      "baseCommit": "cc8e218efabc9fd199f797bf381190ced39acc54",
+      "changedClosureFiles": [
+        "src/server/thin-actor.bend"
+      ],
+      "scope": "Thread-switch canonical cache: navigation, mark_dirty and targeted info keep only the three bounded canonical slots (signals, side index, signal text); each read still re-checks server epoch, trusted revision and online visibility. A refused (oversized) side-index save drops the previous slot. Bodies and the sent receipt keep their existing handling; picture, image, Ui, pending action and wire authority are never carried. No draft readers, keys, scanner, bridge authority or fallback changes.",
+      "sourcePacketSHA256": "6813b8351ae41cd534a067d55628c5052325ab2f5c6f6a99ad3c7aab8090e70e",
+      "outputReceiptSHA256": "d1ba3faf10fc007fe0460e251edf6f4b6995f001e89516e70f873d5685ae27ae",
+      "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+      "fullOutputLogSHA256": "ab373540db60b3eb7d2f955e64a66a54f542a6f1299ab766314d29ff8d116d67",
+      "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Tool-call drawers on top of the to-do move: fold.bend (runs shut by default, live label, RHead live flag), msgs.bend (fold.running), view.bend (drawer head, run marks on timeline rows) and screen.bend (fold row live, run marks) touch only thread timeline entries; the sidebar draft is unaffected (sidebar_draft_image_test 24 ok) Then: sidebar lists never page projects or live threads (view-page.bend Page.whole, view.bend live/active kinds); pager presence only, no draft reader or sidebar-image key changes. Editable turn-scoped to-dos use canonical thread state and explicit operation scope. Completion adoption does not read composer drafts. No scratch filter, private sidebar-image key or bridge policy changes; full-output freshness is requalified on the composition. PR515 (7032a92a): usage_graph.bend extracts Ug.month.offset(now) from Ug.start with the same zero-seeded digit accumulator. The helper reads only the supplied timestamp; its callers render Usage dates, not sidebar rows or composer drafts. Reviewed sidebar readers, scratch filtering, private image keys, full main/picture inputs, bridges and import closure remain unchanged. Requalified test/sidebar_draft_image_test.bend: all 24 full-output draft/IME/search/info fallback and freshness checks passed on 7032a92a (30.16s). This pin update approves only that reviewed helper extraction; no new draft dependency or product behavior change."
+  "reviewNote": "Tool-call drawers on top of the to-do move: fold.bend (runs shut by default, live label, RHead live flag), msgs.bend (fold.running), view.bend (drawer head, run marks on timeline rows) and screen.bend (fold row live, run marks) touch only thread timeline entries; the sidebar draft is unaffected (sidebar_draft_image_test 24 ok) Then: sidebar lists never page projects or live threads (view-page.bend Page.whole, view.bend live/active kinds); pager presence only, no draft reader or sidebar-image key changes. Editable turn-scoped to-dos use canonical thread state and explicit operation scope. Completion adoption does not read composer drafts. No scratch filter, private sidebar-image key or bridge policy changes; full-output freshness is requalified on the composition. PR515 (7032a92a): usage_graph.bend extracts Ug.month.offset(now) from Ug.start with the same zero-seeded digit accumulator. The helper reads only the supplied timestamp; its callers render Usage dates, not sidebar rows or composer drafts. Reviewed sidebar readers, scratch filtering, private image keys, full main/picture inputs, bridges and import closure remain unchanged. Requalified test/sidebar_draft_image_test.bend: all 24 full-output draft/IME/search/info fallback and freshness checks passed on 7032a92a (30.16s). This pin update approves only that reviewed helper extraction; no new draft dependency or product behavior change. Canonical navigation cache follow-up: only canonical Signals/SideIndex/SignalText can survive a connection-owned target/view move. Server epoch, trusted dependency revision and online visibility predicates remain unchanged. No Ui, session, draft, recipient info, body/issued sources, rendered nodes, wire receipts or actions enter these carried slots. Scalar/text slots are limited to 8192/8193 entries, 512KiB of UTF8 keys/derived values each (plus an eight-byte charge per scalar), and 1024 UTF8 bytes per retained key/value. Entry caps separately bound object overhead; these text budgets are not heap-size estimates. Bounds are computed on misses; hits do not scan history, titles or bodies. Over-budget values use unchanged fresh projection and release the previous slot. Explicit bridges pin all three canonical retention modules, including unchanged thin-side-index. Requalified complete sidebar draft/IME/search/info fallback output (24 assertions) and canonical navigation/budget/full-frame invalidation fixtures; full-output log SHA256 a8a3caeb07bf4d0647c9dca76d7f91e8193cba0ad0beb5362f3392d310210519. This review changes no reduced-image draft readers, scratch filtering, image/picture keys, scanner, laws, action freshness or native wire fields; device/runtime acceptance is separate."
 }

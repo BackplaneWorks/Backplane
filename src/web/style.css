@@ -1489,8 +1489,10 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 /* A viewer can be narrow inside a wide desktop window. */
 .solid-workbench { container: solid-pane / inline-size; }
 @container solid-pane (max-width: 950px) {
+  /* The model and PCB give way to the inspector, so only the inspector
+     scrolls; the column scrolls only when even their minimum does not fit. */
   .solid-layout { flex-direction: column; overflow: auto; }
-  .solid-layout > .viewer-stage { flex: 1 0 260px; min-height: 260px; }
+  .solid-layout > .viewer-stage { flex: 1 1 260px; min-height: 160px; }
   .solid-split .solid-layout > .solid-pcb { border-left: 0; border-top: 1px solid var(--line); }
   .solid-inspector { width: 100%; max-width: none; max-height: 45dvh; border-left: 0; border-top: 1px solid var(--line); }
 }
