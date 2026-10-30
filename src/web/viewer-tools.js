@@ -54,7 +54,8 @@ class Workbench {
       this.componentsButton = button("Components", () => this.showComponents(!this.state.components)); this.componentsButton.setAttribute("aria-expanded", "false"); this.componentsButton.setAttribute("aria-controls", "solid-inspector"); this.toolbar.append(this.componentsButton);
     }
     this.model = node("span", "solid-model-name"); const path = this.key.slice(this.key.indexOf("|") + 1); this.model.textContent = path.split("/").pop() || "3D model"; this.model.title = path; this.toolbar.append(this.model);
-    this.quality = new ViewerQuality({ root, solid, services, components: this.components, revision: () => revisions.get(this.key), state: this.state });
+    this.qualityRevision = this.assemblyRevision();
+    this.quality = new ViewerQuality({ root, solid, services, components: this.components, revision: () => this.assemblyRevision(), state: this.state });
     this.prepareAssembly();
     this.change = () => { if (this.alive) this.sync(); }; root.addEventListener("solid-camera-change", this.change); root.addEventListener("solid-quality-change", this.change);
     this.unselect = this.components.subscribe(component => {
@@ -145,8 +146,17 @@ class Workbench {
       if (this.alive && this.readAgain) { this.readAgain = false; void this.readComponents(); }
     }
   }
+  // A board's assembly (key 2|…) and its PCB (key 0|…) name the same saved
+  // .kicad_pcb, so their revisions are the same file stamp. The PCB's arrives
+  // first: the plot actor sends the assembly's only after building its own
+  // thinned mesh, which the original model does not use. The original asset is
+  // still checked against that exact stamp by the hub (render_asset.js) before
+  // it is exported and again when it is published.
+  sameBoardFile() { return sameBoardFile(this.key, this.boardKey); }
+  assemblyRevision() { return assemblyRevision(this.key, this.boardKey, revisions); }
   revision(key) {
-    if (key === this.key) this.quality?.sourceChanged();
+    const next = this.assemblyRevision();
+    if (next !== this.qualityRevision) { this.qualityRevision = next; this.quality?.sourceChanged(); }
     if (key === this.boardKey) {
       this.prepareAssembly();
       this.components.setData(this.boardKey, null); this.overlay?.(); this.overlay = null; this.overlayData = null;
@@ -155,9 +165,9 @@ class Workbench {
     this.syncComponents();
   }
   prepareAssembly() {
-    // A matching saved PCB revision may prepare an authenticated asset early.
-    // Only the independent assembly revision can authorize loading/showing it.
-    if (!this.boardKey || this.quality?.loading || this.key.split("|")[0] !== "2" || this.boardKey.split("|").slice(1).join("|") !== this.key.split("|").slice(1).join("|")) return;
+    // The saved PCB's revision prepares the authenticated asset as soon as it
+    // is known (assemblyRevision); the hub checks the file stamp again.
+    if (this.quality?.loading || !this.sameBoardFile()) return;
     this.quality?.prepareAsset(revisions.get(this.boardKey));
   }
   syncComponents() {
@@ -185,6 +195,17 @@ export function mount(root, solid, services = {}) {
   if (!root) { workbench?.dispose(); workbench = null; return; }
   if (workbench?.root === root && workbench.scope === root.dataset.scope && workbench.key === root.dataset.key) { workbench.sync(); return; }
   workbench?.dispose(); workbench = new Workbench(root, solid, services);
+}
+// a board's assembly (2|root|path) and its PCB (0|root|path) on one saved file
+export function sameBoardFile(key, boardKey) {
+  return !!boardKey && typeof key === "string" && key.split("|")[0] === "2" && boardKey.split("|")[0] === "0"
+    && boardKey.split("|").slice(1).join("|") === key.split("|").slice(1).join("|");
+}
+// the revision that authorizes the original model: the PCB's for the same file
+// (it arrives first), else the assembly's own
+export function assemblyRevision(key, boardKey, known) {
+  const own = known.get(key);
+  return sameBoardFile(key, boardKey) ? known.get(boardKey) || own : own;
 }
 export function sourceRevision(key, revision) {
   if (typeof key !== "string" || typeof revision !== "string" || !revision || revisions.get(key) === revision) return;
