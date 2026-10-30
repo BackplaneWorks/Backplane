@@ -27,6 +27,9 @@ BRIDGES = (
     "src/core/thinq.bend",
     "src/server/thin-splice.bend",
     "src/server/thinstore.bend",
+    "src/server/thin-signals.bend",
+    "src/server/thin-signal-text.bend",
+    "src/server/thin-side-index.bend",
 )
 MANIFEST = "scripts/sidebar-draft-inputs.json"
 
