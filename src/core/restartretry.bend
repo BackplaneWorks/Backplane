@@ -96,7 +96,7 @@ def Retry.asks(xs: List<&2, M.Ask>, +th: String) -> Bool:
 def Retry.valid(+s: M.State, +th: String) -> Bool:
   +r = Retry.record(s, th)
   +t = B.Hub.thread(s, th)
-  Bool.and(M.Carry.on(s), Bool.and(B.Carry.live(t), Bool.and(Retry.interrupted(M.Thread.turn(t)),
+  Bool.and(Bool.and(M.Carry.on(s), Bool.not(M.Dormant.of(s, t))), Bool.and(B.Carry.live(t), Bool.and(Retry.interrupted(M.Thread.turn(t)),
     Bool.and(String.eq(J.Json.get_str(r, "target", ""), Retry.target(t)),
       Bool.and(Nat.is_eq(J.Json.get_nat(r, "activity", 0n), Retry.activity(t)),
         String.eq(J.Json.get_str(r, "message", ""), Retry.user(M.State.mine(s, th))))))))

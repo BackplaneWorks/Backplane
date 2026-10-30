@@ -1448,6 +1448,27 @@ def State.thread.get(s: State, +id: String) -> Thread:
     case State{_, ts, _, _, _, _, _, _, _, _, _}:
       State.thread.get.k(Map.get(Thread, Thread.blank(id), ts, id))
 
+# Dormant projects
+# ----------------
+# A project the person marked dormant (setting "project.dormant.<project>"
+# "on") is left alone: its threads get no watchdog nudge or stall notice,
+# no resume after a restart or a provider's limit reset, no work-deadline
+# notice, and the tick never reopens them. The person's own message still
+# works as always (laws dormant_*)
+def Dormant.key(+p: String) -> String:
+  "project.dormant." ++ p
+
+def Dormant.project(+s: State, +p: String) -> Bool:
+  String.eq(Setting.get(s, Dormant.key(p), ""), "on")
+
+def Dormant.of(+s: State, t: Thread) -> Bool:
+  match t:
+    case Thread{_, +p, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Dormant.project(s, p)
+
+def Dormant.thread(+s: State, +th: String) -> Bool:
+  Dormant.of(s, State.thread.get(s, th))
+
 # No message ever waits behind a running turn (hub.bend's Hub.deliver, law
 # deliver_never_waits). What a thread holds is handed-over context, a
 # message for a worktree still being made (it starts the turn as soon as
