@@ -66,6 +66,12 @@ def start(now: Nat, period: String) -> Nat:
 def count(now: Nat, period: String) -> Nat:
   G.Ug.count(now, period)
 
+def month_offset(now: Nat) -> Nat:
+  G.Ug.month.offset(now)
+
+def days_at(+now: Nat, +period: String) -> List<&2, G.UgDay>:
+  G.Ug.days(M.State.empty(), now, period, "claude")
+
 def reading(v: String) -> String:
   G.Ug.reading(v)
 

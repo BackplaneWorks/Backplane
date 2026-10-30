@@ -5,10 +5,14 @@ const { chromium } = await import(pathToFileURL(process.env.BACKPLANE_PLAYWRIGHT
 const out=resolve('build/usage-review');
 const browser=await chromium.launch({executablePath:process.env.BACKPLANE_CHROME || chromium.executablePath(),headless:true,args:['--disable-gpu']});
 try {
- const page=await browser.newPage({viewport:{width:1280,height:1000}});
+ const page=await browser.newPage({viewport:{width:1280,height:1000},timezoneId:'America/New_York'});
  const errors=[];page.on('pageerror',e=>errors.push(String(e)));
  await page.goto('http://127.0.0.1:4039');
  await page.getByRole('heading',{name:'Daily recorded tokens',exact:true}).waitFor();
+ const monthBars=await page.locator('.usage-column').count();
+ if(monthBars!==18)throw Error('UTC month graph must contain 18 fixture days; got '+monthBars);
+ const monthDates=await page.locator('.usage-column').evaluateAll(cols=>cols.map(c=>c.title.slice(0,10)));
+ if(monthDates[0]!=='2026-10-01'||monthDates.at(-1)!=='2026-10-18')throw Error('Graph escaped UTC month: '+JSON.stringify(monthDates));
  await page.screenshot({path:resolve(out,'usage-desktop.png'),fullPage:true});
  await page.getByRole('tab',{name:'claude',exact:true}).focus();
  await page.keyboard.press('ArrowRight');
@@ -26,7 +30,12 @@ try {
  await page.getByRole('tab',{name:'grok',exact:true}).click();
  await page.getByRole('tab',{name:'grok',exact:true}).and(page.locator('[aria-selected="true"]')).waitFor();
  await page.screenshot({path:resolve(out,'usage-no-readings-390.png'),fullPage:true});
+ await page.getByRole('button',{name:'Today (UTC)',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('.usage-column').length===1);
+ const todayDate=await page.locator('.usage-column').getAttribute('title');
+ if(!todayDate.startsWith('2026-10-18'))throw Error('Today graph must keep the fixture UTC date');
+ await page.screenshot({path:resolve(out,'usage-today-390.png'),fullPage:true});
  if(errors.length)throw Error(errors.join('\n'));
- writeFileSync(resolve(out,'browser-checks.json'),JSON.stringify({pass:true,scope:'production Usage nodes in isolated fixture host, not installed hub',mobile,errors,checks:['keyboard ArrowRight switches provider','only enabled tabs','exact daily reading visible','390px no overflow','180px reserved graph height','missing-provider readings view']},null,2));
+ writeFileSync(resolve(out,'browser-checks.json'),JSON.stringify({pass:true,scope:'production Usage nodes in isolated fixture host, not installed hub',browserTimezone:'America/New_York',monthBars,monthDates,todayDate,mobile,errors,checks:['UTC month has exactly 18 fixture days','Today has exactly one UTC date','keyboard ArrowRight switches provider','only enabled tabs','exact daily reading visible','390px no overflow','180px reserved graph height','missing-provider readings view']},null,2));
  console.log('Usage desktop/390 captures and focused browser checks passed');
 } finally {await browser.close();}

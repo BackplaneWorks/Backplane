@@ -14,6 +14,10 @@ import {installUsageTabs} from '/usage-tabs.js';installUsageTabs();
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-on-click]');if(!b)return;const action=b.getAttribute('data-on-click'), value=b.getAttribute('data-value')||'';const focused=document.activeElement?.id;const r=await fetch('/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,value})});document.querySelector('#preview').innerHTML=await r.text();if(focused)document.getElementById(focused)?.focus();});
 </script></body></html>`;
 const server=Bun.serve({hostname:'127.0.0.1',port:4039,async fetch(req){const url=new URL(req.url);if(url.pathname==='/act'&&req.method==='POST'){const {action,value}=await req.json();ui=lib.act(ui,action,value);return new Response(content(),{headers:{'Content-Type':'text/html'}});}if(['/style.css','/usage-tabs.js'].includes(url.pathname))return new Response(Bun.file(resolve('src/web'+url.pathname)),{headers:{'Content-Type':url.pathname.endsWith('.css')?'text/css':'text/javascript'}});return new Response(shell(),{headers:{'Content-Type':'text/html'}});}});
-if (process.env.USAGE_CAPTURE) await import('./usage_graph_capture.mjs');
-writeFileSync(resolve(review,'preview-ready'),'http://127.0.0.1:4039\n');
-console.log('Usage preview ready http://127.0.0.1:4039 — production Usage renderer, deterministic TurnUsage fixtures');
+if (process.env.USAGE_CAPTURE) {
+  try { await import('./usage_graph_capture.mjs'); }
+  finally { await server.stop(true); }
+} else {
+  writeFileSync(resolve(review,'preview-ready'),'http://127.0.0.1:4039\n');
+  console.log('Usage preview ready http://127.0.0.1:4039 — production Usage renderer, deterministic TurnUsage fixtures');
+}
