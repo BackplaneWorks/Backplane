@@ -1684,7 +1684,15 @@ law fold_default_live:
   for +live: Bool
   {FO.Fold.open("", live) == live : Bool}
 
-# a message is never folded away: it shows as itself wherever it sits
+# Tool runs supply a closed default, including the live run.
+law fold_run_default_closed:
+  for +lc: I18.Loc
+  for +es: List<&2, M.Entry>
+  for +last: Bool
+  for +running: Bool
+  {FO.Fold.grp.roles(lc, FO.GRun{es}, last, Map.new(&2, String), running) == FO.Fold.run.roles(lc, es, False{}) : List<&2, FO.Role>}
+
+# A message is never folded away: it shows as itself wherever it sits.
 law fold_roles_message_shown:
   for +i: String
   for +th: String

@@ -121,6 +121,7 @@ def main() -> IO(Unit):
       "s h(a|3 tool calls · shell, edit|False) i(False) i(False) s h(d|1 tool call · read|False) s h(f|1 tool call · shell|False) ")
     C.Check.str("roles running: not at the bottom", Show.roles(F.Fold.roles([tool("a", "x"), msg("m")], none(), True{})), "h(a|1 tool call · x|False) s ")
     C.Check.str("user opened", Show.roles(F.Fold.roles([tool("a", "x"), tool("b", "x")], Map.set(&2, String, none(), "fold:a", "1"), False{})), "h(a|2 tool calls · x|True) i(True) ")
+    C.Check.str("user opened live run", Show.roles(F.Fold.roles([user("u", 0n), tool("a", "x"), tool("b", "x")], Map.set(&2, String, none(), "fold:a", "1"), True{})), "s h(a|2 tool calls · x|True) i(True) ")
     C.Check.str("user shut the live one", Show.roles(F.Fold.roles([tool("a", "x")], Map.set(&2, String, none(), "fold:a", "0"), True{})), "h(a|1 tool call · x|False) ")
     C.Check.str("ask", F.Fold.ask(True{}, "a") ++ " " ++ F.Fold.ask(False{}, "a"), "0a 1a")
     C.Check.str("took", M.Time.took(45n) ++ " " ++ M.Time.took(133n) ++ " " ++ M.Time.took(3900n), "45s 2m 13s 1h 5m")
