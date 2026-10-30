@@ -7403,6 +7403,27 @@ def Laws.life_on_tick_settles():
 def Laws.life_off_message_wakes():
   {==}
 
+def Laws.settle_idle_completed():
+  {==}
+
+def Laws.settle_idle_failed():
+  {==}
+
+def Laws.settle_idle_interrupted():
+  {==}
+
+def Laws.settle_idle_not_before():
+  {==}
+
+def Laws.settle_idle_running_stays():
+  {==}
+
+def Laws.settle_idle_off():
+  {==}
+
+def Laws.settle_idle_message_reopens():
+  {==}
+
 def Laws.scratch_busy_kept(now, w, t, n):
   and_false_r(M.Scratch.expired(now, w, t))
 

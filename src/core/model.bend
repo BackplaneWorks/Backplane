@@ -3439,7 +3439,8 @@ def Lifecycle.done(+kids: Map<&2, Nat>, +s: State, +t: Thread, snoozed: Bool) ->
 # The "settle.done" setting (Settings, Threads): a done thread settles at
 # once (Lifecycle.done, hub.bend's Shelve) only when "on". Off, the
 # default, a finished thread stays on the active shelf, done, until the
-# person settles it or Settle.auto's inactivity window passes. Waking is
+# person settles it or it has been idle settle.idle.minutes (hub.bend's
+# Hub.settle.idle, 30 by default) or Settle.auto's inactivity window passes. Waking is
 # the same either way (laws life_*, life_off_*)
 def Lifecycle.key() -> String:
   "settle.done"

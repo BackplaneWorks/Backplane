@@ -57,6 +57,10 @@ def step(+s: M.State, +cs: List<&2, M.Change>) -> String:
 def after(+s: M.State, +cs: List<&2, M.Change>) -> M.State:
   M.State.replay(List.append(&2, M.Change, cs, B.Shelve.step(s, cs)), s)
 
+# settle.idle.minutes 0: only the settle window settles
+def noidle() -> List<&2, M.Change>:
+  [M.SettingSet{"settle.idle.minutes", "0", 1n}]
+
 def done() -> List<&2, M.Change>:
   [M.TurnChanged{"t1", M.Completed{}, 5n}]
 
@@ -207,8 +211,21 @@ def main() -> IO(Unit):
     C.Check.str("off: tick leaves a finished thread", tickon(old.off(), "a"), "")
     C.Check.str("off: tick wakes a thread written to after its manual settle", tickon(old.off(), "b"), "wake:b@100")
     C.Check.str("off: tick wakes a self-settled thread that works", tickon(old.off(), "d"), "wake:d@100")
-    C.Check.str("off: the window has not passed: nothing", show(B.Shelve.ticked(after(off(Nil{}), done()), 259204n)), "")
-    C.Check.str("off: the window passed: settles", show(B.Shelve.ticked(after(off(Nil{}), done()), 259205n)), "settle:t1@259205")
+    C.Check.str("off: the window has not passed: nothing", show(B.Shelve.ticked(after(off(noidle()), done()), 259204n)), "")
+    C.Check.str("off: the window passed: settles", show(B.Shelve.ticked(after(off(noidle()), done()), 259205n)), "settle:t1@259205")
+    C.Check.str("idle: finished, idle under 30 min: stays", show(B.Shelve.ticked(after(off(Nil{}), done()), 1804n)), "")
+    C.Check.str("idle: finished, idle 30 min: settles", show(B.Shelve.ticked(after(off(Nil{}), done()), 1805n)), "settle:t1@1805")
+    C.Check.str("idle: failed, idle 30 min: settles", show(B.Shelve.ticked(after(off(Nil{}), [M.TurnChanged{"t1", M.Failed{}, 5n}]), 1805n)), "settle:t1@1805")
+    C.Check.str("idle: stopped, idle 30 min: settles", show(B.Shelve.ticked(after(off(Nil{}), [M.TurnChanged{"t1", M.Interrupted{}, 5n}]), 1805n)), "settle:t1@1805")
+    C.Check.str("idle: running: stays", show(B.Shelve.ticked(off(Nil{}), 1805n)), "")
+    C.Check.str("idle: background work out: stays", show(B.Shelve.ticked(off([M.WorkSet{"t1", "bg", "a\tx", 3n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n)), "")
+    C.Check.str("idle: child task out: stays", show(B.Shelve.ticked(off([M.TaskDelegated{"k1", "t1", "t2", 1n, "claude", "", 3n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n)), "")
+    C.Check.str("idle: an ask waits: stays", show(B.Shelve.ticked(off([M.AskOpened{"a1", "t1", "input", "", "?", "", 3n}, M.PendingChanged{"t1", 1n, 3n}, M.TurnChanged{"t1", M.Completed{}, 4n}]), 1805n)), "")
+    C.Check.str("idle: brought back by the person: stays", show(B.Shelve.ticked(off([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadUnsettled{"t1", 6n}]), 9000n)), "")
+    C.Check.str("idle: settle.idle.minutes 5", show(B.Shelve.ticked(after(off([M.SettingSet{"settle.idle.minutes", "5", 1n}]), done()), 305n)), "settle:t1@305")
+    C.Check.str("idle: settle.idle.minutes 0: off", show(B.Shelve.ticked(after(off(noidle()), done()), 1805n)), "")
+    C.Check.str("idle: a message reopens it", shelf_at(M.State.replay([M.MessagePosted{"t1", "m2", M.User{}, "again", 1900n}], after(off(Nil{}), List.append(&2, M.Change, done(), [M.ThreadSettled{"t1", False{}, 1805n}]))), "t1"), "active")
+    C.Check.str("idle: settled, then a new turn: active again", shelf_at(after(after(off([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 1805n}]), [M.MessagePosted{"t1", "m2", M.User{}, "again", 1900n}, M.TurnChanged{"t1", M.Running{}, 1900n}]), [M.TurnChanged{"t1", M.Completed{}, 1910n}]), "t1"), "active")
     C.Check.str("off: settle.days 1 shortens the window", show(B.Shelve.ticked(after(off([M.SettingSet{"settle.days", "1", 3n}]), done()), 86405n)), "settle:t1@86405")
     C.Check.str("turned on: the tick settles a finished thread", show(B.Shelve.ticked(M.State.replay([M.SettingSet{"settle.done", "on", 6n}], after(off(Nil{}), done())), 100n)), "settle:t1@100")
     C.Check.str("turned off: a step settles nothing", step(log([M.SettingSet{"settle.done", "off", 3n}]), done()), "")

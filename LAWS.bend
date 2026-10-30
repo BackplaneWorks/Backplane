@@ -5326,6 +5326,36 @@ law life_on_tick_settles:
 law life_off_message_wakes:
   {H.Shelve.step(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", True{}, 6n}]), [M.MessagePosted{"t1", "m2", M.User{}, "again", 7n}, M.TurnChanged{"t1", M.Running{}, 7n}]) == [M.ThreadWoke{"t1", 7n}] : List<&2, M.Change>}
 
+# A thread whose turn ended (completed, failed or stopped) with nothing out
+# settles by itself once idle settle.idle.minutes (30 by default), long
+# before the settle window (hub.bend's Hub.settle.idle)
+law settle_idle_completed:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+
+law settle_idle_failed:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Failed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+
+law settle_idle_interrupted:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Interrupted{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+
+# not a second before it has been idle that long
+law settle_idle_not_before:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1804n) == [] : List<&2, M.Change>}
+
+# a running turn never settles by idleness
+law settle_idle_running_stays:
+  {H.Shelve.ticked(H.Shelve.demo(Nil{}), 1805n) == [] : List<&2, M.Change>}
+
+# settle.idle.minutes 0 turns it off: only the settle window is left
+law settle_idle_off:
+  {H.Shelve.ticked(H.Shelve.demo([M.SettingSet{"settle.idle.minutes", "0", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
+
+# a thread that settled by idleness is back on the active shelf with the
+# next message
+law settle_idle_message_reopens:
+  {M.Shelf.of(M.State.thread.get(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 1805n}, M.MessagePosted{"t1", "m2", M.User{}, "again", 1900n}]), "t1")) == M.Active{} : M.Shelf}
+
+
 law scratch_busy_kept:
   for +now: Nat
   for +w: Nat
