@@ -468,26 +468,29 @@ try {
     assert.ok(click&&load&&firstFrame,'missing initial frame milestones');
     const revision=wire.find(s=>s.direction==='revision'&&s.key===load.key&&s.revision===sourceRevision&&s.at>=click.at);
     const pcbRevision=wire.find(s=>s.direction==='revision'&&s.key==='0'+load.key.slice(1)&&s.revision===sourceRevision&&s.at>=click.at);
+    // A board's original model is authorized by the PCB revision of the same saved file,
+    // which arrives first; the assembly's own (revision) may follow the first frame.
+    const authority=pcbRevision||revision;
     const request=wire.find(s=>s.direction==='request'&&s.method==='kicad.renderAsset'&&s.revision===sourceRevision&&s.at>=click.at);
     const reply=wire.find(s=>s.direction==='reply'&&s.id===request?.id);
     const constructor=workerLifecycle.find(s=>s.event==='constructor'&&s.at>=click.at);
     const initPost=workerLifecycle.find(s=>s.event==='post'&&s.method==='init'&&s.at>=constructor?.at);
     const initReply=workerLifecycle.find(s=>s.event==='reply'&&s.method==='init'&&s.id===initPost?.id);
     const vendor=workerResources.flatMap(w=>w.resources).find(e=>e.name.endsWith('/viewer/vendor/viewer.js'));
-    assert.ok(revision&&request&&reply&&constructor&&initPost&&initReply&&vendor,'missing revision/RPC/worker/vendor loading evidence');
+    assert.ok(authority&&request&&reply&&constructor&&initPost&&initReply&&vendor,'missing revision/RPC/worker/vendor loading evidence');
     assert.equal(reply.asset?.sha256,assetId);assert.equal(reply.ok,true);assert.equal(reply.asset?.revision,sourceRevision);assert.equal(reply.asset?.source,pcb);assert.ok(!initReply.error);
-    assert.ok(click.at<=revision.at&&request.at<=reply.at&&reply.at<=constructor.at&&constructor.at<=initPost.at&&initPost.at<=initReply.at&&initReply.at<=load.at&&load.at<=firstFrame.at&&(!bytes||load.at<=bytes.at&&bytes.at<=firstFrame.at),'loading stages out of order');
+    assert.ok(click.at<=authority.at&&request.at<=reply.at&&reply.at<=constructor.at&&constructor.at<=initPost.at&&initPost.at<=initReply.at&&initReply.at<=load.at&&load.at<=firstFrame.at&&(!bytes||load.at<=bytes.at&&bytes.at<=firstFrame.at),'loading stages out of order');
     if(expectAssetPreparation||fidelityOnly){
       assert.ok(pcbRevision&&pcbRevision.at<=request.at&&request.at<revision.at,'authenticated asset preparation must start on the matching PCB revision before independent 3D confirmation');
       assert.equal(String(request.kind),'2');assert.equal(request.path,load.key.split('|').slice(2).join('|'));
-    }else assert.ok(revision.at<=request.at,'sequential asset request preceded its 3D revision');
+    }else assert.ok(authority.at<=request.at,'sequential asset request preceded its authorizing revision');
     for(const actualLoad of observations.workerLoads.filter(s=>s.at>=click.at)){
-      assert.ok(actualLoad.at>=revision.at,'original Worker.load preceded independent 3D revision');
-      assert.equal(actualLoad.source,pcb);assert.equal(actualLoad.revision,sourceRevision);assert.equal(actualLoad.key,revision.key);
+      assert.ok(actualLoad.at>=authority.at,'original Worker.load preceded its authorizing revision');
+      assert.equal(actualLoad.source,pcb);assert.equal(actualLoad.revision,sourceRevision);assert.equal(actualLoad.key,load.key);
     }
-    assert.equal(firstFrame.source,pcb);assert.equal(firstFrame.revision,sourceRevision);assert.equal(firstFrame.key,revision.key);
-    const milestones={click:click.at,pcbRevision:pcbRevision?.at,plotRevision:revision.at,assetRequest:request.at,assetReply:reply.at,workerConstructor:constructor.at,workerConstructorReturn:constructor.returnedAt,initPost:initPost.at,vendorStart:vendor.mainStartAt,vendorResponseEnd:vendor.mainResponseEndAt,initReply:initReply.at,loadPost:load.at,bytes:bytes?.at??null,firstFrame:firstFrame.at};
-    const intervals={clickToRevisionMs:revision.at-click.at,revisionToAssetRequestMs:request.at-revision.at,assetRpcMs:reply.at-request.at,replyToWorkerConstructorMs:constructor.at-reply.at,constructorToInitPostMs:initPost.at-constructor.at,workerInitMs:initReply.at-initPost.at,vendorFetchMs:vendor.duration,vendorResponseEndToInitReplyMs:initReply.at-vendor.mainResponseEndAt,initReplyToLoadPostMs:load.at-initReply.at,modelLoadPostToBytesMs:bytes?bytes.at-load.at:null,bytesToFirstFrameMs:bytes?firstFrame.at-bytes.at:null,clickToFrameMs:firstFrame.at-click.at};
+    assert.equal(firstFrame.source,pcb);assert.equal(firstFrame.revision,sourceRevision);assert.equal(firstFrame.key,load.key);
+    const milestones={click:click.at,pcbRevision:pcbRevision?.at,plotRevision:revision?.at,authority:authority.at,assetRequest:request.at,assetReply:reply.at,workerConstructor:constructor.at,workerConstructorReturn:constructor.returnedAt,initPost:initPost.at,vendorStart:vendor.mainStartAt,vendorResponseEnd:vendor.mainResponseEndAt,initReply:initReply.at,loadPost:load.at,bytes:bytes?.at??null,firstFrame:firstFrame.at};
+    const intervals={clickToRevisionMs:authority.at-click.at,revisionToAssetRequestMs:request.at-authority.at,clickToPlotRevisionMs:revision?revision.at-click.at:null,assetRpcMs:reply.at-request.at,replyToWorkerConstructorMs:constructor.at-reply.at,constructorToInitPostMs:initPost.at-constructor.at,workerInitMs:initReply.at-initPost.at,vendorFetchMs:vendor.duration,vendorResponseEndToInitReplyMs:initReply.at-vendor.mainResponseEndAt,initReplyToLoadPostMs:load.at-initReply.at,modelLoadPostToBytesMs:bytes?bytes.at-load.at:null,bytesToFirstFrameMs:bytes?firstFrame.at-bytes.at:null,clickToFrameMs:firstFrame.at-click.at};
     if(expectAssetPreparation||fidelityOnly)Object.assign(intervals,{preparationLeadBefore3DRevisionMs:revision.at-request.at,assetReplyRelativeTo3DRevisionMs:reply.at-revision.at});
     const profile={scope:'one warm-export/cold-browser loading observation; no authority or production changes',expectAssetPreparation:expectAssetPreparation||fidelityOnly,bytesMeasurement:bytes?.measurement||'unmeasured',assetResourceId:assetId,bytes,clock:'main performance.now; worker resource timeOrigin converted onto main clock; wire decoded after firstFrame',limits:'vendor fetch is directly measured; responseEnd to init reply includes module evaluation, renderer setup and GPU initialization and does not isolate parse CPU time; preparation reply may follow 3D confirmation and no speed threshold is imposed',source:pcb,sourceRevision,milestones,intervals,observations,workerResources};
     fs.writeFileSync(join(output,'loading-profile.json'),JSON.stringify(profile,null,2)+'\n');
