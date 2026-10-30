@@ -142,12 +142,15 @@ def Cli.least(+n: Nat, +t: List<&2, String>, +what: String) -> Cli:
   Bool.pick(Cli, Nat.is_ge(List.length(&2, String, t), n), CliRun{}, CliBad{what})
 
 def Cli.review.why() -> String:
-  "--review bom OLD NEW | --review checks DIR COMMIT HOME TRIGGER | --review release DIR TAG HOME"
+  "--review bom OLD NEW | --review checks DIR COMMIT HOME TRIGGER | --review release DIR TAG HOME | --review components DIR | --review components-page DIR OFFSET PCB_REV SCH_REV | --review renderasset DIR PATH KIND REVISION"
 
 def Cli.review.k(+s: String, +r: List<&2, String>) -> Cli:
   Bool.pick(Cli, String.eq(s, "bom"), Cli.least(2n, r, Cli.review.why()),
     Bool.pick(Cli, String.eq(s, "checks"), Cli.least(4n, r, Cli.review.why()),
-      Bool.pick(Cli, String.eq(s, "release"), Cli.least(3n, r, Cli.review.why()), CliBad{Cli.review.why()})))
+      Bool.pick(Cli, String.eq(s, "release"), Cli.least(3n, r, Cli.review.why()),
+        Bool.pick(Cli, String.eq(s, "components"), Cli.least(1n, r, Cli.review.why()),
+          Bool.pick(Cli, String.eq(s, "components-page"), Cli.least(4n, r, Cli.review.why()),
+            Bool.pick(Cli, String.eq(s, "renderasset"), Cli.least(4n, r, Cli.review.why()), CliBad{Cli.review.why()}))))))
 
 def Cli.review(t: List<&2, String>) -> Cli:
   match t:

@@ -1,0 +1,24 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "backplane-viewer-renderer",
+      "dependencies": {
+        "three": "0.181.1",
+        "three-gpu-pathtracer": "0.0.24",
+        "three-mesh-bvh": "0.9.5",
+        "xatlas-web": "0.1.0",
+      },
+    },
+  },
+  "packages": {
+    "three": ["three@0.181.1", "", {}, "sha512-bz9xZUQMw3pJbjKy7roiwXWgAp+oVUa+4k5o0oBAQ+IFJuru1xzvtk63h6k72XZanXS/SgoEhV6927Vgazyq2w=="],
+
+    "three-gpu-pathtracer": ["three-gpu-pathtracer@0.0.24", "", { "peerDependencies": { "three": ">=0.180.0", "three-mesh-bvh": ">=0.7.4", "xatlas-web": "^0.1.0" } }, "sha512-fHQ7g7ywvSwRAQywhsfech2/kspQKinfFNOcNDTJS2Q34CzcF1kpESlOVvJH8kX/bGlCnxMI+Qo16kWGAy7zCA=="],
+
+    "three-mesh-bvh": ["three-mesh-bvh@0.9.5", "", { "peerDependencies": { "three": ">= 0.159.0" } }, "sha512-MYpwzUWDxPAKGhSBFin9E/7K4AAHyIm4IfMZQ/3+Z/jq/swa2dAhXx0yUNDd9mjlhLuzXkMBTGDZioL2GSlIfQ=="],
+
+    "xatlas-web": ["xatlas-web@0.1.0", "", {}, "sha512-PprVfuXbaIskxLTLBUQRaWfgSy9xUQqAMIRooOw0P6NYqwgh6T0voeer6+Z5M7AFt5SGXUybuww/uDGs1yw8vQ=="],
+  }
+}

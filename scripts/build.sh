@@ -34,6 +34,7 @@ mkdir -p dist build
   python3 scripts/js-unmarshal.py ../core/client.Ui dist/web/chunk-*.js
   python3 scripts/js-native.py dist/web/chunk-*.js
   cp src/web/sw.js dist/web/sw.js
+  sh scripts/build-viewer.sh dist/web/viewer/vendor
   # precompressed copies: the server sends these to browsers that take gzip
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
 ) > build/web-dist.log 2>&1 &

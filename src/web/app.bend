@@ -17,8 +17,19 @@ import ../core/presentation.bend as PS
 import ./cat.bend as WC
 import ../core/onboard.bend as OB
 import ./workspace.bend as WS
-
+import ../core/reflow.bend as RF
 import ../core/bub-move.bend as HOP
+
+# The same pure illustrative thermal planner can be called by every client.
+def reflow_defaults() -> String:
+  RF.defaults()
+
+def reflow_alloys() -> String:
+  RF.alloys()
+
+def reflow_plan(profile: String, alloy: String) -> String:
+  RF.plan(profile, alloy)
+
 
 # What host.js calls. Everything the page decides happens behind these.
 

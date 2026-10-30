@@ -19,6 +19,10 @@ const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(req){
   // Only expose camera configuration to the test. The renderer body is exact
   // production source; App only supplies the localized progress strings.
   if(p==='/solid.js')return new Response(solid+'\nexport {view as testView};',{headers:{'Content-Type':'application/javascript'}});
+  if(p==='/solid-assets.js')return new Response(readFileSync('src/web/solid-assets.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
+  if(p==='/solid-framing.js')return new Response(readFileSync('src/web/solid-framing.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
+  if(p==='/solid-dof.js')return new Response(readFileSync('src/web/solid-dof.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
+  if(p==='/solid-materials.js')return new Response(readFileSync('src/web/solid-materials.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
   if(p==='/app.bend')return new Response('export default {solid_waiting:()=>"",solid_stats:()=>""};',{headers:{'Content-Type':'application/javascript'}});
   if(p==='/top.png'||p==='/bottom.png')return new Response(readFileSync(`test/fixtures/solid-handedness${p}`),{headers:{'Content-Type':'image/png'}});
   return new Response('<style>html,body{margin:0;background:#202128}canvas{width:1000px;height:700px;display:block}</style><canvas id="model" data-key="2|fixture"></canvas>',{headers:{'Content-Type':'text/html'}});

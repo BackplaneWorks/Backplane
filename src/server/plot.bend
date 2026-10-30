@@ -56,7 +56,7 @@ type POut is Data:
 # read after a change (a second save within the same second), whether a
 # read is under way, and its latest plot
 type Src is Data:
-  Src{key: String, kind: U32, path: String, sz: U32, mt: String, re: Nat, busy: Bool, plot: Maybe<&2, P.Plot>}
+  Src{key: String, kind: U32, path: String, sz: U32, mt: String, re: Nat, busy: Bool, plot: Maybe<&2, P.Plot>, revision: String}
 
 # a phone's view: a source it watches, the chunks it holds, and the 3D
 # model's bytes it holds (a 3D view is two: the board's plot and the model);
@@ -95,7 +95,7 @@ def Src.key(+kind: U32, +root: String, +path: String) -> String:
 
 def Src.is(s: Src, +key: String) -> Bool:
   match s:
-    case Src{k, _, _, _, _, _, _, _}:
+    case Src{k, _, _, _, _, _, _, _, _}:
       String.eq(k, key)
 
 def Src.has(ss: List<&2, Src>, +key: String) -> Bool:
@@ -107,7 +107,7 @@ def Src.has(ss: List<&2, Src>, +key: String) -> Bool:
 
 def Src.plot.k(hit: Bool, s: Src, rest: Maybe<&2, P.Plot>) -> Maybe<&2, P.Plot>:
   match hit s:
-    case True{} Src{_, _, _, _, _, _, _, p}:
+    case True{} Src{_, _, _, _, _, _, _, p, _}:
       p
     case False{} _:
       rest
@@ -120,12 +120,19 @@ def Src.plot(ss: List<&2, Src>, +key: String) -> Maybe<&2, P.Plot>:
     case +s <> t:
       Src.plot.k(Src.is(s, key), s, Src.plot(t, key))
 
+def Src.revision(ss: List<&2, Src>, +key: String) -> String:
+  match ss:
+    case Nil{}: ""
+    case Src{+k, _, _, _, _, _, _, _, mt} <> rest:
+      Bool.pick(String, String.eq(k, key), mt, Src.revision(rest, key))
+
+
 def Src.add(has: Bool, +key: String, +kind: U32, +path: String, ss: List<&2, Src>) -> List<&2, Src>:
   match has:
     case True{}:
       ss
     case False{}:
-      Src{key, kind, path, 0, "", 0n, False{}, None{}} <> ss
+      Src{key, kind, path, 0, "", 0n, False{}, None{}, ""} <> ss
 
 def Sub.watched(ss: List<&2, Sub>, +key: String) -> Bool:
   match ss:
@@ -143,13 +150,13 @@ def Src.keep(keep: Bool, s: Src, rest: List<&2, Src>) -> List<&2, Src>:
 
 def Src.key.of(s: Src) -> String:
   match s:
-    case Src{k, _, _, _, _, _, _, _}:
+    case Src{k, _, _, _, _, _, _, _, _}:
       k
 
 # a 3D model's source with its plot, or with one on the way (Pv.warm)
 def Src.model(s: Src) -> Bool:
   match s:
-    case Src{_, +kd, _, _, _, _, b, pl}:
+    case Src{_, +kd, _, _, _, _, b, pl, _}:
       Bool.and(Pv.solid.kind(kd), Bool.or(b, Maybe.is_some(&2, P.Plot, pl)))
 
 # how many 3D models no view watches are kept (the newest first)
@@ -309,6 +316,16 @@ def Sub.is(s: Sub, +key: String) -> Bool:
     case Sub{_, k, _, _, _, _}:
       String.eq(k, key)
 
+def Pv.revision.fan(ss: List<&2, Sub>, +key: String, +revision: String, +out: Chan(POut)) -> IO(Unit):
+  match ss:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case +s <> rest:
+      do IO<Unit>:
+        Bool.pick(IO(Unit), Bool.and(Sub.is(s, key), Bool.not(String.is_empty(revision))),
+          Pv.say(out, Sub.client(s), J.Json.show(J.Json.obj([J.KV{"t", J.Str{"plotrevision"}}, J.KV{"key", J.Str{key}}, J.KV{"revision", J.Str{revision}}]))), IO.pure(Unit, Unit{}))
+        Pv.revision.fan(rest, key, revision, out)
+
+
 def Sub.clear.go(ss: List<&2, Sub>, +key: String) -> List<&2, Sub>:
   match ss:
     case Nil{}:
@@ -367,7 +384,7 @@ def Pv.plot(m: Maybe<&2, List<&2, B.Item>>, +kind: U32) -> Maybe<&2, P.Plot>:
     case None{}:
       None{}
 
-# Non-schematic sources retain their existing whole-second stamp.
+# The legacy stat stamp is kept for callers reading FS.stat's contract.
 def Pv.stamp.k(v: U32 & U32 & U32) -> U32 & String:
   (_, (sz, mt)) = v
   (sz, U32.show(mt))
@@ -382,12 +399,10 @@ def Pv.revision(r: Result<&1, &1, U32 & String, U32 & String>) -> U32 & String:
     case Done{v}: v
     case Fail{_}: (0, "")
 
-def Pv.stamp.read(sch: Bool, +path: String) -> IO(U32 & String):
-  match sch:
-    case True{}:
-      IO.bind(Result<&1, &1, U32 & String, U32 & String>, U32 & String, H.FS.revision(path), r => IO.pure(U32 & String, Pv.revision(r)))
-    case False{}:
-      IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, U32 & String, H.FS.stat(path), r => IO.pure(U32 & String, Pv.stamp(r)))
+# Every live viewer source needs exact revisions: a same-size save within one
+# second must invalidate boards, STEP and GLB assets as well as schematics.
+def Pv.stamp.read(+path: String) -> IO(U32 & String):
+  IO.bind(Result<&1, &1, U32 & String, U32 & String>, U32 & String, H.FS.revision(path), r => IO.pure(U32 & String, Pv.revision(r)))
 
 # The child
 # ---------
@@ -473,23 +488,30 @@ def Pv.step2glb() -> IO(String):
 def Pv.is_step(+p: String) -> Bool:
   Bool.or(String.ends_with(p, ".step"), Bool.or(String.ends_with(p, ".stp"), Bool.or(String.ends_with(p, ".STEP"), String.ends_with(p, ".STP"))))
 
-# a 3D model as a GLB: a .glb as it is; a STEP through step2glb; a board's
-# body and parts through kicad-cli (its copper, mask and silk the phone
-# draws from the board's plot), or its body alone (kind 3: parts off)
-# (a board's model is its body with its mask, silk and pads, and its parts
-# unless bare; tracks and zones are left out: copper drawn over the mask
-# only blots it)
+# Compact board meshes retain pads/mask/silk; the phone also draws copper
+# from its plot. Original-model detail explicitly exports outer routing,
+# zones and actual via body cuts. No inner copper or material overrides.
 def Pv.glb.flags(+bare: Bool, +full: Bool, +out: String, +path: String) -> List<&2, String>:
   List.append(&2, String, ["pcb", "export", "glb"], List.append(&2, String, Bool.pick(List<&2, String>, bare, ["--no-components"], ["--subst-models"]),
-    ["--include-pads", "--include-soldermask", "--include-silkscreen", "-f", "-o", out, path]))
+    List.append(&2, String, ["--include-pads", "--include-soldermask", "--include-silkscreen"],
+      List.append(&2, String, Bool.pick(List<&2, String>, full, ["--include-tracks", "--include-zones", "--cut-vias-in-body"], Nil{}), ["-f", "-o", out, path]))))
 
-# a STEP's GLB is written beside and moved in whole: a reader never meets
-# half of one
+# Export success includes promoting the staging file. A failed rename must
+# not report a cache hit against an absent or older destination.
+def Pv.step.promoted(m: Result<&1, &1, U32 & String, Unit>, r: PR.Ran) -> PR.Ran:
+  match m:
+    case Done{_}: r
+    case Fail{_}: PR.Ran{3, "Unable to save the exported model"}
+
+# a STEP's GLB is written beside and moved in whole only after a successful
+# export: a reader never meets a partial or failed model.
 def Pv.step.ran.to(r: PR.Ran, +from: String, +out: String) -> IO(PR.Ran):
-  IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, r))
+  IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, Pv.step.promoted(m, r)))
 
 def Pv.step.ran(r: PR.Ran, +out: String) -> IO(PR.Ran):
-  Pv.step.ran.to(r, out ++ ".part", out)
+  match r:
+    case PR.Ran{0, log}: Pv.step.ran.to(PR.Ran{0, log}, out ++ ".part", out)
+    case _: IO.pure(PR.Ran, r)
 
 # a board's GLB is written beside and moved in whole only when KiCad
 # succeeded, so a half-written export is never taken for a cached one
@@ -618,20 +640,41 @@ def Pv.ver(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> String:
     case Fail{_}:
       "0"
 
+# Include the exact revision in the cache filename. Hash only the source path,
+# not its revision: a 32-bit revision hash must not silently reuse old geometry.
+def Pv.cache.revision(sm: U32 & String) -> String:
+  (_, rev) = sm
+  String.join(String.split(rev, ':'), ".")
+
 def Pv.step.out(+path: String) -> IO(String):
   do IO<String>:
     +dir : String <- Pv.cache()
-    st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
-    return dir ++ "/" ++ U32.show(P.Key.hash(path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
+    st : U32 & String <- Pv.stamp.read(path)
+    return dir ++ "/step3-" ++ U32.show(P.Key.hash(path, 2166136261)) ++ "." ++ Pv.cache.revision(st) ++ ".glb"
 
-# a board's model, cached per version of the board file (its size and
-# time) and per export (with its parts or bare): KiCad's export takes half a
+# a board's model, cached per exact revision of the board file and per
+# export (with its parts or bare): KiCad's export takes half a
 # minute on a full board, so it runs once per change, not on every view
 def Pv.board.out(+path: String, +bare: Bool) -> IO(String):
   do IO<String>:
     +dir : String <- Pv.cache()
-    st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
-    return dir ++ "/board-" ++ U32.show(P.Key.hash(Bool.pick(String, bare, "bare2|", "parts2|") ++ path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
+    st : U32 & String <- Pv.stamp.read(path)
+    return dir ++ "/board-" ++ U32.show(P.Key.hash(Bool.pick(String, bare, "bare3|", "parts3|") ++ path, 2166136261)) ++ "." ++ Pv.cache.revision(st) ++ ".glb"
+
+# Full detail cannot consume an existing pads-only entry. Keep its recipe
+# and bare/parts mode explicit, with the exact source stamp still unhashed.
+def Pv.board.full.name(+path: String, bare: Bool, st: U32 & String) -> String:
+  "board-full-outer-v1-" ++ Bool.pick(String, bare, "bare-", "parts-") ++
+    U32.show(P.Key.hash(path, 2166136261)) ++ "." ++ Pv.cache.revision(st) ++ ".glb"
+
+def Pv.board.out.recipe(+path: String, +bare: Bool, full: Bool) -> IO(String):
+  match full:
+    case False{}: Pv.board.out(path, bare)
+    case True{}:
+      do IO<String>:
+        +dir : String <- Pv.cache()
+        st : U32 & String <- Pv.stamp.read(path)
+        return dir ++ "/" ++ Pv.board.full.name(path, bare, st)
 
 # where a model's GLB comes from: a .glb is its own; a STEP's and a board's
 # are cached per version
@@ -642,7 +685,7 @@ def Pv.solid.out(isglb: Bool, step: Bool, +bare: Bool, +full: Bool, +path: Strin
     case False{} True{}:
       Pv.step.out(path)
     case False{} False{}:
-      Pv.board.out(path, bare)
+      Pv.board.out.recipe(path, bare, full)
 
 def Pv.child.solid(+bare: Bool, +full: Bool, +path: String, +note: String) -> IO(Unit):
   do IO<Unit>:
@@ -943,7 +986,7 @@ def Pv.stamp.fixed(+path: String) -> Bool:
 def Pv.stamp.one.k(live: Bool, +path: String) -> IO(U32 & String):
   match live:
     case True{}:
-      Pv.stamp.read(String.ends_with(path, ".kicad_sch"), path)
+      Pv.stamp.read(path)
     case False{}:
       IO.pure(U32 & String, (1, "fixed"))
 
@@ -1015,13 +1058,24 @@ def Pv.solid.known(solid: Bool, +kind: U32, +path: String) -> IO(U32):
     case False{}:
       IO.pure(U32, 0)
 
+def Pv.read.stable(same: Bool, st: U32 & String, r: PR.Ran, key: String, kind: U32, q: Chan(PMsg)) -> IO(Unit):
+  match same:
+    case True{}: Pv.read.k(st, r, key, kind, q)
+    case False{}: Pv.read.k(st, PR.Ran{2, ""}, key, kind, q)
+
+def Pv.read.checked(before: U32 & String, after: U32 & String, r: PR.Ran, key: String, kind: U32, q: Chan(PMsg)) -> IO(Unit):
+  (+c, +d) = before
+  (a, b) = after
+  Pv.read.stable(Bool.and(U32.is_eq(a, c), String.eq(b, d)), (c, d), r, key, kind, q)
+
 def Pv.read.run(fits: Bool, +size: U32, st: U32 & String, low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   match fits:
     case True{}:
       do IO<Unit>:
         exe : String <- H.Sys.exe_path()
         r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
-        Pv.read.k(st, r, key, kind, q)
+        after : U32 & String <- Pv.stamp.of(path)
+        Pv.read.checked(st, after, r, key, kind, q)
     case False{}:
       Pv.read.k(st, PR.Ran{3, P.Solid.big(size)}, key, kind, q)
 
@@ -1043,24 +1097,24 @@ def Pv.read(+key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: Strin
 
 def Pv.poll.go(changed: Bool, re: Nat, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   match changed re s:
-    case True{} _ Src{+k, +kd, +p, sz, mt, _, _, pl}:
+    case True{} _ Src{+k, +kd, +p, sz, mt, _, _, pl, good}:
       do IO<Src>:
         IO.spawn(Unit, Pv.read(k, kd, p, q, dir))
-        return Src{k, kd, p, sz, mt, Bool.pick(Nat, Pv.solid.kind(kd), 0n, 7n), True{}, pl}
-    case False{} 1n Src{+k, +kd, +p, sz, mt, _, _, pl}:
+        return Src{k, kd, p, sz, mt, Bool.pick(Nat, Pv.solid.kind(kd), 0n, 7n), True{}, pl, good}
+    case False{} 1n Src{+k, +kd, +p, sz, mt, _, _, pl, good}:
       do IO<Src>:
         IO.spawn(Unit, Pv.read(k, kd, p, q, dir))
-        return Src{k, kd, p, sz, mt, 0n, True{}, pl}
-    case False{} 1n+r Src{k, kd, p, sz, mt, _, b, pl}:
-      IO.pure(Src, Src{k, kd, p, sz, mt, r, b, pl})
+        return Src{k, kd, p, sz, mt, 0n, True{}, pl, good}
+    case False{} 1n+r Src{k, kd, p, sz, mt, _, b, pl, good}:
+      IO.pure(Src, Src{k, kd, p, sz, mt, r, b, pl, good})
     case False{} 0n _:
       IO.pure(Src, s)
 
 def Pv.poll.st(sm: U32 & String, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   (+s2, +m2) = sm
   match s:
-    case Src{k, kd, p, +sz, +mt, +re, b, pl}:
-      Pv.poll.go(RF.Revision.changed(s2, m2, sz, mt), re, Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
+    case Src{k, kd, p, +sz, +mt, +re, b, pl, good}:
+      Pv.poll.go(RF.Revision.changed(s2, m2, sz, mt), re, Src{k, kd, p, sz, mt, re, b, pl, good}, q, dir)
 
 # one source's turn: a changed size or mtime reads it again (not while a
 # read is under way)
@@ -1068,14 +1122,14 @@ def Pv.poll.one(busy: Bool, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   match busy s:
     case True{} _:
       IO.pure(Src, s)
-    case False{} Src{k, kd, +p, sz, mt, re, b, pl}:
+    case False{} Src{k, kd, +p, sz, mt, re, b, pl, good}:
       do IO<Src>:
         st : U32 & String <- Pv.stamp.of(p)
-        Pv.poll.st(st, Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
+        Pv.poll.st(st, Src{k, kd, p, sz, mt, re, b, pl, good}, q, dir)
 
 def Src.busy(s: Src) -> Bool:
   match s:
-    case Src{_, _, _, _, _, _, b, _}:
+    case Src{_, _, _, _, _, _, b, _, _}:
       b
 
 # (a kept model no view watches is not polled: Pv.warm or the next view
@@ -1111,10 +1165,10 @@ def Pv.next(any: Bool, +q: Chan(PMsg)) -> IO(Bool):
 
 def Pv.got.src(hit: Bool, s: Src, +sz: U32, +mt: String, +m: Maybe<&2, P.Plot>) -> Src:
   match hit s m:
-    case True{} Src{k, kd, p, _, _, re, _, _} Some{pl}:
-      Src{k, kd, p, sz, mt, re, False{}, Some{pl}}
-    case True{} Src{k, kd, p, _, _, re, _, pl} None{}:
-      Src{k, kd, p, sz, mt, re, False{}, pl}
+    case True{} Src{k, kd, p, _, _, re, _, _, _} Some{pl}:
+      Src{k, kd, p, sz, mt, re, False{}, Some{pl}, mt}
+    case True{} Src{k, kd, p, _, _, re, _, pl, good} None{}:
+      Src{k, kd, p, sz, mt, re, False{}, pl, good}
     case False{} _ _:
       s
 
@@ -1154,6 +1208,11 @@ def Pv.watch.now(m: Maybe<&2, P.Plot>, s: Sub, +out: Chan(POut)) -> IO(Sub):
     case None{}:
       IO.pure(Sub, s)
 
+def Pv.revision.ready(m: Maybe<&2, P.Plot>, subs: List<&2, Sub>, key: String, revision: String, out: Chan(POut)) -> IO(Unit):
+  match m:
+    case Some{_}: Pv.revision.fan(subs, key, revision, out)
+    case None{}: IO.pure(Unit, Unit{})
+
 def Pv.subs(keep: Bool, subs: List<&2, Sub>, +client: U32) -> List<&2, Sub>:
   match keep:
     case True{}:
@@ -1183,17 +1242,17 @@ def Pv.fresh.pl(changed: Bool, pl: Maybe<&2, P.Plot>) -> Maybe<&2, P.Plot>:
 def Pv.fresh.k(sm: U32 & String, s: Src) -> Src:
   (+s2, +m2) = sm
   match s:
-    case Src{k, kd, p, +sz, +mt, re, b, pl}:
-      Src{k, kd, p, sz, mt, re, b, Pv.fresh.pl(RF.Revision.changed(s2, m2, sz, mt), pl)}
+    case Src{k, kd, p, +sz, +mt, re, b, pl, g}:
+      Src{k, kd, p, sz, mt, re, b, Pv.fresh.pl(RF.Revision.changed(s2, m2, sz, mt), pl), g}
 
 def Pv.fresh.one(go: Bool, busy: Bool, s: Src) -> IO(Src):
   match go busy s:
-    case True{} True{} Src{k, kd, p, sz, mt, re, b, _}:
-      IO.pure(Src, Src{k, kd, p, sz, mt, re, b, None{}})
-    case True{} False{} Src{k, kd, +p, sz, mt, re, b, pl}:
+    case True{} True{} Src{k, kd, p, sz, mt, re, b, _, g}:
+      IO.pure(Src, Src{k, kd, p, sz, mt, re, b, None{}, g})
+    case True{} False{} Src{k, kd, +p, sz, mt, re, b, pl, g}:
       do IO<Src>:
         st : U32 & String <- Pv.stamp.of(p)
-        return Pv.fresh.k(st, Src{k, kd, p, sz, mt, re, b, pl})
+        return Pv.fresh.k(st, Src{k, kd, p, sz, mt, re, b, pl, g})
     case _ _ _:
       IO.pure(Src, s)
 
@@ -1225,7 +1284,8 @@ def Pv.watch.add(has: Bool, +keep: Bool, st: PSt, +client: U32, +kind: U32, +key
       do IO<PSt>:
         +ss1 : List<&2, Src> <- Pv.fresh.at(Sub.watched(subs, key), ss, key)
         +ss2 : List<&2, Src> = Src.add(Src.has(ss1, key), key, kind, file, ss1)
-        sub : Sub <- Pv.watch.now(Src.plot(ss2, key), Sub.new(keep, client, key, subs), out)
+        +sub : Sub <- Pv.watch.now(Src.plot(ss2, key), Sub.new(keep, client, key, subs), out)
+        Pv.revision.ready(Src.plot(ss2, key), [sub], key, Src.revision(ss2, key), out)
         Pv.note.one(Bool.and(Pv.solid.kind(kind), Maybe.is_some(&2, P.Plot, Src.plot(ss2, key))), client, key, dir, out)
         +subs2 : List<&2, Sub> = sub <> Pv.subs(keep, subs, client)
         p2 : Bool <- Pv.start(polling, q)
@@ -1285,25 +1345,25 @@ def Sub.keeps(ss: List<&2, Sub>, +client: U32, +keys: List<&2, String>) -> List<
 
 def Pv.warm.k(changed: Bool, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   match changed s:
-    case True{} Src{+k, +kd, +p, sz, mt, re, _, pl}:
+    case True{} Src{+k, +kd, +p, sz, mt, re, _, pl, g}:
       do IO<Src>:
         IO.spawn(Unit, Pv.read.at(True{}, k, kd, p, q, dir))
-        return Src{k, kd, p, sz, mt, re, True{}, pl}
+        return Src{k, kd, p, sz, mt, re, True{}, pl, g}
     case False{} _:
       IO.pure(Src, s)
 
 def Pv.warm.st(sm: U32 & String, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   (+s2, +m2) = sm
   match s:
-    case Src{k, kd, p, +sz, +mt, re, b, pl}:
-      Pv.warm.k(RF.Revision.changed(s2, m2, sz, mt), Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
+    case Src{k, kd, p, +sz, +mt, re, b, pl, g}:
+      Pv.warm.k(RF.Revision.changed(s2, m2, sz, mt), Src{k, kd, p, sz, mt, re, b, pl, g}, q, dir)
 
 def Pv.warm.at(go: Bool, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   match go s:
-    case True{} Src{k, kd, +p, sz, mt, re, b, pl}:
+    case True{} Src{k, kd, +p, sz, mt, re, b, pl, g}:
       do IO<Src>:
         st : U32 & String <- Pv.stamp.of(p)
-        Pv.warm.st(st, Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
+        Pv.warm.st(st, Src{k, kd, p, sz, mt, re, b, pl, g}, q, dir)
     case False{} _:
       IO.pure(Src, s)
 
@@ -1395,6 +1455,7 @@ def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, 
       do IO<PSt>:
         Bool.pick(IO(Unit), String.is_empty(err), IO.pure(Unit, Unit{}), Pv.fail(subs, key, err, out))
         +subs2 : List<&2, Sub> <- Pv.fan(Sub.clear(subs, key, Bool.not(String.is_empty(err))), key, pl, out)
+        Pv.revision.ready(pl, subs2, key, mt, out)
         Pv.note(Bool.and(String.is_empty(err), Bool.or(String.starts_with(key, "2|"), String.starts_with(key, "3|"))), subs2, key, dir, out)
         return PSt{Src.gc(Pv.got.srcs(ss, key, sz, mt, pl), subs2), subs2, polling}
 

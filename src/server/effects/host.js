@@ -240,6 +240,27 @@ function sock_send_bytes(socket, data, k) {
   return host_send(socket, Uint8Array.from(bytes), k);
 }
 
+function sock_send_file(socket, path, cap, k) {
+  const fs = require('fs'); let fd = -1, bytes;
+  try {
+    if (!Number.isSafeInteger(cap) || cap < 1 || cap > 64 * 1024 * 1024 || path.includes('\0')) throw { errno: 22 };
+    const before = fs.lstatSync(path);
+    if (!before.isFile() || before.isSymbolicLink()) throw { errno: 22 };
+    fd = fs.openSync(path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > cap || stat.dev !== before.dev || stat.ino !== before.ino) throw { errno: 27 };
+    bytes = fs.readFileSync(fd);
+    if (bytes.length !== stat.size) throw { errno: 5 };
+  } catch (e) {
+    if (fd >= 0) try { fs.closeSync(fd); } catch {}
+    return io_tup(socket, io_fail(Math.abs(e.errno || 5)));
+  }
+  fs.closeSync(fd);
+  // Bun-loop handles are not POSIX descriptors (Windows has only handles).
+  if (globalThis.BP_H?.is(socket)) return globalThis.BP_H.sendBytes(socket, bytes, k);
+  return host_send(socket, bytes, k);
+}
+
 // Sock.send_until: a deadline renewed after every send that made progress;
 // a full socket parks on the socket and the clock (never a spin), and a
 // stall for the whole span (or a failure) shuts the socket both ways
@@ -1538,6 +1559,7 @@ io_eff(CID(Clock.epoch), clock_epoch);
 io_eff(CID(Sock.recv_bytes), sock_recv_bytes);
 io_eff(CID(Sock.save), sock_save);
 io_eff(CID(Sock.send_bytes), sock_send_bytes);
+io_eff(CID(Sock.send_file), sock_send_file);
 io_eff(CID(Sock.send_until), sock_send_until);
 io_eff(CID(Sock.send_cbor), sock_send_cbor);
 io_eff(CID(Json.cbor_frame), json_cbor_frame);

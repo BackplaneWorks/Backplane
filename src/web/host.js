@@ -49,6 +49,8 @@ import { pairBrowser } from "./auth.js";
 // Consume the secret before the generic deeplink handler clears the fragment.
 const pairingReady = pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window) }).catch(() => false);
 import * as Solid from "./solid.js";
+import * as ViewerTools from "./viewer-tools.js";
+import { ViewerRpc } from "./viewer-rpc.js";
 import * as Plot2d from "./plot2d.js";
 import { installDesktopBrowser } from "./desktop-browser.js";
 import { restoreCache } from "./replay.js";
@@ -417,6 +419,10 @@ try {
   if (selected) ui = App.presentation_select(ui, selected);
 } catch {}
 let socket = null;
+const viewerRpc = new ViewerRpc(request => {
+  if (!socket || socket.readyState !== 1) throw Error("Connect to the hub to read saved component metadata.");
+  socket.send(fromList(App.wire_out(JSON.stringify(request))));
+});
 const thinContinuations = new ThinContinuations();
 const bodyWindows = new BodyWindows({renderBody: node => App.make(node), request: (part, cursor, tail) => thin?.body(part, cursor, tail), changed: () => later()});
 let frontend = null, frontendNode = null, wantFrontend = true, fallbackIntent = null;
@@ -778,6 +784,7 @@ function render() {
   }
   searchLight(tl2);
   Solid.mount(document.getElementById("solid"));
+  ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
   panes();
   earlierAsked = false;
@@ -2260,7 +2267,7 @@ function stopThin(keepView = false, reason = "replaced") {
   if (socket === s) socket = null;
   if (s) { s.connectionDiagnostic?.initiate(reason);s.onmessage = null;try { s.close(); } catch {} }
   if (previous) previous.disconnect();
-  remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();
+  remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();ViewerTools.reset();viewerRpc.reset();
   if (!keepView) frontendNode = null;
 }
 async function startThin(again = false, reason = "initial") {
@@ -2289,7 +2296,7 @@ async function startThin(again = false, reason = "initial") {
   const current = () => !ended && attempt === thinAttempt && viewMode === "view-v1";
   const fail = message => {
     if (!current()) return;
-    checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();
+    checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();ViewerTools.reset();viewerRpc.reset();
     showViewStatus(message);void restoreFocused(true);later();
   };
   const disconnect = event => {
@@ -2300,7 +2307,7 @@ async function startThin(again = false, reason = "initial") {
     refocusKeep();
     bubMoves.disconnect(location.origin);
     terminalOutput.clear();
-    checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();
+    checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();ViewerTools.reset();viewerRpc.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
     bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
     if (!frontendNode) void restoreFocused(true);
@@ -2438,6 +2445,8 @@ async function startThin(again = false, reason = "initial") {
     try {
       const j = Wire.cbor(bytes, KEYS, WORDS), envelope = Wire.plain(j);
       if (envelope.t === "hb") { s.hb = true;diagnostic.heartbeat();return; }
+      if (viewerRpc.receive(envelope)) return;
+      if (envelope.t === "plotrevision") { ViewerTools.sourceRevision(envelope.key, envelope.revision); return; }
       if (envelope.t === "reply" && sealedReply(envelope)) return;
       if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { diagnostic.greeting(envelope);clearTimeout(thinGreetingTimer);thin.greeting(envelope); }
