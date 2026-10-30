@@ -384,26 +384,55 @@ def SignalText.get(ms: List<&2, Memo>) -> Maybe<&2, SGT.SignalTextCache>:
     case SignalText{cache} <> _: Some{cache}
     case _ <> rest: SignalText.get(rest)
 
+def SideIndex.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
+  match ms:
+    case Nil{}: Nil{}
+    case SideIndex{_} <> rest: SideIndex.drop(rest)
+    case m <> rest: m <> SideIndex.drop(rest)
+
 def SideIndex.save(valid: Bool, a: Actor, cache: SIXV.IndexCache) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
       Actor{u, view, target, pending, reads, dirty, SideIndex{cache} <> List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), SignalText.keep(ms)))}
-    case False{} _: a
+    case False{} Actor{u, view, target, pending, reads, dirty, ms}:
+      Actor{u, view, target, pending, reads, dirty, SideIndex.drop(ms)}
 
 def Actor.kept(+ms: List<&2, Memo>) -> List<&2, Memo>:
   List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), SignalText.keep(ms))))
+
+# Only canonical derivations survive navigation on this connection. Their
+# next read still checks the server epoch/dependency revision (and online
+# visibility for text). No Ui, picture, body source, pending action or wire
+# authority is carried by these three independently bounded slots. A new
+# connection starts with no actor and cannot acquire this private memo.
+def Actor.canonical(+ms: List<&2, Memo>) -> List<&2, Memo>:
+  List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), SignalText.keep(ms)))
+
+def Signals.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
+  match ms:
+    case Nil{}: Nil{}
+    case Signals{_} <> rest: Signals.drop(rest)
+    case m <> rest: m <> Signals.drop(rest)
+
+def SignalText.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
+  match ms:
+    case Nil{}: Nil{}
+    case SignalText{_} <> rest: SignalText.drop(rest)
+    case m <> rest: m <> SignalText.drop(rest)
 
 def Signals.save(valid: Bool, a: Actor, cache: SGV.SignalCache) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
       Actor{u, view, target, pending, reads, dirty, Signals{cache} <> List.append(&2, Memo, Sidebar.keep(ms), SignalText.keep(ms))}
-    case False{} _: a
+    case False{} Actor{u, view, target, pending, reads, dirty, ms}:
+      Actor{u, view, target, pending, reads, dirty, Signals.drop(ms)}
 
 def SignalText.save(valid: Bool, a: Actor, cache: SGT.SignalTextCache) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
       Actor{u, view, target, pending, reads, dirty, SignalText{cache} <> List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), SideIndex.keep(ms)))}
-    case False{} _: a
+    case False{} Actor{u, view, target, pending, reads, dirty, ms}:
+      Actor{u, view, target, pending, reads, dirty, SignalText.drop(ms)}
 
 def Sidebar.get(ms: List<&2, Memo>, +key: String) -> J.Json:
   match ms:
@@ -518,7 +547,7 @@ def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json
       +same = Bool.and(String.eq(oldView, view), W.Target.same(target, J.Json.get_obj(p, "target")))
       Actor{Actor.composer(old, V.Session.renderer(web, Actor.resolve(U.Ui.info_merge(Actor.seed.view(String.is_empty(U.Ui.info(old, "view.kind:" ++ thread)),
         Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), fresh, thread), info), thread), p)),
-        view, J.Json.get_obj(p, "target"), Actor.owed(same, Bool.not(W.Target.same(target, J.Json.get_obj(p, "target"))), pending, J.Json.get_obj(p, "target")), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Bool.pick(List<&2, Memo>, same, Actor.kept(memo), Nil{})}
+        view, J.Json.get_obj(p, "target"), Actor.owed(same, Bool.not(W.Target.same(target, J.Json.get_obj(p, "target"))), pending, J.Json.get_obj(p, "target")), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Bool.pick(List<&2, Memo>, same, Actor.kept(memo), Actor.canonical(memo))}
 
 # The hub's canonical projection is shared; each actor keeps its own pages,
 # drafts, request slots and exact scope. Compare only the selected body's
@@ -876,7 +905,7 @@ def Actor.receive( +web: Bool, +u: U.Ui, +key: String, +now: Nat, +o: J.Json) ->
 
 def Actor.mark_dirty( +a: Actor) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, _, ms}: Actor{u, view, target, pending, reads, True{}, Bodies.keep(ms)}
+    case Actor{u, view, target, pending, reads, _, +ms}: Actor{u, view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(ms), Actor.canonical(ms))}
 
 def Actor.now( +u: U.Ui) -> Nat:
   match u:
@@ -933,14 +962,15 @@ def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
         Actor{u, view, target, Map.del(&2, String, pending, id), reads, dirty, memo}, web, key, o)
 
 # A sent receipt is not a render cache: keep only its bounded value so a
-# future ordinary read can compare its freshly rendered sidebar. Render and
-# derived memos still clear here; actions and scope boundaries still discard it.
+# future ordinary read can compare its freshly rendered sidebar. The three
+# canonical slots stay too (each read re-checks epoch, revision and online
+# visibility). Render and other derived memos still clear here; actions and scope boundaries still discard it.
 # Targeted job info belongs to this connection's server-owned Ui. It does
 # not settle a request, enqueue commands or become client-supplied state.
 def Actor.info(a: Actor, o: J.Json) -> Actor:
   match a:
     case Actor{u, view, target, pending, reads, _, +memo}:
-      Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), SidebarSent.keep(memo))}
+      Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), List.append(&2, Memo, SidebarSent.keep(memo), Actor.canonical(memo)))}
 
 # A thin socket receives rendered views, not raw info notifications or a
 # schematic's sheets. The server folds those privately and sends its

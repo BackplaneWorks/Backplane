@@ -19,8 +19,8 @@ test('whole JSON traversal keeps constructors, raw numeric text, duplicate field
 });
 test('actual server transform lands twice; web pure; missing/duplicate/body/callee/source drift fails before writes',()=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'bp-json-bytes-'));try{
-  const scripts=path.join(temp,'scripts');fs.mkdirSync(scripts,{recursive:true});for(const file of ['js-native.py','js-content-eq.js','js-json-show.js','js-cbor-text.js','js-json-bytes.js'])fs.copyFileSync(path.join(root,'scripts',file),path.join(scripts,file));
-  for(const file of ['src/server/thin-content-eq.bend','src/core/json.bend']){const to=path.join(temp,file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(path.join(root,file),to)}
+  const scripts=path.join(temp,'scripts');fs.mkdirSync(scripts,{recursive:true});for(const file of ['js-native.py','js-content-eq.js','js-json-show.js','js-cbor-text.js','js-json-bytes.js','js-map.js'])fs.copyFileSync(path.join(root,'scripts',file),path.join(scripts,file));
+  for(const file of ['src/server/thin-content-eq.bend','src/core/json.bend','src/core/secret.bend']){const to=path.join(temp,file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(path.join(root,file),to)}
   const raw=path.join(temp,'input.js'),min=path.join(temp,'min.js');fs.writeFileSync(raw,source);cp.execFileSync(process.env.BUN_BINARY||'bun',['build','--minify-whitespace','--minify-syntax','--keep-names','--target=bun',raw,'--outfile',min],{stdio:'pipe',timeout:20000});const original=fs.readFileSync(min,'utf8');
   const run=(s,server=true)=>{fs.writeFileSync(min,s);return cp.spawnSync('python3',[path.join(scripts,'js-native.py'),...(server?['--server']:[]),min],{encoding:'utf8',timeout:10000})};let result=run(original);assert.equal(result.status,0,result.stderr);const got=fs.readFileSync(min,'utf8');assert.equal(got.split('return __bpJsonBytesEsc(').length-1,1);assert.equal(got.split('return __bpJsonBytesStr(').length-1,1);
   result=cp.spawnSync(process.execPath,['--input-type=module','--check'],{input:got,encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr.slice(0,200));
