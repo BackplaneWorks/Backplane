@@ -5598,6 +5598,19 @@ def Deploy.check.w(waiting: Bool, +clear: Bool, +free: Bool, +open: String, +s: 
 def Deploy.check(+s: M.State, +now: Nat, free: Bool, +open: List<&2, String>) -> Step:
   Deploy.check.w(DP.Deploy.waiting(s), Nat.is_eq(DP.Open.count(open), 0n), free, DP.Open.threads(open), s, now)
 
+
+# The public server handoff additionally requires every live turn to be idle.
+# A gap between tool calls is not an idle turn. Keep the lower-level call/
+# build-lock contract above (and its laws) intact, and strengthen the actual
+# handoff with canonical running-turn state read in the same hub step.
+def Deploy.check.idle.gate(idle: Bool, +s: M.State, +now: Nat, +free: Bool, +open: List<&2, String>) -> Step:
+  match idle:
+    case True{}: Deploy.check(s, now, free, open)
+    case False{}: Deploy.check.w(DP.Deploy.waiting(s), False{}, free, DP.Open.threads(open), s, now)
+
+def Deploy.check.idle(+s: M.State, now: Nat, free: Bool, open: List<&2, String>) -> Step:
+  Deploy.check.idle.gate(String.is_empty(DP.Deploy.running(s)), s, now, free, open)
+
 def Deploy.slow.k(due: Bool, +line: String, +s: M.State, +now: Nat) -> Step:
   match due:
     case True{}:

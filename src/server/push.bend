@@ -9,6 +9,7 @@ import ../core/desk.bend as DK
 import ../core/wnote.bend as WN
 import ./host.bend as H
 import ./proc.bend as P
+import ./push-gate.bend as PG
 
 # Phone notifications (APNs alerts and Live Activity updates). The hub
 # calls Push.turn_ended once for every turn that ends, off its own thread
@@ -378,9 +379,11 @@ def Curl.config(+url: String, hs: List<&2, String>, +body: String, +out: String)
 def Curl.code(+out: String) -> String:
   String.drop(String.trim(out), Nat.sub(String.length(String.trim(out)), 3n))
 
-# APNs says the token is gone: 410, or 400 BadDeviceToken
+# APNs permanently refuses this token/topic registration. Drop only that
+# registration through the normal event-sourced device.drop path. Never
+# reinterpret a payload/auth/temporary error as a dead device.
 def Push.dead(+code: String, +reason: String) -> Bool:
-  Bool.or(String.eq(code, "410"), Bool.and(String.eq(code, "400"), Bool.or(String.eq(reason, "BadDeviceToken"), String.eq(reason, "Unregistered"))))
+  Bool.or(String.eq(code, "410"), Bool.and(String.eq(code, "400"), Bool.or(Bool.or(String.eq(reason, "BadDeviceToken"), String.eq(reason, "Unregistered")), Bool.or(String.eq(reason, "DeviceTokenNotForTopic"), String.eq(reason, "TopicDisallowed")))))
 
 def Push.reason(bs: List<&2, U32>) -> String:
   J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(U.Utf8.decode(bs)), J.Null{}), "reason", "")
@@ -390,23 +393,60 @@ def Push.ran(r: P.Ran) -> String:
     case P.Ran{_, out}:
       out
 
-# one request to APNs; True when the token is dead
-def Push.post(+dir: String, +name: String, +url: String, hs: List<&2, String>, +payload: String, +what: String) -> IO(Bool):
+# Every actual send has at most two bounded transient curl retries. Curl's
+# default retry classification excludes permanent 400/403 responses; its
+# default delay grows exponentially. No --retry-all-errors or retry timer.
+def Curl.retry() -> List<&2, String>:
+  ["-sS", "--max-time", "10", "--retry", "2", "--retry-max-time", "20"]
+
+# one permitted request to APNs; True when this registration is dead
+def Push.post.sent(+lease: String, +dir: String, +name: String, +url: String, hs: List<&2, String>, +payload: String, +what: String) -> IO(Bool):
   do IO<Bool>:
-    +body : String = dir ++ "/" ++ name ++ ".json"
-    +out : String = dir ++ "/" ++ name ++ ".out"
-    +cfg : String = dir ++ "/" ++ name ++ ".curl"
+    +body : String = dir ++ "/" ++ name ++ "-" ++ lease ++ ".json"
+    +out : String = dir ++ "/" ++ name ++ "-" ++ lease ++ ".out"
+    +cfg : String = dir ++ "/" ++ name ++ "-" ++ lease ++ ".curl"
     Push.write(body, payload)
     Push.write(cfg, Curl.config(url, hs, body, out))
-    r : P.Ran <- P.Proc.run("curl", ["--http2", "-sS", "--max-time", "15", "-K", cfg], dir)
+    r : P.Ran <- P.Proc.run("curl", List.append(&2, String, "--http2" <> Curl.retry(), ["-K", cfg]), dir)
     +code : String = Curl.code(Push.ran(r))
     resp : List<&2, U32> <- Push.read(out)
     Push.rm(cfg)
     Push.rm(body)
     Push.rm(out)
     +reason : String = Push.reason(resp)
+    finished : U32 <- H.Clock.epoch()
+    PG.PushGate.finish(lease, code, reason, U32.to_nat(finished))
     IO.print_err("backplane: push " ++ what ++ " -> " ++ code ++ Bool.pick(String, String.is_empty(reason), "", " " ++ reason))
     return Push.dead(code, reason)
+
+
+def Push.post.report(report: Bool, lease: String, what: String) -> IO(Unit):
+  match report:
+    case True{}: IO.print_err("backplane: push " ++ what ++ " not delivered (" ++ String.drop(lease, 1n) ++ "); source notice retained")
+    case False{}: IO.pure(Unit, Unit{})
+
+# A held phone delivery never answers or removes its underlying source ask.
+# Routine activity coalescing stays quiet; an alert's delivery hold is explicit.
+def Push.post.hold(+lease: String, what: String) -> IO(Bool):
+  do IO<Bool>:
+    Push.post.report(String.starts_with(lease, "-"), lease, what)
+    return False{}
+
+def Push.post.claimed(go: Bool, +lease: String, dir: String, name: String, url: String, hs: List<&2, String>, payload: String, what: String) -> IO(Bool):
+  match go:
+    case True{}: Push.post.sent(lease, dir, name, url, hs, payload, what)
+    case False{}: Push.post.hold(lease, what)
+
+def Push.topic(hs: List<&2, String>) -> String:
+  match hs:
+    case Nil{}: ""
+    case +h <> rest: Bool.pick(String, String.starts_with(h, "apns-topic: "), String.drop(h, 12n), Push.topic(rest))
+
+def Push.post(+dir: String, +name: String, +url: String, +hs: List<&2, String>, payload: String, +what: String, registration: String) -> IO(Bool):
+  do IO<Bool>:
+    now : U32 <- H.Clock.epoch()
+    +lease : String <- PG.PushGate.claim(url, Push.topic(hs), what, registration, U32.to_nat(now))
+    Push.post.claimed(Bool.and(Bool.not(String.is_empty(lease)), Bool.not(String.starts_with(lease, "-"))), lease, dir, name, url, hs, payload, what)
 
 def Push.url(+base: String, +env: String, +token: String) -> String:
   Bool.pick(String, String.is_empty(base),
@@ -416,35 +456,35 @@ def Push.url(+base: String, +env: String, +token: String) -> String:
 def Push.kind(+platform: String, +kind: String) -> Nat:
   Bool.pick(Nat, String.eq(platform, "ios"), Bool.pick(Nat, String.eq(kind, "alert"), 1n, Bool.pick(Nat, String.eq(kind, "activity"), 2n, 0n)), 0n)
 
-def Push.one.alert(quiet: Bool, j: Job, +name: String, +token: String, +env: String, +bundle: String) -> IO(Bool):
+def Push.one.alert(quiet: Bool, j: Job, +name: String, +token: String, +env: String, +bundle: String, registration: String) -> IO(Bool):
   match quiet j:
     case True{} _:
       IO.pure(Bool, False{})
     case False{} Job{+dir, +base, +jwt, _, _, +alert, _, _, +key}:
       Push.post(dir, name, Push.url(base, env, token),
         ["authorization: bearer " ++ jwt, "apns-topic: " ++ bundle, "apns-push-type: alert", "apns-priority: 10", "apns-collapse-id: " ++ key],
-        alert, "alert")
+        alert, "alert", registration)
 
 def Job.key(j: Job) -> String:
   match j:
     case Job{_, _, _, _, _, _, _, _, k}:
       k
 
-def Push.one.k(i: Nat, +j: Job, +name: String, +token: String, +dthread: String, +env: String, +bundle: String) -> IO(Bool):
+def Push.one.k(i: Nat, +j: Job, +name: String, +token: String, +dthread: String, +env: String, +bundle: String, registration: String) -> IO(Bool):
   match i j:
     case 1n _:
-      Push.one.alert(String.is_empty(Job.key(j)), j, name, token, env, bundle)
+      Push.one.alert(String.is_empty(Job.key(j)), j, name, token, env, bundle, registration)
     case 2n Job{+dir, +base, +jwt, +now, +thread, _, +island, +idle, _}:
       Push.post(dir, name, Push.url(base, env, token),
         ["authorization: bearer " ++ jwt, "apns-topic: " ++ bundle ++ ".push-type.liveactivity", "apns-push-type: liveactivity", "apns-priority: 10"],
-        Island.payload(Bool.or(idle, String.eq(dthread, thread)), now, island), "activity")
+        Island.payload(Bool.or(idle, String.eq(dthread, thread)), now, island), "activity", registration)
     case _ _:
       IO.pure(Bool, False{})
 
 def Push.one(d: M.Device, +j: Job, +name: String) -> IO(Bool):
   match d:
-    case M.Device{+token, +platform, +kind, +dthread, +env, +bundle, _}:
-      Push.one.k(Push.kind(platform, kind), j, name, token, dthread, env, bundle)
+    case M.Device{+token, +platform, +kind, +dthread, +env, +bundle, at}:
+      Push.one.k(Push.kind(platform, kind), j, name, token, dthread, env, bundle, Nat.show(at))
 
 def Push.keep(dead: Bool, +token: String, rest: List<&2, String>) -> List<&2, String>:
   match dead:
@@ -660,7 +700,7 @@ def Push.hook.post.in(+d: String, +st: M.State, +thread: String, +kind: String, 
     +cfg : String = d ++ "/curl"
     Push.write(file, body)
     Push.write(cfg, Curl.config(url, WN.Wn.headers(secret, now, body), file, out))
-    r : P.Ran <- P.Proc.run("curl", ["-sS", "--proto", "=http,https", "--max-redirs", "0", "--max-time", "15", "-X", "POST", "-K", cfg], d)
+    r : P.Ran <- P.Proc.run("curl", List.append(&2, String, Curl.retry(), ["--proto", "=http,https", "--max-redirs", "0", "-X", "POST", "-K", cfg]), d)
     +code : String = Curl.code(Push.ran(r))
     Push.rm(cfg)
     Push.rm(file)

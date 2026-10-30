@@ -13745,3 +13745,9 @@ def Laws.todo_complete_auto_clears():
 
 def Laws.todo_next_turn_hides_old():
   {==}
+
+def Laws.deploy_idle_waits_between_calls():
+  {==}
+
+def Laws.deploy_idle_goes_after_turn_end():
+  {==}

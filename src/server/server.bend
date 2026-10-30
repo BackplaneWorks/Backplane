@@ -1,4 +1,5 @@
 import Base
+import ./restart-hold.bend as RHOLD
 import ../core/watchdog.bend as WD
 import ../core/restartretry.bend as RR
 import ./livenessio.bend as LFX
@@ -13318,7 +13319,7 @@ def Hub.reexec.k(r: Result<&1, &1, U32 & String, Unit>, h: Hub, +home: String) -
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # hand the agents off, then exec (an exec that fails takes the handoff back)
-def Hub.reexec(h: Hub, +path: String, args: List<&2, String>) -> IO(Hub):
+def Hub.reexec.clear(h: Hub, +path: String, args: List<&2, String>) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, +as, inbox, +cfg, note}:
       do IO<Hub>:
@@ -13327,6 +13328,57 @@ def Hub.reexec(h: Hub, +path: String, args: List<&2, String>) -> IO(Hub):
         Log.info("restarting in place; " ++ Nat.show(List.length(&2, String, Agents.threads(as))) ++ " agents handed off")
         r : Result<&1, &1, U32 & String, Unit> <- H.Sys.exec(path, args)
         Hub.reexec.k(r, Hub{st, f, ls, cl, as, inbox, cfg, note}, home)
+
+
+def Reexec.args(xs: List<&2, String>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: Nil{}
+    case x <> rest: J.Str{x} <> Reexec.args(rest)
+
+# The swap runs asynchronously. Recheck at the final exec boundary as well
+# as at DeployLocks: another turn may have started while files were staged.
+def Reexec.idle(+st: M.State, tools: List<&2, String>) -> Bool:
+  Bool.and(String.is_empty(DP.Deploy.running(st)), Nat.is_eq(DP.Open.count(tools), 0n))
+
+def Hub.reexec.held(h: Hub, path: String, args: List<&2, String>) -> IO(Hub):
+  do IO<Hub>:
+    held : Bool <- RHOLD.RestartHold.offer(J.Json.show(J.Json.obj([J.KV{"path", J.Str{path}}, J.KV{"args", J.Json.arr(Reexec.args(args))}])))
+    Log.info(Bool.pick(String, held, "restart deferred: a turn or tool is still active", "restart deferred: private handoff slot unavailable; no process interrupted"))
+    return h
+
+def Hub.reexec.gate(idle: Bool, h: Hub, path: String, args: List<&2, String>) -> IO(Hub):
+  match idle:
+    case True{}: Hub.reexec.clear(h, path, args)
+    case False{}: Hub.reexec.held(h, path, args)
+
+def Hub.reexec(h: Hub, path: String, args: List<&2, String>) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.reexec.gate(Reexec.idle(st, Tools.of(cfg)), Hub{st, f, ls, cl, as, inbox, cfg, note}, path, args)
+
+def Hub.reexec.post(empty: Bool, h: Hub, payload: String) -> IO(Hub):
+  match empty h:
+    case True{} _: IO.pure(Hub, h)
+    case False{} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        +request : J.Json = Maybe.default(&2, J.Json, J.Json.parse(payload), J.Null{})
+        Self.post(inbox, Reexec{J.Json.get_str(request, "path", ""), KH.KH.strings(J.Json.elems(J.Json.get_obj(request, "args")))})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Hub.reexec.poll.k(idle: Bool, h: Hub) -> IO(Hub):
+  match idle:
+    case False{}: IO.pure(Hub, h)
+    case True{}:
+      do IO<Hub>:
+        +payload : String <- RHOLD.RestartHold.take()
+        Hub.reexec.post(String.is_empty(payload), h, payload)
+
+# Existing turn-completion Release and minute Tick messages drive this;
+# there is no timer, polling job or queued canonical snapshot in the latch.
+def Hub.reexec.poll(h: Hub) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.reexec.poll.k(Reexec.idle(st, Tools.of(cfg)), Hub{st, f, ls, cl, as, inbox, cfg, note})
 
 def Adopt.idents(es: List<&2, AD.AEntry>) -> IO(List<&2, String>):
   match es:
@@ -16844,7 +16896,7 @@ def Hub.update_ready(h: Hub, force: Bool, +now: Nat) -> IO(Hub):
 
 def Hub.deploy_locks.k(p: M.State & Hub, free: Bool, open: List<&2, String>, +now: Nat) -> IO(Hub):
   (st, h) = p
-  Hub.step(h, B.Deploy.check(st, now, free, open))
+  Hub.step(h, B.Deploy.check.idle(st, now, free, open))
 
 def Hub.deploy_locks.t(p: List<&2, String> & Hub, free: Bool, +now: Nat) -> IO(Hub):
   (tl, h) = p
@@ -17673,7 +17725,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case TelemetryDone{gen, view, id}:
       Hub.telemetry.done(h, gen, view, id, now)
     case Tick{}:
-      Hub.tick(h, now)
+      IO.bind(Hub, Hub, Hub.tick(h, now), Hub.reexec.poll)
     case ThinFlush{}:
       IO.bind(Nat, Hub, IO.now(), ms => Hub.thin.flush(h, ms))
     case Heart{}:
@@ -17793,7 +17845,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case FarQueueIdle{}:
       Fq.idle(Far.fh(h))
     case Release{}:
-      Hub.release(Hub.state(h), now)
+      IO.bind(Hub, Hub, Hub.release(Hub.state(h), now), Hub.reexec.poll)
     case SpawnFailed{thread, gen, line}:
       Hub.spawn_failed(h, thread, gen, line, now)
     case AgentExited{thread, gen, code}:

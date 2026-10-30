@@ -1,10 +1,10 @@
 # Safe deploy and restart
 
-A restart is cheap: with `restart.continue` on (the default) the hub resumes
-every turn it cut. What a restart must not cut is a **tool call in flight** (a
-build, an edit) and a **build under way** (the machine-wide `/tmp/bp-bend.lock`
-and `/tmp/bp-wt-build.lock` that builds hold). A deploy waits
-for both, then swaps the new package in and restarts in place.
+A restart must not interrupt a running turn. Batch delivery once per qualified
+milestone, then wait for all live turns, tool calls and build locks to clear.
+The actual server handoff adds this stronger idle-turn guard to the existing
+tool/build-lock contract. Agent adoption remains a recovery mechanism, not
+permission to cut a turn.
 
 ## Asking
 
@@ -35,21 +35,25 @@ The request is the private setting `deploy.wait`, one JSON line (`by`, `note`,
    `item.completed`, ACP's `tool.done`); a turn's end, an archive, a delete or a
    stopped agent shuts every call of the thread (`ToolsGone`). None of it is in
    the log, and after a restart the list is empty (the old processes are
-   gone). A thread between two calls has none open, so a deploy goes then,
-   however long its turn. The requester's own `deploy_*` call is never opened;
+   gone). A thread between two calls may have none open but is still running, so
+   its turn continues to hold the actual server handoff. The requester's own `deploy_*` call is never opened;
    a subagent's Agent/Task call stays open until its result. The wait line
    records what was open at the last look (`open`) for the plane row,
    `deploy_status` and the 30-minute note.
 2. With none, the server asks the locks (`flock -n` on each path of
    `BACKPLANE_DEPLOY_LOCKS`, colon-separated, default the two build locks;
-   without flock(1) they count as free) and answers `Deploy.check`.
+   without flock(1) they count as free) and answers `Deploy.check.idle`, using the authoritative current turn state.
 3. Clear: `deploy.done` is written (the same line plus the threads cut) and
    `deploy.wait` cleared in one step, then the server moves the staged package
    into the running install's folder as `scripts/dev.sh`'s `install_into` does
    (renames; the old `web/` is kept as `web.old`) and restarts the hub in
    place (the updater's `Upgrade.restart`, same PID). A failed swap clears
    `deploy.done` and tells the requester; nothing restarts.
-4. After 30 minutes the requester is told once what still blocks.
+4. A turn or call that starts during the asynchronous swap is checked again
+   at the final `Reexec` boundary. One bounded private request is held until
+   normal turn-completion or tick processing observes all idle. No agent is
+   stopped, resumed or signalled by this hold.
+5. After 30 minutes the requester is told once what still blocks.
 
 The Status plane shows a "Restart pending" row in Running while one waits
 ("waiting for 2 tool calls and the build lock · Cancel"; a click cancels:
