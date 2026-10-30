@@ -22,6 +22,10 @@
 #                 its top-level KiCad files are copied, nothing else
 # BP_E2E_ROOT     scratch root (default ${TMPDIR:-/tmp}/bp-e2e)
 # BP_E2E_STREAM   stand-in reply: "N [MS]", deltas per turn (60) and ms apart (50)
+# BP_E2E_TAILNET  1: a stand-in tailnet instead of none (a fake `tailscale` on
+#                 the hub's PATH says its address is 127.0.0.2, no peers), so
+#                 the hub listens there too and has a pairing link; the real
+#                 tailnet and the person's own hubs on it are never touched
 # BACKPLANE_KISTACK_SOURCE  a KiStack (.tar.gz like GitHub's, or a folder) the
 #                 hub syncs into HOME_DIR/kistack at start; unset, it syncs
 #                 none (stand-in agents; BACKPLANE_KISTACK_SYNC=1: GitHub's newest)
@@ -74,7 +78,23 @@ start() {
     fresh=1
   else fresh=0; fi
   port=$(cat "$root/port")
-  set -- "$bin" --home "$root/home" --port "$port" --no-tailscale --foreground
+  # (BP_E2E_TAILNET) the stand-in tailnet, one machine at 127.0.0.2, first
+  # on PATH (written at every start, so the real tailscale is never run)
+  tn=--no-tailscale; tpath=$PATH
+  if [ "${BP_E2E_TAILNET:-}" = 1 ]; then
+    tn=--tailscale; mkdir -p "$root/tailnet"; tpath=$root/tailnet:$PATH
+    cat > "$root/tailnet/tailscale" <<'TS'
+#!/bin/sh
+case "$1" in
+  ip) echo 127.0.0.2;;
+  status) echo '{"Self":{"DNSName":"e2e.tailnet.invalid.","UserID":1,"TailscaleIPs":["127.0.0.2"]},"Peer":{}}';;
+  whois) echo '{}';;
+  *) exit 0;;
+esac
+TS
+    chmod +x "$root/tailnet/tailscale"
+  fi
+  set -- "$bin" --home "$root/home" --port "$port" "$tn" --foreground
   [ -d "$web" ] && set -- "$@" --web "$web"
   n=${BP_E2E_STREAM:-60}; ms=50
   case $n in *" "*) ms=${n#* }; n=${n%% *};; esac
@@ -84,7 +104,7 @@ start() {
   # its caches and config inside its own folder too, never the person's
   # (~/.cache/backplane-bend holds 3D model caches)
   env HOME="$root/userhome" XDG_CACHE_HOME="$root/userhome/.cache" XDG_CONFIG_HOME="$root/userhome/.config" \
-    XDG_DATA_HOME="$root/userhome/.local/share" XDG_STATE_HOME="$root/userhome/.local/state" PATH="$root/fake:$PATH" DISPLAY= WAYLAND_DISPLAY= BACKPLANE_NO_UPDATE=1 BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 BACKPLANE_PEERS= \
+    XDG_DATA_HOME="$root/userhome/.local/share" XDG_STATE_HOME="$root/userhome/.local/state" PATH="$root/fake:$tpath" DISPLAY= WAYLAND_DISPLAY= BACKPLANE_NO_UPDATE=1 BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 BACKPLANE_PEERS= \
     BACKPLANE_AGENTS="$root/fake" BACKPLANE_VAULT_KEYRING=file BP_STANDIN_USAGE=1 BP_STANDIN_MODE=stream BP_STREAM_N="$n" \
     BP_STREAM_MS="$ms" BP_STREAM_SEP="
 " "$@" > "$root/hub.log" 2>&1 &

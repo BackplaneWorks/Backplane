@@ -11924,6 +11924,18 @@ law pair_msg_other_link:
 # no link, no QR code
 law pair_msg_no_link_qr:
   {MPCREDIT.Info.qr("") == "" : String}
+
+# --- the pairing link in a hub-drawn view (Hub.thin.pair) ---
+# a client that came with the token takes the link and its QR code with
+# the info its view is made from, the rest of the info kept (the link is
+# found before any window joins, so Wire.pair, which reaches only an open
+# view, never told it, and Settings said there was none)
+law thin_pair_told:
+  {J.Json.show(MPCREDIT.Hub.thin.pair.k(False{}, "{\"t\":\"info\",\"info\":{\"pair\":\"http://h:1/#token=t\",\"pair.qr\":\"10\"}}", J.Json.obj([J.KV{"a", J.Str{"1"}}]))) == "{\"pair.qr\":\"10\",\"pair\":\"http://h:1/#token=t\",\"a\":\"1\"}" : String}
+
+# one let in the legacy way (no token) never does
+law thin_pair_legacy:
+  {J.Json.show(MPCREDIT.Hub.thin.pair.k(True{}, "{\"t\":\"info\",\"info\":{\"pair\":\"http://h:1/#token=t\",\"pair.qr\":\"10\"}}", J.Json.obj([J.KV{"a", J.Str{"1"}}]))) == "{\"a\":\"1\"}" : String}
 # ---- F1: the far feed made a slice at a time (far.bend Fr.feed.some) ----
 # folding every slice of 2 lines is the feed made from the whole log at once
 law far_feed_sliced:
