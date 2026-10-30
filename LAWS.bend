@@ -13168,3 +13168,11 @@ law todo_complete_auto_clears:
 
 law todo_next_turn_hides_old:
   {M.Todos.visible(M.State.apply(M.State.apply(M.State.empty(), M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 1n}), M.TurnChanged{"t", M.Running{}, 2n}), "t") == False{} : Bool}
+
+# Explicit standing request 2026-10-30: actual hub handoff never cuts a
+# running turn. The existing lower-level tool/lock laws remain unchanged.
+law deploy_idle_waits_between_calls:
+  {H.Deploy.demo.go(H.Deploy.check.idle(H.Deploy.demo(True{}, H.Deploy.demo.line("t0")), 9n, True{}, Nil{})) == 0n : Nat}
+
+law deploy_idle_goes_after_turn_end:
+  {H.Deploy.demo.go(H.Deploy.check.idle(M.State.replay([M.TurnChanged{"t1", M.Idle{}, 8n}], H.Deploy.demo(True{}, H.Deploy.demo.line("t0"))), 9n, True{}, Nil{})) == 1n : Nat}
