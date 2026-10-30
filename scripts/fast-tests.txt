@@ -26,3 +26,4 @@ test/timeline_history_test.bend
 test/fold_test.bend
 # Stalled turns, non-killing deadlines, restart/provider retry and lock leases.
 test/liveness_suite_test.bend
+test/kserve_helper_test.bend

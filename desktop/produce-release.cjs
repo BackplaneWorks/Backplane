@@ -135,6 +135,10 @@ function generatedWeb(root,manifest,release){
  for(const [name,v]of Object.entries(manifest.members)){relative(name);if(/\.(?:html|js|css)$/.test(name))check(manifest.members[name+'.gz'],'Missing gzip sibling');check(actual[name].sha256===v.sha256&&actual[name].bytes===v.bytes,'Web hash/size mismatch');if(name.endsWith('.gz')){const plain=inside(root,name.slice(0,-3));check(fs.existsSync(plain)&&require('node:zlib').gunzipSync(fs.readFileSync(inside(root,name))).equals(fs.readFileSync(plain)),'Invalid gzip sibling');}}
 }
 function serviceFile(target){return target==='windows-x64'?'backplane-serve.exe':'backplane-serve';}
+// The helpers the hub runs beside it (scripts/service-release.py's helper_names; Windows' from its runtime bundle).
+// 0.13.0's macOS and Linux apps shipped none and KiCad IPC never started (#510).
+function helperFiles(target){return target==='windows-x64'?['backplane-kipc.exe','backplane-step2glb.exe']:['backplane-kipc','backplane-step2glb','backplane-voice','backplane-browser'];}
+function helpers(root,target){for(const n of helperFiles(target)){const p=path.join(root,n);check(fs.existsSync(p)&&fs.lstatSync(p).isFile()&&fs.statSync(p).size>0,'Missing helper beside the service: '+n);check(target==='windows-x64'||(fs.statSync(p).mode&0o111)===0o111,'Helper is not executable: '+n);architecture(p,target);}}
 function residentPolicy(policy){
  return policy?.mode==='resident-service'&&policy.managedStop===false&&policy.managedUpdate===false;
 }
@@ -156,7 +160,7 @@ function validateRequest(request,temp){
  const build=readReference(service.receipt.buildReceipt);check(/^VERIFIED_GENUINE/.test(build.status)&&build.target===target&&build.entry==='src/server/main.bend'&&build.version===VERSION&&build.source_tree===release.tree&&build.source_commit===release.commit&&build.binary_sha256===digest(path.join(service.root,exe)),'Missing genuine target build provenance');
  check(target==='windows-x64'?build.serviceRuntime==='bun':build.serviceRuntime===undefined||build.serviceRuntime==='bun','Windows requires the JS (Bun) service runtime');check(build.service===undefined||build.service===exe,'Service file name differs from its build');
  check(digest(path.join(service.root,'BUILD.json'))===service.receipt.buildReceipt.sha256,'Packaged BUILD must preserve the actual genuine build receipt');configuredService(build,freeze);
- membership(service.root,service.receipt.members,target);closure(service.root,service.receipt,target);notices(service.root,service.receipt);architecture(path.join(service.root,exe),target);
+ membership(service.root,service.receipt.members,target);closure(service.root,service.receipt,target);notices(service.root,service.receipt);architecture(path.join(service.root,exe),target);helpers(service.root,target);
  if(target==='windows-x64'){
   // The JS service has no Windows managed-control protocol: only the resident policy (no managed stop/update) ships.
   check(residentPolicy(freeze.lifecyclePolicy?.[target]),'Windows managed control unsupported for the JS service');
@@ -240,7 +244,7 @@ function archive(stageDir,acceptanceFile,output){
  const a=json(acceptanceFile),actual=content(stageDir,s.target),payloadHash=contentDigest(actual);check(a.schema===1&&['backplane-desktop-target-acceptance','backplane-desktop-browser-composite-acceptance'].includes(a.kind)&&a.target===s.target&&a.stageReceiptSha256===digest(stageFile)&&a.payloadManifestSha256===payloadHash,'Acceptance does not bind actual target/final payload');
  check(s.release.tag==='v'+VERSION&&s.release.channel==='release'&&GIT.test(s.release.commit)&&GIT.test(s.release.tree)&&s.payloadManifestSha256===contentDigest(s.members),'Invalid stage source/version binding');
  check(!fs.existsSync(path.join(stageDir,'DESKTOP.json'))&&!fs.existsSync(path.join(stageDir,'MANIFEST.json')),'Stage contains conflicting package receipts');
- check(s.entrypoint===TARGETS[s.target].executable,'Wrong target launch path');architecture(inside(stageDir,s.entrypoint),s.target);
+ check(s.entrypoint===TARGETS[s.target].executable,'Wrong target launch path');architecture(inside(stageDir,s.entrypoint),s.target);helpers(inside(stageDir,TARGETS[s.target].resources+'/backplane-service'),s.target);
  const sourceFiles=Object.values(s.components).filter(r=>r.path).map(r=>r.path.slice('PROVENANCE/'.length)).sort();check(fs.readdirSync(path.join(stageDir,'PROVENANCE')).sort().join('\n')===sourceFiles.join('\n'),'Unexpected provenance payload');
  const frozen=readReference({...s.components.freeze,path:inside(stageDir,s.components.freeze.path)});check(canonical(s.windowsShellSource??null)===canonical(frozen.windowsShellSource??null),'Windows shell provenance must match root freeze');shellIdentity(readReference({...s.components.shell,path:inside(stageDir,s.components.shell.path)}),s.release,s.target,frozen);check(canonical(s.lifecyclePolicy??null)===canonical(frozen.lifecyclePolicy?.[s.target]??null),'Lifecycle policy must match root freeze');check(s.signingPolicy===frozen.signingPolicy?.[s.target],'Signing policy must match root freeze');
  let composite=null,selectedBrowserRuntime=null;
@@ -284,4 +288,4 @@ function main(argv){
  else fail('Unknown operation; use describe');console.log(JSON.stringify(result));
 }
 if(require.main===module){try{main(process.argv.slice(2));}catch(e){console.error('Desktop producer: '+e.message);process.exitCode=1;}}
-module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,TARGETS,browserUtilities,linuxLauncher};
+module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,TARGETS,browserUtilities,linuxLauncher,helpers,helperFiles};
