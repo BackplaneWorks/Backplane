@@ -878,9 +878,9 @@ export function setComponents(key,data,onSelect) {
     componentSources.set(key,{data,onSelect,selected:previous?.data?.fingerprint===data.fingerprint&&previous?.data?.sourceRevision===data.sourceRevision&&previous?.data?.schematicRevision===data.schematicRevision?previous.selected:''});
     if(componentSources.size>8)componentSources.delete(componentSources.keys().next().value);
   }
-  if(view?.key===key)view.later();
+  for(const v of views.values())if(v.key===key)v.later();
 }
 export function selectComponent(id,key=componentKey) {
   const r=componentSources.get(key);
-  if(r){r.selected=r.data.components.some(c=>c.id===id)?id:'';if(view?.key===key)view.later();}
+  if(r){r.selected=r.data.components.some(c=>c.id===id)?id:'';for(const v of views.values())if(v.key===key)v.later();}
 }
