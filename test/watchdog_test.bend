@@ -73,9 +73,25 @@ def main() -> IO(Unit):
     +busyLauncher : M.State = M.State.replay([M.TurnChanged{"launcher", M.Running{}, 10n}, M.TurnQueued{"launcher", "old-parent", "parent context", 11n}], nudged())
     C.Check.str("launcher notice cannot interrupt a legacy queued turn", Nat.show(stop_count(W.Watchdog.tick(busyLauncher, 1270n))), "0")
     +quota : M.State = M.State.apply(base(), M.SettingSet{"provider.resume.idle", "{\"reset\":0}", 10n})
-    C.Check.str("unknown provider reset cannot wait unnoticed", shown(W.Watchdog.active(quota, B.Hub.thread(quota, "idle"))), "true")
+    C.Check.str("a provider hold with no reset waits, not stalled", shown(W.Watchdog.active(quota, B.Hub.thread(quota, "idle"))), "false")
     +reset : M.State = M.State.apply(base(), M.SettingSet{"provider.resume.idle", "{\"reset\":5000}", 10n})
     C.Check.str("known provider reset may wait for scheduled recovery", shown(W.Watchdog.active(reset, B.Hub.thread(reset, "idle"))), "false")
+    # a turn that ended on the session limit with its busy work still out
+    # waits for the reset: no nudge, no stall
+    +heldBusy : M.State = M.State.replay([M.WorkSet{"worker", "bg", "b1\tsleep\tc1\tsleep\tshell", 11n}, M.TurnChanged{"worker", M.Interrupted{}, 12n},
+      M.SettingSet{"provider.resume.worker", "{\"target\":\"claude/x\",\"reset\":0,\"reason\":\"You've hit your session limit\"}", 12n}], base())
+    C.Check.str("held on the limit with busy work: not watched", shown(W.Watchdog.active(heldBusy, B.Hub.thread(heldBusy, "worker"))), "false")
+    C.Check.str("held on the limit: no nudge", Nat.show(L.Liveness.nudged(W.Watchdog.live(tick(heldBusy, 1210n), "worker"))), "0")
+    C.Check.str("held on the limit: never stalled", shown(L.Liveness.stalled(W.Watchdog.live(tick(tick(heldBusy, 1210n), 1270n), "worker"))), "false")
+    C.Check.str("held on the limit: no notice", Nat.show(notice_count(W.Watchdog.tick(tick(heldBusy, 1210n), 1270n), "launcher")), "0")
+    # ephemeral mail runs and coordinator back offices are never watched
+    +runs : M.State = M.State.replay([M.ThreadCreated{"run1793393228-869127", "p", "run", M.Local{}, "", "", "claude", "", 10n}, M.TurnChanged{"run1793393228-869127", M.Running{}, 10n},
+      M.ThreadCreated{"mailcoord-b1-turn1", "p", "coord", M.Local{}, "", "", "claude", "", 10n}, M.TurnChanged{"mailcoord-b1-turn1", M.Running{}, 10n}], base())
+    C.Check.str("a mail run is not watched", shown(W.Watchdog.active(runs, B.Hub.thread(runs, "run1793393228-869127"))), "false")
+    C.Check.str("a coordinator back office is not watched", shown(W.Watchdog.active(runs, B.Hub.thread(runs, "mailcoord-b1-turn1"))), "false")
+    C.Check.str("a mail run is never nudged or stalled", L.Liveness.write(W.Watchdog.live(tick(tick(runs, 1210n), 1270n), "run1793393228-869127")), L.Liveness.write(W.Watchdog.live(runs, "run1793393228-869127")))
+    C.Check.str("an ordinary thread still is", shown(L.Liveness.stalled(W.Watchdog.live(tick(tick(runs, 1210n), 1270n), "worker"))), "true")
+    C.Check.str("ephemeral ids", String.join([shown(B.Ephemeral.is(runs, "run1")), shown(B.Ephemeral.is(runs, "mailcoord-x")), shown(B.Ephemeral.is(runs, "t1"))], ","), "true,true,false")
     C.Check.str("before gap is unchanged", Nat.show(L.Liveness.nudged(W.Watchdog.live(tick(base(), 1209n), "worker"))), "0")
     C.Check.str("at gap one nudge", Nat.show(notice_count(W.Watchdog.tick(base(), 1210n), "worker")), "1")
     C.Check.str("nudge has not stalled yet", shown(L.Liveness.stalled(W.Watchdog.live(nudged(), "worker"))), "false")
