@@ -75,7 +75,7 @@ def probe.watch(st: PV.PSt, client: U32, +stage: String) -> IO(PV.PSt):
   do IO<PV.PSt>:
     +q : Chan(PV.PMsg) <- Chan.new(PV.PMsg, 8)
     +out : Chan(PV.POut) <- Chan.new(PV.POut, 16)
-    +next : PV.PSt <- PV.Pv.watch.k(False{}, False{}, st, client, 0, probe.key(), "/unused", q, out)
+    +next : PV.PSt <- PV.Pv.watch.k(False{}, False{}, st, client, 0, probe.key(), "/unused", q, out, "")
     Chan.close(PV.PMsg, q)
     Chan.close(PV.POut, out)
     probe.drain(17n, out, stage)
@@ -99,9 +99,12 @@ def probe.checked(+stage: String, before: U32 & String, after: U32 & String, r: 
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    a : PV.PSt <- probe.handle(PV.PSt{[PV.Src{probe.key(), 0, "/unused", 0, "", 0n, False{}, None{}, ""}], Nil{}, True{}},
+    # A board source must be watched when its export completes. Keep a
+    # bootstrap subscriber until the first tested subscriber takes over.
+    a : PV.PSt <- probe.handle(PV.PSt{[PV.Src{probe.key(), 0, "/unused", 0, "", 0n, False{}, None{}, ""}], [PV.Sub{0, probe.key(), Nil{}, "", True{}, ""}], True{}},
       PV.PGot{probe.key(), 10, "revision-A", Some{probe.model(True{})}, ""}, "success-A")
-    watched : PV.PSt <- probe.watch(a, 7, "first-subscriber")
+    subscribed : PV.PSt <- probe.watch(a, 7, "first-subscriber")
+    watched : PV.PSt <- probe.handle(subscribed, PV.PStop{0}, "bootstrap-detached")
     failed : PV.PSt <- probe.handle(watched, PV.PGot{probe.key(), 10, "revision-B", None{}, "export failed"}, "failure-B")
     cached : PV.PSt <- probe.watch(failed, 8, "cached-after-failure")
     half : PV.PSt <- probe.handle(cached, PV.PGot{probe.key(), 10, "revision-C", None{}, ""}, "half-written-C")
