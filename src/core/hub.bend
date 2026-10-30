@@ -42,6 +42,7 @@ import ./fallback.bend as FB
 import ./secret.bend as SEC
 import ./stamp.bend as STP
 import ./wnote.bend as WN
+import ./when.bend as WH
 
 # The decider. Requests from clients and lines from agents come in; changes
 # (persisted, folded into the read model) and effects (run by the server)
@@ -9002,11 +9003,70 @@ def Fallback.pending(+s: M.State, +th: String) -> J.Json:
 def Fallback.continue(+s: M.State, +th: String) -> String:
   "[Backplane] The provider reached its usage limit. Continue the interrupted work from its current state. Read the handed-over tool results before acting. Do not repeat completed tool actions or restart finished work. If the request is already satisfied, report that.\n\nOriginal request (context, not a new task):\n" ++ M.Setting.get(s, "fallback.input." ++ th, "")
 
-def Fallback.limited(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
+# A reset given only in words: Claude's session limit says "You've hit your
+# session limit · resets 4:10pm (America/New_York)" with no resets_at. Its
+# moment is the next such time in that zone (the person's when the hub has no
+# rule for it), strictly after now. Words it cannot read keep reset 0: held
+# until cleared, never an invented time (laws reset_words_*).
+def Reset.from.go(t: String, found: Bool, +mark: String, +n: Nat) -> String:
+  match t found:
+    case _ True{}:
+      String.drop(t, n)
+    case SNil{} False{}:
+      ""
+    case SCon{_, +r} False{}:
+      Reset.from.go(r, String.starts_with(r, mark), mark, n)
+
+# the text after the first `mark` ("" when there is none)
+def Reset.from(+t: String, +mark: String, +n: Nat) -> String:
+  Reset.from.go(t, String.starts_with(t, mark), mark, n)
+
+def Reset.first(+t: String, +c: Char) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(t, c)), "")
+
+def Reset.rule(+s: M.State, +zone: String) -> TZ.TzRule:
+  Maybe.default(&2, TZ.TzRule, SC.Zone.rule(s, zone), SC.Sched.person(s, 0n, False{}))
+
+def Reset.words(+s: M.State, +now: Nat, +why: String) -> Nat:
+  +rest = Reset.from(why, "resets ", 7n)
+  Maybe.default(&2, Nat, WH.When.parse(Reset.first(rest, ' '), now, Reset.rule(s, Reset.first(Reset.from(rest, "(", 1n), ')'))), 0n)
+
+def Reset.fill.w(l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
+  match l:
+    case FB.Limit{sc, +why, _}:
+      FB.Limit{sc, why, Reset.words(s, now, why)}
+
+def Reset.fill.k(zero: Bool, l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
+  match zero:
+    case True{}:
+      Reset.fill.w(l, s, now)
+    case False{}:
+      l
+
+# a limit with its reset read from its words when it came without one
+def Reset.fill(+s: M.State, +now: Nat, +l: FB.Limit) -> FB.Limit:
+  Reset.fill.k(Nat.is_eq(FB.Limit.reset(l), 0n), l, s, now)
+
+# A limit seen in a turn is kept as fallback.pending.<thread> and acted on
+# when the turn ends. One recorded before its reset is read as of when it
+# was recorded ("resets 4:10pm" said at 3pm is that 4:10pm, not tomorrow's),
+# and once that reset has passed it is stale: a later turn's end no longer
+# marks the provider limited or holds the thread (laws pending_*). A reset
+# still unknown keeps holding, as before.
+def Pending.of(+s: M.State, +now: Nat, +o: J.Json) -> FB.Limit:
+  Reset.fill(s, J.Json.get_nat(o, "at", now), FB.Limit{J.Json.get_str(o, "scope", ""), J.Json.get_str(o, "reason", "usage limit reached"), J.Json.get_nat(o, "reset", 0n)})
+
+def Pending.due(+l: FB.Limit, +now: Nat) -> Bool:
+  Bool.or(Nat.is_eq(FB.Limit.reset(l), 0n), Nat.is_lt(now, FB.Limit.reset(l)))
+
+def Fallback.limited.k(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
   +cs = {List.append(&2, M.Change,
     Bool.pick(List<&2, M.Change>, FB.Limit.active(s, FB.Limit.scope(lim), now), Nil{}, [M.SettingSet{FB.Limit.key(FB.Limit.scope(lim)), FB.Limit.json(lim, now), now}]),
     [M.SettingSet{"fallback.pending." ++ th, "", now}, M.SettingSet{"fallback.continuing." ++ th, "yes", now}, M.TurnChanged{th, M.Interrupted{}, now}, M.QueueTaken{th, now}, M.TurnChanged{th, M.Running{}, now}]) : List<&2, M.Change>}
   Step{cs, AgentStop{th} <> Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), M.Queue.join(Fallback.continue(s, th), M.Queue.of(s, th)), Hub.uuid(now, th ++ "/fallback/" ++ Nat.show(Hub.seq(s))))}
+
+def Fallback.limited(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
+  Fallback.limited.k(s, now, th, Reset.fill(s, now, lim))
 
 # A reset retry belongs to the interrupted thread, independently of whether
 # a fallback chain was configured. Unknown or expired reset evidence never
@@ -9017,31 +9077,34 @@ def ProviderResume.mark(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> 
       J.KV{"reset", J.Json.nat(Bool.pick(Nat, Nat.is_gt(FB.Limit.reset(lim), now), FB.Limit.reset(lim), 0n))},
       J.KV{"reason", J.Str{String.take(FB.Limit.reason(lim), 400n)}}])), now}]
 
-def ProviderResume.hold(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, normal: Step) -> Step:
+def ProviderResume.hold.k(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, normal: Step) -> Step:
   Step{List.append(&2, M.Change, ProviderResume.mark(s, now, th, lim),
     [M.TurnChanged{th, M.Interrupted{}, now}, M.SettingSet{"fallback.pending." ++ th, "", now},
       M.ActivityLogged{th, Hub.id("quota", now, Hub.seq(s)), "warn", "provider-wait", "Provider limit reached; " ++
         Bool.pick(String, Nat.is_gt(FB.Limit.reset(lim), now), "will continue when the reported reset arrives.", "no future reset supplied; waiting for updated provider evidence or your action."), now}]), [ToolsGone{th}]}
 
+def ProviderResume.hold(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, normal: Step) -> Step:
+  ProviderResume.hold.k(s, now, th, Reset.fill(s, now, lim), normal)
+
 def ProviderResume.pending(has: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
   match has:
     case False{}: normal
-    case True{}: ProviderResume.hold(s, now, th, FB.Limit{J.Json.get_str(o, "scope", ""), J.Json.get_str(o, "reason", "usage limit reached"), J.Json.get_nat(o, "reset", 0n)}, normal)
+    case True{}: ProviderResume.hold(s, now, th, Pending.of(s, now, o), normal)
 
 def ProviderResume.line.m(lim: Maybe<&2, FB.Limit>, terminal: Bool, +s: M.State, +now: Nat, +th: String, normal: Step) -> Step:
   match lim terminal:
     case Some{+lim} True{}: ProviderResume.hold(s, now, th, lim, normal)
-    case Some{+lim} False{}: Step.after(normal, [M.SettingSet{"fallback.pending." ++ th, FB.Limit.json(lim, now), now}])
+    case Some{+lim} False{}: Step.after(normal, [M.SettingSet{"fallback.pending." ++ th, FB.Limit.json(Reset.fill(s, now, lim), now), now}])
     case None{} True{}:
       +o = Fallback.pending(s, th)
       +scope = J.Json.get_str(o, "scope", "")
-      ProviderResume.pending(Bool.not(String.is_empty(scope)), s, now, th, o, normal)
+      ProviderResume.pending(Bool.and(Bool.not(String.is_empty(scope)), Pending.due(Pending.of(s, now, o), now)), s, now, th, o, normal)
     case None{} False{}: normal
 
 def Fallback.line.limit(terminal: Bool, +s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
   match terminal:
     case True{}: Fallback.limited(s, now, th, lim)
-    case False{}: Step{[M.SettingSet{"fallback.pending." ++ th, FB.Limit.json(lim, now), now}], Nil{}}
+    case False{}: Step{[M.SettingSet{"fallback.pending." ++ th, FB.Limit.json(Reset.fill(s, now, lim), now), now}], Nil{}}
 
 def Fallback.line.m(lim: Maybe<&2, FB.Limit>, terminal: Bool, s: M.State, now: Nat, th: String, normal: Step) -> Step:
   match lim:
@@ -9051,14 +9114,14 @@ def Fallback.line.m(lim: Maybe<&2, FB.Limit>, terminal: Bool, s: M.State, now: N
 def Fallback.line.pending(has: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
   match has:
     case True{}:
-      Fallback.limited(s, now, th, FB.Limit{J.Json.get_str(o, "scope", ""), J.Json.get_str(o, "reason", "usage limit reached"), J.Json.get_nat(o, "reset", 0n)})
+      Fallback.limited(s, now, th, Pending.of(s, now, o))
     case False{}: normal
 
 def Fallback.line.on(on: Bool, +terminal: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
   match on:
     case True{}:
       Fallback.line.m(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), terminal, s, now, th,
-        Fallback.line.pending(Bool.and(terminal, Bool.not(String.is_empty(J.Json.get_str(Fallback.pending(s, th), "scope", "")))), s, now, th, Fallback.pending(s, th), normal))
+        Fallback.line.pending(Bool.and(terminal, Bool.and(Bool.not(String.is_empty(J.Json.get_str(Fallback.pending(s, th), "scope", ""))), Pending.due(Pending.of(s, now, Fallback.pending(s, th)), now))), s, now, th, Fallback.pending(s, th), normal))
     case False{}: ProviderResume.line.m(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), terminal, s, now, th, normal)
 
 def Fallback.line.live(live: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, +terminal: Bool, normal: Step) -> Step:

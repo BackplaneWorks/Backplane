@@ -7424,6 +7424,18 @@ def Laws.settle_idle_off():
 def Laws.settle_idle_message_reopens():
   {==}
 
+def Laws.reset_words_none():
+  {==}
+
+def Laws.pending_due_passed():
+  {==}
+
+def Laws.pending_due_ahead():
+  {==}
+
+def Laws.pending_due_unknown():
+  {==}
+
 def Laws.scratch_busy_kept(now, w, t, n):
   and_false_r(M.Scratch.expired(now, w, t))
 
