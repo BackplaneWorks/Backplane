@@ -68,6 +68,14 @@ per character (a 100 KB line with a secret took 2.2 s). Fenced by the pure
 module's hash; test/tools/secret.mjs checks it against the definition.
 Sec.mask's laws hold whatever it answers (the pure check follows it).
 
+Server-only Map.bit/Map.diff implement the same 33-bit code-point trie
+positions without generic Nat.divmod, per-character slicing or iterators.
+On the 5,750-thread catalog these primitives dominate synchronous sidebar
+generation. Complete emitted entry/callee hashes fence Base's definitions;
+the pure map, its callers, cache budgets and every protocol stay unchanged.
+Map.get/has walk that immutable trie without reconstructing equal ancestors.
+Their input root is returned unchanged alongside the original value/default.
+
 Each is found by its shape and must be found exactly once, else the build
 stops (a new Bend that emits them otherwise needs this looked at again).
 With --server (scripts/build-js.sh: one bundle) that holds for every def;
@@ -187,11 +195,43 @@ SEC_FINE_HELPER = (
     "if(!any)return s;let out=\"\",run=0;for(let j=0;j<n;j++){run+=d[j];out+=run>0?\"\\u2022\":cp[j]}return out}\n"
 )
 
+# Bend 2.0.39 Base map definitions, after the standard Bun minification.
+# Unlike the existing prefix rewrites, these fences cover whole definitions
+# and the complete Map.diff helper chain. Compiler/Base drift needs review.
+MAP_DEFS = {
+    "$Map$bit$": "dd4233a5037a0d20842d148e7b38363f363fe1d52a811a39b9328667948dc4d9",
+    "$Map$bit$at$": "95c255398d9ee74d17c933422bfeb2405c1cdb4be0113dc02aa3b4da2cc28309",
+    "$Map$diff$": "7ce09b0adfd68677f26d35b394c01ec5f15eb05a0a4b7bbf5a25978c4597f0fe",
+    "$Map$diff$fin$": "9d48784a9cc56f4c6e9bc1673c6470df648587a4f2980d9a512143ce5bfa4b2a",
+    "$Map$diff$step$": "a39747002ab175e20d0809aac6432a8bdd6172e37fd08f6fbabfa8442be6d40c",
+    "$Map$diff$chr$": "705898200e8a2e029ce9ca63bea5d54111e0883faab72ec8a0fe41d2e1a447f6",
+    "$Map$msb$u$": "b74e19a892bcd2916ff947c10282d637cdce13fe7303a5f5e1acbf5f16701532",
+    "$Map$msb$u$if$": "23e87ee5b37be52d7de67a0b056bd02aed3b7ed154b2ec0f6daa0cfd97e5123d",
+    "$Map$get$": "3191b2a2af8d9ae21e6a53396f29db5058aafdb6b0e82cec062381db2be0516d",
+    "$Map$get$go$": "088c116da48bd2e63846f0835f81ce4a81a886b59aca64842a396bd5b669928e",
+    "$Map$get$leaf$": "9590a61bcc8fa5ce5c670189d6a3f09b25af41ec98959e0fb0a2a83f9b0d2b01",
+    "$Map$has$": "229c41ccf6e51168d32fc75185822dc7cf846152bcaae64c70717fb78e64d7cb",
+    "$Map$has$go$": "3bd24a89d7bce32fab5521e23238e44a668b3e98eb303efd4ae391f076acc8c8",
+    "$Map$has$leaf$": "055e50dd78310908a5612208a5967185d018ed82d6b82815e4de5f1b3e469972",
+    "$Map$lo$": "b0f937536eaf4daff4a5976af25e1e37bcdd74c95c13df77cc1a2436b459b21b",
+    "$Map$hi$": "b886c4c910bc97eb48b1c1d41769fd84b61322d7e8b985f5f20fdeaf0b1c7341",
+}
+
+def map_def(name):
+    return re.compile(r"function " + re.escape(name) + r"\([^\n]*?\}(?=function |\n|$)")
+
 args = sys.argv[1:]
 server = "--server" in args
 files = [a for a in args if a != "--server"]
 srcs = {f: open(f, encoding="utf-8").read() for f in files}
+if server:
+    for name, digest in MAP_DEFS.items():
+        definitions = [m.group() for s in srcs.values() for m in map_def(name).finditer(s)]
+        if len(definitions) != 1 or hashlib.sha256(definitions[0].encode()).hexdigest() != digest:
+            sys.exit(f"js-native: {name} needs its exact Base definition once")
 found = {}
+found["Map.bit"] = found["Map.diff"] = int(server)
+found["Map.get"] = found["Map.has"] = int(server)
 for name, rx, required in (("String.cmp", CMP, True), ("Map.bit.go", BIT, True),
                            ("String.split", SPLIT, server), ("List.length", LEN, server),
                            ("String.starts_with", PRE, server), ("String.contains", HAS, server)):
@@ -266,6 +306,12 @@ for f, s in srcs.items():
     s = LEN.sub(lambda m: 'function %s(%s){let n=0;for(let x=%s;x.$!=="Nil";x=x.tail)n++;return %s(n)}' % (m.group(1), m.group(2), m.group(2), m.group(4)), s)
     s = CMP.sub(lambda m: m.group(0) + 'return{$:"Tuple",fst:{$:"Tuple",fst:%s,snd:%s},snd:{$:__bpOrd(%s,%s)}};' % (m.group(2), m.group(3), m.group(2), m.group(3)), s)
     s = BIT.sub(lambda m: m.group(0) + 'return{$:"Tuple",fst:%s,snd:__bpBit(%s,%s,%s)};' % (m.group(2), m.group(2), m.group(3), m.group(4)), s)
+    if server:
+        s = map_def("$Map$bit$").sub('function $Map$bit$(_key_0,_pos_0){return __bpMapBit(_key_0,_pos_0)}', s)
+        s = map_def("$Map$diff$").sub('function $Map$diff$(_a_0,_b_0){return __bpMapDiff(_a_0,_b_0,nat_chk)}', s)
+        s = map_def("$Map$get$").sub('function $Map$get$(_d_0,_m_0,_key_0){return __bpMapRead(_m_0,_key_0,_d_0,false)}', s)
+        s = map_def("$Map$has$").sub('function $Map$has$(_m_0,_key_0){return __bpMapRead(_m_0,_key_0,false,true)}', s)
+        s = Path(__file__).with_name("js-map.js").read_text(encoding="utf-8") + "\n" + s
     s = SPLIT.sub(lambda m: m.group(0) + 'return __bpSplit(%s,%s);' % (m.group(2), m.group(3)), s)
     s = PRE.sub(lambda m: m.group(0) + 'return __bpPre(%s,%s);' % (m.group(2), m.group(3)), s)
     s = HAS.sub(lambda m: m.group(0) + 'return __bpHas(%s,%s);' % (m.group(2), m.group(3)), s)
@@ -297,7 +343,9 @@ for f, s in srcs.items():
 # each swap must have landed as often as its shape was found (a shape that
 # matched but was not rewritten, or rewritten twice, stops the build too)
 outs = "".join(open(f, encoding="utf-8").read() for f in files)
-for name, call in (("String.cmp", "snd:{$:__bpOrd("), ("Map.bit.go", "snd:__bpBit("),
+for name, call in (("Map.bit", "{return __bpMapBit("), ("Map.diff", "{return __bpMapDiff("),
+                   ("Map.get", "{return __bpMapRead(_m_0,_key_0,_d_0,false)"), ("Map.has", "{return __bpMapRead(_m_0,_key_0,false,true)"),
+                   ("String.cmp", "snd:{$:__bpOrd("), ("Map.bit.go", "snd:__bpBit("),
                    ("String.split", "return __bpSplit("), ("List.length", 'x.$!=="Nil";x=x.tail)n++;return '),
                    ("String.starts_with", "return __bpPre("), ("String.contains", "return __bpHas("),
                    ("Cbor.Enc.text", "return __bpCborText("), ("Json.parse", "){return __bpParsed("),
