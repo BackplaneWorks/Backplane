@@ -2468,8 +2468,7 @@ def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st
     case e <> t Nil{}:
       List.append(&2, D.Node, View.entry(lc, e, st, sel, ec, sp), View.entries.r(lc, t, Nil{}, st, sel, ec, sp))
 
-# a thread's entries, its runs of tool calls folded (the last stays open
-# while its turn runs)
+# A thread's tool runs start folded, including while its turn runs.
 def View.entries.seen(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +running: Bool, +ec: U.Ec) -> List<&2, D.Node>:
   View.entries.r(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
 

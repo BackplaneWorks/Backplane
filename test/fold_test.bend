@@ -117,8 +117,8 @@ def main() -> IO(Unit):
     C.Check.str("label many kinds", F.Fold.label(I.En{}, [tool("a", "a"), tool("b", "b"), tool("c", "c"), tool("d", "d")]), "4 tool calls · a, b, c, …")
     C.Check.str("roles idle", Show.roles(F.Fold.roles(es1(), none(), False{})),
       "s h(a|3 tool calls · shell, edit|False) i(False) i(False) s h(d|1 tool call · read|False) s h(f|1 tool call · shell|False) ")
-    C.Check.str("roles running: last run open", Show.roles(F.Fold.roles(es1(), none(), True{})),
-      "s h(a|3 tool calls · shell, edit|False) i(False) i(False) s h(d|1 tool call · read|False) s h(f|1 tool call · shell|True) ")
+    C.Check.str("roles running: last run starts closed", Show.roles(F.Fold.roles(es1(), none(), True{})),
+      "s h(a|3 tool calls · shell, edit|False) i(False) i(False) s h(d|1 tool call · read|False) s h(f|1 tool call · shell|False) ")
     C.Check.str("roles running: not at the bottom", Show.roles(F.Fold.roles([tool("a", "x"), msg("m")], none(), True{})), "h(a|1 tool call · x|False) s ")
     C.Check.str("user opened", Show.roles(F.Fold.roles([tool("a", "x"), tool("b", "x")], Map.set(&2, String, none(), "fold:a", "1"), False{})), "h(a|2 tool calls · x|True) i(True) ")
     C.Check.str("user shut the live one", Show.roles(F.Fold.roles([tool("a", "x")], Map.set(&2, String, none(), "fold:a", "0"), True{})), "h(a|1 tool call · x|False) ")
@@ -126,8 +126,8 @@ def main() -> IO(Unit):
     C.Check.str("took", M.Time.took(45n) ++ " " ++ M.Time.took(133n) ++ " " ++ M.Time.took(3900n), "45s 2m 13s 1h 5m")
     C.Check.str("turn done: its messages show, only tool runs fold", Show.roles(F.Fold.roles(turn(), at(533n), False{})),
       "s h(a|2 tool calls · shell, edit|False) i(False) s h(c|1 tool call · read|False) s ")
-    C.Check.str("turn running: the last run open", Show.roles(F.Fold.roles([user("u", 0n), said("m", 1n), ran("a", "x", 2n)], at(533n), True{})),
-      "s s h(a|1 tool call · x|True) ")
+    C.Check.str("turn running: the last run starts closed", Show.roles(F.Fold.roles([user("u", 0n), said("m", 1n), ran("a", "x", 2n)], at(533n), True{})),
+      "s s h(a|1 tool call · x|False) ")
     C.Check.str("turn with no reply: nothing folds", Show.roles(F.Fold.roles([user("u", 0n), ran("a", "x", 1n), err("e")], none(), False{})),
       "s h(a|1 tool call · x|False) s ")
     C.Check.str("turn answered at once: nothing folds", Show.roles(F.Fold.roles([user("u", 0n), said("m", 1n)], none(), False{})), "s s ")
@@ -137,5 +137,5 @@ def main() -> IO(Unit):
     C.Check.str("click shuts", U.Ui.info(after(U.Ui.act(after(U.Ui.act(U.Ui.init(0n), "fold", "1a")), "fold", "0a")), "fold:a"), "0")
     C.Check.str("web folded", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("a", "shell"), tool("b", "edit"), err("e")], M.State.empty(), "t", none(), False{}))),
       "<button.fold=1a>^<span>2 tool calls · shell, edit</span></button><div.act error><span.kind>exit</span><span.summary>boom</span></div>")
-    C.Check.str("web live open", Web.shows(V.View.expand(V.View.entries(I.En{}, [msg("m"), tool("a", "shell")], M.State.empty(), "t", none(), True{}))),
-      "<div.msg assistant><div.body><p>hi</p></div><span.stamp>00:00</span><button.copy=hi>Copy</button></div><button.fold=0a>^<span>1 tool call · shell</span></button><div.act tool><span.kind>shell</span><span.summary>x</span></div>")
+    C.Check.str("web live starts folded", Web.shows(V.View.expand(V.View.entries(I.En{}, [msg("m"), tool("a", "shell")], M.State.empty(), "t", none(), True{}))),
+      "<div.msg assistant><div.body><p>hi</p></div><span.stamp>00:00</span><button.copy=hi>Copy</button></div><button.fold=1a>^<span>1 tool call · shell</span></button>")
