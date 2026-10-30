@@ -27,6 +27,7 @@ private func threadStatusSignal(_ state: String, _ status: String?) -> String {
     case "": return state == "run" ? "active" : state == "fail" ? "blocked" : "inactive"
     case "blocked", "needs you", "approval", "input", "failed": return "blocked"
     case "active", "running", "watching", "cancelling", "working", "monitoring": return "active"
+    case "stalled": return "stalled"
     case "waiting": return "waiting"
     case "finished", "complete": return "finished"
     case "settled", "done", "completed", "cancelled": return "settled"
@@ -43,6 +44,7 @@ struct StatusDot: View {
 
     private var label: String {
         switch signal {
+        case "stalled": return lang == "ja" ? "進捗停止・実行中の作業は継続しています" : "Stalled: no recent progress; busy work continues"
         case "blocked": return lang == "ja" ? "対応が必要です" : "Blocked: needs interaction"
         case "active": return lang == "ja" ? "作業中" : "Working: agent or owned work active"
         case "settled": return lang == "ja" ? "完了済み" : "Settled"
@@ -55,6 +57,7 @@ struct StatusDot: View {
     var body: some View {
         Group {
             switch signal {
+            case "stalled": Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(PhaseColor.warn).font(.caption)
             case "blocked": Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(PhaseColor.bad).font(.caption)
             case "active": ProgressView().controlSize(.mini).tint(PhaseColor.accent)
             case "waiting": ProgressView().controlSize(.mini).tint(PhaseColor.waiting)
@@ -338,6 +341,7 @@ struct EntryRow: View {
 private func subColor(_ state: String) -> Color {
     switch state {
     case "active", "running", "watching", "cancelling": PhaseColor.accent
+    case "stalled": PhaseColor.warn
     case "blocked", "needs you": PhaseColor.bad
     case "waiting": PhaseColor.waiting
     case "finished": PhaseColor.ok

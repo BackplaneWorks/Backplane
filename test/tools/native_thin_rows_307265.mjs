@@ -4,7 +4,7 @@ import fs from 'node:fs';import os from 'node:os';import path from 'node:path';i
 if(!process.env.BP_NATIVE_THIN_SOURCE_ROOT&&!fs.existsSync(path.join(process.cwd(),'build/phone-cache/native-thin-bridge-proposal-01')))process.env.BP_NATIVE_THIN_SOURCE_ROOT=process.cwd();
 const root=process.env.BP_NATIVE_THIN_SOURCE_ROOT||process.cwd(),stage=fs.mkdtempSync(path.join(os.tmpdir(),'bp-native-rows-307265-'));
 const donor=process.env.BP_NATIVE_THIN_SOURCE_ROOT?root:path.join(root,'build/phone-cache/native-thin-bridge-proposal-01/qualified-dependencies');
-for(const n of ['src/web/thin.js','src/web/thin-results.js','src/web/startup.js','src/web/mail-drafts.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync(path.join(donor,n),q);}
+for(const n of ['src/web/thin.js','src/web/thin-results.js','src/web/startup.js','src/web/mail-drafts.js','src/web/terminal-input.js','src/web/model-menu-input.js','src/web/sidebar-region.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync(path.join(donor,n),q);}
 const helper=process.env.BP_NATIVE_THIN_HELPER_SOURCE||path.join(root,'src/mobile/thin-native-host-307265.js');
 fs.mkdirSync(path.join(stage,'src/mobile'),{recursive:true});fs.copyFileSync(helper,path.join(stage,'src/mobile/thin-native-host-307265.js'));fs.writeFileSync(path.join(stage,'package.json'),'{"type":"module"}');
 const {validateNativeResult307265:valid}=await import(pathToFileURL(path.join(stage,'src/mobile/thin-native-host-307265.js')));

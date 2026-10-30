@@ -1005,17 +1005,17 @@ def WB.pago(+kind: String, +now: Nat, +at: Nat) -> String:
   WB.pago.loc(I.En{}, kind, now, at)
 
 def WB.pactivity(+state: String) -> String:
-  Bool.pick(String, Bool.or(String.eq(state, "approval"), Bool.or(String.eq(state, "question"), String.eq(state, "failed"))), "blocked",
-    Bool.pick(String, Bool.or(String.eq(state, "working"), String.eq(state, "waiting")), "active", Bool.pick(String, String.eq(state, "settled"), "settled", Bool.pick(String, String.eq(state, "finished"), "finished", "inactive"))))
+  Bool.pick(String, String.eq(state, "stalled"), "stalled", Bool.pick(String, Bool.or(String.eq(state, "approval"), Bool.or(String.eq(state, "question"), String.eq(state, "failed"))), "blocked",
+    Bool.pick(String, Bool.or(String.eq(state, "working"), String.eq(state, "waiting")), "active", Bool.pick(String, String.eq(state, "settled"), "settled", Bool.pick(String, String.eq(state, "finished"), "finished", "inactive")))))
 
 def WB.pmark.signal(+lc: I.Loc, +state: String) -> D.Node:
   D.El{"span", "", [D.At{"class", "dot " ++ WB.pactivity(state)}, D.At{"role", "img"},
     D.At{"aria-label", SG.Signal.label.loc(lc, WB.pactivity(state))}, D.At{"title", SG.Signal.label.loc(lc, WB.pactivity(state))}], Nil{}}
 
 def WB.pmark.activity(+state: String) -> Bool:
-  Bool.or(Bool.or(String.eq(state, "approval"), String.eq(state, "question")),
+  Bool.or(String.eq(state, "stalled"), Bool.or(Bool.or(String.eq(state, "approval"), String.eq(state, "question")),
     Bool.or(Bool.or(String.eq(state, "failed"), String.eq(state, "working")),
-      Bool.or(Bool.or(String.eq(state, "idle"), String.eq(state, "finished")), Bool.or(String.eq(state, "settled"), String.eq(state, "waiting")))))
+      Bool.or(Bool.or(String.eq(state, "idle"), String.eq(state, "finished")), Bool.or(String.eq(state, "settled"), String.eq(state, "waiting"))))))
 
 def WB.pmark.loc(+lc: I.Loc, +state: String) -> D.Node:
   Bool.pick(D.Node, String.eq(state, "reminder"), D.El{"span", "", [D.At{"class", "pbell"}], [WI.WIcon.svg("bell", 12)]},

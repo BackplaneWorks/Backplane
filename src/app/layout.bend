@@ -9,6 +9,7 @@ import ../core/winnote.bend as NT
 import ../core/codec.bend as CC
 import ../core/kihealth.bend as KH
 import ../core/model.bend as M
+import ../core/signal.bend as SG
 import ../core/json.bend as J
 import ../core/client.bend as U
 import ../core/subthreads.bend as LEGACY
@@ -337,6 +338,9 @@ def Lay.phase(p: M.Phase) -> U32:
     case _:
       T.Th.faint()
 
+def Lay.phase.display(+st: M.State, +id: String, p: M.Phase) -> U32:
+  Bool.pick(U32, SG.Signal.display.stalled(st, id), T.Th.warn(), Lay.phase(p))
+
 # a thread's row; the selected one is raised, with its project's colour
 # (tint) down its left edge
 def Lay.row.k(+ty: Ty, +on: Bool, id: String, title: String, +ago: String, +ac: U32, +dot: U32, +tint: U32, +c: D.Clip, +y: U32) -> Out:
@@ -360,9 +364,9 @@ def Lay.row.nc(+badge: String, +other: U32) -> U32:
 def Lay.row.on(+ty: Ty, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +snoozed: Bool, +c: D.Clip, +y: U32) -> Out:
   match t:
     case M.Thread{+id, +p, title, _, +a, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      +b = SB.Subs.badge(SB.Subs.count.ix(ix, st, id))
+      +b = Ty.fit(ty, 2n, SG.Signal.display.note(Ty.loc(ty), st, id, SB.Subs.badge(SB.Subs.count.ix(ix, st, id))), 96)
       Lay.row.k(ty, String.eq(id, sel), id, U.Label.title(st, id, TTL.Title.shown(Ty.loc(ty), title)), Lay.row.note(b, Bool.pick(String, snoozed, U.Time.ago(U.Side.until(st, id), now), U.Time.ago(now, a))), Lay.row.nc(b, T.Th.faint()),
-        Lay.phase(U.Side.phase.ix(ix, st, t)), BG.Badge.rgb_of(st, p), c, y)
+        Lay.phase.display(st, M.Thread.id(t), U.Side.phase.ix(ix, st, t)), BG.Badge.rgb_of(st, p), c, y)
 
 # whether a row at y (32 tall) shows in c at all (one scrolled above the
 # top sits at y modulo 2^32, past the bottom)
@@ -407,7 +411,7 @@ def Lay.arow.k(+ty: Ty, +on: Bool, id: String, title: String, +proj: String, +ba
 def Lay.arow.on(+ty: Ty, r: U.ARow, +ix: U.SIx, +st: M.State, +sel: String, +c: D.Clip, +y: U32) -> Out:
   match r:
     case U.ARow{_, _, +t, +pid, +pt, +faded}:
-      Lay.arow.k(ty, String.eq(M.Thread.id(t), sel), M.Thread.id(t), U.Label.title(st, M.Thread.id(t), TTL.Title.shown(Ty.loc(ty), U.Active.title(t))), pt, SB.Subs.badge(SB.Subs.count.ix(ix, st, M.Thread.id(t))), faded, Lay.phase(U.Side.phase.ix(ix, st, t)), BG.Badge.rgb_of(st, pid), c, y)
+      Lay.arow.k(ty, String.eq(M.Thread.id(t), sel), M.Thread.id(t), U.Label.title(st, M.Thread.id(t), TTL.Title.shown(Ty.loc(ty), U.Active.title(t))), pt, SG.Signal.display.note(Ty.loc(ty), st, M.Thread.id(t), SB.Subs.badge(SB.Subs.count.ix(ix, st, M.Thread.id(t)))), faded, Lay.phase.display(st, M.Thread.id(t), U.Side.phase.ix(ix, st, t)), BG.Badge.rgb_of(st, pid), c, y)
 
 def Lay.arow.id(r: U.ARow) -> String:
   match r:

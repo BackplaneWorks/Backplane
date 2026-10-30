@@ -543,7 +543,10 @@ private struct ThreadRow: View {
                         if let p = row.project, !p.isEmpty {
                             Text(p).font(.caption).foregroundStyle(.secondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                         }
-                        if typeSize.isAccessibilitySize {
+                        if row.status == "stalled", let reason = row.agents, !reason.isEmpty {
+                            Text(reason).font(.caption).foregroundStyle(PhaseColor.warn).lineLimit(2)
+                        }
+                        if typeSize.isAccessibilitySize && row.status != "stalled" {
                             Text(row.agents.flatMap { $0.isEmpty ? nil : $0 } ?? row.ago)
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -552,7 +555,7 @@ private struct ThreadRow: View {
                     .layoutPriority(1)
                     if row.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary).accessibilityLabel(lang == "ja" ? "ピン留め" : "Pinned") }
                     if !typeSize.isAccessibilitySize {
-                        if let n = row.agents, !n.isEmpty {
+                        if let n = row.agents, !n.isEmpty, row.status != "stalled" {
                             Text(n).font(.caption).foregroundStyle(PhaseColor.accent).lineLimit(1)
                                 .frame(maxWidth: 80, alignment: .trailing)
                         } else {

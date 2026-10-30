@@ -92,7 +92,7 @@ def local_phase(name, cmd, folder, cap):
 
 def boat_phase(name, gate, roots, files, folder, extra=None):
     spec = {'name':name,'gate':gate,'roots':roots,'files':sorted(set(files)),
-            'base':base_key(gate,roots,files), **(extra or {})}
+            'base':base_key(gate,roots,files), 'check_shards':os.environ.get('CHECK_SHARDS','1'), **(extra or {})}
     encoded = base64.urlsafe_b64encode(zlib.compress(json.dumps(spec).encode())).decode()
     logpath = folder/(gate+'.boat.log')
     with logpath.open('w') as log:
@@ -174,7 +174,7 @@ def main():
     os.chdir(ROOT)
     os.environ.update(PYTHONDONTWRITEBYTECODE='1', BEND_NO_TELEMETRY='1', BACKPLANE_TELEMETRY='off',
                       BACKPLANE_TELEMETRY_BAKE='0', BACKPLANE_GOOGLE_BAKE='0',
-                      CHECK_JOBS='1', CHECK_SHARDS='1', CHECK_FALLBACK='0', TEST_JOBS='2', TEST_SHARD_COUNT='1', BUN_JSC_forceRAMSize='4294967296')
+                      CHECK_JOBS='1', CHECK_SHARDS=os.environ.get('CHECK_SHARDS','1'), CHECK_FALLBACK='0', TEST_JOBS='2', TEST_SHARD_COUNT='1', BUN_JSC_forceRAMSize='4294967296')
     CACHE.mkdir(parents=True, exist_ok=True)
     # One controller machine-wide, including across worktrees. Fail promptly;
     # never enqueue multiple admission requests or cancel another owner's work.

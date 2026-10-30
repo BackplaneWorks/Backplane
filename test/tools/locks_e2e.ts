@@ -49,10 +49,11 @@ try {
   const pc = await until(10000, () => seen.find(x => x.$ === "ProjectCreated" && x.root === proj));
   const made = async (title: string) => { send("thread.create", { project: pc.id, title, env: "local", provider: "claude" }); return (await until(10000, () => seen.find(x => x.$ === "ThreadCreated" && x.title === title))).id as string; };
   const a = await made("Lock A"), b = await made("Lock B");
+  const mcpUrls = (th: string) => content(log).split("\n").filter(l => l.startsWith("MCP ") && (l.includes(`/mcp/${th}?`) || l.includes(`/mcp/${th}.`))).map(l => l.split(" ").slice(2).join(" "));
   const turns = (th: string) => seen.filter(x => x.$ === "TurnChanged" && x.thread === th && x.state === "completed").length;
   for (const th of [a, b]) { const n = turns(th); send("turn.start", { thread: th, text: "mode:plain ready", msg: `test-${++seq}` }); await until(15000, () => turns(th) > n ? true : undefined); }
   const call = async (th: string, name: string, args: object) => {
-    const url = await until(10000, () => content(log).split("\n").filter(l => l.startsWith("MCP ") && (l.includes(`/mcp/${th}?`) || l.includes(`/mcp/${th}.`))).at(-1)?.split(" ").slice(2).join(" "));
+    const url = await until(10000, () => mcpUrls(th).at(-1));
     const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++seq, method: "tools/call", params: { name, arguments: args } }) });
     const o: any = await r.json(); if (o.result?.isError || o.error) throw new Error(JSON.stringify(o));
     return JSON.parse(o.result.content[0].text);
@@ -144,28 +145,38 @@ try {
   check((await post("status", "ext", "pid:ext@e2e")).held === true, "the queue proceeds when the outside holder exits");
   check((await call(a, "lock_list", {})).locks.find((l: any) => l.name === "ext")?.outside === undefined, "the outside holder is cleared once the guard is taken");
   await post("release", "ext", "pid:ext@e2e");
-  // SIGKILL has no cleanup trap: a stopped renewal must free the lock in 90s.
+  // SIGKILL has no cleanup trap: expiry reports the missing helper, but
+  // its captured busy command keeps the physical lock until the fixture ends.
   const childFile = join(root, "lease-child.pid");
   const killed = spawn([resolve("scripts/bp-lock.sh"), "lease", "--", "sh", "-c", `echo $$ > '${childFile}'; exec sleep 180`]);
   await until(10000, () => existsSync(childFile) ? true : undefined, "lease holder starts");
   const childPid = Number(content(childFile).trim());
+  const leaseParty = (await call(a, "lock_list", {})).locks.find((l: any) => l.name === "lease")?.holder;
   process.kill(killed.pid, "SIGKILL"); await killed.exited;
-  process.kill(childPid, "SIGTERM");
   const expiry = join(root, "after-expiry");
   const started = Date.now();
   const next = spawn([resolve("scripts/bp-lock.sh"), "lease", "--", "sh", "-c", `touch '${expiry}'`]);
-  await until(120000, () => existsSync(expiry) ? true : undefined, "killed helper lease expires");
-  check(await next.exited === 0 && Date.now() - started >= 85000, `killed helper frees lock after lease (${Math.round((Date.now() - started) / 1000)}s)`);
+  await sleep(95000);
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  check(alive(childPid), "expired helper lease never kills its captured busy command");
+  check(!existsSync(expiry), "expired helper lease retains physical exclusion while work is alive");
+  process.kill(childPid, "SIGTERM"); // Explicitly finish this owned test fixture.
+  await until(15000, () => existsSync(expiry) ? true : undefined, "fixture exit releases expired helper guard");
+  check(await next.exited === 0 && Date.now() - started >= 95000, "expired helper guard releases after captured work exits");
+  if (leaseParty?.id) {
+    const nonce = String(leaseParty.id).split(":").at(-1)!;
+    if (/^bp-lock-client\.[A-Za-z0-9]+$/.test(nonce)) rmSync(join("/tmp", nonce), { recursive: true, force: true });
+  }
   // A helper waiting while the hub restarts survives it (see the restart below).
   await post("acquire", "survive", "pid:holder@e2e");
   const surviveMarker = join(root, "survive-ran");
   const survivor = Bun.spawn([resolve("scripts/bp-lock.sh"), "survive", "--", "sh", "-c", `touch '${surviveMarker}'`], { env, stdout: "ignore", stderr: "inherit" });
   owned.push(survivor);
   await sleep(28000); // past the first long-poll acquire: the helper is in its own status loop
-  // A restart loses queued locked work; it must not become an unguarded launch.
+  // A restart keeps queued locked work behind its reservation.
   await call(b, "lock_acquire", { name: "restart" });
   const restartMarker = join(root, "restart-must-not-run");
-  await call(a, "work_run", { command: `touch '${restartMarker}'`, lock: "restart" });
+  const restartWork = await call(a, "work_run", { command: `touch '${restartMarker}'`, lock: "restart", note: "restart queued work" });
   ws?.close(); process.kill(hub.pid, "SIGTERM"); await hub.exited;
   hub = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground", "--headless"], { env, stdout: "ignore", stderr: Bun.file(join(root, "hub-restart.log")) });
   await waitHub(); await sleep(1000);
@@ -174,7 +185,15 @@ try {
   check(survivor.exitCode === null, `a helper waiting through the restart is still alive (exit ${survivor.exitCode})`);
   await post("release", "survive", "pid:holder@e2e");
   check(await survivor.exited === 0 && existsSync(surviveMarker), "the helper that waited through the restart is granted");
-  check(content(join(home, "events.jsonl")).includes("lost on restart"), "restart records and reports lost locked work");
+  check((await call(a, "work_list", {})).work.some((w: any) => w.id === restartWork.id && w.state.startsWith("waiting for lock restart")), "restart retains queued locked work and its FIFO reservation");
+  // Restart invalidates every old agent credential. Reads remain allowed;
+  // mutations must come from a newly launched fixture agent's own URL.
+  await connect();
+  for (const th of [a, b]) {
+    const before = mcpUrls(th).length;
+    send("turn.start", { thread: th, text: "mode:plain ready after restart", msg: `test-${++seq}` });
+    await until(15000, () => mcpUrls(th).length > before ? true : undefined, "fresh post-restart agent credential");
+  }
   const crashPidFile = join(root, "crash-work.pid"), crashRaw = join(root, "crash-raw");
   await call(a, "work_run", { command: `echo $$ > '${crashPidFile}'; exec sleep 180`, lock: "crash-work" });
   await until(10000, () => existsSync(crashPidFile) ? true : undefined, "crash work starts");
@@ -187,11 +206,13 @@ try {
   process.kill(hub.pid, "SIGKILL"); await hub.exited;
   await until(10000, () => existsSync(hubGone) ? true : undefined, "hub death closes guard pipe");
   check(await afterHub.exited === 0, "captured OS guard dies with a killed hub");
-  await until(10000, () => existsSync(crashRaw) ? true : undefined, "crash guard stops the detached work");
-  check(await afterWorkHub.exited === 0, "work guard frees only after crash cleanup");
-  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  await until(5000, () => !alive(crashWorkPid) ? true : undefined, "owned command terminated");
-  check(!alive(crashWorkPid), "hub SIGKILL stops detached locked work by its captured PID");
+  await sleep(1200);
+  check(alive(crashWorkPid), "hub SIGKILL leaves detached busy work running");
+  check(!existsSync(crashRaw), "orphaned work guard retains physical exclusion after hub death");
+  process.kill(crashWorkPid, "SIGTERM"); // Explicitly finish this owned test fixture.
+  await until(10000, () => existsSync(crashRaw) ? true : undefined, "fixture exit releases orphaned work guard");
+  check(await afterWorkHub.exited === 0, "work guard releases after captured work actually exits");
+  crashWorkPid = 0;
 
   const fallback = spawn([resolve("scripts/bp-lock.sh"), "fallback", "--", "sh", "-c", "exit 7"]);
   check(await fallback.exited === 7, "no-hub fallback preserves command exit status");

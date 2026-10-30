@@ -1,3 +1,5 @@
+import ./src/core/restartretry.bend as WDRETRY
+import ./src/core/liveness.bend as LIVEWATCH
 import ./src/core/timeline-virtual.bend as TLVIRTUAL
 import ./src/core/history-window.bend as NATIVEHISTORY
 import ./src/core/accounts.bend as ACCT
@@ -196,6 +198,16 @@ import ./src/core/cli.bend as CLI # one-hub
 import ./src/core/onehub.bend as OHB # one-hub
 import ./src/core/standin.bend as SIN # one-hub
 import ./src/core/thin.bend as JTHIN # J2: JS stack
+import ./src/server/thin-content-eq.bend as CONTENTEQ
+import ./src/web/sidebar-slot.bend as FULLSLOT
+import ./src/server/thin-still-picture.bend as STILLPICTURE
+import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
+import ./src/core/secret.bend as SEC
+import ./src/server/thin-mirror.bend as TMR
+import ./src/core/subthreads.bend as LEG
+import ./src/core/ref-origin.bend as O
+import ./src/server/hotboot.bend as BOOTWARM
+import ./src/core/snapshot.bend as BOOTSNAP
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -657,7 +669,7 @@ law post_running_delivers:
   for role: M.Role
   for +text: String
   for h1: {H.Hub.running(H.Hub.thread(s, th)) == True{} : Bool}
-  for h2: {M.Worktree.pending(H.Hub.thread(s, th), now) == False{} : Bool}
+  for h2: {M.Worktree.waits(s, H.Hub.thread(s, th), now) == False{} : Bool}
   {H.Hub.post(s, now, th, msg, role, text) == H.Hub.deliver.r(True{}, s, now, th, msg, role, text) : H.Step}
 
 # whatever the thread runs, delivery holds nothing back
@@ -746,7 +758,7 @@ law inbox_running_delivers:
   for +text: String
   for +msg: String
   for h1: {H.Hub.running(H.Hub.thread(s, to)) == True{} : Bool}
-  for h2: {M.Worktree.pending(H.Hub.thread(s, to), now) == False{} : Bool}
+  for h2: {M.Worktree.waits(s, H.Hub.thread(s, to), now) == False{} : Bool}
   {H.Hub.inbox.id(s, now, from, to, role, text, msg) == H.Hub.deliver.r(True{}, s, now, to, msg, role, text) : H.Step}
 # Worktrees
 # ---------
@@ -777,7 +789,7 @@ law worktree_waits:
   for +msg: String
   for role: M.Role
   for +text: String
-  for h: {M.Worktree.pending(H.Hub.thread(s, th), now) == True{} : Bool}
+  for h: {M.Worktree.waits(s, H.Hub.thread(s, th), now) == True{} : Bool}
   {H.Step.outs_of(H.Hub.post(s, now, th, msg, role, text)) == [] : List<&2, H.Out>}
 
 # only "local" asks for the project folder; every other mode (the default
@@ -797,7 +809,7 @@ law worktree_revives:
   for +text: String
   for h1: {H.Hub.running(H.Hub.thread(s, th)) == False{} : Bool}
   for h2: {M.Worktree.gone(H.Hub.thread(s, th)) == True{} : Bool}
-  for h3: {M.Worktree.pending(H.Hub.thread(s, th), now) == False{} : Bool}
+  for h3: {M.Worktree.waits(s, H.Hub.thread(s, th), now) == False{} : Bool}
   {H.Step.outs_of(H.Hub.post(s, now, th, msg, role, text)) == [H.Wt.revive(s, th)] : List<&2, H.Out>}
 
 # a worktree is never removed while its thread works or waits on the user
@@ -4044,7 +4056,7 @@ law far_change_names_link:
   for role: M.Role
   for +text: String
   for +at: Nat
-  {FR.Fr.change(l, M.MessagePosted{th, msg, role, text, at}) == Some{M.MessagePosted{FR.Fr.id(l, th), FR.Fr.sent(l, msg), role, text, at}} : Maybe<&2, M.Change>}
+  {FR.Fr.change(l, M.MessagePosted{th, msg, role, text, at}) == Some{M.MessagePosted{FR.Fr.id(l, th), FR.Fr.sent(l, msg), role, O.Origin.show(text, l), at}} : Maybe<&2, M.Change>}
 
 # a message id names its sender (M.Link.id) as the mirror names it: a
 # thread of the mirroring machine's own is its own again, one of the
@@ -7086,7 +7098,7 @@ law slash_claude_prefix:
   {SL.Slash.names(SL.Slash.cmds(True{}, "c")) == ["/compact", "/context"] : List<&2, String>}
 
 law slash_others_own_only:
-  {SL.Slash.names(SL.Slash.cmds(False{}, "")) == ["/btw", "/give"] : List<&2, String>}
+  {SL.Slash.names(SL.Slash.cmds(False{}, "")) == ["/btw", "/give", "/secret"] : List<&2, String>}
 
 law slash_none_unknown:
   {SL.Slash.names(SL.Slash.cmds(True{}, "zz")) == [] : List<&2, String>}
@@ -7125,7 +7137,7 @@ law plane_sections_once:
 law plane_need_ranked:
   {PLN.Plane.ranked(PLN.Plane.need(PLN.Plane.of(PLN.Plane.demo(), 200000n))) == True{} : Bool}
 
-# a click on a thread's row selects that thread
+# a row opens the thread, or its child when only that child needs attention
 law plane_hit_opens:
   for +t: M.Thread
   for +at: Nat
@@ -7133,7 +7145,7 @@ law plane_hit_opens:
   for +u: U.Ui
   for +ix: U.SIx
   for +st: M.State
-  {PLN.Plane.hit(PLN.Plane.thread.t(t, at, pt, u, ix, st)) == "select " ++ M.Thread.id(t) : String}
+  {PLN.Plane.hit(PLN.Plane.thread.t(t, at, pt, u, ix, st)) == "select " ++ PLN.Plane.jump(st, M.Thread.id(t), Bool.pick(String, U.Ui.far.away(u, M.Thread.id(t)), "away", PLN.Plane.asking(PLN.Plane.signal(ix, st, t), ix, M.Thread.id(t)))) : String}
 
 # --- uberbot onboarding: onboard_uber_* ---
 
@@ -12380,7 +12392,6 @@ law sidebar_shared_key_settings:
   {CHATSIDE.SidebarImage.key.shared(True{}, u, epoch, view, revision, picture) == "" : String}
 
 # Exact actual-sidebar comparison is independent of metadata/image keys.
-import ./src/server/thin-content-eq.bend as CONTENTEQ
 law sidebar_content_exact_sound:
   for a: J.Json
   for b: J.Json
@@ -12399,7 +12410,6 @@ law sidebar_sent_no_picture_authority:
   for +rest: List<&2, CHATSIDE.Memo>
   {SWR.Region.key(CHATSIDE.SidebarSent{scope, token, node} <> rest) == SWR.Region.key(rest) : String}
 
-import ./src/web/sidebar-slot.bend as FULLSLOT
 # Full sidebar frames do not construct an unused reference rewrite.
 law sidebar_full_branch_identity:
   for shown: J.Json
@@ -12409,7 +12419,6 @@ law sidebar_full_branch_exact:
   for +shown: J.Json
   {SWR.Region.shown(reuse, shown) == Bool.pick(J.Json, reuse, SWR.Region.replace.go(shown, FULLSLOT.Slot.is(shown, "aside")), shown) : J.Json}
 
-import ./src/server/thin-still-picture.bend as STILLPICTURE
 # A still picture is private, exact-input/clock reuse; disabled work has no authority.
 law still_picture_disabled:
   for key: String
@@ -12422,7 +12431,6 @@ law still_picture_exact:
   for +res: J.Json
   {STILLPICTURE.Picture.select(True{}, res) == Some{res} : Maybe<&2, J.Json>}
 
-import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
 # Only the private sidebar-image input excludes non-scratch draft bodies.
 # These filter laws preserve arbitrary ordered tails and all @ values.
 # Full picture/transport keys and the current main Ui retain every draft.
@@ -12530,7 +12538,6 @@ law hot_demo_threads:
 # ---- end F1 ----
 
 # ---- secret box (src/core/secret.bend, docs/secrets.md) ----
-import ./src/core/secret.bend as SEC
 # A stored value lives only in a SecVal inside a Vault, and only the masks
 # take one apart. No stored value occurs in masked text, masking twice is
 # masking once, clean text is left alone, an empty vault masks nothing, and
@@ -12670,7 +12677,6 @@ law fq_room_keyed:
 law queue_copy_refuses_network:
   {JCOPY.Copy.outs(True{}, [H.FarQueued{}]) == [] : List<&2, H.Out>}
 
-import ./src/server/thin-mirror.bend as TMR
 
 # ---- selected mirrored thin conversation ----
 law mirror_no_authority:
@@ -12691,7 +12697,6 @@ law mirror_changed_basis_anchor:
   {TMR.Mirror.anchor("old", "new", 37n) == 0n : Nat}
 # ---- end selected mirrored thin conversation ----
 
-import ./src/core/subthreads.bend as LEG
 
 law retired_scratch_launch_refused:
   for s: M.State
@@ -12707,7 +12712,6 @@ law retired_scratch_id:
 law legacy_active_visible:
   {LEG.Legacy.unsettled(M.Active{}) == True{} : Bool}
 
-import ./src/core/ref-origin.bend as O
 
 law ref_origin_no_link:
   for s: String
@@ -12723,8 +12727,6 @@ law ref_origin_foreign_untouched:
   {O.Origin.id("other~t", "peer") == "other~t" : String}
 
 # Boot-only decoded threads never cross a checkpoint mismatch.
-import ./src/server/hotboot.bend as BOOTWARM
-import ./src/core/snapshot.bend as BOOTSNAP
 law startup_warm_accepted:
   for +w: BOOTWARM.Warm
   for +rows: List<&2, List<&2, String>>
@@ -12996,3 +12998,137 @@ law private_duplicate_publication_none:
   for text: String
   for key: String
   {H.Private.tell.fresh(False{}, s, now, th, text, key) == H.Step.none() : H.Step}
+
+# ---- Agent liveness: notices only, one episode per real progress gap ----
+# The exact guard used by tick includes activity, a positive configured gap,
+# a non-reversed clock, and elapsed seconds at least that gap.
+law liveness_stalled_only_after_gap:
+  for active: Bool
+  for +now: Nat
+  for +gap: Nat
+  for grace: Nat
+  for +live: LIVEWATCH.Live
+  for quiet: {LIVEWATCH.Liveness.due(active, now, gap, LIVEWATCH.Liveness.last(live)) == False{} : Bool}
+  {LIVEWATCH.Liveness.stalled(LIVEWATCH.Decision.live(LIVEWATCH.Liveness.tick(active, now, gap, grace, live))) == False{} : Bool}
+
+law liveness_nudge_once_per_gap:
+  for active: Bool
+  for +now: Nat
+  for gap: Nat
+  for grace: Nat
+  for +live: LIVEWATCH.Live
+  for sent: {Nat.is_gt(LIVEWATCH.Liveness.nudged(live), 0n) == True{} : Bool}
+  {LIVEWATCH.Decision.nudge(LIVEWATCH.Liveness.tick(active, now, gap, grace, live)) == False{} : Bool}
+
+law liveness_never_kills:
+  for decision: LIVEWATCH.Decision
+  {LIVEWATCH.Decision.kills(decision) == False{} : Bool}
+
+law liveness_launcher_notified_once:
+  for waited: Bool
+  for last: Nat
+  for nudged: Nat
+  for stalled: Bool
+  for reason: String
+  {LIVEWATCH.Decision.notify(LIVEWATCH.Liveness.escalate(waited, LIVEWATCH.Live{last, nudged, stalled, True{}, reason})) == False{} : Bool}
+
+law liveness_progress_clears_stall:
+  for live: LIVEWATCH.Live
+  for now: Nat
+  for reason: String
+  {LIVEWATCH.Liveness.stalled(LIVEWATCH.Liveness.progress(live, now, reason)) == False{} : Bool}
+
+law liveness_nudge_before_stall:
+  for +now: Nat
+  for grace: Nat
+  for +last: Nat
+  for reason: String
+  {LIVEWATCH.Liveness.stalled(LIVEWATCH.Decision.live(LIVEWATCH.Liveness.tick(True{}, now, 1n, grace, LIVEWATCH.Live{last, 0n, False{}, False{}, reason}))) == False{} : Bool}
+
+law liveness_timeout_explicit_optout:
+  {LIVEWATCH.Liveness.timeout(True{}, 0n) == 0n : Nat}
+
+# A stale lease never releases exclusion while its owner is busy. A holder
+# is told first; an idle expired lease is released only after warning grace.
+law lock_lease_busy_retains_exclusion:
+  for expired: Bool
+  for warned: Bool
+  for grace: Bool
+  {LCK.Lock.lease.release(expired, warned, grace, True{}) == False{} : Bool}
+
+law lock_lease_warns_before_release:
+  for expired: Bool
+  for grace: Bool
+  for busy: Bool
+  {LCK.Lock.lease.release(expired, False{}, grace, busy) == False{} : Bool}
+
+law lock_lease_grace_before_release:
+  for expired: Bool
+  for warned: Bool
+  for busy: Bool
+  {LCK.Lock.lease.release(expired, warned, False{}, busy) == False{} : Bool}
+
+law lock_lease_exact_threshold:
+  {LCK.Lock.lease.expired(1200n, 1200n) == True{} : Bool}
+
+# Hub work uses the same twenty-minute default and explicit zero opt-out.
+law work_timeout_default_twenty_minutes:
+  {H.WorkTimeout.seconds(M.State.empty(), J.Null{}) == 1200n : Nat}
+
+law work_timeout_zero_optout:
+  for state: M.State
+  {H.WorkTimeout.seconds(state, J.Json.obj([J.KV{"timeoutSec", J.Num{"0"}}])) == 0n : Nat}
+
+# A provider recovery that is not ready cannot post, start or stop a turn.
+law provider_resume_waits_for_ready:
+  for state: M.State
+  for now: Nat
+  for thread: String
+  {H.ProviderResume.one(False{}, state, now, thread) == H.Step.none() : H.Step}
+
+law background_timeout_waits_for_deadline:
+  for state: M.State
+  for now: Nat
+  for thread: String
+  for row: String
+  {H.WorkTimeout.row(False{}, state, now, thread, row) == H.Step.none() : H.Step}
+
+# Stalls are visible attention overlays; ordinary activity keeps its meaning.
+law liveness_display_active_without_stall:
+  {SIGREV.Signal.display.name(1n, M.State.empty(), "t") == "active" : String}
+
+law liveness_plane_stalled_needs_attention:
+  {PLN.Plane.sec("stalled") == 0n : Nat}
+
+law liveness_label_preserves_busy_work:
+  {SIGREV.Signal.label.loc(I18.En{}, "stalled") == "Stalled: no recent progress; busy work continues" : String}
+
+# Repeated restart recovery waits before retrying and bounds its delay.
+law restart_retry_initial_delay:
+  {WDRETRY.Retry.delay(0n) == 60n : Nat}
+
+law restart_retry_delay_bounded:
+  {WDRETRY.Retry.delay(20n) == 1200n : Nat}
+
+law restart_retry_not_ready_no_resume:
+  for state: M.State
+  for now: Nat
+  for thread: String
+  {WDRETRY.Retry.resume(False{}, state, now, thread) == H.Step.none() : H.Step}
+
+law restart_retry_not_candidate_no_schedule:
+  for state: M.State
+  for now: Nat
+  for thread: String
+  {WDRETRY.Retry.schedule(False{}, state, now, thread) == H.Step.none() : H.Step}
+
+# Actual automatic delivery, even with an older queue, has no process effect.
+law automatic_ride_no_process_effects:
+  for clear: Bool
+  for +state: M.State
+  for +now: Nat
+  for +thread: String
+  for +msg: String
+  for role: M.Role
+  for +text: String
+  {H.Step.outs_of(H.Hub.deliver.ride(clear, state, now, thread, msg, role, text)) == [] : List<&2, H.Out>}

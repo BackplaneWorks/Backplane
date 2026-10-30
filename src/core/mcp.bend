@@ -627,13 +627,22 @@ def Mcp.interrupt.f(ok: Bool, run: Bool, +s: M.State, +now: Nat, +from: String, 
     case False{} _:
       Res.fail("that thread is not in this project")
     case True{} False{}:
-      Res.ok(J.Json.obj([J.KV{"threadId", J.Str{target}}, J.KV{"state", J.Str{"not running"}}]))
+      Res{True{}, J.Json.obj([J.KV{"threadId", J.Str{target}}, J.KV{"state", J.Str{"not running"}}]), B.Step.none()}
     case True{} True{}:
       Res{True{}, J.Json.obj([J.KV{"threadId", J.Str{target}}, J.KV{"state", J.Str{"interrupted"}}]),
         B.Retire.stop.f(s, now, target, from, Nil{})}
 
 def Mcp.interrupt.k(ok: Bool, run: Bool, +s: M.State, +now: Nat, +target: String) -> Res:
   Mcp.interrupt.f(ok, run, s, now, "", target)
+
+def Mcp.interrupt.cancel(ok: Bool, s: M.State, now: Nat, target: String, r: Res) -> Res:
+  match ok r:
+    case False{} r: r
+    case True{} Res{good, body, step}:
+      Res{good, body, B.Step.after(step, B.AutoResume.cancel(s, now, target))}
+
+def Mcp.interrupt.tool(+ok: Bool, run: Bool, +s: M.State, +now: Nat, from: String, +target: String) -> Res:
+  Mcp.interrupt.cancel(ok, s, now, target, Mcp.interrupt.f(ok, run, s, now, from, target))
 
 # a message to another thread with a follow-up mode; auto is the inbox
 # (it never interrupts, law inbox_never_interrupts)
@@ -679,8 +688,8 @@ def Mcp.lock.acquire(ok: Bool, +s: M.State, +now: Nat, +thread: String, +a: J.Js
 # Watched work (hub.bend's Watch.*): work_run, work_watch, work_list,
 # work_cancel, work_unwatch; each answers once its row is stored (the
 # server answers after the step's write)
-def Mcp.secs(+a: J.Json) -> Nat:
-  M.Switch.num(J.Json.as_raw(J.Json.get(a, "timeoutSec"), "0"), 0n)
+def Mcp.secs(+s: M.State, +a: J.Json) -> Nat:
+  B.WorkTimeout.seconds(s, a)
 
 def Mcp.work.json(+l: String) -> J.Json:
   J.Json.obj([J.KV{"id", J.Str{M.Bg.field(l, 0n)}}, J.KV{"state", J.Str{Bool.pick(String, M.Bg.ended(l), M.Bg.status(l), B.Watch.state(l))}},
@@ -698,7 +707,7 @@ def Mcp.work.start.k(locked: Bool, +s: M.State, +now: Nat, +thread: String, +a: 
     case True{}:
       B.Locks.work.start(s, now, thread, a, J.Json.get_bool(a, "_lockReady", False{}))
     case False{}:
-      B.Watch.start(s, now, thread, "run", J.Json.get_str(a, "command", ""), Mcp.or(J.Json.get_str(a, "note", ""), J.Json.get_str(a, "command", "")), Mcp.secs(a))
+      B.Watch.start(s, now, thread, "run", J.Json.get_str(a, "command", ""), Mcp.or(J.Json.get_str(a, "note", ""), J.Json.get_str(a, "command", "")), Mcp.secs(s, a))
 
 def Mcp.work.start(+s: M.State, +now: Nat, +thread: String, +a: J.Json) -> B.Step:
   Mcp.work.start.k(Bool.not(String.is_empty(J.Json.get_str(a, "lock", ""))), s, now, thread, a)
@@ -718,7 +727,7 @@ def Mcp.work.watch(ok: Bool, +s: M.State, +now: Nat, +thread: String, +a: J.Json
     case True{}:
       Res{True{}, J.Json.obj([J.KV{"id", J.Str{B.Watch.id(s, thread)}}, J.KV{"token", J.Str{B.Watch.id(s, thread)}},
           J.KV{"next", J.Str{Bool.pick(String, String.eq(J.Json.get_str(a, "kind", ""), "file"), "Make the work write the token into the file when it is done, then end your turn.", "End your turn: you will be woken when it ends.")}}]),
-        B.Watch.start(s, now, thread, J.Json.get_str(a, "kind", ""), J.Json.get_str(a, "target", ""), Mcp.or(J.Json.get_str(a, "note", ""), J.Json.get_str(a, "target", "")), Mcp.secs(a))}
+        B.Watch.start(s, now, thread, J.Json.get_str(a, "kind", ""), J.Json.get_str(a, "target", ""), Mcp.or(J.Json.get_str(a, "note", ""), J.Json.get_str(a, "target", "")), Mcp.secs(s, a))}
     case False{}:
       Res.fail("kind must be pid or file")
 
@@ -898,9 +907,9 @@ def Mcp.tools() -> J.Json:
     Tool.def("wake_list", "List your wake subscriptions.", Nil{}, Nil{}),
     Tool.def("wake_cancel", "Cancel one of your wake subscriptions.", [Tool.prop("id", "string", "The subscription id.")], ["id"]),
     Tool.def("work_run", "Start long or detached work (a build, a test run, a job on another machine) so Backplane owns it: when it ends you are woken with its exit code and the end of its output; if a restart of Backplane cuts it off you are told it was lost and can start it again. Use this instead of `&`, nohup or disown, then end your turn; never poll or sleep-wait.",
-      [Tool.prop("command", "string", "The shell command, run in this thread's folder."), Tool.prop("lock", "string", "Optional named FIFO lock, held until work ends."), Tool.prop("note", "string", "What it is, in a few words."), Tool.prop("timeoutSec", "number", "Give up watching after this long (the work keeps running; the outcome is then unknown).")], ["command"]),
+      [Tool.prop("command", "string", "The shell command, run in this thread's folder."), Tool.prop("lock", "string", "Optional named FIFO lock, held until work ends."), Tool.prop("note", "string", "What it is, in a few words."), Tool.prop("timeoutSec", "number", "Report a timeout after this many seconds; default 1200 (work.timeout.seconds setting), explicit 0 disables. Work keeps running; never killed.")], ["command"]),
     Tool.def("work_watch", "Have Backplane watch work that is already running and wake you when it ends: kind pid (a process) or file (a file that will contain the token this call returns). Then end your turn.",
-      [Tool.prop("kind", "string", "pid or file."), Tool.prop("target", "string", "The pid, or the file's path."), Tool.prop("note", "string", "What it is."), Tool.prop("timeoutSec", "number", "Give up watching after this long.")], ["kind", "target"]),
+      [Tool.prop("kind", "string", "pid or file."), Tool.prop("target", "string", "The pid, or the file's path."), Tool.prop("note", "string", "What it is."), Tool.prop("timeoutSec", "number", "Report a timeout after this many seconds; default 1200 (work.timeout.seconds setting), explicit 0 disables. Never kills the watched work.")], ["kind", "target"]),
     Tool.def("lock_acquire", "Acquire a named FIFO lock without blocking; if queued, end your turn and wait for the grant message.", [Tool.prop("name", "string", "Lock name"), Tool.prop("note", "string", "Purpose")], ["name"]),
     Tool.def("lock_release", "Release your named lock, granting the next waiter.", [Tool.prop("name", "string", "Lock name")], ["name"]),
     Tool.def("lock_cancel", "Leave a named lock queue.", [Tool.prop("name", "string", "Lock name")], ["name"]),
@@ -1148,7 +1157,7 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
     case 10n:
       Mcp.wait.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""))
     case 11n:
-      Mcp.interrupt.f(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), B.Hub.running(B.Hub.thread(s, J.Json.get_str(a, "threadId", ""))), s, now, thread, J.Json.get_str(a, "threadId", ""))
+      Mcp.interrupt.tool(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), B.Hub.running(B.Hub.thread(s, J.Json.get_str(a, "threadId", ""))), s, now, thread, J.Json.get_str(a, "threadId", ""))
     case 12n:
       Mcp.wait.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""))
     case 13n:

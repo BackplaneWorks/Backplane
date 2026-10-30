@@ -8,8 +8,8 @@ import ../src/core/model.bend as M
 import ../src/core/json.bend as J
 import ../src/core/thin-chat.bend as T
 
-def turn() -> A.AcpTurn:
-  A.AcpTurn{"/tmp/fixture", "http://127.0.0.1:1/mcp/fixture", "RULES", "hello", "old", False{}}
+def turn() -> O.OcpTurn:
+  O.OcpTurn{A.AcpTurn{"/tmp/fixture", "http://127.0.0.1:1/mcp/fixture", "RULES", "hello", "old", False{}}, ""}
 
 def sends(o: A.AcpOut) -> String:
   match o:

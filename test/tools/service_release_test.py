@@ -23,7 +23,7 @@ class ProducerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.release = {"version": "0.12.2", "tag": "v0.12.2", "channel": "release", "commit": "a" * 40, "tree": "b" * 40}
+        self.release = {"version": S.VERSION, "tag": "v" + S.VERSION, "channel": "release", "commit": "a" * 40, "tree": "b" * 40}
         self.env = {"BACKPLANE_GOOGLE_CLIENT_ID": "test.invalid", "BACKPLANE_GOOGLE_CLIENT_SECRET": "test-secret",
                     "BACKPLANE_TELEMETRY_URL": S.ENDPOINT, "BACKPLANE_TELEMETRY_KID": "rel-test",
                     "BACKPLANE_TELEMETRY_KEY": "f" * 64}
@@ -398,7 +398,7 @@ class ProducerTests(unittest.TestCase):
                 (web / "index.html").write_text("fixture")
                 (web / "chunk-0.js").write_text("// fixture")
             elif args[-1] == "--version":
-                return "backplane 0.12.2\n"
+                return f"backplane {S.VERSION}\n"
             return ""
 
         with patch.object(S, "ROOT", source), \

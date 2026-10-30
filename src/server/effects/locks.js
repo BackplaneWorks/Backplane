@@ -201,31 +201,29 @@ function bp_lock_reaped(c, pid) {
   }
 }
 
-// The guard's stdin closes, so its cleanup runs; the drop answers once
-// the guard has ended, as locks.c's blocking waitpid, but parked on the
-// loop (a pidfd, else a 20 ms clock) so the hub runs on meanwhile.
+// Closing the pipe starts a non-killing ownership cleanup. Return at once:
+// a live job may retain the guard for hours, and must not park the hub.
+const bp_lock_retired = [];
+function guard_reap() {
+  if (process.platform === 'win32' || bp_lock_retired.length === 0) return 0;
+  const c = bp_lock_posix();
+  for (let i = bp_lock_retired.length - 1; i >= 0; --i) {
+    if (bp_lock_reaped(c, bp_lock_retired[i])) bp_lock_retired.splice(i, 1);
+  }
+  return bp_lock_retired.length;
+}
 function guard_drop(name, holder, k) {
-  const g = bp_lock_guards.get(name);
-  const unit = { $: "Unit" };
+  guard_reap();
+  const g = bp_lock_guards.get(name), unit = { $: 'Unit' };
   if (!g || g.holder !== holder) return unit;
   bp_lock_guards.delete(name);
-  if (process.platform === "win32") return guard_drop_win(g, k);
+  if (process.platform === 'win32') return guard_drop_win(g, k);
   const c = bp_lock_posix();
   c.close(g.pipe);
-  if (bp_lock_reaped(c, g.pid)) return unit;
-  const fd = c.pidfd === undefined ? -1 : c.pidfd(g.pid, 0);
-  if (fd >= 0) c.fcntl(fd, 2, 1);
-  const park = () => fd >= 0 ? io_park_on(fd, false, k, more) : io_park_on(undefined, false, k, more, io_until(20));
-  const more = () => {
-    if (bp_lock_reaped(c, g.pid)) {
-      if (fd >= 0) c.close(fd);
-      return unit;
-    }
-    park();
-    return undefined;
-  };
-  park();
-  return undefined;
+  if (!bp_lock_reaped(c, g.pid)) bp_lock_retired.push(g.pid);
+  return unit;
 }
 io_eff(CID(Guard.take), guard_take);
 io_eff(CID(Guard.drop), guard_drop);
+
+io_eff(CID(Guard.reap), guard_reap);

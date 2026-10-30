@@ -3677,8 +3677,12 @@ def Ui.new_thread.project(u: Ui, +pid: String) -> Act:
 def Ui.fork.of(+u: Ui, +value: String) -> String:
   Bool.pick(String, String.is_empty(value), Ui.sel(u), value)
 
-def Ui.fork(+u: Ui, +value: String) -> Act:
+def Ui.fork.with(+u: Ui, +value: String) -> Act:
   Ui.rpc(Made.want(u), "thread.fork", [J.KV{"thread", J.Str{Ui.fork.of(u, value)}}])
+
+# The original selected-thread operation remains valid for existing callers.
+def Ui.fork(u: Ui) -> Act:
+  Ui.fork.with(u, "")
 
 # State put back from a cache (a page's saved log, a phone's saved state)
 # is not this connection's: only a live log sets "@sync" again (Ui.reset),
@@ -3726,6 +3730,9 @@ def Urg.key(p: M.Phase, pinned: Bool) -> Nat:
 
 # urg: Urg.key (0 for a faded row); at: its last activity, or when it
 # settled; faded: settled, shown to bring back
+def Urg.display(+st: M.State, +t: M.Thread, p: M.Phase, +pinned: Bool) -> Nat:
+  Bool.pick(Nat, SG.Signal.display.stalled(st, M.Thread.id(t)), Nat.add(12n, Bool.pick(Nat, pinned, 1n, 0n)), Urg.key(p, pinned))
+
 type ARow is Data:
   ARow{urg: Nat, at: Nat, thread: M.Thread, project: String, title: String, faded: Bool}
 
@@ -3764,14 +3771,14 @@ def Active.live(ts: List<&2, M.Thread>, +st: M.State, +pid: String, +pt: String,
     case Nil{}:
       acc
     case +t <> r:
-      Active.live(r, st, pid, pt, ARow{Urg.key(Side.phase(st, t), Active.pinned(t)), Active.activity(t), t, pid, pt, False{}} <> acc)
+      Active.live(r, st, pid, pt, ARow{Urg.display(st, t, Side.phase(st, t), Active.pinned(t)), Active.activity(t), t, pid, pt, False{}} <> acc)
 
 def Active.live.ix(ts: List<&2, M.Thread>, +st: M.State, +ix: SIx, +pid: String, +pt: String, acc: List<&2, ARow>) -> List<&2, ARow>:
   match ts:
     case Nil{}:
       acc
     case +t <> r:
-      Active.live.ix(r, st, ix, pid, pt, ARow{Urg.key(Side.phase.ix(ix, st, t), Active.pinned(t)), Active.activity(t), t, pid, pt, False{}} <> acc)
+      Active.live.ix(r, st, ix, pid, pt, ARow{Urg.display(st, t, Side.phase.ix(ix, st, t), Active.pinned(t)), Active.activity(t), t, pid, pt, False{}} <> acc)
 
 def Active.keep(keep: Bool, r: ARow, acc: List<&2, ARow>) -> List<&2, ARow>:
   match keep:
@@ -14922,7 +14929,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 74n:
       Ui.send(u, True{})
     case 75n:
-      Ui.fork(u, value)
+      Ui.fork.with(u, value)
     case 76n:
       Ui.on_row(u, Ui.fork.of(u, value), "thread.back")
     case _:

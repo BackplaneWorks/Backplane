@@ -54,6 +54,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.CheckCircle
@@ -200,6 +201,7 @@ private fun threadStatusSignal(state: String, status: String): String = when (st
     "" -> when (state) { "run" -> "active"; "fail" -> "blocked"; else -> "inactive" }
     "blocked", "needs you", "approval", "input", "failed" -> "blocked"
     "active", "running", "watching", "cancelling", "working", "monitoring" -> "active"
+    "stalled" -> "stalled"
     "waiting" -> "waiting"
     "finished", "complete" -> "finished"
     "settled", "done", "completed", "cancelled" -> "settled"
@@ -211,6 +213,7 @@ fun StatusDot(state: String, status: String) {
     val lang = LocalBackplaneLanguage.current
     val signal = threadStatusSignal(state, status)
     val label = when (signal) {
+        "stalled" -> if (lang == "ja") "進捗停止・実行中の作業は継続しています" else "Stalled: no recent progress; busy work continues"
         "blocked" -> if (lang == "ja") "対応が必要です" else "Blocked: needs interaction"
         "active" -> if (lang == "ja") "作業中" else "Working: agent or owned work active"
         "settled" -> if (lang == "ja") "完了済み" else "Settled"
@@ -220,6 +223,7 @@ fun StatusDot(state: String, status: String) {
     }
     Box(Modifier.size(24.dp).semantics(mergeDescendants = true) { contentDescription = label }, contentAlignment = Alignment.Center) {
         when (signal) {
+            "stalled" -> Icon(Icons.Filled.Warning, null, Modifier.size(18.dp), tint = PhaseColor.warn)
             "blocked" -> Icon(Icons.Filled.Error, null, Modifier.size(18.dp), tint = PhaseColor.bad)
             "active" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.accent, strokeWidth = 2.dp)
             "waiting" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.waiting, strokeWidth = 2.dp)
@@ -498,6 +502,7 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
 
 private fun subColor(state: String) = when (state) {
     "active", "running", "watching", "cancelling" -> PhaseColor.accent
+    "stalled" -> PhaseColor.warn
     "blocked", "needs you" -> PhaseColor.bad
     "waiting" -> PhaseColor.waiting
     "finished" -> PhaseColor.ok

@@ -271,17 +271,19 @@ test('a press with no view on its way is still refused, and a terminal\'s keys a
  const g=await fixture();g.open();g.host.request('select','B');let keys;g.host.request('term-key','a',ok=>keys=ok);assert.equal(keys,false);
 });
 test('a background update cannot discard a newer navigation action',async()=>{
- const f=await fixture();f.open();f.host.request('uber','bub');const action=f.sent.at(-1);
- f.host.update();const update=f.sent.at(-1);assert.equal(update.m,'view.update');f.host.receive(f.reply(update));
+ const f=await fixture();f.open();f.host.request('uber','bub');const action=f.sent.at(-1),count=f.sent.length;
+ assert.equal(f.host.update(),true);assert.equal(f.sent.length,count,'refresh waits for the navigation result');assert.equal(f.host.active,action.id);
  const response=f.reply(action,{nextTarget:{kind:'bot',id:'bub'},remoteReady:false});delete response.result.shown;
  f.host.receive(response);assert.equal(f.sent.at(-1).m,'view.open');assert.deepEqual(f.sent.at(-1).p.target,{kind:'bot',id:'bub'});
+ const open=f.sent.at(-1);f.host.receive(f.reply(open));assert.equal(f.host.ready,true);assert.deepEqual(f.host.target,{kind:'bot',id:'bub'});assert.equal(f.host.receive(response),false);
 });
 test('a changed notification cannot discard a travelling navigation action',async()=>{
  const f=await fixture();f.open();f.host.request('uber','bub');const action=f.sent.at(-1),count=f.sent.length;
  f.host.receive({t:'view.changed',version:1,generation:'7',epoch:'actual',viewId:'view-A',target:{kind:'thread',id:'A'},viewRevision:'2'});
- assert.equal(f.sent.length,count+1);f.host.receive(f.reply());
+ assert.equal(f.sent.length,count,'notification defers its refresh behind navigation');assert.equal(f.host.active,action.id);
  const response=f.reply(action,{nextTarget:{kind:'bot',id:'bub'},remoteReady:false});delete response.result.shown;
  f.host.receive(response);assert.equal(f.sent.at(-1).m,'view.open');assert.deepEqual(f.sent.at(-1).p.target,{kind:'bot',id:'bub'});
+ f.host.receive(f.reply());assert.equal(f.host.ready,true);assert.deepEqual(f.host.target,{kind:'bot',id:'bub'});assert.equal(f.host.receive(response),false);
 });
 test('message chunks assemble only their exact owner/version/cursor and never confer view readiness',async()=>{
  const f=await fixture();f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:{ids:['row'],older:'',hasMore:false,anchor:{id:'row',offset:0},partial:[{id:'row',cursor:'after-preview',reason:'byte-limit'}]}}));
@@ -355,9 +357,10 @@ test('draft reconciliation: failure restoration survives a projection captured a
  // A delayed projection of the old cleared draft must not undo the domain ACK.
  f.api.ack=s=>s;f.host.receive(response);assert.equal(f.getSession().drafts.A,'restored 日本語');assert.equal(f.disk.get('A'),'restored 日本語');
 });
-test('form ordering: stale failed field cannot release a dependent Send after a newer refresh',async()=>{
+test('form ordering: refresh waits for a field; failure blocks dependent Send and rejects delayed success',async()=>{
  const f=await fixture();f.open();f.host.request('bfield','mrreply\x1fkeep');f.host.request('mail-send','');const field=f.sent.at(-1);
- f.host.update();f.host.receive(f.reply());f.host.receive({t:'reply',id:field.id,ok:false,error:{code:'UNAVAILABLE'}});
+ const delayed=f.reply(field),count=f.sent.length;f.host.update();assert.equal(f.sent.length,count,'refresh cannot overtake the pending field');
+ f.host.receive({t:'reply',id:field.id,ok:false,error:{code:'UNAVAILABLE'}});assert.equal(f.host.receive(delayed),false);
  assert.equal(f.host.ready,false);assert.equal(f.host.actions.length,0);assert(!f.sent.some(r=>r.p.action==='mail-send'));assert.equal(f.host.fieldValue('mrreply',''),'keep');
 });
 test('form ordering: double tap sends the captured Mailroom reply once',async()=>{
@@ -406,8 +409,8 @@ test('mail context: queued old-conversation field and Send never acquire the new
  assert.equal(f.host.fieldValue('mrreply','B field'),'B field');assert.equal(f.host.actions.length,0);assert(!f.sent.some(r=>r.p.action==='mail-send'||r.p.action==='bfield'));
 });
 test('mail context: a travelling original Send still settles once after the displayed conversation changes',async()=>{
- let scope='A';const f=await fixture({operationScope:(a)=>a==='mail-send'?scope:undefined});f.open();f.host.request('mail-send','');const send=f.sent.at(-1);scope='B';f.host.update();f.host.receive(f.reply());
- const response=f.reply(send,{cmds:[{type:'send',text:JSON.stringify({id:24,m:'mail.send',p:{conv:'A'}})}]});f.host.receive(response);assert.equal(f.commands.length,1);assert.equal(JSON.parse(f.commands[0].text).p.conv,'A');assert.equal(f.host.receive(response),false);
+ let scope='A';const f=await fixture({operationScope:(a)=>a==='mail-send'?scope:undefined});f.open();f.host.request('mail-send','');const send=f.sent.at(-1);scope='B';f.host.request('select','B');const open=f.sent.at(-1);assert.equal(open.m,'view.open');f.host.receive(f.reply(open));assert.equal(f.getSession().sel,'B');
+ const shown=f.views.length,response=f.reply(send,{cmds:[{type:'send',text:JSON.stringify({id:24,m:'mail.send',p:{conv:'A'}})}]});f.host.receive(response);assert.equal(f.commands.length,1);assert.equal(JSON.parse(f.commands[0].text).p.conv,'A');assert.equal(f.getSession().sel,'B');assert.equal(f.views.length,shown,'the old Send cannot replace B');assert.equal(f.host.receive(response),false);assert.equal(f.commands.length,1);
 });
 async function partialFixture(){
  const f=await fixture(),row=(id,version)=>({id,version,cursor:'display-'+id+'-'+version,reason:'byte-limit'}),window=partial=>({ids:['row'],older:'',hasMore:false,anchor:{id:'row',offset:0},partial});

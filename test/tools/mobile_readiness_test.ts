@@ -29,6 +29,7 @@ var lastPresentation=null,lastPresentationHub='',half=null,focusOf=null,focusTex
 var App={current:h=>h.cur,lean:h=>h,screen_list_in:()=>({hub:'A',sel:'A-thread'}),focus:()=>({text:'actual selected cached body'}),live_text:()=>'',alerts:()=> '[]'};
 var plain=x=>x,same=(a,b)=>a===b,liveNodes=()=>[];
 var recent={links:new Map(),overlays:()=>[],end:()=>[]};
+var bubLive=new Set();
 var commandList=cs=>cs;
 // a hub that is not on the thin view lane (the transport these checks cover)
 var thin={thin:()=>false,views:()=>null,drain:()=>({cmds:[],sync:[]}),inert:()=>false,receive(){},fail(){},disconnect(){}};

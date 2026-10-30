@@ -17,7 +17,9 @@ spec.loader.exec_module(local)
 
 def inputs():
     files = subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard'],cwd=ROOT,text=True).splitlines()
-    named = sorted(f for f in files if f.startswith(('scripts/', 'test/tools/', 'desktop/', 'src/mobile/', 'src/web/', 'deploy/')) or f in ['test/smoke.ts','test/wire/index.html','test/wire/wire.js','LICENSE'])
+    # Runtime gates also emit Bend fixtures (effects, phone payloads, smoke).
+    # Their source and imported fixture helpers must invalidate a cached pass.
+    named = sorted(f for f in files if f.startswith(('scripts/', 'test/', 'desktop/', 'src/mobile/', 'src/web/', 'deploy/')) or f == 'LICENSE')
     key = subprocess.check_output(['scripts/inputs-key.sh','local-runtime-v1',*named],cwd=ROOT,text=True,
         env={**os.environ,'BP_KEY_ROOTS':'src/server/main.bend src/mobile/app.bend test/wire/wire.bend'}).strip()
     versions = [subprocess.check_output(cmd,text=True).strip() for cmd in [['bun','--revision'],['node','--version']]]
@@ -55,6 +57,14 @@ def main():
         run('startup',['scripts/js-smoke.sh',binary,web])
     else:
         run('wire',['bend','test/wire/index.html','-o','build/wire'])
+        run('liveness-progress',['bun','test/tools/liveness_progress_test.ts'])
+        run('lock-guard-liveness',['bun','test/tools/lock_guard_liveness_test.ts'])
+        run('lock-helper-liveness',['bun','test/tools/lock_helper_liveness_test.ts'])
+        run('work-intent-recovery',['bun','test/tools/work_intent_recovery_test.ts'])
+        run('watch-scripts',['bun','test/tools/watch_scripts_test.ts'])
+        run('liveness',['bun','test/tools/liveness_e2e.ts',binary,str(ROOT/'build/wire')])
+        run('watched-work',['bun','test/tools/watch_e2e.ts',binary,str(ROOT/'build/wire')])
+        run('locks',['bun','test/tools/locks_e2e.ts',binary,str(ROOT/'build/wire')])
         run('full-smoke',['scripts/js-smoke.sh',binary,web],{'BACKPLANE_SMOKE_FULL':'1'})
         run('mailtriage',['bun','test/tools/mailtriage_e2e.ts',binary,str(ROOT/'build/wire')])
         run('stack',['bun','test/tools/js_stack_test.ts',binary])

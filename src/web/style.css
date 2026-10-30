@@ -1838,3 +1838,8 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .timeline-virtual-row > * { flex: none; }
 .timeline-entry { display: flex; flex-direction: column; gap: 10px; }
 @media (max-width: 760px) { .timeline-virtual-row { padding-inline: 10px; } }
+
+/* A progress gap is an amber warning, with its reason in the row/chrome. */
+.dot.stalled { background: var(--warn); border-radius: 0; transform: rotate(45deg); animation: none; }
+.plane-row .why.stalled { color: var(--warn); }
+.thread:has(.dot.stalled) .ago.agents { color: var(--warn); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -24,3 +24,5 @@ test/timeline_history_test.bend
 
 # Tool calls fold into drawers, shut until the person clicks one (laws fold_run_*).
 test/fold_test.bend
+# Stalled turns, non-killing deadlines, restart/provider retry and lock leases.
+test/liveness_suite_test.bend

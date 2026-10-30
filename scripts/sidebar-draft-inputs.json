@@ -37,7 +37,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "652b830e304f7d4f6d9781245acad5d36a3409134a0c987ab45405b99577e63c",
+    "src/core/client.bend": "05cf1e6127b79fff8d1e141c56d3585b755c18fb7259585038134a6698842332",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -68,7 +68,8 @@
     "src/core/layers.bend": "42ba4e35fa04e920a5aaa436b304b4ce07b8b3ba3fc569cd2bdec37630b5a551",
     "src/core/links.bend": "730e2e9f83224660d022c55f1292a2a8f05ba96518f3a6637c94fb2ab3358b7f",
     "src/core/live.bend": "e52a258ce2588fb93c50dec6e766d81102aa6e97064d4003dc8d4aa4a1c45700",
-    "src/core/locks.bend": "f6a91ea3147f84d10c5dfd003659309a7db37020c6cb67133e4e204101df4262",
+    "src/core/liveness.bend": "9ac832aa5350c1b091bd69374c6e5bef25004c8aea40c925aa25e8eb3c14cace",
+    "src/core/locks.bend": "5985aadf53853e870d3fac6edbe55216fb08c83bbab6a806919bd8230ae4e7ac",
     "src/core/look.bend": "039d5756adb79dfb55304bdecdfeac0e9fe15a6aeb3b5676a3d1fd0703d6ed8c",
     "src/core/mail.bend": "621fde9e93c646f8a8a0a85b3e25f79dc20b9e71b9277bbf5ae131a628d5c010",
     "src/core/mailcontinuity.bend": "c9dcefe5d1863e11f85c4c522df1695a85b6cffdf89f6ee3cf7a58271ce8805d",
@@ -88,7 +89,7 @@
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
     "src/core/order.bend": "52c5c591c444256bd2fba6322495d454e7b7b4199cc609541b1263956747f301",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
-    "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
+    "src/core/plane.bend": "a11ae76fded98d1a05ba69e7a9557fa3c6d5dad381df8cb1b1cd1a97f1f4f928",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
     "src/core/prompt.bend": "de79af86187f72df680c127125514b3ce03fbeeae83238c696179e6c3c134882",
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
@@ -109,7 +110,7 @@
     "src/core/sidebar-drafts.bend": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
     "src/core/sidebar-read.bend": "8b9952dbbe0c9ae89bf808e995b8ce643f20102587238724c9156076dd21419d",
     "src/core/sign.bend": "f6c4b636f7be64f7a4a03e8cc4d0b19eae2696e8c08a92236ad7e378d7120edc",
-    "src/core/signal.bend": "1b60221d3dc1e17fe1f900403829482409ed47eb0f5845be51525f208785352f",
+    "src/core/signal.bend": "c2c4b9f56e61d436a3f0b74dce5b6b0284da3827d3bb4f0996efcb5f10c40a08",
     "src/core/slash.bend": "4b88f73566a9b3694a888ede21f2117157df9449c50c52806648e4795d298932",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "feda431038cc6399db63a943d1475f54b67efb76e8b02984bb14f0f8bc2a8c64",
@@ -144,7 +145,7 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
-    "src/mobile/screen.bend": "05129cc45396f7ba97f50a4890c8d189476b22dec7006071bee861dddf3fd002",
+    "src/mobile/screen.bend": "7df3d914e80014deb7e414d526ccde08be80574ba22a1eff02906d183bb88368",
     "src/server/thin-actor.bend": "3adb274a8dc1d5accfaebf4e3bd2c25b7d8e49d2a1a5cb6352d742d189fcf555",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -152,7 +153,7 @@
     "src/server/thin-splice.bend": "f08bc9b41cab08e1d1d4f6931f1fb8f5a8a2edb81d2fd96231ee544649469eb0",
     "src/server/thin-view.bend": "d481b5b710328bcc1c1ae9d0d58feec0393ad5d8e90f6fcc16f2ae8da8a7aa6b",
     "src/server/thinstore.bend": "24f5e750eab6f52abfefeeca6884ed054ab0d8c9bea46c301fb384004b8d54a3",
-    "src/web/bots.bend": "e4353e962b8e71e46a96b0f2a8c6815643b340751c0e2d812a1d807d14256cf6",
+    "src/web/bots.bend": "7518bf17604f71e861f598d365ff989214287ad466aee6bf808e3c38d5d1bf7e",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
     "src/web/dom.bend": "a564bbb014b7247fc3cd670a427bf13782e8f6217b3c32abadb91efc13d5cf7e",
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
@@ -164,7 +165,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "daa4208312a023c422886d4e07d639ad9236aa31a079ed7eb7244406dde1fc22"
+    "src/web/view.bend": "8e9746f74a63de7f6bff43112fdae498e12a3d94b97986e5251ae051c2bd4b94"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -334,6 +335,27 @@
       "base": "214c0c2f391b60227688424dd280d6c07d922649",
       "changedClosureFiles": [],
       "scope": "Owner-scoped private lanes hidden via existing RunSet plus shared run lookup; no changes to draft/image extraction or render/view bodies.24 full-output freshness checks passed; explicit private-context/publication tests passed. No native/device acceptance inherited."
+    },
+    "stalledAgentLiveness": {
+      "baseCommit": "657fdccc009e79f79409c59a2bfd94a6094a33cd",
+      "changedClosureFiles": [
+        "src/core/client.bend",
+        "src/core/liveness.bend",
+        "src/core/locks.bend",
+        "src/core/plane.bend",
+        "src/core/signal.bend",
+        "src/mobile/screen.bend",
+        "src/web/bots.bend",
+        "src/web/view.bend"
+      ],
+      "scope": "Reviewed liveness display overlay from canonical settings across sidebar, plane and mobile; pure liveness module has no Ui or draft access. Client change adds canonical stalled urgency and preserves the selected-thread fork entry. Lock helpers have no draft access. All settings remain in canonical sidebar input; SettingSet invalidates SignalRevision. No draft readers, scratch filtering, image keys, scanner, native bridge authority or fallback changes.",
+      "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+      "fullOutputAssertions": 24,
+      "fullOutputLogSHA256": "c1e4a4fac2b801b126aa8291bfcda8fc18c95860e2b9eab33d738a778254cce3",
+      "limits": "Source review and executed freshness regression only; global proof, full source, artifact and device acceptance remain pending.",
+      "integratedMain": "56209ed8e7ec30da951d680186b9c373fb07861b",
+      "integrationFullOutputEvidenceSha256": "c8b63dfad6ae44c4f98dc274fc0f2fe68817293e02fad7261a5d03c7a50602df",
+      "integrationReview": "Preserved main tool-drawer, todo and workspace changes. Liveness reads canonical settings only; settings remain in full sidebar inputs. No scratch/draft filtering, image key or authority changes. Full sidebar-output freshness passes after integration."
     }
   },
   "reviewNote": "Tool-call drawers on top of the to-do move: fold.bend (runs shut by default, live label, RHead live flag), msgs.bend (fold.running), view.bend (drawer head, run marks on timeline rows) and screen.bend (fold row live, run marks) touch only thread timeline entries; the sidebar draft is unaffected (sidebar_draft_image_test 24 ok)"

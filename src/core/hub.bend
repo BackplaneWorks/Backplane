@@ -1871,6 +1871,34 @@ def Bg.mark.k(none: Bool, +th: String, +now: Nat, +call: String, +kind: String, 
 def Bg.mark(+th: String, +now: Nat, +call: String, +kind: String, +text: String) -> List<&2, M.Change>:
   Bg.mark.k(String.is_empty(call), th, now, call, kind, text)
 
+# A missing timeout uses the hub default; explicit zero is the opt-out.
+# All deadlines report only. They never signal a task or its process.
+def WorkTimeout.number(s: String, valid: Bool, +acc: Nat) -> Maybe<&2, Nat>:
+  match s valid:
+    case _ False{}: None{}
+    case SNil{} True{}: Some{acc}
+    case SCon{+c, t} True{}:
+      WorkTimeout.number(t, Char.is_digit(c), Nat.add(Nat.mul(acc, 10n), U32.to_nat((Char.to_u32(c) - 48 : U32))))
+
+def WorkTimeout.parse(+raw: String, fallback: Nat) -> Nat:
+  Maybe.default(&2, Nat, WorkTimeout.number(raw, Bool.and(Bool.not(String.is_empty(raw)), Nat.is_le(String.length(raw), 10n)), 0n), fallback)
+
+def WorkTimeout.seconds(+s: M.State, +a: J.Json) -> Nat:
+  WorkTimeout.parse(J.Json.as_raw(J.Json.get(a, "timeoutSec"), ""), WorkTimeout.parse(M.Setting.get(s, "work.timeout.seconds", "1200"), 1200n))
+
+def WorkTimeout.key(+th: String, +id: String) -> String:
+  "work.deadline." ++ th ++ "." ++ id
+
+def WorkTimeout.start.k(fresh: Bool, +s: M.State, +now: Nat, +th: String, +id: String, +secs: Nat) -> List<&2, M.Change>:
+  match fresh:
+    case False{}: Nil{}
+    case True{}:
+      [M.SettingSet{WorkTimeout.key(th, id), Nat.show(Bool.pick(Nat, Nat.is_eq(secs, 0n), 0n, Nat.add(now, secs))), now},
+        M.SettingSet{WorkTimeout.key(th, id) ++ ".noted", "", now}]
+
+def WorkTimeout.start(+s: M.State, +now: Nat, +th: String, +id: String, +a: J.Json) -> List<&2, M.Change>:
+  WorkTimeout.start.k(String.is_empty(M.Setting.get(s, WorkTimeout.key(th, id), "")), s, now, th, id, WorkTimeout.seconds(s, a))
+
 def Bg.started(agent: Bool, +s: M.State, +th: String, +now: Nat, +o: J.Json) -> List<&2, M.Change>:
   match agent:
     case True{}:
@@ -1878,7 +1906,7 @@ def Bg.started(agent: Bool, +s: M.State, +th: String, +now: Nat, +o: J.Json) -> 
       +what = J.Json.get_str(o, "description", "Subagent")
       +kind = M.Bg.kind(J.Json.get_str(o, "task_type", ""))
       List.append(&2, M.Change, Bg.put(s, th, now, M.Bg.start(M.Bg.of(s, th), J.Json.get_str(o, "task_id", ""), what, call, what, kind)),
-        Bg.mark(th, now, call, "start:" ++ kind, what))
+        List.append(&2, M.Change, Bg.mark(th, now, call, "start:" ++ kind, what), WorkTimeout.start(s, now, th, J.Json.get_str(o, "task_id", ""), o)))
     case False{}:
       Nil{}
 
@@ -1887,7 +1915,7 @@ def Bg.started(agent: Bool, +s: M.State, +th: String, +now: Nat, +o: J.Json) -> 
 def Bg.moved(bg: Bool, +s: M.State, +th: String, +now: Nat, +id: String) -> List<&2, M.Change>:
   match bg:
     case True{}:
-      Bg.put(s, th, now, M.Bg.start(M.Bg.of(s, th), id, "Background shell", "", "Background shell", "shell"))
+      List.append(&2, M.Change, Bg.put(s, th, now, M.Bg.start(M.Bg.of(s, th), id, "Background shell", "", "Background shell", "shell")), WorkTimeout.start(s, now, th, id, J.Null{}))
     case False{}:
       Nil{}
 
@@ -2512,14 +2540,14 @@ def Hub.deliver.restart(+s: M.State, +now: Nat, +thread: String, +msg: String, r
       Bool.pick(List<&2, M.Change>, String.is_empty(Ride.of(s, thread)), Nil{}, Ride.done(Ride.of(s, thread), now, thread, "with the steer"))), Nil{},
     Steer.go(Hub.thread(s, thread), Hub.cwd(s, Hub.thread(s, thread)), now, Hub.seq(s), thread, M.Queue.join(M.Queue.join(M.Queue.of(s, thread), RD.Ride.input(Ride.of(s, thread))), text)))
 
-# a message for a running non-Claude turn rides its next tool result (an
-# older log's queue still restarts it with everything at once)
+# Automatic delivery never restarts a running turn. An older log's queue
+# remains owned and joins the ride at the next natural turn boundary.
 def Hub.deliver.ride(clear: Bool, +s: M.State, +now: Nat, +thread: String, +msg: String, role: M.Role, +text: String) -> Step:
   match clear:
     case True{}:
       Ride.wait(s, now, thread, msg, role, text)
     case False{}:
-      Hub.deliver.restart(s, now, thread, msg, role, text)
+      Ride.wait(s, now, thread, msg, role, text)
 
 def Hub.deliver.steer(claude: Bool, +s: M.State, +now: Nat, +thread: String, +msg: String, role: M.Role, +text: String) -> Step:
   match claude:
@@ -5059,7 +5087,7 @@ def Run.queue.hold(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
 
 # Stop: the running turn is interrupted (Stop.outs), its asks close
 def Retire.stop.f(+s: M.State, +now: Nat, +th: String, +from: String, os: List<&2, Out>) -> Step:
-  Retire.turn.f(True{}, s, now, th, from, Step{List.append(&2, M.Change, Run.queue.hold(s, now, th), Retire.asks(M.Asks.all(s), th, now)),
+  Retire.turn.f(True{}, s, now, th, from, Step{M.SettingSet{"restart.retry." ++ th, "", now} <> M.SettingSet{"provider.resume." ++ th, "", now} <> List.append(&2, M.Change, Run.queue.hold(s, now, th), Retire.asks(M.Asks.all(s), th, now)),
     List.append(&2, Out, os, List.append(&2, Out, Stop.outs(Hub.provider(Hub.thread(s, th)), th, Hub.id("i", now, Hub.seq(s))), Retire.answers(M.Asks.all(s), th)))})
 
 def Retire.stop(+s: M.State, +now: Nat, +th: String, os: List<&2, Out>) -> Step:
@@ -5070,7 +5098,7 @@ def Hub.interrupt.k(run: Bool, +s: M.State, +now: Nat, +client: U32, +id: String
     case True{}:
       Retire.stop(s, now, thread, [Reply.ok(client, id)])
     case False{}:
-      Step.outs([Reply.ok(client, id)])
+      Step{[], [Reply.ok(client, id)]}
 
 # archive and delete kill the process whatever it was doing: its asks and
 # background rows go, and a running turn ends
@@ -5235,12 +5263,24 @@ def Locks.work.has.go(names: List<&2, String>, +s: M.State, +id: String) -> Bool
 def Locks.work.has(+s: M.State, +id: String) -> Bool:
   Locks.work.has.go(M.Locks.names(s), s, id)
 
+def Watch.timeout.rows(ls: List<&2, String>, +id: String) -> List<&2, String>:
+  match ls:
+    case Nil{}: Nil{}
+    case +l <> rest:
+      Bool.pick(String, M.Bg.is(l, id), Watch.line(M.Bg.field(l, 0n), "watching (timed out, still running)", M.Bg.title(l), Watch.kind(l), Watch.target(l), Watch.ident(l), 0n), l) <> Watch.timeout.rows(rest, id)
+
+def Watch.timeout.locked(fresh: Bool, +s: M.State, +now: Nat, +th: String, +id: String, +detail: String) -> Step:
+  match fresh:
+    case False{}: Step.none()
+    case True{}:
+      Step.cat(Step{[Watch.put(th, now, Watch.timeout.rows(M.Work.watch(s, th), id))], Nil{}}, Watch.tell(s, now, th, Watch.text(M.Bg.title(Watch.find(M.Work.watch(s, th), id)), "timed out, still running, lock retained", detail)))
+
 def Watch.end.locked(timeout: Bool, +s: M.State, +now: Nat, +th: String, +id: String, +status: String, +detail: String) -> Step:
   match timeout:
     case True{}:
-      Step.cat(Step{[Watch.put(th, now, Watch.set(M.Work.watch(s, th), id, "watching (timed out, still running)"))], Nil{}}, Watch.tell(s, now, th, Watch.text(M.Bg.title(Watch.find(M.Work.watch(s, th), id)), "timed out, still running, lock retained", detail)))
+      Watch.timeout.locked(Bool.and(Bool.not(String.is_empty(Watch.find(M.Work.watch(s, th), id))), Bool.not(String.eq(Watch.state(Watch.find(M.Work.watch(s, th), id)), "watching (timed out, still running)"))), s, now, th, id, detail)
     case False{}:
-      Watch.end.k(Bool.and(Bool.not(String.is_empty(Watch.find(M.Work.watch(s, th), id))), Bool.not(M.Bg.ended(Watch.find(M.Work.watch(s, th), id)))), String.eq(status, "timeout"), Watch.find(M.Work.watch(s, th), id), s, now, th, id, status, detail)
+      Watch.end.k(Bool.and(Bool.not(String.is_empty(Watch.find(M.Work.watch(s, th), id))), Bool.or(Bool.not(M.Bg.ended(Watch.find(M.Work.watch(s, th), id))), Bool.and(String.eq(M.Bg.status(Watch.find(M.Work.watch(s, th), id)), "unknown"), Bool.not(String.eq(status, "timeout"))))), String.eq(status, "timeout"), Watch.find(M.Work.watch(s, th), id), s, now, th, id, status, detail)
 
 def Watch.end.raw(+s: M.State, +now: Nat, +th: String, +id: String, +status: String, +detail: String) -> Step:
   Watch.end.locked(Bool.and(String.eq(status, "timeout"), Locks.work.has(s, id)), s, now, th, id, status, detail)
@@ -5301,14 +5341,14 @@ def Watch.rearm.one(ended: Bool, +l: String, +th: String, +cwd: String, rest: Li
     case True{}:
       rest
     case False{}:
-      Await{th, M.Bg.field(l, 0n), Watch.kind(l), Watch.target(l), Watch.ident(l), Watch.deadline(l), cwd} <> rest
+      Await{th, M.Bg.field(l, 0n), Watch.kind(l), Watch.target(l), Watch.ident(l), Bool.pick(Nat, String.eq(M.Bg.status(l), "unknown"), 0n, Watch.deadline(l)), cwd} <> rest
 
 def Watch.rearm.rows(ls: List<&2, String>, +th: String, +cwd: String) -> List<&2, Out>:
   match ls:
     case Nil{}:
       Nil{}
     case +l <> t:
-      Watch.rearm.one(Bool.or(M.Bg.ended(l), String.starts_with(Watch.state(l), "waiting for lock")), l, th, cwd, Watch.rearm.rows(t, th, cwd))
+      Watch.rearm.one(Bool.or(Bool.and(M.Bg.ended(l), Bool.not(String.eq(M.Bg.status(l), "unknown"))), String.starts_with(Watch.state(l), "waiting for lock")), l, th, cwd, Watch.rearm.rows(t, th, cwd))
 
 def Watch.rearm.go(ts: List<&2, M.Thread>, +s: M.State) -> List<&2, Out>:
   match ts:
@@ -5949,8 +5989,8 @@ def Locks.work.start(+s: M.State, +now: Nat, +th: String, +a: J.Json, +ready: Bo
   +party = {LK.LockParty{id, "work", th, J.Json.get_str(a, "note", J.Json.get_str(a, "command", "")), now, 0n} : LK.LockParty}
   +l = LK.Lock.acquire(M.Locks.get(s, name), party, ready)
   +held = Bool.and(String.eq(LK.Lock.owner(l), id), LK.Lock.ready(l))
-  Step{[M.LockChanged{name, l, now}, Watch.put(th, now, List.append(&2, String, M.Work.watch(s, th), [Watch.line(id, Bool.pick(String, held, "launching", LK.Lock.wait.word(name, LK.Lock.position(l, id))), "" ++ LK.Lock.note(party), "run", J.Json.get_str(a, "command", ""), "-", Watch.deadline.of(now, M.Switch.num(J.Json.as_raw(J.Json.get(a, "timeoutSec"), "0"), 0n)))]))],
-    Bool.pick(List<&2, Out>, held, [Await{th, id, "run", J.Json.get_str(a, "command", ""), "-", Watch.deadline.of(now, M.Switch.num(J.Json.as_raw(J.Json.get(a, "timeoutSec"), "0"), 0n)), Hub.cwd(s, Hub.thread(s, th))}], Nil{})}
+  Step{[M.LockChanged{name, l, now}, Watch.put(th, now, List.append(&2, String, M.Work.watch(s, th), [Watch.line(id, Bool.pick(String, held, "launching", LK.Lock.wait.word(name, LK.Lock.position(l, id))), "" ++ LK.Lock.note(party), "run", J.Json.get_str(a, "command", ""), "-", Watch.deadline.of(now, WorkTimeout.seconds(s, a)))]))],
+    Bool.pick(List<&2, Out>, held, [Await{th, id, "run", J.Json.get_str(a, "command", ""), "-", Watch.deadline.of(now, WorkTimeout.seconds(s, a)), Hub.cwd(s, Hub.thread(s, th))}], Nil{})}
 
 def Locks.work.grant(+s: M.State, +now: Nat, +p: LK.LockParty) -> Step:
   +th = LK.Lock.thread(p)
@@ -6052,7 +6092,100 @@ def Locks.wait.go(q: List<&2, LK.LockParty>, +s: M.State, +now: Nat, +name: Stri
     case +p <> t:
       Locks.wait.go(t, s, now, name, 1n+n, Step.cat(st, Locks.wait.party(String.eq(LK.Lock.kind(p), "work"), p, M.State.replay(Queue.changes(st), s), now, name, n)))
 
-def Locks.after.one(+before: M.State, +s: M.State, +now: Nat, +name: String) -> Step:
+# Lock heartbeats come only from real progress, never from the watchdog's
+# own nudge, a waiting poll or the hub's periodic heartbeat.
+def Locks.lease.number(s: String, valid: Bool, +acc: Nat) -> Nat:
+  match s valid:
+    case _ False{}: 0n
+    case SNil{} True{}: acc
+    case SCon{+c, t} True{}:
+      Locks.lease.number(t, Char.is_digit(c), Nat.add(Nat.mul(acc, 10n), U32.to_nat((Char.to_u32(c) - 48 : U32))))
+
+def Locks.lease.seconds.k(+minutes: Nat) -> Nat:
+  Nat.mul(Bool.pick(Nat, Nat.is_eq(minutes, 0n), 20n, minutes), 60n)
+
+def Locks.lease.seconds(+s: M.State) -> Nat:
+  Locks.lease.seconds.k(Locks.lease.number(M.Setting.get(s, "locks.lease.minutes", "20"), True{}, 0n))
+
+def Locks.warning.key(+name: String) -> String:
+  "lock.warning." ++ name
+
+def Locks.warning(+s: M.State, +name: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(s, Locks.warning.key(name), "")), J.Null{})
+
+def Locks.warning.same(+s: M.State, +name: String, +p: LK.LockParty) -> Bool:
+  +o = Locks.warning(s, name)
+  Bool.and(String.eq(J.Json.get_str(o, "owner", ""), LK.Lock.id(p)), Nat.is_eq(J.Json.get_nat(o, "lease", 0n), LK.Lock.lease(p)))
+
+def Locks.warning.put(+name: String, +p: LK.LockParty, +now: Nat) -> M.Change:
+  M.SettingSet{Locks.warning.key(name), J.Json.show(J.Json.obj([J.KV{"owner", J.Str{LK.Lock.id(p)}}, J.KV{"lease", J.Num{Nat.show(LK.Lock.lease(p))}}, J.KV{"at", J.Num{Nat.show(now)}}])), now}
+
+def Locks.heartbeat.one(+s: M.State, +now: Nat, +thread: String, +name: String) -> Step:
+  +l = M.Locks.get(s, name)
+  +l2 = LK.Lock.heartbeat(l, thread, Nat.add(now, Locks.lease.seconds(s)))
+  +same = String.eq(J.Json.show(LK.Lock.json(l)), J.Json.show(LK.Lock.json(l2)))
+  Step{Bool.pick(List<&2, M.Change>, same, Nil{}, [M.LockChanged{name, l2, now}]), Nil{}}
+
+def Locks.heartbeat.go(names: List<&2, String>, +s: M.State, +now: Nat, +thread: String) -> Step:
+  match names:
+    case Nil{}: Step.none()
+    case name <> t: Step.cat(Locks.heartbeat.one(s, now, thread, name), Locks.heartbeat.go(t, s, now, thread))
+
+def Locks.heartbeat(+s: M.State, +now: Nat, +thread: String) -> Step:
+  Locks.heartbeat.go(M.Locks.names(s), s, now, thread)
+
+def Locks.lease.busy(+s: M.State, +p: LK.LockParty) -> Bool:
+  Bool.or(M.Work.turn.runs(M.Thread.turn(Hub.thread(s, LK.Lock.thread(p)))), Nat.is_gt(M.Work.busy(s, LK.Lock.thread(p)), 0n))
+
+def Locks.lease.notice.go(q: List<&2, LK.LockParty>, +s: M.State, +now: Nat, +name: String, +st: Step) -> Step:
+  match q:
+    case Nil{}: st
+    case +p <> t:
+      Locks.lease.notice.go(t, s, now, name, Step.cat(st, Lr.send(M.State.replay(Queue.changes(st), s), now, "lock:" ++ name, LK.Lock.thread(p), "Lock " ++ name ++ " had a stale idle holder; its lease was released. Your FIFO position is preserved.")))
+
+def Locks.lease.release.go(release: Bool, +s: M.State, +now: Nat, +name: String, +p: LK.LockParty) -> Step:
+  match release:
+    case False{}: Step.none()
+    case True{}:
+      +st = Locks.release(s, now, name, LK.Lock.id(p))
+      Locks.lease.notice.go(LK.Lock.waiters(M.Locks.get(s, name)), s, now, name,
+        Step.cat(st, Lr.send(M.State.replay(Queue.changes(st), s), now, "lock:" ++ name, LK.Lock.thread(p), "Lock " ++ name ++ " lease expired after the warning grace period while you had no running turn or owned work; the reservation was released.")))
+
+def Locks.lease.warn(warned: Bool, +s: M.State, +now: Nat, +name: String, +p: LK.LockParty) -> Step:
+  match warned:
+    case False{}:
+      Step.cat(Step{[Locks.warning.put(name, p, now)], Nil{}}, Lr.send(s, now, "lock:" ++ name, LK.Lock.thread(p), "Lock " ++ name ++ " has no recent progress heartbeat. Report progress or release it. Busy work keeps its lock; an idle reservation is released after a 60-second warning grace period."))
+    case True{}:
+      Locks.lease.release.go(LK.Lock.lease.release(True{}, True{}, Nat.is_ge(now, Nat.add(J.Json.get_nat(Locks.warning(s, name), "at", now), 60n)), Locks.lease.busy(s, p)), s, now, name, p)
+
+def Locks.lease.expired(late: Bool, +s: M.State, +now: Nat, +name: String, +p: LK.LockParty) -> Step:
+  match late:
+    case False{}: Step.none()
+    case True{}: Locks.lease.warn(Locks.warning.same(s, name, p), s, now, name, p)
+
+def Locks.lease.init(fresh: Bool, +s: M.State, +now: Nat, +name: String, +p: LK.LockParty) -> Step:
+  match fresh:
+    case True{}:
+      Locks.put(s, now, name, LK.Lock.renew(M.Locks.get(s, name), LK.Lock.id(p), Nat.add(now, Locks.lease.seconds(s))))
+    case False{}:
+      Locks.lease.expired(LK.Lock.lease.expired(LK.Lock.lease(p), now), s, now, name, p)
+
+def Locks.lease.holder(h: Maybe<&2, LK.LockParty>, +changed: Bool, +s: M.State, +now: Nat, +name: String) -> Step:
+  match h:
+    case None{}: Step.none()
+    case Some{LK.LockParty{_, "client", _, _, _, _}}: Step.none()
+    case Some{+p}: Locks.lease.init(Bool.or(changed, Nat.is_eq(LK.Lock.lease(p), 0n)), s, now, name, p)
+
+def Locks.lease.ready(ready: Bool, +before: M.State, +s: M.State, +now: Nat, +name: String) -> Step:
+  match ready:
+    case False{}: Step.none()
+    case True{}:
+      Locks.lease.holder(LK.Lock.holder(M.Locks.get(s, name)), Bool.or(Bool.not(LK.Lock.ready(M.Locks.get(before, name))), Bool.not(String.eq(LK.Lock.owner(M.Locks.get(before, name)), LK.Lock.owner(M.Locks.get(s, name))))), s, now, name)
+
+def Locks.lease(+before: M.State, +s: M.State, +now: Nat, +name: String) -> Step:
+  Locks.lease.ready(LK.Lock.ready(M.Locks.get(s, name)), before, s, now, name)
+
+def Locks.after.pruned(+before: M.State, +s: M.State, +now: Nat, +name: String) -> Step:
   +old = M.Locks.get(before, name)
   +current = M.Locks.get(s, name)
   +l = Locks.prune(current, s, now)
@@ -6061,6 +6194,12 @@ def Locks.after.one(+before: M.State, +s: M.State, +now: Nat, +name: String) -> 
   +s1 = M.State.replay(cs, s)
   Step.cat(Step.cat(Step{cs, Bool.pick(List<&2, Out>, changed, [LockGuard{name, LK.Lock.owner(old), LK.Lock.owner(l)}], Nil{})}, Locks.wait.go(LK.Lock.waiters(l), s1, now, name, 1n, Step.none())),
     Locks.grant(Bool.and(LK.Lock.ready(l), Bool.and(Bool.not(changed), Bool.not(LK.Lock.ready(old)))), LK.Lock.holder(l), s1, now, name))
+
+def Locks.after.leased(+before: M.State, +s: M.State, +now: Nat, +name: String, +st: Step) -> Step:
+  Step.cat(st, Locks.after.pruned(before, M.State.replay(Queue.changes(st), s), now, name))
+
+def Locks.after.one(+before: M.State, +s: M.State, +now: Nat, +name: String) -> Step:
+  Locks.after.leased(before, s, now, name, Locks.lease(before, s, now, name))
 
 # a step's changes hold a LockChanged of this lock (the only change that
 # writes a lock's setting, M.Locks.fold)
@@ -7028,6 +7167,20 @@ def Carry.live(t: M.Thread) -> Bool:
 def Carry.will(+before: M.State, +th: String) -> Bool:
   Bool.and(Bool.not(MR.Run.is(before, th)), Bool.and(M.Carry.on(before), Bool.and(Bool.and(Hub.running(Hub.thread(before, th)), Carry.live(Hub.thread(before, th))), Carry.fresh(M.State.mine(before, th)))))
 
+# A repeated continuation is delayed by restartretry.bend. Keep a delegated
+# task's ownership while it waits; Carry.will and immediate starts stay exact.
+def Carry.prompt(es: List<&2, M.Entry>) -> Bool:
+  match es:
+    case Nil{}: False{}
+    case M.Act{_, _, _, "restart", _, _} <> rest: Carry.prompt(rest)
+    case M.Msg{_, _, M.User{}, text, _} <> _: Carry.is(text)
+    case _: False{}
+
+def Carry.deferred(+before: M.State, +th: String) -> Bool:
+  Bool.and(Bool.not(MR.Run.is(before, th)), Bool.and(M.Carry.on(before),
+    Bool.and(Hub.running(Hub.thread(before, th)), Bool.and(Carry.live(Hub.thread(before, th)),
+      Bool.and(Bool.not(Carry.will(before, th)), Carry.prompt(M.State.mine(before, th)))))))
+
 # Recovery
 # --------
 # After a restart nothing the old process held is left: no agent runs, no
@@ -7062,7 +7215,7 @@ def Rec.turn.k(run: Bool, will: Bool, +s: M.State, +now: Nat, +th: String) -> St
 def Rec.turn(r: Rec, +before: M.State, +now: Nat, +th: String) -> Rec:
   match r:
     case Rec{+s, cs, os}:
-      Rec.add(Rec{s, cs, os}, Rec.turn.k(Hub.running(Hub.thread(s, th)), Carry.will(before, th), s, now, th))
+      Rec.add(Rec{s, cs, os}, Rec.turn.k(Hub.running(Hub.thread(s, th)), Bool.or(Carry.will(before, th), Carry.deferred(before, th)), s, now, th))
 
 def Rec.turns(ts: List<&2, String>, r: Rec, +before: M.State, +now: Nat) -> Rec:
   match ts:
@@ -7370,11 +7523,7 @@ def Rec.lost(ts: List<&2, String>, r: Rec, +now: Nat) -> Rec:
 # deliveries are finished, and lost background work is logged or marked
 # to be told (Hub.carry and Rec.release tell it)
 def Locks.recover.party(p: LK.LockParty, +s: M.State, +now: Nat) -> Step:
-  match p:
-    case LK.LockParty{+id, "work", +th, _, _, _}:
-      Watch.end.raw(s, now, th, id, "lost on restart", "The lock was released; start the work again if needed.")
-    case _:
-      Step.none()
+  Step.none()
 
 def Locks.recover.parties(ps: List<&2, LK.LockParty>, +s: M.State, +now: Nat, +st: Step) -> Step:
   match ps:
@@ -8786,6 +8935,36 @@ def Fallback.limited(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Ste
     [M.SettingSet{"fallback.pending." ++ th, "", now}, M.SettingSet{"fallback.continuing." ++ th, "yes", now}, M.TurnChanged{th, M.Interrupted{}, now}, M.QueueTaken{th, now}, M.TurnChanged{th, M.Running{}, now}]) : List<&2, M.Change>}
   Step{cs, AgentStop{th} <> Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), M.Queue.join(Fallback.continue(s, th), M.Queue.of(s, th)), Hub.uuid(now, th ++ "/fallback/" ++ Nat.show(Hub.seq(s))))}
 
+# A reset retry belongs to the interrupted thread, independently of whether
+# a fallback chain was configured. Unknown or expired reset evidence never
+# invents a retry time. Persist the marker before scheduling any continuation.
+def ProviderResume.mark(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> List<&2, M.Change>:
+  [M.SettingSet{"provider.resume." ++ th,
+    J.Json.show(J.Json.obj([J.KV{"target", J.Str{FB.Target.key(Fallback.target(Hub.thread(s, th)))}},
+      J.KV{"reset", J.Json.nat(Bool.pick(Nat, Nat.is_gt(FB.Limit.reset(lim), now), FB.Limit.reset(lim), 0n))},
+      J.KV{"reason", J.Str{String.take(FB.Limit.reason(lim), 400n)}}])), now}]
+
+def ProviderResume.hold(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, normal: Step) -> Step:
+  Step{List.append(&2, M.Change, ProviderResume.mark(s, now, th, lim),
+    [M.TurnChanged{th, M.Interrupted{}, now}, M.SettingSet{"fallback.pending." ++ th, "", now},
+      M.ActivityLogged{th, Hub.id("quota", now, Hub.seq(s)), "warn", "provider-wait", "Provider limit reached; " ++
+        Bool.pick(String, Nat.is_gt(FB.Limit.reset(lim), now), "will continue when the reported reset arrives.", "no future reset supplied; waiting for updated provider evidence or your action."), now}]), [ToolsGone{th}]}
+
+def ProviderResume.pending(has: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
+  match has:
+    case False{}: normal
+    case True{}: ProviderResume.hold(s, now, th, FB.Limit{J.Json.get_str(o, "scope", ""), J.Json.get_str(o, "reason", "usage limit reached"), J.Json.get_nat(o, "reset", 0n)}, normal)
+
+def ProviderResume.line.m(lim: Maybe<&2, FB.Limit>, terminal: Bool, +s: M.State, +now: Nat, +th: String, normal: Step) -> Step:
+  match lim terminal:
+    case Some{+lim} True{}: ProviderResume.hold(s, now, th, lim, normal)
+    case Some{+lim} False{}: Step.after(normal, [M.SettingSet{"fallback.pending." ++ th, FB.Limit.json(lim, now), now}])
+    case None{} True{}:
+      +o = Fallback.pending(s, th)
+      +scope = J.Json.get_str(o, "scope", "")
+      ProviderResume.pending(Bool.not(String.is_empty(scope)), s, now, th, o, normal)
+    case None{} False{}: normal
+
 def Fallback.line.limit(terminal: Bool, +s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
   match terminal:
     case True{}: Fallback.limited(s, now, th, lim)
@@ -8807,10 +8986,15 @@ def Fallback.line.on(on: Bool, +terminal: Bool, +s: M.State, +now: Nat, +th: Str
     case True{}:
       Fallback.line.m(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), terminal, s, now, th,
         Fallback.line.pending(Bool.and(terminal, Bool.not(String.is_empty(J.Json.get_str(Fallback.pending(s, th), "scope", "")))), s, now, th, Fallback.pending(s, th), normal))
+    case False{}: ProviderResume.line.m(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), terminal, s, now, th, normal)
+
+def Fallback.line.live(live: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, +terminal: Bool, normal: Step) -> Step:
+  match live:
     case False{}: normal
+    case True{}: Fallback.line.on(Bool.and(Bool.not(ACCT.Accounts.named(s, th)), FB.Chain.on(s)), terminal, s, now, th, o, normal)
 
 def Fallback.line(+s: M.State, +now: Nat, +th: String, +o: J.Json, terminal: Bool, normal: Step) -> Step:
-  Fallback.line.on(Bool.and(Bool.not(ACCT.Accounts.named(s, th)), Bool.and(FB.Chain.on(s), Bool.and(Hub.running(Hub.thread(s, th)), String.is_empty(J.Json.get_str(o, "parent_tool_use_id", ""))))), terminal, s, now, th, o, normal)
+  Fallback.line.live(Bool.and(Hub.running(Hub.thread(s, th)), String.is_empty(J.Json.get_str(o, "parent_tool_use_id", ""))), s, now, th, o, terminal, normal)
 
 # One durable alert per outage, plus an audit row in every affected thread.
 # The count includes active threads on the same unavailable scope at discovery.
@@ -8926,8 +9110,14 @@ def Auth.cancel(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
   List.append(&2, M.Change, Bool.pick(List<&2, M.Change>, Auth.waiting(s, th), [M.SettingSet{"auth.wait." ++ th, "", now}], Nil{}),
     Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "fallback.pending." ++ th, "")), Nil{}, [M.SettingSet{"fallback.pending." ++ th, "", now}]))
 
+def AutoResume.cancel(+s: M.State, +now: Nat, +thread: String) -> List<&2, M.Change>:
+  List.append(&2, M.Change,
+    Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "restart.retry." ++ thread, "")), Nil{}, [M.SettingSet{"restart.retry." ++ thread, "", now}]),
+    Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "provider.resume." ++ thread, "")), Nil{}, [M.SettingSet{"provider.resume." ++ thread, "", now}]))
+
 def Hub.interrupt(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String) -> Step:
-  Step.after(Hub.interrupt.k(Hub.running(Hub.thread(s, thread)), s, now, client, id, thread), Auth.cancel(s, now, thread))
+  Step.after(Hub.interrupt.k(Hub.running(Hub.thread(s, thread)), s, now, client, id, thread),
+    List.append(&2, M.Change, Auth.cancel(s, now, thread), AutoResume.cancel(s, now, thread)))
 
 # an archived thread waits on no clock: archiving a snoozed one wakes it, so
 # its row and header no longer say it is snoozed (law archive_wakes)
@@ -9132,8 +9322,8 @@ def Fallback.alert(+s: M.State, +now: Nat, +th: String, scope: String, text: Str
 def Fallback.block(+s: M.State, +now: Nat, +th: String, +text: String) -> Step:
   +from = Fallback.target(Hub.thread(s, th))
   +say = Fallback.say(s, now, th, from, "", True{})
-  Step{List.append(&2, M.Change, [M.TurnChanged{th, M.Interrupted{}, now}, M.TurnQueued{th, "fallback:held:" ++ Nat.show(Hub.seq(s)), text, now},
-    M.ActivityLogged{th, Hub.id("fallback", now, Hub.seq(s)), "error", "fallback-blocked", say, now}], Fallback.alert(s, now, th, Fallback.scope(s, from, now), say, True{})), Nil{}}
+  Step{List.append(&2, M.Change, ProviderResume.mark(s, now, th, FB.Limit{Fallback.scope(s, from, now), Fallback.reason(s, Fallback.scope(s, from, now)), J.Json.get_nat(FB.Limit.record(s, Fallback.scope(s, from, now)), "reset", 0n)}), List.append(&2, M.Change, [M.TurnChanged{th, M.Interrupted{}, now}, M.TurnQueued{th, "fallback:held:" ++ Nat.show(Hub.seq(s)), text, now},
+    M.ActivityLogged{th, Hub.id("fallback", now, Hub.seq(s)), "error", "fallback-blocked", say, now}], Fallback.alert(s, now, th, Fallback.scope(s, from, now), say, True{}))), Nil{}}
 
 # The legacy ledger verdict shares exactly the ordinary line path. This
 # preserves cmds_legacy_same for every input, including provider errors.
@@ -9151,7 +9341,9 @@ def Fallback.manual(cs: List<&2, M.Change>, +now: Nat) -> List<&2, M.Change>:
   match cs:
     case Nil{}: Nil{}
     case M.ProviderSet{+th, _, _, _} <> rest:
-      M.SettingSet{"fallback.intent." ++ th, "", now} <> Fallback.manual(rest, now)
+      M.SettingSet{"restart.retry." ++ th, "", now} <> M.SettingSet{"provider.resume." ++ th, "", now} <> M.SettingSet{"fallback.intent." ++ th, "", now} <> Fallback.manual(rest, now)
+    case M.TurnChanged{+th, M.Running{}, _} <> rest:
+      M.SettingSet{"restart.retry." ++ th, "", now} <> M.SettingSet{"provider.resume." ++ th, "", now} <> Fallback.manual(rest, now)
     case M.ModesSet{+th, _, _, _, _} <> rest:
       M.SettingSet{"fallback.intent." ++ th, "", now} <> Fallback.manual(rest, now)
     case _ <> rest: Fallback.manual(rest, now)
@@ -9374,3 +9566,64 @@ def Secret.saved.k(+asker: String, +s: M.State, +now: Nat, +name: String, +from:
 
 def Secret.saved(+s: M.State, +now: Nat, +name: String, +from: String) -> Step:
   Secret.saved.k(Secret.ask.thread(s, name), s, now, name, from)
+
+# Report background task deadlines once while retaining ownership and any lock.
+def WorkTimeout.row(go: Bool, +s: M.State, +now: Nat, +th: String, +l: String) -> Step:
+  match go:
+    case False{}: Step.none()
+    case True{}:
+      Step.before([M.SettingSet{WorkTimeout.key(th, M.Bg.field(l, 0n)) ++ ".noted", "yes", now}], Nil{},
+        Watch.tell(s, now, th, "[Backplane] Background work \"" ++ M.Bg.title(l) ++ "\" timed out. It may still be running; no process was interrupted. Report status or continue; check the task before repeating it."))
+
+def WorkTimeout.rows(ls: List<&2, String>, +s: M.State, +now: Nat, +th: String) -> Step:
+  match ls:
+    case Nil{}: Step.none()
+    case +l <> rest:
+      +ensure = WorkTimeout.start(s, now, th, M.Bg.field(l, 0n), J.Null{})
+      +before = M.State.replay(ensure, s)
+      +deadline = M.Switch.num(M.Setting.get(before, WorkTimeout.key(th, M.Bg.field(l, 0n)), "0"), 0n)
+      +st = Step.before(ensure, Nil{}, WorkTimeout.row(Bool.and(Bool.not(M.Bg.ended(l)), Bool.and(Nat.is_gt(deadline, 0n), Bool.and(Nat.is_ge(now, deadline), String.is_empty(M.Setting.get(before, WorkTimeout.key(th, M.Bg.field(l, 0n)) ++ ".noted", ""))))), before, now, th, l))
+      Step.cat(st, WorkTimeout.rows(rest, M.State.replay(Queue.changes(st), s), now, th))
+
+def WorkTimeout.threads(ts: List<&2, M.Thread>, +s: M.State, +now: Nat) -> Step:
+  match ts:
+    case Nil{}: Step.none()
+    case +t <> rest:
+      +st = WorkTimeout.rows(Bool.pick(List<&2, String>, Lost.live(t), M.Bg.of(s, M.Thread.id(t)), Nil{}), s, now, M.Thread.id(t))
+      Step.cat(st, WorkTimeout.threads(rest, M.State.replay(Queue.changes(st), s), now))
+
+def WorkTimeout.tick(+s: M.State, now: Nat) -> Step:
+  WorkTimeout.threads(Rec.threads(s), s, now)
+
+def ProviderResume.record(s: M.State, +th: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(s, "provider.resume." ++ th, "")), J.Null{})
+
+def ProviderResume.interrupted(t: M.TurnState) -> Bool:
+  match t:
+    case M.Interrupted{}: True{}
+    case _: False{}
+
+def ProviderResume.ready(+s: M.State, +now: Nat, +th: String) -> Bool:
+  +r = ProviderResume.record(s, th)
+  +reset = J.Json.get_nat(r, "reset", 0n)
+  Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
+    Bool.and(Nat.is_gt(reset, 0n), Bool.and(Nat.is_ge(now, reset), Bool.and(Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n),
+      String.eq(J.Json.get_str(r, "target", ""), FB.Target.key(Fallback.target(Hub.thread(s, th))))))))
+
+def ProviderResume.one(go: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
+  match go:
+    case False{}: Step.none()
+    case True{}:
+      +cs = {[M.SettingSet{"provider.resume." ++ th, "", now}, M.ActivityLogged{th, Hub.id("quota", now, Hub.seq(s)), "info", "provider-resume", "Provider limit reset; continuing from the last step", now}] : List<&2, M.Change>}
+      Step.before(cs, Nil{}, Hub.post(M.State.replay(cs, s), now, th, Hub.id("resume", now, Hub.seq(s)), M.User{},
+        "[Backplane] The provider's reported limit reset has arrived. Continue from your last step. Check completed tool results and any work still running before repeating an action."))
+
+def ProviderResume.threads(ts: List<&2, M.Thread>, +s: M.State, +now: Nat) -> Step:
+  match ts:
+    case Nil{}: Step.none()
+    case +t <> rest:
+      +st = ProviderResume.one(ProviderResume.ready(s, now, M.Thread.id(t)), s, now, M.Thread.id(t))
+      Step.cat(st, ProviderResume.threads(rest, M.State.replay(Queue.changes(st), s), now))
+
+def ProviderResume.tick(+s: M.State, now: Nat) -> Step:
+  ProviderResume.threads(Rec.threads(s), s, now)

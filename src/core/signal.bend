@@ -1,6 +1,7 @@
 import Base
 import ./model.bend as M
 import ./i18n.bend as I
+import ./liveness.bend as L
 
 # The complete typed input to the pure index. Timeline, clock, UI info,
 # device/world state, projects and canonical sequence cannot be read by
@@ -82,11 +83,11 @@ def Signal.name(+n: Nat) -> String:
 def Signal.label.loc(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
-      Bool.pick(String, String.eq(name, "blocked"), "対応が必要です", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了済み",
-        Bool.pick(String, String.eq(name, "waiting"), "サブエージェントや開始した作業の完了待ちです", Bool.pick(String, String.eq(name, "finished"), "完了しました", "非稼働・実行中の作業は未確認です")))))
+      Bool.pick(String, String.eq(name, "stalled"), "進捗停止・実行中の作業は継続しています", Bool.pick(String, String.eq(name, "blocked"), "対応が必要です", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了済み",
+        Bool.pick(String, String.eq(name, "waiting"), "サブエージェントや開始した作業の完了待ちです", Bool.pick(String, String.eq(name, "finished"), "完了しました", "非稼働・実行中の作業は未確認です"))))))
     case _:
-      Bool.pick(String, String.eq(name, "blocked"), "Blocked: needs interaction", Bool.pick(String, String.eq(name, "active"), "Working: agent or owned work active", Bool.pick(String, String.eq(name, "settled"), "Settled",
-        Bool.pick(String, String.eq(name, "waiting"), "Waiting: on subagents or work it started", Bool.pick(String, String.eq(name, "finished"), "Finished: ready for you to look at", "Inactive: no confirmed active work")))))
+      Bool.pick(String, String.eq(name, "stalled"), "Stalled: no recent progress; busy work continues", Bool.pick(String, String.eq(name, "blocked"), "Blocked: needs interaction", Bool.pick(String, String.eq(name, "active"), "Working: agent or owned work active", Bool.pick(String, String.eq(name, "settled"), "Settled",
+        Bool.pick(String, String.eq(name, "waiting"), "Waiting: on subagents or work it started", Bool.pick(String, String.eq(name, "finished"), "Finished: ready for you to look at", "Inactive: no confirmed active work"))))))
 
 def Signal.label(+lc: I.Loc, +n: Nat) -> String:
   Signal.label.loc(lc, Signal.name(n)) ++ Bool.pick(String, Bool.and(Signal.blocked(n), Signal.active(n)),
@@ -155,6 +156,29 @@ def Signal.why.if(failed: Bool, +st: M.State, +th: String) -> String:
       Signal.why(st, th)
     case False{}:
       ""
+
+# Liveness is a display overlay. It does not change the signal's work bits,
+# readiness, persisted turn state or provider/process lifecycle.
+def Signal.display.live(st: M.State, +id: String) -> L.Live:
+  L.Liveness.read(M.Setting.get(st, L.Liveness.key(id), ""))
+
+def Signal.display.stalled(+st: M.State, +id: String) -> Bool:
+  Bool.and(Bool.not(M.Thread.hidden(M.State.thread.get(st, id))), L.Liveness.stalled(Signal.display.live(st, id)))
+
+def Signal.display.name(n: Nat, +st: M.State, +id: String) -> String:
+  Bool.pick(String, Signal.display.stalled(st, id), "stalled", Signal.name(n))
+
+def Signal.display.shown(n: Nat, turn: M.TurnState, pending: Nat, +st: M.State, +id: String) -> String:
+  Bool.pick(String, Signal.display.stalled(st, id), "stalled", Signal.shown(n, turn, pending))
+
+def Signal.display.text(lc: I.Loc, +st: M.State, +id: String) -> String:
+  Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), "進捗停止: ", "Stalled: ") ++ L.Liveness.reason(Signal.display.live(st, id))
+
+def Signal.display.note(lc: I.Loc, +st: M.State, +id: String, fallback: String) -> String:
+  Bool.pick(String, Signal.display.stalled(st, id), Signal.display.text(lc, st, id), fallback)
+
+def Signal.display.label(+lc: I.Loc, +n: Nat, +shown: String, +st: M.State, +id: String) -> String:
+  Signal.display.note(lc, st, id, Signal.label.shown(lc, n, shown, Signal.why.if(String.eq(shown, "failed"), st, id)))
 
 def Signal.at.k(r: Map<&2, Nat> & Nat) -> Nat:
   (_, n) = r

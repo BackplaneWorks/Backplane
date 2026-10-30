@@ -1669,7 +1669,7 @@ def Tree.send(+root: String, +key: String, +q: Chan(ShellMsg)) -> IO(Unit):
     return Unit{}
 
 def Watch.tree(+path: String, +key: String, +q: Chan(ShellMsg)) -> IO(Unit):
-  IO.bind(K.Files, Unit, K.Files.read(Src.at(key, 1n)), f => Tree.send(PV.Tree.root(f, path), key, q))
+  IO.bind(K.Files, Unit, K.Files.read(Src.at(key, 1n)), f => Tree.send(PV.Tree.root(f, path, ""), key, q))
 
 def Watch.tree.if(sch: Bool, +path: String, +key: String, +q: Chan(ShellMsg)) -> IO(Unit):
   match sch:

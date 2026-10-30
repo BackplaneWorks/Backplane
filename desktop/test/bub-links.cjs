@@ -25,8 +25,9 @@ let app,page;const start=performance.now(),navigation=[];
 (async()=>{try{
  await service.start();app=await _electron.launch({executablePath:path.join(stage,'desktop/runtime/backplane-desktop'),env:{...process.env,BACKPLANE_HOME:home,BACKPLANE_SERVICE:path.join(stage,'payload/backplane-serve'),BACKPLANE_WEB:path.join(stage,'payload/web'),BACKPLANE_SERVICE_VERSION:info.version},args:[]});
  page=await app.firstWindow();
+ page.setDefaultTimeout(15000);
  const ready=async id=>page.waitForFunction(id=>document.querySelector('main')?.dataset.thread===id&&document.documentElement.dataset.backplaneRemoteReady==='true',id);
- const chat=async()=>{await page.locator('.bot-row[data-value="bub"]').first().click();const tab=page.locator('[data-on-click="bot-tab"][data-value="chat"]');if(await tab.count())await tab.first().click();await ready(bub);};
+ const chat=async()=>{await page.locator(`[data-on-click="select"][data-value="${bub}"]`).first().click();await ready(bub);};
  await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true');await chat();
  const body=page.locator('[data-id="item_4-435337"] .body');
  const anchors=body.locator('li strong a.ref');
@@ -47,7 +48,7 @@ let app,page;const start=performance.now(),navigation=[];
  }
  const windows=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().map(w=>({visible:w.isVisible(),url:w.webContents.getURL()})));
  assert.equal(windows.filter(w=>w.visible).length,1,JSON.stringify(windows));
- const result={state:'passed',seconds:(performance.now()-start)/1000,out,version:info.version,commit:info.commit,originalMessage:'item_4-435337',renderer:'View.bot Chat → View.thread → Md.render',navigation,windows};
+ const result={state:'passed',seconds:(performance.now()-start)/1000,out,version:info.version,commit:info.commit,originalMessage:'item_4-435337',renderer:'Bub conversation → View.thread → Md.render',navigation,windows};
  fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }catch(e){console.error(e);process.exitCode=1;if(page){fs.writeFileSync(path.join(out,'failure.html'),await page.content().catch(()=>''));await page.screenshot({path:path.join(out,'failure.png')}).catch(()=>{});}}
 finally{if(app)await app.close();service.stop();}})();
