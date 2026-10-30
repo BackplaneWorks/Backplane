@@ -8,6 +8,9 @@ import ../src/core/json.bend as J
 def row(+id: String, text: String) -> D.Node:
   D.El{"div", id, [D.At{"data-id", id}, D.At{"class", "msg"}], [D.Txt{text}]}
 
+def tool(+id: String, kind: String) -> D.Node:
+  D.El{"div", id, [D.At{"data-id", id}, D.At{"class", "act " ++ kind}], [D.Txt{id}]}
+
 def fold(+state: String) -> D.Node:
   D.El{"button", "", [D.On{"click", "fold"}, D.At{"data-value", state ++ "run"}], [D.Txt{state}]}
 
@@ -42,6 +45,12 @@ def main() -> IO(Unit):
     +d : D.Node = row("d", "d")
     +b1 : D.Node = row("b", "fresh b")
     +c1 : D.Node = row("c", "fresh c")
+    +shell : D.Node = tool("shell", "tool")
+    +step : D.Node = tool("step", "step")
+    same("collapse live tail removes retained activity without shared successor", H.project(tl([a, fold("0"), shell, step]), tl([fold("1")]), "update"), tl([a, fold("1")]))
+    same("collapse never hides retained user or assistant messages", H.project(tl([a, fold("0"), shell, b, c]), tl([fold("1")]), "update"), tl([a, fold("1"), b, c]))
+    same("collapse stops at unrelated tool run", H.project(tl([fold("0"), shell, b, headed("other", ""), step]), tl([fold("1")]), "update"), tl([fold("1"), b, headed("other", ""), step]))
+    same("explicit expansion keeps the live tool tail", H.project(tl([a, fold("0"), shell]), tl([fold("0")]), "update"), tl([a, fold("0"), shell]))
     same("initial source label grouped with its stable message", H.project(tl([]), tl([a, source(), b, c]), "reset"), tl([a, sourced(b), c]))
     same("retained source label never disappears on older overlap", H.project(tl([source(), b, source(), c]), tl([a, source(), b1]), "older"), tl([a, sourced(b1), sourced(c)]))
     same("source metadata survives newer overlap", H.project(tl([a, source(), b, source(), c]), tl([source(), c1, d]), "newer"), tl([a, sourced(b), sourced(c1), d]))

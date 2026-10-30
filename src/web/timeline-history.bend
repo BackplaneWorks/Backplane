@@ -335,11 +335,44 @@ def H.normalize(xs: List<&2, D.Node>, +oldKeys: Map<&2, Bool>, +ids: Map<&2, Str
         H.next(H.fold.node(h), Bool.and(H.historical(h), H.has(oldKeys, key(h))), h, next),
         H.normalize.one(H.fold.node(h), h, ids, successors, next) <> acc)
 
+def H.fold.closed(n: D.Node) -> Bool:
+  match n:
+    case D.Txt{_}: False{}
+    case D.El{_, _, +as, _}: Bool.and(H.fold(as), String.starts_with(H.attr(as, "data-value"), "1"))
+
+def H.closed(xs: List<&2, D.Node>, acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match xs:
+    case Nil{}: acc
+    case +h <> t: H.closed(t, H.unique.seen(H.fold.closed(h), h, acc))
+
+def H.tool(n: D.Node) -> Bool:
+  match n:
+    case D.Txt{_}: False{}
+    case D.El{_, _, +as, _}:
+      +cls = H.attr(as, "class")
+      Bool.and(H.word.go(cls, "act", ""), Bool.or(H.word.go(cls, "tool", ""), H.word.go(cls, "step", "")))
+
+def H.prune.step(head: Bool, tool: Bool, +n: D.Node, +closed: Map<&2, Bool>, hiding: Bool) -> Bool:
+  match head tool:
+    case True{} _: H.has(closed, key(n))
+    case False{} True{}: hiding
+    case False{} False{}: False{}
+
+# A fresh closed header owns its old tool body even without a following shared
+# message. Otherwise the old live run survives as the retained page suffix.
+# Only tool/step rows can disappear; messages and unrelated runs stay readable.
+def H.prune(xs: List<&2, D.Node>, +closed: Map<&2, Bool>, +hiding: Bool, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs:
+    case Nil{}: List.reverse(&2, D.Node, acc)
+    case +h <> t:
+      H.prune(t, closed, H.prune.step(H.fold.node(h), H.tool(h), h, closed, hiding),
+        H.push(Bool.not(Bool.and(hiding, H.tool(h))), h, acc))
+
 def H.merge.folds(f: HFolds, +old: List<&2, D.Node>, fresh: List<&2, D.Node>, direction: String) -> List<&2, D.Node>:
   match f:
     case HFolds{ids, successors, _}:
       +normalized = H.normalize(List.reverse(&2, D.Node, fresh), H.keys(old, Map.new(&2, Bool)), ids, successors, "", Nil{})
-      H.merge.rows(old, normalized, H.rows(normalized, Nil{}), direction)
+      H.merge.rows(H.prune(old, H.closed(normalized, Map.new(&2, Bool)), False{}, Nil{}), normalized, H.rows(normalized, Nil{}), direction)
 
 def H.merge(+old: List<&2, D.Node>, +fresh: List<&2, D.Node>, direction: String) -> List<&2, D.Node>:
   H.merge.folds(H.folds(old, H.keys(H.rows(fresh, Nil{}), Map.new(&2, Bool)), HFolds{Map.new(&2, String), Map.new(&2, String), ""}), old, fresh, direction)

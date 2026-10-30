@@ -12,8 +12,7 @@ import ./model.bend as M
 # a run holds only tool calls (law fold_runs_only_tools).
 #
 # A run is open when the user opened it ("fold:<first id>" is "1" in the
-# client's info map), shut when they shut it ("0"), and otherwise open only
-# while it is the live one: the last thing in a thread whose turn runs.
+# client's info map), and otherwise shut, including the live run.
 #
 # Only tool calls fold: a turn's messages always show (law
 # fold_roles_message_shown). The turn fold below ("Worked for …", Work.*)
@@ -257,7 +256,7 @@ def Fold.grp.roles(+l: I.Loc, g: Grp, last: Bool, +info: Map<&2, String>, +runni
     case GOne{_}:
       [RShow{}]
     case GRun{+xs}:
-      Fold.run.roles(l, xs, Fold.open(Fold.user(info, Fold.run_id(xs)), Bool.and(last, running)))
+      Fold.run.roles(l, xs, Fold.open(Fold.user(info, Fold.run_id(xs)), False{}))
 
 def Fold.roles.go(+l: I.Loc, gs: List<&2, Grp>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
   match gs:
