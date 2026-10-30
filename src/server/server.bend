@@ -2299,7 +2299,7 @@ def Hub.push.bin(h: Hub, +client: U32, +bs: List<&2, U32>) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WBin{bs}, List.length(&2, U32, bs))
+        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WBin{bs}, W.Http.count(bs))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 # a ping answered through the client's credit

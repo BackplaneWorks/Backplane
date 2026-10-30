@@ -298,8 +298,10 @@ def Hier.read.go(ls: List<&2, String>) -> List<&2, Row>:
   match ls:
     case Nil{}:
       Nil{}
-    case +l <> +t:
-      Bool.pick(List<&2, Row>, String.is_empty(l), Hier.read.go(t), Hier.read.row(String.split(l, '\t')) <> Hier.read.go(t))
+    case +l <> t:
+      # Bool.pick is strict: build the remaining rows once, not in both arms.
+      +rest = Hier.read.go(t)
+      Bool.pick(List<&2, Row>, String.is_empty(l), rest, Hier.read.row(String.split(l, '\t')) <> rest)
 
 def Hier.read(+s: String) -> List<&2, Row>:
   Hier.read.go(String.split(s, '\n'))
