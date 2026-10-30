@@ -9173,7 +9173,7 @@ def Todos.edit.valid(ok: Bool, +s: M.State, +now: Nat, +client: U32, +id: String
       +change = {M.TodosChanged{th, "person", J.Json.show(edit), now} : M.Change}
       +after = M.State.apply(s, change)
       Step.before([change], [Reply.ok(client, id)], Todos.note(Hub.running(Hub.thread(s, th)), after, now, th, Hub.id("todo-note", now, Hub.seq(s)),
-        "The person updated your to-do list: " ++ J.Json.get_str(p, "op", "") ++ " " ++ J.Json.get_str(p, "id", "") ++ ". Current list: " ++ TD.Todo.show(M.Todos.of(after, th))))
+        "The person updated your to-do list: " ++ J.Json.show(edit)))
 
 def Todos.edit(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
   Todos.edit.valid(Bool.and(Hub.owns(s, J.Json.get_str(p, "thread", "")),

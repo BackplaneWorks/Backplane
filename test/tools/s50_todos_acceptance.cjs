@@ -103,6 +103,7 @@ async function command(o,text,label) {
     task='a'+uuid();toolId='toolu_'+uuid();assistant([{type:'tool_use',id:toolId,name:'Agent',input:{description:'S50 subagent',prompt:'fixture only',subagent_type:'general-purpose',run_in_background:true}}]);
     emit({type:'system',subtype:'task_started',task_id:task,tool_use_id:toolId,description:'S50 subagent',task_type:'local_agent',is_backgrounded:true,session_id:session});
     emit({type:'user',message:{role:'user',content:[{type:'tool_result',tool_use_id:toolId,content:'Async agent launched: '+task}]},parent_tool_use_id:null,session_id:session,uuid:uuid()});
+    await wait(label,'editing');const editing=tasks(7,3);editing[4].content='Agent update while typing';snapshot(label,'editing',editing);
     await wait(label,'repeat');snapshot(label,'repeat',tasks(7,3));
     await wait(label,'next');const next=tasks(8,3);next[4].content='Agent revised step 5';snapshot(label,'next',next);
   }else if(label==='replay'){const next=tasks(8,3);next[4].content='Agent revised step 5';snapshot(label,'initial',next);}
@@ -125,7 +126,9 @@ createInterface({input:process.stdin}).on('line',line=>{
   log({kind:'input',text,uuid:o.uuid});
   if(text.includes('The person updated your to-do list:'))log({kind:'note',text,uuid:o.uuid});
   const label=/<S50 scenario=([a-z0-9-]+)>/.exec(text)?.[1];
-  if(!label)return; // edit receipts never start an artificial turn
+  if(!label){ // Acknowledge consumed steering commands without another model result.
+    const id=o.uuid||uuid();lc(id,'queued');lc(id,'started');lc(id,'completed');return;
+  }
   pending=pending.then(()=>command(o,text,label)).catch(e=>{log({kind:'error',error:String(e)});process.exit(1);});
 }).on('close',()=>process.exit(0));
 `;
@@ -214,7 +217,8 @@ async function main() {
       await waitPage(thread=>document.querySelector('main')?.dataset.thread===thread&&document.querySelector('main')?.getAttribute('aria-busy')!=='true',thread,timeout);
     }
     async function select(thread) {
-      const target=page.locator('[data-on-click="select"][data-value='+css(thread)+']:visible').first();
+      const bot=events().find(e=>e.$==='BotSet'&&e.thread===thread)?.id;
+      const target=page.locator('[data-on-click="select"][data-value='+css(thread)+']:visible'+(bot?', [data-on-click="bot"][data-value='+css(bot)+']:visible':'')).first();
       // Use exact thread IDs, never a first/last row or an inferred active bot.
       // A fresh persisted selection is the fallback for a folded sidebar only;
       // record it so it cannot be mistaken for a successful navigation gesture.
@@ -265,8 +269,10 @@ async function main() {
       page.on('websocket',socket=>socket.on('framesent',frame=>{
         try{const o=frameObject(frame.payload);if(o.m)uiRequests.push(o);}catch{}
       }));
-      await page.addInitScript(id=>{localStorage.setItem('backplane-selected',id);localStorage.setItem('backplane-lang','en');},thread);
-      await page.goto(origin+'/#token='+token);await ready(thread,20000);
+      await page.addInitScript(()=>{localStorage.setItem('backplane-lang','en');});
+      await page.goto(origin+'/#token='+token);
+      await page.locator('.sidebar').waitFor({timeout:20000});
+      await select(thread);
       const skip=page.locator('[data-on-click="ob-skip"]:visible');if(await skip.count())await skip.click();
     }
     async function closeClient() {
@@ -319,7 +325,12 @@ async function main() {
         assert.equal(await row(a,'2').locator('input').getAttribute('data-on-change'),'todo-text');
         assert.equal(await row(a,'2').locator('input').getAttribute('data-pre'),a+'\x1f2\x1f');
         let before=changed(a,'person').length;
-        await step('change text saves on blur',async()=>{await row(a,'2').locator('input').fill(rename);await row(a,'2').locator('input').press('Tab');},async timeout=>{
+        await step('typing survives agent refresh and saves on blur',async()=>{
+          await row(a,'2').locator('input').fill(rename);gate('alpha','editing');
+          await until(async()=>(await snapshot()).find(x=>x.id==='5')?.text==='Agent update while typing',2000);
+          assert.equal(await row(a,'2').locator('input').inputValue(),rename);
+          await row(a,'2').locator('input').press('Tab');
+        },async timeout=>{
           await until(()=>changed(a,'person').length===before+1,timeout);const e=JSON.parse(changed(a,'person').at(-1).data);assert.equal(e.id,'2');assert.equal(e.text,rename);
         });
         before=changed(a,'person').length;
@@ -328,24 +339,28 @@ async function main() {
         await step('add a human item',async()=>{await page.locator('.todo-add input').fill('Human extra');await page.locator('.todo-add button').click();},async timeout=>{
           await until(()=>changed(a,'person').length===before+1,timeout);const e=JSON.parse(changed(a,'person').at(-1).data);assert.equal(e.op,'add');assert.match(e.id,/^h:/);await waitPage(()=>document.querySelectorAll('div.todo').length===8,null,timeout);
         });
-        await edit('delete explicit item 3','3','.todo-delete',async()=>{assert.equal(await row(a,'3').count(),0);});
-        await edit('move item 7 up','7','.todo-up',async()=>{assert.equal((await snapshot())[4].id,'7');});
-        await edit('move item 7 down','7','.todo-down',async()=>{assert.equal((await snapshot())[5].id,'7');});
-        await edit('leave a human order change','7','.todo-up',async()=>{assert.equal((await snapshot())[4].id,'7');});
-        const human=await snapshot();
+        await edit('delete explicit item 3','3','.todo-delete',async timeout=>{await until(async()=>await row(a,'3').count()===0,timeout);});
+        await edit('move item 7 up','7','.todo-up',async timeout=>{await until(async()=>(await snapshot())[4]?.id==='7',timeout);});
+        await edit('move item 7 down','7','.todo-down',async timeout=>{await until(async()=>(await snapshot())[5]?.id==='7',timeout);});
+        await edit('leave a human order change','7','.todo-up',async timeout=>{await until(async()=>(await snapshot())[4]?.id==='7',timeout);});
+        const human=(await snapshot()).map(x=>x.id==='5'?{...x,text:'Step 5'}:x);
         await step('running edits deliver notes to the same agent',async()=>{},async timeout=>{
           await until(()=>audit().filter(x=>x.kind==='note'&&x.text.includes('Human text')).length>0,timeout);
           assert(events().some(e=>e.$==='MessagePosted'&&e.thread===a&&String(e.text).startsWith('The person updated your to-do list:')));
         });
         await step('identical agent repeat preserves every human edit',()=>gate('alpha','repeat'),async timeout=>{
-          await until(()=>audit().some(x=>x.label==='alpha'&&x.phase==='repeat'),timeout);await until(()=>changed(a,'tools').length>=2,timeout);await waitRows(human,timeout);
-          const snaps=audit().filter(x=>x.label==='alpha'&&x.kind==='snapshot');assert.deepEqual(snaps[0].todos,snaps[1].todos);
+          await until(()=>audit().some(x=>x.label==='alpha'&&x.phase==='repeat'),timeout);await until(()=>changed(a,'tools').length>=3,timeout);await waitRows(human,timeout);
+          const snaps=audit().filter(x=>x.label==='alpha'&&x.kind==='snapshot');assert.deepEqual(snaps[0].todos,snaps.find(x=>x.phase==='repeat').todos);
         });
         const next=human.map(x=>x.id==='5'?{...x,text:'Agent revised step 5'}:x).concat([{id:'8',text:'Step 8',status:'pending'}]);
         await step('next agent update merges intended text and new item',()=>gate('alpha','next'),async timeout=>{await waitRows(next,timeout);});
         await step('open choice stays with its exact thread',()=>select(b),async()=>{assert.equal(await head().count(),0);},'nav');
         await step('return restores the open edited list',()=>select(a),async timeout=>{await waitRows(next,timeout);},'nav');
-        await step('shut choice persists across thread switches',async()=>{await head().click();await select(b);await select(a);},async()=>{assert.equal(await head().getAttribute('aria-expanded'),'false');assert.equal(await rows().count(),0);},'nav');
+        await step('shut choice persists across thread switches',async()=>{
+          await head().click();
+          await waitPage(()=>document.querySelector('.todos-head')?.getAttribute('aria-expanded')==='false',null,2000);
+          await select(b);await select(a);
+        },async timeout=>{await waitPage(()=>document.querySelector('.todos-head')?.getAttribute('aria-expanded')==='false'&&!document.querySelector('div.todo'),null,timeout);},'nav');
         await open();await step('unfinished list remains after the turn',()=>end('alpha',a),async timeout=>{await waitRows(next,timeout);},'reply');
         before=events().length;idleAuditFloor=audit().length;const starts=audit().filter(x=>x.kind==='started').length;
         await step('idle edit saves and queues a note without starting',async()=>{await row(a,'6').locator('input').fill('Idle persisted text');await row(a,'6').locator('input').press('Tab');},async timeout=>{
@@ -379,6 +394,7 @@ async function main() {
           const f=fixtures[i];await select(f.id);await open();const before=changed(f.id,'person').length;
           await step('edit only '+f.label+' item 1',async()=>{await row(f.id,'1').locator('input').fill('Private '+f.label);await row(f.id,'1').locator('input').press('Tab');},async timeout=>{
             await until(()=>changed(f.id,'person').length===before+1,timeout);assert.equal(JSON.parse(changed(f.id,'person').at(-1).data).id,'1');
+            await until(async()=>(await snapshot()).find(x=>x.id==='1')?.text==='Private '+f.label,timeout);
           });captured[i]=(await snapshot());
           for(let j=0;j<fixtures.length;j++){await select(fixtures[j].id);await open();await waitRows(captured[j],3000);}
         }

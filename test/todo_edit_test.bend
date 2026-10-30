@@ -87,6 +87,7 @@ def main() -> IO(Unit):
     +queued : M.State = step(idle, request(idle, "t", "Next turn"))
     C.Check.str("idle edit saves without starting agent", Bool.show(M.State.running.k(M.State.thread.get(queued, "t"))), "False")
     C.Check.str("idle edit queues a note for next turn", Bool.show(String.contains(M.Queue.of(queued, "t"), "The person updated your to-do list:")), "True")
+    C.Check.str("edit note contains only the changed item", Bool.show(String.contains(M.Queue.of(queued, "t"), "Build")), "False")
     +running : M.State = step(initial(), request(initial(), "t", "Running edit"))
     C.Check.str("running edit delivers agent note", Bool.show(note.entries(M.State.mine(running, "t"))), "True")
     C.Check.str("missing thread cannot edit", counts(request(initial(), "missing", "Bad")), "0")

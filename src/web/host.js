@@ -160,7 +160,11 @@ function setAttrs(el, oldAttrs, attrs) {
       seen.add(a.name);
       if (a.name === "value") {
         const value = field !== null && viewMode === "view-v1" && frontendNode ? thin?.fieldValue(field, thinMailDraft.fieldValue(field, a.value)) ?? a.value : a.value;
-        if (el.value !== value) el.value = value;
+        // A hub refresh can arrive between typing and the blur that saves a
+        // to-do. Keep that focused edit until its change event captures it.
+        const editingTodo = el === document.activeElement && el.getAttribute("data-on-change") === "todo-text" &&
+          [...each(oldAttrs)].some(old => is(old, "At") && old.name === "value" && old.value !== el.value);
+        if (!editingTodo && el.value !== value) el.value = value;
       } else if (el.getAttribute(a.name) !== a.value) {
         el.setAttribute(a.name, a.value);
         if (a.name === "data-cat") el.src = catUri(a.value);
