@@ -29,6 +29,15 @@ jobs:
           python3 test/tools/release_bootstrap_test.py
           python3 test/tools/release_assets_test.py
           python3 test/tools/kicad_library_header_test.py
+          python3 test/tools/check_helpers_test.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Desktop release producer
+        working-directory: desktop
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test test/release-producer.test.cjs
 
   desktop-install:
     name: Linux desktop installer
@@ -150,6 +159,12 @@ jobs:
           ls -l dist-js/*/
           # the notices every one ships with, Bun's pinned to its version
           BACKPLANE_LICENSES_STRICT=1 scripts/js-licenses.sh dist-js/licenses
+      # the helpers the hub runs, beside it, as a release ships them (issue 510)
+      - name: Helpers for every target
+        run: |
+          for t in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            BACKPLANE_JS_TARGET=$t scripts/build-helpers.sh dist-js/$t
+          done
       # the web client the hub serves (test/smoke.ts loads its page)
       - name: Web client
         run: |
@@ -237,3 +252,18 @@ jobs:
           [ -f "$f" ] || f=$f.exe
           chmod +x "$f"
           scripts/js-smoke.sh "$f"
+      - name: The helpers start on their own target
+        if: matrix.target != 'windows-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          d=dist-js/${{ matrix.target }}
+          chmod +x $d/backplane-kipc $d/backplane-step2glb $d/backplane-voice $d/backplane-browser
+          python3 scripts/check-helpers.py $d --target ${{ matrix.target }} --service-dir
+          # each prints its usage: it loaded and ran on this OS and CPU
+          usage() { out=$(perl -e 'alarm 20; exec @ARGV' "$@" </dev/null 2>&1) || true; echo "$out" | head -2; echo "$out" | grep -qi usage; }
+          usage $d/backplane-voice
+          usage $d/backplane-step2glb
+          usage $d/backplane-browser --help
+          # kipc reads requests on stdin: closed, it ends cleanly
+          perl -e 'alarm 20; exec @ARGV' $d/backplane-kipc </dev/null

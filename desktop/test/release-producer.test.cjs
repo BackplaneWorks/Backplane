@@ -9,11 +9,11 @@ const ref=p=>({path:p,sha256:hash(p),bytes:fs.statSync(p).size});
 function binary(target){const b=Buffer.alloc(512);if(target.startsWith('linux')){b.write('7f454c46','hex');b[4]=2;b[5]=1;b.writeUInt16LE(target==='linux-x64'?62:183,18);}else if(target==='darwin-arm64'){b.writeUInt32LE(0xfeedfacf);b.writeUInt32LE(0x100000c,4);}else{b.write('MZ');b.writeUInt32LE(128,60);b.write('PE\0\0',128);b.writeUInt16LE(0x8664,132);}return b;}
 function fixture(t,target='linux-x64',resident=false,releaseSource={}){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'bp-producer-offline-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const release={version:'0.12.2',tag:'v0.12.2',channel:'release',commit:releaseSource.commit||'a'.repeat(40),tree:releaseSource.tree||'b'.repeat(40)};
+ const release={version:'0.13.0',tag:'v0.13.0',channel:'release',commit:releaseSource.commit||'a'.repeat(40),tree:releaseSource.tree||'b'.repeat(40)};
  const identity=kind=>({schema:1,kind,status:'VERIFIED',target,sourceCommit:release.commit,sourceTree:release.tree,version:release.version,channel:'release'});
  const notice=(dir,name)=>{put(path.join(dir,'LICENSE.'+name),'SYNTHETIC OFFLINE LICENSE '+name);return{name,version:'fixture',sourceDisposition:'Synthetic test only; no redistribution or platform qualification',licenses:[{path:'LICENSE.'+name,sha256:hash(path.join(dir,'LICENSE.'+name))}]};};
  const shell=path.join(root,'shell'),electron=path.join(root,'electron'),service=path.join(root,'service');
- put(path.join(shell,'package.json'),JSON.stringify({name:'backplane-desktop',version:'0.12.2',main:'main.cjs'}));put(path.join(shell,'main.cjs'),'// offline data, never executed\n');
+ put(path.join(shell,'package.json'),JSON.stringify({name:'backplane-desktop',version:'0.13.0',main:'main.cjs'}));put(path.join(shell,'main.cjs'),'// offline data, never executed\n');
  const shellReceipt={...identity('backplane-electron-shell'),electronVersion:'44.9.2',bundleIdentifier:'dev.backplane.fixture',features:{defaultPackagedHome:true,contextIsolation:true,sandbox:true,nodeIntegration:false,managedStop:false,managedUpdate:false,windowsManagedControl:resident?'UNSUPPORTED':'fixture-control-v1',windowsNativePathMapping:true},packages:[notice(shell,'shell')]};shellReceipt.members=producer.inventory(shell,target);
  const exe=target==='darwin-arm64'?'Electron.app/Contents/MacOS/Electron':target==='windows-x64'?'electron.exe':'electron';put(path.join(electron,exe),binary(target),0o755);
  if(target==='darwin-arm64'){
@@ -23,15 +23,15 @@ function fixture(t,target='linux-x64',resident=false,releaseSource={}){
  const electronReceipt={...identity('backplane-electron-runtime'),electronVersion:'44.9.2',signablePaths:[exe],packages:[notice(electron,'electron')]};electronReceipt.runtimeManifest='RUNTIME.json';electronReceipt.closureManifest='CLOSURE.json';
  write(path.join(electron,'RUNTIME.json'),{schema:1,target,inventory:[{path:exe,package:'Electron',version:'44.9.2',architecture:target,sha256:hash(path.join(electron,exe)),bytes:512}],packages:electronReceipt.packages});
  write(path.join(electron,'CLOSURE.json'),{schema:1,target,measured:true,status:'PASS',edges:[],unresolvedMandatory:[]});electronReceipt.runtimeManifestSha256=hash(path.join(electron,'RUNTIME.json'));electronReceipt.closureSha256=hash(path.join(electron,'CLOSURE.json'));electronReceipt.members=producer.inventory(electron,target);
- const serviceExe=target==='windows-x64'?'backplane-serve.exe':'backplane-serve';put(path.join(service,serviceExe),binary(target),0o755);
+ const serviceExe=target==='windows-x64'?'backplane-serve.exe':'backplane-serve';put(path.join(service,serviceExe),binary(target),0o755);for(const n of producer.helperFiles(target))put(path.join(service,n),binary(target),0o755);
  const packageNotice=notice(service,'Backplane');put(path.join(service,'web/index.html'),'<main>synthetic stable fixture</main>');put(path.join(service,'web/index.html.gz'),require('node:zlib').gzipSync(fs.readFileSync(path.join(service,'web/index.html'))));
  const web={schema:1,kind:'matching-generated-web',sourceCommit:release.commit,sourceTree:release.tree,entrypoint:'src/web/index.html',members:{}};
  for(const n of fs.readdirSync(path.join(service,'web')))web.members[n]={sha256:hash(path.join(service,'web',n)),bytes:fs.statSync(path.join(service,'web',n)).size};write(path.join(service,'WEB.json'),web);
  const runtimeNotice=notice(service,'runtime');const runtimeMember=serviceExe;
  const runtime={schema:1,target,inventory:[{path:runtimeMember,package:'fixture',version:'fixture',architecture:target,sha256:hash(path.join(service,runtimeMember)),bytes:fs.statSync(path.join(service,runtimeMember)).size}],packages:[runtimeNotice]};write(path.join(service,'RUNTIME.json'),runtime);
  const closure={schema:1,target,measured:true,status:'PASS',edges:[{from:serviceExe,system:true,kind:'normal',classification:'approved-system',name:'synthetic-system'}],unresolvedMandatory:[]};write(path.join(service,'CLOSURE.json'),closure);
- const compileInputs={version:'0.12.2',versionStamp:'0.12.2',telemetryChannel:'release',google:{requested:true,requiredInputsPresent:true},telemetry:{requested:true,requiredInputsPresent:true,endpoint:'https://backplaneworks.com/api/v1/events'}};
- const buildReceipt={versionStamp:'0.12.2',telemetryChannel:'release',compileInputs,status:'VERIFIED_GENUINE_SYNTHETIC_FIXTURE_ONLY',target,entry:'src/server/main.bend',version:'0.12.2',source_commit:release.commit,source_tree:release.tree,serviceRuntime:'bun',service:serviceExe,binary_sha256:hash(path.join(service,serviceExe))};const buildPath=write(path.join(root,'genuine.json'),buildReceipt);fs.copyFileSync(buildPath,path.join(service,'BUILD.json'));
+ const compileInputs={version:'0.13.0',versionStamp:'0.13.0',telemetryChannel:'release',google:{requested:true,requiredInputsPresent:true},telemetry:{requested:true,requiredInputsPresent:true,endpoint:'https://backplaneworks.com/api/v1/events'}};
+ const buildReceipt={versionStamp:'0.13.0',telemetryChannel:'release',compileInputs,status:'VERIFIED_GENUINE_SYNTHETIC_FIXTURE_ONLY',target,entry:'src/server/main.bend',version:'0.13.0',source_commit:release.commit,source_tree:release.tree,serviceRuntime:'bun',service:serviceExe,binary_sha256:hash(path.join(service,serviceExe))};const buildPath=write(path.join(root,'genuine.json'),buildReceipt);fs.copyFileSync(buildPath,path.join(service,'BUILD.json'));
  let serviceSpec,serviceReceipt;
  {
   serviceReceipt={...identity('backplane-bend-service'),genuineService:true,entrypoint:'src/server/main.bend',roles:{service:serviceExe,web:'web'},buildReceipt:ref(buildPath),runtimeManifest:'RUNTIME.json',runtimeManifestSha256:hash(path.join(service,'RUNTIME.json')),closureManifest:'CLOSURE.json',closureSha256:hash(path.join(service,'CLOSURE.json')),packages:[packageNotice]};serviceReceipt.members=producer.inventory(service,target);const p=write(path.join(root,'service.json'),serviceReceipt);serviceSpec={payload:{directory:service},receipt:ref(p)};
@@ -45,7 +45,7 @@ function fixture(t,target='linux-x64',resident=false,releaseSource={}){
  return{root,target,request,requestPath,shell,electron,service,serviceReceipt,shellReceipt,electronReceipt,freeze,refresh(){request.release.freezeReceipt=ref(write(path.join(root,'freeze.json'),freeze));write(requestPath,request);}};
 }
 function evidence(f,dir,changes={}){
- const inspected=producer.inspectStage(dir),common={schema:1,status:'PASS',target:f.target,version:'0.12.2',commit:f.request.release.commit,tree:f.request.release.tree,payloadManifestSha256:inspected.payloadManifestSha256,freezeReceiptSha256:f.request.release.freezeReceipt.sha256};
+ const inspected=producer.inspectStage(dir),common={schema:1,status:'PASS',target:f.target,version:'0.13.0',commit:f.request.release.commit,tree:f.request.release.tree,payloadManifestSha256:inspected.payloadManifestSha256,freezeReceiptSha256:f.request.release.freezeReceipt.sha256};
  const receipts={signing:{...common,kind:'desktop-signing',signed:false},sandbox:{...common,kind:'desktop-sandbox',osEnforced:true,flags:[]},lifecycle:{...common,kind:'desktop-lifecycle',nativeChildIdentity:true,authBound:true,singleInstance:true,reconnect:true,windowClose:'resident-service',shutdown:f.freeze.lifecyclePolicy?'unsupported':'owned-native-child',startup:true,closePreservesService:true,managedStopAdvertised:false,managedUpdateAdvertised:false,nativeToPosixPaths:true},runtimeAcceptance:{...common,kind:'desktop-runtime-acceptance',scope:'desktop-release'}};
  const a={schema:1,kind:'backplane-desktop-target-acceptance',target:f.target,stageReceiptSha256:inspected.stageReceiptSha256,payloadManifestSha256:inspected.payloadManifestSha256};
  for(const[k,v]of Object.entries(receipts))a[k]=ref(write(path.join(f.root,'proof-'+k+'.json'),{...v,...changes[k]}));return write(path.join(f.root,'acceptance.json'),a);
@@ -53,8 +53,8 @@ function evidence(f,dir,changes={}){
 for(const target of Object.keys(producer.TARGETS))test('offline '+target+' stage/archive layout, receipts and deterministic archive',t=>{
  // Windows ships only with the resident policy: the JS service has no managed control there.
  const f=fixture(t,target,target==='windows-x64'),dir=path.join(f.root,'stage');const staged=producer.stage(f.requestPath,dir);assert.equal(staged.status,'STAGED_UNQUALIFIED');assert.equal(staged.releaseQualified,false);assert(!fs.existsSync(path.join(dir,'DESKTOP.json')));
- const acceptance=evidence(f,dir),one=producer.archive(dir,acceptance,path.join(f.root,'dist1')),two=producer.archive(dir,acceptance,path.join(f.root,'dist2'));assert.equal(one.sha256,two.sha256);assert.equal(one.published,false);assert.equal(path.basename(one.archive),'backplane-v0.12.2-'+target+producer.TARGETS[target].suffix);
- const packaged=path.dirname(one.desktopReceipt),desktop=JSON.parse(fs.readFileSync(one.desktopReceipt));assert.equal(desktop.schema,1);assert.equal(desktop.kind,'backplane-electron-desktop-package');assert.equal(desktop.electronVersion,'44.9.2');assert.equal(desktop.serviceVersion,'0.12.2');
+ const acceptance=evidence(f,dir),one=producer.archive(dir,acceptance,path.join(f.root,'dist1')),two=producer.archive(dir,acceptance,path.join(f.root,'dist2'));assert.equal(one.sha256,two.sha256);assert.equal(one.published,false);assert.equal(path.basename(one.archive),'backplane-v0.13.0-'+target+producer.TARGETS[target].suffix);
+ const packaged=path.dirname(one.desktopReceipt),desktop=JSON.parse(fs.readFileSync(one.desktopReceipt));assert.equal(desktop.schema,1);assert.equal(desktop.kind,'backplane-electron-desktop-package');assert.equal(desktop.electronVersion,'44.9.2');assert.equal(desktop.serviceVersion,'0.13.0');
  assert(fs.existsSync(path.join(packaged,producer.TARGETS[target].executable)));const m=JSON.parse(fs.readFileSync(path.join(packaged,'MANIFEST.json')));assert.equal(m.files['DESKTOP.json'].sha256,hash(one.desktopReceipt));assert.equal(desktop.members['NOTICES.json'].sha256,hash(path.join(packaged,'NOTICES.json')));
  const serviceDir=path.join(packaged,producer.TARGETS[target].resources,'backplane-service');assert(fs.existsSync(path.join(serviceDir,target==='windows-x64'?'backplane-serve.exe':'backplane-serve')));
  for(const n of ['BUILD.json','WEB.json','RUNTIME.json','CLOSURE.json'])assert(fs.readFileSync(path.join(serviceDir,n)).equals(fs.readFileSync(path.join(f.service,n))));
@@ -144,4 +144,24 @@ test('resident-service lifecycle works on non-Windows targets and never override
 test('a Windows shell successor source is refused: the shell comes from the release commit',t=>{
  const f=fixture(t,'windows-x64',true);f.freeze.windowsShellSource={commit:'7'.repeat(40),tree:'8'.repeat(40),serviceSha256:'9'.repeat(64)};f.refresh();
  assert.throws(()=>producer.stage(f.requestPath,path.join(f.root,'stage')),/successor/);
+});
+
+test('a service without every helper is refused at stage, and a stage that lost one at archive (#510)',t=>{
+ for(const name of producer.helperFiles('darwin-arm64')){
+  const f=fixture(t,'darwin-arm64');fs.unlinkSync(path.join(f.service,name));
+  f.serviceReceipt.members=producer.inventory(f.service,f.target);
+  f.request.service.receipt=ref(write(path.join(f.root,'service.json'),f.serviceReceipt));
+  f.freeze.components[f.target].serviceReceiptSha256=f.request.service.receipt.sha256;f.refresh();
+  const dest=path.join(f.root,'stage');assert.throws(()=>producer.stage(f.requestPath,dest),/Missing helper beside the service: /);assert(!fs.existsSync(dest));
+ }
+ const f=fixture(t,'linux-x64'),dir=path.join(f.root,'stage');producer.stage(f.requestPath,dir);const acceptance=evidence(f,dir);
+ fs.unlinkSync(path.join(dir,producer.TARGETS['linux-x64'].resources,'backplane-service','backplane-kipc'));
+ assert.throws(()=>producer.archive(dir,acceptance,path.join(f.root,'dist')),/Missing helper|does not bind/);assert(!fs.existsSync(path.join(f.root,'dist')));
+});
+test('helpers must be executables of the target',t=>{
+ const f=fixture(t,'linux-x64');producer.helpers(f.service,'linux-x64');
+ put(path.join(f.service,'backplane-voice'),binary('linux-arm64'),0o755);assert.throws(()=>producer.helpers(f.service,'linux-x64'));
+ put(path.join(f.service,'backplane-voice'),binary('linux-x64'),0o644);assert.throws(()=>producer.helpers(f.service,'linux-x64'),/not executable/);
+ const w=fixture(t,'windows-x64',true);producer.helpers(w.service,'windows-x64');fs.unlinkSync(path.join(w.service,'backplane-step2glb.exe'));
+ assert.throws(()=>producer.helpers(w.service,'windows-x64'),/backplane-step2glb\.exe/);
 });

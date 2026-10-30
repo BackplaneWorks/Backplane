@@ -491,6 +491,25 @@ def KServe.spawn.fields(+project: String, +argv: List<&2, String>, library: Stri
 
 # the project's server is started (its record says "starting" until it
 # is listening and has answered), and 30 s are given to say so
+def Hp.exe(hp: Hp) -> String:
+  match hp:
+    case Hp{_, _, _, exe}: exe
+
+def Hp.started(hp: Hp) -> Bool:
+  match hp:
+    case Hp{m, _, _, _}: Maybe.is_some(&2, Chan(String), m)
+
+def KServe.launch.wait(started: Bool, +k: Ks, +hp: Hp, +project: String, +now: Nat) -> IO(Ks):
+  match started:
+    case True{}:
+      do IO<Ks>:
+        IO.spawn(Unit, KServe.later(Ks.q(k), 30000, KLate{project, now}))
+        KServe.emit(Ks.with_srvs(Ks.with_hp(k, hp), KServe.put(Ks.srvs(k), KS.KS.starting(KServe.get(Ks.srvs(k), project), now))))
+    case False{}:
+      do IO<Ks>:
+        r : Result<&1, &1, KMsg, Unit> <- Chan.send(KMsg, Ks.q(k), KBad{project, "the KiCad IPC helper could not start: " ++ Hp.exe(hp)})
+        return Ks.with_srvs(Ks.with_hp(k, hp), KServe.put(Ks.srvs(k), KS.KS.starting(KServe.get(Ks.srvs(k), project), now)))
+
 def KServe.launch.ready(+k: Ks, +project: String) -> IO(Ks):
   do IO<Ks>:
     +now : Nat <- KServe.now()
@@ -500,9 +519,8 @@ def KServe.launch.ready(+k: Ks, +project: String) -> IO(Ks):
     library : String <- K.Rt.env("BACKPLANE_KICAD_LIBRARY")
     config : String <- K.Rt.env("KICAD_CONFIG_HOME")
     +sink : Chan(String) <- Chan.new(String, 1)
-    hp : Hp <- KServe.call(Ks.hp(k), Ks.q(k), KServe.spawn.fields(project, KS.KS.argv(KEnv.cli(env), project, dir, Ks.hub(k), KEnv.caps(env)), library, config), sink)
-    IO.spawn(Unit, KServe.later(Ks.q(k), 30000, KLate{project, now}))
-    KServe.emit(Ks.with_srvs(Ks.with_hp(k, hp), KServe.put(Ks.srvs(k), KS.KS.starting(KServe.get(Ks.srvs(k), project), now))))
+    +hp : Hp <- KServe.call(Ks.hp(k), Ks.q(k), KServe.spawn.fields(project, KS.KS.argv(KEnv.cli(env), project, dir, Ks.hub(k), KEnv.caps(env)), library, config), sink)
+    KServe.launch.wait(Hp.started(hp), k, hp, project, now)
 
 def KServe.launch.prepared(fine: Bool, why: String, +k: Ks, +project: String) -> IO(Ks):
   match fine:
@@ -513,8 +531,15 @@ def KServe.launch.prepared(fine: Bool, why: String, +k: Ks, +project: String) ->
         r : Result<&1, &1, KMsg, Unit> <- Chan.send(KMsg, Ks.q(k), KBad{project, why})
         return Ks.with_srvs(k, KServe.put(Ks.srvs(k), KS.KS.starting(KServe.get(Ks.srvs(k), project), now)))
 
+def KServe.launch.checked(r: P.Ran, +k: Ks, +project: String) -> IO(Ks):
+  match r:
+    case P.Ran{0, _}:
+      IO.bind(String, Ks, K.KiCad.prepare(KEnv.cli(Ks.env(k))), +why => KServe.launch.prepared(String.is_empty(why), why, k, project))
+    case _:
+      KServe.launch.prepared(False{}, "the KiCad IPC helper was not found or is not executable: " ++ Hp.exe(Ks.hp(k)), k, project)
+
 def KServe.launch(+k: Ks, +project: String) -> IO(Ks):
-  IO.bind(String, Ks, K.KiCad.prepare(KEnv.cli(Ks.env(k))), +why => KServe.launch.prepared(String.is_empty(why), why, k, project))
+  IO.bind(P.Ran, Ks, P.Proc.run("sh", ["-c", "command -v \"$1\" >/dev/null 2>&1", "sh", Hp.exe(Ks.hp(k))], "/"), r => KServe.launch.checked(r, k, project))
 
 def KServe.close.k(empty: Bool, +k: Ks, +sock: String) -> IO(Ks):
   match empty:

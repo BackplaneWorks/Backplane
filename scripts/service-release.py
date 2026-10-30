@@ -126,6 +126,66 @@ def architecture(path, target):
                 "Service is not the requested Mach-O architecture")
 
 
+# The helper programs the hub runs (src/server/kicad.bend's Helper.find),
+# beside it in the service folder. Linux and macOS build them with the
+# service (scripts/build-helpers.sh); Windows' come in its pinned runtime
+# bundle (scripts/service-runtime.py). 0.13.0's macOS and Linux desktop apps
+# shipped none, so KiCad IPC never started (issue #510): a component, and a
+# packaged app (scripts/check-helpers.py), without every one is refused.
+HELPERS = ("backplane-kipc", "backplane-step2glb", "backplane-voice", "backplane-browser")
+WINDOWS_HELPERS = ("backplane-kipc.exe", "backplane-step2glb.exe")
+HELPER_NOTICES = {"backplane-kipc": "kipc", "backplane-step2glb": "step2glb", "backplane-browser": "browser"}
+
+
+def helper_names(target):
+    return WINDOWS_HELPERS if target.startswith("windows-") else HELPERS
+
+
+def built_helpers(target):
+    # what the js build makes beside the service for the target
+    return () if target.startswith("windows-") else HELPERS
+
+
+def code_signed(path):
+    # a Mach-O with an LC_CODE_SIGNATURE load command (Bun's ad-hoc
+    # signature): Apple silicon runs no unsigned code
+    with Path(path).open("rb") as stream:
+        head = stream.read(32)
+        require(len(head) == 32 and struct.unpack_from("<I", head)[0] == 0xfeedfacf, "Not a 64-bit Mach-O")
+        ncmds, size = struct.unpack_from("<II", head, 16)
+        cmds = stream.read(size)
+    at = 0
+    for _ in range(ncmds):
+        require(at + 8 <= len(cmds), "Truncated Mach-O load commands")
+        cmd, length = struct.unpack_from("<II", cmds, at)
+        if cmd == 0x1d:
+            return True
+        require(length >= 8, "Invalid Mach-O load command")
+        at += length
+    return False
+
+
+def check_helpers(root, target):
+    """Every helper the target's hub needs, beside its service in ROOT: a
+    regular, executable file of the target's architecture (signed on macOS).
+    Answers {name: {sha256, bytes}}."""
+    found = {}
+    for name in helper_names(target):
+        path = Path(root) / name
+        require(path.is_file() and not path.is_symlink(), "Missing helper " + name + " beside the service")
+        require(path.stat().st_size > 0, "Empty helper " + name)
+        if not target.startswith("windows-"):
+            require(path.stat().st_mode & 0o111 == 0o111, "Helper " + name + " is not executable")
+        try:
+            architecture(path, target)
+        except ValueError:
+            raise ValueError("Helper " + name + " is not a " + target + " executable") from None
+        if target.startswith("darwin-"):
+            require(code_signed(path), "Helper " + name + " is not code signed")
+        found[name] = {"sha256": digest(path), "bytes": path.stat().st_size}
+    return found
+
+
 def identity(request):
     release = request.get("release", {})
     require(request.get("schema") == 1 and request.get("target") in TARGETS, "Unsupported target/schema")
@@ -280,8 +340,14 @@ def js(request, base, out):
         # the private prelude holds the protected values; build-js.sh removes it, and so does this
         for name in ("baked.js", "bin.js", "baked-t.js", "baked-g.js"):
             (ROOT / "build/js/backplane-serve" / name).unlink(missing_ok=True)
-    require(sorted(p.name for p in out.iterdir()) == sorted(["logs", service.name]), "Unexpected build outputs")
+    helpers = built_helpers(target)
+    if helpers:
+        # the same target and pinned runtime as the service
+        run(["scripts/build-helpers.sh", out], logs / "helpers.log", env)
+    require(sorted(p.name for p in out.iterdir())
+            == sorted(["logs", service.name, *helpers, *(["licenses"] if helpers else [])]), "Unexpected build outputs")
     architecture(service, target)
+    helper_files = check_helpers(out, target) if helpers else {}
     # a cross-built service is run on its target by runtime acceptance
     if actual_host == target:
         version = run([service, "--version"], logs / "version.log", env, 30).strip()
@@ -339,6 +405,7 @@ def js(request, base, out):
               "entry": "src/server/main.bend", "version": VERSION, "versionStamp": VERSION, "telemetryChannel": "release",
               "source_commit": release["commit"], "source_tree": release["tree"], "compileInputs": compile_inputs(),
               "service": service.name, "binary_sha256": digest(service), "webManifestSha256": digest(out / "WEB.json"),
+              "helpers": {name: helper_files[name]["sha256"] for name in helpers},
               "sourceManifestSha256": digest(out / "SOURCE.json"),
               "toolchain": {name: {key: request["toolchain"][name][key] for key in ("path", "bytes", "sha256", "version")}
                             for name in tool_names},
@@ -396,6 +463,10 @@ def component(request, base, out):
             and digest(source / "WEB.json") == build_data["webManifestSha256"]
             and digest(source / "SOURCE.json") == build_data["sourceManifestSha256"], "Built component changed")
     architecture(source / service, request["target"])
+    helpers = built_helpers(request["target"])
+    require(sorted(build_data.get("helpers", {})) == sorted(helpers), "Build lacks the target's helpers")
+    for name in helpers:
+        require(digest(source / name) == build_data["helpers"][name], "Built helper changed: " + name)
     require(web_manifest(source / "web", release) == read(source / "WEB.json"), "Web manifest mismatch")
     runtime_root = (base / request["runtimeDirectory"]).resolve()
     approval_path = bound(request["runtimeQualification"], base)
@@ -414,6 +485,10 @@ def component(request, base, out):
     for name in (service, "BUILD.json", "SOURCE.json", "WEB.json", "LICENSE.Backplane",
                  "WEB-EMISSION.json", "SOURCE-QUALIFICATION.json", "SOURCE-QUALIFICATION-BOUND.json"):
         shutil.copy2(source / name, payload / name)
+    for name in helpers:
+        shutil.copy2(source / name, payload / name)
+        # an artifact upload drops file modes on the way to this host
+        (payload / name).chmod(0o755)
     if "executionHelper" in build_data:
         helper = bound(build_data["executionHelper"], source)
         require(helper == source / "EXECUTION-HELPER.py", "Execution helper provenance path mismatch")
@@ -430,13 +505,24 @@ def component(request, base, out):
         else:
             shutil.copy2(child, payload / child.name, follow_symlinks=False)
     runtime = runtime_closure(payload, request["target"])
+    check_helpers(payload, request["target"])
+    packages = list(runtime["packages"])
+    for name in helpers:
+        folder = payload / "licenses/helpers" / HELPER_NOTICES.get(name, "")
+        files = sorted(p for p in folder.rglob("*") if p.is_file()) if name in HELPER_NOTICES else []
+        require(files or name not in HELPER_NOTICES, "Helper " + name + " lacks its notices")
+        packages.append({"name": name, "version": VERSION,
+                         "sourceDisposition": "https://github.com/BackplaneWorks/Backplane/tree/" + release["commit"]
+                                              + "/tools/" + name[len("backplane-"):] + " (scripts/build-helpers.sh), on Bun (licenses/bun)",
+                         "licenses": [{"path": p.relative_to(payload).as_posix(), "sha256": digest(p)}
+                                      for p in files] or [{"path": "LICENSE.Backplane", "sha256": digest(payload / "LICENSE.Backplane")}]})
     shutil.copyfile(approval_path, payload / "RUNTIME-QUALIFICATION.json")
     result = {"schema": 1, "kind": "backplane-bend-service", "status": "VERIFIED", "target": request["target"],
               "sourceCommit": release["commit"], "sourceTree": release["tree"], "version": VERSION, "channel": "release",
               "genuineService": True, "entrypoint": "src/server/main.bend", "roles": {"service": service, "web": "web"},
               "buildReceipt": local_reference(payload / "BUILD.json", out), "runtimeManifest": "RUNTIME.json",
               "runtimeManifestSha256": digest(payload / "RUNTIME.json"), "closureManifest": "CLOSURE.json",
-              "closureSha256": digest(payload / "CLOSURE.json"), "packages": runtime["packages"],
+              "closureSha256": digest(payload / "CLOSURE.json"), "packages": packages,
               "members": inventory(payload), "runtimeAcceptance": "PENDING", "published": False}
     notices(payload, result["packages"])
     write(out / "SERVICE.json", result)

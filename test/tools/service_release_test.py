@@ -48,6 +48,25 @@ class ProducerTests(unittest.TestCase):
         path.write_bytes(b)
         path.chmod(0o755)
 
+    def macho(self, path, cpu=0x100000c, signed=True):
+        cmds = struct.pack("<II", 0x19, 8) + (struct.pack("<II", 0x1d, 16) + bytes(8) if signed else b"")
+        b = struct.pack("<IIIIIIII", 0xfeedfacf, cpu, 0, 2, 2 if signed else 1, len(cmds), 0, 0) + cmds
+        path.write_bytes(b)
+        path.chmod(0o755)
+
+    def helpers(self, folder, target):
+        # the helpers the js build makes beside the service, and their notices
+        for name in S.built_helpers(target):
+            path = folder / name
+            if target.startswith("darwin-"):
+                self.macho(path, 0x1000007 if target == "darwin-x64" else 0x100000c)
+            else:
+                self.elf(path, 183 if target == "linux-arm64" else 62)
+        for tool in sorted(set(S.HELPER_NOTICES.values())) if S.built_helpers(target) else ():
+            (folder / "licenses/helpers" / tool).mkdir(parents=True, exist_ok=True)
+            (folder / "licenses/helpers" / tool / "LICENSE").write_text("fixture " + tool + " notice")
+        return {name: S.digest(folder / name) for name in S.built_helpers(target)}
+
     def fixture(self, target="linux-x64"):
         build, runtime = self.root / "build", self.root / "runtime"
         web = build / "web"
@@ -59,6 +78,7 @@ class ProducerTests(unittest.TestCase):
         for sub, name in (("bun", "LICENSE.md"), ("bend", "LICENSE")):
             (build / "licenses" / sub).mkdir(parents=True)
             (build / "licenses" / sub / name).write_text("fixture notice")
+        helpers = self.helpers(build, target)
         (web / "index.html.gz").write_bytes(gzip.compress((web / "index.html").read_bytes(), mtime=0))
         (web / "LICENSE.Backplane").write_text("fixture license")
         (build / "LICENSE.Backplane").write_text("fixture license")
@@ -71,7 +91,7 @@ class ProducerTests(unittest.TestCase):
         self.write(build / "SOURCE.json", {"fixture": True})
         self.write(build / "BUILD.json", {
             "status": "VERIFIED_GENUINE_SERVICE_ONLY_CONFIGURED_BUILD", "target": target, "serviceRuntime": "bun",
-            "service": service.name,
+            "service": service.name, "helpers": helpers,
             "source_commit": self.release["commit"], "source_tree": self.release["tree"], "version": S.VERSION,
             "versionStamp": S.VERSION, "telemetryChannel": "release", "compileInputs": S.compile_inputs(),
             "binary_sha256": S.digest(service), "webManifestSha256": S.digest(build / "WEB.json"),
@@ -79,6 +99,10 @@ class ProducerTests(unittest.TestCase):
         (runtime / "lib").mkdir()
         (runtime / "lib/libfixture.so").write_bytes(b"fixture-runtime-not-executable")
         (runtime / "LICENSE.fixture").write_text("fixture license")
+        if target == "windows-x64":
+            # Windows' helpers come in its pinned runtime bundle
+            for name in S.WINDOWS_HELPERS:
+                self.pe(runtime / name)
         packages = [{"name": "fixture", "version": "1", "sourceDisposition": "fixture only",
                      "licenses": [{"path": "LICENSE.fixture", "sha256": S.digest(runtime / "LICENSE.fixture")}]}]
         self.write(runtime / "RUNTIME.json", {"target": target, "inventory": [
@@ -350,7 +374,12 @@ class ProducerTests(unittest.TestCase):
     def js_request(self, target="linux-arm64", runtime_machine=183, runtime_target=None):
         self.inputs()
         runtime = self.root / "bun-runtime"
-        self.pe(runtime, runtime_machine) if target == "windows-x64" else self.elf(runtime, runtime_machine)
+        if target == "windows-x64":
+            self.pe(runtime, runtime_machine)
+        elif target.startswith("darwin-"):
+            self.macho(runtime, runtime_machine)
+        else:
+            self.elf(runtime, runtime_machine)
         req = {"schema": 1, "kind": "backplane-service-js-inputs", "target": target, "release": self.release,
                "toolchain": {"bend": {**S.reference(self.root / "bend"), "version": "fixture"},
                              "bun": {**S.reference(self.root / "bun"), "version": "1.4.3"},
@@ -360,7 +389,7 @@ class ProducerTests(unittest.TestCase):
                "webNotices": S.reference(self.root / "notices.json")}
         return req
 
-    def mocked_build(self, request=None, outname="actual-output", host=("Linux", "x86_64"), extra=None):
+    def mocked_build(self, request=None, outname="actual-output", host=("Linux", "x86_64"), extra=None, drop=None):
         source = self.inputs()
         req = request or self.js_request("linux-x64", 62)
         out, calls = self.root / outname, []
@@ -387,11 +416,21 @@ class ProducerTests(unittest.TestCase):
                     self.assertNotIn(name, env)
                 if req["target"] == "windows-x64":
                     self.pe(Path(args[2] + ".exe"))
+                elif req["target"].startswith("darwin-"):
+                    self.macho(Path(args[2]), 0x1000007 if req["target"] == "darwin-x64" else 0x100000c)
                 else:
                     self.elf(Path(args[2]), 183 if req["target"] == "linux-arm64" else 62)
                 if extra:
                     (out / extra).write_text("stray")
                 return "stages: " + req["target"] + " emit (fresh)\n"
+            if args[0] == "scripts/build-helpers.sh":
+                self.assertEqual(args[1], str(out))
+                self.assertEqual(env["BACKPLANE_JS_TARGET"], req["target"])
+                self.assertEqual(env["BACKPLANE_JS_BUN_RUNTIME"], str(self.root / "bun-runtime"))
+                self.helpers(out, req["target"])
+                if drop:
+                    (out / drop).unlink()
+                return ""
             elif "src/web/index.html" in args:
                 web = Path(args[-1])
                 web.mkdir()
@@ -412,7 +451,7 @@ class ProducerTests(unittest.TestCase):
 
     def test_js_calls_only_server_and_production_web_then_writes_witness(self):
         out, calls, req = self.mocked_build()
-        self.assertEqual([c[0] for c in calls if c[0].startswith("scripts/")], ["scripts/build-js.sh", "scripts/js-licenses.sh"])
+        self.assertEqual([c[0] for c in calls if c[0].startswith("scripts/")], ["scripts/build-js.sh", "scripts/build-helpers.sh", "scripts/js-licenses.sh"])
         self.assertFalse(any("src/app/main.bend" in c for c in calls))
         build = S.read(out / "BUILD.json")
         self.assertEqual(build["compileInputs"], S.compile_inputs())
@@ -426,7 +465,7 @@ class ProducerTests(unittest.TestCase):
         # an x64 host makes the arm64 service: bun links the JS onto the
         # arm64 runtime pinned in the request; nothing runs it here
         out, calls, req = self.mocked_build(request=self.js_request(), outname="js-output")
-        self.assertEqual([c[0] for c in calls if c[0].startswith("scripts/")], ["scripts/build-js.sh", "scripts/js-licenses.sh"])
+        self.assertEqual([c[0] for c in calls if c[0].startswith("scripts/")], ["scripts/build-js.sh", "scripts/build-helpers.sh", "scripts/js-licenses.sh"])
         self.assertFalse(any(c[-1] == "--version" for c in calls))
         build = S.read(out / "BUILD.json")
         self.assertEqual(build["serviceRuntime"], "bun")
@@ -462,6 +501,90 @@ class ProducerTests(unittest.TestCase):
     def test_js_refuses_stray_build_outputs(self):
         with self.assertRaisesRegex(ValueError, "Unexpected build outputs"):
             self.mocked_build(outname="js-stray", extra="backplane-serve.tmp")
+
+    def test_js_builds_the_helpers_beside_the_service(self):
+        out, calls, req = self.mocked_build(outname="js-helpers")
+        build = S.read(out / "BUILD.json")
+        self.assertEqual(sorted(build["helpers"]), sorted(S.HELPERS))
+        for name in S.HELPERS:
+            self.assertEqual(build["helpers"][name], S.digest(out / name))
+
+    def test_js_darwin_helpers_are_signed_macho(self):
+        out, calls, req = self.mocked_build(request=self.js_request("darwin-arm64", 0x100000c), outname="js-mac",
+                                            host=("Linux", "x86_64"))
+        self.assertEqual(sorted(S.read(out / "BUILD.json")["helpers"]), sorted(S.HELPERS))
+
+    def test_js_refuses_a_missing_helper(self):
+        with self.assertRaisesRegex(ValueError, "Unexpected build outputs"):
+            self.mocked_build(outname="js-nokipc", drop="backplane-kipc")
+
+    def test_js_windows_builds_no_helpers(self):
+        out, calls, req = self.mocked_build(request=self.js_request("windows-x64", 0x8664), outname="js-win-helpers")
+        self.assertFalse(any(c[0] == "scripts/build-helpers.sh" for c in calls))
+        self.assertEqual(S.read(out / "BUILD.json")["helpers"], {})
+
+    def test_component_carries_every_helper_executable(self):
+        req = self.fixture()
+        for name in S.HELPERS:
+            (self.root / "build" / name).chmod(0o644)  # as an artifact download leaves them
+        out = self.root / "component"
+        S.component(req, self.root, out)
+        receipt = S.read(out / "SERVICE.json")
+        for name in S.HELPERS:
+            self.assertEqual(receipt["members"][name]["mode"], 0o755)
+        self.assertTrue({"backplane-kipc", "backplane-step2glb", "backplane-browser"}
+                        <= {p["name"] for p in receipt["packages"]})
+        S.notices(out / "payload", receipt["packages"])
+
+    def test_component_refuses_a_build_without_helpers(self):
+        # 0.13.0's build: the service alone (issue #510)
+        req = self.fixture()
+        p = self.root / "build/BUILD.json"
+        data = S.read(p)
+        del data["helpers"]
+        S.write(p, data)
+        req["buildReceipt"] = S.reference(p)
+        with self.assertRaisesRegex(ValueError, "helpers"):
+            S.component(req, self.root, self.root / "out")
+
+    def test_component_refuses_a_changed_helper(self):
+        req = self.fixture()
+        (self.root / "build/backplane-voice").write_bytes(b"\x7fELF\x02\x01changed")
+        with self.assertRaisesRegex(ValueError, "Built helper changed"):
+            S.component(req, self.root, self.root / "out")
+
+    def test_windows_component_needs_the_bundled_helpers(self):
+        req = self.fixture("windows-x64")
+        (self.root / "runtime/backplane-kipc.exe").unlink()
+        approval = S.read(self.root / "approval.json")
+        approval["members"] = S.inventory(self.root / "runtime")
+        S.write(self.root / "approval.json", approval)
+        req["runtimeQualification"] = S.reference(self.root / "approval.json")
+        with self.assertRaisesRegex(ValueError, "Missing helper backplane-kipc.exe"):
+            S.component(req, self.root, self.root / "out")
+
+    def test_check_helpers_refuses_wrong_arch_mode_and_unsigned(self):
+        folder = self.root / "h"
+        folder.mkdir()
+        self.helpers(folder, "linux-x64")
+        S.check_helpers(folder, "linux-x64")
+        with self.assertRaisesRegex(ValueError, "not a linux-arm64 executable"):
+            S.check_helpers(folder, "linux-arm64")
+        (folder / "backplane-browser").chmod(0o644)
+        with self.assertRaisesRegex(ValueError, "not executable"):
+            S.check_helpers(folder, "linux-x64")
+        mac = self.root / "m"
+        mac.mkdir()
+        self.helpers(mac, "darwin-arm64")
+        S.check_helpers(mac, "darwin-arm64")
+        with self.assertRaisesRegex(ValueError, "not a darwin-x64"):
+            S.check_helpers(mac, "darwin-x64")
+        self.macho(mac / "backplane-kipc", signed=False)
+        with self.assertRaisesRegex(ValueError, "not code signed"):
+            S.check_helpers(mac, "darwin-arm64")
+        (mac / "backplane-kipc").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing helper backplane-kipc"):
+            S.check_helpers(mac, "darwin-arm64")
 
     def test_darwin_x64_macho(self):
         b = bytearray(32)
