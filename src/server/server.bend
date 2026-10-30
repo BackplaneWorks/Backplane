@@ -1,4 +1,7 @@
 import Base
+import ../core/watchdog.bend as WD
+import ../core/restartretry.bend as RR
+import ./livenessio.bend as LFX
 import ../core/mailprivate.bend as PM
 import ../core/handoff.bend as HD
 import ../core/thinq.bend as AQ
@@ -8367,7 +8370,7 @@ def Watch.launch.sh() -> String:
   "d=$1; c=$2; cmd=$3\npid_id() { q=$1; if [ -r \"/proc/$q/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20); echo \"$b:$st\"; elif ps -p \"$q\" >/dev/null 2>&1; then ps -o lstart= -p \"$q\" | tr -s ' ' '_'; fi; }\nmkdir -p \"$d\" || { echo gone; exit 0; }\n[ -e \"$d/cancel\" ] && { echo gone; exit 0; }\n[ -e \"$d/code\" ] && { echo running; exit 0; }\nif [ -e \"$d/started\" ]; then { [ -e \"$d/out\" ] || [ -e \"$d/how\" ]; } && { echo running; exit 0; }; fi\nprintf '%s\\n' \"$cmd\" > \"$d/cmd\"\n{ printf ': > \"%s/out\"\\n' \"$d\"; printf 'cd \"%s\" || exit 127\\n' \"$c\"; printf '[ -e \"%s/cancel\" ] && exit 143\\n' \"$d\"; printf 'sh \"%s/cmd\" > \"%s/out\" 2>&1\\n' \"$d\" \"$d\"; printf 'echo $? > \"%s/code.tmp\" && mv \"%s/code.tmp\" \"%s/code\"\\n' \"$d\" \"$d\" \"$d\"; } > \"$d/run.sh\"\n: > \"$d/started\"\nif command -v setsid >/dev/null 2>&1; then setsid nohup sh \"$d/run.sh\" >/dev/null 2>&1 < /dev/null &\nelse perl -MPOSIX -e 'POSIX::setsid(); exec {$ARGV[0]} @ARGV or exit 127' nohup sh \"$d/run.sh\" >/dev/null 2>&1 < /dev/null &\nfi\necho $! > \"$d/pid\"\npid_id $! > \"$d/pidid\"\necho pid > \"$d/how\"\necho running\n"
 
 def Watch.check.sh() -> String:
-  "k=$1; t=$2; id=$3; d=$4\ncase $k in\nrun)\n  if [ -e \"$d/cancel\" ]; then\n    (\nd=$4\n# A committed job may still be in its launch fiber when the hub dies.\nif [ -e \"$d/intent\" ]; then\n  : > \"$d/cancel\"\n  for attempt in 1 2; do\n    [ -s \"$d/pid\" ] && [ -s \"$d/pidid\" ] && break\n    sleep 1\n  done\nfi\npid_id() {\n  q=$1\n  if [ -r \"/proc/$q/stat\" ]; then\n    b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\n    st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20)\n    echo \"$b:$st\"\n  elif ps -p \"$q\" >/dev/null 2>&1; then\n    ps -o lstart= -p \"$q\" | tr -s ' ' '_'\n  fi\n}\np=$(cat \"$d/pid\" 2>/dev/null)\nsaved=$(cat \"$d/pidid\" 2>/dev/null)\n[ -n \"$p\" ] && [ \"$p\" -gt 1 ] 2>/dev/null && [ -n \"$saved\" ] && [ \"$(pid_id \"$p\")\" = \"$saved\" ] || exit 0\nkill -TERM \"-$p\" 2>/dev/null || :\nkill -TERM \"$p\" 2>/dev/null || :\nfor attempt in 1 2; do\n  if kill -0 \"-$p\" 2>/dev/null || kill -0 \"$p\" 2>/dev/null; then sleep 1; else exit 0; fi\ndone\nkill -KILL \"-$p\" 2>/dev/null || :\n[ \"$(pid_id \"$p\")\" != \"$saved\" ] || kill -KILL \"$p\" 2>/dev/null || :\nfor attempt in 1 2; do\n  if kill -0 \"-$p\" 2>/dev/null || kill -0 \"$p\" 2>/dev/null; then sleep 1; else break; fi\ndone\nexit 0\n\n    )\n  fi\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  [ -e \"$d/code\" ] && { echo \"done $(cat \"$d/code\")\"; exit 0; }\n  p=$(cat \"$d/pid\" 2>/dev/null); [ -n \"$p\" ] && kill -0 \"$p\" 2>/dev/null && { echo running; exit 0; }\n  [ -e \"$d/code\" ] && { echo \"done $(cat \"$d/code\")\"; exit 0; }\n  echo gone ;;\npid)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  if [ -r \"/proc/$t/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$t/stat\" | cut -d' ' -f20); n=\"$b:$st\"\n  elif ps -p \"$t\" >/dev/null 2>&1; then n=$(ps -o lstart= -p \"$t\" | tr -s ' ' '_')\n  else echo gone; exit 0; fi\n  [ \"$id\" = - ] && { echo \"ident $n\"; echo running; exit 0; }\n  [ \"$n\" = \"$id\" ] && echo running || echo gone ;;\nfile)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  [ -f \"$t\" ] && grep -qF \"$id\" \"$t\" 2>/dev/null && { echo found; exit 0; }\n  echo running ;;\n*) echo gone ;;\nesac\n"
+  "k=$1; t=$2; id=$3; d=$4\ncase $k in\nrun)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  [ -e \"$d/code\" ] && { echo \"done $(cat \"$d/code\")\"; exit 0; }\n  p=$(cat \"$d/pid\" 2>/dev/null)\n  saved=$(cat \"$d/pidid\" 2>/dev/null)\n  if [ -r \"/proc/$p/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$p/stat\" | cut -d' ' -f20); actual=\"$b:$st\"; case $(sed 's/^.*) //' \"/proc/$p/stat\") in Z\\ *|X\\ *) actual= ;; esac\n  elif [ -n \"$p\" ] && ps -p \"$p\" >/dev/null 2>&1; then actual=$(ps -o lstart= -p \"$p\" | tr -s ' ' '_')\n  else actual=; fi\n  [ -n \"$saved\" ] && [ \"$saved\" = \"$actual\" ] && { echo running; exit 0; }\n  [ -e \"$d/code\" ] && { echo \"done $(cat \"$d/code\")\"; exit 0; }\n  echo gone ;;\npid)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  if [ -r \"/proc/$t/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$t/stat\" | cut -d' ' -f20); n=\"$b:$st\"; case $(sed 's/^.*) //' \"/proc/$t/stat\") in Z\\ *|X\\ *) echo gone; exit 0 ;; esac\n  elif ps -p \"$t\" >/dev/null 2>&1; then n=$(ps -o lstart= -p \"$t\" | tr -s ' ' '_')\n  else echo gone; exit 0; fi\n  [ \"$id\" = - ] && { echo \"ident $n\"; echo running; exit 0; }\n  [ \"$n\" = \"$id\" ] && echo running || echo gone ;;\nfile)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  [ -f \"$t\" ] && grep -qF \"$id\" \"$t\" 2>/dev/null && { echo found; exit 0; }\n  echo running ;;\n*) echo gone ;;\nesac\n"
 
 def Watch.stop.sh() -> String:
   "pid_id() { q=$1; if [ -r \"/proc/$q/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20); echo \"$b:$st\"; elif ps -p \"$q\" >/dev/null 2>&1; then ps -o lstart= -p \"$q\" | tr -s ' ' '_'; fi; }\nk=$1; t=$2; id=$3; d=$4\nmkdir -p \"$d\"\ncase $k in\nunwatch) : > \"$d/stop\" ;;\nrun) : > \"$d/cancel\"; p=$(cat \"$d/pid\" 2>/dev/null); n=$(pid_id \"$p\"); [ -n \"$p\" ] && [ \"$p\" -gt 1 ] && [ -n \"$n\" ] && [ \"$n\" = \"$(cat \"$d/pidid\" 2>/dev/null)\" ] && { kill -TERM \"-$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; } ;;\npid) [ \"$t\" -gt 1 ] 2>/dev/null && [ \"$id\" != - ] && [ \"$(pid_id \"$t\")\" = \"$id\" ] && kill -TERM \"$t\" 2>/dev/null ;;\nesac\ntrue\n"
@@ -8468,11 +8471,7 @@ def Watch.got(r: P.Ran, +ident: String, +thread: String, +id: String, +kind: Str
   Watch.got.k(Watch.lines(Watch.ran(r)), ident, thread, id, kind, dir, inbox, k)
 
 def Watch.timeout.next(locked: Bool, +ident: String, k: String -> IO(Unit)) -> IO(Unit):
-  match locked:
-    case True{}:
-      k(ident)
-    case False{}:
-      IO.pure(Unit, Unit{})
+  k(ident)
 
 def Watch.tick(late: Bool, +locked: Bool, +ident: String, +home: String, +thread: String, +id: String, +kind: String, +target: String, +inbox: Chan(Msg), k: String -> IO(Unit)) -> IO(Unit):
   match late:
@@ -8492,7 +8491,7 @@ def Watch.loop(fuel: Nat, +locked: Bool, +ident: String, +home: String, +thread:
       IO.pure(Unit, Unit{})
     case 1n+f:
       IO.bind(Nat, Unit, Now.nat(), +now => Watch.tick(Bool.and(Nat.is_gt(deadline, 0n), Nat.is_ge(now, deadline)), locked, ident, home, thread, id, kind, target, inbox,
-        i2 => Watch.loop(f, locked, i2, home, thread, id, kind, target, Bool.pick(Nat, Bool.and(locked, Bool.and(Nat.is_gt(deadline, 0n), Nat.is_ge(now, deadline))), 0n, deadline), inbox)))
+        i2 => Watch.loop(f, locked, i2, home, thread, id, kind, target, Bool.pick(Nat, Bool.and(Nat.is_gt(deadline, 0n), Nat.is_ge(now, deadline)), 0n, deadline), inbox)))
 
 def Watch.launched(r: P.Ran, +thread: String, +id: String, +inbox: Chan(Msg)) -> IO(Unit):
   match r:
@@ -10809,7 +10808,7 @@ def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step)
 
 def Hub.step.k(p: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   (+st, h) = p
-  IO.bind(Nat, Hub & Bool, Now.nat(), +now => Hub.step.fallback(h, [st], now, B.Locks.after(st, now, B.Ride.after(st, now, B.Wake.after(st, B.Run.after(st, now, B.Step{cs, os}))))))
+  IO.bind(Nat, Hub & Bool, Now.nat(), +now => Hub.step.fallback(h, [st], now, WD.Watchdog.after(st, now, B.Locks.after(st, now, B.Ride.after(st, now, B.Wake.after(st, B.Run.after(st, now, B.Step{cs, os})))))))
 
 # a step's changes are stored (with the pending counts they move), then
 # its effects run; answers whether it was stored
@@ -12861,10 +12860,22 @@ def Hub.accounts.observe(has: Bool, h: Hub, +thread: String, +reading: String, +
         snapshot : String <- ACFX.AccountsFx.observe(Cfg.home(cfg), ACCT.Accounts.id(st, thread, "claude"), Nat.show(ACCT.Accounts.epoch(st, thread, "claude")), reading)
         Hub.accounts.found(Hub{st, f, ls, cl, as, inbox, cfg, note}, snapshot, now)
 
-def Hub.line.current(h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
+def Hub.line.current.normal(h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, +as, inbox, cfg, note}:
       Hub.line.m(Agents.run(as, thread), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, line, now)
+
+# Quiet protocol lines have no extra commit/lock pass.
+def Hub.line.progress(step: B.Step, h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
+  match step:
+    case B.Step{Nil{}, Nil{}}: Hub.line.current.normal(h, thread, line, now)
+    case other: IO.bind(Hub, Hub, Hub.step(h, other), h2 => Hub.line.current.normal(h2, thread, line, now))
+
+def Hub.line.current(h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.line.progress(WD.Watchdog.line(st, now, thread, Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, line, now)
 
 def Hub.line(h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
   +reading = J.Json.show(J.Json.get_obj(J.Json.get_obj(ACCT.Accounts.parse(line), "rate_limit_info"), "unifiedWindows"))
@@ -12890,6 +12901,21 @@ def Hub.gone(h: Hub, +thread: String, +code: U32, +pid: U32, +why: String, +now:
     case Hub{st, f, ls, cl, +as, inbox, cfg, note}:
       Hub.gone.k(Agent.pid_is(Agents.get(as, thread), pid), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, code, why, now)
 
+# File metadata and work output are sampled even while a provider blocks in
+# a tool call. Apply observations before the watchdog judges the gap.
+def Hub.watchdog.decide(p: M.State & Hub, +now: Nat) -> IO(Hub):
+  (+st, h) = p
+  +normal = B.Hub.tick(st, now)
+  Hub.step(h, B.Step.cat(normal, WD.Watchdog.tick(M.State.replay(B.Queue.changes(normal), st), now)))
+
+def Hub.watchdog(h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        observed : String <- LFX.Progress.sample(WD.Watchdog.plan(st), Cfg.home(cfg))
+        h2 : Hub <- Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, WD.Watchdog.observed(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(observed), J.Null{})), st, now, B.Step.none()))
+        Hub.watchdog.decide(Hub.state(h2), now)
+
 # each minute the hub's size goes into the gauges
 def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
   match h:
@@ -12902,13 +12928,14 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         PS.Perf.set("hub.busy", U32.from_nat(M.Work.threads(st)))
         # children the last exec handed over that ended meanwhile are waited
         # for (effects/adopt.js), so none stays a zombie
+        guards : U32 <- LG.Guard.reap()
         left : U32 <- AIO.Adopt.reap()
         PS.Perf.set("hub.inherited", left)
         Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         Self.post(inbox, Silence{})
         h2 : Hub <- Hub.telemetry(Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
-        Hub.step(h2, B.Hub.tick(st, now))
+        Hub.watchdog(h2, now)
 
 # a tool call's answer goes once its step is stored: a call whose changes
 # could not be written is told so, never that it worked
@@ -13146,7 +13173,8 @@ def Hub.tagged(h: Hub, +tag: String, line: String, +now: Nat) -> IO(Hub):
 def Hub.recover.carry(h: Hub, +before: M.State, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, +as, inbox, cfg, note}:
-      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Hub.carry.a(before, st, now, Agents.threads(as)))
+      +carried = B.Hub.carry.a(before, st, now, Agents.threads(as))
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step.cat(carried, RR.Retry.after(before, M.State.replay(B.Queue.changes(carried), st), Agents.threads(as), now)))
 
 def Hub.recover.go(h: Hub, st: B.Step, before: M.State, +now: Nat) -> IO(Hub):
   IO.bind(Hub, Hub, Hub.step(h, st), h2 => Hub.recover.carry(h2, before, now))

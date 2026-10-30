@@ -94,13 +94,13 @@ def Before.workspace(+lc: I.Loc, +cur: String, +panel: Bool, term: Bool) -> D.No
 
 def Before.thread.p(+lc: I.Loc, u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.Tool>, +pill: String) -> D.Node:
   match u t:
-    case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, p, ti, c, a, +turn, pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
+    case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, p, ti, c, a, +turn, +pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
       D.El{"main", "thread", [D.At{"class", Bool.pick(String, term, "thread-view with-term", "thread-view") ++ Bool.pick(String, U.Flag.get(op, "drop"), " dropping", "")},
         D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}], List.concat(&2, D.Node, [
         Before.top(lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
         V.View.kx.note(U.KX.note(nf, sel), nf, sel), V.View.kn.loc(lc, U.KN.thread(nf, st, sel), True{}),
         [Before.workspace(lc, U.Fm.tab(U.Str.get(nf, "view.kind:" ++ id)), panel, term)],
-        V.View.thread.workbar(lc, BI.BU.chat.summary(st, id), nf, id, V.View.running(turn)),
+        V.View.thread.workbar(lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, V.View.running(turn)),
         V.View.subthreads(lc, st, id), V.View.thread.subs(lc, st, nf, id, now),
         [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
           fab, V.View.parent(st, id, U.Tasks.up(st, id)),

@@ -87,7 +87,7 @@ def main() -> IO(Unit):
     C.Check.str("timeout retains lock over live work", work.timeout(), H.Watch.id(H.Locks.demo(), "ta"))
     C.Check.str("work end releases", H.Locks.demo.work.end(), "")
     C.Check.str("queued work cancellation removes waiter", work.cancel(), "ta:0")
-    C.Check.str("restart loses locked work", work.restarted(), "")
+    C.Check.str("restart retains locked work until checked", work.restarted(), H.Watch.id(H.Locks.demo(), "ta"))
     C.Check.str("codec held queue round trip", bool(round(M.LockChanged{"bend", queue(), 5n})), "true")
     C.Check.str("codec empty round trip", bool(round(M.LockChanged{"bend", L.Lock.empty(), 6n})), "true")
     C.Check.str("indexed name listed once", Nat.show(List.length(&2, String, M.Locks.names(M.State.replay([M.LockChanged{"bend", queue(), 8n}], H.Locks.demo.queue())))), "1")

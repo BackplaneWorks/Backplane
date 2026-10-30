@@ -2,14 +2,18 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 async function fixture(supported=false, legacyProbe=false){
  const {ConnectionLog}=await import('../../src/web/connection-log.js');
- const {ThinHost,presentationTarget,preservePresentationRoute}=await import('../../src/web/thin-host.js'),{Backoff,Retry,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
+ const {BubMoveObserver}=await import('../../src/web/bub-move.js');
+ const {ThinHost,presentationTarget,preservePresentationRoute,refusedFallback}=await import('../../src/web/thin-host.js'),{Backoff,Retry,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
  let source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
  if(legacyProbe)source=source.replaceAll(' || attempt !== thinAttempt','');
  const a=source.indexOf('function showViewStatus('),b=source.indexOf('// when a frame (a heartbeat included)',a);assert(a>0&&b>a);
  const boot=source.slice(source.indexOf('pairingReady.then('),source.indexOf('window.addEventListener("pagehide",'));
  let clock=0,next=0;const timers=new Map(),sockets=[],requests=[],calls=[],status=[],encoder=new TextEncoder(),decoder=new TextDecoder(),store=new Map();
+ const setTimer=(fn,ms)=>{const id=++next;timers.set(id,{fn,at:clock+ms});return id;};
+ const clearTimer=id=>timers.delete(id);
+ class FixtureRetry extends Retry {constructor(){super({setTimer,clearTimer,now:()=>clock});}}
  class Socket{constructor(url){this.url=url;this.readyState=0;sockets.push(this);}open(){this.readyState=1;this.onopen?.();}send(b){requests.push(JSON.parse(decoder.decode(b)));}frame(v){this.onmessage?.({data:encoder.encode(JSON.stringify(v)).buffer});}close(){this.readyState=3;this.onclose?.();}}
- const ctx={ConnectionLog,CONNECTION_BUNDLE:'chunk-fixture.js',ThinHost,ThinViews,viewCapability,discoverViews,WebSocket:Socket,location:{origin:'https://fixture',host:'fixture',protocol:'https:'},
+ const ctx={ConnectionLog,bubMoves:new BubMoveObserver(()=>null),terminalOutput:{clear(){calls.push('terminal-retired');},rebind(){}},refocusKeep(){},bodyWindows:{disconnect(){},bind(){}},sealedReply:()=>false,CONNECTION_BUNDLE:'chunk-fixture.js',ThinHost,ThinViews,viewCapability,discoverViews,WebSocket:Socket,location:{origin:'https://fixture',host:'fixture',protocol:'https:'},
   thin:null,thinSocket:null,thinAttempt:0,thinExpiry:0,thinGreetingTimer:0,thinDraftTimer:0,thinFieldTimer:0,socket:null,viewMode:'discovering',remoteReady:false,remoteEpoch:'',canonicalBoot:false,pairingAccepted:false,
   thinSession:null,frontendNode:null,frontend:null,cid:'fixture',ui:{},heard:0n,thinMailDraft:{clear(){},bind(){},matches:()=>false,edit(){},scope:()=>'',needsSubmit:()=>false},mailReplyField:()=>undefined,focusedView:{invalidate(){},remote(){calls.push('cache-retired');}},desktopBrowser:{hide(){calls.push('hide');}},Solid:{reset(){},isPlot:()=>false},Plot2d:{reset(){}},
   localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)},performance:{now:()=>clock},Date,Number,JSON,String,Math,Uint8Array,Error,BigInt,
@@ -20,9 +24,12 @@ async function fixture(supported=false, legacyProbe=false){
   presentationJson:x=>x,fromList:x=>x,presentationCommand:c=>calls.push(c),anchorOf:()=>null,
   History:{project:(_before,fresh)=>fresh},historyNode:null,timelineList:()=>null,
   App:{wire_out:t=>encoder.encode(t),presentation_node:n=>n,presentation_prepare:(s,input)=>({...input,rid:s.rid}),presentation_reply:s=>s,presentation_select:(u,id)=>({...u,sel:id}),presentation_handoff:(u,s)=>({...u,sel:s.sel}),unsync:u=>u,lang:()=> 'en'},
-  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x},document:{getElementById:()=>null,documentElement:{style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
-  fallbackIntent:null,wantFrontend:true,Backoff,Retry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
+  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){}},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
+  fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
   fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
+  historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
+  modelFeedback:{clear(){}},viewerFeedback:{choice(){}},
+  viewNote:'',viewNoteTimer:0,shownTarget:null,refusedViews:new Set(),refusedFallback,searchJump:null,
   targetKey:t=>t?t.kind+':'+t.id:'',holdPicture(){if(ctx.frontendNode){ctx.transitionNode=ctx.frontendNode;ctx.frontendNode=null;}},
   stopThin:undefined};
  vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);ctx.showViewStatus=s=>status.push(s);
@@ -50,8 +57,8 @@ test('a missing or failed focused read does not change discovery failure into fu
 });
 test('a dropped view reconnects by itself, bounded, with no whole-log path',async()=>{
  const f=await fixture(true);await f.runBoot();const s=f.sockets[0];s.open();s.close();assert.equal(f.ctx.remoteReady,false);
- // the retry waits out reconnect.js's real-time backoff (125-250 ms first)
- for(let i=0;i<20&&f.sockets.length<2;i++){f.tick(300);await new Promise(r=>setTimeout(r,100));}
+ // Drive both the host deadline and reconnect backoff with the fixture clock.
+ f.tick(300);await new Promise(setImmediate);
  assert.equal(f.sockets.length,2,'a second view socket after the backoff');const url=new URL(f.sockets[1].url);assert.equal(url.searchParams.get('view'),'1');assert.equal(url.searchParams.get('since'),'0');
  assert(!f.calls.includes('FULL-CACHE'));assert(!f.calls.includes('LEGACY-SOCKET'));
 });
@@ -74,7 +81,7 @@ test('actual current Mailroom callback binds displayed text and preserves a newe
  await f.runBoot();const s=f.sockets[0];s.open();s.frame({t:'view',version:1,renderer:'web',generation:'7',epoch:'actual',limits:{...f.VIEW_LIMITS}});const request=f.requests[0];
  const shown={type:'element',tag:'textarea',key:'mail-reply',attrs:[{name:'data-bfield',value:'mrreply'},{name:'value',value:'captured older reply'}],kids:[]},context={kind:'mail-draft',owner:'bot-A',origin:'actual',conv:'conv-A',recipient:'Room'};
  const response={t:'reply',id:request.id,ok:true,result:{version:1,hub:'https://fixture',generation:'7',epoch:'actual',requestRevision:request.p.requestRevision,target:request.p.target,viewId:'real-view',viewRevision:'1',remoteReady:true,renderer:'web',shown,session:request.p.session,cmds:[],mailDraftContext:context,window:{ids:[],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]}}};
- s.frame(response);assert.equal(bound.length,1);assert.equal(bound[0][2],'captured older reply');f.ctx.thin.request('bfield','mrreply\x1f');f.ctx.thin.update();const update=f.requests.at(-1);s.frame({...response,id:update.id,result:{...response.result,requestRevision:update.p.requestRevision}});assert.equal(bound.at(-1)[2],'');
+ s.frame(response);assert.equal(bound.length,1);assert.equal(bound[0][2],'captured older reply');f.ctx.thin.update();f.tick(16);const update=f.requests.at(-1);assert.equal(update.m,'view.update');f.ctx.thin.request('bfield','mrreply\x1f');s.frame({...response,id:update.id,result:{...response.result,viewRevision:'2',requestRevision:update.p.requestRevision}});assert.equal(bound.at(-1)[2],'');
 });
 
 // A late probe was able to close a socket opened by an intervening explicit Retry.

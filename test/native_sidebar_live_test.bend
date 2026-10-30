@@ -10,7 +10,7 @@ import ../src/core/json.bend as J
 
 def cfg() -> S.Cfg:
   S.Cfg{"/tmp/unused-native-sidebar", "", "127.0.0.1", 0, "", Nil{}, "test",
-    S.Net{False{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "[]", None{}, BN.Bn.empty(), True{}, "", "", None{}}, Nil{}, Nil{}}
+    S.Net{False{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "[]", None{}, BN.Bn.empty(), True{}, "", "", None{}}, Nil{}, Nil{}, ""}
 
 def request() -> J.Json:
   J.Json.obj([J.KV{"nativeSidebar", J.Num{"1"}}, J.KV{"hub", J.Str{"h"}}, J.KV{"generation", J.Str{"1"}},

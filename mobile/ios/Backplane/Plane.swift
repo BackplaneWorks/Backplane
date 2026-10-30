@@ -110,7 +110,7 @@ private struct PlaneThread: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(row.title).foregroundStyle(.primary).lineLimit(1)
                     let line = [row.sub, row.machine ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-                    if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(row.state == "stalled" ? 2 : 1) }
                 }
                 Spacer()
                 Text(row.ago).font(.caption).foregroundStyle(BackplaneDesign.secondaryText)
@@ -140,7 +140,7 @@ private struct PlaneBot: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(row.title).foregroundStyle(.primary).lineLimit(1)
                     let line = [row.sub, row.machine ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-                    if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(row.state == "stalled" ? 2 : 1) }
                 }
                 Spacer()
                 if !row.ago.isEmpty {
@@ -188,7 +188,7 @@ private struct PlaneRoutine: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(row.title).foregroundStyle(.primary).lineLimit(1)
                     let line = [row.sub, row.machine ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-                    if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(row.state == "stalled" ? 2 : 1) }
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)

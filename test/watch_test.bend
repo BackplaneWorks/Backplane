@@ -92,6 +92,9 @@ def main() -> IO(Unit):
     C.Check.str("timeout: told, never success", Bool.show(String.contains(last(M.State.mine(t1, "t1")), "timed out, still running, outcome unknown")), "True")
     C.Check.str("timeout: the row stays, unknown", M.Bg.status(rows(t1)), "unknown")
     C.Check.str("timeout: no Stop on it", words(SB.Subs.rows(t1, Map.new(&2, String), "t1", 11n)), "unknown:;")
+    C.Check.str("timeout: final outcome still delivered", rows(apply(t1, H.Watch.end(t1, 90n, "t1", id, "exit 0", "finished"))), "")
+    C.Check.str("timeout: restarted observer has no repeated deadline", awaits(H.Watch.rearm(t1)), "await " ++ id ++ " run sleep 3; exit 4 - 0;")
+    C.Check.str("timeout: repeated deadline report suppressed", Nat.show(List.length(&2, M.Change, H.Queue.changes(H.Watch.end(t1, 81n, "t1", id, "timeout", "")))), "0")
     # gone without an outcome
     +g1 : M.State = apply(s3, H.Watch.end(s3, 30n, "t1", id, "gone", ""))
     C.Check.str("gone: outcome unknown", Bool.show(String.contains(last(M.State.mine(g1, "t1")), "outcome unknown")), "True")
@@ -106,7 +109,7 @@ def main() -> IO(Unit):
     C.Check.str("unwatch: may still run", Bool.show(String.contains(out.text(u1), "may still run")) ++ " " ++ rows(apply(s3, out.step(u1))) ++ awaits(H.Step.outs_of(out.step(u1))), "True stop " ++ id ++ " unwatch;")
     # a file watched: its token
     +f1 : MC.McpOut = tool(base(), 10n, "work_watch", "{\"kind\":\"file\",\"target\":\"/tmp/done.txt\",\"note\":\"remote job\"}")
-    C.Check.str("work_watch file: the token is its ident", awaits(H.Step.outs_of(out.step(f1))), "await " ++ id ++ " file /tmp/done.txt " ++ id ++ " 0;")
+    C.Check.str("work_watch file: the token is its ident", awaits(H.Step.outs_of(out.step(f1))), "await " ++ id ++ " file /tmp/done.txt " ++ id ++ " 1210;")
     C.Check.str("work_watch: a kind it knows", Bool.show(String.contains(out.text(tool(base(), 10n, "work_watch", "{\"kind\":\"socket\",\"target\":\"x\"}")), "kind must be")), "True")
     C.Check.str("work_list", Bool.show(String.contains(out.text(tool(s1, 12n, "work_list", "{}")), "slow build")), "True")
     # a restart watches it again; a mirror never does

@@ -285,3 +285,29 @@ def Lock.ordinal(+n: Nat) -> String:
 
 def Lock.wait.word(+name: String, +position: Nat) -> String:
   "waiting for lock " ++ name ++ " (" ++ Bool.pick(String, Nat.is_eq(position, 0n), "OS flock", Lock.ordinal(position)) ++ ")"
+
+# Lease policy never authorizes signalling a process. Busy owners keep their
+# exclusion while the hub reports the missing heartbeat.
+def Lock.lease.expired(+lease: Nat, +now: Nat) -> Bool:
+  Bool.and(Nat.is_gt(lease, 0n), Nat.is_ge(now, lease))
+
+def Lock.lease.release(+expired: Bool, +warned: Bool, +grace: Bool, busy: Bool) -> Bool:
+  Bool.and(expired, Bool.and(warned, Bool.and(grace, Bool.not(busy))))
+
+def Lock.heartbeat.p(+p: LockParty, +thread: String, +lease: Nat) -> LockParty:
+  Bool.pick(LockParty, Bool.and(String.eq(Lock.thread(p), thread), Bool.not(String.eq(Lock.kind(p), "client"))), Lock.renew.p(p, Lock.id(p), lease), p)
+
+def Lock.heartbeat.q(ps: List<&2, LockParty>, +thread: String, +lease: Nat) -> List<&2, LockParty>:
+  match ps:
+    case Nil{}: Nil{}
+    case p <> t: Lock.heartbeat.p(p, thread, lease) <> Lock.heartbeat.q(t, thread, lease)
+
+def Lock.heartbeat.h(h: Maybe<&2, LockParty>, +thread: String, +lease: Nat) -> Maybe<&2, LockParty>:
+  match h:
+    case None{}: None{}
+    case Some{p}: Some{Lock.heartbeat.p(p, thread, lease)}
+
+def Lock.heartbeat(l: NamedLock, +thread: String, +lease: Nat) -> NamedLock:
+  match l:
+    case NamedLock{h, q, r, o}:
+      NamedLock{Lock.heartbeat.h(h, thread, lease), Lock.heartbeat.q(q, thread, lease), r, o}

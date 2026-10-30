@@ -67,7 +67,7 @@ def rep.go(+r: Nat, +st: M.State, +now: Nat) -> Nat:
     case 0n:
       0n
     case 1n+q:
-      Nat.add(List.length(&2, U.PSlot, U.Side.rows.go(U.Ui.projects(st), U.Ui.threads(st), M.State.navs(st), now)), rep.go(q, st, now))
+      Nat.add(List.length(&2, U.PSlot, U.Side.rows.go(U.Ui.projects(st), st, U.Ui.threads(st), M.State.navs(st), now)), rep.go(q, st, now))
 
 def shelves.n(s: M.Shelves) -> Nat:
   match s:

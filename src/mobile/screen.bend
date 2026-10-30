@@ -119,7 +119,7 @@ def Mob.row(+lc: I.Loc, t: M.Thread, +status: String, +ix: U.SIx, +st: M.State, 
   match t:
     case M.Thread{+id, _, title, _, +a, turn, _, _, _, _, _, pinned, _, _, _, _, _, _, _, _, _}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, TTL.Title.shown(lc, title)))}, J.KV{"state", J.Json.str(Mob.state(turn))},
-        J.KV{"ago", J.Json.str(Mob.when.loc(lc, shelf, st, id, a, now))}, J.KV{"agents", J.Json.str(V.View.sub.badge(lc, SB.Subs.count.ix(ix, st, id)))}, J.KV{"pinned", J.Json.bool(pinned)},
+        J.KV{"ago", J.Json.str(Mob.when.loc(lc, shelf, st, id, a, now))}, J.KV{"agents", J.Json.str(SG.Signal.display.note(lc, st, id, V.View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))))}, J.KV{"pinned", J.Json.bool(pinned)},
         J.KV{"status", J.Json.str(status)}, J.KV{"canChild", J.Json.bool(U.ThreadTree.can_route(st, id))}, J.KV{"lead", J.Json.arr(Mob.lead.loc(lc, shelf, id))}, J.KV{"trail", J.Json.arr(Mob.trail.loc(lc, id))}])
 
 # Keep each thread's own swipe/age semantics even when its subtree is
@@ -140,7 +140,7 @@ def Mob.tree.meta(j: J.Json, depth: Nat, expanded: Bool, children: Nat) -> J.Jso
 def Mob.trow(+lc: I.Loc, r: ST.TRow, +ix: U.SIx, +st: M.State, +now: Nat) -> J.Json:
   match r:
     case ST.TRow{+t, d, e, c}:
-      Mob.tree.meta(Mob.row(lc, t, SG.Signal.name(U.Side.signal.ix(ix, t)), ix, st, now,
+      Mob.tree.meta(Mob.row(lc, t, SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), ix, st, now,
         Mob.shelf(M.Shelf.at(t, U.Side.until(st, M.Thread.id(t)), now))), d, e, c)
 
 def Mob.trows(rs: List<&2, ST.TRow>, +lc: I.Loc, +ix: U.SIx, +st: M.State, +now: Nat) -> List<&2, J.Json>:
@@ -162,7 +162,7 @@ def Mob.legacy(ts: List<&2, M.Thread>, +lc: I.Loc, +ix: U.SIx, +st: M.State, +no
   match ts:
     case Nil{}: Nil{}
     case +t <> rest:
-      Mob.tree.meta(Mob.row(lc, t, SG.Signal.name(U.Side.signal.ix(ix, t)), ix, st, now,
+      Mob.tree.meta(Mob.row(lc, t, SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), ix, st, now,
         Mob.shelf(M.Shelf.at(t, U.Side.until(st, M.Thread.id(t)), now))), 0n, False{}, 0n) <> Mob.legacy(rest, lc, ix, st, now)
 
 # snoozed threads sit on their own shelf, soonest to wake first
@@ -239,7 +239,7 @@ def Mob.arow.k(j: J.Json, +urg: Nat, +at: Nat, +pt: String, +faded: Bool) -> J.J
 def Mob.arow(+lc: I.Loc, r: U.ARow, +ix: U.SIx, +st: M.State, +now: Nat) -> J.Json:
   match r:
     case U.ARow{+urg, +at, +t, _, +pt, +faded}:
-      Mob.arow.k(Mob.row(lc, t, SG.Signal.name(U.Side.signal.ix(ix, t)), ix, st, now, Bool.pick(Nat, faded, 1n, 0n)), urg, at, pt, faded)
+      Mob.arow.k(Mob.row(lc, t, SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), ix, st, now, Bool.pick(Nat, faded, 1n, 0n)), urg, at, pt, faded)
 
 def Mob.aroots(rs: List<&2, U.ARow>) -> List<&2, M.Thread>:
   match rs:
@@ -1336,10 +1336,10 @@ def Mob.sbox.q(+lc: I.Loc, +st: M.State, m: Maybe<&2, U.SAsk>) -> List<&2, J.Jso
 # turn with nothing waiting says "Failed" and why, not "Blocked: needs
 # interaction" (SG.Signal.shown)
 def Mob.working.k(+lc: I.Loc, +st: M.State, +id: String, +ph: Nat, +shown: String) -> String:
-  SG.Signal.label.shown(lc, ph, shown, SG.Signal.why.if(String.eq(shown, "failed"), st, id))
+  SG.Signal.display.label(lc, ph, shown, st, id)
 
 def Mob.working(+lc: I.Loc, +st: M.State, +id: String, +ph: Nat, turn: M.TurnState, +pe: Nat) -> String:
-  Mob.working.k(lc, st, id, ph, SG.Signal.shown(ph, turn, pe))
+  Mob.working.k(lc, st, id, ph, SG.Signal.display.shown(ph, turn, pe, st, id))
 
 def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: Nat, btw: J.Json, embs: J.Json) -> J.Json:
   match u t:
@@ -1365,7 +1365,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"todos", Mob.todos(lc, nf, id, U.Todos.shown(st, id, V.View.running(turn)))},
         J.KV{"live", Mob.live.k.loc(lc, render, U.Str.get(live, id))},
         J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), Mob.working(lc, st, id, ph, turn, pe), ""))},
-        J.KV{"phase", J.Json.str(SG.Signal.name(ph))},
+        J.KV{"phase", J.Json.str(SG.Signal.display.name(ph, st, id))},
         J.KV{"draft", J.Json.str(U.Str.get(drafts, sel))},
         J.KV{"send", J.Json.str(U.Follow.button(lc, st, sel, V.View.running(turn), U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts), U.Str.get(drafts, sel)))},
         J.KV{"sendAct", J.Json.str(U.Follow.act(U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts)))},

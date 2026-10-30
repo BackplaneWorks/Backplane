@@ -4,6 +4,7 @@ import ../src/core/model.bend as M
 import ../src/core/mail.bend as ML
 import ../src/core/mailrun.bend as MR
 import ../src/core/maildisposition.bend as MD
+import ../src/core/mailprivate.bend as PM
 
 def project(st: M.State) -> M.State:
   U.SidebarInput.state(U.SidebarInput.of(st))
@@ -13,10 +14,16 @@ def run_gate(+st: M.State, +r: Maybe<&2, ML.Run>) -> {MD.Runs.gate(project(st), 
     case M.State{_, _, _, _, _, _, _, _, _, _, _} None{}: {==}
     case M.State{_, _, _, _, _, _, _, _, _, _, _} Some{r}: {==}
 
+def run_is.or(+p: Bool, +a: Maybe<&2, ML.Run>, +b: Maybe<&2, ML.Run>, h: {a == b : Maybe<&2, ML.Run>}) ->
+  {Bool.or(p, MR.Run.is.got(a)) == Bool.or(p, MR.Run.is.got(b)) : Bool}:
+  match p:
+    case True{}: {==}
+    case False{}: Equal.cong(Maybe<&2, ML.Run>, Bool, x => MR.Run.is.got(x), a, b, h)
+
 def run_is(+st: M.State, +th: String) -> {MR.Run.is(project(st), th) == MR.Run.is(st, th) : Bool}:
   match st:
     case M.State{_, _, _, _, _, _, _, _, _, _, _}:
-      Equal.cong(Maybe<&2, ML.Run>, Bool, x => MR.Run.is.got(x),
+      run_is.or(PM.Private.is(st, th),
         MD.Runs.gate(project(st), ML.Box.run_of(M.State.mail(st), th)), MD.Runs.gate(st, ML.Box.run_of(M.State.mail(st), th)), run_gate(st, ML.Box.run_of(M.State.mail(st), th)))
 
 def runs(+xs: List<&2, M.Thread>, +st: M.State) -> {U.Runs.keep(xs, project(st)) == U.Runs.keep(xs, st) : List<&2, M.Thread>}:

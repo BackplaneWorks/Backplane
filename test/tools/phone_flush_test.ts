@@ -4,7 +4,7 @@ import { strict as assert } from "node:assert";
 const source = readFileSync("src/mobile/bridge.js", "utf8");
 const out = source.slice(source.indexOf("function out("), source.indexOf("// a step's answer:"));
 // direct() builds every answer now (thin drain, kept drafts, deadline)
-const direct = source.slice(source.indexOf("function direct("), source.indexOf("function expired()"));
+const direct = source.slice(source.indexOf("function direct("), source.indexOf("function expired("));
 const start = source.indexOf("  flush(owe) {");
 assert(start > 0, "bridge exposes an owed-screen flush");
 const flush = source.slice(start, source.indexOf("\n  },", start) + 5);
@@ -14,6 +14,7 @@ const harness = new Function(`
   const is = () => false, plain = x => x;
   const App = {screenj: () => ({version: ++renders})};
   const screenText = () => JSON.stringify(plain(App.screenj(hubs)));
+  const bubMovingScreen = () => JSON.parse(screenText()), nativeDraftEdits = new Map();
   // what flush/out/direct read from the rest of bridge.js: no thin hub, no
   // expired calls or sync updates, nothing waiting for the foreground
   const thin = { drain: () => ({ cmds: [], sync: [] }), thin: () => false, views: () => null };

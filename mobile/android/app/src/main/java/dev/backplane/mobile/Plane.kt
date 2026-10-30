@@ -153,7 +153,7 @@ private fun PlaneItem(m: AppModel, r: PlaneRow, mood: Boolean = false) {
         )
         "routine" -> ListItem(
             headlineContent = { Text(r.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = if (r.state == "stalled") 2 else 1, overflow = TextOverflow.Ellipsis) },
             leadingContent = {
                 Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
                     if (r.state == "working") CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.accent, strokeWidth = 2.dp)
@@ -164,20 +164,20 @@ private fun PlaneItem(m: AppModel, r: PlaneRow, mood: Boolean = false) {
         )
         "bot" -> if (!mood) ListItem(
             headlineContent = { Text(r.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = if (r.state == "stalled") 2 else 1, overflow = TextOverflow.Ellipsis) },
             leadingContent = { StatusDot("", planeStatus(r.state)) },
             trailingContent = { Text(r.ago, style = MaterialTheme.typography.labelMedium) },
             modifier = Modifier.alpha(if (r.away) 0.5f else 1f).clickable(onClick = go),
         ) else ListItem(
             headlineContent = { Text(r.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = if (r.state == "stalled") 2 else 1, overflow = TextOverflow.Ellipsis) },
             leadingContent = { Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { MoodDot(r.state) } },
             trailingContent = { if (r.ago.isNotEmpty()) Text(r.ago, style = MaterialTheme.typography.labelMedium) },
             modifier = Modifier.alpha(if (r.away) 0.5f else 1f).clickable(onClick = go),
         )
         else -> ListItem(
             headlineContent = { Text(r.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            supportingContent = { if (line(r).isNotEmpty()) Text(line(r), maxLines = if (r.state == "stalled") 2 else 1, overflow = TextOverflow.Ellipsis) },
             leadingContent = { StatusDot("", planeStatus(r.state)) },
             trailingContent = { Text(r.ago, style = MaterialTheme.typography.labelMedium) },
             modifier = Modifier.alpha(if (r.away) 0.5f else 1f).clickable(onClick = go),

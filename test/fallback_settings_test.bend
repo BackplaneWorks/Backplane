@@ -60,7 +60,7 @@ def main() -> IO(Unit):
   do IO<Unit>:
     +u : U.Ui = ui()
     +rs : List<&2, U.AgRow> = U.Fallbackv.rows(u)
-    +web : List<&2, D.Node> = W.View.agy.rows(rs)
+    +web : List<&2, D.Node> = W.View.agy.rows(u, rs)
     +phone : String = J.Json.show(J.Json.arr(P.Mob.agy.rows(rs)))
     +win : String = window(L.Set.agy.rows(rs, L.Ty.none(), N.Nui.init(u, 1400, 1000), 20, 680, 20))
     C.Check.str("shared Settings copy explains inheritance", Bool.show(String.contains(rowtext(rs), "delegates, routines and mail runs")), "True")

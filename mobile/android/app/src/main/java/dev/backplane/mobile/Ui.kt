@@ -542,14 +542,17 @@ private fun ThreadRow(m: AppModel, r: Row, hierarchy: Boolean = true) {
                     } else Spacer(Modifier.width(40.dp))
                     ListItem(
                         headlineContent = { Text(r.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = if (r.project.isEmpty()) null else {
-                            { Text(r.project, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        supportingContent = if (r.project.isEmpty() && r.status != "stalled") null else {
+                            { Column {
+                                if (r.project.isNotEmpty()) Text(r.project, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (r.status == "stalled") Text(r.agents, color = PhaseColor.warn, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            } }
                         },
                         leadingContent = { StatusDot(r.state, r.status) },
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.widthIn(max = 88.dp)) {
                                 if (r.pinned) Icon(Icons.Filled.PushPin, NativeMessages.tools_pinned(lang), Modifier.size(16.dp).padding(end = 4.dp))
-                                if (r.agents.isNotEmpty()) Text(r.agents, style = MaterialTheme.typography.labelMedium, color = PhaseColor.accent,
+                                if (r.agents.isNotEmpty() && r.status != "stalled") Text(r.agents, style = MaterialTheme.typography.labelMedium, color = PhaseColor.accent,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 else Text(r.ago, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }

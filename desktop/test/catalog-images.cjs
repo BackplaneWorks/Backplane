@@ -1,4 +1,4 @@
-// Full sidebar metadata and sent-image rendering on the actual Electron client.
+// Full catalog through bounded sidebar windows and sent-image rendering.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
 const {_electron}=require('playwright-core'),{Service}=require('../service.cjs');
 const stage=path.resolve(process.env.BACKPLANE_LOCAL_STAGE),info=JSON.parse(fs.readFileSync(path.join(stage,'LOCAL.json')));
@@ -26,13 +26,22 @@ const service=new Service({home,binary:path.join(stage,'payload/backplane-serve'
 let app,page;const start=performance.now();
 (async()=>{try{
  await service.start();app=await _electron.launch({executablePath:path.join(stage,'desktop/runtime/backplane-desktop'),args:[],env:{...process.env,BACKPLANE_HOME:home,BACKPLANE_SERVICE:path.join(stage,'payload/backplane-serve'),BACKPLANE_WEB:path.join(stage,'payload/web'),BACKPLANE_SERVICE_VERSION:info.version}});page=await app.firstWindow();
+ page.setDefaultTimeout(15000);
  await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true');
  const skip=page.locator('[data-on-click="ob-skip"]');if(await skip.count()){await skip.click();await page.locator('.tour-back').waitFor({state:'hidden'});}
  const older=page.locator('[data-on-click="side-older"]');if(await older.count())await older.click();
- await page.waitForFunction(()=>document.querySelectorAll('.sidebar section.project[data-drag-to^="p"]').length===42);
- assert.equal(await page.locator('.project-head[data-value="p41"]').count(),0);
- assert.equal(await page.locator('[data-on-click="select"][data-value="t40"]').count(),0,'archived thread stays folded');
+ await page.waitForFunction(()=>document.querySelectorAll('.sidebar section.project[data-drag-to^="p"]').length>0);
+ const filterProject=async(i,expected=1)=>{
+  await page.locator('input#proj-find').fill('Catalog project '+String(i).padStart(2,'0'));
+  await page.waitForFunction(({i,expected})=>document.documentElement.dataset.backplaneRemoteReady==='true'&&document.querySelectorAll('.sidebar section.project').length===expected&&document.querySelectorAll(`.project-head[data-value="p${i}"]`).length===expected,{i,expected});
+ };
+ // The sidebar intentionally renders a bounded window. Search every catalog
+ // entry so this still catches a catalog truncated to the newest threads.
+ for(let i=0;i<43;i++)await filterProject(i,i===41?0:1);
  assert.equal(await page.locator('.project-head[data-value="p42"]').count(),1,'empty project retained');
+ await filterProject(40);
+ assert.equal(await page.locator('[data-on-click="select"][data-value="t40"]').count(),0,'archived thread stays folded');
+ await filterProject(0);
  const select=async id=>{await page.locator(`[data-on-click="select"][data-value="${id}"]`).first().click();await page.waitForFunction(id=>document.querySelector('main')?.dataset.thread===id&&document.documentElement.dataset.backplaneRemoteReady==='true',id);};
  await select('t0');
  const msg=page.locator('[data-id="sent-images"]');await msg.locator('.shot').first().scrollIntoViewIfNeeded();
@@ -41,13 +50,14 @@ let app,page;const start=performance.now();
  assert(!(await page.locator('main').innerText()).includes('OTHER_BODY_MUST_NOT_APPEAR_IN_T0'));
  await page.screenshot({path:path.join(out,'sent-images-desktop.png')});
  await msg.locator('.shot').first().click();await page.waitForFunction(()=>document.querySelector('.lightbox .lb-img')?.naturalWidth===64);await page.screenshot({path:path.join(out,'image-lightbox.png')});await page.keyboard.press('Escape');
- await select('t30');await select('t0');
+ await filterProject(30);await select('t30');await filterProject(0);await select('t0');
  await page.setViewportSize({width:390,height:844});await msg.locator('.shot').first().scrollIntoViewIfNeeded();await page.screenshot({path:path.join(out,'sent-images-mobile.png')});
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no mobile horizontal overflow');
- await page.locator('.thread-head .back').click();
+ await page.locator('.topbar [data-on-click="select"][data-value=""]').click();
  await page.waitForFunction(()=>!document.querySelector('.app').classList.contains('picked'));
- const logo=await page.locator('.brand-mark').boundingBox(),title=await page.locator('.brand .name').boundingBox();
- assert(logo&&title&&logo.width===24&&logo.x<title.x,'mobile sidebar keeps one24px logo before title');
+ const logo=await page.locator('.brand-mark').boundingBox(),place=await page.locator('.topbar .crumbs').boundingBox();
+ assert(logo&&place&&logo.width===18&&logo.x<place.x,'mobile top bar keeps one18px logo before the location');
+ assert.equal(await page.locator('.topbar .name').isVisible(),false,'compact top bar hides the wordmark');
  assert.equal(await page.locator('.brand-mark').count(),1);
  await page.locator('input#proj-find').fill('Catalog project 30');
  await page.waitForFunction(()=>document.querySelectorAll('.sidebar section.project').length===1);

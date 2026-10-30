@@ -179,7 +179,7 @@ def View.rows(ps: List<&2, M.Project>, +ts: List<&2, M.Thread>) -> List<&2, PRow
 # left); rows of a shelf with manual order get move buttons on hover
 # a row with subagents at work says how many where its age goes
 def View.note(+badge: String, +other: String) -> D.Node:
-  Bool.pick(D.Node, String.is_empty(badge), D.Dom.span("ago", other), D.Dom.span("ago agents", badge))
+  Bool.pick(D.Node, String.is_empty(badge), D.Dom.span("ago", other), D.El{"span", "", [D.At{"class", "ago agents"}, D.At{"title", badge}], [D.Txt{badge}]})
 
 # A piece of the page left for the host to make: a "bp-memo" element keyed
 # like the node it stands for, its attributes all it is made from ("fn"
@@ -252,7 +252,7 @@ def View.row.m(+id: String, +title: String, +ago: String, +badge: String, +dot: 
 def View.row.s(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, snoozed: Bool, settled: Bool) -> D.Node:
   match t:
     case M.Thread{+id, _, +title, _, +a, _, _, _, _, _, _, pinned, _, _, _, _, _, _, _, _, _}:
-      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), View.sub.badge(lc, SB.Subs.count.ix(ix, st, id)), SG.Signal.name(U.Side.signal.ix(ix, t)), sel, movable)
+      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), SG.Signal.display.note(lc, st, id, View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))), SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), sel, movable)
 
 def View.row(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> D.Node:
   View.row.s(lc, t, ix, st, sel, now, movable, snoozed, False{})
@@ -416,8 +416,8 @@ def View.arow(+lc: I.Loc, r: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> 
     case U.ARow{_, _, +t, +pid, +pt, +faded}:
       D.El{"div", M.Thread.id(t), [D.At{"class", Bool.pick(String, String.eq(M.Thread.id(t), sel), "thread on", Bool.pick(String, faded, "thread faded", "thread"))},
           D.At{"style", "--tint:" ++ BG.Badge.css_of(st, pid)}, D.At{"data-shortcut-project", pid}, D.At{"data-value", M.Thread.id(t)}, D.On{"click", "select"}, D.On{"contextmenu", "row-menu"}],
-        List.concat(&2, D.Node, [[View.dot(lc, SG.Signal.name(U.Side.signal.ix(ix, t))), D.Dom.span("title", U.Label.title(st, M.Thread.id(t), TTL.Title.shown(lc, U.Active.title(t))))], View.pin(lc, U.Active.pinned(t)),
-          [View.note(View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t))), pt)]])}
+        List.concat(&2, D.Node, [[View.dot(lc, SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t))), D.Dom.span("title", U.Label.title(st, M.Thread.id(t), TTL.Title.shown(lc, U.Active.title(t))))], View.pin(lc, U.Active.pinned(t)),
+          [View.note(SG.Signal.display.note(lc, st, M.Thread.id(t), View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t)))), pt)]])}
 
 def View.atree.step(root: Bool, anchors: List<&2, U.ARow>, fallback: U.ARow) -> List<&2, U.ARow> & U.ARow:
   match root anchors:
@@ -3319,9 +3319,9 @@ def View.work.label(lc: I.Loc) -> String:
 
 def View.workbar(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, +turn: M.TurnState, +pending: Nat, running: Bool) -> D.Node:
   +signal = SG.Signal.cached(info, id)
-  +shown = SG.Signal.shown(signal, turn, pending)
+  +shown = SG.Signal.display.shown(signal, turn, pending, st, id)
   D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}],
-    List.append(&2, D.Node, [View.dot(lc, SG.Signal.name(signal)), D.Dom.span("work-state", SG.Signal.label.shown(lc, signal, shown, SG.Signal.why.if(String.eq(shown, "failed"), st, id)))], View.tools(TO.Tools.stop.loc(lc, running)))}
+    List.append(&2, D.Node, [View.dot(lc, SG.Signal.display.name(signal, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(TO.Tools.stop.loc(lc, running)))}
 
 # Keep a running Stop control, but never reserve a status strip for an
 # idle bot conversation. Ordinary thread workbars retain their summaries.
@@ -4579,11 +4579,11 @@ def View.chrome.state.k(lc: I.Loc) -> String:
 def View.chrome.state.word(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
-      Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了",
-        Bool.pick(String, String.eq(name, "waiting"), "完了待ち", Bool.pick(String, String.eq(name, "finished"), "作業完了", Bool.pick(String, String.eq(name, "stopped"), "停止", Bool.pick(String, String.eq(name, "failed"), "失敗", "待機")))))))
+      Bool.pick(String, String.eq(name, "stalled"), "進捗停止", Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了",
+        Bool.pick(String, String.eq(name, "waiting"), "完了待ち", Bool.pick(String, String.eq(name, "finished"), "作業完了", Bool.pick(String, String.eq(name, "stopped"), "停止", Bool.pick(String, String.eq(name, "failed"), "失敗", "待機"))))))))
     case _:
-      Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled",
-        Bool.pick(String, String.eq(name, "waiting"), "waiting", Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", Bool.pick(String, String.eq(name, "failed"), "failed", "idle")))))))
+      Bool.pick(String, String.eq(name, "stalled"), "stalled", Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled",
+        Bool.pick(String, String.eq(name, "waiting"), "waiting", Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", Bool.pick(String, String.eq(name, "failed"), "failed", "idle"))))))))
 
 def View.chrome.changes.k(lc: I.Loc) -> String:
   match lc:
@@ -4639,10 +4639,10 @@ def View.chrome.kv(+cls: String, +title: String, +k: String, vs: List<&2, D.Node
 # SG.Signal.shown), Stop beside it while a turn runs
 def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, +turn: M.TurnState, +pending: Nat) -> D.Node:
   +signal = SG.Signal.cached(info, id)
-  +shown = SG.Signal.shown(signal, turn, pending)
+  +shown = SG.Signal.display.shown(signal, turn, pending, st, id)
   D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)},
-    D.At{"title", SG.Signal.label.shown(lc, signal, shown, SG.Signal.why.if(String.eq(shown, "failed"), st, id))}],
-    List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot(lc, SG.Signal.name(signal)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
+    D.At{"title", SG.Signal.display.label(lc, signal, shown, st, id)}],
+    List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot(lc, SG.Signal.display.name(signal, st, id)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
       View.tools(TO.Tools.stop.loc(lc, View.running(turn))))}
 
 # the subagents: a click opens or shuts their rows under the bar (View.subs.dock)

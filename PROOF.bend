@@ -1,3 +1,7 @@
+import ./src/core/restartretry.bend as WDRETRY
+import ./src/core/signal.bend as SIGREV
+import ./test/liveness_proof.bend as LVPROOF
+import ./src/core/liveness.bend as LIVEWATCH
 import ./test/timeline_virtual_proof.bend as TLVIRTUALPROOF
 import ./test/native_history_window_proof.bend as NATIVEHISTORYPROOF
 import ./src/server/thin-actor.bend as CHATSIDE
@@ -110,6 +114,10 @@ import ./src/core/plane.bend as PLN
 import ./src/core/uber.bend as UBR
 import ./src/core/ubersync.bend as UBS
 import ./src/core/ubop.bend as UBO
+import ./test/sidebar_content_proof.bend as CONTENTPROOF
+import ./test/sidebar_full_branch_test.bend as FULLBRANCH
+import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
+import ./test/secret_proof.bend as SECPROOF
 
 # Lemmas
 # ------
@@ -672,8 +680,8 @@ def Laws.resume_is_replay(a, b, s):
       Laws.resume_is_replay(t, b, M.State.apply(s, h))
 
 def Laws.post_running_delivers(s, now, th, msg, role, text, h1, h2):
-  %Equal.sym(Bool, H.Hub.running(H.Hub.thread(s, th)), True{}, h1) : {H.Hub.post.w(_, M.Worktree.gone(H.Hub.thread(s, th)), M.Worktree.pending(H.Hub.thread(s, th), now), s, now, th, msg, role, text) == H.Hub.deliver.r(True{}, s, now, th, msg, role, text) : H.Step}
-  %Equal.sym(Bool, M.Worktree.pending(H.Hub.thread(s, th), now), False{}, h2) : {H.Hub.deliver(True{}, _, s, now, th, msg, role, text) == H.Hub.deliver.r(True{}, s, now, th, msg, role, text) : H.Step}
+  %Equal.sym(Bool, H.Hub.running(H.Hub.thread(s, th)), True{}, h1) : {H.Hub.post.w(_, M.Worktree.gone(H.Hub.thread(s, th)), M.Worktree.waits(s, H.Hub.thread(s, th), now), s, now, th, msg, role, text) == H.Hub.deliver.r(True{}, s, now, th, msg, role, text) : H.Step}
+  %Equal.sym(Bool, M.Worktree.waits(s, H.Hub.thread(s, th), now), False{}, h2) : {H.Hub.deliver(True{}, _, s, now, th, msg, role, text) == H.Hub.deliver.r(True{}, s, now, th, msg, role, text) : H.Step}
   {==}
 
 def Laws.deliver_held_go(b, th, now):
@@ -713,8 +721,7 @@ def Laws.deliver_held_restart(b1, b2, b3, th, id, now, v, r):
     case False{} False{} False{}:
       {==}
 
-# a running non-Claude turn: the message rides (nothing held), or, with an
-# older log's queue, the turn restarts (Laws.deliver_held_restart)
+# A running non-Claude turn always takes automatic messages on its ride.
 law ride_held_k:
   for q: Bool
   for +s: M.State
@@ -730,7 +737,7 @@ def ride_held_k(q, s, now, th, msg, role, text):
     case True{}:
       {==}
     case False{}:
-      Laws.deliver_held_restart(String.is_empty(M.Queue.of(s, th)), String.eq(H.Hub.provider(H.Hub.thread(s, th)), "claude"), String.is_empty(H.Ride.of(s, th)), th, H.Hub.id("s", now, H.Hub.seq(s)), now, H.Ride.of(s, th), "with the steer")
+      {==}
 
 # an idle thread: the turn starts, with whatever rode (nothing held)
 law ride_post_held:
@@ -783,8 +790,8 @@ def Laws.task_finish_not_ended_same(s, now, thread, cs, os, h):
   {==}
 
 def Laws.inbox_running_delivers(s, now, from, to, role, text, msg, h1, h2):
-  %Equal.sym(Bool, H.Hub.running(H.Hub.thread(s, to)), True{}, h1) : {H.Hub.inbox.w(_, M.Worktree.gone(H.Hub.thread(s, to)), M.Worktree.pending(H.Hub.thread(s, to), now), s, now, from, to, role, text, msg) == H.Hub.deliver.r(True{}, s, now, to, msg, role, text) : H.Step}
-  %Equal.sym(Bool, M.Worktree.pending(H.Hub.thread(s, to), now), False{}, h2) : {H.Hub.deliver(True{}, _, s, now, to, msg, role, text) == H.Hub.deliver.r(True{}, s, now, to, msg, role, text) : H.Step}
+  %Equal.sym(Bool, H.Hub.running(H.Hub.thread(s, to)), True{}, h1) : {H.Hub.inbox.w(_, M.Worktree.gone(H.Hub.thread(s, to)), M.Worktree.waits(s, H.Hub.thread(s, to), now), s, now, from, to, role, text, msg) == H.Hub.deliver.r(True{}, s, now, to, msg, role, text) : H.Step}
+  %Equal.sym(Bool, M.Worktree.waits(s, H.Hub.thread(s, to), now), False{}, h2) : {H.Hub.deliver(True{}, _, s, now, to, msg, role, text) == H.Hub.deliver.r(True{}, s, now, to, msg, role, text) : H.Step}
   {==}
 
 law or_true_r:
@@ -821,7 +828,7 @@ def Laws.worktree_pending_ends(e, wt, c, now, h):
       {==}
 
 def Laws.worktree_waits(s, now, th, msg, role, text, h):
-  %Equal.sym(Bool, M.Worktree.pending(H.Hub.thread(s, th), now), True{}, h) : {H.Step.outs_of(H.Hub.post.w(H.Hub.running(H.Hub.thread(s, th)), M.Worktree.gone(H.Hub.thread(s, th)), _, s, now, th, msg, role, text)) == [] : List<&2, H.Out>}
+  %Equal.sym(Bool, M.Worktree.waits(s, H.Hub.thread(s, th), now), True{}, h) : {H.Step.outs_of(H.Hub.post.w(H.Hub.running(H.Hub.thread(s, th)), M.Worktree.gone(H.Hub.thread(s, th)), _, s, now, th, msg, role, text)) == [] : List<&2, H.Out>}
   %Equal.sym(Bool, Bool.and(M.Worktree.gone(H.Hub.thread(s, th)), False{}), False{}, and_false_r(M.Worktree.gone(H.Hub.thread(s, th)))) : {H.Step.outs_of(H.Hub.post.v(Bool.and(Bool.not(H.Hub.running(H.Hub.thread(s, th))), _), H.Hub.running(H.Hub.thread(s, th)), True{}, s, now, th, msg, role, text)) == [] : List<&2, H.Out>}
   %Equal.sym(Bool, Bool.and(Bool.not(H.Hub.running(H.Hub.thread(s, th))), False{}), False{}, and_false_r(Bool.not(H.Hub.running(H.Hub.thread(s, th))))) : {H.Step.outs_of(H.Hub.post.v(_, H.Hub.running(H.Hub.thread(s, th)), True{}, s, now, th, msg, role, text)) == [] : List<&2, H.Out>}
   {==}
@@ -830,9 +837,9 @@ def Laws.worktree_by_default():
   {==}
 
 def Laws.worktree_revives(s, now, th, msg, role, text, h1, h2, h3):
-  %Equal.sym(Bool, H.Hub.running(H.Hub.thread(s, th)), False{}, h1) : {H.Step.outs_of(H.Hub.post.w(_, M.Worktree.gone(H.Hub.thread(s, th)), M.Worktree.pending(H.Hub.thread(s, th), now), s, now, th, msg, role, text)) == [H.Wt.revive(s, th)] : List<&2, H.Out>}
-  %Equal.sym(Bool, M.Worktree.gone(H.Hub.thread(s, th)), True{}, h2) : {H.Step.outs_of(H.Hub.post.w(False{}, _, M.Worktree.pending(H.Hub.thread(s, th), now), s, now, th, msg, role, text)) == [H.Wt.revive(s, th)] : List<&2, H.Out>}
-  %Equal.sym(Bool, M.Worktree.pending(H.Hub.thread(s, th), now), False{}, h3) : {H.Step.outs_of(H.Hub.post.w(False{}, True{}, _, s, now, th, msg, role, text)) == [H.Wt.revive(s, th)] : List<&2, H.Out>}
+  %Equal.sym(Bool, H.Hub.running(H.Hub.thread(s, th)), False{}, h1) : {H.Step.outs_of(H.Hub.post.w(_, M.Worktree.gone(H.Hub.thread(s, th)), M.Worktree.waits(s, H.Hub.thread(s, th), now), s, now, th, msg, role, text)) == [H.Wt.revive(s, th)] : List<&2, H.Out>}
+  %Equal.sym(Bool, M.Worktree.gone(H.Hub.thread(s, th)), True{}, h2) : {H.Step.outs_of(H.Hub.post.w(False{}, _, M.Worktree.waits(s, H.Hub.thread(s, th), now), s, now, th, msg, role, text)) == [H.Wt.revive(s, th)] : List<&2, H.Out>}
+  %Equal.sym(Bool, M.Worktree.waits(s, H.Hub.thread(s, th), now), False{}, h3) : {H.Step.outs_of(H.Hub.post.w(False{}, True{}, _, s, now, th, msg, role, text)) == [H.Wt.revive(s, th)] : List<&2, H.Out>}
   {==}
 
 def Laws.worktree_kept_while_busy(sh, ours, merged, aged):
@@ -12079,6 +12086,7 @@ def Laws.foh_clean(cs):
     case M.UberSet{_, _, _} <> +t: Laws.foh_clean(t)
     case M.UberOp{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
     case M.ThreadLaunched{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadParentSet{_, _, _} <> +t: Laws.foh_clean(t)
     case M.WakeSet{_, _, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
     case M.WakeDropped{_, _} <> +t: Laws.foh_clean(t)
     case M.LockChanged{_, _, _} <> +t: Laws.foh_clean(t)
@@ -12387,6 +12395,7 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WState{_, _}: {==}
     case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
     case MPCREDIT.WJson{_, _}: {==}
+    case MPCREDIT.WTerminal{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
 def Laws.webphone_model_name_kept(): {==}
@@ -12550,12 +12559,12 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth}, managed, link, freecad, ks}, telemetry, views, accounts}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth}, managed, link, freecad, ks}, telemetry, views, accounts}:
       {==}
 
 # ---- native phone i18n ----
@@ -13328,7 +13337,6 @@ def Laws.sidebar_shared_key_settings(u, epoch, view, revision, picture):
   {==}
 
 # Exact actual-sidebar comparison and separate receipt ownership.
-import ./test/sidebar_content_proof.bend as CONTENTPROOF
 
 def Laws.sidebar_content_exact_sound(a, b, h):
   CONTENTPROOF.exact_sound(a, b, h)
@@ -13337,7 +13345,6 @@ def Laws.sidebar_content_wrong_scope(old, node): {==}
 def Laws.sidebar_sent_no_picture_authority(scope, token, node, rest): {==}
 
 # Full sidebar branch: identical expression, explicit evaluation guard.
-import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 def Laws.sidebar_full_branch_identity(shown): {==}
 def Laws.sidebar_full_branch_exact(reuse, shown):
   FULLBRANCH.shown_exact(reuse, shown)
@@ -13347,7 +13354,6 @@ def Laws.still_picture_disabled(key, res): {==}
 def Laws.still_picture_miss(res): {==}
 def Laws.still_picture_exact(res): {==}
 
-import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 def Laws.sidebar_draft_body_not_input(key, value, rest, h):
   SIDEDRAFTPROOF.body_drop(key, value, rest, h)
 def Laws.sidebar_draft_scratch_input(key, value, rest, h):
@@ -13377,7 +13383,6 @@ def Laws.far_items_projects(): {==}
 def Laws.hot_demo_threads(): {==}
 # ---- end F1 ----
 # ---- secret box ----
-import ./test/secret_proof.bend as SECPROOF
 def Laws.sec_mask_total(v, s, h):
   SECPROOF.secp_mask_total(v, s, h)
 def Laws.sec_vault_valid(ts):
@@ -13439,9 +13444,9 @@ def Laws.ref_origin_return_local(): {==}
 def Laws.ref_origin_owner_remote(): {==}
 def Laws.ref_origin_foreign_untouched(): {==}
 
-def startup_warm_accepted(w, rows):
+def Laws.startup_warm_accepted(w, rows):
   {==}
-def startup_warm_fallback(w, rows):
+def Laws.startup_warm_fallback(w, rows):
   {==}
 
 def Laws.hook_off_unset():
@@ -13501,14 +13506,14 @@ def Laws.hook_secret_default():
 def Laws.hook_secret_path():
   {==}
 
-def mail_empty_success_quiet(): {==}
-def mail_failed_empty_preserved(): {==}
-def mail_no_triage_grants_outside_run(): {==}
-def mail_silent_bot_envelope(s, now, th, text): {==}
+def Laws.mail_empty_success_quiet(): {==}
+def Laws.mail_failed_empty_preserved(): {==}
+def Laws.mail_no_triage_grants_outside_run(): {==}
+def Laws.mail_silent_bot_envelope(s, now, th, text): {==}
 
 
-def codex_error_notice_kind(): {==}
-def codex_error_notice_no_effects(s, th, now, o): {==}
+def Laws.codex_error_notice_kind(): {==}
+def Laws.codex_error_notice_no_effects(s, th, now, o): {==}
 
 def Laws.life_fresh_owned_wakes():
   {==}
@@ -13618,3 +13623,71 @@ def Laws.timeline_virtual_follow_only_at_bottom(follow, held, end):
 def Laws.private_no_implicit_publication(s, now, th, text, key): {==}
 
 def Laws.private_duplicate_publication_none(s, now, th, text, key): {==}
+
+# ---- Agent liveness ----
+def Laws.liveness_stalled_only_after_gap(active, now, gap, grace, live, quiet):
+  LVPROOF.threshold(active, now, gap, grace, live, quiet)
+
+def Laws.liveness_nudge_once_per_gap(active, now, gap, grace, live, sent):
+  LVPROOF.tick_sent(active, now, gap, grace, live, sent)
+
+def Laws.liveness_never_kills(decision):
+  LVPROOF.no_kill(decision)
+
+def Laws.liveness_launcher_notified_once(waited, last, nudged, stalled, reason):
+  LVPROOF.notify_once(waited, last, nudged, stalled, reason)
+
+def Laws.liveness_progress_clears_stall(live, now, reason):
+  LVPROOF.progress(live, now, reason)
+
+def Laws.liveness_nudge_before_stall(now, grace, last, reason):
+  LVPROOF.nudge_first(LIVEWATCH.Liveness.due(True{}, now, 1n, last), now, grace, last, reason)
+
+def Laws.liveness_timeout_explicit_optout(): {==}
+
+def Laws.lock_lease_busy_retains_exclusion(expired, warned, grace):
+  match expired warned grace:
+    case False{} _ _: {==}
+    case True{} False{} _: {==}
+    case True{} True{} False{}: {==}
+    case True{} True{} True{}: {==}
+
+def Laws.lock_lease_warns_before_release(expired, grace, busy):
+  match expired:
+    case False{}: {==}
+    case True{}: {==}
+
+def Laws.lock_lease_grace_before_release(expired, warned, busy):
+  match expired warned:
+    case False{} _: {==}
+    case True{} False{}: {==}
+    case True{} True{}: {==}
+
+def Laws.lock_lease_exact_threshold(): {==}
+
+def Laws.work_timeout_default_twenty_minutes(): {==}
+
+def Laws.work_timeout_zero_optout(state): {==}
+
+def Laws.provider_resume_waits_for_ready(state, now, thread): {==}
+
+def Laws.background_timeout_waits_for_deadline(state, now, thread, row): {==}
+
+def Laws.liveness_display_active_without_stall(): {==}
+
+def Laws.liveness_plane_stalled_needs_attention(): {==}
+
+def Laws.liveness_label_preserves_busy_work(): {==}
+
+def Laws.restart_retry_initial_delay(): {==}
+
+def Laws.restart_retry_delay_bounded(): {==}
+
+def Laws.restart_retry_not_ready_no_resume(state, now, thread): {==}
+
+def Laws.restart_retry_not_candidate_no_schedule(state, now, thread): {==}
+
+def Laws.automatic_ride_no_process_effects(clear, state, now, thread, msg, role, text):
+  match clear:
+    case False{}: {==}
+    case True{}: {==}

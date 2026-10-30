@@ -272,7 +272,7 @@ def Plane.signal.current.k(blocked: Bool, +n: Nat, +t: M.Thread, +phase: M.Phase
     case False{}: Plane.signal.free(n, t)
 
 def Plane.signal.current(+n: Nat, +t: M.Thread, +phase: M.Phase, +st: M.State) -> String:
-  Plane.signal.current.k(SG.Signal.blocked(n), n, t, phase, st)
+  Bool.pick(String, SG.Signal.display.stalled(st, M.Thread.id(t)), "stalled", Plane.signal.current.k(SG.Signal.blocked(n), n, t, phase, st))
 
 def Plane.signal.pick(present: Bool, +ix: U.SIx, +st: M.State, +t: M.Thread) -> String:
   match present:
@@ -280,11 +280,11 @@ def Plane.signal.pick(present: Bool, +ix: U.SIx, +st: M.State, +t: M.Thread) -> 
     case False{}: Plane.state(U.Side.phase.ix(ix, st, t))
 
 def Plane.signal(+ix: U.SIx, +st: M.State, +t: M.Thread) -> String:
-  Plane.signal.pick(U.Side.signal.has(ix, M.Thread.id(t)), ix, st, t)
+  Bool.pick(String, SG.Signal.display.stalled(st, M.Thread.id(t)), "stalled", Plane.signal.pick(U.Side.signal.has(ix, M.Thread.id(t)), ix, st, t))
 
 # how much a state waits on the person (0: not at all)
 def Plane.rank(+s: String) -> Nat:
-  Bool.pick(Nat, String.eq(s, "approval"), 8n, Bool.pick(Nat, String.eq(s, "question"), 7n, Bool.pick(Nat, String.eq(s, "failed"), 6n, 0n)))
+  Bool.pick(Nat, String.eq(s, "approval"), 8n, Bool.pick(Nat, String.eq(s, "question"), 7n, Bool.pick(Nat, String.eq(s, "failed"), 6n, Bool.pick(Nat, String.eq(s, "stalled"), 5n, 0n))))
 
 # the section a state goes to: 0 need, 1 run, 2 the rest
 def Plane.sec(+s: String) -> Nat:
@@ -317,7 +317,7 @@ def Plane.jump(+st: M.State, +id: String, +state: String) -> String:
   Plane.jump.s(Nat.is_eq(Plane.sec(state), 0n), st, id)
 
 def Plane.thread.k(+away: Bool, +id: String, +title: String, +sub: String, +machine: String, +phase: String, +at: Nat, +st: M.State) -> PRow:
-  PRow{"thread", id, "select", Plane.jump(st, id, Bool.pick(String, away, "away", phase)), title, sub, machine, Bool.pick(String, away, "away", phase), at, away}
+  PRow{"thread", id, "select", Plane.jump(st, id, Bool.pick(String, away, "away", phase)), title, Bool.pick(String, away, sub, SG.Signal.display.note(I.En{}, st, id, sub)), machine, Bool.pick(String, away, "away", phase), at, away}
 
 def Plane.thread.t(+t: M.Thread, +at: Nat, +pt: String, +u: U.Ui, +ix: U.SIx, +st: M.State) -> PRow:
   Plane.thread.k(U.Ui.far.away(u, M.Thread.id(t)), M.Thread.id(t), U.Active.title(t), pt, U.Ui.far.name(u, M.Thread.id(t)), Plane.asking(Plane.signal(ix, st, t), ix, M.Thread.id(t)), at, st)
@@ -347,9 +347,14 @@ def Plane.threads(rs: List<&2, U.ARow>, +u: U.Ui, +ix: U.SIx, +st: M.State) -> L
 def Plane.bot.k(+away: Bool, +id: String, +name: String, +machine: String, +phase: String, +at: Nat, +uber: Bool) -> PRow:
   PRow{"bot", id, Bool.pick(String, uber, "uber", "bot"), Bool.pick(String, uber, "", id), name, "", machine, Bool.pick(String, away, "away", phase), at, away}
 
+def Plane.bot.reason(r: PRow, +st: M.State, +th: String, lc: I.Loc) -> PRow:
+  match r:
+    case PRow{k, id, a, v, ti, +sub, ma, state, at, +away}:
+      PRow{k, id, a, v, ti, Bool.pick(String, away, sub, SG.Signal.display.note(lc, st, th, sub)), ma, state, at, away}
+
 def Plane.bot.t(+b: BT.Bot, +th: String, +u: U.Ui, +ix: U.SIx, +st: M.State) -> PRow:
-  Plane.bot.k(U.Ui.far.away(u, BT.Bot.id(b)), BT.Bot.id(b), BT.Bot.name(b), U.Ui.far.name(u, BT.Bot.id(b)), Plane.asking(Plane.signal(ix, st, U.Ui.thread(st, th)), ix, th),
-    U.Active.activity(U.Ui.thread(st, th)), UB.Uber.is(st, BT.Bot.id(b)))
+  Plane.bot.reason(Plane.bot.k(U.Ui.far.away(u, BT.Bot.id(b)), BT.Bot.id(b), BT.Bot.name(b), U.Ui.far.name(u, BT.Bot.id(b)), Plane.asking(Plane.signal(ix, st, U.Ui.thread(st, th)), ix, th),
+    U.Active.activity(U.Ui.thread(st, th)), UB.Uber.is(st, BT.Bot.id(b))), st, th, U.Lang.loc(u))
 
 # only a bot that has a thread, and one that is not at rest, shows here
 def Plane.bots.r(+row: PRow, rest: List<&2, PRow>) -> List<&2, PRow>:
@@ -687,7 +692,7 @@ def Plane.counts.join(+a: String, +b: String) -> String:
 # title so a count can be read row by row
 def Plane.why(+l: I.Loc, +state: String) -> String:
   Bool.pick(String, String.eq(state, "approval"), MSG.T.plane.why.approval(l), Bool.pick(String, String.eq(state, "question"), MSG.T.plane.why.question(l),
-    Bool.pick(String, String.eq(state, "failed"), MSG.T.plane.why.failed(l), "")))
+    Bool.pick(String, String.eq(state, "failed"), MSG.T.plane.why.failed(l), Bool.pick(String, String.eq(state, "stalled"), Bool.pick(String, String.eq(I.I18n.tag(l), "ja"), "進捗停止", "Stalled"), ""))))
 
 # a failed run is told apart from an ask: "1 need you · 2 failed · 7 running"
 # (need counts every row of the section; the words split it, law
@@ -861,9 +866,16 @@ def Plane.hot.sx(ix: U.SIx, m: Map<&2, Bool>) -> Map<&2, Bool>:
     case U.SIx{_, +as, +ks, +wk}:
       Plane.hot.ids(Map.keys(&2, List<&2, M.Ask>, as), Plane.hot.ids(Map.keys(&2, Nat, ks), Plane.hot.signals(Map.keys(&2, Nat, wk), m)))
 
+def Plane.hot.stalled(keys: List<&2, String>, +st: M.State, +m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match keys:
+    case Nil{}: m
+    case +key <> rest:
+      +id = String.drop(key, 9n)
+      Plane.hot.stalled(rest, st, Bool.pick(Map<&2, Bool>, SG.Signal.display.stalled(st, id), Plane.hot.put(id, m), m))
+
 # the ids that can be need or run beyond what a thread's own turn and pending say
 def Plane.hot(+st: M.State, ix: U.SIx) -> Map<&2, Bool>:
-  Plane.hot.sx(ix, Plane.hot.ids(M.Queue.threads(st), Map.new(&2, Bool)))
+  Plane.hot.sx(ix, Plane.hot.stalled(M.Setting.keys.pre(st, "liveness."), st, Plane.hot.ids(M.Queue.threads(st), Map.new(&2, Bool))))
 
 def Plane.turn.hot(t: M.TurnState) -> Bool:
   match t:

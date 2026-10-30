@@ -24,7 +24,7 @@ def Pl.vis(+rel: U32, +h: U32, +off: U32, +vh: U32) -> Bool:
   Bool.and(U32.is_gt((rel + h : U32), off), U32.is_lt(rel, (off + vh : U32)))
 
 def Pl.dot(+s: String) -> U32:
-  Bool.pick(U32, Bool.or(Bool.or(String.eq(s, "approval"), String.eq(s, "question")), Bool.or(String.eq(s, "wait"), String.eq(s, "unread"))), T.Th.warn(),
+  Bool.pick(U32, Bool.or(Bool.or(String.eq(s, "approval"), String.eq(s, "question")), Bool.or(String.eq(s, "wait"), Bool.or(String.eq(s, "stalled"), String.eq(s, "unread")))), T.Th.warn(),
     Bool.pick(U32, Bool.or(String.eq(s, "failed"), String.eq(s, "error")), T.Th.bad(),
       Bool.pick(U32, Bool.or(Bool.or(String.eq(s, "working"), String.eq(s, "work")), String.eq(s, "talk")), T.Th.ok(),
         Bool.pick(U32, Bool.or(String.eq(s, "waiting"), String.eq(s, "think")), T.Th.dim(),
