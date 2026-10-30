@@ -119,7 +119,7 @@ function* each(list) {
 // DOM patch
 // ---------
 
-const EVENTS = ["click", "input", "contextmenu"];
+const EVENTS = ["click", "input", "change", "contextmenu"];
 window.backplaneDesktop?.onFocusAddress?.(() => {
   const address = document.querySelector('[data-bfield^="brurl:"]');
   if (address) { address.focus();address.select(); }

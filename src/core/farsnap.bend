@@ -125,7 +125,7 @@ def Snap.sets(+s: M.State, +id: String, +at: Nat, acc: List<&2, M.Change>) -> Li
     Snap.when(Bool.not(String.is_empty(fork)), M.ThreadForked{id, fork, at},
       Snap.when(Bool.not(String.is_empty(watch)), M.WorkSet{id, "watch", watch, at},
         Snap.when(Bool.not(String.is_empty(bg)), M.WorkSet{id, "bg", bg, at},
-          Snap.when(Bool.not(String.is_empty(todo)), M.TodosSet{id, todo, at}, acc)))))
+          Snap.when(Bool.not(String.is_empty(todo)), M.TodosChanged{id, "snapshot", M.Todos.snapshot(s, id), at}, acc)))))
 
 def Snap.thread.k(+s: M.State, +k: Nat, t: M.Thread, shows: Bool, acc: List<&2, M.Change>) -> List<&2, M.Change>:
   match t:
