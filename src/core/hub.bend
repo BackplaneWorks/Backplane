@@ -3306,15 +3306,48 @@ def Kids.busy(ts: List<&2, M.Task>, +parent: String) -> Bool:
     case M.Task{_, p, _, _, st, _, _, _, _} <> t:
       Bool.or(Bool.and(String.eq(p, parent), Bool.not(M.TaskState.terminal(st))), Kids.busy(t, parent))
 
-# (kids: every parent's unfinished child tasks, M.Work.kids.map; a thread
-# with any work out, children, background or watched, does not settle:
-# law settle_waits_for_work)
-def Hub.settle.go(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat) -> List<&2, M.Change>:
+# A thread whose turn ended (completed, failed or stopped) settles once it
+# has been idle for "settle.idle.minutes" (30 by default; 0 turns this
+# off), sooner than the settle window; nothing out (Work.busy), no ask, no
+# override and no snooze, as for the window. A message wakes it (an
+# auto-settle never holds against one). Laws settle_idle_*.
+def Hub.settle.idle(+s: M.State) -> Nat:
+  Nat.mul(M.Switch.num(M.Setting.get(s, "settle.idle.minutes", "30"), 0n), 60n)
+
+def Hub.settle.ended(t: M.TurnState) -> Bool:
+  match t:
+    case M.Completed{}:
+      True{}
+    case M.Failed{}:
+      True{}
+    case M.Interrupted{}:
+      True{}
+    case _:
+      False{}
+
+def Hub.settle.w.k(ended: Bool, +idle: Nat, +w: Nat) -> Nat:
+  match ended:
+    case True{}:
+      Bool.pick(Nat, Bool.and(Nat.is_gt(idle, 0n), Nat.is_lt(idle, w)), idle, w)
+    case False{}:
+      w
+
+# the window a thread settles by: the idle one once its turn ended
+def Hub.settle.w(+t: M.Thread, +idle: Nat, +w: Nat) -> Nat:
+  Hub.settle.w.k(Hub.settle.ended(M.Thread.turn(t)), idle, w)
+
+def Hub.settle.go.i(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat, +idle: Nat) -> List<&2, M.Change>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> rest:
-      Hub.settle.k(Bool.and(M.Settle.auto.at(now, w, t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t)))), Nat.is_eq(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n)), M.Shelf.of(t), t, now, Hub.settle.go(rest, navs, kids, s, now, w))
+      Hub.settle.k(Bool.and(M.Settle.auto.at(now, Hub.settle.w(t, idle, w), t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t)))), Nat.is_eq(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n)), M.Shelf.of(t), t, now, Hub.settle.go.i(rest, navs, kids, s, now, w, idle))
+
+# (kids: every parent's unfinished child tasks, M.Work.kids.map; a thread
+# with any work out, children, background or watched, does not settle:
+# law settle_waits_for_work)
+def Hub.settle.go(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat) -> List<&2, M.Change>:
+  Hub.settle.go.i(ts, navs, kids, s, now, w, Hub.settle.idle(s))
 
 # the settle window in seconds: the "settle.days" setting (1..90), else 3 days
 def Hub.settle.window(+s: M.State) -> Nat:
