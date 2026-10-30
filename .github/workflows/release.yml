@@ -160,10 +160,17 @@ jobs:
         if: inputs.operation == 'stage-desktop'
         run: |
           node desktop/produce-release.cjs stage --request build/release-inputs/desktop-release-request.json --output "$GITHUB_WORKSPACE/build/desktop-stage-upload/desktop-stage"
+          # every helper the hub runs beside it, for the target (issue #510)
+          python3 scripts/check-helpers.py "$GITHUB_WORKSPACE/build/desktop-stage-upload/desktop-stage" --target "$DESKTOP_TARGET"
       - name: Archive only the signed and target-qualified final payload
         if: inputs.operation == 'archive-desktop'
         run: |
           node desktop/produce-release.cjs archive --stage build/release-inputs/desktop-stage --acceptance build/release-inputs/desktop-release-acceptance.json --output "$GITHUB_WORKSPACE/build/desktop-dist"
+          # the archive people download carries every helper (issue #510)
+          for a in build/desktop-dist/*.tar.gz build/desktop-dist/*.zip; do
+            [ -e "$a" ] || continue
+            python3 scripts/check-helpers.py "$a" --target "$DESKTOP_TARGET"
+          done
       - uses: actions/setup-java@v4
         if: inputs.operation == 'android-artifacts'
         with:

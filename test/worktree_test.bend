@@ -166,7 +166,10 @@ def main() -> IO(Unit):
     C.Check.str("removed is gone", flag(M.Worktree.gone(H.Hub.thread(state(removed()), "t100-1"))), "T")
     C.Check.str("removed not asked again", outs(H.Hub.tick(state(removed()), 2000n)), "")
     C.Check.str("coming back makes it again", outs(step(removed(), 5000n, "{\"id\":3,\"m\":\"turn.start\",\"p\":{\"thread\":\"t100-1\",\"text\":\"one more thing\"}}")), "git:worktree@/r/board(again)")
-    C.Check.str("coming back waits", tags(step(removed(), 5000n, "{\"id\":3,\"m\":\"turn.start\",\"p\":{\"thread\":\"t100-1\",\"text\":\"one more thing\"}}")), "MessagePosted TurnQueued")
+    # the hub records its ask (wt.again.<thread>, Wt.asked) before the message
+    # it queues, so the message waits for that worktree (Worktree.waits)
+    C.Check.str("coming back waits", tags(step(removed(), 5000n, "{\"id\":3,\"m\":\"turn.start\",\"p\":{\"thread\":\"t100-1\",\"text\":\"one more thing\"}}")), "SettingSet MessagePosted TurnQueued")
+    C.Check.str("coming back records the ask", M.Setting.get(state(back()), "wt.again.t100-1", ""), "5000")
     C.Check.str("coming back asks once", outs(step(back(), 5010n, "{\"id\":4,\"m\":\"turn.start\",\"p\":{\"thread\":\"t100-1\",\"text\":\"and this\"}}")), "")
     C.Check.str("back runs there", outs(step(back(), 5020n, "{\"id\":0,\"m\":\"thread.worktree\",\"p\":{\"thread\":\"t100-1\",\"branch\":\"backplane/0a1b2c3d\",\"path\":\"/r/.backplane/worktrees/backplane-0a1b2c3d/board\"}}")),
       "git:checkpoint0@/r/.backplane/worktrees/backplane-0a1b2c3d/board() git:step@/r/.backplane/worktrees/backplane-0a1b2c3d/board() start@/r/.backplane/worktrees/backplane-0a1b2c3d/board send")

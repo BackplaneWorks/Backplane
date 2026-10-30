@@ -75,7 +75,7 @@ def probe.watch(st: PV.PSt, client: U32, +stage: String) -> IO(PV.PSt):
   do IO<PV.PSt>:
     +q : Chan(PV.PMsg) <- Chan.new(PV.PMsg, 8)
     +out : Chan(PV.POut) <- Chan.new(PV.POut, 16)
-    +next : PV.PSt <- PV.Pv.watch.k(False{}, False{}, st, client, 0, probe.key(), "/unused", q, out, "/unused")
+    +next : PV.PSt <- PV.Pv.watch.k(False{}, False{}, st, client, 0, probe.key(), "/unused", q, out, "/tmp")
     Chan.close(PV.PMsg, q)
     Chan.close(PV.POut, out)
     probe.drain(17n, out, stage)
@@ -97,11 +97,14 @@ def probe.checked(+stage: String, before: U32 & String, after: U32 & String, r: 
     m : Maybe<&1, PV.PMsg> <- Chan.recv(PV.PMsg, q)
     probe.checked.message(m, stage)
 
+# client 6 watches the source from the start (a result for a source no one
+# watches is dropped with it, Src.gc) and stops once client 7 watches it
 def main() -> IO(Unit):
   do IO<Unit>:
-    a : PV.PSt <- probe.handle(PV.PSt{[PV.Src{probe.key(), 0, "/unused", 0, "", 0n, False{}, None{}, ""}], Nil{}, True{}},
+    a : PV.PSt <- probe.handle(PV.PSt{[PV.Src{probe.key(), 0, "/unused", 0, "", 0n, False{}, None{}, ""}], [PV.Sub{6, probe.key(), Nil{}, "", False{}, ""}], True{}},
       PV.PGot{probe.key(), 10, "revision-A", Some{probe.model(True{})}, ""}, "success-A")
-    watched : PV.PSt <- probe.watch(a, 7, "first-subscriber")
+    first : PV.PSt <- probe.watch(a, 7, "first-subscriber")
+    watched : PV.PSt <- probe.handle(first, PV.PStop{6}, "seed-gone")
     failed : PV.PSt <- probe.handle(watched, PV.PGot{probe.key(), 10, "revision-B", None{}, "export failed"}, "failure-B")
     cached : PV.PSt <- probe.watch(failed, 8, "cached-after-failure")
     half : PV.PSt <- probe.handle(cached, PV.PGot{probe.key(), 10, "revision-C", None{}, ""}, "half-written-C")

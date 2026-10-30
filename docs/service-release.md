@@ -21,6 +21,18 @@ file is `backplane-serve`, and `backplane-serve.exe` on Windows (build-js.sh
 appends `.exe`). Windows builds but cannot serve until Bend's JS runtime has
 Win32 syscalls.
 
+The helpers the hub runs (`src/server/kicad.bend`'s `Helper.find`:
+`backplane-kipc`, `-step2glb`, `-voice`, `-browser`) sit beside the service.
+On Linux and macOS `js` builds them for the target on its pinned Bun runtime
+(`scripts/build-helpers.sh`, their notices in `licenses/helpers/`) and records
+their hashes in BUILD.json's `helpers`; `component` copies them executable and
+lists them as packages. Windows' (`backplane-kipc.exe`, `backplane-step2glb.exe`)
+come in its pinned runtime bundle (`scripts/service-runtime.py`). Each step
+refuses a missing one, a wrong architecture or, on macOS, an unsigned one, and so
+do the desktop producer and `scripts/check-helpers.py ARCHIVE --target T`, which
+`release.yml` runs on every staged and archived desktop app. 0.13.0's macOS and
+Linux apps shipped none, and KiCad IPC never started (issue #510).
+
 The checkout must be clean at the final committed release identity, checked
 before and after the build. Inputs and outputs should live outside the checkout
 or in an ignored build directory. Source check receipts must already refer to
