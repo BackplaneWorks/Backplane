@@ -1,5 +1,6 @@
 import Base
 import ../core/signal.bend as SG
+import ./thin-signals.bend as K
 
 # One canonical-derived text map, never recipient info, Ui, session, draft,
 # history, clock, node or command. Online visibility is an exact key input.
@@ -17,7 +18,7 @@ def SignalTextCache.bounded(c: SignalTextCache) -> Bool:
 
 def SignalTextCache.build(epoch: String, revision: Nat, +online: Bool, signals: Map<&2, Nat>) -> SignalTextCache:
   +values = SG.Signal.cache(online, signals, Map.new(&2, String))
-  SignalTextCache{epoch, revision, online, values, Nat.is_le(Map.size(&2, String, values), 4097n)}
+  SignalTextCache{epoch, revision, online, values, K.CacheBudget.strings(Map.to_list(&2, String, values), 8193n, 524288n, True{})}
 
 def SignalTextCache.online(saved: Bool, online: Bool) -> Bool:
   match saved:

@@ -156,6 +156,35 @@ class SidebarDraftGuard(unittest.TestCase):
             with self.assertRaisesRegex(guard.GuardError, "scope changed"):
                 guard.check(root)
 
+    def test_canonical_retention_bridges_change_missing_pin_and_scope_fail_closed(self):
+        for name in ["src/server/thin-signals.bend", "src/server/thin-signal-text.bend",
+                     "src/server/thin-side-index.bend"]:
+            with self.subTest(path=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self.copy_review(root)
+                guard.check(root)
+                path = root / name
+                path.write_text(path.read_text() + "\n# unreviewed canonical cache change\n")
+                with self.assertRaises(guard.GuardError):
+                    guard.check(root)
+                self.copy_review(root)
+                path.unlink()
+                with self.assertRaises(guard.GuardError):
+                    guard.check(root)
+                self.copy_review(root)
+                manifest = root / guard.MANIFEST
+                reviewed = json.loads(manifest.read_text())
+                del reviewed["files"][name]
+                manifest.write_text(json.dumps(reviewed))
+                with self.assertRaisesRegex(guard.GuardError, "closure changed"):
+                    guard.check(root)
+                self.copy_review(root)
+                reviewed = json.loads(manifest.read_text())
+                reviewed["bridges"].remove(name)
+                manifest.write_text(json.dumps(reviewed))
+                with self.assertRaisesRegex(guard.GuardError, "scope changed"):
+                    guard.check(root)
+
     def test_required_local_gate_is_outside_optional_modes(self):
         source = (ROOT / "scripts/local-small.py").read_text()
         self.assertLess(source.index("'test/tools/sidebar_draft_guard_test.py'"),

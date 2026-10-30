@@ -42,10 +42,10 @@ def remembered() -> A.Actor:
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("same owner and target retain text", count(refresh("self", "view")), "1")
-    C.Check.str("other target drops text", count(refresh("other", "view")), "0")
-    C.Check.str("other view drops text", count(refresh("self", "other-view")), "0")
-    C.Check.str("dirty action drops text", count(A.Actor.mark_dirty(seed())), "0")
-    C.Check.str("info update drops text", count(A.Actor.info(seed(), J.Json.obj([J.KV{"info", J.Json.obj([J.KV{"models.v", J.Str{"fresh"}}])}]))), "0")
+    C.Check.str("other target retains canonical text", count(refresh("other", "view")), "1")
+    C.Check.str("other view retains canonical text", count(refresh("self", "other-view")), "1")
+    C.Check.str("dirty action keeps canonical text (re-checked on read)", count(A.Actor.mark_dirty(seed())), "1")
+    C.Check.str("info update keeps canonical text (re-checked on read)", count(A.Actor.info(seed(), J.Json.obj([J.KV{"info", J.Json.obj([J.KV{"models.v", J.Str{"fresh"}}])}]))), "1")
     C.Check.str("new schematic state drops text", count(A.Actor.sheets(seed(), J.Json.obj(Nil{}))), "0")
     C.Check.str("render remember preserves one text entry", count(remembered()), "1")
     C.Check.str("metadata save preserves raw signals", Nat.show(List.length(&2, A.Memo, A.Signals.keep(A.Sidebar.memos(seed())))), "1")
