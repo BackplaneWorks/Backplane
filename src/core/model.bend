@@ -2200,10 +2200,13 @@ def Todos.turn.start(was: Bool, s: State, th: String) -> State:
     case True{}: s
     case False{}: State.setting(s, "todos.visible." ++ th, "0")
 
+# A turn ends: a completed list clears, and so does one that stayed hidden
+# all turn (neither the agent nor the person touched it). The next list the
+# agent writes then starts fresh, with no person edits from the retired one.
 def Todos.turn(st: TurnState, +s: State, +th: String) -> State:
   match st:
     case Running{}: Todos.turn.start(State.running.k(State.thread.get(s, th)), s, th)
-    case _: Todos.turn.end(TD.Todo.complete(Todos.of(s, th)), s, th)
+    case _: Todos.turn.end(Bool.or(TD.Todo.complete(Todos.of(s, th)), Bool.not(Todos.visible(s, th))), s, th)
 
 def State.apply.go(s: State, e: Change) -> State:
   match e:

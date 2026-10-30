@@ -13750,4 +13750,14 @@ def Laws.deploy_idle_waits_between_calls():
   {==}
 
 def Laws.deploy_idle_goes_after_turn_end():
+def Laws.todo_hidden_turn_retires():
+  {==}
+
+def Laws.todo_write_after_retire_fresh():
+  {==}
+
+def Laws.todos_retire_shuts():
+  {==}
+
+def Laws.todos_retire_shuts_unselected():
   {==}

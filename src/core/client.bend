@@ -589,8 +589,15 @@ def Todos.closed(done: Bool, info: Map<&2, String>, th: String) -> Map<&2, Strin
     case False{}: info
     case True{}: Map.set(&2, String, info, "fold:todos:" ++ th, "0")
 
+# The list shuts when it completes, and when it is retired (a list that
+# was there is gone), so the agent's next list starts shut. Todos.see runs
+# this per change for every thread; a whole state adopted at once
+# (Ui.adopt.raw) checks only the selected thread.
+def Todos.retired(+old: M.State, +fresh: M.State, +th: String) -> Bool:
+  Bool.and(Bool.not(List.is_empty(&2, TD.Todo, M.Todos.of(old, th))), List.is_empty(&2, TD.Todo, M.Todos.of(fresh, th)))
+
 def Todos.autoclose(+old: M.State, +fresh: M.State, info: Map<&2, String>, +th: String) -> Map<&2, String>:
-  Todos.closed(Bool.and(Bool.not(TD.Todo.complete(M.Todos.of(old, th))), TD.Todo.complete(M.Todos.of(fresh, th))), info, th)
+  Todos.closed(Bool.or(Bool.and(Bool.not(TD.Todo.complete(M.Todos.of(old, th))), TD.Todo.complete(M.Todos.of(fresh, th))), Todos.retired(old, fresh, th)), info, th)
 
 def Ui.adopt.raw(u: Ui, +st: M.State) -> Ui:
   match u:
@@ -14110,6 +14117,8 @@ def Todos.see(+pre: M.State, +c: M.Change, u: Ui) -> Ui:
     case M.TodosSet{+th, _, _} Ui{+st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, nf, ob, tr}:
       Ui{st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, Todos.autoclose(pre, st, nf, th), ob, tr}
     case M.TodosChanged{+th, _, _, _} Ui{+st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, nf, ob, tr}:
+      Ui{st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, Todos.autoclose(pre, st, nf, th), ob, tr}
+    case M.TurnChanged{+th, _, _} Ui{+st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, nf, ob, tr}:
       Ui{st, se, dr, li, op, on, no, ad, pa, v, ri, w, er, note, Todos.autoclose(pre, st, nf, th), ob, tr}
     case _ _: u
 
