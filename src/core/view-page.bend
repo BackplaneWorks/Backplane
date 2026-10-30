@@ -47,8 +47,14 @@ def Page.limit(+kind: String, +budget: String) -> Nat:
   +small = M.Switch.num(String.take(budget, 2n), 0n)
   Bool.pick(Nat, Bool.and(Nat.is_gt(small, 0n), Nat.is_lt(small, normal)), small, normal)
 
+# The sidebar's projects and live threads are never windowed: a byte budget
+# that shrank once must not hide a running project or thread. Only shelves
+# (settled, archived, snoozed) and panels page.
+def Page.whole(+kind: String) -> Bool:
+  Bool.or(String.eq(kind, "projects"), String.eq(kind, "live"))
+
 def Page.of(+st: M.State, +kind: String, +ids: List<&2, String>, +selected: String) -> Page:
-  Page.on(String.eq(M.Setting.get(st, "local.view.lazy", ""), "1"), ids, kind,
+  Page.on(Bool.and(String.eq(M.Setting.get(st, "local.view.lazy", ""), "1"), Bool.not(Page.whole(kind))), ids, kind,
     M.Setting.get(st, "local.view.pages", "{}"), Page.limit(kind, M.Setting.get(st, "local.view.budget", "")), selected)
 
 def Page.info.value(pair: Map<&2, String> & String) -> String:
@@ -61,6 +67,10 @@ def Page.info.get(+m: Map<&2, String>, +key: String) -> String:
 def Page.info(+info: Map<&2, String>, +kind: String, +ids: List<&2, String>, +selected: String) -> Page:
   Page.on(String.eq(Page.info.get(info, "local.view.lazy"), "1"), ids, kind,
     Page.info.get(info, "local.view.pages"), Page.limit(kind, Page.info.get(info, "local.view.budget")), selected)
+
+def Page.scope_of(+p: Page) -> String:
+  match p:
+    case Page{scope, _, _, _, _}: scope
 
 def Page.ids(+p: Page) -> List<&2, String>:
   match p:
