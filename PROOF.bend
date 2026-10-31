@@ -13750,6 +13750,8 @@ def Laws.deploy_idle_waits_between_calls():
   {==}
 
 def Laws.deploy_idle_goes_after_turn_end():
+  {==}
+
 def Laws.todo_hidden_turn_retires():
   {==}
 
