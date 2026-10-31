@@ -30,6 +30,11 @@ defs with the same answers computed natively:
   request with contains, and a 16 KB terminal paste held the hub 1.3 s, 64 KB
   for 12 s.
 
+Server-only `Eq.str(a,b)` uses native exact string equality, avoiding a stack
+frame per plot character when checking an unchanged large render. Its complete
+emitted body, exact character callee, and pure-source hash fence the swap.
+The pure definition and its proofs remain unchanged.
+
 Server-only `Cbor.Enc.text(s, acc)` writes the same code-point UTF-8 bytes
 straight onto its reversed byte accumulator. It counts UTF-8 width with a
 native iteration first, avoiding the reference encoder's temporary byte list
@@ -187,6 +192,10 @@ SEC_FINE_HELPER = (
     "if(!any)return s;let out=\"\",run=0;for(let j=0;j<n;j++){run+=d[j];out+=run>0?\"\\u2022\":cp[j]}return out}\n"
 )
 
+# Exact emitted comparator body and pure-source hash fence this replacement.
+EQ_STR = re.compile('function\\ ([A-Za-z0-9_$]+\\$058Eq\\$str\\$)\\(_a_0,_b_0\\)\\{if\\(_a_0===""\\)if\\(_b_0===""\\)return!0;else\\ return!1;else\\{let\\ _x_0=_a_0\\.codePointAt\\(0\\)>65535\\?_a_0\\.slice\\(0,2\\):_a_0\\[0\\],_xt_0=_a_0\\.codePointAt\\(0\\)>65535\\?_a_0\\.slice\\(2\\):_a_0\\.slice\\(1\\);if\\(_b_0!==""\\)\\{let\\ _y_0=_b_0\\.codePointAt\\(0\\)>65535\\?_b_0\\.slice\\(0,2\\):_b_0\\[0\\],_yt_0=_b_0\\.codePointAt\\(0\\)>65535\\?_b_0\\.slice\\(2\\):_b_0\\.slice\\(1\\);return\\ \\$Bool\\$and\\$\\(([A-Za-z0-9_$]+\\$058Eq\\$chr\\$)\\(_x_0,_y_0\\),\\1\\(_xt_0,_yt_0\\)\\)\\}else\\ return!1\\}\\}')
+EQ_STR_SOURCE_SHA256 = '6c3d9927cff126a6b3bedb170e4fb7e261aef2e4037d409de315aa032d9723a1'
+
 args = sys.argv[1:]
 server = "--server" in args
 files = [a for a in args if a != "--server"]
@@ -206,6 +215,16 @@ if not server:
     for name in ("String.split", "List.length", "String.starts_with", "String.contains"):
         if found[name] > copies:
             sys.exit(f"js-native: {name} exceeds the web Bend entry count")
+found["Eq.str"] = sum(len(EQ_STR.findall(s)) for s in srcs.values()) if server else 0
+if server:
+    if found["Eq.str"] != 1:
+        sys.exit(f"js-native: Eq.str found {found['Eq.str']} times, not once")
+    if hashlib.sha256(Path(__file__).parent.parent.joinpath("src/core/eq.bend").read_bytes()).hexdigest() != EQ_STR_SOURCE_SHA256:
+        sys.exit("js-native: Eq.str pure source changed")
+    for s in srcs.values():
+        for match in EQ_STR.finditer(s):
+            if match.group(2) != match.group(1).replace("$058Eq$str$", "$058Eq$chr$"):
+                sys.exit("js-native: Eq.str needs its exact Eq.chr")
 found["Sec.fine"] = sum(len(SEC_FINE.findall(s)) for s in srcs.values())
 if (server and found["Sec.fine"] != 1) or (not server and found["Sec.fine"] > found["String.cmp"]):
     sys.exit(f"js-native: Sec.fine found {found['Sec.fine']} times, not once")
@@ -291,6 +310,8 @@ for f, s in srcs.items():
     if SEC_FINE.search(s):
         s = SEC_FINE.sub(lambda m: 'function %s(%s,%s){return __bpSecFine(%s,%s)}' % (m.group(1), m.group(2), m.group(3), m.group(2), m.group(3)), s)
         s = SEC_FINE_HELPER + s
+    if server:
+        s = EQ_STR.sub(lambda m: 'function %s(_a_0,_b_0){return _a_0===_b_0}' % m.group(1), s)
     # (a module's imports may come after it: they are hoisted)
     s = HELPERS + s
     open(f, "w", encoding="utf-8").write(s)
@@ -303,7 +324,7 @@ for name, call in (("String.cmp", "snd:{$:__bpOrd("), ("Map.bit.go", "snd:__bpBi
                    ("Cbor.Enc.text", "return __bpCborText("), ("Json.parse", "){return __bpParsed("),
                    ("Json.show", "){return __bpJsonShow("), ("ContentEq.same", "){return __bpContentEq("),
                    ("Json.bytes.esc", "){return __bpJsonBytesEsc("), ("Json.bytes.str", "){return __bpJsonBytesStr("),
-                   ("Sec.fine", "){return __bpSecFine(")):
+                   ("Sec.fine", "){return __bpSecFine("), ("Eq.str", "(_a_0,_b_0){return _a_0===_b_0}")):
     n = outs.count(call)
     if n != found[name]:
         sys.exit(f"js-native: {name}'s native body is in the output {n} times, not {found[name]}")
