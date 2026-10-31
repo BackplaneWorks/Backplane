@@ -800,6 +800,33 @@ function sheetBoxes(text) {
   }
   return out;
 }
+// Native disclosures do not move focus into their search field. Keep this
+// keyboard handling local to the 2D viewer and use the actions Bend rendered.
+let pickerKeysInstalled = false;
+function pickerKeys() {
+  if (pickerKeysInstalled) return;
+  pickerKeysInstalled = true;
+  document.addEventListener("toggle", (event) => {
+    const menu = event.target;
+    if (menu.matches?.("#viewer .board-selector[open]") && menu.closest("#viewer")?.querySelector("canvas.plot2d")) {
+      menu.querySelector("[data-board-filter]")?.focus({ preventScroll: true });
+    }
+  }, true);
+  document.addEventListener("keydown", (event) => {
+    const menu = event.target.closest?.("#viewer .board-selector[open]");
+    if (!menu || !menu.closest("#viewer")?.querySelector("canvas.plot2d") || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+    const rows = [...menu.querySelectorAll(".board-option")].filter(row => !row.hidden && !row.disabled);
+    const search = menu.querySelector("[data-board-filter]"), at = rows.indexOf(event.target);
+    if (event.key === "Enter" && event.target === search) {
+      event.preventDefault(); event.stopImmediatePropagation(); rows[0]?.click();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const next = event.key === "ArrowDown" ? at + 1 : at < 0 ? rows.length - 1 : at - 1;
+      (rows[next] || search)?.focus({ preventScroll: true });
+    }
+  }, true);
+}
+
 let noteSeen = false;
 
 // the page's answer to a right click (host.js)
@@ -819,6 +846,7 @@ function present(v) {
 // after each render: each canvas on the page shows the source its data-key
 // names, once the hub has sent it
 export function mount(canvases) {
+  pickerKeys();
   const list = (Array.isArray(canvases) ? canvases : [canvases]).filter(Boolean);
   for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); clearTimeout(v.probeTimer); park(v); views.delete(c); }
   for (const canvas of list) mountOne(canvas);
