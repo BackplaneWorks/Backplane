@@ -1573,6 +1573,9 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .composer-foot .model-chip:hover { border-color: var(--faint); }
 .composer:has(.model-layer[aria-hidden="false"]) .model-chip { border-color: var(--accent); }
 .composer-foot .model-chip .mp-sel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* squeezed, the chip gives up its key's room (the key is hidden until
+   Ctrl is held) before any of its words */
+.composer-foot .model-chip kbd { flex: 0 100000 auto; min-width: 0; overflow: hidden; }
 /* a narrow thread column (the viewer or Split beside it): the token chip
    keeps to its icon (its panel says the numbers), so the buttons beside it
    fit */
@@ -1916,20 +1919,26 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .app.top.tour-sidebar::after { content: ""; grid-area: side; z-index: 32; pointer-events: none; box-shadow: inset 0 0 0 2px var(--accent); }
 @media (max-width: 760px) { .workspace-bar .keycap { display: none; } }
 
-/* Named accounts sit beside the model without taking space from the draft. */
+/* Named accounts sit beside the model without taking space from the draft.
+   Where one row cannot hold the model chip, the account, the token chip
+   and the buttons whole (a thread under about 60em), the chip and the
+   account take a line over the buttons, and the chip keeps its words. */
 .account-chip { min-width: 0; flex: 0 1 auto; max-width: min(22rem, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-picker { position: absolute; z-index: 4; bottom: 100%; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; max-width: 100%; max-height: min(45vh, 22rem); overflow-y: auto; border: 1px solid var(--line); background: var(--panel); }
 .account-picker button { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 .setrow .field { min-width: 0; max-width: 100%; }
-@container (max-width: 520px) {
+@container (max-width: 60em) {
   .composer-foot:has(> .account-chip) { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); gap: 6px 5px; }
-  .composer-foot:has(> .account-chip) > .model-chip { grid-area: 1 / 1; }
+  .composer-foot:has(> .account-chip) > .model-chip { grid-area: 1 / 1; justify-self: start; }
   .composer-foot:has(> .account-chip) > .account-chip { grid-area: 1 / 2 / 2 / -1; justify-self: end; max-width: 100%; }
   .composer-foot:has(> .account-chip) > .model-ctx { grid-area: 2 / 1; }
   .composer-foot:has(> .account-chip) > .attach.draw { grid-area: 2 / 2; }
   .composer-foot:has(> .account-chip) > label.attach { grid-area: 2 / 3; }
   .composer-foot:has(> .account-chip) > .foot-end { grid-area: 2 / 4; }
 }
+/* narrower, the chip's key goes (it only shows while Ctrl is held; the
+   chip's tooltip names it), so its words keep their room */
+@container (max-width: 46em) { .composer-foot:has(> .account-chip) .model-chip kbd { display: none; } }
 @media (max-width: 760px) {
   .composer-foot:has(> .account-chip) { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); gap: 6px 5px; }
   .composer-foot:has(> .account-chip) > .model-chip { grid-area: 1 / 1; }
