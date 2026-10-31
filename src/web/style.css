@@ -1582,6 +1582,9 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 @container (max-width: 520px) { .composer-foot .tok-chip .tok-n { display: none; } }
 .composer-foot .model-ctx { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 11px; }
 .composer-foot .attach { margin-left: 0; margin-right: 0; flex: none; }
+/* the icon buttons as tall as the chips beside them (28 px; a phone's
+   are taller, below) */
+.composer-foot :where(.attach, .mic, .tok-chip) { min-height: 28px; }
 /* the buttons never give way: the chip and the context do */
 .composer-foot > .foot-end { flex: none; }
 /* A narrow thread (the viewer open beside it) on a wide page: the context
