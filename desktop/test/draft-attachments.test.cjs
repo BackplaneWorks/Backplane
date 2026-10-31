@@ -11,8 +11,8 @@ const modulePromise = import('data:text/javascript;base64,' + Buffer.from(source
 async function cache(records = []) {
   const { DraftAttachments } = await modulePromise;
   const store = Object.create(DraftAttachments.prototype);
-  store.started = new Set();
-  store.restoring = new Set();
+  store.started = new Map();
+  store.restoring = new Map();
   const rows = new Map([['t', records]]);
   store.change = async (thread, update) => { rows.set(thread, update(rows.get(thread) || [])); };
   store.rows = () => rows.get('t') || [];
@@ -69,4 +69,13 @@ test('a refused restore retains its bytes for the next connection', async () => 
   await store.sync('t', [], async () => undefined, () => true);
   assert.equal(store.rows().length, 1);
   assert.equal(store.started.has('t'), false);
+});
+
+test('a fresh actor restores a previously visited thread again', async () => {
+  const store = await cache([{ path: '/old.txt', file: note() }]);
+  let uploads = 0;
+  const upload = async () => { uploads++; return '/restored.txt'; };
+  await store.sync('t', [], upload, () => true, 'actor-1');
+  await store.sync('t', [], upload, () => true, 'actor-2');
+  assert.equal(uploads, 2);
 });

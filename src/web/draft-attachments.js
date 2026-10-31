@@ -2,8 +2,8 @@
 // admission path; saved browser data never supplies attachment authority.
 export class DraftAttachments {
   constructor() {
-    this.started = new Set();
-    this.restoring = new Set();
+    this.started = new Map();
+    this.restoring = new Map();
     this.queue = Promise.resolve();
     this.db = new Promise((resolve, reject) => {
       const request = indexedDB.open('backplane-draft-attachments', 1);
@@ -38,25 +38,25 @@ export class DraftAttachments {
   forget(thread, paths) {
     return this.change(thread, records => records.filter(r => !paths.includes(r.path)));
   }
-  async sync(thread, paths, upload, current) {
-    if (!thread || thread.startsWith('@') || this.restoring.has(thread)) return;
-    if (this.started.has(thread)) return;
-    this.started.add(thread);
-    this.restoring.add(thread);
+  async sync(thread, paths, upload, current, actor = '') {
+    if (!thread || thread.startsWith('@')) return;
+    if (this.started.get(thread) === actor || this.restoring.get(thread) === actor) return;
+    this.started.set(thread, actor);
+    this.restoring.set(thread, actor);
     try {
       let records;
       await this.change(thread, saved => { records = saved; return saved; });
       for (const record of records) {
-        if (!current()) { this.started.delete(thread); return; }
+        if (!current()) { if (this.started.get(thread) === actor) this.started.delete(thread); return; }
         if (!paths.includes(record.path) && !await upload(record.file, record.path)) {
-          this.started.delete(thread);
+          if (this.started.get(thread) === actor) this.started.delete(thread);
           return;
         }
       }
     } catch {
-      this.started.delete(thread);
+      if (this.started.get(thread) === actor) this.started.delete(thread);
     } finally {
-      this.restoring.delete(thread);
+      if (this.restoring.get(thread) === actor) this.restoring.delete(thread);
     }
   }
 }

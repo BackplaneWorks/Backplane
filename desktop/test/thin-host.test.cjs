@@ -810,3 +810,17 @@ test('an intent edit\'s borrowed draft and its mark go with the selected thread\
  f.host.request('settings-page','appearance');const drafts=f.sent.at(-1).p.session.drafts;
  assert.equal(drafts['@intent.draft:A'],'kept 日本語');assert.equal(drafts['@intent.edit:A'],'1');assert.equal(drafts['@intent.draft:B'],undefined);
 });
+
+test('opening a fresh view drops attachment authority inherited from the previous actor', async () => {
+ const f=await fixture({session:()=>({sel:'A',rid:1,drafts:{A:'unsent', '@att:A':'/old.txt','@att.up:A':'old.txt'}})});
+ f.open();
+ assert.equal(f.host.session.drafts['@att:A'],undefined);
+ assert.equal(f.host.session.drafts['@att.up:A'],undefined);
+ assert.equal(f.host.session.drafts.A,'unsent');
+ f.host.session.drafts['@att:A']='/owned.txt';
+ f.host.request('select','B');f.host.receive(f.reply());
+ f.host.request('select','A');
+ const request=f.sent.at(-1),reply=f.reply(request,{session:{...request.p.session,drafts:{A:'unsent','@att:A':'/live.txt'}}});
+ f.host.receive(reply);
+ assert.equal(f.host.session.drafts['@att:A'],'/live.txt');
+});

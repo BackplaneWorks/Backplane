@@ -10,7 +10,9 @@ test('streamed views do not count as the person using the desk',()=>{
   ctx.changed({sel:'B'});assert.equal(checks,1);
 });
 test('only becoming ready reports a new connection, not every ready frame',()=>{
-  let checks=0;const ctx={remoteReady:false,current:()=>true,deskCheck:()=>checks++};
+  const thin={hub:'hub',client:{links:new Map([['hub',{viewId:'view'}]])}};
+  let checks=0;const ctx={remoteReady:false,current:()=>true,deskCheck:()=>checks++,thin,
+    attachmentController:thin,attachmentView:'view',attachmentSelection:'A',currentSession:()=>({sel:'A'})};
   const start=source.indexOf('      state: state => {',source.indexOf('async function startThin(')),end=source.indexOf('        if (!remoteReady)',start);
   const prefix=source.slice(start,end).trim().replace(/^state: /,'');
   vm.createContext(ctx);vm.runInContext('this.state = '+prefix+'}',ctx);

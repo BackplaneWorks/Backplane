@@ -1373,15 +1373,23 @@ function inputValue(el) {
 // pairing cookie carries the token); "attach-up" and "attach-end" tell
 // app.bend it started and what the hub answered, and it decides the rest
 const draftAttachments = new DraftAttachments();
+let attachmentController, attachmentView, attachmentActor, attachmentSelection;
 function draftAttachmentPaths(session, thread) {
   return (session.drafts?.["@att:" + thread] || "").split("\n").filter(Boolean);
 }
 function restoreDraftAttachments(session) {
-  const scope = uploadScope(), thread = session.sel;
-  if (!scope.controller?.ready || scope.thread !== thread || session.drafts?.["@att.up:" + thread]) return;
+  const thread = session.sel, controller = thin, view = controller?.client.links.get(controller.hub)?.viewId;
+  if (!controller?.ready || session.drafts?.["@att.up:" + thread]) return;
+  if (attachmentController !== controller || attachmentView !== view) {
+    attachmentController = controller;attachmentView = view;attachmentActor = {};
+  }
+  attachmentSelection = thread;
+  if (draftAttachments.started.get(thread) === attachmentActor) return;
+  const scope = uploadScope();
   void draftAttachments.sync(thread, draftAttachmentPaths(session, thread),
     (file, previous) => upload("attach", file, scope, previous),
-    () => thin === scope.controller && thin.ready && currentSession().sel === thread).catch(() => {});
+    () => thin === scope.controller && thin.ready && currentSession().sel === thread
+      && thin.epoch === scope.epoch && thin.client.links.get(thin.hub)?.viewId === scope.viewId, attachmentActor).catch(() => {});
 }
 function uploadScope() {
   const controller = viewMode === "compatibility" ? null : thin;
@@ -2645,7 +2653,6 @@ async function startThin(again = false, reason = "initial") {
           ui = App.unsync(App.presentation_handoff(ui, presentationJson(keepDesk(session))));
           document.documentElement.lang = App.lang(ui);
           keepViewer();
-          setTimeout(() => restoreDraftAttachments(currentSession()), 0);
           // A hub action can open a thread too (Ctrl+N, Fork, the palette).
           // Keep the accepted selection as well as explicit sidebar clicks.
           try { localStorage.setItem("backplane-selected", session.sel || ""); } catch {}
@@ -2700,6 +2707,7 @@ async function startThin(again = false, reason = "initial") {
         const becameReady = !remoteReady && state.remoteReady === true;
         remoteReady = state.remoteReady === true;
         if (becameReady) deskCheck();
+        if (remoteReady && (attachmentController !== thin || attachmentView !== thin?.client.links.get(thin.hub)?.viewId || attachmentSelection !== currentSession().sel)) restoreDraftAttachments(currentSession());
         if (!remoteReady) {
           modelFeedback.clear();
           // Keep the last validated tree as a read-only picture. The local Ui

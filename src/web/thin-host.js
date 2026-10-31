@@ -124,6 +124,11 @@ export class ThinHost {
     this.select(this.api.target(this.session));
   }
   select(target) {
+    // A new view may have a fresh actor. Its response alone owns the upload
+    // paths; locally retained bytes are admitted again by the upload helper.
+    const drafts = { ...this.session.drafts };
+    for (const key of Object.keys(drafts)) if (key.startsWith('@att:') || key.startsWith('@att.up:')) delete drafts[key];
+    this.session = { ...this.session, drafts };
     if (this.forView && (this.forView.target.kind !== target?.kind || this.forView.target.id !== target?.id)) this.forView = null;
     this.rememberPage();
     this.restorePage = this.pagePositions.get(JSON.stringify([this.hub, this.epoch, target])) || null;
