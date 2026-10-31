@@ -1889,7 +1889,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
     case 0n: List.concat(&2, J.Json, [[Mob.set.row.l(MSG.T.settings.theme(lc), MSG.T.settings.theme.phone.note(lc), Mob.set.chips.loc(lc, ["dark", "light"], M.Setting.get(st, "ui.theme", ""), "ui.theme"))],
       Mob.lang.rows(lc, u),
       [Mob.set.row.l(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), Mob.set.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view"))]])
-    case 1n: List.concat(&2, J.Json, [[Mob.set.row(Mob.set.days.label.loc(lc, M.Setting.get(st, "settle.days", "3")), MSG.T.settings.settle.note(lc), Mob.set.days(M.Setting.get(st, "settle.days", "3")))],
+    case 1n: List.concat(&2, J.Json, [[Mob.set.row(Mob.set.days.label.loc(lc, M.Setting.get(st, "settle.days", "3")), U.Settings.settle.note(lc, st), Mob.set.days(M.Setting.get(st, "settle.days", "3")))],
       [Mob.set.row(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],
       [Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       Mob.agy.rows(U.Fallbackv.rows(u)),

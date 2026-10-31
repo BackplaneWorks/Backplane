@@ -1568,6 +1568,12 @@ def Settings.viewer.shut(open: Bool, u: Ui) -> Ui:
     case False{}:
       u
 
+def Settings.settle.note.raw(+lc: I.Loc, +raw: String) -> String:
+  Bool.pick(String, Nat.is_eq(M.Switch.num(raw, 0n), 0n), MSG.T.settings.settle.idle.off(lc), MSG.T.settings.settle.note(lc, Nat.show(M.Switch.num(raw, 0n)), Bool.pick(String, Nat.is_eq(M.Switch.num(raw, 0n), 1n), "one", "other")))
+
+def Settings.settle.note(+lc: I.Loc, +st: M.State) -> String:
+  Settings.settle.note.raw(lc, M.Setting.get(st, "settle.idle.minutes", "30"))
+
 def Settings.on(+u: Ui) -> Ui:
   Ui.flag_on(Settings.viewer.shut(Ui.panel(u), u), "settings")
 

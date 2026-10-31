@@ -13557,3 +13557,9 @@ law signal_failed_dot_truthful:
 
 law signal_asked_dot_stays_blocked:
   {SIGREV.Signal.dot.name("blocked", M.Failed{}, 1n) == "blocked" : String}
+
+law settings_settle_names_idle_timer:
+  {String.contains(U.Settings.settle.note.raw(I18.En{}, "30"), "30 idle minutes") == True{} : Bool}
+
+law settings_settle_idle_off_truthful:
+  {String.contains(U.Settings.settle.note.raw(I18.En{}, "0"), "timer is off") == True{} : Bool}

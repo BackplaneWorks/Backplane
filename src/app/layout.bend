@@ -4191,7 +4191,7 @@ def Set.threads(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +b: U32) -> 
   Out.all([
     Set.head(ty, MSG.T.tour.title.threads(Ty.loc(ty)), x, (b + 76 : U32)),
     Set.card(x, (b + 108 : U32), w, 192),
-    Set.row.r(ty, MSG.T.settings.settle(Ty.loc(ty)), MSG.T.settings.settle.note(Ty.loc(ty)), x, (b + 110 : U32), w, 190),
+    Set.row.r(ty, MSG.T.settings.settle(Ty.loc(ty)), U.Settings.settle.note(Ty.loc(ty), st), x, (b + 110 : U32), w, 190),
     Set.days(ty, M.Setting.get(st, "settle.days", "3"), (x + w - 172 : U32), (b + 126 : U32)),
     Set.settle.done(ty, M.Lifecycle.on(st), x, w, (b + 174 : U32)),
     Set.carry(ty, M.Carry.on(st), x, w, (b + 238 : U32)),
