@@ -968,7 +968,11 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .sidebar-tools .machine-pick { background: none; border: 0; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); display: flex; align-items: center; gap: 4px; padding: 12px; }
 .sidebar-tools .machine-pick:hover { color: var(--dim); }
 .sidebar-tools .machines { width: 100%; order: 1; border-top: 1px solid var(--line); }
-.rowmenu { position: fixed; left: var(--mx, 40px); top: var(--my, 80px); z-index: 31; min-width: 200px; background: var(--raise); border: 1px solid var(--line); padding: 4px 0; display: flex; flex-direction: column; }
+/* a row's or a project's menu opens at the pointer (host.js's --mx, --my)
+   and moves up or left by as much as it would pass the window's edge, so
+   every item stays on screen; one taller than the window scrolls */
+.rowmenu { position: fixed; left: var(--mx, 40px); top: var(--my, 80px); z-index: 31; min-width: 200px; max-height: calc(100vh - 16px); overflow-y: auto; background: var(--raise); border: 1px solid var(--line); padding: 4px 0; display: flex; flex-direction: column;
+  transform: translate(min(0px, calc(100vw - var(--mx, 40px) - 100% - 8px)), min(0px, calc(100vh - var(--my, 80px) - 100% - 8px))); }
 .rowmenu .mi { background: none; border: 0; text-align: left; padding: 6px 12px; color: var(--soft, var(--text)); }
 .rowmenu .mi:hover { background: var(--sel, var(--panel)); }
 .rowmenu .mi.danger { color: var(--bad); }
