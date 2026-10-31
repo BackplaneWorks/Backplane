@@ -100,6 +100,9 @@ export function overlayEscape(doc) {
   if (cancel) return () => cancel.click();
   const bot = doc.querySelector?.('.bform [data-on-click="bot-new"]');
   if (bot) return () => bot.click();
+  const room = [...(doc.querySelectorAll?.('.room-view [data-on-click="bfield"]') || [])]
+    .find(button => button.getAttribute('data-value') === 'delroom\u001f' && shown(button));
+  if (room) return () => room.click();
   return null;
 }
 

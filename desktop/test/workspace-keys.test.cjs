@@ -716,3 +716,11 @@ test('Escape presses the bot form existing Cancel control', async () => {
   const doc = { querySelector: q => q.startsWith('.bform ') ? bot : null, querySelectorAll: () => [] };
   overlayEscape(doc)();assert.equal(clicked, true);
 });
+
+test('Escape presses the room deletion existing Cancel control', async () => {
+  const { overlayEscape } = await import('../../src/web/workspace-keys.js');
+  let clicked = false;
+  const room = { getAttribute: () => 'delroom\u001f', getClientRects: () => [{}], click: () => clicked = true };
+  const doc = { querySelector: () => null, querySelectorAll: q => q.startsWith('.room-view ') ? [room] : [] };
+  overlayEscape(doc)();assert.equal(clicked, true);
+});
