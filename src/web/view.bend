@@ -3337,6 +3337,12 @@ def View.workspace.buy(+label: String) -> List<&2, D.Node>:
       List.append(&2, D.Node, [WI.WIcon.svg("shopping-cart", 18), D.Dom.span("workspace-label", U.Fab.rail.word(label))],
         D.Dom.when(Bool.not(String.is_empty(U.Fab.rail.price(label))), D.Dom.span("price", U.Fab.rail.price(label))))}]})
 
+# The top bar replaces the thread header on a desktop, so its restore
+# action belongs beside Buy it in the rail as well.
+def View.workspace.parts(+u: U.Ui) -> List<&2, D.Node>:
+  D.Dom.when(U.Fab.mini.k(U.Fab.min.of(U.Ui.state.of(u), U.Ui.sel(u)), U.Fab.ready.all(u)),
+    D.El{"div", "", [D.At{"class", "workspace-buy"}], [D.Dom.button("parts", "fab-show", "", "Show the Ready to order bar again", "Show parts")]})
+
 # the rail with what goes at its foot (Buy it); a flat bar gets nothing
 def View.workspace.foot(rail: Bool, n: D.Node, foot: List<&2, D.Node>) -> D.Node:
   match rail n:
@@ -3424,7 +3430,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
       +own = Bool.and(View.chrome(u), List.is_empty(&2, D.Node, hd))
       View.thread.frame(View.rail(u), [D.At{"class", Bool.pick(String, View.rail(u), Bool.pick(String, term, "thread-view workspace-thread with-term", "thread-view workspace-thread"), Bool.pick(String, term, "thread-view with-term", "thread-view")) ++ Bool.pick(String, U.Flag.get(op, "drop"), " dropping", "")},
         D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
-        View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Rail.tab.of(panel, U.Str.get(nf, "view.kind:" ++ id), U.Str.get(nf, "view.path:" ++ id)), panel, term, U.Flag.get(op, "palette")), View.workspace.buy(U.Fab.rail(u))), List.concat(&2, D.Node, [
+        View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Rail.tab.of(panel, U.Str.get(nf, "view.kind:" ++ id), U.Str.get(nf, "view.path:" ++ id)), panel, term, U.Flag.get(op, "palette")), List.append(&2, D.Node, View.workspace.buy(U.Fab.rail(u)), View.workspace.parts(u))), List.concat(&2, D.Node, [
         View.top.own(own, View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.Tour.kn(u, U.KN.thread(nf, st, sel)), True{}),
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, View.running(turn)),

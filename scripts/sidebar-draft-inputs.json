@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "fa08c7ad814ee64b99834eed57d1937581ba94b7756932b0d9d77c93b207b62b"
+    "src/web/view.bend": "5c45f7660067ae3048833671886a216ed579f3a192168114e24388bc764e9871"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "c14-3: Open one buy thread for a rapid repeat; sidebar draft composition unchanged"
+  "reviewNote": "c14-1: Restore the Ready bar from the tool rail; sidebar draft composition unchanged"
 }

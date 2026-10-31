@@ -412,6 +412,8 @@ local estimate service: the part list and unpriced Buy stay, with an explanation
 and Retry; restore the service and Retry to recover the price. An empty fab
 object names the invalid file and what is missing instead of hiding Buy.
 Malformed fab JSON also names the bad file rather than calling the board ready.
+Dismiss the Ready bar, then Show parts in the rail restores it, including after
+reload.
 
 **S49 Every board kind priced** (W D)
 Like S38, against a local order server (never the real one) with Ordering
