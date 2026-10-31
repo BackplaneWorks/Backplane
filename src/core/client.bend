@@ -3730,7 +3730,7 @@ def Made.rid(u: Ui) -> Nat:
 
 # the next request is one that makes a thread
 def Made.want(+u: Ui) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(u, "@want.new", Nat.show(Made.rid(u))), "@want.new.at", Made.at(u))
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@want.viewer", ""), "@want.new", Nat.show(Made.rid(u))), "@want.new.at", Made.at(u))
 
 def Ui.new_thread.project(u: Ui, +pid: String) -> Act:
   Ui.rpc(Made.want(u), "thread.create", [J.KV{"project", J.Str{pid}}, J.KV{"title", J.Str{"New thread"}}])
@@ -3741,13 +3741,6 @@ def Ui.new_thread.project(u: Ui, +pid: String) -> Act:
 # the selected one)
 def Ui.fork.of(+u: Ui, +value: String) -> String:
   Bool.pick(String, String.is_empty(value), Ui.sel(u), value)
-
-def Ui.fork.with(+u: Ui, +value: String) -> Act:
-  Ui.rpc(Made.want(u), "thread.fork", [J.KV{"thread", J.Str{Ui.fork.of(u, value)}}])
-
-# The original selected-thread operation remains valid for existing callers.
-def Ui.fork(u: Ui) -> Act:
-  Ui.fork.with(u, "")
 
 # State put back from a cache (a page's saved log, a phone's saved state)
 # is not this connection's: only a live log sets "@sync" again (Ui.reset),
@@ -7154,13 +7147,15 @@ def Solid.sync(a: Act) -> Act:
 def Viewer.live(+path: String) -> String:
   Bool.pick(String, Nat.is_eq(HI.Hist.kind(path), 0n), path, "")
 
-def Viewer.keep(+u: Ui) -> String:
-  +th = Ui.sel(u)
+def Viewer.record(+u: Ui, +th: String) -> String:
   J.Json.show(J.Json.obj([J.KV{"open", J.Str{Bool.pick(String, String.eq(Ui.sel(u), th), Viewer.flag(Ui.panel(u)), Ui.info(u, "panel:" ++ th))}},
     J.KV{"thread", J.Str{th}}, J.KV{"root", J.Str{Ui.root.here(Ui.state(u), th)}}, J.KV{"kind", J.Str{Ui.info(u, "view.kind:" ++ th)}},
     J.KV{"path", J.Str{Viewer.live(Ui.info(u, "view.path:" ++ th))}},
     J.KV{"design", J.Str{Viewer.live(Ui.info(u, "view.design:" ++ th))}}, J.KV{"tree", J.Str{Viewer.live(Ui.info(u, "view.tree:" ++ th))}}, J.KV{"drawingSheet", J.Str{Viewer.live(Ui.info(u, "view.sheet:" ++ th))}},
     J.KV{"sheet", J.Str{Ui.scratch(u, "@sch:" ++ th)}}, J.KV{"split", J.Str{Ui.scratch(u, "@split.sheet:" ++ th)}}]))
+
+def Viewer.keep(+u: Ui) -> String:
+  Viewer.record(u, Ui.sel(u))
 
 def Viewer.restore.k(some: Bool, +u: Ui, +th: String, +o: J.Json) -> Ui:
   match some:
@@ -7178,6 +7173,29 @@ def Viewer.restore.k(some: Bool, +u: Ui, +th: String, +o: J.Json) -> Ui:
 def Viewer.restore(+u: Ui, +th: String, +text: String) -> Ui:
   +o = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
   Viewer.restore.k(Bool.and(Bool.not(String.is_empty(th)), Maybe.is_some(&2, J.Json, J.Json.get(o, "open"))), u, th, o)
+
+# A fork takes a snapshot at the press, including a row menu's source.
+# A failed or superseded creation never applies that snapshot elsewhere.
+def Ui.fork.with(+u: Ui, +value: String) -> Act:
+  Ui.rpc(Ui.scratch_set(Made.want(u), "@want.viewer", Viewer.record(u, Ui.fork.of(u, value))), "thread.fork", [J.KV{"thread", J.Str{Ui.fork.of(u, value)}}])
+
+def Ui.fork(u: Ui) -> Act:
+  Ui.fork.with(u, "")
+
+def Viewer.fork.path(+path: String, +old: String, +root: String) -> String:
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(root)), Bool.and(Bool.not(String.is_empty(old)), String.starts_with(path, old ++ "/"))), root ++ String.drop(path, String.length(old)), path)
+
+def Viewer.fork(+u: Ui, +th: String, +o: J.Json) -> Ui:
+  +old = J.Json.get_str(o, "root", "")
+  +root = Ui.root.here(Ui.state(u), th)
+  Ui.scratch_set(Viewer.restore.k(Maybe.is_some(&2, J.Json, J.Json.get(o, "open")), u, th,
+    J.Json.obj([J.KV{"open", J.Str{J.Json.get_str(o, "open", "")}}, J.KV{"kind", J.Str{J.Json.get_str(o, "kind", "")}},
+      J.KV{"path", J.Str{Viewer.fork.path(J.Json.get_str(o, "path", ""), old, root)}},
+      J.KV{"design", J.Str{Viewer.fork.path(J.Json.get_str(o, "design", ""), old, root)}},
+      J.KV{"tree", J.Str{Viewer.fork.path(J.Json.get_str(o, "tree", ""), old, root)}},
+      J.KV{"drawingSheet", J.Str{Viewer.fork.path(J.Json.get_str(o, "drawingSheet", ""), old, root)}},
+      J.KV{"sheet", J.Str{J.Json.get_str(o, "sheet", "")}},
+      J.KV{"split", J.Str{Viewer.fork.path(J.Json.get_str(o, "split", ""), old, root)}}])), "@viewer.fork:" ++ th, J.Json.get_str(o, "thread", ""))
 
 # what the page says under its parts: where to get FreeCAD when the hub
 # has none, else nothing
@@ -11012,11 +11030,17 @@ def Made.got(go: Bool, u: Ui, +th: String) -> Ui:
     case False{}:
       u
 
+def Made.viewer(copy: Bool, +u: Ui, +th: String) -> Ui:
+  match copy:
+    case True{}: Viewer.fork(u, th, Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@want.viewer")), J.Null{}))
+    case False{}: u
+
 def Made.take(mine: Bool, +o: J.Json, +u: Ui) -> Ui:
   match mine:
     case True{}:
-      Made.got(Bool.and(Bool.and(J.Json.get_bool(o, "ok", False{}), Bool.not(String.is_empty(J.Json.get_str(o, "thread", "")))), String.eq(Ui.scratch(u, "@want.new.at"), Made.at(u))),
-        Ui.scratch_set(Ui.scratch_set(u, "@want.new", ""), "@want.new.at", ""), J.Json.get_str(o, "thread", ""))
+      +go = Bool.and(Bool.and(J.Json.get_bool(o, "ok", False{}), Bool.not(String.is_empty(J.Json.get_str(o, "thread", "")))), String.eq(Ui.scratch(u, "@want.new.at"), Made.at(u)))
+      Made.got(go,
+        Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Made.viewer(go, u, J.Json.get_str(o, "thread", "")), "@want.viewer", ""), "@want.new", ""), "@want.new.at", ""), J.Json.get_str(o, "thread", ""))
     case False{}:
       u
 

@@ -13662,6 +13662,11 @@ law viewer_report_keeps_board:
 law viewer_part_keeps_board:
   {U.Str.get(U.Viewer.put(U.Viewer.put(Map.new(&2, String), "t", "board", "/r/beta.kicad_pcb"), "t", "3d", "/r/part.step"), "view.design:t") == "/r/beta.kicad_pcb" : String}
 
+law fork_drawing_follows_worktree:
+  {U.Viewer.fork.path("/old/boards/beta/power.kicad_sch", "/old", "/new") == "/new/boards/beta/power.kicad_sch" : String}
+law fork_report_is_not_a_file:
+  {U.Viewer.fork.path("bom", "/old", "/new") == "bom" : String}
+
 law viewer_wire_empty_target_unchanged:
   {PRESENTVIEW.Session.viewer_input(U.Ui.init(0n), J.Json.obj(Nil{})) == J.Json.obj(Nil{}) : J.Json}
 
