@@ -1779,8 +1779,14 @@ document.addEventListener("keydown", (e) => {
   }
   const act = App.tour_key(e.key);
   const onButton = document.activeElement instanceof HTMLButtonElement && tour.contains(document.activeElement);
-  // Enter or Space on a focused button is that button's (the click does it)
-  if (onButton && (e.key === "Enter" || e.key === " ")) {
+  // The tour drops keypress below, which also cancels Enter's native
+  // button click. Press it here once; Space still clicks on release.
+  if (onButton && e.key === "Enter") {
+    e.preventDefault();
+    if (!e.repeat) document.activeElement.click();
+    return;
+  }
+  if (onButton && e.key === " ") {
     if (e.repeat) e.preventDefault();
     return;
   }
