@@ -13937,3 +13937,6 @@ def Laws.settings_settle_names_idle_timer():
 
 def Laws.settings_settle_idle_off_truthful():
   {==}
+
+def Laws.estimate_snapshot_is_explicit():
+  {==}

@@ -13563,3 +13563,6 @@ law settings_settle_names_idle_timer:
 
 law settings_settle_idle_off_truthful:
   {String.contains(U.Settings.settle.note.raw(I18.En{}, "0"), "timer is off") == True{} : Bool}
+
+law estimate_snapshot_is_explicit:
+  {ORD.Estimate.snapshot("from $5.00") == "last estimate: from $5.00" : String}

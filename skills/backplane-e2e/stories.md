@@ -422,10 +422,12 @@ on: give the project fab files of other board kinds beside a rigid one, e.g.
 `{"kind": "flex", "options": {"layers": 2, "stiffener": "polyimide_0.2"}}`
 and `{"kind": "aluminum"}` with their measured features. The Ready to order
 bar names every part, wrapping so every name is readable at 760 px, and
-Buy it shows one "from $X" for all of them; the
+Buy it labels the price as the last estimate for all of them; the
 server's estimate prices each with no problems. Give one part invalid options,
 or include more parts than the server returns: its missing estimate is named
-and the partial sum is withheld. A flex board asked to be
+and the partial sum is withheld. Edit a fab file's dimensions while the project
+stays open: Refresh estimate reads the current files and updates both prices;
+repeat after restoring the dimensions. A flex board asked to be
 assembled is refused (only rigid `pcb` boards are). A quote upload approval
 with one file says "Send 1 file"; several files use "files".
 

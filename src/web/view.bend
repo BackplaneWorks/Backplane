@@ -3141,7 +3141,7 @@ def View.asks.u(+lc: I.Loc, u: U.Ui) -> D.Node:
 
 # Buy it with its price (client.bend's Fab.*, core/order.bend)
 def View.fab.buy.tip() -> String:
-  "Order this project's parts in a thread that asks what's missing, exports the files and quotes them. The price is the bare parts at the smallest order; the quote adds assembly, components, shipping and duties."
+  "Order this project's parts in a thread that asks what's missing, exports the files and quotes them. The price is the bare parts at the smallest order; the quote adds assembly, components, shipping and duties. The estimate is from the last check: use Refresh estimate after changing the fab files."
 
 def View.fab.buy(+label: String) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.is_empty(label), Nil{}, [D.Dom.button("fab-buy", "buy", "", View.fab.buy.tip(), label)])
@@ -3187,7 +3187,7 @@ def View.intent(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 # (U.Fab.ready), once the agent's turn is over; it glows as it comes
 def View.ready.r(+line: String, +buy: String, rail: Bool) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.is_empty(line), Nil{},
-    [D.El{"div", "ready", [D.At{"class", "fab-ready"}], D.Dom.cat([D.Dom.span("fab-ready-text", line)], List.append(&2, D.Node, List.append(&2, D.Node, View.fab.buy(buy), D.Dom.when(String.starts_with(line, "Estimate unavailable:"), D.Dom.button("", "fab-refresh", "", "Try the estimate again", "Retry"))),
+    [D.El{"div", "ready", [D.At{"class", "fab-ready"}], D.Dom.cat([D.Dom.span("fab-ready-text", line)], List.append(&2, D.Node, List.append(&2, D.Node, View.fab.buy(buy), D.Dom.when(Bool.or(String.starts_with(line, "Estimate unavailable:"), Bool.or(String.contains(buy, "last estimate:"), String.contains(buy, "estimate incomplete"))), D.Dom.button("", "fab-refresh", "", "Check the current fab files and refresh the estimate", Bool.pick(String, String.starts_with(line, "Estimate unavailable:"), "Retry", "Refresh estimate")))),
       [D.Dom.button("fab-x", "fab-hide", "", Bool.pick(String, rail, "Put this away: Buy it stays in the tool rail", "Put this away: Buy it stays in the thread's header"), "×")]))}])
 
 def View.ready.k(+line: String, +buy: String) -> List<&2, D.Node>:

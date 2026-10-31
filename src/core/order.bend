@@ -375,6 +375,11 @@ def Estimate.validation(ps: List<&2, J.Json>) -> String:
 def Estimate.note(+ps: List<&2, J.Json>, +est: J.Json, on: Bool) -> String:
   Estimate.join(Estimate.validation(ps), Bool.pick(String, Bool.and(on, String.is_empty(J.Json.get_str(est, "error", ""))), Estimate.problems(ps, J.Json.elems(J.Json.get_obj(est, "parts"))), ""))
 
+# A cached number describes the files at the last check. Refresh is explicit
+# because a person or another program can edit those files between turns.
+def Estimate.snapshot(+label: String) -> String:
+  Bool.pick(String, String.starts_with(label, "from "), "last estimate: " ++ label, label)
+
 def Estimate.label(+label: String, +note: String) -> String:
   Bool.pick(String, String.is_empty(note), label, "estimate incomplete")
 
