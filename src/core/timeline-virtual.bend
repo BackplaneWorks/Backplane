@@ -322,14 +322,22 @@ def Layout.total(n: Nat, +start: Px) -> Px:
 def Layout.advance(+size: Px, +start: Px) -> Px:
   Bool.pick(Px, Px.le(size, Px.zero()), start, Px.add(Px.add(start, size), Px.int(10n)))
 
-def Layout.make(keys: List<&2, J.Json>, sizes: Map<&2, String>, +n: Nat, +start: Px, acc: List<&2, Item>) -> Layout:
+# A row not measured yet takes the estimate: the mean of the rows measured
+# so far (the adapter's "estimate"), else 120. A flat 120 for every row of a
+# page put in above made the track shrink row by row as they were measured
+# (most rows are tool drawers and stamps far under it), so the scroll thumb
+# moved at every page while the reader scrolled.
+def Layout.make(keys: List<&2, J.Json>, sizes: Map<&2, String>, +est: String, +n: Nat, +start: Px, acc: List<&2, Item>) -> Layout:
   match keys:
     case Nil{}: Layout{List.reverse(&2, Item, acc), Layout.total(n, start)}
     case +j <> t:
       +key = J.Json.as_str(Some{j}, "")
-      +reply = Sizes.reply(Map.get(String, "120", sizes, key))
+      +reply = Sizes.reply(Map.get(String, est, sizes, key))
       +size = Px.max(Px.zero(), Px.read(Sizes.return.value(reply)))
-      Layout.make(t, Sizes.return.map(reply), 1n+n, Layout.advance(size, start), Item{key, n, start, size} <> acc)
+      Layout.make(t, Sizes.return.map(reply), est, 1n+n, Layout.advance(size, start), Item{key, n, start, size} <> acc)
+
+def Layout.estimate(+input: J.Json) -> String:
+  Px.show(Px.max(Px.int(1n), Px.get(input, "estimate", "120")))
 
 def End.top(total: Px, view: Px) -> Px: Px.max(Px.zero(), Px.sub(total, view))
 
@@ -465,7 +473,7 @@ def Plan.readback(+input: J.Json) -> J.Json:
 def Plan.mode(readback: Bool, +input: J.Json) -> J.Json:
   match readback:
     case True{}: Plan.readback(input)
-    case False{}: Plan.layout(Layout.make(J.Json.elems(J.Json.get_obj(input, "keys")), Sizes.map(J.Json.get_obj(input, "sizes")), 0n, Px.int(16n), Nil{}), input)
+    case False{}: Plan.layout(Layout.make(J.Json.elems(J.Json.get_obj(input, "keys")), Sizes.map(J.Json.get_obj(input, "sizes")), Layout.estimate(input), 0n, Px.int(16n), Nil{}), input)
 
 def plan(+input: J.Json) -> J.Json:
   Plan.mode(String.eq(J.Json.get_str(input, "mode", "update"), "readback"), input)

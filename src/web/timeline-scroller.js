@@ -104,6 +104,14 @@ export class TimelineScroller {
     return changed;
   }
 
+  // The mean measured row, whole pixels, for rows not measured yet (Bend's
+  // Layout.estimate); 120 until a row is measured.
+  _estimate() {
+    let sum = 0, n = 0;
+    for (const key of this._keys) { const h = this.sizes[key]; if (h > 0) { sum += h;n++; } }
+    return n ? Math.max(1, Math.round(sum / n)) : 120;
+  }
+
   _request(mode, extra = {}, preservePending = false) {
     if (this._destroyed) return;
     if (!preservePending || !this._pending) this._pending = { mode, ...extra };
@@ -119,7 +127,7 @@ export class TimelineScroller {
         // Report the triggering operation, not a subsequent measurement pass.
         changeMode ??= request.mode;
         const plan = this.callbacks.plan({
-          keys: this._keys.slice(), sizes: { ...this.sizes },
+          keys: this._keys.slice(), sizes: { ...this.sizes }, estimate: this._estimate(),
           previous: this.lastPlan, top: this.el.scrollTop,
           view: this.el.clientHeight, follow: this._follow, ...request,
         });
