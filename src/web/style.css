@@ -2076,3 +2076,6 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .app.top:not(.picked) > main.empty:has(.kicad-notice) { grid-area: notice; }
   .app:not(.picked) > main.empty .kicad-notice { margin: 0; }
 }
+
+.tour-example { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tour-example > span { border: 1px solid var(--line); background: var(--raise); color: var(--text); padding: 3px 9px; }

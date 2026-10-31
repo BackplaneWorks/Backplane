@@ -13584,3 +13584,11 @@ law search_hides_design_history:
 law project_blank_filter_keeps:
   for rs: List<&2, U.SRow>
   {U.Find.rows(rs, "   ") == rs : List<&2, U.SRow>}
+
+# Found by e2e c1-1.
+law tour_preview_other_steps_keep_selection:
+  for u: U.Ui
+  {U.Tour.preview(0n, u) == u : U.Ui}
+
+law tour_tools_examples_visible:
+  {U.Tour.example(3n) == True{} : Bool}

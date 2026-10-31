@@ -12392,6 +12392,19 @@ def Tour.finish(+u: Ui) -> Act:
 def Tour.raw(manual: Bool, +i: Nat) -> String:
   Bool.pick(String, manual, "m", "") ++ Bool.pick(String, Nat.is_eq(i, OB.Ob.share()), "s", "") ++ Nat.show(i)
 
+# The thread-tools step needs a real header. On a fresh welcome screen,
+# select an existing thread; the tour never creates or starts one.
+def Tour.preview.k(pick: Bool, +u: Ui) -> Ui:
+  match pick:
+    case False{}: u
+    case True{}: Ui.reselect(Ui.sel(u), Ui.select.nav(u, Side.first(Side.visible.projects(u))))
+
+def Tour.example(i: Nat) -> Bool:
+  Nat.is_eq(i, 3n)
+
+def Tour.preview(+i: Nat, +u: Ui) -> Ui:
+  Tour.preview.k(Bool.and(Nat.is_eq(i, 3n), String.is_empty(Ui.sel(u))), u)
+
 def Tour.go.k(live: Bool, +i: Nat, +u: Ui) -> Act:
   match live:
     case True{}:
@@ -12400,7 +12413,7 @@ def Tour.go.k(live: Bool, +i: Nat, +u: Ui) -> Act:
       Tour.finish(u)
 
 def Tour.go(+i: Nat, +u: Ui) -> Act:
-  Tour.go.k(OB.Ob.live(i), i, u)
+  Tour.go.k(OB.Ob.live(i), i, Tour.preview(i, u))
 
 def Tour.open.k(+u: Ui) -> Act:
   Tour.leave(Act{Ui.scratch_set(Ui.scratch_set(u, "@tour", OB.Ob.raw(True{}, 0n)), "@tour.sc", ""), Nil{}}, Tour.focus(u))

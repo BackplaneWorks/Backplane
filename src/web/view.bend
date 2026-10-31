@@ -4650,12 +4650,25 @@ def View.tour.back.loc(+lc: I.Loc, on: Bool) -> D.Node:
 def View.tour.back(on: Bool) -> D.Node:
   View.tour.back.loc(I.En{}, on)
 
-def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, cs: List<&2, U.TChoice>, +counter: String, back: Bool, fwd: String) -> List<&2, D.Node>:
+# The compact header keeps these tools inside a menu. Show their labels
+# in the card so the step also makes sense before there is a thread.
+def View.tour.example.tool(t: TO.Tool) -> D.Node:
+  D.El{"span", "", Nil{}, [D.Txt{TO.Tools.label(t)}]}
+
+def View.tour.example(show: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match show:
+    case False{}: Nil{}
+    case True{}:
+      [D.El{"span", "", [D.At{"class", "tour-example"}, D.At{"aria-label", OB.Ob.title(lc, 3n)}],
+        [View.tour.example.tool(TO.Tools.settle.loc(lc, False{})), View.tour.example.tool(TO.Tools.snooze.loc(lc, False{}, "", "")),
+         View.tour.example.tool(TO.Tools.fork.loc(lc)), View.tour.example.tool(TO.Tools.panel.loc(lc, False{}))]}]
+
+def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, example: List<&2, D.Node>, cs: List<&2, U.TChoice>, +counter: String, back: Bool, fwd: String) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "tour-back"}], Nil{}},
     D.El{"div", "tour", [D.At{"class", "tour"}, D.At{"role", "dialog"}, D.At{"aria-modal", "true"}, D.At{"aria-labelledby", "tour-title"}], [
       D.Dom.span("count", counter),
       D.El{"div", "tour-title", [D.At{"class", "tour-title"}, D.At{"id", "tour-title"}], [D.Txt{OB.Ob.title(lc, i)}]},
-      D.El{"p", "", [D.At{"class", "tour-body"}], [D.Txt{body}]},
+      D.El{"p", "", [D.At{"class", "tour-body"}], D.Txt{body} <> example},
       D.El{"div", "", [D.At{"class", "tour-choices"}], View.tour.choices(cs)},
       D.El{"div", "", [D.At{"class", "tour-btns"}], [
         D.Dom.button("", "ob-skip", "", MSG.T.tour.end.tip(lc), MSG.T.tour.skip(lc)),
@@ -4666,7 +4679,7 @@ def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, cs: List<&2, U.TChoice>, 
 def View.tour.k(+lc: I.Loc, on: Bool, +i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case True{}:
-      View.tour.card(lc, i, U.Tour.body.loc(lc, 1n, u), U.Tour.choices(u), U.Tour.counter.loc(lc, u), U.Tour.back(u), U.Tour.forward(u))
+      View.tour.card(lc, i, U.Tour.body.loc(lc, 1n, u), View.tour.example(U.Tour.example(i), lc), U.Tour.choices(u), U.Tour.counter.loc(lc, u), U.Tour.back(u), U.Tour.forward(u))
     case False{}:
       Nil{}
 

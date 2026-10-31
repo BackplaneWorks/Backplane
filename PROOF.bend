@@ -13961,3 +13961,11 @@ def Laws.project_blank_filter_keeps(rs):
       %Equal.sym(Bool, Nat.is_gt(FZ.Fuzzy.score(ti, ""), 0n), True{}, Laws.fuzzy_empty_matches(ti)) : {U.Find.keep(_, U.SRow{r, M.Project{id, ti, ro, c, rm}, sh}, U.Find.rows(t, "   ")) == U.SRow{r, M.Project{id, ti, ro, c, rm}, sh} <> t : List<&2, U.SRow>}
       %Equal.sym(List<&2, U.SRow>, U.Find.rows(t, "   "), t, Laws.project_blank_filter_keeps(t)) : {U.SRow{r, M.Project{id, ti, ro, c, rm}, sh} <> _ == U.SRow{r, M.Project{id, ti, ro, c, rm}, sh} <> t : List<&2, U.SRow>}
       {==}
+
+# Found by e2e c1-1.
+
+def Laws.tour_preview_other_steps_keep_selection(u):
+  {==}
+
+def Laws.tour_tools_examples_visible():
+  {==}
