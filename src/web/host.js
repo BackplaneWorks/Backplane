@@ -2676,10 +2676,16 @@ watchWake(window, document, why => {
   if (thinRetry.pending) { thinBackoff.reset();thinRetry.wake(); }
 });
 
-setInterval(() => {
+function clockTick() {
   ui = App.tick(ui, now());
+  if (viewMode !== "compatibility") {
+    if (!document.hidden && remoteReady) thin?.update();
+    return;
+  }
   later();
-}, 30000);
+}
+setInterval(clockTick, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) clockTick(); });
 
 render();
 pairingReady.then(paired => {
