@@ -13463,3 +13463,7 @@ law recurring_invalid_interval_help:
 # Regression for c13-8.
 law routine_delete_first_press_preserves:
   {U.Bots.routine.armed(U.Bots.bfield(U.Ui.init(0n), "delroutine\u{1f}routine"), "routine") == True{} : Bool}
+
+# Regression for c13-3.
+law bot_navigation_restores_tab:
+  {U.Ui.scratch(U.Bots.navigation.restore(U.Ui.init(0n), J.Json.obj([J.KV{"bot", J.Str{"bot"}}, J.KV{"tab", J.Str{"settings"}}])), "@btab") == "settings" : String}

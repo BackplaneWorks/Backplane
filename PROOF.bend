@@ -13862,3 +13862,6 @@ def Laws.recurring_invalid_interval_help():
 
 def Laws.routine_delete_first_press_preserves():
   {==}
+
+def Laws.bot_navigation_restores_tab():
+  {==}

@@ -7984,6 +7984,15 @@ def Bots.select.k(m: Maybe<&2, BT.Bot>, +u: Ui) -> Act:
 def Bots.select(+u: Ui, +id: String) -> Act:
   Bots.select.k(BT.World.find.id(BT.World.bot(M.State.bots(Ui.state.of(u)), id)), u)
 
+# The host keeps this small navigation record across a reload.
+def Bots.navigation(+o: J.Json) -> String:
+  +dr = J.Json.get_obj(o, "drafts")
+  J.Json.show(J.Json.obj([J.KV{"sel", J.Str{J.Json.get_str(o, "sel", "")}}, J.KV{"bot", J.Str{J.Json.get_str(dr, "@bot", "")}},
+    J.KV{"room", J.Str{J.Json.get_str(dr, "@room", "")}}, J.KV{"remote", J.Str{J.Json.get_str(dr, "@remote", "")}}, J.KV{"tab", J.Str{J.Json.get_str(dr, "@btab", "")}}]))
+
+def Bots.navigation.restore(+u: Ui, +o: J.Json) -> Ui:
+  Ui.scratch_set(Bots.views(Ui.reselect(Ui.sel(u), Ui.select.nav(u, J.Json.get_str(o, "sel", ""))), J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "room", ""), J.Json.get_str(o, "remote", "")), "@btab", J.Json.get_str(o, "tab", ""))
+
 # Rooms seen: the setting room.seen.<room> is the time (seconds) the person
 # last opened it; its unread posts are those after it that they did not
 # write (a room never opened: those of the last day, not its whole past).

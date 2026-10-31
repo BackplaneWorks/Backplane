@@ -228,6 +228,12 @@ def presentation_handoff(u: U.Ui, session: J.Json) -> U.Ui:
 def presentation_reply(session: J.Json, reply: J.Json) -> J.Json:
   PS.Session.reply(session, reply)
 
+def navigation_keep(session: J.Json) -> String:
+  U.Bots.navigation(session)
+
+def navigation_restore(u: U.Ui, text: String) -> U.Ui:
+  U.Bots.navigation.restore(u, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
+
 def presentation_json(text: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
 

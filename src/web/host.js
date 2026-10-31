@@ -62,6 +62,7 @@ import { refreshCacheIdentity } from "./cache-identity.js";
 import { discoverViews } from "./thin-discovery.js";
 import { Backoff, Retry, watchWake, probeHub, bundleOf, styleOf, deployed, QUIET_MS } from "./reconnect.js";
 import { ThinHost, preservePresentationRoute, presentationTarget, refusedFallback } from "./thin-host.js";
+import { compactRoute } from "./thin.js";
 import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
 const modelFeedback = new ModelFeedback(() => later());
@@ -473,6 +474,15 @@ try {
   const selected = localStorage.getItem("backplane-selected");
   if (selected) ui = App.presentation_select(ui, selected);
 } catch {}
+let navigationRestoreRoute = null;
+try {
+  const saved = localStorage.getItem("backplane-navigation");
+  if (saved) {
+    ui = App.navigation_restore(ui, saved);
+    const choice = JSON.parse(saved);
+    navigationRestoreRoute = compactRoute({ kind: "bot-tab", bot: choice.bot, tab: choice.tab });
+  }
+} catch {}
 // Reload keeps the Settings category, never any fields edited on that page.
 let settingsRestorePage = null;
 try {
@@ -486,6 +496,7 @@ try {
 window.addEventListener("pagehide", () => {
   const session = currentSession();
   try {
+    localStorage.setItem("backplane-navigation", App.navigation_keep(App.presentation_json(JSON.stringify(session))));
     if (session.open?.settings) localStorage.setItem("backplane-settings", JSON.stringify({ page: session.drafts?.["@settings.page"] || "" }));
     else localStorage.removeItem("backplane-settings");
   } catch {}
@@ -554,7 +565,9 @@ const terminalOutput = new TerminalOutputPane({ document, patch, current: () => 
   return remoteReady && link ? { generation: link.greeting.generation, epoch: link.greeting.epoch, viewId: link.viewId, target: link.target, owner: session.drafts?.['@terminal.owner'], open: session.open?.term === true } : null;
 } });
 const focusedStore = new FocusedCache({ indexedDB, report: (state, reason) => trace("focused-cache", { state, reason }) });
-function currentSession() { return thinSession || frontend?.session || fallbackIntent?.session || Wire.plain(App.presentation(ui)); }
+function currentSession() {
+  return thinSession || frontend?.session || fallbackIntent?.session || { ...Wire.plain(App.presentation(ui)), ...(navigationRestoreRoute ? { route: navigationRestoreRoute } : {}) };
+}
 function focusedScope() {
   return { origin: location.origin, cid, identity: cacheIdentity(document.cookie), bundle: import.meta.url,
     language: App.lang(ui), selected: currentSession().sel };
