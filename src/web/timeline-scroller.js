@@ -96,7 +96,10 @@ export class TimelineScroller {
       // In particular, do not restore a completed stream's retired size.
       if (!this._byKey.has(key)) continue;
       const height = wrapper.getBoundingClientRect().height;
-      if (this.sizes[key] !== height) {
+      const previous = this.sizes[key];
+      // Translated DOMRects can jitter by tiny fractions of a CSS pixel.
+      // Do not keep the synchronous measurement loop alive for rounding noise.
+      if (previous === undefined || Math.abs(previous - height) > 0.001) {
         this.sizes[key] = height;
         changed = true;
       }
