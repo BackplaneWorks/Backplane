@@ -1360,3 +1360,7 @@ bots.name.rule = 1–24 letters, digits, - or _.
 bots.name.taken = That bot name is already taken.
 
 apikeys.replace = {name} already exists. Click Save again to replace it.
+
+sched.help.interval = Use a positive interval: every 15m or every 2h.
+sched.help.cron = Use five cron fields: minute (0–59), hour (0–23), day (1–31), month (1–12), weekday (0–7). Example: 0 9 * * *.
+sched.help.minute = Cron minutes must be 0–59, with a positive step. Example: */15 * * * *.

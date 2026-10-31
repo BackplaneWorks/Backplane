@@ -13455,3 +13455,7 @@ law key_long_name_refused:
 # Regression for c12-1.
 law key_normalization_refused:
   {AK.Keys.bad("NOT A KEY!?", "fake") == "Use the environment variable name: NOT_A_KEY__" : String}
+
+# Regression for c13-7.
+law recurring_invalid_interval_help:
+  {SCH.Sched.hint.k(I18.En{}, False{}, "every 0m", TZ.Tz.utc0(), 0n) == "Use a positive interval: every 15m or every 2h." : String}

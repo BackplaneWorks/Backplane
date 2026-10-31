@@ -1383,3 +1383,7 @@ bots.name.rule = 1〜24文字の英数字、-、_。
 bots.name.taken = このボット名は既に使われています。
 
 apikeys.replace = {name} は既に存在します。置き換えるにはもう一度保存してください。
+
+sched.help.interval = 正の間隔を指定してください: every 15m、every 2h。
+sched.help.cron = cronは分 (0–59)、時 (0–23)、日 (1–31)、月 (1–12)、曜日 (0–7) の5項目です。例: 0 9 * * *。
+sched.help.minute = cronの分は0〜59、間隔は正の数です。例: */15 * * * *。

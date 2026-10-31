@@ -592,12 +592,25 @@ def Sched.hint.once(+l: I.Loc, m: Maybe<&2, Nat>, rule: TZ.TzRule, blank: Bool) 
     case None{}:
       Bool.pick(String, blank, "", MSG.T.sched.help.time(l))
 
+# Keep malformed recurring input in its own syntax help instead of falling
+# through to the one-time parser's examples.
+def Sched.hint.fields(+l: I.Loc, fs: List<&2, String>) -> String:
+  match fs:
+    case +mi <> _ <> _ <> _ <> _ <> Nil{}:
+      Bool.pick(String, BT.Maybe.is(List<&2, CR.CRng>, CR.Cron.rngs(mi, 0n, 59n, Nil{}, 0n)), MSG.T.sched.help.cron(l), MSG.T.sched.help.minute(l))
+    case _: MSG.T.sched.help.cron(l)
+
+def Sched.hint.invalid(+l: I.Loc, +text: String, +rule: TZ.TzRule, +now: Nat) -> String:
+  Bool.pick(String, String.starts_with(String.to_lower(String.trim(text)), "every "), MSG.T.sched.help.interval(l),
+    Bool.pick(String, Nat.is_eq(List.length(&2, String, CR.Cron.words(text)), 5n), Sched.hint.fields(l, CR.Cron.words(text)),
+      Sched.hint.once(l, WH.When.parse(text, now, rule), rule, String.is_empty(String.trim(text)))))
+
 def Sched.hint.k(+l: I.Loc, ok: Bool, +text: String, +rule: TZ.TzRule, +now: Nat) -> String:
   match ok:
     case True{}:
       Sched.hint.cron(l, text, rule, now)
     case False{}:
-      Sched.hint.once(l, WH.When.parse(text, now, rule), rule, String.is_empty(String.trim(text)))
+      Sched.hint.invalid(l, text, rule, now)
 
 # what a schedule or a one-time phrase means, in the person's zone: the
 # live hint under a routine form's When field

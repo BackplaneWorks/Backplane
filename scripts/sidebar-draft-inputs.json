@@ -85,7 +85,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "1c7c4e97d361a5ea50e465aab26ce92d425d02ea67e4030a1de7253589a95a9f",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "6b3089fa7c5aa18aa7bff8de7d320a8dd435159d92ec292251bdfe7028c34b0d",
+    "src/core/msgs.bend": "43f9492581909c2ba7a8c10be52da2561e7e4f2bbfcb015d28a1ec19492cf32a",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
@@ -102,7 +102,7 @@
     "src/core/refview.bend": "aad18d93039af1c4b83cd245200c051192609bf1a3a7dc261d2b2f4c1dbf97c0",
     "src/core/release.bend": "682768765cbc4c0ff436a54e69ef37926c25c6b68adcfbb5eb25e992ec648b29",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
-    "src/core/sched.bend": "9e52317b69cabd121e2653f163d701e58293da5e4d02c29320e0d0d395ec5c4b",
+    "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
     "src/core/secret.bend": "2aa67d789bcaf5d4de369af089b533d2a3fdfc423d90e545f5d8a84423159bd6",
     "src/core/semver.bend": "a09f3e4f27f84287b5ee5e0c0840750017af34dda03dff67134958af096a4aee",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "J rebase 4: kept main and fix changes; sidebar draft rendering reviewed, 24 checks pass"
+  "reviewNote": "J rebase 5: kept main and fix changes; sidebar draft rendering reviewed, 24 checks pass"
 }
