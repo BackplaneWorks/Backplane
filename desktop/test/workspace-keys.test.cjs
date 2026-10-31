@@ -594,7 +594,7 @@ test('Tab goes round a dialog: last to first, Shift+Tab first to last, the dialo
 
 test('an Esc that puts a popover away gives the composer the keyboard at once, from the popover\'s own field too', async () => {
   const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
-  for (const where of ['.account-picker', '.title-box', '.workspace-palette', '.tok-pop']) {
+  for (const where of ['.account-picker', '.title-box', '.workspace-palette', '.tok-pop', '.bform']) {
     const h = keeperHarness(installComposerFocus, { phone: true });
     h.doc.activeElement = h.composer;h.composer.setSelectionRange(2, 2);h.fire('select');
     // the popover is still drawn (the hub's next view takes it away), the
@@ -707,4 +707,12 @@ test('Escape cancels a palette before the open has rendered', async () => {
   h.press('k', { ctrlKey: true });h.press('Escape');
   assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-palette-close', '']]);
   assert.equal(h.composer.value, 'unsent draft');
+});
+
+test('Escape presses the bot form existing Cancel control', async () => {
+  const { overlayEscape } = await import('../../src/web/workspace-keys.js');
+  let clicked = false;
+  const bot = { click: () => clicked = true };
+  const doc = { querySelector: q => q.startsWith('.bform ') ? bot : null, querySelectorAll: () => [] };
+  overlayEscape(doc)();assert.equal(clicked, true);
 });

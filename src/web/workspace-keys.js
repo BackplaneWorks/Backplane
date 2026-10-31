@@ -98,6 +98,8 @@ export function overlayEscape(doc) {
   if (account) return () => doc.querySelector?.('.account-chip')?.click();
   const cancel = doc.querySelector?.('.title-box [data-on-click="rename-no"]');
   if (cancel) return () => cancel.click();
+  const bot = doc.querySelector?.('.bform [data-on-click="bot-new"]');
+  if (bot) return () => bot.click();
   return null;
 }
 
@@ -173,12 +175,12 @@ export function escapeState(event, doc) {
 // made) or over a selection outside the composer, nor on a phone-sized or
 // touch page (its keyboard would cover the thread). The caret goes back
 // where it was in that thread's draft.
-const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop,.account-picker,.title-box:has([data-on-click="rename-no"])';
+const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop,.account-picker,.title-box:has([data-on-click="rename-no"]),.bform:has([data-on-click="bot-new"])';
 const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button,button.fold';
 // What an Esc puts away (the palette, a picker, a menu, a row's shade, the
 // token stats, a rename): it goes with the hub's next view, and the draft
 // has the keyboard back at once, before the next key.
-const LEAVING = '.workspace-palette,.shade,.modal-back,.local-menu,.tok-pop,.account-picker,.title-box';
+const LEAVING = '.workspace-palette,.shade,.modal-back,.local-menu,.tok-pop,.account-picker,.title-box,.bform';
 // The keyboard is on its way to the composer for this long after a press on
 // the turn's buttons or another thread's row, an Esc that put something
 // away, or the page's load (until its first view shows the draft); the
