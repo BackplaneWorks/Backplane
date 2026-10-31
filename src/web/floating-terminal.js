@@ -69,7 +69,7 @@ export function installFloatingTerminal({ dispatch, document: doc = document, wi
     // Font/scale settings can change cell width without changing the box.
     // Recheck only inherited style changes, never ordinary output patches.
     if (panel && records?.some(r => r.type === 'attributes' && r.attributeName !== 'data-terminal-owner' && (r.target.contains(panel) || r.target === observedScreen))) measure();
-    const chosen = doc.getElementById('workspace-palette')?.querySelector('.workspace-command.on');
+    const chosen = doc.querySelector('.workspace-palette .workspace-command.on');
     if (chosen && chosen !== lastCommand) chosen.scrollIntoView({ block: 'nearest' });
     lastCommand = chosen;
   };
