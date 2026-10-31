@@ -129,10 +129,15 @@ export function got(o, at = { bytes: 0, t: performance.now() }) {
     const base = typeof o.base === "string" ? o.base : lastKey;
     const held = plots.get(base)?.chunks ?? [];
     const refs = Array.isArray(o.cs) ? o.cs : [];
+    const previous = plots.get(key)?.chunks ?? [];
     const all = [];
     for (const r of refs) {
       const c = typeof r === "number" ? held[r] : r && typeof r === "object" ? chunk(r) : null;
-      if (c) all.push(c);
+      const old = previous[all.length];
+      // A fresh subscription may send an already drawn chunk whole again.
+      // Reuse it only when its style, signature and geometry all agree.
+      if (key.startsWith("1|") && c && old && c.sig !== null && c.sig === old.sig && c.layer === old.layer && c.color === old.color && c.mode === old.mode && c.r === old.r && c.d.length === old.d.length && c.d.every((b, i) => b === old.d[i])) all.push(old);
+      else if (c) all.push(c);
     }
     const box = Array.isArray(o.box) && o.box.length === 4 ? o.box : [0, 0, 1, 1];
     plots.set(key, { chunks: all, box, fam: typeof o.fam === "string" ? o.fam : key, n: (plots.get(key)?.n ?? 0) + 1, thick: typeof o.thick === "number" ? o.thick : 1600 });
