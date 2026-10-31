@@ -1232,7 +1232,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .sub-signal-blocked .state { color: var(--st-need); }
 .sub-signal-settled .state { color: var(--st-idle); }
 /* the draw board (draw.js) and its button beside Attach */
-.composer-foot .attach.draw { margin-right: 6px; font: inherit; }
+.composer-foot .attach.draw { font: inherit; }
 .composer-foot .attach.draw + .attach { margin-left: 0; }
 .draw-back { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .draw-box { background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; padding: 12px; max-width: 100%; max-height: 100%; }
