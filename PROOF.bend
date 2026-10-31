@@ -13844,3 +13844,6 @@ def Laws.keys_navigation_disarms():
 
 def Laws.voice_category_requests_status():
   {==}
+
+def Laws.account_blank_label_no_request():
+  {==}

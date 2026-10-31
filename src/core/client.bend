@@ -10341,11 +10341,18 @@ def Acv.select(+u: Ui, +id: String) -> Act:
     J.KV{"epoch", J.Json.nat(J.Json.get_nat(ACCT.Accounts.profile(st, id), "epoch", 0n))},
     J.KV{"expected", J.Str{M.Setting.get(st, ACCT.Accounts.binding.key(th, pr), "")}}])
 
+def Acv.add.k(blank: Bool, +u: Ui) -> Act:
+  match blank:
+    case True{}:
+      Act{Ui.scratch_set(u, "@acct.label.err", MSG.T.account.label.required(Lang.loc(u))), [Focus{"agy-accountlabel"}]}
+    case False{}:
+      Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@f.accountlabel", ""), "@acct.label.err", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{String.trim(Ui.scratch(u, "@f.accountlabel"))}}])
+
 def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
   match action:
     case "acct-provider": Act{Ui.scratch_set(u, "@acct.provider", value), Nil{}}
     case "acct-open": Acv.rpc(Bool.pick(Ui, Ui.flag(u, "accounts"), Ui.flag_off(u, "accounts"), Ui.flag_on(u, "accounts")), "list", "")
-    case "acct-add": Ui.rpc(Ui.scratch_set(u, "@f.accountlabel", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{Ui.scratch(u, "@f.accountlabel")}}])
+    case "acct-add": Acv.add.k(String.is_empty(String.trim(Ui.scratch(u, "@f.accountlabel"))), u)
     case "acct-login": Acv.rpc(u, "login", value)
     case "acct-status": Acv.rpc(u, "status", value)
     case "acct-disconnect": Acv.rpc(u, "disconnect", value)
@@ -10394,7 +10401,7 @@ def Acv.attempt.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
           [AgBtn{"Complete sign-in", "acct-response:" ++ arg, "", False{}}, AgBtn{"Cancel", "acct-cancel", arg, False{}}])} <> Acv.attempt.rows(t)
 
 def Acv.rows(+u: Ui) -> List<&2, AgRow>:
-  List.concat(&2, AgRow, [[AgRow{"Accounts on this machine", "Subscription accounts use private provider-owned stores. Existing Default accounts remain available. Claude Console accounts use a separate login store and are not supported here. " ++ J.Json.get_str(Acv.live(u), "error", ""),
+  List.concat(&2, AgRow, [[AgRow{"Accounts on this machine", "Subscription accounts use private provider-owned stores. Existing Default accounts remain available. Claude Console accounts use a separate login store and are not supported here. " ++ J.Json.get_str(Acv.live(u), "error", "") ++ " " ++ Ui.scratch(u, "@acct.label.err"),
     [AgField{"accountlabel", "Account label (e.g. Personal)", False{}, Ui.scratch(u, "@f.accountlabel"), "acct-add"}],
     [AgBtn{"Codex", "acct-provider", "codex", String.eq(Acv.selected.provider(u), "codex")}, AgBtn{"Claude", "acct-provider", "claude", String.eq(Acv.selected.provider(u), "claude")}, AgBtn{"Add account", "acct-add", "", True{}}]},
     AgRow{"Existing Default accounts", "Preserve current CLI authentication and sessions; select explicitly beside the model.", Nil{}, [AgBtn{"Default Claude for new threads", "acct-legacy-default", "claude", False{}}, AgBtn{"Default Codex for new threads", "acct-legacy-default", "codex", False{}}]}],

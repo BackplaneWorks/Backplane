@@ -1354,3 +1354,4 @@ intent.save.tip = Save the intent (Ctrl+Enter); Enter starts a new line
 intent.saved = Intent saved
 
 diff.revert.confirm = Discard this thread’s uncommitted changes, including new files?
+account.label.required = Enter an account label.
