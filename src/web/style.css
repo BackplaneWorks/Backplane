@@ -211,6 +211,20 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg .body { min-width: 0; overflow-wrap: anywhere; }
 .msg .copy { position: absolute; top: 4px; right: 4px; opacity: 0; font-size: calc(11px * var(--text-scale, 100) / 100); padding: 1px 6px; }
 .msg:hover > .copy { opacity: 1; }
+/* bot chats (core/reply.bend): Reply sits under Copy and shows with it;
+   a person's reply opens with one "In reply to" line; a bot's message that
+   links threads or projects opens with the one it links most */
+.msg .reply { position: absolute; top: 26px; right: 4px; opacity: 0; font-size: calc(11px * var(--text-scale, 100) / 100); padding: 1px 6px; }
+.msg:hover > .reply, .msg .reply:focus-visible { opacity: 1; }
+.msg-reply { display: flex; gap: 6px; align-items: baseline; min-width: 0; margin: 0 0 4px; font-size: calc(11px * var(--text-scale, 100) / 100); color: var(--dim); }
+.msg-reply .label, .reply-chip .label { text-transform: uppercase; letter-spacing: 0.04em; flex: none; }
+.msg-reply a.rto, .reply-chip a.rto { color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.msg-ctx { display: flex; gap: 8px; align-items: baseline; min-width: 0; margin: 0 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--text-scale, 100) / 100); font-weight: 600; }
+.msg-ctx a.ref.ctx { color: var(--accent); cursor: pointer; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.msg-ctx a.ref.ctx:hover { text-decoration: underline; }
+.msg-ctx .more { color: var(--dim); font-weight: 400; flex: none; }
+.reply-chip { display: flex; gap: 6px; align-items: center; min-width: 0; margin: 0 0 6px; padding: 4px 6px 4px 8px; border-left: 2px solid var(--accent); background: var(--raise); font-size: calc(12px * var(--text-scale, 100) / 100); color: var(--dim); }
+.reply-chip .reply-drop { margin-left: auto; flex: none; padding: 0 6px; line-height: 1.4; }
 /* a reply is as wide as its text, so its Copy sits beside the lines it
    copies (a short reply's chip floated 860 px away); the gutter keeps it
    off the text */
@@ -663,6 +677,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
   .composer { padding: 8px 10px 10px; }
   .composer textarea { min-height: 48px; }
   .msg .copy { opacity: 1; position: static; float: right; margin: 0 0 4px 8px; }
+  .msg .reply { opacity: 1; position: static; float: right; margin: 0 0 4px 8px; }
   .app .viewer { display: flex; position: fixed; inset: 0; z-index: 5; }
   .viewer-split { display: none; }
   .viewer-bar .hint { display: none; }

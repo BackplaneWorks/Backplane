@@ -49,6 +49,7 @@ import ../core/hist.bend as HS
 import ../core/review.bend as RVW
 import ../core/emb.bend as EM
 import ../core/qr.bend as QR
+import ../core/reply.bend as RTO
 import ../core/onboard.bend as OB
 import ../core/sched.bend as SCH
 import ../core/tz.bend as TZ
@@ -2452,12 +2453,44 @@ def View.act.loc(+lc: I.Loc, step: Bool, e: M.Entry, +st: M.State, +ec: U.Ec) ->
 def View.act(step: Bool, e: M.Entry, +st: M.State, +ec: U.Ec) -> D.Node:
   View.act.loc(I.En{}, step, e, st, ec)
 
-def View.msg.k.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String) -> D.Node:
+# Bot chats (core/reply.bend): a message's Reply button ("reply-to"), the
+# "In reply to" line over a person's reply (its link goes to the message,
+# "hist-jump", which brings it into view and flashes it) and the header
+# over a bot's message naming the thread or project it links most
+# ("ref-go"; "+N" the others). All come from the memo's attributes:
+# rpl "1", rto/rtoq, ctx/ctxt/ctxn (View.entry.s.loc).
+def View.rpl.button(+lc: I.Loc, on: Bool, +id: String) -> List<&2, D.Node>:
+  match on:
+    case True{}: [D.El{"button", "", [D.At{"class", "reply"}, D.At{"title", MSG.T.reply.action(lc)}, D.At{"data-value", id}, D.On{"click", "reply-to"}], [D.Txt{MSG.T.reply.action(lc)}]}]
+    case False{}: Nil{}
+
+def View.rto.line(+lc: I.Loc, +to: String, +q: String) -> List<&2, D.Node>:
+  match to:
+    case SNil{}: Nil{}
+    case SCon{+h, +t}:
+      [D.El{"div", "", [D.At{"class", "msg-reply"}], [D.Dom.span("label", MSG.T.reply.to(lc)),
+        D.El{"a", "", [D.At{"class", "rto"}, D.At{"href", "#"}, D.At{"data-to", SCon{h, t}}, D.At{"data-value", SCon{h, t}}, D.On{"click", "hist-jump"}], [D.Txt{Bool.pick(String, String.is_empty(q), SCon{h, t}, q)}]}]}]
+
+def View.ctx.more(none: Bool, +n: String) -> List<&2, D.Node>:
+  match none:
+    case True{}: Nil{}
+    case False{}: [D.Dom.span("more", "+" ++ n)]
+
+def View.ctx.head(+uri: String, +title: String, +n: String) -> List<&2, D.Node>:
+  match uri:
+    case SNil{}: Nil{}
+    case SCon{+h, +t}:
+      [D.El{"div", "", [D.At{"class", "msg-ctx"}], D.Dom.cat([D.El{"a", "", [D.At{"class", "ref ctx"}, D.At{"href", SCon{h, t}}, D.At{"data-ref", SCon{h, t}}, D.At{"data-bare", "0"}, D.At{"data-value", SCon{h, t}}, D.On{"click", "ref-go"}], [D.Txt{title}]}], View.ctx.more(Bool.or(String.is_empty(n), String.eq(n, "0")), n))}]
+
+def View.msg.x.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String, +as: List<&2, D.Attr>) -> D.Node:
   match user:
     case True{}:
-      D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), [D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))]))}
+      D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
     case False{}:
-      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.images(IM.Img.paths(text)), [D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, text)]))}
+      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.images(IM.Img.paths(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
+
+def View.msg.k.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String) -> D.Node:
+  View.msg.x.loc(lc, user, id, text, stamp, Nil{})
 
 def View.msg.k(user: Bool, +id: String, +text: String, +stamp: String) -> D.Node:
   View.msg.k.loc(I.En{}, user, id, text, stamp)
@@ -2491,7 +2524,7 @@ def View.make.l(live: Bool, +fn: String, +k: String, +as: List<&2, D.Attr>, +tex
 def View.make.f.loc(+lc: I.Loc, msg: Bool, +fn: String, +k: String, +as: List<&2, D.Attr>, +text: String) -> D.Node:
   match msg:
     case True{}:
-      View.msg.loc(lc, k, View.attr(as, "who"), text, View.attr(as, "stamp"))
+      View.msg.x.loc(lc, String.eq(View.attr(as, "who"), "u"), k, text, View.attr(as, "stamp"), as)
     case False{}:
       View.make.l.loc(lc, String.eq(fn, "live"), fn, k, as, text)
 
@@ -2530,12 +2563,30 @@ def View.expand(ns: List<&2, D.Node>) -> List<&2, D.Node>:
     case +n <> r:
       n <> View.expand(r)
 
+# a bot chat's memo attributes: Reply, and a person's "In reply to"
+def View.rto.attrs(chat: Bool, m: Maybe<&2, RTO.RtoBlock>) -> List<&2, D.Attr>:
+  match chat m:
+    case False{} _: Nil{}
+    case True{} Some{RTO.RtoBlock{+to, +q, _}}: [D.At{"rpl", "1"}, D.At{"rto", to}, D.At{"rtoq", RTO.Rto.snip(q)}]
+    case True{} None{}: [D.At{"rpl", "1"}]
+
+def View.ctx.kv(m: Maybe<&2, RTO.MsgCtx>) -> List<&2, D.Attr>:
+  match m:
+    case Some{RTO.MsgCtx{+u, +t, +n}}: [D.At{"ctx", u}, D.At{"ctxt", t}, D.At{"ctxn", Nat.show(n)}]
+    case None{}: Nil{}
+
+# a bot chat's memo attributes for a bot's message: Reply, and its header
+def View.ctx.attrs(chat: Bool, +st: M.State, +text: String) -> List<&2, D.Attr>:
+  match chat:
+    case False{}: Nil{}
+    case True{}: D.At{"rpl", "1"} <> View.ctx.kv(RTO.Ctx.of(st, text))
+
 def View.entry.s.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
   match e:
-    case M.Msg{+id, _, M.User{}, +text, _}:
-      View.memo.loc(lc, id, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], text)
-    case M.Msg{+id, _, _, +text, _}:
-      View.memo.loc(lc, id, [D.At{"fn", "msg"}, D.At{"who", "a"}, D.At{"stamp", stamp}], text)
+    case M.Msg{+id, +th, M.User{}, +text, _}:
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
+    case M.Msg{+id, +th, _, +text, _}:
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "a"}, D.At{"stamp", stamp}], View.ctx.attrs(RTO.Rto.chat(st, th), st, text)), text)
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       View.act.loc(lc, String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at}, st, ec)
 
@@ -3142,8 +3193,21 @@ def View.composer.k(+lc: I.Loc, u: U.Ui, t: M.Thread, +atts: List<&2, String>, +
     case U.Ui{+st, +sel, +drafts, _, +op, _, _, _, _, _, _, _, _, _, +nf, _, _} M.Thread{_, _, _, _, _, +turn, _, _, _, _, _, _, _, _, _, +pr, +mo, _, _, _, _}:
       View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)
 
+# over the composer while it replies to a message: "Replying to: <its
+# first line>", the line going to the message, × forgetting it
+def View.rpl.chip.k(+lc: I.Loc, +to: String, +q: String) -> List<&2, D.Node>:
+  match to:
+    case SNil{}: Nil{}
+    case SCon{+h, +t}:
+      [D.El{"div", "reply-chip", [D.At{"class", "reply-chip"}], [D.Dom.span("label", MSG.T.reply.replying(lc)),
+        D.El{"a", "", [D.At{"class", "rto"}, D.At{"href", "#"}, D.At{"data-value", SCon{h, t}}, D.On{"click", "hist-jump"}], [D.Txt{q}]},
+        D.El{"button", "", [D.At{"class", "reply-drop"}, D.At{"title", MSG.T.reply.cancel(lc)}, D.At{"aria-label", MSG.T.reply.cancel(lc)}, D.On{"click", "reply-drop"}], [D.Txt{"×"}]}]}]
+
+def View.rpl.chip(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.rpl.chip.k(lc, U.Rpl.of(u), U.Rpl.label(u))
+
 def View.composer.l(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  View.composer.k(lc, u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))), View.mic.of(u, U.Ui.sel(u)))
+  View.composer.k(lc, u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u)))), View.mic.of(u, U.Ui.sel(u)))
 
 def View.composer.u(+u: U.Ui) -> D.Node:
   View.composer.l(U.Lang.loc(u), u)
@@ -3463,7 +3527,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         rd, [View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]]))
 
 def View.thread.h(+lc: I.Loc, +u: U.Ui, +t: M.Thread, hd: List<&2, D.Node>) -> D.Node:
-  View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))), View.mic.of(u, U.Ui.sel(u)), Nil{}, View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
+  View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u)))), View.mic.of(u, U.Ui.sel(u)), Nil{}, View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
 
 def View.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> D.Node:
   View.thread.h(lc, u, t, Nil{})

@@ -1088,6 +1088,22 @@ object NativeMessages {
   fun queue_edit(tag: String): String =
     if (tag == "ja") ("編集") else ("Edit")
 
+  // reply.action
+  fun reply_action(tag: String): String =
+    if (tag == "ja") ("返信") else ("Reply")
+
+  // reply.cancel
+  fun reply_cancel(tag: String): String =
+    if (tag == "ja") ("返信をやめる") else ("Cancel reply")
+
+  // reply.replying
+  fun reply_replying(tag: String): String =
+    if (tag == "ja") ("返信先:") else ("Replying to:")
+
+  // reply.to
+  fun reply_to(tag: String): String =
+    if (tag == "ja") ("返信先:") else ("In reply to:")
+
   // review.bom
   fun review_bom(tag: String): String =
     if (tag == "ja") ("BOM") else ("BOM")
