@@ -272,7 +272,9 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 /* the model picker: agent | model | effort, a column each (view.bend's
    View.mp.*); the keys' column has its head lit, the cursor's row the
    accent edge, the thread's own row a faint one */
-.model-menu { position: absolute; bottom: calc(100% - 4px); left: 16px; z-index: 31; display: grid; grid-template-columns: minmax(150px, 200px) minmax(0, 1fr) 216px; width: min(800px, calc(100% - 32px)); max-height: 60vh; background: var(--panel); border: 1px solid var(--accent); box-shadow: 0 12px 40px rgba(0, 0, 0, .5); }
+/* (never taller than the room over the composer, host.js's --composer-top:
+   a long draft leaves it less, and it scrolls) */
+.model-menu { position: absolute; bottom: calc(100% - 4px); left: 16px; z-index: 31; display: grid; grid-template-columns: minmax(150px, 200px) minmax(0, 1fr) 216px; width: min(800px, calc(100% - 32px)); max-height: min(60vh, calc(var(--composer-top, 100vh) - 4px)); overflow-y: auto; background: var(--panel); border: 1px solid var(--accent); box-shadow: 0 12px 40px rgba(0, 0, 0, .5); }
 .model-menu .mp-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); padding-bottom: 6px; }
 .model-menu .mp-col:last-child { border-right: 0; }
 .model-menu .mp-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
@@ -1682,7 +1684,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   .composer-foot { flex-wrap: wrap; }
   .composer-foot .model-chip { max-width: calc(100% - 10px); }
   .composer-foot .model-chip kbd { display: none; }
-  .model-menu { left: 8px; right: 8px; width: auto; max-height: 72dvh; }
+  .model-menu { left: 8px; right: 8px; width: auto; max-height: min(72dvh, calc(var(--composer-top, 100dvh) - 4px)); }
   .model-menu kbd { display: none; }
   .model-menu .row { min-height: 40px; align-items: center; }
   .model-menu .mp-agents .row { min-height: 36px; }

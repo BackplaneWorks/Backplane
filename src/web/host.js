@@ -407,10 +407,28 @@ try {
     if (k?.startsWith(VIEWER)) ui = App.viewer_restore(ui, k.slice(VIEWER.length), localStorage.getItem(k) ?? "");
   }
 } catch {}
+// The model picker opens up from the composer's top edge and is never
+// taller than the room above it (style.css's --composer-top), so a long
+// draft does not push its heads out of the window. Kept as the composer
+// grows or shrinks (a keystroke redraws only the composer) and as the
+// window does.
+let composerSeen = null, composerTopKept = "";
+const composerRoom = typeof ResizeObserver === "function" ? new ResizeObserver(() => composerTop()) : null;
+function composerTop() {
+  const c = document.querySelector(".model-layer")?.closest(".composer") || null;
+  if (c !== composerSeen) {
+    if (composerSeen) composerRoom?.unobserve(composerSeen);
+    if (c) composerRoom?.observe(c);
+    composerSeen = c;
+  }
+  const top = c ? Math.round(c.getBoundingClientRect().top) + "px" : "";
+  if (top && top !== composerTopKept) { document.documentElement.style.setProperty("--composer-top", top);composerTopKept = top; }
+}
 // Reserve the footer's measured room in the reload shell. Its account
 // controls can wrap to a second row once the hub supplies the metadata.
 let composerFootKept = "";
 function composerGeometry() {
+  composerTop();
   const foot = document.querySelector(".thread-view .composer-foot");
   if (!foot) return;
   foot.style.removeProperty("min-height");
