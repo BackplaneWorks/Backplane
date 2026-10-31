@@ -592,12 +592,25 @@ def Todos.closed(done: Bool, info: Map<&2, String>, th: String) -> Map<&2, Strin
 # The list shuts when it completes, and when it is retired (a list that
 # was there is gone), so the agent's next list starts shut. Todos.see runs
 # this per change for every thread; a whole state adopted at once
-# (Ui.adopt.raw) checks only the selected thread.
+# (Ui.adopt.raw) checks the selected thread, by the hub's clear count.
 def Todos.retired(+old: M.State, +fresh: M.State, +th: String) -> Bool:
   Bool.and(Bool.not(List.is_empty(&2, TD.Todo, M.Todos.of(old, th))), List.is_empty(&2, TD.Todo, M.Todos.of(fresh, th)))
 
+# The hub counts each clear of a thread's list (M.Todos.gen). The client
+# keeps the count it saw last ("todos.gen:<thread>"); a different one shuts
+# the list, so a whole state adopted after a retire and a new list (the
+# thin lane's renders batch them) shuts it even though no render saw the
+# list empty.
+def Todos.gen.k(same: Bool, info: Map<&2, String>, +th: String, g: String) -> Map<&2, String>:
+  match same:
+    case True{}: info
+    case False{}: Map.set(&2, String, Map.set(&2, String, info, "fold:todos:" ++ th, "0"), "todos.gen:" ++ th, g)
+
+def Todos.gen.see(+fresh: M.State, +info: Map<&2, String>, +th: String) -> Map<&2, String>:
+  Todos.gen.k(String.eq(Str.get(info, "todos.gen:" ++ th), M.Todos.gen(fresh, th)), info, th, M.Todos.gen(fresh, th))
+
 def Todos.autoclose(+old: M.State, +fresh: M.State, info: Map<&2, String>, +th: String) -> Map<&2, String>:
-  Todos.closed(Bool.or(Bool.and(Bool.not(TD.Todo.complete(M.Todos.of(old, th))), TD.Todo.complete(M.Todos.of(fresh, th))), Todos.retired(old, fresh, th)), info, th)
+  Todos.gen.see(fresh, Todos.closed(Bool.or(Bool.and(Bool.not(TD.Todo.complete(M.Todos.of(old, th))), TD.Todo.complete(M.Todos.of(fresh, th))), Todos.retired(old, fresh, th)), info, th), th)
 
 def Ui.adopt.raw(u: Ui, +st: M.State) -> Ui:
   match u:

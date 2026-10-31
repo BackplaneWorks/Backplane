@@ -13763,3 +13763,9 @@ def Laws.todos_retire_shuts():
 
 def Laws.todos_retire_shuts_unselected():
   {==}
+
+def Laws.todos_adopt_whole_retire_shuts():
+  {==}
+
+def Laws.todos_adopt_reopen_holds():
+  {==}
