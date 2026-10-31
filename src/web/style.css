@@ -1790,6 +1790,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .crumbs .crumb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .crumbs .crumb:last-child { color: var(--text); }
 .crumbs .crumb.proj { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; max-width: min(180px, 24vw); font-size: calc(11px * var(--text-scale, 100) / 100); text-transform: uppercase; letter-spacing: 0.06em; }
+.crumbs .crumb.proj .pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .crumbs .sw { width: 8px; height: 8px; flex: none; background: var(--tint, var(--accent)); }
 .crumbs button.crumb.link { background: none; border: 0; padding: 0; color: var(--dim); }
 .crumbs button.crumb.link:hover { color: var(--text); text-decoration: underline; }

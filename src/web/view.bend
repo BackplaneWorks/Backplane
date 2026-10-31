@@ -4759,13 +4759,14 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])
 
 # a thread: its project, its title (a click renames it) and ▾ its menu, then
-# its cells
+# its cells; a project name cut short ends in "…" and its tooltip is whole
 def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
   match u t:
     case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, pending, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, gone}:
+      +pn = U.Label.title(st, p, U.Ui.project_title(st, p))
       [View.chrome.nav(lc, [
         View.chrome.sep(),
-        D.El{"span", "", [D.At{"class", "crumb proj"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}], [D.El{"i", "", [D.At{"class", "sw"}], Nil{}}, D.Txt{U.Label.title(st, p, U.Ui.project_title(st, p))}]},
+        D.El{"span", "", [D.At{"class", "crumb proj"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}, D.At{"title", pn}], [D.El{"i", "", [D.At{"class", "sw"}], Nil{}}, D.Dom.span("pn", pn)]},
         View.chrome.sep(),
         D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title"))},
         View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 14)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
