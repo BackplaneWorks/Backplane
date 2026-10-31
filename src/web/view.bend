@@ -4232,8 +4232,14 @@ def View.probe.attrs(+u: U.Ui, sch: Bool) -> List<&2, D.Attr>:
 def View.rc.checks(+u: U.Ui) -> List<&2, D.Node>:
   View.rc.checks.loc(I.En{}, u)
 
+# The 2D viewer uses its local menu keys.
+def View.plot.layers(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus) -> D.Node:
+  +k = View.layer.kind(sch, cmp)
+  D.El{"details", "", [D.At{"class", "layers local-menu"}], [View.layer.button.loc(lc, k, f),
+    D.El{"div", "", [D.At{"class", "layer-list"}], List.append(&2, D.Node, View.layer.modes.loc(lc, sch, f), View.layer.rows.loc(lc, LY.Lyr.order(k), k, off, f))}]}
+
 def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
-  View.bar.loc(lc, List.append(&2, D.Node, what, [View.layers.loc(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
+  View.bar.loc(lc, List.append(&2, D.Node, what, [View.plot.layers(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
    <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", List.append(&2, D.Attr, [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},

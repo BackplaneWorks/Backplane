@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "798495c920e30b8b4d5b82d6dd05de6af6a8644a0ed3ff6d337396104b9d6de8"
+    "src/web/view.bend": "09bc466d0dbef843f3d8aa2aa99600c9e7f4bf5a9216de0411a98f65c0964e5e"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Keep the chat draft through a reload while editing the intent: sidebar drafts unchanged (sidebar_draft_image_test ok)"
+  "reviewNote": "F: Close the Layers menu before closing the viewer rebased while retaining main; sidebar drafts unchanged."
 }
