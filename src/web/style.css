@@ -2042,3 +2042,13 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .composer-foot .composer-model .model-chip { flex: 1 1 0; }
   .allowance-chip { min-height: 40px; }
 }
+
+/* The 2D plot keeps its drawing still when controls or sheet names change.
+   KiCad's secondary actions live in their own disclosure on these tabs. */
+#viewer:has(> .viewer-stage > canvas.plot2d) > .viewer-bar { flex-wrap: nowrap; }
+#viewer:has(> .viewer-stage > canvas.plot2d) > .viewer-bar > .board-selector { min-width: 0; }
+#viewer:has(> .viewer-stage > canvas.plot2d) > .viewer-bar > .layers,
+.plot-kicad, #viewer:has(> .viewer-stage > canvas.plot2d) > .viewer-bar > .fit,
+#viewer:has(> .viewer-stage > canvas.plot2d) > .viewer-bar > .viewer-help { flex: none; }
+.plot-kicad .local-menu-body { width: 210px; }
+.plot-kicad .local-menu-body > span { display: grid; }

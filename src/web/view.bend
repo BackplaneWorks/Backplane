@@ -3572,7 +3572,11 @@ def View.mech(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.kicad.loc(+lc: I.Loc) -> D.Node:
   D.El{"span", "", Nil{}, [D.Dom.button("", "kicad-open", "", MSG.T.viewer.kicad.tip(lc), MSG.T.palette.kicad(lc)), D.Dom.button("", "kicad-export10", "", MSG.T.viewer.kicad10.tip(lc), MSG.T.viewer.kicad10(lc))]}
 
-# A fit button: host.js fits the board, schematic or model on show
+# KiCad actions are secondary to the name of the board on show.
+def View.plot.kicad.loc(+lc: I.Loc) -> D.Node:
+  D.El{"details", "", [D.At{"class", "local-menu plot-kicad"}], [
+    D.El{"summary", "", Nil{}, [D.Txt{"KiCad"}]},
+    D.El{"div", "", [D.At{"class", "local-menu-body"}], [View.kicad.loc(lc)]}]}
 
 def View.kicad() -> D.Node:
   View.kicad.loc(I.En{})
@@ -4232,10 +4236,15 @@ def View.probe.attrs(+u: U.Ui, sch: Bool) -> List<&2, D.Attr>:
 def View.rc.checks(+u: U.Ui) -> List<&2, D.Node>:
   View.rc.checks.loc(I.En{}, u)
 
-# The 2D viewer uses its local menu keys.
+# The 2D bar keeps its Layers button steady and uses the local menu keys.
+# Other viewers keep their own disclosure and active-layer label.
+def View.plot.layer.button(+lc: I.Loc, +k: U32, +f: LY.Focus) -> D.Node:
+  D.El{"summary", "", [D.At{"class", Bool.pick(String, LY.Lyr.on(f), "on", "")},
+    D.At{"title", Bool.pick(String, LY.Lyr.on(f), View.layer.head.loc(lc, k, f), MSG.T.viewer.layers.tip(lc))}], [D.Txt{MSG.T.viewer.layers(lc)}]}
+
 def View.plot.layers(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus) -> D.Node:
   +k = View.layer.kind(sch, cmp)
-  D.El{"details", "", [D.At{"class", "layers local-menu"}], [View.layer.button.loc(lc, k, f),
+  D.El{"details", "", [D.At{"class", "layers local-menu"}], [View.plot.layer.button(lc, k, f),
     D.El{"div", "", [D.At{"class", "layer-list"}], List.append(&2, D.Node, View.layer.modes.loc(lc, sch, f), View.layer.rows.loc(lc, LY.Lyr.order(k), k, off, f))}]}
 
 def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
@@ -4537,7 +4546,7 @@ def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
     case 3n:
       View.solid.loc(lc, u)
     case 4n:
-      View.sch.after(View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.schematic.tip(lc)), List.append(&2, D.Node, View.sheets.loc(lc, u), [View.kicad.loc(lc)]))),
+      View.sch.after(View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.schematic.tip(lc)), List.append(&2, D.Node, View.sheets.loc(lc, u), [View.plot.kicad.loc(lc)]))),
         List.append(&2, D.Node, View.sch.below(lc, u), View.probe.away(u)))
 
     case 6n:
@@ -4553,7 +4562,7 @@ def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
     case 10n:
       View.combo(lc, u)
     case _:
-      View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.board.tip(lc)), [View.kicad.loc(lc)]))
+      View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.board.tip(lc)), [View.plot.kicad.loc(lc)]))
 
 def View.aside.n(+kind: String) -> Nat:
   Bool.pick(Nat, String.eq(kind, "diff"), 0n, Bool.pick(Nat, String.eq(kind, "browser"), 1n, Bool.pick(Nat, String.eq(kind, "mech"), 2n,
