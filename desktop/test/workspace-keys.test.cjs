@@ -186,6 +186,21 @@ test('a bare letter or digit names a rail keycap only outside editors and withou
   for (const k of ['m', 'o', 'r', 'e', '3']) assert.equal(railKey(event(k, { target: send })), '');
 });
 
+test('viewer focus and pointer ownership keep bare keys away from the rail', async () => {
+  const { railKey, installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const viewer = { closest: selector => selector.split(',').includes('#viewer') ? viewer : null };
+  for (const key of ['f', 'b', 's', '3', '1', '2']) assert.equal(railKey(event(key, { target: viewer })), '');
+  const hovered = { querySelector: selector => selector === '#viewer:hover' ? viewer : null };
+  assert.equal(railKey(event('f'), hovered), '');
+  assert.equal(railKey(event('f'), { querySelector: () => null }), 'f');
+  const h = railHarness(installWorkspaceKeys);
+  assert.equal(h.press('b', { target: viewer }).defaultPrevented, false);
+  assert.deepEqual(h.clicks, []);
+  // Explicit workspace chords still work from a viewer.
+  h.press('d', { ctrlKey: true, target: viewer });
+  assert.deepEqual(h.actions, [['ws-key', 'diff']]);
+});
+
 // The installed listener presses the rail button that shows the key, and
 // leaves every other key (and every key typed into a field) alone.
 function railHarness(installWorkspaceKeys, { overlay = false } = {}) {

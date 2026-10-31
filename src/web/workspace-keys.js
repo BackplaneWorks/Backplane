@@ -10,11 +10,14 @@ const PTY = '[data-keys],[data-keyto]';
 // one of the rail's keycaps (view.bend writes data-keycap on the button
 // that shows it): the host presses that button, so the key does what a
 // click does. '' for any other key.
-export function railKey(event) {
+export function railKey(event, doc = null) {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.getModifierState?.('AltGraph')) return '';
   if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return '';
   const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
-  if (!/^[a-z0-9]$/.test(key) || event.target?.closest?.(EDITOR + ',.composer')) return '';
+  if (!/^[a-z0-9]$/.test(key) || event.target?.closest?.(EDITOR + ',.composer,#viewer')) return '';
+  // Reserve the viewer's keys while the pointer is over it too, before
+  // its canvas has taken focus.
+  if (doc?.querySelector?.('#viewer:hover')) return '';
   return key;
 }
 
@@ -259,7 +262,7 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
     if (slashKey(event) && composer?.end()) { event.preventDefault(); event.stopImmediatePropagation(); return; }
     const action = workspaceShortcut(event, platform);
     if (!action) {
-      const key = railKey(event), button = key && doc.querySelector(`.workspace-bar [data-keycap="${key}"]`);
+      const key = railKey(event, doc), button = key && doc.querySelector(`.workspace-bar [data-keycap="${key}"]`);
       if (button) { event.preventDefault(); event.stopImmediatePropagation(); button.click(); }
       return;
     }
