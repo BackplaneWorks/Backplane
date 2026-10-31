@@ -1,6 +1,7 @@
 const electron = require('electron');
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = electron;
 const { installShortcuts, applicationMenu } = require('./window.cjs');
+const { restoreWindowBounds, rememberWindowBounds } = require('./window-state.cjs');
 const { iconPath } = require('./branding.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -203,13 +204,15 @@ function start() {
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) void createWindow(ses).then(() => connect(ses)); });
 }
 function createWindow(ses) {
-  window = new BrowserWindow({ width: 1400, height: 940, minWidth: 360, minHeight: 480, title: 'Backplane', icon: iconPath(), backgroundColor: themeBackground(), show: false,
+  const boundsFile = path.join(app.getPath('userData'), 'window-bounds.json');
+  window = new BrowserWindow({ width: 1400, height: 940, ...restoreWindowBounds(boundsFile, electron.screen), minWidth: 360, minHeight: 480, title: 'Backplane', icon: iconPath(), backgroundColor: themeBackground(), show: false,
     webPreferences: { session: ses, preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, spellcheck: true,additionalArguments:rendererBrowser?['--backplane-direct-browser=1']:[] } });
   window.webContents.on('console-message', (details, _level, legacyMessage) => {
     // Only our main frame, fixed-prefix and schema-sanitized records reach disk.
     if (!details.frame || details.frame === window.webContents.mainFrame) connectionLog.capture(details.message ?? legacyMessage);
   });
   window.setMenuBarVisibility(false);
+  rememberWindowBounds(window, boundsFile);
   installImageMenu(window, { electron, actions: imageActions, trusted: params => {
     try { return params.frame === window.webContents.mainFrame && new URL(params.pageURL).origin === origin && new URL(params.frameURL).origin === origin; } catch { return false; }
   } });
