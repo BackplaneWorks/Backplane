@@ -430,7 +430,7 @@ test('a bare / outside every field puts the keyboard in the composer; in a field
 
 // The composer keeper over a stand-in page: a thread on show, what covers
 // it, the viewer's close, the person's press and selection.
-function keeperHarness(installComposerFocus, { phone = false } = {}) {
+function keeperHarness(installComposerFocus, { phone = false, deferTimers = false } = {}) {
   const listeners = new Map();
   const page = { thread: 't1', over: false, viewer: false, selection: true, hidden: false, cover: null };
   const body = { tagName: 'BODY', closest: () => null };
@@ -446,10 +446,11 @@ function keeperHarness(installComposerFocus, { phone = false } = {}) {
     focus() { if (!page.hidden) doc.activeElement = composer; }, setSelectionRange(s, e) { composer.selectionStart = s;composer.selectionEnd = e; },
     setRangeText(text, s, e) { composer.value = composer.value.slice(0, s) + text + composer.value.slice(e);composer.selectionStart = composer.selectionEnd = s + text.length; },
     dispatchEvent(e) { inputs.push(e); } };
-  const win = { matchMedia: () => ({ matches: phone }), setTimeout: f => f(), getSelection: () => ({ isCollapsed: page.selection, anchorNode: {} }),
+  const timers = [];
+  const win = { matchMedia: () => ({ matches: phone }), setTimeout: f => deferTimers ? timers.push(f) : f(), getSelection: () => ({ isCollapsed: page.selection, anchorNode: {} }),
     InputEvent: class { constructor(type, init) { Object.assign(this, { type }, init); } } };
   const keeper = installComposerFocus({ document: doc, window: win });
-  const fire = (type, target = doc.activeElement) => { for (const handler of listeners.get(type) || []) handler({ target }); };
+  const fire = (type, target = doc.activeElement, extra = {}) => { for (const handler of listeners.get(type) || []) handler({ target, ...extra }); };
   // a key as the page's capture listener sees it; `rail` says whether a
   // later listener (the rail's keycaps) would still get it
   const key = (k, target = doc.activeElement, fields = {}) => {
@@ -501,7 +502,7 @@ test('a click on Send, Stop or the top bar\'s Stop gives the keyboard back to th
   // the button takes the keyboard on the press; let go, the draft has it
   // back (the caret where it was), so the next words are not lost
   h.composer.setSelectionRange(3, 3);h.fire('keyup');
-  for (const where of ['.composer-foot button', '.topbar .kv.state button']) {
+  for (const where of ['.composer-foot button', '.topbar .kv.state button', 'button.fold']) {
     const button = { tagName: 'BUTTON', closest: selector => selector.split(',').includes(where) ? button : null };
     h.fire('pointerdown', button);h.doc.activeElement = button;h.fire('pointerup', button);
     assert.equal(h.doc.activeElement, h.composer);
@@ -676,4 +677,26 @@ test('typing a moment ago, the keyboard fallen out of its field with a redraw ke
   // Esc out of the draft is on purpose: the rail's keys work
   h.key('Escape', h.composer);h.doc.activeElement = h.body;
   assert.equal(h.key('d', h.body).rail, true);
+});
+
+test('a narrow desktop drawer returns mouse typing while touch inspection keeps its keyboard shut', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  for (const pointerType of ['mouse', 'touch']) {
+    const h = keeperHarness(installComposerFocus, { phone: true, deferTimers: true });
+    h.keeper.check();h.composer.focus();h.composer.setSelectionRange(3, 3);h.fire('keyup');
+    const button = { tagName: 'BUTTON', closest: s => s.split(',').includes('button.fold') ? button : null };
+    h.fire('pointerdown', button, { pointerType });h.doc.activeElement = button;h.fire('pointerup', button, { pointerType });
+    assert.equal(h.doc.activeElement, pointerType === 'mouse' ? h.composer : button);
+    assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [3, 3]);
+  }
+});
+
+test('a drawer gives the keyboard back before the next timer turn', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus, { deferTimers: true });
+  h.keeper.check();h.composer.setSelectionRange(3, 3);h.fire('keyup');
+  const button = { tagName: 'BUTTON', closest: s => s.split(',').includes('button.fold') ? button : null };
+  h.fire('pointerdown', button);h.doc.activeElement = button;h.fire('pointerup', button);
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [3, 3]);
 });

@@ -167,14 +167,14 @@ export function escapeState(event, doc) {
 // covered the page goes (Settings, a dialog, the palette, a menu, the
 // picker, the lightbox, the terminal) or the viewer shuts, after a
 // reconnect, on Esc, and once a press on the turn's own buttons (Send,
-// Stop, Steer, the foot's others, the top bar's Stop) is let go, so the
+// Stop, Steer, the foot's others, the top bar's Stop, a tool drawer) is let go, so the
 // next words go to the draft rather than press that button again. Never
 // from a field the person types in, during a press (a selection being
 // made) or over a selection outside the composer, nor on a phone-sized or
 // touch page (its keyboard would cover the thread). The caret goes back
 // where it was in that thread's draft.
 const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop,.account-picker,.title-box:has([data-on-click="rename-no"])';
-const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button';
+const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button,button.fold';
 // What an Esc puts away (the palette, a picker, a menu, a row's shade, the
 // token stats, a rename): it goes with the hub's next view, and the draft
 // has the keyboard back at once, before the next key.
@@ -287,7 +287,19 @@ export function installComposerFocus({ document: doc = document, window: win = w
   // a menu (a <details>) opened or shut by Esc, a click or its own item:
   // no render follows, so the cover is looked at once it has toggled
   doc.addEventListener('toggle', () => win.setTimeout(check, 0), true);
-  const up = () => { if (pressed) { pressed = false;win.setTimeout(check, 0); } };
+  const up = event => {
+    if (pressed) {
+      pressed = false;
+      // Drawer clicks can be followed by typing before a timer gets a turn.
+      if (event.target?.closest?.('button.fold')) {
+        // A mouse in a narrow desktop window still belongs to the draft.
+        // Touch inspection keeps the phone keyboard out of the thread.
+        restore = event.pointerType === 'mouse';
+        check();
+      }
+      else win.setTimeout(check, 0);
+    }
+  };
   doc.addEventListener('pointerup', up, true);doc.addEventListener('pointercancel', up, true);
   for (const name of ['keyup', 'input', 'pointerup', 'focusout', 'select']) doc.addEventListener(name, event => { if (event.target === field()) keep(); }, true);
   // a dialog, the lightbox or the drawing pad come and go on the body
