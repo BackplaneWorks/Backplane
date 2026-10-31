@@ -176,7 +176,9 @@ def View.rows(ps: List<&2, M.Project>, +ts: List<&2, M.Thread>) -> List<&2, PRow
       View.rows.k(rm, M.Project{id, ti, r, c, rm}, M.Thread.filter_project(ts, id), c, View.rows(t, ts))
 
 # a sidebar row: its status dot, title and age (a snoozed row: the time
-# left); rows of a shelf with manual order get move buttons on hover
+# left); rows of a shelf with manual order get move buttons on hover, in
+# the age's place; the title's tooltip is the whole title, however short
+# the row cuts it
 # a row with subagents at work says how many where its age goes
 def View.note(+badge: String, +other: String) -> D.Node:
   Bool.pick(D.Node, String.is_empty(badge), D.Dom.span("ago", other), D.El{"span", "", [D.At{"class", "ago agents"}, D.At{"title", badge}], [D.Txt{badge}]})
@@ -226,7 +228,7 @@ def View.pin(+lc: I.Loc, pin: Bool) -> List<&2, D.Node>:
 
 def View.row.p.loc(+lc: I.Loc, pin: Bool, +id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
   D.El{"div", id, [D.At{"class", Bool.pick(String, String.eq(id, sel), "thread on", "thread")}, D.At{"data-value", id}, D.On{"click", "select"}, D.On{"contextmenu", "row-menu"}],
-    D.Dom.cat([View.dot(lc, dot), D.Dom.span("title", title)],
+    D.Dom.cat([View.dot(lc, dot), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", title}], [D.Txt{title}]}],
       D.Dom.cat(View.pin(lc, pin), D.Dom.cat(Bool.pick(List<&2, D.Node>, movable, [D.El{"span", "", [D.At{"class", "moves"}], [D.Dom.button("move", "move", id ++ "|up", MSG.T.sidebar.move.up(lc), "↑"), D.Dom.button("move", "move", id ++ "|down", MSG.T.sidebar.move.down(lc), "↓")]}], Nil{}),
         [View.note(badge, ago)])))}
 
@@ -414,9 +416,10 @@ def View.groups(+lc: I.Loc, g: U.SGroups, +q: String, +open: Map<&2, Bool>, +ix:
 def View.arow(+lc: I.Loc, r: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> D.Node:
   match r:
     case U.ARow{_, _, +t, +pid, +pt, +faded}:
+      +tt = U.Label.title(st, M.Thread.id(t), TTL.Title.shown(lc, U.Active.title(t)))
       D.El{"div", M.Thread.id(t), [D.At{"class", Bool.pick(String, String.eq(M.Thread.id(t), sel), "thread on", Bool.pick(String, faded, "thread faded", "thread"))},
           D.At{"style", "--tint:" ++ BG.Badge.css_of(st, pid)}, D.At{"data-shortcut-project", pid}, D.At{"data-value", M.Thread.id(t)}, D.On{"click", "select"}, D.On{"contextmenu", "row-menu"}],
-        List.concat(&2, D.Node, [[View.dot(lc, SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t))), D.Dom.span("title", U.Label.title(st, M.Thread.id(t), TTL.Title.shown(lc, U.Active.title(t))))], View.pin(lc, U.Active.pinned(t)),
+        List.concat(&2, D.Node, [[View.dot(lc, SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t))), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", tt}], [D.Txt{tt}]}], View.pin(lc, U.Active.pinned(t)),
           [View.note(SG.Signal.display.note(lc, st, M.Thread.id(t), View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t)))), pt)]])}
 
 def View.atree.step(root: Bool, anchors: List<&2, U.ARow>, fallback: U.ARow) -> List<&2, U.ARow> & U.ARow:

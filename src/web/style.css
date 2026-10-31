@@ -139,6 +139,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .dot.waiting { background: var(--waiting); animation: pulse 1.2s ease-in-out infinite; }
 .thread .moves { display: none; gap: 2px; }
 .thread:hover .moves { display: flex; }
+/* the move buttons take the age's place, so the title keeps its room */
+.thread:hover:has(.moves) .ago { display: none; }
 .thread .move { padding: 0 5px; font-size: calc(11px * var(--text-scale, 100) / 100); line-height: calc(16px * var(--text-scale, 100) / 100); background: none; }
 .shelf-label { display: block; color: var(--faint); padding: 6px 12px 2px; font-size: calc(11px * var(--text-scale, 100) / 100); }
 @keyframes pulse { 50% { opacity: 0.35; } }
