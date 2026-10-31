@@ -433,7 +433,11 @@ class View {
         else {
           // Cross-probe (main) and saved-component inspection (viewer lane)
           // both follow the same click.
-          this.pick(e.clientX, e.clientY);
+          clearTimeout(this.probeTimer);
+          if (e.pointerType === "mouse") {
+            const key = this.key;
+            this.probeTimer = setTimeout(() => { if (this.key === key && canvas.isConnected) this.pick(e.clientX, e.clientY); }, 250);
+          } else this.pick(e.clientX, e.clientY);
           const record = componentSources.get(this.key);
           if (record) {
             const b = canvas.getBoundingClientRect();
@@ -470,7 +474,7 @@ class View {
       this.follow = false;
       this.later();
     }, { passive: false });
-    canvas.addEventListener("dblclick", () => this.fit());
+    canvas.addEventListener("dblclick", () => { clearTimeout(this.probeTimer); this.fit(); });
     // a right click asks to comment there: the place in mm (the plot's own
     // coordinates); the page decides what to do (host.js)
     canvas.addEventListener("contextmenu", (e) => {
@@ -803,7 +807,7 @@ function present(v) {
 // names, once the hub has sent it
 export function mount(canvases) {
   const list = (Array.isArray(canvases) ? canvases : [canvases]).filter(Boolean);
-  for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); park(v); views.delete(c); }
+  for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); clearTimeout(v.probeTimer); park(v); views.delete(c); }
   for (const canvas of list) mountOne(canvas);
   // a note form that has just come up takes the keyboard
   const note = document.querySelector(".rc-note input");
