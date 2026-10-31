@@ -40,8 +40,8 @@ subagent's steps is listed under its thread and opens that thread.
 In `proj`'s thread type a message and press Enter (A: the send button). The
 message shows at the end at once, the composer empties, the turn shows as
 working, the reply streams in and ends with a "Finished hh:mm · Ns" stamp.
-The thread stays in the project's list (it does not move under "Settled"):
-it settles by itself only with Settings → Threads → "Settle when done" on.
+The thread stays in the project's list (it does not move under "Settled"
+until it has sat idle 30 minutes, or at once with "Settle when done" on: S39).
 No "design change" row or Changes cell when the agent changed no file.
 Click another thread's row and type at once: the text lands in its composer.
 
@@ -181,6 +181,50 @@ listed. Delete the part on show, open Mech again: it is gone, and another
 part shows in its place (never the deleted one); delete them all: Mech says
 there are none. With Mech open, choose another thread, add a part, come
 back: it is listed. The same on a phone's Mech.
+
+**S53 The 3D workbench** (W D)
+Open 3D in `proj`: over the model a toolbar reads Fit Iso Top Bottom Front
+Right Back Left, PCB, Camera, Reflow, Components, a Rendering choice (Fast,
+Studio, Path trace) and Frame part. The quick model draws first; the corner
+note goes "Preparing the original saved model…" to "Studio · original
+model" (within 5 s once the board was exported; a first export takes up
+to ~30 s). On a software renderer Path trace is greyed, the note says why;
+on a GPU it refines ("Refining · n / 64 samples", then "Path traced").
+Top, Iso… turn the view; Fast drops the original model (no note), Studio
+brings it back. PCB shows the saved PCB beside the model, with its Layers;
+press it again: gone. Camera opens Projection, Focal length, Exposure,
+Depth of field, Controls, Materials (CAD studio; Source materials changes
+its note to "Original CAD export materials…") and "Illustrative solder"
+(on: "N estimated joints on M supported parts…", or why it can't). At
+1400x900 the viewer is under 950 px: model, PCB and inspector stack in one
+column, model and PCB 160 px tall, and only the inspector scrolls. At
+1920x1080 with the sidebar folded, drag the viewer's edge past 950 px: they
+sit side by side, the inspector on the right.
+
+**S54 Inspect a part** (W D)
+In 3D press Components: the inspector reads "Components · saved CAD",
+Refresh, "Saved revisions match…", a "Find reference, value or MPN" search
+and a Ref | Value | MPN table; typing filters it. Click U1: its page shows
+U1 with Clear, Value, MPN, Footprint, Side, Position, UUID, the saved
+footprint drawn with numbered pads, the source symbol (or why not), a Pad |
+Net | Shape table, its 3D source and "Saved source: <board>". Frame part
+frames it (or says it has no identified source model). Shut Components,
+turn PCB on and click a pad on the PCB: Components opens on that part,
+its pads lit and the probe chip naming the pad's net. Clear deselects. In
+`multi`, pick `beta`: the model's name and "Saved source" read beta's.
+
+**S55 Reflow preview** (W D)
+In 3D press Reflow: the inspector shows "Reflow preview" tagged
+Illustrative (Components shuts): Solder alloy SAC305 with its composition
+and solidus/liquidus, Furnace, Board mean and Liquid fraction, two graphs,
+↺ Play 1×/10×/30×/60× and "0.0 / 330 s", and "Solid · illustrative".
+Play runs the clock and readings ("Partially molten", "Liquid", then
+"Solidified · illustrative"); Pause holds; the slider scrubs. "Illustrative
+heat overlay" tints the model. Edit profile points: Add point, Apply (a bad
+profile shows its error), Reset; Export JSON saves reflow-preview.json and
+Import JSON reads it back. Pick a part (S54), open Reflow, then Esc and
+open 3D again, or switch threads and back: Reflow is still the open pane
+(never swapped for Components), and Components still has the part.
 
 ## Settings and workspace
 
@@ -373,11 +417,17 @@ server's estimate prices each with no problems. A flex board asked to be
 assembled is refused (only rigid `pcb` boards are).
 
 **S39 Settle when done** (W D)
-Default: a finished thread stays in its project's list. Settings → Threads →
-"Settle when done" on, send a message: when it finishes the thread moves
-under "Settled N"; while it's the open thread its row stays in sight and
-its project keeps its place, not faded. Off again; open the settled thread and send: it comes back
-and stays after it finishes. ▾ → Settle still settles at once.
+Default: a finished thread stays in its project's list, then settles by
+itself (under "Settled N") once idle 30 minutes. There is no Settings row
+for that time: set it short with `rpc.mjs PORT TOKEN setting.set
+'{"key":"settle.idle.minutes","value":"1"}'`, send a message: the thread
+settles within ~2 min of its "Finished" stamp (the hub's tick); a pinned or
+snoozed one, or one with work out, stays; a message brings it back. With
+`"0"` it never settles by itself. Settings → Threads → "Settle when done"
+on, send a message: when it finishes the thread moves under "Settled N" at
+once; while it's the open thread its row stays in sight and its project
+keeps its place, not faded. Off again; open the settled thread and send: it
+comes back and stays after it finishes. ▾ → Settle still settles at once.
 
 ## How it feels
 
