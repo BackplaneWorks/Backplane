@@ -43,11 +43,17 @@ function store_promote(home,temp) {
       sidecars.push(file);
     }
     const sync=store_sync(next);if(sync!=='ok')return sync;
+    // The build's WAL may hold committed pages: durable before it moves.
+    if(fs.existsSync(next+'-wal')){const wal=store_sync(next+'-wal');if(wal!=='ok')return wal;}
     const backup=target+'.previous-'+Date.now();
     for(const suffix of ['','-wal','-shm'])if(fs.existsSync(target+suffix)){fs.copyFileSync(target+suffix,backup+suffix,fs.constants.COPYFILE_EXCL);const saved=store_sync(backup+suffix);if(saved!=='ok')return saved;}
     // No old connection remains at boot. Keep its WAL evidence beside backup.
     for(const suffix of ['-wal','-shm'])if(fs.existsSync(target+suffix))fs.renameSync(target+suffix,backup+suffix+'.retired');
     fs.renameSync(next,target);
+    // macOS's SQLite keeps the build's -wal and -shm after its connection
+    // closes; they belong to the database, so they move with it, into the
+    // places just retired (else the rebuild folder is not empty to remove)
+    for(const suffix of ['-wal','-shm'])if(fs.existsSync(next+suffix))fs.renameSync(next+suffix,target+suffix);
     store_sync_dir(home);
     for(const file of sidecars)fs.rmSync(file,{force:true});
     fs.unlinkSync(path.join(temp,'events.jsonl'));fs.rmdirSync(temp);
