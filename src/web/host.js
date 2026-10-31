@@ -7,6 +7,8 @@
 
 import App from "./app.bend";
 import { applyComposerDraft } from "./composer-draft.js";
+import { homeDraftStorage } from "./home-drafts.js";
+const localStorage = homeDraftStorage(window.localStorage, window.backplaneDesktop?.drafts);
 import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";

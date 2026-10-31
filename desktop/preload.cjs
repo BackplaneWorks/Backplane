@@ -34,6 +34,12 @@ if (document.documentElement) paintTheme();
 else new MutationObserver((_, seen) => { if (document.documentElement) { seen.disconnect();paintTheme(); } }).observe(document, {childList:true});
 contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   theme,
+  drafts: Object.freeze({
+    read: () => ipcRenderer.sendSync('desktop:drafts', {op:'read'}),
+    write: (key, text) => {
+      if (ipcRenderer.sendSync('desktop:drafts', {op:'write', key, text}) !== true) throw new Error('Could not keep draft');
+    },
+  }),
   themeSeen: value => { if (value === 'light' || value === 'dark') ipcRenderer.send('desktop:theme', value); },
   terminalFocus: active => ipcRenderer.send('desktop:terminal-focus', active === true),
   image: Object.freeze({

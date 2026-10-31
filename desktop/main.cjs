@@ -54,6 +54,24 @@ function senderIsWindow(event) {
 function trusted(event) {
   try { return senderIsWindow(event) && origin && new URL(event.senderFrame.url).origin === origin; } catch { return false; }
 }
+// The transport port may change while the home and its conversations do not.
+// Only the authenticated main frame can read or keep these text drafts.
+const draftsFile = path.join(app.getPath('userData'), 'drafts.json');
+const validDraft = ([key, text]) => typeof key === 'string' && key.startsWith('backplane-draft:') && key.length <= 4096 && (text === null || typeof text === 'string' && text.length <= 4 * 1024 * 1024);
+let drafts = new Map();
+try { drafts = new Map(JSON.parse(fs.readFileSync(draftsFile, 'utf8')).filter(entry => Array.isArray(entry) && entry.length === 2 && validDraft(entry))); } catch {}
+ipcMain.on('desktop:drafts', (event, value) => {
+  if (!trusted(event)) { event.returnValue = null;return; }
+  if (value?.op === 'read') { event.returnValue = [...drafts];return; }
+  if (value?.op !== 'write' || !validDraft([value.key, value.text])) { event.returnValue = null;return; }
+  try {
+    const next = new Map(drafts);next.set(value.key, value.text);
+    fs.mkdirSync(path.dirname(draftsFile), {recursive:true});
+    fs.writeFileSync(draftsFile + '.tmp', JSON.stringify([...next]), {mode:0o600});
+    fs.renameSync(draftsFile + '.tmp', draftsFile);drafts = next;
+    event.returnValue = true;
+  } catch { event.returnValue = null; }
+});
 // The theme the hub's page last painted (host.js themeSeen), one word in
 // this home's profile, so a cold window, the startup page and the page's
 // first frame already have it. Nothing is read from or sent to the page but
