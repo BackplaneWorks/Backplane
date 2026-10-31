@@ -294,6 +294,9 @@ def presentation_overlay(node: D.Node, +session: J.Json) -> D.Node:
 def desk(u: U.Ui, focused: Bool, now: Nat) -> U.Act:
   U.Ui.desk(stamp(u), focused, now)
 
+def desk_reset(u: U.Ui) -> U.Ui:
+  U.Ui.desk.reset(u)
+
 def synced(u: U.Ui) -> Bool:
   U.Tour.ready(u)
 

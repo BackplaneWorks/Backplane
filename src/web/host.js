@@ -1064,12 +1064,21 @@ function run(cmds) {
 // used last.
 
 function deskCheck() {
-  if (!canonicalBoot) return;
+  if (!(canonicalBoot || remoteReady) || socket?.readyState !== 1) return;
   const focused = document.visibilityState === "visible" && document.hasFocus();
   const r = App.desk(ui, focused, now());
   ui = r.ui;
+  if (is(r.cmds, "Con")) {
+    const drafts = Wire.plain(App.presentation(ui)).drafts;
+    deskState = {"@desk":drafts["@desk"] || "", "@desk.at":drafts["@desk.at"] || ""};
+  }
   run(r.cmds);
 }
+
+// A view response cannot know the focus receipt this renderer just sent.
+// Keep that receipt across adoption, rather than reporting again every frame.
+let deskState = {"@desk":"", "@desk.at":""};
+function keepDesk(session) { return {...session, drafts:{...session.drafts, ...deskState}}; }
 
 for (const ev of ["focus", "blur"]) window.addEventListener(ev, deskCheck);
 document.addEventListener("visibilitychange", deskCheck);
@@ -2609,11 +2618,12 @@ async function startThin(again = false, reason = "initial") {
         return !!layer && !layer.hasAttribute('data-draft') && !layer.querySelector('input')?.value;
       },
       sessionChanged: (session, detail) => {
+        const selectedChanged = thinSession?.sel !== session.sel;
         thinSession = session;
         if (detail?.remote) {
           // Only live response choices cross this boundary. State and applied
           // cursor stay in the fresh unsynced recipient, never in a picture.
-          ui = App.unsync(App.presentation_handoff(ui, presentationJson(session)));
+          ui = App.unsync(App.presentation_handoff(ui, presentationJson(keepDesk(session))));
           document.documentElement.lang = App.lang(ui);
           keepViewer();
           setTimeout(() => restoreDraftAttachments(currentSession()), 0);
@@ -2621,6 +2631,7 @@ async function startThin(again = false, reason = "initial") {
           // Keep the accepted selection as well as explicit sidebar clicks.
           try { localStorage.setItem("backplane-selected", session.sel || ""); } catch {}
         }
+        if (selectedChanged) deskCheck();
         if (!detail?.inputOnly) later();
       },
       ack: (session, reply) => preservePresentationRoute(session, Wire.plain(App.presentation_reply(presentationJson(session), presentationJson(reply)))),
@@ -2667,7 +2678,9 @@ async function startThin(again = false, reason = "initial") {
       },
       state: state => {
         if (!current()) return;
+        const becameReady = !remoteReady && state.remoteReady === true;
         remoteReady = state.remoteReady === true;
+        if (becameReady) deskCheck();
         if (!remoteReady) {
           modelFeedback.clear();
           // Keep the last validated tree as a read-only picture. The local Ui
@@ -2692,6 +2705,8 @@ async function startThin(again = false, reason = "initial") {
   } catch { disconnect("client-setup");try { s.close(); } catch {}return; }
   s.onopen = () => {
     if (!current()) return;
+    ui = App.desk_reset(ui);
+    deskState = {"@desk":"", "@desk.at":""};
     socket = s;heard = BigInt(Date.now());s.hb = false;diagnostic.note("open");
   };
   s.onmessage = event => {
@@ -2713,6 +2728,7 @@ async function startThin(again = false, reason = "initial") {
     try {
       const j = Wire.cbor(bytes, KEYS, WORDS), envelope = Wire.plain(j);
       if (envelope.t === "hb") { s.hb = true;diagnostic.heartbeat();return; }
+      if (envelope.t === "notify") { notify(envelope);return; }
       if (viewerRpc.receive(envelope)) return;
       if (envelope.t === "plotrevision") { ViewerTools.sourceRevision(envelope.key, envelope.revision); return; }
       if (envelope.t === "reply" && sealedReply(envelope)) return;
