@@ -768,3 +768,38 @@ test('send prefix reconciliation stays with its thread and never trims a complet
  const g=await fixture();g.open();g.host.request('skill','');const completion=g.sent.at(-1);g.host.request('draft',original+'tail');
  g.host.receive(g.reply(completion,{cmds:[{type:'keep',thread:'A',text:''}]}));assert.equal(g.getSession().drafts.A,original+'tail');
 });
+test('an accepted send never takes text the person replaced it with, however it starts',async()=>{
+ const f=await fixture();f.open();const original=f.getSession().drafts.A;
+ f.host.request('send','');const sent=f.sent.at(-1);
+ // select all, then paste a new message that happens to start with the sent one
+ f.host.touched(0);f.host.request('draft',original+'story is useful');
+ f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().drafts.A,original+'story is useful');assert.equal(f.disk.get('A'),original+'story is useful');
+ // select all and type it a letter at a time: the first letter already stops it
+ const g=await fixture();g.open();g.host.request('send','');const again=g.sent.at(-1);
+ g.host.touched(0);g.host.request('draft','o');g.host.request('draft',original);g.host.request('draft',original+' more');
+ g.host.receive(g.reply(again,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'keep',thread:'A',text:''}]}));
+ assert.equal(g.getSession().drafts.A,original+' more');
+});
+test('a Backspace into the sent text leaves the field as the person made it; typing after it does not',async()=>{
+ const f=await fixture();f.open();const original=f.getSession().drafts.A;
+ f.host.request('send','');const sent=f.sent.at(-1);
+ f.host.touched(original.length);f.host.request('draft',original+'x');f.host.touched(original.length);f.host.request('draft',original);
+ f.host.touched(original.length-1);f.host.request('draft',original.slice(0,-1)+'語!');
+ f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().drafts.A,original.slice(0,-1)+'語!');
+});
+test('during an IME composition the sent text comes off only when it ends; queued sends lose it at once',async()=>{
+ let composing=true;const f=await fixture({composing:()=>composing});f.open();const original=f.getSession().drafts.A;
+ f.host.request('send','');const first=f.sent.at(-1);
+ f.host.touched(original.length);f.host.request('draft',original+' 次');f.host.request('send','');
+ f.host.touched(original.length+2);f.host.request('draft',original+' 次 に');
+ f.host.receive(f.reply(first,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().drafts.A,original+' 次 に','the field is not written while composing');
+ const second=f.sent.at(-1);assert.equal(second.p.session.drafts.A,' 次','the queued send carries only what followed');
+ f.host.request('draft',original+' 次 にほん');
+ composing=false;f.host.composed();
+ assert.equal(f.getSession().drafts.A,' 次 にほん');assert.equal(f.disk.get('A'),' 次 にほん');
+ f.host.receive(f.reply(second,{session:{sel:'A',drafts:{A:''},rid:21},cmds:[{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().drafts.A,' にほん');
+});

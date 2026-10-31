@@ -5,6 +5,7 @@ import { viewerChoice } from './viewer-feedback.js';
 import { terminalInputRequest } from './terminal-input.js';
 import { terminalOutputFrame } from './terminal-output.js';
 import { modelMenuRequest } from './model-menu-input.js';
+import { SentClaims } from './sent-claims.js';
 
 const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -74,7 +75,7 @@ export class ThinHost {
     if (!Number.isSafeInteger(rid) || rid < 0 || rid >= 2 ** 47) throw Error('Invalid ordinary request counter');
     this.session.rid = Math.max(rid, Date.now());
     this.viewerRevision = 0;this.localRevision = 0;this.selectionRevision = 0;this.drafts = new Map();this.draftChanges = new Map();this.fields = new Map();this.pending = new Map();this.actions = [];this.active = null;
-    this.terminalBytes = 0;
+    this.terminalBytes = 0;this.sent = new SentClaims();
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
     // the reader away from the end: the thread and the newest entry its page
@@ -195,6 +196,7 @@ export class ThinHost {
       if (action === 'draft') {
         const draft = { revision: this.localRevision, text: value };
         this.drafts.set(this.session.sel, draft);this.draftChanges.set(this.session.sel, draft);
+        this.sent.edited(this.session.sel, value);
       }
       this.api.sessionChanged(this.session);
       this.api.local(action, value, this.session);
@@ -271,6 +273,8 @@ export class ThinHost {
     } else {
       const urgent = retire || action === 'stop' || action === 'interrupt';
       const operation = { action, value, viewer, viewerRevision: this.viewerRevision, input: clone(this.session), revision: this.localRevision, settled, scope, urgent };
+      // what this send takes from the composer (sent-claims.js)
+      if (action === 'send' || action === 'send-alt') operation.claim = this.sent.capture(this.session.sel, operation.input.drafts?.[this.session.sel]);
       // Stop and explicit close/switch controls remain responsive during input.
       if (urgent) this.actions.unshift(operation);
       else this.actions.push(operation);
@@ -283,6 +287,23 @@ export class ThinHost {
   }
   draftChanged(thread, text) {
     this.draftChanges.set(thread, { revision: ++this.localRevision, text });
+  }
+  // The composer's edit events (host.js): an edit starting at `start` in
+  // the selected thread's field, and the end of an IME composition, after
+  // which a sent text due to come off the field does.
+  touched(start) { this.sent.touch(this.session.sel, start); }
+  composed() { this.cutSent(this.session.sel, this.sent.settle(this.session.sel)); }
+  // An accepted send's text comes off the front of the draft the person
+  // typed on with; what they typed after it stays as it is.
+  cutSent(thread, cut) {
+    const text = this.session.drafts[thread];
+    if (!cut || typeof text !== 'string' || !text.startsWith(cut)) return;
+    const rest = text.slice(cut.length);
+    this.session.drafts = { ...this.session.drafts, [thread]: rest };
+    this.drafts.set(thread, { ...this.drafts.get(thread), text: rest });
+    this.draftChanged(thread, rest);
+    this.api.local('draft', rest, { ...this.session, sel: thread });
+    this.api.sessionChanged(this.session);
   }
   perform(action, value) {
     return new Promise(resolve => {
@@ -579,23 +600,17 @@ export class ThinHost {
       const c = item.command, thread = this.api.threadKey?.(c.thread) ?? c.thread;
       const newer = this.drafts.get(thread)?.revision > (metadata?.revision ?? -1);
       if (c.type === 'keep' && newer) {
-        const operation = metadata?.operation, sent = operation?.input.drafts?.[thread];
-        // A send consumes its captured prefix, even if the next keystrokes
-        // arrived before its Keep. Unrelated replacement drafts stay intact.
-        if (c.text === '' && ['send', 'send-alt'].includes(operation?.action) && sent) {
-          const trim = text => typeof text === 'string' && text.startsWith(sent) ? text.slice(sent.length) : text;
-          const text = this.session.drafts[thread], rest = trim(text);
-          if (rest !== text) {
-            this.session.drafts = { ...this.session.drafts, [thread]: rest };
-            this.drafts.set(thread, { ...this.drafts.get(thread), text: rest });
-            this.draftChanged(thread, rest);
-            this.api.local('draft', rest, { ...this.session, sel: thread });
+        const operation = metadata?.operation, claim = operation?.claim, sent = operation?.input.drafts?.[thread];
+        // A send consumes the text it took, even if the next keystrokes
+        // arrived before its Keep: off the field only while no edit touched
+        // that text (sent-claims.js), never by what the new text starts with.
+        if (c.text === '' && claim?.thread === thread && sent) {
+          // Another Enter may already have captured that same text while
+          // this send was on its way. It must send only what followed.
+          for (const queued of this.actions) if (queued.claim?.over.includes(claim) && queued.input.drafts?.[thread]?.startsWith(sent)) {
+            queued.input.drafts[thread] = queued.input.drafts[thread].slice(sent.length);
           }
-          // Another Enter may already have captured that same prefix while
-          // this send was on its way. It must send only the following draft.
-          for (const queued of this.actions) if (['send', 'send-alt'].includes(queued.action) && queued.input.sel === thread) {
-            queued.input.drafts[thread] = trim(queued.input.drafts[thread]);
-          }
+          this.cutSent(thread, this.sent.accept(claim, this.api.composing?.(thread) === true));
         }
         continue;
       }
@@ -610,6 +625,8 @@ export class ThinHost {
       }
     }
     const fieldOperation = metadata?.operation;
+    // (a send whose text is not due to come off the field is done with it)
+    if (fieldOperation?.claim && !fieldOperation.claim.due) this.sent.drop(fieldOperation.claim);
     if (fieldOperation?.action === 'bfield') {
       const field = this.fields.get(fieldOperation.field);
       if (field?.revision === fieldOperation.revision) field.acknowledged = true;

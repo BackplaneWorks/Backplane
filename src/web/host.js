@@ -9,6 +9,7 @@ import App from "./app.bend";
 import { applyComposerDraft } from "./composer-draft.js";
 import { homeDraftStorage } from "./home-drafts.js";
 const localStorage = homeDraftStorage(window.localStorage, window.backplaneDesktop?.drafts);
+import { editStart } from "./sent-claims.js";
 import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
@@ -158,6 +159,9 @@ function catUri(name) {
   return u;
 }
 
+// an IME composition in the composer (its listeners are by the input
+// listener below): the composer's text is not written meanwhile
+let composerComposing = false;
 function setAttrs(el, oldAttrs, attrs) {
   const seen = new Set();
   // Read the new attributes, not an old/recycled element's field owner.
@@ -172,7 +176,7 @@ function setAttrs(el, oldAttrs, attrs) {
         // to-do. Keep that focused edit until its change event captures it.
         const editingTodo = el === document.activeElement && el.getAttribute("data-on-change") === "todo-text" &&
           [...each(oldAttrs)].some(old => is(old, "At") && old.name === "value" && old.value !== el.value);
-        if (!editingTodo && el.value !== value) el.value = value;
+        if (!editingTodo && el.value !== value && !(composerComposing && el.id === "composer")) el.value = value;
       } else if (el.getAttribute(a.name) !== a.value) {
         el.setAttribute(a.name, a.value);
         if (a.name === "data-cat") el.src = catUri(a.value);
@@ -1040,7 +1044,7 @@ function run(cmds) {
       jump = c.id; // after the next render, which opens its folds
       later();
     } else if (is(c, "Keep")) {
-      applyComposerDraft(document, c.thread, c.text);
+      applyComposerDraft(document, c.thread, c.text, composerComposing);
       // written at once: a crash or a closed tab loses nothing typed
       try {
         if (c.thread === "@lang") localStorage.setItem("backplane-lang", c.text);
@@ -1555,6 +1559,27 @@ document.addEventListener("paste", (e) => {
   e.preventDefault();
   void uploadFiles(el.getAttribute("data-paste"), files);
 });
+
+// The composer's edits while a send's acknowledgement is on its way
+// (thin-host.js, sent-claims.js): where each one starts, so text the send
+// took comes off the field only if the person left it alone, and IME
+// compositions, after which what is due comes off
+document.addEventListener("beforeinput", (e) => {
+  const el = e.target;
+  if (el?.id === "composer") thin?.touched?.(editStart(e.inputType, el.value, el.selectionStart, el.selectionEnd));
+}, true);
+document.addEventListener("compositionstart", (e) => {
+  const el = e.target;
+  if (el?.id !== "composer") return;
+  composerComposing = true;
+  thin?.touched?.(Math.min(el.selectionStart, el.selectionEnd));
+}, true);
+document.addEventListener("compositionend", (e) => {
+  if (e.target?.id !== "composer") return;
+  composerComposing = false;
+  // after the composition's last input event has saved the draft
+  setTimeout(() => { if (!composerComposing) thin?.composed?.(); }, 0);
+}, true);
 
 // text typed into a key field without a key event (a phone keyboard)
 document.addEventListener("input", (e) => {
@@ -2140,7 +2165,7 @@ function localPresentation(action, value, session) {
     if (!restoreTransition(presentationTarget(session))) void restoreFocused();
     later();
   } else if (action === "draft") {
-    applyComposerDraft(document, session.sel, value);
+    applyComposerDraft(document, session.sel, value, composerComposing);
     ui = App.restore(ui, session.sel, value);
     // the hub's page is redrawn with the draft at once (app.bend's
     // presentation_overlay: the send button and the slash commands follow
@@ -2576,6 +2601,7 @@ async function startThin(again = false, reason = "initial") {
         restoreTransition(target);
       },
       local: localPresentation,
+      composing: thread => composerComposing && document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread") === thread,
       modelMenuReady: () => {
         // A picker whose cursor moved (data-draft) opens and shuts through
         // the hub, so its picture never shows a cursor dropped since.
