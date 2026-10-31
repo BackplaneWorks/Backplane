@@ -12,6 +12,7 @@ const abortError=()=>new DOMException('Render source superseded','AbortError');
 const raf=globalThis.requestAnimationFrame?.bind(globalThis)||((f)=>setTimeout(()=>f(performance.now()),16));
 const caf=globalThis.cancelAnimationFrame?.bind(globalThis)||clearTimeout;
 const frame=()=>new Promise(raf);
+const PROOF_RETRIES=30;
 const page=globalThis.document;
 export async function createPathTraceView({canvas,vendorUrl='/viewer/vendor/viewer.js',workerUrl='/viewer/vendor/bvh-worker.js',onStatus=()=>{},maxSamples=32,maxMs=30000,maxPixels=2000000,materialPolicy='cad-studio'}={}) {
   const vendor=await import(vendorUrl);
@@ -142,7 +143,7 @@ class OriginalModelView {
     if(this.disposed)throw Error('Renderer disposed');
     this.sourceAbortCleanup?.();this.sourceAbortCleanup=null;const generation=++this.generation;this.abort?.abort();this.abort=new AbortController();this.abort.signal.addEventListener('abort',()=>{this.releaseMaskRelief('Source load aborted');this.releaseTrace();},{once:true});
     const controller=this.abort,abort=()=>controller.abort(),cleanupAbort=()=>signal?.removeEventListener('abort',abort);signal?.addEventListener('abort',abort,{once:true});this.sourceAbortCleanup=cleanupAbort;if(signal?.aborted)controller.abort();
-    this.releaseScene();this.built=false;this.asset={key,revision,source,sha256,orientation};this.state={...this.state,key,revision,source,sha256,orientation,visible:false,firstFrame:false,triangles:0,sourceMeshes:0,samples:0,illustrativeSolder:false,solderJoints:0};this.report('loading');
+    this.releaseScene();this.built=false;this.proofRetries=0;this.asset={key,revision,source,sha256,orientation};this.state={...this.state,key,revision,source,sha256,orientation,visible:false,firstFrame:false,triangles:0,sourceMeshes:0,samples:0,illustrativeSolder:false,solderJoints:0};this.report('loading');
     const current=()=>!this.disposed&&generation===this.generation&&!this.abort.signal.aborted;
     let timeout;
     try {
@@ -280,6 +281,11 @@ class OriginalModelView {
       const pixels=new Uint8Array(w*h*4);gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
       let geometry=false;for(let i=0;i<pixels.length;i+=4){if(Math.abs(pixels[i]-baseline[i])+Math.abs(pixels[i+1]-baseline[i+1])+Math.abs(pixels[i+2]-baseline[i+2])>12){geometry=true;break;}}
       if(geometry&&gl.getError()===gl.NO_ERROR){const generation=this.generation;this.provingFrame=true;raf(()=>{this.provingFrame=false;if(this.ready&&!this.disposed&&generation===this.generation){this.report(this.state.phase,{visible:true,firstFrame:true});this.requestMaskRelief();this.requestRasterBatches();}});}
+      // The first draw of a freshly loaded scene can leave the framebuffer
+      // unchanged (programs and buffers still being prepared). Try the proof
+      // again on the next frames instead of waiting for an unrelated redraw;
+      // bounded, so a model that truly draws nothing still settles.
+      else if(!geometry&&(this.proofRetries=(this.proofRetries||0)+1)<=PROOF_RETRIES){const generation=this.generation;raf(()=>{if(this.ready&&!this.disposed&&!this.hidden&&generation===this.generation&&!this.state.visible&&this.mode!=='pathtrace')this.raster();});}
     }
     this.drawSelection();}finally{this.rasterKey.visible=false;this.areaKey.visible=true;}
     this.requestMaskRelief();this.requestRasterBatches();

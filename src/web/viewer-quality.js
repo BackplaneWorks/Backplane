@@ -200,7 +200,10 @@ export class ViewerQuality {
     if (!this.renderer) return;
     const pose = this.solid.cameraSnapshot?.(); if (!pose) return;
     const text = JSON.stringify(pose);
-    if (text !== this.pose) { this.pose = text; this.renderer.setCamera(pose); }
+    // Until the main view has fitted its own model (or has a saved pose to
+    // restore), its camera is an unfitted default that may not see the original
+    // model at all; the renderer then frames the original model itself.
+    if (text !== this.pose && (this.solid.cameraFitted?.() ?? true)) { this.pose = text; this.renderer.setCamera(pose); }
     const same = this.asset?.revision === this.revision();
     this.show(this.state.quality && this.ready && same && !pose.thermal?.enabled);
     if (pose.thermal?.enabled && this.state.quality) this.message("Illustrative heat overlay · path tracing paused");
