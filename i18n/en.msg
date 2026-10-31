@@ -1351,3 +1351,5 @@ intent.edit = Edit
 intent.edit.tip = Change it in the message box; Save (Ctrl+Enter) keeps it
 intent.save.tip = Save the intent (Ctrl+Enter); Enter starts a new line
 intent.saved = Intent saved
+
+diff.revert.confirm = Discard this thread’s uncommitted changes, including new files?

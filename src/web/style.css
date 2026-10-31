@@ -785,7 +785,7 @@ button.icon { display: inline-flex; align-items: center; justify-content: center
 .lightbox button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .lightbox .lb-status { position: absolute; bottom: 20px; left: 12px; right: 12px; color: white; background: #111c; width: fit-content; max-width: calc(100% - 24px); cursor: default; }
 .lightbox .lb-status:empty { display: none; }
-.tools button.danger { border-color: var(--bad); color: var(--bad); }
+.tools button.danger, .diff-btns button.danger { border-color: var(--bad); color: var(--bad); }
 .tools { align-items: center; }
 .tools button.tool { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 7px; white-space: nowrap; }
 .tools button.tool .ico { color: var(--dim); }

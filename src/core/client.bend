@@ -1130,7 +1130,7 @@ def Ui.on_thread(u: Ui, m: String) -> Act:
 def Ui.select.k(u: Ui, +id: String) -> Ui:
   match u:
     case Ui{st, _, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui{st, id, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@del", ""), "@bot", ""), "@room", ""), "@remote", ""), "@bot.want", ""), "@thread.want", ""), "@intent", ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
+      Ui{st, id, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@revert", ""), "@del", ""), "@bot", ""), "@room", ""), "@remote", ""), "@bot.want", ""), "@thread.want", ""), "@intent", ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
 
 # Drafts kept
 # -----------
@@ -7249,6 +7249,28 @@ def Ui.delete.k(armed: Bool, +u: Ui) -> Act:
 
 def Ui.delete(+u: Ui) -> Act:
   Ui.delete.k(Ui.deleting(u), u)
+
+# Revert asks before replacing the working copy, just as Delete asks
+# before removing a thread. Confirmation belongs to this thread and turn.
+def Ui.reverting(+u: Ui) -> Bool:
+  Bool.and(Bool.not(String.is_empty(Ui.sel(u))), String.eq(Ui.scratch(u, "@revert"), Ui.sel(u)))
+
+def Ui.revert.confirm(armed: Bool, +u: Ui) -> Act:
+  match armed:
+    case True{}:
+      Ui.on_thread.p(Ui.scratch_set(u, "@revert", ""), "git.revert", [J.KV{"turn", J.Num{Ui.scratch(u, "@revert.turn")}}])
+    case False{}:
+      Act{u, Nil{}}
+
+def Ui.revert.k(confirm: Bool, +u: Ui, +turn: String) -> Act:
+  match confirm:
+    case True{}:
+      Ui.revert.confirm(Ui.reverting(u), u)
+    case False{}:
+      Act{Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "diff", ""), "@revert", Ui.sel(u)), "@revert.turn", Bool.pick(String, String.is_empty(turn), "0", turn)), Nil{}}
+
+def Ui.revert(+u: Ui, +turn: String) -> Act:
+  Ui.revert.k(String.eq(turn, "confirm"), u, turn)
 
 # Acting on a thread's row
 # ------------------------
@@ -14858,7 +14880,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 24n:
       Dv.ask(u)
     case 25n:
-      Ui.on_thread.p(u, "git.revert", [J.KV{"turn", J.Num{Bool.pick(String, String.is_empty(value), "0", value)}}])
+      Ui.revert(u, value)
     case 26n:
       Proj.open.fresh(u)
     case 27n:
@@ -15314,8 +15336,13 @@ def Ui.act.todo(on: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}:
       Todos.dispatch(String.eq(action, "todo-edit"), u, action, value)
 
+def Ui.act.revert(cancel: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match cancel:
+    case True{}: Act{Ui.scratch_set(u, "@revert", ""), Nil{}}
+    case False{}: Ui.act.todo(Nat.is_lt(C.Codec.pos(["todo-edit", "todo-text", "todo-add"], action), 3n), u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.act.todo(Nat.is_lt(C.Codec.pos(["todo-edit", "todo-text", "todo-add"], action), 3n), u, action, value)
+  Ui.act.revert(String.eq(action, "revert-no"), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

@@ -1374,3 +1374,5 @@ intent.edit = 編集
 intent.edit.tip = メッセージ欄で変更し、保存（Ctrl+Enter）で保存します
 intent.save.tip = 意図を保存（Ctrl+Enter）・Enterで改行
 intent.saved = 意図を保存しました
+
+diff.revert.confirm = 新しいファイルを含め、このスレッドの未コミットの変更を破棄しますか？

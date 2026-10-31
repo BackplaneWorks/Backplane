@@ -2692,6 +2692,17 @@ def View.diff.at.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<
 def View.diff.at(+lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
   View.diff.at.k(String.is_empty(none), lc, text, none)
 
+# The diff stays visible while the person decides what to discard.
+def View.revert.loc(on: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match on:
+    case False{}: Nil{}
+    case True{}:
+      [D.El{"div", "revert-confirm", [D.At{"class", "diff-head"}, D.At{"role", "alert"}, D.At{"data-esc", "revert-no"}], [
+        D.Dom.span("summary", MSG.T.diff.revert.confirm(lc)),
+        D.El{"div", "", [D.At{"class", "diff-btns"}], [
+          D.Dom.button("danger", "revert", "confirm", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+          D.Dom.button("", "revert-no", "", MSG.T.common.cancel(lc), MSG.T.common.cancel(lc))]}]}]
+
 def View.pending.image(image: Bool, +p: String) -> List<&2, D.Node>:
   match image:
     case True{}:
@@ -4488,7 +4499,7 @@ def View.review(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match i:
     case 0n:
-      View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none"))
+      List.append(&2, D.Node, View.revert.loc(U.Ui.reverting(u), lc), View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none")))
     case 1n:
       View.browser.loc(lc, u)
     case 2n:
