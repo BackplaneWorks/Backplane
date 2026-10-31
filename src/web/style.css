@@ -1155,7 +1155,9 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 .intent-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-bottom: 1px solid var(--line); }
 .intent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .intent-edit { font-size: calc(12px * var(--text-scale, 100) / 100); padding: 3px 10px; }
-.intent-body { padding: 10px 14px 6px; overflow-y: auto; min-height: 0; }
+/* a long word or name wraps at the dialog's edge (a code block keeps its
+   lines and scrolls) */
+.intent-body { padding: 10px 14px 6px; overflow-y: auto; min-height: 0; overflow-wrap: anywhere; }
 .intent-body h1, .intent-body h2, .intent-body h3 { font-size: calc(12px * var(--text-scale, 100) / 100); margin: 10px 0 4px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
 .intent-body h1:first-child, .intent-body h2:first-child, .intent-body h3:first-child { margin-top: 0; }
 .intent-note { display: block; color: var(--dim); padding-bottom: 8px; }
