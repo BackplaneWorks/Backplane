@@ -803,3 +803,10 @@ test('during an IME composition the sent text comes off only when it ends; queue
  f.host.receive(f.reply(second,{session:{sel:'A',drafts:{A:''},rid:21},cmds:[{type:'keep',thread:'A',text:''}]}));
  assert.equal(f.getSession().drafts.A,' にほん');
 });
+test('an intent edit\'s borrowed draft and its mark go with the selected thread\'s requests only',async()=>{
+ const f=await fixture();f.open();f.host.request('flag','settings');const req=f.sent.at(-1);
+ f.host.receive(f.reply(req,{cmds:[{type:'keep',thread:'@intent.draft:A',text:'kept 日本語'},{type:'keep',thread:'@intent.edit:A',text:'1'},{type:'keep',thread:'@intent.draft:B',text:'other'}]}));
+ assert.equal(f.disk.get('@intent.draft:A'),'kept 日本語');
+ f.host.request('settings-page','appearance');const drafts=f.sent.at(-1).p.session.drafts;
+ assert.equal(drafts['@intent.draft:A'],'kept 日本語');assert.equal(drafts['@intent.edit:A'],'1');assert.equal(drafts['@intent.draft:B'],undefined);
+});

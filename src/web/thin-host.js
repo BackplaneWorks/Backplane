@@ -34,6 +34,11 @@ function requestSession(session, _action, target) {
   for (const key of session.sel ? ['@sch:' + session.sel, '@split.sheet:' + session.sel] : []) {
     if (typeof local[key] === 'string' && utf8Bytes(local[key]) <= 1024) Object.defineProperty(drafts, key, { value: local[key], enumerable: true });
   }
+  // an intent edit's borrowed conversation draft and its mark (client.bend's
+  // Intent.kept): a fresh actor (a reload, a reconnect) gives it back on Save
+  for (const key of session.sel ? ['@intent.draft:' + session.sel, '@intent.edit:' + session.sel] : []) {
+    if (typeof local[key] === 'string' && utf8Bytes(local[key]) <= 131072) Object.defineProperty(drafts, key, { value: local[key], enumerable: true });
+  }
   const route = compactRoute(session.route, target);
   return { sel: session.sel, rid: session.rid, drafts, outbox: {},
     open: choices(session.open, (_key, item) => typeof item === 'boolean'),

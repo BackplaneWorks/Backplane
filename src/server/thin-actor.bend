@@ -146,6 +146,16 @@ def Actor.sheet.field(+key: String, value: J.Json, out: J.Json) -> J.Json:
 def Actor.sheet.input(+thread: String, +drafts: J.Json, out: J.Json) -> J.Json:
   Actor.sheet.field("@split.sheet:" ++ thread, J.Json.get_obj(drafts, "@split.sheet:" ++ thread), Actor.sheet.field("@sch:" ++ thread, J.Json.get_obj(drafts, "@sch:" ++ thread), out))
 
+def Actor.intent.field(+key: String, value: J.Json, out: J.Json) -> J.Json:
+  match value:
+    case J.Str{+text}: Actor.local.bounded(W.Wire.within(text, 131072n), key, text, out)
+    case _: out
+
+# an intent edit's borrowed conversation draft and its mark (client.bend's
+# Intent.kept), for a fresh actor: Save after a reload gives the draft back
+def Actor.intent.input(+thread: String, +drafts: J.Json, out: J.Json) -> J.Json:
+  Actor.intent.field("@intent.edit:" ++ thread, J.Json.get_obj(drafts, "@intent.edit:" ++ thread), Actor.intent.field("@intent.draft:" ++ thread, J.Json.get_obj(drafts, "@intent.draft:" ++ thread), out))
+
 def Actor.local.copy(xs: List<&2, Sigma<&2, &2, String, _ => String>>, dr: Map<&2, String>) -> Map<&2, String>:
   match xs:
     case Nil{}: dr
@@ -167,8 +177,8 @@ def Actor.away.input(valid: Bool, +thread: String, +p: J.Json, out: J.Json) -> J
 def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
   +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
   +session = J.Json.get_obj(p, "session")
-  +drafts = Actor.sheet.input(thread, J.Json.get_obj(session, "drafts"), Actor.away.input(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, p,
-    Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts")))))
+  +drafts = Actor.intent.input(thread, J.Json.get_obj(session, "drafts"), Actor.sheet.input(thread, J.Json.get_obj(session, "drafts"), Actor.away.input(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, p,
+    Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts"))))))
   V.Obj.put(p, "session", V.Obj.put(V.Obj.put(V.Obj.put(session, "drafts", drafts), "outbox", J.Json.obj(Nil{})), "info",
     J.Json.obj(P.Session.strings(Map.to_list(&2, String, Actor.seeds(thread, Map.to_list(&2, String, P.Session.read.strings(J.Json.get_obj(session, "info"), Map.new(&2, String))), Map.new(&2, String)))))))
 

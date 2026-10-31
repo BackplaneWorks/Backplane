@@ -1205,14 +1205,27 @@ def Draft.clear(u: Ui) -> Act:
     case Ui{st, +sel, +dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
       Act{Ui{st, sel, Map.set(&2, String, Draft.intent.clear(String.eq(Str.get(dr, "@intent.edit:" ++ sel), "1"), sel, dr), sel, ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, Draft.keep(sel, "")}
 
+# An intent edit's borrowed draft and its mark are kept by the page as
+# drafts of their own (Intent.kept); Save, or an ordinary message sent over
+# an abandoned edit, has the page forget them too
+def Draft.intent.forget(editing: Bool, +sel: String) -> List<&2, Cmd>:
+  match editing:
+    case False{}: Nil{}
+    case True{}: [Keep{"@intent.draft:" ++ sel, ""}, Keep{"@intent.edit:" ++ sel, ""}]
+
+def Draft.sent.f(u: Ui) -> List<&2, Cmd>:
+  match u:
+    case Ui{_, +sel, dr, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Draft.intent.forget(String.eq(Str.get(dr, "@intent.edit:" ++ sel), "1"), sel)
+
 # the same with the thread's attachments, which went out with it
-def Draft.sent.k(a: Act) -> Act:
+def Draft.sent.k(a: Act, more: List<&2, Cmd>) -> Act:
   match a:
     case Act{Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, cs}:
-      Act{Ui{st, sel, Map.set(&2, String, dr, "@att:" ++ sel, ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, cs}
+      Act{Ui{st, sel, Map.set(&2, String, dr, "@att:" ++ sel, ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, List.append(&2, Cmd, cs, more)}
 
-def Draft.sent(u: Ui) -> Act:
-  Draft.sent.k(Draft.clear(u))
+def Draft.sent(+u: Ui) -> Act:
+  Draft.sent.k(Draft.clear(u), Draft.sent.f(u))
 
 # the commands of a step that came first, before those of the next
 def Ui.first(cs: List<&2, Cmd>, a: Act) -> Act:
@@ -7788,6 +7801,17 @@ def Intent.borrow.k(editing: Bool, +u: Ui, +th: String) -> Ui:
 def Intent.borrow(+u: Ui, +th: String) -> Ui:
   Intent.borrow.k(Bool.and(String.eq(Ui.scratch(u, "@intent.edit:" ++ th), "1"), OR.Intent.is(Ui.draft_text(u))), u, th)
 
+# The page keeps the borrowed draft and the mark as drafts of their own
+# (Keeps of "@intent.draft:<t>" and "@intent.edit:<t>"; thin-host.js's
+# requestSession and thin-actor.bend's Actor.intent.input bring them to a
+# new connection's actor), so Save after a reload or a reconnect still
+# gives the conversation's draft back.
+def Intent.kept(+u: Ui, +th: String) -> List<&2, Cmd>:
+  [Keep{"@intent.draft:" ++ th, Ui.scratch(u, "@intent.draft:" ++ th)}, Keep{"@intent.edit:" ++ th, Ui.scratch(u, "@intent.edit:" ++ th)}, Focus{"composer"}]
+
+def Intent.borrowed(+b: Ui, +text: String, +th: String) -> Act:
+  Ui.also(Ui.draft(Ui.scratch_set(b, "@intent", ""), text), Intent.kept(b, th))
+
 def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
   match i:
     # the card opened or shut
@@ -7796,7 +7820,7 @@ def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
     # the intent into the composer, to change and send (the intent on show
     # goes away)
     case 1n:
-      Ui.also(Ui.draft(Ui.scratch_set(Intent.borrow(u, th), "@intent", ""), OR.Intent.edit(Fab.intent(u, th))), [Focus{"composer"}])
+      Intent.borrowed(Intent.borrow(u, th), OR.Intent.edit(Fab.intent(u, th)), th)
     # Buy it: the hub makes the buy thread and this client goes to it
     case 2n:
       Ui.rpc(Made.want(u), "order.buy", [J.KV{"thread", J.Str{th}}])
@@ -7898,7 +7922,8 @@ def Intent.send.d(a: Act, +text: String) -> Act:
 # Save returns the borrowed composer to its conversation, through the
 # usual draft command so the page keeps the restored text too.
 def Intent.return(+u: Ui) -> Act:
-  Ui.draft(Ui.scratch_set(Ui.scratch_set(u, "@intent.draft:" ++ Ui.sel(u), ""), "@intent.edit:" ++ Ui.sel(u), ""), Ui.scratch(u, "@intent.draft:" ++ Ui.sel(u)))
+  Ui.also(Ui.draft(Ui.scratch_set(Ui.scratch_set(u, "@intent.draft:" ++ Ui.sel(u), ""), "@intent.edit:" ++ Ui.sel(u), ""), Ui.scratch(u, "@intent.draft:" ++ Ui.sel(u))),
+    Draft.intent.forget(True{}, Ui.sel(u)))
 
 def Intent.send(+u: Ui) -> Act:
   Intent.send.d(Intent.return(u), OR.Intent.body(Ui.draft_text(u)))

@@ -13482,3 +13482,8 @@ law revert_ask_sends_nothing:
 
 law revert_turn_sent_at_once:
   {List.length(&2, U.Cmd, U.Act.cmds(U.Ui.revert(U.Ui.select.k(U.Ui.init(0n), "t1"), "0"))) == 1n : Nat}
+
+# Save after a reload, with only what the page kept (the borrowed draft and
+# the mark), gives the conversation's draft back
+law intent_kept_backup_restores:
+  {U.Ui.draft_text(U.Act.ui(U.Intent.return(U.Ui.restore(U.Ui.restore(U.Ui.restore(U.Ui.select.k(U.Ui.init(0n), "t"), "t", "/intent"), "@intent.draft:t", "draft"), "@intent.edit:t", "1")))) == "draft" : String}

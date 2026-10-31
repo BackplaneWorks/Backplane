@@ -13873,3 +13873,6 @@ def Laws.revert_ask_sends_nothing():
 
 def Laws.revert_turn_sent_at_once():
   {==}
+
+def Laws.intent_kept_backup_restores():
+  {==}
