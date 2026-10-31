@@ -672,6 +672,39 @@ def Mcp.send.k(ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: Strin
     case False{}:
       Res.fail("that thread is not in this project")
 
+# thread_send's text. Agents sometimes name it `message` (Claude Code's own
+# SendMessage does), so a blank `text` falls back to `message`; a text that
+# is still blank is refused, never posted as an empty message that answers
+# "sent". The walk is tail recursive: no stack per char.
+def Mcp.ws(+c: U32) -> Bool:
+  Bool.or(Bool.or(U32.is_eq(c, 32), U32.is_eq(c, 9)), Bool.or(U32.is_eq(c, 10), U32.is_eq(c, 13)))
+
+def Mcp.blank.go(s: String, +ok: Bool) -> Bool:
+  match s:
+    case SNil{}:
+      ok
+    case SCon{+h, t}:
+      Mcp.blank.go(t, Bool.and(ok, Mcp.ws(Char.to_u32(h))))
+
+def Mcp.blank(s: String) -> Bool:
+  Mcp.blank.go(s, True{})
+
+def Mcp.send.body.k(none: Bool, +a: J.Json) -> String:
+  match none:
+    case True{}: J.Json.get_str(a, "message", "")
+    case False{}: J.Json.get_str(a, "text", "")
+
+def Mcp.send.body(+a: J.Json) -> String:
+  Mcp.send.body.k(Mcp.blank(J.Json.get_str(a, "text", "")), a)
+
+def Mcp.send.ck(blank: Bool, ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: String, +text: String, +mode: String) -> Res:
+  match blank:
+    case True{}: Res.fail("thread_send needs a non-empty `text` (the message); nothing was sent")
+    case False{}: Mcp.send.k(ok, s, now, thread, target, text, mode)
+
+def Mcp.send.checked(ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: String, +text: String, +mode: String) -> Res:
+  Mcp.send.ck(Mcp.blank(text), ok, s, now, thread, target, text, mode)
+
 def Mcp.names() -> List<&2, String>:
   ["orchestrator_capabilities", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "viewer_show",
    "thread_launch", "thread_update", "thread_wait", "thread_interrupt", "thread_wait_now", "terminal_open", "terminal_send", "terminal_close", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "review_comments", "review_comment", "wake_on", "wake_list", "wake_cancel", "deploy_restart", "deploy_status", "deploy_cancel", "lock_acquire", "lock_release", "lock_list", "lock_cancel", "deploy_main", "mail", "mail_list", "mail_read", "mail_search", "mail_tag", "mail_snooze", "mail_done", "decide", "escalate", "charter_set", "mail_dispose", "tell_person"]
@@ -1147,7 +1180,7 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
       Mcp.read.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""),
         Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(a, "limit"), "40")), 40n))
     case 6n:
-      Mcp.send.k(Bool.or(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), B.Lr.may(s, thread, J.Json.get_str(a, "threadId", ""))), s, now, thread, J.Json.get_str(a, "threadId", ""), J.Json.get_str(a, "text", ""), J.Json.get_str(a, "mode", ""))
+      Mcp.send.checked(Bool.or(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), B.Lr.may(s, thread, J.Json.get_str(a, "threadId", ""))), s, now, thread, J.Json.get_str(a, "threadId", ""), Mcp.send.body(a), J.Json.get_str(a, "mode", ""))
     case 7n:
       Mcp.view(thread, J.Json.get_str(a, "path", ""), J.Json.get_str(a, "kind", ""))
     case 8n:
