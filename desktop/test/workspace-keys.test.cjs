@@ -432,21 +432,33 @@ test('a bare / outside every field puts the keyboard in the composer; in a field
 // it, the viewer's close, the person's press and selection.
 function keeperHarness(installComposerFocus, { phone = false } = {}) {
   const listeners = new Map();
-  const page = { thread: 't1', over: false, viewer: false, selection: true, hidden: false };
+  const page = { thread: 't1', over: false, viewer: false, selection: true, hidden: false, cover: null };
   const body = { tagName: 'BODY', closest: () => null };
   const doc = { body, activeElement: body,
     addEventListener: (type, handler) => { if (!listeners.has(type)) listeners.set(type, []);listeners.get(type).push(handler); },
     getElementById: id => id === 'composer' ? composer : null,
     querySelector: sel => sel.startsWith('main.thread-view') ? (page.thread ? { getAttribute: () => page.thread } : null)
       : sel.includes('[data-on-click="panel"]') ? (page.viewer ? {} : null) : null,
-    querySelectorAll: sel => sel.includes('.workspace-palette') && page.over ? [{ getClientRects: () => [{}] }] : [] };
+    querySelectorAll: sel => page.cover ? [page.cover] : sel.includes('.workspace-palette') && page.over ? [{ getClientRects: () => [{}] }] : [] };
+  const inputs = [];
   const composer = { tagName: 'TEXTAREA', id: 'composer', value: 'a draft', selectionStart: 0, selectionEnd: 0, disabled: false,
-    getClientRects: () => [{}], contains: () => false, closest: () => composer,
-    focus() { if (!page.hidden) doc.activeElement = composer; }, setSelectionRange(s, e) { composer.selectionStart = s;composer.selectionEnd = e; } };
-  const win = { matchMedia: () => ({ matches: phone }), setTimeout: f => f(), getSelection: () => ({ isCollapsed: page.selection, anchorNode: {} }) };
+    getClientRects: () => [{}], checkVisibility: () => !page.hidden, contains: () => false, closest: sel => sel.split(',').includes('textarea') ? composer : null,
+    focus() { if (!page.hidden) doc.activeElement = composer; }, setSelectionRange(s, e) { composer.selectionStart = s;composer.selectionEnd = e; },
+    setRangeText(text, s, e) { composer.value = composer.value.slice(0, s) + text + composer.value.slice(e);composer.selectionStart = composer.selectionEnd = s + text.length; },
+    dispatchEvent(e) { inputs.push(e); } };
+  const win = { matchMedia: () => ({ matches: phone }), setTimeout: f => f(), getSelection: () => ({ isCollapsed: page.selection, anchorNode: {} }),
+    InputEvent: class { constructor(type, init) { Object.assign(this, { type }, init); } } };
   const keeper = installComposerFocus({ document: doc, window: win });
   const fire = (type, target = doc.activeElement) => { for (const handler of listeners.get(type) || []) handler({ target }); };
-  return { doc, body, composer, page, keeper, fire };
+  // a key as the page's capture listener sees it; `rail` says whether a
+  // later listener (the rail's keycaps) would still get it
+  const key = (k, target = doc.activeElement, fields = {}) => {
+    const e = { key: k, target, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, defaultPrevented: false, rail: true, ...fields,
+      preventDefault() { e.defaultPrevented = true; }, stopImmediatePropagation() { e.rail = false; } };
+    for (const handler of listeners.get('keydown') || []) handler(e);
+    return e;
+  };
+  return { doc, body, composer, page, keeper, fire, key, inputs };
 }
 
 test('the composer takes the keyboard on load, when another thread shows, when a cover goes or the viewer shuts, caret kept', async () => {
@@ -534,17 +546,6 @@ test('explicit dismissal restores a narrow composer after the popover redraw, ke
   assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [2, 2]);
 });
 
-test('the first view after a reload gives its draft the keyboard once it shows', async () => {
-  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
-  const h = keeperHarness(installComposerFocus);
-  // the page's frame holds the draft hidden until the workspace is whole
-  h.page.hidden = true;h.keeper.check();
-  assert.equal(h.doc.activeElement, h.body);
-  h.page.hidden = false;h.keeper.check();
-  assert.equal(h.doc.activeElement, h.composer);
-  assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [7, 7]);
-});
-
 test('Escape closes a palette or drawing dialog before token stats underneath', async () => {
   const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
   let listener, draw = false, palette = true;
@@ -588,4 +589,91 @@ test('Tab goes round a dialog: last to first, Shift+Tab first to last, the dialo
   assert.equal(dialogTab(dialog, false, stops), edit);
   assert.equal(dialogTab(dialog, true, stops), body);
   assert.equal(dialogTab(dialog, false, []), null);
+});
+
+test('an Esc that puts a popover away gives the composer the keyboard at once, from the popover\'s own field too', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  for (const where of ['.account-picker', '.title-box', '.workspace-palette', '.tok-pop']) {
+    const h = keeperHarness(installComposerFocus, { phone: true });
+    h.doc.activeElement = h.composer;h.composer.setSelectionRange(2, 2);h.fire('select');
+    // the popover is still drawn (the hub's next view takes it away), the
+    // keyboard in it (the rename's or the palette's field)
+    const inner = { tagName: 'INPUT', closest: () => inner };
+    h.page.cover = { getClientRects: () => [{}], matches: sel => sel.split(',').includes(where), contains: el => el === inner };
+    h.doc.activeElement = inner;h.keeper.check();
+    assert.equal(h.doc.activeElement, inner);
+    h.keeper.claim(true);
+    assert.equal(h.doc.activeElement, h.composer, where);
+    assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [2, 2]);
+  }
+  // Settings (or a dialog) is not put away by that Esc: it keeps the keyboard
+  const h = keeperHarness(installComposerFocus);
+  h.page.cover = { getClientRects: () => [{}], matches: () => false, contains: () => false };
+  h.keeper.claim(true);
+  assert.equal(h.doc.activeElement, h.body);
+});
+
+test('the first view after a reload gives its draft the keyboard once it shows', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  // the page's frame holds the draft hidden until the workspace is whole
+  h.page.hidden = true;h.keeper.check();
+  assert.equal(h.doc.activeElement, h.body);
+  // letters typed meanwhile wait for it, not for the rail
+  assert.equal(h.key('x', h.body).rail, false);assert.equal(h.key('y', h.body).defaultPrevented, true);
+  h.page.hidden = false;h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.equal(h.composer.value, 'a draftxy');
+  assert.equal(h.inputs.at(-1).data, 'xy');
+  // once there, the rail's keys are the person's again after Esc from it
+  h.keeper.leave();h.doc.activeElement = h.body;
+  assert.equal(h.key('d', h.body).rail, true);
+});
+
+test('keys typed right after a press on Send or Stop go to the draft, not the rail or the button', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();h.keeper.leave();
+  const send = { tagName: 'BUTTON', closest: selector => selector.split(',').includes('.composer-foot button') ? send : null };
+  // the press is still down: no focus from the keeper yet; the first key
+  // moves it into the draft before the key's own action (the letter lands there)
+  h.fire('pointerdown', send);h.doc.activeElement = send;
+  const m = h.key('m', send);
+  assert.equal(h.doc.activeElement, h.composer);assert.equal(m.rail, false);assert.equal(m.defaultPrevented, false);
+  // Enter right after a press does not press the button again
+  h.fire('pointerdown', send);h.doc.activeElement = send;
+  assert.equal(h.key('Enter', send).defaultPrevented, true);
+  // a press elsewhere (the timeline) and a bare key: the rail's
+  h.fire('pointerdown', h.body);h.fire('pointerup', h.body);h.doc.activeElement = h.body;
+  assert.equal(h.key('d', h.body).rail, true);
+});
+
+test('keys typed right after a press on another thread wait for its composer, never the old one', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();h.keeper.leave();
+  const row = { tagName: 'DIV', closest: selector => selector === '[data-on-click="select"]' ? row : null, getAttribute: () => 't2' };
+  h.fire('pointerdown', row);h.doc.activeElement = h.body;h.fire('pointerup', row);
+  for (const k of 'other') { const e = h.key(k, h.body);assert.equal(e.rail, false);assert.equal(e.defaultPrevented, true); }
+  h.key('x', h.body);h.key('Backspace', h.body);
+  // still t1's composer on show: it does not take them
+  h.keeper.check();
+  assert.equal(h.composer.value, 'a draft');assert.equal(h.doc.activeElement, h.body);
+  // t2 shows (its own draft): there they go, at its caret
+  h.page.thread = 't2';h.composer.value = '';h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.equal(h.composer.value, 'other');
+});
+
+test('typing a moment ago, the keyboard fallen out of its field with a redraw keeps typing in the draft', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();h.keeper.leave();
+  h.key('a', h.composer);
+  h.doc.activeElement = h.body;
+  const e = h.key('b', h.body);
+  assert.equal(e.rail, false);assert.equal(h.doc.activeElement, h.composer);
+  // Esc out of the draft is on purpose: the rail's keys work
+  h.key('Escape', h.composer);h.doc.activeElement = h.body;
+  assert.equal(h.key('d', h.body).rail, true);
 });

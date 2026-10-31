@@ -175,9 +175,23 @@ export function escapeState(event, doc) {
 // where it was in that thread's draft.
 const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop,.account-picker,.title-box:has([data-on-click="rename-no"])';
 const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button';
+// What an Esc puts away (the palette, a picker, a menu, a row's shade, the
+// token stats, a rename): it goes with the hub's next view, and the draft
+// has the keyboard back at once, before the next key.
+const LEAVING = '.workspace-palette,.shade,.modal-back,.local-menu,.tok-pop,.account-picker,.title-box';
+// The keyboard is on its way to the composer for this long after a press on
+// the turn's buttons or another thread's row, an Esc that put something
+// away, or the page's load (until its first view shows the draft); the
+// person typing a moment ago (TYPED) and the keyboard then fallen out of
+// the field (its view redrawn) is the same.
+const COMING = 3000, LOADING = 10000, TYPED = 1000;
 export function installComposerFocus({ document: doc = document, window: win = window,
   phone = () => win.matchMedia?.('(max-width: 760px), (hover: none) and (pointer: coarse)').matches } = {}) {
   let want = true, thread = '', covered = false, viewer = false, pressed = false, restore = false;
+  // (on its way: until when; the thread whose row was pressed; whether the
+  // page's first view is still to come; the last key typed in a field; and
+  // the letters typed meanwhile, for that thread's draft)
+  let coming = Date.now() + LOADING, picked = '', loading = true, typed = 0, held = '', heldFor = '';
   const carets = new Map();
   const field = () => doc.getElementById?.('composer');
   const here = () => doc.querySelector?.('main.thread-view[data-thread]')?.getAttribute('data-thread') || '';
@@ -185,17 +199,30 @@ export function installComposerFocus({ document: doc = document, window: win = w
     const el = field();
     if (el && doc.activeElement === el && here()) carets.set(here(), [el.selectionStart, el.selectionEnd]);
   };
+  // the letters typed while the composer was on its way, into its draft at
+  // the caret (the input event saves the draft as typing does)
+  const flush = el => {
+    if (!held || doc.activeElement !== el || here() !== heldFor) return;
+    const text = held;held = '';
+    try { el.setRangeText(text, el.selectionStart, el.selectionEnd, 'end'); } catch { return; }
+    el.dispatchEvent(new win.InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  };
   const put = (el, at) => {
     el.focus({ preventScroll: true });
     const n = el.value.length, [start, end] = at || [n, n];
     try { el.setSelectionRange(Math.min(start, n), Math.min(end, n)); } catch {}
+    flush(el);
   };
   // (a file field, the paperclip's, takes no typing: a click on it leaves
   // the keyboard to the draft)
   const busy = el => !!el && el !== doc.body && el.type !== 'file' && !!el.closest?.(EDITOR);
+  // (the page's first view keeps its draft hidden until the workspace is whole)
+  const visible = el => shown(el) && el.checkVisibility?.({ visibilityProperty: true }) !== false;
+  // the row pressed opens its thread: until it shows, the composer on show is another's
+  const picking = () => !!picked && Date.now() < coming;
   const check = () => {
     const el = field(), now = here();
-    const over = [...(doc.querySelectorAll?.(COVERS) || [])].some(shown);
+    const covers = [...(doc.querySelectorAll?.(COVERS) || [])].filter(shown), over = covers.length > 0;
     const open = !!doc.querySelector?.(VIEWER_CLOSE);
     if (now && now !== thread) {
       want = true;
@@ -204,19 +231,59 @@ export function installComposerFocus({ document: doc = document, window: win = w
     }
     if (covered && !over || viewer && !open) want = true;
     thread = now || thread;covered = over;viewer = open;
-    if (!want || over || pressed || !el || el.disabled || !shown(el)) return;
+    const active = doc.activeElement, leaving = c => restore && !!c.matches?.(LEAVING);
+    if (!want || !covers.every(leaving) || pressed || !el || el.disabled || !shown(el) || picking() && now !== picked) return;
     want = false;
-    const active = doc.activeElement;
-    if (active === el || busy(active) || phone() && !restore) { restore = false;return; }
+    const done = () => { if (loading) { loading = false;coming = 0; } };
+    if (active === el || busy(active) && !covers.some(c => leaving(c) && c.contains?.(active)) || phone() && !restore) { restore = false;done();return; }
     const selection = win.getSelection?.();
-    if (selection && !selection.isCollapsed && !el.contains(selection.anchorNode)) { restore = false;return; }
+    if (selection && !selection.isCollapsed && !el.contains(selection.anchorNode)) { restore = false;done();return; }
     put(el, carets.get(now));
-    // (still hidden: the reload's first frame keeps the draft out of sight
-    // until the workspace is whole) again once it shows
+    // (hidden still, the page's first view) again once it shows
     if (doc.activeElement !== el) { want = true;return; }
-    restore = false;
+    restore = false;picked = '';done();
   };
-  doc.addEventListener('pointerdown', event => { pressed = true;restore = false; if (event.target?.closest?.(TURN_BUTTONS)) want = true; }, true);
+  doc.addEventListener('pointerdown', event => {
+    pressed = true;restore = false;loading = false;coming = 0;picked = '';typed = 0;held = '';
+    const target = event.target, row = target?.closest?.('[data-on-click="select"]'), id = row?.getAttribute?.('data-value');
+    if (target?.closest?.(TURN_BUTTONS)) { want = true;coming = Date.now() + COMING; }
+    if (id) { picked = id;coming = Date.now() + COMING; }
+  }, true);
+  // A key while the keyboard is on its way (above) is the draft's, not the
+  // rail's: the composer takes the keyboard before the key's own action, so
+  // the letter lands in it, or, its view not on show yet, the letter waits
+  // for it. Esc, Tab, a chord or a press elsewhere is the person moving on.
+  doc.addEventListener('keydown', event => {
+    if (event.isComposing || event.keyCode === 229) return;
+    const target = event.target, key = typeof event.key === 'string' ? event.key : '';
+    const chord = event.ctrlKey || event.metaKey || event.altKey, moving = key === 'Escape' || key === 'Tab';
+    if (busy(target)) {
+      if (moving || target.closest?.(PTY)) { typed = 0;coming = 0;loading = false; } else if (!chord) typed = Date.now();
+      return;
+    }
+    const t = Date.now(), on = t < coming, fell = t - typed < TYPED && (!target || target === doc.body);
+    if (event.defaultPrevented || !on && !fell) return;
+    if (chord || moving) { typed = 0;coming = 0;loading = false;held = '';return; }
+    const letter = key.length === 1;
+    if (!letter && key !== 'Enter' && key !== 'Backspace') return;
+    const el = field(), now = here();
+    if (el && !el.disabled && visible(el) && (!picking() || now === picked)) {
+      if (doc.activeElement !== el) put(el, carets.get(now));
+      want = false;picked = '';
+      // (Enter would press the button the keyboard was on, or start a line)
+      if (key === 'Enter') event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    const owner = picking() ? picked : now;
+    if (!owner) return;
+    event.preventDefault();event.stopImmediatePropagation();
+    if (heldFor !== owner) { held = '';heldFor = owner; }
+    if (key === 'Backspace') held = held.slice(0, -1); else if (letter) held += key;
+    want = true;restore = true;
+  }, true);
+  // the composer taken by a click or the hub's own focus: what waited goes in
+  doc.addEventListener('focusin', event => { if (held && event.target === field()) win.setTimeout(() => flush(field()), 0); }, true);
   // a menu (a <details>) opened or shut by Esc, a click or its own item:
   // no render follows, so the cover is looked at once it has toggled
   doc.addEventListener('toggle', () => win.setTimeout(check, 0), true);
@@ -229,10 +296,14 @@ export function installComposerFocus({ document: doc = document, window: win = w
     check,
     // Esc, a reconnect: the keyboard goes there now if it can
     // An explicit keyboard dismissal may restore the caret at narrow widths
-    // too; automatic focus still leaves the phone's keyboard alone.
-    claim(returning = false) { want = true;restore = returning;check(); },
+    // too, and does not wait for what it put away to leave the page;
+    // automatic focus still leaves the phone's keyboard alone.
+    claim(returning = false) { want = true;restore = returning; if (returning) coming = Date.now() + COMING;check(); },
     // "/": to the end of the draft
     end() { const el = field();if (el && !phone()) { want = false;put(el); return true; } return false; },
+    // Esc from the draft: the keyboard leaves it on purpose (a bare key may
+    // press a rail button)
+    leave() { typed = 0;coming = 0;loading = false;held = ''; },
   };
 }
 
@@ -245,7 +316,10 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
       const action = { Escape: 'ws-palette-close', Enter: 'ws-palette-enter', ArrowUp: 'ws-palette-move', ArrowDown: 'ws-palette-move' }[event.key];
       if (action && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
         event.preventDefault(); event.stopImmediatePropagation();
-        dispatch(action, event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : ''); return;
+        dispatch(action, event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : '');
+        // closed, the draft has the keyboard before the next key
+        if (action === 'ws-palette-close') composer?.claim(true);
+        return;
       }
       if (event.key === 'Tab') {
         const fields = [...palette.querySelectorAll('input,button')];
@@ -291,7 +365,7 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
       if (what === 'term') dispatch('ws-term-hide', '');
       else if (what === 'probe') { if (clearProbe) clearProbe(); else dispatch('probe', ''); }
       else if (what === 'viewer') dispatch('panel', '');
-      else if (esc.composer) { event.target.blur(); return; }
+      else if (esc.composer) { composer?.leave?.();event.target.blur(); return; }
       composer?.claim();
       return;
     }
