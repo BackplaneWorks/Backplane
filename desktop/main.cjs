@@ -39,6 +39,7 @@ const startupPath = path.join(__dirname, 'startup.html');
 const startupURL = pathToFileURL(startupPath).href;
 const launchedAtMs = Date.now();
 let window, origin, connection, serviceReadyAtMs, firstVisibleAtMs, connecting;
+let connectionStatus = {phase:'connecting', message:'Connecting to your service…'};
 let desktopBrowser;
 const imageActions = createImageActions({ electron, origin: () => origin });
 let quitting = false;
@@ -95,10 +96,15 @@ function external(url) {
   try { const parsed = new URL(url); if (['https:', 'http:', 'mailto:'].includes(parsed.protocol) && !parsed.username && !parsed.password) void shell.openExternal(parsed.href); } catch {}
 }
 function status(phase, message) {
+  connectionStatus = {phase, message};
   if (window && !window.isDestroyed()) window.webContents.send('desktop:connection', { phase, message });
 }
+ipcMain.on('desktop:connection-now', event => {
+  event.returnValue = senderIsWindow(event) && event.senderFrame.url === startupURL ? connectionStatus : null;
+});
 async function connect(ses) {
   if (connecting) return connecting;
+  status('connecting', 'Connecting to your service…');
   connecting = (async () => {
     try {
       connection = await service.start(); origin = connection.origin; serviceReadyAtMs = Date.now();

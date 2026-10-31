@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   chooseFolder: () => ipcRenderer.invoke('desktop:choose-folder'),
   version: () => ipcRenderer.invoke('desktop:version'),
   retry: () => ipcRenderer.invoke('desktop:retry'),
+  connectionState: () => ipcRenderer.sendSync('desktop:connection-now'),
   onFocusAddress: callback => {
     if (typeof callback !== 'function') throw new TypeError('Expected a callback');
     const listener = () => callback();
