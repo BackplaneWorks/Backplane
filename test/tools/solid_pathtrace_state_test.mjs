@@ -93,7 +93,11 @@ function batchFixture({compilePending=false}={}){
  queued.shift()();assert.equal(v.state.firstFrame,true);assert.equal(records.length,1);assert.equal(v.state.rasterBatchState,'building');const promise=v.rasterBatchPromise;await promise;
  assert.equal(v.state.rasterBatchState,'active');assert.equal(v.state.rasterBatchSourceMeshes,128);assert.equal(v.state.sourceMeshes,128);assert.equal(v.state.triangles,1);assert.equal(v.state.rasterBatchGroups,1);assert.equal(v.state.rasterBatchBytes,256);assert.equal(v.state.rasterBatchBuildMs,0);assert.equal(v.state.rasterBatchMultiDraw,true);
  const originalScene=v.scene;let drawn;v.renderer.render=scene=>drawn=scene;v.renderRasterScene();assert.equal(drawn,records[0].scene);assert.equal(v.scene,originalScene);
- v.state.visible=false;v.renderRasterScene();assert.equal(drawn,originalScene,'proof remains on original source regardless of a retained batch');v.releaseRasterBatches();assert.equal(records[0].disposed,1);
+ v.state.visible=false;v.renderRasterScene();assert.equal(drawn,records[0].scene,'a retained exact batch is what the proof draws');v.releaseRasterBatches();assert.equal(records[0].disposed,1);
+}
+{
+ const {v,records}=batchFixture();assert.equal(v.state.visible,false);const promise=v.requestRasterBatches(true);assert.equal(records.length,1,'load may batch a large source before its first proof');await promise;
+ assert.equal(v.state.rasterBatchState,'active');let drawn;v.renderer.render=scene=>drawn=scene;v.renderRasterScene();assert.equal(drawn,records[0].scene);v.releaseRasterBatches();
 }
 for(const change of ['policy','solder','resize','hidden','load','dispose','pathtrace']){
  const {v,records}=batchFixture({compilePending:true});Object.assign(v.state,{visible:true,firstFrame:true});const pending=v.requestRasterBatches();await Promise.resolve();const prior=records[0];assert.equal(prior.compiled,true);const epoch=v.rasterEpoch;
