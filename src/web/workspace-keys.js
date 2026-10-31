@@ -335,6 +335,10 @@ export function installComposerFocus({ document: doc = document, window: win = w
   if (win.MutationObserver && doc.body) new win.MutationObserver(check).observe(doc.body, { childList: true });
   return {
     check,
+    activate(event) {
+      if (phone() || event.pointerType === 'touch' || event.pointerType === 'pen' || event.sourceCapabilities?.firesTouchEvents) return;
+      want = true;check();
+    },
     selecting(id) { if (id && id !== picked) { held = '';heldFor = id; } picked = id;want = true; },
     navigationFailed() { picked = '';held = '';heldFor = '';coming = 0;want = false; },
     // Esc, a reconnect: the keyboard goes there now if it can

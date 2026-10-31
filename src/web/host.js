@@ -1635,7 +1635,7 @@ for (const ev of EVENTS) {
     }
     dispatch(action, ev === "input" ? inputValue(el) : valueOf(el));
     // A mouse send or stop leaves the next keystroke in the message box.
-    if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) document.getElementById("composer")?.focus({ preventScroll: true });
+    if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) composerKeeper.activate(e);
   });
 }
 

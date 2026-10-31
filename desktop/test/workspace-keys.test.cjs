@@ -802,3 +802,21 @@ test('a dialog above Commands keeps typing away from its query', async () => {
   assert.equal(h.key('f', button).defaultPrevented, false);
   assert.equal(h.doc.activeElement, button);assert.equal(h.composer.value, 'a draft');
 });
+
+test('button activation returns the desktop caret through the keeper and leaves touch alone', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();h.composer.selectionStart = 2;h.composer.selectionEnd = 4;h.fire('select');
+  h.doc.activeElement = h.body;
+  h.keeper.activate({ pointerType: 'touch' });
+  assert.equal(h.doc.activeElement, h.body);
+  h.keeper.activate({ pointerType: 'mouse' });
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.equal(h.composer.selectionStart, 2);assert.equal(h.composer.selectionEnd, 4);
+  const phone = keeperHarness(installComposerFocus, { phone: true });
+  phone.keeper.activate({ pointerType: 'mouse' });
+  assert.equal(phone.doc.activeElement, phone.body);
+  h.page.over = true;h.doc.activeElement = h.body;
+  h.keeper.activate({ pointerType: 'mouse' });
+  assert.equal(h.doc.activeElement, h.body);
+});
