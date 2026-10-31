@@ -4816,6 +4816,12 @@ law keys_names_of_lines:
 law keys_prompt_none:
   {AK.Keys.prompt("/h/secrets/api.env", "") == "" : String}
 
+law keys_prompt_load_quotes_path:
+  {String.contains(AK.Keys.prompt("/a'b folder/api.env", "TOKEN"), "set -a; . '/a'\\''b folder/api.env'; set +a") == True{} : Bool}
+
+law keys_prompt_list_quotes_path:
+  {String.contains(AK.Keys.prompt("/a'b folder/api.env", "TOKEN"), "sed -n 's/=.*//p' '/a'\\''b folder/api.env'") == True{} : Bool}
+
 # Markdown
 # a separator row makes the row above it the table's head, and only when
 # that row is the table's first

@@ -7031,6 +7031,12 @@ def Laws.keys_names_of_lines():
 def Laws.keys_prompt_none():
   {==}
 
+def Laws.keys_prompt_load_quotes_path():
+  {==}
+
+def Laws.keys_prompt_list_quotes_path():
+  {==}
+
 def Laws.md_head_first(cs):
   {==}
 

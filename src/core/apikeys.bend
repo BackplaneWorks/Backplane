@@ -1,4 +1,5 @@
 import Base
+import ./cad.bend as CAD
 
 # API keys the person keeps for agents (pure). Settings adds one (a name
 # and its secret), lists the names and deletes one; no client ever gets a
@@ -145,9 +146,9 @@ def Keys.prompt.k(none: Bool, +path: String, +ns: List<&2, String>) -> String:
       ""
     case False{}:
       "<api_keys>The user keeps API keys for you in `" ++ path ++ "` (`NAME='value'` lines): " ++ Keys.list(ns) ++ ". "
-      ++ "Use a key without ever seeing it: load the file in the same shell command that needs it, e.g. `set -a; . '" ++ path ++ "'; set +a; curl -H \"Authorization: Bearer $" ++ Maybe.default(&2, String, List.head(&2, String, ns), "NAME") ++ "\" ...`, or in a script read it from the environment that command gives it (`os.environ[\"NAME\"]`). "
+      ++ "Use a key without ever seeing it: load the file in the same shell command that needs it, e.g. `set -a; . " ++ CAD.Cad.quote(path) ++ "; set +a; curl -H \"Authorization: Bearer $" ++ Maybe.default(&2, String, List.head(&2, String, ns), "NAME") ++ "\" ...`, or in a script read it from the environment that command gives it (`os.environ[\"NAME\"]`). "
       ++ "Never print, echo, cat, grep or log the file or a key's value, never write a value into a file, a commit, a message or a tool's arguments, and never pass it on the command line where it would show. If a command's output could show a key, cut it off or redact it before it reaches you. "
-      ++ "To see which names exist now (the user may add some while you work): `sed -n 's/=.*//p' '" ++ path ++ "'`. When a task needs a key that is not there, ask the user to add it in Backplane's Settings, API keys, and say which name to give it.</api_keys>"
+      ++ "To see which names exist now (the user may add some while you work): `sed -n 's/=.*//p' " ++ CAD.Cad.quote(path) ++ "`. When a task needs a key that is not there, ask the user to add it in Backplane's Settings, API keys, and say which name to give it.</api_keys>"
 
 # the block agents get from the names kept (a name a line; nothing when
 # there are none): the names only, never the file

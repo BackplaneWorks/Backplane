@@ -27,6 +27,7 @@ import ../core/usage_page.bend as UP
 import ../core/attach.bend as AT
 import ../core/vt.bend as VT
 import ../core/diff.bend as DF
+import ../core/cad.bend as CAD
 import ../core/mech.bend as MC
 import ../core/look.bend as LO
 import ../core/board.bend as B
@@ -2698,7 +2699,7 @@ def View.diff.nogit(+lc: I.Loc, +path: String) -> List<&2, D.Node>:
    D.El{"div", "", [D.At{"class", "diff-body diff-none"}], [
      D.El{"p", "", Nil{}, [D.Txt{MSG.T.viewer.diff.nogit.why(lc, path)}]},
      D.El{"p", "", Nil{}, [D.Txt{MSG.T.viewer.diff.nogit.how(lc)}]},
-     D.El{"pre", "", Nil{}, [D.Txt{"cd " ++ path ++ "\ngit init\ngit add -A\ngit commit -m start"}]}]}]
+     D.El{"pre", "", Nil{}, [D.Txt{"cd " ++ CAD.Cad.quote(path) ++ "\ngit init\ngit add -A\ngit commit -m start"}]}]}]
 
 def View.diff.at.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
   match git:

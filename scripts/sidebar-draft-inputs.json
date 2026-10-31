@@ -28,7 +28,7 @@
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
     "src/core/agy.bend": "ec8c54a6e7d6fc9abd27476b48d76669393fc59d5ee8141bff3c699e3d476fab",
-    "src/core/apikeys.bend": "20e17ae8e168603b467625ea3f293a54035b061545292b22c1baab11a09be22b",
+    "src/core/apikeys.bend": "b8c6bc89e579ce7714544bfbb8d3952a301ba1ad8970aefa09be99a8f3e468a3",
     "src/core/attach.bend": "d455a495d29974fee95a5daa4c0eb1058b6c5de212c4088fc0374c927bd03fd8",
     "src/core/badge.bend": "8c9269d9d4528b549b34ceeab348c7bc14d1c146cb7cf5918bf0b01265e79b99",
     "src/core/board.bend": "040ef813ec0257f837a94bfe7f48292397787fbb89558d506835314bdadb3aad",
@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "8ee14ba97e5422ba8ae637faf39e3d88160a6d6e671b9cd17dadd90b17d53d9b"
+    "src/web/view.bend": "a2497ade5dee3000445dde66be85e68743cd78c7518afa26fbd52f7d277c7aef"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Keyboard sidebar rows preserve drafts with the schematic toolbar updates"
+  "reviewNote": "Quoted paths preserve sidebar drafts with the schematic toolbar updates"
 }
