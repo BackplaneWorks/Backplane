@@ -64,6 +64,7 @@ import { ModelFeedback } from "./model-feedback.js";
 const modelFeedback = new ModelFeedback(() => later());
 import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
+import { DraftAttachments } from "./draft-attachments.js";
 import { ThinMailDraft, mailReplyField } from "./mail-drafts.js";
 import { ThinViews, viewCapability } from "./thin.js";
 import * as Wire from "./wire.js";
@@ -1109,7 +1110,15 @@ function dispatch(action, value, timer) {
       if (action === "hold-bottom") { holdBottom();return true; }
       const layer = document.querySelector('[data-local-models="1"]');
       const settled = layer ? modelFeedback.choice(action, value, layer.style.display !== "none") : undefined;
-      return thin.request(action, value, settled);
+      const thread = currentSession().sel;
+      const attachments = ["detach", "send", "send-alt"].includes(action) ? draftAttachmentPaths(currentSession(), thread) : [];
+      return thin.request(action, value, accepted => {
+        settled?.(accepted);
+        if (accepted && attachments.length) {
+          const kept = draftAttachmentPaths(currentSession(), thread);
+          void draftAttachments.forget(thread, attachments.filter(path => !kept.includes(path))).catch(() => {});
+        }
+      });
     }
     if (!timer) showViewStatus("Saved conversation is read-only until connected.");
     return true;
@@ -1219,6 +1228,17 @@ function inputValue(el) {
 // Files: each goes whole as the body of one POST /attach to the hub (the
 // pairing cookie carries the token); "attach-up" and "attach-end" tell
 // app.bend it started and what the hub answered, and it decides the rest
+const draftAttachments = new DraftAttachments();
+function draftAttachmentPaths(session, thread) {
+  return (session.drafts?.["@att:" + thread] || "").split("\n").filter(Boolean);
+}
+function restoreDraftAttachments(session) {
+  const scope = uploadScope(), thread = session.sel;
+  if (!scope.controller?.ready || scope.thread !== thread || session.drafts?.["@att.up:" + thread]) return;
+  void draftAttachments.sync(thread, draftAttachmentPaths(session, thread),
+    (file, previous) => upload("attach", file, scope, previous),
+    () => thin === scope.controller && thin.ready && currentSession().sel === thread).catch(() => {});
+}
 function uploadScope() {
   const controller = viewMode === "compatibility" ? null : thin;
   return { mode: viewMode, controller,
@@ -1229,7 +1249,7 @@ function uploadScope() {
 async function uploadFiles(action, files, scope = uploadScope()) {
   for (const file of files) await upload(action, file, scope);
 }
-async function upload(action, file, scope = uploadScope()) {
+async function upload(action, file, scope = uploadScope(), previous = "") {
   const key = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
   const name = file.name || "pasted." + ((file.type || "").split("/")[1] || "bin");
   if (file.size === 0) return;
@@ -1256,6 +1276,13 @@ async function upload(action, file, scope = uploadScope()) {
     answer = JSON.stringify({ text: "the upload did not reach the hub", thread, upload: true });
   }
   if (!current()) return;
+  let result;try { result = JSON.parse(answer); } catch { return; }
+  if (result.attached && result.thread === thread) {
+    try { await draftAttachments.remember(thread, result.attached, file, previous); } catch {
+      showViewStatus("This attachment could not be kept for reload. Send it before leaving this page.");
+    }
+  }
+  if (!current()) return;
   if (viewMode === "compatibility") dispatch("attach-end", answer);
   else if (thin === uploadController) {
     // The HTTP body and completion stay bound to the original chosen thread,
@@ -1268,6 +1295,7 @@ async function upload(action, file, scope = uploadScope()) {
     // of this completion. A retired view never retargets it into a new actor.
     await uploadController.perform("attach-end", answer);
   }
+  return result.attached && result.thread === thread ? result.attached : undefined;
 }
 
 document.addEventListener("change", (e) => {
@@ -2420,6 +2448,7 @@ async function startThin(again = false, reason = "initial") {
           ui = App.unsync(App.presentation_handoff(ui, presentationJson(session)));
           document.documentElement.lang = App.lang(ui);
           keepViewer();
+          setTimeout(() => restoreDraftAttachments(currentSession()), 0);
           // A hub action can open a thread too (Ctrl+N, Fork, the palette).
           // Keep the accepted selection as well as explicit sidebar clicks.
           try { localStorage.setItem("backplane-selected", session.sel || ""); } catch {}
