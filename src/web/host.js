@@ -64,6 +64,7 @@ import { ModelFeedback } from "./model-feedback.js";
 const modelFeedback = new ModelFeedback(() => later());
 import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
+import { previewTextFiles } from "./text-preview.js";
 import { DraftAttachments } from "./draft-attachments.js";
 import { ThinMailDraft, mailReplyField } from "./mail-drafts.js";
 import { ThinViews, viewCapability } from "./thin.js";
@@ -830,6 +831,7 @@ function render() {
   ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
   panes();
+  previewTextFiles();
   composerGeometry();
   earlierAsked = false;
   laterAsked = false;

@@ -412,6 +412,7 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .fm-bar .grow { flex: 1; }
 .fm-bar .fm-file { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .fm-bar .btn { color: var(--dim); text-decoration: none; border: 1px solid var(--line); padding: 3px 10px; }
+.fm-text { flex: 1; min-height: 0; margin: 0; padding: 12px; overflow: auto; color: var(--text); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fm-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
 .fm-row { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 6px 12px; }
 .fm-row:hover:not(.off) { background: var(--raise); }

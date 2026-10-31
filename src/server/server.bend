@@ -1,4 +1,5 @@
 import Base
+import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
 import ../core/watchdog.bend as WD
 import ../core/restartretry.bend as RR
@@ -6012,10 +6013,15 @@ def Conn.pos(xs: List<&2, String>, +x: String, +i: Nat) -> Nat:
 # the hub already lets in (it could read the file through a terminal as
 # well); only image files, at most IM.Img.cap() bytes.
 
+def Img.empty(text: Bool, s: Socket) -> IO(Unit):
+  match text:
+    case True{}: Conn.finish(s, W.Http.response.c("200 OK", "text/plain; charset=utf-8", Nil{}, "no-cache", ""))
+    case False{}: Conn.finish(s, W.Http.text("404 Not Found", "not found"))
+
 def Img.sent(bs: List<&2, U32>, s: Socket, +path: String) -> IO(Unit):
   match bs:
     case Nil{}:
-      Conn.finish(s, W.Http.text("404 Not Found", "not found"))
+      Img.empty(String.eq(FMP.Fm.preview(path), "text"), s)
     case b <> t:
       Conn.finish(s, W.Http.response.c("200 OK", IM.Img.ctype(path), b <> t, "no-cache", ""))
 

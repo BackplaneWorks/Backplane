@@ -5520,7 +5520,7 @@ def Fm.open.k(i: Nat, +u: Ui, +kind: String, +path: String) -> Act:
       Act{u, Nil{}}
 
 def Fm.open(+u: Ui, +rel: String) -> Act:
-  Fm.open.k(Bool.pick(Nat, Bool.or(String.is_empty(FM.Fm.kind(rel)), String.is_empty(Ui.root(u))), 2n, Bool.pick(Nat, String.eq(FM.Fm.kind(rel), "pdf"), 1n, 0n)), u, FM.Fm.kind(rel), FM.Fm.abs(Ui.root(u), rel))
+  Fm.open.k(Bool.pick(Nat, Bool.or(String.is_empty(FM.Fm.preview(rel)), String.is_empty(Ui.root(u))), 2n, Bool.pick(Nat, String.eq(FM.Fm.preview(rel), "pdf"), 1n, 0n)), u, FM.Fm.preview(rel), FM.Fm.abs(Ui.root(u), rel))
 
 # the page a PDF shows in the window, its picture, how many pages, why not
 def Pdf.page(+u: Ui) -> String:
@@ -5612,7 +5612,7 @@ def Fm.row(e: FM.FEnt, +dir: String) -> FmRow:
     case FM.FEnt{True{}, _, +n}:
       FmRow{n, "fm-cd", FM.Fm.join(dir, n), "", "folder"}
     case FM.FEnt{False{}, +size, +n}:
-      FmRow{n, Bool.pick(String, String.is_empty(FM.Fm.kind(n)), "", "fm-open"), FM.Fm.join(dir, n), FM.Fm.size(size), FM.Fm.kind(n)}
+      FmRow{n, Bool.pick(String, String.is_empty(FM.Fm.preview(n)), "", "fm-open"), FM.Fm.join(dir, n), FM.Fm.size(size), FM.Fm.preview(n)}
 
 def Fm.rows.go(es: List<&2, FM.FEnt>, +dir: String) -> List<&2, FmRow>:
   match es:
@@ -5660,9 +5660,9 @@ def Fm.icon(+kind: String) -> String:
     Bool.pick(String, String.eq(kind, "schematic"), "cpu", Bool.pick(String, String.eq(kind, "3d"), "box",
       Bool.pick(String, String.eq(kind, "image"), "image", Bool.pick(String, String.eq(kind, "pdf"), "file-text", "file"))))))
 
-# the tab a kind lights: an image or a PDF is the Files tab's
+# the tab a kind lights: an image, PDF or text note belongs to Files
 def Fm.tab(+kind: String) -> String:
-  Bool.pick(String, Bool.or(String.eq(kind, "image"), String.eq(kind, "pdf")), "files", kind)
+  Bool.pick(String, Bool.or(String.eq(kind, "text"), Bool.or(String.eq(kind, "image"), String.eq(kind, "pdf"))), "files", kind)
 
 # the first row the window shows of a long folder
 def Fm.top(+u: Ui) -> Nat:

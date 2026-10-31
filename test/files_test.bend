@@ -1,4 +1,5 @@
 import Base
+import ../src/core/images.bend as IM
 import ./check.bend as C
 import ../src/core/client.bend as U
 import ../src/core/model.bend as M
@@ -60,6 +61,12 @@ def failed() -> U.Ui:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("text preview endpoint accepts notes", Bool.show(IM.Img.viewable("/r/notes.txt")), "True")
+    C.Check.str("Markdown is served as literal text", IM.Img.ctype("/r/README.MD"), "text/plain; charset=utf-8")
+    C.Check.str("HTML is not a file preview", Bool.show(IM.Img.viewable("/r/note.html")), "False")
+    C.Check.str("text notes open as text", FM.Fm.preview("notes.txt"), "text")
+    C.Check.str("Markdown notes open as text", FM.Fm.preview("README.MD"), "text")
+    C.Check.str("binary still has no preview", FM.Fm.preview("firmware.bin"), "")
     C.Check.str("failed refresh clears stale entries", U.Ui.info(failed(), "fm.list:t1"), "")
     C.Check.str("failed refresh explains missing folder", U.Ui.info(failed(), "fm.err:t1"), "no such folder")
     C.Check.str("successful refresh clears folder error", U.Ui.info(listed(failed(), "", ""), "fm.err:t1"), "")
@@ -75,7 +82,7 @@ def main() -> IO(Unit):
     C.Check.str("ordinary reply does not relist root", sent(U.Fm.again(False{}, U.Act{act(base(), "fm", ""), Nil{}})), "")
     C.Check.str("reconnect without a folder request does not invent one", sent(U.Fm.again(True{}, U.Act{base(), Nil{}})), "")
     C.Check.str("the rows, folders first", String.join(labels(U.Fm.rows(listed(act(base(), "fm", ""), "", "d\t0\thw\nf\t2048\tboard.kicad_pcb\nf\t5\tnotes.txt\n"))), "|"),
-      "hw:fm-cd:folder:|board.kicad_pcb:fm-open:board:2 KB|notes.txt:::5 B")
+      "hw:fm-cd:folder:|board.kicad_pcb:fm-open:board:2 KB|notes.txt:fm-open:text:5 B")
     C.Check.str("a folder below", sent(U.Ui.act(act(base(), "fm", ""), "fm-cd", "hw/main")), "{\"id\":2,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"hw/main\"}}")
     C.Check.str("an old answer is not shown", Bool.show(U.Fm.ready(listed(act(act(base(), "fm", ""), "fm-cd", "hw"), "", "d\t0\thw\n"))), "False")
     C.Check.str("up from a folder", sent(U.Ui.act(act(act(base(), "fm", ""), "fm-cd", "hw/main"), "fm-up", "")), "{\"id\":3,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"hw\"}}")
@@ -83,5 +90,5 @@ def main() -> IO(Unit):
     C.Check.str("a board opens in the board viewer", U.Ui.view_get(act(base(), "fm-open", "hw/x.kicad_pcb"), "view.kind") ++ " " ++ U.Ui.view_get(act(base(), "fm-open", "hw/x.kicad_pcb"), "view.path"), "board /w/board/hw/x.kicad_pcb")
     C.Check.str("a model opens in 3D", U.Ui.view_get(act(base(), "fm-open", "mech/case.step"), "view.kind"), "3d")
     C.Check.str("a PDF asks for its first page", sent(U.Ui.act(base(), "fm-open", "docs/ds.pdf")), "{\"id\":1,\"m\":\"pdf.page\",\"p\":{\"path\":\"/w/board/docs/ds.pdf\",\"page\":\"1\"}}")
-    C.Check.str("a file only listed opens nothing", U.Ui.view_get(act(base(), "fm-open", "notes.txt"), "view.kind"), "")
+    C.Check.str("a text file opens its preview", U.Ui.view_get(act(base(), "fm-open", "notes.txt"), "view.kind"), "text")
     C.Check.str("sizes", String.join([FM.Fm.size(0n), FM.Fm.size(1500n), FM.Fm.size(3500000n), FM.Fm.size(2147483648n)], "|"), "0 B|1 KB|3.3 MB|2.0 GB")

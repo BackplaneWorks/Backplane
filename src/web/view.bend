@@ -4438,6 +4438,11 @@ def View.pdf.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [View.fm.head.loc(lc, u, [D.El{"a", "", [D.At{"class", "btn"}, D.At{"href", IM.Img.url(U.Ui.view_get(u, "view.path"))}, D.At{"target", "_blank"}], [D.Txt{MSG.T.files.tab(lc)}]}]),
    D.El{"iframe", "", [D.At{"class", "fm-pdf"}, D.At{"src", IM.Img.url(U.Ui.view_get(u, "view.path"))}, D.At{"title", U.Fm.name(u)}], Nil{}}]
 
+# Text is loaded as textContent by the host, never interpreted as markup.
+def View.text.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  [View.fm.head.loc(lc, u, Nil{}),
+   D.El{"pre", "file-text:" ++ U.Ui.view_get(u, "view.path"), [D.At{"class", "fm-text"}, D.At{"data-text-src", IM.Img.url(U.Ui.view_get(u, "view.path"))}, D.At{"data-loading", MSG.T.viewer.loading(lc)}, D.At{"data-error", MSG.T.viewer.unread(lc)}], Nil{}}]
+
 # The Review tab (client.bend's Rp): a button for each page, the title,
 # Refresh, then the report's Markdown (or why there is none)
 
@@ -4520,6 +4525,8 @@ def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
       View.pdf.loc(lc, u)
     case 9n:
       View.review(lc, u)
+    case 11n:
+      View.text.loc(lc, u)
     case 10n:
       View.combo(lc, u)
     case _:
@@ -4529,7 +4536,7 @@ def View.aside.n(+kind: String) -> Nat:
   Bool.pick(Nat, String.eq(kind, "diff"), 0n, Bool.pick(Nat, String.eq(kind, "browser"), 1n, Bool.pick(Nat, String.eq(kind, "mech"), 2n,
     Bool.pick(Nat, String.eq(kind, "3d"), 3n, Bool.pick(Nat, String.eq(kind, "schematic"), 4n,
       Bool.pick(Nat, String.eq(kind, "files"), 6n, Bool.pick(Nat, String.eq(kind, "image"), 7n, Bool.pick(Nat, String.eq(kind, "pdf"), 8n, Bool.pick(Nat, String.eq(kind, "review"), 9n,
-        Bool.pick(Nat, String.eq(kind, "split"), 10n, 5n))))))))))
+        Bool.pick(Nat, String.eq(kind, "split"), 10n, Bool.pick(Nat, String.eq(kind, "text"), 11n, 5n)))))))))))
 
 # the side pane of the selected thread: the tabs, then what they show. Its
 # left edge is a handle that resizes it (host.js keeps the width per

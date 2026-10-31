@@ -7,7 +7,8 @@ import ./diff.bend as DF
 # paths from the project's root that never leave it (laws fm_*).
 #
 # A board or schematic opens in the board viewer, a STEP or GLB in 3D, an
-# image or a PDF in a view of its own; anything else is listed only.
+# image or a PDF in a view of its own; project notes open as read-only text.
+# Anything else is listed only.
 
 type FEnt is Data:
   FEnt{dir: Bool, size: Nat, name: String}
@@ -77,9 +78,14 @@ def Fm.kind.k(+e: String) -> String:
           Bool.pick(String, String.ends_with(e, ".pdf"), "pdf", "")))))
 
 # what a file opens as in the viewer: "board", "schematic", "3d", "image",
-# "pdf", or "" (listed only)
+# "pdf", or "" (no design viewer)
 def Fm.kind(+name: String) -> String:
   Fm.kind.k(Fm.ext(name))
+
+# Files can read project notes as well as opening design viewers. Keep
+# that extra preview separate from the design-file classification.
+def Fm.preview(+name: String) -> String:
+  Bool.pick(String, Fm.ends([".txt", ".md", ".markdown", ".csv", ".json", ".log", ".yaml", ".yml"], Fm.ext(name)), "text", Fm.kind(name))
 
 # a path from the root: a folder's entry, the folder itself when "" is the root
 def Fm.join(+dir: String, +name: String) -> String:
