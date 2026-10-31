@@ -2067,3 +2067,12 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 
 .sch-navigation .sch-crumb { flex-shrink: 1; min-width: 0; }
 .project-no-matches { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; }
+
+/* Before a thread is picked, keep the first-run notice below the narrow
+   sidebar. Both rows can scroll without covering a project's controls. */
+@media (max-width: 760px) {
+  .app.top:not(.picked):has(> main.empty .kicad-notice) { grid-template-rows: auto minmax(120px, 1fr) auto; grid-template-areas: "top" "body" "notice"; }
+  .app:not(.picked) > main.empty:has(.kicad-notice) { display: flex; height: auto; max-height: 45dvh; overflow-y: auto; padding: 12px; color: var(--faint); }
+  .app.top:not(.picked) > main.empty:has(.kicad-notice) { grid-area: notice; }
+  .app:not(.picked) > main.empty .kicad-notice { margin: 0; }
+}
