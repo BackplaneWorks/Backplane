@@ -13347,3 +13347,22 @@ def TodoTok.clicked() -> U.Ui:
 law todos_thin_click_holds:
   {[TodoTok.render(TodoTok.opened(), TodoTok.next()), TodoTok.render(TodoTok.clicked(), TodoTok.next()), TodoTok.render(TodoTok.clicked(), TodoTok.next())]
     == [False{}, True{}, True{}] : List<&2, Bool>}
+
+# ---- shared worktrees and their self-heal (hub.bend's Drop.*, Wt.heal) ----
+# a settled thread's worktree stays while another live thread on the same
+# folder stays
+law wt_shared_kept:
+  {H.Wt.share.drops(H.Wt.share.demo(Nil{})) == 0n : Nat}
+
+# once every thread on it is put away, it goes (once per thread asked)
+law wt_shared_last_goes:
+  {H.Wt.share.drops(H.Wt.share.demo([M.ThreadSettled{"b", True{}, 3n}])) == 2n : Nat}
+
+# a worktree thread with its branch can be made again at its own path
+law wt_heal_worktree:
+  {H.Wt.heal(H.Wt.share.demo(Nil{}), "b") == Some{H.Heal{"/r", "/r/.backplane/worktrees/w1", "b1"}} : Maybe<&2, H.Heal>}
+
+# a thread in the project folder never is
+law wt_heal_project_folder_never:
+  {H.Wt.heal(H.Shelve.demo(Nil{}), "t1") == None{} : Maybe<&2, H.Heal>}
+

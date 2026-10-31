@@ -482,6 +482,25 @@ def Git.thread_wt.again.top(+top: String, +cwd: String, +b: String) -> IO(String
 def Git.thread_wt.again(+cwd: String, +branch: String) -> IO(String):
   IO.bind(String, String, Git.root(cwd), top => Git.thread_wt.again.top(top, cwd, branch))
 
+# A thread's worktree folder missing at its agent's start, made again on its
+# branch at the very path it records (hub.bend's Wt.heal decides which
+# threads; arguments, never shell text). Answers "" when the folder is there,
+# else what happened.
+def Git.heal.said(r: P.Ran, +wt: String) -> String:
+  match r:
+    case P.Ran{0, _}:
+      ""
+    case P.Ran{10, _}:
+      "worktree " ++ wt ++ " was gone; made again"
+    case P.Ran{_, out}:
+      "worktree " ++ wt ++ " was gone and could not be made again: " ++ String.take(String.trim(out), 300n)
+
+def Git.heal.sh() -> String:
+  "[ -d \"$2\" ] && exit 0; git -C \"$1\" worktree prune 2>&1 && git -C \"$1\" worktree add \"$2\" \"$3\" 2>&1 && exit 10; exit 1"
+
+def Git.heal(+root: String, +wt: String, +b: String) -> IO(String):
+  IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Git.heal.sh(), "sh", root, wt, b], root), r => IO.pure(String, Git.heal.said(r, wt)))
+
 def Git.skipped(+s: String) -> Bool:
   String.starts_with(s, "skip: ")
 
