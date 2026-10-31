@@ -218,7 +218,7 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
     }
     if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
       const close = overlayEscape(doc);
-      if (close) { event.preventDefault(); event.stopImmediatePropagation(); close(); return; }
+      if (close) { event.preventDefault(); event.stopImmediatePropagation(); close(); composer?.claim(); return; }
     }
     // Esc with no menu or dialog open puts away the floating terminal, else
     // the probe, else the viewer (escNext: workspace.bend's WS.esc.next),

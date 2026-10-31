@@ -276,10 +276,11 @@ test('Escape closes the open menu or dialog wherever the focus is', async () => 
   const { installWorkspaceKeys, overlayEscape } = await import('../../src/web/workspace-keys.js');
   let listener, shades = [], menus = [];
   const clicked = [], actions = [];
+  let claimed = 0;
   const shade = (value, name) => ({ getAttribute: k => k === 'data-value' ? value : null, click: () => clicked.push(name) });
   const doc = { activeElement: null, querySelector: q => q === '.local-menu[open]' ? menus[0] || null : null,
     querySelectorAll: () => shades, addEventListener: (_n, callback) => { listener = callback; } };
-  installWorkspaceKeys({ dispatch: (...a) => actions.push(a), document: doc, platform: 'Linux' });
+  installWorkspaceKeys({ dispatch: (...a) => actions.push(a), document: doc, platform: 'Linux', composer: { claim: () => { if (menus.length) { assert.equal(menus[0].open, false);claimed++; } } } });
   const body = { tagName: 'BODY', closest: () => null, getAttribute: () => null };
   const composer = { tagName: 'TEXTAREA', id: 'composer', closest: () => composer, getAttribute: () => '', blur: () => assert.fail('the menu goes first') };
   const press = (target, fields = {}) => {
@@ -301,6 +302,7 @@ test('Escape closes the open menu or dialog wherever the focus is', async () => 
   const details = { open: true };menus = [details];
   assert.equal(press(body).defaultPrevented, true);
   assert.equal(details.open, false);
+  assert.equal(claimed, 1);
   menus = [];shades = [shade('', 'row menu')];
   for (const fields of [{ ctrlKey: true }, { shiftKey: true }, { isComposing: true }]) assert.equal(press(body, fields).defaultPrevented, false);
   assert.deepEqual(clicked, ['row menu', 'intent']);

@@ -1,6 +1,6 @@
 // Disclosure, filtering and focus only. Bend supplies every action, label,
 // selected identity and confirmation; this module never selects a board.
-export function installWorkspaceMenus(doc = document) {
+export function installWorkspaceMenus(doc = document, reclaim = () => {}) {
   const close = (menu, restore = false) => {
     menu.open = false;
     if (restore) menu.querySelector(':scope > summary')?.focus({ preventScroll: true });
@@ -9,7 +9,7 @@ export function installWorkspaceMenus(doc = document) {
     const menu = event.target.closest?.('.local-menu[open]');
     if (!menu || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key === 'Escape') {
-      event.preventDefault();event.stopImmediatePropagation();close(menu, true);
+      event.preventDefault();event.stopImmediatePropagation();close(menu, true);reclaim();
     }
     if (event.key === 'Tab' && menu.classList.contains('workspace-menu') && matchMedia('(max-width:760px)').matches) {
       const controls = [...menu.querySelectorAll('summary,input,button')].filter(x => x.checkVisibility() && !x.disabled);
