@@ -664,10 +664,26 @@ let activeTimeline = null, historyNode = null, historyStatus = null;
 let held = false, away = "";
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
 function historyClear() { historyNode = null;historyDirection = "";historyPageState(null); }
+// A page that comes within HISTORY_QUIET_MS says nothing: the rows it
+// brings are mostly on screen already, and a line flashing at every page
+// was the "loading" the person saw while scrolling. A slow page, and a
+// failed one, still say so.
+const HISTORY_QUIET_MS = 400;
+let historyQuiet = 0;
 function historyPageState(state) {
+  const again = !!state && state === historyStatus;
   historyStatus = state;
+  if (!again) { clearTimeout(historyQuiet);historyQuiet = 0; }
   let el = document.getElementById("history-status");
   if (!state) { el?.remove();return; }
+  if (state.phase === "loading" && !el) {
+    if (!historyQuiet) historyQuiet = setTimeout(() => { historyQuiet = 0;if (historyStatus === state) historyPageShow(state); }, HISTORY_QUIET_MS);
+    return;
+  }
+  historyPageShow(state);
+}
+function historyPageShow(state) {
+  let el = document.getElementById("history-status");
   if (!el) { el = document.createElement("div");el.id = "history-status";document.body.appendChild(el); }
   el.setAttribute("role", "status");
   el.style.cssText = "position:fixed;z-index:12;max-width:calc(100vw - 32px);background:var(--panel);color:var(--text);border:1px solid var(--line);padding:4px 8px;font-size:12px";

@@ -4,7 +4,7 @@
 // times in one hub step (each "shrink" bottomed out, as a sidebar that never
 // pages cannot shrink); on a real catalog that was 5-6 s per update, past the
 // page's 5 s view deadline, so every message ended in "Conversation
-// unavailable" and a reconnect. The fit now takes at most three renders,
+// unavailable" and a reconnect. The fit now takes at most seven renders,
 // recorded per view as /debug/perf's "thin.fit.renders".
 //
 // Starts a headless hub on a temporary home holding many projects (each a
@@ -99,7 +99,7 @@ try {
   const rpcMax = Number(perf.split("\n").find((l) => l.startsWith("hub.rpc "))?.trim().split(/\s+/)[6] ?? 0);
   check(n > 0, `views were fitted (${n})`);
   check(max >= 2, `the sidebar alone passed the budget, so a view was shrunk (most renders for one view: ${max})`);
-  check(max <= 3, `no view took more than three renders (${max})`);
+  check(max <= 7, `no view took more than seven renders (${max})`);
   const errors = conn.filter((c) => ["view-error", "closing", "closed"].includes(c.event));
   check(errors.length === 0, `the page stayed connected with its view (${errors.map((c) => `${c.event}:${c.cause} at ${c.step}`).join(", ") || "no errors"}; slowest hub.rpc ${rpcMax} ms)`);
 } finally {
