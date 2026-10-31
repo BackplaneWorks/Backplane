@@ -52,3 +52,12 @@ test('schematic back invalidates an asynchronous hit before navigating', async (
   assert.deepEqual(h.probes, []);
   assert.equal(h.navigations.length, 1);assert(h.navigations[0].includes('sch-back'));
 });
+
+test('wheel zoom uses cached viewport geometry and refreshes it on resize', () => {
+  const h = harness(), initial = h.reads();
+  for (let i = 0; i < 100; i++) h.fire('wheel');
+  assert.equal(h.reads(), initial);
+  h.resize(1200, 800);
+  assert.equal(h.view.viewport.width, 1200);
+  assert.equal(h.view.zoomFactor(0), 0.9 * 8 / 4 / h.view.scale);
+});

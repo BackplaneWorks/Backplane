@@ -382,6 +382,7 @@ class View {
     this.scale = 1; this.ox = 0; this.oy = 0;
     this.fitted = false;
     this.gesture = 0;
+    this.viewport = { width: canvas.clientWidth, height: canvas.clientHeight };
     this.fade = 220;
     this.fam = "";
     this.drag = null;
@@ -485,7 +486,7 @@ class View {
       // a touchpad's two fingers move the plot; a pinch or a wheel zooms at the pointer
       const kind = wheelKind(e, this.wheelLast);
       this.wheelLast = { kind, t: e.timeStamp };
-      const px = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1;
+      const px = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.viewport.height : 1;
       if (kind === "pad") { this.ox -= e.deltaX * px; this.oy -= e.deltaY * px; }
       else {
         const f = this.zoomFactor(Math.exp(-e.deltaY * px * (kind === "pinch" ? 0.01 : 0.0015)));
@@ -512,8 +513,9 @@ class View {
       if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
     });
     // a new size refits the view, unless the user has moved it
-    new ResizeObserver(() => {
+    new ResizeObserver(entries => {
       this.gesture++;
+      this.viewport = entries[0].contentRect;
       if (!this.fitted || !this.touched) this.fit(); else this.later();
     }).observe(canvas);
   }
@@ -632,7 +634,7 @@ class View {
     const box = this.plot?.box;
     if (!box) return factor;
     const [x0, y0, x1, y1] = box;
-    const fit = 0.9 * Math.min(this.canvas.clientWidth / Math.max(x1 - x0, 1), this.canvas.clientHeight / Math.max(y1 - y0, 1));
+    const fit = 0.9 * Math.min(this.viewport.width / Math.max(x1 - x0, 1), this.viewport.height / Math.max(y1 - y0, 1));
     return Math.max(fit / 4, this.scale * factor) / this.scale;
   }
 
@@ -643,7 +645,7 @@ class View {
 
   fit() {
     this.gesture++;
-    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    const { width: w, height: h } = this.viewport;
     if (!this.plot || !this.plot.box || w === 0 || h === 0) { this.later(); return; }
     const [x0, y0, x1, y1] = this.plot.box;
     this.scale = 0.9 * Math.min(w / Math.max(x1 - x0, 1), h / Math.max(y1 - y0, 1));
