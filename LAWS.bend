@@ -1,3 +1,4 @@
+import ./src/core/live-checkpoint.bend as LCP
 import ./src/server/plot.bend as PLOTWATCH
 import ./src/core/restartretry.bend as WDRETRY
 import ./src/core/liveness.bend as LIVEWATCH
@@ -13280,3 +13281,13 @@ law room_draft_read_is_scoped:
 law routine_invalid_keeps_form:
   for +u: U.Ui
   {U.Act.ui(U.Bots.routine.save.k(True{}, u)) == u : U.Ui}
+
+law checkpoint_stopped_not_restored:
+  for +b: J.Json
+  {LCP.Checkpoint.restore.one(False{}, b) == Nil{} : List<&2, LV.Buf>}
+
+law checkpoint_anchor_ignores_activity:
+  {LCP.Checkpoint.anchor([M.Act{"a", "t", "tool", "Bash", "running", 1n}, M.Msg{"q", "t", M.User{}, "question", 1n}]) == "q" : String}
+
+law checkpoint_empty_buffers_omitted:
+  {LCP.Checkpoint.records([LV.Buf{"t", Nil{}, 0n, False{}, 1n}], M.State.empty()) == Nil{} : List<&2, J.Json>}

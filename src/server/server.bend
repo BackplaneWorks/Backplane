@@ -135,6 +135,8 @@ import ./adoptio.bend as AIO
 import ./castio.bend as CST
 import ../core/outbox.bend as OB
 import ../core/live.bend as LV
+import ../core/live-checkpoint.bend as LCP
+import ./live-checkpoint.bend as LCFX
 import ../core/steer.bend as STR
 import ../core/farlive.bend as FLV
 import ../core/qr.bend as QR
@@ -7104,6 +7106,19 @@ def Live.with_delta(+cfg: Cfg, +lv: List<&2, LV.Buf>, +thread: String, text: Str
 def Tools.of(+cfg: Cfg) -> List<&2, String>:
   BN.Bn.tools(Cfg.bn(cfg))
 
+# A failed private checkpoint is reported; the durable event log still owns
+# completed messages. Snapshot only when a message or turn consumed a buffer.
+def Live.checkpoint.note(err: String) -> IO(Unit):
+  match err:
+    case SNil{}: IO.pure(Unit, Unit{})
+    case SCon{c, t}: PS.Log.warn("hub", "live checkpoint: " ++ SCon{c, t})
+
+def Live.checkpoint.sync(changed: Bool, +st: M.State, +cfg: Cfg, bs: List<&2, LV.Buf>) -> IO(Unit):
+  match changed:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      IO.bind(String, Unit, LCFX.Checkpoint.sync(Cfg.home(cfg), J.Json.show(J.Json.arr(LCP.Checkpoint.records(bs, st)))), err => Live.checkpoint.note(err))
+
 def Tools.with(+cfg: Cfg, tl: List<&2, String>) -> Cfg:
   Cfg.with_bn(cfg, BN.Bn.with_tools(Cfg.bn(cfg), tl))
 
@@ -7149,13 +7164,15 @@ def Hub.fold.state(fd: Folded, st: M.State) -> Folded:
   match fd:
     case Folded{_, ls, fr}: Folded{st, ls, fr}
 
-def Hub.commit.stored.result(ok: Bool, post: M.State, +result: String, +disk: List<&2, String>, +len: String, +cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: List<&2, String>, +len: String, +cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match ok:
     case True{}:
       do IO<Hub & Wrote>:
         Bot.dir.changed.all(cs, inbox)
-        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg))))), note)
+        +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
+        Live.checkpoint.sync(LCP.Checkpoint.changed(cs), post, cfg, buffers)
+        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, buffers)), note)
     case False{}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
@@ -10171,12 +10188,15 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.to(cl, client, text)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Live{+thread, +text}:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.Live{+thread, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
+        +buffers : List<&2, LV.Buf> = LV.Live.add.at(Live.of(cfg), thread, text, Nat.mul(now, 1000n))
+        err : String <- LCFX.Checkpoint.write(Cfg.home(cfg), J.Json.show(LCP.Checkpoint.one(buffers, st, thread)))
+        Live.checkpoint.note(err)
         cl2 : List<&2, Client> <- Wire.delta(cl, B.Delta.msg(thread, text))
         +off : Nat = FLV.FL.size(Live.of(cfg), thread)
-        Far.live.out(Hub{st, f, ls, cl2, as, inbox, Live.with_delta(cfg, LV.Live.add.at(Live.of(cfg), thread, text, Nat.mul(now, 1000n)), thread, text), note}, thread, off, text, now)
+        Far.live.out(Hub{st, f, ls, cl2, as, inbox, Live.with_delta(cfg, buffers, thread, text), note}, thread, off, text, now)
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.Broadcast{+text}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.all.of(cl, text, All{Bool.pick(Nat, String.starts_with(text, "{\"t\":\"delta"), 2n, 0n), Nil{}, 0n, 0n, Nil{}})
@@ -13283,8 +13303,10 @@ def Hub.recover.k(h: Hub, +now: Nat) -> IO(Hub):
 # (and threads elsewhere start: Far.start)
 def Hub.recover.stale(h: Hub, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.recover.k(Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        saved : String <- LCFX.Checkpoint.read(Cfg.home(cfg))
+        Hub.recover.k(Hub{st, f, ls, cl, as, inbox, Live.with(cfg, LCP.Checkpoint.restore(st, saved)), note}, now)
 
 # Agents kept through a restart in place (core/adopt.bend)
 # --------------------------------------------------------

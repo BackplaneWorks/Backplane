@@ -1,3 +1,4 @@
+import ./src/core/live-checkpoint.bend as LCP
 import ./src/core/restartretry.bend as WDRETRY
 import ./src/core/signal.bend as SIGREV
 import ./test/liveness_proof.bend as LVPROOF
@@ -13783,4 +13784,13 @@ def Laws.room_draft_read_is_scoped():
   {==}
 
 def Laws.routine_invalid_keeps_form(u):
+  {==}
+
+def Laws.checkpoint_stopped_not_restored(b):
+  {==}
+
+def Laws.checkpoint_anchor_ignores_activity():
+  {==}
+
+def Laws.checkpoint_empty_buffers_omitted():
   {==}
