@@ -48,5 +48,20 @@ function components_cache_get(cwd,offset,pcbRev,schRev) {
     return e.text;
   }catch{return '';}
 }
+// The first page of a read names no revisions: the hub gives the canonical
+// files it resolved (the same K.Files.read the child would use), and their
+// current stamps pick the page, which must have been kept for those paths.
+function components_cache_first(cwd,pcb,sch) {
+  const {fs}=cc_modules();
+  try {
+    if(!pcb)return '';
+    const pcbRev=cc_stamp(fs.statSync(pcb,{bigint:true}));
+    let schRev='';if(sch){try{schRev=cc_stamp(fs.statSync(sch,{bigint:true}));}catch{return '';}}
+    const text=components_cache_get(cwd,'0',pcbRev,schRev);if(!text)return '';
+    const {path,crypto}=cc_modules(),e=JSON.parse(fs.readFileSync(path.join(cc_dir(false),cc_name(crypto,fs.realpathSync(cwd),pcbRev,schRev,'0')),'utf8'));
+    return e.pcb===pcb&&e.sch===sch?text:'';
+  }catch{return '';}
+}
 io_eff(CID(ComponentsFx.put),components_cache_put);
 io_eff(CID(ComponentsFx.get),components_cache_get);
+io_eff(CID(ComponentsFx.first),components_cache_first);

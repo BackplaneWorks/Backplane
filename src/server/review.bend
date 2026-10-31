@@ -758,12 +758,26 @@ def RvJob.components.k(miss: Bool, +hit: String, +cwd: String, +off: String, +pc
 def RvJob.components.at(+hit: String, +cwd: String, +off: String, +pcb: String, +sch: String) -> IO(Res):
   RvJob.components.k(String.is_empty(hit), hit, cwd, off, pcb, sch)
 
+def RvJob.components.first(fs: K.Files, +cwd: String) -> IO(String):
+  match fs:
+    case K.Files{_, +pcb, +sch, _}:
+      COMP.ComponentsFx.first(cwd, pcb, sch)
+
+# the first page names no revisions: the canonical files' current stamps
+# pick it (the files the child would read)
+def RvJob.components.look(first: Bool, +cwd: String, +off: String, +pcb: String, +sch: String) -> IO(String):
+  match first:
+    case True{}:
+      IO.bind(K.Files, String, K.Files.read(cwd), fs => RvJob.components.first(fs, cwd))
+    case False{}:
+      COMP.ComponentsFx.get(cwd, off, pcb, sch)
+
 def RvJob.components(+cwd: String, spec: String) -> IO(Res):
   +o = Maybe.default(&2, J.Json, J.Json.parse(spec), J.Null{})
   +off = Nat.show(J.Json.get_nat(o, "offset", 0n))
   +pcb = J.Json.get_str(o, "sourceRevision", "")
   +sch = J.Json.get_str(o, "schematicRevision", "")
-  IO.bind(String, Res, COMP.ComponentsFx.get(cwd, off, pcb, sch), hit => RvJob.components.at(hit, cwd, off, pcb, sch))
+  IO.bind(String, Res, RvJob.components.look(Bool.and(String.eq(off, "0"), String.is_empty(pcb)), cwd, off, pcb, sch), hit => RvJob.components.at(hit, cwd, off, pcb, sch))
 
 # a warm request for an asset already published at this exact revision is
 # answered here (RenderAssetFx.memo re-checks the source's stamp and the

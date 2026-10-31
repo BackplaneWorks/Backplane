@@ -27,5 +27,11 @@ try {
  // a project without a schematic keeps an empty schematic revision
  const p2=revision(pcb);assert.equal(put(project,pcb,'',p2,'','5',text),'');assert.equal(get(project,'5',p2,''),text);
  assert.equal(put(project,pcb,sch,'',sr,'7',text),'');assert.equal(get(project,'7','',sr),'','nothing is kept without a PCB revision');
+ {const first=(...a)=>effects.get('ComponentsFx.first')(...a),pr=revision(pcb),sr=revision(sch),t0='{"components":{"page":{"offset":0}}}';
+  assert.equal(first(project,pcb,sch),'','nothing kept yet');put(project,pcb,sch,pr,sr,'0',t0);
+  assert.equal(first(project,pcb,sch),t0,'the first page at the canonical files\' current stamps');
+  assert.equal(first(project,join(project,'other.kicad_pcb'),sch),'','another canonical board misses');
+  const moved=join(project,'b2.kicad_sch');fs.copyFileSync(sch,moved);assert.equal(first(project,pcb,moved),'','another canonical schematic misses');
+  fs.utimesSync(pcb,new Date(),new Date(Date.now()+20000));assert.equal(first(project,pcb,sch),'','a board saved since misses');}
  console.log('ok component page cache: exact project/offset/revisions, stamps re-checked, private, no-schematic case');
 } finally {fs.rmSync(dir,{recursive:true,force:true});}
