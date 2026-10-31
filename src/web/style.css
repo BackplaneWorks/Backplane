@@ -32,7 +32,9 @@
   --line: #d3d1ca;
   --text: #1b1d21;
   --dim: #5b6068;
-  --faint: #8a8f96;
+  /* (as dark as needed to read small notes on a panel, still a step under
+     --dim) */
+  --faint: #72777f;
   --accent: #1f6fd1;
   --ok: #1c8550;
   --warn: #9a6700;
