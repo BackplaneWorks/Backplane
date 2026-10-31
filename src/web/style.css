@@ -2052,3 +2052,11 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 #viewer:has(> .viewer-stage > canvas.plot2d) > .viewer-bar > .viewer-help { flex: none; }
 .plot-kicad .local-menu-body { width: 210px; }
 .plot-kicad .local-menu-body > span { display: grid; }
+.sch-navigation { display: flex; flex: none; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
+.sch-navigation .sch-btn { flex: none; padding: 3px 6px; white-space: nowrap; }
+.sch-navigation .sch-btn[disabled] { opacity: 0.4; cursor: default; }
+.sch-navigation .sch-trail { display: flex; flex: 1; min-width: 0; overflow: hidden; }
+.sch-navigation .sch-pos { flex: none; color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: nowrap; }
+#viewer:has(> .viewer-stage > canvas.plot2d) > .sch-panel { height: 140px; max-height: 22vh; }
+
+.sch-navigation .sch-crumb { flex-shrink: 1; min-width: 0; }

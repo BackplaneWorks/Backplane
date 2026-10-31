@@ -896,10 +896,15 @@ def Pv.tree.slot(+path: String) -> String:
 def Pv.tree.gen(+n: Nat) -> String:
   Nat.show(n)
 
+# A loose live schematic can be the only file on show. Pass it as the
+# fallback too; comparisons still navigate the live project's hierarchy.
+def Pv.tree.path(+kind: Nat, +path: String) -> String:
+  Bool.pick(String, Bool.or(Nat.is_eq(kind, 0n), Nat.is_eq(kind, 1n)), path, "")
+
 def Pv.tree(+client: U32, +root: String, +path: String, +tree: String, +gen: String, +out: Chan(POut)) -> IO(Unit):
   do IO<Unit>:
     f : K.Files <- K.Files.read(root)
-    Pv.tree.k(Tree.root(f, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 1n), path, ""), tree), client, root, Pv.tree.slot(path), gen, out)
+    Pv.tree.k(Tree.root(f, Pv.tree.path(HS.Hist.kind(path), path), tree), client, root, Pv.tree.slot(path), gen, out)
 
 def Pv.args.copy(xs: List<String>) -> List<&2, String>:
   match xs:

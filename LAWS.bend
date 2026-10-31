@@ -13487,3 +13487,24 @@ law revert_turn_sent_at_once:
 # the mark), gives the conversation's draft back
 law intent_kept_backup_restores:
   {U.Ui.draft_text(U.Act.ui(U.Intent.return(U.Ui.restore(U.Ui.restore(U.Ui.restore(U.Ui.select.k(U.Ui.init(0n), "t"), "t", "/intent"), "@intent.draft:t", "draft"), "@intent.edit:t", "1")))) == "draft" : String}
+
+# A board never waits for schematic metadata, and a fresh schematic waits
+# before drawing until its hierarchy is known.
+law plot_board_skips_tree_wait:
+  for +u: U.Ui
+  {WPH.View.plot.wait.tree(False{}, u) == "" : String}
+
+law plot_first_schematic_waits_for_tree:
+  {WPH.View.plot.wait.tree(True{}, U.Ui.init(0n)) == "1" : String}
+
+# Live loose schematics need a tree reply too; versions keep their file and
+# comparisons retain the live hierarchy instead of passing a diff to the reader.
+law plot_live_tree_path:
+  for +path: String
+  {PLOTWATCH.Pv.tree.path(0n, path) == path : String}
+law plot_version_tree_path:
+  for +path: String
+  {PLOTWATCH.Pv.tree.path(1n, path) == path : String}
+law plot_comparison_tree_path:
+  for +path: String
+  {PLOTWATCH.Pv.tree.path(2n, path) == "" : String}

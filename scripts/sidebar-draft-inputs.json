@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "1276ddd4c98f4a368b2a6aedca069cfd78a151d3934fe229773e0a9c0c0493ef"
+    "src/web/view.bend": "30bbd4803b015ef0b01aab50b8203c8fc64456ac84e1b6128736e35d59105ecc"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "F: Use each schematic navigation label once rebased while retaining main; sidebar drafts unchanged."
+  "reviewNote": "F: Keep schematic navigation in a fixed row rebased while retaining main; sidebar drafts unchanged."
 }

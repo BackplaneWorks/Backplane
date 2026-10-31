@@ -168,7 +168,7 @@ export function whenDrawn(f) {
 }
 function drawnCheck() {
   if (!drawnWaits.length) return;
-  const ready = [...views.values()].every((v) => !v.key || plots.has(v.key)), now = performance.now();
+  const ready = [...views.values()].every((v) => !v.key || plots.has(v.key) && (!v.treeWaiting() || plots.get(v.key)?.none)), now = performance.now();
   for (const w of drawnWaits.splice(0)) {
     if ((w.mounted && ready) || now - w.at >= DRAWN_MS) w.f();
     else drawnWaits.push(w);
@@ -429,7 +429,7 @@ class View {
       this.later();
     });
     const up = (e) => {
-      const tap = e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
+      const tap = !this.treeWaiting() && e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
       this.pts.delete(e.pointerId);
       if (tap) {
@@ -607,6 +607,11 @@ class View {
     return Math.max(fit / 4, this.scale * factor) / this.scale;
   }
 
+  // A failed hierarchy worker must not hide an otherwise valid plot forever.
+  treeWaiting() {
+    return this.waitingTree && this.asked != null && performance.now() - this.asked < DRAWN_MS;
+  }
+
   fit() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (!this.plot || !this.plot.box || w === 0 || h === 0) { this.later(); return; }
@@ -659,7 +664,7 @@ class View {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = this.bg;
     g.fillRect(0, 0, w, h);
-    const p = this.plot;
+    const p = this.treeWaiting() && !this.plot?.none ? null : this.plot;
     if (!p || !p.chunks) {
       g.fillStyle = "#8a8f98";
       g.font = font(c, 13 * dpr);
@@ -868,6 +873,12 @@ function park(v) {
 function mountOne(canvas) {
   let view = views.get(canvas);
   if (!view) views.set(canvas, (view = new View(canvas, canvas.dataset.bg || "#0d0f12")));
+  const waitingTree = canvas.dataset.waitTree === "1";
+  if (waitingTree !== view.waitingTree) {
+    const wasWaiting = view.treeWaiting();
+    view.waitingTree = waitingTree;
+    if (wasWaiting && !waitingTree && view.plot?.chunks) view.fit(); else view.later();
+  }
   const off = Number(canvas.dataset.off || 0), dim = Number(canvas.dataset.dim || 0), lift = Number(canvas.dataset.lift ?? 255);
   if (off !== view.off || dim !== view.dim || lift !== view.lift) { view.off = off; view.dim = dim; view.lift = lift; view.later(); }
   view.side = canvas.dataset.side || "board";

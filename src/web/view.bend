@@ -3739,13 +3739,13 @@ def View.sch.pos(+lc: I.Loc, out: Bool, +at: Nat, +count: Nat, +page: String) ->
 
 def View.sch.bar(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
   match v:
-    case U.SchView{_, trail, _, +at, count, _, back, fwd, out, tree, _, _, page}:
+    case U.SchView{_, trail, _, +at, +count, _, back, fwd, out, tree, _, _, page}:
       [View.sch.btn("sch-back", back, MSG.T.viewer.sch.back.tip(lc), "‹ " ++ MSG.T.viewer.sch.back(lc)),
        View.sch.btn("sch-fwd", fwd, MSG.T.viewer.sch.forward.tip(lc), MSG.T.viewer.sch.forward(lc) ++ " ›"),
        View.sch.btn("sch-up", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.up.tip(lc), "↑ " ++ MSG.T.viewer.sch.up(lc)),
        View.sch.toggle(lc, tree),
        D.El{"nav", "", [D.At{"class", "sch-trail"}, D.At{"aria-label", MSG.T.viewer.sch.trail(lc)}], View.sch.crumbs(lc, trail)},
-       D.El{"span", "", [D.At{"class", "sch-pos"}, D.At{"role", "status"}], [D.Txt{View.sch.pos(lc, out, at, count, page)}]}]
+       D.El{"span", "", [D.At{"class", "sch-pos"}, D.At{"role", "status"}], [D.Txt{Bool.pick(String, Nat.is_eq(count, 0n), MSG.T.viewer.schematic.tip(lc), View.sch.pos(lc, out, at, count, page))}]}]
 
 def View.sch.cls(+st: Nat) -> String:
   Bool.pick(String, Nat.is_eq(st, 2n), " on", Bool.pick(String, Nat.is_eq(st, 1n), " above", ""))
@@ -3793,13 +3793,14 @@ def View.sch.tree(+lc: I.Loc, on: Bool, rows: List<&2, U.SchRow>, +here: List<&2
 
 def View.sch.panel(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
   match v:
-    case U.SchView{rows, _, here, _, _, _, _, _, +out, tree, _, note, _}:
-      List.append(&2, D.Node, View.sch.say(lc, out, note), View.sch.tree(lc, tree, rows, here))
+    case U.SchView{rows, _, here, _, +count, _, _, _, +out, tree, _, note, _}:
+      List.append(&2, D.Node, Bool.pick(List<&2, D.Node>, Nat.is_eq(count, 0n), Nil{}, View.sch.say(lc, out, note)), View.sch.tree(lc, tree, rows, here))
 
 def View.sch.below.k(many: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   match many:
     case True{}:
-      View.sch.panel(lc, U.Sch.view(u))
+      D.El{"div", "", [D.At{"class", "sch-navigation"}], View.sch.bar(lc, U.Sch.view(u))}
+        <> View.sch.panel(lc, U.Sch.view(u))
     case False{}:
       Nil{}
 
@@ -4245,12 +4246,21 @@ def View.plot.layers(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus
   D.El{"details", "", [D.At{"class", "layers local-menu"}], [View.plot.layer.button(lc, k, f),
     D.El{"div", "", [D.At{"class", "layer-list"}], List.append(&2, D.Node, View.layer.modes.loc(lc, sch, f), View.layer.rows.loc(lc, LY.Lyr.order(k), k, off, f))}]}
 
+# Wait for the hierarchy before the first drawing, so its controls cannot
+# move a diagram that is already on screen. Boards do not need this reply.
+def View.plot.wait.tree(sch: Bool, +u: U.Ui) -> String:
+  match sch:
+    case True{}:
+      Bool.pick(String, List.is_empty(&2, HI.Row, U.Sch.rows(u)), "1", "")
+    case False{}:
+      ""
+
 def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
   View.bar.loc(lc, List.append(&2, D.Node, what, [View.plot.layers(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
    <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", List.append(&2, D.Attr, [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
-        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", U.Solid.fam(u, U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], View.probe.attrs(u, String.eq(U.Solid.kind(u), "schematic"))), Nil{}}
+        D.At{"data-wait-tree", View.plot.wait.tree(String.eq(U.Solid.kind(u), "schematic"), u)}, D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", U.Solid.fam(u, U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], View.probe.attrs(u, String.eq(U.Solid.kind(u), "schematic"))), Nil{}}
         <> List.append(&2, D.Node, View.probe.chip(u), View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
    <> View.hist(lc, U.Hs.bar.loc(lc, u), u)
 
@@ -4544,7 +4554,7 @@ def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
     case 3n:
       View.solid.loc(lc, u)
     case 4n:
-      View.sch.after(View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.schematic.tip(lc)), List.append(&2, D.Node, View.sheets.loc(lc, u), [View.plot.kicad.loc(lc)]))),
+      View.sch.after(View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.schematic.tip(lc)), [View.plot.kicad.loc(lc)])),
         List.append(&2, D.Node, View.sch.below(lc, u), View.probe.away(u)))
 
     case 6n:

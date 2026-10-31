@@ -13876,3 +13876,16 @@ def Laws.revert_turn_sent_at_once():
 
 def Laws.intent_kept_backup_restores():
   {==}
+
+def Laws.plot_board_skips_tree_wait(u):
+  {==}
+
+def Laws.plot_first_schematic_waits_for_tree():
+  {==}
+
+def Laws.plot_live_tree_path(path):
+  {==}
+def Laws.plot_version_tree_path(path):
+  {==}
+def Laws.plot_comparison_tree_path(path):
+  {==}
