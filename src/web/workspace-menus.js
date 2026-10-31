@@ -1,10 +1,17 @@
 // Disclosure, filtering and focus only. Bend supplies every action, label,
 // selected identity and confirmation; this module never selects a board.
+export function closeWorkspaceMenu(menu, restore = false) {
+  menu.open = false;
+  // Dismissing an armed confirmation means Cancel, whichever way it closes.
+  menu.querySelector('[data-on-click="delete-no"]')?.click();
+  if (restore) menu.querySelector(':scope > summary')?.focus({ preventScroll: true });
+}
+
 export function installWorkspaceMenus(doc = document, reclaim = () => {}) {
-  const close = (menu, restore = false) => {
-    menu.open = false;
-    if (restore) menu.querySelector(':scope > summary')?.focus({ preventScroll: true });
-  };
+  const close = closeWorkspaceMenu;
+  doc.addEventListener('toggle', event => {
+    if (event.target.matches?.('.local-menu') && !event.target.open) close(event.target);
+  }, true);
   doc.addEventListener('keydown', event => {
     const menu = event.target.closest?.('.local-menu[open]');
     if (!menu || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -25,6 +32,8 @@ export function installWorkspaceMenus(doc = document, reclaim = () => {}) {
     if (picker && !picker.contains(event.target) && !event.target.closest?.('.account-chip')) doc.querySelector('.account-chip')?.click();
   });
   doc.addEventListener('click', event => {
+    const summary = event.target.closest?.('.local-menu > summary');
+    if (summary && !summary.parentElement.open) close(summary.parentElement);
     const button = event.target.closest?.('.local-menu-body button[data-on-click]');
     const menu = button?.closest('.local-menu');
     if (!menu || ['delete','delete-no'].includes(button.dataset.onClick)) return;

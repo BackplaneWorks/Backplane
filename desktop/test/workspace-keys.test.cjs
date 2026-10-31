@@ -303,7 +303,7 @@ test('Escape closes the open menu or dialog wherever the focus is', async () => 
   assert.deepEqual(clicked, ['row menu', 'intent']);
   shades = [shade('models', 'model picker')];
   assert.equal(overlayEscape(doc), null);
-  const details = { open: true };menus = [details];
+  const details = { open: true, querySelector: () => null };menus = [details];
   assert.equal(press(body).defaultPrevented, true);
   assert.equal(details.open, false);
   assert.equal(claimed, 1);
@@ -533,7 +533,6 @@ test('Escape closes a palette or drawing dialog before token stats underneath', 
   draw = false;press();assert.deepEqual(actions[1], ['flag', 'tokstats']);
 });
 
-
 test('Escape cancels inline renaming after the innermost overlay is dismissed', async () => {
   const { overlayEscape } = await import('../../src/web/workspace-keys.js');
   let modal = false, cancelled = 0;
@@ -542,7 +541,6 @@ test('Escape cancels inline renaming after the innermost overlay is dismissed', 
   modal = true;assert.equal(overlayEscape(doc), null);
   modal = false;overlayEscape(doc)();assert.equal(cancelled, 1);
 });
-
 
 test('Escape dismisses the account picker before the inline editor', async () => {
   const { overlayEscape } = await import('../../src/web/workspace-keys.js');

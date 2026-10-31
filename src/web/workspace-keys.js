@@ -1,4 +1,5 @@
 // Event normalization only; Bend owns navigation order and action decisions.
+import { closeWorkspaceMenu } from './workspace-menus.js';
 const EDITOR = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-keys],[data-keyto]';
 // A PTY (the terminal, an embedded one) or a bot's browser frame: every key
 // it gets is its own (Ctrl+K kills a line, Ctrl+D ends the shell).
@@ -87,7 +88,7 @@ export function overlayEscape(doc) {
   const shade = shades.at(-1);
   if (shade) return () => shade.click();
   const menu = doc.querySelector?.('.local-menu[open]');
-  if (menu) return () => { menu.open = false; };
+  if (menu) return () => closeWorkspaceMenu(menu);
   // The inline editor already supplies its cancel action, like a dialog.
   if ([...(doc.querySelectorAll?.('.draw-back,[role="dialog"],[aria-modal="true"]') || [])].some(shown)) return null;
   const account = doc.querySelector?.('.account-picker');

@@ -28,7 +28,7 @@ import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js"
 import { installFloatingTerminal } from "./floating-terminal.js";
 installUsageTabs();
 import { installWorkspaceMenus } from "./workspace-menus.js";
-installWorkspaceMenus(document, () => composerKeeper.claim());
+installWorkspaceMenus(document, () => composerKeeper.claim(true));
 import { installSubagentInspector } from "./subagent-inspector.js";
 installSubagentInspector();
 import { installViewerFeedback } from "./viewer-feedback.js";
