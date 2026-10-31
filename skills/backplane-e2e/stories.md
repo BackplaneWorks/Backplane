@@ -167,7 +167,8 @@ the parts.
 Drag the viewer's left edge: it resizes and keeps that width after a reload;
 a double-click resets it; it stops where the thread would get under 360 px.
 Tab to the divider: Left/Right resize it (Shift takes larger steps), Home
-resets it, and the changed width remains after a reload.
+resets it, End grows it to its clamped maximum, and the changed width remains
+after a reload.
 Close the viewer; open it again from the rail.
 
 **S47 The board picker reads the folder each time** (W D A)

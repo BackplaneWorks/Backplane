@@ -2149,12 +2149,12 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     try { localStorage.removeItem(viewerKey()); } catch {}
     panes();
-  } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+  } else if (e.key === "End" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
     e.preventDefault();
     const s = panesSize(), side = document.documentElement.dataset.fold ? s.strip : s.side;
     const delta = (e.shiftKey ? 64 : 16) * (e.key === "ArrowLeft" ? 1 : -1);
     const w = Number(App.panes_viewer(panesN(s.w), panesN(side), panesN(s.strip), panesN(s.rail),
-      panesN(Math.max(1, edge.parentElement.getBoundingClientRect().width + delta)), splitOn(), true));
+      panesN(e.key === "End" ? s.w : Math.max(1, edge.parentElement.getBoundingClientRect().width + delta)), splitOn(), true));
     viewerWidth(w);
     try { localStorage.setItem(viewerKey(), String(Math.round(w))); } catch {}
   }
