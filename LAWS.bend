@@ -13431,3 +13431,7 @@ law fold_ctx_thirteen:
 law fold_ctx_text_splits:
   {FO.Fold.roles.ctx(I18.En{}, FO.Fold.context(Nil{}, [FoldPage.call(2n), M.Msg{"m", "t", M.Assistant{}, "look", 0n}, FoldPage.call(1n)], Nil{}, [FoldPage.call(2n)]), [FoldPage.call(2n)], Map.new(&2, String), False{})
     == [FO.RHead{"c2", "1 tool call · Bash", False{}, False{}}] : List<&2, FO.Role>}
+
+# Regression for c12-3.
+law keys_navigation_disarms:
+  {U.Ui.scratch(U.Act.ui(U.Settings.go(U.Ui.scratch_set(U.Ui.init(0n), "@keys.rm", "TOKEN"), "privacy")), "@keys.rm") == "" : String}

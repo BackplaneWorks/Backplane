@@ -11829,7 +11829,8 @@ def Settings.seed.k(threads: Bool, +u: Ui) -> Ui:
     case False{}:
       u
 
-def Settings.go.k(+page: String, +u: Ui) -> Act:
+def Settings.go.k(+page: String, +before: Ui) -> Act:
+  +u = Ui.scratch_set(before, "@keys.rm", "")
   Act{Settings.seed.k(String.eq(page, "threads"), Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", page), "@set.sc", "0"), "@set.focus", "")), [Focus{""}]}
 
 def Settings.go(+u: Ui, +page: String) -> Act:

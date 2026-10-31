@@ -13838,3 +13838,6 @@ def Laws.fold_ctx_thirteen():
 
 def Laws.fold_ctx_text_splits():
   {==}
+
+def Laws.keys_navigation_disarms():
+  {==}
