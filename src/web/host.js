@@ -2056,17 +2056,16 @@ let sideKept = false;
 const wide = () => window.matchMedia("(min-width: 761px)").matches;
 const splitOn = () => !!document.querySelector("#viewer.split");
 const viewerKey = () => (splitOn() ? VIEWER_W_SPLIT : VIEWER_W);
-function viewerWidth(w) {
+function viewerWidth(w, s, side = document.documentElement.dataset.fold ? s.strip : s.side) {
   const root = document.documentElement;
   if (w == null) { root.style.removeProperty("--viewer-w"); return; }
   root.style.setProperty("--viewer-w", `${Math.round(w)}px`);
   const edge = document.querySelector(".viewer-split");
   if (edge) {
-    const s = panesSize(), side = root.dataset.fold ? s.strip : s.side;
     const at = drag => Number(App.panes_viewer(panesN(s.w), panesN(side), panesN(s.strip), panesN(s.rail), panesN(drag), splitOn(), true));
-    edge.setAttribute("aria-valuemin", String(at(1)));
-    edge.setAttribute("aria-valuemax", String(at(s.w)));
-    edge.setAttribute("aria-valuenow", String(Math.round(w)));
+    for (const [name, value] of [["aria-valuemin", at(1)], ["aria-valuemax", at(s.w)], ["aria-valuenow", Math.round(w)]]) {
+      if (edge.getAttribute(name) !== String(value)) edge.setAttribute(name, String(value));
+    }
   }
 }
 function viewerDrag() {
@@ -2112,7 +2111,7 @@ function panes() {
   const drawer = App.panes_drawer(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), sideKept);
   if (drawer) root.dataset.fold = "drawer"; else if (fold) root.dataset.fold = "auto"; else delete root.dataset.fold;
   drawerSel = drawer ? (drawerSel ?? selNow()) : null;
-  viewerWidth(Number(App.panes_viewer(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), panesN(viewerDrag()), splitOn(), sideKept)));
+  viewerWidth(Number(App.panes_viewer(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), panesN(viewerDrag()), splitOn(), sideKept)), s);
 }
 document.addEventListener("pointerdown", (e) => {
   if (document.documentElement.dataset.fold === "drawer" && e.target instanceof Element && !e.target.closest(".sidebar")) drawerShut();
@@ -2141,7 +2140,7 @@ document.addEventListener("pointerdown", (e) => {
   const side = document.documentElement.dataset.fold ? s.strip : s.side;
   const move = (m) => {
     w = Number(App.panes_viewer(panesN(s.w), panesN(side), panesN(s.strip), panesN(s.rail), panesN(Math.max(1, right - m.clientX)), splitOn(), true));
-    viewerWidth(w);
+    viewerWidth(w, s, side);
   };
   const done = () => {
     edge.removeEventListener("pointermove", move);
@@ -2173,7 +2172,7 @@ document.addEventListener("keydown", (e) => {
     const delta = (e.shiftKey ? 64 : 16) * (e.key === "ArrowLeft" ? 1 : -1);
     const w = Number(App.panes_viewer(panesN(s.w), panesN(side), panesN(s.strip), panesN(s.rail),
       panesN(e.key === "End" ? s.w : Math.max(1, edge.parentElement.getBoundingClientRect().width + delta)), splitOn(), true));
-    viewerWidth(w);
+    viewerWidth(w, s, side);
     try { localStorage.setItem(viewerKey(), String(Math.round(w))); } catch {}
   }
 });

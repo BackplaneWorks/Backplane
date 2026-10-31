@@ -4,15 +4,17 @@ const fs = require('node:fs'), vm = require('node:vm');
 // Run the production layout listeners with measured panes and the existing
 // Bend clamp boundary. The desktop check exercises the real Bend export.
 function harness() {
-  const listeners = {}, values = {}, kept = new Map(); let width = 600;
-  const edge = { parentElement: { getBoundingClientRect: () => ({ width }) },
-    setAttribute: (key, value) => { values[key] = value; },
+  const listeners = {}, values = {}, kept = new Map(); let width = 600, written = false, afterWrite = 0, attributes = 0;
+  const rect = value => { if (written) afterWrite++;return value; };
+  const edge = { parentElement: { getBoundingClientRect: () => rect({ width }) },
+    getAttribute: key => values[key],
+    setAttribute: (key, value) => { attributes++;values[key] = value; },
     closest: selector => selector === '.viewer-split' ? edge : null };
   const root = { dataset: {}, style: {
-    setProperty: (_key, value) => { width = Number.parseFloat(value); }, removeProperty() {} } };
+    setProperty: (_key, value) => { width = Number.parseFloat(value);written = true; }, removeProperty() {} } };
   const doc = { documentElement: root,
-    querySelector: selector => selector === '.viewer-split' ? edge : selector === '.app' ? { getBoundingClientRect: () => ({ width: 1400 }) }
-      : selector === '.app.panel' ? {} : selector === '.workspace-thread > .workspace-bar' ? { getBoundingClientRect: () => ({ width: 76 }) } : null,
+    querySelector: selector => selector === '.viewer-split' ? edge : selector === '.app' ? { getBoundingClientRect: () => rect({ width: 1400 }) }
+      : selector === '.app.panel' ? {} : selector === '.workspace-thread > .workspace-bar' ? { getBoundingClientRect: () => rect({ width: 76 }) } : null,
     addEventListener: (key, fn) => { (listeners[key] ??= []).push(fn); } };
   const context = { document: doc, localStorage: { getItem: key => kept.get(key), setItem: (key, value) => kept.set(key, value), removeItem: key => kept.delete(key) },
     window: { matchMedia: () => ({ matches: true }), addEventListener() {} },
@@ -20,7 +22,8 @@ function harness() {
     thin: { session: { sel: 'test' } }, ui: {}, composerGeometry() {} };
   const source = fs.readFileSync(require.resolve('../../src/web/host.js'), 'utf8');
   vm.runInNewContext(source.slice(source.indexOf('const VIEWER_W ='), source.indexOf('// Socket\n')), context);
-  return { values, kept, width: () => width, press(key, fields = {}) {
+  return { values, kept, afterWrite: () => afterWrite, attributes: () => attributes, layout() { written = false;context.panes(); }, width: () => width, press(key, fields = {}) {
+    written = false;
     const event = { key, target: edge, preventDefault() { this.defaultPrevented = true; }, ...fields };
     for (const fn of listeners.keydown) fn(event);
     return event;
@@ -47,4 +50,15 @@ test('the divider leaves modified, composing and unrelated keys alone', () => {
   }
   assert.equal(h.press('ArrowDown').defaultPrevented, undefined);
   assert.equal(h.width(), 600); assert.equal(h.kept.size, 0);
+});
+
+test('layout and divider updates reuse geometry and leave unchanged ARIA alone', () => {
+  const h = harness();
+  h.layout();
+  assert.equal(h.afterWrite(), 0);
+  const writes = h.attributes();
+  h.layout();
+  assert.equal(h.attributes(), writes);
+  h.press('ArrowLeft');
+  assert.equal(h.afterWrite(), 0);
 });
