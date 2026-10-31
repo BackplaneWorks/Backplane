@@ -402,6 +402,11 @@ class View {
       return { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top, d: Math.hypot(a.x - b.x, a.y - b.y) };
     };
     canvas.addEventListener("pointerdown", (e) => {
+      if (this.side === "schematic" && (e.button === 3 || e.button === 4)) {
+        canvas.closest("#viewer")?.querySelector(`[data-on-click="${e.button === 3 ? "sch-back" : "sch-fwd"}"]`)?.click();
+        return;
+      }
+      canvas.focus({ preventScroll: true });
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       // a press that stays put is a tap (a sheet symbol opens, anything
@@ -459,6 +464,11 @@ class View {
       this.drag = rest ? { x: rest.x, y: rest.y } : null;
       if (!rest) canvas.classList.remove("dragging");
     };
+    // Cancel native Back on the mouse events. Cancelling pointerdown
+    // would suppress those events before Chromium handles navigation.
+    for (const type of ["mousedown", "mouseup", "auxclick"]) canvas.addEventListener(type, (e) => {
+      if (this.side === "schematic" && (e.button === 3 || e.button === 4)) e.preventDefault();
+    });
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
     canvas.addEventListener("wheel", (e) => {
@@ -816,6 +826,14 @@ function pickerKeys() {
     if (menu.matches?.("#viewer .board-selector[open]") && menu.closest("#viewer")?.querySelector("canvas.plot2d")) {
       menu.querySelector("[data-board-filter]")?.focus({ preventScroll: true });
     }
+  }, true);
+  document.addEventListener("keydown", (event) => {
+    const viewer = event.target.closest?.("#viewer");
+    if (!viewer?.querySelector("canvas.plot2d[data-side='schematic']") || event.target.closest?.("input,textarea,select,[contenteditable='true']") || event.isComposing || event.ctrlKey || event.metaKey) return;
+    const action = event.altKey ? { ArrowLeft: "sch-back", ArrowRight: "sch-fwd", ArrowUp: "sch-up" }[event.key] : event.key === "Backspace" ? "sch-up" : null;
+    if (!action) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    viewer.querySelector(`[data-on-click="${action}"]`)?.click();
   }, true);
   document.addEventListener("keydown", (event) => {
     const menu = event.target.closest?.("#viewer .board-selector[open]");

@@ -4256,8 +4256,9 @@ def View.plot.wait.tree(sch: Bool, +u: U.Ui) -> String:
       ""
 
 def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
-  View.bar.loc(lc, List.append(&2, D.Node, what, [View.plot.layers(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
-   <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", List.append(&2, D.Attr, [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", U.Solid.want(u)},
+  View.bar.loc(lc, List.append(&2, D.Node, what, [View.plot.layers(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc) ++ Bool.pick(String, String.eq(U.Solid.kind(u), "schematic"),
+    " · Alt+←/→: " ++ MSG.T.viewer.sch.back(lc) ++ "/" ++ MSG.T.viewer.sch.forward(lc) ++ " · Alt+↑/Backspace: " ++ MSG.T.viewer.sch.up(lc), ""))
+   <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", List.append(&2, D.Attr, [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"tabindex", "0"}, D.At{"aria-label", Bool.pick(String, String.eq(U.Solid.kind(u), "schematic"), MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.board.tip(lc))}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
         D.At{"data-wait-tree", View.plot.wait.tree(String.eq(U.Solid.kind(u), "schematic"), u)}, D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", U.Solid.fam(u, U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], View.probe.attrs(u, String.eq(U.Solid.kind(u), "schematic"))), Nil{}}
