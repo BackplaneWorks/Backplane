@@ -432,7 +432,7 @@ test('a bare / outside every field puts the keyboard in the composer; in a field
 // it, the viewer's close, the person's press and selection.
 function keeperHarness(installComposerFocus, { phone = false } = {}) {
   const listeners = new Map();
-  const page = { thread: 't1', over: false, viewer: false, selection: true };
+  const page = { thread: 't1', over: false, viewer: false, selection: true, hidden: false };
   const body = { tagName: 'BODY', closest: () => null };
   const doc = { body, activeElement: body,
     addEventListener: (type, handler) => { if (!listeners.has(type)) listeners.set(type, []);listeners.get(type).push(handler); },
@@ -442,7 +442,7 @@ function keeperHarness(installComposerFocus, { phone = false } = {}) {
     querySelectorAll: sel => sel.includes('.workspace-palette') && page.over ? [{ getClientRects: () => [{}] }] : [] };
   const composer = { tagName: 'TEXTAREA', id: 'composer', value: 'a draft', selectionStart: 0, selectionEnd: 0, disabled: false,
     getClientRects: () => [{}], contains: () => false, closest: () => composer,
-    focus() { doc.activeElement = composer; }, setSelectionRange(s, e) { composer.selectionStart = s;composer.selectionEnd = e; } };
+    focus() { if (!page.hidden) doc.activeElement = composer; }, setSelectionRange(s, e) { composer.selectionStart = s;composer.selectionEnd = e; } };
   const win = { matchMedia: () => ({ matches: phone }), setTimeout: f => f(), getSelection: () => ({ isCollapsed: page.selection, anchorNode: {} }) };
   const keeper = installComposerFocus({ document: doc, window: win });
   const fire = (type, target = doc.activeElement) => { for (const handler of listeners.get(type) || []) handler({ target }); };
@@ -532,6 +532,17 @@ test('explicit dismissal restores a narrow composer after the popover redraw, ke
   h.page.over = false;h.keeper.check();
   assert.equal(h.doc.activeElement, h.composer);
   assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [2, 2]);
+});
+
+test('the first view after a reload gives its draft the keyboard once it shows', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  // the page's frame holds the draft hidden until the workspace is whole
+  h.page.hidden = true;h.keeper.check();
+  assert.equal(h.doc.activeElement, h.body);
+  h.page.hidden = false;h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [7, 7]);
 });
 
 test('Escape closes a palette or drawing dialog before token stats underneath', async () => {

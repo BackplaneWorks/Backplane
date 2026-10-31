@@ -210,8 +210,11 @@ export function installComposerFocus({ document: doc = document, window: win = w
     if (active === el || busy(active) || phone() && !restore) { restore = false;return; }
     const selection = win.getSelection?.();
     if (selection && !selection.isCollapsed && !el.contains(selection.anchorNode)) { restore = false;return; }
-    restore = false;
     put(el, carets.get(now));
+    // (still hidden: the reload's first frame keeps the draft out of sight
+    // until the workspace is whole) again once it shows
+    if (doc.activeElement !== el) { want = true;return; }
+    restore = false;
   };
   doc.addEventListener('pointerdown', event => { pressed = true;restore = false; if (event.target?.closest?.(TURN_BUTTONS)) want = true; }, true);
   // a menu (a <details>) opened or shut by Esc, a click or its own item:
