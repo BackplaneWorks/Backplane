@@ -455,8 +455,11 @@ def Order.ask.parts(ps: List<&2, J.Json>) -> List<&2, String>:
     case +p <> t:
       Order.ask.part(p) <> Order.ask.parts(t)
 
+def Order.ask.count(+n: Nat) -> String:
+  Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " file", " files")
+
 def Order.ask.detail(+dir: String, +m: J.Json, +ps: List<&2, String>) -> String:
-  "Send " ++ Nat.show(List.length(&2, String, ps)) ++ " files from " ++ dir ++ " to Backplane's quote service? They are kept only to make what you order.\n"
+  "Send " ++ Order.ask.count(List.length(&2, String, ps)) ++ " from " ++ dir ++ " to Backplane's quote service? They are kept only to make what you order.\n"
     ++ "Ships to " ++ J.Json.get_str(m, "ship_to", "?") ++ " · " ++ String.join(Order.ask.parts(J.Json.elems(J.Json.get_obj(m, "parts"))), ", ") ++ "\n"
     ++ Order.ask.files(ps, 40n)
 

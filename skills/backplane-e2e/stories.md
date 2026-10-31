@@ -425,7 +425,8 @@ Buy it shows one "from $X" for all of them; the
 server's estimate prices each with no problems. Give one part invalid options,
 or include more parts than the server returns: its missing estimate is named
 and the partial sum is withheld. A flex board asked to be
-assembled is refused (only rigid `pcb` boards are).
+assembled is refused (only rigid `pcb` boards are). A quote upload approval
+with one file says "Send 1 file"; several files use "files".
 
 **S39 Settle when done** (W D)
 Default: a finished thread stays in its project's list, then settles by

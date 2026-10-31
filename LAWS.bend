@@ -13545,3 +13545,9 @@ law buy_rapid_repeat_same_intent:
 
 law buy_later_intent_is_new:
   {H.Buy.recent(100n, 103n) == False{} : Bool}
+
+law order_one_file_singular:
+  {ORD.Order.ask.count(1n) == "1 file" : String}
+
+law order_many_files_plural:
+  {ORD.Order.ask.count(2n) == "2 files" : String}

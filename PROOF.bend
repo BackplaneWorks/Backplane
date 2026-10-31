@@ -13919,3 +13919,9 @@ def Laws.buy_rapid_repeat_same_intent():
 
 def Laws.buy_later_intent_is_new():
   {==}
+
+def Laws.order_one_file_singular():
+  {==}
+
+def Laws.order_many_files_plural():
+  {==}
