@@ -560,7 +560,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 
 /* A persistent, nonmodal PTY window; presentation never contains shell bytes. */
 .workspace-root { display: contents; }
-.floating-terminal { position: fixed; z-index: 60; left: max(16px, calc(50vw - 400px)); top: max(80px, calc(50vh - 210px)); width: min(800px, calc(100vw - 32px)); height: min(420px, calc(100dvh - 100px)); min-width: 220px; min-height: 160px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); display: flex; flex-direction: column; resize: both; overflow: hidden; border: 1px solid var(--accent); background: var(--bg); box-shadow: 0 12px 44px #0009; }
+.floating-terminal { position: fixed; z-index: 60; left: max(16px, calc(50vw - 400px)); top: max(80px, calc(50vh - 210px)); width: min(800px, calc(100vw - 32px)); height: min(420px, calc(100dvh - 100px)); min-width: 220px; min-height: 160px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); display: flex; flex-direction: column; resize: both; overflow: hidden; border: 1px solid var(--accent); background: var(--bg); color: var(--text); box-shadow: 0 12px 44px #0009; }
 .floating-terminal-handle { display: flex; align-items: center; gap: 12px; padding: 6px 10px; cursor: move; touch-action: none; user-select: none; background: var(--panel, var(--bg)); border-bottom: 1px solid var(--line); }
 .floating-terminal-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .floating-terminal-path { flex: none; padding: 4px 10px; font: 11px/16px var(--mono); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
