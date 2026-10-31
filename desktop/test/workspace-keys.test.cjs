@@ -180,6 +180,10 @@ test('a bare letter or digit names a rail keycap only outside editors and withou
   for (const input of [event('B', { shiftKey: true }), event('b', { ctrlKey: true }), event('b', { metaKey: true }), event('b', { altKey: true }),
     event('b', { target: editor }), event('b', { isComposing: true }), event('b', { keyCode: 229 }), event('b', { repeat: true }),
     event('b', { getModifierState: () => true }), event('b', { defaultPrevented: true }), event('`'), event('Enter'), event(' '), event('é')]) assert.equal(railKey(input), '');
+  // on one of the composer's own buttons (Send, Stop) a letter is a word
+  // meant for the draft, never a rail button
+  const send = { tagName: 'BUTTON', closest: selector => selector.split(',').includes('.composer') ? send : null };
+  for (const k of ['m', 'o', 'r', 'e', '3']) assert.equal(railKey(event(k, { target: send })), '');
 });
 
 // The installed listener presses the rail button that shows the key, and
@@ -461,6 +465,30 @@ test('the composer takes the keyboard on load, when another thread shows, when a
   h.page.over = true;h.fire('toggle');h.doc.activeElement = summary;
   h.page.over = false;h.fire('toggle');
   assert.equal(h.doc.activeElement, h.composer);
+});
+
+test('a click on Send, Stop or the top bar\'s Stop gives the keyboard back to the composer once let go', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();
+  // the button takes the keyboard on the press; let go, the draft has it
+  // back (the caret where it was), so the next words are not lost
+  h.composer.setSelectionRange(3, 3);h.fire('keyup');
+  for (const where of ['.composer-foot button', '.topbar .kv.state button']) {
+    const button = { tagName: 'BUTTON', closest: selector => selector.split(',').includes(where) ? button : null };
+    h.fire('pointerdown', button);h.doc.activeElement = button;h.fire('pointerup', button);
+    assert.equal(h.doc.activeElement, h.composer);
+    assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [3, 3]);
+  }
+  // the paperclip: a click puts the keyboard in its file field, which
+  // takes no typing; let go, the draft has it
+  const file = { tagName: 'INPUT', type: 'file', closest: selector => selector.split(',').includes('.composer-foot .attach') || selector.split(',').includes('input') ? file : null };
+  h.fire('pointerdown', file);h.doc.activeElement = file;h.fire('pointerup', file);
+  assert.equal(h.doc.activeElement, h.composer);
+  // any other button (a reply's Copy) keeps the keyboard it took
+  const copy = { tagName: 'BUTTON', closest: () => null };
+  h.fire('pointerdown', copy);h.doc.activeElement = copy;h.fire('pointerup', copy);
+  assert.equal(h.doc.activeElement, copy);
 });
 
 test('the composer never takes the keyboard from a field, during a press, over a selection or on a phone', async () => {

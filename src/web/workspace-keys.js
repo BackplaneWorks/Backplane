@@ -4,15 +4,16 @@ const EDITOR = 'input,textarea,select,[contenteditable]:not([contenteditable="fa
 // it gets is its own (Ctrl+K kills a line, Ctrl+D ends the shell).
 const PTY = '[data-keys],[data-keyto]';
 
-// A bare letter or digit (no modifier, outside every editor) may be one of
-// the rail's keycaps (view.bend writes data-keycap on the button that shows
-// it): the host presses that button, so the key does what a click does.
-// '' for any other key.
+// A bare letter or digit (no modifier, outside every editor and the
+// composer's own buttons, where it is a word meant for the draft) may be
+// one of the rail's keycaps (view.bend writes data-keycap on the button
+// that shows it): the host presses that button, so the key does what a
+// click does. '' for any other key.
 export function railKey(event) {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.getModifierState?.('AltGraph')) return '';
   if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return '';
   const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
-  if (!/^[a-z0-9]$/.test(key) || event.target?.closest?.(EDITOR)) return '';
+  if (!/^[a-z0-9]$/.test(key) || event.target?.closest?.(EDITOR + ',.composer')) return '';
   return key;
 }
 
@@ -130,11 +131,15 @@ export function escapeState(event, doc) {
 // in the composer: on load, when another thread comes on show, when what
 // covered the page goes (Settings, a dialog, the palette, a menu, the
 // picker, the lightbox, the terminal) or the viewer shuts, after a
-// reconnect and on Esc. Never from a field the person types in, during a
-// press (a selection being made) or over a selection outside the composer,
-// nor on a phone-sized or touch page (its keyboard would cover the
-// thread). The caret goes back where it was in that thread's draft.
+// reconnect, on Esc, and once a press on the turn's own buttons (Send,
+// Stop, Steer, the foot's others, the top bar's Stop) is let go, so the
+// next words go to the draft rather than press that button again. Never
+// from a field the person types in, during a press (a selection being
+// made) or over a selection outside the composer, nor on a phone-sized or
+// touch page (its keyboard would cover the thread). The caret goes back
+// where it was in that thread's draft.
 const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop';
+const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button';
 export function installComposerFocus({ document: doc = document, window: win = window,
   phone = () => win.matchMedia?.('(max-width: 760px), (hover: none) and (pointer: coarse)').matches } = {}) {
   let want = true, thread = '', covered = false, viewer = false, pressed = false;
@@ -150,7 +155,9 @@ export function installComposerFocus({ document: doc = document, window: win = w
     const n = el.value.length, [start, end] = at || [n, n];
     try { el.setSelectionRange(Math.min(start, n), Math.min(end, n)); } catch {}
   };
-  const busy = el => !!el && el !== doc.body && !!el.closest?.(EDITOR);
+  // (a file field, the paperclip's, takes no typing: a click on it leaves
+  // the keyboard to the draft)
+  const busy = el => !!el && el !== doc.body && el.type !== 'file' && !!el.closest?.(EDITOR);
   const check = () => {
     const el = field(), now = here();
     const over = [...(doc.querySelectorAll?.(COVERS) || [])].some(shown);
@@ -170,7 +177,7 @@ export function installComposerFocus({ document: doc = document, window: win = w
     if (selection && !selection.isCollapsed && !el.contains(selection.anchorNode)) return;
     put(el, carets.get(now));
   };
-  doc.addEventListener('pointerdown', () => { pressed = true; }, true);
+  doc.addEventListener('pointerdown', event => { pressed = true; if (event.target?.closest?.(TURN_BUTTONS)) want = true; }, true);
   // a menu (a <details>) opened or shut by Esc, a click or its own item:
   // no render follows, so the cover is looked at once it has toggled
   doc.addEventListener('toggle', () => win.setTimeout(check, 0), true);
