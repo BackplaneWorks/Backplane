@@ -2385,7 +2385,7 @@ def Find.rows(rs: List<&2, SRow>, +q: String) -> List<&2, SRow>:
     case Nil{}:
       Nil{}
     case SRow{r, M.Project{id, +ti, ro, c, rm}, sh} <> t:
-      Find.keep(Nat.is_gt(FZ.Fuzzy.score(ti, q), 0n), SRow{r, M.Project{id, ti, ro, c, rm}, sh}, Find.rows(t, q))
+      Find.keep(Nat.is_gt(FZ.Fuzzy.score(ti, String.trim(q)), 0n), SRow{r, M.Project{id, ti, ro, c, rm}, sh}, Find.rows(t, q))
 
 # the query in force: "" while the search is shut
 def Find.q.k(on: Bool, +dr: Map<&2, String>) -> String:

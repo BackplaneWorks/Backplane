@@ -115,3 +115,5 @@ def main() -> IO(Unit):
     C.Check.str("restored with threads", String.join(U.Side.of(U.Ui.fold(readded(), U.Ui.init(1000n)), "p1"), ","), "a")
     C.Check.str("new folder new id", Bool.show(Bool.not(String.eq(U.Side.first(U.Side.projects(U.Ui.fold(fresh(), U.Ui.init(1000n)))), "p1"))), "True")
     C.Check.str("live root still refused", String.join(changes.go(H.Queue.changes(step(log(), 700n, "{\"id\":2,\"m\":\"project.create\",\"p\":{\"path\":\"/tmp/board\"}}"))), " "), "")
+    C.Check.str("whitespace query keeps projects", pids(typed("   ")), pids(base()))
+    C.Check.str("padded query finds project", pids(typed("  ENC  ")), "p2")

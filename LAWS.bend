@@ -13579,3 +13579,8 @@ law search_hides_design_history:
   for text: String
   for at: Nat
   {JTHIN.Search.readable(M.Act{id, th, "step", kind, text, at}) == False{} : Bool}
+
+# Found by e2e c1-8.
+law project_blank_filter_keeps:
+  for rs: List<&2, U.SRow>
+  {U.Find.rows(rs, "   ") == rs : List<&2, U.SRow>}

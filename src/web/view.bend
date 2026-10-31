@@ -693,6 +693,13 @@ def View.sidebar.legend(top: Bool, +lc: I.Loc) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
+def View.sidebar.no_matches(+lc: I.Loc, +q: String, empty: Bool) -> List<&2, D.Node>:
+  match empty:
+    case False{}: Nil{}
+    case True{}:
+      D.Dom.when(Bool.not(String.is_empty(String.trim(q))), D.El{"div", "", [D.At{"class", "project-no-matches"}],
+        [D.Dom.span("dim", MSG.T.sidebar.search.empty(lc)), D.Dom.button("", "proj-find", "off", MSG.T.sidebar.search.clear(lc), MSG.T.sidebar.search.clear(lc))]})
+
 def View.sidebar.body.k(+top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>, items: List<&2, D.Node>) -> D.Node:
   D.El{"aside", "sidebar", [D.At{"class", "sidebar"}],
     View.sidebar.top(View.sidebar.find(top, lc, String.eq(U.Side.view(st), "active"), q), View.sidebar.head(top, lc, ms, open, on, v), uber, View.add.loc(lc, adding),
@@ -736,11 +743,11 @@ def View.list.projected(+lc: I.Loc, active: Bool, +rows: List<&2, U.SRow>, raw: 
     case False{}:
       List.append(&2, D.Node, View.groups(lc, U.Side.groups.at(rows, now, U.Side.cur.held(st, sel, now)), q, open, ix, st, sel, now, look, rm), View.history(lc, q, open, ix, st, sel, now))
 
-def View.sidebar.projected(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, +u: U.Ui, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
+def View.sidebar.projected(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, +u: U.Ui, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, _, +open, +on, +now, +adding, _, +v, _, _, _, _, _, _, _}:
       View.sidebar.body.k(View.chrome(u), lc, ms, ix, st, sel, open, on, now, adding, v, U.Str.get(d, "@look"), U.Str.get(d, "@rm"), U.Find.q(open, d), mi, bots, uber,
-        View.list.projected(lc, String.eq(U.Side.view(st), "active"), rows, raw, U.Find.q(open, d), open, ix, st, sel, now, U.Str.get(d, "@look"), U.Str.get(d, "@rm")))
+        D.Dom.cat(View.sidebar.no_matches(lc, U.Find.q(open, d), Bool.and(Bool.not(String.eq(U.Side.view(st), "active")), List.is_empty(&2, U.SRow, rows))), View.list.projected(lc, String.eq(U.Side.view(st), "active"), rows, raw, U.Find.q(open, d), open, ix, st, sel, now, U.Str.get(d, "@look"), U.Str.get(d, "@rm"))))
 
 def View.sidebar.threads.kind(active: Bool, +u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> List<&2, String>:
   match active:

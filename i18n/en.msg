@@ -1366,3 +1366,5 @@ sched.help.cron = Use five cron fields: minute (0–59), hour (0–23), day (1�
 sched.help.minute = Cron minutes must be 0–59, with a positive step. Example: */15 * * * *.
 
 settings.settle.idle.off = The shorter idle timer is off. Inactive threads settle after this window. They stay saved.
+sidebar.search.empty = No projects match.
+sidebar.search.clear = Clear search

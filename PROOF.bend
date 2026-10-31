@@ -13950,3 +13950,14 @@ def Laws.project_pasted_path_trimmed():
 
 def Laws.search_hides_design_history(id, th, kind, text, at):
   {==}
+
+# Found by e2e c1-8.
+
+def Laws.project_blank_filter_keeps(rs):
+  match rs:
+    case Nil{}:
+      {==}
+    case U.SRow{+r, M.Project{+id, +ti, +ro, +c, +rm}, +sh} <> +t:
+      %Equal.sym(Bool, Nat.is_gt(FZ.Fuzzy.score(ti, ""), 0n), True{}, Laws.fuzzy_empty_matches(ti)) : {U.Find.keep(_, U.SRow{r, M.Project{id, ti, ro, c, rm}, sh}, U.Find.rows(t, "   ")) == U.SRow{r, M.Project{id, ti, ro, c, rm}, sh} <> t : List<&2, U.SRow>}
+      %Equal.sym(List<&2, U.SRow>, U.Find.rows(t, "   "), t, Laws.project_blank_filter_keeps(t)) : {U.SRow{r, M.Project{id, ti, ro, c, rm}, sh} <> _ == U.SRow{r, M.Project{id, ti, ro, c, rm}, sh} <> t : List<&2, U.SRow>}
+      {==}

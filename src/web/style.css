@@ -2066,3 +2066,4 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 #viewer:has(> .viewer-stage > canvas.plot2d) > .sch-panel { height: 140px; max-height: 22vh; }
 
 .sch-navigation .sch-crumb { flex-shrink: 1; min-width: 0; }
+.project-no-matches { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; }
