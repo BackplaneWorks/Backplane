@@ -1265,6 +1265,10 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 /* Stable pre-send image geometry, including several pasted files. */
 .composer .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .composer .chip.image { display: flex; flex-direction: column; gap: 4px; max-width: 132px; white-space: normal; overflow-wrap: anywhere; }
+.composer button.chip { display: inline-flex; align-items: center; gap: 6px; }
+.attachment-label { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.attachment-remove { flex: none; }
 .attachment-preview { width: 96px; height: 72px; object-fit: contain; background: var(--bg); flex: none; }
 .attachment-preview.failed { display: none; }
 .attachment-error { display: none; }
