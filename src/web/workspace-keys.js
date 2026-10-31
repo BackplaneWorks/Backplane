@@ -101,6 +101,31 @@ export function overlayEscape(doc) {
   return null;
 }
 
+// What Tab reaches in a dialog, in order: its controls, and a part that
+// scrolls with no control in it (the browser lets the keyboard in to
+// scroll it).
+const TABBABLE = 'a[href],button:not(:disabled),input:not(:disabled):not([type="hidden"]),select:not(:disabled),textarea:not(:disabled),summary,[tabindex]:not([tabindex="-1"])';
+export function tabStops(dialog, win = window) {
+  const scrolls = el => {
+    const s = win.getComputedStyle(el);
+    return (/auto|scroll/.test(s.overflowY) && el.scrollHeight > el.clientHeight || /auto|scroll/.test(s.overflowX) && el.scrollWidth > el.clientWidth) && !el.querySelector(TABBABLE);
+  };
+  return [...dialog.querySelectorAll('*')].filter(el => shown(el) && (el.matches(TABBABLE) || scrolls(el)));
+}
+
+// Tab in a dialog over the page (a project's Intent) stays in it: from
+// its last stop to its first, Shift+Tab from its first to its last, and
+// from the dialog itself to its first (or last). null where the browser's
+// own Tab stays inside.
+export function dialogTab(active, back, stops) {
+  if (!stops.length) return null;
+  const at = stops.indexOf(active);
+  if (at < 0) return back ? stops.at(-1) : stops[0];
+  if (!back && at === stops.length - 1) return stops[0];
+  if (back && at === 0) return stops.at(-1);
+  return null;
+}
+
 // A bare "/" (Shift allowed: some layouts need it) outside every text
 // field puts the keyboard in the composer, at the end of its draft; in the
 // composer or any field it types.
@@ -235,6 +260,14 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
     // the picker, after any dialog opened over it has had the key.
     if (event.key === 'Escape' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && doc.querySelector('.tok-pop')) {
       event.preventDefault(); event.stopImmediatePropagation(); dispatch('flag', 'tokstats'); composer?.claim(true); return;
+    }
+    // Tab stays in a project's Intent until it closes, never reaching the
+    // page it covers
+    const dialog = event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey && doc.querySelector('.intent[aria-modal="true"]');
+    if (dialog) {
+      const next = dialogTab(doc.activeElement, event.shiftKey, tabStops(dialog, doc.defaultView || window));
+      if (next) { event.preventDefault(); event.stopImmediatePropagation(); next.focus(); }
+      return;
     }
     if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
       const close = overlayEscape(doc);

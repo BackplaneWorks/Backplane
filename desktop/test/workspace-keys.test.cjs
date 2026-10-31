@@ -565,3 +565,16 @@ test('Escape dismisses the account picker before the inline editor', async () =>
     selector.includes('rename-no') ? { click() { assert.fail('account picker goes first'); } } : null };
   overlayEscape(doc)();assert.equal(closed, 1);
 });
+
+test('Tab goes round a dialog: last to first, Shift+Tab first to last, the dialog itself to an end', async () => {
+  const { dialogTab } = await import('../../src/web/workspace-keys.js');
+  const edit = { id: 'edit' }, close = { id: 'close' }, body = { id: 'body' }, stops = [edit, close, body];
+  assert.equal(dialogTab(body, false, stops), edit);
+  assert.equal(dialogTab(edit, true, stops), body);
+  assert.equal(dialogTab(edit, false, stops), null);
+  assert.equal(dialogTab(close, true, stops), null);
+  const dialog = { id: 'dialog' };
+  assert.equal(dialogTab(dialog, false, stops), edit);
+  assert.equal(dialogTab(dialog, true, stops), body);
+  assert.equal(dialogTab(dialog, false, []), null);
+});
