@@ -16,7 +16,7 @@ import ./src/web/terminal-cells.bend as TCELL
 import ./src/core/vt.bend as VTSNAP
 import ./src/server/term.bend as TSNAP
 import ./src/core/browser-frame.bend as BFRAME
-import ./src/core/term-scroll.bend as TSC
+import ./src/core/term-scroll.bend as TSCR
 import ./src/web/workspace.bend as WSTERM
 import ./src/server/thin-sidebar.bend as CHATDERIVED
 import ./src/server/thin-sidebar-wire.bend as SWR
@@ -13611,7 +13611,7 @@ law stop_command_only_while_running:
 
 # The terminal viewport reaches both bounds without wrapping.
 law terminal_scroll_bounds:
-  {[TSC.TermScroll.move(0n, 2048n, True{}, 19n), TSC.TermScroll.move(2040n, 2048n, True{}, 19n), TSC.TermScroll.move(3n, 2048n, False{}, 19n)] == [19n, 2048n, 0n] : List<&2, Nat>}
+  {[TSCR.TermScroll.move(0n, 2048n, True{}, 19n), TSCR.TermScroll.move(2040n, 2048n, True{}, 19n), TSCR.TermScroll.move(3n, 2048n, False{}, 19n)] == [19n, 2048n, 0n] : List<&2, Nat>}
 
 # Modifier-only keys encode no input and leave the history viewport alone.
 law terminal_empty_input_keeps_view:

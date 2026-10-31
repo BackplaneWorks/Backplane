@@ -183,7 +183,7 @@ def Fm.report.twice() -> Nat:
 def Fm.call.k(i: Nat, +s: M.State, +now: Nat, +from: String, +a: J.Json, +id: String, +ok: Bool) -> MC.Res:
   match i:
     case 0n:
-      Fm.say(Bool.or(ok, B.Lr.may(s, from, id)), MC.Mcp.send.k(Bool.or(ok, B.Lr.may(s, from, id)), s, now, from, id, J.Json.get_str(a, "text", ""), J.Json.get_str(a, "mode", "")))
+      Fm.say(Bool.or(ok, B.Lr.may(s, from, id)), MC.Mcp.send.checked(Bool.or(ok, B.Lr.may(s, from, id)), s, now, from, id, MC.Mcp.send.body(a), J.Json.get_str(a, "mode", "")))
     case 1n:
       Fm.say(ok, MC.Mcp.wait.k(ok, s, id))
     case 2n:

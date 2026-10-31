@@ -13832,6 +13832,8 @@ def Laws.wt_heal_worktree():
   {==}
 
 def Laws.wt_heal_project_folder_never():
+  {==}
+
 def Laws.fold_blank_joins(i, j, b, th, s, a):
   {==}
 
@@ -13845,6 +13847,8 @@ def Laws.fold_ctx_thirteen():
   {==}
 
 def Laws.fold_ctx_text_splits():
+  {==}
+
 def Laws.checkpoint_untouched_not_rewritten():
   {==}
 
@@ -13876,6 +13880,8 @@ def Laws.routine_delete_first_press_preserves():
   {==}
 
 def Laws.bot_navigation_restores_tab():
+  {==}
+
 def Laws.revert_ask_sends_nothing():
   {==}
 
