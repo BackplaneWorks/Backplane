@@ -25,7 +25,7 @@
 }
 
 /* the light theme (Settings, Appearance: the hub's ui.theme) */
-.app.light, .bub-move.light {
+html.light, .app.light, .bub-move.light {
   --bg: #fafaf8;
   --panel: #f1f0ec;
   --raise: #e8e7e2;
