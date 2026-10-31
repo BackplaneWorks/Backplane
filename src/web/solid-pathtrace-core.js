@@ -86,8 +86,8 @@ class OriginalModelView {
     this.rasterBatches?.dispose();this.rasterBatches=null;this.rasterBatchPromise=null;this.shadowsDirty=true;
     Object.assign(this.state,{rasterBatchState:'idle',rasterBatchReason:reason,rasterBatchSourceMeshes:0,rasterBatchGroups:0,rasterBatchTransparentMeshes:0,rasterBatchBytes:0,rasterBatchBuildMs:null,rasterBatchEpoch:this.rasterEpoch,rasterBatchMultiDraw:false});
   }
-  requestRasterBatches(){
-    if(!this.ready||this.disposed||this.hidden||page?.hidden||this.mode==='pathtrace'||!this.state.visible||!this.state.firstFrame||!(this.state.sourceMeshes>=128)||this.maskReliefPromise||this.rasterBatchPromise||this.rasterBatches||this.state.rasterBatchState==='fallback')return;
+  requestRasterBatches(early=false){
+    if(!this.ready||this.disposed||this.hidden||page?.hidden||this.mode==='pathtrace'||!early&&(!this.state.visible||!this.state.firstFrame)||!(this.state.sourceMeshes>=128)||this.maskReliefPromise||this.rasterBatchPromise||this.rasterBatches||this.state.rasterBatchState==='fallback')return;
     const epoch=this.rasterEpoch,generation=this.generation,model=this.maskReliefRepresentation?.model||this.model,gltf=this.gltf,scene=this.maskReliefRepresentation?.scene||this.scene,controller=new AbortController();this.rasterBatchAbort=controller;
     const current=()=>!controller.signal.aborted&&!this.abort?.signal.aborted&&!this.disposed&&!this.hidden&&!page?.hidden&&this.ready&&epoch===this.rasterEpoch&&generation===this.generation&&model===(this.maskReliefRepresentation?.model||this.model)&&gltf===this.gltf&&scene===(this.maskReliefRepresentation?.scene||this.scene);
     Object.assign(this.state,{rasterBatchState:'building',rasterBatchReason:''});this.reported=0;this.report(this.state.phase);
@@ -112,7 +112,7 @@ class OriginalModelView {
     // traverse this.scene. The derived scene is only used for a raster draw.
     if(this.maskReliefRepresentation&&!this.maskReliefRepresentation.sync())this.releaseMaskRelief('Source presentation changed');
     const scene=this.maskReliefRepresentation?.scene||this.scene,model=this.maskReliefRepresentation?.model||this.model,representation=this.rasterBatches;
-    if(this.state.visible&&this.state.firstFrame&&representation){
+    if(representation){
       if(representation.model===model&&representation.sync()){
         this.renderer.render(representation.scene,this.camera);this.state.rasterBatchState='active';return;
       }
@@ -176,7 +176,13 @@ class OriginalModelView {
       this.addRasterShadows(center,this.radius);
       if(!this.cameraState&&triangles>0)this.fitDefaultCamera(box);
       else if(this.cameraState)this.applyCamera(this.cameraState);
-      this.ready=true;this.report('raster',{triangles,vertices,authoredNormals,sourceMeshes,materials:materialSet.size,bytes:total,reason:'Original GLB materials and normals'});this.raster();await frame();
+      this.ready=true;this.report('raster',{triangles,vertices,authoredNormals,sourceMeshes,materials:materialSet.size,bytes:total,reason:'Original GLB materials and normals'});
+      // A large source is first drawn batched: exact copies of its geometry in
+      // a few multi-draws instead of one upload and draw per mesh (22k on a
+      // populated board). The same framebuffer proof qualifies that draw; a
+      // build that falls back proves the original meshes as before.
+      if(sourceMeshes>=128)await this.requestRasterBatches(true);
+      if(current()&&!this.state.visible)this.raster();await frame();
       if(this.mode==='pathtrace')await this.ensureTrace();return this.status();
     } catch(error) {
       clearTimeout(timeout);if(!current()||error.name==='AbortError')return undefined;

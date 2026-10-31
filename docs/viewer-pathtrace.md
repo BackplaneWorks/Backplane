@@ -300,9 +300,10 @@ optional saved-source inputs exercise exact anchor equality across export recipe
 
 ## Compatible opaque raster batches
 
-The Studio renderer can build a separate `solid-raster-batches.js`
-representation after the original source has passed its existing positive
-framebuffer/background proof. It requires the actual context's
+The Studio renderer builds a separate `solid-raster-batches.js`
+representation as it loads a source of 128 or more meshes, before the first
+draw, and the positive framebuffer/background proof qualifies that batched draw;
+a build that falls back proves the original meshes as before. It requires the actual context's
 `WEBGL_multi_draw` extension before allocating derived objects. Sources with
 fewer than 128 meshes keep their ordinary raster representation. This does not
 change the authenticated asset recipe, source geometry, PBR factors, lighting,
@@ -331,8 +332,11 @@ Original nodes and parser associations remain authoritative for picking,
 component UUIDs/bounds, material roles, exact solder qualification, ray
 acceleration and denoise guides. The raster representation never enters that
 scene. Selection remains a separate overlay. Source-root visibility suppresses
-all derived source geometry. No optimized draw can establish the first-frame
-visibility flag. A changed source/material/illustration/size epoch, hidden
+all derived source geometry, so the proof's background pass stays empty. The
+first-frame flag comes from the batched draw when one was built (exact copies of
+the source attributes and indices), else from the original meshes. On the SMU
+card (22,357 meshes, RTX 5080) this took bytes-to-first-frame from 1.08-1.17 s
+to 0.55-0.68 s: one upload and draw per mesh was most of the first frame. A changed source/material/illustration/size epoch, hidden
 viewer, teardown or entry into path tracing cancels pending optimization.
 Owned resources are released synchronously before borrowed policy, solder or
 source resources are disposed; a superseded shader compilation cannot publish.
