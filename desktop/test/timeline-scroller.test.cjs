@@ -96,6 +96,42 @@ test('timeline DOM effects preserve nodes, measure, forward commands and detach'
   });
   assert.deepEqual(readback, { readback: true, top: 801, transform: 'translateY(0.5px)', logicalTop: 800.5 });
 
+  await t.test('subpixel measurement noise settles while real height changes are retained', async () => {
+    const result = await page.evaluate(() => {
+      const row = scroller.mounted.get('a');
+      const originalRect = row.wrapper.getBoundingClientRect;
+      const originalPlan = scroller.callbacks.plan;
+      const originalHeight = row.node.style.height;
+      const initialHeight = scroller.sizes.a;
+      let reads = 0, plans = 0;
+      // Translated DOMRects on the affected Mac alternated by 1/65536 px.
+      // Keep the browser's layout, adding only that observed measurement noise.
+      row.wrapper.getBoundingClientRect = function () {
+        const rect = originalRect.call(this);
+        return new DOMRect(rect.x, rect.y, rect.width, rect.height + (++reads % 2 ? 1 / 65536 : 0));
+      };
+      scroller.callbacks.plan = input => {
+        // Fail deterministically instead of hanging the browser on the old code.
+        if (++plans > 8) throw new Error('Subpixel measurement loop did not settle');
+        return originalPlan(input);
+      };
+      try {
+        scroller.scrollToEnd();
+        const settledPlans = plans;
+        row.node.style.height = `${initialHeight + 0.25}px`;
+        scroller.refresh();
+        return { settledPlans, measured: scroller.sizes.a, expected: initialHeight + 0.25 };
+      } finally {
+        row.wrapper.getBoundingClientRect = originalRect;
+        row.node.style.height = originalHeight;
+        scroller.callbacks.plan = originalPlan;
+        scroller.refresh();
+      }
+    });
+    assert.ok(result.settledPlans <= 2, 'rounding noise must not keep the synchronous measurement loop alive');
+    assert.ok(Math.abs(result.measured - result.expected) < 0.001, 'real fractional-pixel height changes are still measured');
+  });
+
   const intermediate = await page.evaluate(() => {
     const keptWrapper = scroller.mounted.get('b').wrapper;
     const keptNode = scroller.mounted.get('b').node;
