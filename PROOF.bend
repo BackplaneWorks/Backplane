@@ -13803,3 +13803,13 @@ def Laws.fm_refresh_keeps_received_request():
 
 def Laws.fm_closed_never_requests(kind, at, asked):
   {==}
+
+def Laws.todos_open_token(g):
+  %Equal.sym(Bool, String.eq("1:" ++ g, "1:" ++ g), True{}, Laws.string_eq_refl("1:" ++ g)) : {Bool.or(_, Bool.and(String.eq("1:" ++ g, "1"), String.is_empty(g))) == True{} : Bool}
+  {==}
+
+def Laws.todos_adopt_whole_retire_shuts():
+  {==}
+
+def Laws.todos_thin_click_holds():
+  {==}

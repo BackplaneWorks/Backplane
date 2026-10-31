@@ -892,13 +892,13 @@ def Mob.todo.items(ts: List<&2, TD.Todo>, +th: String, +n: Nat) -> List<&2, J.Js
         J.KV{"up", J.Str{TD.Todo.ask(th, "move", TD.Todo.id(t), "", "", Nat.sub(n, 1n))}},
         J.KV{"down", J.Str{TD.Todo.ask(th, "move", TD.Todo.id(t), "", "", 1n+n)}}]) <> Mob.todo.items(rest, th, 1n+n)
 
-def Mob.todos.k(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> J.Json:
+def Mob.todos.k(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>, +st: M.State) -> J.Json:
   J.Json.obj([J.KV{"items", J.Json.arr(Bool.pick(List<&2, J.Json>, open, Mob.todo.items(ts, th, 0n), Nil{}))}, J.KV{"addScope", J.Str{th ++ "\u{1f}\u{1f}"}}, J.KV{"head", J.Json.str(TD.Todo.head(ts))}, J.KV{"count", J.Json.str(TD.Todo.count(ts))}, J.KV{"open", J.Json.bool(open)}, J.KV{"toggle", J.Json.str(U.Todos.toggle(open, th))},
-    J.KV{"lines", J.Json.arr(Mob.tdlines(U.Todos.rows(info, th, U.Todos.cap.all(), ts)))},
+    J.KV{"lines", J.Json.arr(Mob.tdlines(U.Todos.rows(info, st, th, U.Todos.cap.all(), ts)))},
     J.KV{"more", J.Json.str(Bool.pick(String, open, U.Todos.more(lc, all, ts), ""))}, J.KV{"moreValue", J.Json.str(U.Todos.more.ask(all, th))}])
 
-def Mob.todos(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> J.Json:
-  Bool.pick(J.Json, List.is_empty(&2, TD.Todo, ts), J.Null{}, Mob.todos.k(lc, U.Todos.open(info, th), U.Todos.all(info, th), th, ts, info))
+def Mob.todos(+lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> J.Json:
+  Bool.pick(J.Json, List.is_empty(&2, TD.Todo, ts), J.Null{}, Mob.todos.k(lc, U.Todos.open(info, st, th), U.Todos.all(info, th), th, ts, info, st))
 
 # Asks: what the agent waits on the user for. Each button sends "answer"
 # with its value; "primary" marks the one to lead with
@@ -1372,7 +1372,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"asks", J.Json.arr(Mob.asks(lc, U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
         J.KV{"queued", J.Json.str("")},
         J.KV{"queue", J.Json.arr(List.append(&2, J.Json, Mob.sbox.q(lc, st, U.Sbox.ask.in(U.Sbox.asks(st), id)), List.append(&2, J.Json, Mob.fab(lc, String.eq(U.Str.get(drafts, "@intent"), id), st, nf, id, V.View.running(turn)), Mob.queue(lc, M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn)))))},
-        J.KV{"todos", Mob.todos(lc, nf, id, U.Todos.shown(st, id, V.View.running(turn)))},
+        J.KV{"todos", Mob.todos(lc, nf, st, id, U.Todos.shown(st, id, V.View.running(turn)))},
         J.KV{"live", Mob.live.k.loc(lc, render, U.Str.get(live, id))},
         J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), Mob.working(lc, st, id, ph, turn, pe), ""))},
         J.KV{"phase", J.Json.str(SG.Signal.display.name(ph, st, id))},

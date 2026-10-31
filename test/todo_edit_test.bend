@@ -78,7 +78,7 @@ def main() -> IO(Unit):
     C.Check.str("completed list is not visible", Bool.show(M.Todos.visible(done, "t")), "False")
     +u : U.Ui = U.Ui.info_set(U.Ui.adopt.raw(U.Ui.init(1n), fresh), "fold:todos:t", "1")
     +closed : U.Ui = U.Ui.fold([M.TodosChanged{"t", "agent", TD.Todo.show([TD.Todo{"u:create-use", "New task", "", "completed"}]), 9n}], u)
-    C.Check.str("done auto collapses even if open", Bool.show(U.Todos.open(U.Ui.infos(closed), "t")), "False")
+    C.Check.str("done auto collapses even if open", Bool.show(U.Todos.open(U.Ui.infos(closed), U.Ui.state(closed), "t")), "False")
     +snap : M.State = M.State.apply(M.State.empty(), M.TodosChanged{"t", "snapshot", M.Todos.snapshot(edited, "t"), 8n})
     C.Check.str("snapshot keeps person edit and agent baseline", texts(M.Todos.of(agent(snap), "t")), "Person text/completed;Build/pending;")
     +c : M.Change = M.TodosChanged{"t", "person", TD.Todo.ask("t", "set", "1", "Saved", "", 0n), 8n}

@@ -51,7 +51,7 @@ def bool(b: Bool) -> String:
   Bool.pick(String, b, "true", "false")
 
 def opened(+u: U.Ui) -> String:
-  bool(U.Todos.open(U.Ui.infos(u), "t1"))
+  bool(U.Todos.open(U.Ui.infos(u), U.Ui.state(u), "t1"))
 
 # Reading a page
 # --------------
@@ -177,7 +177,7 @@ def next.k(xs: List<&2, String>, +found: Bool) -> String:
       next.k(t, String.starts_with(x, "kv subs-head"))
 
 def mob(+u: U.Ui) -> J.Json:
-  MS.Mob.todos(I.En{}, U.Ui.infos(u), "t1", ts(u))
+  MS.Mob.todos(I.En{}, U.Ui.infos(u), U.Ui.state(u), "t1", ts(u))
 
 # a turn starts, a new list comes, the turn ends, the person goes to
 # another thread and back
@@ -204,7 +204,7 @@ def main() -> IO(Unit):
     C.Check.str("a second click shuts it", after(page(click(click(t, "1todos:t1"), "0todos:t1")), "todos", ""), "0")
     # without the bar: a section right after the subagents', one line, shut
     C.Check.str("the section follows the subagents'", Bool.show(Bool.and(Nat.is_lt(pos(page(u), "subs"), pos(page(u), "todos shut")), Nat.is_lt(pos(page(u), "todos shut"), pos(page(u), "timeline")))), "True")
-    C.Check.str("its head reads To-do and the count", words([V.View.todos(I.En{}, U.Ui.infos(u), "t1", ts(u))]), "To-do 3/7")
+    C.Check.str("its head reads To-do and the count", words([V.View.todos(I.En{}, U.Ui.infos(u), U.Ui.state(u), "t1", ts(u))]), "To-do 3/7")
     C.Check.str("shut, it shows no steps", after(page(u), "todo ", ""), "0")
     C.Check.str("nothing of it by the composer", after(page(click(u, "1todos:t1")), "todo", "timeline"), "0")
     C.Check.str("opened, its steps show", after(page(click(u, "1todos:t1")), "todo ", ""), "7")
