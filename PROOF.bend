@@ -13981,3 +13981,9 @@ def Laws.search_unicode_spellings_agree():
 
 def Laws.stop_command_only_while_running():
   {==}
+
+def Laws.terminal_scroll_bounds():
+  {==}
+
+def Laws.terminal_empty_input_keeps_view(u):
+  {==}

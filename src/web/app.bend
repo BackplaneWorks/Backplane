@@ -180,7 +180,7 @@ def terminal_node.attrs(+u: U.Ui, node: D.Node) -> D.Node:
     case _: node
 
 def terminal_node(+u: U.Ui) -> D.Node:
-  terminal_node.attrs(u, V.View.term.loc(U.Lang.loc(u), U.Ui.term(u, WS.WS.owner(u))))
+  terminal_node.attrs(u, V.View.term.scroll.loc(U.Lang.loc(u), U.Ui.term(u, WS.WS.owner(u)), WS.WS.term.scroll.at(u)))
 
 def view_sidebar(+u: U.Ui, reuse: Bool) -> D.Node:
   WS.WS.view(u, V.View.page.sidebar(stamp(u), reuse), terminal_node(u))

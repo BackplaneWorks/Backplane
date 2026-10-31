@@ -651,7 +651,8 @@ def Actor.mail_context(+u: U.Ui) -> J.Json:
 # by A.act with this connection's VT modes, never by JavaScript.
 def TerminalInput.request(+web: Bool, +p: J.Json) -> Bool:
   Bool.and(web, Bool.and(J.Json.get_bool(p, "terminalInput", False{}),
-    Bool.or(String.eq(J.Json.get_str(p, "action", ""), "term-key"), String.eq(J.Json.get_str(p, "action", ""), "term-paste"))))
+    Bool.and(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "value", ""), "PageUp\t1"), String.eq(J.Json.get_str(p, "value", ""), "PageDown\t1"))),
+      Bool.or(String.eq(J.Json.get_str(p, "action", ""), "term-key"), String.eq(J.Json.get_str(p, "action", ""), "term-paste")))))
 
 def TerminalInput.owner(+u: U.Ui, +p: J.Json) -> Bool:
   +owner = U.Ui.scratch(u, "@terminal.owner")

@@ -2638,20 +2638,23 @@ def View.paged(+lc: I.Loc, +drafts: Map<&2, String>, +es: List<&2, M.Entry>, +st
 
 # the thread's shell: its screen, and over it a transparent field that
 # takes keys (and a phone's keyboard)
-def View.term.loc(+lc: I.Loc, +v: VT.Vt) -> D.Node:
+def View.term.scroll.loc(+lc: I.Loc, +v: VT.Vt, +scroll: Nat) -> D.Node:
   D.El{"section", "term-pane", [D.At{"class", "term-pane"}], [
     D.El{"div", "", [D.At{"class", "term-head"}], [D.Dom.span("label", MSG.T.palette.terminal(lc) ++ Bool.pick(String, String.is_empty(VT.Vt.title(v)), "", " · " ++ VT.Vt.title(v))),
       WI.WIcon.button("icon", "term-toggle", "", MSG.T.terminal.close(lc), "x", 16, "")]},
-    D.El{"div", "", [D.At{"class", "screen"}, D.At{"style", "background:" ++ View.hex(VT.Vt.bg()) ++ ";color:" ++ View.hex(VT.Vt.fg())}],
-      D.Dom.cat(View.tlines(VT.Vt.lines(v, 0n)), D.Dom.cat(View.cursor(VT.Vt.cursor(v)),
+    D.El{"div", "", [D.At{"class", "screen"}, D.At{"data-wheel", "ws-term-scroll"}, D.At{"style", "background:" ++ View.hex(VT.Vt.bg()) ++ ";color:" ++ View.hex(VT.Vt.fg())}],
+      D.Dom.cat(View.tlines(VT.Vt.lines(v, scroll)), D.Dom.cat(Bool.pick(List<&2, D.Node>, Nat.is_eq(scroll, 0n), View.cursor(VT.Vt.cursor(v)), Nil{}),
         [D.El{"textarea", "term", [D.At{"id", "term"}, D.At{"class", "term-in"}, D.At{"data-keys", "term-key"}, D.At{"data-text", "term-paste"},
           D.At{"autocapitalize", "off"}, D.At{"autocomplete", "off"}, D.At{"spellcheck", "false"}, D.At{"aria-label", MSG.T.terminal.input(lc)}], Nil{}}]))}]}
 
-# Diff
-# ----
+def View.term.loc(lc: I.Loc, v: VT.Vt) -> D.Node:
+  View.term.scroll.loc(lc, v, 0n)
 
 def View.term(+v: VT.Vt) -> D.Node:
   View.term.loc(I.En{}, v)
+
+# Diff
+# ----
 
 def View.dl.cls(+k: U32) -> String:
   Bool.pick(String, U32.is_eq(k, 1), "dl add", Bool.pick(String, U32.is_eq(k, 2), "dl del", Bool.pick(String, U32.is_eq(k, 3), "dl meta", "dl")))

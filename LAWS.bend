@@ -12,6 +12,8 @@ import ./src/core/sidebar-read.bend as SIDEREAD
 import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 import Base
+import ./src/core/term-scroll.bend as TSC
+import ./src/web/workspace.bend as WSTERM
 import ./src/server/thin-sidebar.bend as CHATDERIVED
 import ./src/server/thin-sidebar-wire.bend as SWR
 import ./src/core/cbor.bend as CBR1 # fast hub R1
@@ -13602,3 +13604,11 @@ law search_unicode_spellings_agree:
 # Found by e2e o2-8.
 law stop_command_only_while_running:
   {WSK.WS.stop.command(False{}) == Nil{} : List<&2, U.PItem>}
+
+# The terminal viewport reaches both bounds without wrapping.
+law terminal_scroll_bounds:
+  {[TSC.TermScroll.move(0n, 2048n, True{}, 19n), TSC.TermScroll.move(2040n, 2048n, True{}, 19n), TSC.TermScroll.move(3n, 2048n, False{}, 19n)] == [19n, 2048n, 0n] : List<&2, Nat>}
+
+law terminal_empty_input_keeps_view:
+  for +u: U.Ui
+  {WSTERM.WS.term.send(u, Nil{}) == U.Act{u, Nil{}} : U.Act}

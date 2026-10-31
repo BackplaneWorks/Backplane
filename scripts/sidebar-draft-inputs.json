@@ -150,7 +150,7 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
     "src/mobile/screen.bend": "ecb73a0b02dfadec4f7abe29243062902443307deb1960f23d06274e2021ac16",
-    "src/server/thin-actor.bend": "3cee1ae196cd8b1765949bbb9738d18a298cd5365010aa9591b7eae09af7e73a",
+    "src/server/thin-actor.bend": "0d4da209193fd84504ee8e6c2d1e6302ba8ecb634b042266e57da2717ff44460",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
@@ -172,7 +172,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "7d68ae00f066347efd02c9a569987f4ec2be2c35ff118a28677e0e16f60caacb"
+    "src/web/view.bend": "e7f52e8cc9ceda7059b4161cdc1b3ecc8d720b133f2f65a7b4793711a2decd91"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -377,5 +377,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebased Stop a running turn from Commands or Ctrl+period; sidebar draft readers and rendering unchanged"
+  "reviewNote": "Rebase Let the terminal scroll through its retained output; sidebar drafts unchanged and all 24 image checks pass"
 }

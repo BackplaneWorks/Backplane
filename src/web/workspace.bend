@@ -6,6 +6,7 @@ import ../core/json.bend as J
 import ../core/vt.bend as VT
 import ../core/far.bend as FR
 import ../core/tools.bend as TO
+import ../core/term-scroll.bend as TS
 import ./dom.bend as D
 import ./icon.bend as WI
 
@@ -107,15 +108,30 @@ def WS.term.toggle(+u: U.Ui, +size: String) -> U.Act:
   Bool.pick(U.Act, Bool.and(U.Ui.flag(u, "term"), String.eq(WS.owner(u), U.Ui.sel(u))), WS.term.hide(u),
     WS.term.show(WS.term.local(u), u, size))
 
-def WS.term.send(+u: U.Ui, bytes: List<&2, U32>) -> U.Act:
-  Bool.pick(U.Act, String.is_empty(WS.owner(u)), WS.none(u), U.Ui.rpc(u, "term.input", [J.KV{"thread", J.Str{WS.owner(u)}}, J.KV{"b", J.Json.arr(U.Term.nums(bytes))}]))
+# The viewport is local to this shell, separate from its live grid.
+def WS.term.scroll.at(+u: U.Ui) -> Nat:
+  M.Switch.num(U.Ui.scratch(u, "@terminal.scroll:" ++ WS.owner(u)), 0n)
+
+def WS.term.scroll(+u: U.Ui, back: Bool, rows: Nat) -> U.Act:
+  WS.none(U.Ui.scratch_set(u, "@terminal.scroll:" ++ WS.owner(u), Nat.show(TS.TermScroll.move(WS.term.scroll.at(u), U32.to_nat(VT.Vt.history(U.Ui.term(u, WS.owner(u)))), back, rows))))
+
+def WS.term.wheel(+u: U.Ui, +value: String) -> U.Act:
+  WS.term.scroll(u, String.starts_with(value, "-"), Nat.max(1n, Nat.div(M.Switch.num(Bool.pick(String, String.starts_with(value, "-"), String.drop(value, 1n), value), 0n), 17n)))
+
+def WS.term.send(+u: U.Ui, +bytes: List<&2, U32>) -> U.Act:
+  match bytes:
+    case Nil{}: WS.none(u)
+    case _ <> _:
+      Bool.pick(U.Act, String.is_empty(WS.owner(u)), WS.none(u), U.Ui.rpc(U.Ui.scratch_set(u, "@terminal.scroll:" ++ WS.owner(u), "0"), "term.input", [J.KV{"thread", J.Str{WS.owner(u)}}, J.KV{"b", J.Json.arr(U.Term.nums(bytes))}]))
 
 def WS.term.key.sym(ks: U32 & U32, +u: U.Ui, mods: U32) -> U.Act:
   (sym, cp) = ks
   WS.term.send(u, VT.Vt.key(U.Ui.term(u, WS.owner(u)), sym, cp, mods))
 
-def WS.term.key.parts(ps: List<&2, String>, u: U.Ui) -> U.Act:
+def WS.term.key.parts(ps: List<&2, String>, +u: U.Ui) -> U.Act:
   match ps:
+    case "PageUp" <> "1" <> _: WS.term.scroll(u, True{}, U32.to_nat(VT.Vt.rows(U.Ui.term(u, WS.owner(u)))))
+    case "PageDown" <> "1" <> _: WS.term.scroll(u, False{}, U32.to_nat(VT.Vt.rows(U.Ui.term(u, WS.owner(u)))))
     case +key <> mods <> _: WS.term.key.sym(U.Keys.dom(key), u, U32.from_nat(Maybe.default(&2, Nat, Nat.read(mods), 0n)))
     case _: WS.none(u)
 
@@ -284,6 +300,7 @@ def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
     case "term-toggle": WS.term.toggle(u, value)
     case "ws-term-hide": WS.term.hide(u)
     case "ws-term-resize": WS.term.resize(u, value)
+    case "ws-term-scroll": WS.term.wheel(u, value)
     case "term-key": WS.term.key(u, value)
     case "term-paste": WS.term.send(u, VT.Vt.paste(U.Ui.term(u, WS.owner(u)), value))
     case _: WS.none(u)
