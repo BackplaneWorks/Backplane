@@ -1502,8 +1502,8 @@ def View.todos.k(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2,
     [View.todos.head(lc, open, th, ts), View.todos.body(View.todos.rows(lc, open, all, th, ts, info))]}
 
 # without the top bar: the section, its head and (open) its steps
-def View.todos(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> D.Node:
-  View.todos.k(lc, U.Todos.open(info, th), U.Todos.all(info, th), th, ts, info)
+def View.todos(+lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> D.Node:
+  View.todos.k(lc, U.Todos.open(info, st, th), U.Todos.all(info, th), th, ts, info)
 
 # under the top bar: only the steps, while the bar's To-do cell has them open
 def View.todos.dock.k(open: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
@@ -1513,19 +1513,19 @@ def View.todos.dock.k(open: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: Strin
     case False{}:
       Nil{}
 
-def View.todos.dock(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
-  View.todos.dock.k(Bool.and(Bool.not(List.is_empty(&2, TD.Todo, ts)), U.Todos.open(info, th)), lc, info, th, ts)
+def View.todos.dock(+lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  View.todos.dock.k(Bool.and(Bool.not(List.is_empty(&2, TD.Todo, ts)), U.Todos.open(info, st, th)), lc, info, th, ts)
 
-def View.todos.box(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+def View.todos.box(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
   match none:
     case True{}: Nil{}
-    case False{}: [View.todos(lc, info, th, ts)]
+    case False{}: [View.todos(lc, info, st, th, ts)]
 
 # what the thread's page draws of it, right under its subagents
-def View.thread.todos.own(own: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+def View.thread.todos.own(own: Bool, +lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
   match own:
-    case True{}: View.todos.dock(lc, info, th, ts)
-    case False{}: View.todos.box(List.is_empty(&2, TD.Todo, ts), lc, info, th, ts)
+    case True{}: View.todos.dock(lc, info, st, th, ts)
+    case False{}: View.todos.box(List.is_empty(&2, TD.Todo, ts), lc, info, st, th, ts)
 
 # context handed over to go with the next message (M.Queue.context), each
 # with its buttons (U.Qu.row_buttons)
@@ -3412,7 +3412,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.Tour.kn(u, U.KN.thread(nf, st, sel)), True{}),
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, View.running(turn)),
         View.thread.subs.own(own, lc, st, nf, id, now),
-        View.thread.todos.own(own, lc, nf, id, U.Todos.shown(st, id, View.running(turn))),
+        View.thread.todos.own(own, lc, nf, st, id, U.Todos.shown(st, id, View.running(turn))),
         [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
           fab, View.parent(st, id, U.Tasks.up(st, id)),
           [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
@@ -4727,13 +4727,13 @@ def View.chrome.todos.k(+lc: I.Loc, +open: Bool, +th: String, +ts: List<&2, TD.T
     D.At{"title", Bool.pick(String, open, MSG.T.todos.hide(lc), MSG.T.todos.show(lc))}],
     [D.Dom.span("k", MSG.T.thread.todos(lc)), D.Dom.span("v", TD.Todo.count(ts)), WI.WIcon.svg("chevron-down", 12)]}
 
-def View.chrome.todos.if(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+def View.chrome.todos.if(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
   match none:
     case True{}: Nil{}
-    case False{}: [View.chrome.todos.k(lc, U.Todos.open(info, th), th, ts)]
+    case False{}: [View.chrome.todos.k(lc, U.Todos.open(info, st, th), th, ts)]
 
-def View.chrome.todos(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
-  View.chrome.todos.if(List.is_empty(&2, TD.Todo, ts), lc, info, th, ts)
+def View.chrome.todos(+lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  View.chrome.todos.if(List.is_empty(&2, TD.Todo, ts), lc, info, st, th, ts)
 
 def View.chrome.changes(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
   D.Dom.when(Nat.is_gt(n, 0n), View.chrome.kv("changes", View.chrome.changes.tip(lc), View.chrome.changes.k(lc), [D.Dom.span("v", Nat.show(n))]))
@@ -4753,7 +4753,7 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
       List.concat(&2, D.Node, [
         [View.chrome.state(lc, st, nf, id, turn, pending)],
         View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
-        View.chrome.todos(lc, nf, id, U.Todos.shown(st, id, View.running(turn))),
+        View.chrome.todos(lc, nf, st, id, U.Todos.shown(st, id, View.running(turn))),
         View.chrome.changes(lc, HS.Hist.changes(M.State.steps(st, id))),
         View.chrome.branch(branch),
         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])

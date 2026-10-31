@@ -53,7 +53,7 @@ def bool(b: Bool) -> String:
   Bool.pick(String, b, "true", "false")
 
 def rows(+u: U.Ui, +ts: List<&2, TD.Todo>) -> String:
-  Nat.show(List.length(&2, TD.TRow, U.Todos.rows(U.Ui.infos(u), "t1", U.Todos.cap.all(), ts)))
+  Nat.show(List.length(&2, TD.TRow, U.Todos.rows(U.Ui.infos(u), U.Ui.state(u), "t1", U.Todos.cap.all(), ts)))
 
 # a notch down over a pane, then where it is
 def notch(+n: N.Nui, +last: Nat, +dir: U32) -> N.Nui:
@@ -122,18 +122,18 @@ def main() -> IO(Unit):
     C.Check.str("a short list has no last line", U.Todos.more(I.En{}, False{}, todos(4n)), "")
     C.Check.str("a long one offers every step", U.Todos.more(I.En{}, False{}, many), "Show all 200")
     C.Check.str("shown all, it offers fewer", U.Todos.more(I.En{}, True{}, many), "Show fewer")
-    C.Check.str("the list starts shut", bool(U.Todos.open(U.Ui.infos(u), "t1")), "false")
+    C.Check.str("the list starts shut", bool(U.Todos.open(U.Ui.infos(u), U.Ui.state(u), "t1")), "false")
     C.Check.str("and shows no steps", rows(u, many), "0")
-    C.Check.str("its head opens it", bool(U.Todos.open(U.Ui.infos(opened(u)), "t1")), "true")
+    C.Check.str("its head opens it", bool(U.Todos.open(U.Ui.infos(opened(u)), U.Ui.state(opened(u)), "t1")), "true")
     C.Check.str("open, it shows the fitted few", rows(opened(u), many), "8")
-    C.Check.str("its head shuts it again", bool(U.Todos.open(U.Ui.infos(fold(opened(u), U.Todos.toggle(True{}, "t1"))), "t1")), "false")
+    C.Check.str("its head shuts it again", bool(U.Todos.open(U.Ui.infos(fold(opened(u), U.Todos.toggle(True{}, "t1"))), U.Ui.state(fold(opened(u), U.Todos.toggle(True{}, "t1"))), "t1")), "false")
     C.Check.str("shut, it shows no steps", rows(fold(opened(u), U.Todos.toggle(True{}, "t1")), many), "0")
-    C.Check.str("and opens again", bool(U.Todos.open(U.Ui.infos(fold(fold(opened(u), U.Todos.toggle(True{}, "t1")), U.Todos.toggle(False{}, "t1"))), "t1")), "true")
+    C.Check.str("and opens again", bool(U.Todos.open(U.Ui.infos(fold(fold(opened(u), U.Todos.toggle(True{}, "t1")), U.Todos.toggle(False{}, "t1"))), U.Ui.state(fold(fold(opened(u), U.Todos.toggle(True{}, "t1")), U.Todos.toggle(False{}, "t1"))), "t1")), "true")
     C.Check.str("show all shows every step", rows(fold(opened(u), U.Todos.more.ask(False{}, "t1")), many), "200")
     C.Check.str("show fewer goes back", rows(fold(fold(opened(u), U.Todos.more.ask(False{}, "t1")), U.Todos.more.ask(True{}, "t1")), many), "8")
     C.Check.str("show all never opens a shut list", rows(fold(u, U.Todos.more.ask(False{}, "t1")), many), "0")
-    C.Check.str("another thread's list is its own", bool(U.Todos.open(U.Ui.infos(fold(u, U.Todos.toggle(False{}, "t2"))), "t1")), "false")
-    C.Check.str("and stays open when another opens", bool(U.Todos.open(U.Ui.infos(fold(opened(u), U.Todos.toggle(False{}, "t2"))), "t1")), "true")
+    C.Check.str("another thread's list is its own", bool(U.Todos.open(U.Ui.infos(fold(u, U.Todos.toggle(False{}, "t2"))), U.Ui.state(fold(u, U.Todos.toggle(False{}, "t2"))), "t1")), "false")
+    C.Check.str("and stays open when another opens", bool(U.Todos.open(U.Ui.infos(fold(opened(u), U.Todos.toggle(False{}, "t2"))), U.Ui.state(fold(opened(u), U.Todos.toggle(False{}, "t2"))), "t1")), "true")
     C.Check.str("a pane's hit value: key", N.Pane.at("subs:t1|7", 0n), "subs:t1")
     C.Check.str("a pane's hit value: its last row", N.Pane.at("subs:t1|7", 1n), "7")
     +n : N.Nui = N.Nui.init(u, 1400, 860)

@@ -4305,8 +4305,12 @@ def Ui.view_get.set(+u: Ui, +k: String, +v: String) -> Ui:
 
 # a run of tool calls opened or shut: the value is "1" or "0", then the
 # run's id (FO.Fold.ask); the choice is kept in the info map (FO.Fold.user)
-def Ui.tool_fold(u: Ui, +v: String) -> Ui:
-  Ui.info_set(u, FO.Fold.key(String.drop(v, 1n)), String.take(v, 1n))
+# (a to-do list opened stores "1:<the hub's clear token>", Todos.open)
+def Ui.tool_fold.v(+u: Ui, +id: String, +c: String) -> String:
+  Bool.pick(String, Bool.and(String.eq(c, "1"), String.starts_with(id, "todos:")), "1:" ++ M.Todos.gen(Ui.state(u), String.drop(id, 6n)), c)
+
+def Ui.tool_fold(+u: Ui, +v: String) -> Ui:
+  Ui.info_set(u, FO.Fold.key(String.drop(v, 1n)), Ui.tool_fold.v(u, String.drop(v, 1n), String.take(v, 1n)))
 
 def Skills.got(has: Bool, u: Ui, +o: J.Json) -> Ui:
   match has:
@@ -7419,8 +7423,18 @@ def Todos.all.key(+th: String) -> String:
 # it, never a new list, a turn starting or ending, or a thread switch (laws
 # todos_*). It was open until shut before; that default was never stored,
 # so a stored "1" is always the person's own click (shut, then opened).
-def Todos.open(+info: Map<&2, String>, +th: String) -> Bool:
-  FO.Fold.open(FO.Fold.user(info, Todos.key(th)), False{})
+#
+# The open choice carries the hub's clear token (M.Todos.gen): the head's
+# click stores "1:<token>" (Ui.tool_fold), and the list is open only while
+# that token is still the thread's. A clear (completed or retired) changes
+# the token, so the list shuts with no write: adopting a whole state, the
+# thin lane's renders and the client's fold all agree. A bare "1" (stored
+# before tokens) counts only while the token is "".
+def Todos.open.v(+user: String, +gen: String) -> Bool:
+  Bool.or(String.eq(user, "1:" ++ gen), Bool.and(String.eq(user, "1"), String.is_empty(gen)))
+
+def Todos.open(+info: Map<&2, String>, +st: M.State, +th: String) -> Bool:
+  Todos.open.v(FO.Fold.user(info, Todos.key(th)), M.Todos.gen(st, th))
 
 def Todos.all(+info: Map<&2, String>, +th: String) -> Bool:
   FO.Fold.open(FO.Fold.user(info, Todos.all.key(th)), False{})
@@ -7449,8 +7463,8 @@ def Todos.rows.k(open: Bool, all: Bool, +cap: Nat, +ts: List<&2, TD.Todo>) -> Li
       TD.Todo.rows(ts)
 
 # the card's rows: none shut, every step (up to cap) shown all, else the fitted few
-def Todos.rows(+info: Map<&2, String>, +th: String, +cap: Nat, +ts: List<&2, TD.Todo>) -> List<&2, TD.TRow>:
-  Todos.rows.k(Todos.open(info, th), Todos.all(info, th), cap, ts)
+def Todos.rows(+info: Map<&2, String>, +st: M.State, +th: String, +cap: Nat, +ts: List<&2, TD.Todo>) -> List<&2, TD.TRow>:
+  Todos.rows.k(Todos.open(info, st, th), Todos.all(info, th), cap, ts)
 
 # a client that scrolls the card shows every step
 def Todos.cap.all() -> Nat:

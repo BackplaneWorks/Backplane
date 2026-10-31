@@ -2994,17 +2994,17 @@ law todo_rows_short:
 # person opens it: nothing else opens it (not a new list, a turn, a thread
 # switch), only their own click, kept per thread
 law todos_start_shut:
-  {U.Todos.open(Map.new(&2, String), "t1") == False{} : Bool}
+  {U.Todos.open(Map.new(&2, String), M.State.empty(), "t1") == False{} : Bool}
 
 law todos_click_opens:
-  {U.Todos.open(Map.set(&2, String, Map.new(&2, String), "fold:todos:t1", "1"), "t1") == True{} : Bool}
+  {U.Todos.open(Map.set(&2, String, Map.new(&2, String), "fold:todos:t1", "1"), M.State.empty(), "t1") == True{} : Bool}
 
 law todos_shut_click_asks_open:
   {U.Todos.toggle(False{}, "t1") == "1todos:t1" : String}
 
 # shut, it shows no steps
 law todos_shut_no_steps:
-  {U.Todos.rows(Map.new(&2, String), "t1", 100n, [TD.Todo{"1", "a", "", "pending"}]) == [] : List<&2, TD.TRow>}
+  {U.Todos.rows(Map.new(&2, String), M.State.empty(), "t1", 100n, [TD.Todo{"1", "a", "", "pending"}]) == [] : List<&2, TD.TRow>}
 
 # an assistant message with a todo tool sets the thread's list, once
 law todo_write_sets_list:
@@ -13247,12 +13247,12 @@ law todo_write_after_retire_fresh:
 law todos_retire_shuts:
   {U.Todos.open(U.Todos.autoclose(M.State.apply(M.State.apply(M.State.empty(), M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 1n}), M.TurnChanged{"t", M.Running{}, 2n}),
       M.State.apply(M.State.apply(M.State.apply(M.State.empty(), M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 1n}), M.TurnChanged{"t", M.Running{}, 2n}), M.TurnChanged{"t", M.Completed{}, 3n}),
-      Map.set(&2, String, Map.new(&2, String), "fold:todos:t", "1"), "t"), "t") == False{} : Bool}
+      Map.set(&2, String, Map.new(&2, String), "fold:todos:t", "1"), "t"), M.State.empty(), "t") == False{} : Bool}
 
 # and it shuts in a thread that is not selected, as the client folds the hub's changes
 law todos_retire_shuts_unselected:
   {U.Todos.open(U.Ui.infos(U.Ui.fold([M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 1n}, M.TurnChanged{"t", M.Running{}, 2n}, M.TurnChanged{"t", M.Completed{}, 3n}],
-      U.Ui.info_set(U.Ui.init(0n), "fold:todos:t", "1"))), "t") == False{} : Bool}
+      U.Ui.info_set(U.Ui.init(0n), "fold:todos:t", "1"))), M.State.empty(), "t") == False{} : Bool}
 
 # A failed file stamp is (0, ""). Starting with a distinct stamp ensures
 # that even a missing source gets its first read and an error reply.
@@ -13303,3 +13303,47 @@ law fm_closed_never_requests:
   for at: String
   for asked: String
   {U.Fm.need(False{}, kind, at, asked) == False{} : Bool}
+
+# The open choice carries the hub's clear token: opened with the current
+# token, the list is open.
+law todos_open_token:
+  for g: String
+  {U.Todos.open.v("1:" ++ g, g) == True{} : Bool}
+
+# alpha's list, then (between two renders) its end, a turn without to-dos
+# that retires it, and the agent's new list
+def TodoTok.alpha() -> M.State:
+  M.State.replay([M.TurnChanged{"t", M.Running{}, 1n}, M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 2n}], M.State.empty())
+
+def TodoTok.next() -> M.State:
+  M.State.replay([M.TurnChanged{"t", M.Completed{}, 3n}, M.TurnChanged{"t", M.Running{}, 4n}, M.TurnChanged{"t", M.Completed{}, 5n},
+    M.TurnChanged{"t", M.Running{}, 6n}, M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"b\",\"status\":\"pending\"},{\"id\":\"2\",\"text\":\"c\",\"status\":\"pending\"}]", 7n}], TodoTok.alpha())
+
+def TodoTok.click(+u: U.Ui) -> U.Ui:
+  OnbUi.after(U.Ui.act(u, "fold", U.Todos.toggle(False{}, "t")))
+
+# alpha's list opened by the person's click
+def TodoTok.opened() -> U.Ui:
+  TodoTok.click(U.Ui.adopt.raw(U.Ui.select.nav(U.Ui.init(0n), "t"), TodoTok.alpha()))
+
+# the thin lane's renders: each adopts a whole state into a render it does
+# not keep, from the Ui the actor saved
+def TodoTok.render(+saved: U.Ui, +st: M.State) -> Bool:
+  U.Todos.open(U.Ui.infos(U.Ui.adopt.raw(saved, st)), st, "t")
+
+# adopting the whole state after alpha, the retire and the new list shuts
+# the list the person had open, whether opened with a token or before them
+law todos_adopt_whole_retire_shuts:
+  {[TodoTok.render(TodoTok.opened(), TodoTok.next()), TodoTok.render(U.Ui.info_set(TodoTok.opened(), "fold:todos:t", "1"), TodoTok.next())] == [False{}, False{}] : List<&2, Bool>}
+
+# the person's click on the new list, as the thin actor runs it: on its
+# saved Ui refreshed to the hub's current state (Actor.refresh), and the
+# result saved, never a render's Ui
+def TodoTok.clicked() -> U.Ui:
+  TodoTok.click(U.Ui.adopt.raw(TodoTok.opened(), TodoTok.next()))
+
+# rendered from the saved Ui before the click: shut; then twice from the
+# same saved Ui after it: open both times
+law todos_thin_click_holds:
+  {[TodoTok.render(TodoTok.opened(), TodoTok.next()), TodoTok.render(TodoTok.clicked(), TodoTok.next()), TodoTok.render(TodoTok.clicked(), TodoTok.next())]
+    == [False{}, True{}, True{}] : List<&2, Bool>}

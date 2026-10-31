@@ -7139,9 +7139,9 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       # the todo list under the subagents panel (Lay.todos), shut to its head
       # until the person opens it
       +tds = U.Todos.shown(st, sel, Lay.running(turn))
-      +tdo = U.Todos.open(pics, sel)
+      +tdo = U.Todos.open(pics, st, sel)
       +tda = U.Todos.all(pics, sel)
-      +tdall = U.Todos.rows(pics, sel, U.Todos.cap.all(), tds)
+      +tdall = U.Todos.rows(pics, st, sel, U.Todos.cap.all(), tds)
       +tdoff = Pane.clamp(Pane.off(pics, "todos:" ++ sel), List.length(&2, TD.TRow, tdall))
       +tdr = List.take(&2, TD.TRow, List.drop(&2, TD.TRow, tdall, tdoff), Lay.tdcap(h))
       +tdm = {Bool.pick(String, tdo, U.Todos.more(Ty.loc(ty), tda, tds), "") : String}
