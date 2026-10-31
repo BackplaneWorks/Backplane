@@ -3016,7 +3016,7 @@ def View.composer.p(+lc: I.Loc, +draft: String, +send: String, +act: String, +pr
     menu, D.Dom.cat(tp, D.Dom.cat(View.skills(rs), D.Dom.cat(vo, D.Dom.cat(View.attaching.loc(lc, atts, up), [
     D.El{"textarea", "composer", [D.At{"id", "composer"}, D.At{"rows", "3"}, D.At{"placeholder", MSG.T.composer.placeholder(lc)}, D.At{"value", draft}, D.On{"input", "draft"},
       D.At{"data-enter", U.Draft.enter(Bool.not(List.is_empty(&2, U.SkillRow, rs)), draft)}, D.At{"data-enter-alt", "send-alt"}, D.At{"data-tab", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill")}, D.At{"data-arrows", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-move")}, D.At{"data-esc", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-close")}, D.At{"data-paste", "attach"}], Nil{}},
-    D.El{"div", "", [D.At{"class", "composer-foot"}], List.append(&2, D.Node, chip, [
+    D.El{"div", "composer-foot", [D.At{"class", "composer-foot"}], List.append(&2, D.Node, chip, [
       View.draw.loc(lc),
       D.El{"label", "", [D.At{"class", "attach"}, D.At{"title", MSG.T.composer.attach.tip(lc)}], [WI.WIcon.svg("paperclip", 16),
         D.El{"input", "attach-file", [D.At{"type", "file"}, D.At{"multiple", ""}, D.At{"aria-label", MSG.T.composer.attach.tip(lc)}, D.At{"data-attach", "attach"}], Nil{}}]},

@@ -922,6 +922,8 @@ details.act.thinking > summary .summary { font-style: italic; }
 details.act.thinking > .body { color: var(--dim); border-left: 2px solid var(--line); margin: 4px 0 4px 4px; padding: 0 0 0 10px; font-size: calc(13px * var(--text-scale, 100) / 100); }
 /* token stats (View.tok, opt-in) */
 button.tok-chip { padding: 4px 6px; display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-variant-numeric: tabular-nums; font-size: calc(12px * var(--text-scale, 100) / 100); white-space: nowrap; }
+/* Keep a second press on the chip above the click-away shade as it arrives. */
+.composer:has(.tok-pop) .tok-chip { position: relative; z-index: 31; }
 .tok-pop { position: absolute; bottom: calc(100% - 4px); right: 16px; z-index: 31; display: flex; flex-direction: column; gap: 10px; width: 360px; max-width: calc(100% - 32px); max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); padding: 10px 12px; }
 .tok-title { font-weight: 600; }
 .tok-sec { display: flex; flex-direction: column; gap: 2px; }
