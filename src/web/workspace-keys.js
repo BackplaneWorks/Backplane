@@ -342,7 +342,11 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
     }
     if (palette) {
       const action = { Escape: 'ws-palette-close', Enter: 'ws-palette-enter', ArrowUp: 'ws-palette-move', ArrowDown: 'ws-palette-move' }[event.key];
-      if (action && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+      // Buttons and the help disclosure keep their native activation;
+      // arrows in the help scroll it rather than choosing a command.
+      const nativeEnter = event.key === 'Enter' && event.target?.closest?.('button,summary,a[href]');
+      const help = event.target?.closest?.('footer');
+      if (action && !nativeEnter && (!help || event.key === 'Escape') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
         event.preventDefault(); event.stopImmediatePropagation();
         dispatch(action, event.key === 'ArrowUp' ? 'up' : event.key === 'ArrowDown' ? 'down' : '');
         // closed, the draft has the keyboard before the next key
@@ -350,7 +354,8 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
         return;
       }
       if (event.key === 'Tab') {
-        const fields = [...palette.querySelectorAll('input,button')];
+        const fields = [...palette.querySelectorAll('input,button,summary,a[href],select,textarea,[tabindex]:not([tabindex="-1"])')]
+          .filter(el => !el.disabled && el.checkVisibility());
         const at = fields.indexOf(doc.activeElement), next = (at + (event.shiftKey ? -1 : 1) + fields.length) % fields.length;
         if (fields.length) { event.preventDefault(); event.stopImmediatePropagation();fields[next].focus(); }
         return;
