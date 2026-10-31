@@ -378,5 +378,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebase Show and drive the Browser page for the current thread; sidebar drafts unchanged and all 24 image checks pass"
+  "reviewNote": "Rebase Restore the live terminal screen after a renderer reload; sidebar drafts unchanged and all 24 image checks pass"
 }

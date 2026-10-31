@@ -13988,6 +13988,12 @@ def Laws.terminal_scroll_bounds():
 def Laws.browser_frame_empty_ignored(page):
   {==}
 
+def Laws.terminal_reopen_keeps_screen(v):
+  {==}
+
+def Laws.terminal_new_process_starts_blank(cols, rows, pid, v):
+  {==}
+
 def Laws.browser_frame_input_owner(page):
   {==}
 

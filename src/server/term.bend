@@ -574,6 +574,29 @@ def Et.snapped(+es: List<&2, ETerm>, ts: List<&2, Term>, +client: U32, +key: Str
 def Et.readed(+es: List<&2, ETerm>, ts: List<&2, Term>, +key: String, +reply: Chan(String), k: TS -> IO(Unit)) -> IO(Unit):
   IO.bind(Unit, Unit, Et.read.k(Et.find(es, key), reply), u => k(TS{ts, Et.seen(Et.find(es, key), es)}))
 
+# Ordinary shells keep a screen too, for a renderer that reconnects to
+# the same live PTY. Its clients still own protocol replies as before.
+def Et.shell.keep(same: Bool, +key: String, +c: U32, +r: U32, +pid: U32, v: VT.Vt) -> ETerm:
+  match same:
+    case True{}: ETerm{key, "", VT.Vt.resize(v, c, r), True{}, "running", pid}
+    case False{}: ETerm{key, "", VT.Vt.new(c, r), True{}, "running", pid}
+
+def Et.shell.open(m: Maybe<&2, ETerm>, +es: List<&2, ETerm>, +key: String, +c: U32, +r: U32, +pid: U32) -> List<&2, ETerm>:
+  match m:
+    case Some{ETerm{_, _, v, _, _, p}}: Et.put(es, Et.shell.keep(U32.is_eq(p, pid), key, c, r, pid, v))
+    case None{}: Et.put(es, ETerm{key, "", VT.Vt.new(c, r), True{}, "running", pid})
+
+def Et.shell.resize(m: Maybe<&2, ETerm>, +es: List<&2, ETerm>, +key: String, c: U32, r: U32) -> List<&2, ETerm>:
+  match m:
+    case Some{ETerm{k, ti, v, seen, st, pid}}: Et.put(es, ETerm{k, ti, VT.Vt.resize(v, c, r), seen, st, pid})
+    case None{}: es
+
+def Et.shell.fed(m: Maybe<&2, ETerm>, +es: List<&2, ETerm>, +key: String, +pid: U32, bs: List<&2, U32>) -> List<&2, ETerm>:
+  match m:
+    case Some{ETerm{k, ti, v, seen, st, +p}}:
+      Bool.pick(List<&2, ETerm>, U32.is_eq(p, pid), Et.put(es, ETerm{k, ti, VT.Vt.drain(VT.Vt.feed(v, bs)), seen, st, p}), es)
+    case None{}: es
+
 def Term.forward(same: Bool, +ts: List<&2, Term>, +es: List<&2, ETerm>, +key: String, +pid: U32, bs: List<&2, U32>, +out: Chan(TOut), k: TS -> IO(Unit)) -> IO(Unit):
   match same:
     case False{}: k(TS{ts, es})
@@ -585,16 +608,16 @@ def Term.forward(same: Bool, +ts: List<&2, Term>, +es: List<&2, ETerm>, +key: St
 def Term.fed(emb: Bool, +ts: List<&2, Term>, +es: List<&2, ETerm>, +key: String, +pid: U32, +bs: List<&2, U32>, +out: Chan(TOut), k: TS -> IO(Unit)) -> IO(Unit):
   match emb:
     case True{}: Et.fed(Et.find(es, key), ts, es, key, pid, bs, out, k)
-    case False{}: Term.forward(U32.is_eq(Term.pid(ts, key), pid), ts, es, key, pid, bs, out, k)
+    case False{}: Term.forward(U32.is_eq(Term.pid(ts, key), pid), ts, Et.shell.fed(Et.find(es, key), es, key, pid, bs), key, pid, bs, out, k)
 
 def Term.step(m: Maybe<&1, TMsg>, st: TS, +shell: String, +home: String, +q: Chan(TMsg), +out: Chan(TOut), k: TS -> IO(Unit)) -> IO(Unit):
   match m st:
-    case Some{TOpen{+th, cwd, c, r}} TS{+ts, es}:
-      IO.bind(List<&2, Term>, Unit, Term.open(Term.has(ts, th), ts, th, cwd, c, r, shell, q, out), t2 => k(TS{t2, es}))
+    case Some{TOpen{+th, cwd, +c, +r}} TS{+ts, +es}:
+      IO.bind(List<&2, Term>, Unit, Term.open(Term.has(ts, th), ts, th, cwd, c, r, shell, q, out), +t2 => k(TS{t2, Et.shell.open(Et.find(es, th), es, th, c, r, Term.pid(t2, th))}))
     case Some{TIn{+th, bs}} TS{+ts, es}:
       IO.bind(Unit, Unit, Term.send(ts, th, bs), u => k(TS{ts, es}))
-    case Some{TSize{+th, c, r}} TS{+ts, es}:
-      IO.bind(Unit, Unit, Term.send(ts, th, [255, 254, c, r]), u => k(TS{ts, es}))
+    case Some{TSize{+th, +c, +r}} TS{+ts, +es}:
+      IO.bind(Unit, Unit, Term.send(ts, th, [255, 254, c, r]), u => k(TS{ts, Et.shell.resize(Et.find(es, th), es, th, c, r)}))
     case Some{TGone{+th, +pid, +code}} TS{ts, +es}:
       IO.bind(List<&2, ETerm>, Unit, Et.gone(E.Emb.is_key(th), es, th, pid, code, home), e2 => k(TS{Term.drop(ts, th, pid), e2}))
     case Some{TRun{+key, +ti, +cwd, +cmd, +c, +r, again}} TS{+ts, +es}:

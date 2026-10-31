@@ -93,6 +93,13 @@ def WS.term.resize(+u: U.Ui, size: String) -> U.Act:
 def WS.term.local(+u: U.Ui) -> Bool:
   Bool.and(Bool.not(FR.Fr.is(U.Ui.sel(u))), Bool.and(Bool.not(String.is_empty(U.Ui.sel(u))), Bool.not(String.is_empty(U.Ui.root(u)))))
 
+# A fresh renderer needs the running shell's picture. Hiding and reopening
+# an already-held grid keeps its scrollback, so does not reset it.
+def WS.term.snapshot(need: Bool, a: U.Act, +owner: String) -> U.Act:
+  match need a:
+    case True{} U.Act{u, cs}: U.Ui.first(cs, U.Ui.rpc(u, "term.snap", [J.KV{"key", J.Str{owner}}]))
+    case False{} _: a
+
 def WS.term.show(valid: Bool, +u: U.Ui, size: String) -> U.Act:
   match valid:
     case False{}: WS.none(U.Ui.error_set(u, "Select a local project thread before opening a terminal."))
@@ -102,7 +109,7 @@ def WS.term.show(valid: Bool, +u: U.Ui, size: String) -> U.Act:
       +fresh = U.Ui.info_set(U.Ui.info_set(u, "local.terminal.pending", ""), "local.terminal.incarnation", Nat.show(Bool.pick(Nat, Nat.is_lt(incarnation, PRESENT.Session.nat.max()), Nat.add(incarnation, 1n), incarnation)))
       +ready = U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.flag_on(fresh, "term"), "@terminal.owner", owner),
         "@terminal.cwd", U.Ui.root(u)), "@terminal.title", U.Active.title(U.Ui.thread(U.Ui.state(u), owner)))
-      U.Ui.also(WS.term.dimensions(U.Term.size.k(String.split(size, 'x')), ready, owner, "term.open"), [U.Focus{"term"}])
+      U.Ui.also(WS.term.snapshot(Bool.not(U.Emb.has(u, owner)), WS.term.dimensions(U.Term.size.k(String.split(size, 'x')), ready, owner, "term.open"), owner), [U.Focus{"term"}])
 
 def WS.term.toggle(+u: U.Ui, +size: String) -> U.Act:
   Bool.pick(U.Act, Bool.and(U.Ui.flag(u, "term"), String.eq(WS.owner(u), U.Ui.sel(u))), WS.term.hide(u),

@@ -12,6 +12,8 @@ import ./src/core/sidebar-read.bend as SIDEREAD
 import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 import Base
+import ./src/core/vt.bend as VTSNAP
+import ./src/server/term.bend as TSNAP
 import ./src/core/browser-frame.bend as BFRAME
 import ./src/core/term-scroll.bend as TSC
 import ./src/web/workspace.bend as WSTERM
@@ -13610,6 +13612,7 @@ law stop_command_only_while_running:
 law terminal_scroll_bounds:
   {[TSC.TermScroll.move(0n, 2048n, True{}, 19n), TSC.TermScroll.move(2040n, 2048n, True{}, 19n), TSC.TermScroll.move(3n, 2048n, False{}, 19n)] == [19n, 2048n, 0n] : List<&2, Nat>}
 
+# Modifier-only keys encode no input and leave the history viewport alone.
 law terminal_empty_input_keeps_view:
   for +u: U.Ui
   {WSTERM.WS.term.send(u, Nil{}) == U.Act{u, Nil{}} : U.Act}
@@ -13625,4 +13628,14 @@ law browser_frame_input_owner:
 law browser_frame_bot_owner:
   {BFRAME.BrowserFrame.owner("bot", "thread") == "bot" : String}
 
-# Modifier-only keys encode no input and leave the history viewport alone.
+
+law terminal_reopen_keeps_screen:
+  for +v: VTSNAP.Vt
+  {TSNAP.Et.shell.keep(True{}, "t", 80, 24, 42, v) == TSNAP.ETerm{"t", "", VTSNAP.Vt.resize(v, 80, 24), True{}, "running", 42} : TSNAP.ETerm}
+
+law terminal_new_process_starts_blank:
+  for +cols: U32
+  for +rows: U32
+  for +pid: U32
+  for +v: VTSNAP.Vt
+  {TSNAP.Et.shell.keep(False{}, "t", cols, rows, pid, v) == TSNAP.ETerm{"t", "", VTSNAP.Vt.new(cols, rows), True{}, "running", pid} : TSNAP.ETerm}
