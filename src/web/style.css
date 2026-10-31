@@ -396,6 +396,8 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .viewer-tabs .icon { margin-bottom: 4px; }
 .viewer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex: none; }
 .viewer-bar .what { color: var(--dim); }
+/* The workbench supplies Fit once its toolbar is ready. */
+.viewer:has(.solid-toolbar button) > .viewer-bar > .fit { display: none; }
 .viewer-bar .what.on { color: var(--text); border: 1px solid var(--accent); padding: 3px 10px; }
 .viewer-bar .hint { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); margin-left: auto; }
 /* the Files tab: the folder's trail, its rows; an image or a PDF opened from it */
