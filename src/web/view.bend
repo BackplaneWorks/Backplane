@@ -3711,7 +3711,7 @@ def View.sch.off(on: Bool) -> List<&2, D.Attr>:
       [D.At{"disabled", "disabled"}, D.At{"aria-disabled", "true"}]
 
 def View.sch.btn(+key: String, on: Bool, +title: String, +label: String) -> D.Node:
-  D.El{"button", key, List.append(&2, D.Attr, [D.At{"class", "sch-btn"}, D.At{"title", title}, D.At{"aria-label", title}, D.At{"data-value", ""}, D.On{"click", key}], View.sch.off(on)), [D.Txt{label}]}
+  D.El{"button", key, List.append(&2, D.Attr, [D.At{"class", "sch-btn"}, D.At{"title", title}, D.At{"aria-label", label}, D.At{"data-value", ""}, D.On{"click", key}], View.sch.off(on)), [D.Txt{label}]}
 
 def View.sch.toggle(+lc: I.Loc, +on: Bool) -> D.Node:
   D.El{"button", "sch-tree", [D.At{"class", "sch-btn" ++ Bool.pick(String, on, " on", "")}, D.At{"title", MSG.T.viewer.sch.tree.tip(lc)},
@@ -3743,7 +3743,6 @@ def View.sch.bar(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
       [View.sch.btn("sch-back", back, MSG.T.viewer.sch.back.tip(lc), "‹ " ++ MSG.T.viewer.sch.back(lc)),
        View.sch.btn("sch-fwd", fwd, MSG.T.viewer.sch.forward.tip(lc), MSG.T.viewer.sch.forward(lc) ++ " ›"),
        View.sch.btn("sch-up", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.up.tip(lc), "↑ " ++ MSG.T.viewer.sch.up(lc)),
-       View.sch.btn("sch-root", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.root.tip(lc), MSG.T.viewer.sheet.top(lc)),
        View.sch.toggle(lc, tree),
        D.El{"nav", "", [D.At{"class", "sch-trail"}, D.At{"aria-label", MSG.T.viewer.sch.trail(lc)}], View.sch.crumbs(lc, trail)},
        D.El{"span", "", [D.At{"class", "sch-pos"}, D.At{"role", "status"}], [D.Txt{View.sch.pos(lc, out, at, count, page)}]}]
@@ -3788,8 +3787,7 @@ def View.sch.tree(+lc: I.Loc, on: Bool, rows: List<&2, U.SchRow>, +here: List<&2
     case True{}:
       [D.El{"div", "sch-panel", [D.At{"class", "sch-panel"}, D.At{"id", "sch-tree"}],
         D.El{"div", "", [D.At{"class", "sch-tree"}, D.At{"aria-label", MSG.T.viewer.sch.tree(lc)}], View.sch.rows(lc, rows)}
-        <> D.Dom.when(Nat.is_gt(List.length(&2, U.SchRow, here), 0n),
-          D.El{"div", "", [D.At{"class", "sch-here"}, D.At{"aria-label", MSG.T.viewer.sch.inside(lc)}], D.Dom.span("sch-here-head", MSG.T.viewer.sch.inside(lc)) <> View.sch.here(lc, here)})}]
+        <> Nil{}}]
     case False{}:
       Nil{}
 
