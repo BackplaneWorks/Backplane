@@ -703,7 +703,7 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
     case M.MessagePosted{+th, _, _, _, _}:
       [RK{"thread", th}]
     case M.TurnChanged{+th, _, _}:
-      [RK{"thread", th}, RK{"run", th}, K.set("todos." ++ th), K.set("todos.base." ++ th), K.set("todos.visible." ++ th), K.set("todos.gen." ++ th)]
+      [RK{"thread", th}, RK{"run", th}, K.set("todos." ++ th), K.set("todos.base." ++ th), K.set("todos.visible." ++ th)]
     case M.PendingChanged{+th, _, _}:
       [RK{"thread", th}]
     case M.ActivityLogged{_, _, _, _, _, _}:
