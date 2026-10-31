@@ -1,3 +1,4 @@
+import ./src/web/workspace.bend as WSK
 import ./src/core/search-fold.bend as SFOLD
 import ./src/core/live-checkpoint.bend as LCP
 import ./src/core/restartretry.bend as WDRETRY
@@ -13974,4 +13975,9 @@ def Laws.tour_tools_examples_visible():
 # Found by e2e c1-6.
 
 def Laws.search_unicode_spellings_agree():
+  {==}
+
+# Found by e2e o2-8.
+
+def Laws.stop_command_only_while_running():
   {==}

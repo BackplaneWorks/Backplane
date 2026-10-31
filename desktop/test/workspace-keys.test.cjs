@@ -724,3 +724,12 @@ test('Escape presses the room deletion existing Cancel control', async () => {
   const doc = { querySelector: () => null, querySelectorAll: q => q.startsWith('.room-view ') ? [room] : [] };
   overlayEscape(doc)();assert.equal(clicked, true);
 });
+
+test('Ctrl+period stops from the composer, leaving IME and the PTY alone', async () => {
+  const { workspaceShortcut: key } = await import('../../src/web/workspace-keys.js');
+  const composer = element('textarea', 'composer');
+  assert.deepEqual(key(event('.', { ctrlKey: true, target: composer }), 'Linux'), ['ws-stop', '']);
+  assert.deepEqual(key(event('.', { ctrlKey: true, target: composer }), 'MacIntel'), ['ws-stop', '']);
+  for (const extra of [{ isComposing: true }, { shiftKey: true }, { altKey: true }, { metaKey: true },
+    { target: element('textarea', 'term', ['data-keys']) }]) assert.equal(key(event('.', { ctrlKey: true, ...extra }), 'Linux'), null);
+});

@@ -50,6 +50,9 @@ Send a message; while the reply streams press Stop. The streamed text never
 blanks; the turn ends as stopped within 2 s ("Stopped hh:mm · Ns", the top
 bar's State grey "stopped"), and the composer takes a new message that then
 runs. After it finishes, the stopped reply still reads "Stopped".
+W/D: during another turn, Ctrl+K → Stop the running turn shows Ctrl+. and
+stops it. Start again and Ctrl+. stops it from the composer; idle threads
+offer no Stop command. Both Stop tooltips name the shortcut.
 
 **S06 Follow-ups while busy** (W D)
 Send a message, and while it runs send a second (Send reads "Steer" while a

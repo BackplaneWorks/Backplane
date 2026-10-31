@@ -1,3 +1,4 @@
+import ./src/web/workspace.bend as WSK
 import ./src/core/search-fold.bend as SFOLD
 import ./src/core/live-checkpoint.bend as LCP
 import ./src/server/plot.bend as PLOTWATCH
@@ -13597,3 +13598,7 @@ law tour_tools_examples_visible:
 # Found by e2e c1-6.
 law search_unicode_spellings_agree:
   {SFOLD.Fold.text("CAFÉ ΔΟΚΙΜΉ Straße ς ＣＡＦＥ 가") == SFOLD.Fold.text("cafe\u{301} δοκιμη STRASSE σ cafe 가") : String}
+
+# Found by e2e o2-8.
+law stop_command_only_while_running:
+  {WSK.WS.stop.command(False{}) == Nil{} : List<&2, U.PItem>}

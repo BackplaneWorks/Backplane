@@ -898,7 +898,7 @@ voice.fix.tip = 正しい表記を入力
 voice.dictionary.tip = 認識した表記で辞書に追加
 voice.leave = そのままにする
 voice.replace = 語句を置き換えて辞書に追加
-composer.stop.tip = 実行中のターンを停止
+composer.stop.tip = 実行中のターンを停止 · Ctrl+.
 composer.queue = キューに追加
 composer.model.tip = モデルと推論の強さを選択
 composer.attach.tip = ファイルや画像を添付（画像の貼り付けも可）
@@ -1066,7 +1066,7 @@ phase.complete = 完了
 phase.stopped = 停止
 
 # Web/phone audit: tooltips, reasoning labels, and model progress.
-tools.tip.stop = 実行中のターンを停止
+tools.tip.stop = 実行中のターンを停止 · Ctrl+.
 tools.tip.unpin = ピン留めを外し、通常の順序に戻す
 tools.tip.pin = 一覧の先頭に固定
 tools.tip.unsettle = 進行中のスレッドに戻す

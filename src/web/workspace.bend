@@ -183,8 +183,29 @@ def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
    U.PItem{"Agent, model and effort · Ctrl+M", "flag", "models"},
    U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c)]))
 
+def WS.stop.running(turn: M.TurnState) -> Bool:
+  match turn:
+    case M.Running{}: True{}
+    case _: False{}
+
+def WS.stop.available(+u: U.Ui) -> Bool:
+  Bool.and(U.Ui.timeline(u), WS.stop.running(M.Thread.turn(U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)))))
+
+def WS.stop.command(running: Bool) -> List<&2, U.PItem>:
+  match running:
+    case True{}: [U.PItem{"Stop the running turn · Ctrl+.", "ws-stop", ""}]
+    case False{}: Nil{}
+
+def WS.stop.k(running: Bool, u: U.Ui) -> U.Act:
+  match running:
+    case True{}: U.Ui.act(u, "interrupt", "")
+    case False{}: WS.none(u)
+
+def WS.stop(+u: U.Ui) -> U.Act:
+  WS.stop.k(WS.stop.available(u), u)
+
 def WS.commands(+u: U.Ui) -> List<&2, U.PItem>:
-  WS.commands.k(u, WS.cmds(u))
+  List.append(&2, U.PItem, WS.stop.command(WS.stop.available(u)), WS.commands.k(u, WS.cmds(u)))
 
 def WS.projects(xs: List<&2, M.Project>) -> List<&2, U.PItem>:
   match xs:
@@ -202,6 +223,7 @@ def WS.palette.move(+u: U.Ui, +delta: String) -> U.Act:
 
 def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
   match action:
+    case "ws-stop": WS.stop(u)
     case "ws-term-here": WS.term.show(WS.term.local(u), u, "")
     case "ws-term-hide": WS.term.hide(u)
     case "ws-project": WS.project(u, value)
@@ -249,6 +271,7 @@ def WS.handles(+action: String) -> Bool:
 
 def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
   match action:
+    case "ws-stop": WS.stop(u)
     case "ws-palette-open": WS.palette.press(u)
     case "ws-palette-close": WS.palette.close(u)
     case "ws-palette-query": WS.none(U.Palette.set(u, value, 0n))
@@ -269,7 +292,7 @@ def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
 # title and its project (U.Palette.place), so it can't pass for a command
 def WS.row.face(thread: Bool, +label: String, +place: String) -> List<&2, D.Node>:
   match thread:
-    case False{}: [D.Txt{label}]
+    case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{label}])
     case True{}: [WI.WIcon.svg("message-square", 13), D.Dom.span("name", label), D.Dom.span("where", place)]
 
 def WS.rows(xs: List<&2, U.PItem>, +st: M.State, +chosen: Nat, +i: Nat) -> List<&2, D.Node>:
@@ -295,7 +318,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
             Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), [D.Dom.span("workspace-empty", "No matching commands")], WS.rows(WS.items(u), U.Ui.state(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
             D.El{"details", "", Nil{}, [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
-              D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort · / composer."}]},
+              D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+. stop · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort · / composer."}]},
               D.El{"p", "", Nil{}, [D.Txt{"Esc puts away the floating terminal, else the probe, else the viewer, and puts the keyboard back in the composer; in the composer with nothing to put away it leaves the composer, so a bare key presses its rail button (hold Ctrl to see the keys). Shift+Esc hides the terminal from inside it. / outside a text field puts the keyboard in the composer."}]},
               D.El{"p", "", Nil{}, [D.Txt{"Backtick (`) toggles Terminal from the workspace or composer. In the shell and other text fields, backtick types normally; use Ctrl+J to toggle. Super+grave / tilde also works if your desktop delivers it. Navigation shortcuts leave editors, IME and PTYs alone. Pin is in Commands (its former Ctrl+Shift+P opens this palette)."}]}]}]}]}]}]
 

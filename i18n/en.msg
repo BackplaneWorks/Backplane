@@ -878,7 +878,7 @@ voice.fix.tip = Type the right spelling
 voice.dictionary.tip = Add it to the dictionary as heard
 voice.leave = Leave it
 voice.replace = Replace the word and add it to the dictionary
-composer.stop.tip = Stop the running turn
+composer.stop.tip = Stop the running turn · Ctrl+.
 composer.queue = Queue
 composer.model.tip = Choose the model and effort
 composer.attach.tip = Attach files or images (or paste an image)
@@ -1046,7 +1046,7 @@ phase.complete = Complete
 phase.stopped = Stopped
 
 # Web/phone audit: tooltips, reasoning labels, and model progress.
-tools.tip.stop = Stop the running turn
+tools.tip.stop = Stop the running turn · Ctrl+.
 tools.tip.unpin = Unpin: it sorts with the rest again
 tools.tip.pin = Keep it at the top of the list
 tools.tip.unsettle = Bring it back to the active threads

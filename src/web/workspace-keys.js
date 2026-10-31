@@ -50,6 +50,7 @@ export function workspaceShortcut(event, platform = '') {
   // all of them; bare keys and Alt+digit (Option+1 types ¡ on a Mac) stay
   // off in every field.
   if (editor && event.target?.closest?.(PTY)) return null;
+  if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && key === '.') return ['ws-stop', ''];
   if (command && !event.altKey && event.shiftKey) {
     if (key === 'u') return ['ws-key', 'uber'];
     if (event.code === 'BracketLeft' || key === '[' || key === '{') return ['ws-key', 'prev'];

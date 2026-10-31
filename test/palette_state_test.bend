@@ -49,3 +49,6 @@ def main() -> IO(Unit):
     C.Check.str("listed once: archive", has(at([M.ThreadArchived{"t", True{}, 2n}]), "Archive thread") ++ has(at([M.ThreadArchived{"t", True{}, 2n}]), "Unarchive thread"), "01")
     C.Check.str("listed once: wake", has(at([M.ThreadSnoozed{"t", 5000n, 2n}]), "Wake thread") ++ has(at([M.ThreadSnoozed{"t", 5000n, 2n}]), "Snooze thread for 1 hour"), "10")
     C.Check.str("the rest stay", has(at([]), "Fork thread") ++ has(at([]), "Delete thread…") ++ has(at([]), "Settings"), "111")
+    C.Check.str("idle hides Stop", has(at([]), "Stop the running turn · Ctrl+."), "0")
+    C.Check.str("running offers Stop once", has(at([M.TurnChanged{"t", M.Running{}, 2n}]), "Stop the running turn · Ctrl+."), "1")
+    C.Check.str("completed hides Stop", has(at([M.TurnChanged{"t", M.Completed{}, 2n}]), "Stop the running turn · Ctrl+."), "0")

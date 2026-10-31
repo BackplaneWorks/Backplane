@@ -1154,9 +1154,9 @@ def T.composer.stop(l: I.Loc) -> String:
 def T.composer.stop.tip(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Stop the running turn"
+      "Stop the running turn · Ctrl+."
     case I.Ja{}:
-      "実行中のターンを停止"
+      "実行中のターンを停止 · Ctrl+."
 
 def T.diff.commit.tip(l: I.Loc) -> String:
   match l:
@@ -7342,9 +7342,9 @@ def T.tools.tip.snooze(l: I.Loc) -> String:
 def T.tools.tip.stop(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Stop the running turn"
+      "Stop the running turn · Ctrl+."
     case I.Ja{}:
-      "実行中のターンを停止"
+      "実行中のターンを停止 · Ctrl+."
 
 def T.tools.tip.terminal(l: I.Loc) -> String:
   match l:
