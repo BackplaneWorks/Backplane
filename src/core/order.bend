@@ -282,10 +282,16 @@ def Order.buy.text() -> String:
 type FabFile is Data:
   FabFile{path: String, text: String}
 
+# A fab object needs both a kind and measured features before it can be
+# called ready. Keep the file name in the correction shown to the person.
+def Order.part.validation(+path: String, +o: J.Json) -> String:
+  Bool.pick(String, String.is_empty(String.trim(J.Json.get_str(o, "kind", ""))), path ++ ": missing kind",
+    Bool.pick(String, String.eq(J.Json.show(J.Json.get_obj(o, "features")), "null"), path ++ ": missing measured features", ""))
+
 def Order.part.of(+path: String, +o: J.Json) -> J.Json:
   J.Json.obj([J.KV{"name", J.Str{J.Json.get_str(o, "name", path)}}, J.KV{"kind", J.Str{J.Json.get_str(o, "kind", "")}},
     J.KV{"qty", Maybe.default(&2, J.Json, J.Json.get(o, "qty"), J.Num{"1"})},
-    J.KV{"options", J.Json.get_obj(o, "options")}, J.KV{"features", J.Json.get_obj(o, "features")}, J.KV{"path", J.Str{path}}])
+    J.KV{"options", J.Json.get_obj(o, "options")}, J.KV{"features", J.Json.get_obj(o, "features")}, J.KV{"path", J.Str{path}}, J.KV{"validation", J.Str{Order.part.validation(path, o)}}])
 
 def Order.part.k(ordered: Bool, +path: String, +o: J.Json, rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match ordered:
@@ -350,8 +356,14 @@ def Estimate.problems(ps: List<&2, J.Json>, rs: List<&2, J.Json>) -> String:
     case +p <> t +r <> more:
       Estimate.join(Estimate.row(p, r), Estimate.problems(t, more))
 
+def Estimate.validation(ps: List<&2, J.Json>) -> String:
+  match ps:
+    case Nil{}: ""
+    case +p <> t:
+      Estimate.join(J.Json.get_str(p, "validation", ""), Estimate.validation(t))
+
 def Estimate.note(+ps: List<&2, J.Json>, +est: J.Json, on: Bool) -> String:
-  Bool.pick(String, Bool.and(on, String.is_empty(J.Json.get_str(est, "error", ""))), Estimate.problems(ps, J.Json.elems(J.Json.get_obj(est, "parts"))), "")
+  Estimate.join(Estimate.validation(ps), Bool.pick(String, Bool.and(on, String.is_empty(J.Json.get_str(est, "error", ""))), Estimate.problems(ps, J.Json.elems(J.Json.get_obj(est, "parts"))), ""))
 
 def Estimate.label(+label: String, +note: String) -> String:
   Bool.pick(String, String.is_empty(note), label, "estimate incomplete")

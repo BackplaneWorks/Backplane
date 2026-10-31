@@ -409,7 +409,8 @@ Ordering on, in a project with fab files: the rail's foot shows "Buy it" with
 its price under a divider. Press it: a "Buy: <project>" thread opens, with
 no Buy of its own. The folded rail shows only the cart. Return 503 from the
 local estimate service: the part list and unpriced Buy stay, with an explanation
-and Retry; restore the service and Retry to recover the price.
+and Retry; restore the service and Retry to recover the price. An empty fab
+object names the invalid file and what is missing instead of hiding Buy.
 
 **S49 Every board kind priced** (W D)
 Like S38, against a local order server (never the real one) with Ordering

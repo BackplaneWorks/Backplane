@@ -13525,3 +13525,6 @@ law estimate_complete_keeps_total:
 # An estimate failure does not remove the order preparation conversation.
 law estimate_failure_keeps_preparation:
   {ORD.Card.action(ORD.Card{"", "", "", 1n, 0n, "unreachable", True{}}) == "Buy it" : String}
+
+law estimate_empty_fab_names_file:
+  {ORD.Order.part.validation("main.fab.json", J.Json.obj([])) == "main.fab.json: missing kind" : String}

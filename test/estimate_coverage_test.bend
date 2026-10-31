@@ -21,3 +21,5 @@ def main() -> IO(Unit):
     C.Check.str("service failure retains unpriced preparation", O.Card.action(O.Card{"", "", "", 1n, 0n, "unreachable", True{}}), "Buy it")
     C.Check.str("unavailable service keeps board workflow", O.Card.action(O.Card{"", "", "", 0n, 1n, "unreachable", True{}}), "Buy it")
     C.Check.str("no parts still has no action", O.Card.action(O.Card{"", "", "", 0n, 0n, "unreachable", True{}}), "")
+    C.Check.str("empty fab identifies missing kind", O.Order.part.validation("main.fab.json", J.Json.obj([])), "main.fab.json: missing kind")
+    C.Check.str("missing features identified", O.Order.part.validation("main.fab.json", J.Json.obj([J.KV{"kind", J.Str{"pcb"}}])), "main.fab.json: missing measured features")

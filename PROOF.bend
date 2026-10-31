@@ -13904,3 +13904,6 @@ def Laws.estimate_complete_keeps_total():
 
 def Laws.estimate_failure_keeps_preparation():
   {==}
+
+def Laws.estimate_empty_fab_names_file():
+  {==}
