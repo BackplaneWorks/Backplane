@@ -47,7 +47,7 @@ def actor(+path: String, +dir: String) -> IO(Unit):
     +q : Chan(PV.PMsg) <- Chan.new(PV.PMsg, 32)
     +out : Chan(PV.POut) <- Chan.new(PV.POut, 32)
     IO.spawn(Unit, PV.Pv.loop(1000n, q, PV.Pv.empty(), out, dir))
-    ok : Result<&1, &1, PV.PMsg, Unit> <- Chan.send(PV.PMsg, q, PV.PWatch{1, 1, HI.Hier.dir(path), path, ""})
+    ok : Result<&1, &1, PV.PMsg, Unit> <- Chan.send(PV.PMsg, q, PV.PWatch{1, 1, HI.Hier.dir(path), path, "", False{}})
     IO.spawn(Unit, stop(q, out))
     consume(200n, out)
 

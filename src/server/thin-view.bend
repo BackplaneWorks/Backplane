@@ -259,11 +259,13 @@ def Route.pack(+u: U.Ui) -> J.Json:
 def Session.native_local(+u: U.Ui, +p: J.Json) -> U.Ui:
   H.Hubs.local.ui(3n, u, "mailroom-renderer", J.Json.get_str(p, "nativeRenderer", ""))
 
+# (plotStamp "v1": the page reads plotstamp, a source's exact stamp before
+# its plot, client.bend's kicad.watch "stamps"; native hosts never get it)
 def Session.renderer( +web: Bool, +u: U.Ui, +p: J.Json) -> U.Ui:
   match web:
     case True{}:
-      A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
-        "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")), "local.body.pages", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.view.lazy", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")))
+      A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
+        "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")), "local.body.pages", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.view.lazy", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.plotstamp", Bool.pick(String, String.eq(J.Json.get_str(p, "plotStamp", ""), "v1"), "1", "")))
     case False{}: Session.native_local(u, p)
 
 def Session.input(+st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json) -> U.Ui:

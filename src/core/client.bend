@@ -7142,14 +7142,16 @@ def Solid.fam(+u: Ui, +key: String) -> String:
 
 # (tree: where the schematic's hierarchy starts, Bd.tree; sheet: the
 # combined view's, whose kind names the panes it shows, "split:sb3")
-def Solid.sync.k(same: Bool, u: Ui, +want: String, +kind: String, +path: String, +root: String, +tree: String, +sheet: String, cmds: List<&2, Cmd>) -> Act:
+# (stamps: "1" when this client reads plotstamp, local.plotstamp, set by
+# the thin view for a page that announced it)
+def Solid.sync.k(same: Bool, +u: Ui, +want: String, +kind: String, +path: String, +root: String, +tree: String, +sheet: String, cmds: List<&2, Cmd>) -> Act:
   match same:
     case True{}:
       Act{u, cmds}
     case False{}:
       Ui.also(Ui.rpc(Ui.scratch_set(u, "@solid.at", want), "kicad.watch",
         [J.KV{"kind", J.Str{Bool.pick(String, String.is_empty(want), "", Solid.ask(kind))}}, J.KV{"root", J.Str{root}}, J.KV{"path", J.Str{path}}, J.KV{"tree", J.Str{tree}},
-         J.KV{"sheet", J.Str{sheet}}]), cmds)
+         J.KV{"sheet", J.Str{sheet}}, J.KV{"stamps", J.Str{Ui.info(u, "local.plotstamp")}}]), cmds)
 
 def Solid.sync.m(a: Act) -> Act:
   match a:

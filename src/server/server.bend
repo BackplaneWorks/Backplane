@@ -4554,12 +4554,13 @@ def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
 # kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full"
 # shows it, anything else stops (tree: where a schematic's hierarchy
 # starts, "" for the project's own)
-def Plot.watch(+client: U32, +kind: String, +root: String, +path: String, +tree: String) -> PV.PMsg:
-  Bool.pick(PV.PMsg, String.eq(kind, "board"), PV.PWatch{client, 0, root, path, tree},
-    Bool.pick(PV.PMsg, String.eq(kind, "schematic"), PV.PWatch{client, 1, root, path, tree},
-      Bool.pick(PV.PMsg, String.eq(kind, "3d"), PV.PWatch{client, 2, root, path, tree},
-        Bool.pick(PV.PMsg, String.eq(kind, "3d-bare"), PV.PWatch{client, 3, root, path, tree},
-          Bool.pick(PV.PMsg, String.eq(kind, "3d-full"), PV.PWatch{client, 4, root, path, tree}, PV.PStop{client})))))
+# (stamps: the client reads plotstamp, plot.bend's Pv.stamp.fan)
+def Plot.watch(+client: U32, +kind: String, +root: String, +path: String, +tree: String, +stamps: Bool) -> PV.PMsg:
+  Bool.pick(PV.PMsg, String.eq(kind, "board"), PV.PWatch{client, 0, root, path, tree, stamps},
+    Bool.pick(PV.PMsg, String.eq(kind, "schematic"), PV.PWatch{client, 1, root, path, tree, stamps},
+      Bool.pick(PV.PMsg, String.eq(kind, "3d"), PV.PWatch{client, 2, root, path, tree, stamps},
+        Bool.pick(PV.PMsg, String.eq(kind, "3d-bare"), PV.PWatch{client, 3, root, path, tree, stamps},
+          Bool.pick(PV.PMsg, String.eq(kind, "3d-full"), PV.PWatch{client, 4, root, path, tree, stamps}, PV.PStop{client})))))
 
 # the combined view ("split:" and its panes, s b 3): its schematic's sheet,
 # the board's 3D model (which watches the board) or the board alone, the
@@ -4579,17 +4580,17 @@ def Plot.split.fin(r: List<&2, PV.PMsg> & List<&2, String>, +client: U32) -> Lis
   (ms, ks) = r
   List.append(&2, PV.PMsg, ms, [PV.PKeep{client, ks}])
 
-def Plot.split(+client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String) -> List<&2, PV.PMsg>:
-  Plot.split.fin(Plot.split.on(String.contains(kind, "s"), PV.PAlso{client, 1, root, sheet, tree}, PV.Src.key(1, root, sheet),
-    Plot.split.on(String.contains(kind, "3"), PV.PAlso{client, 2, root, path, tree}, PV.Src.key(2, root, path),
-      Plot.split.on(Bool.or(String.contains(kind, "b"), String.contains(kind, "3")), PV.PAlso{client, 0, root, path, tree}, PV.Src.key(0, root, path), (Nil{}, Nil{})))), client)
+def Plot.split(+client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String, +stamps: Bool) -> List<&2, PV.PMsg>:
+  Plot.split.fin(Plot.split.on(String.contains(kind, "s"), PV.PAlso{client, 1, root, sheet, tree, stamps}, PV.Src.key(1, root, sheet),
+    Plot.split.on(String.contains(kind, "3"), PV.PAlso{client, 2, root, path, tree, stamps}, PV.Src.key(2, root, path),
+      Plot.split.on(Bool.or(String.contains(kind, "b"), String.contains(kind, "3")), PV.PAlso{client, 0, root, path, tree, stamps}, PV.Src.key(0, root, path), (Nil{}, Nil{})))), client)
 
-def Plot.watch.all(split: Bool, +client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String) -> List<&2, PV.PMsg>:
+def Plot.watch.all(split: Bool, +client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String, +stamps: Bool) -> List<&2, PV.PMsg>:
   match split:
     case True{}:
-      Plot.split(client, String.drop(kind, 6n), root, path, tree, sheet)
+      Plot.split(client, String.drop(kind, 6n), root, path, tree, sheet, stamps)
     case False{}:
-      [Plot.watch(client, kind, root, path, tree)]
+      [Plot.watch(client, kind, root, path, tree, stamps)]
 
 def Plot.puts(ms: List<&2, PV.PMsg>, +m: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
   match ms:
@@ -10255,9 +10256,9 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         Plot.put(Cfg.pv(cfg), PV.PInfo{client, id, key, at, idx})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet}:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet, +stamps}:
       do IO<Hub>:
-        Plot.puts(Plot.watch.all(String.starts_with(kind, "split:"), client, kind, root, path, tree, sheet), Cfg.pv(cfg))
+        Plot.puts(Plot.watch.all(String.starts_with(kind, "split:"), client, kind, root, path, tree, sheet, String.eq(stamps, "1")), Cfg.pv(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:

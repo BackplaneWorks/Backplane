@@ -2671,7 +2671,7 @@ async function startThin(again = false, reason = "initial") {
         if (!current() || s.readyState !== 1) throw Error("View connection closed");
         trace("send", { id: request.id, method: request.m });
         const session = request.p?.session ? Wire.plain(App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session))) : null;
-        s.send(fromList(App.wire_out(JSON.stringify({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1" } }))));
+        s.send(fromList(App.wire_out(JSON.stringify({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1", plotStamp: "v1" } }))));
       },
       choice: choosePresentation, prepare: (session, input, action) => preservePresentationRoute(
         action === "send" || action === "send-alt" ? input : session,
@@ -2811,6 +2811,7 @@ async function startThin(again = false, reason = "initial") {
       if (envelope.t === "notify") { notify(envelope);return; }
       if (viewerRpc.receive(envelope)) return;
       if (envelope.t === "plotrevision") { ViewerTools.sourceRevision(envelope.key, envelope.revision); return; }
+      if (envelope.t === "plotstamp") { ViewerTools.sourceStamp(envelope.key, envelope.revision); return; }
       if (envelope.t === "reply" && sealedReply(envelope)) return;
       if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { diagnostic.greeting(envelope);clearTimeout(thinGreetingTimer);thin.greeting(envelope); }
