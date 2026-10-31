@@ -1160,6 +1160,8 @@ function composerPhone() { return matchMedia("(max-width: 760px), (hover: none) 
 function dispatch(action, value, timer) {
   if (action === "secret-save") return secretSave(value);
   if (action === "sealed") return sealedSave(value);
+  // Remove also discards an unsaved key kept only in this page.
+  if (action === "voice-unkey") for (const field of sealedFields("vkey")) field.value = "";
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
   if (action === "select") drawerShut();
