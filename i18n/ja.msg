@@ -1391,3 +1391,4 @@ sched.help.minute = cronの分は0〜59、間隔は正の数です。例: */15 *
 settings.settle.idle.off = ターン終了後の短い非活動タイマーはオフです。この期間動きがないと完了済みになります。内容は保存されます。
 sidebar.search.empty = 一致するプロジェクトはありません。
 sidebar.search.clear = 検索をクリア
+native.file.text.error = {kind, select, size {テキストのプレビューは1 MBまでです。} other {このテキストファイルを読み込めませんでした。}}

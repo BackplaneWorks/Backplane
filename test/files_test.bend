@@ -1,4 +1,5 @@
 import Base
+import ../src/mobile/view.bend as MV
 import ../src/core/images.bend as IM
 import ./check.bend as C
 import ../src/core/client.bend as U
@@ -65,6 +66,11 @@ def main() -> IO(Unit):
     C.Check.str("a Files read is only requested once", sent(U.Fm.sync(U.Act{ui(U.Fm.sync(U.Act{U.Ui.view_put(base(), "files", ""), Nil{}})), Nil{}})), "")
     C.Check.str("an ordinary Files click is not requested twice", sent(U.Fm.sync(U.Act{act(base(), "fm", ""), Nil{}})), "")
     C.Check.str("a closed viewer does not request Files", sent(U.Fm.sync(U.Act{base(), Nil{}})), "")
+    C.Check.str("phone opens README as text", MV.View.kind(ui(MV.View.fm.open(base(), "README.md"))), "text")
+    C.Check.str("phone opens notes as text", MV.View.kind(ui(MV.View.fm.open(base(), "notes.txt"))), "text")
+    C.Check.str("phone text stays in Files", Bool.show(MV.View.fm(ui(MV.View.fm.open(base(), "README.md")))) , "True")
+    C.Check.str("phone text model names its kind", J.Json.get_str(MV.File.json(True{}, ui(MV.View.fm.open(base(), "README.md"))), "kind", ""), "text")
+    C.Check.str("phone text model names its source", J.Json.get_str(MV.File.json(True{}, ui(MV.View.fm.open(base(), "README.md"))), "url", ""), IM.Img.url("/w/board/README.md"))
     C.Check.str("text preview endpoint accepts notes", Bool.show(IM.Img.viewable("/r/notes.txt")), "True")
     C.Check.str("Markdown is served as literal text", IM.Img.ctype("/r/README.MD"), "text/plain; charset=utf-8")
     C.Check.str("HTML is not a file preview", Bool.show(IM.Img.viewable("/r/note.html")), "False")

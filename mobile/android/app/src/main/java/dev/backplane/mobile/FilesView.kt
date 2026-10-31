@@ -4,6 +4,10 @@ import android.graphics.Bitmap
 import android.graphics.Color as AColor
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -137,7 +141,8 @@ fun FileScreen(m: AppModel, v: Viewer, f: FileView) {
             Text(f.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         HorizontalDivider()
-        if (f.kind == "pdf") PdfPages(m, f.url)
+        if (f.kind == "text") TextPage(m, f.url)
+        else if (f.kind == "pdf") PdfPages(m, f.url)
         else Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
             HubPicture(m, f.url, Modifier.fillMaxWidth()) { shown = it }
         }
@@ -214,4 +219,36 @@ private fun PdfPages(m: AppModel, path: String) {
             }
         }
     }
+}
+
+
+// Read a small project note as literal selectable text, never as HTML.
+@Composable
+private fun TextPage(m: AppModel, path: String) {
+    val lang = LocalBackplaneLanguage.current
+    val url = m.web(path) ?: return
+    val got = produceState<Pair<String?, String>?>(null, url) {
+        value = withContext(Dispatchers.IO) {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 5000
+            connection.readTimeout = 15000
+            try {
+                if (connection.responseCode != 200) Pair(null, "read")
+                else connection.inputStream.use { input ->
+                    val data = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (data.size() <= 1_048_576) {
+                        val n = input.read(buffer, 0, minOf(buffer.size, 1_048_577 - data.size()))
+                        if (n < 0) break
+                        data.write(buffer, 0, n)
+                    }
+                    if (data.size() > 1_048_576) Pair(null, "size") else Pair(data.toString("UTF-8"), "")
+                }
+            } catch (e: Exception) { Pair(null, "read") }
+            finally { connection.disconnect() }
+        }
+    }.value
+    if (got == null) CircularProgressIndicator(Modifier.padding(16.dp))
+    else if (got.first == null) Text(NativeMessages.native_file_text_error(lang, got.second), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.outline)
+    else SelectionContainer { Text(got.first!!, Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), fontFamily = FontFamily.Monospace) }
 }

@@ -359,3 +359,5 @@ viewer.loading
 image.copy
 image.show
 image.share
+
+native.file.text.error

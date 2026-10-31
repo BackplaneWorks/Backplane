@@ -13701,3 +13701,6 @@ law revert_entry_is_newest:
 law revert_unarmed_is_off:
   for u: U.Ui
   {U.Ui.reverting.k(False{}, u) == False{} : Bool}
+
+law mobile_text_is_filepage:
+  {MV.View.filepage("text") == True{} : Bool}

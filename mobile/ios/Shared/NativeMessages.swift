@@ -424,6 +424,11 @@ enum NativeMessages {
     tag == "ja" ? ((arg0 == "send" ? "ハブからPDFを取得できません（12 MBを超えている可能性があります）" : (arg0 == "http" ? "ハブの応答：" + arg1 : "このPDFは表示できません"))) : ((arg0 == "send" ? "The hub could not send this PDF (it may be over 12 MB)" : (arg0 == "http" ? "The hub answered " + arg1 : "This PDF cannot be shown here")))
   }
 
+  // native.file.text.error
+  static func native_file_text_error(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? ((arg0 == "size" ? "テキストのプレビューは1 MBまでです。" : "このテキストファイルを読み込めませんでした。")) : ((arg0 == "size" ? "Text preview is limited to 1 MB." : "This text file could not be read."))
+  }
+
   // native.find.empty
   static func native_find_empty(_ tag: String) -> String {
     tag == "ja" ? ("該当なし") : ("Nothing found")

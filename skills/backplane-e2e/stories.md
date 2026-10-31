@@ -159,7 +159,8 @@ on the history bar; Play steps through; Compare shows the change marked.
 
 **S18 Files, Diff, Review** (W D A)
 Files lists the project folder; opening a board file shows it in the Board
-view. Diff on a new thread before its first turn says there are no changes
+view. Open README.md or notes.txt: it is selectable read-only text (phones
+limit previews to 1 MB); Back returns to Files. Diff on a new thread before its first turn says there are no changes
 yet (no error toast); after a turn it shows the change. Review → BOM lists
 the parts.
 

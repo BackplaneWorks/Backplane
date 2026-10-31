@@ -116,6 +116,7 @@ struct FileScreen: View {
     let file: FileView
     @State private var shown: Shown?
     @State private var pdf: PDFDocument?
+    @State private var text: String?
     // Stable failure kind; translate when drawn, so a language switch updates it.
     @State private var failed = ""
 
@@ -131,7 +132,13 @@ struct FileScreen: View {
             .padding(.horizontal)
             .padding(.vertical, 6)
             Divider()
-            if file.kind == "pdf" {
+            if file.kind == "text" {
+                if let text {
+                    ScrollView { Text(text).font(.system(.body, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
+                } else if !failed.isEmpty {
+                    Text(NativeMessages.native_file_text_error(lang, failed)).foregroundStyle(.secondary).padding(); Spacer()
+                } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+            } else if file.kind == "pdf" {
                 if let d = pdf { PDFPages(document: d) }
                 else if !failed.isEmpty { Text(NativeMessages.native_file_pdf_error(lang, failed, "")).foregroundStyle(.secondary).padding(); Spacer() }
                 else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -153,6 +160,23 @@ struct FileScreen: View {
 
     // the PDF fetched whole, then handed to PDFKit
     private func load() async {
+        text = nil
+        if file.kind == "text", let u = model.web(file.url) {
+            failed = ""
+            do {
+                let (bytes, response) = try await URLSession.shared.bytes(from: u)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { failed = "read"; return }
+                var data = Data()
+                for try await byte in bytes {
+                    if data.count == 1_048_576 { failed = "size"; return }
+                    data.append(byte)
+                }
+                try Task.checkCancellation()
+                text = String(decoding: data, as: UTF8.self)
+            } catch is CancellationError { return }
+            catch { failed = "read" }
+            return
+        }
         guard file.kind == "pdf", let u = model.web(file.url) else { return }
         pdf = nil
         failed = ""

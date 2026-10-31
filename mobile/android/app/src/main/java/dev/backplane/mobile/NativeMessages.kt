@@ -336,6 +336,10 @@ object NativeMessages {
   fun native_file_pdf_error(tag: String, arg0: String, arg1: String): String =
     if (tag == "ja") ((if (arg0 == "send") "ハブからPDFを取得できません（12 MBを超えている可能性があります）" else (if (arg0 == "http") "ハブの応答：" + arg1 else "このPDFは表示できません"))) else ((if (arg0 == "send") "The hub could not send this PDF (it may be over 12 MB)" else (if (arg0 == "http") "The hub answered " + arg1 else "This PDF cannot be shown here")))
 
+  // native.file.text.error
+  fun native_file_text_error(tag: String, arg0: String): String =
+    if (tag == "ja") ((if (arg0 == "size") "テキストのプレビューは1 MBまでです。" else "このテキストファイルを読み込めませんでした。")) else ((if (arg0 == "size") "Text preview is limited to 1 MB." else "This text file could not be read."))
+
   // native.find.empty
   fun native_find_empty(tag: String): String =
     if (tag == "ja") ("該当なし") else ("Nothing found")

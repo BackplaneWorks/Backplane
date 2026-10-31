@@ -54,9 +54,12 @@ def View.kind(+u: U.Ui) -> String:
 def View.file(+u: U.Ui) -> String:
   U.Ui.scratch(u, "@view.file:" ++ U.Ui.sel(u))
 
-# the Files tab and what it opened that is not a plot (an image, a PDF)
+# the Files tab and what it opened that is not a plot
+def View.filepage(+kind: String) -> Bool:
+  Bool.or(String.eq(kind, "text"), Bool.or(String.eq(kind, "image"), String.eq(kind, "pdf")))
+
 def View.fm(+u: U.Ui) -> Bool:
-  Bool.or(String.eq(View.kind(u), "files"), Bool.or(String.eq(View.kind(u), "image"), String.eq(View.kind(u), "pdf")))
+  Bool.or(String.eq(View.kind(u), "files"), View.filepage(View.kind(u)))
 
 # The schematic's sheet ("@view.sheet:<thread>", "" for the root) and the
 # 3D model's parts ("@view.bare" set: the board alone, the hub's kind 3)
@@ -166,8 +169,8 @@ def View.sync.u(+u: U.Ui, cmds: List<&2, U.Cmd>) -> U.Act:
 # (client.bend's Fv): the file on screen, from the owner's folder.
 def View.fv.want(+u: U.Ui) -> String:
   Bool.pick(String, String.eq(View.kind(u), "mech"), U.Fv.rel.of(U.Ui.root(u), View.part(u)),
-    Bool.pick(String, Bool.or(View.known(View.kind(u)), Bool.or(String.eq(View.kind(u), "image"), String.eq(View.kind(u), "pdf"))),
-      Bool.pick(String, Bool.or(String.eq(View.kind(u), "image"), String.eq(View.kind(u), "pdf")), U.Fv.rel.of(U.Ui.root(u), U.Fv.t(u, "view.path")),
+    Bool.pick(String, Bool.or(View.known(View.kind(u)), View.filepage(View.kind(u))),
+      Bool.pick(String, View.filepage(View.kind(u)), U.Fv.rel.of(U.Ui.root(u), U.Fv.t(u, "view.path")),
         Bool.pick(String, Nat.is_eq(HS.Hist.kind(View.src(u)), 0n), U.Fv.rel.of(U.Ui.root(u), View.src(u)), "")), ""))
 
 def View.fv(a: U.Act) -> U.Act:
@@ -237,8 +240,8 @@ def View.fm.to(a: U.Act, +slot: String, +file: String) -> U.Act:
       View.sync(U.Act{U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@view.file:" ++ U.Ui.sel(u), file), View.slot(u), slot), "@pick", ""), "@card", ""), cs})
 
 def View.fm.open(+u: U.Ui, +rel: String) -> U.Act:
-  Bool.pick(U.Act, Bool.or(String.is_empty(FM.Fm.kind(rel)), String.is_empty(U.Ui.root(u))), U.Act{u, Nil{}},
-    View.fm.to(U.Ui.act(u, "fm-open", rel), FM.Fm.kind(rel), Bool.pick(String, Bool.or(String.eq(FM.Fm.kind(rel), "image"), String.eq(FM.Fm.kind(rel), "pdf")), "", FM.Fm.abs(U.Ui.root(u), rel))))
+  Bool.pick(U.Act, Bool.or(String.is_empty(FM.Fm.preview(rel)), String.is_empty(U.Ui.root(u))), U.Act{u, Nil{}},
+    View.fm.to(U.Ui.act(u, "fm-open", rel), FM.Fm.preview(rel), Bool.pick(String, View.filepage(FM.Fm.preview(rel)), "", FM.Fm.abs(U.Ui.root(u), rel))))
 
 def View.fm.act(+u: U.Ui, +action: String, +value: String) -> U.Act:
   Bool.pick(U.Act, String.eq(action, "fm-open"), View.fm.open(u, value), View.fm.to(U.Ui.act(u, action, value), "files", ""))
@@ -999,7 +1002,7 @@ def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
   J.Json.obj([J.KV{"open", J.Str{Bool.pick(String, Bool.or(Bool.or(Bool.or(Bool.not(String.is_empty(View.want(u))), View.mech(u)), View.fm(u)), String.eq(View.kind(u), "review")), View.kind(u), "")}}, J.KV{"key", J.Str{View.want(u)}},
     J.KV{"comments", Rc.json(u)},
     J.KV{"review", Rv.json(lc, String.eq(View.kind(u), "review"), u, rb)},
-    J.KV{"files", Files.json(lc, String.eq(View.kind(u), "files"), u)}, J.KV{"file", File.json(Bool.or(String.eq(View.kind(u), "image"), String.eq(View.kind(u), "pdf")), u)},
+    J.KV{"files", Files.json(lc, String.eq(View.kind(u), "files"), u)}, J.KV{"file", File.json(View.filepage(View.kind(u)), u)},
     J.KV{"layers", J.Str{Bool.pick(String, View.mech(u), "", View.layers.at(View.kind(u), U.Ui.root(u), View.src(u)))}},
     J.KV{"hist", Hist.json(lc, U.Hs.bar.for.loc(lc, View.as_client(u), Nat.is_lt(View.hist.num(View.kind(u)), 2n)), View.as_client(u))},
     J.KV{"mech", Mech.json(lc, View.mech(u), u)},

@@ -247,7 +247,7 @@ private fun AppContent(m: AppModel) {
             BackHandler { m.act("view", "") }
             FilesScreen(m, s.thread.viewer, s.thread.viewer.files)
         }
-        s.thread != null && (s.thread.viewer.open == "image" || s.thread.viewer.open == "pdf") && s.thread.viewer.file != null -> {
+        s.thread != null && (s.thread.viewer.open == "image" || s.thread.viewer.open == "pdf" || s.thread.viewer.open == "text") && s.thread.viewer.file != null -> {
             BackHandler { m.act("fm") }
             FileScreen(m, s.thread.viewer, s.thread.viewer.file)
         }

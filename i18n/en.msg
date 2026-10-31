@@ -1368,3 +1368,4 @@ sched.help.minute = Cron minutes must be 0–59, with a positive step. Example: 
 settings.settle.idle.off = The shorter idle timer is off. Inactive threads settle after this window. They stay saved.
 sidebar.search.empty = No projects match.
 sidebar.search.clear = Clear search
+native.file.text.error = {kind, select, size {Text preview is limited to 1 MB.} other {This text file could not be read.}}

@@ -25,7 +25,7 @@ struct ViewerPresentationContent: View {
         if let token = model.visibleViewerToken(for: thread), let v = model.viewerData(for: thread) {
             Group {
                 if v.open == "files", let f = v.files { FilesScreen(model: model, viewer: v, page: f) }
-                else if v.open == "image" || v.open == "pdf", let f = v.file { FileScreen(model: model, viewer: v, file: f) }
+                else if v.open == "image" || v.open == "pdf" || v.open == "text", let f = v.file { FileScreen(model: model, viewer: v, file: f) }
                 else if v.open == "review", let page = v.review { ReviewScreen(model: model, viewer: v, page: page) }
                 else if v.open == "renders", let page = v.mech { MechScreen(model: model, viewer: v, page: page) }
                 else { PlotScreen(model: model, viewer: v, presentation: token) }

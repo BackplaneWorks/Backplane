@@ -14056,3 +14056,6 @@ def Laws.revert_entry_is_newest(e, tail):
 
 def Laws.revert_unarmed_is_off(u):
   {==}
+
+def Laws.mobile_text_is_filepage():
+  {==}
