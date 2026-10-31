@@ -626,7 +626,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .dhead .name { color: var(--text); overflow-wrap: anywhere; } .dhead .status { color: var(--faint); }
 .dhunk { display: block; padding: 2px 12px; color: var(--faint); background: var(--raise); }
 .dl { display: flex; white-space: pre; }
-.dl .no { flex: none; width: 4ch; text-align: right; color: var(--faint); padding-right: 6px; user-select: none; }
+.dl .no { flex: none; min-width: 7ch; width: max-content; text-align: right; color: var(--faint); padding-right: 6px; user-select: none; }
 .dl .sign { flex: none; width: 2ch; text-align: center; user-select: none; }
 .dl .code { flex: 1; min-width: 0; }
 .dl.add { background: var(--add-bg); padding: 0; gap: 0; border-bottom: 0; } .dl.add .sign { color: var(--ok); }
