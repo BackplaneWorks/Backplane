@@ -171,9 +171,10 @@
     "src/web/settings-menu.bend": "c4091ccb3527e23eb5b7ccfab3efd0da16508d5f6b1f42fad18b4644ac348a17",
     "src/web/sidebar-slot.bend": "1104967b7a84470cb9afcf6e1efdd911469de1cbef52c7ad34a16cad73754950",
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
+    "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "e7f52e8cc9ceda7059b4161cdc1b3ecc8d720b133f2f65a7b4793711a2decd91"
+    "src/web/view.bend": "f09f315e19f736a109bbca35cb4b5ceda32af65a1e3ea18c6e87bb39bc86d3bd"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -378,5 +379,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebase Restore the live terminal screen after a renderer reload; sidebar drafts unchanged and all 24 image checks pass"
+  "reviewNote": "Rebase Keep Unicode terminal glyphs on the cursor grid; sidebar drafts unchanged and all 24 image checks pass"
 }

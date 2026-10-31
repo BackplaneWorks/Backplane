@@ -1,4 +1,5 @@
 import Base
+import ./terminal-cells.bend as TCELL
 import ../core/view-page.bend as VP
 import ./list-windows.bend as LW
 import ../core/accounts.bend as ACCT
@@ -2253,7 +2254,7 @@ def View.runs(rs: List<&2, VT.VRun>) -> List<&2, D.Node>:
     case Nil{}:
       Nil{}
     case VT.VRun{t, +fg, +bg, bo, ul} <> rest:
-      D.El{"span", "", [D.At{"style", View.run.style(fg, bg, bo, ul)}], [D.Txt{t}]} <> View.runs(rest)
+      D.El{"span", "", [D.At{"style", View.run.style(fg, bg, bo, ul)}], TCELL.Cells.of(t)} <> View.runs(rest)
 
 def View.tlines(ls: List<&2, VT.VLine>) -> List<&2, D.Node>:
   match ls:

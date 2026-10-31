@@ -13988,6 +13988,9 @@ def Laws.terminal_scroll_bounds():
 def Laws.browser_frame_empty_ignored(page):
   {==}
 
+def Laws.terminal_unicode_cell_widths():
+  {==}
+
 def Laws.terminal_reopen_keeps_screen(v):
   {==}
 

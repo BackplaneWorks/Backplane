@@ -12,6 +12,7 @@ import ./src/core/sidebar-read.bend as SIDEREAD
 import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 import Base
+import ./src/web/terminal-cells.bend as TCELL
 import ./src/core/vt.bend as VTSNAP
 import ./src/server/term.bend as TSNAP
 import ./src/core/browser-frame.bend as BFRAME
@@ -13639,3 +13640,8 @@ law terminal_new_process_starts_blank:
   for +pid: U32
   for +v: VTSNAP.Vt
   {TSNAP.Et.shell.keep(False{}, "t", cols, rows, pid, v) == TSNAP.ETerm{"t", "", VTSNAP.Vt.new(cols, rows), True{}, "running", pid} : TSNAP.ETerm}
+
+law terminal_unicode_cell_widths:
+  {[TCELL.Cells.step(False{}, 945, TCELL.TermCells{"", Nil{}}), TCELL.Cells.step(False{}, 128512, TCELL.TermCells{"", Nil{}})] ==
+   [TCELL.TermCells{"", [DM.El{"span", "", [DM.At{"class", "term-cell"}, DM.At{"style", "display:inline-block;width:1ch"}], [DM.Txt{"α"}]}]},
+    TCELL.TermCells{"", [DM.El{"span", "", [DM.At{"class", "term-cell"}, DM.At{"style", "display:inline-block;width:2ch"}], [DM.Txt{"😀"}]}]}] : List<&2, TCELL.TermCells>}
