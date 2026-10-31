@@ -207,6 +207,9 @@ def build(args):
         run(['node','desktop/test/bub-links.cjs'],env=env)
         timings['bub_links_seconds'] = round(time.monotonic()-t,3)
         t = time.monotonic()
+        run(['node','desktop/test/bot-replies.cjs'],env=env)
+        timings['bot_replies_seconds'] = round(time.monotonic()-t,3)
+        t = time.monotonic()
         run(['node','desktop/test/catalog-images.cjs'],env=env)
         timings['catalog_images_seconds'] = round(time.monotonic()-t,3)
         record['smoked'] = True
