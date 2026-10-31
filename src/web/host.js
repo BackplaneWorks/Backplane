@@ -1479,6 +1479,8 @@ for (const ev of EVENTS) {
       document.documentElement.style.setProperty("--my", e.clientY + "px");
     }
     dispatch(action, ev === "input" ? inputValue(el) : valueOf(el));
+    // A mouse send or stop leaves the next keystroke in the message box.
+    if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) document.getElementById("composer")?.focus({ preventScroll: true });
   });
 }
 
