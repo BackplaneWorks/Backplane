@@ -107,7 +107,7 @@ async function command(o,text,label) {
     await wait(label,'repeat');snapshot(label,'repeat',tasks(7,3));
     await wait(label,'next');const next=tasks(8,3);next[4].content='Agent revised step 5';snapshot(label,'next',next);
   }else if(label==='replay'){const next=tasks(8,3);next[4].content='Agent revised step 5';snapshot(label,'initial',next);}
-  else if(label==='done')snapshot(label,'initial',tasks(2,0));
+  else if(label==='done'||label==='redo')snapshot(label,'initial',tasks(2,0));
   else if(label.startsWith('isolate'))snapshot(label,'initial',tasks(2,0));
   else if(label!=='empty')throw Error('unknown S50 label '+label);
   await wait(label,'end');
@@ -384,6 +384,17 @@ async function main() {
           await waitPage(()=>!document.querySelector('.todos-head')&&!document.querySelector('div.todo'),null,timeout);
         },'reply');
         await step('no stale list returns when the empty turn ends',()=>end('empty',a),async()=>{assert.equal(await head().count(),0);},'reply');
+        // Same thread: alpha's edited list (left open) was retired by the empty
+        // turn, so the agent's next list is its own two steps, shut, 0/2.
+        await step('same thread: next list after an empty turn starts fresh and shut',()=>send(a,'redo'),async timeout=>{
+          await until(()=>audit().some(x=>x.label==='redo'&&x.kind==='snapshot'),timeout);
+          await head().waitFor({timeout});assert.match(await head().innerText(),/0\/2/);
+          assert.equal(await head().getAttribute('aria-expanded'),'false');assert.equal(await rows().count(),0);
+        },'reply');
+        await step('same thread: the fresh list carries no earlier human edits',()=>open(),async timeout=>{
+          await waitRows([{id:'1',text:'Step 1',status:'in_progress'},{id:'2',text:'Step 2',status:'pending'}],timeout);
+        });
+        await end('redo',a);
       });
       await section('thread and bot isolation',async()=>{
         const fixtures=[{id:b,label:'isolate-thread'},{id:botIds[0],label:'isolate-bot1'},{id:botIds[1],label:'isolate-bot2'}];

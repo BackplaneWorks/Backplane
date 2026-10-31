@@ -346,7 +346,9 @@ item without losing the other edits. Running edits reach that agent as
 starting a turn, and the next turn receives it. Reload and restart the hub:
 the list and merge state survive. Another thread and another bot keep their
 own lists, even when item IDs match. An unfinished list remains after its
-turn; start the next turn without to-dos and it disappears. Complete every
+turn; start the next turn without to-dos and it disappears, and the
+agent's next list in that thread starts shut with only its own steps (no
+earlier human edits). Complete every
 item during a turn: the open list collapses to "done", then clears when the
 turn ends. At 420 px the cell sits in the second row; open rows and every
 editing control fit and work without horizontal overflow. Time each action
