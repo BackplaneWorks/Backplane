@@ -13276,3 +13276,7 @@ law room_draft_key_is_scoped:
 
 law room_draft_read_is_scoped:
   {U.Bots.field(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.init(0n), "@room", "room-one"), "@room.draft:room-one", "draft 日本語"), "rpost") == "draft 日本語" : String}
+
+law routine_invalid_keeps_form:
+  for +u: U.Ui
+  {U.Act.ui(U.Bots.routine.save.k(True{}, u)) == u : U.Ui}

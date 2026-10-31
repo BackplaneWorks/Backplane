@@ -8414,10 +8414,20 @@ def Routine.key(+u: Ui, +text: String) -> String:
 def Routine.prompt(+l: I.Loc, +u: Ui) -> String:
   Bool.pick(String, String.eq(Routine.key(u, Bots.field(u, "ocron")), "at"), MSG.T.web.routine.prompt.once(l), MSG.T.web.routine.prompt(l))
 
-def Bots.routine.save(+u: Ui) -> Act:
+def Bots.routine.save.valid(+u: Ui) -> Act:
   Ui.rpc(Bots.fields.clear(Ui.scratch_set(u, "@onew", ""), ["oid", "oname", "ocron", "oprompt"]), "bots.routine",
     [J.KV{"bot", J.Str{Bots.cur(u)}}, J.KV{"routine", J.Str{Bots.field(u, "oid")}}, J.KV{"name", J.Str{Bool.pick(String, String.is_empty(Bots.field(u, "oname")), "routine", Bots.field(u, "oname"))}},
      J.KV{Routine.key(u, String.trim(Bots.field(u, "ocron"))), J.Str{String.trim(Bots.field(u, "ocron"))}}, J.KV{"prompt", J.Str{Bots.field(u, "oprompt")}}, J.KV{"on", J.Flag{True{}}}])
+
+# The preview and Save use the same parser. A bad schedule keeps the
+# person's name and prompt, with the keyboard where it can be corrected.
+def Bots.routine.save.k(bad: Bool, u: Ui) -> Act:
+  match bad:
+    case True{}: Act{u, [Focus{"routine-cron"}]}
+    case False{}: Bots.routine.save.valid(u)
+
+def Bots.routine.save(+u: Ui) -> Act:
+  Bots.routine.save.k(Bool.or(String.is_empty(String.trim(Bots.field(u, "ocron"))), Routine.hint.bad(u)), u)
 
 def Bots.routine.of(+u: Ui, +id: String) -> BT.Routine:
   BT.World.routine(M.State.bots(Ui.state.of(u)), id)
