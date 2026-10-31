@@ -831,6 +831,7 @@ function render() {
   ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
   panes();
+  attachmentPreviews();
   previewTextFiles();
   composerGeometry();
   earlierAsked = false;
@@ -873,6 +874,7 @@ function laterPart() {
     if (!c || !c.__v) { render(); return; }
     const t0 = PERF ? pnow() : 0;
     patch(c, App.composer(ui));
+    attachmentPreviews();
     const a = document.getElementById("asks");
     if (a && a.__v) patch(a, App.asks(ui));
     if (PERF) PERF.part.push(pnow() - t0);
@@ -1390,6 +1392,17 @@ document.addEventListener("drop", (e) => {
 // name first: "<key>\t..."
 const forKey = (el) => (el.getAttribute("data-for") ? el.getAttribute("data-for") + "\t" : "");
 
+// A later hub frame restores the image's class attribute. Keep the load
+// result visible after that patch too; a failed cached image fires once.
+function attachmentPreviews() {
+  for (const img of document.querySelectorAll('img.attachment-preview')) {
+    if (img.complete) img.classList.toggle('failed', img.naturalWidth === 0);
+  }
+}
+
+document.addEventListener("load", e => {
+  if (e.target.matches?.("img.attachment-preview")) e.target.classList.remove("failed");
+}, true);
 document.addEventListener("error", e => {
   if (e.target.matches?.("img.attachment-preview")) {
     e.target.classList.add("failed");e.target.parentElement.setAttribute("title", "Image preview unavailable; remove the attachment and try again.");

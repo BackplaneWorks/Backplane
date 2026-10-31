@@ -85,7 +85,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "5712fc570ea64db86a69a09f2fff168713a5f3a315aa4c194e3a02cd9b8ffb6d",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "c81a424093d73452a30a799161cea20f715a3f5fabf96071283cda1f96578220",
+    "src/core/msgs.bend": "b15be19104dbcac8bb4d229629892370605abb0f9e804605ca84effbed72b08e",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "becbc69fc22037e283b1e25142b6eb05463ad9a2e9b5ffa7a59c9af547e36aef"
+    "src/web/view.bend": "3dcfc7b5442c999c5b7633794bbaf2b73138e4aede08ea9e7c9748ed1b4a1e8a"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Link each fork to its source conversation; sidebar draft rendering unchanged"
+  "reviewNote": "Explain when an attachment image cannot be previewed; sidebar draft rendering unchanged"
 }

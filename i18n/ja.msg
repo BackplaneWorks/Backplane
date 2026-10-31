@@ -778,6 +778,7 @@ model.effort.tip = 推論の強さ：{name}
 subagents.lock.cancel = ロック要求を{action, select, release {解除} other {キャンセル}}
 settings.usage.label = 使用状況：{label}
 settings.days.label = {count}日後に完了へ移動{plural, select, other {}}
+composer.preview.unavailable = 画像をプレビューできません
 composer.detach = {path}を削除
 web.voice.heard = 認識した語句：「{word}」{kind, select, many {（1／{count}）} other {}}
 viewer.layer.toggle = {name}の表示を切り替え

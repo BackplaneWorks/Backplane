@@ -758,6 +758,7 @@ model.effort.tip = Reasoning effort: {name}
 subagents.lock.cancel = {action, select, release {Release this lock request} other {Cancel this lock request}}
 settings.usage.label = Usage: {label}
 settings.days.label = Settle after {count} {plural, select, one {day} other {days}}
+composer.preview.unavailable = Cannot preview this image
 composer.detach = Remove {path}
 web.voice.heard = Heard “{word}”{kind, select, many { (1 of {count})} other {}}
 viewer.layer.toggle = Show or hide {name}

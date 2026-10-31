@@ -1266,7 +1266,9 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .composer .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .composer .chip.image { display: flex; flex-direction: column; gap: 4px; max-width: 132px; white-space: normal; overflow-wrap: anywhere; }
 .attachment-preview { width: 96px; height: 72px; object-fit: contain; background: var(--bg); flex: none; }
-.attachment-preview.failed { visibility: hidden; }
+.attachment-preview.failed { display: none; }
+.attachment-error { display: none; }
+.attachment-preview.failed + .attachment-error { display: block; color: var(--dim); white-space: normal; }
 
 /* Usage keeps the same square controls, colours and type as Settings. */
 .usage-dashboard { min-width: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }

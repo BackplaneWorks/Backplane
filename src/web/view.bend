@@ -2703,10 +2703,10 @@ def View.revert.loc(on: Bool, +lc: I.Loc) -> List<&2, D.Node>:
           D.Dom.button("danger", "revert", "confirm", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
           D.Dom.button("", "revert-no", "", MSG.T.common.cancel(lc), MSG.T.common.cancel(lc))]}]}]
 
-def View.pending.image(image: Bool, +p: String) -> List<&2, D.Node>:
+def View.pending.image.loc(+lc: I.Loc, image: Bool, +p: String) -> List<&2, D.Node>:
   match image:
     case True{}:
-      [D.El{"img", "", [D.At{"class", "attachment-preview"}, D.At{"src", IM.Img.url(p)}, D.At{"alt", AT.Att.label(p)}, D.At{"width", "96"}, D.At{"height", "72"}], Nil{}}]
+      [D.El{"img", "", [D.At{"class", "attachment-preview"}, D.At{"src", IM.Img.url(p)}, D.At{"alt", AT.Att.label(p)}, D.At{"width", "96"}, D.At{"height", "72"}], Nil{}}, D.Dom.span("attachment-error", MSG.T.composer.preview.unavailable(lc))]
     case False{}:
       Nil{}
 
@@ -2716,7 +2716,7 @@ def View.pending.loc(+lc: I.Loc, ps: List<&2, String>) -> List<&2, D.Node>:
       Nil{}
     case +p <> t:
       D.El{"button", "", [D.At{"class", Bool.pick(String, AT.Att.image(p), "chip image", "chip")}, D.At{"title", MSG.T.composer.detach(lc, p)}, D.At{"data-value", p}, D.On{"click", "detach"}],
-        D.Dom.cat(View.pending.image(AT.Att.image(p), p), [D.Txt{AT.Att.label(p) ++ " ×"}])} <> View.pending.loc(lc, t)
+        D.Dom.cat(View.pending.image.loc(lc, AT.Att.image(p), p), [D.Txt{AT.Att.label(p) ++ " ×"}])} <> View.pending.loc(lc, t)
 
 # the draw board's button, beside Attach: host.js opens the board (draw.js)
 # with these words, and its picture is attached as a picked file is
