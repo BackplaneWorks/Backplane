@@ -488,6 +488,37 @@ window.addEventListener("pagehide", () => {
     else localStorage.removeItem("backplane-settings");
   } catch {}
 });
+// A new view actor has no form edits. Keep the visible ordinary fields in
+// memory across a dropped connection, then replay their existing actions.
+// Sealed fields have no data-bfield and never enter this snapshot.
+let settingsRecovery = null, settingsRecovering = null;
+function keepSettingsRecovery() {
+  const content = document.getElementById("settings-content");
+  if (!content || settingsRecovery || settingsRecovering) return;
+  settingsRecovery = { page: content.dataset.settingsPage || "", thread: currentSession().sel,
+    fields: [...content.querySelectorAll("[data-bfield]")].map(el => [el.dataset.bfield, el.value]) };
+}
+async function recoverSettings(controller) {
+  if (!settingsRecovery || settingsRecovering || !controller?.ready) return;
+  const saved = settingsRecovery;
+  if (!currentSession().open?.settings || saved.thread !== currentSession().sel) { settingsRecovery = null;return; }
+  saved.attempt = controller;
+  settingsRecovering = controller;
+  try {
+    if (saved.page && !await controller.perform("settings-page", saved.page)) return;
+    for (const [name, value] of saved.fields) {
+      if (thin !== controller || !controller.ready) return;
+      if (!await controller.perform("bfield", name + "\u001f" + value)) return;
+    }
+    settingsRecovery = null;
+  } finally { settingsRecovering = null;later(); }
+}
+document.addEventListener("input", e => {
+  const el = e.target.closest?.("#settings-content [data-bfield]");
+  if (!el || !settingsRecovery) return;
+  const field = settingsRecovery.fields.find(([name]) => name === el.dataset.bfield);
+  if (field) field[1] = el.value;
+});
 let socket = null;
 const viewerRpc = new ViewerRpc(request => {
   if (!socket || socket.readyState !== 1) throw Error("Connect to the hub to read saved component metadata.");
@@ -789,6 +820,8 @@ function render() {
   queued = false;
   // Settings categories run through the normal hub action after its first
   // view; do not flash the category index while that action is on its way.
+  if (remoteReady && settingsRecovery && settingsRecovery.attempt !== thin) { void recoverSettings(thin);return; }
+  if (settingsRecovering === thin && thin) return;
   if (remoteReady && settingsRestorePage !== null) {
     const page = settingsRestorePage;settingsRestorePage = null;
     if (currentSession().open?.settings && page) { dispatch("settings-page", page);return; }
@@ -2456,6 +2489,7 @@ async function startThin(again = false, reason = "initial") {
     trace("thin-disconnect", { reason: typeof event === "string" ? event : event?.type || "connection-ended", code: event?.code });
     ended = true;
     refocusKeep();
+    keepSettingsRecovery();
     bubMoves.disconnect(location.origin);
     terminalOutput.clear();
     checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();ViewerTools.reset();viewerRpc.reset();
