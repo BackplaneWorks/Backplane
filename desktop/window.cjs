@@ -2,10 +2,18 @@
 function applicationMenu(Menu, platform) {
   return platform === 'darwin' ? Menu.buildFromTemplate([{label:'Backplane', submenu:[
     {role:'about'}, {type:'separator'}, {role:'hide'}, {role:'hideOthers'}, {role:'unhide'},
+    {role:'toggleDevTools', visible:false, accelerator:'Command+Shift+I', acceleratorWorksWhenHidden:true},
     {type:'separator'}, {role:'quit'}
   ]}]) : null;
 }
 function installShortcuts(window, electron, browser = () => null, platform = process.platform, terminalFocus = () => false) {
+  // DevTools consumes input before before-input-event. A hidden window menu
+  // keeps its toggle native even while the tools have the keyboard.
+  if (platform !== 'darwin' && window.setMenu) {
+    window.setMenu(electron.Menu.buildFromTemplate([{label:'Developer Tools', visible:false,
+      accelerator:'Control+Shift+I', acceleratorWorksWhenHidden:true, click:() => window.webContents.toggleDevTools()}]));
+    window.setAutoHideMenuBar(false);window.setMenuBarVisibility(false);
+  }
   const bind = contents => contents.on('before-input-event', (event, input) => {
     if (contents !== window.webContents && contents.getOwnerBrowserWindow?.() !== window) return;
     if (input.type !== 'keyDown' || input.alt || input.isComposing) return;

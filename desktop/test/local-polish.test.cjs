@@ -31,6 +31,13 @@ test('packaged icon formats contain the established Backplane artwork',()=>{
   const windows=fs.readFileSync(ico),mac=fs.readFileSync(icns);assert.equal(windows.readUInt16LE(2),1);assert.equal(mac.subarray(0,4).toString(),'icns');assert.equal(mac.readUInt32BE(4),mac.length);
   const {appFiles}=require('../prepare-components.cjs');const files=appFiles(path.join(__dirname,'..'));for(const f of ['window.cjs','branding.cjs','backplane.png','backplane.ico','backplane.icns'])assert(files.includes(f),f);
 });
+test('DevTools has a window-local native toggle while the menu bar stays hidden, including on Alt',()=>{
+  let toggles=0,menu,autoHide,visible;
+  const win={webContents:{on(){},toggleDevTools:()=>toggles++},setMenu:m=>menu=m,setAutoHideMenuBar:v=>autoHide=v,setMenuBarVisibility:v=>visible=v};
+  installShortcuts(win,{Menu:{buildFromTemplate:x=>x},app:{},webContents:{}},undefined,'linux');
+  assert.equal(menu.length,1);assert.equal(menu[0].accelerator,'Control+Shift+I');assert.equal(menu[0].visible,false);assert.equal(menu[0].acceleratorWorksWhenHidden,true);
+  menu[0].click();assert.equal(toggles,1);assert.equal(autoHide,false);assert.equal(visible,false);
+});
 test('warm switching is synchronous and bounded, and cannot cross target, epoch, language, identity or bot tab',async()=>{
   const {ViewTransition}=await import('../../src/web/view-transition.js');const cache=new ViewTransition({limit:2,bytes:1000});
   const scope={origin:'https://test',identity:'private',language:'en',epoch:'actual',selected:'bub-thread',target:{kind:'bot',id:'bub'},route:{bot:'bub',tab:'chat'}};
