@@ -13649,3 +13649,9 @@ law terminal_unicode_cell_widths:
 # A model choice replaces the account picker, so Escape has one picker to close.
 law model_picker_replaces_accounts:
   {U.Ui.flag(U.Act.ui(U.Models.opened.k(True{}, False{}, U.Ui.flag_on(U.Ui.init(0n), "accounts"), Nil{})), "accounts") == False{} : Bool}
+
+# A report's detail budget does not change its total or hide omitted rows.
+law checks_detail_cap:
+  {CHK.Checks.cap() == 4n : Nat}
+law checks_omitted_visible:
+  {CHK.Ct.table.fin(CHK.Rows{Nil{}, 0n, 185n}) == "\n_185 more not shown_\n" : String}

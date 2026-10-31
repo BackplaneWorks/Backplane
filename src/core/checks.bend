@@ -599,18 +599,29 @@ def Checks.gate.all(+fs: List<&2, Finding>, tasks: List<&2, Task>, runs: List<&2
 # Report
 # ------
 
-# rows shown per source before "N more"
+# Keep the rendered tables inside the hub's 256 KiB view envelope. Counts
+# and the release gate still use every finding, including the omitted rows.
 def Checks.cap() -> Nat:
-  200n
+  4n
 
 # a table cell: no pipes, no line breaks
 def Ct.esc(+s: String) -> String:
   String.join(String.split(String.join(String.split(String.join(String.split(s, '\n'), " "), '\r'), ""), '|'), "\\|")
 
+# A checker can put an entire design or net list in one description. Mark
+# shortened cells instead of letting a single finding overflow the view.
+def Ct.cell.k(long: Bool, +s: String) -> String:
+  match long:
+    case True{}: Ct.esc(String.take(s, 240n)) ++ "…"
+    case False{}: Ct.esc(s)
+
+def Ct.cell(+s: String) -> String:
+  Ct.cell.k(Nat.is_gt(String.length(String.take(s, 241n)), 240n), s)
+
 def Ct.row(f: Finding) -> String:
   match f:
     case Finding{_, +sev, +kind, +text, +place, _, _, _}:
-      "| " ++ Ct.esc(sev) ++ " | " ++ Ct.esc(kind) ++ " | " ++ Ct.esc(place) ++ " | " ++ Ct.esc(text) ++ " |\n"
+      "| " ++ Ct.cell(sev) ++ " | " ++ Ct.cell(kind) ++ " | " ++ Ct.cell(place) ++ " | " ++ Ct.cell(text) ++ " |\n"
 
 def Ct.src(f: Finding) -> String:
   match f:
@@ -732,7 +743,7 @@ def Ct.runs.k(+rs: List<&2, Run>) -> String:
     case _:
       "\n## Custom checks\n\n| Check | Result | Output |\n|---|---|---|\n" ++ Ct.runs(rs)
 
-# the report: one summary line, a table per source with findings (200 rows at
+# the report: one summary line, a table per source with findings (4 rows at
 # most, then "N more"), the checklist, the custom checks' results
 def Checks.md(+fs: List<&2, Finding>, tasks: List<&2, Task>, runs: List<&2, Run>) -> String:
   "**Design checks:** " ++ Checks.line(fs) ++ "\n" ++ Ct.sections(Checks.sources(), fs) ++ Ct.checklist.k(tasks) ++ Ct.runs.k(runs)

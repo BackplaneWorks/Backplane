@@ -14014,3 +14014,8 @@ def Laws.terminal_empty_input_keeps_view(u):
 
 def Laws.model_picker_replaces_accounts():
   {==}
+
+def Laws.checks_detail_cap():
+  {==}
+def Laws.checks_omitted_visible():
+  {==}
