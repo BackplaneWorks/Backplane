@@ -40,7 +40,7 @@ let app,page;const start=performance.now(),navigation=[];
  assert.equal(await page.locator('a[href^="javascript:"],a[href^="unknown:"]').count(),0);
  await page.screenshot({path:path.join(out,'bub-chat.png')});
  for(let i=0;i<ids.length;i++){
-  const a=page.locator(`[data-id="item_4-435337"] a[data-ref="backplane://thread/${ids[i]}"]`);
+  const a=page.locator(`[data-id="item_4-435337"] .body a[data-ref="backplane://thread/${ids[i]}"]`);
   assert.equal(await a.getAttribute('href'),'backplane://thread/'+ids[i]);assert.equal(await a.innerText(),names[i]);
   await a.click();await ready(ids[i]);navigation.push(ids[i]);
   if(i===0)assert.equal(await page.locator('[data-id="normal-list"] li strong a.ref').count(),3);

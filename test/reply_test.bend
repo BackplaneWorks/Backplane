@@ -167,6 +167,7 @@ def main() -> IO(Unit):
     # the client: Reply keeps the message, Send carries it and forgets it
     +u1 : U.Ui = ui.of(act(ui0(), "reply-to", "m-bot2"))
     C.Check.str("reply kept", U.Rpl.of(u1) ++ " | " ++ U.Rpl.label(u1), "m-bot2 | First line of the plan")
+    C.Check.str("composer chip", shows(VW.View.rpl.chip(I.En{}, u1)), "<div class=reply-chip><span class=label>Replying to:</span><a class=rto href=# data-value=m-bot2 onclick=hist-jump>First line of the plan</a><button class=reply-drop title=Cancel reply aria-label=Cancel reply onclick=reply-drop>×</button></div>")
     C.Check.str("reply to nothing", U.Rpl.of(ui.of(act(ui0(), "reply-to", "nope"))), "")
     C.Check.str("reply dropped", U.Rpl.of(ui.of(act(u1, "reply-drop", ""))), "")
     +sent : U.Act = act(ui.of(U.Ui.draft(u1, "yes, go")), "send", "")

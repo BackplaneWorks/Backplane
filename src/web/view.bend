@@ -3527,7 +3527,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         rd, [View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]]))
 
 def View.thread.h(+lc: I.Loc, +u: U.Ui, +t: M.Thread, hd: List<&2, D.Node>) -> D.Node:
-  View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))), View.mic.of(u, U.Ui.sel(u)), Nil{}, View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
+  View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u)))), View.mic.of(u, U.Ui.sel(u)), Nil{}, View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
 
 def View.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> D.Node:
   View.thread.h(lc, u, t, Nil{})
