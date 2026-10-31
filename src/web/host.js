@@ -1675,6 +1675,9 @@ document.addEventListener("keydown", (e) => {
   if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || e.metaKey) return;
   const field = e.target.closest?.("[data-keys]");
   if (field) {
+    // Clipboard chords stay native; forwarding Ctrl+V quotes the shell's
+    // next key instead of letting the paste event carry the clipboard.
+    if (e.ctrlKey && !e.altKey && (e.key.toLowerCase() === "v" || e.shiftKey && e.key.toLowerCase() === "c")) return;
     const mods = (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 4 : 0) | (e.altKey ? 8 : 0);
     if (dispatch(field.getAttribute("data-keys"), forKey(field) + e.key + "\t" + mods)) e.preventDefault();
   }

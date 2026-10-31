@@ -86,6 +86,13 @@ export function installFloatingTerminal({ dispatch, document: doc = document, wi
     if (!drag || !panel || event.pointerId !== drag.id) return;
     put('left', `${event.clientX - drag.x}px`);put('top', `${event.clientY - drag.y}px`);fit();
   });
+  // Leave a drag's native text selection alone; a plain click returns
+  // typing to the hidden PTY field without covering its output.
+  doc.addEventListener('click', event => {
+    const screen = event.target.closest?.('.screen');
+    if (!screen || event.target.closest?.('button,a') || !win.getSelection()?.isCollapsed) return;
+    screen.querySelector('[data-keys]')?.focus({ preventScroll: true });
+  });
   const done = event => { if (drag && event.pointerId === drag.id) { drag.handle.releasePointerCapture(drag.id);drag = null; } };
   doc.addEventListener('pointerup', done);doc.addEventListener('pointercancel', done);
   win.addEventListener('resize', () => { fit();measure(); });

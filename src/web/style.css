@@ -589,7 +589,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .screen { position: relative; flex: 1; overflow: auto; padding: 4px 12px; font: 12px/17px var(--mono); white-space: pre; min-height: 0; }
 .screen .tl { height: 17px; }
 .screen .cur { position: absolute; width: 1ch; height: 17px; background: var(--accent); opacity: 0.55; margin-left: 12px; margin-top: 4px; pointer-events: none; }
-.term-in { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; resize: none; border: 0; padding: 0; background: transparent; color: transparent; caret-color: transparent; cursor: text; }
+.term-in { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; resize: none; border: 0; padding: 0; background: transparent; color: transparent; caret-color: transparent; cursor: text; }
 .screen:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
 .emb { margin: 8px 0; max-width: 100%; }
 .emb-head { display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); padding: 2px 0 4px; }

@@ -347,7 +347,7 @@ def WS.terminal(on: Bool, +u: U.Ui, screen: D.Node) -> List<&2, D.Node>:
         D.El{"header", "", [D.At{"class", "floating-terminal-handle"}], [D.El{"span", "", [D.At{"class", "floating-terminal-title"}],
           [D.Txt{"Terminal · " ++ U.Ui.scratch(u, "@terminal.title")}]}, D.Dom.button("", "ws-term-hide", "", "Hide terminal; shell keeps running · Ctrl+J · Shift+Esc", "Hide")]},
         D.El{"div", "", [D.At{"class", "floating-terminal-path"}, D.At{"title", U.Ui.scratch(u, "@terminal.cwd")}], [D.Txt{U.Ui.scratch(u, "@terminal.cwd")}]}, screen,
-        D.El{"footer", "", Nil{}, [D.Txt{"Interactive shell · Hide keeps the session · type exit to end · drag to move, resize from corner"}]}]}]
+        D.El{"footer", "", Nil{}, [D.Txt{"Interactive shell · Ctrl+Shift+C copy · Ctrl+Shift+V paste · Hide keeps the session · type exit to end · drag to move, resize from corner"}]}]}]
 
 def WS.view(+u: U.Ui, base: D.Node, screen: D.Node) -> D.Node:
   D.El{"div", "workspace-root", [D.At{"class", "workspace-root"}], List.concat(&2, D.Node,

@@ -377,5 +377,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebase Let the terminal scroll through its retained output; sidebar drafts unchanged and all 24 image checks pass"
+  "reviewNote": "Rebase Let terminal output be selected and use native clipboard paste; sidebar drafts unchanged and all 24 image checks pass"
 }
