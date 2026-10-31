@@ -36,6 +36,12 @@ try {
  assert.equal(one.asset.bytes,bytes.length);assert.equal(one.asset.sha256,digest(bytes));assert.equal(one.asset.orientation,'gltf-y-up');assert.equal(one.asset.revision,originalStat);
  const lookup=call('lookup',one.asset.sha256);assert.equal(lookup.size,bytes.length);assert.deepEqual(fs.readFileSync(lookup.path),bytes,'original authored metadata/binary bytes preserved');assert.equal(revision(source),originalStat,'source unchanged');assert.equal(fs.statSync(lookup.path).mode&0o222,0);assert.equal(fs.statSync(join(cache,'backplane-bend/render-assets')).mode&0o077,0);
  const firstRevision=revision(lookup.path),again=publish();assert.equal(again.asset.sha256,one.asset.sha256);assert.equal(revision(lookup.path),firstRevision,'cache hit does not overwrite immutable file');
+ const memo=(k='glb',rev=revision(source))=>effects.get('RenderAssetFx.memo')(project,k,rev);
+ assert.deepEqual(JSON.parse(memo()).asset,again.asset,'a published revision is answered from the memo');
+ assert.equal(memo('mech'),'','another kind misses');assert.equal(memo('glb',''),'','no revision misses');assert.equal(memo('glb','0:0:0:0:0:0:0'),'','another revision misses');
+ assert.equal(effects.get('RenderAssetFx.memo')(outside,'glb',revision(source)),'','another project misses');
+ {const cached=join(cache,'backplane-bend','render-assets',again.asset.sha256+'.glb');fs.chmodSync(cached,0o644);assert.equal(memo(),'','a writable cached copy misses');fs.chmodSync(cached,0o444);assert.ok(memo());}
+ {const before=revision(source);fs.utimesSync(source,new Date(),new Date(Date.now()+5000));assert.notEqual(revision(source),before);assert.equal(memo('glb',before),'','a source no longer at the revision misses');assert.equal(memo(),'','its new revision was never published');}
  const stepped=glb({extras:{unit:'mm',up:'Z'}},2);fs.writeFileSync(exported,stepped);const b=publish(step,exported,'mech');assert.equal(b.asset.orientation,'step-z-up-mm');assert.equal(b.asset.sha256,digest(stepped));
  for(const id of ['../source.glb','A'.repeat(64),'0'.repeat(63),one.asset.sha256+'.glb'])assert(call('lookup',id).error);
  assert(call('lookup','f'.repeat(64)).error,'missing id has no arbitrary path fallback');

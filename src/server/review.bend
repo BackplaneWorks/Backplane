@@ -743,9 +743,24 @@ def RvJob.components(+cwd: String, spec: String) -> IO(Res):
   +o = Maybe.default(&2, J.Json, J.Json.parse(spec), J.Null{})
   IO.bind(P.Ran, Res, Rvc.run(["--review", "components-page", cwd, Nat.show(J.Json.get_nat(o, "offset", 0n)), J.Json.get_str(o, "sourceRevision", ""), J.Json.get_str(o, "schematicRevision", "")]), r => IO.pure(Res, RvJob.components.done(r)))
 
-def RvJob.renderAsset(+cwd: String, path: String, +spec: String) -> IO(Res):
+# a warm request for an asset already published at this exact revision is
+# answered here (RenderAssetFx.memo re-checks the source's stamp and the
+# cached copy); anything else starts the child, which exports and publishes
+def RvJob.renderAsset.k(miss: Bool, +hit: String, +cwd: String, +path: String, +kind: String, +revision: String) -> IO(Res):
+  match miss:
+    case True{}:
+      IO.bind(P.Ran, Res, Rvc.run(["--review", "renderasset", cwd, path, kind, revision]), r => IO.pure(Res, RvJob.components.done(r)))
+    case False{}:
+      IO.pure(Res, RvJob.components.done(P.Ran{0, hit}))
+
+def RvJob.renderAsset.at(+hit: String, +cwd: String, +path: String, +kind: String, +revision: String) -> IO(Res):
+  RvJob.renderAsset.k(String.is_empty(hit), hit, cwd, path, kind, revision)
+
+def RvJob.renderAsset(+cwd: String, +path: String, +spec: String) -> IO(Res):
   +o = Maybe.default(&2, J.Json, J.Json.parse(spec), J.Null{})
-  IO.bind(P.Ran, Res, Rvc.run(["--review", "renderasset", cwd, path, J.Json.get_str(o, "kind", "2"), J.Json.get_str(o, "revision", "")]), r => IO.pure(Res, RvJob.components.done(r)))
+  +kind = J.Json.get_str(o, "kind", "2")
+  +revision = J.Json.get_str(o, "revision", "")
+  IO.bind(String, Res, RA.RenderAssetFx.memo(cwd, kind, revision), hit => RvJob.renderAsset.at(hit, cwd, path, kind, revision))
 
 def RvJob.go(i: Nat, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Res):
   match i:
