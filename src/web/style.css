@@ -534,7 +534,11 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .composer-foot .attach { margin-left: auto; margin-right: 8px; border: 1px solid var(--line); background: var(--raise); padding: 3px 9px; cursor: pointer; color: var(--dim); }
 .composer-foot .attach:hover { color: var(--text); border-color: var(--faint); }
-.composer-foot .attach input { display: none; }
+/* the file field stays in the Tab order (Enter or Space opens the
+   picker) but out of sight: its paperclip shows the focus, as a button
+   does */
+.composer-foot .attach input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); }
+.composer-foot .attach:has(> input:focus-visible) { outline: -webkit-focus-ring-color auto 1px; }
 
 /* Terminal */
 .term-pane { flex: none; height: 40vh; display: flex; flex-direction: column; border-top: 1px solid var(--line); min-height: 0; }

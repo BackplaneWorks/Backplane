@@ -3019,7 +3019,7 @@ def View.composer.p(+lc: I.Loc, +draft: String, +send: String, +act: String, +pr
     D.El{"div", "", [D.At{"class", "composer-foot"}], List.append(&2, D.Node, chip, [
       View.draw.loc(lc),
       D.El{"label", "", [D.At{"class", "attach"}, D.At{"title", MSG.T.composer.attach.tip(lc)}], [WI.WIcon.svg("paperclip", 16),
-        D.El{"input", "attach-file", [D.At{"type", "file"}, D.At{"multiple", ""}, D.At{"data-attach", "attach"}], Nil{}}]},
+        D.El{"input", "attach-file", [D.At{"type", "file"}, D.At{"multiple", ""}, D.At{"aria-label", MSG.T.composer.attach.tip(lc)}, D.At{"data-attach", "attach"}], Nil{}}]},
       D.El{"span", "", [D.At{"class", "foot-end"}], D.Dom.cat(tk, [View.mic.loc(lc, mic),
         View.send.loc(lc, act, send)])}])}])))))}
 
