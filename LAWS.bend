@@ -13251,3 +13251,23 @@ law todos_retire_shuts:
 law todos_retire_shuts_unselected:
   {U.Todos.open(U.Ui.infos(U.Ui.fold([M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 1n}, M.TurnChanged{"t", M.Running{}, 2n}, M.TurnChanged{"t", M.Completed{}, 3n}],
       U.Ui.info_set(U.Ui.init(0n), "fold:todos:t", "1"))), "t") == False{} : Bool}
+
+# The thin lane adopts whole states: alpha's open list, then (between two
+# renders) its end, a turn without to-dos that retires it, and a new list.
+def TodoGen.alpha() -> M.State:
+  M.State.replay([M.TurnChanged{"t", M.Running{}, 1n}, M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 2n}], M.State.empty())
+
+def TodoGen.next() -> M.State:
+  M.State.replay([M.TurnChanged{"t", M.Completed{}, 3n}, M.TurnChanged{"t", M.Running{}, 4n}, M.TurnChanged{"t", M.Completed{}, 5n},
+    M.TurnChanged{"t", M.Running{}, 6n}, M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"b\",\"status\":\"pending\"},{\"id\":\"2\",\"text\":\"c\",\"status\":\"pending\"}]", 7n}], TodoGen.alpha())
+
+def TodoGen.opened() -> U.Ui:
+  U.Ui.info_set(U.Ui.adopt.raw(U.Ui.select.nav(U.Ui.init(0n), "t"), TodoGen.alpha()), "fold:todos:t", "1")
+
+# adopting that whole state shuts the list the person had open
+law todos_adopt_whole_retire_shuts:
+  {U.Todos.open(U.Ui.infos(U.Ui.adopt.raw(TodoGen.opened(), TodoGen.next())), "t") == False{} : Bool}
+
+# and the person's own open click on the new list then holds
+law todos_adopt_reopen_holds:
+  {U.Todos.open(U.Ui.infos(U.Ui.adopt.raw(U.Ui.info_set(U.Ui.adopt.raw(TodoGen.opened(), TodoGen.next()), "fold:todos:t", "1"), TodoGen.next())), "t") == True{} : Bool}
