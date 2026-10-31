@@ -41,8 +41,9 @@ type RK is Data:
 # (a different number in meta.codec: the store is made again).
 # Version 5 also repairs TurnUsage record coverage: daily dimensions,
 # their first accepted turn, and the thread's last turn must survive boot.
+# Version 6 rebuilds term postings with Unicode-normalized search keys.
 def Sdb.codec() -> Nat:
-  5n
+  6n
 
 def Sdb.schema() -> String:
   String.join([

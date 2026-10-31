@@ -1,4 +1,5 @@
 import Base
+import ./search-fold.bend as SF
 import ./model.bend as M
 import ./mail.bend as ML
 
@@ -136,7 +137,7 @@ def Words.go(s: String, ws: WordState) -> Map<&2, Bool>:
     case SCon{h, tail} WordState{w, n, ts}: Words.go(tail, Words.at(Words.code(Char.to_lower(h)), w, n, ts))
 
 def Words.of(s: String) -> Map<&2, Bool>:
-  Words.go(s, WordState{"", 0n, Map.new(&2, Bool)})
+  Words.go(SF.Fold.text(s), WordState{"", 0n, Map.new(&2, Bool)})
 
 def Orders.get.k(p: Map<&2, ML.Order> & ML.Order) -> ML.Order:
   (_, o) = p

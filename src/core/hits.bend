@@ -1,4 +1,5 @@
 import Base
+import ./search-fold.bend as SF
 import ./model.bend as M
 import ./thin.bend as T
 import ./stamp.bend as STP
@@ -59,7 +60,7 @@ def Snip.word(hit: Bool, +c: Char, +pre: String, +word: String, +left: Nat) -> S
 def Snip.read(letter: Bool, +c: Char, +terms: Map<&2, Bool>, +pre: String, +word: String, +low: String, +left: Nat) -> SnipWalk:
   match letter:
     case True{}: SnipRead{pre, SCon{c, word}, SCon{Chr{Snip.lower(c)}, low}, left}
-    case False{}: Snip.word(T.Word.has(terms, String.reverse(low)), c, pre, word, left)
+    case False{}: Snip.word(T.Word.has(terms, SF.Fold.text(String.reverse(low))), c, pre, word, left)
 
 def Snip.take(+c: Char, +pre: String, +word: String, +post: String, left: Nat) -> SnipWalk:
   match left:
@@ -84,7 +85,7 @@ def Snip.go(s: String, +terms: Map<&2, Bool>, w: SnipWalk) -> SnipWalk:
   match s w:
     case _ SnipDone{pre, word, post, cut}: SnipDone{pre, word, post, cut}
     case _ SnipMiss{}: SnipMiss{}
-    case SNil{} SnipRead{+pre, +word, +low, _}: Snip.last(T.Word.has(terms, String.reverse(low)), pre, word)
+    case SNil{} SnipRead{+pre, +word, +low, _}: Snip.last(T.Word.has(terms, SF.Fold.text(String.reverse(low))), pre, word)
     case SNil{} SnipHit{pre, word, post, _}: SnipDone{pre, word, post, False{}}
     case SCon{h, tail} SnipRead{pre, word, low, left}: Snip.go(tail, terms, Snip.step(terms, h, SnipRead{pre, word, low, left}))
     case SCon{h, tail} SnipHit{pre, word, post, left}: Snip.go(tail, terms, Snip.step(terms, h, SnipHit{pre, word, post, left}))
@@ -153,7 +154,7 @@ def Snip.flush(hit: Bool, +plain: String, +word: String, out: List<&2, String>) 
 
 def Snip.flushed(+terms: Map<&2, Bool>, m: SnipMark) -> SnipMark:
   match m:
-    case SnipMark{+plain, +word, +low, out}: Snip.flush(T.Word.has(terms, String.reverse(low)), plain, word, out)
+    case SnipMark{+plain, +word, +low, out}: Snip.flush(T.Word.has(terms, SF.Fold.text(String.reverse(low))), plain, word, out)
 
 def Snip.plain(+c: Char, m: SnipMark) -> SnipMark:
   match m:

@@ -1,4 +1,5 @@
 import Base
+import ./search-fold.bend as SF
 
 # Fuzzy matching for pickers: every character of the query appears in the
 # candidate in order (any case). A match scores higher for a prefix, for
@@ -40,6 +41,18 @@ def Fuzzy.go(s: String, q: String, hit: Bool, +prev: U32, +run: Bool, +first: Bo
     case SCon{Chr{+c}, +t} SCon{+h, +qt} False{}:
       Fuzzy.go(t, SCon{h, qt}, Fuzzy.hit(t, SCon{h, qt}), c, False{}, False{}, acc)
 
-# how well q matches s (0: not at all)
-def Fuzzy.score(+s: String, +q: String) -> Nat:
+def Fuzzy.normalized(+s: String, +q: String) -> Nat:
   Fuzzy.go(s, q, Fuzzy.hit(s, q), 32, False{}, True{}, 0n)
+
+# An empty query keeps every candidate without walking its title.
+def Fuzzy.score.k(empty: Bool, s: String, q: String) -> Nat:
+  match empty:
+    case True{}: 1n
+    case False{}: Fuzzy.normalized(SF.Fold.title(s), q)
+
+def Fuzzy.score.query(s: String, +q: String) -> Nat:
+  Fuzzy.score.k(String.is_empty(q), s, q)
+
+# how well q matches s (0: not at all)
+def Fuzzy.score(s: String, q: String) -> Nat:
+  Fuzzy.score.query(s, SF.Fold.text(q))

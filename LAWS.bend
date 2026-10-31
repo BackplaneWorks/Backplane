@@ -1,3 +1,4 @@
+import ./src/core/search-fold.bend as SFOLD
 import ./src/core/live-checkpoint.bend as LCP
 import ./src/server/plot.bend as PLOTWATCH
 import ./src/core/restartretry.bend as WDRETRY
@@ -13592,3 +13593,7 @@ law tour_preview_other_steps_keep_selection:
 
 law tour_tools_examples_visible:
   {U.Tour.example(3n) == True{} : Bool}
+
+# Found by e2e c1-6.
+law search_unicode_spellings_agree:
+  {SFOLD.Fold.text("CAFÉ ΔΟΚΙΜΉ Straße ς ＣＡＦＥ 가") == SFOLD.Fold.text("cafe\u{301} δοκιμη STRASSE σ cafe 가") : String}

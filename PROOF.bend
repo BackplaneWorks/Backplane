@@ -1,3 +1,4 @@
+import ./src/core/search-fold.bend as SFOLD
 import ./src/core/live-checkpoint.bend as LCP
 import ./src/core/restartretry.bend as WDRETRY
 import ./src/core/signal.bend as SIGREV
@@ -13968,4 +13969,9 @@ def Laws.tour_preview_other_steps_keep_selection(u):
   {==}
 
 def Laws.tour_tools_examples_visible():
+  {==}
+
+# Found by e2e c1-6.
+
+def Laws.search_unicode_spellings_agree():
   {==}

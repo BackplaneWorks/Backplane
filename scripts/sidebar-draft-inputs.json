@@ -53,7 +53,7 @@
     "src/core/farsnap.bend": "a83e2e4f17577be64e737c32613e5cf2a77364c8849f5b7d0430edd0bde38257",
     "src/core/fm.bend": "6000d7e7dffc96057f66e628a8c32c46c096026a67dc9ee2f5b957b81e2aaa14",
     "src/core/fold.bend": "ad2f8b4ec0b7c5f4f690d77d6e6cfc3652570f89fb16ffe70443aa101cfbfbf5",
-    "src/core/fuzzy.bend": "23098d1fc905bec7556734757cec8bfee65bc7fdbe9e317742e6c86f2e2f5e10",
+    "src/core/fuzzy.bend": "3ded93b1ce5272c7cc0c071d3609bb4fa0fe45963e3c04f431a52af0ff31d707",
     "src/core/fview.bend": "8b27131cec07e5697cf96ede00efc8423072619afa956d087008ff7edff29032",
     "src/core/glb.bend": "f2eb124f9c0967d8c03c0a96c3a7120aab3c024cb8af60af6e4263d70bb8fe75",
     "src/core/google.bend": "196ba6d77f7c0e4b8d982d3fb259302752db1f27974b2d49a0123d092fbbb09e",
@@ -104,6 +104,7 @@
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
     "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
+    "src/core/search-fold.bend": "9f5bd7f7249b7ece879f3fb991af03a8ca198a0de68a26d643701ace430742ad",
     "src/core/secret.bend": "2aa67d789bcaf5d4de369af089b533d2a3fdfc423d90e545f5d8a84423159bd6",
     "src/core/semver.bend": "a09f3e4f27f84287b5ee5e0c0840750017af34dda03dff67134958af096a4aee",
     "src/core/sexpr.bend": "e4eebee469e3e9418bdc9eac3a2de06904aec8e9604fccd657919de5f214bcf3",
@@ -128,7 +129,7 @@
     "src/core/textscale.bend": "6f3179e85bce1ed2f56191bcc25621fcd83dc4ecf239b60ceed9cb1fdf883b5c",
     "src/core/thin-chat.bend": "b654c26082a5b02b40a3eb6092744fd4e2f6befda5d4757eb2f8a55368fdceae",
     "src/core/thin-wire.bend": "2190ad986b43ce03424b0f7c8e0da1bf9b2431888ebf160e0ea74d86468e9f21",
-    "src/core/thin.bend": "8b8f79618c1272c60d0480f89fa97657f4021f8c1c7e2971d47f90d427f01a1b",
+    "src/core/thin.bend": "459531fc3b24693bdd6172c98e91a0e954e6bb43f5c2e9925a37465cb24e4550",
     "src/core/thinq.bend": "5952f1ebe9aa7981ec0753937b0dcc26fad895f8142e4507d79a89508da8bf63",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
     "src/core/todo.bend": "5cb670b3e1c3a83c4d3eaee0e1e963892671d51fa30412583b2de628b8830562",
@@ -376,5 +377,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebased Show the thread controls that the tour explains; sidebar draft readers and rendering unchanged"
+  "reviewNote": "Rebased Match Unicode case and accent spellings consistently in search; sidebar draft readers and rendering unchanged"
 }

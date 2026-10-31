@@ -121,7 +121,7 @@ function store_validate(file) {
   const {Database}=require('bun:sqlite'),db=new Database(file,{readonly:true,safeIntegers:true});
   try {
     const m=Object.fromEntries(db.query('SELECT k,v FROM meta').values());
-    if(m.schema!=='1'||m.codec!=='5')throw Error('snapshot schema/codec mismatch');
+    if(m.schema!=='1'||m.codec!=='6')throw Error('snapshot schema/codec mismatch');
     for(const k of ['applied_seq','applied_off','ord'])if(!/^(0|[1-9][0-9]*)$/.test(m[k]||''))throw Error('invalid checkpoint metadata');
     // Missing tables/columns must rebuild, not silently answer empty pages.
     for(const sql of [
@@ -158,7 +158,7 @@ function store_adopt(home) {
   try {
     if(!fs.lstatSync(dir).isDirectory()||fs.lstatSync(dir).isSymbolicLink()||!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink())throw Error('invalid prepared path');
     m=JSON.parse(fs.readFileSync(manifest,'utf8'));
-    if(m.version!==1||m.codec!==5||m.schema!==1||!Number.isSafeInteger(m.prefixBytes)||!Number.isSafeInteger(m.appliedSeq)||!m.storeSha256||!m.prefixSha256)throw Error('invalid prepared manifest');
+    if(m.version!==1||m.codec!==6||m.schema!==1||!Number.isSafeInteger(m.prefixBytes)||!Number.isSafeInteger(m.appliedSeq)||!m.storeSha256||!m.prefixSha256)throw Error('invalid prepared manifest');
     if(store_hash(file)!==m.storeSha256)throw Error('prepared database hash mismatch');
     const meta=store_validate(file);
     if(meta.applied_off!==String(m.prefixBytes)||meta.applied_seq!==String(m.appliedSeq))throw Error('prepared checkpoint mismatch');
