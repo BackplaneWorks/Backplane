@@ -92,7 +92,9 @@ let app,page;const errors=[],observations=[],traffic=[],start=performance.now();
   await page.locator('[data-on-click="select"][data-value="bub-thread"]').first().click();
   const chat=page.locator('[data-on-click="bot-tab"][data-value="chat"]');if(await chat.count())await chat.first().click();
   await page.locator(`a[data-ref="backplane://thread/${tid}"]`).first().waitFor();
-  assert.equal(await page.locator(`a[data-ref="backplane://thread/${tid}"]`).count(),2);
+  // two links in the messages' text, and each message heads with the thread it links (core/reply.bend)
+  assert.equal(await page.locator(`.body a[data-ref="backplane://thread/${tid}"]`).count(),2);
+  assert.equal(await page.locator(`.msg-ctx a[data-ref="backplane://thread/${tid}"]`).count(),2);
   assert.equal(await page.locator('a[href^="javascript:"]').count(),0);assert(await page.locator('a[href="https://example.com"]').count());
   await page.locator(`a[data-ref="backplane://thread/${tid}"]`).first().click();
   await page.waitForFunction(id=>document.querySelector('main')?.dataset.thread===id&&document.documentElement.dataset.backplaneRemoteReady==='true',tid);
