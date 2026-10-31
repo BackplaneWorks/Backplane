@@ -1091,6 +1091,11 @@ function dispatch(action, value, timer) {
     return true;
   }
   if (viewMode !== "compatibility") {
+    if ((action === "send" || action === "send-alt") && (!socket || socket.readyState !== 1)) {
+      offlineSend = true;
+      showViewStatus("Not sent. Reconnect to send; your draft is kept.");
+      return true;
+    }
     if (action === "select" || action === "draft") {
       if (thin) return thin.request(action, value);
       thinSession = choosePresentation(currentSession(), action, value);
@@ -2097,7 +2102,7 @@ function connectingStatus() {
 const connectionLog = new ConnectionLog({ storage: localStorage, bundle: CONNECTION_BUNDLE,
   visibility: () => document.visibilityState || "unknown", online: () => navigator.onLine !== false });
 const thinBackoff = new Backoff(), thinRetry = new Retry();
-let downSince = 0, downNote = "", downTimer = 0;
+let downSince = 0, downNote = "", downTimer = 0, offlineSend = false;
 // The top bar's dot follows the link while the bar says it is down: the
 // hub drew it green and cannot redraw it now, so the page turns it (the
 // root's hub-down class) and says the words the hub left in data-down.
@@ -2117,10 +2122,10 @@ function downStatus(note) {
   if (!downSince) downSince = Date.now();
   clearTimeout(downTimer);
   const wait = Math.max(0, downSince + QUIET_MS - Date.now());
-  downTimer = setTimeout(() => { if (downSince) { showViewStatus(waiting(downNote));connDot(true); } }, wait);
+  downTimer = setTimeout(() => { if (downSince) { showViewStatus(waiting(offlineSend ? "Not sent. Reconnect to send; your draft is kept." : downNote));connDot(true); } }, wait);
 }
 function upStatus() {
-  downSince = 0;clearTimeout(downTimer);downTimer = 0;
+  downSince = 0;clearTimeout(downTimer);downTimer = 0;offlineSend = false;
   thinBackoff.reset();thinRetry.cancel();
   showViewStatus("");connDot(false);
 }
