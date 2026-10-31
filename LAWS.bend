@@ -13645,3 +13645,7 @@ law terminal_unicode_cell_widths:
   {[TCELL.Cells.step(False{}, 945, TCELL.TermCells{"", Nil{}}), TCELL.Cells.step(False{}, 128512, TCELL.TermCells{"", Nil{}})] ==
    [TCELL.TermCells{"", [DM.El{"span", "", [DM.At{"class", "term-cell"}, DM.At{"style", "display:inline-block;width:1ch"}], [DM.Txt{"α"}]}]},
     TCELL.TermCells{"", [DM.El{"span", "", [DM.At{"class", "term-cell"}, DM.At{"style", "display:inline-block;width:2ch"}], [DM.Txt{"😀"}]}]}] : List<&2, TCELL.TermCells>}
+
+# A model choice replaces the account picker, so Escape has one picker to close.
+law model_picker_replaces_accounts:
+  {U.Ui.flag(U.Act.ui(U.Models.opened.k(True{}, False{}, U.Ui.flag_on(U.Ui.init(0n), "accounts"), Nil{})), "accounts") == False{} : Bool}

@@ -4586,9 +4586,9 @@ def Models.phone(+nf: Map<&2, String>, +prov: String, +q: String) -> String:
 def Models.opened.k(open: Bool, oc: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
   match open oc:
     case True{} True{}:
-      Ui.also(Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@f.mq", ""), "@mp", ""), "models.refresh", Nil{}), List.append(&2, Cmd, cs, [Focus{"model-q"}]))
+      Ui.also(Ui.rpc(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "accounts"), "@f.mq", ""), "@mp", ""), "models.refresh", Nil{}), List.append(&2, Cmd, cs, [Focus{"model-q"}]))
     case True{} False{}:
-      Act{Ui.scratch_set(Ui.scratch_set(u, "@f.mq", ""), "@mp", ""), cs}
+      Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "accounts"), "@f.mq", ""), "@mp", ""), cs}
     case False{} _:
       Act{u, cs}
 

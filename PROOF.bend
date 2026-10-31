@@ -14011,3 +14011,6 @@ def Laws.browser_frame_bot_owner():
 
 def Laws.terminal_empty_input_keeps_view(u):
   {==}
+
+def Laws.model_picker_replaces_accounts():
+  {==}

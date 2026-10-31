@@ -2626,7 +2626,7 @@ async function startThin(again = false, reason = "initial") {
         // A picker whose cursor moved (data-draft) opens and shuts through
         // the hub, so its picture never shows a cursor dropped since.
         const layer = document.querySelector('[data-local-models="1"]');
-        return !!layer && !layer.hasAttribute('data-draft') && !layer.querySelector('input')?.value;
+        return !!layer && !document.querySelector('.account-picker') && !layer.hasAttribute('data-draft') && !layer.querySelector('input')?.value;
       },
       sessionChanged: (session, detail) => {
         const selectedChanged = thinSession?.sel !== session.sel;
