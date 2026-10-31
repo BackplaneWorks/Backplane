@@ -57,11 +57,62 @@ def Checkpoint.restore.items(rs: List<&2, J.Json>, +s: M.State) -> List<&2, L.Bu
 def Checkpoint.restore(+s: M.State, text: String) -> List<&2, L.Buf>:
   Checkpoint.restore.items(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})), s)
 
-# Ordinary durable messages and turn ends can consume or split a live buffer.
-# Other changes do not rewrite checkpoints.
-def Checkpoint.changed(cs: List<&2, M.Change>) -> Bool:
-  match cs:
+# The thread a message or turn change belongs to ("" for any other change):
+# only those consume, split or re-anchor a live buffer.
+def Checkpoint.touch(c: M.Change) -> String:
+  match c:
+    case M.MessagePosted{t, _, _, _, _}: t
+    case M.TurnChanged{t, _, _}: t
+    case _: ""
+
+def Checkpoint.seen(ts: List<&2, String>, +t: String) -> Bool:
+  match ts:
     case Nil{}: False{}
-    case M.MessagePosted{_, _, _, _, _} <> _: True{}
-    case M.TurnChanged{_, _, _} <> _: True{}
-    case _ <> tail: Checkpoint.changed(tail)
+    case +h <> tail: Bool.or(String.eq(h, t), Checkpoint.seen(tail, t))
+
+def Checkpoint.touched.k(skip: Bool, +t: String, acc: List<&2, String>) -> List<&2, String>:
+  match skip:
+    case True{}: acc
+    case False{}: t <> acc
+
+def Checkpoint.touched.c(+t: String, +acc: List<&2, String>) -> List<&2, String>:
+  Checkpoint.touched.k(Bool.or(String.is_empty(t), Checkpoint.seen(acc, t)), t, acc)
+
+def Checkpoint.touched.go(cs: List<&2, M.Change>, +acc: List<&2, String>) -> List<&2, String>:
+  match cs:
+    case Nil{}: acc
+    case c <> tail: Checkpoint.touched.go(tail, Checkpoint.touched.c(Checkpoint.touch(c), acc))
+
+# the threads a step's changes touched, each once, in order
+def Checkpoint.touched(cs: List<&2, M.Change>) -> List<&2, String>:
+  List.reverse(&2, String, Checkpoint.touched.go(cs, Nil{}))
+
+# a thread with no buffer: its record says remove its file
+def Checkpoint.gone(+t: String) -> J.Json:
+  J.Json.obj([J.KV{"anchor", J.Str{""}}, J.KV{"buffer", J.Json.obj([J.KV{"thread", J.Str{t}}, J.KV{"text", J.Str{""}}])}])
+
+def Checkpoint.of.k(has: Bool, +bs: List<&2, L.Buf>, +s: M.State, +t: String) -> J.Json:
+  match has:
+    case True{}: Checkpoint.one(bs, s, t)
+    case False{}: Checkpoint.gone(t)
+
+def Checkpoint.of(+bs: List<&2, L.Buf>, +s: M.State, +t: String) -> J.Json:
+  Checkpoint.of.k(L.Live.has(bs, t), bs, s, t)
+
+def Checkpoint.dirty.go(ts: List<&2, String>, +bs: List<&2, L.Buf>, +s: M.State) -> List<&2, J.Json>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> tail: Checkpoint.of(bs, s, t) <> Checkpoint.dirty.go(tail, bs, s)
+
+# What a committed step writes: only the threads its messages and turn
+# changes touched, each buffer whole (a new anchor, a steered remainder) or
+# its file removed (an empty buffer, none at all). A stream in another
+# thread is left to go on appending its deltas; nothing is rewritten for it.
+def Checkpoint.dirty(cs: List<&2, M.Change>, +bs: List<&2, L.Buf>, +s: M.State) -> List<&2, J.Json>:
+  Checkpoint.dirty.go(Checkpoint.touched(cs), bs, s)
+
+# the threads of the restored buffers (their journals are kept at start)
+def Checkpoint.threads(bs: List<&2, L.Buf>) -> List<&2, J.Json>:
+  match bs:
+    case Nil{}: Nil{}
+    case b <> tail: J.Str{L.Buf.thread(b)} <> Checkpoint.threads(tail)

@@ -7120,17 +7120,36 @@ def Tools.of(+cfg: Cfg) -> List<&2, String>:
   BN.Bn.tools(Cfg.bn(cfg))
 
 # A failed private checkpoint is reported; the durable event log still owns
-# completed messages. Snapshot only when a message or turn consumed a buffer.
+# completed messages. A delta is appended to its thread's journal (a write
+# of its own size: the reply so far is never copied or encoded per delta);
+# the whole buffer is written only when the journal asks for it ("new": a
+# new stream, a missing file, a journal grown long).
 def Live.checkpoint.note(err: String) -> IO(Unit):
   match err:
     case SNil{}: IO.pure(Unit, Unit{})
     case SCon{c, t}: PS.Log.warn("hub", "live checkpoint: " ++ SCon{c, t})
 
-def Live.checkpoint.sync(changed: Bool, +st: M.State, +cfg: Cfg, bs: List<&2, LV.Buf>) -> IO(Unit):
-  match changed:
-    case False{}: IO.pure(Unit, Unit{})
+def Live.checkpoint.whole(fresh: Bool, err: String, +cfg: Cfg, +st: M.State, bs: List<&2, LV.Buf>, +thread: String) -> IO(Unit):
+  match fresh:
+    case False{}: Live.checkpoint.note(err)
     case True{}:
-      IO.bind(String, Unit, LCFX.Checkpoint.sync(Cfg.home(cfg), J.Json.show(J.Json.arr(LCP.Checkpoint.records(bs, st)))), err => Live.checkpoint.note(err))
+      IO.bind(String, Unit, LCFX.Checkpoint.write(Cfg.home(cfg), J.Json.show(LCP.Checkpoint.one(bs, st, thread))), e => Live.checkpoint.note(e))
+
+def Live.checkpoint.delta(+cfg: Cfg, +st: M.State, +bs: List<&2, LV.Buf>, +thread: String, text: String) -> IO(Unit):
+  IO.bind(String, Unit, LCFX.Checkpoint.append(Cfg.home(cfg), thread, Nat.show(STR.Steer.gen(bs, thread)), text),
+    +err => Live.checkpoint.whole(String.eq(err, "new"), err, cfg, st, bs, thread))
+
+def Live.checkpoint.sync.k(rs: List<&2, J.Json>, +cfg: Cfg) -> IO(Unit):
+  match rs:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case +r <> +t:
+      IO.bind(String, Unit, LCFX.Checkpoint.sync(Cfg.home(cfg), J.Json.show(J.Json.arr(r <> t))), err => Live.checkpoint.note(err))
+
+# a committed step rewrites (or removes) only the journals of the threads
+# its messages and turn changes touched (core/live-checkpoint.bend's
+# Checkpoint.dirty)
+def Live.checkpoint.sync(cs: List<&2, M.Change>, +st: M.State, +cfg: Cfg, +bs: List<&2, LV.Buf>) -> IO(Unit):
+  Live.checkpoint.sync.k(LCP.Checkpoint.dirty(cs, bs, st), cfg)
 
 def Tools.with(+cfg: Cfg, tl: List<&2, String>) -> Cfg:
   Cfg.with_bn(cfg, BN.Bn.with_tools(Cfg.bn(cfg), tl))
@@ -7184,7 +7203,7 @@ def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: L
       do IO<Hub & Wrote>:
         Bot.dir.changed.all(cs, inbox)
         +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
-        Live.checkpoint.sync(LCP.Checkpoint.changed(cs), post, cfg, buffers)
+        Live.checkpoint.sync(cs, post, cfg, buffers)
         return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, buffers)), note)
     case False{}:
       do IO<Hub & Wrote>:
@@ -10205,8 +10224,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         +now : Nat <- Now.nat()
         +buffers : List<&2, LV.Buf> = LV.Live.add.at(Live.of(cfg), thread, text, Nat.mul(now, 1000n))
-        err : String <- LCFX.Checkpoint.write(Cfg.home(cfg), J.Json.show(LCP.Checkpoint.one(buffers, st, thread)))
-        Live.checkpoint.note(err)
+        Live.checkpoint.delta(cfg, st, buffers, thread, text)
         cl2 : List<&2, Client> <- Wire.delta(cl, B.Delta.msg(thread, text))
         +off : Nat = FLV.FL.size(Live.of(cfg), thread)
         Far.live.out(Hub{st, f, ls, cl2, as, inbox, Live.with_delta(cfg, buffers, thread, text), note}, thread, off, text, now)
@@ -13354,7 +13372,10 @@ def Hub.recover.stale(h: Hub, +now: Nat) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
         saved : String <- LCFX.Checkpoint.read(Cfg.home(cfg))
-        Hub.recover.k(Hub{st, f, ls, cl, as, inbox, Live.with(cfg, LCP.Checkpoint.restore(st, saved)), note}, now)
+        +restored : List<&2, LV.Buf> = LCP.Checkpoint.restore(st, saved)
+        err : String <- LCFX.Checkpoint.keep(Cfg.home(cfg), J.Json.show(J.Json.arr(LCP.Checkpoint.threads(restored))))
+        Live.checkpoint.note(err)
+        Hub.recover.k(Hub{st, f, ls, cl, as, inbox, Live.with(cfg, restored), note}, now)
 
 # Agents kept through a restart in place (core/adopt.bend)
 # --------------------------------------------------------

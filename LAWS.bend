@@ -13467,3 +13467,10 @@ law routine_delete_first_press_preserves:
 # Regression for c13-3.
 law bot_navigation_restores_tab:
   {U.Ui.scratch(U.Bots.navigation.restore(U.Ui.init(0n), J.Json.obj([J.KV{"bot", J.Str{"bot"}}, J.KV{"tab", J.Str{"settings"}}])), "@btab") == "settings" : String}
+# a committed step rewrites only the journals of the threads its messages
+# and turn changes touched; a stream elsewhere goes on appending
+law checkpoint_untouched_not_rewritten:
+  {LCP.Checkpoint.touched([M.ActivityLogged{"t", "a", "tool", "Bash", "working", 1n}]) == Nil{} : List<&2, String>}
+
+law checkpoint_touched_once:
+  {LCP.Checkpoint.touched([M.MessagePosted{"t", "q", M.User{}, "x", 1n}, M.TurnChanged{"u", M.Running{}, 2n}, M.TurnChanged{"t", M.Completed{}, 3n}]) == ["t", "u"] : List<&2, String>}

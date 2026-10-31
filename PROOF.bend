@@ -13837,6 +13837,10 @@ def Laws.fold_ctx_thirteen():
   {==}
 
 def Laws.fold_ctx_text_splits():
+def Laws.checkpoint_untouched_not_rewritten():
+  {==}
+
+def Laws.checkpoint_touched_once():
   {==}
 
 def Laws.keys_navigation_disarms():

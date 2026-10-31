@@ -30,6 +30,12 @@ def posted(cs: List<&2, M.Change>) -> String:
 def stop(+s: M.State) -> List<&2, M.Change>:
   S.Steer.all([M.TurnChanged{"t", M.Interrupted{}, 4n}], s, restored(s))
 
+def names(ts: List<&2, String>) -> String:
+  String.join(ts, ",")
+
+def dirty(cs: List<&2, M.Change>) -> String:
+  J.Json.show(J.Json.arr(K.Checkpoint.dirty(cs, buffers(), state(Nil{}))))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("completed empty buffers are omitted from disk", Nat.show(List.length(&2, J.Json, K.Checkpoint.records(L.Live.end(buffers(), "t"), state(Nil{})))), "0")
@@ -43,3 +49,8 @@ def main() -> IO(Unit):
     C.Check.str("a stopped turn is never restored", Nat.show(List.length(&2, L.Buf, restored(state([M.TurnChanged{"t", M.Interrupted{}, 3n}])))), "0")
     C.Check.str("a failed turn is never restored", Nat.show(List.length(&2, L.Buf, restored(state([M.TurnChanged{"t", M.Failed{}, 3n}])))), "0")
     C.Check.str("unrelated tool activity leaves the stream recoverable", S.Steer.text(restored(state([M.ActivityLogged{"t", "tool", "tool", "Bash", "working", 3n}])), "t"), "日本語 reply\nline 8\n")
+    C.Check.str("deltas elsewhere: an unrelated change rewrites nothing", names(K.Checkpoint.touched([M.ActivityLogged{"t", "tool", "tool", "Bash", "working", 3n}])), "")
+    C.Check.str("each touched thread once, in order", names(K.Checkpoint.touched([M.MessagePosted{"t", "q2", M.User{}, "x", 3n}, M.TurnChanged{"u", M.Running{}, 3n}, M.TurnChanged{"t", M.Completed{}, 4n}])), "t,u")
+    C.Check.str("a touched stream is written whole with its anchor", Bool.show(String.contains(dirty([M.MessagePosted{"t", "q2", M.User{}, "x", 3n}]), "\"text\":\"日本語 reply\\nline 8\\n\"")), "True")
+    C.Check.str("a touched thread with no buffer is removed", dirty([M.TurnChanged{"u", M.Completed{}, 3n}]), "[{\"anchor\":\"\",\"buffer\":{\"thread\":\"u\",\"text\":\"\"}}]")
+    C.Check.str("the restored threads are named for the journals kept", J.Json.show(J.Json.arr(K.Checkpoint.threads(restored(state(Nil{}))))), "[\"t\"]")
