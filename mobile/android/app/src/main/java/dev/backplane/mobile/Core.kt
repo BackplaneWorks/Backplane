@@ -889,7 +889,12 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                     act(action, value)
                 }
             }
-            "jump" -> if (c.id.isNotEmpty()) { jumping = c.id; jumpLeft = 4 }
+            // the open thread's entry, paged back to while left out (an "In
+            // reply to" line names a message far up a long chat): the seek
+            "jump" -> if (c.id.isNotEmpty()) {
+                val th = screen?.thread?.id
+                if (th != null) seek(th, c.id) else { jumping = c.id; jumpLeft = 4 }
+            }
             "keep" -> keep(c.thread, c.text)
             "notify" -> if (!(foreground && screen?.sel == c.thread)) notify(c)
         }

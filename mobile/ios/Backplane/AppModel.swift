@@ -156,8 +156,11 @@ final class AppModel {
     // the same entry shown twice scrolls twice
     private(set) var jump: Jump?
     // a jump waiting for a screen that holds its entry (the jump opens folds
-    // and pages first), and how many more screens it waits
-    @ObservationIgnored private var jumping: (id: String, left: Int)?
+    // and pages first), and how many more screens it waits; while the thread
+    // leaves earlier entries out, it pages back a page at a time, each once
+    // the one before it shows, at most 40 (as Android's seek and the web):
+    // an "In reply to" line names a message far up a long chat
+    @ObservationIgnored private var jumping: (id: String, left: Int, pages: Int, first: String?)?
     // each hub's socket as this phone sees it (HubsView, the list's pill)
     let conn = HubConnections()
     private(set) var sendFailure: String?
@@ -2299,7 +2302,7 @@ final class AppModel {
                         self?.act(action, value)
                     }
                 }
-            case "jump": if let id = c.id, !id.isEmpty { jumping = (id, 4) }
+            case "jump": if let id = c.id, !id.isEmpty { jumping = (id, 4, 0, nil) }
             case "keep":
                 let thread = c.thread ?? ""
                 Self.keep(thread, composerDrafts.text(for: thread) ?? c.text ?? "")
@@ -2340,8 +2343,14 @@ final class AppModel {
             if let e = t.entries.first(where: { $0.id == j.id || $0.id.hasSuffix("|" + j.id) }) {
                 jumping = nil
                 jump = Jump(id: e.id, n: (jump?.n ?? 0) + 1)
+            } else if (t.earlier ?? 0) > 0 && j.pages < 40 {
+                let first = t.entries.first?.id
+                if contentReady && first != j.first {
+                    jumping = (j.id, j.left, j.pages + 1, first)
+                    act("earlier", "")
+                }
             } else if o.screen != nil {
-                jumping = j.left > 1 ? (j.id, j.left - 1) : nil
+                jumping = j.left > 1 ? (j.id, j.left - 1, j.pages, j.first) : nil
             }
         }
     }
