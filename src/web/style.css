@@ -723,7 +723,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .picker .dir { padding: 8px 14px 0; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker input { margin: 6px 10px 8px; background: var(--bg); border: 1px solid var(--line); padding: 6px 8px; font-size: calc(16px * var(--text-scale, 100) / 100); }
 .picker input:focus { outline: none; border-color: var(--accent); }
-.picker .perr { padding: 0 14px 6px; color: var(--bad); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.picker .perr { min-width: 0; overflow-wrap: anywhere; padding: 0 14px 6px; color: var(--bad); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .prows { overflow-y: auto; border-top: 1px solid var(--line); padding: 4px 0; }
 .prow { display: flex; gap: 12px; width: 100%; text-align: left; padding: 6px 14px; background: none; border: 0; white-space: nowrap; }
 .prow .pl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
