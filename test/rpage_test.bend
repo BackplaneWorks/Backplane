@@ -1,4 +1,5 @@
 import Base
+import ../src/server/thin-actor.bend as TA
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/board.bend as B
@@ -91,6 +92,11 @@ def main() -> IO(Unit):
   +rv = act(u, "rv-page", "bom")
   +cmp = act(u, "cmp-pick", "a\tc1\tv1\t/r/.git\t/r")
   do IO<Unit>:
+    C.Check.str("restored report is a follow-up read", Bool.show(TA.Actor.read_only(J.Json.obj([J.KV{"type", J.Str{"send"}}, J.KV{"text", J.Str{"{\"m\":\"review.bom\"}"}}]))), "True")
+    C.Check.str("releases are never follow-up reads", Bool.show(TA.Actor.read_only(J.Json.obj([J.KV{"type", J.Str{"send"}}, J.KV{"text", J.Str{"{\"m\":\"review.release\"}"}}]))), "False")
+    C.Check.str("restored BOM asks for report", Bool.show(String.contains(Show.sent(U.Act.cmds(U.Rp.sync(U.Act{U.Ui.view_put(base(), "review", "bom"), Nil{}}))), "review.bom")), "True")
+    C.Check.str("restored BOM asks once", Show.sent(U.Act.cmds(U.Rp.sync(U.Act{ui(U.Rp.sync(U.Act{U.Ui.view_put(base(), "review", "bom"), Nil{}})), Nil{}}))), "")
+    C.Check.str("closed review does not ask", Show.sent(U.Act.cmds(U.Rp.sync(U.Act{base(), Nil{}}))), "")
     C.Check.str("the tab shows the BOM page", U.Ui.view_get(rv, "view.kind") ++ "|" ++ U.Rp.page(rv), "review|bom")
     C.Check.str("opening it asks the hub for the working copy's BOM", Bool.show(String.contains(sent(U.Ui.act(u, "rv-page", "bom")), "review.bom")), "True")
     C.Check.str("with no versions", Bool.show(String.contains(sent(U.Ui.act(u, "rv-page", "bom")), "\"a\":\"\"")), "True")

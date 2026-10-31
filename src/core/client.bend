@@ -9583,6 +9583,21 @@ def Rp.ask(+u: Ui, +page: String) -> Act:
 def Rp.open(+u: Ui, +page: String) -> Act:
   Rp.ask(Ui.view_put(u, "review", page), page)
 
+# A restored Review page owes its first read once in this view. Mark the
+# attempt before sending so an empty report or an error never loops.
+def Rp.sync.k(go: Bool, +u: Ui, +page: String, cs: List<&2, Cmd>) -> Act:
+  match go:
+    case True{}:
+      Ui.also(Rp.ask(Ui.scratch_set(u, "@rp.at:" ++ Ui.sel(u), page), page), cs)
+    case False{}: Act{u, cs}
+
+def Rp.sync(a: Act) -> Act:
+  match a:
+    case Act{+u, cs}:
+      +page = Rp.page(u)
+      Rp.sync.k(Bool.and(Ui.panel(u), Bool.and(Bool.not(String.is_empty(page)), Bool.and(String.is_empty(Ui.info(u, Rp.key(u, "rp.title", page))),
+        Bool.and(String.is_empty(Ui.scratch(u, "@rp.busy:" ++ Ui.sel(u))), Bool.not(String.eq(Ui.scratch(u, "@rp.at:" ++ Ui.sel(u)), page)))))), u, page, cs)
+
 # the hub's answer: {report: {thread, page, md, err}}, a check's with
 # {gate, line, tasks} too
 def Rp.store(+u: Ui, +r: J.Json) -> Ui:

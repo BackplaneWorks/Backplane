@@ -567,9 +567,8 @@ def Actor.rpc(+command: J.Json) -> J.Json:
 # Mech's parts, listed when Mech comes on screen, Mpage.sync, a thread on
 # it chosen again included, which on this page is no action)
 def Actor.read_only(+command: J.Json) -> Bool:
-  +request = Actor.rpc(command)
-  Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"), Bool.or(String.eq(J.Json.get_str(request, "m", ""), "mail.list"), Bool.or(String.eq(J.Json.get_str(request, "m", ""), "mail.read"),
-    Bool.or(String.eq(J.Json.get_str(request, "m", ""), "mail.find"), Bool.or(String.eq(J.Json.get_str(request, "m", ""), "git.diff"), String.eq(J.Json.get_str(request, "m", ""), "mech.list"))))))
+  Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
+    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs"], J.Json.get_str(Actor.rpc(command), "m", "")), 8n))
 
 # The viewer's watch (kicad.watch: which board, schematic or model this
 # socket is sent) when a reply moved the viewer: Mech opened before its
@@ -619,7 +618,7 @@ def Actor.accept( +a: Actor, +r: V.ActResult, +queue: Bool) -> Actor:
 # Mech's parts when it comes on screen, Mpage.sync.m: once per thread and
 # view, so a render that changed nothing asks for nothing)
 def Actor.mail_ready( +a: Actor) -> Actor:
-  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Dv.sync(U.Mpage.sync.m(U.Act{Actor.ui(a), Nil{}}))))), True{})
+  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Mpage.sync.m(U.Act{Actor.ui(a), Nil{}})))))), True{})
 
 def Actor.origin( +a: Actor, +origin: String) -> Actor:
   match a:
