@@ -21,6 +21,8 @@ export function installWorkspaceMenus(doc = document, reclaim = () => {}) {
   }, true);
   doc.addEventListener('pointerdown', event => {
     for (const menu of doc.querySelectorAll('.local-menu[open]')) if (!menu.contains(event.target)) close(menu);
+    const picker = doc.querySelector('.account-picker');
+    if (picker && !picker.contains(event.target) && !event.target.closest?.('.account-chip')) doc.querySelector('.account-chip')?.click();
   });
   doc.addEventListener('click', event => {
     const button = event.target.closest?.('.local-menu-body button[data-on-click]');

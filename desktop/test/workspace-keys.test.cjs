@@ -542,3 +542,13 @@ test('Escape cancels inline renaming after the innermost overlay is dismissed', 
   modal = true;assert.equal(overlayEscape(doc), null);
   modal = false;overlayEscape(doc)();assert.equal(cancelled, 1);
 });
+
+
+test('Escape dismisses the account picker before the inline editor', async () => {
+  const { overlayEscape } = await import('../../src/web/workspace-keys.js');
+  let closed = 0;
+  const doc = { querySelectorAll: () => [], querySelector: selector =>
+    selector === '.account-picker' ? {} : selector === '.account-chip' ? { click() { closed++; } } :
+    selector.includes('rename-no') ? { click() { assert.fail('account picker goes first'); } } : null };
+  overlayEscape(doc)();assert.equal(closed, 1);
+});
