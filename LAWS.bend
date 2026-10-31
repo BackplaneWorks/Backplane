@@ -13435,3 +13435,7 @@ law fold_ctx_text_splits:
 # Regression for c12-3.
 law keys_navigation_disarms:
   {U.Ui.scratch(U.Act.ui(U.Settings.go(U.Ui.scratch_set(U.Ui.init(0n), "@keys.rm", "TOKEN"), "privacy")), "@keys.rm") == "" : String}
+
+# Regression for c12-7.
+law voice_category_requests_status:
+  {List.length(&2, U.Cmd, U.Act.cmds(U.Settings.go(U.Ui.init(0n), "voice"))) == 2n : Nat}

@@ -11829,9 +11829,16 @@ def Settings.seed.k(threads: Bool, +u: Ui) -> Ui:
     case False{}:
       u
 
+# Reentering Voice reloads its private dictionary and the hub's devices.
+# A reconnect can replace the presentation without those transient replies.
+def Settings.refresh(voice: Bool, a: Act) -> Act:
+  match voice a:
+    case True{} Act{u, cs}: Ui.also(Voice.rpc(u, "status", Nil{}), cs)
+    case False{} _: a
+
 def Settings.go.k(+page: String, +before: Ui) -> Act:
   +u = Ui.scratch_set(before, "@keys.rm", "")
-  Act{Settings.seed.k(String.eq(page, "threads"), Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", page), "@set.sc", "0"), "@set.focus", "")), [Focus{""}]}
+  Settings.refresh(String.eq(page, "voice"), Act{Settings.seed.k(String.eq(page, "threads"), Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", page), "@set.sc", "0"), "@set.focus", "")), [Focus{""}]})
 
 def Settings.go(+u: Ui, +page: String) -> Act:
   Settings.go.k(Settings.clean(page), u)
