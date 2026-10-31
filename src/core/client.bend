@@ -4839,7 +4839,7 @@ def Proj.machine.row(+u: Ui) -> List<&2, PItem>:
 def Proj.query(u: Ui) -> String:
   match u:
     case Ui{_, _, dr, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      Str.get(dr, "@f.proj")
+      String.trim(Str.get(dr, "@f.proj"))
 
 def Proj.index(u: Ui) -> Nat:
   match u:

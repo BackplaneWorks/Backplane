@@ -133,3 +133,5 @@ def main() -> IO(Unit):
     C.Check.str("back", Bool.show(U.Proj.browsing(ui(U.Ui.act(browse, "proj-back", "")))), "False")
     C.Check.str("cd browses", Bool.show(U.Proj.browsing(ui(U.Ui.act(projects(), "proj-cd", "/tmp")))), "True")
     C.Check.str("find error kept quiet", U.Ui.info(U.Ui.recv(ui(U.Ui.act(U.Ui.init(0n), "proj-open", "")), json("{\"t\":\"reply\",\"id\":1,\"ok\":false,\"error\":\"unknown\"}")), "proj.err"), "")
+    C.Check.str("pasted path trims only its edges", U.Proj.query(U.Ui.scratch_set(U.Ui.init(0n), "@f.proj", "  /tmp/Plain notes  ")), "/tmp/Plain notes")
+    C.Check.str("pasted home path", U.Proj.query(U.Ui.scratch_set(U.Ui.init(0n), "@f.proj", "  ~/Plain notes/  ")), "~/Plain notes/")

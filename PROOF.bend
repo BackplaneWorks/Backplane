@@ -13940,3 +13940,8 @@ def Laws.settings_settle_idle_off_truthful():
 
 def Laws.estimate_snapshot_is_explicit():
   {==}
+
+# Found by e2e c1-4.
+
+def Laws.project_pasted_path_trimmed():
+  {==}

@@ -13566,3 +13566,7 @@ law settings_settle_idle_off_truthful:
 
 law estimate_snapshot_is_explicit:
   {ORD.Estimate.snapshot("from $5.00") == "last estimate: from $5.00" : String}
+
+# Found by e2e c1-4.
+law project_pasted_path_trimmed:
+  {U.Proj.query(U.Ui.scratch_set(U.Ui.init(0n), "@f.proj", "  /tmp/Plain notes  ")) == "/tmp/Plain notes" : String}
