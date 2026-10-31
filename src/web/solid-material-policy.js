@@ -32,26 +32,27 @@ export function applyMaterialPolicy(gltf,policy='cad-studio',T){
   for(const [original,set]of roles){
     const role=set.size===1?[...set][0]:'ambiguous';materialRoleCounts[role]=(materialRoleCounts[role]||0)+1;
     if(role==='unclassified'||role==='ambiguous')continue;
-    // A dark coating hides the laminate: KiCad's 83% alpha over its olive
-    // substrate turns a black mask olive. Studio draws only dark masks
-    // opaque; lighter masks keep the authored translucency over copper.
-    const studio=mode==='cad-studio'&&role==='soldermask'&&original.transparent&&original.opacity<1&&Math.max(original.color.r,original.color.g,original.color.b)<.12;
+    // Studio presents the soldermask as a glossy coat (the person's choice,
+    // 2026-10-31): Realistic's clear coat on the mask only. A dark coating
+    // also hides the laminate (KiCad's 83% alpha over its olive substrate
+    // turned a black mask olive), so only dark masks are drawn opaque;
+    // lighter masks keep the authored translucency over copper.
+    const studio=mode==='cad-studio'&&role==='soldermask';
     if(mode!=='realistic'&&!studio)continue;
-    if(studio){const material=original.clone();for(const [key,value]of [['opacity',1],['transparent',false],['depthWrite',true]])if(material[key]!==value){presentationOverrideCount++;if(key!=='depthWrite')explicitPresentationOverrideCount++;material[key]=value;}
-      material.userData={...original.userData,presentationRole:role,presentationSource:'estimated-opaque-dark-coating'};material.needsUpdate=true;replacements.set(original,material);const association=gltf.parser?.associations.get(original);if(association)gltf.parser.associations.set(material,{...association});continue;}
     if(!T?.MeshPhysicalMaterial){materialWarnings.push('Physical material support unavailable; original board factors retained.');continue;}
     const material=new T.MeshPhysicalMaterial();T.MeshStandardMaterial.prototype.copy.call(material,original);material.defines={...material.defines,PHYSICAL:''};
-    const settings=role==='soldermask'?{metalness:0,roughness:.24,opacity:1,transparent:false,depthWrite:true,clearcoat:1,clearcoatRoughness:.10,ior:1.5,transmission:0}:
+    const dark=original.transparent&&original.opacity<1&&Math.max(original.color.r,original.color.g,original.color.b)<.12,coat={metalness:0,roughness:.24,clearcoat:1,clearcoatRoughness:.10,ior:1.5,transmission:0};
+    const settings=studio?(dark?{...coat,opacity:1,transparent:false,depthWrite:true}:coat):role==='soldermask'?{...coat,opacity:1,transparent:false,depthWrite:true}:
       role==='silkscreen'?{metalness:0,roughness:.82,opacity:1,transparent:false,depthWrite:true}:
       role==='substrate'?{metalness:0,roughness:.9}:
       {metalness:1,roughness:.28};
     const index=gltf.parser?.associations.get(original)?.materials,definition=gltf.parser?.json.materials?.[index],pbr=definition?.pbrMetallicRoughness||{};
     for(const [key,value]of Object.entries(settings)){if(original[key]!==value){presentationOverrideCount++;if(key==='metalness'&&Object.hasOwn(pbr,'metallicFactor')||key==='roughness'&&Object.hasOwn(pbr,'roughnessFactor')||key==='opacity'&&pbr.baseColorFactor?.length===4||key==='transparent'&&Object.hasOwn(definition||{},'alphaMode'))explicitPresentationOverrideCount++;}material[key]=value;}
-    material.name=original.name;material.userData={...original.userData,presentationRole:role,presentationSource:'estimated-physical-board-role'};material.needsUpdate=true;
+    material.name=original.name;material.userData={...original.userData,presentationRole:role,presentationSource:studio?'estimated-glossy-coating':'estimated-physical-board-role'};material.needsUpdate=true;
     replacements.set(original,material);const association=gltf.parser?.associations.get(original);if(association)gltf.parser.associations.set(material,{...association});
   }
   if(replacements.size){const meshes=[];gltf.scene.traverse(o=>{if(!o.isMesh)return;meshes.push([o,o.material]);o.material=Array.isArray(o.material)?o.material.map(m=>replacements.get(m)||m):replacements.get(o.material)||o.material;});presentations.set(gltf,{meshes,materials:[...replacements.values()]});}
-  if(mode==='cad-studio'&&replacements.size)materialWarnings.push('Dark soldermask drawn opaque: its authored translucency would show the substrate colour through it.');
+  if(mode==='cad-studio'&&replacements.size)materialWarnings.push('Soldermask presented as a glossy coat; a dark mask is drawn opaque, since its authored translucency would show the substrate colour through it.');
   if(mode==='realistic')materialWarnings.push('Board coating and finish are presentation estimates; unclassified component materials retain explicit factors and estimates only for missing fields.');
-  return {materialPolicy:mode,materialPolicies:['realistic','cad-studio','source-defaults'],missingFactorCount,estimatedFactorCount,unmappedMaterialCount,materialRoleCounts,presentationOverrideCount,explicitPresentationOverrideCount,materialWarnings,materialSource:mode==='realistic'?'original-glb-with-estimated-physical-board-materials':replacements.size?'original-glb-with-opaque-dark-coating':estimatedFactorCount?'original-glb-with-estimated-missing-factors':'original-glb'};
+  return {materialPolicy:mode,materialPolicies:['realistic','cad-studio','source-defaults'],missingFactorCount,estimatedFactorCount,unmappedMaterialCount,materialRoleCounts,presentationOverrideCount,explicitPresentationOverrideCount,materialWarnings,materialSource:mode==='realistic'?'original-glb-with-estimated-physical-board-materials':replacements.size?'original-glb-with-glossy-coating':estimatedFactorCount?'original-glb-with-estimated-missing-factors':'original-glb'};
 }
