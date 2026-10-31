@@ -31,7 +31,14 @@ export function applyMaterialPolicy(gltf,policy='cad-studio',T){
   const materialRoleCounts={},replacements=new Map(),materialWarnings=[];let explicitPresentationOverrideCount=0,presentationOverrideCount=0;
   for(const [original,set]of roles){
     const role=set.size===1?[...set][0]:'ambiguous';materialRoleCounts[role]=(materialRoleCounts[role]||0)+1;
-    if(mode!=='realistic'||role==='unclassified'||role==='ambiguous')continue;
+    if(role==='unclassified'||role==='ambiguous')continue;
+    // A dark coating hides the laminate: KiCad's 83% alpha over its olive
+    // substrate turns a black mask olive. Studio draws only dark masks
+    // opaque; lighter masks keep the authored translucency over copper.
+    const studio=mode==='cad-studio'&&role==='soldermask'&&original.transparent&&original.opacity<1&&Math.max(original.color.r,original.color.g,original.color.b)<.12;
+    if(mode!=='realistic'&&!studio)continue;
+    if(studio){const material=original.clone();for(const [key,value]of [['opacity',1],['transparent',false],['depthWrite',true]])if(material[key]!==value){presentationOverrideCount++;if(key!=='depthWrite')explicitPresentationOverrideCount++;material[key]=value;}
+      material.userData={...original.userData,presentationRole:role,presentationSource:'estimated-opaque-dark-coating'};material.needsUpdate=true;replacements.set(original,material);const association=gltf.parser?.associations.get(original);if(association)gltf.parser.associations.set(material,{...association});continue;}
     if(!T?.MeshPhysicalMaterial){materialWarnings.push('Physical material support unavailable; original board factors retained.');continue;}
     const material=new T.MeshPhysicalMaterial();T.MeshStandardMaterial.prototype.copy.call(material,original);material.defines={...material.defines,PHYSICAL:''};
     const settings=role==='soldermask'?{metalness:0,roughness:.24,opacity:1,transparent:false,depthWrite:true,clearcoat:1,clearcoatRoughness:.10,ior:1.5,transmission:0}:
@@ -44,6 +51,7 @@ export function applyMaterialPolicy(gltf,policy='cad-studio',T){
     replacements.set(original,material);const association=gltf.parser?.associations.get(original);if(association)gltf.parser.associations.set(material,{...association});
   }
   if(replacements.size){const meshes=[];gltf.scene.traverse(o=>{if(!o.isMesh)return;meshes.push([o,o.material]);o.material=Array.isArray(o.material)?o.material.map(m=>replacements.get(m)||m):replacements.get(o.material)||o.material;});presentations.set(gltf,{meshes,materials:[...replacements.values()]});}
+  if(mode==='cad-studio'&&replacements.size)materialWarnings.push('Dark soldermask drawn opaque: its authored translucency would show the substrate colour through it.');
   if(mode==='realistic')materialWarnings.push('Board coating and finish are presentation estimates; unclassified component materials retain explicit factors and estimates only for missing fields.');
-  return {materialPolicy:mode,materialPolicies:['realistic','cad-studio','source-defaults'],missingFactorCount,estimatedFactorCount,unmappedMaterialCount,materialRoleCounts,presentationOverrideCount,explicitPresentationOverrideCount,materialWarnings,materialSource:mode==='realistic'?'original-glb-with-estimated-physical-board-materials':estimatedFactorCount?'original-glb-with-estimated-missing-factors':'original-glb'};
+  return {materialPolicy:mode,materialPolicies:['realistic','cad-studio','source-defaults'],missingFactorCount,estimatedFactorCount,unmappedMaterialCount,materialRoleCounts,presentationOverrideCount,explicitPresentationOverrideCount,materialWarnings,materialSource:mode==='realistic'?'original-glb-with-estimated-physical-board-materials':replacements.size?'original-glb-with-opaque-dark-coating':estimatedFactorCount?'original-glb-with-estimated-missing-factors':'original-glb'};
 }
