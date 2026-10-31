@@ -745,9 +745,25 @@ def RvJob.components.done(r: P.Ran) -> Res:
     case P.Ran{_, _}:
       Res.err("Could not read saved component metadata")
 
+# a page after the first, at revisions the cache still matches, is answered
+# here (COMP.ComponentsFx.get re-checks both files' stamps); anything else
+# starts the child, whose first page also fills the cache
+def RvJob.components.k(miss: Bool, +hit: String, +cwd: String, +off: String, +pcb: String, +sch: String) -> IO(Res):
+  match miss:
+    case True{}:
+      IO.bind(P.Ran, Res, Rvc.run(["--review", "components-page", cwd, off, pcb, sch]), r => IO.pure(Res, RvJob.components.done(r)))
+    case False{}:
+      IO.pure(Res, RvJob.components.done(P.Ran{0, hit}))
+
+def RvJob.components.at(+hit: String, +cwd: String, +off: String, +pcb: String, +sch: String) -> IO(Res):
+  RvJob.components.k(String.is_empty(hit), hit, cwd, off, pcb, sch)
+
 def RvJob.components(+cwd: String, spec: String) -> IO(Res):
   +o = Maybe.default(&2, J.Json, J.Json.parse(spec), J.Null{})
-  IO.bind(P.Ran, Res, Rvc.run(["--review", "components-page", cwd, Nat.show(J.Json.get_nat(o, "offset", 0n)), J.Json.get_str(o, "sourceRevision", ""), J.Json.get_str(o, "schematicRevision", "")]), r => IO.pure(Res, RvJob.components.done(r)))
+  +off = Nat.show(J.Json.get_nat(o, "offset", 0n))
+  +pcb = J.Json.get_str(o, "sourceRevision", "")
+  +sch = J.Json.get_str(o, "schematicRevision", "")
+  IO.bind(String, Res, COMP.ComponentsFx.get(cwd, off, pcb, sch), hit => RvJob.components.at(hit, cwd, off, pcb, sch))
 
 # a warm request for an asset already published at this exact revision is
 # answered here (RenderAssetFx.memo re-checks the source's stamp and the

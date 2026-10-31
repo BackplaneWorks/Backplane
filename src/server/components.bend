@@ -82,7 +82,41 @@ def Components.response(+data: J.Json) -> String:
 def Components.child(cwd: String) -> IO(Unit):
   IO.bind(J.Json, Unit, Components.read(cwd), data => IO.print(Components.response(data)))
 
+# Pages kept per (project, PCB revision, schematic revision): see
+# effects/components_cache.js. put answers "", get the page's exact response
+# or "" when anything differs.
+def ComponentsFx.put(cwd: String, pcb: String, sch: String, pcbRev: String, schRev: String, offset: String, text: String) -> IO(String):
+  import "./effects/components_cache.js"
+
+def ComponentsFx.get(cwd: String, offset: String, pcbRev: String, schRev: String) -> IO(String):
+  import "./effects/components_cache.js"
+
+# every page of a first read, so the hub answers the pages after it from the
+# cache (a page child parses both files again for one page)
+def Components.pages.put(fuel: Nat, go: Bool, +data: J.Json, +off: Nat, +cwd: String, +pcb: String, +sch: String) -> IO(Unit):
+  match fuel go:
+    case 1n+f True{}:
+      +pcbRev = J.Json.get_str(data, "sourceRevision", "")
+      +schRev = J.Json.get_str(data, "schematicRevision", "")
+      +page = C.Components.page(data, off, pcbRev, schRev)
+      +next = J.Json.get_nat(J.Json.get_obj(page, "page"), "next", 0n)
+      do IO<Unit>:
+        w : String <- ComponentsFx.put(cwd, pcb, sch, pcbRev, schRev, Nat.show(off), Components.response(page))
+        Components.pages.put(f, Bool.and(String.is_empty(J.Json.get_str(page, "error", "")), Nat.is_gt(next, off)), data, next, cwd, pcb, sch)
+    case _ _:
+      IO.pure(Unit, Unit{})
+
+def Components.page.files(fs: K.Files, +cwd: String, +offset: Nat, +pcbRev: String, +schRev: String) -> IO(Unit):
+  match fs:
+    case K.Files{_, +pcb, +sch, _}:
+      do IO<Unit>:
+        +a : ComponentRevision <- Components.version(pcb)
+        +b : ComponentRevision <- Components.version(sch)
+        +data : J.Json <- Components.load(Bool.and(Components.small(a), Components.small(b)), pcb, sch, a, b)
+        IO.print(Components.response(C.Components.page(data, offset, pcbRev, schRev)))
+        Components.pages.put(4097n, Bool.and(Nat.is_eq(offset, 0n), Bool.and(String.is_empty(pcbRev), String.is_empty(J.Json.get_str(data, "error", "")))), data, 0n, cwd, pcb, sch)
+
 # Subsequent pages send both stamps from the first page. The unchanged outer
 # response cap includes its envelope and trailing newline.
-def Components.page.child(cwd: String, offset: Nat, pcb: String, sch: String) -> IO(Unit):
-  IO.bind(J.Json, Unit, Components.read(cwd), data => IO.print(Components.response(C.Components.page(data, offset, pcb, sch))))
+def Components.page.child(+cwd: String, offset: Nat, pcb: String, sch: String) -> IO(Unit):
+  IO.bind(K.Files, Unit, K.Files.read(cwd), fs => Components.page.files(fs, cwd, offset, pcb, sch))
