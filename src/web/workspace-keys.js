@@ -142,7 +142,7 @@ const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,
 const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button';
 export function installComposerFocus({ document: doc = document, window: win = window,
   phone = () => win.matchMedia?.('(max-width: 760px), (hover: none) and (pointer: coarse)').matches } = {}) {
-  let want = true, thread = '', covered = false, viewer = false, pressed = false;
+  let want = true, thread = '', covered = false, viewer = false, pressed = false, restore = false;
   const carets = new Map();
   const field = () => doc.getElementById?.('composer');
   const here = () => doc.querySelector?.('main.thread-view[data-thread]')?.getAttribute('data-thread') || '';
@@ -172,12 +172,13 @@ export function installComposerFocus({ document: doc = document, window: win = w
     if (!want || over || pressed || !el || el.disabled || !shown(el)) return;
     want = false;
     const active = doc.activeElement;
-    if (active === el || busy(active) || phone()) return;
+    if (active === el || busy(active) || phone() && !restore) { restore = false;return; }
     const selection = win.getSelection?.();
-    if (selection && !selection.isCollapsed && !el.contains(selection.anchorNode)) return;
+    if (selection && !selection.isCollapsed && !el.contains(selection.anchorNode)) { restore = false;return; }
+    restore = false;
     put(el, carets.get(now));
   };
-  doc.addEventListener('pointerdown', event => { pressed = true; if (event.target?.closest?.(TURN_BUTTONS)) want = true; }, true);
+  doc.addEventListener('pointerdown', event => { pressed = true;restore = false; if (event.target?.closest?.(TURN_BUTTONS)) want = true; }, true);
   // a menu (a <details>) opened or shut by Esc, a click or its own item:
   // no render follows, so the cover is looked at once it has toggled
   doc.addEventListener('toggle', () => win.setTimeout(check, 0), true);
@@ -189,7 +190,9 @@ export function installComposerFocus({ document: doc = document, window: win = w
   return {
     check,
     // Esc, a reconnect: the keyboard goes there now if it can
-    claim() { want = true;check(); },
+    // An explicit keyboard dismissal may restore the caret at narrow widths
+    // too; automatic focus still leaves the phone's keyboard alone.
+    claim(returning = false) { want = true;restore = returning;check(); },
     // "/": to the end of the draft
     end() { const el = field();if (el && !phone()) { want = false;put(el); return true; } return false; },
   };
@@ -198,17 +201,7 @@ export function installComposerFocus({ document: doc = document, window: win = w
 export function installWorkspaceKeys({ dispatch, document: doc = document, platform = navigator.platform, escNext = null, clearProbe = null, composer = null }) {
   doc.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
-    if (doc.querySelector('.tour,.lightbox')) return; // The active overlay owns every key.
-    const models = doc.querySelector('[data-local-models="1"]');
-    if (models && models.style.display !== 'none') {
-      const action = modelPickerKey(event);
-      if (action) { event.preventDefault(); event.stopImmediatePropagation(); dispatch(...action); return; }
-    }
-    // The token stats panel (view.bend's View.tok.pop) shuts on Escape like
-    // the picker, as a click on its chip does
-    if (event.key === 'Escape' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && doc.querySelector('.tok-pop')) {
-      event.preventDefault(); event.stopImmediatePropagation(); dispatch('flag', 'tokstats'); return;
-    }
+    if (doc.querySelector('.tour,.lightbox') || doc.querySelector('.draw-back')) return; // The active overlay owns every key.
     const palette = doc.querySelector('.workspace-palette');
     if (palette) {
       const action = { Escape: 'ws-palette-close', Enter: 'ws-palette-enter', ArrowUp: 'ws-palette-move', ArrowDown: 'ws-palette-move' }[event.key];
@@ -223,9 +216,19 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
         return;
       }
     }
+    const models = doc.querySelector('[data-local-models="1"]');
+    if (models && models.style.display !== 'none') {
+      const action = modelPickerKey(event);
+      if (action) { event.preventDefault(); event.stopImmediatePropagation(); dispatch(...action); return; }
+    }
+    // The token stats panel (view.bend's View.tok.pop) shuts on Escape like
+    // the picker, after any dialog opened over it has had the key.
+    if (event.key === 'Escape' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && doc.querySelector('.tok-pop')) {
+      event.preventDefault(); event.stopImmediatePropagation(); dispatch('flag', 'tokstats'); composer?.claim(true); return;
+    }
     if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
       const close = overlayEscape(doc);
-      if (close) { event.preventDefault(); event.stopImmediatePropagation(); close(); composer?.claim(); return; }
+      if (close) { event.preventDefault(); event.stopImmediatePropagation(); close(); composer?.claim(true); return; }
     }
     // Esc with no menu or dialog open puts away the floating terminal, else
     // the probe, else the viewer (escNext: workspace.bend's WS.esc.next),

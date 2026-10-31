@@ -506,3 +506,29 @@ test('the composer never takes the keyboard from a field, during a press, over a
   assert.equal(phone.doc.activeElement, phone.body);
   assert.equal(phone.keeper.end(), false);
 });
+
+test('explicit dismissal restores a narrow composer after the popover redraw, keeping its caret', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus, { phone: true });
+  h.doc.activeElement = h.composer;h.composer.setSelectionRange(2, 2);h.fire('select');
+  h.page.over = true;h.doc.activeElement = h.body;h.keeper.check();
+  h.keeper.claim(true);
+  assert.equal(h.doc.activeElement, h.body);
+  h.page.over = false;h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [2, 2]);
+});
+
+test('Escape closes a palette or drawing dialog before token stats underneath', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  let listener, draw = false, palette = true;
+  const actions = [];
+  const doc = { addEventListener: (_type, fn) => { listener = fn; }, querySelector: selector =>
+    selector === '.draw-back' ? (draw ? {} : null) : selector === '.workspace-palette' ? (palette ? {} : null) :
+    selector === '.tok-pop' ? {} : null };
+  installWorkspaceKeys({ dispatch: (...a) => actions.push(a), document: doc, platform: 'Linux' });
+  const press = () => listener(event('Escape', { preventDefault() {}, stopImmediatePropagation() {} }));
+  press();assert.deepEqual(actions, [['ws-palette-close', '']]);
+  draw = true;palette = false;press();assert.equal(actions.length, 1);
+  draw = false;press();assert.deepEqual(actions[1], ['flag', 'tokstats']);
+});
