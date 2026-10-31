@@ -411,7 +411,7 @@ class View {
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) this.tap = null;
       if (this.pinch && this.pts.size === 2) {
-        const m = mid(), f = m.d / Math.max(this.pinch.d, 1);
+        const m = mid(), f = this.zoomFactor(m.d / Math.max(this.pinch.d, 1));
         this.ox = m.x - (this.pinch.x - this.ox) * f; this.oy = m.y - (this.pinch.y - this.oy) * f;
         this.scale *= f;
         this.pinch = m;
@@ -466,7 +466,7 @@ class View {
       const px = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1;
       if (kind === "pad") { this.ox -= e.deltaX * px; this.oy -= e.deltaY * px; }
       else {
-        const f = Math.exp(-e.deltaY * px * (kind === "pinch" ? 0.01 : 0.0015));
+        const f = this.zoomFactor(Math.exp(-e.deltaY * px * (kind === "pinch" ? 0.01 : 0.0015)));
         this.ox = mx - (mx - this.ox) * f; this.oy = my - (my - this.oy) * f;
         this.scale *= f;
       }
@@ -594,6 +594,14 @@ class View {
   }
 
   // the whole plot in view, centred, with a margin
+  zoomFactor(factor) {
+    const box = this.plot?.box;
+    if (!box) return factor;
+    const [x0, y0, x1, y1] = box;
+    const fit = 0.9 * Math.min(this.canvas.clientWidth / Math.max(x1 - x0, 1), this.canvas.clientHeight / Math.max(y1 - y0, 1));
+    return Math.max(fit / 4, this.scale * factor) / this.scale;
+  }
+
   fit() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (!this.plot || !this.plot.box || w === 0 || h === 0) { this.later(); return; }
