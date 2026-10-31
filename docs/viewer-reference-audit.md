@@ -276,3 +276,19 @@ What remains:
 - About 0.8–0.9 s from click to the PCB's `plotrevision`. The plot actor announces a revision only after its `--plot` child has parsed the board (`Pv.revision.ready`), although `Pv.poll.st` has the stamp at once. An early stamp needs a new side channel that clients opt into: the native bridge rejected an unknown one before (above), and components bind on `plotrevision`.
 - About 0.35 s for the asset RPC.
 - About 0.25 s parse and about 0.3 s from proof to reveal.
+
+**Hub asset and component work after #551, #553, #555 and #556 (2026-10-31).** Same SMU card, RTX 5080 and isolated hub; each change measured interleaved A/B.
+- **#551:** a warm `kicad.renderAsset` used to start a `--review renderasset` child of the 117 MB hub binary, about 0.24 s just to start. The hub now answers it from a private memo keyed by (project, kind, exact revision). It re-checks the source stamp and the cached copy first. Asset RPC went from 339–354 ms to 2–4 ms.
+- **#553:** every `kicad.components` page after the first used to start a child that parsed the board and schematic again. The first-page child now writes all pages to a private cache keyed by both revisions, and the hub answers later pages after re-stat'ing both files.
+- **#555:** a revision arriving mid-read no longer queues a second full read when the read already returned that revision.
+- **#556:** page 0 is answered from the cache at the canonical files' current stamps (`K.Files.read` in the hub, as the child would do). Metadata already at the arriving revision is kept.
+
+Now:
+- click to original-source GPU visibility is 1.31–1.37 s (was 3.9–4.0 s on 2026-10-30);
+- the full 96-part list arrives at 0.51–0.54 s (was about 5 s), in one round.
+
+What remains of the first frame:
+- about 0.75–0.8 s waiting for the PCB `plotrevision` (the early-stamp side channel above, awaiting the person's decision);
+- about 0.25 s GLTF parse of 22,357 meshes;
+- about 0.13 s batch build;
+- the proof draw.
