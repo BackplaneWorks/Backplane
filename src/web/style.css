@@ -1999,6 +1999,10 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 
 /* Geometry comes from the Bend port of TanStack virtual-core 3.19.9. */
 .timeline-virtual-track { overflow-anchor: none; }
+/* Keep questions, replies and the message box in one reading column on
+   wide windows. The timeline scrollbar stays at the edge of its pane. */
+.thread-view .timeline-virtual-track, .thread-content > .composer { max-width: 960px; margin-inline: auto; }
+.thread-content > .composer { box-sizing: border-box; width: 100%; }
 .timeline-virtual-row { box-sizing: border-box; padding-inline: 16px; display: flex; flex-direction: column; }
 .timeline-virtual-row > * { flex: none; }
 .timeline-entry { display: flex; flex-direction: column; gap: 10px; }
