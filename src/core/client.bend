@@ -723,8 +723,30 @@ def Ui.reply.k(u: Ui, +o: J.Json) -> Ui:
 def Viewer.n(+nf: Map<&2, String>, +th: String) -> String:
   Nat.show(1n+Maybe.default(&2, Nat, Nat.read(Str.get(nf, "view.n:" ++ th)), 0n))
 
+# Drawing choices outlive tabs whose path names a report or a folder.
+# A mechanical part is not a board choice.
+def Viewer.design(+kind: String, +path: String) -> Bool:
+  Bool.or(Bool.or(String.eq(kind, "board"), String.eq(kind, "schematic")),
+    Bool.or(String.eq(kind, "split"), Bool.and(String.eq(kind, "3d"), Bool.or(String.is_empty(path), String.ends_with(path, ".kicad_pcb")))))
+
+def Viewer.board_changed(+nf: Map<&2, String>, +th: String, +path: String) -> Bool:
+  +old = HI.Hist.family(Str.get(nf, "view.design:" ++ th))
+  +file = HI.Hist.family(path)
+  Bool.and(String.ends_with(file, ".kicad_pcb"), Bool.and(String.ends_with(old, ".kicad_pcb"), Bool.not(String.eq(old, file))))
+
+def Viewer.remember(drawing: Bool, schematic: Bool, +nf: Map<&2, String>, +th: String, +path: String) -> Map<&2, String>:
+  match drawing schematic:
+    case True{} True{}:
+      +board = Str.get(nf, "view.design:" ++ th)
+      Map.set(&2, String, Map.set(&2, String, nf, "view.design:" ++ th,
+        Bool.pick(String, String.ends_with(board, ".kicad_pcb"), board, HI.Hist.family(path))), "view.sheet:" ++ th, HI.Hist.family(path))
+    case True{} False{}:
+      +kept = Bool.pick(Map<&2, String>, Viewer.board_changed(nf, th, path), Map.set(&2, String, Map.set(&2, String, nf, "view.tree:" ++ th, ""), "view.sheet:" ++ th, ""), nf)
+      Map.set(&2, String, kept, "view.design:" ++ th, HI.Hist.family(path))
+    case False{} _: nf
+
 def Viewer.put(+nf: Map<&2, String>, +th: String, +kind: String, +path: String) -> Map<&2, String>:
-  Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, nf, "view.kind:" ++ th, kind), "view.path:" ++ th, path), "view.n:" ++ th, Viewer.n(nf, th))
+  Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Viewer.remember(Viewer.design(kind, path), String.eq(kind, "schematic"), nf, th, path), "view.kind:" ++ th, kind), "view.path:" ++ th, path), "view.n:" ++ th, Viewer.n(nf, th))
 
 # the thread a view message is for: named, else the selected one (a hub
 # from before views were per thread names none)
@@ -5985,8 +6007,22 @@ def Bd.keep.k(+cur: String, +kind: String, +root: String) -> String:
   Bool.pick(String, Bool.and(Bool.not(String.is_empty(cur)), Bool.or(Bool.or(String.eq(kind, "board"), String.eq(kind, "split")), Bool.or(String.eq(kind, "schematic"), String.eq(kind, "3d")))),
     FM.Fm.abs(root, Bd.path(kind, cur)), "")
 
+# Non-drawing tabs keep their own path; the last drawing is separate.
+def Bd.context(+u: Ui) -> String:
+  Bool.pick(String, Viewer.design(Ui.view_get(u, "view.kind"), Ui.view_get(u, "view.path")), Ui.view_get(u, "view.path"), Ui.view_get(u, "view.design"))
+
+# A picked board is useful before its asynchronously read card arrives.
+# Its sheets keep this board anchor while remembering their own file.
+def Bd.anchor(+kind: String, +board: String) -> String:
+  Bool.pick(String, Bool.and(String.ends_with(board, ".kicad_pcb"), Bool.or(Bool.or(String.eq(kind, "board"), String.eq(kind, "split")), String.eq(kind, "3d"))), board, "")
+
+def Bd.tree.saved(+root: String, +tree: String) -> String:
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(root)), Bool.and(String.starts_with(tree, root ++ "/"),
+    Bool.and(String.ends_with(tree, ".kicad_sch"), FM.Fm.safe(String.drop(tree, 1n+String.length(root)))))), tree, "")
+
 def Bd.keep(+u: Ui, +kind: String, +path: String) -> String:
-  Bd.keep.k(Bool.pick(String, Bd.many(u), Bd.cur(Bd.files(u), path), ""), kind, Ui.root(u))
+  +kept = Bd.keep.k(Bool.pick(String, Bd.many(u), Bd.cur(Bd.files(u), path), ""), kind, Ui.root(u))
+  Bool.pick(String, String.is_empty(kept), Bool.pick(String, String.eq(kind, "schematic"), Bd.tree.saved(Ui.root(u), Ui.view_get(u, "view.tree")), Bd.anchor(kind, Ui.view_get(u, "view.design"))), kept)
 
 def Bd.or(+a: String, +b: String) -> String:
   Bool.pick(String, String.is_empty(a), b, a)
@@ -6006,7 +6042,22 @@ def Bd.tree.k(+cur: String, +root: String) -> String:
   Bool.pick(String, String.is_empty(cur), "", FM.Fm.abs(root, Bd.path("schematic", cur)))
 
 def Bd.tree(+u: Ui, +path: String) -> String:
-  Bool.pick(String, Bd.many(u), Bd.tree.k(Bd.cur(Bd.files(u), Bd.shown(u, path)), Ui.root(u)), "")
+  Bd.or(Bd.tree.saved(Ui.root(u), Ui.view_get(u, "view.tree")),
+    Bool.pick(String, Bd.many(u), Bd.tree.k(Bd.cur(Bd.files(u), Bd.shown(u, path)), Ui.root(u)), ""))
+
+def Bd.sheet.allowed(+u: Ui, +path: String) -> Bool:
+  +sheet = Ui.view_get(u, "view.sheet")
+  +tree = Ui.view_get(u, "view.tree")
+  Bool.and(Bool.not(String.is_empty(sheet)), Bool.or(Bool.and(Bool.not(String.is_empty(tree)), String.eq(path, tree)),
+    Bool.or(Bool.and(String.is_empty(path), Bool.not(Bd.many(u))), String.eq(MC.Mech.parent(sheet), MC.Mech.parent(path)))))
+
+def Bd.id.k(+root: String, +board: String, +tree: String, +known: String) -> String:
+  Bool.pick(String, Bool.and(String.is_empty(known), Bool.and(Bool.not(String.is_empty(root)),
+    Bool.and(String.ends_with(board, ".kicad_pcb"), Bool.and(String.starts_with(board, root ++ "/"), String.starts_with(tree, root ++ "/"))))),
+    String.drop(board, 1n+String.length(root)), known)
+
+def Bd.id(+u: Ui) -> String:
+  Bd.id.k(Ui.root(u), Ui.view_get(u, "view.design"), Bd.tree.saved(Ui.root(u), Ui.view_get(u, "view.tree")), Bd.cur(Bd.files(u), Bd.shown(u, Bd.context(u))))
 
 # The card is asked again only when the thread or its turn moves on (Fab.sync),
 # so a board added or removed meanwhile never reached the picker. Each time
@@ -6100,7 +6151,8 @@ def Split.sheet.k(+kept: String, +root: String, many: Bool) -> String:
   Bool.pick(String, Bool.or(String.is_empty(kept), Bool.and(many, Bool.not(String.eq(MC.Mech.parent(kept), MC.Mech.parent(root))))), root, kept)
 
 def Split.sheet(+u: Ui) -> String:
-  Split.sheet.k(Ui.scratch(u, Split.key(u)), Bd.tree(u, Ui.view_get(u, "view.path")), Bd.many(u))
+  +root = Bd.tree(u, Ui.view_get(u, "view.path"))
+  Bool.pick(String, Bd.sheet.allowed(u, root), Ui.view_get(u, "view.sheet"), Split.sheet.k(Ui.scratch(u, Split.key(u)), root, Bd.many(u)))
 
 # the panes the hub watches for it: "s" the schematic, "b" the board, "3"
 # its 3D model
@@ -6130,7 +6182,7 @@ def Sch.path(+u: Ui) -> String:
 def Sch.put(split: Bool, +u: Ui, +file: String) -> Ui:
   match split:
     case True{}:
-      Ui.scratch_set(u, Split.key(u), file)
+      Ui.scratch_set(Ui.info_set(u, "view.sheet:" ++ Ui.sel(u), HI.Hist.family(file)), Split.key(u), file)
     case False{}:
       Ui.view_put(u, "schematic", file)
 
@@ -6611,19 +6663,29 @@ def Ui.view_pick.back(+u: Ui, +kind: String) -> Ui:
 
 # the window's tab picked: a comparison kept (Rv.back), else the board picked
 def Ui.view_pick.bd(+u: Ui, +kind: String) -> Ui:
-  Ui.view_pick.p(u, kind, Bd.or(Rv.back(u, kind), Bd.keep(u, kind, Bd.shown(u, Ui.view_get(u, "view.path")))))
+  Ui.view_pick.p(u, kind, Bd.or(Rv.back(u, kind), Bd.keep(u, kind, Bd.shown(u, Bd.context(u)))))
 
 def Bd.kind(+k: String) -> String:
   Bool.pick(String, Bool.or(Bool.or(String.eq(k, "schematic"), String.eq(k, "split")), String.eq(k, "3d")), k, "board")
 
+def Bd.picked(+u: Ui, +rel: String) -> Ui:
+  +board = FM.Fm.abs(Ui.root(u), rel)
+  +tree = FM.Fm.abs(Ui.root(u), Bd.path("schematic", rel))
+  +changed = Bool.not(String.eq(Ui.view_get(u, "view.design"), board))
+  +picked = Ui.info_set(Ui.info_set(u, "view.design:" ++ Ui.sel(u), board), "view.tree:" ++ Ui.sel(u), tree)
+  Bool.pick(Ui, changed, Ui.scratch_set(Ui.info_set(picked, "view.sheet:" ++ Ui.sel(u), tree), Split.key(u), tree), picked)
+
 def Bd.pick(+u: Ui, +rel: String) -> Act:
-  Act{Ui.view_put(u, Bd.kind(Ui.view_get(u, "view.kind")), FM.Fm.abs(Ui.root(u), Bd.path(Bd.kind(Ui.view_get(u, "view.kind")), rel))), Nil{}}
+  Act{Ui.view_put(Bd.picked(u, rel), Bd.kind(Ui.view_get(u, "view.kind")), FM.Fm.abs(Ui.root(u), Bd.path(Bd.kind(Ui.view_get(u, "view.kind")), rel))), Nil{}}
 
 # a viewer tab's file: a comparison kept (Rv.back), else the board picked
 # (Bd.keep); the Schematic tab from the combined view shows its sheet
+def Bd.sheet.keep(+u: Ui, +kind: String, +path: String) -> String:
+  Bool.pick(String, Bool.and(String.eq(kind, "schematic"), Bd.sheet.allowed(u, path)), Ui.view_get(u, "view.sheet"), path)
+
 def View.kind.path(+u: Ui, +value: String) -> String:
   Bd.or(Rv.back(u, value), Bool.pick(String, Bool.and(Split.is(u), String.eq(value, "schematic")), Split.sheet(u),
-    Bd.keep(u, value, Bd.shown(u, Ui.view_get(u, "view.path")))))
+    Bd.sheet.keep(u, value, Bd.keep(u, value, Bd.shown(u, Bd.context(u))))))
 
 # into the combined view from the Schematic tab: its sheet comes along
 def Split.enter(sch: Bool, +u: Ui) -> Ui:
@@ -7093,16 +7155,22 @@ def Viewer.live(+path: String) -> String:
   Bool.pick(String, Nat.is_eq(HI.Hist.kind(path), 0n), path, "")
 
 def Viewer.keep(+u: Ui) -> String:
-  J.Json.show(J.Json.obj([J.KV{"open", J.Str{Viewer.flag(Ui.panel(u))}}, J.KV{"kind", J.Str{Ui.info(u, "view.kind:" ++ Ui.sel(u))}},
-    J.KV{"path", J.Str{Viewer.live(Ui.info(u, "view.path:" ++ Ui.sel(u)))}}, J.KV{"sheet", J.Str{Ui.scratch(u, "@sch:" ++ Ui.sel(u))}},
-    J.KV{"split", J.Str{Ui.scratch(u, "@split.sheet:" ++ Ui.sel(u))}}]))
+  +th = Ui.sel(u)
+  J.Json.show(J.Json.obj([J.KV{"open", J.Str{Bool.pick(String, String.eq(Ui.sel(u), th), Viewer.flag(Ui.panel(u)), Ui.info(u, "panel:" ++ th))}},
+    J.KV{"thread", J.Str{th}}, J.KV{"root", J.Str{Ui.root.here(Ui.state(u), th)}}, J.KV{"kind", J.Str{Ui.info(u, "view.kind:" ++ th)}},
+    J.KV{"path", J.Str{Viewer.live(Ui.info(u, "view.path:" ++ th))}},
+    J.KV{"design", J.Str{Viewer.live(Ui.info(u, "view.design:" ++ th))}}, J.KV{"tree", J.Str{Viewer.live(Ui.info(u, "view.tree:" ++ th))}}, J.KV{"drawingSheet", J.Str{Viewer.live(Ui.info(u, "view.sheet:" ++ th))}},
+    J.KV{"sheet", J.Str{Ui.scratch(u, "@sch:" ++ th)}}, J.KV{"split", J.Str{Ui.scratch(u, "@split.sheet:" ++ th)}}]))
 
 def Viewer.restore.k(some: Bool, +u: Ui, +th: String, +o: J.Json) -> Ui:
   match some:
     case True{}:
-      Ui.scratch_set(Ui.scratch_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "panel:" ++ th, Viewer.flag(String.eq(J.Json.get_str(o, "open", ""), "1"))),
+      +kept = Ui.info_set(Ui.info_set(Ui.scratch_set(Ui.scratch_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "panel:" ++ th, Viewer.flag(String.eq(J.Json.get_str(o, "open", ""), "1"))),
         "view.kind:" ++ th, J.Json.get_str(o, "kind", "")), "view.path:" ++ th, Viewer.live(J.Json.get_str(o, "path", ""))),
-        "@sch:" ++ th, J.Json.get_str(o, "sheet", "")), "@split.sheet:" ++ th, J.Json.get_str(o, "split", ""))
+        "@sch:" ++ th, J.Json.get_str(o, "sheet", "")), "@split.sheet:" ++ th, J.Json.get_str(o, "split", "")),
+        "view.design:" ++ th, Viewer.live(J.Json.get_str(o, "design", Bool.pick(String, Viewer.design(J.Json.get_str(o, "kind", ""), J.Json.get_str(o, "path", "")), J.Json.get_str(o, "path", ""), "")))),
+        "view.sheet:" ++ th, Viewer.live(J.Json.get_str(o, "drawingSheet", Bool.pick(String, String.eq(J.Json.get_str(o, "kind", ""), "schematic"), J.Json.get_str(o, "path", ""), J.Json.get_str(o, "split", "")))))
+      Ui.info_set(kept, "view.tree:" ++ th, Viewer.live(J.Json.get_str(o, "tree", "")))
     case False{}:
       u
 
@@ -9640,16 +9708,20 @@ def Rp.compared(+u: Ui) -> Bool:
   Bool.not(String.is_empty(Hs.get(u, "cmp.a")))
 
 def Rp.bom.title.l(+l: I.Loc, +u: Ui) -> String:
+  +board = Bd.id(u)
   Bool.pick(String, Rp.compared(u),
     MSG.T.review.bom.change(l, Hs.label.shown(l, Hs.get(u, "cmp.al")), Hs.label.shown(l, Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl")))),
-    MSG.T.review.bom.working(l))
+    MSG.T.review.bom.working(l) ++ Bool.pick(String, Bool.and(Bool.not(String.is_empty(board)), Bool.or(Bd.many(u), Bool.not(String.is_empty(Ui.view_get(u, "view.tree"))))), " · " ++ Bd.name(board), ""))
 
 def Rp.bom.title(+u: Ui) -> String:
   Rp.bom.title.l(Lang.loc(u), u)
 
+def Rp.bom.root(+u: Ui) -> String:
+  Bd.tree(u, Bd.context(u))
+
 def Rp.ask.bom(+u: Ui) -> Act:
   Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "bom"), Rp.key(u, "rp.title", "bom"), Rp.bom.title(u)), "review.bom",
-    [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"a", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.a"), "")}}, J.KV{"b", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.b"), "")}}])
+    [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"a", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.a"), "")}}, J.KV{"b", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.b"), Rp.bom.root(u))}}])
 
 # the design checks run on the working copy, or on the new side of a
 # comparison when that is a commit
@@ -9729,8 +9801,11 @@ def Rp.sync(a: Act) -> Act:
   match a:
     case Act{+u, cs}:
       +page = Rp.page(u)
-      Rp.sync.k(Bool.and(Ui.panel(u), Bool.and(Bool.not(String.is_empty(page)), Bool.and(String.is_empty(Ui.info(u, Rp.key(u, "rp.title", page))),
-        Bool.and(String.is_empty(Ui.scratch(u, "@rp.busy:" ++ Ui.sel(u))), Bool.not(String.eq(Ui.scratch(u, "@rp.at:" ++ Ui.sel(u)), page)))))), u, page, cs)
+      # A reload can read the report before fab.look supplies its board list.
+      # Once that list resolves the saved drawing, read the chosen board.
+      +changed = Bool.and(String.eq(page, "bom"), Bool.not(String.eq(Ui.info(u, Rp.key(u, "rp.title", page)), Rp.bom.title(u))))
+      Rp.sync.k(Bool.and(Ui.panel(u), Bool.and(Bool.not(String.is_empty(page)), Bool.and(String.is_empty(Ui.scratch(u, "@rp.busy:" ++ Ui.sel(u))),
+        Bool.or(changed, Bool.and(String.is_empty(Ui.info(u, Rp.key(u, "rp.title", page))), Bool.not(String.eq(Ui.scratch(u, "@rp.at:" ++ Ui.sel(u)), page))))))), u, page, cs)
 
 # the hub's answer: {report: {thread, page, md, err}}, a check's with
 # {gate, line, tasks} too

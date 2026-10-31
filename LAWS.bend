@@ -13655,3 +13655,32 @@ law checks_detail_cap:
   {CHK.Checks.cap() == 4n : Nat}
 law checks_omitted_visible:
   {CHK.Ct.table.fin(CHK.Rows{Nil{}, 0n, 185n}) == "\n_185 more not shown_\n" : String}
+
+# A report path cannot overwrite the person's chosen drawing.
+law viewer_report_keeps_board:
+  {U.Str.get(U.Viewer.put(U.Viewer.put(Map.new(&2, String), "t", "board", "/r/beta.kicad_pcb"), "t", "review", "bom"), "view.design:t") == "/r/beta.kicad_pcb" : String}
+law viewer_part_keeps_board:
+  {U.Str.get(U.Viewer.put(U.Viewer.put(Map.new(&2, String), "t", "board", "/r/beta.kicad_pcb"), "t", "3d", "/r/part.step"), "view.design:t") == "/r/beta.kicad_pcb" : String}
+
+law viewer_wire_empty_target_unchanged:
+  {PRESENTVIEW.Session.viewer_input(U.Ui.init(0n), J.Json.obj(Nil{})) == J.Json.obj(Nil{}) : J.Json}
+
+# A sheet keeps its board even while its card is being read.
+law viewer_sheet_keeps_board_anchor:
+  {U.Str.get(U.Viewer.put(U.Viewer.put(Map.new(&2, String), "t", "board", "/r/boards/beta/beta.kicad_pcb"), "t", "schematic", "/r/boards/beta/power.kicad_sch"), "view.design:t") == "/r/boards/beta/beta.kicad_pcb" : String}
+
+# The chosen root is known before the board card arrives.
+law viewer_selected_root_before_card:
+  {U.Bd.tree.saved("/r", "/r/boards/beta/beta.kicad_sch") == "/r/boards/beta/beta.kicad_sch" : String}
+
+# The same selected board names a report before and after its card arrives.
+law viewer_selected_board_id_before_card:
+  {U.Bd.id.k("/r", "/r/boards/beta/beta.kicad_pcb", "/r/boards/beta/beta.kicad_sch", "") == "boards/beta/beta.kicad_pcb" : String}
+
+# Moving through a board's versions does not pick another board.
+law viewer_same_board_version_keeps_root:
+  {U.Viewer.board_changed(Map.set(&2, String, Map.new(&2, String), "view.design:t", "/r/boards/beta/beta.kicad_pcb"), "t", "git\t/r/.git\tc2\t2\t/r/boards/beta/beta.kicad_pcb") == False{} : Bool}
+
+# A cached drawing root cannot escape its thread's folder.
+law viewer_tree_root_stays_inside_thread:
+  {U.Bd.tree.saved("/r", "/elsewhere/beta.kicad_sch") == "" : String}

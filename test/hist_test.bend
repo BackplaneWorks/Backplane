@@ -162,7 +162,7 @@ def main() -> IO(Unit):
       ++ U.Ui.scratch(U.Viewer.restore(U.Ui.adopt(U.Ui.init(0n), state()), "t", U.Viewer.keep(sheet())), "@sch:t"), "/r/sub/s.kicad_sch|schematic|yes|1	/sub/")
     C.Check.str("a step on show comes back as the live file", path(reload(U.Viewer.keep(first))), "")
     C.Check.str("a shut viewer stays shut", yes(U.Ui.panel(reload(U.Viewer.keep(act(sheet(), "panel", ""))))), "no")
-    C.Check.str("a record that does not parse changes nothing", U.Viewer.keep(reload("{oops")), "{\"open\":\"\",\"kind\":\"\",\"path\":\"\",\"sheet\":\"\",\"split\":\"\"}")
+    C.Check.str("a record that does not parse changes nothing", U.Viewer.keep(reload("{oops")), "{\"open\":\"\",\"thread\":\"t\",\"root\":\"\",\"kind\":\"\",\"path\":\"\",\"design\":\"\",\"tree\":\"\",\"drawingSheet\":\"\",\"sheet\":\"\",\"split\":\"\"}")
     C.Check.str("back from live: the last step", path(back), "git\t/r/.git\tc4\t2\t/r/b.kicad_pcb")
     C.Check.str("bar at the last", bar(back), "True|3|3|Step 3 of 3|m2|Done.|Done.|FalseFalseFalse|||")
     C.Check.str("first", path(first), "git\t/r/.git\tc1\t2\t/r/b.kicad_pcb")

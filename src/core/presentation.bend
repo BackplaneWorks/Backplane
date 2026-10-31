@@ -93,7 +93,7 @@ def Session.read.flags(j: J.Json, acc: Map<&2, Bool>) -> Map<&2, Bool>:
 # reload (client.bend's Viewer.keep)
 def Session.info.key(+k: String) -> Bool:
   Bool.or(Bool.or(String.starts_with(k, "fold:"), Bool.or(String.starts_with(k, "subs:"), Bool.or(String.starts_with(k, "@f."), String.starts_with(k, "fab.")))),
-    Bool.or(String.starts_with(k, "panel:"), Bool.or(String.starts_with(k, "view.kind:"), String.starts_with(k, "view.path:"))))
+    Bool.or(String.starts_with(k, "panel:"), Bool.or(String.starts_with(k, "view.kind:"), Bool.or(String.starts_with(k, "view.path:"), Bool.or(String.starts_with(k, "view.design:"), Bool.or(String.starts_with(k, "view.tree:"), String.starts_with(k, "view.sheet:")))))))
 
 def Session.info.put(keep: Bool, acc: Map<&2, String>, k: String, v: String) -> Map<&2, String>:
   match keep:
@@ -317,3 +317,49 @@ def Session.commands(cs: List<&2, U.Cmd>) -> List<&2, J.Json>:
   match cs:
     case Nil{}: Nil{}
     case c <> tail: Session.command(c) <> Session.commands(tail)
+
+# The shared thin transport predates these drawing fields. Add only the
+# requested thread's bounded viewer context at the host boundary. A fresh
+# actor may seed it; an actor already running still keeps its own choices.
+def ViewerInput.fields(fs: J.Json, +key: String) -> J.Json:
+  match fs:
+    case J.Field{+k, v, tail}:
+      +rest = ViewerInput.fields(tail, key)
+      Bool.pick(J.Json, String.eq(k, key), rest, J.Field{k, v, rest})
+    case _: J.End{}
+
+def ViewerInput.put(j: J.Json, +key: String, value: J.Json) -> J.Json:
+  match j:
+    case J.Obj{fs}: J.Obj{J.Field{key, value, ViewerInput.fields(fs, key)}}
+    case _: J.Json.obj([J.KV{key, value}])
+
+def ViewerInput.value(short: Bool, key: String, value: String, info: J.Json) -> J.Json:
+  match short:
+    case True{}: ViewerInput.put(info, key, J.Str{value})
+    case False{}: info
+
+def ViewerInput.info(+u: U.Ui, +thread: String, +info: J.Json) -> J.Json:
+  +board = U.Ui.info(u, "view.design:" ++ thread)
+  +tree = U.Ui.info(u, "view.tree:" ++ thread)
+  +sheet = U.Ui.info(u, "view.sheet:" ++ thread)
+  ViewerInput.value(Nat.is_le(J.Json.bytes.str(sheet, 0n), 1024n), "view.sheet:" ++ thread, sheet,
+    ViewerInput.value(Nat.is_le(J.Json.bytes.str(tree, 0n), 1024n), "view.tree:" ++ thread, tree,
+      ViewerInput.value(Nat.is_le(J.Json.bytes.str(board, 0n), 1024n), "view.design:" ++ thread, board, info)))
+
+def ViewerInput.request(valid: Bool, +u: U.Ui, +request: J.Json, +thread: String) -> J.Json:
+  match valid:
+    case False{}: request
+    case True{}: ViewerInput.put(request, "info", ViewerInput.info(u, thread, J.Json.get_obj(request, "info")))
+
+def Session.viewer_input(+u: U.Ui, +request: J.Json) -> J.Json:
+  +thread = J.Json.get_str(request, "sel", "")
+  ViewerInput.request(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), u, request, thread)
+
+# Pending presentation choices can be newer than the last accepted Ui.
+# Transport their drawing fields too; the same per-thread bounds apply.
+def Session.viewer_input.current(+u: U.Ui, +info: J.Json, +request: J.Json) -> J.Json:
+  +thread = J.Json.get_str(request, "sel", "")
+  Session.viewer_input(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "view.design:" ++ thread,
+    J.Json.get_str(info, "view.design:" ++ thread, U.Ui.info(u, "view.design:" ++ thread))), "view.sheet:" ++ thread,
+    J.Json.get_str(info, "view.sheet:" ++ thread, U.Ui.info(u, "view.sheet:" ++ thread))), "view.tree:" ++ thread,
+    J.Json.get_str(info, "view.tree:" ++ thread, U.Ui.info(u, "view.tree:" ++ thread))), request)

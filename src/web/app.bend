@@ -256,6 +256,10 @@ def presentation_select(+u: U.Ui, id: String) -> U.Ui:
 def viewer_keep(u: U.Ui) -> String:
   U.Viewer.keep(u)
 
+# Add the requested thread's drawing context after the shared wire filter.
+def viewer_input(u: U.Ui, info: J.Json, request: J.Json) -> J.Json:
+  PS.Session.viewer_input.current(u, info, request)
+
 def viewer_restore(u: U.Ui, thread: String, text: String) -> U.Ui:
   U.Viewer.restore(u, thread, text)
 

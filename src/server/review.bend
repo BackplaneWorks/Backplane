@@ -1,5 +1,6 @@
 import Base
 import ../core/exe.bend as EX
+import ../core/fm.bend as FM
 import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/hist.bend as HI
@@ -544,8 +545,13 @@ def RvJob.bom.k(+sch: String, +thread: String, +a: String, +b: String) -> IO(Res
 # review.bom {thread, a, b}: the BOM of b (a "": one BOM; b "": the working
 # copy), or what changed from a to b; a and b are versions of any file of
 # the project (the one on show), read at its root schematic
+# A working-copy request may name another board's root schematic. Keep it
+# inside this thread's folder; version comparisons still rebase as before.
+def RvJob.bom.root(+cwd: String, +b: String, +fallback: String) -> String:
+  Bool.pick(String, Bool.and(String.starts_with(b, cwd ++ "/"), Bool.and(String.ends_with(b, ".kicad_sch"), FM.Fm.safe(String.drop(b, 1n+String.length(cwd))))), b, fallback)
+
 def RvJob.bom(+thread: String, +cwd: String, +a: String, +b: String) -> IO(Res):
-  IO.bind(K.Files, Res, K.Files.read(cwd), f => RvJob.bom.k(Rvc.sch(f), thread, a, b))
+  IO.bind(K.Files, Res, K.Files.read(cwd), f => RvJob.bom.k(RvJob.bom.root(cwd, b, Rvc.sch(f)), thread, a, b))
 
 # review.checks {thread, commit, trigger}: the design checks, in the child
 def RvJob.checks.k(r: P.Ran, +thread: String) -> Res:

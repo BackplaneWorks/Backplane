@@ -14019,3 +14019,26 @@ def Laws.checks_detail_cap():
   {==}
 def Laws.checks_omitted_visible():
   {==}
+
+def Laws.viewer_report_keeps_board():
+  {==}
+def Laws.viewer_part_keeps_board():
+  {==}
+
+def Laws.viewer_wire_empty_target_unchanged():
+  {==}
+
+def Laws.viewer_sheet_keeps_board_anchor():
+  {==}
+
+def Laws.viewer_selected_root_before_card():
+  {==}
+
+def Laws.viewer_selected_board_id_before_card():
+  {==}
+
+def Laws.viewer_same_board_version_keeps_root():
+  {==}
+
+def Laws.viewer_tree_root_stays_inside_thread():
+  {==}

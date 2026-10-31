@@ -2607,7 +2607,8 @@ async function startThin(again = false, reason = "initial") {
       send: request => {
         if (!current() || s.readyState !== 1) throw Error("View connection closed");
         trace("send", { id: request.id, method: request.m });
-        s.send(fromList(App.wire_out(JSON.stringify({ ...request, p: { ...request.p, workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1" } }))));
+        const session = request.p?.session ? Wire.plain(App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session))) : null;
+        s.send(fromList(App.wire_out(JSON.stringify({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1" } }))));
       },
       choice: choosePresentation, prepare: (session, input, action) => preservePresentationRoute(
         action === "send" || action === "send-alt" ? input : session,

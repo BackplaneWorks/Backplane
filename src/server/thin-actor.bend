@@ -94,7 +94,7 @@ def Actor.prefs( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +prefs: Map<
 # shut, kind, file, sheet); an actor already running keeps its own
 # (Actor.merge takes only Actor.pref.key from the page)
 def Actor.seed.key(+thread: String, +key: String) -> Bool:
-  Bool.or(Actor.pref.key(key), Nat.is_lt(U.Keys.pos(["panel:" ++ thread, "view.kind:" ++ thread, "view.path:" ++ thread], key), 3n))
+  Bool.or(Actor.pref.key(key), Nat.is_lt(U.Keys.pos(["panel:" ++ thread, "view.kind:" ++ thread, "view.path:" ++ thread, "view.design:" ++ thread, "view.tree:" ++ thread, "view.sheet:" ++ thread], key), 6n))
 
 def Actor.seeds( +thread: String, +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +prefs: Map<&2, String>) -> Map<&2, String>:
   match xs:
@@ -543,8 +543,10 @@ def Actor.owed( +same: Bool, +moved: Bool, +pending: Map<&2, String>, +target: J
 def Actor.seed.view(missing: Bool, +u: U.Ui, +fresh: U.Ui, +thread: String) -> U.Ui:
   match missing:
     case True{}:
-      U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.info_set(U.Ui.info_set(u, "view.kind:" ++ thread, U.Ui.info(fresh, "view.kind:" ++ thread)), "view.path:" ++ thread, U.Ui.info(fresh, "view.path:" ++ thread)),
-        "@sch:" ++ thread, U.Ui.scratch(fresh, "@sch:" ++ thread)), "@split.sheet:" ++ thread, U.Ui.scratch(fresh, "@split.sheet:" ++ thread))
+      +kept = U.Ui.info_set(U.Ui.info_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.info_set(U.Ui.info_set(u, "view.kind:" ++ thread, U.Ui.info(fresh, "view.kind:" ++ thread)), "view.path:" ++ thread, U.Ui.info(fresh, "view.path:" ++ thread)),
+        "@sch:" ++ thread, U.Ui.scratch(fresh, "@sch:" ++ thread)), "@split.sheet:" ++ thread, U.Ui.scratch(fresh, "@split.sheet:" ++ thread)),
+        "view.design:" ++ thread, U.Ui.info(fresh, "view.design:" ++ thread)), "view.sheet:" ++ thread, U.Ui.info(fresh, "view.sheet:" ++ thread))
+      U.Ui.info_set(kept, "view.tree:" ++ thread, U.Ui.info(fresh, "view.tree:" ++ thread))
     case False{}: u
 
 def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
