@@ -23,3 +23,6 @@ def main() -> IO(Unit):
     C.Check.str("no parts still has no action", O.Card.action(O.Card{"", "", "", 0n, 0n, "unreachable", True{}}), "")
     C.Check.str("empty fab identifies missing kind", O.Order.part.validation("main.fab.json", J.Json.obj([])), "main.fab.json: missing kind")
     C.Check.str("missing features identified", O.Order.part.validation("main.fab.json", J.Json.obj([J.KV{"kind", J.Str{"pcb"}}])), "main.fab.json: missing measured features")
+    C.Check.str("broken JSON is retained with its file name", O.Estimate.validation(O.Order.parts([O.FabFile{"main.fab.json", "not json"}])), "main.fab.json: invalid fab JSON: expected an object")
+    C.Check.str("nonobject is retained as an error", O.Estimate.validation(O.Order.parts([O.FabFile{"main.fab.json", "[]"}])), "main.fab.json: invalid fab JSON: expected an object")
+    C.Check.str("opted out valid objects stay excluded", Nat.show(List.length(&2, J.Json, O.Order.parts([O.FabFile{"main.fab.json", "{\"order\":false}"}]))), "0")

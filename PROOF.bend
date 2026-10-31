@@ -13907,3 +13907,6 @@ def Laws.estimate_failure_keeps_preparation():
 
 def Laws.estimate_empty_fab_names_file():
   {==}
+
+def Laws.estimate_unreadable_fab_names_file():
+  {==}

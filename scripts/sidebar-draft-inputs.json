@@ -90,7 +90,7 @@
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
-    "src/core/order.bend": "dab5bf47f821f91b87de3ac92f6c1e41da2473cc817ed35975d47c0b8038ebe7",
+    "src/core/order.bend": "a9e3dde2c3f82eb13ef3cdf8f35abc3de0b78ca7004fdfa53f411bff6740d8e4",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "a11ae76fded98d1a05ba69e7a9557fa3c6d5dad381df8cb1b1cd1a97f1f4f928",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "c14-4: Identify empty manufacturing files; sidebar draft composition unchanged"
+  "reviewNote": "c14-5: Show unreadable manufacturing files before ordering; sidebar draft composition unchanged"
 }

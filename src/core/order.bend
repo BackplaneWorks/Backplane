@@ -307,12 +307,22 @@ def Order.obj(o: J.Json) -> Bool:
     case _:
       False{}
 
+def Order.part.bad(+path: String, +why: String) -> J.Json:
+  J.Json.obj([J.KV{"name", J.Str{path}}, J.KV{"kind", J.Str{""}}, J.KV{"path", J.Str{path}}, J.KV{"validation", J.Str{path ++ ": " ++ why}}])
+
+def Order.part.parsed(obj: Bool, +o: J.Json, +path: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match obj:
+    case True{}:
+      Order.part.k(J.Json.get_bool(o, "order", True{}), path, o, rest)
+    case False{}:
+      Order.part.bad(path, "invalid fab JSON: expected an object") <> rest
+
 def Order.part.obj(m: Maybe<&2, J.Json>, +path: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match m:
     case Some{+o}:
-      Order.part.k(Bool.and(Order.obj(o), J.Json.get_bool(o, "order", True{})), path, o, rest)
+      Order.part.parsed(Order.obj(o), o, path, rest)
     case None{}:
-      rest
+      Order.part.bad(path, "could not read fab JSON") <> rest
 
 def Order.parts(fs: List<&2, FabFile>) -> List<&2, J.Json>:
   match fs:

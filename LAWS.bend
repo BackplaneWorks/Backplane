@@ -13528,3 +13528,6 @@ law estimate_failure_keeps_preparation:
 
 law estimate_empty_fab_names_file:
   {ORD.Order.part.validation("main.fab.json", J.Json.obj([])) == "main.fab.json: missing kind" : String}
+
+law estimate_unreadable_fab_names_file:
+  {ORD.Estimate.validation([ORD.Order.part.bad("main.fab.json", "could not read fab JSON")]) == "main.fab.json: could not read fab JSON" : String}
