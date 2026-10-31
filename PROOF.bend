@@ -13985,5 +13985,14 @@ def Laws.stop_command_only_while_running():
 def Laws.terminal_scroll_bounds():
   {==}
 
+def Laws.browser_frame_empty_ignored(page):
+  {==}
+
+def Laws.browser_frame_input_owner(page):
+  {==}
+
+def Laws.browser_frame_bot_owner():
+  {==}
+
 def Laws.terminal_empty_input_keeps_view(u):
   {==}

@@ -34,13 +34,14 @@
     "src/core/board.bend": "040ef813ec0257f837a94bfe7f48292397787fbb89558d506835314bdadb3aad",
     "src/core/bot.bend": "01915f4cf51d98985d8d0812731aa6206d8bd503530bef91e279e98083dd1b5f",
     "src/core/botui.bend": "29a1cda9263185dc559d0d7c4378d615f2366549f211958192be452f052fd651",
+    "src/core/browser-frame.bend": "0c21c1a5fecccc093ac349ba6d5723279b59a4605f6ad3c69d3f064f3e87ce86",
     "src/core/browser-tabs.bend": "005221bc7077a405f82e375dd04cf2783620ff485734a8eafb79b8cfa3c64c53",
     "src/core/bub-move.bend": "d898f633015acd0406a965b5f069db09e37b6c7fd6fc07f1151b7847c839dc14",
     "src/core/cad.bend": "e69f4c5172e7472127aef77ebebb284d0a03a94ce7e6f41a024a00d08cd58e14",
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "f4038f88203651c9bbd1aac142299786d0ae23fc6e89649e558ff0f0f45b73be",
+    "src/core/client.bend": "8221c48d5248d0f21cb2c18c75ac978cf8dbc1693b4adba873e9082749b39aa2",
     "src/core/codec.bend": "7e53e017f449e3747df60d2779ab90fd6be43d0ddb3c0414ab9fa9e4cf4e8694",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -150,7 +151,7 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
     "src/mobile/screen.bend": "ecb73a0b02dfadec4f7abe29243062902443307deb1960f23d06274e2021ac16",
-    "src/server/thin-actor.bend": "0d4da209193fd84504ee8e6c2d1e6302ba8ecb634b042266e57da2717ff44460",
+    "src/server/thin-actor.bend": "e439200f31a637abd3e115b45106fe0937543190de5ac9d88b41e6ba11c16f32",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
@@ -377,5 +378,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebase Let terminal output be selected and use native clipboard paste; sidebar drafts unchanged and all 24 image checks pass"
+  "reviewNote": "Rebase Show and drive the Browser page for the current thread; sidebar drafts unchanged and all 24 image checks pass"
 }

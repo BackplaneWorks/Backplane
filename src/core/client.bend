@@ -1,4 +1,5 @@
 import Base
+import ./browser-frame.bend as BFRAME
 import ./view-page.bend as VP
 import ./accounts.bend as ACCT
 import ./subthreads.bend as ST
@@ -13150,9 +13151,10 @@ def Teach.actions() -> List<&2, String>:
 def Teach.target(+i: Nat, +cur: String, +value: String) -> String:
   Bool.pick(String, Bool.and(Bool.or(Nat.is_eq(i, 6n), Nat.is_eq(i, 7n)), Bool.not(String.is_empty(value))), value, cur)
 
-# the tk- and bb- actions act on the bot whose tab is open
+# The frame under the keyboard may be an ordinary thread's page; task
+# editing still belongs to the bot whose tab is open.
 def Teach.act(+u: Ui, +action: String, +value: String) -> Act:
-  Teach.act.k(C.Codec.pos(Teach.actions(), action), u, Teach.target(C.Codec.pos(Teach.actions(), action), Bots.cur(u), value), value)
+  Teach.act.k(C.Codec.pos(Teach.actions(), action), u, Teach.target(C.Codec.pos(Teach.actions(), action), Bool.pick(String, String.starts_with(action, "bb-"), BFRAME.BrowserFrame.owner(Bots.cur(u), Ui.page(u)), Bots.cur(u)), value), value)
 
 # A choice on the tour's uberbot step does its action, then ends the tour
 # like Done (the action's own commands come after the tour's focus).

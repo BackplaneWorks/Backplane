@@ -12,6 +12,7 @@ import ./src/core/sidebar-read.bend as SIDEREAD
 import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 import Base
+import ./src/core/browser-frame.bend as BFRAME
 import ./src/core/term-scroll.bend as TSC
 import ./src/web/workspace.bend as WSTERM
 import ./src/server/thin-sidebar.bend as CHATDERIVED
@@ -13612,3 +13613,16 @@ law terminal_scroll_bounds:
 law terminal_empty_input_keeps_view:
   for +u: U.Ui
   {WSTERM.WS.term.send(u, Nil{}) == U.Act{u, Nil{}} : U.Act}
+
+law browser_frame_empty_ignored:
+  for +page: String
+  {BFRAME.BrowserFrame.owns("", page) == False{} : Bool}
+
+law browser_frame_input_owner:
+  for +page: String
+  {BFRAME.BrowserFrame.owner("", page) == page : String}
+
+law browser_frame_bot_owner:
+  {BFRAME.BrowserFrame.owner("bot", "thread") == "bot" : String}
+
+# Modifier-only keys encode no input and leave the history viewport alone.

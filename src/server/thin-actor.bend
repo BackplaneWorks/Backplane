@@ -1,4 +1,5 @@
 import Base
+import ../core/browser-frame.bend as BFRAME
 import ./terminal-output.bend as TO
 import ./thin-signals.bend as SGV
 import ./thin-signal-text.bend as SGT
@@ -580,7 +581,7 @@ def Actor.rpc(+command: J.Json) -> J.Json:
 # reads a restored Files panel's folder the same way)
 def Actor.read_only(+command: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
-    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir"], J.Json.get_str(Actor.rpc(command), "m", "")), 9n))
+    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir", "browser.seen"], J.Json.get_str(Actor.rpc(command), "m", "")), 10n))
 
 # The viewer's watch (kicad.watch: which board, schematic or model this
 # socket is sent) when a reply moved the viewer: Mech opened before its
@@ -988,7 +989,7 @@ def Actor.info(a: Actor, o: J.Json) -> Actor:
 # schematic's sheets. The server folds those privately and sends its
 # normal bounded invalidation.
 def Message.on_wire(+o: J.Json) -> Bool:
-  Bool.not(Bool.or(String.eq(J.Json.get_str(o, "t", ""), "info"), String.eq(J.Json.get_str(o, "t", ""), "sheets")))
+  Bool.not(Bool.or(String.eq(J.Json.get_str(o, "t", ""), "shot"), Bool.or(String.eq(J.Json.get_str(o, "t", ""), "info"), String.eq(J.Json.get_str(o, "t", ""), "sheets"))))
 
 # A schematic's sheets (the plot actor's {"t":"sheets"} for this socket's
 # watch) are folded into this connection's Ui like targeted info: the
@@ -998,12 +999,20 @@ def Actor.sheets(a: Actor, +o: J.Json) -> Actor:
     case Actor{u, view, target, pending, reads, _, +memo}:
       Actor{U.Sch.got(u, o), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), SidebarSent.keep(memo))}
 
+# Browser frames belong to the page this connection shows, like terminal
+# bytes belong to its shell. Keep the frame number privately so the normal
+# view draws the helper's JPEG, and renew its existing cast lease.
+def Actor.browser(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
+  +page = U.Ui.shown.page(Actor.ui(a))
+  Actor.reply_if(BFRAME.BrowserFrame.owns(page, J.Json.get_str(o, "bot", "")), a, web, key, o)
+
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
     case "term": Actor.terminal(a, web, key, o)
     case "reply": Actor.reply(a, web, key, o)
     case "info": Actor.info(a, o)
     case "sheets": Actor.sheets(a, o)
+    case "shot": Actor.browser(a, web, key, o)
     case _: a
 
 def Actor.message(a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
