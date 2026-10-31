@@ -13451,3 +13451,7 @@ law bot_invalid_name_keeps_persona:
 # Regression for c12-2.
 law key_long_name_refused:
   {AK.Keys.bad("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLM", "fake") == "Use at most 64 characters for the key name" : String}
+
+# Regression for c12-1.
+law key_normalization_refused:
+  {AK.Keys.bad("NOT A KEY!?", "fake") == "Use the environment variable name: NOT_A_KEY__" : String}

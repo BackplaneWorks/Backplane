@@ -1358,3 +1358,5 @@ account.label.required = Enter an account label.
 
 bots.name.rule = 1–24 letters, digits, - or _.
 bots.name.taken = That bot name is already taken.
+
+apikeys.replace = {name} already exists. Click Save again to replace it.

@@ -1,4 +1,5 @@
 import Base
+import ../core/apikeys.bend as AK
 import ../core/signal.bend as SGR
 import ../core/i18n.bend as I
 import ../core/msgs.bend as MSG
@@ -338,6 +339,10 @@ def secret_req(+packed: String) -> String:
 # "<form>\u001f<field>..." to {"rpc"} or {"error"}
 def sealed_req(+packed: String) -> String:
   U.Sealed.req(packed)
+
+# The sealed editor asks before replacing one of the names already listed.
+def key_replace(+names: String, +name: String, +tag: String) -> String:
+  Bool.pick(String, AK.Keys.has(String.lines(names), name), MSG.T.apikeys.replace(I.I18n.of_tag(tag), name), "")
 
 # A value of each Json constructor, for wire.js: bend 2.0.36 tags a module's
 # constructors with their file ("../core/json.Str"), so the JavaScript that

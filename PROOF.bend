@@ -13853,3 +13853,6 @@ def Laws.bot_invalid_name_keeps_persona():
 
 def Laws.key_long_name_refused():
   {==}
+
+def Laws.key_normalization_refused():
+  {==}

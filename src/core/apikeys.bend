@@ -126,7 +126,8 @@ def Keys.set(+text: String, +name: String, +value: String) -> String:
 def Keys.bad(+name: String, +value: String) -> String:
   Bool.pick(String, String.is_empty(Keys.name(name)), "Give the key a name",
     Bool.pick(String, Nat.is_gt(String.length(String.trim(name)), 64n), "Use at most 64 characters for the key name",
-      Bool.pick(String, String.is_empty(String.trim(value)), "Paste the key itself", "")))
+      Bool.pick(String, Bool.not(String.eq(name, Keys.name(name))), "Use the environment variable name: " ++ Keys.name(name),
+        Bool.pick(String, String.is_empty(String.trim(value)), "Paste the key itself", ""))))
 
 # What agents are told
 # --------------------
@@ -152,3 +153,9 @@ def Keys.prompt.k(none: Bool, +path: String, +ns: List<&2, String>) -> String:
 # there are none): the names only, never the file
 def Keys.prompt(+path: String, +names: String) -> String:
   Keys.prompt.k(List.is_empty(&2, String, Keys.keep(String.lines(names))), path, Keys.keep(String.lines(names)))
+
+# Only names cross into the browser; a replacement asks twice before a save.
+def Keys.has(ns: List<&2, String>, +name: String) -> Bool:
+  match ns:
+    case Nil{}: False{}
+    case +n <> t: Bool.or(String.eq(n, name), Keys.has(t, name))

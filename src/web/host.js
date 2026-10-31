@@ -1119,6 +1119,10 @@ function secretSave(packed) {
 // "sealed-err" with why, in the form.
 const sealedWait = new Map();
 let sealedNext = 2 ** 46;
+let keyReplacing = "";
+document.addEventListener("input", event => {
+  if (event.target.matches?.('[data-sealed="key"]')) keyReplacing = "";
+});
 function sealedFields(form) {
   return [...document.querySelectorAll("[data-sealed]")].filter(f => f.getAttribute("data-sealed") === form);
 }
@@ -1127,6 +1131,14 @@ function sealedSave(form) {
   let r;
   try { r = JSON.parse(App.sealed_req([form, ...fields.map(f => f.value ?? "")].join("\u001f"))); } catch { return true; }
   if (r.error) return dispatch("sealed-err", form + "\u001f" + r.error);
+  if (form === "key") {
+    const warning = App.key_replace(currentSession().drafts?.["@keys"] || "", r.name, document.documentElement.lang);
+    if (warning && keyReplacing !== r.name) {
+      keyReplacing = r.name;
+      return dispatch("sealed-err", form + "\u001f" + warning);
+    }
+    keyReplacing = "";
+  }
   if (!socket || socket.readyState !== 1) return dispatch("sealed-err", form + "\u001f" + "Not connected to the hub");
   if ([...sealedWait.values()].some(w => w.form === form)) return true;
   let rpc;

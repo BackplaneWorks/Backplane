@@ -16,6 +16,7 @@ def main() -> IO(Unit):
     C.Check.str("delete the last", K.Keys.drop("A='1'\n", "A"), "")
     C.Check.str("a value with = keeps its name", String.join(K.Keys.names("TOKEN='a=b=='\n"), ","), "TOKEN")
     C.Check.str("a bad key", K.Keys.bad("  ", "x"), "Give the key a name")
+    C.Check.str("names are not silently normalized", K.Keys.bad(" TOKEN ", "x"), "Use the environment variable name: TOKEN")
     C.Check.str("no secret", K.Keys.bad("A", " "), "Paste the key itself")
     +p : String = K.Keys.prompt("/h/secrets/api.env", "OPENAI_API_KEY\nSTRIPE_SECRET")
     C.Check.str("agents get the names", Bool.show(Bool.and(String.contains(p, "`OPENAI_API_KEY`, `STRIPE_SECRET`"), String.contains(p, "/h/secrets/api.env"))), "True")

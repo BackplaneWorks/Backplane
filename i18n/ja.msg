@@ -1381,3 +1381,5 @@ account.label.required = アカウントの名前を入力してください。
 
 bots.name.rule = 1〜24文字の英数字、-、_。
 bots.name.taken = このボット名は既に使われています。
+
+apikeys.replace = {name} は既に存在します。置き換えるにはもう一度保存してください。
