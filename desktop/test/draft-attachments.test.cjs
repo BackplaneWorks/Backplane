@@ -79,3 +79,16 @@ test('a fresh actor restores a previously visited thread again', async () => {
   await store.sync('t', [], upload, () => true, 'actor-2');
   assert.equal(uploads, 2);
 });
+
+test('the whole saved batch owns Send until its last upload has completed', async () => {
+  const store = await cache([{ path: '/a.txt', file: note() }, { path: '/b.txt', file: note() }]);
+  let release;
+  const waiting = new Promise(resolve => { release = resolve; });
+  let uploads = 0;
+  const restoring = store.sync('t', [], async () => { uploads++; await waiting; return '/new.txt'; }, () => true, 'actor');
+  assert.equal(store.pending('t'), true);
+  await Promise.resolve();
+  release();await restoring;
+  assert.equal(uploads, 2);
+  assert.equal(store.pending('t'), false);
+});

@@ -38,6 +38,7 @@ export class DraftAttachments {
   forget(thread, paths) {
     return this.change(thread, records => records.filter(r => !paths.includes(r.path)));
   }
+  pending(thread) { return this.restoring.has(thread); }
   async sync(thread, paths, upload, current, actor = '') {
     if (!thread || thread.startsWith('@')) return;
     if (this.started.get(thread) === actor || this.restoring.get(thread) === actor) return;

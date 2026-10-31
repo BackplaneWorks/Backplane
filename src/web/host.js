@@ -1208,6 +1208,10 @@ function dispatch(action, value, timer) {
   if (action === "sealed") return sealedSave(value);
   // Remove also discards an unsaved key kept only in this page.
   if (action === "voice-unkey") for (const field of sealedFields("vkey")) field.value = "";
+  if (["send", "send-alt", "detach"].includes(action) && viewMode !== "compatibility") {
+    restoreDraftAttachments(currentSession());
+    if (socket?.readyState === 1 && (!thin?.ready || draftAttachments.pending(currentSession().sel))) return true;
+  }
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
   if (action === "select") drawerShut();
