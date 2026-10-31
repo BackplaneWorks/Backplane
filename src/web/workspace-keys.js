@@ -88,6 +88,10 @@ export function overlayEscape(doc) {
   if (shade) return () => shade.click();
   const menu = doc.querySelector?.('.local-menu[open]');
   if (menu) return () => { menu.open = false; };
+  // The inline editor already supplies its cancel action, like a dialog.
+  if ([...(doc.querySelectorAll?.('.draw-back,[role="dialog"],[aria-modal="true"]') || [])].some(shown)) return null;
+  const cancel = doc.querySelector?.('.title-box [data-on-click="rename-no"]');
+  if (cancel) return () => cancel.click();
   return null;
 }
 
@@ -138,7 +142,7 @@ export function escapeState(event, doc) {
 // made) or over a selection outside the composer, nor on a phone-sized or
 // touch page (its keyboard would cover the thread). The caret goes back
 // where it was in that thread's draft.
-const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop';
+const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop,.title-box:has([data-on-click="rename-no"])';
 const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button';
 export function installComposerFocus({ document: doc = document, window: win = window,
   phone = () => win.matchMedia?.('(max-width: 760px), (hover: none) and (pointer: coarse)').matches } = {}) {

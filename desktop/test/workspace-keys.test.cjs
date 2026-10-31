@@ -532,3 +532,13 @@ test('Escape closes a palette or drawing dialog before token stats underneath', 
   draw = true;palette = false;press();assert.equal(actions.length, 1);
   draw = false;press();assert.deepEqual(actions[1], ['flag', 'tokstats']);
 });
+
+
+test('Escape cancels inline renaming after the innermost overlay is dismissed', async () => {
+  const { overlayEscape } = await import('../../src/web/workspace-keys.js');
+  let modal = false, cancelled = 0;
+  const doc = { querySelectorAll: selector => selector.startsWith('.draw-back') ? [{ getClientRects: () => modal ? [{}] : [] }] : [],
+    querySelector: selector => selector.includes('rename-no') ? { click() { cancelled++; } } : null };
+  modal = true;assert.equal(overlayEscape(doc), null);
+  modal = false;overlayEscape(doc)();assert.equal(cancelled, 1);
+});
