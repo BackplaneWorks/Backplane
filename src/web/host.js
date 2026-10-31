@@ -414,37 +414,50 @@ try {
 // grows or shrinks (a keystroke redraws only the composer) and as the
 // window does.
 let composerSeen = null, composerTopKept = "";
-const composerRoom = typeof ResizeObserver === "function" ? new ResizeObserver(() => composerTop()) : null;
-function composerTop() {
+// Measured by the observer (its first look at a new composer too), on a
+// resize and while the picker is open, not in every render.
+const composerRoom = typeof ResizeObserver === "function" ? new ResizeObserver(() => composerTop(true)) : null;
+function composerTop(measure = !composerRoom) {
   const c = document.querySelector(".model-layer")?.closest(".composer") || null;
   if (c !== composerSeen) {
     if (composerSeen) composerRoom?.unobserve(composerSeen);
     if (c) composerRoom?.observe(c);
     composerSeen = c;
   }
+  if (!measure && !c?.querySelector('.model-layer[aria-hidden="false"]')) return;
   const top = c ? Math.round(c.getBoundingClientRect().top) + "px" : "";
   if (top && top !== composerTopKept) { document.documentElement.style.setProperty("--composer-top", top);composerTopKept = top; }
 }
 // Reserve the footer's measured room in the reload shell. Its account
 // controls can wrap to a second row once the hub supplies the metadata.
-let composerFootKept = "";
+// The room is measured as the page goes (a reload, a quit), never while it
+// draws: a layout read in every render of a streaming reply costs frames.
+let composerFootHeld = false;
 function composerGeometry() {
   composerTop();
-  const foot = document.querySelector(".thread-view .composer-foot");
-  if (!foot) return;
+  if (frontendNode || canonicalBoot) {
+    // the hub's view: the footer's own height again
+    if (composerFootHeld) { document.querySelector(".thread-view .composer-foot")?.style.removeProperty("min-height");composerFootHeld = false; }
+    return;
+  }
+  const foot = document.querySelector(".thread-view .composer-foot"), thread = currentSession().sel;
+  if (!foot || !thread) return;
   foot.style.removeProperty("min-height");
-  const width = foot.getBoundingClientRect().width, thread = currentSession().sel;
-  if (!thread) return;
   try {
-    if (!frontendNode && !canonicalBoot) {
-      const saved = JSON.parse(localStorage.getItem("backplane-composer-foot") || "null");
-      if (saved?.thread === thread && Math.abs(saved.width - width) < 1 && saved.height > 0 && saved.height < 300) foot.style.minHeight = saved.height + "px";
-    } else {
-      const text = JSON.stringify({ thread, width, height: foot.getBoundingClientRect().height });
-      if (text !== composerFootKept) { localStorage.setItem("backplane-composer-foot", text);composerFootKept = text; }
+    const saved = JSON.parse(localStorage.getItem("backplane-composer-foot") || "null");
+    if (saved?.thread === thread && Math.abs(saved.width - foot.getBoundingClientRect().width) < 1 && saved.height > 0 && saved.height < 300) {
+      foot.style.minHeight = saved.height + "px";composerFootHeld = true;
     }
   } catch {}
 }
+function keepComposerGeometry() {
+  const foot = document.querySelector(".thread-view .composer-foot"), thread = currentSession().sel;
+  if (!foot || !thread || !frontendNode && !canonicalBoot) return;
+  const r = foot.getBoundingClientRect();
+  try { localStorage.setItem("backplane-composer-foot", JSON.stringify({ thread, width: r.width, height: r.height })); } catch {}
+}
+window.addEventListener("pagehide", keepComposerGeometry);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") keepComposerGeometry(); });
 let viewerKept = "";
 function keepViewer() {
   const sel = App.sel(ui);
@@ -2015,7 +2028,7 @@ document.addEventListener("keydown", (e) => {
     try { localStorage.setItem(viewerKey(), String(Math.round(w))); } catch {}
   }
 });
-window.addEventListener("resize", () => { panes();composerGeometry(); });
+window.addEventListener("resize", () => { panes();composerGeometry();composerTop(true); });
 
 // Socket
 // ------
