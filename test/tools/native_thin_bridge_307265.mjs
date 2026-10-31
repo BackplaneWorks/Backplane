@@ -333,6 +333,33 @@ registerNativeHistoryChecks(check,harness);
 await registerBridgeChecks(check,stage,root);
 const {registerAncillaryChecks}=await import('./native_thin_ancillary_307265.mjs');
 await registerAncillaryChecks(check,harness,stage);
+// A message sent to a bot whose turn then fails (the hub stores it, answers
+// ok, and the turn ends "failed" at once): the app's "Sending…" bubble is
+// cleared by the hub's answer, not by the turn. A refusal fails it instead.
+function sentTo(m,ok,action='send'){
+ const x=x0();x.open();
+ assert.equal(x.h.sendAt('h','a',action,'yes, go ahead  \n',true),true);
+ const id=x.h.drain().cmds.find(c=>c.request?.m==='view.action').request.id;
+ x.answer(id,{cmds:[{type:'send',text:JSON.stringify({id:77,m,p:m==='bots.say'?{bot:'bub',text:'yes, go ahead',msg:'c1'}:{thread:'a',text:'yes, go ahead',msg:'c1'}})}]});
+ x.h.receive('h',{t:'reply',id:77,ok,...(ok?{}:{error:'no such bot'})},'1');
+ return x.h.drain().cmds.filter(c=>c.type==='send-issued'||c.type==='send-failed');
+}
+const x0=()=>harness();
+check('a bot message the hub stored clears its Sending bubble though the turn fails',()=>{
+ assert.deepEqual(sentTo('bots.say',true),[{type:'send-issued',thread:'h|a',text:'yes, go ahead',action:'send'}]);
+});
+check('a thread message the hub stored clears its Sending bubble',()=>{
+ assert.deepEqual(sentTo('turn.start',true),[{type:'send-issued',thread:'h|a',text:'yes, go ahead',action:'send'}]);
+});
+check('a message the hub refused fails its Sending bubble',()=>{
+ assert.deepEqual(sentTo('bots.say',false),[{type:'send-failed',thread:'h|a',text:'yes, go ahead',action:'send'}]);
+});
+check('an ordinary RPC that is no message names no Sending bubble',()=>{
+ const x=harness();x.open();x.h.request('h','rename','x');const id=x.h.drain().cmds[0].request.id;
+ x.answer(id,{cmds:[{type:'send',text:JSON.stringify({id:78,m:'thread.rename',p:{}})}]});
+ x.h.receive('h',{t:'reply',id:78,ok:true},'1');
+ assert.equal(x.h.drain().cmds.filter(c=>c.type==='send-issued'||c.type==='send-failed').length,0);
+});
 const {registerSidebarChecks}=await import('./native_thin_sidebar_307265.mjs');
 registerSidebarChecks(check,harness,validateSidebar,validateSidebarAction);
 let failed=0;

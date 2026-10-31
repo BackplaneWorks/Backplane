@@ -8,6 +8,14 @@ import { validatePresentation } from '../web/startup.js';
 const copy = value => JSON.parse(JSON.stringify(value));
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const presentation = method => ['view.open', 'view.page', 'view.update', 'view.action'].includes(method);
+// A message the person sent with this action's RPC (a thread's turn.start or
+// a bot's bots.say), as the app's in-flight bubble names it: the hub-qualified
+// thread and the draft, trimmed as the app trims what it shows.
+const sentMessage = (hub, input, rpc) => {
+  const sel = input?.session?.sel, text = input?.session?.drafts?.[sel];
+  if (!['send', 'send-alt'].includes(input?.action) || !['turn.start', 'bots.say'].includes(rpc?.m) || typeof sel !== 'string' || !sel || typeof text !== 'string') return null;
+  return { thread: hub + '|' + sel, text: text.trim(), action: input.action };
+};
 const same = (a, b) => a?.kind === b?.kind && a?.id === b?.id;
 const counter = n => Number.isSafeInteger(n) && n >= 0 && n < 2 ** 47;
 const ordinaryKey = (hub, id) => JSON.stringify([hub, id]);
@@ -998,7 +1006,8 @@ export class NativeThinHost307265 {
       if (c.type === 'keep' && (s.drafts.get(thread)?.revision || 0) > metadata.revision) continue;
       if (c.type === 'send') {
         const rpc = JSON.parse(c.text);
-        this.ordinary.set(ordinaryKey(hub, rpc.id), { hub, epoch: s.epoch, revision: metadata.revision, thread: item.input.session?.sel || '', session: copy(response) });
+        this.ordinary.set(ordinaryKey(hub, rpc.id), { hub, epoch: s.epoch, revision: metadata.revision, thread: item.input.session?.sel || '', session: copy(response),
+          sent: sentMessage(hub, item.input, rpc) });
         this.outboxKeep(hub, rpc);
       }
       commands.push(this.api.command(hub, c, item.input, result.current));
@@ -1056,6 +1065,10 @@ export class NativeThinHost307265 {
     const key = ordinaryKey(hub, envelope.id), original = this.ordinary.get(key), s = this.states.get(hub);
     if (!original || original.hub !== hub || original.epoch !== s?.epoch) return true;
     this.ordinary.delete(key);
+    // The hub stored the message (or refused it): the app's own "Sending…"
+    // bubble for it goes, whatever the turn it starts does next (a bot's
+    // failing at once never answered it otherwise, so it stayed for good).
+    if (original.sent) this.enqueue(hub, { type: envelope.ok === false ? 'send-failed' : 'send-issued', ...original.sent });
     const acknowledged = this.api.ack(original.session, envelope);
     s.session.rid = Math.max(s.session.rid, acknowledged.rid);
     if (original.thread && (s.drafts.get(original.thread)?.revision || 0) <= original.revision) {
