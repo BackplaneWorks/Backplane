@@ -46,6 +46,13 @@ uniform float exposure; uniform float orthographic; uniform vec3 thermal;
 // a probed part (hon) lights the model within its box on the board (hl:
 // x0 y0 x1 y1, hz: its side's heights) and dims the rest (cross-probe)
 uniform vec4 hl; uniform vec2 hz; uniform float hon;
+// a board's own faces (bz: on, bottom, top in model units, 10 um) carry
+// its soldermask: the person chose a glossy mask (2026-10-31), as the
+// original-model Studio draws it (solid-material-policy.js). The compact
+// wire has no material roles, so a mask is a non-metal, non-silk face
+// lying flat within 120 um of either board face (KiCad puts the mask
+// 40-50 um outside the body, the silk under 100 um); parts stand above it.
+uniform vec3 bz;
 const float PI = 3.14159265;
 vec3 fresnel(vec3 f0, float h) { return f0 + (1.0 - f0) * pow(1.0 - h, 5.0); }
 vec3 light(vec3 N, vec3 V, vec3 L, vec3 base, vec3 f0, float rough, float metal) {
@@ -75,7 +82,8 @@ void main() {
   // The wire has double-sided CAD faces. Light whichever side is visible;
   // this does not change winding, handedness, geometry or silk orientation.
   if(dot(N,V)<0.0) N=-N;
-  float rough=vm.x, metal=vm.y, nv=max(dot(N,V),0.0);
+  float rough=vm.x, metal=vm.y, coat=vm.z, nv=max(dot(N,V),0.0);
+  if(bz.x>0.5 && metal<0.5 && rough<0.8 && abs(normalize(vn).z)>0.9 && min(abs(vp.z-bz.y),abs(vp.z-bz.z))<12.0){ rough=0.24; coat=1.0; }
   vec3 base=max(vc,vec3(0.0)), f0=mix(vec3(0.04),base,metal);
   vec3 key=normalize(-right*0.55+up*0.75-forward*0.65);
   vec3 fill=normalize(right*0.85+up*0.25-forward*0.35);
@@ -83,7 +91,7 @@ void main() {
   rgb+=light(N,V,key,base,f0,rough,metal)*1.5;
   rgb+=light(N,V,fill,base,f0,rough,metal)*0.65;
   rgb+=studio(reflect(-V,N),rough,metal)*fresnel(f0,nv)*(1.0-rough*0.35);
-  rgb+=studio(reflect(-V,N),0.3,0.0)*fresnel(vec3(0.04),nv)*vm.z;
+  rgb+=studio(reflect(-V,N),0.3,0.0)*fresnel(vec3(0.04),nv)*coat;
   // A display-only thermal overlay. No claim of per-part temperature/flow.
   float heat=clamp((thermal.y-25.0)/235.0,0.0,1.0);
   vec3 tint=mix(vec3(0.12,0.32,0.85),vec3(1.0,0.15,0.02),heat);

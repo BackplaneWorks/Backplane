@@ -492,6 +492,8 @@ class View {
     gl.uniform1f(gl.getUniformLocation(this.prog, "hon"), lit ? 1 : 0);
     gl.uniform4fv(gl.getUniformLocation(this.prog, "hl"), lit ? lit.box : [0, 0, 0, 0]);
     gl.uniform2fv(gl.getUniformLocation(this.prog, "hz"), lit ? lit.z : [0, 0]);
+    // a board model's faces, for its glossy soldermask (solid-materials.js)
+    gl.uniform3fv(gl.getUniformLocation(this.prog, "bz"), board && isBoard(this.key) ? [1, 0, board.thick(boardOf(this.key)) / 10] : [0, 0, 0]);
     gl.uniform1f(gl.getUniformLocation(this.prog, "orthographic"), Number(this.projection === "orthographic"));
     for (const [name, value] of [["right", cam.r], ["up", cam.u], ["forward", cam.f]]) gl.uniform3fv(gl.getUniformLocation(this.prog, name), value);
     gl.uniform1f(gl.getUniformLocation(this.prog, "exposure"), this.exposure);
