@@ -381,6 +381,7 @@ class View {
     this.lift = 255;
     this.scale = 1; this.ox = 0; this.oy = 0;
     this.fitted = false;
+    this.gesture = 0;
     this.fade = 220;
     this.fam = "";
     this.drag = null;
@@ -402,6 +403,7 @@ class View {
       return { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top, d: Math.hypot(a.x - b.x, a.y - b.y) };
     };
     canvas.addEventListener("pointerdown", (e) => {
+      this.gesture++;
       if (this.side === "schematic" && (e.button === 3 || e.button === 4)) {
         canvas.closest("#viewer")?.querySelector(`[data-on-click="${e.button === 3 ? "sch-back" : "sch-fwd"}"]`)?.click();
         return;
@@ -436,6 +438,7 @@ class View {
     const up = (e) => {
       const tap = !this.treeWaiting() && e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
+      this.mouseTap = !!tap && e.pointerType === "mouse";
       this.pts.delete(e.pointerId);
       if (tap) {
         const s = this.sheetAt(e.clientX, e.clientY);
@@ -443,11 +446,7 @@ class View {
         else {
           // Cross-probe (main) and saved-component inspection (viewer lane)
           // both follow the same click.
-          clearTimeout(this.probeTimer);
-          if (e.pointerType === "mouse") {
-            const key = this.key;
-            this.probeTimer = setTimeout(() => { if (this.key === key && canvas.isConnected) this.pick(e.clientX, e.clientY); }, 250);
-          } else this.pick(e.clientX, e.clientY);
+          if (e.pointerType !== "mouse") this.pick(e.clientX, e.clientY);
           const record = componentSources.get(this.key);
           if (record) {
             const b = canvas.getBoundingClientRect();
@@ -471,7 +470,15 @@ class View {
     });
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
+    // Use the browser's click count, including its platform double-click
+    // interval. A second click restores the probe that preceded the gesture.
+    canvas.addEventListener("click", e => {
+      if (!this.mouseTap || this.sheetAt(e.clientX, e.clientY) || e.detail !== 1) return;
+      this.beforeClick = this.probe;
+      this.pick(e.clientX, e.clientY);
+    });
     canvas.addEventListener("wheel", (e) => {
+      this.gesture++;
       e.preventDefault();
       const b = canvas.getBoundingClientRect();
       const mx = e.clientX - b.left, my = e.clientY - b.top;
@@ -489,7 +496,12 @@ class View {
       this.follow = false;
       this.later();
     }, { passive: false });
-    canvas.addEventListener("dblclick", () => { clearTimeout(this.probeTimer); this.fit(); });
+    canvas.addEventListener("dblclick", () => {
+      this.gesture++;
+      if (this.mouseTap && this.beforeClick !== undefined) this.publishProbe(this.beforeClick);
+      this.beforeClick = undefined;
+      this.fit();
+    });
     // a right click asks to comment there: the place in mm (the plot's own
     // coordinates); the page decides what to do (host.js)
     canvas.addEventListener("contextmenu", (e) => {
@@ -500,7 +512,10 @@ class View {
       if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
     });
     // a new size refits the view, unless the user has moved it
-    new ResizeObserver(() => { if (!this.fitted || !this.touched) this.fit(); else this.later(); }).observe(canvas);
+    new ResizeObserver(() => {
+      this.gesture++;
+      if (!this.fitted || !this.touched) this.fit(); else this.later();
+    }).observe(canvas);
   }
 
   // the sheet symbol (client.bend's Sch.boxes, the canvas's data-sheets)
@@ -526,15 +541,19 @@ class View {
   // in; the page tells the hub, and lights it here at once
   async pick(cx, cy) {
     if (!probed || !this.plot || !this.plot.chunks) return;
-    const key = this.key, b = this.canvas.getBoundingClientRect();
+    const key = this.key, gesture = this.gesture, scale = this.scale, plot = this.plot, b = this.canvas.getBoundingClientRect();
     const x = (cx - b.left - this.ox) / this.scale, y = (cy - b.top - this.oy) / this.scale;
     await need(key);
     if (this.side === "schematic" && this.board) await need(this.board);
-    if (this.key !== key || !this.plot || !this.plot.chunks) return;
-    const exact = under(this.plot, x, y, 0.75 / this.scale, this.off), near = under(this.plot, x, y, 4 / this.scale, this.off);
+    if (this.key !== key || this.gesture !== gesture || this.plot !== plot || !this.canvas.isConnected || !this.plot?.chunks) return;
+    const exact = under(this.plot, x, y, 0.75 / scale, this.off), near = under(this.plot, x, y, 4 / scale, this.off);
     const pick = this.side === "board" ? P.pickBoard(exact, near, partAt(key, x, y)) : P.pickSheet(exact, near);
     const ctx = this.side === "board" ? {} : { groups: groupsOf(this.plot), nets: this.board ? boardNets(this.board) : null, place: this.place };
     const v = P.clickProbe(pick, this.side, ctx);
+    this.publishProbe(v);
+  }
+
+  publishProbe(v) {
     this.probe = v;
     for (const w of views.values()) if (w !== this) { w.probe = v; w.follow = true; w.relight(); }
     this.relight();
@@ -623,6 +642,7 @@ class View {
   }
 
   fit() {
+    this.gesture++;
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (!this.plot || !this.plot.box || w === 0 || h === 0) { this.later(); return; }
     const [x0, y0, x1, y1] = this.plot.box;
@@ -871,7 +891,7 @@ function present(v) {
 export function mount(canvases) {
   pickerKeys();
   const list = (Array.isArray(canvases) ? canvases : [canvases]).filter(Boolean);
-  for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); clearTimeout(v.probeTimer); park(v); views.delete(c); }
+  for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); v.gesture++; park(v); views.delete(c); }
   for (const canvas of list) mountOne(canvas);
   // a note form that has just come up takes the keyboard
   const note = document.querySelector(".rc-note input");
