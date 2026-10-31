@@ -124,7 +124,7 @@ class Workbench {
   async readComponents() {
     if (!this.boardKey || !this.services.components) return;
     if (this.reading) { this.readAgain = true; return; }
-    const generation = ++this.metadataGeneration; this.reading = true;
+    const generation = ++this.metadataGeneration; this.reading = true; let loaded = "";
     this.readAbort = new AbortController();
     try {
       const data = await this.services.components(this.scope, { signal: this.readAbort.signal });
@@ -134,7 +134,7 @@ class Workbench {
       const wanted = revisions.get(this.boardKey);
       if (wanted && data.sourceRevision !== wanted) throw Error("Component metadata and the displayed PCB are different saved revisions. Refresh after the viewer finishes updating.");
       const saved = this.solid.cameraState?.()?.selection;
-      this.components.setData(this.boardKey, data);
+      this.components.setData(this.boardKey, data); loaded = data.sourceRevision || "";
       if (saved?.sourceRevision === data.sourceRevision && !this.components.selected) {
         this.restoring = true;
         try { this.components.select(saved.id); } finally { this.restoring = false; }
@@ -143,7 +143,10 @@ class Workbench {
       if (this.alive && generation === this.metadataGeneration) this.components.setData(this.boardKey, { error: e.message || "Saved component metadata is unavailable." });
     } finally {
       this.reading = false;
-      if (this.alive && this.readAgain) { this.readAgain = false; void this.readComponents(); }
+      // A revision that arrived during the read asks again, unless the read
+      // already returned exactly that revision (the first read starts before
+      // the PCB's revision is known, and it usually is the same one).
+      if (this.alive && this.readAgain) { this.readAgain = false; if (!loaded || loaded !== revisions.get(this.boardKey)) void this.readComponents(); else this.syncComponents(); }
     }
   }
   // A board's assembly (key 2|…) and its PCB (key 0|…) name the same saved
