@@ -2851,7 +2851,7 @@ def View.mic.of(+u: U.Ui, +sel: String) -> String:
 def View.send.loc(+lc: I.Loc, +act: String, +send: String) -> D.Node:
   Bool.pick(D.Node, String.eq(act, "interrupt"), D.Dom.button("primary stop", act, "", MSG.T.composer.stop.tip(lc), send),
     D.Dom.button("primary", act, "", Bool.pick(String, String.eq(send, MSG.T.common.save(lc)), MSG.T.intent.save.tip(lc),
-      MSG.T.composer.enter.tip(lc, Bool.pick(String, String.eq(send, MSG.T.composer.queue(lc)), "steer", "queue"))), send))
+      MSG.T.composer.enter.tip(lc)), send))
 
 # The composer as typed (app.bend's presentation_overlay, in the browser):
 # the hub drew it for the draft it last had, which lags what is typed while

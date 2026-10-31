@@ -1060,12 +1060,12 @@ def T.composer.draw.tip(l: I.Loc) -> String:
     case I.Ja{}:
       "四角形のスケッチを描いて画像として添付"
 
-def T.composer.enter.tip(l: I.Loc, arg0: String) -> String:
+def T.composer.enter.tip(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Enter; ctrl+Enter to " ++ I.I18n.sel(arg0, "steer", "steer", "queue") ++ " instead"
+      "Enter or Ctrl+Enter to send"
     case I.Ja{}:
-      "Enterで送信・ctrl+Enterで" ++ I.I18n.sel(arg0, "steer", "方向を指示", "キューに追加")
+      "Enter または Ctrl+Enterで送信"
 
 def T.composer.give(l: I.Loc) -> String:
   match l:
@@ -10608,7 +10608,7 @@ def T.plain.nlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
 def T.plain.nlll(l: I.Loc, key: String) -> Maybe<&2, String>:
   T.plain.nlll.cmp(String.cmp(key, "bots.memory.forget"), l)
 
-def T.plain.nllrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+def T.plain.nllrlllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
   match c:
     case LT{}:
@@ -10618,8 +10618,21 @@ def T.plain.nllrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case GT{}:
       None{}
 
+def T.plain.nllrlllllll(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nllrlllllll.cmp(String.cmp(key, "composer.attach.tip"), l)
+
+def T.plain.nllrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      T.plain.nllrlllllll(l, key)
+    case EQ{}:
+      Some{T.composer.draw.tip(l)}
+    case GT{}:
+      None{}
+
 def T.plain.nllrllllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrllllll.cmp(String.cmp(key, "composer.attach.tip"), l)
+  T.plain.nllrllllll.cmp(String.cmp(key, "composer.draw.tip"), l)
 
 def T.plain.nllrlllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -10640,12 +10653,12 @@ def T.plain.nllrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nllrllllll(l, key)
     case EQ{}:
-      Some{T.composer.draw.tip(l)}
+      Some{T.composer.enter.tip(l)}
     case GT{}:
       T.plain.nllrlllllr(l, key)
 
 def T.plain.nllrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nllrlllll.cmp(String.cmp(key, "composer.draw.tip"), l)
+  T.plain.nllrlllll.cmp(String.cmp(key, "composer.enter.tip"), l)
 
 def T.plain.nllrllllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
