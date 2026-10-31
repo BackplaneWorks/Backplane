@@ -375,6 +375,8 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .settings { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .set-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; border: 1px solid var(--line); background: var(--panel); padding: 10px 12px; flex-wrap: wrap; }
 .set-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 260px; }
+/* a long name (an API key's, a term) wraps beside its buttons, never under them */
+.set-label { overflow-wrap: anywhere; }
 .set-note { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); overflow-wrap: anywhere; }
 .set-ctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .set-ctl .days { padding: 0 6px; } .set-ctl .ok { color: var(--ok); }
