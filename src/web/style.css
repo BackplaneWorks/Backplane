@@ -126,6 +126,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .project-head .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread { display: flex; align-items: center; gap: 8px; padding: 4px 12px; cursor: pointer; }
 .thread:hover { background: var(--raise); }
+.sidebar .thread:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .thread.on { background: var(--raise); box-shadow: inset 2px 0 var(--tint, var(--accent)); }
 .thread .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread .ago { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }

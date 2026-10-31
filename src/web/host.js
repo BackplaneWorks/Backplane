@@ -29,6 +29,8 @@ function bubMoveSync() {
 document.addEventListener("visibilitychange", () => { bubMoves.disconnect(location.origin); });
 import { installUsageTabs } from "./usage-tabs.js";
 import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js";
+import { installSidebarKeys } from "./sidebar-keys.js";
+installSidebarKeys();
 import { installFloatingTerminal } from "./floating-terminal.js";
 installUsageTabs();
 import { installWorkspaceMenus } from "./workspace-menus.js";
