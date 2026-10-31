@@ -315,6 +315,47 @@ def Order.parts(fs: List<&2, FabFile>) -> List<&2, J.Json>:
     case FabFile{+path, text} <> t:
       Order.part.obj(J.Json.parse(text), path, Order.parts(t))
 
+# A combined estimate covers every requested part. Missing rows and per-part
+# problems must never make an incomplete sum look like the project's price.
+def Estimate.priced(p: J.Json) -> Bool:
+  match p:
+    case J.Num{_}: True{}
+    case _: False{}
+
+def Estimate.strings(xs: List<&2, J.Json>) -> List<&2, String>:
+  match xs:
+    case Nil{}: Nil{}
+    case +x <> t: J.Json.as_str(Some{x}, "") <> Estimate.strings(t)
+
+def Estimate.problem(+p: J.Json, +why: String) -> String:
+  "No estimate for " ++ J.Json.get_str(p, "name", J.Json.get_str(p, "path", "part"))
+    ++ " (" ++ J.Json.get_str(p, "path", "fab file") ++ ")"
+    ++ Bool.pick(String, String.is_empty(why), "", ": " ++ why)
+
+def Estimate.row(+p: J.Json, +r: J.Json) -> String:
+  Bool.pick(String, Bool.and(Bool.and(String.eq(String.take(J.Json.get_str(p, "name", ""), 64n), J.Json.get_str(r, "name", "")),
+    String.eq(J.Json.get_str(p, "kind", ""), J.Json.get_str(r, "kind", ""))),
+    Bool.and(Estimate.priced(J.Json.get_obj(r, "from")), List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(r, "problems"))))), "",
+    Estimate.problem(p, String.join(Estimate.strings(J.Json.elems(J.Json.get_obj(r, "problems"))), "; ")))
+
+def Estimate.join(+a: String, +b: String) -> String:
+  Bool.pick(String, String.is_empty(a), b, a ++ Bool.pick(String, String.is_empty(b), "", "; " ++ b))
+
+def Estimate.problems(ps: List<&2, J.Json>, rs: List<&2, J.Json>) -> String:
+  match ps rs:
+    case Nil{} Nil{}: ""
+    case Nil{} _ <> _: "Unexpected estimate parts"
+    case +p <> t Nil{}:
+      Estimate.join(Estimate.problem(p, "not returned by the estimate service"), Estimate.problems(t, Nil{}))
+    case +p <> t +r <> more:
+      Estimate.join(Estimate.row(p, r), Estimate.problems(t, more))
+
+def Estimate.note(+ps: List<&2, J.Json>, +est: J.Json, on: Bool) -> String:
+  Bool.pick(String, Bool.and(on, String.is_empty(J.Json.get_str(est, "error", ""))), Estimate.problems(ps, J.Json.elems(J.Json.get_obj(est, "parts"))), "")
+
+def Estimate.label(+label: String, +note: String) -> String:
+  Bool.pick(String, String.is_empty(note), label, "estimate incomplete")
+
 # what the hub sends for "from $X": each part without its path
 def Order.est.part(+p: J.Json) -> J.Json:
   J.Json.obj([J.KV{"name", Maybe.default(&2, J.Json, J.Json.get(p, "name"), J.Str{""})}, J.KV{"kind", Maybe.default(&2, J.Json, J.Json.get(p, "kind"), J.Str{""})},
@@ -724,8 +765,11 @@ def Card.ready.or(+ready: String, +st: String) -> String:
 
 # the line beside Buy it above the message box, from the hub's card
 # (laws order_ready_*): what there is to order, by name
+def Card.ready.estimate(+line: String, +note: String) -> String:
+  Bool.pick(String, String.is_empty(note), line, note ++ ". Check the fab files before ordering.")
+
 def Card.ready.j(+j: J.Json) -> String:
-  Card.ready.k(String.join(Card.names.go(J.Json.elems(J.Json.get_obj(j, "parts"))), " · "), J.Json.get_nat(j, "boards", 0n))
+  Card.ready.estimate(Card.ready.k(String.join(Card.names.go(J.Json.elems(J.Json.get_obj(j, "parts"))), " · "), J.Json.get_nat(j, "boards", 0n)), J.Json.get_str(j, "estimate_problems", ""))
 
 # the line the card shows shut: the goal, else a nudge
 def Card.line(c: Card) -> String:

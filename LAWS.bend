@@ -13514,3 +13514,10 @@ law plot_version_tree_path:
 law plot_comparison_tree_path:
   for +path: String
   {PLOTWATCH.Pv.tree.path(2n, path) == "" : String}
+
+# A partial estimate is never shown as the price for the whole project.
+law estimate_partial_withholds_total:
+  {ORD.Estimate.label("from $5.00", "No estimate for b") == "estimate incomplete" : String}
+
+law estimate_complete_keeps_total:
+  {ORD.Estimate.label("from $5.00", "") == "from $5.00" : String}

@@ -13895,3 +13895,9 @@ def Laws.plot_version_tree_path(path):
   {==}
 def Laws.plot_comparison_tree_path(path):
   {==}
+
+def Laws.estimate_partial_withholds_total():
+  {==}
+
+def Laws.estimate_complete_keeps_total():
+  {==}

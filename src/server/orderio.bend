@@ -128,9 +128,10 @@ def Od.strs(xs: List<&2, String>) -> List<&2, J.Json>:
 
 # board_files: every KiCad board in the project (paths from its folder),
 # for the viewer's board picker
-def Od.card(+thread: String, +intent: String, ps: List<&2, J.Json>, +boards: String, +est: J.Json, +on: Bool, bs: List<&2, String>, +bd: String, +ord: String) -> J.Json:
+def Od.card(+thread: String, +intent: String, +ps: List<&2, J.Json>, +boards: String, +est: J.Json, +on: Bool, bs: List<&2, String>, +bd: String, +ord: String) -> J.Json:
   J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"intent", J.Str{intent}}, J.KV{"goal", J.Str{OR.Intent.goal(intent)}},
-    J.KV{"parts", J.Json.arr(Od.part.rows(ps))}, J.KV{"boards", J.Num{boards}}, J.KV{"label", J.Str{J.Json.get_str(est, "label", "")}},
+    J.KV{"parts", J.Json.arr(Od.part.rows(ps))}, J.KV{"boards", J.Num{boards}}, J.KV{"label", J.Str{OR.Estimate.label(J.Json.get_str(est, "label", ""), OR.Estimate.note(ps, est, on))}},
+    J.KV{"estimate_problems", J.Str{OR.Estimate.note(ps, est, on)}},
     J.KV{"error", J.Str{J.Json.get_str(est, "error", "")}}, J.KV{"estimates", J.Flag{on}}, J.KV{"board_files", J.Json.arr(Od.strs(bs))}, J.KV{"board_default", J.Str{bd}}, J.KV{"order", J.Str{ord}}])
 
 # the board the viewer opens by default (kicad.bend's Files.read), from the folder
