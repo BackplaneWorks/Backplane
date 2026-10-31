@@ -1547,7 +1547,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .workspace-bar button.on { box-shadow: inset 2px 0 var(--accent); }
 .workspace-menu { display: none; }
 .workspace-close { margin-top: auto; padding-top: 8px; }
-.workspace-close .viewer-close { min-height: 44px; width: 100%; font-size: 10px; line-height: 1.3; flex-direction: column; white-space: normal; }
+.workspace-close .viewer-close { min-height: 44px; width: 100%; padding: 5px 2px; font-size: 10px; line-height: 1.3; flex-direction: column; white-space: normal; }
 .workspace-feedback { margin: 0; overflow-wrap: anywhere; font-size: 10px; }
 .workspace-feedback:empty { display: none; }
 .thread-content > .subs { flex: none; min-width: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
