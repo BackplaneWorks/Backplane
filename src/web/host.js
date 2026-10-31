@@ -418,6 +418,23 @@ try {
   const selected = localStorage.getItem("backplane-selected");
   if (selected) ui = App.presentation_select(ui, selected);
 } catch {}
+// Reload keeps the Settings category, never any fields edited on that page.
+let settingsRestorePage = null;
+try {
+  const saved = JSON.parse(localStorage.getItem("backplane-settings") || "null");
+  if (saved && typeof saved.page === "string") {
+    ui = App.act(ui, "flag", "settings").ui;
+    ui = App.act(ui, "settings-page", saved.page).ui;
+    settingsRestorePage = saved.page;
+  }
+} catch {}
+window.addEventListener("pagehide", () => {
+  const session = currentSession();
+  try {
+    if (session.open?.settings) localStorage.setItem("backplane-settings", JSON.stringify({ page: session.drafts?.["@settings.page"] || "" }));
+    else localStorage.removeItem("backplane-settings");
+  } catch {}
+});
 let socket = null;
 const viewerRpc = new ViewerRpc(request => {
   if (!socket || socket.readyState !== 1) throw Error("Connect to the hub to read saved component metadata.");
@@ -717,6 +734,12 @@ function render() {
   mailCheckpoint();
   const mail = mailAnchor();
   queued = false;
+  // Settings categories run through the normal hub action after its first
+  // view; do not flash the category index while that action is on its way.
+  if (remoteReady && settingsRestorePage !== null) {
+    const page = settingsRestorePage;settingsRestorePage = null;
+    if (currentSession().open?.settings && page) { dispatch("settings-page", page);return; }
+  }
   const tl = document.getElementById("timeline");
   const t0 = PERF ? pnow() : 0;
   let page = frontendNode ? App.presentation_overlay(frontendNode, presentationJson(modelFeedback.project(currentSession())))
