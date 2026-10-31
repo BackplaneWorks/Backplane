@@ -679,6 +679,9 @@ export function cameraState() {
 
 // A read-only pose for higher-quality renderers of the same saved geometry.
 export function cameraSnapshot() { return view ? structuredClone(view.snapshot()) : null; }
+// whether the camera means anything yet: fitted to this view's model, or a
+// saved pose about to be restored; a fresh default orbit looks at nothing
+export function cameraFitted() { return !!view && (!!view.box || !!view.restoreWanted); }
 
 // Fit verified original-model bounds without replacing the whole-scene box.
 // Board coordinates are millimetres, matching component metadata/projection.

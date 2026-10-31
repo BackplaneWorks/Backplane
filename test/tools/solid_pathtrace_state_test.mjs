@@ -17,7 +17,10 @@ function fake(geometry){
  const {v,events}=fake(true);v.state.triangles=0;v.raster();assert.equal(queued.length,0);assert.equal(events.length,0,'zero triangles cannot reveal a background');
 }
 {
- const {v,events}=fake(false);v.raster();assert.equal(queued.length,0);assert.equal(events.length,0);assert.equal(v.state.visible,false);
+ const {v,events}=fake(false);v.raster();assert.equal(events.length,0);assert.equal(v.state.visible,false);
+ assert.equal(queued.length,1,'a proof that finds no geometry retries on the next frame');
+ let n=0;while(queued.length&&n<100){queued.shift()();n++;}
+ assert.equal(n,30,'proof retries are bounded');assert.equal(events.length,0,'retries never reveal a frame without geometry');assert.equal(v.state.visible,false);
 }
 {
  const {v,events}=fake(true);v.raster();assert.equal(events.length,0);assert.equal(v.state.visible,false);queued.shift()();assert.equal(events[0].visible,true);assert.equal(events[0].firstFrame,true);assert.equal(events[0].key,'source-key');assert.equal(events[0].revision,'source-rev');
