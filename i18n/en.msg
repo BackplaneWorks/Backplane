@@ -1355,3 +1355,6 @@ intent.saved = Intent saved
 
 diff.revert.confirm = Discard this thread’s uncommitted changes, including new files?
 account.label.required = Enter an account label.
+
+bots.name.rule = 1–24 letters, digits, - or _.
+bots.name.taken = That bot name is already taken.

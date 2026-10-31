@@ -1378,3 +1378,6 @@ intent.saved = 意図を保存しました
 
 diff.revert.confirm = 新しいファイルを含め、このスレッドの未コミットの変更を破棄しますか？
 account.label.required = アカウントの名前を入力してください。
+
+bots.name.rule = 1〜24文字の英数字、-、_。
+bots.name.taken = このボット名は既に使われています。

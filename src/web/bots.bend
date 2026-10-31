@@ -134,6 +134,8 @@ def WB.bot.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
       [WB.div("bform", [
         WB.input("bot-name", "name", BI.BU.field(u, "name"), U.Bots.name.hint.loc(lc, u), "bot-create"),
         WB.area("bot-persona", "persona", BI.BU.field(u, "persona"), MSG.T.web.bots.persona.placeholder(lc)),
+        D.Dom.span("hint", MSG.T.bots.name.rule(lc)),
+        D.Dom.span("hint bad", Bool.pick(String, BT.Maybe.is(BT.Bot, BT.World.find(M.State.bots(U.Ui.state(u)), String.trim(BI.BU.field(u, "name")))), MSG.T.bots.name.taken(lc), "")),
         WB.div("chips-row", WB.pchips(["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], WB.prov(u))),
         WB.btns([D.Dom.button("primary", "bot-create", "", MSG.T.bots.create.tip(lc), MSG.T.common.create(lc)), D.Dom.button("", "bot-new", "", MSG.T.common.cancel(lc), MSG.T.common.cancel(lc))])])]
     case False{}:

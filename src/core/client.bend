@@ -8281,11 +8281,20 @@ def Bots.flag(+u: Ui, +k: String) -> Ui:
 def Bots.uber.new(+u: Ui) -> List<&2, J.KV>:
   Bool.pick(List<&2, J.KV>, String.eq(Ui.scratch(u, "@uber.new"), "1"), [J.KV{"uber", J.Flag{True{}}}], Nil{})
 
-def Bots.create(+u: Ui) -> Act:
+def Bots.create.valid(+u: Ui) -> Act:
   Ui.rpc(Bots.fields.clear(Ui.scratch_set(Ui.scratch_set(u, "@bnew", ""), "@uber.new", ""), ["name", "persona"]), "bots.create",
     List.append(&2, J.KV, [J.KV{"name", J.Str{String.trim(Bots.field(u, "name"))}}, J.KV{"persona", J.Str{Bots.field(u, "persona")}},
      J.KV{"provider", J.Str{Bool.pick(String, String.is_empty(Bots.field(u, "provider")), M.Setting.get(Ui.state.of(u), "agent.provider", "claude"), Bots.field(u, "provider"))}},
      J.KV{"model", J.Str{Bots.field(u, "model")}}], Bots.uber.new(u)))
+
+# Refusing a name never clears the persona or closes its form.
+def Bots.create.k(valid: Bool, +u: Ui) -> Act:
+  match valid:
+    case True{}: Bots.create.valid(u)
+    case False{}: Act{u, [Focus{"bot-name"}]}
+
+def Bots.create(+u: Ui) -> Act:
+  Bots.create.k(Bool.and(BT.Bot.name.valid(String.trim(Bots.field(u, "name"))), Bool.not(BT.Maybe.is(BT.Bot, BT.World.find(M.State.bots(Ui.state(u)), String.trim(Bots.field(u, "name")))))), u)
 
 # the form's name field hint
 def Bots.name.hint.loc(+l: I.Loc, +u: Ui) -> String:

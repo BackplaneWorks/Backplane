@@ -13443,3 +13443,7 @@ law voice_category_requests_status:
 # Regression for c12-5.
 law account_blank_label_no_request:
   {U.Act.cmds(U.Acv.act(U.Ui.scratch_set(U.Ui.init(0n), "@f.accountlabel", "  "), "acct-add", "")) == [U.Focus{"agy-accountlabel"}] : List<&2, U.Cmd>}
+
+# Regression for c13-1.
+law bot_invalid_name_keeps_persona:
+  {U.Ui.scratch(U.Act.ui(U.Bots.create(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.init(0n), "@f.name", "bad name"), "@f.persona", "Keep me"))), "@f.persona") == "Keep me" : String}

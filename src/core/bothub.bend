@@ -489,7 +489,7 @@ def Bots.name.chars(s: String) -> Bool:
       Bool.and(Bots.name.c(c), Bots.name.chars(t))
 
 def Bots.name.ok(+name: String) -> Bool:
-  Bool.and(Bool.and(Nat.is_ge(String.length(name), 1n), Nat.is_le(String.length(name), 24n)), Bots.name.chars(name))
+  BT.Bot.name.valid(name)
 
 def Bots.name.free(+s: M.State, +name: String) -> Bool:
   Bool.not(BT.Maybe.is(BT.Bot, BT.World.find(M.State.bots(s), name)))

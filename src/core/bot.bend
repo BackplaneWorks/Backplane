@@ -1270,3 +1270,15 @@ def Hook.id(h: Hook) -> String:
   match h:
     case Hook{i, _, _, _, _, _, _}:
       i
+
+# The creation form and hub use the same name rule.
+def Bot.name.char(+c: Char) -> Bool:
+  Bool.or(Char.is_alpha(c), Bool.or(Char.is_digit(c), Bool.or(Char.is_eq(c, '-'), Char.is_eq(c, '_'))))
+
+def Bot.name.chars(s: String) -> Bool:
+  match s:
+    case SNil{}: True{}
+    case SCon{+c, t}: Bool.and(Bot.name.char(c), Bot.name.chars(t))
+
+def Bot.name.valid(+name: String) -> Bool:
+  Bool.and(Bool.and(Nat.is_ge(String.length(name), 1n), Nat.is_le(String.length(name), 24n)), Bot.name.chars(name))
