@@ -100,7 +100,18 @@ data class Entry(
     val open: Boolean = false, val value: String = "", val key: String = "", val at: String = "",
     val stamp: String = "",
     val partial: MessagePartial? = null,
+    // a bot chat (core/reply.bend): Reply offered; a person's reply names
+    // the message it answers; a bot's message heads with what it links most
+    val reply: Boolean = false,
+    val replyTo: ReplyRef? = null,
+    val ctx: MsgCtx? = null,
 )
+
+// the message a reply answers: its id and first line
+data class ReplyRef(val id: String, val text: String)
+
+// the thread or project a bot's message links most, by its title now
+data class MsgCtx(val uri: String, val title: String, val more: Int)
 
 // what the agent waits on the user for: an approval, a question or a
 // plan; each button sends "answer" with its value
@@ -323,6 +334,8 @@ data class ThreadView(
     val skills: List<Skill> = emptyList(),
     // a side question (/btw) and its answer, until closed
     val btw: Btw? = null,
+    // the message the composer replies to (reply-drop forgets it)
+    val replying: ReplyRef? = null,
     // what the next message attaches, and what is still uploading (chunk:
     // the web's piece size; the app sends a file whole, POST /attach)
     val attaching: List<Chip> = emptyList(),
@@ -525,7 +538,11 @@ private fun entry(o: JSONObject) = Entry(
     o.optJSONArray("images").map { Shot(it.optString("path"), it.optString("url")) },
     o.optBoolean("open"), o.optString("value"), o.optString("key"), o.optString("when"),
     o.optString("stamp"), o.optJSONObject("partial")?.let(::messagePartial),
+    o.optBoolean("reply"), o.optJSONObject("replyTo")?.let(::replyRef),
+    o.optJSONObject("ctx")?.let { MsgCtx(it.optString("uri"), it.optString("title"), it.optInt("more")) },
 )
+
+private fun replyRef(o: JSONObject) = ReplyRef(o.optString("id"), o.optString("text"))
 
 private fun tool(o: JSONObject) = Tool(
     o.optString("label"), o.optString("action"), o.optBoolean("on"), o.optString("value"), o.optBoolean("danger"),
@@ -562,6 +579,7 @@ private fun thread(o: JSONObject) = threadOf(o).copy(
     asks = o.optJSONArray("asks").map(::askOf),
     skills = o.optJSONArray("skills").map { Skill(it.optString("name"), it.optString("desc"), it.optBoolean("on")) },
     btw = o.optJSONObject("btw")?.let { Btw(it.optString("q"), it.optString("a")) },
+    replying = o.optJSONObject("replying")?.let(::replyRef),
     attaching = chips(o.optJSONArray("attaching")),
     uploading = o.optString("uploading"),
     chunk = o.optInt("chunk", 196_608),

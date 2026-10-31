@@ -34,6 +34,7 @@ import ./ledger.bend as LG
 import ./task.bend as TK
 import ./teach.bend as TE
 import ./order.bend as OR
+import ./reply.bend as RTO
 
 # Remote bot directories. A result replaces just its peer; a failure
 # keeps that peer's rows and their last-seen timestamps, marked away.
@@ -1317,7 +1318,8 @@ def Bots.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p
     case 2n:
       Bots.delete.k(Bots.live(s, J.Json.get_str(p, "bot", "")), s, now, client, id, J.Json.get_str(p, "bot", ""))
     case 3n:
-      Bots.say.msg(Bots.live(s, J.Json.get_str(p, "bot", "")), s, now, client, id, J.Json.get_str(p, "bot", ""), J.Json.get_str(p, "text", ""), J.Json.get_str(p, "msg", ""))
+      Bots.say.msg(Bots.live(s, J.Json.get_str(p, "bot", "")), s, now, client, id, J.Json.get_str(p, "bot", ""),
+        RTO.Rto.resolve(s, BT.Bot.thread(Bots.bot(s, J.Json.get_str(p, "bot", ""))), J.Json.get_str(p, "reply", ""), J.Json.get_str(p, "text", "")), J.Json.get_str(p, "msg", ""))
     case 4n:
       Bots.room(s, now, client, id, p)
     case 5n:

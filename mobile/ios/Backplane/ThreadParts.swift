@@ -245,6 +245,9 @@ struct EntryRow: View {
     @State private var selecting = false
 
     @ViewBuilder private var menu: some View {
+        if entry.reply == true {
+            Button(NativeMessages.reply_action(lang), systemImage: "arrowshape.turn.up.left") { model.act("reply-to", entry.id) }
+        }
         Button(NativeMessages.common_copy(lang), systemImage: "doc.on.doc") { model.act("copy", entry.text) }
         Button(NativeMessages.native_text_select_title(lang), systemImage: "selection.pin.in.out") { selecting = true }
     }
@@ -264,6 +267,18 @@ struct EntryRow: View {
         switch entry.kind {
         case "user":
             VStack(alignment: .trailing, spacing: 6) {
+                // only the line: the quote went to the agent
+                if let r = entry.replyTo {
+                    Button { model.act("hist-jump", r.id) } label: {
+                        HStack(spacing: 4) {
+                            Text(NativeMessages.reply_to(lang)).textCase(.uppercase)
+                            Text(r.text).underline().lineLimit(1)
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
                 if !entry.text.isEmpty {
                     Text(entry.text)
                         .padding(.horizontal, 14).padding(.vertical, 10)
@@ -277,6 +292,18 @@ struct EntryRow: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
         case "assistant":
             VStack(alignment: .leading, spacing: 8) {
+                if let c = entry.ctx {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button { model.act("ref-go", c.uri) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(c.title).font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor).lineLimit(1)
+                                if c.more > 0 { Text("+\(c.more)").font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                }
                 MarkdownView(blocks: entry.blocks ?? [])
                 ForEach(entry.images ?? [], id: \.self) { Thumb(model: model, url: $0.url, show: show) }
                 stamp
@@ -600,6 +627,21 @@ struct ComposerExtras: View {
         let atts = thread.attaching ?? []
         let up = thread.uploading ?? ""
         let skills = thread.skills ?? []
+        if let r = thread.replying {
+            HStack(spacing: 6) {
+                Text(NativeMessages.reply_replying(lang)).textCase(.uppercase).foregroundStyle(.secondary)
+                Button { model.act("hist-jump", r.id) } label: { Text(r.text).lineLimit(1) }.buttonStyle(.plain)
+                Spacer()
+                Button { model.actComposer("reply-drop", for: thread.id) } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(NativeMessages.reply_cancel(lang))
+            }
+            .font(.caption)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .overlay(alignment: .leading) { Rectangle().fill(Color.accentColor).frame(width: 2) }
+            .background(Color(.secondarySystemBackground))
+            .padding(.horizontal).padding(.top, 8)
+        }
         if let b = thread.btw {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {

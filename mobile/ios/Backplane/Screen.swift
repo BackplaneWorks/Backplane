@@ -128,6 +128,22 @@ struct Entry: Decodable, Identifiable {
     // a message: when it was sent, or the turn finished (core/stamp.bend)
     let stamp: String?
     let partial: MessagePartial?
+    // a bot chat (core/reply.bend): Reply offered; a person's reply names
+    // the message it answers; a bot's message heads with what it links most
+    let reply: Bool?
+    let replyTo: ReplyRef?
+    let ctx: MsgCtx?
+}
+
+// the message a reply answers: its id and first line
+struct ReplyRef: Decodable, Hashable {
+    let id, text: String
+}
+
+// the thread or project a bot's message links most, by its title now
+struct MsgCtx: Decodable, Hashable {
+    let uri, title: String
+    let more: Int
 }
 
 // what the agent waits on the user for: an approval, a question or a
@@ -538,6 +554,8 @@ struct ThreadView: Decodable {
     let asks: [Ask]?
     let skills: [Skill]?
     let btw: Btw?
+    // the message the composer replies to (reply-drop forgets it)
+    let replying: ReplyRef?
     // what the next message attaches, and what is still uploading (chunk:
     // the web's piece size; the app sends a file whole, POST /attach)
     let attaching: [Chip]?

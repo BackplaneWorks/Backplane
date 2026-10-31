@@ -1380,3 +1380,10 @@ composer.attachment.restoring = Restoring attachments. Wait before sending or re
 viewer.file.missing = The file is no longer in the folder: {name}
 viewer.file.unread = This version of the file cannot be read.
 composer.attachment.offline = Not attached. Reconnect, then choose the file again.
+
+# ---- bot chat replies ----
+reply.action = Reply
+reply.to = In reply to:
+reply.replying = Replying to:
+reply.cancel = Cancel reply
+reply.more = more linked

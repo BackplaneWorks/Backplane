@@ -418,10 +418,12 @@ fun ChipView(m: AppModel, c: Chip, show: (String) -> Unit) {
 // a message's long press: Copy takes it whole, Select text opens it where
 // any part of it can be selected and copied
 @Composable
-private fun MessageMenu(m: AppModel, text: String, open: Boolean, close: () -> Unit) {
+private fun MessageMenu(m: AppModel, text: String, open: Boolean, close: () -> Unit, reply: String = "") {
     val lang = LocalBackplaneLanguage.current
     var selecting by remember { mutableStateOf(false) }
     DropdownMenu(expanded = open, onDismissRequest = close) {
+        // a bot chat's message: Reply (core/reply.bend)
+        if (reply.isNotEmpty()) DropdownMenuItem(text = { Text(NativeMessages.reply_action(lang)) }, onClick = { close(); m.act("reply-to", reply) })
         DropdownMenuItem(text = { Text(NativeMessages.common_copy(lang)) }, onClick = { close(); m.act("copy", text) })
         DropdownMenuItem(text = { Text(NativeMessages.native_text_select_action(lang)) }, onClick = { close(); selecting = true })
     }
@@ -453,21 +455,40 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
     when (e.kind) {
         "user" -> Column(Modifier.fillMaxWidth().padding(start = 48.dp), horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // only the line: the quote went to the agent
+            e.replyTo?.let { r ->
+                Row(Modifier.clickable { m.act("hist-jump", r.id) }, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(NativeMessages.reply_to(lang).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Text(r.text, style = MaterialTheme.typography.labelSmall.copy(textDecoration = TextDecoration.Underline),
+                        color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
             if (e.text.isNotEmpty()) Box {
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shape = MaterialTheme.shapes.large,
                     modifier = Modifier.combinedClickableCompat(onLong = { menu = true }) {},
                 ) { Text(e.text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge) }
-                MessageMenu(m, e.text, menu) { menu = false }
+                MessageMenu(m, e.text, menu, { menu = false }, if (e.reply) e.id else "")
             }
             for (c in e.attachments) ChipView(m, c, show)
             Stamp(e.stamp)
         }
         "assistant" -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            e.ctx?.let { c ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(Modifier.clickable { m.act("ref-go", c.uri) }, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        if (c.more > 0) Text("+${c.more}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                    HorizontalDivider()
+                }
+            }
             Box {
                 Markdown(e.blocks, Modifier.fillMaxWidth().combinedClickableCompat(onLong = { menu = true }) {})
-                MessageMenu(m, e.text, menu) { menu = false }
+                MessageMenu(m, e.text, menu, { menu = false }, if (e.reply) e.id else "")
             }
             for (i in e.images) Thumb(m, i.url, show)
             Stamp(e.stamp)
@@ -627,6 +648,17 @@ fun AskCard(m: AppModel, a: Ask) {
 @Composable
 fun ComposerExtras(m: AppModel, t: ThreadView) {
     val lang = LocalBackplaneLanguage.current
+    t.replying?.let { r ->
+        Surface(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), shape = corner,
+            color = MaterialTheme.colorScheme.surfaceVariant) {
+            Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(NativeMessages.reply_replying(lang).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(r.text, Modifier.weight(1f).clickable { m.act("hist-jump", r.id) }, style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                IconButton(onClick = { m.act("reply-drop") }) { Icon(Icons.Filled.Close, NativeMessages.reply_cancel(lang)) }
+            }
+        }
+    }
     t.btw?.let { b ->
         Surface(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), shape = corner,
             color = MaterialTheme.colorScheme.surfaceVariant) {

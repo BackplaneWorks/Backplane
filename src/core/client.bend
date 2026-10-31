@@ -68,6 +68,7 @@ import ./mail.bend as ML
 import ./thin-chat.bend as TC
 import ./secret.bend as SEC
 import ./modelpick.bend as MPK
+import ./reply.bend as RTO
 
 # The client state, Elm-style, shared by the native window and the web
 # page: a host feeds server messages to Ui.recv and user actions to Ui.act,
@@ -1451,11 +1452,31 @@ def Follow.act(stop: Bool) -> String:
     case False{}:
       "send"
 
+# Replies in bot chats (core/reply.bend): Reply on a message keeps its id in
+# the scratch "@reply:<thread>" and its first line in "@reply.q:<thread>"
+# (Rpl.set); the composer shows it until "reply-drop" or the next send,
+# which carries it as `reply` and forgets it (the hub quotes the message,
+# RTO.Rto.resolve).
+def Rpl.key(+th: String) -> String:
+  "@reply:" ++ th
+
+def Rpl.q.key(+th: String) -> String:
+  "@reply.q:" ++ th
+
+def Rpl.kv(+id: String) -> List<&2, J.KV>:
+  match id:
+    case SNil{}: Nil{}
+    case SCon{+h, +t}: [J.KV{"reply", J.Str{SCon{h, t}}}]
+
+# the drafts with thread th's reply forgotten
+def Rpl.forget(dr: Map<&2, String>, +th: String) -> Map<&2, String>:
+  Map.set(&2, String, Map.set(&2, String, dr, Rpl.key(th), ""), Rpl.q.key(th), "")
+
 def Ui.send.rpc(u: Ui, text: String, +mode: String) -> Act:
   match u:
-    case Ui{st, +sel, dr, live, op, on, +now, ad, pa, v, +rid, w, er, note, +nf, ob, tr}:
-      Ui.also(Ui.rpc.keep(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr},
-        "turn.start", [J.KV{"thread", J.Str{sel}}, J.KV{"text", J.Str{text}}, J.KV{"msg", J.Str{Ui.msg_id(Str.get(nf, "cid"), now, rid)}}, J.KV{"mode", J.Str{mode}}]), [ScrollEnd{}])
+    case Ui{st, +sel, +dr, live, op, on, +now, ad, pa, v, +rid, w, er, note, +nf, ob, tr}:
+      Ui.also(Ui.rpc.keep(Ui{st, sel, Rpl.forget(dr, sel), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr},
+        "turn.start", List.append(&2, J.KV, [J.KV{"thread", J.Str{sel}}, J.KV{"text", J.Str{text}}, J.KV{"msg", J.Str{Ui.msg_id(Str.get(nf, "cid"), now, rid)}}, J.KV{"mode", J.Str{mode}}], Rpl.kv(Str.get(dr, Rpl.key(sel))))), [ScrollEnd{}])
 
 def Ui.send.t.k(a: Act, text: String, +mode: String) -> Act:
   match a:
@@ -7532,7 +7553,7 @@ def Qu.tag(+l: I.Loc, +run: Bool, +msg: String) -> String:
 
 # a queued row's text: context says what it is, a message itself
 def Qu.label(+l: I.Loc, +msg: String, +text: String) -> String:
-  Bool.pick(String, String.starts_with(msg, "handoff:"), MSG.T.queue.handoff(l, DF.Diff.first(String.drop(text, 12n))), text)
+  Bool.pick(String, String.starts_with(msg, "handoff:"), MSG.T.queue.handoff(l, DF.Diff.first(String.drop(text, 12n))), RTO.Rto.text(text))
 
 # a thread's todo list as it shows (TD.Todo.shown): empty when hidden
 def Todos.of(+st: M.State, +th: String) -> List<&2, TD.Todo>:
@@ -7682,8 +7703,9 @@ def Bots.fields.clear(u: Ui, ks: List<&2, String>) -> Ui:
 
 def Bots.say.k(a: Act, +bot: String, text: String) -> Act:
   match a:
-    case Act{u, cs}:
-      Ui.first(cs, Ui.also(Ui.rpc.keep.msg(u, "bots.say", [J.KV{"bot", J.Str{bot}}, J.KV{"text", J.Str{text}}]), [ScrollEnd{}]))
+    case Act{+u, cs}:
+      Ui.first(cs, Ui.also(Ui.rpc.keep.msg(Ui.scratch_set(Ui.scratch_set(u, Rpl.key(Ui.sel(u)), ""), Rpl.q.key(Ui.sel(u)), ""), "bots.say",
+        List.append(&2, J.KV, [J.KV{"bot", J.Str{bot}}, J.KV{"text", J.Str{text}}], Rpl.kv(Ui.scratch(u, Rpl.key(Ui.sel(u)))))), [ScrollEnd{}]))
 
 # (the clear goes to the host too: a bot's thread once kept its sent text)
 def Bots.say(u: Ui, +bot: String, text: String) -> Act:
@@ -15657,8 +15679,38 @@ def Ui.act.revert(cancel: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Act{Ui.scratch_set(u, "@revert", ""), Nil{}}
     case False{}: Ui.act.todo(Nat.is_lt(C.Codec.pos(["todo-edit", "todo-text", "todo-add"], action), 3n), u, action, value)
 
+# Reply on message `id` of the thread on show (none: nothing)
+def Rpl.set.k(+found: Maybe<&2, String>, +u: Ui, +id: String) -> Ui:
+  match found:
+    case Some{+x}: Ui.scratch_set(Ui.scratch_set(u, Rpl.key(Ui.sel(u)), id), Rpl.q.key(Ui.sel(u)), RTO.Rto.snip(x))
+    case None{}: u
+
+def Rpl.set(+u: Ui, +id: String) -> Ui:
+  Rpl.set.k(RTO.Rto.find(M.State.mine(Ui.state(u), Ui.sel(u)), id), u, id)
+
+def Rpl.drop(+u: Ui) -> Ui:
+  Ui.scratch_set(Ui.scratch_set(u, Rpl.key(Ui.sel(u)), ""), Rpl.q.key(Ui.sel(u)), "")
+
+# the message the composer replies to ("" none) and its line
+def Rpl.of(+u: Ui) -> String:
+  Ui.scratch(u, Rpl.key(Ui.sel(u)))
+
+def Rpl.label(+u: Ui) -> String:
+  Ui.scratch(u, Rpl.q.key(Ui.sel(u)))
+
+# "reply-to" (value: the message's id) and "reply-drop"
+def Rpl.pick(to: Bool, +u: Ui, +value: String) -> Ui:
+  match to:
+    case True{}: Rpl.set(u, value)
+    case False{}: Rpl.drop(u)
+
+def Ui.act.rpl(rpl: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match rpl:
+    case True{}: Act{Rpl.pick(String.eq(action, "reply-to"), u, value), [Focus{"composer"}]}
+    case False{}: Ui.act.revert(String.eq(action, "revert-no"), u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.act.revert(String.eq(action, "revert-no"), u, action, value)
+  Ui.act.rpl(Bool.or(String.eq(action, "reply-to"), String.eq(action, "reply-drop")), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

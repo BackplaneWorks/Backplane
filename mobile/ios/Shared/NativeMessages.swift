@@ -1364,6 +1364,26 @@ enum NativeMessages {
     tag == "ja" ? ("編集") : ("Edit")
   }
 
+  // reply.action
+  static func reply_action(_ tag: String) -> String {
+    tag == "ja" ? ("返信") : ("Reply")
+  }
+
+  // reply.cancel
+  static func reply_cancel(_ tag: String) -> String {
+    tag == "ja" ? ("返信をやめる") : ("Cancel reply")
+  }
+
+  // reply.replying
+  static func reply_replying(_ tag: String) -> String {
+    tag == "ja" ? ("返信先:") : ("Replying to:")
+  }
+
+  // reply.to
+  static func reply_to(_ tag: String) -> String {
+    tag == "ja" ? ("返信先:") : ("In reply to:")
+  }
+
   // review.bom
   static func review_bom(_ tag: String) -> String {
     tag == "ja" ? ("BOM") : ("BOM")

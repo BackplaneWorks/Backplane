@@ -43,6 +43,7 @@ import ./secret.bend as SEC
 import ./stamp.bend as STP
 import ./wnote.bend as WN
 import ./when.bend as WH
+import ./reply.bend as RTO
 
 # The decider. Requests from clients and lines from agents come in; changes
 # (persisted, folded into the read model) and effects (run by the server)
@@ -9418,7 +9419,7 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
       Hub.thread_create(s, now, client, id, p)
     case 3n:
       Hub.turn.mode(Bool.or(String.is_empty(J.Json.get_str(p, "mode", "")), String.eq(J.Json.get_str(p, "mode", ""), "auto")), J.Json.get_str(p, "mode", ""),
-        s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "text", ""), J.Json.get_str(p, "msg", ""))
+        s, now, client, id, J.Json.get_str(p, "thread", ""), RTO.Rto.resolve(s, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "reply", ""), J.Json.get_str(p, "text", "")), J.Json.get_str(p, "msg", ""))
     case 4n:
       Hub.interrupt(s, now, client, id, J.Json.get_str(p, "thread", ""))
     case 5n:

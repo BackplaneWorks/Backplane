@@ -1403,3 +1403,10 @@ composer.attachment.restoring = 添付ファイルを復元しています。送
 viewer.file.missing = ファイルがフォルダーにありません: {name}
 viewer.file.unread = このバージョンのファイルを読み込めません。
 composer.attachment.offline = 添付されていません。再接続してからファイルを選び直してください。
+
+# ---- bot chat replies ----
+reply.action = 返信
+reply.to = 返信先:
+reply.replying = 返信先:
+reply.cancel = 返信をやめる
+reply.more = 件のリンク

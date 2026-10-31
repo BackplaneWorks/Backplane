@@ -40,6 +40,7 @@ import ../core/stamp.bend as STP
 import ./permissions.bend as PM
 import ../core/subthreads.bend as ST
 import ../core/native-sidebar.bend as NS
+import ../core/reply.bend as RTO
 
 # Ui -> the screen the phone apps draw, as JSON. SwiftUI and Compose map
 # it onto native lists, toolbars and text fields; every decision (order,
@@ -627,12 +628,59 @@ def Mob.think.hide(e: M.Entry, +st: M.State) -> Bool:
     case _:
       False{}
 
+# Bot chats (core/reply.bend), as the web's View.entry.s.loc: every message
+# has "reply" (Reply sends "reply-to" with its id); a person's reply shows
+# what they wrote ("text") under "replyTo" {id, text} (a tap sends
+# "hist-jump" with the id); a bot's message that links threads or
+# projects has "ctx" {uri, title, more} (a tap sends "ref-go" with uri)
+# the message the composer replies to: {id, text}, null none ("reply-drop"
+# forgets it)
+def Mob.replying(+id: String, +q: String) -> J.Json:
+  match id:
+    case SNil{}: J.Null{}
+    case SCon{+h, +t}: J.Json.obj([J.KV{"id", J.Json.str(SCon{h, t})}, J.KV{"text", J.Json.str(q)}])
+
+def Mob.extra.go(kvs: List<&2, J.KV>, fs: J.Json) -> J.Json:
+  match kvs:
+    case Nil{}: fs
+    case J.KV{k, v} <> t: Mob.extra.go(t, J.Field{k, v, fs})
+
+def Mob.extra(+kvs: List<&2, J.KV>, j: J.Json) -> J.Json:
+  match j:
+    case J.Obj{fs}: J.Obj{Mob.extra.go(kvs, fs)}
+    case _: j
+
+def Mob.rto.kv(m: Maybe<&2, RTO.RtoBlock>) -> List<&2, J.KV>:
+  match m:
+    case Some{RTO.RtoBlock{+to, +q, _}}: [J.KV{"replyTo", J.Json.obj([J.KV{"id", J.Json.str(to)}, J.KV{"text", J.Json.str(RTO.Rto.snip(q))}])}]
+    case None{}: Nil{}
+
+def Mob.ctx.kv(m: Maybe<&2, RTO.MsgCtx>) -> List<&2, J.KV>:
+  match m:
+    case Some{RTO.MsgCtx{+u, +t, +n}}: [J.KV{"ctx", J.Json.obj([J.KV{"uri", J.Json.str(u)}, J.KV{"title", J.Json.str(t)}, J.KV{"more", J.Num{Nat.show(n)}}])}]
+    case None{}: Nil{}
+
+def Mob.chat.kv(user: Bool, +st: M.State, +text: String) -> List<&2, J.KV>:
+  match user:
+    case True{}: J.KV{"reply", J.Flag{True{}}} <> Mob.rto.kv(RTO.Rto.of(text))
+    case False{}: J.KV{"reply", J.Flag{True{}}} <> Mob.ctx.kv(RTO.Ctx.of(st, text))
+
+def Mob.user.is(r: M.Role) -> Bool:
+  match r:
+    case M.User{}: True{}
+    case _: False{}
+
+def Mob.own.chat(chat: Bool, +lc: I.Loc, +id: String, +t: String, +r: M.Role, +x: String, +at: Nat, +st: M.State, +dr: Map<&2, String>, +sp: STP.Stamps) -> J.Json:
+  match chat:
+    case True{}: Mob.extra(Mob.chat.kv(Mob.user.is(r), st, x), Mob.own(lc, M.Msg{id, t, r, Bool.pick(String, Mob.user.is(r), RTO.Rto.text(x), x), at}, dr, sp))
+    case False{}: Mob.own(lc, M.Msg{id, t, r, x, at}, dr, sp)
+
 # what an entry shows as, as the web's View.entry.k: this thread's own
 # (headed by the thread that sent it), or a message it sent to another
 def Mob.entry.k(+lc: I.Loc, mine: Bool, +e: M.Entry, +st: M.State, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
   match mine e:
-    case True{} M.Msg{+id, t, r, x, at}:
-      List.append(&2, J.Json, Mob.from(String.is_empty(M.Link.from(id)), id, M.Link.from(id), st), [Mob.own(lc, M.Msg{id, t, r, x, at}, dr, sp)])
+    case True{} M.Msg{+id, +t, +r, +x, +at}:
+      List.append(&2, J.Json, Mob.from(String.is_empty(M.Link.from(id)), id, M.Link.from(id), st), [Mob.own.chat(RTO.Rto.chat(st, t), lc, id, t, r, x, at, st, dr, sp)])
     case True{} _:
       Bool.pick(List<&2, J.Json>, Mob.think.hide(e, st), Nil{}, Mob.entry.r(lc, Mob.remind.is(e), e, st, dr, sp))
     case False{} M.Msg{+id, +t, _, x, _}:
@@ -1393,6 +1441,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), Mob.working(lc, st, id, ph, turn, pe), ""))},
         J.KV{"phase", J.Json.str(SG.Signal.display.name(ph, st, id))},
         J.KV{"draft", J.Json.str(U.Str.get(drafts, sel))},
+        J.KV{"replying", Mob.replying(U.Str.get(drafts, U.Rpl.key(sel)), U.Str.get(drafts, U.Rpl.q.key(sel)))},
         J.KV{"send", J.Json.str(U.Follow.button(lc, st, sel, V.View.running(turn), U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts), U.Str.get(drafts, sel)))},
         J.KV{"sendAct", J.Json.str(U.Follow.act(U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts)))},
         J.KV{"picker", Mob.picker.ctx.loc(lc, U.Models.phone(nf, pr, U.Str.get(drafts, "@f.mq")), pr, mo, U.Effort.of(st, sel), U.Usage.tail(st, sel))},

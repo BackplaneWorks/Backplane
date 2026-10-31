@@ -363,3 +363,7 @@ image.share
 native.file.text.error
 viewer.file.missing
 viewer.file.unread
+reply.action
+reply.cancel
+reply.replying
+reply.to
