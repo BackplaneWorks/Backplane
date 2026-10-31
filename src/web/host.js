@@ -2395,6 +2395,9 @@ async function startThin(again = false, reason = "initial") {
           ui = App.unsync(App.presentation_handoff(ui, presentationJson(session)));
           document.documentElement.lang = App.lang(ui);
           keepViewer();
+          // A hub action can open a thread too (Ctrl+N, Fork, the palette).
+          // Keep the accepted selection as well as explicit sidebar clicks.
+          try { localStorage.setItem("backplane-selected", session.sel || ""); } catch {}
         }
         if (!detail?.inputOnly) later();
       },
