@@ -1829,6 +1829,14 @@ function viewerWidth(w) {
   const root = document.documentElement;
   if (w == null) { root.style.removeProperty("--viewer-w"); return; }
   root.style.setProperty("--viewer-w", `${Math.round(w)}px`);
+  const edge = document.querySelector(".viewer-split");
+  if (edge) {
+    const s = panesSize(), side = root.dataset.fold ? s.strip : s.side;
+    const at = drag => Number(App.panes_viewer(panesN(s.w), panesN(side), panesN(s.strip), panesN(s.rail), panesN(drag), splitOn(), true));
+    edge.setAttribute("aria-valuemin", String(at(1)));
+    edge.setAttribute("aria-valuemax", String(at(s.w)));
+    edge.setAttribute("aria-valuenow", String(Math.round(w)));
+  }
 }
 function viewerDrag() {
   let w = 0;
@@ -1920,6 +1928,23 @@ document.addEventListener("dblclick", (e) => {
   if (!(e.target instanceof Element) || !e.target.closest(".viewer-split")) return;
   try { localStorage.removeItem(viewerKey()); } catch {}
   panes();
+});
+document.addEventListener("keydown", (e) => {
+  const edge = e.target.closest?.(".viewer-split");
+  if (!edge || !wide() || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.keyCode === 229) return;
+  if (e.key === "Home") {
+    e.preventDefault();
+    try { localStorage.removeItem(viewerKey()); } catch {}
+    panes();
+  } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    e.preventDefault();
+    const s = panesSize(), side = document.documentElement.dataset.fold ? s.strip : s.side;
+    const delta = (e.shiftKey ? 64 : 16) * (e.key === "ArrowLeft" ? 1 : -1);
+    const w = Number(App.panes_viewer(panesN(s.w), panesN(side), panesN(s.strip), panesN(s.rail),
+      panesN(Math.max(1, edge.parentElement.getBoundingClientRect().width + delta)), splitOn(), true));
+    viewerWidth(w);
+    try { localStorage.setItem(viewerKey(), String(Math.round(w))); } catch {}
+  }
 });
 window.addEventListener("resize", () => { panes();composerGeometry(); });
 

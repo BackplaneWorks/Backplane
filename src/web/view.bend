@@ -4522,7 +4522,8 @@ def View.aside.n(+kind: String) -> Nat:
 # left edge is a handle that resizes it (host.js keeps the width per
 # browser; a double-click gives the pane its share back)
 def View.split.loc(+lc: I.Loc) -> D.Node:
-  D.El{"div", "split", [D.At{"class", "viewer-split"}, D.At{"title", MSG.T.viewer.resize(lc)}], Nil{}}
+  D.El{"div", "split", [D.At{"class", "viewer-split"}, D.At{"tabindex", "0"}, D.At{"role", "separator"}, D.At{"aria-orientation", "vertical"},
+    D.At{"aria-label", MSG.T.viewer.resize(lc)}, D.At{"title", MSG.T.viewer.resize(lc)}], Nil{}}
 
 def View.split() -> D.Node:
   View.split.loc(I.En{})

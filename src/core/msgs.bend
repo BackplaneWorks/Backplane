@@ -8371,9 +8371,9 @@ def T.viewer.render.failed(l: I.Loc, arg0: String) -> String:
 def T.viewer.resize(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Drag to resize the viewer; double-click to reset"
+      "Resize the viewer: drag or use Left/Right; Home or double-click resets"
     case I.Ja{}:
-      "ドラッグで幅を変更・ダブルクリックで元に戻す"
+      "ビューアーの幅：ドラッグまたは左右キーで変更・Homeまたはダブルクリックで元に戻す"
 
 def T.viewer.review(l: I.Loc) -> String:
   match l:

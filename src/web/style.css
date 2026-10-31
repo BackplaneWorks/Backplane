@@ -89,7 +89,8 @@ button.icon:hover { color: var(--text); border-color: var(--line); }
 .app.panel { grid-template-columns: 264px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
 /* the viewer's left edge: drag to resize it (host.js sets --viewer-w) */
 .viewer-split { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
-.viewer-split:hover, .viewer-split.on { background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+.viewer-split:hover, .viewer-split.on, .viewer-split:focus-visible { background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
+.viewer-split:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
 
 /* Sidebar */
