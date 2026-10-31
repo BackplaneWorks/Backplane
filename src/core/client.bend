@@ -5377,7 +5377,7 @@ def Ui.reply.att(+r: J.Json, +ok: Bool, u: Ui) -> Ui:
 def Fm.got.k(has: Bool, u: Ui, +r: J.Json) -> Ui:
   match has:
     case True{}:
-      Ui.info_set(Ui.info_set(u, "fm.list:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmEntries", "")), "fm.dir:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmDir", ""))
+      Ui.info_set(Ui.info_set(Ui.info_set(u, "fm.list:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmEntries", "")), "fm.dir:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmDir", "")), "fm.err:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "fmError", ""))
     case False{}:
       u
 

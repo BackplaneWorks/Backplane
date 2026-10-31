@@ -4404,7 +4404,9 @@ def View.fm.rows(rs: List<&2, U.FmRow>) -> List<&2, D.Node>:
 def View.fm.body.loc(+lc: I.Loc, ready: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match ready:
     case True{}:
-      Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.FmRow, U.Fm.rows(u)), [D.Dom.span("fm-note", MSG.T.viewer.files.empty(lc))], View.fm.rows.loc(lc, U.Fm.rows(u)))
+      Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.info(u, "fm.err:" ++ U.Ui.sel(u))),
+        Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.FmRow, U.Fm.rows(u)), [D.Dom.span("fm-note", MSG.T.viewer.files.empty(lc))], View.fm.rows.loc(lc, U.Fm.rows(u))),
+        [D.Dom.span("fm-note", U.Ui.info(u, "fm.err:" ++ U.Ui.sel(u)))])
     case False{}:
       [D.Dom.span("fm-note", MSG.T.viewer.files.loading(lc))]
 

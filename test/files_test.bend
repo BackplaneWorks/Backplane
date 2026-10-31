@@ -55,8 +55,14 @@ def labels(rs: List<&2, U.FmRow>) -> List<&2, String>:
     case U.FmRow{l, a, _, d, k} <> t:
       (l ++ ":" ++ a ++ ":" ++ k ++ ":" ++ d) <> labels(t)
 
+def failed() -> U.Ui:
+  U.Fm.got.k(True{}, listed(base(), "gone", "f\t4\tnote.md"), J.Json.obj([J.KV{"thread", J.Str{"t1"}}, J.KV{"fmDir", J.Str{"gone"}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{"no such folder"}}]))
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("failed refresh clears stale entries", U.Ui.info(failed(), "fm.list:t1"), "")
+    C.Check.str("failed refresh explains missing folder", U.Ui.info(failed(), "fm.err:t1"), "no such folder")
+    C.Check.str("successful refresh clears folder error", U.Ui.info(listed(failed(), "", ""), "fm.err:t1"), "")
     # (the first action on a thread also asks for its card, Fab.sync: one request id before it)
     C.Check.str("Files asks for the folder", sent(U.Ui.act(base(), "fm", "")), "{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}")
     C.Check.str("the viewer shows Files", U.Ui.view_get(act(base(), "fm", ""), "view.kind"), "files")

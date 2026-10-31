@@ -3209,8 +3209,8 @@ def DirJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread:
   match r:
     case P.Ran{0, out}:
       GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"fmEntries", J.Str{out}}, J.KV{"fmDir", J.Str{rel}}, J.KV{"fmRoot", J.Str{cwd}}, J.KV{"thread", J.Str{thread}}]))
-    case P.Ran{_, out}:
-      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{String.trim(out)}}]))
+    case P.Ran{_, +out}:
+      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{String.trim(out)}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{String.trim(out)}}, J.KV{"fmDir", J.Str{rel}}, J.KV{"thread", J.Str{thread}}]))
 
 def DirJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rel: String) -> IO(Unit):
   IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", DirJob.sh(), "sh", cwd, rel], "/"), r => DirJob.sent(r, inbox, client, id, thread, cwd, rel))
