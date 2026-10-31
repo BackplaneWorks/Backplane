@@ -13766,3 +13766,12 @@ def Laws.todos_retire_shuts_unselected():
 
 def Laws.plot_source_starts_unread(key, kind, path, rest):
   {==}
+
+def Laws.intent_borrow_keeps_draft():
+  {==}
+
+def Laws.intent_borrow_twice_keeps_draft():
+  {==}
+
+def Laws.intent_chat_send_forgets_backup():
+  {==}

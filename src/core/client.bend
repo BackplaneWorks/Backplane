@@ -1192,10 +1192,18 @@ def Ui.restore(u: Ui, +id: String, +saved: String) -> Ui:
 # also tells the host to forget its kept copy (a Keep of ""), so text that
 # went out is never read back (laws draft_clear_*). Every way a draft is
 # sent goes through Draft.clear: a message, a bot's (bots.say), /btw, /give.
+# Sending ordinary text ends an abandoned intent edit too. Threads that
+# never borrowed the composer need no intent scratch entries.
+def Draft.intent.clear(editing: Bool, +sel: String, dr: Map<&2, String>) -> Map<&2, String>:
+  match editing:
+    case False{}: dr
+    case True{}:
+      Map.set(&2, String, Map.set(&2, String, dr, "@intent.draft:" ++ sel, ""), "@intent.edit:" ++ sel, "")
+
 def Draft.clear(u: Ui) -> Act:
   match u:
-    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Act{Ui{st, sel, Map.set(&2, String, dr, sel, ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, Draft.keep(sel, "")}
+    case Ui{st, +sel, +dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+      Act{Ui{st, sel, Map.set(&2, String, Draft.intent.clear(String.eq(Str.get(dr, "@intent.edit:" ++ sel), "1"), sel, dr), sel, ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, Draft.keep(sel, "")}
 
 # the same with the thread's attachments, which went out with it
 def Draft.sent.k(a: Act) -> Act:
@@ -7727,6 +7735,17 @@ def Intent.saved(+u: Ui) -> Bool:
 def Intent.saved.off(+u: Ui, +id: String) -> Act:
   Act{Bool.pick(Ui, Bool.or(String.is_empty(id), String.eq(id, Ui.scratch(u, "@intent.saving"))), Ui.scratch_set(Ui.scratch_set(u, "@intent.saving", ""), "@intent.saved", ""), u), Nil{}}
 
+# Edit borrows the composer. Keep the conversation draft once, including
+# when Edit is pressed again before Save.
+def Intent.borrow.k(editing: Bool, +u: Ui, +th: String) -> Ui:
+  match editing:
+    case True{}: u
+    case False{}:
+      Ui.scratch_set(Ui.scratch_set(u, "@intent.draft:" ++ th, Ui.draft_text(u)), "@intent.edit:" ++ th, "1")
+
+def Intent.borrow(+u: Ui, +th: String) -> Ui:
+  Intent.borrow.k(Bool.and(String.eq(Ui.scratch(u, "@intent.edit:" ++ th), "1"), OR.Intent.is(Ui.draft_text(u))), u, th)
+
 def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
   match i:
     # the card opened or shut
@@ -7735,7 +7754,7 @@ def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
     # the intent into the composer, to change and send (the intent on show
     # goes away)
     case 1n:
-      Ui.also(Ui.draft(Ui.scratch_set(u, "@intent", ""), OR.Intent.edit(Fab.intent(u, th))), [Focus{"composer"}])
+      Ui.also(Ui.draft(Ui.scratch_set(Intent.borrow(u, th), "@intent", ""), OR.Intent.edit(Fab.intent(u, th))), [Focus{"composer"}])
     # Buy it: the hub makes the buy thread and this client goes to it
     case 2n:
       Ui.rpc(Made.want(u), "order.buy", [J.KV{"thread", J.Str{th}}])
@@ -7834,8 +7853,13 @@ def Intent.send.d(a: Act, +text: String) -> Act:
     case Act{u, cs}:
       Ui.first(cs, Intent.send.go(u, text))
 
+# Save returns the borrowed composer to its conversation, through the
+# usual draft command so the page keeps the restored text too.
+def Intent.return(+u: Ui) -> Act:
+  Ui.draft(Ui.scratch_set(Ui.scratch_set(u, "@intent.draft:" ++ Ui.sel(u), ""), "@intent.edit:" ++ Ui.sel(u), ""), Ui.scratch(u, "@intent.draft:" ++ Ui.sel(u)))
+
 def Intent.send(+u: Ui) -> Act:
-  Intent.send.d(Draft.clear(u), OR.Intent.body(Ui.draft_text(u)))
+  Intent.send.d(Intent.return(u), OR.Intent.body(Ui.draft_text(u)))
 
 def Ui.send.b(empty: Bool, b: Maybe<&2, BT.Bot>, u: Ui, text: String, +mode: String) -> Act:
   match empty b:

@@ -13261,3 +13261,12 @@ law plot_source_starts_unread:
   for +path: String
   for +rest: List<&2, PLOTWATCH.Src>
   {PLOTWATCH.Src.add(False{}, key, kind, path, rest) == PLOTWATCH.Src{key, kind, path, 0, "unread", 0n, False{}, None{}, ""} <> rest : List<&2, PLOTWATCH.Src>}
+
+law intent_borrow_keeps_draft:
+  {U.Ui.draft_text(U.Act.ui(U.Intent.return(U.Intent.borrow(U.Ui.scratch_set(U.Ui.select.k(U.Ui.init(0n), "t"), "t", "draft 日本語"), "t")))) == "draft 日本語" : String}
+
+law intent_borrow_twice_keeps_draft:
+  {U.Ui.scratch(U.Intent.borrow(U.Intent.borrow(U.Ui.scratch_set(U.Ui.select.k(U.Ui.init(0n), "t"), "t", "draft"), "t"), "t"), "@intent.draft:t") == "draft" : String}
+
+law intent_chat_send_forgets_backup:
+  {U.Ui.scratch(U.Act.ui(U.Draft.clear(U.Intent.borrow(U.Ui.scratch_set(U.Ui.select.k(U.Ui.init(0n), "t"), "t", "draft"), "t"))), "@intent.draft:t") == "" : String}
