@@ -125,7 +125,8 @@ def Keys.set(+text: String, +name: String, +value: String) -> String:
 # why a new key cannot be kept ("" when it can)
 def Keys.bad(+name: String, +value: String) -> String:
   Bool.pick(String, String.is_empty(Keys.name(name)), "Give the key a name",
-    Bool.pick(String, String.is_empty(String.trim(value)), "Paste the key itself", ""))
+    Bool.pick(String, Nat.is_gt(String.length(String.trim(name)), 64n), "Use at most 64 characters for the key name",
+      Bool.pick(String, String.is_empty(String.trim(value)), "Paste the key itself", "")))
 
 # What agents are told
 # --------------------

@@ -13447,3 +13447,7 @@ law account_blank_label_no_request:
 # Regression for c13-1.
 law bot_invalid_name_keeps_persona:
   {U.Ui.scratch(U.Act.ui(U.Bots.create(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.init(0n), "@f.name", "bad name"), "@f.persona", "Keep me"))), "@f.persona") == "Keep me" : String}
+
+# Regression for c12-2.
+law key_long_name_refused:
+  {AK.Keys.bad("ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLM", "fake") == "Use at most 64 characters for the key name" : String}
