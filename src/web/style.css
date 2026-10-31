@@ -398,6 +398,8 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .viewer-bar .what { color: var(--dim); }
 /* The workbench supplies Fit once its toolbar is ready. */
 .viewer:has(.solid-toolbar button) > .viewer-bar > .fit { display: none; }
+/* A part's full path stays in its tooltip; the picker keeps one line. */
+[data-on-click="mech-part"] { max-width: min(240px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-bar .what.on { color: var(--text); border: 1px solid var(--accent); padding: 3px 10px; }
 .viewer-bar .hint { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); margin-left: auto; }
 /* the Files tab: the folder's trail, its rows; an image or a PDF opened from it */
