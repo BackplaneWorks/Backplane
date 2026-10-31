@@ -636,6 +636,9 @@ function refocusKeep() {
   if (!el || el === document.body || !el.id || !el.closest?.("main, aside, .app")) return;
   refocus = { id: el.id, start: el.selectionStart ?? null, end: el.selectionEnd ?? null };
 }
+document.addEventListener("selectionchange", () => {
+  if (!remoteReady && refocus && document.activeElement?.id === refocus.id) refocusKeep();
+});
 function refocusGive() {
   if (!refocus || !remoteReady) return;
   const want = refocus, el = document.getElementById(want.id);
@@ -2122,7 +2125,7 @@ function showViewStatus(message) {
     box.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:var(--panel);border-top:1px solid var(--line)";
     const text = document.createElement("span");text.id = "view-connection-text";box.append(text);
     for (const [label, action] of [["Retry now", retryNow]]) {
-      const button = document.createElement("button");button.type = "button";button.textContent = label;button.addEventListener("click", action);box.append(button);
+      const button = document.createElement("button");button.type = "button";button.textContent = label;button.addEventListener("pointerdown", refocusKeep);button.addEventListener("click", action);box.append(button);
     }
     document.body.append(box);
   }
