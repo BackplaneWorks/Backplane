@@ -10,6 +10,7 @@ import ../core/far.bend as FR
 import ../core/hub.bend as HB
 import ../core/subs.bend as SB
 import ../core/thin-live.bend as TL
+import ../core/fold.bend as FO
 import ../mobile/thin.bend as MT
 import ../web/dom.bend as D
 import ../web/presentation.bend as WP
@@ -197,9 +198,23 @@ def State.window(+st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2,
   State.window.add(State.window.rows(rows, st, index, Nil{}),
     State.window.add(State.window.subs(st, target), State.window.empty(st, Threads.get(st))))
 
+# A run of tool calls the window cuts at either edge folds whole on the
+# page (core/fold.bend's Fold.roles.ctx): the calls just outside the window,
+# from the canonical thread, are filed beside it under their own keys, so
+# every picture keys and counts the run the same and kept rows of earlier
+# pictures never leave a second drawer for it.
+def State.window.around.k(c: FO.Around, +th: String, into: M.State) -> M.State:
+  match c:
+    case FO.Around{b, a}:
+      State.window.add(FO.Around.files(FO.Around.after.key(th), a), State.window.add(FO.Around.files(FO.Around.before.key(th), b), into))
+
+def State.window.around(+st: M.State, +th: String, +es: List<&2, M.Entry>, into: M.State) -> M.State:
+  State.window.around.k(FO.Fold.context(Nil{}, M.State.mine(st, th), Nil{}, FO.Fold.shown(es)), th, into)
+
 def State.window.body(bounded: Bool, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
-  State.window.add(State.window.rows.body(bounded, rows, st, index, Nil{}),
-    State.window.add(State.window.subs(st, target), State.window.empty(st, Threads.get(st))))
+  +es = State.window.rows.body(bounded, rows, st, index, Nil{})
+  State.window.around(st, Target.thread(st, target), es, State.window.add(es,
+    State.window.add(State.window.subs(st, target), State.window.empty(st, Threads.get(st)))))
 
 # A route restores only transient selection. The normal bot tab policy
 # decides whether that content route is still available for this exact bot.

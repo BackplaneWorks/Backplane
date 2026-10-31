@@ -123,6 +123,54 @@ def after(a: U.Act) -> U.Ui:
     case U.Act{u, _}:
       u
 
+# Runs across a page's edges
+# --------------------------
+
+def blank(+id: String) -> M.Entry:
+  M.Msg{id, "t", M.Assistant{}, " \n ", 0n}
+
+def calls(n: Nat, +i: Nat) -> List<&2, M.Entry>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+k:
+      tool("c" ++ Nat.show(i), "Bash") <> calls(k, 1n+i)
+
+# thirteen calls in a row between two messages, oldest first
+def thread13() -> List<&2, M.Entry>:
+  List.append(&2, M.Entry, [user("u", 0n), said("m1", 1n)], List.append(&2, M.Entry, calls(13n, 1n), [said("m2", 2n)]))
+
+# the same with a blank message after every call
+def blanks(es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      e <> blank("b" ++ F.Fold.id(e)) <> blanks(t)
+
+def posted(es: List<&2, M.Entry>, st: M.State) -> M.State:
+  match es:
+    case Nil{}:
+      st
+    case +e <> t:
+      posted(t, M.State.post(st, e))
+
+# each call shown as a page of its own (as the hub-drawn page's windows and
+# the rows it keeps from earlier pictures did): the roles each page gets
+def pages(ps: List<&2, M.Entry>, +newest: List<&2, M.Entry>, +running: Bool) -> String:
+  match ps:
+    case Nil{}:
+      ""
+    case +e <> t:
+      Show.roles(F.Fold.roles.ctx(I.En{}, F.Fold.context(Nil{}, newest, Nil{}, [e]), [e], none(), running)) ++ pages(t, newest, running)
+
+def heads13(n: Nat) -> String:
+  match n:
+    case 0n:
+      ""
+    case 1n+k:
+      "h(c1|13 tool calls · Bash|False) " ++ heads13(k)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("groups", Show.gs(F.Fold.groups(es1())), "m1 [a,b,c] e [d] m2 [f] ")
@@ -130,6 +178,29 @@ def main() -> IO(Unit):
     C.Check.str("count", Nat.show(F.Fold.count(F.Fold.groups(es1()))), "8")
     C.Check.str("runs only tools", Bool.show(F.Fold.all(F.Fold.runs(F.Fold.groups(es1())))), "True")
     C.Check.str("empty", Show.gs(F.Fold.groups(Nil{})), "")
+    C.Check.str("13 calls in a row: one drawer", Show.roles(F.Fold.roles(calls(13n, 1n), none(), False{})),
+      "h(c1|13 tool calls · Bash|False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) ")
+    C.Check.str("13 one-call pages: the same drawer on each", pages(calls(13n, 1n), List.reverse(&2, M.Entry, thread13()), False{}), heads13(13n))
+    C.Check.str("a page cut mid-run while the turn runs: the whole run, live",
+      Show.roles(F.Fold.roles.ctx(I.En{}, F.Fold.context(Nil{}, List.reverse(&2, M.Entry, calls(13n, 1n)), Nil{}, [tool("c12", "Bash"), tool("c13", "Bash")]), [tool("c12", "Bash"), tool("c13", "Bash")], none(), True{})),
+      "h(c1|13 tool calls · running: Bash|False|live) i(False) ")
+    C.Check.str("opened from any page: the run's own key", Show.roles(F.Fold.roles.ctx(I.En{}, F.Fold.context(Nil{}, List.reverse(&2, M.Entry, thread13()), Nil{}, [tool("c5", "Bash")]), [tool("c5", "Bash")], Map.set(&2, String, none(), "fold:c1", "1"), False{})),
+      "h(c1|13 tool calls · Bash|True) ")
+    C.Check.str("a page from a message: the context stops at it", Show.roles(F.Fold.roles.ctx(I.En{}, F.Fold.context(Nil{}, List.reverse(&2, M.Entry, thread13()), Nil{}, [said("m2", 2n)]), [said("m2", 2n)], none(), False{})), "s ")
+    C.Check.str("no context: as Fold.roles", Show.roles(F.Fold.roles.ctx(I.En{}, F.Around.none(), es1(), none(), False{})), Show.roles(F.Fold.roles(es1(), none(), False{})))
+    C.Check.str("blank messages between calls: one drawer", Show.roles(F.Fold.roles(F.Fold.shown(blanks(calls(13n, 1n))), none(), False{})),
+      "h(c1|13 tool calls · Bash|False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) i(False) ")
+    C.Check.str("blank messages kept, hidden (the window)", Show.roles(F.Fold.roles.all(I.En{}, F.Around.none(), [tool("a", "x"), blank("z"), tool("b", "x"), said("m", 0n)], none(), False{})),
+      "h(a|2 tool calls · x|False) i(False) i(False) s ")
+    C.Check.str("text between calls splits them", Show.roles(F.Fold.roles(F.Fold.shown([tool("a", "x"), blank("z"), said("m", 0n), tool("b", "x")]), none(), False{})),
+      "h(a|1 tool call · x|False) s h(b|1 tool call · x|False) ")
+    C.Check.str("web: a thread's page from mid-run, one drawer", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("c7", "Bash"), tool("c8", "Bash")], posted(thread13(), M.State.empty()), "t", none(), False{}))),
+      "<button.fold=1c1>^<span>13 tool calls · Bash</span></button>")
+    C.Check.str("web: the hub's window, its outside calls filed beside it", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("c7", "Bash")],
+        posted(F.Around.files(F.Around.after.key("t"), calls(6n, 8n)), posted(F.Around.files(F.Around.before.key("t"), calls(6n, 1n)), posted([tool("c7", "Bash")], M.State.empty()))), "t", none(), False{}))),
+      "<button.fold=1c1>^<span>13 tool calls · Bash</span></button>")
+    C.Check.str("web: blank messages show nothing and split nothing", Web.shows(V.View.expand(V.View.entries(I.En{}, blanks([tool("a", "shell"), tool("b", "shell")]), M.State.empty(), "t", none(), False{}))),
+      "<button.fold=1a>^<span>2 tool calls · shell</span></button>")
     C.Check.str("label", F.Fold.label(I.En{}, [tool("a", "shell"), tool("b", "edit"), tool("c", "shell"), tool("d", "read")]), "4 tool calls · shell, edit, read")
     C.Check.str("label one", F.Fold.label(I.En{}, [tool("a", "shell")]), "1 tool call · shell")
     C.Check.str("label many kinds", F.Fold.label(I.En{}, [tool("a", "a"), tool("b", "b"), tool("c", "c"), tool("d", "d")]), "4 tool calls · a, b, c, …")
