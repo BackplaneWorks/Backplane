@@ -739,3 +739,32 @@ test('refusedFallback: the thread on show before, else the project list, never a
  assert.equal(refusedFallback({kind:'recent',id:''},thread('b'),new Set(['recent:'])),null);
  assert.equal(refusedFallback(thread('c'),null,new Set(['recent:','thread:c'])),null);
 });
+
+test('send Keep consumes only its captured prefix when fast typing overtakes it',async()=>{
+ for(const action of ['send','send-alt']){
+  const f=await fixture();f.open();const original=f.getSession().drafts.A;
+  f.host.request(action,'');const sent=f.sent.at(-1);
+  f.host.request('draft',original+'next 日本語');
+  f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'keep',thread:'A',text:''}]}));
+  assert.equal(f.getSession().drafts.A,'next 日本語');assert.equal(f.disk.get('A'),'next 日本語');
+  f.host.request('send','');assert.equal(f.sent.at(-1).p.session.drafts.A,'next 日本語');
+ }
+});
+test('two fast Enters capture separate messages even before the first Keep',async()=>{
+ const f=await fixture();f.open();const original=f.getSession().drafts.A;
+ f.host.request('send','');const first=f.sent.at(-1);
+ f.host.request('draft',original+'second');f.host.request('send','');
+ f.host.request('draft',original+'second third');
+ f.host.receive(f.reply(first,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'keep',thread:'A',text:''}]}));
+ const second=f.sent.at(-1);assert.equal(second.p.session.drafts.A,'second');
+ f.host.receive(f.reply(second,{session:{sel:'A',drafts:{A:''},rid:21},cmds:[{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().drafts.A,' third');assert.equal(f.disk.get('A'),' third');
+});
+test('send prefix reconciliation stays with its thread and never trims a completion',async()=>{
+ const f=await fixture();f.open();const original=f.getSession().drafts.A;
+ f.host.request('send','');const first=f.sent.at(-1);f.host.request('draft',original+'tail');f.host.request('select','B');f.host.receive(f.reply());
+ f.host.request('draft','B draft');f.host.receive(f.reply(first,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().sel,'B');assert.equal(f.getSession().drafts.B,'B draft');assert.equal(f.getSession().drafts.A,'tail');
+ const g=await fixture();g.open();g.host.request('skill','');const completion=g.sent.at(-1);g.host.request('draft',original+'tail');
+ g.host.receive(g.reply(completion,{cmds:[{type:'keep',thread:'A',text:''}]}));assert.equal(g.getSession().drafts.A,original+'tail');
+});

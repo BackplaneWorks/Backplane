@@ -6,6 +6,7 @@
 // is dumb).
 
 import App from "./app.bend";
+import { applyComposerDraft } from "./composer-draft.js";
 import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
@@ -959,6 +960,7 @@ function run(cmds) {
       jump = c.id; // after the next render, which opens its folds
       later();
     } else if (is(c, "Keep")) {
+      applyComposerDraft(document, c.thread, c.text);
       // written at once: a crash or a closed tab loses nothing typed
       try {
         if (c.thread === "@lang") localStorage.setItem("backplane-lang", c.text);
@@ -2039,6 +2041,7 @@ function localPresentation(action, value, session) {
     if (!restoreTransition(presentationTarget(session))) void restoreFocused();
     later();
   } else if (action === "draft") {
+    applyComposerDraft(document, session.sel, value);
     ui = App.restore(ui, session.sel, value);
     // the hub's page is redrawn with the draft at once (app.bend's
     // presentation_overlay: the send button and the slash commands follow

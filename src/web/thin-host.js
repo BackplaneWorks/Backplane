@@ -578,7 +578,27 @@ export class ThinHost {
       if (moving && (item.command.type === 'focus' || item.command.type === 'jump')) { held.push(item);continue; }
       const c = item.command, thread = this.api.threadKey?.(c.thread) ?? c.thread;
       const newer = this.drafts.get(thread)?.revision > (metadata?.revision ?? -1);
-      if (c.type === 'keep' && newer) continue;
+      if (c.type === 'keep' && newer) {
+        const operation = metadata?.operation, sent = operation?.input.drafts?.[thread];
+        // A send consumes its captured prefix, even if the next keystrokes
+        // arrived before its Keep. Unrelated replacement drafts stay intact.
+        if (c.text === '' && ['send', 'send-alt'].includes(operation?.action) && sent) {
+          const trim = text => typeof text === 'string' && text.startsWith(sent) ? text.slice(sent.length) : text;
+          const text = this.session.drafts[thread], rest = trim(text);
+          if (rest !== text) {
+            this.session.drafts = { ...this.session.drafts, [thread]: rest };
+            this.drafts.set(thread, { ...this.drafts.get(thread), text: rest });
+            this.draftChanged(thread, rest);
+            this.api.local('draft', rest, { ...this.session, sel: thread });
+          }
+          // Another Enter may already have captured that same prefix while
+          // this send was on its way. It must send only the following draft.
+          for (const queued of this.actions) if (['send', 'send-alt'].includes(queued.action) && queued.input.sel === thread) {
+            queued.input.drafts[thread] = trim(queued.input.drafts[thread]);
+          }
+        }
+        continue;
+      }
       if (c.type === 'send') {
         const rpc = JSON.parse(c.text);
         this.ordinary.set(rpc.id, { revision: metadata?.revision ?? -1, thread: item.input.session?.sel || '' });
