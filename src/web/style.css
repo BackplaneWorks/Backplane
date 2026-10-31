@@ -1872,6 +1872,9 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   .side-strip .side-toggle { color: var(--dim); margin-bottom: 4px; }
   .side-strip .side-toggle:hover { color: var(--text); }
   .side-strip .strip-project.on { border-color: var(--tint, var(--accent)); background: var(--raise); }
+  /* Pale project tints need more ink against the light strip. */
+  .app.light .side-strip .strip-project { color: color-mix(in srgb, var(--tint, var(--dim)) 40%, var(--text)); }
+  .app.light .side-strip .strip-project.on { border-color: currentColor; }
   .side-strip .strip-project .ini { font-size: calc(11px * var(--text-scale, 100) / 100); font-weight: 600; letter-spacing: 0.02em; line-height: 1; }
 }
 /* the tour lifts the part of the bar it points at */
