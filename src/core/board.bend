@@ -195,12 +195,17 @@ def Board.pts.k(xy: Bool, +x: S.Sx, +pl: Place, rest: List<&2, Pt>) -> List<&2, 
     case False{}:
       rest
 
-def Board.pts(xs: List<&2, S.Sx>, +pl: Place) -> List<&2, Pt>:
+# Zone polygons can contain tens of thousands of vertices. Accumulate in
+# reverse so the JS viewer does not retain one call frame per vertex.
+def Board.pts.rev(xs: List<&2, S.Sx>, +pl: Place, acc: List<&2, Pt>) -> List<&2, Pt>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case +x <> t:
-      Board.pts.k(String.eq(S.Sx.name(x), "xy"), x, pl, Board.pts(t, pl))
+      Board.pts.rev(t, pl, Board.pts.k(String.eq(S.Sx.name(x), "xy"), x, pl, acc))
+
+def Board.pts(xs: List<&2, S.Sx>, +pl: Place) -> List<&2, Pt>:
+  List.reverse(&2, Pt, Board.pts.rev(xs, pl, Nil{}))
 
 def Board.home() -> Place:
   Place{0.0, 0.0, 0.0}
