@@ -1268,6 +1268,14 @@ struct ThreadScreen: View {
         .onChange(of: live) { _, selected in
             if selected { model.hold(!position.following, thread: thread) }
         }
+        // a send (or anything else asking for the end, ScrollEnd): the newest
+        // page and the end, as the pill's tap does, wherever the person had
+        // scrolled to (S07); the bot space and Android already followed it
+        .onChange(of: model.scrolls) { _, _ in
+            guard live else { return }
+            if (thread.later ?? 0) > 0 { model.act("history-newest", "") }
+            position.latest?()
+        }
         .onChange(of: model.jump) { _, j in
             guard live, let j else { return }
             position.jump?(j.id)
