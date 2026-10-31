@@ -68,6 +68,8 @@ import { ThinHost, preservePresentationRoute, presentationTarget, refusedFallbac
 import { compactRoute } from "./thin.js";
 import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
+import { ReviewPosition } from "./review-position.js";
+const reviewPosition = new ReviewPosition(localStorage);
 const modelFeedback = new ModelFeedback(() => later());
 import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
@@ -467,6 +469,7 @@ function keepComposerGeometry() {
 }
 window.addEventListener("pagehide", keepComposerGeometry);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") keepComposerGeometry(); });
+window.addEventListener("pagehide", () => reviewPosition.capture());
 let viewerKept = "";
 function keepViewer() {
   const sel = App.sel(ui);
@@ -855,6 +858,7 @@ function jumpTo(tl, el, word = "") {
   el.classList.add("jumped");
 }
 function render() {
+  reviewPosition.capture();
   mailCheckpoint();
   const mail = mailAnchor();
   queued = false;
@@ -899,6 +903,7 @@ function render() {
   trace("dom", { seq: App.seq(ui) });
   if (PERF?.trace) requestAnimationFrame(() => trace("paint", { seq: App.seq(ui) }));
   mailRestore(mail);
+  reviewPosition.mount(document.querySelector(".review-body"));
   desktopBrowser.sync();
   memoSweep();
   const tl2 = document.getElementById("timeline");
@@ -1198,6 +1203,7 @@ function sealedReply(envelope) {
 function composerPhone() { return matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse)").matches; }
 
 function dispatch(action, value, timer) {
+  if (action === "fork") reviewPosition.fork(value || currentSession().sel);
   if (action === "secret-save") return secretSave(value);
   if (action === "sealed") return sealedSave(value);
   // Remove also discards an unsaved key kept only in this page.
@@ -2633,6 +2639,7 @@ async function startThin(again = false, reason = "initial") {
         const selectedChanged = thinSession?.sel !== session.sel;
         thinSession = session;
         if (detail?.remote) {
+          reviewPosition.accepted(session);
           // Only live response choices cross this boundary. State and applied
           // cursor stay in the fresh unsynced recipient, never in a picture.
           ui = App.unsync(App.presentation_handoff(ui, presentationJson(keepDesk(session))));

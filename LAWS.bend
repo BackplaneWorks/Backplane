@@ -13667,6 +13667,9 @@ law fork_drawing_follows_worktree:
 law fork_report_is_not_a_file:
   {U.Viewer.fork.path("bom", "/old", "/new") == "bom" : String}
 
+law review_reading_place_names_page:
+  {U.Rp.place(U.Ui.view_put(U.Ui.init(0n), "review", "bom")) == "[\"bom\",\"\",\"\",\"\"]" : String}
+
 law viewer_wire_empty_target_unchanged:
   {PRESENTVIEW.Session.viewer_input(U.Ui.init(0n), J.Json.obj(Nil{})) == J.Json.obj(Nil{}) : J.Json}
 

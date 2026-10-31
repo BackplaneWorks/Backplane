@@ -9725,6 +9725,11 @@ def Rp.key(+u: Ui, +k: String, +page: String) -> String:
 def Rp.compared(+u: Ui) -> Bool:
   Bool.not(String.is_empty(Hs.get(u, "cmp.a")))
 
+# Reading positions are separate for each report and board/comparison.
+# The host supplies only pixel coordinates under this identity.
+def Rp.place(+u: Ui) -> String:
+  J.Json.show(J.Json.arr([J.Str{Rp.page(u)}, J.Str{Bd.id(u)}, J.Str{Hs.get(u, "cmp.a")}, J.Str{Hs.get(u, "cmp.b")}]))
+
 def Rp.bom.title.l(+l: I.Loc, +u: Ui) -> String:
   +board = Bd.id(u)
   Bool.pick(String, Rp.compared(u),

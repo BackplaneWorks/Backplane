@@ -14030,6 +14030,9 @@ def Laws.fork_drawing_follows_worktree():
 def Laws.fork_report_is_not_a_file():
   {==}
 
+def Laws.review_reading_place_names_page():
+  {==}
+
 def Laws.viewer_wire_empty_target_unchanged():
   {==}
 

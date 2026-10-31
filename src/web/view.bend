@@ -4520,18 +4520,18 @@ def View.review.tabs(ts: List<&2, U.RpTab>) -> List<&2, D.Node>:
     case U.RpTab{+p, +l, +on} <> t:
       D.Dom.button(Bool.pick(String, on, "crumb on", "crumb"), "rv-page", p, l, l) <> View.review.tabs(t)
 
-def View.review.body(+lc: I.Loc, has: Bool, +v: U.RpView, +extra: List<&2, D.Node>) -> D.Node:
+def View.review.body(+lc: I.Loc, has: Bool, +v: U.RpView, +extra: List<&2, D.Node>, +u: U.Ui) -> D.Node:
   match has:
     case True{}:
-      D.El{"div", "review-body", [D.At{"class", "review-body body rp-" ++ U.RpView.page(v)}], List.append(&2, D.Node, extra, D.Md.render.loc(lc, U.RpView.md(v)))}
+      D.El{"div", "review-body", [D.At{"class", "review-body body rp-" ++ U.RpView.page(v)}, D.At{"data-review-thread", U.Ui.sel(u)}, D.At{"data-review-place", U.Rp.place(u)}, D.At{"data-review-ready", "1"}], List.append(&2, D.Node, extra, D.Md.render.loc(lc, U.RpView.md(v)))}
     case False{}:
-      D.El{"div", "review-body", [D.At{"class", "review-body"}], List.append(&2, D.Node, extra, [D.Dom.span("fm-note", Bool.pick(String, String.eq(U.RpView.page(v), "release"), Bool.pick(String, U.RpView.busy(v), "", Bool.pick(String, String.is_empty(U.RpView.err(v)), U.RpView.note.loc(lc, v), "")), U.RpView.note.loc(lc, v)))])}
+      D.El{"div", "review-body", [D.At{"class", "review-body"}, D.At{"data-review-thread", U.Ui.sel(u)}, D.At{"data-review-place", U.Rp.place(u)}, D.At{"data-review-ready", "0"}], List.append(&2, D.Node, extra, [D.Dom.span("fm-note", Bool.pick(String, String.eq(U.RpView.page(v), "release"), Bool.pick(String, U.RpView.busy(v), "", Bool.pick(String, String.is_empty(U.RpView.err(v)), U.RpView.note.loc(lc, v), "")), U.RpView.note.loc(lc, v)))])}
 
-def View.review.v(+lc: I.Loc, +v: U.RpView, +extra: List<&2, D.Node>) -> List<&2, D.Node>:
+def View.review.v(+lc: I.Loc, +v: U.RpView, +extra: List<&2, D.Node>, +u: U.Ui) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "fm-bar review-pane"}], List.append(&2, D.Node, View.review.tabs(U.RpView.tabs(v)),
      [D.Dom.span("fm-file", U.RpView.title(v) ++ Bool.pick(String, U.RpView.busy(v), " · reading…", "")), D.El{"span", "", [D.At{"class", "grow"}], Nil{}},
       D.Dom.button("", "rv-run", "", MSG.T.review.refresh.tip(lc), MSG.T.common.refresh(lc))])},
-   View.review.body(lc, Bool.not(String.is_empty(U.RpView.md(v))), v, extra)]
+   View.review.body(lc, Bool.not(String.is_empty(U.RpView.md(v))), v, extra, u)]
 
 # The Release page (client.bend's Rl): the tag field (Enter makes the
 # release; empty means the proposed tag), two toggles, the button, and why
@@ -4565,7 +4565,7 @@ def View.review.x(+lc: I.Loc, rel: Bool, +u: U.Ui) -> List<&2, D.Node>:
       View.rc.checks.loc(lc, u)
 
 def View.review(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  View.review.v(lc, U.Rp.view.loc(lc, u), View.review.x(lc, String.eq(U.Rp.page(u), "release"), u))
+  View.review.v(lc, U.Rp.view.loc(lc, u), View.review.x(lc, String.eq(U.Rp.page(u), "release"), u), u)
 
 def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match i:
