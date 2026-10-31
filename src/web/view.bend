@@ -3440,10 +3440,10 @@ def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +conte
 
 def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, +hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.Tool>, +pill: String) -> D.Node:
   match u t:
-    case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, p, ti, c, a, +turn, +pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
+    case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, +p, ti, c, a, +turn, +pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
       +own = Bool.and(View.chrome(u), List.is_empty(&2, D.Node, hd))
       View.thread.frame(View.rail(u), [D.At{"class", Bool.pick(String, View.rail(u), Bool.pick(String, term, "thread-view workspace-thread with-term", "thread-view workspace-thread"), Bool.pick(String, term, "thread-view with-term", "thread-view")) ++ Bool.pick(String, U.Flag.get(op, "drop"), " dropping", "")},
-        D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
+        D.At{"data-thread", id}, D.At{"data-project", p}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
         View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Rail.tab.of(panel, U.Str.get(nf, "view.kind:" ++ id), U.Str.get(nf, "view.path:" ++ id)), panel, term, U.Flag.get(op, "palette")), List.append(&2, D.Node, View.workspace.buy(U.Fab.rail(u)), View.workspace.parts(u))), List.concat(&2, D.Node, [
         View.top.own(own, View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.Tour.kn(u, U.KN.thread(nf, st, sel)), True{}),

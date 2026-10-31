@@ -11,6 +11,8 @@ const modulePromise = import('data:text/javascript;base64,' + Buffer.from(source
 async function cache(records = []) {
   const { DraftAttachments } = await modulePromise;
   const store = Object.create(DraftAttachments.prototype);
+  store.identity = () => 'pair-a';store.now = () => 100;
+  store.prune = async () => {};
   store.started = new Map();
   store.restoring = new Map();
   const rows = new Map([['t', records]]);
@@ -91,4 +93,80 @@ test('the whole saved batch owns Send until its last upload has completed', asyn
   release();await restoring;
   assert.equal(uploads, 2);
   assert.equal(store.pending('t'), false);
+});
+
+
+test('raw bytes expire and never cross a pairing identity', async () => {
+  const { retained, MAX_AGE } = await modulePromise;
+  const record = { identity: 'pair-a', at: 100 };
+  assert.equal(retained(record, 'pair-a', 101), true);
+  assert.equal(retained(record, 'pair-b', 101), false);
+  assert.equal(retained(record, '', 101), false);
+  assert.equal(retained(record, 'pair-a', 100 + MAX_AGE), false);
+  assert.equal(retained(record, 'pair-a', 99), false);
+  assert.equal(retained({ path: '/legacy' }, 'pair-a', 101), false);
+});
+
+test('restoring does not extend how long the original file is retained', async () => {
+  const store = await cache([{ path: '/old.txt', file: note(), identity: 'pair-a', at: 1 }]);
+  await store.remember('t', '/new.txt', note(), '/old.txt');
+  assert.equal(store.rows()[0].at, 1);
+  await store.forget('t');
+  assert.equal(store.rows().length, 0);
+});
+
+test('a changed pairing stops a restore batch before its next file', async () => {
+  const store = await cache([{ path: '/a.txt', file: note() }, { path: '/b.txt', file: note() }]);
+  let uploads = 0;
+  await store.sync('t', [], async () => { uploads++;store.identity = () => 'pair-b';return '/new.txt'; }, () => true, 'actor');
+  assert.equal(uploads, 1);
+});
+
+test('an oversized file is not kept locally', async () => {
+  const { MAX_BYTES } = await modulePromise;
+  const store = await cache();
+  await assert.rejects(store.remember('t', '/big.bin', { size: MAX_BYTES + 1 }));
+  assert.equal(store.rows().length, 0);
+});
+
+test('unavailable browser storage does not permanently block the live composer', async () => {
+  const store = await cache();
+  let reads = 0;
+  store.change = async () => { reads++;throw Error('storage unavailable'); };
+  await store.sync('t', [], () => assert.fail('no bytes'), () => true, 'actor');
+  assert.equal(store.pending('t'), false);
+  await store.sync('t', [], () => assert.fail('no bytes'), () => true, 'actor');
+  assert.equal(reads, 1);
+});
+
+test('pruning clears removed projects, old identities, expired files and bytes over the budget', async () => {
+  const { DraftAttachments, MAX_BYTES, MAX_AGE } = await modulePromise;
+  const store = await cache();
+  const rows = [
+    { key: 'foreign', identity: 'pair-b', at: 90, file: { size: 1 } },
+    { key: 'expired', identity: 'pair-a', at: 100 - MAX_AGE, file: { size: 1 } },
+    { key: 'removed', identity: 'pair-a', project: 'gone', at: 90, file: { size: 1 } },
+    { key: 'newer', identity: 'pair-a', at: 90, file: { size: MAX_BYTES } },
+    { key: 'older', identity: 'pair-a', at: 80, file: { size: 1 } },
+  ];
+  const deleted = [];
+  store.transaction = update => new Promise(resolve => {
+    const request = {};
+    update({ getAll() { queueMicrotask(() => { request.result = rows;request.onsuccess();resolve(); });return request; },
+      delete(key) { deleted.push(key); } });
+  });
+  await DraftAttachments.prototype.prune.call(store, 'gone');
+  assert.deepEqual(deleted.sort(), ['expired', 'foreign', 'older', 'removed']);
+});
+
+test('a restore that finishes after its saved record expired cannot renew its retention', async () => {
+  const store = await cache();
+  await store.remember('t', '/new.txt', note(), '/expired.txt');
+  assert.equal(store.rows().length, 0);
+});
+
+test('restore keeps the saved project boundary before the fresh view is drawn', async () => {
+  const store = await cache([{ path: '/old.txt', file: note(), at: 1, project: 'p1' }]);
+  await store.remember('t', '/new.txt', note(), '/old.txt', '');
+  assert.equal(store.rows()[0].project, 'p1');
 });

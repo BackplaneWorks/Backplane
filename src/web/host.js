@@ -630,21 +630,42 @@ function restoreFocused(force = false) {
   focusedRequestedKey = key;
   return focusedView.restore().catch(() => trace("focused-cache", { state: "unavailable", reason: "read error" }));
 }
-async function refreshFocusedIdentity() {
+function refreshFocusedIdentity() {
+  clearTimeout(attachmentIdentityRetry);attachmentIdentityRetry = 0;
+  const generation = ++attachmentIdentityGeneration;
+  attachmentIdentityPending = true;attachmentIdentity = "";
+  return attachmentIdentityCheck = refreshFocusedIdentityFor(generation);
+}
+async function refreshFocusedIdentityFor(generation) {
   const before = cacheIdentity(document.cookie);
   const result = await refreshCacheIdentity({ fetch: window.fetch.bind(window), readCookie: () => document.cookie,
     writeCookie: value => { document.cookie = value; }, protocol: location.protocol });
+  if (generation !== attachmentIdentityGeneration) return;
   trace("cache-identity", { state: result.state });
+  attachmentIdentity = result.state === "verified" ? result.identity : "";
   if (result.state === "denied") {
+    attachmentIdentityPending = false;
+    void draftAttachments.clear().catch(() => {});
     stopThin(false, "auth-denied");viewMode = "read-only";focusedView.invalidate();
     showViewStatus("Pairing is required to reconnect.");later();return;
   }
   if (before !== cacheIdentity(document.cookie) || result.state === "denied" || result.state === "invalid") {
+    void draftAttachments.prune().catch(() => {});
     transitionViews.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
     if (!canonicalBoot && !remoteReady) void restoreFocused();
     else saveFocusedSoon();
   }
+  if (attachmentIdentity) {
+    await draftAttachments.prune().catch(() => {});
+    if (generation !== attachmentIdentityGeneration) return;
+    restoreDraftAttachments(currentSession());
+  }
+  attachmentIdentityPending = result.state === "offline" || result.state === "superseded";
+  if (attachmentIdentityPending) attachmentIdentityRetry = setTimeout(() => {
+    if (socket?.readyState === 1) void refreshFocusedIdentity();
+  }, 1500);
 }
+
 let cacheReady = false;
 let queued = false;
 let scroll = false;
@@ -1024,6 +1045,13 @@ function copy(text) {
 function run(cmds) {
   for (const c of each(cmds)) {
     if (is(c, "Send")) {
+      // These commands exist only after the shared confirmation accepted.
+      // Clearing at submission also covers a deletion whose reply is lost.
+      try {
+        const request = JSON.parse(c.text);
+        if (request.m === "thread.delete") void draftAttachments.forget(request.p.thread).catch(() => {});
+        if (request.m === "project.remove") void draftAttachments.prune(request.p.project).catch(() => {});
+      } catch {}
       outboxKeep(c.text);
       if (socket && socket.readyState === 1) {
         if (PERF?.trace) { const request = JSON.parse(c.text); trace("send", { id: request.id, method: request.m, queuedBytes: socket.bufferedAmount }); }
@@ -1210,7 +1238,7 @@ function dispatch(action, value, timer) {
   if (action === "voice-unkey") for (const field of sealedFields("vkey")) field.value = "";
   if (["send", "send-alt", "detach"].includes(action) && viewMode !== "compatibility") {
     restoreDraftAttachments(currentSession());
-    if (socket?.readyState === 1 && (!thin?.ready || draftAttachments.pending(currentSession().sel))) return true;
+    if (socket?.readyState === 1 && (!thin?.ready || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) return true;
   }
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
@@ -1291,9 +1319,16 @@ function dispatch(action, value, timer) {
   }
   const t0 = PERF ? pnow() : 0;
   trace("input", { action });
+  const attachmentThread = App.sel(ui);
+  const attachmentPaths = ["send", "send-alt", "detach"].includes(action)
+    ? draftAttachmentPaths(Wire.plain(App.presentation(ui)), attachmentThread) : [];
   const r = App.act(ui, action, value);
   if (PERF) PERF.act.push([pnow() - t0, action]);
   ui = r.ui;
+  if (attachmentPaths.length) {
+    const kept = draftAttachmentPaths(Wire.plain(App.presentation(ui)), attachmentThread);
+    void draftAttachments.forget(attachmentThread, attachmentPaths.filter(path => !kept.includes(path))).catch(() => {});
+  }
   if (action === "select") try { localStorage.setItem("backplane-selected", value); } catch {}
   mailCheckpoint();
   if (action === "lang" || action === "lang-os") document.documentElement.lang = App.lang(ui);
@@ -1376,14 +1411,16 @@ function inputValue(el) {
 // Files: each goes whole as the body of one POST /attach to the hub (the
 // pairing cookie carries the token); "attach-up" and "attach-end" tell
 // app.bend it started and what the hub answered, and it decides the rest
-const draftAttachments = new DraftAttachments();
+const draftAttachments = new DraftAttachments({ identity: () => cacheIdentity(document.cookie) });
+setInterval(() => { void draftAttachments.prune().catch(() => {}); }, 60000);
 let attachmentController, attachmentView, attachmentActor, attachmentSelection;
+let attachmentIdentity = "", attachmentIdentityPending = true, attachmentIdentityGeneration = 0, attachmentIdentityRetry = 0, attachmentIdentityCheck = Promise.resolve();
 function draftAttachmentPaths(session, thread) {
   return (session.drafts?.["@att:" + thread] || "").split("\n").filter(Boolean);
 }
 function restoreDraftAttachments(session) {
   const thread = session.sel, controller = thin, view = controller?.client.links.get(controller.hub)?.viewId;
-  if (!controller?.ready || session.drafts?.["@att.up:" + thread]) return;
+  if (!controller?.ready || !attachmentIdentity || attachmentIdentity !== cacheIdentity(document.cookie) || session.drafts?.["@att.up:" + thread]) return;
   if (attachmentController !== controller || attachmentView !== view) {
     attachmentController = controller;attachmentView = view;attachmentActor = {};
   }
@@ -1400,7 +1437,8 @@ function uploadScope() {
   return { mode: viewMode, controller,
     thread: viewMode === "compatibility" ? App.sel(ui) : currentSession().sel,
     target: controller?.target, epoch: controller?.epoch,
-    viewId: controller?.client.links.get(controller.hub)?.viewId };
+    viewId: controller?.client.links.get(controller.hub)?.viewId,
+    identity: cacheIdentity(document.cookie), project: document.querySelector("main.thread-view[data-project]")?.dataset.project || "" };
 }
 async function uploadFiles(action, files, scope = uploadScope()) {
   if (!remoteReady && viewMode !== "compatibility" || viewMode === "compatibility" && socket?.readyState !== 1) {
@@ -1411,10 +1449,11 @@ async function uploadFiles(action, files, scope = uploadScope()) {
   for (const file of files) await upload(action, file, scope);
 }
 async function upload(action, file, scope = uploadScope(), previous = "") {
+  await attachmentIdentityCheck;
   const key = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
   const name = file.name || "pasted." + ((file.type || "").split("/")[1] || "bin");
   const { controller: uploadController, thread } = scope;
-  const current = () => viewMode === scope.mode && (uploadController
+  const current = () => cacheIdentity(document.cookie) === scope.identity && viewMode === scope.mode && (uploadController
     ? thin === uploadController && uploadController.ready && currentSession().sel === thread && uploadController.epoch === scope.epoch
       && uploadController.target?.kind === scope.target?.kind && uploadController.target?.id === scope.target?.id
       && uploadController.client.links.get(uploadController.hub)?.viewId === scope.viewId
@@ -1437,8 +1476,11 @@ async function upload(action, file, scope = uploadScope(), previous = "") {
   }
   if (!current()) return;
   let result;try { result = JSON.parse(answer); } catch { return; }
-  if (result.attached && result.thread === thread) {
-    try { await draftAttachments.remember(thread, result.attached, file, previous); } catch {
+  if (viewMode !== "compatibility" && result.attached && result.thread === thread) {
+    try {
+      if (!attachmentIdentity || attachmentIdentity !== scope.identity) throw Error("Attachment identity unverified");
+      await draftAttachments.remember(thread, result.attached, file, previous, scope.project);
+    } catch {
       showViewStatus("This attachment could not be kept for reload. Send it before leaving this page.");
     }
   }
@@ -2255,6 +2297,7 @@ function showViewStatus(message) {
 // so for a while, and keeps nothing of the refused one: the selection
 // saved for a reload is the one gone back to.
 function refusedView(target, reason) {
+  if (target.kind === "thread" && reason === "NOT_FOUND") void draftAttachments.forget(target.id).catch(() => {});
   composerKeeper.navigationFailed();
   refusedViews.add(targetKey(target));
   trace("thin-refused", { reason });
@@ -2604,6 +2647,8 @@ async function startThin(again = false, reason = "initial") {
     if (typeof event === "string") diagnostic.initiate(event);
     trace("thin-disconnect", { reason: typeof event === "string" ? event : event?.type || "connection-ended", code: event?.code });
     ended = true;
+    clearTimeout(attachmentIdentityRetry);attachmentIdentityRetry = 0;
+    attachmentIdentity = "";attachmentIdentityPending = true;attachmentIdentityGeneration++;
     refocusKeep();
     keepSettingsRecovery();
     bubMoves.disconnect(location.origin);
@@ -2741,6 +2786,7 @@ async function startThin(again = false, reason = "initial") {
     ui = App.desk_reset(ui);
     deskState = {"@desk":"", "@desk.at":""};
     socket = s;heard = BigInt(Date.now());s.hb = false;diagnostic.note("open");
+    void refreshFocusedIdentity();
   };
   s.onmessage = event => {
     if (!current() || typeof event.data === "string") return;
