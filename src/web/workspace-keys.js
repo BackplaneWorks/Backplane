@@ -94,7 +94,7 @@ export function overlayEscape(doc) {
   const menu = doc.querySelector?.('.local-menu[open]');
   if (menu) return () => closeWorkspaceMenu(menu);
   // The inline editor already supplies its cancel action, like a dialog.
-  if ([...(doc.querySelectorAll?.('.draw-back,[role="dialog"],[aria-modal="true"]') || [])].some(shown)) return null;
+  if ([...(doc.querySelectorAll?.('.draw-back,dialog[open],[role="dialog"],[aria-modal="true"]') || [])].some(shown)) return null;
   const account = doc.querySelector?.('.account-picker');
   if (account) return () => doc.querySelector?.('.account-chip')?.click();
   const cancel = doc.querySelector?.('.title-box [data-on-click="rename-no"]');
@@ -147,7 +147,7 @@ export function slashKey(event) {
 // What owns Esc itself, on screen: the tour, the lightbox, Settings, the
 // drawing pad, a dialog (the search results, the model picker); and the
 // subagent inspector open under the keyboard (subagent-inspector.js).
-const ESC_OWNERS = '.tour,.lightbox,#settings-content,.draw-back,[role="dialog"],[aria-modal="true"]';
+const ESC_OWNERS = '.tour,.lightbox,#settings-content,.draw-back,dialog[open],[role="dialog"],[aria-modal="true"]';
 const shown = element => !element.getClientRects || element.getClientRects().length > 0;
 // The viewer's close: the rail's (or the narrow bar's) and the viewer's ×
 const VIEWER_CLOSE = '.workspace-close [data-on-click="panel"],.workspace-bar .viewer-close,.viewer-tabs [data-on-click="panel"]';
@@ -182,7 +182,7 @@ export function escapeState(event, doc) {
 // made) or over a selection outside the composer, nor on a phone-sized or
 // touch page (its keyboard would cover the thread). The caret goes back
 // where it was in that thread's draft.
-const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop,.account-picker,.title-box:has([data-on-click="rename-no"]),.bform:has([data-on-click="bot-new"])';
+const COVERS = '.tour,.lightbox,.workspace-palette,#settings-content,.draw-back,#thin-result,dialog[open],[role="dialog"],[aria-modal="true"],.shade,.modal-back,.local-menu[open],.floating-terminal,.tok-pop,.account-picker,.title-box:has([data-on-click="rename-no"]),.bform:has([data-on-click="bot-new"])';
 const TURN_BUTTONS = '.composer-foot button,.composer-foot .attach,.topbar .kv.state button,button.fold';
 // What an Esc puts away (the palette, a picker, a menu, a row's shade, the
 // token stats, a rename): it goes with the hub's next view, and the draft
@@ -229,10 +229,12 @@ export function installComposerFocus({ document: doc = document, window: win = w
   const visible = el => shown(el) && el.checkVisibility?.({ visibilityProperty: true }) !== false;
   // the row pressed opens its thread: until it shows, the composer on show is another's
   const picking = () => !!picked;
+  const coversNow = () => [...(doc.querySelectorAll?.(COVERS) || [])].filter(shown);
+  const leaving = c => restore && !!c.matches?.(LEAVING);
   const check = () => {
     const el = field(), now = here();
     if (picked && now === picked && el && visible(el)) picked = '';
-    const covers = [...(doc.querySelectorAll?.(COVERS) || [])].filter(shown), over = covers.length > 0;
+    const covers = coversNow(), over = covers.length > 0;
     const open = !!doc.querySelector?.(VIEWER_CLOSE);
     if (now && now !== thread) {
       want = true;
@@ -241,7 +243,7 @@ export function installComposerFocus({ document: doc = document, window: win = w
     }
     if (covered && !over || viewer && !open) want = true;
     thread = now || thread;covered = over;viewer = open;
-    const active = doc.activeElement, leaving = c => restore && !!c.matches?.(LEAVING);
+    const active = doc.activeElement;
     if (!want || !covers.every(leaving) || pressed || !el || el.disabled || !shown(el) || picking() && now !== picked) return;
     want = false;
     const done = () => { if (loading) { loading = false;coming = 0; } };
@@ -268,10 +270,13 @@ export function installComposerFocus({ document: doc = document, window: win = w
     if (event.isComposing || event.keyCode === 229) return;
     const target = event.target, key = typeof event.key === 'string' ? event.key : '';
     const chord = event.ctrlKey || event.metaKey || event.altKey, moving = key === 'Escape' || key === 'Tab';
+    const covers = coversNow();
     // A backdrop click may leave the palette's query without focus. It
     // still owns typing until dismissed, just as the draft keeps its keys
     // while its own field is on its way.
-    const palette = !restore && doc.querySelector?.('.workspace-palette');
+    const visiblePalette = !restore && doc.querySelector?.('.workspace-palette');
+    // A dialog above Commands keeps its own keys.
+    const palette = visiblePalette && covers.every(c => c === visiblePalette || leaving(c)) ? visiblePalette : null;
     // Space on a palette control still presses that control.
     if (palette && key === ' ' && target?.closest?.('button,summary') && palette.contains?.(target)) return;
     if (palette && !busy(target) && !chord && (key.length === 1 || key === 'Backspace')) {
@@ -280,6 +285,7 @@ export function installComposerFocus({ document: doc = document, window: win = w
       return;
     }
     if (palette && !busy(target)) return;
+    if (!covers.every(leaving) || target?.closest?.('#viewer,' + PTY)) return;
     if (busy(target) && !(target === field() && picking() && here() !== picked)) {
       if (moving || target.closest?.(PTY)) { typed = 0;coming = 0;loading = false; } else if (!chord) typed = Date.now();
       return;
@@ -337,7 +343,7 @@ export function installComposerFocus({ document: doc = document, window: win = w
     // automatic focus still leaves the phone's keyboard alone.
     claim(returning = false) { want = true;restore = returning; if (returning) coming = Date.now() + COMING;check(); },
     // "/": to the end of the draft
-    end() { const el = field();if (el && !phone()) { want = false;put(el); return true; } return false; },
+    end() { const el = field();if (el && !phone() && !coversNow().length) { want = false;put(el); return true; } return false; },
     // Esc from the draft: the keyboard leaves it on purpose (a bare key may
     // press a rail button)
     leave() { typed = 0;coming = 0;loading = false;held = ''; },

@@ -440,7 +440,7 @@ function keeperHarness(installComposerFocus, { phone = false, deferTimers = fals
     querySelector: sel => sel.startsWith('main.thread-view') ? (page.thread ? { getAttribute: () => page.thread } : null)
       : sel === '.workspace-palette' ? page.palette || null
       : sel.includes('[data-on-click="panel"]') ? (page.viewer ? {} : null) : null,
-    querySelectorAll: sel => page.cover ? [page.cover] : sel.includes('.workspace-palette') && page.over ? [{ getClientRects: () => [{}] }] : [] };
+    querySelectorAll: sel => page.cover ? [page.cover] : sel.includes('.workspace-palette') && page.over ? [page.palette || { getClientRects: () => [{}] }] : [] };
   const inputs = [];
   const composer = { tagName: 'TEXTAREA', id: 'composer', value: 'a draft', selectionStart: 0, selectionEnd: 0, disabled: false,
     getClientRects: () => [{}], checkVisibility: () => !page.hidden, contains: () => false, closest: sel => sel.split(',').includes('textarea') ? composer : null,
@@ -778,4 +778,27 @@ test('a slow destination keeps its typing fence beyond three seconds', async () 
     h.page.thread = 't2';h.composer.value = '';h.keeper.check();
     assert.equal(h.composer.value, 'ab');
   } finally { Date.now = now; }
+});
+
+test('Draw and other dialogs keep Enter and focus during the return-to-composer window', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();h.keeper.leave();
+  const draw = { tagName: 'BUTTON', closest: s => s.split(',').includes('.composer-foot button') ? draw : null };
+  h.fire('pointerdown', draw);h.doc.activeElement = draw;
+  h.page.cover = { getClientRects: () => [{}], matches: () => false };
+  assert.equal(h.keeper.end(), false);
+  const enter = h.key('Enter', draw);
+  assert.equal(enter.defaultPrevented, false);
+  assert.equal(enter.rail, true);
+  assert.equal(h.doc.activeElement, draw);
+});
+
+test('a dialog above Commands keeps typing away from its query', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus), button = { tagName: 'BUTTON', closest: () => null };
+  h.page.palette = { querySelector: () => assert.fail('the dialog owns typing') };
+  h.page.cover = { getClientRects: () => [{}], matches: () => false };h.doc.activeElement = button;
+  assert.equal(h.key('f', button).defaultPrevented, false);
+  assert.equal(h.doc.activeElement, button);assert.equal(h.composer.value, 'a draft');
 });
