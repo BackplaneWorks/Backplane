@@ -2190,24 +2190,9 @@ def Todos.changed(+s: State, +th: String, who: String, +data: String) -> State:
       Todos.put(s, th, J.Json.get_str(p, "current", ""), J.Json.get_str(p, "base", ""), J.Json.get_str(p, "visible", "0"))
     case _: Todos.agent(s, th, data)
 
-# How many times the thread's list was cleared (completed or retired), as a
-# token that changes each time: "<at>", or "<at>+" for a second clear in the
-# same second. A client that adopts a whole state at once compares it with
-# the one it saw last, so a clear between two renders still shuts the list.
-def Todos.gen(+s: State, +th: String) -> String:
-  Setting.get(s, "todos.gen." ++ th, "")
-
-def Todos.gen.next(+old: String, +at: Nat) -> String:
-  Bool.pick(String, String.eq(old, Nat.show(at)), old ++ "+", Nat.show(at))
-
-def Todos.clear(empty: Bool, +s: State, +th: String, +at: Nat) -> State:
-  match empty:
-    case True{}: Todos.put(s, th, "", "", "0")
-    case False{}: State.setting(Todos.put(s, th, "", "", "0"), "todos.gen." ++ th, Todos.gen.next(Todos.gen(s, th), at))
-
-def Todos.turn.end(done: Bool, +s: State, +th: String, +at: Nat) -> State:
+def Todos.turn.end(done: Bool, +s: State, +th: String) -> State:
   match done:
-    case True{}: Todos.clear(List.is_empty(&2, TD.Todo, Todos.of(s, th)), s, th, at)
+    case True{}: Todos.put(s, th, "", "", "0")
     case False{}: s
 
 def Todos.turn.start(was: Bool, s: State, th: String) -> State:
@@ -2218,10 +2203,10 @@ def Todos.turn.start(was: Bool, s: State, th: String) -> State:
 # A turn ends: a completed list clears, and so does one that stayed hidden
 # all turn (neither the agent nor the person touched it). The next list the
 # agent writes then starts fresh, with no person edits from the retired one.
-def Todos.turn(st: TurnState, +s: State, +th: String, +at: Nat) -> State:
+def Todos.turn(st: TurnState, +s: State, +th: String) -> State:
   match st:
     case Running{}: Todos.turn.start(State.running.k(State.thread.get(s, th)), s, th)
-    case _: Todos.turn.end(Bool.or(TD.Todo.complete(Todos.of(s, th)), Bool.not(Todos.visible(s, th))), s, th, at)
+    case _: Todos.turn.end(Bool.or(TD.Todo.complete(Todos.of(s, th)), Bool.not(Todos.visible(s, th))), s, th)
 
 def State.apply.go(s: State, e: Change) -> State:
   match e:
@@ -2236,7 +2221,7 @@ def State.apply.go(s: State, e: Change) -> State:
     case MessagePosted{+thread, msg, role, text, +at}:
       State.message(s, thread, msg, role, text, at)
     case TurnChanged{+thread, +state, +at}:
-      State.mail_end(state, State.thread((t => Thread.turned(state, at, t)), Todos.turn(state, s, thread, at), thread), thread)
+      State.mail_end(state, State.thread((t => Thread.turned(state, at, t)), Todos.turn(state, s, thread), thread), thread)
     case PendingChanged{+thread, count, _}:
       State.thread((t => Thread.pending_set(count, t)), s, thread)
     case ActivityLogged{thread, act, tone, kind, summary, at}:
