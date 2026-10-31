@@ -2636,6 +2636,29 @@ def Hub.thread_project(t: M.Thread) -> String:
       p
 
 # the worktree made again from a thread's kept branch
+# A thread's worktree folder found missing at its agent's start (removed
+# outside the hub, or by an older hub under a thread sharing it) is made again
+# on the thread's kept branch at the very path the thread records, before the
+# agent starts, instead of failing the turn with "its folder ... is gone"
+# (server.bend's Heal.run, laws wt_heal_*). Only a hub-made worktree
+# (/.backplane/worktrees/) with a branch is healed; a project folder never is.
+type Heal is Data:
+  Heal{root: String, wt: String, branch: String}
+
+def Wt.heal.k(ok: Bool, +root: String, +wt: String, +branch: String) -> Maybe<&2, Heal>:
+  match ok:
+    case True{}:
+      Some{Heal{root, wt, branch}}
+    case False{}:
+      None{}
+
+def Wt.heal.t(+s: M.State, +t: M.Thread) -> Maybe<&2, Heal>:
+  Wt.heal.k(Bool.and(M.Worktree.ours(Hub.worktree(t)), Bool.and(Bool.not(String.is_empty(M.Merge.branch(t))), Bool.not(String.is_empty(Hub.project.root(Hub.project(s, Hub.thread_project(t))))))),
+    Hub.project.root(Hub.project(s, Hub.thread_project(t))), Hub.worktree(t), M.Merge.branch(t))
+
+def Wt.heal(+s: M.State, +th: String) -> Maybe<&2, Heal>:
+  Wt.heal.t(s, Hub.thread(s, th))
+
 def Wt.revive(+s: M.State, +th: String) -> Out:
   Git{0, "", "worktree", th, Hub.project.root(Hub.project(s, Hub.thread_project(Hub.thread(s, th)))), "again", M.Merge.branch(Hub.thread(s, th))}
 
@@ -6683,19 +6706,66 @@ def Wt.stale(ts: List<&2, M.Thread>, +s: M.State, +now: Nat) -> Step:
 def Hub.wt.window(+s: M.State) -> Nat:
   Nat.mul(Nat.max(1n, Nat.min(90n, Maybe.default(&2, Nat, Nat.read(M.Setting.get(s, "worktree.days", "3")), 3n))), 86400n)
 
-def Drop.k(go: Bool, +s: M.State, +t: M.Thread, rest: List<&2, Out>) -> List<&2, Out>:
+def Drop.out(go: Bool, +s: M.State, +t: M.Thread, rest: List<&2, Out>) -> List<&2, Out>:
   match go:
     case True{}:
       Git{0, "", "wt_remove", M.Thread.id(t), Hub.worktree(t), Hub.project.root(Hub.project(s, Hub.thread_project(t))), M.Merge.branch(t)} <> rest
     case False{}:
       rest
 
-def Drop.asks(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat) -> List<&2, Out>:
+def Drop.alive(t: M.Thread) -> Bool:
+  match t:
+    case M.Thread{_, _, _, _, _, _, _, ar, _, _, _, _, _, _, _, _, _, _, _, _, de}:
+      Bool.not(Bool.or(ar, de))
+
+# whether thread o keeps the folder `path` that thread `self` would remove:
+# another live thread on that same folder whose own worktree is not going now
+def Drop.holds(+o: M.Thread, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat, +self: String, +path: String) -> Bool:
+  Bool.and(Bool.not(String.eq(M.Thread.id(o), self)), Bool.and(String.eq(Hub.worktree(o), path),
+    Bool.and(Drop.alive(o), Bool.not(M.Worktree.drop.w(s, o, now, w, M.Work.busy.at(kids, s, M.Thread.id(o)))))))
+
+def Drop.held.go(ts: List<&2, M.Thread>, found: Bool, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat, +self: String, +path: String) -> Bool:
+  match ts found:
+    case _ True{}:
+      True{}
+    case Nil{} False{}:
+      False{}
+    case +o <> rest False{}:
+      Drop.held.go(rest, Drop.holds(o, kids, s, now, w, self, path), kids, s, now, w, self, path)
+
+# Several threads can share one worktree folder (threads launched on it).
+# A thread's worktree goes only when no other live thread still on that
+# folder is staying: removing it under them failed their next start with
+# "its folder ... is gone" (laws wt_shared_*). The folder goes with the last.
+def Drop.k(go: Bool, +all: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State, +t: M.Thread, +now: Nat, +w: Nat, rest: List<&2, Out>) -> List<&2, Out>:
+  match go:
+    case True{}:
+      Drop.out(Bool.not(Drop.held.go(all, False{}, kids, s, now, w, M.Thread.id(t), Hub.worktree(t))), s, t, rest)
+    case False{}:
+      rest
+
+def Drop.asks.a(ts: List<&2, M.Thread>, +all: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat) -> List<&2, Out>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> rest:
-      Drop.k(M.Worktree.drop.w(s, t, now, w, M.Work.busy.at(kids, s, M.Thread.id(t))), s, t, Drop.asks(rest, kids, s, now, w))
+      Drop.k(M.Worktree.drop.w(s, t, now, w, M.Work.busy.at(kids, s, M.Thread.id(t))), all, kids, s, t, now, w, Drop.asks.a(rest, all, kids, s, now, w))
+
+def Drop.asks(+ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat) -> List<&2, Out>:
+  Drop.asks.a(ts, ts, kids, s, now, w)
+
+# the laws' example: threads a and b on one worktree folder (branch b1),
+# a settled by the person at 3, with more of the log after
+def Wt.share.demo(cs: List<&2, M.Change>) -> M.State:
+  M.State.replay(List.append(&2, M.Change, [M.ProjectCreated{"p1", "p", "/r", 1n},
+    M.ThreadCreated{"a", "p1", "a", M.Worktree{}, "", "", "claude", "", 1n}, M.WorktreeSet{"a", "b1", "/r/.backplane/worktrees/w1", 2n},
+    M.ThreadCreated{"b", "p1", "b", M.Worktree{}, "", "", "claude", "", 1n}, M.WorktreeSet{"b", "b1", "/r/.backplane/worktrees/w1", 2n},
+    M.ThreadSettled{"a", True{}, 3n}], cs), M.State.empty())
+
+def Wt.share.drops(+s: M.State) -> Nat:
+  match s:
+    case M.State{_, +ts, _, _, _, _, _, _, _, _, _}:
+      List.length(&2, Out, Drop.asks(Map.values(&2, M.Thread, ts), M.Work.kids.map(s), s, 100n, 10n))
 
 # Scratch threads left alone long enough (M.Scratch.expired) would be
 # deleted, like thread.delete, with their folders. Scratch is retired and

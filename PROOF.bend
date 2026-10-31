@@ -13813,3 +13813,15 @@ def Laws.todos_adopt_whole_retire_shuts():
 
 def Laws.todos_thin_click_holds():
   {==}
+
+def Laws.wt_shared_kept():
+  {==}
+
+def Laws.wt_shared_last_goes():
+  {==}
+
+def Laws.wt_heal_worktree():
+  {==}
+
+def Laws.wt_heal_project_folder_never():
+  {==}
