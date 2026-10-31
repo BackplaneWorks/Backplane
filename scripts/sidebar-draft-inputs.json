@@ -40,7 +40,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "4bc87400ed268d7efd9e3982522da54b52f199d42e49b3ed39e56034821c44ee",
+    "src/core/client.bend": "0d3d8c9d5b559f4fc801dcf450774b67a9a3cf6d69cd2aad66db200aeccb9689",
     "src/core/codec.bend": "7e53e017f449e3747df60d2779ab90fd6be43d0ddb3c0414ab9fa9e4cf4e8694",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -90,7 +90,7 @@
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
-    "src/core/order.bend": "8e71b1050f4b02a218fcac05f681cf0507d2f4e2613b8f59a1b404997e204f32",
+    "src/core/order.bend": "aeeec7e38ab9648cecbb26153af2601c6f2b8c41156deeb4c02d4ca8f0de800e",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "a11ae76fded98d1a05ba69e7a9557fa3c6d5dad381df8cb1b1cd1a97f1f4f928",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "a2497ade5dee3000445dde66be85e68743cd78c7518afa26fbd52f7d277c7aef"
+    "src/web/view.bend": "fa08c7ad814ee64b99834eed57d1937581ba94b7756932b0d9d77c93b207b62b"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "c14-6 rebase keeps all main changes and partial-estimate warnings; sidebar draft composition unchanged"
+  "reviewNote": "c14-2: Keep ordering available when pricing fails; sidebar draft composition unchanged"
 }

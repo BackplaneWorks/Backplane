@@ -13901,3 +13901,6 @@ def Laws.estimate_partial_withholds_total():
 
 def Laws.estimate_complete_keeps_total():
   {==}
+
+def Laws.estimate_failure_keeps_preparation():
+  {==}

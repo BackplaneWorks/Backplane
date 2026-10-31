@@ -18,3 +18,6 @@ def main() -> IO(Unit):
     C.Check.str("extra rows rejected", Bool.show(String.is_empty(O.Estimate.problems([part("a")], [priced("a"), priced("b")]))), "False")
     C.Check.str("complete price retained", O.Estimate.label("from $5.00", ""), "from $5.00")
     C.Check.str("partial price withheld", O.Estimate.label("from $5.00", "No estimate for b"), "estimate incomplete")
+    C.Check.str("service failure retains unpriced preparation", O.Card.action(O.Card{"", "", "", 1n, 0n, "unreachable", True{}}), "Buy it")
+    C.Check.str("unavailable service keeps board workflow", O.Card.action(O.Card{"", "", "", 0n, 1n, "unreachable", True{}}), "Buy it")
+    C.Check.str("no parts still has no action", O.Card.action(O.Card{"", "", "", 0n, 0n, "unreachable", True{}}), "")

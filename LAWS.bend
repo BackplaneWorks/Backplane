@@ -13521,3 +13521,7 @@ law estimate_partial_withholds_total:
 
 law estimate_complete_keeps_total:
   {ORD.Estimate.label("from $5.00", "") == "from $5.00" : String}
+
+# An estimate failure does not remove the order preparation conversation.
+law estimate_failure_keeps_preparation:
+  {ORD.Card.action(ORD.Card{"", "", "", 1n, 0n, "unreachable", True{}}) == "Buy it" : String}

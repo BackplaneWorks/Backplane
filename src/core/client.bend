@@ -7829,14 +7829,16 @@ def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
       Fab.min.set(u, th, "1")
     case 5n:
       Fab.min.set(u, th, "0")
+    case 9n:
+      Ui.rpc(u, "fab.look", [J.KV{"thread", J.Str{th}}])
     case _:
       Act{u, Nil{}}
 
 def Fab.actions() -> List<&2, String>:
-  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show", "proj-intent", "intent-close", "intent-saved-off"]
+  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show", "proj-intent", "intent-close", "intent-saved-off", "fab-refresh"]
 
 def Fab.is(+action: String) -> Bool:
-  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 9n)
+  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 10n)
 
 def Fab.act.v(+i: Nat, +u: Ui, +value: String) -> Act:
   match i:
@@ -7882,7 +7884,7 @@ def Fab.has(+o: J.Json) -> Bool:
 
 def Fab.keep(u: Ui, +th: String, +c: OR.Card) -> Ui:
   Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "fab.line:" ++ th, OR.Card.line(c)), "fab.intent:" ++ th, OR.Card.intent(c)),
-    "fab.buy:" ++ th, OR.Card.buy(c)), "fab.shown:" ++ th, Bool.pick(String, OR.Card.shown(c), "1", ""))
+    "fab.buy:" ++ th, OR.Card.action(c)), "fab.shown:" ++ th, Bool.pick(String, OR.Card.shown(c), "1", ""))
 
 def Fab.reply.r(u: Ui, +th: String, +r: J.Json) -> Ui:
   Fab.keep(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "fab.ready:" ++ th, OR.Card.ready.or(OR.Card.ready.j(r), J.Json.get_str(r, "order", ""))), "fab.boards:" ++ th, OR.Card.boards.j(r)),

@@ -3184,7 +3184,7 @@ def View.intent(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 # (U.Fab.ready), once the agent's turn is over; it glows as it comes
 def View.ready.r(+line: String, +buy: String, rail: Bool) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.is_empty(line), Nil{},
-    [D.El{"div", "ready", [D.At{"class", "fab-ready"}], D.Dom.cat([D.Dom.span("fab-ready-text", line)], List.append(&2, D.Node, View.fab.buy(buy),
+    [D.El{"div", "ready", [D.At{"class", "fab-ready"}], D.Dom.cat([D.Dom.span("fab-ready-text", line)], List.append(&2, D.Node, List.append(&2, D.Node, View.fab.buy(buy), D.Dom.when(String.starts_with(line, "Estimate unavailable:"), D.Dom.button("", "fab-refresh", "", "Try the estimate again", "Retry"))),
       [D.Dom.button("fab-x", "fab-hide", "", Bool.pick(String, rail, "Put this away: Buy it stays in the tool rail", "Put this away: Buy it stays in the thread's header"), "×")]))}])
 
 def View.ready.k(+line: String, +buy: String) -> List<&2, D.Node>:

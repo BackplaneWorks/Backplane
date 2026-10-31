@@ -583,6 +583,13 @@ def Card.buy(c: Card) -> String:
     case Card{_, _, +label, +n, +b, +err, on}:
       Card.buy.k(Nat.is_eq(n, 0n), label, on, Nat.is_gt(b, 0n), err)
 
+# Preparing an order remains possible when the estimate service is down.
+# The price gate above still applies; an unavailable estimate is unpriced.
+def Card.action(+c: Card) -> String:
+  match c:
+    case Card{_, _, _, +n, +b, +err, _}:
+      Bool.pick(String, Bool.and(Nat.is_gt(Nat.add(n, b), 0n), Bool.not(String.is_empty(err))), "Buy it", Card.buy(c))
+
 # the parts a ready line names, " · " between them ("LED board · Lamp shade")
 def Card.names.one(blank: Bool, +name: String, rest: List<&2, String>) -> List<&2, String>:
   match blank:
@@ -768,8 +775,11 @@ def Card.ready.or(+ready: String, +st: String) -> String:
 def Card.ready.estimate(+line: String, +note: String) -> String:
   Bool.pick(String, String.is_empty(note), line, note ++ ". Check the fab files before ordering.")
 
+def Card.ready.error(+line: String, +err: String) -> String:
+  Bool.pick(String, String.is_empty(err), line, "Estimate unavailable: " ++ err ++ Bool.pick(String, String.starts_with(line, "Ready to order · "), " · Parts: " ++ String.drop(line, 17n), Bool.pick(String, String.is_empty(line), "", " · " ++ line)))
+
 def Card.ready.j(+j: J.Json) -> String:
-  Card.ready.estimate(Card.ready.k(String.join(Card.names.go(J.Json.elems(J.Json.get_obj(j, "parts"))), " · "), J.Json.get_nat(j, "boards", 0n)), J.Json.get_str(j, "estimate_problems", ""))
+  Card.ready.error(Card.ready.estimate(Card.ready.k(String.join(Card.names.go(J.Json.elems(J.Json.get_obj(j, "parts"))), " · "), J.Json.get_nat(j, "boards", 0n)), J.Json.get_str(j, "estimate_problems", "")), J.Json.get_str(j, "error", ""))
 
 # the line the card shows shut: the goal, else a nudge
 def Card.line(c: Card) -> String:
