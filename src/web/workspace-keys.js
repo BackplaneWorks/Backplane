@@ -320,10 +320,18 @@ export function installComposerFocus({ document: doc = document, window: win = w
 }
 
 export function installWorkspaceKeys({ dispatch, document: doc = document, platform = navigator.platform, escNext = null, clearProbe = null, composer = null }) {
+  let palettePending = false;
   doc.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
     if (doc.querySelector('.tour,.lightbox') || doc.querySelector('.draw-back')) return; // The active overlay owns every key.
     const palette = doc.querySelector('.workspace-palette');
+    if (palette) palettePending = false;
+    // Queue the explicit close even while the hub is still drawing the open.
+    if (palettePending && event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+      palettePending = false;
+      event.preventDefault(); event.stopImmediatePropagation();
+      dispatch('ws-palette-close', ''); composer?.claim(true); return;
+    }
     if (palette) {
       const action = { Escape: 'ws-palette-close', Enter: 'ws-palette-enter', ArrowUp: 'ws-palette-move', ArrowDown: 'ws-palette-move' }[event.key];
       if (action && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
@@ -390,6 +398,7 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
     }
     event.preventDefault(); event.stopImmediatePropagation();
     if (event.repeat && (action[0] === 'ws-palette-open' || action[1] === 'palette' || action[1] === 'term')) return;
+    if (action[0] === 'ws-palette-open' || action[0] === 'ws-key' && action[1] === 'palette') palettePending = true;
     dispatch(...action);
   }, true);
 }

@@ -700,3 +700,11 @@ test('a drawer gives the keyboard back before the next timer turn', async () => 
   assert.equal(h.doc.activeElement, h.composer);
   assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [3, 3]);
 });
+
+test('Escape cancels a palette before the open has rendered', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = composerHarness(installWorkspaceKeys);
+  h.press('k', { ctrlKey: true });h.press('Escape');
+  assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-palette-close', '']]);
+  assert.equal(h.composer.value, 'unsent draft');
+});
