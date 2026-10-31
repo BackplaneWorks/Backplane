@@ -501,6 +501,275 @@ def Fold.roles.loc(+l: I.Loc, +es: List<&2, M.Entry>, +info: Map<&2, String>, +r
 def Fold.roles(es: List<&2, M.Entry>, info: Map<&2, String>, running: Bool) -> List<&2, Role>:
   Fold.roles.loc(I.En{}, es, info, running)
 
+# Runs across a page's edges
+# --------------------------
+# A page of a thread (the hub-drawn page's window of rows, a client's
+# newest pages) may cut a run of tool calls: its oldest entry may sit in
+# the middle of a run, or its newest one. Folded on its own, each page
+# would make its own drawer of the part it holds, keyed by whichever entry
+# came first on it, and pages kept side by side (the hub-drawn page keeps
+# rows of earlier pictures) showed one drawer per piece. Folded with the
+# tool calls just outside it (Around: those just older than its oldest entry,
+# and just newer than its newest), the run is one drawer on every page:
+# keyed by its real first call, counting all of it (laws fold_ctx_*).
+#
+# An assistant message of nothing but white space shows nothing, so it
+# never splits a run either (Fold.shown, law fold_blank_joins).
+
+# white space only ("" too)
+def Fold.white(s: String) -> Bool:
+  match s:
+    case SNil{}: True{}
+    case SCon{Chr{32}, t}: Fold.white(t)
+    case SCon{Chr{10}, t}: Fold.white(t)
+    case SCon{Chr{13}, t}: Fold.white(t)
+    case SCon{Chr{9}, t}: Fold.white(t)
+    case SCon{_, _}: False{}
+
+# an agent's message that shows nothing
+def Fold.blank(e: M.Entry) -> Bool:
+  match e:
+    case M.Msg{_, _, M.Assistant{}, +x, _}:
+      Fold.white(x)
+    case _:
+      False{}
+
+def Fold.shown.k(b: Bool, e: M.Entry, rest: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match b:
+    case True{}:
+      rest
+    case False{}:
+      e <> rest
+
+# the entries that show, in order: blank messages left out
+def Fold.shown(es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      Fold.shown.k(Fold.blank(e), e, Fold.shown(t))
+
+# the tool calls just outside a page, oldest first
+type Around is Data:
+  Around{before: List<&2, M.Entry>, after: List<&2, M.Entry>}
+
+def Around.none() -> Around:
+  Around{Nil{}, Nil{}}
+
+# a walk over a thread's entries, newest first: looking for the page's
+# newest entry (the tool calls met just before it are its after), then for
+# its oldest, then taking the tool calls just older than it, then done
+type AroundAt is Data:
+  ANew{}
+  AOld{}
+  ATake{}
+  ADone{}
+
+type AroundSt is Data:
+  AroundSt{at: AroundAt, run: List<&2, M.Entry>, after: List<&2, M.Entry>}
+
+# the tool calls met in a row, oldest first (a blank message keeps the
+# row, anything else starts it again)
+def Around.run(tool: Bool, blank: Bool, e: M.Entry, run: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match tool blank:
+    case True{} _:
+      e <> run
+    case False{} True{}:
+      run
+    case False{} False{}:
+      Nil{}
+
+def Around.at.found(first: Bool) -> AroundAt:
+  match first:
+    case True{}:
+      ATake{}
+    case False{}:
+      AOld{}
+
+def Around.new(last: Bool, first: Bool, tool: Bool, blank: Bool, e: M.Entry, run: List<&2, M.Entry>) -> AroundSt:
+  match last:
+    case True{}:
+      AroundSt{Around.at.found(first), Nil{}, run}
+    case False{}:
+      AroundSt{ANew{}, Around.run(tool, blank, e, run), Nil{}}
+
+def Around.old(first: Bool, after: List<&2, M.Entry>) -> AroundSt:
+  match first:
+    case True{}:
+      AroundSt{ATake{}, Nil{}, after}
+    case False{}:
+      AroundSt{AOld{}, Nil{}, after}
+
+def Around.take(tool: Bool, blank: Bool, e: M.Entry, run: List<&2, M.Entry>, after: List<&2, M.Entry>) -> AroundSt:
+  match tool blank:
+    case True{} _:
+      AroundSt{ATake{}, e <> run, after}
+    case False{} True{}:
+      AroundSt{ATake{}, run, after}
+    case False{} False{}:
+      AroundSt{ADone{}, run, after}
+
+def Around.step(+e: M.Entry, +first: String, +last: String, s: AroundSt) -> AroundSt:
+  match s:
+    case AroundSt{ANew{}, run, _}:
+      Around.new(String.eq(Fold.id(e), last), String.eq(Fold.id(e), first), Fold.tool(e), Fold.blank(e), e, run)
+    case AroundSt{AOld{}, _, after}:
+      Around.old(String.eq(Fold.id(e), first), after)
+    case AroundSt{ATake{}, run, after}:
+      Around.take(Fold.tool(e), Fold.blank(e), e, run, after)
+    case AroundSt{ADone{}, run, after}:
+      AroundSt{ADone{}, run, after}
+
+def Around.done(s: AroundSt) -> Bool:
+  match s:
+    case AroundSt{ADone{}, _, _}:
+      True{}
+    case _:
+      False{}
+
+# stops as soon as the run older than the page ends: it walks the entries
+# newer than the page, the page and that run, never the rest of the thread
+def Around.go(xs: List<&2, M.Entry>, done: Bool, +first: String, +last: String, s: AroundSt) -> AroundSt:
+  match xs done:
+    case Nil{} _:
+      s
+    case +e <> +t True{}:
+      s
+    case +e <> t False{}:
+      +n = Around.step(e, first, last, s)
+      Around.go(t, Around.done(n), first, last, n)
+
+def Around.of(s: AroundSt) -> Around:
+  match s:
+    case AroundSt{ANew{}, _, _}:
+      Around{Nil{}, Nil{}}
+    case AroundSt{AOld{}, _, after}:
+      Around{Nil{}, after}
+    case AroundSt{ATake{}, run, after}:
+      Around{run, after}
+    case AroundSt{ADone{}, run, after}:
+      Around{run, after}
+
+def Fold.last.id(es: List<&2, M.Entry>, +acc: String) -> String:
+  match es:
+    case Nil{}:
+      acc
+    case +e <> t:
+      Fold.last.id(t, Fold.id(e))
+
+# the tool calls around a page (es, oldest first) in a thread's entries,
+# newest first, given in three parts walked one after the other: what the
+# hub filed as newer than its window (Around.after.key), the thread's own
+# entries, what it filed as older (Around.before.key)
+def Fold.context(newer: List<&2, M.Entry>, xs: List<&2, M.Entry>, older: List<&2, M.Entry>, +es: List<&2, M.Entry>) -> Around:
+  +first = Fold.run_id(es)
+  +last = Fold.last.id(es, "")
+  +s1 = Around.go(newer, List.is_empty(&2, M.Entry, es), first, last, AroundSt{ANew{}, Nil{}, Nil{}})
+  +s2 = Around.go(xs, Around.done(s1), first, last, s1)
+  Around.of(Around.go(older, Around.done(s2), first, last, s2))
+
+# where the hub files a window's outside tool calls in the state it draws
+# from (src/server/thin-view.bend), as threads of their own
+def Around.before.key(+th: String) -> String:
+  "@fold.before:" ++ th
+
+def Around.after.key(+th: String) -> String:
+  "@fold.after:" ++ th
+
+# a page's context from a state: the hub's filed parts and the thread's own
+def Fold.context.of(+st: M.State, +th: String, +es: List<&2, M.Entry>) -> Around:
+  Fold.context(M.State.mine(st, Around.after.key(th)), M.State.mine(st, th), M.State.mine(st, Around.before.key(th)), es)
+
+# an entry filed under another key (the hub's context)
+def Around.file(+key: String, e: M.Entry) -> M.Entry:
+  match e:
+    case M.Msg{i, _, r, x, a}:
+      M.Msg{i, key, r, x, a}
+    case M.Act{i, _, tone, k, s, a}:
+      M.Act{i, key, tone, k, s, a}
+
+def Around.files(+key: String, es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case e <> t:
+      Around.file(key, e) <> Around.files(key, t)
+
+def Around.before(c: Around) -> List<&2, M.Entry>:
+  match c:
+    case Around{b, _}:
+      b
+
+def Around.after(c: Around) -> List<&2, M.Entry>:
+  match c:
+    case Around{_, a}:
+      a
+
+# what dropping the context's roles leaves of a run's head: the head
+# itself while the run goes on
+def Fold.keep(r: Role, c: Maybe<&2, Role>) -> Maybe<&2, Role>:
+  match r:
+    case RHead{i, lb, o, lv}:
+      Some{RHead{i, lb, o, lv}}
+    case RIn{_}:
+      c
+    case _:
+      None{}
+
+# a run whose head was before the page: its first entry on the page heads it
+def Fold.carry(c: Maybe<&2, Role>, rs: List<&2, Role>) -> List<&2, Role>:
+  match c rs:
+    case Some{h} RIn{_} <> t:
+      h <> t
+    case _ _:
+      rs
+
+def Fold.cut(bs: List<&2, M.Entry>, rs: List<&2, Role>, c: Maybe<&2, Role>) -> List<&2, Role>:
+  match bs rs:
+    case Nil{} _:
+      Fold.carry(c, rs)
+    case +b <> bt r <> rt:
+      Fold.cut(bt, rt, Fold.keep(r, c))
+    case +b <> +bt Nil{}:
+      Nil{}
+
+# the roles of a page's entries, folded with the tool calls around it: one
+# role per entry of the page, a run cut by its edge heading where it starts
+# on the page, keyed by its real first call and counting all of it
+def Fold.roles.ctx(+l: I.Loc, +c: Around, +es: List<&2, M.Entry>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
+  match c:
+    case Around{+b, +a}:
+      List.take(&2, Role, Fold.cut(b, Fold.roles.loc(l, List.append(&2, M.Entry, b, List.append(&2, M.Entry, es, a)), info, running), None{}),
+        List.length(&2, M.Entry, es))
+
+# the same over entries that still hold their blank messages, one role per
+# entry: a blank one is hidden, the others take the roles of the entries
+# that show (for a UI that walks every entry: the window's timeline)
+def Fold.head.blank(es: List<&2, M.Entry>) -> Bool:
+  match es:
+    case Nil{}:
+      False{}
+    case e <> _:
+      Fold.blank(e)
+
+def Fold.spread.go(es: List<&2, M.Entry>, b: Bool, rs: List<&2, Role>) -> List<&2, Role>:
+  match es b rs:
+    case Nil{} _ _:
+      Nil{}
+    case +e <> +t True{} _:
+      RIn{False{}} <> Fold.spread.go(t, Fold.head.blank(t), rs)
+    case +e <> +t False{} r <> rt:
+      r <> Fold.spread.go(t, Fold.head.blank(t), rt)
+    case +e <> +t False{} Nil{}:
+      RShow{} <> Fold.spread.go(t, Fold.head.blank(t), Nil{})
+
+def Fold.spread(+es: List<&2, M.Entry>, rs: List<&2, Role>) -> List<&2, Role>:
+  Fold.spread.go(es, Fold.head.blank(es), rs)
+
+# roles for every entry, blank ones hidden, with the page's context
+def Fold.roles.all(+l: I.Loc, +c: Around, +es: List<&2, M.Entry>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
+  Fold.spread(es, Fold.roles.ctx(l, c, Fold.shown(es), info, running))
+
 # Revealing an entry
 # ------------------
 # To show an entry (the viewer's history goes back to the tool call a

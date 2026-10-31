@@ -52,7 +52,7 @@
     "src/core/farlive.bend": "0fec3c222121256751cf620ad82248a178a7f54581c4f20570fdce2fa0b2e25c",
     "src/core/farsnap.bend": "a83e2e4f17577be64e737c32613e5cf2a77364c8849f5b7d0430edd0bde38257",
     "src/core/fm.bend": "6000d7e7dffc96057f66e628a8c32c46c096026a67dc9ee2f5b957b81e2aaa14",
-    "src/core/fold.bend": "435cab9bde60790e7dbc0a855897b704c9e325f3221de78a437cd42827d15b87",
+    "src/core/fold.bend": "ad2f8b4ec0b7c5f4f690d77d6e6cfc3652570f89fb16ffe70443aa101cfbfbf5",
     "src/core/fuzzy.bend": "23098d1fc905bec7556734757cec8bfee65bc7fdbe9e317742e6c86f2e2f5e10",
     "src/core/fview.bend": "8b27131cec07e5697cf96ede00efc8423072619afa956d087008ff7edff29032",
     "src/core/glb.bend": "f2eb124f9c0967d8c03c0a96c3a7120aab3c024cb8af60af6e4263d70bb8fe75",
@@ -148,7 +148,7 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
-    "src/mobile/screen.bend": "243770a186cc4687fb26175f449029f8823e7ba2ffdfbeb0b404f7e7cc51018d",
+    "src/mobile/screen.bend": "8ad33e2356d24ce7438a49e5d10fb3a395f864b236632a98ffec3d49f219ad2d",
     "src/server/thin-actor.bend": "56c8fdeddb03d94c221ae213d9469e72ba34489bce6d64514018e1a4aa220019",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -157,7 +157,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "f08bc9b41cab08e1d1d4f6931f1fb8f5a8a2edb81d2fd96231ee544649469eb0",
-    "src/server/thin-view.bend": "d481b5b710328bcc1c1ae9d0d58feec0393ad5d8e90f6fcc16f2ae8da8a7aa6b",
+    "src/server/thin-view.bend": "d4192ab3547912cca0dc2fef7688d6f1559f9bd26c47537b44765bb06d4b464a",
     "src/server/thinstore.bend": "24f5e750eab6f52abfefeeca6884ed054ab0d8c9bea46c301fb384004b8d54a3",
     "src/web/bots.bend": "7518bf17604f71e861f598d365ff989214287ad466aee6bf808e3c38d5d1bf7e",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "5c780cea8e0c7417c7560db9e03533e98e097ee54faabf984391c4862aff99f9"
+    "src/web/view.bend": "5fe3203cc11d496bc618f7267fce6c646b5aa72daf1db37f41358622a80d52ec"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

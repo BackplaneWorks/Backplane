@@ -13366,3 +13366,68 @@ law wt_heal_worktree:
 law wt_heal_project_folder_never:
   {H.Wt.heal(H.Shelve.demo(Nil{}), "t1") == None{} : Maybe<&2, H.Heal>}
 
+# Tool runs across a page's edges (core/fold.bend's Fold.roles.ctx)
+# ----------------------------------------------------------------
+
+# a blank message between two calls never splits their run
+law fold_blank_joins:
+  for +i: String
+  for +j: String
+  for +b: String
+  for +th: String
+  for +s: String
+  for +a: Nat
+  {FO.Fold.roles(FO.Fold.shown([M.Act{i, th, "tool", "Bash", s, a}, M.Msg{b, th, M.Assistant{}, " \n", a}, M.Act{j, th, "tool", "Bash", s, a}]), Map.new(&2, String), False{})
+    == [FO.RHead{i, "2 tool calls · Bash", False{}, False{}}, FO.RIn{False{}}] : List<&2, FO.Role>}
+
+# a page whose first call goes on with a run begun before it: that call
+# heads the run, keyed by the run's real first call and counting all of it
+law fold_ctx_carries_head:
+  for +i: String
+  for +j: String
+  for +th: String
+  for +s: String
+  for +a: Nat
+  {FO.Fold.roles.ctx(I18.En{}, FO.Around{[M.Act{i, th, "tool", "Bash", s, a}], Nil{}}, [M.Act{j, th, "tool", "Bash", s, a}], Map.new(&2, String), False{})
+    == [FO.RHead{i, "2 tool calls · Bash", False{}, False{}}] : List<&2, FO.Role>}
+
+# a page that ends before its run does, while the turn runs: the run is
+# not live on it, the calls after the page are
+law fold_ctx_after_live:
+  for +i: String
+  for +j: String
+  for +th: String
+  for +s: String
+  for +a: Nat
+  {FO.Fold.roles.ctx(I18.En{}, FO.Around{Nil{}, [M.Act{j, th, "tool", "Bash", s, a}]}, [M.Act{i, th, "tool", "Bash", s, a}], Map.new(&2, String), True{})
+    == [FO.RHead{i, "2 tool calls · running: Bash", False{}, True{}}] : List<&2, FO.Role>}
+
+def FoldPage.call(+n: Nat) -> M.Entry:
+  M.Act{"c" ++ Nat.show(n), "t", "tool", "Bash", "x", 0n}
+
+def FoldPage.calls(+n: Nat) -> List<&2, M.Entry>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+k:
+      FoldPage.call(1n+k) <> FoldPage.calls(k)
+
+# a thread, newest first: a message, thirteen calls in a row, the person's
+# message
+def FoldPage.thread() -> List<&2, M.Entry>:
+  M.Msg{"m2", "t", M.Assistant{}, "done", 0n} <> List.append(&2, M.Entry, FoldPage.calls(13n), [M.Msg{"u", "t", M.User{}, "go", 0n}])
+
+def FoldPage.roles(+n: Nat) -> List<&2, FO.Role>:
+  FO.Fold.roles.ctx(I18.En{}, FO.Fold.context(Nil{}, FoldPage.thread(), Nil{}, [FoldPage.call(n)]), [FoldPage.call(n)], Map.new(&2, String), False{})
+
+# thirteen calls in a row, each a page by itself (the hub-drawn page's
+# windows, the rows it keeps of earlier pictures): every page draws the
+# same one drawer, "13 tool calls", keyed by the first
+law fold_ctx_thirteen:
+  {[FoldPage.roles(1n), FoldPage.roles(7n), FoldPage.roles(13n)]
+    == [[FO.RHead{"c1", "13 tool calls · Bash", False{}, False{}}], [FO.RHead{"c1", "13 tool calls · Bash", False{}, False{}}], [FO.RHead{"c1", "13 tool calls · Bash", False{}, False{}}]] : List<&2, List<&2, FO.Role>>}
+
+# and text between two calls ends the run: each has its own
+law fold_ctx_text_splits:
+  {FO.Fold.roles.ctx(I18.En{}, FO.Fold.context(Nil{}, [FoldPage.call(2n), M.Msg{"m", "t", M.Assistant{}, "look", 0n}, FoldPage.call(1n)], Nil{}, [FoldPage.call(2n)]), [FoldPage.call(2n)], Map.new(&2, String), False{})
+    == [FO.RHead{"c2", "1 tool call · Bash", False{}, False{}}] : List<&2, FO.Role>}

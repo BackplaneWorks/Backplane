@@ -13824,4 +13824,17 @@ def Laws.wt_heal_worktree():
   {==}
 
 def Laws.wt_heal_project_folder_never():
+def Laws.fold_blank_joins(i, j, b, th, s, a):
+  {==}
+
+def Laws.fold_ctx_carries_head(i, j, th, s, a):
+  {==}
+
+def Laws.fold_ctx_after_live(i, j, th, s, a):
+  {==}
+
+def Laws.fold_ctx_thirteen():
+  {==}
+
+def Laws.fold_ctx_text_splits():
   {==}

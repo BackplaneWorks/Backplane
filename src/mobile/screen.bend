@@ -738,8 +738,21 @@ def Mob.entries.go(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st
 # oldest first, runs of tool calls folded (each shut until the person
 # opens it; the live one says what runs now); a reply's images are the ones found when it came
 # (Mob.imgs.seen)
-def Mob.entries(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
-  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, dr, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)), "", Nil{}))
+# the tool calls around a page, without the design as it was before
+def Mob.around.k(c: FO.Around) -> FO.Around:
+  match c:
+    case FO.Around{b, a}:
+      FO.Around{HS.Hist.seen(b), HS.Hist.seen(a)}
+
+def Mob.around(+st: M.State, +sel: String, +es: List<&2, M.Entry>) -> FO.Around:
+  Mob.around.k(FO.Fold.context.of(st, sel, es))
+
+def Mob.entries.folded(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
+  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.ctx(lc, Mob.around(st, sel, es), es, info, running), st, sel, dr, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)), "", Nil{}))
+
+# blank messages left out, a run cut by the page's edge folded whole
+def Mob.entries(+lc: I.Loc, es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
+  Mob.entries.folded(lc, FO.Fold.shown(es), st, sel, info, dr, running)
 
 # a toolbar button (core/tools.bend): its icon, what it says, what it does
 # (tip) and the action it sends
