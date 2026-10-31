@@ -14,6 +14,9 @@ function button(label, fn, title = label) {
 let workbench = null;
 const panels = new Map();
 const revisions = new Map();
+// a source's exact stamp, heard before its plot is read (plot.bend's
+// plotstamp): it may authorize the original model, never component binding
+const stamps = new Map();
 class Workbench {
   constructor(root, solid, services = {}) {
     this.root = root; this.solid = solid; this.scope = root.dataset.scope; this.key = root.dataset.key;
@@ -156,7 +159,14 @@ class Workbench {
   // still checked against that exact stamp by the hub (render_asset.js) before
   // it is exported and again when it is published.
   sameBoardFile() { return sameBoardFile(this.key, this.boardKey); }
-  assemblyRevision() { return assemblyRevision(this.key, this.boardKey, revisions); }
+  assemblyRevision() { return assemblyRevision(this.key, this.boardKey, revisions, stamps); }
+  stamp() {
+    const next = this.assemblyRevision();
+    if (next === this.qualityRevision) return;
+    this.qualityRevision = next;
+    if (!this.quality?.loading && this.sameBoardFile()) this.quality?.prepareAsset(next);
+    this.quality?.sourceChanged();
+  }
   revision(key) {
     const next = this.assemblyRevision();
     if (next !== this.qualityRevision) { this.qualityRevision = next; this.quality?.sourceChanged(); }
@@ -211,13 +221,22 @@ export function sameBoardFile(key, boardKey) {
 }
 // the revision that authorizes the original model: the PCB's for the same file
 // (it arrives first), else the assembly's own
-export function assemblyRevision(key, boardKey, known) {
+export function assemblyRevision(key, boardKey, known, stamped = new Map()) {
   const own = known.get(key);
-  return sameBoardFile(key, boardKey) ? known.get(boardKey) || own : own;
+  // (a stamp heard since the PCB's last revision is newer: the file changed)
+  return sameBoardFile(key, boardKey) ? stamped.get(boardKey) || known.get(boardKey) || own : own;
 }
 export function sourceRevision(key, revision) {
   if (typeof key !== "string" || typeof revision !== "string" || !revision || revisions.get(key) === revision) return;
   revisions.set(key, revision); if (revisions.size > 64) revisions.delete(revisions.keys().next().value);
+  if (stamps.get(key) !== revision) stamps.delete(key);
   if (workbench && [workbench.key, workbench.boardKey].includes(key)) workbench.revision(key);
 }
-export function reset() { workbench?.dispose(); workbench = null; revisions.clear(); }
+// a stamp the hub saw before reading the source: only the PCB's of the
+// workbench's own board file prepares and authorizes the original model
+export function sourceStamp(key, revision) {
+  if (typeof key !== "string" || typeof revision !== "string" || !revision || stamps.get(key) === revision) return;
+  stamps.set(key, revision); if (stamps.size > 64) stamps.delete(stamps.keys().next().value);
+  if (workbench && key === workbench.boardKey) workbench.stamp();
+}
+export function reset() { workbench?.dispose(); workbench = null; revisions.clear(); stamps.clear(); }

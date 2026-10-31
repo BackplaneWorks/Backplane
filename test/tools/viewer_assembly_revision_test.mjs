@@ -27,4 +27,11 @@ const step = '2|/home/p|mech/case.step', other = new Map([[board, 'r9']]);
 assert.equal(assemblyRevision(step, board, other), undefined, 'a non-board model waits for its own revision');
 other.set(step, 's1');
 assert.equal(assemblyRevision(step, board, other), 's1');
+{
+ const known=new Map(),stamped=new Map();
+ stamped.set(board,'s1');assert.equal(assemblyRevision(key,board,known,stamped),'s1','the PCB stamp authorizes before its plot revision');
+ known.set(board,'s1');assert.equal(assemblyRevision(key,board,known,stamped),'s1','the plot revision for that stamp changes nothing');
+ stamped.set(board,'s2');assert.equal(assemblyRevision(key,board,known,stamped),'s2','a later stamp (the file saved again) wins');
+ assert.equal(assemblyRevision(step,board,known,stamped),undefined,'a stamp never authorizes another file');
+}
 console.log('ok assembly revision: same-file PCB revision authorizes the original board model early; other models keep their own');

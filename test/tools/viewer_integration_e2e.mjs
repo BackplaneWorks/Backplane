@@ -445,6 +445,8 @@ try {
           calls.set(decoded.id,decoded.m);wire.push({direction:'request',at:frame.at,id:decoded.id,method:decoded.m,thread:decoded.p?.thread,path:decoded.p?.path,kind:decoded.p?.kind,revision:decoded.p?.revision,offset:decoded.p?.offset});
         }else if(frame.direction==='receive'&&decoded.t==='plotrevision'){
           wire.push({direction:'revision',at:frame.at,key:decoded.key,revision:decoded.revision});
+        }else if(frame.direction==='receive'&&decoded.t==='plotstamp'){
+          wire.push({direction:'stamp',at:frame.at,key:decoded.key,revision:decoded.revision});
         }else if(frame.direction==='receive'&&decoded.t==='reply'&&calls.has(decoded.id)){
           const asset=decoded.result?.asset;wire.push({direction:'reply',at:frame.at,id:decoded.id,method:calls.get(decoded.id),ok:decoded.ok,error:decoded.error||decoded.result?.error,asset:asset&&{source:asset.source,revision:asset.revision,sha256:asset.sha256},page:decoded.result?.components?.page});
         }
@@ -468,9 +470,11 @@ try {
     assert.ok(click&&load&&firstFrame,'missing initial frame milestones');
     const revision=wire.find(s=>s.direction==='revision'&&s.key===load.key&&s.revision===sourceRevision&&s.at>=click.at);
     const pcbRevision=wire.find(s=>s.direction==='revision'&&s.key==='0'+load.key.slice(1)&&s.revision===sourceRevision&&s.at>=click.at);
-    // A board's original model is authorized by the PCB revision of the same saved file,
-    // which arrives first; the assembly's own (revision) may follow the first frame.
-    const authority=pcbRevision||revision;
+    // A board's original model is authorized by the PCB's exact stamp (plotstamp, heard when
+    // the hub stats the file, before its plot is read) or else its revision, of the same saved
+    // file; the assembly's own (revision) may follow the first frame.
+    const pcbStamp=wire.find(s=>s.direction==='stamp'&&s.key==='0'+load.key.slice(1)&&s.revision===sourceRevision&&s.at>=click.at);
+    const authority=pcbStamp||pcbRevision||revision;
     const request=wire.find(s=>s.direction==='request'&&s.method==='kicad.renderAsset'&&s.revision===sourceRevision&&s.at>=click.at);
     const reply=wire.find(s=>s.direction==='reply'&&s.id===request?.id);
     const constructor=workerLifecycle.find(s=>s.event==='constructor'&&s.at>=click.at);
@@ -490,7 +494,7 @@ try {
     }
     assert.equal(firstFrame.source,pcb);assert.equal(firstFrame.revision,sourceRevision);assert.equal(firstFrame.key,load.key);
     const milestones={click:click.at,pcbRevision:pcbRevision?.at,plotRevision:revision?.at,authority:authority.at,assetRequest:request.at,assetReply:reply.at,workerConstructor:constructor.at,workerConstructorReturn:constructor.returnedAt,initPost:initPost.at,vendorStart:vendor.mainStartAt,vendorResponseEnd:vendor.mainResponseEndAt,initReply:initReply.at,loadPost:load.at,bytes:bytes?.at??null,firstFrame:firstFrame.at};
-    const intervals={clickToRevisionMs:authority.at-click.at,revisionToAssetRequestMs:request.at-authority.at,clickToPlotRevisionMs:revision?revision.at-click.at:null,assetRpcMs:reply.at-request.at,replyToWorkerConstructorMs:constructor.at-reply.at,constructorToInitPostMs:initPost.at-constructor.at,workerInitMs:initReply.at-initPost.at,vendorFetchMs:vendor.duration,vendorResponseEndToInitReplyMs:initReply.at-vendor.mainResponseEndAt,initReplyToLoadPostMs:load.at-initReply.at,modelLoadPostToBytesMs:bytes?bytes.at-load.at:null,bytesToFirstFrameMs:bytes?firstFrame.at-bytes.at:null,clickToFrameMs:firstFrame.at-click.at};
+    const intervals={clickToRevisionMs:authority.at-click.at,clickToPcbRevisionMs:pcbRevision?pcbRevision.at-click.at:null,authorizedByStamp:pcbStamp?1:0,revisionToAssetRequestMs:request.at-authority.at,clickToPlotRevisionMs:revision?revision.at-click.at:null,assetRpcMs:reply.at-request.at,replyToWorkerConstructorMs:constructor.at-reply.at,constructorToInitPostMs:initPost.at-constructor.at,workerInitMs:initReply.at-initPost.at,vendorFetchMs:vendor.duration,vendorResponseEndToInitReplyMs:initReply.at-vendor.mainResponseEndAt,initReplyToLoadPostMs:load.at-initReply.at,modelLoadPostToBytesMs:bytes?bytes.at-load.at:null,bytesToFirstFrameMs:bytes?firstFrame.at-bytes.at:null,clickToFrameMs:firstFrame.at-click.at};
     if(expectAssetPreparation||fidelityOnly)Object.assign(intervals,{preparationLeadBefore3DRevisionMs:revision.at-request.at,assetReplyRelativeTo3DRevisionMs:reply.at-revision.at});
     const profile={scope:'one warm-export/cold-browser loading observation; no authority or production changes',expectAssetPreparation:expectAssetPreparation||fidelityOnly,bytesMeasurement:bytes?.measurement||'unmeasured',assetResourceId:assetId,bytes,clock:'main performance.now; worker resource timeOrigin converted onto main clock; wire decoded after firstFrame',limits:'vendor fetch is directly measured; responseEnd to init reply includes module evaluation, renderer setup and GPU initialization and does not isolate parse CPU time; preparation reply may follow 3D confirmation and no speed threshold is imposed',source:pcb,sourceRevision,milestones,intervals,observations,workerResources};
     fs.writeFileSync(join(output,'loading-profile.json'),JSON.stringify(profile,null,2)+'\n');
