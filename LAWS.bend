@@ -13291,3 +13291,15 @@ law checkpoint_anchor_ignores_activity:
 
 law checkpoint_empty_buffers_omitted:
   {LCP.Checkpoint.records([LV.Buf{"t", Nil{}, 0n, False{}, 1n}], M.State.empty()) == Nil{} : List<&2, J.Json>}
+
+law fm_restore_requests_root:
+  {U.Fm.need(True{}, "files", "t\n", "") == True{} : Bool}
+
+law fm_refresh_keeps_received_request:
+  {U.Fm.need(True{}, "files", "t\n", "t\n") == False{} : Bool}
+
+law fm_closed_never_requests:
+  for kind: String
+  for at: String
+  for asked: String
+  {U.Fm.need(False{}, kind, at, asked) == False{} : Bool}

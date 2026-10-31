@@ -13794,3 +13794,12 @@ def Laws.checkpoint_anchor_ignores_activity():
 
 def Laws.checkpoint_empty_buffers_omitted():
   {==}
+
+def Laws.fm_restore_requests_root():
+  {==}
+
+def Laws.fm_refresh_keeps_received_request():
+  {==}
+
+def Laws.fm_closed_never_requests(kind, at, asked):
+  {==}

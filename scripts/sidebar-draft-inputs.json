@@ -40,7 +40,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "37b52b2840073a6abb118fe3488309e9b45319219990668d265b38924c62beae",
+    "src/core/client.bend": "bdacffc193b19a38b353ffa19a27b1853e80f8f67be65479c0e16afff66d675f",
     "src/core/codec.bend": "7e53e017f449e3747df60d2779ab90fd6be43d0ddb3c0414ab9fa9e4cf4e8694",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -149,7 +149,7 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
     "src/mobile/screen.bend": "dd0557ce798339414311e3ab697ac76f0cfe771dd830d217f6c60c850b1a9558",
-    "src/server/thin-actor.bend": "01dc2ea629dad95be421e9f4f5cbb5e0952bb8d1361a95388edd0c7953261c06",
+    "src/server/thin-actor.bend": "56c8fdeddb03d94c221ae213d9469e72ba34489bce6d64514018e1a4aa220019",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "o2-12 names the supported send keys; no sidebar draft rendering change; 24 image checks pass"
+  "reviewNote": "Restore a Files pane by requesting its folder once; sidebar draft rendering is unchanged; rebased image checks pass"
 }

@@ -173,10 +173,11 @@ def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
     J.Json.obj(P.Session.strings(Map.to_list(&2, String, Actor.seeds(thread, Map.to_list(&2, String, P.Session.read.strings(J.Json.get_obj(session, "info"), Map.new(&2, String))), Map.new(&2, String)))))))
 
 # (Mech's last listing, "@mech.at", goes too: a thread on Mech opened
-# again lists its parts again, client.bend's Mpage.sync)
+# again lists its parts again, client.bend's Mpage.sync; Files does the
+# same for its folder, Fm.sync)
 def Actor.scope.keep(+key: String) -> Bool:
   Bool.not(Bool.or(Bool.or(String.starts_with(key, "@f."), String.starts_with(key, "@mr.")),
-    Nat.is_lt(U.Keys.pos(["@want.new", "@want.new.at", "@thread.want", "@bot.want", "@want.hub", "@want.gen", "@made.far", "@mech.at"], key), 8n)))
+    Nat.is_lt(U.Keys.pos(["@want.new", "@want.new.at", "@thread.want", "@bot.want", "@want.hub", "@want.gen", "@made.far", "@mech.at", "@fm.at"], key), 9n)))
 
 def Actor.scope.clear( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +dr: Map<&2, String>) -> Map<&2, String>:
   match xs:
@@ -565,10 +566,11 @@ def Actor.rpc(+command: J.Json) -> J.Json:
 # (git.diff too: an open Diff asks again as its thread's changes move on,
 # client.bend's Dv.sync, with no action of the page's; and mech.list:
 # Mech's parts, listed when Mech comes on screen, Mpage.sync, a thread on
-# it chosen again included, which on this page is no action)
+# it chosen again included, which on this page is no action; files.dir
+# reads a restored Files panel's folder the same way)
 def Actor.read_only(+command: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
-    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs"], J.Json.get_str(Actor.rpc(command), "m", "")), 8n))
+    Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir"], J.Json.get_str(Actor.rpc(command), "m", "")), 9n))
 
 # The viewer's watch (kicad.watch: which board, schematic or model this
 # socket is sent) when a reply moved the viewer: Mech opened before its
@@ -615,10 +617,10 @@ def Actor.accept( +a: Actor, +r: V.ActResult, +queue: Bool) -> Actor:
         List.append(&2, J.Json, reads, Bool.pick(List<&2, J.Json>, queue, Actor.reads(cs, Nil{}), Nil{})), dirty, memo}
 
 # (before each render: the mail pages' reads, an open Diff's, Dv.sync, and
-# Mech's parts when it comes on screen, Mpage.sync.m: once per thread and
+# Mech's parts and a restored Files folder, Mpage.sync.m and Fm.sync: once per thread and
 # view, so a render that changed nothing asks for nothing)
 def Actor.mail_ready( +a: Actor) -> Actor:
-  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Mpage.sync.m(U.Act{Actor.ui(a), Nil{}})))))), True{})
+  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Fm.sync(U.Mpage.sync.m(U.Act{Actor.ui(a), Nil{}}))))))), True{})
 
 def Actor.origin( +a: Actor, +origin: String) -> Actor:
   match a:

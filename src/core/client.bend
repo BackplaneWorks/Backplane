@@ -5462,8 +5462,11 @@ def Ui.view_put.at(u: Ui, +th: String, +kind: String, +path: String) -> Ui:
 def Fm.dir(+u: Ui) -> String:
   Ui.info(u, "fm.want:" ++ Ui.sel(u))
 
+def Fm.at(+u: Ui, dir: String) -> String:
+  Ui.sel(u) ++ "\n" ++ dir
+
 def Fm.ask(+u: Ui, +dir: String) -> Act:
-  Ui.on_thread.p(Ui.info_set(Ui.info_set(Ui.view_put(u, "files", ""), "fm.want:" ++ Ui.sel(u), dir), "fm.top:" ++ Ui.sel(u), ""), "files.dir", [J.KV{"path", J.Str{dir}}])
+  Ui.on_thread.p(Ui.info_set(Ui.info_set(Ui.scratch_set(Ui.view_put(u, "files", ""), "@fm.at", Fm.at(u, dir)), "fm.want:" ++ Ui.sel(u), dir), "fm.top:" ++ Ui.sel(u), ""), "files.dir", [J.KV{"path", J.Str{dir}}])
 
 # A reconnect's log drops the listings (they may be stale) but keeps each
 # thread's folder (fm.want:<t>), so every kept folder is listed again;
@@ -5505,6 +5508,21 @@ def Fm.again(log: Bool, a: Act) -> Act:
       Fm.again.go(Fm.again.keys(u), Act{u, cs})
     case False{} _:
       a
+
+# A restored Files panel has no listing in its fresh view actor. Ask once
+# for this thread and folder; ordinary refreshes do not repeat the read.
+def Fm.need(panel: Bool, +kind: String, +at: String, +asked: String) -> Bool:
+  Bool.and(panel, Bool.and(String.eq(kind, "files"), Bool.not(String.eq(at, asked))))
+
+def Fm.sync.k(needed: Bool, a: Act) -> Act:
+  match needed a:
+    case True{} Act{+u, cs}: Ui.also(Fm.ask(u, Fm.dir(u)), cs)
+    case False{} _: a
+
+def Fm.sync(a: Act) -> Act:
+  match a:
+    case Act{+u, cs}:
+      Fm.sync.k(Fm.need(Ui.panel(u), Ui.view_get(u, "view.kind"), Fm.at(u, Fm.dir(u)), Ui.scratch(u, "@fm.at")), Act{u, cs})
 
 def Pdf.ask(+u: Ui, +path: String, +page: String) -> Act:
   Ui.rpc(Ui.info_set(u, "pdf.page:" ++ Ui.sel(u), page), "pdf.page", [J.KV{"path", J.Str{path}}, J.KV{"page", J.Str{page}}])

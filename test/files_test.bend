@@ -61,6 +61,10 @@ def failed() -> U.Ui:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("restored Files asks for its root", sent(U.Fm.sync(U.Act{U.Ui.view_put(base(), "files", ""), Nil{}})), "{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}")
+    C.Check.str("a Files read is only requested once", sent(U.Fm.sync(U.Act{ui(U.Fm.sync(U.Act{U.Ui.view_put(base(), "files", ""), Nil{}})), Nil{}})), "")
+    C.Check.str("an ordinary Files click is not requested twice", sent(U.Fm.sync(U.Act{act(base(), "fm", ""), Nil{}})), "")
+    C.Check.str("a closed viewer does not request Files", sent(U.Fm.sync(U.Act{base(), Nil{}})), "")
     C.Check.str("text preview endpoint accepts notes", Bool.show(IM.Img.viewable("/r/notes.txt")), "True")
     C.Check.str("Markdown is served as literal text", IM.Img.ctype("/r/README.MD"), "text/plain; charset=utf-8")
     C.Check.str("HTML is not a file preview", Bool.show(IM.Img.viewable("/r/note.html")), "False")
