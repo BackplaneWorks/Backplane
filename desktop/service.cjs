@@ -122,6 +122,10 @@ async function launchPaths({ home, binary, web, env, platform = process.platform
   const posixHome = await convert(home), posixWeb = await convert(web);
   childEnv.BACKPLANE_HOME = posixHome;
   for (const key of ['BACKPLANE_AGENTS', 'BACKPLANE_LOCK_DIR']) if (childEnv[key]) childEnv[key] = await convert(childEnv[key]);
+  // Without HOME, Cygwin uses the portable runtime's /home/<user>, so the
+  // CLI probe's ~/.local/bin (where claude.exe installs) is never found.
+  const profileKey = Object.keys(env).find(k => k.toLowerCase() === 'userprofile');
+  if (!Object.keys(env).some(k => k.toLowerCase() === 'home') && profileKey && absolute(env[profileKey])) childEnv.HOME = await convert(env[profileKey]);
   return { home: posixHome, web: posixWeb, env: childEnv, cwd: runtimeBin };
 }
 class Service {

@@ -179,6 +179,15 @@ shutil.copyfile(os.environ['MOCK_SUMS' if args[-1].endswith('SHA256SUMS') else '
         self.assertEqual((self.parent / self.args[2] / 'bin/kicad-cli.exe').read_bytes(), b'MZfixture')
 
     @unittest.skipUnless(IS_CYGWIN, 'actual PowerShell ZIP extraction runs on Cygwin')
+    def test_windows_zip_closed_hub_path(self):
+        # The packaged hub's PATH: runtime, System32 and Windows, no PowerShell directory.
+        system = subprocess.run(['cygpath', '-S'], capture_output=True, text=True, check=True).stdout.strip()
+        windows = subprocess.run(['cygpath', '-W'], capture_output=True, text=True, check=True).stdout.strip()
+        self.env['PATH'] = os.pathsep.join([str(self.fake), '/usr/bin', system, windows])
+        self.fixture('windows-x86_64', 'zip'); self.run_install()
+        self.assertEqual((self.parent / self.args[2] / 'bin/kicad-cli.exe').read_bytes(), b'MZfixture')
+
+    @unittest.skipUnless(IS_CYGWIN, 'actual PowerShell ZIP extraction runs on Cygwin')
     def test_windows_zip_traversal_refused(self):
         self.fixture('windows-x86_64', 'zip', member='../outside')
         self.run_install(False)

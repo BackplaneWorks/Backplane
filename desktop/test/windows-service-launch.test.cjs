@@ -14,6 +14,15 @@ test('private DLL path excludes ambient PATH and absolute shipped cygpath maps o
  assert.equal(r.env.BACKPLANE_HOME,mapped(home));assert.equal(r.env.BACKPLANE_AGENTS,mapped(env.BACKPLANE_AGENTS));assert.equal(r.env.BACKPLANE_LOCK_DIR,mapped(env.BACKPLANE_LOCK_DIR));assert.equal(r.env.KEEP,'unchanged');assert.equal(r.env.LC_ALL,'C.UTF-8');assert.equal(JSON.stringify(env),before);
  assert.equal(calls.length,4);for(const c of calls){assert.equal(c.file,path.win32.join(bin,'cygpath.exe'));assert.deepEqual(c.args.slice(0,4),['-a','-u','--',c.args[3]]);assert.equal(c.options.shell,false);assert.equal(c.options.windowsHide,true);assert.equal(c.options.timeout,5000);assert.equal(c.options.encoding,'utf8');assert.equal(c.options.env.LC_ALL,'C.UTF-8');assert.equal(c.options.cwd,bin);assert(c.options.env.PATH.startsWith(bin+';'));}
 });
+test('HOME defaults to the mapped Windows profile, never replacing a set HOME',async()=>{
+ const profile='C:\\Users\\Person 日本';
+ const r=await launchPaths({binary,home,web,env:{SystemRoot:'C:\\Windows',USERPROFILE:profile},platform:'win32',files:privateFs(),run:mapper([])});
+ assert.equal(r.env.HOME,mapped(profile));
+ const set=await launchPaths({binary,home,web,env:{SystemRoot:'C:\\Windows',USERPROFILE:profile,Home:'D:\\Elsewhere'},platform:'win32',files:privateFs(),run:mapper([])});
+ assert.equal(set.env.Home,'D:\\Elsewhere');assert(!('HOME'in set.env));
+ const none=await launchPaths({binary,home,web,env:{SystemRoot:'C:\\Windows',USERPROFILE:'relative'},platform:'win32',files:privateFs(),run:mapper([])});
+ assert(!('HOME'in none.env));
+});
 test('Unix launch preserves exact native argv and environment without running helper',async()=>{
  const env={PATH:'/unchanged',BACKPLANE_HOME:'/tmp/home'};
  for(const platform of ['linux','darwin']){const r=await launchPaths({binary:'/opt/backplane',home:'/tmp/home',web:'/opt/web',env,platform,files:new Proxy({},{get(){throw Error('Unix must not touch runtime scaffold');}}),run:()=>{throw Error('must not run');}});assert.equal(r.env,env);assert.deepEqual(r,{home:'/tmp/home',web:'/opt/web',env});}
