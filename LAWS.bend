@@ -1,3 +1,5 @@
+import ./src/core/msgs.bend as MSG
+import ./src/core/plot-error.bend as PLOTERROR
 import ./src/web/workspace.bend as WSK
 import ./src/core/search-fold.bend as SFOLD
 import ./src/core/live-checkpoint.bend as LCP
@@ -13704,3 +13706,6 @@ law revert_unarmed_is_off:
 
 law mobile_text_is_filepage:
   {MV.View.filepage("text") == True{} : Bool}
+
+law plot_error_missing_keeps_filename:
+  {PLOTERROR.PlotError.text(I18.Ja{}, "@bp.file-missing:回路.kicad_pcb") == MSG.T.viewer.file.missing(I18.Ja{}, "回路.kicad_pcb") : String}

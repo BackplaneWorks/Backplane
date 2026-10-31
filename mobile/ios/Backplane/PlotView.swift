@@ -1296,15 +1296,15 @@ struct PlotScreen: View {
             } else if viewer.layers.isEmpty, m == nil {
                 loadingState.frame(maxHeight: .infinity)
             } else if viewer.layers.isEmpty, let why = m?.none, !why.isEmpty {
-                errorState(why).frame(maxHeight: .infinity)
+                errorState(plotError(why, lang)).frame(maxHeight: .infinity)
             } else if viewer.layers.isEmpty {
                 EmptyView()
             } else if f == nil {
                 loadingState.frame(maxHeight: .infinity)
             } else if let why = f?.none, !why.isEmpty {
-                errorState(why).frame(maxHeight: .infinity)
+                errorState(plotError(why, lang)).frame(maxHeight: .infinity)
             } else if viewer.open == "3d", let why = m?.none, !why.isEmpty {
-                errorState(why).frame(maxHeight: .infinity, alignment: .bottom)
+                errorState(plotError(why, lang)).frame(maxHeight: .infinity, alignment: .bottom)
             } else if needsMesh, m?.mesh == nil {
                 loadingState.frame(maxHeight: .infinity, alignment: .bottom)
             } else if viewer.open == "3d", viewer.parts ?? true, let note = viewer.note, !note.isEmpty {
@@ -1642,4 +1642,11 @@ extension Color {
     init(rgb: UInt32) {
         self.init(red: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255, blue: Double(rgb & 255) / 255)
     }
+}
+
+
+private func plotError(_ raw: String, _ lang: String) -> String {
+    if raw.hasPrefix("@bp.file-missing:") { return NativeMessages.viewer_file_missing(lang, String(raw.dropFirst(17))) }
+    if raw == "@bp.file-unread" { return NativeMessages.viewer_file_unread(lang) }
+    return raw
 }

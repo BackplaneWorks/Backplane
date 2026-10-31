@@ -1358,9 +1358,12 @@ def View.subthreads.if(show: Bool, id: String) -> List<&2, D.Node>:
 def View.subthreads(+lc: I.Loc, +st: M.State, +id: String) -> List<&2, D.Node>:
   View.subthreads.if(U.ThreadTree.can_route(st, id), id)
 
-def View.parent(+st: M.State, +thread: String, +p: String) -> List<&2, D.Node>:
+def View.parent.loc(+lc: I.Loc, +st: M.State, +thread: String, +p: String) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.is_empty(p), Nil{},
-    [D.El{"button", "", [D.At{"class", "parent"}, D.At{"data-value", p}, D.On{"click", "select"}], [D.Txt{U.Tasks.up.label(st, thread, p)}]}])
+    [D.El{"button", "", [D.At{"class", "parent"}, D.At{"data-value", p}, D.On{"click", "select"}], [D.Txt{U.Tasks.up.label.loc(lc, st, thread, p)}]}])
+
+def View.parent(st: M.State, thread: String, p: String) -> List<&2, D.Node>:
+  View.parent.loc(I.En{}, st, thread, p)
 
 # Asks: what the agent waits on the user for
 
@@ -3451,7 +3454,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         View.thread.subs.own(own, lc, st, nf, id, now),
         View.thread.todos.own(own, lc, nf, st, id, U.Todos.shown(st, id, View.running(turn))),
         [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
-          fab, View.parent(st, id, U.Tasks.up(st, id)),
+          fab, View.parent.loc(lc, st, id, U.Tasks.up(st, id)),
           [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
           View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),
           View.sending.loc(lc, pend), View.thread.live.loc(lc, st, nf, live, id), View.hold.pill(pill)])},

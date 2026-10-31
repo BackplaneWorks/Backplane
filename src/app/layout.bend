@@ -3105,7 +3105,7 @@ def Subs.height(+all: List<&2, SB.SubRow>, +rs: List<&2, SB.SubRow>, +open: Bool
   Bool.pick(U32, List.is_empty(&2, SB.SubRow, all), 0, (Subs.box.h(rs, open) + 12 : U32))
 
 def Lay.parent.k(+ty: Ty, +p: String, +st: M.State, +thread: String, +x0: U32, +y: U32) -> Out:
-  +label = U.Tasks.up.label(st, thread, p)
+  +label = U.Tasks.up.label.loc(Ty.loc(ty), st, thread, p)
   Out.when(Bool.not(String.is_empty(p)),
     Out{Ty.text(ty, 2n, label, D.Clip.all(), x0, y, 28, T.Th.accent()), [Lay.hit(x0, y, (Ty.width(ty, 2n, label) + 8 : U32), 28, "select", p)]})
 

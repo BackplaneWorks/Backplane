@@ -699,7 +699,7 @@ def Pv.child.solid(+bare: Bool, +full: Bool, +path: String, +note: String) -> IO
     Pv.solid.done(r, out, note, Pv.is_step(path), Bool.and(Bool.not(isglb), Bool.not(String.eq(v, "0"))), out ++ "." ++ v ++ ".plot")
 
 def Pv.unread() -> String:
-  "This version of the file cannot be read."
+  "@bp.file-unread"
 
 # a file in a commit that cannot be read never will be: say so (exit 3)
 # rather than wait as for a live file half written (exit 2)
@@ -726,7 +726,7 @@ def Pv.child.empty(r: Result<&1, &1, U32 & String, U32 & String>, +path: String)
     case Done{_}:
       IO.die(Unit, 2, "")
     case Fail{_}:
-      IO.die(Unit, 3, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 0n), "The file is no longer in the folder: " ++ MC.Mech.last(HS.Hist.family(path)), Pv.unread()))
+      IO.die(Unit, 3, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 0n), "@bp.file-missing:" ++ MC.Mech.last(HS.Hist.family(path)), Pv.unread()))
 
 # A missing live source must answer too, including on the first watch when
 # its failed stamp would otherwise look like an unread source.

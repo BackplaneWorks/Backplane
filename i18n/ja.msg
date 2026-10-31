@@ -1392,3 +1392,14 @@ settings.settle.idle.off = ターン終了後の短い非活動タイマーは�
 sidebar.search.empty = 一致するプロジェクトはありません。
 sidebar.search.clear = 検索をクリア
 native.file.text.error = {kind, select, size {テキストのプレビューは1 MBまでです。} other {このテキストファイルを読み込めませんでした。}}
+
+tasks.origin.forked = ← 分岐元: {title}
+tasks.origin.launch = ← 起動元: {title}
+tasks.origin.delegate = ← 委任元: {title}
+tasks.origin.parent = ← 親スレッド · {title}
+composer.offline = 送信されていません。再接続して送信してください。下書きは保存されています。
+composer.attachment.reload = この添付ファイルを再読み込み用に保存できませんでした。このページを離れる前に送信してください。
+composer.attachment.restoring = 添付ファイルを復元しています。送信や削除は完了までお待ちください。
+viewer.file.missing = ファイルがフォルダーにありません: {name}
+viewer.file.unread = このバージョンのファイルを読み込めません。
+composer.attachment.offline = 添付されていません。再接続してからファイルを選び直してください。

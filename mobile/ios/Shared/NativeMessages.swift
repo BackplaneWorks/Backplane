@@ -1629,6 +1629,16 @@ enum NativeMessages {
     tag == "ja" ? ("PRを作成") : ("Open PR")
   }
 
+  // viewer.file.missing
+  static func viewer_file_missing(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? ("ファイルがフォルダーにありません: " + arg0) : ("The file is no longer in the folder: " + arg0)
+  }
+
+  // viewer.file.unread
+  static func viewer_file_unread(_ tag: String) -> String {
+    tag == "ja" ? ("このバージョンのファイルを読み込めません。") : ("This version of the file cannot be read.")
+  }
+
   // viewer.files
   static func viewer_files(_ tag: String) -> String {
     tag == "ja" ? ("ファイル") : ("Files")

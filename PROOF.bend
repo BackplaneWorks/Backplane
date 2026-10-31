@@ -1,3 +1,4 @@
+import ./src/core/plot-error.bend as PLOTERROR
 import ./src/web/workspace.bend as WSK
 import ./src/core/search-fold.bend as SFOLD
 import ./src/core/live-checkpoint.bend as LCP
@@ -14058,4 +14059,7 @@ def Laws.revert_unarmed_is_off(u):
   {==}
 
 def Laws.mobile_text_is_filepage():
+  {==}
+
+def Laws.plot_error_missing_keeps_filename():
   {==}

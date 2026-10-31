@@ -361,3 +361,5 @@ image.show
 image.share
 
 native.file.text.error
+viewer.file.missing
+viewer.file.unread

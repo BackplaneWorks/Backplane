@@ -1246,12 +1246,12 @@ private fun PlotScreen(m: AppModel, v: Viewer) {
             v.open == "mech" && v.key.isEmpty() -> Text(v.mech?.say?.ifEmpty { null } ?: v.mech?.note ?: "", Modifier.align(Alignment.Center).padding(24.dp), color = Color.Gray)
             // a part alone (from the Mechanical page) has no board plot under it
             v.layers.isEmpty() && mesh == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-            v.layers.isEmpty() && mesh!!.none.isNotEmpty() -> Text(mesh.none, Modifier.align(Alignment.Center), color = Color.Gray)
+            v.layers.isEmpty() && mesh!!.none.isNotEmpty() -> Text(plotError(mesh.none, lang), Modifier.align(Alignment.Center), color = Color.Gray)
             v.layers.isEmpty() -> {}
             f == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-            f.none.isNotEmpty() -> Text(f.none, Modifier.align(Alignment.Center), color = Color.Gray)
+            f.none.isNotEmpty() -> Text(plotError(f.none, lang), Modifier.align(Alignment.Center), color = Color.Gray)
             v.open == "3d" && mesh != null && mesh.none.isNotEmpty() ->
-                Text(mesh.none, Modifier.align(Alignment.BottomCenter).padding(16.dp), color = Color.Gray,
+                Text(plotError(mesh.none, lang), Modifier.align(Alignment.BottomCenter).padding(16.dp), color = Color.Gray,
                     style = MaterialTheme.typography.labelMedium)
             v.open == "3d" && v.parts && v.note.isNotEmpty() ->
                 Text(v.note, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp), color = Color.Gray,
@@ -1602,4 +1602,11 @@ private fun ImageComposer(m: AppModel, modifier: Modifier = Modifier) {
             }
         },
     )
+}
+
+
+private fun plotError(raw: String, lang: String): String = when {
+    raw.startsWith("@bp.file-missing:") -> NativeMessages.viewer_file_missing(lang, raw.removePrefix("@bp.file-missing:"))
+    raw == "@bp.file-unread" -> NativeMessages.viewer_file_unread(lang)
+    else -> raw
 }

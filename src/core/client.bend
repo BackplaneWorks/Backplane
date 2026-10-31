@@ -1994,8 +1994,11 @@ def Tasks.up(+st: M.State, +thread: String) -> String:
   Bool.pick(String, String.is_empty(ST.Tree.parent(st, thread)), Bool.pick(String, String.is_empty(Tasks.parent(st, thread)), Bool.pick(String, String.is_empty(M.Launch.by(st, thread)), M.Fork.source(st, thread), M.Launch.by(st, thread)), Tasks.parent(st, thread)), ST.Tree.parent(st, thread))
 
 # the row's words
-def Tasks.up.label(+st: M.State, +thread: String, +p: String) -> String:
-  Bool.pick(String, String.is_empty(ST.Tree.parent(st, thread)), Bool.pick(String, String.is_empty(Tasks.parent(st, thread)), Bool.pick(String, String.is_empty(M.Launch.by(st, thread)), "← forked from " ++ Tasks.title(st, p), "← launched by " ++ Launched.name(st, p)), "← delegated by " ++ Tasks.title(st, p)), "← parent thread · " ++ Tasks.title(st, p))
+def Tasks.up.label.loc(+lc: I.Loc, +st: M.State, +thread: String, +p: String) -> String:
+  Bool.pick(String, String.is_empty(ST.Tree.parent(st, thread)), Bool.pick(String, String.is_empty(Tasks.parent(st, thread)), Bool.pick(String, String.is_empty(M.Launch.by(st, thread)), MSG.T.tasks.origin.forked(lc, Tasks.title(st, p)), MSG.T.tasks.origin.launch(lc, Launched.name(st, p))), MSG.T.tasks.origin.delegate(lc, Tasks.title(st, p))), MSG.T.tasks.origin.parent(lc, Tasks.title(st, p)))
+
+def Tasks.up.label(st: M.State, thread: String, p: String) -> String:
+  Tasks.up.label.loc(I.En{}, st, thread, p)
 
 # a launched thread's state as its launcher's list says it
 def Launched.word.k(t: M.TurnState, +pending: Nat) -> String:

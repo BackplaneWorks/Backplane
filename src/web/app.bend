@@ -1,5 +1,6 @@
 import Base
 import ../core/apikeys.bend as AK
+import ../core/plot-error.bend as PE
 import ../core/signal.bend as SGR
 import ../core/i18n.bend as I
 import ../core/msgs.bend as MSG
@@ -36,6 +37,16 @@ def reflow_plan(profile: String, alloy: String) -> String:
 
 def lang(u: U.Ui) -> String:
   U.Ui.scratch(u, "@lang.tag")
+
+def host_message(+u: U.Ui, kind: String) -> String:
+  match kind:
+    case "offline-send": MSG.T.composer.offline(U.Lang.loc(u))
+    case "offline-attachment": MSG.T.composer.attachment.offline(U.Lang.loc(u))
+    case "attachment-reload": MSG.T.composer.attachment.reload(U.Lang.loc(u))
+    case _: MSG.T.composer.attachment.restoring(U.Lang.loc(u))
+
+def plot_error(u: U.Ui, text: String) -> String:
+  PE.PlotError.text(U.Lang.loc(u), text)
 
 def lang_preview(u: U.Ui) -> U.Ui:
   U.Ui.scratch_set(u, "@lang.preview", "1")

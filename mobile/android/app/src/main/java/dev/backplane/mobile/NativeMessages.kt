@@ -1300,6 +1300,14 @@ object NativeMessages {
   fun viewer_diff_pr(tag: String): String =
     if (tag == "ja") ("PRを作成") else ("Open PR")
 
+  // viewer.file.missing
+  fun viewer_file_missing(tag: String, arg0: String): String =
+    if (tag == "ja") ("ファイルがフォルダーにありません: " + arg0) else ("The file is no longer in the folder: " + arg0)
+
+  // viewer.file.unread
+  fun viewer_file_unread(tag: String): String =
+    if (tag == "ja") ("このバージョンのファイルを読み込めません。") else ("This version of the file cannot be read.")
+
   // viewer.files
   fun viewer_files(tag: String): String =
     if (tag == "ja") ("ファイル") else ("Files")

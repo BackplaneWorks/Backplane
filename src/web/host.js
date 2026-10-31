@@ -1238,7 +1238,7 @@ function dispatch(action, value, timer) {
   if (action === "voice-unkey") for (const field of sealedFields("vkey")) field.value = "";
   if (["send", "send-alt", "detach"].includes(action) && viewMode !== "compatibility") {
     restoreDraftAttachments(currentSession());
-    if (socket?.readyState === 1 && (!thin?.ready || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) return true;
+    if (socket?.readyState === 1 && (!thin?.ready || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) { showViewStatus(App.host_message(ui, "attachment-restoring"), false);return true; }
   }
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
@@ -1260,7 +1260,7 @@ function dispatch(action, value, timer) {
   if (viewMode !== "compatibility") {
     if ((action === "send" || action === "send-alt") && (!socket || socket.readyState !== 1)) {
       offlineSend = true;
-      showViewStatus("Not sent. Reconnect to send; your draft is kept.");
+      showViewStatus(App.host_message(ui, "offline-send"));
       return true;
     }
     if (action === "select" || action === "draft") {
@@ -1443,7 +1443,7 @@ function uploadScope() {
 async function uploadFiles(action, files, scope = uploadScope()) {
   if (!remoteReady && viewMode !== "compatibility" || viewMode === "compatibility" && socket?.readyState !== 1) {
     offlineAttach = true;
-    showViewStatus("Not attached. Reconnect, then choose the file again.");
+    showViewStatus(App.host_message(ui, "offline-attachment"));
     return;
   }
   for (const file of files) await upload(action, file, scope);
@@ -1481,7 +1481,7 @@ async function upload(action, file, scope = uploadScope(), previous = "") {
       if (!attachmentIdentity || attachmentIdentity !== scope.identity) throw Error("Attachment identity unverified");
       await draftAttachments.remember(thread, result.attached, file, previous, scope.project);
     } catch {
-      showViewStatus("This attachment could not be kept for reload. Send it before leaving this page.");
+      showViewStatus(App.host_message(ui, "attachment-reload"));
     }
   }
   if (!current()) return;
@@ -2271,7 +2271,7 @@ function presentationCommand(command) {
 
 // Shared thin transport -> platform IO and the existing normal Bend renderer.
 // Neither this path nor its error/retry state touches canonical history.
-function showViewStatus(message) {
+function showViewStatus(message, retry = true) {
   clearTimeout(connectingTimer);connectingTimer = 0;
   let box = document.getElementById("view-connection");
   if (!box) {
@@ -2285,7 +2285,7 @@ function showViewStatus(message) {
   }
   box.hidden = !message;
   box.style.display = message ? "flex" : "none";
-  box.querySelector("button").hidden = message === viewNote;
+  box.querySelector("button").hidden = !retry || message === viewNote;
   document.getElementById("view-connection-text").textContent = message;
   // The page shrinks above the bar instead of sliding under it.
   document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
@@ -2350,7 +2350,7 @@ function downStatus(note) {
   if (!downSince) downSince = Date.now();
   clearTimeout(downTimer);
   const wait = Math.max(0, downSince + QUIET_MS - Date.now());
-  downTimer = setTimeout(() => { if (downSince) { showViewStatus(waiting(offlineSend ? "Not sent. Reconnect to send; your draft is kept." : offlineAttach ? "Not attached. Reconnect, then choose the file again." : downNote));connDot(true); } }, wait);
+  downTimer = setTimeout(() => { if (downSince) { showViewStatus(waiting(offlineSend ? App.host_message(ui, "offline-send") : offlineAttach ? App.host_message(ui, "offline-attachment") : downNote));connDot(true); } }, wait);
 }
 function upStatus() {
   downSince = 0;clearTimeout(downTimer);downTimer = 0;offlineSend = false;offlineAttach = false;
@@ -2795,6 +2795,7 @@ async function startThin(again = false, reason = "initial") {
     diagnostic.frame(bytes.byteLength);
     if (Solid.isPlot(bytes)) {
       const o = Solid.cbor(bytes), at = { bytes: bytes.length, t: performance.now() };
+      if (o && typeof o.none === "string") o.none = App.plot_error(ui, o.none);
       const key = typeof o?.key === "string" ? o.key : "";
       if (["2|", "3|", "4|"].some(prefix => key.startsWith(prefix))) Solid.got(o, at);
       else if (o) Plot2d.got(o, at);

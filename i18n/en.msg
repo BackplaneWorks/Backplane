@@ -1369,3 +1369,14 @@ settings.settle.idle.off = The shorter idle timer is off. Inactive threads settl
 sidebar.search.empty = No projects match.
 sidebar.search.clear = Clear search
 native.file.text.error = {kind, select, size {Text preview is limited to 1 MB.} other {This text file could not be read.}}
+
+tasks.origin.forked = ← forked from {title}
+tasks.origin.launch = ← launched by {title}
+tasks.origin.delegate = ← delegated by {title}
+tasks.origin.parent = ← parent thread · {title}
+composer.offline = Not sent. Reconnect to send; your draft is kept.
+composer.attachment.reload = This attachment could not be kept for reload. Send it before leaving this page.
+composer.attachment.restoring = Restoring attachments. Wait before sending or removing files.
+viewer.file.missing = The file is no longer in the folder: {name}
+viewer.file.unread = This version of the file cannot be read.
+composer.attachment.offline = Not attached. Reconnect, then choose the file again.

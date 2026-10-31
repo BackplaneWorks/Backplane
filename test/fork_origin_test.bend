@@ -1,4 +1,6 @@
 import Base
+import ../src/core/i18n.bend as I
+import ../src/core/msgs.bend as MSG
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/client.bend as U
@@ -9,5 +11,6 @@ def state() -> M.State:
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("fork links to source", U.Tasks.up(state(), "b"), "a")
+    C.Check.str("fork origin in Japanese", U.Tasks.up.label.loc(I.Ja{}, state(), "b", "a"), MSG.T.tasks.origin.forked(I.Ja{}, "Source conversation"))
     C.Check.str("fork names source", U.Tasks.up.label(state(), "b", "a"), "← forked from Source conversation")
     C.Check.str("ordinary thread has no origin", U.Tasks.up(state(), "a"), "")
