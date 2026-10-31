@@ -438,6 +438,7 @@ function keeperHarness(installComposerFocus, { phone = false, deferTimers = fals
     addEventListener: (type, handler) => { if (!listeners.has(type)) listeners.set(type, []);listeners.get(type).push(handler); },
     getElementById: id => id === 'composer' ? composer : null,
     querySelector: sel => sel.startsWith('main.thread-view') ? (page.thread ? { getAttribute: () => page.thread } : null)
+      : sel === '.workspace-palette' ? page.palette || null
       : sel.includes('[data-on-click="panel"]') ? (page.viewer ? {} : null) : null,
     querySelectorAll: sel => page.cover ? [page.cover] : sel.includes('.workspace-palette') && page.over ? [{ getClientRects: () => [{}] }] : [] };
   const inputs = [];
@@ -732,4 +733,31 @@ test('Ctrl+period stops from the composer, leaving IME and the PTY alone', async
   assert.deepEqual(key(event('.', { ctrlKey: true, target: composer }), 'MacIntel'), ['ws-stop', '']);
   for (const extra of [{ isComposing: true }, { shiftKey: true }, { altKey: true }, { metaKey: true },
     { target: element('textarea', 'term', ['data-keys']) }]) assert.equal(key(event('.', { ctrlKey: true, ...extra }), 'Linux'), null);
+});
+
+test('typing after a Commands backdrop click stays in its query and away from the rail', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  const query = { focus() { h.doc.activeElement = query; } };
+  h.page.palette = { querySelector: () => query };h.page.over = true;
+  h.fire('pointerdown', h.body);h.fire('pointerup', h.body);
+  const key = h.key('f', h.body);
+  assert.equal(h.doc.activeElement, query);
+  assert.equal(key.rail, false);
+  assert.equal(key.defaultPrevented, false);
+  assert.equal(h.composer.value, 'a draft');
+  h.doc.activeElement = h.body;
+  assert.equal(h.key('Backspace').rail, false);
+  assert.equal(h.doc.activeElement, query);
+});
+
+
+test('the palette keeper leaves Space on its own controls for native activation', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  const control = { tagName: 'SUMMARY', closest: selector => selector.split(',').includes('summary') ? control : null };
+  h.page.palette = { contains: target => target === control, querySelector: () => { assert.fail('Space stays on the control'); } };h.page.over = true;
+  h.fire('pointerdown', control);h.fire('pointerup', control);h.doc.activeElement = control;
+  assert.equal(h.key(' ', control).defaultPrevented, false);
+  assert.equal(h.doc.activeElement, control);
 });

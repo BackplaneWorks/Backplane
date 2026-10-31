@@ -266,6 +266,18 @@ export function installComposerFocus({ document: doc = document, window: win = w
     if (event.isComposing || event.keyCode === 229) return;
     const target = event.target, key = typeof event.key === 'string' ? event.key : '';
     const chord = event.ctrlKey || event.metaKey || event.altKey, moving = key === 'Escape' || key === 'Tab';
+    // A backdrop click may leave the palette's query without focus. It
+    // still owns typing until dismissed, just as the draft keeps its keys
+    // while its own field is on its way.
+    const palette = !restore && doc.querySelector?.('.workspace-palette');
+    // Space on a palette control still presses that control.
+    if (palette && key === ' ' && target?.closest?.('button,summary') && palette.contains?.(target)) return;
+    if (palette && !busy(target) && !chord && (key.length === 1 || key === 'Backspace')) {
+      const query = palette.querySelector?.('#workspace-query');
+      if (query) { query.focus({ preventScroll: true });event.stopImmediatePropagation(); }
+      return;
+    }
+    if (palette && !busy(target)) return;
     if (busy(target)) {
       if (moving || target.closest?.(PTY)) { typed = 0;coming = 0;loading = false; } else if (!chord) typed = Date.now();
       return;
