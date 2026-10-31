@@ -2,6 +2,7 @@ const electron = require('electron');
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = electron;
 const { installShortcuts, applicationMenu } = require('./window.cjs');
 const { restoreWindowBounds, rememberWindowBounds } = require('./window-state.cjs');
+const { installLoadRecovery } = require('./load-recovery.cjs');
 const { iconPath } = require('./branding.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -213,6 +214,7 @@ function createWindow(ses) {
   });
   window.setMenuBarVisibility(false);
   rememberWindowBounds(window, boundsFile);
+  installLoadRecovery(window, {startupPath, startupURL, origin:() => origin, session:ses, status, reconnect:() => connect(ses), quitting:() => quitting});
   installImageMenu(window, { electron, actions: imageActions, trusted: params => {
     try { return params.frame === window.webContents.mainFrame && new URL(params.pageURL).origin === origin && new URL(params.frameURL).origin === origin; } catch { return false; }
   } });
