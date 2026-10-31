@@ -76,8 +76,8 @@ finishes makes it "1 new ↓".
 **S09 Thread lifecycle** (W D A)
 On a thread: Rename (title updates everywhere), Pin (moves to the top), Settle
 (moves under "Settled N"), Unsettle, Settle again and send a message in it
-(it comes back to the live list), Snooze 1 h, Fork (a new thread with the
-history), Archive, Delete (asks first; the thread goes). Right-click (A: long
+(it comes back to the live list), Snooze 1 h, Fork (a new thread with its inherited
+context and a visible link to the source conversation), Archive, Delete (asks first; the thread goes). Right-click (A: long
 press) opens the same menu on a sidebar row, Fork included; Esc closes it.
 A pinned row shows a small pin. Snooze, then Archive: it wakes (▾ lights only
 Archived, no countdown).

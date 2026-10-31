@@ -1941,11 +1941,11 @@ def Launched.name(+st: M.State, +by: String) -> String:
 # where a thread's link row goes: the parent that delegated it, else who
 # launched it ("" for neither)
 def Tasks.up(+st: M.State, +thread: String) -> String:
-  Bool.pick(String, String.is_empty(ST.Tree.parent(st, thread)), Bool.pick(String, String.is_empty(Tasks.parent(st, thread)), M.Launch.by(st, thread), Tasks.parent(st, thread)), ST.Tree.parent(st, thread))
+  Bool.pick(String, String.is_empty(ST.Tree.parent(st, thread)), Bool.pick(String, String.is_empty(Tasks.parent(st, thread)), Bool.pick(String, String.is_empty(M.Launch.by(st, thread)), M.Fork.source(st, thread), M.Launch.by(st, thread)), Tasks.parent(st, thread)), ST.Tree.parent(st, thread))
 
 # the row's words
 def Tasks.up.label(+st: M.State, +thread: String, +p: String) -> String:
-  Bool.pick(String, String.is_empty(ST.Tree.parent(st, thread)), Bool.pick(String, String.is_empty(Tasks.parent(st, thread)), "← launched by " ++ Launched.name(st, p), "← delegated by " ++ Tasks.title(st, p)), "← parent thread · " ++ Tasks.title(st, p))
+  Bool.pick(String, String.is_empty(ST.Tree.parent(st, thread)), Bool.pick(String, String.is_empty(Tasks.parent(st, thread)), Bool.pick(String, String.is_empty(M.Launch.by(st, thread)), "← forked from " ++ Tasks.title(st, p), "← launched by " ++ Launched.name(st, p)), "← delegated by " ++ Tasks.title(st, p)), "← parent thread · " ++ Tasks.title(st, p))
 
 # a launched thread's state as its launcher's list says it
 def Launched.word.k(t: M.TurnState, +pending: Nat) -> String:
