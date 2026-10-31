@@ -7812,6 +7812,12 @@ def Intent.kept(+u: Ui, +th: String) -> List<&2, Cmd>:
 def Intent.borrowed(+b: Ui, +text: String, +th: String) -> Act:
   Ui.also(Ui.draft(Ui.scratch_set(b, "@intent", ""), text), Intent.kept(b, th))
 
+def Fab.buy.start(waiting: Bool, +u: Ui, +th: String) -> Act:
+  match waiting:
+    case True{}: Act{u, Nil{}}
+    case False{}:
+      Ui.rpc(Made.want(u), "order.buy", [J.KV{"thread", J.Str{th}}])
+
 def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
   match i:
     # the card opened or shut
@@ -7823,7 +7829,7 @@ def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
       Intent.borrowed(Intent.borrow(u, th), OR.Intent.edit(Fab.intent(u, th)), th)
     # Buy it: the hub makes the buy thread and this client goes to it
     case 2n:
-      Ui.rpc(Made.want(u), "order.buy", [J.KV{"thread", J.Str{th}}])
+      Fab.buy.start(Bool.or(Bool.not(String.is_empty(Ui.scratch(u, "@want.new"))), Fab.buying(Ui.state.of(u), th)), u, th)
     # the bar's ×: put away for the project; the header's Buy it: back
     case 4n:
       Fab.min.set(u, th, "1")

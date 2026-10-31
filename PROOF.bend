@@ -13910,3 +13910,12 @@ def Laws.estimate_empty_fab_names_file():
 
 def Laws.estimate_unreadable_fab_names_file():
   {==}
+
+def Laws.buy_thread_never_nests(s, now, client, id, src):
+  {==}
+
+def Laws.buy_rapid_repeat_same_intent():
+  {==}
+
+def Laws.buy_later_intent_is_new():
+  {==}

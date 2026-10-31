@@ -13531,3 +13531,17 @@ law estimate_empty_fab_names_file:
 
 law estimate_unreadable_fab_names_file:
   {ORD.Estimate.validation([ORD.Order.part.bad("main.fab.json", "could not read fab JSON")]) == "main.fab.json: could not read fab JSON" : String}
+
+law buy_thread_never_nests:
+  for s: M.State
+  for now: Nat
+  for client: U32
+  for id: String
+  for src: String
+  {H.Queue.changes(H.Buy.source(True{}, s, now, client, id, src)) == [] : List<&2, M.Change>}
+
+law buy_rapid_repeat_same_intent:
+  {H.Buy.recent(100n, 101n) == True{} : Bool}
+
+law buy_later_intent_is_new:
+  {H.Buy.recent(100n, 103n) == False{} : Bool}

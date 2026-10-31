@@ -406,7 +406,7 @@ The test hub starts with Ordering off (hub.sh sets it, though a person's
 default is on) and the order server a dead local address. Point
 order.server at a local stand-in (never the real one), then Settings →
 Ordering on, in a project with fab files: the rail's foot shows "Buy it" with
-its price under a divider. Press it: a "Buy: <project>" thread opens, with
+its price under a divider. Double-click it: one "Buy: <project>" thread opens, with
 no Buy of its own. The folded rail shows only the cart. Return 503 from the
 local estimate service: the part list and unpriced Buy stay, with an explanation
 and Retry; restore the service and Retry to recover the price. An empty fab

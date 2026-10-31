@@ -6417,14 +6417,43 @@ def Buy.go(t: M.Thread, +s: M.State, +now: Nat, +client: U32, +id: String, +src:
     case M.Thread{_, +project, _, _, _, _, _, _, _, _, _, _, +env, +branch, +wt, +provider, +model, rm, im, _, _}:
       +th = Hub.id("t", now, Hub.seq(s))
       +cs = {[M.ThreadCreated{th, project, Buy.title.of(s, project), env, branch, wt, provider, model, now}, M.ModesSet{th, rm, im, model, now},
-        M.SettingSet{OR.Order.buy.key(th), src, now}] : List<&2, M.Change>}
+        M.SettingSet{OR.Order.buy.key(th), src, now}, M.SettingSet{"buy.last." ++ src, th, now}] : List<&2, M.Change>}
       +s1 = {M.State.replay(cs, s) : M.State}
       Step.before(cs, [Reply.made(client, id, th)], Hub.post(s1, now, th, Hub.id("m", now, Hub.seq(s1)), M.User{}, OR.Order.buy.text()))
+
+# A rapid repeat of the same purchase intent opens the thread just made,
+# including when two clients send before either receives its reply.
+def Buy.recent(+created: Nat, +now: Nat) -> Bool:
+  Bool.and(Nat.is_ge(now, created), Nat.is_le(Nat.sub(now, created), 2n))
+
+def Buy.last.k(t: M.Thread, +now: Nat) -> String:
+  match t:
+    case M.Thread{+id, _, _, +created, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, +deleted}:
+      Bool.pick(String, Bool.and(Bool.not(deleted), Buy.recent(created, now)), id, "")
+
+def Buy.last(+s: M.State, +src: String, +now: Nat) -> String:
+  Buy.last.k(Hub.thread(s, M.Setting.get(s, "buy.last." ++ src, "")), now)
+
+def Buy.once(+last: String, +s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:
+  match last:
+    case SNil{}:
+      Buy.go(Hub.thread(s, src), s, now, client, id, src)
+    case SCon{h, t}:
+      Step.outs([Reply.made(client, id, SCon{h, t})])
+
+# A queued click may arrive after the client has selected its new buy
+# thread. That thread has no Buy of its own, even through a stale action.
+def Buy.source(buying: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:
+  match buying:
+    case True{}:
+      Step.outs([Reply.made(client, id, src)])
+    case False{}:
+      Buy.once(Buy.last(s, src, now), s, now, client, id, src)
 
 def Buy.start.k(on: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:
   match on:
     case True{}:
-      Buy.go(Hub.thread(s, src), s, now, client, id, src)
+      Buy.source(Bool.not(String.is_empty(M.Setting.get(s, OR.Order.buy.key(src), ""))), s, now, client, id, src)
     case False{}:
       Step.outs([Reply.err(client, id, "Ordering is off: turn it on in Settings to buy")])
 
