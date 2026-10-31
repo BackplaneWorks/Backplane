@@ -2002,7 +2002,7 @@ function foldToggle(which) {
   // the sidebar folded by itself beside the viewer (panes below): the
   // button brings it back, and folds it again, for as long as the viewer
   // stays open; the person's own choice is left as it was
-  if (which === "side" && (document.documentElement.dataset.fold || sideKept)) {
+  if (which === "side" && document.documentElement.dataset.fold) {
     sideKept = !sideKept;
     panes();
     return true;
@@ -2011,7 +2011,7 @@ function foldToggle(which) {
   foldSet(which, on);
   try { localStorage.setItem(FOLDS[which][0], on ? "1" : "0"); } catch {}
   // a sidebar opened by hand while the viewer is open stays open
-  if (which === "side" && !on) sideKept = true;
+  if (which === "side") sideKept = !on;
   panes();
   return true;
 }
