@@ -228,15 +228,16 @@ export function installComposerFocus({ document: doc = document, window: win = w
   // (the page's first view keeps its draft hidden until the workspace is whole)
   const visible = el => shown(el) && el.checkVisibility?.({ visibilityProperty: true }) !== false;
   // the row pressed opens its thread: until it shows, the composer on show is another's
-  const picking = () => !!picked && Date.now() < coming;
+  const picking = () => !!picked;
   const check = () => {
     const el = field(), now = here();
+    if (picked && now === picked && el && visible(el)) picked = '';
     const covers = [...(doc.querySelectorAll?.(COVERS) || [])].filter(shown), over = covers.length > 0;
     const open = !!doc.querySelector?.(VIEWER_CLOSE);
     if (now && now !== thread) {
       want = true;
       // the composer kept the keyboard while its draft changed thread
-      if (el && doc.activeElement === el && carets.has(now)) put(el, carets.get(now));
+      if (el && doc.activeElement === el) put(el, carets.get(now));
     }
     if (covered && !over || viewer && !open) want = true;
     thread = now || thread;covered = over;viewer = open;
@@ -253,7 +254,8 @@ export function installComposerFocus({ document: doc = document, window: win = w
     restore = false;picked = '';done();
   };
   doc.addEventListener('pointerdown', event => {
-    pressed = true;restore = false;loading = false;coming = 0;picked = '';typed = 0;held = '';
+    pressed = true;restore = false;loading = false;coming = 0;typed = 0;
+    if (!picked) held = '';
     const target = event.target, row = target?.closest?.('[data-on-click="select"]'), id = row?.getAttribute?.('data-value');
     if (target?.closest?.(TURN_BUTTONS)) { want = true;coming = Date.now() + COMING; }
     if (id) { picked = id;coming = Date.now() + COMING; }
@@ -278,11 +280,11 @@ export function installComposerFocus({ document: doc = document, window: win = w
       return;
     }
     if (palette && !busy(target)) return;
-    if (busy(target)) {
+    if (busy(target) && !(target === field() && picking() && here() !== picked)) {
       if (moving || target.closest?.(PTY)) { typed = 0;coming = 0;loading = false; } else if (!chord) typed = Date.now();
       return;
     }
-    const t = Date.now(), on = t < coming, fell = t - typed < TYPED && (!target || target === doc.body);
+    const t = Date.now(), on = picking() || t < coming, fell = t - typed < TYPED && (!target || target === doc.body);
     if (event.defaultPrevented || !on && !fell) return;
     if (chord || moving) { typed = 0;coming = 0;loading = false;held = '';return; }
     const letter = key.length === 1;
@@ -327,6 +329,8 @@ export function installComposerFocus({ document: doc = document, window: win = w
   if (win.MutationObserver && doc.body) new win.MutationObserver(check).observe(doc.body, { childList: true });
   return {
     check,
+    selecting(id) { if (id && id !== picked) { held = '';heldFor = id; } picked = id;want = true; },
+    navigationFailed() { picked = '';held = '';heldFor = '';coming = 0;want = false; },
     // Esc, a reconnect: the keyboard goes there now if it can
     // An explicit keyboard dismissal may restore the caret at narrow widths
     // too, and does not wait for what it put away to leave the page;

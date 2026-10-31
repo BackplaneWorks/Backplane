@@ -761,3 +761,21 @@ test('the palette keeper leaves Space on its own controls for native activation'
   assert.equal(h.key(' ', control).defaultPrevented, false);
   assert.equal(h.doc.activeElement, control);
 });
+
+test('a slow destination keeps its typing fence beyond three seconds', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();h.keeper.leave();
+  const row = { closest: s => s === '[data-on-click="select"]' ? row : null, getAttribute: () => 't2' };
+  const now = Date.now;
+  let clock = now();Date.now = () => clock;
+  try {
+    h.fire('pointerdown', row);h.doc.activeElement = h.body;h.fire('pointerup', row);
+    h.key('a', h.body);clock += 3001;h.keeper.check();
+    assert.equal(h.doc.activeElement, h.body);
+    const e = h.key('b', h.body);
+    assert.equal(e.defaultPrevented, true);
+    h.page.thread = 't2';h.composer.value = '';h.keeper.check();
+    assert.equal(h.composer.value, 'ab');
+  } finally { Date.now = now; }
+});

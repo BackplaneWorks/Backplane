@@ -1214,7 +1214,7 @@ function dispatch(action, value, timer) {
   }
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
-  if (action === "select") drawerShut();
+  if (action === "select") { composerKeeper.selecting(value);drawerShut(); }
   if (["term-toggle", "ws-term-hide", "ws-term-here"].includes(action) || action === "ws-go" && value === "term") terminalOutput.retire();
   else if (["select", "bot", "bot-tab", "uber", "uber-bot", "remote"].includes(action)) terminalOutput.clear();
   if (["select", "ref-go", "ref-back", "ref-fwd", "bot", "bot-tab", "uber", "uber-bot", "remote"].includes(action)) {
@@ -2256,6 +2256,7 @@ function showViewStatus(message) {
 // so for a while, and keeps nothing of the refused one: the selection
 // saved for a reload is the one gone back to.
 function refusedView(target, reason) {
+  composerKeeper.navigationFailed();
   refusedViews.add(targetKey(target));
   trace("thin-refused", { reason });
   const back = refusedFallback(target, shownTarget, refusedViews);
@@ -2632,6 +2633,7 @@ async function startThin(again = false, reason = "initial") {
         action === "send" || action === "send-alt" ? input : session,
         Wire.plain(App.presentation_prepare(presentationJson(session), presentationJson(input), action))),
       selection: (target, session) => {
+        composerKeeper.selecting(target.kind === "thread" ? target.id : "");
         historyClear();
         modelFeedback.clear();
         thinMailDraft.clear();thinContinuations.clear();bodyWindows.disconnect();
@@ -2722,6 +2724,7 @@ async function startThin(again = false, reason = "initial") {
           holdPicture();desktopBrowser.hide();
         }
         if (state.phase === "error") {
+          composerKeeper.navigationFailed();
           diagnostic.note("view-error", { cause: state.reason === "LIMIT" ? "view-limit" : "view-refused" });
           trace("thin-error", { reason: state.reason });
           fail(state.reason === "LIMIT" ? "This view exceeds the hub's size limit. Your draft is kept; retry explicitly."
