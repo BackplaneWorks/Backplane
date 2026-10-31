@@ -585,7 +585,7 @@ def WB.routine.btns.loc(+lc: I.Loc, own: Bool, +id: String, +on: Bool) -> List<&
       [D.Dom.button(Bool.pick(String, on, "on", ""), "routine-toggle", id, Bool.pick(String, on, MSG.T.hooks.off(lc), MSG.T.routine.on.tip(lc)), Bool.pick(String, on, MSG.T.settings.lang.on(lc), MSG.T.settings.lang.off(lc))),
        D.Dom.button("", "routine-run", id, MSG.T.tasks.run.tip(lc), MSG.T.routine.run(lc)),
        D.Dom.button("", "routine-edit", id, MSG.T.queue.edit(lc), MSG.T.queue.edit(lc)),
-       D.Dom.button("", "routine-delete", id, MSG.T.common.delete(lc), MSG.T.common.delete(lc))]
+       D.Dom.button("", "bfield", WB.bf("delroutine", id), MSG.T.common.delete(lc), MSG.T.common.delete(lc))]
     case False{}:
       [D.Dom.button("", "routine-run", id, MSG.T.tasks.run.tip(lc), MSG.T.routine.run(lc))]
 
@@ -610,27 +610,34 @@ def WB.next.text(+next: String, +rel: String, +zone: String, +done: Bool, +dtext
 def WB.routine.btns.d.loc(+lc: I.Loc, done: Bool, own: Bool, +id: String, +on: Bool) -> List<&2, D.Node>:
   match done:
     case True{}:
-      [D.Dom.button("", "routine-delete", id, MSG.T.common.delete(lc), MSG.T.common.delete(lc))]
+      [D.Dom.button("", "bfield", WB.bf("delroutine", id), MSG.T.common.delete(lc), MSG.T.common.delete(lc))]
     case False{}:
       WB.routine.btns.loc(lc, own, id, on)
 
 def WB.routine.btns.d(done: Bool, own: Bool, +id: String, +on: Bool) -> List<&2, D.Node>:
   WB.routine.btns.d.loc(I.En{}, done, own, id, on)
 
-def WB.routine.row.loc(+lc: I.Loc, w: SC.SRow, +id: String, name: String, prompt: String, +on: Bool, +own: Bool) -> D.Node:
+def WB.routine.controls(armed: Bool, +lc: I.Loc, +done: Bool, +own: Bool, +id: String, +on: Bool) -> List<&2, D.Node>:
+  match armed:
+    case True{}:
+      [D.Dom.button("danger", "routine-delete", id, MSG.T.menu.delete.confirm(lc), MSG.T.menu.delete.confirm(lc)),
+       D.Dom.button("", "bfield", WB.bf("delroutine", ""), MSG.T.bots.keep(lc), MSG.T.common.cancel(lc))]
+    case False{}: WB.routine.btns.d.loc(lc, done, own, id, on)
+
+def WB.routine.row.loc(+lc: I.Loc, w: SC.SRow, +id: String, name: String, prompt: String, +on: Bool, +own: Bool, +armed: Bool) -> D.Node:
   match w:
     case SC.SRow{+kind, +label, +when, +next, +rel, +zone, +done, +dtext}:
       D.El{"div", "ro:" ++ id, [D.At{"class", "item" ++ Bool.pick(String, done, " done", Bool.pick(String, on, "", " off"))}], [
         WB.div("item-main", [D.Dom.span("item-key", name),
           WB.div("item-kind", [WB.kind.chip(kind, label), D.Dom.span("item-when", when)]),
           D.Dom.span("item-next", WB.next.text.loc(lc, next, rel, zone, done, dtext, on)), D.Dom.span("item-text", prompt)]),
-        WB.div("item-btns", WB.routine.btns.d.loc(lc, done, own, id, on))]}
+        WB.div("item-btns", WB.routine.controls(armed, lc, done, own, id, on))]}
 
 def WB.routine.row(w: SC.SRow, +id: String, name: String, prompt: String, +on: Bool, +own: Bool) -> D.Node:
-  WB.routine.row.loc(I.En{}, w, id, name, prompt, on, own)
+  WB.routine.row.loc(I.En{}, w, id, name, prompt, on, own, False{})
 
 def WB.routine(+lc: I.Loc, +u: U.Ui, +r: BT.Routine, +own: Bool, +now: Nat) -> D.Node:
-  WB.routine.row.loc(lc, SC.Sched.row(lc, U.Ui.state(u), r, now, 0n, True{}), BT.Routine.id(r), BT.Routine.name(r), BT.Routine.prompt(r), BT.Routine.on(r), own)
+  WB.routine.row.loc(lc, SC.Sched.row(lc, U.Ui.state(u), r, now, 0n, True{}), BT.Routine.id(r), BT.Routine.name(r), BT.Routine.prompt(r), BT.Routine.on(r), own, U.Bots.routine.armed(u, BT.Routine.id(r)))
 
 def WB.routines.go(+lc: I.Loc, rs: List<&2, BT.Routine>, +u: U.Ui, +own: Bool, +now: Nat) -> List<&2, D.Node>:
   match rs:

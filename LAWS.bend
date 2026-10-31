@@ -13459,3 +13459,7 @@ law key_normalization_refused:
 # Regression for c13-7.
 law recurring_invalid_interval_help:
   {SCH.Sched.hint.k(I18.En{}, False{}, "every 0m", TZ.Tz.utc0(), 0n) == "Use a positive interval: every 15m or every 2h." : String}
+
+# Regression for c13-8.
+law routine_delete_first_press_preserves:
+  {U.Bots.routine.armed(U.Bots.bfield(U.Ui.init(0n), "delroutine\u{1f}routine"), "routine") == True{} : Bool}

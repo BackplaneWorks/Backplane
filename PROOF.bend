@@ -13859,3 +13859,6 @@ def Laws.key_normalization_refused():
 
 def Laws.recurring_invalid_interval_help():
   {==}
+
+def Laws.routine_delete_first_press_preserves():
+  {==}

@@ -103,6 +103,9 @@ export function overlayEscape(doc) {
   const room = [...(doc.querySelectorAll?.('.room-view [data-on-click="bfield"]') || [])]
     .find(button => button.getAttribute('data-value') === 'delroom\u001f' && shown(button));
   if (room) return () => room.click();
+  const routine = [...(doc.querySelectorAll?.('.item-btns [data-on-click="bfield"]') || [])]
+    .find(button => button.getAttribute('data-value') === 'delroutine\u001f' && shown(button));
+  if (routine) return () => routine.click();
   return null;
 }
 

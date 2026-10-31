@@ -14780,12 +14780,16 @@ def Voice.act(i: Nat, +u: Ui, +value: String) -> Act:
     case _:
       Voice.act.tail(i, u, value)
 
+# The web's inline routine confirmation, as for a room's Delete.
+def Bots.routine.armed(+u: Ui, +id: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(id)), String.eq(Bots.field(u, "delroutine"), id))
+
 def Bots.act(i: Nat, +u: Ui, +value: String) -> Act:
   match i:
     case 0n:
       Bots.select(u, value)
     case 1n:
-      Bots.tab.k(String.eq(value, "settings"), Ui.scratch_set(u, "@btab", value))
+      Bots.tab.k(String.eq(value, "settings"), Ui.scratch_set(Ui.scratch_set(u, "@f.delroutine", ""), "@btab", value))
     case 2n:
       Act{Bots.flag(Ui.scratch_set(u, "@uber.new", ""), "@bnew"), [Focus{"bot-name"}]}
     case 3n:
@@ -14817,7 +14821,7 @@ def Bots.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 16n:
       Bots.routine.toggle(u, Bots.routine.of(u, value))
     case 17n:
-      Ui.rpc(u, "bots.routine_delete", [J.KV{"routine", J.Str{value}}])
+      Ui.rpc(Ui.scratch_set(u, "@f.delroutine", ""), "bots.routine_delete", [J.KV{"routine", J.Str{value}}])
     case 18n:
       Ui.rpc(u, "bots.routine_run", [J.KV{"routine", J.Str{value}}])
     case 19n:
