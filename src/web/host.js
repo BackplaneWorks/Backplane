@@ -405,6 +405,25 @@ try {
     if (k?.startsWith(VIEWER)) ui = App.viewer_restore(ui, k.slice(VIEWER.length), localStorage.getItem(k) ?? "");
   }
 } catch {}
+// Reserve the footer's measured room in the reload shell. Its account
+// controls can wrap to a second row once the hub supplies the metadata.
+let composerFootKept = "";
+function composerGeometry() {
+  const foot = document.querySelector(".thread-view .composer-foot");
+  if (!foot) return;
+  foot.style.removeProperty("min-height");
+  const width = foot.getBoundingClientRect().width, thread = currentSession().sel;
+  if (!thread) return;
+  try {
+    if (!frontendNode && !canonicalBoot) {
+      const saved = JSON.parse(localStorage.getItem("backplane-composer-foot") || "null");
+      if (saved?.thread === thread && Math.abs(saved.width - width) < 1 && saved.height > 0 && saved.height < 300) foot.style.minHeight = saved.height + "px";
+    } else {
+      const text = JSON.stringify({ thread, width, height: foot.getBoundingClientRect().height });
+      if (text !== composerFootKept) { localStorage.setItem("backplane-composer-foot", text);composerFootKept = text; }
+    }
+  } catch {}
+}
 let viewerKept = "";
 function keepViewer() {
   const sel = App.sel(ui);
@@ -810,6 +829,7 @@ function render() {
   ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
   panes();
+  composerGeometry();
   earlierAsked = false;
   laterAsked = false;
   if (tl2 && thin?.atNewest?.() === false && tl2.scrollHeight - tl2.scrollTop - tl2.clientHeight <= tl2.clientHeight * 2) requestAnimationFrame(() => laterCheck(document.getElementById("timeline")));
@@ -1901,7 +1921,7 @@ document.addEventListener("dblclick", (e) => {
   try { localStorage.removeItem(viewerKey()); } catch {}
   panes();
 });
-window.addEventListener("resize", () => panes());
+window.addEventListener("resize", () => { panes();composerGeometry(); });
 
 // Socket
 // ------
