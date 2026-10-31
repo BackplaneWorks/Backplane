@@ -83,11 +83,11 @@ def Signal.name(+n: Nat) -> String:
 def Signal.label.loc(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
-      Bool.pick(String, String.eq(name, "stalled"), "進捗停止・実行中の作業は継続しています", Bool.pick(String, String.eq(name, "blocked"), "対応が必要です", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了済み",
-        Bool.pick(String, String.eq(name, "waiting"), "サブエージェントや開始した作業の完了待ちです", Bool.pick(String, String.eq(name, "finished"), "完了しました", "非稼働・実行中の作業は未確認です"))))))
+      Bool.pick(String, String.eq(name, "failed"), "失敗しました", Bool.pick(String, String.eq(name, "stalled"), "進捗停止・実行中の作業は継続しています", Bool.pick(String, String.eq(name, "blocked"), "対応が必要です", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了済み",
+        Bool.pick(String, String.eq(name, "waiting"), "サブエージェントや開始した作業の完了待ちです", Bool.pick(String, String.eq(name, "finished"), "完了しました", "非稼働・実行中の作業は未確認です")))))))
     case _:
-      Bool.pick(String, String.eq(name, "stalled"), "Stalled: no recent progress; busy work continues", Bool.pick(String, String.eq(name, "blocked"), "Blocked: needs interaction", Bool.pick(String, String.eq(name, "active"), "Working: agent or owned work active", Bool.pick(String, String.eq(name, "settled"), "Settled",
-        Bool.pick(String, String.eq(name, "waiting"), "Waiting: on subagents or work it started", Bool.pick(String, String.eq(name, "finished"), "Finished: ready for you to look at", "Inactive: no confirmed active work"))))))
+      Bool.pick(String, String.eq(name, "failed"), "Failed: agent stopped with an error", Bool.pick(String, String.eq(name, "stalled"), "Stalled: no recent progress; busy work continues", Bool.pick(String, String.eq(name, "blocked"), "Blocked: needs interaction", Bool.pick(String, String.eq(name, "active"), "Working: agent or owned work active", Bool.pick(String, String.eq(name, "settled"), "Settled",
+        Bool.pick(String, String.eq(name, "waiting"), "Waiting: on subagents or work it started", Bool.pick(String, String.eq(name, "finished"), "Finished: ready for you to look at", "Inactive: no confirmed active work")))))))
 
 def Signal.label(+lc: I.Loc, +n: Nat) -> String:
   Signal.label.loc(lc, Signal.name(n)) ++ Bool.pick(String, Bool.and(Signal.blocked(n), Signal.active(n)),
@@ -110,6 +110,15 @@ def Signal.shown.k(+name: String, turn: M.TurnState, +pending: Nat) -> String:
 
 def Signal.shown(+n: Nat, turn: M.TurnState, +pending: Nat) -> String:
   Signal.shown.k(Signal.name(n), turn, pending)
+
+# A failed turn keeps the interaction colour, with its own truthful name.
+def Signal.dot.name(+name: String, turn: M.TurnState, +pending: Nat) -> String:
+  Bool.pick(String, String.eq(Signal.shown.k(name, turn, pending), "failed"), "failed", name)
+
+def Signal.dot.thread(+name: String, t: M.Thread) -> String:
+  match t:
+    case M.Thread{_, _, _, _, _, turn, pending, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Signal.dot.name(name, turn, pending)
 
 # the cell's sentence: a failure says why (the failure's own words, why)
 def Signal.label.shown(+lc: I.Loc, +n: Nat, +shown: String, +why: String) -> String:

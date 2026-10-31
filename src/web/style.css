@@ -1245,7 +1245,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 @media(max-width:700px) { .mailroom.reading .mail-list { display:none; } .mailroom { padding:8px; } }
 
 /* Thread activity: the shared Signal projection supplies these classes. */
-.dot.blocked { background: var(--st-need); border-radius: 0; }
+.dot.blocked, .dot.failed { background: var(--st-need); border-radius: 0; }
 .dot.active { background: var(--st-work); border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
 .dot.waiting { background: var(--waiting); border-radius: 50%; animation: pulse 2.4s ease-in-out infinite; }
 .dot.finished { background: var(--st-done); border-radius: 50%; }

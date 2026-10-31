@@ -215,9 +215,12 @@ def View.txt(ns: List<&2, D.Node>) -> String:
       ""
 
 # A shape and a textual status keep activity accessible without colour.
-def View.dot(+lc: I.Loc, +name: String) -> D.Node:
+def View.dot.tip(+name: String, +tip: String) -> D.Node:
   D.El{"span", "", [D.At{"class", "dot " ++ name}, D.At{"role", "img"},
-    D.At{"aria-label", SG.Signal.label.loc(lc, name)}, D.At{"title", SG.Signal.label.loc(lc, name)}], Nil{}}
+    D.At{"aria-label", tip}, D.At{"title", tip}], Nil{}}
+
+def View.dot(+lc: I.Loc, +name: String) -> D.Node:
+  View.dot.tip(name, SG.Signal.label.loc(lc, name))
 
 # a pinned row's mark, small and dim beside its age
 def View.pin(+lc: I.Loc, pin: Bool) -> List<&2, D.Node>:
@@ -256,7 +259,7 @@ def View.row.m(+id: String, +title: String, +ago: String, +badge: String, +dot: 
 def View.row.s(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, snoozed: Bool, settled: Bool) -> D.Node:
   match t:
     case M.Thread{+id, _, +title, _, +a, _, _, _, _, _, _, pinned, _, _, _, _, _, _, _, _, _}:
-      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), SG.Signal.display.note(lc, st, id, View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))), SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), sel, movable)
+      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), SG.Signal.display.note(lc, st, id, View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))), SG.Signal.dot.thread(SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), t), sel, movable)
 
 def View.row(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> D.Node:
   View.row.s(lc, t, ix, st, sel, now, movable, snoozed, False{})
@@ -422,7 +425,7 @@ def View.arow(+lc: I.Loc, r: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> 
       D.El{"div", M.Thread.id(t), [D.At{"class", Bool.pick(String, String.eq(M.Thread.id(t), sel), "thread on", Bool.pick(String, faded, "thread faded", "thread"))},
           D.At{"role", "button"}, D.At{"tabindex", "0"}, D.At{"aria-current", Bool.pick(String, String.eq(M.Thread.id(t), sel), "page", "false")},
           D.At{"style", "--tint:" ++ BG.Badge.css_of(st, pid)}, D.At{"data-shortcut-project", pid}, D.At{"data-value", M.Thread.id(t)}, D.On{"click", "select"}, D.On{"contextmenu", "row-menu"}],
-        List.concat(&2, D.Node, [[View.dot(lc, SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t))), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", tt}], [D.Txt{tt}]}], View.pin(lc, U.Active.pinned(t)),
+        List.concat(&2, D.Node, [[View.dot(lc, SG.Signal.dot.thread(SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), t)), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", tt}], [D.Txt{tt}]}], View.pin(lc, U.Active.pinned(t)),
           [View.note(SG.Signal.display.note(lc, st, M.Thread.id(t), View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t)))), pt)]])}
 
 def View.atree.step(root: Bool, anchors: List<&2, U.ARow>, fallback: U.ARow) -> List<&2, U.ARow> & U.ARow:
@@ -3382,7 +3385,7 @@ def View.workbar(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, 
   +signal = SG.Signal.cached(info, id)
   +shown = SG.Signal.display.shown(signal, turn, pending, st, id)
   D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}],
-    List.append(&2, D.Node, [View.dot(lc, SG.Signal.display.name(signal, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(TO.Tools.stop.loc(lc, running)))}
+    List.append(&2, D.Node, [View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(TO.Tools.stop.loc(lc, running)))}
 
 # Keep a running Stop control, but never reserve a status strip for an
 # idle bot conversation. Ordinary thread workbars retain their summaries.
@@ -4751,7 +4754,7 @@ def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: Str
   +shown = SG.Signal.display.shown(signal, turn, pending, st, id)
   D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)},
     D.At{"title", SG.Signal.display.label(lc, signal, shown, st, id)}],
-    List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot(lc, SG.Signal.display.name(signal, st, id)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
+    List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
       View.tools(TO.Tools.stop.loc(lc, View.running(turn))))}
 
 # the subagents: a click opens or shuts their rows under the bar (View.subs.dock)

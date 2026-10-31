@@ -13551,3 +13551,9 @@ law order_one_file_singular:
 
 law order_many_files_plural:
   {ORD.Order.ask.count(2n) == "2 files" : String}
+
+law signal_failed_dot_truthful:
+  {SIGREV.Signal.dot.name("blocked", M.Failed{}, 0n) == "failed" : String}
+
+law signal_asked_dot_stays_blocked:
+  {SIGREV.Signal.dot.name("blocked", M.Failed{}, 1n) == "blocked" : String}

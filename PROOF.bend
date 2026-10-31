@@ -13925,3 +13925,9 @@ def Laws.order_one_file_singular():
 
 def Laws.order_many_files_plural():
   {==}
+
+def Laws.signal_failed_dot_truthful():
+  {==}
+
+def Laws.signal_asked_dot_stays_blocked():
+  {==}

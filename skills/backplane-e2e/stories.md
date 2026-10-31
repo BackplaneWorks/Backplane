@@ -347,7 +347,8 @@ In `hub.sh trial`: finished threads have green dots, new ones grey. Send a
 message: the dot and the top bar's State turn blue "working", then green
 "finished". Stop a turn: grey "stopped". A thread whose agent fails (pick codex: no
 real codex here) turns red, State "failed" with the reason in its tooltip
-(not "needs you"), and its error row shows the whole reason. A thread whose
+(not "needs you"), and its error row shows the whole reason. Hovering its
+red dot says failed as well, in both the top bar and the sidebar. A thread whose
 turn ended while work it started is out (a delegated task or a launched
 thread still going, a background agent or watched work; the stand-in's
 `work_run` will do) is violet "waiting" (State "waiting", tooltip "Waiting:
