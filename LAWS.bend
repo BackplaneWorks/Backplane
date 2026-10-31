@@ -13570,3 +13570,12 @@ law estimate_snapshot_is_explicit:
 # Found by e2e c1-4.
 law project_pasted_path_trimmed:
   {U.Proj.query(U.Ui.scratch_set(U.Ui.init(0n), "@f.proj", "  /tmp/Plain notes  ")) == "/tmp/Plain notes" : String}
+
+# Found by e2e c1-7.
+law search_hides_design_history:
+  for id: String
+  for th: String
+  for kind: String
+  for text: String
+  for at: Nat
+  {JTHIN.Search.readable(M.Act{id, th, "step", kind, text, at}) == False{} : Bool}

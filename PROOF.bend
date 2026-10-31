@@ -13945,3 +13945,8 @@ def Laws.estimate_snapshot_is_explicit():
 
 def Laws.project_pasted_path_trimmed():
   {==}
+
+# Found by e2e c1-7.
+
+def Laws.search_hides_design_history(id, th, kind, text, at):
+  {==}

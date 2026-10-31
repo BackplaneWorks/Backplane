@@ -63,3 +63,5 @@ def main() -> IO(Unit):
     C.Check.str("boot index preserves real canonical State posting order", ids(T.Index.page(loaded, "thread-a", 0n, 32n)), "1,")
     C.Check.str("incremental commit matches boot ordinal", ids(T.Index.page(T.Index.change(T.Index.empty(), M.MessagePosted{"thread-a", "one", M.User{}, "first", 1n}), "thread-a", 0n, 32n)), "1,")
     C.Check.str("unrelated event adds no phantom entry", Nat.show(T.Index.n(T.Index.change(loaded, M.SettingSet{"test", "value", 1n}))), "2")
+    +history : T.Index = T.Index.changes([M.ActivityLogged{"thread-a", "internal", "step", "snapshot", "history.git café", 1n}, M.MessagePosted{"thread-a", "visible", M.User{}, "history.git café", 2n}], T.Index.empty())
+    C.Check.str("search excludes snapshot payload", search.ids(T.Index.search(history, "café", "", 0n)), "2,")

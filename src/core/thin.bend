@@ -296,8 +296,15 @@ def Search.all(terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, +ts: Map<&2, B
     case Nil{} True{}: True{}
     case (word, _) <> tail True{}: Search.all(tail, ts, Word.has(ts, word))
 
+# Design steps store a private snapshot payload, not a readable chat row.
+# Keep it in history, but never offer it as a conversation search result.
+def Search.readable(e: M.Entry) -> Bool:
+  match e:
+    case M.Act{_, _, "step", _, _, _}: False{}
+    case _: True{}
+
 def Search.owner(+th: String, +e: M.Entry) -> Bool:
-  Bool.or(String.is_empty(th), Bool.or(String.eq(th, M.Idx.thread(e)), String.eq(th, M.Link.from(M.Idx.id(e)))))
+  Bool.and(Search.readable(e), Bool.or(String.is_empty(th), Bool.or(String.eq(th, M.Idx.thread(e)), String.eq(th, M.Link.from(M.Idx.id(e))))))
 
 type SearchPage is Data:
   SearchPage{ids: List<&2, String>, visited: Nat, last: String, more: Bool}

@@ -128,7 +128,7 @@
     "src/core/textscale.bend": "6f3179e85bce1ed2f56191bcc25621fcd83dc4ecf239b60ceed9cb1fdf883b5c",
     "src/core/thin-chat.bend": "b654c26082a5b02b40a3eb6092744fd4e2f6befda5d4757eb2f8a55368fdceae",
     "src/core/thin-wire.bend": "2190ad986b43ce03424b0f7c8e0da1bf9b2431888ebf160e0ea74d86468e9f21",
-    "src/core/thin.bend": "177b6781e652ea868cb4abc985c4445739029ee7c699a5afd4f5cd4a050b1f83",
+    "src/core/thin.bend": "8b8f79618c1272c60d0480f89fa97657f4021f8c1c7e2971d47f90d427f01a1b",
     "src/core/thinq.bend": "5952f1ebe9aa7981ec0753937b0dcc26fad895f8142e4507d79a89508da8bf63",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
     "src/core/todo.bend": "5cb670b3e1c3a83c4d3eaee0e1e963892671d51fa30412583b2de628b8830562",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebased Trim pasted project paths before choosing a folder; sidebar draft readers and rendering unchanged"
+  "reviewNote": "Rebased Keep internal design snapshots out of conversation search; sidebar draft readers and rendering unchanged"
 }
