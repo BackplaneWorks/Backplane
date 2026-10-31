@@ -1,3 +1,4 @@
+import ./src/server/plot.bend as PLOTWATCH
 import ./src/core/restartretry.bend as WDRETRY
 import ./src/core/liveness.bend as LIVEWATCH
 import ./src/core/timeline-virtual.bend as TLVIRTUAL
@@ -13251,3 +13252,12 @@ law todos_retire_shuts:
 law todos_retire_shuts_unselected:
   {U.Todos.open(U.Ui.infos(U.Ui.fold([M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"}]", 1n}, M.TurnChanged{"t", M.Running{}, 2n}, M.TurnChanged{"t", M.Completed{}, 3n}],
       U.Ui.info_set(U.Ui.init(0n), "fold:todos:t", "1"))), "t") == False{} : Bool}
+
+# A failed file stamp is (0, ""). Starting with a distinct stamp ensures
+# that even a missing source gets its first read and an error reply.
+law plot_source_starts_unread:
+  for +key: String
+  for +kind: U32
+  for +path: String
+  for +rest: List<&2, PLOTWATCH.Src>
+  {PLOTWATCH.Src.add(False{}, key, kind, path, rest) == PLOTWATCH.Src{key, kind, path, 0, "unread", 0n, False{}, None{}, ""} <> rest : List<&2, PLOTWATCH.Src>}

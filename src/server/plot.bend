@@ -132,7 +132,7 @@ def Src.add(has: Bool, +key: String, +kind: U32, +path: String, ss: List<&2, Src
     case True{}:
       ss
     case False{}:
-      Src{key, kind, path, 0, "", 0n, False{}, None{}, ""} <> ss
+      Src{key, kind, path, 0, "unread", 0n, False{}, None{}, ""} <> ss
 
 def Sub.watched(ss: List<&2, Sub>, +key: String) -> Bool:
   match ss:
@@ -719,10 +719,28 @@ def Pv.version(fixed: Bool, +kind: U32, bs: List<&2, U32>) -> Maybe<&2, List<&2,
     case _ +b:
       Pv.parse.k(U32.is_eq(kind, 1), b)
 
+# An empty file can be a save in progress. A failed stat means it is gone;
+# keep the usual retry for an existing file while it is being written.
+def Pv.child.empty(r: Result<&1, &1, U32 & String, U32 & String>, +path: String) -> IO(Unit):
+  match r:
+    case Done{_}:
+      IO.die(Unit, 2, "")
+    case Fail{_}:
+      IO.die(Unit, 3, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 0n), "The file is no longer in the folder: " ++ MC.Mech.last(HS.Hist.family(path)), Pv.unread()))
+
+# A missing live source must answer too, including on the first watch when
+# its failed stamp would otherwise look like an unread source.
+def Pv.child.source(+kind: U32, +path: String, +infos: String, bs: List<&2, U32>) -> IO(Unit):
+  match bs:
+    case Nil{}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & String>, Unit, H.FS.revision(path), r => Pv.child.empty(r, path))
+    case +b:
+      Pv.child.v(Pv.plot(Pv.version(Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), kind, b), kind), Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), Bool.pick(U32, U32.is_eq(kind, 0), Pv.thick(b), 0), infos)
+
 def Pv.child.one(+kind: U32, +path: String, +infos: String) -> IO(Unit):
   do IO<Unit>:
     +bs : List<&2, U32> <- GT.Git.version(path)
-    Pv.child.v(Pv.plot(Pv.version(Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), kind, bs), kind), Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), Bool.pick(U32, U32.is_eq(kind, 0), Pv.thick(bs), 0), infos)
+    Pv.child.source(kind, path, infos, bs)
 
 # one side of a comparison: a file that is not there (made or removed by
 # the change) has no items
