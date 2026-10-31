@@ -1972,6 +1972,18 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 /* narrower, the chip's key goes (it only shows while Ctrl is held; the
    chip's tooltip names it), so its words keep their room */
 @container (max-width: 46em) { .composer-foot:has(> .account-chip) .model-chip kbd { display: none; } }
+/* narrower still (a thread beside the viewer), the account takes a line
+   of its own under the chip, so the chip keeps its words there too */
+@media (min-width: 761px) {
+  @container (max-width: 34em) {
+    .composer-foot:has(> .account-chip) > .model-chip { grid-area: 1 / 1 / 2 / -1; }
+    .composer-foot:has(> .account-chip) > .account-chip { grid-area: 2 / 1 / 3 / -1; justify-self: start; }
+    .composer-foot:has(> .account-chip) > .model-ctx { grid-area: 3 / 1; }
+    .composer-foot:has(> .account-chip) > .attach.draw { grid-area: 3 / 2; }
+    .composer-foot:has(> .account-chip) > label.attach { grid-area: 3 / 3; }
+    .composer-foot:has(> .account-chip) > .foot-end { grid-area: 3 / 4; }
+  }
+}
 @media (max-width: 760px) {
   .composer-foot:has(> .account-chip) { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); gap: 6px 5px; }
   .composer-foot:has(> .account-chip) > .model-chip { grid-area: 1 / 1; }
