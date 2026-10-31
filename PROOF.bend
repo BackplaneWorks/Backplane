@@ -14050,3 +14050,9 @@ def Laws.viewer_same_board_version_keeps_root():
 
 def Laws.viewer_tree_root_stays_inside_thread():
   {==}
+
+def Laws.revert_entry_is_newest(e, tail):
+  {==}
+
+def Laws.revert_unarmed_is_off(u):
+  {==}

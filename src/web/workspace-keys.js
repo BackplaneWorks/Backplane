@@ -107,6 +107,8 @@ export function overlayEscape(doc) {
   const routine = [...(doc.querySelectorAll?.('.item-btns [data-on-click="bfield"]') || [])]
     .find(button => button.getAttribute('data-value') === 'delroutine\u001f' && shown(button));
   if (routine) return () => routine.click();
+  const revert = doc.querySelector?.('[data-esc="revert-no"] [data-on-click="revert-no"]');
+  if (revert && shown(revert)) return () => revert.click();
   return null;
 }
 

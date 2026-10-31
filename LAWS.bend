@@ -13692,3 +13692,12 @@ law viewer_same_board_version_keeps_root:
 # A cached drawing root cannot escape its thread's folder.
 law viewer_tree_root_stays_inside_thread:
   {U.Bd.tree.saved("/r", "/elsewhere/beta.kicad_sch") == "" : String}
+
+law revert_entry_is_newest:
+  for +e: M.Entry
+  for tail: List<&2, M.Entry>
+  {U.Ui.revert.entry(e <> tail) == M.Idx.id(e) : String}
+
+law revert_unarmed_is_off:
+  for u: U.Ui
+  {U.Ui.reverting.k(False{}, u) == False{} : Bool}

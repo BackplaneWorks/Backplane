@@ -820,3 +820,11 @@ test('button activation returns the desktop caret through the keeper and leaves 
   h.keeper.activate({ pointerType: 'mouse' });
   assert.equal(h.doc.activeElement, h.body);
 });
+
+test('Escape cancels inline Revert before closing its viewer', async () => {
+  const { overlayEscape } = await import('../../src/web/workspace-keys.js');
+  let cancelled = 0;
+  const doc = { querySelectorAll: () => [], querySelector: selector => selector.startsWith('[data-esc="revert-no"]') ? { click() { cancelled++; } } : null };
+  overlayEscape(doc)();
+  assert.equal(cancelled, 1);
+});

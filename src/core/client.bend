@@ -790,7 +790,7 @@ def Ui.panel(u: Ui) -> Bool:
 def Ui.view_pick(u: Ui, +kind: String) -> Ui:
   match u:
     case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Viewer.put(nf, sel, kind, ""), ob, tr}
+      Ui{st, sel, Map.set(&2, String, dr, "@revert", ""), live, op, on, now, ad, pa, v, rid, w, er, note, Viewer.put(nf, sel, kind, ""), ob, tr}
 
 # A diff is kept as "diff:t", and "diff.none:t" names the folder when
 # thread t's is no git repository (the hub's "nogit": nothing to compare).
@@ -1490,7 +1490,7 @@ def Ui.panel.opened(shut: Bool, dr: Map<&2, String>) -> Map<&2, String>:
 def Ui.toggle_panel(u: Ui) -> Act:
   match u:
     case Ui{st, +sel, dr, live, op, on, now, ad, +pa, v, rid, w, er, note, nf, ob, tr}:
-      Act{Ui{st, sel, Ui.panel.opened(Bool.not(pa), dr), live, op, on, now, ad, Bool.not(pa), v, rid, w, er, note, Map.set(&2, String, nf, "panel.hand:" ++ sel, "1"), ob, tr}, Nil{}}
+      Act{Ui{st, sel, Ui.panel.opened(Bool.not(pa), Map.set(&2, String, dr, "@revert", "")), live, op, on, now, ad, Bool.not(pa), v, rid, w, er, note, Map.set(&2, String, nf, "panel.hand:" ++ sel, "1"), ob, tr}, Nil{}}
 
 def Ui.toggle_settled(u: Ui, +pid: String) -> Act:
   match u:
@@ -5471,7 +5471,7 @@ def Ui.reply.body(u: Ui, +o: J.Json) -> Ui:
 def Ui.view_put(u: Ui, +kind: String, +path: String) -> Ui:
   match u:
     case Ui{st, +sel, dr, live, op, on, now, ad, _, v, rid, w, er, note, +nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, True{}, v, rid, w, er, note, Map.set(&2, String, Viewer.put(nf, sel, kind, path), "panel:" ++ sel, "1"), ob, tr}
+      Ui{st, sel, Map.set(&2, String, dr, "@revert", ""), live, op, on, now, ad, True{}, v, rid, w, er, note, Map.set(&2, String, Viewer.put(nf, sel, kind, path), "panel:" ++ sel, "1"), ob, tr}
 
 def Mpage.has(+o: J.Json) -> Bool:
   Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(J.Json.get_obj(o, "result"), "mech"), J.Null{})), "null"))
@@ -6649,7 +6649,7 @@ def Rv.back(+u: Ui, +kind: String) -> String:
 def Ui.view_pick.p(u: Ui, +kind: String, +path: String) -> Ui:
   match u:
     case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Viewer.put(nf, sel, kind, path), ob, tr}
+      Ui{st, sel, Map.set(&2, String, dr, "@revert", ""), live, op, on, now, ad, pa, v, rid, w, er, note, Viewer.put(nf, sel, kind, path), ob, tr}
 
 def Ui.view_pick.back(+u: Ui, +kind: String) -> Ui:
   Ui.view_pick.p(u, kind, Rv.back(u, kind))
@@ -7391,8 +7391,35 @@ def Ui.delete(+u: Ui) -> Act:
 # palette) arms it for the thread on show; its own Revert ("confirm") sends
 # it. A turn number is a revert already confirmed: the phones' native
 # dialogs ask first and send "0", so it goes at once, as it always did.
+
+def Ui.revert.entry(es: List<&2, M.Entry>) -> String:
+  match es:
+    case Nil{}: ""
+    case e <> _: M.Idx.id(e)
+
+def Ui.revert.at(+u: Ui) -> String:
+  C.Turn.name(M.Thread.turn(Ui.thread(Ui.state.at(u), Ui.sel(u)))) ++ "|" ++ Ui.revert.entry(M.State.mine(Ui.state.at(u), Ui.sel(u)))
+
+# A finished turn can return to the same state; it must never rearm an old ask.
+def Ui.revert.see.k(changed: Bool, u: Ui) -> Ui:
+  match changed:
+    case False{}: u
+    case True{}: Ui.scratch_set(u, "@revert", "")
+
+def Ui.revert.see(c: M.Change, +u: Ui) -> Ui:
+  match c:
+    case M.TurnChanged{thread, _, _}: Ui.revert.see.k(String.eq(thread, Ui.scratch(u, "@revert")), u)
+    case _: u
+
+def Ui.reverting.k(armed: Bool, +u: Ui) -> Bool:
+  match armed:
+    case False{}: False{}
+    case True{}:
+      Bool.and(Ui.panel(u), Bool.and(String.eq(Ui.view_get(u, "view.kind"), "diff"),
+        String.eq(Ui.scratch(u, "@revert.at"), Ui.revert.at(u))))
+
 def Ui.reverting(+u: Ui) -> Bool:
-  Bool.and(Bool.not(String.is_empty(Ui.sel(u))), String.eq(Ui.scratch(u, "@revert"), Ui.sel(u)))
+  Ui.reverting.k(Bool.and(Bool.not(String.is_empty(Ui.sel(u))), String.eq(Ui.scratch(u, "@revert"), Ui.sel(u))), u)
 
 def Ui.revert.confirm(armed: Bool, +u: Ui) -> Act:
   match armed:
@@ -7406,7 +7433,7 @@ def Ui.revert.k(i: Nat, +u: Ui, +turn: String) -> Act:
     case 0n:
       Ui.revert.confirm(Ui.reverting(u), u)
     case 1n:
-      Act{Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "diff", ""), "@revert", Ui.sel(u)), "@revert.turn", "0"), Nil{}}
+      Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "diff", ""), "@revert", Ui.sel(u)), "@revert.turn", "0"), "@revert.at", Ui.revert.at(u)), Nil{}}
     case _:
       Ui.on_thread.p(Ui.scratch_set(u, "@revert", ""), "git.revert", [J.KV{"turn", J.Num{Bool.pick(String, String.is_empty(turn), "0", turn)}}])
 
@@ -14431,7 +14458,7 @@ def Ui.fold(cs: List<&2, M.Change>, u: Ui) -> Ui:
     case Nil{} _:
       u
     case +c <> t Ui{+st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui.fold(t, Todos.see(st, c, Mailv.see(Ui.see(Ui{M.State.apply(st, c), sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, c), c)))
+      Ui.fold(t, Ui.revert.see(c, Todos.see(st, c, Mailv.see(Ui.see(Ui{M.State.apply(st, c), sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, c), c))))
 
 def Ui.fold.d(d: Decoded, u: Ui) -> Ui:
   match d:

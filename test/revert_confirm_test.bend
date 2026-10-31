@@ -1,4 +1,5 @@
 import Base
+import ../src/core/model.bend as M
 import ./check.bend as C
 import ../src/core/client.bend as U
 
@@ -29,6 +30,13 @@ def main() -> IO(Unit):
     C.Check.str("unarmed confirm sends nothing", commands(U.Ui.revert(base(), "confirm")), "")
     C.Check.str("confirmation sends revert", Bool.show(String.contains(commands(U.Ui.revert(armed(), "confirm")), "git.revert")), "True")
     C.Check.str("confirmation disarms", Bool.show(U.Ui.reverting(ui(U.Ui.revert(armed(), "confirm")))), "False")
+    C.Check.str("a new message disarms", Bool.show(U.Ui.reverting(U.Ui.fold([M.MessagePosted{"t1", "new", M.User{}, "next", 1n}], armed()))), "False")
+    C.Check.str("a new turn disarms", Bool.show(U.Ui.reverting(U.Ui.fold([M.TurnChanged{"t1", M.Running{}, 1n}], armed()))), "False")
+    C.Check.str("a turn clears confirmation ownership", U.Ui.scratch(U.Ui.fold([M.TurnChanged{"t1", M.Running{}, 1n}], armed()), "@revert"), "")
+    C.Check.str("closing Diff disarms", Bool.show(U.Ui.reverting(ui(U.Ui.toggle_panel(armed())))), "False")
+    C.Check.str("reopening Diff stays disarmed", Bool.show(U.Ui.reverting(ui(U.Ui.toggle_panel(ui(U.Ui.toggle_panel(armed())))))), "False")
+    C.Check.str("changing viewer disarms", Bool.show(U.Ui.reverting(U.Ui.view_pick(armed(), "board"))), "False")
+    C.Check.str("a kept design detour stays disarmed", Bool.show(U.Ui.reverting(U.Ui.view_pick.p(U.Ui.view_pick.p(armed(), "board", "/board.kicad_pcb"), "diff", ""))), "False")
     C.Check.str("Cancel disarms", Bool.show(U.Ui.reverting(ui(U.Ui.act(armed(), "revert-no", "")))), "False")
     C.Check.str("another thread disarms", commands(U.Ui.revert(U.Ui.select.k(armed(), "t2"), "confirm")), "")
     C.Check.str("return to thread disarms", commands(U.Ui.revert(U.Ui.select.k(U.Ui.select.k(armed(), "t2"), "t1"), "confirm")), "")
