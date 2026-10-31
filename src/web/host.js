@@ -1254,7 +1254,6 @@ async function uploadFiles(action, files, scope = uploadScope()) {
 async function upload(action, file, scope = uploadScope(), previous = "") {
   const key = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
   const name = file.name || "pasted." + ((file.type || "").split("/")[1] || "bin");
-  if (file.size === 0) return;
   const { controller: uploadController, thread } = scope;
   const current = () => viewMode === scope.mode && (uploadController
     ? thin === uploadController && uploadController.ready && currentSession().sel === thread && uploadController.epoch === scope.epoch
