@@ -13270,3 +13270,9 @@ law intent_borrow_twice_keeps_draft:
 
 law intent_chat_send_forgets_backup:
   {U.Ui.scratch(U.Act.ui(U.Draft.clear(U.Intent.borrow(U.Ui.scratch_set(U.Ui.select.k(U.Ui.init(0n), "t"), "t", "draft"), "t"))), "@intent.draft:t") == "" : String}
+
+law room_draft_key_is_scoped:
+  {U.Bots.field.key(U.Ui.scratch_set(U.Ui.init(0n), "@room", "room-one"), "rpost") == "@room.draft:room-one" : String}
+
+law room_draft_read_is_scoped:
+  {U.Bots.field(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.init(0n), "@room", "room-one"), "@room.draft:room-one", "draft 日本語"), "rpost") == "draft 日本語" : String}

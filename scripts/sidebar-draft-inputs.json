@@ -33,14 +33,14 @@
     "src/core/badge.bend": "8c9269d9d4528b549b34ceeab348c7bc14d1c146cb7cf5918bf0b01265e79b99",
     "src/core/board.bend": "040ef813ec0257f837a94bfe7f48292397787fbb89558d506835314bdadb3aad",
     "src/core/bot.bend": "0b7815bd2284ec6fba68c771edf0293b445571773d30f8f2e70f7b7ff8d1be8b",
-    "src/core/botui.bend": "24053ae1a601d1b84ef480361a447c9d3cf927ccee80d89fc1b1a6672504bd95",
+    "src/core/botui.bend": "29a1cda9263185dc559d0d7c4378d615f2366549f211958192be452f052fd651",
     "src/core/browser-tabs.bend": "005221bc7077a405f82e375dd04cf2783620ff485734a8eafb79b8cfa3c64c53",
     "src/core/bub-move.bend": "d898f633015acd0406a965b5f069db09e37b6c7fd6fc07f1151b7847c839dc14",
     "src/core/cad.bend": "e69f4c5172e7472127aef77ebebb284d0a03a94ce7e6f41a024a00d08cd58e14",
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "16a950c71c98efd3b98783fe93f05a8fca4724de754457f6e0af530e32f8329c",
+    "src/core/client.bend": "632d54d1edc0e5e26100d51c419b1777cdb803cd4c7ee1dc93ad336a13d5e7e5",
     "src/core/codec.bend": "7e53e017f449e3747df60d2779ab90fd6be43d0ddb3c0414ab9fa9e4cf4e8694",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "c13-9: restore chat drafts after intent editing; sidebar draft rendering unchanged after merging current main"
+  "reviewNote": "c13-2: Keep a separate draft for each room; sidebar draft rendering unchanged"
 }

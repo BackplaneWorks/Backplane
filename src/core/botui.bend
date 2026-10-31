@@ -614,7 +614,7 @@ def BU.members(+u: U.Ui, r: BT.Room) -> String:
 
 # a form field's text
 def BU.field(+u: U.Ui, +k: String) -> String:
-  U.Ui.scratch(u, "@f." ++ k)
+  U.Bots.field(u, k)
 
 # whether a form is open ("@bnew", "@rnew", "@onew")
 def BU.open(+u: U.Ui, +k: String) -> Bool:

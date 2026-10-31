@@ -7489,8 +7489,13 @@ def Ui.sel.of(u: Ui) -> String:
 def Bots.of_thread(+st: M.State, +thread: String) -> Maybe<&2, BT.Bot>:
   BT.World.of_thread(M.State.bots(st), thread)
 
+# A room's unsent post belongs to that room, rather than to a form that
+# goes away when the person opens another view.
+def Bots.field.key(+u: Ui, +k: String) -> String:
+  Bool.pick(String, String.eq(k, "rpost"), "@room.draft:" ++ Ui.scratch(u, "@room"), "@f." ++ k)
+
 def Bots.field(+u: Ui, +k: String) -> String:
-  Ui.scratch(u, "@f." ++ k)
+  Ui.scratch(u, Bots.field.key(u, k))
 
 def Bots.fields.clear.go(ks: List<&2, String>, u: Ui) -> Ui:
   match ks:
@@ -8218,12 +8223,12 @@ def Bots.bfield.proj(proj: Bool, u: Ui) -> Ui:
 
 # (the secret box's value field, "sval", is never kept: an older phone app
 # that sends its keystrokes as a form field leaves nothing in this state)
-def Bots.bfield.keep(vault: Bool, +k: String, t: List<&2, String>, u: Ui) -> Ui:
+def Bots.bfield.keep(vault: Bool, +k: String, t: List<&2, String>, +u: Ui) -> Ui:
   match vault:
     case True{}:
       u
     case False{}:
-      Bots.bfield.proj(String.eq(k, "proj"), Ui.scratch_set(u, "@f." ++ k, String.join(t, "\u{1f}")))
+      Bots.bfield.proj(String.eq(k, "proj"), Ui.scratch_set(u, Bots.field.key(u, k), String.join(t, "\u{1f}")))
 
 # "name\u001ftext": a form field
 def Bots.bfield.k(ps: List<&2, String>, u: Ui) -> Ui:
@@ -8341,7 +8346,7 @@ def Bots.room.post.k(empty: Bool, +u: Ui) -> Act:
     case True{}:
       Act{u, Nil{}}
     case False{}:
-      Ui.also(Ui.rpc.keep.msg(Ui.scratch_set(u, "@f.rpost", ""), "bots.post", [J.KV{"room", J.Str{Ui.scratch(u, "@room")}}, J.KV{"text", J.Str{Bots.field(u, "rpost")}}]), [ScrollEnd{}])
+      Ui.also(Ui.rpc.keep.msg(Ui.scratch_set(u, Bots.field.key(u, "rpost"), ""), "bots.post", [J.KV{"room", J.Str{Ui.scratch(u, "@room")}}, J.KV{"text", J.Str{Bots.field(u, "rpost")}}]), [ScrollEnd{}])
 
 def Bots.room.post(+u: Ui) -> Act:
   Bots.room.post.k(String.is_empty(String.trim(Bots.field(u, "rpost"))), u)

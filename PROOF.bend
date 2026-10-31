@@ -13775,3 +13775,9 @@ def Laws.intent_borrow_twice_keeps_draft():
 
 def Laws.intent_chat_send_forgets_backup():
   {==}
+
+def Laws.room_draft_key_is_scoped():
+  {==}
+
+def Laws.room_draft_read_is_scoped():
+  {==}
