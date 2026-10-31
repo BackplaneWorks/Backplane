@@ -91,6 +91,9 @@ def ComponentsFx.put(cwd: String, pcb: String, sch: String, pcbRev: String, schR
 def ComponentsFx.get(cwd: String, offset: String, pcbRev: String, schRev: String) -> IO(String):
   import "./effects/components_cache.js"
 
+def ComponentsFx.first(cwd: String, pcb: String, sch: String) -> IO(String):
+  import "./effects/components_cache.js"
+
 # every page of a first read, so the hub answers the pages after it from the
 # cache (a page child parses both files again for one page)
 def Components.pages.put(fuel: Nat, go: Bool, +data: J.Json, +off: Nat, +cwd: String, +pcb: String, +sch: String) -> IO(Unit):

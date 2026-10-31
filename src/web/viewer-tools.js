@@ -162,8 +162,13 @@ class Workbench {
     if (next !== this.qualityRevision) { this.qualityRevision = next; this.quality?.sourceChanged(); }
     if (key === this.boardKey) {
       this.prepareAssembly();
-      this.components.setData(this.boardKey, null); this.overlay?.(); this.overlay = null; this.overlayData = null;
-      void this.readComponents();
+      // metadata already read at exactly this revision (the first read may
+      // finish before the PCB's revision arrives) is kept, not read again
+      const held = this.components.data?.sourceRevision;
+      if (!held || held !== revisions.get(this.boardKey)) {
+        this.components.setData(this.boardKey, null); this.overlay?.(); this.overlay = null; this.overlayData = null;
+        void this.readComponents();
+      }
     }
     this.syncComponents();
   }
