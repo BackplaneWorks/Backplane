@@ -107,6 +107,49 @@ function ra_prune(dir,keep) {
     count++;bytes+=f.size;
   }
 }
+// A published asset is remembered per (project, kind, exact revision): the
+// revision is the source's dev:ino:size:mtime:ctime stamp, so it names one
+// file. The hub answers a later request for that same revision from this
+// private index without starting a child (about 0.24 s of every request);
+// any doubt falls back to the child.
+function ra_memo_name(crypto,cwd,kind,revision) {
+  return crypto.createHash('sha256').update(JSON.stringify([cwd,String(kind),revision])).digest('hex')+'.json';
+}
+function ra_memo_dir(create) {
+  const {fs,path}=ra_modules(),dir=path.join(ra_cache(create),'memo');
+  if(create&&!fs.existsSync(dir))fs.mkdirSync(dir,{mode:0o700});
+  const st=fs.lstatSync(dir);
+  if(!st.isDirectory()||st.isSymbolicLink()||(typeof process.getuid==='function'&&st.uid!==process.getuid())||(st.mode&0o077)!==0)throw Error('Asset memo directory is unavailable.');
+  return dir;
+}
+function ra_memo_write(cwd,kind,revision,asset) {
+  const {fs,path,crypto}=ra_modules();let temp=null;
+  try {
+    const dir=ra_memo_dir(true),name=ra_memo_name(crypto,fs.realpathSync(cwd),kind,revision);
+    temp=path.join(dir,`.memo-${process.pid}-${crypto.randomBytes(12).toString('hex')}.tmp`);
+    fs.writeFileSync(temp,JSON.stringify({kind:String(kind),revision,asset}),{mode:0o600,flag:'wx'});fs.renameSync(temp,path.join(dir,name));temp=null;
+    const names=fs.readdirSync(dir).filter(n=>/^[0-9a-f]{64}\.json$/.test(n)).map(n=>({n,t:fs.statSync(path.join(dir,n)).mtimeMs})).sort((a,b)=>b.t-a.t);
+    for(const f of names.slice(64))try{fs.unlinkSync(path.join(dir,f.n));}catch{}
+  }catch{}finally{if(temp)try{fs.unlinkSync(temp);}catch{}}
+}
+function render_asset_memo(cwd,kind,expected) {
+  const {fs,path,crypto}=ra_modules();let file=null;
+  try {
+    if(!expected)return '';
+    const dir=ra_memo_dir(false),p=path.join(dir,ra_memo_name(crypto,fs.realpathSync(cwd),kind,expected));
+    if(!fs.existsSync(p))return '';
+    const st=fs.lstatSync(p);
+    if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1||(typeof process.getuid==='function'&&st.uid!==process.getuid())||(st.mode&0o077)!==0||st.size>16000)return '';
+    const memo=JSON.parse(fs.readFileSync(p,'utf8')),asset=memo?.asset;
+    if(memo?.revision!==expected||memo?.kind!==String(kind)||!asset||asset.revision!==expected||!/^[0-9a-f]{64}$/.test(asset.sha256||''))return '';
+    // the source is still exactly the revision asked for
+    if(ra_stamp(fs.statSync(asset.source,{bigint:true}))!==expected)return '';
+    // and its published copy is still the private, immutable file it was
+    const a=path.join(ra_cache(false),asset.sha256+'.glb');ra_regular(fs,a,{privateFile:true});file=ra_open(fs,a);
+    if((Number(file.st.mode)&0o222)!==0||Number(file.st.size)!==asset.bytes)return '';
+    return ra_json({asset});
+  }catch{return '';}finally{if(file)fs.closeSync(file.fd);}
+}
 function render_asset_authorize(cwd,requested,canonical,kind,expected) {
   try {return ra_json(ra_authorize(cwd,requested,canonical,kind,expected));}catch(e){return ra_error(e);}
 }
@@ -132,6 +175,7 @@ function render_asset_publish(cwd,source,canonical,kind,expected,glb,missing) {
     const extras=json.asset?.extras||{},orientation=extras.unit==='mm'&&String(extras.up).toUpperCase()==='Z'?'step-z-up-mm':authorized.kind==='step'?'step-z-up-mm':'gltf-y-up';
     const asset={url:'/viewer-asset?id='+sha256,source:authorized.source,revision:authorized.revision,bytes:size,sha256,orientation};
     if(missing)asset.missingModels=missing.slice(0,500);
+    ra_memo_write(cwd,kind,expected,asset);
     return ra_json({asset});
   }catch(e){return ra_error(e);}finally{if(input)fs.closeSync(input.fd);if(outFd!==null)fs.closeSync(outFd);if(temp)try{fs.unlinkSync(temp);}catch{}}
 }
@@ -147,3 +191,4 @@ function render_asset_lookup(id) {
 io_eff(CID(RenderAssetFx.authorize),render_asset_authorize);
 io_eff(CID(RenderAssetFx.publish),render_asset_publish);
 io_eff(CID(RenderAssetFx.lookup),render_asset_lookup);
+io_eff(CID(RenderAssetFx.memo),render_asset_memo);

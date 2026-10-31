@@ -15,6 +15,10 @@ def RenderAssetFx.publish(cwd: String, path: String, canonical: String, kind: St
 def RenderAssetFx.lookup(id: String) -> IO(String):
   import "./effects/render_asset.js"
 
+# a published asset for this project, kind and exact revision, or ""
+def RenderAssetFx.memo(cwd: String, kind: String, revision: String) -> IO(String):
+  import "./effects/render_asset.js"
+
 def RenderAsset.error(s: String) -> IO(Unit):
   IO.print(J.Json.show(J.Json.obj([J.KV{"error", J.Str{s}}])))
 
