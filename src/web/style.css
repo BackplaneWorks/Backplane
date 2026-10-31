@@ -1782,8 +1782,8 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .kvs > .boat-chip { color: var(--accent); background: none; border: 1px solid var(--line); }
 .kvs > button.tool { display: inline-flex; align-items: center; gap: 5px; }
 /* the palette's field grows with the text size; where it is squeezed (a
-   crowded bar, a big text size) it says "Commands" rather than cut its
-   sentence */
+   crowded bar, a big text size, a window under 1180 px) it says
+   "Commands" rather than cut its sentence or show an empty box */
 .topbar .cmd { display: flex; align-items: center; gap: 8px; height: 26px; width: calc(260px * var(--text-scale, 100) / 100); flex: 0 1 calc(260px * var(--text-scale, 100) / 100); min-width: 0; padding: 0 5px 0 8px; background: var(--bg); color: var(--faint); border: 1px solid var(--line); text-align: left; container-type: inline-size; }
 .topbar .cmd:hover { color: var(--dim); border-color: var(--faint); }
 .topbar .cmd svg { flex: none; }
@@ -1809,7 +1809,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .thread-content > .subs.dock { border-bottom: 1px solid var(--line); }
 .thread-content > .subs.dock .subs-body { border-top: 0; }
 @media (max-width: 1300px) { .topbar .kv.branch { display: none; } }
-@media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; container-type: normal; } .topbar .cmd-text { display: none; } }
+@media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; container-type: normal; } .topbar .cmd-long { display: none; } .topbar .cmd-short { display: inline; } }
 @media (max-width: 960px) { .topbar .name, .topbar .kv.changes { display: none; } }
 /* folded under the top bar: a 44 px strip (view.bend's View.strip), the
    button that unfolds it over the projects' badges, each in its colour */
