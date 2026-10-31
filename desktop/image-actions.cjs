@@ -75,7 +75,17 @@ function createImageActions({ electron, origin, runFile = run, platform = proces
 function installImageMenu(window, { electron, trusted, actions }) {
   const wc = window.webContents;
   wc.on('context-menu', (_event, params) => {
-    if (!trusted(params) || params.mediaType !== 'image') return;
+    if (!trusted(params)) return;
+    if (params.isEditable) {
+      const item = (role, flag) => ({role, enabled:params.editFlags?.[flag] === true});
+      electron.Menu.buildFromTemplate([
+        item('undo', 'canUndo'), item('redo', 'canRedo'), {type:'separator'},
+        item('cut', 'canCut'), item('copy', 'canCopy'), item('paste', 'canPaste'),
+        {type:'separator'}, item('selectAll', 'canSelectAll'),
+      ]).popup({window});
+      return;
+    }
+    if (params.mediaType !== 'image') return;
     const items = [{ label: 'Copy image', enabled: params.hasImageContents, click: () => {
       if (wc.isDestroyed() || !trusted(params)) return;
       // Chromium's copyImageAt also writes HTML containing the source URL.

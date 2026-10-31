@@ -53,3 +53,12 @@ test('native menu leaves non-image and untrusted-frame menus alone', () => {
   listener({}, {frameURL:origin,mediaType:'none'});listener({}, {frameURL:'https://guest',mediaType:'image'});assert.equal(menus,0);
   listener({}, {frameURL:origin,mediaType:'image',hasImageContents:false});assert.equal(menus,1);
 });
+test('trusted editable fields have the native editing menu with Chromium edit availability',()=>{
+  let listener,items,popups=0;
+  const window={webContents:{on:(_name,fn)=>listener=fn}};
+  installImageMenu(window,{electron:{Menu:{buildFromTemplate:value=>{items=value;return{popup:options=>{assert.equal(options.window,window);popups++;}};}}},trusted:p=>p.frameURL===origin,actions:{local:()=>false}});
+  const params={frameURL:origin,mediaType:'none',isEditable:true,editFlags:{canUndo:true,canRedo:false,canCut:true,canCopy:true,canPaste:false,canSelectAll:true}};
+  listener({},params);
+  assert.deepEqual(items.filter(x=>x.role).map(x=>[x.role,x.enabled]),[['undo',true],['redo',false],['cut',true],['copy',true],['paste',false],['selectAll',true]]);
+  listener({},{...params,frameURL:'https://other'});assert.equal(popups,1);
+});
