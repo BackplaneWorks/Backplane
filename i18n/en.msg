@@ -1353,7 +1353,7 @@ intent.edit.tip = Change it in the message box; Save (Ctrl+Enter) keeps it
 intent.save.tip = Save the intent (Ctrl+Enter); Enter starts a new line
 intent.saved = Intent saved
 
-diff.revert.confirm = Discard this thread’s uncommitted changes, including new files?
+diff.revert.confirm = Put the files back as they were when this thread began? Every change shown below is undone, committed ones and new files too. Commits stay in git.
 account.label.required = Enter an account label.
 
 bots.name.rule = 1–24 letters, digits, - or _.

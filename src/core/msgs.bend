@@ -1175,9 +1175,9 @@ def T.diff.pr.tip(l: I.Loc) -> String:
 def T.diff.revert.confirm(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Discard this thread’s uncommitted changes, including new files?"
+      "Put the files back as they were when this thread began? Every change shown below is undone, committed ones and new files too. Commits stay in git."
     case I.Ja{}:
-      "新しいファイルを含め、このスレッドの未コミットの変更を破棄しますか？"
+      "ファイルをこのスレッドの開始時点に戻しますか？下に表示された変更は、コミット済みの変更や新しいファイルも含めてすべて取り消されます。コミットは git に残ります。"
 
 def T.diff.revert.tip(l: I.Loc) -> String:
   match l:

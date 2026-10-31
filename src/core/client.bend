@@ -3147,7 +3147,7 @@ def Palette.threads(+l: I.Loc, ts: List<&2, M.Thread>) -> List<&2, PItem>:
 
 def Palette.actions(+l: I.Loc, +pid: String) -> List<&2, PItem>:
   [PItem{MSG.T.palette.newthread(l), "new-thread", pid}, PItem{MSG.T.palette.diff(l), "diff", ""}, PItem{MSG.T.palette.terminal(l), "key:term", ""},
-   PItem{MSG.T.palette.attach(l), "key:attach", ""}, PItem{MSG.T.palette.commit(l), "git", "commit_push"}, PItem{MSG.T.palette.pr(l), "git", "commit_push_pr"}, PItem{MSG.T.palette.revert(l), "revert", "0"},
+   PItem{MSG.T.palette.attach(l), "key:attach", ""}, PItem{MSG.T.palette.commit(l), "git", "commit_push"}, PItem{MSG.T.palette.pr(l), "git", "commit_push_pr"}, PItem{MSG.T.palette.revert(l), "revert", "ask"},
    PItem{MSG.T.palette.settle(l), "settle", ""}, PItem{MSG.T.palette.pin(l), "pin", ""}, PItem{MSG.T.palette.archive(l), "archive", ""}, PItem{MSG.T.palette.unarchive(l), "unarchive", ""}, PItem{MSG.T.palette.delete(l), "delete", ""},
    PItem{MSG.T.palette.snooze.hour(l), "snooze", "1h"}, PItem{MSG.T.palette.snooze.tomorrow(l), "snooze", "tomorrow"}, PItem{MSG.T.palette.snooze.week(l), "snooze", "1w"}, PItem{MSG.T.palette.unsnooze(l), "snooze", "off"},
    PItem{MSG.T.palette.search(l), "key:search", ""}, PItem{MSG.T.palette.findfile(l), "key:files", ""},
@@ -7281,7 +7281,10 @@ def Ui.delete(+u: Ui) -> Act:
   Ui.delete.k(Ui.deleting(u), u)
 
 # Revert asks before replacing the working copy, just as Delete asks
-# before removing a thread. Confirmation belongs to this thread and turn.
+# before removing a thread. The web's Revert ("ask": the diff's button, the
+# palette) arms it for the thread on show; its own Revert ("confirm") sends
+# it. A turn number is a revert already confirmed: the phones' native
+# dialogs ask first and send "0", so it goes at once, as it always did.
 def Ui.reverting(+u: Ui) -> Bool:
   Bool.and(Bool.not(String.is_empty(Ui.sel(u))), String.eq(Ui.scratch(u, "@revert"), Ui.sel(u)))
 
@@ -7292,15 +7295,17 @@ def Ui.revert.confirm(armed: Bool, +u: Ui) -> Act:
     case False{}:
       Act{u, Nil{}}
 
-def Ui.revert.k(confirm: Bool, +u: Ui, +turn: String) -> Act:
-  match confirm:
-    case True{}:
+def Ui.revert.k(i: Nat, +u: Ui, +turn: String) -> Act:
+  match i:
+    case 0n:
       Ui.revert.confirm(Ui.reverting(u), u)
-    case False{}:
-      Act{Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "diff", ""), "@revert", Ui.sel(u)), "@revert.turn", Bool.pick(String, String.is_empty(turn), "0", turn)), Nil{}}
+    case 1n:
+      Act{Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "diff", ""), "@revert", Ui.sel(u)), "@revert.turn", "0"), Nil{}}
+    case _:
+      Ui.on_thread.p(Ui.scratch_set(u, "@revert", ""), "git.revert", [J.KV{"turn", J.Num{Bool.pick(String, String.is_empty(turn), "0", turn)}}])
 
 def Ui.revert(+u: Ui, +turn: String) -> Act:
-  Ui.revert.k(String.eq(turn, "confirm"), u, turn)
+  Ui.revert.k(C.Codec.pos(["confirm", "ask"], turn), u, turn)
 
 # Acting on a thread's row
 # ------------------------

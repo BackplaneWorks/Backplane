@@ -13474,3 +13474,11 @@ law checkpoint_untouched_not_rewritten:
 
 law checkpoint_touched_once:
   {LCP.Checkpoint.touched([M.MessagePosted{"t", "q", M.User{}, "x", 1n}, M.TurnChanged{"u", M.Running{}, 2n}, M.TurnChanged{"t", M.Completed{}, 3n}]) == ["t", "u"] : List<&2, String>}
+
+# the web's Revert asks first; a turn number is a Revert already confirmed
+# (the phones' own dialogs) and is sent at once
+law revert_ask_sends_nothing:
+  {U.Act.cmds(U.Ui.revert(U.Ui.select.k(U.Ui.init(0n), "t1"), "ask")) == Nil{} : List<&2, U.Cmd>}
+
+law revert_turn_sent_at_once:
+  {List.length(&2, U.Cmd, U.Act.cmds(U.Ui.revert(U.Ui.select.k(U.Ui.init(0n), "t1"), "0"))) == 1n : Nat}

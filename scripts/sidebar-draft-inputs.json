@@ -40,7 +40,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "7d826fd5a22f28ded27dd21ce0363ac97359cfb0b47613bc5a1d2fd8c9d26d48",
+    "src/core/client.bend": "07539a1c7f2f862480c551b9e83c7ec1da0683c2916678a40d140392c3fb49ed",
     "src/core/codec.bend": "7e53e017f449e3747df60d2779ab90fd6be43d0ddb3c0414ab9fa9e4cf4e8694",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -85,7 +85,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "1c7c4e97d361a5ea50e465aab26ce92d425d02ea67e4030a1de7253589a95a9f",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "43f9492581909c2ba7a8c10be52da2561e7e4f2bbfcb015d28a1ec19492cf32a",
+    "src/core/msgs.bend": "1049f174e9691b14d378a43fb7f5691be0d0b06effc30c8ca45873ce83bf8680",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
@@ -171,7 +171,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "5fe3203cc11d496bc618f7267fce6c646b5aa72daf1db37f41358622a80d52ec"
+    "src/web/view.bend": "798495c920e30b8b4d5b82d6dd05de6af6a8644a0ed3ff6d337396104b9d6de8"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -376,5 +376,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "J bot navigation and Settings changes retained with main tool-fold and desktop draft merges; sidebar readers reviewed, all 24 image checks pass"
+  "reviewNote": "Let the phones revert again and say what Revert undoes: sidebar drafts unchanged (sidebar_draft_image_test ok)"
 }

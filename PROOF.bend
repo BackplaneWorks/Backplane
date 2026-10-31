@@ -13868,4 +13868,8 @@ def Laws.routine_delete_first_press_preserves():
   {==}
 
 def Laws.bot_navigation_restores_tab():
+def Laws.revert_ask_sends_nothing():
+  {==}
+
+def Laws.revert_turn_sent_at_once():
   {==}

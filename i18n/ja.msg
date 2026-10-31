@@ -1376,7 +1376,7 @@ intent.edit.tip = メッセージ欄で変更し、保存（Ctrl+Enter）で保�
 intent.save.tip = 意図を保存（Ctrl+Enter）・Enterで改行
 intent.saved = 意図を保存しました
 
-diff.revert.confirm = 新しいファイルを含め、このスレッドの未コミットの変更を破棄しますか？
+diff.revert.confirm = ファイルをこのスレッドの開始時点に戻しますか？下に表示された変更は、コミット済みの変更や新しいファイルも含めてすべて取り消されます。コミットは git に残ります。
 account.label.required = アカウントの名前を入力してください。
 
 bots.name.rule = 1〜24文字の英数字、-、_。

@@ -2681,7 +2681,7 @@ def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "diff-head"}], [
       D.Dom.span("summary", Bool.pick(String, none, MSG.T.viewer.diff.empty(lc), DF.Diff.summary(fs))),
       D.El{"div", "", [D.At{"class", "diff-btns"}], [
-        View.diff.btn(none, "", "revert", "0", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+        View.diff.btn(none, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
         View.diff.btn(none, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
         View.diff.btn(none, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
     D.El{"div", "", [D.At{"class", "diff-body"}], View.dfiles(fs)}]
