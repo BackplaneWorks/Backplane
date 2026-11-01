@@ -188,6 +188,7 @@ function setAttrs(el, oldAttrs, attrs) {
       } else if (el.getAttribute(a.name) !== a.value) {
         el.setAttribute(a.name, a.value);
         if (a.name === "data-cat") el.src = catUri(a.value);
+        else if (a.name === "data-wheel") wheelHook(el);
       }
     } else {
       const name = "data-on-" + a.event;
@@ -1900,13 +1901,22 @@ document.addEventListener("click", (e) => {
   frameFlush(el);
   dispatch(el.getAttribute("data-pt"), th(e.clientX - r.left, r.width) + " " + th(e.clientY - r.top, r.height));
 }, true);
-document.addEventListener("wheel", (e) => {
-  const el = e.target.closest?.("[data-wheel]");
-  if (!el) return;
-  e.preventDefault();
-  frameFlush(el);
-  dispatch(el.getAttribute("data-wheel"), String(Math.round(Math.max(-600, Math.min(600, e.deltaY)))));
-}, { passive: false });
+// A [data-wheel] element (a browser frame, a terminal) takes the wheel
+// itself. Its listener is its own (setAttrs hooks it), never the
+// document's: a non-passive wheel listener on the document makes every
+// wheel on the page wait for the main thread before it may scroll (the
+// timeline's wheel→frame went from about 10 to 30-50 ms).
+const wheelHooked = new WeakSet();
+function wheelHook(el) {
+  if (wheelHooked.has(el)) return;
+  wheelHooked.add(el);
+  el.addEventListener("wheel", (e) => {
+    if (!el.hasAttribute("data-wheel") || e.target.closest?.("[data-wheel]") !== el) return;
+    e.preventDefault();
+    frameFlush(el);
+    dispatch(el.getAttribute("data-wheel"), String(Math.round(Math.max(-600, Math.min(600, e.deltaY)))));
+  }, { passive: false });
+}
 const FRAME_KEYS = { Enter: 1, Backspace: 1, Tab: 1, Escape: 1, Delete: 1, ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, Home: 1, End: 1, PageUp: 1, PageDown: 1 };
 document.addEventListener("keydown", (e) => {
   const el = e.target.closest?.("[data-keyto]");

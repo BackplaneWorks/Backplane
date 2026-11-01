@@ -431,16 +431,76 @@ def Items.json(xs: List<&2, Item>, acc: List<&2, J.Json>) -> J.Json:
     case Nil{}: J.Json.arr(List.reverse(&2, J.Json, acc))
     case r <> t: Items.json(t, Item.json(r) <> acc)
 
-def Plan.output(+items: List<&2, Item>, +total: Px, +top: Px, +view: Px, preferred: Anchor, +trackOffset: Px) -> J.Json:
+# The valid range: the tops (logical) over which a scroll plan would mount
+# the same rows and say the same atEnd. The mounted rows are those
+# overlapping [top - ov, top + view + ov]; that set changes only when an
+# edge crosses a row's start or end, so the range runs from the nearest
+# such crossing below to the nearest above (1 px in from each, where a row
+# joins at equality), within [0, the first top that is atEnd). The adapter
+# skips the plan for a scroll inside it (law timeline_valid_*).
+type Edges is Data:
+  Edges{endBelow: Maybe<&2, Px>, startIn: Maybe<&2, Px>, endIn: Maybe<&2, Px>, startAbove: Maybe<&2, Px>}
+
+def Edge.max(m: Maybe<&2, Px>, +x: Px) -> Maybe<&2, Px>:
+  match m:
+    case None{}: Some{x}
+    case Some{y}: Some{Px.max(x, y)}
+
+def Edge.min(m: Maybe<&2, Px>, +x: Px) -> Maybe<&2, Px>:
+  match m:
+    case None{}: Some{x}
+    case Some{y}: Some{Px.min(x, y)}
+
+def Edge.pick(take: Bool, m: Maybe<&2, Px>, +x: Px, max: Bool) -> Maybe<&2, Px>:
+  match take max:
+    case False{} _: m
+    case True{} True{}: Edge.max(m, x)
+    case True{} False{}: Edge.min(m, x)
+
+# one row's start and end against lo and hi
+def Edges.step(e: Edges, +start: Px, +end: Px, +lo: Px, +hi: Px) -> Edges:
+  match e:
+    case Edges{eb, si, ei, sa}:
+      Edges{Edge.pick(Bool.not(Px.le(lo, end)), eb, end, True{}), Edge.pick(Px.le(start, hi), si, start, True{}),
+        Edge.pick(Px.le(lo, end), ei, end, False{}), Edge.pick(Bool.not(Px.le(start, hi)), sa, start, False{})}
+
+def Edges.scan(xs: List<&2, Item>, +lo: Px, +hi: Px, e: Edges) -> Edges:
+  match xs:
+    case Nil{}: e
+    case +r <> t: Edges.scan(t, lo, hi, Edges.step(e, Item.start(r), Item.end(r), lo, hi))
+
+def Valid.from(m: Maybe<&2, Px>, +shift: Px, +d: Px) -> Px:
+  match m:
+    case None{}: d
+    case Some{x}: Px.add(x, shift)
+
+type Span is Data:
+  Span{lo: Px, hi: Px}
+
+def Valid.range(atEnd: Bool, e: Edges, +ov: Px, +view: Px, +total: Px) -> Span:
+  match atEnd e:
+    case True{} _: Span{Px.int(1n), Px.zero()}
+    case False{} Edges{eb, si, ei, sa}:
+      +far = Px.sub(total, Px.add(view, Px.int(5n)))
+      +down = Px.neg(Px.add(view, ov))
+      Span{Px.max(Px.zero(), Px.max(Valid.from(eb, Px.add(ov, Px.int(1n)), Px.zero()), Valid.from(si, down, Px.zero()))),
+        Px.min(far, Px.min(Valid.from(ei, ov, far), Valid.from(sa, Px.sub(down, Px.int(1n)), far)))}
+
+def Valid.json(r: Span, +trackOffset: Px) -> J.Json:
+  match r:
+    case Span{lo, hi}: J.Json.arr([Px.json(Px.add(lo, trackOffset)), Px.json(Px.add(hi, trackOffset))])
+
+def Plan.output(+items: List<&2, Item>, +total: Px, +top: Px, +view: Px, preferred: Anchor, +trackOffset: Px, +extra: Px) -> J.Json:
   +a = Anchor.prefer(Items.find(items, Anchor.key(preferred)), top, view,
     Anchor.capture(items, top, Anchor{"", Px.zero()}))
-  +overscan = Px.add(view, Px.int(720n))
+  +overscan = Px.add(Px.add(view, Px.int(720n)), Px.max(Px.zero(), extra))
   +visible = Window.visible(items, Anchor.key(a), Px.sub(top, overscan), Px.add(Px.add(top, view), overscan))
   J.Json.obj([J.KV{"items", Items.json(items, Nil{})}, J.KV{"visible", Items.json(visible, Nil{})},
     J.KV{"total", Px.json(total)}, J.KV{"top", Px.json(Px.add(top, trackOffset))}, J.KV{"view", Px.json(view)},
     J.KV{"physicalTotal", Px.json(Px.ceil(Px.add(Px.max(total, Px.add(top, view)), trackOffset)))},
     J.KV{"logicalTop", Px.json(top)}, J.KV{"trackOffset", Px.json(trackOffset)},
-    J.KV{"atEnd", J.Flag{End.at(total, top, view)}}, J.KV{"anchor", J.Str{Anchor.key(a)}}, J.KV{"offset", Px.json(Anchor.offset(a))}])
+    J.KV{"atEnd", J.Flag{End.at(total, top, view)}}, J.KV{"anchor", J.Str{Anchor.key(a)}}, J.KV{"offset", Px.json(Anchor.offset(a))},
+    J.KV{"valid", Valid.json(Valid.range(End.at(total, top, view), Edges.scan(items, Px.sub(top, overscan), Px.add(Px.add(top, view), overscan), Edges{None{}, None{}, None{}, None{}}), overscan, view, total), trackOffset)}])
 
 def Plan.layout(layout: Layout, +input: J.Json) -> J.Json:
   match layout:
@@ -452,7 +512,7 @@ def Plan.layout(layout: Layout, +input: J.Json) -> J.Json:
       +inputTop = Px.sub(Px.get(input, "top", "0"), oldOffset)
       +a = Plan.preferred(mode, input, inputTop, view)
       +top = Plan.top(mode, input, items, total, inputTop, view, previous, a)
-      Plan.output(items, total, top, view, a, Bool.pick(Px, String.eq(mode, "init"), Px.zero(), oldOffset))
+      Plan.output(items, total, top, view, a, Bool.pick(Px, String.eq(mode, "init"), Px.zero(), oldOffset), Px.get(input, "overscan", "0"))
 
 # A readback corrects only the physical effect of a rounded/clamped scroll
 # write. It uses the previous logical geometry without following or selecting
@@ -468,7 +528,7 @@ def Plan.readback(+input: J.Json) -> J.Json:
   +residual = Readback.offset(J.Json.get_nat(input, "readbackAttempt", 1n), Px.add(oldOffset, Px.sub(Px.get(input, "top", "0"), requested)))
   Plan.output(Items.read(J.Json.elems(J.Json.get_obj(previous, "items")), Nil{}),
     Px.get(previous, "total", "0"), logicalTop, Px.get(previous, "view", "0"),
-    Anchor{J.Json.get_str(previous, "anchor", ""), Px.get(previous, "offset", "0")}, residual)
+    Anchor{J.Json.get_str(previous, "anchor", ""), Px.get(previous, "offset", "0")}, residual, Px.get(input, "overscan", "0"))
 
 def Plan.mode(readback: Bool, +input: J.Json) -> J.Json:
   match readback:

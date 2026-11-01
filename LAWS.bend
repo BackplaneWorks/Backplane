@@ -14638,3 +14638,19 @@ law view_page_splice_default_off:
 law view_page_splice_setting_on:
   {CHATSIDE.Memo.page.on(M.State.setting(M.State.empty(), "view.splice.page", "on")) == True{} : Bool}
 # END page splice (H)
+
+# The timeline's valid range (timeline-virtual.bend's Valid.range): at the
+# end it is empty, so every scroll there plans (follow and atEnd stay
+# exact); a row that does not take part keeps an edge as it was
+law timeline_valid_end_empty:
+  for e: TLVIRTUAL.Edges
+  for +ov: TLVIRTUAL.Px
+  for +view: TLVIRTUAL.Px
+  for +total: TLVIRTUAL.Px
+  {TLVIRTUAL.Valid.range(True{}, e, ov, view, total) == TLVIRTUAL.Span{TLVIRTUAL.Px.int(1n), TLVIRTUAL.Px.zero()} : TLVIRTUAL.Span}
+
+law timeline_valid_edge_untaken:
+  for m: Maybe<&2, TLVIRTUAL.Px>
+  for +x: TLVIRTUAL.Px
+  for max: Bool
+  {TLVIRTUAL.Edge.pick(False{}, m, x, max) == m : Maybe<&2, TLVIRTUAL.Px>}

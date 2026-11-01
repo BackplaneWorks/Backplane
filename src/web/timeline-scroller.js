@@ -30,7 +30,24 @@ export class TimelineScroller {
     this.track.className = 'timeline-virtual-track';
     Object.assign(this.track.style, { position: 'relative', width: '100%' });
     el.appendChild(this.track);
-    this._onScroll = () => this._request('scroll');
+    this._onScroll = () => this._scrolled();
+    this._stale = false; // a scroll inside the plan's valid range left it as it was
+  }
+
+  // A scroll inside the last plan's valid range (timeline-virtual.bend's
+  // Valid.range: the tops over which a plan mounts the same rows and says
+  // the same atEnd) keeps that plan: no plan, no render, no measure. Its
+  // anchor and offset are then stale until the next plan (position() plans
+  // first). The host still hears of the scroll (onChange).
+  _scrolled() {
+    const p = this.lastPlan, top = this.el.scrollTop;
+    if (p?.valid && this._initialized && !this._pending && !this._busy && top >= p.valid[0] && top <= p.valid[1]) {
+      RR?.n("tl.scroll.kept");
+      this._stale = true;
+      this.callbacks.onChange(this);
+      return;
+    }
+    this._request('scroll');
   }
 
   get followEnabled() { return this._follow; }
@@ -171,6 +188,7 @@ export class TimelineScroller {
         // Report the triggering operation, not a subsequent measurement pass.
         changeMode ??= request.mode;
         RR?.n("tl.plan." + request.mode);
+        this._stale = false;
         const plan = this.callbacks.plan({
           keys: this._keys.slice(), sizes: { ...this.sizes }, estimate: this._estimate(),
           previous: this.lastPlan, top: this.el.scrollTop,
@@ -282,6 +300,7 @@ export class TimelineScroller {
   }
 
   position() {
+    if (this._stale && !this._destroyed) this._request('scroll');
     const p = this.lastPlan;
     return p ? { top: p.logicalTop ?? p.top, atEnd: p.atEnd, anchor: p.anchor, offset: p.offset }
       : { top: this.el.scrollTop, atEnd: true, anchor: null, offset: 0 };
