@@ -1435,7 +1435,26 @@ function voiceMicPress(value) {
   voiceMic.start().catch(err => console.warn("dictation: no microphone", err));
   return "client";
 }
+// The page owns its draft: dictation's words are placed into it here, by
+// the same Bend def as everywhere (client.bend's Voice.place); what that
+// keeps between messages is kept per thread.
+const voicePlace = new Map();
+function voiceWords(envelope) {
+  if (envelope.t !== "voice" || !["words", "live", "idle"].includes(envelope.ev) || !envelope.thread) return;
+  const th = envelope.thread, session = currentSession();
+  const field = document.getElementById("composer");
+  const owner = document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread");
+  const here = session?.sel === th && field && owner === th;
+  let draft = "";
+  try { draft = here ? field.value : (localStorage.getItem(DRAFT + th) || ""); } catch {}
+  const r = Wire.plain(App.voice_place(Wire.json(voicePlace.get(th) || {}), draft, Wire.json(envelope)));
+  voicePlace.set(th, r.keep || {});
+  if (typeof r.draft !== "string" || r.draft === draft) return;
+  if (here) localPresentation("draft", r.draft, session);
+  else try { if (r.draft) localStorage.setItem(DRAFT + th, r.draft); } catch {}
+}
 function voiceMicHeard(envelope) {
+  voiceWords(envelope);
   if (envelope.t === "reply" && typeof envelope.audio === "string" && envelope.audio) voiceMic.address(envelope.audio);
   if (envelope.t === "reply" && envelope.engine !== undefined && !envelope.audio && voiceMic.active) voiceMic.gone();
   if (envelope.t === "voice" && (envelope.ev === "idle" || envelope.ev === "error")) voiceMic.gone();

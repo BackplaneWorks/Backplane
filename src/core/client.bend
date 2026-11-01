@@ -9118,6 +9118,31 @@ def Voice.undo.k(+u: Ui, x: VDC.VFx, +n: Nat) -> Act:
 def Voice.undo(+u: Ui, +n: Nat) -> Act:
   Voice.undo.k(u, Maybe.default(&2, VDC.VFx, List.get(&2, VDC.VFx, Voice.fixes(u), n), VDC.VFx{"", ""}), n)
 
+# A client that owns its draft (the hub-drawn page, the phones) places a
+# voice message's words itself: what Voice.recv keeps between messages
+# ("keep": @voice.pos and the rest) comes back with the new draft, and
+# goes in with the next message (mobile/session.bend's Session.voice, the
+# web's app.bend voice_place)
+def Voice.place.keys() -> List<&2, String>:
+  ["@voice.pos", "@voice.tl", "@voice.to", "@voice.at", "@voice.part", "@voice.uth"]
+
+def Voice.place.in(ks: List<&2, String>, +o: J.Json, u: Ui) -> Ui:
+  match ks:
+    case Nil{}:
+      u
+    case +k <> t:
+      Voice.place.in(t, o, Ui.scratch_set(u, k, J.Json.get_str(o, k, "")))
+
+def Voice.place.out(ks: List<&2, String>, +u: Ui) -> List<&2, J.KV>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case +k <> t:
+      J.KV{k, J.Str{Ui.scratch(u, k)}} <> Voice.place.out(t, u)
+
+def Voice.place.k(+thread: String, +u: Ui) -> J.Json:
+  J.Json.obj([J.KV{"draft", J.Str{Ui.scratch(u, thread)}}, J.KV{"keep", J.Json.obj(Voice.place.out(Voice.place.keys(), u))}])
+
 def Voice.dev(+o: J.Json) -> String:
   Bool.pick(String, String.is_empty(J.Json.get_str(o, "label", "")), J.Json.get_str(o, "device", ""), J.Json.get_str(o, "label", ""))
 
@@ -9156,6 +9181,10 @@ def Voice.recv.k(i: Nat, +u: Ui, +o: J.Json) -> Ui:
 # a {"t":"voice"} message from the hub
 def Voice.recv(+u: Ui, +o: J.Json) -> Ui:
   Voice.recv.k(C.Codec.pos(["live", "part", "text", "level", "hint", "stopping", "error", "idle", "words", "loaded"], J.Json.get_str(o, "ev", "")), u, o)
+
+# a voice message into a draft the client keeps (keep: the last answer's)
+def Voice.place(+keep: J.Json, +draft: String, +o: J.Json) -> J.Json:
+  Voice.place.k(J.Json.get_str(o, "thread", ""), Voice.recv(Voice.place.in(Voice.place.keys(), keep, Ui.scratch_set(Ui.init(0n), J.Json.get_str(o, "thread", ""), draft)), o))
 
 # what the hub answers about voice: the key (masked), the dictionary, the
 # microphones ("@voice.set" once known)
