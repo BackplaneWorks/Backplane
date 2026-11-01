@@ -122,10 +122,10 @@ Options: `--scenarios open,idle,type1,burst,paste,pastebig,bigtype,scroll,stress
 ## Gate rules
 
 - The budgets (`budgets.json`), per scenario, 1.25x + 2 of the worst run
-  written. Scroll and stress windows are budgeted per page landed
-  (mutations, `patch()` calls, nodes recreated, full renders and hub views,
-  each over the window's `view.page` replies), since their totals follow how
-  many pages land. Bytes get 1.5x + 8 KB.
+  written. Scroll and stress windows are budgeted per hub view landed
+  (mutations, `patch()` calls, nodes recreated, full renders, writes outside
+  the operation's regions), since their totals follow how many views land,
+  and their views per page asked for. Bytes get 1.5x + 8 KB.
 - Always failing: a window that does not finish (a timeout, the view not
   current at its end), any "Loading" placeholder, a blank frame while
   scrolling, a wheel stall in a stress window, and a stuck view (after a

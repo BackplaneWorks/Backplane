@@ -478,14 +478,16 @@ function markdown(rep: any) {
 // their sizes are not
 const hubViews = (r: any) => Object.entries(r.hubMsgs as Record<string, any>).filter(([k]) => k.startsWith("reply:view.")).reduce((n, [, v]) => n + v.n, 0);
 
-// Scroll and stress windows: their counts follow how many pages land in
-// them, so their budgets are per page landed (replies to view.page; a
-// window with none counts as one)
+// Scroll and stress windows: their counts follow how many hub views land
+// in them (pages, and the updates around them), which varies from run to
+// run, so their budgets are per view landed (a window with none counts as
+// one), and the views themselves per page asked for
 const pages = (r: any) => Math.max(1, r.hubMsgs?.["reply:view.page"]?.n ?? 0);
+const views = (r: any) => Math.max(1, hubViews(r));
 const perPage = (r: any) => {
-  const n = pages(r);
-  return { mutationsPerPage: r.dom.records / n, domPatchPerPage: (r.counts["dom.patch"] ?? 0) / n,
-    recreatedPerPage: r.dom.recreatedIdentical / n, hubViewsPerPage: hubViews(r) / n, renderFullPerPage: (r.counts["render.full"] ?? 0) / n };
+  const n = views(r);
+  return { mutationsPerView: r.dom.records / n, domPatchPerView: (r.counts["dom.patch"] ?? 0) / n, recreatedPerView: r.dom.recreatedIdentical / n,
+    renderFullPerView: (r.counts["render.full"] ?? 0) / n, outsidePerView: r.waste.outsideRecords / n, hubViewsPerPage: hubViews(r) / pages(r) };
 };
 const paged = (kind: string) => /^(scroll|stress|slow)/.test(kind);
 
@@ -559,9 +561,9 @@ if (wb) {
     if (paged(k)) {
       // per page landed, in place of the totals that follow the page count
       const pp = perPage(r);
-      for (const n of ["mutations", "recreatedIdentical", "domPatch", "hubViews", "renderFull"] as const) delete (cur as any)[n];
-      Object.assign(cur, { mutationsPerPage: lim(pp.mutationsPerPage), domPatchPerPage: lim(pp.domPatchPerPage), recreatedPerPage: lim(pp.recreatedPerPage),
-        hubViewsPerPage: Math.ceil(pp.hubViewsPerPage * 1.25 + 1), renderFullPerPage: Math.ceil(pp.renderFullPerPage * 1.25 + 1) });
+      for (const n of ["mutations", "recreatedIdentical", "domPatch", "hubViews", "renderFull", "outsideRecords"] as const) delete (cur as any)[n];
+      Object.assign(cur, { mutationsPerView: lim(pp.mutationsPerView), domPatchPerView: lim(pp.domPatchPerView), recreatedPerView: lim(pp.recreatedPerView),
+        outsidePerView: lim(pp.outsidePerView), renderFullPerView: Math.ceil(pp.renderFullPerView * 1.25 + 1), hubViewsPerPage: Math.ceil(pp.hubViewsPerPage * 1.25 + 1) });
     }
     b[k] = b[k] ? Object.fromEntries(Object.entries(cur).map(([n, v]) => [n, Math.max(v, b[k][n as keyof typeof cur] ?? 0)])) : cur;
   }
