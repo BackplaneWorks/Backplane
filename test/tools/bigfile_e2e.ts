@@ -3,8 +3,9 @@
 //   upload    a file of --mb MB (default 200) as the body of POST /attach:
 //             it lands whole on disk, the event log grows by no more than
 //             a few KB (a message carries the path, never the bytes)
-//   limit     with "files.max.mb" at 128 a bigger body is refused (413)
-//             before it is read; back at the default it is taken
+//   limit     with "files.max.mb" under the file's size its body is
+//             refused (413) before it is read; at 512 (4000 for a file of
+//             512 MB or more) it is taken
 //   serve     GET /img streams it back whole and byte for byte, and a
 //             Range gets that part alone (206), the last bytes, or a 416
 //             past the end
@@ -114,15 +115,18 @@ try {
   const upload = (key: string) => fetch(`http://127.0.0.1:${port}/attach?thread=${encodeURIComponent(th)}&key=${key}&name=big.png`,
     { method: "POST", headers: { ...auth, "Content-Type": "application/octet-stream", "Content-Length": String(size) }, body: Bun.file(src) });
 
+  // a limit under the file refuses it; then one it fits under takes it
+  const under = MB > 128 ? "128" : "1";
+  const over = MB >= 512 ? "4000" : "512";
   if (!baseline) {
     phase = "limit";
-    send("setting.set", { key: "files.max.mb", value: "128" });
+    send("setting.set", { key: "files.max.mb", value: under });
     await sleep(500);
     const t = performance.now();
     const r = await upload("small").catch(() => null);
     const ms = performance.now() - t;
-    check(r?.status === 413, `over "files.max.mb" 128 a ${MB} MB body is refused (${r?.status}, ${ms.toFixed(0)} ms)`);
-    send("setting.set", { key: "files.max.mb", value: "512" });
+    check(r?.status === 413, `over "files.max.mb" ${under} a ${MB} MB body is refused (${r?.status}, ${ms.toFixed(0)} ms)`);
+    send("setting.set", { key: "files.max.mb", value: over });
     await sleep(500);
   }
 
