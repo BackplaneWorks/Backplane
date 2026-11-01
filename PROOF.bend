@@ -7634,6 +7634,15 @@ def Laws.settle_idle_off():
 def Laws.settle_idle_queued_stays():
   {==}
 
+def Laws.settle_idle_own_stays():
+  {==}
+
+def Laws.settle_idle_agent_launch_stays():
+  {==}
+
+def Laws.settle_idle_bot_delegated():
+  {==}
+
 def Laws.settle_idle_ephemeral_queue_goes():
   {==}
 

@@ -3339,11 +3339,13 @@ def Kids.busy(ts: List<&2, M.Task>, +parent: String) -> Bool:
     case M.Task{_, p, _, _, st, _, _, _, _} <> t:
       Bool.or(Bool.and(String.eq(p, parent), Bool.not(M.TaskState.terminal(st))), Kids.busy(t, parent))
 
-# A thread whose turn ended (completed, failed or stopped) settles once it
-# has been idle for "settle.idle.minutes" (30 by default; 0 turns this
-# off), sooner than the settle window; nothing out (Work.busy), no ask, no
-# override and no snooze, as for the window. A message wakes it (an
-# auto-settle never holds against one). Laws settle_idle_*.
+# A thread a bot set going (below, Hub.settle.bot) whose turn ended
+# (completed, failed or stopped) settles once it has been idle for
+# "settle.idle.minutes" (30 by default; 0 turns this off), sooner than the
+# settle window; nothing out (Work.busy), no ask, no override and no
+# snooze, as for the window. A thread the person started waits out the
+# window. A message wakes it (an auto-settle never holds against one).
+# Laws settle_idle_*.
 def Hub.settle.idle(+s: M.State) -> Nat:
   Nat.mul(M.Switch.num(M.Setting.get(s, "settle.idle.minutes", "30"), 0n), 60n)
 
@@ -3358,16 +3360,6 @@ def Hub.settle.ended(t: M.TurnState) -> Bool:
     case _:
       False{}
 
-def Hub.settle.w.k(ended: Bool, +idle: Nat, +w: Nat) -> Nat:
-  match ended:
-    case True{}:
-      Bool.pick(Nat, Bool.and(Nat.is_gt(idle, 0n), Nat.is_lt(idle, w)), idle, w)
-    case False{}:
-      w
-
-# the window a thread settles by: the idle one once its turn ended
-def Hub.settle.w(+t: M.Thread, +idle: Nat, +w: Nat) -> Nat:
-  Hub.settle.w.k(Hub.settle.ended(M.Thread.turn(t)), idle, w)
 
 # Ephemeral runs: a mail run or a coordinator's back office (mailrun.bend's
 # Run.is; their ids run... and mailcoord-...). One-shot by design: the
@@ -3394,6 +3386,58 @@ def Strand.k(drop: Bool, +s: M.State, +th: String, +now: Nat, rest: List<&2, M.C
     case False{}:
       rest
 
+# Work a bot set going: a thread a bot launched (thread_launch: M.Launch.by
+# names the bot's thread) or delegated (a task whose parent is a bot's
+# thread), and an ephemeral run. Only these take the idle window; the
+# person's own threads, and threads their own threads' agents started, wait
+# out the settle window (laws settle_idle_own_stays, settle_idle_*).
+def Hub.settle.bot.is(m: Maybe<&2, BT.Bot>) -> Bool:
+  match m:
+    case Some{_}:
+      True{}
+    case None{}:
+      False{}
+
+# whether a launcher's or a parent's thread is a bot's ("" is no one's)
+def Hub.settle.bot.by(+s: M.State, +by: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(by)), Hub.settle.bot.is(BT.World.of_thread(M.State.bots(s), by)))
+
+def Hub.settle.parent.go(ts: List<&2, M.Task>, +th: String) -> String:
+  match ts:
+    case Nil{}:
+      ""
+    case M.Task{_, p, +c, _, _, _, _, _, _} <> t:
+      Bool.pick(String, String.eq(c, th), p, Hub.settle.parent.go(t, th))
+
+# the thread that delegated th ("" when no task made it)
+def Hub.settle.parent(+s: M.State, +th: String) -> String:
+  match s:
+    case M.State{_, _, _, _, tk, _, _, _, _, _, _}:
+      Hub.settle.parent.go(Map.values(&2, M.Task, tk), th)
+
+def Hub.settle.bot(+s: M.State, +th: String) -> Bool:
+  Bool.or(Ephemeral.is(s, th), Bool.or(Hub.settle.bot.by(s, M.Launch.by(s, th)), Hub.settle.bot.by(s, Hub.settle.parent(s, th))))
+
+def Hub.settle.w.b(bot: Bool, +idle: Nat, +w: Nat) -> Nat:
+  match bot:
+    case True{}:
+      Bool.pick(Nat, Bool.and(Nat.is_gt(idle, 0n), Nat.is_lt(idle, w)), idle, w)
+    case False{}:
+      w
+
+# (who set it going is asked only once its turn ended and the idle window is on)
+def Hub.settle.w.k(ended: Bool, +s: M.State, +th: String, +idle: Nat, +w: Nat) -> Nat:
+  match ended:
+    case True{}:
+      Hub.settle.w.b(Bool.and(Nat.is_gt(idle, 0n), Hub.settle.bot(s, th)), idle, w)
+    case False{}:
+      w
+
+# the window a thread settles by: the idle one once its turn ended, for
+# work a bot set going
+def Hub.settle.w(+s: M.State, +t: M.Thread, +idle: Nat, +w: Nat) -> Nat:
+  Hub.settle.w.k(Hub.settle.ended(M.Thread.turn(t)), s, M.Thread.id(t), idle, w)
+
 def Strand.due(+due: Bool, +kids: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
   Bool.and(Bool.and(due, Ephemeral.is(s, M.Thread.id(t))), Bool.and(Hub.settle.ended(M.Thread.turn(t)), Nat.is_eq(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n)))
 
@@ -3402,8 +3446,9 @@ def Hub.settle.go.i(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2
     case Nil{}:
       Nil{}
     case +t <> rest:
-      Hub.settle.k(Bool.and(M.Settle.auto.at(now, Hub.settle.w(t, idle, w), t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t)))), Bool.not(M.Lifecycle.working(kids, s, t))), M.Shelf.of(t), t, now,
-        Strand.k(Strand.due(M.Settle.auto.at(now, Hub.settle.w(t, idle, w), t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t)))), kids, s, t), s, M.Thread.id(t), now, Hub.settle.go.i(rest, navs, kids, s, now, w, idle)))
+      +due = M.Settle.auto.at(now, Hub.settle.w(s, t, idle, w), t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t))))
+      Hub.settle.k(Bool.and(due, Bool.not(M.Lifecycle.working(kids, s, t))), M.Shelf.of(t), t, now,
+        Strand.k(Strand.due(due, kids, s, t), s, M.Thread.id(t), now, Hub.settle.go.i(rest, navs, kids, s, now, w, idle)))
 
 # (kids: every parent's unfinished child tasks, M.Work.kids.map; a thread
 # with any work out, children, background or watched, does not settle:
@@ -7192,6 +7237,11 @@ def Shelve.fix(+s: M.State, +cs: List<&2, M.Change>) -> List<&2, M.Change>:
 def Shelve.demo(cs: List<&2, M.Change>) -> M.State:
   M.State.replay(List.append(&2, M.Change, [M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Local{}, "", "", "claude", "", 1n},
     M.MessagePosted{"t1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"t1", M.Running{}, 2n}], cs), M.State.empty())
+
+# the same thread launched by a bot (b1, whose thread is tb1): it takes the
+# idle window (Hub.settle.bot)
+def Shelve.demo.bot(cs: List<&2, M.Change>) -> M.State:
+  Shelve.demo(List.append(&2, M.Change, [M.BotSet{"b1", "Bub", "tb1", 0n, "", 1n}, M.ThreadLaunched{"t1", "tb1", True{}, 1n}], cs))
 
 # the same with the setting settle.done on: a done thread settles at once
 def Shelve.demo.on(cs: List<&2, M.Change>) -> M.State:
