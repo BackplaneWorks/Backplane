@@ -1,6 +1,7 @@
 import Base
 import ./json.bend as J
 import ./model.bend as M
+import ./refs.bend as RF
 
 # Ordering a project (pure; docs/order.md)
 # =========================================
@@ -826,7 +827,7 @@ def Intent.edit(+intent: String) -> String:
 
 # "/intent ..." sent: the rest is the new intent (law intent_edit_round_trip)
 def Intent.is(+draft: String) -> Bool:
-  Bool.or(String.eq(String.trim(draft), "/intent"), Bool.or(String.starts_with(draft, "/intent "), String.starts_with(draft, "/intent\n")))
+  Bool.or(RF.Refs.word(draft, "/intent"), Bool.or(String.starts_with(draft, "/intent "), String.starts_with(draft, "/intent\n")))
 
 def Intent.body(+draft: String) -> String:
   String.trim(String.drop(String.trim(draft), 7n))

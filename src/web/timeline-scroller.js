@@ -1,3 +1,7 @@
+// The re-render harness's counters (test/tools/rerender), when the page
+// has __bpRender; nothing otherwise.
+const RR = globalThis.__bpRender || null;
+
 // DOM effects for the pure Bend timeline planner. Rows remain opaque to this
 // adapter; the planner owns layout, ranges, following and scroll anchoring.
 export class TimelineScroller {
@@ -17,6 +21,11 @@ export class TimelineScroller {
     this._busy = false;
     this._pending = null;
     this._initialized = false;
+    // rows to measure: made or patched since the last measure, or resized
+    // (the ResizeObserver); every other row keeps its measured height
+    this._dirty = new Set();
+    this._measureAll = true;
+    this._view = null; // the list's clientHeight, kept from the ResizeObserver
     this.track = el.ownerDocument.createElement('div');
     this.track.className = 'timeline-virtual-track';
     Object.assign(this.track.style, { position: 'relative', width: '100%' });
@@ -48,6 +57,9 @@ export class TimelineScroller {
     }
     const changed = snapshot.length !== this.rows.length ||
       snapshot.some((row, i) => row !== this.rows[i] || keys[i] !== this._keys[i]);
+    if (RR) { RR.n("tl.update");if (changed) RR.n("tl.update.changed");RR.n("tl.rows.given", snapshot.length);
+      let fresh = 0;for (let i = 0; i < snapshot.length; i++) if (this._byKey.get(keys[i]) !== undefined && this._byKey.get(keys[i]) !== snapshot[i]) fresh++;
+      RR.n("tl.rows.newvnode", fresh); }
     const nextFollow = follow === undefined ? this._follow : Boolean(follow);
     const followChanged = nextFollow !== this._follow;
     this._follow = nextFollow;
@@ -72,16 +84,21 @@ export class TimelineScroller {
       this.el.addEventListener('scroll', this._onScroll, { passive: true });
       const ResizeObserver = this.el.ownerDocument.defaultView.ResizeObserver;
       if (ResizeObserver) {
-        this._observer = new ResizeObserver(() => {
+        this._observer = new ResizeObserver(entries => {
+          RR?.n("tl.resize");
+          for (const e of entries) {
+            if (e.target === this.el) this._view = null;
+            else if (e.target.dataset?.virtualKey !== undefined) this._dirty.add(e.target.dataset.virtualKey);
+          }
           const changed = this._readSizes();
-          if (changed || this.lastPlan?.view !== this.el.clientHeight) this._request('measure');
+          if (changed || this.lastPlan?.view !== this._viewHeight()) this._request('measure');
         });
         this._observer.observe(this.el);
         for (const { wrapper } of this.mounted.values()) this._observer.observe(wrapper);
       }
     }
     const changed = this._readSizes();
-    if (!this._initialized || changed || this.lastPlan?.view !== this.el.clientHeight || this._pending) {
+    if (!this._initialized || changed || this.lastPlan?.view !== this._viewHeight() || this._pending) {
       this._request(this._initialized ? 'measure' : 'init', {}, true);
     }
     return this;
@@ -89,13 +106,31 @@ export class TimelineScroller {
 
   mount() { return this.refresh(); }
 
+  // The list's height: read once, then again only after the ResizeObserver
+  // saw it change (a read after DOM writes forces a layout).
+  _viewHeight() {
+    if (this._view === null || !this._observer) this._view = this.el.clientHeight;
+    return this._view;
+  }
+
+  // Measures the rows that may have changed height. Nothing to measure is
+  // no layout at all.
   _readSizes() {
     let changed = false;
-    for (const [key, { wrapper }] of this.mounted) {
+    const all = this._measureAll || !this._observer;
+    if (!all && !this._dirty.size) return false;
+    RR?.n("tl.measure");
+    const keys = all ? [...this.mounted.keys()] : [...this._dirty];
+    this._measureAll = false;
+    this._dirty.clear();
+    for (const key of keys) {
+      const row = this.mounted.get(key);
       // A row awaiting final cleanup may already have left the snapshot.
       // In particular, do not restore a completed stream's retired size.
-      if (!this._byKey.has(key)) continue;
+      if (!row || !this._byKey.has(key)) continue;
+      const { wrapper } = row;
       const height = wrapper.getBoundingClientRect().height;
+      RR?.n("tl.measure.row");
       if (this.sizes[key] !== height) {
         this.sizes[key] = height;
         changed = true;
@@ -126,10 +161,11 @@ export class TimelineScroller {
         if (!this._initialized && !['restore', 'bottom', 'key'].includes(request.mode)) request.mode = 'init';
         // Report the triggering operation, not a subsequent measurement pass.
         changeMode ??= request.mode;
+        RR?.n("tl.plan." + request.mode);
         const plan = this.callbacks.plan({
           keys: this._keys.slice(), sizes: { ...this.sizes }, estimate: this._estimate(),
           previous: this.lastPlan, top: this.el.scrollTop,
-          view: this.el.clientHeight, follow: this._follow, ...request,
+          view: this._viewHeight(), follow: this._follow, ...request,
         });
         this.lastPlan = plan;
         this._initialized = true;
@@ -173,6 +209,7 @@ export class TimelineScroller {
       if (!wanted.has(key)) {
         this._observer?.unobserve(row.wrapper);
         row.wrapper.remove();
+        RR?.n("tl.row.unmount");
         this.mounted.delete(key);
       }
     }
@@ -187,31 +224,42 @@ export class TimelineScroller {
         wrapper.className = 'timeline-virtual-row';
         Object.assign(wrapper.style, { position: 'absolute', top: '0', left: '0', width: '100%' });
         const node = this.callbacks.create(vnode);
+        RR?.n("tl.row.create");
         wrapper.appendChild(node);
-        row = { wrapper, node, vnode };
+        row = { wrapper, node, vnode, index: '', key: '', minHeight: '', justify: '', transform: '' };
         this.mounted.set(item.key, row);
+        this._dirty.add(item.key);
         this._observer?.observe(wrapper);
       } else if (row.vnode !== vnode) {
+        RR?.n("tl.row.patch");
         const node = this.callbacks.patch(row.node, vnode);
         if (node && node !== row.node) {
           row.node.replaceWith(node);
           row.node = node;
         }
         row.vnode = vnode;
+        this._dirty.add(item.key);
       }
-      row.wrapper.dataset.index = String(item.index);
-      row.wrapper.dataset.virtualKey = item.key;
+      // each written only when it changes: a write of the same value is
+      // still a DOM mutation (and a style invalidation for style)
+      const index = String(item.index);
+      if (row.index !== index) { row.wrapper.dataset.index = index;row.index = index; }
+      if (row.key !== item.key) { row.wrapper.dataset.virtualKey = item.key;row.key = item.key; }
       // Bend marks bounded live previews. Their tail window can shrink while
       // the reply grows; retain measured space and keep the newest line at its
       // foot instead of repeatedly shrinking/growing the entire scroll track.
-      row.wrapper.style.minHeight = item.keepHeight && this.sizes[item.key] !== undefined ? `${this.sizes[item.key]}px` : '';
-      row.wrapper.style.justifyContent = item.keepHeight ? 'flex-end' : '';
-      row.wrapper.style.transform = `translateY(${item.start}px)`;
+      const minHeight = item.keepHeight && this.sizes[item.key] !== undefined ? `${this.sizes[item.key]}px` : '';
+      if (row.minHeight !== minHeight) { row.wrapper.style.minHeight = minHeight;row.minHeight = minHeight; }
+      const justify = item.keepHeight ? 'flex-end' : '';
+      if (row.justify !== justify) { row.wrapper.style.justifyContent = justify;row.justify = justify; }
+      const transform = `translateY(${item.start}px)`;
+      if (row.transform !== transform) { row.wrapper.style.transform = transform;row.transform = transform; }
       const at = this.track.childNodes[i];
       if (at !== row.wrapper) this.track.insertBefore(row.wrapper, at ?? null);
     }
-    this.track.style.height = `${plan.physicalTotal ?? plan.total}px`;
-    this.track.style.transform = `translateY(${plan.trackOffset ?? 0}px)`;
+    const height = `${plan.physicalTotal ?? plan.total}px`, offset = `translateY(${plan.trackOffset ?? 0}px)`;
+    if (this._trackHeight !== height) { this.track.style.height = height;this._trackHeight = height; }
+    if (this._trackOffset !== offset) { this.track.style.transform = offset;this._trackOffset = offset; }
   }
 
   atEnd() { return this.lastPlan?.atEnd ?? true; }

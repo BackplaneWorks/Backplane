@@ -1,229 +1,436 @@
 import ./src/mobile/session.bend as MCOMPOSER
+
 import ./src/core/components.bend as COMPONENTS
+
 import ./src/core/msgs.bend as MSG
+
 import ./src/core/plot-error.bend as PLOTERROR
+
 import ./src/web/workspace.bend as WSK
+
 import ./src/core/search-fold.bend as SFOLD
+
 import ./src/core/live-checkpoint.bend as LCP
+
 import ./src/server/plot.bend as PLOTWATCH
+
 import ./src/core/restartretry.bend as WDRETRY
+
 import ./src/core/liveness.bend as LIVEWATCH
+
 import ./src/core/timeline-virtual.bend as TLVIRTUAL
+
 import ./src/core/history-window.bend as NATIVEHISTORY
+
 import ./src/core/accounts.bend as ACCT
+
 import ./src/server/thin-actor.bend as CHATSIDE
+
 import ./src/core/sidebar-read.bend as SIDEREAD
+
 import ./src/server/thin-signals.bend as SGV
+
 import ./src/core/signal.bend as SIGREV
+
 import Base
+
 import ./src/web/terminal-cells.bend as TCELL
+
 import ./src/core/vt.bend as VTSNAP
+
 import ./src/server/term.bend as TSNAP
+
 import ./src/core/browser-frame.bend as BFRAME
+
 import ./src/core/term-scroll.bend as TSCR
+
 import ./src/web/workspace.bend as WSTERM
+
 import ./src/server/thin-sidebar.bend as CHATDERIVED
+
 import ./src/server/thin-sidebar-wire.bend as SWR
+
 import ./src/core/cbor.bend as CBR1 # fast hub R1
+
 import ./src/core/thin-pace.bend as TPR1 # fast hub R1
+
 import ./src/core/thin.bend as THINL # S3 lazy thin index
+
 import ./src/server/thin-mail.bend as TMAILL # S3 lazy mail cache
+
 import ./src/core/storedb.bend as SDB # S1 indexed store
+
 import ./src/core/presentation.bend as PRESENTVIEW
+
 import ./src/core/desktop-browser.bend as DBGUI
+
 import ./src/server/desktop-broker.bend as DBBROKER
+
 import ./src/core/maildisposition.bend as MDSP
+
 import ./src/core/mailcontinuity.bend as MCN
+
 import ./src/core/telemetry.bend as TEL
+
 import ./test/telemetry_cases.bend as TCF
+
 import ./src/core/refresh.bend as RFSH
+
 import ./src/core/textscale.bend as TSC
+
 import ./src/core/auth.bend as AUTH
+
 import ./src/core/http.bend as HTTPAUTH
+
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
+
 import ./src/app/side_rows.bend as SR
+
 import ./src/app/side_row_types.bend as SRT
+
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
 # ---- native phone i18n imports ----
 import ./src/mobile/app.bend as NATIVEI18N
 # ---- end native phone i18n imports ----
 import ./src/core/fallback.bend as FALL
+
 import ./src/server/server.bend as MPCREDIT # mail perf
 # ---- i18n web phone imports ----
 import ./src/web/view.bend as WPH
 # ---- end i18n web phone imports ----
 import ./src/core/schematic.bend as SC # kicad fork viewers
+
 import ./src/core/charter.bend as CH # mail 2c
+
 import ./src/core/mailrun.bend as MRUN # mail 2c
+
 import ./src/app/mailroom.bend as MRUI # mail ui
+
 import ./src/server/mailstore.bend as MIX # mail index
+
 import ./src/app/mm.bend as MM # window memos
+
 import ./src/core/kexport.bend as KEX
+
 import ./src/core/i18n.bend as I18
+
 import ./test/fixtures/i18n_fallback.bend as I18F
+
 import ./src/core/usage.bend as UZ
+
 import ./src/core/refview.bend as RC # links (cards, trail)
+
 import ./src/core/order.bend as ORD # ordering (project card, buy threads)
+
 import ./src/core/mail.bend as ML # mail 1
+
 import ./src/core/mailbody.bend as MB # mail 2a
+
 import ./src/core/mailview.bend as MVW # mail view
+
 import ./src/core/ref.bend as REF
 # ---- i18n cjk ----
 import ./src/core/cjk.bend as CJK
 # ---- end i18n cjk ----
 # ---- i18n ime ----
 import ./src/core/ime.bend as IMEL
+
 import ./src/app/win.bend as WINL
 # ---- end i18n ime ----
 import ./src/core/kihealth.bend as KH
+
 import ./src/core/kserve.bend as KSL
+
 import ./src/core/tz.bend as TZ
+
 import ./src/core/when.bend as WH
+
 import ./src/core/sched.bend as SCH
+
 import ./src/core/exe.bend as EX
+
 import ./src/core/locks.bend as LCK
+
 import ./src/core/wake.bend as WAK
+
 import ./src/core/bothub.bend as BHS
+
 import ./src/core/bot.bend as BOT
+
 import ./src/core/far.bend as FR
+
 import ./src/core/hot.bend as HOTF # F1 far mirrors
+
 import ./src/core/farsnap.bend as FSNAP # F1 far mirrors
+
 import ./src/core/fview.bend as FVW
+
 import ./src/core/rview.bend as RVW
+
 import ./src/core/botui.bend as BU
+
 import ./src/core/model.bend as M
+
 import ./src/app/viewer.bend as V
+
 import ./src/app/theme.bend as TH
+
 import ./src/core/semver.bend as SV
+
 import ./src/core/clipath.bend as CPA
+
 import ./src/app/nui.bend as N
+
 import ./src/app/bots.bend as BV
+
 import ./src/app/cats.bend as VCAT
+
 import ./src/core/sexpr.bend as KSEX # kicad fork footprint placement
+
 import ./src/core/board.bend as B
+
 import ./src/core/hub.bend as H
+
 import ./src/core/copy.bend as JCOPY # J2: BACKPLANE_COPY
+
 import ./src/core/copynet.bend as JCNET # J2: BACKPLANE_COPY
+
 import ./src/core/deploy.bend as DP
+
 import ./src/core/ship.bend as SHP # deploy main
+
 import ./src/core/cmds.bend as CM
+
 import ./src/core/errtail.bend as ERT
+
 import ./src/core/keyring.bend as KRG
+
 import ./src/core/ride.bend as RD
+
 import ./src/core/adopt.bend as AD
+
 import ./src/core/utf8.bend as UT
+
 import ./src/core/refs.bend as RF
+
 import ./src/core/todo.bend as TD
+
 import ./src/core/apikeys.bend as AK
+
 import ./src/core/onboard.bend as OBD
+
 import ./src/core/fm.bend as FMG
+
 import ./src/core/acp.bend as AC
+
 import ./src/core/msp.bend as MSP
+
 import ./src/core/mcp.bend as MC
+
 import ./src/core/fmcp.bend as FMC
+
 import ./src/core/handoff.bend as HD
+
 import ./src/core/agent.bend as AG
+
 import ./src/core/tailnet.bend as TN
+
 import ./src/core/fuzzy.bend as FZ
+
 import ./src/mobile/notify.bend as Nt
+
 import ./src/core/notice.bend as NO
+
 import ./src/core/codec.bend as C
+
 import ./src/core/json.bend as J
+
 import ./src/core/attach.bend as AT
+
 import ./src/gfx/tiles.bend as T
+
 import ./src/gfx/raster.bend as R
+
 import ./src/gfx/draw.bend as D
+
 import ./src/app/layout.bend as L
+
 import ./src/core/eq.bend as Q
+
 import ./src/core/uber.bend as UBR
+
 import ./src/core/ubersync.bend as UBS
+
 import ./src/core/ubop.bend as UBO
+
 import ./src/core/plane.bend as PLN
+
 import ./src/core/svg.bend as SVG
+
 import ./src/core/icons.bend as ICO
+
 import ./src/core/tools.bend as TOOL
+
 import ./src/core/lightbox.bend as LBX
+
 import ./src/core/links.bend as LK
+
 import ./src/web/dom.bend as DM
+
 import ./src/core/client.bend as U
+
 import ./src/mobile/screen.bend as MSC
+
 import ./src/core/gh.bend as GH
+
 import ./src/gfx/text.bend as X
+
 import ./src/core/fold.bend as FO
+
 import ./src/core/subs.bend as SB
+
 import ./src/core/http.bend as WS
+
 import ./src/core/plot.bend as PL
+
 import ./src/core/look.bend as LO
+
 import ./src/core/hist.bend as HS
+
 import ./src/mobile/view.bend as MV
+
 import ./src/core/pcb3d.bend as P3
+
 import ./src/gfx/mesh.bend as MS
+
 import ./src/gfx/face.bend as FA
+
 import ./src/core/glb.bend as G
+
 import ./src/core/menu.bend as MN
+
 import ./src/app/win.bend as W
+
 import ./src/core/badge.bend as BG
 
 import ./src/mobile/picker.bend as MP
+
 import ./src/mobile/hubs.bend as Hb
+
 import ./src/core/hier.bend as HI
 
 import ./src/core/boot.bend as BT
+
 import ./src/core/store.bend as ST
+
 import ./src/core/sign.bend as SG
+
 import ./src/core/wnote.bend as WN
+
 import ./src/core/ring.bend as RG
+
 import ./src/core/cron.bend as CR
+
 import ./src/core/space.bend as SPC
+
 import ./src/core/google.bend as GO
+
 import ./src/core/cat.bend as CAT
+
 import ./src/core/perf.bend as PF
+
 import ./src/core/prompt.bend as PM
+
 import ./src/core/mech.bend as MCH
+
 import ./src/core/png.bend as PNG
+
 import ./src/core/voice.bend as VO
+
 import ./src/core/once.bend as ON
+
 import ./src/core/desk.bend as DK
+
 import ./src/core/emb.bend as EMB
+
 import ./src/core/outbox.bend as OB
+
 import ./src/core/live.bend as LV
+
 import ./src/core/farlive.bend as FLV
+
 import ./src/core/qr.bend as QR
+
 import ./src/core/layers.bend as LY
+
 import ./src/core/bom.bend as BOM
+
 import ./src/core/cad.bend as CAD
+
 import ./src/core/checks.bend as CHK
+
 import ./src/core/release.bend as REL
+
 import ./src/core/review.bend as RV
+
 import ./src/core/slash.bend as SL
+
 import ./src/core/agy.bend as AGY
+
 import ./src/core/opencode.bend as OC
+
 import ./src/core/pi.bend as PIA
+
 import ./src/core/omp.bend as OMPA
+
 import ./src/core/dialog.bend as DLG
+
 import ./src/core/told.bend as TLD
+
 import ./src/core/rules.bend as RLS
+
 import ./src/core/tboard.bend as TBD
+
 import ./src/core/task.bend as TSK
+
 import ./src/core/teach.bend as TCH
+
 import ./src/core/cef.bend as CEF # browser-cef
+
 import ./src/mobile/bots.bend as MBT
+
 import ./src/core/cli.bend as CLI # one-hub
+
 import ./src/core/onehub.bend as OHB # one-hub
+
 import ./src/core/standin.bend as SIN # one-hub
+
 import ./src/core/thin.bend as JTHIN # J2: JS stack
+
 import ./src/server/thin-content-eq.bend as CONTENTEQ
+
 import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+
 import ./src/server/thin-view.bend as TVIEWH # view delta (H)
+
 import ./src/core/draftbound.bend as DBOUND # view delta (H)
+
 import ./src/web/sidebar-slot.bend as FULLSLOT
+
 import ./src/server/thin-still-picture.bend as STILLPICTURE
+
 import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
+
 import ./src/core/secret.bend as SEC
+
 import ./src/server/thin-mirror.bend as TMR
+
 import ./src/core/subthreads.bend as LEG
+
 import ./src/core/ref-origin.bend as O
+
 import ./src/server/hotboot.bend as BOOTWARM
+
 import ./src/core/snapshot.bend as BOOTSNAP
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
@@ -8688,21 +8895,28 @@ law subs_panel_resolved_stays_shut:
 # ui-panel-paste-lag: paste
 law paste_name_png:
   {AT.Att.paste.name("image/png") == "pasted.png" : String}
+
 law paste_name_jpeg:
   {AT.Att.paste.name("image/jpeg") == "pasted.jpg" : String}
+
 law paste_name_webp:
   {AT.Att.paste.name("image/webp") == "pasted.webp" : String}
+
 law paste_name_gif:
   {AT.Att.paste.name("image/gif") == "pasted.gif" : String}
+
 law paste_name_bmp:
   {AT.Att.paste.name("image/bmp") == "pasted.bmp" : String}
+
 law paste_name_nonempty:
   for mime: String
   {String.is_empty(AT.Att.paste.name(mime)) == False{} : Bool}
+
 law paste_split_rejoins:
   for s: String
   for width: Nat
   {String.take(s, width) ++ String.drop(s, width) == s : String}
+
 law paste_parts_rejoin:
   for fuel: Nat
   for +width: Nat
@@ -8714,10 +8928,13 @@ law paste_full_piece:
   for prefix: String
   for rest: String
   {String.take(prefix ++ rest, String.length(prefix)) == prefix : String}
+
 law paste_chunk_quartets:
   {Nat.mod(AT.Att.paste.width(), 4n) == 0n : Nat}
+
 law paste_chunk_triples:
   {Nat.mod(AT.Att.chunk(), 3n) == 0n : Nat}
+
 law paste_tour_ignored:
   for n: N.Nui
   for mime: String
@@ -8731,10 +8948,12 @@ law paste_parts_k_rejoin:
   for +s: String
   for +width: Nat
   {AT.Att.paste.join(AT.Att.paste.parts.k(zero, s, width)) == s : String}
+
 law paste_upload_rejoins:
   for +s: String
   for +width: Nat
   {AT.Att.paste.join(AT.Att.paste.parts(s, width)) == s : String}
+
 law paste_full_piece_size:
   for +prefix: String
   for rest: String
@@ -9964,22 +10183,29 @@ law order_on_when_asked:
 # ---- i18n lang ----
 law lang_default_auto:
   {U.Lang.resolve("", "en_US.UTF-8", False{}) == "en" : String}
+
 law lang_default_unknown:
   {U.Lang.resolve("garbage", "en_US.UTF-8", False{}) == "en" : String}
+
 law lang_gate:
   for os: String
   {U.Lang.resolve("ja", os, False{}) == "en" : String}
+
 law lang_gate_preview:
   for os: String
   {U.Lang.resolve("ja", os, True{}) == "ja" : String}
+
 law lang_auto_preview:
   {U.Lang.resolve("auto", "ja_JP.UTF-8", True{}) == "ja" : String}
+
 law lang_override_en:
   for os: String
   for p: Bool
   {U.Lang.resolve("en", os, p) == "en" : String}
+
 law prompt_lang_off:
   {PM.Prompt.lang("off") == "" : String}
+
 law prompt_lang_unknown:
   {PM.Prompt.lang("x") == "" : String}
 # ---- end i18n lang ----
@@ -10372,8 +10598,10 @@ law mail_room_once:
 # ---- i18n core ui ----
 law title_shown_ja_new:
   {U.Title.shown(I18.Ja{}, "New thread") == "新しいスレッド" : String}
+
 law title_shown_en_new:
   {U.Title.shown(I18.En{}, "New thread") == "New thread" : String}
+
 law title_shown_other:
   {U.Title.shown(I18.Ja{}, "x") == "x" : String}
 # the localized memo has exactly the lines of a fresh localized layout
@@ -10617,8 +10845,10 @@ law charter_risky_fixed:
 # ---- i18n window ----
 law window_notice_english:
   {L.Lay.notice(I18.En{}, "\u{1}noboard\u{1f}") == "No board in this project yet" : String}
+
 law window_notice_words_kept:
   {L.Lay.notice(I18.Ja{}, "disk full") == "disk full" : String}
+
 law window_tools_english:
   for +h: TOOL.Head
   for +sa: String
@@ -10626,8 +10856,10 @@ law window_tools_english:
   for +ta: String
   for +tv: String
   {TOOL.Tools.head(h, sa, sv, ta, tv) == TOOL.Tools.head.loc(I18.En{}, h, sa, sv, ta, tv) : List<&2, TOOL.Tool>}
+
 law window_picker_default:
   {L.Picker.name.loc(I18.Ja{}, "") == "既定" : String}
+
 law window_provider_missing:
   {L.Set.cli.loc(I18.En{}, "", "codex") == "codex is not installed" : String}
 # ---- end i18n window ----
@@ -10919,12 +11151,16 @@ law mail_credit_native_kept:
 # ---- i18n web phone ----
 law webphone_option_english:
   {WPH.VLabel.option(I18.En{}, "ui.theme", "dark") == "dark" : String}
+
 law webphone_model_name_kept:
   {WPH.VLabel.option(I18.Ja{}, "agent.model", "dark") == "dark" : String}
+
 law webphone_count_ungrouped:
   {WPH.View.sub.badge(I18.En{}, 1200n) == "1200 agents" : String}
+
 law webphone_count_japanese:
   {WPH.View.sub.badge(I18.Ja{}, 1200n) == "エージェント1200件" : String}
+
 law webphone_idle_japanese:
   {Nt.Note.compact.head(I18.Ja{}, 0n) == "すべてのエージェントが待機中" : String}
 # ---- end i18n web phone ----
@@ -11082,6 +11318,7 @@ law kserve4_nested_symbol_cap_lifts:
 law fork_cache_legacy:
   for id: String
   {SC.Sch.cache.name("", id) == id : String}
+
 law fork_cache_alias:
   for id: String
   {SC.Sch.cache.name("local", id) == "local" : String}
@@ -11116,10 +11353,13 @@ law mail_log_count_committed:
 # ---- native phone i18n ----
 law native_language_english:
   {NATIVEI18N.native_locale("en", "ja-JP", "1") == "en" : String}
+
 law native_language_preview:
   {NATIVEI18N.native_locale("ja", "en-US", "1") == "ja" : String}
+
 law native_language_system:
   {NATIVEI18N.native_locale("auto", "ja_JP.UTF-8", "1") == "ja" : String}
+
 law native_language_fallback:
   {NATIVEI18N.native_locale("auto", "de-DE", "1") == "en" : String}
 # ---- end native phone i18n ----
@@ -11302,10 +11542,13 @@ law viewer_reopen_schematic_keeps_scene:
 # --- browser-cef default (October19) ---
 law cef_default_request:
   {CEF.Cef.default() == "cef" : String}
+
 law cef_unset_request:
   {CEF.Cef.requested("") == CEF.Cef.default() : String}
+
 law cef_explicit_chrome_request:
   {CEF.Cef.requested("chrome") == "chrome" : String}
+
 law cef_explicit_cef_request:
   {CEF.Cef.requested("cef") == "cef" : String}
 # --- end browser-cef default ---
@@ -11313,8 +11556,10 @@ law cef_explicit_cef_request:
 # --- browser-cef fallback (October19) ---
 law cef_unavailable_default_is_explained:
   {CEF.Cef.reason("cef", "chrome", "") == "native Linux X11 window/runtime is not active" : String}
+
 law cef_explicit_chrome_has_no_warning:
   {CEF.Cef.reason("chrome", "chrome", "") == "" : String}
+
 law cef_fallback_keeps_error:
   for +err: String
   {CEF.Cef.reason("cef", "chrome", err) == Bool.pick(String, String.is_empty(err), "native Linux X11 window/runtime is not active", err) : String}
@@ -11380,8 +11625,10 @@ law wt_seed_wrap:
 
 law tm_optout_no_id:
   {Bool.or(String.contains(TCF.Cases.body(TCF.Cases.off()), TCF.Cases.id()), String.contains(TCF.Cases.body(TCF.Cases.off()), "\"id\"")) == False{} : Bool}
+
 law tm_unasked_no_id:
   {List.is_empty(&2, TEL.TmEv, TEL.Tm.ready(TEL.TmState.queue(TCF.Cases.unasked()), 2n)) == True{} : Bool}
+
 law tm_sandbox_never:
   for se: String
   for tm: String
@@ -11391,58 +11638,80 @@ law tm_sandbox_never:
   for kid: String
   for key: String
   {TEL.Tm.gate(TEL.TmEnv{True{}, se, tm, dnt, ci, url, kid, key}) == False{} : Bool}
+
 law tm_gate_no_key:
   {TEL.Tm.gate(TEL.TmEnv{False{}, "", "", "", "", "http://stub", "dev-1", ""}) == False{} : Bool}
+
 law tm_clean_drops_path:
   {String.contains(TCF.Cases.bad("/home/h/x"), "/home/h/x") == False{} : Bool}
+
 law tm_clean_drops_email:
   {String.contains(TCF.Cases.bad("a@b.c"), "a@b.c") == False{} : Bool}
+
 law tm_clean_drops_name:
   {String.contains(TCF.Cases.bad("private project"), "private project") == False{} : Bool}
+
 law tm_active_once_a_day:
   {List.length(&2, TEL.TmEv, TEL.TmState.queue(TCF.Cases.twice())) == 1n : Nat}
+
 law tm_queue_cap:
   {List.length(&2, TEL.TmEv, TEL.Tm.queue.limit(TCF.Cases.repeat(201n))) == 200n : Nat}
+
 law tm_sent_202_drops:
   {List.is_empty(&2, TEL.TmEv, TEL.TmState.queue(TEL.Tm.sent(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]), [TCF.Cases.ev("install", "0.11.3", True{})], 202n, 0n, 2n))) == True{} : Bool}
+
 law tm_sent_500_keeps:
   {Bool.and(Nat.is_eq(TEL.TmState.next(TEL.Tm.sent(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]), [TCF.Cases.ev("install", "0.11.3", True{})], 500n, 0n, 2n)), 3602n), Nat.is_eq(List.length(&2, TEL.TmEv, TEL.TmState.queue(TEL.Tm.sent(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]), [TCF.Cases.ev("install", "0.11.3", True{})], 500n, 0n, 2n))), 1n)) == True{} : Bool}
+
 law tm_state_roundtrip:
   {TEL.Tm.state.parse(TEL.Tm.state.json(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]))) == TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]) : TEL.TmState}
+
 law share_on_sets_asked:
   {TCF.Cases.setting(U.Ui.act(U.Ui.init(1n), "share", "on"), "telemetry.asked") == "1" : String}
+
 law share_step_before_uber:
   {OBD.Ob.next(OBD.Ob.share()) == OBD.Ob.uber() : Nat}
+
 law bug_url_only_version:
   {TEL.Bug.url("0.11.3", "linux", "x64") == "https://github.com/i2cjak/Backplane/issues/new?body=Version%3A%200.11.3%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A" : String}
 
 law tm_reset_invalidates_worker:
   {TEL.Tm.current(TCF.Cases.view(True{}, True{}, "0", "0.11.3", "2026-10-14", 2n), M.State.replay([M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.reset", "1", 1n}], M.State.empty())) == False{} : Bool}
+
 law tm_optout_invalidates_worker:
   {TEL.Tm.current(TCF.Cases.view(True{}, True{}, "0", "0.11.3", "2026-10-14", 2n), M.State.replay([M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.share", "off", 1n}], M.State.empty())) == False{} : Bool}
+
 law tm_loopback_rejects_userinfo:
   {TEL.Tm.loopback("http://127.0.0.1:80@elsewhere/api/v1/events") == False{} : Bool}
+
 law tm_package_nightly_channel:
   {TEL.Tm.channel("0.12.1-nightly.20261019.1", "nightly") == "nightly" : String}
 
 law tm_new_usage_marker:
   {U.Tour.raw(False{}, OBD.Ob.share()) == "s9" : String}
+
 law tm_cached_uber_step_kept:
   {U.Tour.legacy("9", OBD.Ob.share()) == OBD.Ob.uber() : Nat}
+
 law tm_marked_usage_step_kept:
   {U.Tour.legacy("s9", OBD.Ob.share()) == OBD.Ob.share() : Nat}
 # --- browser controls (CEF owner) ---
 law browser_url_hostname:
   {CEF.Cef.url("example.com") == "https://example.com" : String}
+
 law browser_url_localhost:
   {CEF.Cef.url("localhost:3787/path") == "http://localhost:3787/path" : String}
+
 law browser_url_explicit:
   for +path: String
   {CEF.Cef.url.explicit(True{}, path) == path : String}
+
 law browser_url_no_script:
   {CEF.Cef.url("javascript:alert(1)") == "" : String}
+
 law browser_toolbar_no_eval:
   {CEF.Cef.toolbar.allowed("evaluate") == False{} : Bool}
+
 law browser_toolbar_tabs_allowed:
   {CEF.Cef.toolbar.allowed("tabs") == True{} : Bool}
 # --- end browser controls ---
@@ -11460,10 +11729,13 @@ law refresh_unchanged_quiet:
 # --- browser-cef release archive (October19) ---
 law cef_release_uses_paired_archive:
   {CEF.Cef.archive("linux-x64") == "linux-x64-cef.tar.gz" : String}
+
 law cef_release_arm_archive_unchanged:
   {CEF.Cef.archive("linux-arm64") == "linux-arm64.tar.gz" : String}
+
 law cef_release_mac_archive_unchanged:
   {CEF.Cef.archive("darwin-arm64") == "darwin-arm64.tar.gz" : String}
+
 law cef_release_old_updater_cannot_match:
   {String.ends_with("backplane-v1-linux-x64-cef.tar.gz", "linux-x64.tar.gz") == False{} : Bool}
 # --- end browser-cef release archive ---
@@ -12576,6 +12848,7 @@ law sidebar_sent_no_picture_authority:
 law sidebar_full_branch_identity:
   for shown: J.Json
   {SWR.Region.shown(False{}, shown) == shown : J.Json}
+
 law sidebar_full_branch_exact:
   for +reuse: Bool
   for +shown: J.Json
@@ -12586,9 +12859,11 @@ law still_picture_disabled:
   for key: String
   for res: J.Json
   {STILLPICTURE.Picture.bounds(False{}, key, res) == False{} : Bool}
+
 law still_picture_miss:
   for res: J.Json
   {STILLPICTURE.Picture.select(False{}, res) == None{} : Maybe<&2, J.Json>}
+
 law still_picture_exact:
   for +res: J.Json
   {STILLPICTURE.Picture.select(True{}, res) == Some{res} : Maybe<&2, J.Json>}
@@ -12602,12 +12877,14 @@ law sidebar_draft_body_not_input:
   for +rest: List<&2, Sigma<&2, &2, String, _ => String>>
   for h: {String.starts_with(key, "@") == False{} : Bool}
   {SIDEDRAFTS.Input.filter((key, value) <> rest) == SIDEDRAFTS.Input.filter(rest) : List<&2, Sigma<&2, &2, String, _ => String>>}
+
 law sidebar_draft_scratch_input:
   for +key: String
   for +value: String
   for +rest: List<&2, Sigma<&2, &2, String, _ => String>>
   for h: {String.starts_with(key, "@") == True{} : Bool}
   {SIDEDRAFTS.Input.filter((key, value) <> rest) == (key, value) <> SIDEDRAFTS.Input.filter(rest) : List<&2, Sigma<&2, &2, String, _ => String>>}
+
 law sidebar_draft_settings_separate:
   for u: U.Ui
   for epoch: String
@@ -12893,6 +13170,7 @@ law startup_warm_accepted:
   for +w: BOOTWARM.Warm
   for +rows: List<&2, List<&2, String>>
   {BOOTWARM.Warm.choose(True{}, w, rows) == BOOTWARM.Warm.threads(w) : Map<&2, M.Thread>}
+
 law startup_warm_fallback:
   for +w: BOOTWARM.Warm
   for +rows: List<&2, List<&2, String>>
@@ -12901,10 +13179,13 @@ law startup_warm_fallback:
 # Empty successful reports carry no outcome; real failures remain assessable.
 law mail_empty_success_quiet:
   {H.Triage.bot.report(M.Completed{}, "") == False{} : Bool}
+
 law mail_failed_empty_preserved:
   {H.Triage.bot.report(M.Failed{}, "") == True{} : Bool}
+
 law mail_no_triage_grants_outside_run:
   {MDSP.Disposition.codex.triage(False{}) == [] : List<&2, String>}
+
 law mail_silent_bot_envelope:
   for s: M.State
   for now: Nat
@@ -12916,6 +13197,7 @@ law mail_silent_bot_envelope:
 
 law codex_error_notice_kind:
   {H.Codex.kind("error") == 9n : Nat}
+
 law codex_error_notice_no_effects:
   for s: M.State
   for th: String
@@ -13603,9 +13885,11 @@ law plot_first_schematic_waits_for_tree:
 law plot_live_tree_path:
   for +path: String
   {PLOTWATCH.Pv.tree.path(0n, path) == path : String}
+
 law plot_version_tree_path:
   for +path: String
   {PLOTWATCH.Pv.tree.path(1n, path) == path : String}
+
 law plot_comparison_tree_path:
   for +path: String
   {PLOTWATCH.Pv.tree.path(2n, path) == "" : String}
@@ -13740,17 +14024,20 @@ law model_picker_replaces_accounts:
 # A report's detail budget does not change its total or hide omitted rows.
 law checks_detail_cap:
   {CHK.Checks.cap() == 4n : Nat}
+
 law checks_omitted_visible:
   {CHK.Ct.table.fin(CHK.Rows{Nil{}, 0n, 185n}) == "\n_185 more not shown_\n" : String}
 
 # A report path cannot overwrite the person's chosen drawing.
 law viewer_report_keeps_board:
   {U.Str.get(U.Viewer.put(U.Viewer.put(Map.new(&2, String), "t", "board", "/r/beta.kicad_pcb"), "t", "review", "bom"), "view.design:t") == "/r/beta.kicad_pcb" : String}
+
 law viewer_part_keeps_board:
   {U.Str.get(U.Viewer.put(U.Viewer.put(Map.new(&2, String), "t", "board", "/r/beta.kicad_pcb"), "t", "3d", "/r/part.step"), "view.design:t") == "/r/beta.kicad_pcb" : String}
 
 law fork_drawing_follows_worktree:
   {U.Viewer.fork.path("/old/boards/beta/power.kicad_sch", "/old", "/new") == "/new/boards/beta/power.kicad_sch" : String}
+
 law fork_report_is_not_a_file:
   {U.Viewer.fork.path("bom", "/old", "/new") == "bom" : String}
 
@@ -14016,4 +14303,34 @@ law view_page_older_next_whole:
 law view_page_older_next_partial:
   for +cursor: String
   {TVIEWH.Page.older.next.k(False{}, cursor) == "" : String}
+# The composer's blank test (refs.bend's Refs.blank: String.trim's
+# whitespace, looking no further than the first other character), its
+# command words (Refs.word: a trimmed draft equal to a word, never walking
+# the rest) and the slash popup's "/" first (re-render harness, 2026-11-01)
+law refs_blank_empty:
+  {RF.Refs.blank("") == True{} : Bool}
+
+law refs_blank_spaces:
+  {RF.Refs.blank(" \n\t\r ") == True{} : Bool}
+
+law refs_blank_word:
+  {RF.Refs.blank("  a ") == False{} : Bool}
+
+law refs_blank_trailing:
+  {RF.Refs.blank("a     ") == False{} : Bool}
+
+law slash_typing_needs_slash:
+  {SL.Slash.typing("give") == False{} : Bool}
+
+law refs_word_padded:
+  {RF.Refs.word("  /btw \n", "/btw") == True{} : Bool}
+
+law refs_word_longer:
+  {RF.Refs.word("/btwx", "/btw") == False{} : Bool}
+
+law refs_word_more:
+  {RF.Refs.word("/btw what", "/btw") == False{} : Bool}
+
+law refs_word_empty:
+  {RF.Refs.word("", "/btw") == False{} : Bool}
 # END page olderNext (H)

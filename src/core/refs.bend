@@ -160,6 +160,44 @@ def Refs.last.go(s: String, cur: String) -> String:
     case SCon{Chr{+c}, t}:
       Refs.last.go(t, Refs.cur(Refs.sep(c), c, cur))
 
+# whether a draft is blank (String.is_empty(String.trim(d)): spaces and
+# 9..13 only), looking no further than its first other character. The
+# composer asks this on every render; a trim walks a whole pasted draft
+# twice, a code point at a time.
+def Refs.blank.c(+c: U32) -> Bool:
+  Bool.or(U32.is_eq(c, 32), Bool.and(U32.is_ge(c, 9), U32.is_le(c, 13)))
+
+# (the verdict so far carried down: the walk stops at the first other
+# character)
+def Refs.blank.go(s: String, sp: Bool) -> Bool:
+  match s sp:
+    case _ False{}:
+      False{}
+    case SNil{} True{}:
+      True{}
+    case SCon{Chr{+c}, t} True{}:
+      Refs.blank.go(t, Refs.blank.c(c))
+
+def Refs.blank(s: String) -> Bool:
+  Refs.blank.go(s, True{})
+
+# whether a draft, trimmed, is the command word w (w without spaces of its
+# own: "/btw", "/give", "/intent"), looking at its leading spaces, w and the
+# first character after it, never the rest (String.trim walks all of it,
+# and the send button asks for each command on every render)
+def Refs.word.k(on: Bool, +lead: String, +w: String) -> Bool:
+  match on:
+    case True{}:
+      Refs.blank(String.drop(lead, String.length(w)))
+    case False{}:
+      False{}
+
+def Refs.word.at(+lead: String, +w: String) -> Bool:
+  Refs.word.k(String.starts_with(lead, w), lead, w)
+
+def Refs.word(+draft: String, +w: String) -> Bool:
+  Refs.word.at(String.trim_start(draft), w)
+
 # the word being typed: the draft's last, after its last space or line break
 def Refs.token(+draft: String) -> String:
   Refs.last.go(draft, SNil{})

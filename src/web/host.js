@@ -142,7 +142,11 @@ window.backplaneDesktop?.onFocusAddress?.(() => {
 const SVG_NS = "http://www.w3.org/2000/svg";
 const SVG_TAGS = new Set(["svg", "path"]);
 
+// The re-render harness (test/tools/rerender): a page whose window has
+// __bpRender (set before it loads) counts what each render does. Off otherwise.
+const RR = globalThis.__bpRender || null;
 function create(v) {
+  RR?.n("dom.create");
   if (is(v, "Txt")) return document.createTextNode(v.text);
   const el = SVG_TAGS.has(v.tag) ? document.createElementNS(SVG_NS, v.tag) : document.createElement(v.tag);
   el.__v = { $: T.El, tag: v.tag, key: v.key, attrs: { $: "Nil" }, kids: { $: "Nil" } };
@@ -223,8 +227,10 @@ function expand(k) {
   const m = MEMO.get(id);
   if (m && sameMemo(m.k, k)) {
     m.gen = memoGen;
+    RR?.n("memo.hit");
     return m.v;
   }
+  RR?.n("memo.make");
   const v = App.make(k);
   MEMO.set(id, { k, v, gen: memoGen });
   return v;
@@ -269,6 +275,7 @@ function timelinePlan(input) {
 
 // make el (whose last vnode is el.__v) match v
 function patch(el, v) {
+  RR?.n("dom.patch");
   const old = el.__v;
   setAttrs(el, old.attrs, v.attrs);
   if (el.id === "timeline") {
@@ -910,6 +917,12 @@ function jumpTo(tl, el, word = "") {
   void el.offsetWidth;
   el.classList.add("jumped");
 }
+// <html>'s data attributes (style.css reads them): written only when they
+// change, so a render that changes nothing there invalidates no style
+function htmlData(name, value) {
+  const d = document.documentElement.dataset, v = String(value);
+  if (d[name] !== v) d[name] = v;
+}
 function render() {
   reviewPosition.capture();
   mailCheckpoint();
@@ -924,7 +937,7 @@ function render() {
     if (currentSession().open?.settings && page) { dispatch("settings-page", page);return; }
   }
   const tl = document.getElementById("timeline");
-  const t0 = PERF ? pnow() : 0;
+  const t0 = PERF || RR ? pnow() : 0;
   let page = frontendNode ? App.presentation_overlay(historyGaps(frontendNode), presentationJson(modelFeedback.project(currentSession())))
     : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
@@ -934,25 +947,26 @@ function render() {
   if (frontendNode || transitionNode || focusedNode) page = thinContinuations.project(page,
     node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
   if (frontendNode) page = bodyWindows.project(page);
-  const t1 = PERF ? pnow() : 0;
+  const t1 = PERF || RR ? pnow() : 0;
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
   bubMoveSync();
   terminalOutput.apply(true);
   if (PERF) PERF.render.push([t1 - t0, pnow() - t1]);
+  if (RR) { RR.n("render.full");RR.t("render.view", t1 - t0);RR.t("render.patch", pnow() - t1); }
   if (frontendNode || canonicalBoot && App.synced(ui)) themeSeen(root.querySelector(".app"));
   if (canonicalBoot) {
-    document.documentElement.dataset.backplaneReady = "true";
-    document.documentElement.dataset.backplaneSeq = App.seq(ui);
+    htmlData("backplaneReady", "true");
+    htmlData("backplaneSeq", App.seq(ui));
   }
-  document.documentElement.dataset.backplaneMode = viewMode;
-  document.documentElement.dataset.backplaneRemoteReady = String(remoteReady);
-  document.documentElement.dataset.backplaneCached = String(!!(focusedNode || transitionNode) && !frontendNode);
+  htmlData("backplaneMode", viewMode);
+  htmlData("backplaneRemoteReady", String(remoteReady));
+  htmlData("backplaneCached", String(!!(focusedNode || transitionNode) && !frontendNode));
   // what style.css quiets: a picture kept for another target than the one
   // picked (true, then quiet past QUIET_MS), and the page before the hub's
   // first view (its frame only, nothing half-filled)
   const heldFor = !frontendNode && !!transitionNode && transitionFor !== targetKey(presentationTarget(currentSession()));
-  document.documentElement.dataset.backplaneHeld = !heldFor ? "false" : heldAt && performance.now() - heldAt >= QUIET_MS ? "quiet" : "true";
-  document.documentElement.dataset.backplaneWait = String(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot);
+  htmlData("backplaneHeld", !heldFor ? "false" : heldAt && performance.now() - heldAt >= QUIET_MS ? "quiet" : "true");
+  htmlData("backplaneWait", String(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot));
   trace("dom", { seq: App.seq(ui) });
   if (PERF?.trace) requestAnimationFrame(() => trace("paint", { seq: App.seq(ui) }));
   mailRestore(mail);
@@ -966,7 +980,8 @@ function render() {
   list?.refresh();
   if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
   else if (scroll) list?.scrollToEnd();
-  if (viewMode === "view-v1") document.querySelector("main")?.setAttribute("aria-busy", String(!remoteReady));
+  const main = viewMode === "view-v1" ? document.querySelector("main") : null;
+  if (main && main.getAttribute("aria-busy") !== String(!remoteReady)) main.setAttribute("aria-busy", String(!remoteReady));
   bodyWindows.observe(tl2, remoteReady && !!frontendNode);
   if (historyStatus) historyPageState(historyStatus);
   scroll = false;
@@ -1036,12 +1051,13 @@ function laterPart() {
     if (queued) return;
     const c = document.querySelector(".thread-view .composer");
     if (!c || !c.__v) { render(); return; }
-    const t0 = PERF ? pnow() : 0;
+    const t0 = PERF || RR ? pnow() : 0;
     patch(c, App.composer(ui));
     attachmentPreviews();
     const a = document.getElementById("asks");
     if (a && a.__v) patch(a, App.asks(ui));
     if (PERF) PERF.part.push(pnow() - t0);
+    if (RR) { RR.n("render.part");RR.t("render.part", pnow() - t0); }
     trace("dom-part", { seq: App.seq(ui) });
     if (PERF?.trace) requestAnimationFrame(() => trace("paint-part", { seq: App.seq(ui) }));
   });
@@ -2757,6 +2773,7 @@ async function startThin(again = false, reason = "initial") {
       send: request => {
         if (!current() || s.readyState !== 1) throw Error("View connection closed");
         trace("send", { id: request.id, method: request.m });
+        RR?.sent?.(request.id, request.m === "view.action" && typeof request.p?.action === "string" ? request.m + ":" + request.p.action : request.m);
         // the session's tree goes into the request as it is (known), not built again from its plain copy
         const tree = request.p?.session ? App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session)) : null;
         const session = tree ? Wire.plain(tree) : null, known = new WeakMap();
@@ -2828,6 +2845,7 @@ async function startThin(again = false, reason = "initial") {
       search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage, body: (message, input) => bodyWindows.accept(message, input), bodyFailed: (input, reason) => bodyWindows.failed(input, reason),
       view: (node, detail) => {
         if (!current()) return;
+        RR?.n("view.apply." + (detail.page?.direction || "update"));
         if (detail.page?.direction === "newest") scroll = true;
         const previous = historyNode || node;
         const projection = historyNode ? detail.page?.direction || "update" : "reset";
@@ -2903,7 +2921,9 @@ async function startThin(again = false, reason = "initial") {
       disconnect("frame-limit");try { s.close(); } catch {}return;
     }
     try {
+      const d0 = RR ? pnow() : 0;
       const j = Wire.cbor(bytes, KEYS, WORDS), envelope = Wire.plain(j);
+      RR?.got?.(envelope, bytes.byteLength, pnow() - d0);
       if (envelope.t === "hb") { s.hb = true;diagnostic.heartbeat();return; }
       if (envelope.t === "notify") { notify(envelope);return; }
       if (viewerRpc.receive(envelope)) return;
