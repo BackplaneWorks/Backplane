@@ -5,9 +5,9 @@ const RR = globalThis.__bpRender || null;
 // DOM effects for the pure Bend timeline planner. Rows remain opaque to this
 // adapter; the planner owns layout, ranges, following and scroll anchoring.
 export class TimelineScroller {
-  constructor(el, { plan, create, patch, key, onChange = () => {} }) {
+  constructor(el, { plan, create, patch, key, same = null, onChange = () => {} }) {
     this.el = el;
-    this.callbacks = { plan, create, patch, key, onChange };
+    this.callbacks = { plan, create, patch, key, same, onChange };
     this.rows = [];
     this.sizes = Object.create(null);
     this.lastPlan = null;
@@ -48,6 +48,15 @@ export class TimelineScroller {
     if (this._destroyed) return this;
     const snapshot = Array.from(rows);
     const keys = snapshot.map(this.callbacks.key);
+    // A row drawn again the same (a fresh tree from the hub or a local
+    // render, its rows equal to the last) keeps the vnode it had: it is
+    // neither patched nor measured again (same: the host's deep equality)
+    if (this.callbacks.same) {
+      for (let i = 0; i < snapshot.length; i++) {
+        const old = this._byKey.get(keys[i]);
+        if (old !== undefined && old !== snapshot[i] && this.callbacks.same(old, snapshot[i])) snapshot[i] = old;
+      }
+    }
     const byKey = new Map();
     for (let i = 0; i < keys.length; i++) {
       if (typeof keys[i] !== 'string' || byKey.has(keys[i])) {

@@ -257,6 +257,25 @@ function patchKey(v) {
   }
   return "";
 }
+// whether two vnodes draw the same: a timeline row drawn again unchanged
+// keeps its old vnode (timeline-scroller.js), so nothing under it is
+// patched or measured. Shared pieces (bp-memo rows expand to the very
+// object they made last time) answer at once.
+function sameNode(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.$ !== b.$) return false;
+  if (is(a, "Txt")) return a.text === b.text;
+  if (a.tag !== b.tag || a.key !== b.key) return false;
+  let x = a.attrs, y = b.attrs;
+  for (; is(x, "Con") && is(y, "Con"); x = x.tail, y = y.tail) {
+    const p = x.head, q = y.head;
+    if (p !== q && (p.$ !== q.$ || p.name !== q.name || p.value !== q.value || p.event !== q.event || p.action !== q.action)) return false;
+  }
+  if (is(x, "Con") || is(y, "Con")) return false;
+  x = a.kids; y = b.kids;
+  for (; is(x, "Con") && is(y, "Con"); x = x.tail, y = y.tail) if (!sameNode(x.head, y.head)) return false;
+  return !is(x, "Con") && !is(y, "Con");
+}
 function same(a, b) {
   return a.$ === b.$ && (is(a, "Txt") || (a.tag === b.tag && patchKey(a) === patchKey(b)));
 }
@@ -284,6 +303,7 @@ function patch(el, v) {
       scroller = new TimelineScroller(el, {
         plan: timelinePlan, create, patch,
         key: (node, i) => History.display_key_at(node, BigInt(i)),
+        same: sameNode,
         onChange: timelineChanged,
       });
       timelineLists.set(el, scroller);
@@ -2356,8 +2376,47 @@ function paintDraft(sel, text) {
   const was = draftPainted.sel === sel ? draftPainted.text : null;
   draftPainted = { sel, text };
   clearTimeout(draftPaintTimer);
-  if (was === null || !was !== !text || DRAFT_POPUP.test(text) || DRAFT_POPUP.test(was)) later();
-  else draftPaintTimer = setTimeout(later, 160);
+  if (was === null || !was !== !text || DRAFT_POPUP.test(text) || DRAFT_POPUP.test(was)) paintComposer();
+  else draftPaintTimer = setTimeout(paintComposer, 160);
+}
+// A draft changes the composer alone (presentation.bend's Node.overlay: the
+// textarea's value; view.bend's View.local: the composer's popups, keys and
+// send button), so a draft's paint patches that element, made from the hub's
+// own composer (View.local compares the draft with the one the hub drew),
+// and not the whole page. Anything else still goes through render().
+const hubComposers = new WeakMap();
+const composerAttr = (v, name) => { for (const a of each(v.attrs)) if (is(a, "At") && a.name === name) return a.value; return null; };
+// View.local.go's composer: class exactly "composer", with a data-lang
+const isComposer = v => is(v, "El") && composerAttr(v, "class") === "composer" && !!composerAttr(v, "data-lang");
+function hubComposer(node) {
+  if (hubComposers.has(node)) return hubComposers.get(node);
+  let found = null;
+  const stack = [node];
+  while (stack.length && !found) {
+    const v = stack.pop();
+    if (!is(v, "El")) continue;
+    if (isComposer(v)) found = v;
+    else for (const k of each(v.kids)) stack.push(k);
+  }
+  hubComposers.set(node, found);
+  return found;
+}
+let composerPainting = false;
+function paintComposer() {
+  if (queued || composerPainting) return;
+  composerPainting = true;
+  requestAnimationFrame(() => {
+    composerPainting = false;
+    if (queued) return;
+    const hub = frontendNode && hubComposer(frontendNode);
+    const el = hub && [...document.querySelectorAll(".composer[data-lang]")].find(e => e.__v && isComposer(e.__v) && e.__v.key === hub.key && e.__v.tag === hub.tag);
+    if (!el) { later();return; }
+    const t0 = RR ? pnow() : 0;
+    patch(el, App.presentation_overlay(hub, presentationJson(modelFeedback.project(currentSession()))));
+    attachmentPreviews();
+    composerGeometry();
+    if (RR) { RR.n("render.part");RR.t("render.part", pnow() - t0); }
+  });
 }
 function adoptPresentation(session) { ui = App.presentation_handoff(ui, presentationJson(session)); }
 function performPresentation(operation) {
