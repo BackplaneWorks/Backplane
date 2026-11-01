@@ -208,7 +208,9 @@ export class ThinHost {
         this.drafts.set(this.session.sel, draft);this.draftChanges.set(this.session.sel, draft);
         this.sent.edited(this.session.sel, value);
       }
-      this.api.sessionChanged(this.session);
+      // (a draft's key paints through local's own pacing, host.js's
+      // paintDraft: not a whole page here as well)
+      this.api.sessionChanged(this.session, action === 'draft' ? { inputOnly: true } : undefined);
       this.api.local(action, value, this.session);
       if (action === 'select') {
         if (this.greeted) this.select(this.api.target(this.session));
