@@ -115,12 +115,17 @@ for t in $tests; do
   ( s=$(now_ms)
     rc=0
     driver="test/tools/$(basename "$t" _test.bend).mjs"
+    # a Python driver that names this test runs it itself, with the
+    # fixture it needs (test/tools/push_transport_test.py's fake curl)
+    pydriver="test/tools/$(basename "$t" .bend).py"
     # each step's peak RSS appended (cost() keeps the largest)
     tm=""
     [ -x /usr/bin/time ] && tm="/usr/bin/time -a -f %M -o $work/$i.rss"
     (
       export BUN_JSC_forceRAMSize=4294967296
-      if [ -f "$driver" ]; then
+      if [ -f "$pydriver" ] && grep -qF "$t" "$pydriver"; then
+        $tm nice -n 19 python3 "$pydriver"
+      elif [ -f "$driver" ]; then
         if grep -q '^def main(' "$t"; then
           $tm nice -n 19 bend "$t" || exit $?
         fi
