@@ -138,6 +138,10 @@ def key_req(+packed: String) -> String:
 def wire(text: String) -> String:
   SH.B64.encode(CB.Cbor.encode(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})))
 
+# a message already built as Json (wire.js's json()), with no text to parse
+def wire_json(j: J.Json) -> String:
+  SH.B64.encode(CB.Cbor.encode(j))
+
 # an action, routed to the hub it names (hubs.bend)
 def act(+hs: H.Hubs, +action: String, +value: String) -> H.HAct:
   H.Hubs.act(hs, action, value)
@@ -230,29 +234,29 @@ def current(hs: H.Hubs) -> String:
 def session(hs: H.Hubs, key: String) -> J.Json:
   PS.Session.pack(H.Hubs.ui(hs, key))
 
-def session_reading(text: String, qualified: String, seen: String, count: Nat, away: Bool) -> J.Json:
-  TH.Session.reading(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), H.Hubs.rest(qualified), seen, count, away)
+def session_reading(session: J.Json, qualified: String, seen: String, count: Nat, away: Bool) -> J.Json:
+  TH.Session.reading(session, H.Hubs.rest(qualified), seen, count, away)
 
-def session_draft(text: String, draft: String) -> J.Json:
-  TH.Session.draft(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), draft)
+def session_draft(session: J.Json, draft: String) -> J.Json:
+  TH.Session.draft(session, draft)
 
-def session_prepare(text: String, input: String, action: String) -> J.Json:
-  TH.Session.prepare(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), Maybe.default(&2, J.Json, J.Json.parse(input), J.Null{}), action)
+def session_prepare(session: J.Json, input: J.Json, action: String) -> J.Json:
+  TH.Session.prepare(session, input, action)
 
-def session_failed(key: String, input: String, action: String) -> J.Json:
-  J.Json.arr(PS.Session.failed(key, Maybe.default(&2, J.Json, J.Json.parse(input), J.Null{}), action))
+def session_failed(key: String, input: J.Json, action: String) -> J.Json:
+  J.Json.arr(PS.Session.failed(key, input, action))
 
-def session_issued(key: String, input: String, action: String) -> J.Json:
-  PS.Session.issued(key, Maybe.default(&2, J.Json, J.Json.parse(input), J.Null{}), action)
+def session_issued(key: String, input: J.Json, action: String) -> J.Json:
+  PS.Session.issued(key, input, action)
 
-def session_local(text: String, key: String, value: String) -> J.Json:
-  TH.Session.local(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), key, value)
+def session_local(session: J.Json, key: String, value: String) -> J.Json:
+  TH.Session.local(session, key, value)
 
-def session_reply(text: String, o: J.Json) -> J.Json:
-  TH.Session.reply(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), o)
+def session_reply(session: J.Json, o: J.Json) -> J.Json:
+  TH.Session.reply(session, o)
 
-def session_adopt(hs: H.Hubs, key: String, text: String, cur: String) -> H.Hubs:
-  PS.Session.handoff(hs, key, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), cur)
+def session_adopt(hs: H.Hubs, key: String, session: J.Json, cur: String) -> H.Hubs:
+  PS.Session.handoff(hs, key, session, cur)
 
 def session_target(hs: H.Hubs, cur: String, action: String, value: String) -> String:
   PS.Session.target(hs, cur, action, value)
@@ -260,8 +264,8 @@ def session_target(hs: H.Hubs, cur: String, action: String, value: String) -> St
 def presentation(hs: H.Hubs, overlays: J.Json, cur: String) -> J.Json:
   PS.Session.overlay(hs, overlays, cur)
 
-def session_shown_draft(shown: J.Json, session: String) -> J.Json:
-  PS.Session.shown.draft(shown, Maybe.default(&2, J.Json, J.Json.parse(session), J.Null{}))
+def session_shown_draft(shown: J.Json, session: J.Json) -> J.Json:
+  PS.Session.shown.draft(shown, session)
 
 def json_array() -> J.Json:
   J.Arr{J.End{}}
@@ -289,32 +293,32 @@ def session_mail_action(action: String, value: String) -> Bool:
 def json_parse(text: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
 
-def thin_target(sessionText: String) -> J.Json:
-  TH.Target.of(json_parse(sessionText))
+def thin_target(session: J.Json) -> J.Json:
+  TH.Target.of(session)
 
-def thin_choice(sessionText: String, action: String, value: String) -> J.Json:
-  TH.Choice(json_parse(sessionText), action, value)
+def thin_choice(session: J.Json, action: String, value: String) -> J.Json:
+  TH.Choice(session, action, value)
 
 def thin_presentation(hs: H.Hubs, overlays: J.Json, cur: String) -> J.Json:
   TH.Overlay.screen(hs, overlays, cur)
 
-def thin_shown_draft(shown: J.Json, sessionText: String) -> J.Json:
-  PS.Session.shown.draft(shown, json_parse(sessionText))
+def thin_shown_draft(shown: J.Json, session: J.Json) -> J.Json:
+  PS.Session.shown.draft(shown, session)
 
 def thin_partial(shown: J.Json, window: J.Json) -> J.Json:
   TH.Partial.screen(shown, window)
 
-def thin_history(text: String) -> J.Json:
-  HISTORY.History.plan(json_parse(text))
+def thin_history(input: J.Json) -> J.Json:
+  HISTORY.History.plan(input)
 
-def thin_viewport(text: String) -> Bool:
-  HISTORY.History.viewport(json_parse(text))
+def thin_viewport(input: J.Json) -> Bool:
+  HISTORY.History.viewport(input)
 
-def thin_history_capacity(text: String) -> Bool:
-  HISTORY.History.capacity(json_parse(text))
+def thin_history_capacity(input: J.Json) -> Bool:
+  HISTORY.History.capacity(input)
 
-def thin_search(screenText: String, searchText: String) -> J.Json:
-  TH.Search.screen(json_parse(screenText), json_parse(searchText))
+def thin_search(screen: J.Json, search: J.Json) -> J.Json:
+  TH.Search.screen(screen, search)
 
 # Tiny lease comparison shared by the web and phone presentation hosts.
 def bub_move(before: String, after: String) -> J.Json:

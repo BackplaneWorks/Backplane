@@ -164,10 +164,10 @@ function privateDraft(thread, text, edit) {
   if (thin.thin(owner.hub)) thin.draftAt(owner.hub, owner.raw, text);
   else {
     const link = recent.links.get(owner.hub), session = link?.session || plain(App.session(hubs, owner.hub));
-    const next = plain(App.session_draft(JSON.stringify({ ...session, sel: owner.raw }), text));
+    const next = plain(App.session_draft(json({ ...session, sel: owner.raw }), text));
     const installed = { ...session, drafts: next.drafts };
     if (link) link.session = installed;
-    hubs = App.session_adopt(hubs, owner.hub, JSON.stringify(installed), foregroundHub());
+    hubs = App.session_adopt(hubs, owner.hub, json(installed), foregroundHub());
     cmds.push({ type: "keep", thread, text });
   }
   return { accepted: true, cmds };
@@ -187,12 +187,12 @@ function fieldValue(j, key) {
   const value = field(j, key);
   return value === null ? null : plain(value);
 }
-const sendWire = (hub, message) => ({ type: "send", hub, data: App.wire(JSON.stringify(message)) });
+const sendWire = (hub, message) => ({ type: "send", hub, data: App.wire_json(json(message)) });
 const readingPages = new Map();
 function reconcileSession(session, key) {
-  for (const [name, value] of deviceLocal) session = plain(App.session_local(JSON.stringify(session), name, value));
+  for (const [name, value] of deviceLocal) session = plain(App.session_local(json(session), name, value));
   for (const [thread, page] of readingPages) if (App.session_target(hubs, key, "select", thread) === key) {
-    session = plain(App.session_reading(JSON.stringify(session), thread, page.seen, BigInt(page.count), page.away));
+    session = plain(App.session_reading(json(session), thread, page.seen, BigInt(page.count), page.away));
   }
   return session;
 }
@@ -200,14 +200,14 @@ const recent = new Recent({
   now: () => Date.now(), cid: () => clientID,
   session: key => reconcileSession(plain(App.session(hubs, key)), key),
   reconcile: reconcileSession,
-  prepare: (session, input, action) => plain(App.session_prepare(JSON.stringify(session), JSON.stringify(input), action)),
+  prepare: (session, input, action) => plain(App.session_prepare(json(session), json(input), action)),
   draft: (session, text, key) => ({
-    session: plain(App.session_draft(JSON.stringify(session), text)),
+    session: plain(App.session_draft(json(session), text)),
     cmds: session.sel ? [{ type: "keep", thread: key + "|" + session.sel, text }] : [],
   }),
-  failed: (key, input, action) => plain(App.session_failed(key, JSON.stringify(input), action)),
-  issued: (key, input, action) => plain(App.session_issued(key, JSON.stringify(input), action)),
-  reply: (session, envelope) => plain(App.session_reply(JSON.stringify(session), envelope.bend)),
+  failed: (key, input, action) => plain(App.session_failed(key, json(input), action)),
+  issued: (key, input, action) => plain(App.session_issued(key, json(input), action)),
+  reply: (session, envelope) => plain(App.session_reply(json(session), envelope.bend)),
   command: c => {
     if (c.type !== "send") return c;
     const request = JSON.parse(c.text);
@@ -216,17 +216,17 @@ const recent = new Recent({
   },
   perform: (key, operation) => {
     const cur = previewCur || App.current(hubs);
-    const session = plain(App.session_prepare(JSON.stringify(plain(App.session(hubs, key))), JSON.stringify(operation.input), operation.action));
-    hubs = App.session_adopt(hubs, key, JSON.stringify(session), key);
+    const session = plain(App.session_prepare(json(plain(App.session(hubs, key))), json(operation.input), operation.action));
+    hubs = App.session_adopt(hubs, key, json(session), key);
     const result = App.act(hubs, operation.action, operation.value);
     hubs = result.hubs;
     const cmds = commandList(result.cmds, JSON.parse(App.alerts(result)));
-    hubs = App.session_adopt(hubs, key, JSON.stringify(plain(App.session(hubs, key))), cur);
+    hubs = App.session_adopt(hubs, key, json(plain(App.session(hubs, key))), cur);
     return cmds;
   },
   send: sendWire,
   adopt: (key, session) => {
-    hubs = App.session_adopt(hubs, key, JSON.stringify(session), previewCur || App.current(hubs));
+    hubs = App.session_adopt(hubs, key, json(session), previewCur || App.current(hubs));
     half = null; focusOf = null;
   },
 });
@@ -242,11 +242,11 @@ function thinRoute(session, previous) {
 }
 function thinIntent(key, session, target, action, value) {
   if (action === "select" || action === "draft") {
-    let next = plain(App.thin_choice(JSON.stringify(session), action, value));
+    let next = plain(App.thin_choice(json(session), action, value));
     if (action === "draft") next = thinRoute(next, session);
     if (next.route === null) delete next.route;
     return { kind: action === "select" ? "select" : "draft", session: next,
-      target: plain(App.thin_target(JSON.stringify(next))) };
+      target: plain(App.thin_target(json(next))) };
   }
   if (action === "earlier" || action === "later") {
     let viewport;
@@ -279,7 +279,7 @@ function thinMaterialize(result, session) {
   const window = bendJson(result.window);
   const shown = plain(App.thin_partial(bendJson(result.shown), window));
   const overlay = { ...result.overlay, j: plain(App.thin_partial(bendJson(result.overlay.j), window)) };
-  return { shown, overlay: plain(App.thin_shown_draft(bendJson(overlay), JSON.stringify(session))) };
+  return { shown, overlay: plain(App.thin_shown_draft(bendJson(overlay), json(session))) };
 }
 function thinMessage(view, message) {
   const hub = view.overlay?.key;
@@ -302,19 +302,19 @@ const thin = new NativeThinHost307265({
     return session;
   },
   drafts: key => Object.fromEntries(Object.entries(kept).filter(([qualified]) => qualified.startsWith(key + "|")).map(([qualified, text]) => [qualified.slice(key.length + 1), text])),
-  target: session => plain(App.thin_target(JSON.stringify(session))),
+  target: session => plain(App.thin_target(json(session))),
   intent: thinIntent,
   focus: key => { previewCur = key; },
   firstProject: () => bubMovingScreen()?.projects?.[0]?.id || '',
-  prepare: (session, input, action) => thinRoute(plain(App.session_prepare(JSON.stringify(session), JSON.stringify(input), action)), input),
-  ack: (session, envelope) => thinRoute(plain(App.session_reply(JSON.stringify(session), envelope.bend || bendJson(envelope))), session),
+  prepare: (session, input, action) => thinRoute(plain(App.session_prepare(json(session), json(input), action)), input),
+  ack: (session, envelope) => thinRoute(plain(App.session_reply(json(session), envelope.bend || bendJson(envelope))), session),
   send: sendWire,
   command: (key, command) => {
     if (command.type === "send") return { type: "send", hub: key, data: App.wire(command.text) };
     return command;
   },
   registration: (key, session, args) => {
-    const isolated = App.session_adopt(hubs, key, JSON.stringify(session), key);
+    const isolated = App.session_adopt(hubs, key, json(session), key);
     const registered = App.register_at(isolated, key, ...args);
     const cmds = [];
     for (const item of each(registered.cmds)) {
@@ -324,17 +324,17 @@ const thin = new NativeThinHost307265({
     return { session: thinRoute(plain(App.session(registered.hubs, key)), session), cmds };
   },
   materialize: thinMaterialize,
-  history: input => plain(App.thin_history(JSON.stringify(input))),
-  historyCapacity: input => App.thin_history_capacity(JSON.stringify(input)),
-  viewport: input => App.thin_viewport(JSON.stringify(input)),
+  history: input => plain(App.thin_history(json(input))),
+  historyCapacity: input => App.thin_history_capacity(json(input)),
+  viewport: input => App.thin_viewport(json(input)),
   message: thinMessage,
   find: (view, search) => {
-    const project = screen => search === null ? { ...screen, find: null } : plain(App.thin_search(JSON.stringify(screen), JSON.stringify(search)));
+    const project = screen => search === null ? { ...screen, find: null } : plain(App.thin_search(json(screen), json(search)));
     return { shown: project(view.shown), overlay: { ...view.overlay, j: project(view.overlay.j) } };
   },
   search: (key, result, view) => ({
-    shown: plain(App.thin_search(JSON.stringify(view.shown), JSON.stringify(result))),
-    overlay: { ...view.overlay, j: plain(App.thin_search(JSON.stringify({ ...view.overlay.j, hub: key }), JSON.stringify(result))) },
+    shown: plain(App.thin_search(json(view.shown), json(result))),
+    overlay: { ...view.overlay, j: plain(App.thin_search(json({ ...view.overlay.j, hub: key }), json(result))) },
   }),
 });
 
@@ -476,7 +476,7 @@ function screenText() {
   if (thin.thin(cur)) {
     const overlays = thin.views();
     if (!overlays) return "null";
-    const drafts = overlays.map(overlay => plain(App.thin_shown_draft(bendJson(overlay), JSON.stringify(thin.state(overlay.key).session))));
+    const drafts = overlays.map(overlay => plain(App.thin_shown_draft(bendJson(overlay), json(thin.state(overlay.key).session))));
     const screen = plain(App.thin_presentation(hubs, bendJson(drafts), cur));
     // Negotiation markers belong to each validated hub reply. A merged
     // client screen exposes the per-hub descriptors, never a global offer.
@@ -493,7 +493,7 @@ function screenText() {
   if (overlays.length) {
     let array = App.json_array();
     const links = [...recent.links.values()].filter(l => l.shown);
-    for (let i = links.length - 1; i >= 0; i--) array = App.json_cons(App.session_shown_draft(links[i].shown, JSON.stringify(links[i].session)), array);
+    for (let i = links.length - 1; i >= 0; i--) array = App.json_cons(App.session_shown_draft(links[i].shown, json(links[i].session)), array);
     const shown = plain(App.presentation(hubs, array, cur));
     // The native host needs the same explicit locale during Recent as
     // after canonical replay. Rendered content and actions stay intact.
@@ -615,11 +615,11 @@ globalThis.Backplane = {
     hubs = App.local(hubs, key, value);
     const cmds = [];
     for (const state of thin.states.values()) if (thin.thin(state.hub)) {
-      state.session = thinRoute(plain(App.session_local(JSON.stringify(state.session), key, value)), state.session);
+      state.session = thinRoute(plain(App.session_local(json(state.session), key, value)), state.session);
       if (state.greeted) thin.update(state);
     }
     for (const [hub, link] of recent.links) {
-      link.session = plain(App.session_local(JSON.stringify(link.session), key, value));
+      link.session = plain(App.session_local(json(link.session), key, value));
       cmds.push(...recent.refresh(hub));
     }
     return cmds.length ? direct(cmds, false) : out(null);
@@ -634,12 +634,12 @@ globalThis.Backplane = {
     const key = App.session_target(hubs, previewCur || App.current(hubs), "select", thread);
     const link = recent.links.get(key);
     const session = link?.session || plain(App.session(hubs, key));
-    const next = plain(App.session_reading(JSON.stringify(session), thread, seen, BigInt(count), away));
+    const next = plain(App.session_reading(json(session), thread, seen, BigInt(count), away));
     if (link) {
       link.session = next;
       return direct(recent.refresh(key), false);
     }
-    hubs = App.session_adopt(hubs, key, JSON.stringify(next), App.current(hubs));
+    hubs = App.session_adopt(hubs, key, json(next), App.current(hubs));
     return direct([], false);
   },
   viewport(thread, id, offset, first, last) {
@@ -762,7 +762,7 @@ globalThis.Backplane = {
   },
   save() {
     let saved = hubs;
-    for (const [key, link] of recent.links) saved = App.session_adopt(saved, key, JSON.stringify(link.session), previewCur || App.current(saved));
+    for (const [key, link] of recent.links) saved = App.session_adopt(saved, key, json(link.session), previewCur || App.current(saved));
     return flat(saved);
   },
   load(text) {
@@ -1005,7 +1005,7 @@ globalThis.Backplane = {
     bubLive.delete(key);bubMoves.disconnect(key);
     thin.connection(key, String(epoch), mode);
     const previous = recent.links.get(key);
-    if (previous) hubs = App.session_adopt(hubs, key, JSON.stringify(previous.session), previewCur || App.current(hubs));
+    if (previous) hubs = App.session_adopt(hubs, key, json(previous.session), previewCur || App.current(hubs));
     const failure = recent.abort(key, "connection changed");
     booting.delete(key);
     transportEpoch.set(key, String(epoch));
