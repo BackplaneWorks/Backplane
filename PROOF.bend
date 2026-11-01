@@ -14111,3 +14111,6 @@ def Laws.component_fragment_keeps_field(key, value, id, index, total):
 
 def Laws.component_fragment_only_last_field_completes(key, value, tail):
   {==}
+
+def Laws.copy_keeps_viewer_reads():
+  {==}

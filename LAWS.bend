@@ -13792,3 +13792,8 @@ law component_fragment_only_last_field_completes:
   for value: J.Json
   for tail: J.Json
   {COMPONENTS.Components.fragment.last(J.Field{key, value, tail}) == False{} : Bool}
+
+# Read-only viewer requests work on a copy without enabling editing jobs.
+law copy_keeps_viewer_reads:
+  {JCOPY.Copy.outs(True{}, [H.Git{3, "9", "boards", "t", "/c", "", ""}, H.Git{3, "10", "rv.components", "t", "/c", "", ""}, H.Git{3, "11", "rv.renderAsset", "t", "/c", "", ""}]) ==
+    [H.Git{3, "9", "boards", "t", "/c", "", ""}, H.Git{3, "10", "rv.components", "t", "/c", "", ""}, H.Git{3, "11", "rv.renderAsset", "t", "/c", "", ""}] : List<&2, H.Out>}
