@@ -56,7 +56,7 @@ class Workbench {
     if (this.boardKey) {
       this.componentsButton = button("Components", () => this.showComponents(!this.state.components)); this.componentsButton.setAttribute("aria-expanded", "false"); this.componentsButton.setAttribute("aria-controls", "solid-inspector"); this.toolbar.append(this.componentsButton);
     }
-    this.model = node("span", "solid-model-name"); const path = this.key.slice(this.key.indexOf("|") + 1); this.model.textContent = path.split("/").pop() || "3D model"; this.model.title = path; this.toolbar.append(this.model);
+    this.model = node("span", "solid-model-name"); const parts = this.key.split("|"), path = parts.slice(2).join("|") || parts[1] || ""; this.model.textContent = path.split("/").pop() || "3D model"; this.model.title = path; this.toolbar.append(this.model);
     this.qualityRevision = this.assemblyRevision();
     this.quality = new ViewerQuality({ root, solid, services, components: this.components, revision: () => this.assemblyRevision(), state: this.state });
     this.prepareAssembly();
