@@ -6,8 +6,14 @@ import { basename, join } from "node:path";
 import { baseUrl, DELAYS, msg, Realtime, transcribeFile, type Opts } from "./openai";
 import { listDevices } from "./devices";
 import { BYTES_PER_MS, Rechunker, Segmenter, type Action } from "./vad";
+import * as L from "./local";
 
 const USAGE = `usage:
+  backplane-voice live --engine local --local-dir D [--model parakeet-v2] [--source ...] [--device NAME]
+  backplane-voice file PATH --engine local --local-dir D [--model ID] [--content-type CT]
+  backplane-voice local-status --local-dir D
+  backplane-voice local-install --local-dir D [--model ID]
+  backplane-voice local-remove --local-dir D [--model ID]
   backplane-voice live [--keywords-file F] [--prompt P] [--language xx]... [--delay low]
                        [--source auto|pw-record|parecord|arecord|stdin] [--device NAME] [--key-file F]
   backplane-voice file PATH [--content-type CT] [--keywords-file F] [--prompt P]
@@ -65,6 +71,9 @@ type Args = {
   source: string;
   device: string;
   contentType: string;
+  engine: string;
+  localDir: string;
+  model: string;
 };
 
 function usage(why?: string): never {
@@ -74,8 +83,8 @@ function usage(why?: string): never {
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { cmd: argv[0] ?? "", pos: [], prompt: "", languages: [], source: "auto", device: "", contentType: "" };
-  if (!["live", "file", "devices"].includes(a.cmd)) usage(a.cmd ? `unknown command: ${a.cmd}` : undefined);
+  const a: Args = { cmd: argv[0] ?? "", pos: [], prompt: "", languages: [], source: "auto", device: "", contentType: "", engine: "openai", localDir: "", model: "parakeet-v2" };
+  if (!["live", "file", "devices", "local-status", "local-install", "local-remove"].includes(a.cmd)) usage(a.cmd ? `unknown command: ${a.cmd}` : undefined);
   for (let i = 1; i < argv.length; i++) {
     const f = argv[i];
     if (!f.startsWith("--")) {
@@ -93,11 +102,16 @@ function parse(argv: string[]): Args {
       case "--source": a.source = v; break;
       case "--device": a.device = v; break;
       case "--content-type": a.contentType = v; break;
+      case "--engine": a.engine = v; break;
+      case "--local-dir": a.localDir = v; break;
+      case "--model": a.model = v; break;
       default: usage(`unknown flag: ${f}`);
     }
   }
   if (a.delay !== undefined && !DELAYS.includes(a.delay)) usage(`--delay is one of ${DELAYS.join("|")}`);
   if (!["auto", "pw-record", "parecord", "arecord", "stdin"].includes(a.source)) usage(`bad --source: ${a.source}`);
+  if (!["openai", "local"].includes(a.engine)) usage(`bad --engine: ${a.engine}`);
+  if ((a.engine === "local" || a.cmd.startsWith("local-")) && !a.localDir) usage("--local-dir is needed");
   if (a.cmd === "file" && a.pos.length !== 1) usage("file needs one PATH");
   if (a.cmd !== "file" && a.pos.length) usage(`unexpected argument: ${a.pos[0]}`);
   return a;
@@ -130,10 +144,10 @@ async function opts(a: Args): Promise<Opts> {
 
 // ---- live
 
-const RECORDERS: Record<string, (device: string) => string[]> = {
-  "pw-record": (d) => ["pw-record", "--raw", "--rate", "24000", "--channels", "1", "--format", "s16", ...(d ? ["--target", d] : []), "-"],
-  parecord: (d) => ["parecord", "--raw", "--rate=24000", "--channels=1", "--format=s16le", ...(d ? [`--device=${d}`] : [])],
-  arecord: (d) => ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", "24000", "-c", "1", ...(d ? ["-D", d] : [])],
+const RECORDERS: Record<string, (device: string, rate: number) => string[]> = {
+  "pw-record": (d, r) => ["pw-record", "--raw", "--rate", `${r}`, "--channels", "1", "--format", "s16", ...(d ? ["--target", d] : []), "-"],
+  parecord: (d, r) => ["parecord", "--raw", `--rate=${r}`, "--channels=1", "--format=s16le", ...(d ? [`--device=${d}`] : [])],
+  arecord: (d, r) => ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", `${r}`, "-c", "1", ...(d ? ["-D", d] : [])],
 };
 const ORDER = ["pw-record", "parecord", "arecord"];
 const OPEN_GRACE_MS = 500; // a recorder alive this long with no audio yet counts as started
@@ -146,8 +160,8 @@ type Source = {
   why: () => Promise<string>;
 };
 
-async function recorder(name: string, device: string): Promise<Source | string> {
-  const cmd = RECORDERS[name](device);
+async function recorder(name: string, device: string, rate: number): Promise<Source | string> {
+  const cmd = RECORDERS[name](device, rate);
   const exe = Bun.which(cmd[0]);
   if (!exe) return `${name} not found`;
   const p = Bun.spawn([exe, ...cmd.slice(1)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -160,7 +174,7 @@ async function recorder(name: string, device: string): Promise<Source | string> 
   return { name, reader, pending, kill: () => p.kill("SIGTERM"), why };
 }
 
-async function openSource(which: string, device: string): Promise<Source> {
+async function openSource(which: string, device: string, rate: number): Promise<Source> {
   if (which === "stdin") {
     const reader = Bun.stdin.stream().getReader();
     return { name: "stdin", reader, pending: reader.read(), kill: () => void reader.cancel().catch(() => {}), why: async () => "stdin closed" };
@@ -168,7 +182,7 @@ async function openSource(which: string, device: string): Promise<Source> {
   const names = which === "auto" ? ORDER : [which];
   const whys: string[] = [];
   for (const n of names) {
-    const s = await recorder(n, device);
+    const s = await recorder(n, device, rate);
     if (typeof s !== "string") return s;
     whys.push(s);
     log(s);
@@ -189,7 +203,13 @@ const NO_AUDIO_MS = 3000;
 const SILENT_MS = 4000;
 
 async function live(a: Args) {
-  const o = await opts(a);
+  const local = a.engine === "local";
+  const rate = local ? L.RATE : 24000;
+  if (local) {
+    const why = L.ready(a.localDir, a.model);
+    if (why) fail(why);
+  }
+  const o = local ? undefined : await opts(a);
   if (a.source !== "stdin") {
     const names = a.source === "auto" ? ORDER : [a.source];
     if (!names.some((n) => Bun.which(n))) {
@@ -230,7 +250,31 @@ async function live(a: Args) {
     if (rt) send(acts);
     else queued.push(...acts);
   };
-  const connecting = Realtime.connect(o, {
+  // the local engine: the model loads while the microphone already records
+  let sess: L.Session | undefined;
+  const held: Uint8Array[] = [];
+  const t0load = performance.now();
+  const loading = !local
+    ? Promise.resolve(undefined)
+    : L.Engine.create(a.localDir, a.model).then(
+        (e) => {
+          sess = new L.Session(e, a.localDir, {
+            hyp: (item, words, end) => emit({ event: "hyp", item, words, end }),
+            done: (item, words, ms) =>
+              emit({ event: "done", item, text: words.map((w) => w[0]).join(" "), words, decode_ms: ms.decode, final_ms: ms.speechEnd }),
+            speech: () => {},
+          });
+          emit({ event: "loaded", ms: Math.round(performance.now() - t0load) });
+          for (const b of held.splice(0)) sess.push(b);
+          return sess;
+        },
+        (e) => {
+          error(`could not load the local model (${msg(e)})`);
+          stop();
+          return undefined;
+        },
+      );
+  const connecting = local ? Promise.resolve(undefined) : Realtime.connect(o!, {
     delta: (item, text) => emit({ event: "delta", item, text }),
     done: (item, text) => emit({ event: "done", item, text }),
     error: (m) => error(m),
@@ -267,8 +311,13 @@ async function live(a: Args) {
   };
   const feed = (b: Uint8Array) => {
     bytes += b.length;
+    if (local) {
+      if (sess) sess.push(b);
+      else held.push(b);
+    }
     for (const c of re.push(b)) {
-      apply(seg.push(c));
+      const acts = seg.push(c);
+      if (!local) apply(acts);
       if (seg.lastRms > peak) peak = seg.lastRms;
       if (seg.lastLoud && !heard) {
         heard = true;
@@ -278,7 +327,7 @@ async function live(a: Args) {
   };
 
   if (!stopping) {
-    const opening = openSource(a.source, a.device);
+    const opening = openSource(a.source, a.device, rate);
     const src = await Promise.race([opening, stopped]);
     if (src === "stop") opening.then((s) => s.kill(), () => {});
     else {
@@ -334,6 +383,11 @@ async function live(a: Args) {
   }
   if (!stopping) stop();
   finishing = true;
+  if (local) {
+    const s = await loading;
+    if (s) await s.finish();
+    end();
+  }
   for (const c of re.rest()) apply(seg.push(c));
   apply(seg.flush());
   const live = await connecting;
@@ -371,8 +425,8 @@ function watchStdin(stop: () => void) {
 
 // ---- file
 
-async function decode(path: string): Promise<Uint8Array> {
-  const p = Bun.spawn(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", "24000", "-"], {
+async function decode(path: string, rate = 24000): Promise<Uint8Array> {
+  const p = Bun.spawn(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", `${rate}`, "-"], {
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -405,6 +459,7 @@ async function liveFile(o: Opts, pcm: Uint8Array, deadline: number): Promise<str
 }
 
 async function file(a: Args) {
+  if (a.engine === "local") return localFile(a);
   const o = await opts(a);
   const path = a.pos[0];
   const deadline = Date.now() + FILE_LIMIT_MS;
@@ -457,6 +512,53 @@ async function file(a: Args) {
   end();
 }
 
+// a recording through the local engine: ffmpeg to 16 kHz PCM, then the
+// segments one by one
+async function localFile(a: Args) {
+  const why = L.ready(a.localDir, a.model);
+  if (why) fail(why);
+  setTimeout(() => fail("timed out after 90 s"), FILE_LIMIT_MS);
+  emit({ event: "ready" });
+  const path = a.pos[0];
+  if (!(await Bun.file(path).exists())) fail(`no such file: ${path}`);
+  if (!Bun.which("ffmpeg")) fail("ffmpeg is needed to read recordings");
+  let onDisk = path;
+  let temp = "";
+  if (a.contentType.toLowerCase().startsWith("multipart/form-data")) {
+    const part = (await new Response(await Bun.file(path).bytes(), { headers: { "content-type": a.contentType } }).formData()).get("audio");
+    if (!(part instanceof Blob)) fail("no audio part");
+    temp = onDisk = join(tmpdir(), `backplane-voice-${process.pid}.audio`);
+    await Bun.write(temp, part);
+  }
+  try {
+    const pcm = await decode(onDisk, L.RATE);
+    const e = await L.Engine.create(a.localDir, a.model);
+    emit({ event: "done", item: "file", text: (await L.transcribe(e, a.localDir, pcm)).trim() });
+  } catch (e) {
+    fail(msg(e));
+  } finally {
+    if (temp) try { unlinkSync(temp); } catch {}
+  }
+  end();
+}
+
+async function localCmd(a: Args) {
+  if (a.cmd === "local-status") {
+    emit({ event: "local", ...L.status(a.localDir), bytes: L.diskBytes(a.localDir) });
+  } else if (a.cmd === "local-remove") {
+    L.remove(a.localDir, a.model);
+    emit({ event: "local", ...L.status(a.localDir), bytes: L.diskBytes(a.localDir) });
+  } else {
+    try {
+      await L.install(a.localDir, a.model, (what, done, total) => emit({ event: "progress", what, done, total }));
+    } catch (e) {
+      error(msg(e));
+    }
+    emit({ event: "local", ...L.status(a.localDir), bytes: L.diskBytes(a.localDir) });
+  }
+  end();
+}
+
 function extOf(type: string): string {
   const t = type.toLowerCase();
   if (t.includes("mp4") || t.includes("m4a") || t.includes("aac")) return "m4a";
@@ -472,5 +574,5 @@ function extOf(type: string): string {
 
 if (import.meta.main) {
   const a = parse(process.argv.slice(2));
-  (a.cmd === "live" ? live(a) : a.cmd === "file" ? file(a) : devices()).catch((e) => fail(msg(e)));
+  (a.cmd === "live" ? live(a) : a.cmd === "file" ? file(a) : a.cmd.startsWith("local-") ? localCmd(a) : devices()).catch((e) => fail(msg(e)));
 }
