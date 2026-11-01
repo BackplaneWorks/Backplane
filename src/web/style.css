@@ -457,7 +457,9 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .review-body.rp-bom th:first-child { width: 30%; }
 .fm-note { display: block; color: var(--faint); padding: 16px 12px; }
 .fm-image { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }
-.fm-image img { max-width: 100%; max-height: 100%; object-fit: contain; background: repeating-conic-gradient(#8882 0% 25%, transparent 0% 50%) 50% / 16px 16px; }
+/* Give the linked image a definite height so a portrait fits the pane. */
+.fm-image > a { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.fm-image img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; background: repeating-conic-gradient(#8882 0% 25%, transparent 0% 50%) 50% / 16px 16px; }
 .fm-pdf { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; }
 .viewer-bar button.on { border-color: var(--accent); color: var(--text); }
 .viewer-stage { position: relative; flex: 1; min-height: 0; }
