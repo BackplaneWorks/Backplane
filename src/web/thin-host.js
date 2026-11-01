@@ -655,7 +655,9 @@ export class ThinHost {
     }
     if (envelope?.t !== 'reply') return false;
     const metadata = this.pending.get(envelope.id);
+    const RR = globalThis.__bpRender, c0 = RR ? performance.now() : 0;
     const result = this.client.reply(this.hub, envelope);
+    if (RR) RR.t?.('land.reply', performance.now() - c0);
     if (!result) return false;
     this.pending.delete(envelope.id);
     if (this.active === envelope.id) this.active = null;
@@ -709,7 +711,9 @@ export class ThinHost {
     // before the first effect. The shared callbacks above remain pure.
     let node;
     try {
+      const v0 = RR ? performance.now() : 0;
       this.validatePresentation({ session: r.session, view: r.nextTarget || result.inputOnly ? { type: 'text', text: '' } : r.shown, cmds: r.cmds });
+      if (RR) RR.t?.('land.validate', performance.now() - v0);
       if (r.session.rid >= 2 ** 47) throw Error('Ordinary counter overlaps view namespace');
       if (!r.nextTarget && !result.inputOnly && (metadata?.viewerRevision ?? 0) === this.viewerRevision) node = this.api.decode(r.shown, r, metadata?.input);
     } catch {
@@ -791,7 +795,7 @@ export class ThinHost {
     if (result.current) for (const [name, field] of this.fields) {
       if (field.acknowledged && field.revision <= (metadata?.revision ?? -1)) this.fields.delete(name);
     }
-    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly });
+    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly, paged: !!paged && !!result.current });
     metadata?.operation?.settled?.(result.current && result.remoteReady && !r.nextTarget);
     if (moving) { this.forView = held.length ? { target: r.nextTarget, cmds: held } : null;this.select(r.nextTarget);return true; }
     if (result.current && result.remoteReady && result.inputOnly) {
@@ -819,9 +823,9 @@ export class ThinHost {
       else this.heldUpdate();
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
-        page: paged && { direction: paged.direction, before: paged.before }, position });
+        page: paged && { direction: paged.direction, before: paged.before }, position, changed: result.changed });
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
-      this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId });
+      this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged });
       this.handOver();
     } else if (result.current && !this.refuse(metadata, 'Current view is not ready', true)) this.fail('Current view is not ready');
     // Send queued navigation before a background read can snapshot its old route.

@@ -34,6 +34,13 @@ def series(count: Nat, +start: Nat, acc: List<&2, D.Node>) -> List<&2, D.Node>:
     case 0n: List.reverse(&2, D.Node, acc)
     case 1n+p: series(p, Nat.add(start, 1n), row(Nat.show(start), Nat.show(start)) <> acc)
 
+# a held timeline without its mark (data-held-clean): project_block then
+# takes the full merge, the result to hold the fast one equal to
+def unmarked(n: D.Node) -> D.Node:
+  match n:
+    case D.El{_, _, _, ks}: tl(ks)
+    case other: other
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +a : D.Node = row("a", "a")
@@ -138,3 +145,32 @@ def main() -> IO(Unit):
     same("gaps: older first, newer after the last entry", H.gaps(tl([before, c, d, after]), "120", "80"), tl([go, before, c, d, gn, after]))
     same("no gap for 0", H.gaps(tl([c, d]), "0", ""), tl([c, d]))
     C.Check.str("a gap is never an anchor", String.take(H.display_key(go), 8n), "control:")
+    # a page project made is prepared already: preparing it again changes nothing
+    +held : D.Node = H.project(page("old", [a, source(), b, c]), page("fresh", [source(), b1, d]), "newer")
+    same("project's result is prepared", H.prepared(held), held)
+    same("project_held over a prepared page is project", H.project_held(held, page("f2", [c1, source(), d]), "newer"), H.project(held, page("f2", [c1, source(), d]), "newer"))
+    # an older page added as a block equals the full merge
+    +ra : D.Node = row("a", "a")
+    +rb : D.Node = row("b", "b")
+    +rc : D.Node = row("c", "c")
+    +rd : D.Node = row("d", "d")
+    +re : D.Node = row("e", "e")
+    +rf : D.Node = row("f", "f")
+    +rg : D.Node = row("g", "g")
+    +p0 : D.Node = H.project(tl([]), tl([rd, re, rf, rg, after]), "reset")
+    +p1 : D.Node = H.project_block(p0, tl([before, rb, rc, rd, re]), "older")
+    same("an older page: the block merge is the full merge", H.project_block(p1, tl([before, ra, rb, rc]), "older"), H.project_block(unmarked(p1), tl([before, ra, rb, rc]), "older"))
+    same("the first older page after a reset: full merge, marked", p1, H.project_block(unmarked(p0), tl([before, rb, rc, rd, re]), "older"))
+    # a control past the overlap: the full merge drops it, so the block one must too
+    +withControl : D.Node = H.project_block(p0, tl([rb, rc, rd, re, between, rf]), "older")
+    same("a control past the overlap takes the full merge", H.project_block(withControl, tl([ra, rb]), "older"), H.project_block(unmarked(withControl), tl([ra, rb]), "older"))
+    # a run of tool calls across the overlap's end takes the full merge
+    +inRun : D.Node = D.El{"div", "e", [D.At{"data-id", "e"}, D.At{"class", "act"}, D.At{"data-run", "d"}], [D.Txt{"e"}]}
+    +p2 : D.Node = H.project_block(p0, tl([rb, rc, headed("d", ""), inRun]), "older")
+    same("a run across the overlap's end takes the full merge", H.project_block(p2, tl([ra, rb, rc]), "older"), H.project_block(unmarked(p2), tl([ra, rb, rc]), "older"))
+    same("a newer page is the full merge", H.project_block(p1, tl([rf, rg]), "newer"), H.project_block(unmarked(p1), tl([rf, rg]), "newer"))
+    C.Check.str("the block merge is taken for an older page", Bool.show(H.blocks(p1, tl([before, ra, rb, rc]), "older")), "True")
+    C.Check.str("not after a reset (no mark yet)", Bool.show(H.blocks(unmarked(p1), tl([before, ra, rb, rc]), "older")), "False")
+    C.Check.str("a control past the overlap is read past, and still a block", Bool.show(H.blocks(withControl, tl([ra, rb]), "older")), "True")
+    C.Check.str("not with a run across the overlap's end", Bool.show(H.blocks(p2, tl([ra, rb, rc]), "older")), "False")
+    C.Check.str("not for a newer page", Bool.show(H.blocks(p1, tl([rf, rg]), "newer")), "False")
