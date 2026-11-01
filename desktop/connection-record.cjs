@@ -2,7 +2,7 @@
 // Diagnostic wire: fixed metadata only. Never retain arbitrary reason/error text.
 const PREFIX = '[bp-connection] ', LIMIT = 64, MAX_BYTES = 65536, TTL = 86400000;
 const events = new Set(['created','open','greeting','ready','closing','closed','error','view-error','pagehide','deploy-reload','renderer-gone','window-close','app-quit','retry-discarded']);
-const causes = new Set(['initial','retry','reconnect','replaced','auth-denied','transport','transport-error','heartbeat-expired','wake-expired','frame-limit','decode-error','greeting-timeout','client-setup','view-limit','view-refused','pagehide','deploy','renderer','app-quit','window-close','stale-retry']);
+const causes = new Set(['initial','retry','reconnect','replaced','auth-denied','transport','transport-error','heartbeat-expired','wake-expired','frame-limit','decode-error','greeting-timeout','client-setup','view-limit','view-refused','view-timeout','view-error','pagehide','deploy','renderer','app-quit','window-close','stale-retry']);
 const reasons = new Set(['','server-shutdown','heartbeat-timeout','backpressure','protocol-error','deploy','redacted']);
 const crashes = new Set(['clean-exit','abnormal-exit','killed','crashed','oom','launch-failed','integrity-failure','memory-eviction']);
 function sanitize(x) {

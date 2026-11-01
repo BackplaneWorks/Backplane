@@ -13,7 +13,7 @@ function fixture(){
   return{window,state,fail:(code=-102,url='http://127.0.0.1:4000/',main=true)=>wc.emit('did-fail-load',{},code,'refused',url,main),tick:async()=>{const timers=[...state.timers.values()];state.timers.clear();for(const fn of timers)fn();await settle();}};
 }
 test('a failed hard reload returns to local recovery and reconnects when the selected hub returns',async()=>{
-  const f=fixture();f.fail();await settle();assert.equal(f.state.loads,1);assert.equal(f.state.status[0][0],'error');assert.equal(f.state.reconnects,0);
+  const f=fixture();f.fail();await settle();assert.equal(f.state.loads,1);assert.equal(f.state.status[0][0],'connecting');assert.equal(f.state.reconnects,0);
   await f.tick();assert.equal(f.state.reconnects,0);f.state.ready=true;await f.tick();assert.equal(f.state.reconnects,1);assert.equal(f.state.url,'http://127.0.0.1:4000/');assert.equal(f.state.timers.size,0);
 });
 test('aborted, subframe, foreign-origin and local-file failures cannot replace the app',async()=>{

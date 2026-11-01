@@ -1434,7 +1434,7 @@ function dispatch(action, value, timer) {
   if (action === "voice-unkey") for (const field of sealedFields("vkey")) field.value = "";
   if (["send", "send-alt", "detach"].includes(action) && viewMode !== "compatibility") {
     restoreDraftAttachments(currentSession());
-    if (socket?.readyState === 1 && (!thin?.ready || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) { showViewStatus(App.host_message(ui, "attachment-restoring"), false);return true; }
+    if (socket?.readyState === 1 && (!thin?.ready || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) { showViewStatus(App.host_message(ui, "attachment-restoring"));return true; }
   }
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
@@ -2595,21 +2595,17 @@ function presentationCommand(command) {
 
 // Shared thin transport -> platform IO and the existing normal Bend renderer.
 // Neither this path nor its error/retry state touches canonical history.
-function showViewStatus(message, retry = true) {
+function showViewStatus(message) {
   clearTimeout(connectingTimer);connectingTimer = 0;
   let box = document.getElementById("view-connection");
   if (!box) {
     box = document.createElement("aside");box.id = "view-connection";box.setAttribute("role", "status");
     box.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:var(--panel);border-top:1px solid var(--line)";
     const text = document.createElement("span");text.id = "view-connection-text";box.append(text);
-    for (const [label, action] of [["Retry now", retryNow]]) {
-      const button = document.createElement("button");button.type = "button";button.textContent = label;button.addEventListener("pointerdown", refocusKeep);button.addEventListener("click", action);box.append(button);
-    }
     document.body.append(box);
   }
   box.hidden = !message;
   box.style.display = message ? "flex" : "none";
-  box.querySelector("button").hidden = !retry || message === viewNote;
   document.getElementById("view-connection-text").textContent = message;
   // The page shrinks above the bar instead of sliding under it.
   document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
@@ -2654,6 +2650,10 @@ function connectingStatus() {
 const connectionLog = new ConnectionLog({ storage: localStorage, bundle: CONNECTION_BUNDLE,
   visibility: () => document.visibilityState || "unknown", online: () => navigator.onLine !== false });
 const thinBackoff = new Backoff(), thinRetry = new Retry();
+// a view request's deadline (thin-host.js), and the view failures in a row
+// that slow the next attempt (viewRecover)
+const VIEW_TIMEOUT_MS = 30000, VIEW_CALM_MS = 120000;
+let viewFailures = 0, viewFailedAt = 0;
 let downSince = 0, downNote = "", downTimer = 0, offlineSend = false, offlineAttach = false;
 // The top bar's dot follows the link while the bar says it is down: the
 // hub drew it green and cannot redraw it now, so the page turns it (the
@@ -2669,17 +2669,32 @@ function connDot(down) {
     }
   }
 }
+// The down state is a small note in the corner (reconnectNote): it takes no
+// room from the page, nothing in it is pressed, and a link back within
+// DOWN_QUIET_MS (a heavy view that held the page, a hub restart) shows
+// nothing at all. The page reconnects by itself, however long it takes.
+const DOWN_QUIET_MS = 4000;
+function reconnectNote(text) {
+  let el = document.getElementById("reconnect-note");
+  if (!text) { el?.remove();return; }
+  if (!el) {
+    el = document.createElement("div");el.id = "reconnect-note";el.setAttribute("role", "status");el.setAttribute("aria-live", "polite");
+    el.style.cssText = "position:fixed;right:10px;bottom:10px;z-index:30;max-width:min(420px,calc(100vw - 20px));padding:3px 8px;font-size:12px;opacity:.85;pointer-events:none;background:var(--panel);color:var(--muted,var(--text));border:1px solid var(--line)";
+    document.body.append(el);
+  }
+  el.textContent = text;
+}
 function downStatus(note) {
   downNote = note;
   if (!downSince) downSince = Date.now();
   clearTimeout(downTimer);
-  const wait = Math.max(0, downSince + QUIET_MS - Date.now());
-  downTimer = setTimeout(() => { if (downSince) { showViewStatus(waiting(offlineSend ? App.host_message(ui, "offline-send") : offlineAttach ? App.host_message(ui, "offline-attachment") : downNote));connDot(true); } }, wait);
+  const wait = Math.max(0, downSince + DOWN_QUIET_MS - Date.now());
+  downTimer = setTimeout(() => { if (downSince) { reconnectNote(waiting(offlineSend ? App.host_message(ui, "offline-send") : offlineAttach ? App.host_message(ui, "offline-attachment") : downNote));connDot(true); } }, wait);
 }
 function upStatus() {
   downSince = 0;clearTimeout(downTimer);downTimer = 0;offlineSend = false;offlineAttach = false;
   thinBackoff.reset();thinRetry.cancel();
-  showViewStatus("");connDot(false);
+  reconnectNote("");showViewStatus("");connDot(false);
 }
 function thinReconnect() {
   if (!pairingAccepted || viewMode === "compatibility" || thinRetry.pending) return;
@@ -2737,13 +2752,6 @@ function outboxFlush() {
 }
 function waiting(note) {
   return outbox.size ? `${note} ${outbox.size === 1 ? "1 message" : outbox.size + " messages"} will send once connected.` : note;
-}
-
-function retryNow() {
-  if (viewMode === "compatibility") return;
-  thinBackoff.reset();
-  if (thinRetry.pending) thinRetry.wake();
-  else void startThin(false, "retry");
 }
 
 // a dialog over the page (the hub's answers to Search and to a message's
@@ -2934,8 +2942,12 @@ function stopThin(keepView = false, reason = "replaced") {
   if (socket === s) socket = null;
   if (s) { s.connectionDiagnostic?.initiate(reason);s.onmessage = null;try { s.close(); } catch {} }
   if (previous) previous.disconnect();
-  remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();ViewerTools.reset();viewerRpc.reset();
-  if (!keepView) frontendNode = null;
+  remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();
+  // A reconnect (keepView) keeps the boards, schematics and 3D models drawn:
+  // the new connection's first plot of each is sent whole, and the same
+  // model's bytes are not decoded again (solid-assets.js), so a drop while a
+  // heavy view loads neither blanks the viewer nor starts its load over.
+  if (!keepView) { Plot2d.reset();Solid.reset();frontendNode = null; }
 }
 async function startThin(again = false, reason = "initial") {
   if (!pairingAccepted) return;
@@ -2961,11 +2973,6 @@ async function startThin(again = false, reason = "initial") {
   diagnostic.note("created", { cause: reason });
   let ended = false;
   const current = () => !ended && attempt === thinAttempt && viewMode === "view-v1";
-  const fail = message => {
-    if (!current()) return;
-    checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();ViewerTools.reset();viewerRpc.reset();
-    showViewStatus(message);void restoreFocused(true);later();
-  };
   const disconnect = event => {
     if (!current()) return;
     if (typeof event === "string") diagnostic.initiate(event);
@@ -2977,18 +2984,33 @@ async function startThin(again = false, reason = "initial") {
     keepSettingsRecovery();
     bubMoves.disconnect(location.origin);
     terminalOutput.clear();
-    checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();ViewerTools.reset();viewerRpc.reset();
+    checkpointFocused();remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
     bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
     if (!frontendNode) void restoreFocused(true);
     later();thinReconnect();
+  };
+  // A view that failed (refused, timed out, too big) is asked for again on a
+  // fresh connection: the first at once, then a growing delay while failures
+  // repeat (viewFailures, forgotten after VIEW_CALM_MS without one), so a hub
+  // that keeps refusing is not asked in a loop. Nothing to press; the corner
+  // note says so only for a view that keeps failing.
+  const viewRecover = reason => {
+    if (!current()) return;
+    const t = Date.now();
+    if (t - viewFailedAt > VIEW_CALM_MS) viewFailures = 0;
+    viewFailedAt = t;viewFailures++;
+    if (viewFailures > 1) thinBackoff.retryAfter(Math.min(30000, 1000 * 2 ** Math.min(viewFailures - 2, 5)));
+    if (viewFailures > 2) downNote = reason === "LIMIT" ? "This view is larger than the hub sends; trying again…" : "Reconnecting…";
+    disconnect("view-error");
+    try { s.close(); } catch {}
   };
   try {
     const saved = localStorage.getItem("backplane-view-request-id");
     const next = saved === null ? 2 ** 47 : /^(0|[1-9][0-9]*)$/.test(saved) ? Number(saved) : NaN;
     if (!Number.isSafeInteger(next) || next < 2 ** 47 || next >= 2 ** 48 - 1) throw Error("Invalid view counter");
     thin = new ThinHost({
-      hub: location.origin, cid, bodyPages: true, now: () => performance.now(), session: currentSession,
+      hub: location.origin, cid, bodyPages: true, now: () => performance.now(), session: currentSession, viewTimeoutMs: VIEW_TIMEOUT_MS,
       target: presentationTarget,
       counter: value => localStorage.setItem("backplane-view-request-id", String(value)),
       send: request => {
@@ -3125,10 +3147,12 @@ async function startThin(again = false, reason = "initial") {
         }
         if (state.phase === "error") {
           composerKeeper.navigationFailed();
-          diagnostic.note("view-error", { cause: state.reason === "LIMIT" ? "view-limit" : "view-refused" });
+          diagnostic.note("view-error", { cause: state.reason === "LIMIT" ? "view-limit" : /timed out/.test(state.reason || "") ? "view-timeout" : "view-refused" });
           trace("thin-error", { reason: state.reason });
-          fail(state.reason === "LIMIT" ? "This view exceeds the hub's size limit. Your draft is kept; retry explicitly."
-            : "Conversation unavailable. Your draft is kept; retry explicitly.");
+          // Never a page to unfreeze by hand: the view is asked for again on
+          // a fresh connection by itself (viewRecover), the last picture and
+          // the viewers kept meanwhile.
+          viewRecover(state.reason);
         }
         else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy(); }
         else if (remoteReady) showViewStatus("");
@@ -3193,9 +3217,17 @@ async function startThin(again = false, reason = "initial") {
 }
 
 // when a frame (a heartbeat included) last arrived, in ms
-let heard = BigInt(Date.now()), tick = Date.now(), hiddenAt = 0;
+let heard = BigInt(Date.now()), tick = Date.now(), hiddenAt = 0, heldUntil = 0;
 setInterval(() => {
-  const t = Date.now(), slept = t - tick > 30000;tick = t;
+  const t = Date.now(), gap = t - tick;tick = t;
+  // A tick far past its time with the machine awake means this page's main
+  // thread was held (a heavy board, schematic or 3D model): the frames that
+  // came meanwhile still wait behind this timer, so `heard` is stale and the
+  // link is fine. It gets one heartbeat period to show a frame before it is
+  // judged; a tick minutes late is a sleep, judged at once.
+  const slept = gap > 120000;
+  if (!slept && gap > 7500) heldUntil = t + 16000;
+  if (!slept && t < heldUntil) return;
   if (socket && (slept || !socket.thin || socket.hb) && App.alive_due(heard, BigInt(t))) socket.dead("heartbeat-expired");
 }, 5000);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") hiddenAt = Date.now(); }, true);

@@ -873,7 +873,9 @@ export class ThinHost {
     return true;
   }
   expire() {
-    const expired = this.client.expire();
+    // api.viewTimeoutMs: how long a request may wait for the hub (the web
+    // and desktop give a busy hub 30 s; a late answer beats a failed view)
+    const expired = this.client.expire(this.api.viewTimeoutMs ?? 5000);
     if (!expired.length) return;
     let current = false, pageExpired = false;
     for (const call of expired) {
