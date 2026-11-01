@@ -2855,9 +2855,9 @@ def T.native.file.page(l: I.Loc, arg0: String) -> String:
 def T.native.file.pdf.error(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
     case I.En{}:
-      I.I18n.sel(arg0, "send", "The hub could not send this PDF (it may be over 12 MB)", I.I18n.sel(arg0, "http", "The hub answered " ++ arg1, "This PDF cannot be shown here"))
+      I.I18n.sel(arg0, "send", "The hub could not read this PDF", I.I18n.sel(arg0, "http", "The hub answered " ++ arg1, "This PDF cannot be shown here"))
     case I.Ja{}:
-      I.I18n.sel(arg0, "send", "ハブからPDFを取得できません（12 MBを超えている可能性があります）", I.I18n.sel(arg0, "http", "ハブの応答：" ++ arg1, "このPDFは表示できません"))
+      I.I18n.sel(arg0, "send", "ハブからPDFを取得できません", I.I18n.sel(arg0, "http", "ハブの応答：" ++ arg1, "このPDFは表示できません"))
 
 def T.native.file.text.error(l: I.Loc, arg0: String) -> String:
   match l:

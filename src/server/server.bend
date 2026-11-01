@@ -6038,57 +6038,28 @@ def Conn.pos(xs: List<&2, String>, +x: String, +i: Nat) -> Nat:
     case +h <> t:
       Bool.pick(Nat, String.eq(h, x), i, Conn.pos(t, x, 1n+i))
 
-# Images in threads
-# -----------------
-# GET /img?path=<an image an agent named>: the file itself, to a client
-# the hub already lets in (it could read the file through a terminal as
-# well); only image files, at most IM.Img.cap() bytes.
+# Image, PDF and text previews
+# ----------------------------
+# GET /img?path=... is available only to clients the hub already lets in.
+# The host effect streams from one open file without a file-sized byte list.
 
-def Img.empty(text: Bool, s: Socket) -> IO(Unit):
-  match text:
-    case True{}: Conn.finish(s, W.Http.response.c("200 OK", "text/plain; charset=utf-8", Nil{}, "no-cache", ""))
-    case False{}: Conn.finish(s, W.Http.text("404 Not Found", "not found"))
+def Img.send(+path: String, s: Socket, range: String) -> IO(Unit):
+  do IO<Unit>:
+    sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_preview(s, path, IM.Img.ctype(path), range)
+    s2 : Socket <- Conn.sent(sent)
+    Socket.close(s2)
 
-def Img.sent(bs: List<&2, U32>, s: Socket, +path: String) -> IO(Unit):
-  match bs:
-    case Nil{}:
-      Img.empty(String.eq(FMP.Fm.preview(path), "text"), s)
-    case b <> t:
-      Conn.finish(s, W.Http.response.c("200 OK", IM.Img.ctype(path), b <> t, "no-cache", ""))
-
-def Img.read(ok: Bool, s: Socket, +path: String) -> IO(Unit):
-  match ok:
-    case True{}:
-      IO.bind(List<&2, U32>, Unit, Files.read(path), bs => Img.sent(bs, s, path))
-    case False{}:
-      Conn.finish(s, W.Http.text("404 Not Found", "not an image, or too large"))
-
-def Img.stat.k(st: U32 & U32 & U32, s: Socket, +path: String) -> IO(Unit):
-  (kind, rest) = st
-  (size, _) = rest
-  Img.read(Bool.and(U32.is_eq(kind, 0), U32.is_le(size, IM.Img.cap())), s, path)
-
-def Img.stat(r: Result<&1, &1, U32 & String, U32 & U32 & U32>, s: Socket, +path: String) -> IO(Unit):
-  match r:
-    case Done{st}:
-      Img.stat.k(st, s, path)
-    case Fail{_}:
-      Conn.finish(s, W.Http.text("404 Not Found", "not found"))
-
-def Img.found(+path: String, s: Socket) -> IO(Unit):
-  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(path), r => Img.stat(r, s, path))
-
-def Img.serve.k(image: Bool, s: Socket, +path: String) -> IO(Unit):
+def Img.serve.k(image: Bool, s: Socket, +path: String, range: String) -> IO(Unit):
   match image:
     case True{}:
-      IO.bind(String, Unit, Env.get("HOME", ""), home => Img.found(Bool.pick(String, String.starts_with(path, "~/"), home ++ String.drop(path, 1n), path), s))
+      IO.bind(String, Unit, Env.get("HOME", ""), home => Img.send(Bool.pick(String, String.starts_with(path, "~/"), home ++ String.drop(path, 1n), path), s, range))
     case False{}:
       Conn.finish(s, W.Http.text("404 Not Found", "not an image"))
 
-def Img.serve(allowed: Bool, s: Socket, +path: String) -> IO(Unit):
+def Img.serve(allowed: Bool, s: Socket, +path: String, range: String) -> IO(Unit):
   match allowed:
     case True{}:
-      Img.serve.k(IM.Img.viewable(path), s, path)
+      Img.serve.k(IM.Img.viewable(path), s, path, range)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -6191,12 +6162,12 @@ def Info.serve(allowed: Bool, s: Socket, +h: String) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
-def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: Bool) -> IO(Unit):
+def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: Bool, range: String) -> IO(Unit):
   match i:
     case 0n:
       Conn.get(True{}, s, web, W.Http.route(p), gz)
     case 1n:
-      Img.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")))
+      Img.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")), range)
     case 2n:
       Debug.serve(allowed, 2n, s)
     case 3n:
@@ -6221,7 +6192,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), Bool.pick(String, String.is_empty(W.Http.header_of(hs, "if-range")), W.Http.header_of(hs, "range"), ""))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:

@@ -42,6 +42,12 @@ def Sock.send_bytes(sock: Socket, data: List<&2, U32>) ->
   IO(Socket & Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
+# An authenticated image/PDF/text preview, sent from one open file in
+# bounded chunks. Handles a single HTTP byte range; no file-sized Bend list.
+def Sock.send_preview(sock: Socket, path: String, ctype: String, range: String) ->
+  IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
 # Stream an immutable bounded binary asset without a Bend list per byte.
 # The caller owns authorization, the HTTP header and a validated cache path.
 def Sock.send_file(sock: Socket, path: String, cap: U32) ->

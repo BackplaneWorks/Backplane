@@ -188,7 +188,3 @@ def Img.ctype(+p: String) -> String:
 # (core/fm.bend), at a path it can be shown from
 def Img.viewable(+p: String) -> Bool:
   Bool.or(Img.is_image(p), Bool.or(String.eq(FM.Fm.preview(p), "text"), Bool.and(Bool.or(String.starts_with(p, "/"), String.starts_with(p, "~/")), String.ends_with(String.to_lower(String.drop(p, Nat.sub(String.length(p), 4n))), ".pdf"))))
-
-# the largest image a hub serves (bytes)
-def Img.cap() -> U32:
-  12582912

@@ -209,6 +209,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Preview file delivery
+        run: |
+          node --test test/tools/preview_file_test.mjs
+          bun test ./test/tools/preview_file_test.mjs
+          bun test/tools/preview_e2e.ts dist-js/linux-x64/backplane-serve
       # the desktop app's thin client, discovery, reader, mail and search
       # pieces (node --test, headless, under a second)
       - name: Desktop thin and mail tests

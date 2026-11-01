@@ -65,7 +65,7 @@
     "src/core/hot.bend": "541015b82fb97a7aa8c5f02206c53faa4d732529e8ab6e79f45a4d81f5403d36",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
-    "src/core/images.bend": "0948aa54cbfd701100596f9573a04c9ef98261fbac89069cdce7cb165f06fabc",
+    "src/core/images.bend": "266729ebb328e8fbf8ce3576e016a74ea322a4e708c0100ea188156f262a2025",
     "src/core/json.bend": "60ea726052fded72970f3be2784d09fbff0baa4a98a47ac82d00a4a311dc242d",
     "src/core/kexport.bend": "e7c768d51b7909761458296102e9aefb66d8ffd9ea37c3487ccc7fdb2defc86d",
     "src/core/kihealth.bend": "0f31f804fddef557d7a038dd39022219455d5b9e0990fa19ccef5a388e511460",
@@ -87,7 +87,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "1c425f2282a80de1b3b4df78af2639ba2c0abf7477b7c0545e3d84258fe7773b",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "32c94a0bceed76aded4b0699791de28701d3bedfef6596f080ae87dfdc48326f",
+    "src/core/msgs.bend": "17c7588672641a29e2211ee823d8d7f97b6c241f7a190cc96e744d83e768242a",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
@@ -379,6 +379,17 @@
       "fullOutputCheck": "test/sidebar_draft_image_test.bend",
       "fullOutputLogSHA256": "ab373540db60b3eb7d2f955e64a66a54f542a6f1299ab766314d29ff8d116d67",
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
+    },
+    "mediaPreviewStreaming": {
+      "baseCommit": "f33556fd3c3ae27e36c107d27ec24368999cdcdd",
+      "changedClosureFiles": [
+        "src/core/images.bend",
+        "src/core/msgs.bend"
+      ],
+      "scope": "Removed the unused preview size constant and regenerated PDF failure copy. Neither change reads Ui, drafts or sidebar inputs; image URLs and sidebar dependencies are unchanged. Reviewed both diffs.",
+      "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+      "fullOutputAssertions": 24,
+      "fullOutputLogSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c"
     }
   },
   "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged"

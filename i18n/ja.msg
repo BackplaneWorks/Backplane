@@ -1173,7 +1173,7 @@ native.hub.failure = {reason, select, timeout {ハブの応答がタイムアウ
 # Native file, review, task and space controls.
 native.viewer.source = 表示元
 native.file.image.unsupported = この画像は表示できません
-native.file.pdf.error = {kind, select, send {ハブからPDFを取得できません（12 MBを超えている可能性があります）} http {ハブの応答：{code}} other {このPDFは表示できません}}
+native.file.pdf.error = {kind, select, send {ハブからPDFを取得できません} http {ハブの応答：{code}} other {このPDFは表示できません}}
 native.file.page = {number}ページ
 native.review.comment = コメント
 native.review.resolved = 解決済み

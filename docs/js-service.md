@@ -38,6 +38,27 @@ Every target cross-builds from one Linux machine, each in under a second once th
 - **Bake.** A release's Google client and telemetry credentials go into a private prelude: `scripts/google-header.py` and `scripts/telemetry-header.py` write `.js` when asked for it. The prelude is compiled in and deleted afterwards, so the emitted and kept JS never hold credentials. The JS twins `effects/google.js` and `effects/telemetry.js` read `globalThis.BACKPLANE_BAKED`. Test: `bun test/tools/js_bake_test.ts`.
 - **Compile.** The compile minifies whitespace and syntax but keeps names (`--keep-names`), so a field crash's stack still names Bend's defs and the effects. It also turns off Bun's `.env` and `bunfig.toml` autoload, which is on by default, so the hub never reads a project's `.env`.
 
+## File previews
+
+`/img?path=...` serves images (including saved Mech renders), PDFs and text
+through the existing pairing and file-type checks. There is no encoded-file
+size ceiling. The sender holds one open descriptor and one 64 KiB buffer,
+waits when the socket is full, and yields between chunks. A reader that makes
+no progress for 30 seconds loses its connection. Single byte ranges are
+supported; malformed or multipart ranges fall back to the whole file.
+
+A missing file returns 404, an unreadable file 403, and an unsatisfiable
+range 416. A failure after headers closes the connection. The separate
+`Solid.most` limit still bounds 3D mesh parsing; it does not apply to PNGs.
+
+```sh
+node --test test/tools/preview_file_test.mjs
+bun test ./test/tools/preview_file_test.mjs
+bun test/tools/preview_e2e.ts build/backplane-serve
+# Also drive the real Mech page and lightbox, with matching web and wire builds:
+bun test/tools/preview_e2e.ts build/backplane-serve build/web build/wire tools/browser/node_modules/playwright-core/index.mjs
+```
+
 ## Licenses
 
 A compiled binary contains Bun (MIT). Bun statically links JavaScriptCore and WebKit (LGPL-2, with some BSD parts) and tinycc (LGPL-2.1). The emitted JS also contains Bend's runtime and Base (Apache-2.0).
