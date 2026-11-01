@@ -487,7 +487,9 @@ const views = (r: any) => Math.max(1, hubViews(r));
 const perPage = (r: any) => {
   const n = views(r);
   return { mutationsPerView: r.dom.records / n, domPatchPerView: (r.counts["dom.patch"] ?? 0) / n, recreatedPerView: r.dom.recreatedIdentical / n,
-    renderFullPerView: (r.counts["render.full"] ?? 0) / n, outsidePerView: r.waste.outsideRecords / n, hubViewsPerPage: hubViews(r) / pages(r) };
+    renderFullPerView: (r.counts["render.full"] ?? 0) / n, outsidePerView: r.waste.outsideRecords / n,
+    // (pages + 1: a window that asks for none or one still has updates)
+    hubViewsPerPage: hubViews(r) / ((r.hubMsgs?.["reply:view.page"]?.n ?? 0) + 1) };
 };
 const paged = (kind: string) => /^(scroll|stress|slow)/.test(kind);
 
