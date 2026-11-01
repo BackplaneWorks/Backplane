@@ -387,6 +387,12 @@ def Mcp.proj(+s: M.State, +thread: String) -> String:
 def Mcp.from.id(+from: String, +msg: String) -> String:
   Bool.pick(String, String.is_empty(from), msg, M.Link.id(from, msg))
 
+# A child's first saved design is its baseline, before its agent can edit.
+# Keep the same capture order as a turn started by the person.
+def Mcp.delegate.run(+t: M.Thread, +cwd: String, +prompt: String, +uuid: String) -> List<&2, B.Out>:
+  +child = M.Thread.id(t)
+  B.Git{0, "", "checkpoint0", child, cwd, "", ""} <> B.Git{0, "", "step", child, cwd, "", "start"} <> B.Hub.run(t, cwd, prompt, uuid)
+
 def Mcp.delegate.go(+s: M.State, +now: Nat, +parent: String, +project: String, env: M.EnvMode, +branch: String, +wt: String, +provider: String, +model: String,
     +rm: M.RuntimeMode, im: M.InteractionMode, +prompt: String, +title: String) -> Res:
   +seq = {B.Hub.seq(s) : Nat}
@@ -404,7 +410,7 @@ def Mcp.delegate.go(+s: M.State, +now: Nat, +parent: String, +project: String, e
         M.TaskStateSet{task, M.TaskRunning{}, "", now},
         M.MessagePosted{child, Mcp.from.id(Bool.pick(String, Mcp.bot(s, parent), parent, ""), B.Hub.id("m", now, 2n+seq)), M.User{}, prompt, now},
         M.TurnChanged{child, M.Running{}, now}],
-      B.Hub.run(M.Thread{child, project, name, now, now, M.Running{}, 0n, False{}, M.NoOverride{}, 0n, 0n, False{}, M.Local{}, branch, wt, provider, model, rm, M.DefaultMode{}, "", False{}}, cwd, prompt, B.Hub.uuid(now, child ++ "/d"))}}
+      Mcp.delegate.run(M.Thread{child, project, name, now, now, M.Running{}, 0n, False{}, M.NoOverride{}, 0n, 0n, False{}, M.Local{}, branch, wt, provider, model, rm, M.DefaultMode{}, "", False{}}, cwd, prompt, B.Hub.uuid(now, child ++ "/d"))}}
 
 def Mcp.delegate.k(ok: Bool, t: M.Thread, +s: M.State, +now: Nat, +thread: String, +bot: Bool, +proj: String, +p: J.Json) -> Res:
   match ok t:

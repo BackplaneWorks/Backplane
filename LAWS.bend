@@ -13848,3 +13848,13 @@ law phone_subs_fold_routed:
 
 law phone_subs_cancel_routed:
   {Bool.and(Nat.is_lt(Hb.Hubs.routed("task-cancel"), Hb.Hubs.routes()), Nat.is_lt(Hb.Hubs.routed("wake-cancel"), Hb.Hubs.routes())) == True{} : Bool}
+
+
+# A delegated agent cannot edit before its initial design is captured.
+law delegation_captures_baseline_before_agent:
+  for +t: M.Thread
+  for +cwd: String
+  for prompt: String
+  for uuid: String
+  {List.head(&2, H.Out, List.drop(&2, H.Out, MC.Mcp.delegate.run(t, cwd, prompt, uuid), 1n)) ==
+    Some{H.Git{0, "", "step", M.Thread.id(t), cwd, "", "start"}} : Maybe<&2, H.Out>}
