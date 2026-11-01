@@ -83,7 +83,7 @@ try {
   page = await context.newPage();
   if (process.env.BIG_DRAFT_DEBUG) { page.on("console", (m: any) => console.log("console:", m.text().slice(0, 300)));page.on("pageerror", (e: any) => console.log("pageerror:", String(e).slice(0, 300))); }
   // every frame the page's socket sends and gets, and whether it closed
-  const wire = { out: [] as number[], in: [] as number[], closed: 0, draftBack: 0 };
+  const wire = { out: [] as number[], in: [] as number[], closed: 0, draftBack: 0, capture: false, ops: [] as any[][] };
   const big = "first words " + "pasted text, line after line\n".repeat(Number(process.env.BIG_N || 10500)) + " ends here";
   page.on("websocket", (s: any) => {
     s.on("framesent", (f: any) => wire.out.push(typeof f.payload === "string" ? Buffer.byteLength(f.payload) : f.payload.length));
@@ -91,6 +91,13 @@ try {
       const n = typeof f.payload === "string" ? Buffer.byteLength(f.payload) : f.payload.length;
       wire.in.push(n);
       if (n > 100000) wire.draftBack++;
+      // the view replies' ops while keys are typed in the middle
+      if (wire.capture) {
+        try {
+          const o = JSON.parse(typeof f.payload === "string" ? f.payload : W.decode(new Uint8Array(f.payload)));
+          if (o?.t === "reply" && o.result) wire.ops.push(o.result.viewDelta?.ops ?? [["whole"]]);
+        } catch {}
+      }
     });
     s.on("close", () => wire.closed++);
   });
@@ -208,7 +215,15 @@ try {
     check(xs.length >= 20 && p95(xs) <= Math.max(16.7, bare + 4), `typing at the ${at}: key → paint p95 ${Math.round(p95(xs))} ms (${xs.length} keys; a bare textarea ${Math.round(bare)} ms)`);
   };
   await typed("end");
+  wire.ops = [];wire.capture = true;
   await typed("mid");
+  wire.capture = false;
+  // a draft key's reply touches the composer and the session only: no
+  // window, no rows moved or remade, no whole view, and no draft text
+  const ops = wire.ops.flat();
+  if (process.env.BIG_DRAFT_OPS) for (const op of ops) console.log("op", op[0], JSON.stringify(op[1]), op[0] === "s" ? JSON.stringify(op[2]).length + " B" : "");
+  check(ops.every((op) => op[0] === "t" || op[0] === "s" && (op[1][0] === "session" || op[1][0] === "shown" && JSON.stringify(op[2]).length < 1024)),
+    `a draft key's replies touch only the composer and the session (${ops.length} ops: ${[...new Set(ops.map((op) => op[0] + ":" + (op[1]?.[0] ?? "")))].join(" ")})`);
   await control.close();
   // the draft as typed, for the reload and Enter checks below
   const whole = await page.locator("#composer").inputValue();
