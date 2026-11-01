@@ -545,33 +545,51 @@ def Pv.step.promoted(m: Result<&1, &1, U32 & String, Unit>, r: PR.Ran) -> PR.Ran
 def Pv.step.ran.to(r: PR.Ran, +from: String, +out: String) -> IO(PR.Ran):
   IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, Pv.step.promoted(m, r)))
 
-def Pv.step.ran(r: PR.Ran, +out: String) -> IO(PR.Ran):
+def Pv.step.ran(r: PR.Ran, from: String, out: String) -> IO(PR.Ran):
   match r:
-    case PR.Ran{0, log}: Pv.step.ran.to(PR.Ran{0, log}, out ++ ".part", out)
+    case PR.Ran{0, log}: Pv.step.ran.to(PR.Ran{0, log}, from, out)
     case _: IO.pure(PR.Ran, r)
 
 # a board's GLB is written beside and moved in whole only when KiCad
 # succeeded, so a half-written export is never taken for a cached one
-def Pv.board.ran.k(ok: Bool, r: PR.Ran, +out: String) -> IO(PR.Ran):
+def Pv.board.ran.k(ok: Bool, r: PR.Ran, from: String, out: String) -> IO(PR.Ran):
   match ok:
     case True{}:
-      Pv.step.ran.to(r, out ++ ".part.glb", out)
+      Pv.step.ran.to(r, from, out)
     case False{}:
       IO.pure(PR.Ran, r)
 
-def Pv.board.ran(r: PR.Ran, +out: String) -> IO(PR.Ran):
+def Pv.board.ran(r: PR.Ran, from: String, out: String) -> IO(PR.Ran):
   match r:
     case PR.Ran{+c, +log}:
-      Pv.board.ran.k(U32.is_eq(c, 0), PR.Ran{c, log}, out)
+      Pv.board.ran.k(U32.is_eq(c, 0), PR.Ran{c, log}, from, out)
+
+# Reloads can export the same revision at once. Each writer needs its own
+# staging file, or a later writer can change an already promoted model.
+def Pv.glb.export(step: Bool, +bare: Bool, +full: Bool, +path: String, +stage: String, +out: String) -> IO(PR.Ran):
+  match step:
+    case True{}:
+      IO.bind(String, PR.Ran, Pv.step2glb(), x => IO.bind(PR.Ran, PR.Ran, PR.Proc.run(x, [path, stage], "/"), r => Pv.step.ran(r, stage, out)))
+    case False{}:
+      IO.bind(String, PR.Ran, Pv.cli(), c => IO.bind(PR.Ran, PR.Ran, K.KiCad.run(c, Pv.glb.flags(bare, full, stage, path)), r => Pv.board.ran(r, stage, out)))
+
+def Pv.glb.staged(m: Result<&1, &1, U32 & String, String>, step: Bool, bare: Bool, full: Bool, path: String, out: String) -> IO(PR.Ran):
+  match m:
+    case Fail{_}: IO.pure(PR.Ran, PR.Ran{3, "Unable to create model staging directory"})
+    case Done{+dir}:
+      do IO<PR.Ran>:
+        +stage : String = dir ++ "/model.glb"
+        r : PR.Ran <- Pv.glb.export(step, bare, full, path, stage, out)
+        _ : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(stage)
+        _ : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(dir)
+        return r
 
 def Pv.glb.run(glb: Bool, step: Bool, +bare: Bool, +full: Bool, +path: String, +out: String) -> IO(PR.Ran):
-  match glb step:
-    case True{} _:
+  match glb:
+    case True{}:
       IO.pure(PR.Ran, PR.Ran{0, ""})
-    case False{} True{}:
-      IO.bind(String, PR.Ran, Pv.step2glb(), x => IO.bind(PR.Ran, PR.Ran, PR.Proc.run(x, [path, out ++ ".part"], "/"), r => Pv.step.ran(r, out)))
-    case False{} False{}:
-      IO.bind(String, PR.Ran, Pv.cli(), c => IO.bind(PR.Ran, PR.Ran, K.KiCad.run(c, Pv.glb.flags(bare, full, out ++ ".part.glb", path)), r => Pv.board.ran(r, out)))
+    case False{}:
+      IO.bind(Result<&1, &1, U32 & String, String>, PR.Ran, H.FS.mkdtemp(out ++ ".export-"), m => Pv.glb.staged(m, step, bare, full, path, out))
 
 # how many parts kicad-cli found no 3D model for ("Could not add 3D model
 # for R1."): the phone says so, else a bare board looks like a bug

@@ -1835,10 +1835,24 @@ def Kids.of(ts: List<&2, M.Task>, +w: BT.World, m: Map<&2, Bool>) -> Map<&2, Boo
     case M.Task{_, +parent, +child, _, _, _, _, _, _} <> t:
       Kids.of(t, w, Kids.add(BT.World.is_bot_thread(w, parent), m, child))
 
-def Kids.set.k(s: M.State, +w: BT.World) -> Map<&2, Bool>:
+# Only children with a visible parent need hiding from project roots.
+# Moving one out, or archiving/deleting its parent, must leave it reachable.
+# That decision reads only thread metadata and saved relationships.
+def Kids.tree(s: M.State) -> M.State:
+  match s:
+    case M.State{_, ts, _, _, _, settings, _, _, _, _, _}:
+      M.State{Map.new(&2, M.Project), ts, Nil{}, 0n, Map.new(&2, M.Task), settings, Map.new(&2, List<&2, M.QItem>), Map.new(&2, M.Ask), Map.new(&2, M.Device), Map.new(&2, M.Nav), Nil{}}
+
+def Kids.nested(ts: List<&2, M.Task>, +w: BT.World, +s: M.State, m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match ts:
+    case Nil{}: m
+    case M.Task{_, +parent, +child, _, _, _, _, _, _} <> t:
+      Kids.nested(t, w, s, Kids.add(Bool.or(BT.World.is_bot_thread(w, parent), String.is_empty(ST.Tree.display_parent(s, child))), m, child))
+
+def Kids.set.k(+s: M.State, +w: BT.World) -> Map<&2, Bool>:
   match s:
     case M.State{_, _, _, _, tk, _, _, _, _, _, _}:
-      Kids.of(Map.values(&2, M.Task, tk), w, Map.new(&2, Bool))
+      Kids.nested(Map.values(&2, M.Task, tk), w, Kids.tree(s), Map.new(&2, Bool))
 
 def Kids.set(+s: M.State) -> Map<&2, Bool>:
   Kids.set.k(s, M.State.bots(s))

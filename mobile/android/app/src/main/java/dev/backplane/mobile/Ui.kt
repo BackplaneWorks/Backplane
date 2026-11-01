@@ -137,6 +137,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.TextRange
@@ -904,7 +906,6 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
     val count = (if (t.parent != null) 1 else 0) +
         (if (t.earlier > 0) 1 else 0) + t.entries.size + t.sending.size + (if (t.live.isNotEmpty() || t.working.isNotEmpty()) 1 else 0) +
         (if (t.later > 0) 1 else 0)
-    LaunchedEffect(t.id, m.scrolls) { if (count > 0) list.scrollToItem(count - 1) }
     // LazyColumn retains the first visible entry key AND its pixel offset.
     // An explicit scrollToItem after a prepend discards that offset and
     // cancels the ongoing fling, so paging never issues a scroll command.
@@ -914,6 +915,18 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
     // lines. Reaching the end takes it up; a drag up lets go (a reply read
     // while it streams holds still).
     var follow by remember(t.id) { mutableStateOf(false) }
+    var latestTap by remember(t.id) { mutableStateOf(0) }
+    LaunchedEffect(t.id, m.scrolls) {
+        follow = true
+        if (count > 0) list.scrollToItem(count - 1, Int.MAX_VALUE / 2)
+    }
+    LaunchedEffect(t.id, latestTap) {
+        if (latestTap > 0) {
+            follow = true
+            if (t.later > 0) m.act("history-newest")
+            if (count > 0) list.scrollToItem(count - 1, Int.MAX_VALUE / 2)
+        }
+    }
     val later by rememberUpdatedState(t.later)
     LaunchedEffect(list, t.id) {
         snapshotFlow { Triple(list.canScrollForward, userDragging, later) }.collect { (more, drag, newer) ->
@@ -1149,6 +1162,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
         },
         snackbarHost = { SnackbarHost(snacks) },
     ) { pad ->
+      Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(
             start = 16.dp, end = 16.dp, top = pad.calculateTopPadding() + 8.dp, bottom = pad.calculateBottomPadding() + 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1187,6 +1201,19 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                 }
             }
         }
+        // The same way back as the desktop and iOS: one tap leaves a
+        // history page and follows the newest reply, above the composer.
+        if (!follow && (list.canScrollForward || t.later > 0)) OutlinedButton(
+            onClick = { latestTap += 1 }, enabled = m.contentReady,
+            shape = MaterialTheme.shapes.small,
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = pad.calculateBottomPadding() + 12.dp)
+                .heightIn(min = 48.dp),
+        ) {
+            Icon(Icons.Filled.ArrowDownward, null, Modifier.size(18.dp))
+            Text(NativeMessages.native_thread_latest(lang), Modifier.padding(start = 6.dp))
+        }
+      }
     }
     shown?.let { u -> Lightbox(u) { shown = null } }
     t.diff?.let { DiffSheet(m, it) }

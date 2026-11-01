@@ -45,7 +45,7 @@ class OriginalModelView {
   }
   report(phase,extra={}) {const previous=this.state.phase;this.state={...this.state,phase,samples:this.tracer?.samples||0,...extra};const now=performance.now();if(extra.firstFrame||previous!==phase||!this.reported||now-this.reported>=100){this.reported=now;this.onStatus({...this.state});}}
   status(){return {...this.state};}
-  stop(){if(this.hidden||page?.hidden||this.disposed){this.releaseMaskRelief('Viewer hidden or closed');this.releaseRasterBatches('Viewer hidden or closed');if(this.tracer||this.worker||this.buildPromise)this.releaseTrace();}if(this.raf)caf(this.raf);this.raf=0;if(this.settle)clearTimeout(this.settle);this.settle=0;if(this.gpuFence){this.renderer.getContext().deleteSync(this.gpuFence.sync);this.gpuFence=null;}this.finalizing=false;}
+  stop(){if(this.cameraFrame)caf(this.cameraFrame);this.cameraFrame=0;if(this.hidden||page?.hidden||this.disposed){this.releaseMaskRelief('Viewer hidden or closed');this.releaseRasterBatches('Viewer hidden or closed');if(this.tracer||this.worker||this.buildPromise)this.releaseTrace();}if(this.raf)caf(this.raf);this.raf=0;if(this.settle)clearTimeout(this.settle);this.settle=0;if(this.gpuFence){this.renderer.getContext().deleteSync(this.gpuFence.sync);this.gpuFence=null;}this.finalizing=false;}
   releaseMaskRelief(reason=''){
     const relief=this.maskRelief,representation=this.maskReliefRepresentation,pending=this.maskReliefPromise;this.traceFallback=null;
     this.maskRelief=null;this.maskReliefRepresentation=null;this.maskReliefPromise=null;
@@ -258,7 +258,10 @@ class OriginalModelView {
     this.camera.position.set(...eye);this.camera.up.set(...cam.u);this.camera.lookAt(new this.T.Vector3(...target));this.camera.near=Math.max(cam.dist*1e-7,(this.radius||0.01)/1000);this.camera.far=cam.dist*1e-5+(this.radius||0.01)*5+Math.hypot(cam.sx,cam.sy)*1e-5;this.camera.updateProjectionMatrix();this.camera.updateMatrixWorld();
     this.renderer.toneMappingExposure=2**(Number(state.exposure)||0);
   }
-  setCamera(state){this.cameraState=structuredClone(state);this.applyCamera(state);if(this.tracer&&this.built)this.tracer.setCamera(this.camera);if(this.ready)this.refresh();}
+  // A burst of keys or pointer messages draws the newest pose once, instead
+  // of queueing a full original-model draw for every message and mode change.
+  cameraLater(){this.stop();if(!this.ready||this.disposed||this.hidden||page?.hidden)return;this.cameraFrame=raf(()=>{this.cameraFrame=0;this.refresh();});}
+  setCamera(state){this.cameraState=structuredClone(state);this.applyCamera(state);if(this.tracer&&this.built)this.tracer.setCamera(this.camera);if(this.ready)this.cameraLater();}
   resizeToCanvas(){
     const w=Math.max(1,this.canvas.clientWidth),h=Math.max(1,this.canvas.clientHeight),dpr=Math.min(globalThis.devicePixelRatio||this.pixelRatio||1,2),css=w*h;
     // Native CSS resolution by default at normal desktop sizes. DPR growth is
@@ -296,7 +299,7 @@ class OriginalModelView {
     this.drawSelection();}finally{this.rasterKey.visible=false;this.areaKey.visible=true;}
     this.requestMaskRelief();this.requestRasterBatches();
   }
-  setInteractive(on){this.interactive=!!on;this.stop();if(this.ready){this.raster();this.report('raster',{reason:on?'Camera moving':'Camera settled',denoised:false});}if(!on)this.refresh();}
+  setInteractive(on){if(this.interactive===!!on)return;this.interactive=!!on;this.cameraLater();if(this.ready)this.report('raster',{reason:on?'Camera moving':'Camera settled',denoised:false});}
   setMode(mode,{samples=this.maxSamples}={}){this.mode=mode==='pathtrace'?'pathtrace':'raster';this.maxSamples=Math.max(1,Math.min(256,Number(samples)||32));if(this.mode==='pathtrace'){const ready=this.maskRelief&&this.maskReliefRepresentation?.sourceModel===this.model&&this.maskReliefRepresentation.sync();if(!ready){this.releaseMaskRelief('No current ready coating representation; original trace retained');this.recordTraceFallback('No current ready coating representation; original trace retained');}else this.traceFallback=null;}if(this.mode==='pathtrace'&&!this.supported){this.mode='raster';this.refresh();this.reported=0;this.report('raster',{reason:this.pathTraceReason,pathTraceAvailable:false,pathTraceReason:this.pathTraceReason});return this.status();}if(this.mode==='pathtrace'&&(this.rasterBatchPromise||this.rasterBatches))this.releaseRasterBatches('Path tracing uses captured unbatched geometry');if(this.mode==='raster')this.report('raster',{reason:'Original GLB studio raster'});this.refresh();return this.status();}
   refresh(){
     this.stop();if(!this.ready||this.disposed||this.hidden||page?.hidden)return;this.state.denoised=false;this.raster();

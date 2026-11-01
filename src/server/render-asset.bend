@@ -19,6 +19,9 @@ def RenderAssetFx.lookup(id: String) -> IO(String):
 def RenderAssetFx.memo(cwd: String, kind: String, revision: String) -> IO(String):
   import "./effects/render_asset.js"
 
+def RenderAssetFx.cached(path: String) -> IO(String):
+  import "./effects/render_asset.js"
+
 def RenderAsset.error(s: String) -> IO(Unit):
   IO.print(J.Json.show(J.Json.obj([J.KV{"error", J.Str{s}}])))
 
@@ -37,8 +40,8 @@ def RenderAsset.export(cached: Bool, glb: Bool, step: Bool, +cwd: String, +path:
 def RenderAsset.out(+cwd: String, +path: String, +canonical: String, +kind: String, +revision: String, +glb: Bool, +step: Bool) -> IO(Unit):
   do IO<Unit>:
     +out : String <- PV.Pv.solid.out(glb, step, String.eq(kind, "3"), True{}, path)
-    cached : Bool <- K.Io.is_file(out)
-    RenderAsset.export(cached, glb, step, cwd, path, canonical, kind, revision, out)
+    cached : String <- RenderAssetFx.cached(out)
+    RenderAsset.export(Bool.or(glb, String.eq(cached, "1")), glb, step, cwd, path, canonical, kind, revision, out)
 
 def RenderAsset.authorized(ok: Bool, +info: J.Json, +cwd: String, +canonical: String, +kind: String, +revision: String) -> IO(Unit):
   match ok:

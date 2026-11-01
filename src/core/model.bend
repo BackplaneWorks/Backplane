@@ -944,8 +944,27 @@ def Idx.term(term: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, Lis
     case False{}:
       ix
 
+# Subagent identities and activity are filed separately. A busy neighbour
+# must not push an agent's start or its newest steps out of the inspector.
+def Idx.sub.starts(+log: String) -> String:
+  "@substarts:" ++ log
+
+def Idx.sub.call(+log: String, +call: String) -> String:
+  "@subcall:" ++ log ++ "\t" ++ call
+
+def Idx.sub.start(start: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
+  match start:
+    case True{}: Idx.put(ix, Idx.sub.starts(Idx.thread(e)), e)
+    case False{}: ix
+
+def Idx.sub.at(sub: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
+  match sub e:
+    case True{} Act{_, +th, +call, +kind, _, _}:
+      Idx.sub.start(String.starts_with(kind, "start"), Idx.put(ix, Idx.sub.call(th, call), e), e)
+    case _ _: ix
+
 def Idx.post(ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
-  Idx.term(Idx.is_term(e), Idx.review(Idx.is_review(e), Idx.step(Idx.is_step(e), Idx.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e), e), e), e)
+  Idx.sub.at(String.starts_with(Idx.thread(e), "@sub:"), Idx.term(Idx.is_term(e), Idx.review(Idx.is_review(e), Idx.step(Idx.is_step(e), Idx.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e), e), e), e), e)
 
 # Projection
 # ----------
@@ -2130,6 +2149,18 @@ def State.bots(s: State) -> BT.World:
     case State{_, _, _, _, _, _, _, _, _, _, bw}:
       State.bots.k(bw)
 
+def State.task_parent(bot: Bool, s: State, +parent: String, +child: String) -> State:
+  match bot:
+    case True{}: s
+    case False{}: State.setting(s, "thread.parent." ++ child, parent)
+
+# Delivery remains the task's; the conversation belongs under a thread
+# delegator until explicitly moved. A bot's work stays in its project.
+def State.delegated(+s: State, +t: Task) -> State:
+  match t:
+    case Task{_, +parent, +child, _, _, _, _, _, _}:
+      State.task_parent(BT.World.is_bot_thread(State.bots(s), parent), State.put_task(s, t), parent, child)
+
 # Direct legacy rooms have no RoomSet; derive both participants once.
 def MailRoom.dm_parts(xs: List<&2, String>, +b: ML.Box) -> List<&2, String>:
   match xs:
@@ -2260,7 +2291,7 @@ def State.apply.go(s: State, e: Change) -> State:
     case ModesSet{+id, r, i, m, _}:
       State.thread((t => Thread.modes_set(r, i, m, t)), s, id)
     case TaskDelegated{id, parent, child, depth, provider, model, _}:
-      State.put_task(s, Task{id, parent, child, depth, TaskQueued{}, "", False{}, provider, model})
+      State.delegated(s, Task{id, parent, child, depth, TaskQueued{}, "", False{}, provider, model})
     case TaskStateSet{+id, st, summary, _}:
       State.task((t => Task.step(t, st, summary)), s, id)
     case TaskDelivered{+id, _}:

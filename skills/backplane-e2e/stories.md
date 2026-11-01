@@ -67,6 +67,8 @@ message. Scroll up to the first message ("Question 1") and back down to the
 newest: every step moves, nothing jumps, no stall (D: also fast bursts of
 notches near the top: 0 jumps). Scroll halfway up and send
 a message: the view goes to the newest page with that message on screen.
+A: scroll into history and tap Latest: it returns directly to the newest
+page and follows the reply again; the button goes away at the end.
 
 **S08 Reading while it streams** (W D)
 Send a message; while the reply streams, scroll up a few notches (D: mouse
@@ -116,6 +118,8 @@ show under it with nothing below them. Click the row: the calls hang under
 it on a rule; click it again: they go, and none is left below the reply
 (the hub-drawn page too). Open it, send "tools:3 again", switch to another
 thread and back: the first run is still open, the new one shut.
+A: long-press a tool row for Copy or Select text; the reader shows its
+whole text. Error rows wrap in full, and their dot announces Failed.
 
 **S52 The pairing link in Settings** (W D)
 Start the hub with `BP_E2E_TAILNET=1` (hub.log: "Backplane on your tailnet:

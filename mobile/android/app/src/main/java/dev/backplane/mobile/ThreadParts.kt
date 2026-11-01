@@ -137,6 +137,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -189,22 +191,26 @@ private val mono = FontFamily.Monospace
 // waiting (violet), finished ok (green), wanting you bad (red), stopped,
 // idle or settled faint (grey) (style.css's --st-*, --waiting)
 object PhaseColor {
-    val accent = Color(0xFF5FB3FF)
-    val ok = Color(0xFF58C28A)
-    val warn = Color(0xFFE3B341)
-    val bad = Color(0xFFF06A6A)
-    val input = Color(0xFFB48CFF)
-    val queued = Color(0xFF4FC1C9)
-    val waiting = Color(0xFFE07BD0)
-    val faint = Color(0xFF5C6473)
+    val accent: Color @Composable get() = MaterialTheme.colorScheme.primary
+    val ok: Color @Composable get() = phaseColor(0xFF1C8550, 0xFF58C28A)
+    val warn: Color @Composable get() = phaseColor(0xFF9A6700, 0xFFE3B341)
+    val bad: Color @Composable get() = MaterialTheme.colorScheme.error
+    val input: Color @Composable get() = phaseColor(0xFF7446D0, 0xFFB48CFF)
+    val queued: Color @Composable get() = phaseColor(0xFF127C84, 0xFF4FC1C9)
+    val waiting: Color @Composable get() = phaseColor(0xFFA3399A, 0xFFE07BD0)
+    val faint: Color @Composable get() = phaseColor(0xFF72777F, 0xFF5C6473)
 }
+
+@Composable
+private fun phaseColor(light: Long, dark: Long) = Color(if (MaterialTheme.colorScheme.background.luminance() > 0.5f) light else dark)
 
 // The projected activity wins over the legacy turn fallback. "waiting" is
 // the signal's own (its turn is over, work it started is still out);
 // queued data alone never proves a worker is running.
 private fun threadStatusSignal(state: String, status: String): String = when (status) {
-    "" -> when (state) { "run" -> "active"; "fail" -> "blocked"; else -> "inactive" }
-    "blocked", "needs you", "approval", "input", "failed" -> "blocked"
+    "" -> when (state) { "run" -> "active"; "fail" -> "failed"; else -> "inactive" }
+    "failed" -> "failed"
+    "blocked", "needs you", "approval", "input" -> "blocked"
     "active", "running", "watching", "cancelling", "working", "monitoring" -> "active"
     "stalled" -> "stalled"
     "waiting" -> "waiting"
@@ -220,6 +226,7 @@ fun StatusDot(state: String, status: String) {
     val label = when (signal) {
         "stalled" -> if (lang == "ja") "進捗停止・実行中の作業は継続しています" else "Stalled: no recent progress; busy work continues"
         "blocked" -> if (lang == "ja") "対応が必要です" else "Blocked: needs interaction"
+        "failed" -> if (lang == "ja") "失敗しました" else "Failed: agent stopped with an error"
         "active" -> if (lang == "ja") "作業中" else "Working: agent or owned work active"
         "settled" -> if (lang == "ja") "完了済み" else "Settled"
         "waiting" -> if (lang == "ja") "サブエージェントや開始した作業の完了待ちです" else "Waiting: on subagents or work it started"
@@ -229,7 +236,7 @@ fun StatusDot(state: String, status: String) {
     Box(Modifier.size(24.dp).semantics(mergeDescendants = true) { contentDescription = label }, contentAlignment = Alignment.Center) {
         when (signal) {
             "stalled" -> Icon(Icons.Filled.Warning, null, Modifier.size(18.dp), tint = PhaseColor.warn)
-            "blocked" -> Icon(Icons.Filled.Error, null, Modifier.size(18.dp), tint = PhaseColor.bad)
+            "blocked", "failed" -> Icon(Icons.Filled.Error, null, Modifier.size(18.dp), tint = PhaseColor.bad)
             "active" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.accent, strokeWidth = 2.dp)
             "waiting" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.waiting, strokeWidth = 2.dp)
             "finished" -> Icon(Icons.Filled.CheckCircle, null, Modifier.size(16.dp), tint = PhaseColor.ok)
@@ -493,7 +500,8 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
             for (i in e.images) Thumb(m, i.url, show)
             Stamp(e.stamp)
         }
-        "fold" -> Row(Modifier.fillMaxWidth().clickable { m.act("fold", e.value) }.padding(vertical = 2.dp),
+        "fold" -> Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { m.act("fold", e.value) }
+            .heightIn(min = 44.dp).padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(if (e.open) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 if (e.open) NativeMessages.common_hide(lang) else NativeMessages.common_show(lang), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
@@ -517,19 +525,25 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
             Text(e.text, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono),
                 color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        else -> Box {
             val color = if (e.tone == "error") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
             val style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono)
-            Text(e.label, style = style, color = color.copy(alpha = 0.7f))
-            Text(e.text, style = style, color = color, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth().combinedClickableCompat(onLong = { menu = true }) {},
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(e.label, style = style, color = color.copy(alpha = 0.7f))
+                Text(e.text, Modifier.weight(1f), style = style, color = color,
+                    maxLines = if (e.tone == "error") Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+            }
+            MessageMenu(m, e.text, menu, { menu = false })
         }
     }
 }
 
+@Composable
 private fun subColor(state: String) = when (state) {
     "active", "running", "watching", "cancelling" -> PhaseColor.accent
     "stalled" -> PhaseColor.warn
-    "blocked", "needs you" -> PhaseColor.bad
+    "blocked", "needs you", "failed" -> PhaseColor.bad
     "waiting" -> PhaseColor.waiting
     "finished" -> PhaseColor.ok
     else -> PhaseColor.faint
@@ -621,7 +635,8 @@ fun SubsView(m: AppModel, subs: Subs) {
 @Composable
 fun AskCard(m: AppModel, a: Ask) {
     if (a.kind == "browser") { BrowserAsk(m, a); return }
-    Surface(color = PhaseColor.bad.copy(alpha = 0.14f), shape = corner, modifier = Modifier.fillMaxWidth()) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = corner,
+        modifier = Modifier.fillMaxWidth().border(1.dp, PhaseColor.bad, corner)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(when (a.kind) { "plan" -> Icons.Filled.Checklist; "input" -> Icons.Filled.QuestionAnswer; else -> Icons.Filled.PanTool },

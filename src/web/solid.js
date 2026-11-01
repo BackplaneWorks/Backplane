@@ -351,8 +351,8 @@ class View {
       else return;
       e.preventDefault();
     });
-    // a pane resized (the viewer's edge dragged) draws again at its new size
-    this.resize = new ResizeObserver(() => this.later());
+    // Keep a fitted model visible when the inspector changes the pane's shape.
+    this.resize = new ResizeObserver(() => { this.refit(); this.later(); });
     this.resize.observe(canvas);
   }
 
@@ -374,6 +374,20 @@ class View {
     cam.dist = fittedDistance(this.box, cam, a, this.projection === "orthographic");
     cam.home = cam.dist;
     this.cam = cam;
+    this.rememberFit(this.box);
+  }
+
+  fitPose() { return JSON.stringify([this.cam, this.projection]); }
+  rememberFit(box, margin = 1.08) {
+    this.framing = { box: box.slice(), margin, pose: this.fitPose() };
+  }
+  refit() {
+    const f = this.framing, w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    // A pan, orbit or zoom belongs to the person, including a framed part.
+    if (!this.box || !f || !w || !h || f.pose !== this.fitPose()) return;
+    this.cam.dist = fittedDistance(f.box, this.cam, w / h, this.projection === "orthographic", f.margin);
+    this.cam.home = this.cam.dist;
+    f.pose = this.fitPose();
   }
 
   // the part under a tap (a ray from the eye through it, to the nearest
@@ -548,12 +562,13 @@ View.prototype.receive = function(record) {
   this.ticking(false); this.later();
 };
 View.prototype.snapshot = function() {
-  return { cam: { ...this.cam }, projection: this.projection, exposure: this.exposure, thermal: { ...this.thermal }, aperture:this.aperture, focusDistance:this.focusDistance, focusLocked:this.focusLocked, selection:this.selection || null };
+  return { cam: { ...this.cam }, framing:this.framing && { ...this.framing, box:this.framing.box.slice() }, projection: this.projection, exposure: this.exposure, thermal: { ...this.thermal }, aperture:this.aperture, focusDistance:this.focusDistance, focusLocked:this.focusLocked, selection:this.selection || null };
 };
 View.prototype.restore = function(state) {
   this.cam = Object.assign(new Orbit(),state.cam);
   this.projection = state.projection; this.exposure = state.exposure; this.thermal = { ...state.thermal };
   this.aperture = state.aperture || "off"; this.focusDistance = state.focusDistance || this.cam.dist/100; this.focusLocked = !!state.focusLocked; this.selection = state.selection || null;
+  this.framing = state.framing && { ...state.framing, box:state.framing.box.slice() }; this.refit();
 };
 View.prototype.dispose = function() {
   this.ticking(false); this.resize?.disconnect(); this.events?.abort(); this.canvas.classList.remove("dragging"); this.dof?.dispose();
@@ -693,6 +708,7 @@ export function frameBounds(min, max) {
   cam.pivot = [(min[0] + max[0]) * 50, -(min[1] + max[1]) * 50, (min[2] + max[2]) * 50];
   const box = [min[0] * 100, -max[1] * 100, min[2] * 100, max[0] * 100, -min[1] * 100, max[2] * 100];
   cam.sx = 0; cam.sy = 0; cam.dist = fittedDistance(box, cam, aspect, view.projection === "orthographic", 1.15); cam.home = cam.dist;
+  view.rememberFit(box, 1.15);
   view.later();
 }
 

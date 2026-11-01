@@ -55,6 +55,13 @@ def create() -> B.Step:
 def created() -> M.State:
   M.State.replay(changes(create()), base())
 
+def delegated() -> M.State:
+  M.State.replay([M.ThreadCreated{"task-child", "p", "Review layout", M.Local{}, "", "", "claude", "", 12n},
+    M.TaskDelegated{"task", "parent", "task-child", 1n, "claude", "", 12n}], base())
+
+def root_candidates(+s: M.State) -> String:
+  ids(U.Kids.keep(U.Ui.threads(s), U.Kids.set(s)))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("root traversal keeps nested archive and cycle fallbacks", String.join([
@@ -73,6 +80,18 @@ def main() -> IO(Unit):
     C.Check.str("parent relationship survives codec", J.Json.show(CD.Change.encode(M.ThreadParentSet{"child", "parent", 9n})), "{\"$\":\"ThreadParentSet\",\"id\":\"child\",\"parent\":\"parent\",\"at\":9}")
     C.Check.str("new child records its actual parent", ST.Tree.parent(created(), B.Hub.id("t", 100n, B.Hub.seq(base()))), "parent")
     C.Check.str("child creates no delegated activity", Nat.show(U.SIx.kids(U.Side.ix(created()), "parent")), "0")
+    C.Check.str("replayed delegation seeds visible parent", ST.Tree.parent(delegated(), "task-child"), "parent")
+    C.Check.str("expanded sidebar contains delegated child", Bool.show(String.contains(visible(M.State.apply(delegated(), M.SettingSet{"thread.tree.parent", "1", 13n})), "task-child")), "True")
+    C.Check.str("completed delivered task stays under parent", ST.Tree.parent(M.State.replay([M.TaskStateSet{"task", M.TaskDone{}, "done", 14n}, M.TaskDelivered{"task", 14n}], delegated()), "task-child"), "parent")
+    C.Check.str("explicit move to root wins over delegation", ST.Tree.parent(M.State.apply(delegated(), M.ThreadParentSet{"task-child", "", 15n}), "task-child"), "")
+    C.Check.str("moved delegated child remains a project root candidate", Bool.show(String.contains(root_candidates(M.State.apply(delegated(), M.ThreadParentSet{"task-child", "", 15n})), "task-child")), "True")
+    C.Check.str("archived parent leaves delegated child reachable", Bool.show(String.contains(root_candidates(M.State.apply(delegated(), M.ThreadArchived{"parent", True{}, 15n})), "task-child")), "True")
+    C.Check.str("deleted parent leaves delegated child reachable", Bool.show(String.contains(root_candidates(M.State.apply(delegated(), M.ThreadDeleted{"parent", 15n})), "task-child")), "True")
+    C.Check.str("cross-project bot work stays at project root", ST.Tree.parent(M.State.apply(delegated(), M.TaskDelegated{"other-task", "other", "task-child", 1n, "claude", "", 13n}), "task-child"), "")
+    +bot : M.State = M.State.replay([M.ThreadCreated{"bot-child", "p", "Bot work", M.Local{}, "", "", "claude", "", 11n},
+      M.BotSet{"b", "Manager bot", "parent", 1n, "", 11n}, M.TaskDelegated{"bot-task", "parent", "bot-child", 1n, "claude", "", 12n}], base())
+    C.Check.str("bot delegation never seeds a hidden sidebar parent", M.Setting.get(bot, "thread.parent.bot-child", ""), "")
+    C.Check.str("same-project bot work stays a project root candidate", Bool.show(String.contains(root_candidates(bot), "bot-child")), "True")
     C.Check.str("drag order remains authoritative", projects(U.Side.rows(M.State.apply(base(), M.ProjectOrdered{"p", "8", 100n}), 101n)), "p,q,")
     C.Check.str("codec decodes parent link", ST.Tree.parent(M.State.apply(base(), Maybe.default(&2, M.Change, CD.Change.decode(CD.Change.encode(M.ThreadParentSet{"child", "parent", 9n})), M.SettingSet{"bad", "bad", 0n})), "child"), "parent")
     C.Check.str("archiving parent exposes live child", ST.Tree.display_parent(M.State.apply(base(), M.ThreadArchived{"parent", True{}, 30n}), "child"), "")

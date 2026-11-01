@@ -42,8 +42,10 @@ type RK is Data:
 # Version 5 also repairs TurnUsage record coverage: daily dimensions,
 # their first accepted turn, and the thread's last turn must survive boot.
 # Version 6 rebuilds term postings with Unicode-normalized search keys.
+# Version 7 records the sidebar parent derived from delegation, including
+# older tasks rebuilt from the log and subsequent explicit moves.
 def Sdb.codec() -> Nat:
-  6n
+  7n
 
 def Sdb.schema() -> String:
   String.join([
@@ -727,8 +729,8 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
       [RK{"thread", id}]
     case M.ModesSet{+id, _, _, _, _}:
       [RK{"thread", id}]
-    case M.TaskDelegated{+id, _, _, _, _, _, _}:
-      [RK{"task", id}]
+    case M.TaskDelegated{+id, _, +child, _, _, _, _}:
+      [RK{"task", id}, K.set("thread.parent." ++ child)]
     case M.TaskStateSet{+id, _, _, _}:
       [RK{"task", id}]
     case M.TaskDelivered{+id, _}:

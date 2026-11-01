@@ -23,6 +23,22 @@ const source=join(project,'source.glb'),board=join(project,'main.kicad_pcb'),ste
 const bytes=glb();fs.writeFileSync(source,bytes);fs.writeFileSync(board,'(kicad_pcb (version 20250114))');fs.writeFileSync(step,'ISO-10303-21; END-ISO-10303-21;');fs.writeFileSync(exported,bytes);
 const publish=(s=source,g=s,k='glb',canonical=board,rev=revision(s))=>call('publish',project,s,canonical,k,rev,g,'');
 try {
+ const cached=p=>effects.get('RenderAssetFx.cached')(p);
+ assert.equal(cached(exported),'1','a complete raw export can be reused');
+ assert.equal(cached(join(dir,'absent.glb')),'');
+ const damaged=join(dir,'damaged.glb');fs.writeFileSync(damaged,Buffer.concat([bytes,Buffer.alloc(32)]));
+ assert.equal(cached(damaged),'','a clobbered declared length must be exported again');
+ fs.writeFileSync(damaged,bytes.subarray(0,40));assert.equal(cached(damaged),'','a truncated export misses');
+ const badJson=Buffer.from(bytes);badJson[20]=0;fs.writeFileSync(damaged,badJson);assert.equal(cached(damaged),'','a malformed JSON chunk misses');
+ fs.symlinkSync(exported,join(dir,'cache-link.glb'));assert.equal(cached(join(dir,'cache-link.glb')),'','raw-cache links are refused');
+ fs.linkSync(exported,join(dir,'cache-hardlink.glb'));assert.equal(cached(exported),'','raw-cache hardlinks are refused');fs.unlinkSync(join(dir,'cache-hardlink.glb'));
+ readHook=()=>{readHook=null;fs.utimesSync(exported,new Date(),new Date(Date.now()+5000));};
+ assert.equal(cached(exported),'','a raw export changed while checking misses');readHook=null;
+ const large=join(dir,'large-complete.glb'),largeBytes=64*1024*1024+4,largeHead=Buffer.from(glb({},0,4));
+ largeHead.writeUInt32LE(largeBytes,8);largeHead.writeUInt32LE(largeBytes-largeHead.length+4,largeHead.length-12);
+ fs.writeFileSync(large,largeHead);fs.truncateSync(large,largeBytes);
+ assert.equal(cached(large),'1','complete oversized exports retain the publication size refusal instead of re-exporting');
+ assert.match(publish(board,large,'3d').error,/64 MiB/);
  const a=call('authorize',project,source,board,'mech',revision(source));assert.equal(a.source,source);assert.equal(a.kind,'glb');
  assert(call('authorize',project,source,board,'mech','').error);assert(call('authorize',project,source,board,'invalid',revision(source)).error);
  const escape=join(outside,'model.glb');fs.writeFileSync(escape,bytes);

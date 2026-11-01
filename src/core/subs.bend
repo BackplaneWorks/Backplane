@@ -17,9 +17,9 @@ import ./json.bend as J
 # now, and a subagent at work shows its newest steps unless shut, so the
 # person sees them go (laws subs_*).
 #
-# A subagent's steps are read from its log (M.Bg.log), newest first and
-# never more than Subs.window() of them, so a frame's work stays bounded
-# however long the thread runs.
+# Starts and each call's activity have their own indices. At most
+# Subs.window() starts and that many entries per call are read, newest
+# first, so another agent's activity cannot erase a row or empty its steps.
 
 type SubStep is Data:
   SubStep{kind: String, text: String}
@@ -97,12 +97,12 @@ def Subs.or(+a: String, +b: String) -> String:
 # "start:<kind>" names its kind ("start" alone, none)
 def Agg.upd(i: Nat, a: SubAgg, +kind: String, +text: String, +at: Nat) -> SubAgg:
   match i a:
-    case 0n SubAgg{c, _, _, e, n, ss, tm}:
-      SubAgg{c, String.drop(kind, 6n), Subs.line(text), e, n, ss, tm}
+    case 0n SubAgg{c, _, _, e, n, ss, +tm}:
+      SubAgg{c, String.drop(kind, 6n), Subs.line(text), e, n, ss, Bool.pick(Nat, Nat.is_eq(tm, 0n), at, tm)}
     case 1n SubAgg{c, k, ti, +en, n, ss, +tm}:
       SubAgg{c, k, ti, Subs.or(en, text), n, ss, Bool.pick(Nat, String.is_empty(en), at, tm)}
-    case _ SubAgg{c, k, ti, e, +n, ss, tm}:
-      SubAgg{c, k, ti, e, 1n+n, Agg.step(kind, text, n, ss), tm}
+    case _ SubAgg{c, k, ti, e, +n, ss, +tm}:
+      SubAgg{c, k, ti, e, 1n+n, Agg.step(kind, text, n, ss), Bool.pick(Nat, Nat.is_eq(tm, 0n), at, tm)}
 
 def Agg.upd.if(hit: Bool, a: SubAgg, +kind: String, +text: String, +at: Nat) -> SubAgg:
   match hit:
@@ -203,18 +203,51 @@ def Agg.out(s: AggS) -> List<&2, SubAgg>:
     case AggS{+m, order}:
       Agg.list(order, m, Nil{})
 
-def Agg.walk.m(k: Nat, es: List<&2, M.Entry>, s: AggS) -> List<&2, SubAgg>:
+def Agg.scan(k: Nat, es: List<&2, M.Entry>, s: AggS) -> AggS:
   match k es:
     case 0n _:
-      Agg.out(s)
+      s
     case 1n+_ Nil{}:
-      Agg.out(s)
+      s
     case 1n+j e <> t:
-      Agg.walk.m(j, t, Agg.met(e, s))
+      Agg.scan(j, t, Agg.met(e, s))
+
+def Agg.walk.m(k: Nat, es: List<&2, M.Entry>, s: AggS) -> List<&2, SubAgg>:
+  Agg.out(Agg.scan(k, es, s))
+
+def Agg.call.entry(e: M.Entry, a: SubAgg) -> SubAgg:
+  match e:
+    case M.Act{_, _, _, +kind, +text, +at}: Agg.upd(Agg.kind(kind), a, kind, text, at)
+    case _: a
+
+def Agg.call.scan(k: Nat, es: List<&2, M.Entry>, a: SubAgg) -> SubAgg:
+  match k es:
+    case 0n _: a
+    case 1n+_ Nil{}: a
+    case 1n+j e <> t: Agg.call.scan(j, t, Agg.call.entry(e, a))
+
+def Agg.replaced(r: Map<&2, SubAgg> & SubAgg, order: List<&2, String>, +a: SubAgg) -> AggS:
+  (m, old) = r
+  AggS{Map.set(&2, SubAgg, m, Agg.call(a), a), Agg.order.k(String.is_empty(Agg.call(old)), Agg.call(a), order)}
+
+def Agg.recover.entry(e: M.Entry, +st: M.State, s: AggS) -> AggS:
+  match e s:
+    case M.Act{_, +log, +call, +kind, +text, +at} AggS{m, order}:
+      +a = Agg.upd(0n, Agg.call.scan(Subs.window(), M.State.mine(st, M.Idx.sub.call(log, call)), Agg.blank(call)), kind, text, at)
+      Agg.replaced(Map.get(SubAgg, Agg.blank(""), m, call), order, a)
+    case _ _: s
+
+def Agg.recover(es: List<&2, M.Entry>, +st: M.State, s: AggS) -> AggS:
+  match es:
+    case Nil{}: s
+    case e <> t: Agg.recover(t, st, Agg.recover.entry(e, st, s))
+
+def Subs.starts(+st: M.State, +th: String) -> List<&2, M.Entry>:
+  List.take(&2, M.Entry, M.State.mine(st, M.Idx.sub.starts(M.Bg.log(th))), Subs.window())
 
 # a thread's subagents from their log, the most recently busy first
 def Subs.aggs(+st: M.State, +th: String) -> List<&2, SubAgg>:
-  Agg.walk.m(Subs.window(), M.State.mine(st, M.Bg.log(th)), AggS{Map.new(&2, SubAgg), Nil{}})
+  Agg.out(Agg.recover(Subs.starts(st, th), st, Agg.scan(Subs.window(), M.State.mine(st, M.Bg.log(th)), AggS{Map.new(&2, SubAgg), Nil{}})))
 
 # the word for how a subagent ended
 def Subs.ended(+status: String) -> String:
@@ -341,6 +374,13 @@ def Subs.key(r: SubRow) -> String:
   match r:
     case SubRow{k, _, _, _, _, _, _, _, _, _}:
       k
+
+# Presentation membership uses every row's actual key. Panel-close
+# signatures (Subs.keys) name attention state and omit finished rows.
+def Subs.row_keys(rs: List<&2, SubRow>) -> List<&2, String>:
+  match rs:
+    case Nil{}: Nil{}
+    case r <> t: Subs.key(r) <> Subs.row_keys(t)
 
 def Subs.word(r: SubRow) -> String:
   match r:

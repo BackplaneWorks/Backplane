@@ -25,8 +25,8 @@ def revision.result(r: PR.Ran) -> IO(Unit):
 
 def revision.dispatch(args: List<String>) -> IO(Unit):
   match args:
-    case "promote" <> code <> path <> _:
-      IO.bind(PR.Ran, Unit, PV.Pv.step.ran(PR.Ran{Maybe.default(&2, U32, U32.read(code), 3), "export"}, path), revision.result)
+    case "promote" <> code <> +path <> _:
+      IO.bind(PR.Ran, Unit, PV.Pv.step.ran(PR.Ran{Maybe.default(&2, U32, U32.read(code), 3), "export"}, path ++ ".part", path), revision.result)
     case path <> _: revision.run(path)
     case _: IO.die(Unit, 2, "expected source path or promote CODE PATH")
 

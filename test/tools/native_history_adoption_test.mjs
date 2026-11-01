@@ -2,16 +2,17 @@
 // These exercise real request fences, materialization, viewport and continuation.
 import assert from 'node:assert/strict';
 export function registerNativeHistoryChecks(check, harness) {
-  const picture = (x, ids, edit = {}) => {
+  const picture = (x, ids, edit = {}, qualified = false) => {
     const shown = x.screen();
+    if (qualified) shown.thread.id = 'h|a';
     shown.thread.entries = ids.map(id => ({ id, kind: 'assistant', text: id, blocks: [], ...(edit[id] || {}) }));
     return { shown, overlay: { key: 'h', name: 'h', j: structuredClone(shown) },
       window: { ids: ids.map((_, i) => String(i + 1)), older: 'older-next', hasMore: true, anchor: { id: '', offset: 0 }, partial: [] } };
   };
-  const opened = ids => {
+  const opened = (ids, qualified = false) => {
     const x = harness(); x.api.historyCapacity = ({ rows, bytes }) => rows <= 260 && bytes <= 1048576;
     x.h.hubs(['h']); x.h.connection('h', '1', 'view-v1');
-    const request = x.greeting().cmds[0].request; x.answer(request.id, picture(x, ids)); return x;
+    const request = x.greeting().cmds[0].request; x.answer(request.id, picture(x, ids, {}, qualified)); return x;
   };
   const keys = x => x.h.states.get('h').shown.thread.entries.map(e => e.id);
   const plan = (ids, aliases = []) => ({ ids, aliases });
@@ -45,6 +46,49 @@ export function registerNativeHistoryChecks(check, harness) {
     x.h.request('h', 'earlier', ''); let req = x.h.drain().cmds[0].request; x.answer(req.id, picture(x, ['p', 'a']));
     x.h.update(x.h.states.get('h')); req = x.h.drain().cmds[0].request;
     x.answer(req.id, picture(x, ['p', 'a'])); assert.deepEqual(keys(x), ['p', 'a', 'b', 'c']);
+  });
+  check('a settled reply replaces its visible streaming preview in both halves', () => {
+    const x = opened(['u', '@live:a'], true), s = x.h.states.get('h');
+    for (const screen of [s.shown, s.overlay.j]) for (const entry of screen.thread.entries) entry.text = 'Same reply';
+    assert(x.h.viewport('h', 'a', { id: 'u', offset: -3, first: 'u', last: '@live:a' }));
+    x.api.history = input => {
+      assert.deepEqual(input.old, ['u']);
+      assert.deepEqual(input.keep, ['u']);
+      assert.deepEqual(input.visible, ['u']);
+      return plan(['u', 'reply']);
+    };
+    x.h.update(s); const req = x.h.drain().cmds[0].request;
+    x.answer(req.id, picture(x, ['u', 'reply'], { u: { text: 'Same reply' }, reply: { text: 'Same reply' } }, true));
+    assert.deepEqual(keys(x), ['u', 'reply']);
+    assert.deepEqual(s.overlay.j.thread.entries, s.shown.thread.entries);
+    assert.equal(s.ready, true);
+  });
+  check('paging retires a settled preview before the planner counts the old window', () => {
+    const x = opened(['u', '@live:a'], true), s = x.h.states.get('h');
+    assert(x.h.viewport('h', 'a', { id: 'u', offset: -3, first: 'u', last: '@live:a' }));
+    x.api.history = input => {
+      assert.equal(input.page, true);
+      assert.deepEqual(input.old, ['u']);
+      assert.deepEqual(input.keep, ['u']);
+      return plan(['p', 'u', 'reply']);
+    };
+    x.h.request('h', 'earlier', ''); const req = x.h.drain().cmds[0].request;
+    x.answer(req.id, picture(x, ['p', 'u', 'reply'], {}, true));
+    assert.deepEqual(keys(x), ['p', 'u', 'reply']);
+    assert.equal(s.ready, true);
+  });
+  check('a current streaming preview remains visible and takes its fresh text', () => {
+    const x = opened(['u', '@live:a'], true), s = x.h.states.get('h');
+    assert(x.h.viewport('h', 'a', { id: '@live:a', offset: -3, first: 'u', last: '@live:a' }));
+    x.api.history = input => {
+      assert.deepEqual(input.old, ['u', '@live:a']);
+      assert.deepEqual(input.keep, ['u', '@live:a']);
+      return plan(['u', '@live:a']);
+    };
+    x.h.update(s); const req = x.h.drain().cmds[0].request;
+    x.answer(req.id, picture(x, ['u', '@live:a'], { '@live:a': { text: 'More of the reply' } }, true));
+    assert.deepEqual(keys(x), ['u', '@live:a']);
+    assert.equal(s.shown.thread.entries[1].text, 'More of the reply');
   });
   check('newer page carries direction and retains its visible older prefix', () => {
     const x = opened(['p', 'a', 'b']), s = x.h.states.get('h'); s.back = ['newer'];
