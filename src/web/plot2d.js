@@ -375,6 +375,8 @@ class View {
     this.canvas = canvas;
     this.bg = bg;
     this.key = "";
+    this.scope = "";
+    this.stateKey = "";
     this.plot = null;
     this.off = 0;
     this.dim = 0;
@@ -823,7 +825,7 @@ const views = new Map();
 let placed = null;
 let sheeted = null;
 let probed = null;
-// where the view was left on each source moved by hand (a few dozen kept)
+// where each thread left its sources moved by hand (a few dozen kept)
 const left = new Map();
 
 // the page's answer to a tap on a sheet symbol (host.js)
@@ -916,10 +918,11 @@ export function mount(canvases) {
 }
 
 function park(v) {
+  const key = v.stateKey || v.key;
   // Fit replaces a source's earlier pan, including when it is left again.
-  if (v.key && v.plot && v.plot.chunks) left.delete(v.key);
+  if (v.key && v.plot && v.plot.chunks) left.delete(key);
   if (v.key && v.plot && v.plot.chunks && v.touched) {
-    left.set(v.key, { scale: v.scale,
+    left.set(key, { scale: v.scale,
       cx: (v.viewport.width / 2 - v.ox) / v.scale,
       cy: (v.viewport.height / 2 - v.oy) / v.scale });
     if (left.size > 48) left.delete(left.keys().next().value);
@@ -948,16 +951,19 @@ function mountOne(canvas) {
   view.fade = Number(canvas.dataset.fade || 0);
   if (view.sheetText !== (canvas.dataset.sheets || "")) { view.sheetText = canvas.dataset.sheets || "";view.sheets = sheetBoxes(view.sheetText); }
   const key = canvas.dataset.key || "";
-  if (key !== view.key) {
+  const scope = canvas.dataset.scope || "", stateKey = `${scope}\0${key}`;
+  if (stateKey !== view.stateKey) {
     park(view);
     // another version of the same file keeps its view, and the last one
     // stays up until the next comes
-    const same = view.plot && view.plot.chunks && canvas.dataset.fam && canvas.dataset.fam === view.fam;
+    const same = scope === view.scope && view.plot && view.plot.chunks && canvas.dataset.fam && canvas.dataset.fam === view.fam;
     view.key = key;
+    view.scope = scope;
+    view.stateKey = stateKey;
     view.fam = canvas.dataset.fam || "";
     view.asked = performance.now();
     view.hl = null;
-    if (!same) { view.plot = null; view.fitted = false; view.back = left.get(key) || null; }
+    if (!same) { view.plot = null; view.fitted = false; view.back = left.get(stateKey) || null; }
     if (plots.has(key)) { view.show(plots.get(key)); prefetch(view); } else view.later();
   }
 }

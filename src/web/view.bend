@@ -4351,7 +4351,7 @@ def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>
   View.bar.loc(lc, List.append(&2, D.Node, what, [View.plot.layers(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc) ++ Bool.pick(String, String.eq(U.Solid.kind(u), "schematic"),
     " · Alt+←/→: " ++ MSG.T.viewer.sch.back(lc) ++ "/" ++ MSG.T.viewer.sch.forward(lc) ++ " · Alt+↑/Backspace: " ++ MSG.T.viewer.sch.up(lc), ""))
    <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", List.append(&2, D.Attr, [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"tabindex", "0"}, D.At{"aria-label", Bool.pick(String, String.eq(U.Solid.kind(u), "schematic"), MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.board.tip(lc))}, D.At{"data-key", U.Solid.want(u)},
-        D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
+        D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
         D.At{"data-wait-tree", View.plot.wait.tree(String.eq(U.Solid.kind(u), "schematic"), u)}, D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", U.Solid.fam(u, U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], View.probe.attrs(u, String.eq(U.Solid.kind(u), "schematic"))), Nil{}}
         <> List.append(&2, D.Node, View.probe.chip(u), View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
@@ -4399,7 +4399,7 @@ def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
            D.El{"section", "solid-pcb", [D.At{"class", "solid-pcb viewer-stage"}, D.At{"aria-label", "PCB beside assembly"}],
              [D.El{"div", "solid-pcb-controls", [D.At{"class", "solid-pcb-controls"}, D.At{"aria-label", "PCB layer controls"}], [View.layers.loc(lc, False{}, False{}, U.Solid.off(u), U.Lfocus.of(u))]},
               D.El{"canvas", "solid-pcb-plot", List.append(&2, D.Attr, View.probe.attrs(u, False{}), [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", View.solid.boardkey(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))},
-                D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
+                D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
                 D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"tabindex", "0"}, D.At{"aria-label", "Saved PCB. Drag to pan, wheel or pinch to zoom."}]), Nil{}},
               D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]},
            D.El{"aside", "solid-inspector", [D.At{"id", "solid-inspector"}, D.At{"class", "solid-inspector"}], Nil{}}]}]}])
@@ -4426,7 +4426,7 @@ def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
 # board, 1 a schematic, as the single tabs keep them)
 def View.combo.canvas(+lc: I.Loc, +id: String, +key: String, +kind: String, +k: U32, +u: U.Ui, +sheets: String) -> D.Node:
   D.El{"canvas", id, List.append(&2, D.Attr, View.probe.attrs(u, U32.is_eq(k, 1)), [D.At{"id", id}, D.At{"class", "plot2d"}, D.At{"tabindex", "0"}, D.At{"aria-label", Bool.pick(String, U32.is_eq(k, 1), MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.board.tip(lc))}, D.At{"data-key", key},
-    D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))},
+    D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))},
     D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of.at(u, kind)))},
     D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(key)}, D.At{"data-sheets", sheets}]), Nil{}}
 
@@ -4466,7 +4466,7 @@ def View.combo.pcb(+lc: I.Loc, +u: U.Ui) -> D.Node:
 def View.combo.solid(+lc: I.Loc, +u: U.Ui) -> D.Node:
   D.El{"section", "combo-3d", [D.At{"class", "combo-pane"}, D.At{"aria-label", "3D"}], [
     View.combo.head("3d", "3D", Nil{}),
-    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}, D.At{"data-probe", U.Probe.get(u)}, D.At{"tabindex", "0"}, D.At{"aria-label", "3D model. Drag or arrow keys to orbit; F fits the model."}], Nil{}},
+    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-probe", U.Probe.get(u)}, D.At{"tabindex", "0"}, D.At{"aria-label", "3D model. Drag or arrow keys to orbit; F fits the model."}], Nil{}},
       D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]}]}
 
 def View.combo.pane(i: Nat, +lc: I.Loc, +u: U.Ui) -> D.Node:

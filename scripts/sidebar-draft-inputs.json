@@ -175,7 +175,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "e625431f0c6bcddc6d5c20f6b186ed2a2fc1d02cc47e58e994f0ff4eac60f784"
+    "src/web/view.bend": "a37f4e5904d559854d3f07c45484dc8c05903b656045bd9d5443edbffd710cd6"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -380,5 +380,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebase subagent fix over current sidebar dependencies; draft image checks unchanged"
+  "reviewNote": "Canvas thread scope only; preserve A subagent changes; sidebar draft test 24 ok, draft readers unchanged."
 }
