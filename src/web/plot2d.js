@@ -683,6 +683,7 @@ class View {
 
   show(p) {
     const first = !this.plot || !this.plot.box;
+    const moved = this.plot?.box && p?.box && p.box.some((value, i) => value !== this.plot.box[i]);
     this.plot = p;
     this.hl = null;
     // a sheet seen before comes back as it was left
@@ -692,7 +693,9 @@ class View {
       this.oy = this.viewport.height / 2 - this.back.cy * this.scale;
       this.fitted = true;this.touched = true;this.back = null;this.later();
     }
-    else if (first) this.fit(); else this.later();
+    // History can move a board far from its previous coordinates. Keep
+    // an automatic Fit framing it; a person's pan or zoom stays theirs.
+    else if (first || (!this.touched && moved)) this.fit(); else this.later();
   }
 
   later() {
