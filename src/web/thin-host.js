@@ -381,6 +381,11 @@ export class ThinHost {
   }
   pump(flushFields = false) {
     if (this.active || !this.ready || !this.actions.length) return;
+    // A history click waits for an already issued picture read. Sending
+    // both spends its request budget queued behind the refresh on the hub.
+    const action = this.actions[0].action;
+    const history = action.startsWith('hist-') || action === 'cmp' || action.startsWith('cmp-') || action === 'rv-as';
+    if (history && this.client.links.get(this.hub)?.updatePending) return;
     // A page on its way is shown first (its reply pumps again): an action
     // sent meanwhile made it stale, and the refresh that drew it instead
     // drew no bridge from the page on screen. Stop and switches do not wait.

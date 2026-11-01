@@ -912,3 +912,24 @@ test('two pages in flight: without olderNext one at a time; a failed first lets 
  g.host.receive(g.reply(b));assert.equal(g.views.length,views,'the second, let go, draws nothing');
  assert.equal(g.host.retryPage(),true);assert.equal(g.sent.at(-1).p.cursor,'c1');
 });
+
+test('design history controls wait for the current refresh before starting their request clock',async()=>{
+ for(const [action,value] of [['hist-go','step:c1'],['hist-live',''],['hist-play',''],['cmp','a'],['cmp-pick','a\tc1'],['rv-as','old']]){
+  const f=await fixture();f.open();f.host.update();const refresh=f.sent.at(-1),count=f.sent.length;
+  f.host.request(action,value);assert.equal(f.sent.length,count,action+' waits for the in-flight refresh');
+  f.tick(4000);f.host.receive(f.reply(refresh));const pick=f.sent.at(-1);assert.equal(pick.p.action,action);
+  f.tick(4000);assert.equal(f.host.ready,true,'the action has its own five-second budget after the refresh');
+  f.host.receive(f.reply(pick));assert.equal(f.host.ready,true);assert.equal(f.sent.filter(x=>x.p.action===action).length,1);
+ }
+});
+test('a queued history control cannot follow a selection into another thread',async()=>{
+ const f=await fixture();f.open();f.host.update();const refresh=f.sent.at(-1);
+ f.host.request('hist-go','step:old');f.host.request('select','B');const opening=f.sent.at(-1);
+ f.host.receive(f.reply(refresh));f.host.receive(f.reply(opening));
+ assert.equal(f.sent.filter(x=>x.p.action==='hist-go').length,0);assert.equal(f.getSession().sel,'B');assert.equal(f.host.ready,true);
+});
+test('waiting history controls keep Stop urgent and leave other action ordering alone',async()=>{
+ const f=await fixture();f.open();f.host.update();f.host.request('hist-go','step:c1');f.host.request('stop','');
+ assert.equal(f.sent.at(-1).p.action,'stop');
+ const g=await fixture();g.open();g.host.update();g.host.request('flag','settings');assert.equal(g.sent.at(-1).p.action,'flag');
+});

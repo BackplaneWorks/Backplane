@@ -164,8 +164,9 @@ Each tick names its save time; selecting one shows its timestamp and source
 tool or turn. Sources on the loaded chat page offer a jump; other source
 labels retain their full tooltip. Highlight edits shows the previous snapshot’s changes with a
 Removed / Changed / Added legend. Scrubbing pauses Play. Paging the chat
-keeps the same history; switching boards shows that board’s steps. Returning
-to Live or reloading keeps the file or schematic sheet on screen.
+keeps the same history; switching boards shows that board’s steps.
+Scrub during a background refresh: history stays usable without a conversation
+error. Returning to Live or reloading keeps the file or schematic sheet on screen.
 
 **S18 Files, Diff, Review** (W D A)
 Files lists the project folder; opening a board file shows it in the Board
