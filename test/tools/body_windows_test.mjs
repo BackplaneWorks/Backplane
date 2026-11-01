@@ -46,13 +46,13 @@ check('append-only live versions retain painted pages and refresh only their bou
  b.bind('h',detail([live(10,27)]),'owner',rr);b.reader(id,true);b.bind('h',detail([live(11,28,'1',true)]),'owner',rr,true);assert.equal(b.reader(id),null,'cut source cannot inherit block positions');
 });
 check('message Markdown construction is once per fetched page and never for collapsed tools',()=>{
- const {b,requests}=setup();let count=0;b.renderBody=n=>{count++;return node('div','made',{},[node('div','',{class:'body'},[node('strong','',{},[text(read(n))])])])};
+ const {b,requests}=setup();let count=0;b.renderBody=n=>{if(read(n))count++;return node('div','made',{},[node('div','',{class:'body'},[node('strong','',{},[text(read(n))])])])};
  b.observe(timeline(b),true);assert.equal(count,1,'preview Markdown rendered synchronously');assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:7,total:7,text:'**bold**',hasMore:false,complete:true,cursor:'',previous:''},requests.at(-1)));
  const page=b.project(root());assert.equal(count,2);b.project(root());assert.equal(count,2);assert(JSON.stringify(page).includes('strong'));
  const closed=setup(false);closed.b.renderBody=()=>{throw Error('collapsed renderer executed')};closed.b.project(root(true));
 });
 check('preview is Markdown on its first frame and cached by entry version',()=>{
- const {b}=setup();let renders=0;b.renderBody=n=>{renders++;return node('div','m',{},[node('div','',{class:'body'},[node('strong','',{},[text(read(n))])])])};
+ const {b}=setup();let renders=0;b.renderBody=n=>{if(read(n))renders++;return node('div','m',{},[node('div','',{class:'body'},[node('strong','',{},[text(read(n))])])])};
  const first=b.project(root()),again=b.project(root());assert(JSON.stringify(first).includes('strong'));assert(!JSON.stringify(first).includes('"tag":"pre"'));assert.equal(renders,1);
  assert.equal(elems(elems(first.kids)[0].kids)[0].kids.head,elems(elems(again.kids)[0].kids)[0].kids.head,'cached Markdown part identity survives projection');
  b.bind('h',detail([{...part(),version:'8'}]),'owner',root());b.project(root());assert.equal(renders,2,'new version renders before publication');
@@ -75,5 +75,29 @@ check('five simultaneous visible body readers settle without eviction/refetch fl
 check('an older retained timeline body is not invalidated by an adjacent hub page',()=>{
  const {b,requests}=setup();b.observe(timeline(b),true);assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:4,total:4,text:'full',hasMore:false,complete:true,cursor:'',previous:''},requests.at(-1)));
  const old=b.reader('m').pages[0];b.bind('h',{...detail([]),window:{ids:['newer'],partial:[]}},'owner',root());assert.equal(b.reader('m').pages[0],old);assert(read(b.project(root())).includes('full'));
+});
+check('a windowed bot message keeps its header, Reply and a whole-message Copy',()=>{
+ // as view.bend's View.msg.x.loc draws a bot chat's message: header, body, stamp, Copy, Reply
+ const made=n=>{const a=attrs(n),id=n.key;return node('div',id,{class:'msg assistant','data-id':id},[
+  ...(a.ctx?[node('div','',{class:'msg-ctx'},[node('a','',{class:'ref ctx',href:a.ctx,'data-on-click':'ref-go'},[text(a.ctxt)])])]:[]),
+  node('div','',{class:'body'},[text(read(n))]),node('span','',{class:'stamp'},[text('')]),
+  node('button','',{class:'copy',title:'Copy','data-on-click':'copy','data-value':read(n)},[text('Copy')]),
+  ...(a.rpl==='1'?[node('button','',{class:'reply',title:'Reply','data-on-click':'reply-to','data-value':id},[text('Reply')])]:[])])};
+ const rr=()=>node('div','timeline',{id:'timeline'},[node('bp-memo','m',{fn:'msg',who:'a',rpl:'1',ctx:'backplane://thread/t1',ctxt:'Boost'},[text('preview of a long report')])]);
+ const {b,requests}=setup();b.renderBody=made;
+ const shape=root=>{const msg=elems(b.project(root).kids)[0],ks=elems(msg.kids);
+  return {classes:ks.map(k=>attrs(k).class),copy:ks.find(k=>attrs(k).class==='copy'),reply:ks.find(k=>attrs(k).class==='reply')}};
+ const before=shape(rr());
+ assert.deepEqual(before.classes,['msg-ctx','body body-window','stamp','copy','reply'],'preview: header, body window, stamp, Copy, Reply');
+ b.observe(timeline(b,false,'next',true,rr()),true);
+ assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:9,total:99,text:'page one ',hasMore:true,complete:false,cursor:'9',previous:''},requests.at(-1)));
+ const after=shape(rr());
+ assert.deepEqual(after.classes,['msg-ctx','body body-window','stamp','copy','reply'],'pages: the same parts around the window');
+ for(const x of [before,after]){
+  assert.equal(attrs(x.copy)['data-on-click'],'copy-entry');assert.equal(attrs(x.copy)['data-value'],'m','Copy names the message, the hub copies all of it');
+  assert.equal(read(x.copy),'Copy');assert.equal(attrs(x.reply)['data-on-click'],'reply-to');assert.equal(attrs(x.reply)['data-value'],'m');
+ }
+ const page=JSON.stringify(b.project(rr()));assert(!page.includes('displayed part'));
+ assert.equal((page.match(/"reply-to"/g)||[]).length,1,'one Reply, outside the pages');
 });
 console.log(JSON.stringify({pass:true,checks,scope:'Read-only body source, bounded retention and current owner/version fences; no service or DOM/anchor qualification'}));

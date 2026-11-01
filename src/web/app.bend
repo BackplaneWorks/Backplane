@@ -289,6 +289,7 @@ def presentation_allowed(action: String) -> Bool:
     case "skill-close": True{}
     case "reply-to": True{}
     case "reply-drop": True{}
+    case "copy-entry": True{}
     case _: False{}
 
 def presentation_wait(u: U.Ui) -> U.Ui:

@@ -123,6 +123,21 @@ def cmds.of(a: U.Act) -> List<&2, U.Cmd>:
   match a:
     case U.Act{_, cs}: cs
 
+def copies(cs: List<&2, U.Cmd>) -> String:
+  match cs:
+    case Nil{}: ""
+    case U.Copy{t} <> r: t ++ copies(r)
+    case _ <> r: copies(r)
+
+# a long bot report: far more than any page the hub sends at once
+def long.go(n: Nat, acc: String) -> String:
+  match n:
+    case 0n: acc
+    case 1n+k: long.go(k, acc ++ "Line of the long report, with enough words to fill a body page quickly.\n")
+
+def long() -> String:
+  long.go(400n, "")
+
 def ui0() -> U.Ui:
   ui.of(U.Ui.select(U.Ui.fold(log(), U.Ui.init(1000000n)), bth()))
 
@@ -174,4 +189,10 @@ def main() -> IO(Unit):
     C.Check.str("send carries reply", yes(String.contains(sends(cmds.of(sent)), "\"reply\":\"m-bot2\"")), "yes")
     C.Check.str("send is bots.say", yes(String.contains(sends(cmds.of(sent)), "bots.say")), "yes")
     C.Check.str("sent forgets reply", U.Rpl.of(ui.of(sent)), "")
+    # Copy takes the whole message from the hub, not the part on screen
+    +ul : U.Ui = U.Ui.fold([M.MessagePosted{bth(), "m-long", M.Assistant{}, long(), 1030n}], ui0())
+    C.Check.str("copy-entry is the whole long message", yes(C.Check.same(copies(cmds.of(act(ul, "copy-entry", "m-long"))), long())), "yes")
+    C.Check.str("copy-entry of a reply is what was written", copies(cmds.of(act(U.Ui.fold(say("m-bot2"), ui0()), "copy-entry", "cx-1"))), "yes, go")
+    C.Check.str("copy-entry of nothing copies nothing", yes(List.is_empty(&2, U.Cmd, cmds.of(act(ui0(), "copy-entry", "nope")))), "yes")
+    C.Check.str("a reply is known as one", yes(R.Rto.is(posted())) ++ " " ++ yes(R.Rto.is("yes, go")), "yes no")
     C.Check.str("plain send has no reply", yes(String.contains(sends(cmds.of(act(ui.of(U.Ui.draft(ui0(), "hi")), "send", ""))), "\"reply\"")), "no")

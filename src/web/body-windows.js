@@ -7,6 +7,12 @@ const text = value => ({ $: T.Txt, text: value });
 const node = (tag, key, attrs, kids) => ({ $: T.El, tag, key,
   attrs: list(Object.entries(attrs).map(([name, value]) => ({ $: T.At, name, value: String(value) }))), kids: list(kids) });
 const bytes = s => new TextEncoder().encode(s).length;
+// A message's own parts around its text (view.bend's View.msg.x.loc): the
+// stamp, Copy, a bot chat's Reply, its context header and a person's "In reply
+// to" line. A windowed body keeps them on the message, outside its pages.
+const classes = k => is(k, 'El') ? (attr(k, 'class') || '').split(/\s+/) : [];
+const SHELL = ['stamp', 'copy', 'reply', 'msg-ctx', 'msg-reply'];
+const shellPart = k => classes(k).some(c => SHELL.includes(c));
 const metadata = p => ({id:p.id,thread:p.thread,version:p.version,cursor:p.cursor,bodyPage:1,automatic:p.automatic, streamGeneration:p.streamGeneration, streamCut:p.streamCut, streamBlocks:p.streamBlocks});
 
 // Read-only body windows, independent of action/session authority. Six small
@@ -18,7 +24,7 @@ export class BodyWindows {
   constructor({ request, changed, renderBody, maxBytes = 1024 * 1024 } = {}) {
     this.request = request;this.changed = changed;this.renderBody = renderBody;this.maxBytes = maxBytes;
     this.scopes = new Map();this.scope = '';this.fence = '';this.parts = new Map();this.pending = null;
-    this.previews = new Map();this.previewBytes = 0;
+    this.previews = new Map();this.previewBytes = 0;this.shells = new Map();
   }
   bind(hub, detail, owner, currentNode, holding = false) {
     const scope = JSON.stringify([hub, owner, detail.epoch, detail.target]);
@@ -161,6 +167,17 @@ export class BodyWindows {
     if (r && reason !== 'overtaken') r.error = reason;
     this.changed?.();
   }
+  // a message's own parts, drawn once per change of its attributes (at most
+  // 128 kept, as the previews)
+  shell(id, n) {
+    const as = Object.fromEntries(items(n.attrs).filter(a => is(a, 'At')).map(a => [a.name, a.value]));
+    const key = JSON.stringify(as), prior = this.shells.get(id);
+    if (prior && prior.key === key) { this.shells.delete(id);this.shells.set(id, prior);return prior.made; }
+    const made = this.renderBody?.(node('bp-memo', id, as, [text('')]));
+    this.shells.delete(id);this.shells.set(id, {key, made});
+    while (this.shells.size > 128) this.shells.delete(this.shells.keys().next().value);
+    return made;
+  }
   preview(n, part, memo, activity) {
     const source = memo ? items(n.kids).filter(k => is(k, 'Txt')).map(k => k.text).join('') : '';
     const prior = this.previews.get(part.id);
@@ -171,7 +188,7 @@ export class BodyWindows {
     // Already rendered messages retain their structured body; flattening them
     // to text here discarded strong/list/link nodes on every cache miss.
     const made = !activity && (memo ? this.renderBody?.(n) : n);
-    const content = made ? items(made.kids).filter(k => !(is(k, 'El') && (attr(k, 'class') || '').split(/\s+/).some(c => c === 'stamp' || c === 'copy')))
+    const content = made ? items(made.kids).filter(k => !shellPart(k))
       : memo ? [text(source)] : items(n.kids).filter(k => is(k, 'El') && (attr(k, 'class') || '').split(/\s+/).includes('body'));
     const rendered = node(activity ? 'pre' : 'div', 'body-part:' + part.id + ':0', {
       class: 'body-message-part', 'data-body-id': part.id, 'data-body-start': 0,
@@ -203,7 +220,7 @@ export class BodyWindows {
           if (!p.rendered) {
             const key = 'body-part:' + id + ':' + p.start;
             const made = !activity && this.renderBody?.(node('bp-memo', key, {fn:'msg', who:attr(n,'who') || ((attr(n,'class') || '').split(/\s+/).includes('user') ? 'u' : 'a'), stamp:''}, [text(p.text)]));
-            const content = made ? items(made.kids).filter(k => !(is(k,'El') && ((attr(k,'class') || '').split(/\s+/).some(c => c === 'stamp' || c === 'copy')))) : [text(p.text)];
+            const content = made ? items(made.kids).filter(k => !shellPart(k)) : [text(p.text)];
             p.rendered = node(made ? 'div' : 'pre', key, {class:'body-message-part', 'data-body-id':id, 'data-body-start':p.start,
               style:made ? 'overflow-wrap:anywhere;max-width:100%' : 'white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;margin:0'}, content);
           }
@@ -220,11 +237,16 @@ export class BodyWindows {
           [text(pages[0].start === 0 && !pages.at(-1).hasMore ? '' : 'Message text continues as you scroll.')]));
         const stamp = memo ? [node('span', 'body-stamp:' + id, {class:'stamp'}, [text(attr(n, 'stamp') || '')])]
           : items(n.kids).filter(k => is(k, 'El') && (attr(k, 'class') || '').split(/\s+/).includes('stamp'));
-        const copy = pages.length ? [node('button', 'body-copy:' + id, {class:'copy', 'data-on-click':'copy',
-          'data-value':pages.map(p=>p.text).join(''), title:'Copy displayed part'}, [text('Copy displayed part')])] : [];
         if (activity) return { ...n, kids: list([...items(n.kids).filter(k => !(is(k, 'El') && k.tag === 'button' && k.key === 'thin-more:' + id)), node('div', 'body-window:' + id, {class:'body body-window'}, body)]) };
-        return node('div', id, {class:'msg ' + (attr(n, 'who') === 'u' ? 'user' : 'assistant'), 'data-id':id},
-          [node('div', 'body-window:' + id, { class: 'body body-window', 'data-body-id': id }, body), ...stamp, ...copy]);
+        // The message as the view draws it with no text: its header, reply
+        // line and Reply stay; Copy asks the hub for the whole message
+        // ("copy-entry"), not the pages on screen.
+        const shell = memo ? this.shell(id, n) : n;
+        const own = c => shell ? items(shell.kids).filter(k => classes(k).includes(c)) : [];
+        const label = attr(own('copy')[0] || {attrs:null}, 'title') || 'Copy';
+        const copy = [node('button', 'body-copy:' + id, {class:'copy', 'data-on-click':'copy-entry', 'data-value':id, title:label}, [text(label)])];
+        return node('div', id, {class:'msg ' + (attr(n, 'who') === 'u' || classes(n).includes('user') ? 'user' : 'assistant'), 'data-id':id},
+          [...own('msg-ctx'), ...own('msg-reply'), node('div', 'body-window:' + id, { class: 'body body-window', 'data-body-id': id }, body), ...stamp, ...copy, ...own('reply')]);
       }
       // (a node whose kids all come back as they were is kept as it was:
       // rows a page landing did not touch stay the very same objects)
