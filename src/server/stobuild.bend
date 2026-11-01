@@ -72,8 +72,8 @@ def Cut.of(bs: List<&2, U32>) -> Cut:
 
 def Stb.ext(x: M.Ext) -> M.Ext:
   match x:
-    case M.Ext{w, _, mail}:
-      M.Ext{w, Map.new(&2, List<&2, M.Entry>), mail}
+    case M.Ext{w, _, mail, usage}:
+      M.Ext{w, Map.new(&2, List<&2, M.Entry>), mail, usage}
 
 def Stb.exts(xs: List<&2, M.Ext>) -> List<&2, M.Ext>:
   match xs:
