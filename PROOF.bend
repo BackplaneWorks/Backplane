@@ -251,6 +251,7 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+import ./src/core/landing.bend as LAND
 
 # Lemmas
 # ------
@@ -14856,3 +14857,18 @@ def Laws.dq_changes_in_order():
   {==}
 
 # ---- end disk-full ----
+
+# BEGIN page landing (P)
+def Laws.land_outside_page(rs, p, ps, h):
+  %Equal.sym(Bool, LAND.Land.inside(rs, p), False{}, h) : {LAND.Land.region.k(Bool.and(_, LAND.Land.all(rs, ps)), rs, p <> ps) == "page" : String}
+  {==}
+
+def Laws.land_root_page(name, t, ts):
+  {==}
+
+def Laws.land_window_only():
+  {==}
+
+def Laws.land_timeline_only():
+  {==}
+# END page landing (P)

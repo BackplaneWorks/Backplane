@@ -245,8 +245,12 @@ export class ThinViews {
         !(Object.hasOwn(r, 'modelMenuInput') ? modelMenuReply(r, c.input) : terminalInputReply(r, c.input)))) {
       return { failed: 'invalid compact action reply', id: e.id, method: c.method, retry: false, cmds: [] };
     }
-    let picture = null;
+    let picture = null, changed = null;
     if (Object.hasOwn(r, 'viewDelta')) {
+      // the paths a delta wrote (null: a whole reply, everything), for the
+      // region the page redraws (core/landing.bend)
+      const d = r.viewDelta;
+      if (record(d) && Array.isArray(d.ops) && d.base) changed = d.ops.map(op => Array.isArray(op) && Array.isArray(op[1]) ? op[1] : []);
       try {
         // the selected draft as the request carried it on the wire
         const wire = this.api.shape ? deltaDraft(this.api.shape(c.input, c.method)) : deltaDraft(c.input);
@@ -295,7 +299,7 @@ export class ThinViews {
       if (!coversRevision(l.changedRevision, r.viewRevision)) l.changedRevision = r.viewRevision;
       coverChanged(l, l.viewRevision);
     }
-    return { id: e.id, method: c.method, current, inputOnly, remoteReady: displayed || current && inputOnly && record(l.shown),
+    return { id: e.id, method: c.method, current, inputOnly, changed: displayed ? changed : null, remoteReady: displayed || current && inputOnly && record(l.shown),
       shown: displayed ? r.shown : null, session: current && presentation ? r.session : null,
       window: displayed ? r.window : null, result: r, cmds,
       refreshDue: (current || (l.viewId === c.viewId && sameTarget(l.target, c.target))) && !l.updatePending && l.invalidated };

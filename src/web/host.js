@@ -308,7 +308,9 @@ function patch(el, v) {
       });
       timelineLists.set(el, scroller);
     }
-    scroller.update([...each(v.kids)].map(expand), { follow: !(thin && thin.atNewest?.() === false) });
+    const u0 = RR ? pnow() : 0, rows = [...each(v.kids)].map(expand), u1 = RR ? pnow() : 0;
+    scroller.update(rows, { follow: !(thin && thin.atNewest?.() === false) });
+    if (RR) { RR.t("patch.tl.rows", u1 - u0);RR.t("patch.tl.update", pnow() - u1); }
     el.__v = v;
     return;
   }
@@ -641,7 +643,8 @@ function restoreTransition(target) {
 }
 const focusedView = new FocusedView({
   cache: focusedStore, scope: focusedScope,
-  hide: () => { focusedNode = null; later(); },
+  // (a kept picture put away; with none on show nothing changes)
+  hide: () => { if (!focusedNode) return;focusedNode = null;later(); },
   view: record => {
     if (canonicalBoot || remoteReady) return;
     const shell = Wire.plain(App.presentation_view(App.presentation_wait(ui)));
@@ -964,10 +967,14 @@ function render() {
   // Saved transition/startup pictures contain the server's unprojected partial
   // footer. Clean it before their first paint, without borrowing live readers
   // or request authority from the currently selected conversation.
+  const tc = RR ? pnow() : 0;
+  if (RR) RR.t("render.overlay", tc - t0);
   if (frontendNode || transitionNode || focusedNode) page = thinContinuations.project(page,
     node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
+  const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
   const t1 = PERF || RR ? pnow() : 0;
+  if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
   bubMoveSync();
   terminalOutput.apply(true);
@@ -1049,6 +1056,121 @@ function render() {
   tourSync();
   settingsSync();
   saveFocusedSoon();
+}
+
+// A page landing redraws only the regions its reply wrote into (core/
+// landing.bend's region over the delta's paths, laws land_*): the timeline,
+// and the top bar when it changed. The page's other regions, the overlay
+// over all of it and the patch of the whole tree were most of a landing's
+// frame. A whole reply, a reply whose delta touched anything outside the
+// regions (the session, a sidebar row), or a full render already due draws
+// the page.
+const jsonClass = (n, c) => Array.isArray(n?.attrs) && n.attrs.some(a => a?.name === "class" && (" " + a.value + " ").includes(" " + c + " "));
+const nodeAttr = (v, name) => { for (const a of each(v.attrs)) if (is(a, "At") && a.name === name) return a.value; return null; };
+const LAND_REGIONS = [
+  { name: "timeline", json: n => Array.isArray(n?.attrs) && n.attrs.some(a => a?.name === "id" && a.value === "timeline"),
+    node: v => nodeAttr(v, "id") === "timeline", el: () => document.getElementById("timeline") },
+  { name: "topbar", json: n => n?.tag === "header" && jsonClass(n, "topbar"),
+    node: v => v.tag === "header" && (" " + (nodeAttr(v, "class") || "") + " ").includes(" topbar "), el: () => document.querySelector("header.topbar") },
+];
+const landPaths = new Map();
+// a region's path in a reply's body: the last one first (regions seldom move)
+function landPathIn(shown, region) {
+  const last = landPaths.get(region.name);
+  if (last) {
+    let n = shown;
+    for (let i = 0; i < last.length && n; i += 2) n = n.kids?.[last[i + 1]];
+    if (region.json(n)) return last;
+  }
+  const stack = [[shown, []]];
+  while (stack.length) {
+    const [n, path] = stack.pop();
+    if (region.json(n)) { landPaths.set(region.name, path);return path; }
+    if (Array.isArray(n?.kids)) for (let i = n.kids.length - 1; i >= 0; i--) stack.push([n.kids[i], [...path, "kids", i]]);
+  }
+  return null;
+}
+// "page", or the names of the regions to redraw, space-separated
+function historyRegion(detail, projection) {
+  if (!detail.page || !["older", "newer"].includes(projection) || !Array.isArray(detail.changed) || searchJump || jump) return "page";
+  const lines = [];
+  for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
+  if (!lines.length) return "page";
+  const region = History.landing(lines.join("\n"), detail.changed.map(p => p.map(String).join("\t")).join("\n"));
+  if (RR) RR.n("land.region." + (region.trim() || "none"));
+  return region;
+}
+let landQueued = null;
+function laterRegions(names) {
+  if (queued) return;
+  const first = !landQueued;
+  landQueued = new Set([...(landQueued || []), ...names]);
+  // A landing's two halves in two frames: the reply's own task (decode,
+  // delta, merge) ends this one, and its regions are drawn in the next, so
+  // a page that came just before a frame never puts both in it.
+  if (first) requestAnimationFrame(() => requestAnimationFrame(renderRegions));
+}
+function nodeIn(node, test) {
+  const stack = [node];
+  while (stack.length) {
+    const v = stack.pop();
+    if (!is(v, "El")) continue;
+    if (test(v)) return v;
+    for (const k of each(v.kids)) stack.push(k);
+  }
+  return null;
+}
+// The timeline's overlay row by row, each kept by the row it was made from
+// while the draft and the model picker stay as they were (all the overlay
+// reads, presentation.bend's Node.overlay): a landing overlays only the
+// page's new rows, and the rest stay the very same objects.
+let overlayKept = new WeakMap(), overlayFor = "";
+function overlayRows(timeline, session) {
+  const s = currentSession(), key = JSON.stringify([s.sel || "", s.drafts?.[s.sel] ?? "", s.open?.models === true]);
+  if (key !== overlayFor) { overlayKept = new WeakMap();overlayFor = key; }
+  const shell = App.presentation_overlay({ ...timeline, kids: { $: "Nil" } }, session), rows = [];
+  for (const row of each(timeline.kids)) {
+    let out = overlayKept.get(row);
+    if (!out) { out = App.presentation_overlay(row, session);if (row && typeof row === "object") overlayKept.set(row, out); }
+    rows.push(out);
+  }
+  let kids = { $: "Nil" };
+  for (let i = rows.length - 1; i >= 0; i--) kids = { $: "Con", head: rows[i], tail: kids };
+  return { ...shell, kids };
+}
+function renderRegions() {
+  const names = landQueued || new Set();landQueued = null;
+  if (queued || !frontendNode) return;
+  const parts = [];
+  for (const r of LAND_REGIONS) if (names.has(r.name)) {
+    const el = r.el(), hub = nodeIn(frontendNode, r.node);
+    // nothing to patch in place: the page is drawn
+    if (!el?.__v || !hub || !same(el.__v, hub)) { if (RR) RR.n("land.bail." + r.name);later();return; }
+    parts.push([r, el, hub]);
+  }
+  const t0 = RR ? pnow() : 0, session = presentationJson(modelFeedback.project(currentSession()));
+  for (const [r, el, hub] of parts) {
+    const a0 = RR ? pnow() : 0;
+    let v = r.name === "timeline" ? overlayRows(historyGaps(hub), session) : App.presentation_overlay(hub, session);
+    const a1 = RR ? pnow() : 0;
+    v = thinContinuations.project(v, node => node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), true);
+    v = bodyWindows.project(v);
+    const a2 = RR ? pnow() : 0;
+    patch(el, v);
+    if (RR) { RR.t("reg." + r.name + ".overlay", a1 - a0);RR.t("reg." + r.name + ".project", a2 - a1);RR.t("reg." + r.name + ".patch", pnow() - a2); }
+  }
+  const tl = document.getElementById("timeline"), list = timelineList(tl);
+  if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
+  activeTimeline = list || null;
+  list?.refresh();
+  bodyWindows.observe(tl, remoteReady && !!frontendNode);
+  if (historyStatus) historyPageState(historyStatus);
+  searchLight(tl);
+  earlierAsked = false;
+  laterAsked = false;
+  if (thin?.ready) historyCheckSoon();
+  saveFocusedSoon();
+  if (RR) { RR.n("render.regions");RR.t("render.regions", pnow() - t0); }
 }
 
 function later() {
@@ -2878,6 +3000,7 @@ async function startThin(again = false, reason = "initial") {
         return !!layer && !document.querySelector('.account-picker') && !layer.hasAttribute('data-draft') && !layer.querySelector('input')?.value;
       },
       sessionChanged: (session, detail) => {
+        const sc0 = RR ? pnow() : 0;
         const selectedChanged = thinSession?.sel !== session.sel;
         thinSession = session;
         if (detail?.remote) {
@@ -2892,10 +3015,17 @@ async function startThin(again = false, reason = "initial") {
           try { localStorage.setItem("backplane-selected", session.sel || ""); } catch {}
         }
         if (selectedChanged) deskCheck();
-        if (!detail?.inputOnly) later();
+        // (a page's reply: its view decides what is drawn, historyRegion)
+        if (!detail?.inputOnly && !detail?.paged) later();
+        if (RR) RR.t("land.session", pnow() - sc0);
       },
       ack: (session, reply) => preservePresentationRoute(session, Wire.plain(App.presentation_reply(presentationJson(session), presentationJson(reply)))),
-      decode: shown => App.presentation_node(presentationJson(shown)),
+      decode: shown => {
+        const d0 = RR ? pnow() : 0, json = presentationJson(shown), d1 = RR ? pnow() : 0;
+        const node = App.presentation_node(json);
+        if (RR) { RR.t("land.json", d1 - d0);RR.t("land.node", pnow() - d1); }
+        return node;
+      },
       terminal: (node, frame) => terminalOutput.receive(node, frame),
       terminalLifetime: () => document.querySelector('.floating-terminal .term-pane')?.getAttribute('data-terminal-incarnation') || '',
       command: command => presentationCommand(command),
@@ -2922,11 +3052,19 @@ async function startThin(again = false, reason = "initial") {
       search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage, body: (message, input) => bodyWindows.accept(message, input), bodyFailed: (input, reason) => bodyWindows.failed(input, reason),
       view: (node, detail) => {
         if (!current()) return;
+        const vw0 = RR ? pnow() : 0;
         RR?.n("view.apply." + (detail.page?.direction || "update"));
         if (detail.page?.direction === "newest") scroll = true;
         const previous = historyNode || node;
         const projection = historyNode ? detail.page?.direction || "update" : "reset";
-        node = History.project(previous, node, projection);
+        if (RR && historyNode && projection === "older") RR.n("land.block." + History.why(previous, node, projection));
+        const p0 = RR ? pnow() : 0;
+        // historyNode is a merge's own result, prepared already and marked with
+        // where its last non-entry row is: an older page is added as a block,
+        // the held rows past its overlap shared (timeline-history.bend's
+        // project_block), anything else merged whole
+        node = historyNode && projection !== "reset" && projection !== "newest" ? History.project_block(previous, node, projection) : History.project(previous, node, projection);
+        if (RR) RR.t("land.project." + projection, pnow() - p0);
         historyNode = node;
         // (timeline-history.bend's project keeps no row from before a reset)
         if (projection === "reset" || projection === "newest") { historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
@@ -2941,7 +3079,10 @@ async function startThin(again = false, reason = "initial") {
         else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
-        trace("thin-view", { entries: detail.window?.ids?.length || 0 });later();
+        trace("thin-view", { entries: detail.window?.ids?.length || 0 });
+        const region = historyRegion(detail, projection);
+        if (region === "page") later();else laterRegions(region.split(" ").filter(Boolean));
+        if (RR) RR.t("land.view", pnow() - vw0);
         fabLook(detail.target);
       },
       state: state => {
@@ -2969,7 +3110,8 @@ async function startThin(again = false, reason = "initial") {
         else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy(); }
         else if (remoteReady) showViewStatus("");
         if (remoteReady && viewNote) showViewStatus(viewNote);
-        later();
+        // a page's reply on a page already shown: its view decides what is drawn
+        if (!(state.paged && !becameReady && remoteReady && state.phase === "presented")) later();
       },
     }, ThinViews, next);
   } catch { disconnect("client-setup");try { s.close(); } catch {}return; }
@@ -3009,7 +3151,11 @@ async function startThin(again = false, reason = "initial") {
       if (envelope.t === "reply" && sealedReply(envelope)) return;
       if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { diagnostic.greeting(envelope);clearTimeout(thinGreetingTimer);thin.greeting(envelope); }
-      else if (!thin.receive(envelope) && envelope.t === "reply" && Number.isSafeInteger(envelope.id) && envelope.id < 2 ** 47) thin.ack(envelope);
+      else {
+        const r0 = RR ? pnow() : 0;
+        if (!thin.receive(envelope) && envelope.t === "reply" && Number.isSafeInteger(envelope.id) && envelope.id < 2 ** 47) thin.ack(envelope);
+        if (RR && envelope.t === "reply") RR.t("land.receive", pnow() - r0);
+      }
       // A thin socket never folds log/changes/info into canonical Ui.
     } catch (error) { diagnostic.note("error", { cause: "decode-error", errorKind: error?.name });disconnect("decode-error");try { s.close(); } catch {} }
   };

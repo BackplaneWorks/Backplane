@@ -438,6 +438,7 @@ import ./src/core/ref-origin.bend as O
 import ./src/server/hotboot.bend as BOOTWARM
 
 import ./src/core/snapshot.bend as BOOTSNAP
+import ./src/core/landing.bend as LAND
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -14537,3 +14538,32 @@ law dq_held_in_order:
 law dq_changes_in_order:
   {DQ.Dq.changes(DQ.Dq.push(DQ.Dq.push(DQ.Dq.empty(), M.State.empty(), 1n, ["a"], [M.SettingSet{"k", "1", 1n}], Nil{}, Nil{}), M.State.empty(), 2n, ["b", "c"], [M.SettingSet{"k", "2", 2n}, M.SettingSet{"k", "3", 3n}], Nil{}, Nil{})) == [M.SettingSet{"k", "1", 1n}, M.SettingSet{"k", "2", 2n}, M.SettingSet{"k", "3", 3n}] : List<&2, M.Change>}
 # ---- end disk-full ----
+
+# BEGIN page landing (P)
+# A reply to a page request redraws only the regions its delta wrote into
+# (src/core/landing.bend, host.js's landing: the timeline, the top bar). A
+# path outside every region and the window makes it the whole page,
+# whatever the other paths are: a page reply that touches a sidebar row, a
+# region not named, or the session still redraws everything.
+law land_outside_page:
+  for +rs: List<&2, LAND.LRegion>
+  for +p: List<&2, String>
+  for +ps: List<&2, List<&2, String>>
+  for h: {LAND.Land.inside(rs, p) == False{} : Bool}
+  {LAND.Land.region(rs, p <> ps) == "page" : String}
+
+# a whole reply (its one path the root) redraws the page
+law land_root_page:
+  for +name: String
+  for +t: String
+  for +ts: List<&2, String>
+  {LAND.Land.region([LAND.LRegion{name, t <> ts}], [Nil{}]) == "page" : String}
+
+# a delta that moved only the window (the page's cursors) redraws nothing
+law land_window_only:
+  {LAND.Land.region([LAND.LRegion{"timeline", ["shown", "kids", "0"]}], [["window", "older"]]) == "" : String}
+
+# rows written under the timeline redraw the timeline, and only it
+law land_timeline_only:
+  {LAND.Land.region([LAND.LRegion{"timeline", ["shown", "kids", "0"]}, LAND.LRegion{"topbar", ["shown", "kids", "1"]}], [["shown", "kids", "0", "kids"], ["window", "older"]]) == "timeline " : String}
+# END page landing (P)
