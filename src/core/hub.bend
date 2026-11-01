@@ -7260,8 +7260,17 @@ def Hub.tick(+s: M.State, +now: Nat) -> Step:
 # clients as C.Change.wire, the same text for every kind but the device
 # ones (wire leaves their tokens out): the disk line is reused, so a change
 # is shown once per commit, not three times (law commit_line_is_wire).
+def Commit.line.s(input: Bool, +c: M.Change, +disk: String) -> String:
+  match input:
+    case True{}:
+      J.Json.show(C.Change.wire(c))
+    case False{}:
+      disk
+
 def Commit.line(+c: M.Change, +disk: String) -> String:
   match c:
+    case M.SettingSet{+k, v, at}:
+      Commit.line.s(M.Setting.input(k), M.SettingSet{k, v, at}, disk)
     case M.DeviceRegistered{_, _, _, _, _, _, _}:
       J.Json.show(C.Change.wire(c))
     case M.DeviceDropped{_, _}:
@@ -9628,11 +9637,16 @@ def Hub.request_text(+s: M.State, +now: Nat, +client: U32, text: String) -> Step
 def Retire.request(i: Nat, +s: M.State) -> Step:
   Hub.request.k(i, s, 9n, 0, "r", J.Json.obj([J.KV{"thread", J.Str{"t1"}}]), "")
 
+# the exact text a turn was started with (launch.input when it differs)
+def Fallback.launch(+s: M.State, +th: String) -> String:
+  +l = M.Setting.get(s, "launch.input." ++ th, "")
+  Bool.pick(String, String.is_empty(l), M.Setting.get(s, "fallback.input." ++ th, ""), l)
+
 # A refusal before spawn may replay the exact unsent input. A process that
 # already started gets a continuation with its completed actions as context.
 def Auth.prompt(+s: M.State, +th: String, +o: J.Json) -> String:
   Bool.pick(String, Bool.or(J.Json.get_bool(o, "not_started", False{}), String.contains(FB.Error.reason(o), "was not started:")),
-    M.Setting.get(s, "launch.input." ++ th, M.Setting.get(s, "fallback.input." ++ th, "")),
+    Fallback.launch(s, th),
     HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), Hub.provider(Hub.thread(s, th)), 0n)
       ++ "\n[Backplane] Credentials became unavailable. Continue the interrupted work from the recorded state. Do not repeat completed tool actions or restart finished work.\nOriginal request (context, not a new task):\n" ++ M.Setting.get(s, "fallback.input." ++ th, ""))
 
@@ -9740,9 +9754,15 @@ def Fallback.use(choice: Maybe<&2, FB.Target>, +s: M.State, +now: Nat, +th: Stri
       +ctx = HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), FB.Target.provider(to), 0n)
       Step{List.append(&2, M.Change, cs, [M.SettingSet{"launch.input." ++ th, M.Queue.join(ctx, text), now}]), AgentStop{th} <> Hub.run(Hub.thread(M.State.replay(cs, s), th), cwd, M.Queue.join(ctx, text), uuid)}
 
+# launch.input is written only when the turn started with more than its
+# fallback.input (a switch's handed-over context, Fallback.use); otherwise
+# a stale one is removed and readers take fallback.input (Fallback.launch)
+def Fallback.launch.clear(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "launch.input." ++ th, "")), Nil{}, [M.SettingSet{"launch.input." ++ th, "", now}])
+
 def Fallback.attempt.k(held: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String, original: List<&2, Out>) -> Step:
   match held:
-    case False{}: Step{[M.SettingSet{"fallback.input." ++ th, text, now}, M.SettingSet{"launch.input." ++ th, text, now}], original}
+    case False{}: Step{M.SettingSet{"fallback.input." ++ th, text, now} <> Fallback.launch.clear(s, now, th), original}
     case True{}: Fallback.use(FB.Chain.pick(FB.Chain.suffix(FB.Chain.of(s), FB.Target.key(Fallback.target(Hub.thread(s, th)))), s, caps, now), s, now, th, cwd, text, uuid)
 
 def Fallback.attempt.quota(+s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:

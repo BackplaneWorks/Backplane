@@ -535,6 +535,11 @@ def Change.decode(+o: J.Json) -> Maybe<&2, M.Change>:
 # so their sequence numbers still match the server's (law
 # device_token_never_sent).
 
+# a setting's value as clients see it: a turn's input blank (M.Setting.input:
+# no client reads one, and they were 39% of a real log's bytes)
+def Change.wire.value(+key: String, value: String) -> String:
+  Bool.pick(String, M.Setting.input(key), "", value)
+
 def Change.wire(c: M.Change) -> J.Json:
   match c:
     case M.DeviceRegistered{_, _, _, _, _, _, at}:
@@ -579,8 +584,8 @@ def Change.wire(c: M.Change) -> J.Json:
       Change.encode(M.TaskStateSet{task, state, summary, at})
     case M.TaskDelivered{task, at}:
       Change.encode(M.TaskDelivered{task, at})
-    case M.SettingSet{key, value, at}:
-      Change.encode(M.SettingSet{key, value, at})
+    case M.SettingSet{+key, value, at}:
+      Change.encode(M.SettingSet{key, Change.wire.value(key, value), at})
     case M.TurnQueued{thread, msg, text, at}:
       Change.encode(M.TurnQueued{thread, msg, text, at})
     case M.QueueTaken{thread, at}:
@@ -714,6 +719,20 @@ def Change.wire_line.k(private: Bool, +o: J.Json, l: String) -> String:
     case False{}:
       l
 
-# a stored line (parsed as o) as clients may see it
+def Change.wire_line.s(input: Bool, +o: J.Json, l: String) -> String:
+  match input:
+    case True{}:
+      J.Json.show(Change.obj("SettingSet", [J.KV{"key", J.Str{J.Json.get_str(o, "key", "")}}, J.KV{"value", J.Str{""}}, J.KV{"at", Codec.nat(J.Json.get_nat(o, "at", 0n))}]))
+    case False{}:
+      l
+
+def Change.wire_line.t(private: Bool, +tag: String, +o: J.Json, l: String) -> String:
+  match private:
+    case True{}:
+      Change.wire_line.k(True{}, o, l)
+    case False{}:
+      Change.wire_line.s(Bool.and(String.eq(tag, "SettingSet"), M.Setting.input(J.Json.get_str(o, "key", ""))), o, l)
+
+# a stored line (parsed as o) as clients may see it (Change.wire's text)
 def Change.wire_line(+o: J.Json, l: String) -> String:
-  Change.wire_line.k(Change.private(J.Json.get_str(o, "$", "")), o, l)
+  Change.wire_line.t(Change.private(J.Json.get_str(o, "$", "")), J.Json.get_str(o, "$", ""), o, l)

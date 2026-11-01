@@ -10065,6 +10065,38 @@ def Laws.commit_line_is_wire():
 def Laws.commit_line_device_hides_token():
   {==}
 # ---- end hub-fanout: commit lines ----
+# ---- hub-memory: turn inputs ----
+def Laws.input_wire_blank():
+  {==}
+
+def Laws.input_wire_other_kept():
+  {==}
+
+def Laws.input_commit_line_is_wire():
+  {==}
+
+def Laws.input_replayed_line_is_wire():
+  {==}
+
+def Laws.input_store_wire():
+  {==}
+
+def Laws.input_blank_removes():
+  {==}
+
+def Laws.input_launch_falls_back():
+  {==}
+
+def Laws.input_prune_rest():
+  {==}
+
+def Laws.input_blank_scoped():
+  {==}
+
+def Laws.input_blank_scoped_value():
+  {==}
+
+# ---- end hub-memory: turn inputs ----
 # win-lean-frame: caret blink
 law caret_keep_k:
   for b: Bool

@@ -1128,6 +1128,19 @@ def State.put_task(s: State, t: Task) -> State:
 def Setting.ledger(+k: String) -> Bool:
   Bool.or(Bool.or(String.starts_with(k, "told."), String.starts_with(k, "rule.")), String.starts_with(k, "board."))
 
+# A turn's input (launch.input.<thread>, fallback.input.<thread>: the text
+# the agent was started with, its context included, often 10-20 KB), kept
+# only so a quota or credential failure can start the turn again (hub.bend's
+# Fallback.*, Auth.prompt). No client reads one: clients get it blank
+# (codec.bend's Change.wire), an empty value removes it, and the minute tick
+# drops those of threads at rest (Input.prune; laws input_*).
+def Setting.input(+k: String) -> Bool:
+  Bool.or(String.starts_with(k, "launch.input."), String.starts_with(k, "fallback.input."))
+
+# keys an empty value removes
+def Setting.blank_gone(+k: String) -> Bool:
+  Bool.or(Setting.ledger(k), Setting.input(k))
+
 def State.setting.put(del: Bool, sg: Map<&2, String>, k: String, v: String) -> Map<&2, String>:
   match del:
     case True{}:
@@ -1137,7 +1150,7 @@ def State.setting.put(del: Bool, sg: Map<&2, String>, k: String, v: String) -> M
 
 def State.setting(s: State, +k: String, +v: String) -> State:
   State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw} = s
-  State{ps, ts, es, n, tk, State.setting.put(Bool.and(String.is_empty(v), Setting.ledger(k)), sg, k, v), qu, ak, dv, nv, bw}
+  State{ps, ts, es, n, tk, State.setting.put(Bool.and(String.is_empty(v), Setting.blank_gone(k)), sg, k, v), qu, ak, dv, nv, bw}
 
 def Ask.blank(id: String) -> Ask:
   Ask{id, "", "", "", "", "", False{}, ""}
@@ -1466,6 +1479,43 @@ def State.thread.get(s: State, +id: String) -> Thread:
   match s:
     case State{_, ts, _, _, _, _, _, _, _, _, _}:
       State.thread.get.k(Map.get(Thread, Thread.blank(id), ts, id))
+
+# Turn inputs at rest
+# -------------------
+# A thread whose turn is not running and has nothing queued never reads its
+# input again: its next turn writes a fresh one, and a held turn keeps its
+# text in its queued item (hub.bend's Auth.hold, Fallback.block). The minute
+# tick removes such inputs, at most Input.max() a tick (laws input_prune_*).
+
+def Input.max() -> Nat:
+  200n
+
+# the thread a turn input belongs to
+def Input.thread(+k: String) -> String:
+  Bool.pick(String, String.starts_with(k, "launch.input."), String.drop(k, 13n), String.drop(k, 15n))
+
+def Input.busy(t: Thread) -> Bool:
+  match t:
+    case Thread{_, _, _, _, _, tu, +pe, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Thread.busy(tu, pe)
+
+def Input.prune.k(rest: Bool, +k: String, +now: Nat, tail: List<&2, Change>) -> List<&2, Change>:
+  match rest:
+    case True{}:
+      SettingSet{k, "", now} <> tail
+    case False{}:
+      tail
+
+def Input.prune.go(ks: List<&2, String>, +s: State, +now: Nat) -> List<&2, Change>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case +k <> t:
+      Input.prune.k(Bool.not(Input.busy(State.thread.get(s, Input.thread(k)))), k, now, Input.prune.go(t, s, now))
+
+# the removals of the inputs of threads at rest; reads only those keys
+def Input.prune(+s: State, +now: Nat) -> List<&2, Change>:
+  List.take(&2, Change, Input.prune.go(List.append(&2, String, Setting.keys.pre(s, "launch.input."), Setting.keys.pre(s, "fallback.input.")), s, now), Input.max())
 
 # Dormant projects
 # ----------------
