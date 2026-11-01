@@ -14569,6 +14569,17 @@ def Laws.phone_subs_cancel_routed():
 
 
 def Laws.delegation_captures_baseline_before_agent(t, cwd, prompt, uuid):
+
+def Laws.refs_word_padded():
+  {==}
+
+def Laws.refs_word_longer():
+  {==}
+
+def Laws.refs_word_more():
+  {==}
+
+def Laws.refs_word_empty():
   {==}
 
 

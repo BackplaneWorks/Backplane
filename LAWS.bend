@@ -14320,4 +14320,16 @@ law refs_blank_trailing:
 
 law slash_typing_needs_slash:
   {SL.Slash.typing("give") == False{} : Bool}
+
+law refs_word_padded:
+  {RF.Refs.word("  /btw \n", "/btw") == True{} : Bool}
+
+law refs_word_longer:
+  {RF.Refs.word("/btwx", "/btw") == False{} : Bool}
+
+law refs_word_more:
+  {RF.Refs.word("/btw what", "/btw") == False{} : Bool}
+
+law refs_word_empty:
+  {RF.Refs.word("", "/btw") == False{} : Bool}
 # END page olderNext (H)

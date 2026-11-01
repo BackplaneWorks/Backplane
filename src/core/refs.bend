@@ -181,6 +181,23 @@ def Refs.blank.go(s: String, sp: Bool) -> Bool:
 def Refs.blank(s: String) -> Bool:
   Refs.blank.go(s, True{})
 
+# whether a draft, trimmed, is the command word w (w without spaces of its
+# own: "/btw", "/give", "/intent"), looking at its leading spaces, w and the
+# first character after it, never the rest (String.trim walks all of it,
+# and the send button asks for each command on every render)
+def Refs.word.k(on: Bool, +lead: String, +w: String) -> Bool:
+  match on:
+    case True{}:
+      Refs.blank(String.drop(lead, String.length(w)))
+    case False{}:
+      False{}
+
+def Refs.word.at(+lead: String, +w: String) -> Bool:
+  Refs.word.k(String.starts_with(lead, w), lead, w)
+
+def Refs.word(+draft: String, +w: String) -> Bool:
+  Refs.word.at(String.trim_start(draft), w)
+
 # the word being typed: the draft's last, after its last space or line break
 def Refs.token(+draft: String) -> String:
   Refs.last.go(draft, SNil{})

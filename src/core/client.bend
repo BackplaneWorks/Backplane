@@ -1418,7 +1418,7 @@ def Follow.stop(run: Bool, +draft: String, +atts: List<&2, String>) -> Bool:
 # the side by the writing model; the turn and the thread never see it
 # (Btw.*, laws btw_*)
 def Btw.is(+draft: String) -> Bool:
-  Bool.or(String.eq(String.trim(draft), "/btw"), Bool.or(String.starts_with(draft, "/btw "), String.starts_with(draft, "/btw\n")))
+  Bool.or(RF.Refs.word(draft, "/btw"), Bool.or(String.starts_with(draft, "/btw "), String.starts_with(draft, "/btw\n")))
 
 def Btw.q(+draft: String) -> String:
   String.trim(String.drop(String.trim(draft), 4n))
@@ -1427,7 +1427,7 @@ def Btw.q(+draft: String) -> String:
 # (>), project (%) and bot (@) the text names (bothub.bend's Give); the way
 # a scratch thread (M.Scratch) goes somewhere (laws give_*)
 def Give.is(+draft: String) -> Bool:
-  Bool.or(String.eq(String.trim(draft), "/give"), Bool.or(String.starts_with(draft, "/give "), String.starts_with(draft, "/give\n")))
+  Bool.or(RF.Refs.word(draft, "/give"), Bool.or(String.starts_with(draft, "/give "), String.starts_with(draft, "/give\n")))
 
 # what the send button says, and what it does
 def Follow.button.k(+l: I.Loc, stop: Bool, +label: String) -> String:
