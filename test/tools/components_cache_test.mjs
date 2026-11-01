@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 const dir=fs.mkdtempSync(join(tmpdir(),'bp-component-pages-')),project=join(dir,'project'),other=join(dir,'other'),cache=join(dir,'cache');
 fs.mkdirSync(project);fs.mkdirSync(other);process.env.XDG_CACHE_HOME=cache;
 const effects=new Map();
@@ -25,6 +26,9 @@ try {
  assert.equal(get(project,'20','',sr),'','no PCB revision misses');
  assert.equal(get(project,'20',pr,'1:2:3:4:5:6:7'),'','another schematic revision misses');
  assert.equal(fs.statSync(join(cache,'backplane-bend','component-pages')).mode&0o777,0o700,'private cache');
+ const oldKey=createHash('sha256').update(JSON.stringify([fs.realpathSync(project),pr,sr,'53'])).digest('hex')+'.json';
+ fs.writeFileSync(join(cache,'backplane-bend','component-pages',oldKey),JSON.stringify({pcb,sch,pcbRev:pr,schRev:sr,offset:'53',text:'{"components":{"error":"One component exceeds the bounded page budget; metadata cannot be truncated."}}'}),{mode:0o600});
+ assert.equal(get(project,'53',pr,sr),'','old indivisible-row cache cannot poison the new fragment cursor chain');
  fs.utimesSync(sch,new Date(),new Date(Date.now()+5000));assert.equal(get(project,'20',pr,sr),'','a changed schematic misses');
  fs.utimesSync(pcb,new Date(),new Date(Date.now()+9000));assert.equal(get(project,'20',pr,revision(sch)),'','a changed board misses');
  // a project without a schematic keeps an empty schematic revision

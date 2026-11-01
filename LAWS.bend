@@ -1,3 +1,4 @@
+import ./src/core/components.bend as COMPONENTS
 import ./src/core/msgs.bend as MSG
 import ./src/core/plot-error.bend as PLOTERROR
 import ./src/web/workspace.bend as WSK
@@ -13769,3 +13770,25 @@ law mobile_text_is_filepage:
 
 law plot_error_missing_keeps_filename:
   {PLOTERROR.PlotError.text(I18.Ja{}, "@bp.file-missing:回路.kicad_pcb") == MSG.T.viewer.file.missing(I18.Ja{}, "回路.kicad_pcb") : String}
+
+# A row that fits keeps its complete representation.
+law component_fragment_keeps_fitting_row:
+  for +row: J.Json
+  {COMPONENTS.Components.fragment.row(True{}, row) == [row] : List<&2, J.Json>}
+
+# The field value is carried exactly, with its place and final marker.
+law component_fragment_keeps_field:
+  for +key: String
+  for +value: J.Json
+  for +id: String
+  for +index: Nat
+  for +total: Nat
+  {COMPONENTS.Components.fragment.fields(J.Field{key, value, J.End{}}, id, index, total) ==
+    [J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"fragment", J.Json.obj([
+      J.KV{"fields", J.Obj{J.Field{key, value, J.End{}}}}, J.KV{"index", J.Json.nat(index)}, J.KV{"total", J.Json.nat(total)}, J.KV{"complete", J.Flag{True{}}}])}])] : List<&2, J.Json>}
+
+law component_fragment_only_last_field_completes:
+  for key: String
+  for value: J.Json
+  for tail: J.Json
+  {COMPONENTS.Components.fragment.last(J.Field{key, value, tail}) == False{} : Bool}

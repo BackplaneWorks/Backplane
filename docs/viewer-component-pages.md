@@ -8,14 +8,43 @@ The unchanged server cap is220000UTF-8 bytes including the newline. Pure `Compon
 {"page":{"offset":0,"next":20,"total":96,"complete":false}}
 ```
 
-At the end, `next` is `null` and `complete` is `true`; an empty board has offset0,total0,nextnull,completetrue. Otherwise next equals offset plus the returned nonzero row count. An oversized individual row is an explicit error, never shortened. Offset must be within0..total and total at most4096. The final server wrapper is independently counted and bounded, so unusually large repeated headers also fail explicitly. The legacy single-response child retains its cap.
+At the end, `next` is `null` and `complete` is `true`; an empty board has offset0,total0,nextnull,completetrue. Otherwise next equals offset plus the returned nonzero row count. Oversized rows use the field records described below; an indivisible oversized field fails explicitly, never shortened. Offset must be within0..total and total at most4096. The final server wrapper is independently counted and bounded, so unusually large repeated headers also fail explicitly. The legacy single-response child retains its cap.
 
-First page: offset0 and both expected revision strings empty are allowed. Continuations require the exact nonempty PCB revision and the exact schematic revision from the first page. An empty schematic revision matches only an actually missing schematic. Existing read-only canonical-file resolution,16MiB-per-input caps and before/after read stamps remain in force. Each page reparses the saved source; it does not retain an unbounded child cache.
+First page: offset0 and both expected revision strings empty are allowed. Continuations require the exact nonempty PCB revision and the exact schematic revision from the first page. An empty schematic revision matches only an actually missing schematic. Existing read-only canonical-file resolution,16MiB-per-input caps and before/after read stamps remain in force. The first-page child parses the saved source once and writes bounded private pages. Later requests re-check both file stamps before using those cached pages.
 
-The root owns CLI/RPC/UI integration: `--review components-page DIR OFFSET PCB_REV SCH_REV`, then sequential `kicad.components` calls with numeric `offset` and string `sourceRevision`/`schematicRevision`. An aggregate must remain unpublished until complete. Require identical schema, source, schematic, both revisions and fingerprint on every page; exact offset/next/total chain; unique UUIDs; bounded aggregate bytes/page count/deadline. A save or error discards the entire aggregate and restarts. Intended client bounds are4096 components,8MiB and256 pages. Those client bounds are an integration requirement, not implemented by this pure/server-only change.
+The root owns CLI/RPC/UI integration: `--review components-page DIR OFFSET PCB_REV SCH_REV`, then sequential `kicad.components` calls with numeric `offset` and string `sourceRevision`/`schematicRevision`. An aggregate must remain unpublished until complete. Require identical schema, source, schematic, both revisions and fingerprint on every page; exact offset/next/total chain; unique UUIDs; bounded aggregate bytes/page count/deadline. A save or error discards the entire aggregate and restarts. Intended client bounds are4096 components,8MiB and256 pages. The production ViewerRpc reader enforces these bounds before publishing metadata.
 
 Large-symbol testing found that generic `List.length` on an encoded UTF-8 byte list overflows the emitted JavaScript stack. The new tail-recursive `Components.utf8.bytes` counts scalar widths without constructing another byte list. Both page sizing and the existing server response cap use it; the cap is not raised.
 
 Actual emitted parser/pager reconstructs all96 saved SMU rows exactly, including all symbol/pad/graphic fields. With both exact filesystem stamps, the full response is860123bytes. Five bounded pages, including envelope/newline, are176925,179487,155513,175037 and176396bytes, at offsets0,20,43,60,69; next values20,43,60,69,null. Full parse plus five pure page operations takes about2.78s in the isolated test; repeated child parsing/HTTP timing belongs to integration. Input PCB and schematic stamps remain unchanged. Receipt: `/tmp/backplane-solder-evidence/pages-receipt.json`.
 
 `test/tools/components_pages_test.mjs` uses the actual emitted Bend module. It checks complete reconstruction, UTF-8 budgets, both revision stamps, schema/offset/count limits, empty boards, missing schematic and oversized indivisible rows. Optional `COMPONENT_SERVER_MODULE` also calls the actual emitted server response function for exact boundary and Unicode cap cases. Existing parser tests pass. The pure module reports `ALL PROOFS CHECK`; the server emits successfully and its check-only result lists expected foreign-dependent definitions. This is not a global proof or normal-app acceptance result. No common CLI/hub/web files, installed app or CAD files are changed by this paging module.
+
+Oversized components now use complete field records under the same bounds.
+When any row exceeds the180000-byte budget, the pages add
+`componentEncoding: "field-fragments-v1"` and `componentCount` (the logical
+component count). Fitting rows stay unchanged. Each oversized row becomes
+one record per complete top-level field:
+
+```json
+{"id":"saved-uuid","fragment":{"fields":{"pads":[]},"index":8,"total":12,"complete":false}}
+```
+
+The last field alone has `complete:true`. In this encoding `page.offset`,
+`next` and `total` count transport records, still bounded to4096 overall
+and32 per page. Each field record, including its envelope, fits the same
+180000-byte row budget. An individual field larger than that still fails
+explicitly; no geometry, text, symbol, pad or property is shortened.
+
+The production reader requires consecutive field indices, a stable field
+count and UUID, unique safe field names, the original UUID field and the
+exact logical component count. An unfinished component cannot be interleaved
+with another row or published. Existing source/revision checks,8MiB,256pages
+and120-second limits include all field envelopes. Only after every page is
+complete does it expose ordinary complete component rows; transport headers
+are removed and the returned page total is the logical count.
+
+Cache keys also name the transport version, so pages and oversized-row
+refusals from older builds cannot survive into the new cursor chain. The
+legacy unpaged response, input caps and final220000-byte response cap are
+unchanged.

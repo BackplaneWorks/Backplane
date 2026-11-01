@@ -12,11 +12,17 @@ export class ViewerRpc {
     // Older hubs still return one complete response. New hubs page large
     // saved boards; no partial page becomes selection or rendering authority.
     if (!data.page) return data;
-    const first = data, rows = [], ids = new Set(), identity = ["schema", "source", "schematic", "sourceRevision", "schematicRevision", "fingerprint", "thicknessMm"];
+    const first = data, rows = [], ids = new Set(), identity = ["schema", "source", "schematic", "sourceRevision", "schematicRevision", "fingerprint", "thicknessMm", "componentEncoding", "componentCount"];
     if (data.schema !== 1 || !data.source || !data.sourceRevision || typeof data.schematicRevision !== "string") throw Error("Invalid saved component page identity.");
     const total = data.page.total;
     if (!Number.isSafeInteger(total) || total < 0 || total > 4096) throw Error("Saved component count exceeds the preview limit.");
-    let offset = 0, bytes = 0;
+    const fragmented = data.componentEncoding === "field-fragments-v1", count = fragmented ? data.componentCount : total;
+    if ((data.componentEncoding !== undefined && !fragmented) || !Number.isSafeInteger(count) || count < 0 || count > total) throw Error("Invalid saved component encoding or count.");
+    let offset = 0, bytes = 0, partial = null;
+    const append = c => {
+      if (!c || typeof c.id !== "string" || !c.id || ids.has(c.id)) throw Error("Ambiguous saved component identity across pages.");
+      ids.add(c.id); rows.push(c);
+    };
     for (let page = 0; page < 256; page++) {
       if (generation !== this.generation) throw Error("Connection changed; component metadata must be refreshed.");
       if (identity.some(key => data[key] !== first[key])) throw Error("Saved CAD changed between component pages. Refresh after the save finishes.");
@@ -25,13 +31,32 @@ export class ViewerRpc {
       const p = data.page, part = data.components;
       if (!p || p.offset !== offset || p.total !== total || !Array.isArray(part) || part.length > 32 || offset + part.length > total) throw Error("Invalid saved component page sequence.");
       for (const c of part) {
-        if (!c || typeof c.id !== "string" || !c.id || ids.has(c.id)) throw Error("Ambiguous saved component identity across pages.");
-        ids.add(c.id); rows.push(c);
+        if (fragmented && c?.fragment) {
+          const f = c.fragment;
+          if (typeof c.id !== "string" || !c.id || ids.has(c.id) || (partial && partial.id !== c.id) ||
+              !Number.isSafeInteger(f.total) || f.total < 1 || f.total > 4096 || !Number.isSafeInteger(f.index) || f.index < 0 || f.index >= f.total ||
+              f.complete !== (f.index === f.total - 1) || !f.fields || typeof f.fields !== "object" || Array.isArray(f.fields) || Object.keys(f.fields).length !== 1) throw Error("Invalid saved component field fragment.");
+          if (!partial) partial = { id: c.id, fields: Object.create(null), next: 0, total: f.total };
+          if (f.index !== partial.next++ || f.total !== partial.total) throw Error("Invalid saved component field sequence.");
+          for (const [key, value] of Object.entries(f.fields)) {
+            if (["__proto__", "constructor", "prototype", "fragment"].includes(key) || Object.hasOwn(partial.fields, key)) throw Error("Duplicate or invalid saved component field.");
+            partial.fields[key] = value;
+          }
+          if (f.complete) {
+            if (partial.fields.id !== partial.id) throw Error("Saved component fragment identity changed.");
+            append({ ...partial.fields }); partial = null;
+          }
+        } else {
+          if (partial) throw Error("Saved component field fragments are incomplete.");
+          append(c);
+        }
       }
       offset += part.length;
       if (p.next === null) {
-        if (p.complete !== true || offset !== total) throw Error("Saved component pages are incomplete.");
-        return { ...first, components: rows, page: { offset: 0, next: null, total, complete: true } };
+        if (p.complete !== true || offset !== total || partial || rows.length !== count) throw Error("Saved component pages are incomplete.");
+        const result = { ...first, components: rows, page: { offset: 0, next: null, total: count, complete: true } };
+        delete result.componentEncoding; delete result.componentCount;
+        return result;
       }
       if (!part.length || p.complete !== false || p.next !== offset || offset >= total) throw Error("Invalid saved component page cursor.");
       if (performance.now() - started > 120000) throw Error("Saved component read exceeded its time limit. Retry after the save finishes.");

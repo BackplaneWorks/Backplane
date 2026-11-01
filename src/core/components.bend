@@ -197,7 +197,7 @@ def Components.text(pcb: String, sch: String, pcbpath: String, schpath: String) 
 def inspect(pcb: String, sch: String, pcbpath: String, schpath: String) -> String:
   Components.text(pcb, sch, pcbpath, schpath)
 
-# Bounded transport of complete saved metadata. Never shorten a component row.
+# Bounded transport of complete saved metadata. Never shorten a component field.
 # The client assembles one exact PCB+schematic revision before publishing it.
 type ComponentPage is Data:
   ComponentPage{rows: List<&2, J.Json>, count: Nat, bytes: Nat}
@@ -220,6 +220,40 @@ def Components.utf8.bytes(s: String) -> Nat:
 
 def Components.page.bytes(data: J.Json) -> Nat:
   Components.utf8.bytes(J.Json.show(data))
+
+# A large symbol and its pads can exceed one page together even when each
+# field fits. Only those components use field records; the reader rebuilds
+# the complete row before making any metadata available to the viewer.
+def Components.fragment.last(fs: J.Json) -> Bool:
+  match fs:
+    case J.End{}: True{}
+    case _: False{}
+
+def Components.fragment.count(fs: J.Json) -> Nat:
+  match fs:
+    case J.Field{_, _, t}: (1n + Components.fragment.count(t) : Nat)
+    case _: 0n
+
+def Components.fragment.fields(fs: J.Json, +id: String, +index: Nat, +total: Nat) -> List<&2, J.Json>:
+  match fs:
+    case J.Field{k, v, +t}:
+      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"fragment", J.Json.obj([
+        J.KV{"fields", J.Obj{J.Field{k, v, J.End{}}}}, J.KV{"index", J.Json.nat(index)}, J.KV{"total", J.Json.nat(total)},
+        J.KV{"complete", J.Flag{Components.fragment.last(t)}}])}]) <> Components.fragment.fields(t, id, (index + 1n : Nat), total)
+    case _: Nil{}
+
+def Components.fragment.row(fits: Bool, +row: J.Json) -> List<&2, J.Json>:
+  match fits row:
+    case True{} _: [row]
+    case False{} J.Obj{+fs}: Components.fragment.fields(fs, J.Json.get_str(J.Obj{fs}, "id", ""), 0n, Components.fragment.count(fs))
+    case False{} _: [row]
+
+def Components.fragment.rows(xs: List<&2, J.Json>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: List.reverse(&2, J.Json, acc)
+    case +h <> t:
+      Components.fragment.rows(t, List.append(&2, J.Json,
+        List.reverse(&2, J.Json, Components.fragment.row(Nat.is_le((Components.page.bytes(h) + 1n : Nat), 180000n), h)), acc))
 
 def Components.page.fits(xs: List<&2, J.Json>, count: Nat, bytes: Nat) -> Bool:
   match xs:
@@ -245,6 +279,21 @@ def Components.page.fields(fs: J.Json) -> J.Json:
     case J.Field{+k, v, t}:
       Components.page.field(Bool.or(String.eq(k, "components"), String.eq(k, "page")), k, v, Components.page.fields(t))
     case _: J.End{}
+
+def Components.fragment.tag(same: Bool, data: J.Json, rows: List<&2, J.Json>, count: Nat) -> J.Json:
+  match same data:
+    case True{} _: data
+    case False{} J.Obj{fs}:
+      J.Obj{J.Field{"componentEncoding", J.Str{"field-fragments-v1"},
+        J.Field{"componentCount", J.Json.nat(count),
+          J.Field{"components", J.Json.arr(rows), Components.page.fields(fs)}}}}
+    case False{} _: data
+
+def Components.fragment(+data: J.Json) -> J.Json:
+  +xs = J.Json.elems(J.Json.get_obj(data, "components"))
+  +rows = Components.fragment.rows(xs, Nil{})
+  +count = List.length(&2, J.Json, xs)
+  Components.fragment.tag(Nat.is_eq(count, List.length(&2, J.Json, rows)), data, rows, count)
 
 def Components.page.next(done: Bool, end: Nat) -> J.Json:
   match done:
@@ -290,7 +339,7 @@ def Components.page.array(data: J.Json) -> Bool:
 
 def Components.page.guard(ok: Bool, +data: J.Json, offset: Nat, pcb: String, sch: String) -> J.Json:
   match ok:
-    case True{}: Components.page.snapshot(data, offset, pcb, sch)
+    case True{}: Components.page.snapshot(Components.fragment(data), offset, pcb, sch)
     case False{}:
       J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(data, "error", "Invalid component metadata schema or rows.")}}])
 
