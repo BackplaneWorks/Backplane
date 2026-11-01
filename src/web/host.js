@@ -2095,6 +2095,13 @@ function laterCheck(tl) {
   if (tl.scrollHeight - tl.scrollTop - tl.clientHeight - gap > historyRunway(tl) * (gap ? 2 : 1)) return;
   laterAsked = thin.ahead("newer");
 }
+// (the re-render harness, test/tools/rerender: why a wheel at the edge did or did not ask)
+if (RR) RR.paging = () => {
+  const tl = document.getElementById("timeline");
+  return { ready: !!thin?.ready, paging: !!thin?.paging, second: !!thin?.pagingNext, pageError: thin?.pageError || null, pending: !!thin?.pageActionPending?.(),
+    earlierAsked, laterAsked, direction: historyDirection, older: !!thin?.hasAhead?.("older"), newer: !!thin?.hasAhead?.("newer"),
+    top: tl?.scrollTop ?? -1, gap: historyGap("older"), runway: tl ? Math.round(historyRunway(tl)) : 0, status: document.getElementById("history-status")?.textContent || "" };
+};
 function historyCheckSoon() {
   if (historyFrame) return;
   historyFrame = true;
