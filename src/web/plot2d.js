@@ -904,6 +904,8 @@ export function mount(canvases) {
 }
 
 function park(v) {
+  // Fit replaces a source's earlier pan, including when it is left again.
+  if (v.key && v.plot && v.plot.chunks) left.delete(v.key);
   if (v.key && v.plot && v.plot.chunks && v.touched) {
     left.delete(v.key);left.set(v.key, { scale: v.scale, ox: v.ox, oy: v.oy });
     if (left.size > 48) left.delete(left.keys().next().value);
