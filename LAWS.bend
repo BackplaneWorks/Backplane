@@ -4564,7 +4564,8 @@ law subs_shell_not_agent:
 law subs_badge:
   {SB.Subs.badge(0n) ++ "|" ++ SB.Subs.badge(1n) ++ "|" ++ SB.Subs.badge(3n) == "|1 agent|3 agents" : String}
 
-# Subagent presentation identities and retained activity.
+# A presentation page uses actual identities, including finished rows;
+# the signatures saved when closing a panel are a different list.
 law subs_row_keys:
   for +r: SB.SubRow
   for +rs: List<&2, SB.SubRow>
@@ -4573,6 +4574,8 @@ law subs_row_keys:
 law subs_done_row_key:
   {SB.Subs.row_keys([SB.Subs.done.toggle("t1", 2n, False{})]) == ["subs.done:t1"] : List<&2, String>}
 
+# Replaying existing activity builds identities and per-call activity
+# independently of the shared newest-activity window.
 law subagent_start_index:
   {M.Idx.get(M.Idx.post(Map.new(&2, List<&2, M.Entry>), M.Act{"s", "@sub:t1", "c1", "start:subagent", "Inspect power", 1n}), M.Idx.sub.starts("@sub:t1"))
     == [M.Act{"s", "@sub:t1", "c1", "start:subagent", "Inspect power", 1n}] : List<&2, M.Entry>}
@@ -4585,6 +4588,32 @@ law subagent_recovered_start:
     M.State.replay([M.ActivityLogged{"@sub:t1", "u", "c1", "Bash", "Inspect rail", 2n}], M.State.empty()), SB.AggS{Map.new(&2, SB.SubAgg), Nil{}}))
     == [SB.SubAgg{"c1", "subagent", "Inspect power", "", 1n, [SB.SubStep{"Bash", "Inspect rail"}], 2n}] : List<&2, SB.SubAgg>}
 
+law delegated_conversation_parent:
+  {M.Setting.get(M.State.apply(M.State.empty(), M.TaskDelegated{"k", "parent", "child", 1n, "claude", "", 1n}), "thread.parent.child", "") == "parent" : String}
+
+law delegated_conversation_moved:
+  {M.Setting.get(M.State.replay([M.TaskDelegated{"k", "parent", "child", 1n, "claude", "", 1n}, M.ThreadParentSet{"child", "", 2n}], M.State.empty()), "thread.parent.child", "") == "" : String}
+
+law delegated_orphan_not_hidden:
+  {U.Flag.get(U.Kids.set(M.State.apply(M.State.empty(), M.TaskDelegated{"k", "parent", "child", 1n, "claude", "", 1n})), "child") == False{} : Bool}
+
+law delegated_bot_parent_unchanged:
+  for s: M.State
+  for +parent: String
+  for +child: String
+  {M.State.task_parent(True{}, s, parent, child) == s : M.State}
+
+law delegated_parent_recorded:
+  for +pre: M.State
+  for +post: M.State
+  for +id: String
+  for +parent: String
+  for +child: String
+  for +depth: Nat
+  for +provider: String
+  for +model: String
+  for +at: Nat
+  {SDB.Sdb.keys(pre, post, M.TaskDelegated{id, parent, child, depth, provider, model, at}) == [SDB.RK{"task", id}, SDB.K.set("thread.parent." ++ child)] : List<&2, SDB.RK>}
 
 # Desks (core/desk.bend)
 # ----------------------

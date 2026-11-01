@@ -2,7 +2,8 @@ import Base
 import ./model.bend as M
 import ./far.bend as FR
 
-# Visible conversations, independent of TaskDelegated and agent activity.
+# Visible conversations. Delegation seeds the parent relationship; later
+# moves and task completion leave the conversation's own hierarchy intact.
 # Existing settings events keep old logs and phone kept-state decodable.
 def Tree.key(id: String) -> String:
   "thread.parent." ++ id

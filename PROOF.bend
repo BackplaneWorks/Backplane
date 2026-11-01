@@ -6885,6 +6885,21 @@ def Laws.subagent_call_index_isolated():
 def Laws.subagent_recovered_start():
   {==}
 
+def Laws.delegated_conversation_parent():
+  {==}
+
+def Laws.delegated_conversation_moved():
+  {==}
+
+def Laws.delegated_orphan_not_hidden():
+  {==}
+
+def Laws.delegated_bot_parent_unchanged(s, parent, child):
+  {==}
+
+def Laws.delegated_parent_recorded(pre, post, id, parent, child, depth, provider, model, at):
+  {==}
+
 def Laws.subs_shell_named():
   {==}
 
