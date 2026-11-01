@@ -73,3 +73,13 @@ test('view delta: after a reconnect, a whole view with a 200 KB draft arrives wi
  assert.equal(r.session.drafts.A,draft);assert.equal(r.shown.kids[1].kids[2].attrs[0].value,draft);
  // the link stays up and the next request offers this body
  const u=f.update();assert.equal(f.v.calls.get(u.id).input.viewDelta.token,String(c.revision));});
+test('view delta: a draft key\'s ops (composer value by "t", session) leave the timeline and window the base\'s own objects',async()=>{
+ const f=await fixture(),draft='x '.repeat(100000),session={...f.session,drafts:{A:draft,'@draft.bound':''}};
+ f.session.drafts['@draft.bound']='';
+ const shown=page(['a','b','c'],'');shown.kids[1].kids.push({type:'element',tag:'textarea',key:'composer',attrs:[{name:'value',value:'old'}],kids:[]});
+ f.v.reply('hub',f.whole(f.open.id,shown));const before=f.link.bases.map.get(f.link.bases.newest);
+ const u=f.v.request('hub','view.update',{session}),t=f.v.calls.get(u.id).input.viewDelta.token;
+ const r=f.v.reply('hub',f.delta(u.id,t,[['t',['session','drafts','A']],['s',['session','drafts','@draft.bound'],'200000 ab'],['t',['shown','kids',1,'kids',4,'attrs',0,'value']]]));
+ assert(r.remoteReady,JSON.stringify(r).slice(0,300));assert.equal(r.shown.kids[1].kids[4].attrs[0].value,draft);
+ for(let i=0;i<4;i++)assert.equal(r.shown.kids[1].kids[i],before.shown.kids[1].kids[i],'timeline row '+i+' kept');
+ assert.equal(r.shown.kids[0],before.shown.kids[0],'sidebar kept');assert.equal(r.window,before.window,'window kept');});
