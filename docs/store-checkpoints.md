@@ -87,3 +87,37 @@ test/native/store_up_probe.bend [EVENTS | OLD_HOME]` (a hub from before the
 bump makes the old store; it is upgraded in place and must equal a rebuild
 of the same log, every table; an upgrade made to fail falls back to the
 rebuild and leaves the old store as it was).
+
+## far_line after a rebuild
+
+`far_line` lists the lines that go to the owner's other machines (`/far/log`
+v3 reads it). Commits and the catch-up write its rows (storeio.bend's
+`Plan.change`); the full rebuild did not, so a store rebuilt before the fix
+lost its far history (on a real log: 232,919 rows before the Nov 1 rebuild,
+28,262 after; the Oct 24 one had already dropped 319,771). The build now
+writes them (stobuild.bend's `Stb.far`) and marks meta `far_line` 1.
+
+A store without that mark gets its rows refilled once the hub serves, by a
+child (`backplane --store-far HOME`, storefar.bend) at nice 19 and ionice
+idle, its JS heap sized to 1 GB: the log is folded up to `applied_off` as
+the build folds it (no entries, no turn inputs, no other facts), its lines
+read by `effects/storefar.js` about 1 MB a call so their bytes stay in
+JavaScript (a string over 64 KB in a line over 256 KB is emptied as text:
+the refill reads only ids), and each read's rows are added in one short
+transaction with meta `far_line.seq`, the last line written. A refill a
+restart cut off folds from the start again (a row needs the state at its
+line) but writes only past that line. The mark is set only when the
+numbering ends where the store's does. On the real 910 MB log: 580,601
+rows, 150 s, 633 MB peak; its rows equal both surviving older stores', row
+for row, over their ranges.
+
+Peers that pulled while the history was missing skipped those lines for
+good, so the share version went to view:3 (far.bend's `Fr.view.tag`): every
+mirror's next pull is one snapshot of what is live, not the history.
+
+Tests: `bun test/tools/store_far_line_e2e.ts` (a whole build equals a
+catch-up, every table, with a 3 MB line and a blank one; a store emptied of
+far_line is refilled to the caught-up store's feed, row for row, and not
+again; a resumed refill writes nothing up to its checkpoint) and
+`bun test/tools/far_line_peer_e2e.ts OLD_HUB NEW_HUB WIRE` (a peer that
+skipped the renames inside the hole ends consistent after one snapshot).

@@ -54,10 +54,7 @@ def Plan.meta(+seq: Nat, +off: Nat, +ord: Nat) -> List<&2, List<&2, String>>:
   [SB.Stb.meta.sql("applied_seq", Nat.show(seq)), SB.Stb.meta.sql("applied_off", Nat.show(off)), SB.Stb.meta.sql("ord", Nat.show(ord))]
 
 def Plan.far(xs: List<&2, F.Fact>, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
-  match xs:
-    case Nil{}: acc
-    case F.Fact{seq, scope} <> t:
-      Plan.far(t, ["INSERT INTO far_line(seq, scope) VALUES (?, ?) ON CONFLICT DO NOTHING", Nat.show(seq), scope] <> acc)
+  SB.Stb.far(xs, acc)
 
 def Plan.change(+c: M.Change, +line: String, +len: Nat, p: Plan) -> Plan:
   match p:

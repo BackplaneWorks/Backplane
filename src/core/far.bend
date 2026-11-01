@@ -1829,8 +1829,12 @@ def Fr.lasts.rows(rows: List<&2, List<&2, String>>, m: Map<&2, Nat>) -> Map<&2, 
 # (by changes) starts a history of its own and mirrors pull it afresh.
 # The version of what is shared (Fr.shared): a build that shares more
 # kinds of change bumps it, so every mirror pulls the history afresh once.
+# view:3: a store rebuilt before stobuild.bend wrote far_line had lost its
+# far history (Oct 24, Nov 1); a peer that pulled then, from a head inside
+# the hole, skipped those lines for good. The bump sends every peer one
+# snapshot of what is live (/far/log v3), never the history.
 def Fr.view.tag() -> String:
-  "|view:2"
+  "|view:3"
 
 def Fr.history.body(+first: String, +len: Nat, +seq: Nat) -> String:
   Bool.pick(String, Nat.is_eq(len, seq), first, first ++ "|unknown:" ++ Nat.show(Nat.sub(len, seq))) ++ Fr.view.tag()

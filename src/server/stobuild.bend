@@ -3,6 +3,7 @@ import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/codec.bend as C
 import ../core/storedb.bend as SDB
+import ../core/far.bend as F
 import ../core/utf8.bend as U
 import ./db.bend as D
 
@@ -145,12 +146,22 @@ def Stb.origin(+seq: Nat, +o: J.Json, origin: String) -> String:
     case _:
       origin
 
+# a line's row in far_line, when it goes to the owner's other machines
+# (far.bend's Fr.fact, from the state after it): the full build writes them
+# as the commit and the catch-up do (storeio.bend's Plan.change)
+def Stb.far(xs: List<&2, F.Fact>, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+  match xs:
+    case Nil{}: acc
+    case F.Fact{seq, scope} <> t:
+      Stb.far(t, ["INSERT INTO far_line(seq, scope) VALUES (?, ?) ON CONFLICT DO NOTHING", Nat.show(seq), scope] <> acc)
+
 def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, +ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String) -> Acc:
   match m:
     case Some{+c}:
       +p = SDB.F.posts(c)
       +cnt2 = Stb.bump(p, cnt)
-      Acc{Stb.apply(st, cnt, c), cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items), id, origin}
+      +post = Stb.apply(st, cnt, c)
+      Acc{post, cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.far(F.Fr.fact(post, c, seq), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items)), id, origin}
     case None{}:
       Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, "")], items), id, origin}
 
@@ -233,6 +244,7 @@ def Stb.end(a: Acc) -> List<&2, List<&2, String>>:
       List.append(&2, List<&2, String>, List.reverse(&2, List<&2, String>, Stb.sqls(SDB.Dump.ops(st), Nil{})), [
         Stb.meta.sql("schema", "1"),
         Stb.meta.sql("codec", Nat.show(SDB.Sdb.codec())),
+        Stb.meta.sql("far_line", "1"),
         Stb.meta.sql("applied_seq", Nat.show(seq)),
         Stb.meta.sql("applied_off", Nat.show(off)),
         Stb.meta.sql("ord", Nat.show(ord)),

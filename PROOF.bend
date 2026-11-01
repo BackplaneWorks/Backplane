@@ -8129,6 +8129,9 @@ def Laws.far_backoff():
 def Laws.far_epoch_on_unknown_lines():
   {==}
 
+def Laws.far_epoch_view_bumped():
+  {==}
+
 def Laws.hb_shows_nothing(u):
   {==}
 
