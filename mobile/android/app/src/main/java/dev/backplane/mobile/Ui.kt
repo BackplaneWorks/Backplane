@@ -529,7 +529,9 @@ private fun ThreadRow(m: AppModel, r: Row, hierarchy: Boolean = true) {
             },
         ) {
             Column(
-                Modifier.fillMaxWidth().padding(start = (r.depth.coerceIn(0, 4) * 12).dp)
+                // Cover the swipe action beneath the hierarchy gutter too.
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                    .padding(start = (r.depth.coerceIn(0, 4) * 12).dp)
                     .alpha(if (r.faded) 0.45f else 1f),
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
