@@ -538,7 +538,7 @@ def Change.decode(+o: J.Json) -> Maybe<&2, M.Change>:
 # a setting's value as clients see it: a turn's input blank (M.Setting.input:
 # no client reads one, and they were 39% of a real log's bytes)
 def Change.wire.value(+key: String, value: String) -> String:
-  Bool.pick(String, M.Setting.input(key), "", value)
+  Bool.pick(String, M.Setting.wire_blank(key), "", value)
 
 def Change.wire(c: M.Change) -> J.Json:
   match c:
@@ -731,7 +731,7 @@ def Change.wire_line.t(private: Bool, +tag: String, +o: J.Json, l: String) -> St
     case True{}:
       Change.wire_line.k(True{}, o, l)
     case False{}:
-      Change.wire_line.s(Bool.and(String.eq(tag, "SettingSet"), M.Setting.input(J.Json.get_str(o, "key", ""))), o, l)
+      Change.wire_line.s(Bool.and(String.eq(tag, "SettingSet"), M.Setting.wire_blank(J.Json.get_str(o, "key", ""))), o, l)
 
 # a stored line (parsed as o) as clients may see it (Change.wire's text)
 def Change.wire_line(+o: J.Json, l: String) -> String:

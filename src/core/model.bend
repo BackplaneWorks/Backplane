@@ -1137,6 +1137,13 @@ def Setting.ledger(+k: String) -> Bool:
 def Setting.input(+k: String) -> Bool:
   Bool.or(String.starts_with(k, "launch.input."), String.starts_with(k, "fallback.input."))
 
+# what clients get blank on the wire (the log keeps it): a turn's input,
+# and a thread's riding mail (ride.<thread>, hub.bend's Riding mail), which
+# no client reads and which is re-sent whole on every message added to it
+# (an uberbot's ride reached 52 KB, re-sent to every client per note)
+def Setting.wire_blank(+k: String) -> Bool:
+  Bool.or(Setting.input(k), String.starts_with(k, "ride."))
+
 # keys an empty value removes
 def Setting.blank_gone(+k: String) -> Bool:
   Bool.or(Setting.ledger(k), Setting.input(k))

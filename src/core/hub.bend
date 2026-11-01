@@ -174,6 +174,66 @@ type Out is Data:
   # far.queue, Fq.*) is due to be sent, in order
   FarQueued{}
 
+
+# an out's constructor name, for its perf span (server.bend's Hub.outs.go:
+# hub.out.<kind>, logged as slow like any span), never what it carries
+def Out.kind(o: Out) -> String:
+  match o:
+    case RunStart{_, _, _}: "RunStart"
+    case RunNext{_, _}: "RunNext"
+    case CharterWrite{_, _}: "CharterWrite"
+    case MailAppend{_, _, _}: "MailAppend"
+    case MailRead{_, _, _, _, _}: "MailRead"
+    case LockGuard{_, _, _}: "LockGuard"
+    case Send{_, _}: "Send"
+    case Broadcast{_}: "Broadcast"
+    case AgentStart{_, _, _, _, _, _, _}: "AgentStart"
+    case AgentSend{_, _}: "AgentSend"
+    case AgentStop{_}: "AgentStop"
+    case Watch{_, _, _, _, _, _, _}: "Watch"
+    case Upgrade{}: "Upgrade"
+    case UpgradeForce{}: "UpgradeForce"
+    case Restart{}: "Restart"
+    case KiCadInstall{}: "KiCadInstall"
+    case KiCadRetry{}: "KiCadRetry"
+    case ModelsRefresh{}: "ModelsRefresh"
+    case ChecksTrust{_}: "ChecksTrust"
+    case CodexTurn{_, _, _, _, _, _}: "CodexTurn"
+    case GrokTurn{_, _, _, _, _, _}: "GrokTurn"
+    case MuseTurn{_, _, _, _, _, _}: "MuseTurn"
+    case AgyTurn{_, _, _, _, _, _}: "AgyTurn"
+    case OcTurn{_, _, _, _, _, _}: "OcTurn"
+    case PiTurn{_, _, _, _, _, _}: "PiTurn"
+    case OmpTurn{_, _, _, _, _, _}: "OmpTurn"
+    case TurnEnded{_, _, _, _, _, _}: "TurnEnded"
+    case IslandSync{}: "IslandSync"
+    case AskAnswered{_, _}: "AskAnswered"
+    case Git{_, _, _, _, _, _, _}: "Git"
+    case TermOp{_, _, _, _, _, _}: "TermOp"
+    case TermRun{_, _, _, _, _, _, _}: "TermRun"
+    case TermSnap{_, _}: "TermSnap"
+    case TermKill{_}: "TermKill"
+    case Fs{_, _, _, _}: "Fs"
+    case PlotInfo{_, _, _, _, _}: "PlotInfo"
+    case BotFx{_, _, _, _}: "BotFx"
+    case DeskLook{_, _, _}: "DeskLook"
+    case BotReply{_, _, _, _}: "BotReply"
+    case Await{_, _, _, _, _, _, _}: "Await"
+    case WatchStop{_, _, _, _, _}: "WatchStop"
+    case Live{_, _}: "Live"
+    case LaunchFar{}: "LaunchFar"
+    case Alerted{_}: "Alerted"
+    case WakePoll{_, _}: "WakePoll"
+    case DeployProbe{}: "DeployProbe"
+    case ToolOpen{_, _}: "ToolOpen"
+    case ToolShut{_, _}: "ToolShut"
+    case ToolsGone{_}: "ToolsGone"
+    case DeployGo{_}: "DeployGo"
+    case ShipRun{_}: "ShipRun"
+    case ShipNext{_}: "ShipNext"
+    case Teach{_, _, _, _}: "Teach"
+    case FarQueued{}: "FarQueued"
+
 type Step is Data:
   Step{changes: List<&2, M.Change>, outs: List<&2, Out>}
 
@@ -7320,7 +7380,7 @@ def Commit.line.s(input: Bool, +c: M.Change, +disk: String) -> String:
 def Commit.line(+c: M.Change, +disk: String) -> String:
   match c:
     case M.SettingSet{+k, v, at}:
-      Commit.line.s(M.Setting.input(k), M.SettingSet{k, v, at}, disk)
+      Commit.line.s(M.Setting.wire_blank(k), M.SettingSet{k, v, at}, disk)
     case M.DeviceRegistered{_, _, _, _, _, _, _}:
       J.Json.show(C.Change.wire(c))
     case M.DeviceDropped{_, _}:

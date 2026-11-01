@@ -1003,7 +1003,7 @@ def F.wire(c: M.Change) -> String:
     case M.DeviceDropped{tok, at}:
       J.Json.show(C.Change.wire(M.DeviceDropped{tok, at}))
     case M.SettingSet{+k, v, at}:
-      F.wire.s(M.Setting.input(k), M.SettingSet{k, v, at})
+      F.wire.s(M.Setting.wire_blank(k), M.SettingSet{k, v, at})
     case _:
       ""
 

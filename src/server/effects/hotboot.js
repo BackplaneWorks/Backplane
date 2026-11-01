@@ -10,7 +10,8 @@
 // logged before the store kept a wire text for them. Only the key and the
 // time are decoded, from the bytes: a slice of the whole line's string
 // would keep all of it alive.
-const INPUTS = ['{"$":"SettingSet","key":"launch.input.', '{"$":"SettingSet","key":"fallback.input.'].map((t) => Buffer.from(t));
+// (and a thread's riding mail, ride.<thread>: model.bend's Setting.wire_blank)
+const INPUTS = ['{"$":"SettingSet","key":"launch.input.', '{"$":"SettingSet","key":"fallback.input.', '{"$":"SettingSet","key":"ride.'].map((t) => Buffer.from(t));
 const VALUE = Buffer.from('","value":"');
 const AT = Buffer.from(',"at":');
 function input(buf, start, end) {

@@ -14935,4 +14935,16 @@ def Laws.plane_list_same_stalled(): {==}
 def Laws.uber_rows_same_count(): {==}
 
 def Laws.side_rows_ix_tree_eq(): {==}
+
+def Laws.ride_wire_blank():
+  {==}
+
+def Laws.ride_commit_line_is_wire():
+  {==}
+
+def Laws.ride_store_wire():
+  {==}
+
+def Laws.ride_state_kept():
+  {==}
 # END sidebar rows (H)
