@@ -24,6 +24,34 @@ def view(request: J.Json, size: String) -> J.Json:
 def readback(previous: J.Json, top: String) -> J.Json:
   V.plan(J.Json.obj([J.KV{"mode", J.Str{"readback"}}, J.KV{"previous", previous}, J.KV{"top", J.Num{top}}]))
 
+
+# the valid range (law timeline_valid_*): a long list of 100 px rows
+def many.keys(+n: Nat, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match n:
+    case 0n: acc
+    case 1n+k: many.keys(k, J.Str{"r" ++ Nat.show(k)} <> acc)
+
+def many.sizes(+n: Nat, acc: List<&2, J.KV>) -> List<&2, J.KV>:
+  match n:
+    case 0n: acc
+    case 1n+k: many.sizes(k, J.KV{"r" ++ Nat.show(k), J.Num{"100"}} <> acc)
+
+def many.plan(top: String, +previous: J.Json) -> J.Json:
+  V.plan(J.Json.obj([J.KV{"keys", J.Json.arr(many.keys(200n, Nil{}))}, J.KV{"sizes", J.Json.obj(many.sizes(200n, Nil{}))}, J.KV{"previous", previous},
+    J.KV{"top", J.Num{top}}, J.KV{"view", J.Num{"100"}}, J.KV{"mode", J.Str{"scroll"}}, J.KV{"follow", J.Flag{False{}}}]))
+
+def keys.go(xs: List<&2, J.Json>, acc: String) -> String:
+  match xs:
+    case Nil{}: acc
+    case j <> t: keys.go(t, acc ++ "," ++ J.Json.get_str(j, "key", ""))
+
+# the rows a plan mounts, as one string
+def mounted(+p: J.Json) -> String:
+  keys.go(J.Json.elems(J.Json.get_obj(p, "visible")), "")
+
+def valid.at(+p: J.Json, i: Nat) -> String:
+  V.Px.show(V.Px.read(J.Json.as_raw(List.head(&2, J.Json, List.drop(&2, J.Json, J.Json.elems(J.Json.get_obj(p, "valid")), i)), "0")))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     num("decimal beyond float32 precision", V.Px.add(V.Px.read("16777216.015625"), V.Px.read("0.015625")), V.Px.read("16777216.03125"))
@@ -113,3 +141,13 @@ def main() -> IO(Unit):
     field("zero height pill contributes no gap or track change", pill, "total", "104.125")
     C.Check.str("anchor forced into window", Bool.show(V.Window.keep(True{}, False{})), "True")
     C.Check.str("only bottom can follow", Bool.show(V.Follow.allowed(True{}, False{})), "False")
+    +mid : J.Json = many.plan("5000", J.Null{})
+    +lo : String = valid.at(mid, 0n)
+    +hi : String = valid.at(mid, 1n)
+    C.Check.str("valid range: low end mounts the same rows", mounted(many.plan(lo, mid)), mounted(mid))
+    C.Check.str("valid range: high end mounts the same rows", mounted(many.plan(hi, mid)), mounted(mid))
+    C.Check.str("valid range: a pixel below it mounts others", Bool.show(String.eq(mounted(many.plan(V.Px.show(V.Px.sub(V.Px.read(lo), V.Px.int(1n))), mid)), mounted(mid))), "False")
+    C.Check.str("valid range: a pixel above it mounts others", Bool.show(String.eq(mounted(many.plan(V.Px.show(V.Px.add(V.Px.read(hi), V.Px.int(1n))), mid)), mounted(mid))), "False")
+    C.Check.str("valid range holds the top it was planned at", Bool.show(Bool.and(V.Px.le(V.Px.read(lo), V.Px.read("5000")), V.Px.le(V.Px.read("5000"), V.Px.read(hi)))), "True")
+    +bottom : J.Json = many.plan("21921", J.Null{})
+    C.Check.str("at the end the range is empty (every scroll plans)", Bool.show(V.Px.le(V.Px.read(valid.at(bottom, 0n)), V.Px.read(valid.at(bottom, 1n)))), "False")
