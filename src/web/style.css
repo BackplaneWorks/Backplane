@@ -1124,8 +1124,9 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .rc-card .rc-head { display: flex; align-items: center; justify-content: space-between; color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .rc-card .rc-x { background: none; border: 0; color: var(--dim); font-size: calc(16px * var(--text-scale, 100) / 100); padding: 0 4px; cursor: pointer; }
 .rc-card .field { padding: 4px 8px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 0; }
-.rc-text { white-space: pre-wrap; }
-.rc-reply { white-space: pre-wrap; color: var(--dim); }
+.review-body.rp-comments { overflow-wrap: anywhere; }
+.rc-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rc-reply { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
 .rc-reply .by { color: var(--faint); margin-right: 6px; }
 .rc-row { display: flex; gap: 8px; }
 .rc-gate { padding: 4px 0 8px; font-weight: 600; }
