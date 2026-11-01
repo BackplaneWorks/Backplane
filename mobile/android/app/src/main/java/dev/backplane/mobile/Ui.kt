@@ -893,7 +893,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
     }
     var menu by remember { mutableStateOf(false) }
     // the subagents sheet (the top bar's button) is up
-    var subs by remember { mutableStateOf(false) }
+    var subs by remember(t.id) { mutableStateOf(false) }
     // the image open in the lightbox
     var shown by remember { mutableStateOf<String?>(null) }
     val termSize = rememberTermSize()

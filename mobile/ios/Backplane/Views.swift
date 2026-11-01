@@ -1308,6 +1308,7 @@ struct ThreadScreen: View {
         }
         .onChange(of: fileMenu) { _, m in if m == nil { shutFile = nil } }
         .fullScreenCover(item: $shown) { s in Lightbox(shown: s) { shown = nil } }
+        .onChange(of: thread.id) { _, _ in showSubs = false }
         .sheet(isPresented: $showSubs) { SubsSheet(model: model).disabled(!live) }
         .sheet(isPresented: Binding(get: { thread.diff != nil }, set: {
             if !$0, live, model.contentReady, model.screen?.thread?.id == thread.id,
