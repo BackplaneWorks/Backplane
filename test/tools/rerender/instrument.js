@@ -193,7 +193,7 @@
         if (d > 25) { F.long++; F.dropped += Math.max(0, Math.round(d / 16.7) - 1); F.gaps.push(Math.round(d)); }
       }
       lastFrame = t;
-      if (W.watchBlank) blankCheck();
+      if (W.watchBlank) { blankCheck(); thumbFrame(); }
       if (W.thread) threadCheck();
       if (wheels.length) wheelFrames();
       checkLoadingText();
@@ -296,6 +296,32 @@
     if (extra > scrollInfo.worstGap) scrollInfo.worstGap = extra;
     if (extra > Math.max(40, 0.15 * box.height)) scrollInfo.blank++;
   }
+  // The scrollbar's thumb each frame: where it is and how tall, as parts of
+  // the track. A wheel moves it; nothing the reader does changes its size,
+  // nor moves it in a frame with no wheel just before: those are the
+  // estimate's corrections and pages landing (the thumb "jumping").
+  let thumbs = [], wheelTimes = [];
+  addEventListener("wheel", (e) => { if (W.on) wheelTimes.push(e.timeStamp); }, { capture: true, passive: true });
+  function thumbFrame() {
+    const tl = document.getElementById("timeline");
+    if (!tl || tl.scrollHeight <= 0) return;
+    const h = tl.scrollHeight, v = tl.clientHeight;
+    thumbs.push({ t: now(), top: tl.scrollTop / h, size: v / h });
+  }
+  function thumbJumps() {
+    let sizeMax = 0, topMax = 0, over = 0;
+    for (let i = 1; i < thumbs.length; i++) {
+      const a = thumbs[i - 1], b = thumbs[i];
+      const ds = Math.abs(b.size - a.size);
+      const wheeled = wheelTimes.some((t) => t > a.t - 50 && t <= b.t);
+      const dt = wheeled ? 0 : Math.abs(b.top - a.top);
+      if (ds > sizeMax) sizeMax = ds;
+      if (dt > topMax) topMax = dt;
+      if (ds > 0.05 || dt > 0.05) over++;
+    }
+    return { frames: thumbs.length, sizeSwingMax: Math.round(sizeMax * 1000) / 1000, unpromptedMoveMax: Math.round(topMax * 1000) / 1000, framesOver5pc: over };
+  }
+
   // open/switch: the first frame the target thread's rows show (a kept
   // picture or the hub's view), and the first where the hub's view of it is
   // current (remote ready, not a cached picture)
@@ -317,7 +343,7 @@
       for (const k in msgs) delete msgs[k];
       sentAt.clear();
       for (const k in times) delete times[k];
-      wheelAt = 0; wheels = []; loadingOn = false; W.thread = opts.thread || ""; W.firstPaint = null; W.current = null;
+      wheelAt = 0; wheels = []; thumbs = []; wheelTimes = []; loadingOn = false; W.thread = opts.thread || ""; W.firstPaint = null; W.current = null;
       rows0 = rowShots(); W.watchBlank = !!opts.blank; W.t0 = now(); W.on = true;
       return W.t0;
     },
@@ -359,7 +385,7 @@
             p50: pctl(ms, 0.5), p95: pctl(ms, 0.95), max: ms.length ? Math.max(...ms) : 0 };
         })(),
         scroll: { wheelToFrame: { n: scrollInfo.wheel.length, p50: pctl(scrollInfo.wheel, 0.5), p95: pctl(scrollInfo.wheel, 0.95), max: scrollInfo.wheel.length ? Math.max(...scrollInfo.wheel) : 0 },
-          blankFrames: scrollInfo.blank, checkedFrames: scrollInfo.checked, worstGapPx: Math.round(scrollInfo.worstGap), loadingSeen: loadingSeen.slice(0, 10), loadingCount: loadingSeen.length },
+          thumb: thumbJumps(), blankFrames: scrollInfo.blank, checkedFrames: scrollInfo.checked, worstGapPx: Math.round(scrollInfo.worstGap), loadingSeen: loadingSeen.slice(0, 10), loadingCount: loadingSeen.length },
         hubMsgs: Object.fromEntries(Object.entries(msgs).map(([k, v]) => [k, v.ms ? { n: v.n, p50: Math.round(pctl(v.ms, 0.5)), max: Math.round(Math.max(...v.ms)) } : { n: v.n, bytes: v.bytes, decodeMs: Math.round(v.decodeMs) }])),
         counts: { ...counts }, times: Object.fromEntries(Object.entries(times).map(([k, v]) => [k, { n: v.n, total: Math.round(v.total), max: Math.round(v.max) }])),
       };
