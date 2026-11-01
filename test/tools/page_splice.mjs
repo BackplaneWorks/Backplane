@@ -44,4 +44,17 @@ for (const [name, i] of [['the newest page counts the thread\'s 8 changes', 4], 
   if (got === '8') console.log('ok', name);
   else { failed++; console.log('FAIL', name, 'got', got); }
 }
+// the window's counts: older (remaining), newer and total, in rows as its ids
+{
+  const parse = s => { const [older, newer, total, ...ids] = s.trim().split(' '); return { older: +older, newer: +newer, total: +total, ids }; };
+  const a = parse(lib['counts.newest'](0n)), b = parse(lib['counts.older'](0n));
+  const checks = [
+    ['the newest page has nothing newer', a.newer === 0],
+    ['total is older + ids + newer (newest)', a.total === a.older + a.ids.length + a.newer],
+    ['total is older + ids + newer (older page)', b.total === b.older + b.ids.length + b.newer],
+    ['total is the same from either page', a.total === b.total],
+    ['an older page counts the rows above its first', b.newer === a.ids.indexOf(b.ids[0]) && b.newer > 0],
+  ];
+  for (const [name, ok] of checks) { if (ok) console.log('ok', name); else { failed++; console.log('FAIL', name, JSON.stringify({ a, b })); } }
+}
 if (failed) process.exit(1);

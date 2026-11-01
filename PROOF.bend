@@ -14969,3 +14969,7 @@ def Laws.wait_news_done():
 
 def Laws.timeline_layout_list_same():
   {==}
+
+# BEGIN page window counts (H)
+def Laws.view_window_newer_empty(index, th, ids): {==}
+# END page window counts (H)

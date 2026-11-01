@@ -125,3 +125,25 @@ def c4.spliced(+z: Nat) -> String:
 
 def c4.full(+z: Nat) -> String:
   J.Json.show(full(Nat.add(z, 0n), "", TL.Stream.blank()))
+
+# a page window's counts, "older newer total ids..." (window's remaining,
+# newer, total and its ids, newest first), for the driver's checks
+def ids.str(+x: J.Json) -> String:
+  match x:
+    case J.Str{+s}: s
+    case _: "?"
+
+def ids.words(xs: List<&2, J.Json>) -> String:
+  match xs:
+    case Nil{}: ""
+    case +x <> tail: " " ++ ids.str(x) ++ ids.words(tail)
+
+def counts.of(+w: J.Json) -> String:
+  Nat.show(J.Json.get_nat(w, "remaining", 0n)) ++ " " ++ Nat.show(J.Json.get_nat(w, "newer", 999n)) ++ " " ++ Nat.show(J.Json.get_nat(w, "total", 0n))
+    ++ ids.words(J.Json.elems(J.Json.get_obj(w, "ids")))
+
+def counts.newest(+z: Nat) -> String:
+  counts.of(V.Render.window(TL.Stream.blank(), index(), "t1", p(""), "1", rows(z)))
+
+def counts.older(+z: Nat) -> String:
+  counts.of(V.Render.window(TL.Stream.blank(), index(), "t1", p("m40"), "1", rows(Nat.add(z, mid(0n)))))
