@@ -173,6 +173,7 @@ export class TimelineScroller {
       const h = this.sizes[key] ?? this.heights.get(w, key);
       if (h !== undefined) out[key] = h;
     }
+    this._given = out; // what the plan was told: a measure that agrees changes nothing
     return out;
   }
 
@@ -195,10 +196,10 @@ export class TimelineScroller {
       const height = wrapper.getBoundingClientRect().height;
       RR?.n("tl.measure.row");
       this.heights?.set(this._widthNow(), key, height);
-      if (this.sizes[key] !== height) {
-        this.sizes[key] = height;
-        changed = true;
-      }
+      // a change is a height the plan did not have (this list's measure, or
+      // else the remembered height it was told)
+      if ((this.sizes[key] ?? this._given?.[key]) !== height) changed = true;
+      this.sizes[key] = height;
     }
     return changed;
   }
