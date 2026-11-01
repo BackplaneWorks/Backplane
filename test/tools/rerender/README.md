@@ -153,6 +153,9 @@ scrolling. The goal is zero.
 
 ## Private data
 
+A run with `--fixture real` refuses an `--out` inside the repository: its
+report, `--dump-rows` and `--blank-shots` hold real thread content.
+
 A real-log run's report names real threads and may quote their text: write
 it under `~/Documents/i2cjak/bp-coord/rerender-harness/` (or another folder
 outside the repository), never into the tree. `budgets.json` and anything

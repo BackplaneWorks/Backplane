@@ -35,6 +35,9 @@ const port = Number(opt("port", "3811"));
 const fixtureKind = opt("fixture", "synthetic");
 const outDir = resolve(opt("out", join(here, "build/rr/out")));
 const deep = flag("deep");
+// a real log's run quotes real threads (reports, --dump-rows, --blank-shots):
+// it writes outside the repository only (bp-coord, or a temp folder)
+if (fixtureKind === "real" && (outDir === here || outDir.startsWith(here + "/"))) throw new Error(`--fixture real writes real thread content: --out must be outside the repository (got ${outDir}); use ~/Documents/i2cjak/bp-coord/rerender-harness/...`);
 const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "slowup", "wheelpanes", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
 const scenarios = opt("scenarios", ALL.join(",")).split(",");
 const roles = opt("targets", "long,tools").split(",");
