@@ -133,7 +133,7 @@
   // Sockets: frames and bytes by kind, request → reply times
   // --------------------------------------------------------
   let S, pend;
-  const resetWs = () => { S = { in: {}, out: {}, inBytes: 0, outBytes: 0, inFrames: 0, outFrames: 0, rpc: {} }; pend = new Map(); };
+  const resetWs = () => { S = { in: {}, out: {}, inBytes: 0, outBytes: 0, inFrames: 0, outFrames: 0, rpc: {}, small: [] }; pend = new Map(); };
   resetWs();
   const dec = new TextDecoder();
   // CBOR text keys are written as plain UTF-8 inside the frame: enough to
@@ -159,6 +159,8 @@
         const b = bytes(e.data), k = kindOf(e.data);
         S.inBytes += b; S.inFrames++;
         const x = S.in[k.kind] || (S.in[k.kind] = { frames: 0, bytes: 0 }); x.frames++; x.bytes += b;
+        // small frames (errors, acks) as their printable text
+        if (b < 400 && S.small.length < 8) S.small.push((typeof e.data === "string" ? e.data : e.data instanceof ArrayBuffer ? dec.decode(new Uint8Array(e.data)) : "").replace(/[^\x20-\x7e]+/g, " "));
         if (k.id !== null && pend.has(k.id)) {
           const p = pend.get(k.id); pend.delete(k.id);
           const r = S.rpc[p.method] || (S.rpc[p.method] = { n: 0, ms: [], replyBytes: 0 });

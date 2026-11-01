@@ -35,12 +35,12 @@ const port = Number(opt("port", "3811"));
 const fixtureKind = opt("fixture", "synthetic");
 const outDir = resolve(opt("out", join(here, "build/rr/out")));
 const deep = flag("deep");
-const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "scroll", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
+const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
 const scenarios = opt("scenarios", ALL.join(",")).split(",");
 const roles = opt("targets", "long,tools").split(",");
 if (port === 3787) throw new Error("3787 is the live hub's port");
 if (bin.startsWith(join(homedir(), ".local/share/backplane"))) throw new Error("refusing to run the installed binary");
-for (const s of scenarios) if (!ALL.includes(s)) throw new Error(`unknown scenario ${s}`);
+for (const s of scenarios) if (!ALL.includes(s) && s !== "pastescale") throw new Error(`unknown scenario ${s}`);
 if (!existsSync(bin)) throw new Error(`no hub at ${bin}`);
 if (!existsSync(join(web, "index.html"))) throw new Error(`no web client at ${web}`);
 try { await fetch(`http://127.0.0.1:${port}/hello`, { signal: AbortSignal.timeout(800) }); throw new Error(`port ${port} is taken`); }
@@ -113,6 +113,8 @@ try {
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://127.0.0.1:${port}` });
   await ctx.addInitScript({ path: join(import.meta.dir, "instrument.js") });
   const page = await ctx.newPage();
+  // RR_CONSOLE=<regex>: the page's console lines that match, in the log (e.g. view- for a refused view)
+  if (process.env.RR_CONSOLE) page.on("console", (m: any) => { const t = m.text(); if (new RegExp(process.env.RR_CONSOLE).test(t)) say(`console: ${t.slice(0, 400)}`); });
   page.on("pageerror", (e: any) => say(`page error: ${e.message}`));
   const cdp = await ctx.newCDPSession(page);
   await cdp.send("Performance.enable", { timeDomain: "timeTicks" });
@@ -299,6 +301,24 @@ try {
       const big = Array.from({ length: 4000 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
       await measure("pastebig", target, () => paste(big), { max: 60000 });
     }
+    // reply bytes against draft size (how often the hub's view repeats the draft)
+    if (scenarios.includes("pastescale")) {
+      for (const n of [10, 40, 80, 160]) {
+        await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
+        const t = Array.from({ length: n }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
+        await measure(`pastescale${t.length}`, target, () => paste(t));
+      }
+    }
+    // typing in a big draft: 20 keys at its end, then 20 in its middle
+    if (scenarios.includes("bigtype")) {
+      await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
+      const big = Array.from({ length: 4000 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
+      await paste(big); await quiet(page, 800, 60000);
+      await page.evaluate(() => { const c = document.getElementById("composer") as HTMLTextAreaElement; c.focus(); c.setSelectionRange(c.value.length, c.value.length); });
+      await measure("bigtype-end", target, () => page.keyboard.type("the quick brown fox ", { delay: 30 }), { max: 60000 });
+      await page.evaluate(() => { const c = document.getElementById("composer") as HTMLTextAreaElement; const m = c.value.length >> 1; c.setSelectionRange(m, m); });
+      await measure("bigtype-mid", target, () => page.keyboard.type("the quick brown fox ", { delay: 30 }), { max: 60000 });
+    }
     // clear the draft (not measured)
     await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
     // (after a longer quiet: a view still on its way is not the tick's)
@@ -342,7 +362,7 @@ try {
 // The report
 // ----------
 const expected: Record<string, string[]> = {
-  "type1": ["composer", "asks"], "type1b": ["composer", "asks"], "burst": ["composer", "asks"], "paste": ["composer", "asks"],
+  "type1": ["composer", "asks"], "type1b": ["composer", "asks"], "burst": ["composer", "asks"], "paste": ["composer", "asks"], "pastebig": ["composer", "asks"], "bigtype-end": ["composer", "asks"], "bigtype-mid": ["composer", "asks"],
   "scroll-up": ["timeline-row", "timeline"], "scroll-down": ["timeline-row", "timeline"],
   "clock": ["workbar"], "idle": [], "bg-stream": ["sidebar"],
 };

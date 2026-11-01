@@ -2371,12 +2371,19 @@ function localPresentation(action, value, session) {
   }
 }
 let draftPainted = { sel: "", text: "" }, draftPaintTimer = 0;
-const DRAFT_POPUP = /(^|\s)[\/$@>%#]\S*$/;
+// whether the draft's last word (after its last whitespace) starts a popup
+// (/ $ @ > % #): /(^|\s)[\/$@>%#]\S*$/, looking at that word alone (the
+// regex tried every position of a pasted draft, twice a key)
+const draftPopup = text => {
+  let i = text.length;
+  while (i > 0 && !/\s/.test(text[i - 1])) i--;
+  return i < text.length && "/$@>%#".includes(text[i]);
+};
 function paintDraft(sel, text) {
   const was = draftPainted.sel === sel ? draftPainted.text : null;
   draftPainted = { sel, text };
   clearTimeout(draftPaintTimer);
-  if (was === null || !was !== !text || DRAFT_POPUP.test(text) || DRAFT_POPUP.test(was)) paintComposer();
+  if (was === null || !was !== !text || draftPopup(text) || draftPopup(was)) paintComposer();
   else draftPaintTimer = setTimeout(paintComposer, 160);
 }
 // A draft changes the composer alone (presentation.bend's Node.overlay: the

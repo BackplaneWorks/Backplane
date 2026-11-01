@@ -25,7 +25,8 @@ bp-admit.sh --mem 8 --cores 4 -- bun test/tools/rerender/rerender.ts --fixture r
 bun test/tools/rerender/rerender.ts --gate test/tools/rerender/budgets.json
 ```
 
-Options: `--scenarios open,idle,type1,burst,paste,scroll,clock,bg,send,stream,toolgroup,switch`,
+Options: `--scenarios open,idle,type1,burst,paste,pastebig,bigtype,scroll,stress,clock,bg,send,stream,toolgroup,switch`
+(and `pastescale`, not run by default),
 `--targets long,tools`, `--port 3811`, `--chrome PATH`, `--stream-n 40 --stream-ms 150`,
 `--keep` (keep the temp home), `--headed`, `--write-budgets FILE`.
 
@@ -54,7 +55,10 @@ Options: `--scenarios open,idle,type1,burst,paste,scroll,clock,bg,send,stream,to
 | idle | 4 s of nothing |
 | type1, type1b | one character in the composer (twice) |
 | burst | 28 characters, 30 ms apart |
-| paste | 20 KB inserted at once |
+| paste | 20 KB pasted (the clipboard, then Ctrl+V: one input event) |
+| pastebig | 200 KB pasted |
+| bigtype-end, bigtype-mid | 20 keys typed at the end, then in the middle, of a 200 KB draft |
+| pastescale (opt-in) | 1, 4, 8 and 16 KB pasted: reply bytes against the draft's size |
 | scroll-up, scroll-down | 20 wheel notches up, 24 down (blank-frame and loading checks on) |
 | clock | the page's 30 s clock tick (a `visibilitychange`) |
 | bg-stream | another thread streams a reply (the driver sent it) |
@@ -72,6 +76,7 @@ Options: `--scenarios open,idle,type1,burst,paste,scroll,clock,bg,send,stream,to
   removed and an identical one added).
 - **Rows**: timeline rows touched by a mutation, really changed (their markup
   differs at the end), touched but unchanged, mounted, unmounted.
+- **Small frames**: the text of up to 8 inbound frames under 400 B (`ws.small`): an error or an ack, e.g. a view refused with `LIMIT`. `RR_CONSOLE=<regex>` copies matching page console lines (the page's `[bp-connection]` diagnostics) into the log.
 - **Hub messages**: what the page decoded, by kind (`view.changed`,
   `reply:view.update`, ...), bytes and decode ms; requests by method with
   their reply time.
