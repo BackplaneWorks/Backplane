@@ -94,9 +94,16 @@ def Fv.wants.go(ls: List<&2, String>) -> Bool:
 def Fv.wants.ok(+text: String) -> Bool:
   Fv.wants.go(String.split(text, '\n'))
 
-# the largest file the owner sends (a file is read whole into memory)
+# the largest file the owner sends: it streams from disk (farview.bend's
+# Fvs.get answers Stream.mark, which server.bend sends a piece at a time)
+# and the client's curl writes it straight to a file; core/attach.bend's
+# Att.ceiling, 4000 MB
 def Fv.cap() -> Nat:
-  25165824n
+  4194304000n
+
+# seconds a client gives one file to arrive (a large file over a slow link)
+def Fv.secs() -> Nat:
+  1800n
 
 # What the owning hub takes: a read about a thread it shares whose
 # paths are safe

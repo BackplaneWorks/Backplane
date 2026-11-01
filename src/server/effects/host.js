@@ -148,6 +148,23 @@ function sock_recv_bytes(socket, max, k) {
 }
 
 // the next n bytes of the socket appended to the file at path
+// A body that would leave the disk with less than this free is refused
+// (ENOSPC) before any of it is written: a large upload must not fill the
+// disk the event log lives on.
+const SAVE_KEEP_FREE = 2 * 1024 * 1024 * 1024;
+// bytes a save takes in one go before it yields to the loop
+const SAVE_SLICE = 1048576;
+function save_room(fs, path, n) {
+  try {
+    if (typeof fs.statfsSync !== "function") return true;
+    const st = fs.statfsSync(require("path").dirname(path));
+    return Number(st.bavail) * Number(st.bsize) - n >= SAVE_KEEP_FREE;
+  } catch (_) {
+    return true;
+  }
+}
+globalThis.BP_SAVE = { room: save_room, slice: SAVE_SLICE };
+
 function sock_save(socket, path, n, k) {
   const sys = io_sys();
   const fs = require("fs");
@@ -155,13 +172,21 @@ function sock_save(socket, path, n, k) {
   const again = sys.mac ? 35 : 11;
   let left = Number(n);
   let out;
+  if (!save_room(fs, path, left)) return io_tup(socket, io_fail(28));
   try {
     out = fs.openSync(path, "a", 0o600);
   } catch (err) {
     return io_tup(socket, io_fail(host_errno(err)));
   }
+  let slice = 0;
   const go = () => {
+    slice = 0;
     while (left > 0) {
+      // a long body yields between slices, so the loop polls other sockets
+      if (slice >= SAVE_SLICE) {
+        io_park_on(undefined, false, k, go, performance.now());
+        return undefined;
+      }
       const got = host_read(socket, sys.ptr(b), Math.min(left, b.length));
       if (got < 0 && sys.errno() === again) {
         io_park_on(socket, false, k, go);
@@ -187,6 +212,7 @@ function sock_save(socket, path, n, k) {
         return io_tup(socket, io_fail(host_errno(err)));
       }
       left -= got;
+      slice += got;
     }
     fs.closeSync(out);
     return io_tup(socket, io_done({ $: "Unit" }));
@@ -259,6 +285,84 @@ function sock_send_file(socket, path, cap, k) {
   // Bun-loop handles are not POSIX descriptors (Windows has only handles).
   if (globalThis.BP_H?.is(socket)) return globalThis.BP_H.sendBytes(socket, bytes, k);
   return host_send(socket, bytes, k);
+}
+
+// Sock.send_path: len bytes of the file at path from start, read and sent a
+// piece (256 KiB) at a time, so a file of any size costs the hub one piece
+// of memory. A full socket parks until it drains; after each piece the
+// send also yields to the loop (a park on the clock alone, due at once), so
+// other sockets, the websocket heartbeat and timers run between pieces of a
+// big file even when the peer reads as fast as the disk (loopback). Works
+// on a Bun-loop handle (loop.js's BP_H) and on a descriptor alike.
+const SEND_PATH_PIECE = 262144;
+function sock_send_path(socket, path, start, len, k) {
+  const fs = require("fs");
+  const sys = io_sys();
+  const bp = globalThis.BP_H?.is(socket) ? globalThis.BP_H.get(socket) : null;
+  const again = sys.mac ? 35 : 11;
+  let fd = -1;
+  let pos = Number(start);
+  let left = Number(len);
+  try {
+    if (path.includes("\0")) throw { errno: 22 };
+    fd = fs.openSync(path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    if (!fs.fstatSync(fd).isFile()) throw { errno: 22 };
+  } catch (e) {
+    if (fd >= 0) try { fs.closeSync(fd); } catch {}
+    return io_tup(socket, io_fail(Math.abs(e.errno || 5)));
+  }
+  const end = (code) => {
+    try { fs.closeSync(fd); } catch {}
+    return io_tup(socket, code === 0 ? io_done({ $: "Unit" }) : io_fail(code));
+  };
+  // what one write answers: bytes taken, -1 a full socket, else -errno-2
+  const put = (b) => {
+    if (bp !== null) {
+      const n = bp.write(b);
+      if (n >= 0) return n;
+      return n === -globalThis.BP_H.EAGAIN ? -1 : n - 2;
+    }
+    const n = host_write(socket, sys.ptr(b), b.length);
+    if (n >= 0) return n;
+    const code = sys.errno();
+    return code === again ? -1 : -code - 2;
+  };
+  let piece = null;
+  let at = 0;
+  const go = () => {
+    for (;;) {
+      if (piece === null) {
+        if (left <= 0) return end(0);
+        const b = new Uint8Array(Math.min(left, SEND_PATH_PIECE));
+        let got;
+        try {
+          got = fs.readSync(fd, b, 0, b.length, pos);
+        } catch (e) {
+          return end(host_errno(e));
+        }
+        // the file shrank under us: what was promised cannot be sent
+        if (got <= 0) return end(5);
+        piece = got < b.length ? b.subarray(0, got) : b;
+        at = 0;
+      }
+      while (at < piece.length) {
+        const n = put(piece.subarray(at));
+        if (n === -1) {
+          io_park_on(socket, true, k, go, performance.now() + 1000);
+          return undefined;
+        }
+        if (n < 0) return end(-(n + 2));
+        at += n;
+      }
+      pos += piece.length;
+      left -= piece.length;
+      piece = null;
+      if (left <= 0) return end(0);
+      io_park_on(undefined, false, k, go, performance.now());
+      return undefined;
+    }
+  };
+  return go();
 }
 
 // Sock.send_until: a deadline renewed after every send that made progress;
@@ -1560,6 +1664,7 @@ io_eff(CID(Sock.recv_bytes), sock_recv_bytes);
 io_eff(CID(Sock.save), sock_save);
 io_eff(CID(Sock.send_bytes), sock_send_bytes);
 io_eff(CID(Sock.send_file), sock_send_file);
+io_eff(CID(Sock.send_path), sock_send_path);
 io_eff(CID(Sock.send_until), sock_send_until);
 io_eff(CID(Sock.send_cbor), sock_send_cbor);
 io_eff(CID(Json.cbor_frame), json_cbor_frame);

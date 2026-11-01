@@ -1989,6 +1989,7 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
     case 1n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.settle(lc), U.Settings.settle.note(lc, st), View.days.loc(lc, M.Setting.get(st, "settle.days", "3")))],
       [View.setrow(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],
       [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
+      [View.setrow(U.Files.set.label(), U.Files.set.note(st), View.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
       View.notify(lc, st),
       View.agy.rows(u, U.Fallbackv.rows(u)),
       View.agy.rows(u, U.Hookv.rows.loc(lc, u))])

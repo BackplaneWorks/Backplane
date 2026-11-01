@@ -189,6 +189,8 @@ def Img.ctype(+p: String) -> String:
 def Img.viewable(+p: String) -> Bool:
   Bool.or(Img.is_image(p), Bool.or(String.eq(FM.Fm.preview(p), "text"), Bool.and(Bool.or(String.starts_with(p, "/"), String.starts_with(p, "~/")), String.ends_with(String.to_lower(String.drop(p, Nat.sub(String.length(p), 4n))), ".pdf"))))
 
-# the largest image a hub serves (bytes)
+# the largest file a hub serves from /img (bytes): any it can stream, as
+# it sends a piece at a time from disk (server.bend's Img.*); 4000 MB, what
+# a U32 size holds (core/attach.bend's Att.ceiling)
 def Img.cap() -> U32:
-  12582912
+  4194304000

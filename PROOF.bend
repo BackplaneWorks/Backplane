@@ -14973,3 +14973,34 @@ def Laws.timeline_layout_list_same():
 # BEGIN page window counts (H)
 def Laws.view_window_newer_empty(index, th, ids): {==}
 # END page window counts (H)
+
+import ./src/core/range.bend as BRANGE
+
+def Laws.att_max_default(): {==}
+
+def Laws.att_max_reads(): {==}
+
+def Laws.att_max_ceiling(): {==}
+
+def Laws.att_max_floor(): {==}
+
+def Laws.att_max_junk(): {==}
+
+def Laws.att_message_holds_path(): {==}
+
+def Laws.range_whole(): {==}
+
+def Laws.range_span(): {==}
+
+def Laws.range_open(): {==}
+
+def Laws.range_tail(): {==}
+
+def Laws.range_clip(): {==}
+
+def Laws.range_past(): {==}
+
+def Laws.range_multi(): {==}
+
+def Laws.range_head_partial(): {==}
+# END large files

@@ -54,7 +54,7 @@ def Rvw.pull(+url: String, +thread: String, +root: String, +rel: String, +cache:
   do IO<String>:
     +n : String <- BN.Bn.random(4n)
     +tmp : String = cache ++ "/.farpart-" ++ n
-    r : BN.Resp <- Rvw.get(url, "/view/get" ++ Rvw.q(thread, root, rel), 120n, Nat.add(FV.Fv.cap(), 1048576n), tmp)
+    r : BN.Resp <- Rvw.get(url, "/view/get" ++ Rvw.q(thread, root, rel), FV.Fv.secs(), Nat.add(FV.Fv.cap(), 1048576n), tmp)
     FVS.Fvs.pull.kept(Nat.is_eq(FVS.Fvs.code(r), 200n), rel, tmp)
 
 def Rvw.lane(ls: List<&2, String>, +url: String, +thread: String, +root: String, +cache: String) -> IO(List<&2, String>):

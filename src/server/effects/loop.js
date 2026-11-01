@@ -715,6 +715,9 @@ function bp_send_list(socket, data, k, at) {
 // Effect files have separate scopes. Binary file delivery uses this shared
 // entry point instead of referring to the loop's private bp_send_with helper.
 BP_H.sendBytes = (socket, bytes, continuation) => bp_send_with(socket, bytes, continuation, null);
+// host.js's Sock.send_path writes to handles itself and needs the code a
+// full one answers
+BP_H.EAGAIN = BP_ERRNO.EAGAIN;
 
 // Base TCP/Socket/Listener: a handle here, a descriptor to the old twin
 function bp_base(old) {
@@ -789,13 +792,24 @@ function bp_sock_save(socket, path, n, k) {
   const b = new Uint8Array(65536);
   let left = Number(n);
   let out;
+  // host.js's rules: refuse a body that would leave under 2 GiB free, and
+  // yield to the loop after each slice (a fast peer never holds it)
+  const keep = globalThis.BP_SAVE;
+  if (keep !== undefined && !keep.room(fs, path, left)) return io_tup(socket, io_fail(BP_ERRNO.ENOSPC || 28));
+  const sliceMax = keep === undefined ? 1048576 : keep.slice;
   try {
     out = fs.openSync(path, "a", 0o600);
   } catch (e) {
     return io_tup(socket, io_fail(bp_errno(e)));
   }
+  let slice = 0;
   const go = () => {
+    slice = 0;
     while (left > 0) {
+      if (slice >= sliceMax) {
+        io_park_on(undefined, false, k, go, performance.now());
+        return undefined;
+      }
       const got = h === undefined ? -BP_ERRNO.EBADF
         : h.read(b.subarray(0, Math.min(left, b.length)));
       if (got === -BP_ERRNO.EAGAIN) {
@@ -806,8 +820,15 @@ function bp_sock_save(socket, path, n, k) {
         fs.closeSync(out);
         return io_tup(socket, io_fail(got === 0 ? BP_ERRNO.EPIPE : -got));
       }
-      fs.writeSync(out, b.subarray(0, got));
+      try {
+        let at = 0;
+        while (at < got) at += fs.writeSync(out, b.subarray(at, got));
+      } catch (e) {
+        try { fs.closeSync(out); } catch (_) {}
+        return io_tup(socket, io_fail(bp_errno(e)));
+      }
       left -= got;
+      slice += got;
     }
     fs.closeSync(out);
     return io_tup(socket, io_done({ $: "Unit" }));

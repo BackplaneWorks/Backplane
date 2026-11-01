@@ -89,16 +89,32 @@ def Fvs.field(ps: List<&2, String>, +i: Nat) -> String:
 def Fvs.nat(+s: String) -> Nat:
   Maybe.default(&2, Nat, Nat.read(String.trim(s)), 0n)
 
-def Fvs.sent(+path: String, +size: Nat, bs: List<&2, U32>) -> List<&2, U32>:
-  match bs:
-    case Nil{}:
-      Bool.pick(List<&2, U32>, Nat.is_eq(size, 0n), W.Http.response.c("200 OK", "application/octet-stream", Nil{}, "no-store", ""), W.Http.text("500 Internal Server Error", "could not read it"))
-    case b <> t:
-      W.Http.response.c("200 OK", "application/octet-stream", b <> t, "no-store", "")
+# A file to stream rather than bytes: the answer is a mark, a 0 byte (no
+# HTTP response starts with one) then "<size>\t<path>", which the
+# connection (server.bend's Conn.bot.answer) turns into the head and the
+# file sent from disk a piece at a time (H.Sock.send_path). The bytes never
+# pass through a Bend list or the hub's memory.
+def Stream.mark(+size: Nat, +path: String) -> List<&2, U32>:
+  0 <> U.Utf8.encode(Nat.show(size) ++ "\t" ++ path)
+
+# a mark's size and path (its text after the 0 byte; a path may hold tabs)
+def Stream.size(+text: String) -> Nat:
+  Fvs.nat(Fvs.field(String.split(text, '\t'), 0n))
+
+def Stream.path(+text: String) -> String:
+  String.join(List.drop(&2, String, String.split(text, '\t'), 1n), "\t")
+
+def Fvs.get.read.k(big: Bool, empty: Bool, +size: Nat, +path: String) -> IO(List<&2, U32>):
+  match big empty:
+    case True{} _:
+      IO.pure(List<&2, U32>, W.Http.text("413 Payload Too Large", "too large to send"))
+    case False{} True{}:
+      IO.pure(List<&2, U32>, W.Http.response.c("200 OK", "application/octet-stream", Nil{}, "no-store", ""))
+    case False{} False{}:
+      IO.pure(List<&2, U32>, Stream.mark(size, path))
 
 def Fvs.get.read(+size: Nat, +path: String) -> IO(List<&2, U32>):
-  Bool.pick(IO(List<&2, U32>), Nat.is_gt(size, FV.Fv.cap()), IO.pure(List<&2, U32>, W.Http.text("413 Payload Too Large", "too large to send")),
-    IO.bind(List<&2, U32>, List<&2, U32>, BN.Bf.read(path), bs => IO.pure(List<&2, U32>, Fvs.sent(path, size, bs))))
+  Fvs.get.read.k(Nat.is_gt(size, FV.Fv.cap()), Nat.is_eq(size, 0n), size, path)
 
 def Fvs.get.done(r: P.Ran) -> IO(List<&2, U32>):
   match r:
@@ -209,7 +225,7 @@ def Fvs.pull(+home: String, +link: String, +url: String, +thread: String, +rel: 
   do IO<String>:
     +n : String <- BN.Bn.random(4n)
     +tmp : String = cache ++ "/.farpart-" ++ n
-    r : BN.Resp <- Fvs.call(home, link, url, "view.get", [J.KV{"thread", J.Str{thread}}, J.KV{"path", J.Str{rel}}], tmp, 120n, Nat.add(FV.Fv.cap(), 1048576n))
+    r : BN.Resp <- Fvs.call(home, link, url, "view.get", [J.KV{"thread", J.Str{thread}}, J.KV{"path", J.Str{rel}}], tmp, FV.Fv.secs(), Nat.add(FV.Fv.cap(), 1048576n))
     Fvs.pull.kept(Nat.is_eq(Fvs.code(r), 200n), rel, tmp)
 
 def Fvs.pair.k(blank: Bool, +p: String, rest: List<&2, String>) -> List<&2, String>:
