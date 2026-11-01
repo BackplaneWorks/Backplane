@@ -11422,6 +11422,15 @@ def Laws.bd_on_sheet():
 def Laws.bd_off_other():
   {==}
 
+def Laws.bd_cur_exact_board():
+  {==}
+
+def Laws.bd_cur_exact_sheet():
+  {==}
+
+def Laws.bd_cur_sheet_anchor():
+  {==}
+
 def Laws.bd_keep_schematic():
   {==}
 

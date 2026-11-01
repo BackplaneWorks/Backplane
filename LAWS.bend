@@ -9655,6 +9655,15 @@ law bd_on_sheet:
 law bd_off_other:
   {U.Bd.on("/p/boards/b/b.kicad_pcb", "boards/a/a.kicad_pcb") == False{} : Bool}
 
+law bd_cur_exact_board:
+  {U.Bd.cur(["boards/a.kicad_pcb", "boards/b.kicad_pcb"], "/p/boards/b.kicad_pcb") == "boards/b.kicad_pcb" : String}
+
+law bd_cur_exact_sheet:
+  {U.Bd.cur(["boards/a.kicad_pcb", "boards/b.kicad_pcb"], "/p/boards/b.kicad_sch") == "boards/b.kicad_pcb" : String}
+
+law bd_cur_sheet_anchor:
+  {U.Bd.cur.at(["boards/a.kicad_pcb", "boards/b.kicad_pcb"], "/p/boards/power.kicad_sch", "/p/boards/b.kicad_pcb") == "boards/b.kicad_pcb" : String}
+
 # another tab stays on the board picked (its schematic beside it); with
 # none picked, the project's own
 law bd_keep_schematic:

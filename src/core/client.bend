@@ -6013,12 +6013,38 @@ def Bd.on(+path: String, +rel: String) -> Bool:
 # none), and what another tab shows of it (Bd.keep: switching between
 # Board, Schematic and 3D stays on the board picked; "" when the project
 # has one board or the viewer is on none of them, for the project's own)
-def Bd.cur(fs: List<&2, String>, +path: String) -> String:
+def Bd.near(fs: List<&2, String>, +path: String) -> String:
   match fs:
     case Nil{}:
       ""
     case +f <> t:
-      Bool.pick(String, Bd.on(path, f), f, Bd.cur(t, path))
+      Bool.pick(String, Bd.on(path, f), f, Bd.near(t, path))
+
+# Several boards may share a folder. Their own PCB and root sheet identify
+# them before a sub-sheet's folder is used as a fallback.
+def Bd.exact.on(+path: String, +rel: String) -> Bool:
+  Bool.or(String.eq(path, rel), String.ends_with(path, "/" ++ rel))
+
+def Bd.exact(fs: List<&2, String>, +path: String) -> String:
+  match fs:
+    case Nil{}: ""
+    case +f <> t:
+      Bool.pick(String, Bool.or(Bd.exact.on(path, f), Bd.exact.on(path, Bd.path("schematic", f))), f, Bd.exact(t, path))
+
+def Bd.cur(+fs: List<&2, String>, +path: String) -> String:
+  +file = HI.Hist.family(path)
+  +exact = Bd.exact(fs, file)
+  Bool.pick(String, String.is_empty(exact), Bd.near(fs, file), exact)
+
+# A sub-sheet beside several boards keeps the one already picked. Opening
+# another board or root sheet still takes its exact identity first.
+def Bd.cur.at(+fs: List<&2, String>, +path: String, +anchor: String) -> String:
+  +file = HI.Hist.family(path)
+  +saved = HI.Hist.family(anchor)
+  +exact = Bd.exact(fs, file)
+  +held = Bd.exact(fs, saved)
+  Bool.pick(String, String.is_empty(exact),
+    Bool.pick(String, Bool.and(String.ends_with(file, ".kicad_sch"), Bool.and(Bool.not(String.is_empty(held)), String.eq(MC.Mech.parent(file), MC.Mech.parent(saved)))), held, Bd.near(fs, file)), exact)
 
 def Bd.keep.k(+cur: String, +kind: String, +root: String) -> String:
   Bool.pick(String, Bool.and(Bool.not(String.is_empty(cur)), Bool.or(Bool.or(String.eq(kind, "board"), String.eq(kind, "split")), Bool.or(String.eq(kind, "schematic"), String.eq(kind, "3d")))),
@@ -6038,7 +6064,7 @@ def Bd.tree.saved(+root: String, +tree: String) -> String:
     Bool.and(String.ends_with(tree, ".kicad_sch"), FM.Fm.safe(String.drop(tree, 1n+String.length(root)))))), tree, "")
 
 def Bd.keep(+u: Ui, +kind: String, +path: String) -> String:
-  +kept = Bd.keep.k(Bool.pick(String, Bd.many(u), Bd.cur(Bd.files(u), path), ""), kind, Ui.root(u))
+  +kept = Bd.keep.k(Bool.pick(String, Bd.many(u), Bd.cur.at(Bd.files(u), path, Ui.view_get(u, "view.design")), ""), kind, Ui.root(u))
   Bool.pick(String, String.is_empty(kept), Bool.pick(String, String.eq(kind, "schematic"), Bd.tree.saved(Ui.root(u), Ui.view_get(u, "view.tree")), Bd.anchor(kind, Ui.view_get(u, "view.design"))), kept)
 
 def Bd.or(+a: String, +b: String) -> String:
@@ -6074,7 +6100,7 @@ def Bd.id.k(+root: String, +board: String, +tree: String, +known: String) -> Str
     String.drop(board, 1n+String.length(root)), known)
 
 def Bd.id(+u: Ui) -> String:
-  Bd.id.k(Ui.root(u), Ui.view_get(u, "view.design"), Bd.tree.saved(Ui.root(u), Ui.view_get(u, "view.tree")), Bd.cur(Bd.files(u), Bd.shown(u, Bd.context(u))))
+  Bd.id.k(Ui.root(u), Ui.view_get(u, "view.design"), Bd.tree.saved(Ui.root(u), Ui.view_get(u, "view.tree")), Bd.cur.at(Bd.files(u), Bd.shown(u, Bd.context(u)), Ui.view_get(u, "view.design")))
 
 # The card is asked again only when the thread or its turn moves on (Fab.sync),
 # so a board added or removed meanwhile never reached the picker. Each time

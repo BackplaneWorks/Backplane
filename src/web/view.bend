@@ -3729,7 +3729,8 @@ def View.board.current.go(fs: List<&2, String>, +path: String, +all: List<&2, St
     case +f <> t: Bool.pick(String, View.board.near(path, f), f, View.board.current.go(t, path, all))
 
 def View.board.current(+fs: List<&2, String>, +path: String) -> String:
-  View.board.current.go(fs, path, fs)
+  +exact = U.Bd.exact(fs, path)
+  Bool.pick(String, String.is_empty(exact), View.board.current.go(fs, path, fs), exact)
 
 def View.board.rows(fs: List<&2, String>, +cur: String, +own: String, +seen: List<&2, String>) -> List<&2, D.Node>:
   match fs:
@@ -3772,7 +3773,7 @@ def View.board.legacy(fs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
 
 def View.boards.for(rail: Bool, +u: U.Ui, +what: String) -> List<&2, D.Node>:
   match rail:
-    case True{}: View.boards.selector(U.Bd.files(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path")), U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), U.Ui.root(u))
+    case True{}: View.boards.selector(U.Bd.files(u), U.Bd.or(U.Bd.id(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), U.Ui.root(u))
     case False{}:
       Bool.pick(List<&2, D.Node>, U.Bd.many(u), View.board.legacy(U.Bd.files(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), [D.Dom.span("what", what)])
 
