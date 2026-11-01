@@ -855,27 +855,49 @@ def Plane.hot.ids(ids: List<&2, String>, m: Map<&2, Bool>) -> Map<&2, Bool>:
     case +i <> t:
       Plane.hot.ids(t, Plane.hot.put(i, m))
 
-def Plane.hot.signals(xs: List<&2, String>, m: Map<&2, Bool>) -> Map<&2, Bool>:
-  match xs:
-    case Nil{}: m
-    case +k <> rest:
-      Plane.hot.signals(rest, Plane.hot.put(Bool.pick(String, String.starts_with(k, "@signal:"), String.drop(k, 8n), k), m))
+def Plane.hot.get(r: Map<&2, Bool> & Bool) -> Bool:
+  (_, b) = r
+  b
 
-def Plane.hot.sx(ix: U.SIx, m: Map<&2, Bool>) -> Map<&2, Bool>:
+def Plane.hot.has(m: Map<&2, Bool>, +id: String) -> Bool:
+  Plane.hot.get(Map.get(Bool, False{}, m, id))
+
+def Plane.has.asks(r: Map<&2, List<&2, M.Ask>> & Bool) -> Bool:
+  (_, b) = r
+  b
+
+def Plane.has.nat(r: Map<&2, Nat> & Bool) -> Bool:
+  (_, b) = r
+  b
+
+# a key of the signal index's work map names the thread: "@signal:<id>",
+# or the id itself when it is not such a key
+def Plane.hot.work(+wk: Map<&2, Nat>, +id: String) -> Bool:
+  Bool.or(Plane.has.nat(Map.has(&2, Nat, wk, SG.Signal.key(id))),
+    Bool.and(Bool.not(String.starts_with(id, "@signal:")), Plane.has.nat(Map.has(&2, Nat, wk, id))))
+
+# whether the signal index names the thread: an open ask, a child task, a
+# signal or work row (the keys Plane.hot once put in its map, one by one)
+def Plane.hot.ix(ix: U.SIx, +id: String) -> Bool:
   match ix:
     case U.SIx{_, +as, +ks, +wk}:
-      Plane.hot.ids(Map.keys(&2, List<&2, M.Ask>, as), Plane.hot.ids(Map.keys(&2, Nat, ks), Plane.hot.signals(Map.keys(&2, Nat, wk), m)))
+      Bool.or(Plane.has.asks(Map.has(&2, List<&2, M.Ask>, as, id)), Bool.or(Plane.has.nat(Map.has(&2, Nat, ks, id)), Plane.hot.work(wk, id)))
 
-def Plane.hot.stalled(keys: List<&2, String>, +st: M.State, +m: Map<&2, Bool>) -> Map<&2, Bool>:
-  match keys:
-    case Nil{}: m
-    case +key <> rest:
-      +id = String.drop(key, 9n)
-      Plane.hot.stalled(rest, st, Bool.pick(Map<&2, Bool>, SG.Signal.display.stalled(st, id), Plane.hot.put(id, m), m))
-
-# the ids that can be need or run beyond what a thread's own turn and pending say
+# the ids that can be need or run beyond what a thread's own turn and
+# pending say: those with a queued message here (Plane.hot.is adds the
+# signal index and a stalled liveness, asked of each thread walked: the
+# whole index and every liveness setting, read on each render, were most
+# of a sidebar's time on a long-lived hub)
 def Plane.hot(+st: M.State, ix: U.SIx) -> Map<&2, Bool>:
-  Plane.hot.sx(ix, Plane.hot.stalled(M.Setting.keys.pre(st, "liveness."), st, Plane.hot.ids(M.Queue.threads(st), Map.new(&2, Bool))))
+  Plane.hot.ids(M.Queue.threads(st), Map.new(&2, Bool))
+
+def Plane.hot.is.k(queued: Bool, +st: M.State, +ix: U.SIx, +id: String) -> Bool:
+  match queued:
+    case True{}: True{}
+    case False{}: Bool.or(Plane.hot.ix(ix, id), SG.Signal.display.stalled(st, id))
+
+def Plane.hot.is(m: Map<&2, Bool>, +st: M.State, +ix: U.SIx, +id: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(id)), Plane.hot.is.k(Plane.hot.has(m, id), st, ix, id))
 
 def Plane.turn.hot(t: M.TurnState) -> Bool:
   match t:
@@ -886,25 +908,18 @@ def Plane.turn.hot(t: M.TurnState) -> Bool:
     case _:
       False{}
 
-def Plane.hot.get(r: Map<&2, Bool> & Bool) -> Bool:
-  (_, b) = r
-  b
-
-def Plane.hot.has(m: Map<&2, Bool>, +id: String) -> Bool:
-  Plane.hot.get(Map.get(Bool, False{}, m, id))
-
-def Plane.maybe.k(own: Bool, m: Map<&2, Bool>, +id: String) -> Bool:
+def Plane.maybe.k(own: Bool, m: Map<&2, Bool>, +st: M.State, +ix: U.SIx, +id: String) -> Bool:
   match own:
     case True{}:
       True{}
     case False{}:
-      Plane.hot.has(m, id)
+      Plane.hot.is(m, st, ix, id)
 
 # whether a thread can be need or run (its phase is worked out only then)
-def Plane.maybe(t: M.Thread, m: Map<&2, Bool>) -> Bool:
+def Plane.maybe(t: M.Thread, m: Map<&2, Bool>, +st: M.State, +ix: U.SIx) -> Bool:
   match t:
     case M.Thread{+id, _, _, _, _, +turn, +pending, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      Plane.maybe.k(Bool.or(Plane.turn.hot(turn), Nat.is_gt(pending, 0n)), m, id)
+      Plane.maybe.k(Bool.or(Plane.turn.hot(turn), Nat.is_gt(pending, 0n)), m, st, ix, id)
 
 def Plane.tally.t(r: Bool, +t: M.Thread, +ix: U.SIx, +st: M.State, acc: PTally) -> PTally:
   match r:
@@ -918,7 +933,7 @@ def Plane.tally.ts(ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +m: Map<&2,
     case Nil{}:
       acc
     case +t <> r:
-      Plane.tally.ts(r, ix, st, m, Plane.tally.t(Plane.maybe(t, m), t, ix, st, acc))
+      Plane.tally.ts(r, ix, st, m, Plane.tally.t(Plane.maybe(t, m, st, ix), t, ix, st, acc))
 
 # the live shelves of every project, as Active.gather walks them
 def Plane.tally.rows(rs: List<&2, U.SRow>, +ix: U.SIx, +st: M.State, +m: Map<&2, Bool>, acc: PTally) -> PTally:
@@ -967,6 +982,17 @@ def Plane.demo.rich() -> U.Ui:
     M.ThreadCreated{"bt1", "", "Kit", M.Local{}, "", "", "claude", "", 100n}, M.BotSet{"b1", "Kit", "bt1", 7n, "", 100n}, M.TurnChanged{"bt1", M.Running{}, 199900n},
     M.ThreadCreated{"bt2", "", "Pip", M.Local{}, "", "", "claude", "", 101n}, M.BotSet{"b2", "Pip", "bt2", 8n, "", 101n}, M.AskOpened{"a3", "bt2", "approval", "Bash", "ls", "", 199901n}], M.State.empty()))
 
+# the rich client with a thread whose liveness says it stalled (t14, live),
+# one whose liveness says it did not (t15), and a stalled one long quiet
+# (t12, not on a live shelf)
+def Plane.demo.stalled() -> U.Ui:
+  U.Ui.far.st(U.Ui.init(200000n), M.State.replay([M.ThreadCreated{"t14", "p1", "N", M.Local{}, "", "", "claude", "", 199600n},
+    M.SettingSet{"liveness.t14", "{\"last\":199600,\"nudged\":199700,\"stalled\":true,\"reported\":false,\"reason\":\"turn or owned work\"}", 199700n},
+    M.ThreadCreated{"t15", "p1", "O", M.Local{}, "", "", "claude", "", 199610n},
+    M.SettingSet{"liveness.t15", "{\"last\":199610,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"turn or owned work\"}", 199700n},
+    M.SettingSet{"liveness.t12", "{\"last\":100,\"nudged\":200,\"stalled\":true,\"reported\":false,\"reason\":\"turn or owned work\"}", 199700n}],
+    U.Ui.state(Plane.demo.rich())))
+
 # the count made without rows is the count of the plane
 def Plane.tally.same(+u: U.Ui, +now: Nat) -> Bool:
   String.eq(Plane.counts.t(U.Lang.loc(u), Plane.tally(u, U.Side.ix(U.Ui.state(u)), U.Side.rows.ix(U.Ui.state(u), U.Side.ix(U.Ui.state(u)), now))), Plane.counts(U.Lang.loc(u), Plane.of(u, now)))
@@ -977,6 +1003,13 @@ def Plane.tally.words.ix(+u: U.Ui, +ix: U.SIx, +now: Nat) -> String:
 
 def Plane.tally.words(+u: U.Ui, +now: Nat) -> String:
   Plane.tally.words.ix(u, U.Side.ix(U.Ui.state(u)), now)
+
+# the count from the sidebar's rows with a project held live (Side.rows.ix.at,
+# what the web's sidebar draws) is the count from Side.rows.ix: the same
+# rows in another order (web/bots.bend's WB.uber.rows)
+def Plane.tally.at.same(+u: U.Ui, +now: Nat, +cur: String) -> Bool:
+  String.eq(Plane.counts.t(U.Lang.loc(u), Plane.tally(u, U.Side.ix(U.Ui.state(u)), U.Side.rows.ix.at(U.Ui.state(u), U.Side.ix(U.Ui.state(u)), now, cur))),
+    Plane.tally.words(u, now))
 
 # The plane as text
 # -----------------
@@ -1175,7 +1208,7 @@ def Plane.list.ts(ts: List<&2, M.Thread>, +pt: String, +ix: U.SIx, +st: M.State,
     case Nil{}:
       rest
     case +t <> r:
-      Plane.list.keep(Plane.maybe(t, m), t, pt, ix, st, u, Plane.list.ts(r, pt, ix, st, m, u, rest))
+      Plane.list.keep(Plane.maybe(t, m, st, ix), t, pt, ix, st, u, Plane.list.ts(r, pt, ix, st, m, u, rest))
 
 def Plane.list.rows(rs: List<&2, U.SRow>, +ix: U.SIx, +st: M.State, +m: Map<&2, Bool>, +u: U.Ui) -> List<&2, PRow>:
   match rs:

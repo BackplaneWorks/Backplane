@@ -2268,12 +2268,21 @@ def Side.rows.go(ps: List<&2, M.Project>, +st: M.State, +ts: List<&2, M.Thread>,
     case M.Project{+id, ti, r, +c, +rm} <> t:
       Side.rows.k(st, rm, M.Project{id, ti, r, c, rm}, M.Thread.filter_project(ts, id), c, navs, now, M.Nav.project_key(navs, id), Side.rows.go(t, st, ts, navs, now))
 
-def Side.rows.go.ix(ps: List<&2, M.Project>, +st: M.State, +ix: SIx, +navs: Map<&2, M.Nav>, +now: Nat) -> List<&2, PSlot>:
+# (kids: the threads that name a parent, ST.Tree.kids, read once)
+def Side.rows.k.at(+st: M.State, +kids: Map<&2, Bool>, removed: Bool, p: M.Project, +mine: List<&2, M.Thread>, +c: Nat, +navs: Map<&2, M.Nav>, +now: Nat, +key: String, rest: List<&2, PSlot>) -> List<&2, PSlot>:
+  match removed:
+    case True{}:
+      rest
+    case False{}:
+      PSlot{M.Key.read(key), SRow{Side.latest(mine, c), p, ST.Tree.shelves.at(st, kids, M.Sidebar.at(mine, navs, now))}} <> rest
+
+def Side.rows.go.ix(ps: List<&2, M.Project>, +st: M.State, +ix: SIx, +kids: Map<&2, Bool>, +navs: Map<&2, M.Nav>, +now: Nat) -> List<&2, PSlot>:
   match ps:
     case Nil{}:
       Nil{}
     case M.Project{+id, ti, r, +c, +rm} <> t:
-      Side.rows.k(st, rm, M.Project{id, ti, r, c, rm}, SIx.mine(ix, id), c, navs, now, M.Nav.project_key(navs, id), Side.rows.go.ix(t, st, ix, navs, now))
+      Side.rows.k.at(st, kids, rm, M.Project{id, ti, r, c, rm}, SIx.mine(ix, id), c, navs, now, M.Nav.project_key(navs, id), Side.rows.go.ix(t, st, ix, kids, navs, now))
+
 
 # the projects the sidebar lists: all but those of a machine sync is off
 # with (only a project elsewhere is asked)
@@ -2308,7 +2317,7 @@ def Side.projs(+s: M.State) -> List<&2, M.Project>:
 
 # Side.sorted from the index
 def Side.sorted.ix(+st: M.State, +ix: SIx, +now: Nat) -> List<&2, SRow>:
-  PSlot.rows(List.sort(~PSlot, ~PSlot.before, Side.rows.go.ix(Side.projs(st), st, ix, M.State.navs(st), now)))
+  PSlot.rows(List.sort(~PSlot, ~PSlot.before, Side.rows.go.ix(Side.projs(st), st, ix, ST.Tree.kids(st), M.State.navs(st), now)))
 
 # the projects by order key, then creation time and ID, their threads on
 # shelves (delegated child threads live under their parent instead)
@@ -3971,6 +3980,14 @@ def Side.demo() -> M.State:
 # the same with background rows on t1 (two) and watched work on t4
 def Side.demo.work() -> M.State:
   M.State.replay([M.SettingSet{"bg.t1", "k1\tsleeping", 20n}, M.SettingSet{"watch.t1", "w1\twatching", 21n}, M.SettingSet{"watch.t4", "w2\tx", 22n}], Side.demo())
+
+# the same with a subthread in One (t2 under t1), an invalid cross-project
+# link (t4 in Two naming t1), and a third project none of whose threads
+# names a parent
+def Side.demo.tree() -> M.State:
+  M.State.replay([M.SettingSet{"thread.parent.t2", "t1", 20n}, M.SettingSet{"thread.parent.t4", "t1", 21n},
+    M.ProjectCreated{"p3", "Three", "/c", 22n}, M.ThreadCreated{"t6", "p3", "F", M.Local{}, "", "", "claude", "", 23n},
+    M.ThreadCreated{"t7", "p3", "G", M.Local{}, "", "", "claude", "", 24n}, M.TurnChanged{"t7", M.Running{}, 25n}], Side.demo())
 
 def Side.phases(ts: List<&2, M.Thread>, +st: M.State) -> List<&2, M.Phase>:
   match ts:
