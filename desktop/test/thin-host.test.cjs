@@ -933,3 +933,21 @@ test('waiting history controls keep Stop urgent and leave other action ordering 
  assert.equal(f.sent.at(-1).p.action,'stop');
  const g=await fixture();g.open();g.host.update();g.host.request('flag','settings');assert.equal(g.sent.at(-1).p.action,'flag');
 });
+test('a reply whose delta changed nothing draws nothing, and its session and commands still apply',async()=>{
+ const details=[];let decoded=0;
+ const f=await fixture({decode:n=>{decoded++;return n;},sessionChanged:(s,d)=>details.push({s,d})});
+ f.open();assert.equal(f.views.length,1);const decodedOpen=decoded;
+ // the order card's look: an action whose reply's view delta has no ops
+ const reply=f.host.client.reply.bind(f.host.client);
+ f.host.client.reply=(hub,e)=>{const r=reply(hub,e);if(r&&e.noop)r.unchanged=true;return r;};
+ f.host.request('fab-look','');const req=f.sent.at(-1);assert.equal(req.m,'view.action');
+ const r=f.reply(req,{session:{...structuredClone(req.p.session),drafts:{...req.p.session.drafts,'@fab':'looked'}},cmds:[{type:'keep',thread:'A',text:'kept'}]});
+ f.host.receive({...r,noop:true});
+ assert.equal(f.views.length,1,'no view drawn for it');
+ assert.equal(decoded,decodedOpen,'its picture is not decoded again');
+ assert.equal(f.host.session.drafts['@fab'],'looked','its session applies');
+ assert.equal(details.at(-1).d.unchanged,true,'the host is told nothing on show changed (host.js draws nothing)');
+ assert.equal(f.host.ready,true);
+ // a whole reply after it still draws
+ f.host.update();f.host.receive(f.reply(f.sent.at(-1)));assert.equal(f.views.length,2);
+});

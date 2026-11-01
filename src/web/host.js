@@ -3019,7 +3019,8 @@ async function startThin(again = false, reason = "initial") {
         }
         if (selectedChanged) deskCheck();
         // (a page's reply: its view decides what is drawn, historyRegion)
-        if (!detail?.inputOnly && !detail?.paged) later();
+        // (a reply that changed nothing on show draws nothing: thin-host's same)
+        if (!detail?.inputOnly && !detail?.paged && !detail?.unchanged) later();
         if (RR) RR.t("land.session", pnow() - sc0);
       },
       ack: (session, reply) => preservePresentationRoute(session, Wire.plain(App.presentation_reply(presentationJson(session), presentationJson(reply)))),
