@@ -12319,14 +12319,16 @@ def Hub.thin.native_fit.start(+acted: TA.Acted, h: Hub, +client: U32, +o: J.Json
   Hub.thin.native_fit.loop(8n, Nat.is_le(J.Json.bytes(Hub.thin.native_fit.envelope(o, TA.Rendered.result(trial), context, version)), 262144n), trial,
     acted, h, client, o, c, now, context, p, key, ms, shown, index, epoch, rows, stream, revision, version)
 
-# Fit the COMPLETE logical picture as well as its encoded region reply.
+# Fit the COMPLETE logical picture as well as its encoded region reply
+# (for a client that takes the view delta, without its own long draft,
+# which it is never sent back: thin-view-delta.bend's Vd.measured).
 # A small wire sidebar reference cannot conceal an oversized restored tree.
 # Reserve 32 KiB for the largest escaped 4 KiB live splice and its metadata;
 # the existing 262144-byte transport cap stays mandatory and unchanged.
 def Hub.thin.web_fit.answer(+st: M.State, +revision: Nat, +c: Client, +o: J.Json, +context: ThinContext, result: J.Json) -> J.Json:
   +p = J.Json.get_obj(o, "p")
   J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"ok", J.Flag{True{}}},
-    J.KV{"result", Hub.thin.result(AccountsRpc.picture(Client.accounts(c), st, J.Json.get_obj(p, "target"), result), p, ThinContext.view(context), "web", revision)}])
+    J.KV{"result", Hub.thin.result(AccountsRpc.picture(Client.accounts(c), st, J.Json.get_obj(p, "target"), TVD.Vd.measured(p, result)), p, ThinContext.view(context), "web", revision)}])
 
 def Hub.thin.web_fit.region(output: TSW.Output, st: M.State, revision: Nat, c: Client, o: J.Json, context: ThinContext) -> Bool:
   match output:

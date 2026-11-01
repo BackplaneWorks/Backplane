@@ -81,11 +81,26 @@ export function deltaPicture(r, input, bases) {
     if (d.base !== '' || !Object.hasOwn(r, 'shown')) throw Error('Invalid whole view');
     return { result: rest, token: d.token, body: bodyOf(rest) };
   }
-  if (d.base !== input.viewDelta.token || !bases?.map.has(d.base) || FIELDS.some(k => Object.hasOwn(r, k))) throw Error('Unacknowledged view delta');
-  const session = input.session, draft = session && typeof session.sel === 'string' && session.drafts ? session.drafts[session.sel] : null;
-  const body = applyViewDelta(bases.map.get(d.base), d.ops, typeof draft === 'string' ? draft : null);
+  // ops with no base make the body from nothing (a whole body whose long
+  // draft goes by reference: the first op sets it all)
+  const fresh = d.base === '';
+  if (FIELDS.some(k => Object.hasOwn(r, k)) || (fresh ? !(Array.isArray(d.ops) && d.ops[0]?.[0] === 's' && Array.isArray(d.ops[0][1]) && d.ops[0][1].length === 0)
+      : d.base !== input.viewDelta.token || !bases?.map.has(d.base))) throw Error('Unacknowledged view delta');
+  const draft = deltaDraft(input);
+  const body = applyViewDelta(fresh ? null : bases.map.get(d.base), d.ops, draft);
   if (!object(body) || !Object.hasOwn(body, 'shown')) throw Error('Invalid view delta body');
   return { result: { ...rest, ...body }, token: d.token, body };
+}
+// the selected thread's draft a request carried
+export function deltaDraft(input) {
+  const session = input?.session, draft = session && typeof session.sel === 'string' && session.drafts ? session.drafts[session.sel] : null;
+  return typeof draft === 'string' ? draft : null;
+}
+// a reply's size as the limit counts it: the client's own long draft, put
+// back from its request, is not on the wire and is not counted
+export function deltaBytes(r, draft, bytes) {
+  const long = typeof draft === 'string' && draft.length >= 1024;
+  return bytes(JSON.stringify(r, long ? (_k, v) => v === draft ? '' : v : undefined));
 }
 export function deltaKeep(bases, picture) {
   bases.map.set(picture.token, picture.body);bases.newest = picture.token;
