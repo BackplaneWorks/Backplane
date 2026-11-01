@@ -12905,12 +12905,12 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth}, managed, link, freecad, ks}, telemetry, views, accounts}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth}, managed, link, freecad, ks}, telemetry, views, accounts}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts}:
       {==}
 
 # ---- native phone i18n ----
@@ -14826,3 +14826,33 @@ def Laws.pace_live_other(): {==}
 def Laws.pace_live_none(): {==}
 def Laws.pace_live_committed_still(): {==}
 # END view step 2 (H)
+
+# ---- disk-full ----
+def Laws.dq_keeps_order():
+  {==}
+
+def Laws.dq_counts():
+  {==}
+
+def Laws.dq_room():
+  {==}
+
+def Laws.dq_full_soft():
+  {==}
+
+def Laws.dq_backoff():
+  {==}
+
+def Laws.dq_due():
+  {==}
+
+def Laws.dq_no_external_before_written():
+  {==}
+
+def Laws.dq_held_in_order():
+  {==}
+
+def Laws.dq_changes_in_order():
+  {==}
+
+# ---- end disk-full ----

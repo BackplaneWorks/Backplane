@@ -37,6 +37,7 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+import ./src/core/diskq.bend as DQ
 
 import ./src/web/terminal-cells.bend as TCELL
 
@@ -14497,3 +14498,42 @@ law pace_live_none:
 law pace_live_committed_still:
   {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.add(TPR1.Touch.none(), TPR1.Touch.live("t1")), "t1"), "t2") == 1n : Nat}
 # END view step 2 (H)
+
+# ---- disk-full: steps kept while the log cannot be written ----
+# nothing taken is dropped, and a flush gives every line in its order
+law dq_keeps_order:
+  {DQ.Dq.out(DQ.Dq.demo()) == ["a", "b", "c"] : List<&2, String>}
+
+law dq_counts:
+  {DQ.Dq.n(DQ.Dq.demo()) == 3n : Nat}
+
+# a step fits while the queue has room, up to the hard bound and not past it
+law dq_room:
+  {[DQ.Dq.room(DQ.Dq.empty(), DQ.Dq.hard()), DQ.Dq.room(DQ.Dq.demo(), DQ.Dq.hard())] == [True{}, False{}] : List<&2, Bool>}
+
+# new turns are refused only from the soft bound on
+law dq_full_soft:
+  {[DQ.Dq.full(DQ.Dq.empty()), DQ.Dq.full(DQ.Dq.demo()), Nat.is_lt(DQ.Dq.soft(), DQ.Dq.hard())] == [False{}, False{}, True{}] : List<&2, Bool>}
+
+# the wait after each failure: 2, 4, 8, ... up to 60 s
+law dq_backoff:
+  {[DQ.Dq.backoff(0n), DQ.Dq.backoff(2n), DQ.Dq.backoff(16n), DQ.Dq.backoff(32n), DQ.Dq.backoff(60n)] == [2n, 4n, 32n, 60n, 60n] : List<&2, Nat>}
+
+# a flush is due once the wait has passed, and only with lines waiting
+law dq_due:
+  {[DQ.Dq.due(DQ.Dq.demo(), 101n), DQ.Dq.due(DQ.Dq.demo(), 102n), DQ.Dq.due(DQ.Dq.empty(), 500n)] == [False{}, True{}, False{}] : List<&2, Bool>}
+# a waiting step runs at once only what stays in the hub: no effect that acts
+# outside it (an agent started, a reply sent, a deploy) runs before the step
+# is written; those wait, in order, for its flush
+law dq_no_external_before_written:
+  {DQ.Dq.split(DQ.Dq.demo.outs()) == ([H.Send{1, "x"}, H.Live{"t1", "d"}], [H.AgentStart{"t1", "/w", "claude", "", "", M.FullAccess{}, M.DefaultMode{}}, H.BotReply{"t1", "to", "text", "done"}, H.DeployGo{""}]) : List<&2, H.Out> & List<&2, H.Out>}
+
+# what a flush runs after writing: the held effects of every waiting step, in
+# the order they were held
+law dq_held_in_order:
+  {DQ.Dq.held(DQ.Dq.push(DQ.Dq.demo.step(M.State.empty(), ["a"], [H.DeployGo{"1"}]), M.State.empty(), 8n, ["b"], Nil{}, Nil{}, [H.DeployGo{"2"}, H.Restart{}])) == [H.DeployGo{"1"}, H.DeployGo{"2"}, H.Restart{}] : List<&2, H.Out>}
+# the changes a flush hands to the far push and the uberbot's sync are the
+# waiting steps' own, in their order
+law dq_changes_in_order:
+  {DQ.Dq.changes(DQ.Dq.push(DQ.Dq.push(DQ.Dq.empty(), M.State.empty(), 1n, ["a"], [M.SettingSet{"k", "1", 1n}], Nil{}, Nil{}), M.State.empty(), 2n, ["b", "c"], [M.SettingSet{"k", "2", 2n}, M.SettingSet{"k", "3", 3n}], Nil{}, Nil{})) == [M.SettingSet{"k", "1", 1n}, M.SettingSet{"k", "2", 2n}, M.SettingSet{"k", "3", 3n}] : List<&2, M.Change>}
+# ---- end disk-full ----
