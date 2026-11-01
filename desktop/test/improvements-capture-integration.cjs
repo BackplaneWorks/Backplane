@@ -10,7 +10,7 @@ const html=`<!doctype html><html><head><meta name="viewport" content="width=devi
 import {installImprovements} from '/src/web/improvements.js';import {captureApp} from '/src/web/improvements-capture.js';
 window.fixture={keys:[],calls:[],selected:[],failCapture:false,failStart:false,captures:0};
 const f=window.fixture;window.addEventListener('keydown',e=>f.keys.push({key:e.key,code:e.code,ctrl:e.ctrlKey,alt:e.altKey,meta:e.metaKey,composing:e.isComposing}),true);f.ui=installImprovements({identity:()=> 'fixture-authenticated-hub',ready:()=>true,
-context:()=>({project:'p',app:'Backplane fixture',view:'Thread',thread:'source',projects:[{id:'p',title:'Current project'},{id:'q',title:'Other project'}]}),
+context:()=>({project:'p',app:'Backplane fixture',view:'Thread',thread:'source',projects:[{id:'p',title:'Backplane',root:'/fixture/backplane-bend'},{id:'q',title:'Other project',root:'/fixture/other'}]}),
 rpc:{request:async(m,p)=>{f.calls.push({m,p});if(m==='thread.create')return{thread:'improvement-'+p.creationKey};if(m==='improvements.context')return{thread:p.sourceThread,accountBinding:''};if(f.failStart){f.failStart=false;throw Error('Connection changed. Reconnect, then press Send to retry the same request.');}return{ok:true};}},
 select:async thread=>{f.selected.push(thread);},beforeCapture:()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))),
 capture:async options=>{f.captures++;if(f.failCapture)throw Error('capture canceled');try{return await captureApp(options);}catch(e){f.captureError=e.message;throw e;}}});

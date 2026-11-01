@@ -1,6 +1,7 @@
 import { captureApp } from './improvements-capture.js';
 import { ImprovementsStore } from './improvements-store.js';
 import { ImprovementsFlow, improvementThread } from './improvements-flow.js';
+import { backplaneProject } from './improvements-context.js';
 
 export function improvementsShortcut(event, platform = '') {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.getModifierState?.('AltGraph') || event.shiftKey) return false;
@@ -20,7 +21,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   capture = captureApp, store = new ImprovementsStore(), doc = document, win = window } = {}) {
   let draft, scope, opening = false, busy = false, capturing = false, previousFocus, previousRange, url, operation = 0, pos = null;
   let saving = Promise.resolve();
-  let captureController;
+  let captureController, openEpoch = 0, projects = [];
   const chord = improvementsChord(win.navigator.platform);
   const el = (tag, text, attrs = {}) => { const n = doc.createElement(tag);if (text) n.textContent = text;for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);return n; };
   const popup = el('section', '', { class: 'improvements', role: 'dialog', 'aria-labelledby': 'improvements-title', hidden: '' });
@@ -29,15 +30,16 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   const close = el('button', '×', { type: 'button', 'aria-label': 'Close Improvements' });header.append(close);
   const label = el('label', 'What would you like to improve?', { for: 'improvements-text' });
   const input = el('textarea', '', { id: 'improvements-text', rows: '5', placeholder: 'Describe the change…' });
-  const projectLabel = el('label', 'Project', { for: 'improvements-project' });
+  const projectLabel = el('label', 'Backplane source project', { for: 'improvements-project' });
   const project = el('select', '', { id: 'improvements-project' });
   const preview = el('img', '', { alt: 'App screenshot to send with this request', hidden: '' });
   const note = el('p', '', { role: 'status', 'aria-live': 'polite' });
+  const help = el('p', '', { id: 'improvements-help' });
   const buttons = el('footer');
   const again = el('button', 'Capture again', { type: 'button' }), choose = el('button', 'Choose image', { type: 'button' });
   const file = el('input', '', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: '' });
-  const send = el('button', 'Send', { type: 'button', class: 'primary' });buttons.append(again, choose, send);
-  popup.append(header, label, input, projectLabel, project, preview, note, buttons, file);doc.body.append(popup);
+  const send = el('button', 'Send', { type: 'button', class: 'primary', 'aria-describedby': 'improvements-help', 'aria-keyshortcuts': 'Control+Enter' });buttons.append(again, choose, send);
+  popup.append(header, label, input, projectLabel, project, preview, help, note, buttons, file);doc.body.append(popup);
   function announce(text) { note.textContent = text; }
   function viewport() { const v = win.visualViewport;return { x: v?.offsetLeft || 0, y: v?.offsetTop || 0, width: v?.width || win.innerWidth, height: v?.height || win.innerHeight }; }
   function place() {
@@ -58,8 +60,10 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     const locked = busy || !!draft?.message;
     input.disabled = !draft;input.readOnly = locked;project.disabled = !draft || locked || !!draft?.key;
     again.disabled = choose.disabled = locked || capturing;
-    send.disabled = busy || capturing || !draft?.image || !draft?.project || !draft?.text?.trim();
+    // Keep an incomplete request actionable: a press explains what is missing.
+    send.disabled = busy || capturing;
     send.textContent = busy ? 'Sending…' : draft?.accepted ? 'Open thread' : 'Send';
+    help.textContent = !draft?.image ? 'Capture again or choose an image before sending.' : !draft?.project ? 'Choose the Backplane source project before sending.' : !draft?.text?.trim() ? 'Describe a change to Backplane. Ctrl+Enter sends it.' : 'Changes will be made in Backplane. Ctrl+Enter sends this request.';
   }
   function showPreview() {
     if (url) URL.revokeObjectURL(url);url = draft?.image ? URL.createObjectURL(draft.image) : null;
@@ -67,7 +71,8 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   }
   function show() { popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();showPreview();input.focus({ preventScroll: true }); }
   function hide() {
-    operation++;popup.hidden = true;popup.removeAttribute('aria-modal');overlayChanged();
+    openEpoch++;operation++;captureController?.abort();capturing = false;opening = false;
+    popup.hidden = true;popup.removeAttribute('aria-modal');overlayChanged();
     if (previousFocus?.isConnected) { previousFocus.focus({ preventScroll: true });if (previousRange && previousFocus.setSelectionRange) previousFocus.setSelectionRange(...previousRange); }
   }
   async function recapture(initial = false) {
@@ -95,28 +100,42 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   }
   async function open() {
     if (opening || capturing || !popup.hidden) return;
+    if (busy && draft) { show();return; }
+    const epoch = ++openEpoch;
     opening = true;previousFocus = doc.activeElement;
     previousRange = typeof previousFocus?.selectionStart === 'number' ? [previousFocus.selectionStart, previousFocus.selectionEnd, previousFocus.selectionDirection] : null;
     try {
       if (!ready()) throw Error('Connect to the hub before opening Improvements.');
       const auth = identity();if (!auth) throw Error('Wait for the hub connection, then open Improvements again.');
-      const current = await context();scope = win.location.origin + ':' + auth;
+      const current = await context();if (epoch !== openEpoch) return;
+      scope = win.location.origin + ':' + auth;
       draft = await timed(store.read(scope), 5000, 'Could not restore the draft. Try Improvements again.');
+      if (epoch !== openEpoch) return;
       if (draft?.accepted) { await select(draft.thread);await store.write(scope, null);draft = null; }
-      const { projects: choices, project: sourceProject, accountBinding: sourceAccountBinding, ...viewContext } = current;
-      viewContext.sourceProject = sourceProject;
-      draft ||= { text: '', image: null, project: current.project || '', context: viewContext, key: '' };
-      input.value = draft.text;project.replaceChildren(el('option', 'Choose a project', { value: '' }));
-      for (const p of current.projects || []) project.append(el('option', p.title, { value: p.id }));
+      const { projects: choices, accountBinding: sourceAccountBinding, ...viewContext } = current;
+      projects = choices || [];const target = backplaneProject(projects);
+      draft ||= { text: '', image: null, project: target?.id || '', context: viewContext, key: '' };
+      // Upgrade an unsent draft from the old origin-project behavior. A request
+      // that has already created a thread keeps its stable identity for retry.
+      if (!draft.key) {
+        draft.project = target?.id || (draft.context?.implementationProject?.id === draft.project && projects.some(p => p.id === draft.project) ? draft.project : '');
+        if (!draft.context?.sourceThread) draft.context = viewContext;
+        draft.context.implementationProject = target || projects.find(p => p.id === draft.project) || null;
+      }
+      input.value = draft.text;project.replaceChildren(el('option', 'Choose the Backplane source project', { value: '' }));
+      for (const p of projects) project.append(el('option', p.title, { value: p.id }));
       if (draft.project && ![...project.options].some(o => o.value === draft.project)) project.append(el('option', 'Saved project', { value: draft.project }));
       project.value = draft.project;
-      announce(draft.message ? 'This request is ready to retry. Send uses the same conversation.' : 'Send starts a new thread in this project.');
+      projectLabel.hidden = project.hidden = !!target && draft.project === target.id;
+      await save(draft);if (epoch !== openEpoch) return;
+      announce(draft.message ? 'This request is ready to retry. Send uses the same conversation.' : 'Send starts a new Backplane thread.');
       if (draft.image) show();else await recapture(true);
-    } catch (error) { announce(error.message);popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();place();close.focus(); }
-    finally { opening = false;controls(); }
+    } catch (error) { if (epoch !== openEpoch) return;announce(error.message);popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();place();close.focus(); }
+    finally { if (epoch === openEpoch) { opening = false;controls(); } }
   }
+  function toggle() { if (opening || capturing || !popup.hidden) hide();else void open(); }
   input.addEventListener('input', () => { if (!draft || draft.message) return;draft.text = input.value;controls();void save(draft).catch(e => announce(e.message)); });
-  project.addEventListener('change', () => { if (!draft || draft.thread) return;draft.project = project.value;void save(draft).catch(e => announce(e.message));controls(); });
+  project.addEventListener('change', () => { if (!draft || draft.key) return;draft.project = project.value;draft.context.implementationProject = projects.find(p => p.id === project.value) || null;void save(draft).catch(e => announce(e.message));controls(); });
   close.addEventListener('click', hide);again.addEventListener('click', () => { void recapture(); });choose.addEventListener('click', () => file.click());
   file.addEventListener('change', async () => {
     const image = file.files?.[0];file.value = '';if (!image || busy || draft?.message) return;
@@ -124,7 +143,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     draft.image = image;draft.path = '';showPreview();
     try { await save(draft);announce('Image refreshed.'); } catch (e) { announce(e.message); }
   });
-  const flow = new ImprovementsFlow({ rpc, save, select, upload: async (thread, key, image) => {
+  const flow = new ImprovementsFlow({ rpc, save, select, status: announce, upload: async (thread, key, image) => {
     if (!ready() || identity() !== scope.slice(win.location.origin.length + 1)) throw Error('Reconnect to the same hub before sending.');
     const query = new URLSearchParams({ thread, key, name: 'backplane.' + ({ 'image/jpeg': 'jpg', 'image/webp': 'webp' }[image.type] || 'png') });
     const response = await fetch('/attach?' + query, { method: 'POST', body: image, credentials: 'same-origin', signal: AbortSignal.timeout(60000) });
@@ -132,17 +151,25 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     if (!response.ok || result.thread !== thread || typeof result.attached !== 'string') throw Error(result.text || 'The image did not arrive. Retry Send.');
     return result.attached;
   } });
-  send.addEventListener('click', async () => {
-    if (busy || capturing || !draft) return;
+  async function submit() {
+    if (busy || capturing) return;
+    if (!draft) { announce('Reconnect, close Improvements, then open it again to restore your draft.');return; }
+    if (!draft.text?.trim()) { announce('Describe the change to Backplane before sending.');input.focus();return; }
+    if (!draft.image) { announce('Capture again or choose an image, then retry Send. Your text is kept.');input.focus();return; }
+    if (!draft.project) { announce('Choose the Backplane source project, then retry Send.');project.focus();return; }
+    const target = backplaneProject(projects);
+    if (target && draft.project !== target.id) { announce('This saved request belongs to another project. Open its thread to finish it before starting a Backplane improvement.');return; }
     busy = true;controls();announce('Sending…');
     try {
       if (!ready() || win.location.origin + ':' + identity() !== scope) throw Error('Reconnect to the same hub, then retry Send.');
       if (draft.accepted) await select(draft.thread);
       else if (!await flow.send(draft)) return;
+      announce('Request sent. Opening the new Backplane thread.');
       await store.write(scope, null);hide();draft = null;
     } catch (error) { announce(error.message || 'Could not send. Your draft and image are kept. Retry Send.'); }
     finally { busy = false;controls(); }
-  });
+  }
+  send.addEventListener('click', () => { void submit(); });
   let drag;
   header.addEventListener('pointerdown', e => {
     if (e.target.closest('button') || viewport().width <= 600 || e.button !== 0) return;
@@ -157,6 +184,9 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   }
   win.addEventListener('keydown', e => {
     if (e.isComposing || e.keyCode === 229 || e.defaultPrevented) return;
+    if (improvementsShortcut(e, win.navigator.platform) && (opening || capturing || !popup.hidden || !doc.querySelector('[aria-modal="true"],.lightbox,.draw-back,.tour'))) {
+      e.preventDefault();e.stopImmediatePropagation();toggle();return;
+    }
     if (capturing && e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();e.stopImmediatePropagation();operation++;captureController?.abort();capturing=false;
       popup.hidden=false;popup.setAttribute('aria-modal','true');overlayChanged();showPreview();input.focus();
@@ -164,16 +194,14 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     }
     if (!popup.hidden) {
       moveKey(e);
+      if (e.key === 'Enter' && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.repeat) { e.preventDefault();e.stopImmediatePropagation();void submit();return; }
       if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault();e.stopImmediatePropagation();hide();return; }
       if (e.key === 'Tab') {
-        const stops = [...popup.querySelectorAll('textarea,select,button,[tabindex="0"]')].filter(n => !n.disabled), at = stops.indexOf(doc.activeElement);
+        const stops = [...popup.querySelectorAll('textarea,select,button,[tabindex="0"]')].filter(n => !n.disabled && !n.hidden), at = stops.indexOf(doc.activeElement);
         if (at < 0 || !e.shiftKey && at === stops.length - 1 || e.shiftKey && at === 0) { e.preventDefault();(e.shiftKey ? stops.at(-1) : stops[0]).focus(); }
       }
       // All other keys belong to this popup's native controls, including IME.
       e.stopImmediatePropagation();return;
-    }
-    if (improvementsShortcut(e, win.navigator.platform) && !doc.querySelector('[aria-modal="true"],.lightbox,.draw-back,.tour')) {
-      e.preventDefault();e.stopImmediatePropagation();void open();
     }
   }, true);
   doc.addEventListener('click', e => { if (e.target.closest?.('[data-improvements]')) { e.preventDefault();void open(); } }, true);
@@ -181,6 +209,6 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   new win.MutationObserver(decorate).observe(doc.getElementById('root') || doc.body, { childList: true, subtree: true });decorate();
   for (const target of [win, win.visualViewport].filter(Boolean)) target.addEventListener('resize', place);
   win.visualViewport?.addEventListener('scroll', place);
-  win.backplaneDesktop?.onImprovements?.(() => { if (!doc.querySelector('[aria-modal="true"],.lightbox,.draw-back,.tour')) void open(); });
-  return { open, close: hide };
+  win.backplaneDesktop?.onImprovements?.(() => { if (opening || capturing || !popup.hidden || !doc.querySelector('[aria-modal="true"],.lightbox,.draw-back,.tour')) toggle(); });
+  return { open, close: hide, toggle };
 }

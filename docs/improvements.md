@@ -6,8 +6,10 @@ The window shortcut is **Ctrl+Alt+I** on Linux and Windows, and **Ctrl+Cmd+I**
 on macOS. Cmd+Option+I and Cmd+Shift+I remain available to DevTools. The shortcut
 belongs to the Backplane window, including its Browser pane; it is not global.
 IME composition and AltGr text entry keep their keys.
+Press the same shortcut again to close the popup, keeping its draft and image.
 
-Write the change, check the screenshot below the input, then press **Send**.
+The textbox receives focus on open. Write the change, check the screenshot
+below the input, then press **Send** or **Ctrl+Enter**. Composition keeps its keys.
 Drag the desktop header, or focus it and use the arrow keys; Shift moves it
 farther. The popup stays within the visible viewport. Phones use a constrained
 sheet. Escape closes the web/desktop popup and restores the previous focus.
@@ -21,7 +23,15 @@ tabs, windows and monitors are rejected without reading their pixels. When
 capture is unavailable or cancelled, **Choose image** uses the normal image
 picker. No desktop source enumeration or unrelated-window capture is used.
 
-Send creates a normal visible thread in the selected project, uploads the
+Every request changes Backplane application code, regardless of the project
+on screen. The popup resolves the unique Backplane source checkout from the
+hub's project roots; an ambiguous or missing match shows the existing project
+selector, labeled **Backplane source project**, for a deliberate choice.
+The origin thread, bot and project are frozen when the popup opens and kept
+with the draft as reference IDs, names and Backplane links, together with the
+view and file path. Closing/reopening keeps that origin. They are not work targets.
+
+Send creates a normal visible thread in that Backplane project, uploads the
 image through `/attach`, then calls normal `turn.start`. It inherits the normal
 new-thread provider, model, permissions and environment configuration. The
 request's exact text and whitespace lead the message; a labeled app/view
@@ -41,6 +51,8 @@ Drafts and screenshots stay in authenticated-hub-scoped IndexedDB, including
 phone browsers. Uploads use the existing authenticated attachment endpoint.
 RPC waits and capture/upload operations have bounded failure paths. Failures
 keep the request and image and permit retrying the same submission.
+Send reports missing text, screenshot or project with an actionable message.
+During dispatch it shows thread creation, upload and agent start progress.
 
 ## Qualification
 
