@@ -600,10 +600,14 @@ def Row.of.k(i: Nat, +s: M.State, +d: String, +k: String) -> Op:
       Row.top.k(i, s, k)
 
 # the record at a key as the fold has it now: written whole, or deleted
+def Row.of.special(usage: Bool, +s: M.State, +d: String, +key: String) -> Op:
+  match usage:
+    case True{}: Row.obj.or(String, value => Row.obj("usage", key, J.Str{value}), "usage", key, Get(String, M.Metrics.data(s), key))
+    case False{}: Row.of.k(Dom.at(Dom.top(), d), s, d, key)
+
 def Row.of(+s: M.State, k: RK) -> Op:
   match k:
-    case RK{+d, +key}:
-      Row.of.k(Dom.at(Dom.top(), d), s, d, key)
+    case RK{+d, +key}: Row.of.special(String.eq(d, "usage"), s, d, key)
 
 # (records' order is free: each is the state's value at its key)
 def Row.ofs(ks: List<&2, RK>, +s: M.State, acc: List<&2, Op>) -> List<&2, Op>:
@@ -1048,8 +1052,21 @@ def Sdb.ord(+c: M.Change, +ord: Nat) -> Nat:
 type Step is Data:
   Step{st: M.State, facts: List<&2, Op>, recs: List<&2, Op>, ord: Nat}
 
+# The daily usage projection touches at most seven private records plus its privacy
+# generation. Include removals as well as changed rows in the store transaction
+# so a restart, opt-out or Reset id cannot restore stale aggregates.
+def K.metrics.changed(keys: List<&2, String>, +pre: M.State, +post: M.State) -> List<&2, RK>:
+  match keys:
+    case Nil{}: Nil{}
+    case +key <> tail:
+      List.append(&2, RK, Bool.pick(List<&2, RK>, String.eq(M.Metrics.get(pre, key), M.Metrics.get(post, key)), Nil{}, [RK{"usage", key}]), K.metrics.changed(tail, pre, post))
+
+def K.metrics(+pre: M.State, +post: M.State) -> List<&2, RK>:
+  List.append(&2, RK, Bool.pick(List<&2, RK>, String.eq(M.Setting.get(pre, "telemetry.usage.generation", ""), M.Setting.get(post, "telemetry.usage.generation", "")), Nil{}, [K.set("telemetry.usage.generation")]),
+    K.metrics.changed(List.append(&2, String, Map.keys(&2, String, M.Metrics.data(pre)), Map.keys(&2, String, M.Metrics.data(post))), pre, post))
+
 def Sdb.step.k(+pre: M.State, +post: M.State, +a: At, +c: M.Change) -> Step:
-  Step{post, Sdb.facts(pre, a, c), Row.ofs(RK{"state", "seq"} <> Sdb.keys(pre, post, c), post, Nil{}), Sdb.ord(c, At.ord(a))}
+  Step{post, Sdb.facts(pre, a, c), Row.ofs(RK{"state", "seq"} <> List.append(&2, RK, Sdb.keys(pre, post, c), K.metrics(pre, post)), post, Nil{}), Sdb.ord(c, At.ord(a))}
 
 def Sdb.step(+pre: M.State, +a: At, +c: M.Change) -> Step:
   Sdb.step.k(pre, M.State.apply(pre, c), a, c)
@@ -1328,7 +1345,7 @@ def Dump.d25(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, Op>
     case (k, v) <> t:
       Dump.d25(t, Row.obj("mailname", k, J.Str{v}) <> acc)
 
-def Dump.ops(+s: M.State) -> List<&2, Op>:
+def Dump.ops.raw(+s: M.State) -> List<&2, Op>:
   +w = M.State.world.of(s)
   +b = M.State.mail(s)
   Dump.d25(Map.to_list(&2, String, ML.Box.names(b)),
@@ -1358,6 +1375,14 @@ def Dump.ops(+s: M.State) -> List<&2, Op>:
     Dump.d1(Map.to_list(&2, M.Thread, St.ts(s)),
     Dump.d0(Map.to_list(&2, M.Project, St.ps(s)),
     [Row.obj("state", "seq", C.Codec.nat(M.State.seq(s)))]))))))))))))))))))))))))))
+
+def Dump.usage(rows: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, Op>) -> List<&2, Op>:
+  match rows:
+    case Nil{}: acc
+    case (day, value) <> tail: Dump.usage(tail, Row.obj("usage", day, J.Str{value}) <> acc)
+
+def Dump.ops(+s: M.State) -> List<&2, Op>:
+  Dump.usage(Map.to_list(&2, String, M.Metrics.data(s)), Dump.ops.raw(s))
 
 # every record of a state, as the pure store holds them
 def Tab.dump(+s: M.State) -> Map<&2, String>:

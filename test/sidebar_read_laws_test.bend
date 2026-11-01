@@ -33,17 +33,17 @@ law sidebar_read_system:
 def sidebar_read_activity(st, th, act, tone, kind, summary, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def sidebar_read_assistant(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def sidebar_read_system(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def main() -> IO(Unit):
   C.Check.str("three exact full-sidebar history input laws", "proved", "proved")

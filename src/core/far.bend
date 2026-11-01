@@ -790,7 +790,7 @@ def Fr.world(w: BT.World, +prefix: String) -> BT.World:
         Fr.map(String, sp, prefix), Fr.map(BT.Hops, ho, prefix), Fr.map(Nat, ta, prefix), Fr.map(BT.Page, pg, prefix), Fr.map(String, tk, prefix)}
 
 def Fr.ext.spec(+bw: List<&2, M.Ext>, +prefix: String, es: List<&2, M.Entry>) -> List<&2, M.Ext>:
-  [M.Ext{Fr.world(M.Ext.world(M.Ext.of(bw)), prefix), Fr.index(List.reverse(&2, M.Entry, es), Map.new(&2, List<&2, M.Entry>)), M.Ext.mail(M.Ext.of(bw))}]
+  [M.Ext{Fr.world(M.Ext.world(M.Ext.of(bw)), prefix), Fr.index(List.reverse(&2, M.Entry, es), Map.new(&2, List<&2, M.Entry>)), M.Ext.mail(M.Ext.of(bw)), M.Ext.usage(M.Ext.of(bw))}]
 
 # The index without the link's entries, without walking the rest. An entry
 # is filed (M.Idx.post) under its thread, under its sender's key when
@@ -886,7 +886,7 @@ def Fr.by(+by: Map<&2, List<&2, M.Entry>>, +prefix: String) -> Map<&2, List<&2, 
 
 def Fr.ext(bw: List<&2, M.Ext>, +prefix: String) -> List<&2, M.Ext>:
   +x = M.Ext.of(bw)
-  [M.Ext{Fr.world(M.Ext.world(x), prefix), Fr.by(M.Ext.by(x), prefix), M.Ext.mail(x)}]
+  [M.Ext{Fr.world(M.Ext.world(x), prefix), Fr.by(M.Ext.by(x), prefix), M.Ext.mail(x), M.Ext.usage(x)}]
 
 # the settings a link's things leave behind: the work their threads had
 # (WorkSet's bg.<link>~... and watch.<link>~...); the rest stay

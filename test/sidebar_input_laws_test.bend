@@ -41,17 +41,17 @@ def side_ix_metadata_input(st):
 def side_input_activity(st, th, act, tone, kind, summary, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def side_input_assistant(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def side_input_system(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def main() -> IO(Unit):
   C.Check.str("four exact sidebar dependency laws", "proved", "proved")

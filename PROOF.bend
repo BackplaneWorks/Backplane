@@ -7423,7 +7423,8 @@ def Laws.bg_turn_end_settles_ended():
   {==}
 
 def Laws.workset_fold_same_as_setting(s, th, kind, rows, at):
-  {==}
+  match s:
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw}: {==}
 
 def Laws.store_workset_encoded():
   {==}
@@ -13781,33 +13782,33 @@ def Laws.side_ix_metadata_input(st):
 def Laws.side_input_activity(st, th, act, tone, kind, summary, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def Laws.side_input_assistant(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def Laws.side_input_system(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 
 def Laws.sidebar_read_activity(st, th, act, tone, kind, summary, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def Laws.sidebar_read_assistant(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def Laws.sidebar_read_system(st, th, id, text, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Nil{}}: {==}
-    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail} <> rest}: {==}
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, M.Ext{world, by, mail, usage} <> rest}: {==}
 
 def Laws.signal_text_overlay_empty(base):
   {==}
@@ -15046,3 +15047,16 @@ def Laws.vd_undo_revokes(out, y, n):
 def Laws.vs_done_tail_empty(timed, st, item, ws): {==}
 
 def Laws.vs_done_resets(timed, st, item, ws): {==}
+
+# Alpha telemetry
+def Laws.alpha_usage_fixed_fields():
+  {==}
+
+def Laws.alpha_usage_closed_snapshot(now, st, id, view):
+  {==}
+
+def Laws.alpha_usage_closed_tokens(st, at, i, r, w, o, known):
+  {==}
+
+def Laws.alpha_usage_mirror_excluded():
+  {==}

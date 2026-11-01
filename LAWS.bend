@@ -80,6 +80,8 @@ import ./src/core/maildisposition.bend as MDSP
 import ./src/core/mailcontinuity.bend as MCN
 
 import ./src/core/telemetry.bend as TEL
+import ./src/core/telemetry-usage.bend as TUSAGE
+import ./src/core/usage-counts.bend as UCOUNT
 
 import ./test/telemetry_cases.bend as TCF
 
@@ -14869,3 +14871,27 @@ law vs_done_resets:
   for +item: String
   for +ws: List<&2, VDICT.VW>
   {VDICT.VStep.st(VDICT.Vs.done(timed, st, item, ws)) == VDICT.Vs.empty() : VDICT.VSet}
+
+# Alpha telemetry: fixed numeric fields, closed gates and mirrored hubs.
+law alpha_usage_fixed_fields:
+  {UCOUNT.Uc.names() == ["threads_created", "user_messages", "assistant_messages", "bot_messages", "bot_wakes", "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens", "usage_turns"] : List<&2, String>}
+
+law alpha_usage_closed_snapshot:
+  for now: Nat
+  for st: M.State
+  for id: String
+  for view: TEL.TmView
+  {TUSAGE.Usage.snapshots.k(False{}, now, st, id, view) == Nil{} : List<&2, J.Json>}
+
+law alpha_usage_closed_tokens:
+  for st: M.State
+  for at: Nat
+  for i: Nat
+  for r: Nat
+  for w: Nat
+  for o: Nat
+  for known: String
+  {M.Metrics.tokens(False{}, st, at, i, r, w, o, known) == st : M.State}
+
+law alpha_usage_mirror_excluded:
+  {M.Metrics.local("peer~thread") == False{} : Bool}

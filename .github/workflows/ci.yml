@@ -119,6 +119,13 @@ jobs:
       # Real render-tree tests can use several GiB each. Keep two workers
       # per runner; the four shards still execute on separate machines.
       - run: TEST_JOBS=2 scripts/test.sh
+      - name: Alpha telemetry regression
+        run: >-
+          TEST_JOBS=2
+          TEST_FILES="test/telemetry_usage_test.bend test/telemetry_test.bend
+          test/telemetry_activity_test.bend test/telemetry_ui_test.bend
+          test/telemetry_delivery_test.bend"
+          scripts/test.sh
 
   # The hub (docs/js-service.md): bend emits src/server/main.bend as JS
   # once (kept by a hash of what it reads, so a change that leaves the

@@ -2212,7 +2212,7 @@ def SidebarInput.of(+st: M.State) -> SidebarInput:
 def SidebarInput.state(input: SidebarInput) -> M.State:
   match input:
     case SidebarInput{ts, tk, sg, ak, world, mail}:
-      M.State{Map.new(&2, M.Project), ts, Nil{}, 0n, tk, sg, Map.new(&2, List<&2, M.QItem>), ak, Map.new(&2, M.Device), Map.new(&2, M.Nav), [M.Ext{world, Map.new(&2, List<&2, M.Entry>), [mail]}]}
+      M.State{Map.new(&2, M.Project), ts, Nil{}, 0n, tk, sg, Map.new(&2, List<&2, M.QItem>), ak, Map.new(&2, M.Device), Map.new(&2, M.Nav), [M.Ext{world, Map.new(&2, List<&2, M.Entry>), [mail], Map.new(&2, String)}]}
 
 def Side.ix.inputs(input: SidebarInput) -> SIx:
   Side.ix(SidebarInput.state(input))
@@ -12647,7 +12647,7 @@ def Share.on(+st: M.State) -> Bool:
   TLM.Tm.share(st)
 
 def Share.asked(+st: M.State) -> Bool:
-  TLM.Tm.asked(st)
+  Bool.and(TLM.Tm.asked(st), Bool.or(Bool.not(TLM.Tm.share(st)), String.eq(M.Setting.get(st, "telemetry.usage.asked", ""), "1")))
 
 def Share.live(+u: Ui) -> Bool:
   String.eq(Ui.info(u, "telemetry.live"), "1")
@@ -12660,7 +12660,7 @@ def Share.privacy() -> String:
   "https://backplane.works/privacy"
 
 def Share.note() -> String:
-  "A random id, the version and OS, once a day. Nothing else."
+  "A random install id, version, OS, daily activity, and daily counts of threads, messages, model tokens and bot traffic. No content or credentials."
 
 # the note ends with the install id the hub reported (info telemetry.id), which
 # the privacy page asks people to quote when they ask for their data to go
@@ -12982,10 +12982,15 @@ def Tour.act.base(+u: Ui, +action: String) -> Act:
 # or Skip on the step set telemetry.asked too (keeping the default, sharing).
 # On the step, a choice moves on (asked alone: the card closes); "share-reset"
 # makes a new id and "open-url" is the client's own and never gets here.
+def Share.then.usage(a: Act) -> Act:
+  match a:
+    case Act{u, cs}:
+      Tour.finish.cat(Ui.setting(u, "telemetry.usage.asked=1"), cs)
+
 def Share.then(a: Act) -> Act:
   match a:
     case Act{u, cs}:
-      Tour.finish.cat(Ui.setting(u, "telemetry.asked=1"), cs)
+      Share.then.usage(Tour.finish.cat(Ui.setting(u, "telemetry.asked=1"), cs))
 
 def Share.val(+v: String) -> String:
   Bool.pick(String, String.eq(v, "off"), "off", "on")

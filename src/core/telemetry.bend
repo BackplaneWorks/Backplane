@@ -29,8 +29,9 @@ def Tm.share(st: M.State) -> Bool:
 def Tm.asked(st: M.State) -> Bool:
   String.eq(M.Setting.get(st, "telemetry.asked", ""), "1")
 
-def Tm.reset(st: M.State) -> String:
-  M.Setting.get(st, "telemetry.reset", "0")
+def Tm.reset(+st: M.State) -> String:
+  +generation = M.Setting.get(st, "telemetry.usage.generation", "")
+  M.Setting.get(st, "telemetry.reset", "0") ++ Bool.pick(String, String.is_empty(generation), "", ":" ++ generation)
 
 # A worker must ask the hub again after PoW and before starting HTTP. A privacy
 # choice processed while that worker ran invalidates its snapshot.
