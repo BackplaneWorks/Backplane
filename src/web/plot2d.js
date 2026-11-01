@@ -397,6 +397,8 @@ class View {
     this.place = "/";
     this.board = "";
     this.hl = null;
+    this.events = new AbortController();
+    const on = (type, fn, options = {}) => canvas.addEventListener(type, fn, { ...options, signal: this.events.signal });
     // one finger (or the mouse) pans; two pinch to zoom about their middle
     // and move the view with it
     this.pts = new Map();
@@ -405,7 +407,7 @@ class View {
       const r = canvas.getBoundingClientRect();
       return { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top, d: Math.hypot(a.x - b.x, a.y - b.y) };
     };
-    canvas.addEventListener("pointerdown", (e) => {
+    on("pointerdown", (e) => {
       this.gesture++;
       if (this.side === "schematic" && (e.button === 3 || e.button === 4)) {
         canvas.closest("#viewer")?.querySelector(`[data-on-click="${e.button === 3 ? "sch-back" : "sch-fwd"}"]`)?.click();
@@ -421,7 +423,7 @@ class View {
       this.pinch = this.pts.size === 2 ? mid() : null;
       canvas.classList.add("dragging");
     });
-    canvas.addEventListener("pointermove", (e) => {
+    on("pointermove", (e) => {
       if (!this.pts.has(e.pointerId)) { this.hover(e);return; }
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) this.tap = null;
@@ -468,19 +470,19 @@ class View {
     };
     // Cancel native Back on the mouse events. Cancelling pointerdown
     // would suppress those events before Chromium handles navigation.
-    for (const type of ["mousedown", "mouseup", "auxclick"]) canvas.addEventListener(type, (e) => {
+    for (const type of ["mousedown", "mouseup", "auxclick"]) on(type, (e) => {
       if (this.side === "schematic" && (e.button === 3 || e.button === 4)) e.preventDefault();
     });
-    canvas.addEventListener("pointerup", up);
-    canvas.addEventListener("pointercancel", up);
+    on("pointerup", up);
+    on("pointercancel", up);
     // Use the browser's click count, including its platform double-click
     // interval. A second click restores the probe that preceded the gesture.
-    canvas.addEventListener("click", e => {
+    on("click", e => {
       if (!this.mouseTap || this.sheetAt(e.clientX, e.clientY) || e.detail !== 1) return;
       this.beforeClick = this.probe;
       this.pick(e.clientX, e.clientY);
     });
-    canvas.addEventListener("wheel", (e) => {
+    on("wheel", (e) => {
       this.gesture++;
       e.preventDefault();
       const b = canvas.getBoundingClientRect();
@@ -499,7 +501,7 @@ class View {
       this.follow = false;
       this.later();
     }, { passive: false });
-    canvas.addEventListener("dblclick", () => {
+    on("dblclick", () => {
       this.gesture++;
       if (this.mouseTap && this.beforeClick !== undefined) this.publishProbe(this.beforeClick);
       this.beforeClick = undefined;
@@ -507,7 +509,7 @@ class View {
     });
     // a right click asks to comment there: the place in mm (the plot's own
     // coordinates); the page decides what to do (host.js)
-    canvas.addEventListener("contextmenu", (e) => {
+    on("contextmenu", (e) => {
       e.preventDefault();
       const b = canvas.getBoundingClientRect();
       // the plot's units are thousandths of a mm
@@ -515,7 +517,7 @@ class View {
       if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
     });
     // a new size refits the view, unless the user has moved it
-    new ResizeObserver(entries => {
+    this.resize = new ResizeObserver(entries => {
       this.gesture++;
       const { width, height } = this.viewport;
       this.viewport = entries[0].contentRect;
@@ -526,7 +528,17 @@ class View {
         this.oy += (this.viewport.height - height) / 2;
         this.later();
       }
-    }).observe(canvas);
+    });
+    this.resize.observe(canvas);
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.gesture++;
+    this.events.abort();
+    this.resize.disconnect();
+    clearInterval(this.tick); this.tick = null;
+    this.canvas.classList.remove("dragging");
   }
 
   // the sheet symbol (client.bend's Sch.boxes, the canvas's data-sheets)
@@ -680,9 +692,9 @@ class View {
   }
 
   later() {
-    if (this.queued) return;
+    if (this.disposed || this.queued) return;
     this.queued = true;
-    requestAnimationFrame(() => { this.queued = false; this.draw(); });
+    requestAnimationFrame(() => { this.queued = false; if (!this.disposed) this.draw(); });
   }
 
   // review comments' pins and the note form sit on the stage at their place
@@ -907,7 +919,7 @@ function present(v) {
 export function mount(canvases) {
   pickerKeys();
   const list = (Array.isArray(canvases) ? canvases : [canvases]).filter(Boolean);
-  for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); v.gesture++; park(v); views.delete(c); }
+  for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); park(v); v.dispose(); views.delete(c); }
   for (const canvas of list) mountOne(canvas);
   // a note form that has just come up takes the keyboard
   const note = document.querySelector(".rc-note input");

@@ -9,6 +9,7 @@ function harness() {
   const frames = new Map(), timers = new Map(), observers = [];
   let serial = 0, draws = 0;
   const context = {
+    AbortController,
     performance: { now: () => 100 }, setTimeout() {},
     requestAnimationFrame(fn) { const id = ++serial; frames.set(id, fn); return id; },
     setInterval(fn) { const id = ++serial; timers.set(id, fn); return id; },
@@ -31,7 +32,10 @@ function harness() {
       parentElement: { querySelectorAll: () => [] }, closest: () => null,
       classList: { add() {}, remove() {} }, focus() {}, setPointerCapture() {},
       getBoundingClientRect: () => ({ left: 0, top: 0 }), getContext: () => g,
-      addEventListener: (type, fn) => { handlers[type] = fn; }, handlers };
+      addEventListener: (type, fn, options) => {
+        handlers[type] = fn;
+        options?.signal?.addEventListener('abort', () => { if (handlers[type] === fn) delete handlers[type]; }, { once: true });
+      }, handlers };
   }
   return { ...context.plot, canvas, frames, timers, observers, draws: () => draws,
     flush() { const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(); },
@@ -63,4 +67,30 @@ test('a thread restores its board centre through Split, Files and another thread
   assert.notDeepEqual(pose(h.views.get(other)), moved);
   h.mount([]); const returned = h.canvas('A', c.dataset.key); h.mount([returned]);
   assert.deepEqual(pose(h.views.get(returned)), moved);
+});
+
+test('leaving a loading board stops its timer, observer and queued draws', () => {
+  const h = harness(), c = h.canvas(); h.mount([c]); h.flush();
+  assert.equal(h.timers.size, 1, 'loading view counts seconds');
+  const tick = [...h.timers.values()][0], resize = h.observers[0];
+  tick(); h.mount([]); c.isConnected = false;
+  const before = h.draws(); h.flush(); tick(); resize.fn([{ contentRect: { width: 0, height: 0 } }]); h.flush();
+  assert.equal(h.timers.size, 0);
+  assert.equal(resize.active, false);
+  assert.equal(h.draws(), before, 'already queued work cannot restart removed loading views');
+});
+
+test('leaving before the first frame cannot create a detached loading timer', () => {
+  const h = harness(), c = h.canvas(); h.mount([c]); h.mount([]); h.flush();
+  assert.equal(h.draws(), 0);
+  assert.equal(h.timers.size, 0);
+});
+
+test('a remounted canvas has only its current view’s gesture handlers', () => {
+  const h = harness(), c = h.canvas(); h.mount([c]); h.receive(c);
+  const old = h.views.get(c), before = old.scale; h.mount([]);
+  assert.equal(Object.keys(c.handlers).length, 0, 'removed view releases canvas listeners');
+  h.mount([c]); h.move(c);
+  assert.equal(old.scale, before);
+  assert.notEqual(h.views.get(c).scale, before);
 });
