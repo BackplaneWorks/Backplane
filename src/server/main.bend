@@ -6,6 +6,7 @@ import ../core/cli.bend as CL
 import ./plot.bend as PV
 import ./review.bend as RVC
 import ./storefar.bend as SFL
+import ./storeterms.bend as STT
 import ./jsloop.bend as LP
 import ../app/render.bend as RN
 
@@ -52,7 +53,7 @@ def start.or(args: List<String>) -> IO(Unit):
 def main.go(u: Unit) -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    RVC.Rvc.main(args, a3 => SFL.Fl.main(a3, a2 => TI.Tio.main(a2, a0 => PV.Pv.main(a0, a => start.or(a)))))
+    RVC.Rvc.main(args, a4 => STT.Terms.main(a4, a3 => SFL.Fl.main(a3, a2 => TI.Tio.main(a2, a0 => PV.Pv.main(a0, a => start.or(a))))))
 
 # (`--plot KIND FILE` is the hub's own board reader, src/server/plot.bend;
 # `--review bom OLD NEW` design review's, src/server/review.bend;

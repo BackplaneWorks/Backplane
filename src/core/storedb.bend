@@ -878,6 +878,50 @@ def F.terms(ws: List<&2, String>, +ord: Nat, acc: List<&2, Op>) -> List<&2, Op>:
     case w <> t:
       F.terms(t, ord, Put{"term", [w, S.n(ord)]} <> acc)
 
+# Search terms' own version
+# -------------------------
+# The term table is a function of the entry table alone (each row's text
+# and ordinal), so a change to how terms are made (THIN.Words.of, search
+# fold) needs no rebuild from the log: bump Sdb.terms.v() instead of
+# Sdb.codec(). A store whose meta "terms" is behind keeps serving, and the
+# hub derives the table again in the background (server/storeterms.bend):
+# a child fills term_next from the entries, the hub catches up the newest
+# and swaps the tables. A store with no "terms" (built before the key
+# existed) has version 1. Laws sdb_terms_*.
+
+def Sdb.terms.v() -> Nat:
+  1n
+
+def Sdb.terms.have(+m: String) -> String:
+  Bool.pick(String, String.is_empty(m), "1", m)
+
+# a store whose meta "terms" is m is behind this code's terms
+def Sdb.terms.due(+m: String) -> Bool:
+  Bool.not(String.eq(Sdb.terms.have(m), Nat.show(Sdb.terms.v())))
+
+# an entry's terms, as its row's text gives them
+def Sdb.terms.of(+ord: Nat, +text: String) -> List<&2, Op>:
+  F.terms(Map.keys(&2, Bool, THIN.Words.of(text)), ord, Nil{})
+
+def Sdb.terms.sql.go(ws: List<&2, String>, +t: String, +ord: Nat, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+  match ws:
+    case Nil{}:
+      acc
+    case w <> rest:
+      Sdb.terms.sql.go(rest, t, ord, ["INSERT INTO " ++ t ++ "(word, ord) VALUES (" ++ Sql.marks(["word", "ord"]) ++ ") ON CONFLICT DO NOTHING", "v" ++ w, "v" ++ S.n(ord)] <> acc)
+
+# the same terms as statements into table t (term_next while it is made
+# again; for "term" they are Sql.of of Sdb.terms.of, law sdb_terms_sql_same)
+def Sdb.terms.sql(+t: String, +ord: Nat, +text: String) -> List<&2, List<&2, String>>:
+  Sdb.terms.sql.go(Map.keys(&2, Bool, THIN.Words.of(text)), t, ord, Nil{})
+
+def Sdb.terms.sqls(os: List<&2, Op>) -> List<&2, List<&2, String>>:
+  match os:
+    case Nil{}:
+      Nil{}
+    case o <> t:
+      Sql.of(o) <> Sdb.terms.sqls(t)
+
 def F.entry.cols(e: M.Entry, +seq: String, +ord: String, +id: String, +th: String, +src: String, +text: String) -> List<&2, String>:
   match e:
     case M.Msg{_, _, r, _, at}:
@@ -895,7 +939,7 @@ def F.entry(+e: M.Entry, +a: At) -> List<&2, Op>:
       +from = M.Link.from(id)
       +src = Bool.pick(String, Bool.or(String.is_empty(from), String.eq(from, th)), "", from)
       +text = THIN.Entry.text(e)
-      Put{"entry", F.entry.cols(e, S.n(seq), S.n(ord), id, th, src, text)} <> F.terms(Map.keys(&2, Bool, THIN.Words.of(text)), ord, Nil{})
+      Put{"entry", F.entry.cols(e, S.n(seq), S.n(ord), id, th, src, text)} <> Sdb.terms.of(ord, text)
 
 # the entry a change posts (State.post's three producers), if any
 def F.posts(c: M.Change) -> Maybe<&2, M.Entry>:

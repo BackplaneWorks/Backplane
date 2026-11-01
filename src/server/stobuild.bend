@@ -245,6 +245,7 @@ def Stb.end(a: Acc) -> List<&2, List<&2, String>>:
         Stb.meta.sql("schema", "1"),
         Stb.meta.sql("codec", Nat.show(SDB.Sdb.codec())),
         Stb.meta.sql("far_line", "1"),
+        Stb.meta.sql("terms", Nat.show(SDB.Sdb.terms.v())),
         Stb.meta.sql("applied_seq", Nat.show(seq)),
         Stb.meta.sql("applied_off", Nat.show(off)),
         Stb.meta.sql("ord", Nat.show(ord)),

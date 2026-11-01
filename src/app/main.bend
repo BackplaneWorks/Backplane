@@ -54,6 +54,7 @@ import ../core/rview.bend as RV
 import ../server/git.bend as GT
 import ../server/review.bend as RVC
 import ../server/storefar.bend as SFL
+import ../server/storeterms.bend as STT
 import ../core/cef.bend as CF
 import ../core/cli.bend as CLI
 import ../server/main.bend as SV
@@ -3302,7 +3303,7 @@ def start(args: List<String>) -> IO(Unit):
 def main.go(u: Unit) -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    RVC.Rvc.main(args, a3 => SFL.Fl.main(a3, a2 => TIO.Tio.main(a2, a0 => PV.Pv.main(a0, a => start(a)))))
+    RVC.Rvc.main(args, a4 => STT.Terms.main(a4, a3 => SFL.Fl.main(a3, a2 => TIO.Tio.main(a2, a0 => PV.Pv.main(a0, a => start(a))))))
 
 # (`--plot KIND FILE` is the hub's own board reader, src/server/plot.bend;
 # `--review bom OLD NEW` design review's, src/server/review.bend)
