@@ -2076,6 +2076,9 @@ final class AppModel {
             return
         }
         defer { traceNavigation(.applied) }
+        #if DEBUG
+        if o.screen != nil { RenderCount.tick("screenApplied") }
+        #endif
         if let c = o.composer, o.screen == nil { if composerPatch != c { composerPatch = c } }
         else if o.screen != nil, composerPatch != nil { composerPatch = nil }
         for update in o.sync ?? [] {
@@ -2269,6 +2272,8 @@ final class AppModel {
                         if kv[0] == "@times" { NSLog("Backplane taps %@", tapTimes.joined(separator: "; ")); continue }
                         // "@type=<text>": the composer's text, as typing it does (editComposer: one key's path)
                         if kv[0] == "@type" { draft(kv.count > 1 ? kv[1] : ""); continue }
+                        // "@send": the composer's send button
+                        if kv[0] == "@send" { send(); continue }
                         // "@renders": how often each counted view's body ran since the last (RenderCount)
                         if kv[0] == "@renders" { NSLog("Backplane renders %@", RenderCount.take()); continue }
                         if kv[0] == "@open", kv.count > 1 {

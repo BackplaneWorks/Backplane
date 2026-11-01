@@ -1206,13 +1206,13 @@ struct ThreadScreen: View {
                            model.performanceDisplayed(thread: thread.id, fresh: live, revision: displayRevision)
                        }, onViewport: { if live { model.timelineViewport(thread.id, $0) } }) {
                 VStack(alignment: .leading, spacing: 14) {
-                    if let p = thread.parent { EntryRow(model: model, entry: p) { shown = $0 } }
+                    if let p = thread.parent { EntryRow(model: model, entry: p) { shown = $0 }.equatable() }
                     ForEach(thread.entries) { e in
                         VStack(alignment: .leading, spacing: 6) {
                             if e.kind == "emb" {
                                 EmbRow(model: model, entry: e, emb: thread.embs?.first { $0.key == e.key })
                             } else {
-                                EntryRow(model: model, entry: e) { shown = $0 }
+                                EntryRow(model: model, entry: e) { shown = $0 }.equatable()
                             }
                             if let partial = e.partial {
                                 PartialMessageFooter(model: model, hub: model.screen?.hub ?? "", thread: thread.id,
@@ -1232,7 +1232,7 @@ struct ThreadScreen: View {
                             .transition(reduceMotion ? .identity : .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                     }
                     if !thread.live.isEmpty {
-                        MarkdownView(blocks: thread.live)
+                        LiveRow(blocks: thread.live)
                     } else if !thread.working.isEmpty {
                         HStack(spacing: 8) {
                             StatusDot(state: thread.state, status: thread.phase)
@@ -1504,5 +1504,17 @@ enum Presented {
         let root = UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first
         return root?.presentedViewController == nil
+    }
+}
+
+// the reply streaming in: its own view, so a delta re-runs this and not the
+// rows above it
+struct LiveRow: View {
+    let blocks: [Block]
+    var body: some View {
+        #if DEBUG
+        let _ = RenderCount.tick("liveRow")
+        #endif
+        MarkdownView(blocks: blocks)
     }
 }

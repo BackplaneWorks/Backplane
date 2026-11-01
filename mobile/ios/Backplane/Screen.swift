@@ -113,7 +113,8 @@ struct Shot: Decodable, Hashable {
 
 // kind: user, assistant, act (a tool line), fold (a run of tool calls:
 // "fold" with value opens or shuts it), link (opens thread value)
-struct Entry: Decodable, Identifiable {
+// Equatable, so an unchanged row is skipped when the screen around it changes
+struct Entry: Decodable, Identifiable, Equatable {
     let id, kind, text: String
     let tone, label: String?
     let blocks: [Block]?
