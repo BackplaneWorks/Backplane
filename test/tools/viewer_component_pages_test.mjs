@@ -58,4 +58,10 @@ for(const [label,change]of [
 {
   const {rpc}=endpoint(()=>({...page(),components:[],page:{offset:0,total:0,next:null,complete:true}}));assert.deepEqual((await rpc.components('empty-board')).components,[]);
 }
+for (const failingPage of [1, 2]) {
+  const message = 'One component exceeds the bounded page budget; metadata cannot be truncated.';
+  const {rpc,sent}=endpoint((data,n)=>n===failingPage?{error:message}:data);
+  await assert.rejects(rpc.components('saved-board'),error=>error.message===message,'a page error retains the server cause');
+  assert.equal(sent.length,failingPage);assert.equal(rpc.pending.size,0);
+}
 console.log('ok production component-page reader: complete-only authority, exact source/revision chain, cursor/total/UUID/schema guards, reset between pages, empty board and count/byte bounds');

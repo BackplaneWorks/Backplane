@@ -62,8 +62,9 @@ export class ViewerRpc {
     if (envelope?.t !== "reply") return false;
     const call = this.pending.get(envelope.id); if (!call) return false;
     call.cleanup();
-    if (envelope.ok === false || envelope.result?.error || !envelope.result?.[call.field]) call.reject(new Error(envelope.result?.error || envelope.error || "Saved model data is unavailable."));
-    else call.resolve(envelope.result[call.field]);
+    const data = envelope.result?.[call.field];
+    if (envelope.ok === false || envelope.result?.error || data?.error || !data) call.reject(new Error(envelope.result?.error || data?.error || envelope.error || "Saved model data is unavailable."));
+    else call.resolve(data);
     return true;
   }
   reset() {
