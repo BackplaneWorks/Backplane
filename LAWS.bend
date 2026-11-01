@@ -4564,6 +4564,16 @@ law subs_shell_not_agent:
 law subs_badge:
   {SB.Subs.badge(0n) ++ "|" ++ SB.Subs.badge(1n) ++ "|" ++ SB.Subs.badge(3n) == "|1 agent|3 agents" : String}
 
+# Subagent presentation identities and retained activity.
+law subs_row_keys:
+  for +r: SB.SubRow
+  for +rs: List<&2, SB.SubRow>
+  {SB.Subs.row_keys(r <> rs) == SB.Subs.key(r) <> SB.Subs.row_keys(rs) : List<&2, String>}
+
+law subs_done_row_key:
+  {SB.Subs.row_keys([SB.Subs.done.toggle("t1", 2n, False{})]) == ["subs.done:t1"] : List<&2, String>}
+
+
 # Desks (core/desk.bend)
 # ----------------------
 

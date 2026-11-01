@@ -6870,6 +6870,12 @@ def Laws.subs_agent_at_work():
 def Laws.subs_agent_done_shut():
   {==}
 
+def Laws.subs_row_keys(r, rs):
+  {==}
+
+def Laws.subs_done_row_key():
+  {==}
+
 def Laws.subs_shell_named():
   {==}
 

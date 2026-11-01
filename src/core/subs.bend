@@ -342,6 +342,13 @@ def Subs.key(r: SubRow) -> String:
     case SubRow{k, _, _, _, _, _, _, _, _, _}:
       k
 
+# Presentation membership uses every row's actual key. Panel-close
+# signatures (Subs.keys) name attention state and omit finished rows.
+def Subs.row_keys(rs: List<&2, SubRow>) -> List<&2, String>:
+  match rs:
+    case Nil{}: Nil{}
+    case r <> t: Subs.key(r) <> Subs.row_keys(t)
+
 def Subs.word(r: SubRow) -> String:
   match r:
     case SubRow{_, _, _, _, w, _, _, _, _, _}:

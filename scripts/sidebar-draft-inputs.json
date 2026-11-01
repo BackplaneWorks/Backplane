@@ -123,7 +123,7 @@
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
-    "src/core/subs.bend": "695a9eedce4bbc7eafd13a9435c77d33a3066f8a2d961086200ca08f91a37a0f",
+    "src/core/subs.bend": "23c58c5ef4441eb937d69aecbee7c523d5a028337712a0a29a9f564daa85765e",
     "src/core/subthreads.bend": "13e42cf12eee61526c333a91d15e18c29319906c6c486b9e4c06bf81d379b046",
     "src/core/svg.bend": "dc334fd62bc35e0fa3c9cdac414ee563a31f99a3fd538810d42d35c148c30c14",
     "src/core/task.bend": "8280585ed265c028ae6fa6bc72be4b56e527e4f162262e1a4a61401d693457b2",
@@ -175,7 +175,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "27c12aa8aa7164cad6b389bdeb49f881f4af4829753e5207548e18243574a28f"
+    "src/web/view.bend": "e625431f0c6bcddc6d5c20f6b186ed2a2fc1d02cc47e58e994f0ff4eac60f784"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -380,5 +380,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "D-7 adds focus to Split canvases; keep incoming mobile layout and sidebar inputs; sidebar draft test 24 ok, rendering unchanged"
+  "reviewNote": "Rebase subagent fix over current sidebar dependencies; draft image checks unchanged"
 }

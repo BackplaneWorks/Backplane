@@ -1310,7 +1310,7 @@ def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, St
     case r <> rest: View.sub.signals(lc, r, info) <> View.subs.signals.raw(lc, rest, info)
 
 def View.subs.signals.go(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
-  +p = VP.Page.info(info, "subagents", SB.Subs.keys(rs), "")
+  +p = VP.Page.info(info, "subagents", SB.Subs.row_keys(rs), "")
   List.append(&2, D.Node, View.subs.signals.raw(lc, LW.Lists.subs(rs, VP.Page.ids(p)), info), LW.Lists.pager(p))
 
 def View.sub(+lc: I.Loc, +r: SB.SubRow) -> D.Node:
