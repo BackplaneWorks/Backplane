@@ -250,6 +250,14 @@
     const hub = !!window.__bpRender.ahead?.(up ? "older" : "newer");
     wheels.push({ at: e.timeStamp, key: viewKey(), ahead: room || hub, frames: 0, moved: null });
   }, { capture: true, passive: true });
+  // a scroll event the browser dispatched after the wheel: the view moved
+  // (scrolled on the compositor, the position read in a frame may lag; the
+  // scroll event is the browser's own word that it moved)
+  addEventListener("scroll", (e) => {
+    if (!W.on || e.target?.id !== "timeline") return;
+    const t = now();
+    for (const w of wheels) if (w.moved === null && t >= w.at) w.moved = t - w.at;
+  }, { capture: true, passive: true });
   function wheelFrames() {
     const k = viewKey(), t = now();
     for (const w of wheels) if (w.moved === null) { w.frames++; if (k !== w.key) w.moved = t - w.at; }

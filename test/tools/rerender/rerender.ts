@@ -478,7 +478,7 @@ say(`wrote ${join(outDir, "report.md")}`);
 function markdown(rep: any) {
   const L: string[] = [];
   L.push(`# Re-render report — ${rep.at}`, "", `Fixture: ${rep.fixture.source} (${rep.fixture.lines} lines). Hub \`${rep.hub}\` (${rep.build.hub || "unstamped"}), web \`${rep.web}\` (${rep.build.web || "unstamped"}), tree ${rep.build.tree}.${rep.failed ? " **The run failed part way.**" : ""}`, "");
-  L.push("| scenario | active ms | first paint / current ms | wheels: stalls, move p50/p95 | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
+  L.push("| scenario | active ms | first paint / current ms | wheels: stalls, wheel→move p50/p95 (diagnostic, unbudgeted) | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
     "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const r of rep.results) {
     const k = r.events["paint:keydown"], w = r.scroll.wheelToFrame, c = r.counts, rpc = r.hub.perf["hub.rpc"];
