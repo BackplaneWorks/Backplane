@@ -9,6 +9,7 @@ root = Path(__file__).resolve().parent.parent
 # Required in every local lane, including focused-only and guards-only.
 subprocess.run([sys.executable, 'test/tools/sidebar_draft_guard_test.py'], cwd=root, check=True)
 subprocess.run(['bun', 'test/tools/store_checkpoint_io_test.cjs'], cwd=root, check=True)
+subprocess.run(['bun', 'test/tools/hotboot_wire_test.cjs'], cwd=root, check=True)
 subprocess.run([sys.executable, 'test/tools/kicad_library_header_test.py'], cwd=root, check=True)
 if '--focused-only' not in sys.argv:
     subprocess.run([sys.executable, 'scripts/local.py', 'deps'], cwd=root, check=True)

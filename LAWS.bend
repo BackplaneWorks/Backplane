@@ -8786,6 +8786,49 @@ law commit_line_is_wire:
 law commit_line_device_hides_token:
   {String.contains(H.Commit.line(M.DeviceDropped{"secret-tok", 5n}, "disk"), "secret-tok") == False{} : Bool}
 # ---- end hub-fanout: commit lines ----
+# ---- hub-memory: turn inputs ----
+# a turn's input goes to clients blank: on a live commit, a replayed line,
+# the store's wire text; disk keeps it (model.bend's Setting.input)
+law input_wire_blank:
+  {J.Json.show(C.Change.wire(M.SettingSet{"fallback.input.t1", "big \"x\"", 5n})) == "{\"$\":\"SettingSet\",\"key\":\"fallback.input.t1\",\"value\":\"\",\"at\":5}" : String}
+
+law input_wire_other_kept:
+  {J.Json.show(C.Change.wire(M.SettingSet{"input.launch.t1", "v", 5n})) == J.Json.show(C.Change.encode(M.SettingSet{"input.launch.t1", "v", 5n})) : String}
+
+law input_commit_line_is_wire:
+  {Bool.and(H.Commit.line.ok(M.SettingSet{"launch.input.t1", "big", 5n}), H.Commit.line.ok(M.SettingSet{"fallback.input.t1", "big", 5n})) == True{} : Bool}
+
+law input_replayed_line_is_wire:
+  {C.Change.wire_line(Maybe.default(&2, J.Json, J.Json.parse(J.Json.show(C.Change.encode(M.SettingSet{"launch.input.t1", "big\nline", 5n}))), J.Null{}), J.Json.show(C.Change.encode(M.SettingSet{"launch.input.t1", "big\nline", 5n}))) == J.Json.show(C.Change.wire(M.SettingSet{"launch.input.t1", "big\nline", 5n})) : String}
+
+law input_store_wire:
+  {Bool.and(String.eq(SDB.F.wire(M.SettingSet{"fallback.input.t1", "big", 5n}), J.Json.show(C.Change.wire(M.SettingSet{"fallback.input.t1", "big", 5n}))), String.is_empty(SDB.F.wire(M.SettingSet{"a.b", "big", 5n}))) == True{} : Bool}
+
+# an empty value removes an input
+law input_blank_removes:
+  {List.length(&2, String, M.Setting.keys(M.State.replay([M.SettingSet{"launch.input.t1", "v", 1n}, M.SettingSet{"launch.input.t1", "", 2n}], M.State.empty()))) == 0n : Nat}
+
+# launch.input when it differs, else fallback.input
+law input_launch_falls_back:
+  {Bool.and(String.eq(H.Fallback.launch(M.State.replay([M.SettingSet{"fallback.input.t1", "x", 1n}], M.State.empty()), "t1"), "x"),
+    String.eq(H.Fallback.launch(M.State.replay([M.SettingSet{"fallback.input.t1", "x", 1n}, M.SettingSet{"launch.input.t1", "ctx x", 1n}], M.State.empty()), "t1"), "ctx x")) == True{} : Bool}
+
+# the tick removes the inputs of threads at rest (t1 idle, t3 never made)
+# and keeps a running thread's (t2)
+law input_prune_rest:
+  {M.Input.prune(M.State.replay([M.ThreadCreated{"t1", "", "a", M.Local{}, "", "", "claude", "", 1n}, M.ThreadCreated{"t2", "", "b", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"t2", M.Running{}, 2n},
+    M.SettingSet{"fallback.input.t1", "x", 2n}, M.SettingSet{"launch.input.t2", "y", 2n}, M.SettingSet{"fallback.input.t2", "y", 2n}, M.SettingSet{"fallback.input.t3", "z", 2n}], M.State.empty()), 9n)
+    == [M.SettingSet{"fallback.input.t1", "", 9n}, M.SettingSet{"fallback.input.t3", "", 9n}] : List<&2, M.Change>}
+# the removal is only the inputs' and the ledgers': any other key's empty
+# value folds as before, kept as "" (persisted meaning), and a key that only
+# looks like an input is not one
+law input_blank_scoped:
+  {M.Setting.keys(M.State.replay([M.SettingSet{"agent.model", "v", 1n}, M.SettingSet{"agent.model", "", 2n}, M.SettingSet{"x.launch.input.t1", "", 2n},
+    M.SettingSet{"launch.inputs.t1", "", 2n}, M.SettingSet{"fallback.inputx", "", 2n}, M.SettingSet{"mail.private.input.t1", "", 2n}], M.State.empty())) == ["agent.model", "fallback.inputx", "launch.inputs.t1", "mail.private.input.t1", "x.launch.input.t1"] : List<&2, String>}
+
+law input_blank_scoped_value:
+  {M.Setting.get(M.State.replay([M.SettingSet{"agent.model", "v", 1n}, M.SettingSet{"agent.model", "", 2n}], M.State.empty()), "agent.model", "unset") == "" : String}
+# ---- end hub-memory: turn inputs ----
 # win-lean-frame: caret blink (tiles.bend's Caret.*, Tiles.blink)
 # a caret shown or hidden reaches a node's quadrant the same way
 law caret_keep:

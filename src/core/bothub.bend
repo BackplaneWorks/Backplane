@@ -1630,9 +1630,10 @@ def Bots.tick.go(rs: List<&2, BT.Routine>, +i: Nat, +s: M.State, +now: Nat, +tz:
 def Bots.tick.routines(+s: M.State, +now: Nat, +tz: Tz) -> B.Step:
   Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz)
 
-# the minute tick: every due routine runs once
+# the minute tick: every due routine runs once; old told records and the
+# inputs of threads at rest go (model.bend's Input.prune)
 def Bots.tick(+s: M.State, +now: Nat, +tz: Tz) -> B.Step:
-  Step.cat(Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz), B.Step{List.append(&2, M.Change, TLD.Told.prune(s, now), B.Mail.due(s, now)), Nil{}})
+  Step.cat(Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz), B.Step{List.append(&2, M.Change, List.append(&2, M.Change, TLD.Told.prune(s, now), M.Input.prune(s, now)), B.Mail.due(s, now)), Nil{}})
 
 # The bots' tools
 # ---------------

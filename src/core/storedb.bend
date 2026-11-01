@@ -942,14 +942,24 @@ def F.entry.of(m: Maybe<&2, M.Entry>, +a: At) -> List<&2, Op>:
     case None{}:
       Nil{}
 
+def F.wire.s(input: Bool, c: M.Change) -> String:
+  match input:
+    case True{}:
+      J.Json.show(C.Change.wire(c))
+    case False{}:
+      ""
+
 # what clients see of a line, when it is not the line itself: a phone's
-# push registration goes out without its token (C.Change.wire_line)
+# push registration goes out without its token, a turn's input blank
+# (C.Change.wire_line)
 def F.wire(c: M.Change) -> String:
   match c:
     case M.DeviceRegistered{tok, p, k, th, e, b, at}:
       J.Json.show(C.Change.wire(M.DeviceRegistered{tok, p, k, th, e, b, at}))
     case M.DeviceDropped{tok, at}:
       J.Json.show(C.Change.wire(M.DeviceDropped{tok, at}))
+    case M.SettingSet{+k, v, at}:
+      F.wire.s(M.Setting.input(k), M.SettingSet{k, v, at})
     case _:
       ""
 
