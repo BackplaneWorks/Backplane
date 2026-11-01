@@ -213,15 +213,19 @@ export class ViewerQuality {
   }
   sourceChanged() { this.stop(this.revision()); if (this.state.quality) void this.enable(true); }
   async framePart() {
-    const id = this.components.selected; if (!this.renderer || !id) return;
+    const id = this.components.selected, renderer = this.renderer, generation = this.generation;
+    if (!renderer || !id) return;
+    // A new mode, model or selection retires this request, including a
+    // rejection delivered when its old worker is disposed.
+    const current = () => this.alive && generation === this.generation && renderer === this.renderer && id === this.components.selected;
     try {
-      const bounds = await this.renderer.componentBounds(id);
-      if (!this.alive || id !== this.components.selected) return;
+      const bounds = await renderer.componentBounds(id);
+      if (!current()) return;
       if (!bounds || bounds.revision !== this.revision()) throw Error("This saved component has no uniquely identified source model.");
       const layout = this.root.querySelector(".solid-layout");
       if (layout) layout.scrollTop = 0;
       this.solid.frameBounds?.(bounds.min, bounds.max);
-    } catch (e) { this.message(e.message || "The component cannot be framed."); }
+    } catch (e) { if (current()) this.message(e.message || "The component cannot be framed."); }
   }
   stop(keepPreparedRevision) {
     if (!keepPreparedRevision || this.preparedAsset?.revision !== keepPreparedRevision) {
