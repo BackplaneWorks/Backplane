@@ -3514,6 +3514,16 @@ def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +conte
       # its absolute box so measuring terminal cells cannot extend the page.
       D.El{"main", "thread", attrs, D.El{"style", "workspace-compat", Nil{}, [D.Txt{".term-probe { top: 0; left: 0; }"}]} <> nav <> content}
 
+# The thread's timeline (#timeline): everything of the page that its rows
+# make, so the hub can draw it alone for another page of rows (thin-view
+# .bend's Page.splice) and put it into the page it drew before
+def View.thread.timeline(+lc: I.Loc, +st: M.State, +id: String, +drafts: Map<&2, String>, +nf: Map<&2, String>, +turn: M.TurnState, +tr: U.MailvLocal, +now: Nat, +live: Map<&2, String>, pend: List<&2, String>, fab: List<&2, D.Node>, +pill: String) -> D.Node:
+  D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
+    fab, View.parent.loc(lc, st, id, U.Tasks.up(st, id)),
+    [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
+    View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),
+    View.sending.loc(lc, pend), View.thread.live.loc(lc, st, nf, live, id), View.hold.pill(pill)])}
+
 def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, +hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.Tool>, +pill: String) -> D.Node:
   match u t:
     case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, +p, ti, c, a, +turn, +pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
@@ -3526,17 +3536,22 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, View.running(turn)),
         View.thread.subs.own(own, lc, st, nf, id, now),
         View.thread.todos.own(own, lc, nf, st, id, U.Todos.shown(st, id, View.running(turn))),
-        [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
-          fab, View.parent.loc(lc, st, id, U.Tasks.up(st, id)),
-          [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
-          View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),
-          View.sending.loc(lc, pend), View.thread.live.loc(lc, st, nf, live, id), View.hold.pill(pill)])},
+        [View.thread.timeline(lc, st, id, drafts, nf, turn, tr, now, live, pend, fab, pill),
          View.asks.box(lc, st, id, U.Str.get(drafts, sel), nf, drafts),
          View.queued(lc, M.Queue.context(M.Queue.items(st, id)), View.running(turn))],
         rd, [View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]]))
 
 def View.thread.h(+lc: I.Loc, +u: U.Ui, +t: M.Thread, hd: List<&2, D.Node>) -> D.Node:
   View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u)))), View.mic.of(u, U.Ui.sel(u)), Nil{}, View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
+
+def View.thread.timeline.k(+lc: I.Loc, u: U.Ui, t: M.Thread, pend: List<&2, String>, +pill: String) -> D.Node:
+  match u t:
+    case U.Ui{+st, _, +drafts, +live, _, _, +now, _, _, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, _, _, _, _, +turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      View.thread.timeline(lc, st, id, drafts, nf, turn, tr, now, live, pend, Nil{}, pill)
+
+# the timeline as View.thread.h draws it (no fab rows above it)
+def View.thread.timeline.u(+lc: I.Loc, +u: U.Ui, +t: M.Thread) -> D.Node:
+  View.thread.timeline.k(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Hold.pill(u, M.Thread.id(t)))
 
 def View.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> D.Node:
   View.thread.h(lc, u, t, Nil{})

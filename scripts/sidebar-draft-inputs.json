@@ -153,14 +153,14 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
     "src/mobile/screen.bend": "b3cb1de9166cfe96f3e93f16d0de1a35da8874bf21f7273303b28da39a8c3979",
-    "src/server/thin-actor.bend": "9cdcfe47d451f22c97dd9680c48d6b09f0b56034920858092465034e724cce31",
+    "src/server/thin-actor.bend": "680fdbb8fa6ff7ecd92826d0fdef02b225566d25ed1320d1c3323768e476f439",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
     "src/server/thin-sidebar.bend": "97498ae01599f2dc826db829e836b34519a2e93d9a5474324a51bfd2331242ae",
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
-    "src/server/thin-splice.bend": "f9e6861ecdd057bfcceb026de81cfd1057eb51ae01e823bb433b527b2ea27632",
+    "src/server/thin-splice.bend": "f3afb501d96bb15c76aeae77bf5e75a55109ce06c3c51d0b8bf07529f82c5ac3",
     "src/server/thin-view.bend": "9113a314f5a39189f80f4768a3284931ae1dbd1f97c13fccf759f57ff805f1ae",
     "src/server/thinstore.bend": "26a87007f744709226b28c22f7158ebef68ab73d6c9f4deb7502c7ea7f40c24f",
     "src/web/bots.bend": "c98dff4be1b4771758a55750519338cffbe4ec9b6ccd833b7f427ed7e24c41f1",
@@ -176,7 +176,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "16a5cc536e4e54b5e733abce2d3939102c07fe81451fcbe20029834dcab866d8"
+    "src/web/view.bend": "3d4a5ad484d8a9ac2bba29184800d54d8748a388968293afe2f3a5e100697f60"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

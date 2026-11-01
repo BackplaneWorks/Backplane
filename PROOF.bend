@@ -14818,13 +14818,21 @@ def Laws.sdb_terms_sql_same():
 
 # BEGIN view step 2 (H)
 def Laws.viewclock_not_after(): {==}
+
 def Laws.viewclock_within_step(): {==}
+
 def Laws.viewclock_step_same(): {==}
+
 def Laws.viewclock_next_step(): {==}
+
 def Laws.view_memo_anchor_left_out(): {==}
+
 def Laws.pace_live_own(): {==}
+
 def Laws.pace_live_other(): {==}
+
 def Laws.pace_live_none(): {==}
+
 def Laws.pace_live_committed_still(): {==}
 # END view step 2 (H)
 
@@ -14872,3 +14880,17 @@ def Laws.land_window_only():
 def Laws.land_timeline_only():
   {==}
 # END page landing (P)
+
+# BEGIN page splice (H)
+def Laws.view_memo_key_page_last(seq, info, p, anchor, view, web, thread): {==}
+def Laws.view_page_memo_same_step(): {==}
+def Laws.view_page_memo_next_step(): {==}
+def Laws.view_page_memo_other_inputs(): {==}
+def Laws.view_page_memo_not_fitted(): {==}
+def Laws.view_page_still_same_step(): {==}
+def Laws.view_page_still_next_step(): {==}
+def Laws.view_page_still_not_fitted(): {==}
+def Laws.view_page_splice_off_none(ms, base, clock, now): {==}
+def Laws.view_page_splice_default_off(): {==}
+def Laws.view_page_splice_setting_on(): {==}
+# END page splice (H)
