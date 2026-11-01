@@ -5368,6 +5368,20 @@ law settle_idle_running_stays:
 law settle_idle_off:
   {H.Shelve.ticked(H.Shelve.demo([M.SettingSet{"settle.idle.minutes", "0", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
 
+# a thread whose turn ended with a message still queued is working
+# (Lifecycle.working), so it is neither settled nor woken by the tick: it
+# was settled and woken again every minute (79 threads, about 3000 events
+# an hour on the desktop, 2026-10-31)
+law settle_idle_queued_stays:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Interrupted{}, 5n}, M.TurnQueued{"t1", "q1", "later", 6n}]), 1805n) == [] : List<&2, M.Change>}
+
+# an ephemeral run (run..., mailcoord-...) is never resumed, so once its turn
+# has been over for the idle window its queued messages go instead
+law settle_idle_ephemeral_queue_goes:
+  {H.Shelve.ticked(M.State.replay([M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"run1", "p1", "x", M.Local{}, "", "", "claude", "", 1n},
+    M.MessagePosted{"run1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"run1", M.Running{}, 2n}, M.TurnChanged{"run1", M.Interrupted{}, 5n},
+    M.TurnQueued{"run1", "q1", "later", 6n}], M.State.empty()), 1805n) == [M.QueueRemoved{"run1", "q1", 1805n}] : List<&2, M.Change>}
+
 # a thread that settled by idleness is back on the active shelf with the
 # next message
 law settle_idle_message_reopens:

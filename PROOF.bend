@@ -7431,6 +7431,12 @@ def Laws.settle_idle_running_stays():
 def Laws.settle_idle_off():
   {==}
 
+def Laws.settle_idle_queued_stays():
+  {==}
+
+def Laws.settle_idle_ephemeral_queue_goes():
+  {==}
+
 def Laws.settle_idle_message_reopens():
   {==}
 
