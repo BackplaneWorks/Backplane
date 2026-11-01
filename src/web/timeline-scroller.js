@@ -5,9 +5,10 @@ const RR = globalThis.__bpRender || null;
 // DOM effects for the pure Bend timeline planner. Rows remain opaque to this
 // adapter; the planner owns layout, ranges, following and scroll anchoring.
 export class TimelineScroller {
-  constructor(el, { plan, create, patch, key, same = null, onChange = () => {} }) {
+  constructor(el, { plan, create, patch, key, same = null, estimate = null, onChange = () => {} }) {
     this.el = el;
-    this.callbacks = { plan, create, patch, key, same, onChange };
+    this.callbacks = { plan, create, patch, key, same, estimate, onChange };
+    this._width = 0; // the list's width, kept from the ResizeObserver
     this.rows = [];
     this.sizes = Object.create(null);
     this.lastPlan = null;
@@ -113,7 +114,7 @@ export class TimelineScroller {
         this._observer = new ResizeObserver(entries => {
           RR?.n("tl.resize");
           for (const e of entries) {
-            if (e.target === this.el) this._view = null;
+            if (e.target === this.el) { this._view = null;this._width = Math.round(e.contentRect.width); }
             else if (e.target.dataset?.virtualKey !== undefined) this._dirty.add(e.target.dataset.virtualKey);
           }
           const changed = this._readSizes();
@@ -165,6 +166,16 @@ export class TimelineScroller {
     return changed;
   }
 
+  // The sizes the plan gets, in the keys' order: each row's measured
+  // height, else the host's estimate from what the row holds (app.bend's
+  // row_estimate), else null (the mean)
+  _sizeList() {
+    const est = this.callbacks.estimate;
+    if (!est) return this._keys.map(key => this.sizes[key] ?? null);
+    if (!this._width) this._width = Math.round(this.el.clientWidth);
+    return this._keys.map((key, i) => this.sizes[key] ?? est(this.rows[i], this._width) ?? null);
+  }
+
   // The mean measured row, whole pixels, for rows not measured yet (Bend's
   // Layout.estimate); 120 until a row is measured.
   _estimate() {
@@ -192,7 +203,7 @@ export class TimelineScroller {
         const plan = this.callbacks.plan({
           // the sizes as a list in the keys' order (null: not measured): the
           // planner walks it beside the keys, no keyed map to build or read
-          keys: this._keys.slice(), sizeList: this._keys.map(key => this.sizes[key] ?? null), estimate: this._estimate(),
+          keys: this._keys.slice(), sizeList: this._sizeList(), estimate: this._estimate(),
           previous: this.lastPlan, top: this.el.scrollTop,
           view: this._viewHeight(), follow: this._follow, ...request,
         });

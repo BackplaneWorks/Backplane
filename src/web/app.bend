@@ -6,6 +6,7 @@ import ../core/i18n.bend as I
 import ../core/msgs.bend as MSG
 import ../core/json.bend as J
 import ./dom.bend as D
+import ./row-estimate.bend as RE
 import ../core/client.bend as U
 import ./view.bend as V
 import ../core/cbor.bend as C
@@ -106,6 +107,11 @@ def recv(u: U.Ui, +o: J.Json) -> U.Act:
 
 # a bot's cat for an <img data-cat="<look>:<mood>:<px>"> (host.js keeps
 # each answer)
+# a timeline row's height before it is measured (row-estimate.bend), in px
+# at the column's width: the timeline scroller plans an unmeasured row at it
+def row_estimate(node: D.Node, width: Nat) -> Nat:
+  RE.Row.estimate(node, width)
+
 def cat(name: String) -> String:
   WC.WCat.uri(name)
 

@@ -258,6 +258,18 @@ function patchKey(v) {
   }
   return "";
 }
+// a timeline row's height before it is measured: app.bend's row_estimate
+// from what the row holds, once per row vnode and width
+const rowEstimates = new WeakMap();
+function rowEstimate(node, width) {
+  if (!node || typeof node !== "object" || !(width > 0)) return null;
+  const kept = rowEstimates.get(node);
+  if (kept && kept.width === width) return kept.h;
+  const h = Number(App.row_estimate(node, BigInt(width)));
+  rowEstimates.set(node, { width, h });
+  return h;
+}
+
 // whether two vnodes draw the same: a timeline row drawn again unchanged
 // keeps its old vnode (timeline-scroller.js), so nothing under it is
 // patched or measured. Shared pieces (bp-memo rows expand to the very
@@ -304,7 +316,7 @@ function patch(el, v) {
       scroller = new TimelineScroller(el, {
         plan: timelinePlan, create, patch,
         key: (node, i) => History.display_key_at(node, BigInt(i)),
-        same: sameNode,
+        same: sameNode, estimate: rowEstimate,
         onChange: timelineChanged,
       });
       timelineLists.set(el, scroller);

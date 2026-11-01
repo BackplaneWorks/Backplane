@@ -216,7 +216,24 @@ try {
     await page.evaluate((a: any) => window.__bpRR.begin(a.n, { blank: a.b, thread: a.t }), { n: `${name}:${target.role}`, b: !!o.blank, t: o.thread ?? "" });
     const t0 = Date.now();
     let error = "";
+    // --blank-shots N: pictures of the timeline in frames the blank check
+    // counted (taken every ~100 ms, kept when a blank frame was within 60 ms)
+    const shotsWanted = Number(opt("blank-shots", "0"));
+    let shooting = !!o.blank && shotsWanted > 0, shots = 0;
+    const shooter = (async () => {
+      const box = await timeline().boundingBox().catch(() => null);
+      while (shooting && box && shots < shotsWanted) {
+        const png = await page.screenshot({ clip: box }).catch(() => null);
+        const since = await page.evaluate(() => window.__bpRR.sinceBlank()).catch(() => -1);
+        if (png && since >= 0 && since < 60) {
+          mkdirSync(join(outDir, "blank-shots"), { recursive: true });
+          writeFileSync(join(outDir, "blank-shots", `${name}-${target.role}-${++shots}.png`), png);
+        }
+        await sleep(100);
+      }
+    })();
     try { await act(); } catch (e: any) { error = String(e.message).split("\n")[0]; }
+    shooting = false; await shooter;
     // at least past the page's debounces (a draft's 75 ms refresh) and a hub round trip
     if (!o.noSettle) { await sleep(o.minMs ?? 400); await quiet(page, o.quietMs ?? 500, o.max ?? 20000); }
     const r = await page.evaluate(() => window.__bpRR.end());
@@ -286,6 +303,23 @@ try {
     await open(page, other); await quiet(page, 800, 60000);
     if (scenarios.includes("open")) await measure("open", target, () => open(page, target), { quietMs: 800, max: 60000, thread: target.id });
     else { await open(page, target); await quiet(page, 800, 60000); }
+    // --dump-rows: every mounted row's facts and height, scrolled through
+    // the whole held thread (for fitting the row estimate; a real run's
+    // dump stays in its --out folder)
+    if (flag("dump-rows")) {
+      const seen = new Map<string, any>();
+      const box = await timeline().boundingBox();
+      if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      for (let i = 0; i < 120; i++) {
+        for (const r of await page.evaluate(() => window.__bpRR.rows())) if (!seen.has(r.key)) seen.set(r.key, r);
+        await page.mouse.wheel(0, -700); await sleep(120);
+      }
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(join(outDir, `rows-${target.role}.json`), JSON.stringify([...seen.values()]));
+      say(`dump-rows:${target.role}: ${seen.size} rows`);
+      for (let i = 0; i < 60; i++) await page.mouse.wheel(0, 5000);
+      await quiet(page, 800);
+    }
     if (scenarios.includes("idle")) await quiet(page, 1500, 20000);
     if (scenarios.includes("idle")) await measure("idle", target, () => sleep(4000));
     if (scenarios.includes("type1")) {

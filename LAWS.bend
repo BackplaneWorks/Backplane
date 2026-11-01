@@ -23,6 +23,7 @@ import ./src/core/restartretry.bend as WDRETRY
 import ./src/core/liveness.bend as LIVEWATCH
 
 import ./src/core/timeline-virtual.bend as TLVIRTUAL
+import ./src/web/row-estimate.bend as ROWEST
 
 import ./src/core/history-window.bend as NATIVEHISTORY
 
@@ -14693,3 +14694,13 @@ law side_rows_ix_tree_eq:
 law timeline_layout_list_same:
   {TLVIRTUAL.Layout.list([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}], [J.Num{"40.5"}, J.Null{}, J.Num{"0"}], "120", 0n, TLVIRTUAL.Px.int(16n), Nil{}) ==
     TLVIRTUAL.Layout.make([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}], TLVIRTUAL.Sizes.map(J.Json.obj([J.KV{"a", J.Num{"40.5"}}, J.KV{"c", J.Num{"0"}}])), "120", 0n, TLVIRTUAL.Px.int(16n), Nil{}) : TLVIRTUAL.Layout}
+
+
+# A timeline row's height before it is measured (src/web/row-estimate.bend):
+# a folded run of tool calls is its fixed 26 px, never the thread's mean; a
+# message is its base and a paragraph's lines at the column's width
+law row_estimate_fold:
+  {ROWEST.Row.estimate(DM.El{"div", "", [DM.At{"class", "fold"}], Nil{}}, 960n) == 26n : Nat}
+
+law row_estimate_paragraph:
+  {ROWEST.Row.estimate(DM.El{"div", "", [DM.At{"class", "msg assistant"}], [DM.El{"p", "", Nil{}, [DM.Txt{"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}]}]}, 960n) == 80n : Nat}

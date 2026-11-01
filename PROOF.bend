@@ -14939,3 +14939,9 @@ def Laws.side_rows_ix_tree_eq(): {==}
 
 def Laws.timeline_layout_list_same():
   {==}
+
+def Laws.row_estimate_fold():
+  {==}
+
+def Laws.row_estimate_paragraph():
+  {==}
