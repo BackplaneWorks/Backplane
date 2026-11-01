@@ -14806,3 +14806,11 @@ def Laws.review_history_keeps_newest(text):
 
 def Laws.review_history_overlap_once(fresh, stored):
   {==}
+
+# ---- store-terms ----
+def Laws.sdb_terms_due():
+  {==}
+
+def Laws.sdb_terms_sql_same():
+  {==}
+# ---- end store-terms ----

@@ -14446,3 +14446,15 @@ law review_history_overlap_once:
   for stored: String
   {REVIEWHISTORY.ReviewHistory.merge([M.Act{"same", "t", "review", "add", fresh, 2n}], [M.Act{"same", "t", "review", "add", stored, 1n}]) ==
     [M.Act{"same", "t", "review", "add", fresh, 2n}] : List<&2, M.Entry>}
+
+# ---- store-terms: search terms made again in the background ----
+# a store's search terms are behind only when its meta "terms" names another
+# version; a store without the key (made before it existed) is version 1
+law sdb_terms_due:
+  {[SDB.Sdb.terms.due(""), SDB.Sdb.terms.due("1"), SDB.Sdb.terms.due("0"), SDB.Sdb.terms.due("2")] == [False{}, False{}, True{}, True{}] : List<&2, Bool>}
+
+# the terms made again (server/storeterms.bend) are the ones a commit writes
+# for the same entry: the same statements, into the table named
+law sdb_terms_sql_same:
+  {SDB.Sdb.terms.sqls(SDB.Sdb.terms.of(5n, "Hello wörld, the BoardView renders")) == SDB.Sdb.terms.sql("term", 5n, "Hello wörld, the BoardView renders") : List<&2, List<&2, String>>}
+# ---- end store-terms ----

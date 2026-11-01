@@ -99,6 +99,7 @@ import ../core/store.bend as ST
 import ./hotboot.bend as HB
 import ./storeio.bend as STO
 import ./storefar.bend as SFL
+import ./storeterms.bend as STT
 import ./db.bend as SQ
 import ./botnet.bend as BN
 import ../core/far.bend as FR
@@ -18027,6 +18028,7 @@ def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front:
     Refresh.start(inbox, cfg)
     KSync.start(Cfg.home(cfg))
     SFL.Fl.start(Cfg.home(cfg), Cfg.thin.store(cfg))
+    STT.Terms.start(Cfg.home(cfg), Cfg.thin.store(cfg))
     IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})
@@ -18044,6 +18046,7 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     Refresh.start(inbox, cfg)
     KSync.start(Cfg.home(cfg))
     SFL.Fl.start(Cfg.home(cfg), Cfg.thin.store(cfg))
+    STT.Terms.start(Cfg.home(cfg), Cfg.thin.store(cfg))
     IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})

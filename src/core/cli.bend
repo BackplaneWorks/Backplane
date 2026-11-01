@@ -16,7 +16,8 @@ import Base
 #   --headless --foreground                        (the window app's)
 # The children the hub runs of its own binary come first and keep their
 # own arguments: --review (review.bend), --plot, --plot-tree, --plot-info
-# (plot.bend), --render (render.bend), --store-far (storefar.bend).
+# (plot.bend), --render (render.bend), --store-terms (storeterms.bend),
+# --store-far (storefar.bend).
 
 type Cli is Data:
   CliRun{}
@@ -160,7 +161,8 @@ def Cli.review(t: List<&2, String>) -> Cli:
       Cli.review.k(s, r)
 
 # 0 none, 1 --review, 2 --plot, 3 --plot-tree, 4 --plot-info, 5 --render,
-# 6 --telemetry-pow, 8 --store-far (server/storefar.bend)
+# 6 --telemetry-pow, 7 --store-terms (server/storeterms.bend), 8 --store-far
+# (server/storefar.bend)
 def Cli.child(h: String) -> U32:
   match h:
     case "--review":
@@ -175,6 +177,8 @@ def Cli.child(h: String) -> U32:
       6
     case "--render":
       5
+    case "--store-terms":
+      7
     case "--store-far":
       8
     case _:
@@ -194,6 +198,8 @@ def Cli.first(k: U32, +h: String, t: List<&2, String>) -> Cli:
       Cli.least(3n, t, "--plot-info FILE SIG INDEX")
     case 6:
       Cli.least(1n, t, "--telemetry-pow UUID")
+    case 7:
+      Cli.least(1n, t, "--store-terms HOME")
     case 8:
       Cli.least(1n, t, "--store-far HOME")
     case _:

@@ -121,3 +121,31 @@ far_line is refilled to the caught-up store's feed, row for row, and not
 again; a resumed refill writes nothing up to its checkpoint) and
 `bun test/tools/far_line_peer_e2e.ts OLD_HUB NEW_HUB WIRE` (a peer that
 skipped the renames inside the hole ends consistent after one snapshot).
+
+## Search terms' own version
+
+The term table is a function of the entry table alone (each row's text and
+ordinal), so a change to how terms are made (`THIN.Words.of`, the search
+fold) bumps `Sdb.terms.v()` (storedb.bend), not `Sdb.codec()`: no rebuild.
+A store whose meta `terms` is behind (a store without the key is version 1)
+keeps serving, and once the hub serves (server/storeterms.bend):
+
+1. a child (`backplane --store-terms HOME`, nice 19, ionice idle, a 1 GB
+   JS heap) clears any `term_old` a
+   previous swap left, then fills `term_next` from the entries, 2,000 per
+   short transaction, in ordinal order; after a restart it goes on from
+   `term_next`'s last ordinal (meta `terms.next` names the version it is
+   for), and says `built <last ordinal>`;
+2. the hub, in one script on its own handle (between two commits), adds the
+   terms of the entries committed since, renames `term` to `term_old` and
+   `term_next` to `term`, and sets meta `terms`;
+3. the child runs again and deletes `term_old` in batches.
+
+Search answers from the old terms until the swap. On a real 910 MB log (337,695 entries, 21.2
+million term rows) the child took 260 s; it holds about 0.6 GB, up to 1.3
+GB while it makes the terms of one 5.7 MB shell output (the terms must be
+the ones a commit makes, from the whole text). Its rows equal the store's
+own but for 198 rows of 7 old system messages whose stored terms came from
+a longer text than the one stored. Laws `sdb_terms_*`; test
+`bun test/tools/store_terms_e2e.ts` (a store with another version's terms
+gets terms equal to a fresh build's, row for row, and is then left alone).
