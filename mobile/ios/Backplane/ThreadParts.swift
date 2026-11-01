@@ -30,8 +30,9 @@ enum PhaseColor {
 // presentation from an older hub is inactive, never proof of a worker.
 private func threadStatusSignal(_ state: String, _ status: String?) -> String {
     switch status ?? "" {
-    case "": return state == "run" ? "active" : state == "fail" ? "blocked" : "inactive"
-    case "blocked", "needs you", "approval", "input", "failed": return "blocked"
+    case "": return state == "run" ? "active" : state == "fail" ? "failed" : "inactive"
+    case "failed": return "failed"
+    case "blocked", "needs you", "approval", "input": return "blocked"
     case "active", "running", "watching", "cancelling", "working", "monitoring": return "active"
     case "stalled": return "stalled"
     case "waiting": return "waiting"
@@ -52,6 +53,7 @@ struct StatusDot: View {
         switch signal {
         case "stalled": return lang == "ja" ? "進捗停止・実行中の作業は継続しています" : "Stalled: no recent progress; busy work continues"
         case "blocked": return lang == "ja" ? "対応が必要です" : "Blocked: needs interaction"
+        case "failed": return lang == "ja" ? "失敗しました" : "Failed: agent stopped with an error"
         case "active": return lang == "ja" ? "作業中" : "Working: agent or owned work active"
         case "settled": return lang == "ja" ? "完了済み" : "Settled"
         case "waiting": return lang == "ja" ? "サブエージェントや開始した作業の完了待ちです" : "Waiting: on subagents or work it started"
@@ -64,7 +66,7 @@ struct StatusDot: View {
         Group {
             switch signal {
             case "stalled": Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(PhaseColor.warn).font(.caption)
-            case "blocked": Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(PhaseColor.bad).font(.caption)
+            case "blocked", "failed": Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(PhaseColor.bad).font(.caption)
             case "active": ProgressView().controlSize(.mini).tint(PhaseColor.accent)
             case "waiting": ProgressView().controlSize(.mini).tint(PhaseColor.waiting)
             case "finished": Image(systemName: "checkmark.circle.fill").foregroundStyle(PhaseColor.ok).font(.caption)
@@ -324,6 +326,7 @@ struct EntryRow: View {
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: 44)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -362,11 +365,13 @@ struct EntryRow: View {
         default:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(entry.label ?? "").foregroundStyle(.tertiary)
-                Text(entry.text).lineLimit(2)
+                Text(entry.text).lineLimit(entry.tone == "error" ? nil : 2)
             }
             .font(.caption.monospaced())
             .foregroundStyle(entry.tone == "error" ? AnyShapeStyle(PhaseColor.bad) : AnyShapeStyle(.secondary))
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .contextMenu { menu }
         }
     }
 }
@@ -375,7 +380,7 @@ private func subColor(_ state: String) -> Color {
     switch state {
     case "active", "running", "watching", "cancelling": PhaseColor.accent
     case "stalled": PhaseColor.warn
-    case "blocked", "needs you": PhaseColor.bad
+    case "blocked", "needs you", "failed": PhaseColor.bad
     case "waiting": PhaseColor.waiting
     case "finished": PhaseColor.ok
     default: PhaseColor.faint

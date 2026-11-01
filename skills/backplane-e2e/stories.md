@@ -118,6 +118,8 @@ show under it with nothing below them. Click the row: the calls hang under
 it on a rule; click it again: they go, and none is left below the reply
 (the hub-drawn page too). Open it, send "tools:3 again", switch to another
 thread and back: the first run is still open, the new one shut.
+A: long-press a tool row for Copy or Select text; the reader shows its
+whole text. Error rows wrap in full, and their dot announces Failed.
 
 **S52 The pairing link in Settings** (W D)
 Start the hub with `BP_E2E_TAILNET=1` (hub.log: "Backplane on your tailnet:
