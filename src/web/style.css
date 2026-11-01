@@ -2150,6 +2150,12 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .top-views .workspace-menu .workspace-current, .top-views .workspace-menu summary > svg:last-child { display: none; }
   .top-views .workspace-buy { margin: 0; padding: 0; border: 0; }
   .top-views .keycap { display: none; }
+  /* a bot's chat: its own bar (back, the bot, Pages) is the one top bar;
+     the place bar over it only said "Bots / <bot>" again */
+  .app.top:has(> main .bot-head) > .topbar { display: none; }
+  .app.top main .bot-head { gap: 8px; padding: max(4px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) 4px env(safe-area-inset-left); }
+  .app.top main .bot-head .back { min-width: 44px; min-height: 44px; padding: 0; border: 0; background: none; font-size: calc(22px * var(--text-scale, 100) / 100); color: var(--dim); }
+  .app.top main .bot-head .bot-mobile-menu > summary { min-height: 40px; border-color: transparent; background: none; }
   .top-views .workspace-buy button.buy { width: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 0; background: none; justify-content: center; }
   .top-views .workspace-buy .workspace-label, .top-views .workspace-buy .price { display: none; }
 

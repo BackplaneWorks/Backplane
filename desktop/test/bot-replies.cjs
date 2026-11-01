@@ -86,9 +86,12 @@ let app,page;const start=performance.now();
  // A phone (430 x 932, an iPhone's CSS width): nothing scrolls the page or
  // the timeline sideways, with the long code on screen and the reply bar
  // open, anywhere up the thread. It came back once after a fix (#567).
- await app.evaluate(({BrowserWindow},[w,h])=>{const win=BrowserWindow.getAllWindows()[0];win.setMinimumSize(200,200);win.setContentSize(w,h);},[430,932]);
- await page.waitForFunction(()=>innerWidth<=440);
- await chat();
+ await page.setViewportSize({width:430,height:932});
+ await page.waitForFunction(()=>matchMedia('(max-width: 760px)').matches&&innerWidth<=440);
+ // (the chat stays open; a phone hides the sidebar while a thread is)
+ await ready(bub);
+ // (the jump above left the thread on the plan: back to its end, where the wide message is)
+ for(let i=0;i<20&&!(await page.locator('[data-id="m-wide"] button.reply').count());i++){await page.evaluate(()=>{const t=document.getElementById('timeline');t.scrollTop=t.scrollHeight;});await page.waitForTimeout(200);}
  await page.locator('[data-id="m-wide"] button.reply').click();
  await page.locator('.reply-chip').waitFor();
  await page.locator('#composer').fill('Reply is back');
