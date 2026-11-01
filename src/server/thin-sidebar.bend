@@ -77,10 +77,16 @@ def Sidebar.request(+p: J.Json, +u: U.Ui) -> Bool:
   Bool.or(Bool.and(String.eq(action, "flag"), String.eq(J.Json.get_str(p, "value", ""), "settings")),
     Bool.or(String.eq(action, "settings-page"), Bool.and(String.is_empty(action), U.Ui.flag(u, "settings"))))
 
+def Sidebar.lookup(+p: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(p, "action", ""), "fab-look"), String.is_empty(J.Json.get_str(p, "value", "")))
+
 # Canonical-derived data is independent of the selected main panel. Ordinary
 # reads may use it without acquiring Settings' rendered-sidebar reuse.
+# The ordering card's own lookup (client.bend's Fab.sync, "fab-look" with
+# no value, sent after each message) is a read too: it asks the hub for
+# the card and changes nothing the sidebar draws that its image key misses.
 def Sidebar.derived(+p: J.Json, u: U.Ui) -> Bool:
-  Bool.or(String.is_empty(J.Json.get_str(p, "action", "")), Sidebar.request(p, u))
+  Bool.or(String.is_empty(J.Json.get_str(p, "action", "")), Bool.or(Sidebar.lookup(p), Sidebar.request(p, u)))
 
 # Ordinary chat keeps the original full canonical sequence in its picture
 # identity. Only the already-qualified Settings path uses the metadata key.

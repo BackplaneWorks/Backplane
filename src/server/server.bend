@@ -7111,7 +7111,8 @@ def Cfg.tch(c: Cfg) -> TE.TeachSt:
 def Cfg.with_tch(+c: Cfg, t: TE.TeachSt) -> Cfg:
   Cfg.with_bn(c, BN.Bn.with_tch(Cfg.bn(c), t))
 
-# th: the thread whose stream changed ("*": any of them)
+# th: the thread whose stream changed ("*": any of them; a delta's touch is
+# TPACE.Touch.live of its thread: only that thread's views hear it)
 def Cfg.thin.live(+cfg: Cfg, streams: Map<&2, TLIVE.Stream>, +th: String) -> Cfg:
   Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), streams, Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), TPACE.Notes.touch(Cfg.thin.notes(cfg), th), Cfg.thin.store(cfg), Cfg.thin.signal_seq(cfg)})
 
@@ -7119,7 +7120,7 @@ def Live.with(+cfg: Cfg, +lv: List<&2, LV.Buf>) -> Cfg:
   Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.snapshot(lv, Cfg.thin.next(Cfg.thin.revision(cfg)), Map.new(&2, TLIVE.Stream)), "*")
 
 def Live.with_delta(+cfg: Cfg, +lv: List<&2, LV.Buf>, +thread: String, text: String) -> Cfg:
-  Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg))), thread)
+  Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg))), TPACE.Touch.live(thread))
 
 # the tool calls open now (core/deploy.bend's Open.*), kept in memory only:
 # after a restart there are none, which is right, the old processes are gone
@@ -12303,6 +12304,12 @@ def Hub.thin.native_fit.anchor(ids: List<&2, String>, +index: THIN.Index, +ancho
 def Hub.thin.native_fit.rows(+rows: List<&2, String>, index: THIN.Index, p: J.Json) -> List<&2, String>:
   List.take(&2, String, rows, Nat.max(Hub.thin.native_fit.anchor(rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", ""), 0n), Nat.max(1n, Nat.div(List.length(&2, String, rows), 2n))))
 
+# A view cut down to fit keeps the rows around the page's anchor, so it is
+# remembered under its key and the anchor's row: an ordinary read's key
+# (the anchor left out, thin-actor.bend's Memo.request) never finds it
+def Hub.thin.fit.key(+key: String, +p: J.Json) -> String:
+  key ++ "\tanchor:" ++ J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")
+
 def Hub.thin.native_fit.loop(fuel: Nat, fits: Bool, rendered: TA.Rendered, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat,
     +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +version: Nat) -> IO(Hub):
   match fuel fits:
@@ -12313,7 +12320,7 @@ def Hub.thin.native_fit.loop(fuel: Nat, fits: Bool, rendered: TA.Rendered, +acte
     case 1n+k False{}:
       +a2 = TA.Acted.reduce(acted)
       +next = Hub.thin.native_fit.rows(rows, index, p)
-      +trial = TA.Rendered.remember.clock(TA.Actor.render.acted(a2, False{}, shown, index, p, epoch, now, next, stream, revision), key, ms, now, stream, False{}, p)
+      +trial = TA.Rendered.remember.clock(TA.Actor.render.acted(a2, False{}, shown, index, p, epoch, now, next, stream, revision), Hub.thin.fit.key(key, p), ms, now, stream, False{}, p)
       Hub.thin.native_fit.loop(k, Nat.is_le(J.Json.bytes(Hub.thin.native_fit.envelope(o, TA.Rendered.result(trial), context, version)), 262144n), trial,
         a2, h, client, o, c, now, context, p, key, ms, shown, index, epoch, next, stream, revision, version)
 
@@ -12380,7 +12387,7 @@ def Hub.thin.web_fit.halvings() -> Nat:
 def Hub.thin.web_fit.level(+j: Nat, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat) -> TA.Rendered:
   +bounded = TV.Obj.put(p, "bodyBudget", J.Num{"1"})
   TA.Rendered.remember.clock(TA.Actor.render.acted(Hub.thin.web_fit.floor.acted(j, acted), True{}, shown, index, bounded, epoch, now,
-    Hub.thin.web_fit.floor.rows(j, rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")), stream, revision), key, ms, now, stream, True{}, bounded)
+    Hub.thin.web_fit.floor.rows(j, rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")), stream, revision), Hub.thin.fit.key(key, p), ms, now, stream, True{}, bounded)
 
 
 def Hub.thin.web_fit.done(+s: FitS) -> Bool:
@@ -12522,8 +12529,8 @@ def Hub.thin.render.current(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: 
       +web = String.eq(Client.thin.mode(c), "view-web")
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       +key = TA.Memo.key(M.State.seq(st), Hub.thin.view_key(st, cfg, thread), p, anchor, ThinContext.view(context), web, thread) ++ TA.Actor.native.key(ThinContext.actors(context)) ++ TA.Actor.loading.key(ThinContext.actors(context))
-      Hub.thin.render.memo(TA.Memo.reply.clock(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, now, web,
-        TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), thread, Hub.thin.view_epoch(st, cfg, thread), J.Json.get_obj(p, "target"), TA.Actor.loc(ThinContext.actors(context))),
+      Hub.thin.render.memo(TA.Memo.reply.at(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, now, web,
+        TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), thread, Hub.thin.view_epoch(st, cfg, thread), J.Json.get_obj(p, "target"), TA.Actor.loc(ThinContext.actors(context)), J.Json.get_obj(p, "anchor")),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, anchor, p, key, ms)
 
 def ThinContext.with_anchor(c: ThinContext, anchor: Nat) -> ThinContext:

@@ -103,23 +103,55 @@ def Live.node(+web: Bool, +old: J.Json, +id: String, +text: String, +lc: I.Loc, 
       Live.mobile(old, id, text, lc, part)
 
 # the tree with its live node written again (hit: whether j is it)
-def Live.put(j: J.Json, hit: Bool, +web: Bool, +id: String, +text: String, +lc: I.Loc, +part: J.Json) -> J.Json:
+# Live.put rebuilds only the path to the live row: a node with no live row
+# below it comes back as it was, the very value, so the view delta's diff
+# (thin-delta.bend, ContentEq by identity first) passes over all of it at
+# once. Rebuilding the whole tree made every splice's diff compare all of
+# it again (about 19 ms a streamed delta on a long thread).
+type Put is Data:
+  Put{hit: Bool, node: J.Json}
+
+def Put.node(p: Put) -> J.Json:
+  match p:
+    case Put{_, +n}: n
+
+def Put.obj(p: Put, +j: J.Json) -> Put:
+  match p:
+    case Put{True{}, +n}: Put{True{}, J.Obj{n}}
+    case Put{False{}, _}: Put{False{}, j}
+
+def Put.arr(p: Put, +j: J.Json) -> Put:
+  match p:
+    case Put{True{}, +n}: Put{True{}, J.Arr{n}}
+    case Put{False{}, _}: Put{False{}, j}
+
+def Put.item(ph: Put, pt: Put, +j: J.Json) -> Put:
+  match ph pt:
+    case Put{False{}, _} Put{False{}, _}: Put{False{}, j}
+    case Put{_, +h} Put{_, +t}: Put{True{}, J.Item{h, t}}
+
+def Put.field(+k: String, pv: Put, pt: Put, +j: J.Json) -> Put:
+  match pv pt:
+    case Put{False{}, _} Put{False{}, _}: Put{False{}, j}
+    case Put{_, +v} Put{_, +t}: Put{True{}, J.Field{k, v, t}}
+
+def Live.put(+j: J.Json, hit: Bool, +web: Bool, +id: String, +text: String, +lc: I.Loc, +part: J.Json) -> Put:
   match j hit:
     case +o True{}:
-      Live.node(web, o, id, text, lc, part)
+      Put{True{}, Live.node(web, o, id, text, lc, part)}
     case J.Obj{+fs} False{}:
-      J.Obj{Live.put(fs, False{}, web, id, text, lc, part)}
+      Put.obj(Live.put(fs, False{}, web, id, text, lc, part), j)
     case J.Arr{+xs} False{}:
-      J.Arr{Live.put(xs, False{}, web, id, text, lc, part)}
+      Put.arr(Live.put(xs, False{}, web, id, text, lc, part), j)
     case J.Item{+h, +t} False{}:
-      J.Item{Live.put(h, Live.is(h, web, id), web, id, text, lc, part), Live.put(t, False{}, web, id, text, lc, part)}
+      Put.item(Live.put(h, Live.is(h, web, id), web, id, text, lc, part), Live.put(t, False{}, web, id, text, lc, part), j)
     case J.Field{+k, +v, +t} False{}:
-      J.Field{k, Live.put(v, Live.is(v, web, id), web, id, text, lc, part), Live.put(t, False{}, web, id, text, lc, part)}
+      Put.field(k, Live.put(v, Live.is(v, web, id), web, id, text, lc, part), Live.put(t, False{}, web, id, text, lc, part), j)
     case +o False{}:
-      o
+      Put{False{}, o}
 
 def Live.tree(+j: J.Json, +web: Bool, +id: String, +text: String, +lc: I.Loc, +part: J.Json) -> J.Json:
-  Live.put(j, Live.is(j, web, id), web, id, text, lc, part)
+  Put.node(Live.put(j, Live.is(j, web, id), web, id, text, lc, part))
 
 # The reply
 # ---------

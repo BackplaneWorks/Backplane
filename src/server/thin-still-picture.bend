@@ -1,11 +1,13 @@
 import Base
+import ../core/viewclock.bend as VC
 import ../core/json.bend as J
 import ../core/thin-live.bend as TL
 import ../core/thin-wire.bend as W
 
 # A complete, private picture for an ordinary web-thread read. Its key is
 # the full canonical/request/info key, never a metadata or transport receipt.
-# The render clock must be exactly equal; this is not an age-based lease.
+# It is read only in the view-clock step it was drawn in (core/viewclock.bend:
+# a view is drawn with that step's clock, so it is the same all through it).
 type Picture is Data:
   Picture{key: String, clock: Nat, result: J.Json}
 
@@ -37,4 +39,4 @@ def Picture.read(+update: Bool, picture: Picture, +key: String, +clock: Nat, +st
   match picture:
     case Picture{saved, at, res}:
       Picture.select(Bool.and(update, Bool.and(String.eq(saved, key),
-        Bool.and(Nat.is_eq(at, clock), Nat.is_eq(TL.Stream.size(stream), 0n)))), res)
+        Bool.and(VC.ViewClock.same(at, clock), Nat.is_eq(TL.Stream.size(stream), 0n)))), res)

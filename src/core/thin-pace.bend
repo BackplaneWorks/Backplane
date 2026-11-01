@@ -46,15 +46,33 @@ def Touch.member(ts: List<&2, String>, +th: String, hit: Bool) -> Bool:
     case +x <> rest False{}:
       Touch.member(rest, th, String.eq(x, th))
 
+# A thread's streamed delta touches its thread's views only (Touch.live:
+# its entry is the thread's id marked by a leading tab, which no id has).
+# A view draws a stream only for its own thread (the hub's render reads
+# TLIVE.Stream.get of the view's thread, and a thin view's other-thread
+# live map is empty), so another thread's delta can change nothing it
+# shows: it is not told (laws pace_live_*). Committed changes are as before.
+def Touch.live(+th: String) -> String:
+  "\t" ++ th
+
+def Touch.is_live(+x: String) -> Bool:
+  String.starts_with(x, "\t")
+
+def Touch.real(ts: List<&2, String>, found: Bool) -> Bool:
+  match ts found:
+    case _ True{}: True{}
+    case Nil{} False{}: False{}
+    case +x <> rest False{}: Touch.real(rest, Bool.not(Touch.is_live(x)))
+
 def Touch.any(t: Touch) -> Bool:
   match t:
     case Touch{all, ts}:
-      Bool.or(all, Bool.not(List.is_empty(&2, String, ts)))
+      Bool.or(all, Touch.real(ts, False{}))
 
 def Touch.own(t: Touch, +th: String) -> Bool:
   match t:
-    case Touch{all, ts}:
-      Bool.or(all, Bool.and(Touch.member(ts, th, False{}), Bool.not(String.is_empty(th))))
+    case Touch{all, +ts}:
+      Bool.or(all, Bool.and(Bool.or(Touch.member(ts, th, False{}), Touch.member(ts, Touch.live(th), False{})), Bool.not(String.is_empty(th))))
 
 def Touch.level.k(own: Bool, any: Bool) -> Nat:
   match own any:

@@ -10,9 +10,9 @@
 //   send      Enter posts nothing: the hub refuses a bounded draft and the
 //             draft stays
 //
-//   bun test/tools/big_draft_e2e.ts --bin BACKPLANE --web DIR [--port 3826] [--wire DIR]
+//   bun test/tools/big_draft_e2e.ts --bin BACKPLANE --web DIR [--port 3826] [--wire DIR] [--keep]
 // Only the hub started here is stopped.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -262,6 +262,10 @@ try {
 } finally {
   await browser?.close();
   proc.kill();
+  await proc.exited;
+  // the temp home goes unless asked to stay (--keep)
+  if (!argv.includes("--keep")) rmSync(root, { recursive: true, force: true });
+  else console.log(`kept ${root}`);
 }
 console.log(fail ? `big draft: ${fail} failed` : "big draft: all passed");
 process.exit(fail ? 1 : 0);

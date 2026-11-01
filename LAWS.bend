@@ -414,6 +414,7 @@ import ./src/core/thin.bend as JTHIN # J2: JS stack
 import ./src/server/thin-content-eq.bend as CONTENTEQ
 
 import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+import ./src/core/viewclock.bend as VCLOCK # view step 2 (H)
 
 import ./src/server/thin-view.bend as TVIEWH # view delta (H)
 
@@ -14458,3 +14459,41 @@ law sdb_terms_due:
 law sdb_terms_sql_same:
   {SDB.Sdb.terms.sqls(SDB.Sdb.terms.of(5n, "Hello wörld, the BoardView renders")) == SDB.Sdb.terms.sql("term", 5n, "Hello wörld, the BoardView renders") : List<&2, List<&2, String>>}
 # ---- end store-terms ----
+
+# BEGIN view step 2 (H): the view clock, the memo without the anchor, streamed deltas heard by their own thread
+# A view is drawn with its view-clock step's start (core/viewclock.bend):
+# never later than the hub's clock, at most a step behind, and the same
+# for every second of the step (so a view drawn in it is kept all through)
+law viewclock_not_after:
+  {Nat.is_le(VCLOCK.ViewClock.of(83n), 83n) == True{} : Bool}
+
+law viewclock_within_step:
+  {Nat.is_lt(Nat.sub(83n, VCLOCK.ViewClock.of(83n)), VCLOCK.ViewClock.step()) == True{} : Bool}
+
+law viewclock_step_same:
+  {VCLOCK.ViewClock.same(60n, 89n) == True{} : Bool}
+
+law viewclock_next_step:
+  {VCLOCK.ViewClock.same(89n, 90n) == False{} : Bool}
+
+# the render memo's key leaves the page's anchor out (a full render only
+# echoes it; one cut down around it is remembered under a key naming it)
+law view_memo_anchor_left_out:
+  {CHATSIDE.Memo.request(J.Json.obj([J.KV{"anchor", J.Json.obj([J.KV{"id", J.Str{"m1"}}, J.KV{"offset", J.Num{"42"}}])}]))
+    == CHATSIDE.Memo.request(J.Json.obj([J.KV{"anchor", J.Json.obj([J.KV{"id", J.Str{"m2"}}, J.KV{"offset", J.Num{"7"}}])}])) : J.Json}
+
+# another thread's streamed delta is heard only by that thread's views
+# (core/thin-pace.bend's Touch.live): a view of another thread, or of none,
+# is not told; a committed change is heard as before
+law pace_live_own:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.none(), TPR1.Touch.live("t1")), "t1") == 2n : Nat}
+
+law pace_live_other:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.none(), TPR1.Touch.live("t1")), "t2") == 0n : Nat}
+
+law pace_live_none:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.none(), TPR1.Touch.live("t1")), "") == 0n : Nat}
+
+law pace_live_committed_still:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.add(TPR1.Touch.none(), TPR1.Touch.live("t1")), "t1"), "t2") == 1n : Nat}
+# END view step 2 (H)
