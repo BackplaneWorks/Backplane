@@ -1,228 +1,26 @@
 {
- "open": {
-  "mutations": 162,
-  "recreatedIdentical": 27,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 872866,
-  "renderFull": 9,
-  "domPatch": 7595,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 6
- },
- "idle": {
-  "mutations": 2,
-  "recreatedIdentical": 2,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 65536,
-  "renderFull": 2,
-  "domPatch": 2,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 2
- },
- "type1": {
-  "mutations": 14,
-  "recreatedIdentical": 2,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 14,
-  "wsInBytes": 334662,
-  "renderFull": 5,
-  "domPatch": 3065,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 4
- },
- "type1b": {
-  "mutations": 7,
-  "recreatedIdentical": 2,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 7,
-  "wsInBytes": 334666,
-  "renderFull": 5,
-  "domPatch": 3065,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 4
- },
- "burst": {
-  "mutations": 9,
-  "recreatedIdentical": 2,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 9,
-  "wsInBytes": 334782,
-  "renderFull": 5,
-  "domPatch": 3065,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 4
- },
- "scroll-up": {
-  "mutations": 2269,
-  "recreatedIdentical": 411,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 75,
-  "wsInBytes": 1925310,
-  "renderFull": 27,
-  "domPatch": 31795,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 27
- },
- "scroll-down": {
-  "mutations": 1380,
-  "recreatedIdentical": 644,
-  "touchedUnchangedRows": 17,
-  "outsideRecords": 74,
-  "wsInBytes": 1833240,
-  "renderFull": 26,
-  "domPatch": 31339,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 26
- },
- "stress-up": {
-  "mutations": 1549,
-  "recreatedIdentical": 217,
-  "touchedUnchangedRows": 17,
-  "outsideRecords": 2,
-  "wsInBytes": 2590076,
-  "renderFull": 29,
-  "domPatch": 34424,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 29
- },
- "stress-down": {
-  "mutations": 1981,
-  "recreatedIdentical": 842,
-  "touchedUnchangedRows": 15,
-  "outsideRecords": 2,
-  "wsInBytes": 2155078,
-  "renderFull": 27,
-  "domPatch": 32281,
-  "loading": 0,
-  "blankFrames": 152,
-  "hubViews": 27
- },
- "paste": {
-  "mutations": 124,
-  "recreatedIdentical": 47,
-  "touchedUnchangedRows": 7,
-  "outsideRecords": 124,
-  "wsInBytes": 250722,
-  "renderFull": 6,
-  "domPatch": 4537,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 5
- },
- "pastebig": {
-  "mutations": 87,
-  "recreatedIdentical": 36,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 65590,
-  "renderFull": 4,
-  "domPatch": 1622,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 2
- },
- "clock": {
-  "mutations": 2,
-  "recreatedIdentical": 2,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 65536,
-  "renderFull": 2,
-  "domPatch": 2,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 2
- },
- "bg-stream": {
-  "mutations": 2,
-  "recreatedIdentical": 2,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 69686,
-  "renderFull": 2,
-  "domPatch": 2,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 2
- },
- "send": {
-  "mutations": 10,
-  "recreatedIdentical": 4,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 65776,
-  "renderFull": 2,
-  "domPatch": 2,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 2
- },
- "stream": {
-  "mutations": 2,
-  "recreatedIdentical": 2,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 65596,
-  "renderFull": 2,
-  "domPatch": 2,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 2
- },
- "toolgroup": {
-  "mutations": 12,
-  "recreatedIdentical": 5,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 66064,
-  "renderFull": 2,
-  "domPatch": 2,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 2
- },
- "switch-away": {
-  "mutations": 287,
-  "recreatedIdentical": 39,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 872044,
-  "renderFull": 9,
-  "domPatch": 9105,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 7
- },
- "switch-back": {
-  "mutations": 226,
-  "recreatedIdentical": 36,
-  "touchedUnchangedRows": 2,
-  "outsideRecords": 2,
-  "wsInBytes": 871232,
-  "renderFull": 10,
-  "domPatch": 9236,
-  "loading": 0,
-  "blankFrames": 2,
-  "hubViews": 7
- },
  "known": [
   {
    "scenario": "stress-down:tools",
    "rule": "blankFrames",
    "blankFrames": 120,
    "worstGapPx": 670,
-   "seen": "main and this branch, 2026-11-01: 26-120 blank frames, worst gaps 183-669 px, under 4x CPU throttling",
+   "seen": "main and #576, 2026-11-01: 26-120 blank frames, worst gaps 183-669 px, under 4x CPU throttling; 0 on main+#583 in one run",
    "until": "backplane/scroll-valid-range (the scroller's valid range and overscan) removes this entry"
+  },
+  {
+   "scenario": "stress-up:long",
+   "rule": "stalls",
+   "stalls": 3,
+   "seen": "main + #583, 2026-11-01: 0-1 wheel a sweep waited 300-400 ms for a page under 4x CPU throttling (pages in flight, not stuck: the recovery check passes)",
+   "until": "the history paging follow-up's prefetch (P) brings this to 0 and removes the entry"
+  },
+  {
+   "scenario": "stress-down:long",
+   "rule": "stalls",
+   "stalls": 3,
+   "seen": "main + #583, 2026-11-01: 0-1 wheel a sweep waited 300-400 ms for a page under 4x CPU throttling (pages in flight, not stuck: the recovery check passes)",
+   "until": "the history paging follow-up's prefetch (P) brings this to 0 and removes the entry"
   }
  ]
 }

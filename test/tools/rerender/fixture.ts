@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type Target = { role: "long" | "tools" | "bg"; id: string; title: string };
-export type Fixture = { lines: number; bytes: number; targets: Target[]; source: string };
+export type Fixture = { lines: number; bytes: number; targets: Target[]; source: string; cut?: number; sha256?: string };
 
 const words = (n: number, seed: number) => Array.from({ length: n }, (_, i) => `word${(i * 7 + seed) % 97}`).join(" ");
 
@@ -81,7 +81,13 @@ function* fileLines(path: string) {
   } finally { closeSync(fd); }
 }
 
-export function real(home: string, root: string, o: { log: string; long: string; tools: string; bg: string }): Fixture {
+// The same input on every run: the slice ends at `until` (unix seconds;
+// default the log's newest event), every turn still running there is
+// closed as interrupted and every delegated task still open is cancelled
+// and delivered (a copied log otherwise resumes them: the stand-in agent
+// then streams during open and idle), and all the slice adds is stamped at
+// the cut. report.json carries the cut and the slice's sha256.
+export function real(home: string, root: string, o: { log: string; long: string; tools: string; bg: string; until?: number }): Fixture {
   const liveHome = join(homedir(), ".backplane-bend");
   const elsewhere = join(root, "elsewhere");
   const keep = new Set([o.long, o.tools, o.bg].filter(Boolean));
@@ -94,9 +100,17 @@ export function real(home: string, root: string, o: { log: string; long: string;
   const titles = new Map<string, string>();
   const rx = /^\{"\$":"([A-Za-z]+)"/;
   const threadOf = (line: string) => /"thread":"([^"]+)"/.exec(line)?.[1] ?? "";
+  const turns = new Map<string, string>(), tasks = new Set<string>();
+  let cut = 0;
   for (const raw of fileLines(o.log)) {
     if (!raw) continue;
+    const at = Number(/"at":(\d+)/.exec(raw)?.[1] ?? 0);
+    if (o.until && at > o.until) continue;
+    if (at > cut) cut = at;
     const ty = rx.exec(raw)?.[1] ?? "";
+    if (ty === "TurnChanged") turns.set(/"thread":"([^"]+)"/.exec(raw)?.[1] ?? "", /"state":"([a-z]+)"/.exec(raw)?.[1] ?? "");
+    if (ty === "TaskDelegated") tasks.add(/"task":"([^"]+)"/.exec(raw)?.[1] ?? "");
+    if (ty === "TaskDelivered") tasks.delete(/"task":"([^"]+)"/.exec(raw)?.[1] ?? "");
     if (DROP_TYPES.has(ty) || /devicetoken|webhook|apns/i.test(raw)) continue;
     if (ty === "WorkSet" && !raw.includes('"kind":"bg"')) continue;
     const setting = ty === "SettingSet" ? /"key":"((?:[^"\\]|\\.)*)"/.exec(raw)?.[1] ?? "" : "";
@@ -119,7 +133,12 @@ export function real(home: string, root: string, o: { log: string; long: string;
     if (SIDEBAR_TYPES.has(ty)) out.push(line);
   }
   for (const id of keep) if (!titles.has(id)) throw new Error(`no thread ${id} in ${o.log}`);
-  const now = Math.floor(Date.now() / 1000);
+  const now = o.until ?? cut;
+  for (const [t, state] of turns) if (t && state === "running") out.push(JSON.stringify({ $: "TurnChanged", thread: t, state: "interrupted", at: now }));
+  for (const k of tasks) if (k) {
+    out.push(JSON.stringify({ $: "TaskStateSet", task: k, state: "cancelled", summary: "", at: now }));
+    out.push(JSON.stringify({ $: "TaskDelivered", task: k, at: now }));
+  }
   const targets: Target[] = [];
   for (const [role, id] of [["long", o.long], ["tools", o.tools], ["bg", o.bg]] as const) {
     if (!id) continue;
@@ -136,5 +155,7 @@ export function real(home: string, root: string, o: { log: string; long: string;
   for (const l of kept) if (l.startsWith('{"$":"BotSet"')) try { mkdirSync(join(home, "bots", JSON.parse(l).id), { recursive: true }); } catch {}
   const text = kept.join("\n") + "\n";
   writeFileSync(join(home, "events.jsonl"), text);
-  return { lines: kept.length, bytes: text.length, source: `real slice of ${o.log} (${(statSync(o.log).size / 1e6).toFixed(0)} MB)`, targets };
+  // (each run's temp folder replaced, so equal input hashes equal)
+  const sha256 = new Bun.CryptoHasher("sha256").update(text.split(root).join("<root>")).digest("hex");
+  return { lines: kept.length, bytes: text.length, source: `real slice of ${o.log} (${(statSync(o.log).size / 1e6).toFixed(0)} MB) cut at ${now}`, targets, cut: now, sha256 };
 }

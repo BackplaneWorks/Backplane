@@ -195,6 +195,7 @@
       lastFrame = t;
       if (W.watchBlank) blankCheck();
       if (W.thread) threadCheck();
+      if (wheels.length) wheelFrames();
       checkLoadingText();
     }
     requestAnimationFrame(frame);
@@ -232,6 +233,27 @@
   // wheel → the frame after its scroll
   let wheelAt = 0;
   addEventListener("wheel", (e) => { if (W.on) wheelAt = e.timeStamp; }, { capture: true, passive: true });
+  // every wheel: what the view looked like before it (scrollTop and the
+  // track's offset), and whether there was more to go that way (rows past
+  // the edge, or the hub holding more: __bpRender.ahead). The first frame
+  // the view differs, the wheel moved it; still the same two frames on with
+  // more ahead, it is a stall, timed until the view does move (or the
+  // window ends).
+  const viewKey = () => { const tl = document.getElementById("timeline"); if (!tl) return ""; const tr = tl.querySelector(".timeline-virtual-track"); return tl.scrollTop + "|" + (tr?.style.transform || ""); };
+  let wheels = [];
+  addEventListener("wheel", (e) => {
+    if (!W.on) return;
+    const tl = document.getElementById("timeline");
+    if (!tl || !tl.contains(e.target)) return;
+    const up = e.deltaY < 0;
+    const room = up ? tl.scrollTop > 0 : tl.scrollHeight - tl.scrollTop - tl.clientHeight > 1;
+    const hub = !!window.__bpRender.ahead?.(up ? "older" : "newer");
+    wheels.push({ at: e.timeStamp, key: viewKey(), ahead: room || hub, frames: 0, moved: null });
+  }, { capture: true, passive: true });
+  function wheelFrames() {
+    const k = viewKey(), t = now();
+    for (const w of wheels) if (w.moved === null) { w.frames++; if (k !== w.key) w.moved = t - w.at; }
+  }
   addEventListener("scroll", () => {
     if (!W.on || !wheelAt) return;
     const t0 = wheelAt; wheelAt = 0;
@@ -287,7 +309,7 @@
       for (const k in msgs) delete msgs[k];
       sentAt.clear();
       for (const k in times) delete times[k];
-      wheelAt = 0; loadingOn = false; W.thread = opts.thread || ""; W.firstPaint = null; W.current = null;
+      wheelAt = 0; wheels = []; loadingOn = false; W.thread = opts.thread || ""; W.firstPaint = null; W.current = null;
       rows0 = rowShots(); W.watchBlank = !!opts.blank; W.t0 = now(); W.on = true;
       return W.t0;
     },
@@ -320,6 +342,14 @@
         ws: { ...S, rpc },
         frames: { ...F, gaps: F.gaps.slice(0, 40), loaf: loaf.sort((a, b) => b.ms - a.ms).slice(0, 12), loafCount: loaf.length, loafMs: loaf.reduce((s, x) => s + x.ms, 0) },
         events: ev,
+        wheels: (() => {
+          const end = now();
+          // a stall: still where it was two frames on, with more that way
+          const stalls = wheels.filter((w) => w.ahead && (w.moved === null ? w.frames >= 2 : w.frames > 2 && w.moved > 34));
+          const ms = wheels.filter((w) => w.ahead).map((w) => Math.round(w.moved ?? end - w.at));
+          return { n: wheels.length, ahead: ms.length, stalls: stalls.length, neverMoved: wheels.filter((w) => w.ahead && w.moved === null).length,
+            p50: pctl(ms, 0.5), p95: pctl(ms, 0.95), max: ms.length ? Math.max(...ms) : 0 };
+        })(),
         scroll: { wheelToFrame: { n: scrollInfo.wheel.length, p50: pctl(scrollInfo.wheel, 0.5), p95: pctl(scrollInfo.wheel, 0.95), max: scrollInfo.wheel.length ? Math.max(...scrollInfo.wheel) : 0 },
           blankFrames: scrollInfo.blank, checkedFrames: scrollInfo.checked, worstGapPx: Math.round(scrollInfo.worstGap), loadingSeen: loadingSeen.slice(0, 10), loadingCount: loadingSeen.length },
         hubMsgs: Object.fromEntries(Object.entries(msgs).map(([k, v]) => [k, v.ms ? { n: v.n, p50: Math.round(pctl(v.ms, 0.5)), max: Math.round(Math.max(...v.ms)) } : { n: v.n, bytes: v.bytes, decodeMs: Math.round(v.decodeMs) }])),
