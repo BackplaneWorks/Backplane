@@ -113,6 +113,8 @@ try {
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://127.0.0.1:${port}` });
   await ctx.addInitScript({ path: join(import.meta.dir, "instrument.js") });
   const page = await ctx.newPage();
+  // RR_CONSOLE=<regex>: the page's console lines that match, in the log (e.g. view- for a refused view)
+  if (process.env.RR_CONSOLE) page.on("console", (m: any) => { const t = m.text(); if (new RegExp(process.env.RR_CONSOLE).test(t)) say(`console: ${t.slice(0, 400)}`); });
   page.on("pageerror", (e: any) => say(`page error: ${e.message}`));
   const cdp = await ctx.newCDPSession(page);
   await cdp.send("Performance.enable", { timeDomain: "timeTicks" });
