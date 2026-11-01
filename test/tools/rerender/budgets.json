@@ -1,0 +1,167 @@
+{
+ "open": {
+  "mutations": 485,
+  "recreatedIdentical": 27,
+  "touchedUnchangedRows": 5,
+  "outsideRecords": 2,
+  "wsInBytes": 504066,
+  "renderFull": 9,
+  "domPatch": 7595,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "idle": {
+  "mutations": 55,
+  "recreatedIdentical": 2,
+  "touchedUnchangedRows": 25,
+  "outsideRecords": 55,
+  "wsInBytes": 57946,
+  "renderFull": 4,
+  "domPatch": 1534,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "type1": {
+  "mutations": 117,
+  "recreatedIdentical": 2,
+  "touchedUnchangedRows": 25,
+  "outsideRecords": 117,
+  "wsInBytes": 168034,
+  "renderFull": 5,
+  "domPatch": 3065,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "type1b": {
+  "mutations": 112,
+  "recreatedIdentical": 2,
+  "touchedUnchangedRows": 25,
+  "outsideRecords": 112,
+  "wsInBytes": 168036,
+  "renderFull": 5,
+  "domPatch": 3065,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "burst": {
+  "mutations": 1531,
+  "recreatedIdentical": 2,
+  "touchedUnchangedRows": 25,
+  "outsideRecords": 1531,
+  "wsInBytes": 168109,
+  "renderFull": 39,
+  "domPatch": 44409,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "paste": {
+  "mutations": 399,
+  "recreatedIdentical": 17,
+  "touchedUnchangedRows": 16,
+  "outsideRecords": 399,
+  "wsInBytes": 213434,
+  "renderFull": 6,
+  "domPatch": 4505,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "scroll-up": {
+  "mutations": 15485,
+  "recreatedIdentical": 389,
+  "touchedUnchangedRows": 2,
+  "outsideRecords": 305,
+  "wsInBytes": 1161691,
+  "renderFull": 44,
+  "domPatch": 53154,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "scroll-down": {
+  "mutations": 4627,
+  "recreatedIdentical": 645,
+  "touchedUnchangedRows": 17,
+  "outsideRecords": 225,
+  "wsInBytes": 1162315,
+  "renderFull": 27,
+  "domPatch": 32927,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "clock": {
+  "mutations": 104,
+  "recreatedIdentical": 2,
+  "touchedUnchangedRows": 47,
+  "outsideRecords": 104,
+  "wsInBytes": 166969,
+  "renderFull": 4,
+  "domPatch": 1622,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "bg-stream": {
+  "mutations": 1631,
+  "recreatedIdentical": 2,
+  "touchedUnchangedRows": 47,
+  "outsideRecords": 1582,
+  "wsInBytes": 1641207,
+  "renderFull": 25,
+  "domPatch": 27632,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "send": {
+  "mutations": 326,
+  "recreatedIdentical": 25,
+  "touchedUnchangedRows": 25,
+  "outsideRecords": 2,
+  "wsInBytes": 167939,
+  "renderFull": 5,
+  "domPatch": 3080,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "stream": {
+  "mutations": 3437,
+  "recreatedIdentical": 49,
+  "touchedUnchangedRows": 24,
+  "outsideRecords": 2,
+  "wsInBytes": 3241047,
+  "renderFull": 57,
+  "domPatch": 66482,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "toolgroup": {
+  "mutations": 4425,
+  "recreatedIdentical": 95,
+  "touchedUnchangedRows": 22,
+  "outsideRecords": 2,
+  "wsInBytes": 4105801,
+  "renderFull": 72,
+  "domPatch": 86830,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "switch-away": {
+  "mutations": 789,
+  "recreatedIdentical": 10,
+  "touchedUnchangedRows": 5,
+  "outsideRecords": 2,
+  "wsInBytes": 494284,
+  "renderFull": 9,
+  "domPatch": 7674,
+  "loading": 0,
+  "blankFrames": 2
+ },
+ "switch-back": {
+  "mutations": 1532,
+  "recreatedIdentical": 10,
+  "touchedUnchangedRows": 5,
+  "outsideRecords": 2,
+  "wsInBytes": 335320,
+  "renderFull": 11,
+  "domPatch": 10735,
+  "loading": 0,
+  "blankFrames": 2
+ }
+}
