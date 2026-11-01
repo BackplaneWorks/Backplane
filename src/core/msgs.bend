@@ -1077,9 +1077,9 @@ def T.composer.attach.tip(l: I.Loc) -> String:
 def T.composer.attachment.offline(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Not attached: reconnecting by itself. Choose the file again once connected."
+      "Not attached. Reconnect, then choose the file again."
     case I.Ja{}:
-      "添付されていません。自動で再接続しています。接続後にファイルを選び直してください。"
+      "添付されていません。再接続してからファイルを選び直してください。"
 
 def T.composer.attachment.reload(l: I.Loc) -> String:
   match l:
@@ -1140,9 +1140,9 @@ def T.composer.model.tip(l: I.Loc) -> String:
 def T.composer.offline(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Not sent: reconnecting by itself. Your draft is kept; send it again once connected."
+      "Not sent. Reconnect to send; your draft is kept."
     case I.Ja{}:
-      "送信されていません。自動で再接続しています。下書きは保存されています。接続後にもう一度送信してください。"
+      "送信されていません。再接続して送信してください。下書きは保存されています。"
 
 def T.composer.placeholder(l: I.Loc) -> String:
   match l:
