@@ -12746,9 +12746,9 @@ def Hub.thin.native_key(on: Bool, a: TA.Actor, p: J.Json, epoch: String, view: S
 def Hub.thin.memo.base(+st: M.State, +cfg: Cfg, +p: J.Json, +context: ThinContext, +web: Bool, +thread: String) -> String:
   TA.Memo.key.base(M.State.seq(st), Hub.thin.view_key(st, cfg, thread), p, ThinContext.view(context), web, thread) ++ TA.Actor.native.key(ThinContext.actors(context)) ++ TA.Actor.loading.key(ThinContext.actors(context))
 
-def Hub.thin.page.memo(on: Bool, +context: ThinContext, +base: String, +ms: Nat) -> Maybe<&2, J.Json>:
+def Hub.thin.page.memo(on: Bool, +context: ThinContext, +base: String, +ms: Nat, +now: Nat) -> Maybe<&2, J.Json>:
   match on:
-    case True{}: TA.Memo.page(TA.Actor.memos(ThinContext.actors(context)), base, ms)
+    case True{}: TA.Memo.page(TA.Actor.memos(ThinContext.actors(context)), base, ms, now)
     case False{}: None{}
 
 def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State) -> IO(Hub):
@@ -12765,7 +12765,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
         +prepared : TA.Actor = TA.Actor.native.prepare(actor, web, p, epoch, ThinContext.view(context), Cfg.thin.signal_seq(cfg), secret)
         Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
           key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg)), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg),
-          Hub.thin.page.memo(Bool.and(web, String.eq(J.Json.get_str(o, "m", ""), "view.page")), context, Hub.thin.memo.base(st, cfg, p, context, web, thread), ms))
+          Hub.thin.page.memo(Bool.and(web, String.eq(J.Json.get_str(o, "m", ""), "view.page")), context, Hub.thin.memo.base(st, cfg, p, context, web, thread), ms, now))
 
 # Read only the selected auxiliary histories, then mask with the vault
 # as it is after those reads. The canonical hub state stays bounded.

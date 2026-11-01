@@ -1158,12 +1158,23 @@ def Memo.page.k(ok: Bool, +res: J.Json) -> Maybe<&2, J.Json>:
     case True{}: Some{res}
     case False{}: None{}
 
-def Memo.page(ms: List<&2, Memo>, +base: String, +clock: Nat) -> Maybe<&2, J.Json>:
+def Memo.page.ok(+k: String, +base: String) -> Bool:
+  Bool.and(String.starts_with(k, base ++ "\tat:"), Bool.not(String.contains(k, "\tanchor:")))
+
+def Memo.page.still(pic: ST.Picture, +base: String, +now: Nat) -> Maybe<&2, J.Json>:
+  match pic:
+    case ST.Picture{+k, +at, +res}:
+      Memo.page.k(Bool.and(Memo.page.ok(k, base), Bool.and(Nat.is_ge(now, at), VC.ViewClock.same(at, now))), res)
+
+# (a quiet thread's view is kept as a still picture, whose clock is the
+# render's second, not its millisecond: thin-still-picture.bend)
+def Memo.page(ms: List<&2, Memo>, +base: String, +clock: Nat, +now: Nat) -> Maybe<&2, J.Json>:
   match ms:
     case Nil{}: None{}
     case Memo{+k, +at, _, +res} <> _:
-      Memo.page.k(Bool.and(String.starts_with(k, base ++ "\tat:"), Bool.and(Bool.not(String.contains(k, "\tanchor:")), Bool.and(Nat.is_ge(clock, at), VC.ViewClock.same.ms(clock, at)))), res)
-    case _ <> rest: Memo.page(rest, base, clock)
+      Memo.page.k(Bool.and(Memo.page.ok(k, base), Bool.and(Nat.is_ge(clock, at), VC.ViewClock.same.ms(clock, at))), res)
+    case Still{+pic} <> _: Memo.page.still(pic, base, now)
+    case _ <> rest: Memo.page(rest, base, clock, now)
 
 def Memo.reply.k(+ok: Bool, +res: J.Json, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
   match ok:

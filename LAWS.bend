@@ -37,6 +37,7 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+
 import ./src/core/diskq.bend as DQ
 
 import ./src/web/terminal-cells.bend as TCELL
@@ -415,6 +416,7 @@ import ./src/core/thin.bend as JTHIN # J2: JS stack
 import ./src/server/thin-content-eq.bend as CONTENTEQ
 
 import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+
 import ./src/core/viewclock.bend as VCLOCK # view step 2 (H)
 
 import ./src/server/thin-view.bend as TVIEWH # view delta (H)
@@ -438,6 +440,7 @@ import ./src/core/ref-origin.bend as O
 import ./src/server/hotboot.bend as BOOTWARM
 
 import ./src/core/snapshot.bend as BOOTSNAP
+
 import ./src/core/landing.bend as LAND
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
@@ -14583,15 +14586,26 @@ law view_memo_key_page_last:
 
 # the last view of the same inputs in the same view-clock step is reused
 law view_page_memo_same_step:
-  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 89000n) == Some{J.Null{}} : Maybe<&2, J.Json>}
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 89000n, 0n) == Some{J.Null{}} : Maybe<&2, J.Json>}
 
 # not from another step, other inputs, or a view cut down to fit
 law view_page_memo_next_step:
-  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 90000n) == None{} : Maybe<&2, J.Json>}
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 90000n, 0n) == None{} : Maybe<&2, J.Json>}
 
 law view_page_memo_other_inputs:
-  {CHATSIDE.Memo.page([CHATSIDE.Memo{"A\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 62000n) == None{} : Maybe<&2, J.Json>}
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"A\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 62000n, 0n) == None{} : Maybe<&2, J.Json>}
 
 law view_page_memo_not_fitted:
-  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc\tanchor:m1", 61000n, False{}, J.Null{}}], "B", 62000n) == None{} : Maybe<&2, J.Json>}
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc\tanchor:m1", 61000n, False{}, J.Null{}}], "B", 62000n, 0n) == None{} : Maybe<&2, J.Json>}
+
+# a quiet thread's view, kept as a still picture (its clock in seconds),
+# serves the same way within its view-clock step
+law view_page_still_same_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Still{STILLPICTURE.Picture{"B\tat:3\tc", 61n, J.Null{}}}], "B", 0n, 89n) == Some{J.Null{}} : Maybe<&2, J.Json>}
+
+law view_page_still_next_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Still{STILLPICTURE.Picture{"B\tat:3\tc", 61n, J.Null{}}}], "B", 0n, 90n) == None{} : Maybe<&2, J.Json>}
+
+law view_page_still_not_fitted:
+  {CHATSIDE.Memo.page([CHATSIDE.Still{STILLPICTURE.Picture{"B\tat:3\tc\tanchor:m1", 61n, J.Null{}}}], "B", 0n, 62n) == None{} : Maybe<&2, J.Json>}
 # END page splice (H)
