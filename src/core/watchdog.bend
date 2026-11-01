@@ -27,7 +27,7 @@ def Watchdog.held(+s: M.State, +th: String) -> Bool:
 # held on a provider's limit, and works, starts, owns work, waits on the
 # person or waits on another thread
 def Watchdog.active.ix(+kids: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
-  Bool.and(Bool.and(Watchdog.active.t(t), Bool.not(Bool.or(B.Ephemeral.is(s, M.Thread.id(t)), Watchdog.held(s, M.Thread.id(t))))),
+  Bool.and(Bool.and(Watchdog.active.t(t), Bool.not(Bool.or(M.Config.held(s, M.Thread.id(t)), Bool.or(B.Ephemeral.is(s, M.Thread.id(t)), Watchdog.held(s, M.Thread.id(t)))))),
     Bool.or(M.State.running.k(t), Bool.or(M.Queue.starting(s, M.Thread.id(t)),
       Bool.or(Nat.is_gt(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n), Bool.or(Nat.is_gt(B.Hub.pending(t), 0n),
         Bool.not(List.is_empty(&2, String, M.Wake.ids(s, "wakes.by." ++ M.Thread.id(t)))))))))

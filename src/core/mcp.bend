@@ -575,6 +575,65 @@ def Mcp.update.r(f: Nat, +s: M.State, +now: Nat, +thread: String, +target: Strin
       Bool.pick(Res, String.is_empty(String.trim(title)), Mcp.report.k(Bool.not(String.is_empty(M.Launch.by(s, target))), s, now, target, Nat.is_eq(f, 1n)),
         Mcp.update(s, now, thread, target, title))
 
+# Configuration never sends a message or runs an agent. ProviderSet keeps
+# provider-owned sessions; Switch.changes keeps any necessary history for
+# the next real prompt. The normal turn executor reconciles idle processes
+# and enforces the selected account when that prompt arrives.
+def Mcp.config.present(+a: J.Json) -> Bool:
+  Bool.or(Maybe.is_some(&2, J.Json, J.Json.get(a, "provider")), Maybe.is_some(&2, J.Json, J.Json.get(a, "model")))
+
+def Mcp.config.string(m: Maybe<&2, J.Json>) -> Bool:
+  match m:
+    case None{}: True{}
+    case Some{J.Str{_}}: True{}
+    case _: False{}
+
+def Mcp.config.live(t: M.Thread) -> Bool:
+  match t:
+    case M.Thread{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, deleted}: Bool.not(deleted)
+
+def Mcp.config.same(+s: M.State, +now: Nat, +target: String, +model: String) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, String.eq(B.Turn.model(B.Hub.thread(s, target)), model), B.Config.hold(s, now, target),
+    B.Queue.changes(B.Hub.modes(s, now, 0, "", J.Json.obj([J.KV{"model", J.Str{model}}]), B.Hub.thread(s, target))))
+
+def Mcp.config.changes(same: Bool, +s: M.State, +now: Nat, +target: String, +provider: String, +model: String) -> List<&2, M.Change>:
+  match same:
+    case True{}: Mcp.config.same(s, now, target, model)
+    case False{}: B.Switch.changes(s, now, target, B.Hub.provider(B.Hub.thread(s, target)), provider, model, Nil{}, False{})
+
+def Mcp.config.done(+s: M.State, +target: String, +cs: List<&2, M.Change>) -> Res:
+  +saved = M.State.replay(cs, s)
+  Res{True{}, J.Json.obj([J.KV{"threadId", J.Str{target}}, J.KV{"status", Mcp.thread_json.w(saved, B.Hub.thread(saved, target))}]), B.Step{cs, Nil{}}}
+
+def Mcp.config.run(running: Bool, +s: M.State, +now: Nat, +target: String, +provider: String, +model: String) -> Res:
+  match running:
+    case True{}: Res.fail("provider and model change between turns; the running turn was left alone")
+    case False{}: Mcp.config.done(s, target, Mcp.config.changes(String.eq(B.Hub.provider(B.Hub.thread(s, target)), provider), s, now, target, provider, model))
+
+def Mcp.config.valid(valid: Bool, +s: M.State, +now: Nat, +target: String, +provider: String, +model: String) -> Res:
+  match valid:
+    case False{}: Res.fail("configuration requires an existing thread, a supported provider and string model, without title or report")
+    case True{}: Mcp.config.run(B.Hub.running(B.Hub.thread(s, target)), s, now, target, provider, model)
+
+# ok is the caller's existing project/shared-thread authorization, also
+# used by the linked-machine route. An absent/deleted target never exists
+# merely because its blank record happens to have the same project id.
+def Mcp.config(ok: Bool, +s: M.State, +now: Nat, +target: String, +a: J.Json) -> Res:
+  match ok:
+    case False{}: Res.fail("that thread is not in this project or shared with you")
+    case True{}:
+      +provider = J.Json.get_str(a, "provider", B.Hub.provider(B.Hub.thread(s, target)))
+      +model = J.Json.get_str(a, "model", Bool.pick(String, String.eq(provider, B.Hub.provider(B.Hub.thread(s, target))), B.Turn.model(B.Hub.thread(s, target)), ""))
+      supported = Nat.is_lt(C.Codec.pos(["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], provider), 8n)
+      strings = Bool.and(Mcp.config.string(J.Json.get(a, "provider")), Mcp.config.string(J.Json.get(a, "model")))
+      only = Bool.and(Bool.not(Maybe.is_some(&2, J.Json, J.Json.get(a, "title"))), Bool.not(Maybe.is_some(&2, J.Json, J.Json.get(a, "report"))))
+      Mcp.config.valid(Bool.and(Mcp.config.live(B.Hub.thread(s, target)), Bool.and(supported, Bool.and(strings, only))), s, now, target, provider, model)
+
+def Mcp.update.args(config: Bool, +ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: String, +a: J.Json) -> Res:
+  match config:
+    case True{}: Mcp.config(ok, s, now, target, a)
+    case False{}: Mcp.update.r(Mcp.flag(J.Json.get(a, "report")), s, now, thread, target, J.Json.get_str(a, "title", ""))
+
 def Mcp.pick(hit: Bool, +text: String, +acc: String) -> String:
   match hit:
     case True{}:
@@ -916,8 +975,9 @@ def Mcp.tools() -> J.Json:
        Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity, opencode, pi or omp (default: the user's default)."), Tool.prop("model", "string", "Model (default: the provider's default)."),
        Tool.prop("project", "string", "The project's name or id (default: this thread's; bots must give one); on another machine its <link>~<id> from machine_list."),
        Tool.prop("machine", "string", "Start it on another machine of the person's, in its project of that name (machine_list).")], ["prompt"]),
-    Tool.def("thread_update", "Rename a thread in this project (this one by default), or with no title have its title written again from its first message. With report (and no title), turn the reports of a thread you launched off (false) or on again (true).",
-      [Tool.prop("threadId", "string", "The thread (default: this one)."), Tool.prop("title", "string", "The new title; empty to regenerate it."), Tool.prop("report", "boolean", "For a thread you launched: whether its reports come to you.")], Nil{}),
+    Tool.def("thread_update", "Configure a thread's provider/model between turns without sending a message or starting an agent; answers the saved status. Running turns are rejected. Stopped queued work stays held until a new request or explicit resume. Fresh choices are silent; established history is kept for the next real prompt. With no provider/model: rename with title, regenerate the title with no title, or change a launched thread's reports with report. Configuration cannot be combined with title/report.",
+      [Tool.prop("threadId", "string", "The thread (default: this one), or its <link>~<id> on another machine."), Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity, opencode, pi or omp. A different provider uses its default model unless model is given; accounts are unchanged."),
+       Tool.prop("model", "string", "Set the selected provider's model; empty selects its default. May be used alone."), Tool.prop("title", "string", "The new title; empty to regenerate it."), Tool.prop("report", "boolean", "For a thread you launched: whether its reports come to you.")], Nil{}),
     Tool.def("thread_wait", "Wait until a thread in this project has finished its turn, or until timeoutMs passes. Answers its state, whether it is done, and its last reply. For anything longer than a few minutes use wake_on instead and end your turn.",
       [Tool.prop("threadId", "string", "The thread."), Tool.prop("timeoutMs", "number", "How long to wait at most (default 30000, at most 600000).")], ["threadId"]),
     Tool.def("thread_interrupt", "Stop the running turn of a thread in this project.",
@@ -1202,7 +1262,7 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
     case 8n:
       Mcp.launch(s, now, thread, a)
     case 9n:
-      Mcp.update.r(Mcp.flag(J.Json.get(a, "report")), s, now, thread, Mcp.or(J.Json.get_str(a, "threadId", ""), thread), J.Json.get_str(a, "title", ""))
+      Mcp.update.args(Mcp.config.present(a), Mcp.same_project(s, thread, Mcp.or(J.Json.get_str(a, "threadId", ""), thread)), s, now, thread, Mcp.or(J.Json.get_str(a, "threadId", ""), thread), a)
     case 10n:
       Mcp.wait.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""), Mcp.news(s, thread, J.Json.get_nat(a, "since", 0n)))
     case 11n:

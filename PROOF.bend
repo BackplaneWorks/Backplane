@@ -5044,6 +5044,15 @@ def Laws.switch_between_turns():
 def Laws.switch_same_nothing():
   {==}
 
+def Laws.switch_initial_choice_quiet():
+  {==}
+
+def Laws.config_hold_keeps_queue_stopped(now):
+  {==}
+
+def Laws.config_running_not_held():
+  {==}
+
 def Laws.switch_new_session():
   {==}
 

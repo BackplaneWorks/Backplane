@@ -3007,6 +3007,21 @@ law switch_between_turns:
 law switch_same_nothing:
   {H.Queue.changes(H.Hub.switch(H.Demo.state("claude", M.Completed{}), 5n, 0, "1", "t1", "claude")) == [] : List<&2, M.Change>}
 
+# A first provider choice creates neither narrative history nor a queued
+# handoff; another choice before the first message remains initial too.
+law switch_initial_choice_quiet:
+  {H.Queue.changes(H.Hub.switch.as(H.Demo.state("claude", M.Idle{}), 5n, 0, "1", "t1", "codex", "gpt-6.1-sol", ["high"]))
+    == [M.ProviderSet{"t1", "codex", "gpt-6.1-sol", 5n}, M.SettingSet{"effort.t1", "high", 5n}] : List<&2, M.Change>}
+
+# Configuration holds old work without taking it, even after the quota
+# marker was cleared. Only a new request or explicit resume releases it.
+law config_hold_keeps_queue_stopped:
+  for +now: Nat
+  {H.Wt.start(M.State.replay([M.TurnQueued{"t1", "original", "saved task", 3n}, M.SettingSet{"thread.config.hold.t1", "on", 4n}], H.Demo.state("codex", M.Interrupted{})), now, "t1", False{}) == H.Step.none() : H.Step}
+
+law config_running_not_held:
+  {H.Config.hold(H.Demo.state("codex", M.Running{}), 5n, "t1") == [] : List<&2, M.Change>}
+
 # each provider keeps its own session: a new one starts fresh, and coming
 # back resumes the one it had
 law switch_new_session:

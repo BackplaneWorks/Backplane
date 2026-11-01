@@ -28,6 +28,18 @@ and `thread_interrupt` take any of them, and `thread_launch` needs a
 `project` (a name or id from `project_list`). The new thread shows in that
 project like the person's own, its first message naming the bot.
 
+`thread_update {threadId, provider: "codex", model: "gpt-6.1-sol"}` sets a
+thread's provider and model between turns and returns its saved status.
+It sends no chat message and starts no agent. `model` can be set alone;
+an empty model selects the provider's default. Running turns reject the
+change. Choices before the first conversation are silent; an established
+conversation keeps its sessions, account bindings and necessary history
+handoff for the next real prompt. Use configuration separately from
+`title` or `report`; leaving all of these out still regenerates the title.
+Configuring a stopped thread keeps its saved queue and recovery work held,
+including after quota reset, worktree readiness or restart. A new request
+or explicit resume releases that hold; configuration alone never does.
+
 New work gets a visible thread. A bot starts it with `thread_launch` and
 its `project`, and `delegate_task` from a bot needs a `project` too (law
 `bot_delegate_needs_project`): the child runs in that project's folder,

@@ -1334,6 +1334,17 @@ def Setting.get(s: State, +k: String, d: String) -> String:
     case State{_, _, _, _, _, sg, qu, ak, _, _, _}:
       State.get.k(Map.get(String, d, sg, k))
 
+# An explicit provider/model choice is not permission to release old work.
+# This survives the clearing of quota/restart markers and event replay.
+def Config.key(+th: String) -> String:
+  "thread.config.hold." ++ th
+
+def Config.held(+s: State, +th: String) -> Bool:
+  String.eq(Setting.get(s, Config.key(th), ""), "on")
+
+def Config.release(+s: State, +now: Nat, +th: String) -> List<&2, Change>:
+  Bool.pick(List<&2, Change>, Config.held(s, th), [SettingSet{Config.key(th), "", now}], Nil{})
+
 # the threads with something queued (even handed-over context alone), and the
 # key of every setting (the status plane counts only the threads these can touch)
 def Queue.threads(s: State) -> List<&2, String>:

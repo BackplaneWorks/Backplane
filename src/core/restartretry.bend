@@ -60,7 +60,7 @@ def Retry.due(s: M.State, th: String) -> Nat:
   J.Json.get_nat(Retry.record(s, th), "due", 0n)
 
 def Retry.candidate(+before: M.State, +after: M.State, +kept: List<&2, String>, +th: String) -> Bool:
-  Bool.and(B.Carry.deferred(before, th), Bool.and(M.Carry.on(after), Bool.and(B.Carry.live(B.Hub.thread(after, th)),
+  Bool.and(B.Carry.deferred(before, th), Bool.and(Bool.and(Bool.not(M.Config.held(after, th)), M.Carry.on(after)), Bool.and(B.Carry.live(B.Hub.thread(after, th)),
     Bool.and(Bool.not(Retry.kept(kept, th)), Bool.and(Retry.interrupted(M.Thread.turn(B.Hub.thread(after, th))),
       Bool.and(String.eq(Retry.target(B.Hub.thread(before, th)), Retry.target(B.Hub.thread(after, th))),
         String.is_empty(M.Setting.get(after, Retry.key(th), ""))))))))
@@ -102,7 +102,7 @@ def Retry.valid(+s: M.State, +th: String) -> Bool:
         String.eq(J.Json.get_str(r, "message", ""), Retry.user(M.State.mine(s, th))))))))
 
 def Retry.ready(+s: M.State, +now: Nat, +th: String) -> Bool:
-  Bool.and(Retry.valid(s, th), Bool.and(Nat.is_gt(Retry.due(s, th), 0n), Bool.and(Nat.is_ge(now, Retry.due(s, th)),
+  Bool.and(Bool.and(Bool.not(M.Config.held(s, th)), Retry.valid(s, th)), Bool.and(Nat.is_gt(Retry.due(s, th), 0n), Bool.and(Nat.is_ge(now, Retry.due(s, th)),
     Bool.and(Nat.is_eq(B.Hub.pending(B.Hub.thread(s, th)), 0n), Bool.not(Retry.asks(M.Asks.all(s), th))))))
 
 def Retry.text() -> String:

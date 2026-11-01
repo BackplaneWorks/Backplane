@@ -746,12 +746,40 @@ def Hub.project_add.p(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.J
 def Hub.project_add(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
   Hub.project_add.p(s, now, client, id, p, J.Json.get_str(p, "path", ""))
 
+# Configuration may leave an old queue and recovery clocks behind. Keep
+# those inputs, but durably hold automatic release until a real message or
+# explicit resume. Fresh threads without old work need no hold register.
+def Config.interrupted(t: M.TurnState) -> Bool:
+  match t:
+    case M.Interrupted{}: True{}
+    case _: False{}
+
+def Config.waits(+s: M.State, +th: String) -> Bool:
+  Bool.or(M.Config.held(s, th), Bool.or(Config.interrupted(M.Thread.turn(Hub.thread(s, th))), Bool.or(M.Queue.waiting(s, th),
+    Bool.or(Bool.not(String.is_empty(M.Setting.get(s, "provider.resume." ++ th, ""))),
+      Bool.or(Bool.not(String.is_empty(M.Setting.get(s, "restart.retry." ++ th, ""))), Bool.not(String.is_empty(M.Setting.get(s, "resume." ++ th, ""))))))))
+
+def Config.hold(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, Bool.and(Bool.not(M.State.running.k(Hub.thread(s, th))), Bool.and(Config.waits(s, th), Bool.not(M.Config.held(s, th)))),
+    [M.SettingSet{M.Config.key(th), "on", now}], Nil{})
+
+# A newly delivered request is permission to work; old assistant output,
+# timer changes, and provider/model changes are not. Applied in the same
+# server step as delivery, including a prompt waiting for its worktree.
+def Config.sent(cs: List<&2, M.Change>, +s: M.State, +now: Nat) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}: Nil{}
+    case M.MessagePosted{th, _, M.User{}, _, _} <> rest:
+      List.append(&2, M.Change, M.Config.release(s, now, th), Config.sent(rest, s, now))
+    case _ <> rest: Config.sent(rest, s, now)
+
 # change a thread's modes; what the request leaves out stays as it is
 def Hub.modes(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, t: M.Thread) -> Step:
   match t:
     case M.Thread{+th, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, mo, rt, im, _, _}:
       Step.before([M.ModesSet{th, C.Runtime.of(J.Json.get_str(p, "runtime", C.Runtime.name(rt))),
-        C.Interaction.of(J.Json.get_str(p, "interaction", C.Interaction.name(im))), J.Json.get_str(p, "model", mo), now}], [Reply.ok(client, id)], Step.none())
+        C.Interaction.of(J.Json.get_str(p, "interaction", C.Interaction.name(im))), J.Json.get_str(p, "model", mo), now}], [Reply.ok(client, id)],
+        Step{Bool.pick(List<&2, M.Change>, Maybe.is_some(&2, J.Json, J.Json.get(p, "model")), Config.hold(s, now, th), Nil{}), Nil{}})
 
 # Answering asks
 # --------------
@@ -2424,7 +2452,7 @@ def Claude.line.parsed(m: Maybe<&2, J.Json>, +s: M.State, +thread: String, +now:
 # first: the thread's first worktree (not one made again), whose waiting
 # message names its branch
 def Wt.start(+s: M.State, +now: Nat, +thread: String, +first: Bool) -> Step:
-  Wt.start.k(Bool.and(Bool.not(Hub.running(Hub.thread(s, thread))), M.Queue.waiting(s, thread)), first,
+  Wt.start.k(Bool.and(Bool.not(M.Config.held(s, thread)), Bool.and(Bool.not(Hub.running(Hub.thread(s, thread))), M.Queue.waiting(s, thread))), first,
     Hub.thread(s, thread), Hub.cwd(s, Hub.thread(s, thread)), M.Queue.of(s, thread), now, Hub.seq(s), thread)
 
 # the record that the hub asked for it, so a message while it is being made
@@ -2631,7 +2659,7 @@ def Ride.start.k(empty: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
 
 # a thread that is not running and has mail waiting starts a turn with it
 def Ride.start(+s: M.State, +now: Nat, +th: String) -> Step:
-  Ride.start.k(Bool.or(Hub.running(Hub.thread(s, th)), String.is_empty(Ride.of(s, th))), s, now, th)
+  Ride.start.k(Bool.or(M.Config.held(s, th), Bool.or(Hub.running(Hub.thread(s, th)), String.is_empty(Ride.of(s, th)))), s, now, th)
 
 # Delivery
 # --------
@@ -3345,20 +3373,28 @@ def Switch.effort.of(m: Maybe<&2, J.Json>) -> List<&2, String>:
     case None{}:
       Nil{}
 
-def Switch.go(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +from: String, +to: String, +model: String, es: List<&2, String>) -> Step:
+# The initial selection is configuration: a notice would itself become
+# history and make the next pre-conversation selection queue a handoff.
+# Harness configuration uses the same session/context changes silently.
+def Switch.changes(+s: M.State, +now: Nat, +th: String, +from: String, +to: String, +model: String, es: List<&2, String>, announce: Bool) -> List<&2, M.Change>:
   +seen = M.Switch.seen(s, th, to)
-  +missed = Nat.sub(M.Switch.count(s, th), seen)
-  Step{List.concat(&2, M.Change, [Switch.old(M.Queue.items(s, th), th, now), [M.ProviderSet{th, to, model, now}], Switch.effort(es, th, to, now),
+  +count = M.Switch.count(s, th)
+  +missed = Nat.sub(count, seen)
+  List.concat(&2, M.Change, [Switch.old(M.Queue.items(s, th), th, now), [M.ProviderSet{th, to, model, now}], Switch.effort(es, th, to, now),
       Switch.ctx(Nat.is_eq(missed, 0n), th, HD.Hand.prefix() ++ "switch:" ++ Nat.show(Hub.seq(s)), HD.Hand.switch(Hub.entries(s), th, from, to, seen), now),
-      [M.ActivityLogged{th, Hub.id("p", now, Hub.seq(s)), "info", "provider", "Now on " ++ to ++ Bool.pick(String, Nat.is_eq(missed, 0n), "", "; it gets what it missed with the next message"), now}]]),
-    [Reply.ok(client, id), AgentStop{th}]}
+      Config.hold(s, now, th), Bool.pick(List<&2, M.Change>, Bool.and(announce, Nat.is_gt(count, 0n)),
+        [M.ActivityLogged{th, Hub.id("p", now, Hub.seq(s)), "info", "provider", "Now on " ++ to ++ Bool.pick(String, Nat.is_eq(missed, 0n), "", "; it gets what it missed with the next message"), now}], Nil{})])
+
+def Switch.go(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +from: String, +to: String, +model: String, es: List<&2, String>) -> Step:
+  Step{Switch.changes(s, now, th, from, to, model, es, True{}),
+    Reply.ok(client, id) <> Bool.pick(List<&2, Out>, Config.waits(s, th), Nil{}, [AgentStop{th}])}
 
 def Switch.k(run: Bool, same: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +from: String, +to: String, +model: String, es: List<&2, String>) -> Step:
   match run same:
     case True{} _:
       Step.outs([Reply.err(client, id, "a provider changes between turns: stop this one first")])
     case False{} True{}:
-      Step.outs([Reply.ok(client, id)])
+      Step{Config.hold(s, now, th), [Reply.ok(client, id)]}
     case False{} False{}:
       Switch.go(s, now, client, id, th, from, to, model, es)
 
@@ -3384,7 +3420,8 @@ def Stop.outs(+provider: String, +thread: String, +rid: String) -> List<&2, Out>
 # the held queue of an idle thread (kept across a restart, or after a
 # stop) starts now
 def Hub.resume(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String) -> Step:
-  Step.before(Nil{}, [Reply.ok(client, id)], Wt.start(s, now, thread, False{}))
+  +cs = M.Config.release(s, now, thread)
+  Step.before(cs, [Reply.ok(client, id)], Wt.start(M.State.replay(cs, s), now, thread, False{}))
 
 # why an agent's process ended, in words: a SIGKILL (137) is most likely
 # the kernel taking it for memory; any other end says its plain exit code
@@ -4051,7 +4088,7 @@ def Ended.out(+s: M.State, +now: Nat, +thread: String, +st: Step) -> Step:
   Ended.out.s(s, now, Ended.state(Queue.changes(st), thread, Hub.running(Hub.thread(s, thread))), thread, Hub.cwd(s, Hub.thread(s, thread)), st)
 
 def Queue.drain(+s: M.State, +now: Nat, +thread: String, +st: Step) -> Step:
-  Queue.drain.k(Bool.and(Queue.ended(Queue.changes(st), thread), M.Queue.waiting(s, thread)), st,
+  Queue.drain.k(Bool.and(Bool.not(M.Config.held(s, thread)), Bool.and(Queue.ended(Queue.changes(st), thread), M.Queue.waiting(s, thread))), st,
     Hub.thread(s, thread), Hub.cwd(s, Hub.thread(s, thread)), M.Queue.of(s, thread), now, Hub.seq(s), thread)
 
 # Delegated tasks finishing
@@ -8430,7 +8467,7 @@ def Rel.k(run: Bool, live: Bool, r: Rec, +now: Nat, +th: String) -> Rec:
 def Rel.one(r: Rec, +now: Nat, +th: String) -> Rec:
   match r:
     case Rec{+s, cs, os}:
-      Rel.k(Hub.running(Hub.thread(s, th)), Lost.live(Hub.thread(s, th)), Rec{s, cs, os}, now, th)
+      Rel.k(Bool.or(M.Config.held(s, th), Hub.running(Hub.thread(s, th))), Lost.live(Hub.thread(s, th)), Rec{s, cs, os}, now, th)
 
 def Rel.all(ts: List<&2, String>, r: Rec, +now: Nat) -> Rec:
   match ts:
@@ -9557,7 +9594,7 @@ def Auth.next(ts: List<&2, M.Thread>, +s: M.State, +found: String, done: Bool) -
     case Nil{} False{}: ""
     case +t <> rest False{}:
       +th = M.Thread.id(t)
-      +go = Bool.and(Auth.waiting(s, th), Bool.and(Lost.live(t), Bool.not(Hub.running(t))))
+      +go = Bool.and(Bool.not(M.Config.held(s, th)), Bool.and(Auth.waiting(s, th), Bool.and(Lost.live(t), Bool.not(Hub.running(t)))))
       Auth.next(rest, s, Bool.pick(String, go, th, ""), go)
 
 def Auth.recover.clear(+s: M.State, +now: Nat, +st: Step) -> Step:
@@ -9939,7 +9976,7 @@ def Fallback.outs(os: List<&2, Out>, +s: M.State, +caps: J.Json, +now: Nat) -> S
 def Fallback.after(+s: M.State, caps: J.Json, +now: Nat, st: Step) -> Step:
   match st:
     case Step{+cs, os}:
-      +all = List.append(&2, M.Change, cs, Fallback.manual(cs, now))
+      +all = List.concat(&2, M.Change, [cs, Fallback.manual(cs, now), Config.sent(cs, s, now)])
       Step.before(all, Nil{}, Fallback.outs(os, M.State.replay(all, s), caps, now))
 
 def Fallback.validated(ok: Bool, +s: M.State, caps: J.Json, now: Nat, step: Step) -> Step:
@@ -10111,7 +10148,7 @@ def WorkTimeout.threads(ts: List<&2, M.Thread>, +s: M.State, +now: Nat) -> Step:
   match ts:
     case Nil{}: Step.none()
     case +t <> rest:
-      +st = WorkTimeout.rows(Bool.pick(List<&2, String>, Bool.and(Lost.live(t), Bool.not(M.Dormant.of(s, t))), M.Bg.of(s, M.Thread.id(t)), Nil{}), s, now, M.Thread.id(t))
+      +st = WorkTimeout.rows(Bool.pick(List<&2, String>, Bool.and(Lost.live(t), Bool.not(Bool.or(M.Config.held(s, M.Thread.id(t)), M.Dormant.of(s, t)))), M.Bg.of(s, M.Thread.id(t)), Nil{}), s, now, M.Thread.id(t))
       Step.cat(st, WorkTimeout.threads(rest, M.State.replay(Queue.changes(st), s), now))
 
 def WorkTimeout.tick(+s: M.State, now: Nat) -> Step:
@@ -10128,7 +10165,7 @@ def ProviderResume.interrupted(t: M.TurnState) -> Bool:
 def ProviderResume.ready(+s: M.State, +now: Nat, +th: String) -> Bool:
   +r = ProviderResume.record(s, th)
   +reset = J.Json.get_nat(r, "reset", 0n)
-  Bool.and(Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), Bool.not(Bool.or(M.Dormant.thread(s, th), Ephemeral.is(s, th)))), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
+  Bool.and(Bool.and(Bool.and(Lost.live(Hub.thread(s, th)), Bool.not(Bool.or(M.Config.held(s, th), Bool.or(M.Dormant.thread(s, th), Ephemeral.is(s, th))))), ProviderResume.interrupted(M.Thread.turn(Hub.thread(s, th)))),
     Bool.and(Nat.is_gt(reset, 0n), Bool.and(Nat.is_ge(now, reset), Bool.and(Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n),
       String.eq(J.Json.get_str(r, "target", ""), FB.Target.key(Fallback.target(Hub.thread(s, th))))))))
 

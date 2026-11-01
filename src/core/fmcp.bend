@@ -189,7 +189,8 @@ def Fm.call.k(i: Nat, +s: M.State, +now: Nat, +from: String, +a: J.Json, +id: St
     case 2n:
       Fm.say(ok, MC.Mcp.interrupt.f(ok, B.Hub.running(B.Hub.thread(s, id)), s, now, from, id))
     case 3n:
-      Fm.say(ok, MC.Mcp.update.k(ok, String.is_empty(String.trim(J.Json.get_str(a, "title", ""))), s, now, id, String.trim(J.Json.get_str(a, "title", ""))))
+      Fm.say(ok, Bool.pick(MC.Res, MC.Mcp.config.present(a), MC.Mcp.config(ok, s, now, id, a),
+        MC.Mcp.update.k(ok, String.is_empty(String.trim(J.Json.get_str(a, "title", ""))), s, now, id, String.trim(J.Json.get_str(a, "title", "")))))
     case 4n:
       Fm.list(s, J.Json.get_str(a, "project", ""))
     case 5n:
