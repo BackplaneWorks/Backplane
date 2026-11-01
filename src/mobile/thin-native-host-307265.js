@@ -495,7 +495,14 @@ export class NativeThinHost307265 {
     // one on screen when the run was shut is never kept (else a shut run
     // stayed open on the phone, its rows held as visible context).
     const shut = new Set(fresh.entries.filter(e => e.kind === 'fold' && e.open === false && typeof e.value === 'string').map(e => e.value.slice(1)));
-    const gone = e => typeof e.run === 'string' && shut.has(e.run);
+    // Stream.entries (core/thin-live.bend) owns the synthetic preview's
+    // lifetime. Once absent from the fresh picture it is not history to
+    // retain beside the stored reply, even if it was in the viewport.
+    const live = '@live:' + rawThread(s.hub, fresh.id);
+    const streaming = fresh.entries.some(e => e.id === live);
+    const retired = e => e.id === live && !streaming;
+    const gone = e => retired(e) || typeof e.run === 'string' && shut.has(e.run);
+    const history = old.entries.filter(e => !retired(e));
     const seen = this.visibleRows(s), visible = seen && seen.filter(e => !gone(e)), keep = new Set((visible || old.entries.filter(e => !gone(e))).map(e => e.id));
     // A full outgoing wire page provides context below/above the viewport.
     if (paged) {
@@ -508,8 +515,8 @@ export class NativeThinHost307265 {
     // Identities only: no message bodies are copied into the lineage plan.
     const identities = entries => entries.map(e => ({ id: e.id, kind: e.kind,
       ...(e.kind === 'fold' ? { value: e.value, open: e.open } : {}) }));
-    const plan = this.api.history({ old: old.entries.map(e => e.id), fresh: fresh.entries.map(e => e.id), keep: [...keep],
-      oldRows: identities(old.entries), freshRows: identities(fresh.entries),
+    const plan = this.api.history({ old: history.map(e => e.id), fresh: fresh.entries.map(e => e.id), keep: [...keep],
+      oldRows: identities(history), freshRows: identities(fresh.entries),
       visible: (visible || old.entries.filter(e => !gone(e))).map(e => e.id), page: !!paged, older: paged?.direction !== 'newer' });
     const previous = new Map(old.entries.map(e => [e.id, e])), raw = new Map(fresh.entries.map(e => [e.id, e]));
     if (!object(plan) || !Array.isArray(plan.aliases) || plan.aliases.some(a => !exactKeys(a, ['from', 'to']) ||
