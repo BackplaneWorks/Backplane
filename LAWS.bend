@@ -14702,3 +14702,33 @@ law ride_store_wire:
 law ride_state_kept:
   {M.Setting.get(M.State.replay([M.SettingSet{"ride.t1", "[{\"id\":\"m1\",\"text\":\"hi\"}]", 5n}], M.State.empty()), "ride.t1", "") == "[{\"id\":\"m1\",\"text\":\"hi\"}]" : String}
 # ---- end hub-memory: riding mail on the wire ----
+# ---- riding mail: a running Claude turn hears at once ----
+# a ride note (an uberbot's wake escalation, a told note) reaches a running
+# Claude turn within one delivery: the same step gives the turn its input
+# (the agent's start, a no-op while it runs, and the line sent) and leaves
+# no ride behind; any other thread keeps it in the ride as before
+# (hub.bend's Ride.note)
+law ride_note_claude_now:
+  {M.Setting.get(M.State.replay(H.Queue.changes(H.Ride.note(H.Demo.state("claude", M.Running{}), 5n, "t1", "m1", "hi")), H.Demo.state("claude", M.Running{})), "ride.t1", "") == "" : String}
+
+law ride_note_claude_given:
+  {List.length(&2, H.Out, H.Step.outs_of(H.Ride.note(H.Demo.state("claude", M.Running{}), 5n, "t1", "m1", "hi"))) == 2n : Nat}
+
+law ride_note_codex_rides:
+  {M.Setting.get(M.State.replay(H.Queue.changes(H.Ride.note(H.Demo.state("codex", M.Running{}), 5n, "t1", "m1", "hi")), H.Demo.state("codex", M.Running{})), "ride.t1", "") == "[{\"id\":\"m1\",\"text\":\"hi\"}]" : String}
+
+law ride_note_idle_rides:
+  {M.Setting.get(M.State.replay(H.Queue.changes(H.Ride.note(H.Demo.state("claude", M.Completed{}), 5n, "t1", "m1", "hi")), H.Demo.state("claude", M.Completed{})), "ride.t1", "") == "[{\"id\":\"m1\",\"text\":\"hi\"}]" : String}
+
+# a wait that began before the note was given ends at its next check, as
+# news, so the agent reads its input instead of sitting out the wait; a
+# check that is no wait's (since 0) or a wait begun after it is not news
+law ride_note_news:
+  {Bool.and(Bool.and(MC.Mcp.news(M.State.replay(H.Queue.changes(H.Ride.note(H.Demo.state("claude", M.Running{}), 5n, "t1", "m1", "hi")), H.Demo.state("claude", M.Running{})), "t1", 4n),
+      Bool.not(MC.Mcp.news(M.State.replay(H.Queue.changes(H.Ride.note(H.Demo.state("claude", M.Running{}), 5n, "t1", "m1", "hi")), H.Demo.state("claude", M.Running{})), "t1", 6n))),
+    Bool.not(MC.Mcp.news(M.State.replay(H.Queue.changes(H.Ride.note(H.Demo.state("claude", M.Running{}), 5n, "t1", "m1", "hi")), H.Demo.state("claude", M.Running{})), "t1", 0n))) == True{} : Bool}
+
+law wait_news_done:
+  {Bool.and(MC.Wait.done("{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"done\\\":false,\\\"news\\\":true}\"}]}}"),
+    Bool.not(MC.Wait.done("{\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"{\\\"done\\\":false}\"}]}}"))) == True{} : Bool}
+# ---- end riding mail: a running Claude turn hears at once ----

@@ -14947,4 +14947,22 @@ def Laws.ride_store_wire():
 
 def Laws.ride_state_kept():
   {==}
+
+def Laws.ride_note_claude_now():
+  {==}
+
+def Laws.ride_note_claude_given():
+  {==}
+
+def Laws.ride_note_codex_rides():
+  {==}
+
+def Laws.ride_note_idle_rides():
+  {==}
+
+def Laws.ride_note_news():
+  {==}
+
+def Laws.wait_news_done():
+  {==}
 # END sidebar rows (H)
