@@ -13672,7 +13672,7 @@ def Hub.mcp.w(+secs: Nat, h: Hub, +thread: String, +o: J.Json, body: String, +re
       Hub.mcp.hub(h, thread, body, reply, now)
     case 1n+k Hub{st, f, ls, cl, as, +inbox, cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Wait.loop(1n+k, Nat.add(now, 1n+k), thread, MC.Wait.now(o), reply, inbox))
+        IO.spawn(Unit, Wait.loop(1n+k, Nat.add(now, 1n+k), thread, MC.Wait.now.at(o, now), reply, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # a line from an agent: a turn process's only while it is the one the hub

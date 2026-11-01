@@ -618,12 +618,22 @@ def Mcp.strs(xs: List<&2, String>) -> List<&2, J.Json>:
 
 # where a thread stands, answered at once (the server asks again each
 # second while it waits, up to the timeout)
-def Mcp.wait.k(ok: Bool, +s: M.State, +target: String) -> Res:
+# whether the caller was given riding mail since its wait began (hub.bend's
+# Ride.note; since 0: a check that is no wait's, never news)
+def Mcp.news(+s: M.State, +caller: String, +since: Nat) -> Bool:
+  Bool.and(Nat.is_gt(since, 0n), Nat.is_ge(M.Switch.num(M.Setting.get(s, B.Ride.given.key(caller), ""), 0n), since))
+
+def Mcp.news.kv(news: Bool) -> List<&2, J.KV>:
+  match news:
+    case True{}: [J.KV{"news", J.Flag{True{}}}, J.KV{"note", J.Str{"A message for you arrived while you waited; it is in your input now. The thread you waited on may still be running."}}]
+    case False{}: Nil{}
+
+def Mcp.wait.k(ok: Bool, +s: M.State, +target: String, +news: Bool) -> Res:
   match ok:
     case True{}:
-      Res.ok(J.Json.obj([J.KV{"threadId", J.Str{target}}, J.KV{"turn", J.Str{C.Turn.name(M.Thread.turn(B.Hub.thread(s, target)))}},
+      Res.ok(J.Json.obj(List.append(&2, J.KV, [J.KV{"threadId", J.Str{target}}, J.KV{"turn", J.Str{C.Turn.name(M.Thread.turn(B.Hub.thread(s, target)))}},
         J.KV{"done", J.Flag{Mcp.done.w(s, target)}}, J.KV{"waiting", J.Json.nat(M.Work.busy(s, target))}, J.KV{"work", J.Json.arr(Mcp.strs(M.Work.titles(s, target)))},
-        J.KV{"lastReply", J.Str{String.take(Mcp.last(M.State.mine(s, target), target), 8000n)}}]))
+        J.KV{"lastReply", J.Str{String.take(Mcp.last(M.State.mine(s, target), target), 8000n)}}], Mcp.news.kv(news))))
     case False{}:
       Res.fail("that thread is not in this project")
 
@@ -1194,11 +1204,11 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
     case 9n:
       Mcp.update.r(Mcp.flag(J.Json.get(a, "report")), s, now, thread, Mcp.or(J.Json.get_str(a, "threadId", ""), thread), J.Json.get_str(a, "title", ""))
     case 10n:
-      Mcp.wait.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""))
+      Mcp.wait.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""), Mcp.news(s, thread, J.Json.get_nat(a, "since", 0n)))
     case 11n:
       Mcp.interrupt.tool(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), B.Hub.running(B.Hub.thread(s, J.Json.get_str(a, "threadId", ""))), s, now, thread, J.Json.get_str(a, "threadId", ""))
     case 12n:
-      Mcp.wait.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""))
+      Mcp.wait.k(Mcp.same_project(s, thread, J.Json.get_str(a, "threadId", "")), s, J.Json.get_str(a, "threadId", ""), Mcp.news(s, thread, J.Json.get_nat(a, "since", 0n)))
     case 13n:
       Mcp.term.open(s, now, thread, J.Json.get_str(a, "command", ""), J.Json.get_str(a, "title", ""), EM.Emb.cols(J.Json.get_u32(a, "cols", 0)), EM.Emb.rows(J.Json.get_u32(a, "rows", 0)))
     case 14n:
@@ -1492,6 +1502,17 @@ def Wait.now(+o: J.Json) -> String:
   J.Json.show(J.Json.obj([J.KV{"jsonrpc", J.Str{"2.0"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"method", J.Str{"tools/call"}},
     J.KV{"params", J.Json.obj([J.KV{"name", J.Str{"thread_wait_now"}}, J.KV{"arguments", J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments")}])}]))
 
+# the arguments with the wait's start (Mcp.news)
+def Wait.args.since(+a: J.Json, +now: Nat) -> J.Json:
+  match a:
+    case J.Obj{fs}: J.Obj{J.Field{"since", J.Json.nat(now), fs}}
+    case _: J.Json.obj([J.KV{"since", J.Json.nat(now)}])
+
+# the check a wait that began at now asks each second
+def Wait.now.at(+o: J.Json, +now: Nat) -> String:
+  J.Json.show(J.Json.obj([J.KV{"jsonrpc", J.Str{"2.0"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"method", J.Str{"tools/call"}},
+    J.KV{"params", J.Json.obj([J.KV{"name", J.Str{"thread_wait_now"}}, J.KV{"arguments", Wait.args.since(J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"), now)}])}]))
+
 def Wait.first(xs: List<&2, J.Json>) -> J.Json:
   match xs:
     case x <> _:
@@ -1504,7 +1525,7 @@ def Wait.first(xs: List<&2, J.Json>) -> J.Json:
 def Wait.done(+reply: String) -> Bool:
   +r = Maybe.default(&2, J.Json, J.Json.parse(reply), J.Null{})
   +inner = Maybe.default(&2, J.Json, J.Json.parse(J.Json.get_str(Wait.first(J.Json.elems(J.Json.get_obj(J.Json.get_obj(r, "result"), "content"))), "text", "")), J.Null{})
-  Bool.or(J.Json.get_bool(J.Json.get_obj(r, "result"), "isError", True{}), J.Json.get_bool(inner, "done", True{}))
+  Bool.or(Bool.or(J.Json.get_bool(J.Json.get_obj(r, "result"), "isError", True{}), J.Json.get_bool(inner, "done", True{})), J.Json.get_bool(inner, "news", False{}))
 
 def Res.changes(r: Res) -> List<&2, M.Change>:
   match r:

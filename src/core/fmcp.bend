@@ -185,7 +185,7 @@ def Fm.call.k(i: Nat, +s: M.State, +now: Nat, +from: String, +a: J.Json, +id: St
     case 0n:
       Fm.say(Bool.or(ok, B.Lr.may(s, from, id)), MC.Mcp.send.checked(Bool.or(ok, B.Lr.may(s, from, id)), s, now, from, id, MC.Mcp.send.body(a), J.Json.get_str(a, "mode", "")))
     case 1n:
-      Fm.say(ok, MC.Mcp.wait.k(ok, s, id))
+      Fm.say(ok, MC.Mcp.wait.k(ok, s, id, False{}))
     case 2n:
       Fm.say(ok, MC.Mcp.interrupt.f(ok, B.Hub.running(B.Hub.thread(s, id)), s, now, from, id))
     case 3n:

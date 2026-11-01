@@ -2591,6 +2591,28 @@ def Ride.wait(+s: M.State, +now: Nat, +thread: String, +msg: String, role: M.Rol
 def Ride.done(+v: String, +now: Nat, +thread: String, +into: String) -> List<&2, M.Change>:
   [M.SettingSet{RD.Ride.key(thread), "", now}, M.ActivityLogged{thread, "ride:" ++ Ride.last(v), "info", "ride", "Delivered " ++ into ++ ": " ++ Ride.count(v) ++ " waiting message(s)", now}]
 
+# when a running Claude turn was last given riding mail (mcp.bend's
+# thread_wait answers a wait that began before it as news, so a long wait
+# ends and the agent reads its input)
+def Ride.given.key(+thread: String) -> String:
+  "ridden." ++ thread
+
+# A note for a thread's ride (an uberbot's wake escalation, a told note):
+# a running Claude turn takes it on its input at once, with whatever waited,
+# as Hub.deliver.steer gives Claude any message; any other thread keeps it
+# in the ride as before (laws ride_note_*). Which notes go where is
+# unchanged; only when a Claude turn hears them.
+def Ride.note.k(now: Bool, +s: M.State, +at: Nat, +th: String, +v: String) -> Step:
+  match now:
+    case True{}:
+      Step{List.append(&2, M.Change, Ride.done(v, at, th, "into the running turn"), [M.SettingSet{Ride.given.key(th), Nat.show(at), at}]),
+        Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), RD.Ride.block(v), Hub.uuid(at, th ++ "/n/" ++ Ride.last(v)))}
+    case False{}:
+      Step{[M.SettingSet{RD.Ride.key(th), v, at}], Nil{}}
+
+def Ride.note(+s: M.State, +now: Nat, +th: String, +msg: String, +text: String) -> Step:
+  Ride.note.k(Bool.and(Hub.running(Hub.thread(s, th)), String.eq(Hub.provider(Hub.thread(s, th)), "claude")), s, now, th, RD.Ride.add(Ride.of(s, th), msg, text))
+
 # what a tool result that carries the ride writes
 def Ride.taken(+s: M.State, +now: Nat, +thread: String) -> List<&2, M.Change>:
   Ride.done(Ride.of(s, thread), now, thread, "into the running turn")
@@ -5065,8 +5087,8 @@ def Lr.tell.k(on: Bool, +s: M.State, +now: Nat, +thread: String, +from: String, 
 # enters the same private triage pipeline as launched reports. Only a
 # triaged escalation uses the ride; other threads keep Lr.send.
 def Wake.ride(+s: M.State, +now: Nat, +by: String, +msg: String, +text: String) -> Step:
-  +cs = {[M.SettingSet{RD.Ride.key(by), RD.Ride.add(Ride.of(s, by), msg, text), now}] : List<&2, M.Change>}
-  Step.cat(Step{cs, Nil{}}, Ride.start(M.State.replay(cs, s), now, by))
+  +st = Ride.note(s, now, by, msg, text)
+  Step.cat(st, Ride.start(M.State.replay(Queue.changes(st), s), now, by))
 
 def Wake.send(owned: Bool, +s: M.State, +now: Nat, +from: String, +by: String, +ref: String, +text: String) -> Step:
   match owned:
@@ -7987,12 +8009,12 @@ def Private.tell.fresh(fresh: Bool, +s: M.State, +now: Nat, +thread: String, +te
       +bot = PM.Private.owner(s, thread)
       +target = PM.Private.target(s, thread)
       +msg = Hub.id("tell", now, Hub.seq(s))
-      Origin.step(Step{List.concat(&2, M.Change,
+      Step.cat(Origin.step(Step{List.concat(&2, M.Change,
         [[M.MessagePosted{target, msg, M.Assistant{}, text, now}, M.SettingSet{PM.Private.told.key(bot, key), msg, now},
-          M.SettingSet{Private.said.key(thread), msg, now},
-          M.SettingSet{RD.Ride.key(target), RD.Ride.add(Ride.of(s, target), "told:" ++ msg, Private.told.note(key, text)), now}],
+          M.SettingSet{Private.said.key(thread), msg, now}],
         Private.tell.alert(Bool.or(NO.Policy.on(s, "needs"), NO.Policy.on(s, "settled")), s, now, target, msg, text),
-        TLD.Told.mark.set(msg, now, key, text, "chat", bot)]), Nil{}}, target, msg, ML.Origin{"thread:" ++ thread, "tell-person", key}, now)
+        TLD.Told.mark.set(msg, now, key, text, "chat", bot)]), Nil{}}, target, msg, ML.Origin{"thread:" ++ thread, "tell-person", key}, now),
+        Ride.note(s, now, target, "told:" ++ msg, Private.told.note(key, text)))
 
 # A lane cut off (a provider's session limit, a failure, a restart) before
 # it told anyone left its escalation nowhere: the triage key was already
