@@ -445,7 +445,8 @@ def project(previous: D.Node, fresh: D.Node, +direction: String) -> D.Node:
 
 # Rows held past the cap (thin-host.js's heldTrim): the rows of the pages
 # let go leave the page, and their measured height stays as a gap (gaps),
-# so the scrollbar and the reader's place do not move. ids: entry ids,
+# so the scrollbar and the reader's place do not move (host.js sums the
+# measured heights of the ids let go). ids: entry ids,
 # one a line. A row goes when it is one of them, the run it heads or the
 # run it is in starts with one; controls and live rows always stay.
 def H.ids.one(+id: String, m: Map<&2, Bool>) -> Map<&2, Bool>:
@@ -479,21 +480,6 @@ def H.drop.paint(xs: List<&2, D.Node>, at: Bool, +ids: Map<&2, Bool>, acc: List<
 def drop(+node: D.Node, ids: String) -> D.Node:
   +m = H.ids(ids, "", Map.new(&2, Bool))
   H.first(H.drop.paint([node], H.timeline(node), m, Nil{}), node)
-
-# The display keys of the timeline's rows (as timeline-scroller.js keys
-# them), one a line: what a drop took away, to keep its heights.
-def H.keys.text(xs: List<&2, D.Node>, +i: Nat, acc: String) -> String:
-  match xs:
-    case Nil{}: acc
-    case +h <> t: H.keys.text(t, Nat.add(i, 1n), acc ++ display_key_at(h, i) ++ "\n")
-
-def H.kids(found: Maybe<&2, List<&2, D.Node>>) -> List<&2, D.Node>:
-  match found:
-    case None{}: Nil{}
-    case Some{xs}: xs
-
-def row_keys(+node: D.Node) -> String:
-  H.keys.text(H.kids(H.find([node], H.timeline(node), None{})), 0n, "")
 
 # The height of the rows let go above and below, as empty rows that are
 # never an anchor (a control's key): the older one first in the timeline,

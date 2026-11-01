@@ -133,7 +133,6 @@ def main() -> IO(Unit):
     same("drop lets the named entries go, controls stay", H.drop(page("p", [before, a, b, c, d, after]), "a\nb"), page("p", [before, c, d, after]))
     same("drop takes a run headed by a dropped entry", H.drop(tl([headed("a", ""), b, c]), "a"), tl([b, c]))
     same("drop of nothing keeps every row", H.drop(tl([a, b, live]), ""), tl([a, b, live]))
-    C.Check.str("row keys are the scroller's keys", H.row_keys(tl([before, a, b])), H.display_key_at(before, 0n) ++ "\n" ++ H.display_key_at(a, 1n) ++ "\n" ++ H.display_key_at(b, 2n) ++ "\n")
     +go : D.Node = D.El{"div", "@gap:older", [D.At{"class", "timeline-gap"}, D.At{"aria-hidden", "true"}, D.At{"style", "height:120px"}], Nil{}}
     +gn : D.Node = D.El{"div", "@gap:newer", [D.At{"class", "timeline-gap"}, D.At{"aria-hidden", "true"}, D.At{"style", "height:80px"}], Nil{}}
     same("gaps: older first, newer after the last entry", H.gaps(tl([before, c, d, after]), "120", "80"), tl([go, before, c, d, gn, after]))

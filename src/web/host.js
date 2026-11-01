@@ -724,27 +724,26 @@ function historyClear() { historyNode = null;historyDirection = "";historyPageSt
 // by the side they went from, and the height they had, kept in their place
 // as a gap (timeline-history.bend's gaps) so the scrollbar and the reader's
 // place stay put. A page that brings them back takes its rows out of the gap.
+// (keys: an entry's row is keyed by its id, a run of tool calls it heads
+// by "fold:<id>"; a row never measured adds nothing)
 const historyGone = { older: new Set(), newer: new Set() };
-const historyKeys = node => History.row_keys(node).split("\n").filter(k => k && !k.startsWith("control:"));
 function historyGap(side) {
   const gone = historyGone[side];
   if (!gone.size) return 0;
-  const sizes = activeTimeline?.sizes || {}, estimate = activeTimeline?._estimate?.() || 120;
+  const sizes = activeTimeline?.sizes || {};
   let px = 0;
-  for (const k of gone) px += sizes[k] > 0 ? sizes[k] : estimate;
+  for (const id of gone) px += sizes[id] > 0 ? sizes[id] : sizes["fold:" + id] > 0 ? sizes["fold:" + id] : 0;
   return Math.round(px);
 }
 function historyLetGo(ids, side) {
   if (!historyNode || !ids.length) return;
-  const before = historyKeys(historyNode);
   historyNode = History.drop(historyNode, ids.join("\n"));
-  const after = new Set(historyKeys(historyNode));
-  for (const k of before) if (!after.has(k)) historyGone[side].add(k);
+  for (const id of ids) historyGone[side].add(id);
 }
-function historyBack(node) {
+// a page's entries are on the page again: out of the gaps (O(page))
+function historyBack(ids) {
   if (!historyGone.older.size && !historyGone.newer.size) return;
-  const now = new Set(historyKeys(node));
-  for (const gone of [historyGone.older, historyGone.newer]) for (const k of gone) if (now.has(k)) gone.delete(k);
+  for (const id of ids || []) { historyGone.older.delete(id);historyGone.newer.delete(id); }
 }
 function historyGaps(node) {
   const older = historyGap("older"), newer = historyGap("newer");
@@ -2814,7 +2813,7 @@ async function startThin(again = false, reason = "initial") {
         historyNode = node;
         // (timeline-history.bend's project keeps no row from before a reset)
         if (projection === "reset" || projection === "newest") { historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
-        else historyBack(node);
+        else historyBack(detail.window?.ids);
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
