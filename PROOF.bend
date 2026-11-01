@@ -14108,3 +14108,15 @@ def Laws.mobile_text_is_filepage():
 
 def Laws.plot_error_missing_keeps_filename():
   {==}
+
+def Laws.component_fragment_keeps_fitting_row(row):
+  {==}
+
+def Laws.component_fragment_keeps_field(key, value, id, index, total):
+  {==}
+
+def Laws.component_fragment_only_last_field_completes(key, value, tail):
+  {==}
+
+def Laws.copy_keeps_viewer_reads():
+  {==}

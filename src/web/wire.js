@@ -137,3 +137,194 @@ export function plain(j) {
     default: return null;
   }
 }
+
+// a JavaScript value as Bend's Json tree, exactly what core/json.bend's
+// Json.parse gives for JSON.stringify(value) (Null where that text is
+// undefined or malformed), without the text: the page used to stringify its
+// session and the timeline's plan input and parse them again a character at a
+// time on every render. A Bend String is a JS string, and Json.parse of what
+// JSON.stringify writes gives back the very same code units, so strings pass
+// through, except a lone surrogate (JSON.stringify writes it as \ud800):
+// Bend's runtime refuses to make a Char of one ("not a Unicode scalar
+// value"), so the old path threw out of the render, and one let through would
+// reach the hub's decoder, which refuses it too. Here each becomes U+FFFD,
+// keys and strings alike, as TextEncoder would send it. A number keeps the text JSON.stringify writes for it (String(n));
+// keys go in JSON.stringify's order (Object.keys) and members it leaves out
+// (undefined, functions, symbols) are left out here, or null in an array.
+// Recursion only per level of nesting, as JSON.stringify. known (a WeakMap,
+// optional) gives the tree of an object that came from plain() and is never
+// changed afterwards, so a value handed back (the timeline's previous plan)
+// costs nothing.
+const NULL = () => ({ $: T.Null });
+// s with each lone surrogate as U+FFFD (String.prototype.toWellFormed, which
+// the phones' engines may lack; JavaScriptCore's /[\ud800-\udfff]/u misses
+// some, so no regex)
+export function whole(s) {
+  if (s.isWellFormed) return s.isWellFormed() ? s : s.toWellFormed();
+  let out = null, from = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s.charCodeAt(i);
+    if (c < 0xd800 || c > 0xdfff) continue;
+    if (c < 0xdc00 && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) { i += 1; continue; }
+    }
+    out = (out ?? "") + s.slice(from, i) + "\ufffd";
+    from = i + 1;
+  }
+  return out === null ? s : out + s.slice(from);
+}
+function toTree(v, key, known) {
+  if (known && v !== null && typeof v === "object") {
+    const t = known.get(v);
+    if (t) return t;
+  }
+  if (v !== null && (typeof v === "object" || typeof v === "bigint") && typeof v.toJSON === "function") v = v.toJSON(key);
+  if (v !== null && typeof v === "object") {
+    if (v instanceof Number) v = Number(v);
+    else if (v instanceof String) v = String(v);
+    else if (v instanceof Boolean) v = v.valueOf();
+  }
+  switch (typeof v) {
+    case "string": return { $: T.Str, text: whole(v) };
+    case "number": return Number.isFinite(v) ? { $: T.Num, raw: String(v) } : NULL();
+    case "boolean": return { $: T.Flag, value: v };
+    case "bigint": throw new TypeError("Do not know how to serialize a BigInt");
+    case "object": {
+      if (v === null) return NULL();
+      if (Array.isArray(v)) {
+        const n = v.length, vs = new Array(n);
+        for (let k = 0; k < n; k += 1) vs[k] = toTree(v[k], String(k), known) || NULL();
+        let items = { $: T.End };
+        for (let k = n - 1; k >= 0; k -= 1) items = { $: T.Item, head: vs[k], tail: items };
+        return { $: T.Arr, items };
+      }
+      const ks = Object.keys(v), fs = [];
+      for (let k = 0; k < ks.length; k += 1) {
+        const t = toTree(v[ks[k]], ks[k], known);
+        if (t) fs.push(whole(ks[k]), t);
+      }
+      let fields = { $: T.End };
+      for (let k = fs.length - 2; k >= 0; k -= 2) fields = { $: T.Field, key: fs[k], value: fs[k + 1], tail: fields };
+      return { $: T.Obj, fields };
+    }
+    default: return undefined;
+  }
+}
+export function json(value, known) {
+  return toTree(value, "", known) || NULL();
+}
+
+// JSON text (a log line) as Bend's Json tree, exactly what core/json.bend's
+// Json.parse gives for it, or null where this cannot promise that: the
+// caller then parses with Bend. Unlike json(JSON.parse(text)) it keeps what
+// a JavaScript object loses: a number's raw text ("1.0", "1E5", "-0", past
+// 2^53), the fields' order (an object puts integer-like keys first) and
+// duplicate keys. Only strict JSON is read (Bend's lexer is looser: it
+// skips commas and colons, takes any bare word); a \uD800-\uDFFF escape is
+// null too, as Bend's runtime refuses to make a Char of a surrogate, so a
+// pair written as two escapes is one Bend cannot read either.
+const NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+const NOPE = {};
+export function jsonText(s) {
+  const n = s.length;
+  let i = 0;
+  const fail = () => { throw NOPE; };
+  const ws = () => {
+    for (let c = s.charCodeAt(i); c === 32 || c === 10 || c === 13 || c === 9; c = s.charCodeAt(++i));
+  };
+  const hex = (c) => c >= 48 && c <= 57 ? c - 48 : c >= 65 && c <= 70 ? c - 55 : c >= 97 && c <= 102 ? c - 87 : fail();
+  const str = () => {
+    i += 1;
+    let out = "", from = i;
+    for (;;) {
+      if (i >= n) fail();
+      const c = s.charCodeAt(i);
+      if (c === 34) { out += s.slice(from, i); i += 1; return out; }
+      if (c === 92) {
+        out += s.slice(from, i);
+        const e = s.charCodeAt(i + 1);
+        if (e === 117) {
+          const u = (hex(s.charCodeAt(i + 2)) << 12) | (hex(s.charCodeAt(i + 3)) << 8) | (hex(s.charCodeAt(i + 4)) << 4) | hex(s.charCodeAt(i + 5));
+          if (u >= 0xd800 && u <= 0xdfff) fail();
+          out += String.fromCharCode(u);
+          i += 6;
+        } else {
+          out += e === 34 ? '"' : e === 92 ? "\\" : e === 47 ? "/" : e === 98 ? "\b" : e === 102 ? "\f" : e === 110 ? "\n" : e === 114 ? "\r" : e === 116 ? "\t" : fail();
+          i += 2;
+        }
+        from = i;
+      } else if (c < 32) fail();
+      else if (c >= 0xd800 && c <= 0xdfff) {
+        const d = s.charCodeAt(i + 1);
+        if (c >= 0xdc00 || !(d >= 0xdc00 && d <= 0xdfff)) fail();
+        i += 2;
+      } else i += 1;
+    }
+  };
+  const word = (w, v) => {
+    if (s.startsWith(w, i)) { i += w.length; return v; }
+    return fail();
+  };
+  const value = () => {
+    const c = s.charCodeAt(i);
+    if (c === 34) return { $: T.Str, text: str() };
+    if (c === 123) {
+      i += 1; ws();
+      const fs = [];
+      if (s.charCodeAt(i) === 125) i += 1;
+      else for (;;) {
+        if (s.charCodeAt(i) !== 34) fail();
+        const k = str();
+        ws();
+        if (s.charCodeAt(i) !== 58) fail();
+        i += 1; ws();
+        fs.push(k, value());
+        ws();
+        const d = s.charCodeAt(i);
+        i += 1;
+        if (d === 125) break;
+        if (d !== 44) fail();
+        ws();
+      }
+      let fields = { $: T.End };
+      for (let k = fs.length - 2; k >= 0; k -= 2) fields = { $: T.Field, key: fs[k], value: fs[k + 1], tail: fields };
+      return { $: T.Obj, fields };
+    }
+    if (c === 91) {
+      i += 1; ws();
+      const vs = [];
+      if (s.charCodeAt(i) === 93) i += 1;
+      else for (;;) {
+        vs.push(value());
+        ws();
+        const d = s.charCodeAt(i);
+        i += 1;
+        if (d === 93) break;
+        if (d !== 44) fail();
+        ws();
+      }
+      let items = { $: T.End };
+      for (let k = vs.length - 1; k >= 0; k -= 1) items = { $: T.Item, head: vs[k], tail: items };
+      return { $: T.Arr, items };
+    }
+    if (c === 116) return word("true", { $: T.Flag, value: true });
+    if (c === 102) return word("false", { $: T.Flag, value: false });
+    if (c === 110) return word("null", { $: T.Null });
+    NUMBER.lastIndex = i;
+    const m = NUMBER.exec(s);
+    if (!m) fail();
+    i += m[0].length;
+    return { $: T.Num, raw: m[0] };
+  };
+  try {
+    ws();
+    const v = value();
+    ws();
+    return i === n ? v : null;
+  } catch (e) {
+    // nesting deeper than the engine's stack: Bend's parser has none
+    if (e === NOPE || e instanceof RangeError) return null;
+    throw e;
+  }
+}

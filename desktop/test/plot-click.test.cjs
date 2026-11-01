@@ -9,7 +9,7 @@ function harness() {
     addEventListener: (name, fn) => { handlers[name] = fn; }, setPointerCapture() {}, focus() {},
     closest: () => ({ querySelector: selector => ({ click: () => navigations.push(selector) }) }),
     getBoundingClientRect: () => ({ left: 0, top: 0 }), classList: { add() {}, remove() {} } };
-  const context = { ResizeObserver: class { constructor(fn) { resize = fn; } observe() {} }, requestAnimationFrame() {},
+  const context = { AbortController, ResizeObserver: class { constructor(fn) { resize = fn; } observe() {} }, requestAnimationFrame() {},
     views: new Map(), left: new Map(), componentSources: new Map(), sheeted: null, need: () => wait,
     probed: value => probes.push(value), under: () => [], partAt: () => null,
     groupsOf: () => [], P: { pickBoard: () => null, pickSheet: () => null, clickProbe: () => 'r:new' }, wheelKind: () => 'wheel' };

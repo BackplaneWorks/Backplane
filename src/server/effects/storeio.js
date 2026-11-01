@@ -13,15 +13,17 @@ function store_sync(path) {
   catch(e) { return 'fail '+e.message; }
   finally { if(fd!==undefined)fs.closeSync(fd); }
 }
-function store_prepare(home) {
+function store_prepare(home,codec) {
   const fs=require('fs'),path=require('path');let fd;
   try {
+    // a store is never set aside without the version to judge it by
+    if(!/^[1-9][0-9]*$/.test(String(codec)))return 'fail no store codec given';
     fd=fs.openSync(path.join(home,'events.jsonl'),'a+');
     const size=fs.fstatSync(fd).size,last=Buffer.alloc(1);
     if(size && fs.readSync(fd,last,0,1,size-1)===1 && last[0]!==10)fs.writeSync(fd,Buffer.from('\n'));
     fs.fsyncSync(fd);
-    const adopted=store_adopt(home);if(adopted!=='ok')return adopted;
-    store_existing(home);return 'ok';
+    const adopted=store_adopt(home,codec);if(adopted!=='ok')return adopted;
+    store_existing(home,codec);return 'ok';
   }catch(e){return 'fail '+e.message}
   finally{if(fd!==undefined)fs.closeSync(fd)}
 }
@@ -117,11 +119,13 @@ function store_hash(file,limit) {
     return hash.digest('hex');
   }finally{fs.closeSync(fd)}
 }
-function store_validate(file) {
+// codec: storedb.bend's Sdb.codec() as text, passed in by Disk.prepare
+function store_validate(file,codec) {
   const {Database}=require('bun:sqlite'),db=new Database(file,{readonly:true,safeIntegers:true});
   try {
     const m=Object.fromEntries(db.query('SELECT k,v FROM meta').values());
-    if(m.schema!=='1'||m.codec!=='6')throw Error('snapshot schema/codec mismatch');
+    if(!/^[1-9][0-9]*$/.test(String(codec)))throw Error('no store codec given');
+    if(m.schema!=='1'||m.codec!==String(codec))throw Error('snapshot schema/codec mismatch');
     for(const k of ['applied_seq','applied_off','ord'])if(!/^(0|[1-9][0-9]*)$/.test(m[k]||''))throw Error('invalid checkpoint metadata');
     // Missing tables/columns must rebuild, not silently answer empty pages.
     for(const sql of [
@@ -139,10 +143,10 @@ function store_validate(file) {
     return m;
   }finally{db.close()}
 }
-function store_existing(home) {
+function store_existing(home,codec) {
   const fs=require('fs'),path=require('path'),file=path.join(home,'store.db');
   if(!fs.existsSync(file))return;
-  try{store_validate(file)}catch(error){
+  try{store_validate(file,codec)}catch(error){
     // Retain the complete old cache and its WAL evidence. Sto.open will build
     // a new cache atomically from the authoritative log, before serving views.
     const old=file+'.invalid-'+Date.now();
@@ -151,16 +155,16 @@ function store_existing(home) {
     console.warn('[store] incompatible/incomplete cache retained for rebuild: '+error.message);
   }
 }
-function store_adopt(home) {
+function store_adopt(home,codec) {
   const fs=require('fs'),path=require('path'),dir=path.join(home,'.store-next');
   if(!fs.existsSync(dir))return 'ok';
   const file=path.join(dir,'store.db'),manifest=path.join(dir,'READY.json');let m;
   try {
     if(!fs.lstatSync(dir).isDirectory()||fs.lstatSync(dir).isSymbolicLink()||!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink())throw Error('invalid prepared path');
     m=JSON.parse(fs.readFileSync(manifest,'utf8'));
-    if(m.version!==1||m.codec!==6||m.schema!==1||!Number.isSafeInteger(m.prefixBytes)||!Number.isSafeInteger(m.appliedSeq)||!m.storeSha256||!m.prefixSha256)throw Error('invalid prepared manifest');
+    if(m.version!==1||m.codec!==Number(codec)||m.schema!==1||!Number.isSafeInteger(m.prefixBytes)||!Number.isSafeInteger(m.appliedSeq)||!m.storeSha256||!m.prefixSha256)throw Error('invalid prepared manifest');
     if(store_hash(file)!==m.storeSha256)throw Error('prepared database hash mismatch');
-    const meta=store_validate(file);
+    const meta=store_validate(file,codec);
     if(meta.applied_off!==String(m.prefixBytes)||meta.applied_seq!==String(m.appliedSeq))throw Error('prepared checkpoint mismatch');
     if(store_hash(path.join(home,'events.jsonl'),m.prefixBytes)!==m.prefixSha256)throw Error('prepared log prefix mismatch');
   }catch(error){

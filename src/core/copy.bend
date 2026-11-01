@@ -15,9 +15,10 @@ import ./copynet.bend as CN
 def Copy.on(+v: String) -> Bool:
   String.eq(v, "1")
 
-# git jobs that only read (a client's diff, status, file lists, refs...)
+# Git jobs that only read the project. Viewer metadata and exports may
+# populate the copy's private cache, like its PDF and mechanical previews.
 def Copy.git.reads(+job: String) -> Bool:
-  CN.Copy.has(["diff", "status", "name", "files", "kicad", "refs", "dir", "mech", "pdf"], job)
+  CN.Copy.has(["diff", "status", "name", "files", "kicad", "refs", "dir", "mech", "pdf", "boards", "rv.components", "rv.renderAsset"], job)
 
 # bot effects inside the home (scratch folders, the zone rule)
 def Copy.fx.home(+kind: String) -> Bool:

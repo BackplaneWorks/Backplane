@@ -1982,6 +1982,7 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
    and the buttons whole (a thread under about 60em), the chip and the
    account take a line over the buttons, and the chip keeps its words. */
 .account-chip { min-width: 0; flex: 0 1 auto; max-width: min(22rem, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 761px) { .account-chip > .ico { display: none; } }
 .account-picker { position: absolute; z-index: 4; bottom: 100%; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; max-width: 100%; max-height: min(45vh, 22rem); overflow-y: auto; border: 1px solid var(--line); background: var(--panel); }
 .account-picker button { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 .setrow .field { min-width: 0; max-width: 100%; }

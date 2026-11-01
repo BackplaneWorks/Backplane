@@ -65,3 +65,58 @@ for (const failingPage of [1, 2]) {
   assert.equal(sent.length,failingPage);assert.equal(rpc.pending.size,0);
 }
 console.log('ok production component-page reader: complete-only authority, exact source/revision chain, cursor/total/UUID/schema guards, reset between pages, empty board and count/byte bounds');
+
+const fragmentedRows=[{id:'before'},
+  ...Object.entries({id:'large',pads:[1,2],symbol:{items:['saved symbol']}}).map(([key,value],index)=>({id:'large',fragment:{fields:{[key]:value},index,total:3,complete:index===2}})),{id:'after'}];
+function fragments(change=()=>{}) {
+  const sent=[];
+  const rpc=new ViewerRpc(request=>{
+    sent.push(request);queueMicrotask(()=>{
+      const offset=request.p.offset||0,part=structuredClone(fragmentedRows.slice(offset,offset+2)),next=offset+part.length;
+      const d={...page(),componentEncoding:'field-fragments-v1',componentCount:3,components:part,page:{offset,total:5,next:next===5?null:next,complete:next===5}};
+      change(d,sent.length);
+      rpc.receive({t:'reply',id:request.id,ok:true,result:{components:d}});
+    });
+  });
+  return {rpc,sent};
+}
+{
+ const {rpc}=fragments();const data=await rpc.components('saved-board');
+ assert.deepEqual(data.components,[{id:'before'},{id:'large',pads:[1,2],symbol:{items:['saved symbol']}},{id:'after'}]);
+ assert.equal(data.page.total,3,'logical count survives extra transport records');
+}
+for(const [label,change]of [
+ ['identity',d=>{d.components[0].id='other';}],
+ ['field index',d=>{d.components[0].fragment.index=0;}],
+ ['field count',d=>{d.components[0].fragment.total=4;}],
+ ['early completion',d=>{d.components[0].fragment.complete=true;}],
+ ['missing final completion',d=>{d.components[1].fragment.complete=false;}],
+ ['repeated field',d=>{d.components[0].fragment.fields={id:'large'};}],
+ ['prototype field',d=>{d.components[0].fragment.fields=JSON.parse('{"__proto__":{}}');}],
+ ['array fields',d=>{d.components[0].fragment.fields=[];}],
+ ['interleaved component',d=>{d.components[0]={id:'other'};}],
+ ['encoding changes',d=>{d.componentEncoding='unsupported';}],
+ ['component count changes',d=>{d.componentCount=2;}],
+]) {
+ const {rpc,sent}=fragments((d,n)=>{if(n===2)change(d);});
+ await assert.rejects(rpc.components('saved-board'),undefined,label);assert.equal(sent.length,2,label);
+}
+{
+ const {rpc}=fragments(d=>{d.componentCount=4;});await assert.rejects(rpc.components('saved-board'),/incomplete/,'a forged logical count cannot publish');
+}
+{
+ const {rpc}=fragments((d,n)=>{if(n===1){d.components[1].fragment.fields={reference:'U2'};}});
+ await assert.rejects(rpc.components('saved-board'),/identity changed/,'fragmented row must retain its saved UUID field');
+}
+{
+ let rpc;let sent;
+ ({rpc,sent}=fragments((d,n)=>{if(n===1)queueMicrotask(()=>rpc.reset());}));
+ await assert.rejects(rpc.components('saved-board'),/Connection changed/);
+ assert.equal(sent.length,1,'a reset with an unfinished field aggregate starts no further read');
+}
+{
+ const owner=new AbortController(),{rpc,sent}=fragments((d,n)=>{if(n===1)queueMicrotask(()=>owner.abort());});
+ await assert.rejects(rpc.components('saved-board',{signal:owner.signal}),{name:'AbortError'});
+ assert.equal(sent.length,1,'disposing an unfinished field aggregate starts no further read');
+}
+console.log('ok complete-only field fragments: exact reconstruction across pages, identity/order/count/field guards, duplicate and unsafe field rejection');

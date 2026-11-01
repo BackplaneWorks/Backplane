@@ -27,7 +27,7 @@ function bubMovingScreen() {
   screen.bubMove = bubMove && bubMove.expires > Date.now() ? bubMove : null;
   return screen;
 }
-import { cbor as decode, is, kind, learnJson } from "../web/wire.js";
+import { cbor as decode, is, json, kind, learnJson } from "../web/wire.js";
 import { Recent, foregroundPending, presentationUpdates } from "./recent.js";
 import { NativeThinHost307265 } from "./thin-native-host-307265.js";
 import { compactRoute, VIEW_LIMITS } from "../web/thin.js";
@@ -233,7 +233,9 @@ const recent = new Recent({
 
 // The thin native lane never invokes App.recv/online/tick on view frames.
 // Every adapter below is pure until direct() returns the complete command batch.
-const bendJson = value => App.json_parse(JSON.stringify(value));
+// a value as Bend's Json, built in JavaScript (wire.js's json(): what
+// Json.parse gives for its JSON text, without the text)
+const bendJson = value => json(value);
 function thinRoute(session, previous) {
   const route = compactRoute(previous.route);
   return route && session.sel === previous.sel ? { ...session, route } : session;
