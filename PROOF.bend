@@ -14159,6 +14159,8 @@ def Laws.signal_failed_display_name():
   {==}
 
 def Laws.signal_pending_display_blocked():
+  {==}
+
 # ---- phone composer (thread J) ----
 def Laws.composer_slash_local():
   {==}

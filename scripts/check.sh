@@ -26,6 +26,8 @@
 # and memory for parallelism when the single check is the bottleneck).
 set -eu
 cd "$(dirname "$0")/.."
+# A lost `{==}` shows up here in a second, not after the emit.
+python3 scripts/laws-shape.py
 python3 scripts/i18n-gen.py --check
 # PROOF.bend outgrew the checker's stack (it overflowed at random on main):
 # a 1 GB main-thread stack, and the engine allowed to use 512 MB of it. A
