@@ -65,6 +65,10 @@ def onmech() -> TA.Actor:
 def reads(+a: TA.Actor) -> String:
   methods(TA.Actor.queued(TA.Actor.mail_ready(a)))
 
+def search_drafts(+query: String) -> Map<&2, String>:
+  Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.new(&2, String),
+    "@f.pq", query), "@f.private", "thread form"), "@mr.reply", "private mail")
+
 def main() -> IO(Unit):
   +a = onmech()
   do IO<Unit>:
@@ -76,3 +80,8 @@ def main() -> IO(Unit):
     C.Check.str("the same page drawn again: nothing", reads(to(a, "a")), "")
     C.Check.str("a page loaded afresh on Mech lists them", reads(to.view(a, "a", "view2")), "mech.list|")
     C.Check.str("the read is the actor's own", Bool.show(TA.Actor.read_only(J.Json.obj([J.KV{"type", J.Str{"send"}}, J.KV{"text", J.Str{"{\"id\":5,\"m\":\"mech.list\",\"p\":{\"thread\":\"a\"}}"}}]))), "True")
+    C.Check.str("sidebar search survives a different thread", U.Str.get(TA.Actor.scope.drafts(False{}, search_drafts("Catalog project 00")), "@f.pq"), "Catalog project 00")
+    C.Check.str("cleared sidebar search stays cleared", U.Str.get(TA.Actor.scope.drafts(False{}, search_drafts("")), "@f.pq"), "")
+    C.Check.str("other thread form stays private on navigation", U.Str.get(TA.Actor.scope.drafts(False{}, search_drafts("Catalog")), "@f.private"), "")
+    C.Check.str("mail reply stays private on navigation", U.Str.get(TA.Actor.scope.drafts(False{}, search_drafts("Catalog")), "@mr.reply"), "")
+    C.Check.str("same thread retains its own form", U.Str.get(TA.Actor.scope.drafts(True{}, search_drafts("Catalog")), "@f.private"), "thread form")

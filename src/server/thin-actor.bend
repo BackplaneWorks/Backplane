@@ -214,8 +214,9 @@ def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
 # again lists its parts again, client.bend's Mpage.sync; Files does the
 # same for its folder, Fm.sync)
 def Actor.scope.keep(+key: String) -> Bool:
-  Bool.not(Bool.or(Bool.or(Bool.or(String.starts_with(key, "@f."), String.starts_with(key, "@mr.")), String.starts_with(key, "@cmp.resolve:")),
-    Nat.is_lt(U.Keys.pos(["@want.new", "@want.new.at", "@thread.want", "@bot.want", "@want.hub", "@want.gen", "@made.far", "@mech.at", "@fm.at", "@cmp.menu"], key), 10n)))
+  # Project search belongs to the whole sidebar, not the selected thread.
+  Bool.or(String.eq(key, "@f.pq"), Bool.not(Bool.or(Bool.or(Bool.or(String.starts_with(key, "@f."), String.starts_with(key, "@mr.")), String.starts_with(key, "@cmp.resolve:")),
+    Nat.is_lt(U.Keys.pos(["@want.new", "@want.new.at", "@thread.want", "@bot.want", "@want.hub", "@want.gen", "@made.far", "@mech.at", "@fm.at", "@cmp.menu"], key), 10n))))
 
 def Actor.scope.clear( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +dr: Map<&2, String>) -> Map<&2, String>:
   match xs:

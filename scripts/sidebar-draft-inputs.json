@@ -155,7 +155,7 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
     "src/mobile/screen.bend": "1bad4894df85a15561e88506496d750c034ea9deb00340b2058bd1e88de291c0",
-    "src/server/thin-actor.bend": "c68a2b63868603316ada3f2e89c3eeff27a578b9cdafeb413c51119dfd57951b",
+    "src/server/thin-actor.bend": "75619b1fe5921a07d55c229fd08c4c77f61958fc5cd39e46b13bd929dd8a0702",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
@@ -383,7 +383,7 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged; 2026-11-01 combined main622/desktop dictation/Improvements: speech-only Vdict and @voice scratch, topbar/voice controls, existing wire privacy retained; no ordinary draft reader/key/filter/fallback change; all24 full-output cases PASS. Receipt MAIN-ALL-SOURCE-QUALIFICATION-CONTINUE-1.json.",
+  "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged; 2026-11-01 combined main622/desktop dictation/Improvements: speech-only Vdict and @voice scratch, topbar/voice controls, existing wire privacy retained; no ordinary draft reader/key/filter/fallback change; all24 full-output cases PASS. Receipt MAIN-ALL-SOURCE-QUALIFICATION-CONTINUE-1.json.; 2026-11-01 catalog scope: retain only sidebar-global @f.pq across target changes; all other thread forms/mail replies still cleared;256KiBunchanged. Scope13/sidebar24PASS, CATALOG-FIX-SOURCE-QUALIFICATION.json.",
   "currentMainAllReview": {
     "changes": {
       "added": [
@@ -401,5 +401,11 @@
     "fullOutputLogSHA256": "744467700e77cf6607fc2f9c352ba3e10153072447dce710d6a18b7b39af5ff2",
     "checks": 24,
     "priorManifestSHA256": "dcf787bdda9d93c032d8087554ac4b7a091734a9c19a8dc2552dd434e77b7066"
+  },
+  "catalogSearchScopeReview": {
+    "priorManifestSHA256": "bfa083b948b6e7578599328ea24cfcee1c7a9375110bb6212da1411089aa78a2",
+    "scopeLogSHA256": "a5b9421e26eeeadd82d9590581d3f10aef38d9c020587968e164ff6c179227ea",
+    "fullOutputLogSHA256": "744467700e77cf6607fc2f9c352ba3e10153072447dce710d6a18b7b39af5ff2",
+    "change": "only @f.pq retention; no wire authority or cap change"
   }
 }
