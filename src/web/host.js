@@ -12,7 +12,7 @@ const localStorage = homeDraftStorage(window.localStorage, window.backplaneDeskt
 import { editStart } from "./sent-claims.js";
 import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
-import { TimelineScroller } from "./timeline-scroller.js";
+import { TimelineScroller, RowHeights } from "./timeline-scroller.js";
 import { installImageActions } from "./image-actions.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => Wire.plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
@@ -293,6 +293,11 @@ function timelinePlan(input) {
   return plan;
 }
 
+// the rows' measured heights, kept across this page's timelines (a thread
+// and back, a page let go and fetched again): timeline-scroller.js's
+// RowHeights
+const rowHeights = new RowHeights(4000);
+
 // make el (whose last vnode is el.__v) match v
 function patch(el, v) {
   RR?.n("dom.patch");
@@ -304,7 +309,7 @@ function patch(el, v) {
       scroller = new TimelineScroller(el, {
         plan: timelinePlan, create, patch,
         key: (node, i) => History.display_key_at(node, BigInt(i)),
-        same: sameNode,
+        same: sameNode, heights: rowHeights,
         onChange: timelineChanged,
       });
       timelineLists.set(el, scroller);

@@ -2,12 +2,32 @@
 // has __bpRender; nothing otherwise.
 const RR = globalThis.__bpRender || null;
 
+// Measured row heights that outlive a list: a page dropped and fetched
+// again, a gap row, another thread and back. Keyed by the column width and
+// the row's key; bounded (the oldest go first). A row not measured in this
+// list is planned at its height here rather than at the list's mean; a row
+// on screen is measured all the same, so a stale height is only ever an
+// estimate. Streaming rows (live keys) change as they grow: never kept.
+export class RowHeights {
+  constructor(limit = 4000) { this.limit = limit;this.map = new Map(); }
+  static keep(key) { return !key.startsWith('live:') && !key.startsWith('@live:'); }
+  get(width, key) { return this.map.get(width + '|' + key); }
+  set(width, key, height) {
+    if (!(width > 0) || !(height > 0) || !RowHeights.keep(key)) return;
+    const k = width + '|' + key;
+    this.map.delete(k);this.map.set(k, height);
+    if (this.map.size > this.limit) this.map.delete(this.map.keys().next().value);
+  }
+}
+
 // DOM effects for the pure Bend timeline planner. Rows remain opaque to this
 // adapter; the planner owns layout, ranges, following and scroll anchoring.
 export class TimelineScroller {
-  constructor(el, { plan, create, patch, key, same = null, onChange = () => {} }) {
+  constructor(el, { plan, create, patch, key, same = null, heights = null, onChange = () => {} }) {
     this.el = el;
     this.callbacks = { plan, create, patch, key, same, onChange };
+    this.heights = heights; // a RowHeights shared with the lists before and after this one
+    this._width = 0; // the list's width, kept from the ResizeObserver
     this.rows = [];
     this.sizes = Object.create(null);
     this.lastPlan = null;
@@ -113,7 +133,7 @@ export class TimelineScroller {
         this._observer = new ResizeObserver(entries => {
           RR?.n("tl.resize");
           for (const e of entries) {
-            if (e.target === this.el) this._view = null;
+            if (e.target === this.el) { this._view = null;this._width = Math.round(e.contentRect.width); }
             else if (e.target.dataset?.virtualKey !== undefined) this._dirty.add(e.target.dataset.virtualKey);
           }
           const changed = this._readSizes();
@@ -139,6 +159,23 @@ export class TimelineScroller {
     return this._view;
   }
 
+  _widthNow() {
+    if (!this._width) this._width = Math.round(this.el.clientWidth);
+    return this._width;
+  }
+
+  // The sizes the plan is given: this list's measured rows, and for the
+  // rest, what the shared heights remember at this width
+  _sizes() {
+    if (!this.heights) return { ...this.sizes };
+    const out = {}, w = this._widthNow();
+    for (const key of this._keys) {
+      const h = this.sizes[key] ?? this.heights.get(w, key);
+      if (h !== undefined) out[key] = h;
+    }
+    return out;
+  }
+
   // Measures the rows that may have changed height. Nothing to measure is
   // no layout at all.
   _readSizes() {
@@ -157,6 +194,7 @@ export class TimelineScroller {
       const { wrapper } = row;
       const height = wrapper.getBoundingClientRect().height;
       RR?.n("tl.measure.row");
+      this.heights?.set(this._widthNow(), key, height);
       if (this.sizes[key] !== height) {
         this.sizes[key] = height;
         changed = true;
@@ -190,7 +228,7 @@ export class TimelineScroller {
         RR?.n("tl.plan." + request.mode);
         this._stale = false;
         const plan = this.callbacks.plan({
-          keys: this._keys.slice(), sizes: { ...this.sizes }, estimate: this._estimate(),
+          keys: this._keys.slice(), sizes: this._sizes(), estimate: this._estimate(),
           previous: this.lastPlan, top: this.el.scrollTop,
           view: this._viewHeight(), follow: this._follow, ...request,
         });

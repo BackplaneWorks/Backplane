@@ -170,5 +170,32 @@ test('timeline DOM effects preserve nodes, measure, forward commands and detach'
     return { extraCalls: calls.length - count, wrappers: scroller.el.children.length };
   });
   assert.deepEqual(destroyed, { extraCalls: 0, wrappers: 0 });
+
+  // heights measured by one list are the next one's sizes for rows it has
+  // not measured (a thread and back): not the mean
+  const kept = await page.evaluate(async () => {
+    const { TimelineScroller, RowHeights } = await import('/timeline-scroller.js');
+    const heights = new RowHeights(10);
+    const make = (visible) => {
+      const el = document.createElement('div'); el.id = 'timeline'; document.body.append(el);
+      const inputs = [];
+      const s = new TimelineScroller(el, { heights, key: r => r.key,
+        plan(input) { inputs.push(input); const items = input.keys.map((key, index) => ({ key, index, start: index * 100, size: 100 }));
+          return { items, visible: items.filter(i => visible.includes(i.key)), total: 1000, top: 0, view: 200, atEnd: false, anchor: '', offset: 0 }; },
+        create(row) { const n = document.createElement('div'); n.style.height = row.height + 'px'; return n; }, patch() {}, onChange() {} });
+      return { s, el, inputs };
+    };
+    const first = make(['a', 'b', 'live:x']);
+    first.s.update([{ key: 'a', height: 31 }, { key: 'b', height: 47 }, { key: 'live:x', height: 90 }]);
+    first.s.refresh();
+    first.s.destroy(); first.el.remove();
+    const second = make(['c']);
+    second.s.update([{ key: 'a', height: 31 }, { key: 'b', height: 47 }, { key: 'live:x', height: 90 }, { key: 'c', height: 20 }]);
+    second.s.refresh();
+    const sizes = second.inputs[0].sizes;
+    const capped = new RowHeights(2); capped.set(800, 'p', 1); capped.set(800, 'q', 2); capped.set(800, 'r', 3);
+    return { a: sizes.a, b: sizes.b, live: sizes['live:x'], kept: [...capped.map.keys()] };
+  });
+  assert.deepEqual(kept, { a: 31, b: 47, live: undefined, kept: ['800|q', '800|r'] }, 'measured heights carry to the next list; live rows are never kept; the oldest go first');
   assert.deepEqual(errors, []);
 });
