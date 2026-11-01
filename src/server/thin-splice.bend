@@ -8,6 +8,9 @@ import ../mobile/screen.bend as SC
 import ../mobile/thin.bend as MT
 import ./thin-view.bend as V
 import ./thin-body.bend as BW
+import ../core/client.bend as U
+import ../web/view.bend as VW
+import ../web/presentation.bend as WP
 
 # A thin view's reply when only its thread's live row changed (fast hub R1).
 # Streamed deltas come 20 a second per busy thread; re-rendering the whole
@@ -213,3 +216,65 @@ def Splice.window(+old: J.Json, +stream: TL.Stream, +thread: String, +epoch: Str
 # found exactly once where the renderer puts it
 def Splice.reply(+web: Bool, +res: J.Json, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
   Splice.k(Splice.ok.k(web, res, TL.Stream.id(thread)), web, res, Splice.window(J.Json.get_obj(res, "window"), stream, thread, epoch, target), TL.Stream.id(thread), BW.Body.live.preview(Bool.and(web, J.Json.get_bool(J.Json.get_obj(res, "window"), "bodyPages", False{})), stream), lc)
+
+# The page splice
+# ---------------
+# A view.page asks for another page of the same view: only the timeline
+# (#timeline: its rows, the earlier mark, the partial buttons, the pill)
+# and the window can differ from the view the hub drew last, when that
+# view was drawn from the same inputs but its rows (server.bend's
+# Hub.thin.page.splice checks the memo's key less its page and step). The
+# timeline is drawn alone for the new rows (view.bend's
+# View.thread.timeline.u, as View.thread.h draws it, with Render.older and
+# Render.after as Render.timeline adds them) and put into the last view in
+# its place, only the path to it rebuilt; the window is the new one.
+# test/page_splice_test.bend holds it equal to a full render of the page.
+def Tl.is(+o: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(o, "tag", ""), "div"), String.eq(J.Json.get_str(o, "key", ""), "timeline"))
+
+def Tl.count(j: J.Json, hit: Bool, +n: Nat) -> Nat:
+  match j hit:
+    case _ True{}:
+      Nat.add(n, 1n)
+    case J.Obj{+fs} False{}:
+      Tl.count(fs, False{}, n)
+    case J.Arr{+xs} False{}:
+      Tl.count(xs, False{}, n)
+    case J.Item{+h, +t} False{}:
+      Tl.count(t, False{}, Tl.count(h, Tl.is(h), n))
+    case J.Field{_, +v, +t} False{}:
+      Tl.count(t, False{}, Tl.count(v, Tl.is(v), n))
+    case _ False{}:
+      n
+
+def Tl.put(+j: J.Json, hit: Bool, +node: J.Json) -> Put:
+  match j hit:
+    case _ True{}:
+      Put{True{}, node}
+    case J.Obj{+fs} False{}:
+      Put.obj(Tl.put(fs, False{}, node), j)
+    case J.Arr{+xs} False{}:
+      Put.arr(Tl.put(xs, False{}, node), j)
+    case J.Item{+h, +t} False{}:
+      Put.item(Tl.put(h, Tl.is(h), node), Tl.put(t, False{}, node), j)
+    case J.Field{+k, +v, +t} False{}:
+      Put.field(k, Tl.put(v, Tl.is(v), node), Tl.put(t, False{}, node), j)
+    case +o False{}:
+      Put{False{}, o}
+
+# the timeline of u's thread for this window, as a full render writes it
+def Page.timeline(+u: U.Ui, +thread: String, +window: J.Json) -> J.Json:
+  WP.Node.write(V.Render.timeline(VW.View.thread.timeline.u(U.Lang.loc(u), u, U.Ui.thread(U.Ui.state(u), thread)),
+    V.Render.older(J.Json.get_bool(window, "hasMore", False{}), u), V.Render.after(window, u)))
+
+def Page.splice.k(one: Bool, +res: J.Json, +shown: J.Json, +node: J.Json, +window: J.Json) -> Maybe<&2, J.Json>:
+  match one:
+    case True{}: Some{Jx.set(Jx.set(res, "shown", Put.node(Tl.put(shown, Tl.is(shown), node))), "window", window)}
+    case False{}: None{}
+
+# res (the last view) with u's timeline for window (u: the view's Ui with
+# the page's rows, V.Render.ui; window: V.Render.window of them); None when
+# the timeline is not there exactly once (the caller renders in full)
+def Page.splice(+res: J.Json, +u: U.Ui, +thread: String, +window: J.Json) -> Maybe<&2, J.Json>:
+  +shown = J.Json.get_obj(res, "shown")
+  Page.splice.k(Nat.is_eq(Tl.count(shown, Tl.is(shown), 0n), 1n), res, shown, Page.timeline(u, thread, window), window)
