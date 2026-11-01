@@ -73,7 +73,7 @@ const reviewPosition = new ReviewPosition(localStorage);
 const modelFeedback = new ModelFeedback(() => later());
 import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
-import { previewTextFiles } from "./text-preview.js";
+import { previewTextFiles, previewMarkdownFiles } from "./text-preview.js";
 import { DraftAttachments } from "./draft-attachments.js";
 import { ThinMailDraft, mailReplyField } from "./mail-drafts.js";
 import { ThinViews, viewCapability } from "./thin.js";
@@ -1041,6 +1041,7 @@ function render() {
   panes();
   attachmentPreviews();
   previewTextFiles();
+  previewMarkdownFiles((text, node) => create(App.md(text, App.lang(ui), node.dataset.mdRoot || "", node.dataset.mdPath || "")));
   composerGeometry();
   earlierAsked = false;
   laterAsked = false;
