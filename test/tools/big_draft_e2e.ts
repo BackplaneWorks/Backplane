@@ -79,6 +79,7 @@ try {
     join(homedir(), ".cache/ms-playwright/chromium_headless_shell-1217/chrome-headless-shell-linux64/chrome-headless-shell")].find((p) => existsSync(p));
   browser = await chromium.launch({ executablePath: exe, headless: true, args: ["--disable-gpu"] });
   const context = await browser.newContext({ viewport: { width: 1200, height: 800 }, serviceWorkers: "block" });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://127.0.0.1:${port}` });
   page = await context.newPage();
   if (process.env.BIG_DRAFT_DEBUG) { page.on("console", (m: any) => console.log("console:", m.text().slice(0, 300)));page.on("pageerror", (e: any) => console.log("pageerror:", String(e).slice(0, 300))); }
   // every frame the page's socket sends and gets, and whether it closed
@@ -130,7 +131,27 @@ try {
     console.log([...self].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, v]) => v + " " + k).join("\n"));
     throw new Error("profiled");
   }
-  await page.locator("#composer").fill(big);
+  // input → paint: from the input event to the task after the next frame
+  // (the re-render harness's measure, test/tools/rerender/instrument.js)
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__bdPaint = [] as number[];
+    document.addEventListener("input", (e) => {
+      if ((e.target as any)?.id !== "composer") return;
+      const t = e.timeStamp;
+      requestAnimationFrame(() => setTimeout(() => w.__bdPaint.push(performance.now() - t), 0));
+    }, true);
+  });
+  const paints = () => page.evaluate(() => (window as any).__bdPaint.splice(0));
+  const p95 = (xs: number[]) => xs.slice().sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * 0.95))] ?? Infinity;
+  // a paste as a person makes one, the clipboard then Ctrl+V: one input
+  // event (Playwright's fill inserts a text of many lines as two input
+  // events a line, 21,000 here)
+  await page.locator("#composer").click();
+  await page.evaluate((t: string) => navigator.clipboard.writeText(t), big);
+  await page.keyboard.press("Control+V");
+  const pasted = await until(10000, async () => { const x = await paints(); return x.length ? x : undefined; }) ?? [];
+  check(pasted.length > 0 && pasted[0] <= 100, `the paste paints within 100 ms (${pasted.map((x: number) => Math.round(x)).join(", ")} ms)`);
   if (process.env.BIG_DRAFT_DEBUG) await page.screenshot({ path: "/tmp/h-delta/bd-fill.png" });
   if (process.env.BIG_DRAFT_DEBUG) console.log("composer", await page.evaluate(() => { const c = document.getElementById("composer") as any; return { tag: c?.tagName, len: c?.value?.length, max: c?.maxLength, n: document.querySelectorAll("#composer").length }; }));
   const said = await until(15000, async () => (await page.locator(".draft-limit").count()) ? await page.locator(".draft-limit").innerText() : undefined);
@@ -142,6 +163,58 @@ try {
   check(wire.draftBack === 0, "no reply carries the draft back");
   check((await page.locator("#composer").inputValue()) === big, "the composer holds the whole draft");
 
+  // typing in it: 20 keys at its end, then 20 in its middle, each painted
+  // as soon as a bare textarea holding the same text paints it (p95, within
+  // a frame or 4 ms more than the bare one: the browser's own editing of a
+  // 300 KB textarea is the floor, about 17 ms at p95 in headless Chromium)
+  const control = await context.newPage();
+  await control.setContent(`<textarea id="composer" style="width:700px;height:300px;font:14px sans-serif"></textarea>`);
+  await control.evaluate((t: string) => {
+    const c = document.getElementById("composer") as HTMLTextAreaElement, w = window as any;
+    c.value = t;w.__bdPaint = [];
+    c.addEventListener("input", (e) => { const t0 = e.timeStamp;requestAnimationFrame(() => setTimeout(() => w.__bdPaint.push(performance.now() - t0), 0)); });
+  }, big);
+  const floor = async (at: "end" | "mid") => {
+    await control.bringToFront();
+    await control.evaluate((m: string) => { const c = document.getElementById("composer") as HTMLTextAreaElement;c.focus();const n = m === "end" ? c.value.length : c.value.length >> 1;c.setSelectionRange(n, n);(window as any).__bdPaint = []; }, at);
+    await control.keyboard.type("the quick brown fox ", { delay: 40 });
+    await sleep(300);
+    const xs: number[] = await control.evaluate(() => (window as any).__bdPaint);
+    await page.bringToFront();
+    return p95(xs);
+  };
+  const typed = async (at: "end" | "mid") => {
+    const bare = await floor(at);
+    await page.evaluate((m: string) => { const c = document.getElementById("composer") as HTMLTextAreaElement;c.focus();const n = m === "end" ? c.value.length : c.value.length >> 1;c.setSelectionRange(n, n); }, at);
+    await paints();
+    const cdp = process.env.BIG_DRAFT_TYPEPROF ? await context.newCDPSession(page) : null;
+    if (cdp) { await cdp.send("Profiler.enable");await cdp.send("Profiler.setSamplingInterval", { interval: 100 });await cdp.send("Profiler.start"); }
+    await page.keyboard.type("the quick brown fox ", { delay: 40 });
+    if (cdp) {
+      // inclusive time by function: each function once per sample's stack
+      const { profile } = await cdp.send("Profiler.stop");
+      const byId = new Map(profile.nodes.map((n: any) => [n.id, n])), parent = new Map<number, number>();
+      for (const n of profile.nodes) for (const c of n.children || []) parent.set(c, n.id);
+      const incl = new Map<string, number>(), dt = profile.timeDeltas as number[];
+      profile.samples.forEach((id: number, i: number) => {
+        const seen = new Set<string>();
+        for (let x: any = id; x !== undefined; x = parent.get(x)) { const f = (byId.get(x) as any).callFrame;const k = `${f.functionName || "(anon)"}:${f.lineNumber + 1}`;if (!seen.has(k)) { seen.add(k);incl.set(k, (incl.get(k) || 0) + (dt[i] || 0)); } }
+      });
+      console.log(`typing at the ${at}, inclusive ms:`);
+      console.log([...incl].filter(([k]) => !/^\((root|idle|program)\)/.test(k)).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k, us]) => `  ${(us / 1000).toFixed(1)} ${k}`).join("\n"));
+    }
+    await sleep(300);
+    const xs: number[] = await paints();
+    check(xs.length >= 20 && p95(xs) <= Math.max(16.7, bare + 4), `typing at the ${at}: key → paint p95 ${Math.round(p95(xs))} ms (${xs.length} keys; a bare textarea ${Math.round(bare)} ms)`);
+  };
+  await typed("end");
+  await typed("mid");
+  await control.close();
+  // the draft as typed, for the reload and Enter checks below
+  const whole = await page.locator("#composer").inputValue();
+  check(whole.length === big.length + 40, "the typed keys are in the draft");
+  await sleep(1500);
+
   // reload: the draft comes back whole, the limit is said again
   const closed = wire.closed;
   if (process.env.BIG_DRAFT_DEBUG) console.log("stored", await page.evaluate(() => Object.keys(localStorage).filter((k) => k.includes("draft")).map((k) => k + ":" + (localStorage.getItem(k) || "").length)));
@@ -149,8 +222,8 @@ try {
   await page.waitForSelector(".sidebar .thread", { timeout: 60000 });
   await ready();
   if (process.env.BIG_DRAFT_DEBUG) console.log("stored after", await page.evaluate(() => Object.keys(localStorage).filter((k) => k.includes("draft")).map((k) => k + ":" + (localStorage.getItem(k) || "").length)), await page.evaluate(() => (document.getElementById("composer") as any)?.value?.length));
-  const back = await until(15000, async () => { const v = await page.locator("#composer").inputValue(); return v === big ? v : undefined; });
-  check(back === big, `after a reload the draft is intact (${back?.length ?? 0} of ${big.length} chars)`);
+  const back = await until(15000, async () => { const v = await page.locator("#composer").inputValue(); return v === whole ? v : undefined; });
+  check(back === whole, `after a reload the draft is intact (${back?.length ?? 0} of ${whole.length} chars)`);
   check(!!(await until(15000, async () => (await page.locator(".draft-limit").count()) || undefined)), "and the limit is said again");
   await sleep(1000);
   check(wire.closed === closed, "the new socket stays up");
@@ -161,7 +234,7 @@ try {
   await page.locator("#composer").press("Enter");
   await sleep(2500);
   check(posted() === before, "Enter posts nothing over a message's bound");
-  check((await page.locator("#composer").inputValue()) === big, "the draft stays after Enter");
+  check((await page.locator("#composer").inputValue()) === whole, "the draft stays after Enter");
   check(wire.closed === closed, "the socket is still up");
   ws.close();
 } catch (e) {
