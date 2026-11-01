@@ -1,5 +1,4 @@
 import Base
-import ./check.bend as C
 import ../src/core/json.bend as J
 import ../src/core/model.bend as M
 import ../src/core/thin.bend as T
@@ -11,8 +10,10 @@ import ../src/server/thin-splice.bend as S
 # A view.page answered from the last view with only its timeline drawn
 # again (thin-splice.bend's Page.splice) is the full render of that page:
 # from the newest page to an older one and back, with and without a live
-# row, on a thread long enough for three pages. Design steps are spread
-# over it, so the top bar's count of changes is the thread's on every page.
+# row, and the same page again, on a thread long enough for three pages.
+# Design steps are spread over it, so the top bar's count of changes is the
+# thread's on every page. The driver (test/tools/page_splice.mjs) compares
+# each case's two pictures: Bend's String.eq on them overflows its stack.
 
 def z(+s: String) -> String:
   s ++ SCon{Chr{0}, SNil{}}
@@ -89,21 +90,38 @@ def spliced.k(a: V.ActResult, +from: Nat, +to: Nat, +anchor: String, +s: TL.Stre
 def spliced(+from: Nat, +to: Nat, +anchor: String, +s: TL.Stream) -> String:
   spliced.k(acted(anchor), from, to, anchor, s)
 
-def same(+name: String, +from: Nat, +to: Nat, +anchor: String, +s: TL.Stream) -> IO(Unit):
-  C.Check.str(name, spliced(from, to, anchor, s), J.Json.show(full(to, anchor, s)))
+# each case: the page spliced from the last view, then drawn in full
+# newest page to the older one
+def c0.spliced(+z: Nat) -> String:
+  spliced(Nat.add(z, 0n), mid(0n), "m40", TL.Stream.blank())
 
-# the top bar on an old page counts all eight of the thread's changes
-def counted.k(+shown: String) -> String:
-  Bool.show(String.contains(shown, "kv changes")) ++ " " ++ Bool.show(String.contains(shown, ">8</span></span>"))
+def c0.full(+z: Nat) -> String:
+  J.Json.show(full(Nat.add(z, mid(0n)), "m40", TL.Stream.blank()))
 
-def counted(+before: Nat, +anchor: String) -> String:
-  counted.k(J.Json.show(full(before, anchor, TL.Stream.blank())))
+# the older page back to the newest
+def c1.spliced(+z: Nat) -> String:
+  spliced(Nat.add(z, mid(0n)), 0n, "m70", TL.Stream.blank())
 
-def main() -> IO(Unit):
-  do IO<Unit>:
-    C.Check.str("an old page's top bar counts the thread's changes", counted(mid(mid(0n)), "m20"), "True True")
-    same("newest page to the older one", 0n, mid(0n), "m40", TL.Stream.blank())
-    same("the older page back to the newest", mid(0n), 0n, "m70", TL.Stream.blank())
-    same("one older page to the next older", mid(0n), mid(mid(0n)), "m20", TL.Stream.blank())
-    same("with a live row, newest to older", 0n, mid(0n), "m40", stream("Looking at the buck converter now.", 3n))
-    same("the same page again", 0n, 0n, "", TL.Stream.blank())
+def c1.full(+z: Nat) -> String:
+  J.Json.show(full(Nat.add(z, 0n), "m70", TL.Stream.blank()))
+
+# one older page to the next older
+def c2.spliced(+z: Nat) -> String:
+  spliced(Nat.add(z, mid(0n)), mid(mid(0n)), "m20", TL.Stream.blank())
+
+def c2.full(+z: Nat) -> String:
+  J.Json.show(full(Nat.add(z, mid(mid(0n))), "m20", TL.Stream.blank()))
+
+# with a live row, newest to older
+def c3.spliced(+z: Nat) -> String:
+  spliced(Nat.add(z, 0n), mid(0n), "m40", stream("Looking at the buck converter now.", 3n))
+
+def c3.full(+z: Nat) -> String:
+  J.Json.show(full(Nat.add(z, mid(0n)), "m40", stream("Looking at the buck converter now.", 3n)))
+
+# the same page again
+def c4.spliced(+z: Nat) -> String:
+  spliced(Nat.add(z, 0n), 0n, "", TL.Stream.blank())
+
+def c4.full(+z: Nat) -> String:
+  J.Json.show(full(Nat.add(z, 0n), "", TL.Stream.blank()))
