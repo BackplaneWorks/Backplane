@@ -10400,6 +10400,14 @@ def paste_take_zero(s: String) -> {String.take(s, 0n) == "" : String}:
     case SCon{_, _}:
       {==}
 
+# an upload's head
+def Laws.http_take_short():
+  {==}
+def Laws.http_take_all():
+  {==}
+def Laws.http_take_none():
+  {==}
+
 # ui-panel-paste-lag: paste
 def Laws.paste_name_png():
   {==}

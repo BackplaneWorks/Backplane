@@ -9001,6 +9001,14 @@ law subs_model_alias:
 law subs_panel_resolved_stays_shut:
   {SB.Subs.panel.chosen("0live:old\u{001f}attention:old", [SB.SubRow{"old", True{}, "Inspect", "subagent", "running", "", True{}, False{}, 0n, Nil{}}]) == False{} : Bool}
 
+# an upload's head: List.take's bytes, without a frame per byte
+law http_take_short:
+  {WS.Http.take([1, 2, 3, 4], 2n) == [1, 2] : List<&2, U32>}
+law http_take_all:
+  {WS.Http.take([1, 2, 3], 7n) == [1, 2, 3] : List<&2, U32>}
+law http_take_none:
+  {WS.Http.take([1, 2, 3], 0n) == [] : List<&2, U32>}
+
 # ui-panel-paste-lag: paste
 law paste_name_png:
   {AT.Att.paste.name("image/png") == "pasted.png" : String}

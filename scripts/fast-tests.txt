@@ -8,6 +8,7 @@ test/mailcontinuity_test.bend
 test/mailboot_test.bend
 test/r1_copy_test.bend
 test/models_cache_test.bend
+test/http_take_test.bend
 test/glb_stack_test.bend
 test/sidebar_fresh_projection_test.bend
 

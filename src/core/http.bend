@@ -44,6 +44,19 @@ def Http.split.go(bs: List<&2, U32>, seen: Nat, acc: List<&2, U32>) -> Maybe<&2,
 def Http.split(bs: List<&2, U32>) -> Maybe<&2, Split>:
   Http.split.go(bs, 0n, Nil{})
 
+# the first n bytes, one tail call each (List.take keeps a frame per byte):
+# a POST /attach body can come whole with its head, and taking it faulted
+# the hub's 64 MiB stack on macOS (test/http_take_test.bend)
+def Http.take.go(bs: List<&2, U32>, n: Nat, acc: List<&2, U32>) -> List<&2, U32>:
+  match bs n:
+    case b <> t 1n+k:
+      Http.take.go(t, k, b <> acc)
+    case _ _:
+      List.reverse(&2, U32, acc)
+
+def Http.take(bs: List<&2, U32>, n: Nat) -> List<&2, U32>:
+  Http.take.go(bs, n, Nil{})
+
 def Http.header.k(parts: List<&2, String>) -> Header:
   match parts:
     case Nil{}:

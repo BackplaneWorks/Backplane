@@ -15556,7 +15556,7 @@ def Upload.into.k(big: Bool, s: Socket, +cont: Bool, +lim: Nat, +dir: String, +t
       do IO<Unit>:
         s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
         mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
-        +head : List<&2, U32> = List.take(&2, U32, rest, len)
+        +head : List<&2, U32> = W.Http.take(rest, len)
         +path : String = dir ++ "/" ++ name
         e : String <- Media.put.file(path, "w", head)
         Upload.wrote(e, s2, Nat.sub(len, List.length(&2, U32, head)), thread, path)
