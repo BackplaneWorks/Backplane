@@ -164,10 +164,10 @@ def VoReq.timed(+r: VoReq) -> Bool:
 # the reader's state: the settling segment, the cloud's text so far, the
 # segment's corrected words and guesses so far, the tail last sent
 type VoSt is Data:
-  VoSt{set: VD.VSet, acc: String, seg: List<&2, VD.VW>, ask: List<&2, V.Unsure>, tl: String}
+  VoSt{set: VD.VSet, acc: String, seg: List<&2, VD.VW>, ask: List<&2, V.Unsure>, tl: String, fxs: List<&2, VD.VFx>}
 
 def Vo.st0() -> VoSt:
-  VoSt{VD.Vs.empty(), "", Nil{}, Nil{}, ""}
+  VoSt{VD.Vs.empty(), "", Nil{}, Nil{}, "", Nil{}}
 
 # what one helper line gives: messages for the client and the state after
 type VoOut is Data:
@@ -179,7 +179,7 @@ def Vo.one(+m: String, st: VoSt) -> VoOut:
 # ev words: "first" when nothing of the segment was committed before, the
 # words committed now (never to change; corrected), the tail
 # (may still change), "firm" when the committed words open with a term,
-# the fixes made, and on a segment's end "final" with the words to clarify
+# the segment's fixes so far, and on its end "final" with the words to clarify
 def Vo.words.msg(+thread: String, +item: String, +first: Bool, +commit: String, +tail: String, +firm: Bool, +fixes: J.Json, +fin: Bool, +unsure: J.Json) -> String:
   Vo.msg(thread, "words", [J.KV{"item", J.Str{item}}, J.KV{"first", J.Flag{first}}, J.KV{"commit", J.Str{commit}}, J.KV{"tail", J.Str{tail}}, J.KV{"firm", J.Flag{firm}},
     J.KV{"fixes", fixes}, J.KV{"final", J.Flag{fin}}, J.KV{"unsure", unsure}])
@@ -191,27 +191,27 @@ def Vo.words.k(quiet: Bool, +m: String, st: VoSt) -> VoOut:
     case False{}:
       VoOut{[m], st}
 
-def Vo.words.go(+thread: String, +item: String, +d: VD.VDict, +fin: Bool, +fx: VD.VFix, +tail: String, +set: VD.VSet, +acc: String, +seg: List<&2, VD.VW>, +ask: List<&2, V.Unsure>, +tl: String) -> VoOut:
+def Vo.words.go(+thread: String, +item: String, +d: VD.VDict, +fin: Bool, +fx: VD.VFix, +tail: String, +set: VD.VSet, +acc: String, +seg: List<&2, VD.VW>, +ask: List<&2, V.Unsure>, +tl: String, +fxs: List<&2, VD.VFx>) -> VoOut:
   Vo.words.k(Bool.and(Bool.not(fin), Bool.and(List.is_empty(&2, VD.VW, VD.VFix.words(fx)), String.eq(tail, tl))),
-    Vo.words.msg(thread, item, List.is_empty(&2, VD.VW, seg), VD.Vdc.text(VD.VFix.words(fx)), tail, V.Voice.firm(VD.Vdc.terms(d), VD.Vdc.text(VD.VFix.words(fx))), VD.Vdc.fixes.json(VD.VFix.fixes(fx)), fin,
+    Vo.words.msg(thread, item, List.is_empty(&2, VD.VW, seg), VD.Vdc.text(VD.VFix.words(fx)), tail, V.Voice.firm(VD.Vdc.terms(d), VD.Vdc.text(VD.VFix.words(fx))), VD.Vdc.fixes.json(List.append(&2, VD.VFx, fxs, VD.VFix.fixes(fx))), fin,
       Bool.pick(J.Json, fin, V.Voice.unsure.json(VD.Vdc.asks(d, Nil{}, VD.VFix{List.append(&2, VD.VW, seg, VD.VFix.words(fx)), Nil{}, List.append(&2, V.Unsure, ask, VD.VFix.ask(fx))})), J.Json.arr(Nil{}))),
-    Bool.pick(VoSt, fin, VoSt{set, "", Nil{}, Nil{}, ""}, VoSt{set, acc, List.append(&2, VD.VW, seg, VD.VFix.words(fx)), List.append(&2, V.Unsure, ask, VD.VFix.ask(fx)), tail}))
+    Bool.pick(VoSt, fin, VoSt{set, "", Nil{}, Nil{}, "", Nil{}}, VoSt{set, acc, List.append(&2, VD.VW, seg, VD.VFix.words(fx)), List.append(&2, V.Unsure, ask, VD.VFix.ask(fx)), tail, List.append(&2, VD.VFx, fxs, VD.VFix.fixes(fx))}))
 
 # a settled step into a message: the committed words corrected, the tail
 # corrected for display; nothing when nothing changed
 def Vo.words(+thread: String, +item: String, +d: VD.VDict, fin: Bool, +x: VD.VStep, st: VoSt) -> VoOut:
   match st:
-    case VoSt{_, +acc, +seg, +ask, +tl}:
-      Vo.words.go(thread, item, d, fin, VD.Vdc.fix(d, VD.VStep.commit(x)), VD.Vdc.text(VD.VFix.words(VD.Vdc.fix(d, VD.VStep.tail(x)))), VD.VStep.st(x), acc, seg, ask, tl)
+    case VoSt{_, +acc, +seg, +ask, +tl, +fxs}:
+      Vo.words.go(thread, item, d, fin, VD.Vdc.fix(d, VD.VStep.commit(x)), VD.Vdc.text(VD.VFix.words(VD.Vdc.fix(d, VD.VStep.tail(x)))), VD.VStep.st(x), acc, seg, ask, tl, fxs)
 
 def Vo.set(+st: VoSt) -> VD.VSet:
   match st:
-    case VoSt{s, _, _, _, _}:
+    case VoSt{s, _, _, _, _, _}:
       s
 
 def Vo.acc(+st: VoSt) -> String:
   match st:
-    case VoSt{_, a, _, _, _}:
+    case VoSt{_, a, _, _, _, _}:
       a
 
 # the cloud's deltas for item, added to what came before for it
@@ -220,8 +220,8 @@ def Vo.acc.for(+st: VoSt, +item: String, +text: String) -> String:
 
 def Vo.with.acc(st: VoSt, +a: String) -> VoSt:
   match st:
-    case VoSt{s, _, g, k, t}:
-      VoSt{s, a, g, k, t}
+    case VoSt{s, _, g, k, t, f}:
+      VoSt{s, a, g, k, t, f}
 
 def Vo.delta(+thread: String, +item: String, +a: String, +d: VD.VDict, +st: VoSt) -> VoOut:
   Vo.words(thread, item, d, False{}, VD.Vs.hyp(False{}, Vo.set(st), item, VD.Vdc.words.text(a), 0n, VD.Vdc.waits(d)), Vo.with.acc(st, a))
