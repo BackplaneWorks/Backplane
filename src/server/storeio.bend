@@ -1,5 +1,6 @@
 import Base
 import ./db.bend as D
+import ./perf.bend as PS
 import ./hotboot.bend as HB
 import ./stobuild.bend as SB
 import ./host.bend as H
@@ -34,9 +35,15 @@ def Disk.sync(path: String) -> IO(String):
 
 # the store's checks before it is opened: the log's tail closed, a prepared
 # store adopted, an incompatible one set aside. codec is S.Sdb.codec()'s
-# text, the one version the JS checks accept (they hold no codec of their
-# own: test/tools/store_checkpoint_io_test.cjs)
-def Disk.prepare(home: String, codec: String) -> IO(String):
+# text and from S.Sdb.codec.from()'s, space-separated: the versions the JS
+# checks keep (they hold none of their own: test/tools/
+# store_checkpoint_io_test.cjs); a prepared store must be at codec itself
+def Disk.prepare(home: String, codec: String, from: String) -> IO(String):
+  import "./effects/storeio.js"
+
+# the complete lines before byte `to` that contain any of the needles, oldest
+# first, decoded as UTF-8 (effects/storeio.js reads the file outside Bend)
+def Disk.pick(path: String, to: String, needles: List<&2, String>) -> IO(List<&2, String>):
   import "./effects/storeio.js"
 
 def Plan.st(p: Plan) -> M.State:
@@ -182,6 +189,55 @@ def Sto.checked(ok: Bool, +h: String, +home: String, +meta: Map<&2, String>) -> 
         closed : String <- D.Db.close(h)
         Sto.rebuild(home)
 
+# Upgrade in place (storedb.bend's "Upgrades in place")
+# -----------------------------------------------------
+# A store whose only difference is a codec in S.Sdb.codec.from() is brought
+# to this codec without a rebuild: the picked lines before its applied_off
+# are folded (S.Up.changes), their rows and meta's codec written in one
+# transaction, then read back. If anything fails the store is rebuilt from
+# the log as before; a store is never left half upgraded (the transaction
+# commits whole or not at all), and the log says which path ran.
+
+def Sto.up.said(+msg: String) -> IO(Unit):
+  PS.Log.info("store", msg)
+
+def Sto.up.count(rows: List<&2, List<&2, String>>) -> Nat:
+  M.Switch.num(Maybe.default(&2, String, List.head(&2, String, Maybe.default(&2, List<&2, String>, List.head(&2, List<&2, String>, rows), Nil{})), ""), 0n)
+
+def Sto.up.verified(ok: Bool, +h: String, +home: String, +meta: Map<&2, String>, +what: String) -> IO(Opened):
+  match ok:
+    case True{}:
+      do IO<Opened>:
+        Sto.up.said("upgraded store.db in place from codec " ++ HB.Hot.get(meta, "codec") ++ " to " ++ Nat.show(S.Sdb.codec()) ++ ": " ++ what)
+        Sto.checked(True{}, h, home, Map.set(&2, String, meta, "codec", Nat.show(S.Sdb.codec())))
+    case False{}:
+      do IO<Opened>:
+        Sto.up.said("in-place upgrade failed (" ++ what ++ "); rebuilding store.db from the log")
+        closed : String <- D.Db.close(h)
+        Sto.rebuild(home)
+
+def Sto.up.check(+r: String, +h: String, +home: String, +meta: Map<&2, String>, +want: Nat, +picked: Nat) -> IO(Opened):
+  do IO<Opened>:
+    n : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT count(*) FROM setting WHERE substr(k, 1, 14) = 'thread.parent.'", [], 2)
+    c : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT v FROM meta WHERE k = 'codec'", [], 2)
+    +got : Nat = Sto.up.count(n)
+    +what : String = Nat.show(picked) ++ " lines picked, " ++ Nat.show(want) ++ " thread.parent rows written, " ++ Nat.show(got) ++ " read back"
+    Sto.up.verified(Bool.and(String.starts_with(r, "ok"), Bool.and(Nat.is_eq(got, want), String.eq(Nat.show(Sto.up.count(c)), Nat.show(S.Sdb.codec())))), h, home, meta, Bool.pick(String, String.starts_with(r, "ok"), what, r))
+
+def Sto.upgrade(+h: String, +home: String, +meta: Map<&2, String>) -> IO(Opened):
+  do IO<Opened>:
+    +ls : List<&2, String> <- Disk.pick(home ++ "/events.jsonl", HB.Hot.get(meta, "applied_off"), S.Up.names())
+    +cs : List<&2, M.Change> = S.Up.changes(ls)
+    r : String <- D.Db.script(h, S.Up.rows(cs))
+    Sto.up.check(r, h, home, meta, S.Up.count(cs), List.length(&2, String, ls))
+
+def Sto.up.or(up: Bool, ok: Bool, +h: String, +home: String, +meta: Map<&2, String>) -> IO(Opened):
+  match up:
+    case True{}:
+      Sto.upgrade(h, home, meta)
+    case False{}:
+      Sto.checked(ok, h, home, meta)
+
 def Sto.opened(ok: Bool, +opened: String, +home: String) -> IO(Opened):
   match ok:
     case False{}: Sto.rebuild(home)
@@ -190,13 +246,23 @@ def Sto.opened(ok: Bool, +opened: String, +home: String) -> IO(Opened):
         +h : String = String.drop(opened, 3n)
         rows : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT k,v FROM meta", [], 1000)
         +meta : Map<&2, String> = HB.Hot.meta.go(rows, Map.new(&2, String))
-        size : U32 <- HB.Hot.size(home ++ "/events.jsonl")
+        +size : U32 <- HB.Hot.size(home ++ "/events.jsonl")
         head : List<&2, U32> <- HB.Hot.head(home ++ "/events.jsonl")
-        Sto.checked(String.is_empty(HB.Hot.check(meta, size, S.Sdb.log_id(head))), h, home, meta)
+        +id : String = S.Sdb.log_id(head)
+        +why : String = HB.Hot.check(meta, size, id)
+        +only : Bool = String.is_empty(HB.Hot.check(Map.set(&2, String, meta, "codec", Nat.show(S.Sdb.codec())), size, id))
+        Sto.up.or(Bool.and(Bool.not(String.is_empty(why)), Bool.and(only, S.Sdb.codec.up(HB.Hot.get(meta, "codec")))), String.is_empty(why), h, home, meta)
+
+def Sto.from.go(xs: List<&2, Nat>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case x <> t:
+      Nat.show(x) ++ " " ++ Sto.from.go(t)
 
 def Sto.boot(+home: String) -> IO(Opened):
   do IO<Opened>:
-    ready : String <- Disk.prepare(home, Nat.show(S.Sdb.codec()))
+    ready : String <- Disk.prepare(home, Nat.show(S.Sdb.codec()), String.trim(Sto.from.go(S.Sdb.codec.from())))
     SB.Stb.check("log tail", ready)
     +opened : String <- D.Db.open(home ++ "/store.db")
     Sto.opened(String.starts_with(opened, "ok "), opened, home)

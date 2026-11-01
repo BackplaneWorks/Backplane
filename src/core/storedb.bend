@@ -1487,3 +1487,138 @@ def Demo.small() -> List<&2, M.Change>:
 
 def Demo.small.log() -> List<&2, LL>:
   Demo.lines(Demo.small(), 0n)
+
+# Upgrades in place
+# -----------------
+# A store at a codec listed in Sdb.codec.from() is brought to Sdb.codec()
+# at boot without a rebuild, when what the newer codec adds can be derived
+# from a few kinds of change: the log's lines are picked by a cheap text
+# test outside Bend (any line naming one of Up.names(), a superset), each
+# is decoded, and only the changes Up.keep takes are folded, in log order,
+# through the real M.State.apply. Their records are written with meta's
+# codec in one transaction (server/storeio.bend's Sto.upgrade); on any
+# failure the store is rebuilt from the log as before. Laws sdb_up_*.
+#
+# 6 -> 7: codec 7 adds the setting thread.parent.<child> that a
+# TaskDelegated now writes (State.delegated) unless its parent is a bot's
+# thread at that moment. Its last value is the last of: such a
+# TaskDelegated, a ThreadParentSet, a SettingSet of the key. Which thread
+# is a bot's changes only with BotSet and BotDeleted, and none of these
+# folds reads anything else, so these five kinds alone give every
+# thread.parent.* exactly as the whole log does.
+
+# a setting's key and value
+type UpKV is Data:
+  UpKV{k: String, v: String}
+
+def Sdb.codec.from() -> List<&2, Nat>:
+  [6n]
+
+def Up.from.go(xs: List<&2, Nat>, +c: String) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +x <> t:
+      Bool.or(String.eq(Nat.show(x), c), Up.from.go(t, c))
+
+# a store at codec c can be upgraded in place
+def Sdb.codec.up(+c: String) -> Bool:
+  Up.from.go(Sdb.codec.from(), c)
+
+# the text the line picker looks for: a line naming none of these holds
+# none of the changes Up.keep takes
+def Up.names() -> List<&2, String>:
+  ["\"TaskDelegated\"", "\"ThreadParentSet\"", "\"BotSet\"", "\"BotDeleted\"", "\"thread.parent."]
+
+# the changes the 6 -> 7 upgrade folds, by their decoded kind
+def Up.keep(c: M.Change) -> Bool:
+  match c:
+    case M.TaskDelegated{_, _, _, _, _, _, _}:
+      True{}
+    case M.ThreadParentSet{_, _, _}:
+      True{}
+    case M.BotSet{_, _, _, _, _, _}:
+      True{}
+    case M.BotDeleted{_, _}:
+      True{}
+    case M.SettingSet{k, _, _}:
+      String.starts_with(k, "thread.parent.")
+    case _:
+      False{}
+
+def Up.kept(m: Maybe<&2, M.Change>, +rest: List<&2, M.Change>) -> List<&2, M.Change>:
+  match m:
+    case Some{+c}:
+      Bool.pick(List<&2, M.Change>, Up.keep(c), c <> rest, rest)
+    case None{}:
+      rest
+
+def Up.line.k(m: Maybe<&2, J.Json>) -> Maybe<&2, M.Change>:
+  match m:
+    case Some{+o}:
+      C.Change.decode(o)
+    case None{}:
+      None{}
+
+def Up.line(+l: String) -> Maybe<&2, M.Change>:
+  Up.line.k(J.Json.parse(l))
+
+# the picked lines (oldest first) as the changes the upgrade folds
+def Up.changes(ls: List<&2, String>) -> List<&2, M.Change>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Up.kept(Up.line(l), Up.changes(t))
+
+def Up.keep.all(cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case c <> t:
+      Up.kept(Some{c}, Up.keep.all(t))
+
+def Up.kv.go(ks: List<&2, String>, +s: M.State) -> List<&2, UpKV>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case +k <> t:
+      UpKV{k, M.Setting.get(s, k, "")} <> Up.kv.go(t, s)
+
+# every thread.parent.* setting of a state, in key order
+def Up.parents(+s: M.State) -> List<&2, UpKV>:
+  Up.kv.go(M.Setting.keys.pre(s, "thread.parent."), s)
+
+def Up.ops(xs: List<&2, UpKV>) -> List<&2, List<&2, String>>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case UpKV{+k, v} <> t:
+      Sql.of(Row.set(k, v)) <> Up.ops(t)
+
+# the 6 -> 7 statements for the changes picked: every thread.parent.* row,
+# then meta's codec (the caller runs them in one transaction)
+def Up.rows(cs: List<&2, M.Change>) -> List<&2, List<&2, String>>:
+  List.append(&2, List<&2, String>, Up.ops(Up.parents(M.State.replay(cs, M.State.empty()))),
+    [["INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", "codec", Nat.show(Sdb.codec())]])
+
+# the number of thread.parent.* rows the upgrade writes (its read-back check)
+def Up.count(cs: List<&2, M.Change>) -> Nat:
+  List.length(&2, UpKV, Up.parents(M.State.replay(cs, M.State.empty())))
+
+# a log with every way thread.parent.* is set, in the orders that matter
+# (laws sdb_up_*): a delegation from a thread, from a bot's thread, from a
+# thread that becomes a bot's after it; a move after a delegation and one
+# before a later delegation; a setting written straight; a delegation from
+# a bot's thread after the bot was deleted; and changes that touch none
+def Up.demo() -> List<&2, M.Change>:
+  [M.ProjectCreated{"p", "P", "/p", 1n}, M.ThreadCreated{"tp", "p", "Parent", M.Local{}, "", "", "claude", "", 1n},
+   M.ThreadCreated{"tb", "p", "Bot", M.Local{}, "", "", "claude", "", 1n}, M.BotSet{"b1", "Bub", "tb", 1n, "", 2n},
+   M.TaskDelegated{"k1", "tp", "c1", 1n, "claude", "", 3n}, M.TaskDelegated{"k2", "tb", "c2", 1n, "claude", "", 3n},
+   M.TaskDelegated{"k3", "tq", "c3", 1n, "claude", "", 4n}, M.BotSet{"b2", "Two", "tq", 1n, "", 5n},
+   M.TaskDelegated{"k4", "tp", "c4", 1n, "claude", "", 6n}, M.ThreadParentSet{"c4", "tx", 7n},
+   M.ThreadParentSet{"c5", "ty", 7n}, M.TaskDelegated{"k5", "tp", "c5", 1n, "claude", "", 8n},
+   M.SettingSet{"thread.parent.c6", "tz", 8n}, M.MessagePosted{"tp", "m1", M.User{}, "BotSet \"TaskDelegated\"", 9n},
+   M.BotDeleted{"b1", 10n}, M.TaskDelegated{"k6", "tb", "c7", 1n, "claude", "", 11n},
+   M.TaskStateSet{"k1", M.TaskDone{}, "done", 12n}, M.TaskDelivered{"k1", 12n}, M.SettingSet{"thread.parentx", "no", 12n},
+   M.ActivityLogged{"tp", "a1", "tool", "BotDeleted", "x", 13n}, M.ThreadParentSet{"c2", "", 14n}]

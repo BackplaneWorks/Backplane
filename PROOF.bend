@@ -14114,3 +14114,20 @@ def Laws.component_fragment_only_last_field_completes(key, value, tail):
 
 def Laws.copy_keeps_viewer_reads():
   {==}
+# ---- store-upgrade ----
+def Laws.sdb_up_parents_exact():
+  {==}
+
+def Laws.sdb_up_parents_demo():
+  {==}
+
+def Laws.sdb_up_keep_kinds():
+  {==}
+
+def Laws.sdb_up_lines_decoded():
+  {==}
+
+def Laws.sdb_up_from():
+  {==}
+
+# ---- end store-upgrade ----

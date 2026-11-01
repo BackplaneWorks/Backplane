@@ -13797,3 +13797,27 @@ law component_fragment_only_last_field_completes:
 law copy_keeps_viewer_reads:
   {JCOPY.Copy.outs(True{}, [H.Git{3, "9", "boards", "t", "/c", "", ""}, H.Git{3, "10", "rv.components", "t", "/c", "", ""}, H.Git{3, "11", "rv.renderAsset", "t", "/c", "", ""}]) ==
     [H.Git{3, "9", "boards", "t", "/c", "", ""}, H.Git{3, "10", "rv.components", "t", "/c", "", ""}, H.Git{3, "11", "rv.renderAsset", "t", "/c", "", ""}] : List<&2, H.Out>}
+# ---- store-upgrade: codec 6 -> 7 in place ----
+# folding only the changes Up.keep takes gives every thread.parent.* the
+# whole log gives, in every order that matters (storedb.bend's Up.demo)
+law sdb_up_parents_exact:
+  {SDB.Up.parents(M.State.replay(SDB.Up.keep.all(SDB.Up.demo()), M.State.empty())) == SDB.Up.parents(M.State.replay(SDB.Up.demo(), M.State.empty())) : List<&2, SDB.UpKV>}
+
+# and they are these
+law sdb_up_parents_demo:
+  {SDB.Up.parents(M.State.replay(SDB.Up.demo(), M.State.empty())) == [SDB.UpKV{"thread.parent.c1", "tp"}, SDB.UpKV{"thread.parent.c2", ""}, SDB.UpKV{"thread.parent.c3", "tq"}, SDB.UpKV{"thread.parent.c4", "tx"}, SDB.UpKV{"thread.parent.c5", "tp"}, SDB.UpKV{"thread.parent.c6", "tz"}, SDB.UpKV{"thread.parent.c7", "tb"}] : List<&2, SDB.UpKV>}
+
+# the changes are chosen by their decoded kind, never by a prefix of a name
+law sdb_up_keep_kinds:
+  {Bool.and(Bool.and(SDB.Up.keep(M.SettingSet{"thread.parent.c", "p", 1n}), Bool.not(SDB.Up.keep(M.SettingSet{"thread.parentx", "p", 1n}))),
+    Bool.and(Bool.not(SDB.Up.keep(M.ActivityLogged{"t", "a", "tool", "BotDeleted", "TaskDelegated", 1n})), Bool.not(SDB.Up.keep(M.TaskStateSet{"k", M.TaskDone{}, "", 1n})))) == True{} : Bool}
+
+# a picked line is decoded: one that only names a kind in its text is dropped
+law sdb_up_lines_decoded:
+  {List.length(&2, M.Change, SDB.Up.changes(["{\"$\":\"TaskDelegated\",\"task\":\"k\",\"parent\":\"p\",\"child\":\"c\",\"depth\":1,\"provider\":\"claude\",\"model\":\"\",\"at\":1}",
+    "{\"$\":\"ActivityLogged\",\"thread\":\"t\",\"id\":\"a\",\"tone\":\"tool\",\"kind\":\"BotSet\",\"text\":\"\",\"at\":1}", "not json \"BotSet\""])) == 1n : Nat}
+
+# only codec 6 is upgraded in place, to this codec
+law sdb_up_from:
+  {Bool.and(Bool.and(SDB.Sdb.codec.up("6"), Bool.not(SDB.Sdb.codec.up("5"))), Bool.not(SDB.Sdb.codec.up(Nat.show(SDB.Sdb.codec())))) == True{} : Bool}
+# ---- end store-upgrade ----
