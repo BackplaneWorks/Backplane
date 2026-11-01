@@ -100,7 +100,7 @@
           const k = size(n); D.added += k; byr.added += k;
           if (n.nodeType === 1 || n.nodeType === 3) { const h = hash(markup(n)); addedHashes.set(h, (addedHashes.get(h) || 0) + 1); }
           const t = n.textContent || "";
-          if (n.nodeType === 1 && LOADING.test(t.slice(0, 200))) loadingSeen.push({ at: now(), text: t.slice(0, 80), region: reg });
+          if (n.nodeType === 1 && n.id !== "history-status" && LOADING.test(t.slice(0, 200))) loadingSeen.push({ at: Math.round(now() - W.t0), text: t.slice(0, 80), region: reg, waiting: late() });
         }
         for (const n of r.removedNodes) {
           const k = size(n); D.removed += k; byr.removed += k;
@@ -112,9 +112,14 @@
   const startMo = () => mo.observe(document, { subtree: true, childList: true, attributes: true, characterData: true, attributeOldValue: true, characterDataOldValue: true });
   if (document.documentElement) startMo(); else document.addEventListener("DOMContentLoaded", startMo);
   // a text-node status ("Loading earlier messages…") written in place
+  // what was still awaited from the hub when a placeholder showed
+  const late = () => [...sentAt.values()].map((v) => ({ method: v.method, ms: Math.round(now() - v.at) }));
+  let loadingOn = false;
   function checkLoadingText() {
     const s = document.getElementById("history-status");
-    if (s && LOADING.test(s.textContent || "")) loadingSeen.push({ at: now(), text: s.textContent.slice(0, 80), region: "status" });
+    const on = !!s && LOADING.test(s.textContent || "");
+    if (on && !loadingOn) loadingSeen.push({ at: Math.round(now() - W.t0), text: s.textContent.slice(0, 80), region: "status", waiting: late() });
+    loadingOn = on;
   }
 
   // Timeline rows: what each mounted row looks like (begin vs end)
@@ -177,7 +182,7 @@
   // Frames: rAF gaps, Long Animation Frames, Event Timing
   // -----------------------------------------------------
   let F, E, loaf, lastFrame = 0, scrollInfo;
-  const resetFrames = () => { F = { frames: 0, long: 0, dropped: 0, worst: 0, gaps: [] }; E = {}; loaf = []; lastFrame = 0; scrollInfo = { wheel: [], blank: 0, checked: 0, minCover: 1 }; };
+  const resetFrames = () => { F = { frames: 0, long: 0, dropped: 0, worst: 0, gaps: [] }; E = {}; loaf = []; lastFrame = 0; scrollInfo = { wheel: [], blank: 0, checked: 0, worstGap: 0, base: undefined }; };
   resetFrames();
   function frame(t) {
     if (W.on) {
@@ -187,6 +192,7 @@
       }
       lastFrame = t;
       if (W.watchBlank) blankCheck();
+      if (W.thread) threadCheck();
       checkLoadingText();
     }
     requestAnimationFrame(frame);
@@ -229,30 +235,44 @@
     const t0 = wheelAt; wheelAt = 0;
     requestAnimationFrame(() => scrollInfo.wheel.push(Math.round(now() - t0)));
   }, { capture: true, passive: true });
-  // a frame where the rows on screen leave part of the timeline empty
+  // A frame where rows are missing from part of the timeline the track
+  // covers (the content exists there but no row is drawn). Measured as the
+  // gap inside track ∩ viewport, against the gap of the settled frame the
+  // window started on (margins between rows, a short thread): blank when
+  // more than 15% of the viewport (and 40 px) more is empty.
   function blankCheck() {
     const tl = document.getElementById("timeline");
     if (!tl) return;
     const box = tl.getBoundingClientRect();
     if (box.height < 50) return;
+    const track = tl.querySelector(".timeline-virtual-track");
+    const tr = track ? track.getBoundingClientRect() : box;
+    const top = Math.max(box.top, tr.top), bottom = Math.min(box.bottom, tr.bottom);
+    const want = Math.max(0, bottom - top);
     const spans = [];
     for (const w of tl.querySelectorAll(".timeline-virtual-row")) {
       const r = w.getBoundingClientRect();
-      if (r.bottom > box.top && r.top < box.bottom && r.height > 0) spans.push([Math.max(r.top, box.top), Math.min(r.bottom, box.bottom)]);
+      if (r.bottom > top && r.top < bottom && r.height > 0) spans.push([Math.max(r.top, top), Math.min(r.bottom, bottom)]);
     }
     spans.sort((a, b) => a[0] - b[0]);
-    let covered = 0, end = box.top;
+    let covered = 0, end = top;
     for (const [a, b] of spans) { if (b > end) { covered += b - Math.max(a, end); end = b; } }
-    // the content may be shorter than the box (a short thread): judge against it
-    const track = tl.querySelector(".timeline-virtual-track");
-    const want = Math.min(box.height, track ? track.getBoundingClientRect().height : box.height);
-    const cover = want > 0 ? Math.min(1, covered / want) : 1;
-    // judged against the cover at the window's start (padding under the
-    // composer or above the first row is no gap)
-    if (scrollInfo.base === undefined) scrollInfo.base = cover;
+    const gap = want - covered;
+    if (scrollInfo.base === undefined) scrollInfo.base = gap;
     scrollInfo.checked++;
-    if (cover < scrollInfo.minCover) scrollInfo.minCover = cover;
-    if (cover < scrollInfo.base - 0.1) scrollInfo.blank++;
+    const extra = gap - scrollInfo.base;
+    if (extra > scrollInfo.worstGap) scrollInfo.worstGap = extra;
+    if (extra > Math.max(40, 0.15 * box.height)) scrollInfo.blank++;
+  }
+  // open/switch: the first frame the target thread's rows show (a kept
+  // picture or the hub's view), and the first where the hub's view of it is
+  // current (remote ready, not a cached picture)
+  function threadCheck() {
+    const id = W.thread, t = now() - W.t0;
+    const view = document.querySelector(`main.thread-view[data-thread="${CSS.escape(id)}"]`);
+    if (W.firstPaint === null && view && view.querySelector(".timeline-virtual-row")) W.firstPaint = t;
+    const d = document.documentElement.dataset;
+    if (W.current === null && view && d.backplaneRemoteReady === "true" && d.backplaneCached === "false") W.current = t;
   }
 
   // The window
@@ -265,7 +285,8 @@
       for (const k in msgs) delete msgs[k];
       sentAt.clear();
       for (const k in times) delete times[k];
-      wheelAt = 0; rows0 = rowShots(); W.watchBlank = !!opts.blank; W.t0 = now(); W.on = true;
+      wheelAt = 0; loadingOn = false; W.thread = opts.thread || ""; W.firstPaint = null; W.current = null;
+      rows0 = rowShots(); W.watchBlank = !!opts.blank; W.t0 = now(); W.on = true;
       return W.t0;
     },
     // ms since the last DOM mutation or socket frame (the harness waits for quiet)
@@ -291,14 +312,14 @@
       const rpc = {}; for (const [m, r] of Object.entries(S.rpc)) rpc[m] = { n: r.n, p50: Math.round(pctl(r.ms, 0.5)), p95: Math.round(pctl(r.ms, 0.95)), max: Math.round(Math.max(...r.ms)), replyBytes: r.replyBytes };
       const ev = {}; for (const [k, xs] of Object.entries(E)) { const v = xs.map((x) => x.ms); ev[k] = { n: v.length, p50: pctl(v, 0.5), p95: pctl(v, 0.95), max: Math.max(...v) }; }
       return {
-        name, ms: Math.round(ms), activeMs: Math.round(Math.max(W.lastDom || 0, W.lastWs || 0, W.t0) - W.t0),
+        name, ms: Math.round(ms), firstPaintMs: W.firstPaint === null ? null : Math.round(W.firstPaint), currentMs: W.current === null ? null : Math.round(W.current), activeMs: Math.round(Math.max(W.lastDom || 0, W.lastWs || 0, W.t0) - W.t0),
         dom: { ...D, rowsTouched: rowsTouched.size },
         rows: { touched: [...rowsTouched.keys()].filter((k) => rows0.has(k) && rows1.has(k)).length, changed, touchedUnchanged: unchanged, mounted, unmounted, mountedNow: rows1.size },
         ws: { ...S, rpc },
         frames: { ...F, gaps: F.gaps.slice(0, 40), loaf: loaf.sort((a, b) => b.ms - a.ms).slice(0, 12), loafCount: loaf.length, loafMs: loaf.reduce((s, x) => s + x.ms, 0) },
         events: ev,
         scroll: { wheelToFrame: { n: scrollInfo.wheel.length, p50: pctl(scrollInfo.wheel, 0.5), p95: pctl(scrollInfo.wheel, 0.95), max: scrollInfo.wheel.length ? Math.max(...scrollInfo.wheel) : 0 },
-          blankFrames: scrollInfo.blank, checkedFrames: scrollInfo.checked, minCover: Math.round(scrollInfo.minCover * 100) / 100, loadingSeen: loadingSeen.slice(0, 10), loadingCount: loadingSeen.length },
+          blankFrames: scrollInfo.blank, checkedFrames: scrollInfo.checked, worstGapPx: Math.round(scrollInfo.worstGap), loadingSeen: loadingSeen.slice(0, 10), loadingCount: loadingSeen.length },
         hubMsgs: Object.fromEntries(Object.entries(msgs).map(([k, v]) => [k, v.ms ? { n: v.n, p50: Math.round(pctl(v.ms, 0.5)), max: Math.round(Math.max(...v.ms)) } : { n: v.n, bytes: v.bytes, decodeMs: Math.round(v.decodeMs) }])),
         counts: { ...counts }, times: Object.fromEntries(Object.entries(times).map(([k, v]) => [k, { n: v.n, total: Math.round(v.total), max: Math.round(v.max) }])),
       };

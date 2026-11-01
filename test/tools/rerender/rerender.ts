@@ -35,7 +35,7 @@ const port = Number(opt("port", "3811"));
 const fixtureKind = opt("fixture", "synthetic");
 const outDir = resolve(opt("out", join(here, "build/rr/out")));
 const deep = flag("deep");
-const ALL = ["open", "idle", "type1", "burst", "paste", "scroll", "clock", "bg", "send", "stream", "toolgroup", "switch"];
+const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "scroll", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
 const scenarios = opt("scenarios", ALL.join(",")).split(",");
 const roles = opt("targets", "long,tools").split(",");
 if (port === 3787) throw new Error("3787 is the live hub's port");
@@ -171,13 +171,13 @@ try {
   const waitText = (p: any, text: string, timeout = 60000) => p.waitForFunction((t: string) => (document.getElementById("timeline")?.textContent || "").includes(t), text, { timeout });
 
   // one measured window: act, then wait until it is over
-  async function measure(name: string, target: Target, act: () => Promise<void>, o: { blank?: boolean; quietMs?: number; max?: number; minMs?: number; noSettle?: boolean } = {}) {
+  async function measure(name: string, target: Target, act: () => Promise<void>, o: { blank?: boolean; quietMs?: number; max?: number; minMs?: number; noSettle?: boolean; thread?: string } = {}) {
     const perf0 = await hubPerf(), cpu0 = hubCpu(), m0 = await metrics();
     if (deep) {
       await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 200 }); await cdp.send("Profiler.start");
       await cdp.send("Tracing.start", { categories: "devtools.timeline,disabled-by-default-devtools.timeline.stack", transferMode: "ReturnAsStream" }).catch(() => {});
     }
-    await page.evaluate((a: any) => window.__bpRR.begin(a.n, { blank: a.b }), { n: `${name}:${target.role}`, b: !!o.blank });
+    await page.evaluate((a: any) => window.__bpRR.begin(a.n, { blank: a.b, thread: a.t }), { n: `${name}:${target.role}`, b: !!o.blank, t: o.thread ?? "" });
     const t0 = Date.now();
     let error = "";
     try { await act(); } catch (e: any) { error = String(e.message).split("\n")[0]; }
@@ -243,7 +243,7 @@ try {
     // where each run starts: a thread other than the target, then the target opened
     const other = fx.targets.find((t) => t !== target) ?? target;
     await open(page, other); await quiet(page, 800, 60000);
-    if (scenarios.includes("open")) await measure("open", target, () => open(page, target), { quietMs: 800, max: 60000 });
+    if (scenarios.includes("open")) await measure("open", target, () => open(page, target), { quietMs: 800, max: 60000, thread: target.id });
     else { await open(page, target); await quiet(page, 800, 60000); }
     if (scenarios.includes("idle")) await quiet(page, 1500, 20000);
     if (scenarios.includes("idle")) await measure("idle", target, () => sleep(4000));
@@ -258,6 +258,11 @@ try {
       const big = Array.from({ length: 400 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
       await measure("paste", target, () => page.keyboard.insertText(big));
     }
+    if (scenarios.includes("pastebig")) {
+      await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
+      const big = Array.from({ length: 4000 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
+      await measure("pastebig", target, () => page.keyboard.insertText(big), { max: 60000 });
+    }
     // clear the draft (not measured)
     await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
     if (scenarios.includes("scroll")) {
@@ -266,6 +271,23 @@ try {
       await measure("scroll-up", target, async () => { for (let i = 0; i < 20; i++) { await page.mouse.wheel(0, -400); await sleep(50); } }, { blank: true, quietMs: 700 });
       await measure("scroll-down", target, async () => { for (let i = 0; i < 24; i++) { await page.mouse.wheel(0, 400); await sleep(50); } }, { blank: true, quietMs: 700 });
       // back at the newest (not measured)
+      for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 2000);
+      await quiet(page, 600);
+    }
+    // The "Loading newer/earlier messages" placeholder is timing-dependent:
+    // fast sweeps on a CPU throttled 4x, three times, each down-sweep
+    // measured (the placeholder, blank frames, and what was still awaited
+    // from the hub when it showed)
+    if (scenarios.includes("stress")) {
+      const box = await timeline().boundingBox();
+      if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+      try {
+        for (let c = 0; c < 3; c++) {
+          await measure("stress-up", target, async () => { for (let i = 0; i < 30; i++) { await page.mouse.wheel(0, -900); await sleep(16); } }, { blank: true, quietMs: 700, max: 30000 });
+          await measure("stress-down", target, async () => { for (let i = 0; i < 40; i++) { await page.mouse.wheel(0, 900); await sleep(16); } }, { blank: true, quietMs: 700, max: 30000 });
+        }
+      } finally { await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 }); }
       for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 2000);
       await quiet(page, 600);
     }
@@ -291,8 +313,8 @@ try {
       await measure("toolgroup", target, async () => { await page.keyboard.press("Enter"); await waitText(page, `${w}39`, 90000); }, { quietMs: 1000, max: 30000 });
     }
     if (scenarios.includes("switch")) {
-      await measure("switch-away", target, () => open(page, other), { quietMs: 800, max: 60000 });
-      await measure("switch-back", target, () => open(page, target), { quietMs: 800, max: 60000 });
+      await measure("switch-away", target, () => open(page, other), { quietMs: 800, max: 60000, thread: other.id });
+      await measure("switch-back", target, () => open(page, target), { quietMs: 800, max: 60000, thread: target.id });
     }
   }
 } catch (e: any) {
@@ -335,11 +357,16 @@ say(`wrote ${join(outDir, "report.md")}`);
 function markdown(rep: any) {
   const L: string[] = [];
   L.push(`# Re-render report — ${rep.at}`, "", `Fixture: ${rep.fixture.source} (${rep.fixture.lines} lines). Hub \`${rep.hub}\`, web \`${rep.web}\`.${rep.failed ? " **The run failed part way.**" : ""}`, "");
-  L.push("| scenario | active ms | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+  L.push("| scenario | active ms | first paint / current ms | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const r of rep.results) {
     const k = r.events["paint:keydown"], w = r.scroll.wheelToFrame, c = r.counts, rpc = r.hub.perf["hub.rpc"];
-    L.push(`| ${r.name} | ${r.activeMs} | ${r.dom.records} | ${r.dom.added} | ${r.dom.removed} | ${r.dom.recreatedIdentical} | ${r.rows.touched} / ${r.rows.touchedUnchanged} | ${(r.ws.inBytes / 1024).toFixed(1)} (${r.ws.inFrames}) | ${r.hub.cpuMs} | ${rpc ? `${rpc.n}, ${rpc.ms}` : "–"} | ${r.chrome.layouts} | ${r.chrome.styleRecalcs} | ${r.chrome.scriptMs} | ${r.frames.long} | ${k ? `${k.p50}/${k.p95}` : "–"} | ${w.n ? w.p95 : "–"} | ${r.scroll.checkedFrames ? r.scroll.blankFrames : "–"} / ${r.scroll.loadingCount} | ${c["render.full"] ?? 0}/${c["render.part"] ?? 0} | ${c["dom.patch"] ?? 0} | ${c["memo.make"] ?? 0} |`);
+    L.push(`| ${r.name} | ${r.activeMs} | ${r.firstPaintMs ?? "–"} / ${r.currentMs ?? "–"} | ${r.dom.records} | ${r.dom.added} | ${r.dom.removed} | ${r.dom.recreatedIdentical} | ${r.rows.touched} / ${r.rows.touchedUnchanged} | ${(r.ws.inBytes / 1024).toFixed(1)} (${r.ws.inFrames}) | ${r.hub.cpuMs} | ${rpc ? `${rpc.n}, ${rpc.ms}` : "–"} | ${r.chrome.layouts} | ${r.chrome.styleRecalcs} | ${r.chrome.scriptMs} | ${r.frames.long} | ${k ? `${k.p50}/${k.p95}` : "–"} | ${w.n ? w.p95 : "–"} | ${r.scroll.checkedFrames ? r.scroll.blankFrames : "–"} / ${r.scroll.loadingCount} | ${c["render.full"] ?? 0}/${c["render.part"] ?? 0} | ${c["dom.patch"] ?? 0} | ${c["memo.make"] ?? 0} |`);
+  }
+  const loads = rep.results.filter((r: any) => r.scroll.loadingCount);
+  if (loads.length) {
+    L.push("", "## Loading placeholders seen (each fails the gate)", "");
+    for (const r of loads) for (const l of r.scroll.loadingSeen) L.push(`- ${r.name} at ${l.at} ms: "${l.text}"; still awaited: ${l.waiting?.map((w: any) => `${w.method} ${w.ms} ms`).join(", ") || "nothing"}`);
   }
   L.push("", "## Worst offenders (waste score: writes outside the operation's region + 10 × rows touched but unchanged + nodes recreated identical + net no-op writes + non-transform writes while scrolling)", "");
   const ranked = [...rep.results].sort((a, b) => b.waste.score - a.waste.score).slice(0, 12);
@@ -363,11 +390,16 @@ if (budgets) {
   const b = JSON.parse(readFileSync(budgets, "utf8"));
   let over = 0;
   for (const r of results) {
-    const lim = b[r.name.split(":")[0]];
+    const kind = r.name.split(":")[0];
+    // hard rules, budget or not: no loading placeholder anywhere, no blank
+    // frame while scrolling
+    if (r.scroll.loadingCount > 0) { console.log(`OVER ${r.name} loading ${r.scroll.loadingCount} > 0 (${JSON.stringify(r.scroll.loadingSeen[0])})`); over++; }
+    if (/^(scroll|stress)/.test(kind) && r.scroll.blankFrames > 0) { console.log(`OVER ${r.name} blankFrames ${r.scroll.blankFrames} > 0 (worst gap ${r.scroll.worstGapPx} px)`); over++; }
+    const lim = b[kind];
     if (!lim) continue;
     const got: Record<string, number> = { mutations: r.dom.records, recreatedIdentical: r.dom.recreatedIdentical, touchedUnchangedRows: r.rows.touchedUnchanged,
       outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
-    for (const [k, max] of Object.entries(lim as Record<string, number>)) if (k in got && got[k] > max) { console.log(`OVER ${r.name} ${k} ${got[k]} > ${max}`); over++; }
+    for (const [k, max] of Object.entries(lim as Record<string, number>)) if (k !== "loading" && k !== "blankFrames" && k in got && got[k] > max) { console.log(`OVER ${r.name} ${k} ${got[k]} > ${max}`); over++; }
   }
   if (failed) { console.log("the run failed"); over++; }
   console.log(over ? `${over} over budget` : "all within budget");

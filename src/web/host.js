@@ -2773,7 +2773,7 @@ async function startThin(again = false, reason = "initial") {
       send: request => {
         if (!current() || s.readyState !== 1) throw Error("View connection closed");
         trace("send", { id: request.id, method: request.m });
-        RR?.sent?.(request.id, request.m);
+        RR?.sent?.(request.id, request.m === "view.action" && typeof request.p?.action === "string" ? request.m + ":" + request.p.action : request.m);
         // the session's tree goes into the request as it is (known), not built again from its plain copy
         const tree = request.p?.session ? App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session)) : null;
         const session = tree ? Wire.plain(tree) : null, known = new WeakMap();
