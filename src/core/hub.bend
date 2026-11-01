@@ -3369,16 +3369,47 @@ def Hub.settle.w.k(ended: Bool, +idle: Nat, +w: Nat) -> Nat:
 def Hub.settle.w(+t: M.Thread, +idle: Nat, +w: Nat) -> Nat:
   Hub.settle.w.k(Hub.settle.ended(M.Thread.turn(t)), idle, w)
 
+# Ephemeral runs: a mail run or a coordinator's back office (mailrun.bend's
+# Run.is; their ids run... and mailcoord-...). One-shot by design: the
+# watchdog never watches them and nothing resumes them by itself (no restart
+# retry, no provider resume, no carry), and none is reported to the person.
+def Ephemeral.is(+s: M.State, +th: String) -> Bool:
+  Bool.or(MR.Run.is(s, th), Bool.or(String.starts_with(th, "run"), String.starts_with(th, "mailcoord-")))
+
+# an ephemeral run's queued messages once its turn has been over for the
+# idle window: nothing resumes it (above), so they would keep it working
+# (Lifecycle.working) forever. They go (QueueRemoved, kept in the log) and
+# it settles at the next tick (law settle_idle_ephemeral_queue_goes).
+def Strand.drops(qs: List<&2, M.QItem>, +th: String, +now: Nat, rest: List<&2, M.Change>) -> List<&2, M.Change>:
+  match qs:
+    case Nil{}:
+      rest
+    case M.QItem{m, _} <> t:
+      M.QueueRemoved{th, m, now} <> Strand.drops(t, th, now, rest)
+
+def Strand.k(drop: Bool, +s: M.State, +th: String, +now: Nat, rest: List<&2, M.Change>) -> List<&2, M.Change>:
+  match drop:
+    case True{}:
+      Strand.drops(M.Queue.items(s, th), th, now, rest)
+    case False{}:
+      rest
+
+def Strand.due(+due: Bool, +kids: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
+  Bool.and(Bool.and(due, Ephemeral.is(s, M.Thread.id(t))), Bool.and(Hub.settle.ended(M.Thread.turn(t)), Nat.is_eq(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n)))
+
 def Hub.settle.go.i(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat, +idle: Nat) -> List<&2, M.Change>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> rest:
-      Hub.settle.k(Bool.and(M.Settle.auto.at(now, Hub.settle.w(t, idle, w), t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t)))), Nat.is_eq(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n)), M.Shelf.of(t), t, now, Hub.settle.go.i(rest, navs, kids, s, now, w, idle))
+      Hub.settle.k(Bool.and(M.Settle.auto.at(now, Hub.settle.w(t, idle, w), t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t)))), Bool.not(M.Lifecycle.working(kids, s, t))), M.Shelf.of(t), t, now,
+        Strand.k(Strand.due(M.Settle.auto.at(now, Hub.settle.w(t, idle, w), t, M.Nav.until(M.Nav.get(navs, M.Thread.id(t)))), kids, s, t), s, M.Thread.id(t), now, Hub.settle.go.i(rest, navs, kids, s, now, w, idle)))
 
 # (kids: every parent's unfinished child tasks, M.Work.kids.map; a thread
 # with any work out, children, background or watched, does not settle:
-# law settle_waits_for_work)
+# law settle_waits_for_work. Nor does one Lifecycle.working counts as
+# working, a queued or pending message included: Shelve.tick wakes exactly
+# those, so settling one woke it again every tick, law settle_idle_queued_stays)
 def Hub.settle.go(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, +w: Nat) -> List<&2, M.Change>:
   Hub.settle.go.i(ts, navs, kids, s, now, w, Hub.settle.idle(s))
 
@@ -7335,13 +7366,6 @@ def Carry.fresh.go(es: List<&2, M.Entry>, skip: Bool) -> Bool:
 
 def Carry.fresh(+es: List<&2, M.Entry>) -> Bool:
   Carry.fresh.go(es, Carry.restart(es))
-
-# Ephemeral runs: a mail run or a coordinator's back office (mailrun.bend's
-# Run.is; their ids run... and mailcoord-...). One-shot by design: the
-# watchdog never watches them and nothing resumes them by itself (no restart
-# retry, no provider resume, no carry), and none is reported to the person.
-def Ephemeral.is(+s: M.State, +th: String) -> Bool:
-  Bool.or(MR.Run.is(s, th), Bool.or(String.starts_with(th, "run"), String.starts_with(th, "mailcoord-")))
 
 # an archived or deleted thread never carries on
 def Carry.live(t: M.Thread) -> Bool:
