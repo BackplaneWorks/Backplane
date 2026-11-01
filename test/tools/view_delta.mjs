@@ -89,6 +89,14 @@ for (let i = 0; i < 1500; i++) {
   assert.deepEqual(applyViewDelta(a, JSON.parse(ops), draft), b);
   assert.throws(() => applyViewDelta(a, JSON.parse(ops)), 'a t op without the draft');
 }
+// a whole body with a long draft: ops from nothing, the draft by reference
+{
+  const draft = 'big paste ✓ '.repeat(300);
+  const a = body();a.session.drafts.t1 = draft;a.shown.kids.push({ type: 'element', tag: 'textarea', key: 'composer', attrs: [['value', draft]], kids: [] });
+  const ops = lib.whole(JSON.stringify(a), draft);
+  assert.ok(!ops.includes('big paste'), 'the draft is not in a whole body');
+  assert.deepEqual(applyViewDelta(null, JSON.parse(ops), draft), a);
+}
 // malformed ops throw
 for (const bad of [[['x', [], 1]], [['s', ['nope'], 1]], [['a', ['shown'], [[0, 99]]]], 'no', [['s', [0], 1]]])
   assert.throws(() => applyViewDelta({ shown: [] }, bad));

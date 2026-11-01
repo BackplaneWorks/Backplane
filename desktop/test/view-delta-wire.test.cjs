@@ -58,3 +58,18 @@ test('view delta: a draft echo puts back the draft this request carried',async()
  const u=f.v.request('hub','view.update',{session}),t=f.v.calls.get(u.id).input.viewDelta.token;
  const e=f.delta(u.id,t,[['t',['session','drafts','A']]]);assert(JSON.stringify(e).length<1024);
  const r=f.v.reply('hub',e);assert(r.remoteReady);assert.equal(r.session.drafts.A,draft);});
+test('view delta: after a reconnect, a whole view with a 200 KB draft arrives without it and within the limit',async()=>{
+ const f=await fixture(),draft='pasted ✓ '.repeat(22000),session={...f.session,drafts:{A:draft}};
+ assert(draft.length>190000);
+ // the reconnect: a fresh link, the first view asked with the big draft
+ f.v.connect('hub',f.link.greeting);const o=f.v.select('hub',{kind:'thread',id:'A'},session,'cid'),c=f.v.calls.get(o.id);
+ assert.equal(c.input.viewDelta.token,'');
+ const shown=page(['a']);shown.kids[1].kids.push({type:'element',tag:'textarea',key:'composer',attrs:[{name:'value',value:''}],kids:[]});
+ // what the hub sends: ops from nothing, the body with the draft blanked, the draft by reference
+ const e=f.delta(o.id,'',[['s',[],{shown,session:{...session,drafts:{A:''}},window:{ids:[],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]}}],
+   ['t',['session','drafts','A']],['t',['shown','kids',1,'kids',2,'attrs',0,'value']]]);
+ assert(JSON.stringify(e).length<4096,'nothing of the draft on the wire');
+ const r=f.v.reply('hub',e);assert(r.remoteReady,JSON.stringify(r.failed));
+ assert.equal(r.session.drafts.A,draft);assert.equal(r.shown.kids[1].kids[2].attrs[0].value,draft);
+ // the link stays up and the next request offers this body
+ const u=f.update();assert.equal(f.v.calls.get(u.id).input.viewDelta.token,String(c.revision));});

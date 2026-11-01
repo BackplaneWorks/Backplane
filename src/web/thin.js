@@ -1,7 +1,7 @@
 import { terminalInputReply } from './terminal-input.js';
 import { modelMenuReply } from './model-menu-input.js';
 import { sidebarOffer, sidebarPicture } from './sidebar-region.js';
-import { deltaOffer, deltaPicture, deltaKeep, deltaBases } from './view-delta.js';
+import { deltaOffer, deltaPicture, deltaKeep, deltaBases, deltaBytes, deltaDraft } from './view-delta.js';
 
 // Bounded view transport shared by the web and native bridge. Product actions
 // and rendering remain in Bend. No canonical replay is initiated here.
@@ -241,7 +241,7 @@ export class ThinViews {
     if (Object.hasOwn(r, 'viewDelta')) {
       try {
         picture = deltaPicture(r, c.input, l.bases);r = picture.result;
-        if (utf8Bytes(JSON.stringify(r)) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
+        if (deltaBytes(r, deltaDraft(c.input), utf8Bytes) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
       } catch {
         // the next request asks for the whole view
         l.bases = deltaBases();

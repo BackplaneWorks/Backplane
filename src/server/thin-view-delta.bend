@@ -85,25 +85,43 @@ def Vd.save(a: A.Actor, +scope: String, +token: String, +body: J.Json) -> A.Acto
 def Vd.meta(+base: String, +token: String) -> List<&2, J.KV>:
   [J.KV{"version", J.Num{"1"}}, J.KV{"base", J.Str{base}}, J.KV{"token", J.Str{token}}]
 
-def Vd.whole(+res: J.Json, +token: String) -> J.Json:
-  V.Obj.put(res, "viewDelta", J.Json.obj(Vd.meta("", token)))
+def Vd.whole.k(long: Bool, +res: J.Json, +token: String, +draft: String) -> J.Json:
+  match long:
+    case False{}: V.Obj.put(res, "viewDelta", J.Json.obj(Vd.meta("", token)))
+    case True{}:
+      V.Obj.put(Vd.strip(res), "viewDelta", J.Json.obj(List.append(&2, J.KV, Vd.meta("", token), [J.KV{"ops", J.Json.arr(D.Delta.whole(Vd.body(res), draft))}])))
+
+# a whole body; one that holds a long draft goes as ops from nothing, the
+# draft by reference (D.Delta.whole), so it never carries the text back
+def Vd.whole(+res: J.Json, +token: String, +draft: String) -> J.Json:
+  Vd.whole.k(D.Delta.draft.long(draft), res, token, draft)
 
 def Vd.reply.k(d: Maybe<&2, List<&2, D.Op>>, +res: J.Json, +base: String, +token: String, +draft: String) -> J.Json:
   match d:
     case Some{+ops}:
       V.Obj.put(Vd.strip(res), "viewDelta", J.Json.obj(List.append(&2, J.KV, Vd.meta(base, token), [J.KV{"ops", J.Json.arr(D.Delta.json(ops, draft))}])))
-    case None{}: Vd.whole(res, token)
+    case None{}: Vd.whole(res, token, draft)
 
 def Vd.reply(m: Maybe<&2, J.Json>, +body: J.Json, +res: J.Json, +base: String, +token: String, +draft: String) -> J.Json:
   match m:
     case Some{+old}: Vd.reply.k(D.Delta.diff(old, body), res, base, token, draft)
-    case None{}: Vd.whole(res, token)
+    case None{}: Vd.whole(res, token, draft)
 
 # the selected thread's draft this request carried (thin-host.js's
 # requestSession sends that one only)
 def Vd.draft(+p: J.Json) -> String:
   +session = J.Json.get_obj(p, "session")
   J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), "")
+
+# what the size fit measures: for a client that takes the delta, the
+# reply without its own long draft (it never carries it back)
+def Vd.measured.k(on: Bool, +p: J.Json, +res: J.Json) -> J.Json:
+  match on:
+    case True{}: D.Delta.undraft(res, Vd.draft(p))
+    case False{}: res
+
+def Vd.measured(+p: J.Json, +res: J.Json) -> J.Json:
+  Vd.measured.k(Bool.and(Vd.offered(p), D.Delta.draft.long(Vd.draft(p))), p, res)
 
 def Vd.send(+web: Bool, +a: A.Actor, +res: J.Json, +p: J.Json) -> SW.Output:
   +scope = Vd.scope(web, a, p)

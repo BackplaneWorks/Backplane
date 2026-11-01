@@ -28,3 +28,7 @@ def diffd(old: String, new: String, draft: String) -> String:
 # new, rebuilt by the Bend applier from old and the diff
 def round(old: String, new: String) -> String:
   J.Json.show(D.Delta.round(parse(old), parse(new)))
+
+# a whole body as ops from nothing, the request's long draft by reference
+def whole(body: String, draft: String) -> String:
+  J.Json.show(J.Json.arr(D.Delta.whole(parse(body), draft)))

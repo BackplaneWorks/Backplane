@@ -319,6 +319,56 @@ def Delta.json(ops: List<&2, Op>, +draft: String) -> List<&2, J.Json>:
     case Nil{}: Nil{}
     case +op <> tail: Delta.op.json(op, draft) <> Delta.json(tail, draft)
 
+# A whole body without the client's own draft
+# ---------------------------------------------
+# A big draft rides in a body twice (the session's drafts, the composer),
+# so a 200 KB paste made a whole view too big to send. A whole body for a
+# client that offered the delta goes as ops from no base: the body with
+# every copy of the request's draft blanked, then ["t", path] for each.
+
+def Delta.undraft(j: J.Json, +draft: String) -> J.Json:
+  match j:
+    case J.Str{+s}: Bool.pick(J.Json, String.eq(s, draft), J.Str{""}, J.Str{s})
+    case J.Arr{x}: J.Arr{Delta.undraft(x, draft)}
+    case J.Obj{x}: J.Obj{Delta.undraft(x, draft)}
+    case J.Item{h, t}: J.Item{Delta.undraft(h, draft), Delta.undraft(t, draft)}
+    case J.Field{+k, v, t}: J.Field{k, Delta.undraft(v, draft), Delta.undraft(t, draft)}
+    case _: j
+
+def Delta.drafted.hit(hit: Bool, +at: List<&2, Step>, acc: List<&2, List<&2, Step>>) -> List<&2, List<&2, Step>>:
+  match hit:
+    case True{}: List.reverse(&2, Step, at) <> acc
+    case False{}: acc
+
+# where the draft is, each path outermost first (i: an Item's index)
+def Delta.drafted(j: J.Json, +at: List<&2, Step>, +i: Nat, +draft: String, acc: List<&2, List<&2, Step>>) -> List<&2, List<&2, Step>>:
+  match j:
+    case J.Str{+s}: Delta.drafted.hit(String.eq(s, draft), at, acc)
+    case J.Arr{x}: Delta.drafted(x, at, 0n, draft, acc)
+    case J.Obj{x}: Delta.drafted(x, at, 0n, draft, acc)
+    case J.Item{h, t}: Delta.drafted(t, at, Nat.add(i, 1n), draft, Delta.drafted(h, DAt{i} <> at, 0n, draft, acc))
+    case J.Field{+k, v, t}: Delta.drafted(t, at, 0n, draft, Delta.drafted(v, DKey{k} <> at, 0n, draft, acc))
+    case _: acc
+
+def Delta.refs(ps: List<&2, List<&2, Step>>) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> tail: J.Json.arr([J.Str{"t"}, J.Json.arr(Delta.path.json(p))]) <> Delta.refs(tail)
+
+# drafts this long go by reference (shorter ones cost less than finding them)
+def Delta.long.go(s: String, n: Nat) -> Bool:
+  match s n:
+    case _ 0n: True{}
+    case SNil{} _: False{}
+    case SCon{_, tail} 1n+k: Delta.long.go(tail, k)
+
+def Delta.draft.long(+draft: String) -> Bool:
+  Delta.long.go(draft, 1024n)
+
+# the ops that make body from nothing, the draft by reference
+def Delta.whole(+body: J.Json, +draft: String) -> List<&2, J.Json>:
+  J.Json.arr([J.Str{"s"}, J.Json.arr(Nil{}), Delta.undraft(body, draft)]) <> List.reverse(&2, J.Json, Delta.refs(Delta.drafted(body, Nil{}, 0n, draft, Nil{})))
+
 # The oracle: ops applied to the base
 # -----------------------------------
 
