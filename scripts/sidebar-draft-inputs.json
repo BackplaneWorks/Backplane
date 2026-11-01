@@ -150,7 +150,7 @@
     "src/core/wake.bend": "074b0501f0db23a207e835beea1de5a5c11dc770287beef06c4d20be0da93a67",
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
-    "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
+    "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
     "src/mobile/screen.bend": "2683296c90f8adefe073fa1774624b12efbb76fa2891bb72ca45035b51fa1d10",
     "src/server/thin-actor.bend": "7d2dd906863b957cb134692672da2f3f76cfd1b30a699cc836719dddc9175e04",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
@@ -380,5 +380,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Canvas thread scope only; preserve A subagent changes; sidebar draft test 24 ok, draft readers unchanged."
+  "reviewNote": "Q-1 routes phone subagent controls; rebased sidebar drafts unchanged"
 }

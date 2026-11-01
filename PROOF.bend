@@ -14131,3 +14131,15 @@ def Laws.sdb_up_from():
   {==}
 
 # ---- end store-upgrade ----
+
+def Laws.phone_subs_open_routed():
+  {==}
+
+def Laws.phone_subs_shut_routed():
+  {==}
+
+def Laws.phone_subs_fold_routed():
+  {==}
+
+def Laws.phone_subs_cancel_routed():
+  {==}

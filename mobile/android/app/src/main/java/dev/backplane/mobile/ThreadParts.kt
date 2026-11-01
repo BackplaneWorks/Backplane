@@ -599,7 +599,7 @@ fun SubsView(m: AppModel, subs: Subs) {
         .then(if (busy) Modifier.border(1.dp, PhaseColor.accent, corner) else Modifier)) {
         Column(Modifier.padding(10.dp).heightIn(max = 260.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             // the head opens and shuts the panel; done, it is folded to this line
-            Row(Modifier.fillMaxWidth().then(if (subs.act.isNotEmpty()) Modifier.clickable { m.act(subs.act, subs.value) } else Modifier),
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (subs.act.isNotEmpty()) Modifier.clickable { m.act(subs.act, subs.value) } else Modifier),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text(NativeMessages.thread_subagents(lang), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
                     color = if (busy) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
@@ -608,7 +608,7 @@ fun SubsView(m: AppModel, subs: Subs) {
                 Icon(if (subs.open) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
                     Modifier.size(18.dp), tint = MaterialTheme.colorScheme.outline)
             }
-            for (r in subs.rows) Column(Modifier.fillMaxWidth().clickable { m.act(r.act, r.value) }.padding(vertical = 4.dp)) {
+            for (r in subs.rows) Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { m.act(r.act, r.value) }.padding(vertical = 4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusDot("", r.state)
                     Text(if (r.agent) (if (r.open) "▾" else "▸") else r.who, style = MaterialTheme.typography.labelSmall,

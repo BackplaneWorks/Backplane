@@ -771,17 +771,19 @@ def Hubs.register.at(hs: Hubs, +key: String, p: String, t: String, k: String, th
 # items name their row too (a row's Fork and Merge into source thread, a
 # link's or a file's copy and open), so they go as plain ids, never with
 # the hub in front (a hub took "host:port|id" for a thread and forked none)
+# The subagent sheet also qualifies its folds and panel controls. Route
+# those like its thread links; a timeline fold without a hub stays local.
 def Hubs.routed(+action: String) -> Nat:
   C.Codec.pos(["select", "new-thread", "picker-open", "bot", "room", "remote", "uber", "uber-bot", "bot-new", "room-new", "proj-go", "hub-settings", "proj-intent",
     "row-settle", "row-unsettle", "row-snooze", "row-delete", "toggle-settled", "add-project", "proj-remove",
     "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach", "intent-close",
-    "fork", "back", "ref-copy", "file-open", "file-reveal", "file-copy", "native-sidebar-page"], action)
+    "fork", "back", "ref-copy", "file-open", "file-reveal", "file-copy", "native-sidebar-page", "fold", "subs-open", "subs-shut", "task-cancel", "wake-cancel"], action)
 
 def Hubs.moves() -> Nat:
   13n
 
 def Hubs.routes() -> Nat:
-  48n
+  53n
 
 # answers to what any hub may be showing (its error, a delete or remove
 # to confirm); the project search is every hub's at once, since the list

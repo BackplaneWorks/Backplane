@@ -1,6 +1,7 @@
 import Base
 import ./check.bend as C
 import ../src/core/model.bend as M
+import ../src/core/subs.bend as SB
 import ../src/core/codec.bend as K
 import ../src/core/json.bend as J
 import ../src/core/client.bend as U
@@ -125,8 +126,42 @@ def tick(h: H.Hubs, +now: Nat) -> H.Hubs:
 def unheard(+now: Nat) -> H.Hubs:
   tick(H.Hubs.after(H.Hubs.online(tick(busy(), 1000n), "box:3787", False{})), now)
 
+# Exercise the same projected actions the native sheet sends, including its
+# completed group. Qualified control values must reach their own hub.
+def subs.hubs() -> H.Hubs:
+  H.Hubs.after(H.Hubs.act(H.Hubs.after(H.Hubs.recv(two(), "box:3787", changes([
+    M.ActivityLogged{"@sub:t2", "c/start", "c", "start:subagent", "Check board", 101n},
+    M.ActivityLogged{"@sub:t2", "c/end", "c", "end", "completed", 102n}]))), "select", "box:3787|t2"))
+
+def subs.screen(hs: H.Hubs) -> J.Json:
+  J.Json.get_obj(J.Json.get_obj(H.Hubs.screen(hs), "thread"), "subs")
+
+def subs.tap(+hs: H.Hubs, +j: J.Json) -> H.Hubs:
+  H.Hubs.after(H.Hubs.act(hs, J.Json.get_str(j, "act", ""), J.Json.get_str(j, "value", "")))
+
+def subs.first(hs: H.Hubs) -> J.Json:
+  Maybe.default(&2, J.Json, List.head(&2, J.Json, J.Json.elems(J.Json.get_obj(subs.screen(hs), "rows"))), J.Null{})
+
+def subs.link.raw() -> J.Json:
+  S.Mob.subs(Map.set(&2, String, Map.new(&2, String), "subs:t2", "1"), "t2", [SB.SubRow{"t2", False{}, "Two", "claude", "done", "", False{}, False{}, 0n, Nil{}}])
+
+def subs.link() -> J.Json:
+  J.Json.get_obj(H.Q.all(J.Json.obj([J.KV{"subs", subs.link.raw()}]), "box:3787"), "subs")
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    +closed : H.Hubs = subs.hubs()
+    C.Check.str("the phone sheet names its own hub", J.Json.get_str(subs.screen(closed), "value", ""), "box:3787|t2")
+    +opened : H.Hubs = subs.tap(closed, subs.screen(closed))
+    C.Check.str("the projected sheet action opens the panel", Bool.show(J.Json.get_bool(subs.screen(opened), "open", False{})), "True")
+    C.Check.str("the completed group names its own hub", J.Json.get_str(subs.first(opened), "value", ""), "box:3787|1subs.done:t2")
+    +expanded : H.Hubs = subs.tap(opened, subs.first(opened))
+    C.Check.str("tapping the completed group reveals its agent", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(subs.screen(expanded), "rows")))), "2")
+    C.Check.str("the projected head closes the panel again", Bool.show(J.Json.get_bool(subs.screen(subs.tap(expanded, subs.screen(expanded))), "open", True{})), "False")
+    C.Check.str("delegated navigation retains its qualified destination", J.Json.get_str(Maybe.default(&2, J.Json, List.head(&2, J.Json, J.Json.elems(J.Json.get_obj(subs.link(), "rows"))), J.Null{}), "value", ""), "box:3787|t2")
+    C.Check.str("a fold routes to a hub without moving focus", H.Hubs.cur(H.Hubs.after(H.Hubs.act(two(), "fold", "box:3787|1subs.done:t2"))), "100.1.1.1:3787")
+    C.Check.str("a qualified fold stores only the local key", U.Ui.info(H.Hubs.ui(H.Hubs.after(H.Hubs.act(two(), "fold", "box:3787|1subs.done:t2")), "box:3787"), "fold:subs.done:t2"), "1")
+    C.Check.str("the group keeps its finished count", J.Json.get_str(subs.screen(expanded), "word", ""), "1 done")
     C.Check.str("first hub is current", H.Hubs.cur(two()), "100.1.1.1:3787")
     # a log arriving in chunks is history: no alert from a chunk or the
     # last one; after it, a turn's end alerts again

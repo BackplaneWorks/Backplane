@@ -13821,3 +13821,16 @@ law sdb_up_lines_decoded:
 law sdb_up_from:
   {Bool.and(Bool.and(SDB.Sdb.codec.up("6"), Bool.not(SDB.Sdb.codec.up("5"))), Bool.not(SDB.Sdb.codec.up(Nat.show(SDB.Sdb.codec())))) == True{} : Bool}
 # ---- end store-upgrade ----
+
+# Native subagent controls keep their hub prefix until action routing.
+law phone_subs_open_routed:
+  {Nat.is_lt(Hb.Hubs.routed("subs-open"), Hb.Hubs.routes()) == True{} : Bool}
+
+law phone_subs_shut_routed:
+  {Nat.is_lt(Hb.Hubs.routed("subs-shut"), Hb.Hubs.routes()) == True{} : Bool}
+
+law phone_subs_fold_routed:
+  {Nat.is_lt(Hb.Hubs.routed("fold"), Hb.Hubs.routes()) == True{} : Bool}
+
+law phone_subs_cancel_routed:
+  {Bool.and(Nat.is_lt(Hb.Hubs.routed("task-cancel"), Hb.Hubs.routes()), Nat.is_lt(Hb.Hubs.routed("wake-cancel"), Hb.Hubs.routes())) == True{} : Bool}

@@ -478,6 +478,7 @@ struct SubsView: View {
                     Text(subs.word ?? subs.busy).font(.caption).foregroundStyle(busy ? PhaseColor.accent : .secondary)
                     Image(systemName: (subs.open ?? true) ? "chevron.down" : "chevron.right").font(.caption).foregroundStyle(.secondary)
                 }
+                .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -509,6 +510,7 @@ struct SubsView: View {
                                     .padding(.leading, 16)
                                 }
                             }
+                            .frame(minHeight: 44)
                             .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
