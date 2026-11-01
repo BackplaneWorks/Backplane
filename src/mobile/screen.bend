@@ -1445,7 +1445,7 @@ def Mob.voice.ask.k(fixing: Bool, +lc: I.Loc, +u: U.Ui, +w: String, +g: String, 
   match fixing:
     case True{}:
       J.Json.obj([J.KV{"text", J.Json.str(MSG.T.voice.spelling(lc))}, J.KV{"word", J.Json.str(w)}, J.KV{"guess", J.Json.str(g)}, J.KV{"count", J.Json.nat(n)},
-        J.KV{"fixing", J.Json.bool(True{})}, J.KV{"field", Mob.set.field("vfix", MSG.T.voice.spelling(lc), False{}, U.Ui.scratch(u, "@f.vfix"))},
+        J.KV{"fixing", J.Json.bool(True{})}, J.KV{"field", J.Json.obj([J.KV{"name", J.Json.str("vfix")}, J.KV{"hint", J.Json.str(MSG.T.voice.spelling(lc))}, J.KV{"secret", J.Json.bool(False{})}, J.KV{"value", J.Json.str(U.Ui.scratch(u, "@f.vfix"))}])},
         J.KV{"buttons", J.Json.arr([Mob.voice.btn(MSG.T.common.save(lc), "voice-fixed", "", True{}), Mob.voice.btn(MSG.T.common.cancel(lc), "form-close", "@voice.fix", False{})])}])
     case False{}:
       J.Json.obj([J.KV{"text", J.Json.str(MSG.T.web.voice.heard(lc, w, Bool.pick(String, Nat.is_gt(n, 1n), "many", "one"), Nat.show(n)))}, J.KV{"word", J.Json.str(w)}, J.KV{"guess", J.Json.str(g)}, J.KV{"count", J.Json.nat(n)},
@@ -2043,21 +2043,21 @@ def Mob.voice.learned(+lc: I.Loc, +st: M.State, ks: List<&2, String>) -> List<&2
     case Nil{}:
       Nil{}
     case +k <> t:
-      +vl = VDV.Vd.vl(M.Setting.get(st, k, ""))
-      Mob.set.btn(MSG.T.voice.learned.item(lc, String.drop(k, 8n), VDV.VL.out(vl), Nat.show(VDV.VL.yes(vl))) ++ " ×", "setting", k ++ "=", VDV.Vd.trusted(vl)) <> Mob.voice.learned(lc, st, t)
+      +v = M.Setting.get(st, k, "")
+      Mob.set.btn(MSG.T.voice.learned.item(lc, String.drop(k, 8n), VDV.Vdc.vl.out(v), Nat.show(VDV.Vdc.vl.yes(v))) ++ " ×", "setting", k ++ "=", VDV.Vdc.vl.trusted(v)) <> Mob.voice.learned(lc, st, t)
 
 def Mob.voice.page(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, J.Json>:
   +eng = M.Setting.get(st, "voice.engine", "auto")
-  +mid = VDV.Vd.model.id(M.Setting.get(st, "voice.model", ""))
+  +mid = VDV.Vdc.model.id(M.Setting.get(st, "voice.model", ""))
   +l = Maybe.default(&2, J.Json, J.Json.parse(U.Ui.scratch(u, "@voice.local")), J.Null{})
   +busy = String.starts_with(U.Ui.scratch(u, "@voice.busy"), "install:")
   [Mob.set.row(MSG.T.settings.voice.engine(lc), MSG.T.settings.voice.engine.note(lc),
      [Mob.voice.chip(eng, "voice.engine", "auto", MSG.T.voice.engine.auto(lc)), Mob.voice.chip(eng, "voice.engine", "local", MSG.T.voice.engine.local(lc)), Mob.voice.chip(eng, "voice.engine", "cloud", MSG.T.voice.engine.cloud(lc))]),
-   Mob.set.row(MSG.T.settings.voice.model(lc), V.View.local.note(lc, l, V.View.local.model(l, mid), busy),
-     List.append(&2, J.Json, [Mob.voice.chip(mid, "voice.model", "parakeet-v2", "English"), Mob.voice.chip(mid, "voice.model", "parakeet-v3", "25 languages")], Mob.voice.model.ctl(lc, V.View.local.model(l, mid), mid, busy))),
+   Mob.set.row(MSG.T.settings.voice.model(lc), V.View.vlocal.note(lc, l, V.View.vlocal.model(l, mid), busy),
+     List.append(&2, J.Json, [Mob.voice.chip(mid, "voice.model", "parakeet-v2", "English"), Mob.voice.chip(mid, "voice.model", "parakeet-v3", "25 languages")], Mob.voice.model.ctl(lc, V.View.vlocal.model(l, mid), mid, busy))),
    Mob.set.row.f(MSG.T.settings.voice.dictionary(lc), MSG.T.settings.voice.entries.note(lc), [Mob.set.field("vterm", MSG.T.settings.voice.term(lc), False{}, U.Ui.scratch(u, "@f.vterm"))],
-     Mob.set.btn(MSG.T.common.add(lc), "voice-term", "", True{}) <> Mob.voice.terms(lc, List.append(&2, String, U.Voice.dict(u), V.View.entries(st)))),
-   Mob.set.row(MSG.T.settings.voice.learned(lc), MSG.T.settings.voice.learned.note(lc), Mob.voice.learned(lc, st, M.Setting.keys.pre(st, VDV.Vd.l.pre())))]
+     Mob.set.btn(MSG.T.common.add(lc), "voice-term", "", True{}) <> Mob.voice.terms(lc, List.append(&2, String, U.Voice.dict(u), V.View.ventries(st)))),
+   Mob.set.row(MSG.T.settings.voice.learned(lc), MSG.T.settings.voice.learned.note(lc), Mob.voice.learned(lc, st, M.Setting.keys.pre(st, VDV.Vdc.l.pre())))]
 
 def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +more: List<&2, J.Json>, +prov: String, +models: String, +model: String) -> List<&2, J.Json>:
   match i:
