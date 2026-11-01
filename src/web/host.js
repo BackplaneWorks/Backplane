@@ -750,7 +750,7 @@ function historyGaps(node) {
   return older || newer ? History.gaps(node, String(older), String(newer)) : node;
 }
 // A page on its way says nothing, however long it takes: it is asked for
-// well before the reader can reach the edge of the rows drawn (historyAhead),
+// well before the reader can reach the edge of the rows drawn (historyRunway),
 // and a reader who gets there stays on the last row drawn until it comes.
 // A line saying "loading" while scrolling is what the person must never
 // see. A failed page still says so, with Retry.
