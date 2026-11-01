@@ -455,6 +455,7 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .review-body.body td, .review-body.body th { font-family: var(--mono); overflow-wrap: anywhere; padding: 3px 6px; }
 .review-body.body th { white-space: nowrap; }
 .review-body.rp-bom th:first-child { width: 30%; }
+.review-body.rp-checks td .link.file { white-space: pre-wrap; }
 .fm-note { display: block; color: var(--faint); padding: 16px 12px; }
 .fm-image { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }
 /* Give the linked image a definite height so a portrait fits the pane. */
