@@ -40,6 +40,21 @@ def key(n: D.Node) -> String:
     case D.El{_, k, _, _}: k
     case _: ""
 
+def first(ns: List<&2, D.Node>) -> D.Node:
+  match ns:
+    case n <> _: n
+    case Nil{}: D.Txt{""}
+
+def kids(n: D.Node) -> List<&2, D.Node>:
+  match n:
+    case D.El{_, _, _, ks}: ks
+    case _: Nil{}
+
+# the class of the workbar's dot for the selected thread "p"
+def bar(+u0: U.Ui) -> String:
+  +u = U.Side.with_signals(u0)
+  V.View.attr(attrs(first(kids(V.View.workbar(I.En{}, U.Ui.state(u), U.Ui.infos(u), "p", M.Completed{}, 0n, False{})))), "class")
+
 def sub(+word: String, who: String) -> SB.SubRow:
   SB.SubRow{"w", True{}, "Build", who, word, "details", True{}, True{}, 0n, Nil{}}
 
@@ -66,9 +81,10 @@ def main() -> IO(Unit):
     C.Check.str("phone settled gray", screen(ui([M.ThreadSettled{"p", True{}, 5n}], True{})), "settled")
     C.Check.str("phone interaction red", screen(ui([M.AskOpened{"q", "c", "input", "", "Choose", "", 5n}], True{})), "blocked")
     C.Check.str("offline preserves explicit interaction", screen(ui([M.AskOpened{"q", "c", "input", "", "Choose", "", 5n}], False{})), "blocked")
-    C.Check.str("web live parent blue", V.View.attr(attrs(V.View.live.u.loc(I.En{}, ui(child(), True{}))), "class"), "phase active")
-    C.Check.str("web offline parent inactive", V.View.attr(attrs(V.View.live.u.loc(I.En{}, ui(child(), False{}))), "class"), "phase inactive")
-    C.Check.str("web stable live row identity", key(V.View.live.u.loc(I.En{}, ui(child(), True{}))), "live:p")
+    # an idle live row draws nothing; the thread's workbar carries its state
+    C.Check.str("web idle live row is empty", key(V.View.live.u.loc(I.En{}, ui(child(), True{}))), "")
+    C.Check.str("web workbar: parent of a running child waits", bar(ui(child(), True{})), "dot waiting")
+    C.Check.str("web workbar: offline parent inactive", bar(ui(child(), False{})), "dot inactive")
     C.Check.str("incremental text delta keeps original memo", V.View.attr(attrs(V.View.live.u.loc(I.En{}, U.Ui.delta(ui(child(), True{}), "p", "stream"))), "fn"), "live")
     C.Check.str("incremental text delta keeps live identity", key(V.View.live.u.loc(I.En{}, U.Ui.delta(ui(child(), True{}), "p", "stream"))), "live:p")
     C.Check.str("nonempty streaming branch preserved", V.View.attr(attrs(V.View.one(V.View.signal.live.loc(I.En{}, False{}, 2n, "stream", "live:p"))), "fn"), "live")

@@ -1,7 +1,17 @@
-name: Nightly candidate (build only)
+name: Nightly
 
-# Future nightly wiring remains available; no tag, public release or pruning
-# is performed before root has accepted the candidate's actual package gates.
+# The whole gate on main, once a day: ci.yml's jobs (type-check, the proof,
+# the full test suite in four shards, the hub cross-built for every target
+# and smoke-tested on its own OS, the desktop and release-producer guards).
+# The merge gate (scripts/local-ci.py) runs only scripts/fast-tests.txt, so
+# this is what keeps the rest of the suite from rotting. Each hub build is
+# kept as the run's `backplane-serve-js` artifact for 7 days.
+#
+# It tags and publishes nothing: release.yml is the release lead's frozen
+# artifact collector (one stable tag, root-chosen producer runs) and cannot
+# be called from here. It used to be, and every nightly from 2026-10-22 on
+# died at startup (release.yml asks for `actions: read`, which this
+# workflow did not grant, and its inputs can never match a nightly).
 on:
   schedule:
     - cron: "17 4 * * *"
@@ -15,38 +25,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  plan:
-    name: Plan immutable nightly candidate
-    runs-on: ubuntu-24.04
-    outputs:
-      commit: ${{ steps.identity.outputs.commit }}
-      version: ${{ steps.identity.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - id: identity
-        run: |
-          set -eu
-          stable=$(git tag -l 'v*' | grep -v -- '-' | sort -V | tail -n1 || true)
-          ver=${stable#v}
-          ver=${ver:-0.0.0}
-          maj=${ver%%.*}; rest=${ver#*.}; min=${rest%%.*}; pat=${rest#*.}
-          base="v$maj.$min.$((pat + 1))"
-          day=$(date -u +%Y%m%d)
-          # Build-only candidates have no tags to count. Reserve a unique numeric
-          # suffix per actual run/attempt, including retries of the same source.
-          [ "$GITHUB_RUN_ATTEMPT" -lt 1000 ]
-          n=$(( GITHUB_RUN_ID * 1000 + GITHUB_RUN_ATTEMPT ))
-          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "version=$base-nightly.$day.$n" >> "$GITHUB_OUTPUT"
-
-  candidate:
-    name: Build nightly candidate only
-    needs: [plan]
-    uses: ./.github/workflows/release.yml
-    with:
-      ref: ${{ needs.plan.outputs.commit }}
-      version: ${{ needs.plan.outputs.version }}
-      telemetry_url: https://backplaneworks.com/api/v1/events
-    secrets: inherit
+  ci:
+    name: Full CI on main
+    uses: ./.github/workflows/ci.yml

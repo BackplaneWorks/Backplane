@@ -22,7 +22,7 @@ async function fixture({identityPending=false}={}){
   cacheIdentity,document:{cookie:'bp_cache_v1='+identity,querySelector:()=>null},attachmentIdentity:identity,attachmentIdentityCheck:identityCheck,draftAttachments,
   showViewStatus:message=>assert.fail(message),
   App:{sel:u=>u.sel,uploading:(u,t)=>u.drafts['@att.up:'+t]||'',act:(u,action,value)=>{const r=JSON.parse(value);return{ui:{...u,drafts:{...u.drafts,['@att:'+r.thread]:r.attached}},cmds:null};},presentation:u=>{const {route,...plain}=u;return plain;}},
-  Wire:{plain:x=>x},run(){},later(){},dispatch(){throw Error('unexpected legacy action');},currentSession:()=>session,
+  Wire:{plain:x=>x},run(){},later(){},document:{cookie:'pair=p1',querySelector:()=>null},cacheIdentity:c=>'id:'+c,attachmentIdentity:'id:pair=p1',attachmentIdentityCheck:undefined,draftAttachments:{remember:async()=>{}},showViewStatus(){throw Error('unexpected status');},dispatch(){throw Error('unexpected legacy action');},currentSession:()=>session,
   fetch:(url,options)=>new Promise(resolve=>requests.push({url,options,complete:answer=>resolve({text:async()=>JSON.stringify(answer)})}))};
  const choice=(s,a,v)=>a==='select'?{...s,sel:v,route:undefined}:a==='draft'?{...s,drafts:{...s.drafts,[s.sel]:v}}:s;
  const api={hub:'https://fixture',cid:'upload-fixture',now:()=>0,session:()=>session,target:presentationTarget,choice,

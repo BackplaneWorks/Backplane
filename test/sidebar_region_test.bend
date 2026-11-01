@@ -15,8 +15,10 @@ def state() -> M.State:
     M.ThreadCreated{"self", "p", "Here", M.Local{}, "", "", "codex", "", 2n},
     M.ThreadCreated{"other", "p", "Other", M.Local{}, "", "", "codex", "", 3n}], M.State.empty())
 
+# stamped as every web session is (app.bend's stamp: mailroom, the rail and
+# the top bar), so an action's own stamp leaves the region key alone
 def ui() -> U.Ui:
-  U.Ui.info_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.flag_on(U.Ui.select.k(U.Ui.adopt.raw(U.Ui.init(10n), state()), "self"), "settings"), "@f.kpath", ""), "self", "PRIVATE 日本語 draft"), "local.mailroom", "on")
+  U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.flag_on(U.Ui.select.k(U.Ui.adopt.raw(U.Ui.init(10n), state()), "self"), "settings"), "@f.kpath", ""), "self", "PRIVATE 日本語 draft"), "local.mailroom", "on"), "local.workspace.layout", "rail-v1"), "local.workspace.chrome", "top-v1")
 
 def key(u: U.Ui) -> String:
   S.Sidebar.key(u, "epoch", "view")

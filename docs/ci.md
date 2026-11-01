@@ -15,6 +15,17 @@ Linux and both kinds of Mac gate; Windows only reports until Bend's JS
 runtime has Win32 syscalls (fast-hub J4). See
 [the JS service](js-service.md).
 
+## Nightly
+
+`nightly.yml` calls `ci.yml` on main every day at 04:17 UTC (and by hand
+with workflow_dispatch). The merge gate (`scripts/local-ci.py`) runs only
+`scripts/fast-tests.txt`, so the nightly is where the whole suite
+(`TEST_FULL=1`), the full type-check, the proof and the native smoke
+runs are held green. It tags and publishes nothing; each run keeps the
+hub for every target as the `backplane-serve-js` artifact for 7 days.
+A red nightly means main broke something the fast set does not cover:
+fix it on main, do not skip the test.
+
 `scripts/test.sh` runs each standalone IO test and its matching
 `test/tools/NAME.mjs` driver when present. JavaScript fixtures are emitted
 and their drivers execute assertions; successful emission alone cannot pass.

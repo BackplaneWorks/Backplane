@@ -42,9 +42,15 @@ def buttons(xs: List<&2, D.Node>, +selected: Bool) -> String:
       Bool.pick(String, Bool.or(Bool.not(selected), String.eq(attr(ats, "class"), "tab on")), attr(ats, "data-value") ++ ";", "") ++ buttons(t, selected)
     case _ <> t: buttons(t, selected)
 
+# the bar's buttons sit in its "bot-desktop-tabs" div (WB.tabs)
+def nav.in(xs: List<&2, D.Node>, on: Bool) -> String:
+  match xs:
+    case D.El{_, _, _, ys} <> _: buttons(ys, on)
+    case _: ""
+
 def nav(n: D.Node, on: Bool) -> String:
   match n:
-    case D.El{_, _, _, xs}: buttons(xs, on)
+    case D.El{_, _, _, xs}: nav.in(xs, on)
     case _: ""
 
 def phone(+route: String) -> J.Json:

@@ -128,7 +128,9 @@ def main() -> IO(Unit):
     C.Check.str("only 33 rows materialized including lookahead", Nat.show(List.length(&2, T.Row, Map.values(&2, T.Row, T.Index.rows(TS.Page.index(first))))), "33")
     +w : J.Json = V.Page.window(TS.Page.index(first), "bub-chat", request(), "ep", TS.Page.ids(first))
     C.Check.str("visible older row sets hasMore", yes(J.Json.get_bool(w, "hasMore", False{})), "yes")
-    C.Check.str("cursor round trip retains exclusive SOURCE ordinal", Nat.show(Maybe.default(&2, Nat, W.Cursor.read(J.Json.get_str(w, "older", ""), "ep", J.Json.get_obj(request(), "target"), ""), 0n)), "18")
+    # the older page starts halfway up this one (thin-view.bend's Page.mid):
+    # the 16th source ordinal of 49..18
+    C.Check.str("cursor round trip retains the SOURCE ordinal halfway up", Nat.show(Maybe.default(&2, Nat, W.Cursor.read(J.Json.get_str(w, "older", ""), "ep", J.Json.get_obj(request(), "target"), ""), 0n)), "34")
     C.Check.str("second page has no duplicate first-page rows", String.join(TS.Page.ids(second), ","), String.join(seq.down(17n, 1n), ","))
     C.Check.str("older receipt anchor is still a source ordinal", String.join(TS.Page.ids(page(i, 100n)), ","), String.join(TS.Page.ids(first), ","))
     C.Check.str("no empty tail cursor", J.Json.get_str(V.Page.window(TS.Page.index(second), "bub-chat", request(), "ep", TS.Page.ids(second)), "older", "bad"), "")

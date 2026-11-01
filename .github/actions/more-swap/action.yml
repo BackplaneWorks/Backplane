@@ -1,0 +1,25 @@
+name: More swap
+description: >
+  Give a Linux runner a larger swapfile. The standard runner has 16 GB of
+  RAM; the proof peaks at ~12.3 GiB and the type-check at ~11 GiB, and with
+  the runner agent beside them the kernel killed the proof (seen as "The
+  runner has received a shutdown signal"). Swap on the runner's disk lets a
+  peak spill over instead.
+inputs:
+  size:
+    description: Swapfile size
+    default: 16G
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        [ "$RUNNER_OS" = Linux ] || exit 0
+        sudo swapoff -a || true
+        sudo rm -f /mnt/swapfile
+        sudo fallocate -l "${{ inputs.size }}" /mnt/swapfile
+        sudo chmod 600 /mnt/swapfile
+        sudo mkswap /mnt/swapfile >/dev/null
+        sudo swapon /mnt/swapfile
+        free -h

@@ -23,7 +23,7 @@ def check(bs: List<&2, U32>) -> IO(Unit):
     C.Check.str("fork rendered pin", Bool.show(Bool.not(U32.is_eq(R.Img.at(10n, img, 75, 200), 0))), "True")
     C.Check.str("fork aliased first pin", T.start(T.find(xs, "00000000-0000-4000-8000-000000000011/pin/1")), "7,20")
     C.Check.str("fork aliased second pin", T.start(T.find(xs, "00000000-0000-4000-8000-000000000012/pin/2")), "40,45")
-    C.Check.str("fork pin metadata", T.info(T.find(xs, "00000000-0000-4000-8000-000000000012/pin/2")), "pin 2;name=B;type=passive;symbol=R2")
+    C.Check.str("fork pin metadata", T.info(T.find(xs, "00000000-0000-4000-8000-000000000012/pin/2")), "pin 2;name=B;type=passive;symbol=R2;g=3092271347")
     C.Check.str("fork cached body", T.layer(T.find(xs, "00000000-0000-4000-8000-000000000011/g1001")), U32.show(SC.L.body()))
     C.Check.str("fork source library metadata preserved", Bool.show(String.contains(T.info(T.find(xs, "00000000-0000-4000-8000-000000000011/g1001")), ";lib=Device:R_Small")), "True")
     C.Check.str("stock cache identity", SC.Sch.cache.id(S.Sx.parse(U.Utf8.encode("(symbol (lib_id \"Device:R\"))"))), "Device:R")

@@ -14,6 +14,11 @@ import ../src/core/json.bend as J
 def log(cs: List<&2, M.Change>) -> M.State:
   B.Shelve.demo(cs)
 
+# the same with "Settle when done" on (settle.done, off by default), where
+# the settle rule applies
+def logon(cs: List<&2, M.Change>) -> M.State:
+  B.Shelve.demo.on(cs)
+
 def agent() -> String:
   "a1\tRunning Probe the build\ttoolu_1\tBuild the archive\tsubagent"
 
@@ -85,10 +90,10 @@ def main() -> IO(Unit):
     C.Check.str("a failed turn says so before its work", phase(log([bg(agent(), 3n), M.TurnChanged{"t1", M.Failed{}, 5n}])), "failed")
     C.Check.str("a Stop with work left: monitoring", phase(log([bg(agent(), 3n), M.TurnChanged{"t1", M.Interrupted{}, 5n}])), "monitoring")
     C.Check.str("a Stop with nothing left: stopped", phase(log([M.TurnChanged{"t1", M.Interrupted{}, 5n}])), "stopped")
-    C.Check.str("turn ended with the subagent at work: no settle", step(log([bg(agent(), 3n)]), [done()]), "")
-    C.Check.str("its progress lines: still no settle", step(log([bg(agent(), 3n), done()]), [bg("a1\tRunning Write README\ttoolu_1\tBuild the archive\tsubagent", 7n)]), "")
-    C.Check.str("killed, row not yet cleared: no settle", step(log([bg(agent(), 3n), done()]), [bg("a1\t" ++ M.Bg.ended.mark() ++ "killed\ttoolu_1\tBuild the archive\tsubagent", 7n)]), "")
-    C.Check.str("all of it done: settles", step(log([bg(agent(), 3n), done()]), [bg("", 8n)]), "settle:t1@8")
+    C.Check.str("turn ended with the subagent at work: no settle", step(logon([bg(agent(), 3n)]), [done()]), "")
+    C.Check.str("its progress lines: still no settle", step(logon([bg(agent(), 3n), done()]), [bg("a1\tRunning Write README\ttoolu_1\tBuild the archive\tsubagent", 7n)]), "")
+    C.Check.str("killed, row not yet cleared: no settle", step(logon([bg(agent(), 3n), done()]), [bg("a1\t" ++ M.Bg.ended.mark() ++ "killed\ttoolu_1\tBuild the archive\tsubagent", 7n)]), "")
+    C.Check.str("all of it done: settles", step(logon([bg(agent(), 3n), done()]), [bg("", 8n)]), "settle:t1@8")
     C.Check.str("settled by the person while it monitors: kept settled", step(log([bg(agent(), 3n), done(), M.ThreadSettled{"t1", True{}, 6n}]), [bg("a1\tRunning Write README\ttoolu_1\tBuild the archive\tsubagent", 7n)]), "")
     C.Check.str("a wake by a killed subagent says so", B.Wake.text(False{}, log([bg(agent(), 3n)]), "t1", note("killed")), "Woken: Build the archive (killed)")
     C.Check.str("a wake by a failed one too", B.Wake.text(False{}, log([bg(agent(), 3n)]), "t1", note("failed")), "Woken: Build the archive (failed)")
