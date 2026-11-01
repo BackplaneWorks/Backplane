@@ -7,8 +7,9 @@ import { terminalOutputFrame } from './terminal-output.js';
 import { modelMenuRequest } from './model-menu-input.js';
 import { SentClaims } from './sent-claims.js';
 
-// how many entries the page holds before it lets the far end go
-export const HELD_IDS = 600;
+// how many entries the page holds before it lets the far end go: about
+// twenty screens (rows held cost every scroll frame; timeline-scroller.js)
+export const HELD_IDS = 320;
 const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 function choices(value, accept) {
