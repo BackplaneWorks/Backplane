@@ -14674,4 +14674,22 @@ def Laws.view_delta_keyed_ops(): {==}
 
 def Laws.view_delta_memo_key(): {==}
 
+def Laws.draft_bound_slash_word(): {==}
+
+def Laws.draft_bound_slash_spaced(): {==}
+
+def Laws.draft_bound_give(): {==}
+
+def Laws.draft_bound_btw(): {==}
+
+def Laws.draft_bound_token(): {==}
+
+def Laws.draft_bound_token_nospace(): {==}
+
+def Laws.draft_bound_say_within(): {==}
+
+def Laws.draft_bound_say_over(): {==}
+
+def Laws.draft_bound_none(): {==}
+
 # END view delta (H)

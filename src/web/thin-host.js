@@ -21,15 +21,36 @@ function choices(value, accept) {
   }
   return out;
 }
+// A draft too long for every view request (core/draftbound.bend's twin):
+// over 64 KB a request carries its first and last 16384 code points, joined
+// by " … " when the cut middle held a space or line break and "…" when not,
+// and marks it "<bytes> <hash>" as "@draft.bound". Send carries the whole
+// text within a message's bound (131072 bytes); over it the hub refuses and
+// says why. This page keeps (and saves) the full text either way.
+const fnv = text => { let h = 0x811c9dc5;for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i);h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); };
+export function boundedDraft(text, action = '', keep = 16384, whole = 65536, send = 131072) {
+  if (typeof text !== 'string' || text.length <= keep) return null;
+  const bytes = utf8Bytes(text);
+  if (bytes <= whole || ['send', 'send-alt'].includes(action) && bytes <= send) return null;
+  const cps = Array.from(text);
+  if (cps.length <= 2 * keep) return null;
+  const middle = cps.slice(keep, cps.length - keep).join('');
+  return { text: cps.slice(0, keep).join('') + (/[ \n\t\r]/.test(middle) ? ' … ' : '…') + cps.slice(cps.length - keep).join(''),
+    marker: bytes + ' ' + fnv(text) };
+}
 // Reference suggestions are projected by the hub from this selected draft.
 // Every view request keeps the same current-thread-only privacy boundary.
-function requestSession(session, _action, target) {
+// bound: as it goes on the wire (the draft bounded for the action); the
+// callers' own copy keeps the whole draft (what the view delta puts back).
+function requestSession(session, action, target, bound = false) {
   const drafts = {}, local = object(session.drafts) ? session.drafts : {};
   for (const key of ['@lang', '@lang.os', '@lang.tag', '@lang.preview', '@desktop.browser']) {
     if (typeof local[key] === 'string' && utf8Bytes(local[key]) <= 128) drafts[key] = local[key];
   }
   if (session.sel && !session.sel.startsWith('@') && Object.hasOwn(local, session.sel) && typeof local[session.sel] === 'string') {
-    Object.defineProperty(drafts, session.sel, { value: local[session.sel], enumerable: true });
+    const b = bound ? boundedDraft(local[session.sel], action) : null;
+    Object.defineProperty(drafts, session.sel, { value: b ? b.text : local[session.sel], enumerable: true });
+    if (b) drafts['@draft.bound'] = b.marker;
   }
   // the selected thread's viewer and its sheets: a fresh view (a reload)
   // starts from them (thin-actor.bend's Actor.seed.key); a running one
@@ -109,7 +130,9 @@ export class ThinHost {
       viewDelta: (api.renderer || 'web') === 'web' && api.viewDelta !== false,
       bodyPages: api.bodyPages === true,
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
-        p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action', request.p.target), away: this.awayOf(request.p.session.sel) } } : request }),
+        p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action' ? request.p.action : '', request.p.target, true), away: this.awayOf(request.p.session.sel) } } : request }),
+      // what the request limit measures: the request as it goes on the wire
+      shape: (p, method) => p.session ? { ...p, session: requestSession(p.session, method === 'view.action' ? p.action : '', this.target, true) } : p,
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: api.validateResult || validateThinResult,
     }, next);
@@ -662,6 +685,9 @@ export class ThinHost {
     if (result.current || navigation) {
       const drafts = { ...responseSession.drafts, ...this.session.drafts };
       if (result.method === 'view.action') for (const [key, text] of Object.entries(responseSession.drafts)) {
+        // a draft the request carried bounded is this page's alone: what
+        // the hub made of the bounded text is never adopted (or saved)
+        if (key === responseSession.sel && metadata?.input?.session?.drafts?.['@draft.bound']) continue;
         if (key === responseSession.sel || key.startsWith('@')) Object.defineProperty(drafts, key, { value: text, enumerable: true, writable: true, configurable: true });
       }
       // each thread's viewer open or shut ("panel:<t>") is this page's own,

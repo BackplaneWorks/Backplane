@@ -1,6 +1,7 @@
 import Base
 import ../src/core/json.bend as J
 import ../src/server/thin-delta.bend as D
+import ../src/core/draftbound.bend as DB
 
 # Driver: test/tools/view_delta.mjs (the client's applier against these)
 
@@ -32,3 +33,7 @@ def round(old: String, new: String) -> String:
 # a whole body as ops from nothing, the request's long draft by reference
 def whole(body: String, draft: String) -> String:
   J.Json.show(J.Json.arr(D.Delta.whole(parse(body), draft)))
+
+# a draft as a view request carries it (core/draftbound.bend)
+def bound(s: String, +keep: String) -> String:
+  DB.Bound.text(s, Maybe.default(&2, Nat, Nat.read(keep), 0n), Maybe.default(&2, Nat, Nat.read(keep), 0n))

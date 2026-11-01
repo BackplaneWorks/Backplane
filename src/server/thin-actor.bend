@@ -135,7 +135,7 @@ def Actor.draft.safe( +valid: Bool, +thread: String, +drafts: J.Json) -> J.Json:
     case True{}: Actor.draft.value(J.Json.get(drafts, thread), thread)
 
 def Actor.local.key(+key: String) -> Bool:
-  Bool.or(String.starts_with(key, "@away."), Nat.is_lt(U.Keys.pos(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], key), 7n))
+  Bool.or(String.starts_with(key, "@away."), Nat.is_lt(U.Keys.pos(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser", "@draft.bound"], key), 8n))
 
 def Actor.local.bounded(valid: Bool, key: String, text: String, out: J.Json) -> J.Json:
   match valid:
@@ -177,6 +177,17 @@ def Actor.local.copy(xs: List<&2, Sigma<&2, &2, String, _ => String>>, dr: Map<&
     case Nil{}: dr
     case (+key, value) <> tail: Actor.local.copy(tail, Actor.pref.put(Actor.local.key(key), dr, key, value))
 
+# "@draft.bound": the page's mark that the draft it carries is bounded
+# (core/draftbound.bend); a request without it carries the whole draft, so
+# the mark is always set, "" then, and never outlives the request
+def Actor.bound.text(value: J.Json) -> String:
+  match value:
+    case J.Str{+text}: Bool.pick(String, W.Wire.within(text, 128n), text, "")
+    case _: ""
+
+def Actor.bound.input(+drafts: J.Json, out: J.Json) -> J.Json:
+  V.Obj.put(out, "@draft.bound", J.Str{Actor.bound.text(J.Json.get_obj(drafts, "@draft.bound"))})
+
 # Away from the end, the page names the newest entry it had then (host.js's
 # hold, the request's "away"; "" back at the end), kept as the shown
 # thread's "@away.<thread>", as bounded as the other choices; a request
@@ -194,7 +205,7 @@ def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
   +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
   +session = J.Json.get_obj(p, "session")
   +drafts = Actor.intent.input(thread, J.Json.get_obj(session, "drafts"), Actor.sheet.input(thread, J.Json.get_obj(session, "drafts"), Actor.away.input(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, p,
-    Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts"))))))
+    Actor.bound.input(J.Json.get_obj(session, "drafts"), Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts")))))))
   V.Obj.put(p, "session", V.Obj.put(V.Obj.put(V.Obj.put(session, "drafts", drafts), "outbox", J.Json.obj(Nil{})), "info",
     J.Json.obj(P.Session.strings(Map.to_list(&2, String, Actor.seeds(thread, Map.to_list(&2, String, P.Session.read.strings(J.Json.get_obj(session, "info"), Map.new(&2, String))), Map.new(&2, String)))))))
 

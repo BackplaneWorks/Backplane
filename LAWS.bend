@@ -214,6 +214,7 @@ import ./src/core/standin.bend as SIN # one-hub
 import ./src/core/thin.bend as JTHIN # J2: JS stack
 import ./src/server/thin-content-eq.bend as CONTENTEQ
 import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+import ./src/core/draftbound.bend as DBOUND # view delta (H)
 import ./src/web/sidebar-slot.bend as FULLSLOT
 import ./src/server/thin-still-picture.bend as STILLPICTURE
 import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
@@ -13960,5 +13961,38 @@ law view_delta_keyed_ops:
 law view_delta_memo_key:
   {CHATSIDE.Memo.request(J.Json.obj([J.KV{"viewDelta", J.Json.obj([J.KV{"version", J.Num{"1"}}, J.KV{"token", J.Str{"7"}}])}, J.KV{"action", J.Str{""}}]))
     == CHATSIDE.Memo.request(J.Json.obj([J.KV{"action", J.Str{""}}])) : J.Json}
+
+# A draft carried bounded (core/draftbound.bend: its head and tail, the
+# join spaced exactly when the cut middle was) gives the hub what the
+# whole draft gives: the slash rows (one word starting with "/"), Give,
+# /btw, and the word being typed (the reference popup), here with heads
+# and tails of 6 (the page keeps 16384 of each)
+law draft_bound_slash_word:
+  {SL.Slash.typing(DBOUND.Bound.text("/compactandthenmorewordlesstext", 6n, 6n)) == SL.Slash.typing("/compactandthenmorewordlesstext") : Bool}
+
+law draft_bound_slash_spaced:
+  {SL.Slash.typing(DBOUND.Bound.text("/compac and then more wordstext", 6n, 6n)) == SL.Slash.typing("/compac and then more wordstext") : Bool}
+
+law draft_bound_give:
+  {U.Give.is(DBOUND.Bound.text("/give >t1 here is a long note to hand", 6n, 6n)) == U.Give.is("/give >t1 here is a long note to hand") : Bool}
+
+law draft_bound_btw:
+  {U.Btw.is(DBOUND.Bound.text("/btw what did the long answer say", 6n, 6n)) == U.Btw.is("/btw what did the long answer say") : Bool}
+
+law draft_bound_token:
+  {RF.Refs.token(DBOUND.Bound.text("a long draft that ends in a ref @bob", 6n, 6n)) == RF.Refs.token("a long draft that ends in a ref @bob") : String}
+
+law draft_bound_token_nospace:
+  {RF.Refs.token(DBOUND.Bound.text("aaaaaaaaaaaaaaaaaaaaaaaaaaa bb @bob", 6n, 6n)) == "@bob" : String}
+
+# within a message's bound nothing is said; over it, the size and the bound
+law draft_bound_say_within:
+  {DBOUND.Bound.say(I18.En{}, "131072 9f") == "" : String}
+
+law draft_bound_say_over:
+  {DBOUND.Bound.say(I18.En{}, "307200 9f") == "This draft is 300 KB. A message can be at most 128 KB." : String}
+
+law draft_bound_none:
+  {DBOUND.Bound.is("") == False{} : Bool}
 
 # END view delta (H)

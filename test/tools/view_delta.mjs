@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { applyViewDelta } from '../../src/web/view-delta.js';
+import { boundedDraft } from '../../src/web/thin-host.js';
 
 const lib = (await import(pathToFileURL(resolve(process.argv[2])).href)).default;
 let seed = 12345;
@@ -97,6 +98,18 @@ for (let i = 0; i < 1500; i++) {
   assert.ok(!ops.includes('big paste'), 'the draft is not in a whole body');
   assert.deepEqual(applyViewDelta(null, JSON.parse(ops), draft), a);
 }
+// the page's bounded draft is Bend's Bound.text (small sizes here)
+for (let i = 0; i < 300; i++) {
+  const alphabet = ['a', 'b', ' ', '\n', '/', '@', 'é', '🦋', '\t'];
+  const n = 13 + rand(40), keep = 2 + rand(5), s = Array.from({ length: n }, () => alphabet[rand(alphabet.length)]).join('');
+  const b = boundedDraft(s, '', keep, 0, 0);
+  if (!b) continue;
+  assert.equal(b.text, lib.bound(s, String(keep)), `bounded ${JSON.stringify(s)} keep ${keep}`);
+}
+assert.equal(boundedDraft('x'.repeat(70000), 'send'), null, 'Send within the bound carries the whole text');
+assert.ok(boundedDraft('x'.repeat(140000), 'send'), 'over the bound even Send is bounded');
+assert.ok(boundedDraft('x'.repeat(70000), ''), 'a view request over 64 KB is bounded');
+assert.equal(boundedDraft('x'.repeat(60000), ''), null);
 // malformed ops throw
 for (const bad of [[['x', [], 1]], [['s', ['nope'], 1]], [['a', ['shown'], [[0, 99]]]], 'no', [['s', [0], 1]]])
   assert.throws(() => applyViewDelta({ shown: [] }, bad));

@@ -865,3 +865,18 @@ test('paging ahead: past the cap the far end is let go, and asked for again past
  assert.equal(gone.at(-1).side,'older');assert.equal(gone.at(-1).ids[0],'p'+k+':0');
  f.host.ahead('older');assert.equal(f.sent.at(-1).p.cursor,'c'+k,'up again: the page past the new top edge');
 });
+test('bounded draft: a 300 KB draft rides every view request bounded and marked; the page keeps and saves its own text',async()=>{
+ const big='first words /x '+'pasted text '.repeat(25000)+' ends @bob',f=await fixture({session:()=>({sel:'A',drafts:{A:big},rid:1})});
+ assert(Buffer.byteLength(big)>300000);f.open();assert.equal(f.host.ready,true,'the view arrives');
+ const open=f.sent[0];assert(Buffer.byteLength(JSON.stringify(open))<70000,'the request is bounded');
+ const d=open.p.session.drafts;assert(/^\d+ [0-9a-f]+$/.test(d['@draft.bound']));assert.equal(Number(d['@draft.bound'].split(' ')[0]),Buffer.byteLength(big));
+ assert(d.A.startsWith('first words /x '));assert(d.A.endsWith(' ends @bob'));assert(d.A.includes(' … '));
+ f.host.update();assert(f.sent.at(-1).p.session.drafts['@draft.bound'],'every request');
+ // Send over a message's bound goes bounded too (the hub refuses it and says why)
+ f.host.receive(f.reply());f.host.request('send','');const send=f.sent.at(-1);assert.equal(send.m,'view.action');assert(send.p.session.drafts['@draft.bound']);
+ // what the hub made of the bounded text is never adopted
+ f.host.receive(f.reply(send,{session:{...send.p.session,drafts:{A:'hub edit of the bounded text'}}}));assert.equal(f.getSession().drafts.A,big);});
+test('bounded draft: Send within a message\'s bound carries the whole text',async()=>{
+ const mid='x '.repeat(40000),f=await fixture({session:()=>({sel:'A',drafts:{A:mid},rid:1})});f.open();
+ assert(f.sent[0].p.session.drafts['@draft.bound'],'a view request over 64 KB is bounded');
+ f.host.request('send','');const send=f.sent.at(-1);assert.equal(send.p.session.drafts.A,mid);assert(!Object.hasOwn(send.p.session.drafts,'@draft.bound'));});
