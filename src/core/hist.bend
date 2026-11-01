@@ -277,6 +277,11 @@ def Step.entry(s: Step) -> String:
     case Step{_, e, _, _, _, _, _, _}:
       e
 
+def Step.at(s: Step) -> Nat:
+  match s:
+    case Step{_, _, _, _, _, _, _, at}:
+      at
+
 def Step.files(s: Step) -> List<&2, SFile>:
   match s:
     case Step{_, _, _, _, _, _, fs, _}:

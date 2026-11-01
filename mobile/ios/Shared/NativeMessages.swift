@@ -1681,7 +1681,7 @@ enum NativeMessages {
 
   // viewer.history.changes
   static func viewer_history_changes(_ tag: String) -> String {
-    tag == "ja" ? ("変更") : ("Changes")
+    tag == "ja" ? ("編集を強調") : ("Highlight edits")
   }
 
   // viewer.history.compare

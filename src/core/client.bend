@@ -9190,6 +9190,30 @@ def Hs.set(+u: Ui, +k: String, +v: String) -> Ui:
 def Hs.entries(+u: Ui) -> List<&2, M.Entry>:
   List.append(&2, M.Entry, M.State.mine(Ui.state(u), Ui.sel(u)), M.State.mine(Ui.state(u), HI.Hist.sources.key(Ui.sel(u))))
 
+def Hs.when.zone(+zone: TZ.TzRule, +at: Nat) -> String:
+  +wall = TZ.Tz.wall(zone, at)
+  TZ.Tz.show.dt(wall) ++ ":" ++ CR.Cron.pad2(Nat.mod(wall, 60n)) ++ " " ++ TZ.Tz.abbr(TZ.Tz.off(zone, at))
+
+def Hs.when(+u: Ui, +s: HI.Step) -> String:
+  Bool.pick(String, Nat.is_eq(HI.Step.at(s), 0n), MSG.T.history.time.unknown(Lang.loc(u)), Hs.when.zone(SC.Sched.person(Ui.state(u), 0n, True{}), HI.Step.at(s)))
+
+def Hs.source.of(+l: I.Loc, m: Maybe<&2, M.Entry>) -> String:
+  match m:
+    case Some{M.Act{_, _, _, +kind, +summary, _}}:
+      MSG.T.history.after(l, kind ++ " · " ++ HI.Hist.line(summary))
+    case Some{M.Msg{_, _, M.User{}, +text, _}}:
+      MSG.T.history.turn.started(l) ++ " · " ++ HI.Hist.line(text)
+    case Some{M.Msg{_, _, M.Assistant{}, +text, _}}:
+      MSG.T.history.after.reply(l) ++ " · " ++ HI.Hist.line(text)
+    case _:
+      MSG.T.history.source.unknown(l)
+
+def Hs.source(+l: I.Loc, +es: List<&2, M.Entry>, +s: HI.Step) -> String:
+  Bool.pick(String, String.is_empty(HI.Step.entry(s)), MSG.T.history.turn.ended(l), Hs.source.of(l, HI.Hist.find(es, HI.Step.entry(s))))
+
+def Hs.detail(+l: I.Loc, +u: Ui, +s: HI.Step, +es: List<&2, M.Entry>) -> String:
+  MSG.T.history.saved(l, Hs.when(u, s)) ++ " · " ++ Hs.source(l, es, s)
+
 # The file on show, including the project's default before its path is
 # explicit. The refs answer knows a canonical schematic whose name need
 # not match its board's.
@@ -9466,12 +9490,12 @@ def Hs.label.k(+l: I.Loc, +s: String, step: Bool, turn: Bool, base: Bool) -> Str
 def Hs.label.shown(+l: I.Loc, +s: String) -> String:
   Hs.label.k(l, s, String.starts_with(s, "Step "), String.starts_with(s, "Turn "), String.starts_with(s, "Branch point · "))
 
-def Hs.row.steps(ss: List<&2, HI.Step>, +l: I.Loc, +side: String, +es: List<&2, M.Entry>, +i: Nat, acc: List<&2, HRow>) -> List<&2, HRow>:
+def Hs.row.steps(ss: List<&2, HI.Step>, +l: I.Loc, +u: Ui, +side: String, +es: List<&2, M.Entry>, +i: Nat, acc: List<&2, HRow>) -> List<&2, HRow>:
   match ss:
     case Nil{}:
       acc
-    case HI.Step{+id, _, +c, _, +g, +top, _, _} <> t:
-      Hs.row.steps(t, l, side, es, 1n+i, HRow{MSG.T.history.step(l, Nat.show(i)), HI.Hist.label(es, HI.Hist.anchor(es, HI.Step{id, "", c, "", g, top, Nil{}, 0n})), Hs.row.value(side, c, "Step " ++ Nat.show(i), g, top)} <> acc)
+    case HI.Step{+id, +entry, +c, +prev, +g, +top, +fs, +at} <> t:
+      Hs.row.steps(t, l, u, side, es, 1n+i, HRow{MSG.T.history.step(l, Nat.show(i)), Hs.detail(l, u, HI.Step{id, entry, c, prev, g, top, fs, at}, es), Hs.row.value(side, c, "Step " ++ Nat.show(i), g, top)} <> acc)
 
 def Hs.ref.label(+r: HI.Ref) -> String:
   match r:
@@ -9509,14 +9533,14 @@ def Hs.menu.steps() -> Nat:
 # taking them from every step's row gives (each row's label walks the
 # thread's entries: made for every step, a thread with a long history
 # took seconds a screen on the phones)
-def Hs.row.last(+ss: List<&2, HI.Step>, +l: I.Loc, +side: String, +es: List<&2, M.Entry>) -> List<&2, HRow>:
-  Hs.row.steps(List.drop(&2, HI.Step, ss, Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps())), l, side, es, 1n+Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps()), Nil{})
+def Hs.row.last(+ss: List<&2, HI.Step>, +l: I.Loc, +u: Ui, +side: String, +es: List<&2, M.Entry>) -> List<&2, HRow>:
+  Hs.row.steps(List.drop(&2, HI.Step, ss, Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps())), l, u, side, es, 1n+Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps()), Nil{})
 
 def Hs.menu.loc(+l: I.Loc, +u: Ui, +side: String) -> List<&2, HRow>:
   +r = Hs.refs(u)
   +es = Hs.entries(u)
   List.append(&2, HRow, [HRow{MSG.T.history.workingcopy(l), MSG.T.history.workingcopy.note(l), Hs.row.value(side, "", "Working copy", "", "")}],
-    List.append(&2, HRow, Hs.row.last(Hs.track(u), l, side, es),
+    List.append(&2, HRow, Hs.row.last(Hs.track(u), l, u, side, es),
       Hs.row.refs(HI.Hist.refs(J.Json.get_str(r, "refs", "")), l, side, J.Json.get_str(r, "git", ""), J.Json.get_str(r, "top", ""))))
 
 def Hs.menu(+u: Ui, side: String) -> List<&2, HRow>:
@@ -10200,11 +10224,11 @@ def Hs.bar.k(+l: I.Loc, m: Maybe<&2, HI.Step>, +u: Ui, +n: Nat, +at: Nat, +es: L
   match m:
     case Some{+s}:
       HBar{True{}, n, at, Hs.bar.pos(l, HI.Step.first(s), at, n),
-        HI.Hist.anchor(es, s), HI.Hist.label(es, HI.Hist.anchor(es, s)), Hs.said.line(HI.Hist.said(es, HI.Hist.anchor(es, s))),
+        HI.Hist.anchor(es, s), HI.Hist.label(es, HI.Hist.anchor(es, s)), Hs.detail(l, u, s, es),
         Hs.playing(u), Hs.diff(u), False{}, "", "", Ui.scratch(u, "@cmp.menu")}
     case None{}:
       HBar{True{}, n, 0n, Bool.pick(String, Hs.cmp(u), MSG.T.history.comparing(l), Bool.pick(String, Nat.is_eq(c, 0n), MSG.T.history.live(l), MSG.T.history.live.steps(l, Nat.show(c), Bool.pick(String, Nat.is_eq(c, 1n), "one", "other")))),
-        "", "", "", Hs.playing(u), Hs.diff(u), Hs.cmp(u), Hs.label.shown(l, Hs.get(u, "cmp.al")), Hs.label.shown(l, Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl"))), Ui.scratch(u, "@cmp.menu")}
+        "", "", "", Hs.playing(u), False{}, Hs.cmp(u), Hs.label.shown(l, Hs.get(u, "cmp.al")), Hs.label.shown(l, Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl"))), Ui.scratch(u, "@cmp.menu")}
 
 def HBar.on(b: HBar) -> Bool:
   match b:

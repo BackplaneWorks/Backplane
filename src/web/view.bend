@@ -4034,9 +4034,12 @@ def View.hist.live.loc(+lc: I.Loc, at: Nat) -> List<&2, D.Node>:
 def View.hist.live(at: Nat) -> List<&2, D.Node>:
   View.hist.live.loc(I.En{}, at)
 
-def View.hist.tick.loc(+lc: I.Loc, +id: String, +i: Nat, +n: Nat, +cur: Bool) -> D.Node:
-  D.El{"button", "", [D.At{"class", Bool.pick(String, cur, "tick on", "tick")}, D.At{"title", Bool.pick(String, String.is_empty(id), MSG.T.history.file.tip(lc), MSG.T.history.step.label(lc, Nat.show(1n+i)))},
+def View.hist.tick.named(+id: String, +i: Nat, +n: Nat, +cur: Bool, +title: String) -> D.Node:
+  D.El{"button", "", [D.At{"class", Bool.pick(String, cur, "tick on", "tick")}, D.At{"title", title}, D.At{"aria-label", title}, D.At{"aria-current", Bool.pick(String, cur, "step", "false")},
     D.At{"style", "left:calc(100% * " ++ Nat.show(i) ++ " / " ++ Nat.show(Bool.pick(Nat, Nat.is_eq(n, 0n), 1n, n)) ++ ")"}, D.At{"data-value", id}, D.On{"click", "hist-go"}], Nil{}}
+
+def View.hist.tick.loc(+lc: I.Loc, +id: String, +i: Nat, +n: Nat, +cur: Bool) -> D.Node:
+  View.hist.tick.named(id, i, n, cur, Bool.pick(String, String.is_empty(id), MSG.T.history.file.tip(lc), MSG.T.history.step.label(lc, Nat.show(1n+i))))
 
 def View.hist.tick(+id: String, +i: Nat, +n: Nat, +cur: Bool) -> D.Node:
   View.hist.tick.loc(I.En{}, id, i, n, cur)
@@ -4051,32 +4054,26 @@ def View.hist.ticks.loc(+lc: I.Loc, ss: List<&2, HS.Step>, +i: Nat, +n: Nat, +at
 def View.hist.ticks(ss: List<&2, HS.Step>, +i: Nat, +n: Nat, +at: Nat) -> List<&2, D.Node>:
   View.hist.ticks.loc(I.En{}, ss, i, n, at)
 
+# The timestamp is cheap per tick; source labels are read only for the
+# selected step and the compare menu, never once per tick over the chat.
+def View.hist.ticks.when(+lc: I.Loc, ss: List<&2, HS.Step>, +i: Nat, +n: Nat, +at: Nat, +zone: TZ.TzRule) -> List<&2, D.Node>:
+  match ss:
+    case Nil{}:
+      [View.hist.tick.loc(lc, "", i, n, Nat.is_eq(at, 0n))]
+    case +s <> t:
+      View.hist.tick.named(HS.Step.id(s), i, n, Nat.is_eq(at, 1n+i), MSG.T.history.step.label(lc, Nat.show(1n+i)) ++ " · " ++ Bool.pick(String, Nat.is_eq(HS.Step.at(s), 0n), MSG.T.history.time.unknown(lc), U.Hs.when.zone(zone, HS.Step.at(s))))
+        <> View.hist.ticks.when(lc, t, 1n+i, n, at, zone)
+
 def View.hist.said.loc(+lc: I.Loc, live: Bool, +text: String) -> List<&2, D.Node>:
   match live:
     case True{}:
-      [D.Dom.span("said", text)]
+      [D.El{"span", "", [D.At{"class", "said"}, D.At{"title", text}], [D.Txt{text}]}]
     case False{}:
       [WI.WIcon.button("icon", "hist-jump", "", MSG.T.history.thread.point(lc), "message-square", 16, ""),
-       D.El{"button", "", [D.At{"class", "said"}, D.At{"title", MSG.T.history.thread.point(lc)}, D.At{"data-value", ""}, D.On{"click", "hist-jump"}], [D.Txt{text}]}]
+       D.El{"button", "", [D.At{"class", "said"}, D.At{"title", text ++ "\n" ++ MSG.T.history.thread.point(lc)}, D.At{"data-value", ""}, D.On{"click", "hist-jump"}], [D.Txt{text}]}]
 
 def View.hist.said(live: Bool, +text: String) -> List<&2, D.Node>:
   View.hist.said.loc(I.En{}, live, text)
-
-def View.hist.walk(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
-  match b:
-    case U.HBar{_, +n, +at, +title, _, +label, +said, +pl, +df, _, _, _, _}:
-      D.El{"div", "", [D.At{"class", "hist"}], [
-        D.El{"div", "", [D.At{"class", "hist-row"}], List.append(&2, D.Node, [
-          View.hist.icon("icon", "hist-first", MSG.T.history.first(lc), "skip-back"),
-          View.hist.icon("icon", "hist-prev", MSG.T.history.previous(lc), "chevron-left"),
-          View.hist.icon("icon play", "hist-play", Bool.pick(String, pl, MSG.T.history.pause(lc), MSG.T.history.play(lc)), Bool.pick(String, pl, "pause", "play")),
-          View.hist.icon("icon", "hist-next", MSG.T.history.next(lc), "chevron-right"),
-          View.hist.icon("icon", "hist-last", MSG.T.history.last(lc), "skip-forward"),
-          D.Dom.span("title", title), D.Dom.span("grow", ""),
-          D.Dom.button(Bool.pick(String, df, "hbtn on", "hbtn"), "hist-diff", "", MSG.T.history.changes.tip(lc), MSG.T.viewer.history.changes(lc)),
-          D.Dom.button("hbtn", "cmp", "a", MSG.T.history.compare.tip(lc), MSG.T.viewer.history.compare(lc))], View.hist.live.loc(lc, at))},
-        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.loc(lc, U.Hs.track(u), 0n, n, at)},
-        D.El{"div", "", [D.At{"class", "hist-said"}], View.hist.said.loc(lc, Nat.is_eq(at, 0n), Bool.pick(String, Nat.is_eq(at, 0n), U.Hs.live.said.loc(lc, n), Bool.pick(String, String.is_empty(said), label, said)))}]}
 
 def View.hist.key(+layer: U32, +label: String) -> D.Node:
   D.El{"span", "", [D.At{"class", "key"}], [D.El{"i", "", [D.At{"style", "background:" ++ View.hex(LO.Look.mark.color(False{}, layer))}], Nil{}}, D.Txt{label}]}
@@ -4097,6 +4094,32 @@ def View.hist.legend.loc(+lc: I.Loc, on: Bool) -> List<&2, D.Node>:
 
 def View.hist.legend(on: Bool) -> List<&2, D.Node>:
   View.hist.legend.loc(I.En{}, on)
+
+def View.hist.disabled(on: Bool) -> List<&2, D.Attr>:
+  match on:
+    case True{}: [D.At{"disabled", ""}]
+    case False{}: Nil{}
+
+def View.hist.changes(+lc: I.Loc, +on: Bool, n: Nat) -> D.Node:
+  D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", Bool.pick(String, on, "hbtn on", "hbtn")}, D.At{"title", MSG.T.history.changes.tip(lc)},
+    D.At{"aria-pressed", Bool.pick(String, on, "true", "false")}, D.At{"data-value", ""}, D.On{"click", "hist-diff"}], View.hist.disabled(Nat.is_eq(n, 0n))), [D.Txt{MSG.T.viewer.history.changes(lc)}]}
+
+def View.hist.walk(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
+  match b:
+    case U.HBar{_, +n, +at, +title, +entry, +label, +said, +pl, +df, _, _, _, _}:
+      D.El{"div", "", [D.At{"class", "hist"}], [
+        D.El{"div", "", [D.At{"class", "hist-row"}], List.append(&2, D.Node, [
+          View.hist.icon("icon", "hist-first", MSG.T.history.first(lc), "skip-back"),
+          View.hist.icon("icon", "hist-prev", MSG.T.history.previous(lc), "chevron-left"),
+          View.hist.icon("icon play", "hist-play", Bool.pick(String, pl, MSG.T.history.pause(lc), MSG.T.history.play(lc)), Bool.pick(String, pl, "pause", "play")),
+          View.hist.icon("icon", "hist-next", MSG.T.history.next(lc), "chevron-right"),
+          View.hist.icon("icon", "hist-last", MSG.T.history.last(lc), "skip-forward"),
+          D.Dom.span("title", title), D.Dom.span("grow", ""),
+          View.hist.changes(lc, Bool.and(df, Nat.is_gt(at, 0n)), n),
+          D.Dom.button("hbtn", "cmp", "a", MSG.T.history.compare.tip(lc), MSG.T.viewer.history.compare(lc))], View.hist.live.loc(lc, at))},
+        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.when(lc, U.Hs.track(u), 0n, n, at, SCH.Sched.person(U.Ui.state(u), 0n, True{}))},
+        D.El{"div", "", [D.At{"class", "hist-said"}], View.hist.said.loc(lc, Bool.or(Nat.is_eq(at, 0n), Bool.not(U.Hs.jump.available(u, entry))), Bool.pick(String, Nat.is_eq(at, 0n), U.Hs.live.said.loc(lc, n), Bool.pick(String, String.is_empty(said), label, said)))},
+        D.El{"div", "", [D.At{"class", "hist-legend"}], View.hist.legend.loc(lc, Bool.and(df, Nat.is_gt(at, 0n)))}]}
 
 def View.hist.cmp.loc(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
   match b:
@@ -4799,14 +4822,10 @@ def View.chrome.state.word(lc: I.Loc, +name: String) -> String:
         Bool.pick(String, String.eq(name, "waiting"), "waiting", Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", Bool.pick(String, String.eq(name, "failed"), "failed", "idle"))))))))
 
 def View.chrome.changes.k(lc: I.Loc) -> String:
-  match lc:
-    case I.Ja{}: "変更"
-    case _: "Changes"
+  MSG.T.history.count.label(lc)
 
 def View.chrome.changes.tip(lc: I.Loc) -> String:
-  match lc:
-    case I.Ja{}: "このスレッドでエージェントが設計に加えた変更（ビューアの履歴で再生できます）"
-    case _: "Design changes the agents made in this thread (the viewer's history plays them)"
+  MSG.T.history.count.tip(lc)
 
 def View.chrome.jump(lc: I.Loc) -> String:
   match lc:

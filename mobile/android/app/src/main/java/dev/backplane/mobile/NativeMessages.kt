@@ -1342,7 +1342,7 @@ object NativeMessages {
 
   // viewer.history.changes
   fun viewer_history_changes(tag: String): String =
-    if (tag == "ja") ("変更") else ("Changes")
+    if (tag == "ja") ("編集を強調") else ("Highlight edits")
 
   // viewer.history.compare
   fun viewer_history_compare(tag: String): String =

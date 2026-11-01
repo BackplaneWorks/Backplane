@@ -160,9 +160,12 @@ Schematic and 3D all show `beta`.
 Have the agent change the board (send `mode:toolhold` with a stand-in that
 edits, or edit the board file by hand while a turn runs). A step tick appears
 on the history bar; Play steps through; Compare shows the change marked.
-Scrubbing pauses Play. Paging the chat keeps the same history; switching
-boards shows that board’s steps. Returning to Live or reloading keeps the
-file or schematic sheet on screen.
+Each tick names its save time; selecting one shows its timestamp and source
+tool or turn. Sources on the loaded chat page offer a jump; other source
+labels retain their full tooltip. Highlight edits shows the previous snapshot’s changes with a
+Removed / Changed / Added legend. Scrubbing pauses Play. Paging the chat
+keeps the same history; switching boards shows that board’s steps. Returning
+to Live or reloading keeps the file or schematic sheet on screen.
 
 **S18 Files, Diff, Review** (W D A)
 Files lists the project folder; opening a board file shows it in the Board
@@ -385,7 +388,8 @@ Split, pick `beta`: every pane shows beta, Sheets lists beta's sheets (no
 Open a thread: the bar reads "Backplane / PROJ / title ▾" with a State cell
 and no separate thread header. ▾ lists Pin, Settle, Snooze, Archive, Delete,
 Fork; a click on the title renames it. Send a message: State reads "working"
-with Stop, Stop interrupts; then "finished". Opening a finished thread
+with Stop, Stop interrupts; then "finished". Design changes counts saved
+board and schematic edit steps; its tooltip explains the viewer history. Opening a finished thread
 from an idle one never shows "idle" first. The gear opens Settings (the
 bar reads "Settings / page") and closes it. The "Jump or run a command" field
 (Ctrl+K) opens the palette. At 420 px wide: the list shows the mark and
