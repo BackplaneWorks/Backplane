@@ -2506,6 +2506,14 @@ function localPresentation(action, value, session) {
     } catch {}
   }
 }
+// A phone's timeline never sits scrolled sideways: style.css hides its
+// sideways overflow, and this undoes a scroll something did anyway (iOS
+// bringing a focused field into view scrolls hidden overflow too).
+const PHONE_WIDTH = typeof matchMedia === "function" ? matchMedia("(max-width: 760px)") : null;
+document.addEventListener("scroll", e => {
+  const t = e.target;
+  if (t && t.id === "timeline" && t.scrollLeft !== 0 && PHONE_WIDTH?.matches) t.scrollLeft = 0;
+}, true);
 let draftPainted = { sel: "", text: "" }, draftPaintTimer = 0;
 // whether the draft's last word (after its last whitespace) starts a popup
 // (/ $ @ > % #): /(^|\s)[\/$@>%#]\S*$/, looking at that word alone (the
