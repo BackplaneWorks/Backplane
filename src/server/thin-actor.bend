@@ -1176,6 +1176,17 @@ def Memo.page(ms: List<&2, Memo>, +base: String, +clock: Nat, +now: Nat) -> Mayb
     case Still{+pic} <> _: Memo.page.still(pic, base, now)
     case _ <> rest: Memo.page(rest, base, clock, now)
 
+# The page splice is off unless the hub setting view.splice.page is "on"
+# (read once per reply): off, a view.page renders in full as before, until
+# the page paces its applies during a wheel (thin-host.js)
+def Memo.page.on(+st: M.State) -> Bool:
+  String.eq(M.Setting.get(st, "view.splice.page", ""), "on")
+
+def Memo.page.if(on: Bool, ms: List<&2, Memo>, +base: String, +clock: Nat, +now: Nat) -> Maybe<&2, J.Json>:
+  match on:
+    case True{}: Memo.page(ms, base, clock, now)
+    case False{}: None{}
+
 def Memo.reply.k(+ok: Bool, +res: J.Json, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
   match ok:
     case True{}: S.Splice.reply(web, res, stream, thread, epoch, target, lc)

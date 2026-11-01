@@ -14897,4 +14897,10 @@ def Laws.view_page_still_same_step(): {==}
 def Laws.view_page_still_next_step(): {==}
 
 def Laws.view_page_still_not_fitted(): {==}
+
+def Laws.view_page_splice_off_none(ms, base, clock, now): {==}
+
+def Laws.view_page_splice_default_off(): {==}
+
+def Laws.view_page_splice_setting_on(): {==}
 # END page splice (H)

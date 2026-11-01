@@ -14608,4 +14608,20 @@ law view_page_still_next_step:
 
 law view_page_still_not_fitted:
   {CHATSIDE.Memo.page([CHATSIDE.Still{STILLPICTURE.Picture{"B\tat:3\tc\tanchor:m1", 61n, J.Null{}}}], "B", 0n, 62n) == None{} : Maybe<&2, J.Json>}
+
+# The splice is behind the hub setting view.splice.page: off unless set to
+# "on", and off, no last view is offered, so a view.page renders in full
+# as before (server.bend's Hub.thin.page.memo -> Hub.thin.web_fit.full)
+law view_page_splice_off_none:
+  for ms: List<&2, CHATSIDE.Memo>
+  for +base: String
+  for +clock: Nat
+  for +now: Nat
+  {CHATSIDE.Memo.page.if(False{}, ms, base, clock, now) == None{} : Maybe<&2, J.Json>}
+
+law view_page_splice_default_off:
+  {CHATSIDE.Memo.page.on(M.State.empty()) == False{} : Bool}
+
+law view_page_splice_setting_on:
+  {CHATSIDE.Memo.page.on(M.State.setting(M.State.empty(), "view.splice.page", "on")) == True{} : Bool}
 # END page splice (H)
