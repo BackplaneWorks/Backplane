@@ -27,7 +27,7 @@ try{
  page=await context.newPage();page.on('pageerror',(e:any)=>errors.push(String(e)));
  page.on('websocket',(socket:any)=>{for(const ev of ['framesent','framereceived'])socket.on(ev,(frame:any)=>{try{const raw=typeof frame.payload==='string'?frame.payload:W.decode(new Uint8Array(frame.payload));const x=JSON.parse(raw);if(x.m||x.ok===false)wireTrace.push({direction:ev,id:x.id,m:x.m,p:x.p?{action:x.p.action,thread:x.p.thread,accountBinding:x.p.accountBinding,op:x.p.op}:undefined,error:x.error});}catch{}});});
  await page.goto(`http://127.0.0.1:${port}/#token=${token}`);await page.waitForSelector('.account-chip',{timeout:30000});
- check('actual web restores selected named thread',(await page.locator('.account-chip').innerText()).includes('A'));
+ check('actual web restores selected named thread',((await page.locator('.account-chip').textContent())||'').includes('A'));
  await page.screenshot({path:join(out,'desktop-thread.png'),fullPage:true});
  await page.locator('[data-on-click="flag"][data-value="settings"]').click();
  await page.locator('[data-on-click="settings-page"][data-value="agents"]').first().click();
@@ -73,7 +73,7 @@ try{
  check('phone account popup retains IME draft',await composer.inputValue()==='Draft preserved 日本語');
  check('phone popup fits screen',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await click('acct-select',added.id);await page.waitForFunction((label:string)=>document.querySelector('.account-chip')?.textContent?.includes(label),label);
- check('between-turn selection updates actual account label',await page.locator('.account-chip').innerText().then((x:string)=>x.includes(label)));
+ check('between-turn selection updates actual account label',await page.locator('.account-chip').textContent().then((x:string|null)=>(x||'').includes(label)));
  check('account switch preserves draft exactly',await composer.inputValue()==='Draft preserved 日本語');
  await page.screenshot({path:join(out,'phone-selected-account.png'),fullPage:true});
  await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:join(out,'desktop-selected-account.png'),fullPage:true});

@@ -63,7 +63,7 @@
     "src/core/hist.bend": "64eca8728749943d10b983b8612028a2e835bc8348672e790ee4ec411a08fb37",
     "src/core/hot.bend": "541015b82fb97a7aa8c5f02206c53faa4d732529e8ab6e79f45a4d81f5403d36",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
-    "src/core/icons.bend": "e61b8148f134319cf75771f45715032cc2aebc0d10e76d6690f8a2d547324172",
+    "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
     "src/core/images.bend": "0948aa54cbfd701100596f9573a04c9ef98261fbac89069cdce7cb165f06fabc",
     "src/core/json.bend": "60ea726052fded72970f3be2784d09fbff0baa4a98a47ac82d00a4a311dc242d",
     "src/core/kexport.bend": "e7c768d51b7909761458296102e9aefb66d8ffd9ea37c3487ccc7fdb2defc86d",
@@ -175,7 +175,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "61fd593a589cf2f73759546690f898bb087e180020b597b541b340dc7173a7ae"
+    "src/web/view.bend": "9286b2fffca84d4501650f7c03ab95b13ad27e5f2d9781126690e5869e6f4395"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

@@ -568,6 +568,7 @@ const refusedViews = new Set();
 let heldAt = 0;
 let focusedNode = null, focusedAtEnd = true, focusedSaveTimer = 0;
 let focusedRequestedKey = null;
+const COARSE_POINTER = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 let thin = null, thinSocket = null, thinAttempt = 0, thinExpiry = 0, thinGreetingTimer = 0, thinDraftTimer = 0, thinFieldTimer = 0;
 const terminalOutput = new TerminalOutputPane({ document, patch, current: () => {
   const link = thin?.client.links.get(location.origin), session = currentSession();
@@ -2246,15 +2247,28 @@ function localPresentation(action, value, session) {
   } else if (action === "draft") {
     applyComposerDraft(document, session.sel, value, composerComposing);
     ui = App.restore(ui, session.sel, value);
-    // the hub's page is redrawn with the draft at once (app.bend's
+    // the hub's page is redrawn with the draft (app.bend's
     // presentation_overlay: the send button and the slash commands follow
-    // what is typed even while the hub is busy with a streaming turn)
-    if (frontendNode) later();
+    // what is typed even while the hub is busy with a streaming turn). The
+    // textarea already shows each key, so a plain one waits until typing
+    // pauses: redrawing a long thread's whole page per key is what made
+    // typing lag, on phones most. A key that empties or fills the draft, or
+    // types in a word that starts a popup (/ $ @ > % #), redraws at once.
+    if (frontendNode) paintDraft(session.sel, value);
     try {
       if (value) localStorage.setItem(DRAFT + session.sel, value);
       else localStorage.removeItem(DRAFT + session.sel);
     } catch {}
   }
+}
+let draftPainted = { sel: "", text: "" }, draftPaintTimer = 0;
+const DRAFT_POPUP = /(^|\s)[\/$@>%#]\S*$/;
+function paintDraft(sel, text) {
+  const was = draftPainted.sel === sel ? draftPainted.text : null;
+  draftPainted = { sel, text };
+  clearTimeout(draftPaintTimer);
+  if (was === null || !was !== !text || DRAFT_POPUP.test(text) || DRAFT_POPUP.test(was)) later();
+  else draftPaintTimer = setTimeout(later, 160);
 }
 function adoptPresentation(session) { ui = App.presentation_handoff(ui, presentationJson(session)); }
 function performPresentation(operation) {
@@ -2723,7 +2737,9 @@ async function startThin(again = false, reason = "initial") {
       // Give an immediately following user action priority over an unsent
       // notification read. Timer is bounded and works while the page is hidden.
       deferRefresh: refresh => setTimeout(() => { if (current()) refresh(); }, 16),
-      draftRefresh: refresh => { clearTimeout(thinDraftTimer);thinDraftTimer = setTimeout(() => { if (current()) refresh(); }, 75); },
+      // (a touch screen's keys wait a little longer for the hub's echo, so
+      // its page is not patched under every key while the person types)
+      draftRefresh: refresh => { clearTimeout(thinDraftTimer);thinDraftTimer = setTimeout(() => { if (current()) refresh(); }, COARSE_POINTER ? 200 : 75); },
       fieldRefresh: refresh => { clearTimeout(thinFieldTimer);thinFieldTimer = setTimeout(() => { if (current()) refresh(); }, 75); },
       fieldsChanged: (name, text) => { if (name === "mrreply") thinMailDraft.edit(text);later(); },
       operationScope: (action, value) => action === "mail-send" ? thinMailDraft.scope(true) : action === "bfield" && value.startsWith("mrreply\u001f") ? thinMailDraft.scope() : undefined,

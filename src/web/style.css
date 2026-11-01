@@ -2095,3 +2095,87 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 
 .tour-example { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tour-example > span { border: 1px solid var(--line); background: var(--raise); color: var(--text); padding: 3px 9px; }
+
+/* Phones (760 px and under), last so it settles the layers above:
+   one top bar (back, the title over its state, the views, search), one
+   row under the draft, and nothing wider than the screen. The rail's views
+   and Buy it ride in the top bar (view.bend's View.chrome.views); wide
+   screens keep the rail. */
+.top-views { display: none; }
+@media (max-width: 760px) {
+  body { overflow-x: clip; }
+  .app.top .workspace-thread > .workspace-bar { display: none; }
+  .app.top .sidebar .find .side-fold { display: none; }
+  .app.top .sidebar .find.with-add { padding-left: max(10px, env(safe-area-inset-left)); }
+  .topbar { flex-wrap: nowrap; gap: 0; min-height: 52px; padding: env(safe-area-inset-top) max(2px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left)); }
+  .app.picked .topbar { padding-left: env(safe-area-inset-left); }
+  .topbar .tb { gap: 0; }
+  .topbar .tb button { width: 44px; height: 44px; border: 0; background: none; }
+  .app.picked .topbar .back { min-width: 44px; min-height: 44px; padding: 0; font-size: calc(22px * var(--text-scale, 100) / 100); }
+  .topbar .crumbs { min-height: 0; gap: 2px; }
+  .topbar .crumbs .crumb, .topbar .crumbs .title { font-size: calc(15px * var(--text-scale, 100) / 100); }
+  /* a thread: the title over a line of its state, in one bar */
+  .app.picked .topbar:has(> .kvs) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: auto auto; align-items: center; }
+  .topbar:has(> .kvs) > :is(.brand-mark, .name, .grow, .cmd) { display: none; }
+  .topbar:has(> .kvs) > .back { grid-area: 1 / 1 / 3 / 2; }
+  .topbar:has(> .kvs) > .crumbs { grid-area: 1 / 2; min-width: 0; min-height: 0; padding-top: 5px; }
+  .topbar:has(> .kvs) > .crumbs > .sep { display: none; }
+  .topbar:has(> .kvs) .crumbs .thread-actions > summary { min-height: 32px; min-width: 32px; }
+  .topbar:has(> .kvs) > .kvs { grid-area: 2 / 2; order: 0; flex: none; align-self: start; min-height: 22px; margin: 0; padding: 0 0 5px; border: 0; overflow: hidden; gap: 10px; }
+  .topbar:has(> .kvs) > .kvs:empty { display: none; }
+  .topbar:has(> .kvs) .kv { padding: 0; border: 0; min-height: 20px; color: var(--dim); }
+  .topbar:has(> .kvs) .kv .k, .topbar:has(> .kvs) .kv.branch { display: none; }
+  .topbar:has(> .kvs) .kv.state button.tool { min-height: 22px; padding: 0 6px 0 4px; }
+  .topbar:has(> .kvs) > .top-views { display: flex; align-items: center; grid-area: 1 / 3 / 3 / 4; }
+  .topbar:has(> .kvs) > .tb { grid-area: 1 / 4 / 3 / 5; }
+  /* Settings is a step back, on the list's bar: the title keeps the room */
+  .topbar:has(> .kvs) .tb .gear { display: none; }
+  .top-views .workspace-menu summary { min-width: 44px; min-height: 44px; padding: 0 6px; justify-content: center; border: 0; background: none; color: var(--dim); }
+  .top-views .workspace-menu[open] summary { color: var(--accent); }
+  .top-views .workspace-menu .workspace-current, .top-views .workspace-menu summary > svg:last-child { display: none; }
+  .top-views .workspace-buy { margin: 0; padding: 0; border: 0; }
+  .top-views .keycap { display: none; }
+  .top-views .workspace-buy button.buy { width: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 0; background: none; justify-content: center; }
+  .top-views .workspace-buy .workspace-label, .top-views .workspace-buy .price { display: none; }
+
+  /* the draft's row: the model, the account as an icon, then the tools and
+     Send, all on one line (the model's words give way, never a button) */
+  .thread-content > .composer, .composer { padding: 6px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); gap: 6px; }
+  .composer textarea { min-height: 44px; padding: 8px 10px; }
+  .composer-foot, .composer-foot:has(> .model-chip), .composer-foot:has(> .account-chip) { display: flex; flex-wrap: nowrap; align-items: center; gap: 3px; }
+  .composer-foot > * { grid-area: auto; }
+  .composer-foot .model-chip, .composer-foot .composer-model .model-chip { flex: 0 1 auto; min-width: 0; max-width: none; height: 36px; margin: 0; padding: 0 8px; }
+  .composer-foot .model-chip .mp-eff, .composer-foot .model-chip kbd, .composer-foot .model-ctx { display: none; }
+  .composer-model { flex: 0 1 auto; flex-basis: auto; width: auto; gap: 4px; }
+  .allowance-chip { width: auto; max-width: 11ch; min-height: 36px; overflow: hidden; text-overflow: ellipsis; }
+  .composer-foot .account-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 36px; padding: 0; }
+  .account-chip .acct-k, .account-chip .acct-v { display: none; }
+  .composer-foot > .attach.draw { margin-left: auto; }
+  .composer-foot :is(.attach, .mic, .tok-chip) { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; width: 34px; height: 36px; min-height: 36px; padding: 0; margin: 0; }
+  .composer-foot .tok-chip .tok-n { display: none; }
+  .composer .foot-end { display: inline-flex; align-items: center; gap: 3px; margin-left: 0; }
+  .composer-foot :is(button, .attach) { min-height: 36px; }
+  .composer .foot-end > button.primary:last-child { height: 36px; min-width: 58px; padding: 0 10px; }
+  .account-picker { left: 8px; right: 8px; }
+
+  /* the Ready to order bar: one line, its buttons beside it */
+  .fab-ready { flex-wrap: nowrap; gap: 6px; margin: 0 8px 6px; padding: 4px 4px 4px 10px; font-size: calc(12px * var(--text-scale, 100) / 100); }
+  .fab-ready-text { flex: 1 1 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .fab-ready > button { flex: none; min-height: 36px; padding: 0 10px; }
+
+  /* a message's time and its Reply/Copy on one line, not a line each */
+  .msg .stamp { display: inline-block; margin-top: 6px; line-height: 28px; }
+  .msg.user .stamp { text-align: left; }
+  .msg .copy, .msg .reply { margin: 4px 0 0 6px; min-height: 28px; padding: 0 10px; }
+  .msg::after { content: ""; display: block; clear: both; }
+  /* code wraps rather than scroll sideways; a table's words keep whole */
+  .codeblock pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; padding-right: 56px; }
+  .body pre, .body code { overflow-wrap: anywhere; }
+  .body table { font-size: calc(12px * var(--text-scale, 100) / 100); }
+  .body :is(td, th) { overflow-wrap: break-word; word-break: normal; hyphens: auto; }
+
+  /* the viewer: one bar of views over its own tools */
+  .viewer > .viewer-tabs { min-height: 48px; padding: env(safe-area-inset-top) max(6px, env(safe-area-inset-right)) 0 max(6px, env(safe-area-inset-left)); }
+  .solid-toolbar button, .solid-toolbar summary, .solid-toolbar select { min-height: 36px; padding: 0 8px; }
+  .local-menu-body { max-width: calc(100vw - 16px); }
+}
