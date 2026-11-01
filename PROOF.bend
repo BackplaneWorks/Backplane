@@ -82,6 +82,8 @@ import ./src/gfx/raster.bend as R
 import ./src/gfx/font.bend as F
 import ./src/app/layout.bend as L
 import ./src/core/eq.bend as Q
+import ./src/server/thin-content-eq.bend as CONTENTEQ # view delta (H)
+import ./src/server/thin-delta.bend as VDELTA # view delta (H)
 import ./src/core/gh.bend as GH
 import ./src/core/fold.bend as FO
 import ./src/core/subs.bend as SB
@@ -14102,3 +14104,88 @@ def Laws.mobile_text_is_filepage():
 
 def Laws.plot_error_missing_keeps_filename():
   {==}
+
+
+# BEGIN view delta (H)
+
+law content_eq_go_refl:
+  for +a: J.Json
+  {CONTENTEQ.ContentEq.go(a, a) == True{} : Bool}
+
+def content_eq_go_refl(a):
+  match a:
+    case J.Null{}:
+      {==}
+    case J.Flag{+x}:
+      match x:
+        case False{}:
+          {==}
+        case True{}:
+          {==}
+    case J.Num{+x}:
+      eq_str_refl(x)
+    case J.Str{+x}:
+      eq_str_refl(x)
+    case J.Arr{+x}:
+      content_eq_go_refl(x)
+    case J.Obj{+x}:
+      content_eq_go_refl(x)
+    case J.Item{+x, +xt}:
+      %Equal.sym(Bool, CONTENTEQ.ContentEq.go(x, x), True{}, content_eq_go_refl(x)) : {Bool.and(_, CONTENTEQ.ContentEq.go(xt, xt)) == True{} : Bool}
+      content_eq_go_refl(xt)
+    case J.Field{+k, +x, +xt}:
+      %Equal.sym(Bool, Q.Eq.str(k, k), True{}, eq_str_refl(k)) : {Bool.and(_, Bool.and(CONTENTEQ.ContentEq.go(x, x), CONTENTEQ.ContentEq.go(xt, xt))) == True{} : Bool}
+      %Equal.sym(Bool, CONTENTEQ.ContentEq.go(x, x), True{}, content_eq_go_refl(x)) : {Bool.and(True{}, Bool.and(_, CONTENTEQ.ContentEq.go(xt, xt))) == True{} : Bool}
+      content_eq_go_refl(xt)
+    case J.End{}:
+      {==}
+
+def Laws.view_delta_same(x):
+  %Equal.sym(Bool, CONTENTEQ.ContentEq.go(x, x), True{}, content_eq_go_refl(x)) : {VDELTA.Delta.diff.k(_, x, x) == Some{Nil{}} : Maybe<&2, List<&2, VDELTA.Op>>}
+  {==}
+
+law view_delta_guard_not_empty:
+  for m: Maybe<&2, List<&2, VDELTA.Op>>
+  {VDELTA.Delta.empty(VDELTA.Delta.guard(m)) == False{} : Bool}
+
+def view_delta_guard_not_empty(m):
+  match m:
+    case None{}:
+      {==}
+    case Some{ops}:
+      match ops:
+        case Nil{}:
+          {==}
+        case op <> tail:
+          {==}
+
+law view_delta_empty_k:
+  for c: Bool
+  for +a: J.Json
+  for +b: J.Json
+  {Bool.or(Bool.not(VDELTA.Delta.empty(VDELTA.Delta.diff.k(c, a, b))), c) == True{} : Bool}
+
+def view_delta_empty_k(c, a, b):
+  match c:
+    case True{}:
+      {==}
+    case False{}:
+      %Equal.sym(Bool, VDELTA.Delta.empty(VDELTA.Delta.guard(VDELTA.Delta.walk(a, b))), False{}, view_delta_guard_not_empty(VDELTA.Delta.walk(a, b))) : {Bool.or(Bool.not(_), False{}) == True{} : Bool}
+      {==}
+
+def Laws.view_delta_empty_same(a, b):
+  view_delta_empty_k(CONTENTEQ.ContentEq.same(a, b), a, b)
+
+def Laws.view_delta_keyed_round(): {==}
+
+def Laws.view_delta_entry_round(): {==}
+
+def Laws.view_delta_unkeyed_round(): {==}
+
+def Laws.view_delta_keys_round(): {==}
+
+def Laws.view_delta_keyed_ops(): {==}
+
+def Laws.view_delta_memo_key(): {==}
+
+# END view delta (H)
