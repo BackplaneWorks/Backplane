@@ -44,12 +44,26 @@ def Ring.until.step(stop: Bool, +c: Char, u: Us) -> Us:
     case False{} Us{False{}, a}:
       Us{False{}, SCon{c, a}}
 
+# whether pat starts at c (then t): its first character first, then the
+# rest of it against t. Asking String.starts_with of SCon{c, t} built a
+# string as long as the rest of the body at every character (quadratic,
+# like ref-origin.bend's Origin.scan was)
+def Ring.at.k(same: Bool, +t: String, +rest: String) -> Bool:
+  match same:
+    case True{}: String.starts_with(t, rest)
+    case False{}: False{}
+
+def Ring.at(+c: Char, +t: String, pat: String) -> Bool:
+  match pat:
+    case SNil{}: True{}
+    case SCon{p, rest}: Ring.at.k(Char.is_eq(c, p), t, rest)
+
 def Ring.until.go(s: String, +pat: String, u: Us) -> String:
   match s u:
     case SNil{} Us{_, a}:
       String.reverse(a)
     case SCon{+c, +t} _:
-      Ring.until.go(t, pat, Ring.until.step(String.starts_with(SCon{c, t}, pat), c, u))
+      Ring.until.go(t, pat, Ring.until.step(Ring.at(c, t, pat), c, u))
 
 # the text of s up to `pat` (all of it when pat never comes)
 def Ring.until(s: String, +pat: String) -> String:
