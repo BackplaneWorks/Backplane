@@ -5665,32 +5665,44 @@ law life_off_message_wakes:
 # settles by itself once idle settle.idle.minutes (30 by default), long
 # before the settle window (hub.bend's Hub.settle.idle)
 law settle_idle_completed:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 law settle_idle_failed:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Failed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Failed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 law settle_idle_interrupted:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Interrupted{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Interrupted{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 # not a second before it has been idle that long
 law settle_idle_not_before:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1804n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1804n) == [] : List<&2, M.Change>}
 
 # a running turn never settles by idleness
 law settle_idle_running_stays:
-  {H.Shelve.ticked(H.Shelve.demo(Nil{}), 1805n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot(Nil{}), 1805n) == [] : List<&2, M.Change>}
 
 # settle.idle.minutes 0 turns it off: only the settle window is left
 law settle_idle_off:
-  {H.Shelve.ticked(H.Shelve.demo([M.SettingSet{"settle.idle.minutes", "0", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.SettingSet{"settle.idle.minutes", "0", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
 
 # a thread whose turn ended with a message still queued is working
 # (Lifecycle.working), so it is neither settled nor woken by the tick: it
 # was settled and woken again every minute (79 threads, about 3000 events
 # an hour on the desktop, 2026-10-31)
 law settle_idle_queued_stays:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Interrupted{}, 5n}, M.TurnQueued{"t1", "q1", "later", 6n}]), 1805n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Interrupted{}, 5n}, M.TurnQueued{"t1", "q1", "later", 6n}]), 1805n) == [] : List<&2, M.Change>}
+
+# the idle window is for work a bot set going: a thread the person started
+# waits out the settle window, as does one their own thread's agent launched
+law settle_idle_own_stays:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
+
+law settle_idle_agent_launch_stays:
+  {H.Shelve.ticked(H.Shelve.demo([M.ThreadLaunched{"t1", "t0", True{}, 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
+
+# a thread a bot delegated takes it, as one a bot launched does
+law settle_idle_bot_delegated:
+  {H.Shelve.ticked(H.Shelve.demo([M.BotSet{"b1", "Bub", "tb1", 0n, "", 1n}, M.TaskDelegated{"k1", "tb1", "t1", 1n, "claude", "", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 # an ephemeral run (run..., mailcoord-...) is never resumed, so once its turn
 # has been over for the idle window its queued messages go instead
@@ -14626,3 +14638,51 @@ law view_page_splice_default_off:
 law view_page_splice_setting_on:
   {CHATSIDE.Memo.page.on(M.State.setting(M.State.empty(), "view.splice.page", "on")) == True{} : Bool}
 # END page splice (H)
+
+# The timeline's valid range (timeline-virtual.bend's Valid.range): at the
+# end it is empty, so every scroll there plans (follow and atEnd stay
+# exact); a row that does not take part keeps an edge as it was
+law timeline_valid_end_empty:
+  for e: TLVIRTUAL.Edges
+  for +ov: TLVIRTUAL.Px
+  for +view: TLVIRTUAL.Px
+  for +total: TLVIRTUAL.Px
+  {TLVIRTUAL.Valid.range(True{}, e, ov, view, total) == TLVIRTUAL.Span{TLVIRTUAL.Px.int(1n), TLVIRTUAL.Px.zero()} : TLVIRTUAL.Span}
+
+law timeline_valid_edge_untaken:
+  for m: Maybe<&2, TLVIRTUAL.Px>
+  for +x: TLVIRTUAL.Px
+  for max: Bool
+  {TLVIRTUAL.Edge.pick(False{}, m, x, max) == m : Maybe<&2, TLVIRTUAL.Px>}
+
+# BEGIN sidebar rows (H): the uberbot row's count without the whole index
+# The plane's counts, as they were when Plane.hot read every liveness
+# setting and every key of the signal index on each render; it now asks
+# those of each thread walked (core/plane.bend's Plane.hot.is)
+law plane_tally_words_plain:
+  {PLN.Plane.tally.words(PLN.Plane.demo(), 200000n) == "2 need you · 1 failed · 2 running" : String}
+
+law plane_tally_words_rich:
+  {PLN.Plane.tally.words(PLN.Plane.demo.rich(), 200000n) == "4 need you · 1 failed · 5 running" : String}
+
+# a thread whose liveness says it stalled needs the person; one that says it did not, does not
+law plane_tally_words_stalled:
+  {PLN.Plane.tally.words(PLN.Plane.demo.stalled(), 200000n) == "6 need you · 1 failed · 5 running" : String}
+
+law plane_tally_counts_stalled:
+  {PLN.Plane.tally.same(PLN.Plane.demo.stalled(), 200000n) == True{} : Bool}
+
+law plane_list_same_stalled:
+  {PLN.Plane.list.same(PLN.Plane.demo.stalled(), 200000n) == True{} : Bool}
+
+# the uberbot row counts from the sidebar's own rows, a project held live,
+# as from Side.rows.ix (web/bots.bend's WB.uber.rows)
+law uber_rows_same_count:
+  {Bool.and(PLN.Plane.tally.at.same(PLN.Plane.demo.stalled(), 200000n, "p1"), PLN.Plane.tally.at.same(PLN.Plane.demo.rich(), 200000n, "p1")) == True{} : Bool}
+
+# The sidebar's rows read the threads that name a parent once (subthreads.bend's
+# Tree.kids, Tree.shelves.at): the same rows as Side.rows, with a subtree, a
+# cross-project link and a project with neither
+law side_rows_ix_tree_eq:
+  {U.Side.rows.ix(U.Side.demo.tree(), U.Side.ix(U.Side.demo.tree()), 100n) == U.Side.rows(U.Side.demo.tree(), 100n) : List<&2, U.SRow>}
+# END sidebar rows (H)

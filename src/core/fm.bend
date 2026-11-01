@@ -87,6 +87,11 @@ def Fm.kind(+name: String) -> String:
 def Fm.preview(+name: String) -> String:
   Bool.pick(String, Fm.ends([".txt", ".md", ".markdown", ".csv", ".json", ".log", ".yaml", ".yml"], Fm.ext(name)), "text", Fm.kind(name))
 
+# a Markdown note: it opens as text, which the web's Files tab draws as
+# Markdown (view.bend's View.md)
+def Fm.md(+name: String) -> Bool:
+  Fm.ends([".md", ".markdown"], Fm.ext(name))
+
 # a path from the root: a folder's entry, the folder itself when "" is the root
 def Fm.join(+dir: String, +name: String) -> String:
   Bool.pick(String, String.is_empty(dir), name, dir ++ "/" ++ name)

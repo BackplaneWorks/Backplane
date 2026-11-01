@@ -35,7 +35,7 @@ const port = Number(opt("port", "3811"));
 const fixtureKind = opt("fixture", "synthetic");
 const outDir = resolve(opt("out", join(here, "build/rr/out")));
 const deep = flag("deep");
-const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "slowup", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
+const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "slowup", "wheelpanes", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
 const scenarios = opt("scenarios", ALL.join(",")).split(",");
 const roles = opt("targets", "long,tools").split(",");
 if (port === 3787) throw new Error("3787 is the live hub's port");
@@ -314,6 +314,36 @@ try {
       r.end = await page.evaluate(() => ({ top: document.getElementById("timeline")?.scrollTop, older: window.__bpRender.ahead?.("older") }));
       say(`slow-up:${target.role}: wheels ${JSON.stringify(r.wheels)}, at the end ${JSON.stringify(r.end)}, hub views ${Object.entries(r.hubMsgs).filter(([k]) => k.startsWith("reply:view.")).map(([k, v]: any) => k + "×" + v.n).join(" ")}`);
     }
+    // opt-in: the wheel where a pane takes it ([data-wheel]: the workspace
+    // terminal's screen) reaches that pane once and scrolls nothing else;
+    // ctrl+wheel over the timeline neither zooms the page nor scrolls it
+    if (scenarios.includes("wheelpanes")) {
+      const pane = async () => page.evaluate(() => { const tl = document.getElementById("timeline"); return { top: tl?.scrollTop ?? -1, scale: visualViewport?.scale ?? 1, dpr: devicePixelRatio, zoom: getComputedStyle(document.documentElement).zoom }; });
+      await page.locator('[data-on-click="term-toggle"]:visible').first().click().catch(() => {});
+      const screen = page.locator('.screen[data-wheel]').first();
+      const shown = await screen.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+      if (!shown) {
+        try { mkdirSync(outDir, { recursive: true }); await page.screenshot({ path: join(outDir, "no-terminal.png") }); } catch {}
+        say(`wheelpanes: terminal buttons ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-on-click="term-toggle"], [data-on-click="ws-go"], [data-on-click="ws-term-here"]')].map((e) => ({ on: e.getAttribute("data-on-click"), v: e.getAttribute("data-value"), shown: !!(e as HTMLElement).offsetParent, label: e.getAttribute("aria-label") || e.textContent?.trim().slice(0, 30) }))))}`);
+      }
+      const r = await measure("wheel-term", target, async () => {
+        if (!shown) throw new Error("no terminal screen ([data-wheel]) came up");
+        const box = await screen.boundingBox();
+        if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.wheel(0, -300);
+      }, { quietMs: 600 });
+      r.wheelPane = { acts: r.hubMsgs["rtt:view.action:ws-term-scroll"]?.n ?? 0 };
+      await page.locator('[data-on-click="term-toggle"]:visible').first().click().catch(() => {});
+      await quiet(page, 600);
+      const tbox = await timeline().boundingBox();
+      if (tbox) await page.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2);
+      const before = await pane();
+      await page.keyboard.down("Control"); await page.mouse.wheel(0, -300); await page.keyboard.up("Control");
+      await sleep(500);
+      const after = await pane();
+      r.ctrlWheel = { before, after };
+      say(`wheelpanes:${target.role}: the terminal's wheel reached it ${r.wheelPane.acts} time(s); ctrl+wheel over the timeline: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+    }
     // The "Loading newer/earlier messages" placeholder is timing-dependent:
     // fast sweeps on a CPU throttled 4x, three times, each down-sweep
     // measured (the placeholder, blank frames, and what was still awaited
@@ -448,7 +478,7 @@ say(`wrote ${join(outDir, "report.md")}`);
 function markdown(rep: any) {
   const L: string[] = [];
   L.push(`# Re-render report — ${rep.at}`, "", `Fixture: ${rep.fixture.source} (${rep.fixture.lines} lines). Hub \`${rep.hub}\` (${rep.build.hub || "unstamped"}), web \`${rep.web}\` (${rep.build.web || "unstamped"}), tree ${rep.build.tree}.${rep.failed ? " **The run failed part way.**" : ""}`, "");
-  L.push("| scenario | active ms | first paint / current ms | wheels: stalls, move p50/p95 | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
+  L.push("| scenario | active ms | first paint / current ms | wheels: stalls, wheel→move p50/p95 (diagnostic, unbudgeted) | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
     "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const r of rep.results) {
     const k = r.events["paint:keydown"], w = r.scroll.wheelToFrame, c = r.counts, rpc = r.hub.perf["hub.rpc"];
@@ -477,6 +507,21 @@ function markdown(rep: any) {
 // hub views a window took (replies to view.* requests): stable even where
 // their sizes are not
 const hubViews = (r: any) => Object.entries(r.hubMsgs as Record<string, any>).filter(([k]) => k.startsWith("reply:view.")).reduce((n, [, v]) => n + v.n, 0);
+
+// Scroll and stress windows: their counts follow how many hub views land
+// in them (pages, and the updates around them), which varies from run to
+// run, so their budgets are per view landed (a window with none counts as
+// one), and the views themselves per page asked for
+const pages = (r: any) => Math.max(1, r.hubMsgs?.["reply:view.page"]?.n ?? 0);
+const views = (r: any) => Math.max(1, hubViews(r));
+const perPage = (r: any) => {
+  const n = views(r);
+  return { mutationsPerView: r.dom.records / n, domPatchPerView: (r.counts["dom.patch"] ?? 0) / n, recreatedPerView: r.dom.recreatedIdentical / n,
+    renderFullPerView: (r.counts["render.full"] ?? 0) / n, outsidePerView: r.waste.outsideRecords / n,
+    // (pages + 1: a window that asks for none or one still has updates)
+    hubViewsPerPage: hubViews(r) / ((r.hubMsgs?.["reply:view.page"]?.n ?? 0) + 1) };
+};
+const paged = (kind: string) => /^(scroll|stress|slow)/.test(kind);
 
 // The gate
 // --------
@@ -517,7 +562,7 @@ if (budgets) {
     const lim = kind === "known" || kind === "fixture" ? null : b[kind];
     if (!lim) continue;
     const got: Record<string, number> = { mutations: r.dom.records, recreatedIdentical: r.dom.recreatedIdentical, touchedUnchangedRows: r.rows.touchedUnchanged,
-      outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
+      outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), ...perPage(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
     for (const [k, max] of Object.entries(lim as Record<string, number>)) if (k !== "loading" && k !== "blankFrames" && k in got && got[k] > max) { console.log(`OVER ${r.name} ${k} ${got[k]} > ${max}`); over++; }
   }
   if (failed) { console.log("the run failed"); over++; }
@@ -542,11 +587,23 @@ if (wb) {
   const b: Record<string, Record<string, number>> = {};
   for (const r of results) {
     const k = r.name.split(":")[0];
-    // scroll and stress windows depend on how many pages land in them:
-    // twice what was seen; other windows a quarter more
-    const lim = /^(scroll|stress)/.test(k) ? (x: number) => Math.ceil(x * 2 + 50) : (x: number) => Math.ceil(x * 1.25 + 2);
+    const lim = (x: number) => Math.ceil(x * 1.25 + 2);
     const cur = { mutations: lim(r.dom.records), recreatedIdentical: lim(r.dom.recreatedIdentical), touchedUnchangedRows: lim(r.rows.touchedUnchanged), outsideRecords: lim(r.waste.outsideRecords),
       wsInBytes: Math.ceil(r.ws.inBytes * 1.5 + 8192), /* the hub's view deltas: sizes vary little now */ renderFull: lim(r.counts["render.full"] ?? 0), hubViews: lim(hubViews(r)), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
+    if (/^stress/.test(k)) {
+      // stress windows (4x throttle, fast sweeps): their DOM counts follow
+      // frame timing, how many rows mount between frames; they are gated by
+      // the hard rules (no loading row, no blank frame, no stall, nothing
+      // stuck) and by hub views per page asked for
+      for (const n of Object.keys(cur)) if (!["wsInBytes", "loading", "blankFrames"].includes(n)) delete (cur as any)[n];
+      (cur as any).hubViewsPerPage = Math.ceil(perPage(r).hubViewsPerPage * 1.25 + 1);
+    } else if (paged(k)) {
+      // per page landed, in place of the totals that follow the page count
+      const pp = perPage(r);
+      for (const n of ["mutations", "recreatedIdentical", "domPatch", "hubViews", "renderFull", "outsideRecords"] as const) delete (cur as any)[n];
+      Object.assign(cur, { mutationsPerView: lim(pp.mutationsPerView), domPatchPerView: lim(pp.domPatchPerView), recreatedPerView: lim(pp.recreatedPerView),
+        outsidePerView: lim(pp.outsidePerView), renderFullPerView: Math.ceil(pp.renderFullPerView * 1.25 + 1), hubViewsPerPage: Math.ceil(pp.hubViewsPerPage * 1.25 + 1) });
+    }
     b[k] = b[k] ? Object.fromEntries(Object.entries(cur).map(([n, v]) => [n, Math.max(v, b[k][n as keyof typeof cur] ?? 0)])) : cur;
   }
   // runs vary with timing (paging, a stray render): a budget is the worst

@@ -505,7 +505,7 @@ settings.tour.welcome = 使い方ツアー
 settings.tour.show = ツアーを表示
 settings.tour.note = プロジェクト、スレッド、ボット、エージェント、マシンを紹介します。
 settings.settle = 通常の非活動期間
-settings.settle.note = この期間動きがないと完了済みになります。ターン終了後は{plural, select, other {{minutes}分間}}の非活動で先に完了済みになります。内容は保存されます。
+settings.settle.note = この期間動きがないと完了済みになります。ボットが始めたスレッドは、ターン終了後{plural, select, other {{minutes}分間}}の非活動で先に完了済みになります。内容は保存されます。
 settings.settle.done = 作業が終わったら完了
 settings.settle.done.note = 作業が終わったスレッドをすぐに完了済みに移動します。
 settings.agents = エージェント
@@ -1398,7 +1398,7 @@ sched.help.interval = 正の間隔を指定してください: every 15m、every
 sched.help.cron = cronは分 (0–59)、時 (0–23)、日 (1–31)、月 (1–12)、曜日 (0–7) の5項目です。例: 0 9 * * *。
 sched.help.minute = cronの分は0〜59、間隔は正の数です。例: */15 * * * *。
 
-settings.settle.idle.off = ターン終了後の短い非活動タイマーはオフです。この期間動きがないと完了済みになります。内容は保存されます。
+settings.settle.idle.off = ボットが始めたスレッドの短い非活動タイマーはオフです。この期間動きがないと完了済みになります。内容は保存されます。
 sidebar.search.empty = 一致するプロジェクトはありません。
 sidebar.search.clear = 検索をクリア
 native.file.text.error = {kind, select, size {テキストのプレビューは1 MBまでです。} other {このテキストファイルを読み込めませんでした。}}

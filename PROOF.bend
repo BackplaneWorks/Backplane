@@ -251,6 +251,7 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+
 import ./src/core/landing.bend as LAND
 
 # Lemmas
@@ -7634,6 +7635,15 @@ def Laws.settle_idle_off():
 def Laws.settle_idle_queued_stays():
   {==}
 
+def Laws.settle_idle_own_stays():
+  {==}
+
+def Laws.settle_idle_agent_launch_stays():
+  {==}
+
+def Laws.settle_idle_bot_delegated():
+  {==}
+
 def Laws.settle_idle_ephemeral_queue_goes():
   {==}
 
@@ -14883,14 +14893,46 @@ def Laws.land_timeline_only():
 
 # BEGIN page splice (H)
 def Laws.view_memo_key_page_last(seq, info, p, anchor, view, web, thread): {==}
+
 def Laws.view_page_memo_same_step(): {==}
+
 def Laws.view_page_memo_next_step(): {==}
+
 def Laws.view_page_memo_other_inputs(): {==}
+
 def Laws.view_page_memo_not_fitted(): {==}
+
 def Laws.view_page_still_same_step(): {==}
+
 def Laws.view_page_still_next_step(): {==}
+
 def Laws.view_page_still_not_fitted(): {==}
+
 def Laws.view_page_splice_off_none(ms, base, clock, now): {==}
+
 def Laws.view_page_splice_default_off(): {==}
+
 def Laws.view_page_splice_setting_on(): {==}
 # END page splice (H)
+
+def Laws.timeline_valid_end_empty(e, ov, view, total):
+  {==}
+
+def Laws.timeline_valid_edge_untaken(m, x, max):
+  {==}
+
+# BEGIN sidebar rows (H)
+def Laws.plane_tally_words_plain(): {==}
+
+def Laws.plane_tally_words_rich(): {==}
+
+def Laws.plane_tally_words_stalled(): {==}
+
+def Laws.plane_tally_counts_stalled(): {==}
+
+def Laws.plane_list_same_stalled(): {==}
+
+def Laws.uber_rows_same_count(): {==}
+
+def Laws.side_rows_ix_tree_eq(): {==}
+# END sidebar rows (H)

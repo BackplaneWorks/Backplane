@@ -17,6 +17,7 @@ import ./mail-actions.bend as MA
 import ./presentation.bend as P
 import ../core/presentation.bend as PS
 import ./cat.bend as WC
+import ./note.bend as NT
 import ../core/onboard.bend as OB
 import ./workspace.bend as WS
 import ../core/reflow.bend as RF
@@ -107,6 +108,12 @@ def recv(u: U.Ui, +o: J.Json) -> U.Act:
 # each answer)
 def cat(name: String) -> String:
   WC.WCat.uri(name)
+
+# a Markdown note from the Files tab (view.bend's View.md), its text as
+# text-preview.js read it: the chat's own Markdown, in the page's language,
+# its paths from its folder in the project at root (note.bend)
+def md(text: String, lang: String, root: String, path: String) -> D.Node:
+  D.El{"div", "", [D.At{"class", "fm-md-doc"}], NT.Note.render(I.I18n.of_tag(lang), root, path, text)}
 
 # the page's own address (a webhook's URL starts with it)
 def page(u: U.Ui, origin: String) -> U.Ui:

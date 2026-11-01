@@ -6145,16 +6145,16 @@ def T.settings.settle.done.note(l: I.Loc) -> String:
 def T.settings.settle.idle.off(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "The shorter idle timer is off. Inactive threads settle after this window. They stay saved."
+      "Bot threads' shorter idle timer is off. Inactive threads settle after this window. They stay saved."
     case I.Ja{}:
-      "ターン終了後の短い非活動タイマーはオフです。この期間動きがないと完了済みになります。内容は保存されます。"
+      "ボットが始めたスレッドの短い非活動タイマーはオフです。この期間動きがないと完了済みになります。内容は保存されます。"
 
 def T.settings.settle.note(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
     case I.En{}:
-      "Inactive threads settle after this window, or " ++ arg0 ++ " idle " ++ I.I18n.sel(arg1, "one", "minute", "minutes") ++ " after a turn ends. They stay saved."
+      "Inactive threads settle after this window. Threads a bot started settle sooner, " ++ arg0 ++ " idle " ++ I.I18n.sel(arg1, "one", "minute", "minutes") ++ " after a turn ends. They stay saved."
     case I.Ja{}:
-      "この期間動きがないと完了済みになります。ターン終了後は" ++ arg0 ++ "分間" ++ "の非活動で先に完了済みになります。内容は保存されます。"
+      "この期間動きがないと完了済みになります。ボットが始めたスレッドは、ターン終了後" ++ arg0 ++ "分間" ++ "の非活動で先に完了済みになります。内容は保存されます。"
 
 def T.settings.sidebar(l: I.Loc) -> String:
   match l:

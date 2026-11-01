@@ -7,7 +7,7 @@ after a change; `--gate` keeps the counts from creeping back.
 ```sh
 # a hub and a web client of the tree under test, stamped with it (check
 # `df -h /` first: leave 20 GB free)
-bp-admit.sh --mem 14 --cores 4 -- test/tools/rerender/build.sh build/rr
+bp-admit.sh --mem 14 --cores 4 -- test/tools/rerender/build.sh build/rr      # (its log: build/rr.log)
 
 # synthetic fixture (safe to share results)
 bp-admit.sh --mem 6 --cores 4 -- bun test/tools/rerender/rerender.ts --out build/rr/synthetic
@@ -91,6 +91,9 @@ Options: `--scenarios open,idle,type1,burst,paste,pastebig,bigtype,scroll,stress
   with their scripts.
 - **Input**: key → next frame (every keydown/input), Event Timing entries,
   wheel → the frame after its scroll.
+- **Thumb** (scroll windows): the scrollbar thumb's largest size swing in a
+  frame, and its largest move in a frame with no wheel just before, as parts
+  of the track (`scroll.thumb`; a page landing or an estimate's correction).
 - **Scroll**: frames where rows leave the timeline less than 85 % covered
   (blank), and any "Loading earlier/newer messages" shown.
 - **Hub**: its CPU ms (`/proc`), RSS, and `/debug/perf` rows that moved
@@ -121,9 +124,13 @@ Options: `--scenarios open,idle,type1,burst,paste,pastebig,bigtype,scroll,stress
 
 ## Gate rules
 
-- The budgets (`budgets.json`), per scenario. Scroll and stress windows get
-  2x + 50 of what was seen (their counts follow how many pages land: to be
-  per page). Others get 1.25x + 2. Bytes get 1.5x + 8 KB.
+- The budgets (`budgets.json`), per scenario, 1.25x + 2 of the worst run
+  written. Scroll and stress windows are budgeted per hub view landed
+  (mutations, `patch()` calls, nodes recreated, full renders, writes outside
+  the operation's regions), since their totals follow how many views land,
+  and their views per page asked for. Stress windows (4x throttle) are gated
+  by the hard rules below and their views per page only: their DOM counts
+  follow frame timing. Bytes get 1.5x + 8 KB.
 - Always failing: a window that does not finish (a timeout, the view not
   current at its end), any "Loading" placeholder, a blank frame while
   scrolling, a wheel stall in a stress window, and a stuck view (after a

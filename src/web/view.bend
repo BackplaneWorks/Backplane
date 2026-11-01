@@ -58,6 +58,7 @@ import ../core/stamp.bend as STP
 import ../core/order.bend as OR
 import ../core/modelpick.bend as MPK
 import ../core/draftbound.bend as DB
+import ../core/fm.bend as FM
 
 # Each web connection explicitly opts into the rail's DOM/CSS contract.
 # An old loaded host must keep the flat layout its stylesheet understands.
@@ -799,7 +800,7 @@ def View.sidebar.strip(n: D.Node, strip: D.Node) -> D.Node:
       D.Txt{text}
 
 def View.sidebar.frame.rows(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, +signals: U.SIx, +rows: List<&2, U.SRow>, +unfolded: List<&2, U.SRow>, +raw: List<&2, U.SRow>) -> D.Node:
-  View.sidebar.strip(View.sidebar.keys(View.sidebar.projected(lc, bots, WB.WB.uber(lc, u, signals), U.Machines.rows.loc(lc, u), U.Menu.items.loc(lc, u, True{}), signals, u, rows, raw),
+  View.sidebar.strip(View.sidebar.keys(View.sidebar.projected(lc, bots, WB.WB.uber.rows(lc, u, signals, raw), U.Machines.rows.loc(lc, u), U.Menu.items.loc(lc, u, True{}), signals, u, rows, raw),
     U.Side.pids(unfolded), View.sidebar.threads(u, plain, unfolded, raw)), View.strip(lc, U.Side.pids(unfolded), U.Ui.state(u), U.Side.cur(u)))
 
 def View.sidebar.frame.shown.raw(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
@@ -4618,9 +4619,20 @@ def View.pdf.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
    D.El{"iframe", "", [D.At{"class", "fm-pdf"}, D.At{"src", IM.Img.url(U.Ui.view_get(u, "view.path"))}, D.At{"title", U.Fm.name(u)}], Nil{}}]
 
 # Text is loaded as textContent by the host, never interpreted as markup.
+def View.text.pre.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  D.El{"pre", "file-text:" ++ U.Ui.view_get(u, "view.path"), [D.At{"class", "fm-text"}, D.At{"data-text-src", IM.Img.url(U.Ui.view_get(u, "view.path"))}, D.At{"data-loading", MSG.T.viewer.loading(lc)}, D.At{"data-error", MSG.T.viewer.unread(lc)}], Nil{}}
+
+# A Markdown note is drawn as the chat draws a message: the host reads the
+# file as text and makes its nodes with app.bend's md (Md.render, its paths
+# from the note's folder in the project: note.bend), so it never becomes
+# HTML either.
+def View.md.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  D.El{"div", "file-md:" ++ U.Ui.view_get(u, "view.path"), [D.At{"class", "fm-md body"}, D.At{"data-md-src", IM.Img.url(U.Ui.view_get(u, "view.path"))},
+    D.At{"data-md-root", U.Ui.root(u)}, D.At{"data-md-path", U.Ui.view_get(u, "view.path")}, D.At{"data-loading", MSG.T.viewer.loading(lc)}, D.At{"data-error", MSG.T.viewer.unread(lc)}], Nil{}}
+
 def View.text.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [View.fm.head.loc(lc, u, Nil{}),
-   D.El{"pre", "file-text:" ++ U.Ui.view_get(u, "view.path"), [D.At{"class", "fm-text"}, D.At{"data-text-src", IM.Img.url(U.Ui.view_get(u, "view.path"))}, D.At{"data-loading", MSG.T.viewer.loading(lc)}, D.At{"data-error", MSG.T.viewer.unread(lc)}], Nil{}}]
+   Bool.pick(D.Node, FM.Fm.md(U.Ui.view_get(u, "view.path")), View.md.loc(lc, u), View.text.pre.loc(lc, u))]
 
 # The Review tab (client.bend's Rp): a button for each page, the title,
 # Refresh, then the report's Markdown (or why there is none)

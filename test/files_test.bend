@@ -77,6 +77,7 @@ def main() -> IO(Unit):
     C.Check.str("text notes open as text", FM.Fm.preview("notes.txt"), "text")
     C.Check.str("Markdown notes open as text", FM.Fm.preview("README.MD"), "text")
     C.Check.str("binary still has no preview", FM.Fm.preview("firmware.bin"), "")
+    C.Check.str("Markdown notes are drawn as Markdown", String.join([Bool.show(FM.Fm.md("README.MD")), Bool.show(FM.Fm.md("docs/notes.markdown")), Bool.show(FM.Fm.md("notes.txt")), Bool.show(FM.Fm.md("md"))], "|"), "True|True|False|False")
     C.Check.str("failed refresh clears stale entries", U.Ui.info(failed(), "fm.list:t1"), "")
     C.Check.str("failed refresh explains missing folder", U.Ui.info(failed(), "fm.err:t1"), "no such folder")
     C.Check.str("successful refresh clears folder error", U.Ui.info(listed(failed(), "", ""), "fm.err:t1"), "")
