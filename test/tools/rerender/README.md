@@ -94,8 +94,11 @@ Options: `--scenarios open,idle,type1,burst,paste,pastebig,bigtype,scroll,stress
 - **Thumb** (scroll windows): the scrollbar thumb's largest size swing in a
   frame, and its largest move in a frame with no wheel just before, as parts
   of the track (`scroll.thumb`; a page landing or an estimate's correction).
-- **Scroll**: frames where rows leave the timeline less than 85 % covered
-  (blank), and any "Loading earlier/newer messages" shown.
+- **Scroll**: blank frames (rows missing where the track has content: the
+  uncovered stretches longer than the planner's 10 px row spacing, summed,
+  more than the settled frame the window started on by 15 % of the view and
+  40 px), with the gap and the element in its middle (`blankWhere`), and any
+  "Loading earlier/newer messages" shown.
 - **Hub**: its CPU ms (`/proc`), RSS, and `/debug/perf` rows that moved
   (`hub.rpc`, `thin.fit.renders`, ...).
 - **Page counters** (host.js and timeline-scroller.js, only when the page has
@@ -149,6 +152,9 @@ identical, plus net no-op writes, plus anything but transforms while
 scrolling. The goal is zero.
 
 ## Private data
+
+A run with `--fixture real` refuses an `--out` inside the repository: its
+report, `--dump-rows` and `--blank-shots` hold real thread content.
 
 A real-log run's report names real threads and may quote their text: write
 it under `~/Documents/i2cjak/bp-coord/rerender-harness/` (or another folder

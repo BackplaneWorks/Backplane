@@ -184,7 +184,7 @@
   // Frames: rAF gaps, Long Animation Frames, Event Timing
   // -----------------------------------------------------
   let F, E, loaf, lastFrame = 0, scrollInfo;
-  const resetFrames = () => { F = { frames: 0, long: 0, dropped: 0, worst: 0, gaps: [] }; E = {}; loaf = []; lastFrame = 0; scrollInfo = { wheel: [], blank: 0, checked: 0, worstGap: 0, base: undefined }; };
+  const resetFrames = () => { F = { frames: 0, long: 0, dropped: 0, worst: 0, gaps: [] }; E = {}; loaf = []; lastFrame = 0; scrollInfo = { wheel: [], blank: 0, checked: 0, worstGap: 0, base: undefined, where: [] }; };
   resetFrames();
   function frame(t) {
     if (W.on) {
@@ -280,21 +280,37 @@
     const track = tl.querySelector(".timeline-virtual-track");
     const tr = track ? track.getBoundingClientRect() : box;
     const top = Math.max(box.top, tr.top), bottom = Math.min(box.bottom, tr.bottom);
-    const want = Math.max(0, bottom - top);
     const spans = [];
     for (const w of tl.querySelectorAll(".timeline-virtual-row")) {
       const r = w.getBoundingClientRect();
       if (r.bottom > top && r.top < bottom && r.height > 0) spans.push([Math.max(r.top, top), Math.min(r.bottom, bottom)]);
     }
     spans.sort((a, b) => a[0] - b[0]);
-    let covered = 0, end = top;
-    for (const [a, b] of spans) { if (b > end) { covered += b - Math.max(a, end); end = b; } }
-    const gap = want - covered;
+    // missing: the uncovered stretches longer than the planner's own space
+    // between rows (10 px, Layout.advance), summed; the spacing is no gap (a
+    // run of 26 px tool drawers is a quarter spacing, and counting it made
+    // a scroll into one look blank)
+    let gap = 0, end = top;
+    for (const [a, b] of spans) { if (a - end > 12) gap += a - end; if (b > end) end = b; }
+    if (bottom - end > 12) gap += bottom - end;
     if (scrollInfo.base === undefined) scrollInfo.base = gap;
     scrollInfo.checked++;
     const extra = gap - scrollInfo.base;
     if (extra > scrollInfo.worstGap) scrollInfo.worstGap = extra;
-    if (extra > Math.max(40, 0.15 * box.height)) scrollInfo.blank++;
+    if (extra > Math.max(40, 0.15 * box.height)) {
+      scrollInfo.blank++;
+      W.lastBlank = now();
+      // what is there instead: the largest uncovered stretch and the element
+      // in its middle (a row not drawn, or something that is not a row)
+      if (scrollInfo.where.length < 8) {
+        let y = top, gapAt = top, gapLen = 0;
+        for (const [a, b] of spans) { if (a - y > gapLen) { gapLen = a - y; gapAt = y; } y = Math.max(y, b); }
+        if (bottom - y > gapLen) { gapLen = bottom - y; gapAt = y; }
+        const mid = document.elementFromPoint(box.left + box.width / 2, gapAt + gapLen / 2);
+        scrollInfo.where.push({ gapPx: Math.round(gapLen), atPx: Math.round(gapAt - box.top), el: mid ? (mid.tagName.toLowerCase() + (mid.id ? "#" + mid.id : "") + "." + (mid.getAttribute("class") || "").split(" ").slice(0, 3).join(".")) : "none",
+          row: mid?.closest?.(".timeline-virtual-row")?.dataset.virtualKey ?? "", trackTop: Math.round(tr.top - box.top), trackBottom: Math.round(tr.bottom - box.top), view: Math.round(box.height) });
+      }
+    }
   }
   // The scrollbar's thumb each frame: where it is and how tall, as parts of
   // the track. A wheel moves it; nothing the reader does changes its size,
@@ -333,6 +349,22 @@
     if (W.current === null && view && d.backplaneRemoteReady === "true" && d.backplaneCached === "false") W.current = t;
   }
 
+  // Every mounted timeline row as it is: what it holds and how tall it is
+  // (for fitting a row height estimate). Opt-in: __bpRR.rows().
+  function rowFacts() {
+    const out = [];
+    for (const w of document.querySelectorAll(".timeline-virtual-row")) {
+      const el = w.firstElementChild;
+      if (!el) continue;
+      const pres = [...el.querySelectorAll("pre")];
+      out.push({ key: w.dataset.virtualKey || "", cls: (el.getAttribute("class") || el.tagName.toLowerCase()).slice(0, 60),
+        h: Math.round(w.getBoundingClientRect().height * 10) / 10, width: Math.round(w.getBoundingClientRect().width),
+        text: (el.textContent || "").length, pre: pres.length, preLines: pres.reduce((n, p) => n + (p.textContent || "").split("\n").length, 0),
+        imgs: el.querySelectorAll("img").length, folds: el.querySelectorAll("button.fold, .fold").length, blocks: el.querySelectorAll("p, li, h1, h2, h3, h4, tr, blockquote").length });
+    }
+    return out;
+  }
+
   // The window
   // ----------
   let name = "", rows0 = null;
@@ -349,6 +381,9 @@
     },
     // ms since the last DOM mutation or socket frame (the harness waits for quiet)
     quiet() { return now() - Math.max(W.lastDom || 0, W.lastWs || 0, W.t0 || 0); },
+    rows: rowFacts,
+    // ms since the last frame the blank check counted (-1: none yet)
+    sinceBlank() { return W.lastBlank ? now() - W.lastBlank : -1; },
     pending() { let n = 0; for (const v of sentAt.values()) if (now() - v.at < 5000) n++; return n; },
     async end() {
       await new Promise((r) => setTimeout(r, 0)); // flush the observers
@@ -385,7 +420,7 @@
             p50: pctl(ms, 0.5), p95: pctl(ms, 0.95), max: ms.length ? Math.max(...ms) : 0 };
         })(),
         scroll: { wheelToFrame: { n: scrollInfo.wheel.length, p50: pctl(scrollInfo.wheel, 0.5), p95: pctl(scrollInfo.wheel, 0.95), max: scrollInfo.wheel.length ? Math.max(...scrollInfo.wheel) : 0 },
-          thumb: thumbJumps(), blankFrames: scrollInfo.blank, checkedFrames: scrollInfo.checked, worstGapPx: Math.round(scrollInfo.worstGap), loadingSeen: loadingSeen.slice(0, 10), loadingCount: loadingSeen.length },
+          thumb: thumbJumps(), blankFrames: scrollInfo.blank, blankWhere: scrollInfo.where, checkedFrames: scrollInfo.checked, worstGapPx: Math.round(scrollInfo.worstGap), loadingSeen: loadingSeen.slice(0, 10), loadingCount: loadingSeen.length },
         hubMsgs: Object.fromEntries(Object.entries(msgs).map(([k, v]) => [k, v.ms ? { n: v.n, p50: Math.round(pctl(v.ms, 0.5)), max: Math.round(Math.max(...v.ms)) } : { n: v.n, bytes: v.bytes, decodeMs: Math.round(v.decodeMs) }])),
         counts: { ...counts }, times: Object.fromEntries(Object.entries(times).map(([k, v]) => [k, { n: v.n, total: Math.round(v.total), max: Math.round(v.max) }])),
       };
