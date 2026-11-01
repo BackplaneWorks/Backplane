@@ -14679,4 +14679,10 @@ law plane_list_same_stalled:
 # as from Side.rows.ix (web/bots.bend's WB.uber.rows)
 law uber_rows_same_count:
   {Bool.and(PLN.Plane.tally.at.same(PLN.Plane.demo.stalled(), 200000n, "p1"), PLN.Plane.tally.at.same(PLN.Plane.demo.rich(), 200000n, "p1")) == True{} : Bool}
+
+# The sidebar's rows read the threads that name a parent once (subthreads.bend's
+# Tree.kids, Tree.shelves.at): the same rows as Side.rows, with a subtree, a
+# cross-project link and a project with neither
+law side_rows_ix_tree_eq:
+  {U.Side.rows.ix(U.Side.demo.tree(), U.Side.ix(U.Side.demo.tree()), 100n) == U.Side.rows(U.Side.demo.tree(), 100n) : List<&2, U.SRow>}
 # END sidebar rows (H)

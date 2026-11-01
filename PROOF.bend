@@ -14933,4 +14933,6 @@ def Laws.plane_tally_counts_stalled(): {==}
 def Laws.plane_list_same_stalled(): {==}
 
 def Laws.uber_rows_same_count(): {==}
+
+def Laws.side_rows_ix_tree_eq(): {==}
 # END sidebar rows (H)
