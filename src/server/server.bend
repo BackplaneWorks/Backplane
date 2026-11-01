@@ -98,6 +98,7 @@ import ../core/boot.bend as BT
 import ../core/store.bend as ST
 import ./hotboot.bend as HB
 import ./storeio.bend as STO
+import ../core/diskq.bend as DQ
 import ./storefar.bend as SFL
 import ./storeterms.bend as STT
 import ./db.bend as SQ
@@ -2023,9 +2024,9 @@ def Bot.dir.changed(c: M.Change, +inbox: Chan(Msg)) -> IO(Unit):
 # keeps serving (the window lives in this process).
 
 # what a step's write did: the new lines for clients (newest first), or
-# why it failed
+# why it failed; held: it was not written but waits (core/diskq.bend)
 type Wrote is Data:
-  Wrote{fresh: List<&2, String>, ok: Bool, err: String}
+  Wrote{fresh: List<&2, String>, ok: Bool, err: String, held: Bool}
 
 def Hub.lines.disk(cs: List<&2, M.Change>) -> List<&2, String>:
   match cs:
@@ -2061,7 +2062,7 @@ def Bot.dir.changed.all(cs: List<&2, M.Change>, +inbox: Chan(Msg)) -> IO(Unit):
 def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String) -> Hub & Wrote:
   match fd:
     case Folded{+st, ls, +fr}:
-      (Hub{st, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, ""})
+      (Hub{st, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, "", False{}})
 
 def Hub.err.msg(e: U32 & String) -> String:
   (_, msg) = e
@@ -2070,7 +2071,7 @@ def Hub.err.msg(e: U32 & String) -> String:
 def Hub.commit.r(r: Hub & Wrote, fresh: List<&2, String>) -> Hub & List<&2, String>:
   (h, w) = r
   match w:
-    case Wrote{fr, _, _}:
+    case Wrote{fr, _, _, _}:
       (h, List.append(&2, String, fr, fresh))
 
 # a generation's name: when it started and the log's length then
@@ -4263,6 +4264,14 @@ def Hub.phone(+home: String, st: M.State, +thread: String, +state: String, +aler
 # a settle or a failure is posted from TurnEnded, which has the end word
 def Hub.alert.hook(+home: String, st: M.State, +thread: String) -> IO(Unit):
   PU.Push.hook.alert(home, st, thread)
+
+# the desk used last hears that the disk is full (core/diskq.bend)
+def Desk.tell.dq(m: Maybe<&2, U32>, +cl: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
+  match m:
+    case Some{c}:
+      Wire.to(cl, c, DK.Desk.notify("", "Disk full", text, "disk", "disk-full"))
+    case None{}:
+      IO.pure(List<&2, Client>, cl)
 
 def Desk.lead.held(seen: Bool, m: Maybe<&2, U32>) -> Maybe<&2, U32>:
   match seen:
@@ -7183,14 +7192,14 @@ def Hub.cut(+len: String, +cfg: Cfg) -> IO(Bool):
 
 def Hub.held(+hold: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
     as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
-  (Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_broken(Cfg.bn(cfg), hold)), note}, Wrote{Nil{}, False{}, ST.Store.held.msg(hold)})
+  (Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_broken(Cfg.bn(cfg), hold)), note}, Wrote{Nil{}, False{}, ST.Store.held.msg(hold), False{}})
 
 # a write failed: cut back (the log is as it was) or held
 def Hub.commit.failed(cut: Bool, +len: String, +err: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
     as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match cut:
     case True{}:
-      IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, err}))
+      IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, err, False{}}))
     case False{}:
       IO.pure(Hub & Wrote, Hub.held(ST.Store.hold(len, err), st, f, ls, cl, as, inbox, cfg, note))
 
@@ -7249,7 +7258,7 @@ def Hub.commit.at(r: File & Result<&1, &1, U32 & String, U32>, +cs: List<&2, M.C
     case Done{len}:
       Hub.commit.write(Hub.lines.disk(cs), f, U32.show(len), cs, st, ls, cl, as, inbox, cfg, note)
     case Fail{e}:
-      IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, Hub.err.msg(e)}))
+      IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, Hub.err.msg(e), False{}}))
 
 def Hub.commit.go(+cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
@@ -7275,14 +7284,103 @@ def Hub.commit.gate(ok: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls:
         cut : Bool <- Hub.cut(ST.Store.hold.len(hold), cfg)
         Hub.commit.heal(cut, hold, cs, st, f, ls, cl, as, inbox, cfg, note)
 
+# Disk full (core/diskq.bend)
+# ---------------------------
+# A step whose append fails (and whose log was cut back cleanly) waits in
+# the queue instead of being dropped; while any step waits, every later one
+# that may (Hub.commit.q's `queue`) waits behind it, folded in for clients.
+# A flush (at a commit once the backoff has passed, and at the tick) writes
+# them all and runs what they held back. A commit that may not wait (mail)
+# is refused while steps wait, as a failed write was before.
+
+def Hub.dq(+cfg: Cfg) -> DQ.Dq:
+  BN.Bn.dq(Cfg.bn(cfg))
+
+def Cfg.with_dq(+cfg: Cfg, q: DQ.Dq) -> Cfg:
+  Cfg.with_bn(cfg, BN.Bn.with_dq(Cfg.bn(cfg), q))
+
+def Hub.fold.st(fd: Folded) -> M.State:
+  match fd:
+    case Folded{st, _, _}: st
+
+# a step that waits: folded in, kept with its lines (held effects are added
+# by Hub.step.wrote)
+def Hub.commit.held(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String, +q: DQ.Dq, +st: M.State, +disk: List<&2, String>) -> Hub & Wrote:
+  match fd:
+    case Folded{+post, ls, +fr}:
+      (Hub{post, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(Cfg.with_dq(cfg, DQ.Dq.push(q, st, M.State.seq(st), disk, cs, fr, Nil{})), cs, post), fr), note}, Wrote{fr, True{}, "", True{}})
+
+def Hub.commit.queue(+cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+    as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String, +q: DQ.Dq) -> IO(Hub & Wrote):
+  do IO<Hub & Wrote>:
+    Bot.dir.changed.all(cs, inbox)
+    +disk : List<&2, String> = Hub.lines.disk(cs)
+    +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
+    +fd : Folded = Hub.fold(cs, disk, Folded{st, ls, Nil{}})
+    Live.checkpoint.sync(cs, Hub.fold.st(fd), cfg, buffers)
+    return Hub.commit.held(fd, cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, buffers)), note, q, st, disk)
+
+# steps wait: this one waits behind them when it may and there is room
+def Hub.commit.behind(ok: Bool, +cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+    as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
+  match ok:
+    case True{}:
+      Hub.commit.queue(cs, st, f, ls, cl, as, inbox, cfg, note, Hub.dq(cfg))
+    case False{}:
+      IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, "disk full: " ++ DQ.Dq.err(Hub.dq(cfg)), False{}}))
+
+def Hub.commit.waiting(some: Bool, queue: Bool, +cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+    as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
+  match some:
+    case False{}:
+      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), cs, st, f, ls, cl, as, inbox, cfg, note)
+    case True{}:
+      Hub.commit.behind(Bool.and(queue, DQ.Dq.room(Hub.dq(cfg), List.length(&2, M.Change, cs))), cs, st, f, ls, cl, as, inbox, cfg, note)
+
+# a commit that failed: when it may wait, its log was cut back cleanly
+# (nothing held) and there is room, the step waits; the person is told
+def Hub.commit.after.go(r: Hub & Wrote, +cs: List<&2, M.Change>, +now: Nat) -> IO(Hub & Wrote):
+  (h, w) = r
+  match h w:
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} Wrote{_, _, +err, _}:
+      do IO<Hub & Wrote>:
+        PS.Log.error("hub", "log write failed, the step waits to be saved: " ++ err)
+        PS.Perf.add("hub.write_queued", 1)
+        Hub.commit.queue(cs, st, f, ls, cl, as, inbox, cfg, note, DQ.Dq.failed(Hub.dq(cfg), now, err))
+
+def Hub.commit.after.k(go: Bool, r: Hub & Wrote, +cs: List<&2, M.Change>, +now: Nat) -> IO(Hub & Wrote):
+  match go:
+    case True{}:
+      Hub.commit.after.go(r, cs, now)
+    case False{}:
+      IO.pure(Hub & Wrote, r)
+
+def Hub.commit.can.queue(r: Hub & Wrote, +queue: Bool) -> Bool & (Hub & Wrote):
+  (h, w) = r
+  match h w:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} Wrote{fr, +ok, err, held}:
+      (Bool.and(Bool.and(queue, Bool.not(ok)), Bool.and(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), DQ.Dq.room(Hub.dq(cfg), 1n))), (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{fr, ok, err, held}))
+
+def Hub.commit.after(p: Bool & (Hub & Wrote), +cs: List<&2, M.Change>) -> IO(Hub & Wrote):
+  (go, r) = p
+  IO.bind(Nat, Hub & Wrote, Now.nat(), now => Hub.commit.after.k(go, r, cs, now))
+
 # persist a step's changes in one write, then fold them in (a person's
-# message into a Claude reply that streams lands under it: core/steer.bend)
-def Hub.commit.w(+cs: List<&2, M.Change>, h: Hub) -> IO(Hub & Wrote):
+# message into a Claude reply that streams lands under it: core/steer.bend);
+# queue: the step may wait when the log cannot be written
+def Hub.commit.q(+queue: Bool, +cs: List<&2, M.Change>, h: Hub) -> IO(Hub & Wrote):
   match cs h:
     case Nil{} _:
-      IO.pure(Hub & Wrote, (h, Wrote{Nil{}, True{}, ""}))
+      IO.pure(Hub & Wrote, (h, Wrote{Nil{}, True{}, "", False{}}))
     case _ Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
-      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), B.Turn.marks(st, STR.Steer.all(cs, st, Live.of(cfg))), st, f, ls, cl, as, inbox, cfg, note)
+      do IO<Hub & Wrote>:
+        +mcs : List<&2, M.Change> = B.Turn.marks(st, STR.Steer.all(cs, st, Live.of(cfg)))
+        r : Hub & Wrote <- Hub.commit.waiting(DQ.Dq.some(Hub.dq(cfg)), queue, mcs, st, f, ls, cl, as, inbox, cfg, note)
+        Hub.commit.after(Hub.commit.can.queue(r, queue), mcs)
+
+# a commit that never waits (mail's headers: what follows it acts outside)
+def Hub.commit.w(+cs: List<&2, M.Change>, h: Hub) -> IO(Hub & Wrote):
+  Hub.commit.q(False{}, cs, h)
 
 def Hub.commit.b(r: Hub & List<&2, String>, moved: Bool) -> IO(Hub & List<&2, String>):
   (h, fr) = r
@@ -7290,7 +7388,7 @@ def Hub.commit.b(r: Hub & List<&2, String>, moved: Bool) -> IO(Hub & List<&2, St
 
 # persist changes, fold them in; answers the hub and the new lines (newest first)
 def Hub.commit(+cs: List<&2, M.Change>, h: Hub, fresh: List<&2, String>) -> IO(Hub & List<&2, String>):
-  IO.bind(Hub & Wrote, Hub & List<&2, String>, Hub.commit.w(cs, h), r => Hub.commit.b(Hub.commit.r(r, fresh), B.Busy.moved(cs)))
+  IO.bind(Hub & Wrote, Hub & List<&2, String>, Hub.commit.q(True{}, cs, h), r => Hub.commit.b(Hub.commit.r(r, fresh), B.Busy.moved(cs)))
 
 def Cfg.host(c: Cfg) -> String:
   match c:
@@ -10051,9 +10149,9 @@ def MailJob.delivery.failed(h: Hub, +body: MB.Body, +reason: String) -> IO(Hub):
 def MailJob.append.committed(r: Hub & Wrote, +cs: List<&2, M.Change>, +from: Nat, +body: MB.Body) -> IO(Hub):
   (h, w) = r
   match w:
-    case Wrote{+fresh, True{}, _}:
+    case Wrote{+fresh, True{}, _, _}:
       IO.bind(Hub, Hub, Hub.announce((h, fresh)), h2 => MailJob.route(h2, cs, fresh, from, body))
-    case Wrote{_, False{}, +err}:
+    case Wrote{_, False{}, +err, _}:
       do IO<Hub>:
         PS.Log.error("mail", "header commit failed: " ++ err)
         PS.Perf.add("hub.write_fail", 1)
@@ -10843,10 +10941,137 @@ def Hub.telemetry.scrub(h: Hub) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.telemetry.scrub.k(Bool.and(Bool.not(TLM.Tm.share(st)), Bool.not(String.is_empty(TI.Tio.id(Cfg.telemetry(cfg))))), Hub{st, f, ls, cl, as, inbox, cfg, note})
 
+# Flushing what waits
+# -------------------
+# every waiting line in one append, the store committed from the state before
+# the first of them; then the effects they held back run, in order, with
+# their far push and the uberbot's sync. A flush that fails is cut back and
+# tried again after the next backoff. The person is told either way.
+
+def Hub.dq.note(+q: DQ.Dq) -> String:
+  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"update"}}, J.KV{"error", J.Str{DQ.Dq.say(q)}}]))
+
+def Hub.dq.note.saved() -> String:
+  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"update"}}, J.KV{"error", J.Str{""}}, J.KV{"state", J.Str{DQ.Dq.saved()}}]))
+
+def Hub.dq.saved(+q: DQ.Dq, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub):
+  do IO<Hub>:
+    PS.Log.info("hub", "disk space is back: " ++ Nat.show(DQ.Dq.n(q)) ++ " waiting lines saved")
+    # the rows are in the store now: every open view reads its page again
+    # (a "*" touch, as Live.with), and the view key's queue size moved
+    h1 : Hub <- Far.push(Hub{st, f, ls, cl, as, inbox, Cfg.thin.live(Cfg.with_dq(cfg, DQ.Dq.empty()), Cfg.thin.streams(cfg), "*"), note}, DQ.Dq.changes(q), DQ.Dq.fresh(q), DQ.Dq.from(q))
+    h2 : Hub <- Hub.outs(DQ.Dq.held(q), h1)
+    h3 : Hub <- Hub.uber.after(h2, DQ.Dq.changes(q))
+    Hub.note(h3, Hub.dq.note.saved())
+
+def Hub.dq.again(+q: DQ.Dq, +now: Nat, +why: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub):
+  do IO<Hub>:
+    PS.Log.warn("hub", "waiting lines still not saved: " ++ why)
+    Hub.note(Hub{st, f, ls, cl, as, inbox, Cfg.with_dq(cfg, DQ.Dq.failed(q, now, why)), note}, Hub.dq.note(DQ.Dq.failed(q, now, why)))
+
+def Hub.dq.stored.k(ok: Bool, +result: String, +q: DQ.Dq, +len: String, +now: Nat, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub):
+  match ok:
+    case True{}:
+      Hub.dq.saved(q, st, f, ls, cl, as, inbox, cfg, note)
+    case False{}:
+      do IO<Hub>:
+        cut : Bool <- Hub.cut(len, cfg)
+        Hub.dq.again(q, now, result, st, f, ls, cl, as, inbox, cfg, note)
+
+def Hub.dq.stored(updated: STO.Updated, +q: DQ.Dq, +len: String, +now: Nat, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub):
+  match updated:
+    case STO.Updated{_, +result}:
+      Hub.dq.stored.k(String.starts_with(result, "ok"), result, q, len, now, st, f, ls, cl, as, inbox, cfg, note)
+
+def Hub.dq.wrote(r: File & Result<&1, &1, U32 & String, Unit>, +q: DQ.Dq, +len: String, +now: Nat, st: M.State, ls: List<&2, String>, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub):
+  (f, res) = r
+  match res:
+    case Done{_}:
+      do IO<Hub>:
+        updated : STO.Updated <- STO.Sto.commit(Cfg.thin.store(cfg), Cfg.home(cfg), DQ.Dq.pre(q), DQ.Dq.out(q), M.Switch.num(len, 0n))
+        Hub.dq.stored(updated, q, len, now, st, f, ls, cl, as, inbox, cfg, note)
+    case Fail{e}:
+      do IO<Hub>:
+        cut : Bool <- Hub.cut(len, cfg)
+        Hub.dq.again(q, now, Hub.err.msg(e), st, f, ls, cl, as, inbox, cfg, note)
+
+def Hub.dq.at(r: File & Result<&1, &1, U32 & String, U32>, +q: DQ.Dq, +now: Nat, st: M.State, ls: List<&2, String>, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub):
+  (f, res) = r
+  match res:
+    case Done{len}:
+      IO.bind(File & Result<&1, &1, U32 & String, Unit>, Hub, File.write(f, ST.Store.text(DQ.Dq.out(q))),
+        w => Hub.dq.wrote(w, q, U32.show(len), now, st, ls, cl, as, inbox, cfg, note))
+    case Fail{e}:
+      Hub.dq.again(q, now, Hub.err.msg(e), st, f, ls, cl, as, inbox, cfg, note)
+
+def Hub.dq.flush(h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(File & Result<&1, &1, U32 & String, U32>, Hub, File.size(f), r => Hub.dq.at(r, Hub.dq(cfg), now, st, ls, cl, as, inbox, cfg, note))
+
+def Hub.dq.try.k(due: Bool, h: Hub, +now: Nat) -> IO(Hub):
+  match due:
+    case True{}:
+      Hub.dq.flush(h, now)
+    case False{}:
+      IO.pure(Hub, h)
+
+# a flush, when one is due (after a commit, at the tick)
+def Hub.dq.try(h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.dq.try.k(DQ.Dq.due(Hub.dq(cfg), now), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+
+# the person is told: every client's note, and the desk used last as a
+# desktop notification when steps start to wait
+def Hub.dq.desk(first: Bool, h: Hub) -> IO(Hub):
+  match first h:
+    case True{} Hub{st, f, ls, +cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        cl2 : List<&2, Client> <- Desk.tell.dq(DK.Desk.lead(Clients.looks(cl)), cl, DQ.Dq.say(Hub.dq(cfg)))
+        return Hub{st, f, ls, cl2, as, inbox, cfg, note}
+    case False{} _:
+      IO.pure(Hub, h)
+
+def Hub.dq.tell.k(tell: Bool, +first: Bool, h: Hub) -> IO(Hub):
+  match tell h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(Hub, Hub, Hub.note(Hub{st, f, ls, cl, as, inbox, cfg, note}, Hub.dq.note(Hub.dq(cfg))), h2 => Hub.dq.desk(first, h2))
+    case False{} _:
+      IO.pure(Hub, h)
+
+def Hub.dq.tell(h: Hub, +k: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.dq.tell.k(DQ.Dq.tell(Hub.dq(cfg), k), Nat.is_eq(DQ.Dq.n(Hub.dq(cfg)), k), Hub{st, f, ls, cl, as, inbox, cfg, note})
+
+# a step that waits (core/diskq.bend): what clients see and what stays in
+# the hub runs now; every effect that acts outside waits with it for its
+# flush (DQ.Dq.split), and so do its far push and the uberbot's sync
+def Hub.dq.hold(h: Hub, held: List<&2, B.Out>) -> Hub:
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub{st, f, ls, cl, as, inbox, Cfg.with_dq(cfg, DQ.Dq.hold(Hub.dq(cfg), held)), note}
+
+def Hub.step.held(p: List<&2, B.Out> & List<&2, B.Out>, h: Hub, +cs: List<&2, M.Change>, +fresh: List<&2, String>) -> IO(Hub & Bool):
+  (now, held) = p
+  do IO<Hub & Bool>:
+    h1 : Hub <- Hub.busy.if(B.Busy.moved(cs), h)
+    h2 : Hub <- Hub.announce((h1, fresh))
+    h3 : Hub <- Hub.outs(now, Hub.dq.hold(h2, held))
+    h4 : Hub <- Hub.telemetry.scrub(h3)
+    h5 : Hub <- Hub.retire_runs(h4)
+    h6 : Hub <- Hub.dq.tell(h5, List.length(&2, M.Change, cs))
+    t : Nat <- Now.nat()
+    h7 : Hub <- Hub.dq.try(h6, t)
+    return (h7, True{})
+
 def Hub.step.wrote(r: Hub & Wrote, +cs: List<&2, M.Change>, os: List<&2, B.Out>, +from: Nat) -> IO(Hub & Bool):
   (h, w) = r
   match w:
-    case Wrote{+fresh, True{}, _}:
+    case Wrote{+fresh, True{}, _, True{}}:
+      Hub.step.held(DQ.Dq.split(os), h, cs, fresh)
+    case Wrote{+fresh, True{}, _, False{}}:
       do IO<Hub & Bool>:
         t0 : U32 <- PS.Perf.us()
         h1 : Hub <- Hub.busy.if(B.Busy.moved(cs), h)
@@ -10859,7 +11084,7 @@ def Hub.step.wrote(r: Hub & Wrote, +cs: List<&2, M.Change>, os: List<&2, B.Out>,
         h5 : Hub <- Hub.telemetry.scrub(h4)
         h6 : Hub <- Hub.retire_runs(h5)
         return (h6, True{})
-    case Wrote{_, False{}, +err}:
+    case Wrote{_, False{}, +err, _}:
       do IO<Hub & Bool>:
         PS.Log.error("hub", "log write failed: " ++ err)
         PS.Perf.add("hub.write_fail", 1)
@@ -10872,7 +11097,7 @@ def Hub.step.go(+st: M.State, h: Hub, cs: List<&2, M.Change>, os: List<&2, B.Out
     +v : SEC.Vault <- VX.Vx.vault()
     +cs2 : List<&2, M.Change> = B.Secret.changes(v, B.Shelve.fix(st, cs))
     t1 : U32 <- PS.Perf.span("hub.step.pend", t0)
-    r : Hub & Wrote <- Hub.commit.w(cs2, h)
+    r : Hub & Wrote <- Hub.commit.q(True{}, cs2, h)
     t2 : U32 <- PS.Perf.span("hub.step.commit", t1)
     Hub.step.wrote(r, cs2, B.Secret.outs(v, os), M.State.seq(st))
 
@@ -11619,8 +11844,21 @@ def Hub.rpc.k(p: M.State & Hub, +client: U32, +text: String, +now: Nat) -> IO(Hu
   IO.bind(Hub & Bool, Hub, Hub.step.ok(h, Bot.request(J.Json.parse(text), st, now, client, text)),
     pair => Hub.rpc.recorded(pair, client, J.Json.as_raw(J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "id"), "null")))
 
+# new turns are refused while too much waits to be saved (core/diskq.bend)
+def Hub.rpc.starts(+m: String) -> Bool:
+  Bool.or(Bool.or(String.eq(m, "turn.start"), String.eq(m, "thread.create")), String.eq(m, "thread.fork"))
+
+def Hub.rpc.dq(refuse: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match refuse:
+    case True{}:
+      Hub.out(h, B.Reply.err(client, J.Json.as_raw(J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "id"), "null"), DQ.Dq.refused()))
+    case False{}:
+      Hub.rpc.k(Hub.state(h), client, text, now)
+
 def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
-  Hub.rpc.k(Hub.state(h), client, text, now)
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.rpc.dq(Bool.and(DQ.Dq.full(Hub.dq(cfg)), Hub.rpc.starts(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "m", ""))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, text, now)
 
 # This fixed method set is constructible only by server IO jobs, never by a
 # JSON origin marker or a client id. Reuse the canonical metadata deciders.
@@ -12262,8 +12500,10 @@ def Hub.thin.view_epoch(+st: M.State, +cfg: Cfg, +thread: String) -> String:
 def Hub.thin.view_revision(+cfg: Cfg, thread: String) -> Nat:
   Bool.pick(Nat, FR.Fr.is(thread), Cfg.thin.revision(cfg), Cfg.thin.signal_seq(cfg))
 
+# (the number of steps waiting to be saved is part of it: their rows are
+# not in the store yet, so a flush changes what a page reads, core/diskq.bend)
 def Hub.thin.view_key(+st: M.State, +cfg: Cfg, +thread: String) -> String:
-  Hub.info.key(cfg) ++ TMIR.Mirror.key(Hub.thin.mirror(st, cfg, thread))
+  Hub.info.key(cfg) ++ "\tdq:" ++ Nat.show(DQ.Dq.n(Hub.dq(cfg))) ++ TMIR.Mirror.key(Hub.thin.mirror(st, cfg, thread))
 
 # A thread's page and the index the renderers read it from: the whole
 # index's, or (with a store) a page index of just its rows (TSTO.Ts.page)
@@ -12388,7 +12628,6 @@ def Hub.thin.web_fit.level(+j: Nat, +acted: TA.Acted, +shown: M.State, +index: T
   +bounded = TV.Obj.put(p, "bodyBudget", J.Num{"1"})
   TA.Rendered.remember.clock(TA.Actor.render.acted(Hub.thin.web_fit.floor.acted(j, acted), True{}, shown, index, bounded, epoch, now,
     Hub.thin.web_fit.floor.rows(j, rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")), stream, revision), Hub.thin.fit.key(key, p), ms, now, stream, True{}, bounded)
-
 
 def Hub.thin.web_fit.done(+s: FitS) -> Bool:
   match s:
@@ -12715,7 +12954,6 @@ def Hub.thin.act(+send: Bool, h: Hub, client: U32, +o: J.Json, +c: Client, now: 
   +p = J.Json.get_obj(o, "p")
   Hub.thin.act.native(Bool.or(Bool.not(String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")),
     Bool.and(NATIVE_SIDE.Ns.offered(String.eq(Client.thin.mode(c), "view-web"), p), TA.Actor.native.valid(ThinContext.actors(Client.thin.context(c)), p))), send, h, client, o, c, now)
-
 
 def Hub.thin.dispatch(+kind: Nat, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match kind h:
@@ -13140,7 +13378,8 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         Self.post(inbox, Release{})
         Self.post(inbox, Silence{})
         h2 : Hub <- Hub.telemetry(Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
-        Hub.watchdog(h2, now)
+        h3 : Hub <- Hub.dq.try(h2, now)
+        Hub.watchdog(h3, now)
 
 # a tool call's answer goes once its step is stored: a call whose changes
 # could not be written is told so, never that it worked
@@ -13172,12 +13411,43 @@ def Hub.mail.mcp.read(h: Hub, +cs: List<&2, M.Change>, +conv: String, +before: S
         r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.thin.store(cfg), Cfg.home(cfg), st, conv, "*", before, n)
         IO.bind(Hub & Bool, Hub, Hub.step.ok(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{cs, Nil{}}), got => Hub.mcp.after(got, "", body, MailJob.mcp.json(r, J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "id")), reply))
 
-def Hub.mcp.k(o: MC.McpOut, h: Hub, +reply: Chan(String), +body: String) -> IO(Hub):
+# an agent's tool call that writes is refused while steps wait to be saved:
+# its answer would say done about what a crash could still lose
+# (core/diskq.bend)
+def Hub.mcp.dq(+body: String, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, MC.Mcp.error(Maybe.default(&2, J.Json, J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "id"), J.Null{}), "-32000", DQ.Dq.refused.tool()))
+    return Unit{}
+
+def Hub.mcp.k.go(o: MC.McpOut, h: Hub, +reply: Chan(String), +body: String) -> IO(Hub):
   match o:
     case MC.McpOut{_, B.Step{cs, B.MailRead{_, _, conv, before, n} <> Nil{}}, _}:
       Hub.mail.mcp.read(h, cs, conv, before, n, reply, body)
     case MC.McpOut{+text, st, +park}:
       IO.bind(Hub & Bool, Hub, Hub.step.ok(h, st), r => Hub.mcp.after(r, park, body, text, reply))
+
+def Hub.mcp.k.dq(wait: Bool, o: MC.McpOut, h: Hub, +reply: Chan(String), +body: String) -> IO(Hub):
+  match wait:
+    case True{}:
+      IO.bind(Unit, Hub, Hub.mcp.dq(body, reply), u => IO.pure(Hub, h))
+    case False{}:
+      Hub.mcp.k.go(o, h, reply, body)
+
+# a tool call that writes (its step has changes); one that only reads is
+# answered as ever while steps wait
+def Hub.mcp.writes(o: MC.McpOut) -> Bool & MC.McpOut:
+  match o:
+    case MC.McpOut{+text, B.Step{+cs, os}, +park}:
+      (Bool.not(List.is_empty(&2, M.Change, cs)), MC.McpOut{text, B.Step{cs, os}, park})
+
+def Hub.mcp.k.w(p: Bool & MC.McpOut, h: Hub, +reply: Chan(String), +body: String) -> IO(Hub):
+  (writes, o) = p
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.mcp.k.dq(Bool.and(writes, DQ.Dq.some(Hub.dq(cfg))), o, Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body)
+
+def Hub.mcp.k(o: MC.McpOut, h: Hub, +reply: Chan(String), +body: String) -> IO(Hub):
+  Hub.mcp.k.w(Hub.mcp.writes(o), h, reply, body)
 
 def Hub.mcp.hub.normal(h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match h:
@@ -13449,7 +13719,6 @@ def Hub.reexec.clear(h: Hub, +path: String, args: List<&2, String>) -> IO(Hub):
         Log.info("restarting in place; " ++ Nat.show(List.length(&2, String, Agents.threads(as))) ++ " agents handed off")
         r : Result<&1, &1, U32 & String, Unit> <- H.Sys.exec(path, args)
         Hub.reexec.k(r, Hub{st, f, ls, cl, as, inbox, cfg, note}, home)
-
 
 def Reexec.args(xs: List<&2, String>) -> List<&2, J.Json>:
   match xs:

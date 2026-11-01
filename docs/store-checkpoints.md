@@ -149,3 +149,39 @@ own but for 198 rows of 7 old system messages whose stored terms came from
 a longer text than the one stored. Laws `sdb_terms_*`; test
 `bun test/tools/store_terms_e2e.ts` (a store with another version's terms
 gets terms equal to a fresh build's, row for row, and is then left alone).
+
+## Disk full
+
+A step whose append fails (no space, a read-only disk) used to be dropped:
+its log was cut back and nothing of it was kept, while agents went on. Now,
+when the cut-back worked, the step waits (core/diskq.bend, server.bend's
+"Disk full"):
+
+- its changes are folded in at once, so every client sees them, and its
+  disk lines wait in order with the state before the first waiting step;
+- every later step waits behind it (a commit that may not wait, mail's
+  headers, is refused as a failed write was before);
+- of a waiting step's effects only those that stay in the hub run at once
+  (what clients see, memory, streamed text, reads: `Dq.local`); every
+  effect that acts outside (an agent started or written to, a send, a push
+  or alert, a deploy, git that writes, work launched or stopped) waits with
+  it and runs, in order, after its flush, and so do its far push and the
+  uberbot's sync. So a hub that stops while steps wait loses their lines but
+  nothing outside heard of them;
+- a flush appends every waiting line at once and commits the store from that
+  state, as one commit of all of them; it is tried after each failure's
+  backoff (2 s doubling to 60 s), with a commit once that has passed, and at
+  the tick;
+- every client is told ("Disk full: Backplane can't save; N changes
+  waiting"), the desk used last gets a desktop notification, and the note
+  clears once the flush is saved;
+- an agent's tool call that writes is refused while steps wait (its answer
+  would say done about what is not yet saved); at 5,000 waiting lines new
+  turns and threads are refused, saying why; at 50,000 a step is refused as a
+  failed write was before.
+
+Laws `dq_*` (nothing taken is dropped, a flush keeps the order, no effect
+that acts outside runs before its step is written). Test:
+`bun test/tools/disk_full_e2e.ts BINARY WIREDIR` (the hub's file size limit
+lowered to the log's: 5,000 steps taken in 10 s, refusals, the note, the
+held agent start, then every line written in order and a hot boot from it).

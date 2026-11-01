@@ -23,7 +23,7 @@ def reset(home: String) -> IO(Unit):
 def checked(r: S.Hub & S.Wrote, +want: String, +want_n: Nat) -> IO(Unit):
   (h, w) = r
   match h w:
-    case S.Hub{st, f, +ls, _, _, inbox, +cfg, _} S.Wrote{fresh, ok, _}:
+    case S.Hub{st, f, +ls, _, _, inbox, +cfg, _} S.Wrote{fresh, ok, _, _}:
       do IO<Unit>:
         C.Check.str("actual write success flag " ++ want, Bool.show(ok), want)
         T.count("actual write updates count only on success " ++ want, cfg, want_n)
