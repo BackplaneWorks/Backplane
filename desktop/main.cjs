@@ -162,7 +162,8 @@ function start() {
   ses.setPermissionCheckHandler((wc, permission, requestingOrigin) => permitted(wc, permission, requestingOrigin));
   ses.webRequest.onHeadersReceived((details, callback) => {
     if (new URL(details.url).origin !== origin) return callback({});
-    callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; worker-src 'self' blob:"] } });
+    // Files embeds PDFs served by this hub; keep foreign frames blocked.
+    callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'; frame-src 'self'; base-uri 'none'; form-action 'self'; worker-src 'self' blob:"] } });
   });
   ipcMain.handle('desktop:version', event => {
     if (!trusted(event)) throw new Error('Invalid sender');
