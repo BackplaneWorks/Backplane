@@ -14966,3 +14966,6 @@ def Laws.ride_note_news():
 def Laws.wait_news_done():
   {==}
 # END sidebar rows (H)
+
+def Laws.timeline_layout_list_same():
+  {==}

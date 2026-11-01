@@ -190,7 +190,9 @@ export class TimelineScroller {
         RR?.n("tl.plan." + request.mode);
         this._stale = false;
         const plan = this.callbacks.plan({
-          keys: this._keys.slice(), sizes: { ...this.sizes }, estimate: this._estimate(),
+          // the sizes as a list in the keys' order (null: not measured): the
+          // planner walks it beside the keys, no keyed map to build or read
+          keys: this._keys.slice(), sizeList: this._keys.map(key => this.sizes[key] ?? null), estimate: this._estimate(),
           previous: this.lastPlan, top: this.el.scrollTop,
           view: this._viewHeight(), follow: this._follow, ...request,
         });
