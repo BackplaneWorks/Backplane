@@ -2079,11 +2079,15 @@ function historyRunway(tl) {
   const speed = recent.reduce((a, m) => a + m[1], 0) / 250;
   return Math.min(tl.clientHeight * 12, Math.max(tl.clientHeight * 2, speed * 2 * Math.max(250, thin?.pageMs || 500)));
 }
+// A reader faster than three screens of runway gets two older pages on
+// their way at once (thin-host.js's ahead {two}): one page at a time cannot
+// keep up with a fast wheel, however early it is asked for.
 function earlierCheck(tl) {
-  if (historyDirection !== "older" || earlierAsked || !tl || tl.id !== "timeline" || !thin?.ready || thin.paging || thin.pageError) return;
-  const gap = historyGap("older");
-  if (!thin.hasAhead("older") || tl.scrollTop - gap > historyRunway(tl) * (gap ? 2 : 1)) return;
-  earlierAsked = thin.ahead("older");
+  if (historyDirection !== "older" || !tl || tl.id !== "timeline" || !thin?.ready || thin.pageError) return;
+  const gap = historyGap("older"), runway = historyRunway(tl), two = runway > tl.clientHeight * 3;
+  if (thin.paging ? !two || !!thin.pagingNext : earlierAsked) return;
+  if (!thin.hasAhead("older") || tl.scrollTop - gap > runway * (gap ? 2 : 1)) return;
+  earlierAsked = thin.ahead("older", { two }) || earlierAsked;
 }
 function laterCheck(tl) {
   if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("newer")) return;

@@ -174,6 +174,12 @@ export class ThinViews {
     const bodyReadIntent = method === 'view.message' && extra.bodyPage === 1 &&
       l.greeting.renderer === 'web' && this.api.bodyPages === true;
     if (terminalInputIntent || bodyReadIntent) l.pictureRevision = previousPicture;
+    // Pages asked for one after another (two in flight while the reader
+    // scrolls fast) each draw when they come, in order: a run of view.page
+    // requests keeps its first revision; any other request that takes the
+    // picture ends the run (pageShown: the newest page drawn).
+    else if (method === 'view.page') { if (l.pagesFrom === null || l.pagesFrom === undefined) l.pagesFrom = l.revision; }
+    else if (method !== 'view.cancel') l.pagesFrom = null;
     let id; try { id = this.allocate(); } catch (e) { return { failed: e.message, cmds: [] }; }
     const p = { ...extra, version: 1, hub, generation: l.greeting.generation, epoch: l.greeting.epoch,
       requestRevision: l.revision, target: snapshot(l.target), viewId: l.viewId };
@@ -218,6 +224,8 @@ export class ThinViews {
     if (!c || c.link !== l || c.link.hub !== hub) return null;
     this.calls.delete(e.id);
     let current = (c.terminalInputIntent || c.method === 'view.cancel' ? l.revision : l.pictureRevision) === c.revision && sameTarget(l.target, c.target);
+    if (!current && c.method === 'view.page' && typeof l.pagesFrom === 'number' && c.revision >= l.pagesFrom && c.revision > (l.pageShown || 0) &&
+        l.viewId === c.viewId && sameTarget(l.target, c.target)) current = true;
     this.retireUpdate(c);
     if (e.ok !== true) return { failed: record(e.error) ? e.error.code : 'UNAVAILABLE', id: e.id, method: c.method, retry: false, cmds: [] };
     let r = e.result;
@@ -274,7 +282,7 @@ export class ThinViews {
     const presentation = ['view.open', 'view.page', 'view.update', 'view.action'].includes(c.method);
     const displayed = current && presentation && record(r.shown) && r.remoteReady === true;
     if (displayed) {
-      l.viewId = r.viewId; l.viewRevision = r.viewRevision; l.shown = r.shown;
+      l.viewId = r.viewId; l.viewRevision = r.viewRevision; l.shown = r.shown;l.pageShown = c.revision;
       if (l.greeting.renderer === 'web') l.accountBinding = typeof r.accountBinding === 'string' ? r.accountBinding : '';
       l.terminalOpen = r.session?.open?.term === true;
       l.terminalOwner = bounded(r.session?.drafts?.['@terminal.owner'], 1024) ? r.session.drafts['@terminal.owner'] : '';
