@@ -393,6 +393,10 @@ def wire_in(bs: List<&2, U32>) -> J.Json:
 def wire_out(text: String) -> List<&2, U32>:
   C.Cbor.encode(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
 
+# a request already built as Json (wire.js's json()), with no text to parse
+def wire_out_json(j: J.Json) -> List<&2, U32>:
+  C.Cbor.encode(j)
+
 def show(j: J.Json) -> String:
   J.Json.show(j)
 

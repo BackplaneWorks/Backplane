@@ -255,6 +255,18 @@ function same(a, b) {
   return a.$ === b.$ && (is(a, "Txt") || (a.tag === b.tag && patchKey(a) === patchKey(b)));
 }
 
+// the timeline's plan (timeline-plan.bend). Its input is built as Bend's
+// Json in JavaScript, and each plan's tree is kept by the plain object it
+// became, so the next request's previous plan (that very object, never
+// changed) is not built again.
+const planTrees = new WeakMap();
+function timelinePlan(input) {
+  const tree = Planner.timeline_plan(Wire.json(input, planTrees));
+  const plan = Wire.plain(tree);
+  if (plan && typeof plan === "object") planTrees.set(plan, tree);
+  return plan;
+}
+
 // make el (whose last vnode is el.__v) match v
 function patch(el, v) {
   const old = el.__v;
@@ -263,7 +275,7 @@ function patch(el, v) {
     let scroller = timelineLists.get(el);
     if (!scroller) {
       scroller = new TimelineScroller(el, {
-        plan: input => Wire.plain(Planner.timeline_plan(presentationJson(input))), create, patch,
+        plan: timelinePlan, create, patch,
         key: (node, i) => History.display_key_at(node, BigInt(i)),
         onChange: timelineChanged,
       });
@@ -505,7 +517,7 @@ try {
 window.addEventListener("pagehide", () => {
   const session = currentSession();
   try {
-    localStorage.setItem("backplane-navigation", App.navigation_keep(App.presentation_json(JSON.stringify(session))));
+    localStorage.setItem("backplane-navigation", App.navigation_keep(presentationJson(session)));
     if (session.open?.settings) localStorage.setItem("backplane-settings", JSON.stringify({ page: session.drafts?.["@settings.page"] || "" }));
     else localStorage.removeItem("backplane-settings");
   } catch {}
@@ -544,7 +556,7 @@ document.addEventListener("input", e => {
 let socket = null;
 const viewerRpc = new ViewerRpc(request => {
   if (!socket || socket.readyState !== 1) throw Error("Connect to the hub to read saved component metadata.");
-  socket.send(fromList(App.wire_out(JSON.stringify(request))));
+  socket.send(fromList(App.wire_out_json(Wire.json(request))));
 });
 const thinContinuations = new ThinContinuations();
 const bodyWindows = new BodyWindows({renderBody: node => App.make(node), request: (part, cursor, tail) => thin?.body(part, cursor, tail), changed: () => later()});
@@ -1209,7 +1221,7 @@ function sealedSave(form) {
   const id = sealedNext++;
   rpc.id = id;
   sealedWait.set(id, { form, timer: setTimeout(() => sealedDone(id, false, "The hub did not answer"), 15000) });
-  socket.send(fromList(App.wire_out(JSON.stringify(rpc))));
+  socket.send(fromList(App.wire_out_json(Wire.json(rpc))));
   rpc = null;
   return true;
 }
@@ -2231,7 +2243,9 @@ function jsonValue(j, key) {
   for (let f = j?.fields; f && is(f, "Field"); f = f.tail) if (f.key === key) return f.value;
   return { $: T.Null };
 }
-const presentationJson = value => App.presentation_json(JSON.stringify(value));
+// the session or an input as Bend's Json, built in JavaScript (wire.js's
+// json(): what Json.parse gives for its JSON text, without the text)
+const presentationJson = value => Wire.json(value);
 const choosePresentation = (session, action, value) => {
   const chosen = Wire.plain(App.presentation_choice(action, presentationJson(session), value));
   return action === "draft" ? preservePresentationRoute(session, chosen) : chosen;
@@ -2684,8 +2698,11 @@ async function startThin(again = false, reason = "initial") {
       send: request => {
         if (!current() || s.readyState !== 1) throw Error("View connection closed");
         trace("send", { id: request.id, method: request.m });
-        const session = request.p?.session ? Wire.plain(App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session))) : null;
-        s.send(fromList(App.wire_out(JSON.stringify({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1", plotStamp: "v1" } }))));
+        // the session's tree goes into the request as it is (known), not built again from its plain copy
+        const tree = request.p?.session ? App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session)) : null;
+        const session = tree ? Wire.plain(tree) : null, known = new WeakMap();
+        if (session && typeof session === "object") known.set(session, tree);
+        s.send(fromList(App.wire_out_json(Wire.json({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1", plotStamp: "v1" } }, known))));
       },
       choice: choosePresentation, prepare: (session, input, action) => preservePresentationRoute(
         action === "send" || action === "send-alt" ? input : session,
