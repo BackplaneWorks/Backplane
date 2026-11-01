@@ -880,3 +880,35 @@ test('bounded draft: Send within a message\'s bound carries the whole text',asyn
  const mid='x '.repeat(40000),f=await fixture({session:()=>({sel:'A',drafts:{A:mid},rid:1})});f.open();
  assert(f.sent[0].p.session.drafts['@draft.bound'],'a view request over 64 KB is bounded');
  f.host.request('send','');const send=f.sent.at(-1);assert.equal(send.p.session.drafts.A,mid);assert(!Object.hasOwn(send.p.session.drafts,'@draft.bound'));});
+test('two pages in flight: the window names the one after, both draw in order, each names the next',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);
+ const win=(k,older,olderNext)=>({window:{ids:[k],older,...(olderNext!==undefined?{olderNext}:{}),hasMore:!!older,anchor:{id:k,offset:0},partial:[]}});
+ f.host.receive(f.reply(f.sent.at(-1),win('n0','c1','c2')));
+ const count=f.sent.length;
+ assert.equal(f.host.ahead('older',{two:true}),true);
+ assert.equal(f.sent.length,count+2,'the older page and the one after it');
+ const [a,b]=f.sent.slice(-2);assert.equal(a.p.cursor,'c1');assert.equal(b.p.cursor,'c2');
+ assert.equal(f.host.ahead('older',{two:true}),false,'no third before the first is back');
+ const views=f.views.length;
+ f.host.receive(f.reply(a,win('n1','c2','c3')));
+ assert.equal(f.views.length,views+1,'the first draws although the second was asked after it');
+ assert.equal(f.views.at(-1).detail.page.direction,'older');
+ // the one on its way now is c2; c1's window names c3, asked at once
+ assert.equal(f.host.ahead('older',{two:true}),true);assert.equal(f.sent.at(-1).p.cursor,'c3');assert.deepEqual(f.sent.at(-1).p.cursor&&f.host.back,['','c1','c2']);
+ f.host.receive(f.reply(b,win('n2','c3','c4')));assert.equal(f.views.length,views+2,'then the second');
+ f.host.receive(f.reply(f.sent.at(-1),win('n3','c4','')));assert.equal(f.views.length,views+3);
+ assert.equal(f.host.paging,null);assert.equal(f.host.pagingNext,null);
+ // back down: the held pages' trails are each request's own
+ assert.equal(f.host.ahead('newer'),true);assert.equal(f.sent.at(-1).p.cursor,'');
+});
+test('two pages in flight: without olderNext one at a time; a failed first lets the second go',async()=>{
+ const f=await fixture();f.open();const count=f.sent.length;
+ assert.equal(f.host.ahead('older',{two:true}),true);assert.equal(f.sent.length,count+1,'no olderNext, one page');
+ const g=await fixture();g.host.greeting(g.greeting);
+ g.host.receive(g.reply(g.sent.at(-1),{window:{ids:['n0'],older:'c1',olderNext:'c2',hasMore:true,anchor:{id:'n0',offset:0},partial:[]}}));
+ g.host.ahead('older',{two:true});const [a,b]=g.sent.slice(-2);const views=g.views.length;
+ g.host.receive({t:'reply',id:a.id,ok:false,error:{code:'LIMIT',message:'x'}});
+ assert.equal(g.host.pageError.direction,'older');assert.equal(g.host.atNewest(),true,'the trail as before both');
+ g.host.receive(g.reply(b));assert.equal(g.views.length,views,'the second, let go, draws nothing');
+ assert.equal(g.host.retryPage(),true);assert.equal(g.sent.at(-1).p.cursor,'c1');
+});

@@ -109,7 +109,7 @@ export function refusedFallback(target, shown, refused) {
 // it alone validates transport identity, generations, targets and RPC ids.
 export class ThinHost {
   constructor(api, Views, next) {
-    this.api = api;this.hub = api.hub;this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.overtaken = new Set();
+    this.api = api;this.hub = api.hub;this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pagingNext = null;this.overtaken = new Set();
     this.session = clone(api.session());
     this.validatePresentation = api.validatePresentation || validatePresentation;
     const rid = this.session.rid;
@@ -190,7 +190,7 @@ export class ThinHost {
     for (const operation of this.actions) operation.settled?.(false);
     this.actions = [];this.terminalBytes = 0;this.fields.clear();
     this.messages.clear();this.target = target;
-    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pageError = null;this.awayMark = null;this.held = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
+    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pagingNext = null;this.pageError = null;this.awayMark = null;this.held = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
     this.api.selection?.(target, this.session);
     const sent = this.flush(this.client.select(this.hub, target, requestSession(this.session, false, target), this.api.cid), { selection: true });
     this.opening = sent;
@@ -284,7 +284,7 @@ export class ThinHost {
     // A page still on its way is dropped when it comes: shown after the
     // newest, it put the reader back on the old page and the message just
     // sent was nowhere to be seen.
-    if (action === 'send' || action === 'send-alt') { if (this.paging) this.overtaken.add(this.paging.id);this.cursor = '';this.back = [];this.paging = null;this.held = null;this.pageError = null;this.api.pageState?.(null); }
+    if (action === 'send' || action === 'send-alt') { for (const p of [this.paging, this.pagingNext]) if (p) this.overtaken.add(p.id);this.cursor = '';this.back = [];this.paging = null;this.pagingNext = null;this.held = null;this.pageError = null;this.api.pageState?.(null); }
     if (action === 'bfield') {
       const split = value.indexOf('\u001f');
       if (split <= 0) { settled?.(false);this.api.blocked();return false; }
@@ -406,10 +406,12 @@ export class ThinHost {
   // repeat one, and out of order replies left the view on an old page
   // while the trail said newest, so new messages never showed). A page
   // that fails puts the trail back as it was.
-  pageTo(cursor, undo, direction, position) {
+  pageTo(cursor, undo, direction, position, second = false) {
     const result = this.client.request(this.hub, 'view.page', { cursor, anchor: this.api.anchor(), session: requestSession(this.session, false, this.target) });
     if (!this.flush(result)) { this.cursor = undo.cursor;this.back = undo.back;return false; }
-    this.pageError = null;this.paging = { id: result.id, undo, direction, before: this.window, position, destination: { cursor, back: this.back.slice() }, at: this.api.now?.() ?? Date.now() };
+    const page = { id: result.id, undo, direction, before: this.window, position, destination: { cursor, back: this.back.slice() }, at: this.api.now?.() ?? Date.now(), olderNext: '' };
+    this.pageError = null;
+    if (second) this.pagingNext = page;else this.paging = page;
     this.api.pageState?.({ phase: 'loading', direction });
     return true;
   }
@@ -431,13 +433,23 @@ export class ThinHost {
   // an earlier one, the newest page itself, merged (not the reset newest()
   // makes), so new messages show and the rows above stay. A scroll inside
   // the rows held asks nothing: they are drawn already.
-  ahead(direction) {
-    if (!this.ready || this.paging || this.pageActionPending()) return false;
+  //
+  // Two older pages may be on their way while the reader scrolls fast
+  // ({two: true}): a window that names its older page's own older cursor
+  // (olderNext, the hub's thin-view.bend) lets the one after the page
+  // asked for be asked for at once, and each one in turn, as it comes,
+  // names the next (thin.js draws a run of pages in order).
+  ahead(direction, { two = false } = {}) {
+    if (!this.ready || this.pageActionPending()) return false;
+    if (this.paging) return direction === 'older' && two ? this.aheadSecond() : false;
     const held = this.held || this.heldHere();
     if (direction === 'older') {
       const top = held.pages[0];
       if (!top.older || top.older === top.cursor) return false;
-      return this.pageJump(top.older, [...top.back, top.cursor], 'older');
+      if (!this.pageJump(top.older, [...top.back, top.cursor], 'older')) return false;
+      this.paging.olderNext = top.olderNext || '';
+      if (two) this.aheadSecond();
+      return true;
     }
     const bottom = held.pages.at(-1);
     if (bottom.back.length) return this.pageJump(bottom.back.at(-1), bottom.back.slice(0, -1), 'newer');
@@ -449,19 +461,27 @@ export class ThinHost {
     const held = this.held || this.heldHere(), top = held.pages[0], bottom = held.pages.at(-1);
     return direction === 'older' ? !!top.older && top.older !== top.cursor : bottom.back.length > 0 || !this.atNewest();
   }
-  pageJump(cursor, back, direction) {
+  // the page after the older one on its way, when its window named it
+  aheadSecond() {
+    const first = this.paging;
+    if (!first || this.pagingNext || first.direction !== 'older' || !first.olderNext || first.olderNext === first.destination.cursor) return false;
+    return this.pageJump(first.olderNext, [...first.destination.back, first.destination.cursor], 'older', true);
+  }
+  pageJump(cursor, back, direction, second = false) {
     const undo = { cursor: this.cursor, back: this.back.slice() };
     this.cursor = cursor;this.back = back;
-    return this.pageTo(cursor, undo, direction);
+    return this.pageTo(cursor, undo, direction, undefined, second);
   }
-  heldPage() {
-    return { cursor: this.cursor, back: this.back.slice(), older: this.window?.older || '', ids: (this.window?.ids || []).slice() };
+  // a page as held: the trail its own request took (paged.destination; a
+  // second page on its way has moved this.cursor on already)
+  heldPage(at = this) {
+    return { cursor: at.cursor, back: at.back.slice(), older: this.window?.older || '', olderNext: this.window?.olderNext || '', ids: (this.window?.ids || []).slice() };
   }
   heldHere() { return { pages: [this.heldPage()] }; }
   // the rows held are only the page on show (host.js reset its history)
   heldReset() { this.held = this.ready ? this.heldHere() : null; }
   heldShown(paged) {
-    const page = this.heldPage(), same = p => p.cursor === page.cursor && p.back.length === page.back.length;
+    const page = this.heldPage(paged?.destination || this), same = p => p.cursor === page.cursor && p.back.length === page.back.length;
     if (!this.held || !paged || paged.direction === 'restore' || paged.direction === 'newest') { this.held = this.heldHere();return; }
     const pages = this.held.pages.filter(p => !same(p));
     if (paged.direction === 'older') pages.unshift(page);else pages.push(page);
@@ -634,12 +654,19 @@ export class ThinHost {
     if (!result) return false;
     this.pending.delete(envelope.id);
     if (this.active === envelope.id) this.active = null;
-    const paged = this.paging?.id === envelope.id ? this.paging : null;
-    if (paged) this.paging = null;
+    let paged = null, dropped = false;
+    if (this.paging?.id === envelope.id) { paged = this.paging;this.paging = null; }
+    else if (this.pagingNext?.id === envelope.id) { paged = this.pagingNext;this.pagingNext = null; }
+    // the first of two pages back: the second is now the one on its way,
+    // named the next by this one's window; a failed first lets it go too
+    if (paged && this.pagingNext) {
+      if (result.failed) { this.overtaken.add(this.pagingNext.id);this.pagingNext = null;dropped = true; }
+      else { this.paging = this.pagingNext;this.pagingNext = null;this.paging.olderNext = result.window?.olderNext || ''; }
+    }
     if (this.overtaken.delete(envelope.id)) { this.pump(true);return true; }
     if (paged && result.failed) {
       this.cursor = paged.undo.cursor;this.back = paged.undo.back;
-      if (this.isCurrent(metadata)) { this.pageFailed(paged, result.failed);this.pump(true);return true; }
+      if (dropped || this.isCurrent(metadata)) { this.pageFailed(paged, result.failed);this.pump(true);return true; }
     }
     if (paged && !result.failed && !result.current) {
       // A later action can retire a page's picture after the hub applied its
@@ -834,9 +861,11 @@ export class ThinHost {
     for (const call of expired) {
       const metadata = this.pending.get(call.id);
       if (metadata?.bodyRead) { this.api.bodyFailed?.(metadata.input, 'timeout');this.pending.delete(call.id);continue; }
+      if (this.pagingNext?.id === call.id) { pageExpired = true;this.pagingNext = null;this.pending.delete(call.id);continue; }
       if (this.paging?.id === call.id) {
         pageExpired = true;
         const page = this.paging;this.paging = null;
+        if (this.pagingNext) { this.overtaken.add(this.pagingNext.id);this.pagingNext = null; }
         if (this.isCurrent(metadata)) this.pageFailed(page, 'History request timed out');
         else { this.cursor = page.undo.cursor;this.back = page.undo.back;this.api.pageState?.(null); }
         this.pending.delete(call.id);continue;
