@@ -129,6 +129,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -174,6 +176,8 @@ import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -749,7 +753,9 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
 }
 
 // Photo picks, clipboard images and keyboard content share one loader.
-internal suspend fun attachUris(ctx: android.content.Context, m: AppModel, uris: List<Uri>, photos: Boolean) {
+internal suspend fun attachUris(ctx: android.content.Context, m: AppModel, uris: List<Uri>, photos: Boolean,
+    owner: String = m.screen?.thread?.id.orEmpty()) {
+    if (owner.isEmpty()) return
     uris.forEachIndexed { i, u ->
         val got = withContext(Dispatchers.IO) {
             runCatching {
@@ -773,19 +779,32 @@ internal suspend fun attachUris(ctx: android.content.Context, m: AppModel, uris:
                 }
             }.getOrNull()
         }
-        if (got != null) m.attach(got.first, got.second)
+        if (got != null) {
+            // Returning from the system picker may precede the hub reconnect.
+            // Keep the chosen file for this thread until its own page is live;
+            // navigation to another thread cancels it instead of redirecting it.
+            val ready = withTimeoutOrNull(30_000) {
+                snapshotFlow { (m.screen?.thread?.id == owner) to m.contentReady }
+                    .first { !it.first || it.second }
+            }
+            if (ready == null || !ready.first || !ready.second) return
+            m.attach(got.first, got.second)
+        }
     }
 }
 
-// the paperclip: photos or files, each sent up in pieces
+// The picker keeps its destination while the app is away.
 @Composable
 fun AttachButton(m: AppModel) {
     val lang = LocalBackplaneLanguage.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
+    var pickerOwner by rememberSaveable { mutableStateOf<String?>(null) }
     fun send(uris: List<Uri>, photos: Boolean) {
-        scope.launch { attachUris(ctx, m, uris, photos) }
+        val owner = pickerOwner ?: return
+        pickerOwner = null
+        scope.launch { attachUris(ctx, m, uris, photos, owner) }
     }
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { send(it, true) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { send(it, false) }
@@ -794,10 +813,12 @@ fun AttachButton(m: AppModel) {
         DropdownMenu(open, { open = false }) {
             DropdownMenuItem(text = { Text(NativeMessages.native_attach_photos(lang)) }, leadingIcon = { Icon(Icons.Filled.Image, null) }, onClick = {
                 open = false
+                pickerOwner = m.screen?.thread?.id
                 photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             })
             DropdownMenuItem(text = { Text(NativeMessages.viewer_files(lang)) }, leadingIcon = { Icon(Icons.Filled.Folder, null) }, onClick = {
                 open = false
+                pickerOwner = m.screen?.thread?.id
                 files.launch(arrayOf("*/*"))
             })
         }
