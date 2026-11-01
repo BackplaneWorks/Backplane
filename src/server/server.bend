@@ -10553,12 +10553,22 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         Bot.fx(C.Codec.pos(["home", "gone", "hook", "unhook", "send", "invite", "join", "unpeer", "google", "token", "retoken", "untoken", "voice", "scratch", "scratch-gone", "uber", "uber-home", "zone", "task-file", "task-gone"], kind), st, inbox, cfg, a, b, c)
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
+# one out, timed as hub.out.<kind> (core's Out.kind): a step's outs are one
+# span (hub.step.outs), and a slow one is logged like any span, so the
+# journal names which out held the hub (a work end once took 6 s there)
+def Hub.out.timed(h: Hub, +o: B.Out) -> IO(Hub):
+  do IO<Hub>:
+    t0 : U32 <- PS.Perf.us()
+    h2 : Hub <- Hub.out(h, o)
+    t1 : U32 <- PS.Perf.span("hub.out." ++ B.Out.kind(o), t0)
+    return h2
+
 def Hub.outs.go(os: List<&2, B.Out>, h: Hub) -> IO(Hub):
   match os:
     case Nil{}:
       IO.pure(Hub, h)
-    case o <> t:
-      IO.bind(Hub, Hub, Hub.out(h, o), h2 => Hub.outs.go(t, h2))
+    case +o <> t:
+      IO.bind(Hub, Hub, Hub.out.timed(h, o), h2 => Hub.outs.go(t, h2))
 
 # a step's outs, run in order; a hub on a copied log runs none that act
 # outside its home (core/copy.bend's Copy.outs)

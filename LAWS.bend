@@ -14686,3 +14686,19 @@ law uber_rows_same_count:
 law side_rows_ix_tree_eq:
   {U.Side.rows.ix(U.Side.demo.tree(), U.Side.ix(U.Side.demo.tree()), 100n) == U.Side.rows(U.Side.demo.tree(), 100n) : List<&2, U.SRow>}
 # END sidebar rows (H)
+# ---- hub-memory: riding mail on the wire ----
+# a thread's riding mail goes to clients blank, as a turn's input does (a
+# live commit, a replayed line, the store's wire text); the hub keeps it
+# (model.bend's Setting.wire_blank)
+law ride_wire_blank:
+  {J.Json.show(C.Change.wire(M.SettingSet{"ride.t1", "[{\"id\":\"m1\",\"text\":\"hi\"}]", 5n})) == "{\"$\":\"SettingSet\",\"key\":\"ride.t1\",\"value\":\"\",\"at\":5}" : String}
+
+law ride_commit_line_is_wire:
+  {H.Commit.line.ok(M.SettingSet{"ride.t1", "[{\"id\":\"m1\",\"text\":\"hi\"}]", 5n}) == True{} : Bool}
+
+law ride_store_wire:
+  {String.eq(SDB.F.wire(M.SettingSet{"ride.t1", "big", 5n}), J.Json.show(C.Change.wire(M.SettingSet{"ride.t1", "big", 5n}))) == True{} : Bool}
+
+law ride_state_kept:
+  {M.Setting.get(M.State.replay([M.SettingSet{"ride.t1", "[{\"id\":\"m1\",\"text\":\"hi\"}]", 5n}], M.State.empty()), "ride.t1", "") == "[{\"id\":\"m1\",\"text\":\"hi\"}]" : String}
+# ---- end hub-memory: riding mail on the wire ----
