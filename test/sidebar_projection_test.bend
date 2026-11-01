@@ -7,6 +7,7 @@ import ../src/core/json.bend as J
 import ../src/web/view.bend as V
 import ../src/web/bots.bend as WB
 import ../src/web/presentation.bend as W
+import ../src/web/dom.bend as D
 
 def base() -> M.State:
   M.State.replay([M.ProjectCreated{"scratch", "Scratch", "/tmp/old", 0n},
@@ -31,6 +32,36 @@ def same(+raw: U.Ui) -> String:
   +after = V.View.sidebar.frame(I.En{}, bots, u, ix, signals)
   Bool.pick(String, C.Check.same(J.Json.show(W.Node.write(before)), J.Json.show(W.Node.write(after))), "same", "DIFFERENT")
 
+# the first node written, or nothing
+def first(ns: List<&2, D.Node>) -> String:
+  match ns:
+    case Nil{}: "<none>"
+    case n <> _: J.Json.show(W.Node.write(n))
+
+# s with the first n in it cut out (hit: s starts with n)
+def Cut.go(s: String, hit: Bool, +n: String) -> String:
+  match s hit:
+    case SNil{} _: ""
+    case SCon{_, +t} True{}: String.drop(t, Nat.sub(String.length(n), 1n))
+    case SCon{c, +t} False{}: SCon{c, Cut.go(t, String.starts_with(t, n), n)}
+
+def Cut.of(+s: String, +n: String) -> String:
+  Cut.go(s, String.starts_with(s, n), n)
+
+# a search that matches nothing: the frame adds a626f122e's "No projects
+# match" notice, which the former path never drew; with it cut out the
+# rest of the tree is the former one
+def same.q(+raw: U.Ui, +q: String) -> String:
+  +u = U.Side.with_signals(raw)
+  +ix = U.Side.ix(U.Ui.state(u))
+  +signals = U.Side.signals.ix(ix, u)
+  +bots = WB.WB.side(I.En{}, u)
+  +before = V.View.sidebar.strip(V.View.sidebar.keys(V.View.sidebar.w(I.En{}, bots, WB.WB.uber(I.En{}, u, signals), U.Machines.rows.loc(I.En{}, u), U.Menu.items.loc(I.En{}, u, True{}), signals, u), U.Side.projects.ix(u, ix), U.Side.here.ix(u, ix)),
+    V.View.strip(I.En{}, U.Side.projects.ix(u, ix), U.Ui.state(u), U.Side.cur(u)))
+  +after = J.Json.show(W.Node.write(V.View.sidebar.frame(I.En{}, bots, u, ix, signals)))
+  +piece = first(V.View.sidebar.no_matches(I.En{}, q, True{}))
+  Bool.pick(String, Bool.and(String.contains(after, piece), C.Check.same(J.Json.show(W.Node.write(before)), Cut.of(after, piece ++ ","))), "same", "DIFFERENT")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("shared sidebar tree preserve project folds", same(selected(base(), "t1")), "same")
@@ -44,4 +75,4 @@ def main() -> IO(Unit):
     C.Check.str("shared sidebar tree preserve other current project", same(selected(base(), "t3")), "same")
     C.Check.str("shared sidebar tree preserves open project shelves", same(U.Ui.flag_on(U.Ui.flag_on(selected(base(), "t1"), "p1"), "arch:p1")), "same")
     C.Check.str("shared sidebar tree preserves old projects", same(U.Ui.flag_on(selected(base(), "t1"), "old-projects")), "same")
-    C.Check.str("shared sidebar tree preserves empty search", same(U.Ui.scratch_set(selected(base(), "t1"), "@f.pq", "no matching project")), "same")
+    C.Check.str("shared sidebar tree preserves empty search", same.q(U.Ui.scratch_set(selected(base(), "t1"), "@f.pq", "no matching project"), "no matching project"), "same")
