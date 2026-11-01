@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "thread",
+    "uri": "backplane://thread/demo-layout",
+    "text": "Backplane\n/\nSENSOR BOARD\n/\nLayout review\nSTATE\nidle\nCommands\nSENSOR BOARD\nMiso\nnow\nLayout review\nnow\nReview the sensor board\nnow\nPower budget\nnow\nBOTS\nMiso\nready\nROOMS\n#\nHardware review\n1\nTerminal\nCommands\nBoard\nSchematic\n3D\nSplit\nMech\nFiles\nDiff\nReview\nBrowser\ncodex / gpt-6.1-sol / auto\nAccount: Default account\nSend"
+  },
+  {
+    "kind": "bot",
+    "uri": "backplane://bot/demo-miso",
+    "text": "Backplane\n/\nBots\n/\nMiso\nCommands\nSENSOR BOARD\nMiso\nnow\nLayout review\nnow\nReview the sensor board\nnow\nPower budget\nnow\nBOTS\nMiso\nready\nROOMS\n#\nHardware review\n1\nTerminal\nCommands\nBoard\nSchematic\n3D\nSplit\nMech\nFiles\nDiff\nReview\nBrowser\nMiso\nready\ncodex · gpt-6.1-sol\nChat\nMailroom\nSpace\nBrowser\nTasks\nMemory\nRoutines\nWebhooks\nSettings\n\nWrite to Miso below: ask it something, or give it a job to look after.\n\ncodex / gpt-6.1-sol / auto\nAccount: Default account\nSend"
+  },
+  {
+    "kind": "project",
+    "uri": "backplane://project/demo-board",
+    "text": "Backplane\n/\nSENSOR BOARD\n/\nReview the sensor board\nSTATE\nidle\nCommands\nSENSOR BOARD\nMiso\nnow\nLayout review\nnow\nReview the sensor board\nnow\nPower budget\nnow\nBOTS\nMiso\nready\nROOMS\n#\nHardware review\n1\nTerminal\nCommands\nBoard\nSchematic\n3D\nSplit\nMech\nFiles\nDiff\nReview\nBrowser\nKeep the design review connected across threads, projects, and bots.\n17:12\nCopy\n\nThe review is organized here:\n\nLayout review\n\nMiso\n\nSensor Board\n\nUse references in the composer to bring the right context into the conversation.\n\nFinished 17:12 · 0s\nCopy\ncodex / gpt-6.1-sol / auto\nAccount: Default account\nSend"
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "events": 53,
+  "port": 47820,
+  "run": "<capture-root>/run/B-recapture-1793546326589794421",
+  "build": "0.13.2-dev.20261101.1606",
+  "commit": "36e6a102411eac368f9ad458fb23167225786d27"
+}

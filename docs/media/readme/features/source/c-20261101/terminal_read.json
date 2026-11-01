@@ -1,0 +1,21 @@
+{
+  "request": {
+    "name": "terminal_read",
+    "arguments": {
+      "id": "x1793546000-23"
+    }
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "<terminal id=\"x1793546000-23\" title=\"Review checklist · vi (Neovim)\" state=\"running\">\nSENSOR BOARD / DESIGN REVIEW                                                            \n                                                                                        \nLocal review checklist                                                                  \n                                                                                        \n[x] Check connector orientation                                                         \n[x] Confirm programming header access                                                   \n[ ] Inspect decoupling placement                                                        \n[ ] Review battery protection                                                           \n[ ] Verify enclosure clearance                                                          \n                                                                                        \nThis is a local text file opened in vi.                                                 \nArrow keys move the cursor. Press :q to exit.                                           \n~                                                                                       \n~                                                                                       \nreview.txt [RO]                                                       4,0-1          All\n                                                                                        \n</terminal>\n"
+        }
+      ],
+      "isError": false
+    }
+  }
+}

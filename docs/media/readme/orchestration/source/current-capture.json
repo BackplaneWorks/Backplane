@@ -1,0 +1,50 @@
+{
+  "events": 53,
+  "port": 47820,
+  "run": "<capture-root>/run/B-recapture-1793546326589794421",
+  "build": "0.13.2-dev.20261101.1606",
+  "commit": "36e6a102411eac368f9ad458fb23167225786d27",
+  "captured_at": "2026-11-01T15:19:01Z",
+  "app_sha256": "23187bcf98ec4b21617d19080de336e9a05f0227b1a935cc85892156161624a6",
+  "deviceScaleFactor": 2,
+  "viewports": {
+    "overview": [
+      1000,
+      720
+    ],
+    "delegation": [
+      1076,
+      720
+    ],
+    "mailroom": [
+      1600,
+      850
+    ],
+    "webhooks": [
+      1000,
+      720
+    ],
+    "space": [
+      1000,
+      720
+    ],
+    "space-webapp": [
+      480,
+      720
+    ]
+  },
+  "network": "loopback-only user/network/UTS namespace",
+  "fixture_sha256": "c0e4a1dd13fe8ce3731f29b82d50a3786e99a11425e42571a94a7e81e64c53fa",
+  "web_assets": {
+    "chunk-14w22a1c.js": "2e2107158da229284d46a77020f042e3a6dad0082cde7ab36ce319540771255f",
+    "index.html": "4653f0db36f57c8487f08b129c9dd1d4b7bff65b178f67661c99bc3feaf9e0e2",
+    "chunk-gv61yk11.css": "0147494a362a8e297c0e6e7491fefa7ad53cfd0ab886fc8b130c8ef9a8ce0d57",
+    "sw.js": "4839dfe81aa5cf2190b06ab8f5bc8427a3c792755b5e28073c1c42cab4b9503a",
+    "viewer/vendor/viewer.js": "fbe16238a69aeb50382903432c1513f55f63baed1b5001c72629671ad361dcf2",
+    "viewer/vendor/bvh-worker.js": "6c08bab1ead64cbacbf7580b1496597a6d147693d13a79ab6a9a5159983f4659",
+    "viewer/vendor/render-worker.js": "546d20d950331e12a9a76f704869c6c0b2ae80148047cacc161d53693f547d5a"
+  },
+  "mailroom_available": true,
+  "space_http_status": 200,
+  "no_agent_turns": true
+}

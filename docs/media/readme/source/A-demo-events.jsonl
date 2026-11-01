@@ -1,0 +1,15 @@
+{"$": "SettingSet", "key": "onboarded", "value": "1", "at": 1793548800}
+{"$": "SettingSet", "key": "onboard.done", "value": "1", "at": 1793548801}
+{"$": "SettingSet", "key": "onboard.uber", "value": "1", "at": 1793548802}
+{"$": "SettingSet", "key": "restart.continue", "value": "off", "at": 1793548803}
+{"$": "SettingSet", "key": "order.enabled", "value": "off", "at": 1793548804}
+{"$": "SettingSet", "key": "telemetry.enabled", "value": "off", "at": 1793548805}
+{"$": "SettingSet", "key": "kicad.ipc", "value": "on", "at": 1793548806}
+{"$": "ProjectCreated", "id": "royalblue", "title": "RoyalBlue54L Feather", "root": "<capture-root>/projects/royalblue54L_feather", "at": 1793548807}
+{"$": "ProjectCreated", "id": "cm5", "title": "CM5 carrier", "root": "<capture-root>/projects/cm5-carrier", "at": 1793548808}
+{"$": "ThreadCreated", "id": "board-demo", "project": "royalblue", "title": "Board inspection", "env": "local", "branch": "", "worktree": "", "provider": "codex", "model": "gpt-6.1-sol", "at": 1793548809}
+{"$": "SettingSet", "key": "effort.board-demo", "value": "high", "at": 1793548810}
+{"$": "ThreadCreated", "id": "case-demo", "project": "cm5", "title": "3D-printable case", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "claude-sonnet-5", "at": 1793548811}
+{"$": "MessagePosted", "thread": "case-demo", "msg": "case-request", "role": "user", "text": "Design a two-part 3D-printable case around the CM5 carrier, with openings for every front connector, and show it on Mech.", "at": 1793548812}
+{"$": "MessagePosted", "thread": "case-demo", "msg": "case-reply", "role": "assistant", "text": "The case assembly is on the **Mech** tab, exploded so you can see the board inside:\n\n- Two printable parts: a bottom tray and a vented lid, split at the top of the PCB.\n- Front openings for UART USB-C, microSD, RJ45, USB-C PD and the barrel jack.\n- Flexure buttons for POWER and BOOT, with light pipes above the four LEDs.\n- Board mounting standoffs and 16 mm of headroom for a low CM5 heatsink.", "at": 1793548813}
+{"$": "TurnChanged", "thread": "case-demo", "state": "completed", "at": 1793548814}

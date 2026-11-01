@@ -1,0 +1,13 @@
+{
+  "date": "2026-11-01",
+  "build": "0.13.2-dev.20261101.1606",
+  "commit": "36e6a1024",
+  "hub_sha256": "23187bcf98ec4b21617d19080de336e9a05f0227b1a935cc85892156161624a6",
+  "home": "<capture-root>/run/C-features/home",
+  "viewport": [
+    1100,
+    800
+  ],
+  "deviceScaleFactor": 2,
+  "isolation": "unshare -rn, loopback only; empty agents directory"
+}

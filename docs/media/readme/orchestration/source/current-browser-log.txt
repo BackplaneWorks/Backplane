@@ -1,0 +1,3235 @@
+overview {
+  "text": "Backplane\n/\nBots\n/\nMochi\nCommands\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nMochi\nready\nclaude · claude-sonnet-5\nChat\nMailroom\nSpace\nBrowser\nMemory\nRoutines\nSettings\nMailroom\nStatus\n0\nNEED YOU\n0\nRUNNING\n0\nBOTS WORKING\n0\nUNREAD ROOMS\ndesktop\nHome: desktop\nIDLE\nBLE handoff\nGateway · agent: completed\nnow\nCoordinate rev C\nSensor node · agent: completed\nnow\nBOTS\nTofu\n· agent: idle\n1m\nPixel\n· agent: idle\n1m",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Status",
+      "action": "bot-tab",
+      "value": "status"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BLE handoff\nGateway · agent: completed\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Coordinate rev C\nSensor node · agent: completed\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tofu\n· agent: idle\n1m",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Pixel\n· agent: idle\n1m",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view bot-view",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 736,
+        "height": 684,
+        "top": 36,
+        "right": 1000,
+        "bottom": 720,
+        "left": 264
+      }
+    }
+  ]
+}
+thread {
+  "text": "Backplane\n/\nSENSOR NODE\n/\nCoordinate rev C\nSTATE\nfinished\nSUBAGENTS\n2 done\nCommands\nMochi\nready\nSENSOR NODE\nCoordinate rev C\n↑\n↓\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nTerminal\nCommands\nBoard\nSchematic\n3D\nSplit\nMech\nFiles\nDiff\nReview\nBrowser\nCoordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.\n17:17\nCopy\n\nI split the review between Claude and Grok. Each task has its own thread; results return here when they finish.\n\n17:17\nCopy\n\nBoth reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.\n\nFinished 17:17 · 8s\nCopy\ncodex / gpt-6.1-sol / auto\nAccount: Default account\nSend",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "SPAN",
+      "text": "Coordinate rev C",
+      "action": "row-rename",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "pin",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "settle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "archive",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "delete",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "fork",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-child",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "snooze",
+      "value": "1h"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "snooze",
+      "value": "tomorrow"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "snooze",
+      "value": "1w"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SUBAGENTS\n2 done",
+      "action": "subs-open",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal`",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BoardB",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SchematicS",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D3",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SplitV",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "MechM",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "FilesF",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "DiffD",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ReviewR",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BrowserW",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\n↑\n↓",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Board",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Schematic",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Split",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mech",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Files",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Diff",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Review",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal`",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BoardB",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SchematicS",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D3",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SplitV",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "MechM",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "FilesF",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "DiffD",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ReviewR",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BrowserW",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "rail-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Copy",
+      "action": "copy",
+      "value": "Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here."
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Copy",
+      "action": "copy",
+      "value": "I split the review between Claude and Grok. Each task has its own thread; results return here when they finish."
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Copy",
+      "action": "copy",
+      "value": "Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox."
+    },
+    {
+      "tag": "BUTTON",
+      "text": "claudeClaude Code",
+      "action": "mp-agent",
+      "value": "claude"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "codexCodex CLI",
+      "action": "mp-agent",
+      "value": "codex"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "grokGrok CLI",
+      "action": "mp-agent",
+      "value": "grok"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "museMuse Code",
+      "action": "mp-agent",
+      "value": "muse"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "antigravityGoogle",
+      "action": "mp-agent",
+      "value": "antigravity"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "opencodeOpenCode",
+      "action": "mp-agent",
+      "value": "opencode"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "piPi",
+      "action": "mp-agent",
+      "value": "pi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ompOh My Pi",
+      "action": "mp-agent",
+      "value": "omp"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "defaultCodex's configured default",
+      "action": "mp-model",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "gpt-6.1-sol",
+      "action": "mp-model",
+      "value": "gpt-6.1-sol"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "auto",
+      "action": "mp-effort",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "low",
+      "action": "mp-effort",
+      "value": "low"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "med",
+      "action": "mp-effort",
+      "value": "medium"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "high",
+      "action": "mp-effort",
+      "value": "high"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "xhigh",
+      "action": "mp-effort",
+      "value": "xhigh"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "max",
+      "value": "max"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "codex / gpt-6.1-sol / auto",
+      "action": "flag",
+      "value": "models"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Account: Default account",
+      "action": "acct-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "tokstats"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "voice",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Send",
+      "action": "send",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view workspace-thread",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 812,
+        "height": 684,
+        "top": 36,
+        "right": 1076,
+        "bottom": 720,
+        "left": 264
+      }
+    }
+  ]
+}
+SUBS 1
+delegation {
+  "text": "Backplane\n/\nSENSOR NODE\n/\nCoordinate rev C\nSTATE\nfinished\nSUBAGENTS\n2 done\nCommands\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nTerminal\nCommands\nBoard\nSchematic\n3D\nSplit\nMech\nFiles\nDiff\nReview\nBrowser\n▾\n2 done\ngrok · grok-4.7\nLayout review\ndone\nsonnet\nPower budget review\ndone\nCoordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.\n17:17\nCopy\n\nI split the review between Claude and Grok. Each task has its own thread; results return here when they finish.\n\n17:17\nCopy\n\nBoth reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.\n\nFinished 17:17 · 8s\nCopy\ncodex / gpt-6.1-sol / auto\nAccount: Default account\nSend",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "SPAN",
+      "text": "Coordinate rev C",
+      "action": "row-rename",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "pin",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "settle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "archive",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "delete",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "fork",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-child",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "snooze",
+      "value": "1h"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "snooze",
+      "value": "tomorrow"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "snooze",
+      "value": "1w"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SUBAGENTS\n2 done",
+      "action": "subs-shut",
+      "value": "release\t"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal`",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BoardB",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SchematicS",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D3",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SplitV",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "MechM",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "FilesF",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "DiffD",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ReviewR",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BrowserW",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Board",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Schematic",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Split",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mech",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Files",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Diff",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Review",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal`",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BoardB",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SchematicS",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D3",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SplitV",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "MechM",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "FilesF",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "DiffD",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ReviewR",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BrowserW",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "rail-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "▾\n2 done",
+      "action": "fold",
+      "value": "0subs.done:release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "grok · grok-4.7\nLayout review\ndone",
+      "action": "select",
+      "value": "layout"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "sonnet\nPower budget review\ndone",
+      "action": "select",
+      "value": "power"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Copy",
+      "action": "copy",
+      "value": "Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here."
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Copy",
+      "action": "copy",
+      "value": "I split the review between Claude and Grok. Each task has its own thread; results return here when they finish."
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Copy",
+      "action": "copy",
+      "value": "Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox."
+    },
+    {
+      "tag": "BUTTON",
+      "text": "claudeClaude Code",
+      "action": "mp-agent",
+      "value": "claude"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "codexCodex CLI",
+      "action": "mp-agent",
+      "value": "codex"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "grokGrok CLI",
+      "action": "mp-agent",
+      "value": "grok"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "museMuse Code",
+      "action": "mp-agent",
+      "value": "muse"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "antigravityGoogle",
+      "action": "mp-agent",
+      "value": "antigravity"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "opencodeOpenCode",
+      "action": "mp-agent",
+      "value": "opencode"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "piPi",
+      "action": "mp-agent",
+      "value": "pi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ompOh My Pi",
+      "action": "mp-agent",
+      "value": "omp"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "defaultCodex's configured default",
+      "action": "mp-model",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "gpt-6.1-sol",
+      "action": "mp-model",
+      "value": "gpt-6.1-sol"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "auto",
+      "action": "mp-effort",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "low",
+      "action": "mp-effort",
+      "value": "low"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "med",
+      "action": "mp-effort",
+      "value": "medium"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "high",
+      "action": "mp-effort",
+      "value": "high"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "xhigh",
+      "action": "mp-effort",
+      "value": "xhigh"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "max",
+      "value": "max"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "codex / gpt-6.1-sol / auto",
+      "action": "flag",
+      "value": "models"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Account: Default account",
+      "action": "acct-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "tokstats"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "voice",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Send",
+      "action": "send",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view workspace-thread",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 812,
+        "height": 684,
+        "top": 36,
+        "right": 1076,
+        "bottom": 720,
+        "left": 264
+      }
+    }
+  ]
+}
+tofu {
+  "text": "Backplane\n/\nBots\n/\nTofu\nCommands\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nTerminal\nCommands\nBoard\nSchematic\n3D\nSplit\nMech\nFiles\nDiff\nReview\nBrowser\nTofu\nready\nclaude · claude-sonnet-5\nChat\nMailroom\nSpace\nBrowser\nTasks\nMemory\nRoutines\nWebhooks\nSettings\n\nWrite to Tofu below: ask it something, or give it a job to look after.\n\nclaude / claude-sonnet-5 / auto\nAccount: Default account\nSend",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Board",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Schematic",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Split",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mech",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Files",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Diff",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Review",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Terminal`",
+      "action": "term-toggle",
+      "value": "@term-size"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BoardB",
+      "action": "view-kind",
+      "value": "board"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SchematicS",
+      "action": "view-kind",
+      "value": "schematic"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "3D3",
+      "action": "view-kind",
+      "value": "3d"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SplitV",
+      "action": "view-kind",
+      "value": "split"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "MechM",
+      "action": "mech",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "FilesF",
+      "action": "fm",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "DiffD",
+      "action": "diff",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ReviewR",
+      "action": "rv-page",
+      "value": "bom"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BrowserW",
+      "action": "view-kind",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "rail-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "claudeClaude Code",
+      "action": "mp-agent",
+      "value": "claude"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "codexCodex CLI",
+      "action": "mp-agent",
+      "value": "codex"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "grokGrok CLI",
+      "action": "mp-agent",
+      "value": "grok"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "museMuse Code",
+      "action": "mp-agent",
+      "value": "muse"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "antigravityGoogle",
+      "action": "mp-agent",
+      "value": "antigravity"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "opencodeOpenCode",
+      "action": "mp-agent",
+      "value": "opencode"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "piPi",
+      "action": "mp-agent",
+      "value": "pi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "ompOh My Pi",
+      "action": "mp-agent",
+      "value": "omp"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "defaultClaude Code's own default",
+      "action": "mp-model",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "fableFable 5.1 · claude-fable-5-1",
+      "action": "mp-model",
+      "value": "fable"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "opusOpus 5.5 · claude-opus-5-5",
+      "action": "mp-model",
+      "value": "opus"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "sonnetSonnet 5 · claude-sonnet-5",
+      "action": "mp-model",
+      "value": "sonnet"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "haikuHaiku 4.5 · claude-haiku-4-5",
+      "action": "mp-model",
+      "value": "haiku"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "claude-sonnet-5",
+      "action": "mp-model",
+      "value": "claude-sonnet-5"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "auto",
+      "action": "mp-effort",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "low",
+      "action": "mp-effort",
+      "value": "low"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "med",
+      "action": "mp-effort",
+      "value": "medium"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "high",
+      "action": "mp-effort",
+      "value": "high"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "xhigh",
+      "action": "mp-effort",
+      "value": "xhigh"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "max",
+      "action": "mp-effort",
+      "value": "max"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "claude / claude-sonnet-5 / auto",
+      "action": "flag",
+      "value": "models"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Account: Default account",
+      "action": "acct-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "tokstats"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "voice",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Send",
+      "action": "send",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view workspace-thread",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 736,
+        "height": 684,
+        "top": 36,
+        "right": 1000,
+        "bottom": 720,
+        "left": 264
+      }
+    }
+  ]
+}
+BOT TABS [{"value":"chat","text":"Chat"},{"value":"mail","text":"Mailroom"},{"value":"space","text":"Space"},{"value":"browser","text":"Browser"},{"value":"tasks","text":"Tasks"},{"value":"memory","text":"Memory"},{"value":"routines","text":"Routines"},{"value":"hooks","text":"Webhooks"},{"value":"settings","text":"Settings"},{"value":"chat","text":"Chat"},{"value":"mail","text":"Mailroom"},{"value":"space","text":"Space"},{"value":"browser","text":"Browser"},{"value":"tasks","text":"Tasks"},{"value":"memory","text":"Memory"},{"value":"routines","text":"Routines"},{"value":"hooks","text":"Webhooks"},{"value":"settings","text":"Settings"}]
+mailroom {
+  "text": "Backplane\n/\nBots\n/\nTofu\nJump or run a command\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nTofu\nready\nclaude · claude-sonnet-5\nChat\nMailroom\nSpace\nBrowser\nTasks\nMemory\nRoutines\nWebhooks\nSettings\nMailroom\ndesktop · here\nAll mail\nTofu\nTofu\nPixel\nUnread\nAct\nFYI\nSnoozed\nDone\nDue\nToday\nOverview\nAll\nNeeds you · 00 running · 0 locks\nGateway handoff\nmochi, tofu · sensor · open\nThe BLE handoff is ready. Link the sensor findings before the next integration session.\nLayout review complete\npixel, tofu · sensor · unread\nAntenna keepout and connector orientation checked. The control desk has the latest review state.\nRev C power review\nmochi, tofu · sensor · unread\nPower and layout reviews are back. Please keep the sensor review handoff together for the gateway integration.\nPrevious\nPage 1\nNext\nBack\nGateway handoff\nLoad earlier\nDone\nmochi · message · fyi · now\nThe BLE handoff is ready. Link the sensor findings before the next integration session.\nmochi\ntofu\nSend",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "Jump or run a command",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "desktop · here",
+      "action": "mail-filter",
+      "value": "machine="
+    },
+    {
+      "tag": "BUTTON",
+      "text": "All mail",
+      "action": "mail-filter",
+      "value": "bot=*"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tofu",
+      "action": "mail-filter",
+      "value": "bot=tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tofu",
+      "action": "mail-filter",
+      "value": "bot=tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Pixel",
+      "action": "mail-filter",
+      "value": "bot=pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Unread",
+      "action": "mail-filter",
+      "value": "unread"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Act",
+      "action": "mail-filter",
+      "value": "act"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "FYI",
+      "action": "mail-filter",
+      "value": "fyi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Snoozed",
+      "action": "mail-filter",
+      "value": "snoozed"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Done",
+      "action": "mail-filter",
+      "value": "done"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Due",
+      "action": "mail-filter",
+      "value": "due"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Today",
+      "action": "mail-filter",
+      "value": "today"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Overview",
+      "action": "mail-filter",
+      "value": "overview"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "All",
+      "action": "mail-filter",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "0 running · 0 locks",
+      "action": "mail-run",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Gateway handoff\nmochi, tofu · sensor · open\nThe BLE handoff is ready. Link the sensor findings befor",
+      "action": "mail-open",
+      "value": "demo-mail-2"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Layout review complete\npixel, tofu · sensor · unread\nAntenna keepout and connector orientation check",
+      "action": "mail-open",
+      "value": "demo-mail-1"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Rev C power review\nmochi, tofu · sensor · unread\nPower and layout reviews are back. Please keep the ",
+      "action": "mail-open",
+      "value": "demo-mail-0"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Previous",
+      "action": "web-mail-page",
+      "value": "2"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Next",
+      "action": "web-mail-page",
+      "value": "52"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Back",
+      "action": "mail-close",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Load earlier",
+      "action": "mail-more",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Done",
+      "action": "mail-mark",
+      "value": "done"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "mochi",
+      "action": "mail-to",
+      "value": "bot:mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "tofu",
+      "action": "mail-to",
+      "value": "bot:tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Send",
+      "action": "mail-send",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view bot-view",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 1336,
+        "height": 814,
+        "top": 36,
+        "right": 1600,
+        "bottom": 850,
+        "left": 264
+      }
+    }
+  ]
+}
+webhooks {
+  "text": "Backplane\n/\nBots\n/\nTofu\nCommands\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nTofu\nready\nclaude · claude-sonnet-5\nChat\nMailroom\nSpace\nBrowser\nTasks\nMemory\nRoutines\nWebhooks\nSettings\nReview handoffs\n/hook/demo-review-hook\n0 calls\nCopy\nToken\nRevoke\nNew webhook",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Copy",
+      "action": "copy",
+      "value": "/hook/demo-review-hook"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Token",
+      "action": "hook-token",
+      "value": "demo-review-hook"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Revoke",
+      "action": "hook-revoke",
+      "value": "demo-review-hook"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "New webhook",
+      "action": "hook-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view bot-view",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 736,
+        "height": 684,
+        "top": 36,
+        "right": 1000,
+        "bottom": 720,
+        "left": 264
+      }
+    }
+  ]
+}
+space {
+  "text": "Backplane\n/\nBots\n/\nPixel\nCommands\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nPixel\nready\nclaude · claude-sonnet-5\nChat\nMailroom\nSpace\nBrowser\nTasks\nMemory\nRoutines\nWebhooks\nSettings\nRev C control desk\nSENSOR NODE / REV C\nReview checks\n2 / 2\nPower + layout\nHandoffs\nReady\nSensor → gateway\nReview completion\n100%\nWork\tHarness\tState\nPower budget\tClaude\tReviewed\nLayout\tGrok\tReviewed\nBLE handoff\tMuse\tReady\n\nA persistent project desk, kept by Pixel. Demo data for the README.\n\nReady for integration",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view bot-view",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 736,
+        "height": 684,
+        "top": 36,
+        "right": 1000,
+        "bottom": 720,
+        "left": 264
+      }
+    }
+  ]
+}
+SPACE STATUS 200
+space-webapp {
+  "text": "PIXEL / PERSISTENT SPACE · DEMO\nRev C control desk\nREVIEW CHECKS\n2 / 2\nPower budget + layout\nNEXT HANDOFF\nReady\nSensor node → gateway\nWORK\tHARNESS\tSTATE\nPower budget\tClaude\tReviewed\nLayout\tGrok\tReviewed\nBLE handoff\tMuse\tReady\nReviews are back. Tofu keeps the handoff in its Mailbox; this desk keeps the project state visible between sessions.\n\nFictional README fixture. No agent turns or live integrations.",
+  "controls": [],
+  "main": []
+}

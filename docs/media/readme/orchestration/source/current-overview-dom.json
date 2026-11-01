@@ -1,0 +1,313 @@
+{
+  "text": "Backplane\n/\nBots\n/\nMochi\nCommands\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nMochi\nready\nclaude · claude-sonnet-5\nChat\nMailroom\nSpace\nBrowser\nMemory\nRoutines\nSettings\nMailroom\nStatus\n0\nNEED YOU\n0\nRUNNING\n0\nBOTS WORKING\n0\nUNREAD ROOMS\ndesktop\nHome: desktop\nIDLE\nBLE handoff\nGateway · agent: completed\nnow\nCoordinate rev C\nSensor node · agent: completed\nnow\nBOTS\nTofu\n· agent: idle\n1m\nPixel\n· agent: idle\n1m",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "Commands",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Status",
+      "action": "bot-tab",
+      "value": "status"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "BLE handoff\nGateway · agent: completed\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Coordinate rev C\nSensor node · agent: completed\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tofu\n· agent: idle\n1m",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Pixel\n· agent: idle\n1m",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view bot-view",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 736,
+        "height": 684,
+        "top": 36,
+        "right": 1000,
+        "bottom": 720,
+        "left": 264
+      }
+    }
+  ]
+}

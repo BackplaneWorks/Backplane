@@ -1,0 +1,15 @@
+{
+  "eventKinds": {
+    "SettingSet": 14,
+    "ProjectCreated": 1,
+    "ThreadCreated": 4,
+    "BotSet": 1,
+    "RoomSet": 1,
+    "MessagePosted": 2,
+    "ActivityLogged": 1
+  },
+  "messageCount": 2,
+  "messagesMatchSeed": true,
+  "agentTurnEvents": 0,
+  "btwSubmitted": false
+}

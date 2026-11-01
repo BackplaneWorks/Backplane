@@ -19,10 +19,10 @@ backplane
   <img src="docs/media/readme/agent-setup-200.png" alt="Backplaneのプロバイダー・モデル・推論レベルの選択メニュー">
 </p>
 
-Backplaneの本当の価値は、KiCadとFreeCADのビューアにあります。エージェントの作業を一つひとつ確認し、特定の部品をクリックして、ワークバーで参照できます。Backplaneには、CAD専用スキル一式と、LLMからの操作を支援する機能を追加したKiCadフォークが付属しています（たとえば、回路図用のIPC API）。
+Backplaneの本当の価値は、KiCadとFreeCADのビューアにあります。エージェントの作業を一つひとつ確認し、部品やネットをクリックして、回路図と基板の対応する箇所をハイライトできます。Backplaneには、CAD専用スキル一式と、LLMからの操作を支援する機能を追加したKiCadフォークが付属しています（たとえば、回路図用のIPC API）。
 
 <p align="center">
-  <img src="docs/media/readme/cad/pad-workbar-detail-200.png" alt="RoyalBlue54Lのパッドを選択し、その詳細をワークバーで参照">
+  <img src="docs/media/readme/cad/pad-workbar-detail-200.png" alt="RoyalBlue54LのJ2のパッド1と+BATTネットを回路図と基板で相互にハイライト">
 </p>
 
 <p align="center">
@@ -66,7 +66,7 @@ Backplaneには、エージェントハーネスを連携させるための便�
 - スレッド・ボット・プロジェクトをつなぐ、クリック可能なリンク。
 
   <p align="center">
-    <img src="docs/media/readme/features/link-cards-2x.png" alt="スレッド・ボット・プロジェクトへのリンクチップ">
+    <img src="docs/media/readme/features/link-cards-2x.png" alt="メッセージ内のスレッド・ボット・プロジェクトへのリンク">
   </p>
 
 - `>`、`#`、`%`、`@`で、ほかのBackplane項目を参照。
@@ -78,7 +78,7 @@ Backplaneには、エージェントハーネスを連携させるための便�
 - TUI用のインラインターミナル。
 
   <p align="center">
-    <img src="docs/media/readme/features/inline-terminal-2x.png" alt="インラインターミナルで実行中のvi">
+    <img src="docs/media/readme/features/inline-terminal-2x.png" alt="インラインターミナルのNeovimで開いた読み取り専用ファイル">
   </p>
 
 - `/btw`。

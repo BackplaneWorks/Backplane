@@ -1,0 +1,74 @@
+[
+  {
+    "value": "chat",
+    "text": "Chat"
+  },
+  {
+    "value": "mail",
+    "text": "Mailroom"
+  },
+  {
+    "value": "space",
+    "text": "Space"
+  },
+  {
+    "value": "browser",
+    "text": "Browser"
+  },
+  {
+    "value": "tasks",
+    "text": "Tasks"
+  },
+  {
+    "value": "memory",
+    "text": "Memory"
+  },
+  {
+    "value": "routines",
+    "text": "Routines"
+  },
+  {
+    "value": "hooks",
+    "text": "Webhooks"
+  },
+  {
+    "value": "settings",
+    "text": "Settings"
+  },
+  {
+    "value": "chat",
+    "text": "Chat"
+  },
+  {
+    "value": "mail",
+    "text": "Mailroom"
+  },
+  {
+    "value": "space",
+    "text": "Space"
+  },
+  {
+    "value": "browser",
+    "text": "Browser"
+  },
+  {
+    "value": "tasks",
+    "text": "Tasks"
+  },
+  {
+    "value": "memory",
+    "text": "Memory"
+  },
+  {
+    "value": "routines",
+    "text": "Routines"
+  },
+  {
+    "value": "hooks",
+    "text": "Webhooks"
+  },
+  {
+    "value": "settings",
+    "text": "Settings"
+  }
+]

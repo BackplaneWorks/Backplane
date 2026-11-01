@@ -1,0 +1,134 @@
+[
+  {
+    "path": "royalblue-viewers-200.png",
+    "size": [
+      3172,
+      2638
+    ],
+    "parts_css_2x": [
+      [
+        "source/A-3d-frame.png",
+        [
+          825,
+          36,
+          1600,
+          600
+        ],
+        [
+          24,
+          24
+        ]
+      ],
+      [
+        "source/A-board-frame.png",
+        [
+          825,
+          36,
+          1600,
+          600
+        ],
+        [
+          1598,
+          24
+        ]
+      ],
+      [
+        "source/A-schematic-frame.png",
+        [
+          638,
+          36,
+          2200,
+          755
+        ],
+        [
+          24,
+          1176
+        ]
+      ]
+    ]
+  },
+  {
+    "path": "agent-setup-200.png",
+    "size": [
+      1888,
+      700
+    ],
+    "parts_css_2x": [
+      [
+        "source/A-picker-frame.png",
+        [
+          422,
+          644,
+          1366,
+          994
+        ]
+      ]
+    ]
+  },
+  {
+    "path": "cad/cm5-mech-200.png",
+    "size": [
+      3200,
+      2000
+    ],
+    "parts_css_2x": [
+      [
+        "cad/source/A-mech-frame.png",
+        "full frame"
+      ]
+    ]
+  },
+  {
+    "path": "cad/kicad-freecad-setup-200.png",
+    "size": [
+      1676,
+      582
+    ],
+    "parts_css_2x": [
+      [
+        "cad/source/A-settings-frame.png",
+        [
+          288,
+          48,
+          1126,
+          80
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      [
+        "cad/source/A-settings-frame.png",
+        [
+          288,
+          100,
+          1126,
+          359
+        ],
+        [
+          0,
+          64
+        ]
+      ]
+    ]
+  },
+  {
+    "path": "cad/pad-workbar-detail-200.png",
+    "size": [
+      3598,
+      1228
+    ],
+    "parts_css_2x": [
+      [
+        "cad/source/A-pad-frame.png",
+        [
+          625,
+          36,
+          2424,
+          650
+        ]
+      ]
+    ]
+  }
+]

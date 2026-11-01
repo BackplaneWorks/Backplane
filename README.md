@@ -25,10 +25,10 @@ backplane
   <img src="docs/media/readme/agent-setup-200.png" alt="Backplane’s provider, model, and reasoning effort picker">
 </p>
 
-The real VALUE of Backplane is in its KiCad + FreeCAD viewers. See EVERY step the agent takes, click on specific components and reference them in the workbar. Backplane ships with a FULL suite of CAD-specific skills and a KiCad fork that adds additional instrumentation for LLM control (IPC schematic API, for instance).
+The real VALUE of Backplane is in its KiCad + FreeCAD viewers. See EVERY step the agent takes, and click components or nets to light them up across the schematic and board. Backplane ships with a FULL suite of CAD-specific skills and a KiCad fork that adds additional instrumentation for LLM control (IPC schematic API, for instance).
 
 <p align="center">
-  <img src="docs/media/readme/cad/pad-workbar-detail-200.png" alt="Select a RoyalBlue54L pad and mention its details in the workbar">
+  <img src="docs/media/readme/cad/pad-workbar-detail-200.png" alt="RoyalBlue54L J2 pad 1 and the +BATT net cross-probed in the schematic and board">
 </p>
 
 <p align="center">
@@ -72,7 +72,7 @@ We also ship persistent agents (catbots) to handle specific tasks. They have web
 - Clickable links between threads and bots and projects.
 
   <p align="center">
-    <img src="docs/media/readme/features/link-cards-2x.png" alt="Rendered thread, bot, and project link chips">
+    <img src="docs/media/readme/features/link-cards-2x.png" alt="Thread, bot, and project links in a message">
   </p>
 
 - Links to other Backplane items with `>`, `#`, `%`, `@`.
@@ -84,7 +84,7 @@ We also ship persistent agents (catbots) to handle specific tasks. They have web
 - Inline terminals for TUIs.
 
   <p align="center">
-    <img src="docs/media/readme/features/inline-terminal-2x.png" alt="An actual vi session in an inline terminal">
+    <img src="docs/media/readme/features/inline-terminal-2x.png" alt="A read-only file open in Neovim in an inline terminal">
   </p>
 
 - `/btw`.

@@ -1,0 +1,457 @@
+{
+  "text": "Backplane\n/\nBots\n/\nTofu\nJump or run a command\nMochi\nready\nSENSOR NODE\nCoordinate rev C\nnow\nGATEWAY\nBLE handoff\nnow\nConversations in progress\nReview notes\nnow\nBOTS\nTofu\nready\nPixel\nready\nROOMS\nTofu\nready\nclaude · claude-sonnet-5\nChat\nMailroom\nSpace\nBrowser\nTasks\nMemory\nRoutines\nWebhooks\nSettings\nMailroom\ndesktop · here\nAll mail\nTofu\nTofu\nPixel\nUnread\nAct\nFYI\nSnoozed\nDone\nDue\nToday\nOverview\nAll\nNeeds you · 00 running · 0 locks\nGateway handoff\nmochi, tofu · sensor · open\nThe BLE handoff is ready. Link the sensor findings before the next integration session.\nLayout review complete\npixel, tofu · sensor · unread\nAntenna keepout and connector orientation checked. The control desk has the latest review state.\nRev C power review\nmochi, tofu · sensor · unread\nPower and layout reviews are back. Please keep the sensor review handoff together for the gateway integration.\nPrevious\nPage 1\nNext\nBack\nGateway handoff\nLoad earlier\nDone\nmochi · message · fyi · now\nThe BLE handoff is ready. Link the sensor findings before the next integration session.\nmochi\ntofu\nSend",
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "text": "Jump or run a command",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thin-search-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "flag",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "SN",
+      "action": "ws-project",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "GA",
+      "action": "ws-project",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "side-toggle",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "proj-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mochi\nready",
+      "action": "uber",
+      "value": "mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "sensor"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "release"
+    },
+    {
+      "tag": "DIV",
+      "text": "Coordinate rev C\nnow",
+      "action": "select",
+      "value": "release"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "release|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "release|down"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "look",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "new-thread",
+      "value": "gateway"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "thread-tree",
+      "value": "firmware"
+    },
+    {
+      "tag": "DIV",
+      "text": "BLE handoff\nnow",
+      "action": "select",
+      "value": "firmware"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↑",
+      "action": "move",
+      "value": "firmware|up"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "↓",
+      "action": "move",
+      "value": "firmware|down"
+    },
+    {
+      "tag": "DIV",
+      "text": "Review notes\nnow",
+      "action": "select",
+      "value": "notes"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "bot-new",
+      "value": ""
+    },
+    {
+      "tag": "DIV",
+      "text": "Tofu\nready",
+      "action": "bot",
+      "value": "tofu"
+    },
+    {
+      "tag": "DIV",
+      "text": "Pixel\nready",
+      "action": "bot",
+      "value": "pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "room-new",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "",
+      "action": "ws-palette-open",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "‹",
+      "action": "select",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Chat",
+      "action": "bot-tab",
+      "value": "chat"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Mailroom",
+      "action": "bot-tab",
+      "value": "mail"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Space",
+      "action": "bot-tab",
+      "value": "space"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Browser",
+      "action": "bot-tab",
+      "value": "browser"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tasks",
+      "action": "bot-tab",
+      "value": "tasks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Memory",
+      "action": "bot-tab",
+      "value": "memory"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Routines",
+      "action": "bot-tab",
+      "value": "routines"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Webhooks",
+      "action": "bot-tab",
+      "value": "hooks"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Settings",
+      "action": "bot-tab",
+      "value": "settings"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "desktop · here",
+      "action": "mail-filter",
+      "value": "machine="
+    },
+    {
+      "tag": "BUTTON",
+      "text": "All mail",
+      "action": "mail-filter",
+      "value": "bot=*"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tofu",
+      "action": "mail-filter",
+      "value": "bot=tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Tofu",
+      "action": "mail-filter",
+      "value": "bot=tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Pixel",
+      "action": "mail-filter",
+      "value": "bot=pixel"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Unread",
+      "action": "mail-filter",
+      "value": "unread"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Act",
+      "action": "mail-filter",
+      "value": "act"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "FYI",
+      "action": "mail-filter",
+      "value": "fyi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Snoozed",
+      "action": "mail-filter",
+      "value": "snoozed"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Done",
+      "action": "mail-filter",
+      "value": "done"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Due",
+      "action": "mail-filter",
+      "value": "due"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Today",
+      "action": "mail-filter",
+      "value": "today"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Overview",
+      "action": "mail-filter",
+      "value": "overview"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "All",
+      "action": "mail-filter",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "0 running · 0 locks",
+      "action": "mail-run",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Gateway handoff\nmochi, tofu · sensor · open\nThe BLE handoff is ready. Link the sensor findings befor",
+      "action": "mail-open",
+      "value": "demo-mail-2"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Layout review complete\npixel, tofu · sensor · unread\nAntenna keepout and connector orientation check",
+      "action": "mail-open",
+      "value": "demo-mail-1"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Rev C power review\nmochi, tofu · sensor · unread\nPower and layout reviews are back. Please keep the ",
+      "action": "mail-open",
+      "value": "demo-mail-0"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Previous",
+      "action": "web-mail-page",
+      "value": "2"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Next",
+      "action": "web-mail-page",
+      "value": "52"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Back",
+      "action": "mail-close",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Load earlier",
+      "action": "mail-more",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Done",
+      "action": "mail-mark",
+      "value": "done"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "mochi",
+      "action": "mail-to",
+      "value": "bot:mochi"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "tofu",
+      "action": "mail-to",
+      "value": "bot:tofu"
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Send",
+      "action": "mail-send",
+      "value": ""
+    },
+    {
+      "tag": "BUTTON",
+      "text": "Retry now"
+    }
+  ],
+  "main": [
+    {
+      "tag": "MAIN",
+      "class": "thread-view bot-view",
+      "rect": {
+        "x": 264,
+        "y": 36,
+        "width": 1336,
+        "height": 814,
+        "top": 36,
+        "right": 1600,
+        "bottom": 850,
+        "left": 264
+      }
+    }
+  ]
+}

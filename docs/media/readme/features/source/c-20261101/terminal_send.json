@@ -1,0 +1,22 @@
+{
+  "request": {
+    "name": "terminal_send",
+    "arguments": {
+      "id": "x1793546000-23",
+      "text": "\rjj"
+    }
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"sent\":3}"
+        }
+      ],
+      "isError": false
+    }
+  }
+}

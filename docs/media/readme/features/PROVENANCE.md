@@ -1,58 +1,71 @@
-# Actual feature captures
+# Current feature captures
 
-Captured from `/home/h/.local/share/backplane/backplane` on a private Xvfb display using a fresh temporary `BACKPLANE_HOME`, `HOME`, and XDG directories. No live Backplane data was copied or modified. No agent turns or chat messages were sent, and no external API was called. The only tool calls went to the isolated app's loopback MCP endpoint: `terminal_open`, `terminal_send`, and `terminal_read` for a local read-only vi session. The capture app and Xvfb processes are terminated by captured PID at the end of the script.
+Captured 2026-11-01 from the supplied **0.13.2-dev.20261101.1606** build,
+main **36e6a1024**. The current desktop uses this same web client. One fresh hub
+and one headless Chromium ran in a private `unshare -rn` namespace with only
+loopback, on ports 47830/47831. HOME, Backplane state, browser state and temporary
+files were under `scratch/readme/run/C-features`; BACKPLANE_AGENTS named an empty
+directory. No agent ran, no chat message was sent, and `/bt` was never submitted.
+No build, app-source edit, installation, external API or real user data was used.
 
-`source/capture.json` records the binary SHA-256, installation commit marker, viewport, and temporary home for the final run. The installation's COMMIT file is provenance metadata, not an independently verified build attestation.
+The new reproducible sources are in [source/c-20261101/](source/c-20261101/):
+`runtime.py`, `drive.mjs`, `capture.mjs`, `export.py`, the complete synthetic
+`demo-events.jsonl`, `runtime.json`, MCP request/response records, `navigation.json`,
+`agent-audit.json`, `panels.json` and full frames in `raw/`. `runtime.json` records
+the supplied hub's SHA-256, viewport 1100 × 800 and `deviceScaleFactor: 2`.
+`outputs.json` records the final sizes. These are real 2× frames, with lossless
+crops and a lossless vertical composition, without pixel enlargement or drawn UI.
+The previous images are in git history (before this capture).
 
-`source/demo-events.jsonl` is the entire synthetic event fixture. Its names and conversation are public-safe demonstration text, not copied user data. The seeded assistant text is fixture content, not model output. Project roots point into the disposable capture home. Bot personas have no hooks, schedules, or pending messages.
+- `link-cards-2x.png` (1000 × 228): “Layout review”, “Miso”, and “Sensor Board” in
+  an assistant fixture message. **This build renders plain link labels, not the
+  older bordered chips with icons/status.** Actual clicks opened Layout review
+  and Miso's bot page. The project link selected Sensor Board, which was already
+  the current project; that click alone does not establish a transition from
+  another project. `navigation.json` and the three `raw/navigation-*.png` frames
+  preserve the observations. The older candidate-binary and unverified-activation
+  claims do not describe this replacement image.
+- `reference-thread-2x.png`, `reference-room-2x.png`, `reference-project-2x.png`, and
+  `reference-bot-2x.png`: actual composer popups, each including its typed sigil.
+  `>` is a thread, `#` a room, `%` a project, and `@` a bot. The room has one
+  synthetic member. `../reference-menus-200.png` (1476 × 926) stacks these lossless
+  crops with 16-pixel gaps; `../source/references.html` describes the same stack.
+- `inline-terminal-2x.png` (1480 × 632): an actual inline PTY, opened directly
+  through the isolated hub's `terminal_open`, showing the local checklist in
+  read-only **Neovim**, with no user configuration, swap or shada file. This host
+  has `/usr/bin/nvim` and no `vi` executable. The title states “vi (Neovim)”; the
+  footer shows `review.txt [RO]`. `terminal_read.json` confirms `state="running"`
+  and the checklist text. `terminal_send.json` preserves Enter/jj; the separate
+  `terminal_send-quit.json` preserves `:q`, followed by `terminal_close`.
+- `btw-autocomplete-2x.png` (1476 × 390): the unsent `/bt` draft, `/btw`, and its
+  real description, “Ask a side question; the thread never sees it”.
 
-## Useful assets
-
-- `reference-thread.png`, `reference-room.png`, `reference-project.png`, `reference-bot.png`: actual composer menus, with the typed sigil visible.
-- `btw-autocomplete.png`: `/btw` command and its actual description, “Ask a side question; the thread never sees it”.
-- `btw-draft.png`: an unsent side-question draft. No answer card was captured because submitting the question would call a model.
-- `inline-terminal.png`: actual inline PTY running installed vi against a local read-only checklist. The terminal response is preserved in `source/terminal_read.json`.
-- `model-picker.png`: installed provider picker, retained as evidence of the available providers.
-- `link-cards.png` and `link-cards-2x.png`: actual rendered thread, bot, and project chips from the separately authorized existing candidate binary. Appearance only; activation is not verified. The clean original is `links/raw/link-cards.png`.
-
-Every unscaled PNG is a lossless crop of a 1600 × 1000 native frame in `raw/`, except the successful `link-cards.png`, whose source is `links/raw/link-cards.png`. `*-2x.png` is a nearest-neighbor 200% enlargement for composition, not a higher-resolution UI rerender. `source/export-panels.py` and `source/panels.json` preserve the exact crop and scale. No UI pixels are invented or redrawn.
-
-## Reference mapping and runtime limits
-
-The exact mapping is `>` → thread, `#` → group chat/room, `%` → project, `@` → bot. `^` is not recognized. The installed composer placeholder and menus demonstrate this; `raw/reference-caret.png` shows the unsupported caret without a menu.
-
-Source evidence: `src/core/refs.bend:125–141`, `Refs.kind.c` and `Refs.sigil`, at both installation marker commit `e6f8c9a48194d79cf71a9304fb12c57b82bff58b` and newer release-prep commit `ac2b41fd275cca1c2e607ee04b8bb606b0b78b5b`. Exact excerpts are saved as `source/reference-mapping.bend.txt` and `source/reference-mapping-newer.bend.txt`. These define only character codes 64 (`@`), 62 (`>`), 37 (`%`), and 35 (`#`), with the empty string for all others. The current root/docs worktree at old HEAD does not include this newer refs implementation.
-
-Clickable thread/bot/project link cards could not be truthfully captured with the installed executable: seeded `[label](backplane://...)` text renders as plain labels. `raw/link-cards.png` is an unsuccessful capability probe, **not a feature asset**. The installation marker's `src/core/links.bend` contains only `PText` and `PLink`, and accepts HTTP(S). Rich internal references are present in newer source, including `src/core/ref.bend`, `refview.bend`, and `links.bend` in the release-prep worktree, but this task did not build or replace the runtime.
-
-### Existing candidate binary for rendered link chips
-
-The parent authorized the existing `/home/h/Documents/i2cjak/bp-coord/links/run3/backplane` binary for a separate isolated capture. This uses the same clean public demo fixture and fresh temporary home, never the existing screenshots' copied personal bot/project context or stress-fixture labels. Original screenshots under `links/shots-3/` and `links/integration-3c/shots-636/` were inspected only and are not included here.
-
-Candidate frames and their manifest are under `links/`, separate from installed-runtime captures. `links/source/capture.json` records the actual executable path and SHA-256; no unverified source revision is assigned to it. This is an existing development candidate, not the installed app and not evidence of a released feature. No binary was built, installed, deployed, or modified.
-
-The candidate SHA-256 is `5470b8a4e89be01689627c1e101207ab59a00b4404d9fa69911a763688ae7f12`. Final capture used `/tmp/bp-readme-features-o7r2vl_b`, private display `:100`; the app and Xvfb exited through the script's cleanup. The finished crop contains only the fixture's “Layout review”, “Miso”, and “Sensor Board” chips and their actual icon/status labels. Export by rerunning `source/export-panels.py` after the candidate capture.
-
-These images demonstrate **rendered internal link chips only**. They do not verify click activation, navigation, or the pending activation repair. Read-only coordination notes `/home/h/Documents/i2cjak/bp-coord/links/STATUS.md` identify PR259 as another owner's activation work. No part of that implementation was touched. Publication/release dependency remains for the parent to resolve.
-
-OpenCode is absent from the installed provider picker: it shows claude, codex, grok, muse, and antigravity. The newer release-prep worktree `/home/h/Documents/i2cjak/bp-coord/release-prep/worktree` at `ac2b41fd2` includes OpenCode; `src/core/client.bend:4052–4053` lists `@opencode` and later provider selection code includes `opencode`. An exact excerpt is in `source/opencode-newer.bend.txt`. This newer source must not be represented by the older installed UI screenshot.
+The terminal calls use today's `POST /mcp/demo-main?k=<thread key>`, a JSON-RPC
+`tools/call`. The key is the token's HMAC-SHA256 of `mcp\ndemo-main` as defined in
+`src/core/auth.bend:Auth.mcp.key`; it is computed in memory and never saved in the
+capture sources. `src/server/server.bend` (`Conn.is_mcp`, `Mcp.gate`,
+`Hub.mcp_url.seg`, `Hub.term_read`), `src/server/term.bend`, and `docs/terminal.md`
+describe the route and terminal actor. Calling these tools does not require an
+agent process. Both seed messages remained unchanged and the persisted log had
+zero agent turn events, as checked in `agent-audit.json`.
 
 ## Reproduce
 
-Use the existing Python with Pillow, without installing dependencies:
+From the repository checkout, using the supplied paths on this machine:
 
 ```sh
-python3 docs/media/readme/features/source/capture-features.py
-python3 docs/media/readme/features/source/export-panels.py
+S=docs/media/readme/features/source/c-20261101
+python3 "$S/runtime.py" start
+python3 "$S/runtime.py" exec node "$PWD/$S/drive.mjs" run "$PWD/$S/capture.mjs"
+python3 "$S/export.py"
+python3 "$S/runtime.py" stop
 ```
 
-The separate existing-candidate capture uses:
+`start` replaces only its own disposable hub home. `stop` signals captured PIDs
+only after checking `/proc/PID/cmdline`. All processes were stopped after capture.
+Every final assigned PNG was opened and compared with its predecessor.
+No README image has a fixed presentation-width attribute in either language.
 
-```sh
-README_CAPTURE_APP=/home/h/Documents/i2cjak/bp-coord/links/run3/backplane \
-README_CAPTURE_OUT="$PWD/docs/media/readme/features/links" \
-README_CAPTURE_LINKS_ONLY=1 \
-python3 docs/media/readme/features/source/capture-features.py
-```
-
-The capture uses the existing Xvfb and xpoke paths named at the top of the script, reserves a private display in 100–109, starts no builds, and does not change README or app files. Snapshots are actual native Backplane frames exported by `BACKPLANE_SNAP`.
+Earlier `source/` scripts, nonassigned native captures (`btw-draft`, model picker,
+unscaled panels), and `links/` are archival 2026-10-19 material. They are not
+sources or runtime evidence for these replacements. The cat footer is unchanged.

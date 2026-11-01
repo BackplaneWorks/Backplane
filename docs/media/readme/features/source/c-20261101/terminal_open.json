@@ -1,0 +1,24 @@
+{
+  "request": {
+    "name": "terminal_open",
+    "arguments": {
+      "command": "exec /usr/bin/nvim -u NONE -i NONE -n -R --cmd 'set title titlestring=Review\\ checklist' review.txt",
+      "title": "Review checklist · vi (Neovim)",
+      "cols": 88,
+      "rows": 16
+    }
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"id\":\"x1793546000-23\",\"cols\":88,\"rows\":16,\"state\":\"running\"}"
+        }
+      ],
+      "isError": false
+    }
+  }
+}

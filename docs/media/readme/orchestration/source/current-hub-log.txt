@@ -1,0 +1,9 @@
+backplane 15:18:47 info hub: stand-in agents only, from <capture-root>/run/B-recapture-1793546326589794421/agents
+backplane 15:18:47 info hub: hot boot from <capture-root>/run/B-recapture-1793546326589794421/home/store.db
+backplane 15:18:47 info hub: 53 lines, state seq 53 from <capture-root>/run/B-recapture-1793546326589794421/home/events.jsonl
+backplane 15:18:47 info hub: vault {"key":"file","locked":false,"why":"","n":0,"flush":""}
+backplane 15:18:47 info hub: log count 53
+backplane 15:18:47 info hub: origin 1793546226
+Backplane listening on http://127.0.0.1:47820
+backplane 15:18:47 info hub: kistack sync: off (BACKPLANE_KISTACK_SYNC=0)
+backplane 15:18:47 info vault: {"key":"file","locked":false,"why":"","n":0,"flush":""}

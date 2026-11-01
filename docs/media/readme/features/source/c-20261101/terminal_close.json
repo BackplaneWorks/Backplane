@@ -1,0 +1,21 @@
+{
+  "request": {
+    "name": "terminal_close",
+    "arguments": {
+      "id": "x1793546000-23"
+    }
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"state\":\"stopped\"}"
+        }
+      ],
+      "isError": false
+    }
+  }
+}

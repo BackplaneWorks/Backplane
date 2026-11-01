@@ -1,0 +1,192 @@
+[
+  {
+    "path": "overview.png",
+    "raw": "raw/current-overview.png",
+    "raw_size": [
+      2000,
+      1440
+    ],
+    "crop_rectangles": [
+      {
+        "source": [
+          0,
+          0,
+          2000,
+          1050
+        ],
+        "destination": [
+          0,
+          0
+        ]
+      }
+    ],
+    "size": [
+      2000,
+      1050
+    ],
+    "sha256": "2b6623e9758a2b9e0e29aadc0c7410a0ea47bb71079f732bb7fa44c81ddb545a",
+    "note": "Mochi Status, projects and threads, Tofu and Pixel; Scratch threads use the Conversations in progress shelf."
+  },
+  {
+    "path": "webhooks.png",
+    "raw": "raw/current-webhooks.png",
+    "raw_size": [
+      2000,
+      1440
+    ],
+    "crop_rectangles": [
+      {
+        "source": [
+          528,
+          72,
+          2000,
+          532
+        ],
+        "destination": [
+          0,
+          0
+        ]
+      }
+    ],
+    "size": [
+      1472,
+      460
+    ],
+    "sha256": "42895337ec4d9ac28bb68de656daac54a3cdaa0603327f437223114113699cf7",
+    "note": "Tofu Webhooks; fictional demo-review-hook, 0 calls. Current UI displays a relative endpoint."
+  },
+  {
+    "path": "space.png",
+    "raw": "raw/current-space.png",
+    "raw_size": [
+      2000,
+      1440
+    ],
+    "crop_rectangles": [
+      {
+        "source": [
+          528,
+          72,
+          2000,
+          1122
+        ],
+        "destination": [
+          0,
+          0
+        ]
+      }
+    ],
+    "size": [
+      1472,
+      1050
+    ],
+    "sha256": "1a6838d207bcbd76915f2b9ba5a41e249afe0202e73a7a44ebc450a0770e53d2",
+    "note": "Pixel Space, persistent structured Rev C control desk."
+  },
+  {
+    "path": "space-webapp.png",
+    "raw": "raw/current-space-webapp.png",
+    "raw_size": [
+      960,
+      1440
+    ],
+    "crop_rectangles": [
+      {
+        "source": [
+          0,
+          0,
+          960,
+          1440
+        ],
+        "destination": [
+          0,
+          0
+        ]
+      }
+    ],
+    "size": [
+      960,
+      1440
+    ],
+    "sha256": "3b6a06d16569254d4cbd46e7600b17be3e3c04fb89419fa3b5c19a8768d9fde8",
+    "note": "Real /bots/pixel/space.html response at 480 CSS pixels, deviceScaleFactor 2."
+  },
+  {
+    "path": "mailroom.png",
+    "raw": "raw/current-mailroom.png",
+    "raw_size": [
+      3200,
+      1700
+    ],
+    "crop_rectangles": [
+      {
+        "source": [
+          528,
+          72,
+          3200,
+          1200
+        ],
+        "destination": [
+          0,
+          0
+        ]
+      }
+    ],
+    "size": [
+      2672,
+      1128
+    ],
+    "sha256": "65b6eed6c7aa227a9a4a62be35eb41f2369adde0fc38d2efcac8e4d149926de4",
+    "note": "Tofu Mailroom, three fictional conversations and the open Gateway handoff message; actual 2x UI pixels."
+  },
+  {
+    "path": "delegation.png",
+    "raw": "raw/current-delegation.png",
+    "raw_size": [
+      2152,
+      1440
+    ],
+    "crop_rectangles": [
+      {
+        "source": [
+          0,
+          0,
+          1472,
+          72
+        ],
+        "destination": [
+          0,
+          0
+        ]
+      },
+      {
+        "source": [
+          528,
+          72,
+          2000,
+          1020
+        ],
+        "destination": [
+          0,
+          72
+        ]
+      }
+    ],
+    "size": [
+      1472,
+      1020
+    ],
+    "sha256": "8986871b720b7beaeea833cb79f319b315d4cb592fd379da18874b7cc80ea613",
+    "note": "Lossless header/content composition: full current thread title and Subagents header above the expanded done rows and conversation; no sidebar or right rail."
+  },
+  {
+    "path": "../mailroom-200.png",
+    "source": "mailroom.png",
+    "size": [
+      2672,
+      1128
+    ],
+    "sha256": "65b6eed6c7aa227a9a4a62be35eb41f2369adde0fc38d2efcac8e4d149926de4",
+    "note": "Byte-identical copy of the real 2x Mailroom crop. No enlargement."
+  }
+]

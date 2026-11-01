@@ -1,0 +1,72 @@
+{
+  "link-cards": {
+    "raw": "raw/link-cards.png",
+    "cropCSS": {
+      "x": 274,
+      "y": 114,
+      "width": 500,
+      "height": 114
+    },
+    "deviceScaleFactor": 2
+  },
+  "reference-thread": {
+    "raw": "raw/reference-thread.png",
+    "cropCSS": {
+      "x": 275,
+      "y": 550,
+      "width": 738,
+      "height": 151
+    },
+    "deviceScaleFactor": 2
+  },
+  "reference-room": {
+    "raw": "raw/reference-room.png",
+    "cropCSS": {
+      "x": 275,
+      "y": 605,
+      "width": 738,
+      "height": 96
+    },
+    "deviceScaleFactor": 2
+  },
+  "reference-project": {
+    "raw": "raw/reference-project.png",
+    "cropCSS": {
+      "x": 275,
+      "y": 605,
+      "width": 738,
+      "height": 96
+    },
+    "deviceScaleFactor": 2
+  },
+  "reference-bot": {
+    "raw": "raw/reference-bot.png",
+    "cropCSS": {
+      "x": 275,
+      "y": 605,
+      "width": 738,
+      "height": 96
+    },
+    "deviceScaleFactor": 2
+  },
+  "btw-autocomplete": {
+    "raw": "raw/btw-autocomplete.png",
+    "cropCSS": {
+      "x": 275,
+      "y": 605,
+      "width": 738,
+      "height": 195
+    },
+    "deviceScaleFactor": 2
+  },
+  "inline-terminal": {
+    "raw": "raw/inline-terminal.png",
+    "cropCSS": {
+      "x": 274,
+      "y": 282,
+      "width": 740,
+      "height": 316
+    },
+    "deviceScaleFactor": 2
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "appended_events": [
+    {
+      "$": "SettingSet",
+      "key": "machine.id",
+      "value": "m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7",
+      "at": 1793546327
+    },
+    {
+      "$": "UberOp",
+      "uid": "demo-mochi",
+      "origin": "m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7",
+      "n": 1,
+      "stamp": "1793546327.000000.m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7",
+      "op": "{\"k\":\"who\",\"name\":\"Mochi\",\"look\":3,\"persona\":\"Coordinates projects, bots and threads.\"}",
+      "at": 1793546327
+    },
+    {
+      "$": "UberOp",
+      "uid": "demo-mochi",
+      "origin": "m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7",
+      "n": 2,
+      "stamp": "1793546327.000001.m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7",
+      "op": "{\"k\":\"lease\",\"holder\":\"m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7\",\"term\":1}",
+      "at": 1793546327
+    },
+    {
+      "$": "UberOp",
+      "uid": "demo-mochi",
+      "origin": "m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7",
+      "n": 3,
+      "stamp": "1793546327.000002.m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7",
+      "op": "{\"k\":\"bind\",\"machine\":\"m21458683c8ab3e1b708685993d59264779f9d35e439ed6c7\",\"bot\":\"mochi\",\"thread\":\"bt-mochi\",\"name\":\"Mochi\"}",
+      "at": 1793546327
+    },
+    {
+      "$": "SettingSet",
+      "key": "accounts.inventory",
+      "value": "{\"version\":1,\"revision\":0,\"profiles\":[],\"error\":\"\"}",
+      "at": 1793546327
+    },
+    {
+      "$": "SettingSet",
+      "key": "tz.machine",
+      "value": "Europe/Athens",
+      "at": 1793546327
+    },
+    {
+      "$": "SettingSet",
+      "key": "tz.rule.Europe/Athens",
+      "value": "EET-2EEST,M3.5.0/3,M10.5.0/4",
+      "at": 1793546327
+    },
+    {
+      "$": "SettingSet",
+      "key": "tz.checked",
+      "value": "1793546327",
+      "at": 1793546327
+    },
+    {
+      "$": "MailMarked",
+      "bot": "tofu",
+      "conv": "demo-mail-2",
+      "status": "open",
+      "seen": 1793546282,
+      "until": 0,
+      "at": 1793546335
+    }
+  ],
+  "forbidden_agent_events": [],
+  "task_states": {
+    "power-check": "done",
+    "layout-check": "done"
+  },
+  "delivered_tasks": [
+    "layout-check",
+    "power-check"
+  ],
+  "blocked_agent_invocations": "grok models\nclaude -p\nclaude --version\ncodex --version\ngrok --version\nmuse serve\nmuse --version\nopencode models\nopencode auth\nopencode --version\npi --list-models\npi --version\nomp models\nomp --version\n",
+  "lossless_selection_verified": true,
+  "mailroom_byte_identical": true
+}
