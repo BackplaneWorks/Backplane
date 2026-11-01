@@ -6,7 +6,7 @@
 //   bun test/tools/disk_full_e2e.ts BINARY WIREDIR
 //
 // No root is needed: the hub runs with SIGXFSZ ignored, and its file size
-// limit (prlimit --fsize) is lowered to the log's size, so every append
+// limit (prlimit --fsize) is lowered to just past the log's size, so every write
 // fails with EFBIG as it would with ENOSPC; raising it again is the disk
 // with room. A stand-in claude logs each turn it is given.
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -75,11 +75,19 @@ try {
   check(r0?.ok && titles().join() === "r0", "a rename is written while there is room");
   // the hub's real pid is the exec'd one (sh exec keeps the pid)
   const before = size();
-  check(limit(h.proc.pid, String(before)) === 0, "the hub's file size limit is the log's size (every append fails)");
+  // what the log holds when the disk fills; a step whose log append went
+  // through just before but whose store write then failed is cut back and
+  // waits too, so the log may shrink here: none of these lines may be lost
+  const held = readFileSync(log, "utf8").split("\n").filter((l) => l);
+  // room for one short line in the log but none in the store (its WAL frames
+  // are 4 KB): the next rename's append goes through and its store write
+  // fails, so it is cut back and waits; the bigger writes after it fail at
+  // the log's append
+  check(limit(h.proc.pid, String(before + 100)) === 0, "the hub's file size limit is the log's size and 100 bytes (log or store write fails)");
   const accepted: boolean[] = [];
   for (const t of ["r1", "r2", "r3"]) accepted.push(!!(await h.rpc("thread.rename", { thread: "t1", title: t }))?.ok);
   check(accepted.every((x) => x), "renames are still taken (they wait instead of being dropped)", accepted);
-  check(size() === before, "nothing reached the log meanwhile", { before, now: size() });
+  check(size() <= before && titles().join() === "r0", "no waiting rename reached the log meanwhile", { before, now: size(), titles: titles() });
   check(h.c.seen.some((x) => x.$ === "ThreadRenamed" && x.title === "r3"), "clients see the waiting changes");
   const note = await until(10000, () => h.c.updates.find((u) => String(u.error ?? "").startsWith("Disk full")));
   check(note, "every client is told: Disk full, changes waiting", h.c.updates.map((u) => u.error));
@@ -111,6 +119,9 @@ try {
   check(await until(20000, () => h.c.updates.some((u) => u.error === "" && String(u.state ?? "").includes("saved"))), "clients are told it is saved");
   check(await until(20000, () => existsSync(started)), "the held agent start runs after the flush: the agent gets its turn");
   check(readFileSync(log, "utf8").includes('"m-df"'), "the turn's message is in the log");
+  const after = new Set(readFileSync(log, "utf8").split("\n"));
+  const lost = held.filter((l) => !after.has(l));
+  check(lost.length === 0, "every line the log held when the disk filled is still in it", lost.map((l) => l.slice(0, 80)));
   await h.stop();
   // the log and the store agree: the next boot is a hot boot with the last title
   h = await hub();
