@@ -18,7 +18,16 @@ runs:
         [ "$RUNNER_OS" = Linux ] || exit 0
         sudo swapoff -a || true
         sudo rm -f /mnt/swapfile
-        sudo fallocate -l "${{ inputs.size }}" /mnt/swapfile
+        # never take the disk the tests write to: leave 12 GiB free
+        want=$(numfmt --from=iec "${{ inputs.size }}")
+        free=$(df --output=avail -B1 /mnt | tail -1)
+        size=$(( free - 12 * 1024 * 1024 * 1024 ))
+        [ "$size" -lt "$want" ] || size=$want
+        if [ "$size" -lt $(( 2 * 1024 * 1024 * 1024 )) ]; then
+          echo "more-swap: only $(numfmt --to=iec "$free") free on /mnt, no extra swap"; df -h; exit 0
+        fi
+        echo "more-swap: $(numfmt --to=iec "$size") of swap ($(numfmt --to=iec "$free") free on /mnt)"
+        sudo fallocate -l "$size" /mnt/swapfile
         sudo chmod 600 /mnt/swapfile
         sudo mkswap /mnt/swapfile >/dev/null
         sudo swapon /mnt/swapfile
