@@ -91,5 +91,28 @@ if (calls !== 3) { bad++; console.error("parse memo: a small text was remembered
 for (let i = 0; i < 9; i++) __bpParsed(big + " ".repeat(i + 1), parse);
 __bpParsed(big, parse);
 if (calls !== 13) { bad++; console.error("parse memo: kept more than 8 texts", calls); }
+// Refs.last.go (src/core/refs.bend), as Bend reads it: a code point at a
+// time, cur the reversed word so far, reset at a space, tab, CR or LF; at
+// the end, cur reversed
+const rsrc = /REFS_HELPER = \(\n([\s\S]*?)\n\)/.exec(py)![1]
+  .split("\n").map((l) => JSON.parse(l.trim().replace(/\\n"$/, '\\n"'))).join("");
+const { __bpRefsLast } = new Function(rsrc + "; return { __bpRefsLast };")();
+function refLast(s: string, cur: string) {
+  for (let i = 0; i < s.length;) {
+    const c = s.codePointAt(i)!, ch = c > 0xffff ? s.slice(i, i + 2) : s[i]; i += ch.length;
+    cur = c === 32 || c === 10 || c === 9 || c === 13 ? "" : ch + cur;
+  }
+  return [...cur].reverse().join("");
+}
+const words = ["", " ", "\n", "\t", "\r", "a", "/btw", "$skill", "@bot", "x😀y", "\ud83d", "\ude00", "é", "  ", "\r\n"];
+for (let i = 0; i < 20000; i++) {
+  const s = Array.from({ length: rnd(8) }, () => words[rnd(words.length)]).join("");
+  const cur = rnd(3) === 0 ? "" : Array.from({ length: rnd(3) }, () => words[rnd(words.length)].replace(/[ \n\t\r]/g, "")).join("");
+  const got = __bpRefsLast(s, cur), want = refLast(s, cur);
+  if (got !== want) { if (bad++ < 5) console.error("refs.last", JSON.stringify(s), JSON.stringify(cur), JSON.stringify(got), JSON.stringify(want)); }
+}
+const long = "word ".repeat(40000) + "/tail";
+const t0 = performance.now(); for (let i = 0; i < 100; i++) __bpRefsLast(long, "");
+if (__bpRefsLast(long, "") !== "/tail" || performance.now() - t0 > 50) { bad++; console.error("refs.last: a 200 KB draft's word is not found from its end"); }
 if (bad) { console.error(`js_native: ${bad} mismatches`); process.exit(1); }
 console.log("js_native: ok");

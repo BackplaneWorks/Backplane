@@ -23,6 +23,7 @@ import ./settings-menu.bend as SM
 import ./icon.bend as WI
 import ../core/tools.bend as TO
 import ../core/client.bend as U
+import ../core/refs.bend as RF
 import ../core/usage.bend as UZ
 import ../core/usage_page.bend as UP
 import ../core/attach.bend as AT
@@ -2999,7 +3000,7 @@ def Local.slash(+l: Local) -> List<&2, D.Node>:
 def Local.send(+l: Local) -> D.Node:
   match l:
     case Local{+d, _, +r, +n, _, +lc}:
-      +stop = Bool.and(r, Bool.and(String.is_empty(String.trim(d)), Nat.is_eq(n, 0n)))
+      +stop = Bool.and(r, Bool.and(RF.Refs.blank(d), Nat.is_eq(n, 0n)))
       View.send.loc(lc, U.Follow.act(stop), U.Follow.button(lc, M.State.empty(), "", r, stop, d))
 
 # the textarea's keys, as View.composer.loc sets them, for rows shown or not

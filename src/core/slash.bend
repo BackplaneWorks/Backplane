@@ -27,8 +27,17 @@ def Slash.table.k(claude: Bool) -> List<&2, Cmd>:
       Slash.own()
 
 # whether the draft is a slash command being typed: one word, no space yet
+# (the "/" first: Bool.and is strict, and the token of a long draft is a
+# walk of all of it)
+def Slash.typing.k(slash: Bool, +draft: String) -> Bool:
+  match slash:
+    case True{}:
+      String.eq(RF.Refs.token(draft), draft)
+    case False{}:
+      False{}
+
 def Slash.typing(+draft: String) -> Bool:
-  Bool.and(String.starts_with(draft, "/"), String.eq(RF.Refs.token(draft), draft))
+  Slash.typing.k(String.starts_with(draft, "/"), draft)
 
 def Slash.has(c: Cmd, +p: String) -> Bool:
   match c:

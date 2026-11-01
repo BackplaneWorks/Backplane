@@ -76,6 +76,14 @@ the pure map, its callers, cache budgets and every protocol stay unchanged.
 Map.get/has walk that immutable trie without reconstructing equal ancestors.
 Their input root is returned unchanged alongside the original value/default.
 
+Web-only `Refs.last.go(s, cur)` (src/core/refs.bend: the word being typed,
+Refs.token, which the composer's slash, skill and reference popups ask on
+every render): the part of s after its last space, tab, CR or LF, or, with
+none, cur reversed and then s; found by scanning back from the end. Bend's
+walk is from the front, a code point at a time, slicing: a 20 KB paste took
+seconds of renders. Fenced by the exact emitted body and its three callees
+(Refs.cur, Refs.sep, String.reverse); at most once per web entry.
+
 Each is found by its shape and must be found exactly once, else the build
 stops (a new Bend that emits them otherwise needs this looked at again).
 With --server (scripts/build-js.sh: one bundle) that holds for every def;
@@ -195,6 +203,23 @@ SEC_FINE_HELPER = (
     "if(!any)return s;let out=\"\",run=0;for(let j=0;j<n;j++){run+=d[j];out+=run>0?\"\\u2022\":cp[j]}return out}\n"
 )
 
+# Refs.last.go, minified: function F(s,c){for(;;){let a=s,b=c;if(a==="")return REV(b);else{let h=...;s=...,c=CUR(SEP(h.codePointAt(0)),h.codePointAt(0),b);continue}}}
+REFS_LAST = re.compile(
+    r'function (' + I + r')\((' + I + r'),(' + I + r')\)\{for\(;;\)\{let (' + I + r')=\2,(' + I + r')=\3;if\(\4===""\)return (' + I + r')\(\5\);'
+    r'else\{let (' + I + r')=\4\.codePointAt\(0\)>65535\?\4\.slice\(0,2\):\4\[0\];\2=\4\.codePointAt\(0\)>65535\?\4\.slice\(2\):\4\.slice\(1\),'
+    r'\3=(' + I + r')\((' + I + r')\(\7\.codePointAt\(0\)\),\7\.codePointAt\(0\),\5\);continue\}\}\}'
+)
+REFS_HELPER = (
+    "function __bpRefsLast(s,c){let i=s.length;while(i>0){const u=s.charCodeAt(i-1);if(u===32||u===10||u===9||u===13)break;i--}"
+    "return i>0?s.slice(i):[...c].reverse().join(\"\")+s}\n"
+)
+def refs_fenced(src, m):
+    """the callees are exactly Refs.cur, Refs.sep and String.reverse"""
+    cur, sep, rev = re.escape(m.group(8)), re.escape(m.group(9)), re.escape(m.group(6))
+    return (len(re.findall(r'function ' + cur + r'\((' + I + r'),(' + I + r'),(' + I + r')\)\{if\(\1\)return"";else return ' + I + r'\(\2\)\+\3\}', src)) == 1 and
+            len(re.findall(r'function ' + sep + r'\((' + I + r')\)\{return \1===32\|\|\1===10\|\|\(\1===9\|\|\1===13\)\}', src)) == 1 and
+            len(re.findall(r'function ' + rev + r'\((' + I + r')\)\{return ' + I + r'\(\1,""\)\}', src)) == 1)
+
 # Bend 2.0.39 Base map definitions, after the standard Bun minification.
 # Unlike the existing prefix rewrites, these fences cover whole definitions
 # and the complete Map.diff helper chain. Compiler/Base drift needs review.
@@ -246,6 +271,15 @@ if not server:
     for name in ("String.split", "List.length", "String.starts_with", "String.contains"):
         if found[name] > copies:
             sys.exit(f"js-native: {name} exceeds the web Bend entry count")
+found["Refs.last.go"] = 0
+if not server:
+    for s in srcs.values():
+        # the loop's shape is generic (other word walks share it): its
+        # callees, exactly Refs.cur, Refs.sep and String.reverse, name it
+        ms = [m for m in REFS_LAST.finditer(s) if refs_fenced(s, m)]
+        if len(ms) > 1:
+            sys.exit("js-native: Refs.last.go needs its exact body and callees, once per entry")
+        found["Refs.last.go"] += len(ms)
 found["Sec.fine"] = sum(len(SEC_FINE.findall(s)) for s in srcs.values())
 if (server and found["Sec.fine"] != 1) or (not server and found["Sec.fine"] > found["String.cmp"]):
     sys.exit(f"js-native: Sec.fine found {found['Sec.fine']} times, not once")
@@ -299,7 +333,7 @@ if server:
             if len(re.findall(r"function " + re.escape(head) + r"\(", s)) != 1:
                 sys.exit("js-native: Cbor.Enc.text needs its exact Enc.head once")
 for f, s in srcs.items():
-    hit = CMP.search(s) or BIT.search(s) or SPLIT.search(s) or LEN.search(s) or PRE.search(s) or HAS.search(s) or SEC_FINE.search(s)
+    hit = CMP.search(s) or BIT.search(s) or SPLIT.search(s) or LEN.search(s) or PRE.search(s) or HAS.search(s) or SEC_FINE.search(s) or not server and any(refs_fenced(s, m) for m in REFS_LAST.finditer(s))
     if not hit:
         continue
     # one pass down the list; nat_chk once (the count only grows)
@@ -337,6 +371,9 @@ for f, s in srcs.items():
     if SEC_FINE.search(s):
         s = SEC_FINE.sub(lambda m: 'function %s(%s,%s){return __bpSecFine(%s,%s)}' % (m.group(1), m.group(2), m.group(3), m.group(2), m.group(3)), s)
         s = SEC_FINE_HELPER + s
+    if not server and any(refs_fenced(s, m) for m in REFS_LAST.finditer(s)):
+        s = REFS_LAST.sub(lambda m: 'function %s(%s,%s){return __bpRefsLast(%s,%s)}' % (m.group(1), m.group(2), m.group(3), m.group(2), m.group(3)) if refs_fenced(s, m) else m.group(0), s)
+        s = REFS_HELPER + s
     # (a module's imports may come after it: they are hoisted)
     s = HELPERS + s
     open(f, "w", encoding="utf-8").write(s)
@@ -351,7 +388,7 @@ for name, call in (("Map.bit", "{return __bpMapBit("), ("Map.diff", "{return __b
                    ("Cbor.Enc.text", "return __bpCborText("), ("Json.parse", "){return __bpParsed("),
                    ("Json.show", "){return __bpJsonShow("), ("ContentEq.same", "){return __bpContentEq("),
                    ("Json.bytes.esc", "){return __bpJsonBytesEsc("), ("Json.bytes.str", "){return __bpJsonBytesStr("),
-                   ("Sec.fine", "){return __bpSecFine(")):
+                   ("Sec.fine", "){return __bpSecFine("), ("Refs.last.go", "){return __bpRefsLast(")):
     n = outs.count(call)
     if n != found[name]:
         sys.exit(f"js-native: {name}'s native body is in the output {n} times, not {found[name]}")

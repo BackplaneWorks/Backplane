@@ -1412,7 +1412,7 @@ def Follow.stop.k(run: Bool, blank: Bool) -> Bool:
       False{}
 
 def Follow.stop(run: Bool, +draft: String, +atts: List<&2, String>) -> Bool:
-  Follow.stop.k(run, Bool.and(String.is_empty(String.trim(draft)), List.is_empty(&2, String, atts)))
+  Follow.stop.k(run, Bool.and(RF.Refs.blank(draft), List.is_empty(&2, String, atts)))
 
 # "/btw <question>": a side question about the thread, answered off to
 # the side by the writing model; the turn and the thread never see it

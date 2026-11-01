@@ -14522,6 +14522,20 @@ def Laws.component_fragment_only_last_field_completes(key, value, tail):
   {==}
 
 def Laws.copy_keeps_viewer_reads():
+
+def Laws.refs_blank_empty():
+  {==}
+
+def Laws.refs_blank_spaces():
+  {==}
+
+def Laws.refs_blank_word():
+  {==}
+
+def Laws.refs_blank_trailing():
+  {==}
+
+def Laws.slash_typing_needs_slash():
   {==}
 # ---- store-upgrade ----
 def Laws.sdb_up_parents_exact():
@@ -14699,5 +14713,6 @@ def Laws.draft_bound_none(): {==}
 
 # BEGIN page olderNext (H)
 def Laws.view_page_older_next_whole(cursor): {==}
+
 def Laws.view_page_older_next_partial(cursor): {==}
 # END page olderNext (H)
