@@ -65,6 +65,19 @@ asks remain at their sources for the person to answer. Source alerts from
 managed workers/private runs/other bots are suppressed; browsing their timelines
 and approval cards remains available.
 
+A tell also writes a `note` alert for the owner's conversation, so the person is
+notified, and puts a context note in the owner's ride (`told:<msg>`): the
+published text reaches the chat, not the owner's own session, which otherwise
+went on as if nothing had been reported. The note joins the owner's running
+turn on its next Backplane tool result, or its next turn; it starts no turn by
+itself. A private lane that ends interrupted or failed (a provider session
+limit, a restart) before it told anyone hands its escalation note
+(`mail.private.note.<lane>`) to the owner's ride once (`lost:<lane>`,
+`mail.private.handed.<lane>`; `Private.lost` in hub.bend, checked after the
+fallback pass so a lane a fallback continued is left alone): a busy owner takes
+it in its turn or at its end, an idle one is woken with it. Stopped lanes are
+never resumed, so before this such escalations were lost.
+
 A private triage tool refusal neither escalates nor acknowledges its source
 input. It returns a denial with permitted evidence alternatives, without raw
 arguments or a new approval. Prefer `thread_read` for a source's status and
