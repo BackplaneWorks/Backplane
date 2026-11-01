@@ -71,19 +71,37 @@ def tools():
     os.environ['PATH'] = str(folder)+':'+os.environ['PATH']
 
 
+def check_layout(spec):
+    layout = spec.get('check_layout')
+    if (spec.get('name') != 'check' or spec.get('gate') != 'check' or
+            not isinstance(layout, dict) or set(layout) != {'jobs','shards'} or
+            type(layout['jobs']) is not int or layout['jobs'] != 1 or
+            type(layout['shards']) is not int or not 1 <= layout['shards'] <= 16):
+        raise SystemExit('Invalid or missing remote serial CHECK layout')
+    if spec.get('check_shards', str(layout['shards'])) != str(layout['shards']):
+        raise SystemExit('Conflicting remote serial CHECK layout')
+    return layout
+
+
 def boat(encoded):
     spec = json.loads(zlib.decompress(base64.urlsafe_b64decode(encoded)))
     name = spec['name']
     if name not in ['check', 'proof', 'tests', 'payload', 'focused']:
         raise SystemExit('Unsupported remote phase')
+    layout = check_layout(spec) if name == 'check' or spec.get('gate') == 'check' else None
     os.chdir(ROOT)
     os.environ.update(BEND_NO_TELEMETRY='1', BACKPLANE_TELEMETRY='off',
         BACKPLANE_TELEMETRY_BAKE='0', BACKPLANE_GOOGLE_BAKE='0', BACKPLANE_NO_UPDATE='1', BACKPLANE_ORDER_SERVER='http://127.0.0.1:9',
-        CHECK_JOBS='1', CHECK_SHARDS=str(spec.get('check_shards','1')), CHECK_FALLBACK='0', TEST_JOBS='2', TEST_SHARD_COUNT='1',
+        CHECK_JOBS='1', CHECK_SHARDS=str(layout['shards']) if layout else str(spec.get('check_shards','1')), CHECK_FALLBACK='0', TEST_JOBS='2', TEST_SHARD_COUNT='1',
         BUN_JSC_forceRAMSize='4294967296')
     env = {**os.environ, 'BP_KEY_ROOTS': ' '.join(spec['roots'])} if spec['roots'] else os.environ
     def inputs():
-        return subprocess.check_output(['scripts/inputs-key.sh', 'local-ci-v2:'+spec['gate'], *spec['files']],
+        label = 'local-ci-v2:' + spec['gate']
+        if layout:
+            if os.environ.get('CHECK_JOBS') != '1' or os.environ.get('CHECK_SHARDS') != str(layout['shards']):
+                raise SystemExit('Remote serial CHECK layout changed; receipt refused')
+            label += ':serial-shards=' + str(layout['shards'])
+        return subprocess.check_output(['scripts/inputs-key.sh', label, *spec['files']],
                                        cwd=ROOT, env=env, text=True).strip()
     if inputs() != spec['base']:
         raise SystemExit('Remote source/compiler input mismatch; phase not executed')
@@ -100,6 +118,7 @@ def boat(encoded):
     data = json.loads((folder/'phase.json').read_text())
     import shutil
     data.update(base=spec['base'], name=name, compiler_sha256=hashlib.sha256(Path(shutil.which('bend')).read_bytes()).hexdigest())
+    if layout: data['check_layout'] = layout
     data['python'] = sys.version
     if name in ['tests','payload']:
         data['bun'] = subprocess.check_output(['bun','--revision'],text=True).strip()

@@ -108,17 +108,17 @@ def main() -> IO(Unit):
     C.Check.str("rooms with news", ids(PL.Plane.rooms(p)), "r1,")
     C.Check.str("a running routine first", ids(PL.Plane.routines(p)), "rt1,rt2,")
     C.Check.str("routine states", states(PL.Plane.routines(p)), "working,idle,")
-    C.Check.str("counts", PL.Plane.counts(I.En{}, p), "3 need you · 2 running")
+    C.Check.str("counts", PL.Plane.counts(I.En{}, p), "2 need you · 1 failed · 2 running")
     # routines-cal: once, reminders and done routines; the next time is in the person's zone
     +pr : PL.Plane = PL.Plane.of(ui([M.SettingSet{"person.tz", "UTC", 1n}, M.RoutineSet{"rt3", "b2", "Stand", "", "stand up", True{}, 199000n}, M.RoutinePlan{"rt3", 203600n, "person", "remind", 199000n},
       M.RoutineSet{"rt4", "b2", "Old", "", "x", True{}, 199000n}, M.RoutinePlan{"rt4", 199500n, "person", "", 199000n}, M.RoutineFired{"rt4", 199500n}, M.RoutineDone{"rt4", 199500n}]), now())
     C.Check.str("a reminder is a routine row in the reminder state, a done one is gone", ids(PL.Plane.routines(pr)), "rt1,rt3,rt2,")
     C.Check.str("states with a reminder", states(PL.Plane.routines(pr)), "working,reminder,idle,")
     C.Check.str("a reminder row says when, in your time", subs(PL.Plane.routines(pr)), "daily at 09:00 · Sat 3 Jan 09:00 UTC,Sat 3 Jan 08:33 UTC · in 1h,every 15 minutes · Sat 3 Jan 07:45 UTC,")
-    C.Check.str("the count without rows", PL.Plane.tally.words(ui(Nil{}), now()), "3 need you · 2 running")
+    C.Check.str("the count without rows", PL.Plane.tally.words(ui(Nil{}), now()), "2 need you · 1 failed · 2 running")
     C.Check.str("every way to be need or run", PL.Plane.tally.words(PL.Plane.demo.rich(), 200000n), PL.Plane.counts(I.En{}, PL.Plane.of(PL.Plane.demo.rich(), 200000n)))
-    C.Check.str("... is what it is", PL.Plane.counts(I.En{}, PL.Plane.of(PL.Plane.demo.rich(), 200000n)), "5 need you · 5 running")
-    C.Check.str("a thread elsewhere counts", PL.Plane.tally.words(far(False{}), now()), "3 need you · 3 running")
+    C.Check.str("... is what it is", PL.Plane.counts(I.En{}, PL.Plane.of(PL.Plane.demo.rich(), 200000n)), "4 need you · 1 failed · 5 running")
+    C.Check.str("a thread elsewhere counts", PL.Plane.tally.words(far(False{}), now()), "2 need you · 1 failed · 3 running")
     C.Check.str("the plane as text, need first", PL.Plane.text(p, "", "this machine", now(), False{}),
       "Status plane of this machine\nNeeds you (3)\n- t1 · approval · A · One · 16m ago\n- t2 · question · B · One · 15m ago\n- t3 · failed · C · One · 13m ago\nRunning (2)\n- b1 · working · Kit · 1m ago\n- t4 · working · D · One · 11m ago\nBots (2)\n- b1 · work · Kit · working · 1m ago\n- b2 · sleep · Pip · 2d ago\nRooms with unread posts (1)\n- r1 · unread · ops · 1 unread · 3m ago\nRoutines (2)\n- rt1 · working · Digest · daily at 09:00 · Sat 3 Jan 09:00 UTC · next in 1h\n- rt2 · idle · Poll · every 15 minutes · Sat 3 Jan 07:45 UTC · next in 11m\nIdle in the last day: 2 (plane_read with idle: true lists them).\n")
     C.Check.str("need before run in the text", Bool.show(PL.Plane.text.need_first(p, now())), "True")

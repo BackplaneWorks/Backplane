@@ -66,6 +66,12 @@ def appends(os: List<&2, H.Out>) -> Nat:
     case H.MailAppend{_, _, _} <> t: 1n+appends(t)
     case _ <> t: appends(t)
 
+def append_line(os: List<&2, H.Out>) -> String:
+  match os:
+    case Nil{}: ""
+    case H.MailAppend{line, _, _} <> _: line
+    case _ <> rest: append_line(rest)
+
 def res_step(r: MC.Res) -> H.Step:
   match r:
     case MC.Res{_, _, st}: st
@@ -231,6 +237,16 @@ def room_restart_checks() -> IO(Unit):
     +reported : M.State = M.State.apply(s, M.MessagePosted{"bot-thread", "bot-final", M.Assistant{}, "Verified new artifact: backplane://thread/other", 58n})
     +report : H.Step = H.Run.after(reported, 58n, H.Step{[M.TurnChanged{"bot-thread", M.Completed{}, 58n}], Nil{}})
     n("substantive other bot completion is filed for triage", appends(H.Step.outs_of(report)), 1n)
+    +envelope : J.Json = Maybe.default(&2, J.Json, J.Json.parse(append_line(H.Step.outs_of(report))), J.Null{})
+    C.Check.str("bot report retains actual source identity", J.Json.get_str(J.Json.get_obj(envelope, "mail"), "from", ""), "bot:pip")
+    C.Check.str("bot report remains scoped to coordinator mailbox", J.Json.get_str(J.Json.get_obj(envelope, "mail"), "to", ""), "bot:b")
+    check("bot report retains substantive outcome", String.contains(J.Json.get_str(envelope, "text", ""), "Verified new artifact"))
+    n("bot completion never becomes coordinator raw chat", posts(H.Queue.changes(report), "foh"), 0n)
+    +botactive : M.State = M.State.apply(s, M.TurnChanged{"bot-thread", M.Running{}, 57n})
+    +blank : H.Step = H.Run.after(botactive, 58n, H.Step{[M.MessagePosted{"bot-thread", "bot-blank", M.Assistant{}, " \n\t", 58n}, M.TurnChanged{"bot-thread", M.Completed{}, 58n}], Nil{}})
+    n("whitespace successful bot completion files no triage envelope", appends(H.Step.outs_of(blank)), 0n)
+    +failed : H.Step = H.Run.after(botactive, 58n, H.Step{[M.TurnChanged{"bot-thread", M.Failed{}, 58n}], Nil{}})
+    n("failed empty bot completion still files for triage", appends(H.Step.outs_of(failed)), 1n)
     C.Check.str("other bot source completion is quiet", N.Policy.said(N.Policy.end(s, 58n, "bot-thread", "completed")), "-")
     +kept : H.Step = H.Run.recover(restart, 59n, [runid(live)], H.Step.none())
     n("adopted run not restarted/reported", List.length(&2, M.Change, H.Queue.changes(kept)), 0n)

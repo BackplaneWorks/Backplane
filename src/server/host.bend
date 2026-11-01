@@ -104,6 +104,29 @@ def Sock.peer(sock: Socket) -> IO(Socket & String):
 def Sock.shutdown(sock: Socket) -> IO(Socket):
   import "./effects/host.js"
 
+# Dictation's audio from a client (server.bend's /voice/in): a helper's
+# stdin kept under a key, the bytes of each upload copied straight into it
+# (never a Bend list per byte), and the key let go (the helper reads EOF).
+# keep: the socket is the key's from now on (a second keep replaces it)
+def Sock.keep(sock: Socket, key: String) -> IO(Unit):
+  import "./effects/host.js"
+
+# the next n bytes of sock into the key's socket; Done once all n are read
+# (a full helper drops what does not fit: audio, not data); fails when sock
+# closes early or the key is unknown
+def Sock.feed(sock: Socket, key: String, n: U32) ->
+  IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
+# bytes already read (an upload's head) into the key's socket; 0 when the
+# key is unknown, else 1
+def Sock.feed_bytes(key: String, data: List<&2, U32>) -> IO(U32):
+  import "./effects/host.js"
+
+# the key's socket shut for writing and closed, and forgotten
+def Sock.unkeep(key: String) -> IO(Unit):
+  import "./effects/host.js"
+
 # start cmd in cwd; stdin+stdout are the returned socket. err: 0 drop
 # stderr, 1 merge it into stdout, 2 inherit, 3 to a file of its own that
 # Proc.errtail reads back

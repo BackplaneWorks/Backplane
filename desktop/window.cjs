@@ -14,8 +14,21 @@ function installShortcuts(window, electron, browser = () => null, platform = pro
       accelerator:'Control+Shift+I', acceleratorWorksWhenHidden:true, click:() => window.webContents.toggleDevTools()}]));
     window.setAutoHideMenuBar(false);window.setMenuBarVisibility(false);
   }
-  const bind = contents => contents.on('before-input-event', (event, input) => {
+  const bind = contents => {
+    let rightAlt = false;
+    contents.on('before-input-event', (event, input) => {
     if (contents !== window.webContents && contents.getOwnerBrowserWindow?.() !== window) return;
+    // Windows/Linux AltGr often arrives as Ctrl+Alt. Keep the right Alt
+    // key's text-entry chord, including on layouts that report it as Alt.
+    if (input.code === 'AltRight' || input.key === 'AltGraph') rightAlt = input.type !== 'keyUp';
+    // Own-window shortcut works from the Browser guest too, without
+    // registering a desktop-global shortcut or changing OS key bindings.
+    if (input.type === 'keyDown' && !input.isComposing && !input.isAutoRepeat && !input.shift && !rightAlt &&
+        !input.modifiers?.some(value => /altgr|altgraph/i.test(value)) &&
+        input.key.toLowerCase() === 'i' && input.control &&
+        (platform === 'darwin' ? input.meta && !input.alt : input.alt && !input.meta)) {
+      event.preventDefault();window.webContents.focus();window.webContents.send('desktop:improvements', {});return;
+    }
     if (input.type !== 'keyDown' || input.alt || input.isComposing) return;
     const key = input.key.toLowerCase();
     if (platform === 'darwin' && input.control && input.meta && key === 'f') { event.preventDefault(); window.setFullScreen(!window.isFullScreen()); return; }
@@ -48,7 +61,8 @@ function installShortcuts(window, electron, browser = () => null, platform = pro
       if (key === 'w') window.close();
       if (key === 'q') electron.app.quit();
     }
-  });
+    });
+  };
   bind(window.webContents);
   const created = (_event, contents) => bind(contents);
   electron.app.on?.('web-contents-created', created);

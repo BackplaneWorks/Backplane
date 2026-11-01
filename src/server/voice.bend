@@ -7,6 +7,7 @@ import ../core/json.bend as J
 import ../core/utf8.bend as U
 import ../core/codec.bend as C
 import ../core/voice.bend as V
+import ../core/vdict.bend as VD
 
 # Dictation's IO (docs/voice.md): the OpenAI key and the dictionary kept in
 # the home, a live session of the desktop's microphone run by the
@@ -27,6 +28,10 @@ def Vo.dir(+home: String) -> String:
 
 def Vo.dict(+home: String) -> String:
   home ++ "/voice/dictionary.txt"
+
+# the terms as the helper's keywords (the cloud's), written at each start
+def Vo.keywords(+home: String) -> String:
+  home ++ "/voice/keywords.txt"
 
 def Vo.pid(+home: String) -> String:
   home ++ "/voice/live.pid"
@@ -118,57 +123,179 @@ def Vo.msg(+thread: String, +ev: String, kvs: List<&2, J.KV>) -> String:
 def Vo.err(+thread: String, +e: String) -> String:
   Vo.msg(thread, "error", [J.KV{"error", J.Str{e}}])
 
-def Vo.text(+thread: String, +item: String, +t: String, +ds: List<&2, String>) -> String:
-  Vo.msg(thread, "text", [J.KV{"item", J.Str{item}}, J.KV{"text", J.Str{t}}, J.KV{"firm", J.Flag{V.Voice.firm(ds, t)}},
-    J.KV{"unsure", V.Voice.unsure.json(V.Voice.unsure(ds, Nil{}, t))}])
+# The session
+# -----------
+# What a start asks for (bothub.bend's Vreq adds the dictionary and the
+# settings to every bots.voice request): the engine ("local" or "openai",
+# chosen by Vo.engine), the local model, where the audio comes from ("hub":
+# this machine's microphone; "client": a client's, uploaded to /voice/in
+# under `key`) and the dictionary.
+type VoReq is Data:
+  VoReq{engine: String, model: String, src: String, key: String, d: VD.VDict}
 
-def Vo.line.k(i: Nat, +o: J.Json, +thread: String, +ds: List<&2, String>) -> String:
+def VoReq.engine(+r: VoReq) -> String:
+  match r:
+    case VoReq{e, _, _, _, _}:
+      e
+
+def VoReq.model(+r: VoReq) -> String:
+  match r:
+    case VoReq{_, m, _, _, _}:
+      m
+
+def VoReq.src(+r: VoReq) -> String:
+  match r:
+    case VoReq{_, _, s, _, _}:
+      s
+
+def VoReq.key(+r: VoReq) -> String:
+  match r:
+    case VoReq{_, _, _, k, _}:
+      k
+
+def VoReq.d(+r: VoReq) -> VD.VDict:
+  match r:
+    case VoReq{_, _, _, _, d}:
+      d
+
+def VoReq.timed(+r: VoReq) -> Bool:
+  String.eq(VoReq.engine(r), "local")
+
+# the reader's state: the settling segment, the cloud's text so far, the
+# segment's corrected words and guesses so far, the tail last sent
+type VoSt is Data:
+  VoSt{set: VD.VSet, acc: String, seg: List<&2, VD.VW>, ask: List<&2, V.Unsure>, tl: String, fxs: List<&2, VD.VFx>}
+
+def Vo.st0() -> VoSt:
+  VoSt{VD.Vs.empty(), "", Nil{}, Nil{}, "", Nil{}}
+
+# what one helper line gives: messages for the client and the state after
+type VoOut is Data:
+  VoOut{msgs: List<&2, String>, st: VoSt}
+
+def Vo.one(+m: String, st: VoSt) -> VoOut:
+  VoOut{Bool.pick(List<&2, String>, String.is_empty(m), Nil{}, [m]), st}
+
+# ev words: "first" when nothing of the segment was committed before, the
+# words committed now (never to change; corrected), the tail
+# (may still change), "firm" when the committed words open with a term,
+# the segment's fixes so far, and on its end "final" with the words to clarify
+def Vo.words.msg(+thread: String, +item: String, +first: Bool, +commit: String, +tail: String, +firm: Bool, +fixes: J.Json, +fin: Bool, +unsure: J.Json) -> String:
+  Vo.msg(thread, "words", [J.KV{"item", J.Str{item}}, J.KV{"first", J.Flag{first}}, J.KV{"commit", J.Str{commit}}, J.KV{"tail", J.Str{tail}}, J.KV{"firm", J.Flag{firm}},
+    J.KV{"fixes", fixes}, J.KV{"final", J.Flag{fin}}, J.KV{"unsure", unsure}])
+
+def Vo.words.k(quiet: Bool, +m: String, st: VoSt) -> VoOut:
+  match quiet:
+    case True{}:
+      VoOut{Nil{}, st}
+    case False{}:
+      VoOut{[m], st}
+
+def Vo.words.go(+thread: String, +item: String, +d: VD.VDict, +fin: Bool, +fx: VD.VFix, +tail: String, +set: VD.VSet, +acc: String, +seg: List<&2, VD.VW>, +ask: List<&2, V.Unsure>, +tl: String, +fxs: List<&2, VD.VFx>) -> VoOut:
+  Vo.words.k(Bool.and(Bool.not(fin), Bool.and(List.is_empty(&2, VD.VW, VD.VFix.words(fx)), String.eq(tail, tl))),
+    Vo.words.msg(thread, item, List.is_empty(&2, VD.VW, seg), VD.Vdc.text(VD.VFix.words(fx)), tail, V.Voice.firm(VD.Vdc.terms(d), VD.Vdc.text(VD.VFix.words(fx))), VD.Vdc.fixes.json(List.append(&2, VD.VFx, fxs, VD.VFix.fixes(fx))), fin,
+      Bool.pick(J.Json, fin, V.Voice.unsure.json(VD.Vdc.asks(d, Nil{}, VD.VFix{List.append(&2, VD.VW, seg, VD.VFix.words(fx)), Nil{}, List.append(&2, V.Unsure, ask, VD.VFix.ask(fx))})), J.Json.arr(Nil{}))),
+    Bool.pick(VoSt, fin, VoSt{set, "", Nil{}, Nil{}, "", Nil{}}, VoSt{set, acc, List.append(&2, VD.VW, seg, VD.VFix.words(fx)), List.append(&2, V.Unsure, ask, VD.VFix.ask(fx)), tail, List.append(&2, VD.VFx, fxs, VD.VFix.fixes(fx))}))
+
+# a settled step into a message: the committed words corrected, the tail
+# corrected for display; nothing when nothing changed
+def Vo.words(+thread: String, +item: String, +d: VD.VDict, fin: Bool, +x: VD.VStep, st: VoSt) -> VoOut:
+  match st:
+    case VoSt{_, +acc, +seg, +ask, +tl, +fxs}:
+      Vo.words.go(thread, item, d, fin, VD.Vdc.fix(d, VD.VStep.commit(x)), VD.Vdc.text(VD.VFix.words(VD.Vdc.fix(d, VD.VStep.tail(x)))), VD.VStep.st(x), acc, seg, ask, tl, fxs)
+
+def Vo.set(+st: VoSt) -> VD.VSet:
+  match st:
+    case VoSt{s, _, _, _, _, _}:
+      s
+
+def Vo.acc(+st: VoSt) -> String:
+  match st:
+    case VoSt{_, a, _, _, _, _}:
+      a
+
+# the cloud's deltas for item, added to what came before for it
+def Vo.acc.for(+st: VoSt, +item: String, +text: String) -> String:
+  Bool.pick(String, String.eq(VD.Vs.item(Vo.set(st)), item), Vo.acc(st) ++ text, text)
+
+def Vo.with.acc(st: VoSt, +a: String) -> VoSt:
+  match st:
+    case VoSt{s, _, g, k, t, f}:
+      VoSt{s, a, g, k, t, f}
+
+def Vo.delta(+thread: String, +item: String, +a: String, +d: VD.VDict, +st: VoSt) -> VoOut:
+  Vo.words(thread, item, d, False{}, VD.Vs.hyp(False{}, Vo.set(st), item, VD.Vdc.words.text(a), 0n, VD.Vdc.waits(d)), Vo.with.acc(st, a))
+
+def Vo.done.ws(timed: Bool, +o: J.Json) -> List<&2, VD.VW>:
+  match timed:
+    case True{}:
+      VD.Vdc.words.json(J.Json.get_obj(o, "words"))
+    case False{}:
+      VD.Vdc.words.text(J.Json.get_str(o, "text", ""))
+
+def Vo.step.k(i: Nat, +o: J.Json, +thread: String, +r: VoReq, +st: VoSt) -> VoOut:
   match i:
     case 0n:
-      Vo.msg(thread, "live", [J.KV{"recorder", J.Str{J.Json.get_str(o, "recorder", "")}}, J.KV{"device", J.Str{J.Json.get_str(o, "device", "")}},
-        J.KV{"label", J.Str{J.Json.get_str(o, "label", "")}}])
+      Vo.one(Vo.msg(thread, "live", [J.KV{"recorder", J.Str{J.Json.get_str(o, "recorder", "")}}, J.KV{"device", J.Str{J.Json.get_str(o, "device", "")}},
+        J.KV{"label", J.Str{J.Json.get_str(o, "label", "")}}, J.KV{"engine", J.Str{VoReq.engine(r)}}]), st)
     case 1n:
-      Vo.msg(thread, "part", [J.KV{"item", J.Str{J.Json.get_str(o, "item", "")}}, J.KV{"text", J.Str{J.Json.get_str(o, "text", "")}}])
+      Vo.delta(thread, J.Json.get_str(o, "item", ""), Vo.acc.for(st, J.Json.get_str(o, "item", ""), J.Json.get_str(o, "text", "")), VoReq.d(r), st)
     case 2n:
-      Vo.text(thread, J.Json.get_str(o, "item", ""), String.trim(J.Json.get_str(o, "text", "")), ds)
+      Vo.words(thread, J.Json.get_str(o, "item", ""), VoReq.d(r), True{}, VD.Vs.done(VoReq.timed(r), Vo.set(st), J.Json.get_str(o, "item", ""), Vo.done.ws(VoReq.timed(r), o)), st)
     case 3n:
-      Vo.msg(thread, "stopping", Nil{})
+      Vo.one(Vo.msg(thread, "stopping", Nil{}), st)
     case 4n:
-      Vo.err(thread, J.Json.get_str(o, "error", "dictation failed"))
+      Vo.one(Vo.err(thread, J.Json.get_str(o, "error", "dictation failed")), st)
     case 5n:
-      Vo.msg(thread, "level", [J.KV{"v", J.Num{Nat.show(J.Json.get_nat(o, "v", 0n))}}])
+      Vo.one(Vo.msg(thread, "level", [J.KV{"v", J.Num{Nat.show(J.Json.get_nat(o, "v", 0n))}}]), st)
     case 6n:
-      Vo.msg(thread, "hint", [J.KV{"hint", J.Str{J.Json.get_str(o, "hint", "")}}])
+      Vo.one(Vo.msg(thread, "hint", [J.KV{"hint", J.Str{J.Json.get_str(o, "hint", "")}}]), st)
+    case 7n:
+      Vo.words(thread, J.Json.get_str(o, "item", ""), VoReq.d(r), False{},
+        VD.Vs.hyp(True{}, Vo.set(st), J.Json.get_str(o, "item", ""), VD.Vdc.words.json(J.Json.get_obj(o, "words")), J.Json.get_nat(o, "end", 0n), VD.Vdc.waits(VoReq.d(r))), st)
+    case 8n:
+      Vo.one(Vo.msg(thread, "loaded", [J.KV{"ms", J.Num{Nat.show(J.Json.get_nat(o, "ms", 0n))}}]), st)
     case _:
-      ""
+      VoOut{Nil{}, st}
 
-def Vo.line.m(m: Maybe<&2, J.Json>, +thread: String, +ds: List<&2, String>) -> String:
+def Vo.step.m(m: Maybe<&2, J.Json>, +thread: String, +r: VoReq, st: VoSt) -> VoOut:
   match m:
     case Some{+o}:
-      Vo.line.k(C.Codec.pos(["ready", "delta", "done", "stopping", "error", "level", "hint"], J.Json.get_str(o, "event", "")), o, thread, ds)
+      Vo.step.k(C.Codec.pos(["ready", "delta", "done", "stopping", "error", "level", "hint", "hyp", "loaded"], J.Json.get_str(o, "event", "")), o, thread, r, st)
     case None{}:
-      ""
+      VoOut{Nil{}, st}
 
-# one of the helper's lines as a message for the client ("" for none)
-def Vo.line(+line: String, +thread: String, +ds: List<&2, String>) -> String:
-  Vo.line.m(J.Json.parse(line), thread, ds)
+# one of the helper's lines: messages for the client, and the state after
+def Vo.step(+line: String, +thread: String, +r: VoReq, st: VoSt) -> VoOut:
+  Vo.step.m(J.Json.parse(line), thread, r, st)
 
 def Vo.send(+out: Chan(String), +text: String) -> IO(Unit):
   do IO<Unit>:
     ok : Result<&1, &1, String, Unit> <- Chan.send(String, out, text)
     return Unit{}
 
-def Vo.put(+text: String, +out: Chan(String)) -> IO(Unit):
-  Bool.pick(IO(Unit), String.is_empty(text), IO.pure(Unit, Unit{}), Vo.send(out, text))
-
-def Vo.say(ls: List<&2, String>, +out: Chan(String), +thread: String, +ds: List<&2, String>) -> IO(Unit):
-  match ls:
+def Vo.sends(ms: List<&2, String>, +out: Chan(String)) -> IO(Unit):
+  match ms:
     case Nil{}:
       IO.pure(Unit, Unit{})
-    case l <> t:
+    case +m <> t:
       do IO<Unit>:
-        Vo.put(Vo.line(l, thread, ds), out)
-        Vo.say(t, out, thread, ds)
+        Vo.send(out, m)
+        Vo.sends(t, out)
+
+def Vo.said(o: VoOut, +out: Chan(String), k: VoSt -> IO(VoSt)) -> IO(VoSt):
+  match o:
+    case VoOut{ms, st}:
+      do IO<VoSt>:
+        Vo.sends(ms, out)
+        k(st)
+
+def Vo.say(ls: List<&2, String>, +out: Chan(String), +thread: String, +r: VoReq, st: VoSt) -> IO(VoSt):
+  match ls:
+    case Nil{}:
+      IO.pure(VoSt, st)
+    case l <> t:
+      Vo.said(Vo.step(l, thread, r, st), out, st2 => Vo.say(t, out, thread, r, st2))
 
 def Vo.unpid.k(same: Bool, +home: String) -> IO(Unit):
   match same:
@@ -183,53 +310,72 @@ def Vo.unpid(+home: String, +pid: U32) -> IO(Unit):
     +t : String <- BN.Bf.text(Vo.pid(home))
     Vo.unpid.k(String.eq(String.trim(t), U32.show(pid)), home)
 
-def Vo.end(s: Socket, +pid: U32, +home: String, +out: Chan(String), +thread: String) -> IO(Unit):
+def Vo.end(s: Socket, +pid: U32, +home: String, +out: Chan(String), +thread: String, +r: VoReq) -> IO(Unit):
   do IO<Unit>:
     Socket.close(s)
+    H.Sock.unkeep(VoReq.key(r))
     code : U32 <- H.Proc.wait(pid)
     Vo.unpid(home, pid)
     Vo.send(out, Vo.msg(thread, "idle", Nil{}))
 
-def Vo.fed(r: U.Lines & List<&2, String>, s: Socket, +out: Chan(String), +thread: String, +ds: List<&2, String>, k: Socket -> U.Lines -> IO(Unit)) -> IO(Unit):
+def Vo.fed(r: U.Lines & List<&2, String>, s: Socket, +out: Chan(String), +thread: String, +rq: VoReq, st: VoSt, k: Socket -> U.Lines -> VoSt -> IO(Unit)) -> IO(Unit):
   (carry, ls) = r
-  do IO<Unit>:
-    Vo.say(ls, out, thread, ds)
-    k(s, carry)
+  IO.bind(VoSt, Unit, Vo.say(ls, out, thread, rq, st), st2 => k(s, carry, st2))
 
 def Vo.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, carry: U.Lines, +pid: U32, +home: String, +out: Chan(String), +thread: String,
-    +ds: List<&2, String>, k: Socket -> U.Lines -> IO(Unit)) -> IO(Unit):
+    +rq: VoReq, st: VoSt, k: Socket -> U.Lines -> VoSt -> IO(Unit)) -> IO(Unit):
   (s, res) = r
   match res:
     case Done{Nil{}}:
-      Vo.end(s, pid, home, out, thread)
+      Vo.end(s, pid, home, out, thread, rq)
     case Done{bs}:
-      Vo.fed(U.Lines.feed(carry, bs), s, out, thread, ds, k)
+      Vo.fed(U.Lines.feed(carry, bs), s, out, thread, rq, st, k)
     case Fail{_}:
-      Vo.end(s, pid, home, out, thread)
+      Vo.end(s, pid, home, out, thread, rq)
 
-def Vo.reader(fuel: Nat, s: Socket, carry: U.Lines, +pid: U32, +home: String, +out: Chan(String), +thread: String, +ds: List<&2, String>) -> IO(Unit):
+def Vo.reader(fuel: Nat, s: Socket, carry: U.Lines, +pid: U32, +home: String, +out: Chan(String), +thread: String, +rq: VoReq, st: VoSt) -> IO(Unit):
   match fuel:
     case 0n:
-      Vo.end(s, pid, home, out, thread)
+      Vo.end(s, pid, home, out, thread, rq)
     case 1n+f:
       IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536),
-        r => Vo.got(r, carry, pid, home, out, thread, ds, s2 => c2 => Vo.reader(f, s2, c2, pid, home, out, thread, ds)))
+        r => Vo.got(r, carry, pid, home, out, thread, rq, st, s2 => c2 => st2 => Vo.reader(f, s2, c2, pid, home, out, thread, rq, st2)))
 
-def Vo.started.ok(started: U32 & Socket, +home: String, +out: Chan(String), +thread: String, +ds: List<&2, String>) -> IO(Unit):
+# a client's audio goes into the helper's stdin: a second handle on it is
+# kept under the session's key for /voice/in
+def Vo.keep.d(r: Socket & Result<&1, &1, U32 & String, Socket>, +key: String) -> IO(Socket):
+  (s, res) = r
+  match res:
+    case Done{w}:
+      do IO<Socket>:
+        H.Sock.keep(w, key)
+        return s
+    case Fail{_}:
+      IO.pure(Socket, s)
+
+def Vo.keep(client: Bool, s: Socket, +key: String) -> IO(Socket):
+  match client:
+    case True{}:
+      IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Socket, H.Sock.dup(s), r => Vo.keep.d(r, key))
+    case False{}:
+      IO.pure(Socket, s)
+
+def Vo.started.ok(started: U32 & Socket, +home: String, +out: Chan(String), +thread: String, +rq: VoReq) -> IO(Unit):
   (+pid, s) = started
   do IO<Unit>:
     w : Bool <- Vo.write(Vo.pid(home), U32.show(pid))
-    Vo.reader(Vo.forever(), s, U.Lines.new(), pid, home, out, thread, ds)
+    s2 : Socket <- Vo.keep(String.eq(VoReq.src(rq), "client"), s, VoReq.key(rq))
+    Vo.reader(Vo.forever(), s2, U.Lines.new(), pid, home, out, thread, rq, Vo.st0())
 
 def Vo.fail(+out: Chan(String), +thread: String, +e: String) -> IO(Unit):
   do IO<Unit>:
     Vo.send(out, Vo.err(thread, e))
     Vo.send(out, Vo.msg(thread, "idle", Nil{}))
 
-def Vo.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +home: String, +out: Chan(String), +thread: String, +ds: List<&2, String>) -> IO(Unit):
+def Vo.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +home: String, +out: Chan(String), +thread: String, +rq: VoReq) -> IO(Unit):
   match r:
     case Done{started}:
-      Vo.started.ok(started, home, out, thread, ds)
+      Vo.started.ok(started, home, out, thread, rq)
     case Fail{_}:
       Vo.fail(out, thread, "backplane-voice did not start (is it installed next to Backplane?)")
 
@@ -258,45 +404,88 @@ def Vo.alive(+home: String) -> IO(U32):
     +t : String <- BN.Bf.text(Vo.pid(home))
     Vo.alive.p(U32.read(String.trim(t)))
 
-# the helper's arguments: a microphone named, else the default one
-def Vo.live.args(+home: String, +device: String) -> List<&2, String>:
-  List.append(&2, String, ["live", "--key-file", Vo.key(home), "--keywords-file", Vo.dict(home)], Bool.pick(List<&2, String>, String.is_empty(device), Nil{}, ["--device", device]))
+# Engines
+# -------
 
-def Vo.live.run(+exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
+# where the local engine's runtime and models are
+def Vo.local(+home: String) -> String:
+  home ++ "/voice/local"
+
+def Vo.model.ok(+m: String) -> String:
+  Bool.pick(String, String.eq(m, "parakeet-v3"), "parakeet-v3", "parakeet-v2")
+
+# the model is downloaded whole (the helper writes ready-<model> last)
+def Vo.ready(+home: String, +model: String) -> IO(Bool):
+  IO.bind(String, Bool, BN.Bf.text(Vo.local(home) ++ "/ready-" ++ Vo.model.ok(model)), t => IO.pure(Bool, String.eq(String.trim(t), "ok")))
+
+# the engine a setting (voice.engine: auto, local, cloud) picks: local when
+# asked for, or for auto when the model is downloaded; else the cloud
+def Vo.engine.of(+want: String, ready: Bool) -> String:
+  match ready:
+    case True{}:
+      Bool.pick(String, String.eq(want, "cloud"), "openai", "local")
+    case False{}:
+      Bool.pick(String, String.eq(want, "local"), "local", "openai")
+
+# the helper's arguments
+def Vo.src.args(+rq: VoReq, +device: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.eq(VoReq.src(rq), "client"), ["--source", "stdin", "--rate", "16000"],
+    Bool.pick(List<&2, String>, String.is_empty(device), Nil{}, ["--device", device]))
+
+def Vo.live.args(+home: String, +rq: VoReq, +device: String) -> List<&2, String>:
+  List.append(&2, String,
+    Bool.pick(List<&2, String>, VoReq.timed(rq), ["live", "--engine", "local", "--local-dir", Vo.local(home), "--model", Vo.model.ok(VoReq.model(rq))],
+      ["live", "--key-file", Vo.key(home), "--keywords-file", Vo.keywords(home)]),
+    Vo.src.args(rq, device))
+
+def Vo.live.run(+exe: String, +home: String, +thread: String, +device: String, +rq: VoReq, +out: Chan(String)) -> IO(Unit):
   do IO<Unit>:
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Vo.dir(home))
-    +d : String <- BN.Bf.text(Vo.dict(home))
-    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, Vo.live.args(home, device), "/", 0)
-    Vo.started(r, home, out, thread, V.Voice.dict.parse(d))
+    w : Bool <- Vo.write(Vo.keywords(home), String.join(V.Voice.keywords(VD.Vdc.terms(VoReq.d(rq))), "\n"))
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, Vo.live.args(home, rq, device), "/", 0)
+    Vo.started(r, home, out, thread, rq)
 
-def Vo.live.c(copy: Bool, +exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
+def Vo.live.c(copy: Bool, +exe: String, +home: String, +thread: String, +device: String, +rq: VoReq, +out: Chan(String)) -> IO(Unit):
   match copy:
     case True{}:
       Vo.fail(out, thread, "a hub on a copied log (BACKPLANE_COPY=1) starts no dictation")
     case False{}:
-      Vo.live.run(exe, home, thread, device, out)
+      Vo.live.run(exe, home, thread, device, rq, out)
 
-def Vo.live.go(+exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
-  IO.bind(Bool, Unit, P.Proc.copy(), copy => Vo.live.c(copy, exe, home, thread, device, out))
+def Vo.live.go(+exe: String, +home: String, +thread: String, +device: String, +rq: VoReq, +out: Chan(String)) -> IO(Unit):
+  IO.bind(Bool, Unit, P.Proc.copy(), copy => Vo.live.c(copy, exe, home, thread, device, rq, out))
 
-def Vo.live.k(busy: Bool, keyed: Bool, +exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
+def Vo.live.k(busy: Bool, keyed: Bool, +exe: String, +home: String, +thread: String, +device: String, +rq: VoReq, +out: Chan(String)) -> IO(Unit):
   match busy keyed:
     case True{} _:
       Vo.fail(out, thread, "already listening: stop the other dictation first")
     case False{} False{}:
-      Vo.fail(out, thread, "add your OpenAI API key in Settings, Voice")
+      Vo.fail(out, thread, "set up dictation in Settings, Voice: download the local model or add an OpenAI API key")
     case False{} True{}:
-      Vo.live.go(exe, home, thread, device, out)
+      Vo.live.go(exe, home, thread, device, rq, out)
 
-# a live session for `thread`: the helper records the desktop's microphone
-# (`device`, "" for the default) until it is stopped (Vo.stop); its
-# messages go out on `out`, the last one {"ev":"idle"}
-def Vo.live(+home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
+# a live session for `thread`: the helper hears this machine's microphone
+# (`device`, "" for the default) or a client's audio, until it is stopped
+# (Vo.stop, or the client's last upload); its messages go out on `out`,
+# the last one {"ev":"idle"}
+def Vo.live(+home: String, +thread: String, +device: String, +rq: VoReq, +out: Chan(String)) -> IO(Unit):
   do IO<Unit>:
     +exe : String <- Vo.exe()
     pid : U32 <- Vo.alive(home)
     +k : String <- BN.Bf.text(Vo.key(home))
-    Vo.live.k(U32.is_gt(pid, 0), Bool.not(String.is_empty(String.trim(k))), exe, home, thread, device, out)
+    Vo.live.k(U32.is_gt(pid, 0), Bool.or(VoReq.timed(rq), Bool.not(String.is_empty(String.trim(k)))), exe, home, thread, device, rq, out)
+
+# the request's engine resolved: the model's readiness read, then the setting
+def Vo.req.k(ready: Bool, +want: String, +model: String, +src: String, +key: String, +d: VD.VDict) -> VoReq:
+  VoReq{Vo.engine.of(want, ready), model, src, key, d}
+
+def Vo.req.d(+home: String, +want: String, +model: String, +src: String, +key: String, +d: VD.VDict) -> IO(VoReq):
+  IO.bind(Bool, VoReq, Vo.ready(home, model), ok => IO.pure(VoReq, Vo.req.k(ok, want, model, src, key, d)))
+
+# the dictionary.txt terms (bots' voice_dictionary_add, older hubs) join
+# the entries the request carried
+def Vo.req(+home: String, +want: String, +model: String, +src: String, +key: String, d: VD.VDict) -> IO(VoReq):
+  IO.bind(String, VoReq, BN.Bf.text(Vo.dict(home)), t => Vo.req.d(home, want, model, src, key, VD.Vdc.lines(V.Voice.dict.parse(t), d)))
 
 def Vo.devices.m(m: Maybe<&2, J.Json>) -> String:
   match m:
@@ -377,22 +566,43 @@ def Vo.file.text(r: P.Ran) -> String:
     case P.Ran{_, +out}:
       Vo.done.of(String.lines(out))
 
-def Vo.file.k(keyed: Bool, +exe: String, +home: String, +path: String, +ct: String) -> IO(String):
-  match keyed:
+# What the last request carried (engine, model, the dictionary): kept for
+# a ring's recordings, which come with no client
+def Vo.prefs(+home: String) -> String:
+  home ++ "/voice/prefs.json"
+
+def Vo.prefs.keep(+home: String, +p: J.Json) -> IO(Unit):
+  do IO<Unit>:
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Vo.dir(home))
+    w : Bool <- Vo.write(Vo.prefs(home), J.Json.show(J.Json.obj([J.KV{"engine", J.Str{J.Json.get_str(p, "engine", "auto")}}, J.KV{"model", J.Str{J.Json.get_str(p, "model", "")}},
+      J.KV{"entries", J.Json.get_obj(p, "entries")}, J.KV{"learned", J.Json.get_obj(p, "learned")}])))
+    return Unit{}
+
+def Vo.prefs.read(+home: String) -> IO(J.Json):
+  IO.bind(String, J.Json, BN.Bf.text(Vo.prefs(home)), t => IO.pure(J.Json, Maybe.default(&2, J.Json, J.Json.parse(t), J.Null{})))
+
+def Vo.file.args(+home: String, +rq: VoReq, +path: String, +ct: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, VoReq.timed(rq), ["file", path, "--content-type", ct, "--engine", "local", "--local-dir", Vo.local(home), "--model", Vo.model.ok(VoReq.model(rq))],
+    ["file", path, "--content-type", ct, "--key-file", Vo.key(home), "--keywords-file", Vo.keywords(home)])
+
+def Vo.file.k(can: Bool, +exe: String, +home: String, +rq: VoReq, +path: String, +ct: String) -> IO(String):
+  match can:
     case True{}:
       do IO<String>:
-        r : P.Ran <- P.Proc.run(exe, ["file", path, "--content-type", ct, "--key-file", Vo.key(home), "--keywords-file", Vo.dict(home)], "/")
+        r : P.Ran <- P.Proc.run(exe, Vo.file.args(home, rq, path, ct), "/")
         return Vo.file.text(r)
     case False{}:
       IO.pure(String, "")
 
-# a recording's words ("" with no key, no helper or no words): `path` holds
-# the audio, or a whole multipart form whose content type `ct` names
-def Vo.file(+home: String, +path: String, +ct: String) -> IO(String):
+# a recording's words, corrected with the dictionary ("" with no engine, no
+# helper or no words): `path` holds the audio, or a whole multipart form
+# whose content type `ct` names
+def Vo.file(+home: String, +rq: VoReq, +path: String, +ct: String) -> IO(String):
   do IO<String>:
     +exe : String <- Vo.exe()
     +k : String <- BN.Bf.text(Vo.key(home))
-    Vo.file.k(Bool.not(String.is_empty(String.trim(k))), exe, home, path, ct)
+    +t : String <- Vo.file.k(Bool.or(VoReq.timed(rq), Bool.not(String.is_empty(String.trim(k)))), exe, home, rq, path, ct)
+    return VD.Vdc.text(VD.VFix.words(VD.Vdc.fix(VoReq.d(rq), VD.Vdc.words.text(t))))
 
 def Vo.bytes.wrote(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Bool):
   BN.Bf.wrote(r)
@@ -411,29 +621,32 @@ def Vo.bytes(+path: String, bs: List<&2, U32>) -> IO(Bool):
     m : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(path, 384)
     Vo.bytes.opened(f, bs)
 
-def Vo.ring.dict(+home: String) -> IO(List<&2, String>):
-  do IO<List<&2, String>>:
-    +d : String <- BN.Bf.text(Vo.dict(home))
-    return V.Voice.dict.parse(d)
-
 # A Pebble ring's form with its recording (`raw`, the body's bytes; `ct`
 # its content type): the recording is transcribed here with the
 # dictionary, and the form comes back with parts put before the ring's own
 # (RG.Ring.part takes the first of a name): `transcription` the words
 # heard, `unsure` the words to clarify (V.Voice.note), `heard` the model.
 # With no key or no words, the form is as it came.
-def Vo.ring.form(+body: String, +heard: String, +note: String) -> String:
+def Vo.ring.form(+body: String, +heard: String, +note: String, +model: String) -> String:
   Bool.pick(String, String.is_empty(heard), body,
     "--backplane\r\nContent-Disposition: form-data; name=\"transcription\"\r\n\r\n" ++ heard ++
     "\r\n--backplane\r\nContent-Disposition: form-data; name=\"unsure\"\r\n\r\n" ++ note ++
-    "\r\n--backplane\r\nContent-Disposition: form-data; name=\"heard\"\r\n\r\ngpt-live-transcribe\r\n" ++ body)
+    "\r\n--backplane\r\nContent-Disposition: form-data; name=\"heard\"\r\n\r\n" ++ model ++ "\r\n" ++ body)
+
+def Vo.ring.model(+rq: VoReq) -> String:
+  Bool.pick(String, VoReq.timed(rq), Vo.model.ok(VoReq.model(rq)), "gpt-live-transcribe")
+
+def Vo.ring.rq(+home: String, +path: String, +ct: String, +body: String, +rq: VoReq) -> IO(String):
+  do IO<String>:
+    +heard : String <- Vo.file(home, rq, path, ct)
+    BN.Bf.rm(path)
+    return Vo.ring.form(body, heard, V.Voice.note(VD.Vdc.asks(VoReq.d(rq), Nil{}, VD.VFix{VD.Vdc.words.text(heard), Nil{}, Nil{}})), Vo.ring.model(rq))
+
+def Vo.ring.p(+home: String, +path: String, +ct: String, +body: String, +p: J.Json) -> IO(String):
+  IO.bind(VoReq, String, Vo.req(home, J.Json.get_str(p, "engine", "auto"), J.Json.get_str(p, "model", ""), "hub", "", VD.Vdc.of.json(p)), rq => Vo.ring.rq(home, path, ct, body, rq))
 
 def Vo.ring.k(+home: String, +path: String, +ct: String, +body: String) -> IO(String):
-  do IO<String>:
-    +heard : String <- Vo.file(home, path, ct)
-    BN.Bf.rm(path)
-    ds : List<&2, String> <- Vo.ring.dict(home)
-    return Vo.ring.form(body, heard, V.Voice.note(V.Voice.unsure(ds, Nil{}, heard)))
+  IO.bind(J.Json, String, Vo.prefs.read(home), p => Vo.ring.p(home, path, ct, body, p))
 
 def Vo.ring.w(ok: Bool, +home: String, +path: String, +ct: String, +body: String) -> IO(String):
   match ok:

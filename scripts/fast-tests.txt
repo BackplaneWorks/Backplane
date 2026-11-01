@@ -1,4 +1,6 @@
-# Required fast regression gate. Full legacy suite: TEST_FULL=1 scripts/test.sh.
+# Required eight-file regression gate, user-authorized 2026-10-22.
+# Expanded22: TEST_FILES="$(sed -e 's/#.*//' -e '/^$/d' scripts/extended-fast-tests.txt)" scripts/test.sh
+# Full legacy suite remains explicit: TEST_FULL=1 scripts/test.sh.
 test/mailtriage_test.bend
 test/mailrun_test.bend
 test/mailrun_model_test.bend
@@ -7,24 +9,3 @@ test/maildisposition_routing_test.bend
 test/mailcontinuity_test.bend
 test/mailboot_test.bend
 test/r1_copy_test.bend
-test/models_cache_test.bend
-test/glb_stack_test.bend
-test/sidebar_fresh_projection_test.bend
-
-# Durable store checkpoints and bounded native folded-shelf transport.
-test/store_checkpoint_test.bend
-test/folded_actions_test.bend
-test/hotboot_thread_decode_law_test.bend
-test/storedb_test.bend
-test/hotboot_test.bend
-
-test/timeline_virtual_test.bend
-
-test/timeline_history_test.bend
-
-# Tool calls fold into drawers, shut until the person clicks one (laws fold_run_*).
-test/fold_test.bend
-# Stalled turns, non-killing deadlines, restart/provider retry and lock leases.
-test/liveness_suite_test.bend
-test/kserve_helper_test.bend
-test/thread_send_text_test.bend

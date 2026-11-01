@@ -3,16 +3,20 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 async function fixture(supported=false, legacyProbe=false){
  const {ConnectionLog}=await import('../../src/web/connection-log.js');
  const {BubMoveObserver}=await import('../../src/web/bub-move.js');
+ const {ViewerRpc}=await import('../../src/web/viewer-rpc.js'),{ReviewPosition}=await import('../../src/web/review-position.js');
+ const {ImprovementsRpc}=await import('../../src/web/improvements-rpc.js');
  const {ThinHost,presentationTarget,preservePresentationRoute,refusedFallback}=await import('../../src/web/thin-host.js'),{Backoff,Retry,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
  let source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
  if(legacyProbe)source=source.replaceAll(' || attempt !== thinAttempt','');
  const a=source.indexOf('function showViewStatus('),b=source.indexOf('// when a frame (a heartbeat included)',a);assert(a>0&&b>a);
- const boot=source.slice(source.indexOf('pairingReady.then('),source.indexOf('window.addEventListener("pagehide",'));
+ // Earlier pagehide listeners are unrelated to startup; bound the end after boot.
+ const bootStart=source.indexOf('pairingReady.then('),bootEnd=source.indexOf('window.addEventListener("pagehide",',bootStart);assert(bootStart>0&&bootEnd>bootStart);
+ const boot=source.slice(bootStart,bootEnd);
  let clock=0,next=0;const timers=new Map(),sockets=[],requests=[],calls=[],status=[],encoder=new TextEncoder(),decoder=new TextDecoder(),store=new Map();
  const setTimer=(fn,ms)=>{const id=++next;timers.set(id,{fn,at:clock+ms});return id;};
  const clearTimer=id=>timers.delete(id);
  class FixtureRetry extends Retry {constructor(){super({setTimer,clearTimer,now:()=>clock});}}
- class Socket{constructor(url){this.url=url;this.readyState=0;sockets.push(this);}open(){this.readyState=1;this.onopen?.();}send(b){requests.push(JSON.parse(decoder.decode(b)));}frame(v){this.onmessage?.({data:encoder.encode(JSON.stringify(v)).buffer});}close(){this.readyState=3;this.onclose?.();}}
+ class Socket{constructor(url){this.url=url;this.readyState=0;sockets.push(this);}open(){this.readyState=1;this.onopen?.();}send(b){requests.push(JSON.parse(decoder.decode(b)));}frame(v){this.onmessage?.({data:encoder.encode(JSON.stringify(v)).buffer});assert(!JSON.parse(store.get('bp.connection.log.v1')||'[]').some(r=>r.cause==='decode-error'),'host callback must not hide a missing fixture dependency as a decode error');}close(){this.readyState=3;this.onclose?.();}}
  const ctx={ConnectionLog,bubMoves:new BubMoveObserver(()=>null),terminalOutput:{clear(){calls.push('terminal-retired');},rebind(){}},refocusKeep(){},bodyWindows:{disconnect(){},bind(){}},sealedReply:()=>false,CONNECTION_BUNDLE:'chunk-fixture.js',ThinHost,ThinViews,viewCapability,discoverViews,WebSocket:Socket,location:{origin:'https://fixture',host:'fixture',protocol:'https:'},
   thin:null,thinSocket:null,thinAttempt:0,thinExpiry:0,thinGreetingTimer:0,thinDraftTimer:0,thinFieldTimer:0,socket:null,viewMode:'discovering',remoteReady:false,remoteEpoch:'',canonicalBoot:false,pairingAccepted:false,
   thinSession:null,frontendNode:null,frontend:null,cid:'fixture',ui:{},heard:0n,thinMailDraft:{clear(){},bind(){},matches:()=>false,edit(){},scope:()=>'',needsSubmit:()=>false},mailReplyField:()=>undefined,focusedView:{invalidate(){},remote(){calls.push('cache-retired');}},desktopBrowser:{hide(){calls.push('hide');}},Solid:{reset(){},isPlot:()=>false},Plot2d:{reset(){}},
@@ -22,17 +26,30 @@ async function fixture(supported=false, legacyProbe=false){
   checkpointFocused(){calls.push('checkpoint');},later(){},render(){},trace(){},KEYS:[],WORDS:[],restoreFocused:()=>{calls.push('focused-read');return new Promise(()=>{});},refreshFocusedIdentity:()=>{calls.push('identity');return new Promise(()=>{});},
   currentSession:()=>ctx.thinSession||{sel:'A',drafts:{A:'unsent 日本語'},rid:1},choosePresentation:(s,a,v)=>a==='select'?{...s,sel:v}:{...s,drafts:{...s.drafts,[s.sel]:v}},localPresentation(){},
   presentationJson:x=>x,fromList:x=>x,presentationCommand:c=>calls.push(c),anchorOf:()=>null,
-  History:{project:(_before,fresh)=>fresh},historyNode:null,timelineList:()=>null,
-  App:{wire_out:t=>encoder.encode(t),presentation_node:n=>n,presentation_prepare:(s,input)=>({...input,rid:s.rid}),presentation_reply:s=>s,presentation_select:(u,id)=>({...u,sel:id}),presentation_handoff:(u,s)=>({...u,sel:s.sel}),unsync:u=>u,lang:()=> 'en'},
-  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){}},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
+  History:{project:(_before,fresh)=>fresh,project_block:(_before,fresh)=>fresh},historyNode:null,timelineList:()=>null,
+  App:{wire_out:t=>encoder.encode(t),wire_out_json:v=>encoder.encode(JSON.stringify(v)),viewer_input:(_u,_info,s)=>s,desk_reset:u=>u,presentation_node:n=>n,presentation_prepare:(s,input)=>({...input,rid:s.rid}),presentation_reply:s=>s,presentation_select:(u,id)=>({...u,sel:id}),presentation_handoff:(u,s)=>({...u,sel:s.sel}),unsync:u=>u,lang:()=> 'en'},
+  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x,json:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){}},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
   fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
   fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
   historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
   modelFeedback:{clear(){}},viewerFeedback:{choice(){}},
+  // The extracted socket adapter shares these services with the full host.
+  // Record peripheral lifecycle calls; wire admission/ownership still uses real ThinHost/ThinViews.
+  RR:null,COARSE_POINTER:false,ViewerTools:{reset(){calls.push('viewer-tools-retired');}},viewerRpc:new ViewerRpc(()=>{throw Error('unexpected viewer RPC');}),
+  improvementsRpc:new ImprovementsRpc(()=>{throw Error('unexpected Improvements RPC');}),voiceMicHeard(){calls.push('voice-envelope');},
+  reviewPosition:new ReviewPosition({getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)}),
+  composerKeeper:{selecting(){},navigationFailed(){}},keepDesk:s=>s,deskCheck(){},settingsRecovery:null,settingsRecovering:null,
+  historyLetGo(){},historyBack(){},historyGone:{older:new Set(),newer:new Set()},historyRegion:()=> 'page',laterRegions(){},
+  attachmentIdentityRetry:0,attachmentIdentity:'',attachmentIdentityPending:true,attachmentIdentityGeneration:0,
+  attachmentController:null,attachmentView:null,attachmentSelection:null,
   viewNote:'',viewNoteTimer:0,shownTarget:null,refusedViews:new Set(),refusedFallback,searchJump:null,
   targetKey:t=>t?t.kind+':'+t.id:'',holdPicture(){if(ctx.frontendNode){ctx.transitionNode=ctx.frontendNode;ctx.frontendNode=null;}},
   stopThin:undefined};
- vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);ctx.showViewStatus=s=>status.push(s);
+ vm.createContext(ctx);
+ for(const [start,end] of [['function keepSettingsRecovery(','async function recoverSettings('],['function restoreDraftAttachments(','function uploadScope(']]){
+  const from=source.indexOf(start),to=source.indexOf(end,from);assert(from>0&&to>from);vm.runInContext(source.slice(from,to),ctx);
+ }
+ vm.runInContext(source.slice(a,b),ctx);ctx.showViewStatus=s=>status.push(s);
  return{ctx,calls,status,requests,sockets,VIEW_LIMITS,boot,runBoot:async()=>{let started;const start=ctx.startThin;ctx.startThin=()=>started=start();vm.runInContext(boot,ctx);await Promise.resolve();await started;},tick:ms=>{clock+=ms;for(const[id,t]of[...timers])if(t.at<=clock&&timers.has(id)){timers.delete(id);t.fn();}}};
 }
 test('actual startup begins capability discovery despite a permanently pending focused IDB lookup',async()=>{
@@ -57,6 +74,7 @@ test('a missing or failed focused read does not change discovery failure into fu
 });
 test('a dropped view reconnects by itself, bounded, with no whole-log path',async()=>{
  const f=await fixture(true);await f.runBoot();const s=f.sockets[0];s.open();s.close();assert.equal(f.ctx.remoteReady,false);
+ assert(f.calls.includes('viewer-tools-retired'));
  // Drive both the host deadline and reconnect backoff with the fixture clock.
  f.tick(300);await new Promise(setImmediate);
  assert.equal(f.sockets.length,2,'a second view socket after the backoff');const url=new URL(f.sockets[1].url);assert.equal(url.searchParams.get('view'),'1');assert.equal(url.searchParams.get('since'),'0');

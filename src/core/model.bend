@@ -1144,9 +1144,13 @@ def Setting.input(+k: String) -> Bool:
 def Setting.wire_blank(+k: String) -> Bool:
   Bool.or(Setting.input(k), String.starts_with(k, "ride."))
 
+# dictation's dictionary (core/vdict.bend): entries and learned replacements
+def Setting.voice(+k: String) -> Bool:
+  Bool.or(String.starts_with(k, "voice.e."), String.starts_with(k, "voice.l."))
+
 # keys an empty value removes
 def Setting.blank_gone(+k: String) -> Bool:
-  Bool.or(Setting.ledger(k), Setting.input(k))
+  Bool.or(Bool.or(Setting.ledger(k), Setting.input(k)), Setting.voice(k))
 
 def State.setting.put(del: Bool, sg: Map<&2, String>, k: String, v: String) -> Map<&2, String>:
   match del:

@@ -147,11 +147,13 @@ try {
 
   send("bots.voice", { op: "start", thread: th });
   const live = await until(() => msgs.find((o) => o.t === "voice" && o.ev === "live"));
-  check("live, with its recorder", live?.recorder === "pw-record" && live?.thread === th, live);
+  check("live, with its recorder and the cloud engine", live?.recorder === "pw-record" && live?.thread === th && live?.engine === "openai", live);
   const lv = await until(() => msgs.find((o) => o.t === "voice" && o.ev === "level" && o.v > 50));
   check("the level shows the tone", !!lv, msgs.filter((o) => o.ev === "level").slice(0, 5));
-  const text = await until(() => msgs.find((o) => o.t === "voice" && o.ev === "text"));
-  check("words heard", text?.text === "open key cad now", text);
+  // words settle: committed pieces only ever add up; the segment's end says final
+  const text = await until(() => msgs.find((o) => o.t === "voice" && o.ev === "words" && o.final));
+  const said = msgs.filter((o) => o.t === "voice" && o.ev === "words").map((o) => o.commit).filter(Boolean).join(" ");
+  check("words heard", said === "open key cad now", msgs.filter((o) => o.ev === "words"));
   check("a word to clarify, with a guess", text?.unsure?.[0]?.word === "key cad" && text?.unsure?.[0]?.guess === "KiCad", text?.unsure);
   const upd = openai.find((e) => e.type === "session.update");
   const tr = upd?.session?.audio?.input?.transcription;

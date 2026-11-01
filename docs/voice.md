@@ -1,8 +1,87 @@
 # Voice
 
-Dictation into the composer, and a Pebble Index ring's voice notes, with
-OpenAI's GPT-Live-Transcribe (`gpt-live-transcribe`, the Realtime API's
-low-latency transcription model) and a personal dictionary.
+Dictation into the composer, and a Pebble Index ring's voice notes, with a
+personal dictionary, by one of two engines (Settings, Voice, Speech to
+text: Auto, On this machine, OpenAI; setting `voice.engine`):
+
+- **local**: NVIDIA Parakeet TDT 0.6B (int8, sherpa-onnx, Silero VAD) on the
+  hub's machine. No key, no network, private, offline. Downloaded once
+  from Settings (about 480 MB; `voice.model` parakeet-v2 English, or
+  parakeet-v3, 25 languages). Auto uses it once it is downloaded.
+- **cloud**: OpenAI's GPT-Live-Transcribe (`gpt-live-transcribe`), with an
+  `sk-` key.
+
+The design and why: `docs/voice-dictation-design.md`.
+
+## The local engine
+
+`backplane-voice live --engine local --local-dir <home>/voice/local`. The
+runtime (sherpa-onnx's Node addon and ONNX Runtime, from npm, sha512
+pinned) and the models (from sherpa-onnx's releases, sha256 pinned) are
+fetched by `local-install` into `<home>/voice/local`, each checked and moved
+into place, then `ready-<model>` is written (what the hub reads). Nothing is
+bundled in the package; nothing loads in the hub. The helper loads the model
+when a session starts (about 0.9 s, off the event loop; audio heard
+meanwhile is kept) and exits with the session. One model does both the live
+words and the final ones: while the VAD has a segment open, its audio so far
+is decoded again every 300 ms (about 25 ms of CPU per second of speech on 4
+threads) and sent as `hyp` with each word's start, end (centiseconds) and
+probability (percent); the segment's last decode is its `done`.
+
+## Live words, calmly
+
+The hub (server/voice.bend's `Vo.step`) settles each hypothesis with
+core/vdict.bend's `Vs.*`: words two hypotheses in a row agree on, ending
+0.4 s or more before the audio so far, are committed; unsure ones (under
+85 %) at the end wait for the next sure one. Committed words go through the
+correction pass (`Vd.fix`) and out as `{"ev":"words", "first", "commit",
+"tail", "firm", "fixes", "final", "unsure"}`. The client (client.bend's
+`Voice.words`) takes the old tail out of the draft, puts the committed words
+where the committed ones end (`@voice.pos`), and the tail after them
+(`@voice.tl` its length): committed words never move or change; only the
+tail, at the end, is rewritten. The cloud engine's deltas settle the same
+way (untimed: never the last two words). The strip shows one word for the
+state (Starting, Loading the model, Listening, Writing, Finishing) and the
+level, never the words; after a segment its fixes are chips that undo.
+
+## The dictionary
+
+Settings (all clients see them; they live in the hub's log):
+
+- `voice.e.<key>`: an entry as typed: `KiCad` (a term), `KiCad = key cad,
+  kai cad` (a term and how it sounds), `jason -> JSON` (a replacement),
+  `!um` (a word to drop). Settings, Voice, Dictionary takes many at once,
+  one a line.
+- `voice.l.<heard>`: a learned fix, `<written>\t<confirmed>\t<undone>`.
+  Taking a guess or typing the right word confirms one; undoing a fix's
+  chip undoes one. It applies by itself once confirmed twice and never
+  undone; until then it is offered as a guess.
+
+An empty value removes either. The correction pass (core/vdict.bend's
+`Vd.fix`, laws `vd_*`): drop words, replacements and how terms sound
+(exact phrases, longest first), terms written another way (`kicad`,
+`stm 32`), then sound-alikes of terms (a rough sound key and edit
+distance: "Kai CAD", "SBI" for SPI), applied by themselves only where the
+engine was itself unsure (local engine), else offered as the guess. Words
+to ask about: the guesses, words the engine heard at under 50 %, then near
+misses and technical-looking words (`Voice.unsure`), at most five.
+`dictionary.txt` (older hubs, bots' `voice_dictionary_add`) still adds
+terms. Every `bots.voice` request carries the entries and settings
+(bothub.bend's `Vreq.with`); the hub keeps the last as
+`<home>/voice/prefs.json` for a ring's recordings.
+
+## Another machine, a phone
+
+The microphone is the one in front of the person; the engine is the hub's.
+A page whose hub is on its own machine (127.0.0.1) lets the hub record its
+microphone, as before. A page on another machine (the tailnet, a phone's
+browser) records itself (`src/web/voice-mic.js`: getUserMedia, an
+AudioWorklet, 16 kHz s16le) and starts with `src: "client"`; the reply names
+`/voice/in?s=<key>`, where it POSTs ~200 ms pieces in order (`&end=1` last).
+The hub copies each body straight into the helper's stdin (host.js's
+`Sock.feed`, never a Bend list) and the helper converts it to the engine's
+rate. The dictionary and learned fixes are the hub's settings, so every
+client of that hub shares them.
 
 ## Pieces
 
@@ -81,3 +160,34 @@ person confirms with `voice_dictionary_add`.
 
 Recording uses PipeWire, PulseAudio or ALSA tools, so dictation works on
 Linux. The ring's recordings work wherever the hub runs.
+
+## Qualification (2026-11-01)
+
+On six synthetic 16 kHz clips on Linux x64, with other builds running:
+model load 1958 ms; first hypothesis median 573 ms (including the cold
+first clip); final after the clip ends median 589 ms, p95 738 ms, including
+VAD silence; word commit lag median 664 ms, p95 1833 ms. This small fixture
+set is a latency sample, not an accuracy benchmark. It does not meet the
+proposal's 250 ms first-word / 600 ms p95 final targets under this load.
+
+Real browser demos using the hub capture path and Chromium's fake
+microphone upload path retained the whole dictated draft through redraws.
+They produced 49 and 37 text changes respectively, with zero replacements
+starting more than three words before the old end. The upload demo used a
+non-loopback hub address on this same machine; it is not physical
+second-device acceptance. `test/tools/voice_browser_e2e.ts` makes this
+fixture reproducible, including an undo/persistence assertion; its added
+assertions still need a run on the final combined build.
+
+Cloud live dictation and the ring webhook pass against a mock API; this
+does not establish current live-service compatibility. iOS and Android
+recorders compiled in their earlier qualification, but physical microphone
+and separate-hub testing remains outstanding. The dictionary is shared by
+clients of the same hub. Cross-hub dictionary replication, project-scoped
+entries, project vocabulary extraction, edit-diff teaching, an optional
+global hotkey and on-device phone inference remain design proposals.
+
+The final full proof pass must be rerun on the combined integration source.
+The controlled-heap attempt completed in 299 seconds with an incomplete
+new `vd_learn_trusted` proof; the corrected five voice laws subsequently
+passed in isolation. No existing law was weakened or removed.

@@ -1,3 +1,6 @@
+import ./src/core/range.bend as BRANGE
+import ./src/core/vdict.bend as VDICT
+
 import ./src/mobile/session.bend as MCOMPOSER
 
 import ./src/server/review-history.bend as REVIEWHISTORY
@@ -14766,13 +14769,13 @@ law view_window_newer_empty:
   for +th: String
   for +ids: List<&2, String>
   {TVIEWH.Page.newer(True{}, index, th, ids) == 0n : Nat}
+
 # END page window counts (H)
 
 # Large files (core/attach.bend's Att.mb, Att.max in bytes; core/range.bend's
 # Rng.*). The
 # "files.max.mb" setting's text is the limit in MB: 512 by default and for
 # anything not a count, at least 1, at most 4000 (a U32 size)
-import ./src/core/range.bend as BRANGE
 
 law att_max_default:
   {AT.Att.mb("") == 512n : Nat}
@@ -14820,3 +14823,49 @@ law range_multi:
 law range_head_partial:
   {BRANGE.Rng.head(BRANGE.Rng.of("bytes=10-19", 100n), 100n, "image/png", "no-cache") == "HTTP/1.1 206 Partial Content\r\nContent-Type: image/png\r\nContent-Length: 10\r\nContent-Range: bytes 10-19/100\r\nAccept-Ranges: bytes\r\nCache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n" : String}
 # END large files
+
+# Improvements retries acknowledge the existing conversation without mutation.
+law improvements_retry_no_changes:
+  for ok: Bool
+  for client: U32
+  for id: String
+  for thread: String
+  {H.Queue.changes(H.Hub.thread_create.reused(ok, client, id, thread)) == Nil{} : List<&2, M.Change>}
+
+law improvements_retry_one_reply:
+  for ok: Bool
+  for client: U32
+  for id: String
+  for thread: String
+  {List.length(&2, H.Out, H.Step.outs_of(H.Hub.thread_create.reused(ok, client, id, thread))) == 1n : Nat}
+# END page splice (H)
+
+# Dictionary trust and finalization are shared by both speech engines.
+law vd_fix_empty:
+  for +d: VDICT.VDict
+  {VDICT.Vdc.fix(d, Nil{}) == VDICT.VFix{Nil{}, Nil{}, Nil{}} : VDICT.VFix}
+
+law vd_learn_trusted:
+  for out: String
+  for y: Nat
+  {VDICT.Vdc.trusted(VDICT.VL{out, 2n+y, 0n}) == True{} : Bool}
+
+law vd_undo_revokes:
+  for out: String
+  for +y: Nat
+  for n: Nat
+  {VDICT.Vdc.trusted(VDICT.VL{out, y, 1n+n}) == False{} : Bool}
+
+law vs_done_tail_empty:
+  for +timed: Bool
+  for +st: VDICT.VSet
+  for +item: String
+  for +ws: List<&2, VDICT.VW>
+  {VDICT.VStep.tail(VDICT.Vs.done(timed, st, item, ws)) == Nil{} : List<&2, VDICT.VW>}
+
+law vs_done_resets:
+  for +timed: Bool
+  for +st: VDICT.VSet
+  for +item: String
+  for +ws: List<&2, VDICT.VW>
+  {VDICT.VStep.st(VDICT.Vs.done(timed, st, item, ws)) == VDICT.Vs.empty() : VDICT.VSet}

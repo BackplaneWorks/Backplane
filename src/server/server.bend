@@ -120,6 +120,7 @@ import ./google.bend as GS
 import ../core/google.bend as GG
 import ../core/ring.bend as RG
 import ./voice.bend as VO
+import ../core/vdict.bend as VD
 import ./apikeys.bend as AKS
 import ./perf.bend as PS
 import ./freecad.bend as FC
@@ -7883,24 +7884,6 @@ def BotJob.token(+op: Nat, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +ho
     +url : String <- Bot.hook.base(tailnet, host, port)
     BotJob.token.done(Bool.and(String.is_empty(tok), Nat.is_lt(op, 2n)), tok, url, inbox, client, id, hook)
 
-# Dictation (server/voice.bend): the key, the dictionary, and live sessions
-# of this machine's microphone, whose messages go to the client that
-# started them. "add" also comes from a bot's voice_dictionary_add (client
-# 0: no one hears the answer).
-
-# the key (masked), the dictionary and the microphones, and the API keys'
-# names (server/apikeys.bend; never a secret)
-def VoiceJob.status(+inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
-  do IO<Unit>:
-    kvs : List<&2, J.KV> <- VO.Vo.status(home)
-    +d : String <- VO.Vo.devices()
-    +ks : String <- AKS.Ak.names(home)
-    BotJob.reply(inbox, client, id, True{}, List.append(&2, J.KV, kvs, [J.KV{"voiceDevices", J.Str{d}}, J.KV{"apiKeys", J.Str{ks}}]))
-
-# "" when done (then the status goes back), else "error: why"
-def VoiceJob.done(+err: String, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
-  Bool.pick(IO(Unit), String.is_empty(err), VoiceJob.status(inbox, home, client, id), BotJob.fail(inbox, client, id, String.drop(err, 7n)))
-
 def VoiceJob.fwd.k(end: Bool, k: Unit -> IO(Unit)) -> IO(Unit):
   match end:
     case True{}:
@@ -7925,12 +7908,74 @@ def VoiceJob.forward(fuel: Nat, +out: Chan(String), +inbox: Chan(Msg), +client: 
     case 1n+f:
       IO.bind(Maybe<&1, String>, Unit, Chan.recv(String, out), m => VoiceJob.fwd(m, inbox, client, u => VoiceJob.forward(f, out, inbox, client)))
 
-def VoiceJob.live(+inbox: Chan(Msg), +home: String, +client: U32, +id: String, +thread: String, +device: String) -> IO(Unit):
+# a session: the engine resolved, the reply names it (and, for a client's
+# own microphone, where to upload the audio: /voice/in?s=<key>), then its
+# messages go to the client until idle
+def VoiceJob.live.rq(+rq: VO.VoReq, +inbox: Chan(Msg), +home: String, +client: U32, +id: String, +thread: String, +device: String) -> IO(Unit):
   do IO<Unit>:
-    BotJob.reply(inbox, client, id, True{}, Nil{})
+    BotJob.reply(inbox, client, id, True{}, [J.KV{"engine", J.Str{VO.VoReq.engine(rq)}},
+      J.KV{"audio", J.Str{Bool.pick(String, String.eq(VO.VoReq.src(rq), "client"), "/voice/in?s=" ++ VO.VoReq.key(rq), "")}}])
     +out : Chan(String) <- Chan.new(String, 256)
-    IO.spawn(Unit, VO.Vo.live(home, thread, device, out))
+    IO.spawn(Unit, VO.Vo.live(home, thread, device, rq, out))
     VoiceJob.forward(Fuel.forever(), out, inbox, client)
+
+def VoiceJob.live(+inbox: Chan(Msg), +home: String, +client: U32, +id: String, +thread: String, +device: String, +p: J.Json) -> IO(Unit):
+  do IO<Unit>:
+    +key : String <- BN.Bn.random(4n)
+    +rq : VO.VoReq <- VO.Vo.req(home, J.Json.get_str(p, "engine", "auto"), J.Json.get_str(p, "model", ""), Bool.pick(String, String.eq(J.Json.get_str(p, "src", ""), "client"), "client", "hub"),
+      key, VD.Vdc.of.json(p))
+    VoiceJob.live.rq(rq, inbox, home, client, id, thread, device)
+
+def VoiceJob.local.m(m: Maybe<&2, J.Json>, +acc: J.Json) -> J.Json:
+  match m:
+    case Some{+o}:
+      Bool.pick(J.Json, String.eq(J.Json.get_str(o, "event", ""), "local"), o, Bool.pick(J.Json, Bool.and(String.eq(J.Json.get_str(o, "event", ""), "error"), String.is_empty(J.Json.get_str(acc, "error", ""))), J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(o, "error", "")}}]), acc))
+    case None{}:
+      acc
+
+# the local engine: what is downloaded ({"local": the helper's status}),
+# a model downloaded or removed (the status after)
+def VoiceJob.local.line(+l: String, +acc: J.Json) -> J.Json:
+  VoiceJob.local.m(J.Json.parse(l), acc)
+
+def VoiceJob.local.go(ls: List<&2, String>, +acc: J.Json) -> J.Json:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> t:
+      VoiceJob.local.go(t, VoiceJob.local.line(l, acc))
+
+def VoiceJob.local.ran(r: P.Ran) -> J.Json:
+  match r:
+    case P.Ran{_, +out}:
+      VoiceJob.local.go(String.lines(out), J.Null{})
+
+# Dictation (server/voice.bend): the key, the dictionary, and live sessions
+# of this machine's microphone, whose messages go to the client that
+# started them. "add" also comes from a bot's voice_dictionary_add (client
+# 0: no one hears the answer).
+
+# the key (masked), the dictionary and the microphones, and the API keys'
+# names (server/apikeys.bend; never a secret)
+def VoiceJob.status(+inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
+  do IO<Unit>:
+    kvs : List<&2, J.KV> <- VO.Vo.status(home)
+    +d : String <- VO.Vo.devices()
+    +ks : String <- AKS.Ak.names(home)
+    +exe : String <- VO.Vo.exe()
+    r : P.Ran <- P.Proc.run(exe, ["local-status", "--local-dir", VO.Vo.local(home)], "/")
+    BotJob.reply(inbox, client, id, True{}, List.append(&2, J.KV, kvs, [J.KV{"voiceDevices", J.Str{d}}, J.KV{"apiKeys", J.Str{ks}}, J.KV{"local", VoiceJob.local.ran(r)}]))
+
+# "" when done (then the status goes back), else "error: why"
+def VoiceJob.done(+err: String, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
+  Bool.pick(IO(Unit), String.is_empty(err), VoiceJob.status(inbox, home, client, id), BotJob.fail(inbox, client, id, String.drop(err, 7n)))
+
+def VoiceJob.local(+cmd: String, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U32, +id: String) -> IO(Unit):
+  do IO<Unit>:
+    +exe : String <- VO.Vo.exe()
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(VO.Vo.local(home))
+    r : P.Ran <- P.Proc.run(exe, [cmd, "--local-dir", VO.Vo.local(home), "--model", VO.Vo.model.ok(J.Json.get_str(p, "id", J.Json.get_str(p, "model", "")))], "/")
+    BotJob.reply(inbox, client, id, True{}, [J.KV{"local", VoiceJob.local.ran(r)}])
 
 def VoiceJob.stopped(on: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String) -> IO(Unit):
   match on:
@@ -8242,7 +8287,7 @@ def VoiceJob.op(i: Nat, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U
     case 4n:
       IO.bind(String, Unit, VO.Vo.add(home, J.Json.get_str(p, "term", "")), e => VoiceJob.done(e, inbox, home, client, id))
     case 5n:
-      VoiceJob.live(inbox, home, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "device", ""))
+      VoiceJob.live(inbox, home, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "device", ""), p)
     case 6n:
       IO.bind(Bool, Unit, VO.Vo.stop(home), on => VoiceJob.stopped(on, inbox, client, id, J.Json.get_str(p, "thread", "")))
     case 7n:
@@ -8258,14 +8303,27 @@ def VoiceJob.op(i: Nat, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U
     # Settings > Usage's Boat side (BoatUse)
     case 11n:
       BoatUse.go(p, inbox, home, client, id)
+    # Settings' local engine
+    case 12n:
+      VoiceJob.local("local-status", inbox, home, p, client, id)
+    case 13n:
+      VoiceJob.local("local-install", inbox, home, p, client, id)
+    case 14n:
+      VoiceJob.local("local-remove", inbox, home, p, client, id)
     case _:
       BotJob.fail(inbox, client, id, "unknown voice request")
 
 def VoiceJob.go(+p: J.Json, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
-  VoiceJob.op(C.Codec.pos(["status", "key", "unkey", "dict", "add", "start", "stop", "devices", "api-add", "api-del", "agy", "usage"], J.Json.get_str(p, "op", "")), inbox, home, p, client, id)
+  VoiceJob.op(C.Codec.pos(["status", "key", "unkey", "dict", "add", "start", "stop", "devices", "api-add", "api-del", "agy", "usage", "local", "local-install", "local-remove"],
+    J.Json.get_str(p, "op", "")), inbox, home, p, client, id)
+
+def VoiceJob.kept(+p: J.Json, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
+  do IO<Unit>:
+    VO.Vo.prefs.keep(home, p)
+    VoiceJob.go(p, inbox, home, client, id)
 
 def VoiceJob.run(+inbox: Chan(Msg), +home: String, +params: String, +client: U32, +id: String) -> IO(Unit):
-  VoiceJob.go(Maybe.default(&2, J.Json, J.Json.parse(params), J.Null{}), inbox, home, client, id)
+  VoiceJob.kept(Maybe.default(&2, J.Json, J.Json.parse(params), J.Null{}), inbox, home, client, id)
 
 # The bots' browsers: who drives, teaching, task runs (core/teach.bend)
 # ---------------------------------------------------------------------
@@ -15587,6 +15645,62 @@ def Upload.gate(ok: Bool, big: Bool, s: Socket, +cont: Bool, +thread: String, +n
         m : Maybe<&1, String> <- Chan.recv(String, reply)
         Upload.into(m, s, cont, thread, name, len, rest)
 
+# Dictation's audio from a client (core/vdict.bend, server/voice.bend)
+# --------------------------------------------------------------------
+# POST /voice/in?s=<key>[&end=1] with raw 16 kHz s16le mono as the body: a
+# page or a phone dictating to this hub sends its microphone's audio in
+# pieces, in order; the bytes go straight into the helper's stdin (host.js's
+# Sock.feed), never through Bend. end=1 is the last piece: the helper reads
+# EOF, finishes and says idle. 404 when no session has that key.
+
+def Conn.is_vin(req: W.Request) -> Bool:
+  match req:
+    case W.Request{m, p, _}:
+      Bool.and(String.eq(m, "POST"), String.eq(W.Http.route(p), "/voice/in"))
+
+def Vin.last(last: Bool, +key: String) -> IO(Unit):
+  match last:
+    case True{}:
+      H.Sock.unkeep(key)
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def Vin.answer(s: Socket, +ok: Bool, +last: Bool, +key: String) -> IO(Unit):
+  do IO<Unit>:
+    Vin.last(last, key)
+    Conn.finish(s, W.Http.text(Bool.pick(String, ok, "200 OK", "404 Not Found"), Bool.pick(String, ok, "ok", "no such dictation")))
+
+def Vin.fed(r: Socket & Result<&1, &1, U32 & String, Unit>, +last: Bool, +key: String) -> IO(Unit):
+  (s, res) = r
+  match res:
+    case Done{_}:
+      Vin.answer(s, True{}, last, key)
+    case Fail{_}:
+      Vin.answer(s, False{}, last, key)
+
+def Vin.rest(known: Bool, none: Bool, s: Socket, +left: Nat, +last: Bool, +key: String) -> IO(Unit):
+  match known none:
+    case False{} _:
+      Vin.answer(s, False{}, False{}, key)
+    case True{} True{}:
+      Vin.answer(s, True{}, last, key)
+    case True{} False{}:
+      IO.bind(Socket & Result<&1, &1, U32 & String, Unit>, Unit, H.Sock.feed(s, key, U32.from_nat(left)), r => Vin.fed(r, last, key))
+
+def Vin.go(+key: String, s: Socket, +len: Nat, +last: Bool, +head: List<&2, U32>) -> IO(Unit):
+  do IO<Unit>:
+    k : U32 <- H.Sock.feed_bytes(key, head)
+    Vin.rest(U32.is_eq(k, 1), Nat.is_eq(Nat.sub(len, List.length(&2, U32, head)), 0n), s, Nat.sub(len, List.length(&2, U32, head)), last, key)
+
+def Vin.gate(ok: Bool, s: Socket, +cont: Bool, +key: String, +len: Nat, +last: Bool, +rest: List<&2, U32>) -> IO(Unit):
+  match ok:
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+    case True{}:
+      do IO<Unit>:
+        s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
+        Vin.go(key, s2, len, last, List.take(&2, U32, rest, len))
+
 def Conn.route.att(att: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match att req:
     case True{} W.Request{_, +p, +hs}:
@@ -15595,6 +15709,14 @@ def Conn.route.att(att: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +
         AT.Att.unpct(W.Http.param(p, "thread")), AT.Att.stored(AT.Att.unpct(W.Http.param(p, "key")), AT.Att.unpct(W.Http.param(p, "name"))), Conn.bot.len(hs), rest, inbox)
     case False{} _:
       Conn.route.mcp(Conn.is_mcp(req), s, req, rest, web, id, inbox, trusted, token)
+
+def Conn.route.vin(vin: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+  match vin req:
+    case True{} W.Request{_, +p, +hs}:
+      Vin.gate(Conn.allowed(trusted, hs, p, token), s, String.contains(String.to_lower(W.Http.header_of(hs, "expect")), "100-continue"),
+        AT.Att.unpct(W.Http.param(p, "s")), Conn.bot.len(hs), String.eq(W.Http.param(p, "end"), "1"), rest)
+    case False{} _:
+      Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
 
 def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match k req:
@@ -15625,7 +15747,7 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case 13n W.Request{_, +p, +hs}:
       Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"tshot", p, "", "", "", "", ""}, inbox)
     case _ _:
-      Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
+      Conn.route.vin(Conn.is_vin(req), s, req, rest, web, id, inbox, trusted, token)
 
 def Conn.pair.reply(ok: Bool, s: Socket, +token: String, https: Bool) -> IO(Unit):
   match ok:

@@ -1,3 +1,6 @@
+import ./src/core/range.bend as BRANGE
+import ./src/core/vdict.bend as VDICT
+
 import ./src/server/review-history.bend as REVIEWHISTORY
 
 import ./src/server/thin-view.bend as THINREVIEW
@@ -14981,9 +14984,9 @@ def Laws.timeline_layout_list_same():
 
 # BEGIN page window counts (H)
 def Laws.view_window_newer_empty(index, th, ids): {==}
+
 # END page window counts (H)
 
-import ./src/core/range.bend as BRANGE
 
 def Laws.att_max_default(): {==}
 
@@ -15013,3 +15016,33 @@ def Laws.range_multi(): {==}
 
 def Laws.range_head_partial(): {==}
 # END large files
+
+def Laws.improvements_retry_no_changes(ok, client, id, thread):
+  match ok:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.improvements_retry_one_reply(ok, client, id, thread):
+  match ok:
+    case True{}: {==}
+    case False{}: {==}
+# END page splice (H)
+
+def Laws.vd_fix_empty(d): {==}
+
+def Laws.vd_learn_trusted(out, y):
+  match y:
+    case 0n: {==}
+    case 1n+k: {==}
+
+def Laws.vd_undo_revokes(out, y, n):
+  match y:
+    case 0n: {==}
+    case 1n+0n: {==}
+    case 1n+1n+k:
+      %Equal.sym(Bool, Nat.is_ge(k, 0n), True{}, ge_zero(k)) : {Bool.and(_, False{}) == False{} : Bool}
+      {==}
+
+def Laws.vs_done_tail_empty(timed, st, item, ws): {==}
+
+def Laws.vs_done_resets(timed, st, item, ws): {==}

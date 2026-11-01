@@ -32,6 +32,7 @@ import ./fold.bend as FO
 import ./todo.bend as TD
 import ./bot.bend as BT
 import ./voice.bend as VC
+import ./vdict.bend as VDC
 import ./space.bend as SPC
 import ./refs.bend as RF
 import ./mech.bend as MC
@@ -83,7 +84,7 @@ type MailvIndex is Data:
 type MailvData is Data:
   MailvData{cache: MV.Cache, find: MV.Find, bubbles: List<&2, MV.Bub>, targets: List<&2, MV.Opt>, rev: Nat, touch: Nat, index: MailvIndex}
 
-# Typed local stores share the old final Ui slot: ordinary Ui copies stay cheap.
+# Typed local stores share the old fin Ui slot: ordinary Ui copies stay cheap.
 # The mail record is behind a List to bound native record flattening.
 type MailvLocal is Data:
   MailvLocal{terms: Map<&2, VT.Vt>, mail: List<&2, MailvData>}
@@ -8944,6 +8945,27 @@ def Bots.google.accts(+u: Ui) -> List<&2, String>:
 def Voice.on(+u: Ui) -> Bool:
   Bool.not(String.is_empty(Ui.scratch(u, "@voice")))
 
+# one quiet word for where dictation is: starting, loading the local model,
+# listening, writing (words are settling into the draft), finishing. The
+# words themselves are only ever in the draft, never repeated here. Every
+# client shows this one (web View.vstate, phones Mob.voice).
+def Voice.status(+lc: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, String.eq(Ui.scratch(u, "@voice"), "starting"), MSG.T.voice.starting(lc),
+    Bool.pick(String, String.eq(Ui.scratch(u, "@voice"), "stopping"), MSG.T.voice.finishing(lc),
+      Bool.pick(String, Bool.and(String.eq(Ui.scratch(u, "@voice.eng"), "local"), String.is_empty(Ui.scratch(u, "@voice.load"))), MSG.T.voice.loading(lc),
+        Bool.pick(String, String.is_empty(String.trim(Ui.scratch(u, "@voice.part"))),
+          MSG.T.web.voice.listening(lc) ++ Bool.pick(String, String.is_empty(Ui.scratch(u, "@voice.dev")), "", " · " ++ Ui.scratch(u, "@voice.dev")),
+          MSG.T.voice.writing(lc)))))
+
+# the level meter, 0..100
+def Voice.level(+u: Ui) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(Ui.scratch(u, "@voice.lv")), 0n)
+
+# whether dictation's strip and notes belong to thread sel (its own, or
+# none named yet)
+def Voice.here(+u: Ui, +sel: String) -> Bool:
+  Bool.or(String.eq(Ui.scratch(u, "@voice.th"), sel), String.is_empty(Ui.scratch(u, "@voice.th")))
+
 def Voice.unsure(+u: Ui) -> List<&2, VC.Unsure>:
   VC.Voice.unsure.parse(Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@voice.unsure")), J.Null{}))
 
@@ -9020,15 +9042,153 @@ def Voice.at.of(+u: Ui, +thread: String) -> Nat:
 def Voice.heard(+u: Ui, +thread: String, +text: String, firm: Bool, us: List<&2, VC.Unsure>) -> Ui:
   Voice.heard.ins(u, thread, VC.Voice.put(firm, Ui.scratch(u, thread), Voice.at.of(u, thread), text), us)
 
+# Live words (core/vdict.bend's Settle): each {"ev":"words"} takes the tail
+# out of the draft, puts the newly committed words where the committed ones
+# end ("@voice.pos"), and the new tail after them ("@voice.tl" its length).
+# Committed words never move or change; only the tail is ever rewritten, in
+# place, at the end of what was dictated. A segment's first words take the
+# usual casing (VC.Voice.put); words later in it keep theirs.
+def Voice.pos(+u: Ui, +thread: String) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(Ui.scratch(u, "@voice.pos")), Voice.at.of(u, thread))
+
+def Voice.tl(+u: Ui) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(Ui.scratch(u, "@voice.tl")), 0n)
+
+# the draft without the tail
+def Voice.untail(+d: String, +p: Nat, +tl: Nat) -> String:
+  String.take(d, p) ++ String.drop(d, Nat.add(p, tl))
+
+# a segment's end: its fixes shown (undo), its words to clarify merged
+def Voice.words.final(fin: Bool, +u: Ui, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
+  match fin:
+    case True{}:
+      Voice.unsure.set(Ui.scratch_set(u, "@voice.fx", fixes), Voice.merge(Voice.unsure(u), us, Voice.ignored(u)))
+    case False{}:
+      u
+
+def Voice.words.put(+u: Ui, +thread: String, +before: String, +c: VC.Ins, +t: VC.Ins, +tail: String, +fin: Bool, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
+  Voice.words.final(fin, Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, thread, VC.Ins.text(t)), "@voice.pos", Nat.show(VC.Ins.caret(c))),
+    "@voice.tl", Nat.show(Nat.sub(String.length(VC.Ins.text(t)), String.length(VC.Ins.text(c))))), "@voice.to", Nat.show(Bool.pick(Nat, String.is_empty(String.trim(tail)), VC.Ins.caret(c), VC.Ins.caret(t)))),
+    "@voice.uth", thread), "@voice.part", tail), fixes, us)
+
+def Voice.words.ins(+u: Ui, +thread: String, +c: VC.Ins, +tail: String, +tfirm: Bool, +fin: Bool, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
+  Voice.words.put(u, thread, VC.Ins.text(c), c, VC.Voice.put(tfirm, VC.Ins.text(c), VC.Ins.caret(c), tail), tail, fin, fixes, us)
+
+def Voice.words.go(+u: Ui, +thread: String, +d: String, +p: Nat, +o: J.Json) -> Ui:
+  Voice.words.ins(u, thread,
+    VC.Voice.put(Bool.or(J.Json.get_bool(o, "firm", False{}), Bool.not(J.Json.get_bool(o, "first", True{}))), d, p, J.Json.get_str(o, "commit", "")),
+    J.Json.get_str(o, "tail", ""), Bool.not(Bool.and(J.Json.get_bool(o, "first", True{}), String.is_empty(J.Json.get_str(o, "commit", "")))),
+    J.Json.get_bool(o, "final", False{}), J.Json.show(J.Json.get_obj(o, "fixes")), VC.Voice.unsure.parse(J.Json.get_obj(o, "unsure")))
+
+def Voice.words.k(+thread: String, +p: Nat, +u: Ui, +o: J.Json) -> Ui:
+  Voice.words.go(u, thread, Voice.untail(Ui.scratch(u, thread), Bool.pick(Nat, Nat.is_le(p, String.length(Ui.scratch(u, thread))), p, String.length(Ui.scratch(u, thread))), Voice.tl(u)),
+    Bool.pick(Nat, Nat.is_le(p, String.length(Ui.scratch(u, thread))), p, String.length(Ui.scratch(u, thread))), o)
+
+def Voice.words(+u: Ui, +o: J.Json) -> Ui:
+  Voice.words.k(J.Json.get_str(o, "thread", ""), Voice.pos(u, J.Json.get_str(o, "thread", "")), u, o)
+
+def Voice.fixes.go(js: List<&2, J.Json>) -> List<&2, VDC.VFx>:
+  match js:
+    case Nil{}:
+      Nil{}
+    case +j <> t:
+      VDC.VFx{J.Json.get_str(j, "heard", ""), J.Json.get_str(j, "out", "")} <> Voice.fixes.go(t)
+
+# the fixes the last segment made ({"heard","out"}), each with its undo
+def Voice.fixes(+u: Ui) -> List<&2, VDC.VFx>:
+  Voice.fixes.go(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@voice.fx")), J.Null{})))
+
+def Voice.fixes.without(fs: List<&2, VDC.VFx>, n: Nat) -> List<&2, VDC.VFx>:
+  match fs n:
+    case Nil{} _:
+      Nil{}
+    case +x <> t 0n:
+      t
+    case +x <> t 1n+k:
+      x <> Voice.fixes.without(t, k)
+
+def Voice.fixes.drop(+u: Ui, +n: Nat) -> Ui:
+  Ui.scratch_set(u, "@voice.fx", J.Json.show(VDC.Vdc.fixes.json(Voice.fixes.without(Voice.fixes(u), n))))
+
+# the learned setting for a heard phrase, after a yes or a no
+def Voice.learn.kv(+u: Ui, +heard: String, +out: String, yes: Bool) -> String:
+  VDC.Vdc.l.pre() ++ VDC.Vdc.phrase(heard) ++ "=" ++ VDC.Vdc.learn(M.Setting.get(Ui.state.of(u), VDC.Vdc.l.pre() ++ VDC.Vdc.phrase(heard), ""), out, yes)
+
+def Voice.learn(+u: Ui, +heard: String, +out: String, yes: Bool) -> Act:
+  Bool.pick(Act, Bool.or(String.is_empty(VDC.Vdc.phrase(heard)), String.eq(heard, out)), Act{u, Nil{}}, Ui.setting(u, Voice.learn.kv(u, heard, out, yes)))
+
+def Voice.then.k(b: Act, cs: List<&2, Cmd>) -> Act:
+  match b:
+    case Act{u, bs}:
+      Act{u, List.append(&2, Cmd, cs, bs)}
+
+# an Act, then a setting on its state
+def Voice.then(a: Act, +kv: String) -> Act:
+  match a:
+    case Act{u, cs}:
+      Voice.then.k(Ui.setting(u, kv), cs)
+
+# a dictionary entry set (an empty line removes it)
+def Voice.entry.kv(+line: String) -> String:
+  VDC.Vdc.ekey.setting(line) ++ "=" ++ String.trim(line)
+
+# many entries (one a line), each its own setting
+def Voice.entries(ls: List<&2, String>, +a: Act) -> Act:
+  match ls:
+    case Nil{}:
+      a
+    case +l <> t:
+      Voice.entries(t, Bool.pick(Act, VDC.Vdc.line.ok(l), Voice.then(a, Voice.entry.kv(l)), a))
+
+# undo the n-th fix: the word as heard goes back where the fix put it, and
+# the fix is learned as unwanted
+def Voice.undo.k(+u: Ui, x: VDC.VFx, +n: Nat) -> Act:
+  match x:
+    case VDC.VFx{+h, +o}:
+      Voice.learn(Voice.fixes.drop(Bool.pick(Ui, String.is_empty(o), u, Ui.scratch_set(u, Ui.scratch(u, "@voice.uth"), VC.Voice.fix(Ui.scratch(u, Ui.scratch(u, "@voice.uth")), o, h))), n), h, o, False{})
+
+def Voice.undo(+u: Ui, +n: Nat) -> Act:
+  Voice.undo.k(u, Maybe.default(&2, VDC.VFx, List.get(&2, VDC.VFx, Voice.fixes(u), n), VDC.VFx{"", ""}), n)
+
+# A client that owns its draft (the hub-drawn page, the phones) places a
+# voice message's words itself: what Voice.recv keeps between messages
+# ("keep": @voice.pos and the rest) comes back with the new draft, and
+# goes in with the next message (mobile/session.bend's Session.voice, the
+# web's app.bend voice_place)
+def Voice.place.keys() -> List<&2, String>:
+  ["@voice", "@voice.pos", "@voice.tl", "@voice.to", "@voice.at", "@voice.part", "@voice.uth"]
+
+def Voice.place.in(ks: List<&2, String>, +o: J.Json, u: Ui) -> Ui:
+  match ks:
+    case Nil{}:
+      u
+    case +k <> t:
+      Voice.place.in(t, o, Ui.scratch_set(u, k, J.Json.get_str(o, k, "")))
+
+def Voice.place.out(ks: List<&2, String>, +u: Ui) -> List<&2, J.KV>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case +k <> t:
+      J.KV{k, J.Str{Ui.scratch(u, k)}} <> Voice.place.out(t, u)
+
+def Voice.place.k(+thread: String, +u: Ui) -> J.Json:
+  J.Json.obj([J.KV{"draft", J.Str{Ui.scratch(u, thread)}}, J.KV{"keep", J.Json.obj(Voice.place.out(Voice.place.keys(), u))}])
+
 def Voice.dev(+o: J.Json) -> String:
   Bool.pick(String, String.is_empty(J.Json.get_str(o, "label", "")), J.Json.get_str(o, "device", ""), J.Json.get_str(o, "label", ""))
 
+# The helper can repeat ready after resolving the microphone's label.
+# That metadata update must preserve words already placed by this session.
+def Voice.live.reset(+u: Ui) -> Ui:
+  Bool.pick(Ui, String.eq(Ui.scratch(u, "@voice"), "live"), u, Ui.scratch_set(Ui.scratch_set(u, "@voice.pos", ""), "@voice.tl", ""))
+
 def Voice.live(+u: Ui, +o: J.Json) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", "live"), "@voice.dev", Voice.dev(o)), "@voice.lv", "0"),
-    "@voice.hint", ""), "@voice.rec", J.Json.get_str(o, "recorder", ""))
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Voice.live.reset(u), "@voice", "live"), "@voice.dev", Voice.dev(o)), "@voice.lv", "0"),
+    "@voice.hint", ""), "@voice.rec", J.Json.get_str(o, "recorder", "")), "@voice.eng", J.Json.get_str(o, "engine", ""))
 
 def Voice.idle(u: Ui) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", ""), "@voice.part", ""), "@voice.lv", ""), "@voice.hint", "")
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", ""), "@voice.part", ""), "@voice.lv", ""), "@voice.hint", ""), "@voice.pos", ""), "@voice.tl", "")
 
 def Voice.recv.k(i: Nat, +u: Ui, +o: J.Json) -> Ui:
   match i:
@@ -9048,12 +9208,20 @@ def Voice.recv.k(i: Nat, +u: Ui, +o: J.Json) -> Ui:
       Ui.scratch_set(u, "@voice.err", J.Json.get_str(o, "error", ""))
     case 7n:
       Voice.idle(u)
+    case 8n:
+      Voice.words(u, o)
+    case 9n:
+      Ui.scratch_set(u, "@voice.load", Nat.show(J.Json.get_nat(o, "ms", 0n)))
     case _:
       u
 
 # a {"t":"voice"} message from the hub
 def Voice.recv(+u: Ui, +o: J.Json) -> Ui:
-  Voice.recv.k(C.Codec.pos(["live", "part", "text", "level", "hint", "stopping", "error", "idle"], J.Json.get_str(o, "ev", "")), u, o)
+  Voice.recv.k(C.Codec.pos(["live", "part", "text", "level", "hint", "stopping", "error", "idle", "words", "loaded"], J.Json.get_str(o, "ev", "")), u, o)
+
+# a voice message into a draft the client keeps (keep: the last answer's)
+def Voice.place(+keep: J.Json, +draft: String, +o: J.Json) -> J.Json:
+  Voice.place.k(J.Json.get_str(o, "thread", ""), Voice.recv(Voice.place.in(Voice.place.keys(), keep, Ui.scratch_set(Ui.init(0n), J.Json.get_str(o, "thread", ""), draft)), o))
 
 # what the hub answers about voice: the key (masked), the dictionary, the
 # microphones ("@voice.set" once known)
@@ -9068,8 +9236,15 @@ def Voice.reply.k(has: Bool, +o: J.Json, +u: Ui) -> Ui:
 def Voice.reply.devs(+o: J.Json, +u: Ui) -> Ui:
   Bool.pick(Ui, String.is_empty(J.Json.get_str(o, "voiceDevices", "")), u, Ui.scratch_set(u, "@voice.devs", J.Json.get_str(o, "voiceDevices", "")))
 
+def Voice.reply.local(m: Maybe<&2, J.Json>, +u: Ui) -> Ui:
+  match m:
+    case Some{+l}:
+      Ui.scratch_set(Ui.scratch_set(u, "@voice.local", J.Json.show(l)), "@voice.busy", "")
+    case None{}:
+      u
+
 def Voice.reply(+o: J.Json, +u: Ui) -> Ui:
-  Voice.reply.devs(o, Voice.reply.k(Maybe.is_some(&2, J.Json, J.Json.get(o, "voiceDict")), o, u))
+  Voice.reply.local(J.Json.get(o, "local"), Voice.reply.devs(o, Voice.reply.k(Maybe.is_some(&2, J.Json, J.Json.get(o, "voiceDict")), o, u)))
 
 # the dictionary as the hub last answered it
 def Voice.dict(+u: Ui) -> List<&2, String>:
@@ -9107,32 +9282,37 @@ def Voice.default(+u: Ui) -> String:
 def Voice.rpc(u: Ui, +op: String, kvs: List<&2, J.KV>) -> Act:
   Ui.rpc(u, "bots.voice", J.KV{"op", J.Str{op}} <> kvs)
 
-def Voice.start(+u: Ui) -> Act:
-  Voice.rpc(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", "starting"), "@voice.th", Ui.sel(u)), "@voice.err", ""), "@voice.hint", ""),
-    "@voice.dev", ""), "start", [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"device", J.Str{M.Setting.get(Ui.state.of(u), "voice.device", "")}}])
+# src "client": the client records (a page or phone away from the hub's
+# machine) and uploads its audio where the reply says
+def Voice.start(+u: Ui, +src: String) -> Act:
+  Voice.rpc(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", "starting"), "@voice.th", Ui.sel(u)), "@voice.err", ""), "@voice.hint", ""),
+    "@voice.dev", ""), "@voice.fx", ""), "start", [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"device", J.Str{M.Setting.get(Ui.state.of(u), "voice.device", "")}},
+    J.KV{"src", J.Str{Bool.pick(String, String.eq(src, "client"), "client", "hub")}}])
 
 def Voice.stop(+u: Ui) -> Act:
   Voice.rpc(Ui.scratch_set(u, "@voice", "stopping"), "stop", [J.KV{"thread", J.Str{Ui.scratch(u, "@voice.th")}}])
 
 # the mic button: start listening into the selected thread, or stop
-def Voice.toggle(on: Bool, +u: Ui) -> Act:
+def Voice.toggle(on: Bool, +u: Ui, +src: String) -> Act:
   match on:
     case True{}:
       Voice.stop(u)
     case False{}:
-      Voice.start(u)
+      Voice.start(u, src)
 
 # a word replaced in the draft it was heard into
 def Voice.fix(+u: Ui, +w: String, +r: String) -> Ui:
   Ui.scratch_set(u, Ui.scratch(u, "@voice.uth"), VC.Voice.fix(Ui.scratch(u, Ui.scratch(u, "@voice.uth")), w, r))
 
+# the guess taken: it replaces the word, and "heard → guess" is learned once
 def Voice.use(+u: Ui, x: VC.Unsure, +n: String) -> Act:
   match x:
     case VC.Unsure{+w, +g}:
-      Act{Voice.drop(Bool.pick(Ui, String.is_empty(g), u, Voice.fix(u, w, g)), n), Nil{}}
+      Voice.learn(Voice.drop(Bool.pick(Ui, String.is_empty(g), u, Voice.fix(u, w, g)), n), w, Bool.pick(String, String.is_empty(g), w, g), True{})
 
+# the word as heard joins the dictionary
 def Voice.add(+u: Ui, x: VC.Unsure, +n: String) -> Act:
-  Voice.rpc(Voice.drop(u, n), "add", [J.KV{"term", J.Str{Voice.word(x)}}])
+  Ui.setting(Voice.drop(u, n), Voice.entry.kv(Voice.word(x)))
 
 def Voice.skip(+u: Ui, x: VC.Unsure, +n: String) -> Act:
   Act{Voice.drop(Ui.scratch_set(u, "@voice.ign", Ui.scratch(u, "@voice.ign") ++ "\n" ++ Voice.word(x)), n), Nil{}}
@@ -9146,10 +9326,11 @@ def Voice.fixed.k(none: Bool, +u: Ui, +x: VC.Unsure, +r: String) -> Act:
     case True{}:
       Act{Ui.scratch_set(u, "@voice.fix", ""), Nil{}}
     case False{}:
-      Voice.rpc(Ui.scratch_set(Ui.scratch_set(Voice.drop(Voice.fix(u, Voice.word(x), r), Ui.scratch(u, "@voice.fix")), "@voice.fix", ""), "@f.vfix", ""),
-        "add", [J.KV{"term", J.Str{r}}])
+      Voice.then(Voice.learn(Ui.scratch_set(Ui.scratch_set(Voice.drop(Voice.fix(u, Voice.word(x), r), Ui.scratch(u, "@voice.fix")), "@voice.fix", ""), "@f.vfix", ""), Voice.word(x), r, True{}),
+        Voice.entry.kv(r))
 
-# the right spelling typed: it replaces the word, and joins the dictionary
+# the right spelling typed: it replaces the word, joins the dictionary, and
+# "heard → right" is learned (twice and it applies by itself)
 def Voice.fixed(+u: Ui) -> Act:
   Voice.fixed.k(String.is_empty(String.trim(Ui.scratch(u, "@f.vfix"))), u, Voice.at(Voice.unsure(u), Ui.scratch(u, "@voice.fix")), String.trim(Ui.scratch(u, "@f.vfix")))
 
@@ -12050,7 +12231,7 @@ def Settings.menu.pages() -> List<&2, String>:
   ["appearance", "threads", "agents", "writing", "cad", "ordering", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
 
 def Settings.phone.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "cad", "ordering", "network", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "cad", "ordering", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
 
 def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
   match ps:
@@ -15134,9 +15315,27 @@ def Proj.enter(+l: I.Loc, +u: Ui) -> Act:
 def Proj.enter.u(+u: Ui) -> Act:
   Proj.enter(Lang.loc(u), u)
 
+# an Act, then a voice request on its state
+def Voice.after.rpc(a: Act, +op: String, kvs: List<&2, J.KV>) -> Act:
+  match a:
+    case Act{u, cs}:
+      Voice.then.k(Voice.rpc(u, op, kvs), cs)
+
 # past the table's own: the project picker's (14-17), then the Mechanical
 # page's (20-28; client.bend's Mpage.act), then a phone's upload (29, 30),
 # then the viewer's history (31-46; Hs.act), then the API keys' (47, 48)
+def Voice.unterm(undo: Bool, +u: Ui, +value: String) -> Act:
+  match undo:
+    case True{}:
+      Voice.undo(u, VDC.Vdc.num(String.drop(value, 1n)))
+    case False{}:
+      Voice.after.rpc(Ui.setting(u, VDC.Vdc.ekey.setting(value) ++ "="), "dict", [J.KV{"dict", J.Str{VC.Voice.dict.show(VC.Voice.dict.remove(Voice.dict(u), value))}}])
+
+def Voice.local(+u: Ui, +value: String) -> Act:
+  Voice.rpc(Ui.scratch_set(u, "@voice.busy", Bool.pick(String, String.eq(value, "status"), Ui.scratch(u, "@voice.busy"), value)),
+    Bool.pick(String, String.starts_with(value, "install:"), "local-install", Bool.pick(String, String.starts_with(value, "remove:"), "local-remove", "local")),
+    [J.KV{"id", J.Str{VDC.Vdc.right(value, ":")}}])
+
 def Voice.act.tail.k(picker: Bool, +i: Nat, +u: Ui, +value: String) -> Act:
   match picker:
     case True{}:
@@ -15150,13 +15349,14 @@ def Voice.act.tail(+i: Nat, +u: Ui, +value: String) -> Act:
 def Voice.act(i: Nat, +u: Ui, +value: String) -> Act:
   match i:
     case 0n:
-      Voice.toggle(Voice.on(u), u)
+      Voice.toggle(Voice.on(u), u, value)
     case 1n:
       Voice.rpc(Ui.scratch_set(u, "@f.vkey", ""), "key", [J.KV{"key", J.Str{Ui.scratch(u, "@f.vkey")}}])
     case 2n:
       Voice.rpc(Sealed.forget(u, "vkey"), "unkey", Nil{})
+    # the local engine: "status", "install:<model>", "remove:<model>"
     case 3n:
-      Voice.rpc(u, "dict", [J.KV{"dict", J.Str{Ui.scratch(u, "@f.vdict")}}])
+      Voice.local(u, value)
     case 4n:
       Voice.use(u, Voice.at(Voice.unsure(u), value), value)
     case 5n:
@@ -15169,10 +15369,12 @@ def Voice.act(i: Nat, +u: Ui, +value: String) -> Act:
       Voice.skip(u, Voice.at(Voice.unsure(u), value), value)
     case 9n:
       Act{Ui.scratch_set(Ui.scratch_set(u, "@voice.err", ""), "@voice.hint", ""), Nil{}}
+    # entries typed (one a line: "KiCad = key cad", "jason -> JSON", "!um")
     case 10n:
-      Voice.rpc(Ui.scratch_set(u, "@f.vterm", ""), "add", [J.KV{"term", J.Str{String.trim(Ui.scratch(u, "@f.vterm"))}}])
+      Voice.entries(String.lines(Ui.scratch(u, "@f.vterm")), Act{Ui.scratch_set(u, "@f.vterm", ""), Nil{}})
+    # "#N" undoes the last segment's N-th fix; else an entry (its line) goes
     case 11n:
-      Voice.rpc(u, "dict", [J.KV{"dict", J.Str{VC.Voice.dict.show(VC.Voice.dict.remove(Voice.dict(u), value))}}])
+      Voice.unterm(String.starts_with(value, "#"), u, value)
     # the table's last action is not voice's: a side question closed
     case 12n:
       Btw.close(u)

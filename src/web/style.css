@@ -2217,3 +2217,16 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .solid-toolbar button, .solid-toolbar summary, .solid-toolbar select { min-height: 36px; padding: 0 8px; }
   .local-menu-body { max-width: calc(100vw - 16px); }
 }
+
+/* Improvements stays outside the hub-patched root, like the drawing pad. */
+.topbar .tb button[data-improvements]{width:auto;gap:5px;padding:0 9px}
+.improvements{position:fixed;z-index:11000;left:20px;top:48px;width:min(520px,calc(100vw - 16px));box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:14px;background:var(--bg,#111410);color:var(--text,#d9dde4);border:1px solid var(--line,#262b34);box-shadow:0 8px 40px #0009;overflow:auto;overscroll-behavior:contain}
+.improvements[hidden]{display:none!important}
+.improvements>header{display:flex;gap:12px;align-items:center;cursor:move;touch-action:none;user-select:none}
+.improvements>header strong{flex:1}.improvements kbd{font-size:11px;opacity:.7;white-space:nowrap}
+.improvements label{font-size:13px}.improvements textarea{box-sizing:border-box;resize:vertical;width:100%;min-height:100px;max-height:30vh;padding:9px;background:var(--panel,#13161b);color:inherit;border:1px solid var(--line,#262b34);font:inherit}
+.improvements select{width:100%;padding:6px;background:var(--panel,#13161b);color:inherit}
+.improvements>img{display:block;width:100%;max-height:32vh;object-fit:contain;background:#080a07;border:1px solid var(--line,#262b34)}
+.improvements>img[hidden]{display:none}.improvements>p{margin:0;font-size:12px;min-height:1.4em}.improvements>footer{display:flex;flex-wrap:wrap;gap:8px}.improvements button{min-height:36px;padding:6px 10px}.improvements .primary{margin-left:auto}.improvements :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:600px){.improvements{padding:12px}.improvements>header{cursor:default;touch-action:auto}.improvements kbd{display:none}.improvements textarea{font-size:16px}.improvements button{min-height:44px}.improvements>img{max-height:25vh}}
+@media(max-width:760px){.topbar .tb button[data-improvements]{width:44px;padding:0}.topbar .improvements-label{display:none}}
