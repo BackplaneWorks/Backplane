@@ -245,6 +245,7 @@ try {
     await open(page, other); await quiet(page, 800, 60000);
     if (scenarios.includes("open")) await measure("open", target, () => open(page, target), { quietMs: 800, max: 60000 });
     else { await open(page, target); await quiet(page, 800, 60000); }
+    if (scenarios.includes("idle")) await quiet(page, 1500, 20000);
     if (scenarios.includes("idle")) await measure("idle", target, () => sleep(4000));
     if (scenarios.includes("type1")) {
       await composer().click(); await quiet(page);
@@ -268,6 +269,8 @@ try {
       for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 2000);
       await quiet(page, 600);
     }
+    // (after a longer quiet: a view still on its way is not the tick's)
+    if (scenarios.includes("clock")) await quiet(page, 1500, 20000);
     if (scenarios.includes("clock")) await measure("clock", target, () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))));
     if (scenarios.includes("bg") && bg && bg !== target) {
       await open(driver, bg); await quiet(driver, 600, 60000);
