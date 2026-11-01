@@ -14522,6 +14522,7 @@ def Laws.component_fragment_only_last_field_completes(key, value, tail):
   {==}
 
 def Laws.copy_keeps_viewer_reads():
+  {==}
 
 def Laws.refs_blank_empty():
   {==}
@@ -14569,6 +14570,7 @@ def Laws.phone_subs_cancel_routed():
 
 
 def Laws.delegation_captures_baseline_before_agent(t, cwd, prompt, uuid):
+  {==}
 
 def Laws.refs_word_padded():
   {==}

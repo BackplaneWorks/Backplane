@@ -14304,8 +14304,9 @@ law view_page_older_next_partial:
   for +cursor: String
   {TVIEWH.Page.older.next.k(False{}, cursor) == "" : String}
 # The composer's blank test (refs.bend's Refs.blank: String.trim's
-# whitespace, looking no further than the first other character) and the
-# slash popup's "/" first (re-render harness, 2026-11-01)
+# whitespace, looking no further than the first other character), its
+# command words (Refs.word: a trimmed draft equal to a word, never walking
+# the rest) and the slash popup's "/" first (re-render harness, 2026-11-01)
 law refs_blank_empty:
   {RF.Refs.blank("") == True{} : Bool}
 
