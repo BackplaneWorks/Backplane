@@ -208,13 +208,29 @@ export class TimelineScroller {
           continue;
         }
         if (this.el.scrollTop !== plan.top) this.el.scrollTop = plan.top;
-        // Browser scroll readback can quantize a fractional command. Bend
-        // decides the track correction; the adapter only returns the reading.
-        // Resize measurements are collected once the command has settled.
         if (this.el.scrollTop !== plan.top) {
           const readbackAttempt = (request.readbackAttempt || 0) + 1;
-          if (readbackAttempt > 4) throw new Error('Timeline scroll readback did not settle');
-          this._pending = { mode: 'readback', readbackAttempt };
+          if (Math.abs(this.el.scrollTop - plan.top) < 1) {
+            // Browser scroll readback can quantize a fractional command. Bend
+            // decides the track correction; the adapter only returns the
+            // reading. After a few tries the reading stands.
+            // Resize measurements are collected once the command has settled.
+            if (readbackAttempt <= 4) this._pending = { mode: 'readback', readbackAttempt };
+          } else if (readbackAttempt <= 3) {
+            // The browser clamped the command: the list is another height than
+            // the plan's (a thread switch or the viewer opening resized it in
+            // this very render, before the ResizeObserver says so). Readback
+            // keeps the old plan's view, so read the height again and plan
+            // from where the list is.
+            RR?.n("tl.scroll.clamped");
+            this._view = null;
+            this._pending = { mode: 'measure', readbackAttempt };
+          } else if (!request.kept) {
+            // Still clamped: keep the browser's position rather than throw out
+            // of the render, which left rows placed for a scroll that never
+            // happened (a blank thread until something drew it again).
+            this._pending = { mode: 'scroll', kept: true, readbackAttempt };
+          }
         }
       }
       if (!this._destroyed) {

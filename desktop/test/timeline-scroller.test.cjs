@@ -159,6 +159,36 @@ test('timeline DOM effects preserve nodes, measure, forward commands and detach'
   });
   assert.deepEqual(stream, { grown: 150, retained: 150, height: 150, alignment: 'flex-end', cleared: true }, 'live tail shrink retains space until the stream ends');
 
+  // A command the browser clamps (the list changed height in this render,
+  // before the ResizeObserver said so) plans again from the list's height
+  // now; one that stays clamped keeps the browser's position. Neither throws
+  // out of the render (that left a blank thread).
+  const clamped = await page.evaluate(() => {
+    const original = scroller.callbacks.plan;
+    const items = [0, 1, 2, 3, 4].map(i => ({ key: 'c' + i, index: i, start: i * 200, size: 200 }));
+    const rows5 = items.map(i => ({ key: i.key, height: 200 }));
+    const at = [];
+    scroller.callbacks.plan = input => {
+      calls.push(input); at.push([input.mode, input.view]);
+      return { items, visible: items, total: 1000, top: 1000 - input.view, view: input.view, atEnd: true, anchor: 'c4', offset: 0 };
+    };
+    scroller._view = 100; // a height from before this render
+    scroller.update(rows5);
+    const fresh = { top: scroller.el.scrollTop, replanned: at.some(a => a[0] === 'measure' && a[1] === 200), kept: at.some(a => a[0] === 'scroll'), last: at.at(-1) };
+    at.length = 0;
+    const before = notifications;
+    scroller.callbacks.plan = input => {
+      calls.push(input); at.push(input.mode);
+      return { items, visible: items, total: 1000, top: 950, view: 200, atEnd: true, anchor: 'c4', offset: 0 };
+    };
+    scroller.update(rows5.map(r => ({ ...r })));
+    const kept = { top: scroller.el.scrollTop, modes: at.slice(), notified: notifications > before };
+    scroller.callbacks.plan = original;
+    return { fresh, kept };
+  });
+  assert.deepEqual(clamped.fresh, { top: 800, replanned: true, kept: false, last: ['measure', 200] });
+  assert.deepEqual(clamped.kept, { top: 800, modes: ['update', 'measure', 'measure', 'measure', 'scroll'], notified: true });
+
   const destroyed = await page.evaluate(async () => {
     scroller.destroy();
     const count = calls.length;
