@@ -159,7 +159,7 @@
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
-    "src/server/thin-sidebar.bend": "97498ae01599f2dc826db829e836b34519a2e93d9a5474324a51bfd2331242ae",
+    "src/server/thin-sidebar.bend": "03a4481e05258eaead769ca352081b6782f0b20589fe29d33e3bb1151916844a",
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "f3afb501d96bb15c76aeae77bf5e75a55109ce06c3c51d0b8bf07529f82c5ac3",
