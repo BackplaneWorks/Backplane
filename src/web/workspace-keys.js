@@ -83,11 +83,12 @@ export function modelPickerKey(event) {
 
 // Esc puts away what is open over the page wherever the keyboard is: what
 // the hub drew with a shade or a backdrop that a click beside it presses (a
-// row's or a project's menu, the badge editor, a project's Intent), the
+// row's or a project's menu, the badge editor, a project's Intent or the
+// history version picker), the
 // topmost (the last) first; else an open ▾ menu. The model picker keeps its
 // own Escape. The answer closes it, or is null when nothing is open.
 export function overlayEscape(doc) {
-  const shades = [...(doc.querySelectorAll?.('.shade[data-on-click], .modal-back[data-on-click]') || [])]
+  const shades = [...(doc.querySelectorAll?.('.shade[data-on-click], .modal-back[data-on-click], .hist-scrim[data-on-click]') || [])]
     .filter(el => el.getAttribute('data-value') !== 'models');
   const shade = shades.at(-1);
   if (shade) return () => shade.click();

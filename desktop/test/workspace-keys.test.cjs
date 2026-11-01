@@ -580,6 +580,17 @@ test('Escape dismisses the account picker before the inline editor', async () =>
   overlayEscape(doc)();assert.equal(closed, 1);
 });
 
+test('Escape dismisses the history version picker before its viewer', async () => {
+  const { overlayEscape } = await import('../../src/web/workspace-keys.js');
+  let dismissed = 0;
+  const scrim = { getAttribute: () => '', click: () => { dismissed++; } };
+  const doc = { querySelector: () => null,
+    querySelectorAll: selector => selector.includes('.hist-scrim') ? [scrim] : [] };
+  const close = overlayEscape(doc);
+  assert.equal(typeof close, 'function');
+  close();assert.equal(dismissed, 1);
+});
+
 test('Tab goes round a dialog: last to first, Shift+Tab first to last, the dialog itself to an end', async () => {
   const { dialogTab } = await import('../../src/web/workspace-keys.js');
   const edit = { id: 'edit' }, close = { id: 'close' }, body = { id: 'body' }, stops = [edit, close, body];
