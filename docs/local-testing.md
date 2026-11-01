@@ -74,12 +74,9 @@ ceilings are explicitly provisional (focused 6, checker 16, proof/build 12,
 fast tests 6 GiB; explicit two-worker legacy tests 12 GiB after a measured 10 GiB scope OOM); successful local measurements replace them with the
 observed aggregate peak plus 20% rounded to GiB. A serial remote checker can
 use its measured process peak plus 64 MiB of helper allowance, then that same
-20% margin. CHECK retains a 16 GiB minimum reservation because its manifest
-has OOM-killed 10 GiB scopes; a smaller prior pass cannot lower that floor.
-A larger measured CHECK peak still receives the same 20% margin. Other phases
-keep their existing adaptation. Warm cache hits never lower a previously
-measured cold peak. The checker floor follows the manifest OOM record,
-not a claim about build RAM. Headroom stays
+20% margin. Warm cache hits never lower a previously measured cold peak.
+The initial checker budget follows the manifest OOM record, not a claim about
+build RAM; successful measurements use that same 20% margin. Headroom stays
 intact; no application is stopped to make a reservation fit.
 For a large check, select serial manifests explicitly with
 `CHECK_SHARDS=8 python3 scripts/local-ci.py --only check` (decimal 1–16,

@@ -134,8 +134,6 @@ def execute_phase(name, roots, files, cmd, folder):
     except (OSError,ValueError): history = {}
     history_name = name+(':full' if os.environ.get('TEST_FULL')=='1' else ':fast') if name=='tests' else name
     cap = math.ceil(history[history_name]*1.2/1073741824) if history_name in history else defaults[name]
-    # CHECK's 16 GiB floor survives smaller history after recorded 10 GiB OOMs.
-    if name == 'check': cap = max(defaults[name], cap)
     local = None
     warm = False
     if name == 'build-smoke':

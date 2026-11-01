@@ -50,9 +50,9 @@ class Resources(unittest.TestCase):
             rc,_,_=ci.boat_phase('proof','proof',[],[],Path(d))
             self.assertEqual(rc,3)
 
-    def test_check_floor_preserves_declared_budget_and_larger_peak_margin(self):
+    def test_check_reservation_uses_measured_peak_plus_margin(self):
         gib = 1073741824
-        for previous, expected in [(None,16),(8*gib,16),(20*gib,24)]:
+        for previous, expected in [(None,16),(8*gib,10),(20*gib,24)]:
             with self.subTest(previous=previous), tempfile.TemporaryDirectory() as d, \
                  patch.object(ci,'CACHE',Path(d)), \
                  patch.dict(ci.os.environ,{'BP_LOCAL_CI_BOAT':''}), \
@@ -70,7 +70,7 @@ class Resources(unittest.TestCase):
                 self.assertEqual(peaks.read_bytes(),before)
                 self.assertFalse((Path(d)/'local-ci-passes').exists())
 
-    def test_check_floor_unavailable_moves_once_without_editing_history(self):
+    def test_measured_check_unavailable_moves_once_without_editing_history(self):
         with tempfile.TemporaryDirectory() as d, patch.object(ci,'CACHE',Path(d)), \
              patch.dict(ci.os.environ,{'BP_LOCAL_CI_BOAT':''}), \
              patch.object(ci,'local_phase',return_value=(75,{})) as local, \
@@ -81,7 +81,7 @@ class Resources(unittest.TestCase):
             command=['scripts/check.sh','check']
             rc,_=ci.execute_phase('check',['fixture.bend'],['checker.py'],command,Path(d))
             self.assertEqual(rc,124)
-            local.assert_called_once_with('check',command,Path(d),16)
+            local.assert_called_once_with('check',command,Path(d),10)
             remote.assert_called_once_with('check','check',['fixture.bend'],['checker.py'],Path(d))
             self.assertEqual(peaks.read_bytes(),before)
             self.assertFalse((Path(d)/'local-ci-passes').exists())
@@ -94,7 +94,7 @@ class Resources(unittest.TestCase):
             ci.execute_phase('proof',[],[],['scripts/check.sh','proof'],Path(d))
             local.assert_called_once_with('proof',['scripts/check.sh','proof'],Path(d),10)
 
-    def test_check_floor_uses_unchanged_no_wait_admission_contract(self):
+    def test_check_uses_unchanged_no_wait_admission_contract(self):
         with tempfile.TemporaryDirectory() as d, patch.object(ci.subprocess,'run') as run:
             folder=Path(d)
             admit=folder/'admit.sh'
