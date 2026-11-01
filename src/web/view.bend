@@ -46,6 +46,7 @@ import ../core/botui.bend as BI
 import ../core/ubersync.bend as US
 import ./bots.bend as WB
 import ../core/voice.bend as VC
+import ../core/vdict.bend as VDV
 import ../core/hist.bend as HS
 import ../core/review.bend as RVW
 import ../core/emb.bend as EM
@@ -1655,6 +1656,9 @@ def View.terms(ts: List<&2, String>) -> List<&2, D.Node>:
 # (the key's field is sealed, client.bend's Sealed: its value never
 # reaches the client's state, a view action or a draft)
 def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  List.append(&2, D.Node, View.voice.engine(lc, u, st), View.voice.set.rest(lc, u, st))
+
+def View.voice.set.rest(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
   [View.setrow(MSG.T.settings.voice.key(lc), U.Sealed.say(u, "vkey", Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.key")), MSG.T.settings.voice.key.note(lc),
       MSG.T.settings.voice.key.saved(lc, U.Ui.scratch(u, "@voice.key")))),
      [WB.WB.sealed("voice-key", "vkey", "password", "sk-…"), D.Dom.button("primary", "sealed", "vkey", MSG.T.settings.key.keep(lc), MSG.T.common.save(lc)),
@@ -1662,9 +1666,70 @@ def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
    View.setrow(MSG.T.settings.voice.microphone(lc), MSG.T.voice.device.note(lc, Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), MSG.T.voice.device.default(lc, U.Voice.label(u, U.Voice.default(u))), U.Voice.label(u, M.Setting.get(st, "voice.device", "")))),
      D.Dom.button(Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), "on", ""), "setting", "voice.device=", MSG.T.settings.voice.default.tip(lc), MSG.T.voice.default(lc)) <>
        View.devs(U.Voice.devices(u), M.Setting.get(st, "voice.device", ""))),
-   View.setrow(MSG.T.settings.voice.dictionary(lc), MSG.T.web.settings.voice.dictionary.note(lc),
-     List.append(&2, D.Node, View.terms.loc(lc, U.Voice.dict(u)), [WB.WB.input("voice-term", "vterm", U.Ui.scratch(u, "@f.vterm"), MSG.T.settings.voice.term(lc), "voice-term"),
-       D.Dom.button("", "voice-term", "", MSG.T.settings.voice.term.add(lc), MSG.T.common.add(lc))]))]
+   View.setrow(MSG.T.settings.voice.dictionary(lc), MSG.T.settings.voice.entries.note(lc),
+     List.append(&2, D.Node, View.terms.loc(lc, List.append(&2, String, U.Voice.dict(u), View.entries(st))), [WB.WB.area("voice-term", "vterm", U.Ui.scratch(u, "@f.vterm"), MSG.T.settings.voice.term(lc)),
+       D.Dom.button("", "voice-term", "", MSG.T.settings.voice.term.add(lc), MSG.T.common.add(lc))])),
+   View.setrow(MSG.T.settings.voice.learned(lc), MSG.T.settings.voice.learned.note(lc), View.learned(lc, st, M.Setting.keys.pre(st, VDV.Vd.l.pre())))]
+
+# the engine (Auto, on this machine, OpenAI) and the local model
+def View.engine.chip(+lc: I.Loc, +cur: String, +v: String, +label: String) -> D.Node:
+  D.Dom.button(Bool.pick(String, String.eq(cur, v), "on", ""), "setting", "voice.engine=" ++ v, label, label)
+
+def View.model.chip(+cur: String, +v: String, +label: String) -> D.Node:
+  D.Dom.button(Bool.pick(String, String.eq(cur, v), "on", ""), "setting", "voice.model=" ++ v, label, label)
+
+# the local status ({"models":[{"id","label","size","installed"}], ...}) for one model
+def View.local.model(+l: J.Json, +id: String) -> J.Json:
+  View.local.find(J.Json.elems(J.Json.get_obj(l, "models")), id)
+
+def View.local.find(ms: List<&2, J.Json>, +id: String) -> J.Json:
+  match ms:
+    case Nil{}:
+      J.Null{}
+    case +m <> t:
+      Bool.pick(J.Json, String.eq(J.Json.get_str(m, "id", ""), id), m, View.local.find(t, id))
+
+def View.local.note(+lc: I.Loc, +l: J.Json, +m: J.Json, +busy: Bool) -> String:
+  Bool.pick(String, busy, MSG.T.voice.model.busy(lc),
+    Bool.pick(String, Bool.not(J.Json.get_bool(l, "supported", True{})), MSG.T.voice.model.unsupported(lc, J.Json.get_str(l, "platform", "")),
+      Bool.pick(String, J.Json.get_bool(m, "installed", False{}), MSG.T.voice.model.ready(lc, J.Json.get_str(m, "label", "")),
+        MSG.T.settings.voice.model.note(lc) ++ " " ++ MSG.T.voice.model.none(lc))))
+
+def View.local.ctl(+lc: I.Loc, +m: J.Json, +id: String, +busy: Bool) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, busy, Nil{},
+    Bool.pick(List<&2, D.Node>, J.Json.get_bool(m, "installed", False{}), [D.Dom.button("", "voice-dict", "remove:" ++ id, MSG.T.voice.model.remove(lc), MSG.T.voice.model.remove(lc))],
+      [D.Dom.button("primary", "voice-dict", "install:" ++ id, J.Json.get_str(m, "label", ""),
+        MSG.T.voice.model.download(lc, J.Json.get_str(m, "label", id), Nat.show(Nat.div(J.Json.get_nat(m, "size", 0n), 1000000n))))]))
+
+def View.voice.engine(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  +eng = M.Setting.get(st, "voice.engine", "auto")
+  +mid = VDV.Vd.model.id(M.Setting.get(st, "voice.model", ""))
+  +l = Maybe.default(&2, J.Json, J.Json.parse(U.Ui.scratch(u, "@voice.local")), J.Null{})
+  +busy = String.starts_with(U.Ui.scratch(u, "@voice.busy"), "install:")
+  [View.setrow(MSG.T.settings.voice.engine(lc), MSG.T.settings.voice.engine.note(lc),
+     [View.engine.chip(lc, eng, "auto", MSG.T.voice.engine.auto(lc)), View.engine.chip(lc, eng, "local", MSG.T.voice.engine.local(lc)), View.engine.chip(lc, eng, "cloud", MSG.T.voice.engine.cloud(lc))]),
+   View.setrow(MSG.T.settings.voice.model(lc), View.local.note(lc, l, View.local.model(l, mid), busy),
+     List.append(&2, D.Node, [View.model.chip(mid, "parakeet-v2", "English"), View.model.chip(mid, "parakeet-v3", "25 languages")], View.local.ctl(lc, View.local.model(l, mid), mid, busy)))]
+
+# the dictionary's entries as written (core/vdict.bend: settings voice.e.*)
+def View.entries.go(ks: List<&2, String>, +st: M.State, acc: List<&2, String>) -> List<&2, String>:
+  match ks:
+    case Nil{}:
+      List.reverse(&2, String, acc)
+    case +k <> t:
+      View.entries.go(t, st, M.Setting.get(st, k, "") <> acc)
+
+def View.entries(+st: M.State) -> List<&2, String>:
+  View.entries.go(M.Setting.keys.pre(st, VDV.Vd.e.pre()), st, Nil{})
+
+# learned fixes (voice.l.*): heard → written · how often, × forgets one
+def View.learned(+lc: I.Loc, +st: M.State, ks: List<&2, String>) -> List<&2, D.Node>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case +k <> t:
+      D.Dom.button(Bool.pick(String, VDV.Vd.trusted(VDV.Vd.vl(M.Setting.get(st, k, ""))), "chip on", "chip"), "setting", k ++ "=", MSG.T.settings.voice.term.remove(lc),
+        MSG.T.voice.learned.item(lc, String.drop(k, 8n), VDV.VL.out(VDV.Vd.vl(M.Setting.get(st, k, ""))), Nat.show(VDV.VL.yes(VDV.Vd.vl(M.Setting.get(st, k, "")))) ++ " ×") <> View.learned(lc, st, t)
 
 # API keys (client.bend's ApiKeys): add one, view the names, delete one
 
@@ -2848,15 +2913,24 @@ def View.vhint.loc(+lc: I.Loc, +h: String, +dev: String) -> String:
 def View.vhint(+h: String, +dev: String) -> String:
   View.vhint.loc(I.En{}, h, dev)
 
+# one quiet word for where dictation is: starting, loading the local model,
+# listening, writing (words are settling into the draft), finishing. The
+# words themselves are only ever in the draft, never repeated here.
+def View.vstate(+lc: I.Loc, +state: String, +u: U.Ui) -> String:
+  Bool.pick(String, String.eq(state, "starting"), MSG.T.voice.starting(lc),
+    Bool.pick(String, String.eq(state, "stopping"), MSG.T.voice.finishing(lc),
+      Bool.pick(String, Bool.and(String.eq(U.Ui.scratch(u, "@voice.eng"), "local"), String.is_empty(U.Ui.scratch(u, "@voice.load"))), MSG.T.voice.loading(lc),
+        Bool.pick(String, String.is_empty(String.trim(U.Ui.scratch(u, "@voice.part"))),
+          MSG.T.web.voice.listening(lc) ++ Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.dev")), "", " · " ++ U.Ui.scratch(u, "@voice.dev")),
+          MSG.T.voice.writing(lc)))))
+
 def View.vstrip.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case True{}:
       +state = U.Ui.scratch(u, "@voice")
       [D.El{"div", "", [D.At{"class", "voice-strip"}], [D.Dom.span("rec", ""),
-        D.Dom.span("voice-head", Bool.pick(String, String.eq(state, "starting"), MSG.T.voice.starting(lc), Bool.pick(String, String.eq(state, "stopping"), MSG.T.voice.finishing(lc),
-          MSG.T.web.voice.listening(lc) ++ Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.dev")), "", " · " ++ U.Ui.scratch(u, "@voice.dev"))))),
+        D.Dom.span("voice-head", View.vstate(lc, state, u)),
         D.El{"span", "", [D.At{"class", "meter"}], [D.El{"span", "", [D.At{"style", "width:" ++ Nat.show(Maybe.default(&2, Nat, Nat.read(U.Ui.scratch(u, "@voice.lv")), 0n)) ++ "%"}], Nil{}}]},
-        D.Dom.span("voice-part", U.Ui.scratch(u, "@voice.part")),
         D.Dom.button("stop", "voice", "", MSG.T.voice.stop(lc), MSG.T.composer.stop(lc))]}]
     case False{}:
       Nil{}
@@ -2912,11 +2986,28 @@ def View.vask.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.vask(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   View.vask.loc(I.En{}, on, u)
 
+# the last segment's fixes, each a chip whose click undoes it
+def View.vfix.go(+lc: I.Loc, fs: List<&2, VDV.VFx>, +n: Nat) -> List<&2, D.Node>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case VDV.VFx{+h, +o} <> t:
+      D.Dom.button("chip", "voice-unterm", "#" ++ Nat.show(n), MSG.T.voice.undo.tip(lc, h),
+        Bool.pick(String, String.is_empty(o), MSG.T.voice.dropped(lc, h), MSG.T.voice.fixed(lc, o, h)) ++ " ↶") <> View.vfix.go(lc, t, 1n+n)
+
+def View.vfix.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
+  match on:
+    case True{}:
+      [D.El{"div", "", [D.At{"class", "voice-fixes"}], View.vfix.go(lc, U.Voice.fixes(u), 0n)}]
+    case False{}:
+      Nil{}
+
 def View.voice.loc(+lc: I.Loc, +u: U.Ui, +sel: String) -> List<&2, D.Node>:
   +here = Bool.or(String.eq(U.Ui.scratch(u, "@voice.th"), sel), String.is_empty(U.Ui.scratch(u, "@voice.th")))
   D.Dom.cat(View.vnote.loc(lc, Bool.and(here, Bool.or(Bool.not(String.is_empty(U.Ui.scratch(u, "@voice.err"))), Bool.and(U.Voice.on(u), Bool.not(String.is_empty(U.Ui.scratch(u, "@voice.hint")))))), u),
     D.Dom.cat(View.vstrip.loc(lc, Bool.and(here, U.Voice.on(u)), u),
-      View.vask.loc(lc, Bool.and(String.eq(U.Ui.scratch(u, "@voice.uth"), sel), Bool.not(List.is_empty(&2, VC.Unsure, U.Voice.unsure(u)))), u)))
+      D.Dom.cat(View.vfix.loc(lc, Bool.and(String.eq(U.Ui.scratch(u, "@voice.uth"), sel), Bool.not(List.is_empty(&2, VDV.VFx, U.Voice.fixes(u)))), u),
+        View.vask.loc(lc, Bool.and(String.eq(U.Ui.scratch(u, "@voice.uth"), sel), Bool.not(List.is_empty(&2, VC.Unsure, U.Voice.unsure(u)))), u))))
 
 # a side question (/btw) and its answer, over the composer until closed
 

@@ -403,6 +403,15 @@ def VL.out(x: VL) -> String:
     case VL{o, _, _}:
       o
 
+def VL.yes(x: VL) -> Nat:
+  match x:
+    case VL{_, y, _}:
+      y
+
+# the local models (the helper's MODELS): v2 unless v3 is asked for
+def Vd.model.id(+m: String) -> String:
+  Bool.pick(String, String.eq(m, "parakeet-v3"), "parakeet-v3", "parakeet-v2")
+
 # "heard → out" confirmed or undone once more; a different out starts over
 def Vd.learn(+old: String, +out: String, yes: Bool) -> String:
   Vd.vl.show(Vd.learn.k(Bool.or(String.is_empty(old), Bool.not(String.eq(VL.out(Vd.vl(old)), out))), Vd.vl(old), out, yes))
@@ -741,6 +750,41 @@ def Vd.fixes.js(fs: List<&2, VFx>) -> List<&2, J.Json>:
 
 def Vd.fixes.json(fs: List<&2, VFx>) -> J.Json:
   J.Json.arr(Vd.fixes.js(fs))
+
+# The dictionary as a request carries it (bothub.bend's Vreq): "entries",
+# the lines; "learned", [heard, value] pairs
+def Vd.js.lines(xs: List<&2, J.Json>, acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, String, acc)
+    case J.Str{+t} <> rest:
+      Vd.js.lines(rest, t <> acc)
+    case _ <> rest:
+      Vd.js.lines(rest, acc)
+
+def Vd.js.pair(xs: List<&2, J.Json>) -> Maybe<&2, VPair>:
+  match xs:
+    case J.Str{+k} <> J.Str{+v} <> _:
+      Some{VPair{k, v}}
+    case _:
+      None{}
+
+def Vd.js.put(m: Maybe<&2, VPair>, acc: List<&2, VPair>) -> List<&2, VPair>:
+  match m:
+    case Some{x}:
+      x <> acc
+    case None{}:
+      acc
+
+def Vd.js.pairs(xs: List<&2, J.Json>, acc: List<&2, VPair>) -> List<&2, VPair>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, VPair, acc)
+    case +h <> rest:
+      Vd.js.pairs(rest, Vd.js.put(Vd.js.pair(J.Json.elems(h)), acc))
+
+def Vd.of.json(+p: J.Json) -> VDict:
+  Vd.of(Vd.js.lines(J.Json.elems(J.Json.get_obj(p, "entries")), Nil{}), Vd.js.pairs(J.Json.elems(J.Json.get_obj(p, "learned")), Nil{}))
 
 # Settle: live words that never change
 # ------------------------------------

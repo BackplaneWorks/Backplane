@@ -7,6 +7,7 @@
 
 import App from "./app.bend";
 import { applyComposerDraft } from "./composer-draft.js";
+import { VoiceMic, hubHere } from "./voice-mic.js";
 import { homeDraftStorage } from "./home-drafts.js";
 const localStorage = homeDraftStorage(window.localStorage, window.backplaneDesktop?.drafts);
 import { editStart } from "./sent-claims.js";
@@ -1424,7 +1425,24 @@ function sealedReply(envelope) {
 // itself there (its keyboard would cover the thread)
 function composerPhone() { return matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse)").matches; }
 
+// Dictation from this page's microphone when the hub is elsewhere
+// (voice-mic.js): the mic button's press starts recording at once and tells
+// Bend so ("client"); a second press sends what is left with the end mark.
+const voiceMic = new VoiceMic();
+function voiceMicPress(value) {
+  if (hubHere() || !navigator.mediaDevices?.getUserMedia) return value;
+  if (voiceMic.active) { voiceMic.stop(); return value; }
+  voiceMic.start().catch(err => console.warn("dictation: no microphone", err));
+  return "client";
+}
+function voiceMicHeard(envelope) {
+  if (envelope.t === "reply" && typeof envelope.audio === "string" && envelope.audio) voiceMic.address(envelope.audio);
+  if (envelope.t === "reply" && envelope.engine !== undefined && !envelope.audio && voiceMic.active) voiceMic.gone();
+  if (envelope.t === "voice" && (envelope.ev === "idle" || envelope.ev === "error")) voiceMic.gone();
+}
+
 function dispatch(action, value, timer) {
+  if (action === "voice" && !timer) value = voiceMicPress(value);
   if (action === "fork") reviewPosition.fork(value || currentSession().sel);
   if (action === "secret-save") return secretSave(value);
   if (action === "sealed") return sealedSave(value);
@@ -3160,6 +3178,7 @@ async function startThin(again = false, reason = "initial") {
       if (viewerRpc.receive(envelope)) return;
       if (envelope.t === "plotrevision") { ViewerTools.sourceRevision(envelope.key, envelope.revision); return; }
       if (envelope.t === "plotstamp") { ViewerTools.sourceStamp(envelope.key, envelope.revision); return; }
+      voiceMicHeard(envelope);
       if (envelope.t === "reply" && sealedReply(envelope)) return;
       if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { diagnostic.greeting(envelope);clearTimeout(thinGreetingTimer);thin.greeting(envelope); }

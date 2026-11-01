@@ -1555,7 +1555,81 @@ function sock_send_cbor(socket, text, keys, words, ms, k) {
   return sock_send_until(socket, xs, ms, k);
 }
 
+// Dictation's audio (host.bend's Sock.keep/feed/feed_bytes/unkeep): a
+// helper's stdin by key; an upload's bytes go into it as they arrive.
+const host_kept = new Map();
+
+function host_keep_write(fd, b, n) {
+  const sys = io_sys();
+  let at = 0;
+  // a helper that stopped reading loses audio rather than stall the hub
+  while (at < n) {
+    const w = host_write(fd, sys.ptr(b, at), n - at);
+    if (w <= 0) return;
+    at += w;
+  }
+}
+
+function sock_keep(socket, key) {
+  const old = host_kept.get(key);
+  if (old !== undefined && old !== socket) {
+    try { host_libc().shutdown(old, 1); host_libc().close(old); } catch (_) {}
+  }
+  host_kept.set(key, socket);
+  return { $: "Unit" };
+}
+
+function sock_feed(socket, key, n, k) {
+  const sys = io_sys();
+  const dst = host_kept.get(key);
+  if (dst === undefined) return io_tup(socket, io_fail(2));
+  const b = new Uint8Array(65536);
+  const again = sys.mac ? 35 : 11;
+  let left = Number(n);
+  const go = () => {
+    while (left > 0) {
+      const got = host_read(socket, sys.ptr(b), Math.min(left, b.length));
+      if (got < 0 && sys.errno() === again) {
+        io_park_on(socket, false, k, go);
+        return undefined;
+      }
+      if (got <= 0) return io_tup(socket, io_fail(got === 0 ? 32 : sys.errno()));
+      const d = host_kept.get(key);
+      if (d !== undefined) host_keep_write(d, b, got);
+      left -= got;
+    }
+    return io_tup(socket, io_done({ $: "Unit" }));
+  };
+  if (left <= 0) return go();
+  io_park_on(socket, false, k, go);
+  return undefined;
+}
+
+function sock_feed_bytes(key, data) {
+  const dst = host_kept.get(key);
+  if (dst === undefined) return 0;
+  const bytes = [];
+  for (let xs = data; xs.$ === "Con"; xs = xs.tail) bytes.push(xs.head & 255);
+  const b = Uint8Array.from(bytes);
+  if (b.length) host_keep_write(dst, b, b.length);
+  return 1;
+}
+
+function sock_unkeep(key) {
+  const fd = host_kept.get(key);
+  host_kept.delete(key);
+  if (fd !== undefined) {
+    try { host_libc().shutdown(fd, 1); } catch (_) {}
+    try { host_libc().close(fd); } catch (_) {}
+  }
+  return { $: "Unit" };
+}
+
 io_eff(CID(Clock.epoch), clock_epoch);
+io_eff(CID(Sock.keep), sock_keep);
+io_eff(CID(Sock.feed), sock_feed);
+io_eff(CID(Sock.feed_bytes), sock_feed_bytes);
+io_eff(CID(Sock.unkeep), sock_unkeep);
 io_eff(CID(Sock.recv_bytes), sock_recv_bytes);
 io_eff(CID(Sock.save), sock_save);
 io_eff(CID(Sock.send_bytes), sock_send_bytes);

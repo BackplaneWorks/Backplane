@@ -72,6 +72,7 @@ type Args = {
   device: string;
   contentType: string;
   engine: string;
+  rate: number;
   localDir: string;
   model: string;
 };
@@ -83,7 +84,7 @@ function usage(why?: string): never {
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { cmd: argv[0] ?? "", pos: [], prompt: "", languages: [], source: "auto", device: "", contentType: "", engine: "openai", localDir: "", model: "parakeet-v2" };
+  const a: Args = { cmd: argv[0] ?? "", pos: [], prompt: "", languages: [], source: "auto", device: "", contentType: "", engine: "openai", rate: 0, localDir: "", model: "parakeet-v2" };
   if (!["live", "file", "devices", "local-status", "local-install", "local-remove"].includes(a.cmd)) usage(a.cmd ? `unknown command: ${a.cmd}` : undefined);
   for (let i = 1; i < argv.length; i++) {
     const f = argv[i];
@@ -103,6 +104,7 @@ function parse(argv: string[]): Args {
       case "--device": a.device = v; break;
       case "--content-type": a.contentType = v; break;
       case "--engine": a.engine = v; break;
+      case "--rate": a.rate = Number(v); break;
       case "--local-dir": a.localDir = v; break;
       case "--model": a.model = v; break;
       default: usage(`unknown flag: ${f}`);
@@ -309,7 +311,12 @@ async function live(a: Args) {
     hints.add(h);
     emit({ event: "hint", hint: h });
   };
-  const feed = (b: Uint8Array) => {
+  // audio from a client (--source stdin --rate R) at another rate is
+  // converted to the engine's
+  const conv = a.source === "stdin" && a.rate > 0 && a.rate !== rate ? new Resampler(a.rate, rate) : undefined;
+  const feed = (b0: Uint8Array) => {
+    const b = conv ? conv.push(b0) : b0;
+    if (!b.length) return;
     bytes += b.length;
     if (local) {
       if (sess) sess.push(b);
@@ -395,6 +402,44 @@ async function live(a: Args) {
   if (!(await live.waitAll(WAIT_MS))) log("gave up waiting for transcripts");
   live.close();
   end();
+}
+
+// s16le mono from one rate to another, linearly (a client's 16 kHz for the
+// cloud's 24 kHz); keeps the odd byte and the last sample between chunks
+export class Resampler {
+  private carry = new Uint8Array(0);
+  private pos = 0; // the next output sample, in input samples from `last`
+  private last = 0;
+  constructor(private from: number, private to: number) {}
+  push(b0: Uint8Array): Uint8Array {
+    let b = b0;
+    if (this.carry.length) {
+      b = new Uint8Array(this.carry.length + b0.length);
+      b.set(this.carry);
+      b.set(b0, this.carry.length);
+    }
+    const n = b.length >> 1;
+    this.carry = b.slice(n * 2);
+    const v = new DataView(b.buffer, b.byteOffset, n * 2);
+    const step = this.from / this.to;
+    const out: number[] = [];
+    // input sample i (-1 is `last`)
+    const at = (i: number) => (i < 0 ? this.last : v.getInt16(i * 2, true));
+    while (this.pos <= n - 1) {
+      const i = Math.floor(this.pos) - 1;
+      const f = this.pos - Math.floor(this.pos);
+      out.push(Math.round(at(i) * (1 - f) + at(i + 1) * f));
+      this.pos += step;
+    }
+    if (n > 0) {
+      this.last = at(n - 1);
+      this.pos -= n;
+    }
+    const o = new Uint8Array(out.length * 2);
+    const ov = new DataView(o.buffer);
+    out.forEach((x, k) => ov.setInt16(k * 2, Math.max(-32768, Math.min(32767, x)), true));
+    return o;
+  }
 }
 
 // ---- devices

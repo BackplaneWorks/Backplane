@@ -7,7 +7,7 @@
 // (Bend: core/voice.bend's Settle) freezes the words two decodes agree on,
 // so what is shown never changes; the segment's last decode is its `done`.
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { arch, platform } from "node:os";
 import { join } from "node:path";
@@ -149,10 +149,15 @@ export async function install(dir: string, id: string, progress: Progress) {
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
+  // the hub reads this to know the model is usable (server/voice.bend)
+  writeFileSync(join(dir, `ready-${id}`), "ok");
 }
 
 export function remove(dir: string, id: string) {
-  if (id in MODELS) rmSync(modelDir(dir, id), { recursive: true, force: true });
+  if (id in MODELS) {
+    rmSync(join(dir, `ready-${id}`), { force: true });
+    rmSync(modelDir(dir, id), { recursive: true, force: true });
+  }
   // the runtime and VAD go with the last model
   if (!status(dir).models.some((m) => m.installed)) {
     rmSync(runtimeDir(dir), { recursive: true, force: true });

@@ -1,7 +1,8 @@
 # Dictation and the dictionary: design
 
-Status: proposal, for review before the big pieces are built. Today's system
-is in `docs/voice.md`.
+Status: accepted 2026-11-01 (all five proposals), with one constraint added:
+dictation must read as one calm stream (section 1b). What was built is in
+`docs/voice.md`.
 
 ## What great dictation is
 
@@ -90,7 +91,8 @@ engines behind it. Setting `voice.engine`: `auto` (default), `local`,
 `auto` picks local when its model is installed, else cloud when keyed, else
 says what to set up.
 
-**Local engine: sherpa-onnx, two passes.** The helper `backplane-voice`
+**Local engine: sherpa-onnx** (as built: one model, see 1b; the two-pass
+plan below was replaced). The helper `backplane-voice`
 gains `--engine local` and loads sherpa-onnx's C library with `bun:ffi`
 (the same way `tools/kipc` loads nng): no framework, no Python, one shared
 library plus ONNX Runtime, prebuilt for linux-x64/arm64, macOS and Windows.
@@ -122,6 +124,43 @@ loads the model when a session starts, stays warm for ten minutes after the
 last one (`voice.warm`), then exits and frees it. Pressing the mic (or the
 hotkey going down) starts the load at once; audio recorded during the load
 is buffered, so no words are lost.
+
+### 1b. One calm stream (the person's constraint)
+
+"Fine with two models, but it must be obvious what is happening and not a
+lot of text flashing around." Measured on this desktop, Parakeet decodes a
+second of speech in about 25 ms on 4 CPU threads, so the live words do not
+need a second, weaker model at all: while a segment is open the helper
+decodes its audio so far again every 300 ms with Parakeet itself, and the
+segment's last decode is the final. One model, so the live words and the
+final ones agree; there is no "draft model" to be overruled.
+
+What the person sees:
+
+- **Words appear once, in place, in the draft.** Each hypothesis carries
+  every word's timing and confidence. Bend (`Vs.*`, Settle) commits a word
+  once two hypotheses in a row agree on it and it ends at least 0.4 s
+  before the audio so far; committed words are written into the draft and
+  never move or change again. Unsure words (under 85 %) at the end wait for
+  the next sure one, so "Kai CAD" is corrected to "KiCad" before it is ever
+  shown.
+- **Only the tail is ever rewritten**: the last one to three words, after
+  the committed ones, at the end of what was dictated. No block is ever
+  replaced, nothing above the caret reflows.
+- **The final is not a swap.** When the segment ends, whatever was still
+  tail is committed (corrected); the words already shown stay as they are.
+- **One quiet word says where it is**: Starting, Loading the model (only
+  the first press after the helper starts cold), Listening, Writing (words
+  are settling), Finishing; with the level meter. The words themselves are
+  never repeated in the strip.
+- After a segment, the fixes it made sit as small chips under the strip
+  ("KiCad ← Kai CAD ↶"); a click undoes one. Unsure words wait as before.
+
+The hotwords spike: sherpa-onnx's hotword boosting had no effect on
+Parakeet TDT (same audio, same output, boost 3 and 8), which matches Hex,
+whose Parakeet biasing needs its own decoder fork and is off by default.
+So the dictionary steers the local engine through the correction pass and
+the engine's own word confidences, not decoder biasing.
 
 ### 2. Where the audio comes from, and where it is heard
 

@@ -1309,6 +1309,35 @@ def Bots.task.req(live: Bool, +s: M.State, +now: Nat, +client: U32, +id: String,
     case False{}:
       Bots.err(client, id, "no such bot")
 
+# Dictation: every bots.voice request carries the dictionary (core/vdict.bend:
+# the voice.e.* entries as lines, the voice.l.* learned pairs) and the
+# engine settings, so the hub's voice jobs never read the state
+def Vreq.put(p: J.Json, +k: String, v: J.Json) -> J.Json:
+  match p:
+    case J.Obj{fs}:
+      J.Obj{J.Field{k, v, fs}}
+    case other:
+      other
+
+def Vreq.vals(ks: List<&2, String>, +s: M.State, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match ks:
+    case Nil{}:
+      List.reverse(&2, J.Json, acc)
+    case +k <> t:
+      Vreq.vals(t, s, J.Str{M.Setting.get(s, k, "")} <> acc)
+
+def Vreq.pairs(ks: List<&2, String>, +s: M.State, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match ks:
+    case Nil{}:
+      List.reverse(&2, J.Json, acc)
+    case +k <> t:
+      Vreq.pairs(t, s, J.Json.arr([J.Str{String.drop(k, 8n)}, J.Str{M.Setting.get(s, k, "")}]) <> acc)
+
+def Vreq.with(+s: M.State, p: J.Json) -> J.Json:
+  Vreq.put(Vreq.put(Vreq.put(Vreq.put(p, "entries", J.Json.arr(Vreq.vals(M.Setting.keys.pre(s, "voice.e."), s, Nil{}))),
+    "learned", J.Json.arr(Vreq.pairs(M.Setting.keys.pre(s, "voice.l."), s, Nil{}))),
+    "engine", J.Str{M.Setting.get(s, "voice.engine", "auto")}), "model", J.Str{M.Setting.get(s, "voice.model", "parakeet-v2")})
+
 def Bots.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> B.Step:
   match i:
     case 0n:
@@ -1357,7 +1386,7 @@ def Bots.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p
     case 20n:
       Bots.token(s, client, id, p)
     case 21n:
-      B.Step.outs([B.BotFx{"voice", J.Json.show(p), U32.show(client), id}])
+      B.Step.outs([B.BotFx{"voice", J.Json.show(Vreq.with(s, p)), U32.show(client), id}])
     case 22n:
       Reply.back(s, now, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "state", ""))
     case 23n:
