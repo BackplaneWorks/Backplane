@@ -24,6 +24,7 @@ import ../core/i18n.bend as I
 import ../core/emb.bend as E
 import ../core/native-sidebar.bend as NS
 import ../core/view-page.bend as VP
+import ../core/viewclock.bend as VC
 
 # Private, connection-owned UI state. It never enters a client snapshot or
 # persisted event. Keep it behind a List in the connection context so the
@@ -448,8 +449,16 @@ def Actor.kept(+ms: List<&2, Memo>) -> List<&2, Memo>:
 # visibility for text). No Ui, picture, body source, pending action or wire
 # authority is carried by these three independently bounded slots. A new
 # connection starts with no actor and cannot acquire this private memo.
+# What a change within the same view keeps besides the canonical caches:
+# the metadata sidebar image (its key is every input it is drawn from, so
+# a reply or info that changes one misses it) and the view bodies sent
+# (transport receipts under their scope). A reply arriving no longer
+# throws the sidebar away to draw it again unchanged.
+def Actor.same.view(+ms: List<&2, Memo>) -> List<&2, Memo>:
+  List.append(&2, Memo, SidebarImage.keep(ms), ViewSent.keep(ms))
+
 def Actor.canonical(+ms: List<&2, Memo>) -> List<&2, Memo>:
-  List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), List.append(&2, Memo, SignalText.keep(ms), ViewSent.keep(ms))))
+  List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), SignalText.keep(ms)))
 
 def Signals.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
   match ms:
@@ -753,7 +762,7 @@ def ModelMenu.result(a: V.ActResult) -> J.Json:
 def Actor.render.web.fresh(+updated: Actor, +action: V.ActResult, +st: M.State, +index: T.Index, +p: J.Json,
     +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream) -> Rendered:
   +u = Actor.ui(updated)
-  +prepared = V.Render.ui(u, st, index, J.Json.get_obj(p, "target"), rows, stream, now)
+  +prepared = U.Ui.tick(V.Render.ui(u, st, index, J.Json.get_obj(p, "target"), rows, stream, now), VC.ViewClock.of(now))
   +key = SC.Sidebar.key(prepared, epoch, Sidebar.view(updated))
   +cached = Sidebar.lookup(SC.Sidebar.request(p, u), Sidebar.memos(updated), key)
   +window = V.Render.window(stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
@@ -768,7 +777,7 @@ def Actor.render.web.fresh(+updated: Actor, +action: V.ActResult, +st: M.State, 
 def Actor.render.web.indexed(+updated: Actor, +action: V.ActResult, +st: M.State, +index: T.Index, +p: J.Json,
     +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream, +revision: Nat) -> Rendered:
   +u = Actor.ui(updated)
-  +prepared = V.Render.ui(u, st, index, J.Json.get_obj(p, "target"), rows, stream, now)
+  +prepared = U.Ui.tick(V.Render.ui(u, st, index, J.Json.get_obj(p, "target"), rows, stream, now), VC.ViewClock.of(now))
   +signals = SGV.SignalCache.obtain.revision(epoch, revision, st, Signals.get(Sidebar.memos(updated)))
   +metadata = SIXV.IndexCache.obtain.revision(epoch, revision, st, SideIndex.get(Sidebar.memos(updated)))
   +text = SGT.SignalTextCache.obtain(epoch, revision, U.Side.signals.online(prepared), SGV.SignalCache.signals(signals), SignalText.get(Sidebar.memos(updated)))
@@ -951,7 +960,7 @@ def Actor.receive( +web: Bool, +u: U.Ui, +key: String, +now: Nat, +o: J.Json) ->
 
 def Actor.mark_dirty( +a: Actor) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, _, +ms}: Actor{u, view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(ms), Actor.canonical(ms))}
+    case Actor{u, view, target, pending, reads, _, +ms}: Actor{u, view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(ms), List.append(&2, Memo, Actor.same.view(ms), Actor.canonical(ms)))}
 
 def Actor.now( +u: U.Ui) -> Nat:
   match u:
@@ -1016,7 +1025,7 @@ def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
 def Actor.info(a: Actor, o: J.Json) -> Actor:
   match a:
     case Actor{u, view, target, pending, reads, _, +memo}:
-      Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), List.append(&2, Memo, SidebarSent.keep(memo), Actor.canonical(memo)))}
+      Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), List.append(&2, Memo, SidebarSent.keep(memo), List.append(&2, Memo, Actor.same.view(memo), Actor.canonical(memo))))}
 
 # A thin socket receives rendered views, not raw info notifications or a
 # schematic's sheets. The server folds those privately and sends its
@@ -1097,9 +1106,13 @@ def Actor.remember(+a: Actor, +m: Memo) -> Actor:
 # hub's info, the request but its revisions and transport receipts (the
 # sidebar region's, the view delta's), the page anchor, the view, the
 # renderer and the thread (a reply arriving clears the memo: Actor.reply_if)
+# The page's scroll anchor is left out: a full render only echoes it in
+# its window, which a reused reply takes from the request (Memo.anchored);
+# a render cut down around it is remembered under a key that names it
+# (server.bend's Hub.thin.fit.key), which this key never matches.
 def Memo.request(+p: J.Json) -> J.Json:
   match p:
-    case J.Obj{+fs}: J.Obj{V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(fs, "requestRevision"), "viewRevision"), "sidebarRegion"), "viewDelta")}
+    case J.Obj{+fs}: J.Obj{V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(fs, "requestRevision"), "viewRevision"), "sidebarRegion"), "viewDelta"), "anchor")}
     case _: p
 
 def Memo.key(+seq: Nat, +info: String, +p: J.Json, +anchor: Nat, +view: String, +web: Bool, +thread: String) -> String:
@@ -1112,7 +1125,8 @@ def Memo.reply.k(+ok: Bool, +res: J.Json, +web: Bool, +stream: TL.Stream, +threa
     case False{}: None{}
 
 # the memo's reply with only the live row and window new, when nothing else
-# can have changed: the same key, at most a second old (clock text), a live
+# can have changed: the same key, drawn in the same view-clock step
+# (core/viewclock.bend: what it shows of time is the same), a live
 # row now with the same chunk marker as then; None: render in full
 def Memo.reply(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
   match ms:
@@ -1128,7 +1142,7 @@ def Memo.reply(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +we
     case SidebarSent{_, _, _} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case Still{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case Memo{+k, +at, +partial, +res} <> _:
-      Memo.reply.k(Bool.and(update, Bool.and(String.eq(k, key), Bool.and(Nat.is_ge(clock, at), Bool.and(Nat.is_lt(Nat.sub(clock, at), 1000n),
+      Memo.reply.k(Bool.and(update, Bool.and(String.eq(k, key), Bool.and(Nat.is_ge(clock, at), Bool.and(VC.ViewClock.same.ms(clock, at),
         Bool.and(Nat.is_gt(TL.Stream.size(stream), 0n), Bool.or(Bool.and(partial, S.Splice.partial(stream)), Bool.and(Bool.not(partial), Bool.not(S.Splice.partial(stream))))))))), res, web, stream, thread, epoch, target, lc)
 
 def Rendered.remember.picture(menu: Bool, +a: Actor, +res: J.Json, +key: String, +clock: Nat, +stream: TL.Stream) -> Rendered:
@@ -1151,6 +1165,18 @@ def Memo.reply.clock(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Na
     case Memo{k, at, part, res} <> rest:
       Memo.reply(Memo{k, at, part, res} <> rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case _ <> rest: Memo.reply.clock(rest, update, key, clock, now, web, stream, thread, epoch, target, lc)
+
+# a reused reply (memo or still picture) with the request's own anchor in
+# its window, where a full render echoes it (V.Page.window): the memo's key
+# leaves the anchor out (Memo.request)
+def Memo.anchored(m: Maybe<&2, J.Json>, +anchor: J.Json) -> Maybe<&2, J.Json>:
+  match m:
+    case Some{+res}: Some{S.Jx.set(res, "window", S.Jx.set(J.Json.get_obj(res, "window"), "anchor", V.Anchor.safe(anchor)))}
+    case None{}: None{}
+
+def Memo.reply.at(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +now: Nat, +web: Bool,
+    +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc, +anchor: J.Json) -> Maybe<&2, J.Json>:
+  Memo.anchored(Memo.reply.clock(ms, update, key, clock, now, web, stream, thread, epoch, target, lc), anchor)
 
 def Rendered.remember.still(valid: Bool, r: Rendered, +key: String, +clock: Nat, +now: Nat, +stream: TL.Stream) -> Rendered:
   match valid r:

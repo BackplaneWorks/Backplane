@@ -14814,3 +14814,15 @@ def Laws.sdb_terms_due():
 def Laws.sdb_terms_sql_same():
   {==}
 # ---- end store-terms ----
+
+# BEGIN view step 2 (H)
+def Laws.viewclock_not_after(): {==}
+def Laws.viewclock_within_step(): {==}
+def Laws.viewclock_step_same(): {==}
+def Laws.viewclock_next_step(): {==}
+def Laws.view_memo_anchor_left_out(): {==}
+def Laws.pace_live_own(): {==}
+def Laws.pace_live_other(): {==}
+def Laws.pace_live_none(): {==}
+def Laws.pace_live_committed_still(): {==}
+# END view step 2 (H)
