@@ -1,6 +1,6 @@
 import Web from '../../src/web/app.bend';
 import Mobile from '../../src/mobile/app.bend';
-import { plain, learnJson } from '../../src/web/wire.js';
+import { plain, learnJson, json } from '../../src/web/wire.js';
 learnJson(Mobile.json_tags());
 let checks = 0;
 function equal(name, actual, expected) {
@@ -15,11 +15,11 @@ equal('production export identity has exact owner/origin', Web.mail_identity(ui)
 equal('production restored text stays text-only',Web.mail_local_text(Web.mail_restore(ui,'{"draft":"saved"}')),'saved');
 equal('production invalid local context cannot persist',Web.mail_identity(Web.mail_local_context(ui,Web.presentation_json('{}'))),'');
 const session={sel:'t',rid:2,drafts:{},route:{kind:'bot-tab',bot:'b',tab:'mail'}};
-const draft=plain(Mobile.session_draft(JSON.stringify(session),'new'));
+const draft=plain(Mobile.session_draft(json(session),'new'));
 equal('production native draft keeps owning route',draft.route,session.route);
-const choice=plain(Mobile.thin_choice(JSON.stringify(draft),'select','hub|next'));
+const choice=plain(Mobile.thin_choice(json(draft),'select','hub|next'));
 equal('production selection omits old bot route',Object.prototype.hasOwnProperty.call(choice,'route'),false);
-equal('production selection chooses exact current thread',plain(Mobile.thin_target(JSON.stringify(choice))),{kind:'thread',id:'next'});
+equal('production selection chooses exact current thread',plain(Mobile.thin_target(json(choice))),{kind:'thread',id:'next'});
 const partial=plain(Mobile.thin_partial(Mobile.json_parse('{"thread":{"entries":[{"id":"e","text":"prefix"}]}}'),Mobile.json_parse('{"partial":[{"id":"e","version":"9","cursor":"opaque","hasMore":true,"complete":false}]}')));
 equal('production native materialization retains partial version',partial.thread.entries[0].partial.version,'9');
 equal('production native materialization does not claim complete',partial.thread.entries[0].partial.complete,false);
