@@ -13,7 +13,7 @@ function store_sync(path) {
   catch(e) { return 'fail '+e.message; }
   finally { if(fd!==undefined)fs.closeSync(fd); }
 }
-function store_prepare(home,codec) {
+function store_prepare(home,codec,from) {
   const fs=require('fs'),path=require('path');let fd;
   try {
     // a store is never set aside without the version to judge it by
@@ -23,7 +23,7 @@ function store_prepare(home,codec) {
     if(size && fs.readSync(fd,last,0,1,size-1)===1 && last[0]!==10)fs.writeSync(fd,Buffer.from('\n'));
     fs.fsyncSync(fd);
     const adopted=store_adopt(home,codec);if(adopted!=='ok')return adopted;
-    store_existing(home,codec);return 'ok';
+    store_existing(home,codec,from);return 'ok';
   }catch(e){return 'fail '+e.message}
   finally{if(fd!==undefined)fs.closeSync(fd)}
 }
@@ -60,6 +60,30 @@ io_eff(CID(Disk.temp),store_temp);
 io_eff(CID(Disk.promote),store_promote);
 io_eff(CID(Disk.sync),store_sync);
 io_eff(CID(Disk.prepare),store_prepare);
+// The complete lines before byte `to` that contain any needle, oldest first
+// (storeio.bend's Disk.pick, for Sto.upgrade). Each needle is found across
+// a chunk with Buffer.indexOf, then its line is cut out once; memory stays
+// a chunk, whatever the log's size.
+function store_pick(file,to,needles){
+  const fs=require('fs');let out={$:CID(Nil)};const ns=[];
+  for(let xs=needles;xs.$===CID(Con);xs=xs.tail)ns.push(Buffer.from(xs.head));
+  const stop=Number(to);if(!Number.isSafeInteger(stop)||stop<=0||!ns.length)return out;
+  const fd=fs.openSync(file,'r'),found=[],size=8*1048576;
+  try{
+    let base=0,carry=Buffer.alloc(0);
+    while(base<stop){
+      const b=Buffer.allocUnsafe(Math.min(size,stop-base)),n=fs.readSync(fd,b,0,b.length,base);if(n<=0)break;
+      const buf=carry.length?Buffer.concat([carry,b.subarray(0,n)]):b.subarray(0,n),start=base-carry.length;
+      const last=buf.lastIndexOf(10),whole=last<0?0:last+1,starts=new Set();
+      for(const nd of ns)for(let i=buf.indexOf(nd);i>=0&&i<whole;i=buf.indexOf(nd,i+1)){const s=buf.lastIndexOf(10,i)+1;starts.add(s);}
+      for(const s of [...starts].sort((a,b)=>a-b)){const e=buf.indexOf(10,s);if(e>s)found.push(buf.toString('utf8',s,e));}
+      carry=Buffer.from(buf.subarray(whole));base+=n;
+    }
+  }finally{fs.closeSync(fd)}
+  for(let i=found.length-1;i>=0;i--)out={$:CID(Con),head:found[i],tail:out};
+  return out;
+}
+io_eff(CID(Disk.pick),store_pick);
 
 // Complete lines only; a single very long event may exceed the normal 256 KiB
 // chunk. Memory is bounded by one event plus one chunk, never the whole tail.
@@ -119,13 +143,16 @@ function store_hash(file,limit) {
     return hash.digest('hex');
   }finally{fs.closeSync(fd)}
 }
-// codec: storedb.bend's Sdb.codec() as text, passed in by Disk.prepare
-function store_validate(file,codec) {
+// codec: storedb.bend's Sdb.codec() as text, passed in by Disk.prepare; from:
+// Sdb.codec.from()'s, space-separated, the codecs the hub upgrades in place
+// (storeio.bend's Sto.upgrade), so such a store is kept for it
+function store_validate(file,codec,from) {
   const {Database}=require('bun:sqlite'),db=new Database(file,{readonly:true,safeIntegers:true});
   try {
     const m=Object.fromEntries(db.query('SELECT k,v FROM meta').values());
     if(!/^[1-9][0-9]*$/.test(String(codec)))throw Error('no store codec given');
-    if(m.schema!=='1'||m.codec!==String(codec))throw Error('snapshot schema/codec mismatch');
+    const keep=[String(codec),...String(from||'').split(' ').filter(x=>/^[1-9][0-9]*$/.test(x))];
+    if(m.schema!=='1'||!keep.includes(m.codec))throw Error('snapshot schema/codec mismatch');
     for(const k of ['applied_seq','applied_off','ord'])if(!/^(0|[1-9][0-9]*)$/.test(m[k]||''))throw Error('invalid checkpoint metadata');
     // Missing tables/columns must rebuild, not silently answer empty pages.
     for(const sql of [
@@ -143,10 +170,10 @@ function store_validate(file,codec) {
     return m;
   }finally{db.close()}
 }
-function store_existing(home,codec) {
+function store_existing(home,codec,from) {
   const fs=require('fs'),path=require('path'),file=path.join(home,'store.db');
   if(!fs.existsSync(file))return;
-  try{store_validate(file,codec)}catch(error){
+  try{store_validate(file,codec,from)}catch(error){
     // Retain the complete old cache and its WAL evidence. Sto.open will build
     // a new cache atomically from the authoritative log, before serving views.
     const old=file+'.invalid-'+Date.now();

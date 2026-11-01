@@ -54,3 +54,36 @@ Focused regressions:
 Private faithful-copy qualification and timings belong in local receipts, not
 the repository. An unavailable/incompatible checkpoint can still require an
 expensive truthful rebuild. This change does not make that fallback instant.
+
+## Upgrades in place
+
+A store at a codec listed in `Sdb.codec.from()` (storedb.bend) is brought to
+`Sdb.codec()` at boot without a rebuild, when what the newer codec adds can be
+derived from a few kinds of change (storedb.bend's "Upgrades in place";
+storeio.bend's `Sto.upgrade`). The log's lines before the store's
+`applied_off` that name one of `Up.names()` are picked natively
+(`Disk.pick`, a superset), each is decoded, and only the changes `Up.keep`
+takes (by their decoded kind) are folded in log order through the real
+`M.State.apply`. Their records and meta's codec are written in one
+transaction, then read back. On any failure the transaction is rolled back
+and the store is rebuilt from the log as before, so no half-upgraded store
+is ever served; the log says which path ran ("upgraded store.db in place
+..." or "in-place upgrade failed ...; rebuilding").
+
+6 → 7: codec 7 adds `thread.parent.<child>` from `TaskDelegated` (unless its
+parent is a bot's thread then). Its last value is that of the last
+`TaskDelegated`, `ThreadParentSet` or `SettingSet` of the key; which thread
+is a bot's changes only with `BotSet` and `BotDeleted`. Laws `sdb_up_*`.
+On a 910 MB log: 437 lines picked, 419 rows, 12 s, against a 547 s, 8 GB
+rebuild.
+
+A newer codec whose additions cannot be derived this way must not list the
+old codec in `Sdb.codec.from()`; the old store is then rebuilt.
+
+Tests: `bun test/tools/store_checkpoint_io_test.cjs` (the JS checks keep a
+store at an upgradable codec, a prepared store must be current, the line
+picker), `bun test/tools/store_upgrade_e2e.ts OLD_HUB
+test/native/store_up_probe.bend [EVENTS | OLD_HOME]` (a hub from before the
+bump makes the old store; it is upgraded in place and must equal a rebuild
+of the same log, every table; an upgrade made to fail falls back to the
+rebuild and leaves the old store as it was).
