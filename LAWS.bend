@@ -1,3 +1,4 @@
+import ./src/core/vdict.bend as VDICT
 import ./src/mobile/session.bend as MCOMPOSER
 
 import ./src/server/review-history.bend as REVIEWHISTORY
@@ -14626,3 +14627,33 @@ law view_page_splice_default_off:
 law view_page_splice_setting_on:
   {CHATSIDE.Memo.page.on(M.State.setting(M.State.empty(), "view.splice.page", "on")) == True{} : Bool}
 # END page splice (H)
+
+# Dictionary trust and finalization are shared by both speech engines.
+law vd_fix_empty:
+  for +d: VDICT.VDict
+  {VDICT.Vdc.fix(d, Nil{}) == VDICT.VFix{Nil{}, Nil{}, Nil{}} : VDICT.VFix}
+
+law vd_learn_trusted:
+  for out: String
+  for y: Nat
+  {VDICT.Vdc.trusted(VDICT.VL{out, 2n+y, 0n}) == True{} : Bool}
+
+law vd_undo_revokes:
+  for out: String
+  for +y: Nat
+  for n: Nat
+  {VDICT.Vdc.trusted(VDICT.VL{out, y, 1n+n}) == False{} : Bool}
+
+law vs_done_tail_empty:
+  for +timed: Bool
+  for +st: VDICT.VSet
+  for +item: String
+  for +ws: List<&2, VDICT.VW>
+  {VDICT.VStep.tail(VDICT.Vs.done(timed, st, item, ws)) == Nil{} : List<&2, VDICT.VW>}
+
+law vs_done_resets:
+  for +timed: Bool
+  for +st: VDICT.VSet
+  for +item: String
+  for +ws: List<&2, VDICT.VW>
+  {VDICT.VStep.st(VDICT.Vs.done(timed, st, item, ws)) == VDICT.Vs.empty() : VDICT.VSet}

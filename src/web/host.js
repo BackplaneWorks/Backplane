@@ -1446,11 +1446,12 @@ function voiceWords(envelope) {
   const owner = document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread");
   const here = session?.sel === th && field && owner === th;
   let draft = "";
-  try { draft = here ? field.value : (localStorage.getItem(DRAFT + th) || ""); } catch {}
+  try { draft = here ? field.value : (session?.drafts?.[th] ?? localStorage.getItem(DRAFT + th) ?? ""); } catch {}
   const r = Wire.plain(App.voice_place(Wire.json(voicePlace.get(th) || {}), draft, Wire.json(envelope)));
   voicePlace.set(th, r.keep || {});
   if (typeof r.draft !== "string" || r.draft === draft) return;
-  if (here) localPresentation("draft", r.draft, session);
+  if (thin) thin.draftAt(th, r.draft);
+  else if (here) dispatch("draft", r.draft);
   else try { if (r.draft) localStorage.setItem(DRAFT + th, r.draft); } catch {}
 }
 function voiceMicHeard(envelope) {

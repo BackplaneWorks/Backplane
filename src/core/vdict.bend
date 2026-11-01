@@ -297,10 +297,23 @@ def Vdc.put.exact(d: VDict, +heard: String, +out: String, auto: Bool) -> VDict:
     case VDict{+ex, fl, fz, ts, ld}:
       VDict{Bool.pick(Map<&2, VR>, String.is_empty(heard), ex, Map.set(&2, VR, ex, heard, VR{out, auto})), fl, fz, ts, Vdc.leads(String.split(heard, ' '), ld)}
 
+# A part number may arrive as two words ("NRF 52840"). Keep its letter
+# prefix open until the digits arrive, so correction sees the whole term.
+def Vdc.part.lead(s: String, +acc: String) -> String:
+  match s:
+    case SNil{}:
+      ""
+    case SCon{Chr{+c}, +t}:
+      Bool.pick(String, Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), String.reverse(acc), Vdc.part.lead(t, SCon{Chr{c}, acc}))
+
+def Vdc.term.leads(+t: String, +ld: List<&2, String>) -> List<&2, String>:
+  +p = Vdc.part.lead(Vdc.flat(String.to_lower(t)), "")
+  Vdc.leads(String.split(Vdc.phrase(t), ' '), Bool.pick(List<&2, String>, String.is_empty(p), ld, p <> ld))
+
 def Vdc.put.term(d: VDict, +t: String) -> VDict:
   match d:
     case VDict{ex, fl, fz, ts, ld}:
-      VDict{ex, Map.set(&2, String, fl, Vdc.flat(String.to_lower(t)), t), VF{Vdc.key(Vdc.flat(String.to_lower(t))), Vdc.flat(String.to_lower(t)), t} <> fz, List.append(&2, String, ts, [t]), ld}
+      VDict{ex, Map.set(&2, String, fl, Vdc.flat(String.to_lower(t)), t), VF{Vdc.key(Vdc.flat(String.to_lower(t))), Vdc.flat(String.to_lower(t)), t} <> fz, List.append(&2, String, ts, [t]), Vdc.term.leads(t, ld)}
 
 def Vdc.sounds(ss: List<&2, String>, +t: String, d: VDict) -> VDict:
   match ss:

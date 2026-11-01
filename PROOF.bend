@@ -1,3 +1,4 @@
+import ./src/core/vdict.bend as VDICT
 import ./src/server/review-history.bend as REVIEWHISTORY
 
 import ./src/server/thin-view.bend as THINREVIEW
@@ -14894,3 +14895,18 @@ def Laws.view_page_splice_off_none(ms, base, clock, now): {==}
 def Laws.view_page_splice_default_off(): {==}
 def Laws.view_page_splice_setting_on(): {==}
 # END page splice (H)
+
+def Laws.vd_fix_empty(d): {==}
+def Laws.vd_learn_trusted(out, y):
+  match y:
+    case 0n: {==}
+    case 1n+k: {==}
+def Laws.vd_undo_revokes(out, y, n):
+  match y:
+    case 0n: {==}
+    case 1n+0n: {==}
+    case 1n+1n+k:
+      %Equal.sym(Bool, Nat.is_ge(k, 0n), True{}, ge_zero(k)) : {Bool.and(_, False{}) == False{} : Bool}
+      {==}
+def Laws.vs_done_tail_empty(timed, st, item, ws): {==}
+def Laws.vs_done_resets(timed, st, item, ws): {==}

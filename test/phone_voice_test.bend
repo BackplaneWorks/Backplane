@@ -47,6 +47,7 @@ def main() -> IO(Unit):
     C.Check.str("a tail shows at the end of the draft", draft(a), "Note: hello")
     +b : J.Json = step(a, words("hello world", "and", True{}, False{}))
     C.Check.str("committed words replace the tail; the new tail follows", draft(b), "Note: hello world and")
+    C.Check.str("a late microphone label keeps the pending tail's position", draft(step(step(b, ev("live")), words("and more", "", False{}, True{}))), "Note: hello world and more")
     +c : J.Json = step(b, words("and more", "", False{}, True{}))
     C.Check.str("later words read on from the committed ones", draft(c), "Note: hello world and more")
     C.Check.str("a level changes nothing in the draft", draft(step(c, J.Json.obj([J.KV{"t", J.Str{"voice"}}, J.KV{"thread", J.Str{"t1"}}, J.KV{"ev", J.Str{"level"}}, J.KV{"v", J.Json.nat(40n)}]))), draft(c))

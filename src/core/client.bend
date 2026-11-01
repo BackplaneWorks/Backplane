@@ -9124,7 +9124,7 @@ def Voice.undo(+u: Ui, +n: Nat) -> Act:
 # goes in with the next message (mobile/session.bend's Session.voice, the
 # web's app.bend voice_place)
 def Voice.place.keys() -> List<&2, String>:
-  ["@voice.pos", "@voice.tl", "@voice.to", "@voice.at", "@voice.part", "@voice.uth"]
+  ["@voice", "@voice.pos", "@voice.tl", "@voice.to", "@voice.at", "@voice.part", "@voice.uth"]
 
 def Voice.place.in(ks: List<&2, String>, +o: J.Json, u: Ui) -> Ui:
   match ks:
@@ -9146,9 +9146,14 @@ def Voice.place.k(+thread: String, +u: Ui) -> J.Json:
 def Voice.dev(+o: J.Json) -> String:
   Bool.pick(String, String.is_empty(J.Json.get_str(o, "label", "")), J.Json.get_str(o, "device", ""), J.Json.get_str(o, "label", ""))
 
+# The helper can repeat ready after resolving the microphone's label.
+# That metadata update must preserve words already placed by this session.
+def Voice.live.reset(+u: Ui) -> Ui:
+  Bool.pick(Ui, String.eq(Ui.scratch(u, "@voice"), "live"), u, Ui.scratch_set(Ui.scratch_set(u, "@voice.pos", ""), "@voice.tl", ""))
+
 def Voice.live(+u: Ui, +o: J.Json) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", "live"), "@voice.dev", Voice.dev(o)), "@voice.lv", "0"),
-    "@voice.hint", ""), "@voice.rec", J.Json.get_str(o, "recorder", "")), "@voice.eng", J.Json.get_str(o, "engine", "")), "@voice.pos", ""), "@voice.tl", "")
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Voice.live.reset(u), "@voice", "live"), "@voice.dev", Voice.dev(o)), "@voice.lv", "0"),
+    "@voice.hint", ""), "@voice.rec", J.Json.get_str(o, "recorder", "")), "@voice.eng", J.Json.get_str(o, "engine", ""))
 
 def Voice.idle(u: Ui) -> Ui:
   Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", ""), "@voice.part", ""), "@voice.lv", ""), "@voice.hint", ""), "@voice.pos", ""), "@voice.tl", "")

@@ -160,3 +160,34 @@ person confirms with `voice_dictionary_add`.
 
 Recording uses PipeWire, PulseAudio or ALSA tools, so dictation works on
 Linux. The ring's recordings work wherever the hub runs.
+
+## Qualification (2026-11-01)
+
+On six synthetic 16 kHz clips on Linux x64, with other builds running:
+model load 1958 ms; first hypothesis median 573 ms (including the cold
+first clip); final after the clip ends median 589 ms, p95 738 ms, including
+VAD silence; word commit lag median 664 ms, p95 1833 ms. This small fixture
+set is a latency sample, not an accuracy benchmark. It does not meet the
+proposal's 250 ms first-word / 600 ms p95 final targets under this load.
+
+Real browser demos using the hub capture path and Chromium's fake
+microphone upload path retained the whole dictated draft through redraws.
+They produced 49 and 37 text changes respectively, with zero replacements
+starting more than three words before the old end. The upload demo used a
+non-loopback hub address on this same machine; it is not physical
+second-device acceptance. `test/tools/voice_browser_e2e.ts` makes this
+fixture reproducible, including an undo/persistence assertion; its added
+assertions still need a run on the final combined build.
+
+Cloud live dictation and the ring webhook pass against a mock API; this
+does not establish current live-service compatibility. iOS and Android
+recorders compiled in their earlier qualification, but physical microphone
+and separate-hub testing remains outstanding. The dictionary is shared by
+clients of the same hub. Cross-hub dictionary replication, project-scoped
+entries, project vocabulary extraction, edit-diff teaching, an optional
+global hotkey and on-device phone inference remain design proposals.
+
+The final full proof pass must be rerun on the combined integration source.
+The controlled-heap attempt completed in 299 seconds with an incomplete
+new `vd_learn_trusted` proof; the corrected five voice laws subsequently
+passed in isolation. No existing law was weakened or removed.

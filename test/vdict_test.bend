@@ -83,6 +83,8 @@ def main() -> IO(Unit):
     C.Check.str("fix: spelled another way", fix(sure("The NRF52840 and the stm32.")), "The nRF52840 and the STM32.")
     C.Check.str("fix: alone", fix(sure("NRF52840")) ++ "/" ++ fix(sure("the NRF52840")) ++ "/" ++ fix(sure("NRF52840 and")), "nRF52840/the nRF52840/nRF52840 and")
     C.Check.str("fix: spaced", fix(sure("an stm 32 board")), "an STM32 board")
+    C.Check.str("fix: spaced part number", fix(sure("the NRF 52840 over SPI")), "the nRF52840 over SPI")
+    C.Check.str("settle: a part prefix waits for its digits", cm(D.Vs.hyp(False{}, D.VStep.st(D.Vs.hyp(False{}, D.Vs.empty(), "p", sure("the NRF 52840 over"), 0n, D.Vdc.waits(dict()))), "p", sure("the NRF 52840 over"), 0n, D.Vdc.waits(dict()))), "the|NRF 52840 over")
     C.Check.str("fix: replacement keeps punctuation", fix(sure("send the jason, please")), "send the JSON, please")
     C.Check.str("fix: a capital stays", fix(sure("Jason is fine")), "JSON is fine")
     C.Check.str("fix: drop word", fix(sure("so um, the board")), "so, the board")
