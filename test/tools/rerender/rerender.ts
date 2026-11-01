@@ -35,7 +35,7 @@ const port = Number(opt("port", "3811"));
 const fixtureKind = opt("fixture", "synthetic");
 const outDir = resolve(opt("out", join(here, "build/rr/out")));
 const deep = flag("deep");
-const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "slowup", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
+const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "slowup", "wheelpanes", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
 const scenarios = opt("scenarios", ALL.join(",")).split(",");
 const roles = opt("targets", "long,tools").split(",");
 if (port === 3787) throw new Error("3787 is the live hub's port");
@@ -313,6 +313,36 @@ try {
       const r = await measure("slow-up", target, async () => { for (let i = 0; i < 40; i++) { await page.mouse.wheel(0, -400); await sleep(300); } await sleep(2000); }, { blank: true, quietMs: 700 });
       r.end = await page.evaluate(() => ({ top: document.getElementById("timeline")?.scrollTop, older: window.__bpRender.ahead?.("older") }));
       say(`slow-up:${target.role}: wheels ${JSON.stringify(r.wheels)}, at the end ${JSON.stringify(r.end)}, hub views ${Object.entries(r.hubMsgs).filter(([k]) => k.startsWith("reply:view.")).map(([k, v]: any) => k + "×" + v.n).join(" ")}`);
+    }
+    // opt-in: the wheel where a pane takes it ([data-wheel]: the workspace
+    // terminal's screen) reaches that pane once and scrolls nothing else;
+    // ctrl+wheel over the timeline neither zooms the page nor scrolls it
+    if (scenarios.includes("wheelpanes")) {
+      const pane = async () => page.evaluate(() => { const tl = document.getElementById("timeline"); return { top: tl?.scrollTop ?? -1, scale: visualViewport?.scale ?? 1, dpr: devicePixelRatio, zoom: getComputedStyle(document.documentElement).zoom }; });
+      await page.locator('[data-on-click="term-toggle"]:visible').first().click().catch(() => {});
+      const screen = page.locator('.screen[data-wheel]').first();
+      const shown = await screen.waitFor({ timeout: 20000 }).then(() => true).catch(() => false);
+      if (!shown) {
+        try { mkdirSync(outDir, { recursive: true }); await page.screenshot({ path: join(outDir, "no-terminal.png") }); } catch {}
+        say(`wheelpanes: terminal buttons ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-on-click="term-toggle"], [data-on-click="ws-go"], [data-on-click="ws-term-here"]')].map((e) => ({ on: e.getAttribute("data-on-click"), v: e.getAttribute("data-value"), shown: !!(e as HTMLElement).offsetParent, label: e.getAttribute("aria-label") || e.textContent?.trim().slice(0, 30) }))))}`);
+      }
+      const r = await measure("wheel-term", target, async () => {
+        if (!shown) throw new Error("no terminal screen ([data-wheel]) came up");
+        const box = await screen.boundingBox();
+        if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.wheel(0, -300);
+      }, { quietMs: 600 });
+      r.wheelPane = { acts: r.hubMsgs["rtt:view.action:ws-term-scroll"]?.n ?? 0 };
+      await page.locator('[data-on-click="term-toggle"]:visible').first().click().catch(() => {});
+      await quiet(page, 600);
+      const tbox = await timeline().boundingBox();
+      if (tbox) await page.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2);
+      const before = await pane();
+      await page.keyboard.down("Control"); await page.mouse.wheel(0, -300); await page.keyboard.up("Control");
+      await sleep(500);
+      const after = await pane();
+      r.ctrlWheel = { before, after };
+      say(`wheelpanes:${target.role}: the terminal's wheel reached it ${r.wheelPane.acts} time(s); ctrl+wheel over the timeline: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
     }
     // The "Loading newer/earlier messages" placeholder is timing-dependent:
     // fast sweeps on a CPU throttled 4x, three times, each down-sweep
