@@ -137,6 +137,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -189,15 +190,18 @@ private val mono = FontFamily.Monospace
 // waiting (violet), finished ok (green), wanting you bad (red), stopped,
 // idle or settled faint (grey) (style.css's --st-*, --waiting)
 object PhaseColor {
-    val accent = Color(0xFF5FB3FF)
-    val ok = Color(0xFF58C28A)
-    val warn = Color(0xFFE3B341)
-    val bad = Color(0xFFF06A6A)
-    val input = Color(0xFFB48CFF)
-    val queued = Color(0xFF4FC1C9)
-    val waiting = Color(0xFFE07BD0)
-    val faint = Color(0xFF5C6473)
+    val accent: Color @Composable get() = MaterialTheme.colorScheme.primary
+    val ok: Color @Composable get() = phaseColor(0xFF1C8550, 0xFF58C28A)
+    val warn: Color @Composable get() = phaseColor(0xFF9A6700, 0xFFE3B341)
+    val bad: Color @Composable get() = MaterialTheme.colorScheme.error
+    val input: Color @Composable get() = phaseColor(0xFF7446D0, 0xFFB48CFF)
+    val queued: Color @Composable get() = phaseColor(0xFF127C84, 0xFF4FC1C9)
+    val waiting: Color @Composable get() = phaseColor(0xFFA3399A, 0xFFE07BD0)
+    val faint: Color @Composable get() = phaseColor(0xFF72777F, 0xFF5C6473)
 }
+
+@Composable
+private fun phaseColor(light: Long, dark: Long) = Color(if (MaterialTheme.colorScheme.background.luminance() > 0.5f) light else dark)
 
 // The projected activity wins over the legacy turn fallback. "waiting" is
 // the signal's own (its turn is over, work it started is still out);
@@ -526,6 +530,7 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
     }
 }
 
+@Composable
 private fun subColor(state: String) = when (state) {
     "active", "running", "watching", "cancelling" -> PhaseColor.accent
     "stalled" -> PhaseColor.warn
@@ -621,7 +626,8 @@ fun SubsView(m: AppModel, subs: Subs) {
 @Composable
 fun AskCard(m: AppModel, a: Ask) {
     if (a.kind == "browser") { BrowserAsk(m, a); return }
-    Surface(color = PhaseColor.bad.copy(alpha = 0.14f), shape = corner, modifier = Modifier.fillMaxWidth()) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = corner,
+        modifier = Modifier.fillMaxWidth().border(1.dp, PhaseColor.bad, corner)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(when (a.kind) { "plan" -> Icons.Filled.Checklist; "input" -> Icons.Filled.QuestionAnswer; else -> Icons.Filled.PanTool },

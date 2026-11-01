@@ -23,6 +23,8 @@ struct BackplaneApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
+                .tint(BackplaneDesign.accent)
+                .accentColor(BackplaneDesign.accent)
                 .safeAreaInset(edge: .top, spacing: 0) {
                     #if DEBUG && targetEnvironment(simulator)
                     if ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION"] == "1" {

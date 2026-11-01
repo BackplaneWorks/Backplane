@@ -4,7 +4,7 @@ import UIKit
 // The same quiet surfaces and accent as the web client. Dynamic colours keep
 // the device's Appearance setting effective on every screen.
 enum BackplaneDesign {
-    private static func color(_ light: UInt32, _ dark: UInt32) -> Color {
+    static func color(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in
             let rgb = traits.userInterfaceStyle == .dark ? dark : light
             return UIColor(red: CGFloat((rgb >> 16) & 255) / 255,
