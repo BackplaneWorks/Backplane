@@ -29,9 +29,9 @@
   "touchedUnchangedRows": 2,
   "outsideRecords": 15,
   "wsInBytes": 9736,
-  "renderFull": 4,
-  "hubViews": 4,
-  "domPatch": 1682,
+  "renderFull": 5,
+  "hubViews": 5,
+  "domPatch": 3229,
   "loading": 0,
   "blankFrames": 2
  },
