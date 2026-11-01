@@ -62,12 +62,10 @@ def main() -> IO(Unit):
     +fresh : J.Json = PAGE.frame(edited, J.Null{})
     C.Check.str("bounded cached frame equals complete fresh frame", F.equal(J.Json.show(cached), J.Json.show(fresh)), "same")
     C.Check.str("complete current composer retains actual IME draft", Bool.show(String.contains(J.Json.show(cached), "New 未確定 draft")), "True")
+    # the project list is never paged (view-page.bend's Page.whole; shelves
+    # page, test/view_page_test.bend): a large real sidebar draws every
+    # project and offers no paging control for them
     +command : String = Maybe.default(&2, String, List.head(&2, String, controls(node)), "")
-    C.Check.str("large real sidebar offers a reachable paging control", Bool.show(String.is_empty(command)), "False")
-    +next : U.Ui = prepare(U.Act.ui(U.Ui.act(u, "list-page", command)))
-    C.Check.str("list-page changes private sidebar image identity", F.equal(key(u), key(next)), "different")
-    C.Check.str("list-page changes actual bounded sidebar rows", F.equal(J.Json.show(node), J.Json.show(sidebar(next))), "different")
-    +miss : J.Json = A.SidebarImage.lookup([A.SidebarImage{key(u), node}], key(next))
-    C.Check.str("new range cannot reuse the previous sidebar", J.Json.show(miss), "null")
-    C.Check.str("new range renders a complete fresh frame after miss", F.equal(J.Json.show(PAGE.frame(next, miss)), J.Json.show(PAGE.frame(next, J.Null{}))), "same")
+    C.Check.str("large real sidebar has no project paging control", Bool.show(String.is_empty(command)), "True")
+    C.Check.str("large real sidebar draws its first and last projects", Bool.show(Bool.and(String.contains(J.Json.show(node), "Visible project 20"), String.contains(J.Json.show(node), "Visible project 9"))), "True")
     C.Check.str("malformed cached tree reaches exact complete fallback", F.equal(J.Json.show(PAGE.frame(edited, J.Str{"malformed"})), J.Json.show(fresh)), "same")

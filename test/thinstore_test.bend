@@ -139,7 +139,9 @@ def pages.th(+n: Nat, +i: T.Index, +r: T.Index, +h: String, +th: String, +acc: A
         +before : Nat = Nat.add(Nat.mul(k, 5n), Nat.mod(k, 3n))
         +want : String = show.page(i, th, T.Index.page(i, th, before, 32n))
         +pg : TS.Page <- TS.Ts.page(h, th, before, 32n, r)
-        pages.th(k, i, r, h, th, Acc.see(acc, th ++ " before " ++ Nat.show(before), show.page(TS.Page.index(pg), th, TS.Page.ids(pg)), want))
+        +a : Acc = Acc.see(acc, th ++ " before " ++ Nat.show(before), show.page(TS.Page.index(pg), th, TS.Page.ids(pg)), want)
+        +body : TS.Page <- TS.Ts.page.body(h, th, before, r, False{})
+        pages.th(k, i, r, h, th, Acc.see(a, th ++ " body before " ++ Nat.show(before), show.page(TS.Page.index(body), th, TS.Page.ids(body)), want))
 
 def pages(ths: List<&2, String>, +i: T.Index, +r: T.Index, +h: String, +acc: Acc) -> IO(Acc):
   match ths:

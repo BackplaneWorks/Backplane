@@ -3,12 +3,17 @@ name: CI
 # Run by hand only: the pipeline every merge waits on is local CI
 # (python3 scripts/local-ci.py, resource-capped local gate). This
 # workflow runs once on a release commit before it is published, as the last
-# check; the release workflows keep their own (user, 2026-10-22).
+# check; the release workflows keep their own (user, 2026-10-22). Nightly
+# (nightly.yml) calls it on main every day: the merge gate runs only
+# scripts/fast-tests.txt, so this is where the whole suite is held green.
 on:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # github.workflow is the caller's name when called, so a nightly and a
+  # hand run on the same ref never cancel each other.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -54,6 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-bend
+      - uses: ./.github/actions/more-swap
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
 
   proof:
@@ -62,6 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-bend
+      - uses: ./.github/actions/more-swap
       # The proof reads only PROOF.bend's imports (scripts/bend-closure.py),
       # bend and the gate's scripts. When a run already proved exactly those
       # (any branch, any commit), its record is in the cache and the proof
@@ -116,9 +123,19 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.3'
+      - uses: ./.github/actions/more-swap
+      # browser fixtures (test/tools/bub_move.mjs) drive the runner's own
+      # Chrome through tools/browser's pinned playwright-core
+      - name: Browser fixture dependencies
+        working-directory: tools/browser
+        run: bun install --frozen-lockfile
       # Real render-tree tests can use several GiB each. Keep two workers
       # per runner; the four shards still execute on separate machines.
-      - run: TEST_JOBS=2 scripts/test.sh
+      # TEST_FULL: the whole suite, never the merge gate's fast set (which
+      # would also run the shard's tests one at a time)
+      - run: TEST_FULL=1 TEST_JOBS=2 scripts/test.sh
+        env:
+          BACKPLANE_CHROME: /usr/bin/google-chrome
 
   # The hub (docs/js-service.md): bend emits src/server/main.bend as JS
   # once (kept by a hash of what it reads, so a change that leaves the

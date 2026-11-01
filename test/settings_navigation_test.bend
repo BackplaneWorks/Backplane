@@ -112,7 +112,7 @@ def main() -> IO(Unit):
     C.Check.str("CAD still has browser engine", Bool.show(present(page(u, "cad", 800, 900, 0), "setting", "browser.engine=cef")), "True")
     C.Check.str("CAD still has ordering", Bool.show(present(page(u, "cad", 800, 900, 0), "setting", "order.enabled=on")), "True")
     C.Check.str("locale category uses translated label", Bool.show(String.is_empty(U.Settings.title(I.Ja{}, "appearance"))), "False")
-    C.Check.str("phones omit empty desktop voice page", Bool.show(U.Settings.known(U.Settings.phone.pages(), "voice")), "False")
+    C.Check.str("phones expose the shared dictation settings", Bool.show(U.Settings.known(U.Settings.phone.pages(), "voice")), "True")
     +home : N.Nui = with_hits(N.Nui.init(u, 800, 900), List.reverse(&2, N.Hit, page(u, "", 800, 900, 0)))
     +tabbed : N.Nui = step(N.Nui.key.m(home, N.Key.tab(), 0, 0))
     C.Check.str("Tab selects first category", U.Ui.scratch(N.Nui.ui(tabbed), "@set.focus"), "settings-page\tappearance")

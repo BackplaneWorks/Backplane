@@ -86,6 +86,11 @@ def Q.sql.page.body(+keep: String) -> String:
 def Q.sql.below() -> String:
   "SELECT (SELECT count(*) FROM entry WHERE thread = ?1 AND seq < ?2) + (SELECT count(*) FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2)"
 
+# Rows excluded by a page's exclusive upper bound. Count them without
+# reading their bodies; apply the same chat predicate as the page query.
+def Q.sql.above(+keep: String) -> String:
+  "SELECT (SELECT count(*) FROM entry WHERE thread = ?1 AND seq >= ?2" ++ keep ++ ") + (SELECT count(*) FROM entry WHERE src = ?1 AND src <> '' AND seq >= ?2" ++ keep ++ ")"
+
 # whole rows: the ordinal ?1, and any row named ?2 among the ordinals ?3
 # (a JSON array of numbers)
 def Q.sql.whole() -> String:

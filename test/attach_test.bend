@@ -82,7 +82,7 @@ def main() -> IO(Unit):
       "{\"id\":0,\"m\":\"turn.start\",\"p\":{\"thread\":\"t1\",\"text\":\"hi\\n\\n[attachment: /h/a/t1/k-x.png]\",\"msg\":\"c0-0\",\"mode\":\"steer\"}};")
     C.Check.str("client sent clears", show.list(U.Ui.atts(act.ui(U.Ui.send(ui.one(), False{})), "t1")), "[]")
     C.Check.str("client detach", show.list(U.Ui.atts(act.ui(U.Ui.act(ui.one(), "detach", "/h/a/t1/k-x.png")), "t1")), "[]")
-    C.Check.str("client too big", act.cmds(U.Ui.act(ui.one(), "attach", "{\"key\":\"k\",\"name\":\"big.bin\",\"size\":99999999,\"i\":0,\"last\":true,\"data\":\"\"}")), "")
+    C.Check.str("client rejects a byte over the 512 MiB default", act.cmds(U.Ui.act(ui.one(), "attach", "{\"key\":\"k\",\"name\":\"big.bin\",\"size\":536870913,\"i\":0,\"last\":true,\"data\":\"\"}")), "")
     C.Check.str("client piece", act.cmds(U.Ui.act(ui.one(), "attach", "{\"key\":\"k\",\"name\":\"a.png\",\"size\":3,\"i\":0,\"last\":true,\"data\":\"QUJD\"}")),
       "{\"id\":0,\"m\":\"attach.put\",\"p\":{\"thread\":\"t1\",\"key\":\"k\",\"name\":\"a.png\",\"i\":0,\"last\":true,\"data\":\"QUJD\"}};")
     C.Check.str("client reply", show.list(U.Ui.atts(U.Ui.recv(ui.one(), Maybe.default(&2, J.Json, J.Json.parse("{\"t\":\"reply\",\"id\":3,\"ok\":true,\"result\":{\"attached\":\"/h/a/t1/k-y.pdf\",\"thread\":\"t1\"}}"), J.Null{})), "t1")),
@@ -91,7 +91,11 @@ def main() -> IO(Unit):
     C.Check.str("client upload ends", show.list(U.Ui.atts(act.ui(U.Ui.act(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"y.pdf\",\"size\":3}")), "attach-end", "{\"attached\":\"/h/a/t1/k-y.pdf\",\"thread\":\"t1\"}")), "t1")),
       "[/h/a/t1/k-x.png|/h/a/t1/k-y.pdf]")
     C.Check.str("client upload ends shown", U.Ui.uploading(act.ui(U.Ui.act(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"y.pdf\",\"size\":3}")), "attach-end", "{\"attached\":\"/h/a/t1/k-y.pdf\",\"thread\":\"t1\"}")), "t1"), "")
-    C.Check.str("client upload too big", U.Ui.uploading(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"big.mov\",\"size\":99999999}")), "t1"), "")
+    C.Check.str("client upload accepts the 512 MiB default boundary", U.Ui.uploading(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"big.mov\",\"size\":536870912}")), "t1"), "big.mov")
+    C.Check.str("client upload rejects a byte over the default", U.Ui.uploading(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"big.mov\",\"size\":536870913}")), "t1"), "")
+    +small : U.Ui = act.ui(U.Ui.act(ui.one(), "setting", "files.max.mb=1"))
+    C.Check.str("client upload accepts the configured boundary", U.Ui.uploading(act.ui(U.Ui.act(small, "attach-up", "{\"name\":\"small.mov\",\"size\":1048576}")), "t1"), "small.mov")
+    C.Check.str("client upload rejects a byte over the configured limit", U.Ui.uploading(act.ui(U.Ui.act(small, "attach-up", "{\"name\":\"small.mov\",\"size\":1048577}")), "t1"), "")
     C.Check.str("client upload fails", U.Ui.uploading(act.ui(U.Ui.act(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"y.pdf\",\"size\":3}")), "attach-end", "{\"text\":\"no\",\"thread\":\"t1\",\"upload\":true}")), "t1"), "")
     C.Check.str("client upload fails atts", show.list(U.Ui.atts(act.ui(U.Ui.act(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"y.pdf\",\"size\":3}")), "attach-end", "{\"text\":\"no\",\"thread\":\"t1\",\"upload\":true}")), "t1")), "[/h/a/t1/k-x.png]")
     C.Check.str("phone upload answered under its hub ends", U.Ui.uploading(act.ui(U.Ui.act(act.ui(U.Ui.act(ui.one(), "attach-up", "{\"name\":\"y.pdf\",\"size\":3}")), "attach-end", "{\"attached\":\"/h/a/t1/k-y.pdf\",\"thread\":\"h:1|t1\"}")), "t1"), "")

@@ -90,7 +90,10 @@ def main() -> IO(Unit):
     C.Check.str("actual empty-text link remains", F.yes(TC.Chat.hidden(M.Msg{M.Link.id("other", "1"), "bub-chat", M.Assistant{}, "", 1n})), "no")
     C.Check.str("warn ride remains", F.yes(TC.Chat.hidden(M.Act{"ride:warn", "bub-chat", "warn", "ride", "warning", 1n})), "no")
     C.Check.str("session notice remains", F.yes(TC.Chat.hidden(M.Act{"session", "bub-chat", "info", "session", "OpenCode reset", 1n})), "no")
-    C.Check.str("ordinary conversation keeps prior presentation", Nat.show(List.length(&2, D.Node, V.View.entries(I.En{}, [M.Msg{"ordinary-empty", "ordinary", M.Assistant{}, "", 1n}], state(), "ordinary", info(), False{}))), "1")
+    # since e87cafd19 (Fold.shown) a blank assistant message shows nothing in
+    # any thread; an ordinary reply with text still draws its one node
+    C.Check.str("ordinary conversation hides a blank reply too", Nat.show(List.length(&2, D.Node, V.View.entries(I.En{}, [M.Msg{"ordinary-empty", "ordinary", M.Assistant{}, "", 1n}], state(), "ordinary", info(), False{}))), "0")
+    C.Check.str("ordinary conversation keeps prior presentation", Nat.show(List.length(&2, D.Node, V.View.entries(I.En{}, [M.Msg{"ordinary-text", "ordinary", M.Assistant{}, "hello", 1n}], state(), "ordinary", info(), False{}))), "1")
     +changes : List<&2, M.Change> = List.append(&2, M.Change, F.changes(), empty.posts(96n, Nil{}))
     +st : M.State = M.State.replay(changes, M.State.empty())
     +i : T.Index = T.Index.of(st)

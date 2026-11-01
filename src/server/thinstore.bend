@@ -63,6 +63,14 @@ def Ts.below(full: Bool, +h: String, +th: String, +seq: Nat) -> IO(Nat):
         r : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.below(), [th, Q.Q.n(seq)], 1)
         return Ts.nat(r)
 
+def Ts.above(newest: Bool, h: String, th: String, seq: Nat, keep: String) -> IO(Nat):
+  match newest:
+    case True{}: IO.pure(Nat, 0n)
+    case False{}:
+      do IO<Nat>:
+        r : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.above(keep), [th, Q.Q.n(seq)], 1)
+        return Ts.nat(r)
+
 # a thread's page older than ordinal `before` (0: the newest), at most
 # `limit` (capped at 32) and one more, as T.Index.page would give it, and
 # what Page.window asks of the rest
@@ -74,7 +82,8 @@ def Ts.page(+h: String, +th: String, +before: Nat, +limit: Nat, +base: T.Index) 
     +s : Nat <- Ts.seq_at(h, before)
     +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.page(), [th, Q.Q.n(s), Q.Q.n(lim)], U32.from_nat(lim))
     +n : Nat <- Ts.below(Nat.is_eq(List.length(&2, List<&2, String>, xs), lim), h, th, Q.Q.last_seq(xs, 0n))
-    +i : T.Index = T.Index.window(Q.Q.rows(xs), th, n, base)
+    +above : Nat <- Ts.above(Nat.is_eq(before, 0n), h, th, s, "")
+    +i : T.Index = T.Index.window.above(T.Index.window(Q.Q.rows(xs), th, n, base), th, above)
     return Page{i, T.Index.page(i, th, before, limit)}
 
 # Presentation-only bot page. Keep a visible lookahead in the bounded page
@@ -99,7 +108,8 @@ def Ts.page.body(+h: String, +th: String, +before: Nat, +base: T.Index, +hide: B
     +s : Nat <- Ts.seq_at(h, before)
     +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.page.body(Bool.pick(String, hide, Q.Q.sql.chat.keep(), "")), [th, Q.Q.n(s), Q.Q.n(49n)], 49)
     +n : Nat <- Ts.below(Nat.is_eq(List.length(&2, List<&2, String>, xs), 49n), h, th, Q.Q.last_seq(xs, 0n))
-    +i : T.Index = T.Index.window(Q.Q.rows(xs), th, n, base)
+    +above : Nat <- Ts.above(Nat.is_eq(before, 0n), h, th, s, Bool.pick(String, hide, Q.Q.sql.chat.keep(), ""))
+    +i : T.Index = T.Index.window.above(T.Index.window(Q.Q.rows(xs), th, n, base), th, above)
     return Page{i, T.Index.page(i, th, before, 32n)}
 
 # A message read whole: the rows the read may name (the cursor's ordinal,

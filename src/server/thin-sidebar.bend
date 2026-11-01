@@ -10,8 +10,10 @@ import ../core/sidebar-drafts.bend as SD
 # exact clock, scope and every transient UI input are retained.
 # Only request/model-rehydration counters and five main-panel-only fields are omitted.
 # No key or draft value is included in a response or diagnostic.
+# "@keys.rm" (the API key a Settings page asks to delete) is Settings-only
+# too: Settings.go clears it on every page change.
 def Sidebar.omit(+key: String) -> Bool:
-  Bool.or(String.eq(key, "@settings.page"), Bool.or(String.eq(key, "@set.sc"), String.eq(key, "@set.focus")))
+  Bool.or(String.eq(key, "@settings.page"), Bool.or(String.eq(key, "@set.sc"), Bool.or(String.eq(key, "@set.focus"), String.eq(key, "@keys.rm"))))
 
 def Sidebar.drafts(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, J.KV>:
   match xs:

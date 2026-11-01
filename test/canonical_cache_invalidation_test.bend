@@ -66,8 +66,10 @@ def main() -> IO(Unit):
     C.Check.str("owned fab reply actually installs fresh card", U.Ui.info(A.Actor.ui(completed()), "fab.intent:self"), "fresh fab intent")
     C.Check.str("info and owned completion still mark actor dirty", N.yes(A.Actor.dirty(completed())), "yes")
     C.Check.str("fab info completion navigation retains exactly canonical slots", N.total(N.refresh(completed(), "other", "new-view")), "3")
-    C.Check.str("dirty invalidation keeps only existing body plus canonical", N.total(A.Actor.mark_dirty(N.tainted(F.seed()))), "4")
-    C.Check.str("info keeps only existing body and sent receipt plus canonical", N.total(info(N.tainted(F.seed()))), "5")
+    # the metadata sidebar image survives too since c286c324f (Actor.same.view:
+    # its key is every input it is drawn from, so a change misses it)
+    C.Check.str("dirty invalidation keeps only existing body, sidebar image and canonical", N.total(A.Actor.mark_dirty(N.tainted(F.seed()))), "5")
+    C.Check.str("info keeps only existing body, sidebar image and sent receipt plus canonical", N.total(info(N.tainted(F.seed()))), "6")
     C.Check.str("oversized metadata fixture really refuses retention", N.yes(X.IndexCache.bounded(IX.too_big())), "no")
     C.Check.str("oversized metadata save releases previously retained slot", Nat.show(List.length(&2, A.Memo, A.SideIndex.keep(A.Sidebar.memos(rejected())))), "0")
     C.Check.str("metadata refusal preserves unrelated scalar and text slots", N.count(rejected()), "2")
