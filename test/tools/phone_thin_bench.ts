@@ -2,9 +2,11 @@
 // apps run it today: no JIT and the phone's stack. Starts a headless hub on
 // a made-up log, then a child bun joins it through bridge.js the way the iOS
 // app does (connection(key, epoch, "view-v1"), the view socket, each frame
-// handed to recv as base64), opens threads and types into a draft. Prints
-// ms per screen, per key (the quiet draft call and the screen after it) and
-// per thread switch. Compare builds with each other.
+// handed to recv as base64), opens threads and types into a draft as each
+// app does (iOS draftAt, Android quiet "draft"). Prints ms per screen, per
+// key, per thread switch, how many keys drew a screen (none should), and
+// the composer each key answers with (its popup rows and send button).
+// Compare builds with each other.
 //
 //   bun test/tools/phone_thin_bench.ts BINARY BRIDGE [keys]
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -65,24 +67,48 @@ if (mode === "child") {
     if (!ok) { console.error("no view of", id); throws++; }
   }
   await drain(500);
-  const screens: number[] = [];
-  for (let i = 0; i < 15; i++) { const t0 = performance.now(); call(() => B.screen()); screens.push(performance.now() - t0); }
-  const quiet: number[] = [], keyScreen: number[] = [], perKey: number[] = [];
-  let draft = "";
+  const screensT: number[] = [];
+  for (let i = 0; i < Number(process.env.SCREENS ?? 15); i++) { const t0 = performance.now(); call(() => B.screen()); screensT.push(performance.now() - t0); }
+  // a key as each app sends it: iOS draftAt(thread, text, edit), Android
+  // quiet("draft", text); neither asks for a screen
+  const sel = String(screen?.thread?.id ?? "");
+  const thread = sel.includes("|") ? sel : `${key}|${sel}`;
+  const ios: number[] = [], android: number[] = [];
+  let draft = "", edit = 0, screens = 0;
   const text = "the quick brown fox jumps over the lazy dog, again and again";
   for (let i = 0; i < Number(a3); i++) {
     draft += text[i % text.length];
     const t0 = performance.now();
-    call(() => B.quiet("draft", draft));
-    const t1 = performance.now();
-    call(() => B.screen());
-    const t2 = performance.now();
-    quiet.push(t1 - t0); keyScreen.push(t2 - t1); perKey.push(t2 - t0);
-    await drain(20);
+    const o = call(() => B.draftAt(thread, draft, ++edit));
+    ios.push(performance.now() - t0);
+    if (o.screen) screens++;
+    await drain(10);
+  }
+  call(() => B.draftAt(thread, "", ++edit));
+  await drain(50);
+  draft = "";
+  for (let i = 0; i < Number(a3); i++) {
+    draft += text[i % text.length];
+    const t0 = performance.now();
+    const o = call(() => B.quiet("draft", draft));
+    android.push(performance.now() - t0);
+    if (o.screen) screens++;
+    await drain(10);
   }
   call(() => B.quiet("draft", ""));
+  await drain(50);
+  // what the composer offers while typing, from the key's own answer
+  const probe: any = {};
+  for (const d of ["/", "/co", "/btw why", "plain"]) {
+    const a = call(() => B.draftAt(thread, d, ++edit));
+    const q = call(() => B.quiet("draft", d));
+    probe[d] = { ios: a.composer && { rows: (a.composer.skills ?? []).map((r: any) => r.name), send: a.composer.send, act: a.composer.sendAct },
+      android: q.composer && { rows: (q.composer.skills ?? []).map((r: any) => r.name), send: q.composer.send } };
+  }
+  call(() => B.draftAt(thread, "", ++edit));
+  const after = JSON.parse(B.screen()).screen?.thread;
   ws.close();
-  console.log(JSON.stringify({ throws, entries: screen?.thread?.entries?.length ?? 0, switch: stats(switches), screen: stats(screens), keyQuiet: stats(quiet), keyScreen: stats(keyScreen), key: stats(perKey) }));
+  console.log(JSON.stringify({ probe, screensPerKey: screens, screenRows: (after?.skills ?? []).length, throws, entries: screen?.thread?.entries?.length ?? 0, switch: stats(switches), screen: stats(screensT), keyIos: stats(ios), keyAndroid: stats(android) }));
   process.exit(0);
 }
 
@@ -113,7 +139,9 @@ try {
   for (let i = 0; i < 600 && !up; i++) { try { up = (await fetch(`http://127.0.0.1:${hubPort}/hello`)).status === 200; } catch {} if (!up) await sleep(100); }
   if (!up) throw new Error("the hub did not start");
   const tok = readFileSync(join(home, "token"), "utf8").trim();
-  const child = Bun.spawn([process.execPath, import.meta.path, bin, resolve(bridge), a3, "child", String(hubPort), tok], {
+  // PROFILE=<dir>: the child under bun --cpu-prof (SCREENS=200 for a screen profile)
+  const prof = process.env.PROFILE ? ["--cpu-prof", `--cpu-prof-dir=${resolve(process.env.PROFILE)}`] : [];
+  const child = Bun.spawn([process.execPath, ...prof, import.meta.path, bin, resolve(bridge), a3, "child", String(hubPort), tok], {
     env: { ...process.env, BUN_JSC_useJIT: "0", BUN_JSC_maxPerThreadStackUsage: "4194304" }, stdout: "pipe", stderr: "inherit",
   });
   const out = await new Response(child.stdout).text();

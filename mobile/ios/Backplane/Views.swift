@@ -1188,6 +1188,9 @@ struct ThreadScreen: View {
     @State private var showSubs = false
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderCount.tick("threadScreen")
+        #endif
       let displayRevision = model.performanceRevision
       VStack(spacing: 0) {
         // the to-do list's steps at the top, while the person has it open

@@ -10,6 +10,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     val links get() = core.links
     val screen get() = core.screen
+    // the key's composer patch while it is for this thread and the text shown
+    private fun patch(t: ThreadView) = core.composerPatch?.takeIf { it.thread == t.id && it.draft == core.composer }
+    fun composerSkills(t: ThreadView) = patch(t)?.skills ?: t.skills
+    fun composerSend(t: ThreadView) = patch(t)?.send ?: t.send
+    fun composerSendAct(t: ThreadView) = patch(t)?.sendAct ?: t.sendAct
     val contentReady get() = core.contentReady
     val startup get() = core.startup
     // the hub's socket is up (for a screen that says online)

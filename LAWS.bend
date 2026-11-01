@@ -1,3 +1,4 @@
+import ./src/mobile/session.bend as MCOMPOSER
 import ./src/core/components.bend as COMPONENTS
 import ./src/core/msgs.bend as MSG
 import ./src/core/plot-error.bend as PLOTERROR
@@ -13866,3 +13867,40 @@ law signal_failed_display_name:
 
 law signal_pending_display_blocked:
   {SIGREV.Signal.display.name(2n, M.State.replay([M.ThreadCreated{"t", "p", "Failed", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"t", M.Failed{}, 2n}, M.PendingChanged{"t", 1n, 3n}], M.State.empty()), "t") == "blocked" : String}
+# ---- phone composer: a key changes only the composer (session.bend's Composer.*; thread J, area perf) ----
+# a draft that is one /word offers its slash commands at once, Claude's own in a Claude thread
+law composer_slash_local:
+  {MCOMPOSER.Composer.names(J.Json.elems(J.Json.get_obj(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{""}}, J.KV{"skills", J.Arr{J.End{}}}, J.KV{"state", J.Str{"idle"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), "/co", I18.En{}), "skills"))) == ["/compact", "/context"] : List<&2, String>}
+
+law composer_slash_not_claude:
+  {MCOMPOSER.Composer.names(J.Json.elems(J.Json.get_obj(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{""}}, J.KV{"skills", J.Arr{J.End{}}}, J.KV{"state", J.Str{"idle"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{False{}}}]), "/", I18.En{}), "skills"))) == ["/btw", "/give", "/secret"] : List<&2, String>}
+
+# the hub's rows stay while its render is for this draft, or neither is a slash command
+law composer_hub_rows_same_draft:
+  {MCOMPOSER.Composer.names(J.Json.elems(J.Json.get_obj(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{"$pl"}}, J.KV{"skills", J.Arr{J.Item{J.Json.obj([J.KV{"name", J.Str{"$plot"}}, J.KV{"desc", J.Str{"d"}}, J.KV{"on", J.Flag{True{}}}]), J.End{}}}}, J.KV{"state", J.Str{"idle"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), "$pl", I18.En{}), "skills"))) == ["$plot"] : List<&2, String>}
+
+law composer_hub_rows_no_slash:
+  {MCOMPOSER.Composer.names(J.Json.elems(J.Json.get_obj(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{"$pl"}}, J.KV{"skills", J.Arr{J.Item{J.Json.obj([J.KV{"name", J.Str{"$plot"}}, J.KV{"desc", J.Str{"d"}}, J.KV{"on", J.Flag{True{}}}]), J.End{}}}}, J.KV{"state", J.Str{"idle"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), "$plo", I18.En{}), "skills"))) == ["$plot"] : List<&2, String>}
+
+# a slash draft the hub has not drawn yet takes its own commands, not the stale rows
+law composer_slash_overtakes_hub:
+  {MCOMPOSER.Composer.names(J.Json.elems(J.Json.get_obj(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{"/co"}}, J.KV{"skills", J.Arr{J.Item{J.Json.obj([J.KV{"name", J.Str{"$plot"}}, J.KV{"desc", J.Str{"d"}}, J.KV{"on", J.Flag{True{}}}]), J.End{}}}}, J.KV{"state", J.Str{"idle"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), "/con", I18.En{}), "skills"))) == ["/context"] : List<&2, String>}
+
+# while a turn runs, a blank draft makes the button Stop; anything typed sends
+law composer_stop_running_blank:
+  {J.Json.get_str(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{""}}, J.KV{"skills", J.Arr{J.End{}}}, J.KV{"state", J.Str{"run"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), " ", I18.En{}), "sendAct", "") == "interrupt" : String}
+
+law composer_send_running_typed:
+  {J.Json.get_str(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{""}}, J.KV{"skills", J.Arr{J.End{}}}, J.KV{"state", J.Str{"run"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), "go on", I18.En{}), "sendAct", "") == "send" : String}
+
+# a full screen's composer is the per-key patch: the same fields, the same values
+law composer_screen_agrees:
+  {J.Json.show(J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(MCOMPOSER.Session.shown.draft(J.Json.obj([J.KV{"j", J.Json.obj([J.KV{"thread", J.Json.obj([J.KV{"draft", J.Str{"$pl"}}, J.KV{"skills", J.Arr{J.Item{J.Json.obj([J.KV{"name", J.Str{"$plot"}}, J.KV{"desc", J.Str{"d"}}, J.KV{"on", J.Flag{True{}}}]), J.End{}}}}, J.KV{"state", J.Str{"run"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}])}])}]), J.Json.obj([J.KV{"sel", J.Str{"t"}}, J.KV{"drafts", J.Json.obj([J.KV{"t", J.Str{"/c"}}])}]), I18.En{}), "j"), "thread"), "skills")) ==
+    J.Json.show(J.Json.get_obj(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{"$pl"}}, J.KV{"skills", J.Arr{J.Item{J.Json.obj([J.KV{"name", J.Str{"$plot"}}, J.KV{"desc", J.Str{"d"}}, J.KV{"on", J.Flag{True{}}}]), J.End{}}}}, J.KV{"state", J.Str{"run"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), "/c", I18.En{}), "skills")) : String}
+
+# a draft that stops being one /word offers nothing of its own
+law composer_no_slash_no_rows:
+  {MCOMPOSER.Composer.names(J.Json.elems(J.Json.get_obj(MCOMPOSER.Composer.of(J.Json.obj([J.KV{"draft", J.Str{"/co"}}, J.KV{"skills", J.Arr{J.End{}}}, J.KV{"state", J.Str{"idle"}}, J.KV{"attaching", J.Arr{J.End{}}}, J.KV{"claude", J.Flag{True{}}}]), "/co x", I18.En{}), "skills"))) == [] : List<&2, String>}
+
+law composer_fields:
+  {MCOMPOSER.Composer.fields() == ["draft", "skills", "send", "sendAct"] : List<&2, String>}

@@ -12,6 +12,9 @@ struct ThreadComposer: View {
         model.actComposer(action, value, for: thread.id)
     }
     var body: some View {
+        #if DEBUG
+        let _ = RenderCount.tick("threadComposer")
+        #endif
           VStack(spacing: 0) {
             Group {
             // the terminals pinned to the top of the thread
@@ -152,7 +155,7 @@ struct ThreadComposer: View {
                 // a long press sends with the other follow-up mode (queue or steer);
                 // while a turn runs with nothing typed the button stops it
                 let blank = model.composerText(for: thread).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                let stop = thread.sendAct == "interrupt" && blank
+                let stop = model.composerSendAct(for: thread) == "interrupt" && blank
                 Image(systemName: stop ? "stop.circle.fill" : "arrow.up.circle.fill").font(.system(size: 32))
                     .frame(minWidth: 44, minHeight: 44)
                     .foregroundStyle(stop ? Color.red : blank ? Color.secondary : Color.accentColor)
@@ -162,7 +165,7 @@ struct ThreadComposer: View {
                     .onLongPressGesture {
                         if model.canSendComposer(for: thread.id), !model.composerText(for: thread).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { model.sendComposer("send-alt", for: thread.id) }
                     }
-                    .accessibilityLabel(thread.send)
+                    .accessibilityLabel(model.composerSend(for: thread))
                     .accessibilityIdentifier("thread.send")
                     .accessibilityAddTraits(.isButton)
                     .disabled(!canSend)

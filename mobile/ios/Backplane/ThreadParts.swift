@@ -261,6 +261,9 @@ struct EntryRow: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderCount.tick("entryRow")
+        #endif
         row.sheet(isPresented: $selecting) { SelectSheet(model: model, text: entry.text) }
     }
 
@@ -638,9 +641,12 @@ struct ComposerExtras: View {
     @Environment(\.verticalSizeClass) private var height
 
     var body: some View {
+        #if DEBUG
+        let _ = RenderCount.tick("composerExtras")
+        #endif
         let atts = thread.attaching ?? []
         let up = thread.uploading ?? ""
-        let skills = thread.skills ?? []
+        let skills = model.composerSkills(for: thread)
         if let r = thread.replying {
             HStack(spacing: 6) {
                 Text(NativeMessages.reply_replying(lang)).textCase(.uppercase).foregroundStyle(.secondary)

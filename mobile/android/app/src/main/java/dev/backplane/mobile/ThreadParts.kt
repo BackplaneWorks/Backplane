@@ -457,6 +457,7 @@ private fun Stamp(s: String) {
 
 @Composable
 fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
+    RenderCount.tick("entryRow")
     val lang = LocalBackplaneLanguage.current
     var menu by remember(e.text) { mutableStateOf(false) }
     when (e.kind) {
@@ -662,6 +663,7 @@ fun AskCard(m: AppModel, a: Ask) {
 // a `>` thread, a `%` project or a `#` room, each with its summary
 @Composable
 fun ComposerExtras(m: AppModel, t: ThreadView) {
+    RenderCount.tick("composerExtras")
     val lang = LocalBackplaneLanguage.current
     t.replying?.let { r ->
         Surface(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), shape = corner,
@@ -688,9 +690,10 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
             }
         }
     }
-    if (t.skills.isNotEmpty()) Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer) {
+    val skills = m.composerSkills(t)
+    if (skills.isNotEmpty()) Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceContainer) {
         // Bend marks the highlighted row; the first one is it only when none is marked
-        val hot = t.skills.indexOfFirst { it.on }.coerceAtLeast(0)
+        val hot = skills.indexOfFirst { it.on }.coerceAtLeast(0)
         val list = rememberLazyListState()
         LaunchedEffect(hot) { list.animateScrollToItem(hot) }
         // about five rows, fewer when the keyboard leaves little room (landscape)
@@ -702,7 +705,7 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
             HorizontalDivider()
             Box {
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = cap), state = list) {
-                    itemsIndexed(t.skills) { i, k ->
+                    itemsIndexed(skills) { i, k ->
                         val sel = i == hot
                         val label = if (k.desc.isEmpty()) k.name else k.name + ", " + k.desc
                         Surface(onClick = { m.act("skill", k.name) }, shape = corner,
