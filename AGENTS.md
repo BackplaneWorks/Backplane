@@ -16,6 +16,9 @@ When using Bend:
 
 - `LAWS.bend`: the rules, stated as laws over the real code. Humans own it. An agent may add laws, but never weaken or delete one without the user's explicit consent.
 - `PROOF.bend`: a proof of every law. `bend PROOF.bend` must print "All terms check."
+- `scripts/laws-shape.py`: a one-second structural check of LAWS.bend and PROOF.bend (no Bend needed; first line of `scripts/check.sh`): every law has its `{… == …}` statement and a `def Laws.NAME` proof with a body, no orphans or duplicates, no conflict markers. Test: `python3 -m unittest discover -s test/tools -p laws_shape_test.py`.
+- `scripts/merge-laws.py` + `scripts/setup-merge-driver.sh`: a block-wise git merge driver for the two files. Run `scripts/setup-merge-driver.sh` once per clone: it replaces `merge=union` (which aligns the identical `  {==}` and blank lines of different blocks and, when two branches both append after the last block, interleaves them and drops a law's statement or splits a proof def from its body) with a merge by block keyed by `law NAME`/`def NAME`; the same block changed on both sides is a real conflict.
+- `scripts/pre-merge.sh`: run it right before `gh pr merge`; it checks LAWS/PROOF shape on origin/main merged with HEAD (in memory), because a check.sh that passed before the last rebase says nothing about the merged result.
 - `src/core/`: pure Bend. JSON, S-expressions, the event-sourced thread model, the settle rule, sidebar order, KiCad parsing, scene diff and fade, semver, and the prompt/skills logic. No IO here.
 - `src/core/telemetry.bend` (pure planner, wire allowlist and signatures), `src/server/telemetry.bend` (hub-only private queue and sender): tiny install/update/daily-active counts, shared Settings opt-out/reset and tour consent. Compile-only credentials and immutable package channel come from `scripts/telemetry-header.py`. See `docs/telemetry.md`; tests `test/telemetry_test.bend`, `test/tools/telemetry_build_test.py` and `test/tools/telemetry_e2e.ts`. Platform package ingestion remains a separate release gate.
 - `src/server/`: the Bend program that owns IO: HTTP/WebSocket, the event store, agent processes, git, file watching, and updates. Its custom effects are JavaScript (`src/server/effects/*.js`): the hub runs on Bun, and has no C.
@@ -146,6 +149,7 @@ User stories end to end (a release check, or "run the user stories"/"run e2e"): 
 
 ## Bend traps (learned here, keep adding)
 
+- Merging or rebasing LAWS.bend/PROOF.bend: with `merge=union` a lost `{==}` shows up only after the emit. Run `scripts/setup-merge-driver.sh` once, and `scripts/laws-shape.py` after every merge/rebase. Without the driver, take main's file (`git checkout origin/main -- LAWS.bend PROOF.bend`) and re-append your law and its proof as whole blocks.
 - A `match` scrutinee must be a parameter or pattern-bound variable, even in a multi-match. Pass computed values (`String.eq(a, b)`) to a helper def that matches on its parameters.
 - A def must be defined above its uses. Forward `law` declarations don't help: live code can't call an unfilled law.
 - No mutual recursion. When a recursive walk needs a per-element decision, compute it in a non-recursive step and recurse on the tail: `go(t, step(h, st))`. For look-ahead, pass the head's precomputed flag as a parameter: `go(t, hit(t, k), k)`.
