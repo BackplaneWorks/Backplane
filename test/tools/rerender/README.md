@@ -7,7 +7,7 @@ after a change; `--gate` keeps the counts from creeping back.
 ```sh
 # a hub and a web client of the tree under test, stamped with it (check
 # `df -h /` first: leave 20 GB free)
-bp-admit.sh --mem 14 --cores 4 -- test/tools/rerender/build.sh build/rr
+bp-admit.sh --mem 14 --cores 4 -- test/tools/rerender/build.sh build/rr      # (its log: build/rr.log)
 
 # synthetic fixture (safe to share results)
 bp-admit.sh --mem 6 --cores 4 -- bun test/tools/rerender/rerender.ts --out build/rr/synthetic
