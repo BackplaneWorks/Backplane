@@ -96,7 +96,8 @@ def main() -> IO(Unit):
     # a failed turn says failed and why on the phone too, not "Blocked: needs interaction"
     C.Check.str("phone failed says why", working(U.Side.with_signals(ui([M.MessagePosted{"p", "u2", M.User{}, "go", 2n}, M.ActivityLogged{"p", "e3", "error", "codex", "codex exited (exit 127)", 3n}, M.TurnChanged{"p", M.Failed{}, 3n}], True{}))),
       "Failed: codex exited (exit 127)")
-    C.Check.str("phone failed still red", screen(ui([M.TurnChanged{"p", M.Failed{}, 3n}], True{})), "blocked")
+    # its own name since ce2f19f91; both phones draw "failed" with PhaseColor.bad
+    C.Check.str("phone failed still red", screen(ui([M.TurnChanged{"p", M.Failed{}, 3n}], True{})), "failed")
     C.Check.str("phone stopped gray", screen(ui([M.TaskStateSet{"task", M.TaskCancelled{}, "", 3n}, M.TurnChanged{"p", M.Interrupted{}, 3n}], True{})), "inactive")
     C.Check.str("plane finished row", P.Plane.signal.state(5n), "finished")
     C.Check.str("held lock gray", SB.Subs.signal.of(info, held), "inactive")

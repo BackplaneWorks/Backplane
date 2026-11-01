@@ -142,7 +142,9 @@ for (const t of ['', ' ', '[1 2]', '{"a" 1}', '{"a":1 "b":2}', '[1,]', '[,1]', '
   '1e', '0x10', '"\\x"', '"\\u12"', '"\\u12g4"', '"\\ud800"', '"\\ud83d\\ude00"', '"a\u0001b"', '"open', '[1]x', '1 2', '{"a":1}}', '[1]]', "'a'",
   '{1:2}', '[NaN]', '[Infinity]', '"\ud800"', '"\udc00x"', '\u000b1', '[1\u00a0]'])
   refuse(t, 'refused');
-const deep = '['.repeat(200000) + ']'.repeat(200000);
+// deep enough to pass any stack test.sh allows (512 MiB for JSC: 200000
+// levels fit there and parsed, 2000000 too)
+const deep = '['.repeat(20000000) + ']'.repeat(20000000);
 assert.equal(jsonText(deep), null, 'nesting past the stack falls back');
 // random texts: random values written with odd spacing and number forms,
 // duplicate and integer-like keys, field order shuffled
@@ -167,6 +169,6 @@ for (let k = 0; k < 2000; k += 1) {
   try { JSON.parse(b); } catch { strict = false; }
   if (strict && b.isWellFormed() && !/\\ud[89a-f][0-9a-f]{2}/i.test(b)) sameText(b, 'broken but strict ' + k); else refuse(b, 'broken ' + k);
 }
-console.log(`jsonText: ${texts_n} texts equal to Json.parse, ${nulls} refused (left to Bend)`);
+console.log(`ok jsonText: ${texts_n} texts equal to Json.parse, ${nulls} refused (left to Bend)`);
 assert.ok(refused >= 50 && n >= 500, `coverage: ${n} compared, ${refused} refused`);
-console.log(`json_native: ${n} values (${refused} with lone surrogates, which Bend refuses and json() makes U+FFFD), each equal to Json.parse(JSON.stringify(v))`);
+console.log(`ok json_native: ${n} values (${refused} with lone surrogates, which Bend refuses and json() makes U+FFFD), each equal to Json.parse(JSON.stringify(v))`);

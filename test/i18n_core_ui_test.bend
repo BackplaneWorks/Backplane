@@ -141,7 +141,7 @@ def main() -> IO(Unit):
     C.Check.str("history labels en", U.Hs.label.shown(I.En{}, "Step 3") ++ "|" ++ U.Hs.label.shown(I.En{}, "Working copy") ++ "|" ++ U.Hs.label.shown(I.En{}, "Turn 2") ++ "|" ++ U.Hs.label.shown(I.En{}, "main"), "Step 3|Working copy|Turn 2|main")
     C.Check.str("history labels ja", U.Hs.label.shown(I.Ja{}, "Step 3") ++ "|" ++ U.Hs.label.shown(I.Ja{}, "Working copy") ++ "|" ++ U.Hs.label.shown(I.Ja{}, "Turn 2") ++ "|" ++ U.Hs.label.shown(I.Ja{}, "Branch point · main"), "変更3|作業コピー|ターン2|分岐点 · main")
     C.Check.str("history position en", U.Hs.bar.pos(I.En{}, True{}, 1n, 4n) ++ "|" ++ U.Hs.bar.pos(I.En{}, False{}, 2n, 4n), "Step 1 of 4 · before the agent's edits|Step 2 of 4")
-    C.Check.str("history live note", U.Hs.live.said(0n) ++ "|" ++ U.Hs.live.said.loc(I.Ja{}, 3n), "The live file. Compare it with any commit, branch or tag.|現在のファイルです。目盛りはエージェントの変更です。再生すると順に表示されます。")
+    C.Check.str("history live note", U.Hs.live.said(0n) ++ "|" ++ U.Hs.live.said.loc(I.Ja{}, 3n), "The live file. Compare it with any commit, branch or tag.|現在のファイルです。各目盛りは保存されたスナップショットです。選択するか、履歴を再生できます。")
     C.Check.str("review tabs", U.Rp.label(I.En{}, "checks") ++ "|" ++ U.Rp.label(I.En{}, "release") ++ "|" ++ U.Rp.label(I.Ja{}, "comments"), "Checks|Release|コメント")
     C.Check.str("review note en", U.RpView.note(U.RpView{"comments", Nil{}, "", "", "", True{}}) ++ "|" ++ U.RpView.note(U.RpView{"bom", Nil{}, "", "", "", False{}}), "Reading the design…|Nothing yet.")
     C.Check.str("review note ja", U.RpView.note.loc(I.Ja{}, U.RpView{"bom", Nil{}, "", "", "", True{}}), "設計を読み込み中…")
