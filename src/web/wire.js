@@ -137,3 +137,80 @@ export function plain(j) {
     default: return null;
   }
 }
+
+// a JavaScript value as Bend's Json tree, exactly what core/json.bend's
+// Json.parse gives for JSON.stringify(value) (Null where that text is
+// undefined or malformed), without the text: the page used to stringify its
+// session and the timeline's plan input and parse them again a character at a
+// time on every render. A Bend String is a JS string, and Json.parse of what
+// JSON.stringify writes gives back the very same code units, so strings pass
+// through, except a lone surrogate (JSON.stringify writes it as \ud800):
+// Bend's runtime refuses to make a Char of one ("not a Unicode scalar
+// value"), so the old path threw out of the render, and one let through would
+// reach the hub's decoder, which refuses it too. Here each becomes U+FFFD,
+// keys and strings alike, as TextEncoder would send it. A number keeps the text JSON.stringify writes for it (String(n));
+// keys go in JSON.stringify's order (Object.keys) and members it leaves out
+// (undefined, functions, symbols) are left out here, or null in an array.
+// Recursion only per level of nesting, as JSON.stringify. known (a WeakMap,
+// optional) gives the tree of an object that came from plain() and is never
+// changed afterwards, so a value handed back (the timeline's previous plan)
+// costs nothing.
+const NULL = () => ({ $: T.Null });
+// s with each lone surrogate as U+FFFD (String.prototype.toWellFormed, which
+// the phones' engines may lack; JavaScriptCore's /[\ud800-\udfff]/u misses
+// some, so no regex)
+export function whole(s) {
+  if (s.isWellFormed) return s.isWellFormed() ? s : s.toWellFormed();
+  let out = null, from = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s.charCodeAt(i);
+    if (c < 0xd800 || c > 0xdfff) continue;
+    if (c < 0xdc00 && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) { i += 1; continue; }
+    }
+    out = (out ?? "") + s.slice(from, i) + "\ufffd";
+    from = i + 1;
+  }
+  return out === null ? s : out + s.slice(from);
+}
+function toTree(v, key, known) {
+  if (known && v !== null && typeof v === "object") {
+    const t = known.get(v);
+    if (t) return t;
+  }
+  if (v !== null && (typeof v === "object" || typeof v === "bigint") && typeof v.toJSON === "function") v = v.toJSON(key);
+  if (v !== null && typeof v === "object") {
+    if (v instanceof Number) v = Number(v);
+    else if (v instanceof String) v = String(v);
+    else if (v instanceof Boolean) v = v.valueOf();
+  }
+  switch (typeof v) {
+    case "string": return { $: T.Str, text: whole(v) };
+    case "number": return Number.isFinite(v) ? { $: T.Num, raw: String(v) } : NULL();
+    case "boolean": return { $: T.Flag, value: v };
+    case "bigint": throw new TypeError("Do not know how to serialize a BigInt");
+    case "object": {
+      if (v === null) return NULL();
+      if (Array.isArray(v)) {
+        const n = v.length, vs = new Array(n);
+        for (let k = 0; k < n; k += 1) vs[k] = toTree(v[k], String(k), known) || NULL();
+        let items = { $: T.End };
+        for (let k = n - 1; k >= 0; k -= 1) items = { $: T.Item, head: vs[k], tail: items };
+        return { $: T.Arr, items };
+      }
+      const ks = Object.keys(v), fs = [];
+      for (let k = 0; k < ks.length; k += 1) {
+        const t = toTree(v[ks[k]], ks[k], known);
+        if (t) fs.push(whole(ks[k]), t);
+      }
+      let fields = { $: T.End };
+      for (let k = fs.length - 2; k >= 0; k -= 2) fields = { $: T.Field, key: fs[k], value: fs[k + 1], tail: fields };
+      return { $: T.Obj, fields };
+    }
+    default: return undefined;
+  }
+}
+export function json(value, known) {
+  return toTree(value, "", known) || NULL();
+}
