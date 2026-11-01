@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type Target = { role: "long" | "tools" | "bg"; id: string; title: string };
-export type Fixture = { lines: number; bytes: number; targets: Target[]; source: string };
+export type Fixture = { lines: number; bytes: number; targets: Target[]; source: string; cut?: number; sha256?: string };
 
 const words = (n: number, seed: number) => Array.from({ length: n }, (_, i) => `word${(i * 7 + seed) % 97}`).join(" ");
 
@@ -54,7 +54,10 @@ export function synthetic(home: string, root: string, o: { projects: number; lon
   lines.push({ $: "MessagePosted", thread: "zqbg", msg: "bg0", role: "user", text: "the background thread", at: at + 4000 });
   const text = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
   writeFileSync(join(home, "events.jsonl"), text);
-  return { lines: lines.length, bytes: text.length, source: "synthetic", targets: [
+  // (its times are now-relative: hashed as offsets from its base, so the
+  // same fixture hashes the same on any day)
+  const sha256 = new Bun.CryptoHasher("sha256").update(text.split(root).join("<root>").replace(/"at":(\d+)/g, (_, n) => `"at":+${Number(n) - at}`)).digest("hex");
+  return { lines: lines.length, bytes: text.length, source: "synthetic", sha256, targets: [
     { role: "long", id: "zqlong", title: "zqlong thread" }, { role: "tools", id: "zqtools", title: "zqtools thread" }, { role: "bg", id: "zqbg", title: "zqbg thread" }] };
 }
 
@@ -81,7 +84,13 @@ function* fileLines(path: string) {
   } finally { closeSync(fd); }
 }
 
-export function real(home: string, root: string, o: { log: string; long: string; tools: string; bg: string }): Fixture {
+// The same input on every run: the slice ends at `until` (unix seconds;
+// default the log's newest event), every turn still running there is
+// closed as interrupted and every delegated task still open is cancelled
+// and delivered (a copied log otherwise resumes them: the stand-in agent
+// then streams during open and idle), and all the slice adds is stamped at
+// the cut. report.json carries the cut and the slice's sha256.
+export function real(home: string, root: string, o: { log: string; long: string; tools: string; bg: string; until?: number }): Fixture {
   const liveHome = join(homedir(), ".backplane-bend");
   const elsewhere = join(root, "elsewhere");
   const keep = new Set([o.long, o.tools, o.bg].filter(Boolean));
@@ -94,15 +103,27 @@ export function real(home: string, root: string, o: { log: string; long: string;
   const titles = new Map<string, string>();
   const rx = /^\{"\$":"([A-Za-z]+)"/;
   const threadOf = (line: string) => /"thread":"([^"]+)"/.exec(line)?.[1] ?? "";
+  const turns = new Map<string, string>(), tasks = new Set<string>();
+  let cut = 0;
   for (const raw of fileLines(o.log)) {
     if (!raw) continue;
+    const at = Number(/"at":(\d+)/.exec(raw)?.[1] ?? 0);
+    if (o.until && at > o.until) continue;
+    if (at > cut) cut = at;
     const ty = rx.exec(raw)?.[1] ?? "";
+    if (ty === "TurnChanged") turns.set(/"thread":"([^"]+)"/.exec(raw)?.[1] ?? "", /"state":"([a-z]+)"/.exec(raw)?.[1] ?? "");
+    if (ty === "TaskDelegated") tasks.add(/"task":"([^"]+)"/.exec(raw)?.[1] ?? "");
+    if (ty === "TaskDelivered") tasks.delete(/"task":"([^"]+)"/.exec(raw)?.[1] ?? "");
     if (DROP_TYPES.has(ty) || /devicetoken|webhook|apns/i.test(raw)) continue;
     if (ty === "WorkSet" && !raw.includes('"kind":"bg"')) continue;
     const setting = ty === "SettingSet" ? /"key":"((?:[^"\\]|\\.)*)"/.exec(raw)?.[1] ?? "" : "";
     if (ty === "SettingSet" && DROP_SETTING.test(setting)) continue;
     // per-thread bookkeeping of other threads (launch.<by>, fallback.<thread>...: 300 MB live)
-    if (ty === "SettingSet" && /^(fallback|launch|triage|run|wake|tok|turn|restart|alert|told)[.:]/.test(setting) && ![...keep].some((id) => setting.includes(id))) continue;
+    // another thread's own state kept as a setting (fallback.*, launch.*,
+    // ride.*: its messages waiting to ride a new turn, which the hub then
+    // delivers at start and so wakes the thread, ...): dropped whole
+    if (ty === "SettingSet" && /t1\d{9}-\d+/.test(setting) && ![...keep].some((id) => setting.includes(id))) continue;
+    if (ty === "SettingSet" && /^(fallback|launch|triage|run|wake|tok|turn|restart|alert|told|ride)[.:]/.test(setting) && ![...keep].some((id) => setting.includes(id))) continue;
     const line = raw.split(liveHome).join(home).split(homedir() + "/").join(elsewhere + "/");
     if (ty === "SettingSet") { keepLast("s\u0000" + setting, line); continue; }
     if (ty.startsWith("Thread") || ty === "ProviderSet") {
@@ -119,7 +140,13 @@ export function real(home: string, root: string, o: { log: string; long: string;
     if (SIDEBAR_TYPES.has(ty)) out.push(line);
   }
   for (const id of keep) if (!titles.has(id)) throw new Error(`no thread ${id} in ${o.log}`);
-  const now = Math.floor(Date.now() / 1000);
+  const now = o.until ?? cut;
+  for (const [t, state] of turns) if (t && state === "running") out.push(JSON.stringify({ $: "TurnChanged", thread: t, state: "interrupted", at: now }));
+  // a delegated task still open at the cut is taken out whole (its lines
+  // dropped): closing it delivered "Delegated task … finished" to its
+  // parent, which started a turn, whose end then reported to its launcher
+  const taskOf = (l: string) => /^\{"\$":"Task[A-Za-z]+"/.test(l) ? /"task":"([^"]+)"/.exec(l)?.[1] ?? "" : "";
+  if (tasks.size) for (let i = 0; i < out.length; i++) if (tasks.has(taskOf(out[i]))) out[i] = "";
   const targets: Target[] = [];
   for (const [role, id] of [["long", o.long], ["tools", o.tools], ["bg", o.bg]] as const) {
     if (!id) continue;
@@ -127,6 +154,8 @@ export function real(home: string, root: string, o: { log: string; long: string;
     targets.push({ role, id, title });
     out.push(JSON.stringify({ $: "ThreadRenamed", id, title, at: now }));
     out.push(JSON.stringify({ $: "ProviderSet", id, provider: "claude", model: "", at: now }));
+    // nothing left waiting to ride its next turn (it would start one at once)
+    out.push(JSON.stringify({ $: "SettingSet", key: `ride.${id}`, value: "", at: now }));
   }
   out.push(JSON.stringify({ $: "SettingSet", key: "restart.continue", value: "off", at: now }));
   out.push(JSON.stringify({ $: "SettingSet", key: "onboard.done", value: "1", at: now }));
@@ -136,5 +165,7 @@ export function real(home: string, root: string, o: { log: string; long: string;
   for (const l of kept) if (l.startsWith('{"$":"BotSet"')) try { mkdirSync(join(home, "bots", JSON.parse(l).id), { recursive: true }); } catch {}
   const text = kept.join("\n") + "\n";
   writeFileSync(join(home, "events.jsonl"), text);
-  return { lines: kept.length, bytes: text.length, source: `real slice of ${o.log} (${(statSync(o.log).size / 1e6).toFixed(0)} MB)`, targets };
+  // (each run's temp folder replaced, so equal input hashes equal)
+  const sha256 = new Bun.CryptoHasher("sha256").update(text.split(root).join("<root>")).digest("hex");
+  return { lines: kept.length, bytes: text.length, source: `real slice of ${o.log} (${(statSync(o.log).size / 1e6).toFixed(0)} MB) cut at ${now}`, targets, cut: now, sha256 };
 }

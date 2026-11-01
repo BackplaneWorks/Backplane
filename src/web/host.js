@@ -611,6 +611,9 @@ let focusedNode = null, focusedAtEnd = true, focusedSaveTimer = 0;
 let focusedRequestedKey = null;
 const COARSE_POINTER = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 let thin = null, thinSocket = null, thinAttempt = 0, thinExpiry = 0, thinGreetingTimer = 0, thinDraftTimer = 0, thinFieldTimer = 0;
+// (the re-render harness asks whether more of the thread lies beyond the
+// rows held, in a direction: a wheel that moves nothing there is a stall)
+if (RR) RR.ahead = dir => !!thin?.hasAhead?.(dir); // the rows held, not the hub's last page
 const terminalOutput = new TerminalOutputPane({ document, patch, current: () => {
   const link = thin?.client.links.get(location.origin), session = currentSession();
   return remoteReady && link ? { generation: link.greeting.generation, epoch: link.greeting.epoch, viewId: link.viewId, target: link.target, owner: session.drafts?.['@terminal.owner'], open: session.open?.term === true } : null;
