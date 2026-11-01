@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { json, learnJson, plain, kind, whole as wf } from '../../src/web/wire.js';
+import { json, jsonText, learnJson, plain, kind, whole as wf } from '../../src/web/wire.js';
 
 const F = (await import(pathToFileURL(path.resolve(process.argv[2])).href)).default;
 learnJson(F.json_tags());
@@ -118,5 +118,55 @@ for (let i = 0; i < texts.length; i += 1) {
   assert.equal(got[i], want[i], 'fallback ' + JSON.stringify(texts[i]));
   assert.equal(fix(texts[i]), want[i], 'test fix ' + JSON.stringify(texts[i]));
 }
+// jsonText: JSON text straight to the tree Json.parse gives, raw numbers,
+// field order and duplicate keys kept; null (use Bend) for anything else
+let texts_n = 0, nulls = 0;
+const sameText = (t, name) => {
+  const got = jsonText(t);
+  assert.ok(got, name + ' (read) ' + t.slice(0, 200));
+  assert.deepEqual(shape(got), shape(F.parse(t)), name + ' ' + t.slice(0, 200));
+  texts_n += 1;
+};
+const refuse = (t, name) => { assert.equal(jsonText(t), null, name + ' ' + JSON.stringify(t).slice(0, 200)); nulls += 1; };
+for (const [name, v] of Object.entries(values)) {
+  const t = JSON.stringify(v);
+  if (t === undefined) continue;
+  if (/\\ud[89a-f][0-9a-f]{2}/i.test(t)) refuse(t, 'text ' + name); else sameText(t, 'text ' + name);
+}
+for (const t of ['1.0', '-0', '1E5', '1e+5', '0.10', '-12.5e-3', '12345678901234567890', '1.7976931348623157e309',
+  '{"b":1,"2":"two","a":3,"1":"one","-1":"m","4294967294":0}', '{"a":1,"a":2,"b":[1.0,2.50],"a":{"a":-0}}',
+  ' \t\n\r[ 1 , {"x" : "y" } ,[ ] , { } ]\n', '"\\u00e9\\u0000\\/\\b\\f\\n\\r\\t\\"\\\\"', '"raw 🙂 é \u2028"',
+  'null', 'true', 'false', '[]', '{}', '""', '{"__proto__":{"x":1},"constructor":2}', '[[[[[[[[[[1]]]]]]]]]]'])
+  sameText(t, 'odd ' + t);
+for (const t of ['', ' ', '[1 2]', '{"a" 1}', '{"a":1 "b":2}', '[1,]', '[,1]', '{,}', '[tru]', 'nul', 'True', 'undefined', '01', '1.', '.5', '+1', '-',
+  '1e', '0x10', '"\\x"', '"\\u12"', '"\\u12g4"', '"\\ud800"', '"\\ud83d\\ude00"', '"a\u0001b"', '"open', '[1]x', '1 2', '{"a":1}}', '[1]]', "'a'",
+  '{1:2}', '[NaN]', '[Infinity]', '"\ud800"', '"\udc00x"', '\u000b1', '[1\u00a0]'])
+  refuse(t, 'refused');
+const deep = '['.repeat(200000) + ']'.repeat(200000);
+assert.equal(jsonText(deep), null, 'nesting past the stack falls back');
+// random texts: random values written with odd spacing and number forms,
+// duplicate and integer-like keys, field order shuffled
+const oddNum = () => [String(rnd(100)), '-0', rnd(9) + '.0', rnd(9) + 'E' + rnd(30), rnd(9) + 'e-' + rnd(30), '1' + '0'.repeat(rnd(30)), '-' + rnd(99) + '.' + rnd(99) + 'e+' + rnd(9)][rnd(7)];
+const sp = () => [' ', '', '\n', '\t', ' \r\n '][rnd(5)];
+const rtext = (d) => {
+  switch (d > 3 ? rnd(4) : rnd(6)) {
+    case 0: return JSON.stringify(rstr()).replace(/\\ud[89a-f][0-9a-f]{2}/gi, 'x');
+    case 1: return oddNum();
+    case 2: return ['true', 'false', 'null'][rnd(3)];
+    case 3: return '"' + ['a', 'b', '1', '0', '10', '2'][rnd(6)] + '"';
+    case 4: { const a = []; const len = rnd(5); for (let k = 0; k < len; k += 1) a.push(sp() + rtext(d + 1) + sp()); return '[' + a.join(',') + ']'; }
+    default: { const a = []; const len = rnd(6); for (let k = 0; k < len; k += 1) a.push(sp() + JSON.stringify(['a', 'b', '1', '0', '10', '2', 'é', rstr()][rnd(8)]).replace(/\\ud[89a-f][0-9a-f]{2}/gi, 'x') + sp() + ':' + sp() + rtext(d + 1)); return '{' + a.join(',') + '}'; }
+  }
+};
+for (let k = 0; k < 2000; k += 1) sameText(sp() + rtext(0) + sp(), 'random text ' + k);
+// and broken copies of them: either refused or, when still strict JSON, equal
+for (let k = 0; k < 2000; k += 1) {
+  const t = rtext(0), at = rnd(t.length + 1);
+  const b = t.slice(0, at) + [',', ':', ']', '}', '"', ' ', 'x', '\\', '1'][rnd(9)] + t.slice(at + rnd(2));
+  let strict = true;
+  try { JSON.parse(b); } catch { strict = false; }
+  if (strict && b.isWellFormed() && !/\\ud[89a-f][0-9a-f]{2}/i.test(b)) sameText(b, 'broken but strict ' + k); else refuse(b, 'broken ' + k);
+}
+console.log(`jsonText: ${texts_n} texts equal to Json.parse, ${nulls} refused (left to Bend)`);
 assert.ok(refused >= 50 && n >= 500, `coverage: ${n} compared, ${refused} refused`);
 console.log(`json_native: ${n} values (${refused} with lone surrogates, which Bend refuses and json() makes U+FFFD), each equal to Json.parse(JSON.stringify(v))`);
