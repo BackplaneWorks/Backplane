@@ -370,10 +370,31 @@ def Anchor.safe(+a: J.Json) -> J.Json:
 def Page.mid(+ids: List<&2, String>, +last: String) -> String:
   Maybe.default(&2, String, List.head(&2, String, List.drop(&2, String, ids, 15n)), last)
 
+# the cursor of the page before the one ids ends at ("" when there is none)
+def Page.older.cursor(+index: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>) -> String:
+  +last = Page.last(ids, "")
+  +older = Page.older(Bool.not(List.is_empty(&2, String, ids)), index, th, Page.number(last))
+  Bool.pick(String, List.is_empty(&2, String, older), "", W.Cursor.write(epoch, J.Json.get_obj(p, "target"), "", Page.number(Page.mid(ids, last))))
+
+def Page.older.next.k(full: Bool, +cursor: String) -> String:
+  match full:
+    case True{}: cursor
+    case False{}: ""
+
+# "olderNext": the older page's own "older" (Page.older.cursor, as the
+# window's own "older" is made, over the rows a request for this page's
+# "older" reads: the rows below its mid, Index.page), so a page can ask for
+# the two pages before it at once; given only when the index holds that
+# whole older page (the store's page reads a lookahead for it:
+# thinstore.bend), else "" (never a guess). Laws view_page_older_next_*.
+def Page.older.next(+index: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>) -> String:
+  +olderIds = T.Index.page(index, th, Page.number(Page.mid(ids, Page.last(ids, ""))), 32n)
+  Page.older.next.k(Bool.and(Bool.not(List.is_empty(&2, String, ids)), Nat.is_eq(List.length(&2, String, olderIds), 32n)), Page.older.cursor(index, th, p, epoch, olderIds))
+
 def Page.window(+index: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>) -> J.Json:
   +last = Page.last(ids, "")
   +older = Page.older(Bool.not(List.is_empty(&2, String, ids)), index, th, Page.number(last))
-  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Bool.pick(String, List.is_empty(&2, String, older), "", W.Cursor.write(epoch, J.Json.get_obj(p, "target"), "", Page.number(Page.mid(ids, last))))}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))))}, J.KV{"partial", J.Json.arr(Partial.rows.body(Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), p, ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
+  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Page.older.cursor(index, th, p, epoch, ids)}}, J.KV{"olderNext", J.Str{Page.older.next(index, th, p, epoch, ids)}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))))}, J.KV{"partial", J.Json.arr(Partial.rows.body(Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), p, ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
 
 type ActResult is Data:
   ActResult{ui: U.Ui, commands: List<&2, J.Json>}

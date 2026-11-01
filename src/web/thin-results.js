@@ -46,6 +46,7 @@ export function validateThinResult(r, input) {
     const w = r.window;
     return object(w) && Array.isArray(w.ids) && w.ids.length <= 32 && w.ids.every(id => string(id) && !!id)
       && new Set(w.ids).size === w.ids.length && string(w.older) && flag(w.hasMore) && (!w.hasMore || !!w.older)
+      && (w.olderNext === undefined || string(w.olderNext) && (!w.olderNext || !!w.older))
       && object(w.anchor) && string(w.anchor.id) && Number.isInteger(w.anchor.offset) && w.anchor.offset >= 0 && w.anchor.offset <= 2 ** 32 - 1
       && Array.isArray(w.partial) && w.partial.length <= 33 && w.partial.every(p => object(p) && string(p.id) && !!p.id && string(p.cursor) && !!p.cursor && p.reason === 'byte-limit'
         && (p.bodyPage === undefined || p.bodyPage === 1 && decimal(p.version) && string(p.thread) && !!p.thread && flag(p.automatic)

@@ -214,6 +214,7 @@ import ./src/core/standin.bend as SIN # one-hub
 import ./src/core/thin.bend as JTHIN # J2: JS stack
 import ./src/server/thin-content-eq.bend as CONTENTEQ
 import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+import ./src/server/thin-view.bend as TVIEWH # view delta (H)
 import ./src/core/draftbound.bend as DBOUND # view delta (H)
 import ./src/web/sidebar-slot.bend as FULLSLOT
 import ./src/server/thin-still-picture.bend as STILLPICTURE
@@ -14002,3 +14003,17 @@ law draft_bound_none:
   {DBOUND.Bound.is("") == False{} : Bool}
 
 # END view delta (H)
+
+# BEGIN page olderNext (H)
+# "olderNext" (a page's window) is the older page's own "older": the same
+# Page.older.cursor its window's "older" is made by, over the rows below
+# this page's mid, when the index holds that whole page; else none (never
+# a guess), so a page may ask for the two pages before it at once
+law view_page_older_next_whole:
+  for +cursor: String
+  {TVIEWH.Page.older.next.k(True{}, cursor) == cursor : String}
+
+law view_page_older_next_partial:
+  for +cursor: String
+  {TVIEWH.Page.older.next.k(False{}, cursor) == "" : String}
+# END page olderNext (H)
