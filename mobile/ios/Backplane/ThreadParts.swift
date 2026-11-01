@@ -251,7 +251,8 @@ struct SelectSheet: View {
 struct EntryRow: View, Equatable {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
-    let entry: Entry
+    // nonisolated: == compares it off the main actor (Entry is a Sendable value)
+    nonisolated let entry: Entry
     let show: (Shown) -> Void
     @State private var selecting = false
 

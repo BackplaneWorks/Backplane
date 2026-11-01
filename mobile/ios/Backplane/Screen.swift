@@ -83,7 +83,7 @@ struct Tool: Decodable, Hashable {
 }
 
 // a markdown node from Md.render: an element with kids, or text
-struct Block: Decodable, Hashable {
+struct Block: Decodable, Hashable, Sendable {
     let tag: String?
     let kids: [Block]?
     let text: String?
@@ -100,21 +100,21 @@ struct Block: Decodable, Hashable {
 }
 
 // an attachment of a user message (url: where its hub serves it)
-struct Chip: Decodable, Hashable {
+struct Chip: Decodable, Hashable, Sendable {
     let label, path: String
     let image: Bool
     let url: String
 }
 
 // an image a reply names
-struct Shot: Decodable, Hashable {
+struct Shot: Decodable, Hashable, Sendable {
     let path, url: String
 }
 
 // kind: user, assistant, act (a tool line), fold (a run of tool calls:
 // "fold" with value opens or shuts it), link (opens thread value)
 // Equatable, so an unchanged row is skipped when the screen around it changes
-struct Entry: Decodable, Identifiable, Equatable {
+struct Entry: Decodable, Identifiable, Equatable, Sendable {
     let id, kind, text: String
     let tone, label: String?
     let blocks: [Block]?
@@ -137,12 +137,12 @@ struct Entry: Decodable, Identifiable, Equatable {
 }
 
 // the message a reply answers: its id and first line
-struct ReplyRef: Decodable, Hashable {
+struct ReplyRef: Decodable, Hashable, Sendable {
     let id, text: String
 }
 
 // the thread or project a bot's message links most, by its title now
-struct MsgCtx: Decodable, Hashable {
+struct MsgCtx: Decodable, Hashable, Sendable {
     let uri, title: String
     let more: Int
 }
