@@ -65,5 +65,6 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun vault(text: String) = core.vault(text)
     fun web(path: String) = core.web(path)
     fun attach(data: ByteArray, name: String) = core.attach(data, name)
+    fun voicePress(on: Boolean) = core.voicePress(on)
     fun hubUrl(path: String, query: String = "", token: Boolean = true) = core.hubUrl(path, query, token)
 }

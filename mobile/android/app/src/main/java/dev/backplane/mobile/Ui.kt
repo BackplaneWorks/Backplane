@@ -1143,8 +1143,10 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         }
                     }
                     ComposerExtras(m, t)
+                    t.voice?.let { VoiceBar(m, it) }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         AttachButton(m)
+                        t.voice?.let { VoiceMicButton(m, it) }
                         ImageComposer(m, Modifier.weight(1f))
                         // a long press sends with the other follow-up mode (queue or steer);
                         // while a turn runs with nothing typed the button stops it, at once,

@@ -356,9 +356,22 @@ data class ThreadView(
     // the thread's Boat chip ("Boat · large · running"; "" for none), a tap opens Settings
     val boat: String = "",
     val canChild: Boolean = false,
+    // dictation in this thread (screen.bend's Mob.voice)
+    val voice: VoiceView? = null,
 )
 
 data class Btw(val q: String, val a: String)
+
+// Dictation (screen.bend's Mob.voice): "on" while its strip shows, one quiet
+// word for its state and the level (the words are only in the draft), a
+// note (an error when bad, closed by voice-err), the last segment's fixes
+// (each a chip that undoes it) and the first word to clarify
+data class VoiceChip(val label: String, val tip: String, val action: String, val value: String, val primary: Boolean)
+data class VoiceAsk(val text: String, val word: String, val guess: String, val count: Int, val fixing: Boolean, val field: SetField?, val buttons: List<VoiceChip>)
+data class VoiceView(
+    val on: Boolean, val state: String, val status: String, val level: Int, val note: String, val bad: Boolean,
+    val mic: String, val stop: String, val fixes: List<VoiceChip>, val ask: VoiceAsk?,
+)
 
 data class IslandLine(val thread: String, val title: String, val doing: String)
 
@@ -491,6 +504,8 @@ data class Cmd(
     val image: String = "",
     // a "later": an action (with its value) to send after ms; a "jump": the entry to show
     val ms: Long = 0, val action: String = "", val value: String = "", val id: String = "",
+    // a "voice-audio": where on the hub the dictated audio goes (/voice/in?s=…)
+    val path: String = "",
 )
 
 // an answer from the engine: its screen (none from a quiet call, or when a
@@ -611,6 +626,20 @@ private fun thread(o: JSONObject) = threadOf(o).copy(
     phase = o.optString("phase"),
     livePartial = o.optJSONObject("livePartial")?.let(::messagePartial),
     boat = o.optString("boat"),
+    voice = o.optJSONObject("voice")?.let(::voiceOf),
+)
+
+private fun voiceChip(o: JSONObject) =
+    VoiceChip(o.optString("label"), o.optString("tip"), o.optString("action"), o.optString("value"), o.optBoolean("primary"))
+
+private fun voiceOf(o: JSONObject) = VoiceView(
+    o.optBoolean("on"), o.optString("state"), o.optString("status"), o.optInt("level"), o.optString("note"), o.optBoolean("bad"),
+    o.optString("mic"), o.optString("stop"), o.optJSONArray("fixes").map(::voiceChip),
+    o.optJSONObject("ask")?.let { a ->
+        VoiceAsk(a.optString("text"), a.optString("word"), a.optString("guess"), a.optInt("count"), a.optBoolean("fixing"),
+            a.optJSONObject("field")?.let { SetField(it.optString("name"), it.optString("hint"), it.optBoolean("secret"), it.optString("value")) },
+            a.optJSONArray("buttons").map(::voiceChip))
+    },
 )
 
 private fun threadOf(o: JSONObject) = ThreadView(
@@ -865,5 +894,5 @@ fun parseCmds(o: JSONObject): List<Cmd> =
     o.optJSONArray("cmds").map {
         Cmd(it.optString("type"), it.optString("text"), it.optString("data"), it.optString("hub"),
             it.optString("thread"), it.optString("title"), it.optString("kind"), it.optString("body"), it.optString("key"), it.optString("image"),
-            it.optDouble("ms", 0.0).toLong(), it.optString("action"), it.optString("value"), it.optString("id"))
+            it.optDouble("ms", 0.0).toLong(), it.optString("action"), it.optString("value"), it.optString("id"), it.optString("path"))
     }
