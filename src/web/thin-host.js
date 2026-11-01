@@ -707,15 +707,21 @@ export class ThinHost {
       if (result.refreshDue) this.refreshSoon();
       return true; // query results neither replace shown nor establish readiness
     }
+    // A reply whose view delta changed nothing (thin.js's `unchanged`: no
+    // ops, the body its base, e.g. the order card's fab-look) draws nothing:
+    // its picture is the one on show, so it is neither validated nor decoded
+    // again, and the page is not rendered for it. Its session and commands
+    // still apply. A page or a navigation always draws.
+    const same = result.unchanged === true && !paged && !r.nextTarget;
     // Validate the entire normal renderer tree and every ordinary command
     // before the first effect. The shared callbacks above remain pure.
     let node;
     try {
       const v0 = RR ? performance.now() : 0;
-      this.validatePresentation({ session: r.session, view: r.nextTarget || result.inputOnly ? { type: 'text', text: '' } : r.shown, cmds: r.cmds });
+      this.validatePresentation({ session: r.session, view: r.nextTarget || result.inputOnly || same ? { type: 'text', text: '' } : r.shown, cmds: r.cmds });
       if (RR) RR.t?.('land.validate', performance.now() - v0);
       if (r.session.rid >= 2 ** 47) throw Error('Ordinary counter overlaps view namespace');
-      if (!r.nextTarget && !result.inputOnly && (metadata?.viewerRevision ?? 0) === this.viewerRevision) node = this.api.decode(r.shown, r, metadata?.input);
+      if (!r.nextTarget && !result.inputOnly && !same && (metadata?.viewerRevision ?? 0) === this.viewerRevision) node = this.api.decode(r.shown, r, metadata?.input);
     } catch {
       metadata?.operation?.settled?.(false);
       if (paged && result.current) this.pageFailed(paged, 'Invalid rendered view');
@@ -795,12 +801,15 @@ export class ThinHost {
     if (result.current) for (const [name, field] of this.fields) {
       if (field.acknowledged && field.revision <= (metadata?.revision ?? -1)) this.fields.delete(name);
     }
-    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly, paged: !!paged && !!result.current });
+    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly, unchanged: same && !!result.current && this.ready, paged: !!paged && !!result.current });
     metadata?.operation?.settled?.(result.current && result.remoteReady && !r.nextTarget);
     if (moving) { this.forView = held.length ? { target: r.nextTarget, cmds: held } : null;this.select(r.nextTarget);return true; }
     if (result.current && result.remoteReady && result.inputOnly) {
       // Input ACKs settle the existing queue without redrawing the conversation
       // or consuming a pending output invalidation. Output still owns its view.
+    } else if (result.current && result.remoteReady && same && this.ready) {
+      // nothing on show changed: the view stays as drawn (its commands ran)
+      this.handOver();
     } else if (result.current && result.remoteReady) {
       const partial = new Map(result.window.partial.map(row => [row.id, row]));
       for (const previous of this.window?.partial || []) {
