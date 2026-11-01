@@ -12,11 +12,11 @@ function ra_error(error) { return ra_json({error:String(error?.message||error).s
 function ra_stamp(st) {
   return [st.dev,st.ino,st.size,st.mtimeNs/1000000000n,st.mtimeNs%1000000000n,st.ctimeNs/1000000000n,st.ctimeNs%1000000000n].join(':');
 }
-function ra_regular(fs,p,{privateFile=false}={}) {
+function ra_regular(fs,p,{privateFile=false,bounded=true}={}) {
   const st=fs.lstatSync(p,{bigint:true});
   if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1n)throw Error('Asset must be a regular file without links.');
   if(privateFile&&typeof process.getuid==='function'&&st.uid!==BigInt(process.getuid()))throw Error('Asset is not owned by this user.');
-  if(st.size<20n||st.size>BigInt(RA_MAX_BYTES))throw Error('GLB asset must be between 20 bytes and 64 MiB.');
+  if(st.size<20n||(bounded&&st.size>BigInt(RA_MAX_BYTES)))throw Error('GLB asset must be between 20 bytes and 64 MiB.');
   return st;
 }
 function ra_cache(create=false) {
@@ -71,13 +71,25 @@ function ra_glb(fs,fd,size,inspect=false) {
   if(at!==size)throw Error('Invalid GLB length.');
   return json;
 }
-function ra_open(fs,p) {
-  const before=ra_regular(fs,p),fd=fs.openSync(p,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+function ra_open(fs,p,options) {
+  const before=ra_regular(fs,p,options),fd=fs.openSync(p,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
   try {
     const actual=fs.fstatSync(fd,{bigint:true});
     if(ra_stamp(before)!==ra_stamp(actual))throw Error('Asset changed while opening.');
     return {fd,st:actual};
   } catch(e) {fs.closeSync(fd);throw e;}
+}
+// An interrupted older export may have left a malformed raw cache entry.
+// Only reuse a complete, stable GLB. Large complete exports still reach the
+// publication size refusal instead of being exported again on every load.
+function render_asset_cached(p) {
+  const {fs}=ra_modules();let file=null;
+  try {
+    file=ra_open(fs,p,{bounded:false});const size=Number(file.st.size);
+    ra_glb(fs,file.fd,size,size<=RA_MAX_BYTES);
+    if(ra_stamp(fs.fstatSync(file.fd,{bigint:true}))!==ra_stamp(file.st)||ra_stamp(fs.statSync(p,{bigint:true}))!==ra_stamp(file.st))return '';
+    return '1';
+  }catch{return '';}finally{if(file)fs.closeSync(file.fd);}
 }
 function ra_hash(fs,crypto,fd,size,outFd=null) {
   const hash=crypto.createHash('sha256'),chunk=Buffer.allocUnsafe(256*1024);let offset=0;
@@ -192,3 +204,4 @@ io_eff(CID(RenderAssetFx.authorize),render_asset_authorize);
 io_eff(CID(RenderAssetFx.publish),render_asset_publish);
 io_eff(CID(RenderAssetFx.lookup),render_asset_lookup);
 io_eff(CID(RenderAssetFx.memo),render_asset_memo);
+io_eff(CID(RenderAssetFx.cached),render_asset_cached);

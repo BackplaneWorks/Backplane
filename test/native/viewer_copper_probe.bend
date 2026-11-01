@@ -43,17 +43,19 @@ def ran(r: PR.Ran) -> IO(Unit):
   match r:
     case PR.Ran{code, log}: IO.print(J.Json.show(J.Json.obj([J.KV{"code", J.Json.u32(code)}, J.KV{"log", J.Str{log}}])))
 
-def dispatch(a: Bool, b: Bool, c: Bool, d: Bool, path: String, out: String) -> IO(Unit):
+def dispatch(a: Bool, b: Bool, c: Bool, d: Bool, +path: String, out: String) -> IO(Unit):
   match a b c d:
     case True{} _ _ _: flags(path, out)
     case False{} True{} _ _: paths(path)
     case False{} False{} True{} _: sources(path)
     case False{} False{} False{} True{}:
-      IO.bind(PR.Ran, Unit, PV.Pv.board.ran(PR.Ran{Maybe.default(&2, U32, U32.read(out), 7), "probe"}, path), ran)
+      IO.bind(PR.Ran, Unit, PV.Pv.board.ran(PR.Ran{Maybe.default(&2, U32, U32.read(out), 7), "probe"}, path ++ ".part.glb", path), ran)
     case _ _ _ _: IO.print("{}")
 
 def args(xs: List<&1, String>) -> IO(Unit):
   match xs:
+    case _ <> "export" <> path <> out <> _:
+      IO.bind(PR.Ran, Unit, PV.Pv.glb.run(False{}, False{}, False{}, True{}, path, out), ran)
     case _ <> +mode <> path <> rest:
       out = Maybe.default(&1, String, List.head(&1, String, rest), "")
       a = String.eq(mode, "flags")
