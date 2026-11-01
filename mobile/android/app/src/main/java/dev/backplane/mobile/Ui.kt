@@ -868,6 +868,7 @@ private fun SendingView(text: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -> Unit)? = null) {
+    RenderCount.tick("threadScreen")
     val lang = s.locale
     val snacks = remember { SnackbarHostState() }
     val list = rememberLazyListState()
@@ -1148,12 +1149,12 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         // as the top bar's Stop does (not held to contentReady: that is down
                         // while the Send that started the turn settles, and half the presses
                         // were lost; m.act still drops it on a page not yet live)
-                        val stop = t.sendAct == "interrupt" && m.composer.isBlank()
+                        val stop = m.composerSendAct(t) == "interrupt" && m.composer.isBlank()
                         Box(Modifier.size(48.dp).combinedClickableCompat(onLong = { if (m.contentReady && m.composer.isNotBlank()) m.act("send-alt") }) {
                             if (stop) m.act("interrupt") else if (m.contentReady && m.composer.isNotBlank()) m.act("send")
                         }, contentAlignment = Alignment.Center) {
-                            if (stop) Icon(Icons.Filled.Stop, t.send, tint = MaterialTheme.colorScheme.error)
-                            else Icon(Icons.AutoMirrored.Filled.Send, t.send,
+                            if (stop) Icon(Icons.Filled.Stop, m.composerSend(t), tint = MaterialTheme.colorScheme.error)
+                            else Icon(Icons.AutoMirrored.Filled.Send, m.composerSend(t),
                                 tint = if (m.composer.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
                         }
                     }
@@ -1581,6 +1582,7 @@ private fun PlotCard(m: AppModel, c: Card, modifier: Modifier) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImageComposer(m: AppModel, modifier: Modifier = Modifier) {
+    RenderCount.tick("imageComposer")
     val lang = LocalBackplaneLanguage.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()

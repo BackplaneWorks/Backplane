@@ -245,6 +245,12 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     // the composer's text, owned here so typing never waits on Bend
     var composer by mutableStateOf("")
         private set
+    // what the composer offers for the text typed now (popup rows, the send
+    // button), from a key's own answer; only the composer reads it, so a key
+    // never recomposes the timeline. A new screen carries the same (Bend's
+    // law composer_screen_agrees) and clears it.
+    var composerPatch by mutableStateOf<ComposerPatch?>(null)
+        private set
     var scrolls by mutableIntStateOf(0)
         private set
     // an entry of the open thread to show (a "jump"); n counts the jumps, so
@@ -265,6 +271,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     val foreground get() = started > 0
 
     init {
+        RenderCount.on = (app.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         AppSettings.init(app)
         // a network that comes up (Wi-Fi back, a switch to cellular): sockets
         // are tried now, and one that went quiet on the old network replaced
@@ -769,6 +776,9 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         thinRequests[update.hub]?.accepts(epoch, update.requestRevision) == true
 
     private fun apply(out: Reply) {
+        val patch = out.composer
+        if (out.screen == null && patch != null) { if (composerPatch != patch) composerPatch = patch }
+        else if (out.screen != null && composerPatch != null) composerPatch = null
         for (update in out.sync) observeThinPresenting(update, epochs[update.hub] ?: 0L)
         // Expiry reaches apply through pulse, outside a received frame. It
         // can retire a marker but cannot establish a new connection's one.
@@ -985,3 +995,10 @@ class BackplaneApp : Application() {
 }
 
 val Context.core: Core get() = (applicationContext as BackplaneApp).core
+
+// how often a composable runs (debug builds only: "Backplane render <name>"
+// in logcat), to see what one key recomposes
+object RenderCount {
+    @Volatile var on = false
+    fun tick(name: String) { if (on) android.util.Log.d("BackplaneRender", name) }
+}

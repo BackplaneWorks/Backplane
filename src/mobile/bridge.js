@@ -279,7 +279,7 @@ function thinMaterialize(result, session) {
   const window = bendJson(result.window);
   const shown = plain(App.thin_partial(bendJson(result.shown), window));
   const overlay = { ...result.overlay, j: plain(App.thin_partial(bendJson(result.overlay.j), window)) };
-  return { shown, overlay: plain(App.thin_shown_draft(bendJson(overlay), json(session))) };
+  return { shown, overlay: plain(App.thin_shown_draft(bendJson(overlay), json(session), nativeLocale)) };
 }
 function thinMessage(view, message) {
   const hub = view.overlay?.key;
@@ -345,7 +345,20 @@ function currentDeadline() {
   return deadlines.length ? Math.min(...deadlines) : null;
 }
 
-function direct(cmds, draw, updates = []) {
+// A key in a thread's composer, on a hub's view lane: only the composer's
+// fields (app.bend's thin_composer: the draft, its popup rows, the send
+// button) for the thread the hub drew, so the native side redraws the
+// composer and never the screen. Only what the composer reads crosses.
+function composerPatch(thread, text) {
+  const owner = nativeOwner(thread);
+  if (!owner || !thin.thin(owner.hub)) return null;
+  const th = thin.states.get(owner.hub)?.overlay?.j?.thread;
+  if (!th || (th.id !== owner.raw && th.id !== thread)) return null;
+  const drawn = { draft: th.draft ?? "", skills: th.skills ?? [], state: th.state ?? "", attaching: th.attaching ?? [], claude: th.claude === true };
+  return { thread, ...plain(App.thin_composer(json(drawn), text, nativeLocale)) };
+}
+
+function direct(cmds, draw, updates = [], composer = null) {
   const pending = thin.drain();
   cmds = cmds.concat(pending.cmds);
   updates = updates.concat(pending.sync);
@@ -357,7 +370,7 @@ function direct(cmds, draw, updates = []) {
   const screen = canDraw ? bubMovingScreen() : null;
   const composerEdit = nativeDraftEdits.get(screen?.thread?.id)?.edit;
   return JSON.stringify({ screen, cmds, sync: syncUpdates.splice(0).concat(updates), deadline: currentDeadline(),
-    ...(composerEdit === undefined ? {} : { composerEdit }) });
+    ...(composerEdit === undefined ? {} : { composerEdit }), ...(composer && !screen ? { composer } : {}) });
 }
 
 function expired(followups = false) {
@@ -468,6 +481,14 @@ function liveNodes(text) {
   return head < text.length ? live.nodes.concat(plain(App.live_nodes(text.slice(head)))) : live.nodes;
 }
 
+// a hub's view (thin host's overlay) as Bend's tree, kept by the object
+const overlayTrees = new WeakMap();
+function overlayTree(overlay) {
+  let tree = overlayTrees.get(overlay);
+  if (!tree) { tree = bendJson(overlay); overlayTrees.set(overlay, tree); }
+  return tree;
+}
+
 let half = null; // { lean, head }: the list half's JSON, but its closing brace
 let focusOf = null;
 let focusText = "null";
@@ -476,8 +497,13 @@ function screenText() {
   if (thin.thin(cur)) {
     const overlays = thin.views();
     if (!overlays) return "null";
-    const drafts = overlays.map(overlay => plain(App.thin_shown_draft(bendJson(overlay), json(thin.state(overlay.key).session))));
-    const screen = plain(App.thin_presentation(hubs, bendJson(drafts), cur));
+    // each hub's view as Bend's tree once (a new view is a new object, never
+    // changed in place), its composer drawn for the draft, straight into the
+    // screen: no JavaScript copy between
+    let drafts = App.json_array();
+    for (let i = overlays.length - 1; i >= 0; i--)
+      drafts = App.json_cons(App.thin_shown_draft(overlayTree(overlays[i]), json(thin.state(overlays[i].key).session), nativeLocale), drafts);
+    const screen = plain(App.thin_presentation(hubs, drafts, cur));
     // Negotiation markers belong to each validated hub reply. A merged
     // client screen exposes the per-hub descriptors, never a global offer.
     delete screen.nativeSidebar;
@@ -493,7 +519,7 @@ function screenText() {
   if (overlays.length) {
     let array = App.json_array();
     const links = [...recent.links.values()].filter(l => l.shown);
-    for (let i = links.length - 1; i >= 0; i--) array = App.json_cons(App.session_shown_draft(links[i].shown, json(links[i].session)), array);
+    for (let i = links.length - 1; i >= 0; i--) array = App.json_cons(App.session_shown_draft(links[i].shown, json(links[i].session), nativeLocale), array);
     const shown = plain(App.presentation(hubs, array, cur));
     // The native host needs the same explicit locale during Recent as
     // after canonical replay. Rendered content and actions stay intact.
@@ -791,7 +817,8 @@ globalThis.Backplane = {
     return step(App.register_at(hubs, hub, platform, token, kind, thread, env, bundle), true);
   },
   draftAt(thread, text, edit) {
-    return direct(privateDraft(thread, text, edit).cmds, false);
+    const r = privateDraft(thread, text, edit);
+    return direct(r.cmds, false, [], r.accepted ? composerPatch(thread, text) : null);
   },
   sendAt(thread, action, text, edit) {
     const owner = nativeOwner(thread);
@@ -939,7 +966,8 @@ globalThis.Backplane = {
     if (thin.thin(key)) {
       previewCur = key;
       thin.request(key, action, value);
-      return direct([], action !== "draft");
+      const sel = action === "draft" ? thin.states.get(key)?.session?.sel : "";
+      return direct([], action !== "draft", [], sel ? composerPatch(key + "|" + sel, value) : null);
     }
     if (recent.active(key)) {
       if (App.session_mail_action(action, value)) return direct([], false);

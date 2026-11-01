@@ -14159,4 +14159,33 @@ def Laws.signal_failed_display_name():
   {==}
 
 def Laws.signal_pending_display_blocked():
+# ---- phone composer (thread J) ----
+def Laws.composer_slash_local():
+  {==}
+
+def Laws.composer_slash_not_claude():
+  {==}
+
+def Laws.composer_hub_rows_same_draft():
+  {==}
+
+def Laws.composer_hub_rows_no_slash():
+  {==}
+
+def Laws.composer_slash_overtakes_hub():
+  {==}
+
+def Laws.composer_stop_running_blank():
+  {==}
+
+def Laws.composer_send_running_typed():
+  {==}
+
+def Laws.composer_screen_agrees():
+  {==}
+
+def Laws.composer_no_slash_no_rows():
+  {==}
+
+def Laws.composer_fields():
   {==}

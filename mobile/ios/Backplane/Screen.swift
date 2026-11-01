@@ -1018,6 +1018,16 @@ struct SyncUpdate: Decodable, Sendable {
     }
 }
 
+// A key in a composer (bridge.js's composerPatch, session.bend's Composer.of):
+// only the composer's fields for the thread the hub drew, never a screen
+struct ComposerPatch: Decodable, Equatable {
+    let thread: String
+    let draft: String
+    let skills: [Skill]?
+    let send: String
+    let sendAct: String
+}
+
 struct Out: Decodable, @unchecked Sendable {
     let screen: Screen?
     let cmds: [Cmd]
@@ -1027,6 +1037,7 @@ struct Out: Decodable, @unchecked Sendable {
     var inert = false
     var composerEdit: UInt64? = nil
     var navigationAccepted: Bool? = nil
+    var composer: ComposerPatch? = nil
 
     private struct Cmds: Decodable {
         let cmds: [Cmd]
@@ -1035,6 +1046,7 @@ struct Out: Decodable, @unchecked Sendable {
         let inert: Bool?
         let composerEdit: UInt64?
         let navigationAccepted: Bool?
+        let composer: ComposerPatch?
     }
 
     // an answer; with screen false only its commands (a newer screen follows)
@@ -1048,7 +1060,7 @@ struct Out: Decodable, @unchecked Sendable {
             NSLog("Backplane decode answer %@", WireDecodeDiagnostic.summary(error))
             return nil
         }
-        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted) }
+        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted, composer: answer.composer) }
         do {
             let s = try JSONDecoder().decode(ScreenOnly.self, from: d)
             return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted)

@@ -1444,6 +1444,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"replying", Mob.replying(U.Str.get(drafts, U.Rpl.key(sel)), U.Str.get(drafts, U.Rpl.q.key(sel)))},
         J.KV{"send", J.Json.str(U.Follow.button(lc, st, sel, V.View.running(turn), U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts), U.Str.get(drafts, sel)))},
         J.KV{"sendAct", J.Json.str(U.Follow.act(U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts)))},
+        J.KV{"claude", J.Json.bool(String.eq(pr, "claude"))},
         J.KV{"picker", Mob.picker.ctx.loc(lc, U.Models.phone(nf, pr, U.Str.get(drafts, "@f.mq")), pr, mo, U.Effort.of(st, sel), U.Usage.tail(st, sel))},
         J.KV{"skills", J.Json.arr(skills)}, J.KV{"btw", btw},
         J.KV{"attaching", J.Json.arr(Mob.chips(atts))}, J.KV{"uploading", J.Json.str(up)},

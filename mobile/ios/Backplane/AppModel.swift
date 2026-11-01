@@ -149,6 +149,11 @@ final class AppModel {
     let plots = PlotStore()
     // the composer's text, owned here so typing never waits on Bend
     private(set) var composer = ""
+    // what the composer offers for the text typed now (popup rows, the send
+    // button), from a key's own answer; only the composer reads it, so a key
+    // never redraws the timeline. A new screen carries the same (Bend's
+    // law composer_screen_agrees) and clears it.
+    private(set) var composerPatch: ComposerPatch? = nil
     private var composerDrafts = ComposerDrafts()
     private var composerOwner = ""
     private(set) var scrolls = 0
@@ -1788,6 +1793,14 @@ final class AppModel {
     func composerText(for thread: ThreadView) -> String {
         composerDrafts.text(for: thread.id) ?? localDrafts[thread.id] ?? thread.draft
     }
+    // the key's patch while it is for this thread and the text shown
+    private func patch(for thread: ThreadView) -> ComposerPatch? {
+        guard let p = composerPatch, p.thread == thread.id, p.draft == composerText(for: thread) else { return nil }
+        return p
+    }
+    func composerSkills(for thread: ThreadView) -> [Skill] { patch(for: thread)?.skills ?? thread.skills ?? [] }
+    func composerSend(for thread: ThreadView) -> String { patch(for: thread)?.send ?? thread.send }
+    func composerSendAct(for thread: ThreadView) -> String? { patch(for: thread)?.sendAct ?? thread.sendAct }
 
     func canEditComposer(for thread: String) -> Bool {
         guard !thread.isEmpty, let s = screen, s.thread?.id == thread,
@@ -2063,6 +2076,8 @@ final class AppModel {
             return
         }
         defer { traceNavigation(.applied) }
+        if let c = o.composer, o.screen == nil { if composerPatch != c { composerPatch = c } }
+        else if o.screen != nil, composerPatch != nil { composerPatch = nil }
         for update in o.sync ?? [] {
             let epoch = conn[update.hub]?.epoch ?? 0
             observeThinPresenting(update, epoch: epoch)
@@ -2252,6 +2267,10 @@ final class AppModel {
                         if step.hasPrefix("!") { step.removeFirst() } else { try? await Task.sleep(for: .seconds(2)) }
                         let kv = step.split(separator: "=", maxSplits: 1).map(String.init)
                         if kv[0] == "@times" { NSLog("Backplane taps %@", tapTimes.joined(separator: "; ")); continue }
+                        // "@type=<text>": the composer's text, as typing it does (editComposer: one key's path)
+                        if kv[0] == "@type" { draft(kv.count > 1 ? kv[1] : ""); continue }
+                        // "@renders": how often each counted view's body ran since the last (RenderCount)
+                        if kv[0] == "@renders" { NSLog("Backplane renders %@", RenderCount.take()); continue }
                         if kv[0] == "@open", kv.count > 1 {
                             let name = kv[1]
                             if let u = screen?.uber, u.name == name {
@@ -2369,3 +2388,16 @@ struct Outgoing: Identifiable, Equatable {
 struct TapDestination {
     let nav, title, cat, kind: String
 }
+
+#if DEBUG
+// how often a view's body runs (simulator checks: "@renders" in BACKPLANE_ACTS
+// logs and resets the counts), to see what one key redraws
+enum RenderCount {
+    nonisolated(unsafe) private static var counts: [String: Int] = [:]
+    static func tick(_ name: String) { counts[name, default: 0] += 1 }
+    static func take() -> String {
+        defer { counts = [:] }
+        return counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+    }
+}
+#endif

@@ -169,10 +169,62 @@ def Session.object.set(j: J.Json, +key: String, +value: J.Json) -> J.Json:
     case J.Obj{+fs}: J.Obj{Session.fields.set(fs, key, value, Session.fields.hit(fs, key))}
     case _: j
 
-def Session.shown.draft(+shown: J.Json, +session: J.Json) -> J.Json:
+# The composer for the draft typed now, from the thread the hub drew (the
+# phones' twin of the web's View.local): the hub's rows stay while its
+# render is for this draft, or while neither draft is a slash command; else
+# the draft's slash commands (Claude's own only in a Claude thread, the
+# thread's "claude"). The send button follows the draft as the hub's would
+# (U.Follow: Stop while a turn runs and nothing is typed or attached).
+# A key on a phone changes only these fields (Composer.fields), so the
+# native side redraws the composer and its popup, never the screen.
+def Composer.fields() -> List<&2, String>:
+  ["draft", "skills", "send", "sendAct"]
+
+def Composer.slash(typing: Bool, +claude: Bool, +draft: String) -> J.Json:
+  match typing:
+    case True{}: J.Json.arr(SC.Mob.skills(U.Slash.local(claude, draft)))
+    case False{}: J.Arr{J.End{}}
+
+def Composer.rows.k(mine: Bool, +thread: J.Json, +claude: Bool, +draft: String) -> J.Json:
+  match mine:
+    case True{}: J.Json.get_obj(thread, "skills")
+    case False{}: Composer.slash(U.Slash.typing.d(draft), claude, draft)
+
+def Composer.rows(+thread: J.Json, +draft: String) -> J.Json:
+  +drawn = J.Json.get_str(thread, "draft", "")
+  Composer.rows.k(Bool.or(String.eq(drawn, draft), Bool.not(Bool.or(U.Slash.typing.d(draft), U.Slash.typing.d(drawn)))),
+    thread, J.Json.get_bool(thread, "claude", False{}), draft)
+
+def Composer.stop(+thread: J.Json, +draft: String) -> Bool:
+  U.Follow.stop.k(String.eq(J.Json.get_str(thread, "state", ""), "run"),
+    Bool.and(String.is_empty(String.trim(draft)), List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(thread, "attaching")))))
+
+def Composer.of(+thread: J.Json, +draft: String, +lc: I.Loc) -> J.Json:
+  +stop = Composer.stop(thread, draft)
+  J.Json.obj([J.KV{"draft", J.Json.str(draft)}, J.KV{"skills", Composer.rows(thread, draft)},
+    J.KV{"send", J.Json.str(U.Follow.button(lc, M.State.empty(), "", String.eq(J.Json.get_str(thread, "state", ""), "run"), stop, draft))},
+    J.KV{"sendAct", J.Json.str(U.Follow.act(stop))}])
+
+def Composer.put(fs: List<&2, String>, +thread: J.Json, +c: J.Json) -> J.Json:
+  match fs:
+    case Nil{}: thread
+    case +k <> t: Composer.put(t, Session.object.set(thread, k, J.Json.get_obj(c, k)), c)
+
+# the names of a composer's rows (for laws and tests)
+def Composer.names(rows: List<&2, J.Json>) -> List<&2, String>:
+  match rows:
+    case Nil{}: Nil{}
+    case +r <> t: J.Json.get_str(r, "name", "") <> Composer.names(t)
+
+# the thread with its composer drawn for the draft: the hub's own fields
+# replaced, none added (an absent thread stays absent)
+def Composer.thread(+thread: J.Json, +draft: String, +lc: I.Loc) -> J.Json:
+  Composer.put(Composer.fields(), thread, Composer.of(thread, draft, lc))
+
+def Session.shown.draft(+shown: J.Json, +session: J.Json, +lc: I.Loc) -> J.Json:
   Session.object.set(shown, "j", Session.object.set(J.Json.get_obj(shown, "j"), "thread",
-    Session.object.set(J.Json.get_obj(J.Json.get_obj(shown, "j"), "thread"), "draft",
-      J.Json.str(J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), "")))))
+    Composer.thread(J.Json.get_obj(J.Json.get_obj(shown, "j"), "thread"),
+      J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), ""), lc)))
 
 def Session.issued.go(cs: List<&2, J.Json>) -> List<&2, J.Json>:
   match cs:

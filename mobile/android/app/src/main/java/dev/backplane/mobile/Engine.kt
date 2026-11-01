@@ -233,7 +233,7 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
         if (stale) scheduleFlush()
         val s = if (stale) null else runCatching { raw?.let(::parseScreen) }
             .onFailure { android.util.Log.w("Backplane", "screen unreadable: $it") }.getOrNull()
-        onFlush?.invoke(Reply(s, parseCmds(o), if (s != null) JSONObject().put("screen", raw).toString() else null, parseSync(o), if (o.isNull("deadline")) null else o.optLong("deadline")))
+        onFlush?.invoke(Reply(s, parseCmds(o), if (s != null) JSONObject().put("screen", raw).toString() else null, parseSync(o), if (o.isNull("deadline")) null else o.optLong("deadline"), parseComposer(o)))
     }
 
     private suspend fun call(expr: String, person: Boolean = false): String =
@@ -271,7 +271,7 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
             if (!inert && (withheld || stale)) scheduleFlush()
             val s = if (stale) null else runCatching { raw?.let(::parseScreen) }
                 .onFailure { android.util.Log.w("Backplane", "screen unreadable: $it") }.getOrNull()
-            Reply(s, parseCmds(o), if (s != null) JSONObject().put("screen", raw).toString() else null, parseSync(o), if (o.isNull("deadline")) null else o.optLong("deadline"))
+            Reply(s, parseCmds(o), if (s != null) JSONObject().put("screen", raw).toString() else null, parseSync(o), if (o.isNull("deadline")) null else o.optLong("deadline"), parseComposer(o))
         }
     }
 

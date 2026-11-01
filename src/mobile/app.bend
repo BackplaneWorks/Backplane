@@ -264,8 +264,8 @@ def session_target(hs: H.Hubs, cur: String, action: String, value: String) -> St
 def presentation(hs: H.Hubs, overlays: J.Json, cur: String) -> J.Json:
   PS.Session.overlay(hs, overlays, cur)
 
-def session_shown_draft(shown: J.Json, session: J.Json) -> J.Json:
-  PS.Session.shown.draft(shown, session)
+def session_shown_draft(shown: J.Json, session: J.Json, locale: String) -> J.Json:
+  PS.Session.shown.draft(shown, session, I.I18n.of_tag(locale))
 
 def json_array() -> J.Json:
   J.Arr{J.End{}}
@@ -302,8 +302,13 @@ def thin_choice(session: J.Json, action: String, value: String) -> J.Json:
 def thin_presentation(hs: H.Hubs, overlays: J.Json, cur: String) -> J.Json:
   TH.Overlay.screen(hs, overlays, cur)
 
-def thin_shown_draft(shown: J.Json, session: J.Json) -> J.Json:
-  PS.Session.shown.draft(shown, session)
+def thin_shown_draft(shown: J.Json, session: J.Json, locale: String) -> J.Json:
+  PS.Session.shown.draft(shown, session, I.I18n.of_tag(locale))
+
+# a key in the composer: only the composer's fields (session.bend's
+# Composer.of) for the thread the hub drew, never a screen
+def thin_composer(thread: J.Json, draft: String, locale: String) -> J.Json:
+  PS.Composer.of(thread, draft, I.I18n.of_tag(locale))
 
 def thin_partial(shown: J.Json, window: J.Json) -> J.Json:
   TH.Partial.screen(shown, window)

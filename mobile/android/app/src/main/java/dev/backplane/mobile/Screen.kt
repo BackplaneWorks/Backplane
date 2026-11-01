@@ -499,8 +499,18 @@ data class SyncUpdate(val hub: String, val phase: String, val detail: String = "
     val thinPresented get() = phase == "presented" && detail == "view-v1" && mode == "view-v1" && remoteReady == true &&
         viewId.isNotEmpty() && viewRevision.isNotEmpty() && requestRevision in 1..4294967295L
 }
+// A key in a composer (bridge.js's composerPatch, session.bend's Composer.of):
+// only the composer's fields for the thread the hub drew, never a screen
+data class ComposerPatch(val thread: String, val draft: String, val skills: List<Skill>, val send: String, val sendAct: String)
+
+fun parseComposer(o: JSONObject): ComposerPatch? = o.optJSONObject("composer")?.let { c ->
+    ComposerPatch(c.optString("thread"), c.optString("draft"),
+        c.optJSONArray("skills").map { Skill(it.optString("name"), it.optString("desc"), it.optBoolean("on")) },
+        c.optString("send"), c.optString("sendAct", "send"))
+}
+
 data class Reply(val screen: Screen?, val cmds: List<Cmd>, val screenJSON: String? = null,
-                 val sync: List<SyncUpdate> = emptyList(), val deadline: Long? = null)
+                 val sync: List<SyncUpdate> = emptyList(), val deadline: Long? = null, val composer: ComposerPatch? = null)
 
 fun parseSync(o: JSONObject): List<SyncUpdate> {
     val rows = o.optJSONArray("sync") ?: return emptyList()
