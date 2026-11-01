@@ -67,6 +67,7 @@ import ./thin-body.bend as TBODY
 import ./thin-actor.bend as TA
 import ./terminal-output.bend as TOUT
 import ./thin-sidebar-wire.bend as TSW
+import ./thin-view-delta.bend as TVD
 import ../core/thin-pace.bend as TPACE
 import ./thin-mail.bend as TMAIL
 import ../core/thin.bend as THIN
@@ -12196,7 +12197,7 @@ def Hub.thin.respond.region(output: TSW.Output, h: Hub, client: U32, o: J.Json, 
       Hub.thin.respond.full(h, client, o, result, c, ThinContext.with_actors(context, actors), now)
 
 def Hub.thin.respond(h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
-  Hub.thin.respond.region(TSW.Region.output(String.eq(Client.thin.mode(c), "view-web"), TA.Bodies.record(ThinContext.actors(context), result), result, J.Json.get_obj(o, "p")),
+  Hub.thin.respond.region(TVD.Vd.output(String.eq(Client.thin.mode(c), "view-web"), TA.Bodies.record(ThinContext.actors(context), result), result, J.Json.get_obj(o, "p")),
     h, client, o, c, context, now)
 
 def Hub.thin.cursor.empty(+empty: Bool, +text: String, +epoch: String, +target: J.Json, +query: String) -> Maybe<&2, Nat>:

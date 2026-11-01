@@ -42,6 +42,21 @@ type Memo is Data:
   SidebarSent{scope: String, token: String, node: J.Json}
   Still{picture: ST.Picture}
   BodyIssued{entries: List<&2, J.Json>}
+  ViewSent{scope: String, token: String, body: J.Json}
+
+# The view bodies last sent to this actor (thin-view-delta.bend), at most
+# three, newest first. A transport receipt like SidebarSent: exactly what
+# went out under a scope and token, so it is kept through every other
+# memo's change and only ever used for a reply under the same scope.
+def ViewSent.keep.go(ms: List<&2, Memo>, +n: Nat) -> List<&2, Memo>:
+  match ms n:
+    case _ 0n: Nil{}
+    case Nil{} _: Nil{}
+    case ViewSent{scope, token, body} <> rest 1n+k: ViewSent{scope, token, body} <> ViewSent.keep.go(rest, k)
+    case _ <> rest _: ViewSent.keep.go(rest, n)
+
+def ViewSent.keep(ms: List<&2, Memo>) -> List<&2, Memo>:
+  ViewSent.keep.go(ms, 3n)
 
 def Bodies.keep(ms: List<&2, Memo>) -> List<&2, Memo>:
   match ms:
@@ -405,12 +420,12 @@ def SideIndex.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
 def SideIndex.save(valid: Bool, a: Actor, cache: SIXV.IndexCache) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
-      Actor{u, view, target, pending, reads, dirty, SideIndex{cache} <> List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), SignalText.keep(ms)))}
+      Actor{u, view, target, pending, reads, dirty, SideIndex{cache} <> List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SignalText.keep(ms), ViewSent.keep(ms))))}
     case False{} Actor{u, view, target, pending, reads, dirty, ms}:
       Actor{u, view, target, pending, reads, dirty, SideIndex.drop(ms)}
 
 def Actor.kept(+ms: List<&2, Memo>) -> List<&2, Memo>:
-  List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), SignalText.keep(ms))))
+  List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), List.append(&2, Memo, SignalText.keep(ms), ViewSent.keep(ms)))))
 
 # Only canonical derivations survive navigation on this connection. Their
 # next read still checks the server epoch/dependency revision (and online
@@ -418,7 +433,7 @@ def Actor.kept(+ms: List<&2, Memo>) -> List<&2, Memo>:
 # authority is carried by these three independently bounded slots. A new
 # connection starts with no actor and cannot acquire this private memo.
 def Actor.canonical(+ms: List<&2, Memo>) -> List<&2, Memo>:
-  List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), SignalText.keep(ms)))
+  List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), List.append(&2, Memo, SignalText.keep(ms), ViewSent.keep(ms))))
 
 def Signals.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
   match ms:
@@ -435,14 +450,14 @@ def SignalText.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
 def Signals.save(valid: Bool, a: Actor, cache: SGV.SignalCache) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
-      Actor{u, view, target, pending, reads, dirty, Signals{cache} <> List.append(&2, Memo, Sidebar.keep(ms), SignalText.keep(ms))}
+      Actor{u, view, target, pending, reads, dirty, Signals{cache} <> List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, SignalText.keep(ms), ViewSent.keep(ms)))}
     case False{} Actor{u, view, target, pending, reads, dirty, ms}:
       Actor{u, view, target, pending, reads, dirty, Signals.drop(ms)}
 
 def SignalText.save(valid: Bool, a: Actor, cache: SGT.SignalTextCache) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
-      Actor{u, view, target, pending, reads, dirty, SignalText{cache} <> List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), SideIndex.keep(ms)))}
+      Actor{u, view, target, pending, reads, dirty, SignalText{cache} <> List.append(&2, Memo, Sidebar.keep(ms), List.append(&2, Memo, Signals.keep(ms), List.append(&2, Memo, SideIndex.keep(ms), ViewSent.keep(ms))))}
     case False{} Actor{u, view, target, pending, reads, dirty, ms}:
       Actor{u, view, target, pending, reads, dirty, SignalText.drop(ms)}
 
@@ -456,10 +471,10 @@ def Sidebar.get(ms: List<&2, Memo>, +key: String) -> J.Json:
 def Sidebar.save(valid: Bool, a: Actor, key: String, node: J.Json) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
-      Actor{u, view, target, pending, reads, dirty, Sidebar{key, node} <> List.append(&2, Memo, Bodies.keep(ms), List.append(&2, Memo, SidebarWire.keep(ms), SidebarSent.keep(ms)))}
-    case False{} Actor{u, view, target, pending, reads, dirty, ms}:
+      Actor{u, view, target, pending, reads, dirty, Sidebar{key, node} <> List.append(&2, Memo, Bodies.keep(ms), List.append(&2, Memo, SidebarWire.keep(ms), List.append(&2, Memo, SidebarSent.keep(ms), ViewSent.keep(ms))))}
+    case False{} Actor{u, view, target, pending, reads, dirty, +ms}:
       # Issued reading sources belong to the view, not the sidebar image.
-      Actor{u, view, target, pending, reads, dirty, Bodies.keep(ms)}
+      Actor{u, view, target, pending, reads, dirty, List.append(&2, Memo, Bodies.keep(ms), ViewSent.keep(ms))}
 
 def Sidebar.lookup(allowed: Bool, ms: List<&2, Memo>, key: String) -> J.Json:
   match allowed:
@@ -999,7 +1014,7 @@ def Message.on_wire(+o: J.Json) -> Bool:
 def Actor.sheets(a: Actor, +o: J.Json) -> Actor:
   match a:
     case Actor{u, view, target, pending, reads, _, +memo}:
-      Actor{U.Sch.got(u, o), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), SidebarSent.keep(memo))}
+      Actor{U.Sch.got(u, o), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), List.append(&2, Memo, SidebarSent.keep(memo), ViewSent.keep(memo)))}
 
 # Browser frames belong to the page this connection shows, like terminal
 # bytes belong to its shell. Keep the frame number privately so the normal
@@ -1063,11 +1078,12 @@ def Actor.remember(+a: Actor, +m: Memo) -> Actor:
     case Actor{u, view, target, pending, reads, dirty, ms}: Actor{u, view, target, pending, reads, dirty, m <> Actor.kept(ms)}
 
 # what a render is made of but its live row: the read model's sequence, the
-# hub's info, the request but its revisions, the page anchor, the view, the
+# hub's info, the request but its revisions and transport receipts (the
+# sidebar region's, the view delta's), the page anchor, the view, the
 # renderer and the thread (a reply arriving clears the memo: Actor.reply_if)
 def Memo.request(+p: J.Json) -> J.Json:
   match p:
-    case J.Obj{+fs}: J.Obj{V.Obj.drop(V.Obj.drop(V.Obj.drop(fs, "requestRevision"), "viewRevision"), "sidebarRegion")}
+    case J.Obj{+fs}: J.Obj{V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(fs, "requestRevision"), "viewRevision"), "sidebarRegion"), "viewDelta")}
     case _: p
 
 def Memo.key(+seq: Nat, +info: String, +p: J.Json, +anchor: Nat, +view: String, +web: Bool, +thread: String) -> String:
@@ -1092,6 +1108,7 @@ def Memo.reply(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +we
     case SignalText{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case SidebarImage{_, _} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case BodyIssued{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
+    case ViewSent{_, _, _} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case SidebarSent{_, _, _} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case Still{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case Memo{+k, +at, +partial, +res} <> _:

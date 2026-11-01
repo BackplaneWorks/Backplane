@@ -104,6 +104,9 @@ export class ThinHost {
     this.opening = false;
     this.client = new Views({ now: api.now,
       sidebarRegions: (api.renderer || 'web') === 'web',
+      // the hub's keyed view delta (view-delta.js); a page that turns it
+      // off (api.viewDelta === false) gets whole views
+      viewDelta: (api.renderer || 'web') === 'web' && api.viewDelta !== false,
       bodyPages: api.bodyPages === true,
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
         p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action', request.p.target), away: this.awayOf(request.p.session.sel) } } : request }),
