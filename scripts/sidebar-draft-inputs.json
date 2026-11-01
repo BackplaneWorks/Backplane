@@ -176,7 +176,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "64cfabe2f36e41f46989f15ac99e88e6dc82c3c979a7990d6dd278a9fb474b79"
+    "src/web/view.bend": "64528ee93c4ce0078a9d9e65e1ea72443afa9340baf44ec1eb322f16070e7b51"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

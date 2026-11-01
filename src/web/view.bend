@@ -3176,6 +3176,12 @@ def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) ->
     D.El{"button", "", [D.At{"class", "account-chip"}, D.At{"title", "Account: " ++ ACCT.Accounts.label(st, sel, provider) ++ " · Manage logins in Settings → Providers → Accounts"}, D.At{"aria-label", "Account: " ++ ACCT.Accounts.label(st, sel, provider)}, D.At{"data-value", ""}, D.On{"click", "acct-open"}],
       [WI.WIcon.svg("user", 16), D.Dom.span("acct-k", "Account: "), D.Dom.span("acct-v", ACCT.Accounts.label(st, sel, provider))]} <> View.accounts.pop(open, st, provider), Nil{})
 
+# a draft over a message's bound says so over the composer (draftbound.bend)
+def View.draft.limit.k(+text: String) -> List<&2, D.Node>:
+  match text:
+    case SNil{}: Nil{}
+    case SCon{+h, +t}: [D.El{"div", "draft-limit", [D.At{"class", "draft-limit"}, D.At{"role", "status"}], [D.Txt{SCon{h, t}}]}]
+
 def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, String>, +op: Map<&2, Bool>, +nf: Map<&2, String>, +turn: M.TurnState, +pr: String, +mo: String,
     +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:
   +stop = U.Follow.stop(View.running(turn), U.Str.get(drafts, sel), atts)
@@ -3183,7 +3189,7 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
   View.composer.p(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), pr,
     View.mp.loc(lc, U.Flag.get(op, "models"), ACCT.Accounts.nf(nf, st, sel), U.Mpk.cur.of(st, sel, drafts), U.Mpk.now(st, sel), U.Str.get(drafts, "@f.mq"), MPK.ModelPick.kept(U.Str.get(drafts, "@mp"), sel)),
     List.append(&2, D.Node, View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))), View.accounts(st, sel, pr, U.Flag.get(op, "accounts"))),
-    U.Skills.shown(st, sel, drafts, nf), atts, up, vo, mic,
+    U.Skills.shown(st, sel, drafts, nf), atts, up, D.Dom.cat(View.draft.limit.k(DB.Bound.say(lc, U.Str.get(drafts, "@draft.bound"))), vo), mic,
     View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), View.running(turn))
 
 def View.asks.box(+lc: I.Loc, +st: M.State, +id: String, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> D.Node:
@@ -3208,17 +3214,8 @@ def View.rpl.chip.k(+lc: I.Loc, +to: String, +q: String) -> List<&2, D.Node>:
 def View.rpl.chip(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   View.rpl.chip.k(lc, U.Rpl.of(u), U.Rpl.label(u))
 
-# a draft over a message's bound says so over the composer (draftbound.bend)
-def View.draft.limit.k(+text: String) -> List<&2, D.Node>:
-  match text:
-    case SNil{}: Nil{}
-    case SCon{+h, +t}: [D.El{"div", "draft-limit", [D.At{"class", "draft-limit"}, D.At{"role", "status"}], [D.Txt{SCon{h, t}}]}]
-
-def View.draft.limit(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  View.draft.limit.k(DB.Bound.say(lc, U.Ui.scratch(u, "@draft.bound")))
-
 def View.composer.l(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  View.composer.k(lc, u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), D.Dom.cat(View.draft.limit(lc, u), D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))))), View.mic.of(u, U.Ui.sel(u)))
+  View.composer.k(lc, u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u)))), View.mic.of(u, U.Ui.sel(u)))
 
 def View.composer.u(+u: U.Ui) -> D.Node:
   View.composer.l(U.Lang.loc(u), u)

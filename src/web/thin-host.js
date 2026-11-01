@@ -38,6 +38,17 @@ export function boundedDraft(text, action = '', keep = 16384, whole = 65536, sen
   return { text: cps.slice(0, keep).join('') + (/[ \n\t\r]/.test(middle) ? ' … ' : '…') + cps.slice(cps.length - keep).join(''),
     marker: bytes + ' ' + fnv(text) };
 }
+// The page's own mark of its selected draft's size, which its composer
+// reads to say a draft is over a message's bound (core/draftbound.bend's
+// Bound.say): set on each edit and selection, so it is never stale. Only
+// the bytes: the hash rides on the wire's mark alone.
+function localBound(session) {
+  const text = object(session?.drafts) && typeof session.sel === 'string' ? session.drafts[session.sel] : null;
+  const bytes = typeof text === 'string' && text.length > 21845 ? utf8Bytes(text) : 0;
+  const mark = bytes > 65536 ? String(bytes) : '';
+  if ((session.drafts?.['@draft.bound'] ?? '') === mark) return session;
+  return { ...session, drafts: { ...session.drafts, '@draft.bound': mark } };
+}
 // Reference suggestions are projected by the hub from this selected draft.
 // Every view request keeps the same current-thread-only privacy boundary.
 // bound: as it goes on the wire (the draft bounded for the action); the
@@ -241,6 +252,7 @@ export class ThinHost {
     if (action === 'draft' || action === 'select') {
       this.localRevision++;
       this.session = this.api.choice(this.session, action, value);
+      this.session = localBound(this.session);
       if (action === 'draft') {
         const draft = { revision: this.localRevision, text: value };
         this.drafts.set(this.session.sel, draft);this.draftChanges.set(this.session.sel, draft);
