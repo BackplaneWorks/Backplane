@@ -14732,3 +14732,10 @@ law wait_news_done:
   {Bool.and(MC.Wait.done("{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"done\\\":false,\\\"news\\\":true}\"}]}}"),
     Bool.not(MC.Wait.done("{\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"{\\\"done\\\":false}\"}]}}"))) == True{} : Bool}
 # ---- end riding mail: a running Claude turn hears at once ----
+
+# The planner's layout from the sizes as a list beside the keys
+# (Layout.list, the adapter's sizeList) is the layout from the keyed sizes
+# (Layout.make): measured, unmeasured (the estimate) and zero-height rows
+law timeline_layout_list_same:
+  {TLVIRTUAL.Layout.list([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}], [J.Num{"40.5"}, J.Null{}, J.Num{"0"}], "120", 0n, TLVIRTUAL.Px.int(16n), Nil{}) ==
+    TLVIRTUAL.Layout.make([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}], TLVIRTUAL.Sizes.map(J.Json.obj([J.KV{"a", J.Num{"40.5"}}, J.KV{"c", J.Num{"0"}}])), "120", 0n, TLVIRTUAL.Px.int(16n), Nil{}) : TLVIRTUAL.Layout}

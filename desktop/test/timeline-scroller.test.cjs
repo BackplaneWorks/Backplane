@@ -87,7 +87,7 @@ test('timeline DOM effects preserve nodes, measure, forward commands and detach'
   assert.deepEqual(update, { unchanged: 0, patches: 1, retained: true, measured: 75.25, snapshot: 2, follow: false });
 
   await page.evaluate(() => { scroller.mounted.get('b').node.style.height = '125.5px'; });
-  await page.waitForFunction(() => calls.some(call => call.mode === 'measure' && call.sizes.b === 125.5));
+  await page.waitForFunction(() => calls.some(call => call.mode === 'measure' && call.sizeList[call.keys.indexOf('b')] === 125.5));
   const readback = await page.evaluate(() => {
     output = { ...output, top: 800.5, logicalTop: 800.5, trackOffset: 0 };
     scroller.restore({ top: 800.5 });
