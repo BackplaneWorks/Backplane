@@ -22,7 +22,7 @@ the store and canonical state are current.
 
 For a large existing stale cache, an offline preparer may offer a derived
 checkpoint as `<home>/.store-next/{store.db,READY.json}`. The manifest contains
-`version:1`, `schema:1`, `codec:4`, `prefixBytes`, `appliedSeq`, `prefixSha256` and
+`version:1`, `schema:1`, `codec` (storedb.bend's `Sdb.codec()`, the one version the JS checks are given by `Disk.prepare`), `prefixBytes`, `appliedSeq`, `prefixSha256` and
 `storeSha256`. Prepare only in an isolated consistent copy. Never promote a
 database from a test hub that has appended recovery or stand-in events.
 At boot, before opening SQLite, the hub verifies both hashes, the entire

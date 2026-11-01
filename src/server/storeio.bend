@@ -32,7 +32,11 @@ def Disk.promote(home: String, temp: String) -> IO(String):
 def Disk.sync(path: String) -> IO(String):
   import "./effects/storeio.js"
 
-def Disk.prepare(home: String) -> IO(String):
+# the store's checks before it is opened: the log's tail closed, a prepared
+# store adopted, an incompatible one set aside. codec is S.Sdb.codec()'s
+# text, the one version the JS checks accept (they hold no codec of their
+# own: test/tools/store_checkpoint_io_test.cjs)
+def Disk.prepare(home: String, codec: String) -> IO(String):
   import "./effects/storeio.js"
 
 def Plan.st(p: Plan) -> M.State:
@@ -192,7 +196,7 @@ def Sto.opened(ok: Bool, +opened: String, +home: String) -> IO(Opened):
 
 def Sto.boot(+home: String) -> IO(Opened):
   do IO<Opened>:
-    ready : String <- Disk.prepare(home)
+    ready : String <- Disk.prepare(home, Nat.show(S.Sdb.codec()))
     SB.Stb.check("log tail", ready)
     +opened : String <- D.Db.open(home ++ "/store.db")
     Sto.opened(String.starts_with(opened, "ok "), opened, home)
