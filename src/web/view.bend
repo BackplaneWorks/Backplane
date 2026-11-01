@@ -4424,8 +4424,8 @@ def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
 
 # a plot pane's canvas: its source, and the layers its kind shows (k 0 a
 # board, 1 a schematic, as the single tabs keep them)
-def View.combo.canvas(+id: String, +key: String, +kind: String, +k: U32, +u: U.Ui, +sheets: String) -> D.Node:
-  D.El{"canvas", id, List.append(&2, D.Attr, View.probe.attrs(u, U32.is_eq(k, 1)), [D.At{"id", id}, D.At{"class", "plot2d"}, D.At{"data-key", key},
+def View.combo.canvas(+lc: I.Loc, +id: String, +key: String, +kind: String, +k: U32, +u: U.Ui, +sheets: String) -> D.Node:
+  D.El{"canvas", id, List.append(&2, D.Attr, View.probe.attrs(u, U32.is_eq(k, 1)), [D.At{"id", id}, D.At{"class", "plot2d"}, D.At{"tabindex", "0"}, D.At{"aria-label", Bool.pick(String, U32.is_eq(k, 1), MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.board.tip(lc))}, D.At{"data-key", key},
     D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))},
     D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of.at(u, kind)))},
     D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(key)}, D.At{"data-sheets", sheets}]), Nil{}}
@@ -4456,17 +4456,17 @@ def View.combo.boxes(many: Bool, +u: U.Ui) -> String:
 def View.combo.sch(+lc: I.Loc, +u: U.Ui) -> D.Node:
   D.El{"section", "combo-sch", [D.At{"class", "combo-pane combo-main"}, D.At{"aria-label", MSG.T.viewer.schematic(lc)}],
     View.combo.head("sch", MSG.T.viewer.schematic(lc), View.combo.nav(U.Sch.many(u), lc, u)) <> List.append(&2, D.Node, View.probe.away(u),
-    [D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas("plot-sch", U.Split.src.sch(u), "schematic", 1, u, View.combo.boxes(U.Sch.many(u), u))]}])}
+    [D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas(lc, "plot-sch", U.Split.src.sch(u), "schematic", 1, u, View.combo.boxes(U.Sch.many(u), u))]}])}
 
 def View.combo.pcb(+lc: I.Loc, +u: U.Ui) -> D.Node:
   D.El{"section", "combo-pcb", [D.At{"class", "combo-pane"}, D.At{"aria-label", MSG.T.viewer.board(lc)}], [
     View.combo.head("pcb", MSG.T.viewer.board(lc), Nil{}),
-    D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas("plot-pcb", U.Split.src.pcb(u), "board", 0, u, "")]}]}
+    D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas(lc, "plot-pcb", U.Split.src.pcb(u), "board", 0, u, "")]}]}
 
 def View.combo.solid(+lc: I.Loc, +u: U.Ui) -> D.Node:
   D.El{"section", "combo-3d", [D.At{"class", "combo-pane"}, D.At{"aria-label", "3D"}], [
     View.combo.head("3d", "3D", Nil{}),
-    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}, D.At{"data-probe", U.Probe.get(u)}], Nil{}},
+    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}, D.At{"data-probe", U.Probe.get(u)}, D.At{"tabindex", "0"}, D.At{"aria-label", "3D model. Drag or arrow keys to orbit; F fits the model."}], Nil{}},
       D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]}]}
 
 def View.combo.pane(i: Nat, +lc: I.Loc, +u: U.Ui) -> D.Node:

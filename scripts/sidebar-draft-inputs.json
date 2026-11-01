@@ -175,7 +175,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "9286b2fffca84d4501650f7c03ab95b13ad27e5f2d9781126690e5869e6f4395"
+    "src/web/view.bend": "27c12aa8aa7164cad6b389bdeb49f881f4af4829753e5207548e18243574a28f"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -380,5 +380,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "C-2: prefer exact board identity in viewer tabs and picker; sidebar draft image test 24 ok and sidebar drafts unchanged"
+  "reviewNote": "D-7 adds focus to Split canvases; keep incoming mobile layout and sidebar inputs; sidebar draft test 24 ok, rendering unchanged"
 }
