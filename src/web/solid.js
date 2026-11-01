@@ -1,7 +1,8 @@
 import App from "./app.bend";
 import { DepthOfField } from "./solid-dof.js";
 import { fittedDistance } from "./solid-framing.js";
-import { SolidAssets } from "./solid-assets.js";
+import { SolidAssets, decodeMesh } from "./solid-assets.js";
+import { workerDecode } from "./mesh-worker.js";
 import { vertexShader as VS, fragmentShader as FS } from "./solid-materials.js";
 
 // A part in 3D on the web page.
@@ -108,7 +109,9 @@ export function mesh(o) {
 }
 
 // One revision-aware bounded asset store shared by reopened canvases.
-const assets = new SolidAssets({ onChange(record) {
+// Models decode in a worker (mesh-worker.js), the main thread's sliced
+// decodeMesh only where no worker can run.
+const assets = new SolidAssets({ decode: workerDecode(decodeMesh), onChange(record) {
   if (view && view.key === record.key) view.receive(record);
 } });
 const mb = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);

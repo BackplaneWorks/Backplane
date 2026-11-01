@@ -24,7 +24,7 @@ function installLoadRecovery(window, {startupPath, startupURL, origin, session, 
     try { if (new URL(url).origin !== origin()) return; } catch { return; }
     clearTimer(recovery?.timer);recovery = {pending:false, timer:null};
     // Keep the error in main before replacing Chromium's empty error page.
-    status('error', 'Service unavailable. Retrying…');
+    status('connecting', 'Reconnecting to your service…');
     void window.loadFile(startupPath).catch(() => {});
   });
   window.on('close', () => { clearTimer(recovery?.timer);recovery = null; });
