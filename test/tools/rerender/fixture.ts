@@ -104,6 +104,7 @@ export function real(home: string, root: string, o: { log: string; long: string;
   const rx = /^\{"\$":"([A-Za-z]+)"/;
   const threadOf = (line: string) => /"thread":"([^"]+)"/.exec(line)?.[1] ?? "";
   const turns = new Map<string, string>(), tasks = new Set<string>();
+  const keptTasks = new Set<string>();
   let cut = 0;
   for (const raw of fileLines(o.log)) {
     if (!raw) continue;
@@ -135,6 +136,19 @@ export function real(home: string, root: string, o: { log: string; long: string;
       continue;
     }
     const t = threadOf(raw);
+    // a delegated task is kept only with its parent or its child: the
+    // slice keeps another thread's last message only, so the hub, finding a
+    // finished task's delivery missing from its parent, delivered it again
+    // at start and woke the parent (and through it its launcher)
+    if (ty.startsWith("Task")) {
+      const id = /"task":"([^"]+)"/.exec(raw)?.[1] ?? "";
+      if (ty === "TaskDelegated") {
+        const parent = /"parent":"([^"]+)"/.exec(raw)?.[1] ?? "", child = /"child":"([^"]+)"/.exec(raw)?.[1] ?? "";
+        if (keep.has(parent) || keep.has(child)) keptTasks.add(id);
+      }
+      if (keptTasks.has(id)) out.push(line);
+      continue;
+    }
     if (!t || keep.has(t)) { out.push(line); continue; }
     if (LAST_OF_OTHERS.has(ty)) { keepLast(ty + "\u0000" + t, line); continue; }
     if (SIDEBAR_TYPES.has(ty)) out.push(line);
