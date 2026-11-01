@@ -940,6 +940,26 @@ def Actor.render.acted(acted: Acted, +web: Bool, +st: M.State, index: T.Index, +
     case Acted{+updated, +action}:
       Actor.native.reconcile(Actor.native.page_result(web, p, Actor.render.result(TerminalInput.allowed(web, p, action), updated, action, web, st, index, V.Render.request(p, Actor.ui(updated)), epoch, now, rows, stream, revision)))
 
+def Actor.page.splice.k(m: Maybe<&2, J.Json>, +updated: Actor) -> Maybe<&2, Rendered>:
+  match m:
+    case Some{+r}: Some{Rendered{updated, r}}
+    case None{}: None{}
+
+def Actor.page.splice.go(ok: Bool, +acted: Acted, +res: J.Json, +st: M.State, +index: T.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream) -> Maybe<&2, Rendered>:
+  match ok acted:
+    case True{} Acted{+updated, _}:
+      +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
+      +prepared = U.Ui.tick(V.Render.ui(Actor.ui(updated), st, index, J.Json.get_obj(p, "target"), rows, stream, now), VC.ViewClock.of(now))
+      Actor.page.splice.k(S.Page.splice(res, prepared, thread, V.Render.window(stream, index, thread, p, epoch, rows)), updated)
+    case False{} _: None{}
+
+# A view.page from the last view of the same inputs (Memo.page): its
+# timeline drawn again for the page's rows, as the full web render draws
+# it (Actor.render.web.indexed: V.Render.ui at the view clock), the rest
+# kept. Only a picture with no commands (a read's) is reused.
+def Actor.page.splice(+acted: Acted, +res: J.Json, +st: M.State, +index: T.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream) -> Maybe<&2, Rendered>:
+  Actor.page.splice.go(String.eq(J.Json.show(J.Json.get_obj(res, "cmds")), "[]"), acted, res, st, index, p, epoch, now, rows, stream)
+
 def Actor.render.revision(+a: Actor, +web: Bool, +st: M.State, +index: T.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream, revision: Nat) -> Rendered:
   +ready = Actor.mail_ready(Actor.origin(a, epoch))
   +action = TerminalInput.run(TerminalInput.request(web, p), TerminalInput.owner(Actor.ui(ready), p), web, Actor.ui(ready), p, now)
@@ -1112,12 +1132,60 @@ def Actor.remember(+a: Actor, +m: Memo) -> Actor:
 # (server.bend's Hub.thin.fit.key), which this key never matches.
 def Memo.request(+p: J.Json) -> J.Json:
   match p:
-    case J.Obj{+fs}: J.Obj{V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(fs, "requestRevision"), "viewRevision"), "sidebarRegion"), "viewDelta"), "anchor")}
+    case J.Obj{+fs}: J.Obj{V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(V.Obj.drop(fs, "requestRevision"), "viewRevision"), "sidebarRegion"), "viewDelta"), "anchor"), "cursor")}
     case _: p
 
-def Memo.key(+seq: Nat, +info: String, +p: J.Json, +anchor: Nat, +view: String, +web: Bool, +thread: String) -> String:
-  J.Json.show(J.Json.obj([J.KV{"seq", J.Json.nat(seq)}, J.KV{"info", J.Str{info}}, J.KV{"p", Memo.request(p)}, J.KV{"anchor", J.Json.nat(anchor)},
+# The key is what a render is made of but its page, then the page: the
+# row it ends at and the request's cursor (Memo.at, last), so a view.page
+# finds the last view of the same inputs by the key's start (Memo.page)
+def Memo.key.base(+seq: Nat, +info: String, +p: J.Json, +view: String, +web: Bool, +thread: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"seq", J.Json.nat(seq)}, J.KV{"info", J.Str{info}}, J.KV{"p", Memo.request(p)},
     J.KV{"view", J.Str{view}}, J.KV{"web", J.Flag{web}}, J.KV{"thread", J.Str{thread}}]))
+
+def Memo.at(+anchor: Nat, +p: J.Json) -> String:
+  "\tat:" ++ Nat.show(anchor) ++ "\t" ++ J.Json.get_str(p, "cursor", "")
+
+def Memo.key(+seq: Nat, +info: String, +p: J.Json, +anchor: Nat, +view: String, +web: Bool, +thread: String) -> String:
+  Memo.key.base(seq, info, p, view, web, thread) ++ Memo.at(anchor, p)
+
+# The last view drawn from the same inputs as a view.page but its page (the
+# memo's key starts with base and a page; not one cut down to fit, whose
+# key names its anchor, server.bend's Hub.thin.fit.key), in the same
+# view-clock step: the page splice draws only its timeline again
+# (thin-splice.bend's Page.splice). None: render in full.
+def Memo.page.k(ok: Bool, +res: J.Json) -> Maybe<&2, J.Json>:
+  match ok:
+    case True{}: Some{res}
+    case False{}: None{}
+
+def Memo.page.ok(+k: String, +base: String) -> Bool:
+  Bool.and(String.starts_with(k, base ++ "\tat:"), Bool.not(String.contains(k, "\tanchor:")))
+
+def Memo.page.still(pic: ST.Picture, +base: String, +now: Nat) -> Maybe<&2, J.Json>:
+  match pic:
+    case ST.Picture{+k, +at, +res}:
+      Memo.page.k(Bool.and(Memo.page.ok(k, base), Bool.and(Nat.is_ge(now, at), VC.ViewClock.same(at, now))), res)
+
+# (a quiet thread's view is kept as a still picture, whose clock is the
+# render's second, not its millisecond: thin-still-picture.bend)
+def Memo.page(ms: List<&2, Memo>, +base: String, +clock: Nat, +now: Nat) -> Maybe<&2, J.Json>:
+  match ms:
+    case Nil{}: None{}
+    case Memo{+k, +at, _, +res} <> _:
+      Memo.page.k(Bool.and(Memo.page.ok(k, base), Bool.and(Nat.is_ge(clock, at), VC.ViewClock.same.ms(clock, at))), res)
+    case Still{+pic} <> _: Memo.page.still(pic, base, now)
+    case _ <> rest: Memo.page(rest, base, clock, now)
+
+# The page splice is off unless the hub setting view.splice.page is "on"
+# (read once per reply): off, a view.page renders in full as before, until
+# the page paces its applies during a wheel (thin-host.js)
+def Memo.page.on(+st: M.State) -> Bool:
+  String.eq(M.Setting.get(st, "view.splice.page", ""), "on")
+
+def Memo.page.if(on: Bool, ms: List<&2, Memo>, +base: String, +clock: Nat, +now: Nat) -> Maybe<&2, J.Json>:
+  match on:
+    case True{}: Memo.page(ms, base, clock, now)
+    case False{}: None{}
 
 def Memo.reply.k(+ok: Bool, +res: J.Json, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
   match ok:

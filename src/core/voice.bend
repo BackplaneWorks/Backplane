@@ -567,9 +567,31 @@ def Voice.fix.head(s: String) -> Bool:
     case SCon{c, t}:
       Voice.wordc(c)
 
-# the word starts here, and neither side touches a letter or digit
-def Voice.fix.at(pv: Bool, +s: String, +w: String, +lw: Nat) -> Bool:
-  Bool.and(Bool.not(pv), Bool.and(String.starts_with(s, w), Bool.not(Voice.fix.head(String.drop(s, lw)))))
+# the word starts here (at c, then t), and neither side touches a letter
+# or digit: the cheap tests first, each only when the last held. Asking
+# String.starts_with and String.drop of SCon{c, t}, always, built a string
+# as long as the rest of the text at every character (quadratic, like
+# ref-origin.bend's Origin.scan was). drop(SCon{c, t}, lw) is drop(t, lw - 1)
+# for the word's lw >= 1 characters
+def Voice.fix.at.end(on: Bool, +t: String, +lw: Nat) -> Bool:
+  match on:
+    case True{}: Bool.not(Voice.fix.head(String.drop(t, Nat.sub(lw, 1n))))
+    case False{}: False{}
+
+def Voice.fix.at.first(same: Bool, +t: String, +rest: String, +lw: Nat) -> Bool:
+  match same:
+    case True{}: Voice.fix.at.end(String.starts_with(t, rest), t, lw)
+    case False{}: False{}
+
+def Voice.fix.at.w(+c: Char, +t: String, w: String, +lw: Nat) -> Bool:
+  match w:
+    case SNil{}: Bool.not(Voice.wordc(c))
+    case SCon{p, rest}: Voice.fix.at.first(Char.is_eq(c, p), t, rest, lw)
+
+def Voice.fix.at(pv: Bool, +c: Char, +t: String, +w: String, +lw: Nat) -> Bool:
+  match pv:
+    case True{}: False{}
+    case False{}: Voice.fix.at.w(c, t, w, lw)
 
 def Voice.fix.hit(hit: Bool, +c: Char, +r: String, +lw: Nat, acc: String) -> Fx:
   match hit:
@@ -578,12 +600,12 @@ def Voice.fix.hit(hit: Bool, +c: Char, +r: String, +lw: Nat, acc: String) -> Fx:
     case False{}:
       Fx{0n, Voice.wordc(c), SCon{c, acc}}
 
-def Voice.fix.step(st: Fx, +c: Char, +s: String, +w: String, +r: String, +lw: Nat) -> Fx:
+def Voice.fix.step(st: Fx, +c: Char, +t: String, +w: String, +r: String, +lw: Nat) -> Fx:
   match st:
     case Fx{1n+k, pv, acc}:
       Fx{k, Voice.wordc(c), acc}
     case Fx{0n, pv, acc}:
-      Voice.fix.hit(Voice.fix.at(pv, s, w, lw), c, r, lw, acc)
+      Voice.fix.hit(Voice.fix.at(pv, c, t, w, lw), c, r, lw, acc)
 
 def Voice.fix.fin(st: Fx) -> String:
   match st:
@@ -595,7 +617,7 @@ def Voice.fix.go(s: String, +w: String, +r: String, +lw: Nat, st: Fx) -> String:
     case SNil{}:
       Voice.fix.fin(st)
     case SCon{+c, +t}:
-      Voice.fix.go(t, w, r, lw, Voice.fix.step(st, c, SCon{c, t}, w, r, lw))
+      Voice.fix.go(t, w, r, lw, Voice.fix.step(st, c, t, w, r, lw))
 
 def Voice.fix.k(same: Bool, t: String, +w: String, +r: String) -> String:
   match same:

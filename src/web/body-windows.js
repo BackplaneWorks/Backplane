@@ -226,7 +226,10 @@ export class BodyWindows {
         return node('div', id, {class:'msg ' + (attr(n, 'who') === 'u' ? 'user' : 'assistant'), 'data-id':id},
           [node('div', 'body-window:' + id, { class: 'body body-window', 'data-body-id': id }, body), ...stamp, ...copy]);
       }
-      return { ...n, kids: list(items(n.kids).map(walk)) };
+      // (a node whose kids all come back as they were is kept as it was:
+      // rows a page landing did not touch stay the very same objects)
+      const ks = items(n.kids), mapped = ks.map(walk);
+      return mapped.every((k, i) => k === ks[i]) ? n : { ...n, kids: list(mapped) };
     };
     return walk(root);
   }

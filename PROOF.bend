@@ -251,6 +251,7 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+import ./src/core/landing.bend as LAND
 
 # Lemmas
 # ------
@@ -14817,13 +14818,21 @@ def Laws.sdb_terms_sql_same():
 
 # BEGIN view step 2 (H)
 def Laws.viewclock_not_after(): {==}
+
 def Laws.viewclock_within_step(): {==}
+
 def Laws.viewclock_step_same(): {==}
+
 def Laws.viewclock_next_step(): {==}
+
 def Laws.view_memo_anchor_left_out(): {==}
+
 def Laws.pace_live_own(): {==}
+
 def Laws.pace_live_other(): {==}
+
 def Laws.pace_live_none(): {==}
+
 def Laws.pace_live_committed_still(): {==}
 # END view step 2 (H)
 
@@ -14856,3 +14865,32 @@ def Laws.dq_changes_in_order():
   {==}
 
 # ---- end disk-full ----
+
+# BEGIN page landing (P)
+def Laws.land_outside_page(rs, p, ps, h):
+  %Equal.sym(Bool, LAND.Land.inside(rs, p), False{}, h) : {LAND.Land.region.k(Bool.and(_, LAND.Land.all(rs, ps)), rs, p <> ps) == "page" : String}
+  {==}
+
+def Laws.land_root_page(name, t, ts):
+  {==}
+
+def Laws.land_window_only():
+  {==}
+
+def Laws.land_timeline_only():
+  {==}
+# END page landing (P)
+
+# BEGIN page splice (H)
+def Laws.view_memo_key_page_last(seq, info, p, anchor, view, web, thread): {==}
+def Laws.view_page_memo_same_step(): {==}
+def Laws.view_page_memo_next_step(): {==}
+def Laws.view_page_memo_other_inputs(): {==}
+def Laws.view_page_memo_not_fitted(): {==}
+def Laws.view_page_still_same_step(): {==}
+def Laws.view_page_still_next_step(): {==}
+def Laws.view_page_still_not_fitted(): {==}
+def Laws.view_page_splice_off_none(ms, base, clock, now): {==}
+def Laws.view_page_splice_default_off(): {==}
+def Laws.view_page_splice_setting_on(): {==}
+# END page splice (H)

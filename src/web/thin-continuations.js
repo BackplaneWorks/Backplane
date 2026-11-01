@@ -35,7 +35,9 @@ export class ThinContinuations {
       if (!is(node, 'El')) return node;
       const expanded = expand(node);
       if (expanded !== node) return walk(expanded, visit);
-      return visit({ ...node, kids: list(items(node.kids).map(k => walk(k, visit))) });
+      // (kids all unchanged: the node itself, so untouched rows keep their identity)
+      const ks = items(node.kids), mapped = ks.map(k => walk(k, visit));
+      return visit(mapped.every((k, i) => k === ks[i]) ? node : { ...node, kids: list(mapped) });
     };
     const timeline = node => {
       const rows = new Map(), controls = new Map();
@@ -80,8 +82,10 @@ export class ThinContinuations {
           // partial metadata. Remove their raw footer controls as well.
           return null;
         }
-        let kids = items(n.kids).map(rewrite).filter(Boolean);
+        const ks = items(n.kids);
+        let kids = ks.map(rewrite).filter(Boolean);
         const row = attr(n, 'data-id'), button = controls.get(row);
+        const same = kids.length === ks.length && kids.every((k, i) => k === ks[i]);
         if (interactive && rows.get(row)?.length === 1 && rows.get(row)[0] === n && button?.length === 1 && classes(n).includes('act'))
           kids.push(...readerNodes(row, button[0]));
         if (n.tag === 'button' && action(n) === 'view-page' && classes(n).includes('earlier')) {
@@ -89,7 +93,7 @@ export class ThinContinuations {
             { $: T.At, name: 'class', value: 'thin-earlier' }, { $: T.At, name: 'title', value: 'Load earlier messages' }
           ])) };
         }
-        return { ...n, kids: list(kids) };
+        return same && kids.length === ks.length ? n : { ...n, kids: list(kids) };
       };
       return rewrite(node);
     };

@@ -472,7 +472,9 @@ def main() -> IO(Unit):
     C.Check.str("bot delegate needs a project", yes(String.contains(call(pj, 1600n, th.of(pj, "Miso"), "delegate_task", "{\"prompt\":\"x\"}"), "name a project")), "yes")
     C.Check.str("bot delegate unknown project", yes(String.contains(call(pj, 1600n, th.of(pj, "Miso"), "delegate_task", "{\"prompt\":\"x\",\"project\":\"nope\"}"), "name a project")), "yes")
     +dg : B.Step = call.step(pj, 1600n, th.of(pj, "Miso"), "delegate_task", "{\"prompt\":\"check the LDO\",\"project\":\"Power board\"}")
-    C.Check.str("bot delegates", st.tags(dg), "ThreadCreated ModesSet TaskDelegated TaskStateSet MessagePosted TurnChanged | out out ")
+    # the child's design is captured before its agent runs (checkpoint0, then
+    # the start step: mcp.bend's Mcp.delegate.run, 746410c14), then the run
+    C.Check.str("bot delegates", st.tags(dg), "ThreadCreated ModesSet TaskDelegated TaskStateSet MessagePosted TurnChanged | out out out out ")
     C.Check.str("bot delegate in the project", yes(String.contains(changes.show(tags.cs(dg)), "\"project\":\"p1\"")), "yes")
     C.Check.str("bot delegate names the bot", yes(String.contains(changes.show(tags.cs(dg)), "t:" ++ th.of(pj, "Miso"))), "yes")
     +dj : M.State = run(pj, dg)

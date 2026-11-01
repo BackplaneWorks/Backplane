@@ -28,10 +28,25 @@ def item_json(i: F.Item) -> J.Json:
   match i:
     case F.Item{_, c}: c
 
+# a long text, built with a tail call (String.repeat is not one)
+def long.go(n: Nat, acc: String) -> String:
+  match n:
+    case 0n: acc
+    case 1n+k: long.go(k, "ab backplan bb " ++ acc)
+
 def main() -> IO(Unit):
   +raw : String = "[desktop](backplane://thread/peer~local)"
   +m : F.In = mirror()
   do IO<Unit>:
+    C.Check.str("a reference inside a word stays", show("xbackplane://thread/t"), "xbackplane://thread/t")
+    C.Check.str("a b before a reference stays a word", show("bbackplane://thread/t"), "bbackplane://thread/t")
+    C.Check.str("a b then a reference", show("b backplane://thread/t"), "b backplane://thread/peer~t")
+    C.Check.str("an unfinished scheme stays", show("backplane:/ backplan b backplane://thread/t"), "backplane:/ backplan b backplane://thread/peer~t")
+    C.Check.str("a lone b", show("b"), "b")
+    # 256 KB with links at both ends: about 1 s here, where the old scan
+    # (a string as long as the rest built at every character) took 5.5 s
+    # and 1.4 GB; a hub's mirror fold at boot peaked 5 GB above its state
+    C.Check.str("a long text keeps both its links", show("backplane://thread/t " ++ long.go(16384n, "") ++ "backplane://thread/t"), "backplane://thread/peer~t " ++ long.go(16384n, "") ++ "backplane://thread/peer~t")
     C.Check.str("plain text exact", show("plain 日本語 text"), "plain 日本語 text")
     C.Check.str("no origin leaves text exact", O.Origin.show("backplane://thread/t", ""), "backplane://thread/t")
     C.Check.str("invalid origin leaves text exact", O.Origin.show("backplane://thread/t", "bad/link"), "backplane://thread/t")

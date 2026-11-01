@@ -37,6 +37,7 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+
 import ./src/core/diskq.bend as DQ
 
 import ./src/web/terminal-cells.bend as TCELL
@@ -415,6 +416,7 @@ import ./src/core/thin.bend as JTHIN # J2: JS stack
 import ./src/server/thin-content-eq.bend as CONTENTEQ
 
 import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+
 import ./src/core/viewclock.bend as VCLOCK # view step 2 (H)
 
 import ./src/server/thin-view.bend as TVIEWH # view delta (H)
@@ -438,6 +440,8 @@ import ./src/core/ref-origin.bend as O
 import ./src/server/hotboot.bend as BOOTWARM
 
 import ./src/core/snapshot.bend as BOOTSNAP
+
+import ./src/core/landing.bend as LAND
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -14537,3 +14541,88 @@ law dq_held_in_order:
 law dq_changes_in_order:
   {DQ.Dq.changes(DQ.Dq.push(DQ.Dq.push(DQ.Dq.empty(), M.State.empty(), 1n, ["a"], [M.SettingSet{"k", "1", 1n}], Nil{}, Nil{}), M.State.empty(), 2n, ["b", "c"], [M.SettingSet{"k", "2", 2n}, M.SettingSet{"k", "3", 3n}], Nil{}, Nil{})) == [M.SettingSet{"k", "1", 1n}, M.SettingSet{"k", "2", 2n}, M.SettingSet{"k", "3", 3n}] : List<&2, M.Change>}
 # ---- end disk-full ----
+
+# BEGIN page landing (P)
+# A reply to a page request redraws only the regions its delta wrote into
+# (src/core/landing.bend, host.js's landing: the timeline, the top bar). A
+# path outside every region and the window makes it the whole page,
+# whatever the other paths are: a page reply that touches a sidebar row, a
+# region not named, or the session still redraws everything.
+law land_outside_page:
+  for +rs: List<&2, LAND.LRegion>
+  for +p: List<&2, String>
+  for +ps: List<&2, List<&2, String>>
+  for h: {LAND.Land.inside(rs, p) == False{} : Bool}
+  {LAND.Land.region(rs, p <> ps) == "page" : String}
+
+# a whole reply (its one path the root) redraws the page
+law land_root_page:
+  for +name: String
+  for +t: String
+  for +ts: List<&2, String>
+  {LAND.Land.region([LAND.LRegion{name, t <> ts}], [Nil{}]) == "page" : String}
+
+# a delta that moved only the window (the page's cursors) redraws nothing
+law land_window_only:
+  {LAND.Land.region([LAND.LRegion{"timeline", ["shown", "kids", "0"]}], [["window", "older"]]) == "" : String}
+
+# rows written under the timeline redraw the timeline, and only it
+law land_timeline_only:
+  {LAND.Land.region([LAND.LRegion{"timeline", ["shown", "kids", "0"]}, LAND.LRegion{"topbar", ["shown", "kids", "1"]}], [["shown", "kids", "0", "kids"], ["window", "older"]]) == "timeline " : String}
+# END page landing (P)
+
+# BEGIN page splice (H): a view.page draws only its timeline again
+# The render memo's key is what a render is made of but its page, then the
+# page (its row and cursor) last, so a view.page finds the last view of the
+# same inputs by the key's start (thin-actor.bend's Memo.page)
+law view_memo_key_page_last:
+  for +seq: Nat
+  for +info: String
+  for +p: J.Json
+  for +anchor: Nat
+  for +view: String
+  for +web: Bool
+  for +thread: String
+  {CHATSIDE.Memo.key(seq, info, p, anchor, view, web, thread) == CHATSIDE.Memo.key.base(seq, info, p, view, web, thread) ++ CHATSIDE.Memo.at(anchor, p) : String}
+
+# the last view of the same inputs in the same view-clock step is reused
+law view_page_memo_same_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 89000n, 0n) == Some{J.Null{}} : Maybe<&2, J.Json>}
+
+# not from another step, other inputs, or a view cut down to fit
+law view_page_memo_next_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 90000n, 0n) == None{} : Maybe<&2, J.Json>}
+
+law view_page_memo_other_inputs:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"A\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 62000n, 0n) == None{} : Maybe<&2, J.Json>}
+
+law view_page_memo_not_fitted:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc\tanchor:m1", 61000n, False{}, J.Null{}}], "B", 62000n, 0n) == None{} : Maybe<&2, J.Json>}
+
+# a quiet thread's view, kept as a still picture (its clock in seconds),
+# serves the same way within its view-clock step
+law view_page_still_same_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Still{STILLPICTURE.Picture{"B\tat:3\tc", 61n, J.Null{}}}], "B", 0n, 89n) == Some{J.Null{}} : Maybe<&2, J.Json>}
+
+law view_page_still_next_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Still{STILLPICTURE.Picture{"B\tat:3\tc", 61n, J.Null{}}}], "B", 0n, 90n) == None{} : Maybe<&2, J.Json>}
+
+law view_page_still_not_fitted:
+  {CHATSIDE.Memo.page([CHATSIDE.Still{STILLPICTURE.Picture{"B\tat:3\tc\tanchor:m1", 61n, J.Null{}}}], "B", 0n, 62n) == None{} : Maybe<&2, J.Json>}
+
+# The splice is behind the hub setting view.splice.page: off unless set to
+# "on", and off, no last view is offered, so a view.page renders in full
+# as before (server.bend's Hub.thin.page.memo -> Hub.thin.web_fit.full)
+law view_page_splice_off_none:
+  for ms: List<&2, CHATSIDE.Memo>
+  for +base: String
+  for +clock: Nat
+  for +now: Nat
+  {CHATSIDE.Memo.page.if(False{}, ms, base, clock, now) == None{} : Maybe<&2, J.Json>}
+
+law view_page_splice_default_off:
+  {CHATSIDE.Memo.page.on(M.State.empty()) == False{} : Bool}
+
+law view_page_splice_setting_on:
+  {CHATSIDE.Memo.page.on(M.State.setting(M.State.empty(), "view.splice.page", "on")) == True{} : Bool}
+# END page splice (H)

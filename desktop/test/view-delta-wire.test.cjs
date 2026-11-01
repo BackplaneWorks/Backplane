@@ -110,3 +110,8 @@ test('page window: olderNext is optional, a string, and only beside an older cur
  const f=await fixture();const ok=w=>{const e=f.whole(f.open.id,page(['a']));e.result.window={...e.result.window,...w};return validateThinResult(e.result,f.v.calls.get(f.open.id).input)===true;};
  assert(ok({}));assert(ok({older:'c1',hasMore:true,olderNext:'c2'}));assert(ok({older:'c1',hasMore:true,olderNext:''}));
  assert(!ok({older:'',hasMore:false,olderNext:'c2'}),'no older, no olderNext');assert(!ok({older:'c1',hasMore:true,olderNext:7}));});
+test('view delta: a reply of no ops is marked unchanged (the page need not draw it again); one with ops is not',async()=>{
+ const f=await fixture();f.v.reply('hub',f.whole(f.open.id,page(['a'])));
+ let u=f.update(),t=f.v.calls.get(u.id).input.viewDelta.token;let r=f.v.reply('hub',f.delta(u.id,t,[]));assert.equal(r.unchanged,true);assert(r.remoteReady);
+ u=f.update();t=f.v.calls.get(u.id).input.viewDelta.token;r=f.v.reply('hub',f.delta(u.id,t,[['s',['shown','kids',1,'kids',1,'kids',0,'text'],'x']]));assert.equal(r.unchanged,false);
+ const w=f.v.request('hub','view.update',{session:f.session});r=f.v.reply('hub',f.whole(w.id,page(['b'])));assert.equal(r.unchanged,false,'a whole reply is not');});

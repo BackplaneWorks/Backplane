@@ -35,7 +35,7 @@ const port = Number(opt("port", "3811"));
 const fixtureKind = opt("fixture", "synthetic");
 const outDir = resolve(opt("out", join(here, "build/rr/out")));
 const deep = flag("deep");
-const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
+const ALL = ["open", "idle", "type1", "burst", "paste", "pastebig", "bigtype", "scroll", "slowup", "stress", "clock", "bg", "send", "stream", "toolgroup", "switch"];
 const scenarios = opt("scenarios", ALL.join(",")).split(",");
 const roles = opt("targets", "long,tools").split(",");
 if (port === 3787) throw new Error("3787 is the live hub's port");
@@ -58,9 +58,9 @@ writeFileSync(join(home, "token"), TOKEN, { mode: 0o600 });
 let fx: Fixture;
 if (fixtureKind === "real") {
   const log = resolve(opt("log", join(homedir(), ".backplane-bend/events.jsonl")));
-  fx = real(home, root, { log, long: opt("long", ""), tools: opt("tools", ""), bg: opt("bg", "") });
+  fx = real(home, root, { log, long: opt("long", ""), tools: opt("tools", ""), bg: opt("bg", ""), until: opt("until", "") ? Number(opt("until", "")) : undefined });
 } else fx = synthetic(home, root, { projects: Number(opt("projects", "30")), long: Number(opt("long-n", "900")) });
-say(`fixture: ${fx.source}, ${fx.lines} lines, ${(fx.bytes / 1e6).toFixed(1)} MB; targets ${fx.targets.map((t) => `${t.role}=${t.id}`).join(" ")}`);
+say(`fixture: ${fx.source}, ${fx.lines} lines${fx.sha256 ? `, sha256 ${fx.sha256.slice(0, 12)}` : ""}, ${(fx.bytes / 1e6).toFixed(1)} MB; targets ${fx.targets.map((t) => `${t.role}=${t.id}`).join(" ")}`);
 writeFileSync(join(agents, "claude"), `#!/bin/sh\nexec ${process.execPath} ${resolve(here, "test/tools/claude_standin.ts")} "$@"\n`);
 for (const n of ["codex", "grok", "muse", "opencode"]) writeFileSync(join(agents, n), "#!/bin/sh\nexit 1\n");
 for (const n of ["claude", "codex", "grok", "muse", "opencode"]) chmodSync(join(agents, n), 0o755);
@@ -154,7 +154,10 @@ try {
   // a thread opened as a sidebar row opens it: a click on an element whose
   // data-on-click is "select" (host.js's delegated handler). The palette
   // is hub-drawn and on a big copied home took longer than a person waits.
+  // the thread the measured page is meant to show (settle() opens it again)
+  let current: Target | null = null;
   const open = async (p: any, t: Target) => {
+    if (p === page) current = t;
     await p.evaluate((id: string) => {
       const b = document.createElement("button");
       b.setAttribute("data-on-click", "select"); b.setAttribute("data-value", id); b.style.display = "none";
@@ -181,7 +184,30 @@ try {
   const waitText = (p: any, text: string, timeout = 60000) => p.waitForFunction((t: string) => (document.getElementById("timeline")?.textContent || "").includes(t), text, { timeout });
 
   // one measured window: act, then wait until it is over
-  async function measure(name: string, target: Target, act: () => Promise<void>, o: { blank?: boolean; quietMs?: number; max?: number; minMs?: number; noSettle?: boolean; thread?: string } = {}) {
+  // Each window starts from a settled page: connected (the hub's view is
+  // current), the target's thread on screen, nothing typed. A page that is
+  // not is put right (reloaded, the thread opened again, the draft cleared)
+  // and the window says so (r.prep): a failure in it is then its own, not
+  // the leftovers of the one before.
+  const state = () => page.evaluate((id: string) => ({
+    ready: document.documentElement.dataset.backplaneRemoteReady === "true",
+    shown: !!document.querySelector(`main.thread-view[data-thread="${CSS.escape(id)}"]`) || !document.querySelector("main.thread-view[data-thread]"),
+    draft: (document.getElementById("composer") as HTMLTextAreaElement | null)?.value.length ?? 0,
+  }), current?.id ?? "").catch(() => ({ ready: false, shown: false, draft: 0 }));
+  async function settle(o: { keepDraft?: boolean }): Promise<string[]> {
+    const target = current;
+    const fixed: string[] = [];
+    let s = await state();
+    if (!s.ready) {
+      for (let i = 0; i < 50 && !s.ready; i++) { await sleep(100); s = await state(); }
+      if (!s.ready) { fixed.push("reloaded (the view was not current)"); await ready(page); if (target) await open(page, target); await quiet(page, 800, 60000); s = await state(); }
+    }
+    if (target && !s.shown) { fixed.push("thread opened again"); await open(page, target); await quiet(page, 800, 60000); s = await state(); }
+    if (s.draft && !o.keepDraft) { fixed.push(`draft of ${s.draft} chars cleared`); await composer().click().catch(() => {}); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600); }
+    return fixed;
+  }
+  async function measure(name: string, target: Target, act: () => Promise<void>, o: { blank?: boolean; quietMs?: number; max?: number; minMs?: number; noSettle?: boolean; thread?: string; keepDraft?: boolean } = {}) {
+    const prep = await settle({ keepDraft: o.keepDraft });
     const perf0 = await hubPerf(), cpu0 = hubCpu(), m0 = await metrics();
     if (deep) {
       await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 200 }); await cdp.send("Profiler.start");
@@ -194,6 +220,10 @@ try {
     // at least past the page's debounces (a draft's 75 ms refresh) and a hub round trip
     if (!o.noSettle) { await sleep(o.minMs ?? 400); await quiet(page, o.quietMs ?? 500, o.max ?? 20000); }
     const r = await page.evaluate(() => window.__bpRR.end());
+    r.prep = prep;
+    // what the window left behind: a lost view connection is its error
+    const after = await state();
+    if (!after.ready) r.error = (r.error ? r.error + "; " : "") + "the view was not current at the window's end (connection lost?)";
     const m1 = await metrics(), cpu1 = hubCpu(), perf1 = await hubPerf();
     r.wallMs = Date.now() - t0;
     r.error = error;
@@ -208,6 +238,7 @@ try {
       r.forcedLayouts = await traceForced();
     }
     results.push(r);
+    if (prep.length) say(`${r.name}: started from a page put right first: ${prep.join(", ")}`);
     say(`${r.name}: ${r.activeMs} ms, ${r.dom.records} mutations (+${r.dom.added}/-${r.dom.removed} nodes, ${r.dom.recreatedIdentical} recreated identical), rows touched ${r.rows.touched} (unchanged ${r.rows.touchedUnchanged}), ws in ${r.ws.inBytes} B, hub ${r.hub.cpuMs} ms CPU${error ? `, ERROR ${error}` : ""}`);
     return r;
   }
@@ -260,7 +291,7 @@ try {
     if (scenarios.includes("type1")) {
       await composer().click(); await quiet(page);
       await measure("type1", target, () => page.keyboard.type("a"));
-      await measure("type1b", target, () => page.keyboard.type("b"));
+      await measure("type1b", target, () => page.keyboard.type("b"), { keepDraft: true });
     }
     if (scenarios.includes("burst")) { await composer().click(); await measure("burst", target, () => page.keyboard.type("the quick brown fox jumps ov", { delay: 30 })); }
     // clear the draft (not measured)
@@ -274,6 +305,15 @@ try {
       for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 2000);
       await quiet(page, 600);
     }
+    // opt-in: a person scrolling up at reading pace, no throttle (a notch
+    // every 300 ms), then 2 s still: does the older history come?
+    if (scenarios.includes("slowup")) {
+      const box = await timeline().boundingBox();
+      if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      const r = await measure("slow-up", target, async () => { for (let i = 0; i < 40; i++) { await page.mouse.wheel(0, -400); await sleep(300); } await sleep(2000); }, { blank: true, quietMs: 700 });
+      r.end = await page.evaluate(() => ({ top: document.getElementById("timeline")?.scrollTop, older: window.__bpRender.ahead?.("older") }));
+      say(`slow-up:${target.role}: wheels ${JSON.stringify(r.wheels)}, at the end ${JSON.stringify(r.end)}, hub views ${Object.entries(r.hubMsgs).filter(([k]) => k.startsWith("reply:view.")).map(([k, v]: any) => k + "×" + v.n).join(" ")}`);
+    }
     // The "Loading newer/earlier messages" placeholder is timing-dependent:
     // fast sweeps on a CPU throttled 4x, three times, each down-sweep
     // measured (the placeholder, blank frames, and what was still awaited
@@ -284,7 +324,19 @@ try {
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       try {
         for (let c = 0; c < 3; c++) {
-          await measure("stress-up", target, async () => { for (let i = 0; i < 30; i++) { await page.mouse.wheel(0, -900); await sleep(16); } }, { blank: true, quietMs: 700, max: 30000 });
+          const up = await measure("stress-up", target, async () => { for (let i = 0; i < 30; i++) { await page.mouse.wheel(0, -900); await sleep(16); } }, { blank: true, quietMs: 700, max: 30000 });
+          // after a sweep that stalled: 2 s idle, then one more wheel must
+          // move the view (pages in flight have come; it is not stuck)
+          if (up.wheels?.stalls) {
+            await sleep(2000);
+            const view = () => page.evaluate(() => { const tl = document.getElementById("timeline"); return { key: tl ? tl.scrollTop + "|" + (tl.querySelector(".timeline-virtual-track")?.getAttribute("style") || "") : "", ahead: !!window.__bpRender.ahead?.("older") || (tl?.scrollTop ?? 0) > 0 }; });
+            const v0 = await view(), t0 = Date.now();
+            await page.mouse.wheel(0, -400);
+            let moved = false;
+            while (!moved && Date.now() - t0 < 1500) { await sleep(30); moved = (await view()).key !== v0.key; }
+            up.recovery = { moved, ms: Date.now() - t0, ahead: v0.ahead };
+            say(`stress-up:${target.role}: after 2 s idle the next wheel ${up.recovery.moved ? `moved in ${up.recovery.ms} ms` : up.recovery.ahead ? "did NOT move (stuck)" : "had nothing above"}`);
+          }
           await measure("stress-down", target, async () => { for (let i = 0; i < 40; i++) { await page.mouse.wheel(0, 900); await sleep(16); } }, { blank: true, quietMs: 700, max: 30000 });
         }
       } finally { await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 }); }
@@ -296,6 +348,36 @@ try {
       const big = Array.from({ length: 400 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
       await measure("paste", target, () => paste(big));
     }
+    // clear the draft (not measured)
+    await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
+    // (after a longer quiet: a view still on its way is not the tick's)
+    if (scenarios.includes("clock")) await quiet(page, 1500, 20000);
+    if (scenarios.includes("clock")) await measure("clock", target, () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))));
+    if (scenarios.includes("bg") && bg && bg !== target) {
+      await open(driver, bg); await quiet(driver, 600, 60000);
+      const w = `zqbgtag${++tag}`;
+      await measure("bg-stream", target, async () => { await sendFrom(driver, `background work ${w}`); await waitText(driver, `${w}39`, 90000); }, { quietMs: 800, max: 30000 });
+    }
+    if (scenarios.includes("send") || scenarios.includes("stream")) {
+      const w = `zqsend${++tag}`;
+      await composer().click(); await page.keyboard.insertText(`a message to measure ${w}`); await quiet(page, 500);
+      await measure("send", target, async () => { await page.keyboard.press("Enter"); await waitText(page, w, 20000); }, { noSettle: true, keepDraft: true });
+      if (scenarios.includes("stream")) await measure("stream", target, () => waitText(page, `${w}39`, 90000), { quietMs: 1000, max: 30000 });
+      else await waitText(page, `${w}39`, 90000).catch(() => {});
+      await quiet(page, 800);
+    }
+    if (scenarios.includes("toolgroup")) {
+      const w = `zqtg${++tag}`;
+      await composer().click(); await page.keyboard.insertText(`run some tools tools:8 ${w}`); await quiet(page, 500);
+      await measure("toolgroup", target, async () => { await page.keyboard.press("Enter"); await waitText(page, `${w}39`, 90000); }, { quietMs: 1000, max: 30000, keepDraft: true });
+    }
+    if (scenarios.includes("switch")) {
+      await measure("switch-away", target, () => open(page, other), { quietMs: 800, max: 60000, thread: other.id });
+      await measure("switch-back", target, () => open(page, target), { quietMs: 800, max: 60000, thread: target.id });
+    }
+    // last for its thread: a draft this size has cost the page its view
+    // connection (the hub echoed it past the 256 KB frame limit); anything
+    // after it would measure the reconnect
     if (scenarios.includes("pastebig")) {
       await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
       const big = Array.from({ length: 4000 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
@@ -315,37 +397,11 @@ try {
       const big = Array.from({ length: 4000 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
       await paste(big); await quiet(page, 800, 60000);
       await page.evaluate(() => { const c = document.getElementById("composer") as HTMLTextAreaElement; c.focus(); c.setSelectionRange(c.value.length, c.value.length); });
-      await measure("bigtype-end", target, () => page.keyboard.type("the quick brown fox ", { delay: 30 }), { max: 60000 });
+      await measure("bigtype-end", target, () => page.keyboard.type("the quick brown fox ", { delay: 30 }), { max: 60000, keepDraft: true });
       await page.evaluate(() => { const c = document.getElementById("composer") as HTMLTextAreaElement; const m = c.value.length >> 1; c.setSelectionRange(m, m); });
-      await measure("bigtype-mid", target, () => page.keyboard.type("the quick brown fox ", { delay: 30 }), { max: 60000 });
+      await measure("bigtype-mid", target, () => page.keyboard.type("the quick brown fox ", { delay: 30 }), { max: 60000, keepDraft: true });
     }
-    // clear the draft (not measured)
-    await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
-    // (after a longer quiet: a view still on its way is not the tick's)
-    if (scenarios.includes("clock")) await quiet(page, 1500, 20000);
-    if (scenarios.includes("clock")) await measure("clock", target, () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))));
-    if (scenarios.includes("bg") && bg && bg !== target) {
-      await open(driver, bg); await quiet(driver, 600, 60000);
-      const w = `zqbgtag${++tag}`;
-      await measure("bg-stream", target, async () => { await sendFrom(driver, `background work ${w}`); await waitText(driver, `${w}39`, 90000); }, { quietMs: 800, max: 30000 });
-    }
-    if (scenarios.includes("send") || scenarios.includes("stream")) {
-      const w = `zqsend${++tag}`;
-      await composer().click(); await page.keyboard.insertText(`a message to measure ${w}`); await quiet(page, 500);
-      await measure("send", target, async () => { await page.keyboard.press("Enter"); await waitText(page, w, 20000); }, { noSettle: true });
-      if (scenarios.includes("stream")) await measure("stream", target, () => waitText(page, `${w}39`, 90000), { quietMs: 1000, max: 30000 });
-      else await waitText(page, `${w}39`, 90000).catch(() => {});
-      await quiet(page, 800);
-    }
-    if (scenarios.includes("toolgroup")) {
-      const w = `zqtg${++tag}`;
-      await composer().click(); await page.keyboard.insertText(`run some tools tools:8 ${w}`); await quiet(page, 500);
-      await measure("toolgroup", target, async () => { await page.keyboard.press("Enter"); await waitText(page, `${w}39`, 90000); }, { quietMs: 1000, max: 30000 });
-    }
-    if (scenarios.includes("switch")) {
-      await measure("switch-away", target, () => open(page, other), { quietMs: 800, max: 60000, thread: other.id });
-      await measure("switch-back", target, () => open(page, target), { quietMs: 800, max: 60000, thread: target.id });
-    }
+    await composer().click().catch(() => {}); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
   }
 } catch (e: any) {
   failed = true;
@@ -378,7 +434,12 @@ for (const r of results) {
     score: outside + 10 * r.rows.touchedUnchanged + r.dom.recreatedIdentical + r.dom.netNoop + (kind.startsWith("scroll") ? r.dom.records - scrollStyle : 0) };
 }
 mkdirSync(outDir, { recursive: true });
-const report = { at: new Date().toISOString(), fixture: { kind: fixtureKind, source: fx.source, lines: fx.lines, bytes: fx.bytes, targets: fx.targets.map((t) => ({ role: t.role, id: fixtureKind === "real" ? t.id : t.id })) },
+// what was measured: each build's stamp (test/tools/rerender/build.sh) and
+// this tree's own (stamp.sh)
+const readStamp = (p: string) => { try { return readFileSync(p, "utf8").trim(); } catch { return ""; } };
+const build = { hub: readStamp(bin + ".stamp"), web: readStamp(join(web, "BUILD-STAMP")),
+  tree: Bun.spawnSync(["sh", join(import.meta.dir, "stamp.sh")]).stdout.toString().trim() };
+const report = { at: new Date().toISOString(), build, fixture: { kind: fixtureKind, source: fx.source, lines: fx.lines, bytes: fx.bytes, cut: fx.cut, sha256: fx.sha256, targets: fx.targets.map((t) => ({ role: t.role, id: fixtureKind === "real" ? t.id : t.id })) },
   hub: bin, web, deep, failed, results };
 writeFileSync(join(outDir, "report.json"), JSON.stringify(report, null, 1));
 writeFileSync(join(outDir, "report.md"), markdown(report));
@@ -386,12 +447,12 @@ say(`wrote ${join(outDir, "report.md")}`);
 
 function markdown(rep: any) {
   const L: string[] = [];
-  L.push(`# Re-render report — ${rep.at}`, "", `Fixture: ${rep.fixture.source} (${rep.fixture.lines} lines). Hub \`${rep.hub}\`, web \`${rep.web}\`.${rep.failed ? " **The run failed part way.**" : ""}`, "");
-  L.push("| scenario | active ms | first paint / current ms | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+  L.push(`# Re-render report — ${rep.at}`, "", `Fixture: ${rep.fixture.source} (${rep.fixture.lines} lines). Hub \`${rep.hub}\` (${rep.build.hub || "unstamped"}), web \`${rep.web}\` (${rep.build.web || "unstamped"}), tree ${rep.build.tree}.${rep.failed ? " **The run failed part way.**" : ""}`, "");
+  L.push("| scenario | active ms | first paint / current ms | wheels: stalls, move p50/p95 | mutations | +nodes | −nodes | recreated same | rows touched / unchanged | ws in KB (frames) | hub CPU ms | hub rpc (n, ms) | layouts | style | script ms | long frames | key→paint p50/p95 | wheel→frame p95 | blank / loading | renders full/part | dom.patch | memo.make |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const r of rep.results) {
     const k = r.events["paint:keydown"], w = r.scroll.wheelToFrame, c = r.counts, rpc = r.hub.perf["hub.rpc"];
-    L.push(`| ${r.name} | ${r.activeMs} | ${r.firstPaintMs ?? "–"} / ${r.currentMs ?? "–"} | ${r.dom.records} | ${r.dom.added} | ${r.dom.removed} | ${r.dom.recreatedIdentical} | ${r.rows.touched} / ${r.rows.touchedUnchanged} | ${(r.ws.inBytes / 1024).toFixed(1)} (${r.ws.inFrames}) | ${r.hub.cpuMs} | ${rpc ? `${rpc.n}, ${rpc.ms}` : "–"} | ${r.chrome.layouts} | ${r.chrome.styleRecalcs} | ${r.chrome.scriptMs} | ${r.frames.long} | ${k ? `${k.p50}/${k.p95}` : "–"} | ${w.n ? w.p95 : "–"} | ${r.scroll.checkedFrames ? r.scroll.blankFrames : "–"} / ${r.scroll.loadingCount} | ${c["render.full"] ?? 0}/${c["render.part"] ?? 0} | ${c["dom.patch"] ?? 0} | ${c["memo.make"] ?? 0} |`);
+    L.push(`| ${r.name} | ${r.activeMs} | ${r.firstPaintMs ?? "–"} / ${r.currentMs ?? "–"} | ${r.wheels?.n ? `${r.wheels.stalls}/${r.wheels.ahead}, ${r.wheels.p50}/${r.wheels.p95}` : "–"} | ${r.dom.records} | ${r.dom.added} | ${r.dom.removed} | ${r.dom.recreatedIdentical} | ${r.rows.touched} / ${r.rows.touchedUnchanged} | ${(r.ws.inBytes / 1024).toFixed(1)} (${r.ws.inFrames}) | ${r.hub.cpuMs} | ${rpc ? `${rpc.n}, ${rpc.ms}` : "–"} | ${r.chrome.layouts} | ${r.chrome.styleRecalcs} | ${r.chrome.scriptMs} | ${r.frames.long} | ${k ? `${k.p50}/${k.p95}` : "–"} | ${w.n ? w.p95 : "–"} | ${r.scroll.checkedFrames ? r.scroll.blankFrames : "–"} / ${r.scroll.loadingCount} | ${c["render.full"] ?? 0}/${c["render.part"] ?? 0} | ${c["dom.patch"] ?? 0} | ${c["memo.make"] ?? 0} |`);
   }
   const loads = rep.results.filter((r: any) => r.scroll.loadingCount);
   if (loads.length) {
@@ -425,39 +486,78 @@ if (budgets) {
   let over = 0;
   for (const r of results) {
     const kind = r.name.split(":")[0];
+    // a window that did not finish (a timeout, a lost connection) fails: its
+    // numbers measure something else
+    if (r.error) { console.log(`OVER ${r.name} error: ${r.error}`); over++; }
+    // nothing the harness did starts an agent in open or idle: one that
+    // starts there was woken by the input itself (an unsettled log)
+    if (/^(open|idle)$/.test(kind) && r.hub.perf["hub.claude_pid"]?.n) { console.log(`OVER ${r.name} an agent started (hub.claude_pid ${r.hub.perf["hub.claude_pid"].n}): the input is not settled`); over++; }
     // hard rules, budget or not: no loading placeholder anywhere, no blank
     // frame while scrolling
     if (r.scroll.loadingCount > 0) { console.log(`OVER ${r.name} loading ${r.scroll.loadingCount} > 0 (${JSON.stringify(r.scroll.loadingSeen[0])})`); over++; }
     // a known failure (budgets.json's "known") is allowed no worse than it
     // was recorded, and only where it was: its owner's PR removes the entry
     const known = (b.known ?? []).find((k: any) => k.scenario === r.name && k.rule === "blankFrames");
+    // stress windows: a wheel that left the view where it was while more
+    // lay that way is a stall; none allowed but a recorded known one
+    const kstall = (b.known ?? []).find((k: any) => k.scenario === r.name && k.rule === "stalls");
+    // stuck: after a stalled sweep and 2 s idle, a wheel with more above
+    // still moved nothing. Never allowed, known failure or not.
+    if (r.recovery && r.recovery.ahead && !r.recovery.moved) { console.log(`OVER ${r.name} stuck: after 2 s idle the next wheel did not move the view`); over++; }
+    if (/^stress/.test(kind) && r.wheels?.stalls > 0) {
+      if (!kstall || r.wheels.stalls > kstall.stalls) { console.log(`OVER ${r.name} stalls ${r.wheels.stalls} > ${kstall ? kstall.stalls + " (known: " + kstall.until + ")" : 0} (wheel→move p95 ${r.wheels.p95} ms)`); over++; }
+      else console.log(`known ${r.name} stalls ${r.wheels.stalls}: ${kstall.until}`);
+    }
     if (/^(scroll|stress)/.test(kind) && r.scroll.blankFrames > 0) {
       if (!known) { console.log(`OVER ${r.name} blankFrames ${r.scroll.blankFrames} > 0 (worst gap ${r.scroll.worstGapPx} px)`); over++; }
       else if (r.scroll.blankFrames > known.blankFrames || r.scroll.worstGapPx > known.worstGapPx) {
         console.log(`OVER ${r.name} blankFrames ${r.scroll.blankFrames} (gap ${r.scroll.worstGapPx} px), worse than the known failure (${known.blankFrames}, ${known.worstGapPx} px; ${known.until})`); over++;
       } else console.log(`known ${r.name} blankFrames ${r.scroll.blankFrames} (gap ${r.scroll.worstGapPx} px): ${known.until}`);
     }
-    const lim = kind === "known" ? null : b[kind];
+    const lim = kind === "known" || kind === "fixture" ? null : b[kind];
     if (!lim) continue;
     const got: Record<string, number> = { mutations: r.dom.records, recreatedIdentical: r.dom.recreatedIdentical, touchedUnchangedRows: r.rows.touchedUnchanged,
       outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
     for (const [k, max] of Object.entries(lim as Record<string, number>)) if (k !== "loading" && k !== "blankFrames" && k in got && got[k] > max) { console.log(`OVER ${r.name} ${k} ${got[k]} > ${max}`); over++; }
   }
   if (failed) { console.log("the run failed"); over++; }
+  if (b.fixture && b.fixture !== fx.sha256) { console.log(`STALE the budgets are for fixture ${b.fixture}, this run's is ${fx.sha256}`); over++; }
+  if (build.hub !== build.tree || build.web !== build.tree) { console.log(`STALE the builds are not this tree's: hub ${build.hub || "unstamped"}, web ${build.web || "unstamped"}, tree ${build.tree} (test/tools/rerender/build.sh)`); over++; }
   console.log(over ? `${over} over budget` : "all within budget");
   process.exit(over ? 1 : 0);
 }
 const wb = opt("write-budgets", "");
+// and only from the fixture the file's numbers came from
+const wbFixture = (() => { try { return JSON.parse(readFileSync(wb, "utf8")).fixture ?? ""; } catch { return ""; } })();
+if (wb && wbFixture && wbFixture !== fx.sha256 && !flag("fresh-budgets")) {
+  console.log(`not writing budgets: their fixture is ${wbFixture}, this run's ${fx.sha256} (--fresh-budgets starts them over)`);
+  process.exit(1);
+}
+if (wb && (!build.hub || build.hub !== build.tree || build.web !== build.tree || failed)) {
+  // budgets come only from a run of this very tree's builds
+  console.log(`not writing budgets: hub ${build.hub || "unstamped"}, web ${build.web || "unstamped"}, tree ${build.tree}${failed ? ", the run failed" : ""} (build with test/tools/rerender/build.sh)`);
+  process.exit(1);
+}
 if (wb) {
   const b: Record<string, Record<string, number>> = {};
   for (const r of results) {
     const k = r.name.split(":")[0];
-    const lim = (x: number) => Math.ceil(x * 1.25 + 2);
+    // scroll and stress windows depend on how many pages land in them:
+    // twice what was seen; other windows a quarter more
+    const lim = /^(scroll|stress)/.test(k) ? (x: number) => Math.ceil(x * 2 + 50) : (x: number) => Math.ceil(x * 1.25 + 2);
     const cur = { mutations: lim(r.dom.records), recreatedIdentical: lim(r.dom.recreatedIdentical), touchedUnchangedRows: lim(r.rows.touchedUnchanged), outsideRecords: lim(r.waste.outsideRecords),
-      wsInBytes: Math.ceil(r.ws.inBytes * 2 + 65536), /* which view lands in a window varies: 55 or 131 KB */ renderFull: lim(r.counts["render.full"] ?? 0), hubViews: lim(hubViews(r)), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
+      wsInBytes: Math.ceil(r.ws.inBytes * 1.5 + 8192), /* the hub's view deltas: sizes vary little now */ renderFull: lim(r.counts["render.full"] ?? 0), hubViews: lim(hubViews(r)), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
     b[k] = b[k] ? Object.fromEntries(Object.entries(cur).map(([n, v]) => [n, Math.max(v, b[k][n as keyof typeof cur] ?? 0)])) : cur;
   }
-  try { const old = JSON.parse(readFileSync(wb, "utf8")); if (old.known) (b as any).known = old.known; } catch {}
+  // runs vary with timing (paging, a stray render): a budget is the worst
+  // of the runs written into the file (--write-budgets several times over)
+  // unless --fresh-budgets; the known failures carry over
+  try {
+    const old = JSON.parse(readFileSync(wb, "utf8"));
+    if (old.known) (b as any).known = old.known;
+    if (!flag("fresh-budgets")) for (const [k, v] of Object.entries(old)) if (k !== "known" && k !== "fixture" && b[k]) for (const [n, x] of Object.entries(v as Record<string, number>)) b[k][n] = Math.max(b[k][n] ?? 0, x);
+  } catch {}
+  (b as any).fixture = fx.sha256;
   writeFileSync(wb, JSON.stringify(b, null, 1) + "\n");
   say(`wrote budgets ${wb}`);
 }

@@ -1,5 +1,6 @@
 import Base
 import ./dom.bend as D
+import ../core/landing.bend as LAND
 
 def H.bool.value(r: Map<&2, Bool> & Bool) -> Bool:
   (_, v) = r
@@ -443,6 +444,16 @@ def H.project(reset: Bool, +previous: D.Node, +fresh: D.Node, direction: String)
 def project(previous: D.Node, fresh: D.Node, +direction: String) -> D.Node:
   H.project(Bool.or(String.eq(direction, "reset"), String.eq(direction, "newest")), H.prepared(previous), H.prepared(fresh), direction)
 
+# The same, for a previous page that is project's own result (host.js's
+# historyNode): already prepared (its source labels grouped, H.prepare
+# again changes nothing, test/timeline_history_test.bend), so it is not
+# walked again; a landing then costs the fresh page and the merge.
+def project_held(previous: D.Node, fresh: D.Node, +direction: String) -> D.Node:
+  H.project(Bool.or(String.eq(direction, "reset"), String.eq(direction, "newest")), previous, H.prepared(fresh), direction)
+
+def prepared(node: D.Node) -> D.Node:
+  H.prepared(node)
+
 # Rows held past the cap (thin-host.js's heldTrim): the rows of the pages
 # let go leave the page, and their measured height stays as a gap (gaps),
 # so the scrollbar and the reader's place do not move (host.js sums the
@@ -530,3 +541,198 @@ def H.gaps.paint(xs: List<&2, D.Node>, at: Bool, +older: String, +newer: String,
 
 def gaps(+node: D.Node, +older: String, +newer: String) -> D.Node:
   H.first(H.gaps.paint([node], H.timeline(node), older, newer, Nil{}), node)
+
+# What a page reply redraws (core/landing.bend, laws land_*): "page", or the
+# names of the regions it wrote into, space-separated. regions: a line each,
+# its name then its path in the reply's body, tab-separated; paths: the
+# delta's, one a line ("" none; a whole reply: one empty line)
+def landing(+regions: String, +paths: String) -> String:
+  LAND.Land.of(regions, paths)
+
+# An older page added as a block (host.js's landing): the merge reads the
+# held rows only down to the end of the new page's overlap, and the rest of
+# them is the very same list, shared. That is the full merge's result when
+# the rest holds entry rows alone and no run of tool calls crosses into it:
+# the full merge keeps every old entry row outside the fresh page's span as
+# it is, in order, and drops only old controls, transient rows, rows the
+# fresh page draws, and the rows of runs the fresh page shuts. The held
+# timeline says where its last non-entry node is (data-held-clean: the
+# count of nodes up to it, set by every merge), so the check costs nothing
+# per held row; anything else takes the full merge
+# (test/timeline_history_test.bend holds both equal).
+def H.kids(found: Maybe<&2, List<&2, D.Node>>) -> List<&2, D.Node>:
+  match found:
+    case None{}: Nil{}
+    case Some{xs}: xs
+
+# (the count H.marked wrote, Nat.show's digits; "" none: unknown)
+def H.num.go(s: String, +acc: Nat) -> Nat:
+  match s:
+    case SNil{}: acc
+    case SCon{Chr{+c}, t}: H.num.go(t, Nat.add(Nat.mul(acc, 10n), U32.to_nat((c - 48 : U32))))
+
+def H.num(s: String) -> Maybe<&2, Nat>:
+  match s:
+    case SNil{}: None{}
+    case SCon{c, t}: Some{H.num.go(SCon{c, t}, 0n)}
+
+# the count of nodes up to and including the last one that is not an entry row
+def H.clean.step(row: Bool, +i: Nat, last: Nat) -> Nat:
+  match row:
+    case True{}: last
+    case False{}: Nat.add(i, 1n)
+
+def H.clean(xs: List<&2, D.Node>, +i: Nat, last: Nat) -> Nat:
+  match xs:
+    case Nil{}: last
+    case +h <> t: H.clean(t, Nat.add(i, 1n), H.clean.step(H.historical(h), i, last))
+
+type HSplit is Data:
+  HSplit{count: Nat, shared: Bool, rest: List<&2, D.Node>}
+
+# the split stops at the first entry row the fresh page does not draw
+def H.stops(xs: List<&2, D.Node>, +fk: Map<&2, Bool>) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case +h <> _: Bool.and(H.historical(h), Bool.not(H.has(fk, key(h))))
+
+def H.split(xs: List<&2, D.Node>, stop: Bool, +fk: Map<&2, Bool>, +n: Nat, shared: Bool) -> HSplit:
+  match xs stop:
+    case Nil{} _: HSplit{n, shared, Nil{}}
+    case +h <> +t True{}: HSplit{n, shared, h <> t}
+    case +h <> +t False{}: H.split(t, H.stops(t, fk), fk, Nat.add(n, 1n), Bool.or(shared, H.has(fk, key(h))))
+
+def H.in.run(xs: List<&2, D.Node>) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case +h <> _: Bool.not(String.is_empty(H.run(h)))
+
+def H.take(xs: List<&2, D.Node>, n: Nat, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs n:
+    case Nil{} _: List.reverse(&2, D.Node, acc)
+    case +h <> t 0n: List.reverse(&2, D.Node, acc)
+    case +h <> t 1n+p: H.take(t, p, h <> acc)
+
+# a merged timeline's rows and where its last non-entry node is
+type HMerged is Data:
+  HMerged{kids: List<&2, D.Node>, clean: Nat}
+
+def H.merged(+kids: List<&2, D.Node>) -> HMerged:
+  HMerged{kids, H.clean(kids, 0n, 0n)}
+
+# merged: the merge of the read part, whose count is the whole's (the
+# shared rest after it holds entry rows alone)
+def H.onto.rest(+merged: List<&2, D.Node>, rest: List<&2, D.Node>) -> HMerged:
+  HMerged{H.onto(List.reverse(&2, D.Node, merged), rest), H.clean(merged, 0n, 0n)}
+
+def H.drop.n(xs: List<&2, D.Node>, n: Nat) -> List<&2, D.Node>:
+  match xs n:
+    case Nil{} _: Nil{}
+    case +h <> +t 0n: h <> t
+    case _ <> t 1n+p: H.drop.n(t, p)
+
+def H.shares(xs: List<&2, D.Node>, +fk: Map<&2, Bool>, acc: Bool) -> Bool:
+  match xs:
+    case Nil{}: acc
+    case +h <> t: H.shares(t, fk, Bool.or(acc, Bool.and(H.historical(h), H.has(fk, key(h)))))
+
+# the part read: down to the end of the overlap or past the last non-entry
+# node, whichever is further (the full merge drops old controls and
+# transient rows, so they are read and dropped here too); both lie in the
+# last pages merged, so the part read is a page or two whatever is held
+type HCut is Data:
+  HCut{head: List<&2, D.Node>, rest: List<&2, D.Node>}
+
+def H.cut(+old: List<&2, D.Node>, +n: Nat) -> HCut:
+  HCut{H.take(old, n, Nil{}), H.drop.n(old, n)}
+
+def H.reach(+s: HSplit, +clean: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+  match s clean:
+    case HSplit{n, _, _} Some{c}: Some{Bool.pick(Nat, Nat.is_ge(n, c), n, c)}
+    case _ None{}: None{}
+
+def H.cut.ok(+c: HCut, +fk: Map<&2, Bool>) -> Bool:
+  match c:
+    case HCut{head, rest}: Bool.and(H.shares(head, fk, False{}), Bool.not(H.in.run(rest)))
+
+def H.block.k(ok: Bool, +old: List<&2, D.Node>, +fresh: List<&2, D.Node>, +c: HCut, +direction: String) -> HMerged:
+  match ok c:
+    case True{} HCut{head, rest}: H.onto.rest(H.merge(H.rows(head, Nil{}), fresh, direction), rest)
+    case False{} _: H.merged(H.merge(H.rows(old, Nil{}), fresh, direction))
+
+def H.block.at(+reach: Maybe<&2, Nat>, +old: List<&2, D.Node>, +fresh: List<&2, D.Node>, +fk: Map<&2, Bool>, +direction: String) -> HMerged:
+  match reach:
+    case None{}: H.merged(H.merge(H.rows(old, Nil{}), fresh, direction))
+    case Some{n}: H.block.k(Bool.and(String.eq(direction, "older"), H.cut.ok(H.cut(old, n), fk)), old, fresh, H.cut(old, n), direction)
+
+def H.block(+old: List<&2, D.Node>, +fresh: List<&2, D.Node>, +clean: Maybe<&2, Nat>, +direction: String) -> HMerged:
+  +fk = H.keys(H.rows(fresh, Nil{}), Map.new(&2, Bool))
+  H.block.at(H.reach(H.split(old, H.stops(old, fk), fk, 0n, False{}), clean), old, fresh, fk, direction)
+
+def H.clean.attr(xs: List<&2, D.Attr>, +n: Nat) -> List<&2, D.Attr>:
+  List.append(&2, D.Attr, xs, [D.At{"data-held-clean", Nat.show(n)}])
+
+def H.no.clean(xs: List<&2, D.Attr>, acc: List<&2, D.Attr>) -> List<&2, D.Attr>:
+  match xs:
+    case Nil{}: List.reverse(&2, D.Attr, acc)
+    case D.At{"data-held-clean", _} <> t: H.no.clean(t, acc)
+    case +h <> t: H.no.clean(t, h <> acc)
+
+# the merged timeline, marked with where its last non-entry node is
+def H.marked(tag: String, k: String, as: List<&2, D.Attr>, m: HMerged) -> D.Node:
+  match m:
+    case HMerged{kids, n}: D.El{tag, k, H.clean.attr(H.no.clean(as, Nil{}), n), kids}
+
+def H.paint.block(xs: List<&2, D.Node>, at: Bool, +old: List<&2, D.Node>, +clean: Maybe<&2, Nat>, +direction: String, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs at:
+    case Nil{} _: List.reverse(&2, D.Node, acc)
+    case D.El{tag, k, as, ks} <> +t True{}:
+      H.paint.block(t, H.head(t), old, clean, direction, H.marked(tag, k, as, H.block(old, ks, clean, direction)) <> acc)
+    case D.El{tag, k, as, +ks} <> +t False{}:
+      H.paint.block(t, H.head(t), old, clean, direction, D.El{tag, k, as, H.paint.block(ks, H.head(ks), old, clean, direction, Nil{})} <> acc)
+    case h <> +t _: H.paint.block(t, H.head(t), old, clean, direction, h <> acc)
+
+def H.timeline.attrs(found: Maybe<&2, D.Node>) -> String:
+  match found:
+    case Some{D.El{_, _, as, _}}: H.attr(as, "data-held-clean")
+    case _: ""
+
+def H.find.el(xs: List<&2, D.Node>, at: Bool, got: Maybe<&2, D.Node>) -> Maybe<&2, D.Node>:
+  match xs at got:
+    case _ _ Some{n}: Some{n}
+    case Nil{} _ None{}: None{}
+    case +h <> +t True{} None{}: Some{h}
+    case D.El{_, _, _, +ks} <> +t False{} None{}:
+      H.find.el(t, H.head(t), H.find.el(ks, H.head(ks), None{}))
+    case D.Txt{_} <> +t _ None{}: H.find.el(t, H.head(t), None{})
+
+# project_held for an older page, the held rows past the overlap shared
+def project_block.k(+previous: D.Node, +ready: D.Node, +direction: String) -> D.Node:
+  +old = H.kids(H.find([previous], H.timeline(previous), None{}))
+  +clean = H.num(H.timeline.attrs(H.find.el([previous], H.timeline(previous), None{})))
+  H.first(H.paint.block([ready], H.timeline(ready), old, clean, direction, Nil{}), ready)
+
+def project_block(+previous: D.Node, fresh: D.Node, +direction: String) -> D.Node:
+  project_block.k(previous, H.prepared(fresh), direction)
+
+# whether project_block adds this page as a block, and why not (for the
+# tests and the harness): "block", "nomark", "noshare", "run", "newer"
+def H.why.parts(+c: HCut, +fk: Map<&2, Bool>) -> String:
+  match c:
+    case HCut{head, rest}: Bool.pick(String, Bool.not(H.shares(head, fk, False{})), "noshare", Bool.pick(String, H.in.run(rest), "run", "block"))
+
+def H.why.cut(+reach: Maybe<&2, Nat>, +old: List<&2, D.Node>, +fk: Map<&2, Bool>) -> String:
+  match reach:
+    case None{}: "nomark"
+    case Some{n}: H.why.parts(H.cut(old, n), fk)
+
+def why.k(+previous: D.Node, +ready: D.Node, +direction: String) -> String:
+  +old = H.kids(H.find([previous], H.timeline(previous), None{}))
+  +fk = H.keys(H.rows(H.kids(H.find([ready], H.timeline(ready), None{})), Nil{}), Map.new(&2, Bool))
+  Bool.pick(String, String.eq(direction, "older"), H.why.cut(H.reach(H.split(old, H.stops(old, fk), fk, 0n, False{}), H.num(H.timeline.attrs(H.find.el([previous], H.timeline(previous), None{})))), old, fk), "newer")
+
+def why(+previous: D.Node, fresh: D.Node, +direction: String) -> String:
+  why.k(previous, H.prepared(fresh), direction)
+
+def blocks(+previous: D.Node, fresh: D.Node, +direction: String) -> Bool:
+  String.eq(why(previous, fresh, direction), "block")

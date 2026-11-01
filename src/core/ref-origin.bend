@@ -74,6 +74,24 @@ def Origin.url(stop: Bool, +c: Char, token: String, acc: String, +link: String, 
     case False{}: Scan{SCon{c, token}, acc, code, 0n, True{}}
     case True{}: Scan{"", SCon{c, Origin.flush(True{}, token, link, acc)}, code, 0n, False{}}
 
+# whether a reference starts at c: the cheap test first. Building
+# SCon{c, tail} to ask String.starts_with of it (a string as long as the
+# rest of the text, at every character) and reading the head of the
+# accumulator (a rope grown a character at a time) made a scan quadratic:
+# a hub folding its mirrors at boot peaked 5 GB above its own state
+def Origin.start.at(+mode: Nat, acc: String, at: Bool) -> Bool:
+  match at:
+    case True{}: Bool.and(Nat.is_eq(mode, 0n), Origin.boundary(acc))
+    case False{}: False{}
+
+def Origin.start.b(b: Bool, +mode: Nat, acc: String, +tail: String) -> Bool:
+  match b:
+    case True{}: Origin.start.at(mode, acc, String.starts_with(tail, "ackplane://"))
+    case False{}: False{}
+
+def Origin.start(+c: Char, +tail: String, +acc: String, +mode: Nat) -> Bool:
+  Origin.start.b(Char.is_eq(c, 'b'), mode, acc, tail)
+
 def Origin.step(tick: Bool, +c: Char, +tail: String, +link: String, st: Scan) -> Scan:
   match tick st:
     case True{} Scan{token, acc, code, ticks, url}:
@@ -81,7 +99,7 @@ def Origin.step(tick: Bool, +c: Char, +tail: String, +link: String, st: Scan) ->
     case False{} Scan{token, acc, code, ticks, True{}}:
       Origin.url(Origin.stops(c), c, token, acc, link, Origin.mode(code, ticks))
     case False{} Scan{_, +acc, +code, +ticks, False{}}:
-      Origin.text(Bool.and(Nat.is_eq(Origin.mode(code, ticks), 0n), Bool.and(Origin.boundary(acc), String.starts_with(SCon{c, tail}, "backplane://"))), c, acc, Origin.mode(code, ticks))
+      Origin.text(Origin.start(c, tail, acc, Origin.mode(code, ticks)), c, acc, Origin.mode(code, ticks))
 
 def Origin.scan(s: String, +link: String, st: Scan) -> String:
   match s st:
