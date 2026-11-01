@@ -14872,3 +14872,10 @@ def Laws.land_window_only():
 def Laws.land_timeline_only():
   {==}
 # END page landing (P)
+# BEGIN page splice (H)
+def Laws.view_memo_key_page_last(seq, info, p, anchor, view, web, thread): {==}
+def Laws.view_page_memo_same_step(): {==}
+def Laws.view_page_memo_next_step(): {==}
+def Laws.view_page_memo_other_inputs(): {==}
+def Laws.view_page_memo_not_fitted(): {==}
+# END page splice (H)

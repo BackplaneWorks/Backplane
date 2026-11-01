@@ -14567,3 +14567,31 @@ law land_window_only:
 law land_timeline_only:
   {LAND.Land.region([LAND.LRegion{"timeline", ["shown", "kids", "0"]}, LAND.LRegion{"topbar", ["shown", "kids", "1"]}], [["shown", "kids", "0", "kids"], ["window", "older"]]) == "timeline " : String}
 # END page landing (P)
+# BEGIN page splice (H): a view.page draws only its timeline again
+# The render memo's key is what a render is made of but its page, then the
+# page (its row and cursor) last, so a view.page finds the last view of the
+# same inputs by the key's start (thin-actor.bend's Memo.page)
+law view_memo_key_page_last:
+  for +seq: Nat
+  for +info: String
+  for +p: J.Json
+  for +anchor: Nat
+  for +view: String
+  for +web: Bool
+  for +thread: String
+  {CHATSIDE.Memo.key(seq, info, p, anchor, view, web, thread) == CHATSIDE.Memo.key.base(seq, info, p, view, web, thread) ++ CHATSIDE.Memo.at(anchor, p) : String}
+
+# the last view of the same inputs in the same view-clock step is reused
+law view_page_memo_same_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 89000n) == Some{J.Null{}} : Maybe<&2, J.Json>}
+
+# not from another step, other inputs, or a view cut down to fit
+law view_page_memo_next_step:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 90000n) == None{} : Maybe<&2, J.Json>}
+
+law view_page_memo_other_inputs:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"A\tat:3\tc", 61000n, False{}, J.Null{}}], "B", 62000n) == None{} : Maybe<&2, J.Json>}
+
+law view_page_memo_not_fitted:
+  {CHATSIDE.Memo.page([CHATSIDE.Memo{"B\tat:3\tc\tanchor:m1", 61000n, False{}, J.Null{}}], "B", 62000n) == None{} : Maybe<&2, J.Json>}
+# END page splice (H)
