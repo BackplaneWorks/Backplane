@@ -560,7 +560,14 @@ if (wb) {
     const lim = (x: number) => Math.ceil(x * 1.25 + 2);
     const cur = { mutations: lim(r.dom.records), recreatedIdentical: lim(r.dom.recreatedIdentical), touchedUnchangedRows: lim(r.rows.touchedUnchanged), outsideRecords: lim(r.waste.outsideRecords),
       wsInBytes: Math.ceil(r.ws.inBytes * 1.5 + 8192), /* the hub's view deltas: sizes vary little now */ renderFull: lim(r.counts["render.full"] ?? 0), hubViews: lim(hubViews(r)), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
-    if (paged(k)) {
+    if (/^stress/.test(k)) {
+      // stress windows (4x throttle, fast sweeps): their DOM counts follow
+      // frame timing, how many rows mount between frames; they are gated by
+      // the hard rules (no loading row, no blank frame, no stall, nothing
+      // stuck) and by hub views per page asked for
+      for (const n of Object.keys(cur)) if (!["wsInBytes", "loading", "blankFrames"].includes(n)) delete (cur as any)[n];
+      (cur as any).hubViewsPerPage = Math.ceil(perPage(r).hubViewsPerPage * 1.25 + 1);
+    } else if (paged(k)) {
       // per page landed, in place of the totals that follow the page count
       const pp = perPage(r);
       for (const n of ["mutations", "recreatedIdentical", "domPatch", "hubViews", "renderFull", "outsideRecords"] as const) delete (cur as any)[n];
