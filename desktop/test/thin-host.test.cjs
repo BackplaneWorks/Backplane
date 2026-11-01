@@ -848,3 +848,20 @@ test('paging ahead: a failed page leaves the rows held as they were',async()=>{
  f.host.receive({t:'reply',id:req.id,ok:false,error:{code:'LIMIT',message:'x'}});
  assert.equal(f.host.atNewest(),true);assert.equal(f.host.hasAhead('newer'),false);f.host.retryPage();assert.equal(f.sent.at(-1).p.cursor,'older-bound-to-A');
 });
+test('paging ahead: past the cap the far end is let go, and asked for again past the new edge',async()=>{
+ const {HELD_IDS}=await import('../../src/web/thin-host.js');
+ const gone=[];const f=await fixture({letGo:(ids,side)=>gone.push({ids,side})});f.open();
+ const win=(k,older,n=32)=>({window:{ids:Array.from({length:n},(_,i)=>k+':'+i),older,hasMore:true,anchor:{id:'row',offset:0},partial:[]}});
+ let k=1;
+ for (;k*32<=HELD_IDS;k++){f.host.ahead('older');f.host.receive(f.reply(f.sent.at(-1),win('p'+k,'c'+(k+1))));}
+ assert.equal(gone.length,0,'under the cap every page stays');
+ const held=(k-1)*32+1;
+ f.host.ahead('older');f.host.receive(f.reply(f.sent.at(-1),win('p'+k,'c'+(k+1),HELD_IDS-held+1)));
+ assert.deepEqual(gone,[{ids:['row'],side:'newer'}],'only the newest page goes, the far end');
+ // back down: the newest page is past the bottom edge now, so it is asked for again
+ assert.equal(f.host.hasAhead('newer'),true);f.host.ahead('newer');assert.equal(f.sent.at(-1).p.cursor,'');
+ f.host.receive(f.reply(f.sent.at(-1),win('top','older-bound-to-A',1)));
+ // going down, the far end is the top: the oldest page goes
+ assert.equal(gone.at(-1).side,'older');assert.equal(gone.at(-1).ids[0],'p'+k+':0');
+ f.host.ahead('older');assert.equal(f.sent.at(-1).p.cursor,'c'+k,'up again: the page past the new top edge');
+});

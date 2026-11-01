@@ -719,7 +719,37 @@ const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
 let held = false, away = "";
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
-function historyClear() { historyNode = null;historyDirection = "";historyPageState(null);thin?.heldReset?.(); }
+function historyClear() { historyNode = null;historyDirection = "";historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
+// Rows let go past the cap (thin-host.js's heldTrim): their display keys,
+// by the side they went from, and the height they had, kept in their place
+// as a gap (timeline-history.bend's gaps) so the scrollbar and the reader's
+// place stay put. A page that brings them back takes its rows out of the gap.
+const historyGone = { older: new Set(), newer: new Set() };
+const historyKeys = node => History.row_keys(node).split("\n").filter(k => k && !k.startsWith("control:"));
+function historyGap(side) {
+  const gone = historyGone[side];
+  if (!gone.size) return 0;
+  const sizes = activeTimeline?.sizes || {}, estimate = activeTimeline?._estimate?.() || 120;
+  let px = 0;
+  for (const k of gone) px += sizes[k] > 0 ? sizes[k] : estimate;
+  return Math.round(px);
+}
+function historyLetGo(ids, side) {
+  if (!historyNode || !ids.length) return;
+  const before = historyKeys(historyNode);
+  historyNode = History.drop(historyNode, ids.join("\n"));
+  const after = new Set(historyKeys(historyNode));
+  for (const k of before) if (!after.has(k)) historyGone[side].add(k);
+}
+function historyBack(node) {
+  if (!historyGone.older.size && !historyGone.newer.size) return;
+  const now = new Set(historyKeys(node));
+  for (const gone of [historyGone.older, historyGone.newer]) for (const k of gone) if (now.has(k)) gone.delete(k);
+}
+function historyGaps(node) {
+  const older = historyGap("older"), newer = historyGap("newer");
+  return older || newer ? History.gaps(node, String(older), String(newer)) : node;
+}
 // A page on its way says nothing, however long it takes: it is asked for
 // well before the reader can reach the edge of the rows drawn (historyAhead),
 // and a reader who gets there stays on the last row drawn until it comes.
@@ -896,7 +926,7 @@ function render() {
   }
   const tl = document.getElementById("timeline");
   const t0 = PERF ? pnow() : 0;
-  let page = frontendNode ? App.presentation_overlay(frontendNode, presentationJson(modelFeedback.project(currentSession())))
+  let page = frontendNode ? App.presentation_overlay(historyGaps(frontendNode), presentationJson(modelFeedback.project(currentSession())))
     : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
   // Saved transition/startup pictures contain the server's unprojected partial
@@ -2007,12 +2037,12 @@ function historyRunway(tl) {
 }
 function earlierCheck(tl) {
   if (historyDirection !== "older" || earlierAsked || !tl || tl.id !== "timeline" || !thin?.ready || thin.paging || thin.pageError) return;
-  if (!thin.hasAhead("older") || tl.scrollTop > historyRunway(tl)) return;
+  if (!thin.hasAhead("older") || tl.scrollTop - historyGap("older") > historyRunway(tl)) return;
   earlierAsked = thin.ahead("older");
 }
 function laterCheck(tl) {
   if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("newer")) return;
-  if (tl.scrollHeight - tl.scrollTop - tl.clientHeight > historyRunway(tl)) return;
+  if (tl.scrollHeight - tl.scrollTop - tl.clientHeight - historyGap("newer") > historyRunway(tl)) return;
   laterAsked = thin.ahead("newer");
 }
 function historyCheckSoon() {
@@ -2772,6 +2802,7 @@ async function startThin(again = false, reason = "initial") {
       viewerChoice: choice => viewerFeedback.choice(choice),
       warning: message => showViewStatus(message),
       pageState: historyPageState,
+      letGo: historyLetGo,
       refused: refusedView,
       search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage, body: (message, input) => bodyWindows.accept(message, input), bodyFailed: (input, reason) => bodyWindows.failed(input, reason),
       view: (node, detail) => {
@@ -2782,7 +2813,8 @@ async function startThin(again = false, reason = "initial") {
         node = History.project(previous, node, projection);
         historyNode = node;
         // (timeline-history.bend's project keeps no row from before a reset)
-        if (projection === "reset" || projection === "newest") thin?.heldReset?.();
+        if (projection === "reset" || projection === "newest") { historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
+        else historyBack(node);
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
