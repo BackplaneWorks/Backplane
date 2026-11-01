@@ -163,21 +163,23 @@ def Tree.any(ts: List<&2, M.Thread>, +kids: Map<&2, Bool>) -> Bool:
     case Nil{}: False{}
     case t <> rest: Bool.or(Tree.kid(kids, M.Thread.id(t)), Tree.any(rest, kids))
 
-def Tree.alive.add(alive: Bool, +s: M.State, +id: String, rest: List<&2, M.Thread>) -> List<&2, M.Thread>:
+def Tree.alive.add(alive: Bool, t: M.Thread, rest: List<&2, M.Thread>) -> List<&2, M.Thread>:
   match alive:
-    case True{}: M.State.thread.get(s, id) <> rest
+    case True{}: t <> rest
     case False{}: rest
 
-# each alive thread as the state has it, as Tree.roots.go keeps a root
-def Tree.alive.all(ts: List<&2, M.Thread>, +s: M.State) -> List<&2, M.Thread>:
+# each alive thread: a shelf holds the state's own threads, so this is what
+# Tree.roots.go keeps for a thread that is its own root, without looking
+# each up again (laws side_rows_ix_eq, side_rows_ix_tree_eq)
+def Tree.alive.all(ts: List<&2, M.Thread>) -> List<&2, M.Thread>:
   match ts:
     case Nil{}: Nil{}
-    case +t <> rest: Tree.alive.add(Tree.alive(t), s, M.Thread.id(t), Tree.alive.all(rest, s))
+    case +t <> rest: Tree.alive.add(Tree.alive(t), t, Tree.alive.all(rest))
 
 def Tree.shelves.at.k(tree: Bool, +s: M.State, +p: List<&2, M.Thread>, +a: List<&2, M.Thread>, +st: List<&2, M.Thread>, +h: List<&2, M.Thread>, +sn: List<&2, M.Thread>) -> M.Shelves:
   match tree:
     case True{}: Tree.shelves.k(s, p, a, st, h, sn)
-    case False{}: M.Shelves{Tree.alive.all(p, s), Tree.alive.all(a, s), Tree.alive.all(st, s), Tree.alive.all(h, s), Tree.alive.all(sn, s)}
+    case False{}: M.Shelves{Tree.alive.all(p), Tree.alive.all(a), Tree.alive.all(st), Tree.alive.all(h), Tree.alive.all(sn)}
 
 # Tree.shelves with the threads that name a parent read once (Tree.kids):
 # the same shelves (law side_rows_ix_tree_eq)
