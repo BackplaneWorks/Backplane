@@ -116,7 +116,7 @@
     "src/core/sidebar-drafts.bend": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
     "src/core/sidebar-read.bend": "8b9952dbbe0c9ae89bf808e995b8ce643f20102587238724c9156076dd21419d",
     "src/core/sign.bend": "f6c4b636f7be64f7a4a03e8cc4d0b19eae2696e8c08a92236ad7e378d7120edc",
-    "src/core/signal.bend": "9f3a236280bb3199e3cf34de80468f869c05f70e97dcbb3ce0b674e535ed9ac0",
+    "src/core/signal.bend": "f8c4c9d95ea321e42676af8fb4ac159bcf15f88a9b2c51ed25a379c3d28a1e34",
     "src/core/slash.bend": "4b88f73566a9b3694a888ede21f2117157df9449c50c52806648e4795d298932",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "feda431038cc6399db63a943d1475f54b67efb76e8b02984bb14f0f8bc2a8c64",
@@ -380,5 +380,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Q-1 routes phone subagent controls; rebased sidebar drafts unchanged"
+  "reviewNote": "Q-2 failed display names; rebased sidebar drafts remain unchanged"
 }

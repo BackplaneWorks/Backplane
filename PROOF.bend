@@ -14148,7 +14148,15 @@ def Laws.phone_subs_fold_routed():
   {==}
 
 def Laws.phone_subs_cancel_routed():
+  {==}
 
 
 def Laws.delegation_captures_baseline_before_agent(t, cwd, prompt, uuid):
+  {==}
+
+
+def Laws.signal_failed_display_name():
+  {==}
+
+def Laws.signal_pending_display_blocked():
   {==}

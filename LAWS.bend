@@ -13858,3 +13858,11 @@ law delegation_captures_baseline_before_agent:
   for uuid: String
   {List.head(&2, H.Out, List.drop(&2, H.Out, MC.Mcp.delegate.run(t, cwd, prompt, uuid), 1n)) ==
     Some{H.Git{0, "", "step", M.Thread.id(t), cwd, "", "start"}} : Maybe<&2, H.Out>}
+
+
+# Dots and native thread phases tell a failed turn apart from an open ask.
+law signal_failed_display_name:
+  {SIGREV.Signal.display.name(2n, M.State.replay([M.ThreadCreated{"t", "p", "Failed", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"t", M.Failed{}, 2n}], M.State.empty()), "t") == "failed" : String}
+
+law signal_pending_display_blocked:
+  {SIGREV.Signal.display.name(2n, M.State.replay([M.ThreadCreated{"t", "p", "Failed", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"t", M.Failed{}, 2n}, M.PendingChanged{"t", 1n, 3n}], M.State.empty()), "t") == "blocked" : String}

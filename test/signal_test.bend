@@ -51,6 +51,8 @@ def bg(+word: String) -> M.Change:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("a failed native display names the failure", S.Signal.display.name(2n, state([M.TurnChanged{"p", M.Failed{}, 5n}]), "p"), "failed")
+    C.Check.str("a failed display with an approval remains blocked", S.Signal.display.name(2n, state([M.TurnChanged{"p", M.Failed{}, 5n}, M.PendingChanged{"p", 1n, 6n}]), "p"), "blocked")
     C.Check.str("blue active + red interaction bits retained", S.Signal.label(I.En{}, 3n), "Blocked: needs interaction; work also active")
     cell("a stopped turn says stopped", [M.TurnChanged{"p", M.Running{}, 2n}, M.TurnChanged{"p", M.Interrupted{}, 3n}], "stopped | Stopped: nothing is running")
     cell("a stopped and settled thread says settled", [M.TurnChanged{"p", M.Interrupted{}, 3n}, M.ThreadSettled{"p", True{}, 4n}], "settled | Settled")

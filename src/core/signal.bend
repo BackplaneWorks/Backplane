@@ -98,7 +98,7 @@ def Signal.label(+lc: I.Loc, +n: Nat) -> String:
 # the person stopped, with nothing else going on, is "stopped" (grey, as
 # inactive); one whose agent failed, with no approval or question waiting
 # (pending), is "failed" (red, as blocked), not "needs you". The dot keeps
-# the signal's colour (Signal.name).
+# the same distinction without changing its work bits.
 def Signal.shown.k(+name: String, turn: M.TurnState, +pending: Nat) -> String:
   match turn:
     case M.Interrupted{}:
@@ -175,7 +175,7 @@ def Signal.display.stalled(+st: M.State, +id: String) -> Bool:
   Bool.and(Bool.not(M.Thread.hidden(M.State.thread.get(st, id))), L.Liveness.stalled(Signal.display.live(st, id)))
 
 def Signal.display.name(n: Nat, +st: M.State, +id: String) -> String:
-  Bool.pick(String, Signal.display.stalled(st, id), "stalled", Signal.name(n))
+  Bool.pick(String, Signal.display.stalled(st, id), "stalled", Signal.dot.thread(Signal.name(n), M.State.thread.get(st, id)))
 
 def Signal.display.shown(n: Nat, turn: M.TurnState, pending: Nat, +st: M.State, +id: String) -> String:
   Bool.pick(String, Signal.display.stalled(st, id), "stalled", Signal.shown(n, turn, pending))
