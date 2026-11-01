@@ -449,14 +449,16 @@ assembled is refused (only rigid `pcb` boards are). A quote upload approval
 with one file says "Send 1 file"; several files use "files".
 
 **S39 Settle when done** (W D)
-Default: a finished thread stays in its project's list, then settles by
+Default: a finished thread stays in its project's list until the general
+inactivity window settles it; one a bot launched or delegated settles by
 itself (under "Settled N") once idle 30 minutes. There is no Settings row
 to edit that time: General inactivity explains the separate shorter idle
-window using its current value. Set it short with `rpc.mjs PORT TOKEN setting.set
-'{"key":"settle.idle.minutes","value":"1"}'`, send a message: the thread
-settles within ~2 min of its "Finished" stamp (the hub's tick); a pinned or
-snoozed one, or one with work out, stays; a message brings it back. With
-`"0"` it never settles by itself. Settings → Threads → "Settle when done"
+window for bot threads using its current value. Set it short with `rpc.mjs PORT TOKEN setting.set
+'{"key":"settle.idle.minutes","value":"1"}'` and have a bot launch a thread
+(`thread_launch`): it settles within ~2 min of its "Finished" stamp (the
+hub's tick), while a thread the person started and sent to stays; a pinned
+or snoozed one, or one with work out, stays; a message brings it back.
+With `"0"` no thread settles by idleness. Settings → Threads → "Settle when done"
 on, send a message: when it finishes the thread moves under "Settled N" at
 once; while it's the open thread its row stays in sight and its project
 keeps its place, not faded. Off again; open the settled thread and send: it

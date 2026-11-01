@@ -5665,32 +5665,44 @@ law life_off_message_wakes:
 # settles by itself once idle settle.idle.minutes (30 by default), long
 # before the settle window (hub.bend's Hub.settle.idle)
 law settle_idle_completed:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 law settle_idle_failed:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Failed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Failed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 law settle_idle_interrupted:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Interrupted{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Interrupted{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 # not a second before it has been idle that long
 law settle_idle_not_before:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1804n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1804n) == [] : List<&2, M.Change>}
 
 # a running turn never settles by idleness
 law settle_idle_running_stays:
-  {H.Shelve.ticked(H.Shelve.demo(Nil{}), 1805n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot(Nil{}), 1805n) == [] : List<&2, M.Change>}
 
 # settle.idle.minutes 0 turns it off: only the settle window is left
 law settle_idle_off:
-  {H.Shelve.ticked(H.Shelve.demo([M.SettingSet{"settle.idle.minutes", "0", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.SettingSet{"settle.idle.minutes", "0", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
 
 # a thread whose turn ended with a message still queued is working
 # (Lifecycle.working), so it is neither settled nor woken by the tick: it
 # was settled and woken again every minute (79 threads, about 3000 events
 # an hour on the desktop, 2026-10-31)
 law settle_idle_queued_stays:
-  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Interrupted{}, 5n}, M.TurnQueued{"t1", "q1", "later", 6n}]), 1805n) == [] : List<&2, M.Change>}
+  {H.Shelve.ticked(H.Shelve.demo.bot([M.TurnChanged{"t1", M.Interrupted{}, 5n}, M.TurnQueued{"t1", "q1", "later", 6n}]), 1805n) == [] : List<&2, M.Change>}
+
+# the idle window is for work a bot set going: a thread the person started
+# waits out the settle window, as does one their own thread's agent launched
+law settle_idle_own_stays:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
+
+law settle_idle_agent_launch_stays:
+  {H.Shelve.ticked(H.Shelve.demo([M.ThreadLaunched{"t1", "t0", True{}, 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [] : List<&2, M.Change>}
+
+# a thread a bot delegated takes it, as one a bot launched does
+law settle_idle_bot_delegated:
+  {H.Shelve.ticked(H.Shelve.demo([M.BotSet{"b1", "Bub", "tb1", 0n, "", 1n}, M.TaskDelegated{"k1", "tb1", "t1", 1n, "claude", "", 1n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), 1805n) == [M.ThreadSettled{"t1", False{}, 1805n}] : List<&2, M.Change>}
 
 # an ephemeral run (run..., mailcoord-...) is never resumed, so once its turn
 # has been over for the idle window its queued messages go instead
