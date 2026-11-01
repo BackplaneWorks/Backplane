@@ -52,6 +52,20 @@ def mounted(+p: J.Json) -> String:
 def valid.at(+p: J.Json, i: Nat) -> String:
   V.Px.show(V.Px.read(J.Json.as_raw(List.head(&2, J.Json, List.drop(&2, J.Json, J.Json.elems(J.Json.get_obj(p, "valid")), i)), "0")))
 
+# the same plan from the sizes as a list (sizeList) and as an object
+def listed(+keys: J.Json, +sizes: J.Json, +list: J.Json, previous: J.Json, top: String, mode: String) -> String:
+  J.Json.show(V.plan(J.Json.obj([J.KV{"keys", keys}, J.KV{"sizeList", list}, J.KV{"previous", previous},
+    J.KV{"top", J.Num{top}}, J.KV{"view", J.Num{"100"}}, J.KV{"mode", J.Str{mode}}, J.KV{"follow", J.Flag{False{}}}])))
+
+def keyed(+keys: J.Json, +sizes: J.Json, previous: J.Json, top: String, mode: String) -> String:
+  J.Json.show(V.plan(J.Json.obj([J.KV{"keys", keys}, J.KV{"sizes", sizes}, J.KV{"previous", previous},
+    J.KV{"top", J.Num{top}}, J.KV{"view", J.Num{"100"}}, J.KV{"mode", J.Str{mode}}, J.KV{"follow", J.Flag{False{}}}])))
+
+def many.list(+n: Nat, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match n:
+    case 0n: acc
+    case 1n+k: many.list(k, J.Num{"100"} <> acc)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     num("decimal beyond float32 precision", V.Px.add(V.Px.read("16777216.015625"), V.Px.read("0.015625")), V.Px.read("16777216.03125"))
@@ -151,3 +165,11 @@ def main() -> IO(Unit):
     C.Check.str("valid range holds the top it was planned at", Bool.show(Bool.and(V.Px.le(V.Px.read(lo), V.Px.read("5000")), V.Px.le(V.Px.read("5000"), V.Px.read(hi)))), "True")
     +bottom : J.Json = many.plan("21921", J.Null{})
     C.Check.str("at the end the range is empty (every scroll plans)", Bool.show(V.Px.le(V.Px.read(valid.at(bottom, 0n)), V.Px.read(valid.at(bottom, 1n)))), "False")
+    +lk : J.Json = parsed("[\"a\",\"b\",\"c\",\"d\",\"e\"]")
+    +ls : J.Json = parsed("{\"a\":80.125,\"b\":40.5,\"d\":80.125,\"e\":12}")
+    +ll : J.Json = parsed("[80.125,40.5,null,80.125,12]")
+    C.Check.str("sizeList plans as the sizes object (scroll)", listed(lk, ls, ll, J.Null{}, "60.25", "scroll"), keyed(lk, ls, J.Null{}, "60.25", "scroll"))
+    C.Check.str("sizeList plans as the sizes object (init)", listed(lk, ls, ll, J.Null{}, "0", "init"), keyed(lk, ls, J.Null{}, "0", "init"))
+    C.Check.str("sizeList plans as the sizes object (bottom)", listed(lk, ls, ll, J.Null{}, "0", "bottom"), keyed(lk, ls, J.Null{}, "0", "bottom"))
+    C.Check.str("sizeList plans as the sizes object (200 rows)", listed(J.Json.arr(many.keys(200n, Nil{})), J.Null{}, J.Json.arr(many.list(200n, Nil{})), J.Null{}, "5000", "scroll"), J.Json.show(many.plan("5000", J.Null{})))
+    C.Check.str("a short sizeList takes the estimate for the rest", listed(lk, ls, parsed("[80.125,40.5]"), J.Null{}, "0", "init"), keyed(lk, parsed("{\"a\":80.125,\"b\":40.5}"), J.Null{}, "0", "init"))

@@ -336,6 +336,28 @@ def Layout.make(keys: List<&2, J.Json>, sizes: Map<&2, String>, +est: String, +n
       +size = Px.max(Px.zero(), Px.read(Sizes.return.value(reply)))
       Layout.make(t, Sizes.return.map(reply), est, 1n+n, Layout.advance(size, start), Item{key, n, start, size} <> acc)
 
+# The same layout from the sizes given as a list in the keys' order (a
+# number, or anything else for "not measured": the estimate). No Map is
+# built and none is read per row: in the web's JS a string-keyed Map is a
+# trie walked in 32-bit bit lists, and on a long thread every scroll plan
+# spent most of its time there (law timeline_layout_list_same).
+def Layout.size(+j: J.Json, +est: String) -> String:
+  match j:
+    case J.Num{s}: s
+    case _: est
+
+def Layout.list(keys: List<&2, J.Json>, sizes: List<&2, J.Json>, +est: String, +n: Nat, +start: Px, acc: List<&2, Item>) -> Layout:
+  match keys sizes:
+    case Nil{} _: Layout{List.reverse(&2, Item, acc), Layout.total(n, start)}
+    case +j <> t Nil{}:
+      +key = J.Json.as_str(Some{j}, "")
+      +size = Px.max(Px.zero(), Px.read(est))
+      Layout.list(t, Nil{}, est, 1n+n, Layout.advance(size, start), Item{key, n, start, size} <> acc)
+    case +j <> t +z <> zs:
+      +key = J.Json.as_str(Some{j}, "")
+      +size = Px.max(Px.zero(), Px.read(Layout.size(z, est)))
+      Layout.list(t, zs, est, 1n+n, Layout.advance(size, start), Item{key, n, start, size} <> acc)
+
 def Layout.estimate(+input: J.Json) -> String:
   Px.show(Px.max(Px.int(1n), Px.get(input, "estimate", "120")))
 
@@ -530,10 +552,17 @@ def Plan.readback(+input: J.Json) -> J.Json:
     Px.get(previous, "total", "0"), logicalTop, Px.get(previous, "view", "0"),
     Anchor{J.Json.get_str(previous, "anchor", ""), Px.get(previous, "offset", "0")}, residual, Px.get(input, "overscan", "0"))
 
+# the sizes as a list beside the keys (the adapter's sizeList) when given,
+# else the keyed object
+def Plan.layout.of(listed: Bool, +input: J.Json) -> Layout:
+  match listed:
+    case True{}: Layout.list(J.Json.elems(J.Json.get_obj(input, "keys")), J.Json.elems(J.Json.get_obj(input, "sizeList")), Layout.estimate(input), 0n, Px.int(16n), Nil{})
+    case False{}: Layout.make(J.Json.elems(J.Json.get_obj(input, "keys")), Sizes.map(J.Json.get_obj(input, "sizes")), Layout.estimate(input), 0n, Px.int(16n), Nil{})
+
 def Plan.mode(readback: Bool, +input: J.Json) -> J.Json:
   match readback:
     case True{}: Plan.readback(input)
-    case False{}: Plan.layout(Layout.make(J.Json.elems(J.Json.get_obj(input, "keys")), Sizes.map(J.Json.get_obj(input, "sizes")), Layout.estimate(input), 0n, Px.int(16n), Nil{}), input)
+    case False{}: Plan.layout(Plan.layout.of(Bool.not(List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(input, "sizeList")))), input), input)
 
 def plan(+input: J.Json) -> J.Json:
   Plan.mode(String.eq(J.Json.get_str(input, "mode", "update"), "readback"), input)
