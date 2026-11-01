@@ -96,6 +96,7 @@ composer.send = Send
 composer.stop = Stop
 composer.ask = Ask
 composer.give = Give
+composer.draft.limit = This draft is {size} KB. A message can be at most {limit} KB.
 
 # project picker, files
 proj.on = On {name} (change)

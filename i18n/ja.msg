@@ -99,6 +99,7 @@ composer.send = 送信
 composer.stop = 停止
 composer.ask = 質問
 composer.give = 引き渡す
+composer.draft.limit = この下書きは{size} KBです。送信できるメッセージは{limit} KBまでです。
 
 # project picker, files
 proj.on = {name}（変更）

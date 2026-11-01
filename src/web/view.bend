@@ -56,6 +56,7 @@ import ../core/tz.bend as TZ
 import ../core/stamp.bend as STP
 import ../core/order.bend as OR
 import ../core/modelpick.bend as MPK
+import ../core/draftbound.bend as DB
 
 # Each web connection explicitly opts into the rail's DOM/CSS contract.
 # An old loaded host must keep the flat layout its stylesheet understands.
@@ -3207,8 +3208,17 @@ def View.rpl.chip.k(+lc: I.Loc, +to: String, +q: String) -> List<&2, D.Node>:
 def View.rpl.chip(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   View.rpl.chip.k(lc, U.Rpl.of(u), U.Rpl.label(u))
 
+# a draft over a message's bound says so over the composer (draftbound.bend)
+def View.draft.limit.k(+text: String) -> List<&2, D.Node>:
+  match text:
+    case SNil{}: Nil{}
+    case SCon{+h, +t}: [D.El{"div", "draft-limit", [D.At{"class", "draft-limit"}, D.At{"role", "status"}], [D.Txt{SCon{h, t}}]}]
+
+def View.draft.limit(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.draft.limit.k(DB.Bound.say(lc, U.Ui.scratch(u, "@draft.bound")))
+
 def View.composer.l(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  View.composer.k(lc, u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u)))), View.mic.of(u, U.Ui.sel(u)))
+  View.composer.k(lc, u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), D.Dom.cat(View.draft.limit(lc, u), D.Dom.cat(View.rpl.chip(lc, u), D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))))), View.mic.of(u, U.Ui.sel(u)))
 
 def View.composer.u(+u: U.Ui) -> D.Node:
   View.composer.l(U.Lang.loc(u), u)

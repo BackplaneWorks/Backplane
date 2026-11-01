@@ -161,7 +161,7 @@ export class ThinViews {
     // explicit query. Invalidations cannot generate those requests.
     let extra;
     try { extra = snapshot(args); } catch { return { failed: 'invalid request', cmds: [] }; }
-    if (!record(extra) || utf8Bytes(JSON.stringify(extra)) > VIEW_LIMITS.replyBytes) return { failed: 'request limit', cmds: [] };
+    if (!record(extra) || utf8Bytes(JSON.stringify(this.api.shape ? this.api.shape(extra, method) : extra)) > VIEW_LIMITS.replyBytes) return { failed: 'request limit', cmds: [] };
     // Compact input cannot change the selected picture. Keep the wire counter
     // monotonic without starving a canonical read during continuous typing.
     // This is an intent only: a validated full fallback becomes a barrier below.

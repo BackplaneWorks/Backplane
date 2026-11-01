@@ -69,6 +69,7 @@ import ./thin-chat.bend as TC
 import ./secret.bend as SEC
 import ./modelpick.bend as MPK
 import ./reply.bend as RTO
+import ./draftbound.bend as DB
 
 # The client state, Elm-style, shared by the native window and the web
 # page: a host feeds server messages to Ui.recv and user actions to Ui.act,
@@ -10430,8 +10431,16 @@ def Ui.send.sec(sec: Bool, +u: Ui, alt: Bool) -> Act:
     case False{}:
       Ui.send.intent(OR.Intent.is(Ui.draft_text(u)), u, alt)
 
+def Ui.send.whole(bounded: Bool, +u: Ui, alt: Bool) -> Act:
+  match bounded:
+    case True{}: Act{Ui.error_set(u, DB.Bound.refuse(Lang.loc(u), Ui.scratch(u, "@draft.bound"))), Nil{}}
+    case False{}: Ui.send.sec(Sbox.is(Ui.draft_text(u)), u, alt)
+
+# a draft this view holds only bounded (draftbound.bend: too long to carry
+# in every request, and over a message's bound) is never sent: the person
+# is told its size and the bound, and the draft stays as it is
 def Ui.send(+u: Ui, alt: Bool) -> Act:
-  Ui.send.sec(Sbox.is(Ui.draft_text(u)), u, alt)
+  Ui.send.whole(DB.Bound.is(Ui.scratch(u, "@draft.bound")), u, alt)
 
 def Sbox.shut.u(+u: Ui) -> Ui:
   Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@sbox", ""), "@sbox.err", ""), "@f.sname", ""), "@f.spurpose", "")
