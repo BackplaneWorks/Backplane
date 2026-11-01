@@ -124,8 +124,55 @@ def tell_checks() -> IO(Unit):
     +told : M.State = M.State.replay(H.Queue.changes(T.res_step(MC.Mcp.tell_person(pending, 27n, th2, args("Person decision needed: backplane://thread/worker", "source-approval")))), pending)
     T.check("explicit tell never answers real source approval", RL.Life.ask(M.Asks.all(told), "worker"))
 
+def cut(+s: M.State, +th: String, +now: Nat) -> H.Step:
+  H.Run.fallback(s, now, H.Step{[M.TurnChanged{th, M.Interrupted{}, now}], Nil{}})
+
+def after(+st: H.Step, +s: M.State) -> M.State:
+  M.State.replay(H.Queue.changes(st), s)
+
+# The owner's agent hears what its back office told the person, and the
+# person is notified (the VCA report: told in the chat, never to the agent).
+def told_checks() -> IO(Unit):
+  do IO<Unit>:
+    +s : M.State = state()
+    +th : String = privateid()
+    +r : MC.Res = MC.Mcp.tell_person(s, 23n, th, args("Draft ready for approval: backplane://thread/worker", "draft-v1"))
+    +post : M.State = after(T.res_step(r), s)
+    T.check("tell gives the owner's agent a context note", String.contains(H.Ride.of(post, "foh"), "Draft ready for approval"))
+    T.check("tell notifies the person", String.starts_with(M.Setting.get(post, "alert.foh", ""), "note\t"))
+    T.n("tell starts no owner turn by itself", starts(H.Step.outs_of(T.res_step(r)), "foh"), 0n)
+    +gone : M.State = after(cut(post, th, 24n), post)
+    C.Check.str("a lane that told hands nothing over when cut", M.Setting.get(gone, "mail.private.handed." ++ th, ""), "")
+
+# A child's report was escalated, then its private lane was cut off (session
+# limit) while the parent was mid-turn: the report waits in the parent's
+# ride and is delivered when the parent's turn ends, once.
+def lost_checks() -> IO(Unit):
+  do IO<Unit>:
+    +s0 : M.State = state()
+    +th : String = privateid()
+    +s : M.State = s0
+    +c : H.Step = cut(s, th, 22n)
+    +s2 : M.State = after(c, s)
+    T.check("cut lane's escalation waits for the parent", String.contains(H.Ride.of(s2, "foh"), "Verified material outcome"))
+    T.n("cut lane posts nothing in the chat", T.posts(H.Queue.changes(c), "foh"), 0n)
+    T.n("busy parent is not restarted", starts(H.Step.outs_of(c), "foh"), 0n)
+    +again : M.State = after(cut(s2, th, 23n), s2)
+    C.Check.str("handed over once", H.Ride.of(again, "foh"), H.Ride.of(s2, "foh"))
+    +end : H.Step = H.Ride.after(again, 24n, H.Step{[M.TurnChanged{"foh", M.Completed{}, 24n}], Nil{}})
+    +s3 : M.State = after(end, again)
+    T.n("parent's turn end delivers it", starts(H.Step.outs_of(end), "foh"), 1n)
+    C.Check.str("delivered report leaves the ride", H.Ride.of(s3, "foh"), "")
+    +rest : M.State = M.State.apply(s0, M.TurnChanged{"foh", M.Completed{}, 21n})
+    +idle : H.Step = cut(rest, th, 22n)
+    T.n("idle parent is woken with it", starts(H.Step.outs_of(idle), "foh"), 1n)
+    +cont : H.Step = H.Run.fallback(s, 22n, H.Step{[M.TurnChanged{th, M.Interrupted{}, 22n}, M.TurnChanged{th, M.Running{}, 22n}], Nil{}})
+    C.Check.str("a lane continued in the same step hands nothing over", H.Ride.of(after(cont, s), "foh"), "")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     empty_checks()
     output_checks()
     tell_checks()
+    told_checks()
+    lost_checks()

@@ -7797,6 +7797,18 @@ def Private.modes(parent: M.Thread, +thread: String, +now: Nat) -> M.Change:
     case M.Thread{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, +model, runtime, interaction, _, _}:
       M.ModesSet{thread, runtime, interaction, model, now}
 
+# A lane's escalation note, kept so a lane cut off before it finished can
+# hand it to its owner (Private.lost). Lanes from older logs have none.
+def Private.note.key(+thread: String) -> String:
+  "mail.private.note." ++ thread
+
+# set once the lane published with tell_person
+def Private.said.key(+thread: String) -> String:
+  "mail.private.said." ++ thread
+
+def Private.handed.key(+thread: String) -> String:
+  "mail.private.handed." ++ thread
+
 def Private.spawn(+s: M.State, +now: Nat, +bot: String, +input: String, +note: String) -> Step:
   +owner = BT.Bot.thread(BT.World.bot(M.State.bots(s), bot))
   +parent = Hub.thread(s, owner)
@@ -7805,11 +7817,25 @@ def Private.spawn(+s: M.State, +now: Nat, +bot: String, +input: String, +note: S
   +cs = {[M.ThreadCreated{thread, "", BT.Bot.name(BT.World.bot(M.State.bots(s), bot)) ++ ": private coordination", M.Local{}, "", Hub.cwd(s, parent), provider, Turn.model(parent), now},
     M.WorktreeSet{thread, "", Hub.cwd(s, parent), now}, Private.modes(parent, thread, now),
     M.SettingSet{PM.Private.key(thread), bot, now}, M.SettingSet{"mail.private.input." ++ thread, input, now},
+    M.SettingSet{Private.note.key(thread), note, now},
     M.RunSet{thread, bot, ML.Mail.pair("bot:" ++ bot, "thread:" ++ thread), input, now},
     M.SettingSet{"account.thread." ++ thread ++ "." ++ provider, M.Setting.get(s, "account.thread." ++ owner ++ "." ++ provider, ""), now},
     M.SettingSet{AG.Effort.key(thread), M.Setting.get(s, AG.Effort.key(owner), ""), now}] : List<&2, M.Change>}
   +post = M.State.replay(cs, s)
   Step.before(cs, Nil{}, Wake.ride(post, now, thread, "triage:" ++ input, PM.Private.brief() ++ note))
+
+# What the owner's own agent is told after its back office told the person:
+# the published text reached the chat, never the owner's session, so its
+# next replies contradicted it ("I'll bring you the draft") and it said no
+# report had come. It rides with the owner's turn (Ride.mcp mid-turn, else
+# the next turn), durable in the ride setting across restarts.
+def Private.told.note(+key: String, +text: String) -> String:
+  "[Backplane] Your private mailroom just told the person this in your conversation (key " ++ key ++ "). It is already on screen and the person was notified: do not repeat it, take it into account. If you have nothing to add, end with an empty reply.\n\n" ++ text
+
+def Private.tell.alert(on: Bool, +s: M.State, +now: Nat, +target: String, +msg: String, +text: String) -> List<&2, M.Change>:
+  match on:
+    case False{}: Nil{}
+    case True{}: [NO.Alert.set(s, now, target, "note", "tell-" ++ msg, NO.Alert.memory(s, target), NO.Alert.text(text, 500n))]
 
 def Private.tell.fresh(fresh: Bool, +s: M.State, +now: Nat, +thread: String, +text: String, +key: String) -> Step:
   match fresh:
@@ -7818,9 +7844,50 @@ def Private.tell.fresh(fresh: Bool, +s: M.State, +now: Nat, +thread: String, +te
       +bot = PM.Private.owner(s, thread)
       +target = PM.Private.target(s, thread)
       +msg = Hub.id("tell", now, Hub.seq(s))
-      Origin.step(Step{List.append(&2, M.Change,
-        [M.MessagePosted{target, msg, M.Assistant{}, text, now}, M.SettingSet{PM.Private.told.key(bot, key), msg, now}],
-        TLD.Told.mark.set(msg, now, key, text, "chat", bot)), Nil{}}, target, msg, ML.Origin{"thread:" ++ thread, "tell-person", key}, now)
+      Origin.step(Step{List.concat(&2, M.Change,
+        [[M.MessagePosted{target, msg, M.Assistant{}, text, now}, M.SettingSet{PM.Private.told.key(bot, key), msg, now},
+          M.SettingSet{Private.said.key(thread), msg, now},
+          M.SettingSet{RD.Ride.key(target), RD.Ride.add(Ride.of(s, target), "told:" ++ msg, Private.told.note(key, text)), now}],
+        Private.tell.alert(Bool.or(NO.Policy.on(s, "needs"), NO.Policy.on(s, "settled")), s, now, target, msg, text),
+        TLD.Told.mark.set(msg, now, key, text, "chat", bot)]), Nil{}}, target, msg, ML.Origin{"thread:" ++ thread, "tell-person", key}, now)
+
+# A lane cut off (a provider's session limit, a failure, a restart) before
+# it told anyone left its escalation nowhere: the triage key was already
+# set, and a stopped lane is never resumed. Its owner's own agent takes it
+# over instead: the note rides into the owner's running turn or wakes it
+# (Wake.ride), once per lane. A lane still running (a fallback continued
+# it in the same step), one that told, and older lanes (no note) are left.
+def Private.cut(t: M.TurnState) -> Bool:
+  match t:
+    case M.Interrupted{}: True{}
+    case M.Failed{}: True{}
+    case _: False{}
+
+def Private.lost.note(+lane: String, +note: String) -> String:
+  "[Backplane] Your private mailroom lane " ++ lane ++ " was cut off (provider limit, failure or restart) before it finished, so this escalation reached no one. Assess it yourself now: told_check first, tell the person only what is material and new, and keep source approvals pending.\n\n" ++ note
+
+def Private.lost.go(go: Bool, +s: M.State, +now: Nat, +lane: String) -> Step:
+  match go:
+    case False{}: Step.none()
+    case True{}:
+      +owner = PM.Private.target(s, lane)
+      +cs = {[M.SettingSet{Private.handed.key(lane), Nat.show(now), now}] : List<&2, M.Change>}
+      Step.cat(Step{cs, Nil{}}, Wake.ride(M.State.replay(cs, s), now, owner, "lost:" ++ lane, Private.lost.note(lane, M.Setting.get(s, Private.note.key(lane), ""))))
+
+def Private.lost.is(+s: M.State, +lane: String) -> Bool:
+  Bool.and(Private.cut(M.Thread.turn(M.State.thread.get(s, lane))),
+    Bool.and(Bool.not(String.is_empty(M.Setting.get(s, Private.note.key(lane), ""))),
+      Bool.and(String.is_empty(M.Setting.get(s, Private.said.key(lane), "")),
+        Bool.and(String.is_empty(M.Setting.get(s, Private.handed.key(lane), "")), Bool.not(String.is_empty(PM.Private.target(s, lane)))))))
+
+# s: the state after the step so far
+def Private.lost(+s: M.State, +now: Nat, +lane: String) -> Step:
+  Private.lost.go(Private.lost.is(s, lane), s, now, lane)
+
+def Private.lost.k(own: Bool, +before: M.State, +now: Nat, +lane: String, +st: Step) -> Step:
+  match own:
+    case False{}: st
+    case True{}: Step.cat(st, Private.lost(M.State.replay(Queue.changes(st), before), now, lane))
 
 def Private.tell(allowed: Bool, +s: M.State, +now: Nat, +thread: String, +text: String, +key: String) -> Step:
   match allowed:
@@ -8026,6 +8093,8 @@ def Run.fallback.go(cs: List<&2, M.Change>, +before: M.State, +now: Nat, +st: St
     case Nil{}: st
     case M.ActivityLogged{+th, _, _, "fallback-blocked", _, _} <> t:
       Run.fallback.go(t, before, now, Run.ended.got(MD.Runs.gate(before, ML.Box.run_of(M.State.mail(before), th)), before, now, st))
+    case M.TurnChanged{+th, _, _} <> t:
+      Run.fallback.go(t, before, now, Private.lost.k(PM.Private.is(before, th), before, now, th, st))
     case _ <> t: Run.fallback.go(t, before, now, st)
 
 def Run.fallback(+before: M.State, +now: Nat, +st: Step) -> Step:
