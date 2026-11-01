@@ -77,6 +77,51 @@ def made() -> B.Step:
 def waits(+s: M.State, +now: Nat) -> String:
   Bool.show(M.Worktree.waits(s, M.State.thread.get(s, "t1"), now))
 
+# A live worktree remains usable even if an old recreation setting survives.
+def healthy(ask: String) -> M.State:
+  B.Wt.demo([M.WorktreeSet{"t1", "b1", "/p/.backplane/worktrees/b1", 7n}, M.TurnChanged{"t1", M.Running{}, 8n}, M.SettingSet{"wt.again.t1", ask, 190n}])
+
+# The confirmed exceptional case: absent worktree and a fresh ask, despite
+# an old running marker. Its original pending(activity) check has expired.
+def fresh_missing() -> M.State:
+  B.Wt.demo([M.TurnChanged{"t1", M.Running{}, 7n}, M.SettingSet{"wt.again.t1", "190", 190n}])
+
+def content_texts(xs: List<&2, J.Json>) -> String:
+  match xs:
+    case Nil{}: ""
+    case x <> rest: J.Json.get_str(x, "text", "") ++ content_texts(rest)
+
+def send_texts(os: List<&2, B.Out>) -> String:
+  match os:
+    case Nil{}: ""
+    case B.AgentSend{_, line} <> rest:
+      content_texts(J.Json.elems(J.Json.get_obj(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), "message"), "content"))) ++ send_texts(rest)
+    case _ <> rest: send_texts(rest)
+
+def send_count(os: List<&2, B.Out>) -> Nat:
+  match os:
+    case Nil{}: 0n
+    case B.AgentSend{_, _} <> rest: Nat.add(1n, send_count(rest))
+    case _ <> rest: send_count(rest)
+
+def ordered_first() -> M.State:
+  after(gone(), B.Hub.post(gone(), 7n, "t1", "first", M.User{}, "first queued input"))
+
+def ordered_waiting() -> M.State:
+  after(ordered_first(), B.Hub.post(ordered_first(), 20n, "t1", "second", M.User{}, "second queued input"))
+
+def ordered_ready(s: M.State, +at: Nat) -> B.Step:
+  B.Wt.ready(s, at, 0, "", "t1", M.WorktreeSet{"t1", "b1", "/p/.backplane/worktrees/b1", at})
+
+def exceptional_waiting() -> M.State:
+  after(fresh_missing(), post(fresh_missing(), 200n, "exceptional"))
+
+def exceptional_ready() -> M.State:
+  after(exceptional_waiting(), ordered_ready(exceptional_waiting(), 201n))
+
+def exceptional_done() -> B.Step:
+  B.Queue.drain(exceptional_ready(), 202n, "t1", B.Step{[M.TurnChanged{"t1", M.Completed{}, 202n}], Nil{}})
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("the old guard read a just-ended turn as a worktree being made", Bool.show(M.Worktree.pending(M.State.thread.get(gone(), "t1"), 7n)), "True")
@@ -96,3 +141,29 @@ def main() -> IO(Unit):
     C.Check.str("a removal with no ask writes no extra line", kinds(changes(B.Hub.agentm(5n, gone(), 30n, 0, "", J.Json.obj([J.KV{"thread", J.Str{"t1"}}]), "thread.unrooted"))), "removed")
     C.Check.str("a new thread still waits for its first worktree", waits(M.State.replay([M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Worktree{}, "", "", "claude", "", 1n}], M.State.empty()), 50n), "True")
     C.Check.str("a new thread's message waits for it, asking nothing", Nat.show(agains(outs(post(M.State.replay([M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Worktree{}, "", "", "claude", "", 1n}], M.State.empty()), 50n, "m2")))), "0")
+    C.Check.str("healthy running worktree has no recreation hold", waits(healthy(""), 200n), "False")
+    C.Check.str("healthy running post is not held", Bool.show(B.Deliver.held(changes(post(healthy(""), 200n, "healthy")))), "False")
+    C.Check.str("healthy running post delivers the current text now", send_texts(outs(post(healthy(""), 200n, "healthy"))), "more")
+    C.Check.str("healthy running post leaves no queue", M.Queue.of(after(healthy(""), post(healthy(""), 200n, "healthy")), "t1"), "")
+    C.Check.str("healthy path ignores even a fresh leftover ask", waits(healthy("190"), 200n), "False")
+    C.Check.str("healthy path plus fresh ask still never holds input", Bool.show(B.Deliver.held(changes(post(healthy("190"), 200n, "fresh")))), "False")
+    C.Check.str("healthy path plus fresh ask delivers once now", Nat.show(send_count(outs(post(healthy("190"), 200n, "fresh")))), "1")
+    C.Check.str("healthy path plus fresh ask starts no recreation", Nat.show(agains(outs(post(healthy("190"), 200n, "fresh")))), "0")
+    C.Check.str("exceptional absent path has the old running marker", Bool.show(B.Hub.running(B.Hub.thread(fresh_missing(), "t1"))), "True")
+    C.Check.str("old activity guard expired in exceptional case", Bool.show(M.Worktree.pending(B.Hub.thread(fresh_missing(), "t1"), 200n)), "False")
+    C.Check.str("exceptional absent path has a genuine fresh recreation", waits(fresh_missing(), 200n), "True")
+    C.Check.str("exceptional post queues only while recreation is fresh", Bool.show(B.Deliver.held(changes(post(fresh_missing(), 200n, "exceptional")))), "True")
+    C.Check.str("exceptional queued input launches no child", Nat.show(List.length(&2, B.Out, outs(post(fresh_missing(), 200n, "exceptional")))), "0")
+    C.Check.str("ordered recreation queue retains both inputs", M.Queue.of(ordered_waiting(), "t1"), "first queued input\n\nsecond queued input")
+    C.Check.str("readiness drains automatically in original order", send_texts(outs(ordered_ready(ordered_waiting(), 25n))), "first queued input\n\nsecond queued input")
+    C.Check.str("readiness emits exactly one provider input", Nat.show(send_count(outs(ordered_ready(ordered_waiting(), 25n)))), "1")
+    C.Check.str("readiness atomically clears the entire queue", M.Queue.of(after(ordered_waiting(), ordered_ready(ordered_waiting(), 25n)), "t1"), "")
+    C.Check.str("repeated readiness emits no second provider input", Nat.show(send_count(outs(ordered_ready(after(ordered_waiting(), ordered_ready(ordered_waiting(), 25n)), 26n)))), "0")
+    C.Check.str("repeated readiness cannot take the queue twice", kinds(changes(ordered_ready(after(ordered_waiting(), ordered_ready(ordered_waiting(), 25n)), 26n))), "worktree")
+    C.Check.str("expired recreation ask no longer holds", waits(fresh_missing(), 310n), "False")
+    C.Check.str("answered recreation ask no longer holds", waits(M.State.replay([M.SettingSet{"wt.again.t1", "", 201n}], fresh_missing()), 202n), "False")
+    C.Check.str("readiness during old running marker preserves queued input", M.Queue.of(exceptional_ready(), "t1"), "more")
+    C.Check.str("readiness during old running marker starts no concurrent input", Nat.show(send_count(outs(ordered_ready(exceptional_waiting(), 201n)))), "0")
+    C.Check.str("completion automatically drains exceptional input without retry", send_texts(outs(exceptional_done())), "more")
+    C.Check.str("completion clears exceptional queue atomically", M.Queue.of(after(exceptional_ready(), exceptional_done()), "t1"), "")
+    C.Check.str("duplicate completion cannot redeliver exceptional input", Nat.show(send_count(outs(B.Queue.drain(after(exceptional_ready(), exceptional_done()), 203n, "t1", B.Step{[M.TurnChanged{"t1", M.Completed{}, 203n}], Nil{}})))), "0")
