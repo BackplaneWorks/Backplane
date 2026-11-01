@@ -180,9 +180,9 @@ def Vo.one(+m: String, st: VoSt) -> VoOut:
 # words committed now (never to change; corrected), the tail
 # (may still change), "firm" when the committed words open with a term,
 # the fixes made, and on a segment's end "final" with the words to clarify
-def Vo.words.msg(+thread: String, +item: String, +first: Bool, +commit: String, +tail: String, +firm: Bool, +fixes: J.Json, +final: Bool, +unsure: J.Json) -> String:
+def Vo.words.msg(+thread: String, +item: String, +first: Bool, +commit: String, +tail: String, +firm: Bool, +fixes: J.Json, +fin: Bool, +unsure: J.Json) -> String:
   Vo.msg(thread, "words", [J.KV{"item", J.Str{item}}, J.KV{"first", J.Flag{first}}, J.KV{"commit", J.Str{commit}}, J.KV{"tail", J.Str{tail}}, J.KV{"firm", J.Flag{firm}},
-    J.KV{"fixes", fixes}, J.KV{"final", J.Flag{final}}, J.KV{"unsure", unsure}])
+    J.KV{"fixes", fixes}, J.KV{"final", J.Flag{fin}}, J.KV{"unsure", unsure}])
 
 def Vo.words.k(quiet: Bool, +m: String, st: VoSt) -> VoOut:
   match quiet:
@@ -191,18 +191,18 @@ def Vo.words.k(quiet: Bool, +m: String, st: VoSt) -> VoOut:
     case False{}:
       VoOut{[m], st}
 
-def Vo.words.go(+thread: String, +item: String, +d: VD.VDict, +final: Bool, +fx: VD.VFix, +tail: String, +set: VD.VSet, +acc: String, +seg: List<&2, VD.VW>, +ask: List<&2, V.Unsure>, +tl: String) -> VoOut:
-  Vo.words.k(Bool.and(Bool.not(final), Bool.and(List.is_empty(&2, VD.VW, VD.VFix.words(fx)), String.eq(tail, tl))),
-    Vo.words.msg(thread, item, List.is_empty(&2, VD.VW, seg), VD.Vd.text(VD.VFix.words(fx)), tail, V.Voice.firm(VD.Vd.terms(d), VD.Vd.text(VD.VFix.words(fx))), VD.Vd.fixes.json(VD.VFix.fixes(fx)), final,
-      Bool.pick(J.Json, final, V.Voice.unsure.json(VD.Vd.asks(d, Nil{}, VD.VFix{List.append(&2, VD.VW, seg, VD.VFix.words(fx)), Nil{}, List.append(&2, V.Unsure, ask, VD.VFix.ask(fx))})), J.Json.arr(Nil{}))),
-    Bool.pick(VoSt, final, VoSt{set, "", Nil{}, Nil{}, ""}, VoSt{set, acc, List.append(&2, VD.VW, seg, VD.VFix.words(fx)), List.append(&2, V.Unsure, ask, VD.VFix.ask(fx)), tail}))
+def Vo.words.go(+thread: String, +item: String, +d: VD.VDict, +fin: Bool, +fx: VD.VFix, +tail: String, +set: VD.VSet, +acc: String, +seg: List<&2, VD.VW>, +ask: List<&2, V.Unsure>, +tl: String) -> VoOut:
+  Vo.words.k(Bool.and(Bool.not(fin), Bool.and(List.is_empty(&2, VD.VW, VD.VFix.words(fx)), String.eq(tail, tl))),
+    Vo.words.msg(thread, item, List.is_empty(&2, VD.VW, seg), VD.Vdc.text(VD.VFix.words(fx)), tail, V.Voice.firm(VD.Vdc.terms(d), VD.Vdc.text(VD.VFix.words(fx))), VD.Vdc.fixes.json(VD.VFix.fixes(fx)), fin,
+      Bool.pick(J.Json, fin, V.Voice.unsure.json(VD.Vdc.asks(d, Nil{}, VD.VFix{List.append(&2, VD.VW, seg, VD.VFix.words(fx)), Nil{}, List.append(&2, V.Unsure, ask, VD.VFix.ask(fx))})), J.Json.arr(Nil{}))),
+    Bool.pick(VoSt, fin, VoSt{set, "", Nil{}, Nil{}, ""}, VoSt{set, acc, List.append(&2, VD.VW, seg, VD.VFix.words(fx)), List.append(&2, V.Unsure, ask, VD.VFix.ask(fx)), tail}))
 
 # a settled step into a message: the committed words corrected, the tail
 # corrected for display; nothing when nothing changed
-def Vo.words(+thread: String, +item: String, +d: VD.VDict, final: Bool, +x: VD.VStep, st: VoSt) -> VoOut:
+def Vo.words(+thread: String, +item: String, +d: VD.VDict, fin: Bool, +x: VD.VStep, st: VoSt) -> VoOut:
   match st:
     case VoSt{_, +acc, +seg, +ask, +tl}:
-      Vo.words.go(thread, item, d, final, VD.Vd.fix(d, VD.VStep.commit(x)), VD.Vd.text(VD.VFix.words(VD.Vd.fix(d, VD.VStep.tail(x)))), VD.VStep.st(x), acc, seg, ask, tl)
+      Vo.words.go(thread, item, d, fin, VD.Vdc.fix(d, VD.VStep.commit(x)), VD.Vdc.text(VD.VFix.words(VD.Vdc.fix(d, VD.VStep.tail(x)))), VD.VStep.st(x), acc, seg, ask, tl)
 
 def Vo.set(+st: VoSt) -> VD.VSet:
   match st:
@@ -224,14 +224,14 @@ def Vo.with.acc(st: VoSt, +a: String) -> VoSt:
       VoSt{s, a, g, k, t}
 
 def Vo.delta(+thread: String, +item: String, +a: String, +d: VD.VDict, +st: VoSt) -> VoOut:
-  Vo.words(thread, item, d, False{}, VD.Vs.hyp(False{}, Vo.set(st), item, VD.Vd.words.text(a), 0n), Vo.with.acc(st, a))
+  Vo.words(thread, item, d, False{}, VD.Vs.hyp(False{}, Vo.set(st), item, VD.Vdc.words.text(a), 0n, VD.Vdc.waits(d)), Vo.with.acc(st, a))
 
 def Vo.done.ws(timed: Bool, +o: J.Json) -> List<&2, VD.VW>:
   match timed:
     case True{}:
-      VD.Vd.words.json(J.Json.get_obj(o, "words"))
+      VD.Vdc.words.json(J.Json.get_obj(o, "words"))
     case False{}:
-      VD.Vd.words.text(J.Json.get_str(o, "text", ""))
+      VD.Vdc.words.text(J.Json.get_str(o, "text", ""))
 
 def Vo.step.k(i: Nat, +o: J.Json, +thread: String, +r: VoReq, +st: VoSt) -> VoOut:
   match i:
@@ -252,7 +252,7 @@ def Vo.step.k(i: Nat, +o: J.Json, +thread: String, +r: VoReq, +st: VoSt) -> VoOu
       Vo.one(Vo.msg(thread, "hint", [J.KV{"hint", J.Str{J.Json.get_str(o, "hint", "")}}]), st)
     case 7n:
       Vo.words(thread, J.Json.get_str(o, "item", ""), VoReq.d(r), False{},
-        VD.Vs.hyp(True{}, Vo.set(st), J.Json.get_str(o, "item", ""), VD.Vd.words.json(J.Json.get_obj(o, "words")), J.Json.get_nat(o, "end", 0n)), st)
+        VD.Vs.hyp(True{}, Vo.set(st), J.Json.get_str(o, "item", ""), VD.Vdc.words.json(J.Json.get_obj(o, "words")), J.Json.get_nat(o, "end", 0n), VD.Vdc.waits(VoReq.d(r))), st)
     case 8n:
       Vo.one(Vo.msg(thread, "loaded", [J.KV{"ms", J.Num{Nat.show(J.Json.get_nat(o, "ms", 0n))}}]), st)
     case _:
@@ -441,7 +441,7 @@ def Vo.live.args(+home: String, +rq: VoReq, +device: String) -> List<&2, String>
 def Vo.live.run(+exe: String, +home: String, +thread: String, +device: String, +rq: VoReq, +out: Chan(String)) -> IO(Unit):
   do IO<Unit>:
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Vo.dir(home))
-    w : Bool <- Vo.write(Vo.keywords(home), String.join(V.Voice.keywords(VD.Vd.terms(VoReq.d(rq))), "\n"))
+    w : Bool <- Vo.write(Vo.keywords(home), String.join(V.Voice.keywords(VD.Vdc.terms(VoReq.d(rq))), "\n"))
     r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, Vo.live.args(home, rq, device), "/", 0)
     Vo.started(r, home, out, thread, rq)
 
@@ -485,7 +485,7 @@ def Vo.req.d(+home: String, +want: String, +model: String, +src: String, +key: S
 # the dictionary.txt terms (bots' voice_dictionary_add, older hubs) join
 # the entries the request carried
 def Vo.req(+home: String, +want: String, +model: String, +src: String, +key: String, d: VD.VDict) -> IO(VoReq):
-  IO.bind(String, VoReq, BN.Bf.text(Vo.dict(home)), t => Vo.req.d(home, want, model, src, key, VD.Vd.lines(V.Voice.dict.parse(t), d)))
+  IO.bind(String, VoReq, BN.Bf.text(Vo.dict(home)), t => Vo.req.d(home, want, model, src, key, VD.Vdc.lines(V.Voice.dict.parse(t), d)))
 
 def Vo.devices.m(m: Maybe<&2, J.Json>) -> String:
   match m:
@@ -602,7 +602,7 @@ def Vo.file(+home: String, +rq: VoReq, +path: String, +ct: String) -> IO(String)
     +exe : String <- Vo.exe()
     +k : String <- BN.Bf.text(Vo.key(home))
     +t : String <- Vo.file.k(Bool.or(VoReq.timed(rq), Bool.not(String.is_empty(String.trim(k)))), exe, home, rq, path, ct)
-    return VD.Vd.text(VD.VFix.words(VD.Vd.fix(VoReq.d(rq), VD.Vd.words.text(t))))
+    return VD.Vdc.text(VD.VFix.words(VD.Vdc.fix(VoReq.d(rq), VD.Vdc.words.text(t))))
 
 def Vo.bytes.wrote(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Bool):
   BN.Bf.wrote(r)
@@ -640,10 +640,10 @@ def Vo.ring.rq(+home: String, +path: String, +ct: String, +body: String, +rq: Vo
   do IO<String>:
     +heard : String <- Vo.file(home, rq, path, ct)
     BN.Bf.rm(path)
-    return Vo.ring.form(body, heard, V.Voice.note(VD.Vd.asks(VoReq.d(rq), Nil{}, VD.VFix{VD.Vd.words.text(heard), Nil{}, Nil{}})), Vo.ring.model(rq))
+    return Vo.ring.form(body, heard, V.Voice.note(VD.Vdc.asks(VoReq.d(rq), Nil{}, VD.VFix{VD.Vdc.words.text(heard), Nil{}, Nil{}})), Vo.ring.model(rq))
 
 def Vo.ring.p(+home: String, +path: String, +ct: String, +body: String, +p: J.Json) -> IO(String):
-  IO.bind(VoReq, String, Vo.req(home, J.Json.get_str(p, "engine", "auto"), J.Json.get_str(p, "model", ""), "hub", "", VD.Vd.of.json(p)), rq => Vo.ring.rq(home, path, ct, body, rq))
+  IO.bind(VoReq, String, Vo.req(home, J.Json.get_str(p, "engine", "auto"), J.Json.get_str(p, "model", ""), "hub", "", VD.Vdc.of.json(p)), rq => Vo.ring.rq(home, path, ct, body, rq))
 
 def Vo.ring.k(+home: String, +path: String, +ct: String, +body: String) -> IO(String):
   IO.bind(J.Json, String, Vo.prefs.read(home), p => Vo.ring.p(home, path, ct, body, p))

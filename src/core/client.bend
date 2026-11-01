@@ -84,7 +84,7 @@ type MailvIndex is Data:
 type MailvData is Data:
   MailvData{cache: MV.Cache, find: MV.Find, bubbles: List<&2, MV.Bub>, targets: List<&2, MV.Opt>, rev: Nat, touch: Nat, index: MailvIndex}
 
-# Typed local stores share the old final Ui slot: ordinary Ui copies stay cheap.
+# Typed local stores share the old fin Ui slot: ordinary Ui copies stay cheap.
 # The mail record is behind a List to bound native record flattening.
 type MailvLocal is Data:
   MailvLocal{terms: Map<&2, VT.Vt>, mail: List<&2, MailvData>}
@@ -9006,20 +9006,20 @@ def Voice.untail(+d: String, +p: Nat, +tl: Nat) -> String:
   String.take(d, p) ++ String.drop(d, Nat.add(p, tl))
 
 # a segment's end: its fixes shown (undo), its words to clarify merged
-def Voice.words.final(final: Bool, u: Ui, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
-  match final:
+def Voice.words.final(fin: Bool, +u: Ui, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
+  match fin:
     case True{}:
       Voice.unsure.set(Ui.scratch_set(u, "@voice.fx", fixes), Voice.merge(Voice.unsure(u), us, Voice.ignored(u)))
     case False{}:
       u
 
-def Voice.words.put(+u: Ui, +thread: String, +before: String, +c: VC.Ins, +t: VC.Ins, +tail: String, +final: Bool, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
-  Voice.words.final(final, Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, thread, VC.Ins.text(t)), "@voice.pos", Nat.show(VC.Ins.caret(c))),
+def Voice.words.put(+u: Ui, +thread: String, +before: String, +c: VC.Ins, +t: VC.Ins, +tail: String, +fin: Bool, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
+  Voice.words.final(fin, Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, thread, VC.Ins.text(t)), "@voice.pos", Nat.show(VC.Ins.caret(c))),
     "@voice.tl", Nat.show(Nat.sub(String.length(VC.Ins.text(t)), String.length(VC.Ins.text(c))))), "@voice.to", Nat.show(Bool.pick(Nat, String.is_empty(String.trim(tail)), VC.Ins.caret(c), VC.Ins.caret(t)))),
     "@voice.uth", thread), "@voice.part", tail), fixes, us)
 
-def Voice.words.ins(+u: Ui, +thread: String, +c: VC.Ins, +tail: String, +tfirm: Bool, +final: Bool, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
-  Voice.words.put(u, thread, VC.Ins.text(c), c, VC.Voice.put(tfirm, VC.Ins.text(c), VC.Ins.caret(c), tail), tail, final, fixes, us)
+def Voice.words.ins(+u: Ui, +thread: String, +c: VC.Ins, +tail: String, +tfirm: Bool, +fin: Bool, +fixes: String, us: List<&2, VC.Unsure>) -> Ui:
+  Voice.words.put(u, thread, VC.Ins.text(c), c, VC.Voice.put(tfirm, VC.Ins.text(c), VC.Ins.caret(c), tail), tail, fin, fixes, us)
 
 def Voice.words.go(+u: Ui, +thread: String, +d: String, +p: Nat, +o: J.Json) -> Ui:
   Voice.words.ins(u, thread,
@@ -9055,14 +9055,14 @@ def Voice.fixes.without(fs: List<&2, VDC.VFx>, n: Nat) -> List<&2, VDC.VFx>:
       x <> Voice.fixes.without(t, k)
 
 def Voice.fixes.drop(+u: Ui, +n: Nat) -> Ui:
-  Ui.scratch_set(u, "@voice.fx", J.Json.show(VDC.Vd.fixes.json(Voice.fixes.without(Voice.fixes(u), n))))
+  Ui.scratch_set(u, "@voice.fx", J.Json.show(VDC.Vdc.fixes.json(Voice.fixes.without(Voice.fixes(u), n))))
 
 # the learned setting for a heard phrase, after a yes or a no
 def Voice.learn.kv(+u: Ui, +heard: String, +out: String, yes: Bool) -> String:
-  VDC.Vd.l.pre() ++ VDC.Vd.phrase(heard) ++ "=" ++ VDC.Vd.learn(M.Setting.get(Ui.state.of(u), VDC.Vd.l.pre() ++ VDC.Vd.phrase(heard), ""), out, yes)
+  VDC.Vdc.l.pre() ++ VDC.Vdc.phrase(heard) ++ "=" ++ VDC.Vdc.learn(M.Setting.get(Ui.state.of(u), VDC.Vdc.l.pre() ++ VDC.Vdc.phrase(heard), ""), out, yes)
 
 def Voice.learn(+u: Ui, +heard: String, +out: String, yes: Bool) -> Act:
-  Bool.pick(Act, Bool.or(String.is_empty(VDC.Vd.phrase(heard)), String.eq(heard, out)), Act{u, Nil{}}, Ui.setting(u, Voice.learn.kv(u, heard, out, yes)))
+  Bool.pick(Act, Bool.or(String.is_empty(VDC.Vdc.phrase(heard)), String.eq(heard, out)), Act{u, Nil{}}, Ui.setting(u, Voice.learn.kv(u, heard, out, yes)))
 
 def Voice.then.k(b: Act, cs: List<&2, Cmd>) -> Act:
   match b:
@@ -9077,15 +9077,15 @@ def Voice.then(a: Act, +kv: String) -> Act:
 
 # a dictionary entry set (an empty line removes it)
 def Voice.entry.kv(+line: String) -> String:
-  VDC.Vd.ekey.setting(line) ++ "=" ++ String.trim(line)
+  VDC.Vdc.ekey.setting(line) ++ "=" ++ String.trim(line)
 
 # many entries (one a line), each its own setting
-def Voice.entries(ls: List<&2, String>, a: Act) -> Act:
+def Voice.entries(ls: List<&2, String>, +a: Act) -> Act:
   match ls:
     case Nil{}:
       a
     case +l <> t:
-      Voice.entries(t, Bool.pick(Act, VDC.Vd.line.ok(l), Voice.then(a, Voice.entry.kv(l)), a))
+      Voice.entries(t, Bool.pick(Act, VDC.Vdc.line.ok(l), Voice.then(a, Voice.entry.kv(l)), a))
 
 # undo the n-th fix: the word as heard goes back where the fix put it, and
 # the fix is learned as unwanted
@@ -15228,26 +15228,26 @@ def Proj.enter(+l: I.Loc, +u: Ui) -> Act:
 def Proj.enter.u(+u: Ui) -> Act:
   Proj.enter(Lang.loc(u), u)
 
-# past the table's own: the project picker's (14-17), then the Mechanical
-# page's (20-28; client.bend's Mpage.act), then a phone's upload (29, 30),
-# then the viewer's history (31-46; Hs.act), then the API keys' (47, 48)
-def Voice.unterm(undo: Bool, +u: Ui, +value: String) -> Act:
-  match undo:
-    case True{}:
-      Voice.undo(u, VDC.Vd.num(String.drop(value, 1n)))
-    case False{}:
-      Voice.after.rpc(Ui.setting(u, VDC.Vd.ekey.setting(value) ++ "="), "dict", [J.KV{"dict", J.Str{VC.Voice.dict.show(VC.Voice.dict.remove(Voice.dict(u), value))}}])
-
 # an Act, then a voice request on its state
 def Voice.after.rpc(a: Act, +op: String, kvs: List<&2, J.KV>) -> Act:
   match a:
     case Act{u, cs}:
       Voice.then.k(Voice.rpc(u, op, kvs), cs)
 
+# past the table's own: the project picker's (14-17), then the Mechanical
+# page's (20-28; client.bend's Mpage.act), then a phone's upload (29, 30),
+# then the viewer's history (31-46; Hs.act), then the API keys' (47, 48)
+def Voice.unterm(undo: Bool, +u: Ui, +value: String) -> Act:
+  match undo:
+    case True{}:
+      Voice.undo(u, VDC.Vdc.num(String.drop(value, 1n)))
+    case False{}:
+      Voice.after.rpc(Ui.setting(u, VDC.Vdc.ekey.setting(value) ++ "="), "dict", [J.KV{"dict", J.Str{VC.Voice.dict.show(VC.Voice.dict.remove(Voice.dict(u), value))}}])
+
 def Voice.local(+u: Ui, +value: String) -> Act:
   Voice.rpc(Ui.scratch_set(u, "@voice.busy", Bool.pick(String, String.eq(value, "status"), Ui.scratch(u, "@voice.busy"), value)),
     Bool.pick(String, String.starts_with(value, "install:"), "local-install", Bool.pick(String, String.starts_with(value, "remove:"), "local-remove", "local")),
-    [J.KV{"id", J.Str{VDC.Vd.right(value, ":")}}])
+    [J.KV{"id", J.Str{VDC.Vdc.right(value, ":")}}])
 
 def Voice.act.tail.k(picker: Bool, +i: Nat, +u: Ui, +value: String) -> Act:
   match picker:

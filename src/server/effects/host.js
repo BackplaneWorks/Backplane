@@ -1556,53 +1556,77 @@ function sock_send_cbor(socket, text, keys, words, ms, k) {
 }
 
 // Dictation's audio (host.bend's Sock.keep/feed/feed_bytes/unkeep): a
-// helper's stdin by key; an upload's bytes go into it as they arrive.
+// helper's stdin by key; an upload's bytes go into it as they arrive. A
+// socket is a descriptor, or (the Bun loop, loop.js) a BP_H handle id.
 const host_kept = new Map();
 
-function host_keep_write(fd, b, n) {
+function host_keep_write(dst, b, n) {
+  const H = globalThis.BP_H;
+  // a helper that stopped reading loses audio rather than stall the hub
+  if (H && H.is(dst)) {
+    const h = H.get(dst);
+    let at = 0;
+    while (h && at < n) {
+      const w = h.write(b.subarray(at, n));
+      if (w <= 0) return;
+      at += w;
+    }
+    return;
+  }
   const sys = io_sys();
   let at = 0;
-  // a helper that stopped reading loses audio rather than stall the hub
   while (at < n) {
-    const w = host_write(fd, sys.ptr(b, at), n - at);
+    const w = host_write(dst, sys.ptr(b, at), n - at);
     if (w <= 0) return;
     at += w;
   }
 }
 
+function host_keep_close(dst) {
+  const H = globalThis.BP_H;
+  if (H && H.is(dst)) {
+    try { H.get(dst)?.shutdown(1); } catch (_) {}
+    try { H.close(dst); } catch (_) {}
+    return;
+  }
+  try { host_libc().shutdown(dst, 1); } catch (_) {}
+  try { host_libc().close(dst); } catch (_) {}
+}
+
 function sock_keep(socket, key) {
   const old = host_kept.get(key);
-  if (old !== undefined && old !== socket) {
-    try { host_libc().shutdown(old, 1); host_libc().close(old); } catch (_) {}
-  }
+  if (old !== undefined && old !== socket) host_keep_close(old);
   host_kept.set(key, socket);
   return { $: "Unit" };
 }
 
 function sock_feed(socket, key, n, k) {
-  const sys = io_sys();
-  const dst = host_kept.get(key);
-  if (dst === undefined) return io_tup(socket, io_fail(2));
+  if (host_kept.get(key) === undefined) return io_tup(socket, io_fail(2));
+  const H = globalThis.BP_H;
+  const handle = H && H.is(socket) ? H.get(socket) : undefined;
+  const sys = handle ? null : io_sys();
   const b = new Uint8Array(65536);
-  const again = sys.mac ? 35 : 11;
+  const again = handle ? -11 : (sys.mac ? 35 : 11);
   let left = Number(n);
   const go = () => {
     while (left > 0) {
-      const got = host_read(socket, sys.ptr(b), Math.min(left, b.length));
-      if (got < 0 && sys.errno() === again) {
-        io_park_on(socket, false, k, go);
-        return undefined;
+      let got;
+      if (handle) {
+        got = handle.read(b.subarray(0, Math.min(left, b.length)));
+        if (got < 0 && got === -(H.ERRNO.EAGAIN)) { io_park_on(socket, false, k, go); return undefined; }
+        if (got <= 0) return io_tup(socket, io_fail(got === 0 ? 32 : -got));
+      } else {
+        got = host_read(socket, sys.ptr(b), Math.min(left, b.length));
+        if (got < 0 && sys.errno() === again) { io_park_on(socket, false, k, go); return undefined; }
+        if (got <= 0) return io_tup(socket, io_fail(got === 0 ? 32 : sys.errno()));
       }
-      if (got <= 0) return io_tup(socket, io_fail(got === 0 ? 32 : sys.errno()));
       const d = host_kept.get(key);
       if (d !== undefined) host_keep_write(d, b, got);
       left -= got;
     }
     return io_tup(socket, io_done({ $: "Unit" }));
   };
-  if (left <= 0) return go();
-  io_park_on(socket, false, k, go);
-  return undefined;
+  return go();
 }
 
 function sock_feed_bytes(key, data) {
@@ -1616,12 +1640,9 @@ function sock_feed_bytes(key, data) {
 }
 
 function sock_unkeep(key) {
-  const fd = host_kept.get(key);
+  const dst = host_kept.get(key);
   host_kept.delete(key);
-  if (fd !== undefined) {
-    try { host_libc().shutdown(fd, 1); } catch (_) {}
-    try { host_libc().close(fd); } catch (_) {}
-  }
+  if (dst !== undefined) host_keep_close(dst);
   return { $: "Unit" };
 }
 

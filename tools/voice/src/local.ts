@@ -210,7 +210,9 @@ export function wordsOf(r: { tokens?: string[]; timestamps?: number[]; durations
       continue;
     }
     const last = out[out.length - 1];
-    if (!last || gap || /^\s/.test(t)) out.push([t.trim(), cs(start), cs(end), pct(p)]);
+    // a piece of only punctuation (" ." at the end) closes the last word
+    const punct = /^[\s.,!?;:]+$/.test(t);
+    if (!last || (!punct && (gap || /^\s/.test(t)))) out.push([t.trim(), cs(start), cs(end), pct(p)]);
     else {
       last[0] += t.trim();
       last[2] = Math.max(last[2], cs(end));

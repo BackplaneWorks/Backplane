@@ -7893,7 +7893,7 @@ def VoiceJob.live(+inbox: Chan(Msg), +home: String, +client: U32, +id: String, +
   do IO<Unit>:
     +key : String <- BN.Bn.random(4n)
     +rq : VO.VoReq <- VO.Vo.req(home, J.Json.get_str(p, "engine", "auto"), J.Json.get_str(p, "model", ""), Bool.pick(String, String.eq(J.Json.get_str(p, "src", ""), "client"), "client", "hub"),
-      key, VD.Vd.of.json(p))
+      key, VD.Vdc.of.json(p))
     VoiceJob.live.rq(rq, inbox, home, client, id, thread, device)
 
 def VoiceJob.local.m(m: Maybe<&2, J.Json>, +acc: J.Json) -> J.Json:
@@ -15627,14 +15627,6 @@ def Vin.gate(ok: Bool, s: Socket, +cont: Bool, +key: String, +len: Nat, +last: B
         s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
         Vin.go(key, s2, len, last, List.take(&2, U32, rest, len))
 
-def Conn.route.vin(vin: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
-  match vin req:
-    case True{} W.Request{_, +p, +hs}:
-      Vin.gate(Conn.allowed(trusted, hs, p, token), s, String.contains(String.to_lower(W.Http.header_of(hs, "expect")), "100-continue"),
-        AT.Att.unpct(W.Http.param(p, "s")), Conn.bot.len(hs), String.eq(W.Http.param(p, "end"), "1"), rest)
-    case False{} _:
-      Conn.route.vin(Conn.is_vin(req), s, req, rest, web, id, inbox, trusted, token)
-
 def Conn.route.att(att: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match att req:
     case True{} W.Request{_, +p, +hs}:
@@ -15643,6 +15635,14 @@ def Conn.route.att(att: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +
         AT.Att.unpct(W.Http.param(p, "thread")), AT.Att.stored(AT.Att.unpct(W.Http.param(p, "key")), AT.Att.unpct(W.Http.param(p, "name"))), Conn.bot.len(hs), rest, inbox)
     case False{} _:
       Conn.route.mcp(Conn.is_mcp(req), s, req, rest, web, id, inbox, trusted, token)
+
+def Conn.route.vin(vin: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+  match vin req:
+    case True{} W.Request{_, +p, +hs}:
+      Vin.gate(Conn.allowed(trusted, hs, p, token), s, String.contains(String.to_lower(W.Http.header_of(hs, "expect")), "100-continue"),
+        AT.Att.unpct(W.Http.param(p, "s")), Conn.bot.len(hs), String.eq(W.Http.param(p, "end"), "1"), rest)
+    case False{} _:
+      Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
 
 def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match k req:
@@ -15673,7 +15673,7 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case 13n W.Request{_, +p, +hs}:
       Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"tshot", p, "", "", "", "", ""}, inbox)
     case _ _:
-      Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
+      Conn.route.vin(Conn.is_vin(req), s, req, rest, web, id, inbox, trusted, token)
 
 def Conn.pair.reply(ok: Bool, s: Socket, +token: String, https: Bool) -> IO(Unit):
   match ok:
