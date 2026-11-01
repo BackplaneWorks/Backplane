@@ -1519,6 +1519,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .solid-pathtrace[hidden] { display: none !important; }
 .solid-render-status { position: absolute; top: 8px; left: 8px; max-width: calc(100% - 16px); color: var(--dim); background: var(--panel); border: 1px solid var(--line); padding: 3px 6px; font: 11px/1.5 var(--mono); z-index: 8; pointer-events: none; }
 .solid-render-status:empty { display: none; }
+.viewer-stage > .probe-chip ~ .solid-render-status { top: 44px; }
 .solid-samples, .solid-render-mode { min-height: 32px; padding: 3px; border: 1px solid var(--line); color: var(--text); background: var(--raise); }
 .solid-original-visible .component-selection-overlay { display: none; }
 @media (max-width: 700px) {
