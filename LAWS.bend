@@ -1,5 +1,7 @@
 import ./src/mobile/session.bend as MCOMPOSER
+
 import ./src/server/review-history.bend as REVIEWHISTORY
+
 import ./src/server/thin-view.bend as THINREVIEW
 
 import ./src/core/components.bend as COMPONENTS
@@ -4930,6 +4932,10 @@ law hist_index_live:
 law hist_record_nothing:
   for +e: String
   {HS.Hist.record("", e) == "" : String}
+
+law hist_window_keeps_steps:
+  {List.length(&2, M.Entry, M.State.steps(HS.Hist.window(M.State.apply(M.State.empty(),
+    M.ActivityLogged{"t", "s", "step", "kicad", "{}", 1n}), "t", M.State.empty()), "t")) == 1n : Nat}
 
 # a board's or schematic's own look is untouched by comparisons; a
 # comparison's marks each have a colour of their own

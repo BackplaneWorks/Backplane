@@ -1,5 +1,7 @@
 import ./src/server/review-history.bend as REVIEWHISTORY
+
 import ./src/server/thin-view.bend as THINREVIEW
+
 import ./src/core/plot-error.bend as PLOTERROR
 
 import ./src/web/workspace.bend as WSK
@@ -7109,6 +7111,9 @@ def Laws.hist_index_live(ss):
   {==}
 
 def Laws.hist_record_nothing(e):
+  {==}
+
+def Laws.hist_window_keeps_steps():
   {==}
 
 def Laws.look_plain_board(layer):

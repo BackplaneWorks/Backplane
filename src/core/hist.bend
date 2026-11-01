@@ -904,3 +904,59 @@ def Hist.sheet.k(k: Nat, +p: String, +abs: String) -> String:
 
 def Hist.sheet(+p: String, +file: String) -> String:
   Hist.sheet.k(Hist.kind(p), p, Hist.abs(file))
+
+# Design history is independent of the chat page. A thin render keeps
+# the selected thread's complete step index, with short source labels
+# beside it. The conversation itself still contains only its page.
+def Hist.sources.key(+th: String) -> String:
+  "@history-sources:" ++ th
+
+def Hist.sources.add(m: Maybe<&2, Step>, ids: Map<&2, Bool>) -> Map<&2, Bool>:
+  match m:
+    case Some{s}: Map.set(&2, Bool, ids, Step.entry(s), True{})
+    case None{}: ids
+
+def Hist.sources.ids(es: List<&2, M.Entry>, ids: Map<&2, Bool>) -> Map<&2, Bool>:
+  match es:
+    case Nil{}: ids
+    case e <> t: Hist.sources.ids(t, Hist.sources.add(Step.of(e), ids))
+
+def Hist.sources.has(p: Map<&2, Bool> & Bool) -> Bool:
+  (_, has) = p
+  has
+
+def Hist.sources.short(e: M.Entry) -> M.Entry:
+  match e:
+    case M.Act{id, th, tone, kind, summary, at}: M.Act{id, th, tone, kind, String.take(Hist.line(summary), 240n), at}
+    case M.Msg{id, th, role, text, at}: M.Msg{id, th, role, String.take(Hist.line(text), 240n), at}
+
+def Hist.sources.keep(keep: Bool, e: M.Entry, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match keep:
+    case True{}: Hist.sources.short(e) <> acc
+    case False{}: acc
+
+def Hist.sources.go(es: List<&2, M.Entry>, +ids: Map<&2, Bool>, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match es:
+    case Nil{}: List.reverse(&2, M.Entry, acc)
+    case +e <> t: Hist.sources.go(t, ids, Hist.sources.keep(Hist.sources.has(Map.get(Bool, False{}, ids, M.Idx.id(e))), e, acc))
+
+def Hist.sources.of(steps: List<&2, M.Entry>, +es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match steps:
+    case Nil{}: Nil{}
+    case +s <> +rest: Hist.sources.go(es, Hist.sources.ids(s <> rest, Map.new(&2, Bool)), Nil{})
+
+def Hist.install(steps: List<&2, M.Entry>, sources: List<&2, M.Entry>, +th: String, page: M.State) -> M.State:
+  match page:
+    case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nav, +bw}:
+      M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nav,
+        [M.Ext{M.Ext.world(M.Ext.of(bw)),
+          Map.set(&2, List<&2, M.Entry>, Map.set(&2, List<&2, M.Entry>, M.Ext.by(M.Ext.of(bw)), M.Idx.steps.key(th), steps),
+            Hist.sources.key(th), sources), M.Ext.mail(M.Ext.of(bw))}]}
+
+def Hist.window.sources(held: List<&2, M.Entry>, steps: List<&2, M.Entry>, es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match held:
+    case Nil{}: Hist.sources.of(steps, es)
+    case h <> rest: h <> rest
+
+def Hist.window(+whole: M.State, +th: String, page: M.State) -> M.State:
+  Hist.install(M.State.steps(whole, th), Hist.window.sources(M.State.mine(whole, Hist.sources.key(th)), M.State.steps(whole, th), M.State.mine(whole, th)), th, page)

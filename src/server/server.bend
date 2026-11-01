@@ -156,6 +156,7 @@ import ../core/task.bend as TKS
 import ../core/teach.bend as TE
 import ../core/usage.bend as UZ
 import ./thinstore.bend as TSTO
+import ./design-history.bend as DHIST
 import ./thin-mirror.bend as TMIR
 import ../core/copy.bend as CP # BACKPLANE_COPY
 import ../core/copynet.bend as CN
@@ -12479,18 +12480,18 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
         Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
           key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg)), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg))
 
-def Hub.thin.render.page.v(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+# Read only the selected auxiliary histories, then mask with the vault
+# as it is after those reads. The canonical hub state stays bounded.
+def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       do IO<Hub>:
         +subs : M.State <- SUBHIST.SubHistory.read(Cfg.thin.store(cfg), Hub.thin.view_state(st, cfg, thread), thread)
-        +shown : M.State <- REVHIST.ReviewHistory.read(Cfg.thin.store(cfg), subs, thread)
+        +reviews : M.State <- REVHIST.ReviewHistory.read(Cfg.thin.store(cfg), subs, thread)
+        +shown : M.State <- DHIST.History.restore(Cfg.thin.store(cfg), thread, reviews)
+        +v : SEC.Vault <- VX.Vx.vault()
         Hub.thin.render.page.shown(v, pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms, shown)
-
-# (the info the view is made from, masked with the vault as it is now)
-def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
-  IO.bind(SEC.Vault, Hub, VX.Vx.vault(), v => Hub.thin.render.page.v(v, pg, h, client, o, c, now, context, p, key, ms))
 
 def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:

@@ -9161,6 +9161,10 @@ def Hs.get(+u: Ui, +k: String) -> String:
 def Hs.set(+u: Ui, +k: String, +v: String) -> Ui:
   Ui.info_set(u, k ++ ":" ++ Ui.sel(u), v)
 
+# Short off-page labels belong to the selected design history.
+def Hs.entries(+u: Ui) -> List<&2, M.Entry>:
+  List.append(&2, M.Entry, M.State.mine(Ui.state(u), Ui.sel(u)), M.State.mine(Ui.state(u), HI.Hist.sources.key(Ui.sel(u))))
+
 # the steps that changed the kind of file on show, oldest first
 def Hs.track(+u: Ui) -> List<&2, HI.Step>:
   HI.Hist.track(HI.Hist.steps(Ui.state(u), Ui.sel(u)), Hs.kind(u))
@@ -10149,7 +10153,7 @@ def Hs.fade() -> Nat:
 
 # (the track made once: each Hs.track parses every step's record)
 def Hs.bar.t(+l: I.Loc, +tr: List<&2, HI.Step>, +u: Ui) -> HBar:
-  Hs.bar.k(l, HI.Hist.nth(tr, Hs.at(u, tr)), u, Hs.n(tr), Hs.at(u, tr), M.State.mine(Ui.state(u), Ui.sel(u)), HI.Hist.track.changes(tr, M.State.steps(Ui.state(u), Ui.sel(u))))
+  Hs.bar.k(l, HI.Hist.nth(tr, Hs.at(u, tr)), u, Hs.n(tr), Hs.at(u, tr), Hs.entries(u), HI.Hist.track.changes(tr, M.State.steps(Ui.state(u), Ui.sel(u))))
 
 def Hs.bar.on(+l: I.Loc, on: Bool, +u: Ui) -> HBar:
   match on:
