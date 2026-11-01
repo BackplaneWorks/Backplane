@@ -853,7 +853,7 @@ test('paging ahead: past the cap the far end is let go, and asked for again past
  const gone=[];const f=await fixture({letGo:(ids,side)=>gone.push({ids,side})});f.open();
  const win=(k,older,n=32)=>({window:{ids:Array.from({length:n},(_,i)=>k+':'+i),older,hasMore:true,anchor:{id:'row',offset:0},partial:[]}});
  let k=1;
- for (;k*32<=HELD_IDS;k++){f.host.ahead('older');f.host.receive(f.reply(f.sent.at(-1),win('p'+k,'c'+(k+1))));}
+ for (;k*32<HELD_IDS;k++){f.host.ahead('older');f.host.receive(f.reply(f.sent.at(-1),win('p'+k,'c'+(k+1))));}
  assert.equal(gone.length,0,'under the cap every page stays');
  const held=(k-1)*32+1;
  f.host.ahead('older');f.host.receive(f.reply(f.sent.at(-1),win('p'+k,'c'+(k+1),HELD_IDS-held+1)));
