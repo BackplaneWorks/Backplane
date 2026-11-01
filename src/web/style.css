@@ -1013,9 +1013,9 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .hbtn.live { color: var(--accent); }
 .hist-scrub { position: relative; height: 18px; margin: 0 8px; }
 .hist-scrub::before { content: ""; position: absolute; left: 0; right: 0; top: 8px; height: 2px; background: var(--line); }
-.hist-scrub .tick { position: absolute; top: 3px; width: 10px; height: 12px; margin-left: -5px; padding: 0; border: 0; background: none; }
-.hist-scrub .tick::after { content: ""; position: absolute; left: 4px; top: 0; width: 2px; height: 12px; background: var(--dim); }
-.hist-scrub .tick.on::after { left: 3px; top: -2px; width: 4px; height: 16px; background: var(--accent); }
+.hist-scrub .tick { position: absolute; top: 3px; width: 10px; height: 12px; transform: translateX(-50%); padding: 0; border: 0; background: none; }
+.hist-scrub .tick::after { content: ""; position: absolute; left: 50%; top: 0; width: 2px; height: 12px; transform: translateX(-50%); pointer-events: none; background: var(--dim); }
+.hist-scrub .tick.on::after { top: -2px; width: 4px; height: 16px; background: var(--accent); }
 .hist-said { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .hist-said .said { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: calc(12px * var(--text-scale, 100) / 100); }
 .hist-said span.said { color: var(--faint); }

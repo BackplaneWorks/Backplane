@@ -4036,7 +4036,7 @@ def View.hist.live(at: Nat) -> List<&2, D.Node>:
 
 def View.hist.tick.named(+id: String, +i: Nat, +n: Nat, +cur: Bool, +title: String) -> D.Node:
   D.El{"button", "", [D.At{"class", Bool.pick(String, cur, "tick on", "tick")}, D.At{"title", title}, D.At{"aria-label", title}, D.At{"aria-current", Bool.pick(String, cur, "step", "false")},
-    D.At{"style", "left:calc(100% * " ++ Nat.show(i) ++ " / " ++ Nat.show(Bool.pick(Nat, Nat.is_eq(n, 0n), 1n, n)) ++ ")"}, D.At{"data-value", id}, D.On{"click", "hist-go"}], Nil{}}
+    D.At{"style", "left:calc(100% * " ++ Nat.show(i) ++ " / " ++ Nat.show(Bool.pick(Nat, Nat.is_eq(n, 0n), 1n, n)) ++ ");width:min(10px,calc(100% / " ++ Nat.show(Bool.pick(Nat, Nat.is_eq(n, 0n), 1n, n)) ++ "))"}, D.At{"data-value", id}, D.On{"click", "hist-go"}], Nil{}}
 
 def View.hist.tick.loc(+lc: I.Loc, +id: String, +i: Nat, +n: Nat, +cur: Bool) -> D.Node:
   View.hist.tick.named(id, i, n, cur, Bool.pick(String, String.is_empty(id), MSG.T.history.file.tip(lc), MSG.T.history.step.label(lc, Nat.show(1n+i))))
