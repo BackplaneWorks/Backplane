@@ -101,7 +101,7 @@ def probe.checked(+stage: String, before: U32 & String, after: U32 & String, r: 
 # watches is dropped with it, Src.gc) and stops once client 7 watches it
 def main() -> IO(Unit):
   do IO<Unit>:
-    a : PV.PSt <- probe.handle(PV.PSt{[PV.Src{probe.key(), 0, "/unused", 0, "", 0n, False{}, None{}, ""}], [PV.Sub{6, probe.key(), Nil{}, "", False{}, ""}], True{}},
+    a : PV.PSt <- probe.handle(PV.PSt{[PV.Src{probe.key(), 0, "/unused", 0, "", 0n, False{}, None{}, ""}], [PV.Sub{6, probe.key(), Nil{}, "", False{}, "", False{}}], True{}},
       PV.PGot{probe.key(), 10, "revision-A", Some{probe.model(True{})}, ""}, "success-A")
     first : PV.PSt <- probe.watch(a, 7, "first-subscriber")
     watched : PV.PSt <- probe.handle(first, PV.PStop{6}, "seed-gone")
