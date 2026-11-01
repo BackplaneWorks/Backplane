@@ -67,6 +67,8 @@ message. Scroll up to the first message ("Question 1") and back down to the
 newest: every step moves, nothing jumps, no stall (D: also fast bursts of
 notches near the top: 0 jumps). Scroll halfway up and send
 a message: the view goes to the newest page with that message on screen.
+A: scroll into history and tap Latest: it returns directly to the newest
+page and follows the reply again; the button goes away at the end.
 
 **S08 Reading while it streams** (W D)
 Send a message; while the reply streams, scroll up a few notches (D: mouse
