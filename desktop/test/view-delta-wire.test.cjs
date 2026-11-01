@@ -105,3 +105,8 @@ test('view delta: a bounded draft edited in its middle (the wire text unchanged)
  assert(r2.remoteReady,JSON.stringify(r2).slice(0,200));
  assert.equal(r2.session.drafts.A,d2,'the page\'s current draft, not the last one');assert.equal(r2.shown.kids[1].kids[2].attrs[0].value,d2);
  assert.equal(r2.shown.kids[1].kids[0],r1.shown.kids[1].kids[0],'rows kept');});
+test('page window: olderNext is optional, a string, and only beside an older cursor',async()=>{
+ const {validateThinResult}=await import('../../src/web/thin-results.js');
+ const f=await fixture();const ok=w=>{const e=f.whole(f.open.id,page(['a']));e.result.window={...e.result.window,...w};return validateThinResult(e.result,f.v.calls.get(f.open.id).input)===true;};
+ assert(ok({}));assert(ok({older:'c1',hasMore:true,olderNext:'c2'}));assert(ok({older:'c1',hasMore:true,olderNext:''}));
+ assert(!ok({older:'',hasMore:false,olderNext:'c2'}),'no older, no olderNext');assert(!ok({older:'c1',hasMore:true,olderNext:7}));});

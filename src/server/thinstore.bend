@@ -67,7 +67,9 @@ def Ts.below(full: Bool, +h: String, +th: String, +seq: Nat) -> IO(Nat):
 # `limit` (capped at 32) and one more, as T.Index.page would give it, and
 # what Page.window asks of the rest
 def Ts.page(+h: String, +th: String, +before: Nat, +limit: Nat, +base: T.Index) -> IO(Page):
-  +lim = Nat.add(Bool.pick(Nat, Nat.is_le(limit, 32n), limit, 32n), 1n)
+  # the page, then a lookahead: the older page's other half and one row
+  # more (thin-view.bend's Page.older.next), 17 rows
+  +lim = Nat.add(Bool.pick(Nat, Nat.is_le(limit, 32n), limit, 32n), 17n)
   do IO<Page>:
     +s : Nat <- Ts.seq_at(h, before)
     +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.page(), [th, Q.Q.n(s), Q.Q.n(lim)], U32.from_nat(lim))
@@ -89,13 +91,14 @@ def Ts.page.chat(enabled: Bool, +h: String, +th: String, +before: Nat, +limit: N
         +i : T.Index = T.Index.window(Q.Q.rows(xs), th, 0n, base)
         return Page{i, T.Index.page(i, th, before, limit)}
 
-# Web body-window capability only. The extra row remains a real chronology
-# lookahead and no large body is materialized by this ordinary page query.
+# Web body-window capability only. The 17 extra rows remain a real chronology
+# lookahead (the older page's other half and one more, for Page.older.next)
+# and no large body is materialized by this ordinary page query.
 def Ts.page.body(+h: String, +th: String, +before: Nat, +base: T.Index, +hide: Bool) -> IO(Page):
   do IO<Page>:
     +s : Nat <- Ts.seq_at(h, before)
-    +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.page.body(Bool.pick(String, hide, Q.Q.sql.chat.keep(), "")), [th, Q.Q.n(s), Q.Q.n(33n)], 33)
-    +n : Nat <- Ts.below(Nat.is_eq(List.length(&2, List<&2, String>, xs), 33n), h, th, Q.Q.last_seq(xs, 0n))
+    +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.page.body(Bool.pick(String, hide, Q.Q.sql.chat.keep(), "")), [th, Q.Q.n(s), Q.Q.n(49n)], 49)
+    +n : Nat <- Ts.below(Nat.is_eq(List.length(&2, List<&2, String>, xs), 49n), h, th, Q.Q.last_seq(xs, 0n))
     +i : T.Index = T.Index.window(Q.Q.rows(xs), th, n, base)
     return Page{i, T.Index.page(i, th, before, 32n)}
 

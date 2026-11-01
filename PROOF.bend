@@ -14693,3 +14693,8 @@ def Laws.draft_bound_say_over(): {==}
 def Laws.draft_bound_none(): {==}
 
 # END view delta (H)
+
+# BEGIN page olderNext (H)
+def Laws.view_page_older_next_whole(cursor): {==}
+def Laws.view_page_older_next_partial(cursor): {==}
+# END page olderNext (H)
