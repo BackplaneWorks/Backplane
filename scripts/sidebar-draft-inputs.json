@@ -31,7 +31,7 @@
     "src/core/apikeys.bend": "b8c6bc89e579ce7714544bfbb8d3952a301ba1ad8970aefa09be99a8f3e468a3",
     "src/core/attach.bend": "cec5bcbc75a3e2ca702216da2f73957a63d17fafda0a87addc7142fd138d8141",
     "src/core/badge.bend": "8c9269d9d4528b549b34ceeab348c7bc14d1c146cb7cf5918bf0b01265e79b99",
-    "src/core/board.bend": "040ef813ec0257f837a94bfe7f48292397787fbb89558d506835314bdadb3aad",
+    "src/core/board.bend": "6ad638e227f7008b8d1a97455a18747c57f9c634be0362302dcc490c4217137c",
     "src/core/bot.bend": "01915f4cf51d98985d8d0812731aa6206d8bd503530bef91e279e98083dd1b5f",
     "src/core/botui.bend": "29a1cda9263185dc559d0d7c4378d615f2366549f211958192be452f052fd651",
     "src/core/browser-frame.bend": "0c21c1a5fecccc093ac349ba6d5723279b59a4605f6ad3c69d3f064f3e87ce86",
