@@ -240,8 +240,10 @@ export class ThinViews {
     let picture = null;
     if (Object.hasOwn(r, 'viewDelta')) {
       try {
-        picture = deltaPicture(r, c.input, l.bases);r = picture.result;
-        if (deltaBytes(r, deltaDraft(c.input), utf8Bytes) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
+        // the selected draft as the request carried it on the wire
+        const wire = this.api.shape ? deltaDraft(this.api.shape(c.input, c.method)) : deltaDraft(c.input);
+        picture = deltaPicture(r, c.input, l.bases, wire);r = picture.result;
+        if (deltaBytes(picture.measure, picture.wire, utf8Bytes) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
       } catch {
         // the next request asks for the whole view
         l.bases = deltaBases();

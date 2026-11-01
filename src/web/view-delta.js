@@ -70,26 +70,50 @@ function bodyOf(r) {
   for (const k of FIELDS) if (Object.hasOwn(r, k)) body[k] = r[k];
   return body;
 }
+// The draft as the page holds it, where the hub has the draft as it went
+// on the wire (bounded, thin-host.js's boundedDraft): copied only along the
+// paths that hold it, so every other subtree stays the same object.
+function refill(n, wire, full) {
+  if (n === wire) return full;
+  if (Array.isArray(n)) {
+    let out = null;
+    for (let i = 0; i < n.length; i++) { const c = refill(n[i], wire, full);if (c !== n[i]) (out ??= n.slice())[i] = c; }
+    return out || n;
+  }
+  if (object(n)) {
+    let out = null;
+    for (const k of Object.keys(n)) { const c = refill(n[k], wire, full);if (c !== n[k]) (out ??= { ...n })[k] = c; }
+    return out || n;
+  }
+  return n;
+}
 // The full reply from a delta reply, and the body to keep. Throws when the
 // reply is malformed or names a body this link does not hold.
-export function deltaPicture(r, input, bases) {
+// wire: the selected draft as the request carried it on the wire (default:
+// as the input holds it). The body kept is exactly the hub's (its "t" is
+// the wire's draft), so the next delta applies to what the hub diffed
+// against; the result shown has the page's own full draft where the wire's
+// was. measure: the hub's body, which the reply limit counts.
+export function deltaPicture(r, input, bases, wire = deltaDraft(input)) {
   const d = r.viewDelta;
   if (!object(d) || d.version !== 1 || !token(d.token) || typeof d.base !== 'string' || input?.viewDelta?.version !== 1
       || d.token !== String(input.requestRevision)) throw Error('Invalid view delta');
   const rest = { ...r };delete rest.viewDelta;
+  const full = deltaDraft(input);
+  const shown = body => typeof wire === 'string' && typeof full === 'string' && wire !== full ? refill(body, wire, full) : body;
   if (!Object.hasOwn(d, 'ops')) {
     if (d.base !== '' || !Object.hasOwn(r, 'shown')) throw Error('Invalid whole view');
-    return { result: rest, token: d.token, body: bodyOf(rest) };
+    const body = bodyOf(rest);
+    return { result: { ...rest, ...shown(body) }, token: d.token, body, measure: rest, wire };
   }
   // ops with no base make the body from nothing (a whole body whose long
   // draft goes by reference: the first op sets it all)
   const fresh = d.base === '';
   if (FIELDS.some(k => Object.hasOwn(r, k)) || (fresh ? !(Array.isArray(d.ops) && d.ops[0]?.[0] === 's' && Array.isArray(d.ops[0][1]) && d.ops[0][1].length === 0)
       : d.base !== input.viewDelta.token || !bases?.map.has(d.base))) throw Error('Unacknowledged view delta');
-  const draft = deltaDraft(input);
-  const body = applyViewDelta(fresh ? null : bases.map.get(d.base), d.ops, draft);
+  const body = applyViewDelta(fresh ? null : bases.map.get(d.base), d.ops, wire);
   if (!object(body) || !Object.hasOwn(body, 'shown')) throw Error('Invalid view delta body');
-  return { result: { ...rest, ...body }, token: d.token, body };
+  return { result: { ...rest, ...shown(body) }, token: d.token, body, measure: { ...rest, ...body }, wire };
 }
 // the selected thread's draft a request carried
 export function deltaDraft(input) {

@@ -3,9 +3,9 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const txt=text=>({type:'text',text}),el=(tag,key,kids=[])=>({type:'element',tag,key,attrs:[],kids});
 const page=(rows,live='')=>el('div','app',[el('aside','sidebar',[el('button','row',[txt('Project / thread')])]),el('main','main',[...rows.map(r=>el('bp-memo',r,[txt('row '+r)])),el('bp-memo','live',[txt(live)])])]);
-async function fixture(enabled=true){
+async function fixture(enabled=true,shape=null){
  const {ThinViews,VIEW_LIMITS,VIEW_ID_BASE}=await import('../../src/web/thin.js'),{validateThinResult}=await import('../../src/web/thin-results.js');
- const v=new ThinViews({now:()=>0,send:(_hub,r)=>r,command:c=>c,validateResult:validateThinResult,viewDelta:enabled},VIEW_ID_BASE+100);
+ const v=new ThinViews({now:()=>0,send:(_hub,r)=>r,command:c=>c,validateResult:validateThinResult,viewDelta:enabled,...(shape?{shape}:{})},VIEW_ID_BASE+100);
  const session={sel:'A',rid:2,drafts:{A:''},open:{},info:{}},target={kind:'thread',id:'A'};
  v.connect('hub',{t:'view',version:1,renderer:'web',generation:'7',epoch:'epoch',limits:{...VIEW_LIMITS}});
  const win={ids:[],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]};
@@ -83,3 +83,25 @@ test('view delta: a draft key\'s ops (composer value by "t", session) leave the 
  assert(r.remoteReady,JSON.stringify(r).slice(0,300));assert.equal(r.shown.kids[1].kids[4].attrs[0].value,draft);
  for(let i=0;i<4;i++)assert.equal(r.shown.kids[1].kids[i],before.shown.kids[1].kids[i],'timeline row '+i+' kept');
  assert.equal(r.shown.kids[0],before.shown.kids[0],'sidebar kept');assert.equal(r.window,before.window,'window kept');});
+test('view delta: a bounded draft edited in its middle (the wire text unchanged) shows the page\'s draft and keeps the hub\'s base',async()=>{
+ // the wire keeps a draft's first and last 10 characters (thin-host.js's boundedDraft does 16384)
+ const wireOf=t=>t.length>40?t.slice(0,10)+'…'+t.slice(-10):t;
+ const shape=p=>p.session?{...p,session:{...p.session,drafts:{...p.session.drafts,A:wireOf(p.session.drafts.A)}}}:p;
+ const f=await fixture(true,shape),d1='head-text '+'x'.repeat(300000)+' tail-text',d2='head-text '+'x'.repeat(150000)+'MIDDLE'+'x'.repeat(150000)+' tail-text';
+ assert.equal(wireOf(d1),wireOf(d2));
+ const box=v=>({type:'element',tag:'textarea',key:'composer',attrs:[{name:'value',value:v}],kids:[]});
+ const s1={...f.session,drafts:{A:d1,'@draft.bound':''}};
+ // the first view after the draft: whole, as ops from nothing, the draft by reference
+ f.v.reply('hub',f.whole(f.open.id,page(['a'])));
+ const o=f.v.request('hub','view.update',{session:s1});
+ const shown={...page(['a']),kids:[page(['a']).kids[0],{...page(['a']).kids[1],kids:[...page(['a']).kids[1].kids,box('')]}]};
+ const r1=f.v.reply('hub',f.delta(o.id,'',[['s',[],{shown,session:{...s1,drafts:{A:'','@draft.bound':''}},window:{ids:[],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]}}],
+   ['t',['session','drafts','A']],['t',['shown','kids',1,'kids',2,'attrs',0,'value']]]));
+ assert(r1.remoteReady,JSON.stringify(r1).slice(0,200));assert.equal(r1.session.drafts.A,d1,'the page sees its own draft');
+ assert.equal(f.link.bases.map.get(f.link.bases.newest).session.drafts.A,wireOf(d1),'the base keeps the hub\'s text');
+ // a key in the middle: the hub's bounded text is the same, so its delta names no draft
+ const u=f.v.request('hub','view.update',{session:{...s1,drafts:{A:d2,'@draft.bound':''}}}),t=f.v.calls.get(u.id).input.viewDelta.token;
+ const r2=f.v.reply('hub',f.delta(u.id,t,[['s',['session','drafts','@draft.bound'],'300016 ab']]));
+ assert(r2.remoteReady,JSON.stringify(r2).slice(0,200));
+ assert.equal(r2.session.drafts.A,d2,'the page\'s current draft, not the last one');assert.equal(r2.shown.kids[1].kids[2].attrs[0].value,d2);
+ assert.equal(r2.shown.kids[1].kids[0],r1.shown.kids[1].kids[0],'rows kept');});
