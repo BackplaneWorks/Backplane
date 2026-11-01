@@ -160,6 +160,9 @@ Schematic and 3D all show `beta`.
 Have the agent change the board (send `mode:toolhold` with a stand-in that
 edits, or edit the board file by hand while a turn runs). A step tick appears
 on the history bar; Play steps through; Compare shows the change marked.
+Scrubbing pauses Play. Paging the chat keeps the same history; switching
+boards shows that board’s steps. Returning to Live or reloading keeps the
+file or schematic sheet on screen.
 
 **S18 Files, Diff, Review** (W D A)
 Files lists the project folder; opening a board file shows it in the Board

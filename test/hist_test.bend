@@ -160,7 +160,7 @@ def main() -> IO(Unit):
       ++ U.Ui.view_get(reload(U.Viewer.keep(sheet())), "view.kind") ++ "|"
       ++ yes(U.Ui.panel(reload(U.Viewer.keep(sheet())))) ++ "|"
       ++ U.Ui.scratch(U.Viewer.restore(U.Ui.adopt(U.Ui.init(0n), state()), "t", U.Viewer.keep(sheet())), "@sch:t"), "/r/sub/s.kicad_sch|schematic|yes|1	/sub/")
-    C.Check.str("a step on show comes back as the live file", path(reload(U.Viewer.keep(first))), "")
+    C.Check.str("a step on show comes back as the live file", path(reload(U.Viewer.keep(first))), "/r/b.kicad_pcb")
     C.Check.str("a shut viewer stays shut", yes(U.Ui.panel(reload(U.Viewer.keep(act(sheet(), "panel", ""))))), "no")
     C.Check.str("a record that does not parse changes nothing", U.Viewer.keep(reload("{oops")), "{\"open\":\"\",\"thread\":\"t\",\"root\":\"\",\"kind\":\"\",\"path\":\"\",\"design\":\"\",\"tree\":\"\",\"drawingSheet\":\"\",\"sheet\":\"\",\"split\":\"\"}")
     C.Check.str("back from live: the last step", path(back), "git\t/r/.git\tc4\t2\t/r/b.kicad_pcb")

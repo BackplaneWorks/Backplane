@@ -213,8 +213,8 @@ def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
 # again lists its parts again, client.bend's Mpage.sync; Files does the
 # same for its folder, Fm.sync)
 def Actor.scope.keep(+key: String) -> Bool:
-  Bool.not(Bool.or(Bool.or(String.starts_with(key, "@f."), String.starts_with(key, "@mr.")),
-    Nat.is_lt(U.Keys.pos(["@want.new", "@want.new.at", "@thread.want", "@bot.want", "@want.hub", "@want.gen", "@made.far", "@mech.at", "@fm.at"], key), 9n)))
+  Bool.not(Bool.or(Bool.or(Bool.or(String.starts_with(key, "@f."), String.starts_with(key, "@mr.")), String.starts_with(key, "@cmp.resolve:")),
+    Nat.is_lt(U.Keys.pos(["@want.new", "@want.new.at", "@thread.want", "@bot.want", "@want.hub", "@want.gen", "@made.far", "@mech.at", "@fm.at", "@cmp.menu"], key), 10n)))
 
 def Actor.scope.clear( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +dr: Map<&2, String>) -> Map<&2, String>:
   match xs:
@@ -235,14 +235,19 @@ def Actor.draft.merge(+clean: Map<&2, String>, +dr: Map<&2, String>, +thread: St
     case True{}: Map.set(&2, String, Actor.selector(dr, clean), thread, U.Str.get(clean, thread))
     case False{}: Actor.selector(dr, clean)
 
+def Actor.history.pause(same: Bool, nf: Map<&2, String>, +thread: String) -> Map<&2, String>:
+  match same:
+    case True{}: nf
+    case False{}: Map.set(&2, String, nf, "hist.play:" ++ thread, "")
+
 def Actor.merge( +fresh: U.Ui, +old: U.Ui, +same: Bool, +thread: String, +present: Bool) -> U.Ui:
   match fresh old:
-    case U.Ui{st, +sel, clean, live, open, on, now, adding, panel, version, +rid2, want, _, _, nf2, _, _} U.Ui{_, oldSel, dr, _, _, _, _, _, _, _, +rid, _, error, note, nf, outbox, stores}:
+    case U.Ui{st, +sel, clean, live, open, on, now, adding, panel, version, +rid2, want, _, _, nf2, _, _} U.Ui{_, +oldSel, dr, _, _, _, _, _, _, _, +rid, _, error, note, nf, outbox, stores}:
       # A correlated creation reply can select its new thread between renders.
       # The same view still requests its parent until nextTarget reaches it.
       # A different view or target remains an explicit navigation boundary.
       U.Ui{st, Bool.pick(String, same, oldSel, sel), Actor.draft.merge(clean, Actor.scope.drafts(same, dr), thread, present), live, open, on, now, adding, panel, version,
-        M.Time.max(rid, rid2), want, error, note, Actor.prefs(Map.to_list(&2, String, nf2), Actor.info.current(Map.to_list(&2, String, nf), Map.new(&2, String))), outbox, stores}
+        M.Time.max(rid, rid2), want, error, note, Actor.prefs(Map.to_list(&2, String, nf2), Actor.info.current(Map.to_list(&2, String, Actor.history.pause(same, nf, oldSel)), Map.new(&2, String))), outbox, stores}
 
 # At most one private region is retained. Canonical or UI input changes
 # invalidate its exact key; another view/target drops it before rehydration.

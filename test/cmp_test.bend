@@ -108,7 +108,7 @@ def main() -> IO(Unit):
     # refs typed in
     C.Check.str("a ref typed in asks the hub", sends(U.Ui.act(cmp, "rv-ref", "a\tv1.2")), "1")
     C.Check.str("a blank ref asks nothing", sends(U.Ui.act(cmp, "rv-ref", "a\t  ")), "0")
-    C.Check.str("the hub's answer is picked", path(recv(u, "{\"t\":\"reply\",\"id\":1,\"ok\":true,\"result\":{\"resolved\":{\"thread\":\"t\",\"side\":\"a\",\"ref\":\"v1.2\",\"commit\":\"c9\",\"git\":\"/r/.git\",\"top\":\"/r\"}}}")),
+    C.Check.str("the hub's answer is picked", path(recv(act(u, "rv-ref", "a\tv1.2"), "{\"t\":\"reply\",\"id\":1,\"ok\":true,\"result\":{\"resolved\":{\"thread\":\"t\",\"side\":\"a\",\"ref\":\"v1.2\",\"commit\":\"c9\",\"git\":\"/r/.git\",\"top\":\"/r\"}}}")),
       H.Hist.diff(git("c9"), "/r/b.kicad_pcb"))
     C.Check.str("another thread's answer is not", path(recv(u, "{\"t\":\"reply\",\"id\":1,\"ok\":true,\"result\":{\"resolved\":{\"thread\":\"x\",\"side\":\"a\",\"ref\":\"v1.2\",\"commit\":\"c9\",\"git\":\"/r/.git\",\"top\":\"/r\"}}}")),
       "/r/b.kicad_pcb")

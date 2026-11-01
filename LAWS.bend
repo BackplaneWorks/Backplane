@@ -4933,9 +4933,45 @@ law hist_record_nothing:
   for +e: String
   {HS.Hist.record("", e) == "" : String}
 
+# A file not yet resolved retains the kind's history.
+law hist_track_unknown_file:
+  for ss: List<&2, HS.Step>
+  for kind: Nat
+  {HS.Hist.track.file(ss, kind, "") == HS.Hist.track(ss, kind) : List<&2, HS.Step>}
+
+# An unchanged sheet stays in the selected snapshot instead of jumping to
+# whichever sheet its tool happened to edit.
+law hist_snapshot_keeps_sheet:
+  {HS.Hist.family(HS.Step.spec(HS.Step{"s", "tool", "c", "p", "/r/.git", "/r", [HS.SFile{"M", "root.kicad_sch"}], 10n},
+    1n, "/r/child.kicad_sch", False{})) == "/r/child.kicad_sch" : String}
+
+# A projected chat page retains the complete selected design-step index.
 law hist_window_keeps_steps:
   {List.length(&2, M.Entry, M.State.steps(HS.Hist.window(M.State.apply(M.State.empty(),
     M.ActivityLogged{"t", "s", "step", "kicad", "{}", 1n}), "t", M.State.empty()), "t")) == 1n : Nat}
+
+# An unresolved default has no steps to scrub into another design.
+law hist_unresolved_track_empty:
+  for u: U.Ui
+  for file: String
+  {U.Hs.track.known(False{}, u, file) == Nil{} : List<&2, HS.Step>}
+
+law hist_empty_source_not_jumpable:
+  for u: U.Ui
+  {U.Hs.jump.available(u, "") == False{} : Bool}
+
+law hist_live_design_closes_picker:
+  {U.Ui.scratch(U.Viewer.history.reset(U.Ui.scratch_set(U.Ui.init(0n), "@cmp.menu", "a")), "@cmp.menu") == "" : String}
+
+law hist_picker_scope:
+  {CHATSIDE.Actor.scope.keep("@cmp.menu") == False{} : Bool}
+
+law hist_playback_same_scope:
+  for nf: Map<&2, String>
+  for thread: String
+  {CHATSIDE.Actor.history.pause(True{}, nf, thread) == nf : Map<&2, String>}
+
+
 
 # a board's or schematic's own look is untouched by comparisons; a
 # comparison's marks each have a colour of their own

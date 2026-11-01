@@ -7113,8 +7113,31 @@ def Laws.hist_index_live(ss):
 def Laws.hist_record_nothing(e):
   {==}
 
+def Laws.hist_track_unknown_file(ss, kind):
+  {==}
+
+def Laws.hist_snapshot_keeps_sheet():
+  {==}
+
 def Laws.hist_window_keeps_steps():
   {==}
+
+def Laws.hist_unresolved_track_empty(u, file):
+  {==}
+
+def Laws.hist_empty_source_not_jumpable(u):
+  {==}
+
+def Laws.hist_live_design_closes_picker():
+  {==}
+
+def Laws.hist_picker_scope():
+  {==}
+
+def Laws.hist_playback_same_scope(nf, thread):
+  {==}
+
+
 
 def Laws.look_plain_board(layer):
   {==}

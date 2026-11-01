@@ -325,6 +325,42 @@ def Hist.track(ss: List<&2, Step>, +kind: Nat) -> List<&2, Step>:
     case +s <> t:
       Hist.track.k(Step.has(s, kind), s, Hist.track(t, kind))
 
+def SFile.touches(fs: List<&2, SFile>, +kind: Nat, +want: String, +top: String) -> Bool:
+  match fs:
+    case Nil{}:
+      False{}
+    case +f <> t:
+      Bool.or(Bool.and(SFile.of_kind(f, kind), String.eq(top ++ "/" ++ SFile.rel(f), want)), SFile.touches(t, kind, want, top))
+
+def Step.touches(s: Step, +kind: Nat, +want: String) -> Bool:
+  match s:
+    case Step{_, _, _, _, _, +top, fs, _}:
+      SFile.touches(fs, kind, want, top)
+
+def Hist.track.path(ss: List<&2, Step>, +kind: Nat, +want: String, +keep: String) -> List<&2, Step>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case +s <> t:
+      Hist.track.k(Bool.or(Step.touches(s, kind, want), String.eq(Step.id(s), keep)), s, Hist.track.path(t, kind, want, keep))
+
+def Hist.track.file.k(unknown: Bool, +ss: List<&2, Step>, +kind: Nat, +want: String, +keep: String) -> List<&2, Step>:
+  match unknown:
+    case True{}:
+      Hist.track(ss, kind)
+    case False{}:
+      Hist.track.path(ss, kind, want, keep)
+
+# Navigating to another sheet keeps the snapshot on show even when that
+# step did not edit the sheet. It is still that snapshot, never Live.
+def Hist.track.file.at(+ss: List<&2, Step>, +kind: Nat, +want: String, +keep: String) -> List<&2, Step>:
+  Hist.track.file.k(String.is_empty(want), ss, kind, want, keep)
+
+# Once the live file is known, its track contains only its own edits.
+# Otherwise a step on another board silently switched the viewer to it.
+def Hist.track.file(+ss: List<&2, Step>, +kind: Nat, +want: String) -> List<&2, Step>:
+  Hist.track.file.at(ss, kind, want, "")
+
 def Step.abs(+s: Step, +rel: String) -> String:
   match s:
     case Step{_, _, _, _, _, top, _, _}:
@@ -369,8 +405,16 @@ def Step.spec.k(diff: Bool, +s: Step, +rel: String) -> String:
     case False{}:
       Step.spec.at(s, Step.commit(s), rel)
 
+# A snapshot contains the whole design, including unchanged sheets. Stay
+# on the requested file when navigating a snapshot's hierarchy.
+def Step.spec.file(+s: Step, +kind: Nat, +want: String) -> String:
+  match s:
+    case Step{+id, +entry, +c, +prev, +git, +top, +fs, +at}:
+      Bool.pick(String, Bool.and(Nat.is_eq(Hist.ext(want), kind), String.starts_with(want, top ++ "/")),
+        String.drop(want, 1n+String.length(top)), Step.file(Step{id, entry, c, prev, git, top, fs, at}, kind, want))
+
 def Step.spec(+s: Step, +kind: Nat, +want: String, diff: Bool) -> String:
-  Step.spec.k(diff, s, Step.file(s, kind, want))
+  Step.spec.k(diff, s, Step.spec.file(s, kind, want))
 
 # Positions
 # ---------
@@ -905,6 +949,9 @@ def Hist.sheet.k(k: Nat, +p: String, +abs: String) -> String:
 def Hist.sheet(+p: String, +file: String) -> String:
   Hist.sheet.k(Hist.kind(p), p, Hist.abs(file))
 
+# A hierarchy's rows are tab-separated. Its version already belongs to
+# a separate tree slot, so send live file paths here; Sch.value applies
+# the selected commit again when a sheet opens.
 # Design history is independent of the chat page. A thin render keeps
 # the selected thread's complete step index, with short source labels
 # beside it. The conversation itself still contains only its page.
