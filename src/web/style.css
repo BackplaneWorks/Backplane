@@ -2110,6 +2110,15 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .top-views { display: none; }
 @media (max-width: 760px) {
   body { overflow-x: clip; }
+  /* nothing scrolls the page or a thread sideways. The timeline scrolls up
+     and down only: overflow-y alone made its overflow-x auto, so anything a
+     pixel too wide (or iOS bringing the focused composer into view) slid the
+     whole thread left under a sideways scrollbar. Code and tables wrap or
+     scroll inside their own box. */
+  html { overflow-x: hidden; }
+  .app, .app > main, .thread-view, .thread-content { max-width: 100vw; overflow-x: clip; }
+  .timeline { overflow-x: hidden; overscroll-behavior-x: none; }
+  .timeline-virtual-track, .timeline-virtual-row, .timeline-entry, .msg, .msg .body { max-width: 100%; min-width: 0; }
   .app.top .workspace-thread > .workspace-bar { display: none; }
   .app.top .sidebar .find .side-fold { display: none; }
   .app.top .sidebar .find.with-add { padding-left: max(10px, env(safe-area-inset-left)); }
@@ -2141,6 +2150,12 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .top-views .workspace-menu .workspace-current, .top-views .workspace-menu summary > svg:last-child { display: none; }
   .top-views .workspace-buy { margin: 0; padding: 0; border: 0; }
   .top-views .keycap { display: none; }
+  /* a bot's chat: its own bar (back, the bot, Pages) is the one top bar;
+     the place bar over it only said "Bots / <bot>" again */
+  .app.top:has(> main .bot-head) > .topbar { display: none; }
+  .app.top main .bot-head { gap: 8px; padding: max(4px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) 4px env(safe-area-inset-left); }
+  .app.top main .bot-head .back { min-width: 44px; min-height: 44px; padding: 0; border: 0; background: none; font-size: calc(22px * var(--text-scale, 100) / 100); color: var(--dim); }
+  .app.top main .bot-head .bot-mobile-menu > summary { min-height: 40px; border-color: transparent; background: none; }
   .top-views .workspace-buy button.buy { width: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 0; background: none; justify-content: center; }
   .top-views .workspace-buy .workspace-label, .top-views .workspace-buy .price { display: none; }
 

@@ -14,6 +14,9 @@ const said=`Routed: [Boost](backplane://thread/${boost}) is done; see [it again]
 // long enough that the hub pages its body (src/web/body-windows.js): the
 // case where Reply and Copy were lost
 const plan='Plan for the inductor swap\nSecond line only the agent should read\n\n'+Array.from({length:120},(_,i)=>`- step ${i+1}: measure the ripple at the output and log the inductor temperature`).join('\n');
+// a message wider than any phone: a long command in a code block, a long
+// unbroken token and a wide table (the page must still never scroll sideways)
+const wide='Here is the command:\n\n```\n'+'find /home/user/.local/share/backplane-local -maxdepth 1 -mindepth 1 -type d -not -name 20261101-032220 -exec rm -rf {} + && du -sh ~/.cache/uv\n'.repeat(3)+'```\n\n`a-very-long-inline-code-token-that-does-not-break-anywhere-at-all-ever` and '+'A'.repeat(90)+'\n\n| Path | Size | Kept |\n|---|---|---|\n| `/home/user/Documents/i2cjak/bp-coord/windows-vm/disk-image-qcow2-65GB.img` | 65 GB | yes |';
 const home=fs.mkdtempSync(path.join(os.tmpdir(),'backplane-bot-replies-'));
 const project=path.join(home,'project'),agents=path.join(home,'agents');fs.mkdirSync(project);fs.mkdirSync(agents);
 for(const name of ['claude','codex','grok','muse','agy','opencode'])fs.writeFileSync(path.join(agents,name),'#!/bin/sh\nexit 127\n',{mode:0o755});
@@ -23,7 +26,8 @@ const events=[event('ProjectCreated',{id:'fixture',title:'Reply fixture',root:pr
  event('BotSet',{id:'bub',name:'Bub',thread:bub,look:0,persona:''}),event('UberSet',{bot:'bub',uid:'bub-reply-fixture'}),
  ...['restart.continue','mail.on','telemetry.share'].map(key=>event('SettingSet',{key,value:'off'})),event('SettingSet',{key:'onboard.done',value:'1'}),
  event('MessagePosted',{thread:bub,msg:'m-bot1',role:'assistant',text:said}),
- event('MessagePosted',{thread:bub,msg:'m-bot2',role:'assistant',text:plan})];
+ event('MessagePosted',{thread:bub,msg:'m-bot2',role:'assistant',text:plan}),
+ event('MessagePosted',{thread:bub,msg:'m-wide',role:'assistant',text:wide})];
 fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n');
 Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
 const info=JSON.parse(fs.readFileSync(path.join(stage,'LOCAL.json')));
@@ -79,6 +83,34 @@ let app,page;const start=performance.now();
  // the line brings the original into view, flashed
  await line.locator('a.rto').click();
  await page.waitForFunction(()=>document.querySelector('[data-id="m-bot2"]')?.closest('.jumped,[class*="jumped"]')||document.querySelector('[data-id="m-bot2"].jumped'));
+ // A phone (430 x 932, an iPhone's CSS width): nothing scrolls the page or
+ // the timeline sideways, with the long code on screen and the reply bar
+ // open, anywhere up the thread. It came back once after a fix (#567).
+ await page.setViewportSize({width:430,height:932});
+ await page.waitForFunction(()=>matchMedia('(max-width: 760px)').matches&&innerWidth<=440);
+ // (the chat stays open; a phone hides the sidebar while a thread is)
+ await ready(bub);
+ // (the jump above left the thread on the plan: back to its end, where the wide message is)
+ for(let i=0;i<20&&!(await page.locator('[data-id="m-wide"] button.reply').count());i++){await page.evaluate(()=>{const t=document.getElementById('timeline');t.scrollTop=t.scrollHeight;});await page.waitForTimeout(200);}
+ await page.locator('[data-id="m-wide"] button.reply').click();
+ await page.locator('.reply-chip').waitFor();
+ await page.locator('#composer').fill('Reply is back');
+ const sideways=()=>page.evaluate(async()=>{
+  const d=document.scrollingElement,t=document.getElementById('timeline');
+  // a sideways scroll from anywhere (a swipe, iOS bringing a field into view) does not stick
+  t.scrollLeft=200;t.dispatchEvent(new Event('scroll'));await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+  return {page:d.scrollWidth-d.clientWidth,timeline:t.scrollWidth-t.clientWidth,left:t.scrollLeft,overflowX:getComputedStyle(t).overflowX};
+ });
+ for(let step=0;step<12;step++){
+  const s=await sideways();
+  assert(s.page<=0,`the page is ${s.page}px wider than a phone (step ${step})`);
+  assert.equal(s.overflowX,'hidden','the timeline cannot scroll sideways on a phone');
+  assert(s.timeline<=1,`the thread's content is ${s.timeline}px wider than the phone: it must wrap, not be cut (step ${step})`);
+  assert.equal(s.left,0,`the timeline stayed scrolled ${s.left}px sideways (step ${step})`);
+  if(step===0)await page.screenshot({path:path.join(out,'phone-replying.png')});
+  const top=await page.evaluate(()=>{const t=document.getElementById('timeline');t.scrollTop=Math.max(0,t.scrollTop-t.clientHeight*0.8);return t.scrollTop;});
+  await page.waitForTimeout(150);if(top===0)break;
+ }
  const result={state:'passed',seconds:(performance.now()-start)/1000,out,version:info.version,commit:info.commit};
  fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }catch(e){console.error(e);process.exitCode=1;if(page){fs.writeFileSync(path.join(out,'failure.html'),await page.content().catch(()=>''));await page.screenshot({path:path.join(out,'failure.png')}).catch(()=>{});}}
