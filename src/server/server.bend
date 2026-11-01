@@ -12692,7 +12692,7 @@ def Hub.thin.web_fit.full(+acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c
 def Hub.thin.page.tried(fits: Bool, +spliced: TA.Rendered, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
     +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat) -> IO(Hub):
   match fits:
-    case True{}: IO.bind(Unit, Hub, PS.Perf.add("thin.page.splice", 1n), _ => Hub.thin.web_fit.sent(1, spliced, h, client, o, c, now, context))
+    case True{}: IO.bind(Unit, Hub, PS.Perf.add("thin.page.splice", 1), _ => Hub.thin.web_fit.sent(1, spliced, h, client, o, c, now, context))
     case False{}: Hub.thin.web_fit.full(acted, h, client, o, c, now, context, p, key, ms, shown, index, epoch, rows, stream, revision)
 
 def Hub.thin.page.try(m: Maybe<&2, TA.Rendered>, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
