@@ -129,6 +129,18 @@ export function fit() {
   if (view && view.box) { view.fit(); view.later(); }
 }
 
+// The original Studio canvas covers this preview. Keep its camera current,
+// but draw it again only when Fast, a fallback or the heat overlay needs it.
+export function setPreviewVisible(canvas, on) {
+  if (!view || view.canvas !== canvas || view.disposed || view.previewVisible === on) return;
+  view.previewVisible = on;
+  if (on) view.later();
+  else {
+    if (view.frame) cancelAnimationFrame(view.frame);
+    view.frame = null; view.queued = false;
+  }
+}
+
 function persp(fov, a, near, far) {
   const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
   return [f / a, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0];
@@ -245,6 +257,7 @@ class View {
     this.key = "";
     this.gl = canvas.getContext("webgl", { antialias: true, alpha: true, premultipliedAlpha: true });
     this.count = 0;
+    this.previewVisible = true;
     this.cam = new Orbit().aim(-0.6, 0.5);
     this.r = 1;
     this.projection = "perspective"; this.exposure = 0;
@@ -469,15 +482,17 @@ class View {
   }
 
   later() {
+    if (this.disposed || !this.canvas.isConnected) return;
     if (!this.focusLocked) this.focusDistance = this.cam.dist / 100;
     this.canvas.dispatchEvent(new CustomEvent("solid-camera-change", {bubbles:true}));
-    if (this.queued) return;
+    if (this.previewVisible === false || this.queued) return;
     this.queued = true;
-    this.frame = requestAnimationFrame(() => { this.queued = false; this.draw(); });
+    this.frame = requestAnimationFrame(() => { this.frame = null; this.queued = false; this.draw(); });
   }
 
   draw() {
     const gl = this.gl, c = this.canvas;
+    if (this.disposed || this.previewVisible === false || !c.isConnected || !c.clientWidth || !c.clientHeight) return;
     if (!gl) { if (this.note) this.note.textContent = "3D unavailable: WebGL could not start"; return; }
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
@@ -571,9 +586,12 @@ View.prototype.restore = function(state) {
   this.framing = state.framing && { ...state.framing, box:state.framing.box.slice() }; this.refit();
 };
 View.prototype.dispose = function() {
+  if (this.disposed) return;
+  this.disposed = true;
   this.ticking(false); this.resize?.disconnect(); this.events?.abort(); this.canvas.classList.remove("dragging"); this.dof?.dispose();
   if (this.frame) cancelAnimationFrame(this.frame);
   if (this.gl) { for (const {b} of this.bufs || []) this.gl.deleteBuffer(b); this.gl.deleteProgram(this.prog); }
+  this.frame = null; this.queued = false; this.gl = null; this.pos = null;
 };
 let view = null;
 

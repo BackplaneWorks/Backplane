@@ -84,6 +84,7 @@ export class ViewerQuality {
     this.visible = !!on;
     if (this.qualityCanvas) this.qualityCanvas.style.visibility = this.visible ? "visible" : "hidden";
     this.root.classList.toggle("solid-original-visible", this.visible);
+    this.solid?.setPreviewVisible?.(this.canvas, !this.visible);
     if (changed && this.alive) this.root.dispatchEvent(new CustomEvent("solid-quality-change"));
   }
   status(status) {
