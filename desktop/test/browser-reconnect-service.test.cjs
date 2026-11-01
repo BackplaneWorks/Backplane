@@ -26,7 +26,7 @@ function fixture(){
     module,Buffer,process,AbortSignal,fetch,setTimeout,require(name){
       if(name==='node:fs/promises')return files;
       if(name==='node:child_process')return{spawn(){throw new Error('Discovery must not launch a service');},execFile(){throw new Error('No child process allowed');}};
-      return require(name);
+      return name==='./service-diagnostics.cjs'?require('../service-diagnostics.cjs'):require(name);
     },
   },{filename:'service.cjs'});
   const service=new module.exports.Service({home:'/synthetic/browser-rebind',expectedVersion:'b990'});

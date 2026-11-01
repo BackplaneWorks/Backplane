@@ -1310,8 +1310,56 @@ async function bp_run(m) {
 // finish there: an in-process run keeps the runtime's own sync loop, with
 // BEND_ASYNC false so the effect files take their sync paths too. Windows
 // has no sync loop; bend does not run programs in-process there.
+// The desktop provides a private report path for its hub. Plot/review/render
+// children inherit the environment but must never replace that hub's report.
+// Structured call sites omit exception messages (which may contain input).
+function bp_failure(error) {
+  try {
+    const file = process.env.BACKPLANE_DIAGNOSTICS_FILE;
+    if (!file || !require('path').isAbsolute(file) ||
+        process.argv.slice(2).some(x => /^--(?:plot|review|render|telemetry-pow|store-(?:far|terms))/.test(x))) return;
+    const fs = require('fs'), path = require('path');
+    const dir = fs.lstatSync(path.dirname(file));
+    if (!dir.isDirectory() || dir.isSymbolicLink() || (process.getuid && dir.uid !== process.getuid())) return;
+    if (process.platform !== 'win32' && (dir.mode & 0o077) !== 0) return;
+    const names = [RangeError, TypeError, SyntaxError, ReferenceError, URIError, EvalError, Error];
+    const exception = names.find(kind => error instanceof kind)?.name ?? 'Unknown';
+    let frames = [], stackAvailable = false;
+    if (error instanceof Error) {
+      const descriptor = Object.getOwnPropertyDescriptor(Error, 'prepareStackTrace');
+      try {
+        Error.prepareStackTrace = (_error, sites) => sites;
+        const sites = error.stack;
+        if (Array.isArray(sites)) {
+          stackAvailable = true;
+          frames = sites.slice(0, 32).map(site => {
+            const name = site.getFunctionName(), source = path.basename(site.getFileName() || '');
+            const line = site.getLineNumber(), column = site.getColumnNumber();
+            return {
+              ...(typeof name === 'string' && /^[\w$.[\]<> -]{1,256}$/.test(name) ? { function: name } : {}),
+              ...(/^[\w.$<> -]{1,128}$/.test(source) ? { source } : {}),
+              ...(Number.isSafeInteger(line) && line >= 0 ? { line } : {}),
+              ...(Number.isSafeInteger(column) && column >= 0 ? { column } : {}),
+            };
+          });
+        }
+      } finally {
+        if (descriptor) Object.defineProperty(Error, 'prepareStackTrace', descriptor);
+        else delete Error.prepareStackTrace;
+      }
+    }
+    const report = { schema: 1, at: new Date().toISOString(), pid: process.pid, exception, stackAvailable, frames };
+    const temp = file + '.' + require('crypto').randomUUID() + '.tmp';
+    try {
+      fs.writeFileSync(temp, JSON.stringify(report) + '\n', { flag: 'wx', mode: 0o600 });
+      fs.renameSync(temp, file);
+    } finally { try { fs.unlinkSync(temp); } catch {} }
+  } catch { /* Never replace the original exception or change the exit code. */ }
+}
+
 function bp_start(main) {
   bp_run(main).then((code) => process.exit(code), (e) => {
+    bp_failure(e);
     io_errs(e instanceof RangeError
       ? "bend: memory fault (machine stack overflow?)" : String(e));
     process.exit(1);

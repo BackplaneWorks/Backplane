@@ -32,6 +32,37 @@ difference between two readings (`PF.Stats.since`), so the overlay,
   logged as a warning. The check runs through `PS.Perf.lap`, and spans
   under 16 ms skip it without reading the environment.
 
+## Hub exit records
+
+The desktop keeps the last eight service launches in `<home>/diagnostics/`.
+Each `hub-*.json` records the launch time, native PID, version, executable
+SHA-256 and last observed state. If the desktop observes the child exit, it
+adds the exit time and code or signal. The state is an observation, not a
+live process check: after the desktop quits, an exit code may be unavailable.
+
+An exception caught by the default JS loop writes a matching
+`hub-*.exception.json`, even when the desktop has closed. It contains the type and up to 32
+structured stack frames: function, source basename, line and column. Exception
+messages, arguments, environment values and file contents are excluded.
+If structured frames are unavailable, `stackAvailable` is false; a rendered
+stack string is not copied into the report. Plot, review and render children do
+not overwrite the hub's report.
+
+Records stay local. The directory is created with mode 0700 and files with
+0600; the operating system's user-profile permissions apply on Windows.
+Diagnostic write failures do not prevent startup or change the exit code.
+The service still runs independently of the desktop, without an output pipe
+to the window. This adds no restart behavior or automatic upload.
+
+Focused checks: `node --test desktop/test/service-diagnostics.test.cjs`.
+For the real desktop test, build `test/native/hub_diagnostics.bend` with
+`scripts/build-js.sh` into a binary named `backplane-serve`, build the web
+client with `scripts/dev.sh web`, then run `node desktop/test/hub-diagnostics.cjs`
+with absolute `BACKPLANE_SERVICE` and `BACKPLANE_WEB` paths. It uses fresh
+homes and stand-in agents, triggers failures only through a test effect,
+and checks the records after restarting. Screenshots and results go into
+`build/hub-diagnostics/practical/`.
+
 ## Names
 
 `area.what`. Spans are µs, other values are plain numbers, and gauges keep

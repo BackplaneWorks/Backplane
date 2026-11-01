@@ -7,7 +7,7 @@ function model(residentService){
   if(name==='node:child_process')return{execFile(){},spawn(_binary,args,options){spawnArgs=args;spawnOptions=options;return child;}};
   if(name==='node:fs/promises')return{mkdir:async()=>{}};
   if(name==='node:net')return{createServer(){return{once(){},listen(_port,_host,done){done();},address(){return{port:40001};},close(done){done();}};}};
-  return require(name);
+  return name==='./service-diagnostics.cjs'?require('../service-diagnostics.cjs'):require(name);
  }},{filename:'service.cjs'});
  const service=new module.exports.Service({home:'/tmp/synthetic-resident',binary:'/synthetic/serve',web:'/synthetic/web',residentService});let attempts=0;service.discover=async()=>++attempts===1?null:{origin:'http://127.0.0.1:40001',version:'fixture'};
  return{service,options:()=>spawnOptions,args:()=>spawnArgs,killCalls:()=>killCalls};

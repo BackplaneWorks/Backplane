@@ -5,6 +5,7 @@ const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const runFile = promisify(execFile);
 const { createHash } = require('node:crypto');
+const { serviceDiagnostics } = require('./service-diagnostics.cjs');
 
 // /hello is the existing service's small CBOR map. Do not pull the domain
 // model into Electron or attempt to decode its event stream here.
@@ -188,19 +189,22 @@ class Service {
     const port = await servicePort(this.home);
     const launch = await launchPaths({ home: this.home, binary: this.binary, web: this.web,
       env: { ...process.env, BACKPLANE_HOME: this.home, ...(this.residentService ? { BACKPLANE_NO_UPDATE: '1' } : {}) } });
+    const diagnostics = await serviceDiagnostics({ home: this.home, binary: this.binary, version: this.expectedVersion, files: fs });
     // Like `backplane --headless`: the listener stays on 127.0.0.1 and the
     // hub's own tailnet handling decides whether the owner's phone reaches it.
     const args = ['--home', launch.home, '--port', String(port), '--host', '127.0.0.1', '--web', launch.web, '--foreground'];
-    this.child = spawn(this.binary, args, { stdio: ['ignore', 'ignore', 'ignore'], env: launch.env, ...(launch.cwd ? { cwd: launch.cwd } : {}), windowsHide: true, detached: true });
+    this.child = spawn(this.binary, args, { stdio: ['ignore', 'ignore', 'ignore'], env: { ...launch.env, BACKPLANE_DIAGNOSTICS_FILE: '', ...diagnostics?.env }, ...(launch.cwd ? { cwd: launch.cwd } : {}), windowsHide: true, detached: true });
     this.child.unref();
+    void diagnostics?.started(this.child.pid);
     let failure;
-    this.child.once('error', () => { failure = new Error('Cannot start the packaged service'); });
-    this.child.once('exit', code => { failure = new Error(`Service exited (${code})`); });
+    this.child.once('error', error => { failure = new Error('Cannot start the packaged service'); void diagnostics?.failed(error.code); });
+    this.child.once('exit', (code, signal) => { failure = new Error(`Service exited (${code})`); void diagnostics?.exited(code, signal); });
     while (Date.now() < deadline) {
       if (failure) throw failure;
       try {
         const connection = await this.discover();
         if (connection) {
+          void diagnostics?.ready(connection.version);
           // Retain our captured native child handle even when another launcher
           // won the home lock. A losing child exits on its own. Lock-file PID
           // equality is not an ownership test (Cygwin IDs differ on Windows).
