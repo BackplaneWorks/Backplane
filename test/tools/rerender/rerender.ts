@@ -478,6 +478,17 @@ function markdown(rep: any) {
 // their sizes are not
 const hubViews = (r: any) => Object.entries(r.hubMsgs as Record<string, any>).filter(([k]) => k.startsWith("reply:view.")).reduce((n, [, v]) => n + v.n, 0);
 
+// Scroll and stress windows: their counts follow how many pages land in
+// them, so their budgets are per page landed (replies to view.page; a
+// window with none counts as one)
+const pages = (r: any) => Math.max(1, r.hubMsgs?.["reply:view.page"]?.n ?? 0);
+const perPage = (r: any) => {
+  const n = pages(r);
+  return { mutationsPerPage: r.dom.records / n, domPatchPerPage: (r.counts["dom.patch"] ?? 0) / n,
+    recreatedPerPage: r.dom.recreatedIdentical / n, hubViewsPerPage: hubViews(r) / n, renderFullPerPage: (r.counts["render.full"] ?? 0) / n };
+};
+const paged = (kind: string) => /^(scroll|stress|slow)/.test(kind);
+
 // The gate
 // --------
 const budgets = opt("gate", "");
@@ -517,7 +528,7 @@ if (budgets) {
     const lim = kind === "known" || kind === "fixture" ? null : b[kind];
     if (!lim) continue;
     const got: Record<string, number> = { mutations: r.dom.records, recreatedIdentical: r.dom.recreatedIdentical, touchedUnchangedRows: r.rows.touchedUnchanged,
-      outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
+      outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), ...perPage(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
     for (const [k, max] of Object.entries(lim as Record<string, number>)) if (k !== "loading" && k !== "blankFrames" && k in got && got[k] > max) { console.log(`OVER ${r.name} ${k} ${got[k]} > ${max}`); over++; }
   }
   if (failed) { console.log("the run failed"); over++; }
@@ -542,11 +553,16 @@ if (wb) {
   const b: Record<string, Record<string, number>> = {};
   for (const r of results) {
     const k = r.name.split(":")[0];
-    // scroll and stress windows depend on how many pages land in them:
-    // twice what was seen; other windows a quarter more
-    const lim = /^(scroll|stress)/.test(k) ? (x: number) => Math.ceil(x * 2 + 50) : (x: number) => Math.ceil(x * 1.25 + 2);
+    const lim = (x: number) => Math.ceil(x * 1.25 + 2);
     const cur = { mutations: lim(r.dom.records), recreatedIdentical: lim(r.dom.recreatedIdentical), touchedUnchangedRows: lim(r.rows.touchedUnchanged), outsideRecords: lim(r.waste.outsideRecords),
       wsInBytes: Math.ceil(r.ws.inBytes * 1.5 + 8192), /* the hub's view deltas: sizes vary little now */ renderFull: lim(r.counts["render.full"] ?? 0), hubViews: lim(hubViews(r)), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
+    if (paged(k)) {
+      // per page landed, in place of the totals that follow the page count
+      const pp = perPage(r);
+      for (const n of ["mutations", "recreatedIdentical", "domPatch", "hubViews", "renderFull"] as const) delete (cur as any)[n];
+      Object.assign(cur, { mutationsPerPage: lim(pp.mutationsPerPage), domPatchPerPage: lim(pp.domPatchPerPage), recreatedPerPage: lim(pp.recreatedPerPage),
+        hubViewsPerPage: Math.ceil(pp.hubViewsPerPage * 1.25 + 1), renderFullPerPage: Math.ceil(pp.renderFullPerPage * 1.25 + 1) });
+    }
     b[k] = b[k] ? Object.fromEntries(Object.entries(cur).map(([n, v]) => [n, Math.max(v, b[k][n as keyof typeof cur] ?? 0)])) : cur;
   }
   // runs vary with timing (paging, a stray render): a budget is the worst
