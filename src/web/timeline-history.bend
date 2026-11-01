@@ -442,3 +442,91 @@ def H.project(reset: Bool, +previous: D.Node, +fresh: D.Node, direction: String)
 # Public API consumed by host.js, importing this module as History.
 def project(previous: D.Node, fresh: D.Node, +direction: String) -> D.Node:
   H.project(Bool.or(String.eq(direction, "reset"), String.eq(direction, "newest")), H.prepared(previous), H.prepared(fresh), direction)
+
+# Rows held past the cap (thin-host.js's heldTrim): the rows of the pages
+# let go leave the page, and their measured height stays as a gap (gaps),
+# so the scrollbar and the reader's place do not move (host.js sums the
+# measured heights of the ids let go). ids: entry ids,
+# one a line. A row goes when it is one of them, the run it heads or the
+# run it is in starts with one; controls and live rows always stay.
+def H.ids.one(+id: String, m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match id:
+    case SNil{}: m
+    case SCon{c, t}: Map.set(&2, Bool, Map.set(&2, Bool, m, SCon{c, t}, True{}), "fold:" ++ SCon{c, t}, True{})
+
+def H.ids(s: String, +word: String, m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match s:
+    case SNil{}: H.ids.one(word, m)
+    case SCon{Chr{10}, t}: H.ids(t, "", H.ids.one(word, m))
+    case SCon{c, t}: H.ids(t, word ++ SCon{c, SNil{}}, m)
+
+def H.let.go(+ids: Map<&2, Bool>, +n: D.Node) -> Bool:
+  Bool.and(H.historical(n), Bool.or(H.has(ids, key(n)), Bool.and(Bool.not(String.is_empty(H.run(n))), H.has(ids, H.run(n)))))
+
+def H.drop.rows(xs: List<&2, D.Node>, +ids: Map<&2, Bool>, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs:
+    case Nil{}: List.reverse(&2, D.Node, acc)
+    case +h <> t: H.drop.rows(t, ids, H.push(Bool.not(H.let.go(ids, h)), h, acc))
+
+def H.drop.paint(xs: List<&2, D.Node>, at: Bool, +ids: Map<&2, Bool>, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs at:
+    case Nil{} _: List.reverse(&2, D.Node, acc)
+    case D.El{tag, k, as, ks} <> +t True{}:
+      H.drop.paint(t, H.head(t), ids, D.El{tag, k, as, H.drop.rows(ks, ids, Nil{})} <> acc)
+    case D.El{tag, k, as, +ks} <> +t False{}:
+      H.drop.paint(t, H.head(t), ids, D.El{tag, k, as, H.drop.paint(ks, H.head(ks), ids, Nil{})} <> acc)
+    case h <> +t _: H.drop.paint(t, H.head(t), ids, h <> acc)
+
+def drop(+node: D.Node, ids: String) -> D.Node:
+  +m = H.ids(ids, "", Map.new(&2, Bool))
+  H.first(H.drop.paint([node], H.timeline(node), m, Nil{}), node)
+
+# The height of the rows let go above and below, as empty rows that are
+# never an anchor (a control's key): the older one first in the timeline,
+# the newer one after its last entry. "0" (or "") adds none.
+def H.gap(+side: String, +px: String) -> D.Node:
+  D.El{"div", "@gap:" ++ side, [D.At{"class", "timeline-gap"}, D.At{"aria-hidden", "true"}, D.At{"style", "height:" ++ px ++ "px"}], Nil{}}
+
+def H.gap.none(+px: String) -> Bool:
+  Bool.or(String.is_empty(px), String.eq(px, "0"))
+
+def H.gap.older(none: Bool, +px: String, xs: List<&2, D.Node>) -> List<&2, D.Node>:
+  match none:
+    case True{}: xs
+    case False{}: H.gap("older", px) <> xs
+
+type HGap is Data:
+  HGap{done: Bool, acc: List<&2, D.Node>}
+
+# walked from the end: the newer gap goes right after the last entry
+def H.gap.step(entry: Bool, +h: D.Node, +gap: D.Node, g: HGap) -> HGap:
+  match entry g:
+    case True{} HGap{False{}, acc}: HGap{True{}, h <> gap <> acc}
+    case _ HGap{done, acc}: HGap{done, h <> acc}
+
+def H.gap.walk(xs: List<&2, D.Node>, +gap: D.Node, g: HGap) -> HGap:
+  match xs:
+    case Nil{}: g
+    case +h <> t: H.gap.walk(t, gap, H.gap.step(H.historical(h), h, gap, g))
+
+def H.gap.end(+gap: D.Node, g: HGap) -> List<&2, D.Node>:
+  match g:
+    case HGap{True{}, acc}: acc
+    case HGap{False{}, acc}: gap <> acc
+
+def H.gap.newer(none: Bool, +px: String, xs: List<&2, D.Node>) -> List<&2, D.Node>:
+  match none:
+    case True{}: xs
+    case False{}: H.gap.end(H.gap("newer", px), H.gap.walk(List.reverse(&2, D.Node, xs), H.gap("newer", px), HGap{False{}, Nil{}}))
+
+def H.gaps.paint(xs: List<&2, D.Node>, at: Bool, +older: String, +newer: String, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs at:
+    case Nil{} _: List.reverse(&2, D.Node, acc)
+    case D.El{tag, k, as, ks} <> +t True{}:
+      H.gaps.paint(t, H.head(t), older, newer, D.El{tag, k, as, H.gap.older(H.gap.none(older), older, H.gap.newer(H.gap.none(newer), newer, ks))} <> acc)
+    case D.El{tag, k, as, +ks} <> +t False{}:
+      H.gaps.paint(t, H.head(t), older, newer, D.El{tag, k, as, H.gaps.paint(ks, H.head(ks), older, newer, Nil{})} <> acc)
+    case h <> +t _: H.gaps.paint(t, H.head(t), older, newer, h <> acc)
+
+def gaps(+node: D.Node, +older: String, +newer: String) -> D.Node:
+  H.first(H.gaps.paint([node], H.timeline(node), older, newer, Nil{}), node)
