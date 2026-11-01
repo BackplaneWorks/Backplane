@@ -2920,12 +2920,7 @@ def View.vhint(+h: String, +dev: String) -> String:
 # listening, writing (words are settling into the draft), finishing. The
 # words themselves are only ever in the draft, never repeated here.
 def View.vstate(+lc: I.Loc, +state: String, +u: U.Ui) -> String:
-  Bool.pick(String, String.eq(state, "starting"), MSG.T.voice.starting(lc),
-    Bool.pick(String, String.eq(state, "stopping"), MSG.T.voice.finishing(lc),
-      Bool.pick(String, Bool.and(String.eq(U.Ui.scratch(u, "@voice.eng"), "local"), String.is_empty(U.Ui.scratch(u, "@voice.load"))), MSG.T.voice.loading(lc),
-        Bool.pick(String, String.is_empty(String.trim(U.Ui.scratch(u, "@voice.part"))),
-          MSG.T.web.voice.listening(lc) ++ Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.dev")), "", " · " ++ U.Ui.scratch(u, "@voice.dev")),
-          MSG.T.voice.writing(lc)))))
+  U.Voice.status(lc, u)
 
 def View.vstrip.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:

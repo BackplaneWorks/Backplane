@@ -1419,3 +1419,5 @@ settings.voice.entries.note = One a line. KiCad = key cad (a term and how it sou
 settings.voice.learned = Learned fixes
 settings.voice.learned.note = Fixes you made after dictating. Each applies by itself once you have made it twice.
 voice.learned.item = {heard} → {out} · {yes}×
+voice.dictate.here = Dictate with this device''s microphone
+native.permission.microphone = Backplane records your voice while you dictate into a thread, and sends it to your computer to turn into text.

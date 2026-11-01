@@ -8913,6 +8913,27 @@ def Bots.google.accts(+u: Ui) -> List<&2, String>:
 def Voice.on(+u: Ui) -> Bool:
   Bool.not(String.is_empty(Ui.scratch(u, "@voice")))
 
+# one quiet word for where dictation is: starting, loading the local model,
+# listening, writing (words are settling into the draft), finishing. The
+# words themselves are only ever in the draft, never repeated here. Every
+# client shows this one (web View.vstate, phones Mob.voice).
+def Voice.status(+lc: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, String.eq(Ui.scratch(u, "@voice"), "starting"), MSG.T.voice.starting(lc),
+    Bool.pick(String, String.eq(Ui.scratch(u, "@voice"), "stopping"), MSG.T.voice.finishing(lc),
+      Bool.pick(String, Bool.and(String.eq(Ui.scratch(u, "@voice.eng"), "local"), String.is_empty(Ui.scratch(u, "@voice.load"))), MSG.T.voice.loading(lc),
+        Bool.pick(String, String.is_empty(String.trim(Ui.scratch(u, "@voice.part"))),
+          MSG.T.web.voice.listening(lc) ++ Bool.pick(String, String.is_empty(Ui.scratch(u, "@voice.dev")), "", " · " ++ Ui.scratch(u, "@voice.dev")),
+          MSG.T.voice.writing(lc)))))
+
+# the level meter, 0..100
+def Voice.level(+u: Ui) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(Ui.scratch(u, "@voice.lv")), 0n)
+
+# whether dictation's strip and notes belong to thread sel (its own, or
+# none named yet)
+def Voice.here(+u: Ui, +sel: String) -> Bool:
+  Bool.or(String.eq(Ui.scratch(u, "@voice.th"), sel), String.is_empty(Ui.scratch(u, "@voice.th")))
+
 def Voice.unsure(+u: Ui) -> List<&2, VC.Unsure>:
   VC.Voice.unsure.parse(Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@voice.unsure")), J.Null{}))
 
@@ -12144,7 +12165,7 @@ def Settings.menu.pages() -> List<&2, String>:
   ["appearance", "threads", "agents", "writing", "cad", "ordering", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
 
 def Settings.phone.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "cad", "ordering", "network", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "cad", "ordering", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
 
 def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
   match ps:

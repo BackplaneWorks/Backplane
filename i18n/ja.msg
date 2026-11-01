@@ -1442,3 +1442,5 @@ settings.voice.entries.note = 1行に1つ。KiCad = key cad（用語と読み）
 settings.voice.learned = 覚えた修正
 settings.voice.learned.note = 音声入力の後にした修正。2回すると自動で適用されます。
 voice.learned.item = {heard} → {out}・{yes}回
+voice.dictate.here = この端末のマイクで音声入力
+native.permission.microphone = スレッドに音声入力する間だけ声を録音し、文字にするためにコンピューターへ送ります。

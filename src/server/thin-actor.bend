@@ -1068,6 +1068,14 @@ def Actor.browser(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
   +page = U.Ui.shown.page(Actor.ui(a))
   Actor.reply_if(BFRAME.BrowserFrame.owns(page, J.Json.get_str(o, "bot", "")), a, web, key, o)
 
+# Dictation's events ({"t":"voice"}, server.bend's VoiceJob) go to the
+# connection that started it: on a view lane they belong in its Ui like a
+# reply, so the drawn strip (its one word, the level, the fixes and the
+# word to clarify) follows. The words themselves are written into the
+# draft by the client that owns it (a phone: bridge.js's session_voice).
+def Actor.voice(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
+  Actor.reply_if(True{}, a, web, key, o)
+
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
     case "term": Actor.terminal(a, web, key, o)
@@ -1075,6 +1083,7 @@ def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json
     case "info": Actor.info(a, o)
     case "sheets": Actor.sheets(a, o)
     case "shot": Actor.browser(a, web, key, o)
+    case "voice": Actor.voice(a, web, key, o)
     case _: a
 
 def Actor.message(a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:

@@ -117,6 +117,32 @@ def Session.handoff(hs: H.Hubs, +key: String, session: J.Json, cur: String) -> H
     case H.Hubs{cid, now, _, list}:
       H.Hubs{cid, now, cur, Session.handoff.go(list, key, session)}
 
+# Live words into a draft the phone owns (bridge.js, on a hub's view lane,
+# where the hub draws the screen but the draft is the phone's): the draft,
+# the phone's own place in it ("@voice.pos" and the rest, kept apart from
+# the hub's session), one {"t":"voice"} event, through the same
+# client.bend Voice.recv the hub and the web run. Answers the draft after
+# it and the place to keep for the next event.
+def Session.voice.keys() -> List<&2, String>:
+  ["@voice.pos", "@voice.tl", "@voice.to", "@voice.at", "@voice.part", "@voice.uth"]
+
+def Session.voice.in(ks: List<&2, String>, +o: J.Json, u: U.Ui) -> U.Ui:
+  match ks:
+    case Nil{}: u
+    case +k <> t: Session.voice.in(t, o, U.Ui.scratch_set(u, k, J.Json.get_str(o, k, "")))
+
+def Session.voice.out(ks: List<&2, String>, +u: U.Ui) -> List<&2, J.KV>:
+  match ks:
+    case Nil{}: Nil{}
+    case +k <> t: J.KV{k, J.Json.str(U.Ui.scratch(u, k))} <> Session.voice.out(t, u)
+
+def Session.voice.k(+thread: String, +u: U.Ui) -> J.Json:
+  J.Json.obj([J.KV{"draft", J.Json.str(U.Ui.scratch(u, thread))}, J.KV{"keep", J.Json.obj(Session.voice.out(Session.voice.keys(), u))}])
+
+def Session.voice(+keep: J.Json, +draft: String, +o: J.Json) -> J.Json:
+  +thread = J.Json.get_str(o, "thread", "")
+  Session.voice.k(thread, U.Voice.recv(Session.voice.in(Session.voice.keys(), keep, U.Ui.scratch_set(U.Ui.init(0n), thread, draft)), o))
+
 def Session.local(session: J.Json, key: String, value: String) -> J.Json:
   Session.pack(H.Hubs.ui(H.Hubs.local(H.Hubs{"", 0n, "local", [H.Hub{"local", Session.adopt(U.Ui.init(0n), session)}]}, key, value), "local"))
 
