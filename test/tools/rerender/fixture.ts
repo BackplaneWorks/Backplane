@@ -54,7 +54,10 @@ export function synthetic(home: string, root: string, o: { projects: number; lon
   lines.push({ $: "MessagePosted", thread: "zqbg", msg: "bg0", role: "user", text: "the background thread", at: at + 4000 });
   const text = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
   writeFileSync(join(home, "events.jsonl"), text);
-  return { lines: lines.length, bytes: text.length, source: "synthetic", targets: [
+  // (its times are now-relative: hashed as offsets from its base, so the
+  // same fixture hashes the same on any day)
+  const sha256 = new Bun.CryptoHasher("sha256").update(text.split(root).join("<root>").replace(/"at":(\d+)/g, (_, n) => `"at":+${Number(n) - at}`)).digest("hex");
+  return { lines: lines.length, bytes: text.length, source: "synthetic", sha256, targets: [
     { role: "long", id: "zqlong", title: "zqlong thread" }, { role: "tools", id: "zqtools", title: "zqtools thread" }, { role: "bg", id: "zqbg", title: "zqbg thread" }] };
 }
 
@@ -116,7 +119,11 @@ export function real(home: string, root: string, o: { log: string; long: string;
     const setting = ty === "SettingSet" ? /"key":"((?:[^"\\]|\\.)*)"/.exec(raw)?.[1] ?? "" : "";
     if (ty === "SettingSet" && DROP_SETTING.test(setting)) continue;
     // per-thread bookkeeping of other threads (launch.<by>, fallback.<thread>...: 300 MB live)
-    if (ty === "SettingSet" && /^(fallback|launch|triage|run|wake|tok|turn|restart|alert|told)[.:]/.test(setting) && ![...keep].some((id) => setting.includes(id))) continue;
+    // another thread's own state kept as a setting (fallback.*, launch.*,
+    // ride.*: its messages waiting to ride a new turn, which the hub then
+    // delivers at start and so wakes the thread, ...): dropped whole
+    if (ty === "SettingSet" && /t1\d{9}-\d+/.test(setting) && ![...keep].some((id) => setting.includes(id))) continue;
+    if (ty === "SettingSet" && /^(fallback|launch|triage|run|wake|tok|turn|restart|alert|told|ride)[.:]/.test(setting) && ![...keep].some((id) => setting.includes(id))) continue;
     const line = raw.split(liveHome).join(home).split(homedir() + "/").join(elsewhere + "/");
     if (ty === "SettingSet") { keepLast("s\u0000" + setting, line); continue; }
     if (ty.startsWith("Thread") || ty === "ProviderSet") {
@@ -135,10 +142,11 @@ export function real(home: string, root: string, o: { log: string; long: string;
   for (const id of keep) if (!titles.has(id)) throw new Error(`no thread ${id} in ${o.log}`);
   const now = o.until ?? cut;
   for (const [t, state] of turns) if (t && state === "running") out.push(JSON.stringify({ $: "TurnChanged", thread: t, state: "interrupted", at: now }));
-  for (const k of tasks) if (k) {
-    out.push(JSON.stringify({ $: "TaskStateSet", task: k, state: "cancelled", summary: "", at: now }));
-    out.push(JSON.stringify({ $: "TaskDelivered", task: k, at: now }));
-  }
+  // a delegated task still open at the cut is taken out whole (its lines
+  // dropped): closing it delivered "Delegated task … finished" to its
+  // parent, which started a turn, whose end then reported to its launcher
+  const taskOf = (l: string) => /^\{"\$":"Task[A-Za-z]+"/.test(l) ? /"task":"([^"]+)"/.exec(l)?.[1] ?? "" : "";
+  if (tasks.size) for (let i = 0; i < out.length; i++) if (tasks.has(taskOf(out[i]))) out[i] = "";
   const targets: Target[] = [];
   for (const [role, id] of [["long", o.long], ["tools", o.tools], ["bg", o.bg]] as const) {
     if (!id) continue;
@@ -146,6 +154,8 @@ export function real(home: string, root: string, o: { log: string; long: string;
     targets.push({ role, id, title });
     out.push(JSON.stringify({ $: "ThreadRenamed", id, title, at: now }));
     out.push(JSON.stringify({ $: "ProviderSet", id, provider: "claude", model: "", at: now }));
+    // nothing left waiting to ride its next turn (it would start one at once)
+    out.push(JSON.stringify({ $: "SettingSet", key: `ride.${id}`, value: "", at: now }));
   }
   out.push(JSON.stringify({ $: "SettingSet", key: "restart.continue", value: "off", at: now }));
   out.push(JSON.stringify({ $: "SettingSet", key: "onboard.done", value: "1", at: now }));

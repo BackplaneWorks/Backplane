@@ -489,6 +489,9 @@ if (budgets) {
     // a window that did not finish (a timeout, a lost connection) fails: its
     // numbers measure something else
     if (r.error) { console.log(`OVER ${r.name} error: ${r.error}`); over++; }
+    // nothing the harness did starts an agent in open or idle: one that
+    // starts there was woken by the input itself (an unsettled log)
+    if (/^(open|idle)$/.test(kind) && r.hub.perf["hub.claude_pid"]?.n) { console.log(`OVER ${r.name} an agent started (hub.claude_pid ${r.hub.perf["hub.claude_pid"].n}): the input is not settled`); over++; }
     // hard rules, budget or not: no loading placeholder anywhere, no blank
     // frame while scrolling
     if (r.scroll.loadingCount > 0) { console.log(`OVER ${r.name} loading ${r.scroll.loadingCount} > 0 (${JSON.stringify(r.scroll.loadingSeen[0])})`); over++; }
@@ -511,18 +514,25 @@ if (budgets) {
         console.log(`OVER ${r.name} blankFrames ${r.scroll.blankFrames} (gap ${r.scroll.worstGapPx} px), worse than the known failure (${known.blankFrames}, ${known.worstGapPx} px; ${known.until})`); over++;
       } else console.log(`known ${r.name} blankFrames ${r.scroll.blankFrames} (gap ${r.scroll.worstGapPx} px): ${known.until}`);
     }
-    const lim = kind === "known" ? null : b[kind];
+    const lim = kind === "known" || kind === "fixture" ? null : b[kind];
     if (!lim) continue;
     const got: Record<string, number> = { mutations: r.dom.records, recreatedIdentical: r.dom.recreatedIdentical, touchedUnchangedRows: r.rows.touchedUnchanged,
       outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
     for (const [k, max] of Object.entries(lim as Record<string, number>)) if (k !== "loading" && k !== "blankFrames" && k in got && got[k] > max) { console.log(`OVER ${r.name} ${k} ${got[k]} > ${max}`); over++; }
   }
   if (failed) { console.log("the run failed"); over++; }
+  if (b.fixture && b.fixture !== fx.sha256) { console.log(`STALE the budgets are for fixture ${b.fixture}, this run's is ${fx.sha256}`); over++; }
   if (build.hub !== build.tree || build.web !== build.tree) { console.log(`STALE the builds are not this tree's: hub ${build.hub || "unstamped"}, web ${build.web || "unstamped"}, tree ${build.tree} (test/tools/rerender/build.sh)`); over++; }
   console.log(over ? `${over} over budget` : "all within budget");
   process.exit(over ? 1 : 0);
 }
 const wb = opt("write-budgets", "");
+// and only from the fixture the file's numbers came from
+const wbFixture = (() => { try { return JSON.parse(readFileSync(wb, "utf8")).fixture ?? ""; } catch { return ""; } })();
+if (wb && wbFixture && wbFixture !== fx.sha256 && !flag("fresh-budgets")) {
+  console.log(`not writing budgets: their fixture is ${wbFixture}, this run's ${fx.sha256} (--fresh-budgets starts them over)`);
+  process.exit(1);
+}
 if (wb && (!build.hub || build.hub !== build.tree || build.web !== build.tree || failed)) {
   // budgets come only from a run of this very tree's builds
   console.log(`not writing budgets: hub ${build.hub || "unstamped"}, web ${build.web || "unstamped"}, tree ${build.tree}${failed ? ", the run failed" : ""} (build with test/tools/rerender/build.sh)`);
@@ -545,8 +555,9 @@ if (wb) {
   try {
     const old = JSON.parse(readFileSync(wb, "utf8"));
     if (old.known) (b as any).known = old.known;
-    if (!flag("fresh-budgets")) for (const [k, v] of Object.entries(old)) if (k !== "known" && b[k]) for (const [n, x] of Object.entries(v as Record<string, number>)) b[k][n] = Math.max(b[k][n] ?? 0, x);
+    if (!flag("fresh-budgets")) for (const [k, v] of Object.entries(old)) if (k !== "known" && k !== "fixture" && b[k]) for (const [n, x] of Object.entries(v as Record<string, number>)) b[k][n] = Math.max(b[k][n] ?? 0, x);
   } catch {}
+  (b as any).fixture = fx.sha256;
   writeFileSync(wb, JSON.stringify(b, null, 1) + "\n");
   say(`wrote budgets ${wb}`);
 }
