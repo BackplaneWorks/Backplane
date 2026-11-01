@@ -361,7 +361,7 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
   let palettePending = false;
   doc.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
-    if (doc.querySelector('.tour,.lightbox') || doc.querySelector('.draw-back')) return; // The active overlay owns every key.
+    if (doc.querySelector('.tour,.lightbox') || doc.querySelector('.draw-back') || doc.querySelector('.improvements:not([hidden])')) return; // The active overlay owns every key.
     const palette = doc.querySelector('.workspace-palette');
     if (palette) palettePending = false;
     // Queue the explicit close even while the hub is still drawing the open.

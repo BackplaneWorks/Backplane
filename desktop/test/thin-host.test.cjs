@@ -22,6 +22,20 @@ async function fixture(overrides={}){
  const open=()=>{host.greeting(greeting);const r=reply();host.receive(r);return r;};
  return{host,api,sent,commands,views,states,warnings,searches,messages,disk,reply,open,greeting,flushFields:()=>fieldRefresh?.(),getSession:()=>session,tick:ms=>{at+=ms;host.expire();}};
 }
+test('dictation survives a stale view reply and subsequent draft rendering',async()=>{
+ const f=await fixture();f.open();f.host.request('flag','settings');const req=f.sent.at(-1);
+ f.host.draftAt('A','original 日本語 dictated words');f.host.receive(f.reply(req));
+ assert.equal(f.getSession().drafts.A,'original 日本語 dictated words');
+ assert.equal(f.disk.get('A'),'original 日本語 dictated words');
+ f.host.draftAt('A','original 日本語 dictated words continue');
+ assert.equal(f.getSession().drafts.A,'original 日本語 dictated words continue');
+});
+test('dictation finishing in another thread keeps selection and its draft',async()=>{
+ const f=await fixture();f.open();f.host.request('select','B');const req=f.sent.at(-1);
+ f.host.request('draft','B typed');f.host.draftAt('A','A dictated');f.host.receive(f.reply(req));
+ assert.equal(f.getSession().sel,'B');assert.equal(f.getSession().drafts.B,'B typed');
+ assert.equal(f.getSession().drafts.A,'A dictated');assert.equal(f.disk.get('A'),'A dictated');
+});
 test('model menu compact: cached menu settles without replacing picture or readiness',async()=>{
  const f=await fixture({modelMenuReady:()=>true});f.open();const count=f.views.length;f.host.request('flag','models');const req=f.sent.at(-1);assert.equal(req.p.modelMenuInput,true);
  const reply=f.reply(req,{modelMenuInput:true,session:{...req.p.session,open:{models:true}}});delete reply.result.shown;delete reply.result.window;

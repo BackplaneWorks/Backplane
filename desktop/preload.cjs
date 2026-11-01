@@ -34,6 +34,13 @@ if (document.documentElement) paintTheme();
 else new MutationObserver((_, seen) => { if (document.documentElement) { seen.disconnect();paintTheme(); } }).observe(document, {childList:true});
 contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   theme,
+  captureApp: () => ipcRenderer.invoke('desktop:capture-app'),
+  onImprovements: callback => {
+    if (typeof callback !== 'function') throw new TypeError('Expected a callback');
+    const listener = () => callback();
+    ipcRenderer.on('desktop:improvements', listener);
+    return () => ipcRenderer.removeListener('desktop:improvements', listener);
+  },
   drafts: Object.freeze({
     read: () => ipcRenderer.sendSync('desktop:drafts', {op:'read'}),
     write: (key, text) => {

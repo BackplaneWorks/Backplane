@@ -1,6 +1,7 @@
 import Base
 import ./mailprivate.bend as PM
 import ./accounts.bend as ACCT
+import ./improvements.bend as IMP
 import ./subthreads.bend as ST
 import ./mailtriage.bend as TRI
 import ./runlife.bend as RL
@@ -629,15 +630,17 @@ def Hub.new.outs(scratch: Bool, +th: String, +root: String, +mode: String) -> Li
     case False{}:
       Hub.env.outs(Hub.env.of(mode), th, root, mode)
 
-def Hub.thread_create.base(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+def Hub.thread_create.named(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +th: String) -> Step:
   +project = J.Json.get_str(p, "project", "")
   +title = J.Json.get_str(p, "title", "New thread")
   +env = J.Json.get_str(p, "env", M.Setting.get(s, "thread.env", "auto"))
-  +th = Hub.id("t", now, Hub.seq(s))
   Step{[M.ThreadCreated{th, project, title,
     Hub.new.env(M.Scratch.is(project), env), "", Hub.new.wt(M.Scratch.is(project), Hub.project.root(Hub.project(s, project)), th), J.Json.get_str(p, "provider", M.Setting.get(s, "agent.provider", "claude")),
     J.Json.get_str(p, "model", M.Setting.get(s, "agent.model", "")), now}],
     Reply.made(client, id, th) <> Hub.new.outs(M.Scratch.is(project), th, Hub.project.root(Hub.project(s, project)), env)}
+
+def Hub.thread_create.base(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Hub.thread_create.named(s, now, client, id, p, Hub.id("t", now, Hub.seq(s)))
 
 # A new visible child is a normal thread. Parent links are never inferred
 # from worker launches, delegated tasks or forks of older conversations.
@@ -660,8 +663,42 @@ def Hub.thread_create.kind(child: Bool, +s: M.State, +now: Nat, +client: U32, +i
         String.eq(ST.Tree.project(Hub.thread(s, parent)), J.Json.get_str(p, "project", "")),
         ST.Tree.chain(63n, s, ST.Tree.raw(s, parent), parent))), s, now, client, id, p, parent)
 
-def Hub.thread_create(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+def Hub.thread_create.ordinary(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
   Hub.thread_create.kind(Bool.not(String.is_empty(J.Json.get_str(p, "parent", ""))), s, now, client, id, p, J.Json.get_str(p, "parent", ""))
+
+# A retry is the same creation, including after restart. Do not recreate a
+# removed thread or retarget a key to another repository. Normal defaults,
+# worktree preparation and permission policy still own the created thread.
+def Hub.thread_create.reused(ok: Bool, +client: U32, +id: String, +th: String) -> Step:
+  match ok:
+    case True{}: Step.outs([Reply.made(client, id, th)])
+    case False{}: Step.outs([Reply.err(client, id, "This request belongs to a different or removed conversation. Open that conversation before retrying.")])
+
+def Hub.thread_create.retry(exists: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +th: String) -> Step:
+  match exists:
+    case False{}: Hub.thread_create.named(s, now, client, id, p, th)
+    case True{}:
+      Hub.thread_create.reused(Bool.and(ST.Tree.alive(Hub.thread(s, th)), String.eq(ST.Tree.project(Hub.thread(s, th)), J.Json.get_str(p, "project", ""))), client, id, th)
+
+def Hub.thread_create.keyed(ok: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +key: String) -> Step:
+  match ok:
+    case False{}: Step.outs([Reply.err(client, id, "Choose an existing project and retry this request.")])
+    case True{}: Hub.thread_create.retry(Hub.owns(s, IMP.Improvements.thread(key)), s, now, client, id, p, IMP.Improvements.thread(key))
+
+def Improvements.project(p: M.Project) -> Bool:
+  match p:
+    case M.Project{+id, _, root, _, removed}:
+      Bool.and(Bool.not(removed), Bool.and(Bool.not(M.Scratch.is(id)), Bool.not(String.is_empty(root))))
+
+def Hub.thread_create.choose(keyed: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +key: String) -> Step:
+  match keyed:
+    case False{}: Hub.thread_create.ordinary(s, now, client, id, p)
+    case True{}:
+      Hub.thread_create.keyed(Bool.and(IMP.Improvements.key(key), Bool.and(String.is_empty(J.Json.get_str(p, "parent", "")),
+        Improvements.project(Hub.project(s, J.Json.get_str(p, "project", ""))))), s, now, client, id, p, key)
+
+def Hub.thread_create(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Hub.thread_create.choose(Bool.not(String.is_empty(J.Json.get_str(p, "creationKey", ""))), s, now, client, id, p, J.Json.get_str(p, "creationKey", ""))
 
 # the project's first thread, made as thread.create would, after it
 def Hub.project_add.thread(+s: M.State, +now: Nat, +client: U32, +id: String, +pid: String, +made: M.Change) -> Step:
@@ -713,6 +750,18 @@ def Hub.projects(s: M.State) -> List<&2, M.Project>:
   match s:
     case M.State{ps, _, _, _, _, _, _, _, _, _, _}:
       Map.values(&2, M.Project, ps)
+
+def Improvements.projects(xs: List<&2, M.Project>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: Nil{}
+    case M.Project{_, _, _, _, True{}} <> t: Improvements.projects(t)
+    case M.Project{id, title, root, _, False{}} <> t:
+      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{title}}, J.KV{"root", J.Str{root}}]) <> Improvements.projects(t)
+
+def Improvements.context(+s: M.State, +thread: String) -> J.Json:
+  J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"project", J.Str{Bool.pick(String, Hub.owns(s, thread), ST.Tree.project(Hub.thread(s, thread)), "")}},
+    J.KV{"accountBinding", J.Str{ACCT.Accounts.owner(s, thread)}},
+    J.KV{"projects", J.Json.arr(Improvements.projects(Hub.projects(s)))}])
 
 # a new project's id, or the removed one's it brings back
 def Hub.project_id(+old: String, +s: M.State, +now: Nat) -> String:
@@ -1255,7 +1304,7 @@ def Hub.methods() -> List<&2, String>:
    "thread.pin", "thread.unpin", "thread.rename", "thread.delete", "kicad.watch", "thread.modes", "app.update", "setting.set", "kicad.install",
    "ask.answer", "device.register", "device.drop", "kicad.info", "queue.resume",
    "queue.edit", "queue.remove", "queue.move", "queue.steer", "thread.fork", "thread.back", "thread.provider", "update.now", "work.cancel", "task.cancel", "wake.cancel", "deploy.restart", "deploy.cancel", "deploy.status", "lock.release", "lock.cancel", "kicad.retry", "mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send",
-   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit"]
+   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context"]
 
 # Agent output (Claude stream-json)
 # ---------------------------------
@@ -9783,6 +9832,8 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
       Step.outs([Reply.ok(client, id), ModelsRefresh{}])
     case 51n:
       Todos.edit(s, now, client, id, p)
+    case 52n:
+      Step.outs([Reply.data(client, id, Improvements.context(s, J.Json.get_str(p, "sourceThread", "")))])
     case 50n:
       Step.reply(client, id, [M.ThreadParentSet{J.Json.get_str(p, "thread", ""), "", now}])
     case _:

@@ -32,7 +32,7 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
     if(next===signature)return;signature=next;const stamp=++ticket;
     // Main converts CSS coordinates using the shell's actual zoom factor and
     // clamps to its content bounds. DPR/roles/target IDs from DOM grant nothing.
-    void Promise.resolve(bridge.present({owner,bounds})).then(result=>{
+    return Promise.resolve(bridge.present({owner,bounds})).then(result=>{
       if(disposed||stamp!==ticket||current!==node)return;
       state=result?.shown===true?{owner,phase:'ready',message:''}:{owner,phase:result?.phase==='error'?'error':'connecting',message:result?.message||'Open a page with the address bar.'};status(node);
     }).catch(()=>{if(stamp===ticket){state={owner,phase:'error',message:'Browser unavailable'};status(node);}});
@@ -60,5 +60,5 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
   }));
   function dispose(){if(disposed)return;hide();disposed=true;if(raf)win.cancelAnimationFrame(raf);resize.disconnect();for(const remove of observers)if(typeof remove==='function')remove();}
   listen(win,'pagehide',dispose,{once:true});
-  return Object.freeze({sync,hide,dispose});
+  return Object.freeze({sync,hide,dispose,async forCapture(){if(raf){win.cancelAnimationFrame(raf);raf=0;}await measure();}});
 }

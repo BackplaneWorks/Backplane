@@ -65,13 +65,26 @@ test('a reconnect keeps the last view of the same thread, with no loading page',
 test('nothing in the page makes up a loading page; render marks held and waiting pictures for style.css',()=>{
  for(const f of fs.readdirSync(path.resolve(__dirname,'../../src/web')).filter(f=>f.endsWith('.js')))
   assert(!fs.readFileSync(path.resolve(__dirname,'../../src/web',f),'utf8').includes('Loading conversation'),f);
- assert.match(source,/dataset\.backplaneHeld = !heldFor \? "false" : heldAt && performance\.now\(\) - heldAt >= QUIET_MS \? "quiet" : "true";/);
- assert.match(source,/dataset\.backplaneWait = String\(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot\);/);
+ assert.match(source,/htmlData\("backplaneHeld", !heldFor \? "false" : heldAt && performance\.now\(\) - heldAt >= QUIET_MS \? "quiet" : "true"\);/);
+ assert.match(source,/htmlData\("backplaneWait", String\(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot\)\);/);
  // a new view drops what was kept and says what it was drawn for
  assert.match(source,/frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;\n\s*shownFor = targetKey\(detail\.target\);/);
  assert.match(css,/html\[data-backplane-held="true"\][^{]*\{ pointer-events: none; \}/);
  assert.match(css,/html\[data-backplane-held="quiet"\][^{]*\{ visibility: hidden; \}/);
- assert.match(css,/html\[data-backplane-wait="true"\][^{]*\.model-chip[^{]*\{ visibility: hidden; \}/);
+ // The wait shell now hides the whole composer, including its model chip.
+ assert.match(css,/html\[data-backplane-wait="true"\][^{]*\.thread-view \.composer[, )][^{]*\{ visibility: hidden; \}/);
+});
+test('actual held/wait markers reach the dataset and unchanged renders do not rewrite them',()=>{
+ const data={},writes=[];const ctx={document:{documentElement:{dataset:new Proxy(data,{set:(o,k,v)=>{writes.push(k);o[k]=v;return true;}})}},
+  frontendNode:null,transitionNode:{},transitionFor:'thread:A',focusedNode:null,canonicalBoot:false,heldAt:5000,QUIET_MS:1200,
+  performance:{now:()=>5000},currentSession:()=>({sel:'B'}),presentationTarget:s=>({kind:'thread',id:s.sel}),targetKey:t=>t.kind+':'+t.id};
+ const a=source.indexOf('function htmlData('),b=source.indexOf('function render()',a),c=source.indexOf('  const heldFor =',b),d=source.indexOf('  trace("dom",',c);assert(a>0&&b>a&&c>b&&d>c);
+ vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);const mark=()=>vm.runInContext('{'+source.slice(c,d)+'}',ctx);
+ mark();assert.deepEqual(data,{backplaneHeld:'true',backplaneWait:'false'});mark();assert.equal(writes.length,2);
+ ctx.performance.now=()=>6200;mark();assert.equal(data.backplaneHeld,'quiet');
+ ctx.transitionFor='thread:B';mark();assert.equal(data.backplaneHeld,'false');
+ ctx.transitionNode=null;mark();assert.equal(data.backplaneWait,'true');
+ ctx.frontendNode={};mark();assert.deepEqual(data,{backplaneHeld:'false',backplaneWait:'false'});
 });
 
 test('the first connection says Connecting only when it takes a while',()=>{

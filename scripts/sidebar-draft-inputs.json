@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "e007a1cb182082a3eef867924166d44120a58ed999afb98fce030f6027ebb1a5",
+    "src/core/client.bend": "975a6140ae25a3c39c5519843572d6c0a64b1bef2d290856f067b74945ebce61",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -85,9 +85,9 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "aed4b2df75b67f6ee8183f42ae6b06d918ea211324581b4a22e5f763c36abd73",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "8a6765d6eae17d39eb4e9a30c0fa9f425684515bb568a5de0dd26fb2461fc411",
+    "src/core/model.bend": "f21634e6301ae9a885e9d9a5796e2d90374098fc0f159753e9ba95114cd17d27",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "da312970c2c7cd74f23a8d74719afee0ab0dc0ca0826372e17bd08407f652e39",
+    "src/core/msgs.bend": "5ae7a38e31cd86a8adda21078a90fd3bc7b7f9f824ebfe5f0db39866cf9b1f75",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
@@ -146,6 +146,7 @@
     "src/core/usage_graph.bend": "28e5f2b438707dc3c9a1ce33af59500ae6eb8f13d0118fd09d5ae41846f5c692",
     "src/core/usage_page.bend": "05f675351e885ee368dd9db73b9e3739d04c9225a1f1c0d8ced43b53d98615f7",
     "src/core/utf8.bend": "0202c5087fd255df10413080cda57f2a4a00aa9b90b5b425a00a729f9563627b",
+    "src/core/vdict.bend": "fc3d918c66fd277f711d61aae68e70ef73bdf331a40fa452f0f7343a2dab737f",
     "src/core/view-page.bend": "443174e2117ff541add79d873a7eaad90225eb0557247188e273e0dd00a2be73",
     "src/core/voice.bend": "ac7874916b93eb350fc602dfcee4a7e7fcbdf99eedf4d63c84785cf0a501d905",
     "src/core/vt.bend": "931708652e96ec2db30f3a5a69dc4c90a98e15fc6e5fbbd8e441475626198581",
@@ -154,7 +155,7 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
     "src/mobile/screen.bend": "1bad4894df85a15561e88506496d750c034ea9deb00340b2058bd1e88de291c0",
-    "src/server/thin-actor.bend": "680fdbb8fa6ff7ecd92826d0fdef02b225566d25ed1320d1c3323768e476f439",
+    "src/server/thin-actor.bend": "c68a2b63868603316ada3f2e89c3eeff27a578b9cdafeb413c51119dfd57951b",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
@@ -177,7 +178,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "10c357aa81b4ab1547ff07478a66cb459aba0be439235c6f433f32be215b5d87"
+    "src/web/view.bend": "cad14b0bd7d350c2876f59d42a9d34d44ec9934fee913fbf0a21592ede73a33d"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -382,5 +383,23 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged"
+  "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged; 2026-11-01 combined main622/desktop dictation/Improvements: speech-only Vdict and @voice scratch, topbar/voice controls, existing wire privacy retained; no ordinary draft reader/key/filter/fallback change; all24 full-output cases PASS. Receipt MAIN-ALL-SOURCE-QUALIFICATION-CONTINUE-1.json.",
+  "currentMainAllReview": {
+    "changes": {
+      "added": [
+        "src/core/vdict.bend"
+      ],
+      "removed": [],
+      "changed": [
+        "src/core/client.bend",
+        "src/core/model.bend",
+        "src/core/msgs.bend",
+        "src/server/thin-actor.bend",
+        "src/web/view.bend"
+      ]
+    },
+    "fullOutputLogSHA256": "744467700e77cf6607fc2f9c352ba3e10153072447dce710d6a18b7b39af5ff2",
+    "checks": 24,
+    "priorManifestSHA256": "dcf787bdda9d93c032d8087554ac4b7a091734a9c19a8dc2552dd434e77b7066"
+  }
 }

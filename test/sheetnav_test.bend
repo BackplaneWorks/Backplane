@@ -6,6 +6,8 @@ import ../src/core/json.bend as J
 import ../src/core/utf8.bend as T
 import ../src/core/sexpr.bend as S2
 import ../src/server/plot.bend as PV
+import ../src/server/kicad.bend as K
+import ../src/core/hist.bend as HS
 
 # Hierarchical schematic navigation by sheet instance (client.bend's Sch,
 # hier.bend's places, boxes and children). Synthetic, read-only fixtures:
@@ -282,6 +284,9 @@ def main() -> IO(Unit):
     C.Check.str("no board picked: the project's own tree", U.Bd.tree.k("", "/p"), "")
     C.Check.str("the hub reads the tree named", PV.Tree.root.of("/p/a.kicad_sch", "/p/boards/beta/beta.kicad_sch"), "/p/boards/beta/beta.kicad_sch")
     C.Check.str("else the project's schematic", PV.Tree.root.of("/p/a.kicad_sch", ""), "/p/a.kicad_sch")
+    C.Check.str("window default root uses project schematic", PV.Tree.root(K.Files{"/p", "/p/a.kicad_pro", "/p/a.kicad_sch", ""}, "/p/sub/child.kicad_sch", ""), "/p/a.kicad_sch")
+    C.Check.str("window default root falls back to shown file", PV.Tree.root(K.Files{"/p", "", "", ""}, "/p/standalone.kicad_sch", ""), "/p/standalone.kicad_sch")
+    C.Check.str("window default root preserves shown commit", PV.Tree.root(K.Files{"/p", "/p/a.kicad_pro", "/p/a.kicad_sch", ""}, HS.Hist.git("/git", "commit", "/p", "sub/child.kicad_sch"), ""), HS.Hist.git("/git", "commit", "/p", "a.kicad_sch"))
     C.Check.str("a board's top sheet is its own file", U.Sch.value(False{}, "", rows(), 0n), "/p/top.kicad_sch")
     C.Check.str("the project top sheet is its own, empty", U.Sch.value(True{}, "", rows(), 0n), "")
     C.Check.str("a board's sub-sheet is its file", U.Sch.value(False{}, "", rows(), 1n), "/p/power.kicad_sch")

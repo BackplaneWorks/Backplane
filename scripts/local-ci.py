@@ -29,9 +29,18 @@ def output(argv, **kwargs):
     return subprocess.check_output(argv, cwd=ROOT, text=True, **kwargs).strip()
 
 
+def check_layout():
+    value = os.environ.get('CHECK_SHARDS', '1')
+    if not re.fullmatch(r'(?:[1-9]|1[0-6])', value):
+        raise ValueError('CHECK_SHARDS must be a decimal integer from 1 to 16')
+    return {'jobs':1, 'shards':int(value)}
+
+
 def base_key(name, roots, files):
     env = {**os.environ, 'BP_KEY_ROOTS': ' '.join(roots)} if roots else os.environ
-    return output(['scripts/inputs-key.sh', 'local-ci-v2:' + name, *sorted(set(files))], env=env)
+    label = 'local-ci-v2:' + name
+    if name == 'check': label += ':serial-shards=' + str(check_layout()['shards'])
+    return output(['scripts/inputs-key.sh', label, *sorted(set(files))], env=env)
 
 
 def key(name, roots, files):
@@ -93,6 +102,7 @@ def local_phase(name, cmd, folder, cap):
 def boat_phase(name, gate, roots, files, folder, extra=None):
     spec = {'name':name,'gate':gate,'roots':roots,'files':sorted(set(files)),
             'base':base_key(gate,roots,files), 'check_shards':os.environ.get('CHECK_SHARDS','1'), **(extra or {})}
+    if gate == 'check': spec['check_layout'] = check_layout()
     encoded = base64.urlsafe_b64encode(zlib.compress(json.dumps(spec).encode())).decode()
     logpath = folder/(gate+'.boat.log')
     with logpath.open('w') as log:
@@ -106,7 +116,9 @@ def boat_phase(name, gate, roots, files, folder, extra=None):
     artifact = Path(matches[-1])/'artifacts/local-remote'/name if matches else None
     receipt = artifact/'phase.json' if artifact else None
     data = json.loads(receipt.read_text()) if receipt and receipt.is_file() else {}
-    if r.returncode == 0 and (data.get('base')!=spec['base'] or data.get('rc')!=0):
+    layout_matches = gate != 'check' or (
+        json.dumps(data.get('check_layout'), sort_keys=True) == json.dumps(spec['check_layout'], sort_keys=True))
+    if r.returncode == 0 and (data.get('base')!=spec['base'] or data.get('rc')!=0 or not layout_matches):
         return 3, {'backend':'boat','reason':'missing or mismatched phase receipt'}, None
     if receipt and receipt.is_file(): shutil.copy2(receipt,folder/(gate+'.boat.resources.json'))
     return r.returncode, {**data,'backend':'boat','artifact':str(artifact) if artifact else None}, artifact
@@ -171,10 +183,12 @@ def main():
     p.add_argument('--runtime', help=argparse.SUPPRESS)
     p.add_argument('--only',choices=['small','check','proof','build-smoke','tests'],help='Continue only an unfinished phase of this batch')
     a = p.parse_args()
+    try: layout = check_layout()
+    except ValueError as error: p.error(str(error))
     os.chdir(ROOT)
     os.environ.update(PYTHONDONTWRITEBYTECODE='1', BEND_NO_TELEMETRY='1', BACKPLANE_TELEMETRY='off',
                       BACKPLANE_TELEMETRY_BAKE='0', BACKPLANE_GOOGLE_BAKE='0',
-                      CHECK_JOBS='1', CHECK_SHARDS=os.environ.get('CHECK_SHARDS','1'), CHECK_FALLBACK='0', TEST_JOBS='2', TEST_SHARD_COUNT='1', BUN_JSC_forceRAMSize='4294967296')
+                      CHECK_JOBS='1', CHECK_SHARDS=str(layout['shards']), CHECK_FALLBACK='0', TEST_JOBS='2', TEST_SHARD_COUNT='1', BUN_JSC_forceRAMSize='4294967296')
     CACHE.mkdir(parents=True, exist_ok=True)
     # One controller machine-wide, including across worktrees. Fail promptly;
     # never enqueue multiple admission requests or cancel another owner's work.
@@ -208,6 +222,7 @@ def execute(a):
         if a.dry_run: continue
         t = time.monotonic()
         row = {'gate': name, 'key': k, 'state': 'reused' if reused else 'running'}
+        if name == 'check': row['check_layout'] = check_layout()
         if name=='tests':row.update(test_files=roots,profile='full' if os.environ.get('TEST_FULL')=='1' else 'fast',budget_seconds=None if os.environ.get('TEST_FULL')=='1' else 120)
         if not reused:
             rc, metrics = execute_phase(name,roots,files,cmd,folder)

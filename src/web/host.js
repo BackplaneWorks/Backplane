@@ -7,6 +7,7 @@
 
 import App from "./app.bend";
 import { applyComposerDraft } from "./composer-draft.js";
+import { VoiceMic, hubHere } from "./voice-mic.js";
 import { homeDraftStorage } from "./home-drafts.js";
 const localStorage = homeDraftStorage(window.localStorage, window.backplaneDesktop?.drafts);
 import { editStart } from "./sent-claims.js";
@@ -29,6 +30,8 @@ function bubMoveSync() {
 document.addEventListener("visibilitychange", () => { bubMoves.disconnect(location.origin); });
 import { installUsageTabs } from "./usage-tabs.js";
 import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js";
+import { installImprovements } from "./improvements.js";
+import { ImprovementsRpc } from "./improvements-rpc.js";
 import { installSidebarKeys } from "./sidebar-keys.js";
 installSidebarKeys();
 import { installFloatingTerminal } from "./floating-terminal.js";
@@ -586,6 +589,10 @@ document.addEventListener("input", e => {
 let socket = null;
 const viewerRpc = new ViewerRpc(request => {
   if (!socket || socket.readyState !== 1) throw Error("Connect to the hub to read saved component metadata.");
+  socket.send(fromList(App.wire_out_json(Wire.json(request))));
+});
+const improvementsRpc = new ImprovementsRpc(request => {
+  if (!socket || socket.readyState !== 1) throw Error("Connect to the hub, then retry Send.");
   socket.send(fromList(App.wire_out_json(Wire.json(request))));
 });
 const thinContinuations = new ThinContinuations();
@@ -1426,7 +1433,44 @@ function sealedReply(envelope) {
 // itself there (its keyboard would cover the thread)
 function composerPhone() { return matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse)").matches; }
 
+// Dictation from this page's microphone when the hub is elsewhere
+// (voice-mic.js): the mic button's press starts recording at once and tells
+// Bend so ("client"); a second press sends what is left with the end mark.
+const voiceMic = new VoiceMic();
+function voiceMicPress(value) {
+  if (hubHere() || !navigator.mediaDevices?.getUserMedia) return value;
+  if (voiceMic.active) { voiceMic.stop(); return value; }
+  voiceMic.start().catch(err => console.warn("dictation: no microphone", err));
+  return "client";
+}
+// The page owns its draft: dictation's words are placed into it here, by
+// the same Bend def as everywhere (client.bend's Voice.place); what that
+// keeps between messages is kept per thread.
+const voicePlace = new Map();
+function voiceWords(envelope) {
+  if (envelope.t !== "voice" || !["words", "live", "idle"].includes(envelope.ev) || !envelope.thread) return;
+  const th = envelope.thread, session = currentSession();
+  const field = document.getElementById("composer");
+  const owner = document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread");
+  const here = session?.sel === th && field && owner === th;
+  let draft = "";
+  try { draft = here ? field.value : (session?.drafts?.[th] ?? localStorage.getItem(DRAFT + th) ?? ""); } catch {}
+  const r = Wire.plain(App.voice_place(Wire.json(voicePlace.get(th) || {}), draft, Wire.json(envelope)));
+  voicePlace.set(th, r.keep || {});
+  if (typeof r.draft !== "string" || r.draft === draft) return;
+  if (thin) thin.draftAt(th, r.draft);
+  else if (here) dispatch("draft", r.draft);
+  else try { if (r.draft) localStorage.setItem(DRAFT + th, r.draft); } catch {}
+}
+function voiceMicHeard(envelope) {
+  voiceWords(envelope);
+  if (envelope.t === "reply" && typeof envelope.audio === "string" && envelope.audio) voiceMic.address(envelope.audio);
+  if (envelope.t === "reply" && envelope.engine !== undefined && !envelope.audio && voiceMic.active) voiceMic.gone();
+  if (envelope.t === "voice" && (envelope.ev === "idle" || envelope.ev === "error")) voiceMic.gone();
+}
+
 function dispatch(action, value, timer) {
+  if (action === "voice" && !timer) value = voiceMicPress(value);
   if (action === "fork") reviewPosition.fork(value || currentSession().sel);
   if (action === "secret-save") return secretSave(value);
   if (action === "sealed") return sealedSave(value);
@@ -1636,6 +1680,23 @@ function uploadScope() {
     viewId: controller?.client.links.get(controller.hub)?.viewId,
     identity: cacheIdentity(document.cookie), project: document.querySelector("main.thread-view[data-project]")?.dataset.project || "" };
 }
+const improvements = installImprovements({
+  rpc: improvementsRpc,
+  ready: () => remoteReady && !!attachmentIdentity && !attachmentIdentityPending,
+  identity: () => attachmentIdentity,
+  context: async () => {
+    const thread = document.querySelector("main.thread-view[data-project]")?.dataset.thread || "";
+    const result = await improvementsRpc.request("improvements.context", { sourceThread: thread });
+    return { app: "Backplane", ...result, view: document.querySelector('.viewer-tabs .on')?.textContent || "Thread",
+      path: currentSession().info?.["view.path:" + thread] || "" };
+  },
+  beforeCapture: async () => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await desktopBrowser.forCapture?.();
+  },
+  overlayChanged: () => desktopBrowser.sync(),
+  select: async thread => { if (!dispatch("select", thread)) throw Error("The request was sent. Open the new thread in the sidebar."); },
+});
 async function uploadFiles(action, files, scope = uploadScope()) {
   if (!remoteReady && viewMode !== "compatibility" || viewMode === "compatibility" && socket?.readyState !== 1) {
     offlineAttach = true;
@@ -2942,7 +3003,7 @@ function stopThin(keepView = false, reason = "replaced") {
   if (socket === s) socket = null;
   if (s) { s.connectionDiagnostic?.initiate(reason);s.onmessage = null;try { s.close(); } catch {} }
   if (previous) previous.disconnect();
-  remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();
+  remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();improvementsRpc.reset();
   // A reconnect (keepView) keeps the boards, schematics and 3D models drawn:
   // the new connection's first plot of each is sent whole, and the same
   // model's bytes are not decoded again (solid-assets.js), so a drop while a
@@ -2984,7 +3045,7 @@ async function startThin(again = false, reason = "initial") {
     keepSettingsRecovery();
     bubMoves.disconnect(location.origin);
     terminalOutput.clear();
-    checkpointFocused();remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();
+    checkpointFocused();remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();improvementsRpc.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
     bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
     if (!frontendNode) void restoreFocused(true);
@@ -3192,9 +3253,10 @@ async function startThin(again = false, reason = "initial") {
       RR?.got?.(envelope, bytes.byteLength, pnow() - d0);
       if (envelope.t === "hb") { s.hb = true;diagnostic.heartbeat();return; }
       if (envelope.t === "notify") { notify(envelope);return; }
-      if (viewerRpc.receive(envelope)) return;
+      if (viewerRpc.receive(envelope) || improvementsRpc.receive(envelope)) return;
       if (envelope.t === "plotrevision") { ViewerTools.sourceRevision(envelope.key, envelope.revision); return; }
       if (envelope.t === "plotstamp") { ViewerTools.sourceStamp(envelope.key, envelope.revision); return; }
+      voiceMicHeard(envelope);
       if (envelope.t === "reply" && sealedReply(envelope)) return;
       if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { diagnostic.greeting(envelope);clearTimeout(thinGreetingTimer);thin.greeting(envelope); }

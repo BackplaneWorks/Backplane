@@ -350,6 +350,18 @@ export class ThinHost {
   draftChanged(thread, text) {
     this.draftChanges.set(thread, { revision: ++this.localRevision, text });
   }
+  // Dictation may finish after the person has selected another thread.
+  // Keep it in the same revisioned store as typing, without navigating.
+  draftAt(thread, text) {
+    if (thread === this.session.sel) return this.request('draft', text);
+    const draft = { revision: ++this.localRevision, text };
+    this.session = { ...this.session, drafts: { ...this.session.drafts, [thread]: text } };
+    this.drafts.set(thread, draft);this.draftChanges.set(thread, draft);
+    this.sent.edited(thread, text);
+    this.api.sessionChanged(this.session, { inputOnly: true });
+    this.api.local('draft', text, { ...this.session, sel: thread });
+    return true;
+  }
   // The composer's edit events (host.js): an edit starting at `start` in
   // the selected thread's field, and the end of an IME composition, after
   // which a sent text due to come off the field does.

@@ -67,6 +67,10 @@ def init(now: Nat, cid: String) -> U.Ui:
   stamp(U.Ui.set_cid(U.Ui.init(now), cid))
 
 # a draft this browser kept (Keep commands), read back at start
+# dictation's words into a draft this page keeps (client.bend's Voice.place)
+def voice_place(keep: J.Json, draft: String, o: J.Json) -> J.Json:
+  U.Voice.place(keep, draft, o)
+
 def restore(u: U.Ui, id: String, text: String) -> U.Ui:
   U.Ui.restore(u, id, text)
 
