@@ -22,6 +22,24 @@ function cc_same(fs,file,rev) {
   if(!file)return rev==='';
   try{return cc_stamp(fs.statSync(file,{bigint:true}))===rev;}catch{return false;}
 }
+// An explicit viewer source stays inside its thread's project. Only the
+// configured canonical board may live elsewhere; its configured sheet wins.
+function components_sources(cwd,requested,canonical,schematic) {
+  const {fs,path}=cc_modules();
+  try {
+    if(!requested)return JSON.stringify({source:canonical,schematic});
+    const source=path.resolve(cwd,requested);
+    if(canonical&&source===path.resolve(cwd,canonical))return JSON.stringify({source:canonical,schematic});
+    const root=fs.realpathSync(cwd),real=fs.realpathSync(source);
+    if(!real.startsWith(root+path.sep)||path.extname(source)!=='.kicad_pcb'||!fs.statSync(source).isFile())throw Error('Component source must be a saved board inside this project.');
+    const sheet=source.slice(0,-10)+'.kicad_sch';let selectedSheet='';
+    if(fs.existsSync(sheet)){
+      if(!fs.realpathSync(sheet).startsWith(root+path.sep)||!fs.statSync(sheet).isFile())throw Error('Component schematic must be inside this project.');
+      selectedSheet=sheet;
+    }
+    return JSON.stringify({source,schematic:selectedSheet});
+  }catch{return JSON.stringify({error:'Could not read the selected board and its schematic inside this project.'});}
+}
 function components_cache_put(cwd,pcb,sch,pcbRev,schRev,offset,text) {
   const {fs,path,crypto}=cc_modules();let temp=null;
   try {
@@ -34,7 +52,7 @@ function components_cache_put(cwd,pcb,sch,pcbRev,schRev,offset,text) {
   }catch{}finally{if(temp)try{fs.unlinkSync(temp);}catch{}}
   return '';
 }
-function components_cache_get(cwd,offset,pcbRev,schRev) {
+function components_cache_get(cwd,offset,pcbRev,schRev,requested) {
   const {fs,path,crypto}=cc_modules();
   try {
     if(!pcbRev||!/^\d+$/.test(String(offset)))return '';
@@ -44,6 +62,7 @@ function components_cache_get(cwd,offset,pcbRev,schRev) {
     if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1||(typeof process.getuid==='function'&&st.uid!==process.getuid())||(st.mode&0o077)!==0||st.size>600000)return '';
     const e=JSON.parse(fs.readFileSync(p,'utf8'));
     if(e?.pcbRev!==pcbRev||e?.schRev!==schRev||e?.offset!==String(offset)||typeof e.text!=='string')return '';
+    if(requested&&e.pcb!==path.resolve(cwd,requested))return '';
     if(!cc_same(fs,e.pcb,pcbRev)||!cc_same(fs,e.sch,schRev))return '';
     return e.text;
   }catch{return '';}
@@ -65,3 +84,4 @@ function components_cache_first(cwd,pcb,sch) {
 io_eff(CID(ComponentsFx.put),components_cache_put);
 io_eff(CID(ComponentsFx.get),components_cache_get);
 io_eff(CID(ComponentsFx.first),components_cache_first);
+io_eff(CID(ComponentsFx.sources),components_sources);

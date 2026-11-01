@@ -3,9 +3,10 @@
 // only by its owner; reconnect/timeout cannot apply it to another source.
 export class ViewerRpc {
   constructor(send, { timeoutMs = 15000 } = {}) { this.send = send; this.timeoutMs = timeoutMs; this.next = 2 ** 46; this.pending = new Map(); this.generation = 0; }
-  async components(thread, { signal } = {}) {
+  async components(thread, { path = "", signal } = {}) {
     const generation = this.generation, started = performance.now();
-    let data = await this.request("kicad.components", { thread }, "components", this.timeoutMs, signal);
+    const source = path ? { thread, path } : { thread };
+    let data = await this.request("kicad.components", source, "components", this.timeoutMs, signal);
     if (signal?.aborted) throw new DOMException("Viewer read canceled", "AbortError");
     if (generation !== this.generation) throw Error("Connection changed; component metadata must be refreshed.");
     // Older hubs still return one complete response. New hubs page large
@@ -34,7 +35,7 @@ export class ViewerRpc {
       }
       if (!part.length || p.complete !== false || p.next !== offset || offset >= total) throw Error("Invalid saved component page cursor.");
       if (performance.now() - started > 120000) throw Error("Saved component read exceeded its time limit. Retry after the save finishes.");
-      data = await this.request("kicad.components", { thread, offset, sourceRevision: first.sourceRevision, schematicRevision: first.schematicRevision }, "components", this.timeoutMs, signal);
+      data = await this.request("kicad.components", { ...source, offset, sourceRevision: first.sourceRevision, schematicRevision: first.schematicRevision }, "components", this.timeoutMs, signal);
     }
     throw Error("Saved component metadata exceeds the page limit.");
   }

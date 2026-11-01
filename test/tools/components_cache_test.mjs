@@ -17,6 +17,9 @@ try {
  const pr=revision(pcb),sr=revision(sch),text='{"components":{"components":[],"page":{"offset":20}}}';
  assert.equal(put(project,pcb,sch,pr,sr,'20',text),'');
  assert.equal(get(project,'20',pr,sr),text,'the exact page comes back');
+ assert.equal(get(project,'20',pr,sr,pcb),text,'the selected source keeps the warm page');
+ assert.equal(get(project,'20',pr,sr,'b.kicad_pcb'),text,'relative selected source');
+ assert.equal(get(project,'20',pr,sr,join(project,'other.kicad_pcb')),'','another selected source misses');
  assert.equal(get(project,'43',pr,sr),'','another offset misses');
  assert.equal(get(other,'20',pr,sr),'','another project misses');
  assert.equal(get(project,'20','',sr),'','no PCB revision misses');

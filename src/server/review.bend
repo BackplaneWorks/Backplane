@@ -504,6 +504,8 @@ def Rvc.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
       Rvr.child(d, t, h)
     case "--review" <> "components" <> d <> _:
       COMP.Components.child(d)
+    case "--review" <> "components-page" <> d <> offset <> pcb <> sch <> path <> _:
+      COMP.Components.page.child.at(d, path, Maybe.default(&2, Nat, Nat.read(offset), 0n), pcb, sch)
     case "--review" <> "components-page" <> d <> offset <> pcb <> sch <> _:
       COMP.Components.page.child(d, Maybe.default(&2, Nat, Nat.read(offset), 0n), pcb, sch)
     case "--review" <> "renderasset" <> d <> p <> k <> r <> _:
@@ -748,36 +750,35 @@ def RvJob.components.done(r: P.Ran) -> Res:
 # a page after the first, at revisions the cache still matches, is answered
 # here (COMP.ComponentsFx.get re-checks both files' stamps); anything else
 # starts the child, whose first page also fills the cache
-def RvJob.components.k(miss: Bool, +hit: String, +cwd: String, +off: String, +pcb: String, +sch: String) -> IO(Res):
+def RvJob.components.k(miss: Bool, +hit: String, +cwd: String, +path: String, +off: String, +pcb: String, +sch: String) -> IO(Res):
   match miss:
     case True{}:
-      IO.bind(P.Ran, Res, Rvc.run(["--review", "components-page", cwd, off, pcb, sch]), r => IO.pure(Res, RvJob.components.done(r)))
+      IO.bind(P.Ran, Res, Rvc.run(["--review", "components-page", cwd, off, pcb, sch, path]), r => IO.pure(Res, RvJob.components.done(r)))
     case False{}:
       IO.pure(Res, RvJob.components.done(P.Ran{0, hit}))
 
-def RvJob.components.at(+hit: String, +cwd: String, +off: String, +pcb: String, +sch: String) -> IO(Res):
-  RvJob.components.k(String.is_empty(hit), hit, cwd, off, pcb, sch)
+def RvJob.components.at(+hit: String, +cwd: String, +path: String, +off: String, +pcb: String, +sch: String) -> IO(Res):
+  RvJob.components.k(String.is_empty(hit), hit, cwd, path, off, pcb, sch)
 
-def RvJob.components.first(fs: K.Files, +cwd: String) -> IO(String):
-  match fs:
-    case K.Files{_, +pcb, +sch, _}:
-      COMP.ComponentsFx.first(cwd, pcb, sch)
-
-# the first page names no revisions: the canonical files' current stamps
+# the first page names no revisions: the selected files' current stamps
 # pick it (the files the child would read)
-def RvJob.components.look(first: Bool, +cwd: String, +off: String, +pcb: String, +sch: String) -> IO(String):
+def RvJob.components.first(+cwd: String, +sources: J.Json) -> IO(String):
+  COMP.ComponentsFx.first(cwd, J.Json.get_str(sources, "source", ""), J.Json.get_str(sources, "schematic", ""))
+
+def RvJob.components.look(first: Bool, +cwd: String, +path: String, off: String, pcb: String, sch: String) -> IO(String):
   match first:
     case True{}:
-      IO.bind(K.Files, String, K.Files.read(cwd), fs => RvJob.components.first(fs, cwd))
+      IO.bind(J.Json, String, COMP.Components.sources(cwd, path), sources => RvJob.components.first(cwd, sources))
     case False{}:
-      COMP.ComponentsFx.get(cwd, off, pcb, sch)
+      COMP.ComponentsFx.get(cwd, off, pcb, sch, path)
 
 def RvJob.components(+cwd: String, spec: String) -> IO(Res):
   +o = Maybe.default(&2, J.Json, J.Json.parse(spec), J.Null{})
   +off = Nat.show(J.Json.get_nat(o, "offset", 0n))
+  +path = J.Json.get_str(o, "path", "")
   +pcb = J.Json.get_str(o, "sourceRevision", "")
   +sch = J.Json.get_str(o, "schematicRevision", "")
-  IO.bind(String, Res, RvJob.components.look(Bool.and(String.eq(off, "0"), String.is_empty(pcb)), cwd, off, pcb, sch), hit => RvJob.components.at(hit, cwd, off, pcb, sch))
+  IO.bind(String, Res, RvJob.components.look(Bool.and(String.eq(off, "0"), String.is_empty(pcb)), cwd, path, off, pcb, sch), hit => RvJob.components.at(hit, cwd, path, off, pcb, sch))
 
 # a warm request for an asset already published at this exact revision is
 # answered here (RenderAssetFx.memo re-checks the source's stamp and the

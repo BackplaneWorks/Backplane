@@ -5,8 +5,8 @@ import ../core/components.bend as C
 import ../core/json.bend as J
 import ../core/utf8.bend as U
 
-# Caller must use its thread's trusted cwd. No client-provided path or
-# arbitrary-file endpoint is accepted here; .backplane.json remains canonical.
+# Caller must use its thread's trusted cwd. An explicit board is resolved
+# inside that project; .backplane.json remains canonical when none is named.
 type ComponentRevision is Data:
   ComponentRevision{bytes: U32, stamp: String, found: Bool}
 
@@ -88,11 +88,23 @@ def Components.child(cwd: String) -> IO(Unit):
 def ComponentsFx.put(cwd: String, pcb: String, sch: String, pcbRev: String, schRev: String, offset: String, text: String) -> IO(String):
   import "./effects/components_cache.js"
 
-def ComponentsFx.get(cwd: String, offset: String, pcbRev: String, schRev: String) -> IO(String):
+def ComponentsFx.get(cwd: String, offset: String, pcbRev: String, schRev: String, path: String) -> IO(String):
   import "./effects/components_cache.js"
 
 def ComponentsFx.first(cwd: String, pcb: String, sch: String) -> IO(String):
   import "./effects/components_cache.js"
+
+def ComponentsFx.sources(cwd: String, path: String, pcb: String, sch: String) -> IO(String):
+  import "./effects/components_cache.js"
+
+def Components.sources.files(fs: K.Files, +cwd: String, path: String) -> IO(J.Json):
+  match fs:
+    case K.Files{_, pcb, sch, _}:
+      IO.bind(String, J.Json, ComponentsFx.sources(cwd, path, pcb, sch), text =>
+        IO.pure(J.Json, Maybe.default(&2, J.Json, J.Json.parse(text), Components.error("Could not resolve the selected board."))))
+
+def Components.sources(+cwd: String, path: String) -> IO(J.Json):
+  IO.bind(K.Files, J.Json, K.Files.read(cwd), fs => Components.sources.files(fs, cwd, path))
 
 # every page of a first read, so the hub answers the pages after it from the
 # cache (a page child parses both files again for one page)
@@ -121,5 +133,16 @@ def Components.page.files(fs: K.Files, +cwd: String, +offset: Nat, +pcbRev: Stri
 
 # Subsequent pages send both stamps from the first page. The unchanged outer
 # response cap includes its envelope and trailing newline.
-def Components.page.child(+cwd: String, offset: Nat, pcb: String, sch: String) -> IO(Unit):
-  IO.bind(K.Files, Unit, K.Files.read(cwd), fs => Components.page.files(fs, cwd, offset, pcb, sch))
+def Components.page.sources(ok: Bool, +sources: J.Json, cwd: String, offset: Nat, pcb: String, sch: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      Components.page.files(K.Files{"", J.Json.get_str(sources, "source", ""), J.Json.get_str(sources, "schematic", ""), ""}, cwd, offset, pcb, sch)
+    case False{}:
+      IO.print(Components.response(sources))
+
+def Components.page.child.at(+cwd: String, path: String, offset: Nat, pcb: String, sch: String) -> IO(Unit):
+  IO.bind(J.Json, Unit, Components.sources(cwd, path), +sources =>
+    Components.page.sources(String.is_empty(J.Json.get_str(sources, "error", "")), sources, cwd, offset, pcb, sch))
+
+def Components.page.child(cwd: String, offset: Nat, pcb: String, sch: String) -> IO(Unit):
+  Components.page.child.at(cwd, "", offset, pcb, sch)

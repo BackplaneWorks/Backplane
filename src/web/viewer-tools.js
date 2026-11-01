@@ -130,10 +130,11 @@ class Workbench {
     const generation = ++this.metadataGeneration; this.reading = true; let loaded = "";
     this.readAbort = new AbortController();
     try {
-      const data = await this.services.components(this.scope, { signal: this.readAbort.signal });
-      if (!this.alive || generation !== this.metadataGeneration) return;
       const explicitPath = this.boardKey.split("|").slice(2).join("|");
-      if (explicitPath && explicitPath !== data.source) throw Error("Component metadata is available for the canonical saved board. This pane shows a different source.");
+      const data = await this.services.components(this.scope, { path: explicitPath, signal: this.readAbort.signal });
+      if (!this.alive || generation !== this.metadataGeneration) return;
+      if (data.error) throw Error(data.error);
+      if (explicitPath && explicitPath !== data.source) throw Error("Component metadata is from a different saved board. Refresh after the viewer finishes updating.");
       const wanted = revisions.get(this.boardKey);
       if (wanted && data.sourceRevision !== wanted) throw Error("Component metadata and the displayed PCB are different saved revisions. Refresh after the viewer finishes updating.");
       const saved = this.solid.cameraState?.()?.selection;
