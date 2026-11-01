@@ -83,6 +83,12 @@ export class ThinHost {
     this.terminalBytes = 0;this.sent = new SentClaims();
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
+    // The pages whose rows the page holds (timeline-history.bend keeps every
+    // row drawn since the view was last reset): the oldest (top: its trail
+    // and the cursor older than it) and the newest (bottom: its trail; an
+    // empty one is the newest page). A scroll within them asks the hub for
+    // nothing (ahead); null: taken from the next view shown.
+    this.held = null;this.pageMs = 500;
     // the reader away from the end: the thread and the newest entry its page
     // showed then (host.js's hold), which the hub's "N new" pill counts from
     this.awayMark = null;
@@ -141,7 +147,7 @@ export class ThinHost {
     for (const operation of this.actions) operation.settled?.(false);
     this.actions = [];this.terminalBytes = 0;this.fields.clear();
     this.messages.clear();this.target = target;
-    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pageError = null;this.awayMark = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
+    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pageError = null;this.awayMark = null;this.held = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
     this.api.selection?.(target, this.session);
     const sent = this.flush(this.client.select(this.hub, target, requestSession(this.session, false, target), this.api.cid), { selection: true });
     this.opening = sent;
@@ -234,7 +240,7 @@ export class ThinHost {
     // A page still on its way is dropped when it comes: shown after the
     // newest, it put the reader back on the old page and the message just
     // sent was nowhere to be seen.
-    if (action === 'send' || action === 'send-alt') { if (this.paging) this.overtaken.add(this.paging.id);this.cursor = '';this.back = [];this.paging = null;this.pageError = null;this.api.pageState?.(null); }
+    if (action === 'send' || action === 'send-alt') { if (this.paging) this.overtaken.add(this.paging.id);this.cursor = '';this.back = [];this.paging = null;this.held = null;this.pageError = null;this.api.pageState?.(null); }
     if (action === 'bfield') {
       const split = value.indexOf('\u001f');
       if (split <= 0) { settled?.(false);this.api.blocked();return false; }
@@ -359,7 +365,7 @@ export class ThinHost {
   pageTo(cursor, undo, direction, position) {
     const result = this.client.request(this.hub, 'view.page', { cursor, anchor: this.api.anchor(), session: requestSession(this.session, false, this.target) });
     if (!this.flush(result)) { this.cursor = undo.cursor;this.back = undo.back;return false; }
-    this.pageError = null;this.paging = { id: result.id, undo, direction, before: this.window, position, destination: { cursor, back: this.back.slice() } };
+    this.pageError = null;this.paging = { id: result.id, undo, direction, before: this.window, position, destination: { cursor, back: this.back.slice() }, at: this.api.now?.() ?? Date.now() };
     this.api.pageState?.({ phase: 'loading', direction });
     return true;
   }
@@ -374,6 +380,46 @@ export class ThinHost {
     const undo = { cursor: this.cursor, back: this.back.slice() };
     this.cursor = this.back.pop();
     return this.pageTo(this.cursor, undo, 'newer');
+  }
+  // The page past the edge of the rows held, in the direction the reader
+  // goes (host.js asks once they near it): older than the oldest page held,
+  // newer than the newest; at the newest page's rows with the hub still on
+  // an earlier one, the newest page itself, merged (not the reset newest()
+  // makes), so new messages show and the rows above stay. A scroll inside
+  // the rows held asks nothing: they are drawn already.
+  ahead(direction) {
+    if (!this.ready || this.paging || this.pageActionPending()) return false;
+    const held = this.held || this.heldHere();
+    if (direction === 'older') {
+      const top = held.top;
+      if (!top.older || top.older === top.cursor) return false;
+      return this.pageJump(top.older, [...top.back, top.cursor], 'older');
+    }
+    const bottom = held.bottom;
+    if (bottom.back.length) return this.pageJump(bottom.back.at(-1), bottom.back.slice(0, -1), 'newer');
+    return this.atNewest() ? false : this.pageJump('', [], 'newer');
+  }
+  // whether ahead(direction) has a page to ask for
+  hasAhead(direction) {
+    if (!this.ready) return false;
+    const held = this.held || this.heldHere();
+    return direction === 'older' ? !!held.top.older && held.top.older !== held.top.cursor : held.bottom.back.length > 0 || !this.atNewest();
+  }
+  pageJump(cursor, back, direction) {
+    const undo = { cursor: this.cursor, back: this.back.slice() };
+    this.cursor = cursor;this.back = back;
+    return this.pageTo(cursor, undo, direction);
+  }
+  heldHere() {
+    return { top: { cursor: this.cursor, back: this.back.slice(), older: this.window?.older || '' }, bottom: { cursor: this.cursor, back: this.back.slice() } };
+  }
+  // the rows held are only the page on show (host.js reset its history)
+  heldReset() { this.held = this.ready ? this.heldHere() : null; }
+  heldShown(paged) {
+    const here = this.heldHere();
+    if (!this.held || !paged || paged.direction === 'restore' || paged.direction === 'newest') { this.held = here;return; }
+    if (paged.direction === 'older') this.held = { ...this.held, top: here.top };
+    else this.held = { ...this.held, bottom: here.bottom };
   }
   // Straight to the newest page (the "new" pill on an earlier page): the
   // trail is let go, as a send does.
@@ -669,7 +715,9 @@ export class ThinHost {
         }
       }
       this.conversation = r.session.sel;
-      if (paged) { this.pageError = null;this.api.pageState?.(null); }
+      if (paged) { this.pageError = null;this.api.pageState?.(null);this.pageMs = 0.7 * this.pageMs + 0.3 * Math.max(0, (this.api.now?.() ?? Date.now()) - paged.at); }
+      if (paged || !this.held) this.heldShown(paged);
+      else if (this.held.top.cursor === this.cursor && this.held.top.back.length === this.back.length) this.held.top.older = this.window?.older || '';
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
         page: paged && { direction: paged.direction, before: paged.before }, position });

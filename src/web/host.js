@@ -719,24 +719,16 @@ const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
 let held = false, away = "";
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
-function historyClear() { historyNode = null;historyDirection = "";historyPageState(null); }
-// A page that comes within HISTORY_QUIET_MS says nothing: the rows it
-// brings are mostly on screen already, and a line flashing at every page
-// was the "loading" the person saw while scrolling. A slow page, and a
-// failed one, still say so.
-const HISTORY_QUIET_MS = 400;
-let historyQuiet = 0;
+function historyClear() { historyNode = null;historyDirection = "";historyPageState(null);thin?.heldReset?.(); }
+// A page on its way says nothing, however long it takes: it is asked for
+// well before the reader can reach the edge of the rows drawn (historyAhead),
+// and a reader who gets there stays on the last row drawn until it comes.
+// A line saying "loading" while scrolling is what the person must never
+// see. A failed page still says so, with Retry.
 function historyPageState(state) {
-  const again = !!state && state === historyStatus;
-  historyStatus = state;
-  if (!again) { clearTimeout(historyQuiet);historyQuiet = 0; }
-  let el = document.getElementById("history-status");
-  if (!state) { el?.remove();return; }
-  if (state.phase === "loading" && !el) {
-    if (!historyQuiet) historyQuiet = setTimeout(() => { historyQuiet = 0;if (historyStatus === state) historyPageShow(state); }, HISTORY_QUIET_MS);
-    return;
-  }
-  historyPageShow(state);
+  historyStatus = state?.phase === "error" ? state : null;
+  if (!historyStatus) { document.getElementById("history-status")?.remove();return; }
+  historyPageShow(historyStatus);
 }
 function historyPageShow(state) {
   let el = document.getElementById("history-status");
@@ -745,13 +737,11 @@ function historyPageShow(state) {
   el.style.cssText = "position:fixed;z-index:12;max-width:calc(100vw - 32px);background:var(--panel);color:var(--text);border:1px solid var(--line);padding:4px 8px;font-size:12px";
   const box = document.getElementById("timeline")?.getBoundingClientRect();
   el.style.top = Math.max(0, box?.top || 0) + "px";el.style.right = Math.max(8, innerWidth - (box?.right || innerWidth) + 8) + "px";
-  el.replaceChildren(document.createTextNode(state.phase === "error" ? "Messages couldn’t load. " : state.direction !== "older" ? "Loading newer messages…" : "Loading earlier messages…"));
-  if (state.phase === "error") {
-    earlierAsked = laterAsked = false;
-    const button = document.createElement("button");button.textContent = "Retry";
-    button.onclick = () => thin?.retryPage();
-    el.appendChild(button);
-  }
+  el.replaceChildren(document.createTextNode("Messages couldn’t load. "));
+  earlierAsked = laterAsked = false;
+  const button = document.createElement("button");button.textContent = "Retry";
+  button.onclick = () => thin?.retryPage();
+  el.appendChild(button);
 }
 function historyRow(node) {
   if (!is(node, "El")) return "";
@@ -966,8 +956,8 @@ function render() {
       jumpTo(tl2, el, searchJump.word);
       searchLit = { id: searchJump.id, word: searchJump.word, flash: performance.now() + 2400, until: performance.now() + 15000 };
       searchJump = null;
-    } else if (thin?.window?.older && searchJump.pages < 40) {
-      if (!searchJump.asked) { searchJump.asked = true; requestAnimationFrame(() => { if (searchJump) { searchJump.asked = false; if (thin.page()) searchJump.pages++; } }); }
+    } else if (thin?.hasAhead?.("older") && searchJump.pages < 40) {
+      if (!searchJump.asked) { searchJump.asked = true; requestAnimationFrame(() => { if (searchJump) { searchJump.asked = false; if (thin.ahead("older")) searchJump.pages++; } }); }
     } else if (thin?.ready) searchJump = null;
   }
   searchLight(tl2);
@@ -980,7 +970,8 @@ function render() {
   composerGeometry();
   earlierAsked = false;
   laterAsked = false;
-  if (tl2 && thin?.atNewest?.() === false && tl2.scrollHeight - tl2.scrollTop - tl2.clientHeight <= tl2.clientHeight * 2) requestAnimationFrame(() => laterCheck(document.getElementById("timeline")));
+  // a page in: the next one, if the reader is still within reach of the edge
+  if (tl2 && thin?.ready) historyCheckSoon();
   // A page of entries the timeline does not draw (todo steps, a fold's
   // calls) moves nothing and, at the very top, no scroll comes to ask for
   // the next: still near the top after a render, it is asked for
@@ -1998,15 +1989,31 @@ document.addEventListener("click", (e) => {
 // The hub issues page cursors. The virtual list accumulates their data in
 // Bend; changing pages never removes the reader's already loaded rows.
 let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null;
+// How far from the edge of the rows drawn the next page is asked for: two
+// screens, or the distance the reader covers at their speed (the last
+// quarter second's scrolling) in twice the time a page has been taking,
+// up to twelve screens. A fast wheel asks early enough that the page is in
+// before the edge comes.
+let historyMoves = [];
+function historyMoved(dy) {
+  const now = performance.now();
+  historyMoves.push([now, Math.abs(dy)]);
+  while (historyMoves.length && now - historyMoves[0][0] > 250) historyMoves.shift();
+}
+function historyRunway(tl) {
+  const now = performance.now(), recent = historyMoves.filter(m => now - m[0] <= 250);
+  const speed = recent.reduce((a, m) => a + m[1], 0) / 250;
+  return Math.min(tl.clientHeight * 12, Math.max(tl.clientHeight * 2, speed * 2 * Math.max(250, thin?.pageMs || 500)));
+}
 function earlierCheck(tl) {
   if (historyDirection !== "older" || earlierAsked || !tl || tl.id !== "timeline" || !thin?.ready || thin.paging || thin.pageError) return;
-  if (!thin.window?.older || tl.scrollTop > tl.clientHeight * 2) return;
-  earlierAsked = thin.page();
+  if (!thin.hasAhead("older") || tl.scrollTop > historyRunway(tl)) return;
+  earlierAsked = thin.ahead("older");
 }
 function laterCheck(tl) {
-  if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.atNewest() || thin.paging || thin.pageError) return;
-  if (tl.scrollHeight - tl.scrollTop - tl.clientHeight > tl.clientHeight * 2) return;
-  laterAsked = thin.newer();
+  if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("newer")) return;
+  if (tl.scrollHeight - tl.scrollTop - tl.clientHeight > historyRunway(tl)) return;
+  laterAsked = thin.ahead("newer");
 }
 function historyCheckSoon() {
   if (historyFrame) return;
@@ -2021,6 +2028,7 @@ document.addEventListener("wheel", e => {
   if (!e.isTrusted || e.ctrlKey || !e.target.closest?.("#timeline")) return;
   const tl = document.getElementById("timeline");
   historyDirection = e.deltaY < 0 ? "older" : e.deltaY > 0 ? "newer" : historyDirection;
+  historyMoved(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? tl?.clientHeight || 800 : 1));
   if (e.deltaY < 0) earlierCheck(tl);
   else if (e.deltaY > 0) laterCheck(tl);
 }, { capture: true, passive: true });
@@ -2030,7 +2038,7 @@ for (const event of ["touchstart", "touchmove", "keydown"]) document.addEventLis
   if (event === "touchstart") historyTouchY = e.touches[0]?.clientY ?? null;
   else if (event === "touchmove") {
     const y = e.touches[0]?.clientY;
-    if (typeof y === "number" && typeof historyTouchY === "number") historyDirection = y > historyTouchY ? "older" : y < historyTouchY ? "newer" : historyDirection;
+    if (typeof y === "number" && typeof historyTouchY === "number") { historyDirection = y > historyTouchY ? "older" : y < historyTouchY ? "newer" : historyDirection;historyMoved(y - historyTouchY); }
     historyTouchY = y;
   } else if (["PageUp", "Home", "ArrowUp"].includes(e.key)) historyDirection = "older";
   else if (["PageDown", "End", "ArrowDown", " "].includes(e.key)) historyDirection = "newer";
@@ -2770,8 +2778,11 @@ async function startThin(again = false, reason = "initial") {
         if (!current()) return;
         if (detail.page?.direction === "newest") scroll = true;
         const previous = historyNode || node;
-        node = History.project(previous, node, historyNode ? detail.page?.direction || "update" : "reset");
+        const projection = historyNode ? detail.page?.direction || "update" : "reset";
+        node = History.project(previous, node, projection);
         historyNode = node;
+        // (timeline-history.bend's project keeps no row from before a reset)
+        if (projection === "reset" || projection === "newest") thin?.heldReset?.();
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;

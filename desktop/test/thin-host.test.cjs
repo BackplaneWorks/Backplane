@@ -824,3 +824,27 @@ test('opening a fresh view drops attachment authority inherited from the previou
  f.host.receive(reply);
  assert.equal(f.host.session.drafts['@att:A'],'/live.txt');
 });
+test('paging ahead: only the edge of the rows held is asked for, never a page held already',async()=>{
+ const f=await fixture();f.open();
+ const win=older=>({window:{ids:['row'],older,hasMore:!!older,anchor:{id:'row',offset:0},partial:[]}});
+ assert.equal(f.host.hasAhead('newer'),false,'at the newest page nothing newer');
+ assert.equal(f.host.ahead('older'),true);assert.equal(f.sent.at(-1).p.cursor,'older-bound-to-A');
+ assert.equal(f.host.ahead('older'),false,'one page at a time');f.host.receive(f.reply(f.sent.at(-1),win('older-2')));
+ f.host.ahead('older');assert.equal(f.sent.at(-1).p.cursor,'older-2');f.host.receive(f.reply(f.sent.at(-1),win('older-3')));
+ // back down: the rows of every page passed are held; the one page asked is the newest, merged
+ assert.equal(f.host.hasAhead('newer'),true);const count=f.sent.length;
+ assert.equal(f.host.ahead('newer'),true);assert.equal(f.sent.length,count+1);assert.equal(f.sent.at(-1).m,'view.page');assert.equal(f.sent.at(-1).p.cursor,'');
+ f.host.receive(f.reply(f.sent.at(-1),win('older-bound-to-A')));
+ assert.equal(f.views.at(-1).detail.page.direction,'newer','merged, not the reset newest()');
+ assert.equal(f.host.atNewest(),true);assert.equal(f.host.hasAhead('newer'),false);
+ // up again: straight past the oldest page held
+ f.host.ahead('older');assert.equal(f.sent.at(-1).p.cursor,'older-3');assert.deepEqual(f.host.back,['','older-bound-to-A','older-2']);
+ f.host.receive(f.reply(f.sent.at(-1),win('')));assert.equal(f.host.hasAhead('older'),false,'the oldest page has nothing older');
+ // the page's history reset: only the page on show is held
+ f.host.heldReset();assert.equal(f.host.hasAhead('newer'),true);f.host.ahead('newer');assert.equal(f.sent.at(-1).p.cursor,'older-2');
+});
+test('paging ahead: a failed page leaves the rows held as they were',async()=>{
+ const f=await fixture();f.open();f.host.ahead('older');const req=f.sent.at(-1);
+ f.host.receive({t:'reply',id:req.id,ok:false,error:{code:'LIMIT',message:'x'}});
+ assert.equal(f.host.atNewest(),true);assert.equal(f.host.hasAhead('newer'),false);f.host.retryPage();assert.equal(f.sent.at(-1).p.cursor,'older-bound-to-A');
+});
