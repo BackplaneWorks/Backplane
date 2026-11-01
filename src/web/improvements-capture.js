@@ -4,7 +4,11 @@ export async function captureApp({ bridge = globalThis.backplaneDesktop, media =
   if (bridge?.captureApp) {
     const png = await bridge.captureApp();
     if (typeof png !== 'string' || !png.startsWith('data:image/png;base64,')) throw Error('The app could not capture this window. Capture again or choose an image.');
-    return new File([await (await fetch(png)).blob()], 'backplane.png', { type: 'image/png' });
+    // Local bytes avoid a data: fetch, which the desktop's connect-src blocks.
+    const binary = atob(png.slice('data:image/png;base64,'.length));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new File([bytes], 'backplane.png', { type: 'image/png' });
   }
   if (!media?.getDisplayMedia || !media.setCaptureHandleConfig) throw Error('Capture is unavailable here. Choose a screenshot from this device.');
   const handle = 'backplane-improvements-' + crypto.randomUUID();
