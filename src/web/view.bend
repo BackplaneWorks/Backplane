@@ -3172,7 +3172,8 @@ def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D
 
 def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, ACCT.Accounts.supported(provider),
-    D.Dom.button("account-chip", "acct-open", "", "Manage logins in Settings → Providers → Accounts", "Account: " ++ ACCT.Accounts.label(st, sel, provider)) <> View.accounts.pop(open, st, provider), Nil{})
+    D.El{"button", "", [D.At{"class", "account-chip"}, D.At{"title", "Account: " ++ ACCT.Accounts.label(st, sel, provider) ++ " · Manage logins in Settings → Providers → Accounts"}, D.At{"aria-label", "Account: " ++ ACCT.Accounts.label(st, sel, provider)}, D.At{"data-value", ""}, D.On{"click", "acct-open"}],
+      [WI.WIcon.svg("user", 16), D.Dom.span("acct-k", "Account: "), D.Dom.span("acct-v", ACCT.Accounts.label(st, sel, provider))]} <> View.accounts.pop(open, st, provider), Nil{})
 
 def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, String>, +op: Map<&2, Bool>, +nf: Map<&2, String>, +turn: M.TurnState, +pr: String, +mo: String,
     +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:
@@ -4900,6 +4901,13 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
         View.chrome.branch(branch),
         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])
 
+# a phone's one top bar also holds the rail's views (its menu, as the rail
+# shows it) and Buy it; style.css shows them only where the rail is hidden
+def View.chrome.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
+  D.El{"div", "top-views", [D.At{"class", "top-views"}],
+    View.workspace.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))
+      <> View.workspace.buy(U.Fab.rail(u))}
+
 # a thread: its project, its title (a click renames it) and ▾ its menu, then
 # its cells; a project name cut short ends in "…" and its tooltip is whole
 def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
@@ -4913,7 +4921,8 @@ def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
         D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title"))},
         View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 14)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
           String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel)]),
-       D.El{"div", "kvs", [D.At{"class", "kvs"}], View.chrome.cells(gone, lc, st, nf, id, turn, pending, branch, now)}]
+       D.El{"div", "kvs", [D.At{"class", "kvs"}], View.chrome.cells(gone, lc, st, nf, id, turn, pending, branch, now)},
+       View.chrome.views(lc, u, id)]
 
 def View.chrome.selected(none: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   match none:
