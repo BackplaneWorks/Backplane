@@ -712,8 +712,23 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     // the file as the body (no base64, no pieces through the engine); the
     // hub's answer goes back as "attach-end", as an attach.put's would
     fun attach(data: ByteArray, name: String) {
-        if (!contentReady) return
         if (data.isEmpty()) return
+        attachStream(name, data.size.toLong()) { data.inputStream() }
+    }
+
+    // the body is copied from open() to the connection 64 KB at a time, so
+    // a file of hundreds of MB never sits in memory. The hub needs its
+    // Content-Length: a provider that does not say the size is read first.
+    fun attachStream(name: String, size: Long, open: () -> java.io.InputStream?) {
+        if (!contentReady) return
+        if (size < 0) {
+            scope.launch {
+                val data = withContext(Dispatchers.IO) { runCatching { open()?.use { it.readBytes() } }.getOrNull() } ?: return@launch
+                if (data.isNotEmpty()) attachStream(name, data.size.toLong()) { data.inputStream() }
+            }
+            return
+        }
+        if (size == 0L) return
         val s = screen ?: return
         // the hub's own id: over several hubs the screen names it "<hub>|<id>"
         val thread = s.thread?.id?.substringAfterLast('|') ?: return
@@ -722,8 +737,8 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         fun q(v: String) = java.net.URLEncoder.encode(v, "UTF-8").replace("+", "%20")
         val url = Pairing.http(l, "/attach", "thread=${q(thread)}&key=$key&name=${q(name)}") ?: return
         // the engine decides: one over the cap it refuses, and nothing goes
-        act("attach-up", JSONObject().put("name", name).put("size", data.size).toString())
-        if (data.size > (s.thread?.cap ?: 10_485_760)) return
+        act("attach-up", JSONObject().put("name", name).put("size", size).toString())
+        if (size > (s.thread?.cap ?: 536_870_912L)) return
         scope.launch {
             val answer = withContext(Dispatchers.IO) {
                 try {
@@ -731,10 +746,11 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                     c.requestMethod = "POST"
                     c.doOutput = true
                     c.connectTimeout = 15_000
-                    c.readTimeout = 600_000
-                    c.setFixedLengthStreamingMode(data.size)
+                    c.readTimeout = 1_800_000
+                    c.setFixedLengthStreamingMode(size)
                     c.setRequestProperty("Content-Type", "application/octet-stream")
-                    c.outputStream.use { it.write(data) }
+                    val input = open() ?: throw java.io.IOException("the file could not be opened")
+                    input.use { i -> c.outputStream.use { o -> i.copyTo(o, 65536) } }
                     val code = c.responseCode
                     val body = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
                     c.disconnect()

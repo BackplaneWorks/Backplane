@@ -2,6 +2,7 @@ import Base
 import ./json.bend as J
 import ./utf8.bend as U
 import ./diff.bend as DF
+import ./range.bend as RG
 
 # Attachments. A file a user attaches to a turn is stored by the server
 # under <home>/attachments/<thread>/<key>-<name>; the message then carries
@@ -16,9 +17,58 @@ import ./diff.bend as DF
 # blocks, Codex as `--image` flags; Grok reads the path (its ACP agent
 # reports promptCapabilities.image false), and so does Muse.
 
-# the most one attachment may hold, in bytes
+# How large a file may be. Every way a file travels is a stream from disk
+# to socket and back (POST /attach writes the body straight to the file,
+# /img and a far view.get send it a piece at a time, host.js's Sock.save and
+# Sock.send_path), and a message carries only the attachment's path, so
+# the size costs disk, never the hub's memory or its event log. The setting
+# "files.max.mb" (Att.key) picks the limit in MB: Att.sizes on every client,
+# 512 by default (Att.mb.default), never under 1 nor over Att.mb.ceiling
+# (4000: sizes travel as U32), and Sock.save also refuses a body that
+# would leave the disk with under 2 GB free. Laws att_max_*.
+
+def Att.key() -> String:
+  "files.max.mb"
+
+def Att.mb.default() -> Nat:
+  512n
+
+def Att.mb.ceiling() -> Nat:
+  4000n
+
+# the choices Settings offers
+def Att.sizes() -> List<&2, String>:
+  ["128", "512", "1024", "2048", "4000"]
+
+def Att.mb.clamp(+n: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_eq(n, 0n), 1n, Bool.pick(Nat, Nat.is_gt(n, Att.mb.ceiling()), Att.mb.ceiling(), n))
+
+def Att.mb.of(m: Maybe<&2, Nat>) -> Nat:
+  match m:
+    case Some{+n}:
+      Att.mb.clamp(n)
+    case None{}:
+      Att.mb.default()
+
+# the limit in MB for the setting's text ("" or anything not a count: the default)
+def Att.mb(+v: String) -> Nat:
+  Att.mb.of(RG.Rng.num(v))
+
+# the limit in bytes for the setting's text
+def Att.max(+v: String) -> Nat:
+  Nat.mul(Att.mb(v), 1048576n)
+
+# what a refused file is told
+def Att.over(+v: String) -> String:
+  "attachments are limited to " ++ Nat.show(Att.mb(v)) ++ " MB"
+
+# the default limit, in bytes (where no setting is at hand)
 def Att.cap() -> Nat:
-  10485760n
+  Att.max("")
+
+# the most any file may be: what the hub serves or sends elsewhere
+def Att.ceiling() -> Nat:
+  Nat.mul(Att.mb.ceiling(), 1048576n)
 
 # bytes per upload request (the web client sends a file in pieces)
 def Att.chunk() -> Nat:

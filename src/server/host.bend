@@ -48,6 +48,13 @@ def Sock.send_file(sock: Socket, path: String, cap: U32) ->
   IO(Socket & Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
+# len bytes of the file at path from start, read and sent a piece at a time
+# (never the whole file in memory, never a Bend list), yielding to the loop
+# between pieces; the caller sends the HTTP head first (core/range.bend)
+def Sock.send_path(sock: Socket, path: String, start: U32, len: U32) ->
+  IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
 # send_bytes with one deadline (ms) for all of it: a peer that stops
 # reading fails it (ETIMEDOUT) and the socket is shut both ways
 def Sock.send_until(sock: Socket, data: List<&2, U32>, ms: U32) ->

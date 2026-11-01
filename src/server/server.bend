@@ -90,6 +90,7 @@ import ../core/port.bend as PT
 import ../core/clipath.bend as CPA
 import ../core/tailnet.bend as TN
 import ../core/images.bend as IM
+import ../core/range.bend as BRANGE
 import ../core/links.bend as LK
 import ../core/attach.bend as ATT
 import ../core/attach.bend as AT
@@ -5594,9 +5595,9 @@ def Hub.link(h: Hub, +lk: String) -> IO(Hub):
 # where a thread's attachments go (the upload itself runs off the hub)
 def Hub.att_dir(h: Hub, +thread: String, +reply: Chan(String)) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, AT.Att.dir(Cfg.home(cfg), thread))
+        ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, Nat.show(AT.Att.max(M.Setting.get(st, AT.Att.key(), ""))) ++ "\t" ++ AT.Att.dir(Cfg.home(cfg), thread))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # the owner's other machines changed: every client hears
@@ -6042,53 +6043,75 @@ def Conn.pos(xs: List<&2, String>, +x: String, +i: Nat) -> Nat:
 # -----------------
 # GET /img?path=<an image an agent named>: the file itself, to a client
 # the hub already lets in (it could read the file through a terminal as
-# well); only image files, at most IM.Img.cap() bytes.
+# well); only files Img.viewable names, at most IM.Img.cap() bytes. It is
+# streamed from disk a piece at a time (H.Sock.send_path), never read into
+# the hub, and a Range header gets that part alone (core/range.bend's
+# Rng.*: 206, or 416 past the end), so a viewer or PDF reader can seek a
+# large file.
 
 def Img.empty(text: Bool, s: Socket) -> IO(Unit):
   match text:
     case True{}: Conn.finish(s, W.Http.response.c("200 OK", "text/plain; charset=utf-8", Nil{}, "no-cache", ""))
     case False{}: Conn.finish(s, W.Http.text("404 Not Found", "not found"))
 
-def Img.sent(bs: List<&2, U32>, s: Socket, +path: String) -> IO(Unit):
-  match bs:
-    case Nil{}:
-      Img.empty(String.eq(FMP.Fm.preview(path), "text"), s)
-    case b <> t:
-      Conn.finish(s, W.Http.response.c("200 OK", IM.Img.ctype(path), b <> t, "no-cache", ""))
+# the head, then the range's bytes straight from the file
+def Img.send.k(go: Bool, s: Socket, +path: String, +start: Nat, +len: Nat) -> IO(Unit):
+  match go:
+    case True{}:
+      do IO<Unit>:
+        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_path(s, path, U32.from_nat(start), U32.from_nat(len))
+        s2 : Socket <- Conn.sent(sent)
+        Socket.close(s2)
+    case False{}:
+      Socket.close(s)
 
-def Img.read(ok: Bool, s: Socket, +path: String) -> IO(Unit):
+def Img.send(r: BRANGE.Rng, s: Socket, +path: String, +size: Nat) -> IO(Unit):
+  match r:
+    case BRANGE.Rng{+a, +n, +part, +ok}:
+      do IO<Unit>:
+        s2 : Socket <- Conn.send(s, U.Utf8.encode(BRANGE.Rng.head(BRANGE.Rng{a, n, part, ok}, size, IM.Img.ctype(path), "no-cache")))
+        Img.send.k(Bool.and(ok, Nat.is_gt(n, 0n)), s2, path, a, n)
+
+def Img.stream(empty: Bool, s: Socket, +path: String, +size: Nat, +range: String) -> IO(Unit):
+  match empty:
+    case True{}:
+      Img.empty(String.eq(FMP.Fm.preview(path), "text"), s)
+    case False{}:
+      Img.send(BRANGE.Rng.of(range, size), s, path, size)
+
+def Img.read(ok: Bool, s: Socket, +path: String, +size: U32, +range: String) -> IO(Unit):
   match ok:
     case True{}:
-      IO.bind(List<&2, U32>, Unit, Files.read(path), bs => Img.sent(bs, s, path))
+      Img.stream(U32.is_eq(size, 0), s, path, U32.to_nat(size), range)
     case False{}:
       Conn.finish(s, W.Http.text("404 Not Found", "not an image, or too large"))
 
-def Img.stat.k(st: U32 & U32 & U32, s: Socket, +path: String) -> IO(Unit):
+def Img.stat.k(st: U32 & U32 & U32, s: Socket, +path: String, +range: String) -> IO(Unit):
   (kind, rest) = st
-  (size, _) = rest
-  Img.read(Bool.and(U32.is_eq(kind, 0), U32.is_le(size, IM.Img.cap())), s, path)
+  (+size, _) = rest
+  Img.read(Bool.and(U32.is_eq(kind, 0), U32.is_le(size, IM.Img.cap())), s, path, size, range)
 
-def Img.stat(r: Result<&1, &1, U32 & String, U32 & U32 & U32>, s: Socket, +path: String) -> IO(Unit):
+def Img.stat(r: Result<&1, &1, U32 & String, U32 & U32 & U32>, s: Socket, +path: String, +range: String) -> IO(Unit):
   match r:
     case Done{st}:
-      Img.stat.k(st, s, path)
+      Img.stat.k(st, s, path, range)
     case Fail{_}:
       Conn.finish(s, W.Http.text("404 Not Found", "not found"))
 
-def Img.found(+path: String, s: Socket) -> IO(Unit):
-  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(path), r => Img.stat(r, s, path))
+def Img.found(+path: String, s: Socket, +range: String) -> IO(Unit):
+  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(path), r => Img.stat(r, s, path, range))
 
-def Img.serve.k(image: Bool, s: Socket, +path: String) -> IO(Unit):
+def Img.serve.k(image: Bool, s: Socket, +path: String, +range: String) -> IO(Unit):
   match image:
     case True{}:
-      IO.bind(String, Unit, Env.get("HOME", ""), home => Img.found(Bool.pick(String, String.starts_with(path, "~/"), home ++ String.drop(path, 1n), path), s))
+      IO.bind(String, Unit, Env.get("HOME", ""), home => Img.found(Bool.pick(String, String.starts_with(path, "~/"), home ++ String.drop(path, 1n), path), s, range))
     case False{}:
       Conn.finish(s, W.Http.text("404 Not Found", "not an image"))
 
-def Img.serve(allowed: Bool, s: Socket, +path: String) -> IO(Unit):
+def Img.serve(allowed: Bool, s: Socket, +path: String, +range: String) -> IO(Unit):
   match allowed:
     case True{}:
-      Img.serve.k(IM.Img.viewable(path), s, path)
+      Img.serve.k(IM.Img.viewable(path), s, path, range)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -6100,7 +6123,7 @@ def RenderHTTP.found(ok: Bool, s: Socket, +path: String, +size: U32) -> IO(Unit)
     case True{}:
       do IO<Unit>:
         s2 : Socket <- Conn.send(s, U.Utf8.encode("HTTP/1.1 200 OK\r\nContent-Type: model/gltf-binary\r\nContent-Length: " ++ U32.show(size) ++ "\r\nCache-Control: private, max-age=31536000, immutable\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n"))
-        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_file(s2, path, 67108864)
+        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_path(s2, path, 0, size)
         s3 : Socket <- Conn.sent(sent)
         Socket.close(s3)
 
@@ -6108,7 +6131,7 @@ def RenderHTTP.lookup(s: Socket, +text: String) -> IO(Unit):
   +o = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
   +path = J.Json.get_str(o, "path", "")
   +size = J.Json.get_u32(o, "size", 0)
-  RenderHTTP.found(Bool.and(Bool.not(String.is_empty(path)), Bool.and(U32.is_gt(size, 0), U32.is_le(size, 67108864))), s, path, size)
+  RenderHTTP.found(Bool.and(Bool.not(String.is_empty(path)), Bool.and(U32.is_gt(size, 0), U32.is_le(size, IM.Img.cap()))), s, path, size)
 
 def RenderHTTP.serve(allowed: Bool, s: Socket, id: String) -> IO(Unit):
   match allowed:
@@ -6191,12 +6214,12 @@ def Info.serve(allowed: Bool, s: Socket, +h: String) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
-def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: Bool) -> IO(Unit):
+def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: Bool, +range: String) -> IO(Unit):
   match i:
     case 0n:
       Conn.get(True{}, s, web, W.Http.route(p), gz)
     case 1n:
-      Img.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")))
+      Img.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")), range)
     case 2n:
       Debug.serve(allowed, 2n, s)
     case 3n:
@@ -6221,7 +6244,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -6857,59 +6880,65 @@ def Media.put.done(+err: String, +last: Bool, +inbox: Chan(Msg), +client: U32, +
     Bool.pick(IO(Unit), last, Media.attached(inbox, client, id, thread, path), GitJob.reply(inbox, client, id, True{}, J.Json.obj(Nil{}))),
     Media.fail(inbox, client, id, thread, err))
 
-def Media.put.k(over: Bool, +first: Bool, +last: Bool, bs: List<&2, U32>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +path: String) -> IO(Unit):
+def Media.put.k(over: Bool, +first: Bool, +last: Bool, bs: List<&2, U32>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +path: String, +lim: String) -> IO(Unit):
   match over:
     case True{}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Media.fail(inbox, client, id, thread, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB")
+        Media.fail(inbox, client, id, thread, AT.Att.over(lim))
     case False{}:
       IO.bind(String, Unit, Media.put.file(path, Bool.pick(String, first, "w", "a"), bs), e => Media.put.done(e, last, inbox, client, id, thread, path))
 
-def Media.put.go(+have: Nat, +first: Bool, +last: Bool, +bs: List<&2, U32>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +path: String) -> IO(Unit):
-  Media.put.k(Nat.is_gt(Nat.add(have, List.length(&2, U32, bs)), AT.Att.cap()), first, last, bs, inbox, client, id, thread, path)
+def Media.put.go(+have: Nat, +first: Bool, +last: Bool, +bs: List<&2, U32>, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +path: String, +lim: String) -> IO(Unit):
+  Media.put.k(Nat.is_gt(Nat.add(have, List.length(&2, U32, bs)), AT.Att.max(lim)), first, last, bs, inbox, client, id, thread, path, lim)
 
-def Media.put.parts(ps: List<&2, String>, +b: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +home: String) -> IO(Unit):
+def Media.put.parts(ps: List<&2, String>, +b: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +home: String, +lim: String) -> IO(Unit):
   match ps:
     case +i <> +l <> +name <> _:
       do IO<Unit>:
         mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(AT.Att.dir(home, thread))
         st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(AT.Att.dir(home, thread) ++ "/" ++ AT.Att.safe(name))
         Media.put.go(Bool.pick(Nat, String.eq(i, "0"), 0n, Media.size(st)), String.eq(i, "0"), String.eq(l, "1"), AT.Att.b64(b),
-          inbox, client, id, thread, AT.Att.dir(home, thread) ++ "/" ++ AT.Att.safe(name))
+          inbox, client, id, thread, AT.Att.dir(home, thread) ++ "/" ++ AT.Att.safe(name), lim)
     case _:
       Media.fail(inbox, client, id, thread, "bad upload")
 
 # one piece of an upload (a = "<index>|<last>|<name>", b = base64); the
 # first piece starts the file, the rest append; a file never passes the cap
 # and never lands outside <home>/attachments/<thread>/
-def Media.put(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +a: String, +b: String, +home: String) -> IO(Unit):
-  Media.put.parts(String.split(a, '|'), b, inbox, client, id, thread, home)
+def Media.put(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +a: String, +b: String, +home: String, +lim: String) -> IO(Unit):
+  Media.put.parts(String.split(a, '|'), b, inbox, client, id, thread, home, lim)
 
-def Media.copy.k(ok: Bool, fits: Bool, +src: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +dest: String) -> IO(Unit):
+# the copy is cp's (the bytes never pass through the hub)
+def Media.copied(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +dest: String) -> IO(Unit):
+  match r:
+    case P.Ran{0, _}:
+      Media.attached(inbox, client, id, thread, dest)
+    case P.Ran{_, +out}:
+      Media.fail(inbox, client, id, thread, "the copy failed: " ++ String.trim(out))
+
+def Media.copy.k(ok: Bool, fits: Bool, +src: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +dest: String, +lim: String) -> IO(Unit):
   match ok fits:
     case True{} True{}:
-      do IO<Unit>:
-        bs : List<&2, U32> <- Files.read(src)
-        Media.put.go(0n, True{}, True{}, bs, inbox, client, id, thread, dest)
+      IO.bind(P.Ran, Unit, P.Proc.run("cp", ["--", src, dest], "/"), r => Media.copied(r, inbox, client, id, thread, dest))
     case True{} False{}:
-      Media.fail(inbox, client, id, thread, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB")
+      Media.fail(inbox, client, id, thread, AT.Att.over(lim))
     case False{} _:
       Media.fail(inbox, client, id, thread, "not a file: " ++ src)
 
-def Media.copy.m(m: Maybe<&2, Nat>, +src: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +dest: String) -> IO(Unit):
+def Media.copy.m(m: Maybe<&2, Nat>, +src: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +dest: String, +lim: String) -> IO(Unit):
   match m:
     case Some{+n}:
-      Media.copy.k(True{}, Nat.is_le(n, AT.Att.cap()), src, inbox, client, id, thread, dest)
+      Media.copy.k(True{}, Nat.is_le(n, AT.Att.max(lim)), src, inbox, client, id, thread, dest, lim)
     case None{}:
-      Media.copy.k(False{}, True{}, src, inbox, client, id, thread, dest)
+      Media.copy.k(False{}, True{}, src, inbox, client, id, thread, dest, lim)
 
 # a file on this machine (the native window's paste or path), copied in
-def Media.file(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +src: String, +name: String, +home: String) -> IO(Unit):
+def Media.file(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +src: String, +name: String, +home: String, +lim: String) -> IO(Unit):
   do IO<Unit>:
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(AT.Att.dir(home, thread))
     st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(src)
-    Media.copy.m(Media.stat(st), src, inbox, client, id, thread, AT.Att.dir(home, thread) ++ "/" ++ AT.Att.safe(name))
+    Media.copy.m(Media.stat(st), src, inbox, client, id, thread, AT.Att.dir(home, thread) ++ "/" ++ AT.Att.safe(name), lim)
 
 def Media.img.k(ok: Bool, +path: String) -> IO(Maybe<&2, AT.Img>):
   match ok:
@@ -6973,12 +7002,12 @@ def Media.claude(+inbox: Chan(Msg), +thread: String, +cwd: String, +text: String
 
 # a Git out: the media jobs here (an upload piece runs on the hub, so the
 # pieces of a file land in order), git jobs off the hub
-def Media.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String) -> IO(Unit):
+def Media.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String, +lim: String) -> IO(Unit):
   match i:
     case 0n:
-      Media.put(inbox, client, id, thread, a, b, home)
+      Media.put(inbox, client, id, thread, a, b, home, lim)
     case 1n:
-      IO.spawn(Unit, Media.file(inbox, client, id, thread, a, b, home))
+      IO.spawn(Unit, Media.file(inbox, client, id, thread, a, b, home, lim))
     case 2n:
       IO.spawn(Unit, Media.claude(inbox, thread, cwd, a, b, gen))
     case 3n:
@@ -6986,8 +7015,9 @@ def Media.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client
     case _:
       IO.spawn(Unit, Jobs.run(tx, job, inbox, client, id, thread, cwd, a, b, home))
 
-def Media.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String) -> IO(Unit):
-  Media.run.k(C.Codec.pos(["attach.put", "attach.file", "attach.claude", "update.check"], job), tx, job, inbox, client, id, thread, cwd, a, b, home, managed, gen)
+# lim: the "files.max.mb" setting's text (core/attach.bend's Att.max)
+def Media.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String, +lim: String) -> IO(Unit):
+  Media.run.k(C.Codec.pos(["attach.put", "attach.file", "attach.claude", "update.check"], job), tx, job, inbox, client, id, thread, cwd, a, b, home, managed, gen, lim)
 
 # thread_wait: the check (MC.Wait.now) goes through the hub each second,
 # off the hub, until the thread is done or the time is up (by the clock: a
@@ -10514,7 +10544,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread), M.Setting.get(st, AT.Att.key(), ""))))
         return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
@@ -15349,10 +15379,31 @@ def Conn.bot.page_ok(+id: String) -> Bool:
 def Conn.bot.page_id(+r: String) -> String:
   Bool.pick(String, Conn.bot.page_ok(String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n))), String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n)), "")
 
+# a far view.get's file (farview.bend's Stream.mark): the head, then the
+# file from disk a piece at a time
+def Conn.bot.stream(s: Socket, +size: Nat, +path: String) -> IO(Unit):
+  do IO<Unit>:
+    s2 : Socket <- Conn.send(s, U.Utf8.encode(BRANGE.Rng.head(BRANGE.Rng.whole(size), size, "application/octet-stream", "no-store")))
+    Img.send.k(True{}, s2, path, 0n, size)
+
+def Conn.bot.mark(mark: Bool, s: Socket, +bs: List<&2, U32>) -> IO(Unit):
+  match mark:
+    case True{}:
+      Conn.bot.stream(s, FVS.Stream.size(U.Utf8.decode(List.drop(&2, U32, bs, 1n))), FVS.Stream.path(U.Utf8.decode(List.drop(&2, U32, bs, 1n))))
+    case False{}:
+      Conn.finish(s, bs)
+
+def Conn.bot.marked(bs: List<&2, U32>) -> Bool:
+  match bs:
+    case Nil{}:
+      False{}
+    case b <> _:
+      U32.is_eq(b, 0)
+
 def Conn.bot.answer(m: Maybe<&1, List<&2, U32>>, s: Socket) -> IO(Unit):
   match m:
-    case Some{bs}:
-      Conn.finish(s, bs)
+    case Some{+bs}:
+      Conn.bot.mark(Conn.bot.marked(bs), s, bs)
     case None{}:
       Conn.finish(s, W.Http.text("503 Service Unavailable", "the hub is gone"))
 
@@ -15488,20 +15539,8 @@ def Upload.wrote.k(ok: Bool, s: Socket, +err: String, +left: Nat, +thread: Strin
 def Upload.wrote(+err: String, s: Socket, +left: Nat, +thread: String, +path: String) -> IO(Unit):
   Upload.wrote.k(String.is_empty(err), s, err, left, thread, path)
 
-def Upload.into(m: Maybe<&1, String>, s: Socket, +thread: String, +name: String, +len: Nat, rest: List<&2, U32>) -> IO(Unit):
-  match m:
-    case Some{+dir}:
-      do IO<Unit>:
-        mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
-        +head : List<&2, U32> = List.take(&2, U32, rest, len)
-        +path : String = dir ++ "/" ++ name
-        e : String <- Media.put.file(path, "w", head)
-        Upload.wrote(e, s, Nat.sub(len, List.length(&2, U32, head)), thread, path)
-    case None{}:
-      Conn.finish(s, W.Http.text("503 Service Unavailable", "the hub is gone"))
-
 # a client that waits for leave to send the body (Expect: 100-continue) is
-# told to go on
+# told to go on, once the hub has said the file fits
 def Upload.go(cont: Bool, s: Socket) -> IO(Socket):
   match cont:
     case True{}:
@@ -15509,24 +15548,49 @@ def Upload.go(cont: Bool, s: Socket) -> IO(Socket):
     case False{}:
       IO.pure(Socket, s)
 
+def Upload.into.k(big: Bool, s: Socket, +cont: Bool, +lim: Nat, +dir: String, +thread: String, +name: String, +len: Nat, +rest: List<&2, U32>) -> IO(Unit):
+  match big:
+    case True{}:
+      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(Nat.div(lim, 1048576n)) ++ " MB"))
+    case False{}:
+      do IO<Unit>:
+        s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
+        mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
+        +head : List<&2, U32> = List.take(&2, U32, rest, len)
+        +path : String = dir ++ "/" ++ name
+        e : String <- Media.put.file(path, "w", head)
+        Upload.wrote(e, s2, Nat.sub(len, List.length(&2, U32, head)), thread, path)
+
+# the hub answers "<the limit in bytes>\t<the thread's folder>" (Hub.att_dir:
+# the "files.max.mb" setting); a body over the limit is refused before any
+# of it is read
+def Upload.into.at(+at: String, s: Socket, +cont: Bool, +thread: String, +name: String, +len: Nat, rest: List<&2, U32>) -> IO(Unit):
+  Upload.into.k(Nat.is_gt(len, FVS.Stream.size(at)), s, cont, FVS.Stream.size(at), FVS.Stream.path(at), thread, name, len, rest)
+
+def Upload.into(m: Maybe<&1, String>, s: Socket, +cont: Bool, +thread: String, +name: String, +len: Nat, rest: List<&2, U32>) -> IO(Unit):
+  match m:
+    case Some{+at}:
+      Upload.into.at(at, s, cont, thread, name, len, rest)
+    case None{}:
+      Conn.finish(s, W.Http.text("503 Service Unavailable", "the hub is gone"))
+
 def Upload.gate(ok: Bool, big: Bool, s: Socket, +cont: Bool, +thread: String, +name: String, +len: Nat, +rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
   match ok big:
     case False{} _:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
     case True{} True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB"))
+      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(AT.Att.mb.ceiling()) ++ " MB"))
     case True{} False{}:
       do IO<Unit>:
         +reply : Chan(String) <- Chan.new(String, 1)
         sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, AttDir{thread, reply})
         m : Maybe<&1, String> <- Chan.recv(String, reply)
-        s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
-        Upload.into(m, s2, thread, name, len, rest)
+        Upload.into(m, s, cont, thread, name, len, rest)
 
 def Conn.route.att(att: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match att req:
     case True{} W.Request{_, +p, +hs}:
-      Upload.gate(Conn.allowed(trusted, hs, p, token), Nat.is_gt(Conn.bot.len(hs), AT.Att.cap()), s,
+      Upload.gate(Conn.allowed(trusted, hs, p, token), Nat.is_gt(Conn.bot.len(hs), AT.Att.ceiling()), s,
         String.contains(String.to_lower(W.Http.header_of(hs, "expect")), "100-continue"),
         AT.Att.unpct(W.Http.param(p, "thread")), AT.Att.stored(AT.Att.unpct(W.Http.param(p, "key")), AT.Att.unpct(W.Http.param(p, "name"))), Conn.bot.len(hs), rest, inbox)
     case False{} _:

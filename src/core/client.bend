@@ -7318,10 +7318,25 @@ def Ui.error_set(u: Ui, e: String) -> Ui:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, _, note, nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, e, note, nf, ob, tr}
 
+# Settings' "Largest attachment" row (web and phones): the choices are
+# core/attach.bend's Att.sizes, in MB; the one on is the limit in force
+def Files.set.label() -> String:
+  "Largest attachment (MB)"
+
+def Files.set.on(+st: M.State) -> String:
+  Nat.show(AT.Att.mb(M.Setting.get(st, AT.Att.key(), "")))
+
+def Files.set.note(+st: M.State) -> String:
+  "A file sent with a message, or shown from this hub, may be up to " ++ Files.set.on(st) ++ " MB. Files stream from disk, so a large one costs disk space, not memory."
+
+# the "files.max.mb" setting's text (core/attach.bend's Att.max reads it)
+def Ui.att.v(+u: Ui) -> String:
+  M.Setting.get(Ui.state(u), AT.Att.key(), "")
+
 def Ui.attach.k(big: Bool, first: Bool, +u: Ui, +o: J.Json) -> Act:
   match big first:
     case True{} True{}:
-      Act{Ui.error_set(u, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB"), Nil{}}
+      Act{Ui.error_set(u, AT.Att.over(Ui.att.v(u))), Nil{}}
     case True{} False{}:
       Act{u, Nil{}}
     case False{} _:
@@ -7334,7 +7349,7 @@ def Ui.attach.k(big: Bool, first: Bool, +u: Ui, +o: J.Json) -> Act:
 # data base64): sent to the selected thread's attachments; a file over the
 # cap is refused here, before any of it is sent
 def Ui.attach.o(+u: Ui, +o: J.Json) -> Act:
-  Ui.attach.k(Nat.is_gt(J.Json.get_nat(o, "size", 0n), AT.Att.cap()), Nat.is_eq(J.Json.get_nat(o, "i", 0n), 0n), u, o)
+  Ui.attach.k(Nat.is_gt(J.Json.get_nat(o, "size", 0n), AT.Att.max(Ui.att.v(u))), Nat.is_eq(J.Json.get_nat(o, "i", 0n), 0n), u, o)
 
 def Ui.attach(+u: Ui, v: String) -> Act:
   Ui.attach.o(u, Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{}))
@@ -9157,12 +9172,12 @@ def Upload.end.k(+o: J.Json, +u: Ui) -> Act:
 def Upload.start.k(big: Bool, +u: Ui, +name: String) -> Act:
   match big:
     case True{}:
-      Act{Ui.error_set(u, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB"), Nil{}}
+      Act{Ui.error_set(u, AT.Att.over(Ui.att.v(u))), Nil{}}
     case False{}:
       Act{Ui.up_set(u, Ui.sel(u), name), Nil{}}
 
 def Upload.start(+u: Ui, +o: J.Json) -> Act:
-  Upload.start.k(Nat.is_gt(J.Json.get_nat(o, "size", 0n), AT.Att.cap()), u, J.Json.get_str(o, "name", "file"))
+  Upload.start.k(Nat.is_gt(J.Json.get_nat(o, "size", 0n), AT.Att.max(Ui.att.v(u))), u, J.Json.get_str(o, "name", "file"))
 
 def Upload.end(+u: Ui, +v: String) -> Act:
   Upload.end.k(Maybe.default(&2, J.Json, J.Json.parse(v), J.Json.obj([J.KV{"text", J.Str{"the upload failed"}}, J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"upload", J.Flag{True{}}}])), u)

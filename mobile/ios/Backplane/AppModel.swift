@@ -1458,30 +1458,54 @@ final class AppModel {
     // the file as the body (no base64, no pieces through the engine); the
     // hub's answer goes back as "attach-end", as an attach.put's would
     func attach(_ data: Data, name: String, for owner: String? = nil) {
-        guard let owner = owner ?? screen?.thread?.id, canSendComposer(for: owner) else { return }
-        guard !data.isEmpty, let s = screen, let named = s.thread?.id,
-              let l = links.first(where: { Pairing.key($0) == s.hub }) else { return }
+        upload(.data(data), size: data.count, name: name, for: owner)
+    }
+
+    // a file from the Files app: streamed from disk by URLSession
+    // (upload(fromFile:)), so a file of hundreds of MB is never held in
+    // memory; the security-scoped access lasts until the upload ends
+    func attach(file url: URL, name: String, for owner: String? = nil) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        upload(.file(url, scoped), size: size, name: name, for: owner)
+    }
+
+    enum UploadBody {
+        case data(Data)
+        case file(URL, Bool)
+        func done() { if case .file(let u, true) = self { u.stopAccessingSecurityScopedResource() } }
+    }
+
+    private func upload(_ body: UploadBody, size: Int, name: String, for owner: String?) {
+        guard let owner = owner ?? screen?.thread?.id, canSendComposer(for: owner) else { body.done(); return }
+        guard size > 0, let s = screen, let named = s.thread?.id,
+              let l = links.first(where: { Pairing.key($0) == s.hub }) else { body.done(); return }
         let epoch = conn[s.hub]?.epoch
         // the hub's own id: over several hubs the screen names it "<hub>|<id>"
         let thread = named.split(separator: "|").last.map(String.init) ?? named
         let key = String(format: "%08x", UInt32.random(in: 0 ... UInt32.max))
         guard let url = Pairing.http(l, path: "/attach", query: [URLQueryItem(name: "thread", value: thread),
-                                                                 URLQueryItem(name: "key", value: key), URLQueryItem(name: "name", value: name)]) else { return }
-        var req = URLRequest(url: url, timeoutInterval: 600)
+                                                                 URLQueryItem(name: "key", value: key), URLQueryItem(name: "name", value: name)]) else { body.done(); return }
+        var req = URLRequest(url: url, timeoutInterval: 1800)
         req.httpMethod = "POST"
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         // the engine decides: one over the cap it refuses, and nothing goes
-        let up = (try? JSONSerialization.data(withJSONObject: ["name": name, "size": data.count] as [String: Any])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let up = (try? JSONSerialization.data(withJSONObject: ["name": name, "size": size] as [String: Any])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         actComposer("attach-up", up, for: owner)
-        guard data.count <= s.thread?.cap ?? 10_485_760 else { return }
+        guard size <= s.thread?.cap ?? 536_870_912 else { body.done(); return }
         Task {
             var answer = ""
             do {
-                let (body, _) = try await URLSession.shared.upload(for: req, from: data)
-                answer = String(data: body, encoding: .utf8) ?? ""
+                let got: Data
+                switch body {
+                case .data(let d): got = try await URLSession.shared.upload(for: req, from: d).0
+                case .file(let u, _): got = try await URLSession.shared.upload(for: req, fromFile: u).0
+                }
+                answer = String(data: got, encoding: .utf8) ?? ""
             } catch {
                 answer = ""
             }
+            body.done()
             // Finishing an upload never applies its result to a replacement
             // pairing or to a different conversation opened in the meantime.
             guard canEditComposer(for: owner), screen?.hub == s.hub, screen?.thread?.id == named,

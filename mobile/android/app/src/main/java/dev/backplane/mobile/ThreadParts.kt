@@ -752,30 +752,42 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
     }
 }
 
+// what the picker gave: a name, its size in bytes (-1 unknown) and how to
+// read it (opened once, as it uploads)
+internal class Picked(val name: String, val size: Long, val open: () -> java.io.InputStream?)
+
 // Photo picks, clipboard images and keyboard content share one loader.
 internal suspend fun attachUris(ctx: android.content.Context, m: AppModel, uris: List<Uri>, photos: Boolean,
     owner: String = m.screen?.thread?.id.orEmpty()) {
     if (owner.isEmpty()) return
     uris.forEachIndexed { i, u ->
-        val got = withContext(Dispatchers.IO) {
+        // a photo is read (HEIC becomes JPEG, which every agent reads); any
+        // other file is streamed from its content URI as it uploads, never
+        // read whole into memory (AppModel.attachStream)
+        val got: Picked? = withContext(Dispatchers.IO) {
             runCatching {
                 val cr = ctx.contentResolver
-                val data = cr.openInputStream(u)?.use { it.readBytes() } ?: return@runCatching null
                 val mime = cr.getType(u) ?: ""
                 if (photos) {
+                    val data = cr.openInputStream(u)?.use { it.readBytes() } ?: return@runCatching null
                     val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "jpg"
-                    // HEIC becomes JPEG, which every agent reads
-                    if (ext == "heic" || ext == "heif") {
+                    val (bytes, name) = if (ext == "heic" || ext == "heif") {
                         val b = BitmapFactory.decodeByteArray(data, 0, data.size)
                         val out = ByteArrayOutputStream()
                         if (b != null && b.compress(Bitmap.CompressFormat.JPEG, 85, out)) out.toByteArray() to "photo-${i + 1}.jpg"
                         else data to "photo-${i + 1}.$ext"
                     } else data to "photo-${i + 1}.$ext"
+                    Picked(name, bytes.size.toLong()) { bytes.inputStream() }
                 } else {
-                    val name = cr.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                        if (c.moveToFirst()) c.getString(0) else null
-                    } ?: u.lastPathSegment ?: "file"
-                    data to name
+                    var name: String? = null
+                    var size = -1L
+                    cr.query(u, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) {
+                            name = c.getString(0)
+                            if (!c.isNull(1)) size = c.getLong(1)
+                        }
+                    }
+                    Picked(name ?: u.lastPathSegment ?: "file", size) { cr.openInputStream(u) }
                 }
             }.getOrNull()
         }
@@ -788,7 +800,7 @@ internal suspend fun attachUris(ctx: android.content.Context, m: AppModel, uris:
                     .first { !it.first || it.second }
             }
             if (ready == null || !ready.first || !ready.second) return
-            m.attach(got.first, got.second)
+            m.attachStream(got.name, got.size, got.open)
         }
     }
 }

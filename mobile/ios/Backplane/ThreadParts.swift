@@ -829,10 +829,10 @@ struct AttachButton: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { r in
             let capturedOwner = fileOwner
             guard case .success(let urls) = r else { return }
+            // each streamed from disk (AppModel.attach(file:)), never read whole
             for u in urls {
-                let ok = u.startAccessingSecurityScopedResource()
-                defer { if ok { u.stopAccessingSecurityScopedResource() } }
-                if let data = try? Data(contentsOf: u) { attach(data, name: u.lastPathComponent, owner: capturedOwner) }
+                if let capturedOwner { model.attach(file: u, name: u.lastPathComponent, for: capturedOwner) }
+                else { model.attach(file: u, name: u.lastPathComponent) }
             }
         }
     }

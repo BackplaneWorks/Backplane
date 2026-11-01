@@ -345,7 +345,7 @@ data class ThreadView(
     val uploading: String = "",
     val chunk: Int = 196_608,
     // the most one attachment may hold, in bytes
-    val cap: Int = 10_485_760,
+    val cap: Long = 536_870_912L,
     val diff: Diff? = null,
     val term: Term? = null,
     // the thread's terminals in the chat (entries of kind "emb" name them)
@@ -596,7 +596,7 @@ private fun thread(o: JSONObject) = threadOf(o).copy(
     attaching = chips(o.optJSONArray("attaching")),
     uploading = o.optString("uploading"),
     chunk = o.optInt("chunk", 196_608),
-    cap = o.optInt("cap", 10_485_760),
+    cap = o.optLong("cap", 536_870_912L),
     diff = o.optJSONObject("diff")?.let { d ->
         Diff(d.optString("summary"), d.optJSONArray("files").map { f ->
             DiffFile(f.optString("name"), f.optString("status"),

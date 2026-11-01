@@ -14752,3 +14752,56 @@ law view_window_newer_empty:
   for +ids: List<&2, String>
   {TVIEWH.Page.newer(True{}, index, th, ids) == 0n : Nat}
 # END page window counts (H)
+
+# Large files (core/attach.bend's Att.mb, Att.max in bytes; core/range.bend's
+# Rng.*). The
+# "files.max.mb" setting's text is the limit in MB: 512 by default and for
+# anything not a count, at least 1, at most 4000 (a U32 size)
+import ./src/core/range.bend as BRANGE
+
+law att_max_default:
+  {AT.Att.mb("") == 512n : Nat}
+
+law att_max_reads:
+  {AT.Att.mb("1024") == 1024n : Nat}
+
+law att_max_ceiling:
+  {AT.Att.mb("99999") == 4000n : Nat}
+
+law att_max_floor:
+  {AT.Att.mb("0") == 1n : Nat}
+
+law att_max_junk:
+  {AT.Att.mb("lots") == 512n : Nat}
+
+# a message carries an attachment as its path, never its bytes
+law att_message_holds_path:
+  {AT.Att.paths("look\n\n" ++ AT.Att.line("/h/attachments/t1/k-big.step")) == ["/h/attachments/t1/k-big.step"] : List<&2, String>}
+
+# a Range header: none is the whole file; a..b, a.. and -n are that part
+# (b clipped to the end); a start past the end is a 416; several ranges are
+# the whole file
+law range_whole:
+  {BRANGE.Rng.of("", 100n) == BRANGE.Rng{0n, 100n, False{}, True{}} : BRANGE.Rng}
+
+law range_span:
+  {BRANGE.Rng.of("bytes=10-19", 100n) == BRANGE.Rng{10n, 10n, True{}, True{}} : BRANGE.Rng}
+
+law range_open:
+  {BRANGE.Rng.of("bytes=90-", 100n) == BRANGE.Rng{90n, 10n, True{}, True{}} : BRANGE.Rng}
+
+law range_tail:
+  {BRANGE.Rng.of("bytes=-10", 100n) == BRANGE.Rng{90n, 10n, True{}, True{}} : BRANGE.Rng}
+
+law range_clip:
+  {BRANGE.Rng.of("bytes=95-200", 100n) == BRANGE.Rng{95n, 5n, True{}, True{}} : BRANGE.Rng}
+
+law range_past:
+  {BRANGE.Rng.ok(BRANGE.Rng.of("bytes=100-", 100n)) == False{} : Bool}
+
+law range_multi:
+  {BRANGE.Rng.of("bytes=0-1,5-6", 100n) == BRANGE.Rng.whole(100n) : BRANGE.Rng}
+
+law range_head_partial:
+  {BRANGE.Rng.head(BRANGE.Rng.of("bytes=10-19", 100n), 100n, "image/png", "no-cache") == "HTTP/1.1 206 Partial Content\r\nContent-Type: image/png\r\nContent-Length: 10\r\nContent-Range: bytes 10-19/100\r\nAccept-Ranges: bytes\r\nCache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n" : String}
+# END large files
