@@ -91,6 +91,9 @@ Options: `--scenarios open,idle,type1,burst,paste,pastebig,bigtype,scroll,stress
   with their scripts.
 - **Input**: key → next frame (every keydown/input), Event Timing entries,
   wheel → the frame after its scroll.
+- **Thumb** (scroll windows): the scrollbar thumb's largest size swing in a
+  frame, and its largest move in a frame with no wheel just before, as parts
+  of the track (`scroll.thumb`; a page landing or an estimate's correction).
 - **Scroll**: frames where rows leave the timeline less than 85 % covered
   (blank), and any "Loading earlier/newer messages" shown.
 - **Hub**: its CPU ms (`/proc`), RSS, and `/debug/perf` rows that moved
