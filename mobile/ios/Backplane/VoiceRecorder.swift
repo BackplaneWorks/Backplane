@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 
 // Dictation from this phone's microphone (docs/voice.md): the hub cannot
@@ -40,7 +40,7 @@ final class VoiceRecorder {
         started = Date()
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers])
             try session.setActive(true, options: [])
             let engine = AVAudioEngine()
             let input = engine.inputNode
@@ -126,9 +126,12 @@ final class VoiceRecorder {
     // in order: each POST waits for the one before it
     private func post(_ body: Data, last: Bool) {
         guard let base = url else { return }
-        var c = URLComponents(url: base, resolvingAgainstBaseURL: false)
-        if last { c?.queryItems = (c?.queryItems ?? []) + [URLQueryItem(name: "end", value: "1")] }
-        guard let u = c?.url else { return }
+        guard var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return }
+        if last {
+            let items = c.queryItems ?? []
+            c.queryItems = items + [URLQueryItem(name: "end", value: "1")]
+        }
+        guard let u = c.url else { return }
         var req = URLRequest(url: u, timeoutInterval: 30)
         req.httpMethod = "POST"
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
