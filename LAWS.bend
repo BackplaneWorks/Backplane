@@ -14739,3 +14739,16 @@ law wait_news_done:
 law timeline_layout_list_same:
   {TLVIRTUAL.Layout.list([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}], [J.Num{"40.5"}, J.Null{}, J.Num{"0"}], "120", 0n, TLVIRTUAL.Px.int(16n), Nil{}) ==
     TLVIRTUAL.Layout.make([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}], TLVIRTUAL.Sizes.map(J.Json.obj([J.KV{"a", J.Num{"40.5"}}, J.KV{"c", J.Num{"0"}}])), "120", 0n, TLVIRTUAL.Px.int(16n), Nil{}) : TLVIRTUAL.Layout}
+
+# BEGIN page window counts (H)
+# A page window's "newer": the entries newer than its newest row (core/thin's
+# Index.newer, the row's place in the thread's order), none for a window
+# without rows; with "remaining" (older) and its ids it makes "total", so a
+# page can size the history it has not loaded (test/page_splice_test.bend
+# checks the counts on a long thread)
+law view_window_newer_empty:
+  for +index: THINL.Index
+  for +th: String
+  for +ids: List<&2, String>
+  {TVIEWH.Page.newer(True{}, index, th, ids) == 0n : Nat}
+# END page window counts (H)

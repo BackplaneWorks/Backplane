@@ -475,6 +475,12 @@ def Index.below(i: Index, th: String) -> Nat:
 def Index.remaining(+i: Index, +th: String, +before: Nat) -> Nat:
   Nat.add(Nat.sub(ML.Order.count(Index.thread(i, th)), Page.after(Index.thread(i, th), before)), Index.below(i, th))
 
+# the entries newer than row `first` (a page window's newest row): its
+# place in the thread's order, newest first, as Page.ids starts a page
+# there (Page.after); newer rows are always in the index
+def Index.newer(+i: Index, +th: String, +first: Nat) -> Nat:
+  Page.after(Index.thread(i, th), Nat.add(first, 1n))
+
 # ---- an index of the recent threads alone ----
 # When the store holds the rows, the hub keeps of the index only what
 # grows with threads, not with history: the recent order (Index.recent).
