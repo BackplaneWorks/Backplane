@@ -1,3 +1,5 @@
+import ./src/server/review-history.bend as REVIEWHISTORY
+import ./src/server/thin-view.bend as THINREVIEW
 import ./src/core/plot-error.bend as PLOTERROR
 
 import ./src/web/workspace.bend as WSK
@@ -14729,3 +14731,15 @@ def Laws.view_page_older_next_whole(cursor): {==}
 
 def Laws.view_page_older_next_partial(cursor): {==}
 # END page olderNext (H)
+
+def Laws.thin_review_index_whole(entries):
+  {==}
+
+def Laws.thin_review_index_isolated(entries):
+  {==}
+
+def Laws.review_history_keeps_newest(text):
+  {==}
+
+def Laws.review_history_overlap_once(fresh, stored):
+  {==}

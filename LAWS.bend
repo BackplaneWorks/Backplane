@@ -1,4 +1,6 @@
 import ./src/mobile/session.bend as MCOMPOSER
+import ./src/server/review-history.bend as REVIEWHISTORY
+import ./src/server/thin-view.bend as THINREVIEW
 
 import ./src/core/components.bend as COMPONENTS
 
@@ -14334,3 +14336,24 @@ law refs_word_more:
 law refs_word_empty:
   {RF.Refs.word("", "/btw") == False{} : Bool}
 # END page olderNext (H)
+
+# The selected viewer gets complete review records, without another thread's.
+law thin_review_index_whole:
+  for entries: List<&2, M.Entry>
+  {M.State.reviews(THINREVIEW.State.window.reviews.keep(THINREVIEW.State.window.file(M.State.empty(), "@review:t", entries), "t", M.State.empty()), "t") == entries : List<&2, M.Entry>}
+
+law thin_review_index_isolated:
+  for entries: List<&2, M.Entry>
+  {M.State.reviews(THINREVIEW.State.window.reviews.keep(THINREVIEW.State.window.file(M.State.empty(), "@review:other", entries), "t", M.State.empty()), "other") == Nil{} : List<&2, M.Entry>}
+
+# A just-recorded review op stays newest and a store overlap is read once.
+law review_history_keeps_newest:
+  for text: String
+  {REVIEWHISTORY.ReviewHistory.merge([M.Act{"new", "t", "review", "add", text, 2n}], [M.Act{"old", "t", "review", "add", "old", 1n}]) ==
+    [M.Act{"new", "t", "review", "add", text, 2n}, M.Act{"old", "t", "review", "add", "old", 1n}] : List<&2, M.Entry>}
+
+law review_history_overlap_once:
+  for fresh: String
+  for stored: String
+  {REVIEWHISTORY.ReviewHistory.merge([M.Act{"same", "t", "review", "add", fresh, 2n}], [M.Act{"same", "t", "review", "add", stored, 1n}]) ==
+    [M.Act{"same", "t", "review", "add", fresh, 2n}] : List<&2, M.Entry>}

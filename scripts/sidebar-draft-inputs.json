@@ -161,7 +161,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "f08bc9b41cab08e1d1d4f6931f1fb8f5a8a2edb81d2fd96231ee544649469eb0",
-    "src/server/thin-view.bend": "b24cb9864c608e8aee279d77a69c38ef73cc1cd5e1c54a09540d072b76fbb367",
+    "src/server/thin-view.bend": "f0e6fb4340a1908725b6953a34d31e59af8608b8eab5e3ff98fdaf671972808c",
     "src/server/thinstore.bend": "26a87007f744709226b28c22f7158ebef68ab73d6c9f4deb7502c7ea7f40c24f",
     "src/web/bots.bend": "c98dff4be1b4771758a55750519338cffbe4ec9b6ccd833b7f427ed7e24c41f1",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
@@ -381,5 +381,5 @@
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
     }
   },
-  "reviewNote": "Q-2 failed display names; rebased sidebar drafts remain unchanged"
+  "reviewNote": "H-2 selected Review hydration retained with incoming store and paging changes; sidebar draft decisions unchanged"
 }

@@ -1,5 +1,6 @@
 import Base
 import ./subagent-history.bend as SUBHIST
+import ./review-history.bend as REVHIST
 import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
 import ../core/watchdog.bend as WD
@@ -12483,7 +12484,8 @@ def Hub.thin.render.page.v(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, 
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       do IO<Hub>:
-        +shown : M.State <- SUBHIST.SubHistory.read(Cfg.thin.store(cfg), Hub.thin.view_state(st, cfg, thread), thread)
+        +subs : M.State <- SUBHIST.SubHistory.read(Cfg.thin.store(cfg), Hub.thin.view_state(st, cfg, thread), thread)
+        +shown : M.State <- REVHIST.ReviewHistory.read(Cfg.thin.store(cfg), subs, thread)
         Hub.thin.render.page.shown(v, pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms, shown)
 
 # (the info the view is made from, masked with the vault as it is now)

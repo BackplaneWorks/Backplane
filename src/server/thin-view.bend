@@ -211,11 +211,16 @@ def State.window.subs.keep(+st: M.State, +target: J.Json, into: M.State) -> M.St
   +starts = SB.Subs.starts(st, Target.thread(st, target))
   State.window.subs.calls(starts, st, State.window.file(State.window.add(State.window.subs(st, target), into), M.Idx.sub.starts(M.Bg.log(Target.thread(st, target))), starts))
 
+# Review ops are complete records, not activity previews. Keep this thread's
+# index after posting the chat page, so neither clipping nor paging hides pins.
+def State.window.reviews.keep(+st: M.State, +thread: String, into: M.State) -> M.State:
+  State.window.file(into, M.Idx.review.key(thread), M.State.reviews(st, thread))
+
 def State.window(+st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
   # Metadata feeds the sidebar; selected conversation history and its own
   # agent steps feed the timeline and inspector independently.
-  State.window.add(State.window.rows(rows, st, index, Nil{}),
-    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st))))
+  State.window.reviews.keep(st, Target.thread(st, target), State.window.add(State.window.rows(rows, st, index, Nil{}),
+    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st)))))
 
 # A run of tool calls the window cuts at either edge folds whole on the
 # page (core/fold.bend's Fold.roles.ctx): the calls just outside the window,
@@ -232,8 +237,8 @@ def State.window.around(+st: M.State, +th: String, +es: List<&2, M.Entry>, into:
 
 def State.window.body(bounded: Bool, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
   +es = State.window.rows.body(bounded, rows, st, index, Nil{})
-  State.window.around(st, Target.thread(st, target), es, State.window.add(es,
-    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st)))))
+  State.window.reviews.keep(st, Target.thread(st, target), State.window.around(st, Target.thread(st, target), es, State.window.add(es,
+    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st))))))
 
 # A route restores only transient selection. The normal bot tab policy
 # decides whether that content route is still available for this exact bot.
