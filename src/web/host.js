@@ -261,7 +261,7 @@ function same(a, b) {
 // changed) is not built again.
 const planTrees = new WeakMap();
 function timelinePlan(input) {
-  const tree = Planner.timeline_plan(Wire.json(input, planTrees));
+  const tree = Planner.timeline_plan(Wire.json({ ...input, overscan: historyOverscan(input.view) }, planTrees));
   const plan = Wire.plain(tree);
   if (plan && typeof plan === "object") planTrees.set(plan, tree);
   return plan;
@@ -2029,6 +2029,15 @@ function historyMoved(dy) {
   historyMoves.push([now, Math.abs(dy)]);
   while (historyMoves.length && now - historyMoves[0][0] > 250) historyMoves.shift();
 }
+// px ahead of the reader the timeline mounts rows (the planner's overscan
+// input): what a quarter second at their speed covers, up to three screens,
+// so a fast wheel that overtakes a busy frame still finds rows drawn
+function historyOverscan(view) {
+  const now = performance.now();
+  let moved = 0;
+  for (const m of historyMoves) if (now - m[0] <= 250) moved += m[1];
+  return Math.round(Math.min((view || 800) * 3, moved));
+}
 function historyRunway(tl) {
   const now = performance.now(), recent = historyMoves.filter(m => now - m[0] <= 250);
   const speed = recent.reduce((a, m) => a + m[1], 0) / 250;
@@ -2036,12 +2045,14 @@ function historyRunway(tl) {
 }
 function earlierCheck(tl) {
   if (historyDirection !== "older" || earlierAsked || !tl || tl.id !== "timeline" || !thin?.ready || thin.paging || thin.pageError) return;
-  if (!thin.hasAhead("older") || tl.scrollTop - historyGap("older") > historyRunway(tl)) return;
+  const gap = historyGap("older");
+  if (!thin.hasAhead("older") || tl.scrollTop - gap > historyRunway(tl) * (gap ? 2 : 1)) return;
   earlierAsked = thin.ahead("older");
 }
 function laterCheck(tl) {
   if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("newer")) return;
-  if (tl.scrollHeight - tl.scrollTop - tl.clientHeight - historyGap("newer") > historyRunway(tl)) return;
+  const gap = historyGap("newer");
+  if (tl.scrollHeight - tl.scrollTop - tl.clientHeight - gap > historyRunway(tl) * (gap ? 2 : 1)) return;
   laterAsked = thin.ahead("newer");
 }
 function historyCheckSoon() {
@@ -2053,6 +2064,17 @@ function historyCheckSoon() {
     earlierCheck(tl);laterCheck(tl);
   });
 }
+// The rows a gap stands for are asked for well before it (twice the
+// distance); a reader faster still stops at its edge, as at the end, and
+// never sees into it. (Capture: before the timeline's own plan reads it.)
+document.addEventListener("scroll", e => {
+  const tl = e.target;
+  if (tl?.id !== "timeline" || !historyGone.older.size && !historyGone.newer.size) return;
+  const older = historyGap("older"), newer = historyGap("newer");
+  if (older && tl.scrollTop < older) tl.scrollTop = older;
+  else if (newer && tl.scrollTop + tl.clientHeight > tl.scrollHeight - newer) tl.scrollTop = Math.max(older, tl.scrollHeight - newer - tl.clientHeight);
+  historyCheckSoon();
+}, true);
 document.addEventListener("wheel", e => {
   if (!e.isTrusted || e.ctrlKey || !e.target.closest?.("#timeline")) return;
   const tl = document.getElementById("timeline");
