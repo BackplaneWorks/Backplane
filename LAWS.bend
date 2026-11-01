@@ -4573,6 +4573,18 @@ law subs_row_keys:
 law subs_done_row_key:
   {SB.Subs.row_keys([SB.Subs.done.toggle("t1", 2n, False{})]) == ["subs.done:t1"] : List<&2, String>}
 
+law subagent_start_index:
+  {M.Idx.get(M.Idx.post(Map.new(&2, List<&2, M.Entry>), M.Act{"s", "@sub:t1", "c1", "start:subagent", "Inspect power", 1n}), M.Idx.sub.starts("@sub:t1"))
+    == [M.Act{"s", "@sub:t1", "c1", "start:subagent", "Inspect power", 1n}] : List<&2, M.Entry>}
+
+law subagent_call_index_isolated:
+  {M.Idx.get(M.Idx.post(Map.new(&2, List<&2, M.Entry>), M.Act{"u", "@sub:t1", "c1", "Bash", "Inspect power", 2n}), M.Idx.sub.call("@sub:t1", "c2")) == Nil{} : List<&2, M.Entry>}
+
+law subagent_recovered_start:
+  {SB.Agg.out(SB.Agg.recover.entry(M.Act{"s", "@sub:t1", "c1", "start:subagent", "Inspect power", 1n},
+    M.State.replay([M.ActivityLogged{"@sub:t1", "u", "c1", "Bash", "Inspect rail", 2n}], M.State.empty()), SB.AggS{Map.new(&2, SB.SubAgg), Nil{}}))
+    == [SB.SubAgg{"c1", "subagent", "Inspect power", "", 1n, [SB.SubStep{"Bash", "Inspect rail"}], 2n}] : List<&2, SB.SubAgg>}
+
 
 # Desks (core/desk.bend)
 # ----------------------

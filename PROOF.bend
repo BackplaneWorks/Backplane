@@ -6876,6 +6876,15 @@ def Laws.subs_row_keys(r, rs):
 def Laws.subs_done_row_key():
   {==}
 
+def Laws.subagent_start_index():
+  {==}
+
+def Laws.subagent_call_index_isolated():
+  {==}
+
+def Laws.subagent_recovered_start():
+  {==}
+
 def Laws.subs_shell_named():
   {==}
 

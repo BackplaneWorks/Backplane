@@ -35,7 +35,8 @@
 //                "todos:N/D" sets a to-do list first (TodoWrite): N
 //                steps, the first D done, the next in progress;
 //                "agents:N" runs N background subagents (Agent calls)
-//                that finish once the text is posted
+//                that finish once the text is posted;
+//                "agentsteps:N" gives each one N tool/text activity rows
 //   delegate     the first command calls the hub's delegate_task (its MCP
 //                URL from --mcp-config) for a child "mode:plain child
 //                work", then ends; later commands as plain
@@ -346,6 +347,19 @@ async function run(c: Cmd, firstOne: boolean) {
       emit({ type: "user", message: { role: "user", content: [{ tool_use_id: tool, type: "tool_result", content: `Async agent launched: ${task}` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
       return { task, tool };
     });
+    const agentSteps = Number(/agentsteps:(\d+)/.exec(c.text)?.[1] ?? 0);
+    for (const a of agents) {
+      for (let step = 1; step <= agentSteps; step++) {
+        const id = `toolu_${rnd()}`;
+        const content = step % 2
+          ? [{ type: "tool_use", id, name: "Bash", input: { command: `inspect ${tag} step ${step}` } }]
+          : [{ type: "text", text: `Checked ${tag} step ${step}` }];
+        emit({ type: "assistant", message: { id: `msg_${rnd()}`, content }, parent_tool_use_id: a.tool, session_id: session });
+        emit({ type: "system", subtype: "task_progress", task_id: a.task, tool_use_id: a.tool,
+          description: `Checking ${tag} step ${step}`, session_id: session });
+        await sleep(ms);
+      }
+    }
     let full = "";
     emit({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     for (let i = 0; i < n; i++) {

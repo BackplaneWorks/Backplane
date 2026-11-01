@@ -192,11 +192,30 @@ def State.window.rows(ids: List<&2, String>, st: M.State, index: T.Index, acc: L
 def State.window.subs(+st: M.State, +target: J.Json) -> List<&2, M.Entry>:
   List.reverse(&2, M.Entry, List.take(&2, M.Entry, M.State.mine(st, M.Bg.log(Target.thread(st, target))), SB.Subs.window()))
 
+def State.window.file(st: M.State, +key: String, es: List<&2, M.Entry>) -> M.State:
+  match st:
+    case M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav, +bw}:
+      M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav,
+        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.set(&2, List<&2, M.Entry>, M.Ext.by(M.Ext.of(bw)), key, es), M.Ext.mail(M.Ext.of(bw))}]}
+
+# The inspector's identities and each call's bounded activity belong only
+# to the selected conversation, independently of its newest shared log page.
+def State.window.subs.calls(es: List<&2, M.Entry>, +st: M.State, into: M.State) -> M.State:
+  match es:
+    case Nil{}: into
+    case M.Act{_, +log, +call, _, _, _} <> rest:
+      State.window.subs.calls(rest, st, State.window.file(into, M.Idx.sub.call(log, call), List.take(&2, M.Entry, M.State.mine(st, M.Idx.sub.call(log, call)), SB.Subs.window())))
+    case _ <> rest: State.window.subs.calls(rest, st, into)
+
+def State.window.subs.keep(+st: M.State, +target: J.Json, into: M.State) -> M.State:
+  +starts = SB.Subs.starts(st, Target.thread(st, target))
+  State.window.subs.calls(starts, st, State.window.file(State.window.add(State.window.subs(st, target), into), M.Idx.sub.starts(M.Bg.log(Target.thread(st, target))), starts))
+
 def State.window(+st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
   # Metadata feeds the sidebar; selected conversation history and its own
   # agent steps feed the timeline and inspector independently.
   State.window.add(State.window.rows(rows, st, index, Nil{}),
-    State.window.add(State.window.subs(st, target), State.window.empty(st, Threads.get(st))))
+    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st))))
 
 # A run of tool calls the window cuts at either edge folds whole on the
 # page (core/fold.bend's Fold.roles.ctx): the calls just outside the window,
@@ -214,7 +233,7 @@ def State.window.around(+st: M.State, +th: String, +es: List<&2, M.Entry>, into:
 def State.window.body(bounded: Bool, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
   +es = State.window.rows.body(bounded, rows, st, index, Nil{})
   State.window.around(st, Target.thread(st, target), es, State.window.add(es,
-    State.window.add(State.window.subs(st, target), State.window.empty(st, Threads.get(st)))))
+    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st)))))
 
 # A route restores only transient selection. The normal bot tab policy
 # decides whether that content route is still available for this exact bot.

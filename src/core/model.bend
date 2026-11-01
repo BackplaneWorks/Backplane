@@ -944,8 +944,27 @@ def Idx.term(term: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, Lis
     case False{}:
       ix
 
+# Subagent identities and activity are filed separately. A busy neighbour
+# must not push an agent's start or its newest steps out of the inspector.
+def Idx.sub.starts(+log: String) -> String:
+  "@substarts:" ++ log
+
+def Idx.sub.call(+log: String, +call: String) -> String:
+  "@subcall:" ++ log ++ "\t" ++ call
+
+def Idx.sub.start(start: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
+  match start:
+    case True{}: Idx.put(ix, Idx.sub.starts(Idx.thread(e)), e)
+    case False{}: ix
+
+def Idx.sub.at(sub: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
+  match sub e:
+    case True{} Act{_, +th, +call, +kind, _, _}:
+      Idx.sub.start(String.starts_with(kind, "start"), Idx.put(ix, Idx.sub.call(th, call), e), e)
+    case _ _: ix
+
 def Idx.post(ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
-  Idx.term(Idx.is_term(e), Idx.review(Idx.is_review(e), Idx.step(Idx.is_step(e), Idx.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e), e), e), e)
+  Idx.sub.at(String.starts_with(Idx.thread(e), "@sub:"), Idx.term(Idx.is_term(e), Idx.review(Idx.is_review(e), Idx.step(Idx.is_step(e), Idx.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e), e), e), e), e)
 
 # Projection
 # ----------
