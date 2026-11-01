@@ -28,7 +28,9 @@ kicad-library/profiles/<original config root hash>/10.99/
 Setup rechecks the archive and manifest, accepts only regular files and bounded
 local PAX path headers, and rejects traversal, links and unexpected types. A
 nonblocking kernel lock (flock on Linux/macOS, exclusive write handle on Windows)
-protects staging/validation/rename and releases on process death. Activation is
+protects staging/validation/rename and releases on process death. Every plot and
+render child sets up once, so a setup that finds the lock held tries again for up
+to 5 s before it fails. Activation is
 last. Other versions stay intact; a damaged extraction is retained under a
 `.damaged-<uuid>` name before repair. An existing valid extraction is checked
 against the compiled inventory without decoding the archive again. In-process

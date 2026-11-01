@@ -166,9 +166,19 @@ function bp_kl_copy(src, dest, budget = { files: 0, bytes: 0 }, depth = 0) {
   }
 }
 // Kernel-owned nonblocking lock: a crash releases it without PID polling,
-// stale-owner reclamation races, sleeps or a child inheriting the handle.
+// stale-owner reclamation races or a child inheriting the handle. Every
+// plot and render child sets up once, taking it for a tenth of a second,
+// so children started together met it held: it is tried again for up to
+// `wait` ms before the setup that came second fails.
 let bp_kl_lock_api;
-function bp_kl_lock(lock) {
+function bp_kl_retry(take, wait) {
+  const end = Date.now() + wait;
+  for (let got = take(); ; got = take()) {
+    if (got !== null || Date.now() >= end) return got;
+    Bun.sleepSync(25);
+  }
+}
+function bp_kl_lock(lock, wait = 5000) {
   const fs = require('node:fs'), ffi = require('bun:ffi');
   bp_kl_plain(lock);
   if (process.platform === 'win32') {
@@ -177,15 +187,15 @@ function bp_kl_lock(lock) {
       CloseHandle: { args: ['i64'], returns: 'i32' },
     }).symbols;
     const name = Buffer.from(lock + '\0', 'utf16le');
-    const h = bp_kl_lock_api.CreateFileW(ffi.ptr(name), 0x40000000, 1, null, 4, 0x80, null);
-    bp_kl_require(Number(h) !== -1, 'another KiCad library setup is active or its lock cannot be opened; retry after it finishes');
+    const h = bp_kl_retry(() => { const h = bp_kl_lock_api.CreateFileW(ffi.ptr(name), 0x40000000, 1, null, 4, 0x80, null); return Number(h) === -1 ? null : h; }, wait);
+    bp_kl_require(h !== null, 'another KiCad library setup is active or its lock cannot be opened; retry after it finishes');
     return () => bp_kl_lock_api.CloseHandle(h);
   }
   if (!bp_kl_lock_api) bp_kl_lock_api = ffi.dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
     flock: { args: ['i32','i32'], returns: 'i32' },
   }).symbols;
   const fd = fs.openSync(lock, fs.constants.O_CREAT | fs.constants.O_RDWR, 0o600);
-  if (bp_kl_lock_api.flock(fd, 6) !== 0) {
+  if (bp_kl_retry(() => bp_kl_lock_api.flock(fd, 6) === 0 ? fd : null, wait) === null) {
     fs.closeSync(fd); throw new Error('another KiCad library setup is active; retry after it finishes');
   }
   return () => fs.closeSync(fd);
