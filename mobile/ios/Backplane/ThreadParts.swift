@@ -245,12 +245,17 @@ struct SelectSheet: View {
     }
 }
 
-struct EntryRow: View {
+// A row is its entry: compared on that alone (the model is the one app model,
+// read through observation; show only opens a sheet), so a new screen re-runs
+// only the rows whose entries changed (.equatable() where it is used)
+struct EntryRow: View, Equatable {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let entry: Entry
     let show: (Shown) -> Void
     @State private var selecting = false
+
+    nonisolated static func == (a: EntryRow, b: EntryRow) -> Bool { a.entry == b.entry }
 
     @ViewBuilder private var menu: some View {
         if entry.reply == true {

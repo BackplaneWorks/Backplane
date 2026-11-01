@@ -93,6 +93,9 @@ data class Shot(val path: String, val url: String)
 // kind: user, assistant, act (a tool line), fold (a run of tool calls:
 // "fold" with value opens or shuts it), link (opens thread value), emb (a
 // terminal in the chat: key names its item in the thread's embs)
+// never changed after parsing: Compose compares it by value (data classes all
+// the way down), so a new screen recomposes only the rows whose entries changed
+@androidx.compose.runtime.Immutable
 data class Entry(
     val id: String, val kind: String, val text: String,
     val tone: String, val label: String, val blocks: List<Block>,
