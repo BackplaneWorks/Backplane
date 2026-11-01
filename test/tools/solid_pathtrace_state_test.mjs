@@ -88,6 +88,9 @@ function batchFixture({compilePending=false}={}){
  };
  return {v,events,records};
 }
+// The production async work crosses the VM's realm before compile starts.
+// Wait for that signal, bounded, before testing a pending compile's lifetime.
+async function compiled(record){for(let i=0;i<8&&!record?.compiled;i++)await Promise.resolve();assert.equal(record?.compiled,true,'the fixture compile must have started');}
 {
  queued.length=0;const {v,records}=batchFixture();v.raster();assert.equal(records.length,0,'unproved source may never start batching');assert.equal(v.state.visible,false);
  queued.shift()();assert.equal(v.state.firstFrame,true);assert.equal(records.length,1);assert.equal(v.state.rasterBatchState,'building');const promise=v.rasterBatchPromise;await promise;
@@ -100,7 +103,7 @@ function batchFixture({compilePending=false}={}){
  assert.equal(v.state.rasterBatchState,'active');let drawn;v.renderer.render=scene=>drawn=scene;v.renderRasterScene();assert.equal(drawn,records[0].scene);v.releaseRasterBatches();
 }
 for(const change of ['policy','solder','resize','hidden','load','dispose','pathtrace']){
- const {v,records}=batchFixture({compilePending:true});Object.assign(v.state,{visible:true,firstFrame:true});const pending=v.requestRasterBatches();await Promise.resolve();const prior=records[0];assert.equal(prior.compiled,true);const epoch=v.rasterEpoch;
+ const {v,records}=batchFixture({compilePending:true});Object.assign(v.state,{visible:true,firstFrame:true});const pending=v.requestRasterBatches();await compiled(records[0]);const prior=records[0];assert.equal(prior.compiled,true);const epoch=v.rasterEpoch;
  // Keep the transition independent from a new raster build; assert actual
  // lifecycle method ordering against the still-pending borrowed representation.
  v.refresh=()=>{};
@@ -120,7 +123,7 @@ for(const change of ['policy','solder','resize','hidden','load','dispose','patht
  if(change==='dispose'){assert.equal(v.requestRasterBatches(),undefined,'a closed Fast/original worker cannot reopen itself');continue;}
  // A reopened/current source owns a fresh epoch; old completion stays inert.
  v.abort=new AbortController();v.state.sourceMeshes=128;v.hidden=false;v.disposed=false;v.ready=true;v.mode='raster';v.state.visible=true;v.state.firstFrame=true;v.raster=()=>{v.renderRasterScene();};
- const next=v.requestRasterBatches();await Promise.resolve();assert.equal(records.length,2);records[1].finish();await next;assert.equal(v.state.rasterBatchState,'active');assert.equal(v.rasterBatches,records[1]);assert.equal(prior.disposed,1);v.releaseRasterBatches();
+ const next=v.requestRasterBatches();assert.equal(records.length,2);await compiled(records[1]);records[1].finish();await next;assert.equal(v.state.rasterBatchState,'active');assert.equal(v.rasterBatches,records[1]);assert.equal(prior.disposed,1);v.releaseRasterBatches();
 }
 {
  const {v}=batchFixture();v.state.visible=true;v.state.firstFrame=true;let builds=0;rasterFactory=async()=>{builds++;return {supported:false,multiDraw:false,reason:'Multi-draw unavailable',dispose(){}};};
@@ -130,8 +133,8 @@ for(const change of ['policy','solder','resize','hidden','load','dispose','patht
 console.log('ok deferred original proof, batch diagnostics, policy/solder/resize/hide/load/dispose/pathtrace invalidation and reopen');
 {
  const {v,records}=batchFixture({compilePending:true});v.state.visible=true;v.state.firstFrame=true;
- const old=v.requestRasterBatches();await Promise.resolve();const oldEpoch=v.rasterEpoch;v.releaseRasterBatches();assert.equal(records[0].disposed,1);
- const current=v.requestRasterBatches();await Promise.resolve();records[1].finish();await current;assert.equal(v.state.rasterBatchState,'active');const epoch=v.state.rasterBatchEpoch;assert(epoch>oldEpoch);
+ const old=v.requestRasterBatches();await compiled(records[0]);const oldEpoch=v.rasterEpoch;v.releaseRasterBatches();assert.equal(records[0].disposed,1);
+ const current=v.requestRasterBatches();await compiled(records[1]);records[1].finish();await current;assert.equal(v.state.rasterBatchState,'active');const epoch=v.state.rasterBatchEpoch;assert(epoch>oldEpoch);
  records[0].finish();await old;assert.equal(v.state.rasterBatchEpoch,epoch);assert.equal(v.state.rasterBatchState,'active');assert.equal(v.rasterBatches,records[1]);assert.equal(records[1].disposed,0);v.releaseRasterBatches();
 }
 console.log('ok older compile resolves after replacement is already active without changing its ownership or diagnostics');

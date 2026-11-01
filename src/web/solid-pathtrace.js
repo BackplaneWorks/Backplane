@@ -3,7 +3,7 @@
 export async function createPathTraceView({canvas,vendorUrl='/viewer/vendor/viewer.js',workerUrl='/viewer/vendor/bvh-worker.js',renderWorkerUrl='/viewer/vendor/render-worker.js',onStatus=()=>{},onSelect=()=>{},maxSamples=32,maxMs=30000,maxPixels=2000000,materialPolicy='cad-studio'}={}) {
   if(!canvas?.transferControlToOffscreen||typeof Worker==='undefined')throw Error('Threaded original-model rendering is unavailable; preview remains available.');
   for(const path of [vendorUrl,workerUrl,renderWorkerUrl]){if(new URL(path,location.href).origin!==location.origin)throw Error('Renderer assets must be served by this hub.');}
-  const worker=new Worker(renderWorkerUrl,{type:'module',name:'backplane-original-model-render'}),pending=new Map();let serial=0,disposed=false,status={phase:'initializing',samples:0},generation=0,cameraQueued=false,latestCamera,lastCameraToken;
+  const worker=new Worker(renderWorkerUrl,{type:'module',name:'backplane-original-model-render'}),pending=new Map();let serial=0,disposed=false,status={phase:'initializing',samples:0},generation=0,cameraQueued=false,latestCamera,lastCameraToken,lastInteractive;
   const send=(method,args={},transfer=[])=>{if(disposed)return Promise.reject(Error('Renderer disposed'));const id=++serial;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error(`Renderer ${method} timed out`));},120000);pending.set(id,{resolve,reject,timer});worker.postMessage({id,method,args},transfer);});};
   const notify=(method,args)=>{if(!disposed)worker.postMessage({method,args});};
   const flushCamera=()=>{if(!cameraQueued)return;cameraQueued=false;notify('camera',latestCamera);};
@@ -21,7 +21,8 @@ export async function createPathTraceView({canvas,vendorUrl='/viewer/vendor/view
   const controller={
     async load(asset){const gen=++generation,signal=asset.signal;if(signal?.aborted)return;const abort=()=>notify('cancel',{generation:gen});signal?.addEventListener('abort',abort,{once:true});try{return await send('load',{...asset,signal:undefined,url:absolute(asset.url),generation:gen});}finally{signal?.removeEventListener('abort',abort);}},
     setCamera(state){const token=JSON.stringify([state.cam,state.projection,state.exposure,state.aperture,state.focusDistance]);if(token===lastCameraToken)return;lastCameraToken=token;latestCamera=state;if(cameraQueued)return;cameraQueued=true;requestAnimationFrame(flushCamera);},
-    setInteractive(on){flushCamera();notify('interactive',{on:!!on});},
+    // Repeated moving notifications must not flush every intermediate camera.
+    setInteractive(on){on=!!on;if(on===lastInteractive)return;lastInteractive=on;flushCamera();notify('interactive',{on});},
     setMode(mode,options={}){flushCamera();notify('mode',{mode,options});},
     setComponents(data,callback){if(callback)onSelect=callback;return send('components',data);},
     selectComponent(id){notify('selection',{id});},
