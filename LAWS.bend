@@ -4966,6 +4966,10 @@ law hist_live_design_closes_picker:
 law hist_picker_scope:
   {CHATSIDE.Actor.scope.keep("@cmp.menu") == False{} : Bool}
 
+law hist_tree_wire_file:
+  {HI.Hier.file(HI.Hier.read(HI.Hier.show(HS.Hist.tree.live([
+    HI.Row{0n, "Root", HS.Hist.git("/r/.git", "c1", "/r", "root.kicad_sch"), False{}}]))), 0n) == "/r/root.kicad_sch" : String}
+
 law hist_playback_same_scope:
   for nf: Map<&2, String>
   for thread: String

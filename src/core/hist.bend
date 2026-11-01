@@ -3,6 +3,7 @@ import ./board.bend as B
 import ./diff.bend as DF
 import ./json.bend as J
 import ./model.bend as M
+import ./hier.bend as HR
 
 # A design's history in the viewer. After each tool call that changed a
 # .kicad_sch or .kicad_pcb, the hub snapshots the thread's KiCad files as
@@ -952,6 +953,12 @@ def Hist.sheet(+p: String, +file: String) -> String:
 # A hierarchy's rows are tab-separated. Its version already belongs to
 # a separate tree slot, so send live file paths here; Sch.value applies
 # the selected commit again when a sheet opens.
+def Hist.tree.live(rs: List<&2, HR.Row>) -> List<&2, HR.Row>:
+  match rs:
+    case Nil{}: Nil{}
+    case HR.Row{d, n, f, loop} <> rest:
+      HR.Row{d, n, Hist.family(f), loop} <> Hist.tree.live(rest)
+
 # Design history is independent of the chat page. A thin render keeps
 # the selected thread's complete step index, with short source labels
 # beside it. The conversation itself still contains only its page.

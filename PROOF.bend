@@ -7134,6 +7134,9 @@ def Laws.hist_live_design_closes_picker():
 def Laws.hist_picker_scope():
   {==}
 
+def Laws.hist_tree_wire_file():
+  {==}
+
 def Laws.hist_playback_same_scope(nf, thread):
   {==}
 

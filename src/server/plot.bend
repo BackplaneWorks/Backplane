@@ -913,7 +913,7 @@ def Pv.child.tree(+root: String) -> IO(Unit):
     ix : String <- Tree.ids(tab, "")
     rx : String <- Tree.refs(tab, "")
     rb : List<&2, U32> <- GT.Git.version(root)
-    IO.print(J.Json.show(J.Json.obj([J.KV{"rows", J.Str{HI.Hier.show(HI.Hier.rows(tab, root))}}, J.KV{"boxes", J.Str{String.trim_end(bx)}},
+    IO.print(J.Json.show(J.Json.obj([J.KV{"rows", J.Str{HI.Hier.show(HS.Hist.tree.live(HI.Hier.rows(tab, root)))}}, J.KV{"boxes", J.Str{String.trim_end(bx)}},
       J.KV{"ids", J.Str{String.trim_end(ix)}}, J.KV{"top", J.Str{HI.Hier.top(rb)}}, J.KV{"refs", J.Str{String.trim_end(rx)}}])))
 
 # a phone or page watching a project's schematic hears its sheets ("" rows
