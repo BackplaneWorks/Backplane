@@ -32,6 +32,7 @@ import { installUsageTabs } from "./usage-tabs.js";
 import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js";
 import { installImprovements } from "./improvements.js";
 import { ImprovementsRpc } from "./improvements-rpc.js";
+import { improvementOrigin, improvementContext } from "./improvements-context.js";
 import { installSidebarKeys } from "./sidebar-keys.js";
 installSidebarKeys();
 import { installFloatingTerminal } from "./floating-terminal.js";
@@ -1685,10 +1686,9 @@ const improvements = installImprovements({
   ready: () => remoteReady && !!attachmentIdentity && !attachmentIdentityPending,
   identity: () => attachmentIdentity,
   context: async () => {
-    const thread = document.querySelector("main.thread-view[data-project]")?.dataset.thread || "";
-    const result = await improvementsRpc.request("improvements.context", { sourceThread: thread });
-    return { app: "Backplane", ...result, view: document.querySelector('.viewer-tabs .on')?.textContent || "Thread",
-      path: currentSession().info?.["view.path:" + thread] || "" };
+    const origin = improvementOrigin({ session: currentSession(), doc: document });
+    const result = await improvementsRpc.request("improvements.context", { sourceThread: origin.thread });
+    return improvementContext(origin, result);
   },
   beforeCapture: async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
