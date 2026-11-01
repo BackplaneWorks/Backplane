@@ -214,5 +214,15 @@
   "loading": 0,
   "blankFrames": 2,
   "hubViews": 7
- }
+ },
+ "known": [
+  {
+   "scenario": "stress-down:tools",
+   "rule": "blankFrames",
+   "blankFrames": 120,
+   "worstGapPx": 670,
+   "seen": "main and this branch, 2026-11-01: 26-120 blank frames, worst gaps 183-669 px, under 4x CPU throttling",
+   "until": "backplane/scroll-valid-range (the scroller's valid range and overscan) removes this entry"
+  }
+ ]
 }

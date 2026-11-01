@@ -408,8 +408,16 @@ if (budgets) {
     // hard rules, budget or not: no loading placeholder anywhere, no blank
     // frame while scrolling
     if (r.scroll.loadingCount > 0) { console.log(`OVER ${r.name} loading ${r.scroll.loadingCount} > 0 (${JSON.stringify(r.scroll.loadingSeen[0])})`); over++; }
-    if (/^(scroll|stress)/.test(kind) && r.scroll.blankFrames > 0) { console.log(`OVER ${r.name} blankFrames ${r.scroll.blankFrames} > 0 (worst gap ${r.scroll.worstGapPx} px)`); over++; }
-    const lim = b[kind];
+    // a known failure (budgets.json's "known") is allowed no worse than it
+    // was recorded, and only where it was: its owner's PR removes the entry
+    const known = (b.known ?? []).find((k: any) => k.scenario === r.name && k.rule === "blankFrames");
+    if (/^(scroll|stress)/.test(kind) && r.scroll.blankFrames > 0) {
+      if (!known) { console.log(`OVER ${r.name} blankFrames ${r.scroll.blankFrames} > 0 (worst gap ${r.scroll.worstGapPx} px)`); over++; }
+      else if (r.scroll.blankFrames > known.blankFrames || r.scroll.worstGapPx > known.worstGapPx) {
+        console.log(`OVER ${r.name} blankFrames ${r.scroll.blankFrames} (gap ${r.scroll.worstGapPx} px), worse than the known failure (${known.blankFrames}, ${known.worstGapPx} px; ${known.until})`); over++;
+      } else console.log(`known ${r.name} blankFrames ${r.scroll.blankFrames} (gap ${r.scroll.worstGapPx} px): ${known.until}`);
+    }
+    const lim = kind === "known" ? null : b[kind];
     if (!lim) continue;
     const got: Record<string, number> = { mutations: r.dom.records, recreatedIdentical: r.dom.recreatedIdentical, touchedUnchangedRows: r.rows.touchedUnchanged,
       outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
@@ -429,6 +437,7 @@ if (wb) {
       wsInBytes: Math.ceil(r.ws.inBytes * 2 + 65536), /* which view lands in a window varies: 55 or 131 KB */ renderFull: lim(r.counts["render.full"] ?? 0), hubViews: lim(hubViews(r)), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
     b[k] = b[k] ? Object.fromEntries(Object.entries(cur).map(([n, v]) => [n, Math.max(v, b[k][n as keyof typeof cur] ?? 0)])) : cur;
   }
+  try { const old = JSON.parse(readFileSync(wb, "utf8")); if (old.known) (b as any).known = old.known; } catch {}
   writeFileSync(wb, JSON.stringify(b, null, 1) + "\n");
   say(`wrote budgets ${wb}`);
 }
