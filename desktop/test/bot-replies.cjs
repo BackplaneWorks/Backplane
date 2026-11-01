@@ -11,7 +11,9 @@ const out=path.join(stage,'bot-replies-'+Date.now());fs.mkdirSync(out);
 const bub='t1790292962-8017',boost='t1793000000-1',other='t1793000000-2';
 const title='12→48 V 480 W Discrete Boost';
 const said=`Routed: [Boost](backplane://thread/${boost}) is done; see [it again](backplane://thread/${boost}) and [the other](backplane://thread/${other}).`;
-const plan='Plan for the inductor swap\nSecond line only the agent should read';
+// long enough that the hub pages its body (src/web/body-windows.js): the
+// case where Reply and Copy were lost
+const plan='Plan for the inductor swap\nSecond line only the agent should read\n\n'+Array.from({length:120},(_,i)=>`- step ${i+1}: measure the ripple at the output and log the inductor temperature`).join('\n');
 const home=fs.mkdtempSync(path.join(os.tmpdir(),'backplane-bot-replies-'));
 const project=path.join(home,'project'),agents=path.join(home,'agents');fs.mkdirSync(project);fs.mkdirSync(agents);
 for(const name of ['claude','codex','grok','muse','agy','opencode'])fs.writeFileSync(path.join(agents,name),'#!/bin/sh\nexit 127\n',{mode:0o755});
@@ -41,6 +43,17 @@ let app,page;const start=performance.now();
  await page.screenshot({path:path.join(out,'header.png')});
  await head.click();await ready(boost);await chat();
  // Reply: the chip over the composer, then the sent message's line
+ // the plan is paged, and keeps its own Reply and a whole-message Copy
+ await page.locator('[data-id="m-bot2"] .body-window').first().waitFor();
+ assert.equal(await page.locator('[data-id="m-bot2"] > button.reply').count(),1,'Reply sits on the paged message');
+ assert.equal(await page.getByText('Copy displayed part').count(),0);
+ const copyBtn=page.locator('[data-id="m-bot2"] > button.copy');
+ assert.equal((await copyBtn.innerText()).trim(),'Copy');
+ await app.evaluate(({clipboard})=>clipboard.writeText(''));
+ await page.locator('[data-id="m-bot2"]').hover();await copyBtn.click();
+ await page.waitForFunction(()=>true);
+ let copied='';for(let i=0;i<50&&copied!==plan;i++){copied=await app.evaluate(({clipboard})=>clipboard.readText());if(copied!==plan)await new Promise(r=>setTimeout(r,100));}
+ assert.equal(copied,plan,'Copy gives the whole message, not the pages on screen');
  await page.locator('[data-id="m-bot2"]').hover();
  await page.locator('[data-id="m-bot2"] button.reply').click();
  const chip=page.locator('.reply-chip');
@@ -60,7 +73,8 @@ let app,page;const start=performance.now();
  const sent=log.find(e=>e.$==='MessagePosted'&&e.thread===bub&&e.role==='user');
  assert(sent,'no person message in the log');
  assert(sent.text.startsWith('<in_reply_to msg=m-bot2 chars='),sent.text);
- assert(sent.text.includes('Second line only the agent should read\n</in_reply_to>\n\nyes, go ahead'),sent.text);
+ assert(sent.text.includes('Second line only the agent should read'),sent.text);
+ assert(sent.text.includes('\n</in_reply_to>\n\nyes, go ahead'),sent.text);
  await page.screenshot({path:path.join(out,'replied.png')});
  // the line brings the original into view, flashed
  await line.locator('a.rto').click();

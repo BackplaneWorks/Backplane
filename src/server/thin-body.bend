@@ -10,6 +10,7 @@ import ./db.bend as D
 import ../core/hub.bend as HB
 import ../core/thin-live.bend as TL
 import ../core/presentation.bend as P
+import ../core/reply.bend as RTO
 
 # Negotiated read-only body windows. Ordinary short messages remain whole;
 # large bodies retain their immutable source and use bounded UTF-8 pages.
@@ -19,6 +20,9 @@ def Body.enabled(web: Bool, p: J.Json) -> Bool:
 
 def Body.large.entry(e: M.Entry, blocks: T.Blocks, threshold: Nat) -> Bool:
   match e:
+    # a person's reply stays whole: its "In reply to" line comes from the
+    # block its pages would show raw (core/reply.bend)
+    case M.Msg{_, _, M.User{}, +x, _}: Bool.and(Bool.not(RTO.Rto.is(x)), Nat.is_gt(T.Blocks.n(blocks), threshold))
     case M.Msg{_, _, _, _, _}: Nat.is_gt(T.Blocks.n(blocks), threshold)
     case _: Nat.is_gt(T.Blocks.n(blocks), 1n)
 

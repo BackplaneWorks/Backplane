@@ -103,6 +103,17 @@ def Rto.parse(ok: Bool, +s: String) -> Maybe<&2, RtoBlock>:
 def Rto.of(+text: String) -> Maybe<&2, RtoBlock>:
   Rto.parse(String.starts_with(text, Rto.open()), text)
 
+# whether a text carries a reply block (the hub never pages such a person's
+# message, src/server/thin-body.bend's Body.large.entry: it is short, and
+# its pages would be cut from the stored text, block and all)
+def Rto.is.k(m: Maybe<&2, RtoBlock>) -> Bool:
+  match m:
+    case Some{_}: True{}
+    case None{}: False{}
+
+def Rto.is(+text: String) -> Bool:
+  Rto.is.k(Rto.of(text))
+
 def Rto.text.k(m: Maybe<&2, RtoBlock>, +text: String) -> String:
   match m:
     case Some{RtoBlock{_, _, +b}}: b

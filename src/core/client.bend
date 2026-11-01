@@ -15858,10 +15858,57 @@ def Rpl.pick(to: Bool, +u: Ui, +value: String) -> Ui:
     case True{}: Rpl.set(u, value)
     case False{}: Rpl.drop(u)
 
+# "copy-entry" (value: a message's id): the whole message, whatever the page
+# draws of it (a long one arrives in pages, src/web/body-windows.js, whose
+# Copy asks for it here, where all of it is): a reply's text as written, a
+# person's without the reply block and attachment lines; at most Cpy.max()
+# UTF-8 bytes (what a hub-drawn page takes in one copy command, thin.js)
+def Cpy.max() -> Nat:
+  120000n
+
+def Cpy.bytes(+c: U32) -> Nat:
+  Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))
+
+def Cpy.cap.go(s: String, +n: Nat, acc: String, stop: Bool) -> String:
+  match s stop:
+    case _ True{}: String.reverse(acc)
+    case SNil{} False{}: String.reverse(acc)
+    case SCon{Chr{+c}, t} False{}:
+      Cpy.cap.go(t, Nat.add(n, Cpy.bytes(c)), SCon{Chr{c}, acc}, Nat.is_gt(Nat.add(Nat.add(n, Cpy.bytes(c)), 4n), Cpy.max()))
+
+def Cpy.cap(s: String) -> String:
+  Cpy.cap.go(s, 0n, "", False{})
+
+def Cpy.one(+e: M.Entry, +id: String) -> Maybe<&2, String>:
+  match e:
+    case M.Msg{+i, _, M.User{}, +x, _}: Bool.pick(Maybe<&2, String>, String.eq(i, id), Some{AT.Att.body(RTO.Rto.text(x))}, None{})
+    case M.Msg{+i, _, _, +x, _}: Bool.pick(Maybe<&2, String>, String.eq(i, id), Some{x}, None{})
+    case _: None{}
+
+def Cpy.find(es: List<&2, M.Entry>, +id: String, found: Maybe<&2, String>) -> Maybe<&2, String>:
+  match es found:
+    case _ Some{+x}: Some{x}
+    case Nil{} None{}: None{}
+    case +e <> t None{}: Cpy.find(t, id, Cpy.one(e, id))
+
+def Cpy.cmds(m: Maybe<&2, String>) -> List<&2, Cmd>:
+  match m:
+    case Some{+x}: [Copy{Cpy.cap(x)}]
+    case None{}: Nil{}
+
+# the whole of message `id` of the thread on show, to the clipboard
+def Cpy.act(+u: Ui, +id: String) -> Act:
+  Act{u, Cpy.cmds(Cpy.find(M.State.mine(Ui.state(u), Ui.sel(u)), id, None{}))}
+
+def Ui.act.cpy(cpy: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match cpy:
+    case True{}: Cpy.act(u, value)
+    case False{}: Ui.act.revert(String.eq(action, "revert-no"), u, action, value)
+
 def Ui.act.rpl(rpl: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match rpl:
     case True{}: Act{Rpl.pick(String.eq(action, "reply-to"), u, value), [Focus{"composer"}]}
-    case False{}: Ui.act.revert(String.eq(action, "revert-no"), u, action, value)
+    case False{}: Ui.act.cpy(String.eq(action, "copy-entry"), u, action, value)
 
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
   Ui.act.rpl(Bool.or(String.eq(action, "reply-to"), String.eq(action, "reply-drop")), u, action, value)
