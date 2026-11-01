@@ -440,6 +440,15 @@ class View {
       this.follow = false;
       this.later();
     });
+    const inspect = (e) => {
+      const record = componentSources.get(this.key);
+      if (!record) return;
+      const b = canvas.getBoundingClientRect();
+      const x = (e.clientX-b.left-this.ox)/this.scale/1000, y = (e.clientY-b.top-this.oy)/this.scale/1000;
+      const selected = hitComponent(record.data,x,y,{off:this.off});
+      selectComponent(selected?.id || '',this.key);
+      record.onSelect?.(selected?.id || '');
+    };
     const up = (e) => {
       const tap = !this.treeWaiting() && e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
@@ -451,15 +460,7 @@ class View {
         else {
           // Cross-probe (main) and saved-component inspection (viewer lane)
           // both follow the same click.
-          if (e.pointerType !== "mouse") this.pick(e.clientX, e.clientY);
-          const record = componentSources.get(this.key);
-          if (record) {
-            const b = canvas.getBoundingClientRect();
-            const x = (e.clientX-b.left-this.ox)/this.scale/1000, y = (e.clientY-b.top-this.oy)/this.scale/1000;
-            const selected = hitComponent(record.data,x,y,{off:this.off});
-            selectComponent(selected?.id || '',this.key);
-            record.onSelect?.(selected?.id || '');
-          }
+          if (e.pointerType !== "mouse") { this.pick(e.clientX, e.clientY);inspect(e); }
         }
       }
       this.pinch = null;
@@ -481,6 +482,9 @@ class View {
       if (!this.mouseTap || this.sheetAt(e.clientX, e.clientY) || e.detail !== 1) return;
       this.beforeClick = this.probe;
       this.pick(e.clientX, e.clientY);
+      // Opening the inspector can move the PCB, so both hits read the
+      // clicked board point before that layout change.
+      inspect(e);
     });
     on("wheel", (e) => {
       this.gesture++;

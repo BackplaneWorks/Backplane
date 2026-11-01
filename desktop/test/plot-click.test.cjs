@@ -4,14 +4,15 @@ function harness() {
   const source = fs.readFileSync(require.resolve('../../src/web/plot2d.js'), 'utf8');
   const start = source.indexOf('class View {'), end = source.indexOf('\n}\n', start) + 2;
   const park = source.slice(source.indexOf('function park(v) {'), source.indexOf('\nfunction mountOne('));
-  const handlers = {}, probes = [], navigations = [];let reads = 0, resize, wait = Promise.resolve();
+  const handlers = {}, probes = [], navigations = [], hits = [];let rect = { left: 0, top: 0 };let reads = 0, resize, wait = Promise.resolve();
   const canvas = { get clientWidth() { reads++;return 900; }, get clientHeight() { reads++;return 600; }, isConnected: true,
     addEventListener: (name, fn) => { handlers[name] = fn; }, setPointerCapture() {}, focus() {},
     closest: () => ({ querySelector: selector => ({ click: () => navigations.push(selector) }) }),
-    getBoundingClientRect: () => ({ left: 0, top: 0 }), classList: { add() {}, remove() {} } };
+    getBoundingClientRect: () => rect, classList: { add() {}, remove() {} } };
   const context = { AbortController, ResizeObserver: class { constructor(fn) { resize = fn; } observe() {} }, requestAnimationFrame() {},
     views: new Map(), left: new Map(), componentSources: new Map(), sheeted: null, need: () => wait,
-    probed: value => probes.push(value), under: () => [], partAt: () => null,
+    hitComponent: () => ({ id: 'U1' }), selectComponent() {},
+    probed: value => probes.push(value), under: (_, x, y) => { hits.push([x,y]);return []; }, partAt: () => null,
     groupsOf: () => [], P: { pickBoard: () => null, pickSheet: () => null, clickProbe: () => 'r:new' }, wheelKind: () => 'wheel' };
   vm.runInNewContext(source.slice(start, end) + '\n' + park + '\nglobalThis.View = View;', context);
   const view = new context.View(canvas, '');context.views.set(canvas, view);
@@ -19,7 +20,7 @@ function harness() {
   const fire = (name, fields = {}) => handlers[name]({ type: name, pointerType: 'mouse', pointerId: 1, button: 0,
     detail: 1, clientX: 20, clientY: 30, deltaY: 10, deltaX: 0, deltaMode: 0, preventDefault() {}, ...fields });
   const click = detail => { fire('pointerdown');fire('pointerup');fire('click', { detail }); };
-  return { view, probes, navigations, fire, click, park: () => context.park(view), saved: () => context.left.get(view.key), reads: () => reads, resize: (w, h) => resize([{ contentRect: { width: w, height: h } }]),
+  return { view, probes, navigations, hits, fire, click, inspect(fn) { context.componentSources.set(view.key, { data: {}, onSelect: fn }); }, setRect(value) { rect = value; }, park: () => context.park(view), saved: () => context.left.get(view.key), reads: () => reads, resize: (w, h) => resize([{ contentRect: { width: w, height: h } }]),
     defer() { let release;wait = new Promise(resolve => { release = resolve; });return release; } };
 }
 
@@ -91,4 +92,12 @@ test('wheel zoom uses cached viewport geometry and refreshes it on resize', () =
   h.resize(1200, 800);
   assert.equal(h.view.viewport.width, 1200);
   assert.equal(h.view.zoomFactor(0), 0.9 * 8 / 4 / h.view.scale);
+});
+
+
+test('opening the component inspector keeps the net hit at the clicked board point', async () => {
+  const h = harness();h.view.scale = 1;h.view.ox = 0;h.view.oy = 0;
+  h.inspect(() => { h.setRect({ left: 100, top: 200 });h.view.ox = 400;h.view.oy = 500; });
+  h.click(1);await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(h.hits, [[20,30],[20,30]], 'inspection can resize and move the PCB before its net information arrives');
 });
