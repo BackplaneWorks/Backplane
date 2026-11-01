@@ -110,6 +110,7 @@ try {
     .map((d) => [join(pwCache, d, "chrome-linux64/chrome"), join(pwCache, d, "chrome-linux/chrome")]).flat().find((p) => existsSync(p)) ?? "" : ""));
   browser = await chromium.launch({ headless: !flag("headed"), ...(chrome ? { executablePath: chrome } : {}), args: ["--enable-blink-features=LongAnimationFrameTiming"] });
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: `http://127.0.0.1:${port}` });
   await ctx.addInitScript({ path: join(import.meta.dir, "instrument.js") });
   const page = await ctx.newPage();
   page.on("pageerror", (e: any) => say(`page error: ${e.message}`));
@@ -161,6 +162,13 @@ try {
   };
   const metrics = async () => Object.fromEntries((await cdp.send("Performance.getMetrics")).metrics.map((m: any) => [m.name, m.value]));
   const composer = () => page.locator("#composer");
+  // a paste as the person makes one: the clipboard, then Ctrl+V (one input
+  // event; Playwright's insertText types a multi-line text as an input
+  // event per line, which is no paste)
+  const paste = async (text: string) => {
+    await page.evaluate((t: string) => navigator.clipboard.writeText(t), text);
+    await page.keyboard.press("Control+V");
+  };
   const timeline = () => page.locator("#timeline");
   const sendFrom = async (p: any, text: string) => {
     await p.locator("#composer").click();
@@ -253,16 +261,6 @@ try {
       await measure("type1b", target, () => page.keyboard.type("b"));
     }
     if (scenarios.includes("burst")) { await composer().click(); await measure("burst", target, () => page.keyboard.type("the quick brown fox jumps ov", { delay: 30 })); }
-    if (scenarios.includes("paste")) {
-      await composer().click();
-      const big = Array.from({ length: 400 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
-      await measure("paste", target, () => page.keyboard.insertText(big));
-    }
-    if (scenarios.includes("pastebig")) {
-      await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
-      const big = Array.from({ length: 4000 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
-      await measure("pastebig", target, () => page.keyboard.insertText(big), { max: 60000 });
-    }
     // clear the draft (not measured)
     await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
     if (scenarios.includes("scroll")) {
@@ -291,6 +289,18 @@ try {
       for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 2000);
       await quiet(page, 600);
     }
+    if (scenarios.includes("paste")) {
+      await composer().click();
+      const big = Array.from({ length: 400 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
+      await measure("paste", target, () => paste(big));
+    }
+    if (scenarios.includes("pastebig")) {
+      await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
+      const big = Array.from({ length: 4000 }, (_, i) => `line ${i}: ${"pasted text ".repeat(4)}`).join("\n");
+      await measure("pastebig", target, () => paste(big), { max: 60000 });
+    }
+    // clear the draft (not measured)
+    await composer().click(); await page.keyboard.press("Control+A"); await page.keyboard.press("Delete"); await quiet(page, 600);
     // (after a longer quiet: a view still on its way is not the tick's)
     if (scenarios.includes("clock")) await quiet(page, 1500, 20000);
     if (scenarios.includes("clock")) await measure("clock", target, () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))));
@@ -383,6 +393,10 @@ function markdown(rep: any) {
   function c(r: any) { return Object.entries(r.counts).sort((a: any, b: any) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k} ${v}`).join(", "); }
 }
 
+// hub views a window took (replies to view.* requests): stable even where
+// their sizes are not
+const hubViews = (r: any) => Object.entries(r.hubMsgs as Record<string, any>).filter(([k]) => k.startsWith("reply:view.")).reduce((n, [, v]) => n + v.n, 0);
+
 // The gate
 // --------
 const budgets = opt("gate", "");
@@ -398,7 +412,7 @@ if (budgets) {
     const lim = b[kind];
     if (!lim) continue;
     const got: Record<string, number> = { mutations: r.dom.records, recreatedIdentical: r.dom.recreatedIdentical, touchedUnchangedRows: r.rows.touchedUnchanged,
-      outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
+      outsideRecords: r.waste.outsideRecords, wsInBytes: r.ws.inBytes, renderFull: r.counts["render.full"] ?? 0, hubViews: hubViews(r), loading: r.scroll.loadingCount, blankFrames: r.scroll.blankFrames, domPatch: r.counts["dom.patch"] ?? 0 };
     for (const [k, max] of Object.entries(lim as Record<string, number>)) if (k !== "loading" && k !== "blankFrames" && k in got && got[k] > max) { console.log(`OVER ${r.name} ${k} ${got[k]} > ${max}`); over++; }
   }
   if (failed) { console.log("the run failed"); over++; }
@@ -412,7 +426,7 @@ if (wb) {
     const k = r.name.split(":")[0];
     const lim = (x: number) => Math.ceil(x * 1.25 + 2);
     const cur = { mutations: lim(r.dom.records), recreatedIdentical: lim(r.dom.recreatedIdentical), touchedUnchangedRows: lim(r.rows.touchedUnchanged), outsideRecords: lim(r.waste.outsideRecords),
-      wsInBytes: lim(r.ws.inBytes), renderFull: lim(r.counts["render.full"] ?? 0), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
+      wsInBytes: Math.ceil(r.ws.inBytes * 2 + 65536), /* which view lands in a window varies: 55 or 131 KB */ renderFull: lim(r.counts["render.full"] ?? 0), hubViews: lim(hubViews(r)), domPatch: lim(r.counts["dom.patch"] ?? 0), loading: 0, blankFrames: lim(r.scroll.blankFrames) };
     b[k] = b[k] ? Object.fromEntries(Object.entries(cur).map(([n, v]) => [n, Math.max(v, b[k][n as keyof typeof cur] ?? 0)])) : cur;
   }
   writeFileSync(wb, JSON.stringify(b, null, 1) + "\n");
