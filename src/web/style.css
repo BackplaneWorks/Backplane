@@ -1451,6 +1451,8 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .solid-split .solid-layout > .solid-pcb { display: block; border-left: 1px solid var(--line); }
 .solid-layout .viewer-stage > canvas { width: 100%; height: 100%; }
 .solid-layout .viewer-stage > canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Studio's canvas covers the preview's outline, so draw it above both. */
+.solid-layout .viewer-stage:has(> canvas:focus-visible)::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 2px var(--accent); pointer-events: none; z-index: 9; }
 .solid-inspector { width: 320px; max-width: 44%; flex: none; overflow-y: auto; overscroll-behavior: contain; border-left: 1px solid var(--line); padding: 12px; background: var(--panel); }
 .solid-inspector:empty, .solid-inspector[hidden], .solid-workbench [hidden] { display: none !important; }
 .solid-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
