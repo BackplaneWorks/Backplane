@@ -6143,7 +6143,13 @@ law far_backoff:
 # lines the log holds that this build cannot decode give the feed a history
 # of its own, so mirrors pull it afresh
 law far_epoch_on_unknown_lines:
-  {[FR.Fr.history.body("x", 3n, 3n), FR.Fr.history.body("x", 5n, 3n)] == ["x|view:2", "x|unknown:2|view:2"] : List<&2, String>}
+  {[FR.Fr.history.body("x", 3n, 3n), FR.Fr.history.body("x", 5n, 3n)] == ["x|view:3", "x|unknown:2|view:3"] : List<&2, String>}
+
+# the share version is part of the history's identity: the same log under
+# view:3 is another history than under view:2, so every mirror of it is sent
+# one snapshot after the far_line repair (far.bend's Fr.view.tag)
+law far_epoch_view_bumped:
+  {Bool.not(String.eq(FR.Fr.history.body("x", 3n, 3n), "x|view:2")) == True{} : Bool}
 
 # the hub's heartbeat draws nothing and changes nothing; a link silent for
 # longer than the limit is dead, one heard within it is not

@@ -85,8 +85,8 @@ try {
   const run = async (home: string) => {
     const t0 = performance.now();
     // a .bend probe runs under bend itself (its IO main), a built one as it is
-    const cmd = probe.endsWith(".bend") ? ["bend", resolve(probe), home] : [resolve(probe), home];
-    const p = Bun.spawn(cmd, { env: { ...env, PATH: `${process.env.HOME}/.bend/bin:${env.PATH}`, BEND_NO_TELEMETRY: "1", HOME: process.env.HOME ?? root }, stdout: "pipe", stderr: "pipe" });
+    const cmd = probe.endsWith(".bend") ? ["sh", "-c", 'ulimit -s 1048576 2>/dev/null; exec bend "$@"', "sh", resolve(probe), home] : [resolve(probe), home];
+    const p = Bun.spawn(cmd, { env: { ...env, PATH: `${process.env.HOME}/.bend/bin:${env.PATH}`, BEND_NO_TELEMETRY: "1", HOME: process.env.HOME ?? root, BUN_JSC_maxPerThreadStackUsage: "4000000000" }, stdout: "pipe", stderr: "pipe" });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     await p.exited;
     return { ms: Math.round(performance.now() - t0), log: out + err };
