@@ -14920,3 +14920,17 @@ def Laws.timeline_valid_end_empty(e, ov, view, total):
 
 def Laws.timeline_valid_edge_untaken(m, x, max):
   {==}
+
+# BEGIN sidebar rows (H)
+def Laws.plane_tally_words_plain(): {==}
+
+def Laws.plane_tally_words_rich(): {==}
+
+def Laws.plane_tally_words_stalled(): {==}
+
+def Laws.plane_tally_counts_stalled(): {==}
+
+def Laws.plane_list_same_stalled(): {==}
+
+def Laws.uber_rows_same_count(): {==}
+# END sidebar rows (H)

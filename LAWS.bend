@@ -14654,3 +14654,29 @@ law timeline_valid_edge_untaken:
   for +x: TLVIRTUAL.Px
   for max: Bool
   {TLVIRTUAL.Edge.pick(False{}, m, x, max) == m : Maybe<&2, TLVIRTUAL.Px>}
+
+# BEGIN sidebar rows (H): the uberbot row's count without the whole index
+# The plane's counts, as they were when Plane.hot read every liveness
+# setting and every key of the signal index on each render; it now asks
+# those of each thread walked (core/plane.bend's Plane.hot.is)
+law plane_tally_words_plain:
+  {PLN.Plane.tally.words(PLN.Plane.demo(), 200000n) == "2 need you · 1 failed · 2 running" : String}
+
+law plane_tally_words_rich:
+  {PLN.Plane.tally.words(PLN.Plane.demo.rich(), 200000n) == "4 need you · 1 failed · 5 running" : String}
+
+# a thread whose liveness says it stalled needs the person; one that says it did not, does not
+law plane_tally_words_stalled:
+  {PLN.Plane.tally.words(PLN.Plane.demo.stalled(), 200000n) == "6 need you · 1 failed · 5 running" : String}
+
+law plane_tally_counts_stalled:
+  {PLN.Plane.tally.same(PLN.Plane.demo.stalled(), 200000n) == True{} : Bool}
+
+law plane_list_same_stalled:
+  {PLN.Plane.list.same(PLN.Plane.demo.stalled(), 200000n) == True{} : Bool}
+
+# the uberbot row counts from the sidebar's own rows, a project held live,
+# as from Side.rows.ix (web/bots.bend's WB.uber.rows)
+law uber_rows_same_count:
+  {Bool.and(PLN.Plane.tally.at.same(PLN.Plane.demo.stalled(), 200000n, "p1"), PLN.Plane.tally.at.same(PLN.Plane.demo.rich(), 200000n, "p1")) == True{} : Bool}
+# END sidebar rows (H)

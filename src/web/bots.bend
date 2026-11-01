@@ -996,6 +996,20 @@ def WB.uber.m(+lc: I.Loc, m: Maybe<&2, BI.BRow>, +u: U.Ui, +ix: U.SIx) -> List<&
 def WB.uber(+lc: I.Loc, +u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
   WB.uber.m(lc, BI.BU.uber(u), u, ix)
 
+# the same from the sidebar's own rows (View.sidebar.frame.rows's raw:
+# Side.rows.ix.at, the open thread's project held live), which hold the
+# same rows as Side.rows.ix in another order, and a tally only adds: the
+# sidebar no longer makes them twice (law uber_rows_same_count)
+def WB.uber.rows.m(+lc: I.Loc, m: Maybe<&2, BI.BRow>, +u: U.Ui, +ix: U.SIx, rows: List<&2, U.SRow>) -> List<&2, D.Node>:
+  match m:
+    case Some{r}:
+      [WB.uber.k(lc, r, PL.Plane.counts.t(lc, PL.Plane.tally(u, ix, rows)))]
+    case None{}:
+      Nil{}
+
+def WB.uber.rows(+lc: I.Loc, +u: U.Ui, +ix: U.SIx, rows: List<&2, U.SRow>) -> List<&2, D.Node>:
+  WB.uber.rows.m(lc, BI.BU.uber(u), u, ix, rows)
+
 # the dot of a row: thread states and bot moods alike
 def WB.pdot(+s: String) -> String:
   Bool.pick(String, Bool.or(String.eq(s, "approval"), String.eq(s, "wait")), "dot approval",
