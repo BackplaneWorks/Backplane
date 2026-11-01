@@ -2172,7 +2172,10 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .codeblock pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; padding-right: 56px; }
   .body pre, .body code { overflow-wrap: anywhere; }
   .body table { font-size: calc(12px * var(--text-scale, 100) / 100); }
-  .body :is(td, th) { overflow-wrap: break-word; word-break: normal; hyphens: auto; }
+  .body :is(td, th) { overflow-wrap: anywhere; word-break: normal; }
+  /* a diff's lines wrap under their numbers */
+  .dl { white-space: pre-wrap; }
+  .dl .code { overflow-wrap: anywhere; }
 
   /* the viewer: one bar of views over its own tools */
   .viewer > .viewer-tabs { min-height: 48px; padding: env(safe-area-inset-top) max(6px, env(safe-area-inset-right)) 0 max(6px, env(safe-area-inset-left)); }
