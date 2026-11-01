@@ -67,6 +67,7 @@ import ./thin-body.bend as TBODY
 import ./thin-actor.bend as TA
 import ./terminal-output.bend as TOUT
 import ./thin-sidebar-wire.bend as TSW
+import ./thin-view-delta.bend as TVD
 import ../core/thin-pace.bend as TPACE
 import ./thin-mail.bend as TMAIL
 import ../core/thin.bend as THIN
@@ -12196,7 +12197,7 @@ def Hub.thin.respond.region(output: TSW.Output, h: Hub, client: U32, o: J.Json, 
       Hub.thin.respond.full(h, client, o, result, c, ThinContext.with_actors(context, actors), now)
 
 def Hub.thin.respond(h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
-  Hub.thin.respond.region(TSW.Region.output(String.eq(Client.thin.mode(c), "view-web"), TA.Bodies.record(ThinContext.actors(context), result), result, J.Json.get_obj(o, "p")),
+  Hub.thin.respond.region(TVD.Vd.output(String.eq(Client.thin.mode(c), "view-web"), TA.Bodies.record(ThinContext.actors(context), result), result, J.Json.get_obj(o, "p")),
     h, client, o, c, context, now)
 
 def Hub.thin.cursor.empty(+empty: Bool, +text: String, +epoch: String, +target: J.Json, +query: String) -> Maybe<&2, Nat>:
@@ -12318,14 +12319,16 @@ def Hub.thin.native_fit.start(+acted: TA.Acted, h: Hub, +client: U32, +o: J.Json
   Hub.thin.native_fit.loop(8n, Nat.is_le(J.Json.bytes(Hub.thin.native_fit.envelope(o, TA.Rendered.result(trial), context, version)), 262144n), trial,
     acted, h, client, o, c, now, context, p, key, ms, shown, index, epoch, rows, stream, revision, version)
 
-# Fit the COMPLETE logical picture as well as its encoded region reply.
+# Fit the COMPLETE logical picture as well as its encoded region reply
+# (for a client that takes the view delta, without its own long draft,
+# which it is never sent back: thin-view-delta.bend's Vd.measured).
 # A small wire sidebar reference cannot conceal an oversized restored tree.
 # Reserve 32 KiB for the largest escaped 4 KiB live splice and its metadata;
 # the existing 262144-byte transport cap stays mandatory and unchanged.
 def Hub.thin.web_fit.answer(+st: M.State, +revision: Nat, +c: Client, +o: J.Json, +context: ThinContext, result: J.Json) -> J.Json:
   +p = J.Json.get_obj(o, "p")
   J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"ok", J.Flag{True{}}},
-    J.KV{"result", Hub.thin.result(AccountsRpc.picture(Client.accounts(c), st, J.Json.get_obj(p, "target"), result), p, ThinContext.view(context), "web", revision)}])
+    J.KV{"result", Hub.thin.result(AccountsRpc.picture(Client.accounts(c), st, J.Json.get_obj(p, "target"), TVD.Vd.measured(p, result)), p, ThinContext.view(context), "web", revision)}])
 
 def Hub.thin.web_fit.region(output: TSW.Output, st: M.State, revision: Nat, c: Client, o: J.Json, context: ThinContext) -> Bool:
   match output:

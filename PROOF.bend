@@ -1,126 +1,251 @@
 import ./src/core/plot-error.bend as PLOTERROR
+
 import ./src/web/workspace.bend as WSK
+
 import ./src/core/search-fold.bend as SFOLD
+
 import ./src/core/live-checkpoint.bend as LCP
+
 import ./src/core/restartretry.bend as WDRETRY
+
 import ./src/core/signal.bend as SIGREV
+
 import ./test/liveness_proof.bend as LVPROOF
+
 import ./src/core/liveness.bend as LIVEWATCH
+
 import ./test/timeline_virtual_proof.bend as TLVIRTUALPROOF
+
 import ./test/native_history_window_proof.bend as NATIVEHISTORYPROOF
+
 import ./src/server/thin-actor.bend as CHATSIDE
+
 import ./src/core/sidebar-read.bend as SIDEREAD
+
 import Base
+
 import ./src/server/thin-sidebar.bend as CHATDERIVED
+
 import ./test/sidebar_input_proof.bend as SIDEINPUTPROOF
+
 import ./src/core/thin.bend as THINL # S3 lazy thin index
+
 import ./src/server/thin-mail.bend as TMAILL # S3 lazy mail cache
+
 import ./src/core/storedb.bend as SDB # S1 indexed store
+
 import ./test/mobile_loading_proof.bend as PRESENTPROOF
+
 import ./src/core/mailcontinuity.bend as MCN
+
 import ./test/mem_score_lazy_proof.bend as MSCORE
+
 import ./src/core/refresh.bend as RFSH
+
 import ./src/core/auth.bend as AUTH
+
 import ./src/core/http.bend as HTTPAUTH
+
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
+
 import ./src/app/side_rows.bend as SR
+
 import ./src/app/side_row_types.bend as SRT
+
 import ./src/gfx/draw.bend as D
+
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
+
 import ./src/server/server.bend as MPCREDIT # mail perf
+
 import ./src/core/schematic.bend as SC # kicad fork viewers
+
 import ./src/core/charter.bend as CH # mail 2c
+
 import ./src/core/mailrun.bend as MRUN # mail 2c
+
 import ./src/app/mailroom.bend as MRUI # mail ui
+
 import ./src/server/mailstore.bend as MIX # mail index
+
 import ./src/app/mm.bend as MM # window memos
+
 import ./src/core/kexport.bend as KEX
+
 import ./src/core/i18n.bend as I18
+
 import ./test/fixtures/i18n_fallback.bend as I18F
+
 import ./src/core/mail.bend as ML # mail 1
+
 import ./src/core/mailbody.bend as MB # mail 2a
+
 import ./src/core/mailview.bend as MVW # mail view
+
 import ./src/core/ref.bend as MREF # mail 2b
+
 import ./src/core/stamp.bend as STP
+
 import ./src/core/kihealth.bend as KH
+
 import ./src/core/tz.bend as TZ
+
 import ./src/core/when.bend as WH
+
 import ./src/core/sched.bend as SCH
+
 import ./src/core/locks.bend as LCK
+
 import ./src/gfx/text.bend as X
+
 import ./src/core/bothub.bend as BHS
+
 import ./src/core/bot.bend as BOT
+
 import ./src/core/botui.bend as BU
+
 import ./LAWS.bend as Laws
+
 import ./src/core/model.bend as M
+
 import ./src/app/viewer.bend as V
+
 import ./src/core/board.bend as B
+
 import ./src/core/semver.bend as SV
+
 import ./src/app/nui.bend as N
+
 import ./src/core/hub.bend as H
+
 import ./src/core/ship.bend as SHP # deploy main
+
 import ./src/core/refs.bend as RF
+
 import ./src/core/todo.bend as TD
+
 import ./src/core/acp.bend as AC
+
 import ./src/core/mcp.bend as MC
+
 import ./src/core/ride.bend as RD
+
 import ./src/core/handoff.bend as HD
+
 import ./src/core/agent.bend as AG
+
 import ./src/core/fuzzy.bend as FZ
+
 import ./src/mobile/notify.bend as Nt
+
 import ./src/core/notice.bend as NO
+
 import ./src/core/codec.bend as C
+
 import ./src/core/json.bend as J
+
 import ./src/core/attach.bend as AT
+
 import ./src/core/svg.bend as SVG
+
 import ./src/core/lightbox.bend as LBX
+
 import ./src/core/links.bend as LK
+
 import ./src/web/dom.bend as DM
+
 import ./src/core/tailnet.bend as TN
+
 import ./src/gfx/tiles.bend as T
+
 import ./src/gfx/raster.bend as R
+
 import ./src/gfx/font.bend as F
+
 import ./src/app/layout.bend as L
+
 import ./src/core/eq.bend as Q
+
+import ./src/server/thin-content-eq.bend as CONTENTEQ # view delta (H)
+
+import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+
 import ./src/core/gh.bend as GH
+
 import ./src/core/fold.bend as FO
+
 import ./src/core/subs.bend as SB
+
 import ./src/core/plot.bend as PL
+
 import ./src/core/look.bend as LO
+
 import ./src/core/hist.bend as HS
+
 import ./src/mobile/view.bend as MV
+
 import ./src/core/pcb3d.bend as P3
+
 import ./src/gfx/mesh.bend as MS
+
 import ./src/gfx/face.bend as FA
+
 import ./src/core/glb.bend as G
+
 import ./src/mobile/picker.bend as MP
+
 import ./src/mobile/hubs.bend as Hb
+
 import ./src/mobile/bots.bend as MBN
+
 import ./src/core/space.bend as SPC
+
 import ./src/core/client.bend as U
+
 import ./src/core/menu.bend as MN
+
 import ./src/core/hier.bend as HI
 
 import ./src/core/boot.bend as BT
+
 import ./src/core/store.bend as ST
+
 import ./src/core/thin.bend as JTHIN # J2: JS stack
+
 import ./src/core/sign.bend as SG
+
 import ./src/core/cron.bend as CR
+
 import ./src/core/google.bend as GO
+
 import ./src/core/cat.bend as CAT
+
 import ./src/core/voice.bend as VO
+
 import ./src/core/once.bend as ON
+
 import ./src/core/bom.bend as BOM
+
 import ./src/core/cad.bend as CAD
+
 import ./src/core/checks.bend as CHK
+
 import ./src/core/release.bend as REL
+
 import ./src/core/plane.bend as PLN
+
 import ./src/core/uber.bend as UBR
+
 import ./src/core/ubersync.bend as UBS
+
 import ./src/core/ubop.bend as UBO
+
 import ./test/sidebar_content_proof.bend as CONTENTPROOF
+
 import ./test/sidebar_full_branch_test.bend as FULLBRANCH
+
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
+
 import ./test/secret_proof.bend as SECPROOF
 
 # Lemmas
@@ -3370,6 +3495,7 @@ def tl_lines_k(s, ty, es, old, px0, sel0, st, sel, px, pics, h):
 
 def Laws.tl_lines_exact(ty, es, old, px0, sel0, st, sel, px, pics):
   tl_lines_k(Bool.and(U32.is_eq(px0, px), Q.Eq.str(sel0, sel)), ty, es, old, px0, sel0, st, sel, px, pics, {==})
+
 def Laws.link_no_script(s):
   {==}
 
@@ -5959,6 +6085,7 @@ def Laws.kids_bot_child_shown(m, c):
 
 def Laws.bot_mood_idle_still():
   {==}
+
 def Laws.perf_errors_always_logged(th):
   {==}
 
@@ -6858,6 +6985,7 @@ def Laws.hubs_origin_title_here(title, name):
 
 def Laws.hubs_origin_title_away(title, name):
   {==}
+
 def Laws.bg_start_keeps_call():
   {==}
 
@@ -7121,20 +7249,28 @@ def Laws.fm_join_root():
 
 def Laws.emb_summary_round():
   {==}
+
 def Laws.emb_size_round():
   {==}
+
 def Laws.emb_pinned_live(touched, last, now):
   {==}
+
 def Laws.emb_message_ends():
   {==}
+
 def Laws.emb_fresh_live():
   {==}
+
 def Laws.emb_idle_ends():
   {==}
+
 def Laws.emb_note_none():
   {==}
+
 def Laws.emb_focus_round():
   {==}
+
 def Laws.cmds_foreign_result_quiet():
   {==}
 
@@ -8016,6 +8152,7 @@ def Laws.bots_post_once(mid, m, s, now, client, id, text):
 
 def Laws.bots_tell_once(mid, remote, s, now, client, id, to, text):
   {==}
+
 def Laws.exit_why_killed():
   {==}
 
@@ -8126,24 +8263,34 @@ def live_cat_exact(hs, ty, px, text, ts):
         case +t <> +tr:
           Equal.sym(List<&2, L.TLine>, L.TL.blocks(ty, List.append(&2, DM.Node, h <> hr, t <> tr), px),
             List.append(&2, L.TLine, L.TL.blocks(ty, h <> hr, px), L.TLine{"", 0, 4, "", 0} <> L.TL.blocks(ty, t <> tr, px)), tl_blocks_append(hr, ty, px, h, t, tr))
+
 def Laws.qr_format_m():
   {==}
+
 def Laws.qr_format_m1():
   {==}
+
 def Laws.qr_version7_bits():
   {==}
+
 def Laws.qr_version_fits():
   {==}
+
 def Laws.qr_version_grows():
   {==}
+
 def Laws.qr_version_none():
   {==}
+
 def Laws.qr_gmul_wraps():
   {==}
+
 def Laws.qr_link_escapes():
   {==}
+
 def Laws.qr_link_none():
   {==}
+
 def Laws.pair_qr_none():
   {==}
 
@@ -8449,6 +8596,7 @@ def Laws.fview_fix_again():
 
 def Laws.fview_fix_leaves_error():
   {==}
+
 def Laws.fmc_taken_tool():
   {==}
 
@@ -8502,6 +8650,7 @@ def Laws.fmc_give_unlinked_nothing():
 
 def Laws.fmc_give_local_drops_machines():
   {==}
+
 def Laws.flive_delta_appends():
   {==}
 
@@ -8993,6 +9142,7 @@ def Laws.onboard_uber_single_no_back():
 
 def Laws.hubs_plane_once(rs):
   Laws.once_distinct(J.Json, Hb.Hubs.pl.src(rs))
+
 def Laws.uber_merge_comm():
   {==}
 
@@ -9186,6 +9336,7 @@ def Laws.notice_report_quiet():
 
 def Laws.launch_send_launcher():
   {==}
+
 def Laws.interrupt_antigravity_stops(th, r):
   {==}
 
@@ -9620,6 +9771,7 @@ def Laws.when_in_minutes():
 
 def Laws.when_in_hours():
   {==}
+
 def Laws.task_secret_never_stored(v, label):
   {==}
 
@@ -10172,16 +10324,22 @@ def paste_take_zero(s: String) -> {String.take(s, 0n) == "" : String}:
 # ui-panel-paste-lag: paste
 def Laws.paste_name_png():
   {==}
+
 def Laws.paste_name_jpeg():
   {==}
+
 def Laws.paste_name_webp():
   {==}
+
 def Laws.paste_name_gif():
   {==}
+
 def Laws.paste_name_bmp():
   {==}
+
 def Laws.paste_name_nonempty(mime):
   {==}
+
 def Laws.paste_split_rejoins(s, width):
   match s width:
     case SNil{} _:
@@ -10191,6 +10349,7 @@ def Laws.paste_split_rejoins(s, width):
     case SCon{h, t} 1n+k:
       %Laws.paste_split_rejoins(t, k) : {SCon{h, String.take(t, k) ++ String.drop(t, k)} == SCon{h, _} : String}
       {==}
+
 def Laws.paste_parts_rejoin(fuel, width, s):
   match fuel:
     case 0n:
@@ -10199,6 +10358,7 @@ def Laws.paste_parts_rejoin(fuel, width, s):
     case 1n+k:
       %Equal.sym(String, AT.Att.paste.join(AT.Att.paste.parts.go(k, width, String.drop(s, width))), String.drop(s, width), Laws.paste_parts_rejoin(k, width, String.drop(s, width))) : {String.take(s, width) ++ _ == s : String}
       Laws.paste_split_rejoins(s, width)
+
 def Laws.paste_full_piece(prefix, rest):
   match prefix:
     case SNil{}:
@@ -10206,10 +10366,13 @@ def Laws.paste_full_piece(prefix, rest):
     case SCon{h, t}:
       %Laws.paste_full_piece(t, rest) : {SCon{h, String.take(t ++ rest, String.length(t))} == SCon{h, _} : String}
       {==}
+
 def Laws.paste_chunk_quartets():
   {==}
+
 def Laws.paste_chunk_triples():
   {==}
+
 def Laws.paste_tour_ignored(n, mime, size, data, key):
   {==}
 
@@ -10219,8 +10382,10 @@ def Laws.paste_parts_k_rejoin(zero, s, width):
       paste_append_empty(s)
     case False{}:
       Laws.paste_parts_rejoin(Nat.div(Nat.sub(String.length(s), 1n), width), width, s)
+
 def Laws.paste_upload_rejoins(s, width):
   Laws.paste_parts_k_rejoin(Nat.is_eq(width, 0n), s, width)
+
 def Laws.paste_full_piece_size(prefix, rest):
   %Laws.paste_full_piece(prefix, rest) : {String.length(String.take(prefix ++ rest, String.length(prefix))) == String.length(_) : Nat}
   {==}
@@ -11641,18 +11806,25 @@ def Laws.order_buy_board_unreachable():
 # ---- i18n lang ----
 def Laws.lang_default_auto():
   {==}
+
 def Laws.lang_default_unknown():
   {==}
+
 def Laws.lang_gate(os):
   {==}
+
 def Laws.lang_gate_preview(os):
   {==}
+
 def Laws.lang_auto_preview():
   {==}
+
 def Laws.lang_override_en(os, p):
   {==}
+
 def Laws.prompt_lang_off():
   {==}
+
 def Laws.prompt_lang_unknown():
   {==}
 # ---- end i18n lang ----
@@ -11957,10 +12129,13 @@ def Laws.mail_room_once(s, now, from, room, text, msg, parts, subject):
 # ---- i18n core ui ----
 def Laws.title_shown_ja_new():
   {==}
+
 def Laws.title_shown_en_new():
   {==}
+
 def Laws.title_shown_other():
   {==}
+
 def Laws.tl_entries_locale(ty, es, st, sel, px, pics):
   %Equal.sym(List<&2, M.Entry>, L.TL.memo.es(L.TL.memo.make(ty, es, px, sel)), es, tl_memo_es(ty, es, px, sel))
     : {L.TL.entries.mr(ty, L.TL.memo.make(ty, es, px, sel), L.TL.roles.loc(L.Ty.loc(ty), _, st, sel, pics), st, sel, px, pics, L.TL.stamps(_, st, sel, pics)) == L.TL.entries.loc(ty, es, st, sel, px, pics) : List<&2, L.TLine>}
@@ -12094,6 +12269,7 @@ def Laws.prompt_kicad_off_names_fallback():
   {==}
 
 def Laws.kserve_desc_needs_cap(root): {==}
+
 def Laws.kserve_desc_with_cap(root): {==}
 
 def Laws.kserve_idle_needs_api2(xs): {==}
@@ -12102,9 +12278,13 @@ def Laws.kserve_idle_needs_api2(xs): {==}
 # ---- kicad-ipc 3 ----
 
 def Laws.kexport_no_unmarked_clear(base): {==}
+
 def Laws.kexport_no_unconsented_force(report): {==}
+
 def Laws.kexport_block_force(): {==}
+
 def Laws.kexport_lossy_force(): {==}
+
 def Laws.kexport_no_outside_clear(): {==}
 
 def Laws.kexport_no_foreign_base(base, marker): {==}
@@ -12223,12 +12403,16 @@ def Laws.charter_risky_fixed(): {==}
 # ---- i18n window ----
 def Laws.window_notice_english():
   {==}
+
 def Laws.window_notice_words_kept():
   {==}
+
 def Laws.window_tools_english(h, sa, sv, ta, tv):
   {==}
+
 def Laws.window_picker_default():
   {==}
+
 def Laws.window_provider_missing():
   {==}
 # ---- end i18n window ----
@@ -12487,9 +12671,13 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WTerminal{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
+
 def Laws.webphone_model_name_kept(): {==}
+
 def Laws.webphone_count_ungrouped(): {==}
+
 def Laws.webphone_count_japanese(): {==}
+
 def Laws.webphone_idle_japanese(): {==}
 # ---- end i18n web phone ----
 # ---- one-hub ----
@@ -12633,6 +12821,7 @@ def Laws.kserve4_nested_symbol_cap_lifts(): {==}
 # ---- kicad fork viewers ----
 def Laws.fork_cache_legacy(id):
   {==}
+
 def Laws.fork_cache_alias(id):
   {==}
 # ---- end kicad fork viewers ----
@@ -12658,8 +12847,11 @@ def Laws.mail_log_count_committed(c, fresh):
 
 # ---- native phone i18n ----
 def Laws.native_language_english(): {==}
+
 def Laws.native_language_preview(): {==}
+
 def Laws.native_language_system(): {==}
+
 def Laws.native_language_fallback(): {==}
 # ---- end native phone i18n ----
 # ---- build-speed: one executable, exact entry selection ----
@@ -12831,6 +13023,7 @@ def Laws.mail_age_relative_deadline(): {==}
 def Laws.mail_plane_indexed_build(u): {==}
 
 def Laws.mail_plane_indexed_hidden(u, ix): {==}
+
 def Laws.auth_foreign_origin_denied(trusted, path, token):
   {==}
 
@@ -12869,10 +13062,13 @@ def Laws.viewer_reopen_schematic_keeps_scene(items, now):
 # --- browser-cef default (October19) ---
 def Laws.cef_default_request():
   {==}
+
 def Laws.cef_unset_request():
   {==}
+
 def Laws.cef_explicit_chrome_request():
   {==}
+
 def Laws.cef_explicit_cef_request():
   {==}
 # --- end browser-cef default ---
@@ -12880,8 +13076,10 @@ def Laws.cef_explicit_cef_request():
 # --- browser-cef fallback (October19) ---
 def Laws.cef_unavailable_default_is_explained():
   {==}
+
 def Laws.cef_explicit_chrome_has_no_warning():
   {==}
+
 def Laws.cef_fallback_keeps_error(err):
   match err:
     case SNil{}: {==}
@@ -12889,73 +13087,108 @@ def Laws.cef_fallback_keeps_error(err):
 # --- end browser-cef fallback ---
 
 def Laws.run_model_codex_unset_inherits(uber): {==}
+
 def Laws.run_model_codex_stale_claude_uses_default(parent, uber): {==}
+
 def Laws.run_model_codex_compatible_override_kept(parent, uber): {==}
+
 def Laws.run_model_muse_keeps_exact_full_selector(uber): {==}
+
 def Laws.run_model_claude_uber_default_kept(parent): {==}
+
 def Laws.run_model_claude_worker_default_kept(parent): {==}
+
 def Laws.run_model_codex_stale_parent_uses_cli_default(uber): {==}
 
 def Laws.wt_seed_digit_step(rest, acc): {==}
+
 def Laws.wt_seed_skips_separator(rest, acc): {==}
+
 def Laws.wt_seed_legacy_small(): {==}
+
 def Laws.wt_seed_large_id(): {==}
+
 def Laws.wt_seed_same_second_next(): {==}
+
 def Laws.wt_seed_wrap(): {==}
 # telemetry
 
 def Laws.tm_optout_no_id():
   {==}
+
 def Laws.tm_unasked_no_id():
   {==}
+
 def Laws.tm_sandbox_never(se, tm, dnt, ci, url, kid, key):
   {==}
+
 def Laws.tm_gate_no_key():
   {==}
+
 def Laws.tm_clean_drops_path():
   {==}
+
 def Laws.tm_clean_drops_email():
   {==}
+
 def Laws.tm_clean_drops_name():
   {==}
+
 def Laws.tm_active_once_a_day():
   {==}
+
 def Laws.tm_queue_cap():
   {==}
+
 def Laws.tm_sent_202_drops():
   {==}
+
 def Laws.tm_sent_500_keeps():
   {==}
+
 def Laws.tm_state_roundtrip():
   {==}
+
 def Laws.share_on_sets_asked():
   {==}
+
 def Laws.share_step_before_uber():
   {==}
+
 def Laws.bug_url_only_version():
   {==}
 
 def Laws.tm_reset_invalidates_worker():
   {==}
+
 def Laws.tm_optout_invalidates_worker():
   {==}
+
 def Laws.tm_loopback_rejects_userinfo():
   {==}
+
 def Laws.tm_package_nightly_channel():
   {==}
 
 def Laws.tm_new_usage_marker():
   {==}
+
 def Laws.tm_cached_uber_step_kept():
   {==}
+
 def Laws.tm_marked_usage_step_kept():
   {==}
 # --- browser controls (CEF owner) ---
 def Laws.browser_url_hostname(): {==}
+
 def Laws.browser_url_localhost(): {==}
+
 def Laws.browser_url_explicit(path): {==}
+
 def Laws.browser_url_no_script(): {==}
+
 def Laws.browser_toolbar_no_eval(): {==}
+
 def Laws.browser_toolbar_tabs_allowed(): {==}
 # --- end browser controls ---
 
@@ -12972,8 +13205,11 @@ def Laws.refresh_size_changed(same_revision):
 def Laws.refresh_unchanged_quiet(): {==}
 # --- browser-cef release archive (October19) ---
 def Laws.cef_release_uses_paired_archive(): {==}
+
 def Laws.cef_release_arm_archive_unchanged(): {==}
+
 def Laws.cef_release_mac_archive_unchanged(): {==}
+
 def Laws.cef_release_old_updater_cannot_match(): {==}
 # --- end browser-cef release archive ---
 
@@ -13015,80 +13251,127 @@ def Laws.tl_live_single_exact(ty, empty, ph, text, memo, px):
     case True{}: {==}
 
 def Laws.textscale_default(): {==}
+
 def Laws.textscale_invalid(): {==}
+
 def Laws.textscale_real_font_size(): {==}
 
 def Laws.mail_continuity_read_open_unresolved(): {==}
+
 def Laws.mail_continuity_unread_unresolved(): {==}
+
 def Laws.mail_continuity_current_escalation_once(token, forwarded, status):
   %Equal.sym(Bool, String.eq(token, token), True{}, Laws.string_eq_refl(token)) : {Bool.and(Bool.not(MCN.Continuity.disposed(status)), Bool.and(Bool.not(_), Bool.not(String.eq(token, forwarded)))) == False{} : Bool}
   and_false_r(Bool.not(MCN.Continuity.disposed(status)))
+
 def Laws.mail_continuity_committed_reply_resolves(token, escalated, forwarded, status): {==}
 
 def Laws.mail_disposition_inactive_refused(input, current): {==}
+
 def Laws.mail_disposition_ordinary_codex_unchanged(): {==}
+
 def Laws.mail_disposition_codex_single_tool(): {==}
+
 def Laws.mail_disposition_done_notice_only(): {==}
+
 def Laws.mail_disposition_defer_notice_only(): {==}
+
 def Laws.mail_disposition_no_product_action(): {==}
 
 def Laws.mail_disposition_bot_router_scoped_tools(s, now, thread, models, version, dir, extra, o): {==}
+
 def Laws.mail_disposition_plain_router_scoped_tools(s, now, thread, models, version, dir, extra, o): {==}
 
 def Laws.mail_ui_dispatch_available(i, s, now, client, id, p): {==}
+
 def Laws.mail_ui_body_read_available(s, now, client, id, p): {==}
+
 def Laws.mail_ui_invalid_target_no_effect(s, now, thread, p, msg): {==}
+
 def Laws.mail_ui_owned_target_uses_mailbox(s, now, thread, p, msg): {==}
 
 def Laws.mail_room_invalid_request_is_error(s, now, client, id, p): {==}
+
 def Laws.mail_room_invalid_room_is_error(s, now, client, id, p, r): {==}
+
 def Laws.mail_room_send_no_eager_events(s, now, client, id, p, room, subject, members, made): {==}
+
 def Laws.mail_room_set_updates_client_index(u, room, name, members, at): {==}
+
 def Laws.mail_room_post_updates_client_index(u, id, room, from, text, hop, at): {==}
+
 def Laws.mail_room_post_affects_room_only(id, room, from, text, hop, at): {==}
 
 def Laws.mail_room_target_nonroom_unchanged(os): {==}
+
 def Laws.mail_room_target_single_empty_option(room): {==}
+
 def Laws.mail_room_target_duplicate_dropped(addr, label, rest): {==}
 
 def Laws.desktop_public_row_no_document(row, index): {==}
+
 def Laws.desktop_public_row_no_lease(row, index): {==}
+
 def Laws.desktop_public_row_no_capture(row, index): {==}
+
 def Laws.desktop_lost_guard_no_cdp(b, owner): {==}
+
 def Laws.desktop_lost_guard_no_reinitialize(b, owner): {==}
+
 def Laws.desktop_no_generic_file_assignment(): {==}
+
 def Laws.desktop_no_public_interception_toggle(): {==}
+
 def Laws.desktop_unknown_owner_has_no_drive(drive): {==}
 
 def Laws.desktop_connection_frame_bytes_unchanged(text, version, hub): {==}
+
 def Laws.desktop_connection_close_bytes_unchanged(text, version, hub): {==}
 
 # The focused universal presentation/credit proofs are reused unchanged.
 
 def Laws.presentation_state_kept(u, p): PRESENTPROOF.state_kept(u, p)
+
 def Laws.presentation_seq_kept(u, p): PRESENTPROOF.seq_kept(u, p)
+
 def Laws.presentation_bodies_kept(u, p): PRESENTPROOF.bodies_kept(u, p)
+
 def Laws.presentation_history_generation_kept(c, at, more, rest): PRESENTPROOF.credit_generation_kept(c, at, more, rest)
+
 def Laws.presentation_history_room_kept(c, at, more, rest): PRESENTPROOF.credit_room_kept(c, at, more, rest)
+
 def Laws.presentation_history_over_kept(c, at, more, rest): PRESENTPROOF.credit_over_kept(c, at, more, rest)
 
 def Laws.cache_identity_post_refused(hs, token): {==}
+
 def Laws.cache_identity_empty_cookie(https): {==}
 
 def Laws.oprep_task_not_in_chat(): {==}
+
 def Laws.oprep_task_delivered_with_filing(): {==}
+
 def Laws.oprep_other_thread_unchanged(): {==}
 
 def Laws.cbor_trees_exact(): {==}
+
 def Laws.thin_pace_own_urgent(): {==}
+
 def Laws.thin_pace_other_soft(): {==}
+
 def Laws.thin_pace_all_urgent(): {==}
+
 def Laws.thin_pace_none_quiet(th): {==}
+
 def Laws.thin_pace_no_thread_soft(): {==}
+
 def Laws.thin_pace_own_sends(): {==}
+
 def Laws.thin_pace_soft_owed(): {==}
+
 def Laws.thin_pace_flush_sends(): {==}
+
 def Laws.thin_pace_owed_raised(): {==}
+
 def Laws.thin_pace_quiet(last, now): {==}
 # --- J2: walks the JS hub makes over a whole log, in tail calls ---
 
@@ -13210,79 +13493,130 @@ def Laws.ws_unmask_take_go(bs, n, key, i, acc):
 # --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
 
 def Laws.watch_copy_launch_none(home, id, cwd, target): {==}
+
 def Laws.watch_copy_check_none(kind, target, ident, home, id): {==}
+
 def Laws.watch_copy_stop_none(kind, target, ident, home, id): {==}
+
 def Laws.watch_copy_intent_none(home, id): {==}
+
 def Laws.copy_off_runs_all(os): {==}
+
 def Laws.copy_drops_outside(): {==}
+
 def Laws.copy_keeps_inside(): {==}
+
 def Laws.copy_git_write_told(): {==}
+
 def Laws.copy_refuses_net(): {==}
+
 def Laws.copy_off_refuses_none(cmd, args): {==}
+
 def Laws.adopt_copy_none(rec, hand): {==}
+
 def Laws.copy_file_open_told(): {==}
 
 # --- J2: the pairing message made once per link, not per join ---
 def Laws.pair_msg_kept(): {==}
+
 def Laws.pair_msg_other_link(): {==}
+
 def Laws.pair_msg_no_link_qr(): {==}
+
 def Laws.thin_pair_told(): {==}
+
 def Laws.thin_pair_legacy(): {==}
 # ---- F1: far feed slices ----
 def Laws.far_feed_sliced(): {==}
+
 def Laws.far_feed_sliced_one(): {==}
+
 def Laws.far_feed_sliced_big(): {==}
+
 def Laws.far_fact_shared(): {==}
+
 def Laws.far_fact_private(): {==}
 # ---- end F1 feed ----
 def Laws.locks_idle_never_set(): {==}
+
 def Laws.locks_idle_released(): {==}
+
 def Laws.locks_idle_held_not(): {==}
+
 def Laws.locks_after_idle_none(): {==}
+
 def Laws.locks_idle_text_exact(): {==}
 
 # --- J2: the sign-in wait asked again only when the log moved ---
 def Laws.auth_beat_kept(): {==}
+
 def Laws.auth_beat_asked(): {==}
 
 def Laws.triage_duplicate_delivery_quiet(s, now, bot, conv, text, input): {==}
+
 def Laws.triage_unknown_run_quiet(s, now, bot, conv, text): {==}
 
 # --- opencode: lost sessions renewed, tool calls named ---
 def Laws.oc_lost_session(): {==}
+
 def Laws.oc_other_folder_session(): {==}
+
 def Laws.oc_tool_names_target(): {==}
+
 def Laws.oc_tool_command_once(): {==}
+
 def Laws.oc_notice_kind(): {==}
+
 def Laws.oc_notice_info(s, th, now): {==}
 
 # --- opencode: model listing says why it is empty ---
 def Laws.oc_models_usage_none(): {==}
+
 def Laws.oc_models_failed_says(): {==}
+
 def Laws.oc_models_empty_says(): {==}
+
 def Laws.oc_models_missing_quiet(): {==}
 # --- Pi and Oh My Pi: turns, stop, supervision, dialogs, effort ---
 def Laws.pi_run_turn(th, cwd, m, s, r, i, t, u): {==}
+
 def Laws.omp_run_turn(th, cwd, m, s, r, i, t, u): {==}
+
 def Laws.interrupt_pi_stops(th, r): {==}
+
 def Laws.interrupt_omp_stops(th, r): {==}
+
 def Laws.pi_acp_like(): {==}
+
 def Laws.omp_acp_like(): {==}
+
 def Laws.pi_mode_supervised_asks(): {==}
+
 def Laws.pi_mode_accept_edits(): {==}
+
 def Laws.pi_mode_full_allows(): {==}
+
 def Laws.omp_mode_supervised_asks(): {==}
+
 def Laws.omp_mode_accept_edits(): {==}
+
 def Laws.omp_mode_full_allows(): {==}
+
 def Laws.pi_session_kept(th, g): {==}
+
 def Laws.dialog_decline_denies(): {==}
+
 def Laws.dialog_dismissed_denies(): {==}
+
 def Laws.dialog_session_allows(): {==}
+
 def Laws.pi_effort_flag(): {==}
+
 def Laws.pi_effort_unknown_default(): {==}
 
 
 def Laws.sidebar_wire_unissued(): {==}
+
 def Laws.sidebar_wire_wrong_ack(): {==}
 
 def Laws.active_rows_given_eq(st, ix, now, q):
@@ -13433,63 +13767,96 @@ def Laws.sidebar_content_exact_sound(a, b, h):
   CONTENTPROOF.exact_sound(a, b, h)
 
 def Laws.sidebar_content_wrong_scope(old, node): {==}
+
 def Laws.sidebar_sent_no_picture_authority(scope, token, node, rest): {==}
 
 # Full sidebar branch: identical expression, explicit evaluation guard.
 def Laws.sidebar_full_branch_identity(shown): {==}
+
 def Laws.sidebar_full_branch_exact(reuse, shown):
   FULLBRANCH.shown_exact(reuse, shown)
 
 # Exact still-picture authority branches; cache dependency fields stay complete.
 def Laws.still_picture_disabled(key, res): {==}
+
 def Laws.still_picture_miss(res): {==}
+
 def Laws.still_picture_exact(res): {==}
 
 def Laws.sidebar_draft_body_not_input(key, value, rest, h):
   SIDEDRAFTPROOF.body_drop(key, value, rest, h)
+
 def Laws.sidebar_draft_scratch_input(key, value, rest, h):
   SIDEDRAFTPROOF.scratch_keep(key, value, rest, h)
+
 def Laws.sidebar_draft_settings_separate(u, epoch, view, revision):
   SIDEDRAFTPROOF.settings_separate(u, epoch, view, revision)
 # ---- F1: far mirrors ----
 def Laws.far_snap_live(): {==}
+
 def Laws.far_snap_fix(): {==}
+
 def Laws.far_compact_live(): {==}
+
 def Laws.far_compact_head(): {==}
+
 def Laws.far_compact_tail(): {==}
+
 def Laws.far_view_put_threads(): {==}
+
 def Laws.far_view_put_projects(): {==}
+
 def Laws.far_view_compact(): {==}
+
 def Laws.far_v3_snap_when(): {==}
+
 def Laws.far_v3_snap_shared(): {==}
+
 def Laws.far_v3_snap_numbers(): {==}
+
 def Laws.far_v3_snap_page(): {==}
+
 def Laws.far_v3_page_full(): {==}
+
 def Laws.far_v3_page_empty(): {==}
+
 def Laws.far_v3_rows(): {==}
+
 def Laws.far_v3_range(): {==}
+
 def Laws.far_v3_skips(): {==}
+
 def Laws.far_v3_lasts(): {==}
+
 def Laws.far_items_projects(): {==}
+
 def Laws.hot_demo_threads(): {==}
 # ---- end F1 ----
 # ---- secret box ----
 def Laws.sec_mask_total(v, s, h):
   SECPROOF.secp_mask_total(v, s, h)
+
 def Laws.sec_vault_valid(ts):
   SECPROOF.secp_vault_valid(ts)
+
 def Laws.sec_vault_total(ts, s):
   SECPROOF.secp_vault_total(ts, s)
+
 def Laws.sec_mask_idem(v, s, h):
   SECPROOF.secp_mask_idem(v, s, h)
+
 def Laws.sec_mask_clean_id(v, s, h):
   SECPROOF.secp_mask_clean_id(v, s, h)
+
 def Laws.sec_empty_id(s):
   SECPROOF.secp_empty_id(s)
+
 def Laws.sec_json_total(v, j, h):
   SECPROOF.secp_json_total(v, j, h)
+
 def Laws.sec_handle_shape(n, b):
   SECPROOF.secp_handle_shape(n, b)
+
 def Laws.sec_changes_empty(cs):
   {==}
 
@@ -13499,44 +13866,67 @@ def Laws.tailnet_announce_off(): {==}
 
 # ---- native owner tailnet pairing ----
 def Laws.auth_owner_pair_untrusted(own, hs, method, path): {==}
+
 def Laws.auth_owner_pair_routes(): {==}
+
 def Laws.auth_owner_pair_rebound(): {==}
 # ---- end native owner tailnet pairing ----
 
 # ---- far queue ----
 def Laws.fq_tools(): {==}
+
 def Laws.fq_fields(): {==}
+
 def Laws.fq_at(): {==}
+
 def Laws.fq_order(): {==}
+
 def Laws.fq_done_drops(): {==}
+
 def Laws.fq_done_once(): {==}
+
 def Laws.fq_old(): {==}
+
 def Laws.fq_queue(): {==}
+
 def Laws.fq_room(): {==}
+
 def Laws.fq_window(): {==}
+
 def Laws.fq_replay_once(): {==}
+
 def Laws.fq_bytes_utf8(): {==}
+
 def Laws.fq_room_keyed(): {==}
 # ---- end far queue ----
 
 def Laws.queue_copy_refuses_network(): {==}
 
 def Laws.mirror_no_authority(mirrors, thread): {==}
+
 def Laws.mirror_no_source_state(st, thread): {==}
+
 def Laws.mirror_local_epoch(epoch): {==}
+
 def Laws.mirror_changed_basis_anchor(): {==}
 
 def Laws.retired_scratch_launch_refused(s, now, thread, by, p): {==}
+
 def Laws.retired_scratch_id(): {==}
+
 def Laws.legacy_active_visible(): {==}
 
 def Laws.ref_origin_no_link(s): {==}
+
 def Laws.ref_origin_return_local(): {==}
+
 def Laws.ref_origin_owner_remote(): {==}
+
 def Laws.ref_origin_foreign_untouched(): {==}
 
 def Laws.startup_warm_accepted(w, rows):
   {==}
+
 def Laws.startup_warm_fallback(w, rows):
   {==}
 
@@ -13598,12 +13988,16 @@ def Laws.hook_secret_path():
   {==}
 
 def Laws.mail_empty_success_quiet(): {==}
+
 def Laws.mail_failed_empty_preserved(): {==}
+
 def Laws.mail_no_triage_grants_outside_run(): {==}
+
 def Laws.mail_silent_bot_envelope(s, now, th, text): {==}
 
 
 def Laws.codex_error_notice_kind(): {==}
+
 def Laws.codex_error_notice_no_effects(s, th, now, o): {==}
 
 def Laws.life_fresh_owned_wakes():
@@ -13782,6 +14176,7 @@ def Laws.automatic_ride_no_process_effects(clear, state, now, thread, msg, role,
   match clear:
     case False{}: {==}
     case True{}: {==}
+
 def Laws.todo_person_field_survives(old, person):
   %Equal.sym(Bool, String.eq(old, old), True{}, Laws.string_eq_refl(old)) : {Bool.pick(String, _, person, old) == person : String}
   {==}
@@ -13945,8 +14340,10 @@ def Laws.plot_first_schematic_waits_for_tree():
 
 def Laws.plot_live_tree_path(path):
   {==}
+
 def Laws.plot_version_tree_path(path):
   {==}
+
 def Laws.plot_comparison_tree_path(path):
   {==}
 
@@ -14063,16 +14460,19 @@ def Laws.model_picker_replaces_accounts():
 
 def Laws.checks_detail_cap():
   {==}
+
 def Laws.checks_omitted_visible():
   {==}
 
 def Laws.viewer_report_keeps_board():
   {==}
+
 def Laws.viewer_part_keeps_board():
   {==}
 
 def Laws.fork_drawing_follows_worktree():
   {==}
+
 def Laws.fork_report_is_not_a_file():
   {==}
 
@@ -14191,3 +14591,105 @@ def Laws.composer_no_slash_no_rows():
 
 def Laws.composer_fields():
   {==}
+
+# BEGIN view delta (H)
+
+law content_eq_go_refl:
+  for +a: J.Json
+  {CONTENTEQ.ContentEq.go(a, a) == True{} : Bool}
+
+def content_eq_go_refl(a):
+  match a:
+    case J.Null{}:
+      {==}
+    case J.Flag{+x}:
+      match x:
+        case False{}:
+          {==}
+        case True{}:
+          {==}
+    case J.Num{+x}:
+      eq_str_refl(x)
+    case J.Str{+x}:
+      eq_str_refl(x)
+    case J.Arr{+x}:
+      content_eq_go_refl(x)
+    case J.Obj{+x}:
+      content_eq_go_refl(x)
+    case J.Item{+x, +xt}:
+      %Equal.sym(Bool, CONTENTEQ.ContentEq.go(x, x), True{}, content_eq_go_refl(x)) : {Bool.and(_, CONTENTEQ.ContentEq.go(xt, xt)) == True{} : Bool}
+      content_eq_go_refl(xt)
+    case J.Field{+k, +x, +xt}:
+      %Equal.sym(Bool, Q.Eq.str(k, k), True{}, eq_str_refl(k)) : {Bool.and(_, Bool.and(CONTENTEQ.ContentEq.go(x, x), CONTENTEQ.ContentEq.go(xt, xt))) == True{} : Bool}
+      %Equal.sym(Bool, CONTENTEQ.ContentEq.go(x, x), True{}, content_eq_go_refl(x)) : {Bool.and(True{}, Bool.and(_, CONTENTEQ.ContentEq.go(xt, xt))) == True{} : Bool}
+      content_eq_go_refl(xt)
+    case J.End{}:
+      {==}
+
+def Laws.view_delta_same(x):
+  %Equal.sym(Bool, CONTENTEQ.ContentEq.go(x, x), True{}, content_eq_go_refl(x)) : {VDELTA.Delta.diff.k(_, x, x) == Some{Nil{}} : Maybe<&2, List<&2, VDELTA.Op>>}
+  {==}
+
+law view_delta_guard_not_empty:
+  for m: Maybe<&2, List<&2, VDELTA.Op>>
+  {VDELTA.Delta.empty(VDELTA.Delta.guard(m)) == False{} : Bool}
+
+def view_delta_guard_not_empty(m):
+  match m:
+    case None{}:
+      {==}
+    case Some{ops}:
+      match ops:
+        case Nil{}:
+          {==}
+        case op <> tail:
+          {==}
+
+law view_delta_empty_k:
+  for c: Bool
+  for +a: J.Json
+  for +b: J.Json
+  {Bool.or(Bool.not(VDELTA.Delta.empty(VDELTA.Delta.diff.k(c, a, b))), c) == True{} : Bool}
+
+def view_delta_empty_k(c, a, b):
+  match c:
+    case True{}:
+      {==}
+    case False{}:
+      %Equal.sym(Bool, VDELTA.Delta.empty(VDELTA.Delta.guard(VDELTA.Delta.walk(a, b))), False{}, view_delta_guard_not_empty(VDELTA.Delta.walk(a, b))) : {Bool.or(Bool.not(_), False{}) == True{} : Bool}
+      {==}
+
+def Laws.view_delta_empty_same(a, b):
+  view_delta_empty_k(CONTENTEQ.ContentEq.same(a, b), a, b)
+
+def Laws.view_delta_keyed_round(): {==}
+
+def Laws.view_delta_entry_round(): {==}
+
+def Laws.view_delta_unkeyed_round(): {==}
+
+def Laws.view_delta_keys_round(): {==}
+
+def Laws.view_delta_keyed_ops(): {==}
+
+def Laws.view_delta_memo_key(): {==}
+
+def Laws.draft_bound_slash_word(): {==}
+
+def Laws.draft_bound_slash_spaced(): {==}
+
+def Laws.draft_bound_give(): {==}
+
+def Laws.draft_bound_btw(): {==}
+
+def Laws.draft_bound_token(): {==}
+
+def Laws.draft_bound_token_nospace(): {==}
+
+def Laws.draft_bound_say_within(): {==}
+
+def Laws.draft_bound_say_over(): {==}
+
+def Laws.draft_bound_none(): {==}
+
+# END view delta (H)

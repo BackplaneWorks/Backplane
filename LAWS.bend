@@ -213,6 +213,8 @@ import ./src/core/onehub.bend as OHB # one-hub
 import ./src/core/standin.bend as SIN # one-hub
 import ./src/core/thin.bend as JTHIN # J2: JS stack
 import ./src/server/thin-content-eq.bend as CONTENTEQ
+import ./src/server/thin-delta.bend as VDELTA # view delta (H)
+import ./src/core/draftbound.bend as DBOUND # view delta (H)
 import ./src/web/sidebar-slot.bend as FULLSLOT
 import ./src/server/thin-still-picture.bend as STILLPICTURE
 import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
@@ -13904,3 +13906,93 @@ law composer_no_slash_no_rows:
 
 law composer_fields:
   {MCOMPOSER.Composer.fields() == ["draft", "skills", "send", "sendAct"] : List<&2, String>}
+
+# BEGIN view delta (H): the hub view protocol's keyed delta (src/server/thin-delta.bend)
+
+# a view the client holds unchanged costs no ops
+law view_delta_same:
+  for +x: J.Json
+  {VDELTA.Delta.diff(x, x) == Some{Nil{}} : Maybe<&2, List<&2, VDELTA.Op>>}
+
+# no ops only for equal bodies: an empty delta implies ContentEq.same,
+# hence equality (sidebar_content_exact_sound). apply(base, diff(base, new))
+# == new for every body is checked against the client's applier on random
+# trees (test/view_delta_test.bend); the cases below hold it by normalizing
+law view_delta_empty_same:
+  for +a: J.Json
+  for +b: J.Json
+  {Bool.or(Bool.not(VDELTA.Delta.empty(VDELTA.Delta.diff(a, b))), CONTENTEQ.ContentEq.same(a, b)) == True{} : Bool}
+
+def VDX.row(k: String, n: Nat) -> J.Json:
+  J.Json.obj([J.KV{"key", J.Str{k}}, J.KV{"n", J.Json.nat(n)}])
+
+def VDX.ent(i: String, t: String) -> J.Json:
+  J.Json.obj([J.KV{"id", J.Str{i}}, J.KV{"text", J.Str{t}}])
+
+# keyed rows: one moved, one changed, one in, one out
+law view_delta_keyed_round:
+  {VDELTA.Delta.round(J.Json.arr([VDX.row("a", 1n), VDX.row("b", 2n), VDX.row("c", 3n)]),
+    J.Json.arr([VDX.row("c", 3n), VDX.row("d", 4n), VDX.row("a", 9n)]))
+    == J.Json.arr([VDX.row("c", 3n), VDX.row("d", 4n), VDX.row("a", 9n)]) : J.Json}
+
+# entries by id inside an object: a streamed text changes in place
+law view_delta_entry_round:
+  {VDELTA.Delta.round(J.Json.obj([J.KV{"entries", J.Json.arr([VDX.ent("e1", "hi"), VDX.ent("e2", "wor")])}, J.KV{"more", J.Flag{False{}}}]),
+    J.Json.obj([J.KV{"entries", J.Json.arr([VDX.ent("e1", "hi"), VDX.ent("e2", "world")])}, J.KV{"more", J.Flag{False{}}}]))
+    == J.Json.obj([J.KV{"entries", J.Json.arr([VDX.ent("e1", "hi"), VDX.ent("e2", "world")])}, J.KV{"more", J.Flag{False{}}}]) : J.Json}
+
+# unkeyed: the common prefix and suffix kept, the middle new
+law view_delta_unkeyed_round:
+  {VDELTA.Delta.round(J.Json.arr([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}, J.Str{"d"}]), J.Json.arr([J.Str{"a"}, J.Str{"x"}, J.Str{"y"}, J.Str{"d"}]))
+    == J.Json.arr([J.Str{"a"}, J.Str{"x"}, J.Str{"y"}, J.Str{"d"}]) : J.Json}
+
+# an object whose keys changed is set whole
+law view_delta_keys_round:
+  {VDELTA.Delta.round(J.Json.obj([J.KV{"a", J.Null{}}, J.KV{"b", J.Json.nat(1n)}]), J.Json.obj([J.KV{"b", J.Json.nat(1n)}, J.KV{"a", J.Null{}}]))
+    == J.Json.obj([J.KV{"b", J.Json.nat(1n)}, J.KV{"a", J.Null{}}]) : J.Json}
+
+# a keyed append is one rebuild: the old rows by index, the new row whole
+law view_delta_keyed_ops:
+  {VDELTA.Delta.diff(J.Json.arr([VDX.row("a", 1n), VDX.row("b", 2n)]), J.Json.arr([VDX.row("b", 2n), VDX.row("c", 3n)]))
+    == Some{[VDELTA.DRebuild{Nil{}, [VDELTA.DOld{1n}, VDELTA.DNew{VDX.row("c", 3n)}]}]} : Maybe<&2, List<&2, VDELTA.Op>>}
+
+# the render memo's key ignores the view delta's receipt: a token that
+# moves with every request must not make every read a full render
+law view_delta_memo_key:
+  {CHATSIDE.Memo.request(J.Json.obj([J.KV{"viewDelta", J.Json.obj([J.KV{"version", J.Num{"1"}}, J.KV{"token", J.Str{"7"}}])}, J.KV{"action", J.Str{""}}]))
+    == CHATSIDE.Memo.request(J.Json.obj([J.KV{"action", J.Str{""}}])) : J.Json}
+
+# A draft carried bounded (core/draftbound.bend: its head and tail, the
+# join spaced exactly when the cut middle was) gives the hub what the
+# whole draft gives: the slash rows (one word starting with "/"), Give,
+# /btw, and the word being typed (the reference popup), here with heads
+# and tails of 6 (the page keeps 16384 of each)
+law draft_bound_slash_word:
+  {SL.Slash.typing(DBOUND.Bound.text("/compactandthenmorewordlesstext", 6n, 6n)) == SL.Slash.typing("/compactandthenmorewordlesstext") : Bool}
+
+law draft_bound_slash_spaced:
+  {SL.Slash.typing(DBOUND.Bound.text("/compac and then more wordstext", 6n, 6n)) == SL.Slash.typing("/compac and then more wordstext") : Bool}
+
+law draft_bound_give:
+  {U.Give.is(DBOUND.Bound.text("/give >t1 here is a long note to hand", 6n, 6n)) == U.Give.is("/give >t1 here is a long note to hand") : Bool}
+
+law draft_bound_btw:
+  {U.Btw.is(DBOUND.Bound.text("/btw what did the long answer say", 6n, 6n)) == U.Btw.is("/btw what did the long answer say") : Bool}
+
+law draft_bound_token:
+  {RF.Refs.token(DBOUND.Bound.text("a long draft that ends in a ref @bob", 6n, 6n)) == RF.Refs.token("a long draft that ends in a ref @bob") : String}
+
+law draft_bound_token_nospace:
+  {RF.Refs.token(DBOUND.Bound.text("aaaaaaaaaaaaaaaaaaaaaaaaaaa bb @bob", 6n, 6n)) == "@bob" : String}
+
+# within a message's bound nothing is said; over it, the size and the bound
+law draft_bound_say_within:
+  {DBOUND.Bound.say(I18.En{}, "131072 9f") == "" : String}
+
+law draft_bound_say_over:
+  {DBOUND.Bound.say(I18.En{}, "307200 9f") == "This draft is 300 KB. A message can be at most 128 KB." : String}
+
+law draft_bound_none:
+  {DBOUND.Bound.is("") == False{} : Bool}
+
+# END view delta (H)

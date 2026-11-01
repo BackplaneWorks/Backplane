@@ -1,6 +1,7 @@
 import { terminalInputReply } from './terminal-input.js';
 import { modelMenuReply } from './model-menu-input.js';
 import { sidebarOffer, sidebarPicture } from './sidebar-region.js';
+import { deltaOffer, deltaPicture, deltaKeep, deltaBases, deltaBytes, deltaDraft } from './view-delta.js';
 
 // Bounded view transport shared by the web and native bridge. Product actions
 // and rendering remain in Bend. No canonical replay is initiated here.
@@ -123,7 +124,7 @@ export class ThinViews {
   connect(hub, greeting) {
     if (!bounded(hub, 1024) || !hub || !viewGreeting(greeting)) return { compatibilityRequired: true, cmds: [] };
     const abandoned = this.disconnect(hub, 'connection changed');
-    const link = { hub, greeting: snapshot(greeting), revision: 0, pictureRevision: 0, terminalOwner: '', terminalOpen: false, viewId: '', target: null, shown: null, viewRevision: '', updatePending: false, updateId: null, invalidated: false, changedRevision: null, readInvalidated: false };
+    const link = { hub, greeting: snapshot(greeting), revision: 0, pictureRevision: 0, terminalOwner: '', terminalOpen: false, viewId: '', target: null, shown: null, viewRevision: '', updatePending: false, updateId: null, invalidated: false, changedRevision: null, readInvalidated: false, bases: deltaBases() };
     this.links.set(hub, link);
     return { connected: true, abandoned, cmds: [] };
   }
@@ -139,7 +140,7 @@ export class ThinViews {
     if (!l || !viewTarget(target)) return { failed: 'invalid view selection', cmds: [] };
     if (session && own(session, 'route') && !compactRoute(session.route, target)) return { failed: 'invalid view route', cmds: [] };
     if (l.revision >= MAX_REVISION) return { failed: 'view revision exhausted', cmds: [] };
-    l.target = snapshot(target); l.accountBinding = ''; l.viewId = ''; l.viewRevision = ''; l.updatePending = false; l.updateId = null; l.invalidated = false; l.changedRevision = null; l.readInvalidated = false;l.sidebar = null;l.terminalOwner = '';l.terminalOpen = false;
+    l.target = snapshot(target); l.accountBinding = ''; l.viewId = ''; l.viewRevision = ''; l.updatePending = false; l.updateId = null; l.invalidated = false; l.changedRevision = null; l.readInvalidated = false;l.sidebar = null;l.terminalOwner = '';l.terminalOpen = false;l.bases = deltaBases();
     return this.request(hub, 'view.open', { session, cid });
   }
   request(hub, method, args = {}) {
@@ -160,7 +161,7 @@ export class ThinViews {
     // explicit query. Invalidations cannot generate those requests.
     let extra;
     try { extra = snapshot(args); } catch { return { failed: 'invalid request', cmds: [] }; }
-    if (!record(extra) || utf8Bytes(JSON.stringify(extra)) > VIEW_LIMITS.replyBytes) return { failed: 'request limit', cmds: [] };
+    if (!record(extra) || utf8Bytes(JSON.stringify(this.api.shape ? this.api.shape(extra, method) : extra)) > VIEW_LIMITS.replyBytes) return { failed: 'request limit', cmds: [] };
     // Compact input cannot change the selected picture. Keep the wire counter
     // monotonic without starving a canonical read during continuous typing.
     // This is an intent only: a validated full fallback becomes a barrier below.
@@ -181,8 +182,10 @@ export class ThinViews {
     const regionEnabled = this.api.sidebarRegions === true && l.greeting.renderer === 'web'
       && ['view.open','view.page','view.update','view.action'].includes(method);
     if (regionEnabled) p.sidebarRegion = sidebarOffer(l.sidebar);
+    // the keyed view delta (view-delta.js): offered by hosts that apply it
+    if (this.api.viewDelta === true && ['view.open','view.page','view.update','view.action'].includes(method)) p.viewDelta = deltaOffer(l.bases);
     const call = { id, link: l, method, target: snapshot(l.target), revision: l.revision, viewId: l.viewId,
-      began: this.api.now(), input: snapshot(p), terminalInputIntent, sidebarBase: regionEnabled ? l.sidebar : null, explicitRead: method === 'view.update' && (l.readInvalidated || l.changedRevision === null) };
+      began: this.api.now(), input: snapshot(p), terminalInputIntent, bases: l.bases, sidebarBase: regionEnabled ? l.sidebar : null, explicitRead: method === 'view.update' && (l.readInvalidated || l.changedRevision === null) };
     if (method === 'view.update') { l.updatePending = true; l.updateId = id; l.invalidated = false; l.readInvalidated = false; }
     this.calls.set(id, call);
     return { id, cmds: [this.api.send(hub, { id, m: method, p })] };
@@ -234,6 +237,19 @@ export class ThinViews {
         !(Object.hasOwn(r, 'modelMenuInput') ? modelMenuReply(r, c.input) : terminalInputReply(r, c.input)))) {
       return { failed: 'invalid compact action reply', id: e.id, method: c.method, retry: false, cmds: [] };
     }
+    let picture = null;
+    if (Object.hasOwn(r, 'viewDelta')) {
+      try {
+        // the selected draft as the request carried it on the wire
+        const wire = this.api.shape ? deltaDraft(this.api.shape(c.input, c.method)) : deltaDraft(c.input);
+        picture = deltaPicture(r, c.input, l.bases, wire);r = picture.result;
+        if (deltaBytes(picture.measure, picture.wire, utf8Bytes) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
+      } catch {
+        // the next request asks for the whole view
+        l.bases = deltaBases();
+        return { failed: 'invalid view delta', id: e.id, method: c.method, retry: false, cmds: [] };
+      }
+    }
     let sidebar;
     if (Object.hasOwn(r, 'sidebarRegion')) {
       try {
@@ -242,7 +258,10 @@ export class ThinViews {
         if (utf8Bytes(JSON.stringify(r)) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
       } catch { return { failed: 'invalid sidebar region', id: e.id, method: c.method, retry: false, cmds: [] }; }
     }
-    if (this.api.validateResult && this.api.validateResult(r, c.input) !== true) return { failed: 'invalid view presentation', id: e.id, method: c.method, retry: false, cmds: [] };
+    if (this.api.validateResult && this.api.validateResult(r, c.input) !== true) { l.bases = deltaBases();return { failed: 'invalid view presentation', id: e.id, method: c.method, retry: false, cmds: [] }; }
+    // a body the hub kept under this token: the base of a later delta,
+    // whether or not this reply is the one shown
+    if (picture && l.bases === c.bases) deltaKeep(l.bases, picture);
     if (c.terminalInputIntent && inputOnly) current = current && l.terminalOpen && l.terminalOwner === c.input.terminalOwner;
     // Only a fully validated, ready full fallback may promote an exempt intent
     // into picture authority. Its original ordinal cannot overtake navigation.
