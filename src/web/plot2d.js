@@ -515,8 +515,15 @@ class View {
     // a new size refits the view, unless the user has moved it
     new ResizeObserver(entries => {
       this.gesture++;
+      const { width, height } = this.viewport;
       this.viewport = entries[0].contentRect;
-      if (!this.fitted || !this.touched) this.fit(); else this.later();
+      if (!this.fitted || !this.touched) this.fit();
+      else {
+        // Keep the same board point in the middle as the pane changes size.
+        this.ox += (this.viewport.width - width) / 2;
+        this.oy += (this.viewport.height - height) / 2;
+        this.later();
+      }
     }).observe(canvas);
   }
 
@@ -661,7 +668,12 @@ class View {
     this.plot = p;
     this.hl = null;
     // a sheet seen before comes back as it was left
-    if (first && this.back && p && p.box) { this.scale = this.back.scale;this.ox = this.back.ox;this.oy = this.back.oy;this.fitted = true;this.touched = true;this.back = null;this.later(); }
+    if (first && this.back && p && p.box) {
+      this.scale = this.back.scale;
+      this.ox = this.viewport.width / 2 - this.back.cx * this.scale;
+      this.oy = this.viewport.height / 2 - this.back.cy * this.scale;
+      this.fitted = true;this.touched = true;this.back = null;this.later();
+    }
     else if (first) this.fit(); else this.later();
   }
 
@@ -907,7 +919,9 @@ function park(v) {
   // Fit replaces a source's earlier pan, including when it is left again.
   if (v.key && v.plot && v.plot.chunks) left.delete(v.key);
   if (v.key && v.plot && v.plot.chunks && v.touched) {
-    left.delete(v.key);left.set(v.key, { scale: v.scale, ox: v.ox, oy: v.oy });
+    left.set(v.key, { scale: v.scale,
+      cx: (v.viewport.width / 2 - v.ox) / v.scale,
+      cy: (v.viewport.height / 2 - v.oy) / v.scale });
     if (left.size > 48) left.delete(left.keys().next().value);
   }
 }

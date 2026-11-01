@@ -41,6 +41,28 @@ test('Fit replaces an older parked pan before returning to the board', () => {
   assert.equal(h.saved(), undefined, 'leaving after Fit cannot restore the older cropped view');
 });
 
+test('resizing a moved plot keeps its board centre and zoom', () => {
+  const h = harness();h.view.fit();h.view.ox += 120;h.view.oy += 110;h.view.touched = true;
+  const { scale, ox, oy } = h.view;
+  const centre = [(900 / 2 - ox) / scale, (600 / 2 - oy) / scale];
+  h.resize(420, 260);
+  assert.equal(h.view.scale, scale);
+  assert.equal((420 / 2 - h.view.ox) / scale, centre[0]);
+  assert.equal((260 / 2 - h.view.oy) / scale, centre[1]);
+  h.resize(900, 600);
+  assert.equal(h.view.ox, ox);assert.equal(h.view.oy, oy);
+});
+
+test('the PCB pane restores the board centre from a larger canvas', () => {
+  const h = harness();h.view.fit();h.view.ox += 120;h.view.oy += 110;h.view.touched = true;
+  h.park();const saved = h.saved(), scale = h.view.scale;
+  h.view.plot = null;h.view.back = saved;h.view.viewport = { width: 420, height: 260 };
+  h.view.show({ chunks: [], box: [0, 0, 100, 100] });
+  assert.equal(h.view.scale, scale);
+  assert.equal((420 / 2 - h.view.ox) / scale, saved.cx);
+  assert.equal((260 / 2 - h.view.oy) / scale, saved.cy);
+});
+
 test('a new gesture invalidates a probe still waiting for hit information', async () => {
   const h = harness(), release = h.defer();
   h.click(1);h.fire('wheel');release();await Promise.resolve();await Promise.resolve();
