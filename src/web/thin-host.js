@@ -1043,7 +1043,9 @@ export class ThinHost {
       if (pictureCurrent) this.presentPreviews(r.session.sel, r.shown, r.session.outbox);
       if (pictureCurrent) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
-        page: sentNewest ? { direction: 'newest' } : paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
+        page: sentNewest ? { direction: 'newest' } : paged && { direction: paged.direction, before: paged.before },
+        entry: result.method === 'view.open' && !this.historyResetPending && !this.awayMark && this.atNewest() && (!resumed || position?.atEnd === true),
+        position, historyReset: this.historyResetPending, changed: result.changed });
       if (pictureCurrent) this.historyResetPending = false;
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
       this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged, painted: pictureCurrent });

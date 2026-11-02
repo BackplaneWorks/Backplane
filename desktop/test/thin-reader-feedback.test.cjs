@@ -1,6 +1,26 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const idleEntry={active:()=>false,cancel(){}};
 const source=()=>fs.readFileSync(process.env.READER_HOST_SOURCE||path.join(__dirname,'../../src/web/host.js'),'utf8');
+test('entry fill waits for painted geometry and reconciles newest only after the merged return',async()=>{
+ const {EntryHistory}=await import('../../src/web/entry-history.js'),entryHistory=new EntryHistory(),src=source(),
+  check=src.slice(src.indexOf('function earlierCheck(tl)'),src.indexOf('function laterCheck(tl)')),
+  changed=src.slice(src.indexOf('function timelineChanged(list)'),src.indexOf('function holdMark()'));
+ const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0},sent=[],said=[];
+ let newest=true;const list={el:tl,atEnd:()=>true},thin={ready:true,pageError:null,paging:null,pagingNext:null,
+  pendingNewest:false,pageActionPending:()=>false,heldHere:()=>({pages:[{older:'issued'}]}),hasAhead:()=>true,
+  atNewest:()=>newest,ahead:direction=>{sent.push(direction);newest=direction==='newer';thin.paging={direction};return true;}};
+ const ctx=vm.createContext({entryHistory,historyFillOwner:()=> 'scope',thin,tl,activeTimeline:list,canonicalBoot:false,
+  remoteReady:true,frontendNode:{},focusedNode:null,transitionPosition:null,held:false,historyDirection:'',historyOlderDemand:0,
+  historyFillScope:'scope',earlierAsked:false,historyFillMore(){},historyHasMessage:()=>true,
+  historyGap:()=>0,historyRunway:()=>1400,timelineList:()=>list,App:{sel:()=> 'A'},ui:{},
+  holdSay:s=>said.push(s),historyCheckSoon(){},bodyWindows:{observe(){}}});
+ vm.runInContext(check+changed,ctx);entryHistory.arm('scope');
+ vm.runInContext('timelineChanged(activeTimeline)',ctx);assert.deepEqual(sent,[],'painting does not synchronously request pages');assert.deepEqual(said,[]);
+ vm.runInContext('earlierCheck(tl)',ctx);assert.deepEqual(sent,['older']);
+ thin.paging=null;tl.scrollHeight=1100;vm.runInContext('earlierCheck(tl)',ctx);assert.deepEqual(sent,['older','newer']);assert.deepEqual(said,[]);
+ thin.paging=null;vm.runInContext('earlierCheck(tl)',ctx);assert.deepEqual(said,[''],'accepted newest reconciles bottom even without a DOM scroll event');
+});
 test('new-output click on the current source page retires upward paging before the next frame',()=>{
  const src=source(),bottom=src.slice(src.indexOf('function holdBottom()'),src.indexOf('// a <details>')),
   earlier=src.slice(src.indexOf('function earlierCheck(tl)'),src.indexOf('function laterCheck(tl)'));
@@ -8,7 +28,7 @@ test('new-output click on the current source page retires upward paging before t
   const requests=[],frames=[],tl={id:'timeline',scrollHeight:900,clientHeight:700,scrollTop:0};let scrolled=0;
   const thin={ready:true,pageError:null,paging:route==='travelling'?{direction:'older'}:null,atNewest:()=>route!=='older',
    newest:()=>requests.push('newest'),hasAhead:()=>true,ahead:()=>{requests.push('older');return true;}};
-  const list={scrollToEnd(){scrolled++;tl.scrollTop=200;}},ctx=vm.createContext({thin,timelineList:()=>list,
+  const list={scrollToEnd(){scrolled++;tl.scrollTop=200;}},ctx=vm.createContext({entryHistory:idleEntry,thin,timelineList:()=>list,
    timelineChanged:()=>frames.push(()=>vm.runInContext('earlierCheck(tl)',ctx)),tl,
    historyDirection:'older',historyOlderDemand:2,historyFillScope:'scope',historyFillOwner:()=> 'scope',
    earlierAsked:false,historyFillMore(){},historyHasMessage:()=>true,historyGap:()=>0,historyRunway:()=>1400});
@@ -17,10 +37,10 @@ test('new-output click on the current source page retires upward paging before t
   assert.equal(scrolled,route==='local'?1:0,'an older picture is never acknowledged as newest');
  }
 });
-test('initial and live tool-only pictures never grant background history demand',()=>{
+test('renders and live tool-only pictures cannot rearm exhausted initial or gesture demand',()=>{
  const src=source(),a=src.indexOf('function earlierCheck(tl)'),b=src.indexOf('function laterCheck(tl)',a),requests=[];
  const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0};
- const context=vm.createContext({historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyOlderDemand:0,earlierAsked:false,historyFillMore(){},historyHasMessage:()=>false,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400});
+ const context=vm.createContext({entryHistory:idleEntry,historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyOlderDemand:0,earlierAsked:false,historyFillMore(){},historyHasMessage:()=>false,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400});
  const check=vm.runInContext('('+src.slice(a,b)+')',context);for(let i=0;i<100;i++)check(tl);assert.equal(requests.length,0,'a long folded prefix cannot cause an automatic scan');
  context.historyDirection='older';context.historyOlderDemand=2;
  for(let i=0;i<100;i++){context.earlierAsked=false;check(tl);}assert.equal(requests.length,2,'one user gesture permits at most two pages, not an entire history');assert.equal(context.historyOlderDemand,0);
@@ -55,7 +75,7 @@ test('new-output read mark is a source identity even when the visible tail is a 
 test('reaching the old viewport bottom cannot clear unread while the newest page is still travelling',()=>{
  const src=source(),a=src.indexOf('function timelineChanged(list)'),b=src.indexOf('function holdMark()',a),said=[];
  const list={atEnd:()=>true,el:{}},thin={atNewest:()=>true,paging:{direction:'newest'}};
- const changed=vm.runInNewContext('('+src.slice(a,b)+')',{transitionPosition:null,canonicalBoot:false,activeTimeline:list,focusedNode:null,frontendNode:{},thin,held:false,
+ const changed=vm.runInNewContext('('+src.slice(a,b)+')',{entryHistory:idleEntry,historyFillOwner:()=> "scope",transitionPosition:null,canonicalBoot:false,activeTimeline:list,focusedNode:null,frontendNode:{},thin,held:false,
   App:{sel:()=> 'chat'},ui:{},holdSay:s=>said.push(s),historyCheckSoon(){},bodyWindows:{observe(){}},remoteReady:true});
  changed(list);assert.deepEqual(said,['chat']);thin.paging=null;changed(list);assert.deepEqual(said,['chat','']);
 });
@@ -68,7 +88,7 @@ test('a cached reconnect picture cannot report reading progress or consume unrea
 });
 test('the temporary bottom drawn before restoring a bookmark cannot clear its unread boundary',()=>{
  const src=source(),a=src.indexOf('function timelineChanged(list)'),b=src.indexOf('function holdMark()',a),said=[];
- let bottom=true;const list={atEnd:()=>bottom,el:{}},context=vm.createContext({transitionPosition:{anchor:'saved',atEnd:false},canonicalBoot:false,
+ let bottom=true;const list={atEnd:()=>bottom,el:{}},context=vm.createContext({entryHistory:idleEntry,historyFillOwner:()=> "scope",transitionPosition:{anchor:'saved',atEnd:false},canonicalBoot:false,
   activeTimeline:list,focusedNode:null,frontendNode:{},thin:{atNewest:()=>true},held:false,App:{sel:()=> 'chat'},ui:{},
   holdSay:s=>said.push(s),historyCheckSoon(){},bodyWindows:{observe(){}},remoteReady:true});
  const changed=vm.runInContext('('+src.slice(a,b)+')',context);changed(list);assert.deepEqual(said,[]);
@@ -76,7 +96,7 @@ test('the temporary bottom drawn before restoring a bookmark cannot clear its un
 });
 test('actual scrollbar movement updates paging direction without requiring a wheel, key or touch',()=>{
  const src=source(),a=src.indexOf('function timelineScrolled(list, delta)'),b=src.indexOf('function timelineChanged(list)',a),list={};
- const context=vm.createContext({activeTimeline:list,historyDirection:'older',historyFillMore(){}});
+ const context=vm.createContext({entryHistory:idleEntry,activeTimeline:list,historyDirection:'older',historyFillMore(){}});
  const scrolled=vm.runInContext('('+src.slice(a,b)+')',context);
  scrolled(list,25);assert.equal(context.historyDirection,'newer');scrolled(list,-10);assert.equal(context.historyDirection,'older');
  scrolled({},30);assert.equal(context.historyDirection,'older');
@@ -127,7 +147,7 @@ test('owning-history reset drops retained DOM rows before normal history project
  const clear=src.slice(src.indexOf('function historyClear()'),src.indexOf('// Rows let go past the cap'));
  for(const reset of [true,false]){
   let resets=0,removed=0;const old={oldHistory:true},fresh={freshHistory:true};
-  const ctx={RR:null,current:()=>true,pnow:()=>0,scroll:false,historyNode:old,resumedConversation:'A',currentSession:()=>({sel:'A'}),transitionPosition:null,
+  const ctx={entryHistory:idleEntry,RR:null,current:()=>true,pnow:()=>0,scroll:false,historyNode:old,resumedConversation:'A',currentSession:()=>({sel:'A'}),transitionPosition:null,
    historyDirection:'older',historyFillMore(){removed++;},historyPageState(){},historyGone:{older:new Set(['old']),newer:new Set()},thin:{heldReset(){resets++;}}};
   vm.createContext(ctx);vm.runInContext(clear,ctx);const view=vm.runInContext('('+body+')',ctx),got=view(fresh,{historyReset:reset,epoch:'local',target:{kind:'thread',id:'peer~A'}});
   assert.equal(got.projection,reset?'reset':'update');assert.equal(got.previous,reset?fresh:old);assert.equal(resets,reset?1:0);assert.equal(removed,reset?1:0);
@@ -170,7 +190,7 @@ test('presenting newest output retires the earlier gesture and its blank history
  const src=source(),from=src.indexOf('view: (node, detail) => {',src.indexOf('thin = new ThinHost(')),to=src.indexOf('        terminalOutput.rebind();',from);
  assert(from>0&&to>from);const body=src.slice(from+'view: '.length,to)+'return projection;}';
  for(const direction of ['newest','older']){
-  let resets=0,hidden=0;const ctx={current:()=>true,RR:null,resumedConversation:null,historyNode:{old:true},
+  let resets=0,hidden=0;const ctx={entryHistory:idleEntry,current:()=>true,RR:null,resumedConversation:null,historyNode:{old:true},
    History:{project:(_old,n)=>n,project_block:(_old,n)=>n},historyDirection:'older',historyOlderDemand:2,
    historyGone:{older:new Set(['before']),newer:new Set(['after'])},thin:{heldReset(){resets++;}},
    historyBack(){},historyFillMore(_tl,shown){assert.equal(shown,false);hidden++;}};

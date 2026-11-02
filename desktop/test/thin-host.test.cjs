@@ -31,6 +31,68 @@ async function fixture(overrides={}){
  const open=()=>{host.greeting(greeting);const r=reply();host.receive(r);return r;};
  return{host,api,sent,commands,views,states,warnings,searches,messages,disk,reply,open,greeting,flushFields:()=>fieldRefresh?.(),getSession:()=>session,tick:ms=>{at+=ms;host.expire();}};
 }
+test('only accepted newest entry may arm viewport fill; updates and away restores cannot',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{anchor:'row',offset:0,atEnd:false}})});f.open();assert.equal(f.views.at(-1).detail.entry,true);
+ f.host.update();f.host.receive(f.reply());assert.equal(f.views.at(-1).detail.entry,false);
+ f.host.away('A','last-seen');f.host.request('select','B');f.host.receive(f.reply());
+ f.host.request('select','A');f.host.receive(f.reply());
+ assert.equal(f.views.at(-1).detail.entry,false,'saved away state never grants initial-fill authority');
+});
+test('older hubs without counts retain the two-page initial fallback and merged-newest return',async()=>{
+ const {EntryHistory}=await import('../../src/web/entry-history.js'),fill=new EntryHistory(),f=await fixture({readingMark:()=> 'newest-source'});f.open();
+ assert.equal(f.views.at(-1).detail.entry,true);f.host.window.newer=0;fill.arm('owner');
+ const win=(id,older,newer)=>({window:{ids:[id],older,hasMore:!!older,newer,anchor:{id,offset:0},partial:[]}});
+ assert(fill.check('owner',f.host,false));assert.equal(f.sent.at(-1).p.cursor,'older-bound-to-A');
+ for(let i=0;i<50;i++)fill.check('owner',f.host,false);assert.equal(f.sent.length,2,'wait for the accepted page, without duplicate reads');
+ f.host.receive(f.reply(undefined,win('older-1','older-2',16)));
+ assert(fill.check('owner',f.host,false));assert.equal(f.sent.at(-1).p.cursor,'older-2');
+ f.host.receive(f.reply(undefined,win('older-2','older-3',32)));
+ assert(fill.check('owner',f.host,false));assert.equal(f.sent.at(-1).p.cursor,'','bounded fill returns to actual newest even if still tool-only');
+ f.host.receive(f.reply(undefined,win('latest','older-bound-to-A',0)));
+ assert.equal(f.views.at(-1).detail.page.direction,'newer');assert.equal(f.host.atNewest(),true);
+ assert.equal(fill.check('owner',f.host,true),false);assert.equal(fill.active('owner'),false);
+ assert.deepEqual(f.host.held.pages.flatMap(p=>p.ids),['older-2','older-1','latest']);
+ assert.equal(f.host.awayOf('A'),'newest-source','only actual viewport reading may clear unread');
+ assert.equal(f.getSession().drafts.A,'original 日本語');
+ for(let i=0;i<50;i++)fill.check('owner',f.host,false);assert.equal(f.sent.length,4,'renders never rearm an exhausted entry');
+});
+test('counted entry fill continues past two sparse pages but cannot exceed retained-history capacity',async()=>{
+ const {EntryHistory}=await import('../../src/web/entry-history.js'),{HELD_IDS}=await import('../../src/web/thin-host.js');
+ for(const remaining of [0,1,4,100000]){
+  const fill=new EntryHistory(),f=await fixture();f.open();fill.arm('owner',remaining);let reads=0;
+  const limit=Math.min(remaining,Math.floor((HELD_IDS-32)/32));
+  for(let i=0;i<limit;i++){
+   assert(fill.check('owner',f.host,false));assert.notEqual(f.sent.at(-1).p.cursor,'');reads++;
+   f.host.receive(f.reply(undefined,{window:{ids:Array.from({length:32},(_,n)=>'page-'+i+'-'+n),older:'older-'+i,hasMore:true,newer:16*(i+1),remaining:remaining-i-1,anchor:{id:'page-'+i+'-0',offset:0},partial:[]}}));
+  }
+  if(limit){assert(fill.check('owner',f.host,false));assert.equal(f.sent.at(-1).p.cursor,'');
+   f.host.receive(f.reply(undefined,{window:{ids:Array.from({length:32},(_,n)=>'latest-'+n),older:'older-bound-to-A',hasMore:true,newer:0,remaining,anchor:{id:'latest-0',offset:0},partial:[]}}));}
+  assert.equal(fill.check('owner',f.host,true),false);assert.equal(reads,limit);
+  assert(new Set(f.host.held.pages.flatMap(p=>p.ids)).size<=HELD_IDS,'initial loading must not evict its newest bridge');
+  if(remaining>4)assert(reads>2,'sparse entry may need more than a scrolling gesture');
+  const count=f.sent.length;for(let i=0;i<20;i++)fill.check('owner',f.host,false);assert.equal(f.sent.length,count);
+ }
+});
+test('initial fill retires cyclic opaque cursors instead of repeating a page',async()=>{
+ const {EntryHistory}=await import('../../src/web/entry-history.js'),fill=new EntryHistory(),f=await fixture();f.open();fill.arm('owner',100);
+ for(const older of ['second','older-bound-to-A']){
+  assert(fill.check('owner',f.host,false));f.host.receive(f.reply(undefined,{window:{ids:[older],older,hasMore:true,newer:16,remaining:80,anchor:{id:older,offset:0},partial:[]}}));
+ }
+ assert(fill.check('owner',f.host,false));assert.equal(f.sent.at(-1).p.cursor,'','a cycle ends at merged newest without another older request');
+});
+test('initial fill stops early on usable geometry and never overrides a reader gesture, failure or new owner',async()=>{
+ const {EntryHistory}=await import('../../src/web/entry-history.js');
+ for(const stop of ['usable','gesture','failure','owner','newest']){
+  const fill=new EntryHistory(),f=await fixture();f.open();fill.arm('owner');
+  if(stop==='usable'){assert.equal(fill.check('owner',f.host,true),false);assert.equal(f.sent.length,1);continue;}
+  assert(fill.check('owner',f.host,false));const page=f.sent.at(-1);
+  if(stop==='failure')f.host.receive({t:'reply',id:page.id,ok:false,error:{code:'LIMIT'}});
+  else f.host.receive(f.reply(page,{window:{ids:['older'],older:'more',hasMore:true,newer:16,anchor:{id:'older',offset:0},partial:[]}}));
+  if(stop==='gesture')fill.cancel();if(stop==='newest')f.host.pendingNewest=true;
+  assert.equal(fill.check(stop==='owner'?'replacement':'owner',f.host,false),false);
+  assert.equal(f.sent.length,2,'stopped automatic work cannot retry, move to newest or enter another owner');
+ }
+});
 test('dictation survives a stale view reply and subsequent draft rendering',async()=>{
  const f=await fixture();f.open();f.host.request('flag','settings');const req=f.sent.at(-1);
  f.host.draftAt('A','original 日本語 dictated words');f.host.receive(f.reply(req));
