@@ -26,7 +26,7 @@ Not provided.
 
 ## Evidence
 
-Not provided. Add an image or a thorough description of the behavior.
+Not provided. Add an image, a screen recording or a thorough description of the behavior.
 
 ## Optional diagnostics
 

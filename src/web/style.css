@@ -2419,3 +2419,9 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 
 /* Presentation headings share the panel scroll area and own no controls. */
 .sub-section { margin: 8px 0 2px; padding: 6px 10px 2px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--dim); }
+
+.improvements-recording{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);padding:10px}
+.improvements-recording video{display:block;width:100%;max-height:32vh;background:#080a07}
+.improvements-recording p{margin:0;font-size:12px;line-height:1.5}
+.improvements-recording-bar{position:fixed;top:8px;left:8px;z-index:100000;display:flex;align-items:center;flex-wrap:wrap;gap:8px;max-width:calc(100vw - 16px);padding:8px 12px;background:#111410;color:#f0f2e9;border:2px solid #e16955;font:14px sans-serif}
+.improvements-recording-bar[hidden]{display:none}.improvements-recording-bar button{min-height:36px;padding:6px 10px;background:#222a1e;color:inherit;border:1px solid #c7cfba}

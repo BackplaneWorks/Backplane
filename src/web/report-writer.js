@@ -4,14 +4,14 @@ import { newCreationKey, improvementThread } from './improvements-flow.js';
 export class ReportWriter {
   constructor({ rpc, save, upload, identity = () => 'fixture', expectedScope = identity }) { Object.assign(this, { rpc, save, upload, identity, expectedScope });this.busy = false; }
   guard(expected) { if (!expected || this.identity() !== expected) throw Error('The hub identity changed. Reconnect to the same hub before retrying this report.'); }
-  async start(draft, prompt, { image = null, project = draft.writerProject } = {}) {
+  async start(draft, prompt, { image = null, video = null, project = draft.writerProject } = {}) {
     if (this.busy) return false;
     this.busy = true;
     try {
       if (typeof prompt !== 'string' || new TextEncoder().encode(prompt).length > 125000) throw Error('The report description is too long for the agent. Shorten it or fill the template locally.');
       if (!draft.writer && (!project || project === 'scratch')) throw Error('Choose a project for the report agent. You can fill the template without an agent.');
       const expected = this.expectedScope();this.guard(expected);
-      if (!draft.writer) draft.writer = { key: newCreationKey(), prompt, withImage: !!image, image, scope: expected, project };
+      if (!draft.writer) draft.writer = { key: newCreationKey(), prompt, withImage: !!image, image, scope: expected, project, withVideo: !!video && draft.includeRecording === true, videoId: draft.recording?.id };
       const w = draft.writer;
       if (!w.project || w.project === 'scratch') throw Error('Open the original report-writing thread, or choose a project to start a new report. Your saved report is kept.');
       if (w.scope && w.scope !== expected) throw Error('This report belongs to another hub identity.');
@@ -27,7 +27,12 @@ export class ReportWriter {
         w.binding = context.accountBinding;await this.save(draft);this.guard(expected);
       }
       if (w.withImage && !w.path) { this.guard(expected);w.path = await this.upload(w.thread, w.key, w.image);this.guard(expected);await this.save(draft);this.guard(expected); }
-      w.message ||= w.prompt + (w.path ? '\n\n[attachment: ' + w.path + ']' : '');
+      if (w.withVideo && !w.videoPath) {
+        if (!video || draft.recording?.id !== w.videoId || draft.includeRecording !== true) throw Error('Reselect the original recording before retrying the report agent.');
+        w.videoKey ||= newCreationKey();await this.save(draft);this.guard(expected);
+        w.videoPath = await this.upload(w.thread, w.videoKey, video);this.guard(expected);await this.save(draft);this.guard(expected);
+      }
+      w.message ||= w.prompt + [w.path, w.videoPath].filter(Boolean).map(path => '\n\n[attachment: ' + path + ']').join('');
       await this.save(draft);this.guard(expected);
       await this.rpc.request('turn.start', { thread: w.thread, text: w.message, msg: 'issue-writer-' + w.key, accountBinding: w.binding });
       this.guard(expected);w.started = true;await this.save(draft);return true;

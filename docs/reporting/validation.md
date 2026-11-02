@@ -67,3 +67,14 @@ attach it. Hub/browser diagnostics can be selected in the web report form.
 
 No real issue submission is part of qualification. The reporter must review
 and submit through their own GitHub account.
+
+## Screen recording addition
+
+The recording addition has separate validation from the reconstructed v3
+continuation above. Its local JavaScript suites passed 26/26 cases: recorder
+bounds/cancel, frame permissions and selection, private capped storage and
+quota faults, exact WebM attachment/retry paths, plus existing Improvements,
+public policy and preload regressions. Browser popup, emitted policy/web and
+an isolated X11 Electron capture fixture are pending. Wayland portal behavior
+has unit coverage; no compositor/portal runtime pass is claimed. There is no
+capture of a person's desktop in these tests.
