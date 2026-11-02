@@ -19,8 +19,9 @@ import ./steer.bend as STR
 # today: the day it is now on the person's wall clock (days since the
 # epoch), worked out once a page; stops: the replies that end a turn the
 # person stopped (to 1), which say "Stopped" where the others say
-# "Finished", and the last turn's last reply while the thread waits on
+# "Finished", the last turn's last reply while the thread waits on
 # work it started (to 2: "Waiting since", never "Finished" before it is)
+# and the last turn's when it failed (to 3: "Failed")
 type Stamps is Data:
   Stamps{rule: TZ.TzRule, today: Nat, ends: Map<&2, Nat>, stops: Map<&2, Nat>}
 
@@ -121,6 +122,22 @@ def Stamp.stopped(t: M.Thread) -> Bool:
     case M.Thread{_, _, _, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       Stamp.interrupted(turn)
 
+def Stamp.end.k(t: M.TurnState) -> Nat:
+  match t:
+    case M.Interrupted{}:
+      1n
+    case M.Failed{}:
+      3n
+    case _:
+      0n
+
+# how the thread's last turn ended, as the stops' kinds: 1 stopped (Stop,
+# an interrupt), 3 failed (an error ended it), 0 otherwise
+def Stamp.end(t: M.Thread) -> Nat:
+  match t:
+    case M.Thread{_, _, _, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Stamp.end.k(turn)
+
 # Stopped turns
 # -------------
 # A turn keeps its own ending after the next one starts: when a turn is
@@ -199,6 +216,19 @@ def Stamp.stops.last(stopped: Bool, +es: List<&2, M.Entry>, stops: Map<&2, Nat>)
     case False{}:
       stops
 
+def Stamp.ended.put(found: Bool, +kind: Nat, +held: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  match found:
+    case True{}:
+      Map.set(&2, Nat, stops, held, kind)
+    case False{}:
+      stops
+
+# the last turn, over, ended as kind says (Stamp.end: 1 stopped, its
+# message maybe unmarked as Stamp.stops.last; 3 failed; 0 changes nothing)
+def Stamp.ended.last(+kind: Nat, +es: List<&2, M.Entry>, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  +id = Stamp.last.go(List.reverse(&2, M.Entry, es))
+  Stamp.ended.put(Bool.and(Nat.is_gt(kind, 0n), Bool.not(String.is_empty(id))), kind, id, stops)
+
 # the last turn's last reply says "Waiting since" while the thread waits
 # on work it started (signal.bend's waiting), unless it was stopped
 def Stamp.kind.at(r: Map<&2, Nat> & Nat) -> Nat:
@@ -229,10 +259,16 @@ def Stamps.of.s(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool,
   Stamps.at.s(SCH.Sched.person(st, 0n, True{}), now, Stamp.ends(es, running),
     Stamp.stops.last(Bool.and(stopped, Bool.not(running)), es, Stamp.stops(es, st, running)))
 
-# the same while the thread waits on work it started (waiting)
-def Stamps.of.w(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool, +stopped: Bool, waiting: Bool) -> Stamps:
+# the same by how the thread's last turn ended (end: Stamp.end), so a
+# failed turn's last reply says "Failed"
+def Stamps.of.e(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool, +end: Nat) -> Stamps:
   Stamps.at.s(SCH.Sched.person(st, 0n, True{}), now, Stamp.ends(es, running),
-    Stamp.waits.last(Bool.and(waiting, Bool.not(running)), es, Stamp.stops.last(Bool.and(stopped, Bool.not(running)), es, Stamp.stops(es, st, running))))
+    Stamp.ended.last(Bool.pick(Nat, running, 0n, end), es, Stamp.stops(es, st, running)))
+
+# the same while the thread waits on work it started (waiting)
+def Stamps.of.w(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool, +end: Nat, waiting: Bool) -> Stamps:
+  Stamps.at.s(SCH.Sched.person(st, 0n, True{}), now, Stamp.ends(es, running),
+    Stamp.waits.last(Bool.and(waiting, Bool.not(running)), es, Stamp.ended.last(Bool.pick(Nat, running, 0n, end), es, Stamp.stops(es, st, running))))
 
 def Stamps.of(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool) -> Stamps:
   Stamps.of.s(es, st, now, running, False{})
@@ -281,22 +317,38 @@ def Stamp.wait.k(+l: I.Loc, known: Bool, +clock: String, +start: Nat, +at: Nat) 
     case False{}:
       MSG.T.stamp.waiting(l, clock)
 
+def Stamp.fail.k(+l: I.Loc, known: Bool, +clock: String, +start: Nat, +at: Nat) -> String:
+  match known:
+    case True{}:
+      MSG.T.stamp.failed.took(l, clock, I.I18n.took(l, Nat.sub(at, start)))
+    case False{}:
+      MSG.T.stamp.failed(l, clock)
+
+# a failed turn's last reply says "Failed 14:12 · 22s"
+def Stamp.reply.f(failed: Bool, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
+  match failed:
+    case True{}:
+      Bool.pick(String, Nat.is_eq(start, 0n), clock, Stamp.fail.k(l, Nat.is_gt(start, 1n), clock, start, at))
+    case False{}:
+      Stamp.reply(l, start, clock, at)
+
 # the stopped turn's last reply says "Stopped 14:12 · 4s"
-def Stamp.reply.s(stopped: Bool, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
+def Stamp.reply.s(stopped: Bool, +kind: Nat, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
   match stopped:
     case True{}:
       Stamp.stop.k(l, Nat.is_gt(start, 1n), clock, start, at)
     case False{}:
-      Stamp.reply(l, start, clock, at)
+      Stamp.reply.f(Nat.is_eq(kind, 3n), l, start, clock, at)
 
 # a turn's last reply by how the turn ended (stops' value: 0 finished,
-# 1 stopped, 2 waiting on work it started: "Waiting since 14:12 · 7m 3s")
+# 1 stopped, 2 waiting on work it started: "Waiting since 14:12 · 7m 3s",
+# 3 failed)
 def Stamp.reply.w(waits: Bool, +kind: Nat, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
   match waits:
     case True{}:
       Bool.pick(String, Nat.is_eq(start, 0n), clock, Stamp.wait.k(l, Nat.is_gt(start, 1n), clock, start, at))
     case False{}:
-      Stamp.reply.s(Nat.is_eq(kind, 1n), l, start, clock, at)
+      Stamp.reply.s(Nat.is_eq(kind, 1n), kind, l, start, clock, at)
 
 def Stamp.reply.k(+kind: Nat, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
   Stamp.reply.w(Nat.is_eq(kind, 2n), kind, l, start, clock, at)

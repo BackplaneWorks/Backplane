@@ -402,6 +402,8 @@ sched.weekdays = 平日{time}
 # message times
 stamp.finished = {clock}に完了
 stamp.finished.took = {clock}に完了 · {took}
+stamp.failed = {clock}に失敗
+stamp.failed.took = {clock}に失敗 · {took}
 stamp.stopped = {clock}に停止
 stamp.stopped.took = {clock}に停止 · {took}
 stamp.waiting = {clock}から完了待ち

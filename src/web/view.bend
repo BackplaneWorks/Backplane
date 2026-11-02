@@ -2872,7 +2872,7 @@ def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st
 # a thread's entries, its runs of tool calls folded (the last stays open
 # while its turn runs)
 def View.entries.folded(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +running: Bool, +ec: U.Ec) -> List<&2, D.Node>:
-  View.entries.r(lc, es, FO.Fold.roles.ctx(lc, View.around(st, sel, es), es, info, running), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
+  View.entries.r(lc, es, FO.Fold.roles.ctx(lc, View.around(st, sel, es), es, info, running), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.end(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
 
 # blank messages left out, and a run cut by the page's edge folded whole
 # (FO.Fold.roles.ctx)
