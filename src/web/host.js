@@ -41,7 +41,9 @@ installSidebarKeys();
 import { installFloatingTerminal } from "./floating-terminal.js";
 installUsageTabs();
 import { installWorkspaceMenus } from "./workspace-menus.js";
+import { installBoardCatalog } from "./board-catalog.js";
 installWorkspaceMenus(document, () => composerKeeper.claim(true));
+const boardCatalog = installBoardCatalog(document, () => currentSession().sel, (action, value) => dispatch(action, value));
 import { installSubagentInspector } from "./subagent-inspector.js";
 installSubagentInspector();
 import { installViewerFeedback } from "./viewer-feedback.js";
@@ -196,18 +198,27 @@ let composerComposing = false;
 function setAttrs(el, oldAttrs, attrs) {
   const seen = new Set();
   // Read the new attributes, not an old/recycled element's field owner.
-  let field = null;
-  for (const a of each(attrs)) if (is(a, "At") && a.name === "data-bfield") field = a.value;
+  let field = null, catalogSource = null, catalogScope = "", serverOpen = false;
+  for (const a of each(attrs)) if (is(a, "At")) {
+    if (a.name === "data-bfield") field = a.value;
+    if (a.name === "data-board-catalog") catalogSource = a.value;
+    if (a.name === "data-scope") catalogScope = a.value;
+    if (a.name === "open") serverOpen = true;
+  }
+  const catalogOpen = catalogSource === null ? null : boardCatalog.renderOpen(el, catalogSource, catalogScope, serverOpen);
   for (const a of each(attrs)) {
     if (is(a, "At")) {
       seen.add(a.name);
-      if (a.name === "value") {
+      if (a.name === "open" && catalogOpen !== null) {
+        if (catalogOpen) el.setAttribute("open", "");else el.removeAttribute("open");
+      } else if (a.name === "value") {
         const value = field !== null && viewMode === "view-v1" && frontendNode ? thin?.fieldValue(field, thinMailDraft.fieldValue(field, a.value)) ?? a.value : a.value;
         // A hub refresh can arrive between typing and the blur that saves a
         // to-do. Keep that focused edit until its change event captures it.
         const editingTodo = el === document.activeElement && el.getAttribute("data-on-change") === "todo-text" &&
           [...each(oldAttrs)].some(old => is(old, "At") && old.name === "value" && old.value !== el.value);
-        if (!editingTodo && el.value !== value && !(composerComposing && el.id === "composer")) el.value = value;
+        const editingCatalog = el.hasAttribute("data-board-query") && (el === document.activeElement || el.dataset.composing === "1");
+        if (!editingTodo && !editingCatalog && el.value !== value && !(composerComposing && el.id === "composer")) el.value = value;
       } else if (el.getAttribute(a.name) !== a.value) {
         el.setAttribute(a.name, a.value);
         if (a.name === "data-cat") el.src = catUri(a.value);
@@ -225,6 +236,9 @@ function setAttrs(el, oldAttrs, attrs) {
       if (name === "value") el.value = "";
       else el.removeAttribute(name);
     }
+  }
+  if (catalogOpen !== null) {
+    if (catalogOpen) el.setAttribute("open", "");else el.removeAttribute("open");
   }
 }
 
@@ -3284,7 +3298,7 @@ async function startThin(again = false, reason = "initial") {
     const next = saved === null ? 2 ** 47 : /^(0|[1-9][0-9]*)$/.test(saved) ? Number(saved) : NaN;
     if (!Number.isSafeInteger(next) || next < 2 ** 47 || next >= 2 ** 48 - 1) throw Error("Invalid view counter");
     thin = new ThinHost({
-      hub: location.origin, cid, bodyPages: true, now: () => performance.now(), session: currentSession, viewTimeoutMs: VIEW_TIMEOUT_MS,
+      hub: location.origin, cid, bodyPages: true, boardCatalog: true, now: () => performance.now(), session: currentSession, viewTimeoutMs: VIEW_TIMEOUT_MS,
       readingState: thinReading?.identity === readingIdentity() ? thinReading.state : null,
       target: presentationTarget,
       counter: value => localStorage.setItem("backplane-view-request-id", String(value)),

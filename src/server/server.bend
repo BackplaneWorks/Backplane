@@ -5,6 +5,7 @@ import ../core/pcb-usage.bend as PC
 import ./pcb-telemetry.bend as PCB
 import ../core/folder.bend as FP
 import ./spawn.bend as SP
+import ./view-capacity.bend as VCAP
 import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
@@ -12859,7 +12860,7 @@ def Hub.thin.native_fit.rows(+rows: List<&2, String>, index: THIN.Index, p: J.Js
 # remembered under its key and the anchor's row: an ordinary read's key
 # (the anchor left out, thin-actor.bend's Memo.request) never finds it
 def Hub.thin.fit.key(+key: String, +p: J.Json) -> String:
-  key ++ "\tanchor:" ++ J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")
+  key ++ Bool.pick(String, J.Json.get_bool(p, "@compactChrome", False{}), "\tcompact-chrome", "") ++ "\tanchor:" ++ J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", "")
 
 def Hub.thin.native_fit.loop(fuel: Nat, fits: Bool, rendered: TA.Rendered, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat,
     +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +version: Nat) -> IO(Hub):
@@ -12972,9 +12973,17 @@ def Hub.thin.web_fit.sent.s(s: FitS, h: Hub, +client: U32, +o: J.Json, +c: Clien
   match s:
     case FitS{_, _, best, +n}: Hub.thin.web_fit.sent(n, best, h, client, o, c, now, context)
 
+# At the compact floor a larger session/command set cannot be repaired by
+# deleting state. Keep LIMIT local and record numeric component attribution.
+def Hub.thin.web_fit.limited(+fl: TA.Rendered, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
+  match fl:
+    case TA.Rendered{+actor, +result}:
+      IO.bind(Unit, Hub, PS.Perf.emit("thin.view.limit " ++ J.Json.show(VCAP.Capacity.report(result, TA.Actor.capacity(actor), J.Json.bytes(Hub.thin.web_fit.answer(st, crev, c, o, context, result))))),
+        _ => Hub.thin.error(h, client, o, "LIMIT"))
+
 def Hub.thin.web_fit.floor(fits: Bool, +fl: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
   match fits:
-    case False{}: Hub.thin.web_fit.sent(3, fl, h, client, o, c, now, context)
+    case False{}: Hub.thin.web_fit.limited(fl, st, crev, c, o, context, h, client)
     case True{}: Hub.thin.web_fit.sent.s(Hub.thin.web_fit.search(4n, FitS{1n, Hub.thin.web_fit.halvings(), fl, 3}, acted, shown, index, p, epoch, now, rows, stream, revision, key, ms, st, crev, c, o, context), h, client, o, c, now, context)
 
 def Hub.thin.web_fit.one(fits: Bool, +l1: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
@@ -12988,8 +12997,11 @@ def Hub.thin.web_fit.first(fits: Bool, +trial: TA.Rendered, +acted: TA.Acted, +s
   match fits:
     case True{}: Hub.thin.web_fit.sent(1, trial, h, client, o, c, now, context)
     case False{}:
-      +l1 = Hub.thin.web_fit.level(1n, acted, shown, index, p, epoch, now, rows, stream, revision, key, ms)
-      Hub.thin.web_fit.one(Hub.thin.web_fit.fits(l1, st, crev, c, o, context), l1, acted, shown, index, p, epoch, now, rows, stream, revision, key, ms, st, crev, c, o, context, h, client)
+      # The first fitted tier also compacts optional chrome. Keep the desired
+      # viewer/session and the anchor; all later trials use this same tier.
+      +compact = TV.Obj.put(p, "@compactChrome", J.Flag{True{}})
+      +l1 = Hub.thin.web_fit.level(1n, acted, shown, index, compact, epoch, now, rows, stream, revision, key, ms)
+      Hub.thin.web_fit.one(Hub.thin.web_fit.fits(l1, st, crev, c, o, context), l1, acted, shown, index, compact, epoch, now, rows, stream, revision, key, ms, st, crev, c, o, context, h, client)
 
 def Hub.thin.web_fit.full(+acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
     +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat) -> IO(Hub):

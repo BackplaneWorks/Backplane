@@ -2,6 +2,7 @@ import Base
 import ../core/chat-pending.bend as CP
 import ./terminal-cells.bend as TCELL
 import ../core/view-page.bend as VP
+import ../core/board-catalog.bend as BC
 import ./list-windows.bend as LW
 import ../core/accounts.bend as ACCT
 import ../core/bub-move.bend as HOP
@@ -74,6 +75,14 @@ def View.rail(+u: U.Ui) -> Bool:
 # of the sidebar's brand and Settings rows and the thread's own header.
 def View.chrome(+u: U.Ui) -> Bool:
   Bool.and(View.rail(u), String.eq(U.Ui.info(u, "local.workspace.chrome"), "top-v1"))
+
+def View.compact(+u: U.Ui) -> Bool:
+  String.eq(U.Ui.info(u, "local.view.compact"), "1")
+
+def View.compact.text(compact: Bool, +text: String) -> String:
+  match compact:
+    case False{}: text
+    case True{}: String.take(text, 512n) ++ Bool.pick(String, String.is_empty(String.drop(text, 512n)), "", "…")
 
 # Ui -> Node. Every decision (order, shelf, status) comes from core defs
 # with laws behind them; this file only lays them out.
@@ -4145,15 +4154,58 @@ def View.boards.selector(fs: List<&2, String>, +path: String, +own: String, +roo
           D.El{"div", "", [D.At{"class", "board-options"}], View.board.rows(f <> t, cur, own, Nil{})},
           D.El{"p", "", [D.At{"class", "board-no-match"}, D.At{"hidden", ""}], [D.Txt{"No matching boards"}]}]}]}]
 
+# Unlike native <details> hiding, the shut catalog never builds option
+# nodes. Search and continuation operate on metadata at the owning actor.
+def View.boards.catalog.button(show: Bool, source: String, query: String, offset: Nat, +label: String) -> List<&2, D.Node>:
+  match show:
+    case False{}: Nil{}
+    case True{}: [D.Dom.button("shelf", "board-catalog", BC.Catalog.command(source, True{}, query, offset), label, label)]
+
+def View.boards.catalog.page(page: VP.Page, +cur: String, own: String, +source: String, +query: String) -> List<&2, D.Node>:
+  match page:
+    case VP.Page{_, +total, +start, +limit, ids}:
+      [D.El{"div", "", [D.At{"class", "local-menu-body"}], List.append(&2, D.Node, [
+        D.El{"label", "", Nil{}, [D.Txt{"Find a board"}, D.El{"input", "board-search", [D.At{"type", "search"}, D.At{"data-board-query", ""}, D.At{"data-render-query", query}, D.At{"value", query}, D.At{"maxlength", "160"}, D.At{"aria-label", "Find a board by name or path"}, D.At{"placeholder", "Name or path"}], Nil{}}]},
+        D.El{"div", "", [D.At{"class", "board-options"}], View.board.rows(ids, cur, own, Nil{})},
+        D.Dom.span("board-count", Nat.show(total) ++ " boards · selected board kept visible")],
+        List.append(&2, D.Node, View.boards.catalog.button(Nat.is_gt(start, 0n), source, query, Nat.sub(start, limit), "Previous boards"),
+          View.boards.catalog.button(Nat.is_lt(Nat.add(start, limit), total), source, query, Nat.add(start, limit), "Next boards")))}]
+
+def View.boards.catalog.options(open: Bool, +u: U.Ui, +ids: List<&2, String>, +cur: String, +source: String, +state: J.Json) -> List<&2, D.Node>:
+  match open:
+    case False{}: Nil{}
+    case True{}:
+      +query = BC.Catalog.query(state, source)
+      +page = BC.Catalog.page(ids, cur, source, state, VP.Page.limit("boards", U.Ui.info(u, "local.view.budget")))
+      View.boards.catalog.page(page, cur, U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), source, query)
+
+def View.boards.catalog(+u: U.Ui) -> List<&2, D.Node>:
+  +ids = BC.Catalog.unique(U.Bd.files(u))
+  +cur = View.board.current(ids, View.board.relative(HS.Hist.family(U.Bd.or(U.Bd.id(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path")))), U.Ui.root(u)))
+  +source = BC.Catalog.source(U.Ui.sel(u), U.Ui.root(u), ids)
+  +state = BC.Catalog.state(U.Ui.info(u, "local.board.catalog"))
+  +open = BC.Catalog.open(state, source)
+  [D.El{"details", "board-selector", List.append(&2, D.Attr,
+      [D.At{"class", "local-menu board-selector"}, D.At{"data-board-catalog", source}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-render-open", Bool.pick(String, open, "1", "0")}],
+      Bool.pick(List<&2, D.Attr>, open, [D.At{"open", ""}], Nil{})),
+    D.El{"summary", "", [D.At{"aria-label", "Select board"}, D.At{"title", cur}], [WI.WIcon.svg("circuit-board", 16),
+      D.El{"span", "", [D.At{"class", "board-current"}], [D.Dom.span("", Bool.pick(String, String.is_empty(cur), "Select board", MC.Mech.stem(cur))), D.El{"small", "", Nil{}, [D.Txt{MC.Mech.parent(cur)}]}]}, WI.WIcon.svg("chevron-down", 14)]}
+      <> View.boards.catalog.options(open, u, ids, cur, source, state)}]
+
 def View.board.legacy(fs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
   match fs:
     case Nil{}: Nil{}
     case +f <> t:
       D.Dom.button(Bool.pick(String, U.Bd.on(cur, f), "on", ""), "board-pick", f, f, U.Bd.name(f)) <> View.board.legacy(t, cur)
 
+def View.boards.contract(current: Bool, +u: U.Ui) -> List<&2, D.Node>:
+  match current:
+    case True{}: View.boards.catalog(u)
+    case False{}: View.boards.selector(U.Bd.files(u), U.Bd.or(U.Bd.id(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), U.Ui.root(u))
+
 def View.boards.for(rail: Bool, +u: U.Ui, +what: String) -> List<&2, D.Node>:
   match rail:
-    case True{}: View.boards.selector(U.Bd.files(u), U.Bd.or(U.Bd.id(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), U.Ui.root(u))
+    case True{}: View.boards.contract(String.eq(U.Ui.info(u, "local.board.catalog.version"), "1"), u)
     case False{}:
       Bool.pick(List<&2, D.Node>, U.Bd.many(u), View.board.legacy(U.Bd.files(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), [D.Dom.span("what", what)])
 
@@ -4435,6 +4487,19 @@ def View.hist.ticks.when(+lc: I.Loc, ss: List<&2, HS.Step>, +i: Nat, +n: Nat, +a
       View.hist.tick.named(HS.Step.id(s), i, n, Nat.is_eq(at, 1n+i), MSG.T.history.step.label(lc, Nat.show(1n+i)) ++ " · " ++ Bool.pick(String, Nat.is_eq(HS.Step.at(s), 0n), MSG.T.history.time.unknown(lc), U.Hs.when.zone(zone, HS.Step.at(s))))
         <> View.hist.ticks.when(lc, t, 1n+i, n, at, zone)
 
+# Compact scrubbing keeps the first, selected and live endpoints at their
+# true positions; the ordinary first/previous/next/last/jump controls remain.
+def View.hist.ticks.compact(+lc: I.Loc, ss: List<&2, HS.Step>, +i: Nat, +n: Nat, +at: Nat) -> List<&2, D.Node>:
+  match ss:
+    case Nil{}: [View.hist.tick.loc(lc, "", i, n, Nat.is_eq(at, 0n))]
+    case +s <> rest:
+      List.append(&2, D.Node, D.Dom.when(Bool.or(Nat.is_eq(i, 0n), Nat.is_eq(at, 1n+i)), View.hist.tick.loc(lc, HS.Step.id(s), i, n, Nat.is_eq(at, 1n+i))), View.hist.ticks.compact(lc, rest, 1n+i, n, at))
+
+def View.hist.ticks.for(compact: Bool, +lc: I.Loc, ss: List<&2, HS.Step>, n: Nat, at: Nat, u: U.Ui) -> List<&2, D.Node>:
+  match compact:
+    case False{}: View.hist.ticks.when(lc, ss, 0n, n, at, SCH.Sched.person(U.Ui.state(u), 0n, True{}))
+    case True{}: View.hist.ticks.compact(lc, ss, 0n, n, at)
+
 def View.hist.said.loc(+lc: I.Loc, live: Bool, +text: String) -> List<&2, D.Node>:
   match live:
     case True{}:
@@ -4488,7 +4553,7 @@ def View.hist.walk(+lc: I.Loc, b: U.HBar, +tr: List<&2, HS.Step>, +u: U.Ui) -> D
           D.Dom.span("title", title), D.Dom.span("grow", ""),
           View.hist.changes(lc, Bool.and(df, Nat.is_gt(at, 0n)), n),
           D.Dom.button("hbtn", "cmp", "a", MSG.T.history.compare.tip(lc), MSG.T.viewer.history.compare(lc))], View.hist.live.loc(lc, at))},
-        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.when(lc, tr, 0n, n, at, SCH.Sched.person(U.Ui.state(u), 0n, True{}))},
+        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.for(View.compact(u), lc, tr, n, at, u)},
         D.El{"div", "", [D.At{"class", "hist-said"}], View.hist.said.loc(lc, Bool.or(Nat.is_eq(at, 0n), Bool.not(U.Hs.jump.available(u, entry))), Bool.pick(String, Nat.is_eq(at, 0n), U.Hs.live.said.loc(lc, n), Bool.pick(String, String.is_empty(said), label, said)))},
         D.El{"div", "", [D.At{"class", "hist-legend"}], View.hist.legend.loc(lc, Bool.and(df, Nat.is_gt(at, 0n)))}]}
 
@@ -4780,10 +4845,15 @@ def View.solid.more.loc(+lc: I.Loc, listed: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.solid.more(listed: Bool, +u: U.Ui) -> List<&2, D.Node>:
   View.solid.more.loc(I.En{}, listed, u)
 
+def View.solid.parts(compact: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  match compact:
+    case False{}: List.append(&2, D.Node, View.mech.chips(U.Mpage.parts(u), U.Mpage.shown(u)), View.solid.more.loc(lc, U.Mpage.listed(u), u))
+    case True{}: List.append(&2, D.Node, [D.Dom.span("what", MC.Mech.last(U.Ui.view_get(u, "view.path")))], [D.Dom.button("", "mech", "", "Browse mechanical parts", "Parts")])
+
 def View.solid.what.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case True{}:
-      List.append(&2, D.Node, View.mech.chips(U.Mpage.parts(u), U.Mpage.shown(u)), View.solid.more.loc(lc, U.Mpage.listed(u), u))
+      View.solid.parts(View.compact(u), lc, u)
     case False{}:
       View.boards(u, MSG.T.viewer.board3d.tip(lc))
 
@@ -4800,7 +4870,7 @@ def View.solid.boardkey(+u: U.Ui) -> String:
 
 def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), MSG.T.viewer.orbit.tip(lc))
-    <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))),
+    <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", View.compact.text(View.compact(u), U.Ui.info(u, "plotnote:" ++ U.Solid.want(u))))),
       [D.El{"div", "solid-workbench", [D.At{"id", "solid-workbench"}, D.At{"class", "solid-workbench"}, D.At{"data-key", U.Solid.want(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-board-key", View.solid.boardkey(u)}],
         [D.El{"div", "solid-toolbar", [D.At{"class", "solid-toolbar"}], Nil{}},
          D.El{"div", "", [D.At{"class", "solid-layout"}],
