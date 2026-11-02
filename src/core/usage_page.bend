@@ -3,27 +3,89 @@ import ./model.bend as M
 import ./usage.bend as UZ
 
 # Presentation over the existing TokensSet rollups, never transcript history.
-# Day totals are UTC calendar days; model/project totals exist only by month.
+# Rolling periods sum UTC daily counters; model breakdowns exist only by month.
 # Reasoning is already part of output. A missing reported cost is unknown.
 
 type UpControl is Data:
   UpControl{label: String, action: String, value: String, selected: Bool}
 
+# Keep "month" as the existing calendar view; new/default ranges roll daily.
 def Up.period(+s: String) -> String:
-  Bool.pick(String, String.eq(s, "today"), "today", "month")
+  Bool.pick(String, M.Tok.has(["today", "week", "2weeks", "4weeks", "30days", "month"], s), s, "30days")
 
 def Up.metric(+s: String) -> String:
   Bool.pick(String, String.eq(s, "cost"), "cost", Bool.pick(String, String.eq(s, "limits"), "limits", "tokens"))
 
+def Up.period.label(+period: String) -> String:
+  Bool.pick(String, String.eq(period, "today"), "Today (UTC)",
+    Bool.pick(String, String.eq(period, "week"), "1 week",
+      Bool.pick(String, String.eq(period, "2weeks"), "2 weeks",
+        Bool.pick(String, String.eq(period, "4weeks"), "4 weeks",
+          Bool.pick(String, String.eq(period, "month"), "This calendar month (UTC)", "Month (30 days)")))))
+
+def Up.periods() -> List<&2, String>:
+  ["today", "week", "2weeks", "4weeks", "30days", "month"]
+
+def Up.period.controls(ps: List<&2, String>, +period: String) -> List<&2, UpControl>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> rest: UpControl{Up.period.label(p), "usage-period", p, String.eq(Up.period(period), p)} <> Up.period.controls(rest, period)
+
+def Up.period.size() -> Nat:
+  List.length(&2, String, Up.periods())
+
 def Up.controls(+period: String, +metric: String) -> List<&2, UpControl>:
-  [UpControl{"Today (UTC)", "usage-period", "today", String.eq(Up.period(period), "today")},
-   UpControl{"This month (UTC)", "usage-period", "month", String.eq(Up.period(period), "month")},
-   UpControl{"Tokens", "usage-metric", "tokens", String.eq(Up.metric(metric), "tokens")},
-   UpControl{"Reported cost", "usage-metric", "cost", String.eq(Up.metric(metric), "cost")},
-   UpControl{"Limits", "usage-metric", "limits", String.eq(Up.metric(metric), "limits")}]
+  List.append(&2, UpControl, Up.period.controls(Up.periods(), period),
+    [UpControl{"Tokens", "usage-metric", "tokens", String.eq(Up.metric(metric), "tokens")},
+     UpControl{"Reported cost", "usage-metric", "cost", String.eq(Up.metric(metric), "cost")},
+     UpControl{"Limits", "usage-metric", "limits", String.eq(Up.metric(metric), "limits")}])
+
+def Up.month.offset(now: Nat) -> Nat:
+  Nat.sub(M.Switch.num(String.drop(M.Tok.day(now), 8n), 0n), 1n)
+
+def Up.offset(+now: Nat, +period: String) -> Nat:
+  Bool.pick(Nat, String.eq(period, "today"), 0n,
+    Bool.pick(Nat, String.eq(period, "week"), 6n,
+      Bool.pick(Nat, String.eq(period, "2weeks"), 13n,
+        Bool.pick(Nat, String.eq(period, "4weeks"), 27n,
+          Bool.pick(Nat, String.eq(period, "month"), Up.month.offset(now), 29n)))))
+
+def Up.start(+now: Nat, period: String) -> Nat:
+  Nat.sub(Nat.mul(Nat.div(now, 86400n), 86400n), Nat.mul(Up.offset(now, Up.period(period)), 86400n))
+
+def Up.count(+now: Nat, +period: String) -> Nat:
+  Nat.add(Nat.div(Nat.sub(now, Up.start(now, period)), 86400n), 1n)
+
+def Up.range(+now: Nat, period: String) -> String:
+  M.Tok.day(Up.start(now, period)) ++ " – " ++ M.Tok.day(now) ++ " (UTC)"
+
+# Add all nine counters, including coverage, without inventing a reading for
+# an empty range. A sum of daily rollups is not another single turn.
+def Up.sum.parts(n: Nat, +i: Nat, +a: String, +b: String) -> List<&2, String>:
+  match n:
+    case 0n: Nil{}
+    case 1n+k: Nat.show(Nat.add(M.Tok.part(a, i), M.Tok.part(b, i))) <> Up.sum.parts(k, Nat.add(i, 1n), a, b)
+
+def Up.sum.k(empty: Bool, +a: String, +b: String) -> String:
+  match empty:
+    case True{}: ""
+    case False{}: String.join(Up.sum.parts(9n, 0n, a, b), "/")
+
+def Up.sum(+a: String, +b: String) -> String:
+  Up.sum.k(Bool.and(String.is_empty(a), String.is_empty(b)), a, b)
+
+def Up.total.days(n: Nat, +at: Nat, +st: M.State, acc: String) -> String:
+  match n:
+    case 0n: acc
+    case 1n+k: Up.total.days(k, Nat.add(at, 86400n), st, Up.sum(acc, M.Setting.get(st, M.Tok.pre(st) ++ "d." ++ M.Tok.day(at), "")))
+
+def Up.total.k(calendar: Bool, +st: M.State, +now: Nat, +period: String) -> String:
+  match calendar:
+    case True{}: M.Setting.get(st, M.Tok.pre(st) ++ "m." ++ M.Tok.month(now), "")
+    case False{}: Up.total.days(Up.count(now, period), Up.start(now, period), st, "")
 
 def Up.total(+st: M.State, +now: Nat, +period: String) -> String:
-  M.Setting.get(st, M.Tok.pre(st) ++ Bool.pick(String, String.eq(Up.period(period), "today"), "d." ++ M.Tok.day(now), "m." ++ M.Tok.month(now)), "")
+  Up.total.k(String.eq(Up.period(period), "month"), st, now, period)
 
 def Up.tokens(+v: String) -> Nat:
   Nat.add(Nat.add(M.Tok.part(v, 1n), M.Tok.part(v, 2n)), Nat.add(M.Tok.part(v, 3n), M.Tok.part(v, 4n)))
@@ -129,7 +191,7 @@ def Up.breakdown(month: Bool, +st: M.State, ps: List<&2, M.Project>, +now: Nat, 
         Up.models(st, now, metric, modelpage), [UZ.URow{"Projects · " ++ M.Tok.month(now), "Page " ++ Nat.show(Nat.add(projectpage, 1n)) ++ " · up to 12 rows", ""}],
         Up.projects(st, ps, now, metric, projectpage)])
     case False{}:
-      [UZ.URow{"Breakdown", "Model and project totals are recorded by calendar month. Select This month to view them.", ""}]
+      [UZ.URow{"Breakdown", "Model and project breakdowns are recorded by calendar month. Select This calendar month to view them. Rolling project token totals appear above.", ""}]
 
 def Up.limits(+st: M.State, +now: Nat) -> List<&2, UZ.URow>:
   Bool.pick(List<&2, UZ.URow>, List.is_empty(&2, UZ.URow, UZ.Tk.limits(st, now)),
@@ -139,8 +201,8 @@ def Up.rows.k(limits: Bool, +st: M.State, ps: List<&2, M.Project>, +now: Nat, +p
   match limits:
     case True{}: Up.limits(st, now)
     case False{}:
-      List.concat(&2, UZ.URow, [[UZ.URow{Bool.pick(String, String.eq(Up.period(period), "today"), "Today (UTC)", "This month (UTC)"),
-        Bool.pick(String, String.eq(Up.period(period), "today"), M.Tok.day(now), M.Tok.month(now)), ""}],
+      List.concat(&2, UZ.URow, [[UZ.URow{Up.period.label(Up.period(period)),
+        Up.range(now, period), ""}],
         Up.readings(Bool.not(String.is_empty(Up.total(st, now, period))), metric, Up.total(st, now, period)), [Up.scope(st)],
         Up.breakdown(String.eq(Up.period(period), "month"), st, ps, now, metric, modelpage, projectpage)])
 

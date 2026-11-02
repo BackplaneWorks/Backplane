@@ -10,9 +10,9 @@ try {
  await page.goto('http://127.0.0.1:4039');
  await page.getByRole('heading',{name:'Daily recorded tokens',exact:true}).waitFor();
  const monthBars=await page.locator('.usage-column').count();
- if(monthBars!==18)throw Error('UTC month graph must contain 18 fixture days; got '+monthBars);
+ if(monthBars!==30)throw Error('Rolling month graph must contain 30 fixture days; got '+monthBars);
  const monthDates=await page.locator('.usage-column').evaluateAll(cols=>cols.map(c=>c.title.slice(0,10)));
- if(monthDates[0]!=='2026-10-01'||monthDates.at(-1)!=='2026-10-18')throw Error('Graph escaped UTC month: '+JSON.stringify(monthDates));
+ if(monthDates[0]!=='2026-09-19'||monthDates.at(-1)!=='2026-10-18')throw Error('Graph escaped rolling month: '+JSON.stringify(monthDates));
  await page.screenshot({path:resolve(out,'usage-desktop.png'),fullPage:true});
  await page.getByRole('tab',{name:'claude',exact:true}).focus();
  await page.keyboard.press('ArrowRight');
@@ -23,6 +23,16 @@ try {
  await page.getByText('Daily readings',{exact:true}).click();
  await page.screenshot({path:resolve(out,'usage-codex-desktop.png'),fullPage:true});
  await page.setViewportSize({width:390,height:844});
+ for (const [label,count] of [['1 week',7],['2 weeks',14],['4 weeks',28],['Month (30 days)',30],['This calendar month (UTC)',18]]) {
+  await page.getByRole('button',{name:label,exact:true}).click();
+  await page.waitForFunction(n=>document.querySelectorAll('.usage-column').length===n,count);
+  const dates=await page.locator('.usage-column').evaluateAll(cols=>cols.map(c=>c.title.slice(0,10)));
+  if(dates.at(-1)!=='2026-10-18')throw Error(label+' lost current date');
+  const width=await page.evaluate(()=>({viewport:innerWidth,scroll:document.documentElement.scrollWidth}));
+  if(width.scroll>width.viewport)throw Error(label+' overflows phone viewport');
+ }
+ await page.getByRole('button',{name:'2 weeks',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('.usage-column').length===14);
  await page.screenshot({path:resolve(out,'usage-390.png'),fullPage:true});
  const mobile=await page.evaluate(()=>({viewport:innerWidth,scroll:document.documentElement.scrollWidth,plot:document.querySelector('.usage-plot').getBoundingClientRect().height}));
  if(mobile.scroll>mobile.viewport)throw Error('Mobile horizontal overflow: '+JSON.stringify(mobile));
@@ -36,6 +46,6 @@ try {
  if(!todayDate.startsWith('2026-10-18'))throw Error('Today graph must keep the fixture UTC date');
  await page.screenshot({path:resolve(out,'usage-today-390.png'),fullPage:true});
  if(errors.length)throw Error(errors.join('\n'));
- writeFileSync(resolve(out,'browser-checks.json'),JSON.stringify({pass:true,scope:'production Usage nodes in isolated fixture host, not installed hub',browserTimezone:'America/New_York',monthBars,monthDates,todayDate,mobile,errors,checks:['UTC month has exactly 18 fixture days','Today has exactly one UTC date','keyboard ArrowRight switches provider','only enabled tabs','exact daily reading visible','390px no overflow','180px reserved graph height','missing-provider readings view']},null,2));
+ writeFileSync(resolve(out,'browser-checks.json'),JSON.stringify({pass:true,scope:'production Usage nodes in isolated fixture host, not installed hub',browserTimezone:'America/New_York',monthBars,monthDates,todayDate,mobile,errors,checks:['Rolling month has exactly 30 fixture days','Today has exactly one UTC date','keyboard ArrowRight switches provider','only enabled tabs','exact daily reading visible','390px no overflow','180px reserved graph height','missing-provider readings view']},null,2));
  console.log('Usage desktop/390 captures and focused browser checks passed');
 } finally {await browser.close();}

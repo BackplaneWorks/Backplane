@@ -25,3 +25,14 @@ def missing_scope.on(u: U.Ui) -> String:
 
 def missing_scope() -> String:
   missing_scope.on(F.ui())
+
+def rolling(period: String) -> String:
+  J.Json.show(J.Json.arr(S.Mob.usage.page(I.En{}, F.act(F.ui(), "usage-period", period))))
+
+def period_scope.on(+u: U.Ui) -> String:
+  +hs : H.Hubs = H.Hubs{"fixture", 1792359200n, "a", [H.Hub{"a", u}, H.Hub{"b", u}]}
+  +changed : H.Hubs = H.Hubs.after(H.Hubs.act(hs, "usage-period", "b|2weeks"))
+  U.Usage.page.period(H.Hubs.ui(changed, "a")) ++ "/" ++ U.Usage.page.period(H.Hubs.ui(changed, "b"))
+
+def period_scope() -> String:
+  period_scope.on(F.ui())
