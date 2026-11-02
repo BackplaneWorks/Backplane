@@ -91,8 +91,9 @@ def Choice.proposal() -> U.Act:
 def Choice.accepted() -> B.Step:
   B.Hub.request(M.State.empty(), 3n, 1, Choice.request(Choice.proposal()))
 
+# Reply to the actual generated request (fresh Ui starts with request id 0).
 def Choice.failed() -> U.Ui:
-  U.Ui.recv.k(3n, F.Cases.ui(Choice.proposal()), J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{"1"}}, J.KV{"ok", J.Flag{False{}}}, J.KV{"error", J.Str{"Unable to save preferences"}}]))
+  U.Ui.recv.k(3n, F.Cases.ui(Choice.proposal()), J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(Choice.request(Choice.proposal()), "id"), J.Null{})}, J.KV{"ok", J.Flag{False{}}}, J.KV{"error", J.Str{"Unable to save preferences"}}]))
 
 # 1. One worker lifecycle as the hub runs it (Hub.telemetry → done → again):
 # a start, its completion, and a restart only when the snapshot is stale.
@@ -127,6 +128,11 @@ def Choice.off.changes() -> List<&2, M.Change>:
 # (Hub.telemetry.usage_permit) with the real queue
 def Choice.permit(+q: DQ.Dq, +post: M.State) -> Bool:
   T.Tm.permit(True{}, DQ.Dq.some(q), T.Tm.allowed(post), T.Tm.current(TI.Tio.view(post, "0.12.0", 5n, Choice.cfg()), post))
+
+# Hub.metrics.start persists this marker only for a capable sender. A saved
+# On choice alone must not bypass a developer build's closed capability gate.
+def Choice.collecting(st: M.State) -> M.State:
+  M.State.apply(st, M.SettingSet{"telemetry.usage.enabled", "1", 3n})
 
 def Choice.usage.permit(+q: DQ.Dq, +post: M.State) -> Bool:
   Bool.and(Choice.permit(q, post), TUS.Usage.current(M.Setting.get(post, "telemetry.usage.generation", ""), post))
@@ -262,10 +268,11 @@ def main() -> IO(Unit):
     # 2. an unpersisted On authorizes nothing until its append is flushed
     Choice.check("queued On: folded state reads On", T.Tm.allowed(M.State.replay(Choice.on.changes(), M.State.empty())))
     Choice.check("queued On: registration send refused", Bool.not(Choice.permit(Choice.queued(M.State.empty(), Choice.on.changes()), M.State.replay(Choice.on.changes(), M.State.empty()))))
-    Choice.check("queued On: aggregate send refused", Bool.not(Choice.usage.permit(Choice.queued(M.State.empty(), Choice.on.changes()), M.State.replay(Choice.on.changes(), M.State.empty()))))
+    Choice.check("queued On: aggregate send refused", Bool.not(Choice.usage.permit(Choice.queued(M.State.empty(), Choice.on.changes()), Choice.collecting(M.State.replay(Choice.on.changes(), M.State.empty())))))
     Choice.check("queued On: no worker starts", Bool.not(T.Tm.start(True{}, DQ.Dq.some(Choice.queued(M.State.empty(), Choice.on.changes())), T.Tm.allowed(M.State.replay(Choice.on.changes(), M.State.empty())))))
     Choice.check("flushed On: registration send permitted", Choice.permit(DQ.Dq.empty(), Choice.on()))
-    Choice.check("flushed On: aggregate send permitted", Choice.usage.permit(DQ.Dq.empty(), Choice.on()))
+    Choice.check("flushed On: aggregate send permitted", Choice.usage.permit(DQ.Dq.empty(), Choice.collecting(Choice.on())))
+    Choice.check("unconfigured On still refuses aggregate send", Bool.not(Choice.usage.permit(DQ.Dq.empty(), Choice.on())))
     Choice.check("queued Off: revokes at once", Bool.not(Choice.permit(Choice.queued(Choice.on(), Choice.off.changes()), M.State.replay(Choice.off.changes(), Choice.on()))))
     Choice.check("queued Off: cleanup worker still starts", T.Tm.start(True{}, DQ.Dq.some(Choice.queued(Choice.on(), Choice.off.changes())), T.Tm.allowed(M.State.replay(Choice.off.changes(), Choice.on()))))
     # 3. receipts name one decision

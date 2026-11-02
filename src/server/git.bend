@@ -1,4 +1,5 @@
 import Base
+import ../core/pcb-usage.bend as PC
 import ./proc.bend as P
 import ./gh.bend as GH
 import ../core/sha1.bend as S
@@ -665,7 +666,7 @@ def Git.step.script() -> String:
     "else",
     "  top=$(pwd); gd=$top/.backplane/history.git; pd=$gd; shadow=1",
     "  [ \"$top\" = / ] || [ \"$top\" = \"$HOME\" ] && exit 0",
-    "  [ -d \"$gd\" ] || [ -L \"$gd\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' \\) -print | head -n 1)\" ] || exit 0",
+    "  [ -d \"$gd\" ] || [ -L \"$gd\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' \\) -print | head -n 1)\" ] || exit 0",
     "  if [ -e \"$gd\" ] || [ -L \"$gd\" ]; then",
     "    if ! { [ -n \"$reg\" ] && [ ! -L \"$gd\" ] && [ -d \"$gd\" ] && grep -qxF \"$(ino \"$gd\") $gd\" \"$reg\"; }; then",
     "      mv \"$gd\" \"$gd.untrusted-$(date +%s)\" || exit 0",
@@ -680,8 +681,8 @@ def Git.step.script() -> String:
     "fi",
     "bp_safe",
     "ref=refs/backplane/checkpoints/$name/steps",
-    "spec='*.kicad_[ps]c[bh]'",
-    "[ -n \"$shadow\" ] || git rev-parse -q --verify \"$ref\" >/dev/null || [ -n \"$(git ls-files -- \"$spec\" | head -n 1)\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' \\) -not -path './.backplane/*' -print | head -n 1)\" ] || exit 0",
+    "spec='*.kicad_[ps][cr][boh]'",
+    "[ -n \"$shadow\" ] || git rev-parse -q --verify \"$ref\" >/dev/null || [ -n \"$(git ls-files -- \"$spec\" | head -n 1)\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' \\) -not -path './.backplane/*' -print | head -n 1)\" ] || exit 0",
     "idx=$pd/backplane-$name.steps.index",
     "lock=$pd/backplane-$name.steps.lock",
     "n=0",
@@ -719,6 +720,20 @@ def Git.step.ran(r: P.Ran) -> IO(String):
 # (reg: the hub's record of the history.git folders it made, Git.step.reg)
 def Git.step.capture(+cwd: String, +thread_id: String, +reg: String) -> IO(String):
   IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Git.step.script(), "sh", cwd, Git.b64url(thread_id), reg], "/"), Git.step.ran)
+
+# Numerical creation evidence from the same successful local design step.
+# Rename detection is enabled only here; history's existing wire stays intact.
+# No paths or revision identities returned here reach a telemetry request.
+def Git.step.previous(+cwd: String, +gitdir: String, +prev: String) -> IO(String):
+  Bool.pick(IO(String), String.is_empty(prev), IO.pure(String, ""),
+    Git.seq.raw(Git.run(cwd, ["--git-dir", gitdir, "ls-tree", "-r", "-z", "--name-only", prev]), Git.done))
+
+def Git.step.created(+cwd: String, +commit: String, +prev: String, +gitdir: String) -> IO(Nat):
+  do IO<Nat>:
+    +added : String <- Git.seq.raw(Git.run(cwd, List.append(&2, String, ["--git-dir", gitdir, "diff-tree", "-r", "-z", "--no-commit-id", "--root", "--find-renames", "--diff-filter=A", "--name-only"],
+      List.append(&2, String, Bool.pick(List<&2, String>, String.is_empty(prev), Nil{}, [prev]), [commit]))), Git.done)
+    +before : String <- Git.step.previous(cwd, gitdir, prev)
+    return Bool.pick(Nat, Bool.or(Git.is_error(added), Git.is_error(before)), 0n, PC.Pcb.created(String.split(added, Chr{0}), String.split(before, Chr{0})))
 
 # What a file may be compared with: the git dir and top (as Git.step
 # finds them), then lines "kind\tlabel\tcommit": HEAD, the newest
