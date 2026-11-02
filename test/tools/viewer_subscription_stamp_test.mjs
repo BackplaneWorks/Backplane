@@ -9,13 +9,13 @@ try {
  const path=join(dir,'board.kicad_pcb');writeFileSync(path,'saved source');
  const binary=resolve(process.argv[2]);
  function run(file){
-  const r=spawnSync(binary,[file],{encoding:'utf8',timeout:15000,env:{...process.env,BACKPLANE_HOME:join(dir,'home'),XDG_CACHE_HOME:join(dir,'cache')}});
+  const r=spawnSync(binary,[],{encoding:'utf8',timeout:15000,env:{...process.env,VIEWER_STAMP_TEST_SOURCE:file,BACKPLANE_HOME:join(dir,'home'),XDG_CACHE_HOME:join(dir,'cache')}});
   assert.equal(r.status,0,r.stderr||r.stdout);return r.stdout.trim().split('\n').filter(Boolean).map(JSON.parse);
  }
- const rows=run(path);
+ const rows=run(path);assert.equal(rows.find(r=>r.stage==='source')?.path,path,'probe must read the actual temporary source');
  for(const stage of ['join-busy','repeat-watch']){
   const messages=rows.filter(r=>r.stage===stage&&r.kind==='text');
-  assert.equal(messages.length,2,'a subscriber gets both stamps before any compact mesh completes');
+  assert.equal(messages.length,2,'a subscriber gets both stamps before any compact mesh completes: '+JSON.stringify(rows));
   assert.deepEqual(messages.map(r=>r.client),[7,7],'no replay to other clients');
   const stamps=messages.map(r=>JSON.parse(r.text));
   assert(stamps.every(r=>r.t==='plotstamp'&&r.revision&&r.revision!=='earlier-save'));

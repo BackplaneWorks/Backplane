@@ -1,6 +1,6 @@
 import Base
 import ../../src/server/plot.bend as PV
-import ../../src/server/argv.bend as AV
+import ../../src/core/json.bend as J
 import ./viewer_revision_state_probe.bend as F
 
 # Join an existing PCB/assembly read. No poll, CAD child or PGot ever runs.
@@ -13,6 +13,7 @@ def initial(+path: String) -> PV.PSt:
 
 def run(+path: String) -> IO(Unit):
   do IO<Unit>:
+    IO.print(J.Json.show(J.Json.obj([J.KV{"stage", J.Str{"source"}}, J.KV{"path", J.Str{path}}])))
     +first : PV.PSt <- F.probe.handle(initial(path), PV.PAlso{7, 2, "/fixture", path, "", True{}}, "join-busy")
     +again : PV.PSt <- F.probe.handle(first, PV.PAlso{7, 2, "/fixture", path, "", True{}}, "repeat-watch")
     last : PV.PSt <- F.probe.handle(again, PV.PAlso{8, 2, "/fixture", path, "", False{}}, "legacy")
@@ -20,5 +21,5 @@ def run(+path: String) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    args : List<String> <- AV.Argv.args()
-    run(Maybe.default(&1, String, List.head(&1, String, args), "/missing"))
+    source : Result<&1, &1, U32 & String, String> <- IO.get_env("VIEWER_STAMP_TEST_SOURCE")
+    run(Result.default(&1, &1, U32 & String, String, source, "/missing"))
