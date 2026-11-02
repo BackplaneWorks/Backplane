@@ -35,6 +35,7 @@ import ./src/server/thin-actor.bend as CHATSIDE
 import ./src/core/sidebar-read.bend as SIDEREAD
 
 import Base
+import ./src/core/pathrecords.bend as PR
 
 import ./src/server/thin-sidebar.bend as CHATDERIVED
 
@@ -15439,3 +15440,9 @@ def Laws.fm_previous_reply_rejected():
 
 def Laws.fm_root_reconnect_requested():
   {==}
+
+# Complete file path records (PR #239).
+def Laws.path_records_newline_is_data(): {==}
+def Laws.path_records_keep_whitespace(): {==}
+def Laws.path_records_unterminated_last(): {==}
+def Laws.path_records_legacy_kept(text): {==}
