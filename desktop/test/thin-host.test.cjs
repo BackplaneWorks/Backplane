@@ -1181,12 +1181,15 @@ test('local send clears the composer and publishes a bubble before the action AC
  const feedback=[];const f=await fixture({previewSend:()=>true,sendFeedback:on=>feedback.push(on)});f.open();
  const text=f.getSession().drafts.A;f.host.request('send','');const sent=f.sent.at(-1);
  assert.equal(f.getSession().drafts.A,'');assert.equal(f.disk.get('A'),'');
- assert.deepEqual(f.host.pendingSends('A'),[{key:'@sending:1',text}]);assert.deepEqual(f.host.pendingSends('B'),[]);
+ assert.deepEqual(f.host.pendingSends('A'),[{key:'@sending:1',text,accepted:false}]);assert.deepEqual(f.host.pendingSends('B'),[]);
  assert.equal(sent.p.session.drafts.A,text,'the request still carries its immutable captured text');
  f.host.request('draft','next 日本語');
  f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'send',text:JSON.stringify({id:20,m:'turn.start',p:{thread:'A',msg:'sent-A',text}})},{type:'keep',thread:'A',text:''}]}));
- assert.equal(f.getSession().drafts.A,'next 日本語');assert.deepEqual(f.host.pendingSends('A'),[]);assert.deepEqual(feedback,[true,false]);
+ assert.equal(f.getSession().drafts.A,'next 日本語');assert.equal(f.host.pendingSends('A').length,1);assert.deepEqual(feedback,[true]);
  assert.equal(f.commands.filter(c=>c.type==='send').length,1);
+ f.host.ack({t:'reply',id:20,ok:true});assert.equal(f.host.pendingSends('A')[0].accepted,true);
+ f.host.update();f.host.receive(f.reply(undefined,{window:{ids:['sent-A'],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]}}));
+ assert.deepEqual(f.host.pendingSends('A'),[]);assert.deepEqual(feedback,[true,false,false]);
 });
 test('local send refusal and ordinary rejection restore captured text alongside newer typing',async()=>{
  for(const ordinary of[false,true]){
