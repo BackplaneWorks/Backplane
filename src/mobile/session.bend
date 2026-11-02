@@ -76,6 +76,9 @@ def Session.reading.ui(away: Bool, +u: U.Ui, +id: String, +seen: String, count: 
 def Session.reading(session: J.Json, id: String, seen: String, count: Nat, away: Bool) -> J.Json:
   P.Session.reading(session, id, seen, count, away)
 
+def Session.draft.at(session: J.Json, thread: String, text: String) -> J.Json:
+  P.Session.draft.at(session, thread, text)
+
 def Session.draft(+session: J.Json, +text: String) -> J.Json:
   P.Session.draft(session, text)
 

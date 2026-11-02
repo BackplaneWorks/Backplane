@@ -60,6 +60,11 @@ def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("derived image cache never crosses presentation transport", J.Json.get_str(J.Json.get_obj(S.Session.pack(cache.fixture()), "drafts"), "@img:old", "private"), "private")
     C.Check.str("canonical image cache survives compact session adoption", U.Ui.scratch(S.Session.adopt(cache.fixture(), S.Session.pack(presentation())), "@img:old"), "=/tmp/old.png")
+    C.Check.str("explicit draft identity preserves selection", J.Json.get_str(S.Session.draft.at(S.Session.pack(presentation()), "other", "new other"), "sel", ""), "t2")
+    C.Check.str("explicit draft identity preserves selected draft", J.Json.get_str(J.Json.get_obj(S.Session.draft.at(S.Session.pack(presentation()), "other", "new other"), "drafts"), "t2", ""), "unsent")
+    C.Check.str("explicit draft identity updates original thread", J.Json.get_str(J.Json.get_obj(S.Session.draft.at(S.Session.pack(presentation()), "other", "new other"), "drafts"), "other", ""), "new other")
+    C.Check.str("queued permission uses the thread visible at tap", J.Json.get_str(S.Session.prepare(S.Session.pack(U.Ui.select.k(presentation(), "other")), S.Session.pack(presentation()), "thread-permissions"), "sel", ""), "t2")
+    C.Check.str("queued permission cannot restore a sent draft", J.Json.get_str(J.Json.get_obj(S.Session.prepare(S.Session.pack(U.Ui.scratch_set(U.Ui.select.k(presentation(), "other"), "t2", "")), S.Session.pack(presentation()), "thread-permissions"), "drafts"), "t2", ""), "")
     C.Check.str("compact session still carries unsent draft", J.Json.get_str(J.Json.get_obj(S.Session.pack(cache.fixture()), "drafts"), "t2", "missing"), "unsent")
     C.Check.str("compact adoption does not restore a cleared draft", U.Ui.scratch(S.Session.adopt(cache.fixture(), S.Session.pack(U.Ui.scratch_set(presentation(), "t2", ""))), "t2"), "")
     C.Check.str("fresh presentation derives visible message images", U.Ui.scratch(S.Session.images(page.fixture()), "@img:visible-image"), "=/tmp/visible.png")
