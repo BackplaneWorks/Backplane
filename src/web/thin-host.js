@@ -1,6 +1,6 @@
 import { validatePresentation } from './startup.js';
 import { validateThinResult, MessageParts } from './thin-results.js';
-import { compactRoute, utf8Bytes } from './thin.js';
+import { compactRoute, utf8Bytes, viewTarget } from './thin.js';
 import { viewerChoice } from './viewer-feedback.js';
 import { terminalInputRequest } from './terminal-input.js';
 import { terminalOutputFrame } from './terminal-output.js';
@@ -319,6 +319,14 @@ export class ThinHost {
         });
       }
       return true;
+    }
+    // Bot selection needs no action on the failed/unfinished picture. Open
+    // its target on the existing greeted link; the hub resolves its actual
+    // conversation and the new selection fences late replies from the old one.
+    if (action === 'bot' && !this.ready) {
+      const target = { kind: 'bot', id: value };
+      if (!this.greeted || !this.client.links.has(this.hub) || !viewTarget(target)) { settled?.(false);this.api.blocked();return true; }
+      const sent = this.select(target);settled?.(sent);return sent;
     }
     // A press while the selected thread's view is on its way (a click right
     // after picking a thread) is for that view: it waits in the queue and

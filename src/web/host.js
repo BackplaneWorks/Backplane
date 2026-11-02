@@ -1592,6 +1592,9 @@ function dispatch(action, value, timer) {
       localPresentation(action, value, thinSession);
       return true;
     }
+    // An explicit destination does not depend on the previous picture
+    // succeeding. ThinHost validates the live greeting and opens the bot.
+    if (action === "bot" && thin?.greeted && !thin.ready && socket?.readyState === 1) return thin.request(action, value);
     // (a press while a thread's view is on its way waits for it: thin-host.js)
     if (thin?.ready || thin?.opening) {
       if (action === "earlier" || action === "view-page") return thin.page();
