@@ -10,6 +10,27 @@ done
 launcher=0
 [ ! -e "$src/backplane" ] || launcher=1
 [ -d "$src/web" ] || { echo 'release missing web' >&2; exit 1; }
+# The caller has checked the archive's release SHA256. Verify macOS code
+# before replacing anything, then remove quarantine only from that payload.
+# A portable ad-hoc bundle has integrity but no notarization ticket.
+if [ "$(uname -s)" = Darwin ]; then
+  if [ -d "$src/desktop/Backplane.app" ] && [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ] &&
+     { [ -d "$prefix/desktop" ] || [ -n "${BACKPLANE_INSTALL_DESKTOP:-}" ]; }; then
+    codesign --verify --deep --strict "$src/desktop/Backplane.app" || {
+      echo 'macOS app signature is invalid; no files replaced' >&2; exit 1;
+    }
+  fi
+  # --deep does not verify executables in arbitrary Resources directories.
+  for file in "$src"/backplane-serve "$src"/backplane-browser "$src"/backplane-step2glb "$src"/backplane-voice "$src"/backplane-kipc \
+              "$src"/desktop/Backplane.app/Contents/Resources/backplane-service/backplane-*; do
+    [ ! -f "$file" ] || [ ! -x "$file" ] || codesign --verify --strict "$file" || {
+      echo 'macOS helper signature is invalid; no files replaced' >&2; exit 1;
+    }
+  done
+  xattr -dr com.apple.quarantine "$src" || {
+    echo 'cannot clear quarantine on verified release; no files replaced' >&2; exit 1;
+  }
+fi
 mkdir -p "$prefix"
 if [ -d "$src/browser-runtime" ]; then
   command -v python3 >/dev/null 2>&1 || { echo 'CEF installation/update needs python3; no files replaced' >&2; exit 1; }

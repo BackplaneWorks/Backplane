@@ -46,7 +46,7 @@ function fixture(t,target='linux-x64',resident=false,releaseSource={}){
 }
 function evidence(f,dir,changes={}){
  const inspected=producer.inspectStage(dir),common={schema:1,status:'PASS',target:f.target,version:'0.13.0',commit:f.request.release.commit,tree:f.request.release.tree,payloadManifestSha256:inspected.payloadManifestSha256,freezeReceiptSha256:f.request.release.freezeReceipt.sha256};
- const receipts={signing:{...common,kind:'desktop-signing',signed:false},sandbox:{...common,kind:'desktop-sandbox',osEnforced:true,flags:[]},lifecycle:{...common,kind:'desktop-lifecycle',nativeChildIdentity:true,authBound:true,singleInstance:true,reconnect:true,windowClose:'resident-service',shutdown:f.freeze.lifecyclePolicy?'unsupported':'owned-native-child',startup:true,closePreservesService:true,managedStopAdvertised:false,managedUpdateAdvertised:false,nativeToPosixPaths:true},runtimeAcceptance:{...common,kind:'desktop-runtime-acceptance',scope:'desktop-release'}};
+ const receipts={signing:{...common,kind:'desktop-signing',signed: f.target==='darwin-arm64',...(f.target==='darwin-arm64'?{macosIntegrity:{schema:1,kind:'macos-bundle-integrity',status:'PASS',sealed:true,nestedCodeVerified:true,machOFiles:1,bundles:2}}:{})},sandbox:{...common,kind:'desktop-sandbox',osEnforced:true,flags:[]},lifecycle:{...common,kind:'desktop-lifecycle',nativeChildIdentity:true,authBound:true,singleInstance:true,reconnect:true,windowClose:'resident-service',shutdown:f.freeze.lifecyclePolicy?'unsupported':'owned-native-child',startup:true,closePreservesService:true,managedStopAdvertised:false,managedUpdateAdvertised:false,nativeToPosixPaths:true},runtimeAcceptance:{...common,kind:'desktop-runtime-acceptance',scope:'desktop-release'}};
  const a={schema:1,kind:'backplane-desktop-target-acceptance',target:f.target,stageReceiptSha256:inspected.stageReceiptSha256,payloadManifestSha256:inspected.payloadManifestSha256};
  for(const[k,v]of Object.entries(receipts))a[k]=ref(write(path.join(f.root,'proof-'+k+'.json'),{...v,...changes[k]}));return write(path.join(f.root,'acceptance.json'),a);
 }
@@ -164,4 +164,20 @@ test('helpers must be executables of the target',t=>{
  put(path.join(f.service,'backplane-voice'),binary('linux-x64'),0o644);assert.throws(()=>producer.helpers(f.service,'linux-x64'),/not executable/);
  const w=fixture(t,'windows-x64',true);producer.helpers(w.service,'windows-x64');fs.unlinkSync(path.join(w.service,'backplane-step2glb.exe'));
  assert.throws(()=>producer.helpers(w.service,'windows-x64'),/backplane-step2glb\.exe/);
+});
+
+test('macOS cannot archive an unsealed portable app or missing nested-code verification (#661)',t=>{
+ const f=fixture(t,'darwin-arm64'),dir=path.join(f.root,'stage');producer.stage(f.requestPath,dir);
+ for(const signing of [{signed:false},{macosIntegrity:undefined},{macosIntegrity:{schema:1,kind:'macos-bundle-integrity',status:'PASS',sealed:true,nestedCodeVerified:false,machOFiles:1,bundles:2}}]){
+  assert.throws(()=>producer.archive(dir,evidence(f,dir,{signing}),path.join(f.root,'reject-'+crypto.randomUUID())),/macOS requires/);
+ }
+});
+test('macOS sealing permits only declared Electron signature deltas and keeps service/web immutable',t=>{
+ const f=fixture(t,'darwin-arm64'),dir=path.join(f.root,'stage');producer.stage(f.requestPath,dir);
+ fs.appendFileSync(path.join(dir,producer.TARGETS[f.target].executable),'synthetic signature');
+ put(path.join(dir,'Backplane.app/Contents/_CodeSignature/CodeResources'),'synthetic resource seal');
+ assert.doesNotThrow(()=>producer.validateSigningChanges(dir,true));
+ assert.throws(()=>producer.validateSigningChanges(dir,false),/Unsigned payload/);
+ const service=path.join(dir,producer.TARGETS[f.target].resources,'backplane-service/backplane-serve');fs.appendFileSync(service,'changed service');
+ assert.throws(()=>producer.validateSigningChanges(dir,true),/Unexpected post-stage|cannot rewrite/);
 });
