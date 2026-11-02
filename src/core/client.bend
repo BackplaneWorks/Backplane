@@ -1,4 +1,5 @@
 import Base
+import ./rpcout.bend as RPO
 import ./star-nudge.bend as STAR
 import ./browser-frame.bend as BFRAME
 import ./view-page.bend as VP
@@ -726,7 +727,7 @@ def Ui.reply.err(+o: J.Json) -> String:
 def Ui.reply.k(u: Ui, +o: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, _, note, nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, Ui.reply.err(o), note, nf, Map.set(&2, String, ob, J.Json.as_raw(J.Json.get(o, "id"), ""), ""), tr}
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, Ui.reply.err(o), note, nf, Map.del(&2, String, ob, J.Json.as_raw(J.Json.get(o, "id"), "")), tr}
 
 # The viewer belongs to a thread: what it shows for thread t is kept as
 # "view.kind:t" and "view.path:t" (a file an agent asked for, else the
@@ -1079,10 +1080,14 @@ def Out.resend(xs: List<&2, String>) -> List<&2, Cmd>:
 def Ui.outbox(u: Ui) -> List<&2, Cmd>:
   match u:
     case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, ob, tr}:
-      Out.resend(Map.values(&2, String, ob))
+      Out.resend(RPO.RpcOut.values(ob))
 
 def Ui.recv_act.k(connected: Bool, +u: Ui) -> Act:
-  Act{u, Bool.pick(List<&2, Cmd>, connected, Ui.outbox(u), Nil{})}
+  match connected:
+    case True{}:
+      Act{u, Ui.outbox(u)}
+    case False{}:
+      Act{u, Nil{}}
 
 # the client's own id (a host sets it once at start)
 def Ui.set_cid(u: Ui, +cid: String) -> Ui:
@@ -1135,7 +1140,7 @@ def Pending.project(small: Bool, xs: List<&2, String>) -> List<&2, String>:
 def Ui.pending(u: Ui, +thread: String) -> List<&2, String>:
   match u:
     case Ui{st, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, ob, tr}:
-      Pending.project(String.eq(Str.get(nf, "local.body.budget"), "1"), Pending.go(Map.values(&2, String, ob), thread, M.State.mine(st, thread)))
+      Pending.project(String.eq(Str.get(nf, "local.body.budget"), "1"), Pending.go(RPO.RpcOut.values(ob), thread, M.State.mine(st, thread)))
 
 # (a new connection has answered nothing: what the Mechanical page and a
 # part in 3D asked for is asked again)
