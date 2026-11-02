@@ -1322,10 +1322,14 @@ def View.sub.detail.open(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +s
   D.Dom.cat(View.sub.ask(lc, ask), Bool.pick(List<&2, D.Node>, Bool.and(agent, Bool.and(open, Bool.and(Bool.not(String.starts_with(key, "subs.done:")), List.is_empty(&2, SB.SubStep, ss)))),
     [D.Dom.span("sub-empty", View.sub.empty.loc(lc))], View.sub.steps(ss)))
 
+# what a subagent of the agent's own shows open, drawn shut too, hidden
+# (style.css's .sub:not(.open) > .sub-detail), so a click on its row shows
+# it at once (subs-feedback.js, presentation.bend's Node.rows); its steps
+# from the walk (SB.SubInfo's shown) when the row has none, shut
 def View.sub.detail(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>, +ask: String) -> List<&2, D.Node>:
-  match open:
+  match agent:
     case False{}: Nil{}
-    case True{}: View.sub.detail.open(lc, agent, open, key, ss, ask)
+    case True{}: [D.El{"div", "", [D.At{"class", "sub-detail"}], View.sub.detail.open(lc, agent, True{}, key, ss, ask)}]
 
 # the line under a row's name: where it runs, its model, how many steps it
 # took and what it used (subs.bend's SubInfo; a part not known is left out)
@@ -1342,11 +1346,11 @@ def View.sub.now(+live: Bool, +doing: String, +title: String, +outcome: String) 
   Bool.pick(List<&2, D.Node>, Bool.and(Bool.not(String.is_empty(doing)), Bool.not(String.eq(doing, title))), [D.Dom.span("doing", doing)],
     D.Dom.when(Bool.and(Bool.not(live), Bool.not(String.is_empty(outcome))), D.Dom.span("sub-outcome", outcome)))
 
-# its newest step, while its steps are not shown
-def View.sub.last(+open: Bool, s: SB.SubStep) -> List<&2, D.Node>:
+# its newest step, shown while its steps are not (style.css's .sub.open > .sub-last)
+def View.sub.last(s: SB.SubStep) -> List<&2, D.Node>:
   match s:
     case SB.SubStep{+kind, +text}:
-      D.Dom.when(Bool.and(Bool.not(open), Bool.not(String.is_empty(text))), D.El{"div", "", [D.At{"class", "sub-step sub-last"}], [D.Dom.span("kind", SB.Subs.step.label(kind)), D.Dom.span("text", text)]})
+      D.Dom.when(Bool.not(String.is_empty(text)), D.El{"div", "", [D.At{"class", "sub-step sub-last"}], [D.Dom.span("kind", SB.Subs.step.label(kind)), D.Dom.span("text", text)]})
 
 # "running · 3m", "done · 4m": its state, and how long it has been at work
 # or took
@@ -1355,12 +1359,12 @@ def View.sub.state(+lc: I.Loc, +word: String, +took: String) -> String:
 
 def View.sub.signal.k(+lc: I.Loc, r: SB.SubRow, +act: String, +signal: String, i: SB.SubInfo, +now: Nat) -> D.Node:
   match r i:
-    case SB.SubRow{+key, +agent, +title, +who, +word, +doing, +live, +open, _, ss} SB.SubInfo{+runs, +model, +since, +until, +steps, +tokens, last, +ask, +outcome}:
+    case SB.SubRow{+key, +agent, +title, +who, +word, +doing, +live, +open, _, +ss} SB.SubInfo{+runs, +model, +since, +until, +steps, +tokens, last, +ask, +outcome, +shown}:
       D.El{"div", key, [D.At{"class", "sub sub-signal-" ++ signal ++ " " ++ word ++ Bool.pick(String, String.eq(signal, "active"), " live", "") ++ Bool.pick(String, open, " open", "")}],
         D.Dom.cat([D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", "sub-row"}, D.At{"type", "button"}], View.sub.act(agent, open, key)),
-          [View.dot(lc, signal), D.Dom.span("who", Bool.pick(String, agent, Bool.pick(String, open, "▾", "▸"), "↗")), D.Dom.span("title", TTL.Title.shown(lc, title)), D.Dom.span("state", View.sub.state(lc, word, SB.Subs.took(live, since, until, now)))]}],
+          [View.dot(lc, signal), D.Dom.span(Bool.pick(String, agent, "who chev", "who"), Bool.pick(String, agent, "▸", "↗")), D.Dom.span("title", TTL.Title.shown(lc, title)), D.Dom.span("state", View.sub.state(lc, word, SB.Subs.took(live, since, until, now)))]}],
           D.Dom.cat(View.sub.stop.loc(lc, act, key), D.Dom.cat(View.sub.meta([SB.Subs.or(runs, who), model, SB.Subs.steps.word(steps), SB.Subs.tokens(tokens)]),
-            D.Dom.cat(View.sub.now(live, doing, title, outcome), D.Dom.cat(View.sub.last(open, last), View.sub.detail(lc, agent, open, key, ss, ask))))))}
+            D.Dom.cat(View.sub.now(live, doing, title, outcome), D.Dom.cat(View.sub.last(last), View.sub.detail(lc, agent, open, key, Bool.pick(List<&2, SB.SubStep>, List.is_empty(&2, SB.SubStep, ss), shown, ss), ask))))))}
 
 def View.sub.k(+lc: I.Loc, +r: SB.SubRow, +act: String) -> D.Node:
   View.sub.signal.k(lc, r, act, SB.Subs.signal(r), SB.SubInfo.none(), 0n)

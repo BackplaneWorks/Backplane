@@ -28,3 +28,20 @@ test('subagents fold: the latest click wins, another thread and a cleared view s
   assert.equal(f.choice('fold', 'xA'), undefined);
   assert.equal(f.project(s), s);
 });
+test('a subagent row opens at the click; other folds wait for the hub', async () => {
+  const { SubsFeedback } = await import('../../src/web/subs-feedback.js');
+  let changed = 0;
+  const f = new SubsFeedback(() => changed++), s = { sel: 'A' };
+  const open = f.choice('fold', '1sub:toolu_1'), shut = f.choice('fold', '0sub:toolu_2');
+  assert.equal(f.project(s).subsRows, '1toolu_1\n0toolu_2');
+  assert.equal(f.choice('fold', '1fold:run'), undefined);
+  assert.equal(f.choice('fold', '1subs.done:A'), undefined);
+  open(true);
+  assert.equal(f.project(s).subsRows, '0toolu_2');
+  const again = f.choice('fold', '1sub:toolu_2');
+  shut(true);
+  assert.equal(f.project(s).subsRows, '1toolu_2');
+  again(false);
+  assert.equal(f.project(s), s);
+  assert.equal(changed, 2);
+});
