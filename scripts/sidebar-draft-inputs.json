@@ -54,7 +54,7 @@
     "src/core/farlive.bend": "0fec3c222121256751cf620ad82248a178a7f54581c4f20570fdce2fa0b2e25c",
     "src/core/farsnap.bend": "a83e2e4f17577be64e737c32613e5cf2a77364c8849f5b7d0430edd0bde38257",
     "src/core/fm.bend": "34e5a2496e5f10c731ced619c797d06841fcc41a289070bbbedaf185d1237325",
-    "src/core/fold.bend": "ad2f8b4ec0b7c5f4f690d77d6e6cfc3652570f89fb16ffe70443aa101cfbfbf5",
+    "src/core/fold.bend": "69be3630233b894c69ef52c28e5da53c23ae528be963dec43d81dbc16dd1ed98",
     "src/core/fuzzy.bend": "3ded93b1ce5272c7cc0c071d3609bb4fa0fe45963e3c04f431a52af0ff31d707",
     "src/core/fview.bend": "c2310b5b1be82f3b0dbddfb72e29e4ed66ce0bc2df933c9824275f0c0500d3ed",
     "src/core/glb.bend": "f2eb124f9c0967d8c03c0a96c3a7120aab3c024cb8af60af6e4263d70bb8fe75",
@@ -87,7 +87,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "563db6e1ca6648dea31e8c3e4db20e8b8f2d2795272c36c1932ed6b2e78a87f1",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "5ae7a38e31cd86a8adda21078a90fd3bc7b7f9f824ebfe5f0db39866cf9b1f75",
+    "src/core/msgs.bend": "4b43c94aa627da7b3a83e07818ad25e934c1fbbfd896e631c6819b33dccb9257",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "3da1d256efc3f426cfa4d49af80414e09e960aeb026ce01cf858e90f0e834394",
@@ -122,7 +122,7 @@
     "src/core/signal.bend": "f8c4c9d95ea321e42676af8fb4ac159bcf15f88a9b2c51ed25a379c3d28a1e34",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
-    "src/core/stamp.bend": "feda431038cc6399db63a943d1475f54b67efb76e8b02984bb14f0f8bc2a8c64",
+    "src/core/stamp.bend": "b30542d995b56b824a6150985af5fd37d69c4787db87638cb0ce07cb81e1f0f8",
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
@@ -137,7 +137,7 @@
     "src/core/thin.bend": "49445e60244e4820224d39989d0d22fc6ff59f049018d26bd29915b25ba091f0",
     "src/core/thinq.bend": "afc1f6858593146d0c69b526ad237101fea160a03b071fcfbd51a41864e82555",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
-    "src/core/todo.bend": "5cb670b3e1c3a83c4d3eaee0e1e963892671d51fa30412583b2de628b8830562",
+    "src/core/todo.bend": "a06c2128de2e9e5de4f2ec6a4134bc740de953c316f3343cd149ec37ecee796f",
     "src/core/tools.bend": "754442a96f667e166f93096811adea081888233b9ea9f0a3d994a4375bd42db7",
     "src/core/tz.bend": "96054e486c1ad8a7305fe0610ee7feb5266869b2ad7c78ed9fd5f1d375c06f40",
     "src/core/uber.bend": "b86d13523ed4fd08006c8cb1f00d00712c4ab3cdc13b7b03dc2808cc72d09938",
@@ -156,7 +156,7 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
-    "src/mobile/screen.bend": "e4c476a7cf316618bdd259d6e2efe3d31feba289773d18243cba5e3a98e563b6",
+    "src/mobile/screen.bend": "7fda958435068475d6f8201940043e209a13ae3fd17fec6ed1dd0f8f4f0a95c4",
     "src/server/thin-actor.bend": "75619b1fe5921a07d55c229fd08c4c77f61958fc5cd39e46b13bd929dd8a0702",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -180,7 +180,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "84ba5d836a59a371826b1f4cca0e317f81b5854dea1fd9894f98b5060f497949"
+    "src/web/view.bend": "81117d2df0f1fd08cfd28d4f0bd0b1a1ce0374880cf5bb357abf65f3ce06e515"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -446,5 +446,21 @@
     "focusedSuites": 8,
     "focusedGateLogSHA256": "6be13cb0235b29d5c6bd1b785aec016c398a7ee40ea5db7a49ef6779dbd18773",
     "limits": "Focused executed output/consent/onboarding/watchdog/sidebar checks pass; normal local qualification remains required."
+  },
+  "telemetryFoldCompatibilityReview": {
+    "priorManifestSHA256": "3931feb9f89a4fa420208af7fcbd07e9e03c5556569f013dc17e646b77c60146",
+    "scope": "Preserve existing singleton legacy Fold.roles and outside-page live-label laws; current localized visible-call summaries remain unchanged. Pure entry-label projection only; no Ui or draft reads, key/filter, scanner, bridge authority or fallback changes.",
+    "changedClosureFiles": [
+      "src/core/fold.bend"
+    ],
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputAssertions": 24,
+    "genericProofCheck": "test/fold_compat_laws_test.bend",
+    "focusedGateLogSHA256": "804284841faa7bdd9420567235da912a738ce6166396a7fedccfe0d0c610b8fe",
+    "checks": [
+      "test/fold_compat_laws_test.bend",
+      "test/fold_test.bend",
+      "test/sidebar_draft_image_test.bend"
+    ]
   }
 }

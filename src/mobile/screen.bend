@@ -544,22 +544,32 @@ def Mob.imgs(+dr: Map<&2, String>, +id: String) -> List<&2, J.Json>:
 
 # a terminal's row or any other activity's: matched, not Bool.pick (which
 # built both, so every tool call's summary was cut as a terminal's title)
-def Mob.act.k(term: Bool, +id: String, +th: String, +tone: String, +kind: String, +summary: String) -> J.Json:
+# an activity's label and text: a review comment's from its JSON (parsed
+# only for one), a tool call's name and summary as the web shows them
+# (FO.Tool.shown, FO.Tool.text)
+def Mob.act.words(review: Bool, +lc: I.Loc, +tone: String, +kind: String, +summary: String) -> List<&2, J.KV>:
+  match review:
+    case True{}:
+      [J.KV{"label", J.Json.str(RVW.Review.label(tone, kind, summary))}, J.KV{"text", J.Json.str(RVW.Review.say(tone, kind, summary))}]
+    case False{}:
+      [J.KV{"label", J.Json.str(FO.Tool.shown(lc, kind))}, J.KV{"text", J.Json.str(FO.Tool.text(kind, summary))}]
+
+def Mob.act.k(term: Bool, +lc: I.Loc, +id: String, +th: String, +tone: String, +kind: String, +summary: String) -> J.Json:
   match term:
     case True{}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("emb")}, J.KV{"key", J.Json.str(EM.Emb.key(th, id))}, J.KV{"text", J.Json.str(EM.Emb.title(summary))}])
     case False{}:
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str(tone)},
-        J.KV{"label", J.Json.str(RVW.Review.label(tone, kind, summary))}, J.KV{"text", J.Json.str(RVW.Review.say(tone, kind, summary))}])
+      J.Json.obj(List.append(&2, J.KV, [J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str(tone)}],
+        Mob.act.words(String.eq(tone, RVW.Review.tone()), lc, tone, kind, summary)))
 
 # a tool call or other activity; a design step (core/hist.bend) is a row
 # that shows it in the viewer ("hist-show" with its value)
-def Mob.act(step: Bool, e: M.Entry) -> J.Json:
+def Mob.act(step: Bool, +lc: I.Loc, e: M.Entry) -> J.Json:
   match step e:
     case True{} M.Act{+id, _, _, _, _, _}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("step")}, J.KV{"text", J.Json.str(HS.Hist.row(e))}, J.KV{"value", J.Json.str(id)}])
     case _ M.Act{+id, +th, +tone, +kind, +summary, _}:
-      Mob.act.k(String.eq(tone, EM.Emb.tone()), id, th, tone, kind, summary)
+      Mob.act.k(String.eq(tone, EM.Emb.tone()), lc, id, th, tone, kind, summary)
     case _ M.Msg{+id, _, _, text, _}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str("")}, J.KV{"label", J.Json.str("")}, J.KV{"text", J.Json.str(text)}])
 
@@ -574,7 +584,7 @@ def Mob.own.s.loc(+lc: I.Loc, e: M.Entry, +dr: Map<&2, String>, +stamp: String) 
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("assistant")}, J.KV{"text", J.Json.str(text)},
         J.KV{"blocks", J.Json.arr(Mob.nodes(D.Md.render.loc(lc, text)))}, J.KV{"images", J.Json.arr(Mob.imgs(dr, id))}, J.KV{"stamp", J.Json.str(stamp)}])
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
-      Mob.act(String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at})
+      Mob.act(String.eq(tone, HS.Step.tone()), lc, M.Act{id, th, tone, kind, summary, at})
 
 # with the time under a message (core/stamp.bend; "stamp", empty for the
 # rest)
@@ -583,7 +593,7 @@ def Mob.own.s(e: M.Entry, +dr: Map<&2, String>, +stamp: String) -> J.Json:
   Mob.own.s.loc(I.En{}, e, dr, stamp)
 
 def Mob.own(+lc: I.Loc, +e: M.Entry, +dr: Map<&2, String>, +sp: STP.Stamps) -> J.Json:
-  Mob.own.s.loc(lc, e, dr, STP.Stamp.text.loc(lc, sp, e))
+  Mob.own.s.loc(lc, e, dr, STP.Stamp.shown(lc, sp, e))
 
 # a row that opens another thread (value: its id)
 def Mob.link(+id: String, +text: String, +to: String) -> J.Json:
