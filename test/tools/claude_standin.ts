@@ -445,10 +445,13 @@ async function run(c: Cmd, firstOne: boolean) {
     }
     // "agents:N": N subagents in the background (task_started), ended after the text
     const agents = Array.from({ length: Number(/agents:(\d+)/.exec(c.text)?.[1] ?? 0) }, (_, k) => {
+      // as Claude Code 2.1.286 says it: the Agent call's input, task_started's
+      // subagent_type and prompt (every other one an Explore on haiku)
       const task = `a${process.pid}x${rnd()}`, tool = `toolu_${task}`, description = `Subagent ${k + 1} for ${tag}`;
+      const subagent_type = k % 2 ? "Explore" : "general-purpose", prompt = `Look into ${tag}: read the board files and report what you find.\nKeep it short.`;
       emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
-        content: [{ type: "tool_use", id: tool, name: "Agent", input: { description, prompt: `Look into ${tag}`, subagent_type: "general-purpose", run_in_background: true } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
-      emit({ type: "system", subtype: "task_started", task_id: task, tool_use_id: tool, description, task_type: "local_agent", is_backgrounded: true, session_id: session });
+        content: [{ type: "tool_use", id: tool, name: "Agent", input: { description, prompt, subagent_type, ...(k % 2 ? { model: "haiku" } : {}), run_in_background: true } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      emit({ type: "system", subtype: "task_started", task_id: task, tool_use_id: tool, description, subagent_type, prompt, task_type: "local_agent", is_backgrounded: true, session_id: session });
       emit({ type: "user", message: { role: "user", content: [{ tool_use_id: tool, type: "tool_result", content: `Async agent launched: ${task}` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
       return { task, tool };
     });
@@ -461,7 +464,7 @@ async function run(c: Cmd, firstOne: boolean) {
           : [{ type: "text", text: `Checked ${tag} step ${step}` }];
         emit({ type: "assistant", message: { id: `msg_${rnd()}`, content }, parent_tool_use_id: a.tool, session_id: session });
         emit({ type: "system", subtype: "task_progress", task_id: a.task, tool_use_id: a.tool,
-          description: `Checking ${tag} step ${step}`, session_id: session });
+          description: `Checking ${tag} step ${step}`, usage: { total_tokens: 1200 * step, tool_uses: Math.ceil(step / 2), duration_ms: step * ms }, last_tool_name: step % 2 ? "Bash" : undefined, session_id: session });
         await sleep(ms);
       }
     }
@@ -476,7 +479,8 @@ async function run(c: Cmd, firstOne: boolean) {
     log(`STREAMED ${tag}`);
     say(full);
     for (const a of agents)
-      emit({ type: "system", subtype: "task_notification", task_id: a.task, tool_use_id: a.tool, status: "completed", summary: `${a.task} done`, session_id: session });
+      emit({ type: "system", subtype: "task_notification", task_id: a.task, tool_use_id: a.tool, status: "completed", summary: `${a.task} done`,
+        usage: { total_tokens: 1200 * agentSteps + 800, tool_uses: Math.ceil(agentSteps / 2), duration_ms: 5000 }, session_id: session });
     result(full);
     lc(c.uuid, "completed");
     return;
