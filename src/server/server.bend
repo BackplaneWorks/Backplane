@@ -13455,15 +13455,6 @@ def AccountsRpc.default.step(ok: Bool, +client: U32, +rid: String, +provider: St
     case False{}: B.Step.outs([B.Reply.err(client, rid, "Check and reconnect this account before making it the default.")])
     case True{}: B.Step.reply(client, rid, [M.SettingSet{"account.default." ++ provider, ACCT.Accounts.binding.show(profile, epoch), now}])
 
-def Hub.rpc.account.default(default: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
-  match default:
-    case False{}: Hub.rpc.account.limit(String.eq(J.Json.get_str(p, "op", ""), "clear-limit"), select, h, st, client, rid, p, now)
-    case True{}:
-      +provider = J.Json.get_str(p, "provider", "")
-      +profile = J.Json.get_str(p, "profile", "")
-      +epoch = J.Json.get_nat(p, "epoch", 0n)
-      Hub.step(h, AccountsRpc.default.step(Bool.and(ACCT.Accounts.supported(provider), Bool.or(Bool.and(String.is_empty(profile), Nat.is_eq(epoch, 0n)), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch))), client, rid, provider, profile, epoch, now))
-
 def AccountsRpc.clear.step(ok: Bool, +st: M.State, +client: U32, +rid: String, +provider: String, profile: String, epoch: Nat, now: Nat) -> B.Step:
   match ok:
     case False{}: B.Step.outs([B.Reply.err(client, rid, "The account's sign-in changed. Refresh its status before clearing its availability hold.")])
@@ -13478,6 +13469,15 @@ def Hub.rpc.account.limit(clear: Bool, select: Bool, h: Hub, +st: M.State, +clie
       +epoch = J.Json.get_nat(p, "epoch", 0n)
       Hub.step(h, AccountsRpc.clear.step(Bool.or(ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch),
         String.is_empty(profile) && Nat.is_eq(epoch, 0n) && ACCT.Accounts.supported(provider)), st, client, rid, provider, profile, epoch, now))
+
+def Hub.rpc.account.default(default: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
+  match default:
+    case False{}: Hub.rpc.account.limit(String.eq(J.Json.get_str(p, "op", ""), "clear-limit"), select, h, st, client, rid, p, now)
+    case True{}:
+      +provider = J.Json.get_str(p, "provider", "")
+      +profile = J.Json.get_str(p, "profile", "")
+      +epoch = J.Json.get_nat(p, "epoch", 0n)
+      Hub.step(h, AccountsRpc.default.step(Bool.and(ACCT.Accounts.supported(provider), Bool.or(Bool.and(String.is_empty(profile), Nat.is_eq(epoch, 0n)), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch))), client, rid, provider, profile, epoch, now))
 
 def Hub.rpc.accounts(account: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
   match account h:
