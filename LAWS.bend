@@ -15458,3 +15458,16 @@ law path_records_unterminated_last:
 law path_records_legacy_kept:
   for +text: String
   {PR.Paths.kept(False{}, text) == String.lines(text) : List<&2, String>}
+
+# Mechanical render failures (PR #226).
+law mech_render_success_quiet:
+  for out: String
+  {MCH.Mech.error(0, out) == "" : String}
+
+# even a failed child with no output must tell the person it failed
+law mech_render_failure_visible:
+  {String.is_empty(MCH.Mech.error(1, "")) == False{} : Bool}
+
+# an earlier successful view must not hide the real diagnostic
+law mech_render_failure_diagnostic:
+  {MCH.Mech.error(1, "/p/renders/fixture.iso.png\nbackplane --render: could not write /p/renders/fixture.front.png\n") == "backplane --render: could not write /p/renders/fixture.front.png" : String}
