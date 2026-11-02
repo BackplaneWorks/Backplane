@@ -3572,7 +3572,7 @@ def Tour.press.go(act: Bool, link: Bool, +n: Nui, +a: String, +v: String) -> Ste
 def Tour.press(m: Maybe<&2, Hit>, +n: Nui) -> Step:
   match m:
     case Some{Hit{_, _, _, _, +a, +v}}:
-      Tour.press.go(Bool.or(Bool.and(String.starts_with(a, "ob-"), Bool.not(String.eq(a, "ob-scroll"))), Bool.or(String.starts_with(a, "uber-"), String.eq(a, "share"))), String.eq(a, "open-url"), n, a, v)
+      Tour.press.go(Bool.or(Bool.and(String.starts_with(a, "ob-"), Bool.not(String.eq(a, "ob-scroll"))), Bool.or(String.starts_with(a, "provider-setup-"), Bool.or(String.starts_with(a, "uber-"), String.eq(a, "share")))), String.eq(a, "open-url"), n, a, v)
     case None{}:
       Step{n, Nil{}, False{}}
 

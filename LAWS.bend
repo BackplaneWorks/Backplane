@@ -1,3 +1,4 @@
+import ./src/core/provider-setup.bend as PROVIDERSETUP
 import ./src/core/range.bend as BRANGE
 import ./src/core/vdict.bend as VDICT
 
@@ -14869,3 +14870,11 @@ law vs_done_resets:
   for +item: String
   for +ws: List<&2, VDICT.VW>
   {VDICT.VStep.st(VDICT.Vs.done(timed, st, item, ws)) == VDICT.Vs.empty() : VDICT.VSet}
+
+# Setup must not present a removed CLI as usable or a failed login as busy.
+law provider_setup_missing_program:
+  for profile: J.Json
+  {PROVIDERSETUP.Ps.ready(False{}, profile) == False{} : Bool}
+
+law provider_setup_failure_retry:
+  {PROVIDERSETUP.Ps.busy("failed") == False{} : Bool}
