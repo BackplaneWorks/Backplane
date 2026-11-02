@@ -53,7 +53,7 @@ def Proposal.detail(p: Proposal) -> String:
     case Proposal{old_on, old_chain, new_on, new_chain, expires}:
       "Hub-wide provider fallback proposal\nEnabled: " ++ old_on ++ " → " ++ new_on ++
       "\nHierarchy: " ++ old_chain ++ " → " ++ new_chain ++
-      "\nValues are effective settings; an unset switch defaults to off and an unset hierarchy is empty. Unchanged settings are left untouched.\nExpires at Unix time " ++ Nat.show(expires) ++ ".\nWhen a provider limit is detected, active threads and bots may switch to a later eligible provider/model; an exhausted hierarchy holds work. This change does not itself start or interrupt a conversation."
+      "\nValues are effective settings; an unset switch defaults to off and an unset hierarchy is empty. Unchanged settings are left untouched.\nExpires at Unix time " ++ Nat.show(expires) ++ ".\nOn a confirmed provider limit, another eligible account of the same provider may be tried first, independently of this setting. If none is available, enabled fallback may switch active threads and bots to a later eligible provider/model; an exhausted hierarchy holds work. This change does not itself start or interrupt a conversation."
 
 # Called by the serialized event writer for every accepted fallback write,
 # including a write that changes a value back to an earlier value. Closure is

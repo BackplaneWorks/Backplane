@@ -1,4 +1,5 @@
 import Base
+import ./filelist.bend as FL
 import ../core/pcb-usage.bend as PC
 import ./pcb-telemetry.bend as PCB
 import ../core/folder.bend as FP
@@ -2988,11 +2989,7 @@ def Files.limit() -> String:
   "3000"
 
 def Files.cmd(repo: Bool) -> String:
-  match repo:
-    case True{}:
-      "git ls-files --cached --others --exclude-standard | head -n " ++ Files.limit()
-    case False{}:
-      "find . -maxdepth 8 -type f -not -path '*/.*' -not -path '*/node_modules/*' 2>/dev/null | head -n " ++ Files.limit() ++ " | sed 's|^\\./||'"
+  FL.FileList.cmd(repo)
 
 def Files.str(blank: Bool, l: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match blank:
@@ -3011,7 +3008,7 @@ def Files.strs(ls: List<&2, String>) -> List<&2, J.Json>:
 def Files.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String) -> IO(Unit):
   match r:
     case P.Ran{0, out}:
-      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"files", J.Json.arr(Files.strs(String.lines(out)))}, J.KV{"thread", J.Str{thread}}]))
+      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"files", FL.FileList.result(out)}, J.KV{"thread", J.Str{thread}}]))
     case P.Ran{_, out}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{out}}]))
 

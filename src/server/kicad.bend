@@ -972,7 +972,7 @@ def KiCad.open.said(r: P.Ran) -> String:
       String.trim(out)
 
 def KiCad.open.script() -> String:
-  "set -eu\nr=$1\nif [ -n \"$2\" ]; then set -- kicad \"$2\"; elif [ -n \"$3\" ]; then set -- pcbnew \"$3\"; elif [ -n \"$4\" ]; then set -- eeschema \"$4\"; else echo 'no KiCad project here'; exit 1; fi\ng=$r/bin/$1\n[ -x \"$g\" ] || g=$g.exe\n[ -x \"$g\" ] || { echo \"Backplane KiCad has no $1\"; exit 1; }\nif command -v setsid >/dev/null 2>&1; then\n  setsid -f \"$g\" \"$2\" </dev/null >/dev/null 2>&1\nelse\n  perl -MPOSIX -e 'defined(my $pid=fork) or exit 127; exit 0 if $pid; POSIX::setsid(); exec {$ARGV[0]} @ARGV or exit 127' \"$g\" \"$2\" </dev/null >/dev/null 2>&1\nfi\n"
+  "set -eu\nr=$1\nif [ -n \"$2\" ]; then set -- kicad \"$2\"; elif [ -n \"$3\" ]; then set -- pcbnew \"$3\"; elif [ -n \"$4\" ]; then set -- eeschema \"$4\"; else echo 'no KiCad project here'; exit 1; fi\nif [ \"$(uname)\" = Darwin ]; then\n  a=$r/KiCad.app\n  [ \"$1\" = kicad ] || a=$a/Contents/Applications/$1.app\n  [ -d \"$a\" ] || { echo \"Backplane KiCad has no $1\"; exit 1; }\n  exec open -a \"$a\" \"$2\"\nfi\ng=$r/bin/$1\n[ -x \"$g\" ] || g=$g.exe\n[ -x \"$g\" ] || { echo \"Backplane KiCad has no $1\"; exit 1; }\nif command -v setsid >/dev/null 2>&1; then\n  setsid -f \"$g\" \"$2\" </dev/null >/dev/null 2>&1\nelse\n  perl -MPOSIX -e 'defined(my $pid=fork) or exit 127; exit 0 if $pid; POSIX::setsid(); exec {$ARGV[0]} @ARGV or exit 127' \"$g\" \"$2\" </dev/null >/dev/null 2>&1\nfi\n"
 
 def KiCad.open.ready(fork: Bool, +cli: String, +fs: Files) -> IO(String):
   match fork fs:
