@@ -4,6 +4,8 @@ import ./src/core/i18n.bend as CHATLOC
 
 import ./src/core/lazy-tools.bend as LTOOLS
 
+import ./src/core/issue-report.bend as ISSUEPOLICY
+
 import ./src/core/star-nudge.bend as STARN
 
 import ./src/core/settingsproposal.bend as SETPROPOSAL
@@ -15257,3 +15259,60 @@ law settings_row_information:
 # File presence alone must never report a usable local engine.
 law voice_model_needs_runtime:
   {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}
+
+# Report destination is an explicit choice; old internal drafts stay internal.
+law issue_report_new_default:
+  {ISSUEPOLICY.Issue.target("", False{}) == "issue" : String}
+
+law issue_report_legacy_internal:
+  {ISSUEPOLICY.Issue.target("", True{}) == "internal" : String}
+
+law issue_report_explicit_issue:
+  for legacy: Bool
+  {ISSUEPOLICY.Issue.target("issue", legacy) == "issue" : String}
+
+law issue_report_explicit_internal:
+  for legacy: Bool
+  {ISSUEPOLICY.Issue.target("internal", legacy) == "internal" : String}
+
+# Automatic metadata cannot rewrite even one character of the person's text.
+law issue_report_verbatim_text:
+  for text: String
+  {ISSUEPOLICY.Issue.report(text, "linux", "v1.2.3", "", "") == text ++ "\n\n---\nOS: Linux\nApp version: 1.2.3\n" : String}
+
+law issue_report_manual_details_verbatim:
+  for c: Char
+  for text: String
+  {ISSUEPOLICY.Issue.optional("Details", SCon{c, text}) == "\n\nDetails\n" ++ SCon{c, text} : String}
+
+law issue_report_diagnostics_absent:
+  {ISSUEPOLICY.Issue.optional("Diagnostics (JSON)", "") == "" : String}
+
+law issue_report_os_description_closed:
+  {ISSUEPOLICY.Issue.os("Linux host.owner /private/path") == "Unknown" : String}
+
+law issue_report_version_omits_build:
+  {ISSUEPOLICY.Issue.version("v1.2.3+local.owner") == "1.2.3" : String}
+
+law issue_report_version_rejects_path:
+  {ISSUEPOLICY.Issue.version("/home/person/build/1.2.3") == "unknown" : String}
+
+law issue_report_preview_retains_body:
+  for body: String
+  {J.Json.get_str(ISSUEPOLICY.Issue.preview.body(body), "body", "") == body : String}
+
+law issue_report_url_overflow_closed:
+  for bs: List<&2, U32>
+  for budget: Nat
+  for acc: String
+  {ISSUEPOLICY.Issue.url.encode(bs, budget, acc, False{}) == "" : String}
+
+law issue_report_official_repository:
+  {ISSUEPOLICY.Issue.new_url() == "https://github.com/BackplaneWorks/Backplane/issues/new" : String}
+
+law issue_report_template_revision:
+  {ISSUEPOLICY.Issue.template.version() == "1" : String}
+
+law issue_report_prompt_original_verbatim:
+  for description: String
+  {ISSUEPOLICY.Issue.prompt.original(description) == "\nOriginal description, verbatim, until end of input\n" ++ description : String}
