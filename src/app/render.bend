@@ -2,6 +2,7 @@ import Base
 import ../server/server.bend as S
 import ../server/kicad.bend as K
 import ../server/proc.bend as P
+import ../server/host.bend as H
 import ../core/glb.bend as G
 import ../core/mech.bend as MC
 import ../core/png.bend as PN
@@ -16,7 +17,8 @@ import ./parts3.bend as PT
 # Mech.views) is fitted to the whole part, drawn by the 3D viewer's own
 # rasterizer and written to renders/<stem>.<view>.png beside the model.
 # Prints each file's path; nothing is installed or needed besides
-# Backplane.
+# Backplane. Exit 0 means every requested view was published; any failed
+# model or view makes the final status 1 while the remaining work runs.
 
 def Render.ground() -> U32:
   2105384
@@ -32,29 +34,42 @@ def Render.opt(xs: List<&2, String>, +flag: String) -> String:
     case _:
       ""
 
-def Render.wrote(r: File & Result<&1, &1, U32 & String, Unit>) -> Bool:
-  (_, res) = r
-  match res:
-    case Done{_}:
-      True{}
-    case Fail{_}:
-      False{}
+def Render.clean(+path: String) -> IO(Bool):
+  do IO<Bool>:
+    r : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path ++ ".part")
+    return False{}
 
-def Render.write.k(f: Result<&1, &1, U32 & String, File>, bs: List<&2, U32>) -> IO(Bool):
+def Render.renamed(r: Result<&1, &1, U32 & String, Unit>, +path: String) -> IO(Bool):
+  match r:
+    case Done{_}:
+      IO.pure(Bool, True{})
+    case Fail{_}:
+      Render.clean(path)
+
+def Render.publish(ok: Bool, +path: String) -> IO(Bool):
+  match ok:
+    case True{}:
+      IO.bind(Result<&1, &1, U32 & String, Unit>, Bool, H.FS.rename(path ++ ".part", path), r => Render.renamed(r, path))
+    case False{}:
+      Render.clean(path)
+
+def Render.wrote(r: File & Result<&1, &1, U32 & String, Unit>, +path: String) -> IO(Bool):
+  (f, res) = r
+  do IO<Bool>:
+    File.close(f)
+    Render.publish(Result.is_done(&1, &1, U32 & String, Unit, res), path)
+
+def Render.write.k(f: Result<&1, &1, U32 & String, File>, bs: List<&2, U32>, +path: String) -> IO(Bool):
   match f:
     case Done{h}:
-      do IO<Bool>:
-        r : File & Result<&1, &1, U32 & String, Unit> <- File.write_bytes(h, bs)
-        return Render.wrote(r)
+      IO.bind(File & Result<&1, &1, U32 & String, Unit>, Bool, File.write_bytes(h, bs), r => Render.wrote(r, path))
     case Fail{_}:
       IO.pure(Bool, False{})
 
 def Render.write(+path: String, bs: List<&2, U32>) -> IO(Bool):
   do IO<Bool>:
     f : Result<&1, &1, U32 & String, File> <- File.open(path ++ ".part", "w")
-    ok : Bool <- Render.write.k(f, bs)
-    mv : P.Ran <- P.Proc.run("mv", ["-f", path ++ ".part", path], "/")
-    return ok
+    Render.write.k(f, bs, path)
 
 def Render.said(ok: Bool, +out: String) -> IO(Unit):
   match ok:
@@ -63,16 +78,17 @@ def Render.said(ok: Bool, +out: String) -> IO(Unit):
     case False{}:
       IO.print_err("backplane --render: could not write " ++ out)
 
-def Render.view(vs: List<&2, MC.MView>, +m: MS.Model, +c: MS.Cam, +model: String, +w: U32, +h: U32) -> IO(Unit):
+def Render.view(vs: List<&2, MC.MView>, +m: MS.Model, +c: MS.Cam, +model: String, +w: U32, +h: U32) -> IO(Bool):
   match vs:
     case Nil{}:
-      IO.pure(Unit, Unit{})
+      IO.pure(Bool, True{})
     case MC.MView{+name, +yaw, +pitch} <> t:
-      do IO<Unit>:
+      do IO<Bool>:
         +out : String = MC.Mech.render(model, name)
-        ok : Bool <- Render.write(out, PN.Png.rgb(D.Snap.rgb(MS.Mesh.render(w, h, m, MS.Cam.face(c, yaw, pitch), Render.ground()), w, h), w, h))
+        +ok : Bool <- Render.write(out, PN.Png.rgb(D.Snap.rgb(MS.Mesh.render(w, h, m, MS.Cam.face(c, yaw, pitch), Render.ground()), w, h), w, h))
         Render.said(ok, out)
-        Render.view(t, m, c, model, w, h)
+        rest : Bool <- Render.view(t, m, c, model, w, h)
+        return Bool.and(ok, rest)
 
 def Render.tris.k(step: Bool, ts: List<&2, G.Tri3>) -> List<&2, G.Tri3>:
   match step:
@@ -84,18 +100,37 @@ def Render.tris.k(step: Bool, ts: List<&2, G.Tri3>) -> List<&2, G.Tri3>:
 def Render.tris(+step: Bool, bs: List<&2, U32>) -> List<&2, G.Tri3>:
   Render.tris.k(step, G.Mesh.tris(G.Glb.parse(bs)))
 
-def Render.go.k(none: Bool, +model: String, +glb: String, +w: U32, +h: U32) -> IO(Unit):
+def Render.failed(why: String) -> IO(Bool):
+  do IO<Bool>:
+    IO.print_err("backplane --render: " ++ why)
+    return False{}
+
+def Render.ready(r: P.Ran, +m: MS.Model, +model: String, +w: U32, +h: U32) -> IO(Bool):
+  match r:
+    case P.Ran{0, _}:
+      Render.view(MC.Mech.views(), m, MS.Model.fit(m), model, w, h)
+    case P.Ran{_, out}:
+      Render.failed("could not create render directory for " ++ model ++ ": " ++ String.trim(out))
+
+def Render.decoded(empty: Bool, +m: MS.Model, +model: String, +w: U32, +h: U32) -> IO(Bool):
+  match empty:
+    case True{}:
+      Render.failed("no renderable triangles in " ++ model ++ ". Nothing was drawn.")
+    case False{}:
+      IO.bind(P.Ran, Bool, P.Proc.run("mkdir", ["-p", MC.Mech.parent(MC.Mech.render(model, "iso"))], "/"),
+        r => Render.ready(r, m, model, w, h))
+
+def Render.go.k(none: Bool, +model: String, +glb: String, +w: U32, +h: U32) -> IO(Bool):
   match none:
     case True{}:
-      IO.print_err("backplane --render: could not mesh " ++ model ++ " (a STEP or GLB file; a large STEP needs FreeCAD installed). Nothing was drawn.")
+      Render.failed("could not mesh " ++ model ++ " (a STEP or GLB file; a large STEP needs FreeCAD installed). Nothing was drawn.")
     case False{}:
-      do IO<Unit>:
+      do IO<Bool>:
         bs : List<&2, U32> <- K.Io.bytes(glb)
         +m : MS.Model = MS.Model.of(Render.tris(MC.Mech.is_step(model), bs))
-        r : P.Ran <- P.Proc.run("mkdir", ["-p", MC.Mech.parent(MC.Mech.render(model, "iso"))], "/")
-        Render.view(MC.Mech.views(), m, MS.Model.fit(m), model, w, h)
+        Render.decoded(MS.Model.is_empty(m), m, model, w, h)
 
-def Render.go(+model: String, +glb: String, +w: U32, +h: U32) -> IO(Unit):
+def Render.go(+model: String, +glb: String, +w: U32, +h: U32) -> IO(Bool):
   Render.go.k(String.is_empty(glb), model, glb, w, h)
 
 def Render.abs(+cwd: String, +p: String) -> String:
@@ -109,8 +144,8 @@ def Render.cwd(r: P.Ran) -> String:
     case _:
       "/"
 
-def Render.run(+model: String, +size: String) -> IO(Unit):
-  do IO<Unit>:
+def Render.run(+model: String, +size: String) -> IO(Bool):
+  do IO<Bool>:
     here : P.Ran <- P.Proc.run("pwd", ["-P"], ".")
     +path : String = Render.abs(Render.cwd(here), model)
     +step : String <- PT.Parts.step2glb()
@@ -140,19 +175,29 @@ def Render.models.go(xs: List<&2, String>, +skip: Bool, acc: List<&2, String>) -
 def Render.models(xs: List<&2, String>) -> List<&2, String>:
   Render.models.go(xs, False{}, Nil{})
 
-def Render.all(ms: List<&2, String>, +size: String) -> IO(Unit):
+def Render.all(ms: List<&2, String>, +size: String) -> IO(Bool):
   match ms:
     case Nil{}:
-      IO.pure(Unit, Unit{})
+      IO.pure(Bool, True{})
     case +m <> t:
-      IO.bind(Unit, Unit, Render.run(m, size), u => Render.all(t, size))
+      do IO<Bool>:
+        ok : Bool <- Render.run(m, size)
+        rest : Bool <- Render.all(t, size)
+        return Bool.and(ok, rest)
+
+def Render.finish(ok: Bool) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "backplane --render: one or more models could not be rendered")
 
 def Render.main.k(ms: List<&2, String>, +size: String) -> IO(Unit):
   match ms:
     case Nil{}:
       Render.usage()
     case _ <> _:
-      Render.all(ms, size)
+      IO.bind(Bool, Unit, Render.all(ms, size), Render.finish)
 
 def Render.main(xs: List<&2, String>) -> IO(Unit):
   match xs:

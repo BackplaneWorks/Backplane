@@ -1,4 +1,5 @@
 import Base
+import ./json.bend as J
 import ./glb.bend as G
 import ./images.bend as IM
 
@@ -11,6 +12,9 @@ import ./images.bend as IM
 # renders, and the part itself in the 3D viewer.
 
 # the folder a project keeps its parts in
+def Mech.config(+text: String) -> String:
+  J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "mech", "")
+
 def Mech.dir() -> String:
   "mech"
 
@@ -138,6 +142,31 @@ def Mech.in(+dir: String, +f: String) -> String:
 def Mech.render(+model: String, +view: String) -> String:
   Mech.in(Mech.in(Mech.parent(model), "renders"), Mech.stem(model) ++ "." ++ view ++ ".png")
 
+# A render child prints successful paths as well as diagnostics. Keep the
+# first diagnostic visible even when earlier views succeeded; a silent
+# failed child must still give the person an error.
+def Mech.error.lines(ls: List<&2, String>, +found: String, +fallback: String) -> String:
+  match ls:
+    case Nil{}:
+      Bool.pick(String, String.is_empty(found), fallback, found)
+    case line <> t:
+      +clean = String.trim(line)
+      Mech.error.lines(t, Bool.pick(String, Bool.and(String.is_empty(found), String.starts_with(clean, "backplane --render:")), String.take(clean, 300n), found), fallback)
+
+def Mech.error.failed(+code: U32, +text: String) -> String:
+  Mech.error.lines(String.split(text, '\n'), "", Bool.pick(String, String.is_empty(text),
+    "backplane --render failed (exit " ++ U32.show(code) ++ ")", String.take(text, 300n)))
+
+def Mech.error.k(ok: Bool, +code: U32, +out: String) -> String:
+  match ok:
+    case True{}:
+      ""
+    case False{}:
+      Mech.error.failed(code, String.trim(out))
+
+def Mech.error(+code: U32, +out: String) -> String:
+  Mech.error.k(U32.is_eq(code, 0), code, out)
+
 # a listed file: its path from the project root and its checksum (a
 # render drawn again gets a new one, so no client shows a stale picture)
 type MFile is Data:
@@ -260,6 +289,26 @@ def Mech.pick.k(ps: List<&2, MPart>, +want: String) -> Maybe<&2, MPart>:
       None{}
     case MPart{+p, +n, +s} <> t:
       Bool.pick(Maybe<&2, MPart>, String.eq(p, want), Some{MPart{p, n, s}}, Mech.pick.k(t, want))
+
+def Mech.preferred.k(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> Maybe<&2, MPart>:
+  match m:
+    case Some{p}:
+      Some{p}
+    case None{}:
+      Mech.default(ps)
+
+def Mech.preferred(+ps: List<&2, MPart>, +primary: String) -> Maybe<&2, MPart>:
+  Mech.preferred.k(Mech.pick.k(ps, primary), ps)
+
+def Mech.choose.k(m: Maybe<&2, MPart>, +ps: List<&2, MPart>, +primary: String) -> Maybe<&2, MPart>:
+  match m:
+    case Some{p}:
+      Some{p}
+    case None{}:
+      Mech.preferred(ps, primary)
+
+def Mech.choose(+ps: List<&2, MPart>, +want: String, +root: String, +primary: String) -> Maybe<&2, MPart>:
+  Mech.choose.k(Mech.pick.k(ps, Bool.pick(String, String.starts_with(want, root ++ "/"), String.drop(want, 1n+String.length(root)), want)), ps, primary)
 
 def Mech.pick.or(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> Maybe<&2, MPart>:
   match m:

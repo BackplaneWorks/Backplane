@@ -60,3 +60,6 @@ the script and regenerate the export to see each revision.
 Keep the source and exports in Git if you want to track mechanical
 revisions. The design history's per-tool KiCad snapshots and board or
 schematic Compare do not provide a STEP geometry comparison.
+
+Choose a [primary mechanical model](mechanical-model.md) when a project
+has several parts and the assembly heuristic is not the preferred default.

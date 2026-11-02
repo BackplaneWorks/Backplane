@@ -35,6 +35,7 @@ import ./src/server/thin-actor.bend as CHATSIDE
 import ./src/core/sidebar-read.bend as SIDEREAD
 
 import Base
+import ./src/server/modelcache.bend as MCACHE
 import ./src/core/pathrecords.bend as PR
 
 import ./src/server/thin-sidebar.bend as CHATDERIVED
@@ -15446,3 +15447,32 @@ def Laws.path_records_newline_is_data(): {==}
 def Laws.path_records_keep_whitespace(): {==}
 def Laws.path_records_unterminated_last(): {==}
 def Laws.path_records_legacy_kept(text): {==}
+
+# Mechanical render failures (PR #226).
+def Laws.mech_render_success_quiet(out):
+  {==}
+
+def Laws.mech_render_failure_visible():
+  {==}
+
+def Laws.mech_render_failure_diagnostic():
+  {==}
+
+# Project mechanical default (PR #223).
+def Laws.mech_configured_primary():
+  {==}
+
+def Laws.mech_primary_missing():
+  {==}
+
+def Laws.mech_primary_selection():
+  {==}
+
+# Successful model cache publication (PR #243).
+def Laws.model_cache_missing_rejected(code, text): {==}
+
+def Laws.model_cache_empty_rejected(modified): {==}
+
+def Laws.model_cache_directory_rejected(size, modified): {==}
+
+def Laws.model_cache_file_accepted(): {==}
