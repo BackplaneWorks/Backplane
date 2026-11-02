@@ -80,7 +80,9 @@ class BPAccountsIO {
     this.index = this.path.join(this.root, "profiles.json");
     try {
       const st = this.fs.lstatSync(this.index);
-      if (!st.isFile() || st.isSymbolicLink() || st.size > 131072 || (st.mode & 0o077)) throw new Error();
+      // Windows reports synthetic mode bits (commonly 0666), not its ACL.
+      // Keep the permission-bit check on POSIX alongside the shared checks.
+      if (!st.isFile() || st.isSymbolicLink() || st.size > 131072 || (process.platform !== "win32" && (st.mode & 0o077))) throw new Error();
       const saved = JSON.parse(this.fs.readFileSync(this.index, "utf8"));
       if (saved.version !== 1 || !Array.isArray(saved.profiles) || saved.profiles.length > 40) throw new Error();
       for (const p of saved.profiles) {
