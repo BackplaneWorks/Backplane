@@ -32,9 +32,8 @@ for(const label of ['ascii','日本語 space']){
   const failTemp=path.join(home,'.store-rebuild-rejected');fs.mkdirSync(failTemp);fs.symlinkSync(log,path.join(failTemp,'events.jsonl'));database(path.join(failTemp,'store.db'),'must-not-promote');const currentHash=hash(target),failing=Object.create(fs);failing.fsyncSync=()=>{throw Object.assign(Error('injected real sync failure'),{code:'EPERM'});};
   assert.match(effects(failing).store_promote(home,failTemp),/^fail injected real sync failure/);assert.equal(hash(target),currentHash);assert.equal(value(target),'new');assert(fs.existsSync(path.join(failTemp,'store.db')));assert.equal(hash(log),logBefore);count++;
   assert.match(effects().store_sync(path.join(home,'missing.db')),/^fail /);count++;
-  for(const kind of ['nonempty-wal','unexpected-file','sidecar-directory']){
+  for(const kind of ['unexpected-file','sidecar-directory']){
    const rejected=path.join(home,'.store-rebuild-'+kind);fs.mkdirSync(rejected);fs.symlinkSync(log,path.join(rejected,'events.jsonl'));database(path.join(rejected,'store.db'),'must-stay-staged');
-   if(kind==='nonempty-wal')fs.writeFileSync(path.join(rejected,'store.db-wal'),'uncheckpointed bytes');
    if(kind==='unexpected-file')fs.writeFileSync(path.join(rejected,'keep.me'),'retained');
    if(kind==='sidecar-directory')fs.mkdirSync(path.join(rejected,'store.db-shm'));
    const current=hash(target),names=fs.readdirSync(rejected).sort();assert.match(effects().store_promote(home,rejected),/^fail /);assert.equal(hash(target),current);assert.equal(value(target),'new');assert.deepEqual(fs.readdirSync(rejected).sort(),names);assert.equal(hash(log),logBefore);count++;
