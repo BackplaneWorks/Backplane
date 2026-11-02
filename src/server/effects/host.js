@@ -1675,6 +1675,77 @@ function fs_chmod(path, mode) {
   }
 }
 
+// Called only after the hub owns its home lock. Exclusive creation never
+// replaces a token; a failed first write keeps a marker and fails closed.
+// No hard-link or POSIX rename semantics are required on any platform.
+function fs_pairing_token(path) {
+  const fs = require("fs"), marker = path + ".backplane-creating";
+  const problem = (message) => Object.assign(new Error(message), { code: "EINVAL" });
+  const syncDir = () => {
+    if (process.platform === "win32") return; // no directory fsync on Windows
+    const fd = fs.openSync(require("path").dirname(path), "r");
+    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  };
+  const noCreation = () => {
+    try { fs.lstatSync(marker); }
+    catch (e) { if (e.code === "ENOENT") return; throw e; }
+    throw problem("pairing token creation is incomplete; preserve the token and resolve its .backplane-creating marker before restarting");
+  };
+  const existing = () => {
+    let fd;
+    try {
+      // Reject non-regular paths without waiting on a FIFO; existing symlinks
+      // to regular files stay supported. Permissions apply to the opened file.
+      fd = fs.openSync(path, fs.constants.O_RDONLY | (process.platform === "win32" ? 0 : fs.constants.O_NONBLOCK));
+      if (!fs.fstatSync(fd).isFile()) throw problem("pairing token is not a regular file");
+      const value = fs.readFileSync(fd, "utf8");
+      if (value.trim() === "") throw problem("existing pairing token is empty; restore it from backup instead of generating a replacement");
+      if (process.platform !== "win32") fs.fchmodSync(fd, 0o600);
+      noCreation();
+      return value;
+    } finally { if (fd !== undefined) fs.closeSync(fd); }
+  };
+  let stage = "read existing pairing token";
+  try {
+    noCreation();
+    try { return io_done(existing()); }
+    catch (e) { if (e.code !== "ENOENT") throw e; }
+    // A dangling symlink is existing configuration, not an absent credential.
+    try { fs.lstatSync(path); throw problem("existing pairing token target is unavailable; restore it instead of generating a replacement"); }
+    catch (e) { if (e.code !== "ENOENT") throw e; }
+    stage = "create pairing token";
+    // Keep the existing 128-bit hex format. Read-only startup needs no RNG.
+    const fresh = require("crypto").randomBytes(16).toString("hex");
+    let markFd;
+    try {
+      markFd = fs.openSync(marker, "wx", 0o600);
+      fs.writeFileSync(markFd, "pairing token creation in progress\n");
+      fs.fsyncSync(markFd);
+    } finally { if (markFd !== undefined) fs.closeSync(markFd); }
+    syncDir();
+    let fd;
+    try { fd = fs.openSync(path, "wx", 0o600); }
+    catch (e) {
+      // We own only the marker; preserve a competing creator's token.
+      fs.unlinkSync(marker);
+      syncDir();
+      throw e;
+    }
+    try {
+      fs.writeFileSync(fd, fresh);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    syncDir();
+    fs.unlinkSync(marker);
+    syncDir();
+    return io_done(fresh);
+  } catch (e) {
+    // The error carries no credential or provider-shaped value.
+    const detail = e.code === "EINVAL" ? e.message : `cannot ${stage} (${e.code || "filesystem error"}); existing credentials were not replaced`;
+    return io_fail(io_tup(1, detail));
+  }
+}
+
 // as net_listen_run in host.c: SO_REUSEADDR, a backlog of 64, nonblocking,
 // close-on-exec (Base's tcp_listen.js through the same ffi)
 function net_listen(host, port) {
@@ -2045,6 +2116,7 @@ io_eff(CID(FS.mkdtemp), fs_mkdtemp);
 io_eff(CID(FS.rename), fs_rename);
 io_eff(CID(FS.remove), fs_remove);
 io_eff(CID(FS.chmod), fs_chmod);
+io_eff(CID(FS.pairing_token), fs_pairing_token);
 io_eff(CID(Net.listen), net_listen);
 io_eff(CID(Env.put), env_put);
 io_eff(CID(Sys.exe_dir), sys_exe_dir);
