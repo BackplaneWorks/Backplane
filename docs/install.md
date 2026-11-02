@@ -11,6 +11,10 @@ Treat pairing links and QR codes as credentials. Browser pairing exchanges the f
 
 On Apple Silicon, the installer includes the macOS desktop app. Add `~/.local/bin` to your `PATH` if requested, then run `backplane`. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub. The installer checks the release checksum and code signatures before replacing files and clears quarantine only on that downloaded payload. Portable macOS apps are ad-hoc sealed, not notarized; a browser-extracted app may still require an explicit Gatekeeper override.
 
+The hub preserves the existing `<home>/token` file byte for byte, including a symlink to a regular file. As before, surrounding whitespace is ignored for pairing. Empty, unreadable or non-regular token files stop startup with an error instead of generating a replacement. Restore the original token from backup to retain paired clients. On Unix the opened file is restricted to mode 0600; Windows access control comes from the home folder's ACL; POSIX mode bits do not establish a private Windows ACL.
+
+A missing token is created exclusively at mode 0600, without requiring hard links. An interrupted creation keeps `token.backplane-creating` and refuses startup. Preserve both files and recover the original credential before resolving that marker; do not remove an existing token to silence the error. The normal home lock serializes startup. Filesystems must support exclusive creation and file flushing; Unix directory flushing is checked too. Windows power-loss durability, native ACL behavior and network filesystem guarantees require platform qualification.
+
 To uninstall what install.sh put in place, quit Backplane, then:
 
 For a custom installation, substitute your `BACKPLANE_PREFIX`,
