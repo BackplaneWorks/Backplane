@@ -13025,12 +13025,34 @@ def Tour.back.k(has: Bool, +u: Ui) -> Act:
 def Psv.active(+u: Ui) -> Bool:
   Ui.flag(u, "provider-setup")
 
-def Psv.provider(+u: Ui) -> String:
-  +p = Ui.scratch(u, "@setup.provider")
-  Bool.pick(String, String.is_empty(PS.Ps.docs(p)) && Bool.not(String.eq(p, "antigravity")), "codex", p)
-
 def Psv.installed(+u: Ui, +p: String) -> Bool:
   Bool.not(String.is_empty(Models.cli(Ui.info(u, "models"), p)))
+
+# with no choice made yet, setup starts on an agent this machine has: the
+# provider for new threads when it is installed, else the first installed
+# one in the setup's order, else Codex (a new user with Claude Code
+# installed was shown Codex and "Program not found yet")
+def Psv.pick(has: Bool, +p: String, +rest: String) -> String:
+  match has:
+    case True{}:
+      p
+    case False{}:
+      rest
+
+def Psv.first(ps: List<&2, String>, +u: Ui) -> String:
+  match ps:
+    case Nil{}:
+      "codex"
+    case +p <> t:
+      Psv.pick(Psv.installed(u, p), p, Psv.first(t, u))
+
+def Psv.default(+u: Ui) -> String:
+  +cur = M.Setting.get(Ui.state(u), "agent.provider", "")
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(PS.Ps.docs(cur))), Psv.installed(u, cur)), cur, Psv.first(PS.Ps.providers(), u))
+
+def Psv.provider(+u: Ui) -> String:
+  +p = Ui.scratch(u, "@setup.provider")
+  Bool.pick(String, String.is_empty(PS.Ps.docs(p)) && Bool.not(String.eq(p, "antigravity")), Psv.default(u), p)
 
 def Psv.profiles(xs: List<&2, J.Json>, +provider: String) -> List<&2, J.Json>:
   match xs:
