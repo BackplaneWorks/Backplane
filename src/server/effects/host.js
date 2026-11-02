@@ -1345,7 +1345,9 @@ function fs_stat(path) {
     return io_done(io_tup(kind, io_tup(Math.min(st.size, 0xffffffff) >>> 0,
       Math.floor(st.mtimeMs / 1000) >>> 0)));
   } catch (e) {
-    return io_fail(host_errno(e));
+    // Windows uses libuv numbers (ENOENT is 4058); Bend branches on the
+    // portable errno supplied by the Bun loop, as Proc.spawn does.
+    return io_fail(bp_proc_errno(e));
   }
 }
 

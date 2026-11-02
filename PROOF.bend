@@ -15264,3 +15264,9 @@ def Laws.tour_usage_kept_when_due(back):
 def Laws.settings_row_information(): {==}
 
 def Laws.voice_model_needs_runtime(): {==}
+
+def Laws.project_drive_root_absolute():
+  {==}
+
+def Laws.project_unc_root():
+  {==}
