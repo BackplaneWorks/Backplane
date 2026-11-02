@@ -38,6 +38,9 @@ def main() -> IO(Unit):
     C.Check.str("table", shows(D.Md.render("Sizes:\n| Part | `R1` |\n|---|:-:|\n| a **b** | 2 |\n|c|\n\nend")),
       "<p>Sizes:</p><table><tr><th>Part</th><th><code>R1</code></th></tr><tr><td>a <strong>b</strong></td><td>2</td></tr><tr><td>c</td></tr></table><p>end</p>")
     C.Check.str("table no head", shows(D.Md.render("| a | b |\n| c | d |")), "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>")
+    C.Check.str("table empty cells", shows(D.Md.render("| a || c |\n| | b ||")), "<table><tr><td>a</td><td></td><td>c</td></tr><tr><td></td><td>b</td><td></td></tr></table>")
+    C.Check.str("table optional closing pipe", shows(D.Md.render("| a | b\n| c | d")), "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>")
+    C.Check.str("table Unicode and trim", shows(D.Md.render(" | 板 | 🟢 | \n| café | é |")), "<table><tr><td>板</td><td>🟢</td></tr><tr><td>café</td><td>é</td></tr></table>")
     C.Check.str("lone sep", shows(D.Md.render("|---|")), "<p>|---|</p>")
     C.Check.str("ordered", shows(D.Md.render("1. one\n2. two\n   - sub\n3. three")),
       "<ol><li value=1>one</li><li value=2>two</li></ol><ul><li>sub</li></ul><ol><li value=3>three</li></ol>")
