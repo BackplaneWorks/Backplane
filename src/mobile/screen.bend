@@ -1948,7 +1948,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
       [Mob.set.row(U.Files.set.label(), U.Files.set.note(st), Mob.set.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
       Mob.agy.rows(U.Fallbackv.rows(u)),
       Mob.agy.rows(U.Hookv.rows.loc(lc, u))])
-    case 2n: List.concat(&2, J.Json, [[Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
+    case 2n: List.concat(&2, J.Json, [Mob.agy.rows(U.Psv.rows(2n, u)), [Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, model),
       Mob.set.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), model), model, "agent.model"))],
       Mob.set.find(lc, u, nf, prov)])
