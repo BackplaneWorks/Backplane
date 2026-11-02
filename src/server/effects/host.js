@@ -266,6 +266,114 @@ function sock_send_bytes(socket, data, k) {
   return host_send(socket, Uint8Array.from(bytes), k);
 }
 
+function sock_send_preview(socket, path, ctype, range, k) {
+  const fs = require('fs');
+  const handle = globalThis.BP_H?.is(socket);
+  const sys = handle ? null : io_sys();
+  const again = handle ? (globalThis.BP_H.EAGAIN ?? 11) : (process.platform === 'darwin' ? 35 : 11);
+  let fd = -1, pos = 0, left = 0, chunk;
+  let pending, offset = 0, until = performance.now() + 30000;
+  const close = () => {
+    if (fd >= 0) {
+      const was = fd;
+      fd = -1;
+      fs.closeSync(was);
+    }
+  };
+  const finish = (code) => {
+    try { close(); } catch (e) { code ||= host_errno(e); }
+    return io_tup(socket, code ? io_fail(code) : io_done({ $: 'Unit' }));
+  };
+  const header = (status, size, extra = '') => Buffer.from(
+    'HTTP/1.1 ' + status + '\r\nContent-Type: ' + ctype
+    + '\r\nContent-Length: ' + size + '\r\nCache-Control: no-cache'
+    + '\r\nAccept-Ranges: bytes\r\nX-Content-Type-Options: nosniff'
+    + '\r\nConnection: close\r\n' + extra + '\r\n');
+  const error = (status, message, extra = '') => {
+    close();
+    ctype = 'text/plain; charset=utf-8';
+    const body = Buffer.from(message);
+    pending = Buffer.concat([header(status, body.length, extra), body]);
+    left = 0;
+  };
+  try {
+    if (path.includes('\0') || /[\r\n]/.test(ctype)) {
+      error('400 Bad Request', 'invalid preview request');
+    } else {
+      // O_NONBLOCK prevents a path replaced with a FIFO from blocking open.
+      // Keep the current sender's no-follow policy where the host supports it.
+      fd = fs.openSync(path, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0) | (fs.constants.O_NOFOLLOW || 0));
+      const st = fs.fstatSync(fd);
+      if (!st.isFile()) {
+        error('404 Not Found', 'not a regular file');
+      } else if (!Number.isSafeInteger(st.size) || st.size < 0) {
+        error('500 Internal Server Error', 'cannot read preview size');
+      } else {
+        let status = '200 OK', extra = '', end = st.size - 1;
+        // Ignore malformed and multipart ranges. A valid single range can
+        // seek past 4 GiB without passing the file size through Bend's U32.
+        const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+        if (m && (m[1] || m[2])) {
+          const size = BigInt(st.size);
+          const first = m[1] ? BigInt(m[1]) : null;
+          const last = m[2] ? BigInt(m[2]) : null;
+          if (size === 0n || (first === null ? last === 0n
+              : first >= size || (last !== null && last < first))) {
+            error('416 Range Not Satisfiable', 'range not satisfiable',
+              'Content-Range: bytes */' + st.size + '\r\n');
+          } else {
+            pos = Number(first === null ? (last >= size ? 0n : size - last) : first);
+            end = first === null || last === null || last >= size ? st.size - 1 : Number(last);
+            status = '206 Partial Content';
+            extra = 'Content-Range: bytes ' + pos + '-' + end + '/' + st.size + '\r\n';
+          }
+        }
+        if (fd >= 0) {
+          left = end - pos + 1;
+          pending = header(status, left, extra);
+        }
+      }
+    }
+  } catch (e) {
+    try {
+      if (e.code === 'ENOENT' || e.code === 'ENOTDIR') error('404 Not Found', 'not found');
+      else if (e.code === 'EACCES' || e.code === 'EPERM') error('403 Forbidden', 'cannot read preview');
+      else error('500 Internal Server Error', 'cannot read preview');
+    } catch (e2) { return finish(host_errno(e2)); }
+  }
+  const go = () => {
+    try {
+      while (offset < pending.length) {
+        const n = handle
+          ? (globalThis.BP_H.get(socket)?.write(pending.subarray(offset)) ?? -9)
+          : host_write(socket, sys.ptr(pending, offset), pending.length - offset);
+        const code = n < 0 ? (handle ? -n : sys.errno()) : 0;
+        if (n === 0 || code === again) {
+          if (performance.now() >= until) return finish(process.platform === 'darwin' ? 60 : 110);
+          host_park_out(socket, k, go, until);
+          return undefined;
+        }
+        if (code) return finish(code);
+        offset += n;
+        until = performance.now() + 30000;
+      }
+      if (left === 0) return finish(0);
+      chunk ??= Buffer.allocUnsafe(65536);
+      const n = fs.readSync(fd, chunk, 0, Math.min(chunk.length, left), pos);
+      // A file truncated during transfer cannot complete its advertised
+      // length. Close the connection; never append an error to its body.
+      if (n === 0) return finish(5);
+      pos += n;
+      left -= n;
+      pending = chunk.subarray(0, n);
+      offset = 0;
+      host_park_out(socket, k, go, until);
+      return undefined;
+    } catch (e) { return finish(host_errno(e)); }
+  };
+  return go();
+}
+
 function sock_send_file(socket, path, cap, k) {
   const fs = require('fs'); let fd = -1, bytes;
   try {
@@ -2086,6 +2194,7 @@ io_eff(CID(Sock.unkeep), sock_unkeep);
 io_eff(CID(Sock.recv_bytes), sock_recv_bytes);
 io_eff(CID(Sock.save), sock_save);
 io_eff(CID(Sock.send_bytes), sock_send_bytes);
+io_eff(CID(Sock.send_preview), sock_send_preview);
 io_eff(CID(Sock.send_file), sock_send_file);
 io_eff(CID(Sock.send_path), sock_send_path);
 io_eff(CID(Sock.send_until), sock_send_until);
