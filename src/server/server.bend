@@ -2173,13 +2173,13 @@ def Hub.agent_send(m: Maybe<&2, Agent>, line: String) -> IO(Unit):
     case None{}:
       IO.pure(Unit, Unit{})
 
-# retiring an agent: its input closes and the process is signalled
+# Retire the owned tree before closing stdin; the replacement waits for it.
 def Hub.agent_stop(m: Maybe<&2, Agent>) -> IO(Unit):
   match m:
-    case Some{Agent{_, input, pid, _, _}}:
+    case Some{Agent{thread, input, pid, _, _}}:
       do IO<Unit>:
+        H.Proc.retire(thread, pid)
         Chan.close(String, input)
-        Proc.kill(pid, 15)
     case None{}:
       IO.pure(Unit, Unit{})
 
@@ -2392,6 +2392,7 @@ def Cfg.prompt(c: Cfg) -> String:
 def Codex.failed(e: U32 & String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   (_, msg) = e
   do IO<Unit>:
+    H.Proc.turn_failed(thread, gen)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, "{\"type\":\"turn.failed\",\"message\":" ++ J.Json.show(J.Str{"could not start codex: " ++ msg}) ++ "}"})
     return Unit{}
 
@@ -3531,15 +3532,25 @@ def Codex.read(started: U32 & Socket, +thread: String, +gen: String, +inbox: Cha
     s3 : Socket <- IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Socket, H.Sock.dup(s2), d => Agent.watch.start(d, pid, thread, gen, inbox))
     Codex.reader(Fuel.forever(), s3, U.Lines.new(), False{}, pid, B.Tag.of(thread, pid), gen, inbox)
 
+def Codex.started.current(current: Bool, started: U32 & Socket, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match current:
+    case True{}: Codex.read(started, thread, gen, inbox)
+    case False{}:
+      (+pid, s) = started
+      Turn.end(s, pid, B.Tag.of(thread, pid), gen, inbox)
+
+def Codex.started.ok(started: U32 & Socket, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  (+pid, s) = started
+  IO.bind(Bool, Unit, H.Proc.turn_spawned(thread, gen, pid), current => Codex.started.current(current, (pid, s), thread, gen, inbox))
+
 def Codex.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   match r:
-    case Done{started}:
-      Codex.read(started, thread, gen, inbox)
-    case Fail{e}:
-      Codex.failed(e, thread, gen, inbox)
+    case Done{started}: Codex.started.ok(started, thread, gen, inbox)
+    case Fail{e}: Codex.failed(e, thread, gen, inbox)
 
 def Codex.refuse(+thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
+    H.Proc.turn_failed(thread, gen)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, "{\"type\":\"turn.failed\",\"not_started\":true,\"message\":" ++ J.Json.show(J.Str{KR.Keyring.refusal("codex")}) ++ "}"})
     return Unit{}
 
@@ -3551,10 +3562,20 @@ def AccountSpawn.named(legacy: Bool, +home: String, +profile: String, +epoch: St
 def AccountSpawn.run(+home: String, +st: M.State, +thread: String, +cmd: String, args: List<&2, String>, cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   AccountSpawn.named(String.is_empty(ACCT.Accounts.id(st, thread, cmd)), home, ACCT.Accounts.id(st, thread, cmd), Nat.show(ACCT.Accounts.epoch(st, thread, cmd)), cmd, args, cwd, err)
 
-def Codex.account(legacy: Bool, +home: String, +st: M.State, +args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+def Codex.account.ready(legacy: Bool, +home: String, +st: M.State, +args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   match legacy:
     case True{}: Keyring.gate("codex", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, Spawn.agent("codex", args, cwd, 3), r => Codex.started(r, thread, gen, inbox)), Codex.refuse(thread, gen, inbox))
     case False{}: IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, AccountSpawn.run(home, st, thread, "codex", args, cwd, 3), r => Codex.started(r, thread, gen, inbox))
+
+# A resumed session cannot open while the retired tree still owns its writer.
+# This runs in the turn worker; other threads and the hub remain responsive.
+def Codex.account.after(retired: Result<&1, &1, U32 & String, Unit>, legacy: Bool, +home: String, +st: M.State, args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match retired:
+    case Done{_}: Codex.account.ready(legacy, home, st, args, cwd, thread, gen, inbox)
+    case Fail{e}: Codex.failed(e, thread, gen, inbox)
+
+def Codex.account(legacy: Bool, +home: String, +st: M.State, args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  IO.bind(Result<&1, &1, U32 & String, Unit>, Unit, H.Proc.await_retired(thread, gen), r => Codex.account.after(r, legacy, home, st, args, cwd, thread, gen, inbox))
 
 def Codex.run(+args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   Keyring.gate("codex", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, Spawn.agent("codex", args, cwd, 3), r => Codex.started(r, thread, gen, inbox)),
@@ -10527,6 +10548,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         Line.skills(String.contains(l2, "$"), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, l2, B.Hub.cwd(st, B.Hub.thread(st, thread)))
     case Hub{st, f, ls, cl, +as, inbox, +cfg, note} B.AgentStop{+thread}:
       do IO<Hub>:
+        H.Proc.turn_cancel(thread)
         Hub.agent_stop(Agents.get(as, thread))
         return Hub{st, f, ls, cl, Agents.drop(as, thread), inbox, Tools.with(cfg, DP.Open.gone(Tools.of(cfg), thread)), note}
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.ToolOpen{+thread, +call}:
@@ -10548,6 +10570,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         +now : Nat <- Now.nat()
         +t2 : String = Far.turn(cfg, st, now, thread, text)
         +g : String = Hub.gen(st, now)
+        H.Proc.turn_begin(thread, g)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Codex.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.ChecksTrust{+hash}:
