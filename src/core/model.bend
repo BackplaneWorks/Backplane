@@ -6,6 +6,7 @@ import ./locks.bend as LK
 import ./mail.bend as ML
 import ./ship.bend as SH
 import ./todo.bend as TD
+import ./usage-counts.bend as UC
 
 # The product's state, event-sourced. Every change is a Change appended to
 # the log; the read model is `replay(log)`. Events are persisted forever:
@@ -976,41 +977,49 @@ type QItem is Data:
 # what the read model keeps behind its last field: the bots' world, and
 # the entries filed by thread (Idx)
 type Ext is Data:
-  Ext{world: BT.World, by: Map<&2, List<&2, Entry>>, mail: List<&2, ML.Box>}
+  Ext{world: BT.World, by: Map<&2, List<&2, Entry>>, mail: List<&2, ML.Box>, usage: Map<&2, String>}
 
 def Ext.of(bw: List<&2, Ext>) -> Ext:
-  Maybe.default(&2, Ext, List.head(&2, Ext, bw), Ext{BT.World.empty(), Map.new(&2, List<&2, Entry>), Nil{}})
+  Maybe.default(&2, Ext, List.head(&2, Ext, bw), Ext{BT.World.empty(), Map.new(&2, List<&2, Entry>), Nil{}, Map.new(&2, String)})
 
 def Ext.world(x: Ext) -> BT.World:
   match x:
-    case Ext{w, _, _}:
+    case Ext{w, _, _, _}:
       w
 
 def Ext.by(x: Ext) -> Map<&2, List<&2, Entry>>:
   match x:
-    case Ext{_, by, _}:
+    case Ext{_, by, _, _}:
       by
 
 def Ext.with_world(f: BT.World -> BT.World, x: Ext) -> Ext:
   match x:
-    case Ext{w, by, mail}:
-      Ext{f(w), by, mail}
+    case Ext{w, by, mail, usage}:
+      Ext{f(w), by, mail, usage}
 
 def Ext.post(x: Ext, +e: Entry) -> Ext:
   match x:
-    case Ext{w, by, mail}:
-      Ext{w, Idx.post(by, e), mail}
+    case Ext{w, by, mail, usage}:
+      Ext{w, Idx.post(by, e), mail, usage}
 
 def Ext.mail(x: Ext) -> List<&2, ML.Box>:
   match x:
-    case Ext{_, _, mail}: mail
+    case Ext{_, _, mail, _}: mail
+
+def Ext.usage(x: Ext) -> Map<&2, String>:
+  match x:
+    case Ext{_, _, _, usage}: usage
+
+def Ext.with_usage(x: Ext, usage: Map<&2, String>) -> Ext:
+  match x:
+    case Ext{w, by, mail, _}: Ext{w, by, mail, usage}
 
 def Ext.mail_box(x: Ext) -> ML.Box:
   Maybe.default(&2, ML.Box, List.head(&2, ML.Box, Ext.mail(x)), ML.Box.empty())
 
 def Ext.with_mail(f: ML.Box -> ML.Box, x: Ext) -> Ext:
   match x:
-    case Ext{w, by, mail}: Ext{w, by, [f(Maybe.default(&2, ML.Box, List.head(&2, ML.Box, mail), ML.Box.empty()))]}
+    case Ext{w, by, mail, usage}: Ext{w, by, [f(Maybe.default(&2, ML.Box, List.head(&2, ML.Box, mail), ML.Box.empty()))], usage}
 
 type State is Data:
   State{
@@ -1032,7 +1041,7 @@ type State is Data:
   }
 
 def State.empty() -> State:
-  State{Map.new(&2, Project), Map.new(&2, Thread), Nil{}, 0n, Map.new(&2, Task), Map.new(&2, String), Map.new(&2, List<&2, QItem>), Map.new(&2, Ask), Map.new(&2, Device), Map.new(&2, Nav), [Ext{BT.World.empty(), Map.new(&2, List<&2, Entry>), Nil{}}]}
+  State{Map.new(&2, Project), Map.new(&2, Thread), Nil{}, 0n, Map.new(&2, Task), Map.new(&2, String), Map.new(&2, List<&2, QItem>), Map.new(&2, Ask), Map.new(&2, Device), Map.new(&2, Nav), [Ext{BT.World.empty(), Map.new(&2, List<&2, Entry>), Nil{}, Map.new(&2, String)}]}
 
 # apply f to the thread at `id` (a blank, hidden thread when absent)
 def State.thread.fin(f: Thread -> Thread, ps: Map<&2, Project>, es: List<&2, Entry>, n: Nat, tk: Map<&2, Task>, sg: Map<&2, String>, qu: Map<&2, List<&2, QItem>>, ak: Map<&2, Ask>, dv: Map<&2, Device>, nv: Map<&2, Nav>, bw: List<&2, Ext>, id: String, r: Map<&2, Thread> & Thread) -> State:
@@ -2495,9 +2504,163 @@ def State.apply.go(s: State, e: Change) -> State:
     case ProjectOrdered{+id, +key, _}:
       State.nav((x => Nav.keyed(x, "active", key)), s, Nav.project(id))
 
+# Alpha aggregate telemetry is a bounded projection of the durable log, not a
+# second event stream. The hub enables it at startup only when its baked gate
+# is open; old logs have no enable marker and are never backfilled. Consent to
+# the expanded disclosure is separate from the legacy install/activity choice.
+def Metrics.allowed(+s: State) -> Bool:
+  Bool.and(String.eq(Setting.get(s, "telemetry.usage.enabled", ""), "1"),
+    Bool.and(String.eq(Setting.get(s, "telemetry.usage.asked", ""), "1"),
+      Bool.and(String.eq(Setting.get(s, "telemetry.asked", ""), "1"), Bool.not(String.eq(Setting.get(s, "telemetry.share", "on"), "off")))))
+
+def Metrics.data(s: State) -> Map<&2, String>:
+  match s:
+    case State{_, _, _, _, _, _, _, _, _, _, bw}: Ext.usage(Ext.of(bw))
+
+def Metrics.exts(bw: List<&2, Ext>, usage: Map<&2, String>) -> List<&2, Ext>:
+  match bw:
+    case Nil{}: [Ext{BT.World.empty(), Map.new(&2, List<&2, Entry>), Nil{}, usage}]
+    case Ext{w, by, mail, _} <> rest: Ext{w, by, mail, usage} <> rest
+
+def Metrics.install(s: State, usage: Map<&2, String>) -> State:
+  match s:
+    case State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw}: State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, Metrics.exts(bw, usage)}
+
+def Metrics.got(pair: Map<&2, String> & String) -> String:
+  (_, value) = pair
+  value
+
+def Metrics.get(+s: State, day: String) -> String:
+  Metrics.got(Map.get(String, "", Metrics.data(s), day))
+
+def Metrics.key(day: String) -> String:
+  day
+
+def Metrics.days(n: Nat, +now: Nat) -> List<&2, String>:
+  match n:
+    case 0n: Nil{}
+    case 1n+k: Tok.day(now) <> Metrics.days(k, Nat.sub(now, 86400n))
+
+def Metrics.prune(keys: List<&2, String>, +keep: List<&2, String>, +s: State) -> State:
+  match keys:
+    case Nil{}: s
+    case +key <> tail:
+      Metrics.prune(tail, keep, Bool.pick(State, Tok.has(keep, key), s, Metrics.install(s, Map.del(&2, String, Metrics.data(s), key))))
+
+def Metrics.clear(+s: State) -> State:
+  Metrics.install(s, Map.new(&2, String))
+
+def Metrics.prepare(+s: State, +at: Nat) -> State:
+  Metrics.prune(Map.keys(&2, String, Metrics.data(s)), Metrics.days(7n, at), s)
+
+def Metrics.add(+s: State, +at: Nat, part: Nat, n: Nat) -> State:
+  Metrics.install(s, Map.set(&2, String, Metrics.data(s), Tok.day(at), UC.Uc.show(UC.Uc.add(UC.Uc.read(Metrics.get(s, Tok.day(at))), part, n))))
+
+def Metrics.one(go: Bool, s: State, +at: Nat, part: Nat) -> State:
+  match go:
+    case False{}: s
+    case True{}: Metrics.add(Metrics.prepare(s, at), at, part, 1n)
+
+def Metrics.local(+id: String) -> Bool:
+  Bool.not(String.contains(id, "~"))
+
+def Metrics.thread_new.k(pair: Map<&2, Thread> & Bool) -> Bool:
+  (_, found) = pair
+  Bool.not(found)
+
+def Metrics.thread_new(s: State, +id: String) -> Bool:
+  match s:
+    case State{_, ts, _, _, _, _, _, _, _, _, _}: Metrics.thread_new.k(Map.has(&2, Thread, ts, id))
+
+def Metrics.message(role: Role, s: State, at: Nat) -> State:
+  match role:
+    case User{}: Metrics.one(True{}, s, at, 1n)
+    case Assistant{}: Metrics.one(True{}, s, at, 2n)
+    case System{}: s
+
+def Metrics.message.local(local: Bool, role: Role, s: State, at: Nat) -> State:
+  match local:
+    case True{}: Metrics.message(role, s, at)
+    case False{}: s
+
+def Metrics.tokens(go: Bool, s: State, +at: Nat, i: Nat, r: Nat, w: Nat, o: Nat, +known: String) -> State:
+  match go:
+    case False{}: s
+    case True{}:
+      Metrics.add(Metrics.add(Metrics.add(Metrics.add(Metrics.one(String.contains(known, "o"), s, at, 9n), at, 5n, Bool.pick(Nat, String.contains(known, "i"), i, 0n)), at, 6n, Bool.pick(Nat, String.contains(known, "r"), r, 0n)), at, 7n, Bool.pick(Nat, String.contains(known, "w"), w, 0n)), at, 8n, Bool.pick(Nat, String.contains(known, "o"), o, 0n))
+
+def Metrics.change(+s: State, e: Change) -> State:
+  match e:
+    case ThreadCreated{+id, _, _, _, _, _, _, _, at}:
+      Metrics.one(Bool.and(Metrics.local(id), Metrics.thread_new(s, id)), s, at, 0n)
+    case MessagePosted{thread, _, role, _, at}: Metrics.message.local(Metrics.local(thread), role, s, at)
+    case MailPosted{+id, _, _, _, _, _, _, _, _, at}:
+      Metrics.one(Bool.and(Metrics.local(id), Bool.not(ML.Box.has(State.mail(s), id))), s, at, 3n)
+    case RoomPosted{+id, _, _, _, _, at}:
+      Metrics.one(Bool.and(Bool.not(String.eq(Setting.get(s, "mail.on", "off"), "on")), Bool.and(Metrics.local(id), Bool.not(ML.Box.has(State.mail(s), id)))), s, at, 3n)
+    case BotWoke{bot, _, at}: Metrics.one(Metrics.local(bot), s, at, 4n)
+    case TurnUsage{+thread, _, _, +key, i, r, w, o, _, _, known, _, +at}:
+      Metrics.tokens(Bool.and(Metrics.local(thread), Bool.or(String.is_empty(key), Bool.not(String.eq(key, Setting.get(s, "tok.key." ++ thread, ""))))), Metrics.prepare(s, at), at, i, r, w, o, known)
+    case _: s
+
+def Metrics.privacy(+key: String) -> Bool:
+  Bool.or(String.eq(key, "telemetry.share"), Bool.or(String.eq(key, "telemetry.reset"), Bool.or(String.eq(key, "telemetry.asked"), String.eq(key, "telemetry.usage.asked"))))
+
+def Metrics.apply.k(on: Bool, s: State, e: Change) -> State:
+  match on:
+    case False{}: s
+    case True{}: Metrics.change(s, e)
+
+def Metrics.generation.next(s: State) -> String:
+  match s:
+    case State{_, _, _, n, _, _, _, _, _, _, _}: Nat.show(n)
+
+def Metrics.privacy.clear(changed: Bool, +s: State) -> State:
+  match changed:
+    case False{}: s
+    case True{}: State.setting(Metrics.clear(s), "telemetry.usage.generation", Metrics.generation.next(s))
+
+def Metrics.setting(+s: State, +key: String, +value: String) -> State:
+  Metrics.privacy.clear(Bool.and(Bool.or(String.eq(Setting.get(s, "telemetry.usage.enabled", ""), "1"), Bool.not(List.is_empty(&2, String, Map.keys(&2, String, Metrics.data(s))))), Bool.and(Metrics.privacy(key), Bool.not(String.eq(value, Setting.get(s, key, ""))))), s)
+
+def Metrics.sg(s: State) -> Map<&2, String>:
+  match s:
+    case State{_, _, _, _, _, sg, _, _, _, _, _}: sg
+
+def Metrics.apply.settings(+s: State, +e: Change) -> Map<&2, String>:
+  match e:
+    case SettingSet{key, value, _}: Metrics.sg(Metrics.setting(s, key, value))
+    case WorkSet{thread, kind, value, _}: Metrics.sg(Metrics.setting(s, kind ++ "." ++ thread, value))
+    case _: Metrics.sg(s)
+
+def Metrics.apply.counts(+s: State, +e: Change) -> Map<&2, String>:
+  match e:
+    case SettingSet{key, value, _}: Metrics.data(Metrics.setting(s, key, value))
+    case WorkSet{thread, kind, value, _}: Metrics.data(Metrics.setting(s, kind ++ "." ++ thread, value))
+    case _: Metrics.data(Metrics.apply.k(Metrics.allowed(s), s, e))
+
+# Daily counters live behind Ext, outside every UI memo input. Reconstruct the
+# existing fields explicitly so their invariance remains structural in proofs.
+def Metrics.apply.state(+s: State, +e: Change) -> State:
+  match s:
+    case State{ps, ts, es, n, tk, _, qu, ak, dv, nv, bw}:
+      State{ps, ts, es, n, tk, Metrics.apply.settings(s, e), qu, ak, dv, nv, Metrics.exts(bw, Metrics.apply.counts(s, e))}
+
+def Metrics.apply(+s: State, +e: Change) -> State:
+  match e:
+    case SettingSet{_, _, _}: Metrics.apply.state(s, e)
+    case WorkSet{_, _, _, _}: Metrics.apply.state(s, e)
+    case ThreadCreated{_, _, _, _, _, _, _, _, _}: Metrics.apply.state(s, e)
+    case MessagePosted{_, _, _, _, _}: Metrics.apply.state(s, e)
+    case MailPosted{_, _, _, _, _, _, _, _, _, _}: Metrics.apply.state(s, e)
+    case RoomPosted{_, _, _, _, _, _}: Metrics.apply.state(s, e)
+    case BotWoke{_, _, _}: Metrics.apply.state(s, e)
+    case TurnUsage{_, _, _, _, _, _, _, _, _, _, _, _, _}: Metrics.apply.state(s, e)
+    case _: s
+
 # one event folded into the read model; every event bumps the sequence
-def State.apply(s: State, e: Change) -> State:
-  State.tick(State.apply.go(s, e))
+def State.apply(s: State, +e: Change) -> State:
+  State.tick(State.apply.go(Metrics.apply(s, e), e))
 
 # the read model after a log, oldest event first
 def State.replay(es: List<&2, Change>, s: State) -> State:

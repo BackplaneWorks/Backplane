@@ -5,6 +5,7 @@ async function fixture(supported=false, legacyProbe=false){
  const {BubMoveObserver}=await import('../../src/web/bub-move.js');
  const {ViewerRpc}=await import('../../src/web/viewer-rpc.js'),{ReviewPosition}=await import('../../src/web/review-position.js');
  const {ImprovementsRpc}=await import('../../src/web/improvements-rpc.js');
+ const {SubsFeedback}=await import('../../src/web/subs-feedback.js');
  const {ThinHost,presentationTarget,preservePresentationRoute,refusedFallback}=await import('../../src/web/thin-host.js'),{Backoff,Retry,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
  let source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
  if(legacyProbe)source=source.replaceAll(' || attempt !== thinAttempt','');
@@ -32,7 +33,7 @@ async function fixture(supported=false, legacyProbe=false){
   fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
   fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
   historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
-  modelFeedback:{clear(){}},viewerFeedback:{choice(){}},
+  modelFeedback:{clear(){}},subsFeedback:new SubsFeedback(()=>{}),viewerFeedback:{choice(){}},
   // The extracted socket adapter shares these services with the full host.
   // Record peripheral lifecycle calls; wire admission/ownership still uses real ThinHost/ThinViews.
   RR:null,COARSE_POINTER:false,ViewerTools:{reset(){calls.push('viewer-tools-retired');}},viewerRpc:new ViewerRpc(()=>{throw Error('unexpected viewer RPC');}),

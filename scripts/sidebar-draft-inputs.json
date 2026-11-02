@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "7dd23dee58221be99a5002eeaf23f4a83ccaf2f68fa83b60a06d442d0434e4d5",
+    "src/core/client.bend": "5ab997e47daf3bc8832495c3c4f23decc29bf05ded096fcd86c7487a2a71f0b9",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -50,18 +50,18 @@
     "src/core/draftbound.bend": "1d973f0181f4cd4d753da6b956025e2abd2ec31c3ae54acb911a802ae4af6f28",
     "src/core/emb.bend": "48012888273e4de02f0618ca1f308fc6d87e42499aa1dafe504837c2b14e2904",
     "src/core/fallback.bend": "b8604144a115b0de6f43af2b294f7cf09f6cabb882afb962c13829a21ea50601",
-    "src/core/far.bend": "1aef9968484a539aac69cdac4bbe93ba99219371253abb2830f4294fdbfa6388",
+    "src/core/far.bend": "124ac07119ec954615d8e926917911edb56a9dcd6416eb884a0c9d12b46647b0",
     "src/core/farlive.bend": "0fec3c222121256751cf620ad82248a178a7f54581c4f20570fdce2fa0b2e25c",
     "src/core/farsnap.bend": "a83e2e4f17577be64e737c32613e5cf2a77364c8849f5b7d0430edd0bde38257",
     "src/core/fm.bend": "34e5a2496e5f10c731ced619c797d06841fcc41a289070bbbedaf185d1237325",
-    "src/core/fold.bend": "51fdb9d6b08cb5b2d6e535fbb3456b075fb5aaa7be1fa1d1561474ebaa1ff40d",
+    "src/core/fold.bend": "ed6d3b880d90d6d50d5f70e73620097ace6c2e5101288041cd8c9bbb5ebfb851",
     "src/core/fuzzy.bend": "3ded93b1ce5272c7cc0c071d3609bb4fa0fe45963e3c04f431a52af0ff31d707",
     "src/core/fview.bend": "c2310b5b1be82f3b0dbddfb72e29e4ed66ce0bc2df933c9824275f0c0500d3ed",
     "src/core/glb.bend": "f2eb124f9c0967d8c03c0a96c3a7120aab3c024cb8af60af6e4263d70bb8fe75",
     "src/core/google.bend": "196ba6d77f7c0e4b8d982d3fb259302752db1f27974b2d49a0123d092fbbb09e",
     "src/core/handoff.bend": "690d78b37f32187a3356d3df2ccb90aafa6d8b1f7234a5583dcbd55baadb55e4",
     "src/core/hier.bend": "c472552a9386d19ace94db4fa82c1a805452f9c3b2fe1f2850fbbc83018255dc",
-    "src/core/hist.bend": "f98f89de20695de233ae1e968d0ed7f6ae2bfa0c4a7efcf5946432a8dfc3dc9e",
+    "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f",
     "src/core/hot.bend": "541015b82fb97a7aa8c5f02206c53faa4d732529e8ab6e79f45a4d81f5403d36",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
@@ -85,12 +85,12 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "7a23d39dd737b3cf8f7cfdb062e2d38b43aec4e38416aff2bd0d375ae2500ea4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "643c2a229ed0744b667d9cbe796712000bb8149ff93a83ef3d42472e77e6174b",
+    "src/core/model.bend": "5d914d165c23c46b1549e453dc0dbae170b99341b4da0b6f7b49a26764d0e6bd",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
     "src/core/msgs.bend": "c900c89d26a77210d01c43d83f40d3b67a17b5e1145a9a8aec798ee6e80997da",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
-    "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
+    "src/core/onboard.bend": "3da1d256efc3f426cfa4d49af80414e09e960aeb026ce01cf858e90f0e834394",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
     "src/core/order.bend": "db37827a6d85d13b50add86e19e055417f4153bb0b44334e005ba3c4e93abae5",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
@@ -117,7 +117,7 @@
     "src/core/sha256.bend": "3eb24b17becba3ede76c98ad4a07feb3b5d9325c410a60b122947e5a8ef0e3d6",
     "src/core/ship.bend": "0ba46fa953d6f21e45a16ab06a9a46f998edb032c4f4e01a64163e8b3e965746",
     "src/core/sidebar-drafts.bend": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
-    "src/core/sidebar-read.bend": "8b9952dbbe0c9ae89bf808e995b8ce643f20102587238724c9156076dd21419d",
+    "src/core/sidebar-read.bend": "4695576d308745ba70284fb90dee0e4aad99ddce8b64f4400297676932b4d12d",
     "src/core/sign.bend": "f6c4b636f7be64f7a4a03e8cc4d0b19eae2696e8c08a92236ad7e378d7120edc",
     "src/core/signal.bend": "f8c4c9d95ea321e42676af8fb4ac159bcf15f88a9b2c51ed25a379c3d28a1e34",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
@@ -130,7 +130,7 @@
     "src/core/subthreads.bend": "48b0d1c078222b3ba94d9a95c7e59edd9c49705a39a89b6de33ae96ecf398fb0",
     "src/core/svg.bend": "dc334fd62bc35e0fa3c9cdac414ee563a31f99a3fd538810d42d35c148c30c14",
     "src/core/task.bend": "8280585ed265c028ae6fa6bc72be4b56e527e4f162262e1a4a61401d693457b2",
-    "src/core/telemetry.bend": "459638fea434c79b7965a9947ca6e9554208fc7c63c7cadb7f2a22b2e5ce6187",
+    "src/core/telemetry.bend": "f7170bbf47146b54267b56f3876fc1925eb0a224fc7a8be84e2829602c55f27a",
     "src/core/textscale.bend": "6f3179e85bce1ed2f56191bcc25621fcd83dc4ecf239b60ceed9cb1fdf883b5c",
     "src/core/thin-chat.bend": "b654c26082a5b02b40a3eb6092744fd4e2f6befda5d4757eb2f8a55368fdceae",
     "src/core/thin-wire.bend": "2190ad986b43ce03424b0f7c8e0da1bf9b2431888ebf160e0ea74d86468e9f21",
@@ -143,6 +143,7 @@
     "src/core/uber.bend": "b86d13523ed4fd08006c8cb1f00d00712c4ab3cdc13b7b03dc2808cc72d09938",
     "src/core/ubersync.bend": "1e94a7d5d085e876ba91eca8a04d960ddfb405db9f62b64d73a70055812dbdc1",
     "src/core/ubop.bend": "e06413a86ecc1dbe4082109bd2deef6769644f9c22538771c78c81ac4c6d25fa",
+    "src/core/usage-counts.bend": "5d59d9889c6d168e36753c4b9d2e1b0a805836a21c2b8fe078a6402c2892025b",
     "src/core/usage.bend": "1873bbaca0589a7d067e3495abe7c9d78082cd5e550495bbc8aba767d1b2f955",
     "src/core/usage_graph.bend": "28e5f2b438707dc3c9a1ce33af59500ae6eb8f13d0118fd09d5ae41846f5c692",
     "src/core/usage_page.bend": "05f675351e885ee368dd9db73b9e3739d04c9225a1f1c0d8ced43b53d98615f7",
@@ -164,7 +165,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "f3afb501d96bb15c76aeae77bf5e75a55109ce06c3c51d0b8bf07529f82c5ac3",
-    "src/server/thin-view.bend": "478fd7ed7ddf9ea7251a5b9671073b5575252ecbf7c587bc2881881f249c018c",
+    "src/server/thin-view.bend": "f752df880a91b80d9537140823dd0277c8521fb99c69a26639d6ae191b37ea66",
     "src/server/thinstore.bend": "b5310129889110fc0689d84985d59be407a79cf9bad762fa63e2486bf338f1ee",
     "src/web/bots.bend": "d1d4ebfa85e13f4ae331b38d783574b444f9db62fd2e3816a424a1c38a70788f",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
@@ -421,5 +422,96 @@
     "fullOutputCheck": "test/sidebar_draft_image_test.bend",
     "fullOutputLogSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
     "assertions": 24
+  },
+  "telemetryAlphaReview": {
+    "baseCommit": "e492b0072f5bdb05d9979b757fb6da209f3d3b3c",
+    "originalClientHead": "1f3fc2d0ca084683d54a18d1d0e56064b1cc28d4",
+    "priorManifestSHA256": "3be04aafc578592a6b9da89e5db67880d99c3c4caa1b86f2319b3dd180e0d0a2",
+    "changedClosureFiles": [
+      "src/core/client.bend",
+      "src/core/far.bend",
+      "src/core/hist.bend",
+      "src/core/model.bend",
+      "src/core/onboard.bend",
+      "src/core/sidebar-read.bend",
+      "src/core/telemetry.bend",
+      "src/server/thin-view.bend"
+    ],
+    "addedClosureFiles": [
+      "src/core/usage-counts.bend"
+    ],
+    "scope": "Private cumulative usage map added behind State.Ext, excluded from shared settings and both sidebar canonical inputs. Ext adapters preserve world/mail/index, and sidebar reconstruction omits counters. New usage-counts module is pure fixed-field numeric parsing/serialization with no Ui or draft reads. Consent/tour changes read existing settings and flags only. Existing metadata state, all unknown @ fields, ordinary draft/full-picture inputs, image keys, scanner, bridge authority and fallbacks remain unchanged. Reviewed combined main onboarding/watchdog diff and all eight changed module diffs.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputAssertions": 24,
+    "focusedSuites": 8,
+    "focusedGateLogSHA256": "6be13cb0235b29d5c6bd1b785aec016c398a7ee40ea5db7a49ef6779dbd18773",
+    "limits": "Focused executed output/consent/onboarding/watchdog/sidebar checks pass; normal local qualification remains required."
+  },
+  "telemetryFoldCompatibilityReview": {
+    "priorManifestSHA256": "3931feb9f89a4fa420208af7fcbd07e9e03c5556569f013dc17e646b77c60146",
+    "scope": "Preserve existing singleton legacy Fold.roles and outside-page live-label laws; current localized visible-call summaries remain unchanged. Pure entry-label projection only; no Ui or draft reads, key/filter, scanner, bridge authority or fallback changes.",
+    "changedClosureFiles": [
+      "src/core/fold.bend"
+    ],
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputAssertions": 24,
+    "genericProofCheck": "test/fold_compat_laws_test.bend",
+    "focusedGateLogSHA256": "804284841faa7bdd9420567235da912a738ce6166396a7fedccfe0d0c610b8fe",
+    "checks": [
+      "test/fold_compat_laws_test.bend",
+      "test/fold_test.bend",
+      "test/sidebar_draft_image_test.bend"
+    ]
+  },
+  "telemetryCurrentMainReview": {
+    "baseCommit": "a1d2b48aeebfe210a5896544b41afaccafcfef90",
+    "repairCommit": "3c6a3bf4abcc431625aa23639a1c1440efc2e2bb",
+    "scope": "Normal merge preserves upstream reviewed dependency hashes and both prior telemetry reviews. Only overlapping source change is Ui.act.subs open-value thread decoding; expanded consent and private Ext usage map retained. Accounts/usage changes are display formatting; subs/view changes are dock projection and short tool labels. No added draft reads, scanner changes, reduced-input filtering changes or bridge authority changes.",
+    "combinedClientHash": "ccf414a190aaf4975798d30b45d0f8e54ac6e48d889171167c2a3c0260b13633",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "focusedSuites": 9,
+    "existingLaws": "unchanged"
+  },
+  "telemetryFinalMainReview": {
+    "baseCommit": "5ca51d1e8465a432ab91b5b729f45a1d77426dcb",
+    "previousQualifiedHead": "d50e3bdf4cbe10a23c5ec0110de69c38fa32ada1",
+    "changedMergedHashes": {
+      "src/core/client.bend": "c3efad258366d791103ab595bde852729acef2b9dfe38486e19510d3ee7b1565",
+      "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f"
+    },
+    "scope": "Reviewed normal source merge: client history track is computed once, project picker focus and failed-turn Retry helpers are outside canonical sidebar projection; hist path match precedes kind check without changing result. Telemetry Share/Tour affirmative consent, private Ext usage map and adapters retained. Mech detail/tools/view/mobile changes retain upstream reviewed hashes. Existing draft readers, reduced input fields, scanner, bridge authority and fallback behavior unchanged.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "focusedSuites": 10,
+    "existingLaws": "unchanged"
+  },
+  "telemetryFinalMainI18nReview": {
+    "baseCommit": "5ca51d1e8465a432ab91b5b729f45a1d77426dcb",
+    "scope": "Register incoming manually generated Retry labels in en/ja source catalogs and regenerate deterministically. All1333 existing individual message function definitions are unchanged; generated lookup/key tables now include the two missing keys. No draft readers, reduced sidebar projection, scanner, bridge authority or fallback changes.",
+    "catalogKeys": 1328,
+    "unchangedMessageFunctions": 1333,
+    "changedClosureFiles": [
+      "src/core/msgs.bend"
+    ],
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "checks": [
+      "test/sidebar_draft_image_test.bend",
+      "test/retry_test.bend",
+      "test/i18n_test.bend",
+      "test/telemetry_ui_test.bend"
+    ]
+  },
+  "telemetryMain20fReview": {
+    "baseCommit": "20f7317139c6973cd8f1f346b91ac5231a723f7a",
+    "previousQualifiedHead": "1970153212a206ff59880e2bd82ef0703d5f064c",
+    "changedMergedHashes": {
+      "src/core/client.bend": "5ab997e47daf3bc8832495c3c4f23decc29bf05ded096fcd86c7487a2a71f0b9",
+      "src/core/fold.bend": "ed6d3b880d90d6d50d5f70e73620097ace6c2e5101288041cd8c9bbb5ebfb851",
+      "src/core/model.bend": "5d914d165c23c46b1549e453dc0dbae170b99341b4da0b6f7b49a26764d0e6bd",
+      "src/core/msgs.bend": "c900c89d26a77210d01c43d83f40d3b67a17b5e1145a9a8aec798ee6e80997da"
+    },
+    "scope": "Normal merge preserves every new main feature and original telemetry reviews. Client older shelf retains selected project using already-keyed selection; review request scratch keys are retained by existing unknown-field policy; provider setup default reads existing model metadata. New subagent projections use existing full info inputs. Fold error fallback preserves compatibility wrappers. Model subagent token-line helpers do not alter private Ext usage storage. Catalog Retry duplicates had identical values; source catalogs deduplicated and generated msgs rebuilt, preserving incoming status/history labels. No changes to draft readers, scanner, key filtering, bridge authority or fallback policy.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "focusedSuites": 20,
+    "existingLaws": "unchanged"
   }
 }

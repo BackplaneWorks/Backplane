@@ -582,8 +582,13 @@ def Fold.now(m: Map<&2, String>) -> Nat:
 def Fold.roles.loc(+l: I.Loc, +es: List<&2, M.Entry>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
   Fold.roles.go(l, Fold.groups(es), info, running)
 
-def Fold.roles(es: List<&2, M.Entry>, info: Map<&2, String>, running: Bool) -> List<&2, Role>:
-  Fold.roles.loc(I.En{}, es, info, running)
+# Preserve the original unlocalized singleton API. Renderers use roles.loc
+# and roles.ctx, whose visible calls retain the richer summary labels.
+def Fold.roles(+es: List<&2, M.Entry>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
+  match es info running:
+    case M.Act{i, _, "tool", k, _, _} <> Nil{} MTip{} True{}:
+      [RHead{i, "1 tool call · running: " ++ k, False{}, True{}}]
+    case _ _ _: Fold.roles.loc(I.En{}, es, info, running)
 
 # Runs across a page's edges
 # --------------------------
@@ -820,10 +825,17 @@ def Fold.cut(bs: List<&2, M.Entry>, rs: List<&2, Role>, c: Maybe<&2, Role>) -> L
 # the roles of a page's entries, folded with the tool calls around it: one
 # role per entry of the page, a run cut by its edge heading where it starts
 # on the page, keyed by its real first call and counting all of it
+def Around.label.calls(+l: I.Loc, es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match es:
+    case Nil{}: Nil{}
+    case M.Act{i, th, tone, +kind, _, at} <> tail:
+      M.Act{i, th, tone, kind, Tool.shown(l, kind), at} <> Around.label.calls(l, tail)
+    case e <> tail: e <> Around.label.calls(l, tail)
+
 def Fold.roles.ctx(+l: I.Loc, +c: Around, +es: List<&2, M.Entry>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
   match c:
     case Around{+b, +a}:
-      List.take(&2, Role, Fold.cut(b, Fold.roles.loc(l, List.append(&2, M.Entry, b, List.append(&2, M.Entry, es, a)), info, running), None{}),
+      List.take(&2, Role, Fold.cut(b, Fold.roles.loc(l, List.append(&2, M.Entry, b, List.append(&2, M.Entry, es, Around.label.calls(l, a))), info, running), None{}),
         List.length(&2, M.Entry, es))
 
 # the same over entries that still hold their blank messages, one role per

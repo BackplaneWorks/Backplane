@@ -541,7 +541,7 @@ def Snap.state.threads.k(+rs: SRows, eb: EB, threads: Map<&2, M.Thread>) -> M.St
         Snap.seq.k(SRows.of(rs, "obj.state")), Fill.tasks(SRows.of(rs, "task"), Map.new(&2, M.Task)), Fill.settings(SRows.of(rs, "setting"), Map.new(&2, String)),
         Fill.queues(SRows.of(rs, "queue"), Map.new(&2, List<&2, M.QItem>)), Fill.asks(SRows.of(rs, "ask"), Map.new(&2, M.Ask)),
         Fill.devices(SRows.of(rs, "obj.device"), Map.new(&2, M.Device)), Fill.navs(SRows.of(rs, "obj.nav"), Map.new(&2, M.Nav)),
-        [M.Ext{Snap.world(rs), by, [Snap.box(rs)]}]}
+        [M.Ext{Snap.world(rs), by, [Snap.box(rs)], Fill.strs(SRows.of(rs, "obj.usage"), Map.new(&2, String))}]}
 
 def Snap.state.k(+rs: SRows, eb: EB) -> M.State:
   Snap.state.threads.k(rs, eb, Fill.threads(SRows.of(rs, "thread"), Map.new(&2, M.Thread)))

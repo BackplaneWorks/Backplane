@@ -128,7 +128,7 @@ def State.window.empty(+st: M.State, +threads: Map<&2, M.Thread>) -> M.State:
   match st:
     case M.State{+ps, _, _, +n, +tk, +settings, +queued, +asks, _, +nav, +bw}:
       M.State{ps, threads, Nil{}, n, tk, settings, queued, asks, Map.new(&2, M.Device), nav,
-        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.new(&2, List<&2, M.Entry>), M.Ext.mail(M.Ext.of(bw))}]}
+        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.new(&2, List<&2, M.Entry>), M.Ext.mail(M.Ext.of(bw)), M.Ext.usage(M.Ext.of(bw))}]}
 
 def State.window.add(+es: List<&2, M.Entry>, +st: M.State) -> M.State:
   match es:
@@ -197,7 +197,7 @@ def State.window.file(st: M.State, +key: String, es: List<&2, M.Entry>) -> M.Sta
   match st:
     case M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav, +bw}:
       M.State{ps, ts, entries, n, tk, settings, queued, asks, devices, nav,
-        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.set(&2, List<&2, M.Entry>, M.Ext.by(M.Ext.of(bw)), key, es), M.Ext.mail(M.Ext.of(bw))}]}
+        [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.set(&2, List<&2, M.Entry>, M.Ext.by(M.Ext.of(bw)), key, es), M.Ext.mail(M.Ext.of(bw)), M.Ext.usage(M.Ext.of(bw))}]}
 
 # The inspector's identities and each call's bounded activity belong only
 # to the selected conversation, independently of its newest shared log page.
