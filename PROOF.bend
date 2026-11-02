@@ -15046,3 +15046,7 @@ def Laws.vd_undo_revokes(out, y, n):
 def Laws.vs_done_tail_empty(timed, st, item, ws): {==}
 
 def Laws.vs_done_resets(timed, st, item, ws): {==}
+
+def Laws.provider_setup_missing_program(profile): {==}
+
+def Laws.provider_setup_failure_retry(): {==}
