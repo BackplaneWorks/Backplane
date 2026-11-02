@@ -939,7 +939,8 @@ export class ThinHost {
     if (result.current) for (const [name, field] of this.fields) {
       if (field.acknowledged && field.revision <= (metadata?.revision ?? -1)) this.fields.delete(name);
     }
-    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly, unchanged: same && !!result.current && this.ready, paged: !!paged && !!result.current });
+    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly, unchanged: same && !!result.current && this.ready, paged: !!paged && !!result.current,
+      presenting: pictureCurrent && !!result.current && !!result.remoteReady && !result.inputOnly && !same && !r.nextTarget });
     metadata?.operation?.settled?.(result.current && result.remoteReady && !r.nextTarget);
     if (moving) { this.forView = held.length ? { target: r.nextTarget, cmds: held } : null;this.select(r.nextTarget);return true; }
     if (result.current && result.remoteReady && result.inputOnly) {
@@ -991,7 +992,7 @@ export class ThinHost {
         page: paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
       if (pictureCurrent) this.historyResetPending = false;
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
-      this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged });
+      this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged, painted: pictureCurrent });
       this.handOver();
     } else if (result.current && !this.refuse(metadata, 'Current view is not ready', true)) this.fail('Current view is not ready');
     // Send queued navigation before a background read can snapshot its old route.

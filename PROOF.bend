@@ -15320,3 +15320,7 @@ def Laws.issue_report_official_repository(): {==}
 def Laws.issue_report_template_revision(): {==}
 
 def Laws.issue_report_prompt_original_verbatim(description): {==}
+
+def Laws.active_progress_other_soft(): {==}
+
+def Laws.active_progress_owner_urgent(): {==}
