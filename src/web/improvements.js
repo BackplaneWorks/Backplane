@@ -4,6 +4,8 @@ import { ImprovementsFlow, improvementThread } from './improvements-flow.js';
 import { backplaneProject } from './improvements-context.js';
 import { osFamily, diagnosticReport, issueLink, IssueHandoff, ISSUE_URL } from './issue-report.js';
 import { ReportWriter } from './report-writer.js';
+import { startScreenRecording, recordingSupported, RECORDING } from './improvements-recording.js';
+import { RecordingStore } from './improvements-recording-store.js';
 
 export function improvementsShortcut(event, platform = '') {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.getModifierState?.('AltGraph') || event.shiftKey) return false;
@@ -21,6 +23,7 @@ const timed = (promise, ms, message) => new Promise((resolve, reject) => {
 });
 export function installImprovements({ rpc, context, identity, ready, select, beforeCapture = async () => {}, overlayChanged = () => {},
   capture = captureApp, store = new ImprovementsStore(), doc = document, win = window,
+  record = startScreenRecording, recordingStore = new RecordingStore({ bridge: win.backplaneDesktop, storage: win.navigator.storage }),
   reportBody, reportPrompt, reportTemplate = () => '', previewBody = body => ({ body, url: issueLink(body) }), reportTarget = (saved, legacy) => ['issue', 'internal'].includes(saved) ? saved : legacy ? 'internal' : 'issue',
   appVersion = async () => 'unknown', diagnostics = {}, openIssue = url => {
     const link = doc.createElement('a');link.href = url;link.target = '_blank';link.rel = 'noopener noreferrer';link.click();
@@ -28,6 +31,8 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   let draft, scope, opening = false, busy = false, capturing = false, previousFocus, previousRange, url, operation = 0, pos = null;
   let saving = Promise.resolve();
   let captureController, openEpoch = 0, projects = [], issuePreview = null, version = 'unknown';
+  let recording, recordingAbort, recordingActive = false, recordingPicking = false, recordingFile, recordingUrl, previewRecordingId;
+  const canRecord = recordingSupported(win);
   const chord = improvementsChord(win.navigator.platform);
   const el = (tag, text, attrs = {}) => { const n = doc.createElement(tag);if (text) n.textContent = text;for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);return n; };
   const popup = el('section', '', { class: 'improvements', role: 'dialog', 'aria-labelledby': 'improvements-title', hidden: '' });
@@ -56,16 +61,28 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   const copy = el('button', 'Copy issue text', { type: 'button' });
   const download = el('button', 'Save report', { type: 'button' });
   const saveImage = el('button', 'Save selected image', { type: 'button', hidden: '' });
+  const saveVideo = el('button', 'Save selected recording', { type: 'button', hidden: '' });
   const retryIssue = el('button', 'Allow another GitHub draft', { type: 'button', hidden: '' });
   const confirm = el('button', 'Open GitHub draft', { type: 'button', id: 'improvements-open-issue' });
-  issueActions.append(copy, download, saveImage, retryIssue, confirm);
+  issueActions.append(copy, download, saveImage, saveVideo, retryIssue, confirm);
   const evidence = el('textarea', '', { id: 'improvements-evidence', rows: '3', 'aria-label': 'Behavior evidence', placeholder: 'Describe the behavior in detail. Include what you did and what you saw. An image can supplement this description.' });
-  const evidenceOk = check('improvements-evidence-confirm', 'My report has a thorough behavior description, or I will attach the selected evidence image on GitHub.');
+  const evidenceOk = check('improvements-evidence-confirm', 'My report has a thorough behavior description, or I will attach the selected image or recording on GitHub.');
   const writer = el('button', 'Write report with agent', { type: 'button', id: 'improvements-write-report' });
   const loadReport = el('button', 'Load agent report', { type: 'button', hidden: '' });
   const openWriter = el('button', 'Open report-writing thread', { type: 'button', hidden: '' });
   const useTemplate = el('button', 'Use report template', { type: 'button' });
   publicBox.append(publicNote, el('p', 'Write report sends the selected description, image and diagnostics to your configured agent in the selected project using its normal permissions. Review issue prepares text locally. Replace private images with a redacted image before sharing.'), evidence, screenshot.label, logs.label, extra.label, details, writerProjectLabel, writerProject, writer, loadReport, openWriter, useTemplate, diagPreview, review, evidenceOk.label, issueActions);
+  const recordingBox = el('div', '', { class: 'improvements-recording', hidden: '' });
+  const recordButton = el('button', 'Record screen', { type: 'button', id: 'improvements-record-screen' });
+  const discardVideo = el('button', 'Discard recording', { type: 'button', hidden: '' });
+  const videoPreview = el('video', '', { controls: '', playsinline: '', preload: 'metadata', hidden: '', 'aria-label': 'Recording preview' });
+  const attachVideo = check('improvements-recording-attach', 'Attach the recording to the local agent thread after previewing it');
+  const videoWarning = el('p', 'A recording may show private messages, credentials or other private information. Review the whole clip before sharing it. Recording does not redact the image.');
+  recordingBox.append(recordButton, el('p', 'Video only, no audio. Up to 2 minutes and 9 MiB. Private copies expire after 24 hours.'), videoWarning, videoPreview, attachVideo.label, discardVideo);
+  const recordingBar = el('aside', '', { class: 'improvements-recording-bar', hidden: '', 'aria-label': 'Screen recording controls' });
+  const recordingStatus = el('span', 'Recording screen', { role: 'status', 'aria-live': 'polite' });
+  const stopRecording = el('button', 'Stop recording', { type: 'button' }), cancelRecording = el('button', 'Cancel recording', { type: 'button' });
+  recordingBar.append(recordingStatus, stopRecording, cancelRecording);doc.body.append(recordingBar);
   const collection = el('details');collection.append(el('summary', 'Local diagnostics'));
   const collectionNote = el('p', 'Bounded connection and timing metadata only; no conversation text. Local collection is separate from telemetry. Nothing is shared until selected and reviewed.');
   const collect = check('improvements-collect', 'Keep local diagnostics on this device');
@@ -79,7 +96,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   const again = el('button', 'Capture again', { type: 'button' }), choose = el('button', 'Choose image', { type: 'button' });
   const file = el('input', '', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: '' });
   const send = el('button', 'Send', { type: 'button', class: 'primary', 'aria-describedby': 'improvements-help', 'aria-keyshortcuts': 'Control+Enter' });buttons.append(again, choose, send);
-  popup.append(header, targetLabel, target, label, input, projectLabel, project, publicBox, preview, collection, help, note, buttons, file);doc.body.append(popup);
+  popup.append(header, targetLabel, target, label, input, projectLabel, project, publicBox, preview, recordingBox, collection, help, note, buttons, file);doc.body.append(popup);
   function announce(text) { note.textContent = text; }
   function viewport() { const v = win.visualViewport;return { x: v?.offsetLeft || 0, y: v?.offsetTop || 0, width: v?.width || win.innerWidth, height: v?.height || win.innerHeight }; }
   function place() {
@@ -103,6 +120,13 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   }
   function controls() {
     const internal = !isPublic(), locked = busy || !!draft?.message;
+    recordingBox.hidden = !canRecord;recordButton.disabled = locked || !!draft?.key || recordingPicking || recordingActive;
+    recordButton.textContent = recordingPicking ? 'Choose a screen or window…' : 'Record screen';
+    videoPreview.hidden = !recordingFile;discardVideo.hidden = !draft?.recording;discardVideo.disabled = locked || !!draft?.key || recordingPicking || recordingActive;
+    attachVideo.label.hidden = !draft?.recording;attachVideo.input.checked = draft?.includeRecording === true;
+    attachVideo.input.disabled = locked || !!draft?.key || !recordingFile || previewRecordingId !== draft?.recording?.id || !draft?.recordingReviewed;
+    attachVideo.label.lastChild.textContent = isPublic() ? ' Select this recording for the public report and agent. It may show private information. Attach it manually on GitHub.' : ' Attach this recording to the local agent thread. Play the preview first.';
+    saveVideo.hidden = !draft?.includeRecording || !draft?.recording;saveVideo.disabled = busy || !draft?.recordingReviewed;
     input.disabled = !draft;input.readOnly = locked;
     target.value = draft?.target || 'issue';target.disabled = locked || !!draft?.key;
     project.disabled = !draft || locked || !!draft?.key;
@@ -119,13 +143,13 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     again.disabled = choose.disabled = locked || capturing;
     preview.hidden = !draft?.image || !hasImage;
     saveImage.hidden = !draft?.image || !draft?.includeScreenshot;
-    send.disabled = busy || capturing;
+    send.disabled = busy || capturing || recordingPicking || recordingActive;
     review.readOnly = busy;evidenceOk.input.disabled = busy;
     retryIssue.hidden = !draft?.issueOpened;retryIssue.disabled = busy;
     confirm.disabled = busy || !!draft?.issueOpened || !evidenceOk.input.checked;
     send.textContent = busy ? 'Working…' : internal ? draft?.accepted ? 'Open thread' : 'Send' : 'Review issue';
-    help.textContent = internal ? !draft?.image ? 'Capture again or choose an image before sending.' : !draft?.project ? 'Choose the Backplane source project before sending.' : 'Changes will be made in Backplane. Ctrl+Enter sends this request.' :
-      'OS family and app release are included. Images stay local until you attach them yourself on GitHub. Ctrl+Enter reviews the issue.';
+    help.textContent = internal ? !draft?.image && !(draft?.includeRecording && draft?.recording) ? 'Choose an image or preview and select a recording before sending.' : !draft?.project ? 'Choose the Backplane source project before sending.' : 'Changes will be made in Backplane. Ctrl+Enter sends this request.' :
+      'OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue.';
   }
   function showPreview() {
     if (url) URL.revokeObjectURL(url);url = draft?.image ? URL.createObjectURL(draft.image) : null;
@@ -133,7 +157,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   }
   function show() { popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();showPreview();input.focus({ preventScroll: true }); }
   function hide() {
-    openEpoch++;operation++;captureController?.abort();capturing = false;opening = false;
+    openEpoch++;operation++;captureController?.abort();recordingAbort?.abort();recording?.cancel();recordingBar.hidden = true;recordingActive = recordingPicking = false;videoPreview.pause?.();capturing = false;opening = false;
     popup.hidden = true;popup.removeAttribute('aria-modal');overlayChanged();
     if (previousFocus?.isConnected) { previousFocus.focus({ preventScroll: true });if (previousRange && previousFocus.setSelectionRange) previousFocus.setSelectionRange(...previousRange); }
   }
@@ -212,11 +236,12 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
       if (isPublic() && draft.issueBody) { issuePreview = Object.freeze(previewBody(draft.issueBody));review.value = draft.issueBody;review.hidden = issueActions.hidden = false; }
       if (draft.issueOpened) announce('This draft was already opened on GitHub. Check GitHub before explicitly allowing another copy.');
       if (seededDescription !== undefined && legacy && seededDescription !== draft.text) announce('Your existing draft is kept. Copy the native description and paste it when ready.');
-      if (draft.image || isPublic()) show();else await recapture(true);
+      if (draft.image || draft.recording || isPublic()) show();else await recapture(true);
+      if (canRecord && draft.recording) await showRecordingPreview();
     } catch (error) { if (epoch !== openEpoch) return;announce(error.message);popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();place();close.focus(); }
     finally { if (epoch === openEpoch) { opening = false;controls(); } }
   }
-  function toggle() { if (opening || capturing || !popup.hidden) hide();else void open(); }
+  function toggle() { if (recordingActive) { recording?.stop();return; }if (opening || capturing || !popup.hidden) hide();else void open(); }
   input.addEventListener('input', () => { if (!draft || draft.message) return;draft.text = input.value;forgetReport();invalidateIssue();controls();void save(draft).catch(e => announce(e.message)); });
   project.addEventListener('change', () => { if (!draft || draft.key) return;draft.project = project.value;draft.context.implementationProject = projects.find(p => p.id === project.value) || null;void save(draft).catch(e => announce(e.message));controls(); });
   close.addEventListener('click', hide);again.addEventListener('click', () => { void recapture(); });choose.addEventListener('click', () => file.click());
@@ -228,7 +253,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   });
   target.addEventListener('change', async () => {
     if (!draft || draft.key || busy) return;
-    draft.target = reportTarget(target.value, false);invalidateIssue();controls();showPreview();
+    draft.target = reportTarget(target.value, false);draft.includeRecording = false;forgetReport();invalidateIssue();controls();showPreview();
     try { await store.write(scope + ':destination', { target: draft.target });await save(draft); }
     catch (e) { announce(e.message); }
   });
@@ -248,12 +273,12 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     catch (e) { announce(e.message); }
   });
   clearLogs.addEventListener('click', async () => {
-    try { await diagnostics.clear?.();if (ready() && diagnostics.controlHub) await diagnostics.controlHub('clear');if (draft) draft.includeDiagnostics = false;forgetReport();invalidateIssue();if (draft) await save(draft);diagPreview.hidden = true;controls();announce('Local diagnostics cleared.'); }
+    try { if (canRecord || draft?.recording) await recordingStore.clear();recordingFile = null;if (draft) { delete draft.recording;draft.includeRecording = false; }await showRecordingPreview();await diagnostics.clear?.();if (ready() && diagnostics.controlHub) await diagnostics.controlHub('clear');if (draft) draft.includeDiagnostics = false;forgetReport();invalidateIssue();if (draft) await save(draft);diagPreview.hidden = true;controls();announce('Local diagnostics cleared.'); }
     catch (e) { announce(e.message); }
   });
   async function prepareIssue() {
     if (!reportBody) { announce('This page needs an update to prepare issues. Your draft is kept.');return; }
-    if (!evidence.value.trim() && !(draft.includeScreenshot && draft.image)) { announce('Add a thorough behavior description or select an evidence image before reviewing.');evidence.focus();return; }
+    if (!hasEvidence()) { announce('Add a thorough behavior description or select an evidence image or reviewed recording before reviewing.');evidence.focus();return; }
     busy = true;controls();
     try {
       let diag = '';
@@ -262,7 +287,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
         if (!value) throw Error('Diagnostics are unavailable. Uncheck diagnostics to continue.');
         diag = diagnosticReport(value);diagPreview.textContent = diag;diagPreview.hidden = false;
       }
-      const body = draft.report || reportBody(draft.text + '\n\nEvidence\n' + (draft.evidence || 'Selected image, attach manually on GitHub.'), osFamily(win.navigator), version, draft.includeDetails ? draft.details || '' : '', diag);
+      const body = draft.report || reportBody(draft.text + '\n\nEvidence\n' + (draft.evidence || (draft.includeRecording ? 'Selected recording, attach manually on GitHub.' : 'Selected image, attach manually on GitHub.')), osFamily(win.navigator), version, draft.includeDetails ? draft.details || '' : '', diag);
       if (typeof body !== 'string' || !body.trim()) throw Error('Could not prepare the exact issue text. Your draft is kept.');
       if (draft.issueBody !== body) delete draft.issueOpened;
       draft.issueBody = body;
@@ -298,15 +323,15 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     if (!ready() || !identity()) { announce('Reconnect to the hub before starting the report agent. You can fill the report template offline.');return; }
     if (win.location.origin + ':' + identity() !== scope) { announce('The hub identity changed. Copy your description, close and reopen Improvements before starting an agent. Your local draft is kept.');return; }
     if (!draft.text?.trim()) { announce('Describe the issue before starting the report agent.');input.focus();return; }
-    if (!draft.evidence?.trim() && !(draft.includeScreenshot && draft.image)) { announce('Add a thorough behavior description or select an evidence image first.');evidence.focus();return; }
+    if (!hasEvidence()) { announce('Add a thorough behavior description or select an evidence image or reviewed recording first.');evidence.focus();return; }
     if (!draft.writer && !draft.writerProject) { announce('Choose a project for the report agent, or fill the template locally.');writerProject.focus();return; }
     if (!reportPrompt) { announce('Update this page before using the report agent.');return; }
     busy = true;controls();
     try {
       const diag = draft.includeDiagnostics ? diagnosticReport(await diagnostics.snapshot()) : '';
-      const evidenceText = draft.evidence || 'The user selected an attached evidence image. Examine it only as evidence.';
+      const evidenceText = draft.evidence || (draft.includeRecording ? 'The user selected the attached screen recording. Watch it only as evidence.' : 'The user selected an attached evidence image. Examine it only as evidence.');
       const prompt = reportPrompt(draft.text, osFamily(win.navigator), version, evidenceText + (draft.includeDetails ? '\nUser-elected details\n' + (draft.details || '') : ''), diag);
-      if (await reportWriter.start(draft, prompt, { image: draft.includeScreenshot ? draft.image : null })) announce('Report agent started in the selected project. Load the report when it finishes, or open the thread to answer its questions.');
+      if (await reportWriter.start(draft, prompt, { image: draft.includeScreenshot ? draft.image : null, video: await selectedRecording() })) announce('Report agent started in the selected project. Load the report when it finishes, or open the thread to answer its questions.');
     } catch (e) { announce(e.message); }
     finally { busy = false;controls(); }
   });
@@ -326,12 +351,60 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     catch (e) { draft.issueOpened = true;announce(e.message); }
     finally { busy = false;controls(); }
   });
+  function hasEvidence() { return !!draft?.evidence?.trim() || !!(draft?.includeScreenshot && draft.image) || !!(canRecord && draft?.includeRecording && draft.recording && draft.recordingReviewed); }
+  async function selectedRecording() {
+    if (!draft?.includeRecording) return null;
+    if (!canRecord || !draft.recording || !draft.recordingReviewed) throw Error('Play the recording preview and select it before attaching.');
+    const selectedScope = scope, owner = draft, id = draft.recording.id;
+    const video = await recordingStore.get(draft.recording);
+    if (scope !== selectedScope || draft !== owner || owner.recording?.id !== id || !ready() || win.location.origin + ':' + identity() !== selectedScope) throw Error('The hub identity or recording changed. Reopen Improvements.');
+    return video;
+  }
+  async function showRecordingPreview() {
+    const owner = draft, ref = draft?.recording, selectedScope = scope;
+    if (recordingUrl) URL.revokeObjectURL(recordingUrl);recordingUrl = null;recordingFile = null;previewRecordingId = null;videoPreview.removeAttribute('src');
+    if (!ref || !canRecord) { controls();return; }
+    try {
+      const file = await recordingStore.get(ref);
+      if (owner !== draft || selectedScope !== scope || draft.recording?.id !== ref.id) return;
+      recordingFile = file;previewRecordingId = ref.id;recordingUrl = URL.createObjectURL(file);videoPreview.src = recordingUrl;
+    } catch { if (owner === draft) { draft.includeRecording = false;announce('The recording expired or could not be read. Record again.'); } }
+    controls();place();
+  }
+  recordButton.addEventListener('click', async () => {
+    if (!draft || busy || draft.key || recordingPicking || recordingActive) return;
+    const owner = draft, selectedScope = scope, stamp = ++operation;
+    recordingAbort = new AbortController();recordingPicking = true;controls();
+    try {
+      const session = await record({ signal: recordingAbort.signal, onTime: (ms, bytes) => {
+        recordingStatus.textContent = '● Recording screen · ' + Math.floor(ms / 1000) + '/120 s · ' + (bytes / 1048576).toFixed(1) + '/9 MiB';
+      } });
+      if (operation !== stamp || owner !== draft || selectedScope !== scope) { session.cancel();await session.done.catch(() => {});return; }
+      recording = session;recordingPicking = false;recordingActive = true;stopRecording.disabled = false;
+      popup.hidden = true;popup.removeAttribute('aria-modal');recordingBar.hidden = false;overlayChanged();
+      const result = await session.done;recordingActive = false;recordingBar.hidden = true;
+      if (operation !== stamp || owner !== draft || selectedScope !== scope || !ready() || win.location.origin + ':' + identity() !== scope) return;
+      const ref = await recordingStore.put(result.file);
+      if (operation !== stamp || owner !== draft || selectedScope !== scope || win.location.origin + ':' + identity() !== scope) { await recordingStore.remove(ref);return; }
+      const previous = owner.recording;owner.recording = { ...ref, durationMs: result.durationMs };owner.includeRecording = false;owner.recordingReviewed = false;
+      forgetReport();invalidateIssue();await save(owner);if (previous) await recordingStore.remove(previous);
+      await showRecordingPreview();show();announce('Recording saved locally. Play the preview, then select it to attach. Clips expire after 24 hours.');
+    } catch (e) { if (stamp === operation) { show();announce(e.message || 'Recording was not completed. Your draft is kept.'); } }
+    finally { if (stamp === operation) { recording = null;recordingPicking = recordingActive = false;recordingBar.hidden = true;controls(); } }
+  });
+  stopRecording.addEventListener('click', () => { stopRecording.disabled = true;recordingStatus.textContent = 'Finishing recording…';recording?.stop(); });
+  cancelRecording.addEventListener('click', () => { recordingAbort?.abort();recording?.cancel(); });
+  videoPreview.addEventListener('play', () => { if (!draft?.recording || !recordingFile || previewRecordingId !== draft.recording.id) return;draft.recordingReviewed = true;controls();void save(draft).catch(e => announce(e.message)); });
+  attachVideo.input.addEventListener('change', () => { if (!draft || busy || draft.key || !draft.recordingReviewed) return;draft.includeRecording = attachVideo.input.checked;forgetReport();invalidateIssue();controls();void save(draft).catch(e => announce(e.message)); });
+  discardVideo.addEventListener('click', async () => { if (!draft?.recording || busy || draft.key) return;try { await recordingStore.remove(draft.recording);delete draft.recording;draft.includeRecording = false;draft.recordingReviewed = false;forgetReport();invalidateIssue();await save(draft);await showRecordingPreview();announce('Recording removed from local storage.'); } catch(e) { announce(e.message); } });
+  saveVideo.addEventListener('click', async () => { try { const video = await selectedRecording();if (video) downloadBlob(video, 'backplane-recording.webm'); } catch(e) { announce(e.message); } });
+  win.addEventListener('pagehide', () => { recordingAbort?.abort();recording?.cancel();if (recordingUrl) URL.revokeObjectURL(recordingUrl); });
   const handoff = new IssueHandoff({ save, open: openIssue });
   confirm.addEventListener('click', async () => {
     if (busy || !issuePreview || draft?.issueOpened) return;
-    if (!evidenceOk.input.checked || !draft.evidence?.trim() && !(draft.includeScreenshot && draft.image)) { announce('Confirm that the report has a thorough description or attachable evidence image.');return; }
+    if (!evidenceOk.input.checked || !hasEvidence()) { announce('Confirm that the report has a thorough description or attachable evidence image.');return; }
     busy = true;controls();
-    try { if (await handoff.send(draft, issuePreview)) announce('GitHub draft opened. Sign in with your GitHub account and press Submit there. Backplane has not submitted an issue.'); }
+    try { if (draft.includeRecording) await selectedRecording();if (await handoff.send(draft, issuePreview)) announce('GitHub draft opened. Sign in with your GitHub account and press Submit there. Backplane has not submitted an issue.'); }
     catch (e) { announce(e.message); }
     finally { busy = false;controls(); }
   });
@@ -343,19 +416,19 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   saveImage.addEventListener('click', () => { if (draft?.includeScreenshot && draft.image) downloadBlob(draft.image, 'backplane-screenshot.' + ({ 'image/jpeg': 'jpg', 'image/webp': 'webp' }[draft.image.type] || 'png')); });
   const uploadImage = async (thread, key, image) => {
     if (!ready() || identity() !== scope.slice(win.location.origin.length + 1)) throw Error('Reconnect to the same hub before sending.');
-    const query = new URLSearchParams({ thread, key, name: 'backplane.' + ({ 'image/jpeg': 'jpg', 'image/webp': 'webp' }[image.type] || 'png') });
+    const query = new URLSearchParams({ thread, key, name: image.type === 'video/webm' ? 'backplane-recording.webm' : 'backplane.' + ({ 'image/jpeg': 'jpg', 'image/webp': 'webp' }[image.type] || 'png') });
     const response = await fetch('/attach?' + query, { method: 'POST', body: image, credentials: 'same-origin', signal: AbortSignal.timeout(60000) });
     const result = await response.json();
     if (!response.ok || result.thread !== thread || typeof result.attached !== 'string') throw Error(result.text || 'The image did not arrive. Retry Send.');
     return result.attached;
   };
-  const flow = new ImprovementsFlow({ rpc, save, select, status: announce, upload: uploadImage });
+  const flow = new ImprovementsFlow({ rpc, save, select, status: announce, upload: uploadImage, identity: () => ready() && identity() ? win.location.origin + ':' + identity() : '', expectedScope: () => scope });
   async function submit() {
-    if (busy || capturing) return;
+    if (busy || capturing || recordingPicking || recordingActive) return;
     if (!draft) { announce('Reconnect, close Improvements, then open it again to restore your draft.');return; }
     if (!draft.text?.trim()) { announce('Describe the change to Backplane before sending.');input.focus();return; }
     if (isPublic()) { await prepareIssue();return; }
-    if (!draft.image) { announce('Capture again or choose an image, then retry Send. Your text is kept.');input.focus();return; }
+    if (!draft.image && !(draft.includeRecording && draft.recording)) { announce('Choose an image or preview and select a recording, then retry Send. Your text is kept.');input.focus();return; }
     if (!draft.project) { announce('Choose the Backplane source project, then retry Send.');project.focus();return; }
     const target = backplaneProject(projects);
     if (target && draft.project !== target.id) { announce('This saved request belongs to another project. Open its thread to finish it before starting a Backplane improvement.');return; }
@@ -363,9 +436,9 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     try {
       if (!ready() || win.location.origin + ':' + identity() !== scope) throw Error('Reconnect to the same hub, then retry Send.');
       if (draft.accepted) await select(draft.thread);
-      else if (!await flow.send(draft)) return;
+      else if (!await flow.send(draft, { video: await selectedRecording() })) return;
       announce('Request sent. Opening the new Backplane thread.');
-      await store.write(scope, null);hide();draft = null;
+      await store.write(scope, null);if (draft.recording) await recordingStore.remove(draft.recording).catch(() => {});recordingFile = null;hide();draft = null;
     } catch (error) { announce(error.message || 'Could not send. Your draft and image are kept. Retry Send.'); }
     finally { busy = false;controls(); }
   }
