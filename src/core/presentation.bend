@@ -206,8 +206,11 @@ def Session.reading(session: J.Json, id: String, seen: String, count: Nat, away:
 def Session.select(+session: J.Json, +id: String) -> J.Json:
   Session.pack(U.Ui.reselect(J.Json.get_str(session, "sel", ""), U.Ui.select.nav(Session.adopt(U.Ui.init(0n), session), id)))
 
-def Session.draft(+session: J.Json, +text: String) -> J.Json:
-  Session.pack(U.Ui.scratch_set(Session.adopt(U.Ui.init(0n), session), J.Json.get_str(session, "sel", ""), text))
+def Session.draft.at(session: J.Json, id: String, text: String) -> J.Json:
+  Session.pack(U.Ui.scratch_set(Session.adopt(U.Ui.init(0n), session), id, text))
+
+def Session.draft(+session: J.Json, text: String) -> J.Json:
+  Session.draft.at(session, J.Json.get_str(session, "sel", ""), text)
 
 def Session.prepare.k(send: Bool, +session: J.Json, +input: J.Json) -> J.Json:
   match send:
@@ -219,8 +222,15 @@ def Session.prepare.k(send: Bool, +session: J.Json, +input: J.Json) -> J.Json:
 
 # Capture the exact message and recipient at the tap, even when a later
 # keystroke or thread switch overtakes its presentation response.
-def Session.prepare(session: J.Json, input: J.Json, +action: String) -> J.Json:
-  Session.prepare.k(Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")), session, input)
+def Session.prepare.thread(bound: Bool, session: J.Json, input: J.Json) -> J.Json:
+  match bound:
+    case True{}:
+      Session.pack(U.Ui.select.k(Session.adopt(U.Ui.init(0n), session), J.Json.get_str(input, "sel", "")))
+    case False{}: session
+
+def Session.prepare(session: J.Json, +input: J.Json, +action: String) -> J.Json:
+  Session.prepare.k(Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")),
+    Session.prepare.thread(String.eq(action, "thread-permissions"), session, input), input)
 
 def Session.failed.k(send: Bool, +key: String, +input: J.Json) -> List<&2, J.Json>:
   match send:
