@@ -1,5 +1,7 @@
 import Base
 import ../core/chat-pending.bend as CP
+
+import ../core/issue-report.bend as ISSUE
 import ../core/bub-move.bend as HOP
 import ../core/title.bend as TTL
 import ../core/msgs.bend as MSG
@@ -2566,3 +2568,25 @@ def Mob.screen.f(focus: Bool, +u: U.Ui) -> J.Json:
 
 def Mob.screen(+u: U.Ui) -> J.Json:
   Mob.screen.f(True{}, u)
+
+# The bridge calls these without a Ui, even when no hub is connected.
+def issue_report(text: String, os: String, version: String, details: String, diagnostics: String) -> String:
+  ISSUE.Issue.report(text, os, version, details, diagnostics)
+
+def issue_target(saved: String, legacy: Bool) -> String:
+  ISSUE.Issue.target(saved, legacy)
+
+def improvements_preview(text: String, os: String, version: String, details: String, diagnostics: String) -> J.Json:
+  ISSUE.Issue.preview(text, os, version, details, diagnostics)
+
+def improvements_preview_body(body: String) -> J.Json:
+  ISSUE.Issue.preview.body(body)
+
+def improvement_issue_url(body: String) -> String:
+  ISSUE.Issue.url.body(body)
+
+def improvements_template() -> String:
+  ISSUE.Issue.template()
+
+def improvements_prompt(description: String, os: String, version: String, evidence: String, diagnostics: String) -> String:
+  ISSUE.Issue.prompt(description, os, version, evidence, diagnostics)

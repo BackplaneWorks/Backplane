@@ -3,6 +3,7 @@ import ./star-nudge.bend as STAR
 import ./browser-frame.bend as BFRAME
 import ./view-page.bend as VP
 import ./accounts.bend as ACCT
+import ./account-fallback.bend as AFB
 import ./subthreads.bend as ST
 import ./fallback.bend as FB
 import ./title.bend as TTL
@@ -11045,6 +11046,10 @@ def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
     case "acct-add": Acv.add.k(String.is_empty(String.trim(Ui.scratch(u, "@f.accountlabel"))), u)
     case "acct-login": Acv.rpc(u, "login", value)
     case "acct-status": Acv.rpc(u, "status", value)
+    case "acct-clear-limit":
+      +b = ACCT.Accounts.parse(value)
+      Ui.rpc(u, "accounts", [J.KV{"op", J.Str{"clear-limit"}}, J.KV{"provider", J.Str{J.Json.get_str(b, "provider", "")}},
+        J.KV{"profile", J.Str{J.Json.get_str(b, "id", "")}}, J.KV{"epoch", J.Json.nat(J.Json.get_nat(b, "epoch", 0n))}])
     case "acct-disconnect": Acv.rpc(u, "disconnect", value)
     case "acct-delete": Acv.delete(String.eq(Ui.scratch(u, "@acct.delete"), value), u, value)
     case "acct-keep": Act{Ui.scratch_set(u, "@acct.delete", ""), Nil{}}
@@ -11072,15 +11077,29 @@ def Acv.note(+p: J.Json) -> String:
     " · allowance: " ++ J.Json.get_str(J.Json.get_obj(p, "allowance"), "state", "unknown") ++ Acv.windows(J.Json.elems(J.Json.get_obj(J.Json.get_obj(p, "allowance"), "windows"))) ++
     " · checked " ++ Nat.show(J.Json.get_nat(p, "checkedAt", 0n)) ++ "; provider pools may be shared across profiles. " ++ J.Json.get_str(p, "message", "")
 
-def Acv.profile.rows(xs: List<&2, J.Json>, +armed: String, +thread: String) -> List<&2, AgRow>:
+def Acv.limit.arg(p: String, id: String, epoch: Nat) -> String:
+  J.Json.show(J.Json.obj([J.KV{"provider", J.Str{p}}, J.KV{"id", J.Str{id}}, J.KV{"epoch", J.Json.nat(epoch)}]))
+
+def Acv.limit.buttons(limited: Bool, arg: String) -> List<&2, AgBtn>:
+  Bool.pick(List<&2, AgBtn>, limited, [AgBtn{"Clear availability hold", "acct-clear-limit", arg, False{}}], Nil{})
+
+def Acv.limit.legacy(ps: List<&2, String>, +s: M.State, +now: Nat) -> List<&2, AgRow>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t:
+      List.append(&2, AgRow, Bool.pick(List<&2, AgRow>, AFB.Hold.profile.active(s, now, p, "", 0n),
+        [AgRow{"Default " ++ p ++ " account · limited", "A confirmed usage limit holds this account until its reported reset. Clearing it lets waiting requests retry.", Nil{}, Acv.limit.buttons(True{}, Acv.limit.arg(p, "", 0n))}], Nil{}), Acv.limit.legacy(t, s, now))
+
+def Acv.profile.rows(xs: List<&2, J.Json>, +armed: String, +thread: String, +s: M.State, +now: Nat) -> List<&2, AgRow>:
   match xs:
     case Nil{}: Nil{}
     case +p <> t:
       +id = J.Json.get_str(p, "id", "")
-      AgRow{J.Json.get_str(p, "label", "Account"), Acv.note(p) ++ Bool.pick(String, String.eq(id, armed), " Delete this saved account and its local sign-in? Existing threads will need another account selected.", ""), Nil{},
+      +limited = AFB.Hold.profile.active(s, now, J.Json.get_str(p, "provider", ""), id, J.Json.get_nat(p, "epoch", 0n))
+      AgRow{J.Json.get_str(p, "label", "Account") ++ Bool.pick(String, limited, " · limited", ""), Acv.note(p) ++ Bool.pick(String, String.eq(id, armed), " Delete this saved account and its local sign-in? Existing threads will need another account selected.", ""), Nil{},
         List.concat(&2, AgBtn, [[AgBtn{"Connect / Login", "acct-login", id, False{}}, AgBtn{"Status / Refresh", "acct-status", id, False{}}, AgBtn{"Disconnect", "acct-disconnect", id, False{}}],
           Bool.pick(List<&2, AgBtn>, String.is_empty(thread), Nil{}, [AgBtn{"Use in this thread", "acct-select", id, True{}}]),
-          [AgBtn{"Default for new threads", "acct-default", id, False{}}], Acv.delete.buttons(id, armed)])} <> Acv.profile.rows(t, armed, thread)
+          [AgBtn{"Default for new threads", "acct-default", id, False{}}], Acv.limit.buttons(limited, Acv.limit.arg(J.Json.get_str(p, "provider", ""), id, J.Json.get_nat(p, "epoch", 0n))), Acv.delete.buttons(id, armed)])} <> Acv.profile.rows(t, armed, thread, s, now)
 
 def Acv.attempt.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
   match xs:
@@ -11098,7 +11117,8 @@ def Acv.rows(+u: Ui) -> List<&2, AgRow>:
     [AgField{"accountlabel", "Account label (e.g. Personal)", False{}, Ui.scratch(u, "@f.accountlabel"), "acct-add"}],
     [AgBtn{"Codex", "acct-provider", "codex", String.eq(Acv.selected.provider(u), "codex")}, AgBtn{"Claude", "acct-provider", "claude", String.eq(Acv.selected.provider(u), "claude")}, AgBtn{"Add account", "acct-add", "", True{}}]},
     AgRow{"Existing Default accounts", "Preserve current CLI authentication and sessions; select explicitly beside the model.", Nil{}, [AgBtn{"Default Claude for new threads", "acct-legacy-default", "claude", False{}}, AgBtn{"Default Codex for new threads", "acct-legacy-default", "codex", False{}}]}],
-    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u)), Ui.scratch(u, "@acct.delete"), Ui.sel(u)), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
+    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u)), Ui.scratch(u, "@acct.delete"), Ui.sel(u), Ui.state(u), Side.now(u)),
+    Acv.limit.legacy(["claude", "codex"], Ui.state(u), Side.now(u)), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
 
 def Agv.info(+u: Ui) -> J.Json:
   J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "models")), J.Null{}), "agy")
