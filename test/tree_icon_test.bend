@@ -12,7 +12,7 @@ def show(n: D.Node) -> String:
 # Independent pre-change button: every changing/accessibility field is still
 # server supplied. Only the literal SVG child crosses the memo boundary.
 def original(+id: String, +expanded: Bool, +count: Nat) -> D.Node:
-  D.El{"button", "tree-toggle:" ++ id, [D.At{"class", "thread-expander"}, D.At{"type", "button"},
+  D.El{"button", "tree-toggle:" ++ id, [D.At{"class", "thread-expander"}, D.At{"type", "button"}, D.At{"data-count", Nat.show(count)},
     D.At{"aria-expanded", Bool.pick(String, expanded, "true", "false")}, D.At{"aria-label", Bool.pick(String, expanded, "Collapse subthreads", "Expand subthreads") ++ " (" ++ Nat.show(count) ++ ")"},
     D.At{"title", Bool.pick(String, expanded, "Collapse subthreads", "Expand subthreads") ++ " · " ++ Nat.show(count)}, D.At{"data-value", id}, D.On{"click", "thread-tree"}],
     [WI.WIcon.svg(Bool.pick(String, expanded, "chevron-down", "chevron-right"), 14)]}

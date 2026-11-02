@@ -272,8 +272,10 @@ def View.row(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +
 
 # Expanders are separate buttons beside the selection target: keyboard
 # activation never opens a thread accidentally, and every row has one.
+# (data-count: a row with no subthreads shows its chevron only on hover or
+# focus, style.css)
 def View.tree.expander(+id: String, +expanded: Bool, +count: Nat) -> D.Node:
-  D.El{"button", "tree-toggle:" ++ id, [D.At{"class", "thread-expander"}, D.At{"type", "button"},
+  D.El{"button", "tree-toggle:" ++ id, [D.At{"class", "thread-expander"}, D.At{"type", "button"}, D.At{"data-count", Nat.show(count)},
     D.At{"aria-expanded", Bool.pick(String, expanded, "true", "false")}, D.At{"aria-label", Bool.pick(String, expanded, "Collapse subthreads", "Expand subthreads") ++ " (" ++ Nat.show(count) ++ ")"},
     D.At{"title", Bool.pick(String, expanded, "Collapse subthreads", "Expand subthreads") ++ " · " ++ Nat.show(count)}, D.At{"data-value", id}, D.On{"click", "thread-tree"}],
     [WI.WIcon.tree(expanded)]}
