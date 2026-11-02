@@ -2600,7 +2600,7 @@ def View.msg.x.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: S
     case True{}:
       D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
     case False{}:
-      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.images(IM.Img.paths(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
+      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.images(IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
 
 def View.msg.k.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String) -> D.Node:
   View.msg.x.loc(lc, user, id, text, stamp, Nil{})
@@ -2694,14 +2694,19 @@ def View.ctx.attrs(chat: Bool, +st: M.State, +text: String) -> List<&2, D.Attr>:
     case False{}: Nil{}
     case True{}: D.At{"rpl", "1"} <> View.ctx.kv(RTO.Ctx.of(st, text))
 
-def View.entry.s.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
+# (mid: a reply inside a turn, its time shown on hover: core/stamp.bend's
+# Stamp.mid)
+def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool) -> D.Node:
   match e:
     case M.Msg{+id, +th, M.User{}, +text, _}:
       View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
     case M.Msg{+id, +th, _, +text, _}:
-      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "a"}, D.At{"stamp", stamp}], View.ctx.attrs(RTO.Rto.chat(st, th), st, text)), text)
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], View.ctx.attrs(RTO.Rto.chat(st, th), st, text)), text)
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       View.act.loc(lc, String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at}, st, ec)
+
+def View.entry.s.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
+  View.entry.m.loc(lc, e, st, ec, stamp, False{})
 
 # an entry of the thread itself, with the time under a message (core/stamp.bend)
 
@@ -2709,7 +2714,7 @@ def View.entry.s(e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
   View.entry.s.loc(I.En{}, e, st, ec, stamp)
 
 def View.entry.own(+lc: I.Loc, +e: M.Entry, +st: M.State, +ec: U.Ec, +sp: STP.Stamps) -> D.Node:
-  View.entry.s.loc(lc, e, st, ec, STP.Stamp.text.loc(lc, sp, e))
+  View.entry.m.loc(lc, e, st, ec, STP.Stamp.text.loc(lc, sp, e), STP.Stamp.mid(sp, e))
 
 # an entry of this thread (headed by the thread that sent it) or a message
 # this thread sent to another (a link)

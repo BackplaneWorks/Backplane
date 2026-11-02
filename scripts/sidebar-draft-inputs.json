@@ -122,7 +122,7 @@
     "src/core/signal.bend": "f8c4c9d95ea321e42676af8fb4ac159bcf15f88a9b2c51ed25a379c3d28a1e34",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
-    "src/core/stamp.bend": "feda431038cc6399db63a943d1475f54b67efb76e8b02984bb14f0f8bc2a8c64",
+    "src/core/stamp.bend": "b30542d995b56b824a6150985af5fd37d69c4787db87638cb0ce07cb81e1f0f8",
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
@@ -155,7 +155,7 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
-    "src/mobile/screen.bend": "bca8d881cd51cf21c33162881c1be58d7974d68298e0c4fe9e50467659fbef3f",
+    "src/mobile/screen.bend": "7fda958435068475d6f8201940043e209a13ae3fd17fec6ed1dd0f8f4f0a95c4",
     "src/server/thin-actor.bend": "75619b1fe5921a07d55c229fd08c4c77f61958fc5cd39e46b13bd929dd8a0702",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -179,7 +179,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "5dac68bd6d94b3520a256d75da6b6ae754eaf53b427071e7351816546bc6c2d3"
+    "src/web/view.bend": "81117d2df0f1fd08cfd28d4f0bd0b1a1ce0374880cf5bb357abf65f3ce06e515"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
