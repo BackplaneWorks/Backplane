@@ -1,5 +1,6 @@
 // Local structured diagnostics. Effects run on Bend's one IO loop; there
-// are no timers, callbacks, promises, network calls or free-form log inputs.
+// are no timers, promises, network calls or free-form log inputs. Exit and
+// exception-monitor callbacks only save bounded, private process metadata.
 // The hub owns its home lock before start(), and calls tick() once a second.
 
 const diagnostics_limits = Object.freeze({
@@ -47,10 +48,52 @@ function diagnostics_state() { return globalThis.BACKPLANE_DIAGNOSTICS?.state; }
 
 // Export and recovery both reconstruct records through this same closed
 // schema. Unknown fields are never copied, even from an edited file.
+const diagnostics_exception_kinds = new Set(["Error", "RangeError", "TypeError", "SyntaxError", "ReferenceError", "URIError", "EvalError", "none"]);
+function diagnostics_version(version) {
+  return typeof version === "string" ? version.match(/^(\d{1,6}\.\d{1,6}\.\d{1,6})(?:[-+].*)?$/)?.[1] || "unknown" : "unknown";
+}
+function diagnostics_exception(error) {
+  const out = { exception: "Error", stack: [] };
+  try {
+    if (diagnostics_exception_kinds.has(error?.name) && error.name !== "none") out.exception = error.name;
+    // Keep only numeric frame coordinates, in order. Never copy the first
+    // line (the message), function names, file names, URLs or private paths.
+    if (typeof error?.stack === "string") for (const line of error.stack.slice(0, 65536).split("\n").slice(1)) {
+      const m = line.match(/^\s*at .+:(\d{1,10}):(\d{1,10})\)?$/);
+      if (m && Number(m[1]) <= 0xffffffff && Number(m[2]) <= 0xffffffff) out.stack.push([Number(m[1]), Number(m[2])]);
+      if (out.stack.length === 8) break;
+    }
+  } catch (_) { /* An error accessor must not change the exit path. */ }
+  return out;
+}
+function diagnostics_exit_capture(s, error) {
+  if (!s?.ready || !s.enabled) return;
+  s.exitException = diagnostics_exception(error);
+}
+function diagnostics_exit(s, code) {
+  try {
+    if (!s?.ready || !s.enabled || s.exitRecorded) return;
+    s.exitRecorded = true;
+    const r = { at: Math.floor(diagnostics_now() / 1000), event: "exit", count: 1,
+      pid: diagnostics_uint(process.pid) ? process.pid : 0, version: s.appVersion,
+      exitCode: Number.isSafeInteger(code) ? code & 255 : 255,
+      ...(s.exitException || { exception: "none", stack: [] }) };
+    if (Buffer.byteLength(JSON.stringify({ v: 1, seq: Number.MAX_SAFE_INTEGER, ...r })) > diagnostics_limits.record_bytes) r.stack = [];
+    s.pending.set("exit", r);
+    diagnostics_flush_value(s);
+  } catch (_) { /* Best effort only: never set an exit code or throw. */ }
+}
+
 function diagnostics_clean(r) {
   if (!r || r.v !== 1 || !diagnostics_uint(r.seq, Number.MAX_SAFE_INTEGER)
       || !diagnostics_uint(r.at, 0xffffffff) || !diagnostics_uint(r.count) || r.count === 0) return null;
   const out = { v: 1, seq: r.seq, at: r.at, event: r.event };
+  if (r.event === "exit" && diagnostics_uint(r.pid) && diagnostics_uint(r.exitCode, 255)
+      && (r.version === "unknown" || diagnostics_version(r.version) === r.version)
+      && diagnostics_exception_kinds.has(r.exception) && Array.isArray(r.stack) && r.stack.length <= 8
+      && r.stack.every(f => Array.isArray(f) && f.length === 2 && f.every(n => diagnostics_uint(n)))) {
+    return { ...out, count: 1, pid: r.pid, version: r.version, exitCode: r.exitCode, exception: r.exception, stack: r.stack.map(f => [f[0], f[1]]) };
+  }
   if (r.event === "latency" && diagnostics_operations.has(r.name)
       && diagnostics_uint(r.us, Number.MAX_SAFE_INTEGER) && Number.isFinite(r.maxMs) && r.maxMs >= 0 && r.maxMs <= 4294967.295) {
     return { ...out, name: r.name, count: r.count, us: r.us, maxMs: r.maxMs };
@@ -227,13 +270,23 @@ function diagnostics_status_value(s, ok = !!s?.ready && s.error === "") {
 }
 function diagnostics_status() { return JSON.stringify(diagnostics_status_value(diagnostics_state())); }
 
-function diagnostics_start() {
+function diagnostics_start(version) {
   const old = diagnostics_state();
   // One hub, one home. A second start does not lose pending measurements.
   if (old) return diagnostics_status();
   const s = { dir: "", ready: false, enabled: false, error: "", pending: new Map(),
     bytes: 0, allocated: 0, seq: 0, dropped: 0, retry: 0, flushed: diagnostics_mono(), swept: 0 };
-  globalThis.BACKPLANE_DIAGNOSTICS = { state: s, recordPerf: diagnostics_perf };
+  s.appVersion = diagnostics_version(version);
+  globalThis.BACKPLANE_DIAGNOSTICS = { state: s, recordPerf: diagnostics_perf,
+    captureException: error => diagnostics_exit_capture(s, error) };
+  // Monitor does not handle or suppress an uncaught exception. In particular,
+  // do not register uncaughtException or unhandledRejection handlers. The
+  // scheduler also captures its rejected run immediately before its existing
+  // process.exit(1). All writes happen synchronously in the exit listener.
+  try {
+    process.on?.("uncaughtExceptionMonitor", error => diagnostics_exit_capture(s, error));
+    process.once?.("exit", code => diagnostics_exit(s, code));
+  } catch (_) { /* Unsupported monitor APIs do not affect hub startup. */ }
   try {
     const home = typeof process !== "undefined" ? process.env.BACKPLANE_HOME : "";
     if (typeof home !== "string" || !require("path").isAbsolute(home) || home.includes("\0")) throw diagnostics_fault("UNSAFE");
@@ -357,7 +410,7 @@ function diagnostics_export() {
     try {
       // Re-read and re-allowlist persisted bytes. Never attach perf logs,
       // traces, exception messages, configuration or a source filename.
-      events = diagnostics_scan(s).flatMap(f => f.rows).sort((a, b) => a.seq - b.seq)
+      events = diagnostics_scan(s).flatMap(f => f.rows).filter(r => r.event !== "exit").sort((a, b) => a.seq - b.seq)
         .map(({ seq, ...r }) => r.event === "latency" ? { ...r, meanMs: r.us / r.count / 1000 } : r);
     } catch (e) { diagnostics_fail(s, e); ok = false; }
   }

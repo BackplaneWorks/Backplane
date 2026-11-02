@@ -192,3 +192,44 @@ total measured storage, block accounting, retention, torn tails, publication
 sanitization, controls, full-disk failure/backoff, absence of measurement-path
 IO and symlink/legacy-file exclusion. The Bend program checks the actual
 effect registration/marshalling, severity-only logging and clear/off behavior.
+
+## Local hub exit record (#590)
+
+After the hub owns its home lock and starts diagnostics, an `exit` row records
+UTC Unix seconds (`at`), the process ID (`pid`), the numeric application version,
+the actual process exit code, a closed exception kind, and up to eight stack
+frame coordinates. Stack coordinates are `[line, column]` pairs in call order.
+Error messages, function names, source file names, paths, URLs, accounts,
+credentials, prompts and CAD data are never copied into the row. Frames without
+numeric coordinates are omitted. An ordinary exit has `exception: "none"` and
+an empty stack. Unknown or unstamped versions are `"unknown"`.
+
+These rows use the existing eight rotating 64 KiB segments, measured 1 MiB total
+logical/allocated disk cap, 512-byte record limit, private permissions and
+seven-day retention. They add no file or timer. Off disables exit recording;
+clear removes the existing rows. A subsequently exiting enabled hub can write
+a new row. Exit rows remain private and are excluded from the report-export
+endpoint, even when the reporter selects optional diagnostic measurements.
+No exit record is uploaded automatically.
+
+A non-handling `uncaughtExceptionMonitor` listener captures only the sanitized
+exception shape; it neither handles the exception nor changes its exit status.
+The scheduler's existing rejected-run path captures the same shape before its
+existing `process.exit(1)`. A synchronous exit listener makes one bounded,
+best-effort append. Every recording failure is contained. It does not set
+`process.exitCode`, add an exception/rejection handler, retry, delay termination
+with asynchronous work, or change the existing stderr behavior.
+
+This cannot run after SIGKILL, native runtime abort, power loss, or a crash
+before diagnostics initialization. Those need a separate supervisor or OS crash
+facility; no signal handler is installed to change normal signal termination.
+The record reports only an exit code delivered by the runtime, never an inferred
+code for those cases. A full or unavailable disk can also prevent the record.
+
+`node --test test/tools/hub_exit_record_test.cjs` runs actual Node and Bun child
+processes in temporary homes. It checks fatal and explicit exits, the production
+scheduler rejection hook, exact exit status, stack redaction, private storage,
+retention, disabled collection, short writes, ENOSPC and exclusion from report
+export. `test/tools/diagnostics_backend_test.cjs` retains the existing cap,
+rotation and storage fault checks. These tests do not start a hub, contact a
+network service, change credentials or use an installed home.
