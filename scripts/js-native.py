@@ -194,7 +194,8 @@ def byte_loop(kind):
                       ("chr" if kind == "esc" else "raw") + r"\$)" + re.escape(after))
 
 BYTE_ESC, BYTE_STR = byte_loop("esc"), byte_loop("str")
-JSON_BYTES_SOURCE_SHA256 = "60ea726052fded72970f3be2784d09fbff0baa4a98a47ac82d00a4a311dc242d"
+# Lexer-only surrogate repair reviewed; byte counters/callees remain unchanged.
+JSON_BYTES_SOURCE_SHA256 = "039105b99a83af70a1f62042fde42e5a4e89e937983e42dfc22135590b3ac075"
 
 SEC_FINE = re.compile(
     r'function (' + I + r'\$058Sec\$fine\$)\((' + I + r'),(' + I + r')\)\{return (' + I + r'\$058Sec\$fine\$go\$)\(\3,0,\2,""\)\}'
