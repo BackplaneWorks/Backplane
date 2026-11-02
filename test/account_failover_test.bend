@@ -40,7 +40,7 @@ def caps() -> J.Json:
 def limit() -> String:
   "{\"type\":\"turn.failed\",\"error\":{\"code\":\"quota_exceeded\",\"scope\":\"account\",\"message\":\"Usage limit reached\",\"resets_at\":200}}"
 
-def fail(+s: M.State, now: Nat, line: String) -> H.Step:
+def fail(+s: M.State, +now: Nat, line: String) -> H.Step:
   H.Fallback.after(s, caps(), now, H.Hub.agent_line(s, now, "t", line))
 
 def fold(+s: M.State, step: H.Step) -> M.State:
@@ -86,7 +86,7 @@ def pick(x: Maybe<&2, J.Json>) -> String:
 def held(+s: M.State, +p: String, +id: String, reset: Nat) -> M.State:
   M.State.replay([M.SettingSet{F.Hold.key(p, id, 1n), FB.Limit.json(FB.Limit{p, "Fixture limit", reset}, 120n), 120n}], s)
 
-def allheld(+p: String, reset: Nat) -> M.State:
+def allheld(+p: String, +reset: Nat) -> M.State:
   held(held(held(base(p), p, "A", reset), p, "B", reset), p, "C", reset)
 
 def launch(+s: M.State, now: Nat) -> H.Step:

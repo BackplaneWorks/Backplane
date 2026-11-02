@@ -41,11 +41,37 @@ for (const iso of ['2026-10-01T00:00:00Z','2026-10-09T23:59:59Z','2026-10-10T00:
  check('monthly graph dates stay inside UTC month '+iso,monthDays.map(d=>d.date),Array.from({length:date.getUTCDate()},(_,i)=>new Date((first+i*86400)*1000).toISOString().slice(0,10)));
  check('Today graph is exactly the UTC date '+iso,todayDays.map(d=>d.date),[iso.slice(0,10)]);
 }
+// Rolling windows include the current UTC day and never reset on a Monday,
+// month boundary, year boundary, leap day or local daylight-saving transition.
+for (const iso of ['2026-11-02T12:30:00Z','2027-01-01T00:00:00Z','2028-03-01T23:59:59Z','2026-03-08T07:01:00Z']) {
+ const now=BigInt(Date.parse(iso)/1000), midnight=now/86400n*86400n;
+ for (const [period,n] of [['week',7],['2weeks',14],['4weeks',28],['30days',30]]) {
+  const dates=list(lib.days_at(now,period)).map(d=>d.date);
+  check('rolling count '+period+' '+iso,lib.count(now,period),BigInt(n));
+  check('rolling start '+period+' '+iso,lib.start(now,period),midnight-BigInt(n-1)*86400n);
+  check('rolling days '+period+' '+iso,dates,Array.from({length:n},(_,i)=>new Date(Number(midnight-BigInt(n-1-i)*86400n)*1000).toISOString().slice(0,10)));
+ }
+}
+check('rolling token/cost counters include endpoints and exclude outside days',parts(lib.rolling_total('week')),[3n,80n,0n,0n,20n,10n,100000000n,1n,2n]);
+check('rolling ranking combines providers and months once',list(lib.rolling_projects('week')).map(p=>[p.id,p.tokens]),[['steady',100n]]);
+check('top five is selected after summing project days',list(lib.rolling_ranked()).map(p=>p.tokens),[100n,60n,60n,60n,60n]);
+check('reset epoch excludes all rolling counters',lib.rolling_reset(),'');
+check('empty rolling range stays unknown',lib.rolling_empty(),'');
 const flatten=xs=>list(xs).flatMap(n=>[n,...flatten(n.kids)]);
 const text=nodes=>nodes.filter(n=>n.$?.endsWith('.Txt')).map(n=>n.text).join(' ');
 const nodes=flatten(lib.page(u));
 const tabs=nodes.filter(n=>n.tag==='button'&&list(n.attrs).some(a=>a.name==='role'&&a.value==='tab'));
 check('production page has enabled tabs only',tabs.length,3);
+const controls=nodes.filter(n=>n.tag==='button');
+const action=n=>list(n.attrs).find(a=>a.action)?.action;
+check('period controls grouped independently of metrics',controls.filter(n=>action(n)==='usage-period').length,6);
+for (const [period,n] of [['week',7],['2weeks',14],['4weeks',28],['30days',30]]) {
+ const changed=lib.act(u,'usage-period',period);
+ check('period action selects rolling graph '+period,list(lib.days(changed)).length,n);
+ check('rolling project totals follow selection '+period,list(lib.projects(changed)).map(p=>p.tokens),[510n,350n,30n,10n]);
+ check('rolling caption uses actual dates '+period,text(flatten(lib.page(changed))).includes(list(lib.days(changed))[0].date+' – 2026-10-18 (UTC)'),true);
+}
+check('default graph is rolling month',cldays.length,30);
 check('top projects is below daily plot',text(nodes).indexOf('Top 5 projects')>text(nodes).indexOf('Daily recorded tokens'),true);
 check('cost view never relabels token graph as money',text(flatten(lib.page(lib.act(u,'usage-metric','cost')))).includes('Daily recorded tokens'),false);
 console.log(JSON.stringify({pass:true,checks,scope:'production aggregation, UI actions, web nodes; deterministic TurnUsage validation fixture'}));
