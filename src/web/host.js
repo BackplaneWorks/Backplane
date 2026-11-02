@@ -6,6 +6,8 @@
 // is dumb).
 
 import App from "./app.bend";
+import { allowanceDeadline } from "./allowance-deadline.js";
+const retireAllowance = allowanceDeadline();
 import { applyComposerDraft } from "./composer-draft.js";
 import { VoiceMic, hubHere } from "./voice-mic.js";
 import { homeDraftStorage } from "./home-drafts.js";
@@ -15,6 +17,7 @@ import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
 import { installImageActions } from "./image-actions.js";
+import { copyText, copyButton } from "./text-copy.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => Wire.plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
 function bubMoveSync() {
@@ -80,6 +83,10 @@ const subsFeedback = new SubsFeedback(() => later());
 // the session the hub's picture is drawn over: the model menu and the
 // Subagents rows as clicked, ahead of the hub's answer
 const feedbackSession = () => subsFeedback.project(modelFeedback.project(currentSession()));
+function pendingPresentation(node) {
+  const pending = thin?.pendingSends(currentSession().sel);
+  return pending?.length ? App.presentation_pending(node, presentationJson(pending), App.lang(ui)) : node;
+}
 // The Subagents rows shown or hidden in the click's own task: their head and
 // section patched with the overlay at once (a whole render waits for the
 // next frame and draws everything), the page drawn whole after as usual
@@ -303,7 +310,7 @@ function same(a, b) {
 // changed) is not built again.
 const planTrees = new WeakMap();
 function timelinePlan(input) {
-  const tree = Planner.timeline_plan(Wire.json({ ...input, overscan: historyOverscan(input.view) }, planTrees));
+  const tree = Planner.timeline_plan(Wire.json({ ...input, bounded: true, bottomAlign: true, overscan: historyOverscan(input.view) }, planTrees));
   const plan = Wire.plain(tree);
   if (plan && typeof plan === "object") planTrees.set(plan, tree);
   return plan;
@@ -747,6 +754,7 @@ async function refreshFocusedIdentityFor(generation) {
     restoreDraftAttachments(currentSession());
   }
   attachmentIdentityPending = result.state === "offline" || result.state === "superseded";
+  enterImprovements();
   if (attachmentIdentityPending) attachmentIdentityRetry = setTimeout(() => {
     if (socket?.readyState === 1) void refreshFocusedIdentity();
   }, 1500);
@@ -790,9 +798,9 @@ let earlierAsked = false;
 // The host owns DOM lifetimes; Bend owns rows, geometry, range and following.
 const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
-let held = false, away = "";
+let held = false, away = "", holdPending = null;
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
-function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
+function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyOlderDemand = 0;historyFillScope = "";historyFillMore(null, false);historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
 // Rows let go past the cap (thin-host.js's heldTrim): their display keys,
 // by the side they went from, and the height they had, kept in their place
 // as a gap (timeline-history.bend's gaps) so the scrollbar and the reader's
@@ -862,13 +870,30 @@ function anchorElement(tl, id) {
 }
 function holdEnd(tl) { return timelineList(tl)?.atEnd() ?? true; }
 function holdSay(now) {
-  if (focusedNode && !frontendNode || now === away) return;
-  const was = away;away = now;
-  queueMicrotask(() => dispatch(now ? "hold-away" : "hold-end", now || was));
+  if (focusedNode && !frontendNode) return;
+  const thread = now || App.sel(ui), controller = thin, target = thin?.target;
+  // Paging/reconnect can establish the controller's first unread boundary
+  // independently of this DOM latch. A local empty latch alone is not an
+  // acknowledgement that the genuinely newest viewport has been reached.
+  const marked = !!thin?.awayOf?.(thread);
+  if (now === away && (!thin || (now ? marked : !marked))) return;
+  if (holdPending?.thread === thread && holdPending.now === now && holdPending.controller === controller && holdPending.target === target) return;
+  away = now;
+  const pending = holdPending = { thread, now, controller, target };
+  queueMicrotask(() => {
+    if (holdPending !== pending) return;
+    holdPending = null;
+    // Old picture callbacks never consume a newly selected bot/thread, even
+    // when two bot tabs resolve to the same underlying conversation.
+    if (thin !== controller || thin?.target !== target || App.sel(ui) !== thread || controller && !controller.ready) return;
+    dispatch(now ? "hold-away" : "hold-end", thread);
+  });
 }
 function timelineScrolled(list, delta) {
   if (list !== activeTimeline || !delta) return;
+  historyFillMore(null, false);
   historyDirection = delta < 0 ? "older" : "newer";
+  historyOlderDemand = delta < 0 ? 2 : 0;
 }
 function timelineChanged(list) {
   if (list !== activeTimeline || focusedNode && !frontendNode) return;
@@ -888,7 +913,15 @@ function holdMark() {
 }
 function holdBottom() {
   if (thin && (thin.paging || thin.atNewest?.() === false)) { thin.newest();return; }
-  timelineList()?.scrollToEnd();
+  const list = timelineList();
+  // The current source page needs no network reply to retire the old
+  // upward gesture. Otherwise the next history frame pages back again
+  // immediately after the new-output button reaches the bottom.
+  historyDirection = "";historyOlderDemand = 0;historyFillMore(null, false);
+  list?.scrollToEnd();
+  // An already-bottom command need not emit a DOM scroll event. Reconcile
+  // its accepted geometry too, rather than leaving a stale badge clickable.
+  if (list) timelineChanged(list);
 }
 // a <details> that asks for something each time it opens (view.bend's
 // board selector, data-on-open "board-list": its boards read again); not
@@ -1026,6 +1059,7 @@ function render() {
     node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
+  if (frontendNode && remoteReady) page = pendingPresentation(page);
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
@@ -1047,6 +1081,7 @@ function render() {
   const heldFor = !frontendNode && !!transitionNode && transitionFor !== targetKey(presentationTarget(currentSession()));
   htmlData("backplaneHeld", !heldFor ? "false" : heldAt && performance.now() - heldAt >= QUIET_MS ? "quiet" : "true");
   htmlData("backplaneWait", String(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot));
+  retireAllowance(root, remoteReady && !!frontendNode || canonicalBoot && App.synced(ui));
   trace("dom", { seq: App.seq(ui) });
   if (PERF?.trace) requestAnimationFrame(() => trace("paint", { seq: App.seq(ui) }));
   mailRestore(mail);
@@ -1058,8 +1093,12 @@ function render() {
   if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
   activeTimeline = list || null;
   list?.refresh();
-  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null;timelineChanged(list); }
+  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
   else if (scroll) list?.scrollToEnd();
+  // A live bot/mailroom update may change only the floating pill. Unchanged
+  // virtual rows/geometry cause neither a plan nor a scroll callback; still
+  // reconcile the accepted newest picture with the controller's read mark.
+  if (list) timelineChanged(list);
   const main = viewMode === "view-v1" ? document.querySelector("main") : null;
   if (main && main.getAttribute("aria-busy") !== String(!remoteReady)) main.setAttribute("aria-busy", String(!remoteReady));
   bodyWindows.observe(tl2, remoteReady && !!frontendNode);
@@ -1112,16 +1151,15 @@ function render() {
   saveFocusedSoon();
 }
 
-// A page landing redraws only the regions its reply wrote into (core/
-// landing.bend's region over the delta's paths, laws land_*): the timeline,
-// and the top bar when it changed. The page's other regions, the overlay
-// over all of it and the patch of the whole tree were most of a landing's
-// frame. A whole reply, a reply whose delta touched anything outside the
-// regions (the session, a sidebar row), or a full render already due draws
-// the page.
+// Live updates and page landings redraw only the regions their delta wrote
+// into (core/landing.bend, laws land_*). A sidebar activity change must not
+// overlay, project and reconcile the selected timeline. Whole replies and
+// changes outside these regions (including session changes) draw the page.
 const jsonClass = (n, c) => Array.isArray(n?.attrs) && n.attrs.some(a => a?.name === "class" && (" " + a.value + " ").includes(" " + c + " "));
 const nodeAttr = (v, name) => { for (const a of each(v.attrs)) if (is(a, "At") && a.name === name) return a.value; return null; };
 const LAND_REGIONS = [
+  { name: "sidebar", json: n => n?.tag === "aside" && n.key === "sidebar",
+    node: v => v.tag === "aside" && v.key === "sidebar", el: () => document.querySelector("aside.sidebar") },
   { name: "timeline", json: n => Array.isArray(n?.attrs) && n.attrs.some(a => a?.name === "id" && a.value === "timeline"),
     node: v => nodeAttr(v, "id") === "timeline", el: () => document.getElementById("timeline") },
   { name: "topbar", json: n => n?.tag === "header" && jsonClass(n, "topbar"),
@@ -1146,7 +1184,9 @@ function landPathIn(shown, region) {
 }
 // "page", or the names of the regions to redraw, space-separated
 function historyRegion(detail, projection) {
-  if (!detail.page || !["older", "newer"].includes(projection) || !Array.isArray(detail.changed) || searchJump || jump) return "page";
+  const landing = detail.page && ["older", "newer"].includes(projection);
+  const update = !detail.page && projection === "update" && !detail.historyReset && !detail.position;
+  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || jump || scroll) return "page";
   const lines = [];
   for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
   if (!lines.length) return "page";
@@ -1206,6 +1246,7 @@ function renderRegions() {
   for (const [r, el, hub] of parts) {
     const a0 = RR ? pnow() : 0;
     let v = r.name === "timeline" ? overlayRows(historyGaps(hub), session) : App.presentation_overlay(hub, session);
+    if (r.name === "timeline") v = pendingPresentation(v);
     const a1 = RR ? pnow() : 0;
     v = thinContinuations.project(v, node => node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), true);
     v = bodyWindows.project(v);
@@ -1213,16 +1254,21 @@ function renderRegions() {
     patch(el, v);
     if (RR) { RR.t("reg." + r.name + ".overlay", a1 - a0);RR.t("reg." + r.name + ".project", a2 - a1);RR.t("reg." + r.name + ".patch", pnow() - a2); }
   }
-  const tl = document.getElementById("timeline"), list = timelineList(tl);
-  if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
-  activeTimeline = list || null;
-  list?.refresh();
-  bodyWindows.observe(tl, remoteReady && !!frontendNode);
-  if (historyStatus) historyPageState(historyStatus);
-  searchLight(tl);
-  earlierAsked = false;
-  laterAsked = false;
-  if (thin?.ready) historyCheckSoon();
+  if (names.has("sidebar")) bubMoveSync();
+  if (names.has("timeline")) {
+    const tl = document.getElementById("timeline"), list = timelineList(tl);
+    if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
+    activeTimeline = list || null;
+    list?.refresh();
+    if (list) timelineChanged(list);
+    bodyWindows.observe(tl, remoteReady && !!frontendNode);
+    if (historyStatus) historyPageState(historyStatus);
+    searchLight(tl);
+    earlierAsked = false;
+    laterAsked = false;
+    if (thin?.ready) historyCheckSoon();
+  }
+  retireAllowance(root, remoteReady);
   saveFocusedSoon();
   if (RR) { RR.n("render.regions");RR.t("render.regions", pnow() - t0); }
 }
@@ -1275,16 +1321,7 @@ function laterLive() {
 }
 
 function copy(text) {
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text);
-    return;
-  }
-  const t = document.createElement("textarea");
-  t.value = text;
-  document.body.appendChild(t);
-  t.select();
-  document.execCommand("copy");
-  t.remove();
+  void copyText(text).catch(error => showViewStatus(error.message));
 }
 
 function run(cmds) {
@@ -1551,6 +1588,9 @@ function dispatch(action, value, timer) {
       localPresentation(action, value, thinSession);
       return true;
     }
+    // An explicit destination does not depend on the previous picture
+    // succeeding. ThinHost validates the live greeting and opens the bot.
+    if (action === "bot" && thin?.greeted && !thin.ready && socket?.readyState === 1) return thin.request(action, value);
     // (a press while a thread's view is on its way waits for it: thin-host.js)
     if (thin?.ready || thin?.opening) {
       if (action === "earlier" || action === "view-page") return thin.page();
@@ -1725,13 +1765,45 @@ function uploadScope() {
     viewId: controller?.client.links.get(controller.hub)?.viewId,
     identity: cacheIdentity(document.cookie), project: document.querySelector("main.thread-view[data-project]")?.dataset.project || "" };
 }
+async function readDiagnostics() {
+  const response = await fetch('/debug/diagnostics.json', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw Error('Hub diagnostics are unavailable. Uncheck diagnostics to continue.');
+  const text = await response.text();
+  if (new TextEncoder().encode(text).length > 1048576) throw Error('Hub diagnostics exceeded the export limit.');
+  return JSON.parse(text);
+}
+let improvementsVersion = "unknown";
 const improvements = installImprovements({
   rpc: improvementsRpc,
+  reportBody: (...args) => App.issue_report(...args),
+  reportTarget: (saved, legacy) => App.issue_target(saved, legacy),
+  reportPrompt: (...args) => App.improvements_prompt(...args),
+  reportTemplate: (...args) => App.improvements_template(...args),
+  previewBody: body => Wire.plain(App.improvements_preview_body(body)),
+  appVersion: async () => window.backplaneDesktop?.version ? (await window.backplaneDesktop.version()).service : improvementsVersion,
+  diagnostics: {
+    enabled: () => connectionLog.enabled(),
+    setEnabled: async on => {
+      const results = await Promise.allSettled([Promise.resolve().then(() => connectionLog.setEnabled(on)),
+        window.backplaneDesktop?.diagnostics ? window.backplaneDesktop.diagnostics(on ? "on" : "off") : Promise.resolve()]);
+      if (results.some(r => r.status === "rejected")) throw Error("Collection stopped for this page where possible; could not persist every diagnostics preference. Retry the control before restarting.");
+    },
+    clear: async () => { connectionLog.clear();if (window.backplaneDesktop?.diagnostics) await window.backplaneDesktop.diagnostics("clear"); },
+    hubStatus: async () => (await improvementsRpc.request("diagnostics.status", {})),
+    controlHub: async action => { const status = await improvementsRpc.request("diagnostics.control", { action });if (!status.ok) throw Error("Could not save hub diagnostics preference. " + status.error);return status; },
+    snapshot: async () => {
+      let hub = null, desktop = [];
+      if (remoteReady) hub = await readDiagnostics();
+      if (window.backplaneDesktop?.diagnostics) desktop = (await window.backplaneDesktop.diagnostics("read")).records || [];
+      return { connections: [...desktop, ...connectionLog.snapshot()], hub };
+    },
+  },
   ready: () => remoteReady && !!attachmentIdentity && !attachmentIdentityPending,
   identity: () => attachmentIdentity,
   context: async () => {
     const origin = improvementOrigin({ session: currentSession(), doc: document });
     const result = await improvementsRpc.request("improvements.context", { sourceThread: origin.thread });
+    improvementsVersion = result.appVersion || "unknown";
     return improvementContext(origin, result);
   },
   beforeCapture: async () => {
@@ -1741,6 +1813,26 @@ const improvements = installImprovements({
   overlayChanged: () => desktopBrowser.sync(),
   select: async thread => { if (!dispatch("select", thread)) throw Error("The request was sent. Open the new thread in the sidebar."); },
 });
+// Native handoff keeps user-authored text out of request/query logs. Consume
+// once and remove it before any navigation, capture or report dispatch.
+let pendingImprovementEntry = null;
+function enterImprovements() {
+  if (!pendingImprovementEntry || !remoteReady || !attachmentIdentity || attachmentIdentityPending) return;
+  const entry = pendingImprovementEntry;pendingImprovementEntry = null;void improvements.open(entry.target, entry.seed);
+}
+const issueFragment = location.hash.startsWith('#improvements-issue=') ? location.hash.slice(20) : null;
+const internalImprovements = location.hash === '#improvements-internal' || new URLSearchParams(location.search).get('improvements') === 'internal';
+if (issueFragment !== null || internalImprovements) {
+  const clean = new URL(location.href);clean.hash = '';clean.searchParams.delete('improvements');history.replaceState(history.state, '', clean.href);
+  let seed;
+  if (issueFragment !== null) try {
+    if (issueFragment.length <= 360000) { const value = JSON.parse(decodeURIComponent(issueFragment));if (typeof value.description === 'string' && value.description.length <= 120000) seed = value.description; }
+  } catch {}
+  const wanted = internalImprovements ? 'internal' : 'issue';
+  // Trigger after host initialization. This creates no thread or model job.
+  pendingImprovementEntry = { target: wanted, seed };
+  queueMicrotask(enterImprovements);
+}
 async function uploadFiles(action, files, scope = uploadScope()) {
   if (!remoteReady && viewMode !== "compatibility" || viewMode === "compatibility" && socket?.readyState !== 1) {
     offlineAttach = true;
@@ -1771,12 +1863,17 @@ async function upload(action, file, scope = uploadScope(), previous = "") {
   try {
     const r = await fetch(`/attach?${q}`, { method: "POST", body: file, credentials: "same-origin" });
     answer = await r.text();
-    JSON.parse(answer);
   } catch {
-    answer = JSON.stringify({ text: "the upload did not reach the hub", thread, upload: true });
+    answer = JSON.stringify({ uiError: "upload.network", thread, upload: true });
   }
   if (!current()) return;
-  let result;try { result = JSON.parse(answer); } catch { return; }
+  // A primitive or malformed body cannot complete an upload. Keep the
+  // failure tied to its original actor so the pending indicator clears.
+  let result;try { result = JSON.parse(answer); } catch { result = null; }
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    result = { uiError: "upload.failed", thread, upload: true };
+    answer = JSON.stringify(result);
+  }
   if (viewMode !== "compatibility" && result.attached && result.thread === thread) {
     try {
       if (!attachmentIdentity || attachmentIdentity !== scope.identity) throw Error("Attachment identity unverified");
@@ -1967,6 +2064,13 @@ for (const ev of EVENTS) {
     const el = e.target.closest?.(`[data-on-${ev}]`);
     if (!el) return;
     const action = el.getAttribute(`data-on-${ev}`);
+    if (ev === "click" && action === "copy") {
+      e.preventDefault();
+      // Copy payloads are literal: a shell comment starting with # is text,
+      // never valueOf's field-reference syntax. No hub action is needed.
+      void copyButton(el, el.getAttribute("data-value") ?? "");
+      return;
+    }
     // a row's menu opens where the pointer was (view.bend's View.rmenu
     // reads these)
     // a file link (dom.bend's Dom.file) goes to the hub, not to its href
@@ -2296,7 +2400,7 @@ document.addEventListener("click", (e) => {
 });
 // The hub issues page cursors. The virtual list accumulates their data in
 // Bend; changing pages never removes the reader's already loaded rows.
-let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null;
+let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null, historyFillScope = "", historyOlderDemand = 0;
 // How far from the edge of the rows drawn the next page is asked for: two
 // screens, or the distance the reader covers at their speed (the last
 // quarter second's scrolling) in twice the time a page has been taking,
@@ -2325,12 +2429,53 @@ function historyRunway(tl) {
 // A reader faster than three screens of runway gets two older pages on
 // their way at once (thin-host.js's ahead {two}): one page at a time cannot
 // keep up with a fast wheel, however early it is asked for.
+function historyFillOwner() {
+  const link = thin?.client.links.get(thin.hub);
+  if (!thin?.ready || !link?.viewId) return "";
+  return JSON.stringify([readingIdentity(), thin.hub, link.greeting.generation, link.greeting.epoch, link.viewId, thin.selectionRevision, thin.target, thin.session.sel, thin.historyEpoch]);
+}
+function historyHasMessage(tl) {
+  const box = tl.getBoundingClientRect();
+  for (const row of tl.querySelectorAll('.msg[data-id]:not(.live):not(.working):not(.sending)')) {
+    const rect = row.getBoundingClientRect();
+    if (!row.dataset.id.startsWith("@live:") && row.textContent.trim() && rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom) return true;
+  }
+  return false;
+}
+// A short tool-only page may have no native scroll range. Its explicit
+// control is another navigation gesture; rendering/live updates never grant
+// an older-page demand or walk the conversation in the background.
+function historyFillMore(tl, shown) {
+  let button = document.getElementById("history-fill-more");
+  if (!shown) { button?.remove();return; }
+  if (!button) {
+    const owner = historyFillScope;
+    button = document.createElement("button");button.id = "history-fill-more";button.type = "button";
+    button.textContent = "Load earlier messages";button.setAttribute("aria-controls", "timeline");
+    button.onclick = () => {
+      if (owner !== historyFillOwner() || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("older")) return;
+      historyDirection = "older";historyOlderDemand = 2;earlierAsked = false;historyCheckSoon();
+    };
+    document.body.appendChild(button);
+  }
+  const box = tl.getBoundingClientRect();
+  button.style.cssText = "position:fixed;z-index:12;max-width:calc(100vw - 32px);background:var(--panel);color:var(--text);border:1px solid var(--line);padding:6px 10px;min-height:36px";
+  button.style.top = Math.max(0, box.top + 8) + "px";button.style.left = Math.max(8, box.left + 8) + "px";
+}
 function earlierCheck(tl) {
-  if (historyDirection !== "older" || !tl || tl.id !== "timeline" || !thin?.ready || thin.pageError) return;
-  const gap = historyGap("older"), runway = historyRunway(tl), two = runway > tl.clientHeight * 3;
+  if (!tl || tl.id !== "timeline" || !thin?.ready || thin.pageError) { historyFillMore(tl, false);return; }
+  const owner = historyFillOwner();
+  if (!owner) { historyFillMore(tl, false);return; }
+  if (!historyFillScope) historyFillScope = owner;
+  else if (owner !== historyFillScope) { historyFillScope = owner;historyOlderDemand = 0;historyFillMore(tl, false);return; }
+  historyFillMore(tl, thin.hasAhead("older") && (tl.scrollHeight <= tl.clientHeight + 10 || !historyHasMessage(tl)));
+  if (historyDirection !== "older" || historyOlderDemand <= 0) return;
+  const gap = historyGap("older"), runway = historyRunway(tl), two = historyOlderDemand > 1 && runway > tl.clientHeight * 3;
   if (thin.paging ? !two || !!thin.pagingNext : earlierAsked) return;
   if (!thin.hasAhead("older") || tl.scrollTop - gap > runway * (gap ? 2 : 1)) return;
-  earlierAsked = thin.ahead("older", { two }) || earlierAsked;
+  const asked = thin.ahead("older", { two });
+  if (asked) historyOlderDemand = Math.max(0, historyOlderDemand - (two ? 2 : 1));
+  earlierAsked = asked || earlierAsked;
 }
 function laterCheck(tl) {
   if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("newer")) return;
@@ -2368,7 +2513,9 @@ document.addEventListener("scroll", e => {
 document.addEventListener("wheel", e => {
   if (!e.isTrusted || e.ctrlKey || !e.target.closest?.("#timeline")) return;
   const tl = document.getElementById("timeline");
+  if (e.deltaY) { historyFillMore(tl, false); }
   historyDirection = e.deltaY < 0 ? "older" : e.deltaY > 0 ? "newer" : historyDirection;
+  if (e.deltaY) historyOlderDemand = e.deltaY < 0 ? 2 : 0;
   historyMoved(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? tl?.clientHeight || 800 : 1));
   if (e.deltaY < 0) earlierCheck(tl);
   else if (e.deltaY > 0) laterCheck(tl);
@@ -2379,10 +2526,10 @@ for (const event of ["touchstart", "touchmove", "keydown"]) document.addEventLis
   if (event === "touchstart") historyTouchY = e.touches[0]?.clientY ?? null;
   else if (event === "touchmove") {
     const y = e.touches[0]?.clientY;
-    if (typeof y === "number" && typeof historyTouchY === "number") { historyDirection = y > historyTouchY ? "older" : y < historyTouchY ? "newer" : historyDirection;historyMoved(y - historyTouchY); }
+    if (typeof y === "number" && typeof historyTouchY === "number") { if (y !== historyTouchY) { historyFillMore(null, false); }historyDirection = y > historyTouchY ? "older" : y < historyTouchY ? "newer" : historyDirection;if (y !== historyTouchY) historyOlderDemand = y > historyTouchY ? 2 : 0;historyMoved(y - historyTouchY); }
     historyTouchY = y;
-  } else if (["PageUp", "Home", "ArrowUp"].includes(e.key)) historyDirection = "older";
-  else if (["PageDown", "End", "ArrowDown", " "].includes(e.key)) historyDirection = "newer";
+  } else if (["PageUp", "Home", "ArrowUp"].includes(e.key)) { historyFillMore(null, false);historyDirection = "older";historyOlderDemand = 2; }
+  else if (["PageDown", "End", "ArrowDown", " "].includes(e.key)) { historyFillMore(null, false);historyDirection = "newer";historyOlderDemand = 0; }
   historyCheckSoon();
 }, { capture: true, passive: true });
 
@@ -2599,6 +2746,17 @@ const choosePresentation = (session, action, value) => {
   const chosen = Wire.plain(App.presentation_choice(action, presentationJson(session), value));
   return action === "draft" ? preservePresentationRoute(session, chosen) : chosen;
 };
+// Until the action replies, keep its captured text in the saved draft too.
+// The visible field is already empty, but a reload before the acknowledgement
+// must recover that text. Subsequent typing is saved alongside it.
+function persistDraft(thread, text) {
+  const pending = thin?.pendingSends(thread) || [];
+  const saved = [...pending.map(p => p.text), text].filter(Boolean).join("\n\n");
+  try {
+    if (saved) localStorage.setItem(DRAFT + thread, saved);
+    else localStorage.removeItem(DRAFT + thread);
+  } catch {}
+}
 function localPresentation(action, value, session) {
   if (action === "select") {
     ui = App.presentation_select(ui, value);
@@ -2618,10 +2776,7 @@ function localPresentation(action, value, session) {
     // typing lag, on phones most. A key that empties or fills the draft, or
     // types in a word that starts a popup (/ $ @ > % #), redraws at once.
     if (frontendNode) paintDraft(session.sel, value);
-    try {
-      if (value) localStorage.setItem(DRAFT + session.sel, value);
-      else localStorage.removeItem(DRAFT + session.sel);
-    } catch {}
+    persistDraft(session.sel, value);
   }
 }
 // A phone's timeline never sits scrolled sideways: style.css hides its
@@ -2682,6 +2837,7 @@ function paintComposer() {
     if (!el) { later();return; }
     const t0 = RR ? pnow() : 0;
     patch(el, App.presentation_overlay(hub, presentationJson(feedbackSession())));
+    retireAllowance(root, remoteReady);
     attachmentPreviews();
     composerGeometry();
     if (RR) { RR.n("render.part");RR.t("render.part", pnow() - t0); }
@@ -2704,6 +2860,7 @@ function presentationCommand(command) {
 // Neither this path nor its error/retry state touches canonical history.
 function showViewStatus(message) {
   clearTimeout(connectingTimer);connectingTimer = 0;
+  document.getElementById("view-retry")?.remove();
   let box = document.getElementById("view-connection");
   if (!box) {
     box = document.createElement("aside");box.id = "view-connection";box.setAttribute("role", "status");
@@ -2716,6 +2873,20 @@ function showViewStatus(message) {
   document.getElementById("view-connection-text").textContent = message;
   // The page shrinks above the bar instead of sliding under it.
   document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
+}
+
+function showViewLimit(reason) {
+  showViewStatus((reason === "LIMIT" ? "This conversation's view is too large. " : "This conversation's view could not be displayed. ") + "Your draft is kept; other threads remain available.");
+  document.getElementById("view-retry")?.remove();
+  const controller = thin, revision = thin?.selectionRevision, target = thin?.target;
+  if (!controller?.greeted || !target) return;
+  const button = document.createElement("button");button.id = "view-retry";button.type = "button";
+  button.textContent = "Retry view";
+  button.onclick = () => {
+    if (thin !== controller || thin?.selectionRevision !== revision || thin?.target !== target) return;
+    button.remove();thin.select(target);
+  };
+  document.getElementById("view-connection").append(button);
 }
 
 // A view the hub refused (thin-host.js's refuse): a search result or a
@@ -2845,7 +3016,8 @@ function outboxReply(envelope) {
 }
 function outboxRefused(o, error) {
   const session = currentSession();
-  if (thin && session.sel === o.thread && !session.drafts?.[o.thread]) thin.request("draft", o.body);
+  if (thin?.ordinary.get(o.id)?.preview) { /* The captured send restores alongside newer typing in ThinHost. */ }
+  else if (thin && session.sel === o.thread && !session.drafts?.[o.thread]) thin.request("draft", o.body);
   else try { if (!localStorage.getItem(DRAFT + o.thread)) localStorage.setItem(DRAFT + o.thread, o.body); } catch {}
   showViewStatus(`A message was not sent (${String(error || "refused")}); its text is back in its draft.`);
 }
@@ -3098,21 +3270,15 @@ async function startThin(again = false, reason = "initial") {
     if (!frontendNode) void restoreFocused(true);
     later();thinReconnect();
   };
-  // A view that failed (refused, timed out, too big) is asked for again on a
-  // fresh connection: the first at once, then a growing delay while failures
-  // repeat (viewFailures, forgotten after VIEW_CALM_MS without one), so a hub
-  // that keeps refusing is not asked in a loop. Nothing to press; the corner
-  // note says so only for a view that keeps failing.
+  // A failed presentation does not invalidate its transport. Preserve the
+  // socket/greeting/heartbeat so another thread can open immediately. Real
+  // disconnects, missing greetings and heartbeat failures have their own
+  // transport handlers below; never turn a renderer refusal into one.
   const viewRecover = reason => {
     if (!current()) return;
-    const t = Date.now();
-    if (t - viewFailedAt > VIEW_CALM_MS) viewFailures = 0;
-    viewFailedAt = t;viewFailures++;
-    if (viewFailures > 1) thinBackoff.retryAfter(Math.min(30000, 1000 * 2 ** Math.min(viewFailures - 2, 5)));
-    if (viewFailures > 2) downNote = reason === "LIMIT" ? "This view is larger than the hub sends; trying again…" : "Reconnecting…";
-    disconnect("view-error");
-    try { s.close(); } catch {}
+    downNote = "";showViewLimit(reason);
   };
+
   try {
     const saved = localStorage.getItem("backplane-view-request-id");
     const next = saved === null ? 2 ** 47 : /^(0|[1-9][0-9]*)$/.test(saved) ? Number(saved) : NaN;
@@ -3152,6 +3318,8 @@ async function startThin(again = false, reason = "initial") {
         return saved?.held;
       },
       local: localPresentation,
+      previewSend: text => App.presentation_send_preview(text),
+      sendFeedback: (started, thread, text) => { persistDraft(thread, text);if (started) scroll = true;later(); },
       composing: thread => composerComposing && document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread") === thread,
       modelMenuReady: () => {
         // A picker whose cursor moved (data-draft) opens and shuts through
@@ -3177,7 +3345,7 @@ async function startThin(again = false, reason = "initial") {
         if (selectedChanged) deskCheck();
         // (a page's reply: its view decides what is drawn, historyRegion)
         // (a reply that changed nothing on show draws nothing: thin-host's same)
-        if (!detail?.inputOnly && !detail?.paged && !detail?.unchanged) later();
+        if (!detail?.inputOnly && !detail?.paged && !detail?.unchanged && !detail?.presenting) later();
         if (RR) RR.t("land.session", pnow() - sc0);
       },
       ack: (session, reply) => preservePresentationRoute(session, Wire.plain(App.presentation_reply(presentationJson(session), presentationJson(reply)))),
@@ -3191,6 +3359,7 @@ async function startThin(again = false, reason = "initial") {
       terminalLifetime: () => document.querySelector('.floating-terminal .term-pane')?.getAttribute('data-terminal-incarnation') || '',
       command: command => presentationCommand(command),
       anchor: () => { const tl = document.getElementById("timeline"), a = tl && anchorOf(tl);return { id: a?.id || "", offset: Math.max(0, Math.round(a ? tl.getBoundingClientRect().top - a.off : 0)) }; },
+      readingMark: () => holdMark(),
       pagePosition: () => {
         const list = timelineList();
         return list ? { position: { ...list.position(), atEnd: thin.atNewest() && list.atEnd() }, adjacent: "" } : null;
@@ -3235,8 +3404,12 @@ async function startThin(again = false, reason = "initial") {
         if (RR) RR.t("land.project." + projection, pnow() - p0);
         historyNode = node;
         // (timeline-history.bend's project keeps no row from before a reset)
-        if (projection === "reset" || projection === "newest") { historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
-        else historyBack(detail.window?.ids);
+        if (projection === "reset" || projection === "newest") {
+          // An older-reading gesture cannot page us back immediately after
+          // Send or the new-output button has presented the newest replies.
+          historyDirection = "";historyOlderDemand = 0;historyFillMore(null, false);
+          historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.();
+        } else historyBack(detail.window?.ids);
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
@@ -3273,15 +3446,16 @@ async function startThin(again = false, reason = "initial") {
           diagnostic.note("view-error", { cause: state.reason === "LIMIT" ? "view-limit" : /timed out/.test(state.reason || "") ? "view-timeout" : "view-refused" });
           trace("thin-error", { reason: state.reason });
           // Never a page to unfreeze by hand: the view is asked for again on
-          // a fresh connection by itself (viewRecover), the last picture and
-          // the viewers kept meanwhile.
+          // a fresh view on the same connection (viewRecover), with the last
+          // validated picture and drafts kept meanwhile.
           viewRecover(state.reason);
         }
-        else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy(); }
+        else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy();enterImprovements(); }
         else if (remoteReady) showViewStatus("");
         if (remoteReady && viewNote) showViewStatus(viewNote);
-        // a page's reply on a page already shown: its view decides what is drawn
-        if (!(state.paged && !becameReady && remoteReady && state.phase === "presented")) later();
+        // An accepted picture's view callback owns its full or region paint.
+        // Session/state notifications must not promote it to a full redraw.
+        if (!(state.painted && !becameReady && remoteReady && state.phase === "presented")) later();
       },
     }, ThinViews, next);
   } catch { disconnect("client-setup");try { s.close(); } catch {}return; }
@@ -3310,8 +3484,9 @@ async function startThin(again = false, reason = "initial") {
       disconnect("frame-limit");try { s.close(); } catch {}return;
     }
     try {
-      const d0 = RR ? pnow() : 0;
+      const d0 = pnow();
       const j = Wire.cbor(bytes, KEYS, WORDS), envelope = Wire.plain(j);
+      connectionLog.measure("frame.decode", pnow() - d0);
       RR?.got?.(envelope, bytes.byteLength, pnow() - d0);
       if (envelope.t === "hb") { s.hb = true;diagnostic.heartbeat();return; }
       if (envelope.t === "notify") { notify(envelope);return; }

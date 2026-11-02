@@ -14,12 +14,15 @@ import json
 import os
 from pathlib import Path
 import secrets
+import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
 import urllib.request
+
+from telemetry_usage_contract import expected_counts
 
 from flask import Flask
 from werkzeug.serving import WSGIRequestHandler, make_server
@@ -119,7 +122,9 @@ def main():
                 return db.execute("SELECT install_id, day, counts FROM usage ORDER BY install_id, day").fetchall()
 
         def expected(n):
-            return dict(zip(telemetry.USAGE_COUNTS, [n, n, n, n, n, 100*n, 20*n, 30*n, 40*n, n]))
+            # Receiver USAGE_COUNTS deliberately remains the legacy required ten;
+            # the client fixture always includes both optional board counters.
+            return expected_counts(n)
 
         def counts(n, ident):
             rows = [row for row in usage_rows() if row[0] == ident and row[1] == day]
@@ -135,6 +140,29 @@ def main():
                 check(response.status == 202, "signed older snapshot accepted idempotently")
 
         try:
+            before = len(requests)
+            for age in (1, 4, 8):
+                for share, consent in (("on", ""), ("off", "0")):
+                    old = root / f"old-{age}-{share}"
+                    (old / "telemetry").mkdir(parents=True)
+                    (old / "telemetry/state.json").write_text(json.dumps({"id": "", "ver": "0.11.0", "today": day, "share": False, "reset": "0", "queue": [
+                        {"e": event, "day": day, "share": False, "id": "", "ver": "0.11.0", "prev": "", "ch": "dev", "os": "linux", "arch": "x64", "pow": "", "made": now-age*86400, "held": True}
+                        for event in ("install", "update", "active")], "next": 0, "busy": 0, "seen": True}))
+                    (old / "telemetry/usage.json").write_text("[]")
+                    run(old, share=share, consent=consent)
+                    check(len(requests) == before and not (old / "telemetry/state.json").exists() and not (old / "telemetry/usage.json").exists(), f"{age}-day old pending/off queue never sends any category and is removed")
+            revoked = root / "revoked-before-registration"
+            run(revoked, permit="no")
+            check(len(requests) == before and not (revoked / "telemetry/state.json").exists(), "revocation at post-PoW authorization prevents install HTTP and persistence")
+            offline = root / "offline-choice"
+            with socket.socket() as reserved:
+                reserved.bind(("127.0.0.1", 0))
+                unused_port = reserved.getsockname()[1]
+            run(offline, n=0, overrides={"BACKPLANE_TELEMETRY_URL": f"http://127.0.0.1:{unused_port}/api/v1/events"})
+            check(len(requests) == before and state(offline)["next"] >= now+3600, "recorded offline choice queues registration with bounded retry")
+            retry_now(offline)
+            run(offline, n=0)
+            check(len(requests) > before, "same-home restart retries recorded offline choice without another popup")
             home = root / "main"
             run(home)
             ident = state(home)["id"]
@@ -182,14 +210,20 @@ def main():
             rotated = state(home)["id"]
             check(rotated != ident, "reset rotates install id")
             counts(1, rotated)
+            before = len(requests)
             run(home, 1, share="off", reset="1")
-            check(state(home)["id"] == "" and not (home / "telemetry/usage.json").exists(), "opt-out clears id and usage acknowledgements")
+            check(len(requests) == before, "opt-out sends no install, update, active or usage request")
+            check(not (home / "telemetry/state.json").exists() and not (home / "telemetry/usage.json").exists(), "opt-out removes private queue, id and usage acknowledgements")
             before = len(requests)
             run(home, 10, share="off", reset="1")
             check(len(requests) == before, "opt-out sends no aggregate activity")
-            before = len(usage_rows())
-            run(root / "legacy", consent="")
-            check(len(usage_rows()) == before, "legacy consent sends no expanded counters")
+            before = len(requests)
+            pending = root / "legacy"
+            run(pending, consent="")
+            check(len(requests) == before and not pending.exists(), "unanswered expanded disclosure sends NOTHING and creates no state")
+            off_home = root / "fresh-off"
+            run(off_home, share="off", consent="0")
+            check(len(requests) == before and not off_home.exists(), "fresh opted-out install sends NOTHING and creates no state")
             for name, overrides in [("dnt", {"DO_NOT_TRACK": "1"}), ("ci", {"CI": "1"}),
                 ("sandbox", {"BACKPLANE_SANDBOX": "1"}), ("off", {"BACKPLANE_TELEMETRY": "off"})]:
                 closed = root / name

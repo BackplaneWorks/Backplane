@@ -59,6 +59,15 @@ def Accounts.ready(+profile: J.Json, +provider: String, +epoch: Nat) -> Bool:
   Bool.and(String.eq(J.Json.get_str(profile, "provider", ""), provider),
     Bool.and(String.eq(J.Json.get_str(profile, "state", ""), "connected"), Nat.is_eq(J.Json.get_nat(profile, "epoch", 0n), epoch)))
 
+def Accounts.unavailable(+profile: J.Json, +epoch: Nat) -> String:
+  +state = J.Json.get_str(profile, "state", "")
+  Bool.pick(String, String.is_empty(J.Json.get_str(profile, "id", "")), "This saved account is no longer available. Choose another account.",
+    Bool.pick(String, String.eq(state, "unchecked"), "This saved sign-in has not been checked yet. Reopen the account menu to refresh it.",
+      Bool.pick(String, String.eq(state, "connecting"), "Finish this account's sign-in in Settings → Agents before selecting it.",
+        Bool.pick(String, Bool.not(String.eq(state, "connected")), "This account is not connected. Use Status / Refresh or Connect / Login in Settings → Agents.",
+          Bool.pick(String, Bool.not(Nat.is_eq(J.Json.get_nat(profile, "epoch", 0n), epoch)), "This account's sign-in changed. Reopen the account menu and select it again.",
+            "The thread or account selection changed. Reopen the account menu and try again.")))))
+
 def Accounts.allowed.k(legacy: Bool, +s: M.State, +th: String, +provider: String) -> Bool:
   match legacy:
     case True{}: True{}
@@ -95,9 +104,21 @@ def Accounts.select(+s: M.State, +now: Nat, +th: String, +provider: String, +id:
 def Accounts.public(+snapshot: J.Json) -> String:
   J.Json.show(J.Json.obj([J.KV{"version", J.Json.nat(1n)}, J.KV{"revision", J.Json.nat(J.Json.get_nat(snapshot, "revision", 0n))}, J.KV{"profiles", J.Json.get_obj(snapshot, "profiles")}, J.KV{"error", J.Str{J.Json.get_str(snapshot, "error", "")}}]))
 
+def Accounts.default.removed(+s: M.State, +now: Nat, +provider: String, +snapshot: J.Json) -> List<&2, M.Change>:
+  +key = "account.default." ++ provider
+  +id = J.Json.get_str(Accounts.binding.raw(M.Setting.get(s, key, "")), "id", "")
+  Bool.pick(List<&2, M.Change>, Bool.not(String.is_empty(id)) &&
+    String.eq(J.Json.get_str(Accounts.profile(s, id), "id", ""), id) &&
+    String.is_empty(J.Json.get_str(Accounts.find(J.Json.elems(J.Json.get_obj(snapshot, "profiles")), id), "id", "")),
+    [M.SettingSet{key, Accounts.binding.show("", 0n), now}], Nil{})
+
 def Accounts.changes(+s: M.State, +now: Nat, snapshot: String) -> List<&2, M.Change>:
-  +value = Accounts.public(Accounts.parse(snapshot))
-  Bool.pick(List<&2, M.Change>, String.eq(M.Setting.get(s, "accounts.inventory", ""), value), Nil{}, [M.SettingSet{"accounts.inventory", value, now}])
+  +parsed = Accounts.parse(snapshot)
+  +value = Accounts.public(parsed)
+  List.append(&2, M.Change,
+    Bool.pick(List<&2, M.Change>, String.eq(M.Setting.get(s, "accounts.inventory", ""), value), Nil{}, [M.SettingSet{"accounts.inventory", value, now}]),
+    Bool.pick(List<&2, M.Change>, String.is_empty(J.Json.get_str(parsed, "error", "")),
+      List.append(&2, M.Change, Accounts.default.removed(s, now, "claude", parsed), Accounts.default.removed(s, now, "codex", parsed)), Nil{}))
 
 # Freeze a default at creation. Old threads with no binding remain legacy.
 def Accounts.created.one(change: M.Change, +s: M.State) -> List<&2, M.Change>:

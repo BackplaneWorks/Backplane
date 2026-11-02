@@ -1333,6 +1333,7 @@ async function bp_run(m) {
 // has no sync loop; bend does not run programs in-process there.
 function bp_start(main) {
   bp_run(main).then((code) => process.exit(code), (e) => {
+    try { globalThis.BACKPLANE_DIAGNOSTICS?.captureException(e); } catch (_) {}
     io_errs(e instanceof RangeError
       ? "bend: memory fault (machine stack overflow?)" : String(e));
     process.exit(1);

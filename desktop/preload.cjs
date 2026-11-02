@@ -35,6 +35,13 @@ else new MutationObserver((_, seen) => { if (document.documentElement) { seen.di
 contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   theme,
   captureApp: () => ipcRenderer.invoke('desktop:capture-app'),
+  recording: Object.freeze({
+    put: (id, bytes) => ipcRenderer.invoke('desktop:recording', { op: 'put', id, bytes }),
+    read: id => ipcRenderer.invoke('desktop:recording', { op: 'read', id }),
+    remove: id => ipcRenderer.invoke('desktop:recording', { op: 'remove', id }),
+    clear: () => ipcRenderer.invoke('desktop:recording', { op: 'clear' }),
+  }),
+  diagnostics: op => ipcRenderer.invoke('desktop:diagnostics', op),
   onImprovements: callback => {
     if (typeof callback !== 'function') throw new TypeError('Expected a callback');
     const listener = () => callback();
@@ -49,6 +56,9 @@ contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   }),
   themeSeen: value => { if (value === 'light' || value === 'dark') ipcRenderer.send('desktop:theme', value); },
   terminalFocus: active => ipcRenderer.send('desktop:terminal-focus', active === true),
+  clipboard: Object.freeze({
+    writeText: text => ipcRenderer.invoke('desktop:clipboard-write-text', text),
+  }),
   image: Object.freeze({
     local: source => ipcRenderer.invoke('desktop:image-local', source),
     copy: png => ipcRenderer.invoke('desktop:image-copy', png),

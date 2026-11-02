@@ -356,7 +356,12 @@ private fun AppContent(m: AppModel) {
                     for (c in t.choices) OutlinedButton(onClick = { m.act(c.action, c.value) }, Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(c.label) }
                 }
             },
-            confirmButton = { TextButton(onClick = { m.act("ob-next") }) { Text(t.next) } },
+            confirmButton = {
+                Column(Modifier.fillMaxWidth()) {
+                    if (t.off.isNotEmpty()) OutlinedButton(onClick = { m.act("share", "off") }, Modifier.fillMaxWidth()) { Text(t.off) }
+                    TextButton(onClick = { m.act("ob-next") }, Modifier.fillMaxWidth()) { Text(t.next) }
+                }
+            },
             dismissButton = {
                 Row {
                     TextButton(onClick = { m.act("ob-skip") }) { Text(t.skip) }
@@ -1196,8 +1201,10 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         }
                     }
                     ComposerExtras(m, t)
+                    t.voice?.let { VoiceBar(m, it) }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         AttachButton(m)
+                        t.voice?.let { VoiceMicButton(m, it) }
                         ImageComposer(m, Modifier.weight(1f))
                         // a long press sends with the other follow-up mode (queue or steer);
                         // while a turn runs with nothing typed the button stops it, at once,

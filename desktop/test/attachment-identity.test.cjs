@@ -32,7 +32,7 @@ test('a temporary identity failure keeps Send gated until verification can retry
  let result={state:'offline',identity:'old'},retry;
  Object.assign(f.context,{attachmentIdentityGeneration:0,attachmentIdentityRetry:0,trace(){},
   window:{fetch(){}},location:{protocol:'http:'},refreshCacheIdentity:async()=>result,
-  clearTimeout(){},setTimeout(fn){retry=fn;return 1}});
+  enterImprovements(){},clearTimeout(){},setTimeout(fn){retry=fn;return 1}});
  const a=source.indexOf('function refreshFocusedIdentity()'),z=source.indexOf('\nlet cacheReady',a);
  vm.runInNewContext(source.slice(a,z),f.context);
  await f.context.refreshFocusedIdentity();

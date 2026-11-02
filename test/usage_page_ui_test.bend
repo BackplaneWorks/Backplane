@@ -43,6 +43,6 @@ def main() -> IO(Unit):
     C.Check.str("unknown machine preserves other", U.Usage.page.metric(H.Hubs.ui(bad, "b")), "tokens")
     +local : H.Hubs = H.Hubs.after(H.Hubs.act(hs, "usage-period", "today"))
     C.Check.str("unqualified control goes to current", U.Usage.page.period(H.Hubs.ui(local, "a")), "today")
-    C.Check.str("other period remains independent", U.Usage.page.period(H.Hubs.ui(local, "b")), "month")
+    C.Check.str("other period remains independent", U.Usage.page.period(H.Hubs.ui(local, "b")), "30days")
     C.Check.str("hidden phone page produces no usage rows", Nat.show(List.length(&2, J.Json, H.Hubs.usage.rows(I.En{}, False{}, u))), "0")
     check("visible phone page has controls", String.contains(J.Json.show(J.Json.arr(H.Hubs.usage.rows(I.En{}, True{}, u))), "usage-period"))

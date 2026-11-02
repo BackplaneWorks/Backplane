@@ -56,6 +56,19 @@ def window(o: L.Out) -> String:
   match o:
     case L.Out{_, hs}: hits(hs)
 
+def state_of(a: U.Act) -> U.Ui:
+  match a:
+    case U.Act{u, _}: u
+
+def page(+u: U.Ui, p: String) -> U.Ui:
+  state_of(U.Ui.act(state_of(U.Ui.act(u, "flag", "settings")), "settings-page", p))
+
+def web_page(+u: U.Ui) -> List<&2, D.Node>:
+  [W.View.settings(u, U.Ui.state.of(u), U.Ui.infos(u), "test", "")]
+
+def native_page(+u: U.Ui) -> String:
+  window(L.Lay.settings(L.Ty.none(), U.Ui.state.of(u), N.Nui.init(u, 1400, 2400), U.Ui.infos(u), "test", "", 264, 1400, 2400, 0))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +u : U.Ui = ui()
@@ -74,3 +87,19 @@ def main() -> IO(Unit):
     C.Check.str("window Settings hit enable", Bool.show(String.contains(win, "setting:fallback.on=on")), "True")
     C.Check.str("window Settings hit reorder", Bool.show(String.contains(win, "fallback.chain=codex/gpt-6.1-sol,claude/sonnet")), "True")
     C.Check.str("config does not overwrite migrated defaults", M.Setting.get(U.Ui.state.of(u), "agent.model", ""), "gpt-6.1-sol")
+    +agents : U.Ui = page(u, "agents")
+    +threads : U.Ui = page(u, "threads")
+    C.Check.str("web Agents page exposes fallback toggle", Bool.show(String.contains(buttons(web_page(agents)), "fallback.on=on")), "True")
+    C.Check.str("web Agents page exposes hierarchy order", Bool.show(String.contains(texts(web_page(agents)), "1. claude/sonnet")), "True")
+    C.Check.str("phone Agents page exposes fallback toggle", Bool.show(String.contains(J.Json.show(P.Mob.settings(I.En{}, True{}, agents)), "fallback.on=on")), "True")
+    C.Check.str("native Agents page exposes fallback toggle", Bool.show(String.contains(native_page(agents), "setting:fallback.on=on")), "True")
+    C.Check.str("web Threads page has no fallback editor", Bool.show(String.contains(buttons(web_page(threads)), "fallback.on=on")), "False")
+    C.Check.str("phone Threads page has no fallback editor", Bool.show(String.contains(J.Json.show(P.Mob.settings(I.En{}, True{}, threads)), "fallback.on=on")), "False")
+    C.Check.str("native Threads page has no fallback editor", Bool.show(String.contains(native_page(threads), "setting:fallback.on=on")), "False")
+    +empty : U.Ui = page(U.Ui.info_set(U.Ui.init(10n), "models", modelinfo()), "agents")
+    C.Check.str("new setup exposes fallback before any chain exists", Bool.show(String.contains(texts(web_page(empty)), "Fallback hierarchy")), "True")
+    C.Check.str("new setup exposes add control", Bool.show(String.contains(texts(web_page(empty)), "Add to hierarchy")), "True")
+    +enabled : U.Ui = state_of(U.Ui.act(agents, "setting", "fallback.on=on"))
+    +added : U.Ui = state_of(U.Ui.act(enabled, "setting", "fallback.chain=claude/sonnet,codex/gpt-6.1-sol,codex/test-next"))
+    C.Check.str("Agents editor enables fallback", M.Setting.get(U.Ui.state.of(enabled), "fallback.on", ""), "on")
+    C.Check.str("Agents page renders saved addition", Bool.show(String.contains(texts(web_page(added)), "3. codex/test-next")), "True")

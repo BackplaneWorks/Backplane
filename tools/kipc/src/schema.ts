@@ -67,7 +67,8 @@ export function builtinSchema(): Schema {
 
 export function fromBytes(bytes: Uint8Array): Schema {
   const set = (descriptor as never as { FileDescriptorSet: protobuf.Type }).FileDescriptorSet.decode(bytes);
-  const root = (protobuf.Root as never as { fromDescriptor(d: unknown): protobuf.Root }).fromDescriptor(set);
+  // The API envelope and IPC JSON both use the original proto field names.
+  const root = (protobuf.Root as never as { fromDescriptor(d: unknown, options: { keepCase: boolean }): protobuf.Root }).fromDescriptor(set, { keepCase: true });
   root.resolveAll();
   return new Schema(root, true);
 }

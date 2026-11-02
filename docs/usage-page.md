@@ -5,8 +5,13 @@ settings also retains a separate Usage section for each paired machine,
 including its stable key and connection status. Cached offline readings stay
 with that machine.
 
-Choose Tokens, Reported cost or Limits. Today means the current UTC calendar
-day; This month means the current UTC calendar month. The page reads existing
+Choose Tokens, Reported cost or Limits. The default Month (30 days) rolls
+through the latest 30 UTC dates, including today. 1 week, 2 weeks and 4 weeks
+show the latest 7, 14 and 28 dates respectively; they cross week, month and
+year boundaries. Today shows just the current UTC date. Today is partial until
+midnight UTC. This calendar month retains the current UTC calendar month and
+its monthly model/project breakdown. Every range displays its exact dates.
+The page reads existing
 `TurnUsage`/`Tok.*` rollups. It requests no transcript import, history replay or
 new telemetry collection. Anonymous installation telemetry is unrelated.
 
@@ -31,8 +36,10 @@ back to the first available provider if availability changes. Tabs support
 Left/Right, Home/End and normal Tab/Enter operation. No provider is inferred
 from a model name. Cached availability can be stale when disconnected.
 
-Each tab plots recorded tokens by UTC day for the selected period. This month
-runs from the first of the month through today; Today is one day. Solid bars
+Each tab plots recorded tokens by UTC day for the selected period, including
+missing dates. Rolling ranges count back from today without resetting at a
+calendar boundary; This calendar month starts on the first; Today is one day.
+Solid bars
 show recorded token subtotals, a baseline marks a reported zero, and hatched
 columns mean no token reading. Expand Daily readings for exact values and
 coverage. The native phone pages use the same readings, with dim missing-day
@@ -49,18 +56,21 @@ may be partial. No history import or new network endpoint is added.
 
 Below the graph, Top 5 projects ranks positive recorded token subtotals across
 all models and providers, independently of the selected provider tab. This
-month uses the existing `p.<project>|<YYYY-MM>` totals; Today uses the new daily
-project totals and shares their coverage limitation. Each project aggregate is
-read once; model totals and reasoning are not added again. Equal titles remain
+calendar month uses the existing `p.<project>|<YYYY-MM>` totals; Today and
+rolling ranges sum daily project totals and share their coverage limitation.
+All selected days are summed per project before choosing the top five; model
+totals and reasoning are not added again. Equal titles remain
 separate project IDs. Missing catalog entries retain their ID as Unavailable
 project; an empty project identity is Unknown project. Unknown readings and
 zero-token projects do not fill ranking slots. Fewer than five projects are
 shown when fewer have positive recorded consumption.
 
-The existing month view's provider/model and project details remain paged in
-groups of twelve below these views. Today does not claim a daily model
-breakdown. Limits, reported cost and context retain their existing source and
-missing-data behavior. No model pricing or cost-to-token conversion is used.
+The calendar month view's provider/model and project details remain paged in
+groups of twelve below these views. Rolling ranges and Today do not claim a
+daily model breakdown. Recorded token totals and reported cost sum the selected
+daily counters, including their coverage counts. A completely empty range stays
+unknown. Limits and context retain their existing source and missing-data
+behavior. No model pricing or cost-to-token conversion is used.
 
 Focused validation: `test/usage_graph_test.bend` with
 `test/tools/usage_graph.mjs` exercises the production rollups, provider actions,
@@ -81,8 +91,9 @@ inspected at `5b2ee393c3d6576bcf44c5d2b74565770943e189` on 2026-10-20:
 
 T3 Code's useful patterns here are separate metrics, environment selection,
 progressive results and honest cost/coverage labels. Backplane retains its
-existing Settings navigation and machine isolation. Its available counters do
-not justify copying rolling ranges, pricing overrides or historical scans.
+existing Settings navigation and machine isolation. Rolling ranges use the
+existing daily counters; pricing overrides and
+historical scans are outside this page.
 
 ## Token stats in threads
 

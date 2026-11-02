@@ -1231,7 +1231,7 @@ enum NativeMessages {
 
   // native.thread.subagents
   static func native_thread_subagents(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("サブエージェント：" + arg0) : ("Subagents: " + arg0)
+    tag == "ja" ? ("サブスレッド：" + arg0) : ("Subthreads: " + arg0)
   }
 
   // native.thread.todos
@@ -1596,7 +1596,7 @@ enum NativeMessages {
 
   // thread.subagents
   static func thread_subagents(_ tag: String) -> String {
-    tag == "ja" ? ("サブエージェント") : ("Subagents")
+    tag == "ja" ? ("サブスレッド") : ("Subthreads")
   }
 
   // thread.todos

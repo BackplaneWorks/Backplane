@@ -4,7 +4,7 @@ Backplane counts installs and how many people use it. Only the hub sends:
 window, web, iOS and Android never contact the telemetry service.
 
 Alpha also sends aggregate daily counts of threads created, messages, model
-token usage and bot traffic for product and investor reporting. This is usage
+token usage, bot traffic and numeric board creation/completed-order counts for product and investor reporting. This is usage
 measurement, not token billing. API keys, authentication tokens, conversation
 content and credentials are never part of these counters.
 
@@ -16,22 +16,38 @@ prompts, names, addresses, hardware identifiers or time zones in these events.
 The request includes a send timestamp and random nonce for authentication and
 replay protection; the server does not retain that timestamp as usage data.
 
-The tour asks once, before the uberbot step. Existing installs see that step
-alone, once their hub's state and version have arrived. Only Keep sharing (or On in Settings) grants consent. Opt out, Next and Skip
-leave sharing off; Reset id never grants consent. Opening Privacy policy or Report an issue leaves the
-step open. Unanswered installs and updates remain local for three days, then
-leave as anonymous counts without an id. Daily activity requires an answer.
+The installation/first-run popup explains **all** telemetry before any can
+leave the hub. Builds without sending capability do not interrupt onboarding with this popup; if capability becomes available, an unanswered choice is still required. Telemetry is selected On by default, but is blocked until the
+person presses **Continue with telemetry on** (a recorded choice). **Turn off
+all telemetry** records Off. **Decide later**, Escape, closing the app and
+unanswered/offline first runs authorize nothing. A dismissed popup remains
+pending and is offered again after reconnect or a new app session. Privacy/report links
+leave it unanswered. The regular onboarding tour does not repeat an already
+answered telemetry step; an interrupted automatic or manual tour resumes at its existing cursor. Only the hub sends; its saved choice is shared by
+web, desktop and both phone clients, so answering on one ends the question on
+all synchronized clients, including after reconnect. No per-client preference
+silently overrides it.
 
-Existing opt-ins see the expanded alpha disclosure once; the new counters
-require its separate affirmative `telemetry.usage.asked=1` answer. An explicit
-decline records `0`, so it does not repeatedly reopen the prompt. Existing opt-outs stay
-off without another prompt. The old install/update/activity protocol and
-consent continue to work. Developer builds with no baked configuration never
-collect the new counters. No pre-alpha or pre-consent history is backfilled.
+An existing explicit Off stays Off even if an older version never wrote an
+answer marker. A recorded expanded-metrics decline also stays Off. Existing
+complete On choices remain On; upgrades and reinstalls using the same hub
+home preserve these settings. An older On choice without the aggregate
+disclosure stays stored, but all sends wait for the complete popup answer.
+A genuinely new hub home has no recorded choice and starts pending. Reset id
+rotates identity only, never enables telemetry or resets the choice.
+
+One hub transaction records the share and disclosure fields. The UI decision
+names the preferences and monotonic choice revision it displayed: a stale On answer or outbox replay cannot
+overwrite a newer Off on another client. An explicit Off always stops sharing. Repeated decisions invalidate stale On requests; bounded replay receipts prevent lost acknowledgements from applying a decision twice. A receipt names one click: the client makes a decision id per click and keeps it in its outbox text, so only a resend of that very request is recognised; two people choosing the same value from the same displayed state are two decisions, and a request without an id is never treated as a replay. A client with several choices outstanding falls back, on a refusal, to the last preferences the hub confirmed, once none is outstanding, never to another unconfirmed proposal. Nothing may contact the network while any write waits in the disk-full queue: a choice folded into the hub's state but not yet on disk authorizes no registration or usage send until it is flushed, while a waiting Off still revokes at once and its cleanup still runs. A worker's snapshot is compared with the hub's state through the same projection it was built from, so an unchanged choice never reschedules it. Older clients may still turn telemetry Off or reset the id; individual legacy On/answer-marker writes are rejected. Each click has its own decision id, kept stable only for transport retries; independent users choosing Off from the same old screen remain distinct. Every decision reply carries authoritative preferences after the append is saved, so rejected choices and failed saves do not leave an optimistic On displayed.
+An offline choice reaches the sender only after it is recorded by the hub;
+there is no pre-choice history backfill. These are product preference records,
+not a statement about legal consent.
 
 Settings on every client has Share anonymous usage, On/Off, Reset id and
-Privacy. Opting out clears the id and queued activity; only id-less install
-and update counts remain. Re-enabling or Reset id makes a fresh random id and
+Privacy. Opting out clears the id, private queue and acknowledgements, and disables
+**every** category, including anonymous install/update pings. Unanswered
+installs never expire into anonymous transmission. Old unanswered/anonymous
+queue entries from previous versions are discarded rather than released. Re-enabling or Reset id makes a fresh random id and
 registers it with a proof of work. The id is stored in
 `<home>/telemetry/state.json`, mode 0600, in a 0700 directory, and sent only
 to authenticated clients as info `telemetry.id` for the copyable Install id
@@ -40,7 +56,7 @@ there is no id or the person opted out. State writes use an atomic rename.
 The queue expires after seven days, caps at 200 events (old activity first),
 and sends at most 50 events / 16 KiB. A failed request retries no sooner than
 one hour, including a longer numeric Retry-After. Schema/auth/replay rejection
-drops its batch. Only HTTP 202 or permanent 400/401/403/409/413 responses consume a submitted batch; other statuses retain it with backoff. Anonymous ambiguous retries can count twice because they have no deduplication identifier. One background job runs at a time and HTTP times out at 10s.
+drops its batch. Only HTTP 202 or permanent 400/401/403/409/413 responses consume a submitted batch; other statuses retain it with backoff. One background job runs at a time and HTTP times out at 10s.
 
 Setting `BACKPLANE_TELEMETRY=0` (or `off`) or `DO_NOT_TRACK=1` disables all
 telemetry, including anonymous counts and state writes. `CI` set,
@@ -75,8 +91,8 @@ mode. CI, sandbox and opt-out kill switches still win. No credentials are
 printed or passed to curl on its command line: curl reads headers/body from
 a private temporary config, removed after the attempt.
 
-Before starting HTTP, the worker asks the hub whether its sharing, consent
-and reset snapshot is still current. A choice made during proof-of-work
+Before starting HTTP, the worker asks the hub whether its recorded all-category
+choice permits transmission and its sharing/answer/reset snapshot is current. Any pending durable-write queue blocks network authorization, including a folded but unsaved On; a queued Off still revokes immediately. A choice made during proof-of-work
 invalidates that worker's pending request. A request already in flight can
 finish; opt-out clears the visible id immediately and the next plan removes
 queued identified data.
@@ -98,7 +114,7 @@ Backplane is in beta.
 
 The additive wire-v1 event is `usage`. It has the same required `day`, `id`,
 `share`, `ver`, `ch`, `os` and `arch` metadata as identified activity, plus a
-`counts` object with exactly these nonnegative integer fields (maximum
+`counts` object with these fixed nonnegative integer fields (maximum
 281474976710655 each):
 
 | Field | Counts |
@@ -113,6 +129,25 @@ The additive wire-v1 event is `usage`. It has the same required `day`, `id`,
 | `cache_write_tokens` | Known cache-write input tokens in those reports. |
 | `output_tokens` | Known output tokens, including reasoning already included by the provider. |
 | `usage_turns` | Turns with known output-token usage; unknown provider usage is not estimated. |
+| `boards_created` | Newly added local KiCad project/PCB families observed after a Backplane tool call. A matching `.kicad_pro`/`.kicad_pcb` pair counts once; a later counterpart adds nothing. Existing baseline files, edits, deletions and detected renames add nothing. |
+| `boards_ordered` | Newly completed non-pilot Buy-it checkouts containing at least one board-kind part. One per order, regardless of quantity or number of designs. Quotes, unpaid/cancelled/refunded orders, mechanical-only orders and already-paid upgrade history add nothing. |
+
+The original ten fields remain required by the receiver. The two board fields
+are optional for older clients and default to zero. New clients send all twelve
+fixed integer counters. Neither arbitrary field names nor design-derived enum
+keys are accepted. No quantities or kind breakdowns are part of this extension.
+No names, paths, design hashes, dimensions, per-design layer counts, part
+numbers, BOMs, netlists or prices are transmitted. Only the existing install,
+package/platform/day metadata surrounds the numerical counts.
+
+Creation is detected from the same local design-history snapshot Backplane
+already takes, with rename detection. Opening/importing a project as an initial
+baseline adds nothing. A completed checkout is first observed as `paid` (or a
+later successful state when polling missed `paid`). Local once-only source
+markers are durable and never enter the usage wire; opting out/reset clears
+counters and leaves earlier observations ineligible for backfill. A design job
+also carries the privacy generation captured before it starts, so stale work
+cannot count into a new sharing session.
 
 Total model tokens are input + cache read + cache write + output. Reasoning
 is a subset of output and is not added again. Costs, provider/model names,

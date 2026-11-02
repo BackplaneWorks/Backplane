@@ -1,4 +1,5 @@
 import Base
+import ../core/issue-report.bend as ISSUE
 import ../core/apikeys.bend as AK
 import ../core/plot-error.bend as PE
 import ../core/signal.bend as SGR
@@ -598,3 +599,39 @@ def mail_local_text(u: U.Ui) -> String:
 # Tiny lease comparison shared by the web and phone presentation hosts.
 def bub_move(before: String, after: String) -> J.Json:
   HOP.Hop.text(before, after)
+
+def presentation_send_preview(text: String) -> Bool:
+  U.Draft.preview(text)
+
+def presentation_pending.rows(xs: List<&2, J.Json>, +lc: I.Loc) -> List<&2, D.Node>:
+  match xs:
+    case Nil{}: Nil{}
+    case +p <> t:
+      D.El{"div", J.Json.get_str(p, "key", ""), [D.At{"class", "msg user sending"}],
+        D.Dom.cat(V.View.user_body(J.Json.get_str(p, "text", "")), [D.Dom.span("note", MSG.T.thread.sending(lc))])} <> presentation_pending.rows(t, lc)
+
+def presentation_pending(node: D.Node, pending: J.Json, lang: String) -> D.Node:
+  P.Node.pending(node, presentation_pending.rows(J.Json.elems(pending), I.I18n.of_tag(lang)))
+
+# Explicit inputs keep public reporting separate from the client state.
+def issue_report(text: String, os: String, version: String, details: String, diagnostics: String) -> String:
+  ISSUE.Issue.report(text, os, version, details, diagnostics)
+
+def issue_target(saved: String, legacy: Bool) -> String:
+  ISSUE.Issue.target(saved, legacy)
+
+def improvements_preview(text: String, os: String, version: String, details: String, diagnostics: String) -> J.Json:
+  ISSUE.Issue.preview(text, os, version, details, diagnostics)
+
+# A complete edited/agent-written body already contains its environment fields.
+def improvements_preview_body(body: String) -> J.Json:
+  ISSUE.Issue.preview.body(body)
+
+def improvement_issue_url(body: String) -> String:
+  ISSUE.Issue.url.body(body)
+
+def improvements_template() -> String:
+  ISSUE.Issue.template()
+
+def improvements_prompt(description: String, os: String, version: String, evidence: String, diagnostics: String) -> String:
+  ISSUE.Issue.prompt(description, os, version, evidence, diagnostics)

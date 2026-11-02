@@ -1,4 +1,5 @@
 import Base
+import ../core/chat-pending.bend as CP
 import ../core/textscale.bend as TS
 import ./side_row_types.bend as ST
 import ../core/title.bend as TTL
@@ -2946,10 +2947,10 @@ def Sa.steps.n(+ss: List<&2, SB.SubStep>) -> U32:
   U32.from_nat(List.length(&2, SB.SubStep, ss))
 
 # how tall a row is: its line, what it does now, the steps it shows
-def Sa.h(r: SB.SubRow) -> U32:
+def Sa.h(+r: SB.SubRow) -> U32:
   match r:
     case SB.SubRow{_, _, _, _, _, +doing, _, _, _, +ss}:
-      (28 + Bool.pick(U32, String.is_empty(doing), 0, 20) + Sa.steps.n(ss) * 20 : U32)
+      Bool.pick(U32, SB.Subs.display.heading(r), 24, (28 + Bool.pick(U32, String.is_empty(doing), 0, 20) + Sa.steps.n(ss) * 20 : U32))
 
 def Sa.step(+ty: Ty, s: SB.SubStep, +x: U32, +x1: U32, +y: U32) -> List<&2, R.Op>:
   match s:
@@ -3012,8 +3013,16 @@ def Sa.row.k(+ty: Ty, r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
           Sa.steps(ty, ss, tx, (x1 - 12 : U32), (y + 28 + dh : U32))]),
         [Sa.hit(agent, open, key, x0, x1, y, (28 + dh : U32))]}
 
-def Sa.row(+ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
+def Sa.row.body(+ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
   Out.cat(Sa.row.k(ty, r, x0, x1, y), Sa.stop(String.is_empty(SB.Subs.cancel(r)), ty, SB.Subs.cancel(r), SB.Subs.key(r), Sa.stop.x(ty, U.StateWord.label(Ty.loc(ty), SB.Subs.word(r)), SB.Subs.cancel(r), x1), y))
+
+def Sa.row.heading(heading: Bool, +ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
+  match heading:
+    case True{}: Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, SB.Subs.display.label(Ty.loc(ty), r), U32.dim((x1 - x0 : U32), 24)), D.Clip.all(), (x0 + 12 : U32), y, 24, T.Th.dim()))
+    case False{}: Sa.row.body(ty, r, x0, x1, y)
+
+def Sa.row(+ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
+  Sa.row.heading(SB.Subs.display.heading(r), ty, r, x0, x1, y)
 
 def Sa.rows(+ty: Ty, rs: List<&2, SB.SubRow>, +x0: U32, +x1: U32, +y: U32) -> Out:
   match rs:
@@ -3058,18 +3067,26 @@ def Sa.fit.put(ok: Bool, r: SB.SubRow, rest: List<&2, SB.SubRow>) -> List<&2, SB
     case False{}:
       Nil{}
 
+# Keep a section with its first worker. A section alone at the bottom
+# would hide that worker's controls until the next scroll.
+def Sa.fit.need(heading: Bool, +h: U32, rs: List<&2, SB.SubRow>) -> U32:
+  match heading rs:
+    case True{} r <> _: (h + Sa.h(r) : U32)
+    case _ _: h
+
 def Sa.fit(rs: List<&2, SB.SubRow>, +room: U32, +first: Bool) -> List<&2, SB.SubRow>:
   match rs:
     case Nil{}:
       Nil{}
-    case +r <> rest:
-      Sa.fit.put(Sa.fit.ok(Sa.h(r), room, first), r,
-        Sa.fit(rest, Bool.pick(U32, Sa.fit.ok(Sa.h(r), room, first), (room - U32.min(Sa.h(r), room) : U32), 0), False{}))
+    case +r <> +rest:
+      +need = Sa.fit.need(SB.Subs.display.heading(r), Sa.h(r), rest)
+      Sa.fit.put(Sa.fit.ok(need, room, first), r,
+        Sa.fit(rest, Bool.pick(U32, Sa.fit.ok(need, room, first), (room - U32.min(Sa.h(r), room) : U32), 0), Bool.and(first, SB.Subs.display.heading(r))))
 
 # the panel's rows on screen: open ones from the scrolled-to row, as many as
 # a third of the window holds
 def Subs.vis(+all: List<&2, SB.SubRow>, +open: Bool, +off: Nat, +h: U32) -> List<&2, SB.SubRow>:
-  Sa.fit(List.drop(&2, SB.SubRow, SB.Subs.panel.rows(open, all), off), (h / 3 : U32), True{})
+  Sa.fit(List.drop(&2, SB.SubRow, SB.Subs.display(SB.Subs.panel.rows(open, all)), off), (h / 3 : U32), True{})
 
 # the panel's box: its head, and its rows when open
 def Subs.box.h(+rs: List<&2, SB.SubRow>, +open: Bool) -> U32:
@@ -3083,7 +3100,7 @@ def Subs.box.h(+rs: List<&2, SB.SubRow>, +open: Bool) -> U32:
 def Lay.subs.k(some: Bool, +ty: Ty, +all: List<&2, SB.SubRow>, +rs: List<&2, SB.SubRow>, +open: Bool, +th: String, +off: Nat, +x0: U32, +x1: U32, +y: U32) -> Out:
   match some:
     case True{}:
-      +n = List.length(&2, SB.SubRow, SB.Subs.panel.rows(open, all))
+      +n = List.length(&2, SB.SubRow, SB.Subs.display(SB.Subs.panel.rows(open, all)))
       +on = Nat.is_gt(SB.Subs.live(all), 0n)
       +word = {SB.Subs.panel.word(all) ++ Pane.range.loc(Ty.loc(ty), off, List.length(&2, SB.SubRow, rs), n) : String}
       +bh = Subs.box.h(rs, open)
@@ -3301,7 +3318,9 @@ def Ask.std.card(+ty: Ty, a: M.Ask, +draft: String, +info: Map<&2, String>, +x0:
         Out.ops(Lay.box(D.Clip.all(), x0, y, (x1 - x0 : U32), h, 0, T.Th.panel(), T.Th.warn())),
         Out.ops(Ty.text(ty, 2n, head, D.Clip.all(), (x0 + 14 : U32), (y + 4 : U32), 22, T.Th.warn())),
         Ask.body(ty, k, id, d, info, x0, x1, y, h),
-        Ask.buttons(ty, Ask.choices.loc(Ty.loc(ty), U.Ask.bkind(k, tool), id, o, draft), (y + h - 36 : U32), (x1 - 12 : U32))])
+        Ask.buttons(ty, Bool.pick(List<&2, S.Hit>, String.eq(tool, "settings_proposal"),
+          [S.Hit{0, 0, 0, 0, "Approve", id ++ "|accept"}, S.Hit{0, 0, 0, 0, "Reject", id ++ "|decline"}],
+          Ask.choices.loc(Ty.loc(ty), U.Ask.bkind(k, tool), id, o, draft)), (y + h - 36 : U32), (x1 - 12 : U32))])
 
 # the buttons of a paused task's card, right to left (the first is leftmost)
 def Ask.tbtns(bs: List<&2, U.TBtn>, +ty: Ty, +y: U32, +x: U32) -> Out:
@@ -3667,7 +3686,7 @@ def Vx.term.btns(ts: List<&2, String>) -> List<&2, VBtn>:
     case +t <> r:
       VBtn{t ++ "  ×", "voice-unterm", t} <> Vx.term.btns(r)
 
-def Set.voice(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+def Set.voice.base(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
   +label0 = MSG.T.common.save(Ty.loc(ty))
   +label1 = MSG.T.queue.remove(Ty.loc(ty))
   +label2 = MSG.T.common.add(Ty.loc(ty))
@@ -3718,7 +3737,7 @@ def Set.settle.done(+ty: Ty, +on: Bool, +x: U32, +w: U32, +y: U32) -> Out:
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) - 6 - Lay.button.w(ty, label1) : U32), (y + 14 : U32), label1, on, "setting", M.Lifecycle.key() ++ "=on"),
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) : U32), (y + 14 : U32), label0, Bool.not(on), "setting", M.Lifecycle.key() ++ "=off")])
 
-def Set.voice.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+def Set.voice.base.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
   +u = S.Nui.ui(n)
   +devs = Vx.devs.loc(Ty.loc(ty), u)
   (386 + (Vx.chips.rows(devs, ty, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
@@ -4196,8 +4215,7 @@ def Set.threads(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +b: U32) -> 
     Set.settle.done(ty, M.Lifecycle.on(st), x, w, (b + 174 : U32)),
     Set.carry(ty, M.Carry.on(st), x, w, (b + 238 : U32)),
     Set.notify(st, ty, x, w, (b + 320 : U32)),
-    Set.fallback(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) : U32)),
-    Set.hook(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) : U32))])
+    Set.hook(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) : U32))])
 
 # Settings' model search (the picker's field, "mq"), once the provider
 # lists many models
@@ -4228,7 +4246,7 @@ def Set.page.threads(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +
 
 def Set.page.threads.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
 
-  (264 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) + Set.hook.h(ty, n, x, w) : U32)
+  (264 + Set.notify.h(st, ty, w) + Set.hook.h(ty, n, x, w) : U32)
 
 def Set.page.agents(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +prov = M.Setting.get(st, "agent.provider", "claude")
@@ -4250,7 +4268,9 @@ def Set.page.agents(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v
     Set.find(srch, ty, n, (x + 16 : U32), (y + 116 + pr : U32), (w - 32 : U32)),
     Set.chips(ty, ms, M.Setting.get(st, "agent.model", ""), "agent.model", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (y + 116 + fh + pr : U32)),
     Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, Set.model_line.loc(Ty.loc(ty), U.Models.label_of(mi, prov, M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", "")), (w - 32 : U32)),
-      D.Clip.all(), (x + 16 : U32), (y + 126 + dy + pr : U32), 24, T.Th.dim()))])
+      D.Clip.all(), (x + 16 : U32), (y + 126 + dy + pr : U32), 24, T.Th.dim())),
+    Set.fallback(ty, n, x, w, (y + 176 + dy + pr : U32)),
+    Set.agy(ty, n, x, w, (y + 176 + dy + pr + Set.fallback.h(ty, n, x, w) : U32))])
 
 def Set.page.agents.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
   +prov = M.Setting.get(st, "agent.provider", "claude")
@@ -4260,7 +4280,7 @@ def Set.page.agents.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, 
   +ms = U.Models.settings(mi, prov, U.Ui.scratch(S.Nui.ui(n), "@f.mq"), M.Setting.get(st, "agent.model", ""))
   +dy = {(Set.rows(ty, ms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 + 26 + fh : U32) : U32}
   +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
-  (176 + dy + pr + Set.agy.sum(U.Psv.rows(0n, S.Nui.ui(n)), ty, x, w) : U32)
+  (176 + dy + pr + Set.agy.sum(U.Psv.rows(0n, S.Nui.ui(n)), ty, x, w) + Set.fallback.h(ty, n, x, w) + Set.agy.h(ty, n, x, w) : U32)
 
 def Set.page.writing(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +tp = U.TextGen.provider(st)
@@ -4357,6 +4377,17 @@ def Set.page.network(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +
 def Set.page.network.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
 
   268
+
+def Set.voice(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  +rows = U.Vlocal.rows(Ty.loc(ty), S.Nui.ui(n))
+  +rh = Set.agy.sum(rows, ty, x, w)
+  Out.all([Set.agy.rows(rows, ty, n, x, w, y),
+    Set.voice.base(ty, st, n, x, w, (y + rh : U32)),
+    Set.agy.rows(U.Vlearned.rows(Ty.loc(ty), st), ty, n, x, w, (y + rh + Set.voice.base.h(ty, n, x, w) : U32))])
+
+def Set.voice.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (Set.voice.base.h(ty, n, x, w) + Set.agy.sum(U.Vlocal.rows(Ty.loc(ty), S.Nui.ui(n)), ty, x, w)
+    + Set.agy.sum(U.Vlearned.rows(Ty.loc(ty), U.Ui.state.of(S.Nui.ui(n))), ty, x, w) : U32)
 
 def Set.page.voice(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
 
@@ -4476,12 +4507,12 @@ def Set.menu(ps: List<&2, String>, +ty: Ty, +x: U32, +w: U32, +y: U32) -> Out:
 
 def Set.body(root: Bool, +i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   match root:
-    case True{}: Set.menu(U.Settings.pages(), ty, x, w, y)
+    case True{}: Set.menu(U.Settings.menu.pages(), ty, x, w, y)
     case False{}: Set.page.draw(i, ty, st, n, info, v, note, x, w, y)
 
 def Set.height(root: Bool, +i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
   match root:
-    case True{}: Set.menu.h(U.Settings.pages(), ty, w)
+    case True{}: Set.menu.h(U.Settings.menu.pages(), ty, w)
     case False{}: Set.page.h(i, ty, st, n, info, v, note, x, w)
 
 def Set.back(root: Bool, +ty: Ty, +x: U32) -> Out:
@@ -4529,7 +4560,6 @@ def Set.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
 # display scaling. The ordinary desktop keeps the project sidebar visible.
 def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
   Set.settings(ty, st, n, info, v, note, Bool.pick(U32, U32.is_lt(U32.dim(x1, x0), 560), 0, x0), x1, h, raw)
-
 
 # Terminal
 # --------
@@ -6953,6 +6983,11 @@ def TL.memo.lines(+ty: Ty, +m: TLMemo, +es: List<&2, M.Entry>, +st: M.State, +se
   TL.memo.lines.k(TL.memo.fits(m, px, sel), ty, m, es, st, sel, px, pics)
 
 # messages the server has not stored yet, marked as sending
+def TL.pending(+ty: Ty, show: Bool, +px: U32) -> List<&2, TLine>:
+  match show:
+    case False{}: Nil{}
+    case True{}: TL.blocks(ty, N.Md.render(CP.Pending.label(Ty.loc(ty))), px)
+
 def TL.sending(+ty: Ty, ps: List<&2, String>, +px: U32) -> List<&2, TLine>:
   match ps:
     case Nil{}:
@@ -7142,7 +7177,7 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       +kh = (Kn.h(kn, ty, cw) + kxh : U32)
       +ts = SB.Subs.rows.at(st, pics, sel, now, ixs)
       +sopen = SB.Subs.panel.open(pics, sel, ts)
-      +soff = Pane.clamp(Pane.off(pics, "subs:" ++ sel), List.length(&2, SB.SubRow, SB.Subs.panel.rows(sopen, ts)))
+      +soff = Pane.clamp(Pane.off(pics, "subs:" ++ sel), List.length(&2, SB.SubRow, SB.Subs.display(SB.Subs.panel.rows(sopen, ts))))
       +svis = Subs.vis(ts, sopen, soff, h)
       # the row under the header: the parent's link
       +pl = {Bool.pick(U32, String.is_empty(U.Tasks.up(st, sel)), 0, 32) : U32}
@@ -7173,7 +7208,7 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       # the timeline and what sits around it are laid out at once
       tl ch = Lay.timeline(ty,
         List.concat(&2, TLine, [TL.memo.shown.loc(ty, memo, st, sel, cw, pics), TL.sending(ty, pend, cw),
-          TL.live.single(ty, String.is_empty(live), ph, live, TL.memo.lv(memo), cw)]),
+          TL.pending(ty, CP.Pending.phase(ph), cw)]),
         cx0, cx1, top, (h - ah - qh - eh - bh : U32), sc, tsel, hold, TL.memo.first(memo), Out.none()) Out.all([Lay.header(ty, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, sel, now), U.Fab.mini.tools.of(st, pics, sel, Lay.running(turn)), x0, x1, pa, term, M.Snooze.on(now, U.Side.until(st, sel)), del, hy),
           Kn.draw(kx, False{}, ty, cx0, (52 + hy : U32), cw),
           Kn.draw(kn, True{}, ty, cx0, (52 + hy + kxh : U32), cw),
@@ -7362,7 +7397,7 @@ def TL.memo.locale(+tag: String, +m: TLMemo) -> TLMemo:
 # whole cost every frame 15 ms on a real log; "earlier" shows another page)
 def Lay.memo.local(+tag: String, +ty: Ty, +n: S.Nui, +prev: TLMemo) -> TLMemo:
   TL.memo.with_live(TL.memo.of(ty, Lay.memo.es(String.is_empty(U.Ui.sel(S.Nui.ui(n))), n), Lay.tl.px(n), U.Ui.sel(S.Nui.ui(n)), prev),
-    TL.live.local(tag, TL.live.get(ty, TL.memo.lv(prev), U.Live.head(U.Ui.live.of(S.Nui.ui(n), U.Ui.sel(S.Nui.ui(n)))), Lay.tl.px(n))))
+    TL.live.local(tag, TL.live.get(ty, TL.memo.lv(prev), "", Lay.tl.px(n))))
 
 def Lay.memo(+ty: Ty, +n: S.Nui, prev: TLMemo) -> TLMemo:
   Lay.memo.local(Ty.tag(ty, TL.locale(S.Nui.ui(n))), ty, n, TL.memo.locale(Ty.tag(ty, TL.locale(S.Nui.ui(n))), prev))

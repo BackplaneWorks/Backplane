@@ -6,6 +6,6 @@
     "start": "bun src/main.ts"
   },
   "dependencies": {
-    "protobufjs": "7.4.0"
+    "protobufjs": "8.6.6"
   }
 }

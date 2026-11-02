@@ -38,7 +38,7 @@ def Menu.note.i(i: Nat, +lc: I.Loc) -> String:
   match i:
     case 0n: Menu.text(lc, "Theme, text size, language and sidebar", "テーマ、文字サイズ、言語、サイドバー")
     case 1n: Menu.text(lc, "Notifications, settling and restart behavior", "通知、完了済みスレッド、再起動時の動作")
-    case 2n: Menu.text(lc, "Default models, effort and fallback order", "既定のモデル、推論レベル、フォールバック順序")
+    case 2n: Menu.text(lc, "Agent setup, sign-in, default models and effort", "エージェントの設定、ログイン、既定のモデル、推論レベル")
     case 3n: Menu.text(lc, "Models for titles, summaries and writing", "タイトル、要約、文章作成に使うモデル")
     case 4n: Menu.text(lc, "KiCad, FreeCAD and viewer connections", "KiCad、FreeCAD、ビューアーの接続")
     case 5n: Menu.text(lc, "Pair devices, sync machines and updates", "デバイスのペアリング、同期、更新")
@@ -78,7 +78,7 @@ def Menu.group.title(i: Nat, +lc: I.Loc) -> String:
 def Menu.group.pages(i: Nat) -> List<&2, String>:
   match i:
     case 0n: ["appearance", "threads", "timezone"]
-    case 1n: ["agents", "writing", "voice", "antigravity", "keys"]
+    case 1n: ["agents", "writing", "voice", "keys"]
     case 2n: ["cad", "ordering"]
     case _: ["network", "usage", "privacy", "about"]
 

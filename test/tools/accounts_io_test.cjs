@@ -17,11 +17,11 @@ const identity=()=>{try{return JSON.parse(fs.readFileSync(marker,'utf8'));}catch
 const save=()=>fs.writeFileSync(marker,JSON.stringify({email:config().email||'fixture@example.test',workspace:config().workspace||'fixture-workspace'}),{mode:0o600});
 fs.appendFileSync(path.join(home,'audit.jsonl'),JSON.stringify({args,home,systemHome:process.env.HOME,hasApiKey:!!process.env.ANTHROPIC_API_KEY,hasOpenAI:!!process.env.OPENAI_API_KEY,hasFederation:!!process.env.OPENAI_FEDERATION_RULE_ID,hasConsoleProfile:!!process.env.ANTHROPIC_PROFILE})+'\\n');
 if(provider==='claude'){
- if(args[0]==='auth'&&args[1]==='status'){const i=identity();console.log(JSON.stringify({loggedIn:!!i,authMethod:i?'claude.ai':'none',email:i?.email,orgUuid:i?.workspace,configDirectory:config().hideDirectory?undefined:home}));process.exit(i?0:1);}
+ if(args[0]==='auth'&&args[1]==='status'){const i=process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST?null:identity();console.log(JSON.stringify({loggedIn:!!i,authMethod:i?'claude.ai':'none',email:i?.email,orgUuid:i?.workspace,configDirectory:config().hideDirectory?undefined:home}));process.exit(i?0:1);}
  if(args[0]==='auth'&&args[1]==='logout'){try{fs.unlinkSync(marker);}catch{}console.log('{}');process.exit(0);}
  if(args[0]==='auth'&&args[1]==='login'){
   console.log('https://claude.com/cai/oauth/authorize?code=true&response_type=code&state=fake-state&code_challenge=fixture');
-  const rl=readline.createInterface({input:process.stdin});rl.on('line',line=>{if(line==='fixture-code'){save();process.exit(0);}else process.exit(1);});
+  const rl=readline.createInterface({input:process.stdin});rl.on('line',line=>{if(line==='fixture-code#fake-state'){if(config().loginFailure){console.error("Login failed: That code wasn't accepted. fixture-private-error");process.exit(1);}save();process.exit(0);}else process.exit(1);});
  }else if(args.includes('--input-format')){const rl=readline.createInterface({input:process.stdin});rl.on('line',line=>{const q=JSON.parse(line);if(q.type!=='control_request'||q.request?.subtype!=='initialize')process.exit(94);console.log(JSON.stringify({type:'control_response',response:{request_id:q.request_id,response:{models:[{value:'fixture-claude',displayName:'Fixture Claude',supportedEffortLevels:['low']}]}}}));});}else process.exit(91);
 }else{
  const rl=readline.createInterface({input:process.stdin});const send=x=>console.log(JSON.stringify(x));
@@ -47,6 +47,7 @@ process.env.ANTHROPIC_API_KEY = 'fixture-secret-anthropic';
 process.env.OPENAI_API_KEY = 'fixture-secret-openai';
 process.env.OPENAI_FEDERATION_RULE_ID = 'fixture-federation';
 process.env.ANTHROPIC_PROFILE = 'fixture-console-profile';
+process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '1';
 process.env.CODEX_HOME = path.join(root,'existing-default');
 fs.mkdirSync(process.env.CODEX_HOME);fs.writeFileSync(path.join(process.env.CODEX_HOME,'preserve'),'unchanged');
 
@@ -73,21 +74,35 @@ function ok(name){passed++;console.log('ok '+name);}
  assert.notEqual(a.identity.email,b.identity.email);assert.notEqual(m.directory(a),m.directory(b));ok('A and B device logins verify independently');
  assert.equal(a.allowance.windows[0].used_percent,23);assert.equal(a.allowance.windows[0].scope,'codex');assert.equal(a.catalog[0].id,'fixture-model');ok('catalog and actual reported quota stay on their account');
  const env=m.environment(a);assert.equal(env.ANTHROPIC_API_KEY,undefined);assert.equal(env.OPENAI_API_KEY,undefined);assert.equal(env.OPENAI_FEDERATION_RULE_ID,undefined);assert.equal(env.ANTHROPIC_PROFILE,undefined);assert.equal(env.HOME,original.HOME);assert.equal(env.CODEX_HOME,m.directory(a));ok('inherited billing/profile selectors scrubbed; real HOME preserved');
+ assert.equal(m.environment(c).CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST,undefined);ok('named subscription accounts never inherit host-managed auth that hides saved CLI credentials');
  const launched=await m.launch(a.id,String(a.epoch),'codex',['exec','resume','session-a'],root,0);
  assert.equal(launched.env.CODEX_HOME,m.directory(a));assert(launched.args.includes('session-a'));await assert.rejects(()=>m.launch(a.id,'1','codex',[],root,0));ok('child environment and epoch checked at launch');
  await m.request({op:'login',profile:c.id});const ca=[...m.attempts.values()].find(x=>x.profile===c.id);
  for(let i=0;i<30&&ca.state!=='waiting';i++)await delay(10);
  assert.equal(ca.state,'waiting');assert(ca.url.startsWith('https://claude.com/cai/oauth/authorize?code=true&'));
- await assert.rejects(()=>m.request({op:'respond',profile:c.id,attempt:aa.id,code:'fixture-code'}));
- await m.request({op:'respond',profile:c.id,attempt:ca.id,code:'fixture-code'});assert.equal((await terminal(m,ca.id)).state,'done');ok('Claude browser ceremony takes a response only for its own active attempt');
+ const partial=await m.request({op:'respond',profile:c.id,attempt:ca.id,code:'fixture-code'});
+ assert(partial.error.includes('including #'));assert.equal(ca.state,'waiting');
+ const stale=await m.request({op:'respond',profile:c.id,attempt:ca.id,code:'fixture-code#earlier-sign-in'});
+ assert(stale.error.includes('different sign-in attempt'));assert.equal(ca.state,'waiting');
+ assert.equal(c.state,'connecting');ok('incomplete and stale pasted codes explain the problem without consuming the active sign-in');
+ await assert.rejects(()=>m.request({op:'respond',profile:c.id,attempt:aa.id,code:'fixture-code#fake-state'}));
+ await m.request({op:'respond',profile:c.id,attempt:ca.id,code:'fixture-code#fake-state'});assert.equal((await terminal(m,ca.id)).state,'done');ok('Claude browser ceremony takes a response only for its own active attempt');
+ await m.request({op:'add',provider:'claude',label:'Refused code'});const refused=m.profiles.at(-1);
+ fs.writeFileSync(path.join(m.directory(refused),'fixture.json'),JSON.stringify({loginFailure:true}));
+ await m.request({op:'login',profile:refused.id});const ra=[...m.attempts.values()].find(x=>x.profile===refused.id);
+ for(let i=0;i<50&&ra.state!=='waiting';i++)await delay(10);
+ await m.request({op:'respond',profile:refused.id,attempt:ra.id,code:'fixture-code#fake-state'});
+ assert.equal((await terminal(m,ra.id)).state,'failed');assert(ra.message.includes('Claude did not accept'));assert(!ra.message.includes('fixture-private-error'));
+ assert(!fs.existsSync(path.join(m.root,refused.id,ra.candidate.store)));assert.equal(c.state,'connected');
+ ok('provider code refusal gives a safe reason, removes its failed store and preserves other accounts');
  await m.request({op:'add',provider:'codex',label:'Cancel'});const cancel=m.profiles.at(-1);
  fs.writeFileSync(path.join(m.directory(cancel),'fixture.json'),JSON.stringify({delay:500}),{mode:0o600});
  await m.request({op:'login',profile:cancel.id});const can=[...m.attempts.values()].find(x=>x.profile===cancel.id);
  await m.request({op:'cancel',profile:cancel.id,attempt:can.id});await delay(50);assert.equal(cancel.state,'disconnected');assert.equal(can.url,'');assert.equal(can.userCode,'');assert.equal(a.state,'connected');ok('cancel closes only its own sign-in and clears ephemeral ceremony');
- await m.request({op:'login',profile:cancel.id});const exp=[...m.attempts.values()].filter(x=>x.profile===cancel.id).at(-1);m.cancel(exp,'expired');assert.equal(exp.state,'expired');await assert.rejects(()=>m.request({op:'respond',profile:cancel.id,attempt:exp.id,code:'fixture-code'}));ok('expired attempts reject completion');
+ await m.request({op:'login',profile:cancel.id});const exp=[...m.attempts.values()].filter(x=>x.profile===cancel.id).at(-1);m.cancel(exp,'expired');assert.equal(exp.state,'expired');await assert.rejects(()=>m.request({op:'respond',profile:cancel.id,attempt:exp.id,code:'fixture-code#fake-state'}));ok('expired attempts reject completion');
  const oldEpoch=a.epoch;fs.writeFileSync(path.join(m.directory(a),'auth.marker.json'),JSON.stringify({email:'replacement@example.test',workspace:'replacement'}),{mode:0o600});
  await assert.rejects(()=>m.launch(a.id,String(oldEpoch),'codex',[],root,0));assert.equal(a.epoch,oldEpoch+1);assert.equal(b.state,'connected');ok('identity replacement invalidates selected generation before process launch');
- const restarted=new BPAccountsIO(home);const saved=restarted.profile(b.id);assert.equal(saved.state,'unchecked');await restarted.request({op:'status',profile:b.id});assert.equal(saved.identity.email,b.identity.email);assert.equal(saved.epoch,b.epoch);ok('restart requires provider verification and preserves stable identity epoch');
+ const restarted=new BPAccountsIO(home);const saved=restarted.profile(b.id);assert.equal(saved.state,'unchecked');await restarted.request({op:'list'});assert.equal(saved.identity.email,b.identity.email);assert.equal(saved.epoch,b.epoch);ok('opening account picker after restart verifies saved accounts and preserves stable identity epoch');
  await m.request({op:'disconnect',profile:b.id});assert.equal(b.state,'disconnected');assert.equal(b.allowance,null);assert.equal(b.catalog.length,0);assert.equal(c.state,'connected');ok('disconnect invalidates only selected profile');
  const registry=fs.readFileSync(m.index,'utf8');for(const secret of ['fixture-secret-anthropic','fixture-secret-openai','fixture-code','FIXTURE-ONLY'])assert(!registry.includes(secret));assert.equal(fs.statSync(m.index).mode&0o777,0o600);assert.equal(fs.statSync(m.root).mode&0o777,0o700);assert.equal(fs.readFileSync(path.join(path.join(root,'existing-default'),'preserve'),'utf8'),'unchanged');ok('private metadata excludes credential/ceremony values and existing default stays intact');
  assert.equal(m.url('https://attacker.example/auth','claude'),'');assert.equal(m.url('https://claude.ai/?access_token=fixture','claude'),'');assert.equal(m.url('http://claude.ai/','claude'),'');ok('provider authorization links use exact HTTPS allowlist');
@@ -116,16 +131,23 @@ function ok(name){passed++;console.log('ok '+name);}
  const {EventEmitter}=require('node:events'),ownedChild=new EventEmitter(),originalSpawn=context.BP_ACCOUNT_SPAWN;
  context.BP_ACCOUNT_SPAWN=(...args)=>{args[6](ownedChild);return {env:args[4]};};
  await m.launch(c.id,String(c.epoch),'claude',[],root,0);assert(m.busy(c.id));
- await assert.rejects(()=>m.request({op:'login',profile:c.id}));await assert.rejects(()=>m.request({op:'disconnect',profile:c.id}));assert.equal(c.state,'connected');
+ await assert.rejects(()=>m.request({op:'login',profile:c.id}));await assert.rejects(()=>m.request({op:'disconnect',profile:c.id}));await assert.rejects(()=>m.request({op:'remove',profile:c.id}));assert.equal(c.state,'connected');
  ownedChild.emit('exit',0);assert(!m.busy(c.id));context.BP_ACCOUNT_SPAWN=originalSpawn;ok('login and disconnect cannot mutate credentials held by an owned provider child');
  const retiredStore=c.store,retiredDir=path.join(m.root,c.id,retiredStore);
  await m.request({op:'login',profile:c.id});const promoted=[...m.attempts.values()].find(x=>x.profile===c.id);for(let i=0;i<40&&promoted.state!=='waiting';i++)await delay(10);
- await m.request({op:'respond',profile:c.id,attempt:promoted.id,code:'fixture-code'});assert.equal((await terminal(m,promoted.id)).state,'done');assert.notEqual(c.store,retiredStore);assert(!fs.existsSync(retiredDir));ok('verified reconnect retires the obsolete private credential store');
+ await m.request({op:'respond',profile:c.id,attempt:promoted.id,code:'fixture-code#fake-state'});assert.equal((await terminal(m,promoted.id)).state,'done');assert.notEqual(c.store,retiredStore);assert(!fs.existsSync(retiredDir));ok('verified reconnect retires the obsolete private credential store');
  const disconnectedDir=path.join(m.root,c.id,c.store);await m.request({op:'disconnect',profile:c.id});assert(!fs.existsSync(disconnectedDir));assert.equal(c.state,'disconnected');ok('disconnect removes its own provider store after successful provider logout');
  assert.equal(m.environment(a).RUST_LOG,'error');ok('named Codex children suppress inherited verbose authentication diagnostics');
  const aMarker=path.join(m.directory(a),'auth.marker.json'),aIdentity=JSON.parse(fs.readFileSync(aMarker,'utf8'));
  fs.writeFileSync(aMarker,JSON.stringify({email:'',workspace:''}));await assert.rejects(()=>m.verify(a));fs.writeFileSync(aMarker,JSON.stringify(aIdentity));ok('authenticated provider without reported account identity cannot establish a profile');
  const workspaceEpoch=a.epoch;fs.writeFileSync(aMarker,JSON.stringify({...aIdentity,workspace:'another-workspace'}));await assert.rejects(()=>m.launch(a.id,String(workspaceEpoch),'codex',[],root,0));assert.equal(a.epoch,workspaceEpoch+1);ok('same email with a different reported workspace invalidates session ownership');
+ const removedDir=path.join(m.root,refused.id);
+ await m.request({op:'remove',profile:refused.id});assert(!fs.existsSync(removedDir));assert(!m.snapshot().profiles.some(p=>p.id===refused.id));assert(!m.snapshot().attempts.some(x=>x.profile===refused.id));
+ assert(!JSON.parse(fs.readFileSync(m.index,'utf8')).profiles.some(p=>p.id===refused.id));assert.equal(m.profile(a.id),a);
+ await assert.rejects(()=>m.launch(refused.id,'1','claude',[],root,0));ok('delete removes failed account metadata, attempts and private stores without touching another profile');
+ const activeDir=m.directory(a);await m.request({op:'remove',profile:a.id});assert(!fs.existsSync(activeDir));assert.equal(m.profile(b.id),b);
+ assert.equal(fs.readFileSync(path.join(root,'existing-default','preserve'),'utf8'),'unchanged');
+ ok('delete can forget a connected account locally and preserves the existing default CLI store');
  console.log('passed '+passed+' account IO cases');
 })().finally(()=>{
  for(const m of context.bp_account_managers?.values?.()??[])for(const a of m.attempts.values())m.cancel(a);

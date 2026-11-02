@@ -111,6 +111,31 @@ try {
   check("back: no new thread", !!kart && threads(kart.id).length === 1, order);
   check("back: the answer names none", r4?.thread === undefined, r4);
 
+  // Invalid roots never become projects or start their first thread.
+  const beforeInvalid = order.filter(c => c.$ === "ProjectCreated").length;
+  const missing = join(user, "missing folder");
+  const [, missingReply] = await rpc("project.add", {path:missing});
+  check("missing root: refused with its path", missingReply?.ok === false && JSON.stringify(missingReply).includes(missing), missingReply);
+  const file = join(user, "a file"); writeFileSync(file, "x");
+  const [, fileReply] = await rpc("project.add", {path:file});
+  check("file root: refused with its path", fileReply?.ok === false && JSON.stringify(fileReply).includes(file), fileReply);
+
+  // The shell can resolve a folder but return a path the native hub cannot
+  // open (the Windows /C:/ failure). A fake converter reproduces that split.
+  if (process.platform !== "win32") {
+    const badFinal = join(user, "bad-final"); mkdirSync(badFinal);
+    writeFileSync(join(fake, "cygpath"), `#!/bin/sh
+if [ "$1" = -am ] && [ "$3" = '${badFinal}' ]; then
+  printf '%s\\n' '/C:/Users/test/invalid native folder'
+else printf '%s\\n' "$3"; fi
+`);
+    chmodSync(join(fake, "cygpath"), 0o755);
+    const [, nativeReply] = await rpc("project.add", {path:badFinal});
+    check("native root: rejected after successful shell resolution", nativeReply?.ok === false && JSON.stringify(nativeReply).includes("invalid project folder: /C:/Users/test/invalid native folder"), nativeReply);
+    rmSync(join(fake, "cygpath"));
+  }
+  check("invalid roots: no project events", order.filter(c => c.$ === "ProjectCreated").length === beforeInvalid);
+
   // two clients create at once: each answer names that client's thread
   // (client.bend's Made.reply selects only it; laws made_*)
   const other: any = { replies: new Map<number, any>() };

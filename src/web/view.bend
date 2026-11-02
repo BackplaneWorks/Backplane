@@ -1,4 +1,5 @@
 import Base
+import ../core/chat-pending.bend as CP
 import ./terminal-cells.bend as TCELL
 import ../core/view-page.bend as VP
 import ./list-windows.bend as LW
@@ -19,6 +20,8 @@ import ../core/i18n.bend as I
 import ./dom.bend as D
 import ./sidebar-slot.bend as SS
 import ./usage-page.bend as UV
+import ./allowance.bend as AW
+import ../core/allowance.bend as ALQ
 import ./settings-menu.bend as SM
 import ./icon.bend as WI
 import ../core/tools.bend as TO
@@ -899,9 +902,18 @@ def View.phase.k(idle: Bool, +label: String, +name: String, +key: String) -> Lis
     case False{}:
       [D.El{"div", key, [D.At{"class", "phase " ++ name}], [D.El{"span", "", [D.At{"class", "dot " ++ name}], Nil{}}, D.Txt{label}]}]
 
+def View.pending.node(+lc: I.Loc, +key: String) -> D.Node:
+  D.El{"div", key, [D.At{"class", "msg assistant pending"}, D.At{"role", "status"}, D.At{"aria-live", "polite"}],
+    [D.El{"div", "", [D.At{"class", "body"}], [D.Txt{CP.Pending.label(lc)}]}]}
+
+def View.pending.rows(+lc: I.Loc, show: Bool, +key: String) -> List<&2, D.Node>:
+  match show:
+    case True{}: [View.pending.node(lc, key)]
+    case False{}: Nil{}
+
 # the reply streaming in (made by the host from its text, View.make)
 def View.live.n.loc(+lc: I.Loc, +key: String, +text: String) -> D.Node:
-  D.El{"div", key, [D.At{"class", "msg assistant live"}], [D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}]}
+  View.pending.node(lc, key)
 
 # the reply streaming in, else the thread's phase (keyed "live:<thread>":
 # a delta redraws this row alone, app.bend's live)
@@ -930,15 +942,15 @@ def View.signal.live.loc(+lc: I.Loc, empty: Bool, +signal: Nat, text: String, +k
 def View.signal.of.loc(+lc: I.Loc, +info: Map<&2, String>, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
   View.signal.live.loc(lc, String.is_empty(U.Str.get(live, id)), SG.Signal.cached(info, id), U.Str.get(live, id), "live:" ++ id)
 
-# An empty bot live row has no summary or placeholder; actual streamed text
-# keeps its memo and identity, including the first delta after an idle chat.
+# A pending reply is a static bubble. Thin views already have a synthetic
+# row once deltas arrive; avoid a second bubble below that row.
 def View.thread.live.hide.loc(+lc: I.Loc, hide: Bool, +info: Map<&2, String>, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
   match hide:
     case True{}: Nil{}
     case False{}: View.signal.of.loc(lc, info, live, id)
 
 def View.thread.live.loc(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
-  View.thread.live.hide.loc(lc, String.is_empty(U.Str.get(live, id)), info, live, id)
+  View.pending.rows(lc, Bool.and(CP.Pending.visible(SG.Signal.cached(info, id)), Bool.not(CP.Pending.has(M.State.mine(st, id)))), "live:" ++ id)
 
 def View.live.of.loc(+lc: I.Loc, +st: M.State, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
   View.live.k.loc(lc, String.is_empty(U.Str.get(live, id)), U.Side.phase(st, U.Ui.thread(st, id)), U.Str.get(live, id), "live:" ++ id)
@@ -972,7 +984,7 @@ def View.live.u.chosen(+lc: I.Loc, empty: Bool, u: U.Ui, +sel: String, +live: Ma
 def View.live.u.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
   match u:
     case U.Ui{_, +sel, _, +live, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      View.live.u.chosen(lc, String.is_empty(U.Str.get(live, sel)), u, sel, live)
+      View.live.signal.u.loc(lc, U.Side.with_signals(u))
 
 def View.live.u(u: U.Ui) -> D.Node:
   View.live.u.loc(I.En{}, u)
@@ -1368,8 +1380,16 @@ def View.sub.signal.k(+lc: I.Loc, r: SB.SubRow, +act: String, +signal: String, i
 def View.sub.k(+lc: I.Loc, +r: SB.SubRow, +act: String) -> D.Node:
   View.sub.signal.k(lc, r, act, SB.Subs.signal(r), SB.SubInfo.none(), 0n)
 
-def View.sub.signals(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
+def View.sub.signals.row(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
   View.sub.signal.k(lc, r, SB.Subs.cancel(r), SB.Subs.signal.of(info, r), SB.Subs.info(st, th, r), now)
+
+def View.sub.signals.k(heading: Bool, +lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
+  match heading:
+    case True{}: D.El{"h3", SB.Subs.key(r), [D.At{"class", "sub-section"}], [D.Txt{SB.Subs.display.label(lc, r)}]}
+    case False{}: View.sub.signals.row(lc, r, info, st, th, now)
+
+def View.sub.signals(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
+  View.sub.signals.k(SB.Subs.display.heading(r), lc, r, info, st, th, now)
 
 def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> List<&2, D.Node>:
   match rs:
@@ -1379,7 +1399,7 @@ def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, St
 # the rows a page shows, each with more about it (SB.Subs.info: only these)
 def View.subs.signals.at(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> List<&2, D.Node>:
   +p = VP.Page.info(info, "subagents", SB.Subs.row_keys(rs), "")
-  List.append(&2, D.Node, View.subs.signals.raw(lc, LW.Lists.subs(rs, VP.Page.ids(p)), info, st, th, now), LW.Lists.pager(p))
+  List.append(&2, D.Node, View.subs.signals.raw(lc, SB.Subs.display(LW.Lists.subs(rs, VP.Page.ids(p))), info, st, th, now), LW.Lists.pager(p))
 
 def View.subs.signals.go(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
   View.subs.signals.at(lc, rs, info, M.State.empty(), "", 0n)
@@ -1477,7 +1497,9 @@ def View.ask.std(+lc: I.Loc, a: M.Ask, +draft: String) -> D.Node:
       D.El{"div", id, [D.At{"class", "ask " ++ k}], [
         D.Dom.span("ask-head", U.Ask.head.loc(lc, k, tool, d)),
         Bool.pick(D.Node, String.eq(k, "plan"), D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, d)}, D.El{"div", "", [D.At{"class", "ask-detail"}], [D.Txt{d}]}),
-        D.El{"div", "", [D.At{"class", "ask-btns"}], View.ask.btns.loc(lc, U.Ask.bkind(k, tool), id, o, draft)}]}
+        D.El{"div", "", [D.At{"class", "ask-btns"}], Bool.pick(List<&2, D.Node>, String.eq(tool, "settings_proposal"),
+          [D.Dom.button("primary", "answer", id ++ "|accept", "Apply this proposal", "Approve"), D.Dom.button("", "answer", id ++ "|decline", "Reject this proposal", "Reject")],
+          View.ask.btns.loc(lc, U.Ask.bkind(k, tool), id, o, draft))}]}
 
 # a browser task paused for help: its question, the screenshot, and the
 # person's choices (client.bend's Teach.ask)
@@ -1650,9 +1672,16 @@ def View.chips.loc(+lc: I.Loc, xs: List<&2, String>, +cur: String, +key: String)
 def View.chips(xs: List<&2, String>, +cur: String, +key: String) -> List<&2, D.Node>:
   View.chips.loc(I.En{}, xs, cur, key)
 
-def View.setrow(+label: String, +note: String, ctl: List<&2, D.Node>) -> D.Node:
-  D.El{"div", "", [D.At{"class", "set-row"}], [D.El{"div", "", [D.At{"class", "set-text"}], [D.Dom.span("set-label", label), D.Dom.span("set-note", note)]},
-    D.El{"div", "", [D.At{"class", "set-ctl"}], ctl}]}
+# Informational rows have no control panel. Keep them visually distinct
+# throughout Settings, including empty collections and unavailable features.
+def View.setrow.k(+info: Bool, +label: String, +note: String, ctl: List<&2, D.Node>) -> D.Node:
+  D.El{"div", "", [D.At{"class", Bool.pick(String, info, "set-row set-info", "set-row")},
+    D.At{"data-setting-kind", U.Settings.row.kind(Bool.not(info))}],
+    [D.El{"div", "", [D.At{"class", "set-text"}], [D.Dom.span("set-label", label), D.Dom.span("set-note", note)]},
+      D.El{"div", "", [D.At{"class", "set-ctl"}], ctl}]}
+
+def View.setrow(+label: String, +note: String, +ctl: List<&2, D.Node>) -> D.Node:
+  View.setrow.k(List.is_empty(&2, D.Node, ctl), label, note, ctl)
 
 def View.days.loc(+lc: I.Loc, +d: String) -> List<&2, D.Node>:
   +n = {Maybe.default(&2, Nat, Nat.read(d), 3n) : Nat}
@@ -1737,46 +1766,6 @@ def View.terms.loc(+lc: I.Loc, ts: List<&2, String>) -> List<&2, D.Node>:
 def View.terms(ts: List<&2, String>) -> List<&2, D.Node>:
   View.terms.loc(I.En{}, ts)
 
-# the engine (Auto, on this machine, OpenAI) and the local model
-def View.engine.chip(+lc: I.Loc, +cur: String, +v: String, +label: String) -> D.Node:
-  D.Dom.button(Bool.pick(String, String.eq(cur, v), "on", ""), "setting", "voice.engine=" ++ v, label, label)
-
-def View.model.chip(+cur: String, +v: String, +label: String) -> D.Node:
-  D.Dom.button(Bool.pick(String, String.eq(cur, v), "on", ""), "setting", "voice.model=" ++ v, label, label)
-
-def View.vlocal.find(ms: List<&2, J.Json>, +id: String) -> J.Json:
-  match ms:
-    case Nil{}:
-      J.Null{}
-    case +m <> t:
-      Bool.pick(J.Json, String.eq(J.Json.get_str(m, "id", ""), id), m, View.vlocal.find(t, id))
-
-# the local status ({"models":[{"id","label","size","installed"}], ...}) for one model
-def View.vlocal.model(+l: J.Json, +id: String) -> J.Json:
-  View.vlocal.find(J.Json.elems(J.Json.get_obj(l, "models")), id)
-
-def View.vlocal.note(+lc: I.Loc, +l: J.Json, +m: J.Json, +busy: Bool) -> String:
-  Bool.pick(String, busy, MSG.T.voice.model.busy(lc),
-    Bool.pick(String, Bool.not(J.Json.get_bool(l, "supported", True{})), MSG.T.voice.model.unsupported(lc, J.Json.get_str(l, "platform", "")),
-      Bool.pick(String, J.Json.get_bool(m, "installed", False{}), MSG.T.voice.model.ready(lc, J.Json.get_str(m, "label", "")),
-        MSG.T.settings.voice.model.note(lc) ++ " " ++ MSG.T.voice.model.none(lc))))
-
-def View.vlocal.ctl(+lc: I.Loc, +m: J.Json, +id: String, +busy: Bool) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, busy, Nil{},
-    Bool.pick(List<&2, D.Node>, J.Json.get_bool(m, "installed", False{}), [D.Dom.button("", "voice-dict", "remove:" ++ id, MSG.T.voice.model.remove(lc), MSG.T.voice.model.remove(lc))],
-      [D.Dom.button("primary", "voice-dict", "install:" ++ id, J.Json.get_str(m, "label", ""),
-        MSG.T.voice.model.download(lc, J.Json.get_str(m, "label", id), Nat.show(Nat.div(J.Json.get_nat(m, "size", 0n), 1000000n))))]))
-
-def View.voice.engine(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
-  +eng = M.Setting.get(st, "voice.engine", "auto")
-  +mid = VDV.Vdc.model.id(M.Setting.get(st, "voice.model", ""))
-  +l = Maybe.default(&2, J.Json, J.Json.parse(U.Ui.scratch(u, "@voice.local")), J.Null{})
-  +busy = String.starts_with(U.Ui.scratch(u, "@voice.busy"), "install:")
-  [View.setrow(MSG.T.settings.voice.engine(lc), MSG.T.settings.voice.engine.note(lc),
-     [View.engine.chip(lc, eng, "auto", MSG.T.voice.engine.auto(lc)), View.engine.chip(lc, eng, "local", MSG.T.voice.engine.local(lc)), View.engine.chip(lc, eng, "cloud", MSG.T.voice.engine.cloud(lc))]),
-   View.setrow(MSG.T.settings.voice.model(lc), View.vlocal.note(lc, l, View.vlocal.model(l, mid), busy),
-     List.append(&2, D.Node, [View.model.chip(mid, "parakeet-v2", "English"), View.model.chip(mid, "parakeet-v3", "25 languages")], View.vlocal.ctl(lc, View.vlocal.model(l, mid), mid, busy)))]
-
 # the dictionary's entries as written (core/vdict.bend: settings voice.e.*)
 def View.ventries.go(ks: List<&2, String>, +st: M.State, acc: List<&2, String>) -> List<&2, String>:
   match ks:
@@ -1788,18 +1777,6 @@ def View.ventries.go(ks: List<&2, String>, +st: M.State, acc: List<&2, String>) 
 def View.ventries(+st: M.State) -> List<&2, String>:
   View.ventries.go(M.Setting.keys.pre(st, VDV.Vdc.e.pre()), st, Nil{})
 
-# learned fixes (voice.l.*): heard → written · how often, × forgets one
-def View.vlearned.one(+lc: I.Loc, +k: String, +v: String) -> D.Node:
-  D.Dom.button(Bool.pick(String, VDV.Vdc.vl.trusted(v), "chip on", "chip"), "setting", k ++ "=", MSG.T.settings.voice.term.remove(lc),
-    MSG.T.voice.learned.item(lc, String.drop(k, 8n), VDV.Vdc.vl.out(v), Nat.show(VDV.Vdc.vl.yes(v))) ++ " ×")
-
-def View.vlearned(+lc: I.Loc, +st: M.State, ks: List<&2, String>) -> List<&2, D.Node>:
-  match ks:
-    case Nil{}:
-      Nil{}
-    case +k <> t:
-      View.vlearned.one(lc, k, M.Setting.get(st, k, "")) <> View.vlearned(lc, st, t)
-
 def View.voice.set.base(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
   [View.setrow(MSG.T.settings.voice.key(lc), U.Sealed.say(u, "vkey", Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.key")), MSG.T.settings.voice.key.note(lc),
       MSG.T.settings.voice.key.saved(lc, U.Ui.scratch(u, "@voice.key")))),
@@ -1808,20 +1785,10 @@ def View.voice.set.base(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
    View.setrow(MSG.T.settings.voice.microphone(lc), MSG.T.voice.device.note(lc, Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), MSG.T.voice.device.default(lc, U.Voice.label(u, U.Voice.default(u))), U.Voice.label(u, M.Setting.get(st, "voice.device", "")))),
      D.Dom.button(Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), "on", ""), "setting", "voice.device=", MSG.T.settings.voice.default.tip(lc), MSG.T.voice.default(lc)) <>
        View.devs(U.Voice.devices(u), M.Setting.get(st, "voice.device", ""))),
-   View.setrow(MSG.T.settings.voice.dictionary(lc), MSG.T.settings.voice.entries.note(lc),
+   View.setrow(MSG.T.settings.voice.dictionary(lc),
+     Bool.pick(String, List.is_empty(&2, String, List.append(&2, String, U.Voice.dict(u), View.ventries(st))), MSG.T.settings.voice.dictionary.empty(lc) ++ " " ++ MSG.T.settings.voice.entries.note(lc), MSG.T.settings.voice.entries.note(lc)),
      List.append(&2, D.Node, View.terms.loc(lc, List.append(&2, String, U.Voice.dict(u), View.ventries(st))), [WB.WB.area("voice-term", "vterm", U.Ui.scratch(u, "@f.vterm"), MSG.T.settings.voice.term(lc)),
-       D.Dom.button("", "voice-term", "", MSG.T.settings.voice.term.add(lc), MSG.T.common.add(lc))])),
-   View.setrow(MSG.T.settings.voice.learned(lc), MSG.T.settings.voice.learned.note(lc), View.vlearned(lc, st, M.Setting.keys.pre(st, VDV.Vdc.l.pre())))]
-
-# (the key's field is sealed, client.bend's Sealed: its value never
-# reaches the client's state, a view action or a draft)
-def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
-  List.append(&2, D.Node, View.voice.engine(lc, u, st), View.voice.set.base(lc, u, st))
-
-# API keys (client.bend's ApiKeys): add one, view the names, delete one
-
-def View.voice.set(+u: U.Ui, +st: M.State) -> List<&2, D.Node>:
-  View.voice.set.loc(I.En{}, u, st)
+       D.Dom.button("", "voice-term", "", MSG.T.settings.voice.term.add(lc), MSG.T.common.add(lc))]))]
 
 # (Delete asks first: the name pressed once, rm, reads "Click again to
 # delete", client.bend's ApiKeys.del)
@@ -1903,6 +1870,37 @@ def View.agy.rows(+u: U.Ui, rs: List<&2, U.AgRow>) -> List<&2, D.Node>:
       Nil{}
     case U.AgRow{+l, +n, fs, bs} <> t:
       View.setrow(l, n, List.append(&2, D.Node, View.agy.fields(u, fs), View.agy.btns(u, bs))) <> View.agy.rows(u, t)
+
+def View.voice.engine(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  View.agy.rows(u, U.Vlocal.rows(lc, u))
+
+# (the key's field is sealed, client.bend's Sealed: its value never
+# reaches the client's state, a view action or a draft)
+def View.vlocal.meter(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
+  match on:
+    case False{}: Nil{}
+    case True{}:
+      +p = Maybe.default(&2, J.Json, J.Json.parse(U.Ui.scratch(u, "@voice.progress")), J.Null{})
+      +total = J.Json.get_nat(p, "total", 0n)
+      +known = Bool.and(Nat.is_gt(total, 0n), String.eq(J.Json.get_str(p, "phase", "download"), "download"))
+      [D.El{"progress", "voice-model-progress", List.append(&2, D.Attr,
+        [D.At{"class", "voice-progress"}, D.At{"aria-label", MSG.T.settings.voice.model(U.Lang.loc(u))}],
+        Bool.pick(List<&2, D.Attr>, known, [D.At{"max", Nat.show(total)}, D.At{"value", Nat.show(Nat.min(total, J.Json.get_nat(p, "done", 0n)))}], Nil{})), Nil{}}]
+
+def View.vlocal.row(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  D.El{"div", "voice-model", [D.At{"class", Bool.pick(String, U.Vlocal.busy(u), "set-row set-busy", "set-row")},
+    D.At{"aria-busy", Bool.pick(String, U.Vlocal.busy(u), "true", "false")}], [
+    D.El{"div", "", [D.At{"class", "set-text"}], [D.Dom.span("set-label", MSG.T.settings.voice.model(lc)),
+      D.El{"span", "", [D.At{"class", Bool.pick(String, String.is_empty(U.Vlocal.error(u)), "set-note", "set-note bad")}, D.At{"role", "status"}, D.At{"aria-live", "polite"}], [D.Txt{U.Vlocal.note(lc, u)}]}]},
+    D.El{"div", "", [D.At{"class", "set-ctl"}], List.append(&2, D.Node, View.agy.btns(u, U.Vlocal.btns.k(U.Vlocal.busy(u), lc, u)), View.vlocal.meter(U.Vlocal.busy(u), u))}]}
+
+def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  List.append(&2, D.Node, List.append(&2, D.Node, View.agy.rows(u, List.take(&2, U.AgRow, U.Vlocal.rows(lc, u), 1n)), [View.vlocal.row(lc, u)]), List.append(&2, D.Node, View.voice.set.base(lc, u, st), View.agy.rows(u, U.Vlearned.rows(lc, st))))
+
+# API keys (client.bend's ApiKeys): add one, view the names, delete one
+
+def View.voice.set(+u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  View.voice.set.loc(I.En{}, u, st)
 
 # the time zone: where the person is (their phone reports it, or they set
 # it); a field for a zone name, Set, and Automatic: on (like a chosen chip)
@@ -2142,14 +2140,14 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       [View.setrow(U.Files.set.label(), U.Files.set.note(st), View.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
       View.notify(lc, st),
-      View.agy.rows(u, U.Fallbackv.rows(u)),
       View.agy.rows(u, U.Hookv.rows.loc(lc, u))])
-    case 2n: Bool.pick(List<&2, D.Node>, U.Psv.active(u), View.agy.rows(u, U.Psv.rows(1n, u)), List.concat(&2, D.Node, [View.agy.rows(u, U.Psv.rows(1n, u)), [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
+    case 2n: List.append(&2, D.Node, Bool.pick(List<&2, D.Node>, U.Psv.active(u), View.agy.rows(u, U.Psv.rows(1n, u)), List.concat(&2, D.Node, [View.agy.rows(u, U.Psv.rows(1n, u)), [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
         D.Dom.cat(View.menu.find(lc, U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), U.Ui.scratch(u, "@f.mq")),
           View.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", ""), "agent.model")))],
+      View.agy.rows(u, U.Fallbackv.rows(u)),
       Bool.pick(List<&2, D.Node>, U.Psv.active(u), Nil{}, View.agy.rows(u, U.Acv.rows(u))),
-      [View.setrow(U.Think.label(), U.Think.note(), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Think.on(st), "on", "off"), M.Think.key()))]]))
+      [View.setrow(U.Think.label(), U.Think.note(), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Think.on(st), "on", "off"), M.Think.key()))]])), View.agy.rows(u, U.Agv.rows.loc(lc, u)))
     case 3n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.writing.provider(lc), MSG.T.web.settings.writing.note(lc), View.chips.loc(lc, ["claude", "codex", "grok", "muse"], U.TextGen.provider(st), "text.provider"))],
       [View.setrow(MSG.T.web.settings.writing.model(lc), Bool.pick(String, String.is_empty(U.TextGen.model(st)), MSG.T.common.default(lc), U.TextGen.model(st)) ++ ": " ++ U.Models.label_of(U.Str.get(nf, "models"), U.TextGen.provider(st), U.TextGen.model(st)),
         View.chips.loc(lc, U.Models.menu(U.Str.get(nf, "models"), U.TextGen.provider(st)), U.TextGen.model(st), "text.model"))]])
@@ -2332,9 +2330,16 @@ def View.images(ps: List<&2, String>) -> List<&2, D.Node>:
 def View.fold.cls(+open: Bool, +live: Bool) -> String:
   "fold" ++ Bool.pick(String, open, " open", "") ++ Bool.pick(String, live, " live", "")
 
+def View.fold.accessible(open: Bool, node: D.Node) -> D.Node:
+  match node:
+    case D.El{tag, key, attrs, kids}: D.El{tag, key, D.At{"aria-expanded", Bool.pick(String, open, "true", "false")} <> attrs, kids}
+    case other: other
+
+
 def View.fold.row.live(+lc: I.Loc, +id: String, +label: String, +open: Bool, +live: Bool) -> D.Node:
-  WI.WIcon.button(View.fold.cls(open, live), "fold", FO.Fold.ask(open, id), MSG.T.fold.tooltip(lc, Bool.pick(String, open, "yes", "no"), Bool.pick(String, String.starts_with(id, "work:"), "work", "tools")),
-    Bool.pick(String, open, "chevron-down", "chevron-right"), 14, label)
+  View.fold.accessible(open, WI.WIcon.button(View.fold.cls(open, live), "fold", FO.Fold.ask(open, id), MSG.T.fold.tooltip(lc, Bool.pick(String, open, "yes", "no"), Bool.pick(String, String.starts_with(id, "work:"), "work", "tools")),
+    Bool.pick(String, open, "chevron-down", "chevron-right"), 14, label))
+
 
 def View.fold.row.loc(+lc: I.Loc, +id: String, +label: String, +open: Bool) -> D.Node:
   View.fold.row.live(lc, id, label, open, False{})
@@ -2782,7 +2787,7 @@ def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: St
     case M.Msg{+id, +th, M.User{}, +text, _}:
       View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
     case M.Msg{+id, +th, _, +text, _}:
-      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], View.ctx.attrs(RTO.Rto.chat(st, th), st, text)), text)
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", Bool.pick(String, CP.Pending.synthetic(id), "live", "msg")}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], View.ctx.attrs(RTO.Rto.chat(st, th), st, CP.Pending.text(lc, id, text))), CP.Pending.text(lc, id, text))
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       View.act.loc(lc, String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at}, st, ec)
 
@@ -3382,20 +3387,33 @@ def View.top(rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.Thread, +st: M.S
 # the asks (an answer with the draft). The page draws them with these, and
 # host.js redraws only them for a keystroke (app.bend's composer and asks):
 # rebuilding a long thread's page for every key took 280 ms a key.
+def View.accounts.wait(+state: String) -> String:
+  match state:
+    case "unchecked": "Checking saved sign-in…"
+    case "connecting": "Finish sign-in in Settings → Agents"
+    case "disconnected": "Connect in Settings → Agents"
+    case _: "Refresh status in Settings → Agents"
+
+def View.accounts.option(+p: J.Json) -> D.Node:
+  +label = J.Json.get_str(p, "provider", "") ++ " · " ++ J.Json.get_str(p, "label", "Account")
+  +state = J.Json.get_str(p, "state", "unchecked")
+  Bool.pick(D.Node, String.eq(state, "connected"),
+    D.Dom.button("", "acct-select", J.Json.get_str(p, "id", ""), U.Acv.note(p), label ++ " · connected"),
+    D.El{"button", "", [D.At{"disabled", "disabled"}, D.At{"aria-disabled", "true"}, D.At{"title", U.Acv.note(p)}], [D.Txt{label ++ " · " ++ View.accounts.wait(state)}]})
+
 def View.accounts.options(xs: List<&2, J.Json>, +provider: String) -> List<&2, D.Node>:
   match xs:
     case Nil{}: Nil{}
     case +p <> t:
-      List.append(&2, D.Node, D.Dom.when(String.eq(J.Json.get_str(p, "provider", ""), provider),
-        D.Dom.button("", "acct-select", J.Json.get_str(p, "id", ""), U.Acv.note(p), J.Json.get_str(p, "label", "Account") ++ " · " ++ J.Json.get_str(p, "state", "unchecked"))), View.accounts.options(t, provider))
+      View.accounts.option(p) <> View.accounts.options(t, provider)
 
 def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D.Node>:
   match open:
     case False{}: Nil{}
     case True{}:
       [D.El{"div", "account-picker", [D.At{"class", "account-picker"}],
-        D.Txt{"Switch between turns. No automatic account fallback."} <>
-        D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default account") <>
+        D.Txt{"Choose an account between turns. Usage limits automatically try another connected account of the same agent, then your fallback hierarchy. Your choice returns after its reported reset, between turns."} <>
+        D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default " ++ provider ++ " account") <>
         View.accounts.options(ACCT.Accounts.profiles(st), provider)}]
 
 def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:
@@ -3413,11 +3431,15 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
     +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:
   +stop = U.Follow.stop(View.running(turn), U.Str.get(drafts, sel), atts)
   +tok = UZ.Ts.on(st)
+  +quota = ALQ.Allowance.selected(st, sel, pr)
+  +clock = M.Switch.num(U.Str.get(nf, "clock"), 0n)
   View.composer.p(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), pr,
     View.mp.loc(lc, U.Flag.get(op, "models"), ACCT.Accounts.nf(nf, st, sel), U.Mpk.cur.of(st, sel, drafts), U.Mpk.now(st, sel), U.Str.get(drafts, "@f.mq"), MPK.ModelPick.kept(U.Str.get(drafts, "@mp"), sel)),
-    List.append(&2, D.Node, View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))), View.accounts(st, sel, pr, U.Flag.get(op, "accounts"))),
+    [D.El{"div", "composer-model", [D.At{"class", "composer-model"}], List.concat(&2, D.Node, [
+      View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))),
+      View.accounts(st, sel, pr, U.Flag.get(op, "accounts")), AW.AllowanceWeb.chip(quota, pr, mo, clock, U.Flag.get(op, "allowance"))])}],
     U.Skills.shown(st, sel, drafts, nf), atts, up, D.Dom.cat(View.draft.limit.k(DB.Bound.say(lc, U.Str.get(drafts, "@draft.bound"))), vo), mic,
-    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), View.running(turn))
+    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), List.append(&2, D.Node, View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), AW.AllowanceWeb.pop(U.Flag.get(op, "allowance"), quota, pr, mo, clock)), View.running(turn))
 
 # A buy thread's asks: a "Backplane needs" card each, above the composer
 # (client.bend's Fab.order). An order question's choices are buttons (the
@@ -5132,18 +5154,25 @@ def View.tour.example(show: Bool, +lc: I.Loc) -> List<&2, D.Node>:
         [View.tour.example.tool(TO.Tools.settle.loc(lc, False{})), View.tour.example.tool(TO.Tools.snooze.loc(lc, False{}, "", "")),
          View.tour.example.tool(TO.Tools.fork.loc(lc)), View.tour.example.tool(TO.Tools.panel.loc(lc, False{}))]}]
 
+def View.tour.footer(telemetry: Bool, +lc: I.Loc, back: Bool, fwd: String) -> List<&2, D.Node>:
+  match telemetry:
+    case True{}:
+      [D.Dom.button("telemetry-off", "share", "off", "Disable every telemetry category", "Turn off all telemetry"),
+        D.Dom.button("primary", "ob-next", "", "Save the displayed telemetry choice", fwd),
+        D.Dom.button("telemetry-later", "ob-skip", "", "Leave undecided; send nothing", "Decide later")]
+    case False{}:
+      [D.Dom.button("", "ob-skip", "", MSG.T.tour.end.tip(lc), MSG.T.tour.skip(lc)), D.Dom.span("gap", ""),
+        View.tour.back.loc(lc, back), D.Dom.button("primary", "ob-next", "", MSG.T.tour.next.tip(lc), fwd)]
+
 def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, example: List<&2, D.Node>, cs: List<&2, U.TChoice>, +counter: String, back: Bool, fwd: String) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "tour-back"}], Nil{}},
-    D.El{"div", "tour", [D.At{"class", "tour"}, D.At{"role", "dialog"}, D.At{"aria-modal", "true"}, D.At{"aria-labelledby", "tour-title"}], [
+    D.El{"div", "tour", [D.At{"class", Bool.pick(String, Nat.is_eq(i, OB.Ob.share()), "tour telemetry-tour", "tour")}, D.At{"role", "dialog"}, D.At{"aria-modal", "true"}, D.At{"aria-labelledby", "tour-title"}], [
       D.Dom.span("count", counter),
       D.El{"div", "tour-title", [D.At{"class", "tour-title"}, D.At{"id", "tour-title"}], [D.Txt{OB.Ob.title(lc, i)}]},
       D.El{"p", "", [D.At{"class", "tour-body"}], D.Txt{body} <> example},
       D.El{"div", "", [D.At{"class", "tour-choices"}], View.tour.choices(cs)},
-      D.El{"div", "", [D.At{"class", "tour-btns"}], [
-        D.Dom.button("", "ob-skip", "", MSG.T.tour.end.tip(lc), MSG.T.tour.skip(lc)),
-        D.Dom.span("gap", ""),
-        View.tour.back.loc(lc, back),
-        D.Dom.button("primary", "ob-next", "", MSG.T.tour.next.tip(lc), fwd)]}]}]
+      D.El{"div", "", [D.At{"class", "tour-btns"}], View.tour.footer(Nat.is_eq(i, OB.Ob.share()), lc, back, fwd)}]}]
+
 
 def View.tour.k(+lc: I.Loc, on: Bool, +i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match on:
@@ -5432,7 +5461,7 @@ def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D
           View.main.b(lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
           D.Dom.cat(View.aside.if(lc, pa, U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
             D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.intent(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
-              D.Dom.cat(View.error(e), D.Dom.cat(View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
+              D.Dom.cat(View.error(U.Ui.error.shown(lc, e)), D.Dom.cat(View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
                 View.star(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))))))))}
 
 def View.page.sidebar.node(reuse: Bool, +lc: I.Loc, u: U.Ui) -> D.Node:

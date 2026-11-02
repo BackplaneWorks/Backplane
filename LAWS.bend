@@ -1,4 +1,18 @@
+import ./src/core/allowance.bend as ALLOWANCE
+
+import ./src/core/usage_page.bend as UPERIOD
+
+import ./src/core/chat-pending.bend as CHATPENDING
+
+import ./src/core/i18n.bend as CHATLOC
+
+import ./src/core/lazy-tools.bend as LTOOLS
+
+import ./src/core/issue-report.bend as ISSUEPOLICY
+
 import ./src/core/star-nudge.bend as STARN
+
+import ./src/core/settingsproposal.bend as SETPROPOSAL
 
 import ./src/core/provider-setup.bend as PROVIDERSETUP
 
@@ -85,6 +99,8 @@ import ./src/core/maildisposition.bend as MDSP
 import ./src/core/mailcontinuity.bend as MCN
 
 import ./src/core/telemetry.bend as TEL
+
+import ./src/core/telemetry-choice.bend as TCHOICE
 
 import ./src/core/telemetry-usage.bend as TUSAGE
 
@@ -8138,6 +8154,14 @@ law clipath_idempotent:
 law clipath_nvm_newest_first:
   {CPA.CliPath.candidates("/h", ["/h/.nvm/versions/node/v9.11.2/bin", "/h/.nvm/versions/node/v24.13.1/bin", "/h/.nvm/versions/node/v18.0.0/bin"]) == ["/h/.nvm/versions/node/v24.13.1/bin", "/h/.nvm/versions/node/v18.0.0/bin", "/h/.nvm/versions/node/v9.11.2/bin"] : List<&2, String>}
 
+# A failed Windows probe cannot replace the native hub's PATH.
+law clipath_windows_missing_probe:
+  for cur: String
+  {CPA.CliPath.win.rows(Nil{}, cur, "", "", Nil{}) == cur : String}
+
+law clipath_windows_claude:
+  {CPA.CliPath.next("C:/Runtime/bin;C:/Windows/System32", "C:/Users/P", "winhome\tC:/Users/P\nwindir\tC:/Users/P/.local/bin\n") == "C:/Runtime/bin;C:/Windows/System32;C:/Users/P/.local/bin" : String}
+
 # harness-coord: wakes
 law wake_once_per_event:
   {H.Wake.demo.twice() == 0n : Nat}
@@ -15112,3 +15136,291 @@ law star_nudge_saved_send_waits:
   for +client: U32
   for +text: String
   {DQ.Dq.local(H.SavedSend{client, text}) == False{} : Bool}
+
+# A rejected settings proposal cannot write either fallback setting.
+law settings_proposal_decline_no_write:
+  for +s: M.State
+  for +now: Nat
+  for +client: U32
+  for +id: String
+  for +ask: String
+  for +th: String
+  {SETPROPOSAL.Proposal.touched(H.Queue.changes(H.Settings.answer(False{}, s, now, client, id, ask, "decline", th, ""))) == False{} : Bool}
+
+law settings_proposal_deadline_exclusive:
+  {SETPROPOSAL.Proposal.snapshot(SETPROPOSAL.Proposal{"off", "", "off", "", 100n}, 100n, "off", "") == False{} : Bool}
+
+law settings_proposal_write_invalidates:
+  {SETPROPOSAL.Proposal.invalidate([M.SettingSet{"fallback.on", "off", 10n}], [M.Ask{"a", "t", "approval", "settings_proposal", "", "", True{}, ""}], 10n) == [M.AskClosed{"a", "stale", 10n}] : List<&2, M.Change>}
+
+# Agents advertises the fallback editor in the shared Settings search index.
+law fallback_settings_agents_row:
+  {List.head(&2, String, List.drop(&2, String, U.Settings.rows.of(2n, I18.En{}), 2n)) == Some{"Fallback hierarchy"} : Maybe<&2, String>}
+
+law chat_pending_working:
+  {CHATPENDING.Pending.visible(1n) == True{} : Bool}
+
+law chat_pending_blocked:
+  {CHATPENDING.Pending.visible(3n) == False{} : Bool}
+
+law chat_pending_finished:
+  {CHATPENDING.Pending.visible(5n) == False{} : Bool}
+
+law chat_pending_no_partial_reply:
+  for +lc: CHATLOC.Loc
+  for +text: String
+  {CHATPENDING.Pending.text(lc, "@live:t", text) == CHATPENDING.Pending.label(lc) : String}
+
+# A viewport may opt into bottom alignment without changing other callers.
+law timeline_fit_disabled:
+  for layout: TLVIRTUAL.Layout
+  for view: TLVIRTUAL.Px
+  {TLVIRTUAL.Layout.fit(False{}, layout, view) == layout : TLVIRTUAL.Layout}
+
+law timeline_unbounded_position:
+  for +top: TLVIRTUAL.Px
+  for total: TLVIRTUAL.Px
+  for view: TLVIRTUAL.Px
+  {TLVIRTUAL.Viewport.top(False{}, top, total, view) == top : TLVIRTUAL.Px}
+
+law sending_preview_excludes_secret:
+  {U.Draft.preview("/secret test") == False{} : Bool}
+
+# Shutting a tool drawer removes its materialized text/blocks while keeping
+# the source ordinal stable. An explicitly open row is left intact.
+law lazy_tools_open_row_unchanged:
+  for +r: THINL.Row
+  {LTOOLS.Tools.row(True{}, r) == r : THINL.Row}
+
+law lazy_tools_shut_row_ordinal:
+  for +r: THINL.Row
+  {THINL.Row.n(LTOOLS.Tools.row(False{}, r)) == THINL.Row.n(r) : Nat}
+
+law lazy_tools_shut_row_blocks:
+  for +r: THINL.Row
+  {THINL.Row.blocks(LTOOLS.Tools.row(False{}, r)) == THINL.Blocks.of("") : THINL.Blocks}
+
+law lazy_tools_shut_row_text:
+  for +n: Nat
+  for +e: M.Entry
+  for +terms: Map<&2, Bool>
+  for +blocks: THINL.Blocks
+  {THINL.Entry.text(THINL.Row.entry(LTOOLS.Tools.row(False{}, THINL.Row{n, e, terms, blocks}))) == "" : String}
+
+# All-category opt-out: the displayed default is not transmission permission.
+law telemetry_default_selected:
+  {TCHOICE.Choice.on("", "") == True{} : Bool}
+
+law telemetry_default_pending:
+  {TCHOICE.Choice.allowed("", "", "") == False{} : Bool}
+
+law telemetry_all_off:
+  for asked: String
+  for usage: String
+  {TCHOICE.Choice.allowed("off", asked, usage) == False{} : Bool}
+
+law telemetry_existing_optout_answered:
+  for asked: String
+  for usage: String
+  {TCHOICE.Choice.answered("off", asked, usage) == True{} : Bool}
+
+law telemetry_runtime_closed:
+  for st: TEL.TmState
+  for view: TEL.TmView
+  for id: String
+  for day: String
+  {TEL.Tm.runtime.plan(False{}, st, view, id, day) == TEL.TmPlan{TEL.Tm.fresh(), False{}} : TEL.TmPlan}
+
+law tm_off_view_current:
+  {TEL.Tm.current(TEL.TmView{False{}, False{}, "0", "0.12.0", "release", "linux", "x64", "", 5n}, M.State.replay([M.SettingSet{"telemetry.share", "off", 1n}, M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.usage.asked", "0", 1n}], M.State.empty())) == True{} : Bool}
+
+law tm_on_view_current:
+  {TEL.Tm.current(TEL.TmView{True{}, True{}, "0", "0.12.0", "release", "linux", "x64", "", 5n}, M.State.replay([M.SettingSet{"telemetry.share", "on", 1n}, M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.usage.asked", "1", 1n}], M.State.empty())) == True{} : Bool}
+
+law tm_permit_waits_for_disk:
+  for allowed: Bool
+  for current: Bool
+  {TEL.Tm.permit(True{}, True{}, allowed, current) == False{} : Bool}
+
+law tm_start_waits_for_disk:
+  {TEL.Tm.start(True{}, True{}, True{}) == False{} : Bool}
+
+law tm_start_cleans_up_waiting_off:
+  {TEL.Tm.start(True{}, True{}, False{}) == True{} : Bool}
+
+law telemetry_choice_no_decision_no_replay:
+  for seen: List<&2, String>
+  for fp: String
+  {H.Hub.telemetry.choice.replay(seen, "", fp) == False{} : Bool}
+
+law tour_back_skips_usage:
+  {U.Tour.dest(True{}, True{}, OBD.Ob.share()) == 8n : Nat}
+
+law tour_next_skips_usage:
+  {U.Tour.dest(False{}, True{}, OBD.Ob.share()) == OBD.Ob.uber() : Nat}
+
+law tour_usage_kept_when_due:
+  for back: Bool
+  {U.Tour.dest(back, False{}, OBD.Ob.share()) == OBD.Ob.share() : Nat}
+
+
+# Read-only settings rows never claim to be controls.
+law settings_row_information:
+  {U.Settings.row.kind(False{}) == "info" : String}
+
+# File presence alone must never report a usable local engine.
+law voice_model_needs_runtime:
+  {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}
+
+# The original ten-field contract remains unchanged; PCB adds exactly two.
+law pcb_usage_fixed_fields:
+  {UCOUNT.Uc.all_names() == ["threads_created", "user_messages", "assistant_messages", "bot_messages", "bot_wakes", "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens", "usage_turns", "boards_created", "boards_ordered"] : List<&2, String>}
+
+# A Windows drive root remains absolute when the project root is stored.
+law project_drive_root_absolute:
+  {H.Hub.root.norm("C:/") == "C:/" : String}
+
+law project_unc_root:
+  {H.Hub.root.norm("//server/share/") == "//server/share" : String}
+
+# Saved-source stamps are opt-in and replay only to the joining client.
+law plot_stamp_opt_out:
+  {PLOTWATCH.Sub.wants.stamp(PLOTWATCH.Sub{7, "board", Nil{}, "", True{}, "", False{}}, "board") == False{} : Bool}
+
+law plot_stamp_other_client:
+  {PLOTWATCH.Sub.for_client([PLOTWATCH.Sub{7, "board", Nil{}, "", True{}, "", True{}}], 8) == Nil{} : List<&2, PLOTWATCH.Sub>}
+
+# Remaining allowance comes from the provider's share used; refreshes are bounded.
+law allowance_remaining_reported:
+  {ALLOWANCE.Allowance.remaining(280n) == 72n : Nat}
+
+law allowance_refresh_held:
+  {ALLOWANCE.Allowance.due.at(1000n, 1299n) == False{} : Bool}
+
+law allowance_refresh_due:
+  {ALLOWANCE.Allowance.due.at(1000n, 1300n) == True{} : Bool}
+
+law allowance_future_unknown:
+  {ALLOWANCE.Allowance.time.known(1001n, 1000n) == False{} : Bool}
+
+# Report destination is an explicit choice; old internal drafts stay internal.
+law issue_report_new_default:
+  {ISSUEPOLICY.Issue.target("", False{}) == "issue" : String}
+
+law issue_report_legacy_internal:
+  {ISSUEPOLICY.Issue.target("", True{}) == "internal" : String}
+
+law issue_report_explicit_issue:
+  for legacy: Bool
+  {ISSUEPOLICY.Issue.target("issue", legacy) == "issue" : String}
+
+law issue_report_explicit_internal:
+  for legacy: Bool
+  {ISSUEPOLICY.Issue.target("internal", legacy) == "internal" : String}
+
+# Automatic metadata cannot rewrite even one character of the person's text.
+law issue_report_verbatim_text:
+  for text: String
+  {ISSUEPOLICY.Issue.report(text, "linux", "v1.2.3", "", "") == text ++ "\n\n---\nOS: Linux\nApp version: 1.2.3\n" : String}
+
+law issue_report_manual_details_verbatim:
+  for c: Char
+  for text: String
+  {ISSUEPOLICY.Issue.optional("Details", SCon{c, text}) == "\n\nDetails\n" ++ SCon{c, text} : String}
+
+law issue_report_diagnostics_absent:
+  {ISSUEPOLICY.Issue.optional("Diagnostics (JSON)", "") == "" : String}
+
+law issue_report_os_description_closed:
+  {ISSUEPOLICY.Issue.os("Linux host.owner /private/path") == "Unknown" : String}
+
+law issue_report_version_omits_build:
+  {ISSUEPOLICY.Issue.version("v1.2.3+local.owner") == "1.2.3" : String}
+
+law issue_report_version_rejects_path:
+  {ISSUEPOLICY.Issue.version("/home/person/build/1.2.3") == "unknown" : String}
+
+law issue_report_preview_retains_body:
+  for body: String
+  {J.Json.get_str(ISSUEPOLICY.Issue.preview.body(body), "body", "") == body : String}
+
+law issue_report_url_overflow_closed:
+  for bs: List<&2, U32>
+  for budget: Nat
+  for acc: String
+  {ISSUEPOLICY.Issue.url.encode(bs, budget, acc, False{}) == "" : String}
+
+law issue_report_official_repository:
+  {ISSUEPOLICY.Issue.new_url() == "https://github.com/BackplaneWorks/Backplane/issues/new" : String}
+
+law issue_report_template_revision:
+  {ISSUEPOLICY.Issue.template.version() == "1" : String}
+
+law issue_report_prompt_original_verbatim:
+  for description: String
+  {ISSUEPOLICY.Issue.prompt.original(description) == "\nOriginal description, verbatim, until end of input\n" ++ description : String}
+
+# Frequent liveness stamps belong to their owner; other views use the
+# sidebar cadence while unknown settings retain global invalidation.
+law active_progress_other_soft:
+  {TPR1.Touch.level(TPR1.Touch.changes([M.SettingSet{"liveness.owner", "progress", 1n}], TPR1.Touch.none()), "other") == 1n : Nat}
+
+law active_progress_owner_urgent:
+  {TPR1.Touch.level(TPR1.Touch.changes([M.SettingSet{"liveness.owner", "progress", 1n}], TPR1.Touch.none()), "owner") == 2n : Nat}
+
+# Rolling usage windows are fixed UTC day counts, regardless of the date.
+law usage_rolling_week:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "week") == 6n : Nat}
+
+law usage_rolling_two_weeks:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "2weeks") == 13n : Nat}
+
+law usage_rolling_four_weeks:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "4weeks") == 27n : Nat}
+
+law usage_rolling_month:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "30days") == 29n : Nat}
+
+law usage_rolling_default:
+  {UPERIOD.Up.period("") == "30days" : String}
+
+law usage_rolling_empty_unknown:
+  {UPERIOD.Up.sum("", "") == "" : String}
+
+# Subthread presentation is separate from work ownership and badge counts.
+law subs_display_shell_background:
+  {SB.Subs.display.kind(SB.SubRow{"shell", True{}, "Build", "shell", "running", "", True{}, False{}, 0n, []}) == 1n : Nat}
+
+law subs_display_child_conversation:
+  {SB.Subs.display.kind(SB.SubRow{"child", False{}, "Inspect", "codex", "running", "", True{}, False{}, 0n, []}) == 0n : Nat}
+
+law subs_display_finished_toggle_kept:
+  {SB.Subs.display.part([SB.Subs.done.toggle("t", 2n, False{})], 2n) == [SB.Subs.done.toggle("t", 2n, False{})] : List<&2, SB.SubRow>}
+
+law subthreads_claude_blocks_native:
+  {String.contains(String.join(PM.Claude.args("", "", M.FullAccess{}, M.DefaultMode{}, "", []), " "), "--disallowedTools Agent,Task") == True{} : Bool}
+
+law pending_projection_unfitted:
+  for xs: List<&2, String>
+  {U.Pending.project(False{}, xs) == xs : List<&2, String>}
+
+law pending_preview_whole:
+  for text: String
+  {U.Pending.preview.k("", text) == text : String}
+
+law pending_preview_ellipsis:
+  for c: Char
+  for rest: String
+  for head: String
+  {U.Pending.preview.k(SCon{c, rest}, head) == head ++ "…" : String}
+
+# a \uXXXX surrogate pair (how Python's json.dumps writes every emoji) is
+# one character, and a surrogate without its partner is U+FFFD: JSON text
+# never stops the parser on a Char Bend refuses to make (the hub stopped at
+# every start on an escaped emoji in a boat status file, 2026-11-02)
+law json_surrogate_pair:
+  {J.Json.show(Maybe.default(&2, J.Json, J.Json.parse("\"\\ud83d\\udc69|\\ud83d|\\udc69\""), J.Null{})) == "\"\u{1F469}|\u{FFFD}|\u{FFFD}\"" : String}
