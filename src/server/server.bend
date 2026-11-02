@@ -1,4 +1,6 @@
 import Base
+import ../core/folder.bend as FP
+import ./spawn.bend as SP
 import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
@@ -1373,7 +1375,7 @@ def Spawn.agent(+cmd: String, args: List<&2, String>, +cwd: String, +err: U32) -
   do IO<Result<&1, &1, U32 & String, U32 & Socket>>:
     xs : List<&2, String> <- VX.Vx.args(args)
     env : List<&2, String> <- K.KiCad.agent_env()
-    Spawn.agent.with_env(env, cmd, xs, cwd, err)
+    IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Result<&1, &1, U32 & String, U32 & Socket>, Spawn.agent.with_env(env, cmd, xs, cwd, err), res => SP.Spawn.checked(res, cwd))
 
 # each line to an agent's stdin (prompts, turn text, answers) masked
 def Agent.write.m(+line: String, s: Socket, k: Socket -> IO(Unit)) -> IO(Unit):
@@ -2413,11 +2415,11 @@ def Codex.fed(r: U.Lines & List<&2, String>, s: Socket, +ended: Bool, +thread: S
 
 # $d from $1: "" and ~ are home, ~/x and relative paths are under home
 def FsJob.path.sh() -> String:
-  "d=\"$1\"; case \"$d\" in ''|'~') d=\"$HOME\";; '~/'*) d=\"$HOME/${d#??}\";; /*) ;; *) d=\"$HOME/$d\";; esac; "
+  FP.Folder.path.sh()
 
-# a folder that exists and can be opened, printed resolved (symlinks too)
+# Resolve symlinks in the shell, then return a native path to the hub.
 def FsJob.dir.sh() -> String:
-  "[ -e \"$d\" ] || { echo \"no such folder: $d\"; exit 2; }; [ -d \"$d\" ] || { echo \"not a folder: $d\"; exit 2; }; [ -r \"$d\" ] && [ -x \"$d\" ] && d=$(cd -P -- \"$d\" && pwd -P) || { echo \"cannot open: $d\"; exit 2; }; "
+  FP.Folder.dir.sh() ++ FP.Folder.native.sh()
 
 def FsJob.list.sh() -> String:
   "exec 2>&1; set -e; " ++ FsJob.path.sh() ++ FsJob.dir.sh() ++ "echo \"$d\"; find \"$d\" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's|^.*/||' | LC_ALL=C sort | head -n 5000"
@@ -2513,13 +2515,21 @@ def FsJob.made(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Uni
 
 # a resolved folder becomes a project: the hub gets project.create as if
 # the asking client sent it, so the answer (or "already a project") is its
+def FsJob.register(st: Result<&1, &1, U32 & String, U32 & U32 & U32>, +inbox: Chan(Msg), +client: U32, +id: String, +path: String) -> IO(Unit):
+  match st:
+    case Done{(1, _)}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Rpc{client, J.Json.show(J.Json.obj([J.KV{"id", J.Num{id}}, J.KV{"m", J.Str{"project.create"}},
+          J.KV{"p", J.Json.obj([J.KV{"path", J.Str{path}}])}]))})
+        return Unit{}
+    case _:
+      FsJob.answer(inbox, client, id, J.Json.obj([J.KV{"error", J.Str{"invalid project folder: " ++ path}}]))
+
 def FsJob.create(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
   match r:
     case P.Ran{0, out}:
-      do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Rpc{client, J.Json.show(J.Json.obj([J.KV{"id", J.Num{id}}, J.KV{"m", J.Str{"project.create"}},
-          J.KV{"p", J.Json.obj([J.KV{"path", J.Str{FsJob.last(String.lines(String.trim(out)))}}])}]))})
-        return Unit{}
+      +path = FsJob.last(String.lines(String.trim(out)))
+      IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(path), st => FsJob.register(st, inbox, client, id, path))
     case P.Ran{_, out}:
       FsJob.answer(inbox, client, id, J.Json.obj([J.KV{"error", J.Str{String.trim(out)}}]))
 
@@ -3541,7 +3551,7 @@ def Codex.refuse(+thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
 def AccountSpawn.named(legacy: Bool, +home: String, +profile: String, +epoch: String, +cmd: String, args: List<&2, String>, +cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   match legacy:
     case True{}: Spawn.agent("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> cmd <> args, cwd, err)
-    case False{}: ACFX.AccountsFx.spawn(home, profile, epoch, cmd, args, cwd, err)
+    case False{}: IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Result<&1, &1, U32 & String, U32 & Socket>, ACFX.AccountsFx.spawn(home, profile, epoch, cmd, args, cwd, err), res => SP.Spawn.checked(res, cwd))
 
 def AccountSpawn.run(+home: String, +st: M.State, +thread: String, +cmd: String, args: List<&2, String>, cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   AccountSpawn.named(String.is_empty(ACCT.Accounts.id(st, thread, cmd)), home, ACCT.Accounts.id(st, thread, cmd), Nat.show(ACCT.Accounts.epoch(st, thread, cmd)), cmd, args, cwd, err)
@@ -9842,26 +9852,13 @@ def Claude.started.ok(started: U32 & Socket, +thread: String, +gen: String, +inp
   (+pid, s) = started
   IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Unit, H.Sock.dup(s), r => Claude.duped(r, pid, thread, gen, input, inbox))
 
-# why a process could not start, naming its folder when that is gone (a
-# thread whose worktree was removed: posix_spawn's chdir answers only
-# "No such file or directory", which reads as a missing program)
-def Spawn.why(st: Result<&1, &1, U32 & String, U32 & U32 & U32>, +cwd: String, +msg: String) -> String:
-  match st:
-    case Done{_}:
-      msg
-    case Fail{_}:
-      Bool.pick(String, String.is_empty(cwd), msg, "its folder " ++ cwd ++ " is gone (" ++ msg ++ ")")
-
-def Claude.started.fail(e: U32 & String, +thread: String, +gen: String, +cwd: String, +inbox: Chan(Msg)) -> IO(Unit):
-  (_, +msg) = e
-  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(cwd), st => Claude.fail(thread, gen, Spawn.why(st, cwd, msg), inbox))
 
 def Claude.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: String, +gen: String, +cwd: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   match r:
     case Done{started}:
       Claude.started.ok(started, thread, gen, input, inbox)
     case Fail{e}:
-      Claude.started.fail(e, thread, gen, cwd, inbox)
+      Claude.fail(thread, gen, SP.Spawn.message(e), inbox)
 
 def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, +effort: String, +gen: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:

@@ -15257,3 +15257,10 @@ law settings_row_information:
 # File presence alone must never report a usable local engine.
 law voice_model_needs_runtime:
   {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}
+
+# A Windows drive root remains absolute when the project root is stored.
+law project_drive_root_absolute:
+  {H.Hub.root.norm("C:/") == "C:/" : String}
+
+law project_unc_root:
+  {H.Hub.root.norm("//server/share/") == "//server/share" : String}
