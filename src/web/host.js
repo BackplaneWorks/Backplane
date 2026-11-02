@@ -320,8 +320,10 @@ function patch(el, v) {
       scroller = new TimelineScroller(el, {
         plan: timelinePlan, create, patch,
         key: (node, i) => History.display_key_at(node, BigInt(i)),
+        floating: node => node.key === "hold-pill",
         same: sameNode,
         onChange: timelineChanged,
+        onScroll: timelineScrolled,
       });
       timelineLists.set(el, scroller);
     }
@@ -632,6 +634,23 @@ let focusedNode = null, focusedAtEnd = true, focusedSaveTimer = 0;
 let focusedRequestedKey = null;
 const COARSE_POINTER = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 let thin = null, thinSocket = null, thinAttempt = 0, thinExpiry = 0, thinGreetingTimer = 0, thinDraftTimer = 0, thinFieldTimer = 0;
+let thinReading = null, resumedConversation = null;
+const readingIdentity = () => JSON.stringify([location.origin, cacheIdentity(document.cookie)]);
+function keepThinReading() {
+  const state = thin?.readingState();
+  if (state) thinReading = { identity: readingIdentity(), state, history: historyNode && !thin.pendingNewest && thin.paging?.direction !== "newest" ? {
+    target: targetKey(thin.target), conversation: thin.conversation, node: historyNode,
+    gone: { older: [...historyGone.older], newer: [...historyGone.newer] }, direction: historyDirection,
+    held: thin.held && { pages: thin.held.pages.map(p => ({ ...p, ids: p.ids.slice(), back: p.back.slice() })) },
+  } : null };
+}
+function takeReadingHistory(target, session) {
+  const saved = thinReading?.history;
+  if (!saved) return null;
+  thinReading.history = null; // one socket replacement, never another selection
+  return thinReading.identity === readingIdentity() && thinReading.state.hub === thin.hub && thinReading.state.epoch === thin.epoch
+    && saved.target === targetKey(target) && saved.conversation === session.sel ? saved : null;
+}
 // (the re-render harness asks whether more of the thread lies beyond the
 // rows held, in a direction: a wheel that moves nothing there is a stall)
 if (RR) RR.ahead = dir => !!thin?.hasAhead?.(dir); // the rows held, not the hub's last page
@@ -773,7 +792,7 @@ const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
 let held = false, away = "";
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
-function historyClear() { historyNode = null;historyDirection = "";historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
+function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
 // Rows let go past the cap (thin-host.js's heldTrim): their display keys,
 // by the side they went from, and the height they had, kept in their place
 // as a gap (timeline-history.bend's gaps) so the scrollbar and the reader's
@@ -847,18 +866,28 @@ function holdSay(now) {
   const was = away;away = now;
   queueMicrotask(() => dispatch(now ? "hold-away" : "hold-end", now || was));
 }
+function timelineScrolled(list, delta) {
+  if (list !== activeTimeline || !delta) return;
+  historyDirection = delta < 0 ? "older" : "newer";
+}
 function timelineChanged(list) {
   if (list !== activeTimeline || focusedNode && !frontendNode) return;
-  held = !list.atEnd() || !!thin && thin.atNewest?.() === false;
+  if (!canonicalBoot && (!remoteReady || !frontendNode)) return;
+  if (transitionPosition) return;
+  // The trail moves when newest is requested; the old viewport is still
+  // unread until that request's content has actually been presented.
+  held = !list.atEnd() || !!thin && (thin.atNewest?.() === false || thin.paging?.direction === "newest");
   holdSay(held ? App.sel(ui) : "");
   historyCheckSoon();
   bodyWindows.observe(list.el, remoteReady && !!frontendNode);
 }
 function holdMark() {
+  const source = timelineList()?.el?.getAttribute("data-reading-seen");
+  if (source) return source;
   return timelineList()?.rows.map(historyRow).filter(id => id && !id.startsWith("@") && !id.startsWith("control:")).at(-1) || "";
 }
 function holdBottom() {
-  if (thin && thin.atNewest?.() === false) { thin.newest();return; }
+  if (thin && (thin.paging || thin.atNewest?.() === false)) { thin.newest();return; }
   timelineList()?.scrollToEnd();
 }
 // a <details> that asks for something each time it opens (view.bend's
@@ -1029,7 +1058,7 @@ function render() {
   if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
   activeTimeline = list || null;
   list?.refresh();
-  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
+  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null;timelineChanged(list); }
   else if (scroll) list?.scrollToEnd();
   const main = viewMode === "view-v1" ? document.querySelector("main") : null;
   if (main && main.getAttribute("aria-busy") !== String(!remoteReady)) main.setAttribute("aria-busy", String(!remoteReady));
@@ -3015,6 +3044,7 @@ function stopThin(keepView = false, reason = "replaced") {
   thinRetry.cancel();
   thinContinuations.clear();
   thinAttempt++;clearInterval(thinExpiry);clearTimeout(thinGreetingTimer);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
+  keepThinReading();
   const previous = thin;thin = null;
   const s = thinSocket;thinSocket = null;
   if (socket === s) socket = null;
@@ -3064,7 +3094,7 @@ async function startThin(again = false, reason = "initial") {
     terminalOutput.clear();
     checkpointFocused();remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();improvementsRpc.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
-    bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
+    keepThinReading();bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
     if (!frontendNode) void restoreFocused(true);
     later();thinReconnect();
   };
@@ -3089,6 +3119,7 @@ async function startThin(again = false, reason = "initial") {
     if (!Number.isSafeInteger(next) || next < 2 ** 47 || next >= 2 ** 48 - 1) throw Error("Invalid view counter");
     thin = new ThinHost({
       hub: location.origin, cid, bodyPages: true, now: () => performance.now(), session: currentSession, viewTimeoutMs: VIEW_TIMEOUT_MS,
+      readingState: thinReading?.identity === readingIdentity() ? thinReading.state : null,
       target: presentationTarget,
       counter: value => localStorage.setItem("backplane-view-request-id", String(value)),
       send: request => {
@@ -3106,12 +3137,19 @@ async function startThin(again = false, reason = "initial") {
         Wire.plain(App.presentation_prepare(presentationJson(session), presentationJson(input), action))),
       selection: (target, session) => {
         composerKeeper.selecting(target.kind === "thread" ? target.id : "");
+        const saved = takeReadingHistory(target, session);
         historyClear();
+        if (saved) {
+          historyNode = saved.node;historyDirection = saved.direction;resumedConversation = saved.conversation;
+          for (const side of ["older", "newer"]) for (const id of saved.gone[side]) historyGone[side].add(id);
+        }
         modelFeedback.clear();subsFeedback.clear();
         thinMailDraft.clear();thinContinuations.clear();bodyWindows.disconnect();
         if (target.kind === "thread") { ui = App.presentation_select(ui, target.id);void restoreFocused(); }
         else { focusedRequestedKey = null;focusedView.invalidate(); }
-        restoreTransition(target);
+        if (saved) transitionPosition = null;
+        else restoreTransition(target);
+        return saved?.held;
       },
       local: localPresentation,
       composing: thread => composerComposing && document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread") === thread,
@@ -3178,6 +3216,13 @@ async function startThin(again = false, reason = "initial") {
         const vw0 = RR ? pnow() : 0;
         RR?.n("view.apply." + (detail.page?.direction || "update"));
         if (detail.page?.direction === "newest") scroll = true;
+        if (detail.historyReset) { historyClear();transitionPosition = { top: 0, atEnd: false }; }
+        // A bot may resolve to a new source conversation on this connection.
+        // Its former timeline never supplies history to that new conversation.
+        if (resumedConversation !== null) {
+          if (resumedConversation !== currentSession().sel) historyClear();
+          resumedConversation = null;
+        }
         const previous = historyNode || node;
         const projection = historyNode ? detail.page?.direction || "update" : "reset";
         if (RR && historyNode && projection === "older") RR.n("land.block." + History.why(previous, node, projection));
@@ -3199,7 +3244,7 @@ async function startThin(again = false, reason = "initial") {
         thinContinuations.bind(location.origin, detail);
         bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held);
         if (detail.position) transitionPosition = detail.position;
-        else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
+        else if (!remoteReady && !detail.historyReset) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });

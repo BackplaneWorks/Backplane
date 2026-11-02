@@ -32,6 +32,7 @@ async function fixture(supported=false, legacyProbe=false){
   Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x,json:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){}},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
   fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
   fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
+  thinReading:null,resumedConversation:null,readingIdentity:()=> 'fixture-account',historyDirection:'',
   historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
   modelFeedback:{clear(){}},subsFeedback:new SubsFeedback(()=>{}),viewerFeedback:{choice(){}},
   // The extracted socket adapter shares these services with the full host.
@@ -47,7 +48,7 @@ async function fixture(supported=false, legacyProbe=false){
   targetKey:t=>t?t.kind+':'+t.id:'',holdPicture(){if(ctx.frontendNode){ctx.transitionNode=ctx.frontendNode;ctx.frontendNode=null;}},
   stopThin:undefined};
  vm.createContext(ctx);
- for(const [start,end] of [['function keepSettingsRecovery(','async function recoverSettings('],['function restoreDraftAttachments(','function uploadScope(']]){
+ for(const [start,end] of [['function keepThinReading(','// (the re-render harness'],['function keepSettingsRecovery(','async function recoverSettings('],['function restoreDraftAttachments(','function uploadScope(']]){
   const from=source.indexOf(start),to=source.indexOf(end,from);assert(from>0&&to>from);vm.runInContext(source.slice(from,to),ctx);
  }
  vm.runInContext(source.slice(a,b),ctx);ctx.showViewStatus=s=>status.push(s);

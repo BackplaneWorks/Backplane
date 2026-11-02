@@ -22,6 +22,12 @@ test('background invalidations cannot retire a viewer choice or require a second
  f.host.receive({t:'view.changed',version:1,generation:'7',epoch:'test',target:{kind:'thread',id:'A'},viewId:'A',viewRevision:'2'});
  assert.equal(f.sent.length,count);f.host.receive(f.reply(action));assert.equal(f.views.at(-1).text,'schematic');
 });
+test('Split has the same pending, coalescing and stale-picture protection as Board',async()=>{
+ const f=await fixture();f.host.request('view-kind','board');const first=f.sent.at(-1);
+ f.host.request('view-kind','split');assert.deepEqual(f.feedback.at(-1),{action:'view-kind',value:'split'});
+ const before=f.views.length;f.host.receive(f.reply(first));assert.equal(f.views.length,before);
+ f.host.receive(f.reply());assert.equal(f.views.at(-1).text,'split');assert.equal(f.feedback.at(-1),null);
+});
 test('viewer coalescing never crosses a message or destructive-action ordering fence',async()=>{
  const f=await fixture();f.host.request('view-kind','board');f.host.request('view-kind','schematic');f.host.request('send','');f.host.request('view-kind','3d');
  assert.deepEqual(f.host.actions.map(x=>x.action),['view-kind','send','view-kind']);

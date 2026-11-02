@@ -22,7 +22,7 @@ if(provider==='claude'&&args[0]==='auth'){
  const op=args[1];audit(op);
  if(op==='status'){const i=identity();emit({loggedIn:!!i,authMethod:i?'claude.ai':'none',email:i?.email,orgUuid:i?.workspace,configDirectory:store,subscriptionType:'fixture'});process.exit(i?0:1);}
  if(op==='logout'){try{fs.unlinkSync(marker);}catch{}console.log('Logged out');process.exit(0);}
- if(op==='login'){console.log('https://claude.ai/oauth/authorize?state=fixture-'+path.basename(store));const input=rl.createInterface({input:process.stdin});input.on('line',line=>{if(line==='fixture-code'){save();process.exit(0);}else process.exit(93);});}
+ if(op==='login'){console.log('https://claude.com/cai/oauth/authorize?code=true&response_type=code&state=fixture-'+path.basename(store)+'&code_challenge=fixture');const input=rl.createInterface({input:process.stdin});input.on('line',line=>{if(line==='fixture-code'){save();process.exit(0);}else process.exit(93);});}
 }else if(provider==='codex'&&args.includes('app-server')){
  const input=rl.createInterface({input:process.stdin});let login;
  input.on('line',line=>{const q=JSON.parse(line);if(!Object.hasOwn(q,'id'))return;let result={};audit(q.method);

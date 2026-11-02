@@ -21,6 +21,14 @@ def st() -> M.State:
 def streaming() -> TL.Stream:
   TL.Stream.append(TL.Stream.blank(), "partial reply", 1n)
 
+def chat(+st: M.State) -> M.State:
+  M.State.replay([M.BotSet{"bot", "Bub", "t", 0n, "", 1n}], st)
+
+def blanks() -> List<&2, M.Change>:
+  [M.MessagePosted{"t", "blank1", M.Assistant{}, "", 6n}, M.MessagePosted{"t", "blank2", M.Assistant{}, " \n", 7n},
+   M.MessagePosted{"t", "blank3", M.Assistant{}, "\t", 8n}, M.MessagePosted{"t", "blank4", M.Assistant{}, "\r\n", 9n},
+   M.ActivityLogged{"t", "ride:internal", "info", "ride", "private receipt", 10n}]
+
 def pill.text(ns: List<&2, D.Node>) -> String:
   match ns:
     case Nil{}: ""
@@ -41,6 +49,16 @@ def main() -> IO(Unit):
     C.Check.str("away, a reply streaming in", V.Render.pill(st(), "t", "m4", streaming()), "New ↓")
     C.Check.str("away, two messages since", V.Render.pill(st(), "t", "m2", TL.Stream.blank()), "2 new ↓")
     C.Check.str("away, counted on the whole thread, not a page", V.Render.pill(st(), "t", "m1", streaming()), "3 new ↓")
+    +hidden : M.State = M.State.replay(blanks(), chat(st()))
+    C.Check.str("four hidden assistant commits and a receipt produce no phantom four-new pill", V.Render.pill(hidden, "t", "m4", TL.Stream.blank()), "")
+    +visible : M.State = M.State.replay([M.MessagePosted{"t", "actual", M.Assistant{}, "A genuine new reply", 11n}], hidden)
+    C.Check.str("only reachable messages count past hidden entries", V.Render.pill(visible, "t", "m4", TL.Stream.blank()), "1 new ↓")
+    C.Check.str("a hidden source entry is still an exact read boundary", V.Render.pill(visible, "t", "blank4", TL.Stream.blank()), "1 new ↓")
+    C.Check.str("visible tool output still offers a jump", V.Render.pill(M.State.replay([M.ActivityLogged{"t", "tool", "tool", "shell", "Result", 12n}], visible), "t", "actual", TL.Stream.blank()), "New ↓")
+    C.Check.str("ordinary blank assistant replies are also absent from display", V.Render.pill(M.State.replay([M.MessagePosted{"t", "empty", M.Assistant{}, "", 6n}], st()), "t", "m4", TL.Stream.blank()), "")
+    C.Check.str("folded tools bookmark the newest source call", U.Hold.source([M.Act{"call2", "t", "tool", "shell", "result", 2n}, M.Act{"call1", "t", "tool", "shell", "start", 1n}]), "call2")
+    C.Check.str("streaming placeholders are never source bookmarks", U.Hold.source([M.Msg{"@live:t", "t", M.Assistant{}, "stream", 3n}, M.Act{"call2", "t", "tool", "shell", "result", 2n}]), "call2")
+    C.Check.str("folded source boundary does not recount old messages", V.Render.pill(M.State.replay([M.ActivityLogged{"t", "call1", "tool", "shell", "start", 6n}, M.ActivityLogged{"t", "call2", "tool", "shell", "result", 7n}], st()), "t", "call2", TL.Stream.blank()), "")
     C.Check.str("the pill comes last in the timeline", pill.text(List.reverse(&2, D.Node, V.Render.after(J.Json.obj([J.KV{"partial", J.Json.arr(Nil{})}]), U.Ui.scratch_set(U.Ui.init(0n), "@pill", "2 new ↓")))), "2 new ↓")
     C.Check.str("no pill, no button", Nat.show(List.length(&2, D.Node, V.Render.after(J.Json.obj([J.KV{"partial", J.Json.arr(Nil{})}]), U.Ui.init(0n)))), "0")
     C.Check.str("the request's away mark is the shown thread's", away.of(request(J.Str{"m2"})), "m2")

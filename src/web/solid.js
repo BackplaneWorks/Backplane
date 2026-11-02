@@ -279,24 +279,28 @@ class View {
     this.thermal = { enabled: false, temperature: 25, liquid: 0 };
     this.aperture = "off"; this.focusLocked = false; this.focusDistance = 0;
     if (!this.gl) return;
-    const gl = this.gl;
     this.events = new AbortController();
     const listen = (type,fn,options={}) => canvas.addEventListener(type,fn,{...options,signal:this.events.signal});
-    const sh = (type, src) => {
-      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`3D shader: ${gl.getShaderInfoLog(s)}`);
-      return s;
-    };
-    this.prog = gl.createProgram();
-    const vertex = sh(gl.VERTEX_SHADER, VS), fragment = sh(gl.FRAGMENT_SHADER, FS);
-    gl.attachShader(this.prog, vertex);
-    gl.attachShader(this.prog, fragment);
-    gl.linkProgram(this.prog);
-    gl.deleteShader(vertex); gl.deleteShader(fragment);
-    if (!gl.getProgramParameter(this.prog, gl.LINK_STATUS)) throw new Error(`3D program: ${gl.getProgramInfoLog(this.prog)}`);
-    this.bufs = ["p", "n", "c"].map((a) => ({ a: gl.getAttribLocation(this.prog, a), b: gl.createBuffer() }));
-    this.dof = new DepthOfField(gl);
-    if (!this.dof.available) console.info(`3D depth of field disabled: ${this.dof.reason}`);
+    this.initGpu();
+    listen("webglcontextlost", event => {
+      // Browsers can retire a background tab's graphics context. Cancelling
+      // the default permits restoration; CPU geometry and the camera survive.
+      event.preventDefault();this.contextLost = true;
+      if (this.frame) cancelAnimationFrame(this.frame);
+      this.frame = null;this.queued = false;
+      this.pts.clear();this.drag = null;this.gesture = null;
+      this.say("3D graphics paused; restoring automatically…");
+    });
+    listen("webglcontextrestored", () => {
+      if (this.disposed) return;
+      try {
+        this.initGpu();this.contextLost = false;
+        const record = assets.get(this.key);
+        if (record) this.receive(record);else this.later();
+      } catch (error) {
+        this.contextLost = true;this.say(`3D graphics could not recover: ${error.message}`);
+      }
+    });
     this.pts = new Map();
     this.drag = null;
     this.gesture = null;
@@ -382,6 +386,24 @@ class View {
     // Keep a fitted model visible when the inspector changes the pane's shape.
     this.resize = new ResizeObserver(() => { this.refit(); this.later(); });
     this.resize.observe(canvas);
+  }
+
+  initGpu() {
+    const gl = this.gl;
+    const sh = (type, src) => {
+      const s = gl.createShader(type);gl.shaderSource(s, src);gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(`3D shader: ${gl.getShaderInfoLog(s)}`);
+      return s;
+    };
+    this.prog = gl.createProgram();
+    const vertex = sh(gl.VERTEX_SHADER, VS), fragment = sh(gl.FRAGMENT_SHADER, FS);
+    gl.attachShader(this.prog, vertex);gl.attachShader(this.prog, fragment);gl.linkProgram(this.prog);
+    gl.deleteShader(vertex);gl.deleteShader(fragment);
+    if (!gl.getProgramParameter(this.prog, gl.LINK_STATUS)) throw new Error(`3D program: ${gl.getProgramInfoLog(this.prog)}`);
+    this.bufs = ["p", "n", "c"].map(a => ({ a: gl.getAttribLocation(this.prog, a), b: gl.createBuffer() }));
+    this.uploadedBuffer = null;this.uploadedCount = 0;
+    this.dof = new DepthOfField(gl);
+    if (!this.dof.available) console.info(`3D depth of field disabled: ${this.dof.reason}`);
   }
 
   // closer by k (over 1 in), keeping the point under (x, y) on the canvas where it is
@@ -478,7 +500,7 @@ class View {
   show(m) {
     this.saying = false;
     this.ticking(false);
-    if (!this.gl || !m) return;
+    if (!this.gl || this.contextLost || this.gl.isContextLost() || !m) return;
     this.pos = m.pos;
     const gl = this.gl;
     if (this.uploadedBuffer !== m.pos.buffer || this.uploadedCount !== m.count) {
@@ -500,14 +522,14 @@ class View {
     if (this.disposed || !this.canvas.isConnected) return;
     if (!this.focusLocked) this.focusDistance = this.cam.dist / 100;
     this.canvas.dispatchEvent(new CustomEvent("solid-camera-change", {bubbles:true}));
-    if (this.previewVisible === false || this.queued) return;
+    if (this.contextLost || this.previewVisible === false || this.queued) return;
     this.queued = true;
     this.frame = requestAnimationFrame(() => { this.frame = null; this.queued = false; this.draw(); });
   }
 
   draw() {
     const gl = this.gl, c = this.canvas;
-    if (this.disposed || this.previewVisible === false || !c.isConnected || !c.clientWidth || !c.clientHeight) return;
+    if (this.disposed || this.contextLost || gl?.isContextLost() || this.previewVisible === false || !c.isConnected || !c.clientWidth || !c.clientHeight) return;
     if (!gl) { if (this.note) this.note.textContent = "3D unavailable: WebGL could not start"; return; }
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
