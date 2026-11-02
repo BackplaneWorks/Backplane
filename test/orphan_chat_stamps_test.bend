@@ -78,7 +78,7 @@ def main() -> IO(Unit):
     C.Check.str("screenshot wrappers/stamps entirely absent after full expanded render", dom(shown(actual)), dom(shown(baseline)))
     C.Check.str("screenshot wrappers/stamps absent in loaded60-row pager", dom(paged(actual)), dom(paged(baseline)))
     C.Check.str("both real assistant wrappers remain", Nat.show(count(V.View.expand(shown(actual)), "msg assistant")), "2")
-    C.Check.str("both attached real timestamps remain", Nat.show(count(V.View.expand(shown(actual)), "stamp")), "2")
+    C.Check.str("both attached real timestamps remain", Nat.show(Nat.add(count(V.View.expand(shown(actual)), "stamp"), count(V.View.expand(shown(actual)), "stamp mid"))), "2")
     C.Check.str("empty-only group emits ZERO nodes, not a hidden div", Nat.show(List.length(&2, D.Node, shown(screenshot.empty()))), "0")
     C.Check.str("new empty arrival leaves actual DOM identical", dom(shown(List.append(&2, M.Entry, baseline, screenshot.empty()))), dom(shown(baseline)))
     C.Check.str("empty dated reply leaves no date/time container", dom(shown(List.append(&2, M.Entry, baseline, [M.Msg{"empty-yesterday", "bub-chat", M.Assistant{}, "", 1792686100n}]))), dom(shown(baseline)))

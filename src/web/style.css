@@ -237,6 +237,9 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg.live { opacity: 0.9; }
 .msg .stamp { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .msg .stamp:empty { display: none; }
+/* A reply inside a turn (core/stamp.bend's Stamp.mid) shows its time only
+   on hover or focus; the turn's last reply and the person's keep theirs. */
+.msg.assistant:not(:hover):not(:focus-within) .stamp.mid { display: none; }
 .msg.user .stamp { text-align: right; }
 .body p { margin: 0 0 8px; white-space: pre-wrap; }
 .body code { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); background: var(--raise); padding: 0 3px; }
@@ -269,6 +272,11 @@ button.fold:hover { color: var(--text); border-color: var(--faint); }
 button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 button.fold svg { flex: none; }
 button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
+/* The call a live run is on (View.act.in's "now"): its name in the accent,
+   then the live fold's dot and "running". */
+.act.now .kind { color: var(--accent); border-color: var(--accent); }
+.act .now { flex: none; display: flex; align-items: center; gap: 6px; color: var(--accent); }
+.act .now::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
 .act[data-run] { position: relative; margin-left: 13px; padding-left: 12px; }
 .act[data-run]::before { content: ""; position: absolute; left: 0; top: -10px; bottom: 0; border-left: 1px solid var(--line); }
 /* the thin view's reader on an activity row (thin-continuations.js): a
@@ -1412,6 +1420,12 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .thread-expander { display:grid; place-items:center; padding:0; width:24px; min-width:24px; min-height:32px; border:0; background:transparent; color:var(--dim); cursor:pointer; }
 .thread-expander:hover { background:var(--raise); color:var(--text); }
 .thread-expander:focus-visible, .thread-create button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+/* A row with no subthreads keeps its chevron's column but shows it only on
+   hover or focus ("+ New subthread" stays one hover away). Touch keeps it. */
+@media (hover:hover) {
+  .thread-expander[data-count="0"][aria-expanded="false"] { opacity:0; }
+  .thread-tree-row:hover > .thread-expander, .thread-tree-row:focus-within > .thread-expander { opacity:1; }
+}
 .thread-create { margin-left:calc(24px + var(--depth,0)*12px); min-width:0; }
 .thread-create button { border:0; padding:6px 8px; font-size:11px; color:var(--dim); background:transparent; text-align:left; max-width:100%; }
 .conversation-history { border-top:1px solid var(--line); margin-top:8px; min-width:0; }

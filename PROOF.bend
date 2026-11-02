@@ -15068,3 +15068,26 @@ def Laws.provider_setup_failure_retry(): {==}
 
 def Laws.alpha_usage_empty_choice_declines():
   {==}
+
+def Laws.tool_short_mcp(): {==}
+
+def Laws.tool_short_server_underscores(): {==}
+
+def Laws.tool_short_plain(): {==}
+
+def Laws.fold_label_leaves_todo_out(): {==}
+
+def Laws.fold_live_names_call(): {==}
+
+def Laws.tool_summary_todo(): {==}
+
+def Laws.stamp_mid_never_user(s, id, th, x, at):
+  match s:
+    case STP.Stamps{r, t, e, o}:
+      {==}
+
+def Laws.stamp_mid_inside_turn(r): {==}
+
+def Laws.stamp_mid_turn_end_shows(r): {==}
+
+def Laws.stamp_mid_running_newest_shows(r): {==}

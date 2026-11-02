@@ -159,6 +159,8 @@ import ./src/core/kserve.bend as KSL
 
 import ./src/core/tz.bend as TZ
 
+import ./src/core/stamp.bend as STP
+
 import ./src/core/when.bend as WH
 
 import ./src/core/sched.bend as SCH
@@ -14912,3 +14914,51 @@ law provider_setup_failure_retry:
 # Consent requires the affirmative sharing action, not a default/empty choice.
 law alpha_usage_empty_choice_declines:
   {U.Share.val("") == "off" : String}
+
+# Tool rows: an MCP tool's name reads without its "mcp__<server>__" prefix
+# (a server name may hold "_"), other names as they are
+law tool_short_mcp:
+  {FO.Tool.short("mcp__backplane__viewer_show") == "viewer_show" : String}
+
+law tool_short_server_underscores:
+  {FO.Tool.short("mcp__claude_ai_Docs__batch") == "batch" : String}
+
+law tool_short_plain:
+  {FO.Tool.short("Bash") == "Bash" : String}
+
+# a fold's label leaves the to-do tools out of its names (the to-do list
+# says what they did); they still count as calls
+law fold_label_leaves_todo_out:
+  {FO.Fold.label(I18.En{}, [M.Act{"a", "t", "tool", "TodoWrite", "1 of 2 done", 0n}, M.Act{"b", "t", "tool", "Read", "board.kicad_pcb", 0n}]) == "2 tool calls · Read" : String}
+
+# the live run's row names what its latest call does (its summary's first
+# line), not only its tool
+law fold_live_names_call:
+  {FO.Fold.label.live(I18.En{}, [M.Act{"a", "t", "tool", "Read", "board.kicad_pcb", 0n}, M.Act{"b", "t", "tool", "Bash", "kicad-cli pcb drc b.kicad_pcb\necho done", 0n}]) == "2 tool calls · running: kicad-cli pcb drc b.kicad_pcb" : String}
+
+# a TodoWrite's row says where the list stands and the step in progress
+law tool_summary_todo:
+  {H.Claude.tool_summary("TodoWrite", J.Json.obj([J.KV{"todos", J.Json.arr([J.Json.obj([J.KV{"content", J.Str{"Read"}}, J.KV{"status", J.Str{"completed"}}]), J.Json.obj([J.KV{"content", J.Str{"Measure"}}, J.KV{"status", J.Str{"in_progress"}}]), J.Json.obj([J.KV{"content", J.Str{"Fix"}}, J.KV{"status", J.Str{"pending"}}])])}])) == "1 of 3 done · now: Measure" : String}
+
+# Reply stamps: a reply inside a turn shows its time only on hover (phones
+# leave it out); the turn's last reply and the person's message always
+# show theirs, and so does a running turn's newest reply
+law stamp_mid_never_user:
+  for +s: STP.Stamps
+  for id: String
+  for th: String
+  for x: String
+  for at: Nat
+  {STP.Stamp.mid(s, M.Msg{id, th, M.User{}, x, at}) == False{} : Bool}
+
+law stamp_mid_inside_turn:
+  for +r: TZ.TzRule
+  {STP.Stamp.mid(STP.Stamps{r, 0n, STP.Stamp.ends([M.Msg{"u", "t", M.User{}, "go", 1n}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}], False{}), Map.new(&2, Nat)}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}) == True{} : Bool}
+
+law stamp_mid_turn_end_shows:
+  for +r: TZ.TzRule
+  {STP.Stamp.mid(STP.Stamps{r, 0n, STP.Stamp.ends([M.Msg{"u", "t", M.User{}, "go", 1n}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}], False{}), Map.new(&2, Nat)}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}) == False{} : Bool}
+
+law stamp_mid_running_newest_shows:
+  for +r: TZ.TzRule
+  {STP.Stamp.mid(STP.Stamps{r, 0n, STP.Stamp.ends([M.Msg{"u", "t", M.User{}, "go", 1n}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}], True{}), Map.new(&2, Nat)}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}) == False{} : Bool}
