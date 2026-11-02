@@ -339,6 +339,43 @@ const thin = new NativeThinHost307265({
   }),
 });
 
+// Dictation on a hub's view lane (docs/voice.md). The phone records its own
+// microphone: the mic button starts it natively and sends "voice" with
+// "client"; the hub's start reply names where the audio goes ("audio":
+// /voice/in?s=<key>), which the app is told as {"type":"voice-audio",
+// hub, path} (it POSTs 16 kHz s16le there, in order, with the pairing
+// token, &end=1 last); "idle" or "error" from the hub, or a start reply
+// without an address (an older hub records itself), is {"type":
+// "voice-stop", hub}. The hub draws the strip itself (it folds the events
+// into the view's Ui); the words go into the draft this phone owns, by the
+// same Bend def the hub and the web run (app.bend's session_voice), with
+// the phone's own place in it kept here, per hub.
+const voicePlace = new Map();
+function voiceHeard(k, envelope, o) {
+  const none = { done: false, cmds: [], draw: false };
+  if (envelope?.t === "reply") {
+    if (typeof envelope.audio === "string" && envelope.audio) return { ...none, cmds: [{ type: "voice-audio", hub: k, path: envelope.audio }] };
+    if (envelope.engine !== undefined) return { ...none, cmds: [{ type: "voice-stop", hub: k }] };
+    return none;
+  }
+  if (envelope?.t !== "voice") return none;
+  const cmds = [];
+  if (envelope.ev === "idle" || envelope.ev === "error") cmds.push({ type: "voice-stop", hub: k });
+  const s = thin.states.get(k), thread = envelope.thread;
+  let draw = false;
+  if (s && typeof thread === "string" && thread && ["live", "words", "text", "idle"].includes(envelope.ev)) {
+    const draft = s.session.drafts?.[thread] ?? kept[k + "|" + thread] ?? "";
+    const r = plain(App.session_voice(json(voicePlace.get(k) || {}), draft, o));
+    voicePlace.set(k, r.keep);
+    if (envelope.ev === "idle") voicePlace.delete(k);
+    if (r.draft !== draft) {
+      thin.draftAt(k, thread, r.draft);
+      draw = s.session.sel === thread && k === foregroundHub();
+    }
+  }
+  return { done: true, cmds, draw };
+}
+
 function currentDeadline() {
   const deadlines = [...recent.links.values()].filter(l => l.flight).map(l => l.flight.began + 5001);
   const deadline = thin.deadline();
@@ -745,6 +782,8 @@ globalThis.Backplane = {
     const type = fieldValue(o, "t");
     if (thin.thin(k)) {
       const envelope = plain(o);
+      const voiced = voiceHeard(k, envelope, o);
+      if (voiced.done) return direct(voiced.cmds, voiced.draw);
       if (thin.inert(k, envelope, transportEpoch.get(k))) {
         // No drain/draw/owed work, and do not cancel or renew an existing timer.
         return JSON.stringify({ screen: null, cmds: [], sync: [], deadline: currentDeadline(), inert: true });
@@ -752,7 +791,7 @@ globalThis.Backplane = {
       if (type === "reply") envelope.bend = o;
       thin.receive(k, envelope, transportEpoch.get(k));
       if (k === foregroundHub() && (quiet === true || owe === true)) owed = true;
-      return direct([], quiet !== true || owe === true);
+      return direct(voiced.cmds, quiet !== true || owe === true);
     }
     if (type === "mobile") {
       booting.add(k);

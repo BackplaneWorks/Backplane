@@ -68,5 +68,6 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     suspend fun improvementsPreviewBody(body: String) = core.improvementsPreviewBody(body)
     fun attach(data: ByteArray, name: String) = core.attach(data, name)
     fun attachStream(name: String, size: Long, open: () -> java.io.InputStream?) = core.attachStream(name, size, open)
+    fun voicePress(on: Boolean) = core.voicePress(on)
     fun hubUrl(path: String, query: String = "", token: Boolean = true) = core.hubUrl(path, query, token)
 }

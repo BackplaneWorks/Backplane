@@ -1902,6 +1902,27 @@ final class AppModel {
             Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
         }
     }
+    // this phone's microphone for dictation (VoiceRecorder.swift)
+    @ObservationIgnored let recorder = VoiceRecorder()
+
+    // The composer's mic and the strip's Stop (screen.bend's Mob.voice): the
+    // first press starts this phone's recorder at once and tells Bend
+    // ("voice" with "client": the phone records itself, the hub's reply says
+    // where the audio goes); the next sends what is left with the end mark
+    // and Bend asks the hub to stop.
+    func voicePress(for thread: String, on: Bool) {
+        guard canSendComposer(for: thread), let hub = screen?.hub, let l = links.first(where: { Pairing.key($0) == hub }) else { return }
+        if recorder.active || on {
+            recorder.stop()
+            actComposer("voice", "", for: thread)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self, await self.recorder.start(hub: hub, link: l) else { return }
+            self.actComposer("voice", "client", for: thread)
+        }
+    }
+
     func actComposer(_ action: String, _ value: String = "", for thread: String) {
         guard action == "attach-end" ? canEditComposer(for: thread) : canSendComposer(for: thread) else { return }
         let generation = pairingGeneration
@@ -2370,6 +2391,9 @@ final class AppModel {
                     }
                 }
             case "jump": if let id = c.id, !id.isEmpty { jumping = (id, 4, 0, nil) }
+            // dictation (bridge.js's voiceHeard): where the hub takes the audio, and when it is done
+            case "voice-audio": if let h = c.hub, let p = c.path { recorder.address(hub: h, path: p) }
+            case "voice-stop": if let h = c.hub { recorder.gone(hub: h) }
             case "keep":
                 let thread = c.thread ?? ""
                 Self.keep(thread, composerDrafts.text(for: thread) ?? c.text ?? "")

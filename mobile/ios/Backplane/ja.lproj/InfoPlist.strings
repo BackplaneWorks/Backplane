@@ -5,5 +5,7 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>コンピューターに表示されたペアリングコードを読み取り、接続します。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>スレッドに音声入力する間だけ声を録音し、文字にするためにコンピューターへ送ります。</string>
 </dict>
 </plist>
