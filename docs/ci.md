@@ -88,3 +88,22 @@ entries. Only Bend/tool resources are bound automatically; external runtimes
 used by drivers need their own pinned identity checks. A packet claiming
 unrelated/missing coverage must not be used as a whole-project pass. Check
 `build/ci-speed/RESULTS.md` for measured scope and limitations.
+
+## Inspect an affected-test plan
+
+```sh
+python3 scripts/ci-select.py --base origin/main --out build/ci-speed/affected.json
+```
+
+This opt-in planner is advisory: existing local/nightly gates do not consume it.
+It includes the required fast set plus changed Bend dependencies and opaque
+roots. Unknown source/import/tool identities use full selection. Plans bound to
+Git are revalidated against the current diff and test inventory; a failed run
+removes its old output. Its model supports the pinned official Bend2.0.36
+compiler/resources; upgrades/custom libraries select all until reviewed.
+
+`python3 -m unittest discover -s test/tools -p ci_select_test.py` exercises the
+skip logic with dependency mutations, a deliberately dropped affected test,
+new/later edits, opaque IO and compiler/library changes. This plans only Bend
+tests; it cannot replace check/proof/build or other-language gates. Required
+integration and execution measurements are tracked in build/ci-speed/RESULTS.md.

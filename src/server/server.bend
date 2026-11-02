@@ -17,6 +17,7 @@ import ../core/stream-step.bend as SSTEP
 import ../core/restartretry.bend as RR
 import ./livenessio.bend as LFX
 import ../core/mailprivate.bend as PM
+import ../core/mailowner.bend as OWN
 import ../core/handoff.bend as HD
 import ../core/thinq.bend as AQ
 import ../core/accounts.bend as ACCT
@@ -227,6 +228,12 @@ type JobReceipt is Data:
 
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
+  MailRecovered{changes: List<&2, M.Change>}
+  OwnerReady{record: J.Json, body: MB.Body}
+  OwnerPlan{record: J.Json}
+  OwnerSent{record: J.Json}
+  OwnerMoved{record: J.Json}
+  OwnerIdle{}
   MailRouted{body: MB.Body}
   MailNext{bot: String, conv: String}
   MailFailed{body: MB.Body, reason: String}
@@ -10249,6 +10256,84 @@ def Fq.idle(p: FR.Fh & Hub) -> IO(Hub):
   (fh, h) = p
   IO.pure(Hub, Far.with(h, FR.Fh.pull.off(fh, FR.Fh.fq.key())))
 
+# Owner mail has a separate, nonexpiring outbox. One worker reads at most
+# sixteen journal records. Its results are checked against the current
+# durable ticket by the hub, never applied from a stale state snapshot.
+def OwnerJob.ack(valid: Bool, +inbox: Chan(Msg), msg: Msg) -> IO(Unit):
+  match valid:
+    case True{}: Self.post(inbox, msg)
+    case False{}: IO.pure(Unit, Unit{})
+
+def OwnerJob.code(+code: Nat, +body: String, +r: J.Json, +inbox: Chan(Msg)) -> IO(Unit):
+  match code:
+    case 200n: OwnerJob.ack(OWN.Owner.response.is(body, r, "committed"), inbox, OwnerSent{r})
+    case 409n: OwnerJob.ack(OWN.Owner.response.is(body, r, "moved"), inbox, OwnerMoved{r})
+    case _: IO.pure(Unit, Unit{})
+
+def OwnerJob.send(own: Bool, +s: M.State, +cfg: Cfg, +r: J.Json, +b: MB.Body, +link: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match own:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        +now : Nat <- Now.nat()
+        +nonce : String <- BN.Bn.random(4n)
+        +ans : BN.Resp <- BN.Bn.to_peer(Cfg.home(cfg), Bot.peer.url(s, link), link, now, "/far/rpc", True{}, FR.Fr.nonced(OWN.Owner.request(s, r, b), nonce))
+        OwnerJob.code(Far.code(ans), Far.body(ans), r, inbox)
+
+def OwnerJob.local(remote: Bool, +r: J.Json, +b: MB.Body, +inbox: Chan(Msg)) -> IO(Unit):
+  match remote:
+    case True{}: Self.post(inbox, OwnerPlan{r})
+    case False{}: Self.post(inbox, OwnerReady{r, b})
+
+def OwnerJob.target(untried: Bool, +s: M.State, +cfg: Cfg, +r: J.Json, +b: MB.Body, +inbox: Chan(Msg)) -> IO(Unit):
+  match untried:
+    case True{}: OwnerJob.local(OWN.Owner.remote(s), r, b, inbox)
+    case False{}:
+      +link = UBS.Ub.link(s, J.Json.get_str(r, "to", ""))
+      OwnerJob.send(Far.own.id(s, cfg, link), s, cfg, r, b, link, inbox)
+
+def OwnerJob.body(got: MST.StoreResult<MB.Body>, +s: M.State, +cfg: Cfg, +r: J.Json, +inbox: Chan(Msg)) -> IO(Unit):
+  match got:
+    case MST.Stored{+b}:
+      OwnerJob.target(String.is_empty(J.Json.get_str(r, "to", "")), s, cfg, r, b, inbox)
+    case _: IO.pure(Unit, Unit{})
+
+def OwnerJob.records(rs: List<&2, J.Json>, +s: M.State, +cfg: Cfg, +inbox: Chan(Msg)) -> IO(Unit):
+  match rs:
+    case Nil{}: Self.post(inbox, OwnerIdle{})
+    case +r <> rest:
+      do IO<Unit>:
+        b : MST.StoreResult<MB.Body> <- MST.MailStore.exact(Cfg.home(cfg), J.Json.get_str(r, "conv", ""), J.Json.get_str(r, "id", ""))
+        OwnerJob.body(b, s, cfg, r, inbox)
+        OwnerJob.records(rest, s, cfg, inbox)
+
+def OwnerJob.key() -> String:
+  "\u{0}owner-mail"
+
+def OwnerJob.start.k(busy: Bool, fh: FR.Fh, h: Hub) -> IO(Hub):
+  match busy h:
+    case True{} kept: IO.pure(Hub, Far.with(kept, fh))
+    case False{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, OwnerJob.records(OWN.Owner.records(st), st, cfg, inbox))
+        return Far.with(Hub{st, f, ls, cl, as, inbox, cfg, note}, FR.Fh.pull.on(fh, OwnerJob.key()))
+
+def OwnerJob.start.p(p: FR.Fh & Hub) -> IO(Hub):
+  (+fh, h) = p
+  OwnerJob.start.k(FR.Fh.busy(fh, OwnerJob.key()), fh, h)
+
+def OwnerJob.start.on(copy: Bool, h: Hub) -> IO(Hub):
+  match copy:
+    case True{}: IO.pure(Hub, h)
+    case False{}: OwnerJob.start.p(Far.fh(h))
+
+def OwnerJob.start(h: Hub) -> IO(Hub):
+  IO.bind(String, Hub, Env.get("BACKPLANE_COPY", ""), copy => OwnerJob.start.on(CP.Copy.on(copy), h))
+
+def OwnerJob.idle(p: FR.Fh & Hub) -> IO(Hub):
+  (fh, h) = p
+  IO.pure(Hub, Far.with(h, FR.Fh.pull.off(fh, OwnerJob.key())))
+
 # One bounded job per distinct target, outside the hub loop.
 def WakeJob.pr.sent(+r: P.Ran, +target: String, +inbox: Chan(Msg)) -> IO(Unit):
   match r:
@@ -10347,7 +10432,7 @@ def MailJob.append.parsed(body: Maybe<&2, MB.Body>, +home: String, changes: List
 
 def MailJob.recover.result(+r: MST.StoreResult<List<&2, M.Change>>, +inbox: Chan(Msg)) -> IO(Unit):
   match r:
-    case MST.Stored{+changes}: Self.post(inbox, Commit{changes})
+    case MST.Stored{+changes}: Self.post(inbox, MailRecovered{changes})
     case MST.Missing{_}: IO.pure(Unit, Unit{})
     case MST.StoreError{+path, +reason}: PS.Log.error("mail.recover", path ++ ": " ++ reason)
 
@@ -10666,6 +10751,8 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         IO.spawn(Unit, Lr.far.run(B.Lr.far.lines(st), Nil{}, st, cfg, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, inbox, cfg, note} B.OwnerMail{}:
+      OwnerJob.start(Hub{st, f, ls, cl, as, inbox, cfg, note})
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.FarQueued{}:
       Fq.start(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}))
     case Hub{st, f, ls, cl, as, +inbox, cfg, note} B.BotReply{+thread, +to, +text, _}:
@@ -13731,6 +13818,15 @@ def Hub.watchdog(h: Hub, +now: Nat) -> IO(Hub):
         t3 : U32 <- PS.Perf.span("hub.tick.decide", t2)
         return h3
 
+def Hub.owner.flush.on(copy: Bool, h: Hub, +now: Nat) -> IO(Hub):
+  match copy h:
+    case True{} kept: IO.pure(Hub, kept)
+    case False{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      IO.bind(Hub, Hub, Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{OWN.Owner.legacy(st, now), Nil{}}), OwnerJob.start)
+
+def Hub.owner.flush(h: Hub, +now: Nat) -> IO(Hub):
+  IO.bind(String, Hub, Env.get("BACKPLANE_COPY", ""), copy => Hub.owner.flush.on(CP.Copy.on(copy), h, now))
+
 # each minute the hub's size goes into the gauges
 def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
   match h:
@@ -14281,7 +14377,7 @@ def Hub.vault.open(h: Hub) -> IO(Hub):
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def Hub.recover.v(h: Hub, +now: Nat) -> IO(Hub):
-  IO.bind(Hub, Hub, Hub.mail.recover.start(h), h0 => IO.bind(Hub, Hub, Far.start(h0), h2 => Hub.recover.stale(h2, now)))
+  IO.bind(Hub, Hub, Hub.mail.recover.start(h), h0 => IO.bind(Hub, Hub, Far.start(h0), h2 => IO.bind(Hub, Hub, Hub.recover.stale(h2, now), h3 => Hub.owner.flush(h3, now))))
 
 def Hub.metrics.start(h: Hub, +now: Nat) -> IO(Hub):
   match h:
@@ -14514,7 +14610,7 @@ def Uber.took.n(h: Hub, +t: UBS.SyncIn, +link: String, +now: Nat) -> IO(Hub):
 def Uber.took.k(some: Bool, h: Hub, +t: UBS.SyncIn, +link: String, +now: Nat) -> IO(Hub):
   match some:
     case True{}:
-      IO.bind(Hub, Hub, Hub.step(h, B.Step{UBS.SyncIn.changes(t), Nil{}}), h2 => Uber.took.n(h2, t, link, now))
+      IO.bind(Hub, Hub, Hub.step(h, B.Step{UBS.SyncIn.changes(t), Nil{}}), h2 => IO.bind(Hub, Hub, Uber.took.n(h2, t, link, now), h3 => Hub.owner.flush(h3, now)))
     case False{}:
       Uber.took.n(h, t, link, now)
 
@@ -14747,7 +14843,7 @@ def Hub.bot_tick(h: Hub, +tz: String, +now: Nat) -> IO(Hub):
         h4 : Hub <- Hub.bot_wake(h4s, tz, Nat.add(now, Nat.div(U32.to_nat(WK.Wake.tick.ms(every)), 1000n)), now)
         h5 : Hub <- Hub.zone.tick(h4, now)
         h5t : Hub <- Hub.tch.ticks(h5, now)
-        Hub.uber.tick(h5t, now)
+        IO.bind(Hub, Hub, Hub.uber.tick(h5t, now), h6 => Hub.owner.flush(h6, now))
 
 # Discovery and signed inbound traffic are return signals. Fetch just the
 # returning peer, and never bounce every successful directory request.
@@ -15217,6 +15313,56 @@ def Hub.far.show(h: Hub, +link: String, +o: J.Json, +reply: Chan(List<&2, U32>))
           J.Json.get_str(J.Json.get_obj(o, "p"), "kind", ""), inbox))
         Hub.answer(Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, Bot.json("200 OK", FVS.Fvs.ok(Nil{})))
 
+def Hub.owner.received.done(h: Hub, +p: J.Json, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.answer(Hub{st, f, ls, cl, as, inbox, cfg, note}, reply,
+        Bool.pick(List<&2, U32>, OWN.Owner.seen(st, p), W.Http.text("200 OK", OWN.Owner.response(J.Json.get_obj(p, "ticket"), "committed")), W.Http.text("503 Service Unavailable", "mail not committed")))
+
+def Hub.owner.received.reactivated.on(ok: Bool, h: Hub, +p: J.Json, +b: MB.Body, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match ok:
+    case False{}: Hub.answer(h, reply, W.Http.text("503 Service Unavailable", "mail not committed"))
+    case True{}: IO.bind(Hub, Hub, MailJob.routed(h, b), h2 => Hub.owner.received.done(h2, p, reply))
+
+def Hub.owner.received.reactivated(pair: Hub & Bool, +p: J.Json, +b: MB.Body, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  (h, ok) = pair
+  Hub.owner.received.reactivated.on(ok, h, p, b, reply)
+
+def Hub.owner.received.existing(seen: Bool, +s: M.State, h: Hub, +home: String, +p: J.Json, +b: MB.Body, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match seen:
+    case True{}:
+      IO.bind(Hub & Bool, Hub, Hub.step.ok(h, B.Step{OWN.Owner.import.changes(s, p, b, now), Nil{}}), got => Hub.owner.received.reactivated(got, p, b, reply))
+    case False{}:
+      IO.bind(Hub, Hub, MailJob.append.parsed(Some{b}, home,
+        List.append(&2, M.Change, B.Mail.pending(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(MB.Body.mail(b))))), b), OWN.Owner.import.changes(s, p, b, now)), h),
+        h2 => Hub.owner.received.done(h2, p, reply))
+
+def Hub.owner.received.body(b: Maybe<&2, MB.Body>, +s: M.State, h: Hub, +home: String, +p: J.Json, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match b:
+    case None{}: Hub.answer(h, reply, W.Http.text("400 Bad Request", "invalid owner mail"))
+    case Some{+b}: Hub.owner.received.existing(ML.Box.has(M.State.mail(s), ML.Mail.id(MB.Body.mail(b))), s, h, home, p, b, reply, now)
+
+def Hub.owner.received.accept(accepted: Bool, +s: M.State, h: Hub, +home: String, +p: J.Json, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match accepted:
+    case False{}: Hub.answer(h, reply, W.Http.text("409 Conflict", OWN.Owner.response(J.Json.get_obj(p, "ticket"), "moved")))
+    case True{}: Hub.owner.received.body(OWN.Owner.import.body(s, p), s, h, home, p, reply, now)
+
+def Hub.owner.received.seen(seen: Bool, +s: M.State, h: Hub, +home: String, +link: String, +p: J.Json, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match seen:
+    case True{}: Hub.answer(h, reply, W.Http.text("200 OK", OWN.Owner.response(J.Json.get_obj(p, "ticket"), "committed")))
+    case False{}: Hub.owner.received.accept(OWN.Owner.accept(s, link, p), s, h, home, p, reply, now)
+
+def Hub.owner.received.peer(own: Bool, +s: M.State, h: Hub, +home: String, +link: String, +p: J.Json, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match own:
+    case False{}: Hub.answer(h, reply, W.Http.text("403 Forbidden", "owner identity mismatch"))
+    case True{}: Hub.owner.received.seen(OWN.Owner.seen(s, p), s, h, home, link, p, reply, now)
+
+def Hub.owner.received(h: Hub, +link: String, +o: J.Json, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +p = J.Json.get_obj(o, "p")
+      Hub.owner.received.peer(OWN.Owner.peer(st, link, p), st, Hub{st, f, ls, cl, as, inbox, cfg, note}, Cfg.home(cfg), link, p, reply, now)
+
 # POST /far/rpc: a request about one of this hub's shared threads (Fr.allowed)
 def Hub.far.rpc.s(show: Bool, +arg: String, view: Bool, +st: M.State, h: Hub, +o: J.Json, +text: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
   match show:
@@ -15233,10 +15379,15 @@ def Hub.far.rpc.u(uber: Bool, show: Bool, +arg: String, view: Bool, +st: M.State
     case False{}:
       Hub.far.rpc.s(show, arg, view, st, h, o, text, reply, now)
 
+def Hub.far.rpc.owner(owner: Bool, +arg: String, +st: M.State, h: Hub, +o: J.Json, +text: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match owner:
+    case True{}: Hub.owner.received(h, arg, o, reply, now)
+    case False{}: Hub.far.rpc.u(String.eq(J.Json.get_str(o, "m", ""), "uber.sync"), FV.Fv.show.is(J.Json.get_str(o, "m", "")), arg, FV.Fv.read(J.Json.get_str(o, "m", "")), st, h, o, text, reply, now)
+
 def Hub.far.rpc(ok: Bool, +arg: String, m: Maybe<&2, J.Json>, h: Hub, +text: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
   match ok m h:
     case True{} Some{+o} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.far.rpc.u(String.eq(J.Json.get_str(o, "m", ""), "uber.sync"), FV.Fv.show.is(J.Json.get_str(o, "m", "")), arg, FV.Fv.read(J.Json.get_str(o, "m", "")), st, Hub{st, f, ls, cl, as, inbox, cfg, note}, o, text, reply, now)
+      Hub.far.rpc.owner(String.eq(J.Json.get_str(o, "m", ""), "owner.mail"), arg, st, Hub{st, f, ls, cl, as, inbox, cfg, note}, o, text, reply, now)
     case True{} None{} _:
       Hub.answer(h, reply, W.Http.text("400 Bad Request", "not JSON"))
     case False{} _ _:
@@ -15680,11 +15831,14 @@ def Conn.bot.page_id(+r: String) -> String:
   Bool.pick(String, Conn.bot.page_ok(String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n))), String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n)), "")
 
 # a far view.get's file (farview.bend's Stream.mark): the head, then the
-# file from disk a piece at a time
+# file from disk a piece at a time. Fvs.get.read already bounds size by
+# Fv.cap (4000 MB), so it fits the send_path effect's U32 byte count.
 def Conn.bot.stream(s: Socket, +size: Nat, +path: String) -> IO(Unit):
   do IO<Unit>:
     s2 : Socket <- Conn.send(s, U.Utf8.encode(BRANGE.Rng.head(BRANGE.Rng.whole(size), size, "application/octet-stream", "no-store")))
-    Img.send.k(True{}, s2, path, 0n, size)
+    sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_path(s2, path, 0, U32.from_nat(size))
+    s3 : Socket <- Conn.sent(sent)
+    Socket.close(s3)
 
 def Conn.bot.mark(mark: Bool, s: Socket, +bs: List<&2, U32>) -> IO(Unit):
   match mark:
@@ -17420,6 +17574,12 @@ def Msg.kind(m: Msg) -> String:
       "recover"
     case Reexec{_, _}:
       "reexec"
+    case MailRecovered{_}: "mail-recovered"
+    case OwnerReady{_, _}: "owner-mail-ready"
+    case OwnerPlan{_}: "owner-mail-plan"
+    case OwnerSent{_}: "owner-mail-sent"
+    case OwnerMoved{_}: "owner-mail-moved"
+    case OwnerIdle{}: "owner-mail-idle"
     case MailRouted{_}: "mail-route"
     case MailNext{_, _}: "mail-next"
     case MailFailed{_, _}: "mail-failed"
@@ -18001,6 +18161,36 @@ def Hub.lock.http(h: Hub, +op: String, +body: String, +reply: Chan(String), +now
 def Hub.mail.failed(h: Hub, +body: MB.Body, +reason: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Mail.failure(st, now, body, reason))
+
+def Hub.mail.recovered(h: Hub, +cs: List<&2, M.Change>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      IO.bind(Hub, Hub, Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{List.append(&2, M.Change, cs, OWN.Owner.recovered(st, cs, now)), Nil{}}), OwnerJob.start)
+
+def Hub.owner.route(pair: M.State & Hub, +b: MB.Body, +now: Nat) -> IO(Hub):
+  (s, h) = pair
+  Hub.step(h, B.Mail.route(s, now, b))
+
+def Hub.owner.ready.on(current: Bool, h: Hub, +b: MB.Body, +now: Nat) -> IO(Hub):
+  match current:
+    case False{}: IO.pure(Hub, h)
+    case True{}:
+      Hub.owner.route(Hub.state(h), b, now)
+
+def Hub.owner.ready(h: Hub, +r: J.Json, +b: MB.Body, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.owner.ready.on(Bool.and(OWN.Owner.current(st, r), Bool.not(OWN.Owner.remote(st))), Hub{st, f, ls, cl, as, inbox, cfg, note}, b, now)
+
+def Hub.owner.plan(h: Hub, +r: J.Json, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{OWN.Owner.plan(st, r, now), Nil{}})
+
+def Hub.owner.sent(h: Hub, +r: J.Json, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{OWN.Owner.sent(st, r, now), Nil{}})
 
 def Hub.mail.routed(h: Hub, body: MB.Body, +now: Nat) -> IO(Hub):
   match h:
@@ -18737,6 +18927,12 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.dir.returned(h, mc)
     case LinkFound{lk}:
       Hub.link(h, lk)
+    case MailRecovered{changes}: Hub.mail.recovered(h, changes, now)
+    case OwnerReady{record, body}: Hub.owner.ready(h, record, body, now)
+    case OwnerPlan{record}: Hub.owner.plan(h, record, now)
+    case OwnerSent{record}: Hub.owner.sent(h, record, now)
+    case OwnerMoved{record}: Hub.owner.plan(h, record, now)
+    case OwnerIdle{}: OwnerJob.idle(Far.fh(h))
     case MailRouted{body}: Hub.mail.routed(h, body, now)
     case MailNext{bot, conv}: Hub.mail.next(h, bot, conv, now)
     case MailFailed{body, reason}: Hub.mail.failed(h, body, reason, now)
