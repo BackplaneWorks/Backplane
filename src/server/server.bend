@@ -17,6 +17,7 @@ import ./mailcontext.bend as MCTX
 import ./telemetry.bend as TI
 import ./telemetry-ui.bend as TUI
 import ../core/telemetry.bend as TLM
+import ../core/telemetry-usage.bend as TUS
 import ../core/charter.bend as CH
 import ../core/mailrun.bend as RUN
 import ../core/runlife.bend as RL
@@ -248,6 +249,7 @@ type Msg is Data:
   Tick{}
   TelemetryDone{gen: Nat, view: TLM.TmView, id: String}
   TelemetryPermit{gen: Nat, view: TLM.TmView, reply: Chan(Bool)}
+  TelemetryUsagePermit{gen: Nat, view: TLM.TmView, privacy_gen: String, reply: Chan(Bool)}
   # a Codex or Grok turn's KiCad files, read off the hub: the panel opens
   # (Hub.auto) when they arrive
   AutoView{thread: String, fs: K.Files}
@@ -10982,16 +10984,30 @@ def TelemetryJob.permit(+inbox: Chan(Msg), gen: Nat, view: TLM.TmView) -> IO(Boo
     ok : Maybe<&1, Bool> <- Chan.recv(Bool, reply)
     return Maybe.default(&1, Bool, ok, False{})
 
-def TelemetryJob.run(+tm: List<&2, TI.TmCfg>, home: String, +view: TLM.TmView, +now: Nat, +inbox: Chan(Msg)) -> IO(Unit):
+def Hub.telemetry.usage_permit(h: Hub, gen: Nat, +view: TLM.TmView, privacy_gen: String, reply: Chan(Bool)) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, Bool.and(TI.Tio.owns(Cfg.telemetry(cfg), gen), Bool.and(TLM.Tm.current(view, st), TUS.Usage.current(privacy_gen, st))))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def TelemetryJob.usage_permit(+inbox: Chan(Msg), gen: Nat, view: TLM.TmView, privacy_gen: String) -> IO(Bool):
+  do IO<Bool>:
+    +reply : Chan(Bool) <- Chan.new(Bool, 1)
+    Self.post(inbox, TelemetryUsagePermit{gen, view, privacy_gen, reply})
+    ok : Maybe<&1, Bool> <- Chan.recv(Bool, reply)
+    return Maybe.default(&1, Bool, ok, False{})
+
+def TelemetryJob.run(+tm: List<&2, TI.TmCfg>, home: String, +view: TLM.TmView, rows: List<&2, TUS.UsageRow>, privacy_gen: String, +now: Nat, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
-    id : String <- TI.Tio.job(tm, home, view, now, u => TelemetryJob.permit(inbox, now, view))
+    id : String <- TI.Tio.job.usage(tm, home, view, rows, now, u => TelemetryJob.permit(inbox, now, view), u => TelemetryJob.usage_permit(inbox, now, view, privacy_gen))
     Self.post(inbox, TelemetryDone{now, view, id})
 
 def Hub.telemetry.k(go: Bool, h: Hub, +now: Nat) -> IO(Hub):
   match go h:
     case True{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, TelemetryJob.run(Cfg.telemetry(cfg), Cfg.home(cfg), TI.Tio.view(st, Cfg.version(cfg), now, Cfg.telemetry(cfg)), now, inbox))
+        IO.spawn(Unit, TelemetryJob.run(Cfg.telemetry(cfg), Cfg.home(cfg), TI.Tio.view(st, Cfg.version(cfg), now, Cfg.telemetry(cfg)), TUS.Usage.rows(now, st), M.Setting.get(st, "telemetry.usage.generation", ""), now, inbox))
         return Hub{st, f, ls, cl, as, inbox, Cfg.with_tm(cfg, TI.Tio.busy(Cfg.telemetry(cfg), now)), note}
     case False{} x: IO.pure(Hub, x)
 
@@ -14047,8 +14063,14 @@ def Hub.vault.open(h: Hub) -> IO(Hub):
 def Hub.recover.v(h: Hub, +now: Nat) -> IO(Hub):
   IO.bind(Hub, Hub, Hub.mail.recover.start(h), h0 => IO.bind(Hub, Hub, Far.start(h0), h2 => Hub.recover.stale(h2, now)))
 
+def Hub.metrics.start(h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +value = Bool.pick(String, TI.Tio.can(Cfg.telemetry(cfg), 0n), "1", "")
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{Bool.pick(List<&2, M.Change>, String.eq(M.Setting.get(st, "telemetry.usage.enabled", ""), value), Nil{}, [M.SettingSet{"telemetry.usage.enabled", value, now}]), Nil{}})
+
 def Hub.recover(h: Hub, +now: Nat) -> IO(Hub):
-  IO.bind(Hub, Hub, Hub.vault.open(h), hv => Hub.recover.v(hv, now))
+  IO.bind(Hub, Hub, Hub.vault.open(h), hv => IO.bind(Hub, Hub, Hub.metrics.start(hv, now), hm => Hub.recover.v(hm, now)))
 
 # The minute
 # ----------
@@ -17044,6 +17066,8 @@ def Msg.kind(m: Msg) -> String:
       "telemetry_done"
     case TelemetryPermit{_, _, _}:
       "telemetry_permit"
+    case TelemetryUsagePermit{_, _, _, _}:
+      "telemetry_usage_permit"
     case Tick{}:
       "tick"
     case Heart{}:
@@ -18348,6 +18372,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.gone(h, thread, code, pid, why, now)
     case TelemetryPermit{gen, view, reply}:
       Hub.telemetry.permit(h, gen, view, reply)
+    case TelemetryUsagePermit{gen, view, privacy_gen, reply}:
+      Hub.telemetry.usage_permit(h, gen, view, privacy_gen, reply)
     case TelemetryDone{gen, view, id}:
       Hub.telemetry.done(h, gen, view, id, now)
     case Tick{}:

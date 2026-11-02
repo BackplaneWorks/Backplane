@@ -116,7 +116,7 @@ def Ob.body.s0(+l: I.Loc, k: Nat) -> String:
   Ob.body.s0.k(l, k) ++ " " ++ Ob.beta()
 
 def Ob.body.share() -> String:
-  "Backplane counts installs and how many people use it: a random install id, the version and OS, once a day. Nothing else: no projects, files, prompts, names or address. If you opt out, installs and updates are still counted, without the id. Change it any time in Settings."
+  "Backplane counts installs, daily activity, threads created, messages sent, model tokens used and bot traffic. We send daily totals with a random install id, version and OS to understand alpha usage and share aggregate metrics with investors. No conversation content, projects, files, names or credentials are sent. Choose Keep sharing to allow this. Next or Skip leaves sharing off, with only id-less install and update counts. Change it any time in Settings."
 
 def Ob.body.s1(+l: I.Loc, +k: Nat, +d: String) -> String:
   Bool.pick(String, Ob.phone(k), MSG.T.tour.body.projects.phone(l), MSG.T.tour.body.projects.desktop(l))

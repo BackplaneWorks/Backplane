@@ -1,5 +1,7 @@
 import Base
 import ../core/telemetry.bend as T
+import ../core/telemetry-usage.bend as TU
+import ../core/json.bend as J
 import ../core/sha256.bend as SH
 import ../core/exe.bend as EX
 import ../core/tz.bend as TZ
@@ -224,12 +226,10 @@ def Tio.http.code(r: P.Ran) -> Nat:
     case P.Ran{0, out}: T.Tm.num(String.trim(out))
     case _: 0n
 
-def Tio.send(xs: List<&2, TmCfg>, +home: String, +st: T.TmState, +evs: List<&2, T.TmEv>, +now: Nat) -> IO(T.TmState):
+def Tio.post(xs: List<&2, TmCfg>, +home: String, +body: String, +now: Nat) -> IO(Nat & Nat):
   match xs:
     case TmCfg{_, _, +url, +kid, +key, _, _, _, _, _, +channel, _} <> _:
-      do IO<T.TmState>:
-        nonce : String <- Tio.random()
-        +body : String = T.Tm.body(now, String.take(nonce, 16n), evs)
+      do IO<Nat & Nat>:
         +path : String = home ++ "/telemetry/request.curl"
         +hdr : String = home ++ "/telemetry/response.headers"
         G.Gf.write(path, "url = " ++ G.Gc.q(url) ++ "\nrequest = \"POST\"\nheader = \"Content-Type: application/json\"\n" ++ G.Gc.headers(T.Tm.headers(kid, key, now, body)) ++ "\ndata-binary = " ++ G.Gc.q(body) ++ "\noutput = \"/dev/null\"\ndump-header = " ++ G.Gc.q(hdr) ++ "\nwrite-out = \"%{http_code}\"\n")
@@ -239,8 +239,18 @@ def Tio.send(xs: List<&2, TmCfg>, +home: String, +st: T.TmState, +evs: List<&2, 
         headers : String <- G.Gf.text(hdr)
         G.Gf.rm(path)
         G.Gf.rm(hdr)
-        return T.Tm.sent(st, evs, Tio.http.code(r), Tio.retry.lines(String.split(headers, '\n')), now)
-    case _: IO.pure(T.TmState, st)
+        return (Tio.http.code(r), Tio.retry.lines(String.split(headers, '\n')))
+    case _: IO.pure(Nat & Nat, (0n, 3600n))
+
+def Tio.sent(+st: T.TmState, evs: List<&2, T.TmEv>, now: Nat, response: Nat & Nat) -> T.TmState:
+  (+status, retry) = response
+  T.Tm.sent(st, evs, status, retry, now)
+
+def Tio.send(xs: List<&2, TmCfg>, home: String, st: T.TmState, +evs: List<&2, T.TmEv>, +now: Nat) -> IO(T.TmState):
+  do IO<T.TmState>:
+    nonce : String <- Tio.random()
+    response : Nat & Nat <- Tio.post(xs, home, T.Tm.body(now, String.take(nonce, 16n), evs), now)
+    return Tio.sent(st, evs, now, response)
 
 def Tio.send.when(go: Bool, xs: List<&2, TmCfg>, home: String, st: T.TmState, evs: List<&2, T.TmEv>, now: Nat) -> IO(T.TmState):
   match go:
@@ -266,6 +276,57 @@ def Tio.job(+cfg: List<&2, TmCfg>, +home: String, +view: T.TmView, +now: Nat, au
     +evs : List<&2, T.TmEv> = T.Tm.batch(T.Tm.ready(T.TmState.queue(st), now))
     allowed : Bool <- authorize(Unit{})
     Tio.finish(allowed, cfg, home, st, evs, now)
+
+# Acknowledgements contain at most seven fixed-field snapshots. They are
+# id-scoped; a new id cannot inherit an old id's acknowledgements. A crash
+# between receipt and saving one only resends a max-merged daily snapshot.
+def Tio.usage.ack(+home: String, events: List<&2, J.Json>) -> IO(Unit):
+  do IO<Unit>:
+    G.Gf.write(home ++ "/telemetry/usage.tmp", J.Json.show(J.Json.arr(events)))
+    r : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(home ++ "/telemetry/usage.tmp", home ++ "/telemetry/usage.json")
+    return Unit{}
+
+def Tio.usage.record(drop: Bool, home: String, events: List<&2, J.Json>) -> IO(Unit):
+  match drop:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}: Tio.usage.ack(home, events)
+
+def Tio.usage.sent(response: Nat & Nat, +st: T.TmState, +home: String, all: List<&2, J.Json>, +now: Nat) -> IO(Unit):
+  (+status, retry) = response
+  do IO<Unit>:
+    Tio.write(home, T.Tm.sent(st, Nil{}, status, retry, now))
+    Tio.usage.record(T.Tm.http.drop(status), home, all)
+    return Unit{}
+
+def Tio.usage.send(go: Bool, cfg: List<&2, TmCfg>, +home: String, st: T.TmState, all: List<&2, J.Json>, pending: List<&2, J.Json>, +now: Nat) -> IO(Unit):
+  match go:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        nonce : String <- Tio.random()
+        response : Nat & Nat <- Tio.post(cfg, home, TU.Usage.body(now, String.take(nonce, 16n), pending), now)
+        Tio.usage.sent(response, st, home, all, now)
+
+def Tio.usage(+cfg: List<&2, TmCfg>, +home: String, +rows: List<&2, TU.UsageRow>, +view: T.TmView, +id: String, +now: Nat, authorize: Unit -> IO(Bool)) -> IO(Unit):
+  do IO<Unit>:
+    raw : String <- G.Gf.text(home ++ "/telemetry/state.json")
+    +st : T.TmState = T.Tm.state.parse(raw)
+    ack : String <- G.Gf.text(home ++ "/telemetry/usage.json")
+    +all : List<&2, J.Json> = TU.Usage.events(rows, id, view)
+    +pending : List<&2, J.Json> = TU.Usage.pending(all, J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(ack), J.Null{})))
+    allowed : Bool <- authorize(Unit{})
+    Tio.usage.send(Bool.and(allowed, Bool.and(T.Tm.clean(T.Tm.ev.new("active", "", view, id)), Bool.and(String.eq(id, T.TmState.id(st)), Bool.and(Nat.is_ge(now, T.TmState.next(st)), Bool.and(Bool.not(TU.Usage.registering(T.TmState.queue(st))), Bool.not(List.is_empty(&2, J.Json, pending))))))), cfg, home, st, all, pending, now)
+
+def Tio.usage.when(go: Bool, cfg: List<&2, TmCfg>, +home: String, rows: List<&2, TU.UsageRow>, view: T.TmView, id: String, now: Nat, authorize: Unit -> IO(Bool)) -> IO(Unit):
+  match go:
+    case False{}: G.Gf.rm(home ++ "/telemetry/usage.json")
+    case True{}: Tio.usage(cfg, home, rows, view, id, now, authorize)
+
+def Tio.job.usage(+cfg: List<&2, TmCfg>, +home: String, +view: T.TmView, +rows: List<&2, TU.UsageRow>, +now: Nat, authorize: Unit -> IO(Bool), usage_authorize: Unit -> IO(Bool)) -> IO(String):
+  do IO<String>:
+    +id : String <- Tio.job(cfg, home, view, now, authorize)
+    Tio.usage.when(Bool.and(T.Tm.uuid.ok(id), Bool.not(List.is_empty(&2, TU.UsageRow, rows))), cfg, home, rows, view, id, now, usage_authorize)
+    return id
 
 def Tio.args.copy(xs: List<String>) -> List<&2, String>:
   match xs:

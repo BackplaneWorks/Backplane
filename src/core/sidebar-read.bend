@@ -20,7 +20,7 @@ def Input.of(+st: M.State) -> Input:
 def Input.state(input: Input) -> M.State:
   match input:
     case Input{ps, ts, tk, sg, qu, ak, dv, nv, world, mail}:
-      M.State{ps, ts, Nil{}, 0n, tk, sg, qu, ak, dv, nv, [M.Ext{world, Map.new(&2, List<&2, M.Entry>), [mail]}]}
+      M.State{ps, ts, Nil{}, 0n, tk, sg, qu, ak, dv, nv, [M.Ext{world, Map.new(&2, List<&2, M.Entry>), [mail], Map.new(&2, String)}]}
 
 def Input.ui(u: U.Ui) -> U.Ui:
   match u:

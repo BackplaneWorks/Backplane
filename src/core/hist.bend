@@ -1018,7 +1018,7 @@ def Hist.install(steps: List<&2, M.Entry>, sources: List<&2, M.Entry>, +th: Stri
       M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nav,
         [M.Ext{M.Ext.world(M.Ext.of(bw)),
           Map.set(&2, List<&2, M.Entry>, Map.set(&2, List<&2, M.Entry>, M.Ext.by(M.Ext.of(bw)), M.Idx.steps.key(th), steps),
-            Hist.sources.key(th), sources), M.Ext.mail(M.Ext.of(bw))}]}
+            Hist.sources.key(th), sources), M.Ext.mail(M.Ext.of(bw)), M.Ext.usage(M.Ext.of(bw))}]}
 
 def Hist.window.sources(held: List<&2, M.Entry>, steps: List<&2, M.Entry>, es: List<&2, M.Entry>) -> List<&2, M.Entry>:
   match held:

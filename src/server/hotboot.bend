@@ -177,7 +177,7 @@ def Hot.tables() -> List<&2, String>:
   ["project", "thread", "task", "ask", "queue", "bot", "room", "routine", "conv", "mark"]
 
 def Hot.doms() -> List<&2, String>:
-  ["device", "nav", "hook", "mem", "peer", "space", "page", "skill", "hops", "talk", "run", "origin", "charter", "decision", "mailname", "state"]
+  ["device", "nav", "hook", "mem", "peer", "space", "page", "skill", "hops", "talk", "run", "origin", "charter", "decision", "mailname", "state", "usage"]
 
 def Hot.read.tables(ts: List<&2, String>, +h: String, m: Map<&2, List<&2, List<&2, String>>>) -> IO(Map<&2, List<&2, List<&2, String>>>):
   match ts:
