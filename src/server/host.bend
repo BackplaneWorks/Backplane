@@ -225,3 +225,25 @@ def Sys.native_pid() -> IO(U32):
 # A filesystem argument for a native OS tool (Win32 paths on Cygwin).
 def Sys.native_path(path: String) -> IO(String):
   import "./effects/host.js"
+
+# Start retirement without blocking the hub. await_retired is the launch
+# barrier: it fails closed if an owned tree could not be stopped.
+def Proc.retire(thread: String, pid: U32) -> IO(Unit):
+  import "./effects/host.js"
+
+def Proc.await_retired(thread: String, gen: String) -> IO(Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
+# A per-thread launch lease covers asynchronous credential preparation as
+# well as the interval before the hub registers the returned PID.
+def Proc.turn_begin(thread: String, gen: String) -> IO(Unit):
+  import "./effects/host.js"
+
+def Proc.turn_cancel(thread: String) -> IO(Unit):
+  import "./effects/host.js"
+
+def Proc.turn_spawned(thread: String, gen: String, pid: U32) -> IO(Bool):
+  import "./effects/host.js"
+
+def Proc.turn_failed(thread: String, gen: String) -> IO(Unit):
+  import "./effects/host.js"
