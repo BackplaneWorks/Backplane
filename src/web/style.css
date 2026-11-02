@@ -2355,3 +2355,14 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .settings-view .set-busy { border-left: 2px solid var(--accent); }
 .settings-view .set-busy .set-ctl { min-width: min(260px, 100%); flex: 1 1 260px; }
 .settings-view .set-note.bad { color: var(--bad); }
+
+.improvements [hidden]{display:none!important}
+.improvements-public{display:flex;flex-direction:column;gap:10px}
+.improvements-public p,.improvements>details p{font-size:12px;margin:0;line-height:1.5}
+.improvements label:has(input[type=checkbox]){display:flex;align-items:flex-start;gap:6px}
+.improvements input[type=checkbox]{flex:none;min-width:18px;min-height:18px}
+.improvements pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:22vh;overflow:auto;font-size:11px}
+.improvements-issue-actions{display:flex;flex-wrap:wrap;gap:8px}
+.improvements #improvements-review{min-height:180px;max-height:45vh}
+.improvements #improvements-details,.improvements #improvements-evidence{min-height:70px}
+.improvements>details{font-size:12px}.improvements>details>label{margin:8px 0}

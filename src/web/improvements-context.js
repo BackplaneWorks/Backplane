@@ -29,7 +29,7 @@ export function improvementOrigin({ session = {}, doc = document } = {}) {
 export function improvementContext(origin, result) {
   const project = result.projects?.find(p => p.id === (result.project || origin.project));
   return {
-    app: 'Backplane',
+    app: 'Backplane', appVersion: result.appVersion || 'unknown',
     sourceThread: reference('thread', origin.thread || result.thread, origin.name),
     sourceBot: reference('bot', origin.bot, origin.bot ? origin.name : ''),
     sourceProject: project ? { ...reference('project', project.id, project.title), root: project.root } : null,

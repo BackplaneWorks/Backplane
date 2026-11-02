@@ -345,6 +345,9 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
     suspend fun offline(key: String) = out("Backplane.online(${q(key)}, false, true)", screen = false)
     suspend fun tick(now: Long) = out("Backplane.tick($now)")
     suspend fun reflowDefaults() = call("Backplane.reflowDefaults()", person = true)
+    suspend fun improvementsPreview(text: String, os: String, version: String, details: String) =
+        call("Backplane.improvementsPreview(${q(text)}, ${q(os)}, ${q(version)}, ${q(details)}, \"\")", person = true)
+    suspend fun improvementsPreviewBody(body: String) = call("Backplane.improvementsPreviewBody(${q(body)})", person = true)
     suspend fun reflowAlloys() = call("Backplane.reflowAlloys()", person = true)
     suspend fun reflow(profile: String, alloy: String) = call("Backplane.reflow(${q(profile)}, ${q(alloy)})", person = true)
     // a catalog text by key, in the device's language

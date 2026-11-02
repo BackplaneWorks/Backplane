@@ -766,9 +766,50 @@ def Improvements.projects(xs: List<&2, M.Project>) -> List<&2, J.Json>:
       J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{title}}, J.KV{"root", J.Str{root}}]) <> Improvements.projects(t)
 
 def Improvements.context(+s: M.State, +thread: String) -> J.Json:
-  J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"project", J.Str{Bool.pick(String, Hub.owns(s, thread), ST.Tree.project(Hub.thread(s, thread)), "")}},
+  J.Json.obj([J.KV{"appVersion", J.Str{VER.Version.current()}}, J.KV{"thread", J.Str{thread}}, J.KV{"project", J.Str{Bool.pick(String, Hub.owns(s, thread), ST.Tree.project(Hub.thread(s, thread)), "")}},
     J.KV{"accountBinding", J.Str{ACCT.Accounts.owner(s, thread)}},
     J.KV{"projects", J.Json.arr(Improvements.projects(Hub.projects(s)))}])
+
+# Only an explicit completed report thread can supply a draft. This reads a
+# bounded per-thread index, never the hub log, and never publishes anything.
+def Improvements.report.fits(s: String, budget: Nat, ok: Bool) -> Bool:
+  match s budget ok:
+    case _ _ False{}: False{}
+    case SNil{} _ True{}: True{}
+    case _ 0n True{}: False{}
+    case SCon{Chr{+c}, t} +left True{}:
+      +width = Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))
+      Improvements.report.fits(t, Nat.sub(left, width), Nat.is_ge(left, width))
+
+def Improvements.report.limit(+text: String) -> String:
+  Bool.pick(String, Improvements.report.fits(text, 120000n, True{}), text, "")
+
+def Improvements.report.body(xs: List<&2, M.Entry>, fuel: Nat) -> String:
+  match xs fuel:
+    case _ 0n: ""
+    case Nil{} _: ""
+    case M.Msg{_, _, M.Assistant{}, +text, _} <> _ 1n+_: Improvements.report.limit(text)
+    case _ <> rest 1n+n: Improvements.report.body(rest, n)
+
+def Improvements.report.done(t: M.TurnState) -> Bool:
+  match t:
+    case M.Completed{}: True{}
+    case _: False{}
+
+def Improvements.report.have(ok: Bool, +s: M.State, +thread: String) -> J.Json:
+  match ok:
+    case False{}: J.Json.obj([J.KV{"error", J.Str{"Choose the report-writing thread first."}}])
+    case True{}:
+      J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"done", J.Json.bool(Improvements.report.done(M.Thread.turn(Hub.thread(s, thread))))},
+        J.KV{"body", J.Str{Bool.pick(String, Improvements.report.done(M.Thread.turn(Hub.thread(s, thread))), Improvements.report.body(M.State.mine(s, thread), 200n), "")}}])
+
+# Existing report threads from the retired Scratch target remain readable.
+# Creation still uses Improvements.project, which rejects Scratch.
+def Improvements.report.project(+s: M.State, +thread: String) -> Bool:
+  Bool.or(Improvements.project(Hub.project(s, ST.Tree.project(Hub.thread(s, thread)))), M.Scratch.is(ST.Tree.project(Hub.thread(s, thread))))
+
+def Improvements.report(+s: M.State, +thread: String) -> J.Json:
+  Improvements.report.have(Bool.and(Hub.owns(s, thread), Bool.and(String.starts_with(thread, "improvement-"), Improvements.report.project(s, thread))), s, thread)
 
 # a new project's id, or the removed one's it brings back
 def Hub.project_id(+old: String, +s: M.State, +now: Nat) -> String:
@@ -1311,7 +1352,7 @@ def Hub.methods() -> List<&2, String>:
    "thread.pin", "thread.unpin", "thread.rename", "thread.delete", "kicad.watch", "thread.modes", "app.update", "setting.set", "kicad.install",
    "ask.answer", "device.register", "device.drop", "kicad.info", "queue.resume",
    "queue.edit", "queue.remove", "queue.move", "queue.steer", "thread.fork", "thread.back", "thread.provider", "update.now", "work.cancel", "task.cancel", "wake.cancel", "deploy.restart", "deploy.cancel", "deploy.status", "lock.release", "lock.cancel", "kicad.retry", "mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send",
-   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context"]
+   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report"]
 
 # Agent output (Claude stream-json)
 # ---------------------------------
@@ -10078,6 +10119,8 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
       Step.outs([Reply.ok(client, id), ModelsRefresh{}])
     case 51n:
       Todos.edit(s, now, client, id, p)
+    case 53n:
+      Step.outs([Reply.data(client, id, Improvements.report(s, J.Json.get_str(p, "thread", "")))])
     case 52n:
       Step.outs([Reply.data(client, id, Improvements.context(s, J.Json.get_str(p, "sourceThread", "")))])
     case 50n:
