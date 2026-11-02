@@ -2418,6 +2418,29 @@ def View.run.el(none: Bool, +run: String, +t: String, +k: String, as: List<&2, D
     case False{}:
       D.El{t, k, List.append(&2, D.Attr, as, [D.At{"data-run", run}]), ks}
 
+def View.act.now(now: Bool) -> String:
+  match now:
+    case True{}:
+      " now"
+    case False{}:
+      ""
+
+def View.act.now.note(+lc: I.Loc, now: Bool) -> List<&2, D.Node>:
+  match now:
+    case True{}:
+      [D.Dom.span("now", MSG.T.fold.now(lc))]
+    case False{}:
+      Nil{}
+
+# the call a live run is on: its last entry (the live run is the last thing
+# of its thread), "data-now" for View.make
+def View.now.mark(now: Bool, ns: List<&2, D.Node>) -> List<&2, D.Node>:
+  match now ns:
+    case True{} D.El{t, k, as, ks} <> r:
+      D.El{t, k, List.append(&2, D.Attr, as, [D.At{"data-now", "1"}]), ks} <> r
+    case _ other:
+      other
+
 def View.run.mark(+run: String, ns: List<&2, D.Node>) -> List<&2, D.Node>:
   match ns:
     case Nil{}:
@@ -2427,21 +2450,37 @@ def View.run.mark(+run: String, ns: List<&2, D.Node>) -> List<&2, D.Node>:
     case n <> r:
       n <> View.run.mark(run, r)
 
-def View.act.spans(review: Bool, +tone: String, +kind: String, +summary: String) -> List<&2, D.Node>:
+# a tool's name as the row shows it (FO.Tool.shown: "viewer_show" for
+# "mcp__backplane__viewer_show", "To-do" for TodoWrite), the full name in
+# its tooltip when they differ
+def View.act.kind.k(same: Bool, +shown: String, +kind: String) -> D.Node:
+  match same:
+    case True{}:
+      D.Dom.span("kind", shown)
+    case False{}:
+      D.El{"span", "", [D.At{"class", "kind"}, D.At{"title", kind}], [D.Txt{shown}]}
+
+def View.act.kind(+lc: I.Loc, +kind: String) -> D.Node:
+  +shown = FO.Tool.shown(lc, kind)
+  View.act.kind.k(String.eq(shown, kind), shown, kind)
+
+def View.act.spans(+lc: I.Loc, review: Bool, +tone: String, +kind: String, +summary: String) -> List<&2, D.Node>:
   match review:
     case True{}:
       [D.Dom.span("kind", RVW.Review.label(tone, kind, summary)), D.Dom.span("summary", RVW.Review.say(tone, kind, summary))]
     case False{}:
-      [D.Dom.span("kind", kind), D.Dom.span("summary", summary)]
+      [View.act.kind(lc, kind), D.Dom.span("summary", FO.Tool.text(kind, summary))]
 
 # an act (a tool call, an error...): made by the host from these alone
 # (View.make)
 def View.act.n(+id: String, +tone: String, +kind: String, +summary: String) -> D.Node:
-  D.El{"div", id, [D.At{"class", "act " ++ tone}, D.At{"data-id", id}], View.act.spans(String.eq(tone, RVW.Review.tone()), tone, kind, summary)}
+  D.El{"div", id, [D.At{"class", "act " ++ tone}, D.At{"data-id", id}], View.act.spans(I.En{}, String.eq(tone, RVW.Review.tone()), tone, kind, summary)}
 
-# the same inside an open run's drawer (View.run.mark: its run's id)
-def View.act.in(+id: String, +tone: String, +kind: String, +summary: String, +run: String) -> D.Node:
-  View.run.el(String.is_empty(run), run, "div", id, [D.At{"class", "act " ++ tone}, D.At{"data-id", id}], View.act.spans(String.eq(tone, RVW.Review.tone()), tone, kind, summary))
+# the same inside an open run's drawer (View.run.mark: its run's id); now:
+# the call a live run is on (View.now.mark), marked like the live fold's row
+def View.act.in(+lc: I.Loc, +id: String, +tone: String, +kind: String, +summary: String, +run: String, +now: Bool) -> D.Node:
+  View.run.el(String.is_empty(run), run, "div", id, [D.At{"class", "act " ++ tone ++ View.act.now(now)}, D.At{"data-id", id}],
+    List.append(&2, D.Node, View.act.spans(lc, String.eq(tone, RVW.Review.tone()), tone, kind, summary), View.act.now.note(lc, now)))
 
 def View.act.g.loc(+lc: I.Loc, rem: Bool, +id: String, +tone: String, +kind: String, +summary: String, +at: Nat, +st: M.State) -> D.Node:
   match rem:
@@ -2580,7 +2619,7 @@ def View.make.r.loc(+lc: I.Loc, row: Bool, +k: String, +as: List<&2, D.Attr>, +t
     case True{}:
       View.row.p.loc(lc, String.eq(View.attr(as, "pin"), "1"), k, text, View.attr(as, "ago"), View.attr(as, "badge"), View.attr(as, "dot"), Bool.pick(String, String.eq(View.attr(as, "on"), "1"), k, ""), String.eq(View.attr(as, "mov"), "1"))
     case False{}:
-      View.act.in(k, View.attr(as, "tone"), View.attr(as, "kind"), text, View.attr(as, "data-run"))
+      View.act.in(lc, k, View.attr(as, "tone"), View.attr(as, "kind"), text, View.attr(as, "data-run"), String.eq(View.attr(as, "data-now"), "1"))
 
 def View.make.r(row: Bool, +k: String, +as: List<&2, D.Attr>, +text: String) -> D.Node:
   View.make.r.loc(I.En{}, row, k, as, text)
@@ -2713,15 +2752,23 @@ def View.run.of(r: FO.Role, +run: String) -> String:
     case FO.RIn{_}: run
     case _: ""
 
-def View.entries.run(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps, +run: String) -> List<&2, D.Node>:
+# whether an entry's role puts it in the live run (live: the one before)
+def View.run.live(r: FO.Role, live: Bool) -> Bool:
+  match r:
+    case FO.RHead{_, _, _, l}: l
+    case FO.RIn{_}: live
+    case _: False{}
+
+def View.entries.run(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps, +run: String, +live: Bool) -> List<&2, D.Node>:
   match es rs:
     case Nil{} _:
       Nil{}
-    case e <> t +r <> rt:
+    case e <> +t +r <> rt:
       +at = View.run.of(r, run)
-      List.append(&2, D.Node, View.role.loc(lc, r, View.run.mark(at, View.entry.role(View.role.body(r), lc, e, st, sel, ec, sp))), View.entries.run(lc, t, rt, st, sel, ec, sp, at))
+      +on = View.run.live(r, live)
+      List.append(&2, D.Node, View.role.loc(lc, r, View.now.mark(Bool.and(on, List.is_empty(&2, M.Entry, t)), View.run.mark(at, View.entry.role(View.role.body(r), lc, e, st, sel, ec, sp)))), View.entries.run(lc, t, rt, st, sel, ec, sp, at, on))
     case e <> t Nil{}:
-      List.append(&2, D.Node, View.entry(lc, e, st, sel, ec, sp), View.entries.run(lc, t, Nil{}, st, sel, ec, sp, ""))
+      List.append(&2, D.Node, View.entry(lc, e, st, sel, ec, sp), View.entries.run(lc, t, Nil{}, st, sel, ec, sp, "", False{}))
 
 # the tool calls around a page, without the design as it was before
 def View.around.k(c: FO.Around) -> FO.Around:
@@ -2733,7 +2780,7 @@ def View.around(+st: M.State, +sel: String, +es: List<&2, M.Entry>) -> FO.Around
   View.around.k(FO.Fold.context.of(st, sel, es))
 
 def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps) -> List<&2, D.Node>:
-  View.entries.run(lc, es, rs, st, sel, ec, sp, "")
+  View.entries.run(lc, es, rs, st, sel, ec, sp, "", False{})
 
 # a thread's entries, its runs of tool calls folded (the last stays open
 # while its turn runs)

@@ -1,5 +1,7 @@
 import ./src/core/provider-setup.bend as PROVIDERSETUP
+
 import ./src/core/range.bend as BRANGE
+
 import ./src/core/vdict.bend as VDICT
 
 import ./src/mobile/session.bend as MCOMPOSER
@@ -14878,3 +14880,28 @@ law provider_setup_missing_program:
 
 law provider_setup_failure_retry:
   {PROVIDERSETUP.Ps.busy("failed") == False{} : Bool}
+
+# Tool rows: an MCP tool's name reads without its "mcp__<server>__" prefix
+# (a server name may hold "_"), other names as they are
+law tool_short_mcp:
+  {FO.Tool.short("mcp__backplane__viewer_show") == "viewer_show" : String}
+
+law tool_short_server_underscores:
+  {FO.Tool.short("mcp__claude_ai_Docs__batch") == "batch" : String}
+
+law tool_short_plain:
+  {FO.Tool.short("Bash") == "Bash" : String}
+
+# a fold's label leaves the to-do tools out of its names (the to-do list
+# says what they did); they still count as calls
+law fold_label_leaves_todo_out:
+  {FO.Fold.label(I18.En{}, [M.Act{"a", "t", "tool", "TodoWrite", "1 of 2 done", 0n}, M.Act{"b", "t", "tool", "Read", "board.kicad_pcb", 0n}]) == "2 tool calls · Read" : String}
+
+# the live run's row names what its latest call does (its summary's first
+# line), not only its tool
+law fold_live_names_call:
+  {FO.Fold.label.live(I18.En{}, [M.Act{"a", "t", "tool", "Read", "board.kicad_pcb", 0n}, M.Act{"b", "t", "tool", "Bash", "kicad-cli pcb drc b.kicad_pcb\necho done", 0n}]) == "2 tool calls · running: kicad-cli pcb drc b.kicad_pcb" : String}
+
+# a TodoWrite's row says where the list stands and the step in progress
+law tool_summary_todo:
+  {H.Claude.tool_summary("TodoWrite", J.Json.obj([J.KV{"todos", J.Json.arr([J.Json.obj([J.KV{"content", J.Str{"Read"}}, J.KV{"status", J.Str{"completed"}}]), J.Json.obj([J.KV{"content", J.Str{"Measure"}}, J.KV{"status", J.Str{"in_progress"}}]), J.Json.obj([J.KV{"content", J.Str{"Fix"}}, J.KV{"status", J.Str{"pending"}}])])}])) == "1 of 3 done · now: Measure" : String}

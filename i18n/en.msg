@@ -272,6 +272,7 @@ fold.more = , …
 fold.worked = Worked for {took} · {ago}
 fold.working = Working · started {ago}
 fold.running = running: {kind}
+fold.now = running
 
 # bot tabs and moods
 bots.tab.chat = Chat
