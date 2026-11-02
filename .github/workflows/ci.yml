@@ -44,6 +44,17 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           node --test test/release-producer.test.cjs
 
+  windows-agent-tree:
+    name: Windows owned agent tree
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - run: bun test/tools/process_tree_test.mjs
+      - run: bun test/tools/process_tree_native_test.ts
+
   desktop-install:
     name: Linux desktop installer
     runs-on: ubuntu-24.04
@@ -220,6 +231,7 @@ jobs:
         run: |
           bend test/wire/index.html -o build/wire > /dev/null
           BACKPLANE_SMOKE_FULL=1 scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
+          bun test/tools/codex_steer_e2e.ts dist-js/linux-x64/backplane-serve build/wire
       # the web client's reconnect pieces, and a view client hearing the
       # hub's heartbeat (and no broadcast) on the built binary
       - name: Reconnect and heartbeat

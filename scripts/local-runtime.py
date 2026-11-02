@@ -57,6 +57,8 @@ def main():
         run('startup',['scripts/js-smoke.sh',binary,web])
     else:
         run('wire',['bend','test/wire/index.html','-o','build/wire'])
+        run('process-tree',['bun','test/tools/process_tree_test.mjs'])
+        run('codex-steer',['bun','test/tools/codex_steer_e2e.ts',binary,str(ROOT/'build/wire')])
         run('liveness-progress',['bun','test/tools/liveness_progress_test.ts'])
         run('lock-guard-liveness',['bun','test/tools/lock_guard_liveness_test.ts'])
         run('lock-helper-liveness',['bun','test/tools/lock_helper_liveness_test.ts'])

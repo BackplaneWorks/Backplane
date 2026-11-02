@@ -859,6 +859,16 @@ function bp_proc_spawn(cmd, args, cwd, err, explicitEnv, deadlineMs = 0, onChild
   }
   child.once("error", () => {});
   child.exited = new Promise((res) => child.once("exit", () => res(child.exitCode)));
+  if (process.platform === "win32") {
+    try {
+      const root = bp_win_process_open(child.pid);
+      if (!root) throw new Error("Spawned process identity unavailable");
+      child.bpTree = { members: new Map([[child.pid, root]]), closed: false, stopping: null };
+    } catch (error) {
+      child.kill(9);
+      return io_fail(5, "Cannot track owned process tree");
+    }
+  }
   if (deadlineMs > 0) {
     const deadline = setTimeout(() => child.kill(), Math.min(deadlineMs, 60000));
     child.once("exit", () => clearTimeout(deadline));
@@ -891,7 +901,11 @@ function bp_proc_wait(pid, k) {
   if (child === undefined) {
     return 255;
   }
-  return io_park_promise(child.exited, k, () => {
+  const ended = child.exited.then(async () => {
+    if (child.bpTree?.stopping) await child.bpTree.stopping;
+    else if (child.bpTree) bp_win_tree_close(child.bpTree);
+  });
+  return io_park_promise(ended, k, () => {
     bp_procs().delete(pid >>> 0);
     return bp_proc_code(child);
   });
@@ -911,7 +925,7 @@ function bp_proc_exited(pid) {
 }
 
 // Proc.kill: pid as kill(2) reads it, a negated pid a process group (POSIX;
-// on Windows a group's leader is ended alone). Never 0, 1 or -1.
+// on Windows the owned process tree is ended). Never 0, 1 or -1.
 function bp_proc_kill(pid, sig) {
   const n = pid | 0;
   if (n === 0 || n === 1 || n === -1) {
@@ -922,12 +936,253 @@ function bp_proc_kill(pid, sig) {
     if (n < 0 && process.platform !== "win32") {
       process.kill(n, sig | 0);
     } else if (child !== undefined) {
-      child.kill(sig | 0);
-    } else {
+      if (process.platform === "win32" && sig !== 0 && child.bpTree) bp_win_tree_stop(child, sig | 0);
+      else child.kill(sig | 0);
+    } else if (process.platform !== "win32") {
       process.kill(n < 0 ? -n : n, sig | 0);
     }
   } catch (_) {
   }
+}
+
+// Windows has no POSIX process groups. Keep a handle to each spawned root:
+// an open process handle pins its PID even after exit, so a later tree walk
+// cannot mistake a reused PID for our wrapper or one of its descendants.
+function bp_win_process_api() {
+  if (globalThis.BP_WIN_PROCESS === undefined) {
+    const ffi = require("bun:ffi");
+    const k = ffi.dlopen("kernel32.dll", {
+      OpenProcess: { args: ["u32", "i32", "u32"], returns: "ptr" },
+      CloseHandle: { args: ["ptr"], returns: "i32" },
+      GetProcessTimes: { args: ["ptr", "ptr", "ptr", "ptr", "ptr"], returns: "i32" },
+      WaitForSingleObject: { args: ["ptr", "u32"], returns: "u32" },
+      TerminateProcess: { args: ["ptr", "u32"], returns: "i32" },
+      CreateToolhelp32Snapshot: { args: ["u32", "u32"], returns: "ptr" },
+      Process32FirstW: { args: ["ptr", "ptr"], returns: "i32" },
+      Process32NextW: { args: ["ptr", "ptr"], returns: "i32" },
+      GetLastError: { args: [], returns: "u32" },
+    }).symbols;
+    globalThis.BP_WIN_PROCESS = { ...k, ptr: ffi.ptr };
+  }
+  return globalThis.BP_WIN_PROCESS;
+}
+
+function bp_win_process_open(pid) {
+  const k = bp_win_process_api();
+  // SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE
+  const handle = k.OpenProcess(0x101001, 0, pid);
+  if (!handle) {
+    if (k.GetLastError() === 87) return null; // it ended since the snapshot
+    throw new Error("Cannot open owned process " + pid);
+  }
+  const times = new BigUint64Array(4);
+  if (!k.GetProcessTimes(handle, k.ptr(times.subarray(0, 1)), k.ptr(times.subarray(1, 2)),
+    k.ptr(times.subarray(2, 3)), k.ptr(times.subarray(3, 4)))) {
+    k.CloseHandle(handle);
+    throw new Error("Cannot read owned process identity " + pid);
+  }
+  return { pid, handle, born: times[0] };
+}
+
+function bp_win_process_snapshot() {
+  const k = bp_win_process_api();
+  const snapshot = k.CreateToolhelp32Snapshot(2, 0); // TH32CS_SNAPPROCESS
+  if (!snapshot || snapshot === -1 || snapshot === 18446744073709551615) {
+    throw new Error("Cannot enumerate owned process tree");
+  }
+  try {
+    // PROCESSENTRY32W, x64: dwSize, th32ProcessID, th32ParentProcessID.
+    const entry = new Uint8Array(568);
+    const view = new DataView(entry.buffer);
+    view.setUint32(0, entry.length, true);
+    const rows = [];
+    let ok = k.Process32FirstW(snapshot, k.ptr(entry));
+    while (ok) {
+      rows.push({ pid: view.getUint32(8, true), parent: view.getUint32(32, true) });
+      ok = k.Process32NextW(snapshot, k.ptr(entry));
+    }
+    if (k.GetLastError() !== 18) throw new Error("Incomplete process tree snapshot");
+    return rows;
+  } finally {
+    k.CloseHandle(snapshot);
+  }
+}
+
+function bp_win_tree_capture(tree) {
+  let added = 0, more = true;
+  while (more) {
+    more = false;
+    const candidates = [];
+    try {
+      for (const row of bp_win_process_snapshot()) {
+        const parent = tree.members.get(row.parent);
+        if (row.pid <= 1 || row.pid === process.pid || !parent || tree.members.has(row.pid)) continue;
+        const member = bp_win_process_open(row.pid);
+        if (member) candidates.push({ member, parent });
+      }
+      if (candidates.length === 0) break;
+      // OpenProcess may race a child exiting and its PID being reused.
+      // With the new handles pinning those PIDs, verify the parent again.
+      const current = new Map(bp_win_process_snapshot().map(row => [row.pid, row.parent]));
+      for (const { member, parent } of candidates) {
+        if (current.get(member.pid) === parent.pid && member.born >= parent.born) {
+          tree.members.set(member.pid, member);
+          added++;
+          more = true;
+        }
+      }
+    } finally {
+      for (const { member } of candidates) {
+        if (!tree.members.has(member.pid)) bp_win_process_api().CloseHandle(member.handle);
+      }
+    }
+  }
+  return added;
+}
+
+function bp_win_tree_exited(member) {
+  const status = bp_win_process_api().WaitForSingleObject(member.handle, 0);
+  if (status === 0) return true;
+  if (status === 258) return false; // WAIT_TIMEOUT
+  throw new Error("Cannot confirm owned process exit " + member.pid);
+}
+
+function bp_win_tree_close(tree) {
+  if (tree.closed) return;
+  tree.closed = true;
+  for (const member of tree.members.values()) bp_win_process_api().CloseHandle(member.handle);
+}
+
+function bp_win_tree_stop(child, sig) {
+  const tree = child.bpTree;
+  if (!tree) return Promise.reject(new Error("No owned process identity for " + child.pid));
+  if (tree.stopping) return tree.stopping;
+  // Capture before signalling the wrapper or closing stdin. Retain every
+  // handle through the final snapshot, including parents that have exited.
+  const stop = async () => {
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      bp_win_tree_capture(tree);
+      for (const member of tree.members.values()) {
+        if (!bp_win_tree_exited(member) && !bp_win_process_api().TerminateProcess(member.handle, 128 + sig)
+          && !bp_win_tree_exited(member)) throw new Error("Cannot terminate owned process " + member.pid);
+      }
+      // TerminateProcess is asynchronous. After all captured handles are
+      // signalled, snapshot again: a child may have been born during the
+      // previous walk. No captured parent can create more children now.
+      if ([...tree.members.values()].every(bp_win_tree_exited) && bp_win_tree_capture(tree) === 0) {
+        bp_win_tree_close(tree);
+        return;
+      }
+      if (Date.now() >= deadline) throw new Error("Timed out stopping owned process tree");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  tree.stopping = stop().catch(error => { tree.stopping = null; throw error; });
+  // Proc.kill is fire-and-forget; Proc.retire/await_retired observe errors.
+  tree.stopping.catch(() => {});
+  return tree.stopping;
+}
+
+// Retirement survives removing an Agent from the hub's registry. A failed
+// retirement stays here so Retry must confirm cleanup too. Waiters and the
+// stream reader share the same stop; neither can release the other early.
+function bp_retirements() {
+  return globalThis.BP_RETIREMENTS ?? (globalThis.BP_RETIREMENTS = new Map());
+}
+
+function proc_retire(thread, pid) {
+  pid >>>= 0;
+  if (pid <= 1) return { $: "Unit" }; // a not-yet-started placeholder
+  let pending = bp_retirements().get(thread);
+  if (!pending) bp_retirements().set(thread, pending = new Map());
+  if (!pending.has(pid)) {
+    const child = bp_procs().get(pid);
+    const stop = process.platform === "win32"
+      ? () => child ? bp_win_tree_stop(child, 15) : Promise.reject(new Error("Owned process identity unavailable"))
+      : async () => {
+        proc_kill(pid, 15);
+        const deadline = Date.now() + 2000;
+        while (proc_exited(pid) === 4294967295) {
+          if (Date.now() >= deadline) proc_kill(pid, 9);
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+      };
+    const task = { promise: null, run: null };
+    task.run = () => {
+      if (!task.promise) {
+        task.promise = Promise.resolve(stop()).then(() => {
+          if (pending.get(pid) === task) pending.delete(pid);
+          if (pending.size === 0 && bp_retirements().get(thread) === pending) bp_retirements().delete(thread);
+        }, error => { task.promise = null; throw error; });
+        task.promise.catch(() => {});
+      }
+      return task.promise;
+    };
+    pending.set(pid, task);
+    // stop starts capturing synchronously, before the input channel closes.
+    task.run();
+  }
+  return { $: "Unit" };
+}
+
+function bp_turn_launches() {
+  return globalThis.BP_TURN_LAUNCHES ?? (globalThis.BP_TURN_LAUNCHES = new Map());
+}
+
+function proc_turn_begin(thread, gen) {
+  let turn = bp_turn_launches().get(thread);
+  if (!turn) bp_turn_launches().set(thread, turn = { latest: gen, launching: null, pid: 0 });
+  turn.latest = gen;
+  // The process may have spawned before TurnPid reached the hub. The launch
+  // lease records it here too, so replacing its placeholder still retires it.
+  if (turn.pid > 1) {
+    if (bp_procs().has(turn.pid) || proc_exited(turn.pid) === 4294967295) proc_retire(thread, turn.pid);
+    turn.pid = 0;
+  }
+  return { $: "Unit" };
+}
+
+function proc_turn_cancel(thread) {
+  return proc_turn_begin(thread, "");
+}
+
+function proc_turn_failed(thread, gen) {
+  const turn = bp_turn_launches().get(thread);
+  if (turn?.launching?.gen === gen) {
+    const release = turn.launching.release;
+    turn.launching = null;
+    release();
+  }
+  return { $: "Unit" };
+}
+
+function proc_turn_spawned(thread, gen, pid) {
+  const turn = bp_turn_launches().get(thread);
+  const current = !turn || turn.latest === gen;
+  if (turn && current) turn.pid = pid >>> 0;
+  if (!current) proc_retire(thread, pid);
+  proc_turn_failed(thread, gen);
+  return { $: current ? "True" : "False" };
+}
+
+function proc_await_retired(thread, gen, k) {
+  const wait = async () => {
+    const turn = bp_turn_launches().get(thread);
+    // A launch can await account verification before it has a PID. Its
+    // replacement waits for that attempt to either fail or register its PID.
+    while (turn?.launching) await turn.launching.done;
+    const pending = bp_retirements().get(thread);
+    if (pending) for (const task of pending.values()) await task.run();
+    if (gen !== "" && turn) {
+      if (turn.latest !== gen) throw new Error("Superseded agent launch");
+      let release;
+      const done = new Promise(resolve => { release = resolve; });
+      turn.launching = { gen, done, release };
+    }
+  };
+  return io_park_promise(wait(), k, (_, error) => error === undefined ? io_done({ $: "Unit" })
+    : io_fail(16, "The previous agent has not stopped or this launch was superseded; refusing to resume its session."));
 }
 
 // Where an agent's stderr goes (err 3): ${BACKPLANE_ERR_DIR:-${TMPDIR:-/tmp}/backplane-err-<uid>}/<pid>.err
@@ -1798,3 +2053,10 @@ io_eff(CID(Sys.exe_path), sys_exe_path);
 
 io_eff(CID(Sys.native_pid), () => process.pid >>> 0);
 io_eff(CID(Sys.native_path), (path) => path);
+
+io_eff(CID(Proc.retire), proc_retire);
+io_eff(CID(Proc.await_retired), proc_await_retired);
+io_eff(CID(Proc.turn_begin), proc_turn_begin);
+io_eff(CID(Proc.turn_cancel), proc_turn_cancel);
+io_eff(CID(Proc.turn_spawned), proc_turn_spawned);
+io_eff(CID(Proc.turn_failed), proc_turn_failed);
