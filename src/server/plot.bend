@@ -1528,14 +1528,52 @@ def Pv.info(+client: U32, +id: String, +file: String, +sig: U32, +idx: Nat, +out
     r : PR.Ran <- PR.Proc.run(EX.Exe.child(exe), ["--plot-info", file, U32.show(sig), Nat.show(idx)], "/")
     Pv.info.done(r, client, id, out)
 
+# A newly subscribed page may join a source whose read is already busy,
+# after the poll that broadcast its stamp. Replay the current file identity
+# at subscription time; waiting for PGot would gate original-model loading
+# on the separate compact-mesh export. This is not plotrevision authority.
+def Sub.for_client(ss: List<&2, Sub>, +client: U32) -> List<&2, Sub>:
+  match ss:
+    case Nil{}: Nil{}
+    case +s <> rest: Sub.keep(Bool.not(U32.is_eq(Sub.client(s), client)), s, Sub.for_client(rest, client))
+
+def Pv.stamp.subscribed.sent(sm: U32 & String, key: String, subs: List<&2, Sub>, client: U32, out: Chan(POut)) -> IO(Unit):
+  (_, revision) = sm
+  Pv.stamp.fan(Sub.for_client(subs, client), key, revision, out)
+
+def Pv.stamp.subscribed.one(watched: Bool, +key: String, path: String, +subs: List<&2, Sub>, +client: U32, +out: Chan(POut)) -> IO(Unit):
+  match watched:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        stamp : U32 & String <- Pv.stamp.of(path)
+        Pv.stamp.subscribed.sent(stamp, key, subs, client, out)
+
+def Pv.stamp.subscribed(ss: List<&2, Src>, +subs: List<&2, Sub>, +client: U32, +out: Chan(POut)) -> IO(Unit):
+  match ss:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case Src{+key, kd, +path, sz, mt, re, busy, pl, good} <> rest:
+      do IO<Unit>:
+        Pv.stamp.subscribed.one(Sub.has(subs, client, key), key, path, subs, client, out)
+        Pv.stamp.subscribed(rest, subs, client, out)
+
+def Pv.watch.stamped(st: PSt, +client: U32, on: Bool, +out: Chan(POut)) -> IO(PSt):
+  match st on:
+    case +s False{}: IO.pure(PSt, PSt.stamps(s, client, False{}))
+    case PSt{+ss, +subs, polling} True{}:
+      do IO<PSt>:
+        +stamped : List<&2, Sub> = Sub.stamps(subs, client, True{})
+        Pv.stamp.subscribed(ss, stamped, client, out)
+        return PSt{ss, stamped, polling}
+
 # (n: the generation of this message: how many messages the actor took
 # before this one, Pv.tree.gen)
 def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, +n: String) -> IO(PSt):
   match st m:
     case _ PWatch{+client, +kind, +root, +path, +tree, +stamps}:
-      IO.bind(PSt, PSt, Pv.watch.go(False{}, st, client, kind, root, path, tree, q, out, n, dir), st2 => IO.pure(PSt, PSt.stamps(st2, client, stamps)))
+      IO.bind(PSt, PSt, Pv.watch.go(False{}, st, client, kind, root, path, tree, q, out, n, dir), st2 => Pv.watch.stamped(st2, client, stamps, out))
     case _ PAlso{+client, +kind, +root, +path, +tree, +stamps}:
-      IO.bind(PSt, PSt, Pv.watch.go(True{}, st, client, kind, root, path, tree, q, out, n, dir), st2 => IO.pure(PSt, PSt.stamps(st2, client, stamps)))
+      IO.bind(PSt, PSt, Pv.watch.go(True{}, st, client, kind, root, path, tree, q, out, n, dir), st2 => Pv.watch.stamped(st2, client, stamps, out))
     case PSt{ss, +subs, polling} PKeep{+client, +keys}:
       do IO<PSt>:
         +subs2 : List<&2, Sub> = Sub.keeps(subs, client, keys)
