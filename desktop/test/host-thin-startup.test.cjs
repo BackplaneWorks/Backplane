@@ -34,7 +34,7 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
   fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
   fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
   thinReading:null,resumedConversation:null,readingIdentity:()=> 'fixture-account',historyDirection:'',
-  historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
+  historyFillMore(){calls.push('history-fill-cleared');},historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
   modelFeedback:{clear(){}},subsFeedback:new SubsFeedback(()=>{}),viewerFeedback:{choice(){}},
   // The extracted socket adapter shares these services with the full host.
   // Record peripheral lifecycle calls; wire admission/ownership still uses real ThinHost/ThinViews.
