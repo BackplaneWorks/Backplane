@@ -69,11 +69,20 @@ def Touch.live(+th: String) -> String:
 def Touch.is_live(+x: String) -> Bool:
   String.starts_with(x, "\t")
 
+# An asynchronous result belongs to the connection that requested it. A
+# carriage-return prefix cannot be a thread ID, and differs from Live's tab.
+# Private results must never create sidebar work for another connection.
+def Touch.client(+cid: String) -> String:
+  "\r" ++ cid
+
+def Touch.is_client(+x: String) -> Bool:
+  String.starts_with(x, "\r")
+
 def Touch.real(ts: List<&2, String>, found: Bool) -> Bool:
   match ts found:
     case _ True{}: True{}
     case Nil{} False{}: False{}
-    case +x <> rest False{}: Touch.real(rest, Bool.not(Touch.is_live(x)))
+    case +x <> rest False{}: Touch.real(rest, Bool.not(Bool.or(Touch.is_live(x), Touch.is_client(x))))
 
 def Touch.any(t: Touch) -> Bool:
   match t:
@@ -98,6 +107,21 @@ def Touch.level.k(own: Bool, any: Bool) -> Nat:
 # 1: something else; 0: nothing
 def Touch.level(+t: Touch, +th: String) -> Nat:
   Touch.level.k(Touch.own(t, th), Touch.any(t))
+
+def Touch.client.own(t: Touch, +cid: String) -> Bool:
+  match t:
+    case Touch{_, ts}:
+      Bool.and(Bool.not(String.is_empty(cid)), Touch.member(ts, Touch.client(cid), False{}))
+
+def Touch.level.for.k(client: Bool, t: Touch, th: String) -> Nat:
+  match client:
+    case True{}: 2n
+    case False{}: Touch.level(t, th)
+
+# A private completion is urgent only for its connection. All normal
+# thread/global touches retain the existing policy, including mixed batches.
+def Touch.level.for(+t: Touch, th: String, +cid: String) -> Nat:
+  Touch.level.for.k(Touch.client.own(t, cid), t, th)
 
 # ms between notices of a view's own thread and of anything else
 def Pace.urgent() -> Nat:
