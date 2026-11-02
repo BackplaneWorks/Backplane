@@ -19,14 +19,14 @@ test('GitHub handoff persists consent before open, opens once, and fails closed 
  const full=new IssueHandoff({save:async()=>{throw Error('full disk');},open:()=>assert.fail('must stay local')});const d={issueBody:'exact body'};
  await assert.rejects(()=>full.send(d,preview),/full disk/);assert.equal(d.issueOpened,false);
 });
-test('report writer uses normal account binding and retries stable identity, upload and start',async()=>{
+test('report writer uses selected project, normal account binding and retries stable identity, upload and start',async()=>{
  const {ReportWriter}=await load('report-writer.js');const calls=[],saves=[];let fail=true,uploads=0;
  const rpc={request:async(m,p)=>{calls.push({m,p});if(m==='thread.create')return{thread:'improvement-'+p.creationKey};if(m==='improvements.context')return{thread:p.sourceThread,accountBinding:'fixture-generation'};if(m==='improvements.report'){assert.equal(p.accountBinding,'fixture-generation');return{thread:p.thread,done:true,body:'  Exact filled template\n日本語  '};}if(fail){fail=false;throw Error('lost reply');}return{ok:true};}};
- const writer=new ReportWriter({rpc,save:async d=>saves.push(structuredClone(d)),upload:async()=>{uploads++;return'/fixture/evidence.png';}}), draft={text:'description'};
+ const writer=new ReportWriter({rpc,save:async d=>saves.push(structuredClone(d)),upload:async()=>{uploads++;return'/fixture/evidence.png';}}), draft={text:'description',writerProject:'reports'};
  await assert.rejects(()=>writer.start(draft,'Actual report prompt',{image:new Blob(['image'])}),/lost reply/);
  const pending=writer.start(draft,'Changed value is not replayed');assert.equal(await writer.start(draft,'Duplicate'),false);await pending;
  const creates=calls.filter(c=>c.m==='thread.create'), starts=calls.filter(c=>c.m==='turn.start');assert.equal(uploads,1);assert.deepEqual(creates[0].p,creates[1].p);assert.deepEqual(starts[0].p,starts[1].p);
- assert.equal(creates[0].p.project,'scratch');assert.equal(starts[0].p.accountBinding,'fixture-generation');assert.match(starts[0].p.text,/Actual report prompt/);assert.match(starts[0].p.text,/\[attachment: \/fixture\/evidence.png\]/);
+ assert.equal(creates[0].p.project,'reports');assert.equal(starts[0].p.accountBinding,'fixture-generation');assert.match(starts[0].p.text,/Actual report prompt/);assert.match(starts[0].p.text,/\[attachment: \/fixture\/evidence.png\]/);
  assert.equal(await writer.load(draft),'  Exact filled template\n日本語  ');assert(!calls.some(c=>/github/.test(c.m)));
 });
 test('desktop collector includes temp/control in measured cap, cleans torn write and retains off across restart',()=>{
@@ -48,7 +48,7 @@ test('report operations fence identity after every persistence and reply boundar
  for(const changeAt of [1,2,3,4]){
   let current='A',saves=0;const calls=[];
   const writer=new ReportWriter({identity:()=>current,expectedScope:()=> 'A',save:async()=>{if(++saves===changeAt)current='B';},rpc:{request:async(m,p)=>{calls.push(m);if(m==='thread.create')return{thread:'improvement-'+p.creationKey};if(m==='improvements.context')return{thread:p.sourceThread,accountBinding:'named-generation'};assert.fail('must fence before start');}}});
-  await assert.rejects(()=>writer.start({text:'Private A description'},'Private A description'),/identity changed/);
+  await assert.rejects(()=>writer.start({text:'Private A description',writerProject:'reports'},'Private A description'),/identity changed/);
   assert(!calls.includes('turn.start'));
  }
  let current='A';const writer=new ReportWriter({identity:()=>current,expectedScope:()=> 'A',rpc:{request:async()=>{current='B';return{thread:'r',done:true,body:'Private A result'};}}});
@@ -58,4 +58,20 @@ test('failed disable stops collection immediately and does not emit another reco
  const {ConnectionLog}=await load('connection-log.js');let emitted=0;
  const journal=new ConnectionLog({storage:{getItem:()=>null,setItem:()=>{throw Error('quota');}},emit:()=>emitted++});
  assert.throws(()=>journal.setEnabled(false),/quota/);assert.equal(journal.enabled(),false);journal.record('open');assert.equal(emitted,0);
+});
+
+test('report agent requires a current project and does not recreate retired Scratch',async()=>{
+ const {ReportWriter}=await load('report-writer.js');let calls=0;const writer=new ReportWriter({rpc:{request:async()=>{calls++;}},save:async()=>{}});
+ await assert.rejects(()=>writer.start({text:'description'},'prompt'),/Choose a project/);
+ await assert.rejects(()=>writer.start({writerProject:'scratch'},'prompt'),/Choose a project/);
+ assert.equal(calls,0);
+});
+
+test('legacy writer recovery never dispatches an undefined or retired project',async()=>{
+ const {ReportWriter}=await load('report-writer.js');let calls=0;const writer=new ReportWriter({rpc:{request:async()=>{calls++;}},save:async()=>{}});
+ for(const old of [{key:'a'.repeat(32),thread:'original'}, {key:'a'.repeat(32),thread:'original',project:'scratch'}]) {
+  const draft={writer:old,writerProject:'reports'};
+  await assert.rejects(()=>writer.start(draft,'prompt'),/original report-writing thread/);assert.equal(draft.writer,old);
+ }
+ assert.equal(calls,0);
 });

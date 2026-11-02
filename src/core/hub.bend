@@ -803,8 +803,13 @@ def Improvements.report.have(ok: Bool, +s: M.State, +thread: String) -> J.Json:
       J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"done", J.Json.bool(Improvements.report.done(M.Thread.turn(Hub.thread(s, thread))))},
         J.KV{"body", J.Str{Bool.pick(String, Improvements.report.done(M.Thread.turn(Hub.thread(s, thread))), Improvements.report.body(M.State.mine(s, thread), 200n), "")}}])
 
+# Existing report threads from the retired Scratch target remain readable.
+# Creation still uses Improvements.project, which rejects Scratch.
+def Improvements.report.project(+s: M.State, +thread: String) -> Bool:
+  Bool.or(Improvements.project(Hub.project(s, ST.Tree.project(Hub.thread(s, thread)))), M.Scratch.is(ST.Tree.project(Hub.thread(s, thread))))
+
 def Improvements.report(+s: M.State, +thread: String) -> J.Json:
-  Improvements.report.have(Bool.and(Hub.owns(s, thread), Bool.and(String.starts_with(thread, "improvement-"), String.eq(ST.Tree.project(Hub.thread(s, thread)), "scratch"))), s, thread)
+  Improvements.report.have(Bool.and(Hub.owns(s, thread), Bool.and(String.starts_with(thread, "improvement-"), Improvements.report.project(s, thread))), s, thread)
 
 # a new project's id, or the removed one's it brings back
 def Hub.project_id(+old: String, +s: M.State, +now: Nat) -> String:
