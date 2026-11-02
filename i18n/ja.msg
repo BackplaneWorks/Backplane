@@ -741,6 +741,7 @@ remote.request.error = 相手のマシンが受け付けませんでした：{er
 remote.unreachable = 接続できません：{host}の名前解決または接続に失敗
 tools.pinned = 固定中
 tools.snooze = スヌーズ
+tools.retry = 再試行
 tools.forkthread = スレッドを分岐
 google.signature.placeholder = — {email}に代わりBackplaneから送信
 viewer.kicad10 = KiCad 10のコピー
@@ -1077,6 +1078,7 @@ phase.complete = 完了
 phase.stopped = 停止
 
 # Web/phone audit: tooltips, reasoning labels, and model progress.
+tools.tip.retry = ターンが失敗しました: 最後のメッセージをもう一度送信
 tools.tip.stop = 実行中のターンを停止 · Ctrl+.
 tools.tip.unpin = ピン留めを外し、通常の順序に戻す
 tools.tip.pin = 一覧の先頭に固定

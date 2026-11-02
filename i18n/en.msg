@@ -722,6 +722,7 @@ remote.request.error = that machine did not take it: {error}
 remote.unreachable = unreachable: cannot resolve or reach {host}
 tools.pinned = Pinned
 tools.snooze = Snooze
+tools.retry = Retry
 tools.forkthread = Fork thread
 google.signature.placeholder = — Sent by Backplane on behalf of {email}
 viewer.kicad10 = KiCad 10 copy
@@ -1057,6 +1058,7 @@ phase.complete = Complete
 phase.stopped = Stopped
 
 # Web/phone audit: tooltips, reasoning labels, and model progress.
+tools.tip.retry = The turn failed: send your last message again
 tools.tip.stop = Stop the running turn · Ctrl+.
 tools.tip.unpin = Unpin: it sorts with the rest again
 tools.tip.pin = Keep it at the top of the list
