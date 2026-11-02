@@ -15424,3 +15424,22 @@ law pending_preview_ellipsis:
 # every start on an escaped emoji in a boat status file, 2026-11-02)
 law json_surrogate_pair:
   {J.Json.show(Maybe.default(&2, J.Json, J.Json.parse("\"\\ud83d\\udc69|\\ud83d|\\udc69\""), J.Null{})) == "\"\u{1F469}|\u{FFFD}|\u{FFFD}\"" : String}
+
+# Files request identity (PR #236).
+law fm_empty_root_ready:
+  {U.Fm.ready.for("0", "0", "", "") == True{} : Bool}
+
+law fm_unanswered_root_waits:
+  {U.Fm.ready.for("", "0", "", "") == False{} : Bool}
+
+law fm_previous_request_waits:
+  {U.Fm.ready.for("0", "1", "", "") == False{} : Bool}
+
+law fm_other_folder_waits:
+  {U.Fm.ready.for("1", "1", "old", "new") == False{} : Bool}
+
+law fm_previous_reply_rejected:
+  {U.Fm.reply.same("0", "1") == False{} : Bool}
+
+law fm_root_reconnect_requested:
+  {U.Fm.again.want("fm.want:t1") == True{} : Bool}

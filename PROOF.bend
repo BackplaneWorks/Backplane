@@ -15420,3 +15420,22 @@ def Laws.pending_preview_whole(text): {==}
 def Laws.pending_preview_ellipsis(c, rest, head): {==}
 
 def Laws.json_surrogate_pair(): {==}
+
+# Files request identity (PR #236).
+def Laws.fm_empty_root_ready():
+  {==}
+
+def Laws.fm_unanswered_root_waits():
+  {==}
+
+def Laws.fm_previous_request_waits():
+  {==}
+
+def Laws.fm_other_folder_waits():
+  {==}
+
+def Laws.fm_previous_reply_rejected():
+  {==}
+
+def Laws.fm_root_reconnect_requested():
+  {==}

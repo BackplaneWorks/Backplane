@@ -5533,6 +5533,37 @@ def Fm.got.k(has: Bool, u: Ui, +r: J.Json) -> Ui:
     case False{}:
       u
 
+def Fm.reply.id(+o: J.Json) -> String:
+  J.Json.as_raw(J.Json.get(o, "id"), "")
+
+def Fm.reply.thread(+u: Ui, +o: J.Json) -> String:
+  Ui.info(u, "fm.req:" ++ Fm.reply.id(o))
+
+def Fm.reply.same(+id: String, +current: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(id)), String.eq(id, current))
+
+def Fm.reply.current(+u: Ui, +o: J.Json) -> Bool:
+  Fm.reply.same(Fm.reply.id(o), Ui.info(u, "fm.id:" ++ Fm.reply.thread(u, o)))
+
+def Fm.reply.stale(+u: Ui, +o: J.Json) -> Bool:
+  Bool.and(Bool.not(String.is_empty(Fm.reply.thread(u, o))), Bool.not(Fm.reply.current(u, o)))
+
+def Fm.reply.forget(+u: Ui, +o: J.Json) -> Ui:
+  Ui.info_drop(u, "fm.req:" ++ Fm.reply.id(o))
+
+def Fm.reply.listed(+u: Ui, +o: J.Json) -> Bool:
+  Bool.and(Bool.and(Bool.not(String.is_empty(Fm.reply.thread(u, o))), Fm.reply.current(u, o)),
+    Bool.and(J.Json.get_bool(o, "ok", True{}),
+      Bool.and(String.eq(J.Json.get_str(J.Json.get_obj(o, "result"), "thread", ""), Fm.reply.thread(u, o)),
+        String.eq(J.Json.get_str(J.Json.get_obj(o, "result"), "fmDir", ""), Ui.info(u, "fm.want:" ++ Fm.reply.thread(u, o))))))
+
+def Fm.reply.done(ok: Bool, +u: Ui, +o: J.Json) -> Ui:
+  match ok:
+    case True{}:
+      Ui.info_set(Fm.got.k(True{}, u, J.Json.get_obj(o, "result")), "fm.done:" ++ Fm.reply.thread(u, o), Fm.reply.id(o))
+    case False{}:
+      u
+
 def Pdf.got.k(has: Bool, u: Ui, +r: J.Json) -> Ui:
   match has:
     case True{}:
@@ -5545,8 +5576,8 @@ def Pdf.got.k(has: Bool, u: Ui, +r: J.Json) -> Ui:
 def Fm.has(+r: J.Json, +k: String) -> Bool:
   Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(r, k), J.Null{})), "null"))
 
-def Fm.reply(u: Ui, +o: J.Json) -> Ui:
-  Pdf.got.k(Fm.has(J.Json.get_obj(o, "result"), "pdfPath"), Fm.got.k(Fm.has(J.Json.get_obj(o, "result"), "fmEntries"), u, J.Json.get_obj(o, "result")), J.Json.get_obj(o, "result"))
+def Fm.reply(+u: Ui, +o: J.Json) -> Ui:
+  Pdf.got.k(Fm.has(J.Json.get_obj(o, "result"), "pdfPath"), Fm.reply.done(Bool.and(Fm.has(J.Json.get_obj(o, "result"), "fmEntries"), Fm.reply.listed(u, o)), u, o), J.Json.get_obj(o, "result"))
 
 # a diff opens the diff view; a file list (files.list) is kept for the
 # file picker; a finished upload becomes an attachment of its thread; a
@@ -5624,8 +5655,12 @@ def Fm.dir(+u: Ui) -> String:
 def Fm.at(+u: Ui, dir: String) -> String:
   Ui.sel(u) ++ "\n" ++ dir
 
+def Fm.request(+u: Ui, +thread: String, +dir: String) -> Act:
+  Ui.rpc(Ui.info_set(Ui.info_set(Ui.info_set(u, "fm.req:" ++ Nat.show(Ui.rid(u)), thread), "fm.id:" ++ thread, Nat.show(Ui.rid(u))), "fm.done:" ++ thread, ""),
+    "files.dir", [J.KV{"thread", J.Str{thread}}, J.KV{"path", J.Str{dir}}])
+
 def Fm.ask(+u: Ui, +dir: String) -> Act:
-  Ui.on_thread.p(Ui.info_set(Ui.info_set(Ui.scratch_set(Ui.view_put(Viewer.history.stop(u), "files", ""), "@fm.at", Fm.at(u, dir)), "fm.want:" ++ Ui.sel(u), dir), "fm.top:" ++ Ui.sel(u), ""), "files.dir", [J.KV{"path", J.Str{dir}}])
+  Fm.request(Ui.info_set(Ui.info_set(Ui.scratch_set(Ui.view_put(Viewer.history.stop(u), "files", ""), "@fm.at", Fm.at(u, dir)), "fm.want:" ++ Ui.sel(u), dir), "fm.top:" ++ Ui.sel(u), ""), Ui.sel(u), dir)
 
 # A reconnect's log drops the listings (they may be stale) but keeps each
 # thread's folder (fm.want:<t>), so every kept folder is listed again;
@@ -5638,16 +5673,19 @@ def Fm.again.join(cs: List<&2, Cmd>, a: Act) -> Act:
 def Fm.again.one(want: Bool, +k: String, a: Act) -> Act:
   match want a:
     case True{} Act{+u, cs}:
-      Fm.again.join(cs, Ui.rpc(u, "files.dir", [J.KV{"thread", J.Str{String.drop(k, 8n)}}, J.KV{"path", J.Str{Ui.info(u, k)}}]))
+      Fm.again.join(cs, Fm.request(u, String.drop(k, 8n), Ui.info(u, k)))
     case False{} _:
       a
+
+def Fm.again.want(+k: String) -> Bool:
+  Bool.and(String.starts_with(k, "fm.want:"), Bool.not(String.is_empty(String.drop(k, 8n))))
 
 def Fm.again.k(+k: String, a: Act) -> Act:
   match a:
     case Act{+u, cs}:
       # This key came from Map.keys: an empty value is the project root,
       # not an absent request. Reconnect must refresh that folder too.
-      Fm.again.one(String.starts_with(k, "fm.want:"), k, Act{u, cs})
+      Fm.again.one(Fm.again.want(k), k, Act{u, cs})
 
 def Fm.again.go(ks: List<&2, String>, a: Act) -> Act:
   match ks:
@@ -5821,10 +5859,11 @@ def Fm.received(u: Ui) -> Bool:
     case Ui{_, sel, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
       Fm.received.k(Map.has(&2, String, nf, "fm.dir:" ++ sel))
 
+def Fm.ready.for(+done: String, +current: String, +listed: String, +wanted: String) -> Bool:
+  Bool.and(Fm.reply.same(done, current), String.eq(listed, wanted))
+
 def Fm.ready(+u: Ui) -> Bool:
-  # An answered empty root has both strings empty. Presence distinguishes
-  # that successful reply from a missing or invalidated listing.
-  Bool.and(Fm.received(u), String.eq(Ui.info(u, "fm.dir:" ++ Ui.sel(u)), Fm.dir(u)))
+  Bool.and(Fm.received(u), Fm.ready.for(Ui.info(u, "fm.done:" ++ Ui.sel(u)), Ui.info(u, "fm.id:" ++ Ui.sel(u)), Ui.info(u, "fm.dir:" ++ Ui.sel(u)), Fm.dir(u)))
 
 # the folder's rows, once the hub has listed it
 def Fm.rows(+u: Ui) -> List<&2, FmRow>:
@@ -15475,8 +15514,18 @@ def Mailv.reply.on(has: Bool, +u: Ui, +o: J.Json, +id: String) -> Ui:
 def Mailv.reply(+u: Ui, +o: J.Json) -> Ui:
   Mailv.reply.on(Bool.not(String.is_empty(Ui.scratch(u, "@mr.req:" ++ J.Json.as_raw(J.Json.get(o, "id"), "")))), u, o, J.Json.as_raw(J.Json.get(o, "id"), ""))
 
-def Ui.reply(u: Ui, +o: J.Json) -> Ui:
+def Ui.reply.apply(u: Ui, +o: J.Json) -> Ui:
   Share.reply(KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o), o)
+
+def Ui.reply.fresh(stale: Bool, +u: Ui, +o: J.Json) -> Ui:
+  match stale:
+    case True{}:
+      Fm.reply.forget(u, o)
+    case False{}:
+      Fm.reply.forget(Ui.reply.apply(u, o), o)
+
+def Ui.reply(+u: Ui, +o: J.Json) -> Ui:
+  Ui.reply.fresh(Fm.reply.stale(u, o), u, o)
 
 def Ui.recv.k(i: Nat, u: Ui, +o: J.Json) -> Ui:
   match i:

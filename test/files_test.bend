@@ -47,7 +47,7 @@ def sent(a: U.Act) -> String:
       sent.go(cs)
 
 def listed(+u: U.Ui, +dir: String, +entries: String) -> U.Ui:
-  U.Ui.recv(u, J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{"1"}}, J.KV{"ok", J.Flag{True{}}},
+  U.Ui.recv(u, J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{U.Ui.info(u, "fm.id:t1")}}, J.KV{"ok", J.Flag{True{}}},
     J.KV{"result", J.Json.obj([J.KV{"fmEntries", J.Str{entries}}, J.KV{"fmDir", J.Str{dir}}, J.KV{"fmRoot", J.Str{"/w/board"}}, J.KV{"thread", J.Str{"t1"}}])}]))
 
 def labels(rs: List<&2, U.FmRow>) -> List<&2, String>:
@@ -58,7 +58,7 @@ def labels(rs: List<&2, U.FmRow>) -> List<&2, String>:
       (l ++ ":" ++ a ++ ":" ++ k ++ ":" ++ d) <> labels(t)
 
 def failed() -> U.Ui:
-  U.Fm.got.k(True{}, listed(base(), "gone", "f\t4\tnote.md"), J.Json.obj([J.KV{"thread", J.Str{"t1"}}, J.KV{"fmDir", J.Str{"gone"}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{"no such folder"}}]))
+  U.Fm.got.k(True{}, listed(act(base(), "fm-cd", "gone"), "gone", "f\t4\tnote.md"), J.Json.obj([J.KV{"thread", J.Str{"t1"}}, J.KV{"fmDir", J.Str{"gone"}}, J.KV{"fmEntries", J.Str{""}}, J.KV{"fmError", J.Str{"no such folder"}}]))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -80,7 +80,7 @@ def main() -> IO(Unit):
     C.Check.str("Markdown notes are drawn as Markdown", String.join([Bool.show(FM.Fm.md("README.MD")), Bool.show(FM.Fm.md("docs/notes.markdown")), Bool.show(FM.Fm.md("notes.txt")), Bool.show(FM.Fm.md("md"))], "|"), "True|True|False|False")
     C.Check.str("failed refresh clears stale entries", U.Ui.info(failed(), "fm.list:t1"), "")
     C.Check.str("failed refresh explains missing folder", U.Ui.info(failed(), "fm.err:t1"), "no such folder")
-    C.Check.str("successful refresh clears folder error", U.Ui.info(listed(failed(), "", ""), "fm.err:t1"), "")
+    C.Check.str("successful refresh clears folder error", U.Ui.info(listed(act(failed(), "fm", ""), "", ""), "fm.err:t1"), "")
     # (the first action on a thread also asks for its card, Fab.sync: one request id before it)
     C.Check.str("Files asks for the folder", sent(U.Ui.act(base(), "fm", "")), "{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}")
     C.Check.str("the viewer shows Files", U.Ui.view_get(act(base(), "fm", ""), "view.kind"), "files")
