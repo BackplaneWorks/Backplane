@@ -19051,7 +19051,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
-        diagnosticStatus : String <- DIAG.Diagnostics.start()
+        diagnosticStatus : String <- DIAG.Diagnostics.start(Main.version())
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
         +opened : STO.Opened <- STO.Sto.boot(home)
