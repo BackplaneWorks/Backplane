@@ -5,6 +5,8 @@ import ./review-history.bend as REVHIST
 import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
 import ../core/watchdog.bend as WD
+import ../core/tickplan.bend as TICK
+import ../core/stream-step.bend as SSTEP
 import ../core/restartretry.bend as RR
 import ./livenessio.bend as LFX
 import ../core/mailprivate.bend as PM
@@ -11342,8 +11344,20 @@ def Hub.step.fallback.captured(pair: String & List<Hub>, states: List<&2, M.Stat
   (models, held) = pair
   Hub.step.fallback.fold(states, Maybe.default(&2, J.Json, J.Json.parse(models), J.Null{}), now, step, held)
 
-def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
-  Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
+# After all lifecycle/lock/watchdog hooks, a step containing only live text
+# cannot switch a provider, edit settings or close a proposal. Avoid parsing
+# the entire model catalog for each token. stream_step_proof proves the
+# skipped validation and run transforms are identity for arbitrary Live lists.
+def Hub.step.fallback.choose(stream: Bool, h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  match stream:
+    case True{}:
+      do IO<Hub & Bool>:
+        PS.Perf.add("hub.step.stream", 1)
+        Hub.step.fallback.done([h], states, step)
+    case False{}: Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
+
+def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, +step: B.Step) -> IO(Hub & Bool):
+  Hub.step.fallback.choose(SSTEP.StreamStep.eligible(step), h, states, now, step)
 
 def Hub.step.k(p: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   (+st, h) = p
@@ -13018,9 +13032,13 @@ def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: C
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +subs : M.State <- SUBHIST.SubHistory.read(Cfg.thin.store(cfg), Hub.thin.view_state(st, cfg, thread), thread)
+        t1 : U32 <- PS.Perf.span("thin.read.subagents", t0)
         +reviews : M.State <- REVHIST.ReviewHistory.read(Cfg.thin.store(cfg), subs, thread)
+        t2 : U32 <- PS.Perf.span("thin.read.reviews", t1)
         +shown : M.State <- DHIST.History.restore(Cfg.thin.store(cfg), thread, reviews)
+        t3 : U32 <- PS.Perf.span("thin.read.design", t2)
         +v : SEC.Vault <- VX.Vx.vault()
         Hub.thin.render.page.shown(v, pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms, shown)
 
@@ -13028,7 +13046,9 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +pg : TSTO.Page <- Hub.thin.fetch.tools(Bool.and(TBODY.Body.enabled(String.eq(Client.thin.mode(c), "view-web"), p), Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(TV.Target.thread(st, J.Json.get_obj(p, "target")))))), String.is_empty(Cfg.thin.store(cfg)), cfg, st, TCHAT.Chat.enabled(st, TV.Target.thread(st, J.Json.get_obj(p, "target"))), TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor, p)
+        t1 : U32 <- PS.Perf.span("thin.read.page", t0)
         Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
 
 # a view.update whose render memo still holds (thin-actor.bend's
@@ -13284,7 +13304,12 @@ def Hub.thin.have(+c: Maybe<&2, Client>, h: Hub, +client: U32, +o: J.Json, +now:
 
 def Hub.thin.rpc.now(h: Hub, +client: U32, +o: J.Json, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, +cl, as, inbox, cfg, note}: Hub.thin.have(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
+        h2 : Hub <- Hub.thin.have(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+        t1 : U32 <- PS.Perf.span("thin.rpc." ++ Nat.show(C.Codec.pos(["view.open", "view.update", "view.page", "view.action", "view.send", "view.search", "view.body"], J.Json.get_str(o, "m", ""))), t0)
+        return h2
 
 # Until the index is built (THIN.Lazy, Thin.warm) a thin request waits in
 # the cache rather than build it on the hub's time; Hub.thin.warmed answers
@@ -13556,7 +13581,7 @@ def Hub.rpc(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
 # the threads' Boat chips that Boat's status changes (logged only then)
 def Hub.chips(p: M.State & Hub, +status: String, +now: Nat) -> IO(Hub):
   (st, h) = p
-  Hub.step(h, B.Step{UZ.Chip.changes(st, status, now), Nil{}})
+  Hub.step(h, B.Step{TICK.Tick.chips(st, status, now), Nil{}})
 
 # Publication ordering is independent of worker/cache completion order.
 # Pending cache observations never become provider readings. At equal attempt
@@ -13674,27 +13699,34 @@ def Hub.gone(h: Hub, +thread: String, +code: U32, +pid: U32, +why: String, +now:
 # a tool call. Apply observations before the watchdog judges the gap.
 def Hub.watchdog.decide(p: M.State & Hub, +now: Nat) -> IO(Hub):
   (+st, h) = p
-  +normal = B.Hub.tick(st, now)
+  +normal = TICK.Tick.main(st, now)
   Hub.step(h, B.Step.cat(normal, WD.Watchdog.tick(M.State.replay(B.Queue.changes(normal), st), now)))
 
 def Hub.watchdog(h: Hub, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         observed : String <- LFX.Progress.sample(WD.Watchdog.plan(st), Cfg.home(cfg))
+        t1 : U32 <- PS.Perf.span("hub.tick.sample", t0)
         h2 : Hub <- Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, WD.Watchdog.observed(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(observed), J.Null{})), st, now, B.Step.none()))
-        Hub.watchdog.decide(Hub.state(h2), now)
+        t2 : U32 <- PS.Perf.span("hub.tick.observed", t1)
+        h3 : Hub <- Hub.watchdog.decide(Hub.state(h2), now)
+        t3 : U32 <- PS.Perf.span("hub.tick.decide", t2)
+        return h3
 
 # each minute the hub's size goes into the gauges
 def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{+st, f, +ls, +cl0, +as, +inbox, cfg, note}:
+    case Hub{+st, f, +ls, +cl0, +as, +inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +cl : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl0), Nat.sub(now, 60n)), cl0, now)
         PS.Perf.set("hub.clients", U32.from_nat(List.length(&2, Client, cl)))
         PS.Perf.set("hub.agents", U32.from_nat(List.length(&2, Agent, as)))
-        PS.Perf.set("hub.changes", U32.from_nat(ST.Store.size(ls)))
+        PS.Perf.set("hub.changes", U32.from_nat(LogCount.n(cfg)))
         PS.Perf.set("hub.busy", U32.from_nat(M.Work.threads(st)))
+        t1 : U32 <- PS.Perf.span("hub.tick.gauges", t0)
         # children the last exec handed over that ended meanwhile are waited
         # for (effects/adopt.js), so none stays a zombie
         guards : U32 <- LG.Guard.reap()
