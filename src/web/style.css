@@ -369,7 +369,7 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90deg); }
 .sub { min-width: 0; border-bottom: 1px solid var(--line); }
 .sub:last-child { border-bottom: 0; }
-.sub-row { display: flex; gap: 10px; align-items: center; width: 100%; min-height: 40px; padding: 8px 16px; cursor: pointer; text-align: left; border: 0; background: none; }
+.sub-row { display: flex; gap: 10px; align-items: center; width: 100%; min-height: 34px; padding: 6px 16px; cursor: pointer; text-align: left; border: 0; background: none; }
 .subs-head:focus-visible, .sub-row:focus-visible, .sub-stop:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sub-row:hover { background: var(--raise); }
 .sub .state-dot { width: 6px; height: 6px; background: var(--faint); flex: none; }
@@ -383,14 +383,25 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .sub.live .title { color: var(--text); }
 .sub .state { color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); flex: none; max-width: 30%; overflow-wrap: anywhere; }
 .sub.running .state { color: var(--st-work); } .sub.done .state { color: var(--st-done); } .sub.failed .state { color: var(--st-need); }
-.sub .doing { display: block; padding: 0 16px 8px 32px; color: var(--accent); font-size: calc(12px * var(--text-scale, 100) / 100); overflow-wrap: anywhere; }
+.sub .doing { display: block; padding: 0 16px 6px 32px; color: var(--accent); font-size: calc(12px * var(--text-scale, 100) / 100); overflow-wrap: anywhere; }
 .sub-step { display: flex; gap: 12px; padding: 4px 16px 4px 32px; font: calc(12px * var(--text-scale, 100) / 100)/1.5 var(--mono); color: var(--dim); }
 .sub-step .kind { color: var(--faint); flex: none; width: 8ch; overflow-wrap: anywhere; align-self: flex-start; }
 /* what a subagent said has no label: no empty chip (.kind's box) */
 .sub-step .kind:empty { border-color: transparent; background: none; }
-.sub-step .text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.sub-last .kind:empty { display: none; }
+.sub-step .text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .sub-step:last-child { padding-bottom: 12px; }
 .sub-empty { display: block; padding: 0 16px 12px 32px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
+/* what a row says beside its name (view.bend's View.sub.meta/now/last/ask) */
+.sub-meta { display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: -6px; padding: 0 16px 6px 32px; color: var(--faint); font: calc(11px * var(--text-scale, 100) / 100)/1.5 var(--mono); }
+.sub-meta .part { min-width: 0; overflow-wrap: anywhere; }
+.sub-meta .part + .part::before { content: "·"; margin-right: 8px; }
+.sub-meta .part:first-child { color: var(--dim); }
+.sub-outcome { display: block; padding: 0 16px 8px 32px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); overflow-wrap: anywhere; }
+.sub-step.sub-last { padding-top: 0; padding-bottom: 8px; }
+.sub-ask { display: flex; gap: 12px; padding: 2px 16px 8px 32px; font: calc(12px * var(--text-scale, 100) / 100)/1.5 var(--mono); }
+.sub-ask .label { color: var(--faint); flex: none; width: 8ch; }
+.sub-ask .text { min-width: 0; max-height: 4.5em; overflow-y: auto; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
   .subs-head, .sub-row, .todos-head { min-height: 44px; padding-left: 10px; padding-right: 10px; }
   .subs-body, .todos-body { max-height: 28dvh; }
