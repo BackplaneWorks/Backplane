@@ -16056,7 +16056,7 @@ def Ui.act.subs(shut: Bool, open: Bool, +u: Ui, +action: String, +value: String)
     case True{} _:
       Act{Ui.subs.shut(u, value), Nil{}}
     case False{} True{}:
-      Act{Ui.info_set(u, "subs:" ++ value, "1"), Nil{}}
+      Act{Ui.info_set(u, "subs:" ++ Ui.subs.thread(value, ""), "1"), Nil{}}
     case False{} False{}:
       Ui.act.z(String.starts_with(action, "tz-"), u, action, value)
 

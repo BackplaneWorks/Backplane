@@ -678,6 +678,19 @@ test('keys typed right after a press on another thread wait for its composer, ne
   assert.equal(h.composer.value, 'other');
 });
 
+test('a right-click on another thread row (its menu) opens nothing: later keys are not held for it', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();h.keeper.leave();
+  const row = { tagName: 'DIV', closest: selector => selector === '[data-on-click="select"]' ? row : null, getAttribute: () => 't2' };
+  h.fire('pointerdown', row, { button: 2 });h.doc.activeElement = h.body;h.fire('pointerup', row, { button: 2 });
+  h.keeper.check();
+  // long after: Enter on a sidebar button and a letter on the page are theirs, not t2's
+  const button = { tagName: 'BUTTON', closest: () => null };
+  const enter = h.key('Enter', button);
+  assert.equal(enter.rail, true);assert.equal(enter.defaultPrevented, false);
+});
+
 test('typing a moment ago, the keyboard fallen out of its field with a redraw keeps typing in the draft', async () => {
   const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
   const h = keeperHarness(installComposerFocus);
