@@ -254,12 +254,53 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           node --test test/host-thin-startup.test.cjs test/mail-draft-dispatch.test.cjs test/mail-drafts.test.cjs test/thin-*.test.cjs
+      # Native jobs consume one target. The former all-target archive was
+      # 802 MiB: every native job downloaded all five platforms.
       - uses: actions/upload-artifact@v4
         with:
-          name: backplane-serve-js
-          path: dist-js/
+          name: backplane-serve-js-linux-x64
+          path: |
+            dist-js/linux-x64/
+            dist-js/licenses/
           retention-days: 7
-          compression-level: 6
+          if-no-files-found: error
+          compression-level: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backplane-serve-js-linux-arm64
+          path: |
+            dist-js/linux-arm64/
+            dist-js/licenses/
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backplane-serve-js-darwin-x64
+          path: |
+            dist-js/darwin-x64/
+            dist-js/licenses/
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backplane-serve-js-darwin-arm64
+          path: |
+            dist-js/darwin-arm64/
+            dist-js/licenses/
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backplane-serve-js-windows-x64
+          path: |
+            dist-js/windows-x64/
+            dist-js/licenses/
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 1
 
   js-native:
     name: JS service on ${{ matrix.target }}
@@ -293,7 +334,7 @@ jobs:
         run: bun test/tools/store_promote_test.cjs
       - uses: actions/download-artifact@v4
         with:
-          name: backplane-serve-js
+          name: backplane-serve-js-${{ matrix.target }}
           path: dist-js
       - uses: oven-sh/setup-bun@v2
         if: matrix.target == 'windows-x64'
