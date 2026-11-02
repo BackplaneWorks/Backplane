@@ -20,6 +20,7 @@
 # BP_E2E_WEB      its web client (default: the web/ folder beside the binary)
 # BP_E2E_FIXTURE  a KiCad project folder (default /usr/share/kicad/demos/ecc83);
 #                 its top-level KiCad files are copied, nothing else
+# BP_E2E_PORT     the port for a new hub (default: a free one)
 # BP_E2E_ROOT     scratch root (default ${TMPDIR:-/tmp}/bp-e2e)
 # BP_E2E_STREAM   stand-in reply: "N [MS]", deltas per turn (60) and ms apart (50)
 # BP_E2E_TAILNET  1: a stand-in tailnet instead of none (a fake `tailscale` on
@@ -74,7 +75,8 @@ start() {
     seed
     printf '#!/bin/sh\nexec bun "%s/test/tools/claude_standin.ts" "$@"\n' "$repo" > "$root/fake/claude"
     chmod +x "$root/fake/claude"
-    python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])' > "$root/port"
+    if [ -n "${BP_E2E_PORT:-}" ]; then echo "$BP_E2E_PORT" > "$root/port"
+    else python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])' > "$root/port"; fi
     fresh=1
   else fresh=0; fi
   port=$(cat "$root/port")
