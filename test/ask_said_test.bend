@@ -14,6 +14,9 @@ def j(+s: String) -> J.Json:
 def q() -> J.Json:
   j("{\"questions\":[{\"question\":\"Which connector?\",\"options\":[{\"label\":\"USB-C\",\"description\":\"reversible\"},{\"label\":\"Micro-B\",\"description\":\"cheaper\"}]}]}")
 
+def two() -> J.Json:
+  j("{\"questions\":[{\"question\":\"Which connector?\",\"options\":[{\"label\":\"USB-C\",\"description\":\"reversible\"},{\"label\":\"Micro-B\"}]},{\"question\":\"Add test points?\",\"options\":[{\"label\":\"Yes\"},{\"label\":\"No\"}]}]}")
+
 def said(cs: List<&2, M.Change>) -> String:
   match cs:
     case Nil{}: ""
@@ -31,3 +34,8 @@ def main() -> IO(Unit):
     C.Check.str("an answered question stays in the thread", said(H.Queue.changes(H.Hub.answer(asked("input", "AskUserQuestion", "Which connector?\nUSB-C: reversible"), 5n, 0, "1", "q1", "USB-C"))), "t: Which connector? → USB-C\n")
     C.Check.str("an approval too", said(H.Queue.changes(H.Hub.answer(asked("approval", "Bash", "rm -rf build/"), 5n, 0, "1", "q1", "accept"))), "t: Allowed: Bash rm -rf build/\n")
     C.Check.str("and a denial", said(H.Queue.changes(H.Hub.answer(asked("approval", "Bash", "rm -rf build/"), 5n, 0, "1", "q1", "deny"))), "t: Denied: Bash rm -rf build/\n")
+    C.Check.str("several questions: the card lists them all", MC.Perm.question.card(two()), "1. Which connector? (USB-C / Micro-B)\n   USB-C: reversible\n2. Add test points? (Yes / No)\nType your answers below, then answer with them.")
+    C.Check.str("with no single-choice buttons", MC.Perm.options(two()), "")
+    C.Check.str("and the typed answer goes to each", J.Json.show(J.Json.get_obj(MC.Perm.answers(two(), "1 USB-C, 2 yes"), "answers")), "{\"Which connector?\":\"1 USB-C, 2 yes\",\"Add test points?\":\"1 USB-C, 2 yes\"}")
+    C.Check.str("one question is answered as before", J.Json.show(J.Json.get_obj(MC.Perm.answers(q(), "USB-C"), "answers")), "{\"Which connector?\":\"USB-C\"}")
+    C.Check.str("with its buttons", MC.Perm.options(q()), "USB-C\nMicro-B")
