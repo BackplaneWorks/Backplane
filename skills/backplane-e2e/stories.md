@@ -111,8 +111,10 @@ each model a line with its cost and its tokens under it; Esc closes it.
 **S51 Tool calls in one drawer** (W D A)
 Send "tools:5 drawer" (the stand-in runs five Bash calls, then streams its
 reply; `BP_E2E_STREAM="60 300"` slows it down). While it runs, the calls are
-one shut row under the message, "› 5 tool calls · running: Bash" with a
-pulsing dot; no call's own row shows. When the turn ends the row reads
+one shut row under the message, "› 5 tool calls · running: grep -n drawer
+board.kicad_pcb # 5" (what the latest call does) with a pulsing dot; no
+call's own row shows. Opened while it runs, that call's row has its name in
+the accent, the dot and "running". When the turn ends the row reads
 "5 tool calls · Bash", still shut, and the reply and its "Finished" stamp
 show under it with nothing below them. Click the row: the calls hang under
 it on a rule; click it again: they go, and none is left below the reply

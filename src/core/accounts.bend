@@ -50,6 +50,11 @@ def Accounts.binding.show(id: String, epoch: Nat) -> String:
 def Accounts.label(+s: M.State, +th: String, +provider: String) -> String:
   Bool.pick(String, String.is_empty(Accounts.id(s, th, provider)), "Default account", J.Json.get_str(Accounts.profile(s, Accounts.id(s, th, provider)), "label", "Unavailable account"))
 
+# the label as the composer's chip shows it beside its icon ("Default" for
+# the CLI's own login; the full label is in its tooltip)
+def Accounts.short(+label: String) -> String:
+  Bool.pick(String, String.eq(label, "Default account"), "Default", label)
+
 def Accounts.ready(+profile: J.Json, +provider: String, +epoch: Nat) -> Bool:
   Bool.and(String.eq(J.Json.get_str(profile, "provider", ""), provider),
     Bool.and(String.eq(J.Json.get_str(profile, "state", ""), "connected"), Nat.is_eq(J.Json.get_nat(profile, "epoch", 0n), epoch)))

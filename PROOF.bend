@@ -94,6 +94,8 @@ import ./src/core/ref.bend as MREF # mail 2b
 
 import ./src/core/stamp.bend as STP
 
+import ./src/core/subs.bend as SUBSTEP
+
 import ./src/core/kihealth.bend as KH
 
 import ./src/core/tz.bend as TZ
@@ -15091,3 +15093,7 @@ def Laws.stamp_mid_inside_turn(r): {==}
 def Laws.stamp_mid_turn_end_shows(r): {==}
 
 def Laws.stamp_mid_running_newest_shows(r): {==}
+
+def Laws.subs_step_label_mcp(): {==}
+
+def Laws.subs_step_label_say(): {==}

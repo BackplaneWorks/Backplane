@@ -1,0 +1,30 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+test('subagents rows show at the click without changing the authoritative session', async () => {
+  const { SubsFeedback } = await import('../../src/web/subs-feedback.js');
+  let changed = 0;
+  const f = new SubsFeedback(() => changed++), s = { sel: 'A', rid: 1, info: { 'subs:A': '0live:x' } };
+  const before = JSON.stringify(s);
+  const settle = f.choice('subs-open', 'A\tlive:x');
+  assert.equal(changed, 0);
+  assert.equal(f.project(s).subsFold, '1');
+  assert.equal(JSON.stringify(s), before);
+  settle(true);
+  assert.equal(f.project(s), s);
+  assert.equal(changed, 1);
+});
+test('subagents fold: the latest click wins, another thread and a cleared view show the hub picture', async () => {
+  const { SubsFeedback } = await import('../../src/web/subs-feedback.js');
+  const f = new SubsFeedback(() => {}), s = { sel: 'A' };
+  const first = f.choice('subs-open', 'A'), second = f.choice('subs-shut', 'A\tlive:x');
+  first(true);
+  assert.equal(f.project(s).subsFold, '0');
+  assert.equal(f.project({ sel: 'B' }).subsFold, undefined);
+  second(false);
+  assert.equal(f.project(s), s);
+  const old = f.choice('subs-open', 'A');
+  f.clear();old(true);
+  assert.equal(f.project(s), s);
+  assert.equal(f.choice('fold', 'xA'), undefined);
+  assert.equal(f.project(s), s);
+});
