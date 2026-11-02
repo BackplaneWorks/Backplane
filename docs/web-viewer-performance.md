@@ -15,7 +15,7 @@ A completed fade and a resting view stop asking for frames.
 From the repository root, with Playwright and Chrome available:
 
 ```sh
-git show 30884966ef59c383581bcd1b7653f8f739cf009e:src/web/plot2d.js > /tmp/plot2d-main.js
+git show ac63a153f86067f6cbcb9d9319d01b1fe6209650:src/web/plot2d.js > /tmp/plot2d-main.js
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright-core/index.mjs \
   CHROME=/absolute/path/to/chrome \
   node test/tools/plot2d_cache.mjs /tmp/plot2d-main.js
@@ -41,6 +41,12 @@ MediaQueryList event target. This checks the listener and redraw path and does
 not certify an operating-system monitor transition. Arrival telemetry is omitted
 from pixel comparisons because its elapsed timings vary between draws.
 
+The measurements below are retained from the original contributor candidate,
+not rerun on the current multi-canvas integration. Current browser pixels,
+physical performance and disposal acceptance remain UNRUN. Probe and
+selected-component overlays use the current vector path rather than cached
+metadata.
+
 On an Intel Core i7-8650U Linux host, headless Chrome 155.0.8059.84,
 Node 22.23.3 and Playwright 1.62.1, two
 same-fixture runs measured the following milliseconds. These are software Canvas
@@ -53,7 +59,7 @@ draw/raster timings, not physical display or pointer-to-pixel latency:
 | First paint | 132.7 / 132.2 | 125.5 / 92.2 |
 | Layer toggle | 4.7 / 4.3 | 1.5 / 3.8 |
 
-All 14 dense checks and ten mount checks pass. Before the rested-drawing fix,
+On that original candidate, all 14 dense checks and ten mount checks passed. Before the rested-drawing fix,
 the rebased original cache failed initial, fractional-pan, zoom and fit pixel
 comparisons. Before the fade scheduling fix, a warmed canvas did not repaint
 when only `data-fade` changed; the other nine mount assertions passed.

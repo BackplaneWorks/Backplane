@@ -2,15 +2,16 @@
 // PLAYWRIGHT_MODULE=/absolute/playwright-core/index.mjs CHROME=/absolute/chrome \
 //   node test/tools/plot2d_mount.mjs BASELINE_PLOT2D_JS [CANDIDATE_PLOT2D_JS]
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright-core');
 const sources = {
   '/baseline.js': readFileSync(process.argv[2], 'utf8') + '\nexport {View};',
-  '/candidate.js': readFileSync(process.argv[3] || 'src/web/plot2d.js', 'utf8') + '\nexport {View}; export const current = () => view;',
+  '/candidate.js': readFileSync(process.argv[3] || 'src/web/plot2d.js', 'utf8') + '\nexport {View}; export const current = () => views.values().next().value ?? null;',
   '/solid.js': readFileSync('src/web/solid.js', 'utf8'),
-  '/app.bend': 'export default {};'
+  '/app.bend': 'export default {plot_loading:()=>"Loading",plot_stats:()=>""};'
 };
+for (const name of readdirSync("src/web")) if (name.endsWith(".js") && !("/"+name in sources)) sources["/"+name] = readFileSync("src/web/"+name,"utf8");
 const server = createServer((req, res) => {
   res.setHeader('Content-Type', sources[req.url] ? 'text/javascript' : 'text/html');
   res.end(sources[req.url] || '<!doctype html><style>body{margin:0}canvas{width:480px;height:320px}</style><div><canvas id="plot"></canvas></div>');

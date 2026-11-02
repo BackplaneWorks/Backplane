@@ -1,19 +1,20 @@
 // Real Canvas2D pixels and timings, using generated plot-wire chunks only.
 // PLAYWRIGHT_MODULE=/path/to/playwright-core/index.mjs CHROME=/path/to/chrome \
 //   node test/tools/plot2d_cache.mjs BASELINE_PLOT2D_JS [CANDIDATE_PLOT2D_JS]
-// Baseline: git show 30884966e:src/web/plot2d.js > /tmp/plot2d-main.js
+// Baseline: git show ac63a153f:src/web/plot2d.js > /tmp/plot2d-main.js
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright-core");
 
 const baseline = process.argv[2];
 if (!baseline) throw new Error("Provide the uncached baseline source for independent pixel comparisons");
 const sources = { "/baseline.js": readFileSync(baseline, "utf8"), "/candidate.js": readFileSync(process.argv[3] || "src/web/plot2d.js", "utf8") };
+for (const name of readdirSync("src/web")) if (name.endsWith(".js") && !("/"+name in sources)) sources["/"+name] = readFileSync("src/web/"+name,"utf8");
 const server = createServer((req, res) => {
   res.setHeader("Content-Type", "text/javascript");
   if (sources[req.url]) res.end(sources[req.url] + "\nexport { View, chunk };\n");
   else if (req.url === "/solid.js") res.end(readFileSync("src/web/solid.js", "utf8"));
-  else if (req.url === "/app.bend") res.end("export default {}; // 3D UI methods are not used in this Canvas2D harness");
+  else if (req.url === "/app.bend") res.end('export default {plot_loading:()=>"Loading",plot_stats:()=>""};');
   else { res.setHeader("Content-Type", "text/html"); res.end("<!doctype html><body></body>"); }
 });
 await new Promise(r => server.listen(0, "127.0.0.1", r));
