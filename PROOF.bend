@@ -15097,3 +15097,11 @@ def Laws.stamp_mid_running_newest_shows(r): {==}
 def Laws.subs_step_label_mcp(): {==}
 
 def Laws.subs_step_label_say(): {==}
+
+def Laws.star_nudge_rejected_accept(raw, id, now): {==}
+
+def Laws.star_nudge_rejected_decision(o, token, action, now): {==}
+
+def Laws.star_nudge_official_repository(): {==}
+
+def Laws.star_nudge_saved_send_waits(client, text): {==}

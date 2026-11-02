@@ -2373,6 +2373,7 @@ def Hubs.screen.p.loc(+lc: I.Loc, +pl: MPL.MUber, +ss: List<&2, Shown>, +cur: St
     J.KV{"folders", J.Json.get_obj(Hubs.of(ss, cur), "folders")},
     J.KV{"settings", J.Json.get_obj(Hubs.of(ss, cur), "settings")},
     J.KV{"tour", J.Json.get_obj(Hubs.of(ss, cur), "tour")},
+    J.KV{"starNudge", J.Json.get_obj(Hubs.of(ss, cur), "starNudge")},
     J.KV{"find", J.Json.get_obj(Hubs.of(ss, cur), "find")},
     J.KV{"island", Hubs.compact.go.loc(lc, ss, 0n, [], 0n)},
     J.KV{"islands", J.Json.arr(Hubs.islands(ss))},

@@ -613,6 +613,15 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
             opening = null
             tapAt = 0L
         }
+        // A banner tap records its token before using the same browser path
+        // as settings links. Screen updates never open the browser, and the
+        // destination is the official repository rather than a wire URL.
+        if (action == "star-open") {
+            if (!acting || value.isEmpty() || screen?.starNudge?.token != value) return
+            dispatch(action, value)
+            act("open-url", "https://github.com/BackplaneWorks/Backplane")
+            return
+        }
         // a web address a settings row offers (Antigravity's sign-in):
         // opened in the browser here, never sent to the engine
         if (action == "open-url") {
@@ -912,7 +921,10 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 val value = c.value
                 scope.launch {
                     delay(maxOf(0L, c.ms))
-                    act(action, value)
+                    // Scheduled star actions can update shared state, but
+                    // only an explicit UI tap may reach the browser opener.
+                    if (action == "star-open" || action == "star-dismiss") dispatch(action, value)
+                    else act(action, value)
                 }
             }
             // the open thread's entry, paged back to while left out (an "In

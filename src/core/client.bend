@@ -1,4 +1,5 @@
 import Base
+import ./star-nudge.bend as STAR
 import ./browser-frame.bend as BFRAME
 import ./view-page.bend as VP
 import ./accounts.bend as ACCT
@@ -1475,11 +1476,17 @@ def Rpl.kv(+id: String) -> List<&2, J.KV>:
 def Rpl.forget(dr: Map<&2, String>, +th: String) -> Map<&2, String>:
   Map.set(&2, String, Map.set(&2, String, dr, Rpl.key(th), ""), Rpl.q.key(th), "")
 
-def Ui.send.rpc(u: Ui, text: String, +mode: String) -> Act:
+# A Retry is an accepted re-delivery, not a new prompt for the star nudge.
+# The marker rides the normal reliable outbox with the original send policy.
+def Ui.send.rpc.as(u: Ui, text: String, +mode: String, retry: Bool) -> Act:
   match u:
     case Ui{st, +sel, +dr, live, op, on, +now, ad, pa, v, +rid, w, er, note, +nf, ob, tr}:
+      +mark = Bool.pick(List<&2, J.KV>, retry, [J.KV{"retry", J.Flag{True{}}}], Nil{})
       Ui.also(Ui.rpc.keep(Ui{st, sel, Rpl.forget(dr, sel), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr},
-        "turn.start", List.append(&2, J.KV, [J.KV{"thread", J.Str{sel}}, J.KV{"text", J.Str{text}}, J.KV{"msg", J.Str{Ui.msg_id(Str.get(nf, "cid"), now, rid)}}, J.KV{"mode", J.Str{mode}}], Rpl.kv(Str.get(dr, Rpl.key(sel))))), [ScrollEnd{}])
+        "turn.start", List.append(&2, J.KV, [J.KV{"thread", J.Str{sel}}, J.KV{"text", J.Str{text}}, J.KV{"msg", J.Str{Ui.msg_id(Str.get(nf, "cid"), now, rid)}}, J.KV{"mode", J.Str{mode}}], List.append(&2, J.KV, mark, Rpl.kv(Str.get(dr, Rpl.key(sel)))))), [ScrollEnd{}])
+
+def Ui.send.rpc(u: Ui, text: String, +mode: String) -> Act:
+  Ui.send.rpc.as(u, text, mode, False{})
 
 def Ui.send.t.k(a: Act, text: String, +mode: String) -> Act:
   match a:
@@ -16426,7 +16433,7 @@ def Retry.k(none: Bool, +u: Ui, +text: String) -> Act:
     case True{}:
       Act{u, Nil{}}
     case False{}:
-      Ui.send.rpc(u, text, "")
+      Ui.send.rpc.as(u, text, "", True{})
 
 def Ui.retry(+u: Ui) -> Act:
   +text = Retry.last(M.State.mine(Ui.state(u), Ui.sel(u)), Ui.sel(u))
@@ -16439,8 +16446,35 @@ def Retry.dispatch(retry: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Psv.dispatch(String.starts_with(action, "provider-setup-"), u, action, value)
 
+
+# Only a targeted connection offer may display the suggestion. Shared hub
+# status removes it as soon as any saved decision is adopted. No history,
+# client storage, draft, device id or account credentials are changed.
+def Star.token(+u: Ui) -> String:
+  Ui.info(u, "star.nudge.offer")
+
+def Star.url() -> String:
+  STAR.Star.url()
+
+def Star.body() -> String:
+  STAR.Star.body()
+
+def Star.visible(+u: Ui) -> Bool:
+  +o = STAR.Star.state(Ui.state(u))
+  Bool.and(Bool.not(String.is_empty(Star.token(u))), Bool.and(STAR.Star.sent(o), String.eq(STAR.Star.token(o), Star.token(u))))
+
+def Star.act(+u: Ui, +action: String, +token: String) -> Act:
+  Ui.rpc.keep(Ui.info_set(u, "star.nudge.offer", ""), "star.nudge",
+    [J.KV{"token", J.Str{token}}, J.KV{"action", J.Str{Bool.pick(String, String.eq(action, "star-open"), "open", "dismiss")}}])
+
+def Star.dispatch(star: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match star:
+    case True{}: Star.act(u, action, value)
+    case False{}: Retry.dispatch(String.eq(action, "retry"), u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Retry.dispatch(String.eq(action, "retry"), u, action, value)
+  Star.dispatch(Bool.or(String.eq(action, "star-open"), String.eq(action, "star-dismiss")), u, action, value)
+
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

@@ -226,61 +226,71 @@ private fun AppContent(m: AppModel) {
     val s = m.screen
     // New Thread's page, left with Back before the hub made the thread
     var leftNew by remember { mutableStateOf(false) }
+    var starUp by remember { mutableStateOf(false) }
     LaunchedEffect(s?.making) { if (s?.making != true) leftNew = false }
     // a file link tapped in a message asks for its menu
-    CompositionLocalProvider(LocalBackplaneLanguage provides (s?.locale ?: "en"), LocalFileTap provides { p: String -> m.act("file-menu", p) }) { when {
-        m.links.isEmpty() -> Pair(s?.locale ?: "en", "", cancel = null) { m.pair(it) }
-        s == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        pairing -> {
-            BackHandler { pairing = false }
-            Hubs(m, s) { pairing = false }
+    CompositionLocalProvider(LocalBackplaneLanguage provides (s?.locale ?: "en"), LocalFileTap provides { p: String -> m.act("file-menu", p) }) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.onSizeChanged { starUp = it.height > 0 }) {
+                if (!pairing && s != null) StarSuggestion(m, s)
+            }
+            Box(Modifier.weight(1f).then(if (starUp) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
+                when {
+                    m.links.isEmpty() -> Pair(s?.locale ?: "en", "", cancel = null) { m.pair(it) }
+                    s == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    pairing -> {
+                        BackHandler { pairing = false }
+                        Hubs(m, s) { pairing = false }
+                    }
+                    // New Thread: its page at once, waiting for the hub's thread
+                    s.making && !leftNew -> {
+                        BackHandler { leftNew = true; m.back() }
+                        MakingScreen { leftNew = true; m.back() }
+                    }
+                    m.leaving -> Tabs(m, s, onPair = { pairing = true })
+                    m.opening != null -> {
+                        BackHandler { m.back() }
+                        OpeningDestination(m, s, m.opening!!)
+                    }
+                    s.thread != null && s.thread.viewer.open == "files" && s.thread.viewer.files != null -> {
+                        BackHandler { m.act("view", "") }
+                        FilesScreen(m, s.thread.viewer, s.thread.viewer.files)
+                    }
+                    s.thread != null && (s.thread.viewer.open == "image" || s.thread.viewer.open == "pdf" || s.thread.viewer.open == "text") && s.thread.viewer.file != null -> {
+                        BackHandler { m.act("fm") }
+                        FileScreen(m, s.thread.viewer, s.thread.viewer.file)
+                    }
+                    s.thread != null && s.thread.viewer.open == "review" && s.thread.viewer.review != null -> {
+                        BackHandler { m.act("view", "") }
+                        ReviewScreen(m, s.thread.viewer, s.thread.viewer.review)
+                    }
+                    s.thread != null && s.thread.viewer.open == "renders" && s.thread.viewer.mech != null -> {
+                        BackHandler { m.act("view", "") }
+                        MechScreen(m, s.thread.viewer, s.thread.viewer.mech)
+                    }
+                    s.thread != null && s.thread.viewer.open.isNotEmpty() -> {
+                        BackHandler { m.act("view", "") }
+                        PlotScreen(m, s.thread.viewer)
+                    }
+                    // the thread's shell, in place of the screen so it follows the keyboard
+                    s.thread?.term != null -> {
+                        BackHandler { m.act("term-toggle") }
+                        TermSheet(m, s.thread.term)
+                    }
+                    // a bot (its chat is its thread), a room, or a bot on a linked machine
+                    s.bot != null -> {
+                        BackHandler { m.back() }
+                        BotDestination(m, s, s.bot)
+                    }
+                    s.thread != null -> {
+                        BackHandler { m.back() }
+                        ThreadScreen(m, s, s.thread)
+                    }
+                    else -> Tabs(m, s, onPair = { pairing = true })
+                }
+            }
         }
-        // New Thread: its page at once, waiting for the hub's thread
-        s.making && !leftNew -> {
-            BackHandler { leftNew = true; m.back() }
-            MakingScreen { leftNew = true; m.back() }
-        }
-        m.leaving -> Tabs(m, s, onPair = { pairing = true })
-        m.opening != null -> {
-            BackHandler { m.back() }
-            OpeningDestination(m, s, m.opening!!)
-        }
-        s.thread != null && s.thread.viewer.open == "files" && s.thread.viewer.files != null -> {
-            BackHandler { m.act("view", "") }
-            FilesScreen(m, s.thread.viewer, s.thread.viewer.files)
-        }
-        s.thread != null && (s.thread.viewer.open == "image" || s.thread.viewer.open == "pdf" || s.thread.viewer.open == "text") && s.thread.viewer.file != null -> {
-            BackHandler { m.act("fm") }
-            FileScreen(m, s.thread.viewer, s.thread.viewer.file)
-        }
-        s.thread != null && s.thread.viewer.open == "review" && s.thread.viewer.review != null -> {
-            BackHandler { m.act("view", "") }
-            ReviewScreen(m, s.thread.viewer, s.thread.viewer.review)
-        }
-        s.thread != null && s.thread.viewer.open == "renders" && s.thread.viewer.mech != null -> {
-            BackHandler { m.act("view", "") }
-            MechScreen(m, s.thread.viewer, s.thread.viewer.mech)
-        }
-        s.thread != null && s.thread.viewer.open.isNotEmpty() -> {
-            BackHandler { m.act("view", "") }
-            PlotScreen(m, s.thread.viewer)
-        }
-        // the thread's shell, in place of the screen so it follows the keyboard
-        s.thread?.term != null -> {
-            BackHandler { m.act("term-toggle") }
-            TermSheet(m, s.thread.term)
-        }
-        // a bot (its chat is its thread), a room, or a bot on a linked machine
-        s.bot != null -> {
-            BackHandler { m.back() }
-            BotDestination(m, s, s.bot)
-        }
-        s.thread != null -> {
-            BackHandler { m.back() }
-            ThreadScreen(m, s, s.thread)
-        }
-        else -> Tabs(m, s, onPair = { pairing = true })
-    } }
+    }
     if (s == null || m.links.isEmpty()) return
     val d = s.deleting
     // the delete just answered: its dialog stays down until the screen drops it
@@ -600,6 +610,41 @@ private fun ThreadRow(m: AppModel, r: Row, hierarchy: Boolean = true) {
 internal fun Modifier.combinedClickableCompat(onLong: (() -> Unit)? = null, onClick: () -> Unit) =
     this.combinedClickable(onClick = onClick, onLongClick = onLong)
 
+// One common-root banner includes bot conversations. Pairing, device/hub
+// setup, cached destinations and bot forms take priority.
+@Composable
+private fun StarSuggestion(m: AppModel, s: Screen) {
+    val nudge = s.starNudge ?: return
+    var handled by remember(s.hub, nudge.token) { mutableStateOf(false) }
+    if (handled || !m.contentReady || !s.online || !m.linkUp(s.hub) || m.links.isEmpty() ||
+        m.opening != null || m.leaving || s.making ||
+        (s.bot == null && s.thread == null && m.tab != Tab.Threads) ||
+        (s.bot?.kind == "bot" && s.bot.tab != "chat") || s.bot?.routine?.open == true || s.tour != null ||
+        s.settings != null || s.folders != null || s.find != null ||
+        s.deleting != null || s.renaming != null || s.removing != null || s.rowMenu != null ||
+        s.newBot != null || s.newRoom != null || s.bubMove != null || Overlay.n > 0 ||
+        s.thread?.term != null || s.thread?.diff != null || s.thread?.viewer?.open.orEmpty().isNotEmpty()) return
+    Surface(
+        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(nudge.text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                IconButton(onClick = {
+                    handled = true
+                    m.act("star-dismiss", nudge.token)
+                }) { Icon(Icons.Filled.Close, "Dismiss star suggestion") }
+            }
+            TextButton(onClick = {
+                handled = true
+                m.act("star-open", nudge.token)
+            }, modifier = Modifier.align(Alignment.End)) { Text("Star on GitHub") }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyListState = rememberLazyListState()) {
@@ -607,6 +652,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
     val snacks = remember { SnackbarHostState() }
     var choosing by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
+    if (choosing || more) Overlaid()
     Errors(m, s, snacks)
     Scaffold(
         topBar = {
@@ -892,10 +938,13 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
         if (userDragging) { scrollGesture = true; acceptedPage = "" }
     }
     var menu by remember { mutableStateOf(false) }
+    var boards by remember { mutableStateOf(false) }
+    var models by remember { mutableStateOf(false) }
     // the subagents sheet (the top bar's button) is up
     var subs by remember(t.id) { mutableStateOf(false) }
     // the image open in the lightbox
     var shown by remember { mutableStateOf<String?>(null) }
+    if (menu || boards || models || subs || shown != null) Overlaid()
     val termSize = rememberTermSize()
     val su = t.subs
     if (subs && su != null) {
@@ -1028,7 +1077,6 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         }
                     }
                     if (t.viewer.choices.isNotEmpty()) Box {
-                        var boards by remember { mutableStateOf(false) }
                         IconButton(onClick = { boards = true }) { Icon(Icons.Filled.Memory, NativeMessages.native_thread_board(lang)) }
                         DropdownMenu(boards, { boards = false }) {
                             for (c in t.viewer.choices) DropdownMenuItem(
@@ -1110,7 +1158,6 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         }
                     }
                     Box {
-                        var models by remember { mutableStateOf(false) }
                         TextButton(onClick = { models = true }) {
                             Text(t.picker.label, style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
