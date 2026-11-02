@@ -9490,6 +9490,12 @@ def Laws.clipath_idempotent():
 
 def Laws.clipath_nvm_newest_first():
   {==}
+
+def Laws.clipath_windows_missing_probe(cur):
+  {==}
+
+def Laws.clipath_windows_claude():
+  {==}
 # ---- notif-policy ----
 
 def Laws.policy_no_alert_unless():
