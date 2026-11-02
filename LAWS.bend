@@ -155,6 +155,8 @@ import ./src/core/kserve.bend as KSL
 
 import ./src/core/tz.bend as TZ
 
+import ./src/core/stamp.bend as STP
+
 import ./src/core/when.bend as WH
 
 import ./src/core/sched.bend as SCH
@@ -14905,3 +14907,26 @@ law fold_live_names_call:
 # a TodoWrite's row says where the list stands and the step in progress
 law tool_summary_todo:
   {H.Claude.tool_summary("TodoWrite", J.Json.obj([J.KV{"todos", J.Json.arr([J.Json.obj([J.KV{"content", J.Str{"Read"}}, J.KV{"status", J.Str{"completed"}}]), J.Json.obj([J.KV{"content", J.Str{"Measure"}}, J.KV{"status", J.Str{"in_progress"}}]), J.Json.obj([J.KV{"content", J.Str{"Fix"}}, J.KV{"status", J.Str{"pending"}}])])}])) == "1 of 3 done · now: Measure" : String}
+
+# Reply stamps: a reply inside a turn shows its time only on hover (phones
+# leave it out); the turn's last reply and the person's message always
+# show theirs, and so does a running turn's newest reply
+law stamp_mid_never_user:
+  for +s: STP.Stamps
+  for id: String
+  for th: String
+  for x: String
+  for at: Nat
+  {STP.Stamp.mid(s, M.Msg{id, th, M.User{}, x, at}) == False{} : Bool}
+
+law stamp_mid_inside_turn:
+  for +r: TZ.TzRule
+  {STP.Stamp.mid(STP.Stamps{r, 0n, STP.Stamp.ends([M.Msg{"u", "t", M.User{}, "go", 1n}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}], False{}), Map.new(&2, Nat)}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}) == True{} : Bool}
+
+law stamp_mid_turn_end_shows:
+  for +r: TZ.TzRule
+  {STP.Stamp.mid(STP.Stamps{r, 0n, STP.Stamp.ends([M.Msg{"u", "t", M.User{}, "go", 1n}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}], False{}), Map.new(&2, Nat)}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}) == False{} : Bool}
+
+law stamp_mid_running_newest_shows:
+  for +r: TZ.TzRule
+  {STP.Stamp.mid(STP.Stamps{r, 0n, STP.Stamp.ends([M.Msg{"u", "t", M.User{}, "go", 1n}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}], True{}), Map.new(&2, Nat)}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}) == False{} : Bool}
