@@ -140,7 +140,7 @@ export class ThinViews {
     if (!l || !viewTarget(target)) return { failed: 'invalid view selection', cmds: [] };
     if (session && own(session, 'route') && !compactRoute(session.route, target)) return { failed: 'invalid view route', cmds: [] };
     if (l.revision >= MAX_REVISION) return { failed: 'view revision exhausted', cmds: [] };
-    l.target = snapshot(target); l.accountBinding = ''; l.viewId = ''; l.viewRevision = ''; l.updatePending = false; l.updateId = null; l.invalidated = false; l.changedRevision = null; l.readInvalidated = false;l.sidebar = null;l.terminalOwner = '';l.terminalOpen = false;l.bases = deltaBases();
+    l.target = snapshot(target); l.accountBinding = ''; l.viewId = ''; l.viewRevision = ''; l.updatePending = false; l.updateId = null; l.invalidated = false; l.changedRevision = null; l.readInvalidated = false;l.sidebar = null;l.terminalOwner = '';l.terminalOpen = false;l.bases = deltaBases();l.displayedBase = '';
     return this.request(hub, 'view.open', { session, cid });
   }
   request(hub, method, args = {}) {
@@ -250,14 +250,17 @@ export class ThinViews {
       // the paths a delta wrote (null: a whole reply, everything), for the
       // region the page redraws (core/landing.bend)
       const d = r.viewDelta;
-      if (record(d) && Array.isArray(d.ops) && d.base) changed = d.ops.map(op => Array.isArray(op) && Array.isArray(op[1]) ? op[1] : []);
+      // Retained bases include replies that never reached the screen. Their
+      // paths describe changes from that older picture, not from the DOM.
+      const fromShown = record(d) && d.base && d.base === l.displayedBase;
+      if (fromShown && Array.isArray(d.ops)) changed = d.ops.map(op => Array.isArray(op) && Array.isArray(op[1]) ? op[1] : []);
       try {
         // the selected draft as the request carried it on the wire
         const wire = this.api.shape ? deltaDraft(this.api.shape(c.input, c.method)) : deltaDraft(c.input);
         picture = deltaPicture(r, c.input, l.bases, wire);r = picture.result;
         // no ops: the very body this reply names (applyViewDelta hands the
         // base back), so the page has nothing to draw again
-        unchanged = (Array.isArray(e.result.viewDelta?.ops) && e.result.viewDelta.ops.length === 0 && picture.body === l.bases.map.get(e.result.viewDelta.base));
+        unchanged = !!fromShown && Array.isArray(d.ops) && d.ops.length === 0 && picture.body === l.bases.map.get(d.base);
         if (deltaBytes(picture.measure, picture.wire, utf8Bytes) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
       } catch {
         // the next request asks for the whole view
@@ -289,7 +292,7 @@ export class ThinViews {
     const presentation = ['view.open', 'view.page', 'view.update', 'view.action'].includes(c.method);
     const displayed = current && presentation && record(r.shown) && r.remoteReady === true;
     if (displayed) {
-      l.viewId = r.viewId; l.viewRevision = r.viewRevision; l.shown = r.shown;l.pageShown = c.revision;
+      l.viewId = r.viewId; l.viewRevision = r.viewRevision; l.shown = r.shown;l.pageShown = c.revision;l.displayedBase = picture?.token || '';
       if (l.greeting.renderer === 'web') l.accountBinding = typeof r.accountBinding === 'string' ? r.accountBinding : '';
       l.terminalOpen = r.session?.open?.term === true;
       l.terminalOwner = bounded(r.session?.drafts?.['@terminal.owner'], 1024) ? r.session.drafts['@terminal.owner'] : '';
