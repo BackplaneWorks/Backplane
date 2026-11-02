@@ -1205,3 +1205,13 @@ test('a timeout with multiple immediate sends restores every capture in order',a
   assert.equal(f.getSession().drafts.A,first+'\n\nsecond\n\nthird');assert.deepEqual(f.host.pendingSends('A'),[]);
  }
 });
+
+test('LIMIT on initial or live view keeps greeting, drafts and other-thread navigation usable',async()=>{
+ for(const initial of [true,false]){
+  const f=await fixture();if(initial)f.host.greeting(f.greeting);else{f.open();f.host.request('flag','palette');}
+  const failed=f.sent.at(-1),client=f.host.client,link=client.links.get(f.api.hub);
+  f.host.receive({t:'reply',id:failed.id,ok:false,error:{code:'LIMIT'}});
+  assert.equal(f.host.client,client);assert.equal(client.links.get(f.api.hub),link);assert.equal(f.host.greeted,true);assert.equal(f.getSession().drafts.A,'original 日本語');
+  assert(f.host.request('select','B'));const next=f.sent.at(-1);assert.equal(next.m,'view.open');assert.equal(next.p.generation,'7');assert.equal(next.p.target.id,'B');f.host.receive(f.reply(next));assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'B');assert.equal(f.getSession().drafts.A,'original 日本語');
+ }
+});
