@@ -2809,6 +2809,10 @@ law recover_interrupts_running:
 law recover_closes_asks:
   {H.Pend.open(M.Asks.all(H.Rec.after(H.Rec.demo(M.Running{}), 10n)), "t1") == 0n : Nat}
 
+# but an order's question, which parks nothing, stays to be answered
+law recover_keeps_order_ask:
+  {H.Pend.open(M.Asks.all(H.Rec.after(M.State.replay([M.AskOpened{"a2", "t1", "input", "order_ask.typed", "Ship to which country?", "", 4n}], H.Rec.demo(M.Completed{})), 10n)), "t1") == 1n : Nat}
+
 # a thread that was not running is left as it was
 law recover_leaves_idle:
   {H.Hub.running(H.Hub.thread(H.Rec.after(H.Rec.demo(M.Completed{}), 10n), "t1")) == False{} : Bool}

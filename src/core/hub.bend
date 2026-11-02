@@ -7793,10 +7793,20 @@ def Rec.turns(ts: List<&2, String>, r: Rec, +before: M.State, +now: Nat) -> Rec:
     case +th <> t:
       Rec.turns(t, Rec.turn(r, before, now, th), before, now)
 
+# (an order's question parks nothing, so it stays open: its answer starts
+# the agent again, Hub.answer.order; "Ship to which country?" went away
+# with every deploy; law recover_keeps_order_ask)
+def Rec.ask.close(order: Bool, +id: String, +th: String, +s: M.State, +now: Nat) -> Step:
+  match order:
+    case True{}:
+      Step.none()
+    case False{}:
+      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), "Backplane restarted: this request can no longer be answered")], Nil{}}
+
 def Rec.ask.k(a: M.Ask, +s: M.State, +now: Nat) -> Step:
   match a:
-    case M.Ask{+id, +th, _, _, _, _, True{}, _}:
-      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), "Backplane restarted: this request can no longer be answered")], Nil{}}
+    case M.Ask{+id, +th, _, +tool, _, _, True{}, _}:
+      Rec.ask.close(OR.Order.ask.is(tool), id, th, s, now)
     case _:
       Step.none()
 
