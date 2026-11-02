@@ -18,7 +18,7 @@ async function capture(name){const data=await page.evaluate(()=>window.backplane
  await new Promise(resolve=>site.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${site.address().port}`;
  const connection=await service.start();
  app=await _electron.launch({executablePath,args:process.env.BACKPLANE_BROWSER_HEADLESS==='1'?['--ozone-platform=headless']:[],env:{...env,BACKPLANE_SERVICE:binary,BACKPLANE_WEB:web}});
- page=await app.firstWindow();await page.setViewportSize({width:1440,height:960});page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
+ await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentBounds({x:0,y:0,width:1440,height:960}));page=await app.firstWindow();await page.setViewportSize({width:1440,height:960});page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.locator('.sidebar').waitFor();const skip=page.locator('[data-on-click="ob-skip"]');if(await skip.count())await skip.click();
  await page.locator('.sidebar [data-on-click="select"][data-value="self"]').first().click();
  await page.waitForFunction(()=>document.querySelector('main')?.dataset.thread==='self'&&document.documentElement.dataset.backplaneRemoteReady==='true');

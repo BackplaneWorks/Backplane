@@ -13,7 +13,11 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
     if(label){
       // A selected owner's ready state says nothing about a different page.
       const selected=!state.owner||state.owner===ownerOf(node);
-      label.textContent=selected?(state.phase==='ready'?'':String(state.message||'Browser unavailable').slice(0,240)):'Connecting Browser…';
+      const message=selected?(state.phase==='ready'?'':String(state.message||'Browser unavailable').slice(0,240)):'Connecting Browser…';
+      // Keep the text node tracked by the DOM patcher. Replacing it with
+      // textContent strands its reference and can duplicate the placeholder.
+      if(label.firstChild?.nodeType===3&&label.childNodes.length===1)label.firstChild.nodeValue=message;
+      else label.textContent=message;
     }
     // Recovery belongs to the private controller, not to a visible guest.
     // Keep it available on Settings too, without changing the person's pane.
