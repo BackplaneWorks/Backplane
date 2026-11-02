@@ -164,9 +164,9 @@ export class ThinHost {
       viewDelta: (api.renderer || 'web') === 'web' && api.viewDelta !== false,
       bodyPages: api.bodyPages === true,
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
-        p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action' ? request.p.action : '', request.p.target, true), away: this.awayOf(request.p.session.sel) } } : request }),
+        p: { ...request.p, boardCatalog: api.boardCatalog === true ? 1 : 0, session: requestSession(request.p.session, request.m === 'view.action' ? request.p.action : '', request.p.target, true), away: this.awayOf(request.p.session.sel) } } : request }),
       // what the request limit measures: the request as it goes on the wire
-      shape: (p, method) => p.session ? { ...p, session: requestSession(p.session, method === 'view.action' ? p.action : '', this.target, true) } : p,
+      shape: (p, method) => p.session ? { ...p, boardCatalog: api.boardCatalog === true ? 1 : 0, session: requestSession(p.session, method === 'view.action' ? p.action : '', this.target, true) } : p,
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: api.validateResult || validateThinResult,
     }, next);

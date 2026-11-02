@@ -1266,3 +1266,11 @@ test('bot recovery requires a live greeted link and a valid target',async()=>{
  }
  const f=await fixture();f.open();f.host.disconnect();const count=f.sent.length;f.host.request('bot','bub');assert.equal(f.sent.length,count);assert.equal(f.host.ready,false);
 });
+
+test('bounded board catalog protocol is explicitly negotiated and measured on outgoing view requests',async()=>{
+ for(const enabled of [false,true]){
+  const f=await fixture({boardCatalog:enabled});f.host.greeting(f.greeting);
+  assert.equal(f.sent.at(-1).p.boardCatalog,enabled?1:0);
+  f.host.receive(f.reply());f.host.update();assert.equal(f.sent.at(-1).p.boardCatalog,enabled?1:0);
+ }
+});
