@@ -180,7 +180,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "ae6c416d7a4944128ce7de2e4cee6ba98c1908fefbe8bba96a258b9b00c9600f"
+    "src/web/view.bend": "8bdadf2a44b932ee8173422660d80d3729d1a72d76dd5d14b231fe322ac7d0df"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -513,5 +513,12 @@
     "fullOutputCheck": "test/sidebar_draft_image_test.bend",
     "focusedSuites": 20,
     "existingLaws": "unchanged"
+  },
+  "browserRecoveryReview": {
+    "priorManifestSHA256": "398d0276a1a5caff6445a1ccb8b2aae06e46b34bb83ebc07abdc06da677ac908",
+    "scope": "Only View.chrome.tools adds an initially hidden fixed native Browser reconnect button. It has no Bend action, Ui/draft read, authority or sidebar dependency. Existing explicit private bridge reconnect stays renderer-local, preserves UNKNOWN latches and never replays guest work. Sidebar draft readers, keys, wire/filter/fallback and scanner unchanged.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputLogSHA256": "2346c889dc7e515782456328088f61680b9c114ebd58b71e1c4897a79978bae0",
+    "assertions": 24
   }
 }

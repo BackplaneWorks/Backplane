@@ -3,7 +3,7 @@
 export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onTakeover=()=>{}}={}) {
   if(!bridge)return Object.freeze({sync(){},hide(){},dispose(){}});
   const doc=root.ownerDocument||root,win=doc.defaultView;
-  let current=null,signature='',ticket=0,raf=0,disposed=false,stateRevision=0;
+  let current=null,signature='',ticket=0,raf=0,disposed=false,stateRevision=0,reconnecting=false;
   let state={phase:'connecting',message:'Connecting Browser…'};
   const ownerOf=node=>node?.getAttribute('data-desktop-browser-owner');
   const observers=[];
@@ -11,15 +11,21 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
   function status(node){
     const label=node?.querySelector('.desktop-browser-status');
     if(label&&(!state.owner||state.owner===ownerOf(node)))label.textContent=state.phase==='ready'?'':String(state.message||'Browser unavailable').slice(0,240);
-    const reconnect=node?.querySelector('[data-desktop-browser-reconnect]');
-    if(reconnect)reconnect.hidden=state.phase!=='error';
+    // Recovery belongs to the private controller, not to a visible guest.
+    // Keep it available on Settings too, without changing the person's pane.
+    for(const reconnect of root.querySelectorAll('[data-desktop-browser-reconnect]')){
+      reconnect.hidden=state.phase!=='error';
+      reconnect.disabled=reconnecting;
+      // Toolbar button display rules otherwise override the HTML hidden rule.
+      reconnect.style.display=reconnect.hidden?'none':'';
+    }
   }
   function hide(){
     ticket++;signature='';
     if(current){current=null;resize.disconnect();void Promise.resolve(bridge.hide()).catch(()=>{});}
   }
   function measure(){
-    raf=0;if(disposed)return;
+    raf=0;if(disposed)return;status(current);
     const node=root.querySelector('[data-desktop-browser-owner]'),owner=ownerOf(node);
     if(!isReady()||doc.hidden||!node||typeof owner!=='string'||!owner.length||owner.length>512){hide();return;}
     const style=win.getComputedStyle(node),r=node.getBoundingClientRect();
@@ -41,13 +47,13 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
   const listen=(target,event,callback,options)=>{target.addEventListener(event,callback,options);observers.push(()=>target.removeEventListener(event,callback,options));};
   listen(win,'resize',sync);listen(doc,'scroll',sync,true);listen(doc,'visibilitychange',()=>{if(doc.hidden)hide();else{signature='';sync();}});
   listen(doc,'click',event=>{
-    if(disposed||state.phase!=='error'||!current||!event.target.closest?.('[data-desktop-browser-reconnect]')||!bridge.reconnect)return;
-    event.preventDefault();state={phase:'connecting',message:'Connecting Browser…'};status(current);
+    if(disposed||reconnecting||state.phase!=='error'||!event.target.closest?.('[data-desktop-browser-reconnect]')||!bridge.reconnect)return;
+    event.preventDefault();reconnecting=true;state={phase:'connecting',message:'Connecting Browser…'};status(current);
     // Reconnect creates a new private channel, never replays the prior action.
-    void Promise.resolve(bridge.reconnect()).then(value=>{state=value;signature='';if(current)status(current);sync();}).catch(()=>{state={phase:'error',message:'Browser unavailable'};if(current)status(current);});
+    void Promise.resolve().then(()=>bridge.reconnect()).then(value=>{if(disposed)return;state=value;signature='';sync();}).catch(()=>{if(!disposed)state={phase:'error',message:'Browser unavailable'};}).finally(()=>{reconnecting=false;if(!disposed)status(current);});
   });
   if(win.visualViewport){listen(win.visualViewport,'resize',sync);listen(win.visualViewport,'scroll',sync);}
-  const receiveState=value=>{if(disposed||!value)return;stateRevision++;state=value;signature='';if(current)status(current);sync();};
+  const receiveState=value=>{if(disposed||!value)return;stateRevision++;state=value;signature='';status(current);sync();};
   if(bridge.onState)observers.push(bridge.onState(receiveState));
   // Main may already be ready (or unavailable) before this renderer loads.
   // An event that arrives during the query always wins over its older answer.
