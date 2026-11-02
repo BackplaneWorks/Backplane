@@ -1,4 +1,5 @@
 import Base
+import ../core/chat-pending.bend as CP
 import ../core/bub-move.bend as HOP
 import ../core/title.bend as TTL
 import ../core/msgs.bend as MSG
@@ -580,9 +581,10 @@ def Mob.own.s.loc(+lc: I.Loc, e: M.Entry, +dr: Map<&2, String>, +stamp: String) 
     case M.Msg{id, _, M.User{}, +text, _}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("user")}, J.KV{"text", J.Json.str(AT.Att.body(text))},
         J.KV{"attachments", J.Json.arr(Mob.chips(AT.Att.paths(text)))}, J.KV{"stamp", J.Json.str(stamp)}])
-    case M.Msg{+id, _, _, +text, _}:
+    case M.Msg{+id, _, _, +raw, _}:
+      +text = CP.Pending.text(lc, id, raw)
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("assistant")}, J.KV{"text", J.Json.str(text)},
-        J.KV{"blocks", J.Json.arr(Mob.nodes(D.Md.render.loc(lc, text)))}, J.KV{"images", J.Json.arr(Mob.imgs(dr, id))}, J.KV{"stamp", J.Json.str(stamp)}])
+        J.KV{"blocks", J.Json.arr(Mob.nodes(D.Md.render.loc(lc, text)))}, J.KV{"images", J.Json.arr(Mob.imgs(dr, id))}, J.KV{"stamp", J.Json.str(Bool.pick(String, CP.Pending.synthetic(id), "", stamp))}])
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       Mob.act(String.eq(tone, HS.Step.tone()), lc, M.Act{id, th, tone, kind, summary, at})
 
@@ -1427,6 +1429,11 @@ def Mob.working.k(+lc: I.Loc, +st: M.State, +id: String, +ph: Nat, +shown: Strin
 def Mob.working(+lc: I.Loc, +st: M.State, +id: String, +ph: Nat, turn: M.TurnState, +pe: Nat) -> String:
   Mob.working.k(lc, st, id, ph, SG.Signal.display.shown(ph, turn, pe, st, id))
 
+def Mob.pending(+lc: I.Loc, show: Bool, +id: String) -> List<&2, J.Json>:
+  match show:
+    case False{}: Nil{}
+    case True{}: [Mob.own.s.loc(lc, M.Msg{"@working:" ++ id, id, M.Assistant{}, CP.Pending.label(lc), 0n}, Map.new(&2, String), "")]
+
 def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: Nat, btw: J.Json, embs: J.Json) -> J.Json:
   match u t:
     case U.Ui{+st, +sel, +drafts, +live, _, _, +now, _, pa, _, _, _, _, _, +nf, _, _} M.Thread{+id, _, title, _, _, +turn, +pe, archived, o, +sa, +ua, pinned, _, branch, _, +pr, +mo, rt, _, _, _}:
@@ -1442,14 +1449,14 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
 
         J.KV{"parent", Mob.parent.loc(lc, String.is_empty(U.Tasks.up(st, id)), st, id, U.Tasks.up(st, id))},
         J.KV{"subs", Mob.subs.loc(lc, nf, id, SB.Subs.rows(st, nf, id, now))},
-        J.KV{"entries", J.Json.arr(Mob.paged.es(lc, pg, st, id, nf, drafts, V.View.running(turn)))},
+        J.KV{"entries", J.Json.arr(List.append(&2, J.Json, Mob.paged.es(lc, pg, st, id, nf, drafts, V.View.running(turn)), Mob.pending(lc, Bool.and(CP.Pending.visible(ph), Bool.not(CP.Pending.has(M.State.mine(st, id)))), id)))},
         J.KV{"earlier", J.Json.nat(U.Win.hidden(pg))},
         J.KV{"sending", J.Json.arr(Mob.strs(pend))},
         J.KV{"asks", J.Json.arr(Mob.asks(lc, U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
         J.KV{"queued", J.Json.str("")},
         J.KV{"queue", J.Json.arr(List.append(&2, J.Json, Mob.sbox.q(lc, st, U.Sbox.ask.in(U.Sbox.asks(st), id)), List.append(&2, J.Json, Mob.fab(lc, String.eq(U.Str.get(drafts, "@intent"), id), st, nf, id, V.View.running(turn)), Mob.queue(lc, M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn)))))},
         J.KV{"todos", Mob.todos(lc, nf, st, id, U.Todos.shown(st, id, V.View.running(turn)))},
-        J.KV{"live", Mob.live.k.loc(lc, render, U.Str.get(live, id))},
+        J.KV{"live", J.Json.arr(Nil{})},
         J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), Mob.working(lc, st, id, ph, turn, pe), ""))},
         J.KV{"phase", J.Json.str(SG.Signal.display.name(ph, st, id))},
         J.KV{"draft", J.Json.str(U.Str.get(drafts, sel))},

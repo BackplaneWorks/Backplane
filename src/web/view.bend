@@ -1,4 +1,5 @@
 import Base
+import ../core/chat-pending.bend as CP
 import ./terminal-cells.bend as TCELL
 import ../core/view-page.bend as VP
 import ./list-windows.bend as LW
@@ -899,9 +900,18 @@ def View.phase.k(idle: Bool, +label: String, +name: String, +key: String) -> Lis
     case False{}:
       [D.El{"div", key, [D.At{"class", "phase " ++ name}], [D.El{"span", "", [D.At{"class", "dot " ++ name}], Nil{}}, D.Txt{label}]}]
 
+def View.pending.node(+lc: I.Loc, +key: String) -> D.Node:
+  D.El{"div", key, [D.At{"class", "msg assistant pending"}, D.At{"role", "status"}, D.At{"aria-live", "polite"}],
+    [D.El{"div", "", [D.At{"class", "body"}], [D.Txt{CP.Pending.label(lc)}]}]}
+
+def View.pending.rows(+lc: I.Loc, show: Bool, +key: String) -> List<&2, D.Node>:
+  match show:
+    case True{}: [View.pending.node(lc, key)]
+    case False{}: Nil{}
+
 # the reply streaming in (made by the host from its text, View.make)
 def View.live.n.loc(+lc: I.Loc, +key: String, +text: String) -> D.Node:
-  D.El{"div", key, [D.At{"class", "msg assistant live"}], [D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}]}
+  View.pending.node(lc, key)
 
 # the reply streaming in, else the thread's phase (keyed "live:<thread>":
 # a delta redraws this row alone, app.bend's live)
@@ -930,15 +940,15 @@ def View.signal.live.loc(+lc: I.Loc, empty: Bool, +signal: Nat, text: String, +k
 def View.signal.of.loc(+lc: I.Loc, +info: Map<&2, String>, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
   View.signal.live.loc(lc, String.is_empty(U.Str.get(live, id)), SG.Signal.cached(info, id), U.Str.get(live, id), "live:" ++ id)
 
-# An empty bot live row has no summary or placeholder; actual streamed text
-# keeps its memo and identity, including the first delta after an idle chat.
+# A pending reply is a static bubble. Thin views already have a synthetic
+# row once deltas arrive; avoid a second bubble below that row.
 def View.thread.live.hide.loc(+lc: I.Loc, hide: Bool, +info: Map<&2, String>, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
   match hide:
     case True{}: Nil{}
     case False{}: View.signal.of.loc(lc, info, live, id)
 
 def View.thread.live.loc(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
-  View.thread.live.hide.loc(lc, String.is_empty(U.Str.get(live, id)), info, live, id)
+  View.pending.rows(lc, Bool.and(CP.Pending.visible(SG.Signal.cached(info, id)), Bool.not(CP.Pending.has(M.State.mine(st, id)))), "live:" ++ id)
 
 def View.live.of.loc(+lc: I.Loc, +st: M.State, +live: Map<&2, String>, +id: String) -> List<&2, D.Node>:
   View.live.k.loc(lc, String.is_empty(U.Str.get(live, id)), U.Side.phase(st, U.Ui.thread(st, id)), U.Str.get(live, id), "live:" ++ id)
@@ -972,7 +982,7 @@ def View.live.u.chosen(+lc: I.Loc, empty: Bool, u: U.Ui, +sel: String, +live: Ma
 def View.live.u.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
   match u:
     case U.Ui{_, +sel, _, +live, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      View.live.u.chosen(lc, String.is_empty(U.Str.get(live, sel)), u, sel, live)
+      View.live.signal.u.loc(lc, U.Side.with_signals(u))
 
 def View.live.u(u: U.Ui) -> D.Node:
   View.live.u.loc(I.En{}, u)
@@ -2784,7 +2794,7 @@ def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: St
     case M.Msg{+id, +th, M.User{}, +text, _}:
       View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
     case M.Msg{+id, +th, _, +text, _}:
-      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], View.ctx.attrs(RTO.Rto.chat(st, th), st, text)), text)
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", Bool.pick(String, CP.Pending.synthetic(id), "live", "msg")}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], View.ctx.attrs(RTO.Rto.chat(st, th), st, CP.Pending.text(lc, id, text))), CP.Pending.text(lc, id, text))
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       View.act.loc(lc, String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at}, st, ec)
 

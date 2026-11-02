@@ -1,3 +1,7 @@
+import ./src/core/chat-pending.bend as CHATPENDING
+
+import ./src/core/i18n.bend as CHATLOC
+
 import ./src/core/star-nudge.bend as STARN
 
 import ./src/core/settingsproposal.bend as SETPROPOSAL
@@ -15130,3 +15134,17 @@ law settings_proposal_deadline_exclusive:
 
 law settings_proposal_write_invalidates:
   {SETPROPOSAL.Proposal.invalidate([M.SettingSet{"fallback.on", "off", 10n}], [M.Ask{"a", "t", "approval", "settings_proposal", "", "", True{}, ""}], 10n) == [M.AskClosed{"a", "stale", 10n}] : List<&2, M.Change>}
+
+law chat_pending_working:
+  {CHATPENDING.Pending.visible(1n) == True{} : Bool}
+
+law chat_pending_blocked:
+  {CHATPENDING.Pending.visible(3n) == False{} : Bool}
+
+law chat_pending_finished:
+  {CHATPENDING.Pending.visible(5n) == False{} : Bool}
+
+law chat_pending_no_partial_reply:
+  for +lc: CHATLOC.Loc
+  for +text: String
+  {CHATPENDING.Pending.text(lc, "@live:t", text) == CHATPENDING.Pending.label(lc) : String}
