@@ -685,10 +685,11 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .dl.del { background: var(--del-bg); } .dl.del .sign { color: var(--bad); }
 .dl.meta { color: var(--faint); }
 
-.toast { position: fixed; right: 16px; bottom: 16px; background: var(--raise); border: 1px solid var(--bad); color: var(--bad); padding: 8px 12px; cursor: pointer; }
-/* a note that something worked ("Intent saved"): under the top bar, clear
-   of the composer, in the accent */
-.toast.ok { top: 48px; bottom: auto; z-index: 40; border-color: var(--accent); color: var(--text); }
+/* An error stays until clicked: under the top bar, clear of the composer,
+   so Send and Stop stay in reach while it shows */
+.toast { position: fixed; right: 16px; top: 48px; z-index: 40; background: var(--raise); border: 1px solid var(--bad); color: var(--bad); padding: 8px 12px; cursor: pointer; }
+/* a note that something worked ("Intent saved"): there too, in the accent */
+.toast.ok { border-color: var(--accent); color: var(--text); }
 
 /* Phones: one pane at a time; the sidebar until a thread is picked */
 @media (max-width: 760px) {
