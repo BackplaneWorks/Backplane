@@ -283,9 +283,9 @@ def WB.browser.direct(+u: U.Ui, +id: String) -> Bool:
 
 def WB.browser.drive.loc(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
   +person = Bool.not(String.is_empty(U.Teach.drive(u, id)))
-  WB.div("tk-strip desktop-browser-drive", [
-    D.Dom.span("", Bool.pick(String, person, "You drive", "Agent drives · click the page to take over")),
-    D.Dom.button("", Bool.pick(String, person, "tk-handback", "tk-takeover"), id,
+  WB.div("desktop-browser-drive" ++ Bool.pick(String, person, " person", ""), [
+    D.Dom.span("browser-driver", Bool.pick(String, person, "You have control", "Agent has control")),
+    D.Dom.button("browser-control", Bool.pick(String, person, "tk-handback", "tk-takeover"), id,
       Bool.pick(String, person, MSG.T.teach.handback(lc), MSG.T.teach.takeover(lc)),
       Bool.pick(String, person, MSG.T.teach.handback(lc), MSG.T.teach.takeover(lc)))])
 
@@ -294,7 +294,7 @@ def WB.browser.surface.k(direct: Bool, +lc: I.Loc, +u: U.Ui, +id: String, +name:
     case True{}:
       D.El{"div", "desktop-browser:" ++ id, [D.At{"class", "desktop-browser"}, D.At{"data-desktop-browser-owner", id}, D.At{"aria-label", MSG.T.browser.owner(lc, name)}],
         [D.El{"span", "desktop-browser-status:" ++ id, [D.At{"class", "desktop-browser-status"}, D.At{"role", "status"}, D.At{"aria-live", "polite"}], [D.Txt{"Connecting Browser…"}]},
-         D.El{"button", "desktop-browser-reconnect:" ++ id, [D.At{"type", "button"}, D.At{"data-desktop-browser-reconnect", ""}, D.At{"hidden", ""}], [D.Txt{"Reconnect Browser"}]}]}
+         D.El{"button", "desktop-browser-reconnect:" ++ id, [D.At{"class", "browser-reconnect"}, D.At{"type", "button"}, D.At{"data-desktop-browser-reconnect", ""}, D.At{"hidden", ""}, D.At{"style", "display:none"}], [WI.WIcon.svg("repeat", 16), D.Txt{"Reconnect"}]}]}
     case False{}:
       WB.browser.in.loc(lc, U.Teach.input(u, id), String.is_empty(U.Ui.info(u, "shot." ++ id)), U.Ui.info(u, "shot." ++ id), id, name)
 
@@ -313,6 +313,9 @@ def WB.tbtns(bs: List<&2, U.TBtn>) -> List<&2, D.Node>:
     case U.TBtn{+label, +action, +value, +primary} <> t:
       D.Dom.button(Bool.pick(String, primary, "primary", ""), action, value, label, label) <> WB.tbtns(t)
 
+def WB.browser.button(cls: String, action: String, value: String, +label: String, icon: String) -> D.Node:
+  D.El{"button", "", [D.At{"class", "browser-icon " ++ cls}, D.At{"type", "button"}, D.At{"title", label}, D.At{"aria-label", label}, D.At{"data-value", value}, D.On{"click", action}], [WI.WIcon.svg(icon, 16)]}
+
 def WB.browser.tabs(ts: List<&2, J.Json>) -> List<&2, D.Node>:
   match ts:
     case Nil{}: Nil{}
@@ -321,14 +324,14 @@ def WB.browser.tabs(ts: List<&2, J.Json>) -> List<&2, D.Node>:
       WB.div(Bool.pick(String, J.Json.get_bool(tab, "active", False{}), "browser-tab on", "browser-tab"), [
         D.Dom.button("browser-tab-title", "br-select", J.Json.get_str(tab, "id", ""), J.Json.get_str(tab, "url", ""),
           Bool.pick(String, String.is_empty(title), J.Json.get_str(tab, "url", "New tab"), title)),
-        D.Dom.button("", "br-close", J.Json.get_str(tab, "id", ""), "Close tab", "×")]) <> WB.browser.tabs(rest)
+        WB.browser.button("browser-tab-close", "br-close", J.Json.get_str(tab, "id", ""), "Close tab", "x")]) <> WB.browser.tabs(rest)
 
 def WB.browser.controls(+lc: I.Loc, +u: U.Ui, +page: String) -> List<&2, D.Node>:
-  [WB.div("browser-tabs", List.append(&2, D.Node, WB.browser.tabs(U.Browse.tabs(u, page)), [D.Dom.button("", "br-new", "", "New tab", "+")])),
-   WB.div("browser-address", [D.Dom.button("", "br-back", "", MSG.T.tour.back(lc), "←"),
-    D.Dom.button("", "br-forward", "", "Forward", "→"), D.Dom.button("", "br-reload", "", MSG.T.common.reload(lc), "↻"),
+  [WB.div("browser-tabs", List.append(&2, D.Node, WB.browser.tabs(U.Browse.tabs(u, page)), [WB.browser.button("browser-new", "br-new", "", "New tab", "plus")])),
+   WB.div("browser-address", [WB.browser.button("", "br-back", "", MSG.T.tour.back(lc), "chevron-left"),
+    WB.browser.button("", "br-forward", "", "Forward", "chevron-right"), WB.browser.button("", "br-reload", "", MSG.T.common.reload(lc), "repeat"),
     WB.input("browser-address:" ++ page, U.Browse.field(page), U.Browse.address(u, page), MSG.T.browser.address(lc), "br-go"),
-    D.Dom.button("", "br-go", "", MSG.T.common.go(lc), MSG.T.common.go(lc))])]
+    WB.browser.button("browser-go", "br-go", "", MSG.T.common.go(lc), "send")])]
 
 def WB.urlbar.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
   WB.div("bform row", [D.Dom.button("", "bb-back", "", MSG.T.tour.back(lc), MSG.T.tour.back(lc)), D.Dom.button("", "bb-reload", "", MSG.T.common.reload(lc), MSG.T.common.reload(lc)),
