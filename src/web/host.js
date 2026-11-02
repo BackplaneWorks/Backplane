@@ -796,7 +796,7 @@ const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
 let held = false, away = "";
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
-function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyFillPages = 0;historyFillSeeking = true;historyFillScope = "";document.getElementById("history-fill-more")?.remove();historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
+function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyFillPages = 0;historyFillSeeking = true;historyFillScope = "";historyFillMore(null, false);historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
 // Rows let go past the cap (thin-host.js's heldTrim): their display keys,
 // by the side they went from, and the height they had, kept in their place
 // as a gap (timeline-history.bend's gaps) so the scrollbar and the reader's
@@ -2303,7 +2303,7 @@ document.addEventListener("click", (e) => {
 });
 // The hub issues page cursors. The virtual list accumulates their data in
 // Bend; changing pages never removes the reader's already loaded rows.
-let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null, historyFillPages = 0, historyFillSeeking = true, historyFillScope = "";
+let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null, historyFillPages = 0, historyFillSeeking = true, historyFillScope = "", historyFillResume = null;
 // How far from the edge of the rows drawn the next page is asked for: two
 // screens, or the distance the reader covers at their speed (the last
 // quarter second's scrolling) in twice the time a page has been taking,
@@ -2363,25 +2363,35 @@ function historySeekMessage(tl) {
   }
   return false;
 }
+// Yield between bounded batches, then keep seeking without requiring a
+// gesture from a viewport that may have no scroll range. The timer owns no
+// cursor: ThinHost remains responsible for ordered, fenced page requests.
+function historyFillContinue(owner) {
+  if (historyFillResume) return;
+  const pending = { owner, timer: null };
+  historyFillResume = pending;
+  pending.timer = setTimeout(() => {
+    if (historyFillResume !== pending) return;
+    historyFillResume = null;
+    if (owner !== historyFillScope || owner !== historyFillOwner() || !historyFillSeeking || historyDirection) return;
+    historyFillPages = 0;earlierAsked = false;historyCheckSoon();
+  }, 100);
+}
 function historyFillMore(tl, shown) {
-  let button = document.getElementById("history-fill-more");
-  if (!shown) { button?.remove();return; }
-  if (!button) {
-    const owner = historyFillScope;
-    button = document.createElement("button");button.id = "history-fill-more";button.type = "button";
-    button.textContent = "Earlier messages";button.setAttribute("aria-controls", "timeline");
-    button.onclick = () => {
-      if (owner !== historyFillOwner() || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("older")) return;
-      // One deliberate continuation grants another bounded batch. It does
-      // not turn a short viewport into an unlimited background history scan.
-      historyFillPages = 0;historyFillSeeking = true;historyDirection = "";earlierAsked = false;
-      button.remove();historyCheckSoon();
-    };
-    document.body.appendChild(button);
+  let status = document.getElementById("history-fill-more");
+  if (!shown) {
+    if (historyFillResume) clearTimeout(historyFillResume.timer);
+    historyFillResume = null;status?.remove();return;
+  }
+  if (!status) {
+    status = document.createElement("div");status.id = "history-fill-more";
+    status.textContent = "Finding earlier messages…";status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");status.setAttribute("aria-controls", "timeline");
+    document.body.appendChild(status);
   }
   const box = tl.getBoundingClientRect();
-  button.style.cssText = "position:fixed;z-index:12;max-width:calc(100vw - 32px);background:var(--panel);color:var(--text);border:1px solid var(--line);padding:6px 10px;min-height:36px";
-  button.style.top = Math.max(0, box.top + 8) + "px";button.style.left = Math.max(8, box.left + 8) + "px";
+  status.style.cssText = "position:fixed;z-index:12;pointer-events:none;max-width:calc(100vw - 32px);background:var(--panel);color:var(--text);border:1px solid var(--line);padding:6px 10px";
+  status.style.top = Math.max(0, box.top + 8) + "px";status.style.left = Math.max(8, box.left + 8) + "px";
 }
 function earlierCheck(tl) {
   if (!tl || tl.id !== "timeline" || !thin?.ready || thin.pageError) { historyFillMore(tl, false);return; }
@@ -2392,14 +2402,21 @@ function earlierCheck(tl) {
   // Raw pages can be entirely folded tools. Fill a short initial viewport
   // without waiting for a scroll event that cannot occur without a scrollbar.
   // This retains the existing raw cursor/overlap contract and has a fixed
-  // automatic budget; explicit scrolling remains available after that budget.
+  // batch size; automatic continuation yields between batches until a message
+  // and usable scrolling are available, or the history is exhausted.
   // Virtual measurements can leave a few pixels of overflow around a lone
   // fold. A scrollbar by itself does not mean any message became readable.
   const visible = historyHasMessage(tl), short = tl.scrollHeight <= tl.clientHeight + 10 || !visible;
   if (visible && !short) historyFillSeeking = false;
   if (!historyDirection && historyFillSeeking && historyFillPages > 0 && !visible && historySeekMessage(tl)) { historyFillMore(tl, false);return; }
-  historyFillMore(tl, historyFillSeeking && !historyDirection && short && historyFillPages >= 32 && !thin.paging && thin.hasAhead("older"));
-  const filling = historyFillSeeking && !historyDirection && short && historyFillPages < 32;
+  const seeking = historyFillSeeking && !historyDirection && short && thin.hasAhead("older");
+  if (seeking && historyFillPages >= 32) {
+    historyFillMore(tl, true);
+    if (!thin.paging) historyFillContinue(owner);
+    return;
+  }
+  historyFillMore(tl, false);
+  const filling = seeking;
   if (historyDirection !== "older" && !filling) return;
   const gap = historyGap("older"), runway = historyRunway(tl), two = filling || runway > tl.clientHeight * 3;
   if (thin.paging ? !two || !!thin.pagingNext : earlierAsked) return;

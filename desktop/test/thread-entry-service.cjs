@@ -18,6 +18,7 @@ const tail=Number(process.env.ENTRY_TAIL||128),sentinel='PRIVATE_TOOL_DETAIL_SEN
 for(let i=0;i<tail;i++)events.push({$:'ActivityLogged',thread:'chat',act:'tail-tool-'+i,tone:'tool',kind:'shell',summary:'Inspecting the saved design\n'+sentinel+' '+i+'\n'+'Large private detail. '.repeat(1000),at:100000+i});
 for(const [key,value]of [['restart.continue','off'],['mail.on','off'],['telemetry.share','off'],['onboard.done','1'],['onboard.uber','1']])events.push({$:'SettingSet',key,value,at:1});
 if(!process.env.ENTRY_REUSE)fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n',{mode:0o600});
+if(process.env.ENTRY_REUSE&&process.env.ENTRY_BOT==='1')fs.appendFileSync(path.join(home,'events.jsonl'),JSON.stringify({$:'BotSet',id:'fixture-bot',name:'Fixture bot',thread:'chat',look:0,persona:'',at:1})+'\n');
 const extraTools=Number(process.env.ENTRY_BUDGET_TAIL||0);
 if(extraTools){assert(extraTools>1024);fs.appendFileSync(path.join(home,'events.jsonl'),Array.from({length:extraTools},(_,i)=>JSON.stringify({$:'ActivityLogged',thread:'chat',act:'budget-tool-'+i,tone:'tool',kind:'shell',summary:'Bounded metadata probe',at:200000+i})).join('\n')+'\n');}
 Object.assign(process.env,{BACKPLANE_HOME:home,BACKPLANE_COPY:'1',BACKPLANE_AGENTS:agents,BACKPLANE_KISTACK_SYNC:'0',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',XDG_CACHE_HOME:home+'/cache',SHELL:'/bin/sh'});
@@ -48,21 +49,16 @@ let browser,page,phase='start';const privateFrames=[];
  try{await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds,{timeout:2500});result.firstMessageAndScrollMs=performance.now()-start;}catch{}
  result.snapshots.push({label:'entry-settled',...(await entry())});await page.screenshot({path:output+'.entry.png'});
  if(extraTools){
-  phase='budget';await page.getByRole('button',{name:'Earlier messages',exact:true}).waitFor();
-  result.budget={extraTools,initialPageRequests:result.wire.requests.filter(r=>r.method==='view.page').length,batches:[]};
-  assert(result.budget.initialPageRequests<=32,'automatic fill has bounded page cost');
-  for(let attempt=0;attempt<4&&!result.continuationMessageAndScrollMs;attempt++){
-   const prior=result.wire.requests.filter(r=>r.method==='view.page').length;
-   const control=page.getByRole('button',{name:'Earlier messages',exact:true});
-   let focused=false;for(let tab=0;tab<160;tab++){if(await control.evaluate(e=>document.activeElement===e)){focused=true;break;}await page.keyboard.press('Tab');}
-   assert(focused,'the bounded continuation is reachable through native Tab navigation');const previous=await control.elementHandle();
-   await page.keyboard.press('Enter');await page.waitForFunction(e=>!e.isConnected,previous);
-   await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return document.getElementById('history-fill-more')||t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds);
-   const snap=await entry();result.snapshots.push({label:'continuation-'+attempt,...snap});
-   const count=result.wire.requests.filter(r=>r.method==='view.page').length-prior;assert(count<=32,'one continuation grants at most32 raw page requests');result.budget.batches.push(count);
-   if(snap.height>snap.view+10&&snap.messages.some(e=>realIds.includes(e.id)))result.continuationMessageAndScrollMs=performance.now()-start;
-  }
-  assert(result.continuationMessageAndScrollMs,'the accessible bounded continuation reaches real message text and usable scrolling without expanding tools');
+  phase='automatic-long-prefix';
+  if(!result.firstMessageAndScrollMs){await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds,{timeout:20000});result.firstMessageAndScrollMs=performance.now()-start;}
+  const final=await entry();result.snapshots.push({label:'automatic-message-and-scroll',...final});
+  const pages=result.wire.requests.filter(r=>r.method==='view.page'),cursors=pages.map(r=>JSON.stringify(r.cursor));
+  result.budget={extraTools,automaticPageRequests:pages.length,maxPages:Math.ceil((extraTools+tail+64)/16)+4};
+  assert(pages.length>32,'the fixture crosses the original automatic fill limit');
+  assert(pages.length<=result.budget.maxPages,'automatic demand remains within raw-prefix coverage');
+  assert.equal(new Set(cursors).size,cursors.length,'every automatic request advances to a distinct raw cursor');
+  assert.equal(await page.getByRole('button',{name:'Earlier messages',exact:true}).count(),0,'entry never requires a continuation button');
+  assert.equal(await page.evaluate(()=>__entryEvents.filter(e=>e.trusted&&['click','keydown'].includes(e.event)).length),0,'no navigation gesture is needed after selecting the target');
  }else {assert(result.firstMessageAndScrollMs,'Entering a long tool-heavy conversation immediately paints message text and provides scrollable history without a first wheel gesture');}
  assert.equal(result.wire.closedDetailBytes,0,'closed tool payloads do not ride ordinary view frames');assert.equal(result.wire.requests.filter(r=>r.phase==='entry'&&r.method==='view.message').length,0,'closed tools do not request body pages');
  assert.equal(result.wire.requests.filter(r=>r.method==='view.action'&&['send','send-alt'].includes(r.action)||['thread.send','thread.post'].includes(r.method)).length,0,'reader navigation never sends a composer turn');assert.deepEqual(result.errors,[]);result.state='passed';
