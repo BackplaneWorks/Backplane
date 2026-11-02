@@ -674,11 +674,20 @@ def Rvr.gated(+gate: String, +thread: String, +cwd: String, +tag: String, +home:
     IO.pure(Res, Rvr.report(thread, "", "No release: the checks fail (" ++ gate ++ "). Fix them, or release anyway.")),
     IO.bind(P.Ran, Res, P.Proc.run("git", ["tag", "-a", tag, "-m", "Release " ++ tag], cwd), r => Rvr.tagged(r, thread, cwd, tag, home, publish)))
 
+# a folder with no commit to tag says so before the checks run, rather than
+# failing at the tag with git's own words (REL.Release.nocommit)
+def Rvr.head(r: P.Ran, +thread: String, +cwd: String, +tag: String, +flags: String, +home: String) -> IO(Res):
+  match r:
+    case P.Ran{0, _}:
+      IO.bind(P.Ran, Res, Rvc.run(["--review", "checks", cwd, "", home, "release"]),
+        c => Rvr.gated(J.Json.get_str(Rvr.json(c), "gate", ""), thread, cwd, tag, home, String.contains(flags, "p"), String.contains(flags, "f")))
+    case _:
+      IO.pure(Res, Rvr.report(thread, "", REL.Release.nocommit(cwd)))
+
 def RvJob.release.k(ok: Bool, +thread: String, +cwd: String, +tag: String, +flags: String, +home: String) -> IO(Res):
   match ok:
     case True{}:
-      IO.bind(P.Ran, Res, Rvc.run(["--review", "checks", cwd, "", home, "release"]),
-        c => Rvr.gated(J.Json.get_str(Rvr.json(c), "gate", ""), thread, cwd, tag, home, String.contains(flags, "p"), String.contains(flags, "f")))
+      IO.bind(P.Ran, Res, P.Proc.run("git", ["rev-parse", "--verify", "-q", "HEAD"], cwd), r => Rvr.head(r, thread, cwd, tag, flags, home))
     case False{}:
       IO.pure(Res, Rvr.report(thread, "", "\"" ++ tag ++ "\" is not a tag name git takes."))
 
