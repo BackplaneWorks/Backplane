@@ -15446,3 +15446,13 @@ def Laws.path_records_newline_is_data(): {==}
 def Laws.path_records_keep_whitespace(): {==}
 def Laws.path_records_unterminated_last(): {==}
 def Laws.path_records_legacy_kept(text): {==}
+
+# Mechanical render failures (PR #226).
+def Laws.mech_render_success_quiet(out):
+  {==}
+
+def Laws.mech_render_failure_visible():
+  {==}
+
+def Laws.mech_render_failure_diagnostic():
+  {==}
