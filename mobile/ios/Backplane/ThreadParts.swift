@@ -574,6 +574,8 @@ struct AskCard: View {
             browser
         } else if ask.kind == "browser" {
             BrowserAskCard(model: model, ask: ask)
+        } else if ask.needs == true {
+            NeedsCard(model: model, ask: ask)
         } else {
             standard
         }
@@ -609,6 +611,111 @@ struct AskCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(BackplaneDesign.panel)
         .overlay(Rectangle().stroke(PhaseColor.bad, lineWidth: 1))
+    }
+}
+
+// a buy thread's question: "Backplane needs", the question, its choices,
+// a box (leading when the answer is typed) sent with Continue or Return as
+// "answer" pre + text, and Skip; the files' approval: what would be sent
+// with Send / Not now
+struct NeedsCard: View {
+    let model: AppModel
+    let ask: Ask
+    @State private var text = ""
+
+    private var pre: String { ask.pre ?? "" }
+
+    private func send() {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { model.act("answer", pre + t) }
+    }
+
+    @ViewBuilder private var chips: some View {
+        if !ask.buttons.isEmpty { FlowButtons(buttons: ask.buttons) { model.act("answer", $0.value) } }
+    }
+
+    private var box: some View {
+        HStack(spacing: 8) {
+            TextField(ask.placeholder ?? "", text: $text)
+                .textFieldStyle(.roundedBorder).submitLabel(.go).onSubmit(send)
+            if ask.typed == true {
+                Button(ask.go ?? "Continue", action: send).buttonStyle(.borderedProminent)
+                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+            } else {
+                Button(ask.go ?? "Continue", action: send).buttonStyle(.bordered)
+                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(ask.head).font(.subheadline.bold()).foregroundStyle(PhaseColor.accent)
+                Spacer()
+                if let sk = ask.skip { Button(sk.label) { model.act("answer", sk.value) }.font(.caption).foregroundStyle(.secondary) }
+            }
+            if pre.isEmpty {
+                ScrollView { Text(ask.detail).font(.caption.monospaced()).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
+                chips
+            } else {
+                Text(ask.detail).font(.callout)
+                if ask.typed == true { box; chips } else { chips; box }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BackplaneDesign.panel)
+        .overlay(Rectangle().stroke(PhaseColor.accent, lineWidth: 1))
+    }
+}
+
+// a buy thread's Order card under the top bar (screen.bend's Mob.order):
+// "Order · <project>", the steps (done ✓, the one at work lit: violet while
+// the quote is on its way), what happens now, and once quoted the total,
+// the customs line and Buy now (opened in the browser)
+struct OrderCardView: View {
+    let card: OrderCard
+    @Environment(\.openURL) private var openURL
+
+    private var lit: Color { card.waiting ? PhaseColor.waiting : PhaseColor.accent }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "cart").foregroundStyle(PhaseColor.accent)
+                Text("Order").bold()
+                Text("· " + card.name).foregroundStyle(.secondary).lineLimit(1)
+            }.font(.caption)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { steps }
+                VStack(alignment: .leading, spacing: 2) { steps }
+            }
+            Text(card.line).font(.caption).foregroundStyle(card.waiting ? PhaseColor.waiting : Color.primary)
+            if !card.total.isEmpty {
+                Divider()
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(card.total).font(.subheadline.monospaced().bold())
+                    Text(card.customs).font(.caption2).foregroundStyle(.secondary)
+                }
+                if !card.pay.isEmpty, let url = URL(string: card.pay) {
+                    Button(card.label) { openURL(url) }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BackplaneDesign.panel)
+        .overlay(Rectangle().stroke(lit.opacity(0.6), lineWidth: 1))
+        .padding(.horizontal, 8).padding(.vertical, 4)
+    }
+
+    @ViewBuilder private var steps: some View {
+        ForEach(card.steps, id: \.self) { s in
+            Text(s.mark == "done" ? "✓ " + s.label : s.mark == "on" ? "■ " + s.label : s.label)
+                .font(.caption2.monospaced()).fontWeight(s.mark == "on" ? .bold : .regular)
+                .foregroundStyle(s.mark == "done" ? PhaseColor.ok : s.mark == "on" ? lit : Color.secondary)
+        }
     }
 }
 
