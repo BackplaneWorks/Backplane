@@ -6,12 +6,12 @@ test('subagents rows show at the click without changing the authoritative sessio
   const f = new SubsFeedback(() => changed++), s = { sel: 'A', rid: 1, info: { 'subs:A': '0live:x' } };
   const before = JSON.stringify(s);
   const settle = f.choice('subs-open', 'A\tlive:x');
-  assert.equal(changed, 1);
+  assert.equal(changed, 0);
   assert.equal(f.project(s).subsFold, '1');
   assert.equal(JSON.stringify(s), before);
   settle(true);
   assert.equal(f.project(s), s);
-  assert.equal(changed, 2);
+  assert.equal(changed, 1);
 });
 test('subagents fold: the latest click wins, another thread and a cleared view show the hub picture', async () => {
   const { SubsFeedback } = await import('../../src/web/subs-feedback.js');

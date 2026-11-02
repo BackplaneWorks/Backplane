@@ -9,8 +9,9 @@ export class SubsFeedback {
     const tab = String(value).indexOf('\t');
     const thread = tab < 0 ? String(value) : String(value).slice(0, tab);
     const revision = ++this.revision;
+    // (drawn by the caller at once: host.js's subsNow; a whole page in the
+    // same frame would hold that frame back)
     this.pending = { thread, open: action === 'subs-open' };
-    this.changed();
     // the hub's answer is the picture from here on
     return () => { if (revision === this.revision) { this.pending = null;this.changed(); } };
   }
