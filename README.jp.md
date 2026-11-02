@@ -3,7 +3,7 @@
 </p>
 
 1. Backplaneは、エージェントによるハードウェア開発のための、完全にオープンソースのワークスペースです。
-2. Backplaneは[KiCadのフォーク](https://github.com/i2cjak/Backplane_KiCad)です。
+2. Backplaneは[KiCadのフォーク](https://github.com/BackplaneWorks/Backplane_KiCad)です。
 3. Backplaneは、実際の電気エンジニアが開発・保守しています。
 
 <p align="center">
@@ -11,9 +11,17 @@
 </p>
 
 ```sh
-curl -fsSL https://github.com/i2cjak/backplane-bend/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 backplane
 ```
+
+### Windows（x64、実験段階）
+
+[最新リリース](https://github.com/BackplaneWorks/Backplane/releases/latest)から `backplane-v<version>-windows-x64.zip` をダウンロードし、書き込み可能なフォルダーに全体を展開して `Backplane.exe` を開きます。`resources/` とほかの展開ファイルは隣に置いたままにしてください。ElectronアプリとBunハブのポータブル版で、WSLは不要です。シェルコマンドにはCygwinのツールが必要です。同梱されているランタイムを保持してください。ツールがない場合は、[Windowsセットアップスクリプト](scripts/setup-windows.ps1)でCygwinをインストールし、起動前にその `bin` ディレクトリを `PATH` に追加します。エージェントCLIのインストールとサインインは別途必要です。[プロバイダー設定スクリプト](scripts/install-windows-providers.ps1)でClaudeとCodexをインストールできます。
+
+FreeCADと[Backplane KiCadランタイム](https://github.com/BackplaneWorks/Backplane_KiCad/releases)は別途インストールしてください。`BACKPLANE_FREECAD` に実際の `bin/FreeCADCmd.exe`（隣にGUI実行ファイルが必要）、`BACKPLANE_KICAD` にランタイムのルートまたは `bin/kicad-cli.exe` を指定し、Backplaneを再起動します。通常のKiCadには、必要なIPC機能の一部がありません。
+
+Windowsでは、サービスの停止・更新を管理する機能は未対応です。ウィンドウを閉じてもハブは動作し続けます。現在、WindowsのCIスモークチェックは失敗を報告してもビルドを止めないため、ZIPの公開だけではWindowsでの十分な動作確認を意味しません。
 
 <p align="center">
   <img src="docs/media/readme/agent-setup-200.png" alt="Backplaneのプロバイダー・モデル・推論レベルの選択メニュー">
@@ -91,7 +99,7 @@ Backplaneでは、好きなエージェントを使えます。Grokでも、Code
 
 ## ライセンス
 
-MIT。[LICENSE](LICENSE)をご覧ください。[KiCadフォーク](https://github.com/i2cjak/Backplane_KiCad)には、KiCadのライセンスが引き続き適用されます。STEPコンバーターには、OpenCascadeと`occt-import-js`（LGPL-2.1）が含まれています。[サードパーティーのライセンス](tools/step2glb/README.md#license)をご覧ください。
+MIT。[LICENSE](LICENSE)をご覧ください。[KiCadフォーク](https://github.com/BackplaneWorks/Backplane_KiCad)には、KiCadのライセンスが引き続き適用されます。STEPコンバーターには、OpenCascadeと`occt-import-js`（LGPL-2.1）が含まれています。[サードパーティーのライセンス](tools/step2glb/README.md#license)をご覧ください。
 
 <p align="center">
   <img src="docs/media/readme/cad/cats-footer-200.png" alt="Backplaneの猫たち" width="216" height="72">
