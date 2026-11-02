@@ -203,9 +203,9 @@ const recent = new Recent({
   session: key => reconcileSession(plain(App.session(hubs, key)), key),
   reconcile: reconcileSession,
   prepare: (session, input, action) => plain(App.session_prepare(json(session), json(input), action)),
-  draft: (session, text, key) => ({
-    session: plain(App.session_draft(json(session), text)),
-    cmds: session.sel ? [{ type: "keep", thread: key + "|" + session.sel, text }] : [],
+  draft: (session, text, key, thread = session.sel) => ({
+    session: plain(App.session_draft_at(json(session), thread, text)),
+    cmds: thread ? [{ type: "keep", thread: key + "|" + thread, text }] : [],
   }),
   failed: (key, input, action) => plain(App.session_failed(key, json(input), action)),
   issued: (key, input, action) => plain(App.session_issued(key, json(input), action)),

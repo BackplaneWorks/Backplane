@@ -15502,3 +15502,15 @@ law model_cache_directory_rejected:
 
 law model_cache_file_accepted:
   {MCACHE.ModelCache.nonempty(Done{(0, (20, 0))}) == True{} : Bool}
+
+# Snapshot release report integrity (PR #247).
+law checks_report_missing_erc:
+  {CHK.Checks.report_valid("erc", "{}") == False{} : Bool}
+
+law checks_report_missing_drc:
+  {CHK.Checks.report_valid("drc", "{}") == False{} : Bool}
+
+law checks_execution_keeps_identity:
+  for +kind: String
+  for +why: String
+  {CHK.Checks.execution([CHK.Checks.finding("execution", "error", kind, why, "")]) == kind ++ ": " ++ why ++ "\n" : String}

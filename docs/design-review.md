@@ -63,3 +63,37 @@ KiCad is the first adapter, built over `kicad-cli` 10 (`sch erc`, `pcb drc` with
 3. Design checks: the Checks page (ERC, DRC, BOM rules, the checklist's boxes ticked into `.backplane/checklist.md`, custom checks, the gate) on the working copy or the comparison's new commit.
 4. Review comments: pinned to a place on a board or schematic by the person (right-click, long press) or the agent (MCP `review_comment`), answered, resolved, reopened; the open ones go to the agent with each message; listed on the Review tab's Comments page.
 5. Releases: the Review tab's Release page. A tag (the next one proposed), gated by the design checks unless forced; Gerbers, drill, CPL, BOM, PDFs and STEP from a clean checkout of the tag into `.backplane/releases/<tag>/` with notes (the BOM change since the tag before) and a manifest; published on GitHub only when the person turns Publish on.
+
+### Release transaction failures and retries
+
+A release first resolves HEAD to an immutable commit and refuses staged,
+unstaged and untracked work outside generated release/worktree/history output. Review
+configuration and checklist changes must be committed as well. Tracked
+configuration changes are also refused. Commit or stash that work first.
+Checks run against an archive of the resolved commit. If HEAD changes during
+validation, no tag is created; retry to validate the new commit. A tag names the
+validated commit explicitly, and exports and the manifest use that same commit.
+
+Check invocation failures and missing/malformed report schemas are execution
+errors, separate from design findings. The ERC/DRC gate settings and force
+control still govern design findings. Execution errors always stop a release
+and are shown in the checks/release report; an absent child gate cannot pass.
+
+Exports are built in a private sibling staging directory under
+`.backplane/releases`. Failed commands, directory creation, listing and metadata
+writes leave no final output directory. Successful notes and manifest are written
+before the complete directory is renamed into place. Existing complete output
+is preserved byte for byte. A failed export may leave the local annotated tag;
+retry the same tag only while it still names the validated commit. Existing
+complete outputs are never regenerated over: choose a new tag for another build.
+A running per-tag transaction reports its lock; after an interrupted process,
+inspect the named stale lock and staging directory before retrying. Publishing
+remains an explicit user action after successful output generation.
+
+Snapshot releases refuse symlinks and reject configured CAD files or hierarchical
+sheets whose resolved paths escape the committed repository archive. An internal
+parent reference to another committed folder is allowed. Export commands must
+produce new nonempty output; a zero exit status without the selected output is a
+failure. Publication pushes the captured annotated tag object by immutable refspec
+and verifies the remote object before and after the GitHub call. Publication
+failures remain visible while complete local outputs are preserved.
