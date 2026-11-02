@@ -1467,3 +1467,9 @@ voice.model.incomplete = 実行に必要なファイルが不足しています�
 voice.model.available = 未ダウンロード。約 {mb} MB と音声ランタイムが必要です。一度ダウンロードするとオフラインで使えます。
 voice.model.language.en = 英語
 voice.model.language.multi = 25言語
+
+# Upload failure messages resolved at the client
+upload.network = アップロードがハブに届きませんでした
+upload.failed = アップロードに失敗しました
+upload.incomplete = アップロードが途中で途切れました
+upload.cap = 添付ファイルは{mb} MBまでです

@@ -23,7 +23,7 @@ async function fixture({identityPending=false}={}){
   showViewStatus:message=>assert.fail(message),
   App:{sel:u=>u.sel,uploading:(u,t)=>u.drafts['@att.up:'+t]||'',act:(u,action,value)=>{const r=JSON.parse(value);return{ui:{...u,drafts:{...u.drafts,['@att:'+r.thread]:r.attached}},cmds:null};},presentation:u=>{const {route,...plain}=u;return plain;}},
   Wire:{plain:x=>x},run(){},later(){},dispatch(){throw Error('unexpected legacy action');},currentSession:()=>session,
-  fetch:(url,options)=>new Promise(resolve=>requests.push({url,options,complete:answer=>resolve({text:async()=>JSON.stringify(answer)})}))};
+  fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,fail:()=>reject(Error('synthetic transport failure')),complete:answer=>resolve({text:async()=>JSON.stringify(answer)}),raw:answer=>resolve({text:async()=>answer})}))};
  const choice=(s,a,v)=>a==='select'?{...s,sel:v,route:undefined}:a==='draft'?{...s,drafts:{...s.drafts,[s.sel]:v}}:s;
  const api={hub:'https://fixture',cid:'upload-fixture',now:()=>0,session:()=>session,target:presentationTarget,choice,
   prepare:s=>preservePresentationRoute(s,{...s,rid:s.rid}),counter(){},send:r=>sent.push(structuredClone(r)),local(){},
@@ -79,4 +79,28 @@ test('identity verification is awaited and a rotated credential cannot admit the
  await f.settle();assert.equal(f.sent.length,before);assert.equal(f.requests.length,0);
  f.ctx.document.cookie='bp_cache_v1='+'b'.repeat(64);f.verifyIdentity();await p;
  assert.equal(f.sent.length,before);assert.equal(f.requests.length,0);assert.equal(f.completions.length,0);assert.equal(f.records.size,0);
+});
+
+for (const [label,answer] of [['null',null],['array',[]],['number',42],['string','unexpected']]) {
+ test(`nonobject HTTP ${label} settles the original actor with a generic failure`,{timeout:1000},async()=>{
+  const f=await fixture(),p=f.start('failed.png');await f.admit('failed.png');await f.finish(0,answer);await p;
+  assert.equal(f.completions.length,1);assert.equal(f.completions[0].uiError,'upload.failed');assert.equal(f.completions[0].thread,'A');
+  assert.equal(f.getSession().drafts['@att.up:A'],'');assert.equal(f.getSession().drafts.A,'kept 日本語');assert.equal(f.records.size,0);
+ });
+}
+test('transport failure carries the stable network ID and keeps drafts',{timeout:1000},async()=>{
+ const f=await fixture(),p=f.start('failed.png');await f.admit('failed.png');f.requests[0].fail();await f.settle();
+ const request=f.sent.at(-1),o=JSON.parse(request.p.value);assert.equal(request.p.action,'attach-end');
+ assert.equal(o.uiError,'upload.network');assert.equal(o.thread,'A');assert.equal(o.upload,true);
+ f.host.receive(f.reply(request));await p;assert.equal(f.getSession().drafts.A,'kept 日本語');assert.equal(f.records.size,0);
+});
+test('malformed HTTP body carries a generic failure through the original actor',{timeout:1000},async()=>{
+ const f=await fixture(),p=f.start('failed.png');await f.admit('failed.png');f.requests[0].raw('not JSON');await f.settle();
+ const request=f.sent.at(-1),o=JSON.parse(request.p.value);assert.equal(request.p.action,'attach-end');
+ assert.equal(o.uiError,'upload.failed');assert.equal(o.thread,'A');f.host.receive(f.reply(request));await p;
+});
+test('unknown server failure is passed through without interpreting content as a catalog key',{timeout:1000},async()=>{
+ const f=await fixture(),p=f.start('failed.png');await f.admit('failed.png');
+ await f.finish(0,{thread:'A',upload:true,uiError:'unknown',text:'raw {text} 日本語'});await p;
+ assert.equal(f.completions[0].text,'raw {text} 日本語');assert.equal(f.getSession().drafts['@att.up:A'],'');assert.equal(f.records.size,0);
 });

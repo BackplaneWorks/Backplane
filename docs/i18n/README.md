@@ -124,3 +124,10 @@ ICU interpolation or selection.
 The Bend in-app language override does not change that OS preference. Japanese
 permission resources can therefore follow iOS language independently of the
 in-app preview gate; live prompt/device verification remains pending.
+
+Upload failures carry additive `uiError`/`uiDetail` metadata for network,
+generic, incomplete-body and attachment-cap failures. English `text` remains
+for older clients. Web, Electron and phone projections translate held failures
+at display time, including after a locale switch; unknown server/OS text stays
+content. Attachment limits follow the current hub setting. The iOS producer
+already sends the stable network ID; Android and the browser use the same ID.
