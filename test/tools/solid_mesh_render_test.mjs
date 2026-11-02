@@ -20,6 +20,7 @@ const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(req){
   // production source; App only supplies the localized progress strings.
   if(p==='/solid.js')return new Response(solid+'\nexport {view as testView};',{headers:{'Content-Type':'application/javascript'}});
   if(p==='/solid-assets.js')return new Response(readFileSync('src/web/solid-assets.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
+  if(p==='/mesh-worker.js')return new Response(readFileSync('src/web/mesh-worker.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
   if(p==='/solid-framing.js')return new Response(readFileSync('src/web/solid-framing.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
   if(p==='/solid-dof.js')return new Response(readFileSync('src/web/solid-dof.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
   if(p==='/solid-materials.js')return new Response(readFileSync('src/web/solid-materials.js','utf8'),{headers:{'Content-Type':'application/javascript'}});
@@ -46,7 +47,13 @@ try{
       const image=await createImageBitmap(await(await fetch(`/${name}.png`)).blob());
       const ref=new OffscreenCanvas(1000,700),r=ref.getContext('2d');r.drawImage(image,0,0);
       const expected=r.getImageData(0,0,1000,700).data;
-      const v=window.S.testView;v.fit();v.cam.aim(bottom?Math.PI:0,bottom?-Math.PI/2:Math.PI/2);v.draw();
+      const v=window.S.testView;v.fit();v.cam.aim(bottom?Math.PI:0,bottom?-Math.PI/2:Math.PI/2);
+      // Keep the reviewed images' sphere-fit distance. Production Fit now
+      // preserves the current face and fits its projected corners, so calling
+      // it in this loop changes the scale between the top and bottom shots.
+      // Orientation must be compared at the reference pose, independently of Fit.
+      v.cam.dist=Math.hypot(v.box[3]-v.box[0],v.box[4]-v.box[1],v.box[5]-v.box[2])/2/Math.sin(v.cam.fov/2)*1.05;
+      v.draw();
       const copy=new OffscreenCanvas(1000,700),c=copy.getContext('2d');c.drawImage(v.canvas,0,0);
       const actual=c.getImageData(0,0,1000,700).data;
       const white=(a,i)=>a[i]>220&&a[i+1]>220&&a[i+2]>220&&a[i+3]>128;
