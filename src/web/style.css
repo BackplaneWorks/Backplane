@@ -2014,8 +2014,9 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
    Where one row cannot hold the model chip, the account, the token chip
    and the buttons whole (a thread under about 60em), the chip and the
    account take a line over the buttons, and the chip keeps its words. */
-.account-chip { min-width: 0; flex: 0 1 auto; max-width: min(22rem, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (min-width: 761px) { .account-chip > .ico { display: none; } }
+.account-chip { min-width: 0; flex: 0 1 auto; max-width: min(22rem, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.account-chip > .ico { flex: none; }
+.account-chip .acct-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .account-picker { position: absolute; z-index: 4; bottom: 100%; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; max-width: 100%; max-height: min(45vh, 22rem); overflow-y: auto; border: 1px solid var(--line); background: var(--panel); }
 .account-picker button { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 .setrow .field { min-width: 0; max-width: 100%; }
@@ -2075,6 +2076,19 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .todos .todo input:focus, .todos .todo-add input:focus { border-color: var(--accent); outline: none; }
 .todos .todo button, .todos .todo-add button { flex: 0 0 auto; min-width: 30px; min-height: 32px; cursor: pointer; }
 @media(max-width: 640px) { .todos .todo button { min-width: 36px; min-height: 44px; } }
+/* Calmer steps: a green ✓ when done, an empty square to do, an accent
+   square for the step in progress (View.todo.item). The reorder and remove
+   buttons show on the hovered or focused row; touch keeps them. */
+.todos .todo .todo-check { display: grid; place-items: center; background: none; border: 0; padding: 0; color: var(--ok); font-size: calc(13px * var(--text-scale, 100) / 100); }
+.todos .todo .todo-check:hover { background: var(--raise); }
+.todos .todo .todo-check:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.todos .todo .todo-check:empty::before { content: ""; width: 11px; height: 11px; box-sizing: border-box; border: 1px solid var(--faint); }
+.todos .todo.in_progress { color: var(--text); }
+.todos .todo.in_progress .todo-check:empty::before { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 35%, transparent); }
+@media (hover: hover) {
+  .todos .todo :is(.todo-up, .todo-down, .todo-delete) { opacity: 0; }
+  .todos .todo:hover :is(.todo-up, .todo-down, .todo-delete), .todos .todo:focus-within :is(.todo-up, .todo-down, .todo-delete) { opacity: 1; }
+}
 
 @media (max-width: 760px) { .rail-toggle, .sidebar .side-toggle { display: none; } }
 .solid-pcb-controls { position:absolute; top:8px; right:8px; z-index:6; }
@@ -2198,7 +2212,7 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .composer-model { flex: 0 1 auto; flex-basis: auto; width: auto; gap: 4px; }
   .allowance-chip { width: auto; max-width: 11ch; min-height: 36px; overflow: hidden; text-overflow: ellipsis; }
   .composer-foot .account-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 36px; padding: 0; }
-  .account-chip .acct-k, .account-chip .acct-v { display: none; }
+  .account-chip .acct-v { display: none; }
   .composer-foot > .attach.draw { margin-left: auto; }
   .composer-foot :is(.attach, .mic, .tok-chip) { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; width: 34px; height: 36px; min-height: 36px; padding: 0; margin: 0; }
   .composer-foot .tok-chip .tok-n { display: none; }
