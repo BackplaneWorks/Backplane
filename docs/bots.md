@@ -912,6 +912,12 @@ owner's (`Far.own` in server.bend: the machines list; laws `far_*_stay_home`).
   start, then grown by each commit). A batch that comes twice, late or out
   of order changes nothing (laws `far_gap_takes_nothing`,
   `far_old_takes_nothing`, `far_overlap_takes_new`, `far_batch_again`).
+  A peer may request version 4, which wraps a sufficiently large response
+  in a gzip/base64 JSON envelope when that is smaller. Older peers continue
+  to exchange plain JSON; a version 4 requester also accepts a plain answer
+  from an older hub. Decoding rejects invalid envelopes and output over 1 MiB
+  before the mirror consumes a batch. The request remains signed, and the
+  sequence, epoch and gap rules stay the same.
 - History identity. The epoch is a cached hash of the first durable wire
   change. It stays the same through restart; replacing that first change
   changes it. A pull with another epoch starts at zero. A push naming
