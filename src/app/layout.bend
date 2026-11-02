@@ -4238,7 +4238,11 @@ def Set.page.agents(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v
   +ms = U.Models.settings(mi, prov, U.Ui.scratch(S.Nui.ui(n), "@f.mq"), M.Setting.get(st, "agent.model", ""))
   +dy = {(Set.rows(ty, ms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 + 26 + fh : U32) : U32}
   +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
-  Out.all([
+  +guide = U.Psv.rows(0n, S.Nui.ui(n))
+  +gh = Set.agy.sum(guide, ty, x, w)
+  +base = y
+  +y = (base + gh : U32)
+  Out.all([Set.agy.rows(guide, ty, n, x, w, base),
     Set.head(ty, MSG.T.settings.agents(Ty.loc(ty)), x, (y : U32)),
     Set.card(x, (y + 32 : U32), w, (124 + dy + pr : U32)),
     Set.row(ty, MSG.T.settings.agents.default(Ty.loc(ty)), MSG.T.settings.agents.note(Ty.loc(ty), Set.cli.loc(Ty.loc(ty), U.Models.cli(U.Str.get(info, "models"), prov), prov)), x, (y + 34 : U32), w),
@@ -4256,7 +4260,7 @@ def Set.page.agents.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, 
   +ms = U.Models.settings(mi, prov, U.Ui.scratch(S.Nui.ui(n), "@f.mq"), M.Setting.get(st, "agent.model", ""))
   +dy = {(Set.rows(ty, ms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 + 26 + fh : U32) : U32}
   +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
-  (176 + dy + pr : U32)
+  (176 + dy + pr + Set.agy.sum(U.Psv.rows(0n, S.Nui.ui(n)), ty, x, w) : U32)
 
 def Set.page.writing(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +tp = U.TextGen.provider(st)
