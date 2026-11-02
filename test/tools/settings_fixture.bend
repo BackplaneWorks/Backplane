@@ -11,6 +11,10 @@ def state(a: U.Act) -> U.Ui:
 def init() -> U.Ui:
   state(U.Ui.act(U.Ui.init(0n), "flag", "settings"))
 
+# Fictional installed catalog for the fallback editor interaction review.
+def fallback_init() -> U.Ui:
+  U.Ui.info_set(init(), "models", "{\"claude\":[\"sonnet\"],\"codex\":[\"gpt-6.1-sol\"]}")
+
 def act(u: U.Ui, a: String, v: String) -> U.Ui:
   state(U.Ui.act(u, a, v))
 

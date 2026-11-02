@@ -16,6 +16,7 @@ const server=Bun.serve({hostname:'127.0.0.1',port:4040,async fetch(req){const ur
  if(url.pathname==='/style.css')return new Response(Bun.file(resolve('src/web/style.css')),{headers:{'Content-Type':'text/css'}});
  if(url.pathname==='/act'){const {action,value}=await req.json();actions.push({action,value});ui=lib.act(ui,action,value);return new Response(view());}
  if(url.pathname==='/ja'){ja=true;ui=lib.init();}
+ if(url.pathname==='/fallback'){ja=false;ui=lib.fallback_init();}
  return new Response(`<!doctype html><html lang="${ja?'ja':'en'}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Backplane Settings review</title><link rel="stylesheet" href="/style.css"><body><div id="review" style="height:100vh">${view()}</div><script>
  const send=async(action,value)=>{const focused=document.activeElement?.id;const selection=document.activeElement?.selectionStart;const response=await fetch('/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,value})});document.querySelector('#review').innerHTML=await response.text();if(focused){const f=document.getElementById(focused);f?.focus();if(typeof selection==='number')f?.setSelectionRange(selection,selection);}};
  document.addEventListener('click',e=>{const b=e.target.closest('[data-on-click]');if(b)send(b.dataset.onClick,b.dataset.value||'');});
@@ -46,7 +47,8 @@ try{
  assert.equal(mobile.scroll,390,'390px layout has no horizontal overflow');
  await page.screenshot({path:resolve(out,'settings-390.png')});
  await page.locator('#settings-find').fill('usage');
- await page.locator('.settings-category').filter({hasText:'Usage'}).waitFor();
+ await page.waitForFunction(()=>document.querySelectorAll('.settings-category').length===1);
+ await page.locator('.settings-category[data-value="usage"]').waitFor();
  assert.equal(await page.locator('.settings-category').count(),1,'search keeps matching category');
  await page.locator('#settings-find').press('Enter');
  await page.locator('#settings-content[data-settings-page="usage"]').waitFor();
@@ -54,7 +56,36 @@ try{
  await page.goto('http://127.0.0.1:4040/ja');
  assert.equal(await page.locator('.settings-category').count(),14);
  await page.getByRole('heading',{name:'ワークスペース',exact:true}).waitFor();
+ // Open the advertised Agents page and exercise its real fallback controls.
+ await page.setViewportSize({width:1280,height:1000});
+ await page.goto('http://127.0.0.1:4040/fallback');
+ await page.locator('.settings-category[data-value="agents"]').click();
+ const toggle=page.locator('button[data-value="fallback.on=on"]');
+ await toggle.waitFor();
+ await toggle.click();
+ await page.locator('button.on[data-value="fallback.on=on"]').waitFor();
+ const add=page.getByRole('button',{name:'Add to hierarchy',exact:true});
+ await add.click();
+ await page.getByText('1. codex/gpt-6.1-sol',{exact:true}).waitFor();
+ assert.equal(await add.count(),0,'duplicate target cannot be added twice');
+ await page.locator('button[data-value="fallback.add.provider=claude"]').click();
+ await page.locator('button[data-value="fallback.add.model=sonnet"]').click();
+ await add.click();
+ await page.getByText('2. claude/sonnet',{exact:true}).waitFor();
+ await page.locator('button[data-value="fallback.chain=claude/sonnet,codex/gpt-6.1-sol"]').filter({hasText:'Move up'}).click();
+ await page.getByText('1. claude/sonnet',{exact:true}).waitFor();
+ await page.screenshot({path:resolve(out,'fallback-agents-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ await toggle.scrollIntoViewIfNeeded();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390,'fallback editor fits 390px');
+ await page.screenshot({path:resolve(out,'fallback-agents-390.png')});
+ await page.locator('button[data-value="fallback.chain=codex/gpt-6.1-sol"]').filter({hasText:'Remove'}).click();
+ await page.getByText('1. codex/gpt-6.1-sol',{exact:true}).waitFor();
+ // Reload the saved fixture state, rather than its explicit reset route.
+ await page.evaluate(()=>history.replaceState(null,'','/'));
+ await page.reload();
+ await page.getByText('1. codex/gpt-6.1-sol',{exact:true}).waitFor();
  assert.deepEqual(errors,[],'no browser errors');
- const receipt={pass:true,scope:'actual production Settings fixture; isolated browser, no live hub writes',checks:['14 categories open with one click each','4 groups with existing SVG icons','390px no overflow and single column','search filters and Enter opens result','Japanese menu retains14 categories','zero page errors'],mobile};
+ const receipt={pass:true,scope:'actual production Settings fixture; isolated browser, no live hub writes',checks:['14 categories open with one click each','4 groups with existing SVG icons','390px no overflow and single column','search filters and Enter opens result','Japanese menu retains14 categories','Agents fallback enable/add/reorder/remove and duplicate prevention','fallback editor fits 390px and retains configured order on reload','zero page errors'],mobile};
  writeFileSync(resolve(out,'browser-checks.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify(receipt));
 }finally{await browser.close();server.stop(true);}

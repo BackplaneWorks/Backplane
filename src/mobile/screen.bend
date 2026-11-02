@@ -1958,12 +1958,12 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
       [Mob.set.row(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],
       [Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       [Mob.set.row(U.Files.set.label(), U.Files.set.note(st), Mob.set.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
-      Mob.agy.rows(U.Fallbackv.rows(u)),
       Mob.agy.rows(U.Hookv.rows.loc(lc, u))])
     case 2n: List.concat(&2, J.Json, [Mob.agy.rows(U.Psv.rows(2n, u)), [Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, model),
       Mob.set.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), model), model, "agent.model"))],
-      Mob.set.find(lc, u, nf, prov)])
+      Mob.set.find(lc, u, nf, prov),
+      Mob.agy.rows(U.Fallbackv.rows(u))])
     case 3n: List.concat(&2, J.Json, [])
     case 4n: List.concat(&2, J.Json, [[Mob.set.row.f("KiCad", U.KN.summary(nf) ++ " · " ++ U.Str.get(nf, "kicad.cli"), [Mob.set.field("kpath", MSG.T.settings.kicad.path(lc), False{}, U.Ui.scratch(u, "@f.kpath"))], [Mob.set.btn(MSG.T.settings.kicad.path.save(lc), "kicad-path-save", "", False{})])],
       Mob.kn(U.KN.of(nf, st)),
