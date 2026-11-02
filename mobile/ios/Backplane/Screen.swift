@@ -590,6 +590,11 @@ struct TourChoice: Decodable, Equatable {
     let label, action, value: String
 }
 
+// Shared eligibility and dismissal live on the hub; native only presents it.
+struct StarNudge: Decodable, Equatable {
+    let text, url, token: String
+}
+
 // a thread being renamed: its id, the alert's title, the title so far, the
 // buttons ("rename-save" with "id\u{1f}title", or "rename-no")
 struct Renaming: Decodable, Equatable {
@@ -943,6 +948,7 @@ struct Screen: Decodable {
     let removing: Deleting?
     let renaming: Renaming?
     let tour: Tour?
+    let starNudge: StarNudge?
     let search: Search?
     let folders: Folders?
     let settings: Settings?
@@ -1106,7 +1112,7 @@ extension Screen {
     private enum K: String, CodingKey {
         case bubMove, locale, online, version, error, note, sel, empty, hub, hubs, usageMachines, found, projects, sidebarPages, lang, view, making, active, legacy, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
-             folders, settings, find, island, islands, thread, theme, tabs
+             folders, settings, find, island, islands, thread, theme, tabs, starNudge
     }
 
     init(from decoder: Decoder) throws {
@@ -1159,6 +1165,7 @@ extension Screen {
         removing = c.lossy(.removing)
         renaming = c.lossy(.renaming)
         tour = c.lossy(.tour)
+        starNudge = c.lossy(.starNudge)
         search = c.lossy(.search)
         folders = c.lossy(.folders)
         settings = c.lossy(.settings)

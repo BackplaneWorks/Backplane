@@ -34,6 +34,7 @@ final class AppModel {
     }
     @ObservationIgnored private var lastScreenJSON: String?
     @ObservationIgnored private var earlyActions: [(String, String)] = []
+    @ObservationIgnored private var openedStarSuggestion: (hub: String, token: String)?
     @ObservationIgnored private var navigationResume = NavigationResumeIntent()
     @ObservationIgnored private var navigationToken: NavigationResumeIntent.Token?
     @ObservationIgnored private var navigationGeneration: UInt64 = 0
@@ -943,9 +944,19 @@ final class AppModel {
     }
 
     func act(_ action: String, _ value: String = "") {
+        if action == "star-open" {
+            guard contentReady, !value.isEmpty, let s = screen, s.starNudge?.token == value,
+                  openedStarSuggestion?.hub != s.hub || openedStarSuggestion?.token != value else { return }
+            openedStarSuggestion = (s.hub, value)
+            // Only this tap may open the browser, after the ordinary action
+            // path applies its result without a pairing change.
+            act(action, value, continuingViewerLoad: false, openStarAfterApply: true)
+            return
+        }
         act(action, value, continuingViewerLoad: false)
     }
-    private func act(_ action: String, _ value: String, continuingViewerLoad: Bool) {
+
+    private func act(_ action: String, _ value: String, continuingViewerLoad: Bool, openStarAfterApply: Bool = false) {
         if action == "view", value.isEmpty {
             if let token = viewerClose.current { closeViewer(token) }
             return
@@ -1039,6 +1050,9 @@ final class AppModel {
             guard generation == pairingGeneration else { return }
             if out == nil, let viewerRequest { failViewerResume(viewerRequest) }
             if navigation { dirty = true; keep() }
+            if openStarAfterApply, out != nil {
+                self.act("open-url", "https://github.com/BackplaneWorks/Backplane")
+            }
         }
     }
 
@@ -2347,7 +2361,8 @@ final class AppModel {
                 if !action.isEmpty {
                     Task { [weak self] in
                         try? await Task.sleep(for: .milliseconds(Int(ms)))
-                        self?.act(action, value)
+                        // Scheduled backend actions aren't browser gestures.
+                        self?.act(action, value, continuingViewerLoad: false)
                     }
                 }
             case "jump": if let id = c.id, !id.isEmpty { jumping = (id, 4, 0, nil) }
