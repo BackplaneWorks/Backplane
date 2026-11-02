@@ -7,6 +7,8 @@
 # $BACKPLANE_PREFIX (~/.local/share/backplane), the desktop app into its
 # desktop/ folder (BACKPLANE_NO_DESKTOP_APP=1 skips it: a hub-only install),
 # and links the commands into ~/.local/bin. No sudo, no shell files edited.
+# Terminal downloads show a progress bar; --quiet or BACKPLANE_QUIET=1 uses
+# plain step results, as does NO_COLOR. Example: curl ... | sh -s -- --quiet.
 set -eu
 
 REPO="BackplaneWorks/Backplane"
@@ -15,7 +17,75 @@ SHA_LINUX_X64="@SHA_LINUX_X64@"
 SHA_LINUX_ARM64="@SHA_LINUX_ARM64@"
 SHA_DARWIN_ARM64="@SHA_DARWIN_ARM64@"
 
-fail() { printf 'backplane: %s\n' "$*" >&2; exit 1; }
+# Progress helpers begin. Kept in the generated single-file installer.
+# --quiet/BACKPLANE_QUIET and NO_COLOR select plain, one-line step results.
+bp_quiet=${BACKPLANE_QUIET:-}
+[ "$bp_quiet" = 0 ] && bp_quiet=
+for bp_arg in "$@"; do
+  case $bp_arg in
+    -q|--quiet) bp_quiet=1 ;;
+    *) printf 'backplane: unknown option %s (only --quiet)\n' "$bp_arg" >&2; exit 2 ;;
+  esac
+done
+bp_fancy=0
+if [ -t 2 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "$bp_quiet" ] && [ -z "${NO_COLOR+x}" ]; then
+  bp_fancy=1
+fi
+bp_step=0 bp_label= bp_task_pid=
+bp_esc=$(printf '\033')
+bp_begin() {
+  bp_step=$((bp_step + 1))
+  bp_label=$1
+  if [ "$bp_fancy" = 1 ]; then
+    printf '\r%s[2K[%s/5] %s ...' "$bp_esc" "$bp_step" "$bp_label" >&2
+  fi
+}
+bp_done() {
+  if [ "$bp_fancy" = 1 ]; then
+    printf '\r%s[2K%s[32m[%s/5] %s: done%s[0m\n' "$bp_esc" "$bp_esc" "$bp_step" "$bp_label" "$bp_esc" >&2
+  else
+    printf '[%s/5] %s: done\n' "$bp_step" "$bp_label" >&2
+  fi
+  bp_label=
+}
+fail() {
+  if [ -n "$bp_label" ]; then
+    if [ "$bp_fancy" = 1 ]; then printf '\r%s[2K' "$bp_esc" >&2; fi
+    printf '[%s/5] %s: failed\n' "$bp_step" "$bp_label" >&2
+  fi
+  printf 'backplane: %s\n' "$*" >&2
+  exit 1
+}
+bp_cleanup() {
+  if [ -n "$bp_task_pid" ]; then
+    kill "$bp_task_pid" 2>/dev/null || :
+    wait "$bp_task_pid" 2>/dev/null || :
+  fi
+  rm -rf "$tmp"
+}
+# Only temporary archive extraction animates in a captured child. Installation
+# and replacement remain synchronous in the foreground, as before.
+bp_extract() {
+  if [ "$bp_fancy" != 1 ]; then "$@"; return; fi
+  rm -f "$tmp/progress.rc"
+  (bp_rc=0; "$@" >"$tmp/progress.log" 2>&1 || bp_rc=$?; printf '%s\n' "$bp_rc" >"$tmp/progress.rc") &
+  bp_task_pid=$!
+  while [ ! -s "$tmp/progress.rc" ]; do
+    for bp_frame in '|' '/' '-' '\'; do
+      printf '\r%s[2K[%s/5] %s %s' "$bp_esc" "$bp_step" "$bp_label" "$bp_frame" >&2
+      sleep 0.1
+      [ -s "$tmp/progress.rc" ] && break
+    done
+  done
+  wait "$bp_task_pid" || :
+  bp_task_pid=
+  cat "$tmp/progress.log" >&2
+  return "$(cat "$tmp/progress.rc")"
+}
+# Progress helpers end.
+
+bp_begin 'Detect platform'
+
 
 case $(uname -s) in
   Linux) os=linux ;;
@@ -34,6 +104,7 @@ case $os-$arch in
   *) fail "no build for $os-$arch yet" ;;
 esac
 [ -n "$sum" ] || fail "this release has no build for $os-$arch"
+bp_done
 
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}
 bin=${BACKPLANE_BIN:-$HOME/.local/bin}
@@ -42,25 +113,37 @@ bin=${BACKPLANE_BIN:-$HOME/.local/bin}
 name="backplane-$VER-classic-$os-$arch.tar.gz"
 mkdir -p "$prefix" "$bin"
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+trap bp_cleanup 0
+trap 'exit 130' 2 15
 fetch() {
   url="https://github.com/$REPO/releases/download/$VER/$1"
   echo "downloading $url"
-  curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$1" "$url" || fail "download failed: $url"
+  if [ "$bp_fancy" = 1 ]; then
+    curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/$1" "$url" || fail "download failed: $url"
+  else
+    curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$1" "$url" || fail "download failed: $url"
+  fi
   if command -v sha256sum >/dev/null 2>&1; then
     echo "$2  $tmp/$1" | sha256sum -c - >/dev/null 2>&1 || fail "$1 does not match its sha256; not installed"
   else
     echo "$2  $tmp/$1" | shasum -a 256 -c - >/dev/null 2>&1 || fail "$1 does not match its sha256; not installed"
   fi
 }
+bp_begin 'Download and verify release'
 fetch "$name" "$sum"
-tar -xzf "$tmp/$name" -C "$tmp"
+bp_done
+bp_begin 'Unpack release'
+bp_extract tar -xzf "$tmp/$name" -C "$tmp" || fail "could not unpack $name; not installed"
 app=
 if [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
   [ -d "$tmp/backplane-$os-$arch/desktop" ] || fail "this release has no desktop app for $os-$arch (BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone)"
   app=1
 fi
-BACKPLANE_INSTALL_DESKTOP=$app sh "$tmp/backplane-$os-$arch/install-release.sh" "$tmp/backplane-$os-$arch" "$prefix"
+bp_done
+bp_begin 'Install payload'
+BACKPLANE_INSTALL_DESKTOP=$app sh "$tmp/backplane-$os-$arch/install-release.sh" "$tmp/backplane-$os-$arch" "$prefix" || fail "payload installation failed"
+bp_done
+bp_begin 'Configure commands and desktop entry'
 ln -sf "$prefix/backplane" "$bin/backplane"
 ln -sf "$prefix/backplane-serve" "$bin/backplane-serve"
 # the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips
@@ -113,6 +196,7 @@ if [ "$os" = linux ] && [ -n "$app" ]; then
     sandbox_fix="sudo chown root:root '$q' && sudo chmod 4755 '$q'"
   fi
 fi
+bp_done
 echo
 echo "  Backplane $VER is installed. Run: backplane"
 if [ -n "$sandbox_fix" ]; then
