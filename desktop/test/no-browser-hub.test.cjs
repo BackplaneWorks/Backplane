@@ -5,7 +5,7 @@
 // Electron, a stubbed service and a browser controller that cannot connect.
 const {test}=require('node:test'),assert=require('node:assert/strict'),Module=require('node:module'),path=require('node:path'),os=require('node:os'),fs=require('node:fs');
 
-function harness(hang=false,{discover,keepOpen=false}={}){
+function harness(hang=false,{discover,keepOpen=false,token}={}){
   const calls={loadURL:[],sent:[],errors:[],handlers:new Map(),controllers:0,controllerOptions:[],discover:[],tokenReads:0,token:'a'.repeat(32)};
   let ready;const whenReady=new Promise(r=>ready=r);
   const events=()=>{const on=new Map();return{on(e,f){on.set(e,f);return this;},once(e,f){on.set(e,f);return this;},emit(e,...a){on.get(e)?.(...a);}};};
@@ -25,7 +25,7 @@ function harness(hang=false,{discover,keepOpen=false}={}){
   const electron={app:{isPackaged:false,setPath:(key,value)=>paths.set(key,value),getPath:key=>paths.get(key),setName(){},requestSingleInstanceLock:()=>true,on(){},quit(){},whenReady:()=>whenReady},
     BrowserWindow,Menu:{setApplicationMenu(){},buildFromTemplate:x=>x},dialog:{showErrorBox:(a,b)=>calls.errors.push(b)},
     ipcMain:{handle:(ch,f)=>calls.handlers.set(ch,f),on(){}},session:{fromPartition:()=>ses},shell:{},webContents:{getFocusedWebContents:()=>null}};
-  class Service{async discover(options){calls.discover.push(options);return discover?discover(options):{origin:'http://127.0.0.1:1',version:'fixture'};}async start(){return{origin:'http://127.0.0.1:1',version:'fixture'};}async token(){calls.tokenReads++;return calls.token;}}
+  class Service{async discover(options){calls.discover.push(options);return discover?discover(options):{origin:'http://127.0.0.1:1',version:'fixture'};}async start(){return{origin:'http://127.0.0.1:1',version:'fixture'};}async token(){calls.tokenReads++;return token?token(calls):calls.token;}}
   // the hub has no /desktop/browser/v1: the controller's start fails and it closes
   const controller={createDesktopBrowserController:options=>{const{onState}=options;calls.controllers++;calls.controllerOptions.push(options);let closed=false,state={phase:'connecting'};
     return{async start(){if(hang)return new Promise(()=>{});closed=!keepOpen;state=keepOpen?{phase:'ready'}:{phase:'error',message:'Browser connection unavailable'};onState(state);},
@@ -108,11 +108,29 @@ test('Browser explicit reconnect binds a fresh version and token without replay 
 test('Browser reconnect failure creates no controller and does not retry discovery',async()=>{
   const h=harness(false,{discover:async()=>{throw new Error('Selected service authentication failed');}});
   await boot(h,async()=>{
-    await assert.rejects(()=>reconnect(h),/authentication failed/);
+    assert.equal((await reconnect(h)).phase,'error');
     assert.equal(h.calls.discover.length,1);assert.equal(h.calls.controllers,1);assert.equal(h.calls.tokenReads,2);
     assert.deepEqual(h.calls.loadURL,['http://127.0.0.1:1']);
     const shown=await h.calls.handlers.get('desktop:browser-state')({sender:h.stubs.electron.BrowserWindow.all[0].webContents,senderFrame:h.stubs.electron.BrowserWindow.all[0].webContents.mainFrame});
     assert.equal(shown.phase,'error');
+  });
+});
+
+test('failure before controller creation is queryable and one explicit reconnect recovers',async()=>{
+  let failed=false;
+  const h=harness(false,{keepOpen:true,token:calls=>{
+    if(calls.tokenReads===2){failed=true;throw Error('Synthetic credential read failure');}
+    return calls.token;
+  }});
+  await boot(h,async()=>{
+    assert(failed);assert.equal(h.calls.controllers,0);
+    const w=h.stubs.electron.BrowserWindow.all[0];
+    w.webContents.mainFrame={url:'http://127.0.0.1:1/'};
+    const state=await h.calls.handlers.get('desktop:browser-state')({sender:w.webContents,senderFrame:w.webContents.mainFrame});
+    assert.equal(state.phase,'error');assert.match(state.message,/Reconnect/);
+    assert(h.calls.sent.some(([ch,value])=>ch==='desktop:browser-state'&&value.phase==='error'));
+    assert.equal((await reconnect(h)).phase,'ready');assert.equal(h.calls.controllers,1);
+    assert.deepEqual(h.calls.loadURL,['http://127.0.0.1:1']);
   });
 });
 

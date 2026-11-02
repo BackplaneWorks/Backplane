@@ -44,6 +44,12 @@ let window, origin, connection, serviceReadyAtMs, firstVisibleAtMs, connecting;
 let connectTries = 0, connectTimer = null;
 let connectionStatus = {phase:'connecting', message:'Connecting to your service…'};
 let desktopBrowser;
+let browserStatus={phase:'connecting',message:'Connecting Browser…'};
+function browserState(value,browserWindow=window){
+  if(window!==browserWindow||!browserWindow||browserWindow.isDestroyed())return;
+  browserStatus=value;
+  browserWindow.webContents.send('desktop:browser-state',value);
+}
 const imageActions = createImageActions({ electron, origin: () => origin });
 let quitting = false;
 let terminalFocused = false;
@@ -137,7 +143,16 @@ async function connect(ses) {
 // one attempt at a time: the start after load and a Reconnect share it
 let browserStarting=null;
 function connectBrowser(ses,reconnect=false){
-  browserStarting??=startBrowser(ses,reconnect).finally(()=>{browserStarting=null;});
+  if(!browserStarting&&desktopBrowser&&!desktopBrowser.isClosed())return Promise.resolve();
+  if(!browserStarting){
+    const browserWindow=window;
+    browserState({phase:'connecting',message:'Connecting Browser…'},browserWindow);
+    browserStarting=startBrowser(ses,reconnect).catch(()=>{
+      // Discovery, credential reads and package validation can fail before a
+      // controller exists. Keep that failure queryable after renderer reload.
+      browserState({phase:'error',message:'Browser connection unavailable. Reconnect to try again.'},browserWindow);
+    }).finally(()=>{browserStarting=null;});
+  }
   return browserStarting;
 }
 async function startBrowser(ses,reconnect){
@@ -156,7 +171,7 @@ async function startBrowser(ses,reconnect){
     guestManagerSha256:config.guestManagerSha256||hash(guestPath),
     recorder:{preloadPath,preloadSha256:config.preloadSha256||hash(preloadPath),recorderSourceSha256:'2e4b03765cc4ae6595e32048555ffe27e750994a85c18b89027064f3c0c15350',subframePreload:true,popupPreloadVerified:false},
     unknownState:browserUnknown,executeCall:createBrowserActions(),
-    onState:value=>{if(window===browserWindow&&!browserWindow.isDestroyed())browserWindow.webContents.send('desktop:browser-state',value);},
+    onState:value=>browserState(value,browserWindow),
     onTakeover:value=>{if(window===browserWindow&&!browserWindow.isDestroyed())browserWindow.webContents.send('desktop:browser-takeover',value);}});
   desktopBrowser=controller;
   await controller.start();
@@ -214,8 +229,8 @@ function start() {
   ipcMain.handle('desktop:browser-hide',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');desktopBrowser?.hide();return true;});
   // Reloaded renderers subscribe after main may already have become ready or
   // failed. Query the current state instead of depending on a one-shot event.
-  ipcMain.handle('desktop:browser-state',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');return desktopBrowser?.state()??{phase:'connecting',message:'Connecting Browser…'};});
-  ipcMain.handle('desktop:browser-reconnect',async event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');await connectBrowser(ses,true);return desktopBrowser?.state()??{phase:'error',message:'Browser unavailable'};});
+  ipcMain.handle('desktop:browser-state',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');return browserStatus;});
+  ipcMain.handle('desktop:browser-reconnect',async event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');await connectBrowser(ses,true);return browserStatus;});
   Menu.setApplicationMenu(applicationMenu(Menu, process.platform));
   app.setAppUserModelId?.('works.backplane.desktop');
   if (process.platform === 'darwin') app.dock?.setIcon(iconPath());
