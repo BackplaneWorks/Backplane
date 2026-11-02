@@ -198,6 +198,10 @@ def FS.remove(path: String) -> IO(Result<&1, &1, U32 & String, Unit>):
 def FS.chmod(path: String, mode: U32) -> IO(Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
+# Preserve an existing credential, or create one privately without replacement.
+def FS.pairing_token(path: String) -> IO(Result<&1, &1, U32 & String, String>):
+  import "./effects/host.js"
+
 # listen on one interface (Base's TCP.listen binds all of them)
 def Net.listen(host: String, port: U32) -> IO(Result<&1, &1, U32 & String, Listener>):
   import "./effects/host.js"
