@@ -5,7 +5,7 @@ import Base
 # binds that home once; no RPC can supply a location. A local byte remembers
 # enable/disable. Every result is bounded JSON with closed status/error fields.
 # See docs/diagnostics-backend.md for the integration and schemas.
-def Diagnostics.start() -> IO(String):
+def Diagnostics.start(version: String) -> IO(String):
   import "./effects/diagnostics.js"
 
 def Diagnostics.status() -> IO(String):
