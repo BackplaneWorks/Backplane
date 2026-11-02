@@ -53,7 +53,14 @@ def st.of(+es: List<&2, M.Entry>, +s: M.State, +running: Bool, +stopped: Bool, +
 
 # the same while the thread waits on work it started
 def st.w(+es: List<&2, M.Entry>, +s: M.State, +running: Bool, +stopped: Bool, +waiting: Bool, +i: Nat) -> String:
-  S.Stamp.text(S.Stamps.of.w(es, s, at(3600n), running, stopped, waiting), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
+  S.Stamp.text(S.Stamps.of.w(es, s, at(3600n), running, Bool.pick(Nat, stopped, 1n, 0n), waiting), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
+
+# the stamp of entry i by how the thread's last turn ended (Stamp.end)
+def st.e(+l: I.Loc, +es: List<&2, M.Entry>, +s: M.State, +running: Bool, +turn: M.TurnState, +waiting: Bool, +i: Nat) -> String:
+  S.Stamp.text.loc(l, S.Stamps.of.w(es, s, at(3600n), running, S.Stamp.end.k(turn), waiting), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
+
+def st.e2(+l: I.Loc, +es: List<&2, M.Entry>, +s: M.State, +running: Bool, +turn: M.TurnState, +i: Nat) -> String:
+  S.Stamp.text.loc(l, S.Stamps.of.e(es, s, at(3600n), running, S.Stamp.end.k(turn)), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
 
 # a thread's entries as the hub posts them, for Stamp.stop.mark
 def posted(es: List<&2, M.Entry>) -> List<&2, M.Change>:
@@ -127,6 +134,17 @@ def main() -> IO(Unit):
     C.Check.str("an unmarked last turn the thread stopped says Stopped", st.of(es(), state(Nil{}), False{}, True{}, 6n), "Stopped 09:16 · 10s")
     C.Check.str("with no mark, the turns before it say Finished", st.of(es(), state(Nil{}), False{}, True{}, 3n), "Finished 09:07 · 7m 13s")
     C.Check.str("the turn still running says nothing yet", st.of(es3(), marked(), True{}, False{}, 6n), "09:02")
+    # a turn an error ended: its last reply says Failed, not Finished
+    C.Check.str("a failed last turn's reply says Failed", st.e(I.En{}, es(), state(Nil{}), False{}, M.Failed{}, False{}, 6n), "Failed 09:16 · 10s")
+    C.Check.str("in Japanese too", st.e(I.Ja{}, es(), state(Nil{}), False{}, M.Failed{}, False{}, 6n), "09:16に失敗 · 10秒")
+    C.Check.str("failed: the turns before it still say Finished", st.e(I.En{}, es(), state(Nil{}), False{}, M.Failed{}, False{}, 3n), "Finished 09:07 · 7m 13s")
+    C.Check.str("a failed turn stays Failed while work is out", st.e(I.En{}, es(), state(Nil{}), False{}, M.Failed{}, True{}, 6n), "Failed 09:16 · 10s")
+    C.Check.str("a retried turn running says nothing yet", st.e(I.En{}, es(), state(Nil{}), True{}, M.Failed{}, False{}, 6n), "09:16")
+    C.Check.str("a turn that failed before any reply stamps none", st.e(I.En{}, [u("u1", 0n), a("a1", 30n), u("u2", 60n)], state(Nil{}), False{}, M.Failed{}, False{}, 1n), "Finished 09:00 · 30s")
+    C.Check.str("a completed turn says Finished", st.e(I.En{}, es(), state(Nil{}), False{}, M.Completed{}, False{}, 6n), "Finished 09:16 · 10s")
+    C.Check.str("an interrupted turn says Stopped", st.e(I.En{}, es(), state(Nil{}), False{}, M.Interrupted{}, False{}, 6n), "Stopped 09:16 · 10s")
+    C.Check.str("the native window: Failed too", st.e2(I.En{}, es(), state(Nil{}), False{}, M.Failed{}, 6n), "Failed 09:16 · 10s")
+    C.Check.str("the native window: a stopped turn marked stays Stopped", st.e2(I.En{}, es3(), marked(), False{}, M.Completed{}, 1n), "Stopped 09:00 · 5s")
     C.Check.str("a Stop marks the message that started the turn", marks(S.Stamp.stop.mark(state(posted(es3())), "t", at(140n))), "stopped.u3=1 ")
     C.Check.str("a reply sent to another thread is not its message", marks(S.Stamp.stop.mark(state(posted([u("u1", 0n), a("a1", 5n), M.Msg{"x", "t2", M.User{}, "hi", at(6n)}])), "t", at(10n))), "stopped.u1=1 ")
     C.Check.str("a turn with no message of the person marks nothing", marks(S.Stamp.stop.mark(state(posted([a("a1", 5n)])), "t", at(10n))), "")

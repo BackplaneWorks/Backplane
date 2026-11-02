@@ -242,14 +242,28 @@ def Actor.history.pause(same: Bool, nf: Map<&2, String>, +thread: String) -> Map
     case True{}: nf
     case False{}: Map.set(&2, String, nf, "hist.play:" ++ thread, "")
 
+# The viewer open or shut is the page's (it sends its own "panel" with each
+# request), except right after the hub sent a view (Actor.view: an agent's
+# viewer_show, Auto.view): the next merge keeps the actor's once, the page
+# takes it from the reply's session, and the mark goes, so the person's own
+# toggles win again.
+def Actor.hub.view() -> String:
+  "local.hub.view"
+
+def Actor.merge.panel(hub: Bool, fresh: Bool, old: Bool) -> Bool:
+  match hub:
+    case True{}: old
+    case False{}: fresh
+
 def Actor.merge( +fresh: U.Ui, +old: U.Ui, +same: Bool, +thread: String, +present: Bool) -> U.Ui:
   match fresh old:
-    case U.Ui{st, +sel, clean, live, open, on, now, adding, panel, version, +rid2, want, _, _, nf2, _, _} U.Ui{_, +oldSel, dr, _, _, _, _, _, _, _, +rid, _, error, note, nf, outbox, stores}:
+    case U.Ui{st, +sel, clean, live, open, on, now, adding, panel, version, +rid2, want, _, _, nf2, _, _} U.Ui{_, +oldSel, dr, _, _, _, _, _, oldPanel, _, +rid, _, error, +note, +nf, outbox, stores}:
       # A correlated creation reply can select its new thread between renders.
       # The same view still requests its parent until nextTarget reaches it.
       # A different view or target remains an explicit navigation boundary.
-      U.Ui{st, Bool.pick(String, same, oldSel, sel), Actor.draft.merge(clean, Actor.scope.drafts(same, dr), thread, present), live, open, on, now, adding, panel, version,
-        M.Time.max(rid, rid2), want, error, note, Actor.prefs(Map.to_list(&2, String, nf2), Actor.info.current(Map.to_list(&2, String, Actor.history.pause(same, nf, oldSel)), Map.new(&2, String))), outbox, stores}
+      U.Ui{st, Bool.pick(String, same, oldSel, sel), Actor.draft.merge(clean, Actor.scope.drafts(same, dr), thread, present), live, open, on, now, adding,
+        Actor.merge.panel(String.eq(U.Str.get(nf, Actor.hub.view()), "1"), panel, oldPanel), version,
+        M.Time.max(rid, rid2), want, error, note, Map.del(&2, String, Actor.prefs(Map.to_list(&2, String, nf2), Actor.info.current(Map.to_list(&2, String, Actor.history.pause(same, nf, oldSel)), Map.new(&2, String))), Actor.hub.view()), outbox, stores}
 
 # At most one private region is retained. Canonical or UI input changes
 # invalidate its exact key; another view/target drops it before rehydration.
@@ -558,7 +572,8 @@ def Actor.lean(+info: J.Json) -> J.Json:
 # Intent…, a reference, Fab.sync after a move) has its answer applied when
 # the page has moved there; moving to any other view drops it.
 def Actor.owed.scope(+value: String) -> String:
-  Bool.pick(String, String.starts_with(value, "term-input:"), String.drop(value, 11n), value)
+  Bool.pick(String, String.starts_with(value, "term-input:"), String.drop(value, 11n),
+    Bool.pick(String, String.starts_with(value, "kicad-watch:"), String.drop(value, 12n), value))
 
 def Actor.owed.go( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +scope: String, +acc: Map<&2, String>) -> Map<&2, String>:
   match xs:
@@ -645,7 +660,8 @@ def Actor.pending_put( +send: Bool, +command: J.Json, +pending: Map<&2, String>,
   match send:
     case False{}: pending
     case True{}: Map.set(&2, String, pending, J.Json.as_raw(J.Json.get(Actor.rpc(command), "id"), ""),
-      Bool.pick(String, String.eq(J.Json.get_str(Actor.rpc(command), "m", ""), "term.input"), "term-input:" ++ scope, scope))
+      Bool.pick(String, String.eq(J.Json.get_str(Actor.rpc(command), "m", ""), "term.input"), "term-input:" ++ scope,
+        Bool.pick(String, String.eq(J.Json.get_str(Actor.rpc(command), "m", ""), "kicad.watch"), "kicad-watch:" ++ scope, scope)))
 
 def Actor.note( +cs: List<&2, J.Json>, +pending: Map<&2, String>, +scope: String) -> Map<&2, String>:
   match cs:
@@ -1026,6 +1042,19 @@ def Actor.terminal.ack(owned: Bool, quiet: Bool, +a: Actor, +web: Bool, +key: St
     case True{} True{}: Actor.accept(a, Actor.receive(web, Actor.ui(a), key, Actor.now(Actor.ui(a)), o), True{})
     case True{} False{}: Actor.reply_if(True{}, a, web, key, o)
 
+# A successful kicad.watch ACK (the viewer's watch, sent each time it moves:
+# a history step, another board) carries no display state either: no
+# result, no error, and none showing that its answer would clear. Marking
+# the view dirty for it sent view.changed and the page asked for the whole
+# view again, a second full render for every history step (half a second
+# on a real thread). The plot itself comes on its own.
+def Actor.watch.ack(watch: Bool, +u: U.Ui, +o: J.Json) -> Bool:
+  match watch:
+    case False{}: False{}
+    case True{}:
+      Bool.and(J.Json.get_bool(o, "ok", False{}), Bool.and(String.is_empty(J.Json.get_str(o, "error", "")),
+        Bool.and(Maybe.is_none(&2, J.Json, J.Json.get(o, "result")), String.is_empty(U.Tzs.er(u)))))
+
 def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
   match a:
     case Actor{+u, view, +target, +pending, reads, dirty, memo}:
@@ -1034,7 +1063,8 @@ def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
       # owed to this view, or to the one the last action moved to before
       # the page has opened it (Actor.accept)
       Actor.terminal.ack(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "reply"), Bool.or(String.eq(scope, Actor.scope(target)), String.eq(scope, Actor.scope(V.Target.after(u))))),
-        Bool.and(TO.Output.enabled(web, u, U.Ui.scratch(u, "@terminal.owner")), Bool.and(String.starts_with(U.Str.get(pending, id), "term-input:"), Bool.and(J.Json.get_bool(o, "ok", False{}), String.is_empty(J.Json.get_str(o, "error", ""))))),
+        Bool.or(Bool.and(TO.Output.enabled(web, u, U.Ui.scratch(u, "@terminal.owner")), Bool.and(String.starts_with(U.Str.get(pending, id), "term-input:"), Bool.and(J.Json.get_bool(o, "ok", False{}), String.is_empty(J.Json.get_str(o, "error", ""))))),
+          Actor.watch.ack(String.starts_with(U.Str.get(pending, id), "kicad-watch:"), u, o)),
         Actor{u, view, target, Map.del(&2, String, pending, id), reads, dirty, memo}, web, key, o)
 
 # A sent receipt is not a render cache: keep only its bounded value so a
@@ -1077,6 +1107,19 @@ def Actor.browser(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
 def Actor.voice(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
   Actor.reply_if(True{}, a, web, key, o)
 
+# A view the hub sends a thread's viewers (an agent's viewer_show, mcp.bend's
+# Mcp.view; the board an agent starting in a KiCad project opens, hub.bend's
+# Auto.view) goes into this connection's Ui as a legacy client takes it
+# (client.bend's Ui.view: the panel opens on it, an auto one only while
+# the person has not opened or shut it by hand). Without it a hub-drawn
+# page never followed either.
+def Actor.view.mark(a: Actor) -> Actor:
+  match a:
+    case Actor{u, view, target, pending, reads, dirty, memo}: Actor{U.Ui.info_set(u, Actor.hub.view(), "1"), view, target, pending, reads, dirty, memo}
+
+def Actor.view(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
+  Actor.view.mark(Actor.reply_if(True{}, a, web, key, o))
+
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
     case "term": Actor.terminal(a, web, key, o)
@@ -1085,6 +1128,7 @@ def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json
     case "sheets": Actor.sheets(a, o)
     case "shot": Actor.browser(a, web, key, o)
     case "voice": Actor.voice(a, web, key, o)
+    case "view": Actor.view(a, web, key, o)
     case _: a
 
 def Actor.message(a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:

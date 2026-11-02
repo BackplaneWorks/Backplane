@@ -396,17 +396,20 @@ def View.older.open(+lc: I.Loc, on: Bool, rs: List<&2, U.SRow>, +open: Map<&2, B
     case True{}:
       View.projects(lc, rs, True{}, open, ix, st, sel, now, look, rm)
     case False{}:
-      Nil{}
+      View.projects(lc, U.Side.older.sel(rs, U.Side.cur.of(st, sel)), True{}, open, ix, st, sel, now, look, rm)
 
 # the older projects (quiet for Quiet.days) folded under one row; a search
-# shows them in place
-def View.older.k(+lc: I.Loc, searching: Bool, +n: Nat, rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
+# shows them in place. Shut, it still shows the open thread's project, and
+# says so ("Older 7 · 1 shown": U.Side.older.sel, U.Shelf.words)
+def View.older.k(+lc: I.Loc, searching: Bool, +n: Nat, +rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
   match searching:
     case True{}:
       View.projects(lc, rs, True{}, open, ix, st, sel, now, look, rm)
     case False{}:
       WI.WIcon.button(Bool.pick(String, U.Flag.get(open, "old-projects"), "shelf older open", "shelf older"), "side-older", "", MSG.T.sidebar.quiet.note(lc),
-          Bool.pick(String, U.Flag.get(open, "old-projects"), "chevron-down", "chevron-right"), 14, MSG.T.sidebar.older(lc, Nat.show(n)))
+          Bool.pick(String, U.Flag.get(open, "old-projects"), "chevron-down", "chevron-right"), 14,
+          Bool.pick(String, U.Flag.get(open, "old-projects"), MSG.T.sidebar.older(lc, Nat.show(n)),
+            U.Shelf.words(lc, MSG.T.sidebar.older(lc, Nat.show(n)), List.length(&2, U.SRow, U.Side.older.sel(rs, U.Side.cur.of(st, sel))))))
         <> View.older.open(lc, U.Flag.get(open, "old-projects"), rs, open, ix, st, sel, now, look, rm)
 
 def View.older(+lc: I.Loc, rs: List<&2, U.SRow>, +searching: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
@@ -819,7 +822,7 @@ def View.sidebar.frame.rows(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain
     U.Side.pids(unfolded), View.sidebar.threads(u, plain, unfolded, raw)), View.strip(lc, U.Side.pids(unfolded), U.Ui.state(u), U.Side.cur(u)))
 
 def View.sidebar.frame.shown.raw(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
-  View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded.at(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u))), raw)
+  View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded.at(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u)), U.Side.cur(u)), raw)
 
 def View.sidebar.frame.project_page(node: D.Node, p: VP.Page) -> D.Node:
   match node:
@@ -1306,37 +1309,81 @@ def View.sub.empty.loc(lc: I.Loc) -> String:
     case I.En{}: "No steps reported yet."
     case I.Ja{}: "まだ手順が報告されていません。"
 
-def View.sub.detail.open(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, Bool.and(agent, Bool.and(open, Bool.and(Bool.not(String.starts_with(key, "subs.done:")), List.is_empty(&2, SB.SubStep, ss)))),
-    [D.Dom.span("sub-empty", View.sub.empty.loc(lc))], View.sub.steps(ss))
+# what it was asked (its prompt, as its Agent call gave it), open only
+def View.sub.ask.loc(lc: I.Loc) -> String:
+  match lc:
+    case I.En{}: "Asked"
+    case I.Ja{}: "依頼"
 
-def View.sub.detail(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>) -> List<&2, D.Node>:
-  match open:
+def View.sub.ask(+lc: I.Loc, +ask: String) -> List<&2, D.Node>:
+  D.Dom.when(Bool.not(String.is_empty(ask)), D.El{"div", "", [D.At{"class", "sub-ask"}], [D.Dom.span("label", View.sub.ask.loc(lc)), D.Dom.span("text", ask)]})
+
+def View.sub.detail.open(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>, +ask: String) -> List<&2, D.Node>:
+  D.Dom.cat(View.sub.ask(lc, ask), Bool.pick(List<&2, D.Node>, Bool.and(agent, Bool.and(open, Bool.and(Bool.not(String.starts_with(key, "subs.done:")), List.is_empty(&2, SB.SubStep, ss)))),
+    [D.Dom.span("sub-empty", View.sub.empty.loc(lc))], View.sub.steps(ss)))
+
+# what a subagent of the agent's own shows open, drawn shut too, hidden
+# (style.css's .sub:not(.open) > .sub-detail), so a click on its row shows
+# it at once (subs-feedback.js, presentation.bend's Node.rows); its steps
+# from the walk (SB.SubInfo's shown) when the row has none, shut
+def View.sub.detail(+lc: I.Loc, +agent: Bool, +open: Bool, +key: String, +ss: List<&2, SB.SubStep>, +ask: String) -> List<&2, D.Node>:
+  match agent:
     case False{}: Nil{}
-    case True{}: View.sub.detail.open(lc, agent, open, key, ss)
+    case True{}: [D.El{"div", "", [D.At{"class", "sub-detail"}], View.sub.detail.open(lc, agent, True{}, key, ss, ask)}]
 
-def View.sub.signal.k(+lc: I.Loc, r: SB.SubRow, +act: String, +signal: String) -> D.Node:
-  match r:
-    case SB.SubRow{+key, +agent, +title, +who, +word, +doing, +live, +open, _, ss}:
-      D.El{"div", key, [D.At{"class", "sub sub-signal-" ++ signal ++ " " ++ word ++ Bool.pick(String, String.eq(signal, "active"), " live", "")}],
+# the line under a row's name: where it runs, its model, how many steps it
+# took and what it used (subs.bend's SubInfo; a part not known is left out)
+def View.sub.meta.go(ps: List<&2, String>) -> List<&2, D.Node>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t: List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(p)), D.Dom.span("part", p)), View.sub.meta.go(t))
+
+def View.sub.meta(+ps: List<&2, String>) -> List<&2, D.Node>:
+  D.Dom.when(Bool.not(List.is_empty(&2, D.Node, View.sub.meta.go(ps))), D.El{"div", "", [D.At{"class", "sub-meta"}], View.sub.meta.go(ps)})
+
+# what it does now (at work: Claude's word for it), or what it reported
+def View.sub.now(+live: Bool, +doing: String, +title: String, +outcome: String) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, Bool.and(Bool.not(String.is_empty(doing)), Bool.not(String.eq(doing, title))), [D.Dom.span("doing", doing)],
+    D.Dom.when(Bool.and(Bool.not(live), Bool.not(String.is_empty(outcome))), D.Dom.span("sub-outcome", outcome)))
+
+# its newest step, shown while its steps are not (style.css's .sub.open > .sub-last)
+def View.sub.last(s: SB.SubStep) -> List<&2, D.Node>:
+  match s:
+    case SB.SubStep{+kind, +text}:
+      D.Dom.when(Bool.not(String.is_empty(text)), D.El{"div", "", [D.At{"class", "sub-step sub-last"}], [D.Dom.span("kind", SB.Subs.step.label(kind)), D.Dom.span("text", text)]})
+
+# "running · 3m", "done · 4m": its state, and how long it has been at work
+# or took
+def View.sub.state(+lc: I.Loc, +word: String, +took: String) -> String:
+  U.StateWord.label(lc, word) ++ Bool.pick(String, String.is_empty(took), "", " · " ++ took)
+
+def View.sub.signal.k(+lc: I.Loc, r: SB.SubRow, +act: String, +signal: String, i: SB.SubInfo, +now: Nat) -> D.Node:
+  match r i:
+    case SB.SubRow{+key, +agent, +title, +who, +word, +doing, +live, +open, _, +ss} SB.SubInfo{+runs, +model, +since, +until, +steps, +tokens, last, +ask, +outcome, +shown}:
+      D.El{"div", key, [D.At{"class", "sub sub-signal-" ++ signal ++ " " ++ word ++ Bool.pick(String, String.eq(signal, "active"), " live", "") ++ Bool.pick(String, open, " open", "")}],
         D.Dom.cat([D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", "sub-row"}, D.At{"type", "button"}], View.sub.act(agent, open, key)),
-          [View.dot(lc, signal), D.Dom.span("who", Bool.pick(String, agent, Bool.pick(String, open, "▾", "▸"), who)), D.Dom.span("title", TTL.Title.shown(lc, title)), D.Dom.span("state", U.StateWord.label(lc, word))]}],
-          D.Dom.cat(View.sub.stop.loc(lc, act, key), D.Dom.cat(D.Dom.when(Bool.not(String.is_empty(doing)), D.Dom.span("doing", doing)), View.sub.detail(lc, agent, open, key, ss))))}
+          [View.dot(lc, signal), D.Dom.span(Bool.pick(String, agent, "who chev", "who"), Bool.pick(String, agent, "▸", "↗")), D.Dom.span("title", TTL.Title.shown(lc, title)), D.Dom.span("state", View.sub.state(lc, word, SB.Subs.took(live, since, until, now)))]}],
+          D.Dom.cat(View.sub.stop.loc(lc, act, key), D.Dom.cat(View.sub.meta([SB.Subs.or(runs, who), model, SB.Subs.steps.word(steps), SB.Subs.tokens(tokens)]),
+            D.Dom.cat(View.sub.now(live, doing, title, outcome), D.Dom.cat(View.sub.last(last), View.sub.detail(lc, agent, open, key, Bool.pick(List<&2, SB.SubStep>, List.is_empty(&2, SB.SubStep, ss), shown, ss), ask))))))}
 
 def View.sub.k(+lc: I.Loc, +r: SB.SubRow, +act: String) -> D.Node:
-  View.sub.signal.k(lc, r, act, SB.Subs.signal(r))
+  View.sub.signal.k(lc, r, act, SB.Subs.signal(r), SB.SubInfo.none(), 0n)
 
-def View.sub.signals(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>) -> D.Node:
-  View.sub.signal.k(lc, r, SB.Subs.cancel(r), SB.Subs.signal.of(info, r))
+def View.sub.signals(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
+  View.sub.signal.k(lc, r, SB.Subs.cancel(r), SB.Subs.signal.of(info, r), SB.Subs.info(st, th, r), now)
 
-def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
+def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
-    case r <> rest: View.sub.signals(lc, r, info) <> View.subs.signals.raw(lc, rest, info)
+    case r <> rest: View.sub.signals(lc, r, info, st, th, now) <> View.subs.signals.raw(lc, rest, info, st, th, now)
+
+# the rows a page shows, each with more about it (SB.Subs.info: only these)
+def View.subs.signals.at(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> List<&2, D.Node>:
+  +p = VP.Page.info(info, "subagents", SB.Subs.row_keys(rs), "")
+  List.append(&2, D.Node, View.subs.signals.raw(lc, LW.Lists.subs(rs, VP.Page.ids(p)), info, st, th, now), LW.Lists.pager(p))
 
 def View.subs.signals.go(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
-  +p = VP.Page.info(info, "subagents", SB.Subs.row_keys(rs), "")
-  List.append(&2, D.Node, View.subs.signals.raw(lc, LW.Lists.subs(rs, VP.Page.ids(p)), info), LW.Lists.pager(p))
+  View.subs.signals.at(lc, rs, info, M.State.empty(), "", 0n)
 
 def View.sub(+lc: I.Loc, +r: SB.SubRow) -> D.Node:
   View.sub.k(lc, r, SB.Subs.cancel(r))
@@ -1368,16 +1415,26 @@ def View.subs.k(+lc: I.Loc, +busy: String, +open: Bool, +th: String, +rs: List<&
   D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs" ++ Bool.pick(String, String.is_empty(busy), "", " busy") ++ Bool.pick(String, open, "", " shut")}],
     [View.subs.head(lc, open, th, rs, View.sub.panel(lc, rs)), View.subs.body(open, View.subs.go(lc, rs))]}
 
-def View.sub.signal.panel(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> String:
-  MSG.T.subagents.panel(lc, View.sub.count(SB.Subs.waiting(rs)), View.sub.count(SB.Subs.active(rs, info)), Nat.show(SB.Subs.finished_n(rs)))
+# the rows that finished and are reporting to the agent (SB.Subs.reporting):
+# not at work, so the cell counts them done rather than say "0 done"
+def View.sub.reporting(rs: List<&2, SB.SubRow>) -> Nat:
+  match rs:
+    case Nil{}: 0n
+    case +r <> t: Nat.add(Bool.pick(Nat, String.eq(SB.Subs.word(r), "reporting"), 1n, 0n), View.sub.reporting(t))
 
-def View.subs.signal.k(+lc: I.Loc, +busy: String, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:
+def View.sub.signal.panel(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> String:
+  MSG.T.subagents.panel(lc, View.sub.count(SB.Subs.waiting(rs)), View.sub.count(SB.Subs.active(rs, info)), Nat.show(Nat.add(SB.Subs.finished_n(rs), View.sub.reporting(rs))))
+
+def View.subs.signal.k(+lc: I.Loc, +busy: String, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +now: Nat) -> D.Node:
   D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs" ++ Bool.pick(String, String.is_empty(busy), "", " busy") ++ Bool.pick(String, open, "", " shut")}],
-    [View.subs.head(lc, open, th, rs, View.sub.signal.panel(lc, rs, info)), View.subs.body(open, View.subs.signals.go(lc, rs, info))]}
+    [View.subs.head(lc, open, th, rs, View.sub.signal.panel(lc, rs, info)), View.subs.body(open, View.subs.signals.at(lc, rs, info, st, th, now))]}
+
+def View.subs.at(+lc: I.Loc, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>, +st: M.State, +now: Nat) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, List.is_empty(&2, SB.SubRow, rs), Nil{},
+    [View.subs.signal.k(lc, View.sub.busy(lc, SB.Subs.active(rs, info)), SB.Subs.panel.open(info, th, rs), th, rs, info, st, now)])
 
 def View.subs(+lc: I.Loc, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, List.is_empty(&2, SB.SubRow, rs), Nil{},
-    [View.subs.signal.k(lc, View.sub.busy(lc, SB.Subs.active(rs, info)), SB.Subs.panel.open(info, th, rs), th, rs, info)])
+  View.subs.at(lc, info, th, rs, M.State.empty(), 0n)
 
 def View.subthreads.if(show: Bool, id: String) -> List<&2, D.Node>:
   match show:
@@ -2815,7 +2872,7 @@ def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st
 # a thread's entries, its runs of tool calls folded (the last stays open
 # while its turn runs)
 def View.entries.folded(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +running: Bool, +ec: U.Ec) -> List<&2, D.Node>:
-  View.entries.r(lc, es, FO.Fold.roles.ctx(lc, View.around(st, sel, es), es, info, running), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
+  View.entries.r(lc, es, FO.Fold.roles.ctx(lc, View.around(st, sel, es), es, info, running), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.end(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
 
 # blank messages left out, and a run cut by the page's edge folded whole
 # (FO.Fold.roles.ctx)
@@ -3461,21 +3518,24 @@ def View.hold.pill(+label: String) -> List<&2, D.Node>:
 
 # The Uberbot's conversation stays a conversation. Its operational overview
 # remains available in Status; ordinary thread subagent panels are unchanged.
-def View.thread.subs(+lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, now: Nat) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, US.Ub.chat.is(st, id), Nil{}, View.subs(lc, nf, id, SB.Subs.rows(st, nf, id, now)))
+def View.thread.subs(+lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, +now: Nat) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, US.Ub.chat.is(st, id), Nil{}, View.subs.at(lc, nf, id, SB.Subs.rows(st, nf, id, now), st, now))
 
 # Under the top bar its Subagents cell is the dock's head: the dock is only
 # its rows, shown while that cell has them open and drawn hidden while shut
 # (so the page shows them at the click: View.subs.head)
-def View.subs.dock.k(some: Bool, +open: Bool, +lc: I.Loc, +info: Map<&2, String>, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
+def View.subs.dock.k(some: Bool, +open: Bool, +lc: I.Loc, +info: Map<&2, String>, +rs: List<&2, SB.SubRow>, +st: M.State, +th: String, +now: Nat) -> List<&2, D.Node>:
   match some:
     case True{}:
-      [D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs dock" ++ Bool.pick(String, open, "", " shut")}], [View.subs.body(open, View.subs.signals.go(lc, rs, info))]}]
+      [D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs dock" ++ Bool.pick(String, open, "", " shut")}], [View.subs.body(open, View.subs.signals.at(lc, rs, info, st, th, now))]}]
     case False{}:
       Nil{}
 
+def View.subs.dock.at(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>, +now: Nat) -> List<&2, D.Node>:
+  View.subs.dock.k(Bool.and(Bool.not(List.is_empty(&2, SB.SubRow, rs)), Bool.not(US.Ub.chat.is(st, th))), SB.Subs.panel.open(info, th, rs), lc, info, rs, st, th, now)
+
 def View.subs.dock(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
-  View.subs.dock.k(Bool.and(Bool.not(List.is_empty(&2, SB.SubRow, rs)), Bool.not(US.Ub.chat.is(st, th))), SB.Subs.panel.open(info, th, rs), lc, info, rs)
+  View.subs.dock.at(lc, st, info, th, rs, 0n)
 
 def View.tab(+cur: String, +kind: String, +action: String, +value: String, +title: String, +label: String) -> D.Node:
   D.El{"button", "", [D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")}, D.At{"type", "button"},
@@ -3671,9 +3731,9 @@ def View.thread.workbar.own(own: Bool, +lc: I.Loc, summary: Bool, +st: M.State, 
     case True{}: Nil{}
     case False{}: View.thread.workbar(lc, summary, st, info, id, turn, pending, running)
 
-def View.thread.subs.own(own: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, now: Nat) -> List<&2, D.Node>:
+def View.thread.subs.own(own: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, +now: Nat) -> List<&2, D.Node>:
   match own:
-    case True{}: View.subs.dock(lc, st, nf, id, SB.Subs.rows(st, nf, id, now))
+    case True{}: View.subs.dock.at(lc, st, nf, id, SB.Subs.rows(st, nf, id, now), now)
     case False{}: View.thread.subs(lc, st, nf, id, now)
 
 def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +content: List<&2, D.Node>) -> D.Node:
@@ -5110,8 +5170,25 @@ def View.chrome.todos.if(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +st: M.
 def View.chrome.todos(+lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
   View.chrome.todos.if(List.is_empty(&2, TD.Todo, ts), lc, info, st, th, ts)
 
-def View.chrome.changes(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
-  D.Dom.when(Nat.is_gt(n, 0n), View.chrome.kv("changes", View.chrome.changes.tip(lc), View.chrome.changes.k(lc), [D.Dom.span("v", Nat.show(n))]))
+def View.chrome.changes.pcb(e: M.Entry) -> Bool:
+  match e:
+    case M.Act{_, _, _, _, +summary, _}: String.contains(summary, ".kicad_pcb")
+    case M.Msg{_, _, _, _, _}: False{}
+
+# whether any of the thread's steps changed a board
+def View.chrome.changes.board(es: List<&2, M.Entry>) -> Bool:
+  match es:
+    case Nil{}: False{}
+    case +e <> t: Bool.or(View.chrome.changes.pcb(e), View.chrome.changes.board(t))
+
+# the design changes: a click opens the viewer on their history (the
+# board's, or the schematic's for a thread that changed no board), whose
+# bar says how many of these are that kind's (client.bend's Hs.live.words)
+def View.chrome.changes(+lc: I.Loc, +es: List<&2, M.Entry>) -> List<&2, D.Node>:
+  +n = HS.Hist.changes(es)
+  D.Dom.when(Nat.is_gt(n, 0n), D.El{"button", "changes", [D.At{"class", "kv changes"}, D.At{"type", "button"}, D.At{"title", View.chrome.changes.tip(lc)},
+    D.At{"data-value", Bool.pick(String, View.chrome.changes.board(es), "board", "schematic")}, D.On{"click", "view-kind"}],
+    [D.Dom.span("k", View.chrome.changes.k(lc)), D.Dom.span("v", Nat.show(n))]})
 
 def View.chrome.branch(+b: String) -> List<&2, D.Node>:
   D.Dom.when(Bool.not(String.is_empty(b)), D.El{"span", "", [D.At{"class", "kv branch"}, D.At{"title", b}], [WI.WIcon.svg("git-branch", 12), D.Dom.span("v", b)]})
@@ -5129,7 +5206,7 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
         [View.chrome.state(lc, st, nf, id, turn, pending)],
         View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
         View.chrome.todos(lc, nf, st, id, U.Todos.shown(st, id, View.running(turn))),
-        View.chrome.changes(lc, HS.Hist.changes(M.State.steps(st, id))),
+        View.chrome.changes(lc, M.State.steps(st, id)),
         View.chrome.branch(branch),
         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])
 

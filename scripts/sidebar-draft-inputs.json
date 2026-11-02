@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "c3efad258366d791103ab595bde852729acef2b9dfe38486e19510d3ee7b1565",
+    "src/core/client.bend": "5ab997e47daf3bc8832495c3c4f23decc29bf05ded096fcd86c7487a2a71f0b9",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -54,7 +54,7 @@
     "src/core/farlive.bend": "0fec3c222121256751cf620ad82248a178a7f54581c4f20570fdce2fa0b2e25c",
     "src/core/farsnap.bend": "a83e2e4f17577be64e737c32613e5cf2a77364c8849f5b7d0430edd0bde38257",
     "src/core/fm.bend": "34e5a2496e5f10c731ced619c797d06841fcc41a289070bbbedaf185d1237325",
-    "src/core/fold.bend": "69be3630233b894c69ef52c28e5da53c23ae528be963dec43d81dbc16dd1ed98",
+    "src/core/fold.bend": "ed6d3b880d90d6d50d5f70e73620097ace6c2e5101288041cd8c9bbb5ebfb851",
     "src/core/fuzzy.bend": "3ded93b1ce5272c7cc0c071d3609bb4fa0fe45963e3c04f431a52af0ff31d707",
     "src/core/fview.bend": "c2310b5b1be82f3b0dbddfb72e29e4ed66ce0bc2df933c9824275f0c0500d3ed",
     "src/core/glb.bend": "f2eb124f9c0967d8c03c0a96c3a7120aab3c024cb8af60af6e4263d70bb8fe75",
@@ -85,9 +85,9 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "7a23d39dd737b3cf8f7cfdb062e2d38b43aec4e38416aff2bd0d375ae2500ea4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "563db6e1ca6648dea31e8c3e4db20e8b8f2d2795272c36c1932ed6b2e78a87f1",
+    "src/core/model.bend": "5d914d165c23c46b1549e453dc0dbae170b99341b4da0b6f7b49a26764d0e6bd",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "c079f6a4fb3d6a5d1d368cb4656f13d7b68c2a49f538f14126b46935499dab77",
+    "src/core/msgs.bend": "c900c89d26a77210d01c43d83f40d3b67a17b5e1145a9a8aec798ee6e80997da",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "3da1d256efc3f426cfa4d49af80414e09e960aeb026ce01cf858e90f0e834394",
@@ -104,7 +104,7 @@
     "src/core/ref.bend": "fa2dd3c0a4e9865ac9b185680361c681ce187f625a315e560f3a289e651e90f7",
     "src/core/refs.bend": "5962df838d787b23cf253082282efe70064b1b580012661b9b1f5f6d07c5ce5f",
     "src/core/refview.bend": "aad18d93039af1c4b83cd245200c051192609bf1a3a7dc261d2b2f4c1dbf97c0",
-    "src/core/release.bend": "682768765cbc4c0ff436a54e69ef37926c25c6b68adcfbb5eb25e992ec648b29",
+    "src/core/release.bend": "0959468fb4ae02796c74eb78d97219ba21c5b74de28ec406d17621f4f6f64826",
     "src/core/reply.bend": "9e6f30962b274fa5595f4902f5ecd8f308275bea72ac4d558221bcd4b01ece0f",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
     "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
@@ -122,11 +122,11 @@
     "src/core/signal.bend": "f8c4c9d95ea321e42676af8fb4ac159bcf15f88a9b2c51ed25a379c3d28a1e34",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
-    "src/core/stamp.bend": "b30542d995b56b824a6150985af5fd37d69c4787db87638cb0ce07cb81e1f0f8",
+    "src/core/stamp.bend": "65ab4ed3f26f023be1e76e47f4eec7e48a82eefc509b2f5366085ff1df4f140b",
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
-    "src/core/subs.bend": "3a28494159e499f90f821d560c2013b08b82e6b4f9d931faa3b089d5615d38d9",
+    "src/core/subs.bend": "035dcf68652cb412b72594b163380b0be6d72e51184939094a9f6bc848b3667a",
     "src/core/subthreads.bend": "48b0d1c078222b3ba94d9a95c7e59edd9c49705a39a89b6de33ae96ecf398fb0",
     "src/core/svg.bend": "dc334fd62bc35e0fa3c9cdac414ee563a31f99a3fd538810d42d35c148c30c14",
     "src/core/task.bend": "8280585ed265c028ae6fa6bc72be4b56e527e4f162262e1a4a61401d693457b2",
@@ -156,8 +156,8 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
-    "src/mobile/screen.bend": "77741d401533f28ba8e418acd18fcbf427b6756178cd0ab711f568a00171c2ff",
-    "src/server/thin-actor.bend": "75619b1fe5921a07d55c229fd08c4c77f61958fc5cd39e46b13bd929dd8a0702",
+    "src/mobile/screen.bend": "73e4192556575fbe562310bc3fc6a07622ec403838b89aa6f8255e1cf75738e5",
+    "src/server/thin-actor.bend": "ea84db3e1a8609e1455f9efb33cdbcc638bcb46570b03293b5589a7be2f687e7",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
@@ -180,7 +180,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "16219748d46a4a18ef5823b2465faf13b91828c2587acfdf80c8907e2953e084"
+    "src/web/view.bend": "ae6c416d7a4944128ce7de2e4cee6ba98c1908fefbe8bba96a258b9b00c9600f"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -499,5 +499,19 @@
       "test/i18n_test.bend",
       "test/telemetry_ui_test.bend"
     ]
+  },
+  "telemetryMain20fReview": {
+    "baseCommit": "20f7317139c6973cd8f1f346b91ac5231a723f7a",
+    "previousQualifiedHead": "1970153212a206ff59880e2bd82ef0703d5f064c",
+    "changedMergedHashes": {
+      "src/core/client.bend": "5ab997e47daf3bc8832495c3c4f23decc29bf05ded096fcd86c7487a2a71f0b9",
+      "src/core/fold.bend": "ed6d3b880d90d6d50d5f70e73620097ace6c2e5101288041cd8c9bbb5ebfb851",
+      "src/core/model.bend": "5d914d165c23c46b1549e453dc0dbae170b99341b4da0b6f7b49a26764d0e6bd",
+      "src/core/msgs.bend": "c900c89d26a77210d01c43d83f40d3b67a17b5e1145a9a8aec798ee6e80997da"
+    },
+    "scope": "Normal merge preserves every new main feature and original telemetry reviews. Client older shelf retains selected project using already-keyed selection; review request scratch keys are retained by existing unknown-field policy; provider setup default reads existing model metadata. New subagent projections use existing full info inputs. Fold error fallback preserves compatibility wrappers. Model subagent token-line helpers do not alter private Ext usage storage. Catalog Retry duplicates had identical values; source catalogs deduplicated and generated msgs rebuilt, preserving incoming status/history labels. No changes to draft readers, scanner, key filtering, bridge authority or fallback policy.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "focusedSuites": 20,
+    "existingLaws": "unchanged"
   }
 }

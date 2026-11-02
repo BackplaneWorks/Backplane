@@ -2503,20 +2503,30 @@ def Side.visible.go(rs: List<&2, SRow>, +open: Map<&2, Bool>) -> List<&2, String
       List.concat(&2, String, [Side.ids(p), Side.ids(a), Side.ids(sn), Side.when(Flag.get(open, id), Side.ids(st)),
         Side.when(Flag.get(open, "arch:" ++ id), Side.ids(M.Archive.of(h))), Side.visible.go(t, open)])
 
+# the older projects a shut Older shelf still shows: the open thread's
+# (pid: its project, "" for none), so the thread open is never folded out
+# of sight (as a shut Settled shelf keeps its row: Side.sel, Shelf.words)
+def Side.older.sel(rs: List<&2, SRow>, +pid: String) -> List<&2, SRow>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      Find.keep(Bool.and(Bool.not(String.is_empty(pid)), String.eq(SRow.pid(r), pid)), r, Side.older.sel(t, pid))
+
 # the projects shown with the Older shelf folded unless it is open or a
-# search is on
-def Side.fold.k(show: Bool, g: SGroups) -> List<&2, SRow>:
+# search is on (folded, it keeps the open thread's project: Side.older.sel)
+def Side.fold.k(show: Bool, g: SGroups, +pid: String) -> List<&2, SRow>:
   match show g:
     case True{} x:
       SGroups.all(x)
-    case False{} SGroups{l, q, _}:
-      List.append(&2, SRow, l, q)
+    case False{} SGroups{l, q, o}:
+      List.append(&2, SRow, l, List.append(&2, SRow, q, Side.older.sel(o, pid)))
 
-def Side.unfolded(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat) -> List<&2, SRow>:
-  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups(rs, now))
+def Side.unfolded(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat, +pid: String) -> List<&2, SRow>:
+  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups(rs, now), pid)
 
-def Side.unfolded.at(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat, +cur: String) -> List<&2, SRow>:
-  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups.at(rs, now, cur))
+def Side.unfolded.at(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat, +cur: String, +pid: String) -> List<&2, SRow>:
+  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups.at(rs, now, cur), pid)
 
 def Side.tree_ids(+st: M.State, ts: List<&2, M.Thread>, +sel: String) -> List<&2, String>:
   ST.Tree.row_ids(ST.Tree.rows(st, ts, sel))
@@ -2533,7 +2543,7 @@ def Side.visible.tree(rs: List<&2, SRow>, +open: Map<&2, Bool>, +st: M.State, +s
 def Side.visible.projects(u: Ui) -> List<&2, String>:
   match u:
     case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.visible.tree(Side.unfolded(Side.shown(st, now, Find.q(op, dr)), op, Find.q(op, dr), now), op, st, sel)
+      Side.visible.tree(Side.unfolded(Side.shown(st, now, Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.of(st, sel)), op, st, sel)
 
 def Side.nth(xs: List<&2, String>, i: Nat) -> String:
   match xs i:
@@ -2614,7 +2624,7 @@ def Side.pids(rs: List<&2, SRow>) -> List<&2, String>:
 def Side.projects(u: Ui) -> List<&2, String>:
   match u:
     case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.pids(Side.unfolded.at(Find.rows(Side.rows.at(st, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now)))
+      Side.pids(Side.unfolded.at(Find.rows(Side.rows.at(st, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now), Side.cur.of(st, sel)))
 
 def Side.only.k(keep: Bool, r: SRow, rest: List<&2, SRow>) -> List<&2, SRow>:
   match keep:
@@ -10160,11 +10170,17 @@ def Rp.bom.title.l(+l: I.Loc, +u: Ui) -> String:
 def Rp.bom.title(+u: Ui) -> String:
   Rp.bom.title.l(Lang.loc(u), u)
 
+# the page a review request asks for, kept by its id ("@rp.req:<id>":
+# "<thread>:<page>"): a request that fails has no report to end the page's
+# reading (Rp.store), which then said "Reading the design..." for ever
+def Rp.mark(+u: Ui, +page: String) -> Ui:
+  Ui.scratch_set(u, "@rp.req:" ++ Nat.show(Ui.rid(u)), Ui.sel(u) ++ ":" ++ page)
+
 def Rp.bom.root(+u: Ui) -> String:
   Bd.tree(u, Bd.context(u))
 
 def Rp.ask.bom(+u: Ui) -> Act:
-  Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "bom"), Rp.key(u, "rp.title", "bom"), Rp.bom.title(u)), "review.bom",
+  Ui.rpc(Rp.mark(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "bom"), Rp.key(u, "rp.title", "bom"), Rp.bom.title(u)), "bom"), "review.bom",
     [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"a", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.a"), "")}}, J.KV{"b", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.b"), Rp.bom.root(u))}}])
 
 # the design checks run on the working copy, or on the new side of a
@@ -10179,7 +10195,7 @@ def Rp.checks.title(+u: Ui) -> String:
   Rp.checks.title.l(Lang.loc(u), u)
 
 def Rp.ask.checks(+u: Ui) -> Act:
-  Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "checks"), Rp.key(u, "rp.title", "checks"), Rp.checks.title(u)), "review.checks",
+  Ui.rpc(Rp.mark(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "checks"), Rp.key(u, "rp.title", "checks"), Rp.checks.title(u)), "checks"), "review.checks",
     [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"commit", J.Str{Rp.commit(u)}}, J.KV{"trigger", J.Str{"manual"}}])
 
 # The Release page: a tag (the field "@f.rltag", else the next one after
@@ -10219,8 +10235,10 @@ def Rl.form(+u: Ui) -> RlForm:
 def Rl.flip(+u: Ui, +k: String) -> Ui:
   Ui.scratch_set(u, k ++ ":" ++ Ui.sel(u), Bool.pick(String, Rl.on(u, k), "", "1"))
 
+# (releasing although the checks fail is for this release only: the tick
+# goes once it is asked, so the next release is gated again)
 def Rl.ask(+u: Ui) -> Act:
-  Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "release"), Rp.key(u, "rp.err", "release"), ""), "review.release",
+  Ui.rpc(Rp.mark(Ui.scratch_set(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "release"), Rp.key(u, "rp.err", "release"), ""), "@rl.force:" ++ Ui.sel(u), ""), "release"), "review.release",
     [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"tag", J.Str{Rl.tag(u)}}, J.KV{"publish", J.Flag{Rl.on(u, "@rl.pub")}}, J.KV{"force", J.Flag{Rl.on(u, "@rl.force")}}])
 
 # opening the page asks for the tags once (the next one is proposed)
@@ -10283,8 +10301,20 @@ def Rp.reply.k(has: Bool, u: Ui, +o: J.Json) -> Ui:
     case False{}:
       u
 
-def Rp.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
-  Rp.ticked.k(Rp.ticked.has(o), Rp.reply.k(has, u, o), o)
+# a review request that failed: its page stops reading and says why
+def Rp.failed.on(failed: Bool, +key: String, u: Ui, +o: J.Json) -> Ui:
+  match failed:
+    case False{}: u
+    case True{}:
+      Ui.scratch_set(Ui.info_set(u, "rp.err:" ++ key, Ui.reply.err.std(o)), "@rp.busy:" ++ HI.Hist.at(String.split(key, ':'), 0n), "")
+
+def Rp.failed(+id: String, +key: String, u: Ui, +o: J.Json) -> Ui:
+  Rp.failed.on(Bool.and(Bool.not(String.is_empty(key)), Bool.not(J.Json.get_bool(o, "ok", True{}))), key, Ui.scratch_set(u, "@rp.req:" ++ id, ""), o)
+
+def Rp.reply(has: Bool, +u: Ui, +o: J.Json) -> Ui:
+  +id = J.Json.as_raw(J.Json.get(o, "id"), "")
+  +key = Ui.scratch(u, "@rp.req:" ++ id)
+  Rp.failed(id, key, Rp.ticked.k(Rp.ticked.has(o), Rp.reply.k(has, u, o), o), o)
 
 # The checks page: why the gate fails ("" it passes), the one-line summary,
 # and the checklist's boxes (each ticked with "rv-tick" and its index)
@@ -10443,14 +10473,21 @@ def Hs.bar.pos(+l: I.Loc, first: Bool, +at: Nat, +n: Nat) -> String:
     case True{}: MSG.T.history.position.first(l, Nat.show(at), Nat.show(n))
     case False{}: MSG.T.history.position(l, Nat.show(at), Nat.show(n))
 
-def Hs.bar.k(+l: I.Loc, m: Maybe<&2, HI.Step>, +u: Ui, +n: Nat, +at: Nat, +es: List<&2, M.Entry>, +c: Nat) -> HBar:
+# the live bar's words: its track's changes, and the thread's all when
+# those are more (the top bar's Design changes counts the board's and the
+# schematic's together: "Live · 98 of 181 changes")
+def Hs.live.words(+l: I.Loc, +c: Nat, +all: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(c, 0n), MSG.T.history.live(l),
+    Bool.pick(String, Nat.is_lt(c, all), MSG.T.history.live.steps.of(l, Nat.show(c), Nat.show(all)), MSG.T.history.live.steps(l, Nat.show(c), Bool.pick(String, Nat.is_eq(c, 1n), "one", "other"))))
+
+def Hs.bar.k(+l: I.Loc, m: Maybe<&2, HI.Step>, +u: Ui, +n: Nat, +at: Nat, +es: List<&2, M.Entry>, +c: Nat, +all: Nat) -> HBar:
   match m:
     case Some{+s}:
       HBar{True{}, n, at, Hs.bar.pos(l, HI.Step.first(s), at, n),
         HI.Hist.anchor(es, s), HI.Hist.label(es, HI.Hist.anchor(es, s)), Hs.detail(l, u, s, es),
         Hs.playing(u), Hs.diff(u), False{}, "", "", Ui.scratch(u, "@cmp.menu")}
     case None{}:
-      HBar{True{}, n, 0n, Bool.pick(String, Hs.cmp(u), MSG.T.history.comparing(l), Bool.pick(String, Nat.is_eq(c, 0n), MSG.T.history.live(l), MSG.T.history.live.steps(l, Nat.show(c), Bool.pick(String, Nat.is_eq(c, 1n), "one", "other")))),
+      HBar{True{}, n, 0n, Bool.pick(String, Hs.cmp(u), MSG.T.history.comparing(l), Hs.live.words(l, c, all)),
         "", "", "", Hs.playing(u), False{}, Hs.cmp(u), Hs.label.shown(l, Hs.get(u, "cmp.al")), Hs.label.shown(l, Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl"))), Ui.scratch(u, "@cmp.menu")}
 
 def HBar.on(b: HBar) -> Bool:
@@ -10475,7 +10512,7 @@ def Hs.fade() -> Nat:
 
 # (the track made once: each Hs.track parses every step's record)
 def Hs.bar.t(+l: I.Loc, +tr: List<&2, HI.Step>, +u: Ui) -> HBar:
-  Hs.bar.k(l, HI.Hist.nth(tr, Hs.at(u, tr)), u, Hs.n(tr), Hs.at(u, tr), Hs.entries(u), HI.Hist.track.changes(tr, M.State.steps(Ui.state(u), Ui.sel(u))))
+  Hs.bar.k(l, HI.Hist.nth(tr, Hs.at(u, tr)), u, Hs.n(tr), Hs.at(u, tr), Hs.entries(u), HI.Hist.track.changes(tr, M.State.steps(Ui.state(u), Ui.sel(u))), HI.Hist.changes(M.State.steps(Ui.state(u), Ui.sel(u))))
 
 def Hs.bar.on(+l: I.Loc, on: Bool, +u: Ui) -> HBar:
   match on:
@@ -12988,12 +13025,34 @@ def Tour.back.k(has: Bool, +u: Ui) -> Act:
 def Psv.active(+u: Ui) -> Bool:
   Ui.flag(u, "provider-setup")
 
-def Psv.provider(+u: Ui) -> String:
-  +p = Ui.scratch(u, "@setup.provider")
-  Bool.pick(String, String.is_empty(PS.Ps.docs(p)) && Bool.not(String.eq(p, "antigravity")), "codex", p)
-
 def Psv.installed(+u: Ui, +p: String) -> Bool:
   Bool.not(String.is_empty(Models.cli(Ui.info(u, "models"), p)))
+
+# with no choice made yet, setup starts on an agent this machine has: the
+# provider for new threads when it is installed, else the first installed
+# one in the setup's order, else Codex (a new user with Claude Code
+# installed was shown Codex and "Program not found yet")
+def Psv.pick(has: Bool, +p: String, +rest: String) -> String:
+  match has:
+    case True{}:
+      p
+    case False{}:
+      rest
+
+def Psv.first(ps: List<&2, String>, +u: Ui) -> String:
+  match ps:
+    case Nil{}:
+      "codex"
+    case +p <> t:
+      Psv.pick(Psv.installed(u, p), p, Psv.first(t, u))
+
+def Psv.default(+u: Ui) -> String:
+  +cur = M.Setting.get(Ui.state(u), "agent.provider", "")
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(PS.Ps.docs(cur))), Psv.installed(u, cur)), cur, Psv.first(PS.Ps.providers(), u))
+
+def Psv.provider(+u: Ui) -> String:
+  +p = Ui.scratch(u, "@setup.provider")
+  Bool.pick(String, String.is_empty(PS.Ps.docs(p)) && Bool.not(String.eq(p, "antigravity")), Psv.default(u), p)
 
 def Psv.profiles(xs: List<&2, J.Json>, +provider: String) -> List<&2, J.Json>:
   match xs:
@@ -15355,7 +15414,7 @@ def Side.here(+u: Ui) -> List<&2, String>:
 def Side.projects.ix(u: Ui, +ix: SIx) -> List<&2, String>:
   match u:
     case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.pids(Side.unfolded.at(Find.rows(Side.rows.ix.at(st, ix, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now)))
+      Side.pids(Side.unfolded.at(Find.rows(Side.rows.ix.at(st, ix, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now), Side.cur.of(st, sel)))
 
 def Side.active.project(rs: List<&2, ARow>, +pid: String) -> List<&2, ARow>:
   match rs:
@@ -15372,7 +15431,7 @@ def Side.here.kind(active: Bool, +u: Ui, +ix: SIx, +pid: String) -> List<&2, Str
     case False{}:
       match u:
         case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-          Side.visible.tree(Side.only(Side.unfolded(Side.shown.ix(st, ix, now, Find.q(op, dr)), op, Find.q(op, dr), now), pid), op, st, sel)
+          Side.visible.tree(Side.only(Side.unfolded(Side.shown.ix(st, ix, now, Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.of(st, sel)), pid), op, st, sel)
 
 def Side.here.ix(+u: Ui, +ix: SIx) -> List<&2, String>:
   List.append(&2, String, Side.here.kind(String.eq(Side.view(Ui.state(u)), "active"), u, ix, Side.cur(u)),

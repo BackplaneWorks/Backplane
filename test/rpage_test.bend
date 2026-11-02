@@ -122,3 +122,5 @@ def main() -> IO(Unit):
     C.Check.str("publish is off until asked", Bool.show(U.Rl.on(act(u, "rv-page", "release"), "@rl.pub")) ++ Bool.show(U.Rl.on(act(act(u, "rv-page", "release"), "rv-release-pub", ""), "@rl.pub")), "FalseTrue")
     C.Check.str("making it asks the hub", Bool.show(String.contains(sent(U.Ui.act(act(u, "rv-page", "release"), "rv-release", "")), "review.release")), "True")
     C.Check.str("without publishing", Bool.show(String.contains(sent(U.Ui.act(act(u, "rv-page", "release"), "rv-release", "")), "\"publish\":false")), "True")
+    C.Check.str("forced, it asks once forced", Bool.show(String.contains(sent(U.Ui.act(act(act(u, "rv-page", "release"), "rv-release-force", ""), "rv-release", "")), "\"force\":true")), "True")
+    C.Check.str("and the next release is gated again", Bool.show(U.Rl.on(act(act(act(u, "rv-page", "release"), "rv-release-force", ""), "rv-release", ""), "@rl.force")), "False")

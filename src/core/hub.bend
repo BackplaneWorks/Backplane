@@ -1467,13 +1467,37 @@ def Think.act(think: Bool, +thread: String, +id: String, +text: String, +now: Na
 def Think.items() -> List<&2, String>:
   ["agent_message", "command_execution", "file_change", "todo_list", "reasoning"]
 
+# An Agent call (Task in older CLIs): what its subagent was asked, its type
+# and model as the call names them, noted in the subagent's own log
+# (model.bend's Bg.log; subs.bend's SubInfo reads it, kind "about"; a
+# subagent no start names stays unlisted). The prompt is kept to its first
+# Sub.prompt.max() characters.
+def Sub.prompt.max() -> Nat:
+  1500n
+
+def Sub.prompt(+p: String) -> String:
+  Bool.pick(String, Nat.is_gt(String.length(p), Sub.prompt.max()), String.take(p, Sub.prompt.max()) ++ "…", p)
+
+def Sub.about.k(agent: Bool, +thread: String, +now: Nat, +b: J.Json) -> List<&2, M.Change>:
+  match agent:
+    case True{}:
+      +id = J.Json.get_str(b, "id", "")
+      +i = J.Json.get_obj(b, "input")
+      [M.ActivityLogged{M.Bg.log(thread), id ++ "/about", id, "about", J.Json.show(J.Json.obj([J.KV{"type", J.Str{J.Json.get_str(i, "subagent_type", "")}},
+        J.KV{"model", J.Str{J.Json.get_str(i, "model", "")}}, J.KV{"prompt", J.Str{Sub.prompt(J.Json.get_str(i, "prompt", ""))}}])), now}]
+    case False{}:
+      Nil{}
+
+def Sub.about(+thread: String, +now: Nat, +b: J.Json) -> List<&2, M.Change>:
+  Sub.about.k(Bool.and(Bool.or(String.eq(J.Json.get_str(b, "name", ""), "Agent"), String.eq(J.Json.get_str(b, "name", ""), "Task")), Bool.not(String.is_empty(J.Json.get_str(b, "id", "")))), thread, now, b)
+
 def Claude.block.k(i: Nat, +thread: String, +msg: String, +n: Nat, +now: Nat, +seq: Nat, +uuid: String, +b: J.Json, +think: Bool) -> List<&2, M.Change>:
   match i:
     case 0n:
       [M.MessagePosted{thread, msg ++ ":" ++ Nat.show(n) ++ Claude.uid(uuid), M.Assistant{}, J.Json.get_str(b, "text", ""), now}]
     case 1n:
-      [M.ActivityLogged{thread, J.Json.get_str(b, "id", Hub.id("a", now, seq)), "tool", J.Json.get_str(b, "name", "tool"),
-        Claude.tool_summary(J.Json.get_str(b, "name", "tool"), J.Json.get_obj(b, "input")), now}]
+      M.ActivityLogged{thread, J.Json.get_str(b, "id", Hub.id("a", now, seq)), "tool", J.Json.get_str(b, "name", "tool"),
+        Claude.tool_summary(J.Json.get_str(b, "name", "tool"), J.Json.get_obj(b, "input")), now} <> Sub.about(thread, now, b)
     case 2n:
       Think.act(think, thread, "think:" ++ msg ++ ":" ++ Nat.show(n) ++ Claude.uid(uuid), J.Json.get_str(b, "thinking", ""), now)
     case _:
@@ -1524,8 +1548,22 @@ def Claude.result.k(err: Bool, +thread: String, +now: Nat, text: String) -> Step
     case False{}:
       Step{[M.TurnChanged{thread, M.Completed{}, now}], Nil{}}
 
+# an error result's words: its result, else its errors, else its subtype
+# (error_during_execution, error_max_turns...), so its row never reads empty
+def Claude.result.errs(es: List<&2, J.Json>) -> List<&2, String>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      J.Json.as_str(Some{e}, J.Json.show(e)) <> Claude.result.errs(t)
+
+def Claude.result.why(+o: J.Json) -> String:
+  +r = String.trim(J.Json.get_str(o, "result", ""))
+  +es = String.trim(String.join(Claude.result.errs(J.Json.elems(J.Json.get_obj(o, "errors"))), "; "))
+  Bool.pick(String, String.is_empty(r), Bool.pick(String, String.is_empty(es), J.Json.get_str(o, "subtype", ""), es), r)
+
 def Claude.result(+thread: String, +now: Nat, +o: J.Json) -> Step:
-  Claude.result.k(J.Json.get_bool(o, "is_error", False{}), thread, now, J.Json.get_str(o, "result", ""))
+  Claude.result.k(J.Json.get_bool(o, "is_error", False{}), thread, now, Claude.result.why(o))
 
 # Claude keeps its process across a Stop, and what it still says for the
 # stopped turn (its partial text, its result) changes nothing: only a
@@ -2044,6 +2082,22 @@ def Bg.mark.k(none: Bool, +th: String, +now: Nat, +call: String, +kind: String, 
 def Bg.mark(+th: String, +now: Nat, +call: String, +kind: String, +text: String) -> List<&2, M.Change>:
   Bg.mark.k(String.is_empty(call), th, now, call, kind, text)
 
+# what a task reported as it ended (its task_notification's summary, and
+# the tokens, tool uses and time it used when Claude Code says), noted in
+# its log beside its end (kind "outcome"; subs.bend's SubInfo); a summary
+# is kept to its first 600 characters
+def Bg.outcome.k(none: Bool, +th: String, +now: Nat, +call: String, +o: J.Json) -> List<&2, M.Change>:
+  match none:
+    case True{}:
+      Nil{}
+    case False{}:
+      +sum = J.Json.get_str(o, "summary", "")
+      [M.ActivityLogged{M.Bg.log(th), call ++ "/outcome", call, "outcome", J.Json.show(J.Json.obj([J.KV{"summary", J.Str{Bool.pick(String, Nat.is_gt(String.length(sum), 600n), String.take(sum, 600n) ++ "…", sum)}},
+        J.KV{"usage", J.Json.get_obj(o, "usage")}])), now}]
+
+def Bg.outcome(+th: String, +now: Nat, +o: J.Json) -> List<&2, M.Change>:
+  Bg.outcome.k(Bool.or(String.is_empty(J.Json.get_str(o, "tool_use_id", "")), Bool.and(String.is_empty(J.Json.get_str(o, "summary", "")), String.eq(J.Json.show(J.Json.get_obj(o, "usage")), J.Json.show(J.Null{})))), th, now, J.Json.get_str(o, "tool_use_id", ""), o)
+
 # A missing timeout uses the hub default; explicit zero is the opt-out.
 # All deadlines report only. They never signal a task or its process.
 def WorkTimeout.number(s: String, valid: Bool, +acc: Nat) -> Maybe<&2, Nat>:
@@ -2126,15 +2180,36 @@ def Bg.listed(+o: J.Json) -> Bool:
   Bool.and(Nat.is_lt(C.Codec.pos(["local_agent", "local_bash", "local_workflow", "remote_agent", "monitor_mcp", "monitor_ws", "in_process_teammate"], J.Json.get_str(o, "task_type", "")), 7n),
     Bool.and(Bool.not(J.Json.get_bool(o, "owned_by_subagent", False{})), J.Json.get_bool(o, "is_backgrounded", True{})))
 
+# a task_progress line on the rows: what the task does now, and the tokens
+# it has used when Claude Code says (M.Bg.used; none: the rows as they were)
+def Bg.used.k(n: Nat, rows: List<&2, String>, +id: String) -> List<&2, String>:
+  match n:
+    case 0n:
+      rows
+    case _:
+      M.Bg.used(rows, id, Nat.show(n))
+
+# its tokens, read only when it has a usage (Nat.read in the laws'
+# progress lines would slow PROOF.bend down: AGENTS.md)
+def Bg.tokens.of(u: J.Json) -> Nat:
+  match u:
+    case J.Null{}:
+      0n
+    case _:
+      J.Json.get_nat(u, "total_tokens", 0n)
+
+def Bg.progress.o(rows: List<&2, String>, +o: J.Json) -> List<&2, String>:
+  Bg.used.k(Bg.tokens.of(J.Json.get_obj(o, "usage")), M.Bg.progress(rows, J.Json.get_str(o, "task_id", ""), J.Json.get_str(o, "description", "")), J.Json.get_str(o, "task_id", ""))
+
 def Bg.system.k(i: Nat, +s: M.State, +th: String, +now: Nat, +o: J.Json) -> List<&2, M.Change>:
   match i:
     case 0n:
       Bg.started(Bg.listed(o), s, th, now, o)
     case 1n:
-      Bg.put(s, th, now, M.Bg.progress(M.Bg.of(s, th), J.Json.get_str(o, "task_id", ""), J.Json.get_str(o, "description", "")))
+      Bg.put(s, th, now, Bg.progress.o(M.Bg.of(s, th), o))
     case 2n:
       List.append(&2, M.Change, Bg.put(s, th, now, M.Bg.drop(M.Bg.of(s, th), J.Json.get_str(o, "task_id", ""))),
-        Bg.mark(th, now, J.Json.get_str(o, "tool_use_id", ""), "end", J.Json.get_str(o, "status", "completed")))
+        List.append(&2, M.Change, Bg.mark(th, now, J.Json.get_str(o, "tool_use_id", ""), "end", J.Json.get_str(o, "status", "completed")), Bg.outcome(th, now, o)))
     case 3n:
       Bg.ended(Nat.is_lt(C.Codec.pos(["completed", "failed", "killed", "stopped", "cancelled"], J.Json.get_str(J.Json.get_obj(o, "patch"), "status", "")), 5n),
         J.Json.get_bool(J.Json.get_obj(o, "patch"), "is_backgrounded", False{}), s, th, now, J.Json.get_str(o, "task_id", ""), J.Json.get_str(J.Json.get_obj(o, "patch"), "status", ""))
@@ -2228,7 +2303,7 @@ def Prog.beat(+at: Nat, +pend: List<&2, String>, +now: Nat) -> PStep:
   Prog.beat.k(Bool.and(Prog.due(at, now), Bool.not(List.is_empty(&2, String, pend))), at, now, pend)
 
 def Prog.one(rows: List<&2, String>, +o: J.Json) -> List<&2, String>:
-  M.Bg.progress(rows, J.Json.get_str(o, "task_id", ""), J.Json.get_str(o, "description", ""))
+  Bg.progress.o(rows, o)
 
 def Prog.fold(ls: List<&2, String>, rows: List<&2, String>) -> List<&2, String>:
   match ls:
@@ -3124,13 +3199,34 @@ def Mail.request.mark(+valid: Bool, +s: M.State, +now: Nat, +client: U32, +id: S
 def Hub.inbox.id(+s: M.State, +now: Nat, +from: String, +to: String, role: M.Role, +text: String, +msg: String) -> Step:
   Hub.inbox.w(Hub.running(Hub.thread(s, to)), M.Worktree.gone(Hub.thread(s, to)), M.Worktree.waits(s, Hub.thread(s, to), now), s, now, from, to, role, text, msg)
 
+# what the person decided stays in the thread: an answered question as
+# "<question> → <answer>", an approval as Allowed/Denied and what it was
+# for (the card goes once answered, and the drawer's row named only the
+# tool); plans and the rest say nothing here
+def Ans.line(+k: String, +tool: String, +q: String, +answer: String) -> String:
+  Bool.pick(String, String.eq(k, "input"),
+    String.trim(String.take(Maybe.default(&2, String, List.head(&2, String, String.lines(q)), q), 200n)) ++ " → " ++ Bool.pick(String, String.is_empty(String.trim(answer)), "dismissed", String.trim(answer)),
+    Bool.pick(String, String.eq(answer, "accept"), "Allowed", Bool.pick(String, String.eq(answer, "session"), "Allowed for this session", "Denied")) ++ ": " ++ tool ++ " " ++ String.take(q, 160n))
+
+def Ans.said.k(say: Bool, +th: String, +k: String, +tool: String, +q: String, +answer: String, +id: String, +now: Nat) -> List<&2, M.Change>:
+  match say:
+    case True{}:
+      [M.ActivityLogged{th, id, "info", "answer", Ans.line(k, tool, q, answer), now}]
+    case False{}:
+      Nil{}
+
+def Ans.said(a: M.Ask, +answer: String, +id: String, +now: Nat) -> List<&2, M.Change>:
+  match a:
+    case M.Ask{_, +th, +k, +tool, +q, _, _, _}:
+      Ans.said.k(Bool.and(Bool.not(String.is_empty(th)), Bool.or(String.eq(k, "input"), String.eq(k, "approval"))), th, k, tool, q, answer, id, now)
+
 def Hub.answer.plan(impl: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String, +th: String) -> Step:
   match impl:
     case True{}:
       Step.before(M.AskClosed{ask, answer, now} <> Hub.implement.k(Hub.thread(s, th), now), [Reply.ok(client, id)],
         Hub.post(Hub.impl.state(s, th, now), now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, "Implement the proposed plan."))
     case False{}:
-      Step{[M.AskClosed{ask, answer, now}], [Reply.ok(client, id), AskAnswered{ask, answer}]}
+      Step{M.AskClosed{ask, answer, now} <> Ans.said(Ask.find(M.Asks.all(s), ask), answer, Hub.id("k", now, Hub.seq(s)), now), [Reply.ok(client, id), AskAnswered{ask, answer}]}
 
 # an order's question (order_ask, core/order.bend) parks nothing: the
 # person's answer is posted in its thread as their message, which starts
@@ -6817,7 +6913,7 @@ def Claude.line.v.k(v: Nat, +s: M.State, +thread: String, +now: Nat, +o: J.Json,
     case 3n:
       Step.after(Step.after(Claude.result.k(False{}, thread, now, text), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
     case 4n:
-      Step.after(Step.after(Claude.result.k(True{}, thread, now, text), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
+      Step.after(Step.after(Claude.result.k(True{}, thread, now, Bool.pick(String, String.is_empty(String.trim(text)), Claude.result.why(o), text)), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
     case 5n:
       Step{List.append(&2, M.Change, [M.TurnChanged{thread, M.Interrupted{}, now}], Bg.settle(s, thread, now)), Nil{}}
     case 6n:

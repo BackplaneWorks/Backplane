@@ -6893,7 +6893,7 @@ def TL.entries.r(+ty: Ty, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.S
 
 # the times under the messages (the clock is the client's last tick)
 def TL.stamps(+es: List<&2, M.Entry>, +st: M.State, +sel: String, +pics: Map<&2, String>) -> STP.Stamps:
-  STP.Stamps.of.s(es, st, FO.Fold.now(pics), TL.turn(U.Ui.thread(st, sel)), STP.Stamp.stopped(U.Ui.thread(st, sel)))
+  STP.Stamps.of.e(es, st, FO.Fold.now(pics), TL.turn(U.Ui.thread(st, sel)), STP.Stamp.end(U.Ui.thread(st, sel)))
 
 # the timeline from scratch, in the frame's language
 def TL.entries.loc(+ty: Ty, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +px: U32, +pics: Map<&2, String>) -> List<&2, TLine>:

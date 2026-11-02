@@ -3508,6 +3508,29 @@ def Bg.progress(ls: List<&2, String>, +id: String, +doing: String) -> List<&2, S
     case +l <> t:
       Bg.set.k(Bool.and(Bg.is(l, id), Bool.not(Bg.ended(l))), l, id, doing) <> Bg.progress(t, id, doing)
 
+# what row id has used so far (Claude Code's task_progress usage: its
+# tokens), kept as the line's sixth field; a line naming no call, title or
+# kind gets them empty. "" for none (subs.bend's SubInfo)
+def Bg.used.line(+l: String, +tokens: String) -> String:
+  Bg.field(l, 0n) ++ "\t" ++ Bg.field(l, 1n) ++ "\t" ++ Bg.field(l, 2n) ++ "\t" ++ Bg.field(l, 3n) ++ "\t" ++ Bg.field(l, 4n) ++ "\t" ++ tokens
+
+def Bg.used.k(hit: Bool, +l: String, +tokens: String) -> String:
+  match hit:
+    case True{}:
+      Bg.used.line(l, tokens)
+    case False{}:
+      l
+
+def Bg.used(ls: List<&2, String>, +id: String, +tokens: String) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Bg.used.k(Bool.and(Bg.is(l, id), Bool.not(Bg.ended(l))), l, tokens) <> Bg.used(t, id, tokens)
+
+def Bg.tokens(+l: String) -> String:
+  Bg.field(l, 5n)
+
 # every row, ended or not: the work the thread still waits on
 def Bg.live(ls: List<&2, String>) -> Nat:
   List.length(&2, String, ls)

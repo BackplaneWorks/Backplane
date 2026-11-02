@@ -806,7 +806,7 @@ def Mob.around(+st: M.State, +sel: String, +es: List<&2, M.Entry>) -> FO.Around:
   Mob.around.k(FO.Fold.context.of(st, sel, es))
 
 def Mob.entries.folded(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
-  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.ctx(lc, Mob.around(st, sel, es), es, info, running), st, sel, dr, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)), "", Nil{}))
+  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.ctx(lc, Mob.around(st, sel, es), es, info, running), st, sel, dr, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.end(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)), "", Nil{}))
 
 # blank messages left out, a run cut by the page's edge folded whole
 def Mob.entries(+lc: I.Loc, es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:

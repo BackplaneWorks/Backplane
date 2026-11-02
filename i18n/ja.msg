@@ -332,10 +332,11 @@ history.turn.ended = ターン終了
 history.after.reply = 返信の後
 history.source.unknown = 保存元不明
 history.count.label = 設計の変更
-history.count.tip = このスレッドでツール実行後に保存された基板・回路図の変更です。ビューアの履歴で確認できます。
+history.count.tip = このスレッドでツール実行後に保存された基板・回路図の変更です。クリックするとビューアの履歴で確認できます。履歴は基板または回路図の変更だけを数えます。
 history.comparing = 比較中
 history.live = 現在
 history.live.steps = {plural, select, one {現在 · 変更{count}件} other {現在 · 変更{count}件}}
+history.live.steps.of = 現在 · 変更{total}件中{count}件
 
 # review panel
 review.bom = BOM
@@ -401,6 +402,8 @@ sched.weekdays = 平日{time}
 # message times
 stamp.finished = {clock}に完了
 stamp.finished.took = {clock}に完了 · {took}
+stamp.failed = {clock}に失敗
+stamp.failed.took = {clock}に失敗 · {took}
 stamp.stopped = {clock}に停止
 stamp.stopped.took = {clock}に停止 · {took}
 stamp.waiting = {clock}から完了待ち
@@ -741,6 +744,7 @@ remote.request.error = 相手のマシンが受け付けませんでした：{er
 remote.unreachable = 接続できません：{host}の名前解決または接続に失敗
 tools.pinned = 固定中
 tools.snooze = スヌーズ
+tools.retry = 再試行
 tools.forkthread = スレッドを分岐
 google.signature.placeholder = — {email}に代わりBackplaneから送信
 viewer.kicad10 = KiCad 10のコピー
@@ -1077,6 +1081,7 @@ phase.complete = 完了
 phase.stopped = 停止
 
 # Web/phone audit: tooltips, reasoning labels, and model progress.
+tools.tip.retry = ターンが失敗しました: 最後のメッセージをもう一度送信
 tools.tip.stop = 実行中のターンを停止 · Ctrl+.
 tools.tip.unpin = ピン留めを外し、通常の順序に戻す
 tools.tip.pin = 一覧の先頭に固定
@@ -1445,7 +1450,3 @@ settings.voice.learned.note = 音声入力の後にした修正。2回すると�
 voice.learned.item = {heard} → {out}・{yes}回
 voice.dictate.here = この端末のマイクで音声入力
 native.permission.microphone = スレッドに音声入力する間だけ声を録音し、文字にするためにコンピューターへ送ります。
-
-# Retry a failed turn.
-tools.retry = 再試行
-tools.tip.retry = ターンが失敗しました: 最後のメッセージをもう一度送信

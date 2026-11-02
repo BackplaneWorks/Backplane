@@ -98,4 +98,8 @@ def main() -> IO(Unit):
     C.Check.str("finished tour never auto-requests setup", Bool.show(U.Psv.due(U.Ui.adopt.raw(fresh(), M.State.setting(U.Ui.state(fresh()), "onboard.done", "1")))), "False")
     C.Check.str("verified account bypasses first-run setup", Bool.show(U.Psv.due(account("connected"))), "False")
     C.Check.str("sealed sign-in response targets existing account flow", U.Sealed.agy(opened(), "acct-response:a:attempt-a"), "account:a:attempt-a")
+    C.Check.str("setup starts on the agent this machine has", U.Psv.provider(U.Ui.info_set(opened(), "models", "{\"about\":{\"claude\":{\"cli\":\"2.1.286 (Claude Code)\"}}}")), "claude")
+    C.Check.str("or the one new threads use, when installed", U.Psv.provider(U.Ui.adopt.raw(opened(), M.State.replay([M.SettingSet{"agent.provider", "claude", 4n}], U.Ui.state(opened())))), "claude")
+    C.Check.str("with none installed, Codex as before", U.Psv.provider(U.Ui.info_set(opened(), "models", "{}")), "codex")
+    C.Check.str("a choice made stays", U.Psv.provider(act(U.Ui.info_set(opened(), "models", "{\"about\":{\"claude\":{\"cli\":\"c\"}}}"), "provider-setup-pick", "grok")), "grok")
     return Unit{}

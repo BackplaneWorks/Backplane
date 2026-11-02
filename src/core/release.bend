@@ -28,6 +28,12 @@ def Rel.has(+s: String, +p: String) -> Bool:
 # Is this a name git accepts for a tag? Not empty; no whitespace, control or
 # ~ ^ : ? * [ \ characters; no "..", "@{", "//"; not "@"; no leading '-', '/'
 # or '.'; no trailing ".lock", '.' or '/'; no component starting with '.'
+# what the Release page says when the folder has no commit to tag (not a
+# git repository yet, or one with no commit): plainly, and how to make one,
+# before the checks run (server/review.bend's Rvr.head)
+def Release.nocommit(+dir: String) -> String:
+  "No release: a release tags a commit, and " ++ dir ++ " has none (it is not a git repository yet, or nothing is committed). Make one first: cd " ++ dir ++ " && git init && git add -A && git commit -m start"
+
 def Release.valid(+t: String) -> Bool:
   Bool.and(Bool.and(Bool.and(Bool.not(String.is_empty(t)), Rel.clean(t, True{})), Bool.and(Bool.not(Rel.has(t, "..")), Bool.not(Rel.has(t, "@{")))), Bool.and(Bool.and(Bool.not(Rel.has(t, "//")), Bool.not(Rel.has(t, "/."))), Bool.and(Bool.and(Bool.not(String.eq(t, "@")), Bool.not(String.starts_with(t, "-"))), Bool.and(Bool.and(Bool.not(String.starts_with(t, "/")), Bool.not(String.starts_with(t, "."))), Bool.and(Bool.not(String.ends_with(t, ".lock")), Bool.and(Bool.not(String.ends_with(t, ".")), Bool.not(String.ends_with(t, "/"))))))))
 
