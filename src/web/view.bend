@@ -3322,7 +3322,7 @@ def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D
 def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, ACCT.Accounts.supported(provider),
     D.El{"button", "", [D.At{"class", "account-chip"}, D.At{"title", "Account: " ++ ACCT.Accounts.label(st, sel, provider) ++ " · Manage logins in Settings → Providers → Accounts"}, D.At{"aria-label", "Account: " ++ ACCT.Accounts.label(st, sel, provider)}, D.At{"data-value", ""}, D.On{"click", "acct-open"}],
-      [WI.WIcon.svg("user", 16), D.Dom.span("acct-k", "Account: "), D.Dom.span("acct-v", ACCT.Accounts.label(st, sel, provider))]} <> View.accounts.pop(open, st, provider), Nil{})
+      [WI.WIcon.svg("user", 16), D.Dom.span("acct-v", ACCT.Accounts.short(ACCT.Accounts.label(st, sel, provider)))]} <> View.accounts.pop(open, st, provider), Nil{})
 
 # a draft over a message's bound says so over the composer (draftbound.bend)
 def View.draft.limit.k(+text: String) -> List<&2, D.Node>:
