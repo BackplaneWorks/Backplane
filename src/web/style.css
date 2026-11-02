@@ -237,6 +237,9 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg.live { opacity: 0.9; }
 .msg .stamp { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .msg .stamp:empty { display: none; }
+/* A reply inside a turn (core/stamp.bend's Stamp.mid) shows its time only
+   on hover or focus; the turn's last reply and the person's keep theirs. */
+.msg.assistant:not(:hover):not(:focus-within) .stamp.mid { display: none; }
 .msg.user .stamp { text-align: right; }
 .body p { margin: 0 0 8px; white-space: pre-wrap; }
 .body code { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); background: var(--raise); padding: 0 3px; }

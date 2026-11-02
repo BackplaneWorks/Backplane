@@ -6520,7 +6520,7 @@ def TL.entry.q(mine: Bool, +ty: Ty, e: M.Entry, +st: M.State, +px: U32, +pics: M
       Nil{}
 
 def TL.entry.p(mine: Bool, +ty: Ty, +e: M.Entry, +st: M.State, +px: U32, +pics: Map<&2, String>, p: TLPart, +sp: STP.Stamps) -> List<&2, TLine>:
-  TL.entry.q(mine, ty, e, st, px, pics, p, STP.Stamp.text.loc(Ty.loc(ty), sp, e))
+  TL.entry.q(mine, ty, e, st, px, pics, p, STP.Stamp.shown(Ty.loc(ty), sp, e))
 
 def TL.entry(+ty: Ty, +e: M.Entry, +st: M.State, +sel: String, +px: U32, +pics: Map<&2, String>, +sp: STP.Stamps) -> List<&2, TLine>:
   TL.entry.p(TL.mine_of(e, sel), ty, e, st, px, pics, TL.part(TL.mine_of(e, sel), ty, e, px), sp)

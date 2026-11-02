@@ -58,10 +58,36 @@ def Stamp.ends.go(es: List<&2, M.Entry>, +open: Bool, +held: String, ends: Map<&
     case _ <> t:
       Stamp.ends.go(t, open, held, ends)
 
+# the newest reply after the person's newest message, entries newest
+# first ("" for none)
+def Stamp.newest(es: List<&2, M.Entry>) -> String:
+  match es:
+    case Nil{}:
+      ""
+    case M.Msg{_, _, M.User{}, _, _} <> t:
+      ""
+    case M.Msg{+id, _, M.Assistant{}, _, _} <> t:
+      id
+    case _ <> t:
+      Stamp.newest(t)
+
+def Stamp.live.k(+id: String, ends: Map<&2, Nat>) -> Map<&2, Nat>:
+  Stamp.close(String.is_empty(id), id, 0n, ends)
+
+# while a turn runs, its newest reply so far is kept in ends with 0: it is
+# no turn's end (its stamp is its time), but its time stays in sight
+# (Stamp.mid)
+def Stamp.live(running: Bool, +es: List<&2, M.Entry>, ends: Map<&2, Nat>) -> Map<&2, Nat>:
+  match running:
+    case True{}:
+      Stamp.live.k(Stamp.newest(List.reverse(&2, M.Entry, es)), ends)
+    case False{}:
+      ends
+
 # entries oldest first; while the thread's turn runs its last turn has not
-# ended
+# ended (its newest reply is kept with 0, Stamp.live)
 def Stamp.ends(+es: List<&2, M.Entry>, +running: Bool) -> Map<&2, Nat>:
-  Stamp.ends.go(List.reverse(&2, M.Entry, es), Bool.not(running), "", Map.new(&2, Nat))
+  Stamp.live(running, es, Stamp.ends.go(List.reverse(&2, M.Entry, es), Bool.not(running), "", Map.new(&2, Nat)))
 
 def Stamps.at.s(+r: TZ.TzRule, +now: Nat, ends: Map<&2, Nat>, stops: Map<&2, Nat>) -> Stamps:
   Stamps{r, Nat.div(TZ.Tz.wall(r, now), 86400n), ends, stops}
@@ -295,3 +321,35 @@ def Stamp.text.loc(+l: I.Loc, +s: Stamps, e: M.Entry) -> String:
 
 def Stamp.text(+s: Stamps, e: M.Entry) -> String:
   Stamp.text.loc(I.En{}, s, e)
+
+# Replies inside a turn
+# ---------------------
+# A turn of several short replies would read as a column of the same
+# time. A reply that does not end its turn (and is not the newest of a
+# running one) is "mid": the web shows its time only on hover
+# (view.bend's View.entry.own, style.css's .stamp.mid), the phones and
+# the native window leave it out (Stamp.shown). The person's message and
+# the turn's Finished/Stopped/Waiting stamp always show (laws stamp_mid_*).
+
+def Stamp.mid.k(r: Map<&2, Nat> & Bool) -> Bool:
+  (_, yes) = r
+  Bool.not(yes)
+
+def Stamp.mid(+s: Stamps, e: M.Entry) -> Bool:
+  match s e:
+    case Stamps{_, _, +ends, _} M.Msg{+id, _, M.Assistant{}, _, _}:
+      Stamp.mid.k(Map.has(&2, Nat, ends, id))
+    case _ _:
+      False{}
+
+def Stamp.shown.k(mid: Bool, +l: I.Loc, +s: Stamps, e: M.Entry) -> String:
+  match mid:
+    case True{}:
+      ""
+    case False{}:
+      Stamp.text.loc(l, s, e)
+
+# what a client with no hover shows under an entry: Stamp.text.loc, but
+# nothing under a reply inside a turn
+def Stamp.shown(+l: I.Loc, +s: Stamps, +e: M.Entry) -> String:
+  Stamp.shown.k(Stamp.mid(s, e), l, s, e)

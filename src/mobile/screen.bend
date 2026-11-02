@@ -593,7 +593,7 @@ def Mob.own.s(e: M.Entry, +dr: Map<&2, String>, +stamp: String) -> J.Json:
   Mob.own.s.loc(I.En{}, e, dr, stamp)
 
 def Mob.own(+lc: I.Loc, +e: M.Entry, +dr: Map<&2, String>, +sp: STP.Stamps) -> J.Json:
-  Mob.own.s.loc(lc, e, dr, STP.Stamp.text.loc(lc, sp, e))
+  Mob.own.s.loc(lc, e, dr, STP.Stamp.shown(lc, sp, e))
 
 # a row that opens another thread (value: its id)
 def Mob.link(+id: String, +text: String, +to: String) -> J.Json:
