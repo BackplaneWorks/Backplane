@@ -1128,3 +1128,18 @@ test('linked newest-in-flight intent and draft survive an owning-history replace
  g.host.greeting(g.greeting);g.host.receive(g.reply(undefined,{window:win('fresh','peer-new')}));
  assert.equal(g.views.at(-1).detail.historyReset,true);assert.equal(g.views.at(-1).detail.position.atEnd,true);assert.equal(g.host.session.drafts['peer~A'],'unsent');
 });
+
+test('bot navigation preserves the private destination draft omitted from its source-thread request',async()=>{
+ const f=await fixture();f.open();f.host.draftAt('B','Saved 日本語 bot draft');f.host.request('bot','bot-B');const action=f.sent.at(-1);
+ assert.equal(action.p.session.sel,'A');assert.equal(action.p.session.drafts.B,undefined,'destination draft remains private on source-thread action');
+ const response=f.reply(action,{nextTarget:{kind:'bot',id:'bot-B'},remoteReady:false,session:{sel:'B',rid:2,drafts:{B:'','@bot':'bot-B'}}});delete response.result.shown;
+ f.host.receive(response);assert.equal(f.getSession().drafts.B,'Saved 日本語 bot draft');
+ assert.equal(f.sent.at(-1).m,'view.open');assert.equal(f.sent.at(-1).p.session.drafts.B,'Saved 日本語 bot draft','new bot view carries its own saved destination draft');
+ f.host.receive(f.reply());assert.equal(f.getSession().drafts.B,'Saved 日本語 bot draft');assert.equal(f.getSession().drafts.A,'original 日本語');
+});
+test('same-conversation actions and explicit Keep still own their draft changes',async()=>{
+ const f=await fixture();f.open();f.host.request('flag','models');const action=f.sent.at(-1);
+ f.host.receive(f.reply(action,{session:{...action.p.session,drafts:{A:'changed by action'}}}));assert.equal(f.getSession().drafts.A,'changed by action');
+ f.host.request('bot','bot-B');const moving=f.sent.at(-1),response=f.reply(moving,{nextTarget:{kind:'bot',id:'bot-B'},remoteReady:false,session:{sel:'B',rid:3,drafts:{B:'suggested'}},cmds:[{type:'keep',thread:'B',text:''}]});delete response.result.shown;
+ f.host.receive(response);assert.equal(f.getSession().drafts.B,'','explicit authoritative Keep remains effective');
+});
