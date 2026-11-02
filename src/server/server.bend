@@ -106,6 +106,7 @@ import ./storefar.bend as SFL
 import ./storeterms.bend as STT
 import ./db.bend as SQ
 import ./botnet.bend as BN
+import ./farcodec.bend as FCODEC
 import ../core/far.bend as FR
 import ../core/fview.bend as FV
 import ../core/rview.bend as RVW
@@ -8997,8 +8998,9 @@ def Far.push.job(s: FR.Send, +epoch: String, +home: String, +url: String, +inbox
 def Far.pull.job(+link: String, +since: Nat, +epoch: String, +home: String, +url: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     now : Nat <- Now.nat()
-    +r : BN.Resp <- BN.Bn.to_peer(home, url, link, now, "/far/log", True{}, J.Json.show(J.Json.obj([J.KV{"since", J.Json.nat(since)}, J.KV{"epoch", J.Str{epoch}}, J.KV{"v", J.Json.nat(3n)}])))
-    Far.send(inbox, FarPulled{link, since, Far.code(r), Far.body(r)})
+    +r : BN.Resp <- BN.Bn.to_peer(home, url, link, now, "/far/log", True{}, J.Json.show(J.Json.obj([J.KV{"since", J.Json.nat(since)}, J.KV{"epoch", J.Str{epoch}}, J.KV{"v", J.Json.nat(4n)}])))
+    +body : String <- FCODEC.FarCodec.unpack(Far.body(r))
+    Far.send(inbox, FarPulled{link, since, Far.code(r), body})
 
 def Far.rpc.job(+client: U32, +id: String, +link: String, +body: String, +home: String, +url: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
@@ -15513,15 +15515,36 @@ def Conn.bot.answer(m: Maybe<&1, List<&2, U32>>, s: Socket) -> IO(Unit):
     case None{}:
       Conn.finish(s, W.Http.text("503 Service Unavailable", "the hub is gone"))
 
+# The owner has already authorized the response before it reaches here.
+# Only an explicit v4 far-log request opts into the envelope.
+def Conn.bot.answer.codec(on: Bool, m: Maybe<&1, List<&2, U32>>, s: Socket) -> IO(Unit):
+  match on m:
+    case True{} Some{bs}:
+      do IO<Unit>:
+        packed : List<&2, U32> <- FCODEC.FarCodec.pack(bs)
+        Conn.bot.answer(Some{packed}, s)
+    case _ other:
+      Conn.bot.answer(other, s)
+
+def Conn.bot.codec.request.k(far: Bool, body: String) -> Bool:
+  match far:
+    case True{}:
+      Nat.is_eq(J.Json.get_nat(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "v", 0n), 4n)
+    case False{}:
+      False{}
+
+def Conn.bot.codec.request(kind: String, body: String) -> Bool:
+  Conn.bot.codec.request.k(String.eq(kind, "far-log"), body)
+
 # the hub answers the whole response on a channel made for this request
-def Conn.bot.ask(s: Socket, rq: BotReq, body: String, +ct: String, raw: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
+def Conn.bot.ask(s: Socket, rq: BotReq, +body: String, +ct: String, raw: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
   match rq:
-    case BotReq{k, a, p, t, sg, g, d}:
+    case BotReq{+k, a, p, t, sg, g, d}:
       do IO<Unit>:
         +reply : Chan(List<&2, U32>) <- Chan.new(List<&2, U32>, 1)
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotHttp{k, a, p, t, sg, g, d, body, ct, raw, reply})
         m : Maybe<&1, List<&2, U32>> <- Chan.recv(List<&2, U32>, reply)
-        Conn.bot.answer(m, s)
+        Conn.bot.answer.codec(Conn.bot.codec.request(k, body), m, s)
 
 # the body as text, and its bytes too when it is a form with a recording
 def Conn.bot.bytes(s: Socket, +rq: BotReq, +bs: List<&2, U32>, +text: String, +ct: String, +inbox: Chan(Msg)) -> IO(Unit):
