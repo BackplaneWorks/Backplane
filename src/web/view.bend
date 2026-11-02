@@ -2144,12 +2144,12 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       [View.setrow(U.Files.set.label(), U.Files.set.note(st), View.chips.loc(lc, AT.Att.sizes(), U.Files.set.on(st), AT.Att.key()))],
       View.notify(lc, st),
-      View.agy.rows(u, U.Fallbackv.rows(u)),
       View.agy.rows(u, U.Hookv.rows.loc(lc, u))])
     case 2n: Bool.pick(List<&2, D.Node>, U.Psv.active(u), View.agy.rows(u, U.Psv.rows(1n, u)), List.concat(&2, D.Node, [View.agy.rows(u, U.Psv.rows(1n, u)), [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
         D.Dom.cat(View.menu.find(lc, U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), U.Ui.scratch(u, "@f.mq")),
           View.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", ""), "agent.model")))],
+      View.agy.rows(u, U.Fallbackv.rows(u)),
       Bool.pick(List<&2, D.Node>, U.Psv.active(u), Nil{}, View.agy.rows(u, U.Acv.rows(u))),
       [View.setrow(U.Think.label(), U.Think.note(), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Think.on(st), "on", "off"), M.Think.key()))]]))
     case 3n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.writing.provider(lc), MSG.T.web.settings.writing.note(lc), View.chips.loc(lc, ["claude", "codex", "grok", "muse"], U.TextGen.provider(st), "text.provider"))],

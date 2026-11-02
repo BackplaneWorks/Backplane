@@ -15130,3 +15130,7 @@ law settings_proposal_deadline_exclusive:
 
 law settings_proposal_write_invalidates:
   {SETPROPOSAL.Proposal.invalidate([M.SettingSet{"fallback.on", "off", 10n}], [M.Ask{"a", "t", "approval", "settings_proposal", "", "", True{}, ""}], 10n) == [M.AskClosed{"a", "stale", 10n}] : List<&2, M.Change>}
+
+# Agents advertises the fallback editor in the shared Settings search index.
+law fallback_settings_agents_row:
+  {List.head(&2, String, List.drop(&2, String, U.Settings.rows.of(2n, I18.En{}), 2n)) == Some{"Fallback hierarchy"} : Maybe<&2, String>}
