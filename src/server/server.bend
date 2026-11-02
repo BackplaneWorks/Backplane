@@ -18,6 +18,7 @@ import ./mailcontext.bend as MCTX
 import ./telemetry.bend as TI
 import ./telemetry-ui.bend as TUI
 import ../core/telemetry.bend as TLM
+import ../core/winnote.bend as NT
 import ../core/telemetry-usage.bend as TUS
 import ../core/charter.bend as CH
 import ../core/mailrun.bend as RUN
@@ -6855,6 +6856,10 @@ def Sys.exe_dir.io() -> IO(String):
 def Media.fail(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +msg: String) -> IO(Unit):
   GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{msg}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}]))
 
+# Upload metadata is additive; older clients keep the English text fallback.
+def Media.fail.cap(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, lim: String) -> IO(Unit):
+  GitJob.reply(inbox, client, id, False{}, NT.Notice.upload.reply(thread, "upload.cap", Nat.show(AT.Att.mb(lim))))
+
 def Media.attached(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +path: String) -> IO(Unit):
   GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"attached", J.Str{path}}, J.KV{"thread", J.Str{thread}}]))
 
@@ -6907,7 +6912,7 @@ def Media.put.k(over: Bool, +first: Bool, +last: Bool, bs: List<&2, U32>, +inbox
     case True{}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Media.fail(inbox, client, id, thread, AT.Att.over(lim))
+        Media.fail.cap(inbox, client, id, thread, lim)
     case False{}:
       IO.bind(String, Unit, Media.put.file(path, Bool.pick(String, first, "w", "a"), bs), e => Media.put.done(e, last, inbox, client, id, thread, path))
 
@@ -6944,7 +6949,7 @@ def Media.copy.k(ok: Bool, fits: Bool, +src: String, +inbox: Chan(Msg), +client:
     case True{} True{}:
       IO.bind(P.Ran, Unit, P.Proc.run("cp", ["--", src, dest], "/"), r => Media.copied(r, inbox, client, id, thread, dest))
     case True{} False{}:
-      Media.fail(inbox, client, id, thread, AT.Att.over(lim))
+      Media.fail.cap(inbox, client, id, thread, lim)
     case False{} _:
       Media.fail(inbox, client, id, thread, "not a file: " ++ src)
 
@@ -15701,6 +15706,9 @@ def Upload.json(+status: String, +ok: Bool, +thread: String, +v: String) -> List
     [J.KV{"attached", J.Str{v}}, J.KV{"thread", J.Str{thread}}],
     [J.KV{"text", J.Str{v}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}])))), "")
 
+def Upload.failure(status: String, thread: String, id: String, detail: String) -> List<&2, U32>:
+  W.Http.response(status, "application/json", U.Utf8.encode(J.Json.show(NT.Notice.upload.reply(thread, id, detail))), "")
+
 def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String, +path: String) -> IO(Unit):
   (s, res) = r
   match res:
@@ -15709,7 +15717,7 @@ def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String
     case Fail{_}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Conn.finish(s, Upload.json("400 Bad Request", False{}, thread, "the upload did not arrive whole"))
+        Conn.finish(s, Upload.failure("400 Bad Request", thread, "upload.incomplete", ""))
 
 # the head's leftover (the body's start) is written; the rest is copied
 # (a body that came whole with the head has nothing left to copy: the copy
@@ -15743,7 +15751,7 @@ def Upload.go(cont: Bool, s: Socket) -> IO(Socket):
 def Upload.into.k(big: Bool, s: Socket, +cont: Bool, +lim: Nat, +dir: String, +thread: String, +name: String, +len: Nat, +rest: List<&2, U32>) -> IO(Unit):
   match big:
     case True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(Nat.div(lim, 1048576n)) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(Nat.div(lim, 1048576n))))
     case False{}:
       do IO<Unit>:
         s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
@@ -15771,7 +15779,7 @@ def Upload.gate(ok: Bool, big: Bool, s: Socket, +cont: Bool, +thread: String, +n
     case False{} _:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
     case True{} True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(AT.Att.mb.ceiling()) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(AT.Att.mb.ceiling())))
     case True{} False{}:
       do IO<Unit>:
         +reply : Chan(String) <- Chan.new(String, 1)

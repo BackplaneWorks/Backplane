@@ -1831,12 +1831,17 @@ async function upload(action, file, scope = uploadScope(), previous = "") {
   try {
     const r = await fetch(`/attach?${q}`, { method: "POST", body: file, credentials: "same-origin" });
     answer = await r.text();
-    JSON.parse(answer);
   } catch {
-    answer = JSON.stringify({ text: "the upload did not reach the hub", thread, upload: true });
+    answer = JSON.stringify({ uiError: "upload.network", thread, upload: true });
   }
   if (!current()) return;
-  let result;try { result = JSON.parse(answer); } catch { return; }
+  // A primitive or malformed body cannot complete an upload. Keep the
+  // failure tied to its original actor so the pending indicator clears.
+  let result;try { result = JSON.parse(answer); } catch { result = null; }
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    result = { uiError: "upload.failed", thread, upload: true };
+    answer = JSON.stringify(result);
+  }
   if (viewMode !== "compatibility" && result.attached && result.thread === thread) {
     try {
       if (!attachmentIdentity || attachmentIdentity !== scope.identity) throw Error("Attachment identity unverified");
