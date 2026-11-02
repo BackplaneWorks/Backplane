@@ -235,6 +235,15 @@ jobs:
           bun test/tools/native_thin_bridge_307265.mjs
           bun test/tools/mobile_readiness_test.ts
           bun test/tools/phone_flush_test.ts
+      - name: Twenty active threads stay bounded
+        timeout-minutes: 3
+        run: bun test/tools/active_threads_load.ts --bin dist-js/linux-x64/backplane-serve --out build/active-threads-load.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: active-threads-load
+          path: build/active-threads-load.json
+          if-no-files-found: ignore
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

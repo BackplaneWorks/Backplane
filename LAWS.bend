@@ -15346,3 +15346,11 @@ law issue_report_template_revision:
 law issue_report_prompt_original_verbatim:
   for description: String
   {ISSUEPOLICY.Issue.prompt.original(description) == "\nOriginal description, verbatim, until end of input\n" ++ description : String}
+
+# Frequent liveness stamps belong to their owner; other views use the
+# sidebar cadence while unknown settings retain global invalidation.
+law active_progress_other_soft:
+  {TPR1.Touch.level(TPR1.Touch.changes([M.SettingSet{"liveness.owner", "progress", 1n}], TPR1.Touch.none()), "other") == 1n : Nat}
+
+law active_progress_owner_urgent:
+  {TPR1.Touch.level(TPR1.Touch.changes([M.SettingSet{"liveness.owner", "progress", 1n}], TPR1.Touch.none()), "owner") == 2n : Nat}
