@@ -72,7 +72,11 @@ try{
  await click('acct-login');await page.waitForSelector('[data-sealed^="account:"]');
  const claudeSignIn=await page.getByRole('link',{name:'Open provider sign-in',exact:true}).getAttribute('href');
  check('phone Claude offers current provider authorization URL',claudeSignIn?.startsWith('https://claude.com/cai/oauth/authorize?code=true&'),claudeSignIn);
- await page.locator('[data-sealed^="account:"]').fill('fixture-code');await page.getByRole('button',{name:'Complete sign-in',exact:true}).click();await visible('Connection verified');
+ await page.locator('[data-sealed^="account:"]').fill('fixture-code');await page.getByRole('button',{name:'Complete sign-in',exact:true}).click();await visible('including #');
+ check('incomplete code keeps phone sign-in open with an actionable message',await page.getByRole('link',{name:'Open provider sign-in',exact:true}).isVisible());
+ await page.locator('[data-sealed^="account:"]').fill('fixture-code#old-attempt');await page.getByRole('button',{name:'Complete sign-in',exact:true}).click();await visible('different sign-in attempt');
+ check('stale code keeps phone sign-in open with its current link',await page.getByRole('link',{name:'Open provider sign-in',exact:true}).getAttribute('href')===claudeSignIn);
+ await page.locator('[data-sealed^="account:"]').fill('fixture-code#'+new URL(claudeSignIn).searchParams.get('state'));await page.getByRole('button',{name:'Complete sign-in',exact:true}).click();await visible('Connection verified');
  check('phone Claude completes existing sealed ceremony',await page.getByText('Connection verified',{exact:false}).isVisible());
  check('sealed response never enters browser storage',await page.evaluate(()=>!Object.values(localStorage).some(x=>x.includes('fixture-code'))));
  await page.screenshot({path:join(output,'phone-claude.png'),fullPage:true});

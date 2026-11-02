@@ -1,11 +1,20 @@
 // Provider-owned authentication and child-process IO. No inference requests.
 // Only allowlisted metadata leaves this actor; raw CLI output is never logged.
 const bp_account_managers = new Map();
+// Public sign-in diagnostics are fixed strings, never a provider transcript.
+const bp_account_failures = {
+  code_rejected:"Claude did not accept that authentication code. It may be incomplete, expired, already used, or from an earlier sign-in. Choose Connect / Login and copy the new code from that sign-in page.",
+  network:"Claude could not reach its sign-in service. Check the connection and try Connect / Login again.",
+  storage:"Claude could not save the sign-in in this account's private store. Check its directory permissions and try again.",
+  cli_start:"Claude Code could not start. Check the provider CLI installation and try again.",
+  directory:"Claude did not report this account's private directory. Update Claude Code and try again.",
+  verification:"The provider sign-in finished, but the saved subscription account could not be verified. Try Connect / Login again.",
+};
 const bp_account_unset = [
   "CODEX_HOME", "CODEX_SQLITE_HOME", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY",
   "OPENAI_BASE_URL", "ACCESS_TOKEN", "OPENAI_IDENTITY_TOKEN_FILE",
   "OPENAI_FEDERATION_RULE_ID", "OPENAI_ORGANIZATION_ID", "CODEX_AUTH_TOKEN",
-  "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+  "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
   "CLAUDE_CODE_OAUTH_SCOPES", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_PROFILE",
   "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID",
@@ -133,7 +142,8 @@ class BPAccountsIO {
     for (const key of Object.keys(env)) {
       if (/^(OPENAI_|ANTHROPIC_|CODEX_.*(?:TOKEN|AUTH|WIF)|CLAUDE_CODE_USE_|CLAUDE_CODE_(?:OAUTH|API_KEY|AUTH|PROFILE|SESSION))/.test(key)) delete env[key];
     }
-    env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = "1";
+    // These profiles use Claude's own saved subscription login, as T3's
+    // per-instance CLAUDE_CONFIG_DIR does. Host-managed auth hides that login.
     env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
     env.DISABLE_AUTOUPDATER = "1";
     env.MCP_TOOL_TIMEOUT = "86400000";
@@ -153,7 +163,7 @@ class BPAccountsIO {
       const timer = setTimeout(() => { child.kill(); reject(new Error("Provider status timed out")); }, timeout);
       child.stdout.on("data", b => {out += b.toString(); if (Buffer.byteLength(out)>131072) {child.kill(); reject(new Error("Provider response exceeded its limit"));}});
       child.on("error", () => {clearTimeout(timer); reject(new Error("Provider CLI could not start"));});
-      child.on("exit", code => {clearTimeout(timer); try {resolve({code, data:(args[1]==="logout" ? {} : JSON.parse(out))});} catch (_) {reject(new Error("Provider status was not valid JSON"));}});
+      child.on("close", code => {clearTimeout(timer); try {resolve({code, data:(args[1]==="logout" ? {} : JSON.parse(out))});} catch (_) {reject(new Error("Provider status was not valid JSON"));}});
     });
   }
   fingerprint(p, identity) {
@@ -281,10 +291,11 @@ class BPAccountsIO {
       if (this.jobs.get(p.id)!==a || a.finishing) return;
       if (Date.now()>=a.expiresAt) return this.cancel(a,"expired");
       a.finishing=true;
-      if (!success) return this.cancel(a,"failed");
-      try {await this.verify(candidate,true,a); if (this.jobs.get(p.id)!==a) return;
+      try {
+        if (!success) return this.cancel(a,"failed",a.failureReason);
+        await this.verify(candidate,true,a); if (this.jobs.get(p.id)!==a) return;
         const old={...p};Object.assign(p,candidate);this.save();a.state="done"; a.url=""; a.userCode=""; this.jobs.delete(p.id); clearTimeout(a.timer); this.revision++;this.removeStore(old);}
-      catch (_) {this.cancel(a,"failed");}
+      catch (e) {this.cancel(a,"failed",e.message==="Claude must report its isolated account directory (Claude Code 2.1.268 or later)"?"directory":"verification");}
       finally {a.rpc?.close(); a.child?.kill();this.discardAttempt(a);}
     };
     if (p.provider==="codex") {
@@ -310,6 +321,9 @@ class BPAccountsIO {
       let output="";
       const read=b=>{
         output += b.toString("utf8"); if (Buffer.byteLength(output)>131072) return this.cancel(a,"failed");
+        if (/That code wasn't accepted|Invalid code\.|invalid_grant|code.*(?:expired|already used)/i.test(output)) a.failureReason="code_rejected";
+        else if (/could not save|failed to save|credential store could not be/i.test(output)) a.failureReason="storage";
+        else if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|unable to connect|fetch failed/i.test(output)) a.failureReason="network";
         for (const candidate of output.match(/https:\/\/[^\s\u001b<>]+/g) ?? []) {
           const url=this.url(candidate,p.provider);
           if (url && this.jobs.get(p.id)===a) {a.url=url;a.state="waiting";this.revision++;break;}
@@ -317,13 +331,13 @@ class BPAccountsIO {
         // No terminal transcript is retained or sent to a client.
       };
       child.stdout.on("data",read); child.stderr.on("data",read);
-      child.on("error",()=>this.cancel(a,"failed")); child.on("exit",code=>finish(code===0));
+      child.on("error",()=>this.cancel(a,"failed","cli_start")); child.on("close",code=>finish(code===0));
     }
     return a;
   }
-  cancel(a, state="cancelled") {
+  cancel(a, state="cancelled", reason="") {
     if (this.jobs.get(a.profile)!==a) return;
-    this.jobs.delete(a.profile); a.state=state;a.url="";a.userCode="";a.message=state==="failed"?"Sign-in could not be verified. Retry or check the provider CLI installation.":"";
+    this.jobs.delete(a.profile); a.state=state;a.url="";a.userCode="";a.message=state==="failed"?(bp_account_failures[reason]||"Sign-in could not be verified. Retry or check the provider CLI installation."):"";
     clearTimeout(a.timer);
     if (a.rpc && a.loginId) a.rpc.request("account/login/cancel",{loginId:a.loginId}).catch(()=>{}).finally(()=>a.rpc.close()); else a.rpc?.close();
     a.child?.stdin.destroy(); a.child?.kill(); const p=this.profile(a.profile);p.state=a.previousState;this.revision++;
@@ -332,7 +346,13 @@ class BPAccountsIO {
   async request(r) {
     if (!r || typeof r!=="object" || typeof r.op!=="string") throw new Error("Invalid account request");
     if (this.loadError) throw new Error(this.loadError);
-    if (r.op==="list") return this.snapshot();
+    if (r.op==="list") {
+      // Reverify saved profiles when the picker opens after a hub restart.
+      // Initialization/status only; no model prompt or credential import.
+      const unchecked=this.profiles.filter(p=>p.state==="unchecked" && !this.jobs.has(p.id) && !this.launchQueues.has(p.id));
+      await Promise.all(unchecked.map(p=>this.request({op:"status",profile:p.id}).catch(()=>{})));
+      return this.snapshot();
+    }
     if (r.op==="add") {
       if (!["claude","codex"].includes(r.provider) || !this.label(r.label) || this.profiles.length>=12) throw new Error("Choose a provider and account label");
       const p={id:this.crypto.randomUUID(),provider:r.provider,label:this.label(r.label),epoch:1,state:"disconnected",identity:{},fingerprint:"",catalog:[],allowance:null,checkedAt:0};
@@ -343,6 +363,11 @@ class BPAccountsIO {
     if (r.op==="respond") {
       const a=this.attempts.get(r.attempt);
       if (!a || this.jobs.get(p.id)!==a || a.state!=="waiting" || Date.now()>=a.expiresAt || p.provider!=="claude" || typeof r.code!=="string" || r.code.length>4096 || /[\r\n\0]/.test(r.code)) throw new Error("Sign-in response does not belong to an active attempt");
+      const parts=r.code.trim().split("#"),state=new URL(a.url).searchParams.get("state");
+      const error=parts.length!==2 || !parts[0] || !parts[1] ? "Paste the complete authentication code from Claude's sign-in page, including # and everything after it. API keys and setup-tokens cannot complete this sign-in." :
+        !state || parts[1]!==state ? "That code belongs to a different sign-in attempt. Open this attempt's provider sign-in link and copy its new authentication code." : "";
+      if(error){a.message=error;this.revision++;return {...this.snapshot(),error};}
+      a.message="";this.revision++;
       // Claude validates its own OAuth state/code. No callback is fetched by Backplane.
       a.child.stdin.write(r.code.trim()+"\n"); return this.snapshot();
     }
@@ -358,6 +383,16 @@ class BPAccountsIO {
         else {const rpc=this.codex(p);try {await rpc.initialize();await rpc.request("account/logout");} finally {rpc.close();}}
         p.epoch++;p.state="disconnected";p.fingerprint="";p.identity={};p.catalog=[];p.allowance=null;this.save();this.removeStore(p,false);
       } else if (r.op==="rename") {if (!this.label(r.label)) throw new Error("Choose an account label");p.label=this.label(r.label);this.save();}
+      else if (r.op==="remove") {
+        if(this.busy(p.id))throw new Error("Finish this account's active provider requests before deleting it");
+        // Forget only this named account's local provider store. Existing CLI
+        // defaults and every other account remain provider-owned and untouched.
+        const base=this.path.join(this.root,p.id);this.privateDir(base);
+        this.fs.rmSync(base,{recursive:true,force:true});
+        this.profiles=this.profiles.filter(x=>x.id!==p.id);
+        for(const [id,a] of this.attempts)if(a.profile===p.id)this.attempts.delete(id);
+        this.save();
+      }
       else throw new Error("Unknown account operation");
     } finally {this.jobs.delete(p.id);}
     return this.snapshot();

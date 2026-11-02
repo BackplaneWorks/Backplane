@@ -109,7 +109,7 @@ def Tio.date(+now: Nat, +secs: Nat) -> String:
 def Tio.view(+st: M.State, +ver: String, +now: Nat, xs: List<&2, TmCfg>) -> T.TmView:
   match xs:
     case TmCfg{_, _, _, _, _, os, arch, days, _, _, +channel, _} <> _:
-      T.TmView{T.Tm.share(st), T.Tm.asked(st), T.Tm.reset(st), ver, T.Tm.channel(ver, channel), os, arch, Tio.date(now, days), now}
+      T.TmView{T.Tm.selected(st), T.Tm.allowed(st), T.Tm.reset(st), ver, T.Tm.channel(ver, channel), os, arch, Tio.date(now, days), now}
     case _: T.TmView{False{}, False{}, "0", ver, "release", "linux", "x64", "", now}
 
 # Server-owned evidence only: call after an authenticated, validated successful
@@ -266,16 +266,30 @@ def Tio.finish(allowed: Bool, cfg: List<&2, TmCfg>, +home: String, +st: T.TmStat
         Tio.write(home, st2)
         return T.TmState.id(st2)
 
-def Tio.job(+cfg: List<&2, TmCfg>, +home: String, +view: T.TmView, +now: Nat, authorize: Unit -> IO(Bool)) -> IO(String):
+def Tio.job.allowed(+cfg: List<&2, TmCfg>, +home: String, +view: T.TmView, +now: Nat, authorize: Unit -> IO(Bool)) -> IO(String):
   do IO<String>:
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(home ++ "/telemetry")
     md : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(home ++ "/telemetry", 448)
     raw : String <- G.Gf.text(home ++ "/telemetry/state.json")
     id : String <- Tio.random()
-    +st : T.TmState <- Tio.plan(T.Tm.plan.activity(T.Tm.state.parse(raw), view, T.Tm.uuid(id), Tio.human.day(cfg)))
+    +st : T.TmState <- Tio.plan(T.Tm.runtime.plan(True{}, T.Tm.state.parse(raw), view, T.Tm.uuid(id), Tio.human.day(cfg)))
     +evs : List<&2, T.TmEv> = T.Tm.batch(T.Tm.ready(T.TmState.queue(st), now))
     allowed : Bool <- authorize(Unit{})
     Tio.finish(allowed, cfg, home, st, evs, now)
+
+# Pending and Off do not create telemetry state, solve PoW or send anonymous
+# pings. Removing old private queue/acks also prevents later backfill.
+def Tio.job.when(go: Bool, cfg: List<&2, TmCfg>, +home: String, view: T.TmView, now: Nat, authorize: Unit -> IO(Bool)) -> IO(String):
+  match go:
+    case False{}:
+      do IO<String>:
+        G.Gf.rm(home ++ "/telemetry/state.json")
+        G.Gf.rm(home ++ "/telemetry/usage.json")
+        return ""
+    case True{}: Tio.job.allowed(cfg, home, view, now, authorize)
+
+def Tio.job(+cfg: List<&2, TmCfg>, +home: String, +view: T.TmView, +now: Nat, authorize: Unit -> IO(Bool)) -> IO(String):
+  Tio.job.when(Bool.and(T.TmView.share(view), T.TmView.asked(view)), cfg, home, view, now, authorize)
 
 # Acknowledgements contain at most seven fixed-field snapshots. They are
 # id-scoped; a new id cannot inherit an old id's acknowledgements. A crash

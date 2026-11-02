@@ -22,13 +22,13 @@ def Probe.state(+at: Nat, n: Nat, share: String, consent: String, reset: String)
   Probe.work(n, at, M.State.replay([M.SettingSet{"telemetry.usage.enabled", "1", at}, M.SettingSet{"telemetry.asked", "1", at},
     M.SettingSet{"telemetry.usage.asked", consent, at}, M.SettingSet{"telemetry.share", share, at}, M.SettingSet{"telemetry.reset", reset, at}], M.State.empty()))
 
-def Probe.start(on: Bool, +cfg: List<&2, TI.TmCfg>, +home: String, +st: M.State, +now: Nat, permit: Bool) -> IO(Unit):
+def Probe.start(on: Bool, +cfg: List<&2, TI.TmCfg>, +home: String, +st: M.State, +now: Nat, +permit: Bool) -> IO(Unit):
   match on:
     case False{}: IO.pure(Unit, Unit{})
     case True{}:
       do IO<Unit>:
         id : String <- TI.Tio.job.usage(cfg, home, TI.Tio.view(st, "0.12.0", now, cfg), U.Usage.rows(now, st), now,
-          u => IO.pure(Bool, True{}), u => IO.pure(Bool, Bool.and(permit, M.Metrics.allowed(st))))
+          u => IO.pure(Bool, Bool.and(permit, T.Tm.allowed(st))), u => IO.pure(Bool, Bool.and(permit, M.Metrics.allowed(st))))
         return Unit{}
 
 def Probe.run(xs: List<String>) -> IO(Unit):

@@ -1,4 +1,6 @@
 import Base
+import ../core/i18n.bend as I
+import ../core/chat-pending.bend as CP
 import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/bot.bend as B
@@ -445,11 +447,9 @@ def Partial.live.include(large: Bool, s: TL.Stream, thread: String, epoch: Strin
     case False{}: J.Null{}
     case True{}: BW.Body.live.part(s, thread, epoch, target)
 
+# Partial response text stays internal until its MessagePosted event.
 def Partial.live.body(on: Bool, +s: TL.Stream, +thread: String, +epoch: String, +target: J.Json) -> List<&2, J.Json>:
-  match on:
-    case False{}: Partial.live(s, thread, epoch, target)
-    case True{}:
-      Partial.include(Partial.live.include(Nat.is_gt(T.Blocks.n(TL.Stream.blocks(s)), 8n), s, thread, epoch, target), Nil{})
+  Nil{}
 
 def Render.window.marker(on: Bool, window: J.Json) -> J.Json:
   match on:
@@ -497,10 +497,18 @@ def Render.stream.entries(on: Bool, +stream: TL.Stream, +thread: String, +now: N
     case False{}: TL.Stream.entries(Nat.is_gt(TL.Stream.size(stream), 0n), stream, thread, now)
     case True{}: Render.stream.entry(Nat.is_gt(TL.Stream.size(stream), 0n), stream, thread, now)
 
+def Render.pending.stream.k(show: Bool, +lc: I.Loc, +thread: String, now: Nat) -> List<&2, M.Entry>:
+  match show:
+    case False{}: Nil{}
+    case True{}: [M.Msg{TL.Stream.id(thread), thread, M.Assistant{}, CP.Pending.label(lc), now}]
+
+def Render.pending.stream(lc: I.Loc, stream: TL.Stream, thread: String, now: Nat) -> List<&2, M.Entry>:
+  Render.pending.stream.k(Nat.is_gt(TL.Stream.size(stream), 0n), lc, thread, now)
+
 def Render.ui(+u: U.Ui, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>, +stream: TL.Stream, +now: Nat) -> U.Ui:
   U.Ui.adopt.raw(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@more." ++ Target.thread(st, target), "1"), "@away." ++ Target.thread(st, target), ""),
     "@pill", Render.pill(st, Target.thread(st, target), U.Ui.scratch(u, "@away." ++ Target.thread(st, target)), stream)),
-    State.window.add(Render.stream.entries(String.eq(U.Ui.info(u, "local.body.pages"), "1"), stream, Target.thread(st, target), now), State.window.body(String.eq(U.Ui.info(u, "local.body.pages"), "1"), VP.Page.state(String.eq(U.Ui.info(u, "local.view.lazy"), "1"), st, State.window.info(u)), BW.Body.index(String.eq(U.Ui.info(u, "local.body.pages"), "1"), index, Target.thread(st, target), rows, Render.body_options(u)), target, rows)))
+    State.window.add(Render.pending.stream(U.Lang.loc(u), stream, Target.thread(st, target), now), State.window.body(String.eq(U.Ui.info(u, "local.body.pages"), "1"), VP.Page.state(String.eq(U.Ui.info(u, "local.view.lazy"), "1"), st, State.window.info(u)), BW.Body.index(String.eq(U.Ui.info(u, "local.body.pages"), "1"), index, Target.thread(st, target), rows, Render.body_options(u)), target, rows)))
 
 def Partial.button(automatic: Bool, +part: J.Json, +u: U.Ui, rest: List<&2, D.Node>) -> List<&2, D.Node>:
   match automatic:

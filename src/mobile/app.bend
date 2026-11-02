@@ -175,10 +175,10 @@ def screen_list_in(hs: H.Hubs, tag: String) -> J.Json:
 def focus(+hs: H.Hubs) -> J.Json:
   H.Hubs.opened(hs)
 
-# the open thread's streamed reply, and markdown text as the nodes the
-# thread's "live" shows
+# Partial replies stay internal. The shared screen supplies a static
+# Working message; completed messages arrive through the normal entries.
 def live_text(+hs: H.Hubs) -> String:
-  H.Hubs.live.text(hs)
+  ""
 
 def live_nodes(+text: String) -> J.Json:
   S.Mob.live.nodes(text)

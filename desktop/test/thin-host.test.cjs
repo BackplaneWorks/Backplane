@@ -1,5 +1,14 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
+
+test('older paging records the newest source boundary before its picture is replaced',async()=>{
+ let mark='latest-committed-source';const f=await fixture({readingMark:()=>mark});
+ f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:{ids:['row'],older:'older-bound-to-A',hasMore:true,newer:0,anchor:{id:'row',offset:0},partial:[]}}));
+ assert(f.host.page());assert.equal(f.sent.at(-1).p.away,'latest-committed-source');
+ mark='older-page-source';f.host.receive(f.reply());f.host.away('A',mark);
+ assert.equal(f.host.awayOf('A'),'latest-committed-source','old loaded history does not become new output');
+ f.host.away('A','');assert.equal(f.host.awayOf('A'),'','reaching genuinely newest output still clears the mark');
+});
 async function fixture(overrides={}){
  const {ThinHost}=await import(process.env.THIN_HOST_MODULE||'../../src/web/thin-host.js'),{ThinViews,VIEW_LIMITS}=await import('../../src/web/thin.js');
  let at=0,session={sel:'A',drafts:{A:'original 日本語'},rid:1},persisted=0,fieldRefresh;
@@ -1142,4 +1151,57 @@ test('same-conversation actions and explicit Keep still own their draft changes'
  f.host.receive(f.reply(action,{session:{...action.p.session,drafts:{A:'changed by action'}}}));assert.equal(f.getSession().drafts.A,'changed by action');
  f.host.request('bot','bot-B');const moving=f.sent.at(-1),response=f.reply(moving,{nextTarget:{kind:'bot',id:'bot-B'},remoteReady:false,session:{sel:'B',rid:3,drafts:{B:'suggested'}},cmds:[{type:'keep',thread:'B',text:''}]});delete response.result.shown;
  f.host.receive(response);assert.equal(f.getSession().drafts.B,'','explicit authoritative Keep remains effective');
+});
+
+test('local send clears the composer and publishes a bubble before the action ACK',async()=>{
+ const feedback=[];const f=await fixture({previewSend:()=>true,sendFeedback:on=>feedback.push(on)});f.open();
+ const text=f.getSession().drafts.A;f.host.request('send','');const sent=f.sent.at(-1);
+ assert.equal(f.getSession().drafts.A,'');assert.equal(f.disk.get('A'),'');
+ assert.deepEqual(f.host.pendingSends('A'),[{key:'@sending:1',text}]);assert.deepEqual(f.host.pendingSends('B'),[]);
+ assert.equal(sent.p.session.drafts.A,text,'the request still carries its immutable captured text');
+ f.host.request('draft','next 日本語');
+ f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'send',text:JSON.stringify({id:20,m:'turn.start',p:{thread:'A',msg:'sent-A',text}})},{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().drafts.A,'next 日本語');assert.deepEqual(f.host.pendingSends('A'),[]);assert.deepEqual(feedback,[true,false]);
+ assert.equal(f.commands.filter(c=>c.type==='send').length,1);
+});
+test('local send refusal and ordinary rejection restore captured text alongside newer typing',async()=>{
+ for(const ordinary of[false,true]){
+  const f=await fixture({previewSend:()=>true});f.open();const text=f.getSession().drafts.A;
+  f.host.request('send','');const sent=f.sent.at(-1);f.host.request('draft','new text');
+  if(ordinary){
+   f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'send',text:JSON.stringify({id:20,m:'turn.start',p:{thread:'A',text}})},{type:'keep',thread:'A',text:''}]}));
+   f.host.ack({t:'reply',id:20,ok:false,error:'refused'});
+  }else f.host.receive({t:'reply',id:sent.id,ok:false,error:{code:'UNAVAILABLE'}});
+  assert.equal(f.getSession().drafts.A,text+'\n\nnew text');assert.equal(f.disk.get('A'),text+'\n\nnew text');assert.deepEqual(f.host.pendingSends('A'),[]);
+ }
+});
+test('local send failure stays with its original thread and is restored once',async()=>{
+ const f=await fixture({previewSend:()=>true});f.open();const text=f.getSession().drafts.A;
+ f.host.request('send','');f.host.request('select','B');f.host.receive(f.reply());f.host.request('draft','B draft');
+ f.host.disconnect();f.host.disconnect();assert.equal(f.getSession().drafts.A,text);assert.equal(f.getSession().drafts.B,'B draft');assert.deepEqual(f.host.pendingSends('A'),[]);
+});
+test('local send timeout and synchronous transport failure keep the text recoverable',async()=>{
+ for(const failure of['timeout','transport','invalid']){
+  const f=await fixture({previewSend:()=>true});f.open();const text=f.getSession().drafts.A;
+  if(failure==='transport')f.api.send=()=>{throw Error('closed');};
+  f.host.request('send','');
+  if(failure==='timeout')f.tick(5001);
+  if(failure==='invalid')f.host.receive(f.reply(undefined,{cmds:[{type:'INVALID'}]}));
+  assert.equal(f.getSession().drafts.A,text,failure);assert.deepEqual(f.host.pendingSends('A'),[],failure);
+ }
+});
+test('composer commands and an IME composition retain their existing draft path',async()=>{
+ for(const composing of[false,true]){
+  const f=await fixture({previewSend:()=>composing,composing:()=>composing});f.open();const text=f.getSession().drafts.A;f.host.request('send','');
+  assert.equal(f.getSession().drafts.A,text);assert.deepEqual(f.host.pendingSends('A'),[]);
+ }
+});
+test('a timeout with multiple immediate sends restores every capture in order',async()=>{
+ for(const disconnect of[false,true]){
+  const f=await fixture({previewSend:text=>!!text});f.open();const first=f.getSession().drafts.A;
+  f.host.request('send','');f.host.request('draft','second');f.host.request('send','');f.host.request('draft','third');
+  assert.equal(f.host.pendingSends('A').length,2);
+  if(disconnect)f.host.disconnect();else f.tick(5001);
+  assert.equal(f.getSession().drafts.A,first+'\n\nsecond\n\nthird');assert.deepEqual(f.host.pendingSends('A'),[]);
+ }
 });

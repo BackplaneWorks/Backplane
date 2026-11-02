@@ -18,12 +18,12 @@ def Human.mark_if(go: Bool, cfg: List<&2, TI.TmCfg>, now: Nat) -> List<&2, TI.Tm
 
 def Human.mark(authenticated: Bool, successful: Bool, +st: M.State, method: String, action: String, cfg: List<&2, TI.TmCfg>, now: Nat) -> List<&2, TI.TmCfg>:
   Human.mark_if(Bool.and(authenticated, Bool.and(successful, Bool.and(String.eq(method, "view.action"),
-    Bool.and(Human.allowed(action), Bool.and(T.Tm.share(st), T.Tm.asked(st)))))), cfg, now)
+    Bool.and(Human.allowed(action), T.Tm.allowed(st))))), cfg, now)
 
 # Inspect every committed setting, rather than just the endpoints of a batch:
 # off then on in one append must still discard earlier action evidence.
 def Privacy.key(+key: String) -> Bool:
-  Bool.or(String.eq(key, "telemetry.share"), Bool.or(String.eq(key, "telemetry.asked"), String.eq(key, "telemetry.reset")))
+  Bool.or(String.eq(key, "telemetry.share"), Bool.or(String.eq(key, "telemetry.asked"), Bool.or(String.eq(key, "telemetry.usage.asked"), String.eq(key, "telemetry.reset"))))
 
 def Privacy.clear_if(clear: Bool, cfg: List<&2, TI.TmCfg>) -> List<&2, TI.TmCfg>:
   match clear:

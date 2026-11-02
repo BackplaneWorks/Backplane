@@ -1,3 +1,5 @@
+import ./src/core/lazy-tools.bend as LTOOLS
+
 import ./src/core/range.bend as BRANGE
 
 import ./src/core/vdict.bend as VDICT
@@ -15181,3 +15183,84 @@ def Laws.settings_proposal_deadline_exclusive(): {==}
 def Laws.settings_proposal_write_invalidates(): {==}
 
 def Laws.fallback_settings_agents_row(): {==}
+
+def Laws.chat_pending_working(): {==}
+
+def Laws.chat_pending_blocked(): {==}
+
+def Laws.chat_pending_finished(): {==}
+
+def Laws.chat_pending_no_partial_reply(lc, text): {==}
+
+def Laws.timeline_fit_disabled(layout, view):
+  {==}
+
+def Laws.timeline_unbounded_position(top, total, view):
+  {==}
+
+def Laws.sending_preview_excludes_secret():
+  {==}
+
+def Laws.lazy_tools_open_row_unchanged(r):
+  match r:
+    case THINL.Row{n, e, terms, blocks}: {==}
+
+def Laws.lazy_tools_shut_row_ordinal(r):
+  match r:
+    case THINL.Row{n, e, terms, blocks}: {==}
+
+def Laws.lazy_tools_shut_row_blocks(r):
+  match r:
+    case THINL.Row{n, e, terms, blocks}: {==}
+
+def Laws.lazy_tools_shut_row_text(n, e, terms, blocks):
+  match e:
+    case M.Msg{id, th, role, text, at}: {==}
+    case M.Act{id, th, tone, kind, text, at}: {==}
+
+def Laws.telemetry_default_selected():
+  {==}
+
+def Laws.telemetry_default_pending():
+  {==}
+
+def Laws.telemetry_all_off(asked, usage):
+  {==}
+
+def Laws.telemetry_existing_optout_answered(asked, usage):
+  {==}
+
+def Laws.telemetry_runtime_closed(st, view, id, day):
+  {==}
+
+def Laws.tm_off_view_current():
+  {==}
+
+def Laws.tm_on_view_current():
+  {==}
+
+def Laws.tm_permit_waits_for_disk(allowed, current):
+  {==}
+
+def Laws.tm_start_waits_for_disk():
+  {==}
+
+def Laws.tm_start_cleans_up_waiting_off():
+  {==}
+
+def Laws.telemetry_choice_no_decision_no_replay(seen, fp):
+  {==}
+
+def Laws.tour_back_skips_usage():
+  {==}
+
+def Laws.tour_next_skips_usage():
+  {==}
+
+def Laws.tour_usage_kept_when_due(back):
+  {==}
+
+
+def Laws.settings_row_information(): {==}
+
+def Laws.voice_model_needs_runtime(): {==}

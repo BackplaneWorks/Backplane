@@ -40,3 +40,27 @@ turning it off hides the ones already logged (web and phones). Thoughts
 arrive whole, after the model finishes thinking, not streamed. The ACP
 agents (OpenCode, Grok, Oh My Pi, Antigravity) send thinking as chunks that
 are not collected yet, and Muse's reasoning is not read.
+
+
+## Status and empty rows
+
+Rows without controls are informational: web and desktop draw them as plain
+text with a left rule instead of another setting card. On iOS they do not
+create an empty boxed section; both phone clients dim their labels. Existing
+buttons and fields keep their normal treatment throughout Settings.
+
+Voice explains how an empty dictionary and Learned fixes become populated.
+Learned fixes are available now: choosing a suggested correction or using Fix
+after dictation adds one, and confirming the same correction twice lets it
+apply automatically. Existing fixes retain their forget controls.
+
+Local model setup shows starting, bytes received (and a percentage when the
+size is known), verification/unpacking, readiness, and errors with a retry.
+Unknown model metadata offers Check availability instead of a zero-size
+download. The same state and text drive the web, desktop and both phones.
+The web/desktop page also has an accessible progress bar and live status.
+
+Regression checks: `test/settings_status_test.bend`, the Voice states in
+`test/tools/settings_review.mjs`, and `test/tools/voice_download_e2e.ts` (an
+isolated hub with a deterministic helper, including fragmented progress lines,
+status racing a download, errors followed by status, retries and helper exit).

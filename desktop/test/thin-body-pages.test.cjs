@@ -20,6 +20,11 @@ test('body capability is explicit and read-only query never replaces the current
  assert(f.host.body(f.part,f.part.cursor));const q=f.sent.at(-1);assert.equal(q.m,'view.message');assert.equal(q.p.bodyVersion,'7');
  f.host.receive(f.answer(q));assert.equal(f.bodies.length,1);assert.equal(f.views.length,count);assert.equal(f.host.ready,true);
 });
+test('fold read generation stays local while fencing a returned body',async()=>{
+ const f=await fixture();assert(f.host.body({...f.part,localGeneration:42},f.part.cursor));const q=f.sent.at(-1);
+ assert.equal(q.p.localGeneration,undefined,'local fold lifecycle is not server authorization or wire state');
+ f.host.receive(f.answer(q));assert.equal(f.bodies.at(-1).p.localGeneration,42);
+});
 test('body query cannot delay navigation or publish its text after A to B',async()=>{
  const f=await fixture();f.host.body(f.part,f.part.cursor);const q=f.sent.at(-1);
  f.host.request('select','B');assert.equal(f.sent.at(-1).m,'view.open');assert.equal(f.sent.at(-1).p.target.id,'B');

@@ -1562,11 +1562,21 @@ struct TourSheet: View {
             ForEach(tour.choices, id: \.label) { c in
                 Button(c.label) { model.act(c.action, c.value) }.buttonStyle(.bordered)
             }
+            if let off = tour.off, !off.isEmpty {
+                Button(off) { model.act("share", "off") }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                Button(tour.next) { model.act("ob-next") }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                Button(tour.skip) { model.act("ob-skip") }
+            } else {
             HStack {
                 Button(tour.skip) { model.act("ob-skip") }
                 Spacer()
                 if !tour.first { Button(tour.back) { model.act("ob-back") } }
                 Button(tour.next) { model.act("ob-next") }.buttonStyle(.borderedProminent)
+            }
             }
         }
         .padding(20)
