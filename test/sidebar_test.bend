@@ -66,6 +66,10 @@ def copied(a: U.Act) -> String:
 def base() -> U.Ui:
   U.Ui.fold(log(), U.Ui.init(now()))
 
+# g, a thread in p3 (Older) settled long ago
+def older() -> U.Ui:
+  U.Ui.fold(List.append(&2, M.Change, log(), [M.ThreadCreated{"g", "p3", "Bootloader", M.Local{}, "", "", "claude", "", 600n}, M.ThreadSettled{"g", True{}, 700n}]), U.Ui.init(now()))
+
 # b made as a fork of a
 def forked() -> U.Ui:
   U.Ui.fold(List.append(&2, M.Change, log(), [M.SettingSet{"fork.b", "a", 999600n}]), U.Ui.init(now()))
@@ -139,6 +143,11 @@ def main() -> IO(Unit):
     C.Check.str("not held: settled long ago", U.Side.cur.held(st(), "e", now()) ++ "|" ++ U.Side.cur.held(st(), "", now()), "|")
     C.Check.str("open thread's project held live", pids(act(base(), "select", "f")), "p2,p1,p4")
     C.Check.str("held keeps the groups' order", String.join(U.Side.pids(U.SGroups.all(U.Side.groups.at(U.Side.rows(st(), now()), now(), ""))), ","), String.join(U.Side.pids(U.Side.rows(st(), now())), ","))
+    # a thread open in a project folded under Older (settled long ago, so
+    # not held live) keeps its project on screen, and the shelf says so
+    C.Check.str("older shut shows the open thread's project", pids(act(older(), "select", "g")) ++ "|" ++ pids(older()), "p1,p4,p2,p3|p1,p4,p2")
+    C.Check.str("older shut words", U.Shelf.words(I.En{}, "Older 1", List.length(&2, U.SRow, U.Side.older.sel(U.Side.rows(U.Side.st(older()), now()), "p3"))), "Older 1 · 1 shown")
+    C.Check.str("older open lists it once", pids(act(act(older(), "select", "g"), "toggle-settled", "old-projects")), "p1,p4,p2,p3")
     C.Check.str("shut fold shows the open row", String.join(U.Side.ids(U.Side.sel(U.Ui.threads(st()), "d")), ",") ++ "|" ++ String.join(U.Side.ids(U.Side.sel(U.Ui.threads(st()), "")), ","), "d|")
     C.Check.str("rename opens on the title", U.Ui.scratch(act(base(), "row-rename", "d"), "@ren") ++ "|" ++ U.Ui.scratch(act(base(), "row-rename", "d"), "@f.title"), "d|" ++ U.Active.title(U.Ui.thread(st(), "d")))
     C.Check.str("rename sends the edited title", sent(U.Ui.act(act(act(base(), "row-rename", "d"), "bfield", "title\u{1f}  Enclosure v2 "), "rename-save", "")), "{\"id\":0,\"m\":\"thread.rename\",\"p\":{\"thread\":\"d\",\"title\":\"Enclosure v2\"}}")

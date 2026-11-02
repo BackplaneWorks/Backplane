@@ -396,17 +396,20 @@ def View.older.open(+lc: I.Loc, on: Bool, rs: List<&2, U.SRow>, +open: Map<&2, B
     case True{}:
       View.projects(lc, rs, True{}, open, ix, st, sel, now, look, rm)
     case False{}:
-      Nil{}
+      View.projects(lc, U.Side.older.sel(rs, U.Side.cur.of(st, sel)), True{}, open, ix, st, sel, now, look, rm)
 
 # the older projects (quiet for Quiet.days) folded under one row; a search
-# shows them in place
-def View.older.k(+lc: I.Loc, searching: Bool, +n: Nat, rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
+# shows them in place. Shut, it still shows the open thread's project, and
+# says so ("Older 7 · 1 shown": U.Side.older.sel, U.Shelf.words)
+def View.older.k(+lc: I.Loc, searching: Bool, +n: Nat, +rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
   match searching:
     case True{}:
       View.projects(lc, rs, True{}, open, ix, st, sel, now, look, rm)
     case False{}:
       WI.WIcon.button(Bool.pick(String, U.Flag.get(open, "old-projects"), "shelf older open", "shelf older"), "side-older", "", MSG.T.sidebar.quiet.note(lc),
-          Bool.pick(String, U.Flag.get(open, "old-projects"), "chevron-down", "chevron-right"), 14, MSG.T.sidebar.older(lc, Nat.show(n)))
+          Bool.pick(String, U.Flag.get(open, "old-projects"), "chevron-down", "chevron-right"), 14,
+          Bool.pick(String, U.Flag.get(open, "old-projects"), MSG.T.sidebar.older(lc, Nat.show(n)),
+            U.Shelf.words(lc, MSG.T.sidebar.older(lc, Nat.show(n)), List.length(&2, U.SRow, U.Side.older.sel(rs, U.Side.cur.of(st, sel))))))
         <> View.older.open(lc, U.Flag.get(open, "old-projects"), rs, open, ix, st, sel, now, look, rm)
 
 def View.older(+lc: I.Loc, rs: List<&2, U.SRow>, +searching: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
@@ -819,7 +822,7 @@ def View.sidebar.frame.rows(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain
     U.Side.pids(unfolded), View.sidebar.threads(u, plain, unfolded, raw)), View.strip(lc, U.Side.pids(unfolded), U.Ui.state(u), U.Side.cur(u)))
 
 def View.sidebar.frame.shown.raw(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
-  View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded.at(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u))), raw)
+  View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded.at(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u)), U.Side.cur(u)), raw)
 
 def View.sidebar.frame.project_page(node: D.Node, p: VP.Page) -> D.Node:
   match node:
