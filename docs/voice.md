@@ -20,7 +20,11 @@ runtime (sherpa-onnx's Node addon and ONNX Runtime, from npm, sha512
 pinned) and the models (from sherpa-onnx's releases, sha256 pinned) are
 fetched by `local-install` into `<home>/voice/local`, each checked and moved
 into place, then `ready-<model>` is written (what the hub reads). Nothing is
-bundled in the package; nothing loads in the hub. The helper loads the model
+bundled in the package; nothing loads in the hub. The hub streams the helper's
+progress to the requesting client as `local-progress` voice events, then one
+`local-result` carrying status and any error. Status probes do not clear a
+running download, and a status line after an error does not erase it. Setup
+continues if the person leaves Settings (on the same connection). The helper loads the model
 when a session starts (about 0.9 s, off the event loop; audio heard
 meanwhile is kept) and exits with the session. One model does both the live
 words and the final ones: while the VAD has a segment open, its audio so far

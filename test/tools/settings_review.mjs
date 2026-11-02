@@ -12,9 +12,10 @@ const esc=x=>String(x).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll
 function html(n){if(n.$?.endsWith('.Txt'))return esc(n.text);return `<${n.tag} ${each(n.attrs).map(a=>a.$?.endsWith('.At')?`${esc(a.name)}="${esc(a.value)}"`:`data-on-${esc(a.event)}="${esc(a.action)}"`).join(' ')}>${each(n.kids).map(html).join('')}</${n.tag}>`;}
 let ui=lib.init(),ja=false;const actions=[];
 const view=()=>html(lib.view(ui,ja));
-const server=Bun.serve({hostname:'127.0.0.1',port:4040,async fetch(req){const url=new URL(req.url);
+const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req){const url=new URL(req.url);
  if(url.pathname==='/style.css')return new Response(Bun.file(resolve('src/web/style.css')),{headers:{'Content-Type':'text/css'}});
  if(url.pathname==='/act'){const {action,value}=await req.json();actions.push({action,value});ui=lib.act(ui,action,value);return new Response(view());}
+ if(url.pathname==='/recv'){ui=lib.recv(ui,JSON.stringify(await req.json()));return new Response(view());}
  if(url.pathname==='/ja'){ja=true;ui=lib.init();}
  return new Response(`<!doctype html><html lang="${ja?'ja':'en'}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Backplane Settings review</title><link rel="stylesheet" href="/style.css"><body><div id="review" style="height:100vh">${view()}</div><script>
  const send=async(action,value)=>{const focused=document.activeElement?.id;const selection=document.activeElement?.selectionStart;const response=await fetch('/act',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,value})});document.querySelector('#review').innerHTML=await response.text();if(focused){const f=document.getElementById(focused);f?.focus();if(typeof selection==='number')f?.setSelectionRange(selection,selection);}};
@@ -26,7 +27,7 @@ const server=Bun.serve({hostname:'127.0.0.1',port:4040,async fetch(req){const ur
 const browser=await chromium.launch({executablePath:process.env.BACKPLANE_CHROME||chromium.executablePath(),headless:true,args:['--disable-gpu']});
 try{
  const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));
- await page.goto('http://127.0.0.1:4040');
+ await page.goto(`http://127.0.0.1:${server.port}`);
  assert.equal(await page.locator('.settings-category').count(),14);
  assert.equal(await page.locator('.settings-group').count(),4);
  assert.equal(await page.locator('.settings-category-icon svg path').count()>14,true,'existing vector icons rendered');
@@ -41,6 +42,38 @@ try{
   await page.locator('button[data-on-click="settings-page"][data-value=""]').click();
   await page.locator('.settings-category').first().waitFor();
  }
+ // Voice states are real Bend actions/events over the production view.
+ const push=async o=>{await page.evaluate(async o=>{const r=await fetch('/recv',{method:'POST',body:JSON.stringify(o)});document.querySelector('#review').innerHTML=await r.text();},o);};
+ const local=installed=>({supported:true,runtime:installed,vad:installed,models:[{id:'parakeet-v2',label:'Parakeet v2',size:482468385,installed}]});
+ await page.locator('.settings-category[data-value="voice"]').click();
+ await page.getByRole('button',{name:'Check availability',exact:true}).waitFor();
+ assert.equal(await page.getByText(/0 MB/).count(),0,'unknown size does not pretend to be zero');
+ await push({t:'reply',local:local(false)});
+ const learned=page.locator('.set-row').filter({hasText:'Learned fixes'});
+ assert.equal(await learned.getAttribute('data-setting-kind'),'info');
+ await learned.getByText(/No fixes learned yet/).waitFor();
+ assert.equal(await learned.locator('button').count(),0,'empty learned fixes has no fake control');
+ await page.screenshot({path:resolve(out,'settings-voice-empty.png')});
+ await page.getByRole('button',{name:'Download Parakeet v2 (482 MB)',exact:true}).click();
+ await page.getByRole('status').filter({hasText:'Starting download'}).waitFor();
+ await push({t:'voice',ev:'local-progress',what:'Parakeet v2',done:241000000,total:482000000});
+ await page.getByRole('status').filter({hasText:'241 / 482 MB (50%)'}).waitFor();
+ assert.equal(await page.locator('progress').getAttribute('value'),'241000000');
+ await page.screenshot({path:resolve(out,'settings-voice-progress.png')});
+ await push({t:'voice',ev:'local-result',local:local(false),error:'network offline'});
+ await page.getByRole('button',{name:'Retry download',exact:true}).waitFor();
+ await page.getByRole('status').filter({hasText:'network offline'}).waitFor();
+ await page.getByRole('button',{name:'Retry download',exact:true}).click();
+ await push({t:'voice',ev:'local-progress',phase:'unpack',what:'Parakeet v2',done:0,total:0});
+ assert.equal(await page.locator('progress').getAttribute('value'),null,'unpacking is indeterminate');
+ await push({t:'voice',ev:'local-result',local:local(true)});
+ await page.getByRole('button',{name:'Remove',exact:true}).first().waitFor();
+ await page.getByRole('status').filter({hasText:'is ready.'}).waitFor();
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390,'voice fits a phone');
+ await page.screenshot({path:resolve(out,'settings-voice-390.png')});
+ await page.locator('button[data-on-click="settings-page"][data-value=""]').click();
+ await page.locator('.settings-category').first().waitFor();
  await page.setViewportSize({width:390,height:844});
  const mobile=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,columns:getComputedStyle(document.querySelector('.settings-grid')).gridTemplateColumns}));
  assert.equal(mobile.scroll,390,'390px layout has no horizontal overflow');
@@ -51,10 +84,10 @@ try{
  await page.locator('#settings-find').press('Enter');
  await page.locator('#settings-content[data-settings-page="usage"]').waitFor();
  await page.screenshot({path:resolve(out,'settings-usage-390.png')});
- await page.goto('http://127.0.0.1:4040/ja');
+ await page.goto(`http://127.0.0.1:${server.port}/ja`);
  assert.equal(await page.locator('.settings-category').count(),14);
  await page.getByRole('heading',{name:'ワークスペース',exact:true}).waitFor();
  assert.deepEqual(errors,[],'no browser errors');
- const receipt={pass:true,scope:'actual production Settings fixture; isolated browser, no live hub writes',checks:['14 categories open with one click each','4 groups with existing SVG icons','390px no overflow and single column','search filters and Enter opens result','Japanese menu retains14 categories','zero page errors'],mobile};
+ const receipt={pass:true,scope:'actual production Settings fixture; isolated browser, no live hub writes',checks:['14 categories open with one click each','4 groups with existing SVG icons','390px no overflow and single column','search filters and Enter opens result','Japanese menu retains14 categories','voice: empty, download, progress, unpack, error, retry, ready','read-only rows are distinct from controls','zero page errors'],mobile};
  writeFileSync(resolve(out,'browser-checks.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify(receipt));
 }finally{await browser.close();server.stop(true);}

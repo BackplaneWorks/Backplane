@@ -1205,7 +1205,8 @@ private fun UsageDayChart(days: List<UsageDay>) {
 fun LazyListScope.hubSettingsRows(m: AppModel, rows: List<SetRow>, notify: Boolean = false) {
     items(rows.filter { if (notify) it.notify else !(it.local || it.notify) }) { r ->
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(r.label, style = MaterialTheme.typography.bodyLarge)
+            Text(r.label, style = MaterialTheme.typography.bodyLarge,
+                color = if (r.buttons.isEmpty() && r.fields.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
             if (r.note.isNotEmpty()) Text(r.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             if (r.chart.isNotEmpty()) UsageDayChart(r.chart)
             for (f in r.fields) {

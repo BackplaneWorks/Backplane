@@ -7910,7 +7910,7 @@ def VoiceJob.fwd(m: Maybe<&1, String>, +inbox: Chan(Msg), +client: U32, k: Unit 
     case Some{+text}:
       do IO<Unit>:
         sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Push{client, text})
-        VoiceJob.fwd.k(String.contains(text, "\"ev\":\"idle\""), k)
+        VoiceJob.fwd.k(Bool.or(String.contains(text, "\"ev\":\"idle\""), String.contains(text, "\"ev\":\"local-result\"")), k)
     case None{}:
       IO.pure(Unit, Unit{})
 
@@ -7940,29 +7940,22 @@ def VoiceJob.live(+inbox: Chan(Msg), +home: String, +client: U32, +id: String, +
       key, VD.Vdc.of.json(p))
     VoiceJob.live.rq(rq, inbox, home, client, id, thread, device)
 
-def VoiceJob.local.m(m: Maybe<&2, J.Json>, +acc: J.Json) -> J.Json:
-  match m:
-    case Some{+o}:
-      Bool.pick(J.Json, String.eq(J.Json.get_str(o, "event", ""), "local"), o, Bool.pick(J.Json, Bool.and(String.eq(J.Json.get_str(o, "event", ""), "error"), String.is_empty(J.Json.get_str(acc, "error", ""))), J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(o, "error", "")}}]), acc))
-    case None{}:
-      acc
-
-# the local engine: what is downloaded ({"local": the helper's status}),
-# a model downloaded or removed (the status after)
-def VoiceJob.local.line(+l: String, +acc: J.Json) -> J.Json:
-  VoiceJob.local.m(J.Json.parse(l), acc)
-
-def VoiceJob.local.go(ls: List<&2, String>, +acc: J.Json) -> J.Json:
+# Status probes use the same error-preserving collector as downloads.
+def VoiceJob.local.go(ls: List<&2, String>, acc: J.Json) -> J.Json:
   match ls:
-    case Nil{}:
-      acc
+    case Nil{}: acc
     case +l <> t:
-      VoiceJob.local.go(t, VoiceJob.local.line(l, acc))
+      VoiceJob.local.go(t, VO.Vo.local.acc(Maybe.default(&2, J.Json, J.Json.parse(l), J.Null{}), acc))
+
+def VoiceJob.local.ran.k(+code: U32, +acc: J.Json) -> J.Json:
+  +local = J.Json.get_obj(acc, "local")
+  Bool.pick(J.Json, Bool.and(U32.is_eq(code, 0), Maybe.is_some(&2, J.Json, J.Json.get(local, "models"))), local,
+    J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(acc, "error", "The voice helper returned no model status. Check that it is installed beside Backplane.")}}]))
 
 def VoiceJob.local.ran(r: P.Ran) -> J.Json:
   match r:
-    case P.Ran{_, +out}:
-      VoiceJob.local.go(String.lines(out), J.Null{})
+    case P.Ran{code, out}:
+      VoiceJob.local.ran.k(code, VoiceJob.local.go(String.lines(out), J.Json.obj(Nil{})))
 
 # Dictation (server/voice.bend): the key, the dictionary, and live sessions
 # of this machine's microphone, whose messages go to the client that
@@ -7986,10 +7979,10 @@ def VoiceJob.done(+err: String, +inbox: Chan(Msg), +home: String, +client: U32, 
 
 def VoiceJob.local(+cmd: String, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U32, +id: String) -> IO(Unit):
   do IO<Unit>:
-    +exe : String <- VO.Vo.exe()
-    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(VO.Vo.local(home))
-    r : P.Ran <- P.Proc.run(exe, [cmd, "--local-dir", VO.Vo.local(home), "--model", VO.Vo.model.ok(J.Json.get_str(p, "id", J.Json.get_str(p, "model", "")))], "/")
-    BotJob.reply(inbox, client, id, True{}, [J.KV{"local", VoiceJob.local.ran(r)}])
+    +out : Chan(String) <- Chan.new(String, 32)
+    BotJob.reply(inbox, client, id, True{}, Nil{})
+    IO.spawn(Unit, VO.Vo.local.run(home, cmd, J.Json.get_str(p, "id", J.Json.get_str(p, "model", "")), out))
+    VoiceJob.forward(Fuel.forever(), out, inbox, client)
 
 def VoiceJob.stopped(on: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String) -> IO(Unit):
   match on:
@@ -8319,7 +8312,7 @@ def VoiceJob.op(i: Nat, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U
       BoatUse.go(p, inbox, home, client, id)
     # Settings' local engine
     case 12n:
-      VoiceJob.local("local-status", inbox, home, p, client, id)
+      VoiceJob.status(inbox, home, client, id)
     case 13n:
       VoiceJob.local("local-install", inbox, home, p, client, id)
     case 14n:
@@ -16701,7 +16694,6 @@ def Od.resume(+inbox: Chan(Msg), +home: String) -> IO(Unit):
   do IO<Unit>:
     r : P.Ran <- P.Proc.run("sh", ["-c", "ls -1 2>/dev/null | grep '^q_.*\\.json$' | head -n 200"], ODI.Od.orders(home))
     Od.resume.all(String.lines(ODI.Od.ran(r)), inbox, home)
-
 
 # Send (or allowed for the session): upload; Not now: the agent is told;
 # the empty answer (the run was retired: Stop, archive, delete) tells no one

@@ -3669,7 +3669,7 @@ def Vx.term.btns(ts: List<&2, String>) -> List<&2, VBtn>:
     case +t <> r:
       VBtn{t ++ "  ×", "voice-unterm", t} <> Vx.term.btns(r)
 
-def Set.voice(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+def Set.voice.base(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
   +label0 = MSG.T.common.save(Ty.loc(ty))
   +label1 = MSG.T.queue.remove(Ty.loc(ty))
   +label2 = MSG.T.common.add(Ty.loc(ty))
@@ -3720,7 +3720,7 @@ def Set.settle.done(+ty: Ty, +on: Bool, +x: U32, +w: U32, +y: U32) -> Out:
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) - 6 - Lay.button.w(ty, label1) : U32), (y + 14 : U32), label1, on, "setting", M.Lifecycle.key() ++ "=on"),
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) : U32), (y + 14 : U32), label0, Bool.not(on), "setting", M.Lifecycle.key() ++ "=off")])
 
-def Set.voice.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+def Set.voice.base.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
   +u = S.Nui.ui(n)
   +devs = Vx.devs.loc(Ty.loc(ty), u)
   (386 + (Vx.chips.rows(devs, ty, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
@@ -4360,6 +4360,17 @@ def Set.page.network.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>,
 
   268
 
+def Set.voice(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  +rows = U.Vlocal.rows(Ty.loc(ty), S.Nui.ui(n))
+  +rh = Set.agy.sum(rows, ty, x, w)
+  Out.all([Set.agy.rows(rows, ty, n, x, w, y),
+    Set.voice.base(ty, st, n, x, w, (y + rh : U32)),
+    Set.agy.rows(U.Vlearned.rows(Ty.loc(ty), st), ty, n, x, w, (y + rh + Set.voice.base.h(ty, n, x, w) : U32))])
+
+def Set.voice.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (Set.voice.base.h(ty, n, x, w) + Set.agy.sum(U.Vlocal.rows(Ty.loc(ty), S.Nui.ui(n)), ty, x, w)
+    + Set.agy.sum(U.Vlearned.rows(Ty.loc(ty), U.Ui.state.of(S.Nui.ui(n))), ty, x, w) : U32)
+
 def Set.page.voice(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
 
   Out.all([
@@ -4531,7 +4542,6 @@ def Set.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
 # display scaling. The ordinary desktop keeps the project sidebar visible.
 def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
   Set.settings(ty, st, n, info, v, note, Bool.pick(U32, U32.is_lt(U32.dim(x1, x0), 560), 0, x0), x1, h, raw)
-
 
 # Terminal
 # --------

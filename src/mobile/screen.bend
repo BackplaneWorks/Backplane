@@ -1975,7 +1975,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
       [Mob.set.pair(lc, U.Ui.flag(u, "pairqr"), nf)],
       [Mob.set.row(MSG.T.settings.channel(lc), MSG.T.settings.channel.note(lc), Mob.set.chips.loc(lc, ["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel"))],
       [Mob.set.row("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), Mob.update.btn.loc(lc, U.Update.btn(st, nf, note)))]])
-    case 6n: List.concat(&2, J.Json, [])
+    case 6n: List.concat(&2, J.Json, [Mob.agy.rows(U.Vlocal.rows(lc, u)), Mob.agy.rows(U.Vlearned.rows(lc, st))])
     case 7n: List.concat(&2, J.Json, [Mob.keys(lc, u), Mob.secrets(lc, u)])
     case 8n: List.concat(&2, J.Json, [Mob.agy.rows(U.Agv.rows.loc(lc, u))])
     case 9n: List.concat(&2, J.Json, [Mob.tz(lc, u)])
