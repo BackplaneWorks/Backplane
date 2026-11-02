@@ -62,6 +62,13 @@ test('browser origin-private recording quota, cleanup and exact reads never fall
 test('Electron permission gate and concurrent/navigation fences never grant a foreign or extra stream',async()=>{
  const {installDisplayCapture,displayCapturePermission}=require('../improvements-display-capture.cjs');const frame={url:'https://hub/'},window={isDestroyed:()=>false,webContents:{mainFrame:frame}},origin='https://hub';
  assert(displayCapturePermission(window.webContents,'display-capture',origin,{isMainFrame:true,mediaTypes:['video']},window,origin));for(const [p,d]of [['media',{isMainFrame:true}],['display-capture',{isMainFrame:false}],['display-capture',{isMainFrame:true,mediaTypes:['audio']}]])assert(!displayCapturePermission(window.webContents,p,origin,d,window,origin));
+ const legacy={isMainFrame:true,mediaTypes:[]};assert(displayCapturePermission(window.webContents,'media',origin,legacy,window,origin,'request'));
+ for(const phase of ['check','request']){
+  for(const mediaTypes of [undefined,null,'',{},['video'],['audio'],['audio','video'],['unknown']])assert.equal(displayCapturePermission(window.webContents,'media',origin,{isMainFrame:true,mediaTypes},window,origin,phase),false);
+  for(const mediaType of ['audio','video','unknown'])assert.equal(displayCapturePermission(window.webContents,'media',origin,{isMainFrame:true,mediaType},window,origin,phase),false);
+ }
+ assert.equal(displayCapturePermission(window.webContents,'media',origin,legacy,window,origin),false);
+ for(const [wc,url,d]of [[{},origin,legacy],[window.webContents,'https://foreign',legacy],[window.webContents,origin,{...legacy,isMainFrame:false}]])assert.equal(displayCapturePermission(wc,'media',url,d,window,origin,'request'),false);
  let handler,release,calls=0;installDisplayCapture({electron:{desktopCapturer:{getSources:()=>{calls++;return new Promise(r=>release=r);}}},session:{setDisplayMediaRequestHandler(h){handler=h;}},getWindow:()=>window,origin:()=>origin,wayland:true});const request={frame,userGesture:true,videoRequested:true,audioRequested:false,securityOrigin:origin};
  let first;const active=handler(request,x=>first=x);await handler(request,x=>assert.equal(x,null));await handler(request,x=>assert.equal(x,null));assert.equal(calls,1);window.webContents.mainFrame={url:'https://hub/'};release([{id:'never-granted'}]);await active;assert.equal(first,null);
 });
