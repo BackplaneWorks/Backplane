@@ -28,6 +28,14 @@ def said(cs: List<&2, M.Change>) -> String:
     case _ <> t:
       said(t)
 
+# where it ships, typed (core/order.bend's Order.ask.tool): its quick choice
+# the earlier order's country, sent without "· last time"
+def typed(+turn: M.TurnState) -> M.State:
+  M.State.replay([M.AskOpened{"a4", "t1", "input", "order_ask.typed", "Ship to which country?", "Greece · last time", 4n}], st(turn))
+
+def answered.typed(+ans: String) -> String:
+  said(H.Queue.changes(H.Hub.answer(typed(M.Completed{}), 9n, 0, "r", "a4", ans)))
+
 def answered(+turn: M.TurnState, +ans: String) -> String:
   said(H.Queue.changes(H.Hub.answer(st(turn), 9n, 0, "r", "a3", ans)))
 
@@ -42,3 +50,7 @@ def main() -> IO(Unit):
     C.Check.str("a dismissal closes it", Bool.show(String.contains(answered(M.Completed{}, ""), "closed:a3")), "True")
     C.Check.str("and tells the agent it was skipped", Bool.show(String.contains(answered(M.Completed{}, ""), "user@t1:" ++ H.Order.skipped())), "True")
     C.Check.str("a Stop leaves it open", open(H.Retire.after(st(M.Running{}), H.Hub.interrupt(st(M.Running{}), 9n, 0, "r", "t1"))), "1")
+    C.Check.str("a typed answer to where it ships is posted", Bool.show(String.contains(answered.typed("Portugal"), "user@t1:Portugal")), "True")
+    C.Check.str("its quick choice without the mark", Bool.show(String.contains(answered.typed("Greece · last time"), "user@t1:Greece ")), "True")
+    C.Check.str("and it closes", Bool.show(String.contains(answered.typed("Greece"), "closed:a4")), "True")
+    C.Check.str("a Stop leaves a typed one open too", open(H.Retire.after(typed(M.Running{}), H.Hub.interrupt(typed(M.Running{}), 9n, 0, "r", "t1"))), "2")

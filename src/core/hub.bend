@@ -3243,7 +3243,7 @@ def Order.skipped() -> String:
 def Hub.answer.order(said: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String, +th: String) -> Step:
   match said:
     case True{}:
-      Step.before([M.AskClosed{ask, answer, now}], [Reply.ok(client, id)], Hub.post(s, now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, String.trim(answer)))
+      Step.before([M.AskClosed{ask, answer, now}], [Reply.ok(client, id)], Hub.post(s, now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, OR.Order.ask.value(String.trim(answer))))
     case False{}:
       Step.before([M.AskClosed{ask, answer, now}], [Reply.ok(client, id)], Hub.post(s, now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, Order.skipped()))
 
@@ -3257,7 +3257,8 @@ def Hub.answer.open(order: Bool, +s: M.State, +now: Nat, +client: U32, +id: Stri
 # the user's answer: the ask closes (once; law ask_closes_once), a parked
 # agent request gets its reply, implementing a plan leaves plan mode and
 # asks the agent to carry it out, and an order's question is answered in
-# its thread (Hub.answer.order)
+# its thread (Hub.answer.order; a quick choice "<it> · last time" as
+# <it>, OR.Order.ask.value)
 # A project's own checks wait for the person's OK (server/review.bend's
 # Rvc.trusted): the hub asks in the thread (an "input" ask, tool
 # "checks_ok", id "checks:<sha256>:<n>", server.bend's Hub.checks.ask);
@@ -3296,7 +3297,7 @@ def Hub.answer.cx.t(cx: Bool, order: Bool, +s: M.State, +now: Nat, +client: U32,
 def Hub.answer.k(a: M.Ask, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String) -> Step:
   match a:
     case M.Ask{_, +th, +k, +tool, _, _, True{}, _}:
-      Hub.answer.cx.t(String.eq(tool, "checks_ok"), String.eq(tool, "order_ask"), s, now, client, id, ask, answer, th, k)
+      Hub.answer.cx.t(String.eq(tool, "checks_ok"), OR.Order.ask.is(tool), s, now, client, id, ask, answer, th, k)
     case M.Ask{_, _, _, _, _, _, False{}, _}:
       Step.outs([Reply.ok(client, id)])
 
@@ -4734,7 +4735,7 @@ def Task.by.id(+s: M.State, +id: String) -> M.Task:
 def Retire.hit(a: M.Ask, +th: String) -> Bool:
   match a:
     case M.Ask{_, t, +kind, +tool, _, _, op, _}:
-      Bool.and(op, Bool.and(String.eq(t, th), Bool.not(Bool.or(String.eq(kind, "plan"), String.eq(tool, "order_ask")))))
+      Bool.and(op, Bool.and(String.eq(t, th), Bool.not(Bool.or(String.eq(kind, "plan"), OR.Order.ask.is(tool)))))
 
 def Retire.id(a: M.Ask) -> String:
   match a:

@@ -70,9 +70,9 @@ def Order.prompt.buy() -> String:
   "<backplane_buy>This thread orders the project's parts; the person pressed Buy it. Be brief: short messages, a small table at most, no walls of text. Steps:\n"
   ++ "1. Read `.backplane/intent.md` and every `*.fab.json` (find . -name '*.fab.json' -not -path './extra/*' -not -path './mfg/*'). If a board or part to order has none yet, write it first, measured as the project's instructions say, and say so in a line. In one short message, list what would be ordered (part, what it is, quantity).\n"
   ++ "2. Call the backplane tool `order_review` with action \"gate\". When the review is current and passed it says so: go on. Otherwise Backplane itself tells the person where the review stands (the issues as a list, with the link to `.backplane/review.md`) and asks them; end your turn, and their answer comes as their next message: \"Review for manufacturing\": call delegate_task with the prompt \"Review this project for manufacturing.\" (the task works in this thread's folder, on the very files to be ordered, and its result comes back here), say in one line that it runs as a task of this thread and the order goes on when it's done, and end your turn; when its result comes, call the gate again. \"Fix them first\": delegate_task again with the exact changes `.backplane/review.md` asks for (in this folder, so the order gets them), and once that is done the review once more, then the gate. \"Order without a review\" or \"Order anyway\": go on. Export nothing until the gate passes or the person says to order anyway. Never review or change the design yourself here; this thread only orders.\n"
-  ++ "3. Ask only what is missing, one question at a time with the backplane tool `order_ask` (it never waits: end your turn after each, and the answer comes as the person's next message) so the person can tap the answers (two to four short choices, the likely one first): quantities, and for each rigid board (kind pcb) whether it comes assembled or bare; other board kinds come bare. Where it ships is not a choice: ask it in plain words in your reply, with no `order_ask` and no options (\"Which country should it ship to?\"), and the person types it; use that country's two-letter ISO code as ship_to. A region (EU, Europe, Asia) is not a country: ask which country. When an earlier order's `mfg/*/manifest.json` exists, offer its answers first (its quantities and assembly as choices; its country by name, asking whether it ships there again) and skip what still holds. Boards come in at least 5 and assembly starts at 2 boards (any number up to the quantity). Bare boards can come with a BOM they order parts with themselves (by manufacturer part number at any distributor).\n"
+  ++ "3. Ask only what is missing, one question at a time with the backplane tool `order_ask` (it never waits: end your turn after each, and the answer comes as the person's next message), never in plain words in your reply: Backplane shows each question in its own card above the message box. Questions with choices get two to four short ones, the likely one first: quantities, and for each rigid board (kind pcb) whether it comes assembled or bare; other board kinds come bare. Where it ships is typed: `order_ask` with the question \"Ship to which country?\", `typed` true and no options, so the person gets a box to type it in; when an earlier order's `mfg/*/manifest.json` exists, add `last` with its country's name (it shows as a quick choice). Use the country's two-letter ISO code as ship_to. A region (EU, Europe, Asia) is not a country: ask which country. When an earlier order exists, offer its answers first (its quantities and assembly as choices, its country as `last`) and skip what still holds. Boards come in at least 5 and assembly starts at 2 boards (any number up to the quantity). Bare boards can come with a BOM they order parts with themselves (by manufacturer part number at any distributor).\n"
   ++ "4. Export from the saved files (a fix made through `kicad_ipc` counts once saved with SaveDocument) into `mfg/<YYYYMMDD-HHMM>/`: for each board `<name>/gerbers/` (kicad-cli pcb export gerbers, and kicad-cli pcb export drill with Excellon, mm, PTH and NPTH in separate files, into the same folder), and when it is assembled `<name>/bom.csv` (columns Designator, Quantity, Value, Footprint, MPN, Manufacturer, and LCSC when known; one line per part number) and `<name>/positions.csv` (kicad-cli pcb export pos --format csv --units mm --side both; columns Designator, Mid X, Mid Y, Rotation, Layer); for each mechanical part `<name>/<name>.step`, and for sheet metal also its flat pattern `<name>/<name>.dxf`. Then write `manifest.json` there: {\"spec\": 1, \"title\": \"<the project, in words>\", \"ship_to\": \"US\", \"parts\": [{\"name\" (its fab.json name, e.g. Main board), \"kind\", \"qty\", \"options\", \"features\" (sheet metal: its bends), \"files\": {\"gerbers\": \"<name>/gerbers\", \"bom\", \"positions\"} or {\"step\", \"dxf\"}, \"assemble\": <boards to assemble, 0 for bare>}], \"files\": {\"<path from the folder>\": \"<sha256>\"}}, listing every file (sha256sum).\n"
-  ++ "5. Call the backplane tool `order_quote` with the folder (`mfg/<...>`) and end your turn: Backplane shows the person every file it would send and asks them first. Once they send, it posts the quote with its Buy now link (it opens Stripe) in this thread and you get a message with its total; do not repeat its table. Say in a line or two what it covers, and if it lists problems, what fixes each.\n"
+  ++ "5. Call the backplane tool `order_quote` with the folder (`mfg/<...>`) and end your turn: Backplane shows the person every file it would send and asks them first. Once they send, the files go to the order server and the quote is made (usually 1-2 minutes); meanwhile the thread shows that the quote is on its way. Backplane then posts it with its Buy now link (it opens Stripe) in this thread and you get a message with its total; do not repeat its table. Say in a line or two what it covers, and if it lists problems, what fixes each. If the person writes before the quote comes, call `order_status`: it says whether the files were sent and the quote is being made; never ask them to send or approve again unless it says the files were not sent, and never guess at problems.\n"
   ++ "Only order_quote ever sends anything: never upload files or contact a manufacturer yourself. The person never deals with the fab: there is no fab website, account or preview for them, so never ask them to check anything there; check what can be checked here (the exported files, the positions file, the renders) and say what you checked. Prices are estimates until paid; the person can always take the mfg folder to any manufacturer themselves. Never name the manufacturer.</backplane_buy>"
 
 # The review gate (order_review's action "gate", in a buy thread): the
@@ -156,10 +156,70 @@ def Order.ask.asked() -> String:
   "Asked on the person's screen. End your turn now: their answer comes as their next message, however long they take."
 
 def Order.quote.asked() -> String:
-  "The person is asked whether to send these files. End your turn now: once they send, the quote is posted in this thread and you get a message with its total."
+  "The person is asked on their screen whether to send these files (Send or Not now). End your turn now. Once they send, the files go to the order server and the quote is made (usually 1-2 minutes); the thread shows the person it is on its way, Backplane posts the quote here and you get a message with its total. There is nothing more for them to press: never ask them to send or approve again."
+
+# order_status while the quote is on its way (the files sent, the quote not
+# posted yet: the setting Order.wait.key) or before the person sent them
+# (the approval still open); "" otherwise, and the order server is asked
+def Order.status.sent() -> String:
+  "The files are sent; the quote is being made (usually 1-2 minutes). Backplane posts it in this thread and tells you. Nothing is wrong and there is nothing for the person to press: say it is on its way and end your turn."
+
+def Order.status.unsent() -> String:
+  "The files are not sent yet: Backplane's question whether to send them (Send or Not now) is open on the person's screen. Say so in a line and end your turn; you get a message once they answer."
+
+def Order.status.now(unsent: Bool, sent: Bool) -> String:
+  Bool.pick(String, unsent, Order.status.unsent(), Bool.pick(String, sent, Order.status.sent(), ""))
 
 def Order.quote.declined() -> String:
   "The person chose not to send the files (Not now). Ask whether anything should change first."
+
+# A buy thread's questions show in a "Backplane needs" card above the
+# composer. One whose answer is typed (where it ships) is the tool
+# "order_ask.typed": a box with Continue on every client, its quick choice
+# the earlier order's answer as "<it> · last time" (the answer sent is the
+# choice without it). Every "order_ask…" is an order's question
+# (Order.ask.is: posted as the person's message, never retired; laws
+# order_ask_*)
+def Order.ask.tool(typed: Bool) -> String:
+  Bool.pick(String, typed, "order_ask.typed", "order_ask")
+
+def Order.ask.is(+tool: String) -> Bool:
+  String.starts_with(tool, "order_ask")
+
+def Order.ask.typed(+tool: String) -> Bool:
+  String.eq(tool, "order_ask.typed")
+
+def Order.ask.last.mark() -> String:
+  " · last time"
+
+def Order.ask.value(+choice: String) -> String:
+  Bool.pick(String, String.ends_with(choice, Order.ask.last.mark()), String.trim(String.take(choice, Nat.sub(String.length(choice), String.length(Order.ask.last.mark())))), choice)
+
+def Order.ask.keep(skip: Bool, +x: String, rest: List<&2, String>) -> List<&2, String>:
+  match skip:
+    case True{}:
+      rest
+    case False{}:
+      x <> rest
+
+# the choices but blank ones and the one given
+def Order.ask.but(xs: List<&2, String>, +x: String) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> t:
+      Order.ask.keep(Bool.or(String.is_empty(String.trim(h)), String.eq(String.trim(h), x)), String.trim(h), Order.ask.but(t, x))
+
+def Order.ask.choices.k(none: Bool, +last: String, xs: List<&2, String>) -> List<&2, String>:
+  match none:
+    case True{}:
+      Order.ask.but(xs, "")
+    case False{}:
+      (last ++ Order.ask.last.mark()) <> Order.ask.but(xs, last)
+
+# the ask's options, a line each: the earlier answer first
+def Order.ask.choices(+last: String, xs: List<&2, String>) -> String:
+  String.join(Order.ask.choices.k(String.is_empty(String.trim(last)), String.trim(last), xs), "\n")
 
 # Ordering is on unless the person turns it off in Settings (the setting
 # order.enabled, "on" when never set: on for people updating too, since
@@ -193,10 +253,12 @@ def Order.tools() -> List<&2, J.Json>:
   [Order.tool.def("order_quote", "Get a quote for an exported order: the folder (from this thread's folder, e.g. mfg/20261017-0930) holding manifest.json and the files it lists. Backplane shows the person every file it would send and asks them first, and answers at once: end your turn. Once they send, it uploads the files, waits for the quote (a minute or two), posts it in this thread with a Buy now link and sends you a message with its total and any problems (or that they chose not to send).",
      [Order.tool.prop("dir", "string", "The order's folder, from this thread's folder.")], [J.Str{"dir"}]),
    Order.tool.def("order_status", "Where this thread's last quote or order stands: waiting, quoted (with its total), paid, placed, shipped (with tracking) or delivered.", Nil{}, Nil{}),
-   Order.tool.def("order_ask", "Ask the person one question with choices they can tap (on every device); they may also type their own answer. Answers at once: end your turn, and their answer comes as their next message, however long they take.",
+   Order.tool.def("order_ask", "Ask the person one question, shown in its own card above the message box on every device: choices they can tap, or with typed a box to type the answer in (where it ships); they may always type their own answer. Answers at once: end your turn, and their answer comes as their next message, however long they take.",
      [Order.tool.prop("question", "string", "The question, short and plain."),
-      J.KV{"options", J.Json.obj([J.KV{"type", J.Str{"array"}}, J.KV{"items", J.Json.obj([J.KV{"type", J.Str{"string"}}])}, J.KV{"description", J.Str{"Two to four short choices, the likely one first."}}])}],
-     [J.Str{"question"}, J.Str{"options"}])]
+      J.KV{"options", J.Json.obj([J.KV{"type", J.Str{"array"}}, J.KV{"items", J.Json.obj([J.KV{"type", J.Str{"string"}}])}, J.KV{"description", J.Str{"Two to four short choices, the likely one first; none with typed."}}])},
+      J.KV{"typed", J.Json.obj([J.KV{"type", J.Str{"boolean"}}, J.KV{"description", J.Str{"true when the answer is typed (the country it ships to): the person gets a box with Continue."}}])},
+      Order.tool.prop("last", "string", "With typed: the earlier order's answer (its country's name), offered as a quick choice.")],
+     [J.Str{"question"}])]
 
 # every thread's agent has this one (a buy thread checks, a review records)
 def Order.review.tool() -> J.Json:
@@ -438,6 +500,23 @@ def Order.quote.md(+md: String, +pay: String, +label: String, ok: Bool) -> Strin
     case False{}:
       md
 
+# what the price covers about customs, said where the total is: a
+# duty-paid quote (its shipping's ddp) has nothing left to pay
+def Order.customs(ddp: Bool) -> String:
+  match ddp:
+    case True{}:
+      "Includes import VAT and duties: nothing to pay on delivery."
+    case False{}:
+      "Excludes customs: the courier will contact you to pay any duties and taxes before delivery."
+
+def Order.ddp(+q: J.Json) -> Bool:
+  J.Json.get_bool(J.Json.get_obj(J.Json.get_obj(q, "quote"), "shipping"), "ddp", False{})
+
+# the posted quote says what it covers about customs (its shipping's ddp:
+# Order.customs), whatever the order server wrote above it
+def Order.quote.customs(+md: String, ddp: Bool) -> String:
+  Bool.pick(String, String.is_empty(String.trim(md)), md, md ++ "\n\n" ++ Order.customs(ddp))
+
 # What the person approves before anything is sent: how many files, from
 # where, to where they ship, and each file (the first 40)
 def Order.ask.files(ps: List<&2, String>, n: Nat) -> String:
@@ -473,14 +552,27 @@ def Order.ask.detail(+dir: String, +m: J.Json, +ps: List<&2, String>) -> String:
 def Order.payable(+q: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(q, "status", ""), "ready"), List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(J.Json.get_obj(q, "quote"), "problems"))))
 
+# a quote the order server is still working out
+def Order.pending(+q: J.Json) -> Bool:
+  Bool.or(String.eq(J.Json.get_str(q, "status", ""), "received"), String.eq(J.Json.get_str(q, "status", ""), "analysing"))
+
 # what the agent is told the thread shows: the Buy now link only when the
-# quote can be paid; otherwise there is none, and the agent says why
-def Order.said.note(pay: Bool) -> String:
+# quote can be paid; otherwise there is none, and the agent says why. A
+# quote still being made is neither (test/ordercard_test.bend): an agent told
+# "no Buy now link" while it was invented problems
+def Order.said.note.k(pay: Bool) -> String:
   match pay:
     case True{}:
       "Backplane posted the quote with its Buy now link in this thread; do not repeat its table."
     case False{}:
       "Backplane posted the quote in this thread with NO Buy now link: it cannot be paid until its problems are fixed. Do not say a link is there. Tell the person each problem in plain words and what fixes it (for a destination that cannot be priced, ask for another country), then make a new quote."
+
+def Order.said.note.p(pending: Bool, pay: Bool) -> String:
+  match pending:
+    case True{}:
+      Order.status.sent()
+    case False{}:
+      Order.said.note.k(pay)
 
 # what the agent hears back (never the token or the Buy now link)
 def Order.said(+q: J.Json) -> String:
@@ -490,7 +582,7 @@ def Order.said(+q: J.Json) -> String:
     J.KV{"problems", Maybe.default(&2, J.Json, J.Json.get(J.Json.get_obj(q, "quote"), "problems"), J.Json.arr(Nil{}))},
     J.KV{"warnings", Maybe.default(&2, J.Json, J.Json.get(J.Json.get_obj(q, "quote"), "warnings"), J.Json.arr(Nil{}))},
     J.KV{"order", J.Json.get_obj(q, "order")},
-    J.KV{"note", J.Str{Order.said.note(Order.payable(q))}}]))
+    J.KV{"note", J.Str{Order.said.note.p(Order.pending(q), Order.payable(q))}}]))
 
 # An order's progress, said once each in the buy thread
 def Order.status.text.k(i: Nat, +tracking: String) -> String:
@@ -565,6 +657,180 @@ def Order.done(+st: String) -> Bool:
 # while unpaid it is checked each minute, after that every ten
 def Order.every(+st: String) -> U32:
   Bool.pick(U32, Bool.or(String.eq(st, "ready"), Bool.or(String.eq(st, "quoted"), String.eq(st, ""))), 60000, 600000)
+
+# The order card
+# --------------
+# A buy thread's card, pinned at its top on every client: its steps,
+# Details → Files → Quote → Pay → Made → Shipped, the one at work lit, and
+# a line saying what happens now or what it needs; once quoted the total,
+# what it covers about customs and Buy now (laws order_card_*). From the
+# thread's state alone: an order question open (asked), the files'
+# approval open (files), the quote on its way (the setting
+# Order.wait.key, set from the person's Send until the quote or why there
+# is none is posted: the thread waits, never Finished) and the posted
+# quote as the hub keeps it (the setting Order.quote.key, Order.sum).
+def Order.wait.key(+thread: String) -> String:
+  M.Work.order.key(thread)
+
+def Order.quote.key(+thread: String) -> String:
+  "order.quote." ++ thread
+
+def Order.steps() -> List<&2, String>:
+  ["Details", "Files", "Quote", "Pay", "Made", "Shipped"]
+
+# the total in words: the Buy now label's price ("Buy now · $112.40")
+def Order.total.of(+label: String, +raw: String) -> String:
+  Bool.pick(String, String.starts_with(label, "Buy now · "), String.drop(label, 10n), Bool.pick(String, String.is_empty(raw), "", "$" ++ raw))
+
+# what the hub keeps of a quote for the card (q: the order server's answer,
+# pay: its Buy now link)
+def Order.sum(+q: J.Json, +pay: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"id", J.Str{J.Json.get_str(q, "id", "")}}, J.KV{"state", J.Str{Order.state(q)}},
+    J.KV{"total", J.Str{Order.total.of(J.Json.get_str(J.Json.get_obj(q, "quote"), "pay_label", ""), J.Json.as_raw(J.Json.get(J.Json.get_obj(q, "quote"), "total"), ""))}},
+    J.KV{"ddp", J.Flag{Order.ddp(q)}}, J.KV{"payable", J.Flag{Order.payable(q)}}, J.KV{"pay", J.Str{pay}},
+    J.KV{"label", J.Str{J.Json.get_str(J.Json.get_obj(q, "quote"), "pay_label", "Buy now")}},
+    J.KV{"tracking", J.Str{J.Json.get_str(J.Json.get_obj(q, "order"), "tracking", "")}}]))
+
+# a newer quote always takes the card; a quote's own progress only while it
+# is the card's (an older quote's watcher never overwrites a newer one)
+def Order.sum.keeps(fresh: Bool, +cur: String, +id: String) -> Bool:
+  Bool.or(fresh, Bool.or(String.is_empty(cur), String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(cur), J.Null{}), "id", ""), id)))
+
+def Order.sum.set.k(keep: Bool, +thread: String, +sum: String, +now: Nat) -> List<&2, M.Change>:
+  match keep:
+    case True{}:
+      [M.SettingSet{Order.quote.key(thread), sum, now}]
+    case False{}:
+      Nil{}
+
+# what the hub keeps of a quote (server.bend's Hub.order.quoted)
+def Order.sum.set(+s: M.State, +thread: String, +sum: String, +id: String, fresh: Bool, +now: Nat) -> List<&2, M.Change>:
+  Order.sum.set.k(Order.sum.keeps(fresh, M.Setting.get(s, Order.quote.key(thread), ""), id), thread, sum, now)
+
+# the quote on its way from the person's Send (server.bend's Od.go) ...
+def Order.wait.set(+thread: String, +now: Nat) -> M.Change:
+  M.SettingSet{Order.wait.key(thread), Nat.show(now), now}
+
+# ... until the hub tells the agent what came of it (the quote, why there
+# is none, the files not taken: Hub.order.wake)
+def Order.unwait(+s: M.State, +thread: String, +now: Nat) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, Order.wait.key(thread), "")), Nil{}, [M.SettingSet{Order.wait.key(thread), "", now}])
+
+type OrderCard is Data:
+  OrderCard{step: Nat, line: String, total: String, customs: String, pay: String, label: String}
+
+# the step a quote's state is at (6: delivered, every step done)
+def Order.card.at(+st: String) -> Nat:
+  Bool.pick(Nat, String.eq(st, "delivered"), 6n, Bool.pick(Nat, String.eq(st, "shipped"), 5n,
+    Bool.pick(Nat, Bool.or(String.eq(st, "paid"), String.eq(st, "placed")), 4n, 3n)))
+
+def Order.card.step.k(files: Bool, waiting: Bool, quoted: Bool, +st: String) -> Nat:
+  match files waiting quoted:
+    case True{} _ _:
+      1n
+    case False{} True{} _:
+      2n
+    case False{} False{} True{}:
+      Order.card.at(st)
+    case False{} False{} False{}:
+      0n
+
+# what a quote's state says once it is posted
+def Order.card.said(+st: String, payable: Bool, +tracking: String) -> String:
+  Bool.pick(String, String.eq(st, "expired"), "This quote expired. Ask here for a new one.",
+    Bool.pick(String, String.eq(st, "failed"), "The quote could not be worked out. Ask here to try again.",
+      Bool.pick(String, String.eq(st, "pilot"), "Test payment: nothing was charged or ordered.",
+        Bool.pick(String, String.eq(st, "refunded"), "Refunded: the money is on its way back to you.",
+          Bool.pick(String, Nat.is_ge(Order.card.at(st), 4n), Order.status.note(st, tracking),
+            Bool.pick(String, payable, "Quoted. Buy now to place the order.", "The quote has something to fix first: see it below."))))))
+
+def Order.card.line.k(+i: Nat, running: Bool, +st: String, payable: Bool, +tracking: String) -> String:
+  match i:
+    case 0n:
+      Bool.pick(String, running, "Getting the order ready…", "Reply below to go on.")
+    case 1n:
+      "Check the files below and send them for a quote."
+    case 2n:
+      "Getting your quote… usually 1-2 min"
+    case _:
+      Order.card.said(st, payable, tracking)
+
+# (an open question comes first: the card says it needs the answer)
+def Order.card.line(asked: Bool, +i: Nat, running: Bool, +st: String, payable: Bool, +tracking: String) -> String:
+  match asked:
+    case True{}:
+      "Backplane needs your answer below."
+    case False{}:
+      Order.card.line.k(i, running, st, payable, tracking)
+
+# Buy now only while the quote can be paid and is not paid yet
+def Order.card.buys(+i: Nat, +st: String, payable: Bool) -> Bool:
+  Bool.and(Bool.and(Nat.is_eq(i, 3n), payable), Bool.or(String.eq(st, "ready"), String.eq(st, "quoted")))
+
+def Order.card.of(asked: Bool, +i: Nat, running: Bool, +q: J.Json) -> OrderCard:
+  +st = J.Json.get_str(q, "state", "")
+  +payable = J.Json.get_bool(q, "payable", False{})
+  +shown = Nat.is_ge(i, 3n)
+  +buys = Order.card.buys(i, st, payable)
+  OrderCard{i, Order.card.line(asked, i, running, st, payable, J.Json.get_str(q, "tracking", "")),
+    Bool.pick(String, shown, J.Json.get_str(q, "total", ""), ""),
+    Bool.pick(String, Bool.and(shown, Bool.not(String.is_empty(J.Json.get_str(q, "total", "")))), Order.customs(J.Json.get_bool(q, "ddp", False{})), ""),
+    Bool.pick(String, buys, J.Json.get_str(q, "pay", ""), ""), Bool.pick(String, buys, J.Json.get_str(q, "label", "Buy now"), "")}
+
+# among a thread's open asks (client.bend's Asks.open): the files'
+# approval, an order question
+def Order.asks.files(as: List<&2, M.Ask>) -> Bool:
+  match as:
+    case Nil{}:
+      False{}
+    case M.Ask{_, _, _, +tool, _, _, _, _} <> t:
+      Bool.or(String.eq(tool, "order_quote"), Order.asks.files(t))
+
+def Order.asks.question(as: List<&2, M.Ask>) -> Bool:
+  match as:
+    case Nil{}:
+      False{}
+    case M.Ask{_, _, _, +tool, _, _, _, _} <> t:
+      Bool.or(Order.ask.is(tool), Order.asks.question(t))
+
+def Order.asks.keep(keep: Bool, a: M.Ask, rest: List<&2, M.Ask>) -> List<&2, M.Ask>:
+  match keep:
+    case True{}:
+      a <> rest
+    case False{}:
+      rest
+
+def Order.asks.open.go(as: List<&2, M.Ask>, +th: String) -> List<&2, M.Ask>:
+  match as:
+    case Nil{}:
+      Nil{}
+    case M.Ask{i, +t, k, tool, d, o, +op, an} <> rest:
+      Order.asks.keep(Bool.and(op, String.eq(t, th)), M.Ask{i, t, k, tool, d, o, op, an}, Order.asks.open.go(rest, th))
+
+# what order_status answers without asking the order server: the files not
+# sent yet, or sent and the quote on its way ("" otherwise)
+def Order.status.of(+s: M.State, +th: String) -> String:
+  Order.status.now(Order.asks.files(Order.asks.open.go(M.Asks.all(s), th)), Bool.not(String.is_empty(M.Setting.get(s, Order.wait.key(th), ""))))
+
+# asked: an order question open; files: the approval to send open;
+# waiting: the quote on its way; sum: the setting Order.quote.key
+def Order.card(asked: Bool, files: Bool, waiting: Bool, running: Bool, +sum: String) -> OrderCard:
+  Order.card.of(asked, Order.card.step.k(files, waiting, Bool.not(String.is_empty(sum)), J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(sum), J.Null{}), "state", "")), running,
+    Maybe.default(&2, J.Json, J.Json.parse(sum), J.Null{}))
+
+# a step's mark on the card: "done" before the one at work, "on" for it
+def Order.card.mark(+i: Nat, +k: Nat) -> String:
+  Bool.pick(String, Nat.is_lt(k, i), "done", Bool.pick(String, Nat.is_eq(k, i), "on", ""))
+
+def Order.card.step(c: OrderCard) -> Nat:
+  match c:
+    case OrderCard{i, _, _, _, _, _}:
+      i
+
+def Order.card.text(c: OrderCard) -> String:
+  match c:
+    case OrderCard{_, l, _, _, _, _}:
+      l
 
 # The card every client draws (from the hub's fab.look answer, kept by the
 # client as info fab:<thread>)
@@ -867,3 +1133,23 @@ def Intent.shown.go(ls: List<&2, String>, +acc: List<&2, String>) -> List<&2, St
 
 def Intent.shown(+text: String) -> String:
   String.trim(String.join(Intent.shown.go(String.lines(text), Nil{}), "\n"))
+
+def Order.card.total(c: OrderCard) -> String:
+  match c:
+    case OrderCard{_, _, t, _, _, _}:
+      t
+
+def Order.card.customs(c: OrderCard) -> String:
+  match c:
+    case OrderCard{_, _, _, x, _, _}:
+      x
+
+def Order.card.pay(c: OrderCard) -> String:
+  match c:
+    case OrderCard{_, _, _, _, p, _}:
+      p
+
+def Order.card.label(c: OrderCard) -> String:
+  match c:
+    case OrderCard{_, _, _, _, _, l}:
+      l
