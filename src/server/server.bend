@@ -165,6 +165,8 @@ import ../core/rules.bend as RLS
 import ../core/task.bend as TKS
 import ../core/teach.bend as TE
 import ../core/usage.bend as UZ
+import ./allowanceio.bend as ALIO
+import ../core/allowance.bend as ALQ
 import ./thinstore.bend as TSTO
 import ./design-history.bend as DHIST
 import ./thin-mirror.bend as TMIR
@@ -434,6 +436,7 @@ type Msg is Data:
   # Boat's status.json, read again because it changed: the threads' Boat
   # chips (core/usage.bend's Chip)
   BoatThreads{status: String}
+  AllowanceSeen{snapshot: String}
   # the thin index and the mail cache, built off the hub after it
   # listened (Thin.warm)
   ThinWarm{index: THIN.Index, mail: TMAIL.Cache}
@@ -6816,12 +6819,36 @@ def KSync.run(+home: String) -> IO(Unit):
 def KSync.start(+home: String) -> IO(Unit):
   IO.spawn(Unit, KSync.run(home))
 
+# Account limits are read after listening, on a worker, never on the event
+# loop or the model-selection path. The collector serializes/cache-bounds
+# all callers (including Check limits) to one read per five minutes.
+def AllowanceJob.post(+inbox: Chan(Msg), +home: String) -> IO(Unit):
+  do IO<Unit>:
+    snapshot : String <- ALIO.AllowanceIO.read(home ++ "/allowance-codex.json")
+    Self.post(inbox, AllowanceSeen{snapshot})
+
+def AllowanceJob.loop(fuel: Nat, +inbox: Chan(Msg), +home: String) -> IO(Unit):
+  match fuel:
+    case 0n: IO.pure(Unit, Unit{})
+    case 1n+f:
+      do IO<Unit>:
+        AllowanceJob.post(inbox, home)
+        IO.sleep(300000)
+        AllowanceJob.loop(f, inbox, home)
+
+def AllowanceJob.start(copy: Bool, +inbox: Chan(Msg), +home: String) -> IO(Unit):
+  match copy:
+    case True{}: IO.pure(Unit, Unit{})
+    case False{}: IO.spawn(Unit, AllowanceJob.loop(Fuel.forever(), inbox, home))
+
 def Refresh.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   do IO<Unit>:
     +user : String <- Env.get("HOME", "")
     xs : String <- Env.get("XDG_STATE_HOME", "")
     IO.spawn(Unit, Chips.loop(Fuel.forever(), inbox, UZ.Chip.path(xs, user), ""))
     IO.spawn(Unit, Refresh.loop(Fuel.forever(), inbox, user, Cfg.home(cfg), Models.cache(Cfg.home(cfg)), Net.models(Cfg.net(cfg)), "?", 0n))
+    copy : Bool <- P.Proc.copy()
+    AllowanceJob.start(copy, inbox, Cfg.home(cfg))
 
 def Main.prepare(+user: String, +exe: String) -> IO(Boot):
   do IO<Boot>:
@@ -8503,6 +8530,28 @@ def Tk.input(m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, +o: J.Json) -> IO(Unit):
 
 # one B.BotFx: home, gone, hook, unhook, send, invite, join, unpeer, google,
 # token, retoken, untoken, voice
+# The explicit read is a single worker, not a second polling loop.
+def AllowanceJob.once(copy: Bool, inbox: Chan(Msg), home: String) -> IO(Unit):
+  match copy:
+    case True{}: IO.pure(Unit, Unit{})
+    case False{}: AllowanceJob.post(inbox, home)
+
+def AllowanceJob.request(allowed: Bool, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
+  match allowed:
+    case False{}: BotJob.fail(inbox, client, id, "No default Codex allowance source for this thread")
+    case True{}:
+      do IO<Unit>:
+        BotJob.reply(inbox, client, id, True{}, Nil{})
+        copy : Bool <- P.Proc.copy()
+        AllowanceJob.once(copy, inbox, home)
+
+def AllowanceJob.dispatch(read: Bool, +st: M.State, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U32, +id: String) -> IO(Unit):
+  match read:
+    case False{}: VoiceJob.run(inbox, home, J.Json.show(p), client, id)
+    case True{}:
+      +th = J.Json.get_str(p, "thread", "")
+      AllowanceJob.request(ALQ.Allowance.read.allowed(st, th), inbox, home, client, id)
+
 def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: String, +c: String) -> IO(Unit):
   match i:
     case 0n:
@@ -8530,7 +8579,7 @@ def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: S
     case 11n:
       IO.spawn(Unit, BotJob.token(2n, inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), a, BotJob.client(b), BotJob.id(c)))
     case 12n:
-      IO.spawn(Unit, VoiceJob.run(inbox, Cfg.home(cfg), a, BotJob.client(b), BotJob.id(c)))
+      IO.spawn(Unit, AllowanceJob.dispatch(String.eq(J.Json.get_str(ACCT.Accounts.parse(a), "op", ""), "allowance"), st, inbox, Cfg.home(cfg), ACCT.Accounts.parse(a), BotJob.client(b), BotJob.id(c)))
     case 13n:
       BotJob.scratch(BN.Bn.safe(a), inbox, Cfg.home(cfg) ++ "/scratch/", a)
     case 14n:
@@ -13509,6 +13558,33 @@ def Hub.chips(p: M.State & Hub, +status: String, +now: Nat) -> IO(Hub):
   (st, h) = p
   Hub.step(h, B.Step{UZ.Chip.changes(st, status, now), Nil{}})
 
+# Publication ordering is independent of worker/cache completion order.
+# Pending cache observations never become provider readings. At equal attempt
+# time the first complete result is immutable; a newer attempt may clear an
+# old account even when its successful reading time is lower or unknown.
+def Hub.allowance.complete(+o: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(o, "phase", "complete"), "complete"),
+    Bool.or(String.eq(J.Json.get_str(o, "state", ""), "ok"), Bool.or(String.eq(J.Json.get_str(o, "state", ""), "error"), String.eq(J.Json.get_str(o, "state", ""), "unavailable"))))
+
+def Hub.allowance.ordered(+old: J.Json, +next: J.Json, +now: Nat) -> Bool:
+  +before = ALQ.Allowance.nat(old, "attempted_at")
+  +after = ALQ.Allowance.nat(next, "attempted_at")
+  Bool.and(Bool.and(Hub.allowance.complete(next), String.eq(J.Json.get_str(next, "phase", ""), "complete")), Bool.and(Nat.is_gt(after, 0n), Bool.and(Nat.is_le(after, now),
+    Bool.or(Nat.is_gt(after, before), Bool.and(Nat.is_eq(after, before), Bool.not(Hub.allowance.complete(old)))))))
+
+def Hub.allowance.changes.parsed(+st: M.State, +snapshot: String, +now: Nat, +next: J.Json) -> List<&2, M.Change>:
+  +old = Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(st, "allowance.codex", "")), J.Null{})
+  Bool.pick(List<&2, M.Change>, Bool.and(String.eq(J.Json.get_str(next, "provider", ""), "codex"),
+    Bool.and(String.eq(J.Json.get_str(next, "source", ""), "codex-app-server"), Hub.allowance.ordered(old, next, now))),
+    [M.SettingSet{"allowance.codex", snapshot, now}], Nil{})
+
+def Hub.allowance.changes(+st: M.State, +snapshot: String, +now: Nat) -> List<&2, M.Change>:
+  Hub.allowance.changes.parsed(st, snapshot, now, Maybe.default(&2, J.Json, J.Json.parse(snapshot), J.Null{}))
+
+def Hub.allowance(p: M.State & Hub, snapshot: String, now: Nat) -> IO(Hub):
+  (st, h) = p
+  Hub.step(h, B.Step{Hub.allowance.changes(st, snapshot, now), Nil{}})
+
 def Hub.line.k(p: M.State & Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
   (st, h) = p
   Hub.step(h, B.Hub.agent_line(st, now, thread, line))
@@ -17296,6 +17372,7 @@ def Msg.kind(m: Msg) -> String:
       "order_gate"
     case OrderQuoted{_, _, _, _}:
       "order_quoted"
+    case AllowanceSeen{_}: "allowance_seen"
     case BoatThreads{_}:
       "boat_threads"
     case ThinWarm{_, _}:
@@ -18600,6 +18677,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.order.gate(kind, h, thread, md, now)
     case OrderQuoted{+thread, +sum, +id, fresh}:
       Hub.order.quoted(h, thread, sum, id, fresh, now)
+    case AllowanceSeen{snapshot}: Hub.allowance(Hub.state(h), snapshot, now)
     case BoatThreads{status}:
       Hub.chips(Hub.state(h), status, now)
     case ThinWarm{i, m}:
