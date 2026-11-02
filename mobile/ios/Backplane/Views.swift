@@ -1273,6 +1273,10 @@ struct ThreadScreen: View {
         if let td = thread.todos, td.open == true {
             TodosPanel(model: model, todos: td).disabled(!live)
         }
+        // a buy thread's Order card, under the bar
+        if let c = thread.order {
+            OrderCardView(card: c).disabled(!live)
+        }
         TimelineScroll(position: position, ids: thread.entries.map(\.id), earlier: thread.earlier ?? 0,
                        loadEarlier: { live && model.loadEarlier(thread.id, viewport: position.reading) },
                        later: thread.later ?? 0, loadLater: { live && model.loadLater(thread.id, viewport: position.reading) },
@@ -1406,10 +1410,17 @@ struct ThreadScreen: View {
                         .disabled(!live)
                 }
             }
-            if !thread.branch.isEmpty || !(thread.boat ?? "").isEmpty {
+            if !thread.branch.isEmpty || !(thread.boat ?? "").isEmpty || thread.order != nil {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {
-                        Text(thread.title).font(.headline).lineLimit(1)
+                        HStack(spacing: 6) {
+                            // a buy thread's title is marked an Order (the cart)
+                            if thread.order != nil {
+                                Label("ORDER", systemImage: "cart").font(.caption2.bold()).foregroundStyle(PhaseColor.accent)
+                                    .padding(.horizontal, 4).overlay(Rectangle().stroke(PhaseColor.accent, lineWidth: 1))
+                            }
+                            Text(thread.title).font(.headline).lineLimit(1)
+                        }
                         if !thread.branch.isEmpty {
                             Text(thread.branch).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }

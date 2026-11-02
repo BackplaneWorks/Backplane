@@ -12,6 +12,7 @@ import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/signal.bend as SG
 import ../core/client.bend as U
+import ../core/order.bend as OR
 import ../core/usage.bend as UZ
 import ../core/usage_page.bend as UP
 import ../core/usage_graph.bend as UG
@@ -1058,6 +1059,92 @@ def Mob.asks(+lc: I.Loc, as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, Strin
     case a <> t:
       Mob.ask(lc, a, draft, nf) <> Mob.asks(lc, t, draft, nf)
 
+# A buy thread's asks, as the web's "Backplane needs" cards (view.bend's
+# View.needs): an order question gives its question, its choices as
+# buttons ("chips", the earlier answer marked "· last time" and sent
+# without it), a box (typed: it leads, the question where it ships) whose
+# text the app sends as "answer" with pre ++ the text (Continue or the
+# keyboard's Go), and Skip; the files' approval keeps its buttons with the
+# needs head. Any other ask is as everywhere.
+def Mob.needs.chips(ls: List<&2, String>, +id: String, +first: Bool) -> List<&2, J.Json>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Mob.btn(l, id ++ "|" ++ OR.Order.ask.value(l), first) <> Mob.needs.chips(t, id, False{})
+
+def Mob.needs.q(+lc: I.Loc, a: M.Ask) -> J.Json:
+  match a:
+    case M.Ask{+id, _, +k, +tool, +d, +o, _, _}:
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str(k)}, J.KV{"needs", J.Json.bool(True{})},
+        J.KV{"head", J.Json.str("Backplane needs")}, J.KV{"detail", J.Json.str(d)}, J.KV{"blocks", J.Json.arr(Nil{})},
+        J.KV{"typed", J.Json.bool(OR.Order.ask.typed(tool))}, J.KV{"pre", J.Json.str(id ++ "|")},
+        J.KV{"placeholder", J.Json.str(Bool.pick(String, OR.Order.ask.typed(tool), "Type it here", "Or type an answer"))},
+        J.KV{"go", J.Json.str("Continue")}, J.KV{"skip", Mob.btn("Skip", id ++ "|", False{})},
+        J.KV{"buttons", J.Json.arr(Mob.needs.chips(OR.Order.ask.but(String.split(o, '\n'), ""), id, Bool.not(OR.Order.ask.typed(tool))))}])
+
+def Mob.needs.files(+lc: I.Loc, a: M.Ask, +draft: String) -> J.Json:
+  match a:
+    case M.Ask{+id, _, +k, +tool, +d, +o, _, _}:
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str(k)}, J.KV{"needs", J.Json.bool(True{})},
+        J.KV{"head", J.Json.str("Backplane needs · " ++ U.Ask.head.loc(lc, k, tool, d))}, J.KV{"detail", J.Json.str(d)}, J.KV{"blocks", J.Json.arr(Nil{})},
+        J.KV{"buttons", J.Json.arr(Mob.ask.btns.loc(lc, C.Codec.pos(["plan", "input", "send"], U.Ask.bkind(k, tool)), id, o, draft))}])
+
+def Mob.needs.k(i: Nat, +lc: I.Loc, a: M.Ask, +draft: String, +nf: Map<&2, String>) -> J.Json:
+  match i:
+    case 0n:
+      Mob.needs.q(lc, a)
+    case 1n:
+      Mob.needs.files(lc, a, draft)
+    case _:
+      Mob.ask(lc, a, draft, nf)
+
+def Mob.needs(+lc: I.Loc, a: M.Ask, +draft: String, +nf: Map<&2, String>) -> J.Json:
+  match a:
+    case M.Ask{i, th, k, +tool, d, o, op, an}:
+      Mob.needs.k(Bool.pick(Nat, OR.Order.ask.is(tool), 0n, Bool.pick(Nat, String.eq(tool, "order_quote"), 1n, 2n)), lc, M.Ask{i, th, k, tool, d, o, op, an}, draft, nf)
+
+def Mob.needs.all(+lc: I.Loc, as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>) -> List<&2, J.Json>:
+  match as:
+    case Nil{}:
+      Nil{}
+    case a <> t:
+      Mob.needs(lc, a, draft, nf) <> Mob.needs.all(lc, t, draft, nf)
+
+def Mob.asks.of(+lc: I.Loc, buying: Bool, as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>) -> List<&2, J.Json>:
+  match buying:
+    case True{}:
+      Mob.needs.all(lc, as, draft, nf)
+    case False{}:
+      Mob.asks(lc, as, draft, nf)
+
+# A buy thread's Order card (client.bend's Fab.order, as the web's
+# View.order): the project's name, the steps with each one's mark ("done",
+# "on" or ""), what happens now (waiting: the quote on its way), and once
+# quoted the total, the customs line and Buy now (its label and link, which
+# the app opens in the browser); null for any other thread. The apps show
+# it under the top bar and mark the title Order.
+def Mob.order.steps(ss: List<&2, String>, +i: Nat, +k: Nat) -> List<&2, J.Json>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      J.Json.obj([J.KV{"label", J.Json.str(x)}, J.KV{"mark", J.Json.str(OR.Order.card.mark(i, k))}]) <> Mob.order.steps(t, i, 1n+k)
+
+def Mob.order.card(+st: M.State, +id: String, +c: OR.OrderCard) -> J.Json:
+  J.Json.obj([J.KV{"name", J.Json.str(U.Ui.project_title(st, U.Ui.thread_project(U.Ui.thread(st, id))))},
+    J.KV{"steps", J.Json.arr(Mob.order.steps(OR.Order.steps(), OR.Order.card.step(c), 0n))},
+    J.KV{"line", J.Json.str(OR.Order.card.text(c))}, J.KV{"waiting", J.Json.bool(Nat.is_eq(OR.Order.card.step(c), 2n))},
+    J.KV{"total", J.Json.str(OR.Order.card.total(c))}, J.KV{"customs", J.Json.str(OR.Order.card.customs(c))},
+    J.KV{"pay", J.Json.str(OR.Order.card.pay(c))}, J.KV{"label", J.Json.str(OR.Order.card.label(c))}])
+
+def Mob.order(buying: Bool, +st: M.State, +id: String, running: Bool) -> J.Json:
+  match buying:
+    case True{}:
+      Mob.order.card(st, id, U.Fab.order(st, id, running))
+    case False{}:
+      J.Null{}
+
 # Subagents (core/subs.bend): what this thread delegated ("select" with
 # the row's key opens its thread) and the agent's own ("fold" with its
 # value opens or shuts its steps), and the thread that delegated this one
@@ -1544,7 +1631,8 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"entries", J.Json.arr(List.append(&2, J.Json, Mob.paged.es(lc, pg, st, id, nf, drafts, V.View.running(turn)), Mob.pending(lc, Bool.and(CP.Pending.visible(ph), Bool.not(CP.Pending.has(M.State.mine(st, id)))), id)))},
         J.KV{"earlier", J.Json.nat(U.Win.hidden(pg))},
         J.KV{"sending", J.Json.arr(Mob.strs(pend))},
-        J.KV{"asks", J.Json.arr(Mob.asks(lc, U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
+        J.KV{"asks", J.Json.arr(Mob.asks.of(lc, U.Fab.buying(st, id), U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
+        J.KV{"order", Mob.order(U.Fab.buying(st, id), st, id, V.View.running(turn))},
         J.KV{"queued", J.Json.str("")},
         J.KV{"queue", J.Json.arr(List.append(&2, J.Json, Mob.sbox.q(lc, st, U.Sbox.ask.in(U.Sbox.asks(st), id)), List.append(&2, J.Json, Mob.fab(lc, String.eq(U.Str.get(drafts, "@intent"), id), st, nf, id, V.View.running(turn)), Mob.queue(lc, M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn)))))},
         J.KV{"todos", Mob.todos(lc, nf, st, id, U.Todos.shown(st, id, V.View.running(turn)))},

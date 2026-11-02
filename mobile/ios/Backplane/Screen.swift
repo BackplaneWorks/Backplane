@@ -162,6 +162,32 @@ struct Ask: Decodable, Identifiable {
     let buttons: [AskButton]
     // a browser task's pause: the hub path of its screenshot
     let image: String?
+    // a buy thread's "Backplane needs" card (screen.bend's Mob.needs): an
+    // order question has a box whose text is sent as "answer" with pre and
+    // the text (typed: the box leads, where it ships), its choices as
+    // buttons, go (Continue) and skip; the files' approval only the look
+    var needs: Bool? = nil
+    var typed: Bool? = nil
+    var pre: String? = nil
+    var placeholder: String? = nil
+    var go: String? = nil
+    var skip: AskButton? = nil
+}
+
+// a buy thread's Order card (screen.bend's Mob.order): the project, the
+// steps (mark "done", "on" or ""), what happens now (waiting: the quote on
+// its way), and once quoted the total, the customs line and Buy now (its
+// label and link, opened in the browser); the title is marked Order
+struct OrderStep: Decodable, Hashable {
+    let label, mark: String
+}
+
+struct OrderCard: Decodable {
+    let name: String
+    let steps: [OrderStep]
+    let line: String
+    let waiting: Bool
+    let total, customs, pay, label: String
 }
 
 // the subagent panel (src/core/subs.bend): what the thread delegated and
@@ -535,6 +561,8 @@ struct ThreadView: Decodable {
     let queued: String
     let queue: [QueueRow]?
     let todos: Todos?
+    // a buy thread's Order card (null for any other thread)
+    var order: OrderCard? = nil
     // how many older entries the page leaves out ("earlier" shows more)
     let earlier: Int?
     var later: Int? = nil

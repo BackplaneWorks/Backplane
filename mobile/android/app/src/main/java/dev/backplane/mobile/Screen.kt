@@ -123,9 +123,25 @@ data class MsgCtx(val uri: String, val title: String, val more: Int)
 // action: what the button sends ("" is "answer"; a browser card's Take over is "tk-takeover")
 data class AskButton(val label: String, val value: String, val primary: Boolean, val action: String = "")
 // image: the hub path of a browser task's screenshot at the pause ("" for none)
+// needs: a buy thread's "Backplane needs" card (screen.bend's Mob.needs):
+// an order question has a box whose text is sent as "answer" with pre and
+// the text (typed: the box leads, where it ships), its choices as buttons,
+// go (Continue) and skip; the files' approval only the needs look
 data class Ask(
     val id: String, val kind: String, val head: String, val detail: String, val blocks: List<Block>, val buttons: List<AskButton>,
     val image: String = "", val risky: Boolean = false,
+    val needs: Boolean = false, val typed: Boolean = false, val pre: String = "", val placeholder: String = "",
+    val go: String = "", val skip: AskButton? = null,
+)
+
+// a buy thread's Order card (screen.bend's Mob.order): the project, the
+// steps (mark "done", "on" or ""), what happens now (waiting: the quote on
+// its way), and once quoted the total, the customs line and Buy now (its
+// label and link, opened in the browser); the title is marked Order
+data class OrderStep(val label: String, val mark: String)
+data class OrderCard(
+    val name: String, val steps: List<OrderStep>, val line: String, val waiting: Boolean,
+    val total: String, val customs: String, val pay: String, val label: String,
 )
 
 // the subagent panel (src/core/subs.bend): what the thread delegated and
@@ -360,6 +376,7 @@ data class ThreadView(
     // the thread's Boat chip ("Boat · large · running"; "" for none), a tap opens Settings
     val boat: String = "",
     val canChild: Boolean = false,
+    val order: OrderCard? = null,
     // dictation in this thread (screen.bend's Mob.voice)
     val voice: VoiceView? = null,
 )
@@ -662,6 +679,10 @@ private fun threadOf(o: JSONObject) = ThreadView(
         td.optBoolean("open", false), td.optString("toggle"), td.optString("more"), td.optString("moreValue"), td.optString("count"),
             if (td.has("items")) td.optJSONArray("items").map { TodoItem(it.optString("id"), it.optString("text"), it.optString("status"), it.optString("scope"), it.optString("check"), it.optString("delete"), it.optString("up"), it.optString("down")) } else null, td.optString("addScope")) },
     canChild = o.optBoolean("canChild"),
+    order = o.optJSONObject("order")?.let { c ->
+        OrderCard(c.optString("name"), c.optJSONArray("steps").map { OrderStep(it.optString("label"), it.optString("mark")) },
+            c.optString("line"), c.optBoolean("waiting"), c.optString("total"), c.optString("customs"), c.optString("pay"), c.optString("label"))
+    },
 )
 
 private fun choices(a: JSONArray?) = a.map { Choice(it.optString("label"), it.optString("value"), it.optBoolean("on")) }
@@ -736,7 +757,9 @@ private fun island(o: JSONObject?) = Island(
 private fun askOf(a: JSONObject) =
     Ask(a.optString("id"), a.optString("kind"), a.optString("head"), a.optString("detail"), blocks(a.optJSONArray("blocks")),
         a.optJSONArray("buttons").map { AskButton(it.optString("label"), it.optString("value"), it.optBoolean("primary"), it.optString("action")) },
-        a.optString("image"), a.optBoolean("risky"))
+        a.optString("image"), a.optBoolean("risky"),
+        a.optBoolean("needs"), a.optBoolean("typed"), a.optString("pre"), a.optString("placeholder"), a.optString("go"),
+        a.optJSONObject("skip")?.let { AskButton(it.optString("label"), it.optString("value"), false) })
 
 private fun botBrowser(o: JSONObject) = BotBrowser(
     o.optString("url"), o.optString("n"), o.optInt("mode"), o.optString("title"), o.optString("clock"), o.optInt("steps"),
