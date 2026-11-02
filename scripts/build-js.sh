@@ -26,6 +26,8 @@
 # and the emit's peak RSS.
 set -eu
 cd "$(dirname "$0")/.."
+. scripts/heavy-guard.sh
+[ "${1:-}" = --key ] || heavy_guard build "$@"
 # This review must run even for --key and before a cached emit is accepted.
 # A new sidebar draft reader must not inherit the reduced private image key.
 if [ "${1:-}" = --key ]; then
