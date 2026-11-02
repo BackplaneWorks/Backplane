@@ -35,7 +35,8 @@ def SignalInput.asks(st: SignalInput) -> List<&2, M.Ask>:
 # out. 6: active (bit 1, Signal.bits) only through confirmed owned work or
 # its children's (Signal.waits); 7: finished or idle with something still
 # out that the hub waits on but none of it confirmed at work (Signal.out:
-# M.Work.busy's delegated tasks, background rows, watched work), so no
+# M.Work.busy's delegated tasks, background rows, watched work, a buy
+# thread's quote on its way), so no
 # activity bit (the island, the plane's run, offline hiding and its
 # parents read it as before). Both are named "waiting", never "finished".
 # The index is transient: do not persist it or change the event/state codecs.
@@ -237,7 +238,7 @@ def Signal.shelf(s: M.Shelf) -> Bool:
 # their outcome is still owed) and its watched work
 def Signal.out(+st: SignalInput, +kids: Map<&2, Nat>, +id: String) -> Bool:
   Bool.or(Nat.is_gt(Signal.at(kids, id), 0n), Bool.or(Nat.is_gt(M.Bg.live(M.Bg.lines(SignalInput.setting(st, M.Bg.key(id)))), 0n),
-    Nat.is_gt(M.Bg.live(M.Bg.lines(SignalInput.setting(st, M.Work.watch.key(id)))), 0n)))
+    Bool.or(Nat.is_gt(M.Bg.live(M.Bg.lines(SignalInput.setting(st, M.Work.watch.key(id)))), 0n), Bool.not(String.is_empty(SignalInput.setting(st, M.Work.order.key(id)))))))
 
 # idle (0) or finished (5) with work out waits (7)
 def Signal.out.k(out: Bool, +n: Nat) -> Nat:

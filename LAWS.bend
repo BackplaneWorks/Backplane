@@ -2809,6 +2809,10 @@ law recover_interrupts_running:
 law recover_closes_asks:
   {H.Pend.open(M.Asks.all(H.Rec.after(H.Rec.demo(M.Running{}), 10n)), "t1") == 0n : Nat}
 
+# but an order's question, which parks nothing, stays to be answered
+law recover_keeps_order_ask:
+  {H.Pend.open(M.Asks.all(H.Rec.after(M.State.replay([M.AskOpened{"a2", "t1", "input", "order_ask.typed", "Ship to which country?", "", 4n}], H.Rec.demo(M.Completed{})), 10n)), "t1") == 1n : Nat}
+
 # a thread that was not running is left as it was
 law recover_leaves_idle:
   {H.Hub.running(H.Hub.thread(H.Rec.after(H.Rec.demo(M.Completed{}), 10n), "t1")) == False{} : Bool}
@@ -10293,6 +10297,63 @@ law order_gate_cuts_summary:
 law order_ask_alert_plain:
   for q: String
   {NO.Alert.ask.say("order_ask", q) == q : String}
+
+# where it ships is typed in a box (order_ask.typed): an order question all
+# the same, alerted in plain words and left open by a Stop
+law order_ask_typed_alert_plain:
+  for q: String
+  {NO.Alert.ask.say("order_ask.typed", q) == q : String}
+
+law order_ask_typed_survives_retire:
+  {H.Retire.hit(M.Ask{"a4", "t1", "input", "order_ask.typed", "Ship to which country?", "Greece · last time", True{}, ""}, "t1") == False{} : Bool}
+
+# its quick choice, the earlier order's answer, is sent without its mark
+law order_ask_last_value:
+  {ORD.Order.ask.value("Greece · last time") == "Greece" : String}
+
+# the order card: the files' approval comes first, then the quote on its
+# way (never Finished: test/ordercard_test.bend), then
+# where the quote stands
+law order_card_files_first:
+  for +st: String
+  {ORD.Order.card.step.k(True{}, True{}, True{}, st) == 1n : Nat}
+
+law order_card_waits:
+  for +st: String
+  {ORD.Order.card.step.k(False{}, True{}, True{}, st) == 2n : Nat}
+
+law order_card_waiting_says:
+  for +st: String
+  for +tracking: String
+  {ORD.Order.card.line(False{}, 2n, False{}, st, True{}, tracking) == "Getting your quote… usually 1-2 min" : String}
+
+law order_card_question_first:
+  for +i: Nat
+  for +st: String
+  {ORD.Order.card.line(True{}, i, False{}, st, True{}, "") == "Backplane needs your answer below." : String}
+
+# Buy now only while the quote can be paid and is not paid yet
+law order_card_no_buy_paid:
+  {ORD.Order.card.buys(4n, "paid", True{}) == False{} : Bool}
+
+law order_card_buys_quoted:
+  {ORD.Order.card.buys(3n, "ready", True{}) == True{} : Bool}
+
+# what the price covers about customs, said plainly
+law order_customs_paid:
+  {ORD.Order.customs(True{}) == "Includes import VAT and duties: nothing to pay on delivery." : String}
+
+law order_customs_courier:
+  {ORD.Order.customs(False{}) == "Excludes customs: the courier will contact you to pay any duties and taxes before delivery." : String}
+
+# order_status while the quote is made says it is on its way, never that
+# something is wrong
+law order_status_sent_says:
+  {ORD.Order.status.now(False{}, True{}) == ORD.Order.status.sent() : String}
+
+law order_status_unsent_says:
+  for sent: Bool
+  {ORD.Order.status.now(True{}, sent) == ORD.Order.status.unsent() : String}
 
 # a tool call with only a question (order_ask) is summed up by it, not by
 # its name again (the phone's running line: "<tool> <summary>")

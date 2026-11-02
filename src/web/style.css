@@ -1256,6 +1256,44 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 .fab-ready .fab-x { padding: 2px 8px; border: none; background: none; color: var(--faint); font-size: calc(16px * var(--text-scale, 100) / 100); line-height: 1; }
 .fab-ready .fab-x:hover { color: var(--text); }
 .fab-ready { animation: fab-ping 1.6s ease-out 1; }
+/* a buy thread's order card under the top bar (view.bend's View.order) */
+.order-card { margin: 8px 16px 0; padding: 8px 12px; border: 1px solid var(--line); border-left: 2px solid var(--accent); background: var(--panel); display: flex; flex-direction: column; gap: 6px; max-width: 860px; font-size: calc(12px * var(--text-scale, 100) / 100); }
+.order-card.waiting { border-left-color: var(--waiting); }
+.oc-head { display: flex; align-items: center; gap: 6px; color: var(--dim); min-width: 0; }
+.oc-head svg { flex: none; color: var(--accent); }
+.oc-k { color: var(--text); font-weight: 600; }
+.oc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-name::before { content: "· "; color: var(--faint); }
+.oc-steps { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; color: var(--faint); font-family: var(--mono); }
+.oc-step.done { color: var(--ok); }
+.oc-step.on { color: var(--text); font-weight: 600; }
+.oc-step.on::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 6px 1px 0; background: var(--accent); vertical-align: middle; }
+.order-card.waiting .oc-step.on::before { background: var(--waiting); animation: pulse 1.2s ease-in-out infinite; }
+.oc-line { color: var(--text); overflow-wrap: anywhere; }
+.order-card.waiting .oc-line { color: var(--waiting); }
+.oc-quote { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding-top: 6px; border-top: 1px solid var(--line); }
+.oc-total { font-family: var(--mono); font-weight: 600; font-size: calc(14px * var(--text-scale, 100) / 100); }
+.oc-customs { flex: 1 1 260px; min-width: 0; color: var(--dim); }
+.oc-buy { padding: 5px 14px; background: var(--accent); color: var(--on-accent); text-decoration: none; white-space: nowrap; }
+.oc-buy:hover { filter: brightness(1.1); }
+/* the title of a buy thread: marked an Order */
+.order-mark { display: inline-flex; align-items: center; gap: 4px; flex: none; padding: 1px 6px; border: 1px solid var(--accent); color: var(--accent); font-size: calc(11px * var(--text-scale, 100) / 100); text-transform: uppercase; letter-spacing: 0.06em; }
+/* "Backplane needs": a buy thread's question above the composer */
+.ask.needs { border: 1px solid var(--accent); border-left-width: 3px; background: var(--raise); gap: 8px; padding: 10px 12px; }
+.needs-head { display: flex; align-items: center; gap: 8px; }
+.needs-k { color: var(--accent); font-weight: 600; font-size: calc(12px * var(--text-scale, 100) / 100); }
+.needs-what { color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.needs-skip { margin-left: auto; padding: 1px 8px; background: none; border: 0; color: var(--faint); }
+.needs-skip:hover { color: var(--text); }
+.needs-q { font-size: calc(14px * var(--text-scale, 100) / 100); color: var(--text); overflow-wrap: anywhere; white-space: pre-wrap; }
+.needs-box { display: flex; gap: 6px; align-items: stretch; }
+.needs-box input { flex: 1 1 auto; min-width: 0; max-width: 420px; padding: 6px 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+.needs-box input:focus { border-color: var(--accent); outline: none; }
+.needs-box button { padding: 5px 14px; }
+.needs-box button[disabled] { opacity: .5; cursor: default; }
+.needs-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.needs-chips:empty { display: none; }
+.ask.needs .ask-btns { justify-content: flex-start; }
 @keyframes fab-ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
 .kicad-notice { position: relative; border: 1px solid var(--warn); border-radius: 0; padding: 16px; margin: 12px 0; text-align: left; width: 100%; max-width: 720px; box-sizing: border-box; overflow-wrap: anywhere; }
 .kicad-notice strong { display: block; padding-right: 30px; }
