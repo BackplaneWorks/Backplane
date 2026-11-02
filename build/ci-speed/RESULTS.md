@@ -215,3 +215,60 @@ Surviving handoff source: Codex recovery transcript
 lines505/512; original helper receipt in Claude subagent-a49849459aaa2f2d1.jsonl
 line932 (paths supplied by owner335450). These are historical evidence paths,
 not shipped artifacts. Installer415584 and design1131486 remained untouched.
+
+## Affected-test planning (opt-in, no gate change)
+
+`scripts/ci-select.py` plans from the PR merge-base through current tracked,
+dirty and untracked inputs. It preserves the required eight tests, includes new
+tests, follows every transitive Bend import, and always retains roots with
+opaque drivers/custom effects or Base operations that can reach undeclared
+inputs. Unknown non-Bend changes/imports, missing files, symlinked dependencies
+and unreviewed compiler/resources select the full set. `.ci-packet/` transport
+changes retain opaque tests without pretending the archive affects pure code.
+The effect model is bound to the actual official Bend2.0.36 executable and all
+66 bundled resources plus Base bytes; a custom binary, changed sidecar or named
+library environment selects all. Check/proof/build/other-language gates are
+outside the selector's scope and are not skipped.
+
+Fifteen focused tests pass in0.073s. An independent 16-node dependency fixture
+checks every changed node against its known dependents and deliberately removes
+an affected test to require rejection. Other controls cover later import/body
+edits, new-test inventory drift, dirty/deleted/renamed/untracked inputs, opaque
+foreign behavior, changed compiler/sidecar bytes and stale output removal on
+failure. A Git-bound plan is recomputed against the current diff before being
+accepted. No pass records are made or reused by this planner.
+
+| Simulated single-file change | Full catalog before | Planned tests after | Skipped | Plan+revalidation median |
+|---|---:|---:|---:|---:|
+| src/core/cli.bend | 557 | 221 | 336 | 1.066s |
+| src/core/kserve.bend | 557 | 409 | 148 | 1.048s |
+| src/core/qr.bend | 557 | 285 | 272 | 1.053s |
+
+[Three-sample API planning benchmark](affected-plan-benchmark.json) retains its
+measured source hash; final source revalidation produced the same counts. The
+[final complete CLI run](affected-cli-metrics.json), including extra compiler
+resource pinning, diff and inventory checks, took **1.17s /28,984KiB**. It
+correctly selected all557 tests for the current tooling-only dirty diff. These
+are planning measurements, **not test execution or CI wall-time reductions**.
+No Boat credit was spent. The existing local gate already runs only eight
+required tests; this planner prepares a future complete affected-test gate and
+does not claim a speedup over that eight-test gate. Local/nightly behavior stays
+unchanged until integration and actual full coverage/performance validation.
+
+## Remaining original goal scope
+
+| Requirement | Verified current state |
+|---|---|
+| Audit150 CI runs plus local/Boat | Done; aggregates and source receipts above. |
+| Every job on fast runners, queue~8s, cost | Incomplete. Existing queue3s median; defaults still in use. Org runner authorization unavailable; no live auth/settings changed. |
+| Fast lint/checkers; per-file proof profile/cache | Incomplete. Two proof slices only; no production proof splitting/pass-cache or linter/type-checker migration. |
+| Shared/reset test workers, core-aware shards | Incomplete; no unvalidated state sharing enabled. |
+| Cache setup/outputs; blobless clones | Partial: verified lean closure transport/cache landed. Workflow clone strategy and broader dependency caches remain. |
+| Parallel independent gates, split slow job | Incomplete; current local controller remains serial. |
+| Affected PRs, full nightly, mutation guard | Partial: opt-in planner/negative controls; existing nightly is full, but no new PR integration or green-nightly claim. |
+| Actual pre-push hook under10s | Incomplete; no global hook/settings changed. |
+| Incremental low-memory local/deploy builds, auto-offload | Existing owner1188217 retains this lane. No duplicate broad proof/build or installer work in this pass. |
+
+The approximately120s complete PR gate and minute-scale complete build targets
+remain unproven. Preserve these requirements; do not redefine success around
+the tooling already delivered.
