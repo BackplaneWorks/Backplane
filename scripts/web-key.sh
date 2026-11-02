@@ -6,7 +6,8 @@
 # Fails closed: a reference in the page, a script or a style that does not
 # resolve to a web file or the explicit shared desktop module prints nothing
 # and exits 1, so the web is built afresh.
-#   scripts/web-key.sh
+#   scripts/web-key.sh            the key
+#   scripts/web-key.sh --roots    the Bend entries it follows
 set -u
 cd "$(dirname "$0")/.." || exit 1
 w=src/web
@@ -25,6 +26,14 @@ for r in $refs; do
 done
 files=$(find "$w" -type f ! -name '*.bend' | LC_ALL=C sort) || exit 1
 viewer_files=$(find tools/viewer -path '*/node_modules' -prune -o -type f -print | LC_ALL=C sort) || exit 1
+# every Bend entry the page's scripts import: host.js bundles
+# timeline-plan.bend and timeline-history.bend beside app.bend, and neither
+# is in app.bend's imports, so with app.bend alone a change to the
+# timeline's planner or page history (core/timeline-virtual.bend...) kept
+# the key and the cached client, without it, was shipped
+roots=$(for r in $refs; do case $r in ./*.bend) printf '%s\n' "$w/${r#./}" ;; esac; done | LC_ALL=C sort -u)
+case " $(echo $roots) " in *" $w/app.bend "*) ;; *) exit 1 ;; esac
+[ "${1:-}" = --roots ] && { printf '%s\n' $roots; exit 0; }
 # shellcheck disable=SC2086
-BP_KEY_ROOTS=$w/app.bend scripts/inputs-key.sh web2 $files $viewer_files scripts/build-viewer.sh scripts/web-key.sh \
+BP_KEY_ROOTS=$(echo $roots) scripts/inputs-key.sh web2 $files $viewer_files scripts/build-viewer.sh scripts/web-key.sh \
   desktop/connection-record.cjs scripts/js-unmarshal.py scripts/js-native.py scripts/inputs-key.sh scripts/bend-closure.py
