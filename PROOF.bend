@@ -15173,3 +15173,9 @@ def Laws.star_nudge_rejected_decision(o, token, action, now): {==}
 def Laws.star_nudge_official_repository(): {==}
 
 def Laws.star_nudge_saved_send_waits(client, text): {==}
+
+def Laws.settings_proposal_decline_no_write(s, now, client, id, ask, th): {==}
+
+def Laws.settings_proposal_deadline_exclusive(): {==}
+
+def Laws.settings_proposal_write_invalidates(): {==}

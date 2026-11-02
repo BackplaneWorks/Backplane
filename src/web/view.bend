@@ -1477,7 +1477,9 @@ def View.ask.std(+lc: I.Loc, a: M.Ask, +draft: String) -> D.Node:
       D.El{"div", id, [D.At{"class", "ask " ++ k}], [
         D.Dom.span("ask-head", U.Ask.head.loc(lc, k, tool, d)),
         Bool.pick(D.Node, String.eq(k, "plan"), D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, d)}, D.El{"div", "", [D.At{"class", "ask-detail"}], [D.Txt{d}]}),
-        D.El{"div", "", [D.At{"class", "ask-btns"}], View.ask.btns.loc(lc, U.Ask.bkind(k, tool), id, o, draft)}]}
+        D.El{"div", "", [D.At{"class", "ask-btns"}], Bool.pick(List<&2, D.Node>, String.eq(tool, "settings_proposal"),
+          [D.Dom.button("primary", "answer", id ++ "|accept", "Apply this proposal", "Approve"), D.Dom.button("", "answer", id ++ "|decline", "Reject this proposal", "Reject")],
+          View.ask.btns.loc(lc, U.Ask.bkind(k, tool), id, o, draft))}]}
 
 # a browser task paused for help: its question, the screenshot, and the
 # person's choices (client.bend's Teach.ask)
