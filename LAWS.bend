@@ -8152,6 +8152,14 @@ law clipath_idempotent:
 law clipath_nvm_newest_first:
   {CPA.CliPath.candidates("/h", ["/h/.nvm/versions/node/v9.11.2/bin", "/h/.nvm/versions/node/v24.13.1/bin", "/h/.nvm/versions/node/v18.0.0/bin"]) == ["/h/.nvm/versions/node/v24.13.1/bin", "/h/.nvm/versions/node/v18.0.0/bin", "/h/.nvm/versions/node/v9.11.2/bin"] : List<&2, String>}
 
+# A failed Windows probe cannot replace the native hub's PATH.
+law clipath_windows_missing_probe:
+  for cur: String
+  {CPA.CliPath.win.rows(Nil{}, cur, "", "", Nil{}) == cur : String}
+
+law clipath_windows_claude:
+  {CPA.CliPath.next("C:/Runtime/bin;C:/Windows/System32", "C:/Users/P", "winhome\tC:/Users/P\nwindir\tC:/Users/P/.local/bin\n") == "C:/Runtime/bin;C:/Windows/System32;C:/Users/P/.local/bin" : String}
+
 # harness-coord: wakes
 law wake_once_per_event:
   {H.Wake.demo.twice() == 0n : Nat}

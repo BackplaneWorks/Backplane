@@ -38,8 +38,11 @@ def CliPath.cat(a: List<&2, String>, b: List<&2, String>) -> List<&2, String>:
 
 # the new PATH: the current entries first in order, then the login shell's
 # not there yet, then the extra directories not there yet; ':'-joined
+def CliPath.merge.sep(+sep: Char, +cur: String, +login: String, extra: List<&2, String>) -> String:
+  String.join(CliPath.uniq.go(CliPath.cat(CliPath.cat(String.split(cur, sep), String.split(login, sep)), extra), Nil{}), SCon{sep, ""})
+
 def CliPath.merge(+cur: String, +login: String, extra: List<&2, String>) -> String:
-  String.join(CliPath.uniq.go(CliPath.cat(CliPath.cat(String.split(cur, ':'), String.split(login, ':')), extra), Nil{}), ":")
+  CliPath.merge.sep(':', cur, login, extra)
 
 # nvm's node versions: "<home>/.nvm/versions/node/v24.13.1/bin"
 def CliPath.nvm.root(+home: String) -> String:
@@ -119,14 +122,20 @@ def CliPath.candidates(+home: String, +listed: List<&2, String>) -> List<&2, Str
 
 # sh that prints the login shell's PATH (`login<TAB>PATH`, empty when it
 # fails; an interactive rc file's chatter is cut away by the marker) and
-# `dir<TAB>path` for each candidate that exists. Runs on Linux and macOS.
+# `dir<TAB>path` for each candidate that exists. Cygwin additionally reports
+# native Windows paths: the Bun hub needs ';' and drive letters, whereas
+# an older Cygwin hub still consumes the original POSIX rows.
 def CliPath.probe.sh() -> String:
   PT.Port.tmo()
+    ++ "native=; case $(uname -s) in CYGWIN*|MSYS*|MINGW*) native=1 ;; esac; "
     ++ "l=$(tmo 5 \"${SHELL:-/bin/sh}\" -lic 'printf \"\\n__BP_PATH__%s\\n\" \"$PATH\"' </dev/null 2>/dev/null | sed -n 's/^__BP_PATH__//p' | tail -n 1); "
     ++ "printf 'login\\t%s\\n' \"$l\"; "
+    ++ "if [ -n \"$native\" ]; then h=$(cygpath -m \"$HOME\") && printf 'winhome\\t%s\\n' \"$h\"; "
+    ++ "if [ -n \"$l\" ]; then w=$(cygpath -mp \"$l\") && printf 'winlogin\\t%s\\n' \"$w\"; fi; fi; "
     ++ "for d in \"$HOME\"/.nvm/versions/node/*/bin \"$HOME/.volta/bin\" \"$HOME/.local/share/fnm/aliases/default/bin\" \"$HOME/.fnm/aliases/default/bin\" "
     ++ "\"$FNM_MULTISHELL_PATH/bin\" \"$HOME/.bun/bin\" \"$HOME/.local/bin\" \"$HOME/.npm-global/bin\" \"$HOME/.cargo/bin\" \"$HOME/.grok/bin\" "
-    ++ "/opt/homebrew/bin /usr/local/bin; do [ -d \"$d\" ] && printf 'dir\\t%s\\n' \"$d\"; done; true"
+    ++ "/opt/homebrew/bin /usr/local/bin; do if [ -d \"$d\" ]; then printf 'dir\\t%s\\n' \"$d\"; "
+    ++ "if [ -n \"$native\" ]; then w=$(cygpath -m \"$d\") && printf 'windir\\t%s\\n' \"$w\"; fi; fi; done; true"
 
 type CliProbe is Data:
   CliProbe{login: String, dirs: List<&2, String>}
@@ -148,6 +157,34 @@ def CliPath.next.k(+cur: String, +home: String, p: CliProbe) -> String:
     case CliProbe{login, dirs}:
       CliPath.merge(cur, login, CliPath.candidates(home, dirs))
 
-# the PATH after a probe: the hub's own first
+def CliPath.native(+s: String) -> Bool:
+  Bool.or(String.starts_with(s, "\\\\"), String.ends_with(String.take(s, 2n), ":"))
+
+# An absent/failed native conversion must leave the hub's PATH intact.
+def CliPath.win.finish(missing: Bool, +cur: String, +home: String, login: String, dirs: List<&2, String>) -> String:
+  match missing:
+    case True{}:
+      cur
+    case False{}:
+      CliPath.merge.sep(';', cur, login, CliPath.candidates(home, List.reverse(&2, String, dirs)))
+
+def CliPath.win.rows(ls: List<&2, String>, +cur: String, +home: String, +login: String, +dirs: List<&2, String>) -> String:
+  match ls:
+    case Nil{}:
+      CliPath.win.finish(String.is_empty(home), cur, home, login, dirs)
+    case +l <> t:
+      CliPath.win.rows(t, cur,
+        Bool.pick(String, String.starts_with(l, "winhome\t"), String.drop(l, 8n), home),
+        Bool.pick(String, String.starts_with(l, "winlogin\t"), String.drop(l, 9n), login),
+        Bool.pick(List<&2, String>, String.starts_with(l, "windir\t"), String.drop(l, 7n) <> dirs, dirs))
+
+def CliPath.next.platform(native: Bool, +cur: String, home: String, +out: String) -> String:
+  match native:
+    case True{}:
+      CliPath.win.rows(String.lines(out), cur, "", "", Nil{})
+    case False{}:
+      CliPath.next.k(cur, home, CliPath.parse(out))
+
+# The native hub's HOME/PATH are Windows paths; a Cygwin hub's are POSIX.
 def CliPath.next(+cur: String, +home: String, +out: String) -> String:
-  CliPath.next.k(cur, home, CliPath.parse(out))
+  CliPath.next.platform(Bool.or(CliPath.native(home), CliPath.native(cur)), cur, home, out)
