@@ -242,14 +242,28 @@ def Actor.history.pause(same: Bool, nf: Map<&2, String>, +thread: String) -> Map
     case True{}: nf
     case False{}: Map.set(&2, String, nf, "hist.play:" ++ thread, "")
 
+# The viewer open or shut is the page's (it sends its own "panel" with each
+# request), except right after the hub sent a view (Actor.view: an agent's
+# viewer_show, Auto.view): the next merge keeps the actor's once, the page
+# takes it from the reply's session, and the mark goes, so the person's own
+# toggles win again.
+def Actor.hub.view() -> String:
+  "local.hub.view"
+
+def Actor.merge.panel(hub: Bool, fresh: Bool, old: Bool) -> Bool:
+  match hub:
+    case True{}: old
+    case False{}: fresh
+
 def Actor.merge( +fresh: U.Ui, +old: U.Ui, +same: Bool, +thread: String, +present: Bool) -> U.Ui:
   match fresh old:
-    case U.Ui{st, +sel, clean, live, open, on, now, adding, panel, version, +rid2, want, _, _, nf2, _, _} U.Ui{_, +oldSel, dr, _, _, _, _, _, _, _, +rid, _, error, note, nf, outbox, stores}:
+    case U.Ui{st, +sel, clean, live, open, on, now, adding, panel, version, +rid2, want, _, _, nf2, _, _} U.Ui{_, +oldSel, dr, _, _, _, _, _, oldPanel, _, +rid, _, error, +note, +nf, outbox, stores}:
       # A correlated creation reply can select its new thread between renders.
       # The same view still requests its parent until nextTarget reaches it.
       # A different view or target remains an explicit navigation boundary.
-      U.Ui{st, Bool.pick(String, same, oldSel, sel), Actor.draft.merge(clean, Actor.scope.drafts(same, dr), thread, present), live, open, on, now, adding, panel, version,
-        M.Time.max(rid, rid2), want, error, note, Actor.prefs(Map.to_list(&2, String, nf2), Actor.info.current(Map.to_list(&2, String, Actor.history.pause(same, nf, oldSel)), Map.new(&2, String))), outbox, stores}
+      U.Ui{st, Bool.pick(String, same, oldSel, sel), Actor.draft.merge(clean, Actor.scope.drafts(same, dr), thread, present), live, open, on, now, adding,
+        Actor.merge.panel(String.eq(U.Str.get(nf, Actor.hub.view()), "1"), panel, oldPanel), version,
+        M.Time.max(rid, rid2), want, error, note, Map.del(&2, String, Actor.prefs(Map.to_list(&2, String, nf2), Actor.info.current(Map.to_list(&2, String, Actor.history.pause(same, nf, oldSel)), Map.new(&2, String))), Actor.hub.view()), outbox, stores}
 
 # At most one private region is retained. Canonical or UI input changes
 # invalidate its exact key; another view/target drops it before rehydration.
@@ -1099,8 +1113,12 @@ def Actor.voice(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
 # (client.bend's Ui.view: the panel opens on it, an auto one only while
 # the person has not opened or shut it by hand). Without it a hub-drawn
 # page never followed either.
+def Actor.view.mark(a: Actor) -> Actor:
+  match a:
+    case Actor{u, view, target, pending, reads, dirty, memo}: Actor{U.Ui.info_set(u, Actor.hub.view(), "1"), view, target, pending, reads, dirty, memo}
+
 def Actor.view(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
-  Actor.reply_if(True{}, a, web, key, o)
+  Actor.view.mark(Actor.reply_if(True{}, a, web, key, o))
 
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
