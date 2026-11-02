@@ -319,10 +319,11 @@ history.turn.ended = Turn ended
 history.after.reply = After reply
 history.source.unknown = Source unavailable
 history.count.label = Design changes
-history.count.tip = Saved board and schematic changes in this thread, captured after tool calls. Browse them in the viewer history.
+history.count.tip = Saved board and schematic changes in this thread, captured after tool calls. Click to browse them in the viewer's history, which counts the board's or the schematic's alone.
 history.comparing = Comparing
 history.live = Live
 history.live.steps = Live · {count} {plural, select, one {change} other {changes}}
+history.live.steps.of = Live · {count} of {total} changes
 
 # review panel
 review.bom = BOM
@@ -722,6 +723,7 @@ remote.request.error = that machine did not take it: {error}
 remote.unreachable = unreachable: cannot resolve or reach {host}
 tools.pinned = Pinned
 tools.snooze = Snooze
+tools.retry = Retry
 tools.forkthread = Fork thread
 google.signature.placeholder = — Sent by Backplane on behalf of {email}
 viewer.kicad10 = KiCad 10 copy
@@ -1057,6 +1059,7 @@ phase.complete = Complete
 phase.stopped = Stopped
 
 # Web/phone audit: tooltips, reasoning labels, and model progress.
+tools.tip.retry = The turn failed: send your last message again
 tools.tip.stop = Stop the running turn · Ctrl+.
 tools.tip.unpin = Unpin: it sorts with the rest again
 tools.tip.pin = Keep it at the top of the list
