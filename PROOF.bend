@@ -15456,3 +15456,13 @@ def Laws.mech_render_failure_visible():
 
 def Laws.mech_render_failure_diagnostic():
   {==}
+
+# Project mechanical default (PR #223).
+def Laws.mech_configured_primary():
+  {==}
+
+def Laws.mech_primary_missing():
+  {==}
+
+def Laws.mech_primary_selection():
+  {==}

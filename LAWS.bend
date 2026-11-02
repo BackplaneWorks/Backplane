@@ -15471,3 +15471,15 @@ law mech_render_failure_visible:
 # an earlier successful view must not hide the real diagnostic
 law mech_render_failure_diagnostic:
   {MCH.Mech.error(1, "/p/renders/fixture.iso.png\nbackplane --render: could not write /p/renders/fixture.front.png\n") == "backplane --render: could not write /p/renders/fixture.front.png" : String}
+
+# Project mechanical default (PR #223).
+law mech_configured_primary:
+  {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.preferred(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step"), MCH.Mech.config("{\"mech\":\"mech/lid.step\"}")), MCH.MPart{"", "", Nil{}})) == "mech/lid.step" : String}
+
+# a missing configured model cannot hide the project's other parts
+law mech_primary_missing:
+  {MCH.Mech.preferred(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step"), "mech/missing.step") == MCH.Mech.default(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step")) : Maybe<&2, MCH.MPart>}
+
+# choosing a part explicitly always takes precedence over the configuration
+law mech_primary_selection:
+  {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.choose(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step"), "/p/mech/assembly.step", "/p", "mech/lid.step"), MCH.MPart{"", "", Nil{}})) == "mech/assembly.step" : String}

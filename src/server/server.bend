@@ -3025,15 +3025,18 @@ def Files.list(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +c
 def Mech.cmd() -> String:
   "[ -d mech ] || exit 0; find mech -maxdepth 4 -type f \\( -iname '*.step' -o -iname '*.stp' -o -iname '*.glb' -o -iname '*.png' \\) -not -path '*/.*' 2>/dev/null | LC_ALL=C sort | head -n 400 | while IFS= read -r f; do cksum \"$f\"; done"
 
-def Mech.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
+def Mech.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +primary: String) -> IO(Unit):
   match r:
     case P.Ran{0, out}:
-      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"mech", J.Str{out}}, J.KV{"root", J.Str{cwd}}, J.KV{"thread", J.Str{thread}}]))
+      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"mech", J.Str{out}}, J.KV{"root", J.Str{cwd}}, J.KV{"thread", J.Str{thread}}, J.KV{"primary", J.Str{primary}}]))
     case P.Ran{_, out}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{out}}]))
 
 def Mech.list(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
-  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", Mech.cmd()], cwd), r => Mech.sent(r, inbox, client, id, thread, cwd))
+  do IO<Unit>:
+    text : String <- K.Io.text(cwd ++ "/.backplane.json")
+    r : P.Ran <- P.Proc.run("sh", ["-c", Mech.cmd()], cwd)
+    Mech.sent(r, inbox, client, id, thread, cwd, MCH.Mech.config(text))
 
 # a part's renders, drawn on request (mech.render: the Mech page's Create
 # renders): this program as a `--render` child (render.bend), in the
@@ -3044,18 +3047,19 @@ def Mech.said(r: P.Ran) -> String:
     case P.Ran{code, out}:
       MCH.Mech.error(code, out)
 
-def Mech.rendered(+err: String, l: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
+def Mech.rendered(+err: String, l: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String, +primary: String) -> IO(Unit):
   match l:
     case P.Ran{_, out}:
       GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"mech", J.Str{out}}, J.KV{"root", J.Str{cwd}}, J.KV{"thread", J.Str{thread}},
-        J.KV{"rendered", J.Str{path}}, J.KV{"error", J.Str{err}}]))
+        J.KV{"rendered", J.Str{path}}, J.KV{"error", J.Str{err}}, J.KV{"primary", J.Str{primary}}]))
 
 def Mech.render(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
   do IO<Unit>:
     exe : String <- H.Sys.exe_path()
     r : P.Ran <- P.Proc.run(EX.Exe.child(exe), ["--render", path], cwd)
     l : P.Ran <- P.Proc.run("sh", ["-c", Mech.cmd()], cwd)
-    Mech.rendered(Mech.said(r), l, inbox, client, id, thread, cwd, path)
+    text : String <- K.Io.text(cwd ++ "/.backplane.json")
+    Mech.rendered(Mech.said(r), l, inbox, client, id, thread, cwd, path, MCH.Mech.config(text))
 
 # the board picker opened (boards.list, hub.bend's Hub.nav): the
 # project's boards read again, as the card finds them (orderio.bend's
