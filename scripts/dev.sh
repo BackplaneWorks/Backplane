@@ -49,6 +49,8 @@
 # A nonempty caller BACKPLANE_VERSION_STAMP overrides that generated stamp.
 set -eu
 cd "$(dirname "$0")/.."
+. scripts/heavy-guard.sh
+case ${1:-run} in web|stage|install) heavy_guard build "$@" ;; run) case " $* " in *" --no-build "*) ;; *) heavy_guard build "$@" ;; esac ;; esac
 . scripts/bendok.sh
 export PATH="$HOME/.bend/bin:$HOME/.bun/bin:$PATH"
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}

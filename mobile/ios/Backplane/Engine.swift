@@ -336,6 +336,10 @@ final class Engine: @unchecked Sendable {
     func offline(_ key: String) async -> Out? { await out("online", [key, false, true], screen: false) }
     func tick(_ now: Int) async -> Out? { await out("tick", [now]) }
     func reflowDefaults() async -> String { await call("reflowDefaults", [], person: true) { $0 } }
+    func improvementsPreview(_ text: String, os: String, version: String, details: String) async -> String {
+        await call("improvementsPreview", [text, os, version, details, ""], person: true) { $0 }
+    }
+    func improvementsPreviewBody(_ body: String) async -> String { await call("improvementsPreviewBody", [body], person: true) { $0 } }
     func reflowAlloys() async -> String { await call("reflowAlloys", [], person: true) { $0 } }
     func reflow(_ profile: String, alloy: String) async -> String { await call("reflow", [profile, alloy], person: true) { $0 } }
     // a catalog text by key, in the device's language

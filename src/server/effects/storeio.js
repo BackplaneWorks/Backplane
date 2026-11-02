@@ -34,26 +34,26 @@ function store_promote(home,temp) {
     // separators): compare resolved paths, never the spelling.
     if(path.resolve(path.dirname(temp))!==path.resolve(home) || !path.basename(temp).startsWith('.store-rebuild-'))throw Error('invalid rebuild directory');
     const next=path.join(temp,'store.db'),target=path.join(home,'store.db');
-    // Db.close can leave an empty WAL and its disposable shared index on
-    // macOS. Refuse uncheckpointed data or unexpected members before moving
-    // the current database; never recursively discard a rebuild directory.
+    // Db.close can retain both sidecars on macOS. The WAL may still contain
+    // committed pages, and a read-only boot can need even empty sidecars.
+    // Move the complete SQLite file set; never discard rebuild residue.
     const sidecars=[];
     for(const name of fs.readdirSync(temp)) {
       if(name==='store.db'||name==='events.jsonl')continue;
       if(name!=='store.db-wal'&&name!=='store.db-shm')throw Error('unexpected rebuild member retained: '+name);
       const file=path.join(temp,name),st=fs.lstatSync(file);
       if(!st.isFile()||st.isSymbolicLink())throw Error('invalid rebuild sidecar retained: '+name);
-      if(name==='store.db-wal'&&st.size!==0)throw Error('uncheckpointed rebuild WAL retained');
-      sidecars.push(file);
+      sidecars.push(name.slice('store.db'.length));
     }
     const sync=store_sync(next);if(sync!=='ok')return sync;
+    for(const suffix of sidecars){const saved=store_sync(next+suffix);if(saved!=='ok')return saved;}
     const backup=target+'.previous-'+Date.now();
     for(const suffix of ['','-wal','-shm'])if(fs.existsSync(target+suffix)){fs.copyFileSync(target+suffix,backup+suffix,fs.constants.COPYFILE_EXCL);const saved=store_sync(backup+suffix);if(saved!=='ok')return saved;}
     // No old connection remains at boot. Keep its WAL evidence beside backup.
     for(const suffix of ['-wal','-shm'])if(fs.existsSync(target+suffix))fs.renameSync(target+suffix,backup+suffix+'.retired');
     fs.renameSync(next,target);
+    for(const suffix of sidecars)fs.renameSync(next+suffix,target+suffix);
     store_sync_dir(home);
-    for(const file of sidecars)fs.rmSync(file,{force:true});
     fs.unlinkSync(path.join(temp,'events.jsonl'));fs.rmdirSync(temp);
     return 'ok';
   }catch(e){return 'fail '+e.message;}

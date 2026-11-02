@@ -173,9 +173,77 @@ shutil.copyfile(os.environ['MOCK_SUMS' if args[-1].endswith('SHA256SUMS') else '
         self.assertNotEqual(r.returncode,0); self.assertTrue(lock.is_dir())
         self.assertFalse((self.root / 'requests').exists())
 
+    def windows_tools(self, stub_powershell=False):
+        # Exercise the exact ZIP branch on POSIX too. Only native path
+        # conversion and PowerShell are stand-ins; curl is already offline.
+        # There is deliberately no powershell.exe on this PATH.
+        tools = self.root / 'closed-path'; tools.mkdir()
+        for name in ('sh', 'mkdir', 'rmdir', 'rm', 'mktemp', 'awk', 'cut',
+                     'od', 'tr', 'grep', 'mv', 'sha256sum'):
+            tool = shutil.which(name); self.assertIsNotNone(tool, name)
+            (tools / name).symlink_to(tool)
+        (tools / 'curl').symlink_to(self.fake / 'curl')
+        system = self.root / 'Windows system 日本'
+        self.env['MOCK_SYSTEM'] = str(system)
+        cygpath = tools / 'cygpath'
+        if IS_CYGWIN:
+            cygpath.symlink_to(shutil.which('cygpath'))
+            return dict(self.env, PATH=str(tools))
+        cygpath.write_text('#!' + sys.executable + '\n' + '''import os,sys
+if sys.argv[1:] == ['-S']: print(os.environ['MOCK_SYSTEM'])
+elif len(sys.argv) == 3 and sys.argv[1] == '-w': print(sys.argv[2])
+else: sys.exit(89)
+''')
+        cygpath.chmod(0o700)
+        if stub_powershell:
+            ps = system / 'WindowsPowerShell/v1.0/powershell.exe'
+            ps.parent.mkdir(parents=True)
+            ps.write_text('#!' + sys.executable + '\n' + '''import json,os,sys,zipfile
+from pathlib import Path
+assert sys.argv[1:4] == ['-NoProfile','-NonInteractive','-Command'] and len(sys.argv) == 5
+Path(os.environ['MOCK_PS_LOG']).write_text(json.dumps({
+ 'exe':sys.argv[0], 'root':os.environ['BP_KICAD_ROOT'],
+ 'zip':os.environ['BP_KICAD_ZIP'], 'out':os.environ['BP_KICAD_OUT']}))
+with zipfile.ZipFile(os.environ['BP_KICAD_ZIP']) as z:
+ z.extractall(os.environ['BP_KICAD_OUT'])
+''')
+            ps.chmod(0o700)
+        return dict(self.env, PATH=str(tools), MOCK_PS_LOG=str(self.root / 'powershell-call'))
+
+    @unittest.skipIf(IS_CYGWIN, 'POSIX stand-ins; real Cygwin coverage below')
+    def test_windows_zip_resolves_system_powershell_off_path(self):
+        self.fixture('windows-x86_64', 'zip')
+        env = self.windows_tools(stub_powershell=True)
+        self.run_install(env=env)
+        call = json.loads((self.root / 'powershell-call').read_text())
+        self.assertEqual(call['exe'], str(Path(env['MOCK_SYSTEM']) / 'WindowsPowerShell/v1.0/powershell.exe'))
+        self.assertEqual(call['root'], self.args[4][:-4])
+        self.assertTrue(call['zip'].endswith(self.args[4]))
+        self.assertTrue(call['out'].endswith('/unpack'))
+        self.assertEqual((self.parent / self.args[2] / 'bin/kicad-cli.exe').read_bytes(), b'MZfixture')
+
+    @unittest.skipIf(IS_CYGWIN, 'POSIX stand-ins; real Cygwin coverage below')
+    def test_windows_zip_missing_system_powershell_cleans_stage(self):
+        self.fixture('windows-x86_64', 'zip')
+        env = self.windows_tools()
+        # An ambient executable must never replace the system PowerShell.
+        foreign = Path(env['PATH']) / 'powershell.exe'
+        foreign.write_text('#!/bin/sh\necho unexpected-ambient-powershell >&2\nexit 91\n')
+        foreign.chmod(0o700)
+        r = self.run_install(False, env=env)
+        self.assertIn('Windows PowerShell', r.stderr)
+        self.assertNotIn('unexpected-ambient', r.stderr)
+        self.assertFalse((self.parent / self.args[2]).exists())
+
     @unittest.skipUnless(IS_CYGWIN, 'actual PowerShell ZIP extraction runs on Cygwin')
     def test_windows_zip_actual_powershell(self):
         self.fixture('windows-x86_64', 'zip'); self.run_install()
+        self.assertEqual((self.parent / self.args[2] / 'bin/kicad-cli.exe').read_bytes(), b'MZfixture')
+
+    @unittest.skipUnless(IS_CYGWIN, 'actual closed-PATH PowerShell ZIP extraction runs on Cygwin')
+    def test_windows_zip_actual_powershell_without_powershell_on_path(self):
+        self.fixture('windows-x86_64', 'zip')
+        self.run_install(env=self.windows_tools())
         self.assertEqual((self.parent / self.args[2] / 'bin/kicad-cli.exe').read_bytes(), b'MZfixture')
 
     @unittest.skipUnless(IS_CYGWIN, 'actual PowerShell ZIP extraction runs on Cygwin')

@@ -1,3 +1,5 @@
+import ./src/core/allowance.bend as ALLOWANCE
+
 import ./src/core/lazy-tools.bend as LTOOLS
 
 import ./src/core/range.bend as BRANGE
@@ -2675,6 +2677,70 @@ def eq_chr_refl(a):
       %Equal.sym(Bool, U32.is_eq(a0, a0), True{}, u32_eq_refl(a0)) : {_ == True{} : Bool}
       {==}
 
+# Eq.str walks with its verdict carried (Eq.str.go): a False verdict
+# answers False at once, whatever is left
+law eq_str_go_false:
+  for a: String
+  for b: String
+  {Q.Eq.str.go(a, b, False{}) == False{} : Bool}
+
+def eq_str_go_false(a, b):
+  match a b:
+    case SNil{} SNil{}:
+      {==}
+    case SNil{} SCon{+y, +yt}:
+      {==}
+    case SCon{+x, +xt} SNil{}:
+      {==}
+    case SCon{+x, +xt} SCon{+y, +yt}:
+      {==}
+
+# so a walk that ends True was carrying True
+law eq_str_go_ok:
+  for a: String
+  for b: String
+  for ok: Bool
+  for +h: {Q.Eq.str.go(a, b, ok) == True{} : Bool}
+  {ok == True{} : Bool}
+
+def eq_str_go_ok(a, b, ok, h):
+  match ok:
+    case True{}:
+      {==}
+    case False{}:
+      Empty.absurd({False{} == True{} : Bool}, false_ne_true(Equal.trans(Bool, False{}, Q.Eq.str.go(a, b, False{}), True{},
+        Equal.sym(Bool, Q.Eq.str.go(a, b, False{}), False{}, eq_str_go_false(a, b)), h)))
+
+law eq_str_go_sound:
+  for a: String
+  for b: String
+  for ok: Bool
+  for +h: {Q.Eq.str.go(a, b, ok) == True{} : Bool}
+  {a == b : String}
+
+def eq_str_go_sound(a, b, ok, h):
+  match a b ok:
+    case SNil{} SNil{} True{}:
+      {==}
+    case SNil{} SNil{} False{}:
+      {==}
+    case SNil{} SCon{+y, +yt} True{}:
+      Empty.absurd({SNil{} == SCon{y, yt} : String}, false_ne_true(h))
+    case SNil{} SCon{+y, +yt} False{}:
+      Empty.absurd({SNil{} == SCon{y, yt} : String}, false_ne_true(h))
+    case SCon{+x, +xt} SNil{} True{}:
+      Empty.absurd({SCon{x, xt} == SNil{} : String}, false_ne_true(h))
+    case SCon{+x, +xt} SNil{} False{}:
+      Empty.absurd({SCon{x, xt} == SNil{} : String}, false_ne_true(h))
+    case SCon{+x, +xt} SCon{+y, +yt} True{}:
+      e0 = eq_chr_sound(x, y, eq_str_go_ok(xt, yt, Q.Eq.chr(x, y), h))
+      e1 = eq_str_go_sound(xt, yt, Q.Eq.chr(x, y), h)
+      %e0 : {SCon{x, xt} == SCon{_, yt} : String}
+      %e1 : {SCon{x, xt} == SCon{x, _} : String}
+      {==}
+    case SCon{+x, +xt} SCon{+y, +yt} False{}:
+      Empty.absurd({SCon{x, xt} == SCon{y, yt} : String}, false_ne_true(h))
+
 law eq_str_sound:
   for a: String
   for b: String
@@ -2682,31 +2748,26 @@ law eq_str_sound:
   {a == b : String}
 
 def eq_str_sound(a, b, h):
-  match a b:
-    case SNil{} SNil{}:
+  eq_str_go_sound(a, b, True{}, h)
+
+law eq_str_go_refl:
+  for +a: String
+  {Q.Eq.str.go(a, a, True{}) == True{} : Bool}
+
+def eq_str_go_refl(a):
+  match a:
+    case SNil{}:
       {==}
-    case SNil{} SCon{+y, +yt}:
-      Empty.absurd({SNil{} == SCon{y, yt} : String}, false_ne_true(h))
-    case SCon{+x, +xt} SNil{}:
-      Empty.absurd({SCon{x, xt} == SNil{} : String}, false_ne_true(h))
-    case SCon{+x, +xt} SCon{+y, +yt}:
-      e0 = eq_chr_sound(x, y, and_l(Q.Eq.chr(x, y), Q.Eq.str(xt, yt), h))
-      e1 = eq_str_sound(xt, yt, and_r(Q.Eq.chr(x, y), Q.Eq.str(xt, yt), h))
-      %e0 : {SCon{x, xt} == SCon{_, yt} : String}
-      %e1 : {SCon{x, xt} == SCon{x, _} : String}
-      {==}
+    case SCon{+x, +xt}:
+      %Equal.sym(Bool, Q.Eq.chr(x, x), True{}, eq_chr_refl(x)) : {Q.Eq.str.go(xt, xt, _) == True{} : Bool}
+      eq_str_go_refl(xt)
 
 law eq_str_refl:
   for +a: String
   {Q.Eq.str(a, a) == True{} : Bool}
 
 def eq_str_refl(a):
-  match a:
-    case SNil{}:
-      {==}
-    case SCon{+x, +xt}:
-      %Equal.sym(Bool, Q.Eq.chr(x, x), True{}, eq_chr_refl(x)) : {Bool.and(_, Q.Eq.str(xt, xt)) == True{} : Bool}
-      eq_str_refl(xt)
+  eq_str_go_refl(a)
 
 law eq_role_sound:
   for a: M.Role
@@ -9488,6 +9549,12 @@ def Laws.clipath_idempotent():
 
 def Laws.clipath_nvm_newest_first():
   {==}
+
+def Laws.clipath_windows_missing_probe(cur):
+  {==}
+
+def Laws.clipath_windows_claude():
+  {==}
 # ---- notif-policy ----
 
 def Laws.policy_no_alert_unless():
@@ -15267,3 +15334,61 @@ def Laws.voice_model_needs_runtime(): {==}
 
 def Laws.pcb_usage_fixed_fields():
   {==}
+
+def Laws.project_drive_root_absolute():
+  {==}
+
+def Laws.project_unc_root():
+  {==}
+
+def Laws.plot_stamp_opt_out():
+  {==}
+
+def Laws.plot_stamp_other_client():
+  {==}
+
+def Laws.allowance_remaining_reported(): {==}
+
+def Laws.allowance_refresh_held(): {==}
+
+def Laws.allowance_refresh_due(): {==}
+
+def Laws.allowance_future_unknown(): {==}
+
+def Laws.issue_report_new_default(): {==}
+
+def Laws.issue_report_legacy_internal(): {==}
+
+def Laws.issue_report_explicit_issue(legacy): {==}
+
+def Laws.issue_report_explicit_internal(legacy): {==}
+
+def Laws.issue_report_verbatim_text(text): {==}
+
+def Laws.issue_report_manual_details_verbatim(c, text): {==}
+
+def Laws.issue_report_diagnostics_absent(): {==}
+
+def Laws.issue_report_os_description_closed(): {==}
+
+def Laws.issue_report_version_omits_build(): {==}
+
+def Laws.issue_report_version_rejects_path(): {==}
+
+def Laws.issue_report_preview_retains_body(body): {==}
+
+def Laws.issue_report_url_overflow_closed(bs, budget, acc):
+  match bs budget:
+    case Nil{} _: {==}
+    case _ <> _ 0n: {==}
+    case _ <> _ 1n+k: {==}
+
+def Laws.issue_report_official_repository(): {==}
+
+def Laws.issue_report_template_revision(): {==}
+
+def Laws.issue_report_prompt_original_verbatim(description): {==}
+
+def Laws.active_progress_other_soft(): {==}
+
+def Laws.active_progress_owner_urgent(): {==}

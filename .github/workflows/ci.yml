@@ -162,6 +162,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.3'
+      - name: SQLite store promotion preserves WAL data
+        run: bun test/tools/store_promote_test.cjs
       - id: key
         run: |
           k=$(scripts/build-js.sh --key src/server/main.bend) || k=""
@@ -233,6 +235,15 @@ jobs:
           bun test/tools/native_thin_bridge_307265.mjs
           bun test/tools/mobile_readiness_test.ts
           bun test/tools/phone_flush_test.ts
+      - name: Twenty active threads stay bounded
+        timeout-minutes: 3
+        run: bun test/tools/active_threads_load.ts --bin dist-js/linux-x64/backplane-serve --out build/active-threads-load.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: active-threads-load
+          path: build/active-threads-load.json
+          if-no-files-found: ignore
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -270,7 +281,16 @@ jobs:
         with:
           sparse-checkout: |
             scripts
+            src/server/effects
+            src/core
             test/tools
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.target != 'windows-x64'
+        with:
+          bun-version: '1.4.3'
+      - name: SQLite store promotion on the native platform
+        if: matrix.target != 'windows-x64'
+        run: bun test/tools/store_promote_test.cjs
       - uses: actions/download-artifact@v4
         with:
           name: backplane-serve-js
