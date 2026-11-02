@@ -17,6 +17,7 @@ import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
 import { installImageActions } from "./image-actions.js";
+import { copyText, copyButton } from "./text-copy.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => Wire.plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
 function bubMoveSync() {
@@ -1316,16 +1317,7 @@ function laterLive() {
 }
 
 function copy(text) {
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text);
-    return;
-  }
-  const t = document.createElement("textarea");
-  t.value = text;
-  document.body.appendChild(t);
-  t.select();
-  document.execCommand("copy");
-  t.remove();
+  void copyText(text).catch(error => showViewStatus(error.message));
 }
 
 function run(cmds) {
@@ -2065,6 +2057,13 @@ for (const ev of EVENTS) {
     const el = e.target.closest?.(`[data-on-${ev}]`);
     if (!el) return;
     const action = el.getAttribute(`data-on-${ev}`);
+    if (ev === "click" && action === "copy") {
+      e.preventDefault();
+      // Copy payloads are literal: a shell comment starting with # is text,
+      // never valueOf's field-reference syntax. No hub action is needed.
+      void copyButton(el, el.getAttribute("data-value") ?? "");
+      return;
+    }
     // a row's menu opens where the pointer was (view.bend's View.rmenu
     // reads these)
     // a file link (dom.bend's Dom.file) goes to the hub, not to its href
