@@ -1362,11 +1362,63 @@ def Perm.labels(os: List<&2, J.Json>) -> List<&2, String>:
     case +o <> t:
       J.Json.get_str(o, "label", J.Json.show(o)) <> Perm.labels(t)
 
+# each option's description under the question ("USB-C: reversible"),
+# so the person picks knowing what the agent meant by it
+def Perm.described.k(has: Bool, +line: String, rest: List<&2, String>) -> List<&2, String>:
+  match has:
+    case True{}:
+      line <> rest
+    case False{}:
+      rest
+
+def Perm.described(os: List<&2, J.Json>) -> List<&2, String>:
+  match os:
+    case Nil{}:
+      Nil{}
+    case +o <> t:
+      Perm.described.k(Bool.not(String.is_empty(J.Json.get_str(o, "description", ""))), J.Json.get_str(o, "label", "") ++ ": " ++ J.Json.get_str(o, "description", ""), Perm.described(t))
+
+def Perm.question.k(+q: String, +ds: List<&2, String>) -> String:
+  Bool.pick(String, List.is_empty(&2, String, ds), q, q ++ "\n" ++ String.join(ds, "\n"))
+
+# the question as asked (the answer is keyed by it, Perm.answers)
 def Perm.question(+input: J.Json) -> String:
   J.Json.get_str(Perm.first_q(input), "question", J.Json.get_str(input, "question", ""))
 
-def Perm.options(+input: J.Json) -> String:
+# what the card says: the question, then each option's description
+def Perm.question.card.one(+input: J.Json) -> String:
+  Perm.question.k(Perm.question(input), Perm.described(J.Json.elems(J.Json.get_obj(Perm.first_q(input), "options"))))
+
+def Perm.options.one(+input: J.Json) -> String:
   String.join(Perm.labels(J.Json.elems(J.Json.get_obj(Perm.first_q(input), "options"))), "\n")
+
+# Several questions at once (AskUserQuestion takes up to four): one choice
+# can't answer them all, so the card lists every question with its options
+# and offers no choice buttons; the person types their answers (the card's
+# answer with the draft), and that text answers each question (Perm.answers)
+def Perm.many(+input: J.Json) -> Bool:
+  Nat.is_gt(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(input, "questions"))), 1n)
+
+def Perm.one.line(+n: Nat, +q: J.Json) -> String:
+  Nat.show(n) ++ ". " ++ J.Json.get_str(q, "question", "") ++ Bool.pick(String, List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(q, "options"))), "",
+    " (" ++ String.join(Perm.labels(J.Json.elems(J.Json.get_obj(q, "options"))), " / ") ++ ")") ++
+    Bool.pick(String, List.is_empty(&2, String, Perm.described(J.Json.elems(J.Json.get_obj(q, "options")))), "", "\n   " ++ String.join(Perm.described(J.Json.elems(J.Json.get_obj(q, "options"))), "; "))
+
+def Perm.lines(qs: List<&2, J.Json>, +n: Nat) -> List<&2, String>:
+  match qs:
+    case Nil{}:
+      Nil{}
+    case +q <> t:
+      Perm.one.line(n, q) <> Perm.lines(t, Nat.add(n, 1n))
+
+def Perm.many.card(+input: J.Json) -> String:
+  String.join(Perm.lines(J.Json.elems(J.Json.get_obj(input, "questions")), 1n), "\n") ++ "\nType your answers below, then answer with them."
+
+def Perm.options(+input: J.Json) -> String:
+  Bool.pick(String, Perm.many(input), "", Perm.options.one(input))
+
+def Perm.question.card(+input: J.Json) -> String:
+  Bool.pick(String, Perm.many(input), Perm.many.card(input), Perm.question.card.one(input))
 
 def Perm.session_ok(as: List<&2, M.Ask>, +thread: String, +tool: String) -> Bool:
   match as:
@@ -1385,7 +1437,7 @@ def Perm.approve(ok: Bool, +ask: String, +s: M.State, +now: Nat, +thread: String
 def Perm.k(i: Nat, +ask: String, +s: M.State, +now: Nat, +thread: String, +id: J.Json, +tool: String, +input: J.Json) -> McpOut:
   match i:
     case 0n:
-      McpOut{"", B.Step{[M.AskOpened{ask, thread, "input", tool, Perm.question(input), Perm.options(input), now}], Nil{}}, ask}
+      McpOut{"", B.Step{[M.AskOpened{ask, thread, "input", tool, Perm.question.card(input), Perm.options(input), now}], Nil{}}, ask}
     case 1n:
       McpOut{Mcp.result(id, Perm.text(Perm.deny(Perm.plan_note()))), B.Step{[M.AskOpened{ask, thread, "plan", tool, J.Json.get_str(input, "plan", ""), "", now}], Nil{}}, ""}
     case _:
@@ -1427,8 +1479,16 @@ def Perm.answers.k(input: J.Json, extra: J.Json) -> J.Json:
     case _ _:
       input
 
+# every question keyed by its text, each with the person's answer
+def Perm.answered(qs: List<&2, J.Json>, +answer: String) -> List<&2, J.KV>:
+  match qs:
+    case Nil{}:
+      Nil{}
+    case +q <> t:
+      J.KV{J.Json.get_str(q, "question", ""), J.Str{answer}} <> Perm.answered(t, answer)
+
 def Perm.answers(+input: J.Json, +answer: String) -> J.Json:
-  Perm.answers.k(input, J.Json.obj([J.KV{"answers", J.Json.obj([J.KV{Perm.question(input), J.Str{answer}}])}]))
+  Perm.answers.k(input, J.Json.obj([J.KV{"answers", J.Json.obj(Bool.pick(List<&2, J.KV>, Perm.many(input), Perm.answered(J.Json.elems(J.Json.get_obj(input, "questions")), answer), [J.KV{Perm.question(input), J.Str{answer}}]))}]))
 
 def Perm.verdict.k(i: Nat, +tool: String, +input: J.Json, +answer: String) -> J.Json:
   match i:

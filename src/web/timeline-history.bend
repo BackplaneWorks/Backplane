@@ -1,6 +1,7 @@
 import Base
 import ./dom.bend as D
 import ../core/landing.bend as LAND
+import ../core/timeline-virtual.bend as TV
 
 def H.bool.value(r: Map<&2, Bool> & Bool) -> Bool:
   (_, v) = r
@@ -73,15 +74,27 @@ def key(n: D.Node) -> String:
       H.fold.key(H.fold(as), k, as, H.prefer(H.attr(as, "data-id"), H.prefer(k,
         H.prefer(H.attr(as, "id"), "control:" ++ tag ++ ":" ++ H.attr(as, "class") ++ ":" ++ H.attr(as, "data-value") ++ ":" ++ H.actions(as, "")))))
 
-def H.word.go(s: String, +word: String, acc: String) -> Bool:
+# (no char literal in the pattern: in the JS build a literal's fallback
+# case rebuilds each char through a 32-bit list, and this walks every
+# class of every row at each page landing and key; the head's space comes
+# in beside it instead)
+def H.space(s: String) -> Bool:
   match s:
-    case SNil{}: String.eq(acc, word)
-    case SCon{Chr{32}, t}:
-      Bool.or(String.eq(acc, word), H.word.go(t, word, ""))
-    case SCon{c, t}: H.word.go(t, word, acc ++ SCon{c, SNil{}})
+    case SCon{Chr{x}, _}: U32.is_eq(x, 32)
+    case SNil{}: False{}
+
+def H.word.go.k(s: String, sp: Bool, +word: String, acc: String) -> Bool:
+  match s sp:
+    case SNil{} _: String.eq(acc, word)
+    case SCon{_, +t} True{}:
+      Bool.or(String.eq(acc, word), H.word.go.k(t, H.space(t), word, ""))
+    case SCon{c, +t} False{}: H.word.go.k(t, H.space(t), word, acc ++ SCon{c, SNil{}})
+
+def H.word.go(+s: String, +word: String, acc: String) -> Bool:
+  H.word.go.k(s, H.space(s), word, acc)
 
 def H.transient(+k: String, +as: List<&2, D.Attr>) -> Bool:
-  Bool.or(Bool.or(String.starts_with(k, "live:"), String.starts_with(k, "@live:")), Bool.or(String.eq(H.attr(as, "fn"), "live"),
+  Bool.or(TV.Item.live.key(k), Bool.or(String.eq(H.attr(as, "fn"), "live"),
     Bool.or(H.word.go(H.attr(as, "class"), "live", ""), H.word.go(H.attr(as, "class"), "sending", ""))))
 
 def H.historical.allowed(blocked: Bool, +tag: String, +k: String, +as: List<&2, D.Attr>) -> Bool:

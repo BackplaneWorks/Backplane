@@ -466,10 +466,23 @@ def Window.visible.go(xs: List<&2, Item>, +anchor: String, +lo: Px, +hi: Px, acc
 def Window.visible(xs: List<&2, Item>, anchor: String, lo: Px, hi: Px) -> List<&2, Item>:
   Window.visible.go(xs, anchor, lo, hi, Nil{})
 
+def Item.live.k(live: Bool, +k: String) -> Bool:
+  match live:
+    case True{}: Bool.not(String.ends_with(k, ":stopped"))
+    case False{}: False{}
+
+# a live row's key: "live:<thread>" (the web view's) or "@live:<thread>"
+# (a thin view's). A reply a Stop posted from what had streamed keeps its
+# id "live:<thread>:<gen>:stopped" (core/steer.bend's Steer.stop.mark) but
+# is a message like any other, never the live row: taken for one, the
+# timeline dropped it (and every earlier one) as the stream went away
+def Item.live.key(+k: String) -> Bool:
+  Item.live.k(Bool.or(String.starts_with(k, "@live:"), String.starts_with(k, "live:")), k)
+
 def Item.json(r: Item) -> J.Json:
   match r:
     case Item{+k, n, s, z}: J.Json.obj([J.KV{"key", J.Str{k}}, J.KV{"index", J.Json.nat(n)}, J.KV{"start", Px.json(s)}, J.KV{"size", Px.json(z)},
-      J.KV{"keepHeight", J.Flag{Bool.or(String.starts_with(k, "@live:"), String.starts_with(k, "live:"))}}])
+      J.KV{"keepHeight", J.Flag{Item.live.key(k)}}])
 
 def Items.json(xs: List<&2, Item>, acc: List<&2, J.Json>) -> J.Json:
   match xs:

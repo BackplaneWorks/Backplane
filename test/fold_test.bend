@@ -30,6 +30,10 @@ def ran(+id: String, +kind: String, +at: Nat) -> M.Entry:
 def turn() -> List<&2, M.Entry>:
   [user("u", 100n), ran("a", "shell", 110n), ran("b", "edit", 120n), said("m1", 150n), ran("c", "read", 160n), said("m2", 233n)]
 
+# thread t, its last turn ended by an error
+def failed() -> M.State:
+  M.State.replay([M.ThreadCreated{"t", "p", "t", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"t", M.Running{}, 2n}, M.TurnChanged{"t", M.Failed{}, 30n}], M.State.empty())
+
 def at(+now: Nat) -> Map<&2, String>:
   Map.set(&2, String, Map.new(&2, String), "clock", Nat.show(now))
 
@@ -244,5 +248,7 @@ def main() -> IO(Unit):
       "<div.msg assistant><div.body><p>hi</p></div><span.stamp>00:00</span><button.copy=hi>Copy</button></div><button.fold live=1a>^<span>1 tool call · running: x</span></button>")
     C.Check.str("web opened: its rows hang in the drawer, marked with its run", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("a", "shell"), tool("b", "edit"), msg("m")], M.State.empty(), "t", Map.set(&2, String, none(), "fold:a", "1"), False{}))),
       "<button.fold open=0a>^<span>2 tool calls · shell, edit</span></button><div.act tool~a><span.kind>shell</span><span.summary>x</span></div><div.act tool~a><span.kind>edit</span><span.summary>x</span></div><div.msg assistant><div.body><p>hi</p></div><span.stamp>Finished 00:00</span><button.copy=hi>Copy</button></div>")
+    C.Check.str("web: a failed turn's last reply says Failed", Web.shows(V.View.expand(V.View.entries(I.En{}, [user("u", 100n), said("m", 122n)], failed(), "t", none(), False{}))),
+      "<div.msg user><div.body plain>do it</div><span.stamp>00:01</span><button.copy=do it>Copy</button></div><div.msg assistant><div.body><p>done</p></div><span.stamp>Failed 00:02 · 22s</span><button.copy=done>Copy</button></div>")
     C.Check.str("web opened live: open and pulsing", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("a", "shell")], M.State.empty(), "t", Map.set(&2, String, none(), "fold:a", "1"), True{}))),
       "<button.fold open live=0a>^<span>1 tool call · running: x</span></button><div.act tool now~a><span.kind>shell</span><span.summary>x</span><span.now>running</span></div>")

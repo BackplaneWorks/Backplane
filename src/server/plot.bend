@@ -177,15 +177,32 @@ def Src.idle(+s: Src, +subs: List<&2, Sub>, +n: Nat) -> Bool:
 # the sources some phone still watches, and the last few 3D models no view
 # watches now (their plots kept: a model takes seconds to prepare, and the
 # next page or phone to ask for an unchanged board gets it at once)
-def Src.gc.n(ss: List<&2, Src>, +subs: List<&2, Sub>, +n: Nat) -> List<&2, Src>:
+# a board's or schematic's plot of a saved version (a history step, a
+# commit, a comparison): it never changes, and scrubbing the history comes
+# back to it; it was dropped as soon as the view moved on, and each step
+# shown again was plotted again (about a second on a real board)
+def Src.version(s: Src) -> Bool:
+  match s:
+    case Src{_, +kd, +path, _, _, _, _, pl, _}:
+      Bool.and(Bool.not(Pv.solid.kind(kd)), Bool.and(Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), Maybe.is_some(&2, P.Plot, pl)))
+
+# how many such version plots no view watches are kept (the newest first)
+def Src.versions.kept() -> Nat:
+  8n
+
+def Src.idle.v(+s: Src, +subs: List<&2, Sub>, +n: Nat) -> Bool:
+  Bool.and(Bool.not(Sub.watched(subs, Src.key.of(s))), Bool.and(Src.version(s), Nat.is_gt(n, 0n)))
+
+def Src.gc.n(ss: List<&2, Src>, +subs: List<&2, Sub>, +n: Nat, +v: Nat) -> List<&2, Src>:
   match ss:
     case Nil{}:
       Nil{}
     case +s <> t:
-      Src.keep(Bool.or(Sub.watched(subs, Src.key.of(s)), Src.idle(s, subs, n)), s, Src.gc.n(t, subs, Src.left(Src.idle(s, subs, n), n)))
+      Src.keep(Bool.or(Sub.watched(subs, Src.key.of(s)), Bool.or(Src.idle(s, subs, n), Src.idle.v(s, subs, v))), s,
+        Src.gc.n(t, subs, Src.left(Src.idle(s, subs, n), n), Src.left(Src.idle.v(s, subs, v), v)))
 
 def Src.gc(ss: List<&2, Src>, +subs: List<&2, Sub>) -> List<&2, Src>:
-  Src.gc.n(ss, subs, Src.kept())
+  Src.gc.n(ss, subs, Src.kept(), Src.versions.kept())
 
 def Sub.keep(drop: Bool, s: Sub, rest: List<&2, Sub>) -> List<&2, Sub>:
   match drop:

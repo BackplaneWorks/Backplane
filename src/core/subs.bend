@@ -40,6 +40,12 @@ def Subs.window() -> Nat:
 def Subs.shown() -> Nat:
   6n
 
+# what the hub notes about a subagent beside its steps (hub.bend's
+# Sub.about at its Agent call: its type, model and prompt; Bg.outcome at
+# its end: what it reported and used), each a JSON object
+def Subs.meta(+kind: String) -> Bool:
+  Bool.or(String.eq(kind, "about"), String.eq(kind, "outcome"))
+
 # a step's first line, in one walk that stops at the first break (splitting
 # a subagent's 20 KB step recursed once per character and overflowed the
 # web's and the phones' stacks: the thread never opened)
@@ -70,8 +76,10 @@ def Agg.step.k(keep: Bool, +kind: String, +text: String, ss: List<&2, SubStep>) 
 def Agg.step(+kind: String, +text: String, +n: Nat, +ss: List<&2, SubStep>) -> List<&2, SubStep>:
   Agg.step.k(Nat.is_lt(n, Subs.shown()), kind, text, ss)
 
+# 0 its start, 1 its end, 3 what the hub noted about it (Subs.meta: what it
+# was asked, how it ended), 2 a step it took
 def Agg.kind(+kind: String) -> Nat:
-  Bool.pick(Nat, String.starts_with(kind, "start"), 0n, Bool.pick(Nat, String.eq(kind, "end"), 1n, 2n))
+  Bool.pick(Nat, String.starts_with(kind, "start"), 0n, Bool.pick(Nat, String.eq(kind, "end"), 1n, Bool.pick(Nat, Subs.meta(kind), 3n, 2n)))
 
 def Agg.find(as: List<&2, SubAgg>, +call: String) -> SubAgg:
   match as:
@@ -112,6 +120,8 @@ def Agg.upd(i: Nat, a: SubAgg, +kind: String, +text: String, +at: Nat) -> SubAgg
       SubAgg{c, String.drop(kind, 6n), Subs.line(text), e, n, ss, Bool.pick(Nat, Nat.is_eq(tm, 0n), at, tm)}
     case 1n SubAgg{c, k, ti, +en, n, ss, +tm}:
       SubAgg{c, k, ti, Subs.or(en, text), n, ss, Bool.pick(Nat, String.is_empty(en), at, tm)}
+    case 3n a:
+      a
     case _ SubAgg{c, k, ti, e, +n, ss, +tm}:
       SubAgg{c, k, ti, e, 1n+n, Agg.step(kind, text, n, ss), Bool.pick(Nat, Nat.is_eq(tm, 0n), at, tm)}
 
@@ -878,3 +888,187 @@ def Subs.active(rs: List<&2, SubRow>, +info: Map<&2, String>) -> Nat:
     case Nil{}: 0n
     case r <> rest:
       Nat.add(Bool.pick(Nat, String.eq(Subs.signal.of(info, r), "active"), 1n, 0n), Subs.active(rest, info))
+
+# More about a row
+# ----------------
+# What a row says beside its name, worked out only for the rows a page
+# shows (view.bend's View.subs.signals.at): where it runs (Claude Code's
+# subagent and its type, a background shell, a thread of another agent and
+# the machine it is on), its model, when it started and ended, how many
+# steps it took, what it used, its newest step, what it was asked and what
+# it reported. Nothing here is guessed: a field the log has not got is
+# empty (0, "") and the row leaves it out.
+type SubInfo is Data:
+  SubInfo{runs: String, model: String, since: Nat, until: Nat, steps: Nat, tokens: Nat, last: SubStep, ask: String, outcome: String, shown: List<&2, SubStep>}
+
+def SubInfo.none() -> SubInfo:
+  SubInfo{"", "", 0n, 0n, 0n, 0n, SubStep{"", ""}, "", "", Nil{}}
+
+# a subagent's own entries, newest first: its start and end times, its
+# step count, newest step and newest Subs.shown() steps (oldest first: the
+# page draws them shut too, hidden, so a click shows them at once), the
+# newest of what the hub noted
+type SubWalk is Data:
+  SubWalk{since: Nat, until: Nat, n: Nat, last: SubStep, about: String, outcome: String, ss: List<&2, SubStep>}
+
+def Walk.first(+have: String, +text: String) -> String:
+  Bool.pick(String, String.is_empty(have), text, have)
+
+# the newest step's first line, taken once (not for every step: Agg.step.k)
+def Walk.last(none: Bool, +kind: String, +text: String, last: SubStep) -> SubStep:
+  match none:
+    case True{}:
+      SubStep{kind, Subs.line(text)}
+    case False{}:
+      last
+
+def Walk.empty(s: SubStep) -> Bool:
+  match s:
+    case SubStep{+k, +t}:
+      Bool.and(String.is_empty(k), String.is_empty(t))
+
+def Walk.act(i: Nat, w: SubWalk, +kind: String, +text: String, +at: Nat) -> SubWalk:
+  match i w:
+    case 0n SubWalk{_, u, n, l, ab, oc, ss}:
+      SubWalk{at, u, n, l, ab, oc, ss}
+    case 1n SubWalk{si, +u, n, l, ab, oc, ss}:
+      SubWalk{si, Bool.pick(Nat, Nat.is_eq(u, 0n), at, u), n, l, ab, oc, ss}
+    case 3n SubWalk{si, u, n, l, +ab, +oc, ss}:
+      SubWalk{si, u, n, l, Bool.pick(String, String.eq(kind, "about"), Walk.first(ab, text), ab), Bool.pick(String, String.eq(kind, "outcome"), Walk.first(oc, text), oc), ss}
+    case _ SubWalk{si, u, +n, +l, ab, oc, ss}:
+      SubWalk{si, u, 1n+n, Walk.last(Walk.empty(l), kind, text, l), ab, oc, Agg.step(kind, text, n, ss)}
+
+def Walk.entry(e: M.Entry, w: SubWalk) -> SubWalk:
+  match e:
+    case M.Act{_, _, _, +kind, +text, +at}:
+      Walk.act(Agg.kind(kind), w, kind, text, at)
+    case M.Msg{_, _, _, _, _}:
+      w
+
+def Walk.go(k: Nat, es: List<&2, M.Entry>, w: SubWalk) -> SubWalk:
+  match k es:
+    case 0n _:
+      w
+    case 1n+_ Nil{}:
+      w
+    case 1n+j e <> t:
+      Walk.go(j, t, Walk.entry(e, w))
+
+def Subs.walk(+st: M.State, +th: String, +call: String) -> SubWalk:
+  Walk.go(Subs.window(), M.State.mine(st, M.Idx.sub.call(M.Bg.log(th), call)), SubWalk{0n, 0n, 0n, SubStep{"", ""}, "", "", Nil{}})
+
+def Subs.json(+text: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+
+# where a subagent of the agent's own runs: Claude Code reports them all
+# (hub.bend's Bg.system), as a subagent of a type, a background shell...
+def Subs.runs.own(+kind: String, +ty: String) -> String:
+  Bool.pick(String, String.eq(kind, "subagent"), "Claude Code" ++ Bool.pick(String, String.is_empty(ty), " subagent", " · " ++ ty),
+    Bool.pick(String, String.eq(kind, "shell"), "background shell",
+      Bool.pick(String, String.eq(kind, "watch"), "watched by Backplane", Subs.or(kind, "task"))))
+
+def Subs.info.walked(w: SubWalk, +kind: String) -> SubInfo:
+  match w:
+    case SubWalk{si, u, n, l, +ab, +oc, ss}:
+      +a = Subs.json(ab)
+      +o = Subs.json(oc)
+      SubInfo{Subs.runs.own(kind, J.Json.get_str(a, "type", "")), J.Json.get_str(a, "model", ""), si, u, n, J.Json.get_nat(J.Json.get_obj(o, "usage"), "total_tokens", 0n), l,
+        J.Json.get_str(a, "prompt", ""), J.Json.get_str(o, "summary", ""), ss}
+
+def Subs.link(+id: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(id, '~')), "")
+
+# a delegated or launched thread: the agent it runs, and on which machine
+# when not this one (far.bend's ids hold a "~")
+def Subs.machine(+st: M.State, +id: String) -> String:
+  Bool.pick(String, String.contains(id, "~"), " on " ++ Subs.or(M.Nav.key(M.Nav.get(M.State.navs(st), "far~" ++ Subs.link(id)), "pinned"), Subs.link(id)), "")
+
+def Subs.model.of(+pr: String, +mo: String) -> String:
+  Bool.pick(String, String.eq(pr, "claude"), Subs.model.family(Bool.pick(String, String.starts_with(mo, "claude-"), String.drop(mo, 7n), mo)), mo)
+
+# the agents' names (modelpick.bend's ModelPick.product, which subs.bend
+# cannot import without a cycle through client.bend)
+def Subs.product(+agent: String) -> String:
+  match agent:
+    case "claude": "Claude Code"
+    case "codex": "Codex"
+    case "grok": "Grok"
+    case "muse": "Muse"
+    case "antigravity": "Antigravity"
+    case "opencode": "OpenCode"
+    case "pi": "Pi"
+    case "omp": "Oh My Pi"
+    case _: ""
+
+def Subs.thread.info(t: M.Thread, +st: M.State, +launched: Bool, live: Bool, +doing: String) -> SubInfo:
+  match t:
+    case M.Thread{+id, _, _, +created, +activity, _, _, _, _, _, _, _, _, _, _, +pr, +mo, _, _, _, _}:
+      SubInfo{Bool.pick(String, launched, "launched ", "") ++ Subs.or(Subs.or(Subs.product(pr), pr), "Backplane") ++ " thread" ++ Subs.machine(st, id), Subs.model.of(pr, mo), created, Bool.pick(Nat, live, 0n, activity), 0n, 0n, SubStep{"", ""}, "", "", Nil{}}
+
+# digits as a Nat ("" or anything else: 0)
+def Subs.num.go(s: String, acc: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{c, t}:
+      Subs.num.go(t, Nat.add(Nat.mul(acc, 10n), U32.to_nat((Char.to_u32(c) - 48 : U32))))
+
+def Subs.num(+s: String) -> Nat:
+  Bool.pick(Nat, Bool.and(Bool.not(String.is_empty(s)), Nat.is_le(String.length(s), 12n)), Subs.num.go(s, 0n), 0n)
+
+# the tokens a subagent at work has used so far (its Bg line), 0 for none
+def Subs.used(ls: List<&2, String>, +call: String) -> Nat:
+  match ls:
+    case Nil{}:
+      0n
+    case +l <> t:
+      Bool.pick(Nat, String.eq(M.Bg.call(l), call), Subs.num(M.Bg.tokens(l)), Subs.used(t, call))
+
+def Subs.info.tokens(i: SubInfo, +live: Nat) -> SubInfo:
+  match i:
+    case SubInfo{w, m, si, u, n, +tk, l, a, o, ss}:
+      SubInfo{w, m, si, u, n, Bool.pick(Nat, Nat.is_eq(tk, 0n), live, tk), l, a, o, ss}
+
+def Subs.info.k(agent: Bool, +st: M.State, +th: String, r: SubRow) -> SubInfo:
+  match agent r:
+    case True{} SubRow{+key, _, _, +who, _, _, _, _, _, _}:
+      Subs.info.tokens(Subs.info.walked(Subs.walk(st, th, key), who), Subs.used(M.Bg.of(st, th), key))
+    case False{} SubRow{+key, _, _, +who, _, +doing, live, _, _, _}:
+      Subs.thread.info(U.Ui.thread(st, key), st, String.starts_with(who, "launched"), live, doing)
+
+def Subs.info(+st: M.State, +th: String, r: SubRow) -> SubInfo:
+  match r:
+    case SubRow{+key, +agent, ti, +who, wo, d, li, o, n, ss}:
+      Bool.pick(SubInfo, Bool.or(String.starts_with(key, "subs.done:"), Bool.or(String.eq(who, "lock"), String.eq(who, "wake"))), SubInfo.none(),
+        Subs.info.k(agent, st, th, SubRow{key, agent, ti, who, wo, d, li, o, n, ss}))
+
+# "45s", "12m", "1h 4m", "3d"
+def Subs.dur(+s: Nat) -> String:
+  Bool.pick(String, Nat.is_lt(s, 60n), Nat.show(s) ++ "s",
+    Bool.pick(String, Nat.is_lt(s, 3600n), Nat.show(Nat.div(s, 60n)) ++ "m",
+      Bool.pick(String, Nat.is_lt(s, 86400n), Nat.show(Nat.div(s, 3600n)) ++ "h" ++ Bool.pick(String, Nat.is_eq(Nat.mod(Nat.div(s, 60n), 60n), 0n), "", " " ++ Nat.show(Nat.mod(Nat.div(s, 60n), 60n)) ++ "m"),
+        Nat.show(Nat.div(s, 86400n)) ++ "d")))
+
+# how long: at work so far, or what it took ("" with no start known). At
+# work it is told in minutes: the hub's view clock moves in 30 s steps
+# (core/viewclock.bend), so seconds would stand still or read 0s
+def Subs.so_far(+s: Nat) -> String:
+  Bool.pick(String, Nat.is_lt(s, 60n), "<1m", Subs.dur(s))
+
+def Subs.took(+live: Bool, +since: Nat, +until: Nat, +now: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(since, 0n), "",
+    Bool.pick(String, live, Subs.so_far(Nat.sub(now, since)), Bool.pick(String, Nat.is_eq(until, 0n), "", Subs.dur(Nat.sub(until, since)))))
+
+# a whole and its tenth: "18.2", "240"
+def Subs.tenths(+whole: Nat, +tenth: Nat) -> String:
+  Nat.show(whole) ++ Bool.pick(String, Nat.is_eq(tenth, 0n), "", "." ++ Nat.show(tenth))
+
+# "812 tokens", "18.2k tokens", "240k tokens", "1.4M tokens"
+def Subs.tokens(+n: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(n, 0n), "",
+    Bool.pick(String, Nat.is_lt(n, 1000n), Nat.show(n) ++ " tokens",
+      Bool.pick(String, Nat.is_lt(n, 1000000n), Subs.tenths(Nat.div(n, 1000n), Nat.div(Nat.mod(n, 1000n), 100n)) ++ "k tokens",
+        Subs.tenths(Nat.div(n, 1000000n), Nat.div(Nat.mod(n, 1000000n), 100000n)) ++ "M tokens")))
+
+def Subs.steps.word(+n: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(n, 0n), "", Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " step", " steps"))

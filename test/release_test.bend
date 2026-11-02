@@ -49,6 +49,7 @@ def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("tags valid", valids(["v1.2", "rev-A", "release/2026", "r7", "1", "v1.2-rc.1", "a.b"]), "True True True True True True True ")
     C.Check.str("tags invalid", valids(["", "a b", "a..b", "-x", "x.lock", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "@", "a@{b", "/x", "x/", "x.", "a//b", ".x", "a/.b", "a\tb", "a\nb"]), "False False False False False False False False False False False False False False False False False False False False False False ")
+    C.Check.str("no commit to tag: says so and how", R.Release.nocommit("/p/uno"), "No release: a release tags a commit, and /p/uno has none (it is not a git repository yet, or nothing is committed). Make one first: cd /p/uno && git init && git add -A && git commit -m start")
     C.Check.str("next: v1.2", R.Release.next(["v1.1", "v1.2"]), "v1.3")
     C.Check.str("next: order given doesn't matter", R.Release.next(["v1.2", "v1.1"]), "v1.3")
     C.Check.str("next: numbers by value", R.Release.next(["v1.9", "v1.10", "v1.2"]), "v1.11")

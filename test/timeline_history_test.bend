@@ -82,6 +82,11 @@ def main() -> IO(Unit):
     same("body-window live key never becomes historical overlap", H.project(tl([c, d, bodyLive]), tl([a, b, bodyLive]), "older"), tl([a, b, c, d, bodyLive]))
     same("stream refresh preserves chronological retained suffix", H.project(H.project(tl([c, d, bodyLive]), tl([a, b, bodyLive]), "older"), tl([a, b, bodyLive]), "update"), tl([a, b, c, d, bodyLive]))
     same("memo history retained and old transient/control nodes excluded", H.project(tl([before, memo, memoRow, live, sending, liveId]), tl([a, after]), "newer"), tl([memo, memoRow, a, after]))
+    # a reply a Stop posted from the stream (id "live:<thread>:<gen>:stopped",
+    # core/steer.bend) is a message: kept like any other, never dropped as
+    # the live row it was streamed in
+    +stopped : D.Node = D.El{"bp-memo", "live:t:1793592174014:stopped", [D.At{"fn", "msg"}], [D.Txt{"stopped reply"}]}
+    same("a stopped reply is retained, not taken for the live row", H.project(tl([before, memo, stopped, live]), tl([a, after]), "newer"), tl([memo, stopped, a, after]))
     same("accumulates more than two visited pages", H.project(H.project(tl([a]), tl([b]), "newer"), tl([c]), "newer"), tl([a, b, c]))
     same("class timeline alone is not selected", H.project(tl([a]), D.Dom.div("timeline", [b]), "older"), D.Dom.div("timeline", [b]))
     same("missing previous timeline uses fresh", H.project(D.Txt{"old"}, page("fresh", [b]), "older"), page("fresh", [b]))
