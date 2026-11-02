@@ -59,6 +59,7 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+import ./src/core/pathrecords.bend as PR
 
 import ./src/core/diskq.bend as DQ
 
@@ -15443,3 +15444,17 @@ law fm_previous_reply_rejected:
 
 law fm_root_reconnect_requested:
   {U.Fm.again.want("fm.want:t1") == True{} : Bool}
+
+# Complete file path records (PR #239).
+law path_records_newline_is_data:
+  {PR.Paths.read("café.step\0line\nbreak.step\0back\\slash.step\0") == ["café.step", "line\nbreak.step", "back\\slash.step"] : List<&2, String>}
+
+law path_records_keep_whitespace:
+  {PR.Paths.read(" \0\t\0\0") == [" ", "\t"] : List<&2, String>}
+
+law path_records_unterminated_last:
+  {PR.Paths.read("first\0last") == ["first", "last"] : List<&2, String>}
+
+law path_records_legacy_kept:
+  for +text: String
+  {PR.Paths.kept(False{}, text) == String.lines(text) : List<&2, String>}
