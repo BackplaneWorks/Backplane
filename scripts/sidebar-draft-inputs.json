@@ -69,7 +69,7 @@
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
     "src/core/images.bend": "5e00c7c36ef76ff7d458f381e829534f62eeef6c3dc3208789b5b20b4cb7a376",
-    "src/core/json.bend": "60ea726052fded72970f3be2784d09fbff0baa4a98a47ac82d00a4a311dc242d",
+    "src/core/json.bend": "039105b99a83af70a1f62042fde42e5a4e89e937983e42dfc22135590b3ac075",
     "src/core/kexport.bend": "e7c768d51b7909761458296102e9aefb66d8ffd9ea37c3487ccc7fdb2defc86d",
     "src/core/kihealth.bend": "0f31f804fddef557d7a038dd39022219455d5b9e0990fa19ccef5a388e511460",
     "src/core/kserve.bend": "f375590578eaba849f6523cbf5719da104ac0073f4adcbfd7c0b7157bd1f2100",
@@ -107,7 +107,7 @@
     "src/core/ref.bend": "fa2dd3c0a4e9865ac9b185680361c681ce187f625a315e560f3a289e651e90f7",
     "src/core/refs.bend": "5962df838d787b23cf253082282efe70064b1b580012661b9b1f5f6d07c5ce5f",
     "src/core/refview.bend": "aad18d93039af1c4b83cd245200c051192609bf1a3a7dc261d2b2f4c1dbf97c0",
-    "src/core/release.bend": "0959468fb4ae02796c74eb78d97219ba21c5b74de28ec406d17621f4f6f64826",
+    "src/core/release.bend": "10774d2df08da7e3df59ae55b0f7ec1cb4902172d83f327463e5939e3c58b4ab",
     "src/core/reply.bend": "9e6f30962b274fa5595f4902f5ecd8f308275bea72ac4d558221bcd4b01ece0f",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
     "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
@@ -176,7 +176,7 @@
     "src/web/allowance.bend": "4feae6cd71dcc76c98875476d0d20fb223008a7f5adad4008ec5851272e4818a",
     "src/web/bots.bend": "2e5a1a0a9c7f10e48c824d44b6da84ebb62abbe9922ef53ee6f16801f297352c",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
-    "src/web/dom.bend": "a564bbb014b7247fc3cd670a427bf13782e8f6217b3c32abadb91efc13d5cf7e",
+    "src/web/dom.bend": "6e0ddb26a372a07cf2af0bbccdae476087fb50d6e2af5da9c6f8d6b9cc1ca0b5",
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
     "src/web/list-windows.bend": "965be3f9f1a13e97dd7dc36a4f21827d51e1a666fc37d13a619ae66cf8584dcc",
     "src/web/mail-actions.bend": "da52f4d849410a7dbfe2484db0d1d07b010ff99e126668fdd05b30b12f495c8f",
@@ -694,5 +694,16 @@
     "qualifiedBase": "ea5011afd32181ff13d630197ca865402c29a768 with the pending-send projection",
     "rebasedMain": "208c90493f82b669125aa31557796238ca46132b",
     "qualificationOnRebasedMain": "UNRUN: full-output24, Bend proof/mobile and exact-video runtime on rebased main. Earlier24 cases passed on the qualifiedBase only; not inherited. Current user permits immediate normal merges with unrun/failed gates recorded. Remote E2E synthetic run timed out before MessagePosted and diagnostic retry was refused admission; neither counts as a pass."
+  },
+  "surrogateNavigation20261102Review": {
+    "sourceCommit": "e37a3e66c86e7885174b1d00eb7482bea8964407",
+    "sourceTree": "aa1a92ebea88625130a5fc011e91ec14c232e189",
+    "scope": "Three reviewed pure-helper changes; roots, bridges, scanner, filters, image keys and authority unchanged.",
+    "review": "docs/reviews/surrogate-navigation-sidebar-20261102.md",
+    "fullOutput": "Actual direct JSON15 and sidebar24 passed on exact222inputclosure; preserved unchanged through this pin-only change. No global proof/default/native claim.",
+    "work": "w-t1793604413-1188217-1277028",
+    "jsonLogSHA256": "60640172e56db3332c6506a8834ced3d046c225e3d59ed3cf8930b981abf0441",
+    "sidebarLogSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+    "inputFiles": 222
   }
 }
