@@ -829,6 +829,9 @@ export class ThinHost {
         // a draft the request carried bounded is this page's alone: what
         // the hub made of the bounded text is never adopted (or saved)
         if (key === responseSession.sel && metadata?.input?.session?.drafts?.['@draft.bound']) continue;
+        // Navigation carried only its source conversation's private draft.
+        // A destination it did not send cannot overwrite that local draft.
+        if (key === responseSession.sel && key !== metadata?.input?.session?.sel && Object.hasOwn(this.session.drafts, key)) continue;
         if (key === responseSession.sel || key.startsWith('@')) Object.defineProperty(drafts, key, { value: text, enumerable: true, writable: true, configurable: true });
       }
       // each thread's viewer open or shut ("panel:<t>") is this page's own,
