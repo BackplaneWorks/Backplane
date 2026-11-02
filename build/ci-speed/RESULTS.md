@@ -9,7 +9,8 @@ required assertion. This target is **not achieved**.
 | Change / workload | Before | After | Evidence / limits |
 |---|---:|---:|---|
 | Artifact compression, installed 118,042,489-byte service, DEFLATE 6 → 1 | 2.543 s; 43,834,514 B | 0.934 s; 47,954,641 B | One local pair using Python zipfile/zlib; 63% less compression CPU, 9.4% larger archive. Not an Actions wall-time measurement. |
-| Native CI artifact selection, all targets → own target | 840,655,549 B per native download; latest Mac x64 102 s | Not yet measured on Actions | Workflow changed; native smoke still requires its target's binary and every helper. |
+| Native CI artifact selection, all targets → own target (merged PR737) | 840,655,549 B per native download; latest Mac x64 102 s | Not yet measured on Actions | Workflow changed; native smoke still requires its target's binary and every helper. |
+| Lean source transfer for saved two-slice pilot | 146 s push +37 s setup; 2,748 files /77 MiB | **3 s push +1 s setup; 3 files /272 KiB** | One pair; exact saved pilot inputs and actual Bend/library identities verified; default4CPU/8GB Boat. |
 | Local combined gate (existing owner receipt, PR630) | 932.760 s | Not yet measured | Check/tests cached; proof 417.870 s, build/smoke 505.442 s. Not a cold complete gate. |
 | Lock regression E2E (existing build-times owner) | 151.956 s | 123.941 s | One controlled pair, original assertions retained; already on main. Not a whole-gate result. |
 
@@ -137,3 +138,80 @@ tool identity, and avoid paying to retain idle sandboxes by default.
 Preserved four-file `bp-fastci` follow-up from owner335450 is being reconciled
 before overlapping implementation. Its old `bp-coord/fast-hub` path is absent
 on this machine; no replacement gate has been written or launched.
+
+## Lean source transport, merged tooling candidate
+
+New `scripts/ci-packet.py` sends the explicit transitive Bend source closure,
+required runner/effect/data extras and pinned setup metadata in one deterministic,
+content-addressed gzip archive. It uploads just that archive, the verifier and
+setup pin using the existing Boat runner's exclusion interface. It retains
+Boat's budget/admission/orphan/cleanup behavior; no runner or settings changed.
+Archive cache hits are byte/mode verified; a corrupt cache is rebuilt. No proof
+or test pass is cached by this tool. Missing dynamic dependencies must be added
+explicitly; this is not an affected-test selector.
+
+Probe `j20261102214147-1677271` / work1283095 used source HEAD `dc4052def` with
+**the exact saved7b pilot proof/statement/import bytes**, bound by snapshot
+hashes. Forty declared source inputs total827,451 B. Transport manifest
+`1f30d50eed61d420f37dfc04e874dcf06601ab5a5b43fc9a34f93b5e456a36a5`,
+archive `f4dae6e34f4ded64a42e06b6b6b6219c69b20fd459f28ebc95c0eca919fa54c3`,
+compiler/library identity `690c66727e08f7b63d2ad681e590140a6913bb5bad2e2070a2a5986abfbb885e`.
+Bend2.0.36 release archive is checksum-pinned; actual executable and bundled and
+named-library file hashes match before/after the command. Bootstrap payload
+3 files/272KiB: startup3 s, **push3 s, setup1 s**. Command wall1.47 s, peak
+308,484KiB; receipt's own inner wall1.397 s. Usage proof0.58 s/308,484KiB,
+scene proof0.34 s/256,268KiB. False theorem rejected again; required inputs
+unchanged. This is one before/after pair on separate default-size sandboxes,
+not a controlled estimate of compiler speed or a claim of full-law coverage.
+Earlier **198,596–274,608KiB (0.19–0.26GiB)** evidence remains valid for its
+original pilot; the new run peaks0.29GiB. The large command-time difference has
+not been causally attributed to transport alone.
+
+The sandbox was deleted and verified absent immediately. Recorded charge:
+**8credit-s = $0.00008**, including its lifetime; no idle retention. Compare
+original pilot $0.00250 active lifetime +$0.01500 warm tail. Only one new lean
+probe was launched; no broad proofs, app builds or installer work were repeated.
+
+[Saved benchmark receipt](lean-transport/result.json), metrics and negative
+control logs are retained beside it. Measured verifier SHA256:
+`0f71ef48d23c9015e4a621238f330739ad8ead4a0f8d53f55de7d92f0c1c1c07`.
+The measured source can be reproduced from the final verifier using the saved
+`lean-transport/ci-packet-measured.patch`; `candidate-identity.json` binds both
+hashes. The final candidate additionally preserves exact ordinary permission bits
+instead of only executable/non-executable, with a separate regression; this
+small hardening was not rebenchmarked remotely. Sixteen focused tests pass
+(0.338 s), including source/compiler/library/manifest/mode invalidation,
+corrupt archive cache repair, symlink/traversal/duplicate rejection, ignored
+source detection, private-file filtering, failure exit propagation and no
+stale successful receipt after input mutation.
+
+## Historical bp-fastci reconciliation
+
+Owner335450 recovered a transcript, not a ready patch. The original
+`/home/h/Documents/i2cjak/bp-fastci/` worktree and
+`/tmp/ci-helper-recovery-a498.patch` backup are absent. Historical base
+`15067058f3c3496668911f8101d96a4044bad683` is not an ancestor of current main.
+The four uncommitted follow-up files were `scripts/ci-fast.py` (runner-bound
+cache reuse), `scripts/ci-runner-id.sh` (Bend/Bun binary hashes),
+`scripts/boat-job.sh` (slot identity, modes, symlink fallback and inventory),
+and `test/tools/boat_job_test.sh` (slot regressions). Recorded patch digest:
+`66d64a1ce2b55463fc029db2fe400a3a713eb257e1642445b2453b0e8f68e265`;
+112 insertions/46 deletions. Three recorded blob prefixes cannot be resolved.
+
+Historical receipts: ci_fast43/43 and local-ci25/25 passed **before** the last
+slot repairs; final Boat fake run was interrupted (exit143). There was no
+completed cold/warm benchmark or passing receipt for the final four-file state.
+The surviving transcript was independently read; its head-limited diff is
+retained in [the partial recovery](bp-fastci-recovered-diff.partial.txt). The
+base non-ancestry was checked against origin/main. Current main lacks ci-fast.py/ci-runner-id.sh; its boat-job pushes the full
+filtered tree. Therefore this is reference material for deliberate porting,
+not a change to cherry-pick or certify from those older passes. The transport
+correction above reuses current bend-closure.py and budgeted Boat plumbing;
+exact byte/tool/mode identity and inventory checks were independently tested.
+No old pass-cache, named-slot or symlink-fallback implementation was restored.
+
+Surviving handoff source: Codex recovery transcript
+`~/.codex/sessions/2026/10/21/rollout-2026-10-21T14-43-08-01a15fc6-39d2-7413-876e-c23b00b027ce.jsonl`
+lines505/512; original helper receipt in Claude subagent-a49849459aaa2f2d1.jsonl
+line932 (paths supplied by owner335450). These are historical evidence paths,
+not shipped artifacts. Installer415584 and design1131486 remained untouched.
