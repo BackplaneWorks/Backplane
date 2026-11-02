@@ -2211,7 +2211,7 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 /* The allowance stays beside the model; both keep a stable row at phone widths. */
 .composer-model { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; gap: 8px; }
 .composer-foot .composer-model .model-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
-.allowance-chip { flex: none; min-height: 28px; padding: 3px 7px; color: var(--dim); font: 11px/1.3 var(--mono); white-space: nowrap; width: 19ch; box-sizing: border-box; text-align: center; border: 1px solid var(--line); background: var(--bg); }
+.allowance-chip { flex: none; min-height: 28px; padding: 3px 7px; color: var(--dim); font: 11px/1.3 var(--mono); white-space: nowrap; width: calc(19ch + 16px); box-sizing: border-box; text-align: center; border: 1px solid var(--line); background: var(--bg); }
 .allowance-chip:hover, .allowance-chip[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
 .allowance-pop { position: absolute; bottom: calc(100% - 4px); left: 8px; z-index: 31; width: 410px; max-width: calc(100% - 16px); max-height: min(60dvh, 520px); overflow: auto; overscroll-behavior: contain; background: var(--panel); border: 1px solid var(--line); padding: 12px; box-sizing: border-box; }
 .allowance-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
@@ -2396,11 +2396,18 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 html[data-backplane-cached="true"] .allowance-pop,
 html[data-backplane-remote-ready="false"] .allowance-pop { display: none; }
 html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
+@media (max-width: 700px) {
+  /* Keep the shared-pool label readable beside the model and account. */
+  .composer-foot:has(.allowance-chip) { flex-wrap: wrap; }
+  .composer-foot .composer-model:has(.allowance-chip) { flex: 1 0 100%; width: 100%; flex-wrap: nowrap; gap: 4px; }
+  .composer-foot .composer-model:has(.allowance-chip) .model-chip { flex: 1 1 0; min-width: 120px; }
+  .composer-foot .composer-model .allowance-chip { flex: none; width: calc(19ch + 16px); max-width: none; margin-left: auto; }
+}
 @media (max-width: 400px) {
   .composer-model { gap: 4px; }
   .composer-model .model-chip { flex-basis: calc(100% - 15ch); }
   .composer-model .account-chip { max-width: 12ch; }
-  .composer-model .allowance-chip { max-width: none; width: 19ch; margin-left: auto; }
+  .composer-model .allowance-chip { max-width: none; width: calc(19ch + 16px); margin-left: auto; }
 }
 
 .allowance-retired { display: none; }
