@@ -142,3 +142,10 @@ test('queued reading progress is retired by bot navigation and cannot consume an
  const say=vm.runInContext('('+src.slice(a,b)+')',ctx);say('');thin.target={kind:'bot',id:'other'};jobs.splice(0).forEach(f=>f());
  assert.deepEqual(sent,[],'same source conversation alone cannot authorize a later bot target');
 });
+
+test('a pill-only bot/mailroom refresh reconciles reading even when virtual rows and geometry stay unchanged',()=>{
+ const src=source(),a=src.indexOf('  const tl2 = document.getElementById("timeline");'),b=src.indexOf('  const main = viewMode',a);assert(a>0&&b>a);
+ const seen=[],list={refresh(){},scrollToEnd(){}};
+ vm.runInNewContext(src.slice(a,b),{document:{getElementById:()=>({})},timelineList:()=>list,activeTimeline:list,transitionPosition:null,scroll:false,timelineChanged:l=>seen.push(l)});
+ assert.deepEqual(seen,[list],'accepted picture must reconcile bottom when only floating new-message navigation changed');
+});
