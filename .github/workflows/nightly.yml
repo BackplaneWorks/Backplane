@@ -5,7 +5,7 @@ name: Nightly
 # and smoke-tested on its own OS, the desktop and release-producer guards).
 # The merge gate (scripts/local-ci.py) runs only scripts/fast-tests.txt, so
 # this is what keeps the rest of the suite from rotting. Each hub build is
-# kept as the run's `backplane-serve-js` artifact for 7 days.
+# kept as the run's `backplane-serve-js-TARGET` artifacts for 7 days.
 #
 # It tags and publishes nothing: release.yml is the release lead's frozen
 # artifact collector (one stable tag, root-chosen producer runs) and cannot
