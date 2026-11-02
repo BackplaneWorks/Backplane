@@ -15179,3 +15179,11 @@ def Laws.settings_proposal_decline_no_write(s, now, client, id, ask, th): {==}
 def Laws.settings_proposal_deadline_exclusive(): {==}
 
 def Laws.settings_proposal_write_invalidates(): {==}
+
+def Laws.chat_pending_working(): {==}
+
+def Laws.chat_pending_blocked(): {==}
+
+def Laws.chat_pending_finished(): {==}
+
+def Laws.chat_pending_no_partial_reply(lc, text): {==}

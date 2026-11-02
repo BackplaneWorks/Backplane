@@ -1,4 +1,5 @@
 import Base
+import ../core/chat-pending.bend as CP
 import ../core/textscale.bend as TS
 import ./side_row_types.bend as ST
 import ../core/title.bend as TTL
@@ -6955,6 +6956,11 @@ def TL.memo.lines(+ty: Ty, +m: TLMemo, +es: List<&2, M.Entry>, +st: M.State, +se
   TL.memo.lines.k(TL.memo.fits(m, px, sel), ty, m, es, st, sel, px, pics)
 
 # messages the server has not stored yet, marked as sending
+def TL.pending(+ty: Ty, show: Bool, +px: U32) -> List<&2, TLine>:
+  match show:
+    case False{}: Nil{}
+    case True{}: TL.blocks(ty, N.Md.render(CP.Pending.label(Ty.loc(ty))), px)
+
 def TL.sending(+ty: Ty, ps: List<&2, String>, +px: U32) -> List<&2, TLine>:
   match ps:
     case Nil{}:
@@ -7175,7 +7181,7 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       # the timeline and what sits around it are laid out at once
       tl ch = Lay.timeline(ty,
         List.concat(&2, TLine, [TL.memo.shown.loc(ty, memo, st, sel, cw, pics), TL.sending(ty, pend, cw),
-          TL.live.single(ty, String.is_empty(live), ph, live, TL.memo.lv(memo), cw)]),
+          TL.pending(ty, CP.Pending.phase(ph), cw)]),
         cx0, cx1, top, (h - ah - qh - eh - bh : U32), sc, tsel, hold, TL.memo.first(memo), Out.none()) Out.all([Lay.header(ty, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, sel, now), U.Fab.mini.tools.of(st, pics, sel, Lay.running(turn)), x0, x1, pa, term, M.Snooze.on(now, U.Side.until(st, sel)), del, hy),
           Kn.draw(kx, False{}, ty, cx0, (52 + hy : U32), cw),
           Kn.draw(kn, True{}, ty, cx0, (52 + hy + kxh : U32), cw),
@@ -7364,7 +7370,7 @@ def TL.memo.locale(+tag: String, +m: TLMemo) -> TLMemo:
 # whole cost every frame 15 ms on a real log; "earlier" shows another page)
 def Lay.memo.local(+tag: String, +ty: Ty, +n: S.Nui, +prev: TLMemo) -> TLMemo:
   TL.memo.with_live(TL.memo.of(ty, Lay.memo.es(String.is_empty(U.Ui.sel(S.Nui.ui(n))), n), Lay.tl.px(n), U.Ui.sel(S.Nui.ui(n)), prev),
-    TL.live.local(tag, TL.live.get(ty, TL.memo.lv(prev), U.Live.head(U.Ui.live.of(S.Nui.ui(n), U.Ui.sel(S.Nui.ui(n)))), Lay.tl.px(n))))
+    TL.live.local(tag, TL.live.get(ty, TL.memo.lv(prev), "", Lay.tl.px(n))))
 
 def Lay.memo(+ty: Ty, +n: S.Nui, prev: TLMemo) -> TLMemo:
   Lay.memo.local(Ty.tag(ty, TL.locale(S.Nui.ui(n))), ty, n, TL.memo.locale(Ty.tag(ty, TL.locale(S.Nui.ui(n))), prev))
