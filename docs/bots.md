@@ -502,6 +502,12 @@ first turn the menu shows its persona's first line.
 
 ## Conversation history and subthreads
 
+Delegated agent work runs as Backplane subthreads. `thread_launch` keeps its continuing conversation and reporting contract; `delegate_task` keeps its task completion, delivery and depth limit. Claude starts with its native `Agent` and `Task` spawning tools disallowed, including resumed sessions. Other providers are instructed to use Backplane delegation. Small intent-file edits are done inline.
+
+The existing panel is called Subthreads on the window, web, iOS and Android. It separates conversation rows from Background work (shells, watched work, wakes, locks and legacy native subagents). Conversation rows still open their own thread; Background rows keep their own fold and Stop/Cancel/Release actions. Completed work keeps the existing done toggle. Headings are presentation only, and do not contribute to activity or badge counts. The sidebar retains its existing “N agents” wording and count contract pending explicit consent to change the badge law.
+
+Existing native-subagent events and logs remain decodable and inspectable; this change rewrites no history, parent links, reporting choices, drafts or credentials. A native worker from an already running process is still ingested.
+
 Chat with the uberbot for conversations outside a project. New hubs no longer create a Scratch project, and previous chats are never automatically expired. Existing IDs, folders, history, project mappings and links stay intact. Open these conversations from Conversation history in the sidebar or search.
 
 A project conversation can create a visible subthread from its dropdown, its row menu, or New subthread in its workspace. These are ordinary conversations with their own identity, history and activity. Their saved parent link is independent of delegated subagents and launch reports. Expand or collapse each row to show its children; expansion is saved on the hub. Move to top level removes only that link. Archiving or deleting a parent keeps its live children visible at the top level; restoring the parent restores their saved hierarchy. Archived children stay in the project's Archived shelf. No existing worker threads are automatically reparented.

@@ -614,22 +614,29 @@ fun SubsView(m: AppModel, subs: Subs) {
                 Icon(if (subs.open) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
                     Modifier.size(18.dp), tint = MaterialTheme.colorScheme.outline)
             }
-            for (r in subs.rows) Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { m.act(r.act, r.value) }.padding(vertical = 4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusDot("", r.state)
-                    Text(if (r.agent) (if (r.open) "▾" else "▸") else r.who, style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline, maxLines = 1)
-                    Text(r.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (r.cancel.isNotEmpty()) Text(if (r.cancel == "wake-cancel") NativeMessages.common_cancel(lang) else NativeMessages.composer_stop(lang), Modifier.clickable { m.act(r.cancel, r.id) }.padding(horizontal = 4.dp),
-                        style = MaterialTheme.typography.labelSmall, color = PhaseColor.warn)
-                    Text(r.stateLabel.ifEmpty { r.state }, style = MaterialTheme.typography.labelSmall, color = subColor(r.state))
+            for (r in subs.rows) {
+                if (r.heading) {
+                    Text(r.title, Modifier.fillMaxWidth().padding(top = 6.dp), style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.outline)
+                    continue
                 }
-                if (r.doing.isNotEmpty()) Text(r.doing, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelSmall,
-                    color = PhaseColor.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                for (st in r.steps) Row(Modifier.padding(start = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val style = MaterialTheme.typography.labelSmall.copy(fontFamily = mono)
-                    if (st.kind.isNotEmpty()) Text(st.kind, style = style, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
-                    Text(st.text, style = style, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { m.act(r.act, r.value) }.padding(vertical = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatusDot("", r.state)
+                        Text(if (r.agent) (if (r.open) "▾" else "▸") else r.who, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                        Text(r.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (r.cancel.isNotEmpty()) Text(if (r.cancel == "wake-cancel") NativeMessages.common_cancel(lang) else NativeMessages.composer_stop(lang), Modifier.clickable { m.act(r.cancel, r.id) }.padding(horizontal = 4.dp),
+                            style = MaterialTheme.typography.labelSmall, color = PhaseColor.warn)
+                        Text(r.stateLabel.ifEmpty { r.state }, style = MaterialTheme.typography.labelSmall, color = subColor(r.state))
+                    }
+                    if (r.doing.isNotEmpty()) Text(r.doing, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelSmall,
+                        color = PhaseColor.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    for (st in r.steps) Row(Modifier.padding(start = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val style = MaterialTheme.typography.labelSmall.copy(fontFamily = mono)
+                        if (st.kind.isNotEmpty()) Text(st.kind, style = style, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+                        Text(st.text, style = style, color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
