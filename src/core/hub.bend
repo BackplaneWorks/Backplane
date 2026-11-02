@@ -40,6 +40,7 @@ import ./adopt.bend as AD
 import ./cmds.bend as CM
 import ./order.bend as OR
 import ./fallback.bend as FB
+import ./settingsproposal.bend as SP
 import ./secret.bend as SEC
 import ./stamp.bend as STP
 import ./wnote.bend as WN
@@ -316,6 +317,8 @@ def Alerts.asks(+post: M.State, cs: List<&2, M.Change>) -> List<&2, M.Change>:
   match cs:
     case Nil{}:
       Nil{}
+    case M.AskOpened{_, +th, _, "settings_proposal", _, _, +at} <> t:
+      List.append(&2, M.Change, NO.Policy.ask.k(NO.Policy.on(post, "needs"), post, at, th, "", "A settings proposal needs your review."), Alerts.asks(post, t))
     case M.AskOpened{_, +th, _, +tool, +d, _, +at} <> t:
       List.append(&2, M.Change, NO.Policy.ask(post, at, th, tool, d), Alerts.asks(post, t))
     case _ <> t:
@@ -3294,8 +3297,30 @@ def Hub.answer.cx.t(cx: Bool, order: Bool, +s: M.State, +now: Nat, +client: U32,
     case False{}:
       Hub.answer.open(order, s, now, client, id, ask, answer, th, k)
 
+def Settings.answer.apply(ok: Bool, +p: SP.Proposal, +now: Nat, +client: U32, +id: String, +ask: String, +th: String) -> Step:
+  match ok:
+    case False{}:
+      Step{[M.AskClosed{ask, "stale", now}, M.ActivityLogged{th, "settings:" ++ ask, "info", "settings", "Settings proposal expired or the settings changed; no change was applied.", now}], [Reply.err(client, id, "Settings proposal expired or the settings changed; request a new proposal.")]}
+    case True{}:
+      match p:
+        case SP.Proposal{old_on, old_chain, +new_on, +new_chain, _}:
+          Step{List.concat(&2, M.Change, [[M.AskClosed{ask, "accept", now}],
+            Bool.pick(List<&2, M.Change>, Bool.not(String.eq(old_chain, new_chain)), [M.SettingSet{"fallback.chain", new_chain, now}], Nil{}),
+            Bool.pick(List<&2, M.Change>, Bool.not(String.eq(old_on, new_on)), [M.SettingSet{"fallback.on", new_on, now}], Nil{}),
+            [M.ActivityLogged{th, "settings:" ++ ask, "info", "settings", "Approved fallback settings applied.", now}]]), [Reply.ok(client, id)]}
+
+def Settings.answer(accept: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String, +th: String, +options: String) -> Step:
+  match accept:
+    case False{}:
+      Step{[M.AskClosed{ask, "decline", now}, M.ActivityLogged{th, "settings:" ++ ask, "info", "settings", "Settings proposal declined; no change was applied.", now}], [Reply.ok(client, id)]}
+    case True{}:
+      +p = SP.Proposal.from(Maybe.default(&2, J.Json, J.Json.parse(options), J.Null{}))
+      Settings.answer.apply(SP.Proposal.snapshot(p, now, M.Setting.get(s, "fallback.on", "off"), M.Setting.get(s, "fallback.chain", "")), p, now, client, id, ask, th)
+
 def Hub.answer.k(a: M.Ask, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String) -> Step:
   match a:
+    case M.Ask{_, +th, _, "settings_proposal", _, +options, True{}, _}:
+      Settings.answer(String.eq(answer, "accept"), s, now, client, id, ask, answer, th, options)
     case M.Ask{_, +th, +k, +tool, _, _, True{}, _}:
       Hub.answer.cx.t(String.eq(tool, "checks_ok"), OR.Order.ask.is(tool), s, now, client, id, ask, answer, th, k)
     case M.Ask{_, _, _, _, _, _, False{}, _}:
@@ -8474,6 +8499,10 @@ def Run.after.go(cs: List<&2, M.Change>, +before: M.State, +now: Nat, +st: Step)
       Run.after.go(rest, before, now, Triage.ended(before, now, th, st))
     case M.TurnChanged{+th, M.Failed{}, _} <> rest:
       Run.after.go(rest, before, now, Triage.ended(before, now, th, st))
+    # A settings proposal remains an owner decision at its source. It must
+    # not spawn a private triage conversation or forward its contents.
+    case M.AskOpened{_, _, _, "settings_proposal", _, _, _} <> rest:
+      Run.after.go(rest, before, now, st)
     case M.AskOpened{+ask, +th, _, +tool, +detail, _, _} <> rest:
       Run.after.go(rest, before, now, Step.cat(st, Triage.ask(TRI.Triage.managed(before, th), M.State.replay(Queue.changes(st), before), now, th, ask, tool, detail)))
     case M.ActivityLogged{+th, _, _, "fallback-blocked", _, _} <> rest:
@@ -9803,8 +9832,8 @@ def Auth.recover(open: Bool, +s: M.State, +now: Nat) -> Step:
 def Fallback.settings.ok(cs: List<&2, M.Change>, +s: M.State, +caps: J.Json) -> Bool:
   match cs:
     case Nil{}: True{}
-    case M.SettingSet{"fallback.chain", +value, _} <> rest:
-      Bool.and(Bool.and(Nat.is_le(String.length(value), 2000n), Nat.is_le(List.length(&2, FB.Target, FB.Chain.parse(value)), 16n)), Bool.and(FB.Chain.valid(FB.Chain.parse(value), caps), Fallback.settings.ok(rest, s, caps)))
+    case M.SettingSet{"fallback.chain", +value, +at} <> rest:
+      Bool.and(Bool.and(Nat.is_le(String.length(value), 2000n), Nat.is_le(List.length(&2, FB.Target, FB.Chain.parse(value)), 16n)), Bool.and(FB.Chain.valid(FB.Chain.parse(value), caps), Fallback.settings.ok(rest, M.State.apply(s, M.SettingSet{"fallback.chain", value, at}), caps)))
     case M.SettingSet{"fallback.on", "on", _} <> rest:
       Bool.and(Bool.not(List.is_empty(&2, FB.Target, FB.Chain.of(s))), Bool.and(FB.Chain.valid(FB.Chain.of(s), caps), Fallback.settings.ok(rest, s, caps)))
     case _ <> rest: Fallback.settings.ok(rest, s, caps)
@@ -10171,9 +10200,14 @@ def Fallback.after(+s: M.State, caps: J.Json, +now: Nat, st: Step) -> Step:
       +all = List.concat(&2, M.Change, [cs, Fallback.manual(cs, now), Config.sent(cs, s, now)])
       Step.before(all, Nil{}, Fallback.outs(os, M.State.replay(all, s), caps, now))
 
+def Fallback.invalidate(+s: M.State, caps: J.Json, +now: Nat, st: Step) -> Step:
+  match st:
+    case Step{+cs, os}:
+      Fallback.after(s, caps, now, Step{List.append(&2, M.Change, cs, SP.Proposal.invalidate(cs, M.Asks.all(s), now)), os})
+
 def Fallback.validated(ok: Bool, +s: M.State, caps: J.Json, now: Nat, step: Step) -> Step:
   match ok:
-    case True{}: Fallback.after(s, caps, now, step)
+    case True{}: Fallback.invalidate(s, caps, now, step)
     case False{}: Step{Nil{}, Fallback.settings.errors(Step.outs_of(step))}
 
 def Fallback.validate(+s: M.State, +caps: J.Json, now: Nat, +step: Step) -> Step:
