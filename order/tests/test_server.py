@@ -194,6 +194,28 @@ def test_quote_from_files_with_assembly():
         assert c.get(f"/q/{up['id']}?t={up['token']}", follow_redirects=False).status_code == 503
 
 
+def test_a_part_only_standard_assembly_places_prices_it():
+    # a BGA/LGA part or a module goes only on the fab's standard (dearer)
+    # assembly service; priced as the cheaper one, the quote came in a fifth
+    # under the fab's invoice
+    bom = BOM + b"U1,1,LGA-IMU\n"
+    pos = POS + b"U1,imu,LGA-14,4,1,0,top\n"
+    quotes = []
+    for b, p in ((BOM, POS), (bom, pos)):
+        files = {"main/gerbers.zip": board_zip(), "main/bom.csv": b, "main/pos.csv": p}
+        man = manifest(files, files={"gerbers": "main/gerbers.zip", "bom": "main/bom.csv", "positions": "main/pos.csv"}, assemble=2)
+        with client() as c:
+            up = upload(c, man, files).json()
+            q = wait_ready(c, up["id"], up["token"])
+            assert q["status"] == "ready", q
+            quotes.append(q["quote"])
+    plain, standard = quotes
+    assert not any("standard assembly" in w for w in plain["warnings"]), plain["warnings"]
+    assert any("standard assembly" in w and "LGA-IMU" in w for w in standard["warnings"]), standard["warnings"]
+    # the IMU itself is 1.00 a board; the rest is the dearer service
+    assert standard["total"] - plain["total"] > 25, (plain["total"], standard["total"])
+
+
 def test_uploads_are_checked():
     good = {"main/gerbers.zip": board_zip()}
     with client() as c:

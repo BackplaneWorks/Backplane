@@ -182,7 +182,8 @@ def price(manifest, measured):
                 sides = 2 if f.get("paste_bottom") or f.get("placed_bottom") else 1
                 asm = v.assembly({"boards": n, "sides": sides, "smt_joints": (f.get("paste_top", 0) + f.get("paste_bottom", 0)),
                                   "tht_joints": f.get("tht_holes", 0), "unique_parts": comp["unique"],
-                                  "extended_parts": comp["extended"], "options": opts, "features": feats})
+                                  "extended_parts": comp["extended"], "standard_only": comp["standard_only"],
+                                  "options": opts, "features": feats})
                 warnings += [f"{p['name']}: {w}" for w in asm.get("warnings", [])]
                 cost += float(asm["total"]) + comp["total"]
                 lead = max(lead, int(pr.get("lead_days") or 0) + int(asm.get("lead_days") or 0) + comp["extra_days"])

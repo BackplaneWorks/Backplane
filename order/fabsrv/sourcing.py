@@ -154,7 +154,7 @@ def components(v, lines, boards):
     keys = [(ln["code"] or ln["mpn"]) + ("" if ln["code"] else "\t" + (ln.get("maker") or "")) for ln in lines]
     lib = v.library(keys) if lines else {}
     total, extended, extra_days = 0.0, 0, 0
-    rows, problems, warnings, sourced = [], [], [], []
+    rows, problems, warnings, sourced, standard_only = [], [], [], [], []
     elsewhere = []
     for key, ln in zip(keys, lines):
         usage = ln["qty"] * boards
@@ -164,6 +164,8 @@ def components(v, lines, boards):
             if st["stock"] >= buy:
                 total += price_at(st["breaks"], buy) * buy
                 extended += 1 if st["library"] == "extended" else 0
+                if st.get("standard_only"):
+                    standard_only.append(ln["mpn"] or st["mpn"])
                 rows.append({"refs": ln["refs"][:8], "mpn": ln["mpn"] or st["mpn"], "status": "stocked", "library": st["library"]})
                 continue
             warnings.append(f"{ln['mpn'] or st['mpn']}: only {st['stock']} in the fab's stock; sourced instead")
@@ -195,4 +197,4 @@ def components(v, lines, boards):
         warnings.append(f"{len(sourced)} part{'s' if len(sourced) != 1 else ''} bought from a distributor for this order "
                         f"(about {SOURCED_DAYS} more days)")
     return {"total": round(total, 2), "unique": len(lines), "extended": extended, "lines": rows,
-            "problems": problems, "warnings": warnings, "extra_days": extra_days}
+            "problems": problems, "warnings": warnings, "extra_days": extra_days, "standard_only": standard_only}

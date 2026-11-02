@@ -19,11 +19,17 @@ def min_qty(kind, options):
 
 
 def assembly(spec):
-    return _p(10 + 0.01 * spec["smt_joints"] * spec["boards"], 2)
+    p = _p(10 + 0.01 * spec["smt_joints"] * spec["boards"], 2)
+    if spec.get("standard_only"):  # the dearer service, as the real pack does
+        p = _p(p["total"] + 25, 4)
+        p["warnings"] = ["standard assembly, for " + ", ".join(spec["standard_only"])]
+    return p
 
 
 STOCK = {"RC0402-10K": {"code": "C1", "mpn": "RC0402-10K", "maker": "x", "library": "basic", "stock": 100000,
-                        "breaks": [[1, 0.01]], "loss": 10, "least": 20}}
+                        "breaks": [[1, 0.01]], "loss": 10, "least": 20},
+         "LGA-IMU": {"code": "C2", "mpn": "LGA-IMU", "maker": "x", "library": "extended", "stock": 1000,
+                     "breaks": [[1, 1.0]], "loss": 0, "least": 0, "standard_only": True}}
 
 
 def library(keys):
