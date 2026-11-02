@@ -913,6 +913,10 @@ function holdMark() {
 function holdBottom() {
   if (thin && (thin.paging || thin.atNewest?.() === false)) { thin.newest();return; }
   const list = timelineList();
+  // The current source page needs no network reply to retire the old
+  // upward gesture. Otherwise the next history frame pages back again
+  // immediately after the new-output button reaches the bottom.
+  historyDirection = "";historyOlderDemand = 0;historyFillMore(null, false);
   list?.scrollToEnd();
   // An already-bottom command need not emit a DOM scroll event. Reconcile
   // its accepted geometry too, rather than leaving a stale badge clickable.
