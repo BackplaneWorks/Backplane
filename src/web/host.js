@@ -2746,12 +2746,12 @@ const choosePresentation = (session, action, value) => {
   const chosen = Wire.plain(App.presentation_choice(action, presentationJson(session), value));
   return action === "draft" ? preservePresentationRoute(session, chosen) : chosen;
 };
-// Until the action replies, keep its captured text in the saved draft too.
+// Until the ordinary send is accepted, keep its captured text in the saved draft too.
 // The visible field is already empty, but a reload before the acknowledgement
 // must recover that text. Subsequent typing is saved alongside it.
 function persistDraft(thread, text) {
   const pending = thin?.pendingSends(thread) || [];
-  const saved = [...pending.map(p => p.text), text].filter(Boolean).join("\n\n");
+  const saved = [...pending.filter(p => !p.accepted).map(p => p.text), text].filter(Boolean).join("\n\n");
   try {
     if (saved) localStorage.setItem(DRAFT + thread, saved);
     else localStorage.removeItem(DRAFT + thread);
