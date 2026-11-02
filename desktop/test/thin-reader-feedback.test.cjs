@@ -1,6 +1,22 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=()=>fs.readFileSync(process.env.READER_HOST_SOURCE||path.join(__dirname,'../../src/web/host.js'),'utf8');
+test('new-output click on the current source page retires upward paging before the next frame',()=>{
+ const src=source(),bottom=src.slice(src.indexOf('function holdBottom()'),src.indexOf('// a <details>')),
+  earlier=src.slice(src.indexOf('function earlierCheck(tl)'),src.indexOf('function laterCheck(tl)'));
+ for(const route of ['local','older','travelling']){
+  const requests=[],frames=[],tl={id:'timeline',scrollHeight:900,clientHeight:700,scrollTop:0};let scrolled=0;
+  const thin={ready:true,pageError:null,paging:route==='travelling'?{direction:'older'}:null,atNewest:()=>route!=='older',
+   newest:()=>requests.push('newest'),hasAhead:()=>true,ahead:()=>{requests.push('older');return true;}};
+  const list={scrollToEnd(){scrolled++;tl.scrollTop=200;}},ctx=vm.createContext({thin,timelineList:()=>list,
+   timelineChanged:()=>frames.push(()=>vm.runInContext('earlierCheck(tl)',ctx)),tl,
+   historyDirection:'older',historyOlderDemand:2,historyFillScope:'scope',historyFillOwner:()=> 'scope',
+   earlierAsked:false,historyFillMore(){},historyHasMessage:()=>true,historyGap:()=>0,historyRunway:()=>1400});
+  vm.runInContext(earlier+bottom,ctx);vm.runInContext('holdBottom()',ctx);frames.forEach(f=>f());
+  assert.deepEqual(requests,route==='local'?[]:['newest'],'returning to output must not revive an earlier scroll gesture');
+  assert.equal(scrolled,route==='local'?1:0,'an older picture is never acknowledged as newest');
+ }
+});
 test('initial and live tool-only pictures never grant background history demand',()=>{
  const src=source(),a=src.indexOf('function earlierCheck(tl)'),b=src.indexOf('function laterCheck(tl)',a),requests=[];
  const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0};
