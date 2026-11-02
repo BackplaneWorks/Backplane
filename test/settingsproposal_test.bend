@@ -32,6 +32,7 @@ def main() -> IO(Unit):
     C.Check.str("empty enabled hierarchy rejects", Bool.show(P.Proposal.valid(P.Proposal{"off", "", "on", "", 100n}, caps())), "False")
     C.Check.str("unchanged values are not a proposal", Bool.show(P.Proposal.changed(P.Proposal{"off", "", "off", "", 100n})), "False")
     C.Check.str("proposal round-trip preserves snapshot", Bool.show(P.Proposal.snapshot(P.Proposal.from(P.Proposal.json(proposal())), 50n, "off", "claude/sonnet")), "True")
+    C.Check.str("proposal explains account retry before provider fallback", Bool.show(String.contains(P.Proposal.detail(proposal()), "another eligible account of the same provider may be tried first")), "True")
     C.Check.str("malformed record cannot be accepted", Bool.show(P.Proposal.snapshot(P.Proposal.from(J.Null{}), 50n, "off", "claude/sonnet")), "False")
     C.Check.str("fallback write invalidates both proposals only", invalidated([M.SettingSet{"fallback.chain", "codex/model", 10n}]), "2")
     C.Check.str("unrelated setting preserves proposals", invalidated([M.SettingSet{"sidebar.view", "active", 10n}]), "0")
