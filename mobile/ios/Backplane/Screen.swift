@@ -180,6 +180,8 @@ struct SubRow: Decodable, Identifiable {
     let steps: [SubStep]
     // the action a Stop sends with the row's id ("" or absent: no Stop)
     let cancel: String?
+    // Presentation only; absent in older cached screens.
+    let heading: Bool?
 }
 
 struct Subs: Decodable {

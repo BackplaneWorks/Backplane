@@ -1380,8 +1380,16 @@ def View.sub.signal.k(+lc: I.Loc, r: SB.SubRow, +act: String, +signal: String, i
 def View.sub.k(+lc: I.Loc, +r: SB.SubRow, +act: String) -> D.Node:
   View.sub.signal.k(lc, r, act, SB.Subs.signal(r), SB.SubInfo.none(), 0n)
 
-def View.sub.signals(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
+def View.sub.signals.row(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
   View.sub.signal.k(lc, r, SB.Subs.cancel(r), SB.Subs.signal.of(info, r), SB.Subs.info(st, th, r), now)
+
+def View.sub.signals.k(heading: Bool, +lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
+  match heading:
+    case True{}: D.El{"h3", SB.Subs.key(r), [D.At{"class", "sub-section"}], [D.Txt{SB.Subs.display.label(lc, r)}]}
+    case False{}: View.sub.signals.row(lc, r, info, st, th, now)
+
+def View.sub.signals(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> D.Node:
+  View.sub.signals.k(SB.Subs.display.heading(r), lc, r, info, st, th, now)
 
 def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> List<&2, D.Node>:
   match rs:
@@ -1391,7 +1399,7 @@ def View.subs.signals.raw(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, St
 # the rows a page shows, each with more about it (SB.Subs.info: only these)
 def View.subs.signals.at(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +th: String, +now: Nat) -> List<&2, D.Node>:
   +p = VP.Page.info(info, "subagents", SB.Subs.row_keys(rs), "")
-  List.append(&2, D.Node, View.subs.signals.raw(lc, LW.Lists.subs(rs, VP.Page.ids(p)), info, st, th, now), LW.Lists.pager(p))
+  List.append(&2, D.Node, View.subs.signals.raw(lc, SB.Subs.display(LW.Lists.subs(rs, VP.Page.ids(p))), info, st, th, now), LW.Lists.pager(p))
 
 def View.subs.signals.go(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, D.Node>:
   View.subs.signals.at(lc, rs, info, M.State.empty(), "", 0n)

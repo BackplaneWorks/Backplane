@@ -291,17 +291,17 @@ def Prompt.project(+root: String, +pro: String, +pcb: String, +sch: String, +all
 def Prompt.orchestration.k(may: Bool, +models: String) -> String:
   match may:
     case True{}:
-      "You may delegate well-scoped, independent pieces of work (footprint or symbol generation, part lookup, ERC/DRC review, mechanical checks) to other models with the backplane MCP tool `delegate_task`; `orchestrator_capabilities` lists them. Models available: " ++ models
+      "Delegated work is a Backplane subthread. Use `thread_launch` for a conversation that can continue, or `delegate_task` for a bounded task with model selection and a depth limit; both keep their existing reporting contracts. Do not spawn provider-native subagents (including Claude's Agent/Task tools). You may delegate well-scoped, independent pieces of work (footprint or symbol generation, part lookup, ERC/DRC review, mechanical checks) to other models with the backplane MCP tool `delegate_task`; `orchestrator_capabilities` lists them. Models available: " ++ models
       ++ ". A child does not see this conversation, only the prompt you give it, so include paths and acceptance criteria, and say whether it may write the canonical board or schematic: only one agent writes a file at a time. It does get Backplane's instructions and the same skills as you (KiStack's KiCad skills and the person's), and uses the one its task matches: name the skill that applies rather than copying its instructions or paths. Each result reaches you exactly once as a message when the child finishes; end your turn rather than polling. Finished tasks never restart, and delegation depth is limited. For work the user should see as a thread of its own, `thread_launch` starts one in this project, and its reports reach you the same way (each turn end, and at once when it asks the person something); `thread_send` (mode auto, queue or steer), `thread_wait`, `thread_read`, `thread_interrupt` and `thread_update` (rename, or regenerate a title) work on any thread of this project. The person's other machines running Backplane are linked to this one: `machine_list` shows them and their projects; `thread_list` and `thread_launch` take a `machine`, and a thread there has an id like `<link>~<id>` that `thread_send`, `thread_wait`, `thread_read`, `thread_interrupt` and `thread_update` take, so you can start work on another machine or hand it a message. A `>machine:slug` in a message names such a thread."
     case False{}:
-      "You are a delegated task at the depth limit: do not delegate further. Finish the task and put the result in your final message."
+      "You are a delegated task at the depth limit: do not delegate further or spawn provider-native subagents. Finish the task and put the result in your final message."
 
 def Prompt.orchestration(may: Bool, +models: String) -> String:
   "<orchestration>" ++ Prompt.orchestration.k(may, models) ++ "</orchestration>"
 
 # how to wait for work that runs on (laws prompt_background_work*)
 def Prompt.background() -> String:
-  "<background_work>Backplane wakes you itself when an Agent, background shell or monitor task ends. End your turn instead of polling, sleeping or checking in a loop. After a restart you are told what was lost. Start long or detached work with the backplane MCP tool `work_run`, or register what you already started with `work_watch`, then end your turn: Backplane wakes you with the outcome. Heavy jobs that must not run at once (builds, long test runs) share a named lock: start them with `work_run` and `lock: \"<name>\"`, or take it with `lock_acquire` and end your turn (a message tells you when it is yours; `lock_release` after), instead of a bare flock. Never poll or sleep-wait. Keep builds lean: a job that runs the machine out of memory is killed, and if Backplane itself restarts you are picked back up and told what was lost. To use another model, prefer `delegate_task`.</background_work>"
+  "<background_work>Backplane wakes you itself when a delegated task, reporting subthread, background shell or monitor task ends. End your turn instead of polling, sleeping or checking in a loop. After a restart you are told what was lost. Start long or detached work with the backplane MCP tool `work_run`, or register what you already started with `work_watch`, then end your turn: Backplane wakes you with the outcome. Heavy jobs that must not run at once (builds, long test runs) share a named lock: start them with `work_run` and `lock: \"<name>\"`, or take it with `lock_acquire` and end your turn (a message tells you when it is yours; `lock_release` after), instead of a bare flock. Never poll or sleep-wait. Keep builds lean: a job that runs the machine out of memory is killed, and if Backplane itself restarts you are picked back up and told what was lost. To use another model, prefer `delegate_task`.</background_work>"
 
 # Claude Code arguments
 # ---------------------
@@ -358,6 +358,7 @@ def Claude.ask(r: M.RuntimeMode, i: M.InteractionMode, rest: List<&2, String>) -
 def Claude.args(+model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, prompt: String, +dirs: List<&2, String>) -> List<&2, String>:
   List.append(&2, String, ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json",
     "--include-partial-messages", "--permission-mode", Claude.permission(r, i),
+    "--disallowedTools", "Agent,Task",
     "--append-system-prompt", prompt],
     Claude.ask(r, i,
     Claude.opt("--model", model, Claude.opt("--resume", session, Claude.dirs(dirs)))))
