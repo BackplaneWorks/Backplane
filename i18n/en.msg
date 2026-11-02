@@ -1444,3 +1444,9 @@ voice.model.incomplete = The model needs additional files before it can run. Dow
 voice.model.available = Not downloaded. About {mb} MB, plus the speech runtime. Download once for private, offline dictation.
 voice.model.language.en = English
 voice.model.language.multi = 25 languages
+
+# Upload failure messages resolved at the client
+upload.network = the upload did not reach the hub
+upload.failed = the upload failed
+upload.incomplete = the upload did not arrive whole
+upload.cap = attachments are limited to {mb} MB
