@@ -10,7 +10,7 @@ def main() -> IO(Unit):
   do IO<Unit>:
     +home : String <- IO.try(String, H.FS.mkdtemp("/tmp/backplane-diagnostics-smoke-"))
     H.Env.put("BACKPLANE_HOME", home)
-    +started : String <- D.Diagnostics.start()
+    +started : String <- D.Diagnostics.start("1.2.3")
     C.Check.str("diagnostics started", Bool.show(String.contains(started, "\"enabled\":true")), "True")
     t0 : U32 <- P.Perf.us()
     t1 : U32 <- P.Perf.span("hub.rpc", t0)
