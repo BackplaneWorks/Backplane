@@ -839,7 +839,11 @@ export class ThinHost {
     // its picture is the one on show, so it is neither validated nor decoded
     // again, and the page is not rendered for it. Its session and commands
     // still apply. A page or a navigation always draws.
-    const same = result.unchanged === true && !paged && !r.nextTarget && !this.historyResetPending;
+    // Send returns the server to its newest page. Give that picture the same
+    // projection as explicit newest navigation: merging it into deep retained
+    // history leaves the unloaded newer rows' spacers below the replies.
+    const sentNewest = ['send', 'send-alt'].includes(metadata?.operation?.action) && r.cmds.some(c => c.type === 'scroll');
+    const same = result.unchanged === true && !paged && !sentNewest && !r.nextTarget && !this.historyResetPending;
     // A queued viewer choice waits for history reads in pump(). The accepted
     // page still bridges the rows on screen to the next page; dropping only
     // its picture leaves held/cursor ahead of what the reader can reach.
@@ -968,7 +972,8 @@ export class ThinHost {
       }
       this.historyEpoch = incomingEpoch;
       this.ready = true;this.opening = false;this.window = result.window;
-      let position = paged?.position;
+      let position = sentNewest ? { atEnd: true } : paged?.position;
+      if (sentNewest) this.awayMark = null;
       if (changedHistory && !resumed) position = this.awayMark ? { top: 0, atEnd: false } : { atEnd: true };
       if (result.method === 'view.open' && this.restorePage) {
         const saved = this.restorePage;this.restorePage = null;position = saved.position;
@@ -988,7 +993,7 @@ export class ThinHost {
       else this.heldUpdate();
       if (pictureCurrent) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
-        page: paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
+        page: sentNewest ? { direction: 'newest' } : paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
       if (pictureCurrent) this.historyResetPending = false;
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
       this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged });
