@@ -4,7 +4,14 @@ export async function registerBridgeChecks(check,stage,root){
  const packet=path.join(root,'build/phone-cache/native-thin-bridge-proposal-01');
  for(const n of ['src/web/wire.js','src/web/bub-move.js','src/mobile/recent.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync((process.env.BP_NATIVE_THIN_SOURCE_ROOT ? path.join(process.env.BP_NATIVE_THIN_SOURCE_ROOT,n) : path.join(packet,fs.existsSync(path.join(packet,'qualified-dependencies'))?'qualified-dependencies':'dependencies',n)),q);}
  const stub=path.join(stage,'src/mobile/app-stub.mjs');fs.copyFileSync(path.join(root,'test/tools/native_thin_app_stub_307265.mjs'),stub);
- const code=fs.readFileSync(process.env.BP_NATIVE_BRIDGE_SOURCE||path.join(root,'src/mobile/bridge.js'),'utf8').replace('import App from "./app.bend";','import App from "./app-stub.mjs";');
+ let code=fs.readFileSync(process.env.BP_NATIVE_BRIDGE_SOURCE||path.join(root,'src/mobile/bridge.js'),'utf8');
+ const appImport='import App from "./app.bend";',screenImport='import IssueScreen from "./screen.bend";';
+ assert.equal(code.split(appImport).length,2,'source adapter must substitute exactly one App import');
+ assert.equal(code.split(screenImport).length,2,'source adapter must substitute exactly one IssueScreen import');
+ // Improvements rendering is outside these transport checks. Refuse any
+ // accidental call rather than supplying a pretend Bend rendering result.
+ code=code.replace(appImport,'import App from "./app-stub.mjs";').replace(screenImport,
+  'const IssueScreen=new Proxy({}, {get(_target,name){throw Error("IssueScreen export reached outside transport fixture: "+String(name));}});');
  fs.writeFileSync(path.join(stage,'src/mobile/bridge.js'),code);await import(pathToFileURL(path.join(stage,'src/mobile/bridge.js')));
  const {observed,screen,j,default:stubApp}=await import(pathToFileURL(stub));const B=globalThis.Backplane;
  const bhead=(major,n)=>n<24?Buffer.from([(major<<5)|n]):n<256?Buffer.from([(major<<5)|24,n]):n<65536?Buffer.from([(major<<5)|25,n>>8,n&255]):Buffer.from([(major<<5)|26,n>>>24,(n>>>16)&255,(n>>>8)&255,n&255]);

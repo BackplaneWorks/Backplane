@@ -358,6 +358,14 @@ export class ThinHost {
     const normalQueued = this.actions.filter(op => !op.terminal).length;
     if (!terminalInput && normalQueued >= 7) { settled?.(false);this.api.blocked();return true; }
     if (viewer) { this.viewerRevision++;this.api.viewerChoice?.({ action, value }); }
+    if ((viewer || action === 'panel') && this.paging) {
+      // Keep the history already displayed. Reads for older pages can be
+      // asked for again after the destination is shown; their late replies
+      // must not redraw the previous viewer or move the reading cursor.
+      this.cursor = this.paging.undo.cursor;this.back = this.paging.undo.back.slice();
+      for (const page of [this.paging, this.pagingNext]) if (page) this.overtaken.add(page.id);
+      this.paging = null;this.pagingNext = null;this.pageError = null;this.api.pageState?.(null);
+    }
     if (action === 'send' || action === 'send-alt' || action === 'mail-send') {
       const active = this.pending.get(this.active)?.operation;
       const draftRevision = action === 'mail-send' ? this.localRevision : this.drafts.get(this.session.sel)?.revision || 0;

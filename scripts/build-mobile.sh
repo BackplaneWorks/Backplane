@@ -5,6 +5,8 @@
 # The iOS app is built on a Mac: mobile/ios/build.sh (see mobile/README.md).
 set -eu
 cd "$(dirname "$0")/.."
+. scripts/heavy-guard.sh
+heavy_guard build "$@"
 . scripts/bendok.sh
 bend_check src/mobile/app.bend || exit 1
 rm -rf build/mobile-web

@@ -8,6 +8,7 @@ import contextlib
 import io
 import tempfile
 import plistlib
+import re
 from unittest.mock import patch
 
 root = Path(__file__).resolve().parents[2]
@@ -23,39 +24,66 @@ def catalog(text):
 
 def info_template():
     return plistlib.dumps({'NSCameraUsageDescription': '@NSCameraUsageDescription@',
+                          'NSMicrophoneUsageDescription': '@NSMicrophoneUsageDescription@',
                           'CFBundleURLTypes': [{'CFBundleURLSchemes': ['backplane']}]}).decode('utf-8')
+
+
+def permission_catalog():
+    return catalog('native.permission.camera = Camera\nnative.permission.microphone = Microphone')
 
 
 class NativeCodegen(unittest.TestCase):
     def test_ios_resource_roundtrip_escaping_and_fallback(self):
         text = 'Read "code" & <camera>\n次の行'
-        cats = {'en': {'native.permission.camera': [gen.Text(text)]}, 'ja': {}}
+        microphone = 'Record "voice" & <microphone>\nNext line'
+        translated = '声を録音する "マイク" & <音声>\n次の行'
+        cats = {'en': {'native.permission.camera': [gen.Text(text)],
+                       'native.permission.microphone': [gen.Text(microphone)]},
+                'ja': {'native.permission.microphone': [gen.Text(translated)]}}
         outputs = gen.generate_ios_resources(cats, info_template())
         for name, value in outputs.items():
             parsed = plistlib.loads(value.encode('utf-8'))
             self.assertEqual(parsed['NSCameraUsageDescription'], text, name)
+            self.assertEqual(parsed['NSMicrophoneUsageDescription'],
+                             translated if '/ja.lproj/' in name else microphone, name)
         self.assertEqual(plistlib.loads(outputs['mobile/ios/Info.plist'].encode())['CFBundleURLTypes'],
                          [{'CFBundleURLSchemes': ['backplane']}])
 
     def test_ios_resources_reject_runtime_formatting(self):
-        for message in ['Use {name}', '{n, plural, other {# cameras}}', '{who, select, other {Camera}}']:
-            cats = {'en': catalog('native.permission.camera = ' + message), 'ja': {}}
-            with self.assertRaises(gen.CatalogError):
-                gen.generate_ios_resources(cats, info_template())
+        for key in ['native.permission.camera', 'native.permission.microphone']:
+            for message in ['Use {name}', '{n, plural, other {# devices}}', '{who, select, other {Device}}']:
+                with self.subTest(key=key, message=message):
+                    source = permission_catalog()
+                    source[key] = catalog(key + ' = ' + message)[key]
+                    with self.assertRaisesRegex(gen.CatalogError, re.escape('iOS info key must be a literal message: ' + key)):
+                        gen.generate_ios_resources({'en': source, 'ja': {}}, info_template())
 
     def test_ios_resources_reject_template_key_gaps(self):
-        cats = {'en': catalog('native.permission.camera = Camera'), 'ja': {}}
-        for text in [info_template().replace('@NSCameraUsageDescription@', 'Camera'),
-                     info_template().replace('@NSCameraUsageDescription@', '@UnknownKey@'),
-                     info_template().replace('@NSCameraUsageDescription@', '@NSCameraUsageDescription@@NSCameraUsageDescription@'),
-                     info_template().replace('<string>@NSCameraUsageDescription@</string>', '<array><string>@NSCameraUsageDescription@</string></array>')]:
-            with self.assertRaises(gen.CatalogError):
-                gen.generate_ios_resources(cats, text)
+        cats = {'en': permission_catalog(), 'ja': {}}
+        for name in ['NSCameraUsageDescription', 'NSMicrophoneUsageDescription']:
+            marker = '@' + name + '@'
+            cases = [
+                (info_template().replace(marker, 'Permission'), 'expected exactly one marker per iOS info key'),
+                (info_template().replace(marker, '@UnknownKey@'), 'expected exactly one marker per iOS info key'),
+                (info_template().replace(marker, marker + marker), 'expected exactly one marker per iOS info key'),
+                (info_template().replace('<string>' + marker + '</string>', '<array><string>' + marker + '</string></array>'),
+                 'localized markers must be top-level string values')]
+            for text, reason in cases:
+                with self.subTest(key=name, reason=reason), self.assertRaisesRegex(gen.CatalogError, re.escape(reason)):
+                    gen.generate_ios_resources(cats, text)
 
     def test_ios_resources_require_nonempty_source(self):
-        for entries in [{}, {'native.permission.camera': []}]:
-            with self.assertRaises(gen.CatalogError):
-                gen.generate_ios_resources({'en': entries, 'ja': {}}, info_template())
+        for key in ['native.permission.camera', 'native.permission.microphone']:
+            for value in [None, [], [gen.Text(' \n')]]:
+                entries = permission_catalog()
+                if value is None:
+                    del entries[key]
+                    reason = 'iOS info key has no source message: ' + key
+                else:
+                    entries[key] = value
+                    reason = 'iOS info key must not be empty: ' + key
+                with self.subTest(key=key, value=value), self.assertRaisesRegex(gen.CatalogError, re.escape(reason)):
+                    gen.generate_ios_resources({'en': entries, 'ja': {}}, info_template())
 
     def test_catalog_metadata_helpers_cannot_shadow_a_message(self):
         cats = {'en': catalog('catalog.rev = Source'), 'ja': catalog('catalog.rev = 翻訳')}
@@ -94,8 +122,8 @@ class NativeCodegen(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.object(gen, 'ROOT', Path(temp)), patch.object(sys, 'argv', ['i18n-gen.py']):
             folder = Path(temp)
             (folder / 'i18n').mkdir()
-            (folder / 'i18n/en.msg').write_text('common.save = Save\nnative.permission.camera = Camera\n')
-            (folder / 'i18n/ja.msg').write_text('common.save = 保存\nnative.permission.camera = カメラ\n')
+            (folder / 'i18n/en.msg').write_text('common.save = Save\nnative.permission.camera = Camera\nnative.permission.microphone = Microphone\n')
+            (folder / 'i18n/ja.msg').write_text('common.save = 保存\nnative.permission.camera = カメラ\nnative.permission.microphone = マイク\n')
             (folder / 'i18n/native.keys').write_text('common.save\n')
             (folder / 'mobile/ios').mkdir(parents=True)
             (folder / 'mobile/ios/Info.plist.in').write_text(info_template())
@@ -104,10 +132,14 @@ class NativeCodegen(unittest.TestCase):
                            'mobile/ios/Backplane/ja.lproj/InfoPlist.strings']:
                 with contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(gen.main(), 0)
+                with patch.object(sys, 'argv', ['i18n-gen.py', '--check']), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(gen.main(), 0)
                 output = folder / target
                 output.write_text(output.read_text() + '// deliberate stale output\n')
-                with patch.object(sys, 'argv', ['i18n-gen.py', '--check']), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                diagnostic = io.StringIO()
+                with patch.object(sys, 'argv', ['i18n-gen.py', '--check']), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(diagnostic):
                     self.assertEqual(gen.main(), 1)
+                self.assertIn(target + ' is stale;', diagnostic.getvalue())
 
 
 

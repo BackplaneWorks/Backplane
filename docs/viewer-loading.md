@@ -143,3 +143,21 @@ camera/projection/exposure restoration across canvas teardown, identical cached
 model reuse, and zero repaints at rest in both motion modes. The renderer's own
 material/DOF tests remain separate. Runtime receipts and screenshots are written
 to `build/solid-loading/`; generated evidence is not committed.
+
+Subscription and tab switching
+-----------------------------
+
+A web viewer joining an existing in-flight compact-model read receives the
+current saved-source stamps immediately on subscription. Each replay is scoped
+to that client and its opted-in subscriptions. A stamp authorizes the checked
+original-model export; it never asserts that compact geometry or component
+binding is ready. Native clients that do not opt in keep the existing wire.
+`viewer_subscription_stamp_test.mjs` checks a busy read that never finishes,
+repeat subscriptions, other clients, missing files and legacy opt-out.
+
+Board, Schematic, 3D and the viewer close control retire pending conversation
+history reads before sending their ordered action. The displayed history and
+its cursor stay; skipped bridges can be fetched again. Late retired replies
+cannot restore the former viewer. The transport regressions cover both reply
+orders, two simultaneous history pages, retained reading state and later
+paging. An already-issued action keeps its ordering fence.
