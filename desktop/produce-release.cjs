@@ -239,6 +239,11 @@ function stage(requestFile,output){
   return{status:record.status,target,stage:output,stageReceiptSha256:digest(path.join(output,'STAGE.json')),payloadManifestSha256:record.payloadManifestSha256,releaseQualified:false};
  }finally{fs.rmSync(temp,{recursive:true,force:true});}
 }
+function validateSigningChanges(stageDir,signed,s=json(path.join(stageDir,'STAGE.json')),actual=content(stageDir,s.target)){
+ const changed=[...new Set([...Object.keys(s.members),...Object.keys(actual)])].filter(n=>canonical(s.members[n])!==canonical(actual[n]));
+ for(const n of changed){const signature=s.target==='darwin-arm64'&&/^Backplane\.app\/(?:.*\/)?_CodeSignature\/[^/]+$/.test(n);check(signature||s.signablePaths.includes(n),'Unexpected post-stage payload mutation');check(actual[n]?.type==='file'&&(signature||s.members[n]?.type==='file'),'Signing cannot remove files or add links');if(!signature){check(actual[n].mode===s.members[n].mode,'Signing changed executable mode');architecture(inside(stageDir,n),s.target);}check(!n.startsWith(TARGETS[s.target].resources+'/app/')&&!n.startsWith(TARGETS[s.target].resources+'/backplane-service/'),'Signed mutation cannot rewrite app/service/web');}
+ check(changed.length===0||signed,'Unsigned payload changed after staging');
+}
 function archive(stageDir,acceptanceFile,output){
  check(path.isAbsolute(output)&&!fs.existsSync(output),'Distribution output must be new');const stageFile=path.join(stageDir,'STAGE.json'),s=json(stageFile);check(s.schema===1&&s.kind==='backplane-electron-desktop-stage'&&s.status==='STAGED_UNQUALIFIED'&&TARGETS[s.target]&&s.release.version===VERSION,'Invalid stable stage');
  const a=json(acceptanceFile),actual=content(stageDir,s.target),payloadHash=contentDigest(actual);check(a.schema===1&&['backplane-desktop-target-acceptance','backplane-desktop-browser-composite-acceptance'].includes(a.kind)&&a.target===s.target&&a.stageReceiptSha256===digest(stageFile)&&a.payloadManifestSha256===payloadHash,'Acceptance does not bind actual target/final payload');
@@ -262,15 +267,17 @@ function archive(stageDir,acceptanceFile,output){
   const ref=a[k],r=readReference(ref);check(r.schema===1&&r.status==='PASS'&&r.target===s.target&&r.version===VERSION&&r.commit===s.release.commit&&r.tree===s.release.tree&&r.payloadManifestSha256===payloadHash&&r.freezeReceiptSha256===s.release.freezeReceipt.sha256,'Missing/wrong-target/pending '+k+' evidence');proofs[k]={ref,receipt:r};
  }
  check(proofs.signing.receipt.kind==='desktop-signing'&&typeof proofs.signing.receipt.signed==='boolean'&&(s.signingPolicy!=='required'||proofs.signing.receipt.signed),'Signing required or undeclared');
+ if(s.target==='darwin-arm64'){
+  const m=proofs.signing.receipt.macosIntegrity;
+  check(proofs.signing.receipt.signed===true&&m?.schema===1&&m.kind==='macos-bundle-integrity'&&m.status==='PASS'&&m.sealed===true&&m.nestedCodeVerified===true&&Number.isInteger(m.machOFiles)&&m.machOFiles>0&&Number.isInteger(m.bundles)&&m.bundles>1,'macOS requires verified main bundle, nested helpers and Mach-O signatures');
+ }
  check(proofs.sandbox.receipt.kind==='desktop-sandbox'&&proofs.sandbox.receipt.osEnforced===true&&Array.isArray(proofs.sandbox.receipt.flags)&&!proofs.sandbox.receipt.flags.includes('--no-sandbox'),'Unqualified OS sandbox');
  const lifecycle=proofs.lifecycle.receipt;check(lifecycle.kind==='desktop-lifecycle'&&lifecycle.nativeChildIdentity===true&&lifecycle.authBound===true&&lifecycle.singleInstance===true&&lifecycle.reconnect===true&&lifecycle.windowClose==='resident-service','Unqualified service lifecycle');
  if(s.lifecyclePolicy){check(residentPolicy(s.lifecyclePolicy),'Unknown lifecycle policy');check(lifecycle.startup===true&&lifecycle.closePreservesService===true&&lifecycle.shutdown==='unsupported'&&lifecycle.managedStopAdvertised===false&&lifecycle.managedUpdateAdvertised===false,'Unqualified resident-service lifecycle');}
  else{check(s.target!=='windows-x64','Windows managed control unsupported for the JS service');check(lifecycle.shutdown==='owned-native-child','Unsupported target shutdown');}
  if(s.target==='windows-x64')check(lifecycle.nativeToPosixPaths===true,'Unqualified Windows path mapping');
  check(proofs.runtimeAcceptance.receipt.kind==='desktop-runtime-acceptance'&&proofs.runtimeAcceptance.receipt.scope==='desktop-release','Missing full target desktop acceptance');
- const changed=[...new Set([...Object.keys(s.members),...Object.keys(actual)])].filter(n=>canonical(s.members[n])!==canonical(actual[n]));
- for(const n of changed){const signature=s.target==='darwin-arm64'&&/^Backplane\.app\/(?:.*\/)?_CodeSignature\/[^/]+$/.test(n);check(signature||s.signablePaths.includes(n),'Unexpected post-stage payload mutation');check(actual[n]?.type==='file'&&(signature||s.members[n]?.type==='file'),'Signing cannot remove files or add links');if(!signature){check(actual[n].mode===s.members[n].mode,'Signing changed executable mode');architecture(inside(stageDir,n),s.target);}check(!n.startsWith(TARGETS[s.target].resources+'/app/')&&!n.startsWith(TARGETS[s.target].resources+'/backplane-service/'),'Signed mutation cannot rewrite app/service/web');}
- check(changed.length===0||proofs.signing.receipt.signed,'Unsigned payload changed after staging');
+ validateSigningChanges(stageDir,proofs.signing.receipt.signed,s,actual);
  for(const [name,ref]of Object.entries(s.components))if(ref.path)reference({...ref,path:inside(stageDir,ref.path)});
  const finalRoot=path.join(output,TARGETS[s.target].root);fs.mkdirSync(output,{recursive:true});copy(stageDir,finalRoot,true);fs.unlinkSync(path.join(finalRoot,'STAGE.json'));check(contentDigest(content(finalRoot,s.target))===payloadHash,'Payload changed while archiving');
  const evidence={};for(const [k,v]of Object.entries(proofs)){const name=(composite?'baseline-':'')+k+'.json',n='PROVENANCE/'+name;fs.copyFileSync(reference(v.ref),inside(finalRoot,n));evidence[k]={...publicReference(v.ref,name),status:'PASS'};}
@@ -288,4 +295,4 @@ function main(argv){
  else fail('Unknown operation; use describe');console.log(JSON.stringify(result));
 }
 if(require.main===module){try{main(process.argv.slice(2));}catch(e){console.error('Desktop producer: '+e.message);process.exitCode=1;}}
-module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,TARGETS,browserUtilities,linuxLauncher,helpers,helperFiles};
+module.exports={validateSigningChanges,stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,TARGETS,browserUtilities,linuxLauncher,helpers,helperFiles};

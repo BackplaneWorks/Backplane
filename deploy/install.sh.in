@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs Backplane: curl -fsSL https://github.com/i2cjak/Backplane/releases/latest/download/install.sh | sh
+# Installs Backplane: curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 #
 # The release fills in the version and the sha256 of each archive
 # (scripts/release-classic.sh), so this script vouches for what it downloads.
@@ -9,7 +9,7 @@
 # and links the commands into ~/.local/bin. No sudo, no shell files edited.
 set -eu
 
-REPO="i2cjak/Backplane"
+REPO="BackplaneWorks/Backplane"
 VER="@VERSION@"
 SHA_LINUX_X64="@SHA_LINUX_X64@"
 SHA_LINUX_ARM64="@SHA_LINUX_ARM64@"
