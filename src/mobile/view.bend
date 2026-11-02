@@ -882,10 +882,13 @@ def Hist.json.track.k(+lc: I.Loc, b: U.HBar, +ss: List<&2, HS.Step>, +u: U.Ui) -
 def Hist.json.k(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> J.Json:
   Hist.json.track.k(lc, b, U.Hs.track(u), u)
 
-def Hist.json(+lc: I.Loc, +b: U.HBar, +u: U.Ui) -> J.Json:
-  match U.HBar.on(b):
+def Hist.json.on(on: Bool, +lc: I.Loc, b: U.HBar, +u: U.Ui) -> J.Json:
+  match on:
     case True{}: Hist.json.k(lc, b, u)
     case False{}: J.Null{}
+
+def Hist.json(+lc: I.Loc, +b: U.HBar, +u: U.Ui) -> J.Json:
+  Hist.json.on(U.HBar.on(b), lc, b, u)
 
 # One track supplies the phone's bar, ticks and open menu. Hidden viewers
 # do not parse history merely to discard its rendered value.
