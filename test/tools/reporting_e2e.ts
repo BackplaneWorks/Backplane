@@ -25,13 +25,17 @@ try{
  ws.onmessage=e=>{const value=JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));for(const c of value.items||[])changes.push(c);if(value.t==='reply'){const p=pending.get(Number(value.id));if(p){pending.delete(Number(value.id));clearTimeout(p.timer);value.ok===false?p.reject(Error(value.error)):p.resolve(value.result??value);}}};
  await new Promise<void>((r,j)=>{ws!.onopen=()=>r();ws!.onerror=()=>j(Error('test websocket failed'));});
  const rpc={request(m:string,p:any){const id=++next;return new Promise<any>((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error('RPC timeout '+m));},15000);pending.set(id,{resolve,reject,timer});ws!.send(W.encode(JSON.stringify({id,m,p})));});}};
+ mkdirSync(join(user,'reports'),{recursive:true});
+ const createdProject=await rpc.request('project.add',{path:join(user,'reports')});
+ const projectState=await rpc.request('improvements.context',{});
+ const reportProject=projectState.projects.find((p:any)=>p.root===join(user,'reports'))?.id;assert(reportProject);
  await rpc.request('setting.set',{key:'agent.provider',value:'codex'});
  await rpc.request('setting.set',{key:'agent.model',value:'gpt-6.1-sol'});
- const draft:any={text:'Fixture behavior only'},writer=new ReportWriter({rpc,save:async()=>{},upload:async()=>{throw Error('No screenshot elected');}});
+ const draft:any={text:'Fixture behavior only',writerProject:reportProject},writer=new ReportWriter({rpc,save:async()=>{},upload:async()=>{throw Error('No screenshot elected');}});
  assert.equal(await writer.start(draft,'Write only the supplied report. No external issue. No source changes.'),true);
  let report:any;for(let i=0;i<120;i++){report=await rpc.request('improvements.report',{thread:draft.writer.thread});if(report.done)break;await nap(100);}
  assert.equal(report.done,true);assert.equal(report.body,expected);assert.equal(await writer.load(draft),expected);
- const create=await rpc.request('thread.create',{project:'scratch',title:'ignored retry',creationKey:draft.writer.key});assert.equal(create.thread,draft.writer.thread);
+ const create=await rpc.request('thread.create',{project:reportProject,title:'ignored retry',creationKey:draft.writer.key});assert.equal(create.thread,draft.writer.thread);
  const status=await rpc.request('diagnostics.control',{action:'off'});assert.equal(status.enabled,false);assert.equal(status.ok,true);
  const off=await get();assert.equal(off.status.enabled,false);
  const clear=await rpc.request('diagnostics.control',{action:'clear'});assert.equal(clear.ok,true);assert.deepEqual((await get()).events,[]);
@@ -39,5 +43,5 @@ try{
  const exported=await get();assert(exported.events.some((e:any)=>e.name==='hub.rpc'));assert(!JSON.stringify(exported).includes('Fixture behavior'));assert(!JSON.stringify(exported).includes(root));assert(!JSON.stringify(exported).includes('fixture-session'));
  let bytes=0,allocated=0;for(const f of readdirSync(join(home,'diagnostics'))){const s=statSync(join(home,'diagnostics',f));bytes+=s.size;allocated+=s.blocks*512;}assert(bytes<=1048576&&allocated<=1048576);
  assert.equal(changes.filter(x=>x.$==='ThreadCreated'&&x.id===draft.writer.thread).length,1);
- console.log('ok real hub startup, safe export and measured disk cap; normal Scratch report agent result; keyed retry; durable controls; no private text in diagnostics');
+ console.log('ok real hub startup, safe export and measured disk cap; normal selected-project report agent result; keyed retry; durable controls; no private text in diagnostics');
 }finally{ws?.close();proc.kill();await proc.exited;const errors=await new Response(proc.stderr).text();if(proc.exitCode&&process.env.REPORTING_DEBUG)console.error(errors.slice(-10000));rmSync(root,{recursive:true,force:true});}

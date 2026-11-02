@@ -42,7 +42,7 @@ It does not reinterpret the native public draft as an internal submission.
 using `#improvements-issue=<encodeURIComponent(JSON.stringify({description:text}))>`.
 The browser consumes/removes the fragment, seeds only when there is no conflicting
 saved draft, and requires a further explicit writer action. The parent-owned web
-flow uses the normal scratch-thread agent transport and report retrieval, the
+flow uses the normal project-thread agent transport and report retrieval, the
 versioned template, ASD-STE100 guidance and supplied Unslop resource. The person
 can review and finish there, or explicitly copy/paste the generated edited body
 back to the native body editor. No automatic report retrieval or clipboard read

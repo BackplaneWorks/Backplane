@@ -10,7 +10,7 @@ test('public report writer, exact editable preview, evidence and consent on desk
  const f=window.fixture={calls:[],opens:[],captures:0,reads:0,done:false,quota:false,data:new Map()};
  const body='# Title\\n\\nConnection closes after reconnect.\\n\\n## Evidence\\nUser typed a detailed description.\\n\\nOS: Linux\\nApp version: 1.2.3\\n';
  f.body=body;
- f.ui=installImprovements({identity:()=> 'authenticated-fixture',ready:()=>true,context:async()=>({appVersion:'1.2.3-dev',sourceThread:{id:'PRIVATE-thread'},path:'/home/PRIVATE',projects:[]}),
+ f.ui=installImprovements({identity:()=> 'authenticated-fixture',ready:()=>true,context:async()=>({appVersion:'1.2.3-dev',sourceThread:{id:'PRIVATE-thread'},path:'/home/PRIVATE',projects:[{id:'reports',title:'Report workspace',root:'/fixture/reports'}]}),
  reportBody:api('report'),reportTarget:api('target'),reportPrompt:api('prompt'),reportTemplate:api('template'),previewBody:b=>plain(api('preview.body')(b)),appVersion:async()=> '1.2.3-dev.private',
  store:{read:async k=>structuredClone(f.data.get(k)),write:async(k,v)=>{if(f.quota)throw Error('Local draft storage is full.');f.data.set(k,structuredClone(v));}},
  openIssue:async url=>f.opens.push(url),select:async()=>{},capture:async()=>{f.captures++;return new Blob(['test-image'],{type:'image/png'});},
@@ -35,7 +35,7 @@ test('public report writer, exact editable preview, evidence and consent on desk
   await page.locator('#improvements-text').fill(description);await page.getByRole('button',{name:'Review issue',exact:true}).click();assert.match(await page.locator('.improvements [role=status]').textContent(),/thorough behavior description/);
   await page.locator('#improvements-evidence').fill('I restarted the test hub, waited for reconnect, then opened a thread. The conversation loaded, but the connection dot stayed red.');
   await page.getByRole('button',{name:'Write report with agent',exact:true}).click();await page.getByRole('button',{name:'Load agent report',exact:true}).waitFor();
-  const calls=await page.evaluate(()=>fixture.calls),turn=calls.find(x=>x.m==='turn.start');assert.equal(calls[0].p.project,'scratch');assert.equal(turn.p.accountBinding,'fixture-generation');
+  const calls=await page.evaluate(()=>fixture.calls),turn=calls.find(x=>x.m==='turn.start');assert.equal(calls[0].p.project,'reports');assert.equal(turn.p.accountBinding,'fixture-generation');
   assert.match(turn.p.text,/ASD-STE100/);assert.match(turn.p.text,/# Unslop/);assert.match(turn.p.text,/image or a thorough description/);assert(turn.p.text.endsWith(description));assert(!turn.p.text.includes('PRIVATE-thread'));assert(!turn.p.text.includes('/home/PRIVATE'));assert.equal(await page.evaluate(()=>fixture.reads),0);
   await page.getByRole('button',{name:'Load agent report',exact:true}).click();assert.match(await page.locator('.improvements [role=status]').textContent(),/still working/);
   await page.evaluate(()=>fixture.done=true);await page.getByRole('button',{name:'Load agent report',exact:true}).click();await page.locator('#improvements-review').waitFor();

@@ -1,10 +1,28 @@
 # Qualification status
 
-This feature is a follow-up. It is not part of urgent chat/account delivery.
-No installed hub, live telemetry settings, credentials or external issue has
-been changed by these checks. No release or merge has been performed.
+PR #679 is separate from the installed urgent chat/account delivery. These
+checks do not change installed hubs, live telemetry settings, credentials or
+external issues. No reporting release or merge has been performed.
 
-## Passed
+## Rebased candidate
+
+The selected-project report writer was rebased onto main after PR #680. Boat
+job `j20261102183942-857627` checked the frozen v2 source and failed overall.
+All four focused Bend suites passed, and backend storage tests passed 19/19.
+The JavaScript phase passed 38/44 tests. Four startup cases lacked the VM
+fixture clock, one identity retry case lacked the Improvements callback, and
+the CSP browser test lacked Playwright in the sandbox. Policy and web emits
+were not reached. The sandbox was deleted and verified.
+
+The two fixture bindings were corrected without changing their assertions;
+those 14 JavaScript cases passed locally. A pinned browser dependency and the
+remaining JavaScript/policy/web continuation are pending. Earlier passes below
+belong to the original source campaign and do not qualify this rebased tree.
+Global check, global proof and the default suite are omitted from the current
+Boat qualification because of its memory limit; they are not reported as pass.
+No existing law statement has been weakened or removed.
+
+## Historical source campaign
 
 - The final source campaign ran serially in the shared `bend` queue, inside the
   original admission wrapper's 18 GiB memory scope with swap disabled and a
@@ -35,11 +53,11 @@ regression. No existing law statement was weakened or removed.
 
 ## Pending
 
-Production web/mobile/hub bundle builds and the real isolated-hub/stand-in-agent
-reporting end-to-end test have not run. They require the original resource
-admission helper to be restored after external cleanup. No substitute runner is
-permitted. The build phase is a separate admitted 16 GiB serial phase and must
-not be inferred to pass from source tests.
+The current policy/web emits and JavaScript browser qualification remain
+pending. The final combined production build belongs to the installer after
+the reader and diagnostics source merges. Mobile emission, hub/service
+emission, wire build and isolated-hub reporting E2E are outside the current
+Boat phase. Reporting E2E must use the final combined server artifact.
 
 The iOS model executable, SwiftUI compilation and device flows are unqualified
 on this Linux host. System pickers, native browser sign-in/chooser behavior and

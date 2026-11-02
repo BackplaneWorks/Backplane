@@ -41,6 +41,8 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   const targetLabel = el('label', 'Destination', { for: 'improvements-target' });
   const target = el('select', '', { id: 'improvements-target' });
   target.append(el('option', 'Public GitHub issue', { value: 'issue' }), el('option', 'Internal implementation thread', { value: 'internal' }));
+  const writerProjectLabel = el('label', 'Report agent project', { for: 'improvements-writer-project' });
+  const writerProject = el('select', '', { id: 'improvements-writer-project' });
   const publicBox = el('div', '', { class: 'improvements-public' });
   const publicNote = el('p', 'Public on BackplaneWorks/Backplane, attributed to your GitHub account. Sign in on GitHub and press Submit there. Review your text and images for private information.');
   const check = (id, text) => { const label = el('label');const input = el('input', '', { type: 'checkbox', id });label.append(input, doc.createTextNode(' ' + text));return { label, input }; };
@@ -63,7 +65,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   const loadReport = el('button', 'Load agent report', { type: 'button', hidden: '' });
   const openWriter = el('button', 'Open report-writing thread', { type: 'button', hidden: '' });
   const useTemplate = el('button', 'Use report template', { type: 'button' });
-  publicBox.append(publicNote, el('p', 'Write report sends the selected description, image and diagnostics to your configured agent in a normal Scratch thread. Review issue prepares text locally. Replace private images with a redacted image before sharing.'), evidence, screenshot.label, logs.label, extra.label, details, writer, loadReport, openWriter, useTemplate, diagPreview, review, evidenceOk.label, issueActions);
+  publicBox.append(publicNote, el('p', 'Write report sends the selected description, image and diagnostics to your configured agent in the selected project using its normal permissions. Review issue prepares text locally. Replace private images with a redacted image before sharing.'), evidence, screenshot.label, logs.label, extra.label, details, writerProjectLabel, writerProject, writer, loadReport, openWriter, useTemplate, diagPreview, review, evidenceOk.label, issueActions);
   const collection = el('details');collection.append(el('summary', 'Local diagnostics'));
   const collectionNote = el('p', 'Bounded connection and timing metadata only; no conversation text. Local collection is separate from telemetry. Nothing is shared until selected and reviewed.');
   const collect = check('improvements-collect', 'Keep local diagnostics on this device');
@@ -107,7 +109,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     projectLabel.hidden = project.hidden = !internal || !!backplaneProject(projects) && draft?.project === backplaneProject(projects)?.id;
     publicBox.hidden = internal;
     screenshot.input.checked = draft?.includeScreenshot === true;logs.input.checked = draft?.includeDiagnostics === true;extra.input.checked = draft?.includeDetails === true;
-    for (const node of [screenshot.input, logs.input, extra.input, details, evidence, writer, useTemplate]) node.disabled = locked;
+    for (const node of [screenshot.input, logs.input, extra.input, details, evidence, writerProject, writer, useTemplate]) node.disabled = locked;
     loadReport.hidden = openWriter.hidden = !draft?.writer?.thread;
     loadReport.disabled = openWriter.disabled = locked;
     writer.disabled = locked || !!draft?.writer?.started;
@@ -195,6 +197,11 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
         if (!draft.context?.sourceThread) draft.context = viewContext;
         draft.context.implementationProject = target || projects.find(p => p.id === draft.project) || null;
       }
+      const workspaces = projects.filter(p => p.id !== 'scratch' && p.root);
+      draft.writerProject ||= workspaces.find(p => p.id === draft.context?.sourceProject?.id)?.id || (workspaces.length === 1 ? workspaces[0].id : '');
+      writerProject.replaceChildren(el('option', 'Choose a project for the report agent', { value: '' }));
+      for (const p of workspaces) writerProject.append(el('option', p.title, { value: p.id }));
+      writerProject.value = draft.writerProject;
       input.value = draft.text;details.value = draft.details || '';evidence.value = draft.evidence || '';evidenceOk.input.checked = false;diagPreview.hidden = true;project.replaceChildren(el('option', 'Choose the Backplane source project', { value: '' }));
       for (const p of projects) project.append(el('option', p.title, { value: p.id }));
       if (draft.project && ![...project.options].some(o => o.value === draft.project)) project.append(el('option', 'Saved project', { value: draft.project }));
@@ -224,6 +231,9 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     draft.target = reportTarget(target.value, false);invalidateIssue();controls();showPreview();
     try { await store.write(scope + ':destination', { target: draft.target });await save(draft); }
     catch (e) { announce(e.message); }
+  });
+  writerProject.addEventListener('change', () => {
+    if (!draft || busy) return;draft.writerProject = writerProject.value;forgetReport();invalidateIssue();controls();void save(draft).catch(e => announce(e.message));
   });
   for (const [node, field] of [[screenshot.input, 'includeScreenshot'], [logs.input, 'includeDiagnostics'], [extra.input, 'includeDetails']]) node.addEventListener('change', () => {
     if (!draft || busy) return;draft[field] = node.checked;forgetReport();invalidateIssue();diagPreview.hidden = true;controls();showPreview();void save(draft).catch(e => announce(e.message));
@@ -289,13 +299,14 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     if (win.location.origin + ':' + identity() !== scope) { announce('The hub identity changed. Copy your description, close and reopen Improvements before starting an agent. Your local draft is kept.');return; }
     if (!draft.text?.trim()) { announce('Describe the issue before starting the report agent.');input.focus();return; }
     if (!draft.evidence?.trim() && !(draft.includeScreenshot && draft.image)) { announce('Add a thorough behavior description or select an evidence image first.');evidence.focus();return; }
+    if (!draft.writer && !draft.writerProject) { announce('Choose a project for the report agent, or fill the template locally.');writerProject.focus();return; }
     if (!reportPrompt) { announce('Update this page before using the report agent.');return; }
     busy = true;controls();
     try {
       const diag = draft.includeDiagnostics ? diagnosticReport(await diagnostics.snapshot()) : '';
       const evidenceText = draft.evidence || 'The user selected an attached evidence image. Examine it only as evidence.';
       const prompt = reportPrompt(draft.text, osFamily(win.navigator), version, evidenceText + (draft.includeDetails ? '\nUser-elected details\n' + (draft.details || '') : ''), diag);
-      if (await reportWriter.start(draft, prompt, { image: draft.includeScreenshot ? draft.image : null })) announce('Report agent started in a normal scratch thread. Load the report when it finishes, or open the thread to answer its questions.');
+      if (await reportWriter.start(draft, prompt, { image: draft.includeScreenshot ? draft.image : null })) announce('Report agent started in the selected project. Load the report when it finishes, or open the thread to answer its questions.');
     } catch (e) { announce(e.message); }
     finally { busy = false;controls(); }
   });

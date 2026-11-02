@@ -16,7 +16,7 @@ remain "Not provided." A report needs a thorough behavior description or an
 image that the person will attach. The person confirms evidence before opening
 GitHub. A checkbox is an attestation, not automated proof of evidence quality.
 
-Write report with agent starts a visible normal Scratch thread, using the
+Write report with agent starts a visible normal thread in the selected project, using the
 usual configured provider, account binding, permissions and stable request
 identities. It sends only the explicit description and selected evidence,
 optional typed details and selected sanitized diagnostics. A selected image is
@@ -29,7 +29,7 @@ verified dictionary. Normal agent permissions still apply; these writing
 instructions are not a new sandbox or a changed tool-permission mode.
 
 Load agent report reads the completed assistant response from that report's
-Scratch thread. The result is editable. Open its thread to answer any questions;
+selected project thread. The result is editable. Open its thread to answer any questions;
 no stopped thread is automatically resumed. The local template remains available
 without an agent. Manual edits use the same body-only URL builder as the native
 apps and do not append another environment footer. Changed sharing choices
