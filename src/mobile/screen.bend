@@ -828,11 +828,11 @@ def Mob.tools(ts: List<&2, TO.Tool>) -> List<&2, J.Json>:
       Mob.tool(t) <> Mob.tools(r)
 
 # the toolbar's: stop, then under the menu where it sits and forking
-def Mob.head.loc(+lc: I.Loc, running: Bool, pinned: Bool, settled: Bool, archived: Bool, forked: Bool) -> List<&2, J.Json>:
-  Mob.tools(List.concat(&2, TO.Tool, [TO.Tools.stop.loc(lc, running), [TO.Tools.pin.loc(lc, pinned), TO.Tools.settle.loc(lc, settled), TO.Tools.archive.loc(lc, archived), TO.Tools.fork.loc(lc)], TO.Tools.back.loc(lc, forked)]))
+def Mob.head.loc(+lc: I.Loc, turn: M.TurnState, pinned: Bool, settled: Bool, archived: Bool, forked: Bool) -> List<&2, J.Json>:
+  Mob.tools(List.concat(&2, TO.Tool, [TO.Tools.turn.loc(lc, turn), [TO.Tools.pin.loc(lc, pinned), TO.Tools.settle.loc(lc, settled), TO.Tools.archive.loc(lc, archived), TO.Tools.fork.loc(lc)], TO.Tools.back.loc(lc, forked)]))
 
-def Mob.head(running: Bool, pinned: Bool, settled: Bool, archived: Bool, forked: Bool) -> List<&2, J.Json>:
-  Mob.head.loc(I.En{}, running, pinned, settled, archived, forked)
+def Mob.head(turn: M.TurnState, pinned: Bool, settled: Bool, archived: Bool, forked: Bool) -> List<&2, J.Json>:
+  Mob.head.loc(I.En{}, turn, pinned, settled, archived, forked)
 
 def Mob.live.loc(+lc: I.Loc, empty: Bool, running: Bool) -> String:
   match empty running:
@@ -1435,7 +1435,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"readingSeen", J.Json.str(U.Hold.newest(M.State.mine(st, id)))},
         J.KV{"canChild", J.Json.bool(U.ThreadTree.can_route(st, id))},
         J.KV{"state", J.Json.str(Mob.state(turn))},
-        J.KV{"tools", J.Json.arr(Mob.head.loc(lc, V.View.running(turn), pinned, TO.Tools.settled(o, Nat.is_gt(sa, ua)), archived, Bool.not(String.is_empty(M.Fork.source(st, id)))))},
+        J.KV{"tools", J.Json.arr(Mob.head.loc(lc, turn, pinned, TO.Tools.settled(o, Nat.is_gt(sa, ua)), archived, Bool.not(String.is_empty(M.Fork.source(st, id)))))},
         J.KV{"menu", J.Json.arr(Mob.menu.loc(lc, id, M.Snooze.on(now, U.Side.until(st, id)), U.Fab.mini.tools.of(st, nf, id, V.View.running(turn))))},
 
         J.KV{"parent", Mob.parent.loc(lc, String.is_empty(U.Tasks.up(st, id)), st, id, U.Tasks.up(st, id))},

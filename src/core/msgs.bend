@@ -7570,6 +7570,20 @@ def T.tools.tip.snooze(l: I.Loc) -> String:
     case I.Ja{}:
       "後で表示するまで非表示にする"
 
+def T.tools.retry(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Retry"
+    case I.Ja{}:
+      "再試行"
+
+def T.tools.tip.retry(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "The turn failed: send your last message again"
+    case I.Ja{}:
+      "ターンが失敗しました: 最後のメッセージをもう一度送信"
+
 def T.tools.tip.stop(l: I.Loc) -> String:
   match l:
     case I.En{}:
