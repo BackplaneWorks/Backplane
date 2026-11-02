@@ -1,4 +1,5 @@
 import ./src/core/range.bend as BRANGE
+
 import ./src/core/vdict.bend as VDICT
 
 import ./src/server/review-history.bend as REVIEWHISTORY
@@ -15050,3 +15051,15 @@ def Laws.vs_done_resets(timed, st, item, ws): {==}
 def Laws.provider_setup_missing_program(profile): {==}
 
 def Laws.provider_setup_failure_retry(): {==}
+
+def Laws.tool_short_mcp(): {==}
+
+def Laws.tool_short_server_underscores(): {==}
+
+def Laws.tool_short_plain(): {==}
+
+def Laws.fold_label_leaves_todo_out(): {==}
+
+def Laws.fold_live_names_call(): {==}
+
+def Laws.tool_summary_todo(): {==}

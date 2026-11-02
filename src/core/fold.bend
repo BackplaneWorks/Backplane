@@ -158,13 +158,69 @@ def Fold.add.k(has: Bool, +k: String, acc: List<&2, String>) -> List<&2, String>
     case False{}:
       List.append(&2, String, acc, [k])
 
-# the distinct kinds, in the order first seen
+# Tool names as rows show them
+# ---------------------------
+# An MCP tool reads without its "mcp__<server>__" prefix (the full name
+# stays in the row's tooltip, view.bend's View.act.spans), and Claude's
+# to-do tools read "To-do": a fold's label leaves them out of its names,
+# since the to-do list says what they did (laws tool_short_*).
+
+# the rest of a name after its first "__" ("" without one); u: the last
+# character was a "_"
+def Tool.cut(s: String, u: Bool) -> String:
+  match s u:
+    case SNil{} _:
+      ""
+    case SCon{Chr{95}, t} True{}:
+      t
+    case SCon{Chr{95}, t} False{}:
+      Tool.cut(t, True{})
+    case SCon{_, t} _:
+      Tool.cut(t, False{})
+
+def Tool.or(+v: String, +d: String) -> String:
+  Bool.pick(String, String.is_empty(v), d, v)
+
+def Tool.mcp(mcp: Bool, +k: String) -> String:
+  match mcp:
+    case True{}:
+      Tool.or(Tool.cut(String.drop(k, 5n), False{}), k)
+    case False{}:
+      k
+
+# "mcp__backplane__viewer_show" -> "viewer_show"; other names as they are
+def Tool.short(+k: String) -> String:
+  Tool.mcp(String.starts_with(k, "mcp__"), k)
+
+# one of Claude's to-do tools (they set the to-do list, core/todo.bend)
+def Tool.todo(+k: String) -> Bool:
+  Bool.or(String.eq(k, "TodoWrite"), Bool.or(String.eq(k, "TaskCreate"), String.eq(k, "TaskUpdate")))
+
+# the name a row shows for a tool call
+def Tool.shown(+l: I.Loc, +k: String) -> String:
+  Bool.pick(String, Tool.todo(k), MSG.T.thread.todos(l), Tool.short(k))
+
+# what a row says after the name: the call's summary, or nothing when the
+# summary is only the name again (a call with no input to tell, as older
+# TodoWrite events stored)
+def Tool.text(+k: String, +summary: String) -> String:
+  Bool.pick(String, String.eq(summary, k), "", summary)
+
+def Fold.kinds.k(todo: Bool, +k: String, +acc: List<&2, String>) -> List<&2, String>:
+  match todo:
+    case True{}:
+      acc
+    case False{}:
+      Fold.add.k(Fold.has(acc, Tool.short(k)), Tool.short(k), acc)
+
+# the distinct kinds, in the order first seen, short (Tool.short) and
+# without the to-do tools
 def Fold.kinds(es: List<&2, M.Entry>, +acc: List<&2, String>) -> List<&2, String>:
   match es:
     case Nil{}:
       acc
     case +e <> t:
-      Fold.kinds(t, Fold.add.k(Fold.has(acc, Fold.kind(e)), Fold.kind(e), acc))
+      Fold.kinds(t, Fold.kinds.k(Tool.todo(Fold.kind(e)), Fold.kind(e), acc))
 
 def Fold.first(k: Nat, xs: List<&2, String>) -> List<&2, String>:
   match k xs:
@@ -191,24 +247,49 @@ def Fold.label(+l: I.Loc, +es: List<&2, M.Entry>) -> String:
   Bool.pick(String, Nat.is_eq(n, 0n), Fold.steps.label(l, d),
     Fold.calls.label(l, n, Fold.kinds(Fold.calls(es), Nil{})) ++ Bool.pick(String, Nat.is_eq(d, 0n), "", " · " ++ Fold.steps.label(l, d)))
 
-# the kind of a run's latest call ("" with none)
-def Fold.latest(es: List<&2, M.Entry>, +acc: String) -> String:
-  match es:
-    case Nil{}:
-      acc
-    case +e <> t:
-      Fold.latest(t, Fold.kind(e))
+# a text's first line, n characters at most (acc: the line so far,
+# reversed); the row ellipses it (style.css's button.fold span)
+def Fold.line(n: Nat, s: String, +acc: String) -> String:
+  match n s:
+    case 0n _:
+      String.reverse(acc)
+    case 1n+k SNil{}:
+      String.reverse(acc)
+    case 1n+k SCon{Chr{10}, _}:
+      String.reverse(acc)
+    case 1n+k SCon{c, t}:
+      Fold.line(k, t, SCon{c, acc})
 
-# the live run's row: how many calls, then what the latest is
-# ("6 tool calls · running: Bash"); a run of design changes alone reads
-# as Fold.label
+# what a call does, in a line: its summary's first line, or its name
+# (Tool.shown) for a to-do call or one with no summary
+def Fold.what(+l: I.Loc, e: M.Entry) -> String:
+  match e:
+    case M.Act{_, _, _, +k, +x, _}:
+      Bool.pick(String, Tool.todo(k), Tool.shown(l, k), Tool.or(String.trim(Fold.line(160n, x, "")), Tool.shown(l, k)))
+    case M.Msg{_, _, _, _, _}:
+      ""
+
+def Fold.latest.k(+l: I.Loc, m: Maybe<&2, M.Entry>) -> String:
+  match m:
+    case Some{e}:
+      Fold.what(l, e)
+    case None{}:
+      ""
+
+# what a run's latest call does (Fold.what; "" with none)
+def Fold.latest(+l: I.Loc, es: List<&2, M.Entry>) -> String:
+  Fold.latest.k(l, List.last(&2, M.Entry, es))
+
+# the live run's row: how many calls, then what the latest does
+# ("6 tool calls · running: kicad-cli pcb drc board.kicad_pcb"); a run of
+# design changes alone reads as Fold.label
 def Fold.label.live(+l: I.Loc, +es: List<&2, M.Entry>) -> String:
   +n = List.length(&2, M.Entry, Fold.calls(es))
   +d = Fold.steps(es)
   Bool.pick(String, Nat.is_eq(n, 0n), Fold.steps.label(l, d),
     MSG.T.fold.calls(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other"))
       ++ Bool.pick(String, Nat.is_eq(d, 0n), "", " · " ++ Fold.steps.label(l, d))
-      ++ " · " ++ MSG.T.fold.running(l, Fold.latest(Fold.calls(es), "")))
+      ++ " · " ++ MSG.T.fold.running(l, Fold.latest(l, Fold.calls(es))))
 
 def Fold.label.k(live: Bool, +l: I.Loc, +es: List<&2, M.Entry>) -> String:
   match live:

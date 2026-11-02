@@ -183,7 +183,7 @@ def main() -> IO(Unit):
     C.Check.str("13 one-call pages: the same drawer on each", pages(calls(13n, 1n), List.reverse(&2, M.Entry, thread13()), False{}), heads13(13n))
     C.Check.str("a page cut mid-run while the turn runs: the whole run, live",
       Show.roles(F.Fold.roles.ctx(I.En{}, F.Fold.context(Nil{}, List.reverse(&2, M.Entry, calls(13n, 1n)), Nil{}, [tool("c12", "Bash"), tool("c13", "Bash")]), [tool("c12", "Bash"), tool("c13", "Bash")], none(), True{})),
-      "h(c1|13 tool calls · running: Bash|False|live) i(False) ")
+      "h(c1|13 tool calls · running: x|False|live) i(False) ")
     C.Check.str("opened from any page: the run's own key", Show.roles(F.Fold.roles.ctx(I.En{}, F.Fold.context(Nil{}, List.reverse(&2, M.Entry, thread13()), Nil{}, [tool("c5", "Bash")]), [tool("c5", "Bash")], Map.set(&2, String, none(), "fold:c1", "1"), False{})),
       "h(c1|13 tool calls · Bash|True) ")
     C.Check.str("a page from a message: the context stops at it", Show.roles(F.Fold.roles.ctx(I.En{}, F.Fold.context(Nil{}, List.reverse(&2, M.Entry, thread13()), Nil{}, [said("m2", 2n)]), [said("m2", 2n)], none(), False{})), "s ")
@@ -202,19 +202,24 @@ def main() -> IO(Unit):
     C.Check.str("web: blank messages show nothing and split nothing", Web.shows(V.View.expand(V.View.entries(I.En{}, blanks([tool("a", "shell"), tool("b", "shell")]), M.State.empty(), "t", none(), False{}))),
       "<button.fold=1a>^<span>2 tool calls · shell</span></button>")
     C.Check.str("label", F.Fold.label(I.En{}, [tool("a", "shell"), tool("b", "edit"), tool("c", "shell"), tool("d", "read")]), "4 tool calls · shell, edit, read")
+    C.Check.str("label: mcp names short, to-do left out", F.Fold.label(I.En{}, [tool("a", "TodoWrite"), tool("b", "Read"), tool("c", "mcp__backplane__viewer_show"), tool("d", "Bash"), tool("e", "TaskUpdate")]), "5 tool calls · Read, viewer_show, Bash")
+    C.Check.str("label: only to-do calls", F.Fold.label(I.En{}, [tool("a", "TodoWrite")]), "1 tool call")
+    C.Check.str("live: names the latest call's first line", F.Fold.label.live(I.En{}, [tool("a", "Read"), M.Act{"b", "t", "tool", "Bash", "  make drc\nmake gerbers", 0n}]), "2 tool calls · running: make drc")
+    C.Check.str("live: a to-do call reads To-do", F.Fold.label.live(I.En{}, [tool("a", "Read"), M.Act{"b", "t", "tool", "TodoWrite", "1 of 3 done", 0n}]), "2 tool calls · running: To-do")
+    C.Check.str("live: no summary, the name", F.Fold.label.live(I.En{}, [M.Act{"b", "t", "tool", "mcp__backplane__viewer_show", "", 0n}]), "1 tool call · running: viewer_show")
     C.Check.str("label one", F.Fold.label(I.En{}, [tool("a", "shell")]), "1 tool call · shell")
     C.Check.str("label many kinds", F.Fold.label(I.En{}, [tool("a", "a"), tool("b", "b"), tool("c", "c"), tool("d", "d")]), "4 tool calls · a, b, c, …")
     C.Check.str("roles idle", Show.roles(F.Fold.roles(es1(), none(), False{})),
       "s h(a|3 tool calls · shell, edit|False) i(False) i(False) s h(d|1 tool call · read|False) s h(f|1 tool call · shell|False) ")
     C.Check.str("roles running: the last run shut too, saying what runs", Show.roles(F.Fold.roles(es1(), none(), True{})),
-      "s h(a|3 tool calls · shell, edit|False) i(False) i(False) s h(d|1 tool call · read|False) s h(f|1 tool call · running: shell|False|live) ")
+      "s h(a|3 tool calls · shell, edit|False) i(False) i(False) s h(d|1 tool call · read|False) s h(f|1 tool call · running: x|False|live) ")
     C.Check.str("roles running: a live run of three says its latest", Show.roles(F.Fold.roles([msg("m"), tool("a", "Read"), tool("b", "Edit"), tool("c", "Bash")], none(), True{})),
-      "s h(a|3 tool calls · running: Bash|False|live) i(False) i(False) ")
+      "s h(a|3 tool calls · running: x|False|live) i(False) i(False) ")
     C.Check.str("roles running: the person opened the live run", Show.roles(F.Fold.roles([tool("a", "Read"), tool("b", "Bash")], Map.set(&2, String, none(), "fold:a", "1"), True{})),
-      "h(a|2 tool calls · running: Bash|True|live) i(True) ")
+      "h(a|2 tool calls · running: x|True|live) i(True) ")
     C.Check.str("roles running: a run of design changes alone has no hint", Show.roles(F.Fold.roles([M.Act{"s", "t", "step", "", "x", 0n}], none(), True{})),
       "h(s|1 design change|False|live) ")
-    C.Check.str("ja live hint", Show.roles(F.Fold.roles.loc(I.Ja{}, [tool("a", "Bash")], none(), True{})), "h(a|ツール呼び出し1件 · 実行中: Bash|False|live) ")
+    C.Check.str("ja live hint", Show.roles(F.Fold.roles.loc(I.Ja{}, [tool("a", "Bash")], none(), True{})), "h(a|ツール呼び出し1件 · 実行中: x|False|live) ")
     C.Check.str("no stored choice: shut, live or not", Bool.show(F.Fold.run.open("", True{})) ++ Bool.show(F.Fold.run.open("", False{})), "FalseFalse")
     C.Check.str("roles running: not at the bottom", Show.roles(F.Fold.roles([tool("a", "x"), msg("m")], none(), True{})), "h(a|1 tool call · x|False) s ")
     C.Check.str("user opened", Show.roles(F.Fold.roles([tool("a", "x"), tool("b", "x")], Map.set(&2, String, none(), "fold:a", "1"), False{})), "h(a|2 tool calls · x|True) i(True) ")
@@ -236,8 +241,8 @@ def main() -> IO(Unit):
     C.Check.str("web folded", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("a", "shell"), tool("b", "edit"), err("e")], M.State.empty(), "t", none(), False{}))),
       "<button.fold=1a>^<span>2 tool calls · shell, edit</span></button><div.act error><span.kind>exit</span><span.summary>boom</span></div>")
     C.Check.str("web live shut, saying what runs", Web.shows(V.View.expand(V.View.entries(I.En{}, [msg("m"), tool("a", "shell")], M.State.empty(), "t", none(), True{}))),
-      "<div.msg assistant><div.body><p>hi</p></div><span.stamp>00:00</span><button.copy=hi>Copy</button></div><button.fold live=1a>^<span>1 tool call · running: shell</span></button>")
+      "<div.msg assistant><div.body><p>hi</p></div><span.stamp>00:00</span><button.copy=hi>Copy</button></div><button.fold live=1a>^<span>1 tool call · running: x</span></button>")
     C.Check.str("web opened: its rows hang in the drawer, marked with its run", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("a", "shell"), tool("b", "edit"), msg("m")], M.State.empty(), "t", Map.set(&2, String, none(), "fold:a", "1"), False{}))),
       "<button.fold open=0a>^<span>2 tool calls · shell, edit</span></button><div.act tool~a><span.kind>shell</span><span.summary>x</span></div><div.act tool~a><span.kind>edit</span><span.summary>x</span></div><div.msg assistant><div.body><p>hi</p></div><span.stamp>Finished 00:00</span><button.copy=hi>Copy</button></div>")
     C.Check.str("web opened live: open and pulsing", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("a", "shell")], M.State.empty(), "t", Map.set(&2, String, none(), "fold:a", "1"), True{}))),
-      "<button.fold open live=0a>^<span>1 tool call · running: shell</span></button><div.act tool~a><span.kind>shell</span><span.summary>x</span></div>")
+      "<button.fold open live=0a>^<span>1 tool call · running: x</span></button><div.act tool now~a><span.kind>shell</span><span.summary>x</span><span.now>running</span></div>")

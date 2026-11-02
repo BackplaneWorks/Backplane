@@ -269,6 +269,11 @@ button.fold:hover { color: var(--text); border-color: var(--faint); }
 button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 button.fold svg { flex: none; }
 button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
+/* The call a live run is on (View.act.in's "now"): its name in the accent,
+   then the live fold's dot and "running". */
+.act.now .kind { color: var(--accent); border-color: var(--accent); }
+.act .now { flex: none; display: flex; align-items: center; gap: 6px; color: var(--accent); }
+.act .now::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
 .act[data-run] { position: relative; margin-left: 13px; padding-left: 12px; }
 .act[data-run]::before { content: ""; position: absolute; left: 0; top: -10px; bottom: 0; border-left: 1px solid var(--line); }
 /* the thin view's reader on an activity row (thin-continuations.js): a
