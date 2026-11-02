@@ -15390,3 +15390,16 @@ law usage_rolling_default:
 
 law usage_rolling_empty_unknown:
   {UPERIOD.Up.sum("", "") == "" : String}
+
+# Subthread presentation is separate from work ownership and badge counts.
+law subs_display_shell_background:
+  {SB.Subs.display.kind(SB.SubRow{"shell", True{}, "Build", "shell", "running", "", True{}, False{}, 0n, []}) == 1n : Nat}
+
+law subs_display_child_conversation:
+  {SB.Subs.display.kind(SB.SubRow{"child", False{}, "Inspect", "codex", "running", "", True{}, False{}, 0n, []}) == 0n : Nat}
+
+law subs_display_finished_toggle_kept:
+  {SB.Subs.display.part([SB.Subs.done.toggle("t", 2n, False{})], 2n) == [SB.Subs.done.toggle("t", 2n, False{})] : List<&2, SB.SubRow>}
+
+law subthreads_claude_blocks_native:
+  {String.contains(String.join(PM.Claude.args("", "", M.FullAccess{}, M.DefaultMode{}, "", []), " "), "--disallowedTools Agent,Task") == True{} : Bool}

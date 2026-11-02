@@ -2947,10 +2947,10 @@ def Sa.steps.n(+ss: List<&2, SB.SubStep>) -> U32:
   U32.from_nat(List.length(&2, SB.SubStep, ss))
 
 # how tall a row is: its line, what it does now, the steps it shows
-def Sa.h(r: SB.SubRow) -> U32:
+def Sa.h(+r: SB.SubRow) -> U32:
   match r:
     case SB.SubRow{_, _, _, _, _, +doing, _, _, _, +ss}:
-      (28 + Bool.pick(U32, String.is_empty(doing), 0, 20) + Sa.steps.n(ss) * 20 : U32)
+      Bool.pick(U32, SB.Subs.display.heading(r), 24, (28 + Bool.pick(U32, String.is_empty(doing), 0, 20) + Sa.steps.n(ss) * 20 : U32))
 
 def Sa.step(+ty: Ty, s: SB.SubStep, +x: U32, +x1: U32, +y: U32) -> List<&2, R.Op>:
   match s:
@@ -3013,8 +3013,16 @@ def Sa.row.k(+ty: Ty, r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
           Sa.steps(ty, ss, tx, (x1 - 12 : U32), (y + 28 + dh : U32))]),
         [Sa.hit(agent, open, key, x0, x1, y, (28 + dh : U32))]}
 
-def Sa.row(+ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
+def Sa.row.body(+ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
   Out.cat(Sa.row.k(ty, r, x0, x1, y), Sa.stop(String.is_empty(SB.Subs.cancel(r)), ty, SB.Subs.cancel(r), SB.Subs.key(r), Sa.stop.x(ty, U.StateWord.label(Ty.loc(ty), SB.Subs.word(r)), SB.Subs.cancel(r), x1), y))
+
+def Sa.row.heading(heading: Bool, +ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
+  match heading:
+    case True{}: Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, SB.Subs.display.label(Ty.loc(ty), r), U32.dim((x1 - x0 : U32), 24)), D.Clip.all(), (x0 + 12 : U32), y, 24, T.Th.dim()))
+    case False{}: Sa.row.body(ty, r, x0, x1, y)
+
+def Sa.row(+ty: Ty, +r: SB.SubRow, +x0: U32, +x1: U32, +y: U32) -> Out:
+  Sa.row.heading(SB.Subs.display.heading(r), ty, r, x0, x1, y)
 
 def Sa.rows(+ty: Ty, rs: List<&2, SB.SubRow>, +x0: U32, +x1: U32, +y: U32) -> Out:
   match rs:
@@ -3059,18 +3067,26 @@ def Sa.fit.put(ok: Bool, r: SB.SubRow, rest: List<&2, SB.SubRow>) -> List<&2, SB
     case False{}:
       Nil{}
 
+# Keep a section with its first worker. A section alone at the bottom
+# would hide that worker's controls until the next scroll.
+def Sa.fit.need(heading: Bool, +h: U32, rs: List<&2, SB.SubRow>) -> U32:
+  match heading rs:
+    case True{} r <> _: (h + Sa.h(r) : U32)
+    case _ _: h
+
 def Sa.fit(rs: List<&2, SB.SubRow>, +room: U32, +first: Bool) -> List<&2, SB.SubRow>:
   match rs:
     case Nil{}:
       Nil{}
-    case +r <> rest:
-      Sa.fit.put(Sa.fit.ok(Sa.h(r), room, first), r,
-        Sa.fit(rest, Bool.pick(U32, Sa.fit.ok(Sa.h(r), room, first), (room - U32.min(Sa.h(r), room) : U32), 0), False{}))
+    case +r <> +rest:
+      +need = Sa.fit.need(SB.Subs.display.heading(r), Sa.h(r), rest)
+      Sa.fit.put(Sa.fit.ok(need, room, first), r,
+        Sa.fit(rest, Bool.pick(U32, Sa.fit.ok(need, room, first), (room - U32.min(Sa.h(r), room) : U32), 0), Bool.and(first, SB.Subs.display.heading(r))))
 
 # the panel's rows on screen: open ones from the scrolled-to row, as many as
 # a third of the window holds
 def Subs.vis(+all: List<&2, SB.SubRow>, +open: Bool, +off: Nat, +h: U32) -> List<&2, SB.SubRow>:
-  Sa.fit(List.drop(&2, SB.SubRow, SB.Subs.panel.rows(open, all), off), (h / 3 : U32), True{})
+  Sa.fit(List.drop(&2, SB.SubRow, SB.Subs.display(SB.Subs.panel.rows(open, all)), off), (h / 3 : U32), True{})
 
 # the panel's box: its head, and its rows when open
 def Subs.box.h(+rs: List<&2, SB.SubRow>, +open: Bool) -> U32:
@@ -3084,7 +3100,7 @@ def Subs.box.h(+rs: List<&2, SB.SubRow>, +open: Bool) -> U32:
 def Lay.subs.k(some: Bool, +ty: Ty, +all: List<&2, SB.SubRow>, +rs: List<&2, SB.SubRow>, +open: Bool, +th: String, +off: Nat, +x0: U32, +x1: U32, +y: U32) -> Out:
   match some:
     case True{}:
-      +n = List.length(&2, SB.SubRow, SB.Subs.panel.rows(open, all))
+      +n = List.length(&2, SB.SubRow, SB.Subs.display(SB.Subs.panel.rows(open, all)))
       +on = Nat.is_gt(SB.Subs.live(all), 0n)
       +word = {SB.Subs.panel.word(all) ++ Pane.range.loc(Ty.loc(ty), off, List.length(&2, SB.SubRow, rs), n) : String}
       +bh = Subs.box.h(rs, open)
@@ -7161,7 +7177,7 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       +kh = (Kn.h(kn, ty, cw) + kxh : U32)
       +ts = SB.Subs.rows.at(st, pics, sel, now, ixs)
       +sopen = SB.Subs.panel.open(pics, sel, ts)
-      +soff = Pane.clamp(Pane.off(pics, "subs:" ++ sel), List.length(&2, SB.SubRow, SB.Subs.panel.rows(sopen, ts)))
+      +soff = Pane.clamp(Pane.off(pics, "subs:" ++ sel), List.length(&2, SB.SubRow, SB.Subs.display(SB.Subs.panel.rows(sopen, ts))))
       +svis = Subs.vis(ts, sopen, soff, h)
       # the row under the header: the parent's link
       +pl = {Bool.pick(U32, String.is_empty(U.Tasks.up(st, sel)), 0, 32) : U32}

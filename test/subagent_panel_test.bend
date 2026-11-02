@@ -26,9 +26,9 @@ def many(+n: Nat) -> List<&2, SB.SubRow>:
 def main() -> IO(Unit):
   do IO<Unit>:
     +info : Map<&2, String> = Map.new(&2, String)
-    C.Check.str("web renders live agents, delegated children and finished rows", keys(V.View.subs.signals.go(I.En{}, mixed(), info)), "agent;child;subs.done:t1;finished-agent;")
+    C.Check.str("web renders live agents, delegated children and finished rows", keys(V.View.subs.signals.go(I.En{}, mixed(), info)), "subs.section:0;child;subs.section:1;agent;subs.done:t1;subs.section:4;finished-agent;")
     +lazy : Map<&2, String> = Map.set(&2, String, info, "local.view.lazy", "1")
-    C.Check.str("thin page renders the same row identities", keys(V.View.subs.signals.go(I.En{}, mixed(), lazy)), "agent;child;subs.done:t1;finished-agent;")
-    C.Check.str("finished panel paginates all its rows", Nat.show(List.length(&2, D.Node, V.View.subs.signals.go(I.En{}, many(20n), lazy))), "17")
+    C.Check.str("thin page renders the same row identities", keys(V.View.subs.signals.go(I.En{}, mixed(), lazy)), "subs.section:0;child;subs.section:1;agent;subs.done:t1;subs.section:4;finished-agent;")
+    C.Check.str("finished panel paginates all its rows", Nat.show(List.length(&2, D.Node, V.View.subs.signals.go(I.En{}, many(20n), lazy))), "18")
     C.Check.str("a reporting subagent counts as done, not \"0 done\"", V.View.sub.signal.panel(I.En{}, [row("r", True{}, "reporting", True{})], info), "1 done")
     C.Check.str("closing still records work signatures", String.join(SB.Subs.keys(mixed()), ";"), "live:agent;live:child")

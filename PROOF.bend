@@ -15404,3 +15404,11 @@ def Laws.usage_rolling_month(now): {==}
 def Laws.usage_rolling_default(): {==}
 
 def Laws.usage_rolling_empty_unknown(): {==}
+
+def Laws.subs_display_shell_background(): {==}
+
+def Laws.subs_display_child_conversation(): {==}
+
+def Laws.subs_display_finished_toggle_kept(): {==}
+
+def Laws.subthreads_claude_blocks_native(): {==}

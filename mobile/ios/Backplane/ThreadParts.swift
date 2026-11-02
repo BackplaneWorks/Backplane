@@ -495,34 +495,40 @@ struct SubsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(subs.rows) { r in
-                        Button { model.act(r.act, r.value) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 8) {
-                                    StatusDot(state: "", status: r.state)
-                                    Text(r.agent ? (r.open ? "▾" : "▸") : r.who).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                                    Text(r.title).lineLimit(1)
-                                    Spacer(minLength: 0)
-                                    if let c = r.cancel, !c.isEmpty {
-                                        Button(c == "wake-cancel" ? NativeMessages.common_cancel(lang) : NativeMessages.composer_stop(lang)) { model.act(c, r.id) }.font(.caption2).foregroundStyle(PhaseColor.warn).buttonStyle(.plain)
+                        if r.heading == true {
+                            Text(r.title).font(.caption.bold()).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                                .accessibilityAddTraits(.isHeader)
+                        } else {
+                            Button { model.act(r.act, r.value) } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 8) {
+                                        StatusDot(state: "", status: r.state)
+                                        Text(r.agent ? (r.open ? "▾" : "▸") : r.who).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                        Text(r.title).lineLimit(1)
+                                        Spacer(minLength: 0)
+                                        if let c = r.cancel, !c.isEmpty {
+                                            Button(c == "wake-cancel" ? NativeMessages.common_cancel(lang) : NativeMessages.composer_stop(lang)) { model.act(c, r.id) }.font(.caption2).foregroundStyle(PhaseColor.warn).buttonStyle(.plain)
+                                        }
+                                        Text(r.stateLabel ?? r.state).font(.caption2).foregroundStyle(subColor(r.state))
                                     }
-                                    Text(r.stateLabel ?? r.state).font(.caption2).foregroundStyle(subColor(r.state))
-                                }
-                                if !r.doing.isEmpty {
-                                    Text(r.doing).font(.caption2).foregroundStyle(PhaseColor.accent).lineLimit(1).padding(.leading, 16)
-                                }
-                                ForEach(Array(r.steps.enumerated()), id: \.offset) { _, st in
-                                    HStack(spacing: 6) {
-                                        if !st.kind.isEmpty { Text(st.kind).foregroundStyle(.tertiary) }
-                                        Text(st.text).foregroundStyle(.secondary).lineLimit(1)
+                                    if !r.doing.isEmpty {
+                                        Text(r.doing).font(.caption2).foregroundStyle(PhaseColor.accent).lineLimit(1).padding(.leading, 16)
                                     }
-                                    .font(.caption2.monospaced())
-                                    .padding(.leading, 16)
+                                    ForEach(Array(r.steps.enumerated()), id: \.offset) { _, st in
+                                        HStack(spacing: 6) {
+                                            if !st.kind.isEmpty { Text(st.kind).foregroundStyle(.tertiary) }
+                                            Text(st.text).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                        .font(.caption2.monospaced())
+                                        .padding(.leading, 16)
+                                    }
                                 }
+                                .frame(minHeight: 44)
+                                .contentShape(.rect)
                             }
-                            .frame(minHeight: 44)
-                            .contentShape(.rect)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
