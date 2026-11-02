@@ -1,58 +1,28 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=()=>fs.readFileSync(process.env.READER_HOST_SOURCE||path.join(__dirname,'../../src/web/host.js'),'utf8');
-test('an underfilled entry loads real older pages before a wheel can generate scroll',()=>{
+test('initial and live tool-only pictures never grant background history demand',()=>{
  const src=source(),a=src.indexOf('function earlierCheck(tl)'),b=src.indexOf('function laterCheck(tl)',a),requests=[];
  const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0};
- const context=vm.createContext({historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyFillSeeking:true,historySeekMessage:()=>false,historyFillPages:0,earlierAsked:false,historyFillMore(){},historyFillContinue(){},historyHasMessage:t=>t.scrollHeight>t.clientHeight+10,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400});
- const check=vm.runInContext('('+src.slice(a,b)+')',context);check(tl);
- assert.equal(requests.length,1);assert.equal(requests[0].direction,'older');assert.equal(requests[0].options.two,true);
- context.earlierAsked=false;tl.scrollHeight=1200;check(tl);assert.equal(requests.length,1,'stop automatic filling once history scrolls');
- tl.scrollHeight=700;context.historyFillSeeking=true;context.historyFillPages=32;check(tl);assert.equal(requests.length,1,'each automatic batch yields after32 pages');
- context.historyDirection='older';check(tl);assert.equal(requests.length,2,'explicit user input can continue past the automatic budget');
+ const context=vm.createContext({historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyOlderDemand:0,earlierAsked:false,historyFillMore(){},historyHasMessage:()=>false,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400});
+ const check=vm.runInContext('('+src.slice(a,b)+')',context);for(let i=0;i<100;i++)check(tl);assert.equal(requests.length,0,'a long folded prefix cannot cause an automatic scan');
+ context.historyDirection='older';context.historyOlderDemand=2;
+ for(let i=0;i<100;i++){context.earlierAsked=false;check(tl);}assert.equal(requests.length,2,'one user gesture permits at most two pages, not an entire history');assert.equal(context.historyOlderDemand,0);
+ context.historyOlderDemand=2;context.historyFillOwner=()=> 'new-account-or-history';check(tl);assert.equal(context.historyOlderDemand,0);assert.equal(requests.length,2,'retire demand at an ownership boundary');
 });
 test('usable history means an actually visible committed message rather than a tiny scrollbar',()=>{
- const src=source(),a=src.indexOf('function historyHasMessage(tl)'),b=src.indexOf('function historyMessageKey(',a);
+ const src=source(),a=src.indexOf('function historyHasMessage(tl)'),b=src.indexOf('// A short tool-only page',a);
  let rows=[];const tl={scrollHeight:705,clientHeight:700,getBoundingClientRect:()=>({top:0,bottom:700}),querySelectorAll:()=>rows};
  const has=vm.runInNewContext('('+src.slice(a,b)+')');assert.equal(has(tl),false);
  const row=(id,text,top=20)=>({dataset:{id},textContent:text,getBoundingClientRect:()=>({height:30,top,bottom:top+30})});
  rows=[row('@live:t','Working'),row('empty','  '),row('offscreen','committed',900)];assert.equal(has(tl),false);
  rows.push(row('committed-message','Visible message'));assert.equal(has(tl),true);
 });
-test('tool-only entry continues automatically in paced batches and stops at real content',()=>{
- const src=source(),a=src.indexOf('function historyFillContinue('),b=src.indexOf('function laterCheck(tl)',a),nodes=new Map(),requests=[],timers=new Map();let next=0,scheduled=0;
- const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0,getBoundingClientRect:()=>({top:30,left:200})};
+test('a tool-only recent window offers an explicit scoped earlier control',()=>{
+ const src=source(),a=src.indexOf('function historyFillMore('),b=src.indexOf('function earlierCheck(tl)',a),nodes=new Map();let scheduled=0,owner='scope';
  const document={getElementById:id=>nodes.get(id),createElement:()=>({style:{},attrs:{},setAttribute(k,v){this.attrs[k]=v;},remove(){nodes.delete(this.id);}}),body:{appendChild:n=>nodes.set(n.id,n)}};
- const context=vm.createContext({document,setTimeout(fn,ms){assert.equal(ms,100);timers.set(++next,fn);return next;},clearTimeout(id){timers.delete(id);},historyFillResume:null,historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyFillSeeking:true,historySeekMessage:()=>false,historyFillPages:0,earlierAsked:false,historyHasMessage:t=>t.scrollHeight>t.clientHeight+10,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400,historyCheckSoon(){scheduled++;}});
- vm.runInContext(src.slice(a,b),context);
- for(let batch=0;batch<4;batch++){
-  for(let n=0;n<20;n++){context.earlierAsked=false;context.earlierCheck(tl);}
-  assert.equal(requests.length,(batch+1)*16,'at most two in-flight pages and32 requests per batch');
-  assert.equal(timers.size,1,'one automatic continuation replaces manual navigation');
-  const status=nodes.get('history-fill-more');assert(status);assert.equal(status.attrs.role,'status');assert.equal(status.onclick,undefined);
-  const [id,fn]=timers.entries().next().value;timers.delete(id);fn();assert.equal(context.historyFillPages,0);
- }
- assert.equal(scheduled,4);context.earlierCheck(tl);assert.equal(requests.length,65,'continues past128 raw pages without input');
- tl.scrollHeight=1100;context.earlierAsked=false;context.earlierCheck(tl);assert.equal(context.historyFillSeeking,false);assert(!nodes.has('history-fill-more'));assert.equal(timers.size,0);
- // Cancel and reopen under even the same owner: a late old callback must not
- // reset the new batch or clear its timer.
- context.historyFillSeeking=true;context.historyFillContinue('scope');const stale=[...timers.values()][0];context.historyFillMore(null,false);context.historyFillContinue('scope');const current=context.historyFillResume;context.historyFillPages=32;stale();assert.equal(context.historyFillResume,current);assert.equal(context.historyFillPages,32);
- context.historyDirection='newer';const fresh=timers.get(current.timer);fresh();assert.equal(scheduled,4,'user navigation cancels background seeking');
- context.historyDirection='';context.historyFillContinue('scope');context.historyFillScope='other';[...timers.values()].at(-1)();assert.equal(scheduled,4,'selection/account/epoch replacement rejects a late continuation');
-});
-test('initial context seeking uses a loaded committed key and respects restored reading intent',()=>{
- const src=source(),a=src.indexOf('function earlierCheck(tl)'),b=src.indexOf('function laterCheck(tl)',a);let seeks=0,pages=0,visible=false;
- const tl={id:'timeline',scrollTop:5000,scrollHeight:6000,clientHeight:700};
- const ctx={historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyFillSeeking:true,historyFillPages:4,earlierAsked:false,historyFillMore(){},historyHasMessage:()=>visible,historySeekMessage(){seeks++;return true;},thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead(){pages++;return true;}},historyGap:()=>0,historyRunway:()=>1400};
- vm.createContext(ctx);const check=vm.runInContext('('+src.slice(a,b)+')',ctx);check(tl);assert.equal(seeks,1);assert.equal(pages,0,'do not fetch past a message already loaded outside the mounted range');
- visible=true;check(tl);assert.equal(ctx.historyFillSeeking,false);assert.equal(pages,0);
- visible=false;check(tl);assert.equal(seeks,1,'a restored/established reading intent is not moved by background fill');assert.equal(pages,0);
-});
-test('message-key lookup reads opaque metadata without constructing hidden bodies',()=>{
- const src=source(),a=src.indexOf('function historyMessageKey(node)'),b=src.indexOf('function historySeekMessage(tl)',a);
- const key=vm.runInNewContext('('+src.slice(a,b)+')',{each:x=>x||[],historyRow:n=>n.key});
- const memo=(id,fn,text)=>({tag:'bp-memo',key:id,attrs:[{name:'fn',value:fn}],kids:[{text}]});
- assert.equal(key(memo('committed','msg','Visible text')),'committed');assert.equal(key(memo('tool','act','private body')),'');assert.equal(key(memo('@live:t','msg','Working')),'');assert.equal(key(memo('empty','msg','  ')),'');
+ const context=vm.createContext({document,historyFillScope:'scope',historyFillOwner:()=>owner,historyDirection:'',historyOlderDemand:0,earlierAsked:true,thin:{ready:true,paging:null,pageError:null,hasAhead:()=>true},historyCheckSoon(){scheduled++;}});
+ const show=vm.runInContext('('+src.slice(a,b)+')',context);show({getBoundingClientRect:()=>({top:10,left:100})},true);const button=nodes.get('history-fill-more');assert.equal(button.textContent,'Load earlier messages');assert.equal(button.attrs['aria-controls'],'timeline');assert.equal(scheduled,0);button.onclick();assert.equal(context.historyOlderDemand,2);assert.equal(scheduled,1);owner='other';button.onclick();assert.equal(scheduled,1,'a stale control cannot page another conversation');show(null,false);assert.equal(nodes.size,0);
 });
 test('context-seek ownership changes with account, selection, view generation and owning history epoch',()=>{
  const src=source(),a=src.indexOf('function historyFillOwner()'),b=src.indexOf('function historyHasMessage(tl)',a);
@@ -147,4 +117,9 @@ test('owning-history reset drops retained DOM rows before normal history project
   assert.equal(got.projection,reset?'reset':'update');assert.equal(got.previous,reset?fresh:old);assert.equal(resets,reset?1:0);assert.equal(removed,reset?1:0);
   if(reset){assert.equal(ctx.historyGone.older.size,0);assert.equal(ctx.transitionPosition.atEnd,false);assert.equal(ctx.transitionPosition.top,0);}
  }
+});
+
+test('an oversized picture never closes the live socket or starts reconnect backoff',()=>{
+ const src=source(),a=src.indexOf('  const viewRecover = reason => {'),b=src.indexOf('\n  try {',a);assert(a>0&&b>a);
+ let shown=0;const recover=vm.runInNewContext('('+src.slice(a+'  const viewRecover = '.length,b).trim().replace(/;$/,'')+')',{current:()=>true,showViewLimit(){shown++;},downNote:'',Date:{now(){throw Error('must not enter reconnect/backoff');}},disconnect(){throw Error('socket must stay live');},s:{close(){throw Error('socket must stay live');}}});for(const reason of ['LIMIT','invalid view presentation','invalid view delta','View request timed out; actions were not resent'])recover(reason);assert.equal(shown,4);
 });

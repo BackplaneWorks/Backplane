@@ -237,6 +237,15 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg.assistant .body > :last-child { margin-bottom: 0; }
 .msg.live { opacity: 0.9; }
 .msg.assistant.pending { align-self: flex-start; width: fit-content; min-width: 0; max-width: 100%; padding: 8px 12px; background: var(--raise); border: 1px solid var(--line); color: var(--dim); }
+/* Keep all three dots in layout; reveal one, two, then three without
+   resizing the Working bubble or moving the conversation below it. */
+.msg.assistant.pending .body::after { content: "..."; display: inline-block; white-space: nowrap; animation: working-dots 1.5s step-end infinite; }
+@keyframes working-dots {
+  0%, 100% { clip-path: inset(0 66.6667% 0 0); }
+  33.3333% { clip-path: inset(0 33.3333% 0 0); }
+  66.6667% { clip-path: inset(0); }
+}
+@media (prefers-reduced-motion: reduce) { .msg.assistant.pending .body::after { animation: none; } }
 .msg .stamp { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .msg .stamp:empty { display: none; }
 /* A reply inside a turn (core/stamp.bend's Stamp.mid) shows its time only
@@ -2355,3 +2364,33 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .settings-view .set-busy { border-left: 2px solid var(--accent); }
 .settings-view .set-busy .set-ctl { min-width: min(260px, 100%); flex: 1 1 260px; }
 .settings-view .set-note.bad { color: var(--bad); }
+
+/* Account and allowance share one wrapping row, including narrow phones. */
+.composer-model { flex-wrap: wrap; }
+.composer-model .model-chip { flex: 1 1 10ch; }
+.composer-model .account-chip { min-width: 0; max-width: 14ch; }
+.allowance-expired { display: none; }
+.allowance-pop[data-retired="true"] .allowance-expired { display: block; color: var(--dim); }
+html[data-backplane-cached="true"] .allowance-pop,
+html[data-backplane-remote-ready="false"] .allowance-pop { display: none; }
+html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
+@media (max-width: 400px) {
+  .composer-model { gap: 4px; }
+  .composer-model .model-chip { flex-basis: calc(100% - 15ch); }
+  .composer-model .account-chip { max-width: 12ch; }
+  .composer-model .allowance-chip { max-width: none; width: 19ch; margin-left: auto; }
+}
+
+.allowance-retired { display: none; }
+.allowance-chip[data-retired="true"] .allowance-current { display: none; }
+.allowance-chip[data-retired="true"] .allowance-retired { display: inline; }
+.improvements [hidden]{display:none!important}
+.improvements-public{display:flex;flex-direction:column;gap:10px}
+.improvements-public p,.improvements>details p{font-size:12px;margin:0;line-height:1.5}
+.improvements label:has(input[type=checkbox]){display:flex;align-items:flex-start;gap:6px}
+.improvements input[type=checkbox]{flex:none;min-width:18px;min-height:18px}
+.improvements pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:22vh;overflow:auto;font-size:11px}
+.improvements-issue-actions{display:flex;flex-wrap:wrap;gap:8px}
+.improvements #improvements-review{min-height:180px;max-height:45vh}
+.improvements #improvements-details,.improvements #improvements-evidence{min-height:70px}
+.improvements>details{font-size:12px}.improvements>details>label{margin:8px 0}

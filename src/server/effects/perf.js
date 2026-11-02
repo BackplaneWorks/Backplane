@@ -133,6 +133,18 @@ function perf_us() {
   return perf_now_us() >>> 0;
 }
 
+// Installed only by the hub's Diagnostics.start, after its home lock.
+// This bridge receives numeric measurements, never Perf.emit's text.
+function perf_diagnostics(kind, name, value) {
+  try { globalThis.BACKPLANE_DIAGNOSTICS?.recordPerf(kind, name, value); }
+  catch (_) { /* optional diagnostics must never interrupt measured work */ }
+}
+
+function perf_severity(level) {
+  perf_diagnostics("severity", "", level);
+  return { $: "Unit" };
+}
+
 function perf_span(name, t0) {
   const full = perf_now_us();
   const now = full >>> 0;
@@ -140,6 +152,7 @@ function perf_span(name, t0) {
   const s = perf_slot(name);
   perf_put(s, dur);
   perf_trace_span(s.name, full, dur);
+  perf_diagnostics("span", name, dur);
   return now;
 }
 
@@ -148,6 +161,7 @@ function perf_add(name, v) {
   s.kind = 2;
   perf_put(s, v);
   perf_trace_count(s.name, perf_now_us(), v);
+  perf_diagnostics("add", name, v);
   return { $: "Unit" };
 }
 
@@ -158,6 +172,7 @@ function perf_set(name, v) {
   }
   s.kind = 1;
   perf_put(s, v);
+  perf_diagnostics("set", name, v);
   return { $: "Unit" };
 }
 
@@ -177,6 +192,7 @@ function perf_done(name) {
     s.mark = 0;
     perf_put(s, Math.min(dur, 0xffffffff));
     perf_trace_span(s.name, now, dur);
+    perf_diagnostics("span", name, Math.min(dur, 0xffffffff));
   }
   return { $: "Unit" };
 }
@@ -244,3 +260,4 @@ io_eff(CID(Perf.done), perf_done);
 io_eff(CID(Perf.take), perf_take);
 io_eff(CID(Perf.emit), perf_emit);
 io_eff(CID(Perf.logs), perf_logs);
+io_eff(CID(Perf.severity), perf_severity);

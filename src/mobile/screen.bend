@@ -1,5 +1,7 @@
 import Base
 import ../core/chat-pending.bend as CP
+
+import ../core/issue-report.bend as ISSUE
 import ../core/bub-move.bend as HOP
 import ../core/title.bend as TTL
 import ../core/msgs.bend as MSG
@@ -42,6 +44,8 @@ import ./permissions.bend as PM
 import ../core/subthreads.bend as ST
 import ../core/native-sidebar.bend as NS
 import ../core/reply.bend as RTO
+import ../core/vdict.bend as VDV
+import ../core/voice.bend as VC
 
 # Ui -> the screen the phone apps draw, as JSON. SwiftUI and Compose map
 # it onto native lists, toolbars and text fields; every decision (order,
@@ -1434,7 +1438,83 @@ def Mob.pending(+lc: I.Loc, show: Bool, +id: String) -> List<&2, J.Json>:
     case False{}: Nil{}
     case True{}: [Mob.own.s.loc(lc, M.Msg{"@working:" ++ id, id, M.Assistant{}, CP.Pending.label(lc), 0n}, Map.new(&2, String), "")]
 
-def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: Nat, btw: J.Json, embs: J.Json) -> J.Json:
+# Dictation in the open thread (client.bend's Voice), as the web's strip,
+# note, fix chips and word to clarify (view.bend's View.voice): "on" while
+# its strip shows, one quiet word for its state (U.Voice.status) and the
+# level, never the words (they are only ever in the draft); "note" an error
+# or why nothing comes ("bad" for an error, closed by voice-err); "fixes"
+# the last segment's fixes, each a chip that undoes it; "ask" the first word
+# to clarify, or null. The phone records itself: its mic button sends
+# "voice" with "client", a second press (or "stop") sends "voice" again.
+def Mob.voice.fixes(+lc: I.Loc, fs: List<&2, VDV.VFx>, +n: Nat) -> List<&2, J.Json>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case VDV.VFx{+h, +o} <> t:
+      J.Json.obj([J.KV{"label", J.Json.str(Bool.pick(String, String.is_empty(o), MSG.T.voice.dropped(lc, h), MSG.T.voice.fixed(lc, o, h)) ++ " ↶")},
+        J.KV{"tip", J.Json.str(MSG.T.voice.undo.tip(lc, h))}, J.KV{"action", J.Json.str("voice-unterm")}, J.KV{"value", J.Json.str("#" ++ Nat.show(n))}]) <> Mob.voice.fixes(lc, t, 1n+n)
+
+def Mob.voice.btn(+label: String, +action: String, +value: String, primary: Bool) -> J.Json:
+  J.Json.obj([J.KV{"label", J.Json.str(label)}, J.KV{"action", J.Json.str(action)}, J.KV{"value", J.Json.str(value)}, J.KV{"primary", J.Json.bool(primary)}])
+
+def Mob.voice.guess(+lc: I.Loc, +g: String) -> List<&2, J.Json>:
+  Bool.pick(List<&2, J.Json>, String.is_empty(g), Nil{}, [Mob.voice.btn(MSG.T.voice.choose(lc, g), "voice-use", "0", True{})])
+
+# the word to clarify: take the guess, type the right spelling (the field
+# "vfix", "bfield" as it is typed), add it as heard, or leave it
+def Mob.voice.ask.k(fixing: Bool, +lc: I.Loc, +u: U.Ui, +w: String, +g: String, +n: Nat) -> J.Json:
+  match fixing:
+    case True{}:
+      J.Json.obj([J.KV{"text", J.Json.str(MSG.T.voice.spelling(lc))}, J.KV{"word", J.Json.str(w)}, J.KV{"guess", J.Json.str(g)}, J.KV{"count", J.Json.nat(n)},
+        J.KV{"fixing", J.Json.bool(True{})}, J.KV{"field", J.Json.obj([J.KV{"name", J.Json.str("vfix")}, J.KV{"hint", J.Json.str(MSG.T.voice.spelling(lc))}, J.KV{"secret", J.Json.bool(False{})}, J.KV{"value", J.Json.str(U.Ui.scratch(u, "@f.vfix"))}])},
+        J.KV{"buttons", J.Json.arr([Mob.voice.btn(MSG.T.common.save(lc), "voice-fixed", "", True{}), Mob.voice.btn(MSG.T.common.cancel(lc), "form-close", "@voice.fix", False{})])}])
+    case False{}:
+      J.Json.obj([J.KV{"text", J.Json.str(MSG.T.web.voice.heard(lc, w, Bool.pick(String, Nat.is_gt(n, 1n), "many", "one"), Nat.show(n)))}, J.KV{"word", J.Json.str(w)}, J.KV{"guess", J.Json.str(g)}, J.KV{"count", J.Json.nat(n)},
+        J.KV{"fixing", J.Json.bool(False{})},
+        J.KV{"buttons", J.Json.arr(List.append(&2, J.Json, Mob.voice.guess(lc, g),
+          [Mob.voice.btn(MSG.T.voice.fix(lc), "voice-fix", "0", False{}), Mob.voice.btn(MSG.T.voice.dictionary.add(lc), "voice-add", "0", False{}), Mob.voice.btn(MSG.T.tour.skip(lc), "voice-skip", "0", False{})]))}])
+
+def Mob.voice.ask.m(m: Maybe<&2, VC.Unsure>, +lc: I.Loc, +u: U.Ui, +n: Nat) -> J.Json:
+  match m:
+    case Some{+x}:
+      Mob.voice.ask.k(Bool.not(String.is_empty(U.Ui.scratch(u, "@voice.fix"))), lc, u, U.Voice.word(x), U.Voice.guess(x), n)
+    case None{}:
+      J.Null{}
+
+def Mob.voice.ask(mine: Bool, +lc: I.Loc, +u: U.Ui) -> J.Json:
+  match mine:
+    case True{}:
+      +us = U.Voice.unsure(u)
+      Mob.voice.ask.m(List.head(&2, VC.Unsure, us), lc, u, List.length(&2, VC.Unsure, us))
+    case False{}:
+      J.Null{}
+
+def Mob.voice.fixes.if(mine: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  match mine:
+    case True{}:
+      Mob.voice.fixes(lc, U.Voice.fixes(u), 0n)
+    case False{}:
+      Nil{}
+
+def Mob.voice.note(here: Bool, +lc: I.Loc, +u: U.Ui) -> String:
+  match here:
+    case True{}:
+      Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.err")),
+        Bool.pick(String, Bool.and(U.Voice.on(u), Bool.not(String.is_empty(U.Ui.scratch(u, "@voice.hint")))), V.View.vhint.loc(lc, U.Ui.scratch(u, "@voice.hint"), U.Ui.scratch(u, "@voice.dev")), ""),
+        MSG.T.voice.error(lc, U.Ui.scratch(u, "@voice.err")))
+    case False{}:
+      ""
+
+def Mob.voice(+lc: I.Loc, +u: U.Ui, +sel: String) -> J.Json:
+  +here = U.Voice.here(u, sel)
+  +mine = String.eq(U.Ui.scratch(u, "@voice.uth"), sel)
+  J.Json.obj([J.KV{"on", J.Json.bool(Bool.and(here, U.Voice.on(u)))}, J.KV{"state", J.Json.str(Bool.pick(String, here, U.Ui.scratch(u, "@voice"), ""))},
+    J.KV{"status", J.Json.str(U.Voice.status(lc, u))}, J.KV{"level", J.Json.nat(U.Voice.level(u))},
+    J.KV{"note", J.Json.str(Mob.voice.note(here, lc, u))}, J.KV{"bad", J.Json.bool(Bool.not(String.is_empty(U.Ui.scratch(u, "@voice.err"))))},
+    J.KV{"mic", J.Json.str(MSG.T.voice.dictate.here(lc))}, J.KV{"stop", J.Json.str(MSG.T.voice.stop(lc))},
+    J.KV{"fixes", J.Json.arr(Mob.voice.fixes.if(mine, lc, u))}, J.KV{"ask", Mob.voice.ask(mine, lc, u)}])
+
+def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: Nat, btw: J.Json, embs: J.Json, voice: J.Json) -> J.Json:
   match u t:
     case U.Ui{+st, +sel, +drafts, +live, _, _, +now, _, pa, _, _, _, _, _, +nf, _, _} M.Thread{+id, _, title, _, _, +turn, +pe, archived, o, +sa, +ua, pinned, _, branch, _, +pr, +mo, rt, _, _, _}:
       +pg = Mob.page(drafts, id, st)
@@ -1472,7 +1552,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"diff", Mob.diff.at(lc, Bool.and(pa, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff")), U.Str.get(nf, "diff:" ++ id), U.Str.get(nf, "diff.none:" ++ id))},
         J.KV{"term", term},
         J.KV{"embs", embs},
-        J.KV{"viewer", vw}])
+        J.KV{"viewer", vw}, J.KV{"voice", voice}])
 
 def Mob.main.r(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, render: Bool) -> J.Json:
   match none:
@@ -1480,7 +1560,7 @@ def Mob.main.r(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, render: Bool) -> 
       J.Null{}
     case False{}:
       Mob.thread(lc, render, u, U.Ui.thread(Mob.st(u), sel), U.Ui.pending(u, sel), VW.View.json(lc, u, Mob.review.loc(lc, String.eq(VW.View.kind(u), "review"), u)), U.Ui.atts(u, sel), U.Ui.uploading(u, sel),
-        Mob.term(U.Ui.flag(u, "term"), u, sel), Mob.skills(U.Ui.skills(u)), U.Side.signal(u, U.Ui.thread(Mob.st(u), sel)), Mob.btw(lc, u), J.Json.arr(Mob.embs(U.Emb.views(u, sel), u, sel)))
+        Mob.term(U.Ui.flag(u, "term"), u, sel), Mob.skills(U.Ui.skills(u)), U.Side.signal(u, U.Ui.thread(Mob.st(u), sel)), Mob.btw(lc, u), J.Json.arr(Mob.embs(U.Emb.views(u, sel), u, sel)), Mob.voice(lc, u, sel))
 
 def Mob.main(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String) -> J.Json:
   Mob.main.r(lc, none, u, sel, True{})
@@ -1956,6 +2036,26 @@ def Mob.agy.rows(rs: List<&2, U.AgRow>) -> List<&2, J.Json>:
     case U.AgRow{+l, +n, fs, bs} <> t:
       Mob.set.row.f(l, n, Mob.agy.fields(fs), Mob.agy.btns(bs)) <> Mob.agy.rows(t)
 
+# Settings, Voice (the web's View.voice.set, but no OpenAI key field: a
+# phone never takes the key): the engine, the local model (Download or
+# Remove, the status the hub answered in "@voice.local"), the dictionary
+# (each entry a chip that takes it out, the field "vterm" adds one) and
+# the learned fixes (each a chip that forgets it)
+def Mob.voice.terms(+lc: I.Loc, ts: List<&2, String>) -> List<&2, J.Json>:
+  match ts:
+    case Nil{}:
+      Nil{}
+    case +t <> r:
+      Mob.set.btn(t ++ " ×", "voice-unterm", t, False{}) <> Mob.voice.terms(lc, r)
+
+# Keep main's shared model/progress and learned-rule rows; the phone adds
+# the dictionary editor without recreating older download controls.
+def Mob.voice.page(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, J.Json>:
+  List.concat(&2, J.Json, [Mob.agy.rows(U.Vlocal.rows(lc, u)),
+    [Mob.set.row.f(MSG.T.settings.voice.dictionary(lc), MSG.T.settings.voice.entries.note(lc), [Mob.set.field("vterm", MSG.T.settings.voice.term(lc), False{}, U.Ui.scratch(u, "@f.vterm"))],
+      Mob.set.btn(MSG.T.common.add(lc), "voice-term", "", True{}) <> Mob.voice.terms(lc, List.append(&2, String, U.Voice.dict(u), V.View.ventries(st))))],
+    Mob.agy.rows(U.Vlearned.rows(lc, st))])
+
 def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +more: List<&2, J.Json>, +prov: String, +models: String, +model: String) -> List<&2, J.Json>:
   match i:
     case 0n: List.concat(&2, J.Json, [[Mob.set.row.l(MSG.T.settings.theme(lc), MSG.T.settings.theme.phone.note(lc), Mob.set.chips.loc(lc, ["dark", "light"], M.Setting.get(st, "ui.theme", ""), "ui.theme"))],
@@ -1982,7 +2082,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
       [Mob.set.pair(lc, U.Ui.flag(u, "pairqr"), nf)],
       [Mob.set.row(MSG.T.settings.channel(lc), MSG.T.settings.channel.note(lc), Mob.set.chips.loc(lc, ["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel"))],
       [Mob.set.row("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), Mob.update.btn.loc(lc, U.Update.btn(st, nf, note)))]])
-    case 6n: List.concat(&2, J.Json, [Mob.agy.rows(U.Vlocal.rows(lc, u)), Mob.agy.rows(U.Vlearned.rows(lc, st))])
+    case 6n: Mob.voice.page(lc, u, st)
     case 7n: List.concat(&2, J.Json, [Mob.keys(lc, u), Mob.secrets(lc, u)])
     case 8n: List.concat(&2, J.Json, [Mob.agy.rows(U.Agv.rows.loc(lc, u))])
     case 9n: List.concat(&2, J.Json, [Mob.tz(lc, u)])
@@ -2417,7 +2517,7 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
       +thread = Mob.focus.thread(lc, focus, u, sel)
       +bot = Mob.focus.bot(lc, focus, u)
       +covered = Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom], thread, bot)
-      Mob.native.finish(NS.Ns.enabled(u), J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
+      Mob.native.finish(NS.Ns.enabled(u), J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(U.Ui.error.shown(lc, e))},
         J.KV{"bubHome", HOP.Hop.snapshot(u)}, J.KV{"lang", Mob.lang.loc(lc, u)}, J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
         J.KV{"empty", J.Json.str(Mob.empty.loc(lc, List.length(&2, M.Project, U.Ui.projects(st))))},
         J.KV{"projects", J.Json.arr(NPack.projects(native))},
@@ -2468,3 +2568,25 @@ def Mob.screen.f(focus: Bool, +u: U.Ui) -> J.Json:
 
 def Mob.screen(+u: U.Ui) -> J.Json:
   Mob.screen.f(True{}, u)
+
+# The bridge calls these without a Ui, even when no hub is connected.
+def issue_report(text: String, os: String, version: String, details: String, diagnostics: String) -> String:
+  ISSUE.Issue.report(text, os, version, details, diagnostics)
+
+def issue_target(saved: String, legacy: Bool) -> String:
+  ISSUE.Issue.target(saved, legacy)
+
+def improvements_preview(text: String, os: String, version: String, details: String, diagnostics: String) -> J.Json:
+  ISSUE.Issue.preview(text, os, version, details, diagnostics)
+
+def improvements_preview_body(body: String) -> J.Json:
+  ISSUE.Issue.preview.body(body)
+
+def improvement_issue_url(body: String) -> String:
+  ISSUE.Issue.url.body(body)
+
+def improvements_template() -> String:
+  ISSUE.Issue.template()
+
+def improvements_prompt(description: String, os: String, version: String, evidence: String, diagnostics: String) -> String:
+  ISSUE.Issue.prompt(description, os, version, evidence, diagnostics)

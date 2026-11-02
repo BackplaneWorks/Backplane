@@ -305,6 +305,7 @@ struct AppSettingsTab: View {
     @State private var requestingNotifications = false
     @State private var cacheBytes = 0
     @State private var confirmClear = false
+    @State private var improvements = false
 
     private var tag: String { screen.locale ?? "en" }
 
@@ -451,6 +452,10 @@ struct AppSettingsTab: View {
             Section(NativeMessages.settings_tour(tag)) {
                 Button(NativeMessages.settings_tour_show(tag)) { model.act("ob-open") }
             }
+            Section {
+                Button("Improvements") { improvements = true }
+                    .accessibilityIdentifier("settings.improvements")
+            }
             Section(NativeMessages.native_settings_about(tag)) {
                 HStack {
                     Text("Backplane")
@@ -460,6 +465,7 @@ struct AppSettingsTab: View {
             }
         }
         .navigationTitle(NativeMessages.palette_settings(tag))
+        .sheet(isPresented: $improvements) { ImprovementsView(model: model) }
         .task {
             notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
             notificationsLoaded = true

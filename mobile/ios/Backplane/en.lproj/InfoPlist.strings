@@ -5,5 +5,7 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Backplane reads the pairing code your computer shows, to connect to it.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Backplane records your voice while you dictate into a thread, and sends it to your computer to turn into text.</string>
 </dict>
 </plist>
