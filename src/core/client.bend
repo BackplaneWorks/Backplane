@@ -5921,6 +5921,13 @@ def Mpage.on.at(+u: Ui, +th: String) -> Bool:
     Bool.and(String.eq(Ui.info(u, "view.kind:" ++ th), "mech"), String.is_empty(Ui.info(u, "view.path:" ++ th))))
 
 # what the thread's fresh listing gives (a path from its project root)
+def Mpage.path.k(m: Maybe<&2, MC.MPart>) -> String:
+  match m:
+    case Some{p}:
+      MC.Mech.part.path(p)
+    case None{}:
+      ""
+
 def Mpage.after(+u: Ui, +th: String) -> String:
   Mpage.path.k(MC.Mech.choose(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "view.path:" ++ th), Ui.info(u, "mech.root:" ++ th), Ui.info(u, "mech.primary:" ++ th)))
 
@@ -5992,13 +5999,6 @@ def Mpage.cur(+u: Ui) -> Maybe<&2, MC.MPart>:
 # 0 while the parts are asked for, 1 when there are none, 2 with parts
 def Mpage.state(+u: Ui) -> Nat:
   Bool.pick(Nat, String.is_empty(Mpage.root(u)), 0n, Bool.pick(Nat, List.is_empty(&2, MC.MPart, Mpage.parts(u)), 1n, 2n))
-
-def Mpage.path.k(m: Maybe<&2, MC.MPart>) -> String:
-  match m:
-    case Some{p}:
-      MC.Mech.part.path(p)
-    case None{}:
-      ""
 
 def Mpage.cur.path(+u: Ui) -> String:
   Mpage.path.k(Mpage.cur(u))
