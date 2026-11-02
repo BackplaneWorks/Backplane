@@ -6,6 +6,9 @@ const { ThinHost } = await import(process.env.THIN_HOST_MODULE || '../../src/web
 const { ThinViews, VIEW_LIMITS } = await import('../../src/web/thin.js');
 
 const clone = value => structuredClone(value);
+const timeline = kids => ({ type: 'element', tag: 'div', key: 'timeline', attrs: [{ name: 'id', value: 'timeline' }], kids });
+const user = id => ({ type: 'element', tag: 'bp-memo', key: id, attrs: [{ name: 'fn', value: 'msg' }, { name: 'who', value: 'u' }], kids: [] });
+const sending = () => ({ type: 'element', tag: 'div', key: '', attrs: [{ name: 'class', value: 'msg user sending' }], kids: [] });
 function setup(route) {
   const sent = [], commands = [], frames = [], feedback = [], settled = [];
   let clock = 0;
@@ -22,8 +25,8 @@ function setup(route) {
   const reply = (request, ids = [], cmds = []) => ({ t: 'reply', id: request.id, ok: true, result: {
     version: 1, hub: 'h', generation: '3', epoch: 'e', requestRevision: request.p.requestRevision,
     target: clone(request.p.target), viewId: request.p.viewId || 'v', viewRevision: '1', renderer: 'web', remoteReady: true,
-    session: clone(h.session), shown: { type: 'text', text: ids.join(',') || 'empty' },
-    window: { ids, older: '', hasMore: false, anchor: { id: '', offset: 0 }, partial: [] }, cmds,
+    session: clone(h.session), shown: timeline(ids.map(user)),
+    window: { ids: ids.map((_, i) => String(i + 1)), older: '', hasMore: false, anchor: { id: '', offset: 0 }, partial: [] }, cmds,
   } });
   function send(msg = 'm1', method = route ? 'bots.say' : 'turn.start') {
     h.request('send', '', ok => settled.push(ok));
@@ -57,7 +60,7 @@ for (const route of [undefined, { kind: 'bot-tab', bot: 'b', tab: 'chat' }]) {
     assert.equal(f.h.pendingSends('a')[0].accepted, true);
     f.refresh(['m1']);
     assert.equal(f.h.pendingSends('a').length, 0);
-    assert.deepEqual(f.frames.at(-1), { ids: ['m1'], pending: [] }, 'saved row and preview hand off in one presentation');
+    assert.deepEqual(f.frames.at(-1), { ids: ['1'], pending: [] }, 'store row numbers differ from rendered message keys');
   });
 }
 check('saved picture may arrive before the ordinary ACK', () => {
@@ -105,6 +108,25 @@ check('retired picture does not consume its preview', () => {
   f.h.update();const old = f.sent.at(-1);
   f.h.request('select', 'b');f.h.receive(f.reply(old, ['m1']));
   assert.equal(f.h.pendingSends('a').length, 1);
+});
+check('identified server outbox bubble replaces local preview before persistence', () => {
+  const f = setup(), send = f.send();
+  send.actionReply.result.session.outbox = { [send.rpc.id]: JSON.stringify(send.rpc) };
+  send.actionReply.result.shown = timeline([sending()]);
+  f.h.receive(send.actionReply);
+  assert.equal(f.h.pendingSends('a').length, 0);
+  f.h.request('draft', 'new text');
+  f.h.ack({ t: 'reply', id: send.rpc.id, ok: false, error: 'refused' });
+  assert.equal(f.h.session.drafts.a, 'same message\n\nnew text', 'refusal restores a capture already handed to a server bubble');
+});
+check('an outbox receipt without a displayed bubble cannot remove the preview', () => {
+  const f = setup(), send = f.send();
+  send.actionReply.result.session.outbox = { [send.rpc.id]: JSON.stringify(send.rpc) };
+  f.h.receive(send.actionReply);assert.equal(f.h.pendingSends('a').length, 1);
+});
+check('an anonymous bubble without its outbox receipt cannot remove the preview', () => {
+  const f = setup(), send = f.send();send.actionReply.result.shown = timeline([sending()]);
+  f.h.receive(send.actionReply);assert.equal(f.h.pendingSends('a').length, 1);
 });
 console.log(JSON.stringify({ pass: true, checks, scope: 'Production ThinHost/ThinViews send lifecycle; deterministic delayed replies, no live data or provider.' }));
 });

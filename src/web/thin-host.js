@@ -420,13 +420,44 @@ export class ThinHost {
   pendingSends(thread) {
     return [...this.sendPreviews.values()].filter(p => p.thread === thread).map(({ key, text, accepted }) => ({ key, text, accepted: accepted === true }));
   }
-  presentPreviews(thread, ids) {
+  presentPreviews(thread, shown, outbox) {
+    if (!this.sendPreviews.size) return;
     // Preparing a Send only returns the ordinary RPC; even its ACK can
     // precede the saved picture. Hand off by the client-named message id
     // in the picture actually being presented, never by matching its text.
-    const shown = new Set(ids);
+    // window.ids are store row numbers, not message ids. The rendered user
+    // nodes retain the message keys. A thread action can also show its own
+    // outbox bubbles before persistence; hand off to those only when the
+    // displayed count agrees with the same picture's identified outbox.
+    const stored = new Set(), stack = [shown];let sending = 0;
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || !Array.isArray(node.attrs)) continue;
+      const attrs = Object.fromEntries(node.attrs.map(a => [a.name, a.value]));
+      if (attrs.id === 'timeline') {
+        const rows = [...(node.kids || [])];
+        while (rows.length) {
+          const row = rows.pop(), as = Object.fromEntries((row.attrs || []).map(a => [a.name, a.value]));
+          if (row.tag === 'bp-memo' && as.fn === 'msg' && as.who === 'u') stored.add(row.key);
+          if (as['data-id'] && as.class?.split(/\s+/).includes('user')) stored.add(as['data-id']);
+          const classes = new Set((as.class || '').split(/\s+/));
+          if (classes.has('msg') && classes.has('user') && classes.has('sending')) sending++;
+          rows.push(...(row.kids || []));
+        }
+        break;
+      }
+      stack.push(...(node.kids || []));
+    }
+    const pending = new Set();
+    for (const text of Object.values(outbox || {})) {
+      if (!text) continue;
+      try {
+        const rpc = JSON.parse(text);
+        if (rpc.m === 'turn.start' && rpc.p?.thread === thread && rpc.p.msg && !stored.has(rpc.p.msg)) pending.add(rpc.p.msg);
+      } catch { /* An unrelated opaque outbox value grants no display handoff. */ }
+    }
     for (const preview of this.sendPreviews.values()) {
-      if (preview.thread === thread && preview.msg && shown.has(preview.msg)) this.finishPreview(preview, false);
+      if (preview.thread === thread && preview.msg && (stored.has(preview.msg) || sending === pending.size && pending.has(preview.msg))) this.finishPreview(preview, false);
     }
   }
   restorePreview(preview) {
@@ -1009,7 +1040,7 @@ export class ThinHost {
         position = freshHistoryPosition(position, result.window.ids);
       } else if (paged || !this.held) this.heldShown(paged);
       else this.heldUpdate();
-      if (pictureCurrent) this.presentPreviews(r.session.sel, result.window.ids);
+      if (pictureCurrent) this.presentPreviews(r.session.sel, r.shown, r.session.outbox);
       if (pictureCurrent) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
         page: sentNewest ? { direction: 'newest' } : paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
@@ -1042,7 +1073,7 @@ export class ThinHost {
       this.session = { ...this.session, drafts: { ...this.session.drafts, [thread]: before.drafts[thread] || '' } };
     }
     if (original.preview) {
-      if (envelope.ok === false) this.finishPreview(original.preview, true);
+      if (envelope.ok === false) { this.restorePreview(original.preview);this.finishPreview(original.preview, false); }
       else {
         original.preview.accepted = true;
         // Accepted text no longer belongs in the saved draft, while its
