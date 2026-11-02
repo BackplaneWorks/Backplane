@@ -768,7 +768,9 @@ class View {
     const moved = this.shown !== undefined && view !== this.shown;
     this.shown = view;
     let b = this.cache;
-    if (b && (b.plot !== p || b.look !== look)) b = null;
+    // Live probe/selected-pad overlays retain the current vector path.
+    // Their metadata can change independently of the base plot identity.
+    if (b && (b.plot !== p || b.look !== look || this.probe || componentSources.get(this.key)?.selected)) b = null;
     // Even a pan inside the margin needs a fresh rested frame: a bitmap
     // shifted by a fraction of a pixel cannot reproduce vector antialiasing.
     if (moved && !this.rest) {
@@ -790,14 +792,24 @@ class View {
       else this.idle();
     }
     this.rest = false;
-    // how it came and how long the layers took to draw, small in a corner
-    const st = stats.get(this.key);
-    if (st) {
+    // how it came, small in a corner, on the page's background so a board
+    // panned under it never shows through; while another version of the
+    // same file is read (a step of the design history: the last one stays
+    // up meanwhile) the corner says it is loading, in the accent, once it
+    // has taken longer than a blink
+    const st = stats.get(this.key), waited = this.key && !plots.has(this.key) ? performance.now() - this.asked : -1;
+    const loading = waited >= LOADING_MS;
+    if (waited >= 0 && !loading) setTimeout(() => this.later(), LOADING_MS - waited);
+    if (st || loading) {
       g.setTransform(1, 0, 0, 1, 0, 0);
-      g.fillStyle = "rgba(138,143,152,0.9)";
-      g.font = `${11 * dpr}px system-ui, sans-serif`;
+      g.font = font(this.canvas, 11 * dpr);
       g.textAlign = "left";
-      g.fillText(`${mb(st.bytes)}` + (st.waited > 0.5 ? ` · came after ${st.waited.toFixed(1)} s` : "") + (this.drew ? ` · drawn in ${Math.round(this.drew)} ms` : ""), 8 * dpr, h - 8 * dpr);
+      const lang = document.documentElement.lang;
+      const text = loading ? App.plot_loading(lang) : App.plot_stats(lang, mb(st.bytes), st.waited.toFixed(1), st.waited > 0.5);
+      g.fillStyle = this.bg;
+      g.fillRect(4 * dpr, h - 20 * dpr, g.measureText(text).width + 8 * dpr, 16 * dpr);
+      g.fillStyle = loading ? ACCENT : "rgba(138,143,152,0.9)";
+      g.fillText(text, 8 * dpr, h - 8 * dpr);
     }
   }
 
@@ -832,7 +844,7 @@ class View {
       // Baking never replaces the rested canvas. Even an integer margin
       // can change Canvas2D's clipping/antialiasing by a few pixels.
       const go = () => {
-        if (!this.disposed && !this.fading && !this.moving && this.plot && this.plot.chunks) {
+        if (!this.disposed && !this.fading && !this.moving && !this.probe && !componentSources.get(this.key)?.selected && this.plot && this.plot.chunks) {
           const dpr = window.devicePixelRatio || 1;
           this.bake(this.plot, this.look, this.canvas.width, this.canvas.height, dpr);
         }
