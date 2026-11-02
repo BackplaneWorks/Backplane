@@ -333,11 +333,8 @@ def Od.get(+home: String, +server: String, +install: String, +qid: String, +toke
     r : GS.GResp <- GS.Gc.req(Od.tmp(home), url ++ "/v1/quotes/" ++ qid, ["Authorization: Bearer " ++ token, "X-Backplane-Install: " ++ install], "")
     return Od.est.got(r)
 
-def Od.pending(+q: J.Json) -> Bool:
-  Bool.or(String.eq(J.Json.get_str(q, "status", ""), "received"), String.eq(J.Json.get_str(q, "status", ""), "analysing"))
-
 def Od.poll.k(+q: J.Json, again: Unit -> IO(J.Json)) -> IO(J.Json):
-  Bool.pick(IO(J.Json), Od.pending(q), again(Unit{}), IO.pure(J.Json, q))
+  Bool.pick(IO(J.Json), OR.Order.pending(q), again(Unit{}), IO.pure(J.Json, q))
 
 # at most n polls, 3 s apart
 def Od.poll(n: Nat, +home: String, +server: String, +install: String, +qid: String, +token: String) -> IO(J.Json):
