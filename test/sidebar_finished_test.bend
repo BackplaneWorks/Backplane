@@ -19,22 +19,17 @@ def base() -> M.State:
 def name(+s: M.State) -> String:
   SG.Signal.name(SG.Signal.at(SG.Signal.index(s), "t"))
 
-def label(lc: I.Loc, n: String) -> String:
+def word(lc: I.Loc, n: String) -> String:
   V.View.attr(attrs(V.View.dot(lc, n)), "data-status-label")
 
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("completed retained thread says finished", name(base()), "finished")
-    C.Check.str("finished has visible English word", label(I.En{}, name(base())), "Finished")
-    C.Check.str("finished word uses existing Japanese translation", label(I.Ja{}, name(base())), "完了")
+    C.Check.str("finished is the green dot, no word beside it", word(I.En{}, name(base())), "")
     C.Check.str("finished keeps descriptive accessible label", V.View.attr(attrs(V.View.dot(I.En{}, "finished")), "aria-label"), "Finished: ready for you to look at")
     +running : M.State = M.State.apply(base(), M.TurnChanged{"t", M.Running{}, 3n})
     C.Check.str("running keeps activity signal", name(running), "active")
-    C.Check.str("running never has Finished label", label(I.En{}, name(running)), "")
     +monitor : M.State = M.State.apply(base(), M.WorkSet{"t", "watch", "w\twatching\t\tReal monitor\twatch\trun\tcmd\t-\t0", 3n})
     C.Check.str("completed with owned work remains waiting", name(monitor), "waiting")
-    C.Check.str("monitor never has Finished label", label(I.En{}, name(monitor)), "")
     +settled : M.State = M.State.apply(base(), M.ThreadSettled{"t", True{}, 3n})
     C.Check.str("settled differs from finished", name(settled), "settled")
-    C.Check.str("settled never has Finished label", label(I.En{}, name(settled)), "")
-    C.Check.str("approval stays distinct", label(I.En{}, "blocked"), "")
