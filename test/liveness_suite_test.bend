@@ -5,6 +5,7 @@ import ./liveness_recovery_test.bend as R
 import ./liveness_ui_test.bend as U
 import ./restart_retry_test.bend as RR
 import ./watchdog_test.bend as W
+import ./watchdog_passive_test.bend as WP
 
 # Compile the shared hub/client imports once for the required fast gate.
 def main() -> IO(Unit):
@@ -15,3 +16,4 @@ def main() -> IO(Unit):
     U.main()
     RR.main()
     W.main()
+    WP.main()
