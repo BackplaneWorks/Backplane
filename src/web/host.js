@@ -3398,8 +3398,12 @@ async function startThin(again = false, reason = "initial") {
         if (RR) RR.t("land.project." + projection, pnow() - p0);
         historyNode = node;
         // (timeline-history.bend's project keeps no row from before a reset)
-        if (projection === "reset" || projection === "newest") { historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
-        else historyBack(detail.window?.ids);
+        if (projection === "reset" || projection === "newest") {
+          // An older-reading gesture cannot page us back immediately after
+          // Send or the new-output button has presented the newest replies.
+          historyDirection = "";historyOlderDemand = 0;historyFillMore(null, false);
+          historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.();
+        } else historyBack(detail.window?.ids);
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
