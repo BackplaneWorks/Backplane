@@ -11904,6 +11904,21 @@ def Laws.order_card_no_buy_paid():
 def Laws.order_card_buys_quoted():
   {==}
 
+def Laws.order_wake_hidden(i, th, said, a):
+  {==}
+
+def Laws.order_wake_failed_hidden(i, th, e, a):
+  {==}
+
+def Laws.order_wake_untaken_hidden(i, th, e, a):
+  {==}
+
+def Laws.order_wake_declined_hidden(i, th, a):
+  {==}
+
+def Laws.order_wake_person_shown(i, th, said, a):
+  {==}
+
 def Laws.order_customs_paid():
   {==}
 

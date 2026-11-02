@@ -4,6 +4,7 @@ import ../src/core/json.bend as J
 import ../src/core/model.bend as M
 import ../src/core/signal.bend as SG
 import ../src/core/order.bend as OR
+import ../src/core/fold.bend as FO
 
 # A buy thread's order card (core/order.bend's Order.card) and the quote on
 # its way: from the person's Send until the quote is posted the thread
@@ -36,6 +37,20 @@ def sum(+state: String, ddp: Bool, payable: Bool) -> String:
 def card(+s: M.State, running: Bool) -> OR.OrderCard:
   OR.Order.card(False{}, OR.Order.asks.files(OR.Order.asks.open.go(M.Asks.all(s), "t1")), Bool.not(String.is_empty(M.Setting.get(s, OR.Order.wait.key("t1"), ""))), running,
     M.Setting.get(s, OR.Order.quote.key("t1"), ""))
+
+# the ids of the entries the conversation shows (every client: Fold.shown)
+def shown.ids(es: List<&2, M.Entry>) -> List<&2, String>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      M.Idx.id(e) <> shown.ids(t)
+
+def shown(es: List<&2, M.Entry>) -> String:
+  String.join(shown.ids(FO.Fold.shown(es)), ",")
+
+def note(+id: String, +text: String) -> M.Entry:
+  M.Msg{id, "t1", M.System{}, "[Backplane] " ++ text, 9n}
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -87,3 +102,13 @@ def main() -> IO(Unit):
     C.Check.str("none without one", OR.Order.ask.choices(" ", ["5", " ", "10"]), "5\n10")
     C.Check.str("sent without the mark", OR.Order.ask.value("Greece · last time"), "Greece")
     C.Check.str("a choice as it is", OR.Order.ask.value("10"), "10")
+    # the hub's notes for the agent never show; the quote and what the
+    # person and agent say do (the real neurband thread's note first)
+    C.Check.str("the quote's note is hidden", shown([M.Msg{"q", "t1", M.Assistant{}, "**Your quote: $5.00**", 8n},
+      note("w", "The quote is posted in this thread. {\"status\":\"ready\",\"total\":112.4,\"note\":\"Backplane posted the quote with its Buy now link in this thread; do not repeat its table.\"}"),
+      M.Msg{"a", "t1", M.Assistant{}, "It is here.", 10n}]), "q,a")
+    C.Check.str("so is a failed quote's", shown([note("w", OR.Order.wake.failed("no answer from the order server"))]), "")
+    C.Check.str("files not taken", shown([note("w", OR.Order.wake.untaken("no answer"))]), "")
+    C.Check.str("and Not now", shown([note("w", OR.Order.quote.declined())]), "")
+    C.Check.str("the person's same words show", shown([M.Msg{"u", "t1", M.User{}, "[Backplane] " ++ OR.Order.wake.posted("x"), 9n}]), "u")
+    C.Check.str("other hub notes show", shown([note("n", "Background work \"x\" timed out.")]), "n")
