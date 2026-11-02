@@ -1088,8 +1088,12 @@ function render() {
   if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
   activeTimeline = list || null;
   list?.refresh();
-  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null;timelineChanged(list); }
+  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
   else if (scroll) list?.scrollToEnd();
+  // A live bot/mailroom update may change only the floating pill. Unchanged
+  // virtual rows/geometry cause neither a plan nor a scroll callback; still
+  // reconcile the accepted newest picture with the controller's read mark.
+  if (list) timelineChanged(list);
   const main = viewMode === "view-v1" ? document.querySelector("main") : null;
   if (main && main.getAttribute("aria-busy") !== String(!remoteReady)) main.setAttribute("aria-busy", String(!remoteReady));
   bodyWindows.observe(tl2, remoteReady && !!frontendNode);
