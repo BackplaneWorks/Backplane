@@ -163,6 +163,28 @@ test('a send drops the older page still on its way: its late reply never puts th
  f.host.receive(f.reply(pg));assert.equal(f.views.length,count,'the old page is not shown');assert.equal(f.host.atNewest(),true);assert.equal(f.host.paging,null);
  assert(f.sent.some(x=>x.m==='view.action'),'the send still goes');
 });
+test('sending from retained history presents the newest page without old reading gaps',async()=>{
+ for(const kind of ['bot','thread'])for(const action of ['send','send-alt']){
+  const f=await fixture({target:()=>({kind,id:'A'})});f.open();f.host.page();f.host.receive(f.reply());
+  // An action already in flight can put the old history back after the
+  // UI's eager send cleanup. Only the accepted send knows its newest page.
+  f.host.request('flag','models');const earlier=f.sent.at(-1);
+  f.host.request(action,'');f.host.receive(f.reply(earlier));
+  assert.notEqual(f.views.at(-1).detail.page?.direction,'newest');
+  const request=f.sent.at(-1);
+  f.host.receive(f.reply(request,{window:{ids:['sent'],older:'older-newest',hasMore:true,newer:0,anchor:{id:'sent',offset:0},partial:[]},
+   cmds:[{type:'scroll'}]}));
+  assert.equal(f.views.at(-1).detail.page?.direction,'newest','the DOM must discard retained rows and their blank scroll spacers');
+  assert.equal(f.views.at(-1).detail.position?.atEnd,true,'the accepted latest page owns the viewport');
+ }
+});
+test('an empty or rejected send does not replace the displayed history',async()=>{
+ const f=await fixture();f.open();f.host.request('send','');f.host.receive(f.reply());
+ assert.notEqual(f.views.at(-1).detail.page?.direction,'newest','no server scroll command means no accepted navigation');
+ const count=f.views.length;f.host.request('send','');const request=f.sent.at(-1);
+ f.host.receive({t:'reply',id:request.id,ok:false,error:{code:'LIMIT'}});
+ assert.equal(f.views.length,count,'a refused send keeps the existing picture');
+});
 test('page and search are explicit requests; ordinary open and selected updates never fetch older pages',async()=>{
  const f=await fixture();f.open();assert.equal(f.sent.length,1);f.host.page();assert.equal(f.sent.at(-1).m,'view.page');assert.equal(f.sent.at(-1).p.cursor,'older-bound-to-A');
  f.host.search('日本語 query');assert.equal(f.sent.at(-1).m,'view.search');assert.equal(f.sent.at(-1).p.query,'日本語 query');
