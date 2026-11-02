@@ -7,6 +7,8 @@ import ./client.bend as U
 import ./diff.bend as DF
 import ./wake.bend as WK
 import ./json.bend as J
+import ./i18n.bend as I
+import ./msgs.bend as MSG
 
 # Subagents
 # ---------
@@ -819,6 +821,40 @@ def Subs.panel.rows(open: Bool, rs: List<&2, SubRow>) -> List<&2, SubRow>:
       rs
     case False{}:
       Nil{}
+
+# Presentation only. Keep the source rows, work signatures, counts, done
+# toggle and every action unchanged. A page groups conversations apart
+# from shells, watched work, locks, wakes and legacy native subagents.
+# Headers never enter Subs.rows or the lifecycle/badge projection.
+def Subs.display.heading(r: SubRow) -> Bool:
+  String.starts_with(Subs.key(r), "subs.section:")
+
+def Subs.display.kind(+r: SubRow) -> Nat:
+  match r:
+    case SubRow{+key, +agent, _, _, _, _, +live, _, _, _}:
+      Bool.pick(Nat, String.starts_with(key, "subs.done:"), 2n,
+        Nat.add(Bool.pick(Nat, agent, 1n, 0n), Bool.pick(Nat, Subs.is_done(r), 3n, 0n)))
+
+def Subs.display.part(rs: List<&2, SubRow>, +kind: Nat) -> List<&2, SubRow>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> rest:
+      Subs.keep(Nat.is_eq(Subs.display.kind(r), kind), r, Subs.display.part(rest, kind))
+
+def Subs.display.group(rs: List<&2, SubRow>, +kind: Nat) -> List<&2, SubRow>:
+  match rs:
+    case Nil{}: Nil{}
+    case r <> rest:
+      SubRow{"subs.section:" ++ Nat.show(kind), True{}, "", "section", "", "", False{}, False{}, 0n, Nil{}} <> r <> rest
+
+def Subs.display(+rs: List<&2, SubRow>) -> List<&2, SubRow>:
+  List.concat(&2, SubRow, [Subs.display.group(Subs.display.part(rs, 0n), 0n),
+    Subs.display.group(Subs.display.part(rs, 1n), 1n), Subs.display.part(rs, 2n),
+    Subs.display.group(Subs.display.part(rs, 3n), 3n), Subs.display.group(Subs.display.part(rs, 4n), 4n)])
+
+def Subs.display.label(+lc: I.Loc, +r: SubRow) -> String:
+  Bool.pick(String, Bool.or(String.eq(Subs.key(r), "subs.section:0"), String.eq(Subs.key(r), "subs.section:3")),
+    MSG.T.subagents.group.threads(lc), MSG.T.subagents.group.background(lc))
 
 def Subs.agent_n(ls: List<&2, String>) -> Nat:
   match ls:
