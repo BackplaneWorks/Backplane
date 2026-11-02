@@ -279,8 +279,32 @@ def Route.pack_if( +bot: Bool, +u: U.Ui) -> J.Json:
     case False{}: P.Session.pack(u)
     case True{}: Obj.put(P.Session.pack(u), "route", Route.json(U.Bots.cur(u), BI.BU.tab.of(u, U.Bots.cur(u))))
 
+# Board enumeration is an actor-owned derived cache, not a preference or
+# draft. Returning it in Session.info defeated bounded option rendering.
+# Keep it in the actor; only the bounded shown catalog crosses this boundary.
+def Route.catalog.field(cache: Bool, key: String, value: J.Json, rest: J.Json) -> J.Json:
+  match cache:
+    case True{}: rest
+    case False{}: J.Field{key, value, rest}
+
+def Route.catalog.fields(fs: J.Json) -> J.Json:
+  match fs:
+    case J.Field{+key, value, rest}:
+      Route.catalog.field(String.starts_with(key, "fab.boards:"), key, value, Route.catalog.fields(rest))
+    case _: J.End{}
+
+def Route.catalog.info(info: J.Json) -> J.Json:
+  match info:
+    case J.Obj{fields}: J.Obj{Route.catalog.fields(fields)}
+    case _: info
+
+def Route.catalog.pack(enabled: Bool, +session: J.Json) -> J.Json:
+  match enabled:
+    case False{}: session
+    case True{}: Obj.put(session, "info", Route.catalog.info(J.Json.get_obj(session, "info")))
+
 def Route.pack(+u: U.Ui) -> J.Json:
-  Route.pack_if(Bool.not(String.is_empty(U.Bots.cur(u))), u)
+  Route.catalog.pack(String.eq(U.Ui.info(u, "local.board.catalog.version"), "1"), Route.pack_if(Bool.not(String.is_empty(U.Bots.cur(u))), u))
 
 # These explicit device renderer hints affect presentation only. They cannot
 # change the authoritative state, issue commands or enable automation.
@@ -289,10 +313,15 @@ def Session.native_local(+u: U.Ui, +p: J.Json) -> U.Ui:
 
 # (plotStamp "v1": the page reads plotstamp, a source's exact stamp before
 # its plot, client.bend's kicad.watch "stamps"; native hosts never get it)
+# New loaded hosts explicitly opt into closed/paged catalog actions. Old
+# rail-v1 clients retain their existing disclosure and session contracts.
+def Session.catalog(u: U.Ui, +p: J.Json) -> U.Ui:
+  U.Ui.info_set(u, "local.board.catalog.version", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "boardCatalog", 0n), 1n), "1", ""))
+
 def Session.renderer( +web: Bool, +u: U.Ui, +p: J.Json) -> U.Ui:
   match web:
     case True{}:
-      A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
+      A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(Session.catalog(u, p), "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
         "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")), "local.body.pages", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.view.lazy", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.plotstamp", Bool.pick(String, String.eq(J.Json.get_str(p, "plotStamp", ""), "v1"), "1", "")))
     case False{}: Session.native_local(u, p)
 
