@@ -35,6 +35,7 @@ import ./src/server/thin-actor.bend as CHATSIDE
 import ./src/core/sidebar-read.bend as SIDEREAD
 
 import Base
+import ./src/core/pathrecords.bend as PR
 
 import ./src/server/thin-sidebar.bend as CHATDERIVED
 
@@ -15420,3 +15421,28 @@ def Laws.pending_preview_whole(text): {==}
 def Laws.pending_preview_ellipsis(c, rest, head): {==}
 
 def Laws.json_surrogate_pair(): {==}
+
+# Files request identity (PR #236).
+def Laws.fm_empty_root_ready():
+  {==}
+
+def Laws.fm_unanswered_root_waits():
+  {==}
+
+def Laws.fm_previous_request_waits():
+  {==}
+
+def Laws.fm_other_folder_waits():
+  {==}
+
+def Laws.fm_previous_reply_rejected():
+  {==}
+
+def Laws.fm_root_reconnect_requested():
+  {==}
+
+# Complete file path records (PR #239).
+def Laws.path_records_newline_is_data(): {==}
+def Laws.path_records_keep_whitespace(): {==}
+def Laws.path_records_unterminated_last(): {==}
+def Laws.path_records_legacy_kept(text): {==}
