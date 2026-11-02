@@ -181,10 +181,10 @@ async function startBrowser(ses,reconnect){
 function start() {
   require('./text-clipboard.cjs').installTextClipboard(ipcMain, electron.clipboard, trusted);
   const ses = session.fromPartition('persist:backplane-ui');
-  const permitted = (wc, permission, url, details = {}) => {
-    try { return wc === window?.webContents && origin && new URL(url).origin === origin && (['notifications', 'clipboard-sanitized-write'].includes(permission) || require('./improvements-display-capture.cjs').displayCapturePermission(wc, permission, url, details, window, origin)); } catch { return false; }
+  const permitted = (wc, permission, url, details = {}, phase = 'check') => {
+    try { return wc === window?.webContents && origin && new URL(url).origin === origin && (['notifications', 'clipboard-sanitized-write'].includes(permission) || require('./improvements-display-capture.cjs').displayCapturePermission(wc, permission, url, details, window, origin, phase)); } catch { return false; }
   };
-  ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl, details)));
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl, details, 'request')));
   ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permitted(wc, permission, requestingOrigin, details));
   require('./improvements-display-capture.cjs').installDisplayCapture({ electron, session: ses, getWindow: () => window, origin: () => origin });
   try { recordingStore.prune(); } catch {}
