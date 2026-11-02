@@ -51,6 +51,8 @@ class DesktopInstallTest(unittest.TestCase):
         self.installer.write_text(script)
         self.tools = self.root / "tools"
         self.tools.mkdir()
+        self.tool("codesign", 'printf "codesign %s\\n" "$*" >> "$TEST_MAC_LOG"; exit "${TEST_SIGN_FAIL:-0}"')
+        self.tool("xattr", 'printf "xattr %s\\n" "$*" >> "$TEST_MAC_LOG"; exit "${TEST_XATTR_FAIL:-0}"')
         self.tool("uname", 'case "$1" in -s) printf "%s\\n" "$TEST_OS";; -m) echo x86_64;; esac')
         self.tool("curl", 'while [ "$#" -gt 0 ]; do if [ "$1" = -o ]; then cp "$TEST_ARCHIVE" "$2"; exit; fi; shift; done; exit 1')
         # Cache refresh is optional; failure must not undo an otherwise good install.
@@ -59,6 +61,7 @@ class DesktopInstallTest(unittest.TestCase):
         self.env = {**os.environ, "HOME": str(self.root / "home"),
                     "PATH": str(self.tools) + os.pathsep + os.environ["PATH"],
                     "TEST_OS": "Linux", "TEST_ARCHIVE": str(self.archive),
+                    "TEST_MAC_LOG": str(self.root / "mac-commands.txt"),
                     "BACKPLANE_PREFIX": str(self.root / "installation"),
                     "BACKPLANE_BIN": str(self.root / "bin"),
                     "XDG_DATA_HOME": str(self.root / "desktop data"),
@@ -133,6 +136,18 @@ class DesktopInstallTest(unittest.TestCase):
 
     def test_mac_install_does_not_add_linux_desktop_files(self):
         self.env["TEST_OS"] = "Darwin"
+        self.mac_archive()
+        self.install()
+        self.assertFalse(self.desktop().exists())
+        commands = (self.root / "mac-commands.txt").read_text()
+        self.assertIn("codesign --verify --deep --strict", commands)
+        self.assertIn("xattr -dr com.apple.quarantine", commands)
+        self.assertLess(commands.index("codesign"), commands.index("xattr"))
+
+    def mac_archive(self):
+        app = self.root / "package/backplane-linux-x64/desktop/Backplane.app"
+        (app / "Contents/Resources/backplane-service").mkdir(parents=True)
+        shutil.copy2(self.root / "package/backplane-linux-x64/backplane-serve", app / "Contents/Resources/backplane-service/backplane-serve")
         # The macOS archive has the same minimal payload with its own platform name.
         with tarfile.open(self.archive, "w:gz") as archive:
             archive.add(self.root / "package/backplane-linux-x64", arcname="backplane-darwin-arm64")
@@ -142,8 +157,27 @@ class DesktopInstallTest(unittest.TestCase):
         script = re.sub(r'^DESKTOP_SHA_DARWIN_ARM64="[^"]*"', 'DESKTOP_SHA_DARWIN_ARM64="' + digest + '"', script, flags=re.M)
         self.installer.write_text(script)
         self.tool("uname", 'case "$1" in -s) echo Darwin;; -m) echo arm64;; esac')
-        self.install()
-        self.assertFalse(self.desktop().exists())
+
+    def test_invalid_mac_signature_or_quarantine_failure_preserves_install(self):
+        self.mac_archive()
+        prefix = Path(self.env["BACKPLANE_PREFIX"])
+        (prefix / "web").mkdir(parents=True)
+        (prefix / "web/index.html").write_text("previous version")
+        for key in ["TEST_SIGN_FAIL", "TEST_XATTR_FAIL"]:
+            with self.subTest(key=key):
+                env = {**self.env, key: "1"}
+                result = subprocess.run(["sh", str(self.installer)], env=env, text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("no files replaced", result.stderr)
+                self.assertEqual((prefix / "web/index.html").read_text(), "previous version")
+
+    def test_bad_checksum_never_removes_quarantine(self):
+        self.mac_archive()
+        self.archive.write_bytes(b"tampered")
+        result = subprocess.run(["sh", str(self.installer)], env=self.env, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not match its sha256", result.stderr)
+        self.assertFalse((self.root / "mac-commands.txt").exists())
 
 
 if __name__ == "__main__":

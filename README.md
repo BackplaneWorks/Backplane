@@ -17,7 +17,7 @@
 <h2>Install</h2>
 
 ```sh
-curl -fsSL https://github.com/i2cjak/backplane-bend/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 backplane
 ```
 

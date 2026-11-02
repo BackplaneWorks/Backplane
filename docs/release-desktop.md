@@ -1,6 +1,6 @@
 # Desktop release packages
 
-How one release commit becomes the four desktop packages (`backplane-v<ver>-<plat>.tar.gz`, Windows `.zip`). Everything runs from a tooling checkout of `fast/integration` or `main`. The product is the frozen release commit. Nothing here installs, signs or publishes.
+How one release commit becomes the four desktop packages (`backplane-v<ver>-<plat>.tar.gz`, Windows `.zip`). Everything runs from a tooling checkout of `fast/integration` or `main`. The product is the frozen release commit. Nothing here installs or publishes; macOS sealing is an explicit step before smoke.
 
 1. **Service, per target.** Run `release-bootstrap.yml`, operation `js`, on the frozen commit. Each `configured-service-<target>` artifact has `bootstrap-service/component/{SERVICE.json,payload/}`. A downloaded artifact keeps no file modes. Put back the ones the receipt records before staging:
    `node desktop/restore-modes.cjs SERVICE.json payload`.
@@ -21,4 +21,28 @@ How one release commit becomes the four desktop packages (`backplane-v<ver>-<pla
 
    It then writes the four proofs and `ACCEPTANCE.json` and runs `produce-release.cjs archive`. The archive and its `.sha256` are in `NEW_DIST`.
 
-macOS: re-seal the `.app` between step 4 and step 5 with an ad-hoc `codesign --force --deep -s -`. Only `_CodeSignature` and the signable paths may change, and `archive` checks that.
+macOS: between steps 4 and 5, on a native Mac, run:
+
+```sh
+python3 desktop/macos-bundle.py seal STAGE/Backplane.app
+```
+
+This signs Electron binaries and nested bundles inside out, preserving entitlements.
+The immutable service component must already have valid Mach-O signatures. The
+smoke verifies every Mach-O (including helpers under Resources) and every nested
+bundle with `codesign --verify --deep --strict`. It permits only the producer's
+existing signature changes; app, service and web bytes remain protected. Archiving
+requires this native verification evidence even under `unsigned-portable-allowed`.
+Include `macos-bundle.py` with the smoke tools. The hosted smoke always seals macOS.
+
+Ad-hoc sealing provides integrity, not Developer ID signing or notarization. The
+checksum-verified shell installer verifies code before replacing files and removes
+quarantine only from its downloaded payload. Browser-extracted portable apps remain
+subject to Gatekeeper's unidentified-developer policy; do not claim notarization.
+A browser-distributed app that opens without an override requires Developer ID and
+notarization as a separate release gate.
+
+Generate the public installer with `scripts/release-classic.sh` and all three
+supported targets: `linux-x64`, `linux-arm64`, `darwin-arm64`. Missing targets fail
+before packaging. Each checksum in `install.sh` names its matching classic archive;
+ship them together. Use the canonical BackplaneWorks/Backplane release URL in docs.

@@ -14,7 +14,7 @@ subprocess.run([sys.executable, 'test/tools/kicad_library_header_test.py'], cwd=
 if '--focused-only' not in sys.argv:
     subprocess.run([sys.executable, 'scripts/local.py', 'deps'], cwd=root, check=True)
     for name in ['service_runtime_test.py', 'release_bootstrap_test.py', 'release_assets_test.py',
-             'desktop_install_test.py', 'local_workflow_test.py', 'local_resource_test.py']:
+             'desktop_install_test.py', 'classic_installer_test.py', 'macos_bundle_test.py', 'local_workflow_test.py', 'local_resource_test.py']:
         subprocess.run([sys.executable, 'test/tools/' + name], cwd=root, check=True)
     subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'test/tools', '-p', 'test_runner_test.py'], cwd=root, check=True)
     # Preserve CI's existing thin/mail coverage and add the guards this batch touches.

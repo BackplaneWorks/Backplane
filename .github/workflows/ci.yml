@@ -49,9 +49,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: python3 test/tools/desktop_install_test.py
+      - run: |
+          python3 test/tools/desktop_install_test.py
+          python3 test/tools/classic_installer_test.py
+          python3 test/tools/macos_bundle_test.py
       - name: Check test runner dispatch and failure guards
         run: python3 -m unittest discover -s test/tools -p test_runner_test.py
+
+  macos-bundle:
+    name: Native macOS bundle integrity
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 test/tools/macos_bundle_test.py
 
   check:
     name: Type-check
