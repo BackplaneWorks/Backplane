@@ -84,7 +84,7 @@ def model.picker() -> J.Json:
 def upload.held() -> U.Ui:
   U.Act.ui(U.Ui.act(F.Fixture.thread("en"), "attach-end", J.Json.show(NT.Notice.upload.reply("t43", "upload.network", ""))))
 
-def upload.locale(tag: String) -> U.Ui:
+def upload.locale(+tag: String) -> U.Ui:
   U.Lang.apply(upload.held(), tag, tag)
 
 def main() -> IO(Unit):
