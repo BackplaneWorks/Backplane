@@ -20,6 +20,8 @@ import ../core/i18n.bend as I
 import ./dom.bend as D
 import ./sidebar-slot.bend as SS
 import ./usage-page.bend as UV
+import ./allowance.bend as AW
+import ../core/allowance.bend as ALQ
 import ./settings-menu.bend as SM
 import ./icon.bend as WI
 import ../core/tools.bend as TO
@@ -3421,11 +3423,15 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
     +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:
   +stop = U.Follow.stop(View.running(turn), U.Str.get(drafts, sel), atts)
   +tok = UZ.Ts.on(st)
+  +quota = ALQ.Allowance.selected(st, sel, pr)
+  +clock = M.Switch.num(U.Str.get(nf, "clock"), 0n)
   View.composer.p(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), pr,
     View.mp.loc(lc, U.Flag.get(op, "models"), ACCT.Accounts.nf(nf, st, sel), U.Mpk.cur.of(st, sel, drafts), U.Mpk.now(st, sel), U.Str.get(drafts, "@f.mq"), MPK.ModelPick.kept(U.Str.get(drafts, "@mp"), sel)),
-    List.append(&2, D.Node, View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))), View.accounts(st, sel, pr, U.Flag.get(op, "accounts"))),
+    [D.El{"div", "composer-model", [D.At{"class", "composer-model"}], List.concat(&2, D.Node, [
+      View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))),
+      View.accounts(st, sel, pr, U.Flag.get(op, "accounts")), AW.AllowanceWeb.chip(quota, pr, mo, clock, U.Flag.get(op, "allowance"))])}],
     U.Skills.shown(st, sel, drafts, nf), atts, up, D.Dom.cat(View.draft.limit.k(DB.Bound.say(lc, U.Str.get(drafts, "@draft.bound"))), vo), mic,
-    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), View.running(turn))
+    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), List.append(&2, D.Node, View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), AW.AllowanceWeb.pop(U.Flag.get(op, "allowance"), quota, pr, mo, clock)), View.running(turn))
 
 # A buy thread's asks: a "Backplane needs" card each, above the composer
 # (client.bend's Fab.order). An order question's choices are buttons (the

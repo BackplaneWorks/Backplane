@@ -3,6 +3,7 @@ import ./star-nudge.bend as STAR
 import ./browser-frame.bend as BFRAME
 import ./view-page.bend as VP
 import ./accounts.bend as ACCT
+import ./allowance.bend as ALQ
 import ./account-fallback.bend as AFB
 import ./subthreads.bend as ST
 import ./fallback.bend as FB
@@ -11500,6 +11501,27 @@ def Usage.ask(a: Act, +what: String) -> Act:
     case Act{u, cs}:
       Usage.ask.k(cs, Voice.rpc(u, "usage", [J.KV{"do", J.Str{what}}]))
 
+# Allowance is independent of the token/context totals. Opening only reads
+# the supported account endpoint; every client uses the same action.
+def Allowancev.read.codex(codex: Bool, +u: Ui) -> Act:
+  match codex:
+    case True{}: Ui.on_thread.p(u, "bots.voice", [J.KV{"op", J.Str{"allowance"}}])
+    case False{}: Act{u, Nil{}}
+
+def Allowancev.read(+u: Ui) -> Act:
+  Allowancev.read.codex(ALQ.Allowance.read.allowed(Ui.state(u), Ui.sel(u)), u)
+
+def Allowancev.open(open: Bool, +u: Ui) -> Act:
+  match open:
+    case True{}: Act{Ui.flag_on(u, "allowance"), [Focus{"allowance-close"}]}
+    case False{}: Act{Ui.flag_off(u, "allowance"), [Focus{"allowance-chip"}]}
+
+def Allowancev.act(i: Nat, +u: Ui) -> Act:
+  match i:
+    case 0n: Allowancev.open(Bool.not(Ui.flag(u, "allowance")), u)
+    case 1n: Allowancev.open(False{}, u)
+    case _: Allowancev.read(u)
+
 # opening Settings asks for the voice settings and Boat's usage; opening or
 # closing it puts the pairing code away
 # (and the vault's list for Settings > Secrets)
@@ -16692,8 +16714,15 @@ def Star.dispatch(star: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Star.act(u, action, value)
     case False{}: Retry.dispatch(String.eq(action, "retry"), u, action, value)
 
+def Ui.act.allowance(i: Nat, +u: Ui, +action: String, +value: String) -> Act:
+  match i:
+    case 0n: Allowancev.act(0n, u)
+    case 1n: Allowancev.act(1n, u)
+    case 2n: Allowancev.act(2n, u)
+    case _: Star.dispatch(Bool.or(String.eq(action, "star-open"), String.eq(action, "star-dismiss")), u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Star.dispatch(Bool.or(String.eq(action, "star-open"), String.eq(action, "star-dismiss")), u, action, value)
+  Ui.act.allowance(C.Codec.pos(["allowance-open", "allowance-close", "allowance-read"], action), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))
