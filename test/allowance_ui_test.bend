@@ -31,7 +31,7 @@ def model(+u: U.Ui, provider: String) -> U.Ui:
 def set(+u: U.Ui, text: String) -> U.Ui:
   U.Ui.adopt(u, M.State.replay([M.SettingSet{"allowance.codex", text, 1793166000n}], U.Ui.state(u)))
 
-def tick(u: U.Ui, now: Nat) -> U.Ui:
+def tick(u: U.Ui, +now: Nat) -> U.Ui:
   U.Ui.info_set(U.Ui.tick(u, now), "clock", Nat.show(now))
 
 def stream() -> J.Json:
