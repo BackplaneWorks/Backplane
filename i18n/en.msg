@@ -1159,7 +1159,7 @@ native.hub.failure = {reason, select, timeout {Hub response timed out; retrying}
 # Native file, review, task and space controls.
 native.viewer.source = Source
 native.file.image.unsupported = This image cannot be shown here
-native.file.pdf.error = {kind, select, send {The hub could not send this PDF (it may be over 12 MB)} http {The hub answered {code}} other {This PDF cannot be shown here}}
+native.file.pdf.error = {kind, select, send {The hub could not read this PDF} http {The hub answered {code}} other {This PDF cannot be shown here}}
 native.file.page = Page {number}
 native.review.comment = Comment
 native.review.resolved = Resolved
