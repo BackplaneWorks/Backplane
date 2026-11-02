@@ -1,7 +1,7 @@
 # Installation
 
 ```sh
-curl -fsSL https://github.com/i2cjak/Backplane/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 backplane
 ```
 
@@ -9,7 +9,7 @@ Linux (x64, arm64) and macOS (Apple silicon). It installs into `~/.local/share/b
 
 Treat pairing links and QR codes as credentials. Browser pairing exchanges the fragment for an HttpOnly, SameSite=Strict cookie (Secure over HTTPS), then removes the fragment; existing browser tokens migrate out of local storage after a successful exchange. Native phone clients retain their pairing-link protocol. Remote clients need the pairing credential; a browser cannot inherit localhost access through a foreign origin or rebound hostname. Local programs running as your user remain trusted. Full Access runs agent tools with your user’s access; choose a more restrictive thread permission mode when wanted. Pairing controls access to the hub, and does not provide OS isolation for a Full Access agent.
 
-On a Mac there is no native window yet: `backplane` runs the hub and you use it in the browser at http://127.0.0.1:3787 (and from your phone, as anywhere). Add `~/.local/bin` to your `PATH` if the installer says so.
+On Apple Silicon, the installer includes the macOS desktop app. Add `~/.local/bin` to your `PATH` if requested, then run `backplane`. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub. The installer checks the release checksum and code signatures before replacing files and clears quarantine only on that downloaded payload. Portable macOS apps are ad-hoc sealed, not notarized; a browser-extracted app may still require an explicit Gatekeeper override.
 
 To uninstall what install.sh put in place, quit Backplane, then:
 
@@ -26,4 +26,4 @@ rm -f ~/.local/share/applications/backplane.desktop \
 
 Your threads, settings and keys stay in `~/.backplane-bend` and the model cache in `~/.cache/backplane-bend`; remove them too to start over. A package install (`.deb`, AUR) uninstalls through its package manager.
 
-Nightly builds of `main` are prereleases on the [Releases](https://github.com/i2cjak/Backplane/releases) page, each with its own installer: `curl -fsSL https://github.com/i2cjak/Backplane/releases/download/<tag>/install.sh | sh`.
+Nightly builds of `main` are prereleases on the [Releases](https://github.com/i2cjak/Backplane/releases) page, each with its own installer: `curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/download/<tag>/install.sh | sh`.
