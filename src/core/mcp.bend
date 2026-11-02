@@ -1362,8 +1362,32 @@ def Perm.labels(os: List<&2, J.Json>) -> List<&2, String>:
     case +o <> t:
       J.Json.get_str(o, "label", J.Json.show(o)) <> Perm.labels(t)
 
+# each option's description under the question ("USB-C: reversible"),
+# so the person picks knowing what the agent meant by it
+def Perm.described.k(has: Bool, +line: String, rest: List<&2, String>) -> List<&2, String>:
+  match has:
+    case True{}:
+      line <> rest
+    case False{}:
+      rest
+
+def Perm.described(os: List<&2, J.Json>) -> List<&2, String>:
+  match os:
+    case Nil{}:
+      Nil{}
+    case +o <> t:
+      Perm.described.k(Bool.not(String.is_empty(J.Json.get_str(o, "description", ""))), J.Json.get_str(o, "label", "") ++ ": " ++ J.Json.get_str(o, "description", ""), Perm.described(t))
+
+def Perm.question.k(+q: String, +ds: List<&2, String>) -> String:
+  Bool.pick(String, List.is_empty(&2, String, ds), q, q ++ "\n" ++ String.join(ds, "\n"))
+
+# the question as asked (the answer is keyed by it, Perm.answers)
 def Perm.question(+input: J.Json) -> String:
   J.Json.get_str(Perm.first_q(input), "question", J.Json.get_str(input, "question", ""))
+
+# what the card says: the question, then each option's description
+def Perm.question.card(+input: J.Json) -> String:
+  Perm.question.k(Perm.question(input), Perm.described(J.Json.elems(J.Json.get_obj(Perm.first_q(input), "options"))))
 
 def Perm.options(+input: J.Json) -> String:
   String.join(Perm.labels(J.Json.elems(J.Json.get_obj(Perm.first_q(input), "options"))), "\n")
@@ -1385,7 +1409,7 @@ def Perm.approve(ok: Bool, +ask: String, +s: M.State, +now: Nat, +thread: String
 def Perm.k(i: Nat, +ask: String, +s: M.State, +now: Nat, +thread: String, +id: J.Json, +tool: String, +input: J.Json) -> McpOut:
   match i:
     case 0n:
-      McpOut{"", B.Step{[M.AskOpened{ask, thread, "input", tool, Perm.question(input), Perm.options(input), now}], Nil{}}, ask}
+      McpOut{"", B.Step{[M.AskOpened{ask, thread, "input", tool, Perm.question.card(input), Perm.options(input), now}], Nil{}}, ask}
     case 1n:
       McpOut{Mcp.result(id, Perm.text(Perm.deny(Perm.plan_note()))), B.Step{[M.AskOpened{ask, thread, "plan", tool, J.Json.get_str(input, "plan", ""), "", now}], Nil{}}, ""}
     case _:
