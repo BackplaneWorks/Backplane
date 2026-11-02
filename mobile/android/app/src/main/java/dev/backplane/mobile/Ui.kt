@@ -1050,7 +1050,11 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                 navigationIcon = { IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) } },
                 title = {
                     Column {
-                        Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // a buy thread's title is marked an Order (the cart)
+                            if (t.order != null) OrderMark()
+                            Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                         if (t.branch.isNotEmpty()) Text(t.branch, style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.outline, maxLines = 1)
                         // the thread's Boat chip: a tap opens Settings (Usage)
@@ -1145,6 +1149,8 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
             )
             // the to-do list's steps, under the bar while it is open
             t.todos?.let { td -> if (td.open) TodosPanel(m, td) }
+            // a buy thread's Order card, under the bar
+            t.order?.let { OrderCardView(it) }
             below?.invoke()
         } },
         bottomBar = {
