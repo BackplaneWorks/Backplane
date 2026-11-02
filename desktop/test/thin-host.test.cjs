@@ -705,6 +705,7 @@ test('the away mark rides on every view request for the shown thread; a switch l
  const f=await fixture();f.open();assert.equal(f.sent.at(-1).p.away,'');
  f.host.away('A','m7');assert.equal(f.sent.at(-1).m,'view.update');assert.equal(f.sent.at(-1).p.away,'m7');f.host.receive(f.reply());
  const n=f.sent.length;f.host.away('A','m7');assert.equal(f.sent.length,n,'the same mark asks for nothing');
+ f.host.away('A','m9');assert.equal(f.host.awayOf('A'),'m7','refreshing the tail while away cannot consume genuinely new messages');assert.equal(f.sent.length,n);
  f.host.away('A','');assert.equal(f.sent.at(-1).p.away,'','back at the end');f.host.receive(f.reply());
  f.host.away('A','m9');f.host.receive(f.reply());f.host.request('select','B');assert.equal(f.sent.at(-1).m,'view.open');assert.equal(f.sent.at(-1).p.away,'');assert.equal(f.host.awayMark,null);
 });
@@ -712,6 +713,60 @@ test('the new-messages pill on an earlier page goes straight to the newest page'
  const f=await fixture();f.open();f.host.page();f.host.receive(f.reply());f.host.page();f.host.receive(f.reply());assert.equal(f.host.atNewest(),false);
  assert.equal(f.host.newest(),true);const req=f.sent.at(-1);assert.equal(req.m,'view.page');assert.equal(req.p.cursor,'');assert.equal(f.host.atNewest(),true);
  f.host.receive(f.reply(req));assert.equal(f.views.at(-1).detail.page.direction,'newest');assert.equal(f.host.newest(),false,'at the newest there is nowhere to go');
+});
+test('a newest click while an older page is in flight is retained until its reply',async()=>{
+ const f=await fixture();f.open();f.host.page();const older=f.sent.at(-1);
+ assert.equal(f.host.newest(),true,'explicit bottom intent is accepted while paging');
+ f.host.receive(f.reply(older));const newest=f.sent.at(-1);
+ assert.equal(newest.m,'view.page');assert.equal(newest.p.cursor,'');assert.notEqual(newest.id,older.id);
+ f.host.receive(f.reply(newest));assert.equal(f.views.at(-1).detail.page.direction,'newest');assert.equal(f.host.atNewest(),true);
+ assert.equal(f.getSession().drafts.A,'original 日本語');
+});
+test('a queued newest click cannot move a later explicit conversation selection',async()=>{
+ const f=await fixture();f.open();f.host.page();const older=f.sent.at(-1);f.host.newest();f.host.request('select','B');const open=f.sent.at(-1);
+ f.host.receive(f.reply(older));f.host.receive(f.reply(open));assert.equal(f.getSession().sel,'B');assert.equal(f.sent.at(-1).id,open.id);
+});
+test('latest source window, rather than the local trail alone, decides whether newer rows exist',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:{ids:['row'],older:'older-bound-to-A',hasMore:true,newer:4,anchor:{id:'row',offset:0},partial:[]}}));
+ assert.equal(f.host.atNewest(),false);assert.equal(f.host.hasAhead('newer'),true);assert.equal(f.host.newest(),true);
+ assert.equal(f.sent.at(-1).p.cursor,'');
+});
+test('socket replacement restores the same page and unread boundary before exposing a fresh view',async()=>{
+ const position={top:1100,atEnd:false,anchor:'row',offset:-37};
+ const f=await fixture({pagePosition:()=>({position,adjacent:''})});f.open();f.host.away('A','m7');f.host.receive(f.reply());
+ f.host.page();f.host.receive(f.reply());const state=f.host.readingState?.();f.host.disconnect();
+ const g=await fixture({readingState:state});g.open();const restore=g.sent.at(-1);
+ assert.equal(g.views.length,0,'no newest-page flash');assert.equal(restore.m,'view.page');assert.equal(restore.p.away,'m7');
+ g.host.receive(g.reply(restore));assert.deepEqual(g.views.at(-1).detail.position,position);assert.equal(g.host.awayOf('A'),'m7');
+ assert.equal(g.getSession().drafts.A,'original 日本語');
+});
+test('a newest click retained behind a failed page still reaches the already displayed newest page',async()=>{
+ const f=await fixture();f.open();f.host.page();const older=f.sent.at(-1);f.host.newest();
+ f.host.receive({t:'reply',id:older.id,ok:false,error:{code:'STALE_CURSOR'}});
+ assert.equal(f.host.pendingNewest,false);assert.equal(f.commands.at(-1)?.type,'scroll');assert.equal(f.host.atNewest(),true);
+});
+test('a pending newest click survives socket replacement as an explicit bottom bookmark',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{atEnd:false,anchor:'row',offset:-9},adjacent:''})});f.open();
+ f.host.away('A','m7');f.host.receive(f.reply());f.host.page();f.host.newest();const state=f.host.readingState();
+ const g=await fixture({readingState:state});g.open();assert.equal(g.views.at(-1).detail.position.atEnd,true);
+ assert.equal(g.host.atNewest(),true);assert.equal(g.host.awayOf('A'),'m7','mark stays until the viewport actually reaches the content');
+});
+test('latest source metadata also lets manual downward paging fetch newer rows without a local trail',async()=>{
+ const f=await fixture();f.open();f.host.window.newer=4;assert.equal(f.host.hasAhead('newer'),true);
+ assert.equal(f.host.ahead('newer'),true);const request=f.sent.at(-1);assert.equal(request.p.cursor,'');
+ f.host.receive(f.reply(request,{window:{ids:['new'],older:'older',hasMore:true,newer:0,anchor:{id:'new',offset:0},partial:[]}}));
+ assert.equal(f.host.atNewest(),true);assert.equal(f.host.hasAhead('newer'),false);
+});
+test('another hub cannot restore local reading state, and reconnect never replays actions',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{atEnd:false,anchor:'row'},adjacent:''})});f.open();f.host.page();f.host.receive(f.reply());
+ const state=f.host.readingState();state.hub='https://foreign';const g=await fixture({readingState:state});g.open();
+ assert.equal(g.views.length,1);assert.equal(g.host.restorePage,null);assert.equal(g.host.awayOf('A'),'');
+ assert(g.sent.every(r=>r.m==='view.open'));
+});
+test('another history epoch cannot reuse a reconnect bookmark or its read mark',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{atEnd:false,anchor:'row'},adjacent:''})});f.open();f.host.away('A','m7');f.host.receive(f.reply());
+ const state=f.host.readingState();state.epoch='retired';const g=await fixture({readingState:state});g.open();
+ assert.equal(g.views.length,1);assert.equal(g.host.restorePage,null);assert.equal(g.host.awayOf('A'),'');
 });
 // A search result once named a subagent's log ("@sub:<thread>"), which the
 // hub has no view of: the page stopped on "Conversation unavailable", and
@@ -964,4 +1019,112 @@ test('a reply whose delta changed nothing draws nothing, and its session and com
  assert.equal(f.host.ready,true);
  // a whole reply after it still draws
  f.host.update();f.host.receive(f.reply(f.sent.at(-1)));assert.equal(f.views.length,2);
+});
+
+for (const two of [false, true]) test('queued 3D choice preserves '+(two?'two':'one')+' in-flight history page bridges', async () => {
+ const f=await fixture(); f.host.greeting(f.greeting);
+ const win=(text,older,olderNext)=>({shown:{type:'text',text},window:{ids:[text],older,olderNext,hasMore:!!older,anchor:{id:text,offset:0},partial:[]}});
+ f.host.receive(f.reply(undefined,win('Newest','c1',two?'c2':'')));
+ assert(f.host.ahead('older',{two})); const pages=f.sent.slice(-(two?2:1)), count=f.views.length;
+ f.host.request('view-kind','3d');
+ assert.equal(f.sent.at(-1).id,pages.at(-1).id,'viewer choice waits for its earlier history pages');
+ for (let i=0;i<pages.length;i++) {
+  f.host.receive(f.reply(pages[i],win('Older bridge '+i,'c'+(i+2),'c'+(i+3))));
+  assert.equal(f.views.length,count+i+1,'accepted older page must display before the queued viewer choice');
+  assert.equal(f.views.at(-1).detail.page.direction,'older');
+  assert.equal(f.views.at(-1).n.text,'Older bridge '+i);
+ }
+ assert.equal(f.sent.at(-1).p.action,'view-kind');
+});
+
+test('reconnect bookmark names the held source page containing the visible anchor',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{anchor:'fold:call',offset:20,atEnd:false},adjacent:''})});f.open();
+ f.host.held={pages:[{cursor:'old',back:[''],older:'older',ids:['call']},{cursor:'',back:[],older:'old',ids:['newest']}]};
+ const state=f.host.readingState(),saved=[...state.positions.values()][0];
+ assert.equal(saved.cursor,'old');assert.deepEqual(saved.back,['']);assert.equal(saved.position.anchor,'fold:call');
+});
+test('reconnect can retain the displayed history and its issued page boundaries through restore',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{anchor:'call',offset:20,atEnd:false},adjacent:''})});f.open();
+ const held={pages:[{cursor:'old',back:[''],older:'older',ids:['call']},{cursor:'',back:[],older:'old',ids:['newest']}]};
+ f.host.held=structuredClone(held);const state=f.host.readingState();
+ const g=await fixture({readingState:state,selection:()=>structuredClone(held)});g.open();
+ const restore=g.sent.at(-1);assert.equal(restore.m,'view.page');assert.equal(restore.p.cursor,'old');
+ g.host.receive(g.reply(restore,{window:{ids:['call','middle'],older:'older',hasMore:true,anchor:{id:'call',offset:20},partial:[]}}));
+ assert.equal(g.host.held.pages.length,2,'restored viewport can still span multiple retained pages');
+ assert.deepEqual(g.host.held.pages[0].ids,['call','middle']);assert.deepEqual(g.host.held.pages[1].ids,['newest']);
+ assert.equal(g.views.at(-1).detail.position.anchor,'call');assert.equal(g.host.ready,true);
+});
+
+test('newest jump already in flight survives reconnect as a bottom intent',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{anchor:'old',offset:30,atEnd:false},adjacent:''})});f.open();
+ f.host.away('A','m7');f.host.page();f.host.receive(f.reply());assert(f.host.newest());assert.equal(f.host.paging.direction,'newest');
+ const state=f.host.readingState();const g=await fixture({readingState:state});g.open();
+ assert.equal(g.views.at(-1).detail.position.atEnd,true);assert.equal(g.host.cursor,'');assert.deepEqual(g.host.back,[]);
+});
+
+for(const replacement of ['peer-epoch','snapshot-basis']) test('fresh linked history retires retained pages after '+replacement+' changes under the same greeting',async()=>{
+ const target={kind:'thread',id:'peer~A'},older=epoch=>JSON.stringify({version:1,epoch,target,query:'',before:'12'});
+ const oldEpoch='actual|mirror:peer:history-A:100',nextEpoch=replacement==='peer-epoch'?'actual|mirror:peer:history-B:100':'actual|mirror:peer:history-A:200';
+ const window=(id,epoch)=>({ids:[id],older:older(epoch),hasMore:true,anchor:{id,offset:0},partial:[]});
+ const f=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),pagePosition:()=>({position:{anchor:'read-marker',offset:10,atEnd:false},adjacent:''})});
+ f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:window('read-marker',oldEpoch)}));
+ const held={pages:[{cursor:older(oldEpoch),back:[''],older:'before',ids:['old-retained-entry']},{cursor:'',back:[],older:older(oldEpoch),ids:['read-marker']}]};
+ f.host.held=structuredClone(held);const state=f.host.readingState();
+ const g=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),readingState:state,selection:()=>structuredClone(held)});
+ g.host.greeting(g.greeting);g.host.receive(g.reply(undefined,{window:window('fresh-entry',nextEpoch),shown:{type:'text',text:'Fresh owning peer history'}}));
+ assert.equal(g.host.held.pages.some(p=>p.ids.includes('old-retained-entry')),false,'old visual bridge must not survive fresh owning-history replacement');
+ assert.equal(g.views.at(-1).detail.historyReset,true,'host must reset its retained DOM history before presenting fresh history');
+ assert.equal(g.host.epoch,'actual','local greeting did not change');assert.equal(g.host.session.drafts['peer~A'],'unsent');
+});
+
+for(const mode of ['same-history','opaque-cursor','wrong-target','short-history']) test('linked resume fence handles '+mode+' without borrowing another page namespace',async()=>{
+ const target={kind:'thread',id:'peer~A'},epoch='actual|mirror:peer:history-A:100';
+ const cursor=(before,t=target)=>JSON.stringify({version:1,epoch,target:t,query:'',before});
+ const window=(id,older)=>({ids:[id],older,hasMore:!!older,anchor:{id,offset:0},partial:[]});
+ const f=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),pagePosition:()=>({position:{anchor:'read-marker',offset:10,atEnd:false},adjacent:''})});
+ f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:window('read-marker',cursor('12'))}));
+ const held={pages:[{cursor:cursor('12'),back:[''],older:'before',ids:['old-retained-entry']},{cursor:'',back:[],older:cursor('12'),ids:['read-marker']}]};
+ f.host.held=structuredClone(held);f.host.away('peer~A','read-marker');const state=f.host.readingState();
+ const g=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),readingState:state,selection:()=>structuredClone(held)});
+ const token=mode==='same-history'?cursor('20'):mode==='opaque-cursor'?'opaque-v2':mode==='short-history'?'':cursor('20',{kind:'thread',id:'peer~other'});
+ g.host.greeting(g.greeting);g.host.receive(g.reply(undefined,{window:window('fresh-entry',token)}));
+ assert.equal(g.host.held.pages.some(p=>p.ids.includes('old-retained-entry')),mode==='same-history');
+ assert.equal(!!g.views.at(-1).detail.historyReset,mode!=='same-history');
+ assert.equal(g.host.awayOf('peer~A'),'read-marker','unread boundary remains until actual viewport reaches new content');
+ assert.equal(g.host.session.drafts['peer~A'],'unsent');
+ if(mode!=='same-history'&&mode!=='short-history'){assert(g.host.ahead('older'));assert.equal(g.sent.at(-1).p.cursor,token,'cursor stays opaque/unchanged on the wire');}
+});
+test('a fresh owning epoch retires an old restore cursor before any page request uses it',async()=>{
+ const target={kind:'thread',id:'peer~A'},cursor=epoch=>JSON.stringify({version:1,epoch,target,query:'',before:'12'});
+ const win=(id,epoch)=>({ids:[id],older:cursor(epoch),hasMore:true,anchor:{id,offset:0},partial:[]});
+ const f=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),pagePosition:()=>({position:{anchor:'old-entry',offset:10,atEnd:false},adjacent:''})});
+ f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:win('read-marker','peer-old')}));
+ const held={pages:[{cursor:cursor('peer-old'),back:[''],older:'before',ids:['old-entry']},{cursor:'',back:[],older:cursor('peer-old'),ids:['read-marker']}]};f.host.held=structuredClone(held);
+ const g=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),readingState:f.host.readingState(),selection:()=>structuredClone(held)});
+ g.host.greeting(g.greeting);g.host.receive(g.reply(undefined,{window:win('fresh-entry','peer-new')}));
+ assert.equal(g.sent.filter(r=>r.m==='view.page').length,0);assert.equal(g.views.at(-1).detail.historyReset,true);assert.equal(g.host.cursor,'');assert.deepEqual(g.host.back,[]);
+});
+
+for(const mode of ['opaque','short','wrong-target']) test('linked saved cursor is retired when fresh '+mode+' history cannot validate its owner',async()=>{
+ const target={kind:'thread',id:'peer~A'},epoch='actual|mirror:peer:history-A:100';
+ const cursor=(before,t=target)=>JSON.stringify({version:1,epoch,target:t,query:'',before});
+ const win=older=>({ids:['fresh-entry'],older,hasMore:!!older,anchor:{id:'fresh-entry',offset:0},partial:[]});
+ const f=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),pagePosition:()=>({position:{anchor:'old-entry',offset:10,atEnd:false},adjacent:''})});
+ f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:win(cursor('12'))}));
+ f.host.held={pages:[{cursor:cursor('12'),back:[''],older:'before',ids:['old-entry']},{cursor:'',back:[],older:cursor('12'),ids:['fresh-entry']}]};
+ const g=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),readingState:f.host.readingState()});
+ g.host.greeting(g.greeting);g.host.receive(g.reply(undefined,{window:win(mode==='short'?'':mode==='opaque'?'opaque-v2':cursor('20',{kind:'thread',id:'peer~other'}))}));
+ assert.equal(g.sent.filter(r=>r.m==='view.page').length,0,'do not restore a cursor before its owning namespace is validated');
+ assert.equal(g.views.at(-1).detail.historyReset,true);assert.equal(g.host.cursor,'');assert.equal(g.host.session.drafts['peer~A'],'unsent');
+});
+
+test('linked newest-in-flight intent and draft survive an owning-history replacement',async()=>{
+ const target={kind:'thread',id:'peer~A'},cursor=epoch=>JSON.stringify({version:1,epoch,target,query:'',before:'12'});
+ const win=(id,epoch)=>({ids:[id],older:cursor(epoch),hasMore:true,anchor:{id,offset:0},partial:[]});
+ const f=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),pagePosition:()=>({position:{anchor:'old',offset:10,atEnd:false},adjacent:''})});
+ f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:win('old','peer-old')}));
+ f.host.page();f.host.receive(f.reply(undefined,{window:win('older','peer-old')}));assert(f.host.newest());assert.equal(f.host.paging.direction,'newest');
+ const g=await fixture({session:()=>({sel:'peer~A',drafts:{'peer~A':'unsent'},rid:1}),readingState:f.host.readingState()});
+ g.host.greeting(g.greeting);g.host.receive(g.reply(undefined,{window:win('fresh','peer-new')}));
+ assert.equal(g.views.at(-1).detail.historyReset,true);assert.equal(g.views.at(-1).detail.position.atEnd,true);assert.equal(g.host.session.drafts['peer~A'],'unsent');
 });

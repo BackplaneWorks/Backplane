@@ -260,8 +260,12 @@ class BPAccountsIO {
   }
   url(value, provider) {
     try {
-      const u=new URL(value); const hosts=provider==="codex" ? ["auth.openai.com","chatgpt.com"] : ["claude.ai","platform.claude.com","console.anthropic.com"];
-      if (u.protocol!=="https:" || u.username || u.password || !hosts.includes(u.hostname) || u.searchParams.has("access_token") || u.searchParams.has("refresh_token") || u.searchParams.has("code")) return "";
+      const u=new URL(value); const hosts=provider==="codex" ? ["auth.openai.com","chatgpt.com"] : ["claude.ai","claude.com","platform.claude.com","console.anthropic.com"];
+      // Claude Code's authorization link uses code=true to request its code
+      // entry flow. This boolean is not an OAuth callback's authorization code.
+      const claudeCodeFlow=provider==="claude" && u.hostname==="claude.com" && u.pathname==="/cai/oauth/authorize" &&
+        u.searchParams.getAll("code").length===1 && u.searchParams.get("code")==="true";
+      if (u.protocol!=="https:" || u.username || u.password || !hosts.includes(u.hostname) || u.searchParams.has("access_token") || u.searchParams.has("refresh_token") || (u.searchParams.has("code") && !claudeCodeFlow)) return "";
       return u.href.length<=8192 ? u.href : "";
     } catch (_) {return "";}
   }

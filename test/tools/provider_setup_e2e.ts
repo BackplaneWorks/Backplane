@@ -70,6 +70,8 @@ try{
  check('phone setup fits screen',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await click('provider-setup-pick','claude');await page.locator('[data-bfield="accountlabel"]').fill('Onboarding Claude');await click('acct-add');await visible('Account status: disconnected');
  await click('acct-login');await page.waitForSelector('[data-sealed^="account:"]');
+ const claudeSignIn=await page.getByRole('link',{name:'Open provider sign-in',exact:true}).getAttribute('href');
+ check('phone Claude offers current provider authorization URL',claudeSignIn?.startsWith('https://claude.com/cai/oauth/authorize?code=true&'),claudeSignIn);
  await page.locator('[data-sealed^="account:"]').fill('fixture-code');await page.getByRole('button',{name:'Complete sign-in',exact:true}).click();await visible('Connection verified');
  check('phone Claude completes existing sealed ceremony',await page.getByText('Connection verified',{exact:false}).isVisible());
  check('sealed response never enters browser storage',await page.evaluate(()=>!Object.values(localStorage).some(x=>x.includes('fixture-code'))));
