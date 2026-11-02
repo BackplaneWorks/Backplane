@@ -178,6 +178,7 @@ async function startBrowser(ses,reconnect){
   if(window!==browserWindow||browserWindow.isDestroyed())controller.close();
 }
 function start() {
+  require('./text-clipboard.cjs').installTextClipboard(ipcMain, electron.clipboard, trusted);
   const ses = session.fromPartition('persist:backplane-ui');
   const permitted = (wc, permission, url) => {
     try { return wc === window?.webContents && origin && new URL(url).origin === origin && ['notifications', 'clipboard-sanitized-write'].includes(permission); } catch { return false; }
