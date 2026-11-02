@@ -9,8 +9,17 @@ function chooseSource(electron,parent,sources){return new Promise(resolve=>{
  const html='<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; img-src data:; style-src &#39;unsafe-inline&#39;"><meta name="viewport" content="width=device-width"><style>body{background:#111410;color:#eceee8;font:16px sans-serif;padding:16px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}a{display:block;color:inherit;border:1px solid #53634c;padding:10px;overflow-wrap:anywhere}img{width:100%;height:150px;object-fit:contain}a:focus{outline:3px solid #cee66b}</style><p>Choose what to record. The recording can show private information. Close this window to cancel.</p><main>'+sources.map((s,i)=>'<a href="backplane-capture://select/'+i+'"><img alt="" src="'+escape(s.thumbnail?.toDataURL()||'')+'"><span>'+escape(s.name)+'</span></a>').join('')+'</main>';
  picker.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html)).catch(()=>finish(null));
  });}
-function displayCapturePermission(wc,permission,url,details,window,origin){
- try{return permission==='display-capture'&&wc===window?.webContents&&!!origin&&new URL(url).origin===origin&&details?.isMainFrame===true&&!details.mediaTypes?.includes('audio');}catch{return false;}
+function displayCapturePermission(wc,permission,url,details,window,origin,phase='check'){
+ try{
+  if(wc!==window?.webContents||!origin||new URL(url).origin!==origin||details?.isMainFrame!==true)return false;
+  if(permission==='display-capture')return !details.mediaTypes?.includes('audio');
+  // Electron 44.9.2 reports display requests as media with an empty array.
+  // Camera/microphone requests contain video/audio. Never grant a media
+  // permission check (or a missing/malformed array) through this fallback.
+  // The app uses getDisplayMedia: installDisplayCapture still requires a
+  // user gesture and explicit screen/window selection before giving a stream.
+  return phase==='request'&&permission==='media'&&Array.isArray(details.mediaTypes)&&details.mediaTypes.length===0;
+ }catch{return false;}
 }
 function installDisplayCapture({electron,session,getWindow,origin,choose=chooseSource,wayland=process.platform==='linux'&&(!!process.env.WAYLAND_DISPLAY||process.env.XDG_SESSION_TYPE==='wayland')}){
  let pending=false;
