@@ -1,4 +1,5 @@
 import Base
+import ./json.bend as J
 import ./glb.bend as G
 import ./images.bend as IM
 
@@ -11,6 +12,9 @@ import ./images.bend as IM
 # renders, and the part itself in the 3D viewer.
 
 # the folder a project keeps its parts in
+def Mech.config(+text: String) -> String:
+  J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "mech", "")
+
 def Mech.dir() -> String:
   "mech"
 
@@ -285,6 +289,26 @@ def Mech.pick.k(ps: List<&2, MPart>, +want: String) -> Maybe<&2, MPart>:
       None{}
     case MPart{+p, +n, +s} <> t:
       Bool.pick(Maybe<&2, MPart>, String.eq(p, want), Some{MPart{p, n, s}}, Mech.pick.k(t, want))
+
+def Mech.preferred.k(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> Maybe<&2, MPart>:
+  match m:
+    case Some{p}:
+      Some{p}
+    case None{}:
+      Mech.default(ps)
+
+def Mech.preferred(+ps: List<&2, MPart>, +primary: String) -> Maybe<&2, MPart>:
+  Mech.preferred.k(Mech.pick.k(ps, primary), ps)
+
+def Mech.choose.k(m: Maybe<&2, MPart>, +ps: List<&2, MPart>, +primary: String) -> Maybe<&2, MPart>:
+  match m:
+    case Some{p}:
+      Some{p}
+    case None{}:
+      Mech.preferred(ps, primary)
+
+def Mech.choose(+ps: List<&2, MPart>, +want: String, +root: String, +primary: String) -> Maybe<&2, MPart>:
+  Mech.choose.k(Mech.pick.k(ps, Bool.pick(String, String.starts_with(want, root ++ "/"), String.drop(want, 1n+String.length(root)), want)), ps, primary)
 
 def Mech.pick.or(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> Maybe<&2, MPart>:
   match m:
