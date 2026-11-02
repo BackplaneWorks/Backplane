@@ -11371,7 +11371,7 @@ def Hub.accounts.select.valid(valid: Bool, +st: M.State, +now: Nat, +client: U32
   match valid:
     case False{}: B.Step.outs([B.Reply.err(client, rid, Bool.pick(String, B.Hub.running(B.Hub.thread(st, th)), "Finish or stop the current turn before selecting another account.",
       Bool.pick(String, String.is_empty(profile), "The thread or account selection changed. Reopen the account menu and try again.", ACCT.Accounts.unavailable(ACCT.Accounts.profile(st, profile), epoch))))])
-    case True{}: Hub.accounts.select.provider(st, now, client, rid, th, provider, profile, epoch, count, entries)
+    case True{}: B.Step.before(B.AccountFallback.forget(th, now), Nil{}, Hub.accounts.select.provider(st, now, client, rid, th, provider, profile, epoch, count, entries))
 
 def Hub.accounts.select.step(+st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   +th = J.Json.get_str(p, "thread", "")
@@ -13368,12 +13368,27 @@ def AccountsRpc.default.step(ok: Bool, +client: U32, +rid: String, +provider: St
 
 def Hub.rpc.account.default(default: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
   match default:
-    case False{}: Hub.rpc.account.kind(select, h, st, client, rid, p, now)
+    case False{}: Hub.rpc.account.limit(String.eq(J.Json.get_str(p, "op", ""), "clear-limit"), select, h, st, client, rid, p, now)
     case True{}:
       +provider = J.Json.get_str(p, "provider", "")
       +profile = J.Json.get_str(p, "profile", "")
       +epoch = J.Json.get_nat(p, "epoch", 0n)
       Hub.step(h, AccountsRpc.default.step(Bool.and(ACCT.Accounts.supported(provider), Bool.or(Bool.and(String.is_empty(profile), Nat.is_eq(epoch, 0n)), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch))), client, rid, provider, profile, epoch, now))
+
+def AccountsRpc.clear.step(ok: Bool, +st: M.State, +client: U32, +rid: String, +provider: String, profile: String, epoch: Nat, now: Nat) -> B.Step:
+  match ok:
+    case False{}: B.Step.outs([B.Reply.err(client, rid, "The account's sign-in changed. Refresh its status before clearing its availability hold.")])
+    case True{}: B.Step.also(B.AccountFallback.clear(st, now, provider, profile, epoch), [B.Reply.ok(client, rid)])
+
+def Hub.rpc.account.limit(clear: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
+  match clear:
+    case False{}: Hub.rpc.account.kind(select, h, st, client, rid, p, now)
+    case True{}:
+      +provider = J.Json.get_str(p, "provider", "")
+      +profile = J.Json.get_str(p, "profile", "!missing")
+      +epoch = J.Json.get_nat(p, "epoch", 0n)
+      Hub.step(h, AccountsRpc.clear.step(Bool.or(ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch),
+        String.is_empty(profile) && Nat.is_eq(epoch, 0n) && ACCT.Accounts.supported(provider)), st, client, rid, provider, profile, epoch, now))
 
 def Hub.rpc.accounts(account: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
   match account h:
