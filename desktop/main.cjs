@@ -24,6 +24,7 @@ if (!home || !path.isAbsolute(home)) throw new Error('Set an absolute, isolated 
 if (!app.isPackaged && path.resolve(home) === path.join(os.homedir(), '.backplane-bend')) throw new Error('Development Electron must use an isolated BACKPLANE_HOME');
 app.setPath('userData', path.join(home, 'electron-profile'));
 const connectionLog = createConnectionLog(home);
+const recordingStore = require('./improvements-recording-store.cjs').createRecordingStore(home);
 app.setName('Backplane');
 if (process.platform === 'linux') app.setDesktopName?.('backplane.desktop');
 const resourceRoot = path.join(process.resourcesPath, 'backplane-service');
@@ -180,11 +181,14 @@ async function startBrowser(ses,reconnect){
 function start() {
   require('./text-clipboard.cjs').installTextClipboard(ipcMain, electron.clipboard, trusted);
   const ses = session.fromPartition('persist:backplane-ui');
-  const permitted = (wc, permission, url) => {
-    try { return wc === window?.webContents && origin && new URL(url).origin === origin && ['notifications', 'clipboard-sanitized-write'].includes(permission); } catch { return false; }
+  const permitted = (wc, permission, url, details = {}) => {
+    try { return wc === window?.webContents && origin && new URL(url).origin === origin && (['notifications', 'clipboard-sanitized-write'].includes(permission) || require('./improvements-display-capture.cjs').displayCapturePermission(wc, permission, url, details, window, origin)); } catch { return false; }
   };
-  ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl)));
-  ses.setPermissionCheckHandler((wc, permission, requestingOrigin) => permitted(wc, permission, requestingOrigin));
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl, details)));
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permitted(wc, permission, requestingOrigin, details));
+  require('./improvements-display-capture.cjs').installDisplayCapture({ electron, session: ses, getWindow: () => window, origin: () => origin });
+  try { recordingStore.prune(); } catch {}
+  const recordingCleanup = setInterval(() => { try { recordingStore.prune(); } catch {} }, 15 * 60 * 1000);recordingCleanup.unref();
   ses.webRequest.onHeadersReceived((details, callback) => {
     if (new URL(details.url).origin !== origin) return callback({});
     // Files embeds PDFs served by this hub; keep foreign frames blocked.
@@ -197,6 +201,15 @@ function start() {
   ipcMain.handle('desktop:diagnostics', (event, op = 'read') => {
     if (!trusted(event)) throw new Error('Invalid diagnostics sender');
     return op === 'read' ? connectionLog.snapshot() : connectionLog.command(op);
+  });
+  ipcMain.handle('desktop:recording', (event, value) => {
+    if (!trusted(event)) throw new Error('Invalid recording sender');
+    if (!value || typeof value !== 'object') throw new Error('Invalid recording request');
+    if (value.op === 'put') return recordingStore.put(value.id, value.bytes);
+    if (value.op === 'read') return recordingStore.read(value.id);
+    if (value.op === 'remove') return recordingStore.remove(value.id);
+    if (value.op === 'clear') return recordingStore.clear();
+    throw new Error('Invalid recording operation');
   });
   ipcMain.handle('desktop:capture-app', async event => {
     if (!trusted(event)) throw new Error('Invalid capture sender');

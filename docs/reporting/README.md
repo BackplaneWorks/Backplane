@@ -94,3 +94,48 @@ writer/editable-preview flow at desktop and phone widths, native model/adapters,
 production bundles and a real isolated hub with a stand-in provider. No test
 creates an external issue or uses a real provider credential. Native SwiftUI
 execution requires Xcode; absence is reported as unqualified, not a pass.
+
+## Screen recordings
+
+Desktop Electron and capable desktop browsers show Record screen. Pick the
+window or screen in the chooser. A separate Recording screen bar remains
+visible while the app is usable. Stop recording finishes the clip; Cancel,
+closing the report while a picker is open, or leaving the page stops all tracks.
+No microphone or system audio is requested. Recording ends at about two minutes
+or near the 9 MiB limit. An oversized final chunk is discarded with an error.
+
+Play the WebM preview before selecting Attach recording. Starting or stopping a
+recording never uploads it. Internal Send and the public report agent use the
+normal authenticated file attachment route and stable retry keys. They append
+the video path as a normal attachment, so the agent receives the same file-style
+input as a user-shared recording. Public selection is unchecked initially and
+is cleared when switching destinations. It warns that a recording can show
+private information and cannot redact the video. Save selected recording gives
+the reporter a WebM to attach manually on GitHub. No video enters an issue URL,
+structured diagnostics export or automatic GitHub submission.
+
+The desktop keeps two clips for at most 24 hours in the private
+`<home>/diagnostics-recordings` directory. This is separate from the 1 MiB
+metadata journal. The recording folder has a 32 MiB cap measured over logical
+and allocated file sizes, including temporary writes and directory allocation.
+Files are private, links and caller-supplied paths are refused, and interrupted
+writes are cleaned up. Startup, reads/writes and a 15-minute sweep apply expiry.
+Discard recording and Clear local diagnostics remove the local copies. Once a
+person sends a recording to an agent, that attachment follows the normal thread
+history rules; clearing local capture copies does not delete a sent message.
+
+Web browsers use the origin-private `diagnostics-recordings` folder through
+OPFS, with the same clip, count and age limits and a 32 MiB measured payload
+budget including replacement allowance. Physical browser disk allocation is
+managed by the browser and is not claimed as measured. Browser quota or failed
+writes prevent attachment and retain the report text. Expiry is checked on use.
+There is no fallback that uploads a recording to a hub merely to store it.
+
+Mobile and unsupported browsers hide the control. Electron grants display
+capture only to its authenticated main frame after a user gesture. On Wayland,
+PipeWire's portal chooser selects the source. X11 uses an explicit local
+window/screen picker. Source names and thumbnails are never logged or stored.
+The session permission check and display request handler are both restricted;
+camera and microphone permissions remain denied. See Electron's
+[display capture API](https://www.electronjs.org/docs/latest/api/session#sessetdisplaymediarequesthandlerhandler-opts)
+and [PipeWire behavior](https://github.com/electron/electron/blob/main/docs/api/desktop-capturer.md).

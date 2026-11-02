@@ -35,6 +35,12 @@ else new MutationObserver((_, seen) => { if (document.documentElement) { seen.di
 contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   theme,
   captureApp: () => ipcRenderer.invoke('desktop:capture-app'),
+  recording: Object.freeze({
+    put: (id, bytes) => ipcRenderer.invoke('desktop:recording', { op: 'put', id, bytes }),
+    read: id => ipcRenderer.invoke('desktop:recording', { op: 'read', id }),
+    remove: id => ipcRenderer.invoke('desktop:recording', { op: 'remove', id }),
+    clear: () => ipcRenderer.invoke('desktop:recording', { op: 'clear' }),
+  }),
   diagnostics: op => ipcRenderer.invoke('desktop:diagnostics', op),
   onImprovements: callback => {
     if (typeof callback !== 'function') throw new TypeError('Expected a callback');
