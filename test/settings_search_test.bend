@@ -60,6 +60,8 @@ def main() -> IO(Unit):
     C.Check.str("fallback search opens Agents", found("fallback"), "agents")
     C.Check.str("hierarchy search opens Agents", found("hierarchy"), "agents")
     C.Check.str("fallback hint names the editor", U.Settings.hint(I.En{}, "agents", "fallback"), "Fallback hierarchy")
+    C.Check.str("Antigravity search finds Agents", found("antigravity"), "agents")
+    C.Check.str("Gemini search finds Agents", found("gemini"), "agents")
     C.Check.str("nothing found", found("zzzz"), "")
     C.Check.str("the hint names the rows that matched", U.Settings.hint(I.En{}, "ordering", "price"), "Price estimates")
     C.Check.str("no hint without a query", U.Settings.hint(I.En{}, "ordering", ""), "")

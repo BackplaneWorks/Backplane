@@ -38,7 +38,7 @@ def Ps.login(p: String) -> String:
     case "opencode": "On the hub machine, run opencode auth login and choose your provider."
     case "pi": "On the hub machine, run pi, then enter /login and follow its instructions."
     case "omp": "On the hub machine, run omp, then enter /login and follow its instructions."
-    case _: "Open Settings → Antigravity for its supported installation and sign-in options."
+    case _: "Open Settings → Agents → Antigravity for its supported installation and sign-in options."
 
 def Ps.connected(+p: J.Json) -> Bool:
   String.eq(J.Json.get_str(p, "state", ""), "connected")
