@@ -1,7 +1,7 @@
 // Only workspace destinations coalesce; sends, destructive actions, field edits
 // and terminal toggles retain their ordered, once-only transport semantics.
 export function viewerChoice(action, value) {
-  return action === 'view-kind' && ['board','schematic','3d','browser'].includes(value)
+  return action === 'view-kind' && ['board','schematic','3d','split','browser'].includes(value)
     || ['mech','fm','diff'].includes(action) && value === ''
     || action === 'rv-page' && value === 'bom';
 }
@@ -11,7 +11,7 @@ export function viewerChoice(action, value) {
 export function installViewerFeedback(root = document) {
   let pending = null;
   const sync = () => {
-    for (const bar of root.querySelectorAll('.workspace-bar,.viewer-tabs')) {
+    for (const bar of root.querySelectorAll('.workspace-bar,.viewer-tabs,.top-views')) {
       for (const button of bar.querySelectorAll('button')) {
         const selected = pending && button.dataset.onClick === pending.action && button.dataset.value === pending.value;
         if (selected && button.dataset.viewerPending !== 'true') button.dataset.viewerPending = 'true';
@@ -23,6 +23,21 @@ export function installViewerFeedback(root = document) {
     if (status) {
       const text = pending ? loading : '';
       if (status.textContent !== text) status.textContent = text;
+    }
+    // Phones select from the top bar; their desktop rail (and its status)
+    // is hidden. Keep acknowledgement visible while the hub draws the pane.
+    const top = root.querySelector('.top-views');
+    if (top) {
+      let note = top.querySelector('.viewer-choice-status');
+      if (!note) {
+        note = top.ownerDocument.createElement('span');note.className = 'viewer-choice-status';
+        note.setAttribute('role', 'status');top.append(note);
+      }
+      const text = pending ? loading : '';
+      if (note.textContent !== text) note.textContent = text;
+      const summary = top.querySelector('.workspace-menu > summary');
+      if (pending) summary?.setAttribute('aria-busy', 'true');
+      else summary?.removeAttribute('aria-busy');
     }
     const viewer = root.querySelector('#viewer');
     if (viewer) {
