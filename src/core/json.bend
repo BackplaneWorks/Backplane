@@ -364,7 +364,9 @@ type Lex is Data:
   LIdle{}
   LStr{acc: String}
   LEsc{acc: String}
-  LUni{acc: String, left: Nat, code: U32}
+  LUni{acc: String, left: Nat, code: U32, hi: U32}
+  LHi{acc: String, hi: U32}
+  LHiE{acc: String, hi: U32}
   LAtom{acc: String, num: Bool}
 
 type Cls is Data:
@@ -451,7 +453,7 @@ def Lex.esc.b.k(b: Bool, f: Bool, +u: U32, acc: String) -> Lex:
 def Lex.esc.k(uu: Bool, n: Bool, t: Bool, r: Bool, +u: U32, acc: String) -> Lex:
   match uu n t r:
     case True{} _ _ _:
-      LUni{acc, 4n, 0}
+      LUni{acc, 4n, 0, 0}
     case _ True{} _ _:
       LStr{SCon{Chr{10}, acc}}
     case _ _ True{} _:
@@ -478,13 +480,51 @@ def Lex.hexval.k(d: Bool, up: Bool, +u: U32) -> U32:
 def Lex.hexval(+u: U32) -> U32:
   Lex.hexval.k(U32.is_le(u, 57), U32.is_le(u, 70), u)
 
+# A \uXXXX escape is one UTF-16 unit: a character past U+FFFF comes as a
+# high and a low surrogate escape (Python's json.dumps writes every emoji
+# so). The pair is one Char; a surrogate without its partner is U+FFFD, as
+# wire.js's json() makes a lone one. Never a Char of a surrogate: Bend
+# refuses to make one, and the hub stopped at every start on a boat status
+# file holding an escaped emoji (2026-11-02).
+def Lex.is_hi(+u: U32) -> Bool:
+  Bool.and(U32.is_ge(u, 55296), U32.is_le(u, 56319))
+
+def Lex.is_lo(+u: U32) -> Bool:
+  Bool.and(U32.is_ge(u, 56320), U32.is_le(u, 57343))
+
+def Lex.pair(+hi: U32, +lo: U32) -> U32:
+  ((U32.shln((hi - 55296 : U32), 10n) + 65536 : U32) + (lo - 56320 : U32) : U32)
+
+# a finished unit with no high surrogate waiting
+def Lex.unit(hi: Bool, lo: Bool, +code: U32, acc: String) -> Lex:
+  match hi lo:
+    case True{} _:
+      LHi{acc, code}
+    case _ True{}:
+      LStr{SCon{Chr{65533}, acc}}
+    case _ _:
+      LStr{SCon{Chr{code}, acc}}
+
+# a finished unit after the high surrogate `hi` (0: none waiting)
+def Lex.unit.after(wait: Bool, lo: Bool, +hi: U32, +code: U32, acc: String) -> Lex:
+  match wait lo:
+    case True{} True{}:
+      LStr{SCon{Chr{Lex.pair(hi, code)}, acc}}
+    case True{} False{}:
+      Lex.unit(Lex.is_hi(code), False{}, code, SCon{Chr{65533}, acc})
+    case False{} _:
+      Lex.unit(Lex.is_hi(code), Lex.is_lo(code), code, acc)
+
+def Lex.unit.end(+code: U32, +hi: U32, acc: String) -> Lex:
+  Lex.unit.after(Bool.not(U32.is_eq(hi, 0)), Lex.is_lo(code), hi, code, acc)
+
 # one more hex digit of a \uXXXX escape
-def Lex.uni(acc: String, left: Nat, +code: U32, c: Char) -> Lex:
+def Lex.uni(acc: String, left: Nat, +code: U32, +hi: U32, c: Char) -> Lex:
   match left c:
     case 1n+0n Chr{+u}:
-      LStr{SCon{Chr{U32.or(U32.shln(code, 4n), Lex.hexval(u))}, acc}}
+      Lex.unit.end(U32.or(U32.shln(code, 4n), Lex.hexval(u)), hi, acc)
     case 1n+p Chr{+u}:
-      LUni{acc, p, U32.or(U32.shln(code, 4n), Lex.hexval(u))}
+      LUni{acc, p, U32.or(U32.shln(code, 4n), Lex.hexval(u)), hi}
     case 0n _:
       LStr{acc}
 
@@ -523,6 +563,21 @@ def Lex.atom.step(k: Cls, c: Char, acc: String, num: Bool, out: List<&2, Tok>) -
     case _:
       Lex.idle(k, c, Lex.atom(acc, num) <> out)
 
+# after a high surrogate escape: its low half must follow as \uXXXX
+def Lex.hi.k(bs: Bool, +hi: U32, c: Char, acc: String, out: List<&2, Tok>) -> Lex & List<&2, Tok>:
+  match bs:
+    case True{}:
+      (LHiE{acc, hi}, out)
+    case False{}:
+      Lex.str(c, SCon{Chr{65533}, acc}, out)
+
+def Lex.hie.k(uu: Bool, +hi: U32, c: Char, acc: String) -> Lex:
+  match uu:
+    case True{}:
+      LUni{acc, 4n, 0, hi}
+    case False{}:
+      Lex.esc(c, SCon{Chr{65533}, acc})
+
 def Lex.step(st: Lex, c: Char, out: List<&2, Tok>) -> Lex & List<&2, Tok>:
   match st c:
     case LIdle{} Chr{+u}:
@@ -531,8 +586,12 @@ def Lex.step(st: Lex, c: Char, out: List<&2, Tok>) -> Lex & List<&2, Tok>:
       Lex.str(c, acc, out)
     case LEsc{acc} _:
       (Lex.esc(c, acc), out)
-    case LUni{acc, left, code} _:
-      (Lex.uni(acc, left, code, c), out)
+    case LUni{acc, left, code, hi} _:
+      (Lex.uni(acc, left, code, hi, c), out)
+    case LHi{acc, hi} Chr{+u}:
+      Lex.hi.k(U32.is_eq(u, 92), hi, Chr{u}, acc, out)
+    case LHiE{acc, hi} Chr{+u}:
+      (Lex.hie.k(U32.is_eq(u, 117), hi, Chr{u}, acc), out)
     case LAtom{acc, num} Chr{+u}:
       Lex.atom.step(Lex.cls.p(u), Chr{u}, acc, num, out)
 

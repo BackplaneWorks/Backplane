@@ -15418,3 +15418,5 @@ def Laws.pending_projection_unfitted(xs): {==}
 def Laws.pending_preview_whole(text): {==}
 
 def Laws.pending_preview_ellipsis(c, rest, head): {==}
+
+def Laws.json_surrogate_pair(): {==}

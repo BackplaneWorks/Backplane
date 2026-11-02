@@ -15417,3 +15417,10 @@ law pending_preview_ellipsis:
   for rest: String
   for head: String
   {U.Pending.preview.k(SCon{c, rest}, head) == head ++ "…" : String}
+
+# a \uXXXX surrogate pair (how Python's json.dumps writes every emoji) is
+# one character, and a surrogate without its partner is U+FFFD: JSON text
+# never stops the parser on a Char Bend refuses to make (the hub stopped at
+# every start on an escaped emoji in a boat status file, 2026-11-02)
+law json_surrogate_pair:
+  {J.Json.show(Maybe.default(&2, J.Json, J.Json.parse("\"\\ud83d\\udc69|\\ud83d|\\udc69\""), J.Null{})) == "\"\u{1F469}|\u{FFFD}|\u{FFFD}\"" : String}
