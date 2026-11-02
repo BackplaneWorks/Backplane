@@ -16640,17 +16640,17 @@ def Od.quoted.k(ok: Bool, +q: J.Json, +inbox: Chan(Msg), +home: String, +server:
           J.Json.get_str(J.Json.get_obj(q, "quote"), "pay_label", "Buy now"), OR.Order.payable(q)))
         Od.card(inbox, thread, OR.Order.sum(q, ODI.Od.pay(server, qid, token)), qid, True{})
         ODI.Od.keep(home, qid, token, thread, server, "quoted")
-        Od.wake(inbox, thread, "The quote is posted in this thread. " ++ OR.Order.said(q))
+        Od.wake(inbox, thread, OR.Order.wake.posted(OR.Order.said(q)))
         Od.watch(9000n, inbox, home, server, qid, token, thread, "quoted")
     case False{}:
-      Od.wake(inbox, thread, "The quote could not be worked out: " ++ J.Json.get_str(q, "error", "no answer from the order server") ++ ".")
+      Od.wake(inbox, thread, OR.Order.wake.failed(J.Json.get_str(q, "error", "no answer from the order server")))
 
 def Od.quoted(+q: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String) -> IO(Unit):
   Od.quoted.k(Bool.not(String.is_empty(J.Json.get_str(q, "status", ""))), q, inbox, home, server, qid, token, thread)
 
 def Od.sent(+up: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +install: String, +thread: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.is_empty(J.Json.get_str(up, "token", "")),
-    Od.wake(inbox, thread, "The files were not taken: " ++ J.Json.get_str(up, "error", "no answer") ++ "."),
+    Od.wake(inbox, thread, OR.Order.wake.untaken(J.Json.get_str(up, "error", "no answer"))),
     IO.bind(J.Json, Unit, ODI.Od.poll(60n, home, server, install, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", "")),
       q => Od.quoted(q, inbox, home, server, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", ""), thread)))
 

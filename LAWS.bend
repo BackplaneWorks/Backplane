@@ -10339,6 +10339,43 @@ law order_card_no_buy_paid:
 law order_card_buys_quoted:
   {ORD.Order.card.buys(3n, "ready", True{}) == True{} : Bool}
 
+# the hub's notes to the agent once the quote is settled show nothing in
+# the conversation (fold.bend's Fold.note); the agent still gets them
+law order_wake_hidden:
+  for +i: String
+  for +th: String
+  for +said: String
+  for +a: Nat
+  {FO.Fold.blank(M.Msg{i, th, M.System{}, "[Backplane] " ++ ORD.Order.wake.posted(said), a}) == True{} : Bool}
+
+law order_wake_failed_hidden:
+  for +i: String
+  for +th: String
+  for +e: String
+  for +a: Nat
+  {FO.Fold.blank(M.Msg{i, th, M.System{}, "[Backplane] " ++ ORD.Order.wake.failed(e), a}) == True{} : Bool}
+
+law order_wake_untaken_hidden:
+  for +i: String
+  for +th: String
+  for +e: String
+  for +a: Nat
+  {FO.Fold.blank(M.Msg{i, th, M.System{}, "[Backplane] " ++ ORD.Order.wake.untaken(e), a}) == True{} : Bool}
+
+law order_wake_declined_hidden:
+  for +i: String
+  for +th: String
+  for +a: Nat
+  {FO.Fold.blank(M.Msg{i, th, M.System{}, "[Backplane] " ++ ORD.Order.quote.declined(), a}) == True{} : Bool}
+
+# the same words from the person still show
+law order_wake_person_shown:
+  for +i: String
+  for +th: String
+  for +said: String
+  for +a: Nat
+  {FO.Fold.blank(M.Msg{i, th, M.User{}, "[Backplane] " ++ ORD.Order.wake.posted(said), a}) == False{} : Bool}
+
 # what the price covers about customs, said plainly
 law order_customs_paid:
   {ORD.Order.customs(True{}) == "Includes import VAT and duties: nothing to pay on delivery." : String}

@@ -173,6 +173,19 @@ def Order.status.now(unsent: Bool, sent: Bool) -> String:
 def Order.quote.declined() -> String:
   "The person chose not to send the files (Not now). Ask whether anything should change first."
 
+# The hub's words to the agent once the quote is settled (Hub.order.wake
+# posts them as a "[Backplane] " system note): only the agent reads them;
+# the conversation hides them (fold.bend's Fold.note, which keeps their
+# openings; law order_wake_hidden)
+def Order.wake.posted(+said: String) -> String:
+  "The quote is posted in this thread. " ++ said
+
+def Order.wake.failed(+error: String) -> String:
+  "The quote could not be worked out: " ++ error ++ "."
+
+def Order.wake.untaken(+error: String) -> String:
+  "The files were not taken: " ++ error ++ "."
+
 # A buy thread's questions show in a "Backplane needs" card above the
 # composer. One whose answer is typed (where it ships) is the tool
 # "order_ask.typed": a box with Continue on every client, its quick choice
