@@ -36,7 +36,7 @@ test('public report writer, exact editable preview, evidence and consent on desk
   await page.locator('#improvements-evidence').fill('I restarted the test hub, waited for reconnect, then opened a thread. The conversation loaded, but the connection dot stayed red.');
   await page.getByRole('button',{name:'Write report with agent',exact:true}).click();await page.getByRole('button',{name:'Load agent report',exact:true}).waitFor();
   const calls=await page.evaluate(()=>fixture.calls),turn=calls.find(x=>x.m==='turn.start');assert.equal(calls[0].p.project,'reports');assert.equal(turn.p.accountBinding,'fixture-generation');
-  assert.match(turn.p.text,/ASD-STE100/);assert.match(turn.p.text,/# Unslop/);assert.match(turn.p.text,/image or a thorough description/);assert(turn.p.text.endsWith(description));assert(!turn.p.text.includes('PRIVATE-thread'));assert(!turn.p.text.includes('/home/PRIVATE'));assert.equal(await page.evaluate(()=>fixture.reads),0);
+  assert.match(turn.p.text,/ASD-STE100/);assert.match(turn.p.text,/# Unslop/);assert.match(turn.p.text,/image, a screen recording or a thorough description/);assert(turn.p.text.endsWith(description));assert(!turn.p.text.includes('PRIVATE-thread'));assert(!turn.p.text.includes('/home/PRIVATE'));assert.equal(await page.evaluate(()=>fixture.reads),0);
   await page.getByRole('button',{name:'Load agent report',exact:true}).click();assert.match(await page.locator('.improvements [role=status]').textContent(),/still working/);
   await page.evaluate(()=>fixture.done=true);await page.getByRole('button',{name:'Load agent report',exact:true}).click();await page.locator('#improvements-review').waitFor();
   assert.equal(await page.locator('#improvements-review').inputValue(),await page.evaluate(()=>fixture.body));
