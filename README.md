@@ -51,7 +51,7 @@ See [installation](docs/install.md) for setup, phone pairing and uninstalling. Y
 The viewers show the design as the agent works.
 
 - **Board, Schematic, 3D.** Hierarchical schematics, layer controls in KiCad’s order and names, and cross-probing between views.
-- **Mech.** View STEP or GLB models. Agents model parts with FreeCAD scripts, export STEP, and show the result here.
+- **Mech.** View STEP or GLB models. Agents model parts with FreeCAD scripts, export STEP, and show the result here. Mechanical-only folders need no KiCad project; see the [mechanical quickstart](docs/mechanical.md).
 - **History and review.** Compare versions, inspect changes by sheet and layer, pin comments to a board or schematic, and run BOM, ERC and DRC checks from the Review tab.
 - **Skills.** KiCad skills from [KiStack](https://github.com/BackplaneWorks/kistack) ship with the app: schematic, layout, footprints, BOM and fabrication exports.
 - **Ordering.** When a design has a fab file, Buy it opens a thread that checks the design and gets a quote. See [ordering](docs/order.md).
