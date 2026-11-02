@@ -46,7 +46,7 @@ def info(+s: M.State, +call: String) -> SB.SubInfo:
 
 def runs(i: SB.SubInfo) -> String:
   match i:
-    case SB.SubInfo{w, m, si, u, n, tk, SB.SubStep{lk, lt}, a, o}:
+    case SB.SubInfo{w, m, si, u, n, tk, SB.SubStep{lk, lt}, a, o, _}:
       w ++ "|" ++ m ++ "|" ++ Nat.show(si) ++ "|" ++ Nat.show(u) ++ "|" ++ Nat.show(n) ++ "|" ++ Nat.show(tk) ++ "|" ++ lk ++ " " ++ lt ++ "|" ++ a ++ "|" ++ o
 
 def steps(as: List<&2, SB.SubAgg>) -> String:
@@ -60,6 +60,10 @@ def opened() -> Map<&2, String>:
 
 def page(+s: M.State, +now: Nat) -> String:
   J.Json.show(P.Node.write(D.El{"div", "", Nil{}, V.View.subs.signals.at(I.En{}, SB.Subs.rows(s, opened(), "t1", now), opened(), s, "t1", now)}))
+
+# c2 at work (open by itself) beside a timeline row with the same id
+def rowsnode(+info: Map<&2, String>) -> D.Node:
+  D.El{"div", "", Nil{}, D.El{"div", "c2", [D.At{"class", "act tool"}], Nil{}} <> V.View.subs.signals.at(I.En{}, SB.Subs.rows(live(), info, "t1", 280n), info, live(), "t1", 280n)}
 
 def yes(b: Bool) -> String:
   Bool.pick(String, b, "yes", "no")
@@ -111,6 +115,18 @@ def main() -> IO(Unit):
     C.Check.str("a progress line without usage leaves the line as it was", String.join(H.Bg.progress.o(M.Bg.of(live(), "t1"), Maybe.default(&2, J.Json, J.Json.parse("{\"task_id\":\"a\",\"description\":\"x\"}"), J.Null{})), "\n"), "a\tx\tc2\tCheck the parts\tsubagent")
     +used : M.State = M.State.replay([M.SettingSet{"bg.t1", String.join(rows, "\n"), 2n}], live())
     C.Check.str("at work: the tokens so far", runs(info(used, "c2")), "Claude Code subagent||100|0|1|4200|Bash ls parts||")
+    # a row's own fold shows at the click: its steps are drawn shut too
+    +shutinfo : Map<&2, String> = Map.set(&2, String, Map.new(&2, String), "fold:sub:c2", "0")
+    C.Check.str("shut, a row still has its steps, hidden", yes(String.contains(J.Json.show(P.Node.write(rowsnode(shutinfo))), "\"sub-detail\"")), "yes")
+    C.Check.str("shut, the row is not open", yes(String.contains(J.Json.show(P.Node.write(rowsnode(shutinfo))), " open\"")), "no")
+    +opened2 : String = J.Json.show(P.Node.write(P.Node.overlay.rows(rowsnode(shutinfo), "", False{}, "", "1c2")))
+    C.Check.str("opened at the click, the row is open", yes(String.contains(opened2, "running live open\"")), "yes")
+    C.Check.str("opened at the click, its next click shuts", yes(String.contains(opened2, "\"0sub:c2\"")), "yes")
+    C.Check.str("opened at the click, a timeline row with its id is left alone", yes(String.contains(opened2, "\"act tool\"")), "yes")
+    +shut2 : String = J.Json.show(P.Node.write(P.Node.overlay.rows(rowsnode(Map.new(&2, String)), "", False{}, "", "0c2")))
+    C.Check.str("shut at the click, the row is not open", yes(String.contains(shut2, " open\"")), "no")
+    C.Check.str("shut at the click, its next click opens", yes(String.contains(shut2, "\"1sub:c2\"")), "yes")
+    C.Check.str("no row click pending: as drawn", yes(String.eq(J.Json.show(P.Node.write(P.Node.overlay.rows(rowsnode(shutinfo), "", False{}, "", ""))), J.Json.show(P.Node.write(rowsnode(shutinfo))))), "yes")
     # the hub notes an Agent call's type, model and prompt in its subagent's log
     +cs : List<&2, M.Change> = H.Claude.block.k(1n, "t1", "m", 0n, 5n, 0n, "", agent("c9", "{\"description\":\"Check\",\"prompt\":\"Look\",\"subagent_type\":\"Explore\",\"model\":\"haiku\"}"), False{})
     C.Check.str("an Agent call is logged and noted", kinds(cs), "t1:Agent;@sub:t1:about;")

@@ -315,8 +315,8 @@ def presentation_reset(+u: U.Ui, now: Nat, cid: String) -> U.Ui:
   presentation_handoff(init(now, cid), presentation(u))
 
 def presentation_overlay(node: D.Node, +session: J.Json) -> D.Node:
-  P.Node.read.first(V.View.local(P.Node.overlay.subs(node, J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), ""),
-    J.Json.get_bool(J.Json.get_obj(session, "open"), "models", False{}), J.Json.get_str(session, "subsFold", "")), J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), "")))
+  P.Node.read.first(V.View.local(P.Node.overlay.rows(node, J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), ""),
+    J.Json.get_bool(J.Json.get_obj(session, "open"), "models", False{}), J.Json.get_str(session, "subsFold", ""), J.Json.get_str(session, "subsRows", "")), J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), "")))
 
 # this page is a desk (core/desk.bend): host.js calls this after input,
 # focus and visibility changes; it answers the desk.look to send, when due

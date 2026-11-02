@@ -139,6 +139,64 @@ def Node.subs.attrs(none: Bool, head: Bool, attrs: List<&2, D.Attr>, open: Bool)
     case False{} True{}: Node.subs.head(attrs, open)
     case False{} False{}: Node.subs.section(attrs, open)
 
+# A subagent's row opened or shut at the click (subs-feedback.js's rows:
+# a line "1<key>" or "0<key>" each), ahead of the hub's view: the row's
+# " open" and its button's aria-expanded and next fold value (fold.bend's
+# Fold.ask: its first character). Its steps are drawn either way
+# (view.bend's View.sub.detail).
+def Node.rows.go(ls: List<&2, String>, +key: String) -> String:
+  match ls:
+    case Nil{}: ""
+    case +l <> t: Bool.pick(String, String.eq(String.drop(l, 1n), key), String.take(l, 1n), Node.rows.go(t, key))
+
+def Node.rows.get(none: Bool, +rows: String, +key: String) -> String:
+  match none:
+    case True{}: ""
+    case False{}: Node.rows.go(String.split(rows, '\n'), key)
+
+def Node.rows.bare(+c: String) -> String:
+  Bool.pick(String, String.ends_with(c, " open"), String.take(c, Nat.sub(String.length(c), 5n)), c)
+
+def Node.rows.attrs(attrs: List<&2, D.Attr>, +open: Bool) -> List<&2, D.Attr>:
+  match attrs:
+    case Nil{}: Nil{}
+    case D.At{"class", c} <> tail: D.At{"class", Node.rows.bare(c) ++ Bool.pick(String, open, " open", "")} <> Node.rows.attrs(tail, open)
+    case head <> tail: head <> Node.rows.attrs(tail, open)
+
+def Node.rows.button(attrs: List<&2, D.Attr>, +open: Bool) -> List<&2, D.Attr>:
+  match attrs:
+    case Nil{}: Nil{}
+    case D.At{"aria-expanded", _} <> tail: D.At{"aria-expanded", Node.subs.word(open)} <> Node.rows.button(tail, open)
+    case D.At{"data-value", v} <> tail: D.At{"data-value", Bool.pick(String, open, "0", "1") ++ String.drop(v, 1n)} <> Node.rows.button(tail, open)
+    case head <> tail: head <> Node.rows.button(tail, open)
+
+# the row's own button is its first child
+def Node.rows.kids(kids: List<&2, D.Node>, +open: Bool) -> List<&2, D.Node>:
+  match kids:
+    case D.El{"button", k, as, ks} <> tail: D.El{"button", k, Node.rows.button(as, open), ks} <> tail
+    case _: kids
+
+# only a Subagents row (class "sub ..."): a timeline row may carry the
+# same id (the Agent call that started it)
+def Node.rows.sub(attrs: List<&2, D.Attr>) -> Bool:
+  match attrs:
+    case Nil{}: False{}
+    case D.At{"class", c} <> _: String.starts_with(c, "sub ")
+    case _ <> tail: Node.rows.sub(tail)
+
+def Node.rows.el.k(hit: Bool, +open: Bool, +tag: String, +key: String, attrs: List<&2, D.Attr>, kids: List<&2, D.Node>) -> D.Node:
+  match hit:
+    case False{}: D.El{tag, key, attrs, kids}
+    case True{}: D.El{tag, key, Node.rows.attrs(attrs, open), Node.rows.kids(kids, open)}
+
+def Node.rows.el.h(none: Bool, +hit: String, +tag: String, +key: String, +attrs: List<&2, D.Attr>, kids: List<&2, D.Node>) -> D.Node:
+  match none:
+    case True{}: D.El{tag, key, attrs, kids}
+    case False{}: Node.rows.el.k(Node.rows.sub(attrs), String.eq(hit, "1"), tag, key, attrs, kids)
+
+def Node.rows.el(+hit: String, +tag: String, +key: String, +attrs: List<&2, D.Attr>, kids: List<&2, D.Node>) -> D.Node:
+  Node.rows.el.h(String.is_empty(hit), hit, tag, key, attrs, kids)
+
 def Node.overlay.attrs(key: String, +attrs: List<&2, D.Attr>, text: String, open: Bool, +subs: String) -> List<&2, D.Attr>:
   match key:
     case "model-layer": Node.models.attrs(attrs, open)
@@ -175,16 +233,19 @@ def Node.overlay.kids(key: String, +open: Bool, kids: List<&2, D.Node>) -> List<
     case "model-layer": Node.models.kids(open, kids)
     case _: kids
 
-def Node.overlay.go(nodes: List<&2, D.Node>, +text: String, +open: Bool, +subs: String, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+def Node.overlay.go(nodes: List<&2, D.Node>, +text: String, +open: Bool, +subs: String, +rows: String, acc: List<&2, D.Node>) -> List<&2, D.Node>:
   match nodes:
     case Nil{}: acc
-    case D.Txt{value} <> tail: Node.overlay.go(tail, text, open, subs, D.Txt{value} <> acc)
-    case D.El{tag, +key, attrs, kids} <> tail:
-      Node.overlay.go(tail, text, open, subs, D.El{tag, key, Node.overlay.attrs(key, attrs, text, open, subs),
-        Node.overlay.kids(key, open, List.reverse(&2, D.Node, Node.overlay.go(kids, text, open, subs, Nil{})))} <> acc)
+    case D.Txt{value} <> tail: Node.overlay.go(tail, text, open, subs, rows, D.Txt{value} <> acc)
+    case D.El{+tag, +key, attrs, kids} <> tail:
+      Node.overlay.go(tail, text, open, subs, rows, Node.rows.el(Node.rows.get(String.is_empty(rows), rows, key), tag, key, Node.overlay.attrs(key, attrs, text, open, subs),
+        Node.overlay.kids(key, open, List.reverse(&2, D.Node, Node.overlay.go(kids, text, open, subs, rows, Nil{})))) <> acc)
+
+def Node.overlay.rows(node: D.Node, text: String, open: Bool, subs: String, rows: String) -> D.Node:
+  Node.read.first(Node.overlay.go([node], text, open, subs, rows, Nil{}))
 
 def Node.overlay.subs(node: D.Node, text: String, open: Bool, subs: String) -> D.Node:
-  Node.read.first(Node.overlay.go([node], text, open, subs, Nil{}))
+  Node.overlay.rows(node, text, open, subs, "")
 
 def Node.overlay(node: D.Node, text: String, open: Bool) -> D.Node:
   Node.overlay.subs(node, text, open, "")

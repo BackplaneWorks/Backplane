@@ -899,15 +899,17 @@ def Subs.active(rs: List<&2, SubRow>, +info: Map<&2, String>) -> Nat:
 # it reported. Nothing here is guessed: a field the log has not got is
 # empty (0, "") and the row leaves it out.
 type SubInfo is Data:
-  SubInfo{runs: String, model: String, since: Nat, until: Nat, steps: Nat, tokens: Nat, last: SubStep, ask: String, outcome: String}
+  SubInfo{runs: String, model: String, since: Nat, until: Nat, steps: Nat, tokens: Nat, last: SubStep, ask: String, outcome: String, shown: List<&2, SubStep>}
 
 def SubInfo.none() -> SubInfo:
-  SubInfo{"", "", 0n, 0n, 0n, 0n, SubStep{"", ""}, "", ""}
+  SubInfo{"", "", 0n, 0n, 0n, 0n, SubStep{"", ""}, "", "", Nil{}}
 
 # a subagent's own entries, newest first: its start and end times, its
-# step count and newest step, the newest of what the hub noted
+# step count, newest step and newest Subs.shown() steps (oldest first: the
+# page draws them shut too, hidden, so a click shows them at once), the
+# newest of what the hub noted
 type SubWalk is Data:
-  SubWalk{since: Nat, until: Nat, n: Nat, last: SubStep, about: String, outcome: String}
+  SubWalk{since: Nat, until: Nat, n: Nat, last: SubStep, about: String, outcome: String, ss: List<&2, SubStep>}
 
 def Walk.first(+have: String, +text: String) -> String:
   Bool.pick(String, String.is_empty(have), text, have)
@@ -927,14 +929,14 @@ def Walk.empty(s: SubStep) -> Bool:
 
 def Walk.act(i: Nat, w: SubWalk, +kind: String, +text: String, +at: Nat) -> SubWalk:
   match i w:
-    case 0n SubWalk{_, u, n, l, ab, oc}:
-      SubWalk{at, u, n, l, ab, oc}
-    case 1n SubWalk{si, +u, n, l, ab, oc}:
-      SubWalk{si, Bool.pick(Nat, Nat.is_eq(u, 0n), at, u), n, l, ab, oc}
-    case 3n SubWalk{si, u, n, l, +ab, +oc}:
-      SubWalk{si, u, n, l, Bool.pick(String, String.eq(kind, "about"), Walk.first(ab, text), ab), Bool.pick(String, String.eq(kind, "outcome"), Walk.first(oc, text), oc)}
-    case _ SubWalk{si, u, +n, +l, ab, oc}:
-      SubWalk{si, u, 1n+n, Walk.last(Walk.empty(l), kind, text, l), ab, oc}
+    case 0n SubWalk{_, u, n, l, ab, oc, ss}:
+      SubWalk{at, u, n, l, ab, oc, ss}
+    case 1n SubWalk{si, +u, n, l, ab, oc, ss}:
+      SubWalk{si, Bool.pick(Nat, Nat.is_eq(u, 0n), at, u), n, l, ab, oc, ss}
+    case 3n SubWalk{si, u, n, l, +ab, +oc, ss}:
+      SubWalk{si, u, n, l, Bool.pick(String, String.eq(kind, "about"), Walk.first(ab, text), ab), Bool.pick(String, String.eq(kind, "outcome"), Walk.first(oc, text), oc), ss}
+    case _ SubWalk{si, u, +n, +l, ab, oc, ss}:
+      SubWalk{si, u, 1n+n, Walk.last(Walk.empty(l), kind, text, l), ab, oc, Agg.step(kind, text, n, ss)}
 
 def Walk.entry(e: M.Entry, w: SubWalk) -> SubWalk:
   match e:
@@ -953,7 +955,7 @@ def Walk.go(k: Nat, es: List<&2, M.Entry>, w: SubWalk) -> SubWalk:
       Walk.go(j, t, Walk.entry(e, w))
 
 def Subs.walk(+st: M.State, +th: String, +call: String) -> SubWalk:
-  Walk.go(Subs.window(), M.State.mine(st, M.Idx.sub.call(M.Bg.log(th), call)), SubWalk{0n, 0n, 0n, SubStep{"", ""}, "", ""})
+  Walk.go(Subs.window(), M.State.mine(st, M.Idx.sub.call(M.Bg.log(th), call)), SubWalk{0n, 0n, 0n, SubStep{"", ""}, "", "", Nil{}})
 
 def Subs.json(+text: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
@@ -967,11 +969,11 @@ def Subs.runs.own(+kind: String, +ty: String) -> String:
 
 def Subs.info.walked(w: SubWalk, +kind: String) -> SubInfo:
   match w:
-    case SubWalk{si, u, n, l, +ab, +oc}:
+    case SubWalk{si, u, n, l, +ab, +oc, ss}:
       +a = Subs.json(ab)
       +o = Subs.json(oc)
       SubInfo{Subs.runs.own(kind, J.Json.get_str(a, "type", "")), J.Json.get_str(a, "model", ""), si, u, n, J.Json.get_nat(J.Json.get_obj(o, "usage"), "total_tokens", 0n), l,
-        J.Json.get_str(a, "prompt", ""), J.Json.get_str(o, "summary", "")}
+        J.Json.get_str(a, "prompt", ""), J.Json.get_str(o, "summary", ""), ss}
 
 def Subs.link(+id: String) -> String:
   Maybe.default(&2, String, List.head(&2, String, String.split(id, '~')), "")
@@ -1001,7 +1003,7 @@ def Subs.product(+agent: String) -> String:
 def Subs.thread.info(t: M.Thread, +st: M.State, +launched: Bool, live: Bool, +doing: String) -> SubInfo:
   match t:
     case M.Thread{+id, _, _, +created, +activity, _, _, _, _, _, _, _, _, _, _, +pr, +mo, _, _, _, _}:
-      SubInfo{Bool.pick(String, launched, "launched ", "") ++ Subs.or(Subs.or(Subs.product(pr), pr), "Backplane") ++ " thread" ++ Subs.machine(st, id), Subs.model.of(pr, mo), created, Bool.pick(Nat, live, 0n, activity), 0n, 0n, SubStep{"", ""}, "", ""}
+      SubInfo{Bool.pick(String, launched, "launched ", "") ++ Subs.or(Subs.or(Subs.product(pr), pr), "Backplane") ++ " thread" ++ Subs.machine(st, id), Subs.model.of(pr, mo), created, Bool.pick(Nat, live, 0n, activity), 0n, 0n, SubStep{"", ""}, "", "", Nil{}}
 
 # digits as a Nat ("" or anything else: 0)
 def Subs.num.go(s: String, acc: Nat) -> Nat:
@@ -1024,8 +1026,8 @@ def Subs.used(ls: List<&2, String>, +call: String) -> Nat:
 
 def Subs.info.tokens(i: SubInfo, +live: Nat) -> SubInfo:
   match i:
-    case SubInfo{w, m, si, u, n, +tk, l, a, o}:
-      SubInfo{w, m, si, u, n, Bool.pick(Nat, Nat.is_eq(tk, 0n), live, tk), l, a, o}
+    case SubInfo{w, m, si, u, n, +tk, l, a, o, ss}:
+      SubInfo{w, m, si, u, n, Bool.pick(Nat, Nat.is_eq(tk, 0n), live, tk), l, a, o, ss}
 
 def Subs.info.k(agent: Bool, +st: M.State, +th: String, r: SubRow) -> SubInfo:
   match agent r:
