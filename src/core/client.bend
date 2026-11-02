@@ -2503,20 +2503,30 @@ def Side.visible.go(rs: List<&2, SRow>, +open: Map<&2, Bool>) -> List<&2, String
       List.concat(&2, String, [Side.ids(p), Side.ids(a), Side.ids(sn), Side.when(Flag.get(open, id), Side.ids(st)),
         Side.when(Flag.get(open, "arch:" ++ id), Side.ids(M.Archive.of(h))), Side.visible.go(t, open)])
 
+# the older projects a shut Older shelf still shows: the open thread's
+# (pid: its project, "" for none), so the thread open is never folded out
+# of sight (as a shut Settled shelf keeps its row: Side.sel, Shelf.words)
+def Side.older.sel(rs: List<&2, SRow>, +pid: String) -> List<&2, SRow>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      Find.keep(Bool.and(Bool.not(String.is_empty(pid)), String.eq(SRow.pid(r), pid)), r, Side.older.sel(t, pid))
+
 # the projects shown with the Older shelf folded unless it is open or a
-# search is on
-def Side.fold.k(show: Bool, g: SGroups) -> List<&2, SRow>:
+# search is on (folded, it keeps the open thread's project: Side.older.sel)
+def Side.fold.k(show: Bool, g: SGroups, +pid: String) -> List<&2, SRow>:
   match show g:
     case True{} x:
       SGroups.all(x)
-    case False{} SGroups{l, q, _}:
-      List.append(&2, SRow, l, q)
+    case False{} SGroups{l, q, o}:
+      List.append(&2, SRow, l, List.append(&2, SRow, q, Side.older.sel(o, pid)))
 
-def Side.unfolded(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat) -> List<&2, SRow>:
-  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups(rs, now))
+def Side.unfolded(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat, +pid: String) -> List<&2, SRow>:
+  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups(rs, now), pid)
 
-def Side.unfolded.at(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat, +cur: String) -> List<&2, SRow>:
-  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups.at(rs, now, cur))
+def Side.unfolded.at(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat, +cur: String, +pid: String) -> List<&2, SRow>:
+  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups.at(rs, now, cur), pid)
 
 def Side.tree_ids(+st: M.State, ts: List<&2, M.Thread>, +sel: String) -> List<&2, String>:
   ST.Tree.row_ids(ST.Tree.rows(st, ts, sel))
@@ -2533,7 +2543,7 @@ def Side.visible.tree(rs: List<&2, SRow>, +open: Map<&2, Bool>, +st: M.State, +s
 def Side.visible.projects(u: Ui) -> List<&2, String>:
   match u:
     case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.visible.tree(Side.unfolded(Side.shown(st, now, Find.q(op, dr)), op, Find.q(op, dr), now), op, st, sel)
+      Side.visible.tree(Side.unfolded(Side.shown(st, now, Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.of(st, sel)), op, st, sel)
 
 def Side.nth(xs: List<&2, String>, i: Nat) -> String:
   match xs i:
@@ -2614,7 +2624,7 @@ def Side.pids(rs: List<&2, SRow>) -> List<&2, String>:
 def Side.projects(u: Ui) -> List<&2, String>:
   match u:
     case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.pids(Side.unfolded.at(Find.rows(Side.rows.at(st, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now)))
+      Side.pids(Side.unfolded.at(Find.rows(Side.rows.at(st, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now), Side.cur.of(st, sel)))
 
 def Side.only.k(keep: Bool, r: SRow, rest: List<&2, SRow>) -> List<&2, SRow>:
   match keep:
@@ -15349,7 +15359,7 @@ def Side.here(+u: Ui) -> List<&2, String>:
 def Side.projects.ix(u: Ui, +ix: SIx) -> List<&2, String>:
   match u:
     case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.pids(Side.unfolded.at(Find.rows(Side.rows.ix.at(st, ix, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now)))
+      Side.pids(Side.unfolded.at(Find.rows(Side.rows.ix.at(st, ix, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now), Side.cur.of(st, sel)))
 
 def Side.active.project(rs: List<&2, ARow>, +pid: String) -> List<&2, ARow>:
   match rs:
@@ -15366,7 +15376,7 @@ def Side.here.kind(active: Bool, +u: Ui, +ix: SIx, +pid: String) -> List<&2, Str
     case False{}:
       match u:
         case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-          Side.visible.tree(Side.only(Side.unfolded(Side.shown.ix(st, ix, now, Find.q(op, dr)), op, Find.q(op, dr), now), pid), op, st, sel)
+          Side.visible.tree(Side.only(Side.unfolded(Side.shown.ix(st, ix, now, Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.of(st, sel)), pid), op, st, sel)
 
 def Side.here.ix(+u: Ui, +ix: SIx) -> List<&2, String>:
   List.append(&2, String, Side.here.kind(String.eq(Side.view(Ui.state(u)), "active"), u, ix, Side.cur(u)),
