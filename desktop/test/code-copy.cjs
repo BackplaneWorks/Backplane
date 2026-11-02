@@ -5,6 +5,24 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
 const {chromium, _electron} = require(process.env.PLAYWRIGHT_MODULE || 'playwright-core');
 const {Service} = require('../service.cjs');
+// Each platform gets a fresh hub: a prior platform's live reply must never
+// satisfy this platform's wait merely because virtualization unmounted it.
+if(!process.env.CODE_COPY_CASE&&process.env.CODE_COPY_ONLY_ELECTRON!=='1') {
+  const output=path.resolve(process.env.CODE_COPY_OUT||path.join(__dirname,'../../build/code-copy/results'));
+  fs.mkdirSync(output,{recursive:true});
+  const results=[],sessions=[];
+  for(const name of ['web','mobile-web',...(process.env.CODE_COPY_ELECTRON_RUNTIME?['electron']:[])]) {
+    const dir=path.join(output,name);
+    const child=require('node:child_process').spawnSync(process.execPath,[__filename],{stdio:'inherit',env:{...process.env,CODE_COPY_CASE:name,CODE_COPY_OUT:dir}});
+    if(child.status!==0)process.exit(child.status||1);
+    const result=JSON.parse(fs.readFileSync(dir+'/RESULT.json'));
+    results.push(...result.results);sessions.push({name,home:result.home,liveMessageId:result.liveMessageId,liveText:result.liveText});
+  }
+  assert.equal(new Set(sessions.map(s=>s.home)).size,sessions.length,'each platform owns a fresh conversation home');
+  assert.equal(new Set(sessions.map(s=>s.liveMessageId)).size,sessions.length,'each platform receives a distinct new live message');
+  fs.writeFileSync(output+'/RESULT.json',JSON.stringify({ok:true,isolatedPerPlatform:true,results,sessions},null,2));
+  console.log(JSON.stringify({ok:true,isolatedPerPlatform:true,results,sessions,out:output}));process.exit(0);
+}
 const root = path.resolve(__dirname, '../..'), home = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-code-copy-'));
 const out = path.resolve(process.env.CODE_COPY_OUT || root + '/build/code-copy/results');fs.mkdirSync(out, {recursive:true});
 const web = path.resolve(process.env.CODE_COPY_WEB || root + '/build/code-copy/web');
@@ -12,13 +30,14 @@ const binary = process.env.CODE_COPY_SERVICE;assert(binary && path.isAbsolute(bi
 const thread = 'bot-chat', project = home + '/project', agents = home + '/agents';fs.mkdirSync(project);fs.mkdirSync(agents);
 const sample = "ssh -t h@backplane 'sudo bash /home/h/memtest/apply-memmap.sh && sudo reboot'";
 const older = '# a literal shell comment\nprintf \'日本語 🦊 & <script>literal</script>\'\n  echo "quoted"';
-const live = 'printf "live assistant 日本語"\necho "$HOME"';
+const caseId=process.env.CODE_COPY_CASE||'electron';
+const live = 'printf "live assistant 日本語 '+caseId+'"\necho "$HOME"';
 const markdown = text => 'Use this command:\n\n```sh\n' + text + '\n```\n\nAfter the block.';
 const response = markdown(live);
 for (const name of ['claude','grok','muse','agy','opencode','pi','omp']) fs.writeFileSync(agents + '/' + name, '#!/bin/sh\nexit 127\n', {mode:0o755});
 fs.writeFileSync(agents + '/codex', '#!/usr/bin/env node\nif(process.argv[2]==="--version"){console.log("codex-cli 1.0.0");}else{for(const event of ' + JSON.stringify([
   {type:'thread.started',thread_id:'copy-fixture-session'},
-  {type:'item.completed',item:{id:'live-answer',type:'agent_message',text:response}},
+  {type:'item.completed',item:{id:'live-answer-'+caseId,type:'agent_message',text:response}},
   {type:'turn.completed',usage:{input_tokens:1,output_tokens:1}},
 ]) + '){if(event.item)event.item.id+="-"+process.pid;console.log(JSON.stringify(event));}}\n', {mode:0o755});
 const events = [{$:'ProjectCreated',id:'fixture',title:'Copy fixture',root:project,at:1},
@@ -28,11 +47,11 @@ for (let i = 0; i < 70; i++) events.push({$:'MessagePosted',thread,msg:'m' + i,r
 for (const key of ['restart.continue','mail.on','telemetry.share','order.enabled','order.estimates']) events.push({$:'SettingSet',key,value:'off',at:100});
 for (const key of ['onboard.done','onboard.uber']) events.push({$:'SettingSet',key,value:'1',at:100});
 fs.writeFileSync(home + '/events.jsonl', events.map(JSON.stringify).join('\n') + '\n');
-const env = {...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_KISTACK_SYNC:'0',BACKPLANE_PEERS:'',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_SERVICE:binary,BACKPLANE_WEB:web};
+const env = {...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_KISTACK_SYNC:'0',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_SERVICE:binary,BACKPLANE_WEB:web};
 Object.assign(process.env, env);
 const service = new Service({home,binary,web});
 const results = [], errors = [];
-let browser, app, page;
+let browser, app, page, liveMessageId;
 async function scenario(name, context, read, native) {
   page.setDefaultTimeout(15000);
   page.on('pageerror', error => errors.push(error.message));
@@ -102,19 +121,25 @@ async function scenario(name, context, read, native) {
   // A genuine stand-in agent response arrives over the live service socket.
   await page.evaluate(() => {const t=document.getElementById('timeline');t.scrollTop=t.scrollHeight;});
   const oldIds = await page.locator('.msg[data-id]').evaluateAll(es=>es.map(e=>e.dataset.id));
+  const journal=()=>fs.readFileSync(home+'/events.jsonl','utf8').trim().split('\n').map(JSON.parse);
+  assert(!journal().some(e=>e.$==='MessagePosted'&&e.role==='assistant'&&e.text===response),'live response must not exist before the send');
   await page.locator('#composer').fill('Please reply with the fixture code');await page.locator('.thread-view button[data-on-click="send"]').click();
   await page.waitForFunction(({text,oldIds}) => [...document.querySelectorAll('.codeblock .copy')].some(b=>b.getAttribute('data-value')===text&&!oldIds.includes(b.closest('.msg')?.dataset.id)), {text:live,oldIds});
   const liveSelector = await page.evaluate(({text,oldIds}) => {
     const b=[...document.querySelectorAll('.codeblock .copy')].find(b=>b.getAttribute('data-value')===text&&!oldIds.includes(b.closest('.msg')?.dataset.id));
     return '[data-id="' + CSS.escape(b.closest('.msg').dataset.id) + '"] .codeblock .copy';
   }, {text:live,oldIds});
+  liveMessageId=await page.locator(liveSelector).evaluate(b=>b.closest('.msg').dataset.id);
+  assert(liveMessageId.startsWith('live-answer-'+caseId+'-'),'new response has the platform-specific ID');
+  assert(journal().some(e=>e.$==='MessagePosted'&&e.role==='assistant'&&e.msg===liveMessageId&&e.text===response),'new live response is committed by the hub after the send');
   await click(liveSelector, live);
   await page.screenshot({path:path.join(out,name+'.png')});
 }
 (async () => {try {
   const connection = await service.start(), token = await service.token();
-  if(process.env.CODE_COPY_ONLY_ELECTRON!=='1')browser = await chromium.launch({executablePath:process.env.BACKPLANE_CHROME,headless:true});
-  for (const [name, viewport] of process.env.CODE_COPY_ONLY_ELECTRON==='1'?[]:[['web',{width:1440,height:1000}],['mobile-web',{width:390,height:844}]]) {
+  const onlyElectron=process.env.CODE_COPY_ONLY_ELECTRON==='1'||process.env.CODE_COPY_CASE==='electron';
+  if(!onlyElectron)browser = await chromium.launch({executablePath:process.env.BACKPLANE_CHROME,headless:true});
+  for (const [name, viewport] of (onlyElectron?[]:[['web',{width:1440,height:1000}],['mobile-web',{width:390,height:844}]]).filter(([name])=>!process.env.CODE_COPY_CASE||process.env.CODE_COPY_CASE===name)) {
     const context = await browser.newContext({viewport,...(name==='mobile-web'?{isMobile:true,hasTouch:true}:{}),permissions:['clipboard-read','clipboard-write']});
     await context.request.post(connection.origin+'/auth/pair',{headers:{Authorization:'Bearer '+token}});
     page = await context.newPage();await page.goto(connection.origin);
@@ -123,7 +148,7 @@ async function scenario(name, context, read, native) {
     await context.close();
   }
   await browser?.close();browser=null;
-  if (process.env.CODE_COPY_ELECTRON_RUNTIME) {
+  if (process.env.CODE_COPY_ELECTRON_RUNTIME&&onlyElectron) {
     const runtime = path.resolve(process.env.CODE_COPY_ELECTRON_RUNTIME), staged = home+'/runtime';fs.mkdirSync(staged);
     for (const file of fs.readdirSync(runtime)) {
       if (file==='resources') continue;
@@ -142,6 +167,6 @@ async function scenario(name, context, read, native) {
     await scenario('electron',app.context(),()=>app.evaluate(async({clipboard})=>await clipboard.readText()),true);
     await app.close();app=null;
   }
-  assert.deepEqual(errors,[]);fs.writeFileSync(out+'/RESULT.json',JSON.stringify({ok:true,results,web,binary},null,2));console.log(JSON.stringify({ok:true,results,out}));
+  assert.deepEqual(errors,[]);fs.writeFileSync(out+'/RESULT.json',JSON.stringify({ok:true,results,web,binary,home,liveMessageId,liveText:live},null,2));console.log(JSON.stringify({ok:true,results,out,home,liveMessageId}));
 }catch(error){console.error(error.stack);console.error(JSON.stringify({pageErrors:errors,results}));if(page&&!page.isClosed()){fs.writeFileSync(out+'/failure.html',await page.content());await page.screenshot({path:out+'/failure.png'}).catch(()=>{});}process.exitCode=1;}
 finally{await app?.close();await browser?.close();service.stop();}})();
