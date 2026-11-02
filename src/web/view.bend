@@ -3419,8 +3419,78 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
     U.Skills.shown(st, sel, drafts, nf), atts, up, D.Dom.cat(View.draft.limit.k(DB.Bound.say(lc, U.Str.get(drafts, "@draft.bound"))), vo), mic,
     View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), View.running(turn))
 
+# A buy thread's asks: a "Backplane needs" card each, above the composer
+# (client.bend's Fab.order). An order question's choices are buttons (the
+# earlier order's answer marked "· last time", sent without it:
+# OR.Order.ask.value) and a box takes a typed answer, Enter or Continue
+# sending it; a typed question (where it ships) leads with its box. The
+# files' approval keeps its Send / Not now.
+def View.needs.chips(ls: List<&2, String>, +id: String, +first: Bool) -> List<&2, D.Node>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      D.Dom.button(Bool.pick(String, first, "needs-chip primary", "needs-chip"), "answer", id ++ "|" ++ OR.Order.ask.value(l), l, l) <> View.needs.chips(t, id, False{})
+
+def View.needs.box(+id: String, +typed: String, +lead: Bool) -> D.Node:
+  D.El{"div", "", [D.At{"class", "needs-box"}], [
+    D.El{"input", "needs-in", [D.At{"id", "needs:" ++ id}, D.At{"type", "text"}, D.At{"autocomplete", "off"}, D.At{"aria-label", "Your answer"},
+      D.At{"placeholder", Bool.pick(String, lead, "Type it here", "Or type an answer")}, D.At{"value", typed},
+      D.At{"data-bfield", U.Fab.typed.key(id)}, D.On{"input", "bfield"}, D.At{"data-pre", id ++ "|"}, D.At{"data-enter", "answer"}], Nil{}},
+    D.El{"button", "needs-go", List.append(&2, D.Attr, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, lead, "primary", "")}, D.At{"data-value", id ++ "|" ++ String.trim(typed)}, D.On{"click", "answer"}],
+      Bool.pick(List<&2, D.Attr>, String.is_empty(String.trim(typed)), [D.At{"disabled", "disabled"}], Nil{})), [D.Txt{"Continue"}]}]}
+
+def View.needs.ask(+lc: I.Loc, +typed: Bool, +id: String, +o: String, +field: String) -> List<&2, D.Node>:
+  match typed:
+    case True{}:
+      [View.needs.box(id, field, True{}), D.El{"div", "", [D.At{"class", "needs-chips"}], View.needs.chips(OR.Order.ask.but(String.split(o, '\n'), ""), id, False{})}]
+    case False{}:
+      [D.El{"div", "", [D.At{"class", "needs-chips"}], View.needs.chips(OR.Order.ask.but(String.split(o, '\n'), ""), id, True{})}, View.needs.box(id, field, False{})]
+
+def View.needs.k(+lc: I.Loc, question: Bool, a: M.Ask, +dr: Map<&2, String>) -> D.Node:
+  match question a:
+    case True{} M.Ask{+id, _, _, +tool, +d, +o, _, _}:
+      D.El{"div", id, [D.At{"class", "ask needs"}, D.At{"role", "group"}, D.At{"aria-label", "Backplane needs"}], List.append(&2, D.Node, [
+        D.El{"div", "", [D.At{"class", "needs-head"}], [D.Dom.span("needs-k", "Backplane needs"),
+          D.Dom.button("needs-skip", "answer", id ++ "|", "Skip this question: the agent is told you skipped it", "Skip")]},
+        D.El{"div", "", [D.At{"class", "needs-q"}], [D.Txt{d}]}],
+        View.needs.ask(lc, OR.Order.ask.typed(tool), id, o, U.Str.get(dr, "@f." ++ U.Fab.typed.key(id))))}
+    case False{} M.Ask{+id, _, +k, +tool, +d, +o, _, _}:
+      D.El{"div", id, [D.At{"class", "ask needs " ++ k}, D.At{"role", "group"}, D.At{"aria-label", "Backplane needs"}], [
+        D.El{"div", "", [D.At{"class", "needs-head"}], [D.Dom.span("needs-k", "Backplane needs"), D.Dom.span("needs-what", U.Ask.head.loc(lc, k, tool, d))]},
+        D.El{"div", "", [D.At{"class", "ask-detail"}], [D.Txt{d}]},
+        D.El{"div", "", [D.At{"class", "ask-btns"}], View.ask.btns.loc(lc, U.Ask.bkind(k, tool), id, o, "")}]}
+
+# (any other ask in a buy thread, a tool's approval, a plan, a paused
+# browser task, keeps its own card: View.ask)
+def View.needs.or(order: Bool, +lc: I.Loc, a: M.Ask, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> D.Node:
+  match order a:
+    case True{} M.Ask{i, th, k, +tool, d, o, op, an}:
+      View.needs.k(lc, OR.Order.ask.is(tool), M.Ask{i, th, k, tool, d, o, op, an}, dr)
+    case False{} _:
+      View.ask(lc, a, draft, nf)
+
+def View.needs(+lc: I.Loc, a: M.Ask, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> D.Node:
+  match a:
+    case M.Ask{i, th, k, +tool, d, o, op, an}:
+      View.needs.or(Bool.or(OR.Order.ask.is(tool), String.eq(tool, "order_quote")), lc, M.Ask{i, th, k, tool, d, o, op, an}, draft, nf, dr)
+
+def View.needs.all(+lc: I.Loc, as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> List<&2, D.Node>:
+  match as:
+    case Nil{}:
+      Nil{}
+    case a <> t:
+      View.needs(lc, a, draft, nf, dr) <> View.needs.all(lc, t, draft, nf, dr)
+
+def View.asks.of(+lc: I.Loc, buying: Bool, as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> List<&2, D.Node>:
+  match buying:
+    case True{}:
+      View.needs.all(lc, as, draft, nf, dr)
+    case False{}:
+      View.asks(lc, as, draft, nf)
+
 def View.asks.box(+lc: I.Loc, +st: M.State, +id: String, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> D.Node:
-  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], List.append(&2, D.Node, View.sbox(lc, U.Sbox.box.d(st, dr, id)), View.asks(lc, U.Asks.open(st, id), draft, nf))}
+  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], List.append(&2, D.Node, View.sbox(lc, U.Sbox.box.d(st, dr, id)), View.asks.of(lc, U.Fab.buying(st, id), U.Asks.open(st, id), draft, nf, dr))}
 
 # the same two from the Ui alone (app.bend's composer and asks)
 def View.composer.k(+lc: I.Loc, u: U.Ui, t: M.Thread, +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:
@@ -3508,6 +3578,36 @@ def View.ready.k(+line: String, +buy: String) -> List<&2, D.Node>:
 
 def View.ready(+u: U.Ui) -> List<&2, D.Node>:
   View.ready.r(U.Fab.ready(u), U.Fab.ready.btn(u), View.rail(u))
+
+# A buy thread's order card, pinned under its top bar (client.bend's
+# Fab.order, core/order.bend's Order.card): "Order · <project>", the steps
+# with the one at work lit, what happens now, and once quoted the total,
+# what it covers about customs and Buy now
+def View.order.steps(ss: List<&2, String>, +i: Nat, +k: Nat) -> List<&2, D.Node>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      D.El{"li", "", [D.At{"class", "oc-step " ++ OR.Order.card.mark(i, k)}], [D.Txt{Bool.pick(String, Nat.is_lt(k, i), "✓ " ++ x, x)}]} <> View.order.steps(t, i, 1n+k)
+
+def View.order.quote(+total: String, +customs: String, +pay: String, +label: String) -> List<&2, D.Node>:
+  D.Dom.when(Bool.not(String.is_empty(total)), D.El{"div", "oc-quote", [D.At{"class", "oc-quote"}], List.append(&2, D.Node,
+    [D.Dom.span("oc-total", total), D.Dom.span("oc-customs", customs)],
+    D.Dom.when(Bool.not(String.is_empty(pay)), D.El{"a", "oc-buy", [D.At{"class", "oc-buy"}, D.At{"href", pay}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}, D.At{"title", "Pay on Stripe's checkout page"}], [D.Txt{label}]}))})
+
+def View.order.card(+lc: I.Loc, +st: M.State, +id: String, +c: OR.OrderCard) -> D.Node:
+  D.El{"section", "order-card", [D.At{"class", "order-card" ++ Bool.pick(String, Nat.is_eq(OR.Order.card.step(c), 2n), " waiting", "")}, D.At{"aria-label", "Order"}], List.append(&2, D.Node, [
+    D.El{"div", "", [D.At{"class", "oc-head"}], [WI.WIcon.svg("shopping-cart", 13), D.Dom.span("oc-k", "Order"), D.Dom.span("oc-name", U.Ui.project_title(st, U.Ui.thread_project(U.Ui.thread(st, id))))]},
+    D.El{"ol", "", [D.At{"class", "oc-steps"}], View.order.steps(OR.Order.steps(), OR.Order.card.step(c), 0n)},
+    D.El{"div", "oc-line", [D.At{"class", "oc-line"}, D.At{"role", "status"}], [D.Txt{OR.Order.card.text(c)}]}],
+    View.order.quote(OR.Order.card.total(c), OR.Order.card.customs(c), OR.Order.card.pay(c), OR.Order.card.label(c)))}
+
+def View.order(+lc: I.Loc, buying: Bool, +st: M.State, +id: String, running: Bool) -> List<&2, D.Node>:
+  match buying:
+    case True{}:
+      [View.order.card(lc, st, id, U.Fab.order(st, id, running))]
+    case False{}:
+      Nil{}
 
 # Away from the timeline's end with something new below (client.bend's
 # Hold.pill): "3 new ↓" stuck to the timeline's foot, a click back down
@@ -3766,6 +3866,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, View.running(turn)),
         View.thread.subs.own(own, lc, st, nf, id, now),
         View.thread.todos.own(own, lc, nf, st, id, U.Todos.shown(st, id, View.running(turn))),
+        View.order(lc, U.Fab.buying(st, id), st, id, View.running(turn)),
         [View.thread.timeline(lc, st, id, drafts, nf, turn, tr, now, live, pend, fab, pill),
          View.asks.box(lc, st, id, U.Str.get(drafts, sel), nf, drafts),
          View.queued(lc, M.Queue.context(M.Queue.items(st, id)), View.running(turn))],
@@ -5209,6 +5310,14 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
         View.chrome.branch(branch),
         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])
 
+# a buy thread's title is marked an Order (the cart, as Buy it's)
+def View.chrome.order(buying: Bool) -> List<&2, D.Node>:
+  match buying:
+    case True{}:
+      [D.El{"span", "order-mark", [D.At{"class", "order-mark"}, D.At{"title", "This thread orders the project's parts"}], [WI.WIcon.svg("shopping-cart", 12), D.Dom.span("", "Order")]}]
+    case False{}:
+      Nil{}
+
 # a phone's one top bar also holds the rail's views (its menu, as the rail
 # shows it) and Buy it; style.css shows them only where the rail is hidden
 def View.chrome.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
@@ -5226,7 +5335,7 @@ def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
         View.chrome.sep(),
         D.El{"span", "", [D.At{"class", "crumb proj"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}, D.At{"title", pn}], [D.El{"i", "", [D.At{"class", "sw"}], Nil{}}, D.Dom.span("pn", pn)]},
         View.chrome.sep(),
-        D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title"))},
+        D.El{"div", "", [D.At{"class", "title-box"}], List.append(&2, D.Node, View.chrome.order(U.Fab.buying(st, id)), View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title")))},
         View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 14)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
           String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel)]),
        D.El{"div", "kvs", [D.At{"class", "kvs"}], View.chrome.cells(gone, lc, st, nf, id, turn, pending, branch, now)},

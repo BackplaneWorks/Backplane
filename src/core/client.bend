@@ -7891,6 +7891,22 @@ def Fab.open(+u: Ui) -> Bool:
 def Fab.buying(+st: M.State, +th: String) -> Bool:
   Bool.not(String.is_empty(M.Setting.get(st, OR.Order.buy.key(th), "")))
 
+# A buy thread's order card, pinned at its top (core/order.bend's
+# Order.card: steps, what happens now, the total with its customs line and
+# Buy now), from the thread's open asks, the quote on its way and the
+# quote the hub keeps; its question in a "Backplane needs" card above the
+# composer, a typed one with a box (the form field "ask.<id>": Fab.typed)
+def Fab.order.k(+as: List<&2, M.Ask>, +st: M.State, +th: String, running: Bool) -> OR.OrderCard:
+  OR.Order.card(OR.Order.asks.question(as), OR.Order.asks.files(as), Bool.not(String.is_empty(M.Setting.get(st, OR.Order.wait.key(th), ""))), running,
+    M.Setting.get(st, OR.Order.quote.key(th), ""))
+
+def Fab.order(+st: M.State, +th: String, running: Bool) -> OR.OrderCard:
+  Fab.order.k(Asks.open(st, th), st, th, running)
+
+# what is typed in a question's box
+def Fab.typed.key(+ask: String) -> String:
+  "ask." ++ ask
+
 # the Buy button's words ("" for none: ordering off, or a buy thread,
 # which has none of its own; laws fab_buy_*)
 def Fab.buy.k(off: Bool, +label: String) -> String:
