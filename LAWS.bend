@@ -15257,3 +15257,10 @@ law settings_row_information:
 # File presence alone must never report a usable local engine.
 law voice_model_needs_runtime:
   {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}
+
+# Saved-source stamps are opt-in and replay only to the joining client.
+law plot_stamp_opt_out:
+  {PLOTWATCH.Sub.wants.stamp(PLOTWATCH.Sub{7, "board", Nil{}, "", True{}, "", False{}}, "board") == False{} : Bool}
+
+law plot_stamp_other_client:
+  {PLOTWATCH.Sub.for_client([PLOTWATCH.Sub{7, "board", Nil{}, "", True{}, "", True{}}], 8) == Nil{} : List<&2, PLOTWATCH.Sub>}
