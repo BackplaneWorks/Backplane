@@ -7125,6 +7125,109 @@ def Hub.agent_gone.active(+s: M.State, +now: Nat, +thread: String, +code: U32, +
   Hub.agent_gone.m(Launch.tell(s, now, thread, Task.finish(s, now, thread, Queue.drain(s, now, thread, Ended.out(s, now, thread, Hub.agent_gone.k(Hub.running(Hub.thread(s, thread)), thread, now, code, why))))),
     s, now, thread, code)
 
+# A reset given only in words: Claude's session limit says "You've hit your
+# session limit · resets 4:10pm (America/New_York)" with no resets_at. Its
+# moment is the next such time in that zone (the person's when the hub has no
+# rule for it), strictly after now. Words it cannot read keep reset 0: held
+# until cleared, never an invented time (laws reset_words_*).
+def Reset.from.go(t: String, found: Bool, +mark: String, +n: Nat) -> String:
+  match t found:
+    case _ True{}:
+      String.drop(t, n)
+    case SNil{} False{}:
+      ""
+    case SCon{_, +r} False{}:
+      Reset.from.go(r, String.starts_with(r, mark), mark, n)
+
+# the text after the first `mark` ("" when there is none)
+def Reset.from(+t: String, +mark: String, +n: Nat) -> String:
+  Reset.from.go(t, String.starts_with(t, mark), mark, n)
+
+def Reset.first(+t: String, +c: Char) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(t, c)), "")
+
+def Reset.rule(+s: M.State, +zone: String) -> TZ.TzRule:
+  Maybe.default(&2, TZ.TzRule, SC.Zone.rule(s, zone), SC.Sched.person(s, 0n, False{}))
+
+def Reset.words(+s: M.State, +now: Nat, +why: String) -> Nat:
+  +rest = Reset.from(why, "resets ", 7n)
+  Maybe.default(&2, Nat, WH.When.parse(Reset.first(rest, ' '), now, Reset.rule(s, Reset.first(Reset.from(rest, "(", 1n), ')'))), 0n)
+
+def Reset.fill.w(l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
+  match l:
+    case FB.Limit{sc, +why, _}:
+      FB.Limit{sc, why, Reset.words(s, now, why)}
+
+def Reset.fill.k(zero: Bool, l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
+  match zero:
+    case True{}:
+      Reset.fill.w(l, s, now)
+    case False{}:
+      l
+
+# a limit with its reset read from its words when it came without one
+def Reset.fill(+s: M.State, +now: Nat, +l: FB.Limit) -> FB.Limit:
+  Reset.fill.k(Nat.is_eq(FB.Limit.reset(l), 0n), l, s, now)
+
+# A limit seen in a turn is kept as fallback.pending.<thread> and acted on
+# when the turn ends. One recorded before its reset is read as of when it
+# was recorded ("resets 4:10pm" said at 3pm is that 4:10pm, not tomorrow's),
+# and once that reset has passed it is stale: a later turn's end no longer
+# marks the provider limited or holds the thread (laws pending_*). A reset
+# still unknown keeps holding, as before.
+def Pending.of(+s: M.State, +now: Nat, +o: J.Json) -> FB.Limit:
+  Reset.fill(s, J.Json.get_nat(o, "at", now), FB.Limit{J.Json.get_str(o, "scope", ""), J.Json.get_str(o, "reason", "usage limit reached"), J.Json.get_nat(o, "reset", 0n)})
+
+def Pending.due(+l: FB.Limit, +now: Nat) -> Bool:
+  Bool.or(Nat.is_eq(FB.Limit.reset(l), 0n), Nat.is_lt(now, FB.Limit.reset(l)))
+
+def AccountFallback.pending(+s: M.State, +th: String) -> J.Json:
+  ACCT.Accounts.parse(M.Setting.get(s, "account.failover.pending." ++ th, ""))
+
+# Account quota recovery runs before the opt-in cross-provider hierarchy.
+# A binding always retains the provider's verified sign-in epoch. Selecting
+# another account uses the same session swap as explicit account selection.
+def AccountFallback.binding(+s: M.State, +th: String, +p: String) -> String:
+  ACCT.Accounts.binding.show(ACCT.Accounts.id(s, th, p), ACCT.Accounts.epoch(s, th, p))
+
+def AccountFallback.pending.current(+s: M.State, +th: String, +o: J.Json) -> Bool:
+  +p = Hub.provider(Hub.thread(s, th))
+  String.eq(J.Json.get_str(o, "provider", "!missing"), p) && String.eq(J.Json.get_str(o, "binding", "!missing"), AccountFallback.binding(s, th, p))
+
+def Step.outs_of(st: Step) -> List<&2, Out>:
+  match st:
+    case Step{_, os}:
+      os
+
+def Fallback.continue(+s: M.State, +th: String) -> String:
+  "[Backplane] The provider reached its usage limit. Continue the interrupted work from its current state. Read the handed-over tool results before acting. Do not repeat completed tool actions or restart finished work. If the request is already satisfied, report that.\n\nOriginal request (context, not a new task):\n" ++ M.Setting.get(s, "fallback.input." ++ th, "")
+
+# the exact text a turn was started with (launch.input when it differs)
+def Fallback.launch(+s: M.State, +th: String) -> String:
+  +l = M.Setting.get(s, "launch.input." ++ th, "")
+  Bool.pick(String, String.is_empty(l), M.Setting.get(s, "fallback.input." ++ th, ""), l)
+
+def AccountFallback.retire(+s: M.State, +now: Nat, +th: String) -> Step:
+  +lost = Bg.lost.k(Lost.new(Lost.of(s, th)) && Lost.live(Hub.thread(s, th)), False{}, s, now, th, "account usage limit", Lost.of(s, th))
+  Step{List.concat(&2, M.Change, [Retire.asks(M.Asks.all(s), th, now), Queue.changes(lost), Bg.clear(s, th, now)]), Retire.answers(M.Asks.all(s), th)}
+
+def AccountFallback.limited(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, +o: J.Json) -> Step:
+  +retired = AccountFallback.retire(s, now, th)
+  +cs = List.concat(&2, M.Change, [Queue.changes(retired), AF.Hold.mark(s, now, th, Reset.fill(s, now, lim)),
+    [M.SettingSet{"account.failover.pending." ++ th, "", now}, M.SettingSet{"account.failover.continuing." ++ th, "yes", now},
+     M.TurnChanged{th, M.Interrupted{}, now}, M.QueueTaken{th, now}, M.TurnChanged{th, M.Running{}, now}]])
+  +prompt = Bool.pick(String, J.Json.get_bool(o, "not_started", False{}), Fallback.launch(s, th), Fallback.continue(s, th))
+  Step{cs, List.append(&2, Out, Step.outs_of(retired), Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), M.Queue.join(prompt, M.Queue.of(s, th)), Hub.uuid(now, th ++ "/account-fallback/" ++ Nat.show(Hub.seq(s)))))}
+
+def AccountFallback.pending.use(go: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
+  match go:
+    case False{}: normal
+    case True{}: AccountFallback.limited(s, now, th, Pending.of(s, now, o), o)
+
+def AccountFallback.gone(+s: M.State, +now: Nat, +th: String, normal: Step) -> Step:
+  +o = AccountFallback.pending(s, th)
+  AccountFallback.pending.use(Hub.running(Hub.thread(s, th)) && AccountFallback.pending.current(s, th, o) && Pending.due(Pending.of(s, now, o), now), s, now, th, o, normal)
+
 # A completed private SDK disappearing is resource retirement, not failed
 # work. Source approvals, receipts and pending conversation FIFO stay put.
 # A killed unfinished run still takes normal failure/recovery handling.
@@ -7143,11 +7246,6 @@ def Hub.agent_gone.why(+s: M.State, +now: Nat, +thread: String, +code: U32, +why
 
 def Hub.agent_gone(+s: M.State, +now: Nat, +thread: String, +code: U32) -> Step:
   Hub.agent_gone.why(s, now, thread, code, "")
-
-def Step.outs_of(st: Step) -> List<&2, Out>:
-  match st:
-    case Step{_, os}:
-      os
 
 # Worktrees on the tick
 # ---------------------
@@ -9647,65 +9745,6 @@ def Fallback.target(t: M.Thread) -> FB.Target:
 def Fallback.pending(+s: M.State, +th: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(s, "fallback.pending." ++ th, "")), J.Null{})
 
-def Fallback.continue(+s: M.State, +th: String) -> String:
-  "[Backplane] The provider reached its usage limit. Continue the interrupted work from its current state. Read the handed-over tool results before acting. Do not repeat completed tool actions or restart finished work. If the request is already satisfied, report that.\n\nOriginal request (context, not a new task):\n" ++ M.Setting.get(s, "fallback.input." ++ th, "")
-
-# A reset given only in words: Claude's session limit says "You've hit your
-# session limit · resets 4:10pm (America/New_York)" with no resets_at. Its
-# moment is the next such time in that zone (the person's when the hub has no
-# rule for it), strictly after now. Words it cannot read keep reset 0: held
-# until cleared, never an invented time (laws reset_words_*).
-def Reset.from.go(t: String, found: Bool, +mark: String, +n: Nat) -> String:
-  match t found:
-    case _ True{}:
-      String.drop(t, n)
-    case SNil{} False{}:
-      ""
-    case SCon{_, +r} False{}:
-      Reset.from.go(r, String.starts_with(r, mark), mark, n)
-
-# the text after the first `mark` ("" when there is none)
-def Reset.from(+t: String, +mark: String, +n: Nat) -> String:
-  Reset.from.go(t, String.starts_with(t, mark), mark, n)
-
-def Reset.first(+t: String, +c: Char) -> String:
-  Maybe.default(&2, String, List.head(&2, String, String.split(t, c)), "")
-
-def Reset.rule(+s: M.State, +zone: String) -> TZ.TzRule:
-  Maybe.default(&2, TZ.TzRule, SC.Zone.rule(s, zone), SC.Sched.person(s, 0n, False{}))
-
-def Reset.words(+s: M.State, +now: Nat, +why: String) -> Nat:
-  +rest = Reset.from(why, "resets ", 7n)
-  Maybe.default(&2, Nat, WH.When.parse(Reset.first(rest, ' '), now, Reset.rule(s, Reset.first(Reset.from(rest, "(", 1n), ')'))), 0n)
-
-def Reset.fill.w(l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
-  match l:
-    case FB.Limit{sc, +why, _}:
-      FB.Limit{sc, why, Reset.words(s, now, why)}
-
-def Reset.fill.k(zero: Bool, l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
-  match zero:
-    case True{}:
-      Reset.fill.w(l, s, now)
-    case False{}:
-      l
-
-# a limit with its reset read from its words when it came without one
-def Reset.fill(+s: M.State, +now: Nat, +l: FB.Limit) -> FB.Limit:
-  Reset.fill.k(Nat.is_eq(FB.Limit.reset(l), 0n), l, s, now)
-
-# A limit seen in a turn is kept as fallback.pending.<thread> and acted on
-# when the turn ends. One recorded before its reset is read as of when it
-# was recorded ("resets 4:10pm" said at 3pm is that 4:10pm, not tomorrow's),
-# and once that reset has passed it is stale: a later turn's end no longer
-# marks the provider limited or holds the thread (laws pending_*). A reset
-# still unknown keeps holding, as before.
-def Pending.of(+s: M.State, +now: Nat, +o: J.Json) -> FB.Limit:
-  Reset.fill(s, J.Json.get_nat(o, "at", now), FB.Limit{J.Json.get_str(o, "scope", ""), J.Json.get_str(o, "reason", "usage limit reached"), J.Json.get_nat(o, "reset", 0n)})
-
-def Pending.due(+l: FB.Limit, +now: Nat) -> Bool:
-  Bool.or(Nat.is_eq(FB.Limit.reset(l), 0n), Nat.is_lt(now, FB.Limit.reset(l)))
-
 def Fallback.limited.k(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
   +cs = {List.append(&2, M.Change,
     Bool.pick(List<&2, M.Change>, FB.Limit.active(s, FB.Limit.scope(lim), now), Nil{}, [M.SettingSet{FB.Limit.key(FB.Limit.scope(lim)), FB.Limit.json(lim, now), now}]),
@@ -9770,6 +9809,27 @@ def Fallback.line.on(on: Bool, +terminal: Bool, +s: M.State, +now: Nat, +th: Str
       Fallback.line.m(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), terminal, s, now, th,
         Fallback.line.pending(Bool.and(terminal, Bool.and(Bool.not(String.is_empty(J.Json.get_str(Fallback.pending(s, th), "scope", ""))), Pending.due(Pending.of(s, now, Fallback.pending(s, th)), now))), s, now, th, Fallback.pending(s, th), normal))
     case False{}: ProviderResume.line.m(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), terminal, s, now, th, normal)
+
+def AccountFallback.pending.save(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, +o: J.Json) -> List<&2, M.Change>:
+  +p = Hub.provider(Hub.thread(s, th))
+  [M.SettingSet{"account.failover.pending." ++ th, J.Json.show(ACCT.Accounts.put(ACCT.Accounts.put(ACCT.Accounts.put(ACCT.Accounts.parse(FB.Limit.json(lim, now)), "provider", J.Str{p}), "binding", J.Str{AccountFallback.binding(s, th, p)}), "not_started", J.Flag{J.Json.get_bool(o, "not_started", False{})})), now}]
+
+def AccountFallback.terminal(go: Bool, s: M.State, now: Nat, th: String, lim: FB.Limit, o: J.Json, normal: Step) -> Step:
+  match go:
+    case False{}: normal
+    case True{}: AccountFallback.limited(s, now, th, lim, o)
+
+def AccountFallback.line.limit(lim: Maybe<&2, FB.Limit>, +s: M.State, +now: Nat, +th: String, +o: J.Json, terminal: Bool, normal: Step) -> Step:
+  match lim terminal:
+    case Some{+lim} True{}: AccountFallback.terminal(Pending.due(Reset.fill(s, now, lim), now), s, now, th, lim, o, normal)
+    case Some{+lim} False{}: Step.after(normal, AccountFallback.pending.save(s, now, th, Reset.fill(s, now, lim), o))
+    case None{} True{}: AccountFallback.gone(s, now, th, normal)
+    case None{} False{}: normal
+
+def AccountFallback.line(managed: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, terminal: Bool, normal: Step) -> Step:
+  match managed:
+    case False{}: Fallback.line.on(FB.Chain.on(s), terminal, s, now, th, o, normal)
+    case True{}: AccountFallback.line.limit(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), s, now, th, o, terminal, normal)
 
 def Fallback.line.live(live: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, +terminal: Bool, normal: Step) -> Step:
   match live:
@@ -10155,11 +10215,6 @@ def Hub.request_text(+s: M.State, +now: Nat, +client: U32, text: String) -> Step
 def Retire.request(i: Nat, +s: M.State) -> Step:
   Hub.request.k(i, s, 9n, 0, "r", J.Json.obj([J.KV{"thread", J.Str{"t1"}}]), "")
 
-# the exact text a turn was started with (launch.input when it differs)
-def Fallback.launch(+s: M.State, +th: String) -> String:
-  +l = M.Setting.get(s, "launch.input." ++ th, "")
-  Bool.pick(String, String.is_empty(l), M.Setting.get(s, "fallback.input." ++ th, ""), l)
-
 # A refusal before spawn may replay the exact unsent input. A process that
 # already started gets a continuation with its completed actions as context.
 def Auth.prompt(+s: M.State, +th: String, +o: J.Json) -> String:
@@ -10285,6 +10340,128 @@ def Fallback.attempt.k(held: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: S
 
 def Fallback.attempt.quota(+s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
   Fallback.attempt.k(Bool.and(Bool.not(ACCT.Accounts.named(s, th)), Bool.and(FB.Chain.on(s), FB.Target.held(s, Fallback.target(Hub.thread(s, th)), now))), s, caps, now, th, cwd, text, uuid, original)
+
+def AccountFallback.input(+s: M.State, +now: Nat, +th: String, +text: String, actual: String) -> List<&2, M.Change>:
+  [M.SettingSet{"fallback.input." ++ th, Bool.pick(String, String.eq(M.Setting.get(s, "account.failover.continuing." ++ th, ""), "yes"), M.Setting.get(s, "fallback.input." ++ th, text), text), now},
+   M.SettingSet{"launch.input." ++ th, actual, now}, M.SettingSet{"account.failover.continuing." ++ th, "", now}, M.SettingSet{"account.failover.waiting." ++ th, "", now}]
+
+def AccountFallback.name(+s: M.State, +binding: String) -> String:
+  +id = J.Json.get_str(ACCT.Accounts.binding.raw(binding), "id", "")
+  Bool.pick(String, String.is_empty(id), "Default account", J.Json.get_str(ACCT.Accounts.profile(s, id), "label", "account"))
+
+def AccountFallback.rebind(+s: M.State, +now: Nat, +th: String, +p: String, +model: String, +binding: String) -> List<&2, M.Change>:
+  +from = Hub.provider(Hub.thread(s, th))
+  +changed = Bool.not(String.eq(from, p) && String.eq(FB.Target.model(Fallback.target(Hub.thread(s, th))), model))
+  +saved = Bool.pick(List<&2, M.Change>, changed,
+    [M.SettingSet{ACCT.Accounts.session.key(th, from, ACCT.Accounts.id(s, th, from), ACCT.Accounts.epoch(s, th, from)), M.Switch.sess(Hub.thread(s, th)), now},
+     M.SettingSet{ACCT.Accounts.seen.key(th, from, ACCT.Accounts.id(s, th, from), ACCT.Accounts.epoch(s, th, from)), Nat.show(M.Switch.count(s, th)), now},
+     M.ProviderSet{th, p, model, now}, M.SettingSet{AG.Effort.key(th), "", now}], Nil{})
+  +next = M.State.replay(saved, s)
+  +b = ACCT.Accounts.binding.raw(binding)
+  List.append(&2, M.Change, saved, Bool.pick(List<&2, M.Change>, String.eq(AccountFallback.binding(next, th, p), binding), Nil{},
+    ACCT.Accounts.select(next, now, th, p, J.Json.get_str(b, "id", ""), J.Json.get_nat(b, "epoch", 0n), M.Switch.sess(Hub.thread(next, th)), M.Switch.count(s, th))))
+
+def AccountFallback.use(+s: M.State, +now: Nat, +th: String, +p: String, +model: String, +binding: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  +from = Hub.provider(Hub.thread(s, th))
+  +say = "Usage limit reached on " ++ AccountFallback.name(s, AccountFallback.binding(s, th, from)) ++ "; automatically switched to " ++ AccountFallback.name(s, binding) ++ " (" ++ p ++ "). Continuing the request."
+  +cs = List.concat(&2, M.Change, [AF.Preference.save(s, now, th, p, binding), AccountFallback.rebind(s, now, th, p, model, binding),
+    [M.ActivityLogged{th, Hub.id("account-fallback", now, Hub.seq(s)), "info", "account-switch", say, now}]])
+  +b = ACCT.Accounts.binding.raw(binding)
+  +ctx = HD.Hand.switch(Hub.entries(s), th, from, p, ACCT.Accounts.seen(s, th, p, J.Json.get_str(b, "id", ""), J.Json.get_nat(b, "epoch", 0n)))
+  +actual = M.Queue.join(ctx, text)
+  Step{List.append(&2, M.Change, cs, AccountFallback.input(s, now, th, text, actual)),
+    AgentStop{th} <> Hub.run(Hub.thread(M.State.replay(cs, s), th), cwd, actual, uuid)}
+
+def AccountFallback.pick.profile(x: Maybe<&2, J.Json>) -> Maybe<&2, String>:
+  match x:
+    case None{}: None{}
+    case Some{p}: Some{AF.Pick.binding(p)}
+
+def AccountFallback.pick.target.k(keep: Bool, raw: String, +s: M.State, +now: Nat, +p: String, +model: String) -> Maybe<&2, String>:
+  match keep:
+    case True{}: Some{raw}
+    case False{}: AccountFallback.pick.profile(AF.Pick.account(s, now, p, model))
+
+def AccountFallback.pick.target(+s: M.State, +caps: J.Json, +now: Nat, +th: String, +target: FB.Target) -> Maybe<&2, String>:
+  +p = FB.Target.provider(target)
+  +model = FB.Target.model(target)
+  +raw = M.Setting.get(s, ACCT.Accounts.binding.key(th, p), M.Setting.get(s, "account.default." ++ p, ""))
+  +b = ACCT.Accounts.binding.raw(raw)
+  +id = J.Json.get_str(b, "id", "!invalid")
+  +epoch = J.Json.get_nat(b, "epoch", 0n)
+  +legacy = String.is_empty(id)
+  +valid = Bool.pick(Bool, legacy, FB.Caps.valid(caps, target) && (Bool.not(String.is_empty(raw)) || Bool.not(AF.Provider.has(ACCT.Accounts.profiles(s), p))),
+    ACCT.Accounts.ready(ACCT.Accounts.profile(s, id), p, epoch) && AF.Profile.model(ACCT.Accounts.profile(s, id), model))
+  AccountFallback.pick.target.k(valid && Bool.not(AF.Hold.current(s, p, id, epoch, model, now)) && (Bool.not(legacy) || Bool.not(FB.Target.held(s, target, now))), ACCT.Accounts.binding.show(id, epoch), s, now, p, model)
+
+def AccountFallback.chain.choice(choice: Maybe<&2, String>, +target: FB.Target, rest: Step, +s: M.State, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  match choice:
+    case None{}: rest
+    case Some{binding}: AccountFallback.use(s, now, th, FB.Target.provider(target), FB.Target.model(target), binding, cwd, text, uuid)
+
+def AccountFallback.block(+s: M.State, +now: Nat, +th: String, +text: String) -> Step:
+  +p = Hub.provider(Hub.thread(s, th))
+  +reset = AF.Reset.next(s, now, th, p)
+  +say = "All connected " ++ p ++ " accounts are limited. The request is preserved; " ++ Bool.pick(String, Nat.is_gt(reset, now), "it will retry at the next reported reset.", "no reset is known. Clear an availability hold or select an available account to continue.")
+  Step{List.concat(&2, M.Change, [ProviderResume.mark(s, now, th, FB.Limit{p, say, reset}),
+    [M.SettingSet{"account.failover.continuing." ++ th, "", now}, M.SettingSet{"account.failover.waiting." ++ th, "yes", now}, M.TurnChanged{th, M.Interrupted{}, now},
+     M.TurnQueued{th, "account:held:" ++ Nat.show(Hub.seq(s)), text, now},
+     M.ActivityLogged{th, Hub.id("account-blocked", now, Hub.seq(s)), "warn", "account-wait", say, now}]]), [AgentStop{th}]}
+
+def AccountFallback.chain(xs: List<&2, FB.Target>, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  match xs:
+    case Nil{}: AccountFallback.block(s, now, th, text)
+    case +h <> t: AccountFallback.chain.choice(AccountFallback.pick.target(s, caps, now, th, h), h, AccountFallback.chain(t, s, caps, now, th, cwd, text, uuid), s, now, th, cwd, text, uuid)
+
+def AccountFallback.cross(on: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String) -> Step:
+  match on:
+    case False{}: AccountFallback.block(s, now, th, text)
+    case True{}: AccountFallback.chain(FB.Chain.suffix(FB.Chain.of(s), FB.Target.key(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
+
+def AccountFallback.pick.choice(choice: Maybe<&2, J.Json>, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  match choice:
+    case Some{profile}: AccountFallback.use(s, now, th, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), AF.Pick.binding(profile), cwd, text, uuid)
+    case None{}: AccountFallback.cross(FB.Chain.on(s), s, caps, now, th, cwd, text, uuid)
+
+def AccountFallback.preflight(held: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
+  match held:
+    case False{}: Step.after(Fallback.attempt.quota(s, caps, now, th, cwd, text, uuid, original),
+      Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "account.failover.waiting." ++ th, "")), Nil{}, [M.SettingSet{"account.failover.waiting." ++ th, "", now}]))
+    case True{}: AccountFallback.pick.choice(AF.Pick.account(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
+
+def AccountFallback.restore.one(go: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
+  match go:
+    case False{}: Step.none()
+    case True{}:
+      +o = AF.Preference.record(s, th)
+      +binding = J.Json.get_str(o, "binding", "")
+      +p = J.Json.get_str(o, "provider", "")
+      +b = ACCT.Accounts.binding.raw(binding)
+      +seen = ACCT.Accounts.seen(s, th, p, J.Json.get_str(b, "id", ""), J.Json.get_nat(b, "epoch", 0n))
+      Step{List.concat(&2, M.Change, [Switch.old(M.Queue.items(s, th), th, now),
+        AccountFallback.rebind(s, now, th, p, J.Json.get_str(o, "model", ""), binding), AF.Preference.forget(th, now),
+        Switch.ctx(Nat.is_eq(M.Switch.count(s, th), seen), th, HD.Hand.prefix() ++ Hub.id("switch:account-reset", now, Hub.seq(s)), HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), p, seen), now),
+        [M.SettingSet{AG.Effort.key(th), AG.Effort.of(p, J.Json.get_str(o, "effort", "")), now}],
+        [M.ActivityLogged{th, Hub.id("account-reset", now, Hub.seq(s)), "info", "account-switch", "Usage limit reset; restored " ++ AccountFallback.name(s, binding) ++ ".", now}]]), [AgentStop{th}]}
+
+def AccountFallback.attempt.restore(restore: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String, original: List<&2, Out>) -> Step:
+  match restore:
+    case True{}:
+      +one = AccountFallback.restore.one(True{}, s, now, th)
+      +next = M.State.replay(Queue.changes(one), s)
+      +actual = M.Queue.join(M.Queue.of(next, th), text)
+      Step.before(List.concat(&2, M.Change, [Queue.changes(one), [M.QueueTaken{th, now}], AccountFallback.input(s, now, th, text, actual)]), [AgentStop{th}],
+        Step.outs(Hub.run(Hub.thread(next, th), cwd, actual, uuid)))
+    case False{}:
+      +p = Hub.provider(Hub.thread(s, th))
+      AccountFallback.preflight(AF.Hold.current(s, p, ACCT.Accounts.id(s, th, p), ACCT.Accounts.epoch(s, th, p), FB.Target.model(Fallback.target(Hub.thread(s, th))), now), s, caps, now, th, cwd, text, uuid, original)
+
+def AccountFallback.safe(+s: M.State, +th: String) -> Bool:
+  Hub.owns(s, th) && Lost.live(Hub.thread(s, th)) && Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n) &&
+    Bool.not(M.Config.held(s, th) || M.Dormant.thread(s, th) || Ephemeral.is(s, th))
+
+def AccountFallback.attempt(+s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
+  AccountFallback.attempt.restore(AccountFallback.safe(s, th) && AF.Preference.ready(s, now, th), s, caps, now, th, cwd, text, uuid, original)
 
 def Auth.attempt(wait: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
   match wait:
@@ -10538,169 +10715,6 @@ def ProviderResume.threads(ts: List<&2, M.Thread>, +s: M.State, +now: Nat) -> St
       +st = ProviderResume.one(ProviderResume.ready(s, now, M.Thread.id(t)), s, now, M.Thread.id(t))
       Step.cat(st, ProviderResume.threads(rest, M.State.replay(Queue.changes(st), s), now))
 
-def ProviderResume.tick(+s: M.State, now: Nat) -> Step:
-  +restored = AccountFallback.restore.threads(Rec.threads(s), s, now)
-  +next = M.State.replay(Queue.changes(restored), s)
-  Step.cat(restored, ProviderResume.threads(Rec.threads(next), next, now))
-
-# Account quota recovery runs before the opt-in cross-provider hierarchy.
-# A binding always retains the provider's verified sign-in epoch. Selecting
-# another account uses the same session swap as explicit account selection.
-def AccountFallback.binding(+s: M.State, +th: String, +p: String) -> String:
-  ACCT.Accounts.binding.show(ACCT.Accounts.id(s, th, p), ACCT.Accounts.epoch(s, th, p))
-
-def AccountFallback.name(+s: M.State, +binding: String) -> String:
-  +id = J.Json.get_str(ACCT.Accounts.binding.raw(binding), "id", "")
-  Bool.pick(String, String.is_empty(id), "Default account", J.Json.get_str(ACCT.Accounts.profile(s, id), "label", "account"))
-
-def AccountFallback.rebind(+s: M.State, +now: Nat, +th: String, +p: String, +model: String, +binding: String) -> List<&2, M.Change>:
-  +from = Hub.provider(Hub.thread(s, th))
-  +changed = Bool.not(String.eq(from, p) && String.eq(FB.Target.model(Fallback.target(Hub.thread(s, th))), model))
-  +saved = Bool.pick(List<&2, M.Change>, changed,
-    [M.SettingSet{ACCT.Accounts.session.key(th, from, ACCT.Accounts.id(s, th, from), ACCT.Accounts.epoch(s, th, from)), M.Switch.sess(Hub.thread(s, th)), now},
-     M.SettingSet{ACCT.Accounts.seen.key(th, from, ACCT.Accounts.id(s, th, from), ACCT.Accounts.epoch(s, th, from)), Nat.show(M.Switch.count(s, th)), now},
-     M.ProviderSet{th, p, model, now}, M.SettingSet{AG.Effort.key(th), "", now}], Nil{})
-  +next = M.State.replay(saved, s)
-  +b = ACCT.Accounts.binding.raw(binding)
-  List.append(&2, M.Change, saved, Bool.pick(List<&2, M.Change>, String.eq(AccountFallback.binding(next, th, p), binding), Nil{},
-    ACCT.Accounts.select(next, now, th, p, J.Json.get_str(b, "id", ""), J.Json.get_nat(b, "epoch", 0n), M.Switch.sess(Hub.thread(next, th)), M.Switch.count(s, th))))
-
-def AccountFallback.input(+s: M.State, +now: Nat, +th: String, +text: String, actual: String) -> List<&2, M.Change>:
-  [M.SettingSet{"fallback.input." ++ th, Bool.pick(String, String.eq(M.Setting.get(s, "account.failover.continuing." ++ th, ""), "yes"), M.Setting.get(s, "fallback.input." ++ th, text), text), now},
-   M.SettingSet{"launch.input." ++ th, actual, now}, M.SettingSet{"account.failover.continuing." ++ th, "", now}, M.SettingSet{"account.failover.waiting." ++ th, "", now}]
-
-def AccountFallback.use(+s: M.State, +now: Nat, +th: String, +p: String, +model: String, +binding: String, +cwd: String, +text: String, +uuid: String) -> Step:
-  +from = Hub.provider(Hub.thread(s, th))
-  +say = "Usage limit reached on " ++ AccountFallback.name(s, AccountFallback.binding(s, th, from)) ++ "; automatically switched to " ++ AccountFallback.name(s, binding) ++ " (" ++ p ++ "). Continuing the request."
-  +cs = List.concat(&2, M.Change, [AF.Preference.save(s, now, th, p, binding), AccountFallback.rebind(s, now, th, p, model, binding),
-    [M.ActivityLogged{th, Hub.id("account-fallback", now, Hub.seq(s)), "info", "account-switch", say, now}]])
-  +b = ACCT.Accounts.binding.raw(binding)
-  +ctx = HD.Hand.switch(Hub.entries(s), th, from, p, ACCT.Accounts.seen(s, th, p, J.Json.get_str(b, "id", ""), J.Json.get_nat(b, "epoch", 0n)))
-  +actual = M.Queue.join(ctx, text)
-  Step{List.append(&2, M.Change, cs, AccountFallback.input(s, now, th, text, actual)),
-    AgentStop{th} <> Hub.run(Hub.thread(M.State.replay(cs, s), th), cwd, actual, uuid)}
-
-def AccountFallback.pending(+s: M.State, +th: String) -> J.Json:
-  ACCT.Accounts.parse(M.Setting.get(s, "account.failover.pending." ++ th, ""))
-
-def AccountFallback.pending.current(+s: M.State, +th: String, +o: J.Json) -> Bool:
-  +p = Hub.provider(Hub.thread(s, th))
-  String.eq(J.Json.get_str(o, "provider", "!missing"), p) && String.eq(J.Json.get_str(o, "binding", "!missing"), AccountFallback.binding(s, th, p))
-
-def AccountFallback.pending.save(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, +o: J.Json) -> List<&2, M.Change>:
-  +p = Hub.provider(Hub.thread(s, th))
-  [M.SettingSet{"account.failover.pending." ++ th, J.Json.show(ACCT.Accounts.put(ACCT.Accounts.put(ACCT.Accounts.put(ACCT.Accounts.parse(FB.Limit.json(lim, now)), "provider", J.Str{p}), "binding", J.Str{AccountFallback.binding(s, th, p)}), "not_started", J.Flag{J.Json.get_bool(o, "not_started", False{})})), now}]
-
-def AccountFallback.limited(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit, +o: J.Json) -> Step:
-  +retired = AccountFallback.retire(s, now, th)
-  +cs = List.concat(&2, M.Change, [Queue.changes(retired), AF.Hold.mark(s, now, th, Reset.fill(s, now, lim)),
-    [M.SettingSet{"account.failover.pending." ++ th, "", now}, M.SettingSet{"account.failover.continuing." ++ th, "yes", now},
-     M.TurnChanged{th, M.Interrupted{}, now}, M.QueueTaken{th, now}, M.TurnChanged{th, M.Running{}, now}]])
-  +prompt = Bool.pick(String, J.Json.get_bool(o, "not_started", False{}), Fallback.launch(s, th), Fallback.continue(s, th))
-  Step{cs, List.append(&2, Out, Step.outs_of(retired), Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), M.Queue.join(prompt, M.Queue.of(s, th)), Hub.uuid(now, th ++ "/account-fallback/" ++ Nat.show(Hub.seq(s)))))}
-
-def AccountFallback.retire(+s: M.State, +now: Nat, +th: String) -> Step:
-  +lost = Bg.lost.k(Lost.new(Lost.of(s, th)) && Lost.live(Hub.thread(s, th)), False{}, s, now, th, "account usage limit", Lost.of(s, th))
-  Step{List.concat(&2, M.Change, [Retire.asks(M.Asks.all(s), th, now), Queue.changes(lost), Bg.clear(s, th, now)]), Retire.answers(M.Asks.all(s), th)}
-
-def AccountFallback.pending.use(go: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
-  match go:
-    case False{}: normal
-    case True{}: AccountFallback.limited(s, now, th, Pending.of(s, now, o), o)
-
-def AccountFallback.gone(+s: M.State, +now: Nat, +th: String, normal: Step) -> Step:
-  +o = AccountFallback.pending(s, th)
-  AccountFallback.pending.use(Hub.running(Hub.thread(s, th)) && AccountFallback.pending.current(s, th, o) && Pending.due(Pending.of(s, now, o), now), s, now, th, o, normal)
-
-def AccountFallback.terminal(go: Bool, s: M.State, now: Nat, th: String, lim: FB.Limit, o: J.Json, normal: Step) -> Step:
-  match go:
-    case False{}: normal
-    case True{}: AccountFallback.limited(s, now, th, lim, o)
-
-def AccountFallback.line.limit(lim: Maybe<&2, FB.Limit>, +s: M.State, +now: Nat, +th: String, +o: J.Json, terminal: Bool, normal: Step) -> Step:
-  match lim terminal:
-    case Some{+lim} True{}: AccountFallback.terminal(Pending.due(Reset.fill(s, now, lim), now), s, now, th, lim, o, normal)
-    case Some{+lim} False{}: Step.after(normal, AccountFallback.pending.save(s, now, th, Reset.fill(s, now, lim), o))
-    case None{} True{}: AccountFallback.gone(s, now, th, normal)
-    case None{} False{}: normal
-
-def AccountFallback.line(managed: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, terminal: Bool, normal: Step) -> Step:
-  match managed:
-    case False{}: Fallback.line.on(FB.Chain.on(s), terminal, s, now, th, o, normal)
-    case True{}: AccountFallback.line.limit(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), s, now, th, o, terminal, normal)
-
-def AccountFallback.pick.profile(x: Maybe<&2, J.Json>) -> Maybe<&2, String>:
-  match x:
-    case None{}: None{}
-    case Some{p}: Some{AF.Pick.binding(p)}
-
-def AccountFallback.pick.target.k(keep: Bool, raw: String, +s: M.State, +now: Nat, +p: String, +model: String) -> Maybe<&2, String>:
-  match keep:
-    case True{}: Some{raw}
-    case False{}: AccountFallback.pick.profile(AF.Pick.account(s, now, p, model))
-
-def AccountFallback.pick.target(+s: M.State, +caps: J.Json, +now: Nat, +th: String, +target: FB.Target) -> Maybe<&2, String>:
-  +p = FB.Target.provider(target)
-  +model = FB.Target.model(target)
-  +raw = M.Setting.get(s, ACCT.Accounts.binding.key(th, p), M.Setting.get(s, "account.default." ++ p, ""))
-  +b = ACCT.Accounts.binding.raw(raw)
-  +id = J.Json.get_str(b, "id", "!invalid")
-  +epoch = J.Json.get_nat(b, "epoch", 0n)
-  +legacy = String.is_empty(id)
-  +valid = Bool.pick(Bool, legacy, FB.Caps.valid(caps, target) && (Bool.not(String.is_empty(raw)) || Bool.not(AF.Provider.has(ACCT.Accounts.profiles(s), p))),
-    ACCT.Accounts.ready(ACCT.Accounts.profile(s, id), p, epoch) && AF.Profile.model(ACCT.Accounts.profile(s, id), model))
-  AccountFallback.pick.target.k(valid && Bool.not(AF.Hold.current(s, p, id, epoch, model, now)) && (Bool.not(legacy) || Bool.not(FB.Target.held(s, target, now))), ACCT.Accounts.binding.show(id, epoch), s, now, p, model)
-
-def AccountFallback.chain(xs: List<&2, FB.Target>, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
-  match xs:
-    case Nil{}: AccountFallback.block(s, now, th, text)
-    case +h <> t: AccountFallback.chain.choice(AccountFallback.pick.target(s, caps, now, th, h), h, t, s, caps, now, th, cwd, text, uuid)
-
-def AccountFallback.chain.choice(choice: Maybe<&2, String>, +target: FB.Target, rest: List<&2, FB.Target>, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
-  match choice:
-    case None{}: AccountFallback.chain(rest, s, caps, now, th, cwd, text, uuid)
-    case Some{binding}: AccountFallback.use(s, now, th, FB.Target.provider(target), FB.Target.model(target), binding, cwd, text, uuid)
-
-def AccountFallback.block(+s: M.State, +now: Nat, +th: String, +text: String) -> Step:
-  +p = Hub.provider(Hub.thread(s, th))
-  +reset = AF.Reset.next(s, now, th, p)
-  +say = "All connected " ++ p ++ " accounts are limited. The request is preserved; " ++ Bool.pick(String, Nat.is_gt(reset, now), "it will retry at the next reported reset.", "no reset is known. Clear an availability hold or select an available account to continue.")
-  Step{List.concat(&2, M.Change, [ProviderResume.mark(s, now, th, FB.Limit{p, say, reset}),
-    [M.SettingSet{"account.failover.continuing." ++ th, "", now}, M.SettingSet{"account.failover.waiting." ++ th, "yes", now}, M.TurnChanged{th, M.Interrupted{}, now},
-     M.TurnQueued{th, "account:held:" ++ Nat.show(Hub.seq(s)), text, now},
-     M.ActivityLogged{th, Hub.id("account-blocked", now, Hub.seq(s)), "warn", "account-wait", say, now}]]), [AgentStop{th}]}
-
-def AccountFallback.pick.choice(choice: Maybe<&2, J.Json>, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
-  match choice:
-    case Some{profile}: AccountFallback.use(s, now, th, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), AF.Pick.binding(profile), cwd, text, uuid)
-    case None{}: AccountFallback.cross(FB.Chain.on(s), s, caps, now, th, cwd, text, uuid)
-
-def AccountFallback.cross(on: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String) -> Step:
-  match on:
-    case False{}: AccountFallback.block(s, now, th, text)
-    case True{}: AccountFallback.chain(FB.Chain.suffix(FB.Chain.of(s), FB.Target.key(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
-
-def AccountFallback.preflight(held: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
-  match held:
-    case False{}: Step.after(Fallback.attempt.quota(s, caps, now, th, cwd, text, uuid, original),
-      Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "account.failover.waiting." ++ th, "")), Nil{}, [M.SettingSet{"account.failover.waiting." ++ th, "", now}]))
-    case True{}: AccountFallback.pick.choice(AF.Pick.account(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
-
-def AccountFallback.restore.one(go: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
-  match go:
-    case False{}: Step.none()
-    case True{}:
-      +o = AF.Preference.record(s, th)
-      +binding = J.Json.get_str(o, "binding", "")
-      +p = J.Json.get_str(o, "provider", "")
-      +b = ACCT.Accounts.binding.raw(binding)
-      +seen = ACCT.Accounts.seen(s, th, p, J.Json.get_str(b, "id", ""), J.Json.get_nat(b, "epoch", 0n))
-      Step{List.concat(&2, M.Change, [Switch.old(M.Queue.items(s, th), th, now),
-        AccountFallback.rebind(s, now, th, p, J.Json.get_str(o, "model", ""), binding), AF.Preference.forget(th, now),
-        Switch.ctx(Nat.is_eq(M.Switch.count(s, th), seen), th, HD.Hand.prefix() ++ Hub.id("switch:account-reset", now, Hub.seq(s)), HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), p, seen), now),
-        [M.SettingSet{AG.Effort.key(th), AG.Effort.of(p, J.Json.get_str(o, "effort", "")), now}],
-        [M.ActivityLogged{th, Hub.id("account-reset", now, Hub.seq(s)), "info", "account-switch", "Usage limit reset; restored " ++ AccountFallback.name(s, binding) ++ ".", now}]]), [AgentStop{th}]}
-
 def AccountFallback.restore.threads(ts: List<&2, M.Thread>, +s: M.State, +now: Nat) -> Step:
   match ts:
     case Nil{}: Step.none()
@@ -10708,27 +10722,13 @@ def AccountFallback.restore.threads(ts: List<&2, M.Thread>, +s: M.State, +now: N
       +one = AccountFallback.restore.one(Bool.not(Hub.running(t)) && AccountFallback.safe(s, M.Thread.id(t)) && AF.Preference.ready(s, now, M.Thread.id(t)), s, now, M.Thread.id(t))
       Step.cat(one, AccountFallback.restore.threads(rest, M.State.replay(Queue.changes(one), s), now))
 
-def AccountFallback.attempt.restore(restore: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String, original: List<&2, Out>) -> Step:
-  match restore:
-    case True{}:
-      +one = AccountFallback.restore.one(True{}, s, now, th)
-      +next = M.State.replay(Queue.changes(one), s)
-      +actual = M.Queue.join(M.Queue.of(next, th), text)
-      Step.before(List.concat(&2, M.Change, [Queue.changes(one), [M.QueueTaken{th, now}], AccountFallback.input(s, now, th, text, actual)]), [AgentStop{th}],
-        Step.outs(Hub.run(Hub.thread(next, th), cwd, actual, uuid)))
-    case False{}:
-      +p = Hub.provider(Hub.thread(s, th))
-      AccountFallback.preflight(AF.Hold.current(s, p, ACCT.Accounts.id(s, th, p), ACCT.Accounts.epoch(s, th, p), FB.Target.model(Fallback.target(Hub.thread(s, th))), now), s, caps, now, th, cwd, text, uuid, original)
-
-def AccountFallback.attempt(+s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
-  AccountFallback.attempt.restore(AccountFallback.safe(s, th) && AF.Preference.ready(s, now, th), s, caps, now, th, cwd, text, uuid, original)
+def ProviderResume.tick(+s: M.State, now: Nat) -> Step:
+  +restored = AccountFallback.restore.threads(Rec.threads(s), s, now)
+  +next = M.State.replay(Queue.changes(restored), s)
+  Step.cat(restored, ProviderResume.threads(Rec.threads(next), next, now))
 
 def AccountFallback.forget(th: String, now: Nat) -> List<&2, M.Change>:
   AF.Preference.forget(th, now)
-
-def AccountFallback.safe(+s: M.State, +th: String) -> Bool:
-  Hub.owns(s, th) && Lost.live(Hub.thread(s, th)) && Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n) &&
-    Bool.not(M.Config.held(s, th) || M.Dormant.thread(s, th) || Ephemeral.is(s, th))
 
 def AccountFallback.clear.waiters(ts: List<&2, M.Thread>, +s: M.State, +now: Nat, +p: String) -> List<&2, M.Change>:
   match ts:

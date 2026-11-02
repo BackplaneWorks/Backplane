@@ -26,6 +26,10 @@
 # and memory for parallelism when the single check is the bottleneck).
 set -eu
 cd "$(dirname "$0")/.."
+. scripts/heavy-guard.sh
+export TEST_JOBS=1 CHECK_JOBS=1 CHECK_SHARDS=1
+export BUN_JSC_forceRAMSize=${BUN_JSC_forceRAMSize:-4294967296}
+case ${1:-all} in all|proof) heavy_guard proof "$@" ;; *) heavy_guard check "$@" ;; esac
 # A lost `{==}` shows up here in a second, not after the emit.
 python3 scripts/laws-shape.py
 python3 scripts/i18n-gen.py --check
