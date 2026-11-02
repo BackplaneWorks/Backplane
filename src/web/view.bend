@@ -1483,10 +1483,12 @@ def View.todo.more.if(open: Bool, +lc: I.Loc, +all: Bool, +th: String, +ts: List
     case True{}: View.todo.more(U.Todos.more(lc, all, ts), U.Todos.more.ask(all, th))
     case False{}: Nil{}
 
-# the steps (none shut) and the last line
+# the steps (none shut) and the last line: a done step's box holds a ✓,
+# the others are empty squares that style.css draws (the step in progress,
+# class in_progress, in the accent); ↑ ↓ × show on the hovered or focused row
 def View.todo.item(+th: String, +t: TD.Todo, +n: Nat) -> D.Node:
   D.El{"div", "todo:" ++ TD.Todo.id(t), [D.At{"class", "todo " ++ TD.Todo.status(t)}], [
-    D.Dom.button("todo-check", "todo-edit", TD.Todo.check(th, t), "Check or uncheck item", Bool.pick(String, String.eq(TD.Todo.status(t), "completed"), "☑", "☐")),
+    D.Dom.button("todo-check", "todo-edit", TD.Todo.check(th, t), "Check or uncheck item", Bool.pick(String, String.eq(TD.Todo.status(t), "completed"), "✓", "")),
     D.El{"input", "text", [D.At{"type", "text"}, D.At{"value", TD.Todo.text(t)}, D.At{"aria-label", "To-do text"}, D.At{"maxlength", "2000"},
       D.At{"data-pre", th ++ "\u{1f}" ++ TD.Todo.id(t) ++ "\u{1f}"}, D.On{"change", "todo-text"}], Nil{}},
     D.Dom.button("todo-up", "todo-edit", TD.Todo.ask(th, "move", TD.Todo.id(t), "", "", Nat.sub(n, 1n)), "Move item up", "↑"),
