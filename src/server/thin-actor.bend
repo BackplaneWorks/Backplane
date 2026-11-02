@@ -940,7 +940,7 @@ def Actor.loading.key.on(on: Bool, +u: U.Ui) -> String:
     case False{}: ""
     case True{}: J.Json.show(J.Json.obj([
       J.KV{"pages", J.Str{U.Ui.info(u, "local.view.pages")}}, J.KV{"lists", J.Str{U.Ui.info(u, "local.view.budget")}},
-      J.KV{"bodies", J.Str{U.Ui.info(u, "local.body.budget")}}]))
+      J.KV{"bodies", J.Str{U.Ui.info(u, "local.body.budget")}}, J.KV{"boardCatalog", J.Str{U.Ui.info(u, "local.board.catalog")}}, J.KV{"boardCatalogVersion", J.Str{U.Ui.info(u, "local.board.catalog.version")}}]))
 
 def Actor.loading.key(xs: List<&2, Actor>) -> String:
   match xs:
@@ -952,10 +952,27 @@ def Actor.acted(+a: Actor, +web: Bool, +p: J.Json, +epoch: String, +now: Nat) ->
   +action = Actor.native.action(Bool.and(NS.Ns.offered(web, p), String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")), ready, web, p, now)
   Acted{Actor.accept(ready, action, False{}), action}
 
-def Actor.render.acted(acted: Acted, +web: Bool, +st: M.State, index: T.Index, +p: J.Json, epoch: String, now: Nat, +rows: List<&2, String>, stream: TL.Stream, revision: Nat) -> Rendered:
-  match acted:
-    case Acted{+updated, +action}:
+# Compact chrome is a render input only. In particular neither the actor's
+# desired viewer nor ActResult/session is rewritten, and no sidebar/delta
+# reference can hide a full tree from the subsequent complete-size checks.
+def Actor.render.compact(+updated: Actor, +action: V.ActResult, +st: M.State, +index: T.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream) -> Rendered:
+  +prepared = U.Ui.info_set(U.Ui.tick(V.Render.ui(Actor.ui(updated), st, index, J.Json.get_obj(p, "target"), rows, stream, now), VC.ViewClock.of(now)), "local.view.compact", "1")
+  +window = V.Render.window(stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
+  Rendered{updated, V.Obj.put(V.Render.web.prepared(action, prepared, window, J.Null{}), "mailDraftContext", Actor.mail_context(Actor.ui(updated)))}
+
+def Actor.render.compact.checked(same: Bool, updated: Actor, action: V.ActResult, st: M.State, index: T.Index, p: J.Json, epoch: String, now: Nat, rows: List<&2, String>, stream: TL.Stream, revision: Nat) -> Rendered:
+  match same:
+    case True{}: Actor.render.compact(updated, action, st, index, p, epoch, now, rows, stream)
+    case False{}: Actor.render.full.revision(True{}, updated, action, st, index, p, epoch, now, rows, stream, revision)
+
+def Actor.render.acted.kind(compact: Bool, acted: Acted, +web: Bool, +st: M.State, index: T.Index, +p: J.Json, epoch: String, now: Nat, +rows: List<&2, String>, stream: TL.Stream, revision: Nat) -> Rendered:
+  match compact acted:
+    case True{} Acted{+updated, +action}: Actor.render.compact.checked(W.Target.same(V.Target.after(Actor.ui(updated)), J.Json.get_obj(p, "target")), updated, action, st, index, p, epoch, now, rows, stream, revision)
+    case False{} Acted{+updated, +action}:
       Actor.native.reconcile(Actor.native.page_result(web, p, Actor.render.result(TerminalInput.allowed(web, p, action), updated, action, web, st, index, V.Render.request(p, Actor.ui(updated)), epoch, now, rows, stream, revision)))
+
+def Actor.render.acted(acted: Acted, +web: Bool, +st: M.State, index: T.Index, +p: J.Json, epoch: String, now: Nat, +rows: List<&2, String>, stream: TL.Stream, revision: Nat) -> Rendered:
+  Actor.render.acted.kind(Bool.and(web, J.Json.get_bool(p, "@compactChrome", False{})), acted, web, st, index, p, epoch, now, rows, stream, revision)
 
 def Actor.page.splice.k(m: Maybe<&2, J.Json>, +updated: Actor) -> Maybe<&2, Rendered>:
   match m:

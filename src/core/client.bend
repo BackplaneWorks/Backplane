@@ -2,6 +2,7 @@ import Base
 import ./star-nudge.bend as STAR
 import ./browser-frame.bend as BFRAME
 import ./view-page.bend as VP
+import ./board-catalog.bend as BC
 import ./accounts.bend as ACCT
 import ./allowance.bend as ALQ
 import ./account-fallback.bend as AFB
@@ -6219,6 +6220,24 @@ def Bd.look.k(ask: Bool, +u: Ui) -> Act:
 
 def Bd.look(+u: Ui) -> Act:
   Bd.look.k(Bd.can(Ui.sel(u)), u)
+
+# The web disclosure is an explicit bounded, recipient-local catalog. A
+# response/action from an old target or changed source cannot reopen it.
+def Bd.catalog.source(+u: Ui) -> String:
+  BC.Catalog.source(Ui.sel(u), Ui.root(u), BC.Catalog.unique(Bd.files(u)))
+
+def Bd.catalog.accept(valid: Bool, +u: Ui, +request: J.Json) -> Act:
+  match valid:
+    case False{}: Act{u, Nil{}}
+    case True{}:
+      +before = BC.Catalog.state(Ui.info(u, "local.board.catalog"))
+      +source = Bd.catalog.source(u)
+      +opening = Bool.and(J.Json.get_bool(request, "open", False{}), Bool.not(BC.Catalog.open(before, source)))
+      Bd.look.k(opening, Ui.info_set(u, "local.board.catalog", BC.Catalog.command(source, J.Json.get_bool(request, "open", False{}), J.Json.get_str(request, "query", ""), J.Json.get_nat(request, "offset", 0n))))
+
+def Bd.catalog(+u: Ui, +value: String) -> Act:
+  +request = BC.Catalog.state(value)
+  Bd.catalog.accept(Bool.and(String.eq(Ui.info(u, "local.board.catalog.version"), "1"), Bool.and(Bool.not(String.is_empty(Ui.sel(u))), BC.Catalog.current(request, Bd.catalog.source(u)))), u, request)
 
 # (an answer to boards.list: OR.Boards.listed)
 def Bd.has(+o: J.Json) -> Bool:
@@ -16398,12 +16417,17 @@ def Ui.act.fab(fab: Bool, +u: Ui, +action: String, +value: String) -> Act:
       Ui.act.us(C.Codec.pos(["usage-refresh", "usage-open", "usage-period", "usage-metric", "usage-model-page", "usage-project-page", "usage-provider"], action), u, action, value)
 
 # (the board picker opened: Bd.look)
+def Ui.act.board_catalog(on: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match on:
+    case True{}: Bd.catalog(u, value)
+    case False{}: Ui.act.fab(Fab.is(action), u, action, value)
+
 def Ui.act.bd(look: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match look:
     case True{}:
       Bd.look(u)
     case False{}:
-      Ui.act.fab(Fab.is(action), u, action, value)
+      Ui.act.board_catalog(String.eq(action, "board-catalog"), u, action, value)
 
 def Ui.act.z(tz: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match tz:

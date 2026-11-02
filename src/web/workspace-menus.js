@@ -36,7 +36,7 @@ export function installWorkspaceMenus(doc = document, reclaim = () => {}) {
     if (summary && !summary.parentElement.open) close(summary.parentElement);
     const button = event.target.closest?.('.local-menu-body button[data-on-click]');
     const menu = button?.closest('.local-menu');
-    if (!menu || ['delete','delete-no'].includes(button.dataset.onClick)) return;
+    if (!menu || ['delete','delete-no','board-catalog'].includes(button.dataset.onClick)) return;
     close(menu, true);
   });
   doc.addEventListener('input', event => {
