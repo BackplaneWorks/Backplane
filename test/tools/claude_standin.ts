@@ -39,7 +39,12 @@
 //                "hold:MS" runs a last Bash call MS before its result;
 //                "agents:N" runs N background subagents (Agent calls)
 //                that finish once the text is posted;
-//                "agentsteps:N" gives each one N tool/text activity rows
+//                "agentsteps:N" gives each one N tool/text activity rows;
+//                "ask:" asks a question (AskUserQuestion), "approve:" a
+//                Bash approval, both through permission_prompt, waiting;
+//                "edit:" moves the board's first footprint 2.54 mm;
+//                "delegate:" calls delegate_task (a plain child);
+//                "fail:" starts, then fails the turn (an API error result)
 //   delegate     the first command calls the hub's delegate_task (its MCP
 //                URL from --mcp-config) for a child "mode:plain child
 //                work", then ends; later commands as plain
@@ -68,6 +73,11 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 const args = process.argv.slice(2);
+// `claude --version` (the hub's probe for Settings › Agents) answers at once
+if (args[0] === "--version") {
+  process.stdout.write("2.1.286 (Claude Code)\n");
+  process.exit(0);
+}
 const at = args.indexOf("--resume");
 const session = at >= 0 ? args[at + 1] : `sess-${process.pid}-${Date.now()}`;
 const logf = process.env.FAKE_LOG ?? "";
@@ -330,6 +340,70 @@ async function run(c: Cmd, firstOne: boolean) {
         content: [{ type: "tool_use", id, name: "Bash", input: { command: `grep -n ${tag} board.kicad_pcb # ${k}` } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
       await sleep(ms);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `${k}: (footprint "${tag}" (layer "F.Cu"))` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "ask:" / "approve:": a question (AskUserQuestion) or a tool approval
+    // (Bash) through the hub's permission_prompt, waiting for the answer
+    for (const [kw, tool, input] of [
+      ["ask:", "AskUserQuestion", { questions: [{ question: `Which connector for ${tag}?`, header: "Connector", multiSelect: false,
+        options: [{ label: "USB-C", description: "reversible" }, { label: "Micro-B", description: "cheaper" }] }] }],
+      ["approve:", "Bash", { command: `rm -rf build/ && kicad-cli pcb export gerbers board.kicad_pcb # ${tag}` }],
+    ] as const) {
+      if (!c.text.includes(kw) || !mcpUrl) continue;
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: tool, input }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      let got = "";
+      try {
+        const r = await fetch(mcpUrl, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "permission_prompt", arguments: { tool_name: tool, input, tool_use_id: id } } }) });
+        got = await r.text();
+      } catch (e) { got = String(e); }
+      log(`PERMIT ${tool} ${got.slice(0, 300)}`);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.includes("allow") ? `answered: ${got.slice(0, 200)}` : "denied", is_error: !got.includes("allow") }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "edit:": an Edit call that moves the board's first footprint 2.54 mm right
+    if (c.text.includes("edit:")) {
+      const fs = await import("node:fs");
+      const f = fs.readdirSync(process.cwd()).find((n) => n.endsWith(".kicad_pcb"));
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "Edit", input: { file_path: `${process.cwd()}/${f}`, old_string: "(at", new_string: "(at" } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      if (f) {
+        const s = fs.readFileSync(f, "utf8");
+        const m = /\(footprint [^\n]*\n(?:[^\n]*\n){0,6}?\s*\(at ([\d.-]+) ([\d.-]+)/.exec(s);
+        if (m) {
+          const at = m.index + m[0].lastIndexOf("(at ");
+          const old = `(at ${m[1]} ${m[2]}`;
+          fs.writeFileSync(f, s.slice(0, at) + `(at ${(Number(m[1]) + 2.54).toFixed(2)} ${m[2]}` + s.slice(at + old.length));
+        }
+      }
+      await sleep(ms);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: f ? `edited ${f}` : "no board" }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "delegate:": hands a child task to another thread (delegate_task)
+    if (c.text.includes("delegate:") && mcpUrl) {
+      const id = `toolu_${rnd()}`;
+      const args = { prompt: `mode:plain check the footprints for ${tag}`, provider: "claude", title: `Footprint check ${tag}` };
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "mcp__backplane__delegate_task", input: args }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      let got = "";
+      try {
+        const r = await fetch(mcpUrl, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "delegate_task", arguments: args } }) });
+        got = await r.text();
+      } catch (e) { got = String(e); }
+      log(`DELEGATED ${got.slice(0, 300)}`);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.slice(0, 400) }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "fail:": streams a little, then the API fails the turn (an error result)
+    if (c.text.includes("fail:")) {
+      emit({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      emit({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `Starting on ${tag}… ` } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      await sleep(ms * 5);
+      say("API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}");
+      result("", true);
+      lc(c.uuid, "completed");
+      return;
     }
     // "todos:N/D": the agent's to-do list, N steps with the first D done
     const todo = /todos:(\d+)\/(\d+)/.exec(c.text);
