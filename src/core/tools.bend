@@ -39,6 +39,28 @@ def Tools.stop.loc(+l: LC.Loc, running: Bool) -> List<&2, Tool>:
 def Tools.stop(running: Bool) -> List<&2, Tool>:
   Tools.stop.loc(LC.En{}, running)
 
+# a turn that failed (an API error, a crash): Retry sends the person's
+# last message again (client.bend's Ui.retry), where Stop sits while it runs
+def Tools.retry.loc(+l: LC.Loc, failed: Bool) -> List<&2, Tool>:
+  match failed:
+    case True{}:
+      [Tool{"repeat", MSG.T.tools.retry(l), MSG.T.tools.tip.retry(l), "retry", "", False{}, False{}, False{}}]
+    case False{}:
+      Nil{}
+
+def Tools.retry(failed: Bool) -> List<&2, Tool>:
+  Tools.retry.loc(LC.En{}, failed)
+
+# the turn's own button: Stop while it runs, Retry once it failed
+def Tools.turn.loc(+l: LC.Loc, t: M.TurnState) -> List<&2, Tool>:
+  match t:
+    case M.Running{}:
+      Tools.stop.loc(l, True{})
+    case M.Failed{}:
+      Tools.retry.loc(l, True{})
+    case _:
+      Nil{}
+
 def Tools.pin.loc(+l: LC.Loc, p: Bool) -> Tool:
   match p:
     case True{}:
@@ -151,7 +173,7 @@ def Tools.icons(ts: List<&2, Tool>) -> List<&2, String>:
 def Tools.every() -> List<&2, Tool>:
   List.concat(&2, Tool, [
     Tools.head(Head{True{}, True{}, True{}, True{}, True{}, True{}, True{}, True{}, True{}}, "", "", "", ""),
-    Tools.head(Head{False{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}}, "", "", "", "")])
+    Tools.head(Head{False{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}}, "", "", "", ""), Tools.retry(True{})])
 
 # every button has a label and a tooltip to go with its icon
 def Tools.labelled(ts: List<&2, Tool>) -> Bool:

@@ -1445,3 +1445,7 @@ settings.voice.learned.note = 音声入力の後にした修正。2回すると�
 voice.learned.item = {heard} → {out}・{yes}回
 voice.dictate.here = この端末のマイクで音声入力
 native.permission.microphone = スレッドに音声入力する間だけ声を録音し、文字にするためにコンピューターへ送ります。
+
+# Retry a failed turn.
+tools.retry = 再試行
+tools.tip.retry = ターンが失敗しました: 最後のメッセージをもう一度送信

@@ -132,6 +132,18 @@ export function fit() {
   if (view && view.box) { view.fit(); view.later(); }
 }
 
+// the preview as a PNG Blob: drawn now and copied in the same task (the
+// context keeps no drawing buffer) over the background the page shows it on
+export function snapshot(canvas) {
+  if (!view || view.canvas !== canvas || view.disposed) return Promise.resolve(null);
+  let bg = "", el = canvas;
+  while (el && (!bg || bg === "transparent" || /rgba\(.*,\s*0\)$/.test(bg))) { bg = getComputedStyle(el).backgroundColor; el = el.parentElement; }
+  view.draw();
+  const out = document.createElement("canvas"); out.width = canvas.width; out.height = canvas.height;
+  const g = out.getContext("2d"); g.fillStyle = bg || "#000"; g.fillRect(0, 0, out.width, out.height); g.drawImage(canvas, 0, 0);
+  return new Promise(ok => out.toBlob(ok, "image/png"));
+}
+
 // The original Studio canvas covers this preview. Keep its camera current,
 // but draw it again only when Fast, a fallback or the heat overlay needs it.
 export function setPreviewVisible(canvas, on) {
