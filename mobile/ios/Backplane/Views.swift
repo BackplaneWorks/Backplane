@@ -16,6 +16,7 @@ struct RootView: View {
     // knows of another overlay, and this covers the rest (the hubs sheet, a
     // picture opened large, menus and sheets still going away)
     @State private var tourReady = false
+    @State private var handledStarSuggestion: (hub: String, token: String)?
 
     var body: some View {
         content
@@ -65,6 +66,7 @@ struct RootView: View {
             ConnectionStartupView(model: model, initialKey: key)
         } else if let s = model.screen {
             asked(s)
+                .safeAreaInset(edge: .top, spacing: 0) { starSuggestion }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if let key = authKey {
                         Button {
@@ -99,6 +101,41 @@ struct RootView: View {
         } else {
             ConnectionStartupView(model: model, initialKey: authKey)
         }
+    }
+
+    @ViewBuilder private var starSuggestion: some View {
+        if let nudge = starNudge {
+            // Local sheets (pictures, subagents, permissions, etc.) aren't all
+            // in Screen. Recheck the tour's UIKit guard, including transitions,
+            // only while a suggestion is waiting on otherwise usable content.
+            TimelineView(.periodic(from: .now, by: 0.3)) { _ in
+                if Presented.none {
+                    StarNudgeBanner(nudge: nudge, open: {
+                        guard starNudge == nudge, Presented.none else { return }
+                        handledStarSuggestion = (model.screen?.hub ?? "", nudge.token)
+                        model.act("star-open", nudge.token)
+                    }, dismiss: {
+                        guard starNudge == nudge, Presented.none else { return }
+                        handledStarSuggestion = (model.screen?.hub ?? "", nudge.token)
+                        model.act("star-dismiss", nudge.token)
+                    })
+                }
+            }
+        }
+    }
+
+    private var starNudge: StarNudge? {
+        guard model.contentReady, !pairing, !recoverySheet, authKey == nil,
+              let s = model.screen, let nudge = s.starNudge,
+              handledStarSuggestion?.hub != s.hub || handledStarSuggestion?.token != nudge.token,
+              s.tour == nil, s.error.isEmpty, s.deleting == nil, s.removing == nil,
+              s.renaming == nil, s.find == nil, s.folders == nil, s.rowMenu == nil,
+              s.newBot == nil, s.newRoom == nil, s.settings == nil,
+              s.thread?.diff == nil, s.thread?.term == nil,
+              model.tab != .settings,
+              !(model.stacks[model.tab] ?? []).contains(where: { $0 == "@hubs" || $0.hasPrefix("@hub:") })
+        else { return nil }
+        return nudge
     }
 
     // the first-run tour (core/onboard.bend): up while the screen carries a
@@ -160,6 +197,44 @@ struct RootView: View {
                 Text(d.body)
             }
             .onChange(of: s.removing?.id) { removed = "" }
+    }
+}
+
+private struct StarNudgeBanner: View {
+    let nudge: StarNudge
+    let open: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: nudge.text)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Star on GitHub", action: open)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BackplaneDesign.accentText)
+                    .frame(minHeight: 44, alignment: .leading)
+                    .accessibilityIdentifier("star.nudge.open")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.body)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Dismiss star suggestion")
+            .accessibilityIdentifier("star.nudge.dismiss")
+        }
+        .buttonStyle(.plain)
+        .tint(BackplaneDesign.accent)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(BackplaneDesign.panel)
+        .overlay(alignment: .bottom) { Rectangle().fill(BackplaneDesign.line).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("star.nudge")
     }
 }
 

@@ -1,3 +1,5 @@
+import ./src/core/star-nudge.bend as STARN
+
 import ./src/core/provider-setup.bend as PROVIDERSETUP
 
 import ./src/core/range.bend as BRANGE
@@ -14972,3 +14974,27 @@ law subs_step_label_mcp:
 
 law subs_step_label_say:
   {SUBSTEP.Subs.step.label("say") == "" : String}
+
+# The star suggestion is optional and local. A failed eligibility check
+# cannot write state; a stale/terminal decision cannot write state either.
+law star_nudge_rejected_accept:
+  for +raw: String
+  for +id: String
+  for +now: Nat
+  {STARN.Star.accept.k(False{}, raw, id, now) == Nil{} : List<&2, M.Change>}
+
+law star_nudge_rejected_decision:
+  for +o: J.Json
+  for +token: String
+  for +action: String
+  for +now: Nat
+  {STARN.Star.decide.k(False{}, o, token, action, now) == Nil{} : List<&2, M.Change>}
+
+law star_nudge_official_repository:
+  {STARN.Star.url() == "https://github.com/BackplaneWorks/Backplane" : String}
+
+# Durable client effects are never released by the disk queue before save.
+law star_nudge_saved_send_waits:
+  for +client: U32
+  for +text: String
+  {DQ.Dq.local(H.SavedSend{client, text}) == False{} : Bool}

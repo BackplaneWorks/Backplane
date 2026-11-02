@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "5ab997e47daf3bc8832495c3c4f23decc29bf05ded096fcd86c7487a2a71f0b9",
+    "src/core/client.bend": "de44ec5bea9bcf30ae5309791bf0e9eed0b9aa66471f7fbcc2f64eb2e366e75c",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -123,6 +123,7 @@
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "65ab4ed3f26f023be1e76e47f4eec7e48a82eefc509b2f5366085ff1df4f140b",
+    "src/core/star-nudge.bend": "8a8b5ce5e4ad2cc0035fb1ffe0dfe999d4bb15b6ecf15f60ea48a6dac71ba933",
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
@@ -155,8 +156,8 @@
     "src/core/wake.bend": "074b0501f0db23a207e835beea1de5a5c11dc770287beef06c4d20be0da93a67",
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
-    "src/mobile/hubs.bend": "3528d072ca34c99edb2b95349907db2134bd3df56b16786260c454eab5e6f3ca",
-    "src/mobile/screen.bend": "73e4192556575fbe562310bc3fc6a07622ec403838b89aa6f8255e1cf75738e5",
+    "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
+    "src/mobile/screen.bend": "6666dcd2317e2be91c4f7e055fef747d33a61e3df21efa0f275075513b464a61",
     "src/server/thin-actor.bend": "ea84db3e1a8609e1455f9efb33cdbcc638bcb46570b03293b5589a7be2f687e7",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -180,7 +181,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "ae6c416d7a4944128ce7de2e4cee6ba98c1908fefbe8bba96a258b9b00c9600f"
+    "src/web/view.bend": "6fe1b515db150f1d95db1375c016c88b93686a168f2a7fab0ee09f18ef1d2723"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -513,5 +514,32 @@
     "fullOutputCheck": "test/sidebar_draft_image_test.bend",
     "focusedSuites": 20,
     "existingLaws": "unchanged"
+  },
+  "starNudgeReview": {
+    "priorManifestSHA256": "3be04aafc578592a6b9da89e5db67880d99c3c4caa1b86f2319b3dd180e0d0a2",
+    "changedClosureFiles": [
+      "src/core/client.bend",
+      "src/core/star-nudge.bend",
+      "src/mobile/hubs.bend",
+      "src/mobile/screen.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "Reviewed shared Star policy and footer/mobile/focused-hub projections: only canonical star.nudge.v1 settings, connection-owned star.nudge.offer info and existing overlay controls are read. The policy has no draft access. Retry keeps original reliable send, draft clearing, account and reply handling, adding only an explicit resend marker. Sidebar draft readers, unknown @ retention, ordinary conversation body omission, full picture inputs, private image keys and transport authority remain unchanged. No scanner/filter/fallback changes or guard bypass. Main630 provenance retained. Current integration full-output sidebar, star UI/state, Retry, onboarding and inherited generic fold checks passed.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputLogSHA256": "267c934463c918ab35cfd86ad8e77c4a6f93008f591bfc2a206dbedb4b8f53d2",
+    "assertions": 24,
+    "starUiLogSHA256": "267c934463c918ab35cfd86ad8e77c4a6f93008f591bfc2a206dbedb4b8f53d2",
+    "starUiAssertions": 37,
+    "integrationBase": "277039ff3da0ea5a3e515b0d5b506d9fc36a7609",
+    "postReviewQualification": "Focused final277 integration checks passed; normal five-gate qualification is recorded separately with exact source keys.",
+    "postReviewChangedClosureFiles": [
+      "src/core/client.bend",
+      "src/core/star-nudge.bend",
+      "src/mobile/hubs.bend",
+      "src/mobile/screen.bend",
+      "src/web/view.bend"
+    ],
+    "postReviewFocusedLogSHA256": "267c934463c918ab35cfd86ad8e77c4a6f93008f591bfc2a206dbedb4b8f53d2",
+    "focusedSuites": 6
   }
 }

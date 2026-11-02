@@ -1,4 +1,5 @@
 import Base
+import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
 import ../core/fm.bend as FMP
@@ -7494,6 +7495,12 @@ def Bot.request(m: Maybe<&2, J.Json>, +st: M.State, +now: Nat, +client: U32, +te
     case None{}:
       B.Hub.request_text(st, now, client, text)
 
+# The star policy belongs to real client requests only. Far RPCs use
+# Bot.request directly and retain their ordinary reply and no local offer.
+def Bot.request.client(+st: M.State, +now: Nat, +client: U32, +text: String) -> B.Step:
+  +parsed = J.Json.parse(text)
+  STAR.Star.request(st, now, client, Maybe.default(&2, J.Json, parsed, J.Null{}), Bot.request(parsed, st, now, client, text))
+
 # Memory reaches only the agent: a bot's turn text gets its <memory>
 # block here, after the timeline kept the text as it was sent
 
@@ -10388,6 +10395,17 @@ def RunJob.read(bound: Bool, +home: String, +conv: String, +input: String) -> IO
         r : MST.StoreResult<MB.Body> <- MST.MailStore.exact(home, conv, input)
         return RunJob.exact.result(r)
 
+# A no-change retry may reach Hub.out while an earlier decision still
+# waits on disk. Keep its success response behind that same queue too.
+def Hub.send.saved(queued: Bool, h: Hub, +client: U32, +text: String) -> IO(Hub):
+  match queued h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Cfg.with_dq(cfg, DQ.Dq.hold(Hub.dq(cfg), [B.SavedSend{client, text}])), note})
+    case False{} Hub{st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        cl2 : List<&2, Client> <- Wire.to(cl, client, text)
+        return Hub{st, f, ls, cl2, as, inbox, cfg, note}
+
 def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
   match h o:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note} B.RunStart{+thread, conv, head}:
@@ -10412,6 +10430,10 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.thin.store(cfg), Cfg.home(cfg), st, conv, "*", before, n)
         cl2 : List<&2, Client> <- Wire.to(cl, client, MailJob.read.text(MailJob.read.reply(r, client, id)))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
+    # Even a no-change retry must wait behind a queued unsaved decision.
+    # Dq.split holds changed steps; this guard also covers that retry path.
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.SavedSend{+client, +text}:
+      Hub.send.saved(DQ.Dq.some(Hub.dq(cfg)), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, text)
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.Send{+client, +text}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.to(cl, client, text)
@@ -11955,7 +11977,7 @@ def Hub.rpc.recorded(pair: Hub & Bool, client: U32, id: String) -> IO(Hub):
 
 def Hub.rpc.k(p: M.State & Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   (st, h) = p
-  IO.bind(Hub & Bool, Hub, Hub.step.ok(h, Bot.request(J.Json.parse(text), st, now, client, text)),
+  IO.bind(Hub & Bool, Hub, Hub.step.ok(h, Bot.request.client(st, now, client, text)),
     pair => Hub.rpc.recorded(pair, client, J.Json.as_raw(J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "id"), "null")))
 
 # new turns are refused while too much waits to be saved (core/diskq.bend)
