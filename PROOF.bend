@@ -15332,6 +15332,9 @@ def Laws.settings_row_information(): {==}
 
 def Laws.voice_model_needs_runtime(): {==}
 
+def Laws.pcb_usage_fixed_fields():
+  {==}
+
 def Laws.project_drive_root_absolute():
   {==}
 

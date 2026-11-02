@@ -15272,6 +15272,10 @@ law settings_row_information:
 law voice_model_needs_runtime:
   {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}
 
+# The original ten-field contract remains unchanged; PCB adds exactly two.
+law pcb_usage_fixed_fields:
+  {UCOUNT.Uc.all_names() == ["threads_created", "user_messages", "assistant_messages", "bot_messages", "bot_wakes", "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens", "usage_turns", "boards_created", "boards_ordered"] : List<&2, String>}
+
 # A Windows drive root remains absolute when the project root is stored.
 law project_drive_root_absolute:
   {H.Hub.root.norm("C:/") == "C:/" : String}
