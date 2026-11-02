@@ -42,6 +42,17 @@ def signature(key, stamp, raw):
     return "sha256=" + hmac.new(key, str(stamp).encode()+b"."+raw, hashlib.sha256).hexdigest()
 
 
+def remember_fixtures(receipt, batch, nonce):
+    for event in batch:
+        ident = event["id"]
+        if uuid.UUID(ident).version != 4:
+            raise ValueError("only throwaway UUIDv4 fixtures are allowed")
+        if ident not in receipt["test_install_ids"]:
+            receipt["test_install_ids"].append(ident)
+    if nonce not in receipt["test_nonces"]:
+        receipt["test_nonces"].append(nonce)
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
         return None
@@ -79,19 +90,37 @@ def main():
                "worker_sha256": actual_sha, "uses_real_hub_home": False,
                "production_default_totals_expected_unchanged": True,
                "receiver_storage_and_aggregation": "PENDING_OWNER_READBACK",
-               "requests": [], "stages": {}, "test_install_ids": []}
+               "requests": [], "stages": {}, "test_install_ids": [], "test_nonces": []}
     events = []
     failures = []
 
+    persist_lock = threading.Lock()
+
+    def persist():
+        # Persist cleanup identities BEFORE any request can reach AWS. If the
+        # worker or harness fails halfway, its exact fixtures remain recoverable.
+        with persist_lock:
+            args.receipt.parent.mkdir(parents=True, exist_ok=True)
+            temporary = args.receipt.with_name(args.receipt.name+".tmp")
+            fd = os.open(temporary, os.O_WRONLY|os.O_CREAT|os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as output:
+                json.dump(receipt, output, indent=2)
+                output.write("\n")
+            os.replace(temporary, args.receipt)
+
     def stage(name, ok):
         receipt["stages"][name] = "PASS" if ok else "FAIL"
+        persist()
         print(("PASS " if ok else "FAIL ")+name, flush=True)
         if not ok:
             raise AssertionError(name)
 
     def post_events(batch, name):
         stamp = int(time.time())
-        raw = json.dumps({"v": 1, "ts": stamp, "nonce": secrets.token_hex(8), "events": batch}, separators=(",", ":")).encode()
+        nonce = secrets.token_hex(8)
+        raw = json.dumps({"v": 1, "ts": stamp, "nonce": nonce, "events": batch}, separators=(",", ":")).encode()
+        remember_fixtures(receipt, batch, nonce)
+        persist()
         status = forward(raw, {"Content-Type": "application/json", "X-Backplane-Key": args.key_id,
                               "X-Backplane-Timestamp": str(stamp), "X-Backplane-Signature": signature(key, stamp, raw)})
         receipt["requests"].append({"stage": name, "status": status,
@@ -123,6 +152,8 @@ def main():
                 headers = {name: self.headers[name] for name in ("X-Backplane-Key", "X-Backplane-Timestamp", "X-Backplane-Signature")}
                 headers["Content-Type"] = "application/json"
                 # Forward exact body and signatures, with redirects disabled.
+                remember_fixtures(receipt, body["events"], body["nonce"])
+                persist()
                 status = forward(raw, headers)
                 receipt["requests"].append({"stage": "native-forward", "status": status,
                                             "body_sha256": hashlib.sha256(raw).hexdigest(),
@@ -146,7 +177,8 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="bp-aws-usage-test-") as temp:
             home = Path(temp)/"throwaway"
-            env = {k: v for k, v in os.environ.items() if not k.startswith("BACKPLANE_TELEMETRY")}
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "TZ": "UTC",
+                   "TMPDIR": temp, "XDG_CACHE_HOME": str(Path(temp)/"cache")}
             env.update(HOME=temp, CURL_HOME=temp, CI="", DO_NOT_TRACK="", BACKPLANE_SANDBOX="",
                        BACKPLANE_TELEMETRY="on", BACKPLANE_TELEMETRY_TEST="1", BACKPLANE_TELEMETRY_CHANNEL="dev",
                        BACKPLANE_TELEMETRY_URL=f"http://127.0.0.1:{server.server_port}/api/v1/events",
@@ -162,7 +194,6 @@ def main():
             run(3)
             installs = [e for e in events if e["e"] == "install"]
             usage = [e for e in events if e["e"] == "usage"]
-            receipt["test_install_ids"] = list(dict.fromkeys(e["id"] for e in events))
             stage("native_registration_before_usage", bool(installs) and bool(usage) and events[0]["e"] == "install")
             stage("native_registration_18_bit_pow", all(proof_ok(e["id"], e["pow"]) for e in installs))
             stage("initial_all_ten_counters", usage[-1]["counts"] == counts(3))
@@ -179,26 +210,26 @@ def main():
             invalid = dict(installs[0], id=str(uuid.uuid4()), pow="0")
             while proof_ok(invalid["id"], invalid["pow"]):
                 invalid["pow"] += "0"
-            receipt["test_install_ids"].append(invalid["id"])
-            invalid_status = post_events([invalid], "invalid_registration_pow")
-            receipt["invalid_registration"] = {"id": invalid["id"], "pow_valid": False, "http_status": invalid_status,
+            receipt["invalid_registration"] = {"id": invalid["id"], "pow_valid": False,
                                                 "storage_verification": "PENDING_OWNER_READBACK"}
+            invalid_status = post_events([invalid], "invalid_registration_pow")
+            receipt["invalid_registration"]["http_status"] = invalid_status
             # Some receivers return 202 while discarding an invalid registration;
             # only storage verification can establish cryptographic rejection.
             stage("invalid_pow_no_server_error", 200 <= invalid_status < 500)
+            invalid_usage_status = post_events([dict(usage[-1], id=invalid["id"])], "usage_after_invalid_pow")
+            receipt["invalid_registration"]["usage_http_status"] = invalid_usage_status
+            stage("invalid_pow_usage_no_server_error", 200 <= invalid_usage_status < 500)
             receipt["expected"] = {"verified_install_id": installs[0]["id"], "day": original["day"],
                                    "counters_after_older_replay": counts(5), "total_tokens": 950,
                                    "invalid_pow_install_not_verified": True,
+                                   "invalid_pow_id_has_no_usage_rows": True,
                                    "default_production_totals_include_no_test_ids": True}
             receipt["test_only_payload"] = {"version": original["ver"], "os": original["os"], "arch": original["arch"]}
     finally:
         server.shutdown()
         server.server_close()
-        args.receipt.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(args.receipt, os.O_WRONLY|os.O_CREAT|os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as output:
-            json.dump(receipt, output, indent=2)
-            output.write("\n")
+        persist()
         print("Receiver storage/aggregation verification: PENDING OWNER READBACK", flush=True)
 
 
