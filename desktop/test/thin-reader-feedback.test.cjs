@@ -4,11 +4,11 @@ const source=()=>fs.readFileSync(process.env.READER_HOST_SOURCE||path.join(__dir
 test('an underfilled entry loads real older pages before a wheel can generate scroll',()=>{
  const src=source(),a=src.indexOf('function earlierCheck(tl)'),b=src.indexOf('function laterCheck(tl)',a),requests=[];
  const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0};
- const context=vm.createContext({historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyFillSeeking:true,historySeekMessage:()=>false,historyFillPages:0,earlierAsked:false,historyFillMore(){},historyHasMessage:t=>t.scrollHeight>t.clientHeight+10,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400});
+ const context=vm.createContext({historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyFillSeeking:true,historySeekMessage:()=>false,historyFillPages:0,earlierAsked:false,historyFillMore(){},historyFillContinue(){},historyHasMessage:t=>t.scrollHeight>t.clientHeight+10,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400});
  const check=vm.runInContext('('+src.slice(a,b)+')',context);check(tl);
  assert.equal(requests.length,1);assert.equal(requests[0].direction,'older');assert.equal(requests[0].options.two,true);
  context.earlierAsked=false;tl.scrollHeight=1200;check(tl);assert.equal(requests.length,1,'stop automatic filling once history scrolls');
- tl.scrollHeight=700;context.historyFillSeeking=true;context.historyFillPages=32;check(tl);assert.equal(requests.length,1,'automatic work remains bounded');
+ tl.scrollHeight=700;context.historyFillSeeking=true;context.historyFillPages=32;check(tl);assert.equal(requests.length,1,'each automatic batch yields after32 pages');
  context.historyDirection='older';check(tl);assert.equal(requests.length,2,'explicit user input can continue past the automatic budget');
 });
 test('usable history means an actually visible committed message rather than a tiny scrollbar',()=>{
@@ -19,17 +19,26 @@ test('usable history means an actually visible committed message rather than a t
  rows=[row('@live:t','Working'),row('empty','  '),row('offscreen','committed',900)];assert.equal(has(tl),false);
  rows.push(row('committed-message','Visible message'));assert.equal(has(tl),true);
 });
-test('a tool-only prefix beyond the fill budget keeps an accessible bounded continuation',()=>{
- const src=source(),a=src.indexOf('function historyFillMore('),b=src.indexOf('function laterCheck(tl)',a),nodes=new Map(),requests=[];
- let scheduled=0;const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0,getBoundingClientRect:()=>({top:30,left:200})};
+test('tool-only entry continues automatically in paced batches and stops at real content',()=>{
+ const src=source(),a=src.indexOf('function historyFillContinue('),b=src.indexOf('function laterCheck(tl)',a),nodes=new Map(),requests=[],timers=new Map();let next=0,scheduled=0;
+ const tl={id:'timeline',scrollHeight:700,clientHeight:700,scrollTop:0,getBoundingClientRect:()=>({top:30,left:200})};
  const document={getElementById:id=>nodes.get(id),createElement:()=>({style:{},attrs:{},setAttribute(k,v){this.attrs[k]=v;},remove(){nodes.delete(this.id);}}),body:{appendChild:n=>nodes.set(n.id,n)}};
- const context=vm.createContext({document,historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyFillSeeking:true,historySeekMessage:()=>false,historyFillPages:32,earlierAsked:false,historyHasMessage:t=>t.scrollHeight>t.clientHeight+10,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400,historyCheckSoon(){scheduled++;}});
- vm.runInContext(src.slice(a,b),context);context.earlierCheck(tl);
- const button=nodes.get('history-fill-more');assert(button);assert.equal(button.textContent,'Earlier messages');assert.equal(button.attrs['aria-controls'],'timeline');assert.equal(requests.length,0);
- button.onclick();assert.equal(scheduled,1);assert.equal(context.historyFillPages,0);assert.equal(context.historyDirection,'');
- for(let n=0;n<20;n++){context.earlierAsked=false;context.earlierCheck(tl);}
- assert.equal(requests.length,16,'one explicit continuation permits at most32 raw pages');assert(nodes.has('history-fill-more'),'another continuation remains after another tool-only batch');
- tl.scrollHeight=1100;context.earlierCheck(tl);assert(!nodes.has('history-fill-more'),'remove the continuation when ordinary scrolling becomes usable');
+ const context=vm.createContext({document,setTimeout(fn,ms){assert.equal(ms,100);timers.set(++next,fn);return next;},clearTimeout(id){timers.delete(id);},historyFillResume:null,historyDirection:'',historyFillScope:'scope',historyFillOwner:()=> 'scope',historyFillSeeking:true,historySeekMessage:()=>false,historyFillPages:0,earlierAsked:false,historyHasMessage:t=>t.scrollHeight>t.clientHeight+10,thin:{ready:true,pageError:null,paging:null,hasAhead:()=>true,ahead:(direction,options)=>{requests.push({direction,options});return true;}},historyGap:()=>0,historyRunway:()=>1400,historyCheckSoon(){scheduled++;}});
+ vm.runInContext(src.slice(a,b),context);
+ for(let batch=0;batch<4;batch++){
+  for(let n=0;n<20;n++){context.earlierAsked=false;context.earlierCheck(tl);}
+  assert.equal(requests.length,(batch+1)*16,'at most two in-flight pages and32 requests per batch');
+  assert.equal(timers.size,1,'one automatic continuation replaces manual navigation');
+  const status=nodes.get('history-fill-more');assert(status);assert.equal(status.attrs.role,'status');assert.equal(status.onclick,undefined);
+  const [id,fn]=timers.entries().next().value;timers.delete(id);fn();assert.equal(context.historyFillPages,0);
+ }
+ assert.equal(scheduled,4);context.earlierCheck(tl);assert.equal(requests.length,65,'continues past128 raw pages without input');
+ tl.scrollHeight=1100;context.earlierAsked=false;context.earlierCheck(tl);assert.equal(context.historyFillSeeking,false);assert(!nodes.has('history-fill-more'));assert.equal(timers.size,0);
+ // Cancel and reopen under even the same owner: a late old callback must not
+ // reset the new batch or clear its timer.
+ context.historyFillSeeking=true;context.historyFillContinue('scope');const stale=[...timers.values()][0];context.historyFillMore(null,false);context.historyFillContinue('scope');const current=context.historyFillResume;context.historyFillPages=32;stale();assert.equal(context.historyFillResume,current);assert.equal(context.historyFillPages,32);
+ context.historyDirection='newer';const fresh=timers.get(current.timer);fresh();assert.equal(scheduled,4,'user navigation cancels background seeking');
+ context.historyDirection='';context.historyFillContinue('scope');context.historyFillScope='other';[...timers.values()].at(-1)();assert.equal(scheduled,4,'selection/account/epoch replacement rejects a late continuation');
 });
 test('initial context seeking uses a loaded committed key and respects restored reading intent',()=>{
  const src=source(),a=src.indexOf('function earlierCheck(tl)'),b=src.indexOf('function laterCheck(tl)',a);let seeks=0,pages=0,visible=false;
@@ -133,7 +142,7 @@ test('owning-history reset drops retained DOM rows before normal history project
  for(const reset of [true,false]){
   let resets=0,removed=0;const old={oldHistory:true},fresh={freshHistory:true};
   const ctx={RR:null,current:()=>true,pnow:()=>0,scroll:false,historyNode:old,resumedConversation:'A',currentSession:()=>({sel:'A'}),transitionPosition:null,
-   historyDirection:'older',document:{getElementById:id=>id==='history-fill-more'?{remove(){removed++;}}:null},historyPageState(){},historyGone:{older:new Set(['old']),newer:new Set()},thin:{heldReset(){resets++;}}};
+   historyDirection:'older',historyFillMore(){removed++;},historyPageState(){},historyGone:{older:new Set(['old']),newer:new Set()},thin:{heldReset(){resets++;}}};
   vm.createContext(ctx);vm.runInContext(clear,ctx);const view=vm.runInContext('('+body+')',ctx),got=view(fresh,{historyReset:reset,epoch:'local',target:{kind:'thread',id:'peer~A'}});
   assert.equal(got.projection,reset?'reset':'update');assert.equal(got.previous,reset?fresh:old);assert.equal(resets,reset?1:0);assert.equal(removed,reset?1:0);
   if(reset){assert.equal(ctx.historyGone.older.size,0);assert.equal(ctx.transitionPosition.atEnd,false);assert.equal(ctx.transitionPosition.top,0);}
