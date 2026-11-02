@@ -91,6 +91,15 @@ if (calls !== 3) { bad++; console.error("parse memo: a small text was remembered
 for (let i = 0; i < 9; i++) __bpParsed(big + " ".repeat(i + 1), parse);
 __bpParsed(big, parse);
 if (calls !== 13) { bad++; console.error("parse memo: kept more than 8 texts", calls); }
+// a step-sized text (64 B up to 1 KB) is remembered too, the last 4096
+const step = JSON.stringify({ e: "toolu_01", c: "abc", p: "def", f: ["M\tboard.kicad_pcb"], t: "/r" });
+const s1 = __bpParsed(step, parse), s2 = __bpParsed(step, parse);
+if (s1 !== s2 || calls !== 14) { bad++; console.error("parse memo: a step record was parsed again", calls); }
+for (let i = 0; i < 4096; i++) __bpParsed(step.replace("abc", "abc" + i), parse);
+__bpParsed(step, parse);
+if (calls !== 14 + 4096 + 1) { bad++; console.error("parse memo: kept more than 4096 small texts", calls); }
+__bpParsed("[1,2,3]", parse); __bpParsed("[1,2,3]", parse);
+if (calls !== 14 + 4096 + 3) { bad++; console.error("parse memo: a text under 64 bytes was remembered", calls); }
 // Refs.last.go (src/core/refs.bend), as Bend reads it: a code point at a
 // time, cur the reversed word so far, reset at a space, tab, CR or LF; at
 // the end, cur reversed

@@ -46,6 +46,11 @@ parse is pure and its value never changes, so the same text gives the same
 value; smaller texts (short agent lines and requests) are parsed as before.
 The 1 KB cutoff includes the measured 10.5 KB catalog and 3.2 KB shown-row
 catalog that were each parsed repeatedly below the old 16 KB cutoff.
+Texts of 64 bytes up to 1 KB are remembered too, the last 4096 of them: a
+design step's record (core/hist.bend's Step.of, a few hundred bytes) is
+parsed for every step of the thread, two or three times a render, while
+the viewer is open (2026-11-02, a real 181-step thread: over half of the
+viewer's render time, the viewer half of every view the hub sent).
 
 Server-only `Json.show(j)`: an iterative compact serializer preserving the
 pure encoder's exact escapes, raw number text, field order and duplicate
@@ -158,9 +163,10 @@ PARSE = re.compile(
     r'function (' + I + r'\$058Json\$parse\$)\((' + I + r')\)\{(?=return ' + I + r'\$058Parse\$fin\$\()'
 )
 PARSE_HELPER = (
-    "const __bpParseMemo=new Map();function __bpParsed(s,f){if(typeof s!==\"string\"||s.length<1024)return f(s);"
-    "let v=__bpParseMemo.get(s);if(v===undefined){v=f(s);if(__bpParseMemo.size>=8)__bpParseMemo.delete(__bpParseMemo.keys().next().value);"
-    "__bpParseMemo.set(s,v)}return v}\n"
+    "const __bpParseMemo=new Map(),__bpParseSmall=new Map();function __bpParsed(s,f){if(typeof s!==\"string\"||s.length<64)return f(s);"
+    "const m=s.length<1024?__bpParseSmall:__bpParseMemo,cap=s.length<1024?4096:8;"
+    "let v=m.get(s);if(v===undefined){v=f(s);if(m.size>=cap)m.delete(m.keys().next().value);"
+    "m.set(s,v)}return v}\n"
 )
 
 # Match the whole unchanged Json.show body and its exact Json.emit callee.
