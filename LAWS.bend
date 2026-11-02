@@ -15270,6 +15270,13 @@ law settings_row_information:
 law voice_model_needs_runtime:
   {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}
 
+# A Windows drive root remains absolute when the project root is stored.
+law project_drive_root_absolute:
+  {H.Hub.root.norm("C:/") == "C:/" : String}
+
+law project_unc_root:
+  {H.Hub.root.norm("//server/share/") == "//server/share" : String}
+
 # Saved-source stamps are opt-in and replay only to the joining client.
 law plot_stamp_opt_out:
   {PLOTWATCH.Sub.wants.stamp(PLOTWATCH.Sub{7, "board", Nil{}, "", True{}, "", False{}}, "board") == False{} : Bool}
