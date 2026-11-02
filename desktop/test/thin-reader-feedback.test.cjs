@@ -149,3 +149,21 @@ test('a pill-only bot/mailroom refresh reconciles reading even when virtual rows
  vm.runInNewContext(src.slice(a,b),{document:{getElementById:()=>({})},timelineList:()=>list,activeTimeline:list,transitionPosition:null,scroll:false,timelineChanged:l=>seen.push(l)});
  assert.deepEqual(seen,[list],'accepted picture must reconcile bottom when only floating new-message navigation changed');
 });
+
+test('presenting newest output retires the earlier gesture and its blank history gaps',()=>{
+ const src=source(),from=src.indexOf('view: (node, detail) => {',src.indexOf('thin = new ThinHost(')),to=src.indexOf('        terminalOutput.rebind();',from);
+ assert(from>0&&to>from);const body=src.slice(from+'view: '.length,to)+'return projection;}';
+ for(const direction of ['newest','older']){
+  let resets=0,hidden=0;const ctx={current:()=>true,RR:null,resumedConversation:null,historyNode:{old:true},
+   History:{project:(_old,n)=>n,project_block:(_old,n)=>n},historyDirection:'older',historyOlderDemand:2,
+   historyGone:{older:new Set(['before']),newer:new Set(['after'])},thin:{heldReset(){resets++;}},
+   historyBack(){},historyFillMore(_tl,shown){assert.equal(shown,false);hidden++;}};
+  vm.createContext(ctx);const view=vm.runInContext('('+body+')',ctx),fresh={latest:true};
+  assert.equal(view(fresh,{page:{direction},window:{ids:['reply']}}),direction);
+  assert.equal(ctx.historyNode,fresh);
+  assert.equal(ctx.historyOlderDemand,direction==='newest'?0:2,'only newest navigation consumes the old gesture');
+  assert.equal(ctx.historyDirection,direction==='newest'?'':'older');
+  assert.equal(ctx.historyGone.newer.size,direction==='newest'?0:1);
+  assert.equal(resets,direction==='newest'?1:0);assert.equal(hidden,resets);
+ }
+});
