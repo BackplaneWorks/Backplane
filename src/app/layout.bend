@@ -6366,6 +6366,16 @@ def TL.bubble.a(+ty: Ty, +text: String, +px: U32) -> List<&2, TLine>:
 type TLPart is Data:
   TLPart{head: List<&2, TLine>, paths: List<&2, String>, tail: List<&2, TLine>}
 
+# an activity's line: a review comment's from its JSON (parsed only for
+# one), a tool call's name and summary as the web shows them
+# (FO.Tool.shown, FO.Tool.text)
+def TL.act.text(review: Bool, +ty: Ty, +tone: String, +kind: String, +summary: String) -> String:
+  match review:
+    case True{}:
+      RVW.Review.label(tone, kind, summary) ++ "  " ++ RVW.Review.say(tone, kind, summary)
+    case False{}:
+      FO.Tool.shown(Ty.loc(ty), kind) ++ "  " ++ FO.Tool.text(kind, summary)
+
 # a tool call or other activity in a line; a design step as a row that
 # shows it in the viewer (kind 16, copy its id)
 def TL.part.act(step: Bool, +ty: Ty, e: M.Entry, +px: U32) -> TLPart:
@@ -6374,7 +6384,7 @@ def TL.part.act(step: Bool, +ty: Ty, e: M.Entry, +px: U32) -> TLPart:
       TLPart{[TLine{Ty.fit(ty, 2n, HS.Hist.row(e), (px - 22 : U32)), T.Th.accent(), 16, id, 0}], Nil{}, Nil{}}
     case _ M.Act{_, _, +tone, +kind, +summary, _}:
       Bool.pick(TLPart, String.eq(tone, EM.Emb.tone()), TLPart{Nil{}, Nil{}, Nil{}},
-        TLPart{[TLine{Ty.fit(ty, 2n, RVW.Review.label(tone, kind, summary) ++ "  " ++ RVW.Review.say(tone, kind, summary), px), Bool.pick(U32, String.eq(tone, "error"), T.Th.bad(), T.Th.dim()), 3, "", 0}], Nil{}, Nil{}})
+        TLPart{[TLine{Ty.fit(ty, 2n, TL.act.text(String.eq(tone, RVW.Review.tone()), ty, tone, kind, summary), px), Bool.pick(U32, String.eq(tone, "error"), T.Th.bad(), T.Th.dim()), 3, "", 0}], Nil{}, Nil{}})
     case _ M.Msg{_, _, _, +text, _}:
       TLPart{[TLine{Ty.fit(ty, 2n, text, px), T.Th.dim(), 3, "", 0}], Nil{}, Nil{}}
 

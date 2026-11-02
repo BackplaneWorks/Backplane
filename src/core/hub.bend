@@ -1434,16 +1434,20 @@ def Claude.stream(+thread: String, +ev: J.Json) -> Step:
   Claude.stream.k(String.eq(J.Json.get_str(ev, "type", ""), "content_block_delta"),
     String.eq(J.Json.get_str(d, "type", ""), "text_delta"), thread, J.Json.get_str(d, "text", ""))
 
-# a short line describing a tool call, from its input (a question, as a buy
-# thread's order_ask asks, when there is nothing else; law
-# tool_summary_question)
-def Claude.tool_summary(+name: String, +input: J.Json) -> String:
+def Claude.tool_summary.any(+name: String, +input: J.Json) -> String:
   +cmd = J.Json.get_str(input, "command", "")
   +path = J.Json.get_str(input, "file_path", J.Json.get_str(input, "path", ""))
   +pat = J.Json.get_str(input, "pattern", "")
   Bool.pick(String, Bool.not(String.is_empty(cmd)), cmd,
     Bool.pick(String, Bool.not(String.is_empty(path)), path,
       Bool.pick(String, Bool.not(String.is_empty(pat)), pat, J.Json.get_str(input, "description", J.Json.get_str(input, "question", name)))))
+
+# a short line describing a tool call, from its input (a question, as a buy
+# thread's order_ask asks, when there is nothing else; law
+# tool_summary_question). A TodoWrite says where the list stands (law
+# tool_summary_todo; older events keep the name they stored).
+def Claude.tool_summary(+name: String, +input: J.Json) -> String:
+  Bool.pick(String, String.eq(name, "TodoWrite"), TD.Todo.summary(TD.Todo.write(input)), Claude.tool_summary.any(name, input))
 
 # The CLI writes one block per line, each numbered from 0, so two text
 # blocks of one message (text, thinking, text) share "msg:0". A line that

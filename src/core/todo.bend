@@ -155,6 +155,28 @@ def Todo.done(ts: List<&2, Todo>) -> Nat:
     case Todo{_, _, _, +st} <> t:
       Todo.done.k(st, Todo.done(t))
 
+def Todo.now.k(now: Bool, +text: String, +rest: String) -> String:
+  match now:
+    case True{}:
+      text
+    case False{}:
+      rest
+
+# the first step in progress ("" with none)
+def Todo.now(ts: List<&2, Todo>) -> String:
+  match ts:
+    case Nil{}:
+      ""
+    case Todo{_, +text, _, +st} <> t:
+      Todo.now.k(String.eq(st, "in_progress"), text, Todo.now(t))
+
+# a TodoWrite call's line in the timeline: "2 of 6 done · now: <the step
+# in progress>" (hub.bend's Claude.tool_summary; law todo_summary)
+def Todo.summary(+ts: List<&2, Todo>) -> String:
+  +now = Todo.now(ts)
+  Nat.show(Todo.done(ts)) ++ " of " ++ Nat.show(List.length(&2, Todo, ts)) ++ " done"
+    ++ Bool.pick(String, String.is_empty(now), "", " · now: " ++ now)
+
 # whether the list shows: while the turn runs, or while a step is left
 def Todo.shown(+ts: List<&2, Todo>, run: Bool) -> Bool:
   Bool.and(Bool.not(List.is_empty(&2, Todo, ts)), Bool.or(run, Nat.is_lt(Todo.done(ts), List.length(&2, Todo, ts))))
