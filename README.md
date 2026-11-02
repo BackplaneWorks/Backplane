@@ -7,7 +7,7 @@
 </p>
 
 1. Backplane is a TOTALLY open-source workspace for agentic hardware development.
-2. Backplane is a [KiCad fork](https://github.com/i2cjak/Backplane_KiCad).
+2. Backplane is a [KiCad fork](https://github.com/BackplaneWorks/Backplane_KiCad).
 3. Backplane is created + maintained by real electrical engineers.
 
 <p align="center">
@@ -20,6 +20,14 @@
 curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 backplane
 ```
+
+<h3>Windows (x64, experimental)</h3>
+
+Download `backplane-v<version>-windows-x64.zip` from the [latest release](https://github.com/BackplaneWorks/Backplane/releases/latest), extract the entire archive into a writable folder, and open `Backplane.exe`. Keep `resources/` and the other extracted files beside it. This is a portable Electron app with a Bun hub; no WSL is required. Shell commands still need Cygwin tools: keep the bundled runtime when supplied. If those tools are missing, [the Windows setup script](scripts/setup-windows.ps1) installs Cygwin; add its `bin` directory to `PATH` before launching Backplane. Install your agent CLIs and sign in separately; [the provider setup script](scripts/install-windows-providers.ps1) installs Claude and Codex.
+
+Install FreeCAD and the [Backplane KiCad runtime](https://github.com/BackplaneWorks/Backplane_KiCad/releases) separately. Set `BACKPLANE_FREECAD` to the actual `bin/FreeCADCmd.exe` (with the GUI executable beside it) and `BACKPLANE_KICAD` to the runtime root or its `bin/kicad-cli.exe`, then restart Backplane. Stock KiCad lacks some required IPC capabilities.
+
+Windows managed service stop and update are unsupported; closing the window leaves the hub running. Windows CI smoke checks currently report failures without gating the build, so a published ZIP alone does not establish full Windows validation.
 
 <h2>Providers Supported</h2>
 
@@ -99,7 +107,7 @@ Backplane works with WHATEVER agent you choose to bring. I'm not going to stop y
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The [KiCad fork](https://github.com/i2cjak/Backplane_KiCad) retains KiCad's licensing. The STEP converter includes OpenCascade and `occt-import-js` (LGPL-2.1); see [third-party licensing](tools/step2glb/README.md#license).
+MIT. See [LICENSE](LICENSE). The [KiCad fork](https://github.com/BackplaneWorks/Backplane_KiCad) retains KiCad's licensing. The STEP converter includes OpenCascade and `occt-import-js` (LGPL-2.1); see [third-party licensing](tools/step2glb/README.md#license).
 
 <p align="center">
   <img src="docs/media/readme/cad/cats-footer-200.png" alt="Three Backplane cats" width="216" height="72">
