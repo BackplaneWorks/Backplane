@@ -105,8 +105,9 @@ def faded(rs: List<&2, U.ARow>) -> List<&2, String>:
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    C.Check.str("live, quiet, older folded", pids(base()), "p1,p2,p4")
-    C.Check.str("older unfolds", pids(act(base(), "toggle-settled", "old-projects")), "p1,p2,p4,p3")
+    # each group newest project first (SRow.before: creation time)
+    C.Check.str("live, quiet, older folded", pids(base()), "p1,p4,p2")
+    C.Check.str("older unfolds", pids(act(base(), "toggle-settled", "old-projects")), "p1,p4,p2,p3")
     C.Check.str("search reaches older", pids(act(base(), "bfield", "pq\u{1f}firm")), "p3")
     C.Check.str("view default", U.Side.view(st()), "projects")
     C.Check.str("view setting", U.Side.view(M.State.replay([M.SettingSet{"sidebar.view", "active", 1n}], st())), "active")

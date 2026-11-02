@@ -127,8 +127,10 @@ def main() -> IO(Unit):
     C.Check.str("Enter: an intent's own (a new line)", U.Draft.enter(False{}, "/intent\n# Goal\n"), "")
     C.Check.str("Enter: anything else sends", U.Draft.enter(False{}, "hello"), "send")
     # Save: the draft goes, the hub is asked, and a while later the note goes
+    # the three Keeps first: the chat draft back, the intent's draft and edit
+    # flag cleared (kept through a reload, e2f255f03)
     C.Check.str("Save sends the intent, then asks for the note's end", sent(U.Ui.act(edited(), "send", "")),
-      "other;send {\"id\":" ++ sid() ++ ",\"m\":\"fab.intent\",\"p\":{\"thread\":\"current\",\"text\":\"# Goal\\nA lamp\"}};later intent-saved-off " ++ sid() ++ ";")
+      "other;other;other;send {\"id\":" ++ sid() ++ ",\"m\":\"fab.intent\",\"p\":{\"thread\":\"current\",\"text\":\"# Goal\\nA lamp\"}};later intent-saved-off " ++ sid() ++ ";")
     C.Check.str("Ctrl+Enter saves too", Bool.show(String.contains(sent(U.Ui.act(edited(), "send-alt", "")), "fab.intent")), "True")
     C.Check.str("Save empties the composer", U.Ui.draft_text(saving()), "")
     C.Check.str("Save waits for its answer", Bool.show(String.is_empty(sid())), "False")

@@ -121,14 +121,24 @@ def Arc.sweep(+ux: F32, +uy: F32, +ax: F32, +ay: F32, +bx: F32, +by: F32, +cx: F
   Arc.steps(24n, 0n, ux, uy, F32.hypot(F32.sub(ax, ux), F32.sub(ay, uy)), a0,
     Bool.pick(F32, F32.is_lt(sm, s1), s1, F32.sub(s1, F32.mul(2.0, F32.pi()))))
 
+# The centre is found from b and c as offsets from a (p, q): squaring
+# board coordinates (~100 mm) in F32 would leave too few digits for a
+# small arc's centre, and a length-tuning meander's 0.08 mm corners came
+# out up to 2.5 radii off.
 def Arc.points.k(flat: Bool, +d: F32, +ax: F32, +ay: F32, +bx: F32, +by: F32, +cx: F32, +cy: F32) -> List<&2, Pt>:
   match flat:
     case True{}:
       [Pt{ax, ay}, Pt{cx, cy}]
     case False{}:
+      +px = F32.sub(bx, ax)
+      +py = F32.sub(by, ay)
+      +qx = F32.sub(cx, ax)
+      +qy = F32.sub(cy, ay)
+      +p2 = F32.add(Arc.sq(px), Arc.sq(py))
+      +q2 = F32.add(Arc.sq(qx), Arc.sq(qy))
       Arc.sweep(
-        F32.div(F32.add(F32.mul(F32.add(Arc.sq(ax), Arc.sq(ay)), F32.sub(by, cy)), F32.add(F32.mul(F32.add(Arc.sq(bx), Arc.sq(by)), F32.sub(cy, ay)), F32.mul(F32.add(Arc.sq(cx), Arc.sq(cy)), F32.sub(ay, by)))), d),
-        F32.div(F32.add(F32.mul(F32.add(Arc.sq(ax), Arc.sq(ay)), F32.sub(cx, bx)), F32.add(F32.mul(F32.add(Arc.sq(bx), Arc.sq(by)), F32.sub(ax, cx)), F32.mul(F32.add(Arc.sq(cx), Arc.sq(cy)), F32.sub(bx, ax)))), d),
+        F32.add(ax, F32.div(F32.sub(F32.mul(qy, p2), F32.mul(py, q2)), d)),
+        F32.add(ay, F32.div(F32.sub(F32.mul(px, q2), F32.mul(qx, p2)), d)),
         ax, ay, bx, by, cx, cy)
 
 def Arc.points.d(+d: F32, +ax: F32, +ay: F32, +bx: F32, +by: F32, +cx: F32, +cy: F32) -> List<&2, Pt>:
@@ -138,7 +148,7 @@ def Arc.points.d(+d: F32, +ax: F32, +ay: F32, +bx: F32, +by: F32, +cx: F32, +cy:
 def Arc.points(+a: Pt, +b: Pt, +c: Pt) -> List<&2, Pt>:
   match a b c:
     case Pt{+ax, +ay} Pt{+bx, +by} Pt{+cx, +cy}:
-      Arc.points.d(F32.mul(2.0, F32.add(F32.mul(ax, F32.sub(by, cy)), F32.add(F32.mul(bx, F32.sub(cy, ay)), F32.mul(cx, F32.sub(ay, by))))), ax, ay, bx, by, cx, cy)
+      Arc.points.d(F32.mul(2.0, F32.sub(F32.mul(F32.sub(bx, ax), F32.sub(cy, ay)), F32.mul(F32.sub(by, ay), F32.sub(cx, ax)))), ax, ay, bx, by, cx, cy)
 
 # Layers
 # ------

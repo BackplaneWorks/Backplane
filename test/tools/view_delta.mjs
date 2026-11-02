@@ -114,4 +114,4 @@ assert.equal(boundedDraft('x'.repeat(60000), ''), null);
 for (const bad of [[['x', [], 1]], [['s', ['nope'], 1]], [['a', ['shown'], [[0, 99]]]], 'no', [['s', [0], 1]]])
   assert.throws(() => applyViewDelta({ shown: [] }, bad));
 sizes.sort((x, y) => x - y);
-console.log(`view delta: 1500 pairs exact both ways; ops/new median ${sizes[750].toFixed(3)}`);
+console.log(`ok view delta: 1500 pairs exact both ways; ops/new median ${sizes[750].toFixed(3)}`);

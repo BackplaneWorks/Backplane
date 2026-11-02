@@ -26,6 +26,20 @@ def starts(os: List<&2, H.Out>, +thread: String) -> Nat:
     case H.CodexTurn{+th, _, _, _, _, _} <> rest: Nat.add(Bool.pick(Nat, String.eq(th, thread), 1n, 0n), starts(rest, thread))
     case _ <> rest: starts(rest, thread)
 
+# what a running Claude turn is given on its input (Hub.run's AgentSend)
+def sent(os: List<&2, H.Out>, +thread: String) -> String:
+  match os:
+    case Nil{}: ""
+    case H.AgentSend{+th, +line} <> rest: Bool.pick(String, String.eq(th, thread), line, "") ++ sent(rest, thread)
+    case _ <> rest: sent(rest, thread)
+
+# turns started: a TurnChanged to Running
+def turns(cs: List<&2, M.Change>, +thread: String) -> Nat:
+  match cs:
+    case Nil{}: 0n
+    case M.TurnChanged{+th, M.Running{}, _} <> rest: Nat.add(Bool.pick(Nat, String.eq(th, thread), 1n, 0n), turns(rest, thread))
+    case _ <> rest: turns(rest, thread)
+
 def spawn(+s: M.State) -> H.Step:
   H.Run.escalate(s, 20n, "b", "c", "bot", "Verified material outcome with backplane://thread/worker")
 
@@ -138,15 +152,17 @@ def told_checks() -> IO(Unit):
     +th : String = privateid()
     +r : MC.Res = MC.Mcp.tell_person(s, 23n, th, args("Draft ready for approval: backplane://thread/worker", "draft-v1"))
     +post : M.State = after(T.res_step(r), s)
-    T.check("tell gives the owner's agent a context note", String.contains(H.Ride.of(post, "foh"), "Draft ready for approval"))
+    # the owner is a running Claude turn: it hears the note on its input at
+    # once (ride_note_*, #613), and no new turn starts for it
+    T.check("tell gives the owner's agent a context note", String.contains(sent(H.Step.outs_of(T.res_step(r)), "foh"), "Draft ready for approval"))
     T.check("tell notifies the person", String.starts_with(M.Setting.get(post, "alert.foh", ""), "note\t"))
-    T.n("tell starts no owner turn by itself", starts(H.Step.outs_of(T.res_step(r)), "foh"), 0n)
+    T.n("tell starts no owner turn by itself", turns(H.Queue.changes(T.res_step(r)), "foh"), 0n)
     +gone : M.State = after(cut(post, th, 24n), post)
     C.Check.str("a lane that told hands nothing over when cut", M.Setting.get(gone, "mail.private.handed." ++ th, ""), "")
 
 # A child's report was escalated, then its private lane was cut off (session
-# limit) while the parent was mid-turn: the report waits in the parent's
-# ride and is delivered when the parent's turn ends, once.
+# limit) while the parent was mid-turn: a running Claude parent takes the
+# report on its input at once, once; an idle one is woken with it.
 def lost_checks() -> IO(Unit):
   do IO<Unit>:
     +s0 : M.State = state()
@@ -154,14 +170,17 @@ def lost_checks() -> IO(Unit):
     +s : M.State = s0
     +c : H.Step = cut(s, th, 22n)
     +s2 : M.State = after(c, s)
-    T.check("cut lane's escalation waits for the parent", String.contains(H.Ride.of(s2, "foh"), "Verified material outcome"))
+    # the parent is a running Claude turn: the report goes into it at once
+    # (ride_note_*, #613), with no new turn and nothing in the chat
+    T.check("cut lane's escalation reaches the busy parent's turn", String.contains(sent(H.Step.outs_of(c), "foh"), "Verified material outcome"))
     T.n("cut lane posts nothing in the chat", T.posts(H.Queue.changes(c), "foh"), 0n)
-    T.n("busy parent is not restarted", starts(H.Step.outs_of(c), "foh"), 0n)
-    +again : M.State = after(cut(s2, th, 23n), s2)
-    C.Check.str("handed over once", H.Ride.of(again, "foh"), H.Ride.of(s2, "foh"))
+    T.n("busy parent is not restarted", turns(H.Queue.changes(c), "foh"), 0n)
+    +c2 : H.Step = cut(s2, th, 23n)
+    +again : M.State = after(c2, s2)
+    C.Check.str("handed over once", sent(H.Step.outs_of(c2), "foh"), "")
     +end : H.Step = H.Ride.after(again, 24n, H.Step{[M.TurnChanged{"foh", M.Completed{}, 24n}], Nil{}})
     +s3 : M.State = after(end, again)
-    T.n("parent's turn end delivers it", starts(H.Step.outs_of(end), "foh"), 1n)
+    T.n("parent's turn end has nothing left to deliver", starts(H.Step.outs_of(end), "foh"), 0n)
     C.Check.str("delivered report leaves the ride", H.Ride.of(s3, "foh"), "")
     +rest : M.State = M.State.apply(s0, M.TurnChanged{"foh", M.Completed{}, 21n})
     +idle : H.Step = cut(rest, th, 22n)

@@ -186,8 +186,9 @@ def check(+name: String, +h: String) -> IO(Unit):
     C.Check.str(name ++ ": records equal the fold's dump", Db.show(rs), Pure.of(S.Tab.dump(fold())))
     c0 : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT count(*) FROM obj WHERE domain = 'count'", [], 1)
     C.Check.str(name ++ ": no counter rows", one(c0), "0")
+    # far_line (9755bb5a4) and terms (13b391b5e) are written by every rebuild
     mt : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT group_concat(k || '=' || v, ' ') FROM (SELECT k, v FROM meta WHERE k <> 'log_id' ORDER BY k)", [], 1)
-    C.Check.str(name ++ ": meta", one(mt), "applied_off=" ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " applied_seq=" ++ Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " codec=" ++ Nat.show(S.Sdb.codec()) ++ " ord=" ++ Nat.show(Mat.ord(mat())) ++ " origin=1 schema=1")
+    C.Check.str(name ++ ": meta", one(mt), "applied_off=" ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " applied_seq=" ++ Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " codec=" ++ Nat.show(S.Sdb.codec()) ++ " far_line=1 ord=" ++ Nat.show(Mat.ord(mat())) ++ " origin=1 schema=1 terms=1")
     id : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT v FROM meta WHERE k = 'log_id'", [], 1)
     C.Check.str(name ++ ": log id", one(id), S.Sdb.log_id(U.Utf8.encode(String.join(Log.lines(), "\n") ++ "\n{\"$\":\"MessagePosted\",\"th")))
     cl : String <- D.Db.close(h)

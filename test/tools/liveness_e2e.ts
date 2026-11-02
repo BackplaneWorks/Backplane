@@ -51,12 +51,15 @@ const event = ($: string, fields: object, at = now) => ({ $, ...fields, at });
 const thread = (id: string) => event('ThreadCreated', { id, project: 'p', title: id, env: 'local', branch: '', worktree: project, provider: 'claude', model: 'fake' }, old);
 fs.writeFileSync(journal, [
   event('ProjectCreated', { id: 'p', title: 'Liveness fixture', root: project }, old),
-  thread('worker'), thread('launcher'), thread('dependency'),
+  thread('worker'), thread('launcher'), thread('dependency'), thread('passive'),
   event('MessagePosted', { thread: 'worker', msg: 'request', role: 'user', text: 'Wait for the dependency and finish the project' }, old),
-  event('TurnChanged', { thread: 'worker', state: 'completed' }, old),
+  event('TurnChanged', { thread: 'worker', state: 'running' }, old),
   event('ThreadLaunched', { id: 'worker', by: 'launcher', report: true }, old),
   event('WakeSet', { id: 'waiting', by: 'worker', kind: 'thread', target: 'dependency', events: ['end'], once: true, note: 'waiting for dependency' }, old),
-  event('SettingSet', { key: 'liveness.worker', value: JSON.stringify({last: old, nudged: 0, stalled: false, reported: false, reason: 'waiting for dependency fixture'}) }, old),
+  event('SettingSet', { key: 'liveness.worker', value: JSON.stringify({last: old, nudged: 0, stalled: false, reported: false, reason: 'blocking execution fixture'}) }, old),
+  event('TurnChanged', { thread: 'passive', state: 'completed' }, old),
+  event('WakeSet', { id: 'passive-file', by: 'passive', kind: 'file', target: join(root, 'future-file'), events: ['changed'], once: true, note: 'retain future notification' }, old),
+  event('SettingSet', { key: 'liveness.passive', value: JSON.stringify({last: old, nudged: old + 1200, stalled: true, reported: true, reason: 'stale notification'}) }, old),
   ...[['watchdog.minutes', '20'], ['watchdog.grace.seconds', '0'], ['mail.on', 'off'], ['telemetry.share', 'off'],
     ['settle.done', 'off'], ['restart.continue', 'on']].map(([key, value]) => event('SettingSet', { key, value }))
 ].map(JSON.stringify).join('\n') + '\n');
@@ -125,8 +128,16 @@ try {
   const workerPid = agents().find(a => a.event === 'start' && a.thread === 'worker')?.pid;
   check(workerPid && alive(workerPid), 'stalled worker process is still alive');
   check(live().last === old && live().nudged > 0, 'echoed injected text does not advance progress');
-  check(/dependency fixture/.test(live().reason), 'stall retains its actionable reason');
+  check(/execution fixture/.test(live().reason), 'stall retains its actionable reason');
   await until('stalled state broadcast to clients', () => frames.some(e => e.$ === 'SettingSet' && e.key === 'liveness.worker' && JSON.parse(e.value).stalled));
+  check(!events().some(e => e.$ === 'MessagePosted' && e.thread === 'passive'), 'passive subscription never starts its completed owner');
+  check(!agents().some(a => a.thread === 'passive'), 'passive owner has no provider process');
+  check(events().filter(e => e.$ === 'TurnChanged' && e.thread === 'passive').at(-1)?.state === 'completed', 'passive reconciliation preserves completion');
+  check(!events().some(e => e.$ === 'WakeDropped' && e.id === 'passive-file'), 'future notification subscription is preserved');
+  await until('stale passive marker reconciles', () => {
+    const value = events().filter(e => e.$ === 'SettingSet' && e.key === 'liveness.passive').at(-1)?.value;
+    return value && JSON.parse(value).stalled === false;
+  });
   const quietUntil = Date.now() + 2500;
   await until('three accelerated ticks remain quiet', () => {
     assert.equal(nudges().length, 1); assert.equal(reports().length, 1);
@@ -145,6 +156,8 @@ try {
     return Date.now() >= restartedUntil;
   }, 4000);
   check(true, 'restart retains episode and sends no duplicate notification');
+  check(!events().some(e => e.$ === 'MessagePosted' && e.thread === 'passive'), 'restart never resumes the passive owner');
+  check(!agents().some(a => a.thread === 'passive'), 'restart preserves passive owner without provider invocation');
   const beforeWrite = Math.floor(Date.now() / 1000);
   fs.writeFileSync(join(project, 'actual-progress.txt'), 'explicit fixture progress\n');
   await until('file write clears stall through registered sampler effect', () => live().stalled === false && live().last >= beforeWrite);

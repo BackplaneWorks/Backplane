@@ -118,10 +118,17 @@ def TouchK.rename.with(+id: String, t: TouchK, ig: Nat) -> TouchK:
 def TouchK.rename(+id: String, +t: TouchK) -> TouchK:
   TouchK.rename.with(id, t, TouchK.index_g(t))
 
+# Deleting or archiving a thread can put its children back among the
+# project's roots (client.bend's Kids.nested, 998d3ab8a), rows other than its
+# own: the index is made again whole ("*").
 def TouchK.change.known(+c: M.Change, t: TouchK) -> TouchK:
   match c:
     case M.ThreadRenamed{id, _, _}:
       TouchK.side.k(False{}, TouchK.rename(id, t))
+    case M.ThreadDeleted{+id, _}:
+      TouchK.side.k(False{}, TouchK.ids(["*", id], t))
+    case M.ThreadArchived{+id, _, _}:
+      TouchK.side.k(False{}, TouchK.ids(["*", id], t))
     case _:
       TouchK.side.k(Sm.blind(c), TouchK.ids(U.Touch.of(c), t))
 
