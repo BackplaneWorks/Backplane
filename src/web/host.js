@@ -80,6 +80,13 @@ const subsFeedback = new SubsFeedback(() => later());
 // the session the hub's picture is drawn over: the model menu and the
 // Subagents rows as clicked, ahead of the hub's answer
 const feedbackSession = () => subsFeedback.project(modelFeedback.project(currentSession()));
+// The Subagents rows shown or hidden in the click's own task: their head and
+// section patched with the overlay at once (a whole render waits for the
+// next frame and draws everything), the page drawn whole after as usual
+function subsNow() {
+  const session = presentationJson(feedbackSession());
+  for (const el of document.querySelectorAll("section.subs, .subs-head")) if (el.__v) patch(el, App.presentation_overlay(el.__v, session));
+}
 import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
 import { previewTextFiles, previewMarkdownFiles } from "./text-preview.js";
@@ -1533,6 +1540,7 @@ function dispatch(action, value, timer) {
       const layer = document.querySelector('[data-local-models="1"]');
       const menu = layer ? modelFeedback.choice(action, value, layer.style.display !== "none") : undefined;
       const subs = subsFeedback.choice(action, value);
+      if (subs) subsNow();
       const settled = menu || subs ? accepted => { menu?.(accepted);subs?.(accepted); } : undefined;
       const thread = currentSession().sel;
       const attachments = ["detach", "send", "send-alt"].includes(action) ? draftAttachmentPaths(currentSession(), thread) : [];
