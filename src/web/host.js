@@ -310,6 +310,7 @@ function patch(el, v) {
         key: (node, i) => History.display_key_at(node, BigInt(i)),
         same: sameNode,
         onChange: timelineChanged,
+        onScroll: timelineScrolled,
       });
       timelineLists.set(el, scroller);
     }
@@ -620,6 +621,12 @@ let focusedNode = null, focusedAtEnd = true, focusedSaveTimer = 0;
 let focusedRequestedKey = null;
 const COARSE_POINTER = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 let thin = null, thinSocket = null, thinAttempt = 0, thinExpiry = 0, thinGreetingTimer = 0, thinDraftTimer = 0, thinFieldTimer = 0;
+let thinReading = null;
+const readingIdentity = () => JSON.stringify([location.origin, cacheIdentity(document.cookie)]);
+function keepThinReading() {
+  const state = thin?.readingState();
+  if (state) thinReading = { identity: readingIdentity(), state };
+}
 // (the re-render harness asks whether more of the thread lies beyond the
 // rows held, in a direction: a wheel that moves nothing there is a stall)
 if (RR) RR.ahead = dir => !!thin?.hasAhead?.(dir); // the rows held, not the hub's last page
@@ -835,18 +842,28 @@ function holdSay(now) {
   const was = away;away = now;
   queueMicrotask(() => dispatch(now ? "hold-away" : "hold-end", now || was));
 }
+function timelineScrolled(list, delta) {
+  if (list !== activeTimeline || !delta) return;
+  historyDirection = delta < 0 ? "older" : "newer";
+}
 function timelineChanged(list) {
   if (list !== activeTimeline || focusedNode && !frontendNode) return;
-  held = !list.atEnd() || !!thin && thin.atNewest?.() === false;
+  if (!canonicalBoot && (!remoteReady || !frontendNode)) return;
+  if (transitionPosition) return;
+  // The trail moves when newest is requested; the old viewport is still
+  // unread until that request's content has actually been presented.
+  held = !list.atEnd() || !!thin && (thin.atNewest?.() === false || thin.paging?.direction === "newest");
   holdSay(held ? App.sel(ui) : "");
   historyCheckSoon();
   bodyWindows.observe(list.el, remoteReady && !!frontendNode);
 }
 function holdMark() {
+  const source = timelineList()?.el?.getAttribute("data-reading-seen");
+  if (source) return source;
   return timelineList()?.rows.map(historyRow).filter(id => id && !id.startsWith("@") && !id.startsWith("control:")).at(-1) || "";
 }
 function holdBottom() {
-  if (thin && thin.atNewest?.() === false) { thin.newest();return; }
+  if (thin && (thin.paging || thin.atNewest?.() === false)) { thin.newest();return; }
   timelineList()?.scrollToEnd();
 }
 // a <details> that asks for something each time it opens (view.bend's
@@ -1017,7 +1034,7 @@ function render() {
   if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
   activeTimeline = list || null;
   list?.refresh();
-  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
+  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null;timelineChanged(list); }
   else if (scroll) list?.scrollToEnd();
   const main = viewMode === "view-v1" ? document.querySelector("main") : null;
   if (main && main.getAttribute("aria-busy") !== String(!remoteReady)) main.setAttribute("aria-busy", String(!remoteReady));
@@ -2998,6 +3015,7 @@ function stopThin(keepView = false, reason = "replaced") {
   thinRetry.cancel();
   thinContinuations.clear();
   thinAttempt++;clearInterval(thinExpiry);clearTimeout(thinGreetingTimer);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
+  keepThinReading();
   const previous = thin;thin = null;
   const s = thinSocket;thinSocket = null;
   if (socket === s) socket = null;
@@ -3047,7 +3065,7 @@ async function startThin(again = false, reason = "initial") {
     terminalOutput.clear();
     checkpointFocused();remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();improvementsRpc.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
-    bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
+    keepThinReading();bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
     if (!frontendNode) void restoreFocused(true);
     later();thinReconnect();
   };
@@ -3072,6 +3090,7 @@ async function startThin(again = false, reason = "initial") {
     if (!Number.isSafeInteger(next) || next < 2 ** 47 || next >= 2 ** 48 - 1) throw Error("Invalid view counter");
     thin = new ThinHost({
       hub: location.origin, cid, bodyPages: true, now: () => performance.now(), session: currentSession, viewTimeoutMs: VIEW_TIMEOUT_MS,
+      readingState: thinReading?.identity === readingIdentity() ? thinReading.state : null,
       target: presentationTarget,
       counter: value => localStorage.setItem("backplane-view-request-id", String(value)),
       send: request => {

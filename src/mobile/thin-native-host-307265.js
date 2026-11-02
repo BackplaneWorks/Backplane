@@ -292,7 +292,7 @@ export class NativeThinHost307265 {
         // history pages (as the web's thin-host): the cursor shown ('' the
         // newest), the cursors that led here, the one page on its way, and
         // pages a send overtook (their replies are dropped)
-        cursor: '', back: [], paging: null, overtaken: new Set(),
+        cursor: '', back: [], paging: null, pendingNewest: false, overtaken: new Set(),
         revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map(),
         shownTarget: null, deferredNavigation: null, attachmentEnds: [], projectQuery: null, projectApplied: null, followup: null };
       this.states.set(hub, value);
@@ -416,6 +416,7 @@ export class NativeThinHost307265 {
     for (const [id, call] of this.pending) if (call.hub === hub) this.pending.delete(id);
     for (const [id, call] of this.ordinary) if (call.hub === hub) this.ordinary.delete(id);
     if (s) {
+      s.pendingNewest = false;
       s.ready = false; s.greeted = false; s.active = null; s.queue = []; s.messages.clear();
       s.deferredNavigation = null; s.attachmentEnds = []; s.projectQuery = null; s.projectApplied = null; s.shownTarget = null; s.followup = null;
       s.registrations.clear();
@@ -553,6 +554,7 @@ export class NativeThinHost307265 {
   }
 
   select(s, target, session) {
+    s.pendingNewest = false;
     if (this.projectSearch?.owners.has(s.hub)) this.projectSearchEnd(this.projectSearch.scope);
     s.deferredNavigation = null; s.attachmentEnds = [];
     s.projectQuery = null;
@@ -659,6 +661,11 @@ export class NativeThinHost307265 {
       if (pending && pending.hub === hub && !pending.operation) this.issue(s, this.client.request(hub, 'view.cancel', intent.args));
       return true;
     }
+    if (intent.kind === 'newest' && s.greeted && (s.ready || s.paging)) {
+      s.pendingNewest = true;
+      this.newestDue(s);
+      return true;
+    }
     if (!s.greeted || !s.ready) {
       // Preserve read navigation during refresh, while main's presenting-owner
       // queue still admits ordinary actions and latest typed-field edits.
@@ -685,13 +692,6 @@ export class NativeThinHost307265 {
     if (intent.kind === 'later') {
       if (intent.viewport && !this.viewport(hub, s.session.sel, intent.viewport)) return true;
       if (!s.paging && s.back.length) this.pageTo(s, s.back[s.back.length - 1], s.back.slice(0, -1), 'newer');
-      return true;
-    }
-    if (intent.kind === 'newest') {
-      if (!s.paging) {
-        s.historyReset = true; s.viewport = null; s.anchor = { id: '', offset: 0 };
-        this.pageTo(s, '', [], 'newest');
-      }
       return true;
     }
     if (intent.kind === 'search') {
@@ -823,6 +823,13 @@ export class NativeThinHost307265 {
     const result = this.client.request(s.hub, 'view.action', { session: this.requestSession(session, 'view.action', s.target), action: operation.action, value: operation.value });
     s.active = result.id || null;
     this.issue(s, result, { operation, revision: operation.revision });
+  }
+
+  newestDue(s) {
+    if (!s.pendingNewest || !s.ready || s.paging || s.active || s.queue.length) return;
+    s.pendingNewest = false;
+    s.historyReset = true; s.viewport = null; s.anchor = { id: '', offset: 0 };
+    this.pageTo(s, '', [], 'newest');
   }
 
   pumpProjectQuery(s) {
@@ -1060,6 +1067,7 @@ export class NativeThinHost307265 {
     }
     this.pumpAttachmentEnd(s);
     this.pump(s);
+    this.newestDue(s);
     this.pumpProjectGo();
     // Person work gets the next request; ThinViews retains invalidation until
     // a later accepted picture covers it, or a new selection retires it.

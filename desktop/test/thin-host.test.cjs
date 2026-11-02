@@ -705,6 +705,7 @@ test('the away mark rides on every view request for the shown thread; a switch l
  const f=await fixture();f.open();assert.equal(f.sent.at(-1).p.away,'');
  f.host.away('A','m7');assert.equal(f.sent.at(-1).m,'view.update');assert.equal(f.sent.at(-1).p.away,'m7');f.host.receive(f.reply());
  const n=f.sent.length;f.host.away('A','m7');assert.equal(f.sent.length,n,'the same mark asks for nothing');
+ f.host.away('A','m9');assert.equal(f.host.awayOf('A'),'m7','refreshing the tail while away cannot consume genuinely new messages');assert.equal(f.sent.length,n);
  f.host.away('A','');assert.equal(f.sent.at(-1).p.away,'','back at the end');f.host.receive(f.reply());
  f.host.away('A','m9');f.host.receive(f.reply());f.host.request('select','B');assert.equal(f.sent.at(-1).m,'view.open');assert.equal(f.sent.at(-1).p.away,'');assert.equal(f.host.awayMark,null);
 });
@@ -712,6 +713,60 @@ test('the new-messages pill on an earlier page goes straight to the newest page'
  const f=await fixture();f.open();f.host.page();f.host.receive(f.reply());f.host.page();f.host.receive(f.reply());assert.equal(f.host.atNewest(),false);
  assert.equal(f.host.newest(),true);const req=f.sent.at(-1);assert.equal(req.m,'view.page');assert.equal(req.p.cursor,'');assert.equal(f.host.atNewest(),true);
  f.host.receive(f.reply(req));assert.equal(f.views.at(-1).detail.page.direction,'newest');assert.equal(f.host.newest(),false,'at the newest there is nowhere to go');
+});
+test('a newest click while an older page is in flight is retained until its reply',async()=>{
+ const f=await fixture();f.open();f.host.page();const older=f.sent.at(-1);
+ assert.equal(f.host.newest(),true,'explicit bottom intent is accepted while paging');
+ f.host.receive(f.reply(older));const newest=f.sent.at(-1);
+ assert.equal(newest.m,'view.page');assert.equal(newest.p.cursor,'');assert.notEqual(newest.id,older.id);
+ f.host.receive(f.reply(newest));assert.equal(f.views.at(-1).detail.page.direction,'newest');assert.equal(f.host.atNewest(),true);
+ assert.equal(f.getSession().drafts.A,'original 日本語');
+});
+test('a queued newest click cannot move a later explicit conversation selection',async()=>{
+ const f=await fixture();f.open();f.host.page();const older=f.sent.at(-1);f.host.newest();f.host.request('select','B');const open=f.sent.at(-1);
+ f.host.receive(f.reply(older));f.host.receive(f.reply(open));assert.equal(f.getSession().sel,'B');assert.equal(f.sent.at(-1).id,open.id);
+});
+test('latest source window, rather than the local trail alone, decides whether newer rows exist',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:{ids:['row'],older:'older-bound-to-A',hasMore:true,newer:4,anchor:{id:'row',offset:0},partial:[]}}));
+ assert.equal(f.host.atNewest(),false);assert.equal(f.host.hasAhead('newer'),true);assert.equal(f.host.newest(),true);
+ assert.equal(f.sent.at(-1).p.cursor,'');
+});
+test('socket replacement restores the same page and unread boundary before exposing a fresh view',async()=>{
+ const position={top:1100,atEnd:false,anchor:'row',offset:-37};
+ const f=await fixture({pagePosition:()=>({position,adjacent:''})});f.open();f.host.away('A','m7');f.host.receive(f.reply());
+ f.host.page();f.host.receive(f.reply());const state=f.host.readingState?.();f.host.disconnect();
+ const g=await fixture({readingState:state});g.open();const restore=g.sent.at(-1);
+ assert.equal(g.views.length,0,'no newest-page flash');assert.equal(restore.m,'view.page');assert.equal(restore.p.away,'m7');
+ g.host.receive(g.reply(restore));assert.deepEqual(g.views.at(-1).detail.position,position);assert.equal(g.host.awayOf('A'),'m7');
+ assert.equal(g.getSession().drafts.A,'original 日本語');
+});
+test('a newest click retained behind a failed page still reaches the already displayed newest page',async()=>{
+ const f=await fixture();f.open();f.host.page();const older=f.sent.at(-1);f.host.newest();
+ f.host.receive({t:'reply',id:older.id,ok:false,error:{code:'STALE_CURSOR'}});
+ assert.equal(f.host.pendingNewest,false);assert.equal(f.commands.at(-1)?.type,'scroll');assert.equal(f.host.atNewest(),true);
+});
+test('a pending newest click survives socket replacement as an explicit bottom bookmark',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{atEnd:false,anchor:'row',offset:-9},adjacent:''})});f.open();
+ f.host.away('A','m7');f.host.receive(f.reply());f.host.page();f.host.newest();const state=f.host.readingState();
+ const g=await fixture({readingState:state});g.open();assert.equal(g.views.at(-1).detail.position.atEnd,true);
+ assert.equal(g.host.atNewest(),true);assert.equal(g.host.awayOf('A'),'m7','mark stays until the viewport actually reaches the content');
+});
+test('latest source metadata also lets manual downward paging fetch newer rows without a local trail',async()=>{
+ const f=await fixture();f.open();f.host.window.newer=4;assert.equal(f.host.hasAhead('newer'),true);
+ assert.equal(f.host.ahead('newer'),true);const request=f.sent.at(-1);assert.equal(request.p.cursor,'');
+ f.host.receive(f.reply(request,{window:{ids:['new'],older:'older',hasMore:true,newer:0,anchor:{id:'new',offset:0},partial:[]}}));
+ assert.equal(f.host.atNewest(),true);assert.equal(f.host.hasAhead('newer'),false);
+});
+test('another hub cannot restore local reading state, and reconnect never replays actions',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{atEnd:false,anchor:'row'},adjacent:''})});f.open();f.host.page();f.host.receive(f.reply());
+ const state=f.host.readingState();state.hub='https://foreign';const g=await fixture({readingState:state});g.open();
+ assert.equal(g.views.length,1);assert.equal(g.host.restorePage,null);assert.equal(g.host.awayOf('A'),'');
+ assert(g.sent.every(r=>r.m==='view.open'));
+});
+test('another history epoch cannot reuse a reconnect bookmark or its read mark',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{atEnd:false,anchor:'row'},adjacent:''})});f.open();f.host.away('A','m7');f.host.receive(f.reply());
+ const state=f.host.readingState();state.epoch='retired';const g=await fixture({readingState:state});g.open();
+ assert.equal(g.views.length,1);assert.equal(g.host.restorePage,null);assert.equal(g.host.awayOf('A'),'');
 });
 // A search result once named a subagent's log ("@sub:<thread>"), which the
 // hub has no view of: the page stopped on "Conversation unavailable", and

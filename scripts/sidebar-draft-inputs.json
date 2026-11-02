@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "3be11e371531a1cc6bc79ce7d4c001b93410f0ad7b25d593c1f775f35df3aac6",
+    "src/core/client.bend": "53bd2dbc3cb4168acf0193713b68ac27224e2f8e8e30ebf996e711518795634c",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -164,7 +164,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "f3afb501d96bb15c76aeae77bf5e75a55109ce06c3c51d0b8bf07529f82c5ac3",
-    "src/server/thin-view.bend": "478fd7ed7ddf9ea7251a5b9671073b5575252ecbf7c587bc2881881f249c018c",
+    "src/server/thin-view.bend": "c6f3f733ca4a2489adec0bfae33d7f09c20a97f6b1fbe1a90da427cc8547babd",
     "src/server/thinstore.bend": "b5310129889110fc0689d84985d59be407a79cf9bad762fa63e2486bf338f1ee",
     "src/web/bots.bend": "d1d4ebfa85e13f4ae331b38d783574b444f9db62fd2e3816a424a1c38a70788f",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
@@ -179,7 +179,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "84ba5d836a59a371826b1f4cca0e317f81b5854dea1fd9894f98b5060f497949"
+    "src/web/view.bend": "19b71837221008a4b27e7a4b70b7f471c7ddde43aa2ccb0d12f852d80ef925e7"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
