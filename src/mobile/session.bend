@@ -117,6 +117,17 @@ def Session.handoff(hs: H.Hubs, +key: String, session: J.Json, cur: String) -> H
     case H.Hubs{cid, now, _, list}:
       H.Hubs{cid, now, cur, Session.handoff.go(list, key, session)}
 
+# Live words into a draft the phone owns (bridge.js, on a hub's view lane,
+# where the hub draws the screen but the draft is the phone's): the draft,
+# the phone's own place in it ("@voice.pos" and the rest, kept apart from
+# the hub's session), one {"t":"voice"} event, through the same
+# client.bend Voice.recv the hub and the web run. Answers the draft after
+# it and the place to keep for the next event.
+# dictation's words into the phone's draft: the web's def (client.bend's
+# Voice.place)
+def Session.voice(+keep: J.Json, +draft: String, +o: J.Json) -> J.Json:
+  U.Voice.place(keep, draft, o)
+
 def Session.local(session: J.Json, key: String, value: String) -> J.Json:
   Session.pack(H.Hubs.ui(H.Hubs.local(H.Hubs{"", 0n, "local", [H.Hub{"local", Session.adopt(U.Ui.init(0n), session)}]}, key, value), "local"))
 

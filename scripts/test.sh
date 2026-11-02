@@ -27,6 +27,10 @@
 # to regenerate scripts/test-timings.txt from a serial run).
 set -eu
 cd "$(dirname "$0")/.."
+. scripts/heavy-guard.sh
+export TEST_JOBS=1 CHECK_JOBS=1 CHECK_SHARDS=1
+export BUN_JSC_forceRAMSize=${BUN_JSC_forceRAMSize:-4294967296}
+heavy_guard test "$@"
 export BEND_NO_TELEMETRY=1
 # no test reaches the real order server (Ordering is on by default):
 # orderio.bend's Od.at sends Backplane's own address here instead

@@ -49,17 +49,12 @@ let browser,page,phase='start';const privateFrames=[];
  try{await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds,{timeout:2500});result.firstMessageAndScrollMs=performance.now()-start;}catch{}
  result.snapshots.push({label:'entry-settled',...(await entry())});await page.screenshot({path:output+'.entry.png'});
  if(extraTools){
-  phase='automatic-long-prefix';
-  if(!result.firstMessageAndScrollMs){await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds,{timeout:20000});result.firstMessageAndScrollMs=performance.now()-start;}
-  const final=await entry();result.snapshots.push({label:'automatic-message-and-scroll',...final});
-  const pages=result.wire.requests.filter(r=>r.method==='view.page'),cursors=pages.map(r=>JSON.stringify(r.cursor));
-  result.budget={extraTools,automaticPageRequests:pages.length,maxPages:Math.ceil((extraTools+tail+64)/16)+4};
-  assert(pages.length>32,'the fixture crosses the original automatic fill limit');
-  assert(pages.length<=result.budget.maxPages,'automatic demand remains within raw-prefix coverage');
-  assert.equal(new Set(cursors).size,cursors.length,'every automatic request advances to a distinct raw cursor');
-  assert.equal(await page.getByRole('button',{name:'Earlier messages',exact:true}).count(),0,'entry never requires a continuation button');
-  assert.equal(await page.evaluate(()=>__entryEvents.filter(e=>e.trusted&&['click','keydown'].includes(e.event)).length),0,'no navigation gesture is needed after selecting the target');
- }else {assert(result.firstMessageAndScrollMs,'Entering a long tool-heavy conversation immediately paints message text and provides scrollable history without a first wheel gesture');}
+  phase='bounded-recent';const initialPages=result.wire.requests.filter(r=>r.method==='view.page').length;
+  assert.equal(initialPages,0,'initial tool-only view stays within its recent window');assert(result.snapshots.at(-1).folds.length,'recent collapsed tool summary is visible');
+  const earlier=page.getByRole('button',{name:'Load earlier messages',exact:true});await earlier.click();
+  const deadline=Date.now()+3000;while(!result.wire.requests.some(r=>r.method==='view.page')&&Date.now()<deadline)await page.waitForTimeout(25);await page.waitForFunction(()=>!__bpRender.paging().paging);await page.waitForTimeout(300);
+  const pages=result.wire.requests.filter(r=>r.method==='view.page');assert(pages.length>0&&pages.length<=2,'one explicit earlier gesture asks at most two bounded pages');result.budget={extraTools,initialPageRequests:initialPages,explicitPageRequests:pages.length};
+ }else {assert(result.firstMessageAndScrollMs,'Entering a long conversation paints committed message text and provides scrollable history without a first wheel gesture');}
  assert.equal(result.wire.closedDetailBytes,0,'closed tool payloads do not ride ordinary view frames');assert.equal(result.wire.requests.filter(r=>r.phase==='entry'&&r.method==='view.message').length,0,'closed tools do not request body pages');
  assert.equal(result.wire.requests.filter(r=>r.method==='view.action'&&['send','send-alt'].includes(r.action)||['thread.send','thread.post'].includes(r.method)).length,0,'reader navigation never sends a composer turn');assert.deepEqual(result.errors,[]);result.state='passed';
 }catch(e){result.state='failed';result.phase=phase;result.error=e.stack;process.exitCode=1;

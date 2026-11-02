@@ -72,6 +72,14 @@ async function launchPaths({ home, binary, web, env, platform = process.platform
     // checks for (a ZIP keeps no empty folder)
     const bin = path.win32.join(path.win32.dirname(binary), 'runtime', 'bin');
     const childEnv = { ...env, BACKPLANE_HOME: home };
+    // The native hub reads user config through HOME; BACKPLANE_HOME is
+    // application data. Windows normally supplies only USERPROFILE.
+    const homeKey = Object.keys(childEnv).find(k => k.toLowerCase() === 'home');
+    const profileKey = Object.keys(childEnv).find(k => k.toLowerCase() === 'userprofile');
+    if (!(homeKey && childEnv[homeKey]) && profileKey && absolute(childEnv[profileKey])) {
+      if (homeKey) delete childEnv[homeKey];
+      childEnv.HOME = childEnv[profileKey];
+    }
     let hasRuntime = false;
     try { hasRuntime = (await files.lstat(path.win32.join(bin, 'bash.exe'))).isFile?.() === true; } catch {}
     if (hasRuntime) {
