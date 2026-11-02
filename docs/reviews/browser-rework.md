@@ -34,7 +34,13 @@ unchanged. The conservative source pin must be refreshed only after the existing
 repository acceptance of the foreign-effect proof verdict, 292 seconds. This is
 not an independent kernel verdict. No laws or proofs were edited.
 
-`build/browser-review/browser-tests.log`: all 54 focused Browser Node tests pass.
+`build/browser-review/browser-tests.log`: all 55 focused Browser Node tests pass.
+The candidate renderer also presented an actual native page after being injected
+into the installed web bundle in a private Electron fixture. That targeted result
+is in `build/browser-review/renderer-fixed-result.json`; it does not qualify the
+new chrome or a candidate full build. Status updates preserve the managed text
+node used by the DOM patcher to avoid duplicating the placeholder.
+
 `desktop/test/browser-panel.cjs` exercises the actual native guest against a
 controlled local page in a temporary home. Its candidate runtime result and the
 sidebar equivalence/build results are pending.

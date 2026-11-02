@@ -81,6 +81,16 @@ test('an empty connected Browser gives an address hint and keeps it through UI p
  }finally{h.controller.dispose();}
 });
 
+test('status updates preserve the text node tracked by the DOM patcher',async()=>{
+ const h=await fixture({phase:'ready',surface:true,present:async()=>({shown:true})});
+ try{
+  await tick();const text={nodeType:3,nodeValue:'Connecting Browser…'};h.label.firstChild=text;h.label.childNodes=[text];
+  Object.defineProperty(h.label,'textContent',{get:()=>text.nodeValue,set:()=>assert.fail('Replacing the managed text node strands the DOM patcher')});
+  h.controller.sync();h.frame();assert.equal(text.nodeValue,'');
+  h.state({phase:'error',message:'Connection unavailable'});assert.equal(text.nodeValue,'Connection unavailable');assert.equal(h.label.firstChild,text);
+ }finally{h.controller.dispose();}
+});
+
 test('a late presentation reply cannot erase a newer connection failure or its recovery button',async()=>{
  let resolve;const h=await fixture({phase:'ready',surface:true,present:()=>new Promise(r=>{resolve=r;})});
  try{
