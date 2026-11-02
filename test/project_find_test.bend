@@ -5,6 +5,9 @@ import ../src/core/codec.bend as K
 import ../src/core/hub.bend as H
 import ../src/core/json.bend as J
 import ../src/core/client.bend as U
+import ../src/core/i18n.bend as I
+import ../src/web/dom.bend as D
+import ../src/web/view.bend as V
 
 # Finding and removing projects: the sidebar's search keeps the projects
 # whose name matches, Enter goes to the first; Remove takes two clicks and
@@ -87,6 +90,17 @@ def readded() -> List<&2, M.Change>:
 def fresh() -> List<&2, M.Change>:
   after(removed(), 700n, "{\"id\":2,\"m\":\"project.create\",\"p\":{\"path\":\"/tmp/other\"}}")
 
+# the search field's Esc action with query q
+def esc.of(n: D.Node) -> String:
+  match n:
+    case D.El{_, _, as, _}:
+      V.View.attr(as, "data-esc")
+    case _:
+      "?"
+
+def esc(+q: String) -> String:
+  esc.of(V.View.find.field(I.En{}, False{}, q))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("all shown", pids(base()), "p1,p3,p2")
@@ -98,6 +112,9 @@ def main() -> IO(Unit):
     C.Check.str("no match", pids(typed("zzz")), "")
     C.Check.str("shut shows all", pids(act(typed("bo"), "proj-find", "")), "p1,p3,p2")
     C.Check.str("shut clears", U.Ui.scratch(act(typed("bo"), "proj-find", ""), "@f.pq"), "")
+    C.Check.str("the field's Esc clears a query", esc("bo"), "proj-find")
+    C.Check.str("an empty field leaves Esc to the page", esc(""), "")
+    C.Check.str("Esc on a query typed straight in (the desktop's field) clears it", U.Ui.scratch(act(act(base(), "bfield", "pq\u{1f}bo"), "proj-find", ""), "@f.pq"), "")
     C.Check.str("enter goes to top thread", U.Ui.sel(act(typed("bo"), "proj-go", "")), "a")
     C.Check.str("enter shuts", pids(act(typed("bo"), "proj-go", "")), "p1,p3,p2")
     C.Check.str("the web's enter sends what was typed: the top thread", U.Ui.sel(act(typed("bo"), "proj-go", "bo")), "a")
