@@ -385,7 +385,9 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .sub.running .state { color: var(--st-work); } .sub.done .state { color: var(--st-done); } .sub.failed .state { color: var(--st-need); }
 .sub .doing { display: block; padding: 0 16px 8px 32px; color: var(--accent); font-size: calc(12px * var(--text-scale, 100) / 100); overflow-wrap: anywhere; }
 .sub-step { display: flex; gap: 12px; padding: 4px 16px 4px 32px; font: calc(12px * var(--text-scale, 100) / 100)/1.5 var(--mono); color: var(--dim); }
-.sub-step .kind { color: var(--faint); flex: none; width: 8ch; overflow-wrap: anywhere; }
+.sub-step .kind { color: var(--faint); flex: none; width: 8ch; overflow-wrap: anywhere; align-self: flex-start; }
+/* what a subagent said has no label: no empty chip (.kind's box) */
+.sub-step .kind:empty { border-color: transparent; background: none; }
 .sub-step .text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .sub-step:last-child { padding-bottom: 12px; }
 .sub-empty { display: block; padding: 0 16px 12px 32px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }

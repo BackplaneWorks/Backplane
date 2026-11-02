@@ -156,6 +156,7 @@ import ./src/core/kserve.bend as KSL
 import ./src/core/tz.bend as TZ
 
 import ./src/core/stamp.bend as STP
+import ./src/core/subs.bend as SUBSTEP
 
 import ./src/core/when.bend as WH
 
@@ -14930,3 +14931,11 @@ law stamp_mid_turn_end_shows:
 law stamp_mid_running_newest_shows:
   for +r: TZ.TzRule
   {STP.Stamp.mid(STP.Stamps{r, 0n, STP.Stamp.ends([M.Msg{"u", "t", M.User{}, "go", 1n}, M.Msg{"a1", "t", M.Assistant{}, "one", 2n}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}], True{}), Map.new(&2, Nat)}, M.Msg{"a2", "t", M.Assistant{}, "two", 3n}) == False{} : Bool}
+
+# a subagent's steps name an MCP tool as the timeline does, and what it
+# said has no label
+law subs_step_label_mcp:
+  {SUBSTEP.Subs.step.label("mcp__backplane__viewer_show") == "viewer_show" : String}
+
+law subs_step_label_say:
+  {SUBSTEP.Subs.step.label("say") == "" : String}
