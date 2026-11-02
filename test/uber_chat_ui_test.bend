@@ -31,7 +31,7 @@ def default_is_chat(u, id):
 
 law ordinary_subagents_unchanged:
   {V.View.thread.subs(I.En{}, state(), Map.new(&2, String), "ordinary", 10n) ==
-    V.View.subs(I.En{}, Map.new(&2, String), "ordinary", SB.Subs.rows(state(), Map.new(&2, String), "ordinary", 10n)) : List<&2, D.Node>}
+    V.View.subs.at(I.En{}, Map.new(&2, String), "ordinary", SB.Subs.rows(state(), Map.new(&2, String), "ordinary", 10n), state(), 10n) : List<&2, D.Node>}
 
 def ordinary_subagents_unchanged():
   {==}
