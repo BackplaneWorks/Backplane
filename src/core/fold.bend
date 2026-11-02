@@ -615,11 +615,42 @@ def Fold.white(s: String) -> Bool:
     case SCon{Chr{9}, t}: Fold.white(t)
     case SCon{_, _}: False{}
 
-# an agent's message that shows nothing
+# the openings of the hub's notes to a buy thread's agent (order.bend's
+# Order.wake.*, Order.quote.declined), after "[Backplane] "
+def Fold.note.heads() -> List<&2, String>:
+  ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."]
+
+# x opens with p (walked on p: it stops at p's end, whatever x's length)
+def Fold.lead(p: String, x: String) -> Bool:
+  match p x:
+    case SNil{} _:
+      True{}
+    case SCon{_, _} SNil{}:
+      False{}
+    case SCon{+h, t} SCon{+c, r}:
+      Bool.and(Char.is_eq(h, c), Fold.lead(t, r))
+
+def Fold.note.go(hs: List<&2, String>, +x: String) -> Bool:
+  match hs:
+    case Nil{}:
+      False{}
+    case +h <> t:
+      Bool.or(Fold.lead("[Backplane] " ++ h, x), Fold.note.go(t, x))
+
+# the hub's own note for the agent (Hub.order.wake: a system message): the
+# agent reads it, the person is never shown it; the person's and the
+# agent's messages are never notes, whatever they say
+def Fold.note(+x: String) -> Bool:
+  Fold.note.go(Fold.note.heads(), x)
+
+# a message that shows nothing: an agent's of white space only, or the
+# hub's note for the agent
 def Fold.blank(e: M.Entry) -> Bool:
   match e:
     case M.Msg{_, _, M.Assistant{}, +x, _}:
       Fold.white(x)
+    case M.Msg{_, _, M.System{}, +x, _}:
+      Fold.note(x)
     case _:
       False{}
 
