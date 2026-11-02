@@ -1,3 +1,4 @@
+import ./src/core/allowance.bend as ALLOWANCE
 import ./src/core/lazy-tools.bend as LTOOLS
 
 import ./src/core/range.bend as BRANGE
@@ -15264,3 +15265,8 @@ def Laws.tour_usage_kept_when_due(back):
 def Laws.settings_row_information(): {==}
 
 def Laws.voice_model_needs_runtime(): {==}
+
+def Laws.allowance_remaining_reported(): {==}
+def Laws.allowance_refresh_held(): {==}
+def Laws.allowance_refresh_due(): {==}
+def Laws.allowance_future_unknown(): {==}
