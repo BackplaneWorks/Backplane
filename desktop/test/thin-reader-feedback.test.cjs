@@ -1,6 +1,40 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=()=>fs.readFileSync(process.env.READER_HOST_SOURCE||path.join(__dirname,'../../src/web/host.js'),'utf8');
+test('new-output read mark is a source identity even when the visible tail is a folded tool run',()=>{
+ const src=source(),a=src.indexOf('function holdMark()'),b=src.indexOf('function holdBottom()',a);
+ const mark=vm.runInNewContext('('+src.slice(a,b)+')',{timelineList:()=>({el:{getAttribute:()=> 'latest-source-call'},rows:[{id:'fold:oldest-call'}]}),historyRow:r=>r.id});
+ assert.equal(mark(),'latest-source-call');
+});
+test('reaching the old viewport bottom cannot clear unread while the newest page is still travelling',()=>{
+ const src=source(),a=src.indexOf('function timelineChanged(list)'),b=src.indexOf('function holdMark()',a),said=[];
+ const list={atEnd:()=>true,el:{}},thin={atNewest:()=>true,paging:{direction:'newest'}};
+ const changed=vm.runInNewContext('('+src.slice(a,b)+')',{transitionPosition:null,canonicalBoot:false,activeTimeline:list,focusedNode:null,frontendNode:{},thin,held:false,
+  App:{sel:()=> 'chat'},ui:{},holdSay:s=>said.push(s),historyCheckSoon(){},bodyWindows:{observe(){}},remoteReady:true});
+ changed(list);assert.deepEqual(said,['chat']);thin.paging=null;changed(list);assert.deepEqual(said,['chat','']);
+});
+test('a cached reconnect picture cannot report reading progress or consume unread content',()=>{
+ const src=source(),a=src.indexOf('function timelineChanged(list)'),b=src.indexOf('function holdMark()',a),said=[];
+ const list={atEnd:()=>true,el:{}};
+ const changed=vm.runInNewContext('('+src.slice(a,b)+')',{transitionPosition:null,canonicalBoot:false,activeTimeline:list,focusedNode:null,frontendNode:null,thin:{atNewest:()=>true},held:false,
+  App:{sel:()=> 'chat'},ui:{},holdSay:s=>said.push(s),historyCheckSoon(){},bodyWindows:{observe(){}},remoteReady:false});
+ changed(list);assert.deepEqual(said,[]);
+});
+test('the temporary bottom drawn before restoring a bookmark cannot clear its unread boundary',()=>{
+ const src=source(),a=src.indexOf('function timelineChanged(list)'),b=src.indexOf('function holdMark()',a),said=[];
+ let bottom=true;const list={atEnd:()=>bottom,el:{}},context=vm.createContext({transitionPosition:{anchor:'saved',atEnd:false},canonicalBoot:false,
+  activeTimeline:list,focusedNode:null,frontendNode:{},thin:{atNewest:()=>true},held:false,App:{sel:()=> 'chat'},ui:{},
+  holdSay:s=>said.push(s),historyCheckSoon(){},bodyWindows:{observe(){}},remoteReady:true});
+ const changed=vm.runInContext('('+src.slice(a,b)+')',context);changed(list);assert.deepEqual(said,[]);
+ bottom=false;context.transitionPosition=null;changed(list);assert.deepEqual(said,['chat']);
+});
+test('actual scrollbar movement updates paging direction without requiring a wheel, key or touch',()=>{
+ const src=source(),a=src.indexOf('function timelineScrolled(list, delta)'),b=src.indexOf('function timelineChanged(list)',a),list={};
+ const context=vm.createContext({activeTimeline:list,historyDirection:'older'});
+ const scrolled=vm.runInContext('('+src.slice(a,b)+')',context);
+ scrolled(list,25);assert.equal(context.historyDirection,'newer');scrolled(list,-10);assert.equal(context.historyDirection,'older');
+ scrolled({},30);assert.equal(context.historyDirection,'older');
+});
 test('rejected current inline reader response produces visible feedback instead of a dead button',()=>{
  const src=source(),a=src.indexOf('function showThinMessage(message)'),b=src.indexOf('function stopThin(',a),warnings=[];let paints=0;
  const show=vm.runInNewContext('('+src.slice(a,b)+')',{viewMode:'view-v1',thinContinuations:{accept:()=>false},showViewStatus:s=>warnings.push(s),later(){paints++;}});

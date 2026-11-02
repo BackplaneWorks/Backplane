@@ -5,9 +5,9 @@ const RR = globalThis.__bpRender || null;
 // DOM effects for the pure Bend timeline planner. Rows remain opaque to this
 // adapter; the planner owns layout, ranges, following and scroll anchoring.
 export class TimelineScroller {
-  constructor(el, { plan, create, patch, key, same = null, onChange = () => {} }) {
+  constructor(el, { plan, create, patch, key, same = null, onChange = () => {}, onScroll = () => {} }) {
     this.el = el;
-    this.callbacks = { plan, create, patch, key, same, onChange };
+    this.callbacks = { plan, create, patch, key, same, onChange, onScroll };
     this.rows = [];
     this.sizes = Object.create(null);
     this.lastPlan = null;
@@ -41,6 +41,9 @@ export class TimelineScroller {
   // first). The host still hears of the scroll (onChange).
   _scrolled() {
     const p = this.lastPlan, top = this.el.scrollTop;
+    const delta = top - (this._observedTop ?? top);
+    this._observedTop = top;
+    if (delta) this.callbacks.onScroll(this, delta);
     if (p?.valid && this._initialized && !this._pending && !this._busy && top >= p.valid[0] && top <= p.valid[1]) {
       RR?.n("tl.scroll.kept");
       this._stale = true;
@@ -238,6 +241,9 @@ export class TimelineScroller {
         // settled range includes again. Keep its DOM through this synchronous
         // transaction and retire only rows outside the final range.
         this._prune(this.lastPlan);
+        // Planner writes are layout/follow corrections, not reader movement.
+        // A later DOM scroll event for this same position reports no delta.
+        this._observedTop = this.el.scrollTop;
         this.lastMode = changeMode;
         this.callbacks.onChange(this);
       }

@@ -3609,7 +3609,7 @@ def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +conte
 # make, so the hub can draw it alone for another page of rows (thin-view
 # .bend's Page.splice) and put it into the page it drew before
 def View.thread.timeline(+lc: I.Loc, +st: M.State, +id: String, +drafts: Map<&2, String>, +nf: Map<&2, String>, +turn: M.TurnState, +tr: U.MailvLocal, +now: Nat, +live: Map<&2, String>, pend: List<&2, String>, fab: List<&2, D.Node>, +pill: String) -> D.Node:
-  D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
+  D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}, D.At{"data-reading-seen", U.Hold.source(M.State.mine(st, id))}], List.concat(&2, D.Node, [
     fab, View.parent.loc(lc, st, id, U.Tasks.up(st, id)),
     [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
     View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),

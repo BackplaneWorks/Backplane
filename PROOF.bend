@@ -11970,6 +11970,17 @@ def Laws.hold_at_end_zero():
 def Laws.hold_label_nothing():
   {==}
 
+def Laws.hold_shown_stopped(es, chat, seen, n, any):
+  match es:
+    case Nil{}: {==}
+    case _ <> _: {==}
+
+def Laws.hold_shown_receipt_hidden():
+  {==}
+
+def Laws.hold_shown_empty_hidden():
+  {==}
+
 def Laws.hold_fresh_seen(e, t, n):
   %Equal.sym(Bool, String.eq(M.Idx.id(e), M.Idx.id(e)), True{}, Laws.string_eq_refl(M.Idx.id(e))) : {U.Hold.fresh(e <> t, Bool.or(_, Nat.is_ge(n, U.Hold.most())), M.Idx.id(e), n) == n : Nat}
   {==}
