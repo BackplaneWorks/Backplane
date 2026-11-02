@@ -568,6 +568,38 @@ struct ThreadView: Decodable {
     let term: Term?
     // the thread's terminals in the chat (entries of kind "emb" name them)
     let embs: [Emb]?
+    // dictation in this thread (screen.bend's Mob.voice)
+    var voice: VoiceView? = nil
+}
+
+// Dictation (screen.bend's Mob.voice): "on" while its strip shows, one
+// quiet word for its state and the level (the words are only in the draft),
+// a note (an error when bad, closed by voice-err), the last segment's fixes
+// (each a chip that undoes it) and the first word to clarify
+struct VoiceView: Decodable, Equatable {
+    let on: Bool
+    let state, status: String
+    let level: Int
+    let note: String
+    let bad: Bool
+    let mic, stop: String
+    let fixes: [VoiceChip]
+    let ask: VoiceAsk?
+}
+
+struct VoiceChip: Decodable, Equatable, Hashable {
+    let label: String
+    var tip: String? = nil
+    let action, value: String
+    var primary: Bool? = nil
+}
+
+struct VoiceAsk: Decodable, Equatable {
+    let text, word, guess: String
+    let count: Int
+    let fixing: Bool
+    var field: SetField? = nil
+    let buttons: [VoiceChip]
 }
 
 // a delete a row asked for, waiting for yes ("row-delete" id) or no
@@ -1003,6 +1035,8 @@ struct Cmd: Decodable {
     let ms: Double?
     let action, value, id: String?
     let edit: UInt64?
+    // voice-audio: where on the hub the dictated audio goes (/voice/in?s=…)
+    var path: String? = nil
 }
 
 struct Resume: Decodable {

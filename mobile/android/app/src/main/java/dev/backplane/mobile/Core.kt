@@ -717,6 +717,29 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         return if (i < 0) Pairing.http(l, path) else Pairing.http(l, path.substring(0, i), path.substring(i + 1))
     }
 
+    // this phone's microphone for dictation (VoiceRecorder.kt)
+    val recorder = VoiceRecorder()
+
+    // The composer's mic and the strip's Stop (screen.bend's Mob.voice): the
+    // first press starts this phone's recorder at once and tells Bend
+    // ("voice" with "client": the phone records itself, the hub's reply says
+    // where the audio goes); the next sends what is left with the end mark
+    // and Bend asks the hub to stop. The caller holds RECORD_AUDIO.
+    fun voicePress(on: Boolean) {
+        if (!contentReady) return
+        val s = screen ?: return
+        val l = links.firstOrNull { Pairing.key(it) == s.hub } ?: return
+        if (recorder.active || on) {
+            scope.launch(Dispatchers.IO) { recorder.stop() }
+            act("voice", "")
+            return
+        }
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { recorder.start(s.hub, l) }
+            if (ok) act("voice", "client")
+        }
+    }
+
     // a file for the next message: one POST /attach to the thread's hub with
     // the file as the body (no base64, no pieces through the engine); the
     // hub's answer goes back as "attach-end", as an attach.put's would
@@ -934,6 +957,9 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 if (th != null) seek(th, c.id) else { jumping = c.id; jumpLeft = 4 }
             }
             "keep" -> keep(c.thread, c.text)
+            // dictation (bridge.js's voiceHeard): where the hub takes the audio, and when it is done
+            "voice-audio" -> if (c.path.isNotEmpty()) recorder.address(c.hub, c.path)
+            "voice-stop" -> recorder.gone(c.hub)
             "notify" -> if (!(foreground && screen?.sel == c.thread)) notify(c)
         }
         jumping?.let { id ->
