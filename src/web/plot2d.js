@@ -1051,7 +1051,8 @@ function mountOne(canvas) {
   if (probe !== view.hubProbe) { view.hubProbe = probe; if (probe !== view.probe) view.follow = true; view.probe = probe; view.relight(); }
   present(view);
   view.pins();
-  view.fade = Number(canvas.dataset.fade || 0);
+  const fade = Number(canvas.dataset.fade || 0);
+  if (fade !== view.fade) { view.fade = fade; view.later(); }
   if (view.sheetText !== (canvas.dataset.sheets || "")) { view.sheetText = canvas.dataset.sheets || "";view.sheets = sheetBoxes(view.sheetText); }
   const key = canvas.dataset.key || "";
   const scope = canvas.dataset.scope || "", stateKey = `${scope}\0${key}`;
