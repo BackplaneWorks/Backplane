@@ -331,12 +331,20 @@ def Hist.track(ss: List<&2, Step>, +kind: Nat) -> List<&2, Step>:
     case +s <> t:
       Hist.track.k(Step.has(s, kind), s, Hist.track(t, kind))
 
+# the file's kind only for the file asked about: Hist.ext's ends_with
+# reverses both strings, and this ran for every file of every step, two or
+# three times a view while the viewer is open
+def SFile.touches.k(same: Bool, +f: SFile, +kind: Nat) -> Bool:
+  match same:
+    case True{}: SFile.of_kind(f, kind)
+    case False{}: False{}
+
 def SFile.touches(fs: List<&2, SFile>, +kind: Nat, +want: String, +top: String) -> Bool:
   match fs:
     case Nil{}:
       False{}
     case +f <> t:
-      Bool.or(Bool.and(SFile.of_kind(f, kind), String.eq(top ++ "/" ++ SFile.rel(f), want)), SFile.touches(t, kind, want, top))
+      Bool.or(SFile.touches.k(String.eq(top ++ "/" ++ SFile.rel(f), want), f, kind), SFile.touches(t, kind, want, top))
 
 def Step.touches(s: Step, +kind: Nat, +want: String) -> Bool:
   match s:
