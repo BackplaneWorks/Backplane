@@ -846,8 +846,11 @@ def Subs.badge(+n: Nat) -> String:
   Bool.pick(String, Nat.is_eq(n, 0n), "", Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " agent", " agents"))
 
 # a step as a row shows it: the tool, or "" for what it wrote
+# a subagent's step: its tool as the timeline names it (FO.Tool.short: an
+# MCP tool without its server prefix), nothing for what it said (laws
+# subs_step_label_*)
 def Subs.step.label(+kind: String) -> String:
-  Bool.pick(String, String.eq(kind, "say"), "", kind)
+  Bool.pick(String, String.eq(kind, "say"), "", FO.Tool.short(kind))
 
 # Display activity only. Keep the raw live/action flags for cancellation,
 # delivery, folding and history compatibility; they include queued/reporting.
