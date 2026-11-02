@@ -10170,11 +10170,17 @@ def Rp.bom.title.l(+l: I.Loc, +u: Ui) -> String:
 def Rp.bom.title(+u: Ui) -> String:
   Rp.bom.title.l(Lang.loc(u), u)
 
+# the page a review request asks for, kept by its id ("@rp.req:<id>":
+# "<thread>:<page>"): a request that fails has no report to end the page's
+# reading (Rp.store), which then said "Reading the design..." for ever
+def Rp.mark(+u: Ui, +page: String) -> Ui:
+  Ui.scratch_set(u, "@rp.req:" ++ Nat.show(Ui.rid(u)), Ui.sel(u) ++ ":" ++ page)
+
 def Rp.bom.root(+u: Ui) -> String:
   Bd.tree(u, Bd.context(u))
 
 def Rp.ask.bom(+u: Ui) -> Act:
-  Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "bom"), Rp.key(u, "rp.title", "bom"), Rp.bom.title(u)), "review.bom",
+  Ui.rpc(Rp.mark(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "bom"), Rp.key(u, "rp.title", "bom"), Rp.bom.title(u)), "bom"), "review.bom",
     [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"a", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.a"), "")}}, J.KV{"b", J.Str{Bool.pick(String, Rp.compared(u), Hs.get(u, "cmp.b"), Rp.bom.root(u))}}])
 
 # the design checks run on the working copy, or on the new side of a
@@ -10189,7 +10195,7 @@ def Rp.checks.title(+u: Ui) -> String:
   Rp.checks.title.l(Lang.loc(u), u)
 
 def Rp.ask.checks(+u: Ui) -> Act:
-  Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "checks"), Rp.key(u, "rp.title", "checks"), Rp.checks.title(u)), "review.checks",
+  Ui.rpc(Rp.mark(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "checks"), Rp.key(u, "rp.title", "checks"), Rp.checks.title(u)), "checks"), "review.checks",
     [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"commit", J.Str{Rp.commit(u)}}, J.KV{"trigger", J.Str{"manual"}}])
 
 # The Release page: a tag (the field "@f.rltag", else the next one after
@@ -10232,7 +10238,7 @@ def Rl.flip(+u: Ui, +k: String) -> Ui:
 # (releasing although the checks fail is for this release only: the tick
 # goes once it is asked, so the next release is gated again)
 def Rl.ask(+u: Ui) -> Act:
-  Ui.rpc(Ui.scratch_set(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "release"), Rp.key(u, "rp.err", "release"), ""), "@rl.force:" ++ Ui.sel(u), ""), "review.release",
+  Ui.rpc(Rp.mark(Ui.scratch_set(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "release"), Rp.key(u, "rp.err", "release"), ""), "@rl.force:" ++ Ui.sel(u), ""), "release"), "review.release",
     [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"tag", J.Str{Rl.tag(u)}}, J.KV{"publish", J.Flag{Rl.on(u, "@rl.pub")}}, J.KV{"force", J.Flag{Rl.on(u, "@rl.force")}}])
 
 # opening the page asks for the tags once (the next one is proposed)
@@ -10295,8 +10301,20 @@ def Rp.reply.k(has: Bool, u: Ui, +o: J.Json) -> Ui:
     case False{}:
       u
 
-def Rp.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
-  Rp.ticked.k(Rp.ticked.has(o), Rp.reply.k(has, u, o), o)
+# a review request that failed: its page stops reading and says why
+def Rp.failed.on(failed: Bool, +key: String, u: Ui, +o: J.Json) -> Ui:
+  match failed:
+    case False{}: u
+    case True{}:
+      Ui.scratch_set(Ui.info_set(u, "rp.err:" ++ key, Ui.reply.err.std(o)), "@rp.busy:" ++ HI.Hist.at(String.split(key, ':'), 0n), "")
+
+def Rp.failed(+id: String, +key: String, u: Ui, +o: J.Json) -> Ui:
+  Rp.failed.on(Bool.and(Bool.not(String.is_empty(key)), Bool.not(J.Json.get_bool(o, "ok", True{}))), key, Ui.scratch_set(u, "@rp.req:" ++ id, ""), o)
+
+def Rp.reply(has: Bool, +u: Ui, +o: J.Json) -> Ui:
+  +id = J.Json.as_raw(J.Json.get(o, "id"), "")
+  +key = Ui.scratch(u, "@rp.req:" ++ id)
+  Rp.failed(id, key, Rp.ticked.k(Rp.ticked.has(o), Rp.reply.k(has, u, o), o), o)
 
 # The checks page: why the gate fails ("" it passes), the one-line summary,
 # and the checklist's boxes (each ticked with "rv-tick" and its index)
