@@ -797,7 +797,7 @@ let earlierAsked = false;
 // The host owns DOM lifetimes; Bend owns rows, geometry, range and following.
 const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
-let held = false, away = "";
+let held = false, away = "", holdPending = null;
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
 function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyOlderDemand = 0;historyFillScope = "";historyFillMore(null, false);historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
 // Rows let go past the cap (thin-host.js's heldTrim): their display keys,
@@ -869,9 +869,24 @@ function anchorElement(tl, id) {
 }
 function holdEnd(tl) { return timelineList(tl)?.atEnd() ?? true; }
 function holdSay(now) {
-  if (focusedNode && !frontendNode || now === away) return;
-  const was = away;away = now;
-  queueMicrotask(() => dispatch(now ? "hold-away" : "hold-end", now || was));
+  if (focusedNode && !frontendNode) return;
+  const thread = now || App.sel(ui), controller = thin, target = thin?.target;
+  // Paging/reconnect can establish the controller's first unread boundary
+  // independently of this DOM latch. A local empty latch alone is not an
+  // acknowledgement that the genuinely newest viewport has been reached.
+  const marked = !!thin?.awayOf?.(thread);
+  if (now === away && (!thin || (now ? marked : !marked))) return;
+  if (holdPending?.thread === thread && holdPending.now === now && holdPending.controller === controller && holdPending.target === target) return;
+  away = now;
+  const pending = holdPending = { thread, now, controller, target };
+  queueMicrotask(() => {
+    if (holdPending !== pending) return;
+    holdPending = null;
+    // Old picture callbacks never consume a newly selected bot/thread, even
+    // when two bot tabs resolve to the same underlying conversation.
+    if (thin !== controller || thin?.target !== target || App.sel(ui) !== thread || controller && !controller.ready) return;
+    dispatch(now ? "hold-away" : "hold-end", thread);
+  });
 }
 function timelineScrolled(list, delta) {
   if (list !== activeTimeline || !delta) return;
@@ -897,7 +912,11 @@ function holdMark() {
 }
 function holdBottom() {
   if (thin && (thin.paging || thin.atNewest?.() === false)) { thin.newest();return; }
-  timelineList()?.scrollToEnd();
+  const list = timelineList();
+  list?.scrollToEnd();
+  // An already-bottom command need not emit a DOM scroll event. Reconcile
+  // its accepted geometry too, rather than leaving a stale badge clickable.
+  if (list) timelineChanged(list);
 }
 // a <details> that asks for something each time it opens (view.bend's
 // board selector, data-on-open "board-list": its boards read again); not
