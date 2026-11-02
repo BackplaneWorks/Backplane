@@ -6109,76 +6109,25 @@ def Conn.pos(xs: List<&2, String>, +x: String, +i: Nat) -> Nat:
     case +h <> t:
       Bool.pick(Nat, String.eq(h, x), i, Conn.pos(t, x, 1n+i))
 
-# Images in threads
-# -----------------
-# GET /img?path=<an image an agent named>: the file itself, to a client
-# the hub already lets in (it could read the file through a terminal as
-# well); only files Img.viewable names, at most IM.Img.cap() bytes. It is
-# streamed from disk a piece at a time (H.Sock.send_path), never read into
-# the hub, and a Range header gets that part alone (core/range.bend's
-# Rng.*: 206, or 416 past the end), so a viewer or PDF reader can seek a
-# large file.
+# Image, PDF and text previews
+# ----------------------------
+# GET /img?path=... is available only to clients the hub already lets in.
+# The host effect streams from one open file without a file-sized byte list.
 
-def Img.empty(text: Bool, s: Socket) -> IO(Unit):
-  match text:
-    case True{}: Conn.finish(s, W.Http.response.c("200 OK", "text/plain; charset=utf-8", Nil{}, "no-cache", ""))
-    case False{}: Conn.finish(s, W.Http.text("404 Not Found", "not found"))
+def Img.send(+path: String, s: Socket, range: String) -> IO(Unit):
+  do IO<Unit>:
+    sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_preview(s, path, IM.Img.ctype(path), range)
+    s2 : Socket <- Conn.sent(sent)
+    Socket.close(s2)
 
-# the head, then the range's bytes straight from the file
-def Img.send.k(go: Bool, s: Socket, +path: String, +start: Nat, +len: Nat) -> IO(Unit):
-  match go:
-    case True{}:
-      do IO<Unit>:
-        sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_path(s, path, U32.from_nat(start), U32.from_nat(len))
-        s2 : Socket <- Conn.sent(sent)
-        Socket.close(s2)
-    case False{}:
-      Socket.close(s)
-
-def Img.send(r: BRANGE.Rng, s: Socket, +path: String, +size: Nat) -> IO(Unit):
-  match r:
-    case BRANGE.Rng{+a, +n, +part, +ok}:
-      do IO<Unit>:
-        s2 : Socket <- Conn.send(s, U.Utf8.encode(BRANGE.Rng.head(BRANGE.Rng{a, n, part, ok}, size, IM.Img.ctype(path), "no-cache")))
-        Img.send.k(Bool.and(ok, Nat.is_gt(n, 0n)), s2, path, a, n)
-
-def Img.stream(empty: Bool, s: Socket, +path: String, +size: Nat, +range: String) -> IO(Unit):
-  match empty:
-    case True{}:
-      Img.empty(String.eq(FMP.Fm.preview(path), "text"), s)
-    case False{}:
-      Img.send(BRANGE.Rng.of(range, size), s, path, size)
-
-def Img.read(ok: Bool, s: Socket, +path: String, +size: U32, +range: String) -> IO(Unit):
-  match ok:
-    case True{}:
-      Img.stream(U32.is_eq(size, 0), s, path, U32.to_nat(size), range)
-    case False{}:
-      Conn.finish(s, W.Http.text("404 Not Found", "not an image, or too large"))
-
-def Img.stat.k(st: U32 & U32 & U32, s: Socket, +path: String, +range: String) -> IO(Unit):
-  (kind, rest) = st
-  (+size, _) = rest
-  Img.read(Bool.and(U32.is_eq(kind, 0), U32.is_le(size, IM.Img.cap())), s, path, size, range)
-
-def Img.stat(r: Result<&1, &1, U32 & String, U32 & U32 & U32>, s: Socket, +path: String, +range: String) -> IO(Unit):
-  match r:
-    case Done{st}:
-      Img.stat.k(st, s, path, range)
-    case Fail{_}:
-      Conn.finish(s, W.Http.text("404 Not Found", "not found"))
-
-def Img.found(+path: String, s: Socket, +range: String) -> IO(Unit):
-  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(path), r => Img.stat(r, s, path, range))
-
-def Img.serve.k(image: Bool, s: Socket, +path: String, +range: String) -> IO(Unit):
+def Img.serve.k(image: Bool, s: Socket, +path: String, range: String) -> IO(Unit):
   match image:
     case True{}:
-      IO.bind(String, Unit, Env.get("HOME", ""), home => Img.found(Bool.pick(String, String.starts_with(path, "~/"), home ++ String.drop(path, 1n), path), s, range))
+      IO.bind(String, Unit, Env.get("HOME", ""), home => Img.send(Bool.pick(String, String.starts_with(path, "~/"), home ++ String.drop(path, 1n), path), s, range))
     case False{}:
       Conn.finish(s, W.Http.text("404 Not Found", "not an image"))
 
-def Img.serve(allowed: Bool, s: Socket, +path: String, +range: String) -> IO(Unit):
+def Img.serve(allowed: Bool, s: Socket, +path: String, range: String) -> IO(Unit):
   match allowed:
     case True{}:
       Img.serve.k(IM.Img.viewable(path), s, path, range)
