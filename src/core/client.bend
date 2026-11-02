@@ -4,6 +4,7 @@ import ./browser-frame.bend as BFRAME
 import ./view-page.bend as VP
 import ./accounts.bend as ACCT
 import ./allowance.bend as ALQ
+import ./account-fallback.bend as AFB
 import ./subthreads.bend as ST
 import ./fallback.bend as FB
 import ./title.bend as TTL
@@ -13,6 +14,7 @@ import ./ref.bend as R
 import ./refview.bend as RE
 import ./i18n.bend as I
 import ./msgs.bend as MSG
+import ./winnote.bend as NT
 import ./kihealth.bend as KH
 import ./kserve.bend as KSV
 import ./kexport.bend as KEX
@@ -709,8 +711,13 @@ def Ui.delta(u: Ui, +thread: String, text: String) -> Ui:
       Ui{st, sel, dr, Map.set(&2, String, live, thread, Str.get(live, thread) ++ text), op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
 
 # a failed request shows its error, or the text of a failed git step
+# a failed answer's words: an upload notice id (Media.fail.cap) is kept as
+# the notice, shown in the client's language; any other text as it came
+def Ui.reply.err.text(+r: J.Json) -> String:
+  NT.Notice.upload(J.Json.get_str(r, "uiError", ""), J.Json.get_str(r, "uiDetail", ""), String.take(J.Json.get_str(r, "text", "failed"), 200n))
+
 def Ui.reply.err.std(+o: J.Json) -> String:
-  Bool.pick(String, J.Json.get_bool(o, "ok", True{}), "", J.Json.get_str(o, "error", J.Json.get_str(J.Json.get_obj(o, "result"), "error", String.take(J.Json.get_str(J.Json.get_obj(o, "result"), "text", "failed"), 200n))))
+  Bool.pick(String, J.Json.get_bool(o, "ok", True{}), "", J.Json.get_str(o, "error", J.Json.get_str(J.Json.get_obj(o, "result"), "error", Ui.reply.err.text(J.Json.get_obj(o, "result")))))
 
 # an answer: its request leaves the outbox
 def Ui.reply.err(+o: J.Json) -> String:
@@ -7332,6 +7339,9 @@ def Mpage.note.loc(+l: I.Loc, +u: Ui) -> String:
 def Mpage.note(+u: Ui) -> String:
   Mpage.note.loc(Lang.loc(u), u)
 
+def Ui.error.shown(l: I.Loc, e: String) -> String:
+  NT.Notice.shown(l, e)
+
 def Ui.error_set(u: Ui, e: String) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, _, note, nf, ob, tr}:
@@ -7355,7 +7365,7 @@ def Ui.att.v(+u: Ui) -> String:
 def Ui.attach.k(big: Bool, first: Bool, +u: Ui, +o: J.Json) -> Act:
   match big first:
     case True{} True{}:
-      Act{Ui.error_set(u, AT.Att.over(Ui.att.v(u))), Nil{}}
+      Act{Ui.error_set(u, NT.Notice.make("upload.cap", Nat.show(AT.Att.mb(Ui.att.v(u))))), Nil{}}
     case True{} False{}:
       Act{u, Nil{}}
     case False{} _:
@@ -9385,10 +9395,14 @@ def Voice.fixed(+u: Ui) -> Act:
 # hub (server.bend's Upload); the answer comes back here as "attach-end":
 # the path joins the thread's attachments, or the failure shows
 
+def Upload.error(+o: J.Json) -> String:
+  NT.Notice.upload(J.Json.get_str(o, "uiError", ""), J.Json.get_str(o, "uiDetail", ""),
+    J.Json.get_str(o, "text", NT.Notice.make("upload.failed", "")))
+
 def Upload.fail(failed: Bool, +o: J.Json, u: Ui) -> Ui:
   match failed:
     case True{}:
-      Ui.error_set(u, J.Json.get_str(o, "text", "the upload failed"))
+      Ui.error_set(u, Upload.error(o))
     case False{}:
       u
 
@@ -9398,15 +9412,24 @@ def Upload.end.k(+o: J.Json, +u: Ui) -> Act:
 def Upload.start.k(big: Bool, +u: Ui, +name: String) -> Act:
   match big:
     case True{}:
-      Act{Ui.error_set(u, AT.Att.over(Ui.att.v(u))), Nil{}}
+      Act{Ui.error_set(u, NT.Notice.make("upload.cap", Nat.show(AT.Att.mb(Ui.att.v(u))))), Nil{}}
     case False{}:
       Act{Ui.up_set(u, Ui.sel(u), name), Nil{}}
 
 def Upload.start(+u: Ui, +o: J.Json) -> Act:
   Upload.start.k(Nat.is_gt(J.Json.get_nat(o, "size", 0n), AT.Att.max(Ui.att.v(u))), u, J.Json.get_str(o, "name", "file"))
 
+# A JSON primitive is not an upload reply. The parser may recover one even
+# from malformed input, so require the expected object before inspecting flags.
+def Upload.end.value(o: J.Json, +u: Ui) -> Act:
+  match o:
+    case J.Obj{fs}:
+      Upload.end.k(J.Obj{fs}, u)
+    case _:
+      Upload.end.k(J.Json.obj([J.KV{"uiError", J.Str{"upload.failed"}}, J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"upload", J.Flag{True{}}}]), u)
+
 def Upload.end(+u: Ui, +v: String) -> Act:
-  Upload.end.k(Maybe.default(&2, J.Json, J.Json.parse(v), J.Json.obj([J.KV{"text", J.Str{"the upload failed"}}, J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"upload", J.Flag{True{}}}])), u)
+  Upload.end.value(Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{}), u)
 
 # Design history
 # --------------
@@ -11046,6 +11069,10 @@ def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
     case "acct-add": Acv.add.k(String.is_empty(String.trim(Ui.scratch(u, "@f.accountlabel"))), u)
     case "acct-login": Acv.rpc(u, "login", value)
     case "acct-status": Acv.rpc(u, "status", value)
+    case "acct-clear-limit":
+      +b = ACCT.Accounts.parse(value)
+      Ui.rpc(u, "accounts", [J.KV{"op", J.Str{"clear-limit"}}, J.KV{"provider", J.Str{J.Json.get_str(b, "provider", "")}},
+        J.KV{"profile", J.Str{J.Json.get_str(b, "id", "")}}, J.KV{"epoch", J.Json.nat(J.Json.get_nat(b, "epoch", 0n))}])
     case "acct-disconnect": Acv.rpc(u, "disconnect", value)
     case "acct-delete": Acv.delete(String.eq(Ui.scratch(u, "@acct.delete"), value), u, value)
     case "acct-keep": Act{Ui.scratch_set(u, "@acct.delete", ""), Nil{}}
@@ -11073,15 +11100,29 @@ def Acv.note(+p: J.Json) -> String:
     " · allowance: " ++ J.Json.get_str(J.Json.get_obj(p, "allowance"), "state", "unknown") ++ Acv.windows(J.Json.elems(J.Json.get_obj(J.Json.get_obj(p, "allowance"), "windows"))) ++
     " · checked " ++ Nat.show(J.Json.get_nat(p, "checkedAt", 0n)) ++ "; provider pools may be shared across profiles. " ++ J.Json.get_str(p, "message", "")
 
-def Acv.profile.rows(xs: List<&2, J.Json>, +armed: String, +thread: String) -> List<&2, AgRow>:
+def Acv.limit.arg(p: String, id: String, epoch: Nat) -> String:
+  J.Json.show(J.Json.obj([J.KV{"provider", J.Str{p}}, J.KV{"id", J.Str{id}}, J.KV{"epoch", J.Json.nat(epoch)}]))
+
+def Acv.limit.buttons(limited: Bool, arg: String) -> List<&2, AgBtn>:
+  Bool.pick(List<&2, AgBtn>, limited, [AgBtn{"Clear availability hold", "acct-clear-limit", arg, False{}}], Nil{})
+
+def Acv.limit.legacy(ps: List<&2, String>, +s: M.State, +now: Nat) -> List<&2, AgRow>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t:
+      List.append(&2, AgRow, Bool.pick(List<&2, AgRow>, AFB.Hold.profile.active(s, now, p, "", 0n),
+        [AgRow{"Default " ++ p ++ " account · limited", "A confirmed usage limit holds this account until its reported reset. Clearing it lets waiting requests retry.", Nil{}, Acv.limit.buttons(True{}, Acv.limit.arg(p, "", 0n))}], Nil{}), Acv.limit.legacy(t, s, now))
+
+def Acv.profile.rows(xs: List<&2, J.Json>, +armed: String, +thread: String, +s: M.State, +now: Nat) -> List<&2, AgRow>:
   match xs:
     case Nil{}: Nil{}
     case +p <> t:
       +id = J.Json.get_str(p, "id", "")
-      AgRow{J.Json.get_str(p, "label", "Account"), Acv.note(p) ++ Bool.pick(String, String.eq(id, armed), " Delete this saved account and its local sign-in? Existing threads will need another account selected.", ""), Nil{},
+      +limited = AFB.Hold.profile.active(s, now, J.Json.get_str(p, "provider", ""), id, J.Json.get_nat(p, "epoch", 0n))
+      AgRow{J.Json.get_str(p, "label", "Account") ++ Bool.pick(String, limited, " · limited", ""), Acv.note(p) ++ Bool.pick(String, String.eq(id, armed), " Delete this saved account and its local sign-in? Existing threads will need another account selected.", ""), Nil{},
         List.concat(&2, AgBtn, [[AgBtn{"Connect / Login", "acct-login", id, False{}}, AgBtn{"Status / Refresh", "acct-status", id, False{}}, AgBtn{"Disconnect", "acct-disconnect", id, False{}}],
           Bool.pick(List<&2, AgBtn>, String.is_empty(thread), Nil{}, [AgBtn{"Use in this thread", "acct-select", id, True{}}]),
-          [AgBtn{"Default for new threads", "acct-default", id, False{}}], Acv.delete.buttons(id, armed)])} <> Acv.profile.rows(t, armed, thread)
+          [AgBtn{"Default for new threads", "acct-default", id, False{}}], Acv.limit.buttons(limited, Acv.limit.arg(J.Json.get_str(p, "provider", ""), id, J.Json.get_nat(p, "epoch", 0n))), Acv.delete.buttons(id, armed)])} <> Acv.profile.rows(t, armed, thread, s, now)
 
 def Acv.attempt.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
   match xs:
@@ -11099,7 +11140,8 @@ def Acv.rows(+u: Ui) -> List<&2, AgRow>:
     [AgField{"accountlabel", "Account label (e.g. Personal)", False{}, Ui.scratch(u, "@f.accountlabel"), "acct-add"}],
     [AgBtn{"Codex", "acct-provider", "codex", String.eq(Acv.selected.provider(u), "codex")}, AgBtn{"Claude", "acct-provider", "claude", String.eq(Acv.selected.provider(u), "claude")}, AgBtn{"Add account", "acct-add", "", True{}}]},
     AgRow{"Existing Default accounts", "Preserve current CLI authentication and sessions; select explicitly beside the model.", Nil{}, [AgBtn{"Default Claude for new threads", "acct-legacy-default", "claude", False{}}, AgBtn{"Default Codex for new threads", "acct-legacy-default", "codex", False{}}]}],
-    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u)), Ui.scratch(u, "@acct.delete"), Ui.sel(u)), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
+    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u)), Ui.scratch(u, "@acct.delete"), Ui.sel(u), Ui.state(u), Side.now(u)),
+    Acv.limit.legacy(["claude", "codex"], Ui.state(u), Side.now(u)), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
 
 def Agv.info(+u: Ui) -> J.Json:
   J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "models")), J.Null{}), "agy")
