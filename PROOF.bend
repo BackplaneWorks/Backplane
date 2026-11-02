@@ -15273,6 +15273,12 @@ def Laws.settings_row_information(): {==}
 
 def Laws.voice_model_needs_runtime(): {==}
 
+def Laws.project_drive_root_absolute():
+  {==}
+
+def Laws.project_unc_root():
+  {==}
+
 def Laws.plot_stamp_opt_out():
   {==}
 
