@@ -15680,11 +15680,14 @@ def Conn.bot.page_id(+r: String) -> String:
   Bool.pick(String, Conn.bot.page_ok(String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n))), String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n)), "")
 
 # a far view.get's file (farview.bend's Stream.mark): the head, then the
-# file from disk a piece at a time
+# file from disk a piece at a time. Fvs.get.read already bounds size by
+# Fv.cap (4000 MB), so it fits the send_path effect's U32 byte count.
 def Conn.bot.stream(s: Socket, +size: Nat, +path: String) -> IO(Unit):
   do IO<Unit>:
     s2 : Socket <- Conn.send(s, U.Utf8.encode(BRANGE.Rng.head(BRANGE.Rng.whole(size), size, "application/octet-stream", "no-store")))
-    Img.send.k(True{}, s2, path, 0n, size)
+    sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_path(s2, path, 0, U32.from_nat(size))
+    s3 : Socket <- Conn.sent(sent)
+    Socket.close(s3)
 
 def Conn.bot.mark(mark: Bool, s: Socket, +bs: List<&2, U32>) -> IO(Unit):
   match mark:
