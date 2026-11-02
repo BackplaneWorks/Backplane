@@ -1,10 +1,14 @@
 import Base
+import ../core/folder.bend as FP
+import ./spawn.bend as SP
 import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
 import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
 import ../core/watchdog.bend as WD
+import ../core/tickplan.bend as TICK
+import ../core/stream-step.bend as SSTEP
 import ../core/restartretry.bend as RR
 import ./livenessio.bend as LFX
 import ../core/mailprivate.bend as PM
@@ -1378,7 +1382,7 @@ def Spawn.agent(+cmd: String, args: List<&2, String>, +cwd: String, +err: U32) -
   do IO<Result<&1, &1, U32 & String, U32 & Socket>>:
     xs : List<&2, String> <- VX.Vx.args(args)
     env : List<&2, String> <- K.KiCad.agent_env()
-    Spawn.agent.with_env(env, cmd, xs, cwd, err)
+    IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Result<&1, &1, U32 & String, U32 & Socket>, Spawn.agent.with_env(env, cmd, xs, cwd, err), res => SP.Spawn.checked(res, cwd))
 
 # each line to an agent's stdin (prompts, turn text, answers) masked
 def Agent.write.m(+line: String, s: Socket, k: Socket -> IO(Unit)) -> IO(Unit):
@@ -2418,11 +2422,11 @@ def Codex.fed(r: U.Lines & List<&2, String>, s: Socket, +ended: Bool, +thread: S
 
 # $d from $1: "" and ~ are home, ~/x and relative paths are under home
 def FsJob.path.sh() -> String:
-  "d=\"$1\"; case \"$d\" in ''|'~') d=\"$HOME\";; '~/'*) d=\"$HOME/${d#??}\";; /*) ;; *) d=\"$HOME/$d\";; esac; "
+  FP.Folder.path.sh()
 
-# a folder that exists and can be opened, printed resolved (symlinks too)
+# Resolve symlinks in the shell, then return a native path to the hub.
 def FsJob.dir.sh() -> String:
-  "[ -e \"$d\" ] || { echo \"no such folder: $d\"; exit 2; }; [ -d \"$d\" ] || { echo \"not a folder: $d\"; exit 2; }; [ -r \"$d\" ] && [ -x \"$d\" ] && d=$(cd -P -- \"$d\" && pwd -P) || { echo \"cannot open: $d\"; exit 2; }; "
+  FP.Folder.dir.sh() ++ FP.Folder.native.sh()
 
 def FsJob.list.sh() -> String:
   "exec 2>&1; set -e; " ++ FsJob.path.sh() ++ FsJob.dir.sh() ++ "echo \"$d\"; find \"$d\" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's|^.*/||' | LC_ALL=C sort | head -n 5000"
@@ -2518,13 +2522,21 @@ def FsJob.made(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Uni
 
 # a resolved folder becomes a project: the hub gets project.create as if
 # the asking client sent it, so the answer (or "already a project") is its
+def FsJob.register(st: Result<&1, &1, U32 & String, U32 & U32 & U32>, +inbox: Chan(Msg), +client: U32, +id: String, +path: String) -> IO(Unit):
+  match st:
+    case Done{(1, _)}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Rpc{client, J.Json.show(J.Json.obj([J.KV{"id", J.Num{id}}, J.KV{"m", J.Str{"project.create"}},
+          J.KV{"p", J.Json.obj([J.KV{"path", J.Str{path}}])}]))})
+        return Unit{}
+    case _:
+      FsJob.answer(inbox, client, id, J.Json.obj([J.KV{"error", J.Str{"invalid project folder: " ++ path}}]))
+
 def FsJob.create(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
   match r:
     case P.Ran{0, out}:
-      do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Rpc{client, J.Json.show(J.Json.obj([J.KV{"id", J.Num{id}}, J.KV{"m", J.Str{"project.create"}},
-          J.KV{"p", J.Json.obj([J.KV{"path", J.Str{FsJob.last(String.lines(String.trim(out)))}}])}]))})
-        return Unit{}
+      +path = FsJob.last(String.lines(String.trim(out)))
+      IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(path), st => FsJob.register(st, inbox, client, id, path))
     case P.Ran{_, out}:
       FsJob.answer(inbox, client, id, J.Json.obj([J.KV{"error", J.Str{String.trim(out)}}]))
 
@@ -3546,7 +3558,7 @@ def Codex.refuse(+thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
 def AccountSpawn.named(legacy: Bool, +home: String, +profile: String, +epoch: String, +cmd: String, args: List<&2, String>, +cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   match legacy:
     case True{}: Spawn.agent("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> cmd <> args, cwd, err)
-    case False{}: ACFX.AccountsFx.spawn(home, profile, epoch, cmd, args, cwd, err)
+    case False{}: IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Result<&1, &1, U32 & String, U32 & Socket>, ACFX.AccountsFx.spawn(home, profile, epoch, cmd, args, cwd, err), res => SP.Spawn.checked(res, cwd))
 
 def AccountSpawn.run(+home: String, +st: M.State, +thread: String, +cmd: String, args: List<&2, String>, cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   AccountSpawn.named(String.is_empty(ACCT.Accounts.id(st, thread, cmd)), home, ACCT.Accounts.id(st, thread, cmd), Nat.show(ACCT.Accounts.epoch(st, thread, cmd)), cmd, args, cwd, err)
@@ -9908,26 +9920,12 @@ def Claude.started.ok(started: U32 & Socket, +thread: String, +gen: String, +inp
   (+pid, s) = started
   IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Unit, H.Sock.dup(s), r => Claude.duped(r, pid, thread, gen, input, inbox))
 
-# why a process could not start, naming its folder when that is gone (a
-# thread whose worktree was removed: posix_spawn's chdir answers only
-# "No such file or directory", which reads as a missing program)
-def Spawn.why(st: Result<&1, &1, U32 & String, U32 & U32 & U32>, +cwd: String, +msg: String) -> String:
-  match st:
-    case Done{_}:
-      msg
-    case Fail{_}:
-      Bool.pick(String, String.is_empty(cwd), msg, "its folder " ++ cwd ++ " is gone (" ++ msg ++ ")")
-
-def Claude.started.fail(e: U32 & String, +thread: String, +gen: String, +cwd: String, +inbox: Chan(Msg)) -> IO(Unit):
-  (_, +msg) = e
-  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(cwd), st => Claude.fail(thread, gen, Spawn.why(st, cwd, msg), inbox))
-
 def Claude.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: String, +gen: String, +cwd: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   match r:
     case Done{started}:
       Claude.started.ok(started, thread, gen, input, inbox)
     case Fail{e}:
-      Claude.started.fail(e, thread, gen, cwd, inbox)
+      Claude.fail(thread, gen, SP.Spawn.message(e), inbox)
 
 def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, +effort: String, +gen: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
@@ -11342,8 +11340,20 @@ def Hub.step.fallback.captured(pair: String & List<Hub>, states: List<&2, M.Stat
   (models, held) = pair
   Hub.step.fallback.fold(states, Maybe.default(&2, J.Json, J.Json.parse(models), J.Null{}), now, step, held)
 
-def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
-  Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
+# After all lifecycle/lock/watchdog hooks, a step containing only live text
+# cannot switch a provider, edit settings or close a proposal. Avoid parsing
+# the entire model catalog for each token. stream_step_proof proves the
+# skipped validation and run transforms are identity for arbitrary Live lists.
+def Hub.step.fallback.choose(stream: Bool, h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  match stream:
+    case True{}:
+      do IO<Hub & Bool>:
+        PS.Perf.add("hub.step.stream", 1)
+        Hub.step.fallback.done([h], states, step)
+    case False{}: Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
+
+def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, +step: B.Step) -> IO(Hub & Bool):
+  Hub.step.fallback.choose(SSTEP.StreamStep.eligible(step), h, states, now, step)
 
 def Hub.step.k(p: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   (+st, h) = p
@@ -13018,9 +13028,13 @@ def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: C
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +subs : M.State <- SUBHIST.SubHistory.read(Cfg.thin.store(cfg), Hub.thin.view_state(st, cfg, thread), thread)
+        t1 : U32 <- PS.Perf.span("thin.read.subagents", t0)
         +reviews : M.State <- REVHIST.ReviewHistory.read(Cfg.thin.store(cfg), subs, thread)
+        t2 : U32 <- PS.Perf.span("thin.read.reviews", t1)
         +shown : M.State <- DHIST.History.restore(Cfg.thin.store(cfg), thread, reviews)
+        t3 : U32 <- PS.Perf.span("thin.read.design", t2)
         +v : SEC.Vault <- VX.Vx.vault()
         Hub.thin.render.page.shown(v, pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms, shown)
 
@@ -13028,7 +13042,9 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +pg : TSTO.Page <- Hub.thin.fetch.tools(Bool.and(TBODY.Body.enabled(String.eq(Client.thin.mode(c), "view-web"), p), Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(TV.Target.thread(st, J.Json.get_obj(p, "target")))))), String.is_empty(Cfg.thin.store(cfg)), cfg, st, TCHAT.Chat.enabled(st, TV.Target.thread(st, J.Json.get_obj(p, "target"))), TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor, p)
+        t1 : U32 <- PS.Perf.span("thin.read.page", t0)
         Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
 
 # a view.update whose render memo still holds (thin-actor.bend's
@@ -13284,7 +13300,12 @@ def Hub.thin.have(+c: Maybe<&2, Client>, h: Hub, +client: U32, +o: J.Json, +now:
 
 def Hub.thin.rpc.now(h: Hub, +client: U32, +o: J.Json, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, +cl, as, inbox, cfg, note}: Hub.thin.have(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
+        h2 : Hub <- Hub.thin.have(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+        t1 : U32 <- PS.Perf.span("thin.rpc." ++ Nat.show(C.Codec.pos(["view.open", "view.update", "view.page", "view.action", "view.send", "view.search", "view.body"], J.Json.get_str(o, "m", ""))), t0)
+        return h2
 
 # Until the index is built (THIN.Lazy, Thin.warm) a thin request waits in
 # the cache rather than build it on the hub's time; Hub.thin.warmed answers
@@ -13556,7 +13577,7 @@ def Hub.rpc(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
 # the threads' Boat chips that Boat's status changes (logged only then)
 def Hub.chips(p: M.State & Hub, +status: String, +now: Nat) -> IO(Hub):
   (st, h) = p
-  Hub.step(h, B.Step{UZ.Chip.changes(st, status, now), Nil{}})
+  Hub.step(h, B.Step{TICK.Tick.chips(st, status, now), Nil{}})
 
 # Publication ordering is independent of worker/cache completion order.
 # Pending cache observations never become provider readings. At equal attempt
@@ -13674,27 +13695,34 @@ def Hub.gone(h: Hub, +thread: String, +code: U32, +pid: U32, +why: String, +now:
 # a tool call. Apply observations before the watchdog judges the gap.
 def Hub.watchdog.decide(p: M.State & Hub, +now: Nat) -> IO(Hub):
   (+st, h) = p
-  +normal = B.Hub.tick(st, now)
+  +normal = TICK.Tick.main(st, now)
   Hub.step(h, B.Step.cat(normal, WD.Watchdog.tick(M.State.replay(B.Queue.changes(normal), st), now)))
 
 def Hub.watchdog(h: Hub, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         observed : String <- LFX.Progress.sample(WD.Watchdog.plan(st), Cfg.home(cfg))
+        t1 : U32 <- PS.Perf.span("hub.tick.sample", t0)
         h2 : Hub <- Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, WD.Watchdog.observed(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(observed), J.Null{})), st, now, B.Step.none()))
-        Hub.watchdog.decide(Hub.state(h2), now)
+        t2 : U32 <- PS.Perf.span("hub.tick.observed", t1)
+        h3 : Hub <- Hub.watchdog.decide(Hub.state(h2), now)
+        t3 : U32 <- PS.Perf.span("hub.tick.decide", t2)
+        return h3
 
 # each minute the hub's size goes into the gauges
 def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{+st, f, +ls, +cl0, +as, +inbox, cfg, note}:
+    case Hub{+st, f, +ls, +cl0, +as, +inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +cl : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl0), Nat.sub(now, 60n)), cl0, now)
         PS.Perf.set("hub.clients", U32.from_nat(List.length(&2, Client, cl)))
         PS.Perf.set("hub.agents", U32.from_nat(List.length(&2, Agent, as)))
-        PS.Perf.set("hub.changes", U32.from_nat(ST.Store.size(ls)))
+        PS.Perf.set("hub.changes", U32.from_nat(LogCount.n(cfg)))
         PS.Perf.set("hub.busy", U32.from_nat(M.Work.threads(st)))
+        t1 : U32 <- PS.Perf.span("hub.tick.gauges", t0)
         # children the last exec handed over that ended meanwhile are waited
         # for (effects/adopt.js), so none stays a zombie
         guards : U32 <- LG.Guard.reap()

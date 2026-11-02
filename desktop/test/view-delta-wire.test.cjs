@@ -115,3 +115,31 @@ test('view delta: a reply of no ops is marked unchanged (the page need not draw 
  let u=f.update(),t=f.v.calls.get(u.id).input.viewDelta.token;let r=f.v.reply('hub',f.delta(u.id,t,[]));assert.equal(r.unchanged,true);assert(r.remoteReady);
  u=f.update();t=f.v.calls.get(u.id).input.viewDelta.token;r=f.v.reply('hub',f.delta(u.id,t,[['s',['shown','kids',1,'kids',1,'kids',0,'text'],'x']]));assert.equal(r.unchanged,false);
  const w=f.v.request('hub','view.update',{session:f.session});r=f.v.reply('hub',f.whole(w.id,page(['b'])));assert.equal(r.unchanged,false,'a whole reply is not');});
+
+test('view delta: region paths and no-op reuse refer to the displayed base, never another retained reply',async()=>{
+ const f=await fixture();f.v.reply('hub',f.whole(f.open.id,page(['a'])));
+ const base=f.link.bases.newest,a=f.v.request('hub','view.action',{session:f.session,action:'noop',value:''});
+ const old=f.delta(a.id,base,[]),u=f.update();
+ const path=['shown','kids',1,'kids',0,'kids',0,'text'];
+ let r=f.v.reply('hub',f.delta(u.id,base,[['s',path,'visible timeline']]));
+ assert.deepEqual(r.changed,[path]);
+ assert.equal(f.v.reply('hub',old).current,false,'late action retained for transport only');
+ const staleBase=f.link.bases.newest;
+ assert.notEqual(staleBase,f.link.displayedBase);
+ const next=f.update();r=f.v.reply('hub',f.delta(next.id,staleBase,[]));
+ assert.equal(r.current,true);assert.equal(r.unchanged,false,'an old empty delta can replace the current picture');
+ assert.equal(r.changed,null,'cannot paint regions using paths from a different picture');
+ const fresh=f.update();r=f.v.reply('hub',f.delta(fresh.id,f.link.bases.newest,[['s',path,'current timeline']]));
+ assert.deepEqual(r.changed,[path],'the displayed base can supply region paths again');
+});
+
+test('view delta: a nonempty delta from a retained older base requires a full paint',async()=>{
+ const f=await fixture();f.v.reply('hub',f.whole(f.open.id,page(['a'])));
+ const base=f.link.bases.newest,a=f.v.request('hub','view.action',{session:f.session,action:'noop',value:''});
+ const old=f.delta(a.id,base,[]),u=f.update();
+ f.v.reply('hub',f.delta(u.id,base,[['s',['shown','kids',1,'kids',0,'kids',0,'text'],'new timeline']]));
+ f.v.reply('hub',old);
+ const next=f.update(),r=f.v.reply('hub',f.delta(next.id,f.link.bases.newest,[['s',['shown','kids',0,'kids',0,'kids',0,'text'],'new sidebar']]));
+ assert(r.remoteReady);assert.equal(r.changed,null);
+ assert.equal(r.shown.kids[1].kids[0].kids[0].text,'row a','older base also changed timeline relative to display');
+});

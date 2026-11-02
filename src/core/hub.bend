@@ -1,4 +1,5 @@
 import Base
+import ./folder.bend as FP
 import ./telemetry.bend as TLM
 import ./mailprivate.bend as PM
 import ./accounts.bend as ACCT
@@ -714,7 +715,7 @@ def Hub.project_add.thread(+s: M.State, +now: Nat, +client: U32, +id: String, +p
   Step.before([made], Nil{}, Hub.thread_create(s, now, client, id, J.Json.obj([J.KV{"project", J.Str{pid}}, J.KV{"title", J.Str{"New thread"}}])))
 
 def Hub.root.norm.fin(+r: String) -> String:
-  Bool.pick(String, String.is_empty(r), "/", r)
+  FP.Folder.root.fin(r)
 
 def Hub.root.slashes.k(slash: Bool, rest: Nat) -> Nat:
   match slash:

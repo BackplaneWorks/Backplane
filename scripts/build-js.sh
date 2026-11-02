@@ -26,8 +26,6 @@
 # and the emit's peak RSS.
 set -eu
 cd "$(dirname "$0")/.."
-. scripts/heavy-guard.sh
-[ "${1:-}" = --key ] || heavy_guard build "$@"
 # This review must run even for --key and before a cached emit is accepted.
 # A new sidebar draft reader must not inherit the reduced private image key.
 if [ "${1:-}" = --key ]; then
@@ -35,6 +33,10 @@ if [ "${1:-}" = --key ]; then
 else
   python3 scripts/sidebar-draft-guard.py --entry "${1:?build-js.sh SRC OUT}"
 fi
+# Reject unreviewed source before reserving memory or offloading a build.
+# The same review also runs in the admitted child before any cached emit.
+. scripts/heavy-guard.sh
+[ "${1:-}" = --key ] || heavy_guard build "$@"
 # the key the emit is kept under: only what bend reads for $src (its
 # imports, effects and headers), so a change elsewhere (the web client, a
 # script) reuses the last emit
