@@ -15267,6 +15267,12 @@ def Laws.settings_row_information(): {==}
 
 def Laws.voice_model_needs_runtime(): {==}
 
+def Laws.plot_stamp_opt_out():
+  {==}
+
+def Laws.plot_stamp_other_client():
+  {==}
+
 def Laws.allowance_remaining_reported(): {==}
 
 def Laws.allowance_refresh_held(): {==}
