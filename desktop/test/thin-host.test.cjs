@@ -1239,3 +1239,30 @@ test('LIMIT on initial or live view keeps greeting, drafts and other-thread navi
   assert(f.host.request('select','B'));const next=f.sent.at(-1);assert.equal(next.m,'view.open');assert.equal(next.p.generation,'7');assert.equal(next.p.target.id,'B');f.host.receive(f.reply(next));assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'B');assert.equal(f.getSession().drafts.A,'original 日本語');
  }
 });
+
+test('bot navigation opens a fresh view after LIMIT without waiting for the failed picture',async()=>{
+ for(const initial of [true,false]){
+  const f=await fixture();if(initial)f.host.greeting(f.greeting);else{f.open();f.host.request('flag','palette');}
+  f.host.request('draft','STM32 unsent');const failed=f.sent.at(-1);
+  f.host.receive({t:'reply',id:failed.id,ok:false,error:{code:'LIMIT'}});
+  f.host.request('bot','bub');const next=f.sent.at(-1);
+  assert.notEqual(next.id,failed.id);assert.equal(next.m,'view.open');assert.deepEqual(next.p.target,{kind:'bot',id:'bub'});
+  assert(!f.sent.some(r=>r.m==='view.action'&&r.p.action==='bot'),'selection does not require a successful previous picture');
+  const session={...next.p.session,sel:'bub-conversation',drafts:{'bub-conversation':'saved Bub draft'}};
+  f.host.receive(f.reply(next,{session}));assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'bub-conversation');
+  assert.equal(f.getSession().drafts.A,'STM32 unsent');assert.equal(f.getSession().drafts['bub-conversation'],'saved Bub draft');
+ }
+});
+test('bot selection overtakes an opening view; late LIMIT cannot strand the new selection',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);const old=f.sent.at(-1);
+ f.host.request('bot','bub');const next=f.sent.at(-1);assert.notEqual(next.id,old.id);assert.equal(next.m,'view.open');assert.equal(next.p.target.kind,'bot');
+ f.host.receive(f.reply(next,{session:{...next.p.session,sel:'bub-conversation'}}));
+ f.host.receive({t:'reply',id:old.id,ok:false,error:{code:'LIMIT'}});
+ assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'bub-conversation');assert.equal(f.host.target.id,'bub');
+});
+test('bot recovery requires a live greeted link and a valid target',async()=>{
+ for(const value of ['',null,'x'.repeat(1025)]){
+  const f=await fixture();f.host.greeting(f.greeting);const count=f.sent.length;f.host.request('bot',value);assert.equal(f.sent.length,count);
+ }
+ const f=await fixture();f.open();f.host.disconnect();const count=f.sent.length;f.host.request('bot','bub');assert.equal(f.sent.length,count);assert.equal(f.host.ready,false);
+});
