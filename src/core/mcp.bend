@@ -25,6 +25,7 @@ import ./sched.bend as SC
 import ./tz.bend as TZ
 import ./mail.bend as ML
 import ./uber.bend as UBM
+import ./settingsproposal.bend as SP
 
 # The Backplane MCP server, as a decider. Each agent session gets its own
 # endpoint (/mcp/<thread>), so every call knows which thread is asking. A
@@ -782,7 +783,7 @@ def Mcp.send.checked(ok: Bool, +s: M.State, +now: Nat, +thread: String, +target:
 
 def Mcp.names() -> List<&2, String>:
   ["orchestrator_capabilities", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "viewer_show",
-   "thread_launch", "thread_update", "thread_wait", "thread_interrupt", "thread_wait_now", "terminal_open", "terminal_send", "terminal_close", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "review_comments", "review_comment", "wake_on", "wake_list", "wake_cancel", "deploy_restart", "deploy_status", "deploy_cancel", "lock_acquire", "lock_release", "lock_list", "lock_cancel", "deploy_main", "mail", "mail_list", "mail_read", "mail_search", "mail_tag", "mail_snooze", "mail_done", "decide", "escalate", "charter_set", "mail_dispose", "tell_person"]
+   "thread_launch", "thread_update", "thread_wait", "thread_interrupt", "thread_wait_now", "terminal_open", "terminal_send", "terminal_close", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "review_comments", "review_comment", "wake_on", "wake_list", "wake_cancel", "deploy_restart", "deploy_status", "deploy_cancel", "lock_acquire", "lock_release", "lock_list", "lock_cancel", "deploy_main", "mail", "mail_list", "mail_read", "mail_search", "mail_tag", "mail_snooze", "mail_done", "decide", "escalate", "charter_set", "mail_dispose", "tell_person", "settings_inspect", "settings_propose"]
 
 def Mcp.lock.acquire(ok: Bool, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
   match ok:
@@ -949,6 +950,9 @@ def Mcp.mail.tools() -> List<&2, J.Json>:
 
 def Mcp.tools() -> J.Json:
   J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, [
+    Tool.def("settings_inspect", "Inspect supported hub-wide provider fallback settings and installed model capabilities. Never returns credentials.", Nil{}, Nil{}),
+    Tool.def("settings_propose", "Propose a hub-wide fallback change for the person's one-time approval. This never applies the change itself. Do not supply credentials or secrets.",
+      [Tool.prop("on", "string", "on or off."), Tool.prop("chain", "string", "Comma-separated installed provider/model hierarchy; empty only when off.")], ["on", "chain"]),
     Tool.def("orchestrator_capabilities",
       "List the providers and models this Backplane can run, the delegation depth limit, and this thread's own provider, model and depth.",
       Nil{}, Nil{}),
@@ -1240,6 +1244,27 @@ def Mcp.tell_person(+s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
     J.KV{"scope", J.Str{"Explicit publication to this private coordinator's original conversation only; no approval or source work changed"}}]),
     B.Private.tell(allowed, s, now, thread, text, key)}
 
+def Settings.inspect.ok(ok: Bool, +s: M.State, +models: J.Json) -> Res:
+  match ok:
+    case False{}: Res.fail("Fallback settings are invalid or their model catalog is unavailable; inspect them in Settings.")
+    case True{}: Res.ok(J.Json.obj([J.KV{"scope", J.Str{"this hub"}}, J.KV{"on", J.Str{M.Setting.get(s, "fallback.on", "off")}},
+      J.KV{"chain", J.Str{M.Setting.get(s, "fallback.chain", "")}}, J.KV{"models", models}]))
+
+def Settings.inspect(+s: M.State, +models: J.Json) -> Res:
+  Settings.inspect.ok(Bool.and(SP.Proposal.on.valid(M.Setting.get(s, "fallback.on", "off")), SP.Proposal.chain.valid(M.Setting.get(s, "fallback.chain", ""), models)), s, models)
+
+def Settings.propose.ok(ok: Bool, +s: M.State, +now: Nat, +thread: String, +p: SP.Proposal) -> Res:
+  match ok:
+    case False{}: Res.fail("Invalid fallback proposal or model catalog unavailable; no proposal was stored.")
+    case True{}:
+      +ask = B.Hub.id("settings", now, B.Hub.seq(s))
+      Res{True{}, J.Json.obj([J.KV{"id", J.Str{ask}}, J.KV{"status", J.Str{"awaiting person"}}, J.KV{"proposal", SP.Proposal.json(p)}]),
+        B.Step{[M.AskOpened{ask, thread, "approval", "settings_proposal", SP.Proposal.detail(p), J.Json.show(SP.Proposal.json(p)), now}], Nil{}}}
+
+def Settings.propose(+s: M.State, +now: Nat, +thread: String, +models: J.Json, +a: J.Json) -> Res:
+  +p = {SP.Proposal{M.Setting.get(s, "fallback.on", "off"), M.Setting.get(s, "fallback.chain", ""), J.Json.get_str(a, "on", ""), J.Json.get_str(a, "chain", ""), Nat.add(now, 600n)} : SP.Proposal}
+  Settings.propose.ok(Bool.and(Bool.not(PM.Private.live(s, thread)), Bool.and(SP.Proposal.changed(p), SP.Proposal.valid(p, models))), s, now, thread, p)
+
 def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +a: J.Json) -> Res:
   match i:
     case 0n:
@@ -1323,6 +1348,8 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
     case 43n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
     case 44n: Mcp.dispose(s, now, thread, a)
     case 45n: Mcp.tell_person(s, now, thread, a)
+    case 46n: Settings.inspect(s, models)
+    case 47n: Settings.propose(s, now, thread, models, a)
     case _:
       Res.fail("unknown tool")
 

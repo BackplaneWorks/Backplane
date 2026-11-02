@@ -157,7 +157,7 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
-    "src/mobile/screen.bend": "6666dcd2317e2be91c4f7e055fef747d33a61e3df21efa0f275075513b464a61",
+    "src/mobile/screen.bend": "0b0c496336556ffefb83c6e2d142ccf2b892645c26d15c80962a3cca627d9519",
     "src/server/thin-actor.bend": "ea84db3e1a8609e1455f9efb33cdbcc638bcb46570b03293b5589a7be2f687e7",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -181,7 +181,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "db69391e192d77c012db20ca4eff9c865bc39a1fe538a919b1a5705c933a1afc"
+    "src/web/view.bend": "67101494840171ae975d7667009c1e2fbb60879bfe1d055bb78d52d7c5ddcdd1"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -560,5 +560,15 @@
       "src/server/thin-view.bend": "fe0859ebc70442a7a89b41bf6d53b19871642b982acddb1d2d64d2069c567d2c",
       "src/web/view.bend": "76828cdfd3608c94464e1677b1559fadbdb9cf9afcb5c16120c91fedf8f45ba1"
     }
+  },
+  "settingsProposalReview": {
+    "baseCommit": "fcd8dffa81b37ade1604a7f26363c5e89ef6ad5e",
+    "scope": "Only View.ask.std and Mob.ask.std.loc approval-card buttons changed within the reviewed closure. They read the ask tool and id. No new draft reads or changes to sidebar projection, private image key, unknown scratch retention, full picture inputs, scanner or bridge authority. Incoming order and Buy behavior retained.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "qualification": "Strict seven-suite run w-t1793604413-1188211-1204210 passed against fcd8d, including sidebar full output, settings approval paths, fallback, order asks and order cards.",
+    "changedFiles": [
+      "src/mobile/screen.bend",
+      "src/web/view.bend"
+    ]
   }
 }

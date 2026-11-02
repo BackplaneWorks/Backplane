@@ -61,11 +61,17 @@ def rows(+st: M.State) -> {M.Work.rows.map(project(st)) == M.Work.rows.map(st) :
     case M.State{_, _, _, _, _, _, _, _, _, _, _}:
       +bg = M.Setting.keys.pre(st, "bg.")
       +watch = M.Setting.keys.pre(st, "watch.")
+      +orders = M.Setting.keys.pre(st, "order.wait.")
       +empty : Map<&2, Nat> = Map.new(&2, Nat)
       +a = M.Work.rows.ids(bg, 3n, project(st), empty)
       +b = M.Work.rows.ids(bg, 3n, st, empty)
-      Equal.trans(Map<&2, Nat>, M.Work.rows.ids(watch, 6n, project(st), a), M.Work.rows.ids(watch, 6n, project(st), b), M.Work.rows.ids(watch, 6n, st, b),
-        Equal.cong(Map<&2, Nat>, Map<&2, Nat>, m => M.Work.rows.ids(watch, 6n, project(st), m), a, b, row_ids(bg, 3n, st, empty)), row_ids(watch, 6n, st, b))
+      +left = M.Work.rows.ids(watch, 6n, project(st), a)
+      +right = M.Work.rows.ids(watch, 6n, st, b)
+      Equal.trans(Map<&2, Nat>, M.Work.rows.ids(orders, 11n, project(st), left), M.Work.rows.ids(orders, 11n, project(st), right), M.Work.rows.ids(orders, 11n, st, right),
+        Equal.cong(Map<&2, Nat>, Map<&2, Nat>, m => M.Work.rows.ids(orders, 11n, project(st), m), left, right,
+          Equal.trans(Map<&2, Nat>, left, M.Work.rows.ids(watch, 6n, project(st), b), right,
+            Equal.cong(Map<&2, Nat>, Map<&2, Nat>, m => M.Work.rows.ids(watch, 6n, project(st), m), a, b, row_ids(bg, 3n, st, empty)), row_ids(watch, 6n, st, b))),
+        row_ids(orders, 11n, st, right))
 
 def exact(+st: M.State) -> {U.Side.ix.inputs(U.SidebarInput.of(st)) == U.Side.ix(st) : U.SIx}:
   match st:

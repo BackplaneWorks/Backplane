@@ -1,5 +1,7 @@
 import ./src/core/star-nudge.bend as STARN
 
+import ./src/core/settingsproposal.bend as SETPROPOSAL
+
 import ./src/core/provider-setup.bend as PROVIDERSETUP
 
 import ./src/core/range.bend as BRANGE
@@ -15112,3 +15114,19 @@ law star_nudge_saved_send_waits:
   for +client: U32
   for +text: String
   {DQ.Dq.local(H.SavedSend{client, text}) == False{} : Bool}
+
+# A rejected settings proposal cannot write either fallback setting.
+law settings_proposal_decline_no_write:
+  for +s: M.State
+  for +now: Nat
+  for +client: U32
+  for +id: String
+  for +ask: String
+  for +th: String
+  {SETPROPOSAL.Proposal.touched(H.Queue.changes(H.Settings.answer(False{}, s, now, client, id, ask, "decline", th, ""))) == False{} : Bool}
+
+law settings_proposal_deadline_exclusive:
+  {SETPROPOSAL.Proposal.snapshot(SETPROPOSAL.Proposal{"off", "", "off", "", 100n}, 100n, "off", "") == False{} : Bool}
+
+law settings_proposal_write_invalidates:
+  {SETPROPOSAL.Proposal.invalidate([M.SettingSet{"fallback.on", "off", 10n}], [M.Ask{"a", "t", "approval", "settings_proposal", "", "", True{}, ""}], 10n) == [M.AskClosed{"a", "stale", 10n}] : List<&2, M.Change>}

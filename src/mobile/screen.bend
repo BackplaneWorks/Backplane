@@ -1025,7 +1025,9 @@ def Mob.ask.std.loc(+lc: I.Loc, a: M.Ask, +draft: String) -> J.Json:
         J.KV{"head", J.Json.str(U.Ask.head.loc(lc, k, tool, d))},
         J.KV{"detail", J.Json.str(Bool.pick(String, String.eq(k, "plan"), "", d))},
         J.KV{"blocks", J.Json.arr(Mob.ask.body.loc(lc, String.eq(k, "plan"), d))},
-        J.KV{"buttons", J.Json.arr(Mob.ask.btns.loc(lc, C.Codec.pos(["plan", "input", "send"], U.Ask.bkind(k, tool)), id, o, draft))}])
+        J.KV{"buttons", J.Json.arr(Bool.pick(List<&2, J.Json>, String.eq(tool, "settings_proposal"),
+          [Mob.btn("Approve", id ++ "|accept", True{}), Mob.btn("Reject", id ++ "|decline", False{})],
+          Mob.ask.btns.loc(lc, C.Codec.pos(["plan", "input", "send"], U.Ask.bkind(k, tool)), id, o, draft)))}])
 
 def Mob.ask.std(a: M.Ask, draft: String) -> J.Json:
   Mob.ask.std.loc(I.En{}, a, draft)
