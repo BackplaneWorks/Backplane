@@ -56,6 +56,9 @@ def Session.route_if( +present: Maybe<&2, J.Json>, +result: J.Json) -> J.Json:
 def Session.keep_route(+before: J.Json, +result: J.Json) -> J.Json:
   Session.route_if(J.Json.get(before, "route"), result)
 
+def Session.draft.at(+session: J.Json, thread: String, text: String) -> J.Json:
+  Session.keep_route(session, P.Session.draft.at(session, thread, text))
+
 def Session.draft(+session: J.Json, +text: String) -> J.Json:
   Session.keep_route(session, P.Session.draft(session, text))
 

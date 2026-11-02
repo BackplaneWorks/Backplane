@@ -237,6 +237,9 @@ def session(hs: H.Hubs, key: String) -> J.Json:
 def session_reading(session: J.Json, qualified: String, seen: String, count: Nat, away: Bool) -> J.Json:
   TH.Session.reading(session, H.Hubs.rest(qualified), seen, count, away)
 
+def session_draft_at(session: J.Json, thread: String, draft: String) -> J.Json:
+  TH.Session.draft.at(session, thread, draft)
+
 def session_draft(session: J.Json, draft: String) -> J.Json:
   TH.Session.draft(session, draft)
 
