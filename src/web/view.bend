@@ -568,9 +568,21 @@ def View.history(+lc: I.Loc, +q: String, +open: Map<&2, Bool>, +ix: U.SIx, +st: 
 def View.list(+lc: I.Loc, active: Bool, +q: String, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
   List.append(&2, D.Node, View.list.k(lc, active, q, open, ix, st, sel, now, look, rm), View.history(lc, q, open, ix, st, sel, now))
 
+# the search's field: with a query, Esc clears it (client.bend's
+# Find.toggle); empty, Esc is the page's
+def View.find.esc(+q: String, n: D.Node) -> D.Node:
+  match n:
+    case D.El{t, k, as, ks}:
+      D.El{t, k, List.append(&2, D.Attr, as, [D.At{"data-esc", Bool.pick(String, String.is_empty(q), "", "proj-find")}]), ks}
+    case other:
+      other
+
+def View.find.field(+lc: I.Loc, +active: Bool, +q: String) -> D.Node:
+  View.find.esc(q, WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"))
+
 # the search, always at the top of the list
 def View.find.loc(+lc: I.Loc, +active: Bool, +q: String) -> List<&2, D.Node>:
-  [D.El{"div", "", [D.At{"class", "find"}], [WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go")]}]
+  [D.El{"div", "", [D.At{"class", "find"}], [View.find.field(lc, active, q)]}]
 
 # a row's or project's menu (core's Menu), where the pointer was (host.js
 # keeps it in --mx, --my); the shade under it shuts it
@@ -661,7 +673,7 @@ def View.sidebar.find(top: Bool, +lc: I.Loc, +active: Bool, +q: String) -> List<
   match top:
     case True{}:
       ([D.El{"div", "", [D.At{"class", "find with-add"}], [WI.WIcon.button("icon side-fold", "side-toggle", "", "Fold the sidebar · Ctrl+B", "chevron-left", 16, ""),
-        WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"),
+        View.find.field(lc, active, q),
         WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, "")]}], Nil{})
     case False{}:
       (Nil{}, View.find.loc(lc, active, q))
