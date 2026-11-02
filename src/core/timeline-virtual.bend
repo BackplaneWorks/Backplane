@@ -9,10 +9,22 @@ import ./json.bend as J
 type Px is Data:
   Px{negative: Bool, digits: String, scale: Nat}
 
-def Dig.trim(s: String) -> String:
+# No char literal in a pattern here: in the JS build a literal's fallback
+# case rebuilds the char through a 32-bit list (u32_to_word/word_to_u32),
+# which was half of every timeline plan on a long thread. Codes are
+# compared as U32 instead (Px.code).
+def Px.code(s: String) -> U32:
   match s:
-    case SCon{'0', t}: Dig.trim(t)
-    case s: s
+    case SCon{Chr{x}, _}: x
+    case SNil{}: 0
+
+def Dig.trim.go(s: String, zero: Bool) -> String:
+  match s zero:
+    case SCon{_, +t} True{}: Dig.trim.go(t, U32.is_eq(Px.code(t), 48))
+    case SCon{c, t} False{}: SCon{c, t}
+    case SNil{} _: ""
+
+def Dig.trim(+s: String) -> String: Dig.trim.go(s, U32.is_eq(Px.code(s), 48))
 
 def Dig.zero(s: String) -> String:
   match s:
@@ -80,18 +92,29 @@ def Px.exponent(negative: Bool, digits: String, +scale: Nat, exp: String) -> Px:
       +e = Maybe.default(&2, Nat, Nat.read(s), 0n)
       Px.make(negative, digits ++ Dig.zeros(Nat.sub(e, scale)), Nat.sub(scale, e))
 
-def Px.scan(s: String, negative: Bool, +dot: Bool, scale: Nat, acc: String) -> Px:
-  match s:
-    case SNil{}: Px.make(negative, acc, scale)
-    case SCon{'.', t}: Px.scan(t, negative, True{}, scale, acc)
-    case SCon{'e', t}: Px.exponent(negative, acc, scale, t)
-    case SCon{'E', t}: Px.exponent(negative, acc, scale, t)
-    case SCon{c, t}: Px.scan(t, negative, dot, Nat.add(scale, Bool.pick(Nat, dot, 1n, 0n)), acc ++ SCon{c, SNil{}})
+def Px.is_dot(+s: String) -> Bool: U32.is_eq(Px.code(s), 46)
 
-def Px.read(s: String) -> Px:
-  match s:
-    case SCon{'-', t}: Px.scan(t, True{}, False{}, 0n, "")
-    case s: Px.scan(s, False{}, False{}, 0n, "")
+def Px.is_exp(+s: String) -> Bool: Bool.or(U32.is_eq(Px.code(s), 101), U32.is_eq(Px.code(s), 69))
+
+# the head's kind comes in beside it (is_dot, is_exp of s), computed from
+# the tail for the next step
+def Px.scan(s: String, dotHere: Bool, expHere: Bool, negative: Bool, +dot: Bool, scale: Nat, acc: String) -> Px:
+  match s dotHere expHere:
+    case SNil{} _ _: Px.make(negative, acc, scale)
+    case SCon{_, +t} True{} _: Px.scan(t, Px.is_dot(t), Px.is_exp(t), negative, True{}, scale, acc)
+    case SCon{_, t} False{} True{}: Px.exponent(negative, acc, scale, t)
+    case SCon{c, +t} False{} False{}:
+      Px.scan(t, Px.is_dot(t), Px.is_exp(t), negative, dot, Nat.add(scale, Bool.pick(Nat, dot, 1n, 0n)), acc ++ SCon{c, SNil{}})
+
+def Px.scan.from(+s: String, negative: Bool) -> Px:
+  Px.scan(s, Px.is_dot(s), Px.is_exp(s), negative, False{}, 0n, "")
+
+def Px.read.signed(minus: Bool, s: String) -> Px:
+  match minus s:
+    case True{} SCon{_, t}: Px.scan.from(t, True{})
+    case _ s: Px.scan.from(s, False{})
+
+def Px.read(+s: String) -> Px: Px.read.signed(U32.is_eq(Px.code(s), 45), s)
 
 def Px.scale(p: Px) -> Nat:
   match p:
