@@ -22,7 +22,7 @@ window.allowanceFixture=async scenario=>{const r=await fetch('/scenario',{method
 const server=Bun.serve({hostname:'127.0.0.1',port,async fetch(req){const path=new URL(req.url).pathname;
  if(path==='/act'){const {action,value}=await req.json();ui=lib.act(ui,action,value);return Response.json({html:content()});}
  if(path==='/scenario'){const scenario=await req.text();ui=lib.ui();if(scenario==='stale')ui=lib.tick(ui,1793168000n);else if(scenario==='unknown')ui=lib.model(ui,'grok');else if(scenario==='reset')ui=lib.tick(ui,1793176001n);return new Response(content());}
- if(path==='/style.css'||path==='/workspace-keys.js')return new Response(Bun.file(resolve('src/web'+path)),{headers:{'content-type':path.endsWith('.css')?'text/css':'text/javascript'}});
+ if(path==='/style.css'||path==='/workspace-keys.js'||path==='/workspace-menus.js')return new Response(Bun.file(resolve('src/web'+path)),{headers:{'content-type':path.endsWith('.css')?'text/css':'text/javascript'}});
  return new Response(shell(),{headers:{'content-type':'text/html'}});
 }});
 
