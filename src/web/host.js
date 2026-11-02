@@ -1146,16 +1146,15 @@ function render() {
   saveFocusedSoon();
 }
 
-// A page landing redraws only the regions its reply wrote into (core/
-// landing.bend's region over the delta's paths, laws land_*): the timeline,
-// and the top bar when it changed. The page's other regions, the overlay
-// over all of it and the patch of the whole tree were most of a landing's
-// frame. A whole reply, a reply whose delta touched anything outside the
-// regions (the session, a sidebar row), or a full render already due draws
-// the page.
+// Live updates and page landings redraw only the regions their delta wrote
+// into (core/landing.bend, laws land_*). A sidebar activity change must not
+// overlay, project and reconcile the selected timeline. Whole replies and
+// changes outside these regions (including session changes) draw the page.
 const jsonClass = (n, c) => Array.isArray(n?.attrs) && n.attrs.some(a => a?.name === "class" && (" " + a.value + " ").includes(" " + c + " "));
 const nodeAttr = (v, name) => { for (const a of each(v.attrs)) if (is(a, "At") && a.name === name) return a.value; return null; };
 const LAND_REGIONS = [
+  { name: "sidebar", json: n => n?.tag === "aside" && n.key === "sidebar",
+    node: v => v.tag === "aside" && v.key === "sidebar", el: () => document.querySelector("aside.sidebar") },
   { name: "timeline", json: n => Array.isArray(n?.attrs) && n.attrs.some(a => a?.name === "id" && a.value === "timeline"),
     node: v => nodeAttr(v, "id") === "timeline", el: () => document.getElementById("timeline") },
   { name: "topbar", json: n => n?.tag === "header" && jsonClass(n, "topbar"),
@@ -1180,7 +1179,9 @@ function landPathIn(shown, region) {
 }
 // "page", or the names of the regions to redraw, space-separated
 function historyRegion(detail, projection) {
-  if (!detail.page || !["older", "newer"].includes(projection) || !Array.isArray(detail.changed) || searchJump || jump) return "page";
+  const landing = detail.page && ["older", "newer"].includes(projection);
+  const update = !detail.page && projection === "update" && !detail.historyReset && !detail.position;
+  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || jump || scroll) return "page";
   const lines = [];
   for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
   if (!lines.length) return "page";
@@ -1248,16 +1249,20 @@ function renderRegions() {
     patch(el, v);
     if (RR) { RR.t("reg." + r.name + ".overlay", a1 - a0);RR.t("reg." + r.name + ".project", a2 - a1);RR.t("reg." + r.name + ".patch", pnow() - a2); }
   }
-  const tl = document.getElementById("timeline"), list = timelineList(tl);
-  if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
-  activeTimeline = list || null;
-  list?.refresh();
-  bodyWindows.observe(tl, remoteReady && !!frontendNode);
-  if (historyStatus) historyPageState(historyStatus);
-  searchLight(tl);
-  earlierAsked = false;
-  laterAsked = false;
-  if (thin?.ready) historyCheckSoon();
+  if (names.has("sidebar")) bubMoveSync();
+  if (names.has("timeline")) {
+    const tl = document.getElementById("timeline"), list = timelineList(tl);
+    if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
+    activeTimeline = list || null;
+    list?.refresh();
+    if (list) timelineChanged(list);
+    bodyWindows.observe(tl, remoteReady && !!frontendNode);
+    if (historyStatus) historyPageState(historyStatus);
+    searchLight(tl);
+    earlierAsked = false;
+    laterAsked = false;
+    if (thin?.ready) historyCheckSoon();
+  }
   retireAllowance(root, remoteReady);
   saveFocusedSoon();
   if (RR) { RR.n("render.regions");RR.t("render.regions", pnow() - t0); }
@@ -3334,7 +3339,7 @@ async function startThin(again = false, reason = "initial") {
         if (selectedChanged) deskCheck();
         // (a page's reply: its view decides what is drawn, historyRegion)
         // (a reply that changed nothing on show draws nothing: thin-host's same)
-        if (!detail?.inputOnly && !detail?.paged && !detail?.unchanged) later();
+        if (!detail?.inputOnly && !detail?.paged && !detail?.unchanged && !detail?.presenting) later();
         if (RR) RR.t("land.session", pnow() - sc0);
       },
       ack: (session, reply) => preservePresentationRoute(session, Wire.plain(App.presentation_reply(presentationJson(session), presentationJson(reply)))),
@@ -3442,8 +3447,9 @@ async function startThin(again = false, reason = "initial") {
         else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy();enterImprovements(); }
         else if (remoteReady) showViewStatus("");
         if (remoteReady && viewNote) showViewStatus(viewNote);
-        // a page's reply on a page already shown: its view decides what is drawn
-        if (!(state.paged && !becameReady && remoteReady && state.phase === "presented")) later();
+        // An accepted picture's view callback owns its full or region paint.
+        // Session/state notifications must not promote it to a full redraw.
+        if (!(state.painted && !becameReady && remoteReady && state.phase === "presented")) later();
       },
     }, ThinViews, next);
   } catch { disconnect("client-setup");try { s.close(); } catch {}return; }

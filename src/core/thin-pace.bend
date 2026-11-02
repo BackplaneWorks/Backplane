@@ -29,13 +29,24 @@ def Touch.adds(ths: List<&2, String>, t: Touch) -> Touch:
     case +th <> rest:
       Touch.adds(rest, Touch.add(t, th))
 
+# Liveness is a thread's display overlay. Its frequent progress stamps must
+# not promote every other view to the urgent lane. Other views still owe a
+# sidebar refresh, including a stalled/recovered dot, at the soft cadence.
+# Keep the general client touch policy conservative for all other settings.
+def Touch.change(c: M.Change) -> List<&2, String>:
+  match c:
+    case M.SettingSet{+key, _, _}:
+      Bool.pick(List<&2, String>, Bool.and(String.starts_with(key, "liveness."), Bool.not(String.is_empty(String.drop(key, 9n)))),
+        [U.Touch.id(String.drop(key, 9n))], U.Touch.setting(key))
+    case _: U.Touch.of(c)
+
 # what a step's committed changes touch
 def Touch.changes(cs: List<&2, M.Change>, t: Touch) -> Touch:
   match cs:
     case Nil{}:
       t
     case c <> rest:
-      Touch.changes(rest, Touch.adds(U.Touch.of(c), t))
+      Touch.changes(rest, Touch.adds(Touch.change(c), t))
 
 def Touch.member(ts: List<&2, String>, +th: String, hit: Bool) -> Bool:
   match ts hit:

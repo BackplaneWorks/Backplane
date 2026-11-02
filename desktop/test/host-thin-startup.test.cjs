@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-async function fixture(supported=false, legacyProbe=false){
+async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
  const {ConnectionLog}=await import('../../src/web/connection-log.js');
  const {BubMoveObserver}=await import('../../src/web/bub-move.js');
  const {ViewerRpc}=await import('../../src/web/viewer-rpc.js'),{ReviewPosition}=await import('../../src/web/review-position.js');
@@ -9,6 +9,7 @@ async function fixture(supported=false, legacyProbe=false){
  const {ThinHost,presentationTarget,preservePresentationRoute,refusedFallback}=await import('../../src/web/thin-host.js'),{Backoff,Retry,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
  let source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
  if(legacyProbe)source=source.replaceAll(' || attempt !== thinAttempt','');
+ if(legacyPaint)source=source.replace(' && !detail?.presenting','').replace('state.painted && !becameReady','state.paged && !becameReady');
  const a=source.indexOf('function showViewStatus('),b=source.indexOf('// when a frame (a heartbeat included)',a);assert(a>0&&b>a);
  // Earlier pagehide listeners are unrelated to startup; bound the end after boot.
  const bootStart=source.indexOf('pairingReady.then('),bootEnd=source.indexOf('window.addEventListener("pagehide",',bootStart);assert(bootStart>0&&bootEnd>bootStart);
@@ -52,7 +53,7 @@ async function fixture(supported=false, legacyProbe=false){
   const from=source.indexOf(start),to=source.indexOf(end,from);assert(from>0&&to>from);vm.runInContext(source.slice(from,to),ctx);
  }
  vm.runInContext(source.slice(a,b),ctx);ctx.showViewStatus=s=>status.push(s);
- return{ctx,calls,status,requests,sockets,VIEW_LIMITS,boot,runBoot:async()=>{let started;const start=ctx.startThin;ctx.startThin=()=>started=start();vm.runInContext(boot,ctx);await Promise.resolve();await started;},tick:ms=>{clock+=ms;for(const[id,t]of[...timers])if(t.at<=clock&&timers.has(id)){timers.delete(id);t.fn();}}};
+ return{ctx,calls,status,requests,sockets,VIEW_LIMITS,boot,source,runBoot:async()=>{let started;const start=ctx.startThin;ctx.startThin=()=>started=start();vm.runInContext(boot,ctx);await Promise.resolve();await started;},tick:ms=>{clock+=ms;for(const[id,t]of[...timers])if(t.at<=clock&&timers.has(id)){timers.delete(id);t.fn();}}};
 }
 test('actual startup begins capability discovery despite a permanently pending focused IDB lookup',async()=>{
  const f=await fixture(false);await f.runBoot();assert(f.calls.includes('focused-read'));assert(f.calls.includes('/client/capabilities'));assert.equal(f.ctx.viewMode,'read-only');
@@ -115,4 +116,119 @@ test('late retry probe cannot replace a newer connection; previous host path rep
   release({status:200});await new Promise(setImmediate);
   assert.equal(f.sockets.length,legacy?3:2);assert.equal(newer.readyState,legacy?3:1);
  }
+});
+
+// Exercise the socket adapter and the actual region scheduler together. The
+// pure Bend landing planner has its own laws/tests; its output is explicit at
+// this effect boundary, and we assert the paths the host gives it. No hub,
+// compiler, generated bundle, display, or real browser profile is involved.
+function regionPainter(f) {
+ const c=f.ctx,frames=[],patches=[],landings=[],effects=[],list=xs=>xs.reduceRight((tail,head)=>({$: 'Con',head,tail}),{$:'Nil'});
+ const node=n=>n.type==='text'?{$:'Txt',text:n.text}:{$:'El',tag:n.tag,key:n.key,attrs:list(n.attrs.map(a=>({$:a.name?'At':'On',...a}))),kids:list(n.kids.map(node))};
+ const is=(v,k)=>v.$===k,each=function*(xs){for(;xs?.$==='Con';xs=xs.tail)yield xs.head;};
+ const side={__v:node(regionPage().kids[0])},timeline={__v:node(regionPage().kids[1].kids[1])},top={__v:node(regionPage().kids[1].kids[0])};
+ c.document.querySelector=s=>s==='aside.sidebar'?side:s==='header.topbar'?top:null;
+ c.document.getElementById=id=>id==='timeline'?timeline:null;
+ const scroller={refresh:()=>effects.push('timeline.refresh'),destroy:()=>effects.push('timeline.destroy')};
+ Object.assign(c,{is,each,queued:false,requestAnimationFrame:fn=>frames.push(fn),landingPlan:'sidebar ',searchJump:null,jump:null,scroll:false,
+  feedbackSession:()=>c.currentSession(),historyGaps:n=>n,pendingPresentation:n=>n,
+  same:(a,b)=>a.$===b.$&&a.tag===b.tag&&a.key===b.key,
+  patch:(el,v)=>{el.__v=v;patches.push(v.key);},expand:n=>n,root:{},
+  bubMoveSync:()=>effects.push('sidebar.moves'),timelineList:()=>scroller,activeTimeline:scroller,
+  timelineChanged:l=>{assert.equal(l,scroller);effects.push('timeline.reconcile');},
+  historyStatus:null,searchLight:()=>effects.push('timeline.search'),earlierAsked:false,laterAsked:false,
+  historyCheckSoon:()=>effects.push('timeline.history'),retireAllowance(){},saveFocusedSoon(){},
+  later(){if(c.queued)return;c.queued=true;frames.push(()=>{c.queued=false;effects.push('paint.page');});}});
+ c.App.presentation_node=node;c.App.presentation_overlay=n=>{effects.push('overlay:'+n.key);return n;};
+ c.bodyWindows.project=n=>{effects.push('body:'+n.key);return n;};c.bodyWindows.observe=()=>effects.push('timeline.observe');
+ c.History.landing=(regions,paths)=>{landings.push({regions,paths});return c.landingPlan;};
+ const from=f.source.indexOf('const jsonClass ='),to=f.source.indexOf('\nfunction later() {',from);assert(from>0&&to>from);
+ vm.runInContext(f.source.slice(from,to),c);
+ const drain=()=>{let budget=10;while(frames.length){assert(budget-->0,'paint must settle without a continuous frame loop');frames.shift()();}};
+ return{side,timeline,top,frames,patches,effects,landings,drain,reset(){patches.length=effects.length=landings.length=0;}};
+}
+function regionPage(rows=2){
+ const el=(tag,key,attrs,kids=[])=>({type:'element',tag,key,attrs:Object.entries(attrs).map(([name,value])=>({name,value})),kids});
+ return el('div','app',{},[
+  el('aside','sidebar',{class:'sidebar'},Array.from({length:15},(_,i)=>el('button','thread-'+i,{},[{type:'text',text:'Working '+i}]))),
+  el('main','main',{},[el('header','topbar',{class:'topbar'}),el('div','timeline',{id:'timeline'},Array.from({length:rows},(_,i)=>el('div','row-'+i,{},[{type:'text',text:'Message '+i}])))]),
+ ]);
+}
+async function liveRegionFixture(legacy=false,rows=2){
+ const f=await fixture(true,false,legacy),paint=regionPainter(f);await f.runBoot();const socket=f.sockets[0];socket.open();
+ socket.frame({t:'view',version:1,renderer:'web',generation:'7',epoch:'actual',limits:{...f.VIEW_LIMITS}});
+ const req=f.requests.at(-1);
+ socket.frame({t:'reply',id:req.id,ok:true,result:{version:1,hub:'https://fixture',generation:'7',epoch:'actual',requestRevision:req.p.requestRevision,target:req.p.target,viewId:'live',viewRevision:'1',renderer:'web',remoteReady:true,
+  session:{...req.p.session,rid:1},cmds:[],shown:regionPage(rows),window:{ids:[],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]},viewDelta:{version:1,base:'',token:String(req.p.requestRevision)}}});
+ assert(f.ctx.remoteReady);paint.drain();paint.reset();
+ const update=(ops,plan='sidebar ')=>{
+  f.ctx.landingPlan=plan;const revision=String(BigInt(f.ctx.thin.client.links.get('https://fixture').viewRevision)+1n);
+  socket.frame({t:'view.changed',version:1,generation:'7',epoch:'actual',viewId:'live',target:{kind:'thread',id:'A'},viewRevision:revision});
+  f.tick(16);const request=f.requests.at(-1);assert.equal(request.m,'view.update');
+  socket.frame({t:'reply',id:request.id,ok:true,result:{version:1,hub:'https://fixture',generation:'7',epoch:'actual',requestRevision:request.p.requestRevision,target:request.p.target,viewId:'live',viewRevision:revision,renderer:'web',remoteReady:true,cmds:[],
+   viewDelta:{version:1,base:request.p.viewDelta.token,token:String(request.p.requestRevision),ops}}});
+ };
+ return{...f,paint,update};
+}
+test('15 active-thread sidebar updates no longer amplify into full-page or timeline paints',async t=>{
+ for(const rows of [2,600]){
+  const measured=[];
+  for(const legacy of [true,false]){
+   const f=await liveRegionFixture(legacy,rows);
+   for(let i=0;i<15;i++){
+    f.update([['s',['shown','kids',0,'kids',i,'kids',0,'text'],'Tool call '+i]]);
+    f.paint.drain();
+   }
+   const pages=f.paint.effects.filter(x=>x==='paint.page').length;
+   measured.push(pages);
+   if(!legacy){
+    assert.deepEqual(f.paint.patches,Array(15).fill('sidebar'));
+    assert(!f.paint.effects.some(x=>x.includes('timeline')),'sidebar paint must not project, refresh, observe or search the timeline');
+    assert.equal(f.paint.effects.filter(x=>x==='sidebar.moves').length,15,'sidebar lease display still updates');
+    assert(f.paint.landings.every(x=>x.regions.includes('sidebar\tshown\tkids\t0')&&x.paths.startsWith('shown\tkids\t0\t')));
+    assert.equal(f.ctx.thin.session.drafts.A,'unsent 日本語','background activity keeps the local draft');
+   }
+  }
+  assert.deepEqual(measured,[15,0]);t.diagnostic(`${rows} selected rows: full-page paint requests 15 -> 0; sidebar patches 15; timeline effects 0`);
+ }
+});
+test('live region paints coalesce against the latest accepted picture and retain timeline lifecycle work',async()=>{
+ const f=await liveRegionFixture();
+ f.update([['s',['shown','kids',0,'kids',0,'kids',0,'text'],'background change']]);
+ f.update([['s',['shown','kids',1,'kids',1,'kids',0,'kids',0,'text'],'new selected message']], 'timeline ');
+ assert.equal(f.paint.frames.length,1,'one two-frame region paint for both replies');f.paint.drain();
+ assert.deepEqual(f.paint.patches,['sidebar','timeline']);assert(!f.paint.effects.includes('paint.page'));
+ assert(f.paint.effects.includes('timeline.refresh'));assert(f.paint.effects.includes('timeline.observe'));assert(f.paint.effects.includes('timeline.history'));
+ assert.equal(f.paint.timeline.__v.kids.head.kids.head.text,'new selected message');
+});
+test('whole replies, session changes and missing region DOM retain the full-page fallback',async()=>{
+ const f=await liveRegionFixture();
+ assert.equal(f.ctx.historyRegion({shown:regionPage(),changed:null},'update'),'page');
+ assert.equal(f.ctx.historyRegion({shown:regionPage(),changed:[[]]},'update'),'page','a root replacement must paint even though its tab-separated path is empty');
+ assert.equal(f.ctx.historyRegion({shown:regionPage(),changed:[]},'reset'),'page');
+ assert.equal(f.ctx.historyRegion({shown:regionPage(),changed:[],historyReset:true},'update'),'page');
+ assert.equal(f.ctx.historyRegion({shown:regionPage(),changed:[],position:{atEnd:true}},'update'),'page');
+ f.ctx.searchJump={id:'search-result'};assert.equal(f.ctx.historyRegion({shown:regionPage(),changed:[]},'update'),'page');f.ctx.searchJump=null;
+ f.ctx.scroll=true;assert.equal(f.ctx.historyRegion({shown:regionPage(),changed:[]},'update'),'page','ScrollEnd commands keep the full render that consumes them');f.ctx.scroll=false;
+ f.update([['s',['session','open'],{settings:true}]],'page');f.paint.drain();assert(f.paint.effects.includes('paint.page'));
+ assert.equal(f.paint.landings.at(-1).paths,'session\topen');f.paint.reset();
+ f.paint.side.__v=null;f.update([['s',['shown','kids',0,'kids',0,'kids',0,'text'],'changed']]);f.paint.drain();
+ assert(f.paint.effects.includes('paint.page'));assert.equal(f.paint.patches.length,0,'incompatible DOM cannot get a partial patch');
+});
+test('a pill-only timeline region reconciles unread even when rows and geometry do not change',async()=>{
+ const f=await liveRegionFixture();
+ // refresh deliberately emits no plan/scroll callback. Only the accepted
+ // timeline picture changes; virtual rows and scroller geometry stay equal.
+ f.update([['s',['shown','kids',1,'kids',1,'attrs'],[{name:'id',value:'timeline'},{name:'data-unread-pill',value:'1'}]]],'timeline ');
+ f.paint.drain();
+ assert.deepEqual(f.paint.patches,['timeline']);
+ assert.equal(f.paint.effects.filter(x=>x==='timeline.refresh').length,1);
+ assert.equal(f.paint.effects.filter(x=>x==='timeline.reconcile').length,1,'accepted region must run the same bottom reconciliation as a full paint');
+ assert(!f.paint.effects.includes('paint.page'));
+ assert(!f.paint.effects.includes('sidebar.moves'));
+});
+test('a queued full paint covers a live region update without an additional paint',async()=>{
+ const f=await liveRegionFixture();f.ctx.later();
+ f.update([['s',['shown','kids',0,'kids',0,'kids',0,'text'],'covered']]);f.paint.drain();
+ assert.deepEqual(f.paint.effects,['paint.page']);assert.equal(f.paint.patches.length,0);
 });
