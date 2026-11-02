@@ -10229,8 +10229,10 @@ def Rl.form(+u: Ui) -> RlForm:
 def Rl.flip(+u: Ui, +k: String) -> Ui:
   Ui.scratch_set(u, k ++ ":" ++ Ui.sel(u), Bool.pick(String, Rl.on(u, k), "", "1"))
 
+# (releasing although the checks fail is for this release only: the tick
+# goes once it is asked, so the next release is gated again)
 def Rl.ask(+u: Ui) -> Act:
-  Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "release"), Rp.key(u, "rp.err", "release"), ""), "review.release",
+  Ui.rpc(Ui.scratch_set(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "release"), Rp.key(u, "rp.err", "release"), ""), "@rl.force:" ++ Ui.sel(u), ""), "review.release",
     [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"tag", J.Str{Rl.tag(u)}}, J.KV{"publish", J.Flag{Rl.on(u, "@rl.pub")}}, J.KV{"force", J.Flag{Rl.on(u, "@rl.force")}}])
 
 # opening the page asks for the tags once (the next one is proposed)
