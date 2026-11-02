@@ -4055,17 +4055,19 @@ def Token.save(+path: String, +t: String) -> IO(String):
     m : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(path, 384)
     return t
 
-def Token.load.k(none: Bool, +path: String, +have: String) -> IO(String):
-  match none:
-    case True{}:
-      IO.bind(String, String, Token.fresh(), t => Token.save(path, t))
-    case False{}:
-      IO.pure(String, have)
+def Token.loaded(r: Result<&1, &1, U32 & String, String>) -> IO(String):
+  match r:
+    case Done{have}:
+      # Earlier hubs ignored surrounding whitespace. Keep that protocol
+      # compatibility without rewriting any byte of the existing file.
+      IO.pure(String, String.trim(have))
+    case Fail{(_, why)}:
+      IO.die(String, 1, "backplane: " ++ why)
 
 def Token.load(+home: String) -> IO(String):
   do IO<String>:
-    +have : String <- Files.text(home ++ "/token")
-    Token.load.k(String.is_empty(String.trim(have)), home ++ "/token", String.trim(have))
+    r : Result<&1, &1, U32 & String, String> <- H.FS.pairing_token(home ++ "/token")
+    Token.loaded(r)
 
 def Cfg.with_token(c: Cfg, +t: String) -> Cfg:
   match c:
@@ -19121,6 +19123,8 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
+        # Refuse credential filesystem errors before opening/migrating data.
+        tok : String <- Token.load(home)
         diagnosticStatus : String <- DIAG.Diagnostics.start(Main.version())
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
@@ -19139,7 +19143,6 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         GT.Git.step.migrate(home, HistReg.roots(st))
         f0 : Result<&1, &1, U32 & String, File> <- File.open(Store.path(home), "a")
         f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, torn)
-        tok : String <- Token.load(home)
         # the secret box's vault opens before anything can be served, and
         # the models cache (untrusted probe output, perhaps written before a
         # value was stored or by an older hub) is masked again before it is
