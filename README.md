@@ -6,28 +6,55 @@
   <img src="docs/media/readme/backplane-banner.png" alt="Backplane, the default for agentic CAD">
 </p>
 
-1. Backplane is a TOTALLY open-source workspace for agentic hardware development.
-2. Backplane is a [KiCad fork](https://github.com/i2cjak/Backplane_KiCad).
-3. Backplane is created + maintained by real electrical engineers.
+Backplane is an open-source workspace for agentic hardware development. Your agent edits KiCad and FreeCAD files; you follow the work in board, schematic, 3D and mechanical viewers, click a part, and talk about it.
+
+- **Your agent, your choice.** Claude, Codex, Grok, OpenCode, Muse Code, Antigravity, Pi and Oh My Pi, in one workspace.
+- **A KiCad fork built for agents.** [Backplane KiCad](https://github.com/BackplaneWorks/Backplane_KiCad) adds board and schematic IPC APIs so agents can edit through KiCad.
+- **Design history.** Changes to boards and schematics are checkpointed. Revisit earlier steps, compare versions, and leave review comments.
+- **Desktop, web and phones.** The desktop app, browser, iOS and Android clients connect to the hub.
+- **MIT licensed.** Made and maintained by electrical engineers.
 
 <p align="center">
   <img src="docs/media/readme/royalblue-viewers-200.png" alt="RoyalBlue54L in Backplane’s 3D, PCB, and schematic viewers">
 </p>
 
-<h2>Install</h2>
+## Install
 
 ```sh
 curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 backplane
 ```
 
-<h2>Providers Supported</h2>
+<h3>Windows (x64, experimental)</h3>
+
+Download `backplane-v<version>-windows-x64.zip` from the [latest release](https://github.com/BackplaneWorks/Backplane/releases/latest), extract the entire archive into a writable folder, and open `Backplane.exe`. Keep `resources/` and the other extracted files beside it. This is a portable Electron app with a Bun hub; no WSL is required. Shell commands still need Cygwin tools: keep the bundled runtime when supplied. If those tools are missing, [the Windows setup script](scripts/setup-windows.ps1) installs Cygwin; add its `bin` directory to `PATH` before launching Backplane. Install your agent CLIs and sign in separately; [the provider setup script](scripts/install-windows-providers.ps1) installs Claude and Codex.
+
+Install FreeCAD and the [Backplane KiCad runtime](https://github.com/BackplaneWorks/Backplane_KiCad/releases) separately. Set `BACKPLANE_FREECAD` to the actual `bin/FreeCADCmd.exe` (with the GUI executable beside it) and `BACKPLANE_KICAD` to the runtime root or its `bin/kicad-cli.exe`, then restart Backplane. Stock KiCad lacks some required IPC capabilities.
+
+Windows managed service stop and update are unsupported; closing the window leaves the hub running. Windows CI smoke checks currently report failures without gating the build, so a published ZIP alone does not establish full Windows validation.
+
+See [installation](docs/install.md) for setup, phone pairing and uninstalling. You need an agent CLI, KiCad for board and schematic work, and FreeCAD for mechanical work. Antigravity can be installed from Settings.
+
+## Quick start
+
+1. Start Backplane and add a project folder: an existing KiCad project or an empty folder.
+2. Pick an agent, model and reasoning effort under the composer.
+3. Ask for something: "add a 3.3 V LDO and decoupling to the schematic", "check the DRC and fix it", or "design a case for this board".
+4. Follow the work in the Board, Schematic, 3D and Mech tabs. Click components or nets to highlight them across the schematic and board, or reference a part in your next message.
 
 <p align="center">
   <img src="docs/media/readme/agent-setup-200.png" alt="Backplane’s provider, model, and reasoning effort picker">
 </p>
 
-The real VALUE of Backplane is in its KiCad + FreeCAD viewers. See EVERY step the agent takes, and click components or nets to light them up across the schematic and board. Backplane ships with a FULL suite of CAD-specific skills and a KiCad fork that adds additional instrumentation for LLM control (IPC schematic API, for instance).
+## CAD
+
+The viewers show the design as the agent works.
+
+- **Board, Schematic, 3D.** Hierarchical schematics, layer controls in KiCad’s order and names, and cross-probing between views.
+- **Mech.** View STEP or GLB models. Agents model parts with FreeCAD scripts, export STEP, and show the result here.
+- **History and review.** Compare versions, inspect changes by sheet and layer, pin comments to a board or schematic, and run BOM, ERC and DRC checks from the Review tab.
+- **Skills.** KiCad skills from [KiStack](https://github.com/BackplaneWorks/kistack) ship with the app: schematic, layout, footprints, BOM and fabrication exports.
+- **Ordering.** When a design has a fab file, Buy it opens a thread that checks the design and gets a quote. See [ordering](docs/order.md).
 
 <p align="center">
   <img src="docs/media/readme/cad/pad-workbar-detail-200.png" alt="RoyalBlue54L J2 pad 1 and the +BATT net cross-probed in the schematic and board">
@@ -41,7 +68,9 @@ The real VALUE of Backplane is in its KiCad + FreeCAD viewers. See EVERY step th
   <img src="docs/media/readme/cad/kicad-freecad-setup-200.png" alt="KiCad IPC and FreeCAD integration settings">
 </p>
 
-Backplane features some nice harness orchestration primitives. We have projects that contain threads (wow, a truly novel idea), bots, and an "uberbot" that coordinates bots, projects, and threads. Any harness can create subagents with any other harness, and all harnesses can send messages between threads.
+## Orchestration
+
+Projects contain threads. Agents can start subagents using other providers, and threads can message each other. An "uberbot" can coordinate bots, projects and threads as your main interface.
 
 <p align="center">
   <img src="docs/media/readme/orchestration/overview.png" alt="Uberbot overview with projects, threads, and persistent bots">
@@ -51,7 +80,9 @@ Backplane features some nice harness orchestration primitives. We have projects 
   <img src="docs/media/readme/orchestration/delegation.png" alt="A thread coordinating Claude and Grok subagents">
 </p>
 
-We also ship persistent agents (catbots) to handle specific tasks. They have webhooks, etc., whatever you expect BUT also ship with a nice mailbox system for communication and a "space" in which the bot can create a persistent webapp.
+### Catbots
+
+Catbots are persistent agents for specific jobs. They have webhooks and routines, a mailbox for communication, and a "space" where the bot serves a persistent web app.
 
 <p align="center">
   <img src="docs/media/readme/orchestration/webhooks.png" alt="A catbot’s Webhooks tab">
@@ -71,13 +102,13 @@ We also ship persistent agents (catbots) to handle specific tasks. They have web
 
 ## Other features
 
-- Clickable links between threads and bots and projects.
+- Clickable links between threads, bots and projects.
 
   <p align="center">
     <img src="docs/media/readme/features/link-cards-2x.png" alt="Thread, bot, and project links in a message">
   </p>
 
-- Links to other Backplane items with `>`, `#`, `%`, `@`.
+- References to other Backplane items with `>`, `#`, `%`, `@`.
 
   <p align="center">
     <img src="docs/media/readme/reference-menus-200.png" alt="Thread, room, project, and bot reference menus">
@@ -89,17 +120,34 @@ We also ship persistent agents (catbots) to handle specific tasks. They have web
     <img src="docs/media/readme/features/inline-terminal-2x.png" alt="A read-only file open in Neovim in an inline terminal">
   </p>
 
-- `/btw`.
+- `/btw` for side questions.
 
   <p align="center">
     <img src="docs/media/readme/features/btw-autocomplete-2x.png" alt="The btw side-question command in the composer">
   </p>
 
-Backplane works with WHATEVER agent you choose to bring. I'm not going to stop you from using Grok, Codex, Claude, Antigravity, Muse, whatever. We even have OpenCode support!
+- A secret vault: agents use API keys and tokens by name without seeing their values.
+- Voice dictation, push alerts to your phone, and git, worktree and PR actions in the thread.
+
+## How it works
+
+One hub per machine owns the event log, agent processes, git and file watchers. The desktop app, browser, iOS and Android clients connect to that hub, and your machines can pair over Tailscale. Agents edit KiCad through the fork’s IPC server. The hub is written in [Bend](https://bend-lang.com) and runs on Bun. Important rules are stated as laws in [`LAWS.bend`](LAWS.bend), with proofs in [`PROOF.bend`](PROOF.bend) checked by the compiler.
+
+## Docs
+
+- [Install](docs/install.md), [settings](docs/settings.md), [secrets](docs/secrets.md)
+- [KiCad IPC](docs/kicad-ipc.md), [design review](docs/design-review.md), [git](docs/git.md)
+- [Bots, rooms and routines](docs/bots.md), [the uberbot](docs/uber.md), [terminals](docs/terminal.md)
+- [Ordering](docs/order.md), [voice](docs/voice.md), [telemetry](docs/telemetry.md)
+- [`AGENTS.md`](AGENTS.md): the code map
+
+## Contributing
+
+Issues and pull requests are welcome. Building needs [Bend](https://bend-lang.com), Bun and Python 3.12+. Start with [`AGENTS.md`](AGENTS.md) for the code map and [local testing](docs/local-testing.md) for isolated builds and previews. The [desktop guide](desktop/README.md) covers the Electron shell, and the [mobile guide](mobile/README.md) covers the phone apps.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The [KiCad fork](https://github.com/i2cjak/Backplane_KiCad) retains KiCad's licensing. The STEP converter includes OpenCascade and `occt-import-js` (LGPL-2.1); see [third-party licensing](tools/step2glb/README.md#license).
+MIT. See [LICENSE](LICENSE). The [KiCad fork](https://github.com/BackplaneWorks/Backplane_KiCad) retains KiCad's licensing. The STEP converter includes OpenCascade and `occt-import-js` (LGPL-2.1); see [third-party licensing](tools/step2glb/README.md#license).
 
 <p align="center">
   <img src="docs/media/readme/cad/cats-footer-200.png" alt="Three Backplane cats" width="216" height="72">

@@ -42,7 +42,7 @@ test('popup toggle, focus, actionable Send, IME-safe Ctrl+Enter, origin routing 
  const fixture=`import {installImprovements} from '/src/web/improvements.js';import {improvementOrigin,improvementContext} from '/src/web/improvements-context.js';
  const f=window.fixture={calls:[],selected:[],failCapture:true,failUpload:false,failStart:false,captures:0};
  window.backplaneDesktop={captureApp:async()=>{f.captures++;if(f.capturePending)await new Promise(r=>f.releaseCapture=r);if(f.failCapture)throw Error('fixture cancel');return 'data:image/png;base64,${png}';},onImprovements:cb=>f.nativeShortcut=cb};
- f.ui=installImprovements({identity:()=> 'fixture-hub',ready:()=>true,
+ f.ui=installImprovements({reportTarget:()=> 'internal',identity:()=> 'fixture-hub',ready:()=>true,
  context:async()=>improvementContext(improvementOrigin({doc:document,session:{sel:'source-thread',route:{bot:'bub',tab:'chat'}}}),{thread:'source-thread',project:'origin',projects:[{id:'origin',title:'Hardware',root:'/work/hardware'},{id:'app',title:'Backplane',root:'/work/backplane-bend'}]}),
  rpc:{request:async(m,p)=>{f.calls.push({m,p});if(m==='thread.create')return{thread:'improvement-'+p.creationKey};if(m==='improvements.context')return{thread:p.sourceThread,accountBinding:'fixture-account'};if(f.failStart){f.failStart=false;throw Error('Lost reply. Retry Send.');}return{ok:true};}},
  select:async id=>f.selected.push(id)});`;

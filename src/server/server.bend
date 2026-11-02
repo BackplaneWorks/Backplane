@@ -18,6 +18,7 @@ import ./mailcontext.bend as MCTX
 import ./telemetry.bend as TI
 import ./telemetry-ui.bend as TUI
 import ../core/telemetry.bend as TLM
+import ../core/winnote.bend as NT
 import ../core/telemetry-usage.bend as TUS
 import ../core/charter.bend as CH
 import ../core/mailrun.bend as RUN
@@ -127,6 +128,7 @@ import ./voice.bend as VO
 import ../core/vdict.bend as VD
 import ./apikeys.bend as AKS
 import ./perf.bend as PS
+import ./diagnostics.bend as DIAG
 import ./freecad.bend as FC
 import ../core/perf.bend as PF
 import ../core/semver.bend as SV
@@ -6195,6 +6197,15 @@ def Debug.serve(allowed: Bool, +i: Nat, s: Socket) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
+# Diagnostics are local-only until this authenticated read. A public draft
+# reads this endpoint only when the user elects diagnostics. No raw logs.
+def DiagnosticsHTTP.serve(allowed: Bool, s: Socket) -> IO(Unit):
+  match allowed:
+    case True{}:
+      IO.bind(String, Unit, DIAG.Diagnostics.export(), text => Conn.finish(s, W.Http.response.c("200 OK", "application/json", U.Utf8.encode(text), "no-store", "")))
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+
 # GET /plot/info?h=<the FNV-1a of a source's key, decimal>: the info file
 # the reading child wrote beside the source's newest plot (core/plot.bend's
 # Infos.file, server/plot.bend's Pv.infos), for the web's cross-probing,
@@ -6243,6 +6254,8 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
       Info.serve(allowed, s, W.Http.param(p, "h"))
     case 6n:
       RenderHTTP.serve(allowed, s, W.Http.param(p, "id"))
+    case 7n:
+      DiagnosticsHTTP.serve(allowed, s)
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), gz)
 
@@ -6257,7 +6270,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -6870,6 +6883,10 @@ def Sys.exe_dir.io() -> IO(String):
 def Media.fail(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +msg: String) -> IO(Unit):
   GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{msg}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}]))
 
+# Upload metadata is additive; older clients keep the English text fallback.
+def Media.fail.cap(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, lim: String) -> IO(Unit):
+  GitJob.reply(inbox, client, id, False{}, NT.Notice.upload.reply(thread, "upload.cap", Nat.show(AT.Att.mb(lim))))
+
 def Media.attached(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +path: String) -> IO(Unit):
   GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"attached", J.Str{path}}, J.KV{"thread", J.Str{thread}}]))
 
@@ -6922,7 +6939,7 @@ def Media.put.k(over: Bool, +first: Bool, +last: Bool, bs: List<&2, U32>, +inbox
     case True{}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Media.fail(inbox, client, id, thread, AT.Att.over(lim))
+        Media.fail.cap(inbox, client, id, thread, lim)
     case False{}:
       IO.bind(String, Unit, Media.put.file(path, Bool.pick(String, first, "w", "a"), bs), e => Media.put.done(e, last, inbox, client, id, thread, path))
 
@@ -6959,7 +6976,7 @@ def Media.copy.k(ok: Bool, fits: Bool, +src: String, +inbox: Chan(Msg), +client:
     case True{} True{}:
       IO.bind(P.Ran, Unit, P.Proc.run("cp", ["--", src, dest], "/"), r => Media.copied(r, inbox, client, id, thread, dest))
     case True{} False{}:
-      Media.fail(inbox, client, id, thread, AT.Att.over(lim))
+      Media.fail.cap(inbox, client, id, thread, lim)
     case False{} _:
       Media.fail(inbox, client, id, thread, "not a file: " ++ src)
 
@@ -11420,7 +11437,7 @@ def Hub.accounts.select.valid(valid: Bool, +st: M.State, +now: Nat, +client: U32
   match valid:
     case False{}: B.Step.outs([B.Reply.err(client, rid, Bool.pick(String, B.Hub.running(B.Hub.thread(st, th)), "Finish or stop the current turn before selecting another account.",
       Bool.pick(String, String.is_empty(profile), "The thread or account selection changed. Reopen the account menu and try again.", ACCT.Accounts.unavailable(ACCT.Accounts.profile(st, profile), epoch))))])
-    case True{}: Hub.accounts.select.provider(st, now, client, rid, th, provider, profile, epoch, count, entries)
+    case True{}: B.Step.before(B.AccountFallback.forget(th, now), Nil{}, Hub.accounts.select.provider(st, now, client, rid, th, provider, profile, epoch, count, entries))
 
 def Hub.accounts.select.step(+st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   +th = J.Json.get_str(p, "thread", "")
@@ -12052,10 +12069,33 @@ def Hub.rpc.dq(refuse: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> 
     case False{}:
       Hub.rpc.k(Hub.state(h), client, text, now)
 
-def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+def Hub.rpc.normal(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.rpc.dq(Bool.and(DQ.Dq.full(Hub.dq(cfg)), Hub.rpc.starts(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "m", ""))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, text, now)
+
+# Mutating diagnostics controls use the normal authenticated WebSocket RPC,
+# never a GET/query parameter, a forwarded machine or a caller-supplied path.
+def Hub.diagnostics.control(result: String, h: Hub, client: U32, id: String) -> IO(Hub):
+  Hub.out(h, B.Reply.data(client, id, Maybe.default(&2, J.Json, J.Json.parse(result), J.Json.obj([J.KV{"ok", J.Flag{False{}}}, J.KV{"error", J.Str{"io"}}]))))
+
+def Hub.diagnostics.operation(action: String) -> IO(String):
+  match action:
+    case "status": DIAG.Diagnostics.status()
+    case _: DIAG.Diagnostics.control(action)
+
+def Hub.rpc.diagnostics(yes: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
+  match yes:
+    case False{}: Hub.rpc.normal(h, client, text, now)
+    case True{}:
+      IO.bind(String, Hub, Hub.diagnostics.operation(Bool.pick(String, String.eq(J.Json.get_str(o, "m", ""), "diagnostics.status"), "status", J.Json.get_str(J.Json.get_obj(o, "p"), "action", ""))),
+        result => Hub.diagnostics.control(result, h, client, J.Json.as_raw(J.Json.get(o, "id"), "0")))
+
+def Hub.rpc.diagnostics.o(h: Hub, client: U32, text: String, now: Nat, +o: J.Json) -> IO(Hub):
+  Hub.rpc.diagnostics(Bool.or(String.eq(J.Json.get_str(o, "m", ""), "diagnostics.control"), String.eq(J.Json.get_str(o, "m", ""), "diagnostics.status")), h, client, text, now, o)
+
+def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  Hub.rpc.diagnostics.o(h, client, text, now, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
 
 # This fixed method set is constructible only by server IO jobs, never by a
 # JSON origin marker or a client id. Reuse the canonical metadata deciders.
@@ -13417,12 +13457,27 @@ def AccountsRpc.default.step(ok: Bool, +client: U32, +rid: String, +provider: St
 
 def Hub.rpc.account.default(default: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
   match default:
-    case False{}: Hub.rpc.account.kind(select, h, st, client, rid, p, now)
+    case False{}: Hub.rpc.account.limit(String.eq(J.Json.get_str(p, "op", ""), "clear-limit"), select, h, st, client, rid, p, now)
     case True{}:
       +provider = J.Json.get_str(p, "provider", "")
       +profile = J.Json.get_str(p, "profile", "")
       +epoch = J.Json.get_nat(p, "epoch", 0n)
       Hub.step(h, AccountsRpc.default.step(Bool.and(ACCT.Accounts.supported(provider), Bool.or(Bool.and(String.is_empty(profile), Nat.is_eq(epoch, 0n)), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch))), client, rid, provider, profile, epoch, now))
+
+def AccountsRpc.clear.step(ok: Bool, +st: M.State, +client: U32, +rid: String, +provider: String, profile: String, epoch: Nat, now: Nat) -> B.Step:
+  match ok:
+    case False{}: B.Step.outs([B.Reply.err(client, rid, "The account's sign-in changed. Refresh its status before clearing its availability hold.")])
+    case True{}: B.Step.also(B.AccountFallback.clear(st, now, provider, profile, epoch), [B.Reply.ok(client, rid)])
+
+def Hub.rpc.account.limit(clear: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
+  match clear:
+    case False{}: Hub.rpc.account.kind(select, h, st, client, rid, p, now)
+    case True{}:
+      +provider = J.Json.get_str(p, "provider", "")
+      +profile = J.Json.get_str(p, "profile", "!missing")
+      +epoch = J.Json.get_nat(p, "epoch", 0n)
+      Hub.step(h, AccountsRpc.clear.step(Bool.or(ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch),
+        String.is_empty(profile) && Nat.is_eq(epoch, 0n) && ACCT.Accounts.supported(provider)), st, client, rid, provider, profile, epoch, now))
 
 def Hub.rpc.accounts(account: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
   match account h:
@@ -15727,6 +15782,9 @@ def Upload.json(+status: String, +ok: Bool, +thread: String, +v: String) -> List
     [J.KV{"attached", J.Str{v}}, J.KV{"thread", J.Str{thread}}],
     [J.KV{"text", J.Str{v}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}])))), "")
 
+def Upload.failure(status: String, thread: String, id: String, detail: String) -> List<&2, U32>:
+  W.Http.response(status, "application/json", U.Utf8.encode(J.Json.show(NT.Notice.upload.reply(thread, id, detail))), "")
+
 def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String, +path: String) -> IO(Unit):
   (s, res) = r
   match res:
@@ -15735,7 +15793,7 @@ def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String
     case Fail{_}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Conn.finish(s, Upload.json("400 Bad Request", False{}, thread, "the upload did not arrive whole"))
+        Conn.finish(s, Upload.failure("400 Bad Request", thread, "upload.incomplete", ""))
 
 # the head's leftover (the body's start) is written; the rest is copied
 # (a body that came whole with the head has nothing left to copy: the copy
@@ -15769,7 +15827,7 @@ def Upload.go(cont: Bool, s: Socket) -> IO(Socket):
 def Upload.into.k(big: Bool, s: Socket, +cont: Bool, +lim: Nat, +dir: String, +thread: String, +name: String, +len: Nat, +rest: List<&2, U32>) -> IO(Unit):
   match big:
     case True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(Nat.div(lim, 1048576n)) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(Nat.div(lim, 1048576n))))
     case False{}:
       do IO<Unit>:
         s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
@@ -15797,7 +15855,7 @@ def Upload.gate(ok: Bool, big: Bool, s: Socket, +cont: Bool, +thread: String, +n
     case False{} _:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
     case True{} True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(AT.Att.mb.ceiling()) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(AT.Att.mb.ceiling())))
     case True{} False{}:
       do IO<Unit>:
         +reply : Chan(String) <- Chan.new(String, 1)
@@ -18569,7 +18627,9 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case TelemetryDone{gen, view, id}:
       Hub.telemetry.done(h, gen, view, id, now)
     case Tick{}:
-      IO.bind(Hub, Hub, Hub.tick(h, now), Hub.reexec.poll)
+      do IO<Hub>:
+        DIAG.Diagnostics.tick()
+        IO.bind(Hub, Hub, Hub.tick(h, now), Hub.reexec.poll)
     case ThinFlush{}:
       IO.bind(Nat, Hub, IO.now(), ms => Hub.thin.flush(h, ms))
     case Heart{}:
@@ -18936,6 +18996,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
+        diagnosticStatus : String <- DIAG.Diagnostics.start()
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
         +opened : STO.Opened <- STO.Sto.boot(home)

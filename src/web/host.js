@@ -753,6 +753,7 @@ async function refreshFocusedIdentityFor(generation) {
     restoreDraftAttachments(currentSession());
   }
   attachmentIdentityPending = result.state === "offline" || result.state === "superseded";
+  enterImprovements();
   if (attachmentIdentityPending) attachmentIdentityRetry = setTimeout(() => {
     if (socket?.readyState === 1) void refreshFocusedIdentity();
   }, 1500);
@@ -1736,13 +1737,45 @@ function uploadScope() {
     viewId: controller?.client.links.get(controller.hub)?.viewId,
     identity: cacheIdentity(document.cookie), project: document.querySelector("main.thread-view[data-project]")?.dataset.project || "" };
 }
+async function readDiagnostics() {
+  const response = await fetch('/debug/diagnostics.json', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw Error('Hub diagnostics are unavailable. Uncheck diagnostics to continue.');
+  const text = await response.text();
+  if (new TextEncoder().encode(text).length > 1048576) throw Error('Hub diagnostics exceeded the export limit.');
+  return JSON.parse(text);
+}
+let improvementsVersion = "unknown";
 const improvements = installImprovements({
   rpc: improvementsRpc,
+  reportBody: (...args) => App.issue_report(...args),
+  reportTarget: (saved, legacy) => App.issue_target(saved, legacy),
+  reportPrompt: (...args) => App.improvements_prompt(...args),
+  reportTemplate: (...args) => App.improvements_template(...args),
+  previewBody: body => Wire.plain(App.improvements_preview_body(body)),
+  appVersion: async () => window.backplaneDesktop?.version ? (await window.backplaneDesktop.version()).service : improvementsVersion,
+  diagnostics: {
+    enabled: () => connectionLog.enabled(),
+    setEnabled: async on => {
+      const results = await Promise.allSettled([Promise.resolve().then(() => connectionLog.setEnabled(on)),
+        window.backplaneDesktop?.diagnostics ? window.backplaneDesktop.diagnostics(on ? "on" : "off") : Promise.resolve()]);
+      if (results.some(r => r.status === "rejected")) throw Error("Collection stopped for this page where possible; could not persist every diagnostics preference. Retry the control before restarting.");
+    },
+    clear: async () => { connectionLog.clear();if (window.backplaneDesktop?.diagnostics) await window.backplaneDesktop.diagnostics("clear"); },
+    hubStatus: async () => (await improvementsRpc.request("diagnostics.status", {})),
+    controlHub: async action => { const status = await improvementsRpc.request("diagnostics.control", { action });if (!status.ok) throw Error("Could not save hub diagnostics preference. " + status.error);return status; },
+    snapshot: async () => {
+      let hub = null, desktop = [];
+      if (remoteReady) hub = await readDiagnostics();
+      if (window.backplaneDesktop?.diagnostics) desktop = (await window.backplaneDesktop.diagnostics("read")).records || [];
+      return { connections: [...desktop, ...connectionLog.snapshot()], hub };
+    },
+  },
   ready: () => remoteReady && !!attachmentIdentity && !attachmentIdentityPending,
   identity: () => attachmentIdentity,
   context: async () => {
     const origin = improvementOrigin({ session: currentSession(), doc: document });
     const result = await improvementsRpc.request("improvements.context", { sourceThread: origin.thread });
+    improvementsVersion = result.appVersion || "unknown";
     return improvementContext(origin, result);
   },
   beforeCapture: async () => {
@@ -1752,6 +1785,26 @@ const improvements = installImprovements({
   overlayChanged: () => desktopBrowser.sync(),
   select: async thread => { if (!dispatch("select", thread)) throw Error("The request was sent. Open the new thread in the sidebar."); },
 });
+// Native handoff keeps user-authored text out of request/query logs. Consume
+// once and remove it before any navigation, capture or report dispatch.
+let pendingImprovementEntry = null;
+function enterImprovements() {
+  if (!pendingImprovementEntry || !remoteReady || !attachmentIdentity || attachmentIdentityPending) return;
+  const entry = pendingImprovementEntry;pendingImprovementEntry = null;void improvements.open(entry.target, entry.seed);
+}
+const issueFragment = location.hash.startsWith('#improvements-issue=') ? location.hash.slice(20) : null;
+const internalImprovements = location.hash === '#improvements-internal' || new URLSearchParams(location.search).get('improvements') === 'internal';
+if (issueFragment !== null || internalImprovements) {
+  const clean = new URL(location.href);clean.hash = '';clean.searchParams.delete('improvements');history.replaceState(history.state, '', clean.href);
+  let seed;
+  if (issueFragment !== null) try {
+    if (issueFragment.length <= 360000) { const value = JSON.parse(decodeURIComponent(issueFragment));if (typeof value.description === 'string' && value.description.length <= 120000) seed = value.description; }
+  } catch {}
+  const wanted = internalImprovements ? 'internal' : 'issue';
+  // Trigger after host initialization. This creates no thread or model job.
+  pendingImprovementEntry = { target: wanted, seed };
+  queueMicrotask(enterImprovements);
+}
 async function uploadFiles(action, files, scope = uploadScope()) {
   if (!remoteReady && viewMode !== "compatibility" || viewMode === "compatibility" && socket?.readyState !== 1) {
     offlineAttach = true;
@@ -1782,12 +1835,17 @@ async function upload(action, file, scope = uploadScope(), previous = "") {
   try {
     const r = await fetch(`/attach?${q}`, { method: "POST", body: file, credentials: "same-origin" });
     answer = await r.text();
-    JSON.parse(answer);
   } catch {
-    answer = JSON.stringify({ text: "the upload did not reach the hub", thread, upload: true });
+    answer = JSON.stringify({ uiError: "upload.network", thread, upload: true });
   }
   if (!current()) return;
-  let result;try { result = JSON.parse(answer); } catch { return; }
+  // A primitive or malformed body cannot complete an upload. Keep the
+  // failure tied to its original actor so the pending indicator clears.
+  let result;try { result = JSON.parse(answer); } catch { result = null; }
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    result = { uiError: "upload.failed", thread, upload: true };
+    answer = JSON.stringify(result);
+  }
   if (viewMode !== "compatibility" && result.attached && result.thread === thread) {
     try {
       if (!attachmentIdentity || attachmentIdentity !== scope.identity) throw Error("Attachment identity unverified");
@@ -3389,7 +3447,7 @@ async function startThin(again = false, reason = "initial") {
           // the viewers kept meanwhile.
           viewRecover(state.reason);
         }
-        else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy(); }
+        else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy();enterImprovements(); }
         else if (remoteReady) showViewStatus("");
         if (remoteReady && viewNote) showViewStatus(viewNote);
         // a page's reply on a page already shown: its view decides what is drawn
@@ -3422,8 +3480,9 @@ async function startThin(again = false, reason = "initial") {
       disconnect("frame-limit");try { s.close(); } catch {}return;
     }
     try {
-      const d0 = RR ? pnow() : 0;
+      const d0 = pnow();
       const j = Wire.cbor(bytes, KEYS, WORDS), envelope = Wire.plain(j);
+      connectionLog.measure("frame.decode", pnow() - d0);
       RR?.got?.(envelope, bytes.byteLength, pnow() - d0);
       if (envelope.t === "hb") { s.hb = true;diagnostic.heartbeat();return; }
       if (envelope.t === "notify") { notify(envelope);return; }

@@ -136,6 +136,7 @@ struct ThreadComposer: View {
             }
             .padding(.horizontal).padding(.top, 8)
             if canSend { ComposerExtras(model: model, thread: thread) }
+            if let v = thread.voice { VoiceBar(model: model, voice: v, owner: thread.id) }
             if model.sendFailure == thread.id {
                 Text(NativeMessages.native_thread_send_failed(lang))
                     .font(.caption).foregroundStyle(.red).padding(.horizontal)
@@ -143,6 +144,18 @@ struct ThreadComposer: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 AttachButton(model: model, owner: thread.id).disabled(!canSend)
+                if let v = thread.voice {
+                    let live = v.on || !v.state.isEmpty
+                    Button { model.voicePress(for: thread.id, on: live) } label: {
+                        Image(systemName: live ? "mic.fill" : "mic").font(.system(size: 20))
+                            .foregroundStyle(live ? Color.red : Color.secondary)
+                            .frame(minWidth: 36, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(live ? v.stop : v.mic)
+                    .accessibilityIdentifier("thread.mic")
+                    .disabled(!canSend)
+                }
                 TextField("", text: Binding(get: { model.composerText(for: thread) }, set: { model.editComposer($0, for: thread.id) }), prompt: Text(NativeMessages.native_thread_composer(lang)).foregroundStyle(BackplaneDesign.secondaryText), axis: .vertical)
                     .disabled(!model.canEditComposer(for: thread.id))
                     .lineLimit(1...6)
@@ -174,5 +187,84 @@ struct ThreadComposer: View {
           }
           .background(BackplaneDesign.panel)
 
+    }
+}
+
+// Dictation over the composer (screen.bend's Mob.voice), as calm as the
+// web's strip: a dot, one word for the state, the level and Stop, never the
+// words (they appear only in the draft); a note when something is wrong;
+// after a segment its fixes, each a chip that undoes it; the word to
+// clarify, with its choices.
+struct VoiceBar: View {
+    let model: AppModel
+    let voice: VoiceView
+    let owner: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !voice.note.isEmpty {
+                HStack(spacing: 6) {
+                    Text(voice.note).font(.caption).foregroundStyle(voice.bad ? Color.red : Color.orange).lineLimit(3)
+                    Spacer(minLength: 0)
+                    Button { model.actComposer("voice-err", "", for: owner) } label: { Image(systemName: "xmark").font(.caption) }
+                        .buttonStyle(.borderless)
+                }
+            }
+            if voice.on {
+                HStack(spacing: 8) {
+                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                    Text(voice.status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Rectangle().fill(Color.secondary.opacity(0.2))
+                            Rectangle().fill(Color.accentColor).frame(width: g.size.width * CGFloat(min(max(voice.level, 0), 100)) / 100)
+                        }
+                    }
+                    .frame(width: 72, height: 4)
+                    .animation(.linear(duration: 0.2), value: voice.level)
+                    Spacer(minLength: 0)
+                    Button(voice.stop) { model.voicePress(for: owner, on: true) }
+                        .font(.caption).buttonStyle(.borderless)
+                        .accessibilityIdentifier("voice.stop")
+                }
+                .accessibilityIdentifier("voice.strip")
+            }
+            if !voice.fixes.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(voice.fixes, id: \.value) { f in
+                            Button(f.label) { model.actComposer(f.action, f.value, for: owner) }
+                                .font(.caption).buttonStyle(.bordered)
+                                .accessibilityHint(f.tip ?? "")
+                        }
+                    }
+                }
+            }
+            if let a = voice.ask {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(a.text).font(.caption)
+                    if a.fixing, let f = a.field {
+                        TextField(f.hint, text: Binding(get: { f.value }, set: { model.field(f.name, $0) }))
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .font(.callout).padding(6).background(BackplaneDesign.raised)
+                            .onSubmit { model.actComposer("voice-fixed", "", for: owner) }
+                            .accessibilityIdentifier("voice.spelling")
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(a.buttons, id: \.self) { b in
+                                if b.primary == true {
+                                    Button(b.label) { model.actComposer(b.action, b.value, for: owner) }.font(.caption).buttonStyle(.borderedProminent)
+                                } else {
+                                    Button(b.label) { model.actComposer(b.action, b.value, for: owner) }.font(.caption).buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+                }
+                .accessibilityIdentifier("voice.ask")
+            }
+        }
+        .padding(.horizontal).padding(.top, voice.on || !voice.note.isEmpty || !voice.fixes.isEmpty || voice.ask != nil ? 8 : 0)
     }
 }

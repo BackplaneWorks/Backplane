@@ -16,7 +16,7 @@ NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 KEYWORDS = set('match case def type is where if else return import as law do with use let fork for when switch true false'.split())
 CATEGORIES = ('zero', 'one', 'two', 'few', 'many', 'other')
 LOCALES = (('en', 'En'), ('ja', 'Ja'))
-IOS_INFO_KEYS = {'NSCameraUsageDescription': 'native.permission.camera'}
+IOS_INFO_KEYS = {'NSCameraUsageDescription': 'native.permission.camera', 'NSMicrophoneUsageDescription': 'native.permission.microphone'}
 
 
 class CatalogError(ValueError):

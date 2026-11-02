@@ -3404,7 +3404,7 @@ def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D
     case False{}: Nil{}
     case True{}:
       [D.El{"div", "account-picker", [D.At{"class", "account-picker"}],
-        D.Txt{"Choose an account between turns. Selecting another agent's account switches the agent too. No automatic account fallback."} <>
+        D.Txt{"Choose an account between turns. Usage limits automatically try another connected account of the same agent, then your fallback hierarchy. Your choice returns after its reported reset, between turns."} <>
         D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default " ++ provider ++ " account") <>
         View.accounts.options(ACCT.Accounts.profiles(st), provider)}]
 
@@ -5453,7 +5453,7 @@ def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D
           View.main.b(lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
           D.Dom.cat(View.aside.if(lc, pa, U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
             D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.intent(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
-              D.Dom.cat(View.error(e), D.Dom.cat(View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
+              D.Dom.cat(View.error(U.Ui.error.shown(lc, e)), D.Dom.cat(View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
                 View.star(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))))))))}
 
 def View.page.sidebar.node(reuse: Bool, +lc: I.Loc, u: U.Ui) -> D.Node:
