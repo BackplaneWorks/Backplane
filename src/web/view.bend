@@ -226,9 +226,7 @@ def View.dot.tip(+name: String, +tip: String) -> D.Node:
     D.At{"aria-label", tip}, D.At{"title", tip}], Nil{}}
 
 def View.dot(+lc: I.Loc, +name: String) -> D.Node:
-  D.El{"span", "", [D.At{"class", "dot " ++ name}, D.At{"role", "img"},
-    D.At{"aria-label", SG.Signal.label.loc(lc, name)}, D.At{"title", SG.Signal.label.loc(lc, name)},
-    D.At{"data-status-label", Bool.pick(String, String.eq(name, "finished"), MSG.T.notify.finished(lc), "")}], Nil{}}
+  View.dot.tip(name, SG.Signal.label.loc(lc, name))
 
 # a pinned row's mark, small and dim beside its age
 def View.pin(+lc: I.Loc, pin: Bool) -> List<&2, D.Node>:
