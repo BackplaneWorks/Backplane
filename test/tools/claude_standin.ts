@@ -34,6 +34,9 @@
 //                "tools:N" in the message runs N Bash calls first;
 //                "todos:N/D" sets a to-do list first (TodoWrite): N
 //                steps, the first D done, the next in progress;
+//                "mcp:N" runs N Backplane MCP calls (viewer_show);
+//                "replies:N" posts N short replies, each after a Bash call;
+//                "hold:MS" runs a last Bash call MS before its result;
 //                "agents:N" runs N background subagents (Agent calls)
 //                that finish once the text is posted;
 //                "agentsteps:N" gives each one N tool/text activity rows
@@ -337,6 +340,34 @@ async function run(c: Cmd, firstOne: boolean) {
       emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
         content: [{ type: "tool_use", id, name: "TodoWrite", input: { todos } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "Todos have been modified successfully." }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "mcp:N": N calls of a Backplane MCP tool, each answered
+    for (let k = 1; k <= Number(/mcp:(\d+)/.exec(c.text)?.[1] ?? 0); k++) {
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "mcp__backplane__viewer_show", input: { path: "board.kicad_pcb" } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      await sleep(ms);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "shown" }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "replies:N": N short replies in the turn, each after a Bash call
+    for (let k = 1; k <= Number(/replies:(\d+)/.exec(c.text)?.[1] ?? 0); k++) {
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "Bash", input: { command: `make check${k} # ${tag}` } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      await sleep(ms);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "text", text: `Reply ${k} of ${tag}: check ${k} passed.` }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      await sleep(ms);
+    }
+    // "hold:MS": a last Bash call that runs MS before its result
+    const hold = Number(/hold:(\d+)/.exec(c.text)?.[1] ?? 0);
+    if (hold > 0) {
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "Bash", input: { command: `kicad-cli pcb drc board.kicad_pcb\n# ${tag}` } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      await sleep(hold);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "0 violations" }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     }
     // "agents:N": N subagents in the background (task_started), ended after the text
     const agents = Array.from({ length: Number(/agents:(\d+)/.exec(c.text)?.[1] ?? 0) }, (_, k) => {
