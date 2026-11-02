@@ -27,7 +27,7 @@ function main(argv) {
   assert(r.status === 'PASS' && r.phase === 'done' && !r.error && !r.cleanupError, 'Requires an actual complete PASS; a partial or failed smoke cannot archive');
   const stage = read(path.join(a['--stage'], 'STAGE.json')), inspected = p.inspectStage(a['--stage']);
   assert(p.TARGETS[stage.target], 'Unknown desktop target');
-  assert.deepEqual(r.stage, inspected, 'The smoke ran another stage'); assert.equal(stage.payloadManifestSha256, inspected.payloadManifestSha256);
+  assert.deepEqual(r.stage, inspected, 'The smoke ran another stage'); p.validateSigningChanges(a['--stage'], stage.target === 'darwin-arm64');
   for (const [key, value] of Object.entries({target: stage.target, version: stage.release.version, commit: stage.release.commit, tree: stage.release.tree}))
     assert.equal(r[key], value, key);
   // the smoke that ran is the one the freeze names
@@ -61,7 +61,7 @@ function main(argv) {
     payloadManifestSha256: inspected.payloadManifestSha256, freezeReceiptSha256: stage.release.freezeReceipt.sha256, evidence, fixtureSha256: r.fixture.sha256,
     deferredByUser: r.deferredByUser ?? [], reconnectMode: r.reconnectMode};
   const proofs = {
-    signing: {kind: 'desktop-signing', signed: false, policy: 'unsigned-portable-allowed', scope: 'Unsigned portable disposition satisfied; no code-signing or notarization claim.'},
+    signing: {kind: 'desktop-signing', signed: stage.target === 'darwin-arm64', policy: 'unsigned-portable-allowed', ...(stage.target === 'darwin-arm64' ? {macosIntegrity: r.macosIntegrity} : {}), scope: 'Portable policy; macOS requires ad-hoc bundle integrity. No Developer ID or notarization claim.'},
     sandbox: {kind: 'desktop-sandbox', osEnforced: true, flags: sandbox.argv, kernel: sandbox.kernel ?? null, metric: sandbox.metric ?? null},
     lifecycle: {kind: 'desktop-lifecycle', startup: true, nativeChildIdentity: true, authBound: true, singleInstance: true, reconnect: true, windowClose: 'resident-service',
       closePreservesService: true, shutdown: 'unsupported', managedStopAdvertised: false, managedUpdateAdvertised: false,
