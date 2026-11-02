@@ -20,10 +20,14 @@ try {
   await page.evaluate(()=>window.allowanceFixture('base'));
   await page.locator('#allowance-chip').waitFor();
   assert.equal(await page.locator('#allowance-chip').innerText(),'39% left · shared');
+  const chip=await page.locator('#allowance-chip').evaluate(el=>({clientWidth:el.clientWidth,scrollWidth:el.scrollWidth,font:getComputedStyle(el).font,padding:getComputedStyle(el).padding}));
+  writeFileSync(resolve(out,`${width}-chip.json`),JSON.stringify(chip,null,2)+'\n');
   const bar=await page.locator('.composer-model').evaluate(el=>({group:el.getBoundingClientRect().toJSON(),buttons:[...el.querySelectorAll('button')].map(b=>({text:b.innerText,box:b.getBoundingClientRect().toJSON()}))}));
+  writeFileSync(resolve(out,`${width}-bar.json`),JSON.stringify(bar,null,2)+'\n');
+  await page.screenshot({path:resolve(out,`${width}-closed.png`)});
   assert.equal(bar.buttons.length,3);assert(bar.buttons.every(b=>b.box.x>=0&&b.box.right<=width+1));
   assert(bar.buttons[0].box.width>=120);assert(bar.buttons[2].box.width>0);
-  await page.screenshot({path:resolve(out,`${width}-closed.png`)});
+  assert(await page.locator('#allowance-chip').evaluate(el=>el.scrollWidth<=el.clientWidth),'shared allowance label must fit');
   await Promise.all([page.waitForResponse(r=>r.url().endsWith('/act')&&JSON.parse(r.request().postData()||'{}').action==='draft'),page.locator('#composer').fill('Draft 日本語 👩🏽‍💻')]);
   await page.locator('#allowance-chip').click();
   await page.locator('#allowance-details').waitFor();
