@@ -11,9 +11,10 @@ process.env.ALLOWANCE_PREVIEW_PORT='4043';
 await import('./allowance_preview_v2.mjs');
 const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_PATH||'/home/h/Documents/i2cjak/backplane-bend/tools/browser/node_modules/playwright-core/index.mjs').href);
 const browser=await chromium.launch({executablePath:process.env.CHROME_BIN||'/usr/bin/google-chrome',headless:true,args:['--no-sandbox']});
-const page=await browser.newPage({viewport:{width:1440,height:1000}});const evidence=[];
+const page=await browser.newPage({viewport:{width:1440,height:1000}});const evidence=[],pageErrors=[];page.on('pageerror',error=>pageErrors.push(error.message));
 try {
  await page.goto('http://127.0.0.1:4043');
+ await page.waitForFunction(()=>typeof window.allowanceFixture==='function');
  for (const width of [1440,390,320]) {
   await page.setViewportSize({width,height:width===1440?1000:844});
   await page.evaluate(()=>window.allowanceFixture('base'));
@@ -47,7 +48,8 @@ try {
   assert(heights.every(h=>Math.abs(h-heights[0])<1));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   evidence.push({width,bar,pop,stableStateHeights:heights});
  }
- const receipt={result:'PASS',scope:'Chromium rendered production Bend page/composer with synthetic snapshots and real Bend UI actions; not installed app or live provider data',fixtureSha256:sha(process.argv[2]),styleSha256:sha('src/web/style.css'),keyboardSha256:sha('src/web/workspace-keys.js'),captureScriptSha256:sha('test/tools/allowance_capture.mjs'),evidence};
+ assert.deepEqual(pageErrors,[]);
+ const receipt={pageErrors,result:'PASS',scope:'Chromium rendered production Bend page/composer with synthetic snapshots and real Bend UI actions; not installed app or live provider data',fixtureSha256:sha(process.argv[2]),styleSha256:sha('src/web/style.css'),keyboardSha256:sha('src/web/workspace-keys.js'),captureScriptSha256:sha('test/tools/allowance_capture.mjs'),evidence};
  writeFileSync(resolve(out,'receipt.json'),JSON.stringify(receipt,null,2)+'\n');
  console.log('ok production composer rendered at 1440,390,320 widths; details, shared scope, drafts, Escape/focus, stale/unknown/reset and stable height');
 } finally {await browser.close();}
