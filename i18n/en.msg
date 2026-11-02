@@ -319,10 +319,11 @@ history.turn.ended = Turn ended
 history.after.reply = After reply
 history.source.unknown = Source unavailable
 history.count.label = Design changes
-history.count.tip = Saved board and schematic changes in this thread, captured after tool calls. Browse them in the viewer history.
+history.count.tip = Saved board and schematic changes in this thread, captured after tool calls. Click to browse them in the viewer's history, which counts the board's or the schematic's alone.
 history.comparing = Comparing
 history.live = Live
 history.live.steps = Live · {count} {plural, select, one {change} other {changes}}
+history.live.steps.of = Live · {count} of {total} changes
 
 # review panel
 review.bom = BOM

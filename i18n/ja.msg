@@ -332,10 +332,11 @@ history.turn.ended = ターン終了
 history.after.reply = 返信の後
 history.source.unknown = 保存元不明
 history.count.label = 設計の変更
-history.count.tip = このスレッドでツール実行後に保存された基板・回路図の変更です。ビューアの履歴で確認できます。
+history.count.tip = このスレッドでツール実行後に保存された基板・回路図の変更です。クリックするとビューアの履歴で確認できます。履歴は基板または回路図の変更だけを数えます。
 history.comparing = 比較中
 history.live = 現在
 history.live.steps = {plural, select, one {現在 · 変更{count}件} other {現在 · 変更{count}件}}
+history.live.steps.of = 現在 · 変更{total}件中{count}件
 
 # review panel
 review.bom = BOM
