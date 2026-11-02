@@ -6,6 +6,7 @@ import ../core/botui.bend as BI
 import ../core/client.bend as U
 import ../core/presentation.bend as P
 import ../core/thin.bend as T
+import ../core/thin-chat.bend as TC
 import ../core/far.bend as FR
 import ../core/hub.bend as HB
 import ../core/subs.bend as SB
@@ -467,7 +468,7 @@ def Render.window(+s: TL.Stream, +index: T.Index, +thread: String, +p: J.Json, +
 def Render.pill.k(away: Bool, +st: M.State, +thread: String, +seen: String, +live: String) -> String:
   match away:
     case False{}: ""
-    case True{}: U.Hold.label(U.Hold.count.k(M.State.mine(st, thread), seen), U.Hold.any.k(M.State.mine(st, thread), seen, live))
+    case True{}: U.Hold.shown(TC.Chat.enabled(st, thread), M.State.mine(st, thread), seen, Bool.not(String.is_empty(live)))
 
 def Render.pill(+st: M.State, +thread: String, +seen: String, +stream: TL.Stream) -> String:
   Render.pill.k(Bool.not(String.is_empty(seen)), st, thread, seen, Bool.pick(String, Nat.is_gt(TL.Stream.size(stream), 0n), "1", ""))

@@ -10421,6 +10421,22 @@ law hold_at_end_zero:
 law hold_label_nothing:
   {U.Hold.label(0n, False{}) == "" : String}
 
+# A stopped displayed-entry scan never invents new output.
+law hold_shown_stopped:
+  for es: List<&2, M.Entry>
+  for chat: Bool
+  for seen: String
+  for n: Nat
+  for any: Bool
+  {U.Hold.shown.scan(es, True{}, chat, seen, n, any) == U.Hold.label(n, any) : String}
+
+# Internal chat receipts and empty assistant bodies are absent from the badge.
+law hold_shown_receipt_hidden:
+  {U.Hold.visible(True{}, M.Act{"ride:receipt", "t", "info", "ride", "internal", 1n}) == False{} : Bool}
+
+law hold_shown_empty_hidden:
+  {U.Hold.visible(True{}, M.Msg{"empty", "t", M.Assistant{}, "", 1n}) == False{} : Bool}
+
 # the entry seen is the newest: nothing is counted as new
 law hold_fresh_seen:
   for +e: M.Entry

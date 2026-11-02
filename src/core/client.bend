@@ -12033,6 +12033,18 @@ def Hold.newest(es: List<&2, M.Entry>) -> String:
     case e <> _:
       M.Idx.id(e)
 
+# A bounded renderer can add a transient streaming row above the source
+# window. Bookmarks name committed source entries, including folded calls.
+def Hold.source.scan(es: List<&2, M.Entry>, found: Bool, id: String) -> String:
+  match es found:
+    case _ True{}: id
+    case Nil{} False{}: "-"
+    case +e <> t False{}:
+      Hold.source.scan(t, Bool.not(String.starts_with(M.Idx.id(e), "@live:")), M.Idx.id(e))
+
+def Hold.source(es: List<&2, M.Entry>) -> String:
+  Hold.source.scan(es, False{}, "-")
+
 def Hold.mark.k(has: Bool, +u: Ui, +k: String, +th: String) -> Ui:
   match has:
     case True{}:
@@ -12100,11 +12112,30 @@ def Hold.any.k(+es: List<&2, M.Entry>, +seen: String, +live: String) -> Bool:
 def Hold.label(+n: Nat, any: Bool) -> String:
   Bool.pick(String, Nat.is_gt(n, 0n), Bool.pick(String, Nat.is_ge(n, Hold.most()), "99+ new ↓", Nat.show(n) ++ " new ↓"), Bool.pick(String, any, "New ↓", ""))
 
+# Count the same entries the conversation can show. Test the raw source
+# boundary BEFORE skipping hidden entries: an existing bookmark may name
+# an internal receipt or an empty assistant commit from an older client.
+# Outgoing links still have visible navigation even when their body is empty.
+def Hold.visible(+chat: Bool, +e: M.Entry) -> Bool:
+  Bool.and(Bool.not(Bool.and(chat, TC.Chat.hidden(e))),
+    Bool.or(Bool.not(String.is_empty(M.Link.from(M.Idx.id(e)))), Bool.not(FO.Fold.blank(e))))
+
+def Hold.shown.scan(es: List<&2, M.Entry>, stop: Bool, +chat: Bool, +seen: String, +n: Nat, +any: Bool) -> String:
+  match es stop:
+    case _ True{}: Hold.label(n, any)
+    case Nil{} False{}: Hold.label(n, any)
+    case +e <> +t False{}:
+      +visible = Hold.visible(chat, e)
+      +count = Nat.add(n, Bool.pick(Nat, visible, Hold.msg(e), 0n))
+      Hold.shown.scan(t, Hold.stop(t, seen, count), chat, seen, count, Bool.or(any, visible))
+
+def Hold.shown(+chat: Bool, +es: List<&2, M.Entry>, +seen: String, live: Bool) -> String:
+  Hold.shown.scan(es, Hold.stop(es, seen, 0n), chat, seen, 0n, live)
+
 def Hold.pill.k(away: Bool, +u: Ui, +th: String) -> String:
   match away:
     case True{}:
-      Hold.label(Hold.count.k(M.State.mine(Ui.state.of(u), th), Ui.scratch(u, "@away." ++ th)),
-        Hold.any.k(M.State.mine(Ui.state.of(u), th), Ui.scratch(u, "@away." ++ th), Ui.live.of(u, th)))
+      Hold.shown(TC.Chat.enabled(Ui.state.of(u), th), M.State.mine(Ui.state.of(u), th), Ui.scratch(u, "@away." ++ th), Bool.not(String.is_empty(Ui.live.of(u, th))))
     case False{}:
       ""
 

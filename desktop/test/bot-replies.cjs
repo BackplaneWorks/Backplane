@@ -39,6 +39,9 @@ let app,page;const start=performance.now();
  const ready=async id=>page.waitForFunction(id=>document.querySelector('main')?.dataset.thread===id&&document.documentElement.dataset.backplaneRemoteReady==='true',id);
  const chat=async()=>{await page.locator(`[data-on-click="select"][data-value="${bub}"]`).first().click();await ready(bub);};
  await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true');await chat();
+ // The initial bottom viewport virtualizes the first message. Reach it
+ // through the real scroller before checking its context header.
+ await page.evaluate(()=>{const t=document.getElementById('timeline');t.scrollTop=0;});
  // the header: the thread linked most, its title, +1 for the other
  const head=page.locator('[data-id="m-bot1"] .msg-ctx a.ref.ctx');
  assert.equal(await head.innerText(),title);
