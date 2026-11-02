@@ -127,7 +127,7 @@ try{
  if(attempt){const cancel=await account({op:'cancel',profile:C.id,attempt:attempt.id});check('cancel account ceremony',cancel.ok,cancel);await pause(1400);check('late cancelled completion cannot create a connected account',(await list()).profiles.find((x:any)=>x.id===C.id)?.state!=='connected');}
  const cl=await add('Claude','claude');await account({op:'login',profile:cl.id});
  let ca:any;for(let i=0;i<100;i++){ca=(await list()).attempts?.find((x:any)=>x.profile===cl.id&&x.state==='waiting');if(ca?.url)break;await pause(30);}
- check('Claude login exposes only its provider ceremony',ca?.url?.startsWith('https://claude.ai/'),ca);
+ check('Claude login exposes its current code=true provider ceremony',ca?.url?.startsWith('https://claude.com/cai/oauth/authorize?code=true&'),ca);
  if(ca){const response=await account({op:'respond',profile:cl.id,attempt:ca.id,code:'fixture-code'});check('Claude in-app response accepted for its bound attempt',response.ok,response);const cp=await connected(cl.id);check('Claude authenticated identity and init-only model catalog',cp.identity?.email==='claude@example.test'&&cp.catalog?.length,cp);}
  const logout=await account({op:'disconnect',profile:B.id});check('disconnect B succeeds',logout.ok,logout);const after=await list();check('disconnect B preserves A and legacy thread',after.profiles.find((x:any)=>x.id===A.id)?.state==='connected'&&binding()===ownerA);
  writeFileSync(join(root,'RESULT.json'),JSON.stringify({passed:!failed,scope:'fake CLI actual isolated hub only',home,port,thread,base:'7eccc1e6f29187929d24e0cbb4a8d85127f9d713'},null,2));

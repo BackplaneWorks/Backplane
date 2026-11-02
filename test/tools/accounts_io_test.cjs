@@ -20,7 +20,7 @@ if(provider==='claude'){
  if(args[0]==='auth'&&args[1]==='status'){const i=identity();console.log(JSON.stringify({loggedIn:!!i,authMethod:i?'claude.ai':'none',email:i?.email,orgUuid:i?.workspace,configDirectory:config().hideDirectory?undefined:home}));process.exit(i?0:1);}
  if(args[0]==='auth'&&args[1]==='logout'){try{fs.unlinkSync(marker);}catch{}console.log('{}');process.exit(0);}
  if(args[0]==='auth'&&args[1]==='login'){
-  console.log('https://claude.ai/oauth/authorize?state=fake-state');
+  console.log('https://claude.com/cai/oauth/authorize?code=true&response_type=code&state=fake-state&code_challenge=fixture');
   const rl=readline.createInterface({input:process.stdin});rl.on('line',line=>{if(line==='fixture-code'){save();process.exit(0);}else process.exit(1);});
  }else if(args.includes('--input-format')){const rl=readline.createInterface({input:process.stdin});rl.on('line',line=>{const q=JSON.parse(line);if(q.type!=='control_request'||q.request?.subtype!=='initialize')process.exit(94);console.log(JSON.stringify({type:'control_response',response:{request_id:q.request_id,response:{models:[{value:'fixture-claude',displayName:'Fixture Claude',supportedEffortLevels:['low']}]}}}));});}else process.exit(91);
 }else{
@@ -77,7 +77,7 @@ function ok(name){passed++;console.log('ok '+name);}
  assert.equal(launched.env.CODEX_HOME,m.directory(a));assert(launched.args.includes('session-a'));await assert.rejects(()=>m.launch(a.id,'1','codex',[],root,0));ok('child environment and epoch checked at launch');
  await m.request({op:'login',profile:c.id});const ca=[...m.attempts.values()].find(x=>x.profile===c.id);
  for(let i=0;i<30&&ca.state!=='waiting';i++)await delay(10);
- assert.equal(ca.state,'waiting');assert(ca.url.startsWith('https://claude.ai/'));
+ assert.equal(ca.state,'waiting');assert(ca.url.startsWith('https://claude.com/cai/oauth/authorize?code=true&'));
  await assert.rejects(()=>m.request({op:'respond',profile:c.id,attempt:aa.id,code:'fixture-code'}));
  await m.request({op:'respond',profile:c.id,attempt:ca.id,code:'fixture-code'});assert.equal((await terminal(m,ca.id)).state,'done');ok('Claude browser ceremony takes a response only for its own active attempt');
  await m.request({op:'add',provider:'codex',label:'Cancel'});const cancel=m.profiles.at(-1);
@@ -91,6 +91,12 @@ function ok(name){passed++;console.log('ok '+name);}
  await m.request({op:'disconnect',profile:b.id});assert.equal(b.state,'disconnected');assert.equal(b.allowance,null);assert.equal(b.catalog.length,0);assert.equal(c.state,'connected');ok('disconnect invalidates only selected profile');
  const registry=fs.readFileSync(m.index,'utf8');for(const secret of ['fixture-secret-anthropic','fixture-secret-openai','fixture-code','FIXTURE-ONLY'])assert(!registry.includes(secret));assert.equal(fs.statSync(m.index).mode&0o777,0o600);assert.equal(fs.statSync(m.root).mode&0o777,0o700);assert.equal(fs.readFileSync(path.join(path.join(root,'existing-default'),'preserve'),'utf8'),'unchanged');ok('private metadata excludes credential/ceremony values and existing default stays intact');
  assert.equal(m.url('https://attacker.example/auth','claude'),'');assert.equal(m.url('https://claude.ai/?access_token=fixture','claude'),'');assert.equal(m.url('http://claude.ai/','claude'),'');ok('provider authorization links use exact HTTPS allowlist');
+ const claudeLogin='https://claude.com/cai/oauth/authorize?code=true&response_type=code&state=fixture&code_challenge=fixture';
+ assert.equal(m.url(claudeLogin,'claude'),claudeLogin);
+ assert.equal(m.url('https://claude.ai/oauth/authorize?state=fixture','claude'),'https://claude.ai/oauth/authorize?state=fixture');
+ for(const link of [claudeLogin.replace('code=true','code=fixture-secret'),claudeLogin+'&code=fixture-secret',claudeLogin+'&code=true',claudeLogin+'&access_token=fixture-secret',claudeLogin+'&refresh_token=fixture-secret',claudeLogin.replace('/cai/oauth/authorize','/callback'),claudeLogin.replace('claude.com','claude.com.attacker.example'),claudeLogin.replace('https:','http:')])assert.equal(m.url(link,'claude'),'');
+ assert.equal(m.url(claudeLogin,'codex'),'');assert.equal(m.url('https://auth.openai.com/callback?code=true','codex'),'');
+ ok('current Claude code=true authorization link works; callback codes, duplicate codes, tokens and foreign hosts remain blocked');
  assert.equal(c.catalog[0].id,'fixture-claude');ok('Claude catalog is initialized without any user/model prompt');
  const beforeStore=c.store,beforeEpoch=c.epoch,beforeIdentity=c.identity.email;
  await m.request({op:'login',profile:c.id});const retry=[...m.attempts.values()].find(x=>x.profile===c.id);

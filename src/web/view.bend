@@ -226,7 +226,9 @@ def View.dot.tip(+name: String, +tip: String) -> D.Node:
     D.At{"aria-label", tip}, D.At{"title", tip}], Nil{}}
 
 def View.dot(+lc: I.Loc, +name: String) -> D.Node:
-  View.dot.tip(name, SG.Signal.label.loc(lc, name))
+  D.El{"span", "", [D.At{"class", "dot " ++ name}, D.At{"role", "img"},
+    D.At{"aria-label", SG.Signal.label.loc(lc, name)}, D.At{"title", SG.Signal.label.loc(lc, name)},
+    D.At{"data-status-label", Bool.pick(String, String.eq(name, "finished"), MSG.T.notify.finished(lc), "")}], Nil{}}
 
 # a pinned row's mark, small and dim beside its age
 def View.pin(+lc: I.Loc, pin: Bool) -> List<&2, D.Node>:
@@ -3749,7 +3751,7 @@ def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +conte
 # make, so the hub can draw it alone for another page of rows (thin-view
 # .bend's Page.splice) and put it into the page it drew before
 def View.thread.timeline(+lc: I.Loc, +st: M.State, +id: String, +drafts: Map<&2, String>, +nf: Map<&2, String>, +turn: M.TurnState, +tr: U.MailvLocal, +now: Nat, +live: Map<&2, String>, pend: List<&2, String>, fab: List<&2, D.Node>, +pill: String) -> D.Node:
-  D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
+  D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}, D.At{"data-reading-seen", U.Hold.source(M.State.mine(st, id))}], List.concat(&2, D.Node, [
     fab, View.parent.loc(lc, st, id, U.Tasks.up(st, id)),
     [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
     View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),
@@ -5279,6 +5281,7 @@ def View.chrome.tools(+lc: I.Loc, settings: Bool) -> D.Node:
   D.El{"div", "", [D.At{"class", "tb"}], [
     D.El{"button", "", [D.At{"type", "button"}, D.At{"data-improvements", ""}, D.At{"title", "Improvements"}, D.At{"aria-label", "Improvements"}], [WI.WIcon.svg("message-square", 15), D.Dom.span("improvements-label", "Improvements")]},
     WI.WIcon.button("find-open", "thin-search-open", "", "Search conversations · Ctrl+Shift+F", "search", 15, ""),
+    D.El{"button", "desktop-browser-global-reconnect", [D.At{"type", "button"}, D.At{"data-desktop-browser-reconnect", ""}, D.At{"data-desktop-browser-global-reconnect", ""}, D.At{"hidden", ""}, D.At{"style", "display:none"}, D.At{"title", "Reconnect Browser"}, D.At{"aria-label", "Reconnect Browser"}], [WI.WIcon.svg("link", 15)]},
     WI.WIcon.button(Bool.pick(String, settings, "gear on", "gear"), "flag", "settings", MSG.T.palette.settings(lc), "settings", 15, "")]}
 
 def View.chrome.bar(+lc: I.Loc, +settings: Bool, bv: BI.View, +u: U.Ui) -> D.Node:

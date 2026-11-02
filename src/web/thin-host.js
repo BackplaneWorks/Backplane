@@ -13,6 +13,28 @@ import { SentClaims } from './sent-claims.js';
 export const HELD_IDS = 600;
 const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
+// The greeting fences the receiving hub. Linked history has its own epoch,
+// carried by the hub's existing v1 page cursors (including mirror basis).
+// Inspect only for optional visual reuse; never rewrite or authorize a cursor.
+// Unknown cursor formats disable retained linked-history reuse.
+function owningHistoryEpoch(window, target, conversation, localEpoch) {
+  if (!conversation?.includes('~')) return localEpoch;
+  for (const token of [window?.older, window?.olderNext]) {
+    if (typeof token !== 'string' || token.length > 8192) continue;
+    try {
+      const cursor = JSON.parse(token);
+      if (cursor.version === 1 && cursor.query === '' && cursor.target?.kind === target?.kind && cursor.target?.id === target?.id
+        && typeof cursor.epoch === 'string' && cursor.epoch.length > 0 && cursor.epoch.length <= 1024) return cursor.epoch;
+    } catch { /* Opaque/older cursors remain the server's to validate. */ }
+  }
+  return null;
+}
+function freshHistoryPosition(position, ids) {
+  if (position?.atEnd) return { atEnd: true };
+  const source = position?.anchor?.replace(/^fold:/, '');
+  return source && ids.includes(source) ? position : { top: 0, atEnd: false };
+}
+
 function choices(value, accept) {
   const out = {};
   for (const [key, item] of Object.entries(object(value) ? value : {})) {
@@ -119,6 +141,7 @@ export class ThinHost {
     this.terminalBytes = 0;this.sent = new SentClaims();
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
+    this.pendingNewest = false;
     // The pages whose rows the page holds (timeline-history.bend keeps every
     // row drawn since the view was last reset), oldest first, each its trail
     // (cursor, back), the cursor older than it and its entry ids: the first
@@ -170,9 +193,15 @@ export class ThinHost {
     const result = this.client.connect(this.hub, header);
     if (result.connected !== true) { this.fail('Unsupported view greeting');return; }
     this.greeted = true;this.epoch = header.epoch;
+    const reading = this.api.readingState;
+    if (reading?.hub === this.hub && reading.epoch === this.epoch) {
+      this.pagePositions = new Map(reading.positions);
+      this.pagePositionBytes = [...this.pagePositions.values()].reduce((n, p) => n + p.bytes, 0);
+    }
     this.select(this.api.target(this.session));
   }
   select(target) {
+    this.pendingNewest = false;
     // A new view may have a fresh actor. Its response alone owns the upload
     // paths; locally retained bytes are admitted again by the upload helper.
     const drafts = { ...this.session.drafts };
@@ -190,8 +219,11 @@ export class ThinHost {
     for (const operation of this.actions) operation.settled?.(false);
     this.actions = [];this.terminalBytes = 0;this.fields.clear();
     this.messages.clear();this.target = target;
-    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pagingNext = null;this.pageError = null;this.awayMark = null;this.held = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
-    this.api.selection?.(target, this.session);
+    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pagingNext = null;this.pageError = null;
+    this.awayMark = this.restorePage?.away ? { thread: this.session.sel, mark: this.restorePage.away } : null;
+    this.held = null;this.retainedHistory = false;this.historyEpoch = null;this.historyResetPending = false;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
+    const retained = this.api.selection?.(target, this.session);
+    if (retained?.pages?.length) { this.held = retained;this.retainedHistory = true; }
     const sent = this.flush(this.client.select(this.hub, target, requestSession(this.session, false, target), this.api.cid), { selection: true });
     this.opening = sent;
     return sent;
@@ -207,9 +239,16 @@ export class ThinHost {
     let cursor = base.cursor, back = base.back.slice();
     // The reader can still be in the outgoing visual bridge. Restore the
     // adjacent issued page that actually contains that visible message.
+    const source = position.position?.anchor?.replace(/^fold:/, '');
+    const pages = this.held?.pages || [], contains = page => page.ids.includes(source);
+    const reading = pages.find(page => page.cursor === cursor && page.back.length === back.length && contains(page)) || pages.find(contains);
     if (position.adjacent === 'newer' && back.length) cursor = back.pop();
     else if (position.adjacent === 'older' && this.window?.older) { back.push(cursor);cursor = this.window.older; }
-    const saved = { cursor, back, position: position.position, conversation: this.conversation };
+    else if (reading) { cursor = reading.cursor;back = reading.back.slice(); }
+    if (back.length > 512) return;
+    const wantsNewest = this.pendingNewest || this.paging?.direction === 'newest';
+    const saved = { cursor: wantsNewest ? '' : cursor, back: wantsNewest ? [] : back,
+      position: wantsNewest ? { atEnd: true } : position.position, conversation: this.conversation, away: this.awayOf(this.session.sel), historyEpoch: this.historyEpoch };
     const bytes = utf8Bytes(JSON.stringify(saved)), key = JSON.stringify([this.hub, this.epoch, this.target]);
     const old = this.pagePositions.get(key);
     if (old) { this.pagePositionBytes -= old.bytes;this.pagePositions.delete(key); }
@@ -218,6 +257,11 @@ export class ThinHost {
     while (this.pagePositions.size > 8 || this.pagePositionBytes > 65536) {
       const oldest = this.pagePositions.keys().next().value;this.pagePositionBytes -= this.pagePositions.get(oldest).bytes;this.pagePositions.delete(oldest);
     }
+  }
+  readingState() {
+    if (!this.ready) return null;
+    this.rememberPage();
+    return { hub: this.hub, epoch: this.epoch, positions: new Map(this.pagePositions) };
   }
   // Every view request names the shown thread's away mark ("" at the end),
   // so the hub draws the pill over the newest page and any other.
@@ -228,6 +272,9 @@ export class ThinHost {
   // (''): the view is asked for again, with the pill or without it.
   away(thread, mark) {
     const was = this.awayMark?.thread === thread ? this.awayMark.mark : '';
+    // Re-rendering/reconnecting while still away must not consume arrivals.
+    // Only an explicit end clears the first boundary, as Hold.away does.
+    if (mark && was) return;
     this.awayMark = mark ? { thread, mark } : this.awayMark?.thread === thread ? null : this.awayMark;
     if (was !== mark && thread === this.session.sel) this.update();
   }
@@ -498,6 +545,10 @@ export class ThinHost {
   // the rows held are only the page on show (host.js reset its history)
   heldReset() { this.held = this.ready ? this.heldHere() : null; }
   heldShown(paged) {
+    if (paged?.direction === 'restore' && this.retainedHistory) {
+      this.retainedHistory = false;this.heldUpdate();return;
+    }
+    this.retainedHistory = false;
     const page = this.heldPage(paged?.destination || this), same = p => p.cursor === page.cursor && p.back.length === page.back.length;
     if (!this.held || !paged || paged.direction === 'restore' || paged.direction === 'newest') { this.held = this.heldHere();return; }
     const pages = this.held.pages.filter(p => !same(p));
@@ -525,10 +576,25 @@ export class ThinHost {
   // Straight to the newest page (the "new" pill on an earlier page): the
   // trail is let go, as a send does.
   newest() {
-    if (!this.ready || this.atNewest() || this.paging || this.pageActionPending()) return false;
+    if (!this.ready && !this.opening) return false;
+    // A click is an intent, not a best-effort page request. Retain it while
+    // an issued page/action owns the reply; never let that older reply land
+    // after a prematurely issued newest request and strand the local trail.
+    if (!this.ready || this.paging || this.pagingNext || this.pageActionPending()) { this.pendingNewest = true;return true; }
+    this.pendingNewest = false;
+    if (this.atNewest()) return false;
     const undo = { cursor: this.cursor, back: this.back.slice() };
     this.cursor = '';this.back = [];
     return this.pageTo('', undo, 'newest');
+  }
+  newestDue() {
+    if (!this.pendingNewest || !this.ready || this.paging || this.pagingNext || this.pageActionPending()) return false;
+    if (this.atNewest()) {
+      this.pendingNewest = false;
+      this.api.command({ type: 'scroll' }, {}, true);
+      return true;
+    }
+    return this.newest();
   }
   pageFailed(page, reason) {
     this.cursor = page.undo.cursor;this.back = page.undo.back;
@@ -551,7 +617,12 @@ export class ThinHost {
     }
     return this.pageError?.direction === 'newer' ? this.newer() : this.pageError?.direction === 'newest' ? this.newest() : this.pageError ? this.page() : false;
   }
-  atNewest() { return this.back.length === 0; }
+  atNewest() {
+    // The trail describes issued navigation; the accepted source window
+    // describes what is actually available. A restored/late older window
+    // can have newer rows even when this connection has no local trail.
+    return this.back.length === 0 && (!!this.paging || !(this.window?.newer > 0));
+  }
   search(query, cursor = '') {
     if (!this.ready) return false;
     return this.flush(this.client.request(this.hub, 'view.search', { query, cursor }));
@@ -685,7 +756,7 @@ export class ThinHost {
     if (this.overtaken.delete(envelope.id)) { this.pump(true);return true; }
     if (paged && result.failed) {
       this.cursor = paged.undo.cursor;this.back = paged.undo.back;
-      if (dropped || this.isCurrent(metadata)) { this.pageFailed(paged, result.failed);this.pump(true);return true; }
+      if (dropped || this.isCurrent(metadata)) { this.pageFailed(paged, result.failed);this.pump(true);this.newestDue();return true; }
     }
     if (paged && !result.failed && !result.current) {
       // A later action can retire a page's picture after the hub applied its
@@ -724,7 +795,11 @@ export class ThinHost {
     // its picture is the one on show, so it is neither validated nor decoded
     // again, and the page is not rendered for it. Its session and commands
     // still apply. A page or a navigation always draws.
-    const same = result.unchanged === true && !paged && !r.nextTarget;
+    const same = result.unchanged === true && !paged && !r.nextTarget && !this.historyResetPending;
+    // A queued viewer choice waits for history reads in pump(). The accepted
+    // page still bridges the rows on screen to the next page; dropping only
+    // its picture leaves held/cursor ahead of what the reader can reach.
+    const pictureCurrent = !!paged || (metadata?.viewerRevision ?? 0) === this.viewerRevision;
     // Validate the entire normal renderer tree and every ordinary command
     // before the first effect. The shared callbacks above remain pure.
     let node;
@@ -733,7 +808,7 @@ export class ThinHost {
       this.validatePresentation({ session: r.session, view: r.nextTarget || result.inputOnly || same ? { type: 'text', text: '' } : r.shown, cmds: r.cmds });
       if (RR) RR.t?.('land.validate', performance.now() - v0);
       if (r.session.rid >= 2 ** 47) throw Error('Ordinary counter overlaps view namespace');
-      if (!r.nextTarget && !result.inputOnly && !same && (metadata?.viewerRevision ?? 0) === this.viewerRevision) node = this.api.decode(r.shown, r, metadata?.input);
+      if (!r.nextTarget && !result.inputOnly && !same && pictureCurrent) node = this.api.decode(r.shown, r, metadata?.input);
     } catch {
       metadata?.operation?.settled?.(false);
       if (paged && result.current) this.pageFailed(paged, 'Invalid rendered view');
@@ -754,6 +829,9 @@ export class ThinHost {
         // a draft the request carried bounded is this page's alone: what
         // the hub made of the bounded text is never adopted (or saved)
         if (key === responseSession.sel && metadata?.input?.session?.drafts?.['@draft.bound']) continue;
+        // Navigation carried only its source conversation's private draft.
+        // A destination it did not send cannot overwrite that local draft.
+        if (key === responseSession.sel && key !== metadata?.input?.session?.sel && Object.hasOwn(this.session.drafts, key)) continue;
         if (key === responseSession.sel || key.startsWith('@')) Object.defineProperty(drafts, key, { value: text, enumerable: true, writable: true, configurable: true });
       }
       // each thread's viewer open or shut ("panel:<t>") is this page's own,
@@ -828,11 +906,26 @@ export class ThinHost {
         const current = partial.get(previous.id);
         if (!current || current.version !== previous.version) this.messages.reset(previous.id);
       }
+      const resumed = result.method === 'view.open' ? this.restorePage : null;
+      const incomingEpoch = owningHistoryEpoch(result.window, this.target, r.session.sel, this.epoch);
+      const previousEpoch = resumed?.historyEpoch ?? this.historyEpoch;
+      const changedHistory = previousEpoch != null && incomingEpoch != null && previousEpoch !== incomingEpoch;
+      const rejectedHistory = this.retainedHistory && (incomingEpoch == null || previousEpoch !== incomingEpoch);
+      const rejectedResume = resumed && r.session.sel?.includes('~') && (incomingEpoch == null || resumed.historyEpoch !== incomingEpoch);
+      if (changedHistory || rejectedHistory || rejectedResume) {
+        this.held = null;this.retainedHistory = false;this.historyResetPending = true;
+        this.cursor = '';this.back = [];
+        const key = JSON.stringify([this.hub, this.epoch, this.target]), old = this.pagePositions.get(key);
+        if (old) { this.pagePositionBytes -= old.bytes;this.pagePositions.delete(key); }
+      }
+      this.historyEpoch = incomingEpoch;
       this.ready = true;this.opening = false;this.window = result.window;
       let position = paged?.position;
+      if (changedHistory && !resumed) position = this.awayMark ? { top: 0, atEnd: false } : { atEnd: true };
       if (result.method === 'view.open' && this.restorePage) {
         const saved = this.restorePage;this.restorePage = null;position = saved.position;
-        if (saved.conversation !== r.session.sel) position = undefined;
+        if (saved.conversation !== r.session.sel) { position = undefined;this.awayMark = null; }
+        else if (changedHistory || rejectedResume) position = freshHistoryPosition(saved.position, result.window.ids);
         else if (saved.cursor) {
           this.cursor = saved.cursor;this.back = saved.back.slice();
           this.pageTo(this.cursor, { cursor: '', back: [] }, 'restore', position);return true;
@@ -840,17 +933,22 @@ export class ThinHost {
       }
       this.conversation = r.session.sel;
       if (paged) { this.pageError = null;this.api.pageState?.(null);this.pageMs = 0.7 * this.pageMs + 0.3 * Math.max(0, (this.api.now?.() ?? Date.now()) - paged.at); }
-      if (paged || !this.held) this.heldShown(paged);
+      if (this.historyResetPending) {
+        this.held = this.heldHere();
+        position = freshHistoryPosition(position, result.window.ids);
+      } else if (paged || !this.held) this.heldShown(paged);
       else this.heldUpdate();
-      if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
+      if (pictureCurrent) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
-        page: paged && { direction: paged.direction, before: paged.before }, position, changed: result.changed });
+        page: paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
+      if (pictureCurrent) this.historyResetPending = false;
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
       this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged });
       this.handOver();
     } else if (result.current && !this.refuse(metadata, 'Current view is not ready', true)) this.fail('Current view is not ready');
     // Send queued navigation before a background read can snapshot its old route.
     this.pump(true);
+    this.newestDue();
     if (result.refreshDue || paged && !result.current) this.refreshSoon();
     return true;
   }
@@ -910,6 +1008,7 @@ export class ThinHost {
     if (current) { this.actions = [];this.fail('View request timed out; actions were not resent'); }
     else if (!pageExpired) this.api.warning?.('Old request timed out; action was not resent');
     this.pump();
+    this.newestDue();
   }
   abortField(metadata) {
     const target = this.client.links.get(this.hub)?.target;
@@ -948,6 +1047,7 @@ export class ThinHost {
     this.ready = false;this.api.state({ phase: 'error', remoteReady: false, reason });
   }
   disconnect() {
+    this.pendingNewest = false;
     this.api.pageState?.(null);this.forView = null;this.opening = false;
     this.retireTerminal('Queued terminal input was not sent because the connection closed.');
     this.refreshScheduled = null;

@@ -6,10 +6,75 @@ const path = require('node:path');
 const http = require('node:http');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright-core');
 
+test('new-message navigation stays clickable far outside the virtual range without changing scroll geometry', async t => {
+  const source = fs.readFileSync(process.env.TIMELINE_SCROLLER_SOURCE || path.resolve(__dirname, '../../src/web/timeline-scroller.js'));
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', req.url.endsWith('.js') ? 'text/javascript' : 'text/html');
+    res.end(req.url.endsWith('.js') ? source : '<style>#timeline{height:300px;width:400px;overflow:auto;display:block}.timeline-virtual-track{flex:none}</style><div id="timeline"></div>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser=await chromium.launch({executablePath:process.env.BACKPLANE_CHROME||'/home/h/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome',headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.evaluate(async()=>{
+    const {TimelineScroller}=await import('/timeline-scroller.js');window.clicks=0;
+    window.list=new TimelineScroller(document.getElementById('timeline'),{
+      key:r=>r.key,floating:r=>r.key==='pill',
+      create(r){const e=document.createElement(r.key==='pill'?'button':'div');e.textContent=r.text;e.onclick=()=>clicks++;return e;},
+      patch(e,r){e.textContent=r.text;return e;},
+      plan(input){const item={key:'history',index:0,start:0,size:20000};return{items:[item],visible:[item],total:20000,top:input.mode==='init'?500:input.top,view:300,valid:[0,19700],atEnd:false,anchor:'history',offset:0};}
+    });
+    list.update([{key:'history',text:'Old visible content'}]).mount();
+    window.before={top:list.el.scrollTop,height:list.el.scrollHeight};
+    list.update([{key:'history',text:'Old visible content'},{key:'pill',text:'1 new ↓'}]);
+  });
+  const button=page.getByRole('button',{name:'1 new ↓'});await button.click({timeout:2000});
+  assert.deepEqual(await page.evaluate(()=>({top:list.el.scrollTop,height:list.el.scrollHeight})),await page.evaluate(()=>before),'showing navigation does not move the reader or add track height');
+  assert.equal(await page.evaluate(()=>clicks),1);
+  await page.evaluate(()=>list.update([{key:'history',text:'Old visible content'},{key:'pill',text:'2 new ↓'}]));
+  await page.getByRole('button',{name:'2 new ↓'}).click();assert.equal(await page.evaluate(()=>clicks),2);
+  await page.evaluate(()=>{list.el.scrollTop=9000;});
+  await page.getByRole('button',{name:'2 new ↓'}).click();
+  const geometry=await page.getByRole('button',{name:'2 new ↓'}).evaluate(e=>{const r=e.getBoundingClientRect(),t=e.closest('#timeline').getBoundingClientRect();return r.top>=t.top&&r.bottom<=t.bottom;});
+  assert(geometry,'navigation remains inside the viewport after a large scroll');
+  await page.evaluate(()=>list.update([{key:'history',text:'Old visible content'}]));assert.equal(await page.getByRole('button').count(),0,'reached output removes navigation');
+});
+
+test('scrollbar deltas include reversals inside a kept range and exclude planner corrections', async t => {
+  const source = fs.readFileSync(process.env.TIMELINE_SCROLLER_SOURCE || path.resolve(__dirname, '../../src/web/timeline-scroller.js'));
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', req.url.endsWith('.js') ? 'text/javascript' : 'text/html');
+    res.end(req.url.endsWith('.js') ? source : '<style>#timeline{height:200px;width:400px;overflow:auto}</style><div id="timeline"></div>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const executablePath = process.env.BACKPLANE_CHROME || '/home/h/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome';
+  const browser = await chromium.launch({ executablePath, headless: true });t.after(() => browser.close());
+  const page = await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.evaluate(async () => {
+    const { TimelineScroller } = await import('/timeline-scroller.js');window.deltas = [];
+    window.list = new TimelineScroller(document.getElementById('timeline'), {
+      plan(input) {
+        const top = ['init', 'bottom'].includes(input.mode) ? 800 : input.top;
+        const item = { key: 'row', index: 0, start: 0, size: 1000 };
+        return { items: [item], visible: [item], total: 1000, top, view: 200, valid: [0, 800], atEnd: top >= 796, anchor: 'row', offset: -top };
+      },
+      key: row => row.key, create() { const node = document.createElement('div');node.style.height = '1000px';return node; },patch() {},
+      onScroll(_, delta) { deltas.push(delta); },
+    });
+    list.update([{ key: 'row' }]);list.refresh();
+  });
+  await page.waitForTimeout(50);assert.deepEqual(await page.evaluate(() => deltas), [], 'initial layout is not a reading gesture');
+  await page.locator('#timeline').evaluate(el => { el.scrollTop = 700; });await page.waitForFunction(() => deltas.length === 1);
+  await page.locator('#timeline').evaluate(el => { el.scrollTop = 720; });await page.waitForFunction(() => deltas.length === 2);
+  assert.deepEqual(await page.evaluate(() => deltas), [-100, 20], 'reversal is measured from the last actual scroll inside the kept range');
+  await page.evaluate(() => list.scrollToEnd());await page.waitForTimeout(50);
+  assert.deepEqual(await page.evaluate(() => deltas), [-100, 20], 'explicit planner bottom correction does not create a new gesture');
+});
+
 // These exercise the DOM boundary with explicit planner outputs, not a second
 // implementation of the Bend anchoring/range algorithm. Layout is Chromium's.
 test('timeline DOM effects preserve nodes, measure, forward commands and detach', async t => {
-  const source = fs.readFileSync(path.resolve(__dirname, '../../src/web/timeline-scroller.js'));
+  const source = fs.readFileSync(process.env.TIMELINE_SCROLLER_SOURCE || path.resolve(__dirname, '../../src/web/timeline-scroller.js'));
   const server = http.createServer((req, res) => {
     if (req.url === '/timeline-scroller.js') {
       res.setHeader('content-type', 'text/javascript');

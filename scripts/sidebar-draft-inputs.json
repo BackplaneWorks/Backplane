@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "de44ec5bea9bcf30ae5309791bf0e9eed0b9aa66471f7fbcc2f64eb2e366e75c",
+    "src/core/client.bend": "0fbaf24da084f9cf3ef139f7e2e8d0c30720727dd2d2ac9ba152351830311518",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -166,7 +166,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "f3afb501d96bb15c76aeae77bf5e75a55109ce06c3c51d0b8bf07529f82c5ac3",
-    "src/server/thin-view.bend": "f752df880a91b80d9537140823dd0277c8521fb99c69a26639d6ae191b37ea66",
+    "src/server/thin-view.bend": "fe0859ebc70442a7a89b41bf6d53b19871642b982acddb1d2d64d2069c567d2c",
     "src/server/thinstore.bend": "b5310129889110fc0689d84985d59be407a79cf9bad762fa63e2486bf338f1ee",
     "src/web/bots.bend": "d1d4ebfa85e13f4ae331b38d783574b444f9db62fd2e3816a424a1c38a70788f",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
@@ -181,7 +181,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "6fe1b515db150f1d95db1375c016c88b93686a168f2a7fab0ee09f18ef1d2723"
+    "src/web/view.bend": "76828cdfd3608c94464e1677b1559fadbdb9cf9afcb5c16120c91fedf8f45ba1"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -541,5 +541,24 @@
     ],
     "postReviewFocusedLogSHA256": "267c934463c918ab35cfd86ad8e77c4a6f93008f591bfc2a206dbedb4b8f53d2",
     "focusedSuites": 6
+  },
+  "browserRecoveryReview": {
+    "priorManifestSHA256": "398d0276a1a5caff6445a1ccb8b2aae06e46b34bb83ebc07abdc06da677ac908",
+    "scope": "Only View.chrome.tools adds an initially hidden fixed native Browser reconnect button. It has no Bend action, Ui/draft read, authority or sidebar dependency. Existing explicit private bridge reconnect stays renderer-local, preserves UNKNOWN latches and never replays guest work. Sidebar draft readers, keys, wire/filter/fallback and scanner unchanged.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputLogSHA256": "2346c889dc7e515782456328088f61680b9c114ebd58b71e1c4897a79978bae0",
+    "assertions": 24
+  },
+  "combinedDeliveryReview": {
+    "base": "c5f553b7c0d239bd6dec7f508861a14ec525924d",
+    "scope": "Manual review: Hold source/bookmark and shown-entry counting read only committed displayed-thread entries and pre-existing chat visibility. thin-view imports the existing pure thin-chat predicate. View adds committed source id for reading, localized Finished label, fixed native recovery button. Existing sidebar draft readers/keys/filter/fallback, account/authority, consent adapters and wire contracts unchanged. Preserve Star nudge scope. Combined full24 output must pass before the exact three pins update.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "checks": 24,
+    "fullOutputLogSHA256": "3bc3cb5debd33b5c0935602c82d7a8927335f023864d3f6847aca70fd1348101",
+    "changed": {
+      "src/core/client.bend": "0fbaf24da084f9cf3ef139f7e2e8d0c30720727dd2d2ac9ba152351830311518",
+      "src/server/thin-view.bend": "fe0859ebc70442a7a89b41bf6d53b19871642b982acddb1d2d64d2069c567d2c",
+      "src/web/view.bend": "76828cdfd3608c94464e1677b1559fadbdb9cf9afcb5c16120c91fedf8f45ba1"
+    }
   }
 }

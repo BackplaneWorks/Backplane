@@ -89,8 +89,9 @@ button.icon:hover { color: var(--text); border-color: var(--line); }
 #root { height: calc(100% - var(--status-h, 0px)); }
 .app { font-size: calc(13px * var(--text-scale, 100) / 100); display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
 .app.panel { grid-template-columns: 264px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
-/* the viewer's left edge: drag to resize it (host.js sets --viewer-w) */
-.viewer-split { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
+/* Keep the resize target inside the viewer: extending it left intercepts
+   the conversation's adjacent native scrollbar. host.js sets --viewer-w. */
+.viewer-split { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
 .viewer-split:hover, .viewer-split.on, .viewer-split:focus-visible { background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
 .viewer-split:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
@@ -1325,6 +1326,12 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .dot.active { background: var(--st-work); border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
 .dot.waiting { background: var(--waiting); border-radius: 50%; animation: pulse 2.4s ease-in-out infinite; }
 .dot.finished { background: var(--st-done); border-radius: 50%; }
+/* Completion is visible without interpreting a coloured activity dot. The
+   short word is localized by View.dot; lifecycle/shelf state is unchanged. */
+.sidebar .dot.finished { width: auto; height: auto; display: inline-flex; align-items: center; gap: 4px; background: none; border-radius: 0; color: var(--st-done); font-size: calc(11px * var(--text-scale, 100) / 100); line-height: 1; animation: none; white-space: nowrap; }
+.sidebar .dot.finished::before { content: "✓"; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.sidebar .dot.finished::after { content: attr(data-status-label); }
+
 .dot.inactive { background: var(--st-idle); border-radius: 50%; }
 .dot.settled { background: var(--st-idle); border-radius: 50%; }
 @media (prefers-reduced-motion: reduce) { .dot.active, .dot.waiting { animation: none; } }
@@ -2190,7 +2197,10 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
    and Buy it ride in the top bar (view.bend's View.chrome.views); wide
    screens keep the rail. */
 .top-views { display: none; }
+.viewer-choice-status:empty { display: none; }
 @media (max-width: 760px) {
+  .top-views .viewer-choice-status { position: fixed; z-index: 7; top: max(72px, env(safe-area-inset-top)); left: 8px; right: 8px; padding: 10px; background: var(--view); color: var(--text); border: 1px solid var(--accent); pointer-events: none; }
+  .top-views:has([data-viewer-pending]) summary { color: var(--accent); }
   body { overflow-x: clip; }
   /* nothing scrolls the page or a thread sideways. The timeline scrolls up
      and down only: overflow-y alone made its overflow-x auto, so anything a

@@ -25,6 +25,7 @@ function harness(){
    if(a==='select'){s.sel=v.startsWith(hub+'|')?v.slice(hub.length+1):v;delete s.route;return{kind:'select',session:s,target:target(s)};}
    if(a==='draft'){s.drafts={...s.drafts,[s.sel]:v};return{kind:'draft',session:s};}
    if(a==='earlier')return{kind:'page'};
+   if(a==='history-newest')return{kind:'newest'};
    if(a==='thin-search')return{kind:'search',args:JSON.parse(v)};
    if(a==='thin-message-more')return{kind:'message',args:JSON.parse(v)};
    if(a==='thin-cancel')return{kind:'cancel',args:JSON.parse(v)};
@@ -281,6 +282,20 @@ check('bot tab waits for presentation and does not admit arbitrary action',()=>{
 check('selection change cancels held viewer intent and stale reply cannot run it',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const old=x.h.drain().cmds[0].request;x.h.request('h','view','board');x.h.request('h','select','h|b');const selection=x.h.drain().cmds[0].request;const fresh=x.answer(selection.id);assert(!fresh.cmds.some(c=>c.request?.p?.action==='view'));const late=x.answer(old.id);assert(!late.cmds.some(c=>c.request?.p?.action==='view'));});
 check('connection replacement and forget discard held viewer intent',()=>{for(const forget of [false,true]){const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);x.h.drain();x.h.request('h','view','board');if(forget){x.h.forgetHub('h');x.h.hubs(['h']);}x.h.connection('h','2','view-v1');const greeting=x.greeting('h','2');const fresh=x.answer(greeting.cmds[0].request.id);assert(!fresh.cmds.some(c=>c.request?.p?.action==='view'));}});
 check('older page is only an explicit gesture request',()=>{const x=harness();x.open();assert.equal(x.h.client.calls.size,0);x.h.request('h','earlier','');const o=x.h.drain();assert.equal(o.cmds[0].request.m,'view.page');assert.equal(o.cmds[0].request.p.cursor,'older');assert.equal(o.sync[0].phase,'presenting');});
+check('newest tap during pagination is retained and sent after the issued page settles',()=>{
+ const x=harness();x.open();x.h.request('h','draft','Unsent 日本語');x.h.drain();
+ x.h.request('h','earlier','');const older=x.h.drain().cmds[0].request;
+ x.h.request('h','history-newest','');assert.deepEqual(x.h.drain().cmds,[]);
+ const next=x.answer(older.id).cmds.find(c=>c.request?.m==='view.page')?.request;
+ assert(next);assert.equal(next.p.cursor,'');x.answer(next.id);
+ assert.equal(x.h.states.get('h').session.drafts.a,'Unsent 日本語');assert.equal(x.h.states.get('h').back.length,0);
+});
+check('newest tap waiting on a page is retired by another conversation',()=>{
+ const x=harness();x.open();x.h.request('h','earlier','');const older=x.h.drain().cmds[0].request;
+ x.h.request('h','history-newest','');x.h.drain();x.h.request('h','select','h|b');const selected=x.h.drain().cmds[0].request;
+ x.answer(selected.id);assert(!x.answer(older.id).cmds.some(c=>c.request?.m==='view.page'));
+ assert.equal(x.h.states.get('h').session.sel,'b');
+});
 check('hub search result does not change readiness or auto page',()=>{const x=harness();x.open();x.h.request('h','thin-search',JSON.stringify({query:'needle',cursor:''}));const o=x.h.drain();assert.deepEqual(o.sync,[]);assert(x.h.states.get('h').ready);x.answer(o.cmds[0].request.id,{search:{query:'needle',rows:[],cursor:'next',hasMore:true,visited:1}});assert.equal(x.calls.search.length,1);assert.equal(x.h.client.calls.size,0);assert(x.h.states.get('h').ready);});
 check('original action commands settle once after newer selection',()=>{const x=harness();x.open();x.h.request('h','send','');const action=x.h.drain().cmds[0].request.id;x.h.request('h','select','h|b');const selected=x.h.drain().cmds[0].request.id;x.answer(selected);const command={type:'send',text:JSON.stringify({id:42,m:'turn.start',p:{thread:'a'}})};const out=x.answer(action,{cmds:[command]});assert.equal(out.cmds.length,1);assert.equal(x.h.states.get('h').session.sel,'b');assert.equal(x.h.states.get('h').shown.thread.id,'b');x.h.receive('h',{t:'reply',id:action,ok:true,result:{}},'1');assert.deepEqual(x.h.drain().cmds,[]);assert.equal(x.calls.command,1);});
 check('old Keep cannot clear newer local draft',()=>{const x=harness();x.open();x.h.request('h','draft','first');x.h.drain();x.h.request('h','send','');const id=x.h.drain().cmds[0].request.id;x.h.request('h','draft','newer');x.h.drain();const out=x.answer(id,{cmds:[{type:'keep',thread:'h|a',text:''}]});assert.equal(x.h.states.get('h').session.drafts.a,'newer');assert(!out.cmds.some(c=>c.type==='keep'&&c.text===''));});

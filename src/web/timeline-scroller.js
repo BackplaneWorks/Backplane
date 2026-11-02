@@ -5,9 +5,10 @@ const RR = globalThis.__bpRender || null;
 // DOM effects for the pure Bend timeline planner. Rows remain opaque to this
 // adapter; the planner owns layout, ranges, following and scroll anchoring.
 export class TimelineScroller {
-  constructor(el, { plan, create, patch, key, same = null, onChange = () => {} }) {
+  constructor(el, { plan, create, patch, key, same = null, floating = () => false, onChange = () => {}, onScroll = () => {} }) {
     this.el = el;
-    this.callbacks = { plan, create, patch, key, same, onChange };
+    this.callbacks = { plan, create, patch, key, same, floating, onChange, onScroll };
+    this.floating = new Map();
     this.rows = [];
     this.sizes = Object.create(null);
     this.lastPlan = null;
@@ -41,6 +42,9 @@ export class TimelineScroller {
   // first). The host still hears of the scroll (onChange).
   _scrolled() {
     const p = this.lastPlan, top = this.el.scrollTop;
+    const delta = top - (this._observedTop ?? top);
+    this._observedTop = top;
+    if (delta) this.callbacks.onScroll(this, delta);
     if (p?.valid && this._initialized && !this._pending && !this._busy && top >= p.valid[0] && top <= p.valid[1]) {
       RR?.n("tl.scroll.kept");
       this._stale = true;
@@ -63,7 +67,9 @@ export class TimelineScroller {
 
   update(rows, { follow } = {}) {
     if (this._destroyed) return this;
-    const snapshot = Array.from(rows);
+    const given = Array.from(rows);
+    this._floating(given.filter(this.callbacks.floating));
+    const snapshot = given.filter(row => !this.callbacks.floating(row));
     const keys = snapshot.map(this.callbacks.key);
     // A row drawn again the same (a fresh tree from the hub or a local
     // render, its rows equal to the last) keeps the vnode it had: it is
@@ -100,6 +106,36 @@ export class TimelineScroller {
     }
     if (changed || followChanged) this._request('update');
     return this;
+  }
+
+  // Navigation belongs to the viewport, rather than the virtual history range.
+  // Its zero-height sticky container contributes no scroll extent or anchor.
+  _floating(rows) {
+    if (!rows.length) {
+      this.floating.clear();this.floatingContainer?.remove();this.floatingContainer = null;
+      return;
+    }
+    if (!this.floatingContainer) {
+      const box = this.el.ownerDocument.createElement('div');
+      box.className = 'timeline-floating-controls';
+      Object.assign(box.style, { position: 'sticky', bottom: '0', height: '0', flex: 'none', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: '4', pointerEvents: 'none' });
+      this.el.appendChild(box);this.floatingContainer = box;
+    }
+    const wanted = new Set();
+    rows.forEach((vnode, index) => {
+      const key = this.callbacks.key(vnode, index);wanted.add(key);
+      let row = this.floating.get(key);
+      if (!row) { row = { node: this.callbacks.create(vnode), vnode };this.floating.set(key, row); }
+      else if (row.vnode !== vnode) {
+        const node = this.callbacks.patch(row.node, vnode);
+        if (node && node !== row.node) { row.node.replaceWith(node);row.node = node; }
+        row.vnode = vnode;
+      }
+      Object.assign(row.node.style, { position: 'relative', bottom: 'auto', margin: '0', transform: 'translateY(-8px)', pointerEvents: 'auto' });
+      const at = this.floatingContainer.childNodes[index];
+      if (at !== row.node) this.floatingContainer.insertBefore(row.node, at ?? null);
+    });
+    for (const [key, row] of this.floating) if (!wanted.has(key)) { row.node.remove();this.floating.delete(key); }
   }
 
   // Host creation starts detached. Call after the root patch attaches it.
@@ -238,6 +274,9 @@ export class TimelineScroller {
         // settled range includes again. Keep its DOM through this synchronous
         // transaction and retire only rows outside the final range.
         this._prune(this.lastPlan);
+        // Planner writes are layout/follow corrections, not reader movement.
+        // A later DOM scroll event for this same position reports no delta.
+        this._observedTop = this.el.scrollTop;
         this.lastMode = changeMode;
         this.callbacks.onChange(this);
       }
@@ -332,6 +371,7 @@ export class TimelineScroller {
     this._observer?.disconnect();
     this.el.removeEventListener('scroll', this._onScroll);
     this.mounted.clear();
+    this.floating.clear();this.floatingContainer?.remove();
     this.track.remove();
     this._pending = null;
   }
