@@ -15179,3 +15179,8 @@ def Laws.settings_proposal_decline_no_write(s, now, client, id, ask, th): {==}
 def Laws.settings_proposal_deadline_exclusive(): {==}
 
 def Laws.settings_proposal_write_invalidates(): {==}
+
+
+def Laws.settings_row_information(): {==}
+
+def Laws.voice_model_needs_runtime(): {==}

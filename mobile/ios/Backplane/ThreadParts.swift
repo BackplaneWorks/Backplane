@@ -1275,15 +1275,15 @@ struct HubSettingsRows: View {
     var notify = false
 
     // a row is a section of its own on the hub's page, a plain row in App settings' list
-    @ViewBuilder private func wrapped<C: View>(@ViewBuilder _ c: () -> C) -> some View {
-        if notify { c() } else { Section { c() } }
+    @ViewBuilder private func wrapped<C: View>(_ r: SetRow, @ViewBuilder _ c: () -> C) -> some View {
+        if notify || (r.buttons.isEmpty && (r.fields ?? []).isEmpty && (r.qr ?? []).isEmpty && (r.chart ?? []).isEmpty) { c() } else { Section { c() } }
     }
 
     var body: some View {
         ForEach(rows.filter { notify ? ($0.notify ?? false) : !(($0.local ?? false) || ($0.notify ?? false)) }, id: \.self) { r in
-            wrapped {
+            wrapped(r) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(r.label)
+                    Text(r.label).foregroundStyle(r.buttons.isEmpty && (r.fields ?? []).isEmpty ? .secondary : .primary)
                     if !r.note.isEmpty { Text(r.note).font(.footnote).foregroundStyle(.secondary) }
                     if let days = r.chart, !days.isEmpty { UsageDayChart(days: days) }
                     ForEach(r.fields ?? [], id: \.self) { f in SetFieldView(model: model, field: f) }

@@ -15130,3 +15130,12 @@ law settings_proposal_deadline_exclusive:
 
 law settings_proposal_write_invalidates:
   {SETPROPOSAL.Proposal.invalidate([M.SettingSet{"fallback.on", "off", 10n}], [M.Ask{"a", "t", "approval", "settings_proposal", "", "", True{}, ""}], 10n) == [M.AskClosed{"a", "stale", 10n}] : List<&2, M.Change>}
+
+
+# Read-only settings rows never claim to be controls.
+law settings_row_information:
+  {U.Settings.row.kind(False{}) == "info" : String}
+
+# File presence alone must never report a usable local engine.
+law voice_model_needs_runtime:
+  {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}

@@ -1,4 +1,5 @@
 import Base
+import ../../src/core/json.bend as J
 import ../../src/core/client.bend as U
 import ../../src/core/i18n.bend as I
 import ../../src/web/view.bend as V
@@ -16,3 +17,7 @@ def act(u: U.Ui, a: String, v: String) -> U.Ui:
 
 def view(+u: U.Ui, +ja: Bool) -> D.Node:
   V.View.settings.loc(Bool.pick(I.Loc, ja, I.Ja{}, I.En{}), u, U.Ui.state.of(u), Map.new(&2, String), "review", "")
+
+
+def recv(u: U.Ui, o: String) -> U.Ui:
+  U.Ui.recv(u, Maybe.default(&2, J.Json, J.Json.parse(o), J.Null{}))

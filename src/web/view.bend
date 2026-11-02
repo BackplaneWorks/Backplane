@@ -1652,9 +1652,16 @@ def View.chips.loc(+lc: I.Loc, xs: List<&2, String>, +cur: String, +key: String)
 def View.chips(xs: List<&2, String>, +cur: String, +key: String) -> List<&2, D.Node>:
   View.chips.loc(I.En{}, xs, cur, key)
 
-def View.setrow(+label: String, +note: String, ctl: List<&2, D.Node>) -> D.Node:
-  D.El{"div", "", [D.At{"class", "set-row"}], [D.El{"div", "", [D.At{"class", "set-text"}], [D.Dom.span("set-label", label), D.Dom.span("set-note", note)]},
-    D.El{"div", "", [D.At{"class", "set-ctl"}], ctl}]}
+# Informational rows have no control panel. Keep them visually distinct
+# throughout Settings, including empty collections and unavailable features.
+def View.setrow.k(+info: Bool, +label: String, +note: String, ctl: List<&2, D.Node>) -> D.Node:
+  D.El{"div", "", [D.At{"class", Bool.pick(String, info, "set-row set-info", "set-row")},
+    D.At{"data-setting-kind", U.Settings.row.kind(Bool.not(info))}],
+    [D.El{"div", "", [D.At{"class", "set-text"}], [D.Dom.span("set-label", label), D.Dom.span("set-note", note)]},
+      D.El{"div", "", [D.At{"class", "set-ctl"}], ctl}]}
+
+def View.setrow(+label: String, +note: String, +ctl: List<&2, D.Node>) -> D.Node:
+  View.setrow.k(List.is_empty(&2, D.Node, ctl), label, note, ctl)
 
 def View.days.loc(+lc: I.Loc, +d: String) -> List<&2, D.Node>:
   +n = {Maybe.default(&2, Nat, Nat.read(d), 3n) : Nat}
@@ -1739,46 +1746,6 @@ def View.terms.loc(+lc: I.Loc, ts: List<&2, String>) -> List<&2, D.Node>:
 def View.terms(ts: List<&2, String>) -> List<&2, D.Node>:
   View.terms.loc(I.En{}, ts)
 
-# the engine (Auto, on this machine, OpenAI) and the local model
-def View.engine.chip(+lc: I.Loc, +cur: String, +v: String, +label: String) -> D.Node:
-  D.Dom.button(Bool.pick(String, String.eq(cur, v), "on", ""), "setting", "voice.engine=" ++ v, label, label)
-
-def View.model.chip(+cur: String, +v: String, +label: String) -> D.Node:
-  D.Dom.button(Bool.pick(String, String.eq(cur, v), "on", ""), "setting", "voice.model=" ++ v, label, label)
-
-def View.vlocal.find(ms: List<&2, J.Json>, +id: String) -> J.Json:
-  match ms:
-    case Nil{}:
-      J.Null{}
-    case +m <> t:
-      Bool.pick(J.Json, String.eq(J.Json.get_str(m, "id", ""), id), m, View.vlocal.find(t, id))
-
-# the local status ({"models":[{"id","label","size","installed"}], ...}) for one model
-def View.vlocal.model(+l: J.Json, +id: String) -> J.Json:
-  View.vlocal.find(J.Json.elems(J.Json.get_obj(l, "models")), id)
-
-def View.vlocal.note(+lc: I.Loc, +l: J.Json, +m: J.Json, +busy: Bool) -> String:
-  Bool.pick(String, busy, MSG.T.voice.model.busy(lc),
-    Bool.pick(String, Bool.not(J.Json.get_bool(l, "supported", True{})), MSG.T.voice.model.unsupported(lc, J.Json.get_str(l, "platform", "")),
-      Bool.pick(String, J.Json.get_bool(m, "installed", False{}), MSG.T.voice.model.ready(lc, J.Json.get_str(m, "label", "")),
-        MSG.T.settings.voice.model.note(lc) ++ " " ++ MSG.T.voice.model.none(lc))))
-
-def View.vlocal.ctl(+lc: I.Loc, +m: J.Json, +id: String, +busy: Bool) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, busy, Nil{},
-    Bool.pick(List<&2, D.Node>, J.Json.get_bool(m, "installed", False{}), [D.Dom.button("", "voice-dict", "remove:" ++ id, MSG.T.voice.model.remove(lc), MSG.T.voice.model.remove(lc))],
-      [D.Dom.button("primary", "voice-dict", "install:" ++ id, J.Json.get_str(m, "label", ""),
-        MSG.T.voice.model.download(lc, J.Json.get_str(m, "label", id), Nat.show(Nat.div(J.Json.get_nat(m, "size", 0n), 1000000n))))]))
-
-def View.voice.engine(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
-  +eng = M.Setting.get(st, "voice.engine", "auto")
-  +mid = VDV.Vdc.model.id(M.Setting.get(st, "voice.model", ""))
-  +l = Maybe.default(&2, J.Json, J.Json.parse(U.Ui.scratch(u, "@voice.local")), J.Null{})
-  +busy = String.starts_with(U.Ui.scratch(u, "@voice.busy"), "install:")
-  [View.setrow(MSG.T.settings.voice.engine(lc), MSG.T.settings.voice.engine.note(lc),
-     [View.engine.chip(lc, eng, "auto", MSG.T.voice.engine.auto(lc)), View.engine.chip(lc, eng, "local", MSG.T.voice.engine.local(lc)), View.engine.chip(lc, eng, "cloud", MSG.T.voice.engine.cloud(lc))]),
-   View.setrow(MSG.T.settings.voice.model(lc), View.vlocal.note(lc, l, View.vlocal.model(l, mid), busy),
-     List.append(&2, D.Node, [View.model.chip(mid, "parakeet-v2", "English"), View.model.chip(mid, "parakeet-v3", "25 languages")], View.vlocal.ctl(lc, View.vlocal.model(l, mid), mid, busy)))]
-
 # the dictionary's entries as written (core/vdict.bend: settings voice.e.*)
 def View.ventries.go(ks: List<&2, String>, +st: M.State, acc: List<&2, String>) -> List<&2, String>:
   match ks:
@@ -1790,18 +1757,6 @@ def View.ventries.go(ks: List<&2, String>, +st: M.State, acc: List<&2, String>) 
 def View.ventries(+st: M.State) -> List<&2, String>:
   View.ventries.go(M.Setting.keys.pre(st, VDV.Vdc.e.pre()), st, Nil{})
 
-# learned fixes (voice.l.*): heard → written · how often, × forgets one
-def View.vlearned.one(+lc: I.Loc, +k: String, +v: String) -> D.Node:
-  D.Dom.button(Bool.pick(String, VDV.Vdc.vl.trusted(v), "chip on", "chip"), "setting", k ++ "=", MSG.T.settings.voice.term.remove(lc),
-    MSG.T.voice.learned.item(lc, String.drop(k, 8n), VDV.Vdc.vl.out(v), Nat.show(VDV.Vdc.vl.yes(v))) ++ " ×")
-
-def View.vlearned(+lc: I.Loc, +st: M.State, ks: List<&2, String>) -> List<&2, D.Node>:
-  match ks:
-    case Nil{}:
-      Nil{}
-    case +k <> t:
-      View.vlearned.one(lc, k, M.Setting.get(st, k, "")) <> View.vlearned(lc, st, t)
-
 def View.voice.set.base(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
   [View.setrow(MSG.T.settings.voice.key(lc), U.Sealed.say(u, "vkey", Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.key")), MSG.T.settings.voice.key.note(lc),
       MSG.T.settings.voice.key.saved(lc, U.Ui.scratch(u, "@voice.key")))),
@@ -1810,20 +1765,10 @@ def View.voice.set.base(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
    View.setrow(MSG.T.settings.voice.microphone(lc), MSG.T.voice.device.note(lc, Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), MSG.T.voice.device.default(lc, U.Voice.label(u, U.Voice.default(u))), U.Voice.label(u, M.Setting.get(st, "voice.device", "")))),
      D.Dom.button(Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), "on", ""), "setting", "voice.device=", MSG.T.settings.voice.default.tip(lc), MSG.T.voice.default(lc)) <>
        View.devs(U.Voice.devices(u), M.Setting.get(st, "voice.device", ""))),
-   View.setrow(MSG.T.settings.voice.dictionary(lc), MSG.T.settings.voice.entries.note(lc),
+   View.setrow(MSG.T.settings.voice.dictionary(lc),
+     Bool.pick(String, List.is_empty(&2, String, List.append(&2, String, U.Voice.dict(u), View.ventries(st))), MSG.T.settings.voice.dictionary.empty(lc) ++ " " ++ MSG.T.settings.voice.entries.note(lc), MSG.T.settings.voice.entries.note(lc)),
      List.append(&2, D.Node, View.terms.loc(lc, List.append(&2, String, U.Voice.dict(u), View.ventries(st))), [WB.WB.area("voice-term", "vterm", U.Ui.scratch(u, "@f.vterm"), MSG.T.settings.voice.term(lc)),
-       D.Dom.button("", "voice-term", "", MSG.T.settings.voice.term.add(lc), MSG.T.common.add(lc))])),
-   View.setrow(MSG.T.settings.voice.learned(lc), MSG.T.settings.voice.learned.note(lc), View.vlearned(lc, st, M.Setting.keys.pre(st, VDV.Vdc.l.pre())))]
-
-# (the key's field is sealed, client.bend's Sealed: its value never
-# reaches the client's state, a view action or a draft)
-def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
-  List.append(&2, D.Node, View.voice.engine(lc, u, st), View.voice.set.base(lc, u, st))
-
-# API keys (client.bend's ApiKeys): add one, view the names, delete one
-
-def View.voice.set(+u: U.Ui, +st: M.State) -> List<&2, D.Node>:
-  View.voice.set.loc(I.En{}, u, st)
+       D.Dom.button("", "voice-term", "", MSG.T.settings.voice.term.add(lc), MSG.T.common.add(lc))]))]
 
 # (Delete asks first: the name pressed once, rm, reads "Click again to
 # delete", client.bend's ApiKeys.del)
@@ -1905,6 +1850,37 @@ def View.agy.rows(+u: U.Ui, rs: List<&2, U.AgRow>) -> List<&2, D.Node>:
       Nil{}
     case U.AgRow{+l, +n, fs, bs} <> t:
       View.setrow(l, n, List.append(&2, D.Node, View.agy.fields(u, fs), View.agy.btns(u, bs))) <> View.agy.rows(u, t)
+
+def View.voice.engine(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  View.agy.rows(u, U.Vlocal.rows(lc, u))
+
+# (the key's field is sealed, client.bend's Sealed: its value never
+# reaches the client's state, a view action or a draft)
+def View.vlocal.meter(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
+  match on:
+    case False{}: Nil{}
+    case True{}:
+      +p = Maybe.default(&2, J.Json, J.Json.parse(U.Ui.scratch(u, "@voice.progress")), J.Null{})
+      +total = J.Json.get_nat(p, "total", 0n)
+      +known = Bool.and(Nat.is_gt(total, 0n), String.eq(J.Json.get_str(p, "phase", "download"), "download"))
+      [D.El{"progress", "voice-model-progress", List.append(&2, D.Attr,
+        [D.At{"class", "voice-progress"}, D.At{"aria-label", MSG.T.settings.voice.model(U.Lang.loc(u))}],
+        Bool.pick(List<&2, D.Attr>, known, [D.At{"max", Nat.show(total)}, D.At{"value", Nat.show(Nat.min(total, J.Json.get_nat(p, "done", 0n)))}], Nil{})), Nil{}}]
+
+def View.vlocal.row(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  D.El{"div", "voice-model", [D.At{"class", Bool.pick(String, U.Vlocal.busy(u), "set-row set-busy", "set-row")},
+    D.At{"aria-busy", Bool.pick(String, U.Vlocal.busy(u), "true", "false")}], [
+    D.El{"div", "", [D.At{"class", "set-text"}], [D.Dom.span("set-label", MSG.T.settings.voice.model(lc)),
+      D.El{"span", "", [D.At{"class", Bool.pick(String, String.is_empty(U.Vlocal.error(u)), "set-note", "set-note bad")}, D.At{"role", "status"}, D.At{"aria-live", "polite"}], [D.Txt{U.Vlocal.note(lc, u)}]}]},
+    D.El{"div", "", [D.At{"class", "set-ctl"}], List.append(&2, D.Node, View.agy.btns(u, U.Vlocal.btns.k(U.Vlocal.busy(u), lc, u)), View.vlocal.meter(U.Vlocal.busy(u), u))}]}
+
+def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  List.append(&2, D.Node, List.append(&2, D.Node, View.agy.rows(u, List.take(&2, U.AgRow, U.Vlocal.rows(lc, u), 1n)), [View.vlocal.row(lc, u)]), List.append(&2, D.Node, View.voice.set.base(lc, u, st), View.agy.rows(u, U.Vlearned.rows(lc, st))))
+
+# API keys (client.bend's ApiKeys): add one, view the names, delete one
+
+def View.voice.set(+u: U.Ui, +st: M.State) -> List<&2, D.Node>:
+  View.voice.set.loc(I.En{}, u, st)
 
 # the time zone: where the person is (their phone reports it, or they set
 # it); a field for a zone name, Set, and Automatic: on (like a chosen chip)

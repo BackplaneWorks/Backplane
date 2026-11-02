@@ -595,7 +595,7 @@ async function localCmd(a: Args) {
     emit({ event: "local", ...L.status(a.localDir), bytes: L.diskBytes(a.localDir) });
   } else {
     try {
-      await L.install(a.localDir, a.model, (what, done, total) => emit({ event: "progress", what, done, total }));
+      await L.install(a.localDir, a.model, (what, done, total, phase = "download") => emit({ event: "progress", what, done, total, phase }));
     } catch (e) {
       error(msg(e));
     }

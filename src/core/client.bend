@@ -2292,7 +2292,6 @@ def Side.rows.go.ix(ps: List<&2, M.Project>, +st: M.State, +ix: SIx, +kids: Map<
     case M.Project{+id, ti, r, +c, +rm} <> t:
       Side.rows.k.at(st, kids, rm, M.Project{id, ti, r, c, rm}, SIx.mine(ix, id), c, navs, now, M.Nav.project_key(navs, id), Side.rows.go.ix(t, st, ix, kids, navs, now))
 
-
 # the projects the sidebar lists: all but those of a machine sync is off
 # with (only a project elsewhere is asked)
 def Side.keep(hide: Bool, p: M.Project, rest: List<&2, M.Project>) -> List<&2, M.Project>:
@@ -9224,6 +9223,36 @@ def Voice.live(+u: Ui, +o: J.Json) -> Ui:
 def Voice.idle(u: Ui) -> Ui:
   Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", ""), "@voice.part", ""), "@voice.lv", ""), "@voice.hint", ""), "@voice.pos", ""), "@voice.tl", "")
 
+# what the hub answers about voice: the key (masked), the dictionary, the
+# microphones ("@voice.set" once known)
+def Voice.reply.k(has: Bool, +o: J.Json, +u: Ui) -> Ui:
+  match has:
+    case True{}:
+      Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice.key", J.Json.get_str(o, "voiceKey", "")), "@voice.dict", J.Json.get_str(o, "voiceDict", "")),
+        "@f.vdict", J.Json.get_str(o, "voiceDict", "")), "@voice.set", "1")
+    case False{}:
+      u
+
+def Voice.reply.devs(+o: J.Json, +u: Ui) -> Ui:
+  Bool.pick(Ui, String.is_empty(J.Json.get_str(o, "voiceDevices", "")), u, Ui.scratch_set(u, "@voice.devs", J.Json.get_str(o, "voiceDevices", "")))
+
+def Voice.reply.local(m: Maybe<&2, J.Json>, +u: Ui) -> Ui:
+  match m:
+    case Some{J.Null{}}: u
+    case Some{+l}:
+      Ui.scratch_set(u, "@voice.local", J.Json.show(l))
+    case None{}:
+      u
+
+def Voice.reply(+o: J.Json, +u: Ui) -> Ui:
+  Voice.reply.local(J.Json.get(o, "local"), Voice.reply.devs(o, Voice.reply.k(Maybe.is_some(&2, J.Json, J.Json.get(o, "voiceDict")), o, u)))
+
+# Download events are separate from microphone events. A concurrent status
+# reply must not clear a running operation or its failure.
+def Voice.local.result(+u: Ui, +o: J.Json) -> Ui:
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Voice.reply.local(J.Json.get(o, "local"), u), "@voice.busy", ""),
+    "@voice.progress", ""), "@voice.local.error", J.Json.get_str(o, "error", ""))
+
 def Voice.recv.k(i: Nat, +u: Ui, +o: J.Json) -> Ui:
   match i:
     case 0n:
@@ -9246,39 +9275,20 @@ def Voice.recv.k(i: Nat, +u: Ui, +o: J.Json) -> Ui:
       Voice.words(u, o)
     case 9n:
       Ui.scratch_set(u, "@voice.load", Nat.show(J.Json.get_nat(o, "ms", 0n)))
+    case 10n:
+      Ui.scratch_set(u, "@voice.progress", J.Json.show(o))
+    case 11n:
+      Voice.local.result(u, o)
     case _:
       u
 
 # a {"t":"voice"} message from the hub
 def Voice.recv(+u: Ui, +o: J.Json) -> Ui:
-  Voice.recv.k(C.Codec.pos(["live", "part", "text", "level", "hint", "stopping", "error", "idle", "words", "loaded"], J.Json.get_str(o, "ev", "")), u, o)
+  Voice.recv.k(C.Codec.pos(["live", "part", "text", "level", "hint", "stopping", "error", "idle", "words", "loaded", "local-progress", "local-result"], J.Json.get_str(o, "ev", "")), u, o)
 
 # a voice message into a draft the client keeps (keep: the last answer's)
 def Voice.place(+keep: J.Json, +draft: String, +o: J.Json) -> J.Json:
   Voice.place.k(J.Json.get_str(o, "thread", ""), Voice.recv(Voice.place.in(Voice.place.keys(), keep, Ui.scratch_set(Ui.init(0n), J.Json.get_str(o, "thread", ""), draft)), o))
-
-# what the hub answers about voice: the key (masked), the dictionary, the
-# microphones ("@voice.set" once known)
-def Voice.reply.k(has: Bool, +o: J.Json, +u: Ui) -> Ui:
-  match has:
-    case True{}:
-      Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice.key", J.Json.get_str(o, "voiceKey", "")), "@voice.dict", J.Json.get_str(o, "voiceDict", "")),
-        "@f.vdict", J.Json.get_str(o, "voiceDict", "")), "@voice.set", "1")
-    case False{}:
-      u
-
-def Voice.reply.devs(+o: J.Json, +u: Ui) -> Ui:
-  Bool.pick(Ui, String.is_empty(J.Json.get_str(o, "voiceDevices", "")), u, Ui.scratch_set(u, "@voice.devs", J.Json.get_str(o, "voiceDevices", "")))
-
-def Voice.reply.local(m: Maybe<&2, J.Json>, +u: Ui) -> Ui:
-  match m:
-    case Some{+l}:
-      Ui.scratch_set(Ui.scratch_set(u, "@voice.local", J.Json.show(l)), "@voice.busy", "")
-    case None{}:
-      u
-
-def Voice.reply(+o: J.Json, +u: Ui) -> Ui:
-  Voice.reply.local(J.Json.get(o, "local"), Voice.reply.devs(o, Voice.reply.k(Maybe.is_some(&2, J.Json, J.Json.get(o, "voiceDict")), o, u)))
 
 # the dictionary as the hub last answered it
 def Voice.dict(+u: Ui) -> List<&2, String>:
@@ -15632,10 +15642,24 @@ def Voice.unterm(undo: Bool, +u: Ui, +value: String) -> Act:
     case False{}:
       Voice.after.rpc(Ui.setting(u, VDC.Vdc.ekey.setting(value) ++ "="), "dict", [J.KV{"dict", J.Str{VC.Voice.dict.show(VC.Voice.dict.remove(Voice.dict(u), value))}}])
 
-def Voice.local(+u: Ui, +value: String) -> Act:
-  Voice.rpc(Ui.scratch_set(u, "@voice.busy", Bool.pick(String, String.eq(value, "status"), Ui.scratch(u, "@voice.busy"), value)),
+def Voice.local.begin(+u: Ui, +value: String) -> Ui:
+  match value:
+    case "status": u
+    case _:
+      Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice.busy", value), "@voice.progress", ""), "@voice.local.error", "")
+
+def Voice.local.go(+u: Ui, +value: String) -> Act:
+  Voice.rpc(Voice.local.begin(u, value),
     Bool.pick(String, String.starts_with(value, "install:"), "local-install", Bool.pick(String, String.starts_with(value, "remove:"), "local-remove", "local")),
     [J.KV{"id", J.Str{VDC.Vdc.right(value, ":")}}])
+
+def Voice.local.k(busy: Bool, +u: Ui, +value: String) -> Act:
+  match busy:
+    case True{}: Act{u, Nil{}}
+    case False{}: Voice.local.go(u, value)
+
+def Voice.local(+u: Ui, +value: String) -> Act:
+  Voice.local.k(Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@voice.busy"))), Bool.not(String.eq(value, "status"))), u, value)
 
 def Voice.act.tail.k(picker: Bool, +i: Nat, +u: Ui, +value: String) -> Act:
   match picker:
@@ -16451,7 +16475,6 @@ def Psv.dispatch(setup: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Psv.act(u, action, value)
     case False{}: Ui.act.rpl(Bool.or(String.eq(action, "reply-to"), String.eq(action, "reply-drop")), u, action, value)
 
-
 # Retry (tools.bend's Tools.retry, on a failed turn): the selected thread's
 # last message from the person, sent again as it was typed; nothing when
 # it has none. Entries newest first (M.State.mine); the walk stops at the
@@ -16493,7 +16516,6 @@ def Retry.dispatch(retry: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Psv.dispatch(String.starts_with(action, "provider-setup-"), u, action, value)
 
-
 # Only a targeted connection offer may display the suggestion. Shared hub
 # status removes it as soon as any saved decision is adopted. No history,
 # client storage, draft, device id or account credentials are changed.
@@ -16521,7 +16543,6 @@ def Star.dispatch(star: Bool, +u: Ui, +action: String, +value: String) -> Act:
 
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
   Star.dispatch(Bool.or(String.eq(action, "star-open"), String.eq(action, "star-dismiss")), u, action, value)
-
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))
@@ -16575,3 +16596,98 @@ def Side.signal.has(+ix: SIx, +id: String) -> Bool:
   match ix:
     case SIx{_, _, _, work}:
       SG.Signal.has(work, SG.Signal.key(id))
+
+# Settings presentation shared by desktop, web and phone projections.
+def Settings.row.kind(controls: Bool) -> String:
+  Bool.pick(String, controls, "control", "info")
+
+def Vlocal.status(+u: Ui) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@voice.local")), J.Null{})
+
+def Vlocal.find(ms: List<&2, J.Json>, +id: String) -> J.Json:
+  match ms:
+    case Nil{}: J.Null{}
+    case +m <> t:
+      Bool.pick(J.Json, String.eq(J.Json.get_str(m, "id", ""), id), m, Vlocal.find(t, id))
+
+def Vlocal.id(+u: Ui) -> String:
+  VDC.Vdc.model.id(M.Setting.get(Ui.state.of(u), "voice.model", ""))
+
+def Vlocal.model(+u: Ui) -> J.Json:
+  Vlocal.find(J.Json.elems(J.Json.get_obj(Vlocal.status(u), "models")), Vlocal.id(u))
+
+def Vlocal.busy(+u: Ui) -> Bool:
+  Bool.not(String.is_empty(Ui.scratch(u, "@voice.busy")))
+
+def Vlocal.error(+u: Ui) -> String:
+  +err = Ui.scratch(u, "@voice.local.error")
+  Bool.pick(String, String.is_empty(err), J.Json.get_str(Vlocal.status(u), "error", ""), err)
+
+def Vlocal.ready(+l: J.Json, +m: J.Json) -> Bool:
+  Bool.and(J.Json.get_bool(m, "installed", False{}), Bool.and(J.Json.get_bool(l, "runtime", False{}), J.Json.get_bool(l, "vad", False{})))
+
+def Vlocal.mb(bytes: Nat) -> String:
+  Nat.show(Nat.div(bytes, 1000000n))
+
+def Vlocal.progress.k(phase: String, +lc: I.Loc, +p: J.Json) -> String:
+  match phase:
+    case "unpack": MSG.T.voice.model.unpack(lc, J.Json.get_str(p, "what", ""))
+    case _:
+      +done = J.Json.get_nat(p, "done", 0n)
+      +total = J.Json.get_nat(p, "total", 0n)
+      Bool.pick(String, Nat.is_eq(total, 0n), MSG.T.voice.model.received(lc, J.Json.get_str(p, "what", ""), Vlocal.mb(done)),
+        MSG.T.voice.model.progress(lc, J.Json.get_str(p, "what", ""), Vlocal.mb(done), Vlocal.mb(total), Nat.show(Nat.min(100n, Nat.div(Nat.mul(done, 100n), Nat.max(1n, total))))))
+
+def Vlocal.progress(+lc: I.Loc, +u: Ui) -> String:
+  +p = Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@voice.progress")), J.Null{})
+  Bool.pick(String, String.is_empty(Ui.scratch(u, "@voice.progress")),
+    Bool.pick(String, String.starts_with(Ui.scratch(u, "@voice.busy"), "remove:"), MSG.T.voice.model.removing(lc), MSG.T.voice.model.starting(lc)),
+    Vlocal.progress.k(J.Json.get_str(p, "phase", "download"), lc, p))
+
+def Vlocal.note.k(busy: Bool, +lc: I.Loc, +u: Ui) -> String:
+  match busy:
+    case True{}: Vlocal.progress(lc, u)
+    case False{}:
+      +l = Vlocal.status(u)
+      +m = Vlocal.model(u)
+      Bool.pick(String, Bool.not(String.is_empty(Vlocal.error(u))), MSG.T.voice.model.failed(lc, Vlocal.error(u)),
+        Bool.pick(String, Bool.not(J.Json.get_bool(l, "supported", True{})), MSG.T.voice.model.unsupported(lc, J.Json.get_str(l, "platform", "")),
+          Bool.pick(String, Maybe.is_none(&2, J.Json, J.Json.get(m, "size")), MSG.T.voice.model.checking(lc),
+            Bool.pick(String, Vlocal.ready(l, m), MSG.T.voice.model.ready(lc, J.Json.get_str(m, "label", "")),
+              Bool.pick(String, J.Json.get_bool(m, "installed", False{}), MSG.T.voice.model.incomplete(lc), MSG.T.voice.model.available(lc, Vlocal.mb(J.Json.get_nat(m, "size", 0n))))))))
+
+def Vlocal.note(+lc: I.Loc, +u: Ui) -> String:
+  Vlocal.note.k(Vlocal.busy(u), lc, u)
+
+def Vlocal.btns.k(busy: Bool, +lc: I.Loc, +u: Ui) -> List<&2, AgBtn>:
+  match busy:
+    case True{}: Nil{}
+    case False{}:
+      +l = Vlocal.status(u)
+      +m = Vlocal.model(u)
+      +id = Vlocal.id(u)
+      List.append(&2, AgBtn, [AgBtn{MSG.T.voice.model.language.en(lc), "setting", "voice.model=parakeet-v2", String.eq(id, "parakeet-v2")},
+        AgBtn{MSG.T.voice.model.language.multi(lc), "setting", "voice.model=parakeet-v3", String.eq(id, "parakeet-v3")}],
+        Bool.pick(List<&2, AgBtn>, Bool.or(Maybe.is_none(&2, J.Json, J.Json.get(m, "size")), Bool.not(J.Json.get_bool(l, "supported", True{}))),
+          [AgBtn{MSG.T.voice.model.check(lc), "voice-dict", "status", False{}}],
+          Bool.pick(List<&2, AgBtn>, Vlocal.ready(l, m), [AgBtn{MSG.T.voice.model.remove(lc), "voice-dict", "remove:" ++ id, False{}}],
+            [AgBtn{Bool.pick(String, String.is_empty(Vlocal.error(u)), MSG.T.voice.model.download(lc, J.Json.get_str(m, "label", id), Vlocal.mb(J.Json.get_nat(m, "size", 0n))), MSG.T.voice.model.retry(lc)), "voice-dict", "install:" ++ id, False{}}])))
+
+def Vlocal.rows(+lc: I.Loc, +u: Ui) -> List<&2, AgRow>:
+  +eng = M.Setting.get(Ui.state.of(u), "voice.engine", "auto")
+  [AgRow{MSG.T.settings.voice.engine(lc), MSG.T.settings.voice.engine.note(lc), Nil{}, [
+    AgBtn{MSG.T.voice.engine.auto(lc), "setting", "voice.engine=auto", String.eq(eng, "auto")},
+    AgBtn{MSG.T.voice.engine.local(lc), "setting", "voice.engine=local", String.eq(eng, "local")},
+    AgBtn{MSG.T.voice.engine.cloud(lc), "setting", "voice.engine=cloud", String.eq(eng, "cloud")}]},
+    AgRow{MSG.T.settings.voice.model(lc), Vlocal.note(lc, u), Nil{}, Vlocal.btns.k(Vlocal.busy(u), lc, u)}]
+
+def Vlearned.btns(ks: List<&2, String>, +lc: I.Loc, +st: M.State) -> List<&2, AgBtn>:
+  match ks:
+    case Nil{}: Nil{}
+    case +k <> t:
+      +v = M.Setting.get(st, k, "")
+      AgBtn{MSG.T.voice.learned.item(lc, String.drop(k, 8n), VDC.Vdc.vl.out(v), Nat.show(VDC.Vdc.vl.yes(v))) ++ " ×", "setting", k ++ "=", VDC.Vdc.vl.trusted(v)} <> Vlearned.btns(t, lc, st)
+
+def Vlearned.rows(+lc: I.Loc, +st: M.State) -> List<&2, AgRow>:
+  +ks = M.Setting.keys.pre(st, VDC.Vdc.l.pre())
+  [AgRow{MSG.T.settings.voice.learned(lc), Bool.pick(String, List.is_empty(&2, String, ks), MSG.T.settings.voice.learned.empty(lc), MSG.T.settings.voice.learned.note(lc)), Nil{}, Vlearned.btns(ks, lc, st)}]
