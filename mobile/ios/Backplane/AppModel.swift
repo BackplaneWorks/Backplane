@@ -14,6 +14,10 @@ final class AppModel {
     // Display-only tint; temperatures and fractions come from the shared planner.
     var reflowThermal = SIMD4<Float>(0, 25, 0, 0)
     func reflowDefaults() async -> String { await engine.reflowDefaults() }
+    func improvementsPreview(_ text: String, os: String, version: String, details: String) async -> String {
+        await engine.improvementsPreview(text, os: os, version: version, details: details)
+    }
+    func improvementsPreviewBody(_ body: String) async -> String { await engine.improvementsPreviewBody(body) }
     func reflowAlloys() async -> String { await engine.reflowAlloys() }
     func reflow(_ profile: String, alloy: String) async -> String { await engine.reflow(profile, alloy: alloy) }
     // the client's state, kept for the next launch (StateStore)

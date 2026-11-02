@@ -127,6 +127,7 @@ import ./voice.bend as VO
 import ../core/vdict.bend as VD
 import ./apikeys.bend as AKS
 import ./perf.bend as PS
+import ./diagnostics.bend as DIAG
 import ./freecad.bend as FC
 import ../core/perf.bend as PF
 import ../core/semver.bend as SV
@@ -6192,6 +6193,15 @@ def Debug.serve(allowed: Bool, +i: Nat, s: Socket) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
+# Diagnostics are local-only until this authenticated read. A public draft
+# reads this endpoint only when the user elects diagnostics. No raw logs.
+def DiagnosticsHTTP.serve(allowed: Bool, s: Socket) -> IO(Unit):
+  match allowed:
+    case True{}:
+      IO.bind(String, Unit, DIAG.Diagnostics.export(), text => Conn.finish(s, W.Http.response.c("200 OK", "application/json", U.Utf8.encode(text), "no-store", "")))
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+
 # GET /plot/info?h=<the FNV-1a of a source's key, decimal>: the info file
 # the reading child wrote beside the source's newest plot (core/plot.bend's
 # Infos.file, server/plot.bend's Pv.infos), for the web's cross-probing,
@@ -6240,6 +6250,8 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
       Info.serve(allowed, s, W.Http.param(p, "h"))
     case 6n:
       RenderHTTP.serve(allowed, s, W.Http.param(p, "id"))
+    case 7n:
+      DiagnosticsHTTP.serve(allowed, s)
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), gz)
 
@@ -6254,7 +6266,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -12003,10 +12015,33 @@ def Hub.rpc.dq(refuse: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> 
     case False{}:
       Hub.rpc.k(Hub.state(h), client, text, now)
 
-def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+def Hub.rpc.normal(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.rpc.dq(Bool.and(DQ.Dq.full(Hub.dq(cfg)), Hub.rpc.starts(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "m", ""))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, text, now)
+
+# Mutating diagnostics controls use the normal authenticated WebSocket RPC,
+# never a GET/query parameter, a forwarded machine or a caller-supplied path.
+def Hub.diagnostics.control(result: String, h: Hub, client: U32, id: String) -> IO(Hub):
+  Hub.out(h, B.Reply.data(client, id, Maybe.default(&2, J.Json, J.Json.parse(result), J.Json.obj([J.KV{"ok", J.Flag{False{}}}, J.KV{"error", J.Str{"io"}}]))))
+
+def Hub.diagnostics.operation(action: String) -> IO(String):
+  match action:
+    case "status": DIAG.Diagnostics.status()
+    case _: DIAG.Diagnostics.control(action)
+
+def Hub.rpc.diagnostics(yes: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
+  match yes:
+    case False{}: Hub.rpc.normal(h, client, text, now)
+    case True{}:
+      IO.bind(String, Hub, Hub.diagnostics.operation(Bool.pick(String, String.eq(J.Json.get_str(o, "m", ""), "diagnostics.status"), "status", J.Json.get_str(J.Json.get_obj(o, "p"), "action", ""))),
+        result => Hub.diagnostics.control(result, h, client, J.Json.as_raw(J.Json.get(o, "id"), "0")))
+
+def Hub.rpc.diagnostics.o(h: Hub, client: U32, text: String, now: Nat, +o: J.Json) -> IO(Hub):
+  Hub.rpc.diagnostics(Bool.or(String.eq(J.Json.get_str(o, "m", ""), "diagnostics.control"), String.eq(J.Json.get_str(o, "m", ""), "diagnostics.status")), h, client, text, now, o)
+
+def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  Hub.rpc.diagnostics.o(h, client, text, now, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
 
 # This fixed method set is constructible only by server IO jobs, never by a
 # JSON origin marker or a client id. Reuse the canonical metadata deciders.
@@ -18492,7 +18527,9 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case TelemetryDone{gen, view, id}:
       Hub.telemetry.done(h, gen, view, id, now)
     case Tick{}:
-      IO.bind(Hub, Hub, Hub.tick(h, now), Hub.reexec.poll)
+      do IO<Hub>:
+        DIAG.Diagnostics.tick()
+        IO.bind(Hub, Hub, Hub.tick(h, now), Hub.reexec.poll)
     case ThinFlush{}:
       IO.bind(Nat, Hub, IO.now(), ms => Hub.thin.flush(h, ms))
     case Heart{}:
@@ -18858,6 +18895,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
+        diagnosticStatus : String <- DIAG.Diagnostics.start()
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
         +opened : STO.Opened <- STO.Sto.boot(home)

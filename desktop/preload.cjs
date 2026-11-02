@@ -35,6 +35,7 @@ else new MutationObserver((_, seen) => { if (document.documentElement) { seen.di
 contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   theme,
   captureApp: () => ipcRenderer.invoke('desktop:capture-app'),
+  diagnostics: op => ipcRenderer.invoke('desktop:diagnostics', op),
   onImprovements: callback => {
     if (typeof callback !== 'function') throw new TypeError('Expected a callback');
     const listener = () => callback();
