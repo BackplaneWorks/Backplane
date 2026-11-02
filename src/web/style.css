@@ -237,6 +237,15 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg.assistant .body > :last-child { margin-bottom: 0; }
 .msg.live { opacity: 0.9; }
 .msg.assistant.pending { align-self: flex-start; width: fit-content; min-width: 0; max-width: 100%; padding: 8px 12px; background: var(--raise); border: 1px solid var(--line); color: var(--dim); }
+/* Keep all three dots in layout; reveal one, two, then three without
+   resizing the Working bubble or moving the conversation below it. */
+.msg.assistant.pending .body::after { content: "..."; display: inline-block; white-space: nowrap; animation: working-dots 1.5s step-end infinite; }
+@keyframes working-dots {
+  0%, 100% { clip-path: inset(0 66.6667% 0 0); }
+  33.3333% { clip-path: inset(0 33.3333% 0 0); }
+  66.6667% { clip-path: inset(0); }
+}
+@media (prefers-reduced-motion: reduce) { .msg.assistant.pending .body::after { animation: none; } }
 .msg .stamp { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .msg .stamp:empty { display: none; }
 /* A reply inside a turn (core/stamp.bend's Stamp.mid) shows its time only
