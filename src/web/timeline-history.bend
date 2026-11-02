@@ -1,6 +1,7 @@
 import Base
 import ./dom.bend as D
 import ../core/landing.bend as LAND
+import ../core/timeline-virtual.bend as TV
 
 def H.bool.value(r: Map<&2, Bool> & Bool) -> Bool:
   (_, v) = r
@@ -93,7 +94,7 @@ def H.word.go(+s: String, +word: String, acc: String) -> Bool:
   H.word.go.k(s, H.space(s), word, acc)
 
 def H.transient(+k: String, +as: List<&2, D.Attr>) -> Bool:
-  Bool.or(Bool.or(String.starts_with(k, "live:"), String.starts_with(k, "@live:")), Bool.or(String.eq(H.attr(as, "fn"), "live"),
+  Bool.or(TV.Item.live.key(k), Bool.or(String.eq(H.attr(as, "fn"), "live"),
     Bool.or(H.word.go(H.attr(as, "class"), "live", ""), H.word.go(H.attr(as, "class"), "sending", ""))))
 
 def H.historical.allowed(blocked: Bool, +tag: String, +k: String, +as: List<&2, D.Attr>) -> Bool:
