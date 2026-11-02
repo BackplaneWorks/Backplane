@@ -17,7 +17,7 @@ function changes(view) {
     if (!n || typeof n !== 'object') return null;
     if (Array.isArray(n)) { for (const x of n) { const r = find(x); if (r !== null) return r; } return null; }
     const cls = (n.attrs || []).find((a) => a.name === 'class')?.value || '';
-    if (n.tag === 'span' && cls === 'kv changes') {
+    if ((n.tag === 'span' || n.tag === 'button') && cls === 'kv changes') {
       const v = (n.kids || []).find((k) => (k.attrs || []).some((a) => a.name === 'class' && a.value === 'v'));
       return v?.kids?.[0]?.text ?? null;
     }

@@ -5159,8 +5159,25 @@ def View.chrome.todos.if(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +st: M.
 def View.chrome.todos(+lc: I.Loc, +info: Map<&2, String>, +st: M.State, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
   View.chrome.todos.if(List.is_empty(&2, TD.Todo, ts), lc, info, st, th, ts)
 
-def View.chrome.changes(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
-  D.Dom.when(Nat.is_gt(n, 0n), View.chrome.kv("changes", View.chrome.changes.tip(lc), View.chrome.changes.k(lc), [D.Dom.span("v", Nat.show(n))]))
+def View.chrome.changes.pcb(e: M.Entry) -> Bool:
+  match e:
+    case M.Act{_, _, _, _, +summary, _}: String.contains(summary, ".kicad_pcb")
+    case M.Msg{_, _, _, _, _}: False{}
+
+# whether any of the thread's steps changed a board
+def View.chrome.changes.board(es: List<&2, M.Entry>) -> Bool:
+  match es:
+    case Nil{}: False{}
+    case +e <> t: Bool.or(View.chrome.changes.pcb(e), View.chrome.changes.board(t))
+
+# the design changes: a click opens the viewer on their history (the
+# board's, or the schematic's for a thread that changed no board), whose
+# bar says how many of these are that kind's (client.bend's Hs.live.words)
+def View.chrome.changes(+lc: I.Loc, +es: List<&2, M.Entry>) -> List<&2, D.Node>:
+  +n = HS.Hist.changes(es)
+  D.Dom.when(Nat.is_gt(n, 0n), D.El{"button", "changes", [D.At{"class", "kv changes"}, D.At{"type", "button"}, D.At{"title", View.chrome.changes.tip(lc)},
+    D.At{"data-value", Bool.pick(String, View.chrome.changes.board(es), "board", "schematic")}, D.On{"click", "view-kind"}],
+    [D.Dom.span("k", View.chrome.changes.k(lc)), D.Dom.span("v", Nat.show(n))]})
 
 def View.chrome.branch(+b: String) -> List<&2, D.Node>:
   D.Dom.when(Bool.not(String.is_empty(b)), D.El{"span", "", [D.At{"class", "kv branch"}, D.At{"title", b}], [WI.WIcon.svg("git-branch", 12), D.Dom.span("v", b)]})
@@ -5178,7 +5195,7 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
         [View.chrome.state(lc, st, nf, id, turn, pending)],
         View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
         View.chrome.todos(lc, nf, st, id, U.Todos.shown(st, id, View.running(turn))),
-        View.chrome.changes(lc, HS.Hist.changes(M.State.steps(st, id))),
+        View.chrome.changes(lc, M.State.steps(st, id)),
         View.chrome.branch(branch),
         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])
 
