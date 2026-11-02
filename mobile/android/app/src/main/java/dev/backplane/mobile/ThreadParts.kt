@@ -61,6 +61,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.filled.Archive
@@ -1245,6 +1246,7 @@ fun toolIcon(name: String) = when (name) {
     "diff" -> Icons.Filled.Difference
     "search" -> Icons.Filled.FindInPage
     "stop" -> Icons.Filled.Stop
+    "repeat" -> Icons.Filled.Refresh
     "x" -> Icons.Filled.Close
     "box" -> Icons.Filled.ShoppingCart
     else -> null

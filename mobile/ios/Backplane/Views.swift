@@ -1459,6 +1459,7 @@ struct ThreadScreen: View {
         case "diff": "plusminus"
         case "search": "doc.text.magnifyingglass"
         case "stop": "stop.fill"
+        case "repeat": "arrow.clockwise"
         case "x": "xmark"
         case "box": "cart"
         default: "circle"

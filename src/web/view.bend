@@ -982,6 +982,13 @@ def View.running(t: M.TurnState) -> Bool:
     case _:
       False{}
 
+def View.failed(t: M.TurnState) -> Bool:
+  match t:
+    case M.Failed{}:
+      True{}
+    case _:
+      False{}
+
 # a header tool (core/tools.bend): its icon and label, its sentence as the
 # tooltip; a group starts with a line before it (class "gap")
 def View.tool.cls(on: Bool, danger: Bool, gap: Bool) -> String:
@@ -3636,7 +3643,7 @@ def View.workbar(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, 
   +signal = SG.Signal.cached(info, id)
   +shown = SG.Signal.display.shown(signal, turn, pending, st, id)
   D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}],
-    List.append(&2, D.Node, [View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(TO.Tools.stop.loc(lc, running)))}
+    List.append(&2, D.Node, [View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(List.append(&2, TO.Tool, TO.Tools.stop.loc(lc, running), TO.Tools.retry.loc(lc, View.failed(turn)))))}
 
 # Keep a running Stop control, but never reserve a status strip for an
 # idle bot conversation. Ordinary thread workbars retain their summaries.
@@ -5065,7 +5072,7 @@ def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: Str
   D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)},
     D.At{"title", SG.Signal.display.label(lc, signal, shown, st, id)}],
     List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
-      View.tools(TO.Tools.stop.loc(lc, View.running(turn))))}
+      View.tools(TO.Tools.turn.loc(lc, turn)))}
 
 # the subagents: a click opens or shuts their rows under the bar (View.subs.dock)
 def View.chrome.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:

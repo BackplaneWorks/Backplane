@@ -16303,8 +16303,49 @@ def Psv.dispatch(setup: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}: Ui.act.rpl(Bool.or(String.eq(action, "reply-to"), String.eq(action, "reply-drop")), u, action, value)
 
 
+# Retry (tools.bend's Tools.retry, on a failed turn): the selected thread's
+# last message from the person, sent again as it was typed; nothing when
+# it has none. Entries newest first (M.State.mine); the walk stops at the
+# first (n: how many more to look at, 0 once found, as Stamp.turn.go).
+def Retry.user(e: M.Entry, +th: String) -> String:
+  match e:
+    case M.Msg{_, +t, M.User{}, +text, _}:
+      Bool.pick(String, String.eq(t, th), text, "")
+    case _:
+      ""
+
+def Retry.go(es: List<&2, M.Entry>, +th: String, n: Nat, +found: String) -> String:
+  match es n:
+    case +_ 0n:
+      found
+    case Nil{} 1n+_:
+      found
+    case +e <> t 1n+k:
+      Retry.go(t, th, Bool.pick(Nat, String.is_empty(Retry.user(e, th)), k, 0n), Retry.user(e, th))
+
+def Retry.last(+es: List<&2, M.Entry>, +th: String) -> String:
+  Retry.go(es, th, 100000n, "")
+
+def Retry.k(none: Bool, +u: Ui, +text: String) -> Act:
+  match none:
+    case True{}:
+      Act{u, Nil{}}
+    case False{}:
+      Ui.send.rpc(u, text, "")
+
+def Ui.retry(+u: Ui) -> Act:
+  +text = Retry.last(M.State.mine(Ui.state(u), Ui.sel(u)), Ui.sel(u))
+  Retry.k(String.is_empty(text), u, text)
+
+def Retry.dispatch(retry: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match retry:
+    case True{}:
+      Ui.retry(u)
+    case False{}:
+      Psv.dispatch(String.starts_with(action, "provider-setup-"), u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Psv.dispatch(String.starts_with(action, "provider-setup-"), u, action, value)
+  Retry.dispatch(String.eq(action, "retry"), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))
