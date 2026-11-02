@@ -51,3 +51,40 @@ scripts/test.sh
 scripts/build.sh
 scripts/smoke.sh
 ```
+
+## Lean Boat packets
+
+For a focused Bend program, `scripts/ci-packet.py` uploads an explicit source
+closure as one compressed, verified archive through `boat-job.sh`:
+
+```sh
+python3 scripts/ci-packet.py create \
+  --root test/NAME_test.bend --extra scripts/bendok.sh \
+  --manifest extra/NAME-packet.json \
+  --env BEND_NO_TELEMETRY=1 \
+  --env BUN_JSC_forceRAMSize=4294967296 \
+  --env BUN_JSC_maxPerThreadStackUsage=536870912
+# Use the manifest SHA printed above, never a partial/prefix restore key.
+python3 scripts/ci-packet.py run --manifest extra/NAME-packet.json \
+  --expect SHA256 --timeout 180 -- bend test/NAME_test.bend
+```
+
+Run it under Backplane `work_run` and end the turn. It uses the existing Boat
+budget/admission/deletion controls, waits0 seconds for capacity and retains no
+paid idle sandbox. A local transport cache under `.ci-packet/` is keyed by the
+full manifest digest and verified before reuse. It is generated transport data;
+do not commit it. It stays visible to Git so the existing Boat source-staging
+interface can transfer it; all other files are explicitly excluded.
+
+The packet records exact source bytes and modes plus the actual Bend binary,
+bundled files and named-library hashes. Remote verification runs before and
+after execution; mutations, unexpected source and incomplete uploads fail.
+The command's exit status is preserved. Results in `build/ci-packet/` are
+copied back by the existing runner. This does not cache or certify a gate pass.
+
+Bend imports/effects and local C headers are discovered by bend-closure.py.
+Dynamic JS imports, drivers and data dependencies need explicit `--extra`
+entries. Only Bend/tool resources are bound automatically; external runtimes
+used by drivers need their own pinned identity checks. A packet claiming
+unrelated/missing coverage must not be used as a whole-project pass. Check
+`build/ci-speed/RESULTS.md` for measured scope and limitations.
