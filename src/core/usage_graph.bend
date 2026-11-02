@@ -20,14 +20,13 @@ def Ug.selected(+ps: List<&2, String>, +wanted: String) -> String:
 # Switch.num's second argument is a digit accumulator, not a fallback.
 # Starting at one would parse "01" as 101 and move the range back 100 days.
 def Ug.month.offset(now: Nat) -> Nat:
-  Nat.sub(M.Switch.num(String.drop(M.Tok.day(now), 8n), 0n), 1n)
+  UP.Up.month.offset(now)
 
-def Ug.start(+now: Nat, +period: String) -> Nat:
-  +midnight = Nat.mul(Nat.div(now, 86400n), 86400n)
-  Nat.sub(midnight, Nat.mul(Bool.pick(Nat, String.eq(UP.Up.period(period), "today"), 0n, Ug.month.offset(now)), 86400n))
+def Ug.start(now: Nat, period: String) -> Nat:
+  UP.Up.start(now, period)
 
-def Ug.count(+now: Nat, +period: String) -> Nat:
-  Nat.add(Nat.div(Nat.sub(now, Ug.start(now, period)), 86400n), 1n)
+def Ug.count(now: Nat, period: String) -> Nat:
+  UP.Up.count(now, period)
 
 type UgDay is Data:
   UgDay{date: String, total: String}
@@ -102,7 +101,40 @@ def Ug.projects.go(keys: List<&2, String>, +st: M.State, +catalog: List<&2, M.Pr
       +id = String.take(String.drop(key, String.length(pre)), Nat.sub(String.length(String.drop(key, String.length(pre))), String.length(suffix)))
       Ug.projects.go(rest, st, catalog, pre, suffix, Ug.project.add(Bool.and(String.ends_with(key, suffix), Nat.is_gt(UP.Up.tokens(v), 0n)), id, v, catalog, acc))
 
+# Accumulate every selected daily project reading before choosing the top
+# five: a project can win a rolling range without winning any single day.
+def Ug.projects.collect(keys: List<&2, String>, +st: M.State, +pre: String, +acc: Map<&2, String>) -> Map<&2, String>:
+  match keys:
+    case Nil{}: acc
+    case +key <> rest:
+      +id = String.drop(key, String.length(pre))
+      old = M.State.get.k(Map.get(String, "", acc, id))
+      Ug.projects.collect(rest, st, pre, Map.set(&2, String, acc, id, UP.Up.sum(old, M.Setting.get(st, key, ""))))
+
+def Ug.projects.days(n: Nat, +at: Nat, +st: M.State, acc: Map<&2, String>) -> Map<&2, String>:
+  match n:
+    case 0n: acc
+    case 1n+k:
+      +pre = M.Tok.pre(st) ++ "dp." ++ M.Tok.day(at) ++ "|"
+      Ug.projects.days(k, Nat.add(at, 86400n), st, Ug.projects.collect(M.Setting.keys.pre(st, pre), st, pre, acc))
+
+def Ug.projects.rank(keys: List<&2, String>, +totals: Map<&2, String>, +catalog: List<&2, M.Project>, acc: List<&2, UgProject>) -> List<&2, UgProject>:
+  match keys:
+    case Nil{}: acc
+    case +id <> rest:
+      +v = M.State.get.k(Map.get(String, "", totals, id))
+      Ug.projects.rank(rest, totals, catalog, Ug.project.add(Nat.is_gt(UP.Up.tokens(v), 0n), id, v, catalog, acc))
+
+def Ug.projects.ranked(+totals: Map<&2, String>, catalog: List<&2, M.Project>) -> List<&2, UgProject>:
+  Ug.projects.rank(Map.keys(&2, String, totals), totals, catalog, Nil{})
+
+def Ug.projects.k(calendar: Bool, +st: M.State, catalog: List<&2, M.Project>, +now: Nat, +period: String) -> List<&2, UgProject>:
+  match calendar:
+    case True{}:
+      +pre = M.Tok.pre(st) ++ "p."
+      Ug.projects.go(M.Setting.keys.pre(st, pre), st, catalog, pre, "|" ++ M.Tok.month(now), Nil{})
+    case False{}:
+      Ug.projects.ranked(Ug.projects.days(Ug.count(now, period), Ug.start(now, period), st, Map.new(&2, String)), catalog)
+
 def Ug.projects(+st: M.State, catalog: List<&2, M.Project>, +now: Nat, +period: String) -> List<&2, UgProject>:
-  +pre = M.Tok.pre(st) ++ Bool.pick(String, String.eq(UP.Up.period(period), "today"), "dp." ++ M.Tok.day(now) ++ "|", "p.")
-  +suffix = Bool.pick(String, String.eq(UP.Up.period(period), "today"), "", "|" ++ M.Tok.month(now))
-  Ug.projects.go(M.Setting.keys.pre(st, pre), st, catalog, pre, suffix, Nil{})
+  Ug.projects.k(String.eq(UP.Up.period(period), "month"), st, catalog, now, period)

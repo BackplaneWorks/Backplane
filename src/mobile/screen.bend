@@ -1963,7 +1963,7 @@ def Mob.usage.dashboard(show: Bool, +u: U.Ui) -> List<&2, J.Json>:
       +projects = UG.Ug.projects(st, U.Ui.projects(st), U.Side.now(u), U.Usage.page.period(u))
       List.concat(&2, J.Json, [[Mob.set.row("Provider", "", Mob.usage.providers(U.Usage.page.providers(u), U.Usage.page.provider(u)))],
         Mob.usage.graph(Bool.not(String.is_empty(U.Usage.page.provider(u))), u),
-        [Mob.set.row("Top 5 projects", "Recorded tokens across all models and providers · same UTC period. Missing usage is unknown." ++ Bool.pick(String, String.eq(U.Usage.page.period(u), "today"), " " ++ UG.Ug.coverage(st), ""), Nil{})],
+        [Mob.set.row("Top 5 projects", "Recorded tokens across all models and providers · same UTC period. Missing usage is unknown." ++ Bool.pick(String, Bool.not(String.eq(U.Usage.page.period(u), "month")), " " ++ UG.Ug.coverage(st), ""), Nil{})],
         Bool.pick(List<&2, J.Json>, List.is_empty(&2, UG.UgProject, projects), [Mob.set.row("Projects", "No project token readings in this period.", Nil{})], Mob.usage.ranked(projects, 1n))])
 
 def Mob.usage.pagers(cs: List<&2, UP.UpControl>) -> List<&2, J.Json>:
@@ -1973,9 +1973,9 @@ def Mob.usage.pagers(cs: List<&2, UP.UpControl>) -> List<&2, J.Json>:
 
 def Mob.usage.page(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
   +cs = U.Usage.page.controls(u)
-  List.concat(&2, J.Json, [[Mob.set.row("Period", "UTC calendar boundaries", Mob.usage.controls(List.take(&2, UP.UpControl, cs, 2n))),
-    Mob.set.row("View", "", Mob.usage.controls(List.take(&2, UP.UpControl, List.drop(&2, UP.UpControl, cs, 2n), 3n)))],
-    Mob.usage.dashboard(String.eq(U.Usage.page.metric(u), "tokens"), u), Mob.usage.rows.loc(lc, U.Usage.page.rows(u)), Mob.usage.pagers(List.drop(&2, UP.UpControl, cs, 5n))])
+  List.concat(&2, J.Json, [[Mob.set.row("Period", "Rolling ranges include today (UTC); month = 30 days", Mob.usage.controls(List.take(&2, UP.UpControl, cs, UP.Up.period.size()))),
+    Mob.set.row("View", "", Mob.usage.controls(List.take(&2, UP.UpControl, List.drop(&2, UP.UpControl, cs, UP.Up.period.size()), 3n)))],
+    Mob.usage.dashboard(String.eq(U.Usage.page.metric(u), "tokens"), u), Mob.usage.rows.loc(lc, U.Usage.page.rows(u)), Mob.usage.pagers(List.drop(&2, UP.UpControl, cs, Nat.add(UP.Up.period.size(), 3n)))])
 
 def Mob.kn.acts(as: List<&2, KH.KAct>) -> List<&2, J.Json>:
   match as:

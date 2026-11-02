@@ -15389,3 +15389,15 @@ def Laws.issue_report_prompt_original_verbatim(description): {==}
 def Laws.active_progress_other_soft(): {==}
 
 def Laws.active_progress_owner_urgent(): {==}
+
+def Laws.usage_rolling_week(now): {==}
+
+def Laws.usage_rolling_two_weeks(now): {==}
+
+def Laws.usage_rolling_four_weeks(now): {==}
+
+def Laws.usage_rolling_month(now): {==}
+
+def Laws.usage_rolling_default(): {==}
+
+def Laws.usage_rolling_empty_unknown(): {==}
