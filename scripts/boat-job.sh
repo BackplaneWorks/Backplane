@@ -80,8 +80,8 @@ d = {"at": int(time.time()), "day": time.strftime("%Y-%m-%d", time.gmtime())}
 for x in kv:
     k, v = x.split("=", 1)
     d[k] = int(v) if v.lstrip("-").isdigit() else v
-with open(path, "a") as f:
-    f.write(json.dumps(d) + "\n")
+with open(path, "a", encoding="utf-8") as f:
+    f.write(json.dumps(d, ensure_ascii=False) + "\n")
 EOF
   status_file
 }
@@ -97,7 +97,7 @@ path, mode = sys.argv[1], sys.argv[2]
 day = time.strftime("%Y-%m-%d", time.gmtime())
 jobs = {}; attempts = []; sbx = {}
 try:
-    lines = open(path).read().splitlines()
+    lines = open(path, encoding="utf-8").read().splitlines()
 except FileNotFoundError:
     lines = []
 for l in lines:
@@ -165,7 +165,7 @@ account_cache() {
   python3 - "$ROOT/account.json" "$1" <<'EOF'
 import json, os, sys, time
 path, raw = sys.argv[1], sys.argv[2]
-try: old = json.load(open(path))
+try: old = json.load(open(path, encoding="utf-8"))
 except Exception: old = {}
 now = int(time.time())
 def win(x):
@@ -187,7 +187,7 @@ try:
 except Exception as e:
     out = dict(old) if old else {"refreshed_at": None, "source": "boat limits"}
     out["error"] = "Boat limits unreadable"; out["error_at"] = now
-tmp = path + ".tmp"; json.dump(out, open(tmp, "w")); os.replace(tmp, path)
+tmp = path + ".tmp"; json.dump(out, open(tmp, "w", encoding="utf-8"), ensure_ascii=False); os.replace(tmp, path)
 EOF
 }
 limits_live() { local l; l=$(BT=30 b limits --json 2>/dev/null) || { account_cache ""; return 1; }; account_cache "$l"; printf '%s' "$l"; }
@@ -282,8 +282,9 @@ sweep() {
 status_json() {
   python3 - "$LEDGER" "$ROOT/account.json" <<'EOF2'
 import json, sys, time
+sys.stdout.reconfigure(encoding="utf-8")
 day = time.strftime("%Y-%m-%d", time.gmtime()); jobs = {}; sbx = {}; saved = []; idle_costs = []
-try: lines = open(sys.argv[1]).read().splitlines()
+try: lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
 except FileNotFoundError: lines = []
 for l in lines:
     try: e = json.loads(l)
@@ -332,7 +333,7 @@ for x in threads.values():
     if x["state"] != "warm": x["idle_until"] = None
 out = sorted(jobs.values(), key=lambda j: j.get("queued_at", j.get("ended_at", 0)))
 today = [j for j in out if j.get("day") == day]
-try: account = json.load(open(sys.argv[2]))
+try: account = json.load(open(sys.argv[2], encoding="utf-8"))
 except Exception: account = None
 import os
 bpath = os.path.join(os.path.dirname(sys.argv[2]), "budget-usd")
@@ -353,7 +354,7 @@ print(json.dumps({"rate": {"credit_s_per_usd": 100000, "small": 0.5, "default": 
   "starts_saved": len(saved),
   "sandboxes": sorted(sbx.values(), key=lambda x: x["since"]),
   "threads": threads,
-  "jobs": out}))
+  "jobs": out}, ensure_ascii=False))
 EOF2
 }
 # the folded view for the Usage settings, rewritten whole after every ledger line
@@ -779,5 +780,5 @@ e = os.environ
 m = open(e["J_OUT"] + "/manifest.sha256", "rb").read()
 json.dump({"job": e["J_JOB"], "sandbox": e["J_ID"], "size": e["J_SIZE"], "ttl": int(e["J_TTL"]), "source": e["J_SRC"], "revision": e["J_REV"], "dirty": e["J_DIRTY"],
   "manifest_sha256": hashlib.sha256(m).hexdigest(), "manifest_files": m.count(b"\n"), "bend": e["J_BV"] or None, "bend_sha256": e["J_BSUM"] or None,
-  "command": e["J_CMD"].strip(), "exit": int(e["J_RC"]), "started": int(e["J_T3"])}, open(e["J_OUT"] + "/provenance.json", "w"), indent=1)'
+  "command": e["J_CMD"].strip(), "exit": int(e["J_RC"]), "started": int(e["J_T3"])}, open(e["J_OUT"] + "/provenance.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)'
 finish "$RC"
