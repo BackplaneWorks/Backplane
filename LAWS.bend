@@ -15403,3 +15403,17 @@ law subs_display_finished_toggle_kept:
 
 law subthreads_claude_blocks_native:
   {String.contains(String.join(PM.Claude.args("", "", M.FullAccess{}, M.DefaultMode{}, "", []), " "), "--disallowedTools Agent,Task") == True{} : Bool}
+
+law pending_projection_unfitted:
+  for xs: List<&2, String>
+  {U.Pending.project(False{}, xs) == xs : List<&2, String>}
+
+law pending_preview_whole:
+  for text: String
+  {U.Pending.preview.k("", text) == text : String}
+
+law pending_preview_ellipsis:
+  for c: Char
+  for rest: String
+  for head: String
+  {U.Pending.preview.k(SCon{c, rest}, head) == head ++ "…" : String}
