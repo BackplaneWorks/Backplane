@@ -1,6 +1,6 @@
 # Named Claude and Codex accounts
 
-This implementation is isolated from canonical main `7eccc1e6f29187929d24e0cbb4a8d85127f9d713` (tree `2e58fcc31644639f3c8828147486ca54434dc264`). It adds machine-local subscription profiles and login management to Backplane's web UI, including the desktop web shell. It does not import existing credentials or change existing default CLI homes. Native account-selection UI remains a separate delivery; released native clients receive a visible refusal for named-account threads and cannot dispatch provider work with default credentials.
+Backplane keeps named, machine-local subscription profiles in the web UI, including the desktop web shell. It does not import existing credentials or change existing default CLI homes. Native account-selection UI remains a separate delivery; released native clients receive a visible refusal for named-account threads and cannot dispatch provider work with default credentials. Use the current web or desktop interface to select a named account.
 
 The [pinned upstream research](research/multiple-provider-accounts.md) compares T3 Code commit `9e09926d97824179d97311d1a810c6b5bb60d2d1`, official Codex source commit `78a3185ecba7ca3422f14589aeac97059649f60f`, and Backplane's existing allowance work. T3 has several account mechanisms; this implementation uses independent CLI profiles and Backplane's conversation handoff, rather than shared native-session overlays or managed subscription tokens.
 
@@ -12,7 +12,11 @@ Codex uses the provider's app-server device ceremony. Backplane displays the pro
 
 Status / Refresh verifies the provider identity and retrieves supported metadata. The provider owns token refresh. Disconnect runs the supported provider logout and removes that profile's active private store. Login/disconnect refuse while an owned provider child still uses that profile. Failed verification never creates a successful account from CLI availability or a display name.
 
+Delete account in Settings → Agents removes a saved profile and its local sign-in data after confirmation. Cancel a pending sign-in or finish its active turns first. Deleting a new-thread default clears that choice; existing threads keep their binding and require another account to be selected explicitly. The existing Default CLI accounts are left intact.
+
 Use the Account chip beside the model to select between turns. Selection saves the old native session under its profile/generation, restores only the selected account's session, and hands over unseen recent conversation with an earlier-history pointer. The popup explains that context is handed to the selected account. An active turn must finish or be stopped first. There is no automatic account rotation or fallback for a named-account thread.
+
+The menu lists saved Claude and Codex accounts together. Selecting an account from another agent switches the thread's agent and account in one guarded change. Settings also offers Use in this thread. Opening the menu after a restart rechecks saved sign-ins without a model prompt; unchecked accounts show checking feedback, and disconnected accounts show where to refresh or sign in. Missing accounts and old sign-in generations cannot silently use another account.
 
 Each provider's new-thread default is frozen when a thread is created with that provider. Changing a default leaves existing threads alone. An old thread with no account binding continues to use its existing default CLI authentication and native session. Forks copy account bindings but receive their own thread/session ownership. Switching providers retains each provider's selected profile and catalog separately.
 

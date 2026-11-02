@@ -8,7 +8,7 @@ def cfg() -> List<&2, TI.TmCfg>:
   TI.Tio.plat.cfg(("linux", "x64"), True{}, False{}, "", "", "", 0n, "release")
 
 def shared() -> M.State:
-  M.State.apply(M.State.empty(), M.SettingSet{"telemetry.asked", "1", 1n})
+  M.State.replay([M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.usage.asked", "1", 1n}], M.State.empty())
 
 def marked() -> List<&2, TI.TmCfg>:
   UI.Human.mark(True{}, True{}, shared(), "view.action", "fold", cfg(), 86400n)

@@ -8,6 +8,7 @@ import ../core/mail.bend as ML
 import ../core/mailq.bend as MQ
 import ../core/mailroom_history.bend as RH
 import ../core/presentation.bend as P
+import ../core/lazy-tools.bend as LT
 import ./db.bend as D
 
 # Thin views from the store (IO): the queries core/thinq.bend writes, run on
@@ -111,6 +112,25 @@ def Ts.page.body(+h: String, +th: String, +before: Nat, +base: T.Index, +hide: B
     +above : Nat <- Ts.above(Nat.is_eq(before, 0n), h, th, s, Bool.pick(String, hide, Q.Q.sql.chat.keep(), ""))
     +i : T.Index = T.Index.window.above(T.Index.window(Q.Q.rows(xs), th, n, base), th, above)
     return Page{i, T.Index.page(i, th, before, 32n)}
+
+def Ts.tools.rows(h: String, th: String, ids: List<&2, J.Json>) -> IO(List<&2, List<&2, String>>):
+  match ids:
+    case Nil{}: IO.pure(List<&2, List<&2, String>>, Nil{})
+    case +xs: Ts.query(h, Q.Q.sql.tools(), [th, J.Json.show(J.Json.arr(xs))], 32)
+
+# Same raw rows, overlap, counts and opaque cursors as Ts.page.body. Only
+# body materialization changes: collapsed rows carry only a bounded title
+# and no detail blocks; explicit expansion fetches the full tool payload.
+def Ts.page.lazy_tools(+h: String, +th: String, +before: Nat, +base: T.Index, +hide: Bool, +st: M.State, p: J.Json) -> IO(Page):
+  do IO<Page>:
+    +s : Nat <- Ts.seq_at(h, before)
+    +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.page.lazy_tools(Bool.pick(String, hide, Q.Q.sql.chat.keep(), "")), [th, Q.Q.n(s), Q.Q.n(49n)], 49)
+    +n : Nat <- Ts.below(Nat.is_eq(List.length(&2, List<&2, String>, xs), 49n), h, th, Q.Q.last_seq(xs, 0n))
+    +above : Nat <- Ts.above(Nat.is_eq(before, 0n), h, th, s, Bool.pick(String, hide, Q.Q.sql.chat.keep(), ""))
+    +i : T.Index = T.Index.window.above(T.Index.window(Q.Q.rows(xs), th, n, base), th, above)
+    +ids : List<&2, String> = T.Index.page(i, th, before, 32n)
+    +details : List<&2, List<&2, String>> <- Ts.tools.rows(h, th, LT.Tools.ordinals(ids, i, LT.Tools.allowed(st, i, th, ids, p), Nil{}))
+    return Page{T.Index.window.rows(Q.Q.rows(details), th, i), ids}
 
 # A message read whole: the rows the read may name (the cursor's ordinal,
 # or the entry `id` among the page's rows), whole, in the page's index

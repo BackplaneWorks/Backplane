@@ -1,4 +1,5 @@
 import Base
+import ./telemetry-choice.bend as TC
 import ./bot.bend as BT
 import ./json.bend as J
 import ./ubop.bend as UO
@@ -2506,12 +2507,11 @@ def State.apply.go(s: State, e: Change) -> State:
 
 # Alpha aggregate telemetry is a bounded projection of the durable log, not a
 # second event stream. The hub enables it at startup only when its baked gate
-# is open; old logs have no enable marker and are never backfilled. Consent to
-# the expanded disclosure is separate from the legacy install/activity choice.
+# is open; old logs have no enable marker and are never backfilled. The saved
+# disclosure answer now gates every telemetry category together.
 def Metrics.allowed(+s: State) -> Bool:
   Bool.and(String.eq(Setting.get(s, "telemetry.usage.enabled", ""), "1"),
-    Bool.and(String.eq(Setting.get(s, "telemetry.usage.asked", ""), "1"),
-      Bool.and(String.eq(Setting.get(s, "telemetry.asked", ""), "1"), Bool.not(String.eq(Setting.get(s, "telemetry.share", "on"), "off")))))
+    TC.Choice.allowed(Setting.get(s, "telemetry.share", ""), Setting.get(s, "telemetry.asked", ""), Setting.get(s, "telemetry.usage.asked", "")))
 
 def Metrics.data(s: State) -> Map<&2, String>:
   match s:

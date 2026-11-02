@@ -80,6 +80,10 @@ const subsFeedback = new SubsFeedback(() => later());
 // the session the hub's picture is drawn over: the model menu and the
 // Subagents rows as clicked, ahead of the hub's answer
 const feedbackSession = () => subsFeedback.project(modelFeedback.project(currentSession()));
+function pendingPresentation(node) {
+  const pending = thin?.pendingSends(currentSession().sel);
+  return pending?.length ? App.presentation_pending(node, presentationJson(pending), App.lang(ui)) : node;
+}
 // The Subagents rows shown or hidden in the click's own task: their head and
 // section patched with the overlay at once (a whole render waits for the
 // next frame and draws everything), the page drawn whole after as usual
@@ -303,7 +307,7 @@ function same(a, b) {
 // changed) is not built again.
 const planTrees = new WeakMap();
 function timelinePlan(input) {
-  const tree = Planner.timeline_plan(Wire.json({ ...input, overscan: historyOverscan(input.view) }, planTrees));
+  const tree = Planner.timeline_plan(Wire.json({ ...input, bounded: true, bottomAlign: true, overscan: historyOverscan(input.view) }, planTrees));
   const plan = Wire.plain(tree);
   if (plan && typeof plan === "object") planTrees.set(plan, tree);
   return plan;
@@ -792,7 +796,7 @@ const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
 let held = false, away = "";
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
-function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
+function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyFillPages = 0;historyFillSeeking = true;historyFillScope = "";document.getElementById("history-fill-more")?.remove();historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
 // Rows let go past the cap (thin-host.js's heldTrim): their display keys,
 // by the side they went from, and the height they had, kept in their place
 // as a gap (timeline-history.bend's gaps) so the scrollbar and the reader's
@@ -868,6 +872,7 @@ function holdSay(now) {
 }
 function timelineScrolled(list, delta) {
   if (list !== activeTimeline || !delta) return;
+  historyFillSeeking = false;historyFillMore(null, false);
   historyDirection = delta < 0 ? "older" : "newer";
 }
 function timelineChanged(list) {
@@ -1026,6 +1031,7 @@ function render() {
     node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
+  if (frontendNode && remoteReady) page = pendingPresentation(page);
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
@@ -1206,6 +1212,7 @@ function renderRegions() {
   for (const [r, el, hub] of parts) {
     const a0 = RR ? pnow() : 0;
     let v = r.name === "timeline" ? overlayRows(historyGaps(hub), session) : App.presentation_overlay(hub, session);
+    if (r.name === "timeline") v = pendingPresentation(v);
     const a1 = RR ? pnow() : 0;
     v = thinContinuations.project(v, node => node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), true);
     v = bodyWindows.project(v);
@@ -2296,7 +2303,7 @@ document.addEventListener("click", (e) => {
 });
 // The hub issues page cursors. The virtual list accumulates their data in
 // Bend; changing pages never removes the reader's already loaded rows.
-let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null;
+let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null, historyFillPages = 0, historyFillSeeking = true, historyFillScope = "";
 // How far from the edge of the rows drawn the next page is asked for: two
 // screens, or the distance the reader covers at their speed (the last
 // quarter second's scrolling) in twice the time a page has been taking,
@@ -2325,12 +2332,81 @@ function historyRunway(tl) {
 // A reader faster than three screens of runway gets two older pages on
 // their way at once (thin-host.js's ahead {two}): one page at a time cannot
 // keep up with a fast wheel, however early it is asked for.
+function historyFillOwner() {
+  const link = thin?.client.links.get(thin.hub);
+  if (!thin?.ready || !link?.viewId) return "";
+  return JSON.stringify([readingIdentity(), thin.hub, link.greeting.generation, link.greeting.epoch, link.viewId, thin.selectionRevision, thin.target, thin.session.sel, thin.historyEpoch]);
+}
+function historyHasMessage(tl) {
+  const box = tl.getBoundingClientRect();
+  for (const row of tl.querySelectorAll('.msg[data-id]:not(.live):not(.working):not(.sending)')) {
+    const rect = row.getBoundingClientRect();
+    if (!row.dataset.id.startsWith("@live:") && row.textContent.trim() && rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom) return true;
+  }
+  return false;
+}
+function historyMessageKey(node) {
+  if (!node?.tag || !node.key || node.key.startsWith("@") || node.key.startsWith("control:")) return "";
+  const attrs = [...each(node.attrs)], classes = attrs.find(a => a.name === "class")?.value.split(/\s+/) || [];
+  if (classes.some(c => ["live", "working", "sending"].includes(c))) return "";
+  if (attrs.some(a => a.name === "fn" && a.value === "msg")) {
+    return [...each(node.kids)].some(n => typeof n.text === "string" && n.text.trim()) ? node.key : "";
+  }
+  return classes.includes("msg") ? historyRow(node) : "";
+}
+function historySeekMessage(tl) {
+  const list = timelineList(tl);
+  if (!list || list !== activeTimeline || historyFillScope !== historyFillOwner()) return false;
+  for (let i = (list?.rows.length || 0) - 1; i >= 0; i--) {
+    const key = historyMessageKey(list.rows[i]);
+    if (key && list.scrollToKey(key, { align: "center" })) return true;
+  }
+  return false;
+}
+function historyFillMore(tl, shown) {
+  let button = document.getElementById("history-fill-more");
+  if (!shown) { button?.remove();return; }
+  if (!button) {
+    const owner = historyFillScope;
+    button = document.createElement("button");button.id = "history-fill-more";button.type = "button";
+    button.textContent = "Earlier messages";button.setAttribute("aria-controls", "timeline");
+    button.onclick = () => {
+      if (owner !== historyFillOwner() || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("older")) return;
+      // One deliberate continuation grants another bounded batch. It does
+      // not turn a short viewport into an unlimited background history scan.
+      historyFillPages = 0;historyFillSeeking = true;historyDirection = "";earlierAsked = false;
+      button.remove();historyCheckSoon();
+    };
+    document.body.appendChild(button);
+  }
+  const box = tl.getBoundingClientRect();
+  button.style.cssText = "position:fixed;z-index:12;max-width:calc(100vw - 32px);background:var(--panel);color:var(--text);border:1px solid var(--line);padding:6px 10px;min-height:36px";
+  button.style.top = Math.max(0, box.top + 8) + "px";button.style.left = Math.max(8, box.left + 8) + "px";
+}
 function earlierCheck(tl) {
-  if (historyDirection !== "older" || !tl || tl.id !== "timeline" || !thin?.ready || thin.pageError) return;
-  const gap = historyGap("older"), runway = historyRunway(tl), two = runway > tl.clientHeight * 3;
+  if (!tl || tl.id !== "timeline" || !thin?.ready || thin.pageError) { historyFillMore(tl, false);return; }
+  const owner = historyFillOwner();
+  if (!owner) { historyFillMore(tl, false);return; }
+  if (!historyFillScope) historyFillScope = owner;
+  else if (owner !== historyFillScope) { historyFillScope = owner;historyFillSeeking = false;historyFillMore(tl, false);return; }
+  // Raw pages can be entirely folded tools. Fill a short initial viewport
+  // without waiting for a scroll event that cannot occur without a scrollbar.
+  // This retains the existing raw cursor/overlap contract and has a fixed
+  // automatic budget; explicit scrolling remains available after that budget.
+  // Virtual measurements can leave a few pixels of overflow around a lone
+  // fold. A scrollbar by itself does not mean any message became readable.
+  const visible = historyHasMessage(tl), short = tl.scrollHeight <= tl.clientHeight + 10 || !visible;
+  if (visible && !short) historyFillSeeking = false;
+  if (!historyDirection && historyFillSeeking && historyFillPages > 0 && !visible && historySeekMessage(tl)) { historyFillMore(tl, false);return; }
+  historyFillMore(tl, historyFillSeeking && !historyDirection && short && historyFillPages >= 32 && !thin.paging && thin.hasAhead("older"));
+  const filling = historyFillSeeking && !historyDirection && short && historyFillPages < 32;
+  if (historyDirection !== "older" && !filling) return;
+  const gap = historyGap("older"), runway = historyRunway(tl), two = filling || runway > tl.clientHeight * 3;
   if (thin.paging ? !two || !!thin.pagingNext : earlierAsked) return;
-  if (!thin.hasAhead("older") || tl.scrollTop - gap > runway * (gap ? 2 : 1)) return;
-  earlierAsked = thin.ahead("older", { two }) || earlierAsked;
+  if (!thin.hasAhead("older") || !filling && tl.scrollTop - gap > runway * (gap ? 2 : 1)) return;
+  const asked = thin.ahead("older", { two });
+  if (asked && filling) historyFillPages += 2;
+  earlierAsked = asked || earlierAsked;
 }
 function laterCheck(tl) {
   if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.paging || thin.pageError || !thin.hasAhead("newer")) return;
@@ -2368,6 +2444,7 @@ document.addEventListener("scroll", e => {
 document.addEventListener("wheel", e => {
   if (!e.isTrusted || e.ctrlKey || !e.target.closest?.("#timeline")) return;
   const tl = document.getElementById("timeline");
+  if (e.deltaY) { historyFillSeeking = false;historyFillMore(tl, false); }
   historyDirection = e.deltaY < 0 ? "older" : e.deltaY > 0 ? "newer" : historyDirection;
   historyMoved(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? tl?.clientHeight || 800 : 1));
   if (e.deltaY < 0) earlierCheck(tl);
@@ -2379,10 +2456,10 @@ for (const event of ["touchstart", "touchmove", "keydown"]) document.addEventLis
   if (event === "touchstart") historyTouchY = e.touches[0]?.clientY ?? null;
   else if (event === "touchmove") {
     const y = e.touches[0]?.clientY;
-    if (typeof y === "number" && typeof historyTouchY === "number") { historyDirection = y > historyTouchY ? "older" : y < historyTouchY ? "newer" : historyDirection;historyMoved(y - historyTouchY); }
+    if (typeof y === "number" && typeof historyTouchY === "number") { if (y !== historyTouchY) { historyFillSeeking = false;historyFillMore(null, false); }historyDirection = y > historyTouchY ? "older" : y < historyTouchY ? "newer" : historyDirection;historyMoved(y - historyTouchY); }
     historyTouchY = y;
-  } else if (["PageUp", "Home", "ArrowUp"].includes(e.key)) historyDirection = "older";
-  else if (["PageDown", "End", "ArrowDown", " "].includes(e.key)) historyDirection = "newer";
+  } else if (["PageUp", "Home", "ArrowUp"].includes(e.key)) { historyFillSeeking = false;historyFillMore(null, false);historyDirection = "older"; }
+  else if (["PageDown", "End", "ArrowDown", " "].includes(e.key)) { historyFillSeeking = false;historyFillMore(null, false);historyDirection = "newer"; }
   historyCheckSoon();
 }, { capture: true, passive: true });
 
@@ -2599,6 +2676,17 @@ const choosePresentation = (session, action, value) => {
   const chosen = Wire.plain(App.presentation_choice(action, presentationJson(session), value));
   return action === "draft" ? preservePresentationRoute(session, chosen) : chosen;
 };
+// Until the action replies, keep its captured text in the saved draft too.
+// The visible field is already empty, but a reload before the acknowledgement
+// must recover that text. Subsequent typing is saved alongside it.
+function persistDraft(thread, text) {
+  const pending = thin?.pendingSends(thread) || [];
+  const saved = [...pending.map(p => p.text), text].filter(Boolean).join("\n\n");
+  try {
+    if (saved) localStorage.setItem(DRAFT + thread, saved);
+    else localStorage.removeItem(DRAFT + thread);
+  } catch {}
+}
 function localPresentation(action, value, session) {
   if (action === "select") {
     ui = App.presentation_select(ui, value);
@@ -2618,10 +2706,7 @@ function localPresentation(action, value, session) {
     // typing lag, on phones most. A key that empties or fills the draft, or
     // types in a word that starts a popup (/ $ @ > % #), redraws at once.
     if (frontendNode) paintDraft(session.sel, value);
-    try {
-      if (value) localStorage.setItem(DRAFT + session.sel, value);
-      else localStorage.removeItem(DRAFT + session.sel);
-    } catch {}
+    persistDraft(session.sel, value);
   }
 }
 // A phone's timeline never sits scrolled sideways: style.css hides its
@@ -2845,7 +2930,8 @@ function outboxReply(envelope) {
 }
 function outboxRefused(o, error) {
   const session = currentSession();
-  if (thin && session.sel === o.thread && !session.drafts?.[o.thread]) thin.request("draft", o.body);
+  if (thin?.ordinary.get(o.id)?.preview) { /* The captured send restores alongside newer typing in ThinHost. */ }
+  else if (thin && session.sel === o.thread && !session.drafts?.[o.thread]) thin.request("draft", o.body);
   else try { if (!localStorage.getItem(DRAFT + o.thread)) localStorage.setItem(DRAFT + o.thread, o.body); } catch {}
   showViewStatus(`A message was not sent (${String(error || "refused")}); its text is back in its draft.`);
 }
@@ -3140,6 +3226,7 @@ async function startThin(again = false, reason = "initial") {
         const saved = takeReadingHistory(target, session);
         historyClear();
         if (saved) {
+          historyFillSeeking = false;
           historyNode = saved.node;historyDirection = saved.direction;resumedConversation = saved.conversation;
           for (const side of ["older", "newer"]) for (const id of saved.gone[side]) historyGone[side].add(id);
         }
@@ -3152,6 +3239,8 @@ async function startThin(again = false, reason = "initial") {
         return saved?.held;
       },
       local: localPresentation,
+      previewSend: text => App.presentation_send_preview(text),
+      sendFeedback: (started, thread, text) => { persistDraft(thread, text);if (started) scroll = true;later(); },
       composing: thread => composerComposing && document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread") === thread,
       modelMenuReady: () => {
         // A picker whose cursor moved (data-draft) opens and shuts through
@@ -3191,6 +3280,7 @@ async function startThin(again = false, reason = "initial") {
       terminalLifetime: () => document.querySelector('.floating-terminal .term-pane')?.getAttribute('data-terminal-incarnation') || '',
       command: command => presentationCommand(command),
       anchor: () => { const tl = document.getElementById("timeline"), a = tl && anchorOf(tl);return { id: a?.id || "", offset: Math.max(0, Math.round(a ? tl.getBoundingClientRect().top - a.off : 0)) }; },
+      readingMark: () => holdMark(),
       pagePosition: () => {
         const list = timelineList();
         return list ? { position: { ...list.position(), atEnd: thin.atNewest() && list.atEnd() }, adjacent: "" } : null;
@@ -3243,7 +3333,7 @@ async function startThin(again = false, reason = "initial") {
         thinMailDraft.bind(detail.mailDraftContext, detail.epoch, accepted);
         thinContinuations.bind(location.origin, detail);
         bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held);
-        if (detail.position) transitionPosition = detail.position;
+        if (detail.position) { transitionPosition = detail.position;if (detail.position.atEnd === false) historyFillSeeking = false; }
         else if (!remoteReady && !detail.historyReset) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);

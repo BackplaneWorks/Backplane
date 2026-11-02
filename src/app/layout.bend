@@ -1,4 +1,5 @@
 import Base
+import ../core/chat-pending.bend as CP
 import ../core/textscale.bend as TS
 import ./side_row_types.bend as ST
 import ../core/title.bend as TTL
@@ -3669,7 +3670,7 @@ def Vx.term.btns(ts: List<&2, String>) -> List<&2, VBtn>:
     case +t <> r:
       VBtn{t ++ "  ×", "voice-unterm", t} <> Vx.term.btns(r)
 
-def Set.voice(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+def Set.voice.base(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
   +label0 = MSG.T.common.save(Ty.loc(ty))
   +label1 = MSG.T.queue.remove(Ty.loc(ty))
   +label2 = MSG.T.common.add(Ty.loc(ty))
@@ -3720,7 +3721,7 @@ def Set.settle.done(+ty: Ty, +on: Bool, +x: U32, +w: U32, +y: U32) -> Out:
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) - 6 - Lay.button.w(ty, label1) : U32), (y + 14 : U32), label1, on, "setting", M.Lifecycle.key() ++ "=on"),
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) : U32), (y + 14 : U32), label0, Bool.not(on), "setting", M.Lifecycle.key() ++ "=off")])
 
-def Set.voice.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+def Set.voice.base.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
   +u = S.Nui.ui(n)
   +devs = Vx.devs.loc(Ty.loc(ty), u)
   (386 + (Vx.chips.rows(devs, ty, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
@@ -4360,6 +4361,17 @@ def Set.page.network.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>,
 
   268
 
+def Set.voice(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  +rows = U.Vlocal.rows(Ty.loc(ty), S.Nui.ui(n))
+  +rh = Set.agy.sum(rows, ty, x, w)
+  Out.all([Set.agy.rows(rows, ty, n, x, w, y),
+    Set.voice.base(ty, st, n, x, w, (y + rh : U32)),
+    Set.agy.rows(U.Vlearned.rows(Ty.loc(ty), st), ty, n, x, w, (y + rh + Set.voice.base.h(ty, n, x, w) : U32))])
+
+def Set.voice.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (Set.voice.base.h(ty, n, x, w) + Set.agy.sum(U.Vlocal.rows(Ty.loc(ty), S.Nui.ui(n)), ty, x, w)
+    + Set.agy.sum(U.Vlearned.rows(Ty.loc(ty), U.Ui.state.of(S.Nui.ui(n))), ty, x, w) : U32)
+
 def Set.page.voice(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
 
   Out.all([
@@ -4531,7 +4543,6 @@ def Set.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
 # display scaling. The ordinary desktop keeps the project sidebar visible.
 def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
   Set.settings(ty, st, n, info, v, note, Bool.pick(U32, U32.is_lt(U32.dim(x1, x0), 560), 0, x0), x1, h, raw)
-
 
 # Terminal
 # --------
@@ -6955,6 +6966,11 @@ def TL.memo.lines(+ty: Ty, +m: TLMemo, +es: List<&2, M.Entry>, +st: M.State, +se
   TL.memo.lines.k(TL.memo.fits(m, px, sel), ty, m, es, st, sel, px, pics)
 
 # messages the server has not stored yet, marked as sending
+def TL.pending(+ty: Ty, show: Bool, +px: U32) -> List<&2, TLine>:
+  match show:
+    case False{}: Nil{}
+    case True{}: TL.blocks(ty, N.Md.render(CP.Pending.label(Ty.loc(ty))), px)
+
 def TL.sending(+ty: Ty, ps: List<&2, String>, +px: U32) -> List<&2, TLine>:
   match ps:
     case Nil{}:
@@ -7175,7 +7191,7 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       # the timeline and what sits around it are laid out at once
       tl ch = Lay.timeline(ty,
         List.concat(&2, TLine, [TL.memo.shown.loc(ty, memo, st, sel, cw, pics), TL.sending(ty, pend, cw),
-          TL.live.single(ty, String.is_empty(live), ph, live, TL.memo.lv(memo), cw)]),
+          TL.pending(ty, CP.Pending.phase(ph), cw)]),
         cx0, cx1, top, (h - ah - qh - eh - bh : U32), sc, tsel, hold, TL.memo.first(memo), Out.none()) Out.all([Lay.header(ty, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, sel, now), U.Fab.mini.tools.of(st, pics, sel, Lay.running(turn)), x0, x1, pa, term, M.Snooze.on(now, U.Side.until(st, sel)), del, hy),
           Kn.draw(kx, False{}, ty, cx0, (52 + hy : U32), cw),
           Kn.draw(kn, True{}, ty, cx0, (52 + hy + kxh : U32), cw),
@@ -7364,7 +7380,7 @@ def TL.memo.locale(+tag: String, +m: TLMemo) -> TLMemo:
 # whole cost every frame 15 ms on a real log; "earlier" shows another page)
 def Lay.memo.local(+tag: String, +ty: Ty, +n: S.Nui, +prev: TLMemo) -> TLMemo:
   TL.memo.with_live(TL.memo.of(ty, Lay.memo.es(String.is_empty(U.Ui.sel(S.Nui.ui(n))), n), Lay.tl.px(n), U.Ui.sel(S.Nui.ui(n)), prev),
-    TL.live.local(tag, TL.live.get(ty, TL.memo.lv(prev), U.Live.head(U.Ui.live.of(S.Nui.ui(n), U.Ui.sel(S.Nui.ui(n)))), Lay.tl.px(n))))
+    TL.live.local(tag, TL.live.get(ty, TL.memo.lv(prev), "", Lay.tl.px(n))))
 
 def Lay.memo(+ty: Ty, +n: S.Nui, prev: TLMemo) -> TLMemo:
   Lay.memo.local(Ty.tag(ty, TL.locale(S.Nui.ui(n))), ty, n, TL.memo.locale(Ty.tag(ty, TL.locale(S.Nui.ui(n))), prev))

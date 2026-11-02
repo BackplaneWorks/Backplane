@@ -34,8 +34,22 @@ def request(a: U.Act) -> J.Json:
 def params(a: U.Act) -> J.Json:
   J.Json.get_obj(request(a), "p")
 
+def cross_ui() -> U.Ui:
+  F.ordinary(M.State.replay([
+    M.SettingSet{"accounts.inventory", "{\"profiles\":[{\"id\":\"C\",\"provider\":\"claude\",\"epoch\":3,\"state\":\"connected\"}]}", 6n},
+    M.SettingSet{A.Accounts.binding.key("self", "claude"), A.Accounts.binding.show("old-claude", 1n), 6n}], state()), 10n)
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("other provider selection compares its own previous binding", J.Json.get_str(params(U.Acv.select(cross_ui(), "C")), "expected", ""), A.Accounts.binding.show("old-claude", 1n))
+    C.Check.str("other provider selection still captures current thread owner", J.Json.get_str(params(U.Acv.select(cross_ui(), "C")), "accountBinding", ""), A.Accounts.binding.show("A", 2n))
+    C.Check.str("other provider selection names target epoch", Nat.show(J.Json.get_nat(params(U.Acv.select(cross_ui(), "C")), "epoch", 0n)), "3")
+    C.Check.str("other provider selection captures current provider", J.Json.get_str(params(U.Acv.select(cross_ui(), "C")), "expectedProvider", ""), "codex")
+    C.Check.str("other provider selection captures current owner even for comparison", J.Json.get_str(params(U.Acv.select(cross_ui(), "C")), "expectedOwner", ""), A.Accounts.binding.show("A", 2n))
+    C.Check.str("delete account first click sends no request", J.Json.get_str(request(U.Acv.act(ui(), "acct-delete", "A")), "m", ""), "")
+    C.Check.str("delete account first click arms only selected profile", U.Ui.scratch(after(U.Acv.act(ui(), "acct-delete", "A")), "@acct.delete"), "A")
+    C.Check.str("delete account confirmation sends remove", J.Json.get_str(params(U.Acv.act(after(U.Acv.act(ui(), "acct-delete", "A")), "acct-delete", "A")), "op", ""), "remove")
+    C.Check.str("keep account cancels deletion", U.Ui.scratch(after(U.Acv.act(after(U.Acv.act(ui(), "acct-delete", "A")), "acct-keep", "")), "@acct.delete"), "")
     C.Check.str("selection preserves current draft", U.Ui.draft_text(after(U.Acv.act(ui(), "acct-select", "B"))), U.Ui.draft_text(ui()))
     C.Check.str("selection names exact profile", J.Json.get_str(params(U.Acv.act(ui(), "acct-select", "B")), "profile", ""), "B")
     C.Check.str("selection compares previous binding", J.Json.get_str(params(U.Acv.act(ui(), "acct-select", "B")), "expected", ""), A.Accounts.binding.show("A", 2n))
