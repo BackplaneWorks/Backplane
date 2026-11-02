@@ -15412,3 +15412,9 @@ def Laws.subs_display_child_conversation(): {==}
 def Laws.subs_display_finished_toggle_kept(): {==}
 
 def Laws.subthreads_claude_blocks_native(): {==}
+
+def Laws.pending_projection_unfitted(xs): {==}
+
+def Laws.pending_preview_whole(text): {==}
+
+def Laws.pending_preview_ellipsis(c, rest, head): {==}
