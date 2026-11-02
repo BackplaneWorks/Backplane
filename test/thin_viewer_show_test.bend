@@ -19,6 +19,16 @@ def heard(+u: U.Ui, +msg: String) -> A.Actor:
 def shown() -> String: "{\"t\":\"view\",\"thread\":\"a\",\"kind\":\"board\",\"path\":\"/tmp/b.kicad_pcb\"}"
 def auto() -> String: "{\"t\":\"view\",\"thread\":\"a\",\"kind\":\"board\",\"path\":\"/tmp/b.kicad_pcb\",\"auto\":true}"
 
+# the page's next request, its viewer shut (the hub's reply tells it otherwise)
+def asked() -> J.Json:
+  F.obj("{\"target\":{\"kind\":\"thread\",\"id\":\"a\"},\"session\":{\"sel\":\"a\",\"rid\":100,\"drafts\":{},\"open\":{},\"info\":{},\"panel\":false}}")
+
+def again(+a: A.Actor) -> A.Actor:
+  A.Actor.refresh([a], True{}, U.Ui.state(F.ui()), F.obj("{}"), F.obj("{}"), 2n, asked(), "v")
+
+def open(+a: A.Actor) -> String:
+  Bool.show(U.Ui.panel(A.Actor.ui(a)))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("viewer_show opens the panel", Bool.show(U.Ui.panel(A.Actor.ui(heard(F.ui(), shown())))), "True")
@@ -26,3 +36,6 @@ def main() -> IO(Unit):
     C.Check.str("and the page is drawn again", Bool.show(A.Actor.dirty(heard(F.ui(), shown()))), "True")
     C.Check.str("an agent's start opens the board", Bool.show(U.Ui.panel(A.Actor.ui(heard(F.ui(), auto())))), "True")
     C.Check.str("but not where the person shut it by hand", Bool.show(U.Ui.panel(A.Actor.ui(heard(U.Act.ui(U.Ui.toggle_panel(U.Act.ui(U.Ui.toggle_panel(F.ui())))), auto())))), "False")
+    C.Check.str("the page's next request keeps the viewer the hub opened", open(again(heard(F.ui(), shown()))), "True")
+    C.Check.str("once: after that the page's own choice wins", open(again(again(heard(F.ui(), shown())))), "False")
+    C.Check.str("with no view from the hub the page's choice stands", open(again(actor(F.ui()))), "False")
