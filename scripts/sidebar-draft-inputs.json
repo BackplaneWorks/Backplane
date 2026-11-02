@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "c4e1139954cc06e41e1de8a68104cbf8722b8a40c6a7f924bcc07a54bf763733",
+    "src/core/client.bend": "3f79a193b83bf8d1317ecf99e9a839f2e78bfa5b7489738a00bab1c4afbcae13",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -157,7 +157,7 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
-    "src/mobile/screen.bend": "0b0c496336556ffefb83c6e2d142ccf2b892645c26d15c80962a3cca627d9519",
+    "src/mobile/screen.bend": "2f550841d80490b891e0aefdc66264c5673a95cc128522528dae140e1f19af9f",
     "src/server/thin-actor.bend": "ea84db3e1a8609e1455f9efb33cdbcc638bcb46570b03293b5589a7be2f687e7",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -181,7 +181,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "67101494840171ae975d7667009c1e2fbb60879bfe1d055bb78d52d7c5ddcdd1"
+    "src/web/view.bend": "f86df95479667fa0154acdd39c671595615942fd00dc97ff0cfb5b3e3b9e695a"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -567,6 +567,18 @@
     "fullOutputCheck": "test/sidebar_draft_image_test.bend",
     "qualification": "Strict seven-suite run w-t1793604413-1188211-1204210 passed against fcd8d, including sidebar full output, settings approval paths, fallback, order asks and order cards.",
     "changedFiles": [
+      "src/mobile/screen.bend",
+      "src/web/view.bend"
+    ]
+  },
+  "fallbackSettingsReview": {
+    "baseCommit": "351bddb1967bf459be48b882fda002df49ffb385",
+    "scope": "Move existing fallback rows from Threads to Agents in web and phone settings; add static fallback labels and keywords to the Settings search index. These edits add no draft or scratch reads and do not change sidebar inputs, filtering, private image keys, unknown scratch retention, wire or authority boundaries.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "qualification": "Strict scripts/test.sh run passed all 24 sidebar input and full-page equivalence assertions on the merged fallback Settings sources.",
+    "qualificationLogSHA256": "57279750ee337c1d44777c55db6bd4689c619af541d9bfb61d24e526b6b5ab97",
+    "changedFiles": [
+      "src/core/client.bend",
       "src/mobile/screen.bend",
       "src/web/view.bend"
     ]
