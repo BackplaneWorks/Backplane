@@ -82,6 +82,7 @@ import ./thin-mail.bend as TMAIL
 import ../core/thin.bend as THIN
 import ../core/thin-chat.bend as TCHAT
 import ../core/thin-live.bend as TLIVE
+import ../core/stream-commit.bend as SCOM
 import ../core/thin-wire.bend as TVW
 import ../core/presentation.bend as PRESENT
 import ../web/session.bend as WEBFRONT
@@ -7224,6 +7225,21 @@ def Cfg.thin.live(+cfg: Cfg, streams: Map<&2, TLIVE.Stream>, +th: String) -> Cfg
 def Live.with(+cfg: Cfg, +lv: List<&2, LV.Buf>) -> Cfg:
   Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.snapshot(lv, Cfg.thin.next(Cfg.thin.revision(cfg)), Map.new(&2, TLIVE.Stream)), "*")
 
+# Metadata commits cannot change live buffers. Stream endings update only
+# their own slots; Cfg.thin.committed supplies the revision and notices once.
+# Keep Live.with's global replacement for recovery and remote snapshots.
+def Live.committed.when(ending: Bool, +cfg: Cfg, cs: List<&2, M.Change>, +lv: List<&2, LV.Buf>) -> Cfg:
+  match ending:
+    case False{}: cfg
+    case True{}:
+      Cfg.with_thin_cache(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)),
+        ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg),
+          SCOM.Streams.commit(cs, lv, Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg)),
+          Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), Cfg.thin.notes(cfg), Cfg.thin.store(cfg), Cfg.thin.signal_seq(cfg)})
+
+def Live.committed(+cfg: Cfg, +cs: List<&2, M.Change>, lv: List<&2, LV.Buf>) -> Cfg:
+  Live.committed.when(SCOM.Streams.any(cs), cfg, cs, lv)
+
 def Live.with_delta(+cfg: Cfg, +lv: List<&2, LV.Buf>, +thread: String, text: String) -> Cfg:
   Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg))), TPACE.Touch.live(thread))
 
@@ -7317,7 +7333,7 @@ def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: L
         Bot.dir.changed.all(cs, inbox)
         +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
         Live.checkpoint.sync(cs, post, cfg, buffers)
-        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, buffers)), note)
+        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note)
     case False{}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
@@ -7414,7 +7430,7 @@ def Hub.commit.queue(+cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2
     +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
     +fd : Folded = Hub.fold(cs, disk, Folded{st, ls, Nil{}})
     Live.checkpoint.sync(cs, Hub.fold.st(fd), cfg, buffers)
-    return Hub.commit.held(fd, cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, buffers)), note, q, st, disk)
+    return Hub.commit.held(fd, cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note, q, st, disk)
 
 # steps wait: this one waits behind them when it may and there is room
 def Hub.commit.behind(ok: Bool, +cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
@@ -18425,7 +18441,7 @@ type ThinReadJob is Data:
   ThinReadJob{client: U32, gen: U32, view: String, target: J.Json, text: String}
 
 type ThinDrained is Data:
-  ThinDrained{clients: List<&2, Client>, jobs: List<&2, ThinReadJob>, dirty: Bool}
+  ThinDrained{clients: List<&2, Client>, jobs: List<&2, ThinReadJob>, dirty: List<&2, String>}
 
 def ThinRead.jobs(cs: List<&2, J.Json>, +client: U32, +gen: U32, +view: String, +target: J.Json) -> List<&2, ThinReadJob>:
   match cs:
@@ -18436,16 +18452,16 @@ def Client.thin.drain(+c: Client) -> ThinDrained:
   match c:
     case Client{+id, out, look, +cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, +target, +view, revision, anchor, +actor <> _, control} <> _} <> _, +accountCap}:
       ThinDrained{[Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.clean(actor)], control}]}], accountCap}],
-        ThinRead.jobs(TA.Actor.queued(actor), id, OB.Cr.gen(cr), view, target), TA.Actor.dirty(actor)}
-    case _: ThinDrained{[c], Nil{}, False{}}
+        ThinRead.jobs(TA.Actor.queued(actor), id, OB.Cr.gen(cr), view, target), Bool.pick(List<&2, String>, TA.Actor.dirty(actor), [U32.show(id)], Nil{})}
+    case _: ThinDrained{[c], Nil{}, Nil{}}
 
 def ThinDrained.append(a: ThinDrained, b: ThinDrained) -> ThinDrained:
   match a b:
-    case ThinDrained{ac, ar, ad} ThinDrained{bc, br, bd}: ThinDrained{List.append(&2, Client, ac, bc), List.append(&2, ThinReadJob, ar, br), Bool.or(ad, bd)}
+    case ThinDrained{ac, ar, ad} ThinDrained{bc, br, bd}: ThinDrained{List.append(&2, Client, ac, bc), List.append(&2, ThinReadJob, ar, br), List.append(&2, String, ad, bd)}
 
 def Clients.thin.drain(cs: List<&2, Client>) -> ThinDrained:
   match cs:
-    case Nil{}: ThinDrained{Nil{}, Nil{}, False{}}
+    case Nil{}: ThinDrained{Nil{}, Nil{}, Nil{}}
     case c <> tail: ThinDrained.append(Client.thin.drain(c), Clients.thin.drain(tail))
 
 def ThinRead.post(jobs: List<&2, ThinReadJob>, +inbox: Chan(Msg)) -> IO(Unit):
@@ -18456,10 +18472,21 @@ def ThinRead.post(jobs: List<&2, ThinReadJob>, +inbox: Chan(Msg)) -> IO(Unit):
         Self.post(inbox, ThinRead{client, gen, view, target, text})
         ThinRead.post(tail, inbox)
 
-def Cfg.thin.dirty(dirty: Bool, cfg: Cfg) -> Cfg:
+def ThinDirty.notes(ids: List<&2, String>, notes: TPACE.Notes) -> TPACE.Notes:
+  match ids:
+    case Nil{}: notes
+    case id <> rest: ThinDirty.notes(rest, TPACE.Notes.touch(notes, TPACE.Touch.client(id)))
+
+# Actor replies/info/sheets change one connection's private Ui. A global
+# invalidation here makes every view refresh and repeat its own follow-up
+# reads. Retain the actual recipient IDs through the drain, so only those
+# views are told. Canonical changes still use the ordinary thread/all path.
+def Cfg.thin.dirty(+dirty: List<&2, String>, +cfg: Cfg) -> Cfg:
   match dirty:
-    case False{}: cfg
-    case True{}: Cfg.thin.bump(cfg)
+    case Nil{}: cfg
+    case _ <> _:
+      Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg),
+        ThinDirty.notes(dirty, Cfg.thin.notes(cfg)), Cfg.thin.store(cfg), Cfg.thin.signal_seq(cfg)})
 
 def Hub.thin.drained(result: ThinDrained, h: Hub) -> IO(Hub):
   match result h:
@@ -18528,7 +18555,7 @@ def Wire.thin.paced.thin(+thin: Bool, +c: Client, +st: M.State, +touch: TPACE.To
     case False{}: IO.pure(ThinNoticed, ThinNoticed.keep(Some{c}, rest))
     case True{}:
       +key = U32.show(Client.id(c))
-      Wire.thin.paced.one(TPACE.Pace.step(TPACE.Pace.of(ps, key), now, TPACE.Touch.level(touch, TV.Target.thread(st, ThinContext.target(Client.thin.context(c))))), c, epoch, revision, key, rest)
+      Wire.thin.paced.one(TPACE.Pace.step(TPACE.Pace.of(ps, key), now, TPACE.Touch.level.for(touch, TV.Target.thread(st, ThinContext.target(Client.thin.context(c))), key)), c, epoch, revision, key, rest)
 
 def Wire.thin.paced(clients: List<&2, Client>, +st: M.State, +touch: TPACE.Touch, +ps: Map<&2, TPACE.Pace>, +now: Nat, +epoch: String, +revision: Nat) -> IO(ThinNoticed):
   match clients:

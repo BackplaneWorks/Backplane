@@ -89,3 +89,67 @@ stopped on an ownership annotation in the stream test fixture; that fixture
 error was corrected before the next validation run. Benchmark source is
 `test/native/tickplan_bench.bend` and parity fixtures are in
 `test/tickplan_test.bend`. Job: `j20261102194722-383034`.
+
+## Matched compiled-hub comparison
+
+The matched default fixture (twenty 40 Hz producers, 1,000 historical metadata
+threads, three thin views and a legacy observer) ran both binaries serially on
+`h@backplane`, inside a 20 GiB no-swap scope with the native build lock and
+pinned build tools. Both runs have the same fixture SHA-256. The after binary
+was built from the source subsequently merged in PR #711.
+
+| Metric | Installed 138b2731e | After #711 |
+| --- | ---: | ---: |
+| Actual hub CPU, combined phases | 145.27% | 144.43% |
+| Load gate | FAIL | FAIL |
+
+This does **not** demonstrate a meaningful overall hub CPU improvement. The
+after run still delivered only about 22–30 deltas/s per thread against 40/s
+offered, accumulated multi-second lag and sent quiet views about 11 notices/s.
+The 80% CPU and 2/s sidebar targets remain unmet; the CI test should continue
+to expose them. No rate, liveness or CPU assertion was relaxed to obtain a pass.
+
+The new phase counters attribute 11.30 s of the after mixed phase to 375 RPCs
+and 8.69 s to 4,044 agent-line messages in a 20.03 s interval (inclusive spans).
+Source tracing then found a separate feedback path: a reply/info/sheets update
+changes one actor's private Ui, but `Cfg.thin.dirty(True)` invalidated every
+view via a global bump. Its refreshes can issue further private follow-up
+reads, invalidating every view again. A recipient-scoped follow-up is being
+qualified separately. Do not infer that PR #711 fully resolves app lag from
+its planner benchmark or client paint checks.
+
+The after executable SHA-256 is
+`d1ed7e5be2565d5064ee256993bf1286ad01e43f2e27510d5d9e011ae42075cd`.
+Raw reports are retained in this worktree's ignored `build/perf/` directory.
+The complete repository PROOF invocation for #711 finished with only its
+2,470 unsafe/foreign-effect declarations and was accepted by
+`scripts/bendok.sh`'s exact `bend_verdict`; this is not a claim that foreign
+implementations are mathematically verified. The three sidebar full-output
+fixtures also passed on Boat (31 checks). Local and remote build locks were
+released for the installer, and no live hub was restarted by this work.
+
+
+## Scoped commit and private-result follow-up
+
+Source tracing found that both durable and queued nonempty commits called
+`Live.with`, which rebuilt every live stream and added an urgent global `*`
+notice before the canonical commit added its own notices. Liveness, usage and
+tool metadata therefore bypassed the sidebar's soft cadence even though their
+live buffers were unchanged. The follow-up preserves the original live state
+and stream map for metadata, and snapshots only threads whose assistant
+message or terminal turn changes their buffer. Checkpoint synchronization,
+steering tails, generation changes, and canonical commit ordering are retained.
+The canonical commit now owns the single revision bump and normal notices.
+
+The same change carries requesting connection IDs through private actor result
+drains. Private replies/info/sheets can wake their requesting connection without
+creating sidebar work in other connections, including views of the same thread.
+
+Boat job `j20261102201107-677175` passed the selective stream parity fixture
+(including the arbitrary no-ending identity proof), 24 private-notice checks,
+and eight existing progress-notice checks. Peak RSS was 3,435,200 KiB. Independent
+source review found no lifecycle gap. Full repository proof work
+`w-t1793648028-1245355-1258404` is still running; its result is not claimed here.
+The private follow-up build/load is deferred at the boundary after that proof
+so the installer can build the next combined, exact main. No compiled CPU
+improvement is yet established for this follow-up.
