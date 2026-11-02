@@ -3384,20 +3384,33 @@ def View.top(rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.Thread, +st: M.S
 # the asks (an answer with the draft). The page draws them with these, and
 # host.js redraws only them for a keystroke (app.bend's composer and asks):
 # rebuilding a long thread's page for every key took 280 ms a key.
+def View.accounts.wait(+state: String) -> String:
+  match state:
+    case "unchecked": "Checking saved sign-in…"
+    case "connecting": "Finish sign-in in Settings → Agents"
+    case "disconnected": "Connect in Settings → Agents"
+    case _: "Refresh status in Settings → Agents"
+
+def View.accounts.option(+p: J.Json) -> D.Node:
+  +label = J.Json.get_str(p, "provider", "") ++ " · " ++ J.Json.get_str(p, "label", "Account")
+  +state = J.Json.get_str(p, "state", "unchecked")
+  Bool.pick(D.Node, String.eq(state, "connected"),
+    D.Dom.button("", "acct-select", J.Json.get_str(p, "id", ""), U.Acv.note(p), label ++ " · connected"),
+    D.El{"button", "", [D.At{"disabled", "disabled"}, D.At{"aria-disabled", "true"}, D.At{"title", U.Acv.note(p)}], [D.Txt{label ++ " · " ++ View.accounts.wait(state)}]})
+
 def View.accounts.options(xs: List<&2, J.Json>, +provider: String) -> List<&2, D.Node>:
   match xs:
     case Nil{}: Nil{}
     case +p <> t:
-      List.append(&2, D.Node, D.Dom.when(String.eq(J.Json.get_str(p, "provider", ""), provider),
-        D.Dom.button("", "acct-select", J.Json.get_str(p, "id", ""), U.Acv.note(p), J.Json.get_str(p, "label", "Account") ++ " · " ++ J.Json.get_str(p, "state", "unchecked"))), View.accounts.options(t, provider))
+      View.accounts.option(p) <> View.accounts.options(t, provider)
 
 def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D.Node>:
   match open:
     case False{}: Nil{}
     case True{}:
       [D.El{"div", "account-picker", [D.At{"class", "account-picker"}],
-        D.Txt{"Switch between turns. No automatic account fallback."} <>
-        D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default account") <>
+        D.Txt{"Choose an account between turns. Selecting another agent's account switches the agent too. No automatic account fallback."} <>
+        D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default " ++ provider ++ " account") <>
         View.accounts.options(ACCT.Accounts.profiles(st), provider)}]
 
 def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:

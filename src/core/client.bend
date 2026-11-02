@@ -11004,9 +11004,11 @@ def Acv.sealed(+arg: String, +code: String) -> String:
 def Acv.select(+u: Ui, +id: String) -> Act:
   +st = Ui.state(u)
   +th = Ui.sel(u)
-  +pr = M.Thread.provider(Ui.thread(st, th))
-  Ui.on_thread.p(Ui.flag_off(u, "accounts"), "accounts.select", [J.KV{"profile", J.Str{id}},
+  +pr = Bool.pick(String, String.is_empty(id), M.Thread.provider(Ui.thread(st, th)), J.Json.get_str(ACCT.Accounts.profile(st, id), "provider", ""))
+  Ui.on_thread.p(Ui.flag_off(Ui.flag_off(u, "accounts"), "settings"), "accounts.select", [J.KV{"profile", J.Str{id}},
     J.KV{"epoch", J.Json.nat(J.Json.get_nat(ACCT.Accounts.profile(st, id), "epoch", 0n))},
+    J.KV{"expectedProvider", J.Str{M.Thread.provider(Ui.thread(st, th))}},
+    J.KV{"expectedOwner", J.Str{ACCT.Accounts.owner(st, th)}},
     J.KV{"expected", J.Str{M.Setting.get(st, ACCT.Accounts.binding.key(th, pr), "")}}])
 
 def Acv.add.k(blank: Bool, +u: Ui) -> Act:
@@ -11016,6 +11018,16 @@ def Acv.add.k(blank: Bool, +u: Ui) -> Act:
     case False{}:
       Ui.rpc(Ui.scratch_set(Ui.scratch_set(Bool.pick(Ui, Ui.flag(u, "provider-setup"), Ui.scratch_set(u, "@setup.profile", ""), u), "@f.accountlabel", ""), "@acct.label.err", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{String.trim(Ui.scratch(u, "@f.accountlabel"))}}])
 
+def Acv.delete(armed: Bool, +u: Ui, +id: String) -> Act:
+  match armed:
+    case False{}: Act{Ui.scratch_set(u, "@acct.delete", id), Nil{}}
+    case True{}: Acv.rpc(Ui.scratch_set(u, "@acct.delete", ""), "remove", id)
+
+def Acv.delete.buttons(+id: String, +armed: String) -> List<&2, AgBtn>:
+  Bool.pick(List<&2, AgBtn>, String.eq(id, armed),
+    [AgBtn{"Confirm delete account", "acct-delete", id, False{}}, AgBtn{"Keep account", "acct-keep", "", False{}}],
+    [AgBtn{"Delete account", "acct-delete", id, False{}}])
+
 def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
   match action:
     case "acct-provider": Act{Ui.scratch_set(u, "@acct.provider", value), Nil{}}
@@ -11024,6 +11036,8 @@ def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
     case "acct-login": Acv.rpc(u, "login", value)
     case "acct-status": Acv.rpc(u, "status", value)
     case "acct-disconnect": Acv.rpc(u, "disconnect", value)
+    case "acct-delete": Acv.delete(String.eq(Ui.scratch(u, "@acct.delete"), value), u, value)
+    case "acct-keep": Act{Ui.scratch_set(u, "@acct.delete", ""), Nil{}}
     case "acct-cancel": Ui.rpc(u, "accounts", [J.KV{"op", J.Str{"cancel"}}, J.KV{"profile", J.Str{Sealed.base(value)}}, J.KV{"attempt", J.Str{Sealed.arg(value)}}])
     case "acct-select": Acv.select(u, value)
     case "acct-default":
@@ -11048,14 +11062,15 @@ def Acv.note(+p: J.Json) -> String:
     " · allowance: " ++ J.Json.get_str(J.Json.get_obj(p, "allowance"), "state", "unknown") ++ Acv.windows(J.Json.elems(J.Json.get_obj(J.Json.get_obj(p, "allowance"), "windows"))) ++
     " · checked " ++ Nat.show(J.Json.get_nat(p, "checkedAt", 0n)) ++ "; provider pools may be shared across profiles. " ++ J.Json.get_str(p, "message", "")
 
-def Acv.profile.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
+def Acv.profile.rows(xs: List<&2, J.Json>, +armed: String, +thread: String) -> List<&2, AgRow>:
   match xs:
     case Nil{}: Nil{}
     case +p <> t:
       +id = J.Json.get_str(p, "id", "")
-      AgRow{J.Json.get_str(p, "label", "Account"), Acv.note(p), Nil{},
-        [AgBtn{"Connect / Login", "acct-login", id, False{}}, AgBtn{"Status / Refresh", "acct-status", id, False{}},
-         AgBtn{"Disconnect", "acct-disconnect", id, False{}}, AgBtn{"Default for new threads", "acct-default", id, False{}}]} <> Acv.profile.rows(t)
+      AgRow{J.Json.get_str(p, "label", "Account"), Acv.note(p) ++ Bool.pick(String, String.eq(id, armed), " Delete this saved account and its local sign-in? Existing threads will need another account selected.", ""), Nil{},
+        List.concat(&2, AgBtn, [[AgBtn{"Connect / Login", "acct-login", id, False{}}, AgBtn{"Status / Refresh", "acct-status", id, False{}}, AgBtn{"Disconnect", "acct-disconnect", id, False{}}],
+          Bool.pick(List<&2, AgBtn>, String.is_empty(thread), Nil{}, [AgBtn{"Use in this thread", "acct-select", id, True{}}]),
+          [AgBtn{"Default for new threads", "acct-default", id, False{}}], Acv.delete.buttons(id, armed)])} <> Acv.profile.rows(t, armed, thread)
 
 def Acv.attempt.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
   match xs:
@@ -11073,7 +11088,7 @@ def Acv.rows(+u: Ui) -> List<&2, AgRow>:
     [AgField{"accountlabel", "Account label (e.g. Personal)", False{}, Ui.scratch(u, "@f.accountlabel"), "acct-add"}],
     [AgBtn{"Codex", "acct-provider", "codex", String.eq(Acv.selected.provider(u), "codex")}, AgBtn{"Claude", "acct-provider", "claude", String.eq(Acv.selected.provider(u), "claude")}, AgBtn{"Add account", "acct-add", "", True{}}]},
     AgRow{"Existing Default accounts", "Preserve current CLI authentication and sessions; select explicitly beside the model.", Nil{}, [AgBtn{"Default Claude for new threads", "acct-legacy-default", "claude", False{}}, AgBtn{"Default Codex for new threads", "acct-legacy-default", "codex", False{}}]}],
-    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u))), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
+    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u)), Ui.scratch(u, "@acct.delete"), Ui.sel(u)), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
 
 def Agv.info(+u: Ui) -> J.Json:
   J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "models")), J.Null{}), "agy")

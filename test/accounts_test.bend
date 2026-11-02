@@ -18,8 +18,22 @@ def cycle() -> M.State:
 def request(+m: String, +thread: String) -> J.Json:
   J.Json.obj([J.KV{"m", J.Str{m}}, J.KV{"p", J.Json.obj([J.KV{"thread", J.Str{thread}}])}])
 
+def deleting_default(+snapshot: String) -> M.State:
+  +before = M.State.replay([
+    M.SettingSet{"accounts.inventory", "{\"profiles\":[{\"id\":\"A\",\"provider\":\"codex\",\"epoch\":2,\"state\":\"connected\"},{\"id\":\"B\",\"provider\":\"codex\"}]}", 8n},
+    M.SettingSet{"account.default.codex", A.Accounts.binding.show("A", 2n), 8n}], cycle())
+  M.State.replay(A.Accounts.changes(before, 9n, snapshot), before)
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("missing account has a clear selection reason", A.Accounts.unavailable(J.Null{}, 1n), "This saved account is no longer available. Choose another account.")
+    C.Check.str("unchecked sign-in asks for refresh rather than authentication", A.Accounts.unavailable(A.Accounts.parse("{\"id\":\"A\",\"state\":\"unchecked\"}"), 1n), "This saved sign-in has not been checked yet. Reopen the account menu to refresh it.")
+    C.Check.str("disconnected account has an authentication next step", A.Accounts.unavailable(A.Accounts.parse("{\"id\":\"A\",\"state\":\"disconnected\"}"), 1n), "This account is not connected. Use Status / Refresh or Connect / Login in Settings → Agents.")
+    C.Check.str("replaced sign-in asks for a fresh selection", A.Accounts.unavailable(A.Accounts.parse("{\"id\":\"A\",\"state\":\"connected\",\"epoch\":2}"), 1n), "This account's sign-in changed. Reopen the account menu and select it again.")
+    C.Check.str("deleting default clears it for new threads", M.Setting.get(deleting_default("{\"profiles\":[{\"id\":\"B\",\"provider\":\"codex\"}]}"), "account.default.codex", ""), A.Accounts.binding.show("", 0n))
+    C.Check.str("deleting account keeps old thread explicitly bound", A.Accounts.id(deleting_default("{\"profiles\":[{\"id\":\"B\",\"provider\":\"codex\"}]}"), "t", "codex"), "A")
+    C.Check.str("deleted account never falls back to default on an old thread", Bool.show(A.Accounts.allowed(deleting_default("{\"profiles\":[{\"id\":\"B\",\"provider\":\"codex\"}]}"), "t", "codex")), "False")
+    C.Check.str("registry read failure does not clear account default", M.Setting.get(deleting_default("{\"profiles\":[],\"error\":\"unavailable\"}"), "account.default.codex", ""), A.Accounts.binding.show("A", 2n))
     C.Check.str("old unset binding is legacy", A.Accounts.id(state(), "t", "codex"), "")
     C.Check.str("legacy session saved on first selection", A.Accounts.session(switched(state(), "A", 2n, "legacy-session", 4n), "t", "codex", "", 0n), "legacy-session")
     C.Check.str("A to B to A resumes A", M.Switch.sess(M.State.thread.get(cycle(), "t")), "session-A")
