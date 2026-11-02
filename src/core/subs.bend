@@ -55,9 +55,20 @@ def Agg.call(a: SubAgg) -> String:
       c
 
 # a step taken, kept while fewer than Subs.shown() are (the walk goes newest
-# first, so what it keeps are the newest)
+# first, so what it keeps are the newest). A match, not a Bool.pick: the
+# pick took the first line of every step a subagent took (up to
+# Subs.window() each, a character at a time), only to keep six, at every
+# render of the thread, a Subagents fold included (~170 ms on a thread
+# with 8 subagents)
+def Agg.step.k(keep: Bool, +kind: String, +text: String, ss: List<&2, SubStep>) -> List<&2, SubStep>:
+  match keep:
+    case True{}:
+      SubStep{kind, Subs.line(text)} <> ss
+    case False{}:
+      ss
+
 def Agg.step(+kind: String, +text: String, +n: Nat, +ss: List<&2, SubStep>) -> List<&2, SubStep>:
-  Bool.pick(List<&2, SubStep>, Nat.is_lt(n, Subs.shown()), SubStep{kind, Subs.line(text)} <> ss, ss)
+  Agg.step.k(Nat.is_lt(n, Subs.shown()), kind, text, ss)
 
 def Agg.kind(+kind: String) -> Nat:
   Bool.pick(Nat, String.starts_with(kind, "start"), 0n, Bool.pick(Nat, String.eq(kind, "end"), 1n, 2n))
