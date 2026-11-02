@@ -100,12 +100,17 @@ def Od.part.rows(ps: List<&2, J.Json>) -> List<&2, J.Json>:
     case +p <> t:
       Od.part.row(p) <> Od.part.rows(t)
 
+# no answer at all (curl's 000): what the person can do about it, not
+# curl's own words ("curl: (7) Failed to connect to … after 0 ms")
+def Od.unreachable() -> String:
+  "the order server is not reachable: check this machine's internet connection, then Retry"
+
 # what the server said, as the card's fields: the price's label, or why there is none
 def Od.est.got(r: GS.GResp) -> J.Json:
   match r:
     case GS.GResp{+code, +body, +err}:
       Bool.pick(J.Json, GS.Gc.ok(code), Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}),
-        J.Json.obj([J.KV{"error", J.Str{Bool.pick(String, String.eq(code, "000"), "the order server is not reachable" ++ Bool.pick(String, String.is_empty(err), "", ": " ++ err),
+        J.Json.obj([J.KV{"error", J.Str{Bool.pick(String, String.eq(code, "000"), Od.unreachable(),
           J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "error", "the order server said " ++ code))}}]))
 
 def Od.est.k(ask: Bool, +home: String, +server: String, +install: String, +body: String) -> IO(J.Json):
