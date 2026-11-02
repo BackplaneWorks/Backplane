@@ -2355,3 +2355,23 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .settings-view .set-busy { border-left: 2px solid var(--accent); }
 .settings-view .set-busy .set-ctl { min-width: min(260px, 100%); flex: 1 1 260px; }
 .settings-view .set-note.bad { color: var(--bad); }
+
+/* Account and allowance share one wrapping row, including narrow phones. */
+.composer-model { flex-wrap: wrap; }
+.composer-model .model-chip { flex: 1 1 10ch; }
+.composer-model .account-chip { min-width: 0; max-width: 14ch; }
+.allowance-expired { display: none; }
+.allowance-pop[data-retired="true"] .allowance-expired { display: block; color: var(--dim); }
+html[data-backplane-cached="true"] .allowance-pop,
+html[data-backplane-remote-ready="false"] .allowance-pop { display: none; }
+html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
+@media (max-width: 400px) {
+  .composer-model { gap: 4px; }
+  .composer-model .model-chip { flex-basis: calc(100% - 15ch); }
+  .composer-model .account-chip { max-width: 12ch; }
+  .composer-model .allowance-chip { max-width: none; width: 19ch; margin-left: auto; }
+}
+
+.allowance-retired { display: none; }
+.allowance-chip[data-retired="true"] .allowance-current { display: none; }
+.allowance-chip[data-retired="true"] .allowance-retired { display: inline; }

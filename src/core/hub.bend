@@ -15,6 +15,7 @@ import ./mailbody.bend as MB
 import ./ref.bend as REF
 import ./ride.bend as RD
 import ./json.bend as J
+import ./allowance_stream.bend as ALS
 import ./model.bend as M
 import ./review.bend as RVW
 import ./codec.bend as C
@@ -2562,7 +2563,7 @@ def Claude.line.k(i: Nat, +s: M.State, +thread: String, +now: Nat, +o: J.Json) -
     case 3n:
       Step.after(Claude.result.if(Hub.running(Hub.thread(s, thread)), thread, now, o), Usage.result(s, thread, now, o))
     case 5n:
-      Step{Lim.claude(s, now, o), Nil{}}
+      Step{List.append(&2, M.Change, Lim.claude(s, now, o), ALS.AllowanceStream.default(String.is_empty(ACCT.Accounts.id(s, thread, "claude")), s, now, o)), Nil{}}
     case 4n:
       Step.also(Step.also(Claude.named(s, thread, now, o), Steps.claude(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "message"), "content")), thread, Hub.cwd(s, Hub.thread(s, thread)))),
         Tools.shuts(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "message"), "content")), thread))

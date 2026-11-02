@@ -1,3 +1,4 @@
+import ./src/core/allowance.bend as ALLOWANCE
 import ./src/core/chat-pending.bend as CHATPENDING
 
 import ./src/core/i18n.bend as CHATLOC
@@ -15257,3 +15258,13 @@ law settings_row_information:
 # File presence alone must never report a usable local engine.
 law voice_model_needs_runtime:
   {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}
+
+# Remaining allowance comes from the provider's share used; refreshes are bounded.
+law allowance_remaining_reported:
+  {ALLOWANCE.Allowance.remaining(280n) == 72n : Nat}
+law allowance_refresh_held:
+  {ALLOWANCE.Allowance.due.at(1000n, 1299n) == False{} : Bool}
+law allowance_refresh_due:
+  {ALLOWANCE.Allowance.due.at(1000n, 1300n) == True{} : Bool}
+law allowance_future_unknown:
+  {ALLOWANCE.Allowance.time.known(1001n, 1000n) == False{} : Bool}
