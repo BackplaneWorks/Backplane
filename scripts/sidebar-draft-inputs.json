@@ -24,7 +24,7 @@
   ],
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
-    "src/core/accounts.bend": "522ef105ac2dac3664aa3cbfad4b1c05ac845399af81851ef1bf065992bb2764",
+    "src/core/accounts.bend": "39081d0514b3dc48a6b3796bf2da4684bc7e3c1eb619b9f37df7713f84ab2729",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
     "src/core/agy.bend": "ec8c54a6e7d6fc9abd27476b48d76669393fc59d5ee8141bff3c699e3d476fab",
@@ -143,7 +143,7 @@
     "src/core/uber.bend": "b86d13523ed4fd08006c8cb1f00d00712c4ab3cdc13b7b03dc2808cc72d09938",
     "src/core/ubersync.bend": "1e94a7d5d085e876ba91eca8a04d960ddfb405db9f62b64d73a70055812dbdc1",
     "src/core/ubop.bend": "e06413a86ecc1dbe4082109bd2deef6769644f9c22538771c78c81ac4c6d25fa",
-    "src/core/usage.bend": "dc1514142132c9d83a0e75b0e0cc346d2b627c75d208b66993728be8002e2bec",
+    "src/core/usage.bend": "1873bbaca0589a7d067e3495abe7c9d78082cd5e550495bbc8aba767d1b2f955",
     "src/core/usage_graph.bend": "28e5f2b438707dc3c9a1ce33af59500ae6eb8f13d0118fd09d5ae41846f5c692",
     "src/core/usage_page.bend": "05f675351e885ee368dd9db73b9e3739d04c9225a1f1c0d8ced43b53d98615f7",
     "src/core/utf8.bend": "0202c5087fd255df10413080cda57f2a4a00aa9b90b5b425a00a729f9563627b",
@@ -179,7 +179,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "81117d2df0f1fd08cfd28d4f0bd0b1a1ce0374880cf5bb357abf65f3ce06e515"
+    "src/web/view.bend": "62ce5ee754e5ed9f9a8775ac1c2e1809b7e7754bbceedfda2b58edd4705b1fb4"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
