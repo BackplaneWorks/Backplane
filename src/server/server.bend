@@ -9918,7 +9918,6 @@ def Claude.started.ok(started: U32 & Socket, +thread: String, +gen: String, +inp
   (+pid, s) = started
   IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Unit, H.Sock.dup(s), r => Claude.duped(r, pid, thread, gen, input, inbox))
 
-
 def Claude.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: String, +gen: String, +cwd: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   match r:
     case Done{started}:
