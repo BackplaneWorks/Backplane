@@ -10722,7 +10722,7 @@ def AccountFallback.restore.threads(ts: List<&2, M.Thread>, +s: M.State, +now: N
       +one = AccountFallback.restore.one(Bool.not(Hub.running(t)) && AccountFallback.safe(s, M.Thread.id(t)) && AF.Preference.ready(s, now, M.Thread.id(t)), s, now, M.Thread.id(t))
       Step.cat(one, AccountFallback.restore.threads(rest, M.State.replay(Queue.changes(one), s), now))
 
-def ProviderResume.tick(+s: M.State, now: Nat) -> Step:
+def ProviderResume.tick(+s: M.State, +now: Nat) -> Step:
   +restored = AccountFallback.restore.threads(Rec.threads(s), s, now)
   +next = M.State.replay(Queue.changes(restored), s)
   Step.cat(restored, ProviderResume.threads(Rec.threads(next), next, now))
