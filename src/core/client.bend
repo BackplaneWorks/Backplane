@@ -1116,7 +1116,7 @@ def Ui.pending(u: Ui, +thread: String) -> List<&2, String>:
 def Ui.online(u: Ui, b: Bool) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, _, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui{st, sel, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@mech.at", ""), "@solid.at", ""), "@desk", ""), "@sync", ""), live, op, b, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
+      Ui{st, sel, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@telemetry.dismiss", ""), "@mech.at", ""), "@solid.at", ""), "@desk", ""), "@sync", ""), live, op, b, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
 
 # the clock goes in the info map too, where a thread's folded turns read
 # it ("5m ago", FO.Fold.roles)
@@ -2291,7 +2291,6 @@ def Side.rows.go.ix(ps: List<&2, M.Project>, +st: M.State, +ix: SIx, +kids: Map<
       Nil{}
     case M.Project{+id, ti, r, +c, +rm} <> t:
       Side.rows.k.at(st, kids, rm, M.Project{id, ti, r, c, rm}, SIx.mine(ix, id), c, navs, now, M.Nav.project_key(navs, id), Side.rows.go.ix(t, st, ix, kids, navs, now))
-
 
 # the projects the sidebar lists: all but those of a machine sync is off
 # with (only a project elsewhere is asked)
@@ -9224,6 +9223,36 @@ def Voice.live(+u: Ui, +o: J.Json) -> Ui:
 def Voice.idle(u: Ui) -> Ui:
   Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice", ""), "@voice.part", ""), "@voice.lv", ""), "@voice.hint", ""), "@voice.pos", ""), "@voice.tl", "")
 
+# what the hub answers about voice: the key (masked), the dictionary, the
+# microphones ("@voice.set" once known)
+def Voice.reply.k(has: Bool, +o: J.Json, +u: Ui) -> Ui:
+  match has:
+    case True{}:
+      Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice.key", J.Json.get_str(o, "voiceKey", "")), "@voice.dict", J.Json.get_str(o, "voiceDict", "")),
+        "@f.vdict", J.Json.get_str(o, "voiceDict", "")), "@voice.set", "1")
+    case False{}:
+      u
+
+def Voice.reply.devs(+o: J.Json, +u: Ui) -> Ui:
+  Bool.pick(Ui, String.is_empty(J.Json.get_str(o, "voiceDevices", "")), u, Ui.scratch_set(u, "@voice.devs", J.Json.get_str(o, "voiceDevices", "")))
+
+def Voice.reply.local(m: Maybe<&2, J.Json>, +u: Ui) -> Ui:
+  match m:
+    case Some{J.Null{}}: u
+    case Some{+l}:
+      Ui.scratch_set(u, "@voice.local", J.Json.show(l))
+    case None{}:
+      u
+
+def Voice.reply(+o: J.Json, +u: Ui) -> Ui:
+  Voice.reply.local(J.Json.get(o, "local"), Voice.reply.devs(o, Voice.reply.k(Maybe.is_some(&2, J.Json, J.Json.get(o, "voiceDict")), o, u)))
+
+# Download events are separate from microphone events. A concurrent status
+# reply must not clear a running operation or its failure.
+def Voice.local.result(+u: Ui, +o: J.Json) -> Ui:
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Voice.reply.local(J.Json.get(o, "local"), u), "@voice.busy", ""),
+    "@voice.progress", ""), "@voice.local.error", J.Json.get_str(o, "error", ""))
+
 def Voice.recv.k(i: Nat, +u: Ui, +o: J.Json) -> Ui:
   match i:
     case 0n:
@@ -9246,39 +9275,20 @@ def Voice.recv.k(i: Nat, +u: Ui, +o: J.Json) -> Ui:
       Voice.words(u, o)
     case 9n:
       Ui.scratch_set(u, "@voice.load", Nat.show(J.Json.get_nat(o, "ms", 0n)))
+    case 10n:
+      Ui.scratch_set(u, "@voice.progress", J.Json.show(o))
+    case 11n:
+      Voice.local.result(u, o)
     case _:
       u
 
 # a {"t":"voice"} message from the hub
 def Voice.recv(+u: Ui, +o: J.Json) -> Ui:
-  Voice.recv.k(C.Codec.pos(["live", "part", "text", "level", "hint", "stopping", "error", "idle", "words", "loaded"], J.Json.get_str(o, "ev", "")), u, o)
+  Voice.recv.k(C.Codec.pos(["live", "part", "text", "level", "hint", "stopping", "error", "idle", "words", "loaded", "local-progress", "local-result"], J.Json.get_str(o, "ev", "")), u, o)
 
 # a voice message into a draft the client keeps (keep: the last answer's)
 def Voice.place(+keep: J.Json, +draft: String, +o: J.Json) -> J.Json:
   Voice.place.k(J.Json.get_str(o, "thread", ""), Voice.recv(Voice.place.in(Voice.place.keys(), keep, Ui.scratch_set(Ui.init(0n), J.Json.get_str(o, "thread", ""), draft)), o))
-
-# what the hub answers about voice: the key (masked), the dictionary, the
-# microphones ("@voice.set" once known)
-def Voice.reply.k(has: Bool, +o: J.Json, +u: Ui) -> Ui:
-  match has:
-    case True{}:
-      Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice.key", J.Json.get_str(o, "voiceKey", "")), "@voice.dict", J.Json.get_str(o, "voiceDict", "")),
-        "@f.vdict", J.Json.get_str(o, "voiceDict", "")), "@voice.set", "1")
-    case False{}:
-      u
-
-def Voice.reply.devs(+o: J.Json, +u: Ui) -> Ui:
-  Bool.pick(Ui, String.is_empty(J.Json.get_str(o, "voiceDevices", "")), u, Ui.scratch_set(u, "@voice.devs", J.Json.get_str(o, "voiceDevices", "")))
-
-def Voice.reply.local(m: Maybe<&2, J.Json>, +u: Ui) -> Ui:
-  match m:
-    case Some{+l}:
-      Ui.scratch_set(Ui.scratch_set(u, "@voice.local", J.Json.show(l)), "@voice.busy", "")
-    case None{}:
-      u
-
-def Voice.reply(+o: J.Json, +u: Ui) -> Ui:
-  Voice.reply.local(J.Json.get(o, "local"), Voice.reply.devs(o, Voice.reply.k(Maybe.is_some(&2, J.Json, J.Json.get(o, "voiceDict")), o, u)))
 
 # the dictionary as the hub last answered it
 def Voice.dict(+u: Ui) -> List<&2, String>:
@@ -11004,9 +11014,11 @@ def Acv.sealed(+arg: String, +code: String) -> String:
 def Acv.select(+u: Ui, +id: String) -> Act:
   +st = Ui.state(u)
   +th = Ui.sel(u)
-  +pr = M.Thread.provider(Ui.thread(st, th))
-  Ui.on_thread.p(Ui.flag_off(u, "accounts"), "accounts.select", [J.KV{"profile", J.Str{id}},
+  +pr = Bool.pick(String, String.is_empty(id), M.Thread.provider(Ui.thread(st, th)), J.Json.get_str(ACCT.Accounts.profile(st, id), "provider", ""))
+  Ui.on_thread.p(Ui.flag_off(Ui.flag_off(u, "accounts"), "settings"), "accounts.select", [J.KV{"profile", J.Str{id}},
     J.KV{"epoch", J.Json.nat(J.Json.get_nat(ACCT.Accounts.profile(st, id), "epoch", 0n))},
+    J.KV{"expectedProvider", J.Str{M.Thread.provider(Ui.thread(st, th))}},
+    J.KV{"expectedOwner", J.Str{ACCT.Accounts.owner(st, th)}},
     J.KV{"expected", J.Str{M.Setting.get(st, ACCT.Accounts.binding.key(th, pr), "")}}])
 
 def Acv.add.k(blank: Bool, +u: Ui) -> Act:
@@ -11016,6 +11028,16 @@ def Acv.add.k(blank: Bool, +u: Ui) -> Act:
     case False{}:
       Ui.rpc(Ui.scratch_set(Ui.scratch_set(Bool.pick(Ui, Ui.flag(u, "provider-setup"), Ui.scratch_set(u, "@setup.profile", ""), u), "@f.accountlabel", ""), "@acct.label.err", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{String.trim(Ui.scratch(u, "@f.accountlabel"))}}])
 
+def Acv.delete(armed: Bool, +u: Ui, +id: String) -> Act:
+  match armed:
+    case False{}: Act{Ui.scratch_set(u, "@acct.delete", id), Nil{}}
+    case True{}: Acv.rpc(Ui.scratch_set(u, "@acct.delete", ""), "remove", id)
+
+def Acv.delete.buttons(+id: String, +armed: String) -> List<&2, AgBtn>:
+  Bool.pick(List<&2, AgBtn>, String.eq(id, armed),
+    [AgBtn{"Confirm delete account", "acct-delete", id, False{}}, AgBtn{"Keep account", "acct-keep", "", False{}}],
+    [AgBtn{"Delete account", "acct-delete", id, False{}}])
+
 def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
   match action:
     case "acct-provider": Act{Ui.scratch_set(u, "@acct.provider", value), Nil{}}
@@ -11024,6 +11046,8 @@ def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
     case "acct-login": Acv.rpc(u, "login", value)
     case "acct-status": Acv.rpc(u, "status", value)
     case "acct-disconnect": Acv.rpc(u, "disconnect", value)
+    case "acct-delete": Acv.delete(String.eq(Ui.scratch(u, "@acct.delete"), value), u, value)
+    case "acct-keep": Act{Ui.scratch_set(u, "@acct.delete", ""), Nil{}}
     case "acct-cancel": Ui.rpc(u, "accounts", [J.KV{"op", J.Str{"cancel"}}, J.KV{"profile", J.Str{Sealed.base(value)}}, J.KV{"attempt", J.Str{Sealed.arg(value)}}])
     case "acct-select": Acv.select(u, value)
     case "acct-default":
@@ -11048,14 +11072,15 @@ def Acv.note(+p: J.Json) -> String:
     " · allowance: " ++ J.Json.get_str(J.Json.get_obj(p, "allowance"), "state", "unknown") ++ Acv.windows(J.Json.elems(J.Json.get_obj(J.Json.get_obj(p, "allowance"), "windows"))) ++
     " · checked " ++ Nat.show(J.Json.get_nat(p, "checkedAt", 0n)) ++ "; provider pools may be shared across profiles. " ++ J.Json.get_str(p, "message", "")
 
-def Acv.profile.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
+def Acv.profile.rows(xs: List<&2, J.Json>, +armed: String, +thread: String) -> List<&2, AgRow>:
   match xs:
     case Nil{}: Nil{}
     case +p <> t:
       +id = J.Json.get_str(p, "id", "")
-      AgRow{J.Json.get_str(p, "label", "Account"), Acv.note(p), Nil{},
-        [AgBtn{"Connect / Login", "acct-login", id, False{}}, AgBtn{"Status / Refresh", "acct-status", id, False{}},
-         AgBtn{"Disconnect", "acct-disconnect", id, False{}}, AgBtn{"Default for new threads", "acct-default", id, False{}}]} <> Acv.profile.rows(t)
+      AgRow{J.Json.get_str(p, "label", "Account"), Acv.note(p) ++ Bool.pick(String, String.eq(id, armed), " Delete this saved account and its local sign-in? Existing threads will need another account selected.", ""), Nil{},
+        List.concat(&2, AgBtn, [[AgBtn{"Connect / Login", "acct-login", id, False{}}, AgBtn{"Status / Refresh", "acct-status", id, False{}}, AgBtn{"Disconnect", "acct-disconnect", id, False{}}],
+          Bool.pick(List<&2, AgBtn>, String.is_empty(thread), Nil{}, [AgBtn{"Use in this thread", "acct-select", id, True{}}]),
+          [AgBtn{"Default for new threads", "acct-default", id, False{}}], Acv.delete.buttons(id, armed)])} <> Acv.profile.rows(t, armed, thread)
 
 def Acv.attempt.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
   match xs:
@@ -11073,7 +11098,7 @@ def Acv.rows(+u: Ui) -> List<&2, AgRow>:
     [AgField{"accountlabel", "Account label (e.g. Personal)", False{}, Ui.scratch(u, "@f.accountlabel"), "acct-add"}],
     [AgBtn{"Codex", "acct-provider", "codex", String.eq(Acv.selected.provider(u), "codex")}, AgBtn{"Claude", "acct-provider", "claude", String.eq(Acv.selected.provider(u), "claude")}, AgBtn{"Add account", "acct-add", "", True{}}]},
     AgRow{"Existing Default accounts", "Preserve current CLI authentication and sessions; select explicitly beside the model.", Nil{}, [AgBtn{"Default Claude for new threads", "acct-legacy-default", "claude", False{}}, AgBtn{"Default Codex for new threads", "acct-legacy-default", "codex", False{}}]}],
-    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u))), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
+    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u)), Ui.scratch(u, "@acct.delete"), Ui.sel(u)), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
 
 def Agv.info(+u: Ui) -> J.Json:
   J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "models")), J.Null{}), "agy")
@@ -12757,16 +12782,16 @@ def Tour.ready(+u: Ui) -> Bool:
 
 # Anonymous usage counts (Settings, the tour's "Anonymous usage" step;
 # core/telemetry.bend, docs/telemetry.md). The hub-held settings: telemetry.share
-# ("on", "off"; unset is on), telemetry.asked ("1" once the person answered
-# or touched the row), telemetry.reset (a counter: a new id), and, written by
+# ("on", "off"; unset only selects the popup default), telemetry.asked ("1" once the person answered
+# with telemetry.usage.asked for the complete disclosure), telemetry.reset (a counter: a new id), and, written by
 # the hub, telemetry.live ("1" when this build can send at all) and
 # hub.platform (e.g. "linux-x64", for the bug report link). The install id
 # is never shown or sent to a client.
 def Share.on(+st: M.State) -> Bool:
-  TLM.Tm.share(st)
+  TLM.Tm.selected(st)
 
 def Share.asked(+st: M.State) -> Bool:
-  Bool.and(TLM.Tm.asked(st), Bool.or(Bool.not(TLM.Tm.share(st)), TLM.Tm.has(["0", "1"], M.Setting.get(st, "telemetry.usage.asked", ""))))
+  TLM.Tm.answered(st)
 
 def Share.live(+u: Ui) -> Bool:
   String.eq(Ui.info(u, "telemetry.live"), "1")
@@ -12775,11 +12800,16 @@ def Share.live(+u: Ui) -> Bool:
 def Share.pending(+u: Ui) -> Bool:
   Bool.and(Share.live(u), Bool.not(Share.asked(Ui.state.of(u))))
 
+# Dismissal is presentation state only, deliberately not a recorded choice.
+# Reload/reconnect can offer again; a committed answer on any client ends it.
+def Share.popup(+u: Ui) -> Bool:
+  Bool.and(Tour.ready(u), Bool.and(Share.pending(u), Bool.not(String.eq(Ui.scratch(u, "@telemetry.dismiss"), "1"))))
+
 def Share.privacy() -> String:
   "https://backplane.works/privacy"
 
 def Share.note() -> String:
-  "A random install id, version, OS, daily activity, and daily counts of threads, messages, model tokens and bot traffic. No content or credentials."
+  "All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens and bot traffic; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them."
 
 # the note ends with the install id the hub reported (info telemetry.id), which
 # the privacy page asks people to quote when they ask for their data to go
@@ -12827,7 +12857,7 @@ def Tour.single.k(+st: M.State, +raw: String, pending: Bool) -> Bool:
   Bool.and(Bool.and(Tour.done(st), Bool.not(OB.Ob.manual(raw))), Bool.or(Tour.uber.due(st), pending))
 
 def Tour.single(+u: Ui) -> Bool:
-  Bool.and(Tour.ready(u), Tour.single.k(Ui.state.of(u), Ui.scratch(u, "@tour"), Share.pending(u)))
+  Bool.and(Tour.ready(u), Bool.or(Share.popup(u), Tour.single.k(Ui.state.of(u), Ui.scratch(u, "@tour"), False{})))
 
 def Tour.at.k(+i: Nat, up: Bool, share: Bool) -> Nat:
   Bool.pick(Nat, Bool.and(Nat.is_eq(i, OB.Ob.count()), up), Bool.pick(Nat, share, OB.Ob.share(), OB.Ob.uber()), i)
@@ -12837,12 +12867,19 @@ def Tour.at.k(+i: Nat, up: Bool, share: Bool) -> Nat:
 def Tour.legacy(+raw: String, +i: Nat) -> Nat:
   Bool.pick(Nat, Bool.and(Nat.is_eq(i, OB.Ob.share()), Bool.not(String.contains(raw, "s"))), OB.Ob.uber(), i)
 
+# Normalize old explicit usage cursors on render as well as navigation, so
+# dismissal and a choice adopted from another client cannot strand the card.
+def Tour.at.base(+u: Ui) -> Nat:
+  +i = Tour.legacy(Ui.scratch(u, "@tour"), OB.Ob.at(Tour.ready(u), Tour.done(Ui.state.of(u)), Ui.scratch(u, "@tour")))
+  +skip = Bool.and(Nat.is_eq(i, OB.Ob.share()), Bool.or(Share.asked(Ui.state(u)), String.eq(Ui.scratch(u, "@telemetry.dismiss"), "1")))
+  Tour.at.k(Bool.pick(Nat, skip, OB.Ob.uber(), i), Tour.single(u), False{})
+
 def Tour.at(+u: Ui) -> Nat:
-  Tour.at.k(Tour.legacy(Ui.scratch(u, "@tour"), OB.Ob.at(Tour.ready(u), Tour.done(Ui.state.of(u)), Ui.scratch(u, "@tour"))), Tour.single(u), Share.pending(u))
+  Bool.pick(Nat, Share.popup(u), OB.Ob.share(), Tour.at.base(u))
 
 # the forward button: a step asked alone is answered with Done
 def Tour.forward(+u: Ui) -> String:
-  Bool.pick(String, Tour.single(u), "Done", OB.Ob.forward(Lang.loc(u), Tour.at(u)))
+  Bool.pick(String, Nat.is_eq(Tour.at(u), OB.Ob.share()), Bool.pick(String, Share.on(Ui.state(u)), "Continue with telemetry on", "Continue with telemetry off"), Bool.pick(String, Tour.single(u), "Done", OB.Ob.forward(Lang.loc(u), Tour.at(u))))
 
 # what the card says: no "10 of 10" for a step asked alone
 def Tour.counter.loc(+l: I.Loc, +u: Ui) -> String:
@@ -12950,7 +12987,7 @@ def Tour.report(+u: Ui) -> TChoice:
   TChoice{"Report an issue", "open-url", Share.bug(u)}
 
 def Tour.share.choices(single: Bool, +u: Ui) -> List<&2, TChoice>:
-  List.append(&2, TChoice, [TChoice{"Keep sharing", "share", "on"}, TChoice{"Opt out", "share", "off"}, TChoice{"Privacy policy", "open-url", Share.privacy()}],
+  List.append(&2, TChoice, [TChoice{"Privacy policy", "open-url", Share.privacy()}],
     Bool.pick(List<&2, TChoice>, single, [Tour.report(u)], Nil{}))
 
 def Tour.choices.at(i: Nat, single: Bool, +u: Ui) -> List<&2, TChoice>:
@@ -13057,8 +13094,22 @@ def Tour.go.k(live: Bool, +i: Nat, +u: Ui) -> Act:
     case False{}:
       Tour.finish(u)
 
+# The usage step is passed over once it is answered or dismissed here (the
+# same condition the render normalization in Tour.at.base uses), in the
+# direction of travel: Next from before it lands after it, Back from after it
+# lands before it, so neither direction is ever bounced back to where it was.
+def Tour.share.skip(+u: Ui) -> Bool:
+  Bool.or(Share.asked(Ui.state(u)), String.eq(Ui.scratch(u, "@telemetry.dismiss"), "1"))
+
+def Tour.dest(back: Bool, skip: Bool, +i: Nat) -> Nat:
+  Bool.pick(Nat, Bool.and(Nat.is_eq(i, OB.Ob.share()), skip), Bool.pick(Nat, back, OB.Ob.back(i), OB.Ob.uber()), i)
+
+def Tour.go.to(back: Bool, +i: Nat, +u: Ui) -> Act:
+  +j = Tour.dest(back, Tour.share.skip(u), i)
+  Tour.go.k(OB.Ob.live(j), j, Tour.preview(j, u))
+
 def Tour.go(+i: Nat, +u: Ui) -> Act:
-  Tour.go.k(OB.Ob.live(i), i, Tour.preview(i, u))
+  Tour.go.to(False{}, i, u)
 
 def Tour.open.k(+u: Ui) -> Act:
   Tour.leave(Act{Ui.scratch_set(Ui.scratch_set(u, "@tour", OB.Ob.raw(True{}, 0n)), "@tour.sc", ""), Nil{}}, Tour.focus(u))
@@ -13070,7 +13121,7 @@ def Tour.open(+u: Ui) -> Act:
 def Tour.back.k(has: Bool, +u: Ui) -> Act:
   match has:
     case True{}:
-      Tour.go(OB.Ob.back(Tour.at(u)), u)
+      Tour.go.to(True{}, OB.Ob.back(Tour.at(u)), u)
     case False{}:
       Act{u, Nil{}}
 
@@ -13271,7 +13322,7 @@ def Tour.act.base(+u: Ui, +action: String) -> Act:
 
 # Anonymous usage: the choices, Settings' row and the tour's usage step
 # set telemetry.share and telemetry.asked together ("share on|off"). Only
-# explicit On/Keep sharing accepts expanded usage; Next/Skip leave sharing off.
+# Continue records the displayed default; Turn off records Off; dismissal grants nothing.
 # On the step, a choice moves on (asked alone: the card closes); "share-reset"
 # makes a new id and "open-url" is the client's own and never gets here.
 def Share.then.usage(a: Act, answer: String) -> Act:
@@ -13287,13 +13338,76 @@ def Share.then(a: Act) -> Act:
 def Share.val(+v: String) -> String:
   Bool.pick(String, String.eq(v, "on"), "on", "off")
 
+# A decision's own id: this client, the second and the request number (as a
+# sent message's), made once per click and kept in the outbox text, so every
+# resend of it repeats the id and the hub's receipt recognises only that.
+def Share.decision(u: Ui) -> String:
+  match u:
+    case Ui{_, _, _, _, _, _, +now, _, _, _, +rid, _, _, _, +nf, _, _}:
+      Ui.msg_id(Str.get(nf, "cid"), now, rid)
+
+# Choices may overlap (a second click before the first is answered). Each
+# proposal is optimistic, so the state shown may hold another unanswered one:
+# a refusal must fall back to what the hub last said, never to that. The
+# scratch keeps the canonical preferences (@telemetry.base, taken when no
+# choice is outstanding and replaced by every authoritative reply) and how
+# many choices are outstanding (@telemetry.out). A refusal with no
+# authoritative state restores the base only once none is outstanding, in
+# whatever order the replies come.
+def Share.out(+u: Ui) -> Nat:
+  OB.Ob.num(Ui.scratch(u, "@telemetry.out"), 0n)
+
+def Share.base(+u: Ui, +st: M.State) -> String:
+  Bool.pick(String, Nat.is_eq(Share.out(u), 0n), J.Json.show(TLM.Tm.choice.json(st)), Ui.scratch(u, "@telemetry.base"))
+
 def Share.set(+u: Ui, +value: String) -> Act:
-  Share.then.usage(Share.then(Ui.setting(Ui.info_set(u, "telemetry.id", ""), "telemetry.share=" ++ Share.val(value))), Bool.pick(String, String.eq(value, "on"), "1", "0"))
+  +st = Ui.state(u)
+  +v = Share.val(value)
+  +local = Ui.setting.here(Ui.setting.here(Ui.setting.here(Ui.info_set(u, "telemetry.id", ""), ["telemetry.share", v]), ["telemetry.asked", "1"]), ["telemetry.usage.asked", Bool.pick(String, String.eq(v, "on"), "1", "0")])
+  +kept = Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(local, "@telemetry.req:" ++ Nat.show(Ui.rid(u)), "1"), "@telemetry.base", Share.base(u, st)), "@telemetry.out", Nat.show(Nat.add(Share.out(u), 1n)))
+  Ui.rpc.keep(kept, "telemetry.choice", [J.KV{"value", J.Str{v}}, J.KV{"expected", J.Str{TLM.Tm.choice.token(st)}}, J.KV{"decision", J.Str{Share.decision(u)}}, J.KV{"popup", J.Flag{Bool.and(Share.pending(u), Bool.and(Tour.on(u), Nat.is_eq(Tour.at(u), OB.Ob.share())))}}])
+
+def Share.restore.k(current: Bool, +u: Ui, +j: J.Json) -> Ui:
+  match current:
+    case False{}: u
+    case True{}:
+      Ui.setting.here(Ui.setting.here(Ui.setting.here(Ui.setting.here(Ui.setting.here(Ui.info_set(u, "telemetry.id", ""),
+        ["telemetry.share", J.Json.get_str(j, "share", "")]), ["telemetry.asked", J.Json.get_str(j, "asked", "")]),
+        ["telemetry.usage.asked", J.Json.get_str(j, "usage", "")]), ["telemetry.usage.generation", J.Json.get_str(j, "generation", "")]),
+        ["telemetry.choice.revision", J.Json.get_str(j, "revision", "")])
+
+def Share.restore(+u: Ui, +j: J.Json) -> Ui:
+  Share.restore.k(Nat.is_ge(Maybe.default(&2, Nat, Nat.read(J.Json.get_str(j, "revision", "")), 0n), TLM.Tm.choice.revision(Ui.state(u))), u, j)
+
+# An authoritative reply is the new base (its revision guarded like the state)
+def Share.rebase(+u: Ui, +choice: J.Json) -> Ui:
+  Bool.pick(Ui, Nat.is_ge(TLM.Tm.num(J.Json.get_str(choice, "revision", "")), TLM.Tm.num(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@telemetry.base")), J.Null{}), "revision", ""))),
+    Ui.scratch_set(u, "@telemetry.base", J.Json.show(choice)), u)
+
+def Share.settle(last: Bool, +u: Ui) -> Ui:
+  match last:
+    case True{}: Share.restore(u, Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@telemetry.base")), J.Null{}))
+    case False{}: u
+
+# The hub's own saved choice always wins (guarded by its revision); a bare
+# refusal of a tracked choice settles on the base once none is outstanding.
+def Share.reply.k(tracked: Bool, +u: Ui, choice: Maybe<&2, J.Json>) -> Ui:
+  match choice:
+    case Some{+choice}: Share.rebase(Share.restore(u, choice), choice)
+    case None{}: Share.settle(Bool.and(tracked, Nat.is_eq(Share.out(u), 0n)), u)
+
+def Share.reply.n(tracked: Bool, +u: Ui) -> Ui:
+  Bool.pick(Ui, tracked, Ui.scratch_set(u, "@telemetry.out", Nat.show(Nat.sub(Share.out(u), 1n))), u)
+
+def Share.reply(+u: Ui, +o: J.Json) -> Ui:
+  +key = "@telemetry.req:" ++ J.Json.as_raw(J.Json.get(o, "id"), "")
+  +tracked = Bool.not(String.is_empty(Ui.scratch(u, key)))
+  Share.reply.k(tracked, Share.reply.n(tracked, Ui.scratch_set(u, key, "")), J.Json.get(o, "telemetryChoice"))
 
 def Share.close(a: Act) -> Act:
   match a:
     case Act{+u, cs}:
-      Tour.leave(Act{Ui.scratch_set(u, "@tour", ""), cs}, Tour.focus(u))
+      Tour.leave(Act{u, cs}, Tour.focus(u))
 
 def Share.step(single: Bool, a: Act) -> Act:
   match single:
@@ -13332,8 +13446,11 @@ def Tour.act.q.finish(single: Bool, a: Act, action: String) -> Act:
     case Act{+u, +cs}:
       Bool.pick(Act, single, Share.close(Act{u, cs}), Tour.finish.cat(Tour.act.base(u, action), cs))
 
-def Tour.act.q(single: Bool, u: Ui, action: String) -> Act:
-  Tour.act.q.finish(single, Share.set(u, "off"), action)
+# Continue records the displayed default. Escape/Skip is only dismissal: no
+# setting changes, no inferred answer and no telemetry; the prompt remains due.
+def Tour.act.q(single: Bool, +u: Ui, +action: String) -> Act:
+  Bool.pick(Act, String.eq(action, "ob-next"),
+    Tour.act.q.finish(single, Share.set(u, Bool.pick(String, Share.on(Ui.state(u)), "on", "off")), action), Act{Ui.scratch_set(u, "@telemetry.dismiss", "1"), Nil{}})
 
 def Tour.act.m(moves: Bool, single: Bool, +u: Ui, +action: String) -> Act:
   match moves:
@@ -15267,7 +15384,7 @@ def Mailv.reply(+u: Ui, +o: J.Json) -> Ui:
   Mailv.reply.on(Bool.not(String.is_empty(Ui.scratch(u, "@mr.req:" ++ J.Json.as_raw(J.Json.get(o, "id"), "")))), u, o, J.Json.as_raw(J.Json.get(o, "id"), ""))
 
 def Ui.reply(u: Ui, +o: J.Json) -> Ui:
-  KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o)
+  Share.reply(KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o), o)
 
 def Ui.recv.k(i: Nat, u: Ui, +o: J.Json) -> Ui:
   match i:
@@ -15632,10 +15749,24 @@ def Voice.unterm(undo: Bool, +u: Ui, +value: String) -> Act:
     case False{}:
       Voice.after.rpc(Ui.setting(u, VDC.Vdc.ekey.setting(value) ++ "="), "dict", [J.KV{"dict", J.Str{VC.Voice.dict.show(VC.Voice.dict.remove(Voice.dict(u), value))}}])
 
-def Voice.local(+u: Ui, +value: String) -> Act:
-  Voice.rpc(Ui.scratch_set(u, "@voice.busy", Bool.pick(String, String.eq(value, "status"), Ui.scratch(u, "@voice.busy"), value)),
+def Voice.local.begin(+u: Ui, +value: String) -> Ui:
+  match value:
+    case "status": u
+    case _:
+      Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@voice.busy", value), "@voice.progress", ""), "@voice.local.error", "")
+
+def Voice.local.go(+u: Ui, +value: String) -> Act:
+  Voice.rpc(Voice.local.begin(u, value),
     Bool.pick(String, String.starts_with(value, "install:"), "local-install", Bool.pick(String, String.starts_with(value, "remove:"), "local-remove", "local")),
     [J.KV{"id", J.Str{VDC.Vdc.right(value, ":")}}])
+
+def Voice.local.k(busy: Bool, +u: Ui, +value: String) -> Act:
+  match busy:
+    case True{}: Act{u, Nil{}}
+    case False{}: Voice.local.go(u, value)
+
+def Voice.local(+u: Ui, +value: String) -> Act:
+  Voice.local.k(Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@voice.busy"))), Bool.not(String.eq(value, "status"))), u, value)
 
 def Voice.act.tail.k(picker: Bool, +i: Nat, +u: Ui, +value: String) -> Act:
   match picker:
@@ -16451,7 +16582,6 @@ def Psv.dispatch(setup: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Psv.act(u, action, value)
     case False{}: Ui.act.rpl(Bool.or(String.eq(action, "reply-to"), String.eq(action, "reply-drop")), u, action, value)
 
-
 # Retry (tools.bend's Tools.retry, on a failed turn): the selected thread's
 # last message from the person, sent again as it was typed; nothing when
 # it has none. Entries newest first (M.State.mine); the walk stops at the
@@ -16493,7 +16623,6 @@ def Retry.dispatch(retry: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Psv.dispatch(String.starts_with(action, "provider-setup-"), u, action, value)
 
-
 # Only a targeted connection offer may display the suggestion. Shared hub
 # status removes it as soon as any saved decision is adopted. No history,
 # client storage, draft, device id or account credentials are changed.
@@ -16521,7 +16650,6 @@ def Star.dispatch(star: Bool, +u: Ui, +action: String, +value: String) -> Act:
 
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
   Star.dispatch(Bool.or(String.eq(action, "star-open"), String.eq(action, "star-dismiss")), u, action, value)
-
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))
@@ -16575,3 +16703,104 @@ def Side.signal.has(+ix: SIx, +id: String) -> Bool:
   match ix:
     case SIx{_, _, _, work}:
       SG.Signal.has(work, SG.Signal.key(id))
+
+# Only ordinary chat text gets a provisional timeline bubble. Composer
+# commands have their own panels and must keep their original field.
+def Draft.preview(+text: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(String.trim(text))),
+    Bool.not(Bool.or(Sbox.is(text), Bool.or(OR.Intent.is(text), Bool.or(Give.is(text), Btw.is(text))))))
+
+# Settings presentation shared by desktop, web and phone projections.
+def Settings.row.kind(controls: Bool) -> String:
+  Bool.pick(String, controls, "control", "info")
+
+def Vlocal.status(+u: Ui) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@voice.local")), J.Null{})
+
+def Vlocal.find(ms: List<&2, J.Json>, +id: String) -> J.Json:
+  match ms:
+    case Nil{}: J.Null{}
+    case +m <> t:
+      Bool.pick(J.Json, String.eq(J.Json.get_str(m, "id", ""), id), m, Vlocal.find(t, id))
+
+def Vlocal.id(+u: Ui) -> String:
+  VDC.Vdc.model.id(M.Setting.get(Ui.state.of(u), "voice.model", ""))
+
+def Vlocal.model(+u: Ui) -> J.Json:
+  Vlocal.find(J.Json.elems(J.Json.get_obj(Vlocal.status(u), "models")), Vlocal.id(u))
+
+def Vlocal.busy(+u: Ui) -> Bool:
+  Bool.not(String.is_empty(Ui.scratch(u, "@voice.busy")))
+
+def Vlocal.error(+u: Ui) -> String:
+  +err = Ui.scratch(u, "@voice.local.error")
+  Bool.pick(String, String.is_empty(err), J.Json.get_str(Vlocal.status(u), "error", ""), err)
+
+def Vlocal.ready(+l: J.Json, +m: J.Json) -> Bool:
+  Bool.and(J.Json.get_bool(m, "installed", False{}), Bool.and(J.Json.get_bool(l, "runtime", False{}), J.Json.get_bool(l, "vad", False{})))
+
+def Vlocal.mb(bytes: Nat) -> String:
+  Nat.show(Nat.div(bytes, 1000000n))
+
+def Vlocal.progress.k(phase: String, +lc: I.Loc, +p: J.Json) -> String:
+  match phase:
+    case "unpack": MSG.T.voice.model.unpack(lc, J.Json.get_str(p, "what", ""))
+    case _:
+      +done = J.Json.get_nat(p, "done", 0n)
+      +total = J.Json.get_nat(p, "total", 0n)
+      Bool.pick(String, Nat.is_eq(total, 0n), MSG.T.voice.model.received(lc, J.Json.get_str(p, "what", ""), Vlocal.mb(done)),
+        MSG.T.voice.model.progress(lc, J.Json.get_str(p, "what", ""), Vlocal.mb(done), Vlocal.mb(total), Nat.show(Nat.min(100n, Nat.div(Nat.mul(done, 100n), Nat.max(1n, total))))))
+
+def Vlocal.progress(+lc: I.Loc, +u: Ui) -> String:
+  +p = Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@voice.progress")), J.Null{})
+  Bool.pick(String, String.is_empty(Ui.scratch(u, "@voice.progress")),
+    Bool.pick(String, String.starts_with(Ui.scratch(u, "@voice.busy"), "remove:"), MSG.T.voice.model.removing(lc), MSG.T.voice.model.starting(lc)),
+    Vlocal.progress.k(J.Json.get_str(p, "phase", "download"), lc, p))
+
+def Vlocal.note.k(busy: Bool, +lc: I.Loc, +u: Ui) -> String:
+  match busy:
+    case True{}: Vlocal.progress(lc, u)
+    case False{}:
+      +l = Vlocal.status(u)
+      +m = Vlocal.model(u)
+      Bool.pick(String, Bool.not(String.is_empty(Vlocal.error(u))), MSG.T.voice.model.failed(lc, Vlocal.error(u)),
+        Bool.pick(String, Bool.not(J.Json.get_bool(l, "supported", True{})), MSG.T.voice.model.unsupported(lc, J.Json.get_str(l, "platform", "")),
+          Bool.pick(String, Maybe.is_none(&2, J.Json, J.Json.get(m, "size")), MSG.T.voice.model.checking(lc),
+            Bool.pick(String, Vlocal.ready(l, m), MSG.T.voice.model.ready(lc, J.Json.get_str(m, "label", "")),
+              Bool.pick(String, J.Json.get_bool(m, "installed", False{}), MSG.T.voice.model.incomplete(lc), MSG.T.voice.model.available(lc, Vlocal.mb(J.Json.get_nat(m, "size", 0n))))))))
+
+def Vlocal.note(+lc: I.Loc, +u: Ui) -> String:
+  Vlocal.note.k(Vlocal.busy(u), lc, u)
+
+def Vlocal.btns.k(busy: Bool, +lc: I.Loc, +u: Ui) -> List<&2, AgBtn>:
+  match busy:
+    case True{}: Nil{}
+    case False{}:
+      +l = Vlocal.status(u)
+      +m = Vlocal.model(u)
+      +id = Vlocal.id(u)
+      List.append(&2, AgBtn, [AgBtn{MSG.T.voice.model.language.en(lc), "setting", "voice.model=parakeet-v2", String.eq(id, "parakeet-v2")},
+        AgBtn{MSG.T.voice.model.language.multi(lc), "setting", "voice.model=parakeet-v3", String.eq(id, "parakeet-v3")}],
+        Bool.pick(List<&2, AgBtn>, Bool.or(Maybe.is_none(&2, J.Json, J.Json.get(m, "size")), Bool.not(J.Json.get_bool(l, "supported", True{}))),
+          [AgBtn{MSG.T.voice.model.check(lc), "voice-dict", "status", False{}}],
+          Bool.pick(List<&2, AgBtn>, Vlocal.ready(l, m), [AgBtn{MSG.T.voice.model.remove(lc), "voice-dict", "remove:" ++ id, False{}}],
+            [AgBtn{Bool.pick(String, String.is_empty(Vlocal.error(u)), MSG.T.voice.model.download(lc, J.Json.get_str(m, "label", id), Vlocal.mb(J.Json.get_nat(m, "size", 0n))), MSG.T.voice.model.retry(lc)), "voice-dict", "install:" ++ id, False{}}])))
+
+def Vlocal.rows(+lc: I.Loc, +u: Ui) -> List<&2, AgRow>:
+  +eng = M.Setting.get(Ui.state.of(u), "voice.engine", "auto")
+  [AgRow{MSG.T.settings.voice.engine(lc), MSG.T.settings.voice.engine.note(lc), Nil{}, [
+    AgBtn{MSG.T.voice.engine.auto(lc), "setting", "voice.engine=auto", String.eq(eng, "auto")},
+    AgBtn{MSG.T.voice.engine.local(lc), "setting", "voice.engine=local", String.eq(eng, "local")},
+    AgBtn{MSG.T.voice.engine.cloud(lc), "setting", "voice.engine=cloud", String.eq(eng, "cloud")}]},
+    AgRow{MSG.T.settings.voice.model(lc), Vlocal.note(lc, u), Nil{}, Vlocal.btns.k(Vlocal.busy(u), lc, u)}]
+
+def Vlearned.btns(ks: List<&2, String>, +lc: I.Loc, +st: M.State) -> List<&2, AgBtn>:
+  match ks:
+    case Nil{}: Nil{}
+    case +k <> t:
+      +v = M.Setting.get(st, k, "")
+      AgBtn{MSG.T.voice.learned.item(lc, String.drop(k, 8n), VDC.Vdc.vl.out(v), Nat.show(VDC.Vdc.vl.yes(v))) ++ " ×", "setting", k ++ "=", VDC.Vdc.vl.trusted(v)} <> Vlearned.btns(t, lc, st)
+
+def Vlearned.rows(+lc: I.Loc, +st: M.State) -> List<&2, AgRow>:
+  +ks = M.Setting.keys.pre(st, VDC.Vdc.l.pre())
+  [AgRow{MSG.T.settings.voice.learned(lc), Bool.pick(String, List.is_empty(&2, String, ks), MSG.T.settings.voice.learned.empty(lc), MSG.T.settings.voice.learned.note(lc)), Nil{}, Vlearned.btns(ks, lc, st)}]

@@ -1427,3 +1427,20 @@ settings.voice.learned.note = Fixes you made after dictating. Each applies by it
 voice.learned.item = {heard} → {out} · {yes}×
 voice.dictate.here = Dictate with this device''s microphone
 native.permission.microphone = Backplane records your voice while you dictate into a thread, and sends it to your computer to turn into text.
+
+# Settings status and empty states
+settings.voice.learned.empty = No fixes learned yet. After dictating, use Fix on a misheard word or accept a suggested correction. Fixes appear here; after two confirmations they apply automatically. You can forget any fix here.
+settings.voice.dictionary.empty = No dictionary entries yet. Add names or technical terms below to help dictation spell them correctly.
+voice.model.checking = Checking the voice helper on this machine…
+voice.model.check = Check availability
+voice.model.retry = Retry download
+voice.model.starting = Starting download… You can leave Settings while it runs.
+voice.model.removing = Removing the local model…
+voice.model.progress = Downloading {name} · {done} / {total} MB ({percent}%)
+voice.model.received = Downloading {name} · {done} MB received
+voice.model.unpack = Verifying and unpacking {name}…
+voice.model.failed = Download failed: {error}
+voice.model.incomplete = The model needs additional files before it can run. Download to finish setup.
+voice.model.available = Not downloaded. About {mb} MB, plus the speech runtime. Download once for private, offline dictation.
+voice.model.language.en = English
+voice.model.language.multi = 25 languages

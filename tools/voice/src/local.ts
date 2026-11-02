@@ -80,9 +80,10 @@ export function ready(dir: string, id: string): string | undefined {
 
 // ---- install
 
-type Progress = (what: string, done: number, total: number) => void;
+type Progress = (what: string, done: number, total: number, phase?: "download" | "unpack") => void;
 
 async function fetchTo(pin: Pin, path: string, what: string, progress: Progress) {
+  progress(what, 0, pin.size ?? 0, "download");
   const res = await fetch(pin.url, { redirect: "follow" });
   if (!res.ok || !res.body) throw new Error(`${what}: HTTP ${res.status}`);
   const total = pin.size ?? Number(res.headers.get("content-length") ?? 0);
@@ -133,6 +134,7 @@ export async function install(dir: string, id: string, progress: Progress) {
     if (!s.runtime) {
       const tgz = join(stage, "runtime.tgz");
       await fetchTo(RUNTIMES[plat()], tgz, "speech runtime", progress);
+      progress("speech runtime", 0, 0, "unpack");
       await untar(tgz, join(stage, "rt"), "-xzf");
       rmSync(runtimeDir(dir), { recursive: true, force: true });
       renameSync(join(stage, "rt", "package"), runtimeDir(dir));
@@ -141,6 +143,7 @@ export async function install(dir: string, id: string, progress: Progress) {
       const m = MODELS[id];
       const tb = join(stage, "model.tar.bz2");
       await fetchTo(m.pin, tb, m.label, progress);
+      progress(m.label, 0, 0, "unpack");
       await untar(tb, join(stage, "m"), "-xjf");
       rmSync(join(stage, "m", m.dir, "test_wavs"), { recursive: true, force: true });
       rmSync(modelDir(dir, id), { recursive: true, force: true });

@@ -384,7 +384,26 @@ def Layout.list(keys: List<&2, J.Json>, sizes: List<&2, J.Json>, +est: String, +
 def Layout.estimate(+input: J.Json) -> String:
   Px.show(Px.max(Px.int(1n), Px.get(input, "estimate", "120")))
 
+# Short conversations sit against the composer. The inset is part of the
+# layout, so row measurements, bookmarks and hit positions agree with it.
+def Layout.inset(xs: List<&2, Item>, +by: Px) -> List<&2, Item>:
+  match xs:
+    case Nil{}: Nil{}
+    case Item{k, n, start, size} <> t:
+      Item{k, n, Px.add(start, by), size} <> Layout.inset(t, by)
+
+def Layout.fit(enabled: Bool, layout: Layout, +view: Px) -> Layout:
+  match enabled layout:
+    case False{} l: l
+    case True{} Layout{items, +total}:
+      Layout{Layout.inset(items, Px.max(Px.zero(), Px.sub(view, total))), Px.max(view, total)}
+
 def End.top(total: Px, view: Px) -> Px: Px.max(Px.zero(), Px.sub(total, view))
+
+def Viewport.top(bounded: Bool, +top: Px, total: Px, view: Px) -> Px:
+  match bounded:
+    case False{}: top
+    case True{}: Px.max(Px.zero(), Px.min(top, End.top(total, view)))
 
 def End.at(total: Px, top: Px, view: Px) -> Bool:
   Px.le(Px.sub(Px.sub(total, top), view), Px.int(4n))
@@ -569,7 +588,7 @@ def Plan.layout(layout: Layout, +input: J.Json) -> J.Json:
       +oldOffset = Px.get(previous, "trackOffset", "0")
       +inputTop = Px.sub(Px.get(input, "top", "0"), oldOffset)
       +a = Plan.preferred(mode, input, inputTop, view)
-      +top = Plan.top(mode, input, items, total, inputTop, view, previous, a)
+      +top = Viewport.top(J.Json.get_bool(input, "bounded", False{}), Plan.top(mode, input, items, total, inputTop, view, previous, a), total, view)
       Plan.output(items, total, top, view, a, Bool.pick(Px, String.eq(mode, "init"), Px.zero(), oldOffset), Px.get(input, "overscan", "0"))
 
 # A readback corrects only the physical effect of a rounded/clamped scroll
@@ -598,7 +617,7 @@ def Plan.layout.of(listed: Bool, +input: J.Json) -> Layout:
 def Plan.mode(readback: Bool, +input: J.Json) -> J.Json:
   match readback:
     case True{}: Plan.readback(input)
-    case False{}: Plan.layout(Plan.layout.of(Bool.not(List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(input, "sizeList")))), input), input)
+    case False{}: Plan.layout(Layout.fit(J.Json.get_bool(input, "bottomAlign", False{}), Plan.layout.of(Bool.not(List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(input, "sizeList")))), input), Px.get(input, "view", "0")), input)
 
 def plan(+input: J.Json) -> J.Json:
   Plan.mode(String.eq(J.Json.get_str(input, "mode", "update"), "readback"), input)

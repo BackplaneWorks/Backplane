@@ -581,6 +581,7 @@ struct Deleting: Decodable, Equatable {
 struct Tour: Decodable, Equatable {
     let step, count: Int
     let counter, title, body, next, back, skip: String
+    let off: String?
     let first: Bool
     // the uberbot step's buttons: each sends its action and value as they are
     let choices: [TourChoice]

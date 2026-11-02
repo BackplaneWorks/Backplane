@@ -1,4 +1,5 @@
 import Base
+import ./telemetry-choice.bend as TC
 import ./json.bend as J
 import ./model.bend as M
 import ./semver.bend as SV
@@ -29,16 +30,55 @@ def Tm.share(st: M.State) -> Bool:
 def Tm.asked(st: M.State) -> Bool:
   String.eq(M.Setting.get(st, "telemetry.asked", ""), "1")
 
+# The legacy planner below remains a wire/state compatibility model. Runtime
+# workers use this unified recorded-choice gate, including install/update.
+def Tm.allowed(+st: M.State) -> Bool:
+  TC.Choice.allowed(M.Setting.get(st, "telemetry.share", ""), M.Setting.get(st, "telemetry.asked", ""), M.Setting.get(st, "telemetry.usage.asked", ""))
+
+def Tm.answered(+st: M.State) -> Bool:
+  TC.Choice.answered(M.Setting.get(st, "telemetry.share", ""), M.Setting.get(st, "telemetry.asked", ""), M.Setting.get(st, "telemetry.usage.asked", ""))
+
+def Tm.selected(+st: M.State) -> Bool:
+  TC.Choice.on(M.Setting.get(st, "telemetry.share", ""), M.Setting.get(st, "telemetry.usage.asked", ""))
+
+# Binds a UI decision to the hub preferences it actually displayed. A stale
+# popup/outbox retry cannot overwrite a newer choice on another client.
+def Tm.choice.token(+st: M.State) -> String:
+  J.Json.show(J.Json.arr([J.Str{M.Setting.get(st, "telemetry.share", "")}, J.Str{M.Setting.get(st, "telemetry.asked", "")}, J.Str{M.Setting.get(st, "telemetry.usage.asked", "")}, J.Str{M.Setting.get(st, "telemetry.usage.generation", "")}, J.Str{M.Setting.get(st, "telemetry.choice.revision", "")}]))
+
+def Tm.choice.revision(st: M.State) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(M.Setting.get(st, "telemetry.choice.revision", "")), 0n)
+
+def Tm.choice.json(+st: M.State) -> J.Json:
+  J.Json.obj([J.KV{"share", J.Str{M.Setting.get(st, "telemetry.share", "")}}, J.KV{"asked", J.Str{M.Setting.get(st, "telemetry.asked", "")}}, J.KV{"usage", J.Str{M.Setting.get(st, "telemetry.usage.asked", "")}}, J.KV{"generation", J.Str{M.Setting.get(st, "telemetry.usage.generation", "")}}, J.KV{"revision", J.Str{M.Setting.get(st, "telemetry.choice.revision", "")}}])
+
 def Tm.reset(+st: M.State) -> String:
   +generation = M.Setting.get(st, "telemetry.usage.generation", "")
   M.Setting.get(st, "telemetry.reset", "0") ++ Bool.pick(String, String.is_empty(generation), "", ":" ++ generation)
 
+def Tm.same(a: Bool, +b: Bool) -> Bool:
+  Bool.pick(Bool, a, b, Bool.not(b))
+
 # A worker must ask the hub again after PoW and before starting HTTP. A privacy
-# choice processed while that worker ran invalidates its snapshot.
+# choice processed while that worker ran invalidates its snapshot. The
+# comparison uses exactly the projection the runtime view is built from
+# (server Tio.view: selected, allowed, reset), so an unchanged state is always
+# current and a finished worker never reschedules itself on its own snapshot.
 def Tm.current(v: TmView, +st: M.State) -> Bool:
   match v:
     case TmView{share, asked, reset, _, _, _, _, _, _}:
-      Bool.and(Bool.pick(Bool, share, Tm.share(st), Bool.not(Tm.share(st))), Bool.and(Bool.pick(Bool, asked, Tm.asked(st), Bool.not(Tm.asked(st))), String.eq(reset, Tm.reset(st))))
+      Bool.and(Tm.same(share, Tm.selected(st)), Bool.and(Tm.same(asked, Tm.allowed(st)), String.eq(reset, Tm.reset(st))))
+
+# Folded state may include a choice whose append still waits in the disk
+# queue (server Hub.commit.held). Network permission needs a durable choice:
+# nothing is permitted while any write waits, while a waiting Off still
+# revokes at once (allowed reads the folded state). A worker may start while
+# writes wait only to clean up after a revocation.
+def Tm.permit(owns: Bool, waiting: Bool, allowed: Bool, current: Bool) -> Bool:
+  Bool.and(owns, Bool.and(Bool.not(waiting), Bool.and(allowed, current)))
+
+def Tm.start(can: Bool, waiting: Bool, allowed: Bool) -> Bool:
+  Bool.and(can, Bool.or(Bool.not(waiting), Bool.not(allowed)))
 
 def Tm.fresh() -> TmState:
   TmState{"", "", "", True{}, "0", Nil{}, 0n, 0n, False{}}
@@ -495,6 +535,25 @@ def Tm.activity.finish(st: TmState, +previous: String, +action_day: String, v: T
 def Tm.plan.activity(+st: TmState, +v: TmView, fresh_id: String, action_day: String) -> TmPlan:
   +s = Tm.activity.finish(Tm.plan.build(Tm.activity.base(st), v, fresh_id), TmState.today(st), action_day, v)
   TmPlan{s, Tm.needpow(TmState.queue(s))}
+
+# Never revive anonymous or unanswered events left by an older installation.
+# Fresh install/update registration begins only after the recorded choice.
+def Tm.runtime.queue(xs: List<&2, TmEv>) -> List<&2, TmEv>:
+  match xs:
+    case Nil{}: Nil{}
+    case TmEv{e, day, True{}, id, ver, prev, ch, os, arch, pow, made, False{}} <> rest:
+      TmEv{e, day, True{}, id, ver, prev, ch, os, arch, pow, made, False{}} <> Tm.runtime.queue(rest)
+    case _ <> rest: Tm.runtime.queue(rest)
+
+def Tm.runtime.state(st: TmState) -> TmState:
+  match st:
+    case TmState{id, ver, today, share, reset, queue, next, busy, seen}:
+      TmState{id, ver, today, share, reset, Tm.runtime.queue(queue), next, busy, seen}
+
+def Tm.runtime.plan(go: Bool, st: TmState, v: TmView, id: String, day: String) -> TmPlan:
+  match go:
+    case False{}: TmPlan{Tm.fresh(), False{}}
+    case True{}: Tm.plan.activity(Tm.runtime.state(st), v, id, day)
 
 def Tm.uuid.variant(s: String) -> String:
   match s:

@@ -598,3 +598,16 @@ def mail_local_text(u: U.Ui) -> String:
 # Tiny lease comparison shared by the web and phone presentation hosts.
 def bub_move(before: String, after: String) -> J.Json:
   HOP.Hop.text(before, after)
+
+def presentation_send_preview(text: String) -> Bool:
+  U.Draft.preview(text)
+
+def presentation_pending.rows(xs: List<&2, J.Json>, +lc: I.Loc) -> List<&2, D.Node>:
+  match xs:
+    case Nil{}: Nil{}
+    case +p <> t:
+      D.El{"div", J.Json.get_str(p, "key", ""), [D.At{"class", "msg user sending"}],
+        D.Dom.cat(V.View.user_body(J.Json.get_str(p, "text", "")), [D.Dom.span("note", MSG.T.thread.sending(lc))])} <> presentation_pending.rows(t, lc)
+
+def presentation_pending(node: D.Node, pending: J.Json, lang: String) -> D.Node:
+  P.Node.pending(node, presentation_pending.rows(J.Json.elems(pending), I.I18n.of_tag(lang)))

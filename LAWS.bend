@@ -1,3 +1,9 @@
+import ./src/core/chat-pending.bend as CHATPENDING
+
+import ./src/core/i18n.bend as CHATLOC
+
+import ./src/core/lazy-tools.bend as LTOOLS
+
 import ./src/core/star-nudge.bend as STARN
 
 import ./src/core/settingsproposal.bend as SETPROPOSAL
@@ -87,6 +93,8 @@ import ./src/core/maildisposition.bend as MDSP
 import ./src/core/mailcontinuity.bend as MCN
 
 import ./src/core/telemetry.bend as TEL
+
+import ./src/core/telemetry-choice.bend as TCHOICE
 
 import ./src/core/telemetry-usage.bend as TUSAGE
 
@@ -15134,3 +15142,118 @@ law settings_proposal_write_invalidates:
 # Agents advertises the fallback editor in the shared Settings search index.
 law fallback_settings_agents_row:
   {List.head(&2, String, List.drop(&2, String, U.Settings.rows.of(2n, I18.En{}), 2n)) == Some{"Fallback hierarchy"} : Maybe<&2, String>}
+
+law chat_pending_working:
+  {CHATPENDING.Pending.visible(1n) == True{} : Bool}
+
+law chat_pending_blocked:
+  {CHATPENDING.Pending.visible(3n) == False{} : Bool}
+
+law chat_pending_finished:
+  {CHATPENDING.Pending.visible(5n) == False{} : Bool}
+
+law chat_pending_no_partial_reply:
+  for +lc: CHATLOC.Loc
+  for +text: String
+  {CHATPENDING.Pending.text(lc, "@live:t", text) == CHATPENDING.Pending.label(lc) : String}
+
+# A viewport may opt into bottom alignment without changing other callers.
+law timeline_fit_disabled:
+  for layout: TLVIRTUAL.Layout
+  for view: TLVIRTUAL.Px
+  {TLVIRTUAL.Layout.fit(False{}, layout, view) == layout : TLVIRTUAL.Layout}
+
+law timeline_unbounded_position:
+  for +top: TLVIRTUAL.Px
+  for total: TLVIRTUAL.Px
+  for view: TLVIRTUAL.Px
+  {TLVIRTUAL.Viewport.top(False{}, top, total, view) == top : TLVIRTUAL.Px}
+
+law sending_preview_excludes_secret:
+  {U.Draft.preview("/secret test") == False{} : Bool}
+
+# Shutting a tool drawer removes its materialized text/blocks while keeping
+# the source ordinal stable. An explicitly open row is left intact.
+law lazy_tools_open_row_unchanged:
+  for +r: THINL.Row
+  {LTOOLS.Tools.row(True{}, r) == r : THINL.Row}
+
+law lazy_tools_shut_row_ordinal:
+  for +r: THINL.Row
+  {THINL.Row.n(LTOOLS.Tools.row(False{}, r)) == THINL.Row.n(r) : Nat}
+
+law lazy_tools_shut_row_blocks:
+  for +r: THINL.Row
+  {THINL.Row.blocks(LTOOLS.Tools.row(False{}, r)) == THINL.Blocks.of("") : THINL.Blocks}
+
+law lazy_tools_shut_row_text:
+  for +n: Nat
+  for +e: M.Entry
+  for +terms: Map<&2, Bool>
+  for +blocks: THINL.Blocks
+  {THINL.Entry.text(THINL.Row.entry(LTOOLS.Tools.row(False{}, THINL.Row{n, e, terms, blocks}))) == "" : String}
+
+# All-category opt-out: the displayed default is not transmission permission.
+law telemetry_default_selected:
+  {TCHOICE.Choice.on("", "") == True{} : Bool}
+
+law telemetry_default_pending:
+  {TCHOICE.Choice.allowed("", "", "") == False{} : Bool}
+
+law telemetry_all_off:
+  for asked: String
+  for usage: String
+  {TCHOICE.Choice.allowed("off", asked, usage) == False{} : Bool}
+
+law telemetry_existing_optout_answered:
+  for asked: String
+  for usage: String
+  {TCHOICE.Choice.answered("off", asked, usage) == True{} : Bool}
+
+law telemetry_runtime_closed:
+  for st: TEL.TmState
+  for view: TEL.TmView
+  for id: String
+  for day: String
+  {TEL.Tm.runtime.plan(False{}, st, view, id, day) == TEL.TmPlan{TEL.Tm.fresh(), False{}} : TEL.TmPlan}
+
+law tm_off_view_current:
+  {TEL.Tm.current(TEL.TmView{False{}, False{}, "0", "0.12.0", "release", "linux", "x64", "", 5n}, M.State.replay([M.SettingSet{"telemetry.share", "off", 1n}, M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.usage.asked", "0", 1n}], M.State.empty())) == True{} : Bool}
+
+law tm_on_view_current:
+  {TEL.Tm.current(TEL.TmView{True{}, True{}, "0", "0.12.0", "release", "linux", "x64", "", 5n}, M.State.replay([M.SettingSet{"telemetry.share", "on", 1n}, M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.usage.asked", "1", 1n}], M.State.empty())) == True{} : Bool}
+
+law tm_permit_waits_for_disk:
+  for allowed: Bool
+  for current: Bool
+  {TEL.Tm.permit(True{}, True{}, allowed, current) == False{} : Bool}
+
+law tm_start_waits_for_disk:
+  {TEL.Tm.start(True{}, True{}, True{}) == False{} : Bool}
+
+law tm_start_cleans_up_waiting_off:
+  {TEL.Tm.start(True{}, True{}, False{}) == True{} : Bool}
+
+law telemetry_choice_no_decision_no_replay:
+  for seen: List<&2, String>
+  for fp: String
+  {H.Hub.telemetry.choice.replay(seen, "", fp) == False{} : Bool}
+
+law tour_back_skips_usage:
+  {U.Tour.dest(True{}, True{}, OBD.Ob.share()) == 8n : Nat}
+
+law tour_next_skips_usage:
+  {U.Tour.dest(False{}, True{}, OBD.Ob.share()) == OBD.Ob.uber() : Nat}
+
+law tour_usage_kept_when_due:
+  for back: Bool
+  {U.Tour.dest(back, False{}, OBD.Ob.share()) == OBD.Ob.share() : Nat}
+
+
+# Read-only settings rows never claim to be controls.
+law settings_row_information:
+  {U.Settings.row.kind(False{}) == "info" : String}
+
+# File presence alone must never report a usable local engine.
+law voice_model_needs_runtime:
+  {U.Vlocal.ready(J.Null{}, J.Json.obj([J.KV{"installed", J.Flag{True{}}}])) == False{} : Bool}

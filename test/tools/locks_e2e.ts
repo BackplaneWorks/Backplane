@@ -156,7 +156,16 @@ try {
   const expiry = join(root, "after-expiry");
   const started = Date.now();
   const next = spawn([resolve("scripts/bp-lock.sh"), "lease", "--", "sh", "-c", `touch '${expiry}'`]);
-  await sleep(95000);
+  // Start the separate restart scenario only during the last 30 seconds:
+  // its holder must not expire while the lease test waits 95 seconds.
+  await sleep(65000);
+  // A helper waiting while the hub restarts survives it (see the restart below).
+  await post("acquire", "survive", "pid:holder@e2e");
+  const surviveMarker = join(root, "survive-ran");
+  const survivor = Bun.spawn([resolve("scripts/bp-lock.sh"), "survive", "--", "sh", "-c", `touch '${surviveMarker}'`], { env, stdout: "ignore", stderr: "inherit" });
+  owned.push(survivor);
+  const survivorStarted = performance.now();
+  await sleep(30000);
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   check(alive(childPid), "expired helper lease never kills its captured busy command");
   check(!existsSync(expiry), "expired helper lease retains physical exclusion while work is alive");
@@ -167,12 +176,9 @@ try {
     const nonce = String(leaseParty.id).split(":").at(-1)!;
     if (/^bp-lock-client\.[A-Za-z0-9]+$/.test(nonce)) rmSync(join("/tmp", nonce), { recursive: true, force: true });
   }
-  // A helper waiting while the hub restarts survives it (see the restart below).
-  await post("acquire", "survive", "pid:holder@e2e");
-  const surviveMarker = join(root, "survive-ran");
-  const survivor = Bun.spawn([resolve("scripts/bp-lock.sh"), "survive", "--", "sh", "-c", `touch '${surviveMarker}'`], { env, stdout: "ignore", stderr: "inherit" });
-  owned.push(survivor);
-  await sleep(28000); // past the first long-poll acquire: the helper is in its own status loop
+  // Preserve the original 28-second minimum before restarting the hub.
+  check(performance.now() - survivorStarted >= 28000, "restart helper has waited through its long poll");
+  check((await call(a, "lock_list", {})).locks.find((l: any) => l.name === "survive")?.waiters.some((w: any) => w.note === "bp-lock.sh"), "restart helper remains queued before hub restart");
   // A restart keeps queued locked work behind its reservation.
   await call(b, "lock_acquire", { name: "restart" });
   const restartMarker = join(root, "restart-must-not-run");
