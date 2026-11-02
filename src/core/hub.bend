@@ -14,6 +14,7 @@ import ./mailcontinuity.bend as MCN
 import ./maildisposition.bend as MD
 import ./mail.bend as ML
 import ./mailbody.bend as MB
+import ./mailowner.bend as OWN
 import ./ref.bend as REF
 import ./ride.bend as RD
 import ./json.bend as J
@@ -60,6 +61,7 @@ type Out is Data:
   RunStart{thread: String, conv: String, head: String}
   RunNext{bot: String, conv: String}
   CharterWrite{path: String, text: String}
+  OwnerMail{}
   MailAppend{line: String, conv: String, changes: List<&2, M.Change>}
   MailRead{client: U32, id: String, conv: String, before: String, n: Nat}
   LockGuard{name: String, old: String, holder: String}
@@ -182,7 +184,6 @@ type Out is Data:
   # far.queue, Fq.*) is due to be sent, in order
   FarQueued{}
 
-
 # an out's constructor name, for its perf span (server.bend's Hub.outs.go:
 # hub.out.<kind>, logged as slow like any span), never what it carries
 def Out.kind(o: Out) -> String:
@@ -190,6 +191,7 @@ def Out.kind(o: Out) -> String:
     case RunStart{_, _, _}: "RunStart"
     case RunNext{_, _}: "RunNext"
     case CharterWrite{_, _}: "CharterWrite"
+    case OwnerMail{}: "OwnerMail"
     case MailAppend{_, _, _}: "MailAppend"
     case MailRead{_, _, _, _, _}: "MailRead"
     case LockGuard{_, _, _}: "LockGuard"
@@ -2094,7 +2096,6 @@ def Claude.named(+s: M.State, +th: String, +now: Nat, +o: J.Json) -> Step:
   +bs = Claude.named.inputs(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "message"), "content")))
   Step{Claude.todos.tools(Bool.not(List.is_empty(&2, J.Json, bs)), th, now, bs), Nil{}}
 
-
 def Claude.init.same(t: M.Thread, +sid: String) -> Bool:
   match t:
     case M.Thread{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, session, _}:
@@ -3072,7 +3073,7 @@ def Mail.pending(+missing: Bool, +body: MB.Body) -> List<&2, M.Change>:
   List.append(&2, M.Change, Mail.metadata.new(missing, MB.Body.conv(body)), [MB.Body.header(MB.Body.mail(body))])
 
 def Mail.file.body(+s: M.State, +body: MB.Body) -> Step:
-  Step{Nil{}, [MailAppend{MB.Body.line(body), ML.Mail.conv(MB.Body.mail(body)), Mail.pending(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(MB.Body.mail(body))))), body)}]}
+  Step{Nil{}, [MailAppend{MB.Body.line(body), ML.Mail.conv(MB.Body.mail(body)), List.append(&2, M.Change, Mail.pending(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(MB.Body.mail(body))))), body), OWN.Owner.track(s, body, ML.Mail.at(MB.Body.mail(body))))}]}
 
 def Mail.sender.empty(+person: Bool, +s: M.State, +from: String) -> String:
   match person:
@@ -3221,7 +3222,7 @@ def Operational.owner(+s: M.State, +to: String) -> String:
   Bool.pick(String, UBS.Ub.chat.is(s, to), Mail.or(UBS.Ub.chat(s), to), to)
 
 def Operational.is(+s: M.State, +to: String) -> Bool:
-  Bool.and(UBS.Ub.chat.is(s, to), Bool.not(FR.Fr.is(Operational.owner(s, to))))
+  UBS.Ub.chat.is(s, to)
 
 # the producer's acknowledgements, committed with the header
 def Operational.after(st: Step, +after: List<&2, M.Change>) -> Step:
@@ -3236,7 +3237,7 @@ def Operational.file.k(has: Bool, +s: M.State, +body: MB.Body, +after: List<&2, 
 
 # want: "fyi", or "" for the kind's own (a thread's direct message asks)
 def Operational.mail(+s: M.State, +now: Nat, +o: ML.Origin, +to: String, +text: String, +msg: String, +want: String, +after: List<&2, M.Change>) -> Step:
-  +addr = Mail.addr(s, Operational.owner(s, to))
+  +addr = Bool.pick(String, UBS.Ub.chat.is(s, to), OWN.Owner.addr(s), Mail.addr(s, to))
   Operational.file.k(ML.Box.has(M.State.mail(s), msg), s,
     Mail.body(s, now, o, addr, text, msg, ML.Mail.route(o, addr), Mail.subject(String.eq(ML.Origin.kind(o), "launch"), s, o, addr), want), after)
 
@@ -3744,7 +3745,6 @@ def Hub.settle.ended(t: M.TurnState) -> Bool:
       True{}
     case _:
       False{}
-
 
 # Ephemeral runs: a mail run or a coordinator's back office (mailrun.bend's
 # Run.is; their ids run... and mailcoord-...). One-shot by design: the
@@ -6091,7 +6091,6 @@ def Deploy.check.w(waiting: Bool, +clear: Bool, +free: Bool, +open: String, +s: 
 # a lock holds it and what is open, for the plane and deploy_status
 def Deploy.check(+s: M.State, +now: Nat, free: Bool, +open: List<&2, String>) -> Step:
   Deploy.check.w(DP.Deploy.waiting(s), Nat.is_eq(DP.Open.count(open), 0n), free, DP.Open.threads(open), s, now)
-
 
 # The public server handoff additionally requires every live turn to be idle.
 # A gap between tool calls is not an idle turn. Keep the lower-level call/
@@ -9576,7 +9575,7 @@ def Run.spawn.new(+s: M.State, +now: Nat, +bot: String, +conv: String, +body: MB
   +model = Run.model(s, bot)
   +cs = {[M.ThreadCreated{th, ML.Conv.project(MB.Body.conv(body)), BT.Bot.name(b) ++ ": " ++ ML.Conv.subject(MB.Body.conv(body)), M.Local{}, "", Hub.cwd(s, parent), Run.provider(s, bot), model, now},
     M.WorktreeSet{th, "", Hub.cwd(s, parent), now}, M.ModesSet{th, M.Supervised{}, M.DefaultMode{}, model, now}, M.RunSet{th, bot, conv, ML.Mail.id(MB.Body.mail(body)), now}, M.SettingSet{"run.pending." ++ th, "on", now}] : List<&2, M.Change>}
-  +bound = List.append(&2, M.Change, cs, Bool.pick(List<&2, M.Change>, TRI.Triage.owner(s, bot), [M.SettingSet{"run.bound." ++ th, ML.Mail.id(MB.Body.mail(body)), now}], Nil{}))
+  +bound = List.append(&2, M.Change, List.append(&2, M.Change, cs, Bool.pick(List<&2, M.Change>, TRI.Triage.owner(s, bot), OWN.Owner.claim(s, ML.Mail.id(MB.Body.mail(body)), now), Nil{})), Bool.pick(List<&2, M.Change>, TRI.Triage.owner(s, bot), [M.SettingSet{"run.bound." ++ th, ML.Mail.id(MB.Body.mail(body)), now}], Nil{}))
   +s1 = M.State.replay(bound, s)
   Step{List.append(&2, M.Change, bound, Run.alarm(s1, now, bot, conv)), [RunStart{th, conv, MR.Run.brief(s1, bot, conv)}]}
 
@@ -9601,7 +9600,7 @@ def Run.queue.ready(ready: Bool, +s: M.State, +now: Nat, +bot: String, +conv: St
     case True{}: Run.queue.ids(TRI.Triage.queue(s, bot, conv), s, now, bot, conv)
 
 def Run.queue.start(+s: M.State, +now: Nat, +bot: String, +conv: String) -> Step:
-  Run.queue.ready(Bool.and(Bool.not(TRI.Triage.held(s, bot, conv)), Bool.and(TRI.Triage.owner(s, bot), String.is_empty(ML.Box.live(M.State.mail(s), bot, conv)))), s, now, bot, conv)
+  Run.queue.ready(Bool.and(Bool.not(OWN.Owner.redirect(s, bot)), Bool.and(Bool.not(TRI.Triage.held(s, bot, conv)), Bool.and(TRI.Triage.owner(s, bot), String.is_empty(ML.Box.live(M.State.mail(s), bot, conv))))), s, now, bot, conv)
 
 def Run.queue.enqueue(+s: M.State, +now: Nat, +body: MB.Body, +bot: String) -> Step:
   +conv = ML.Mail.conv(MB.Body.mail(body))
@@ -9660,10 +9659,15 @@ def Mail.route_bot.spawn(owned: Bool, +s: M.State, +now: Nat, +body: MB.Body, +b
     case True{}: Run.queue.admit(s, now, body, bot)
     case False{}: Run.spawn(s, now, bot, ML.Mail.conv(MB.Body.mail(body)), body)
 
+def Mail.route_bot.owner(remote: Bool, +s: M.State, +now: Nat, +body: MB.Body, +bot: String) -> Step:
+  match remote:
+    case True{}: Step.outs([OwnerMail{}])
+    case False{}: Mail.route_bot.spawn(TRI.Triage.owner(s, bot), s, now, body, bot)
+
 def Mail.route_bot.want(act: Bool, +s: M.State, +now: Nat, +body: MB.Body, +bot: String) -> Step:
   match act:
     case False{}: Step.none()
-    case True{}: Mail.route_bot.spawn(TRI.Triage.owner(s, bot), s, now, body, bot)
+    case True{}: Mail.route_bot.owner(OWN.Owner.redirect(s, bot), s, now, body, bot)
 
 def Mail.route_bot.plan(p: MR.MailRunPlan, +s: M.State, +now: Nat, +body: MB.Body, +bot: String) -> Step:
   match p:

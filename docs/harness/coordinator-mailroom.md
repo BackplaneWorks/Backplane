@@ -153,3 +153,30 @@ restart interruptions do not invent a user stop. Clearing the exact hold via
 an explicit authenticated setting change is required before queue processing
 can resume; an arrival or generic restart setting is insufficient. Source
 approvals are untouched.
+
+Waiting mail for a synced coordinator follows the committed conversation lease.
+The local body and header commit an outbox ticket before routing. A local RunSet
+claims that exact ticket; already running inputs finish on their original run.
+Waiting FIFO IDs (including held inputs) can move to the holder's private
+mailroom. Holds travel with those IDs and are never cleared by delivery.
+
+Owner handoffs use the existing signed, own-machine `/far/rpc` boundary, under
+`owner.mail`. The receiver checks the shared coordinator UID, sender binding and
+lease term. It commits the body, header, original provenance metadata and retry
+receipt before acknowledging. Remote headers qualify source references while
+retaining original kind, want, timestamp and full text. Original metadata remains
+in the ticket; a return handoff reuses the original local journal coordinates.
+Only the exact receipt/key retires the sender's ticket and exact waiting ID.
+
+A send attempt first persists its recipient and term. An unanswered attempt
+stays pinned there across lease changes and restarts: the old receiver can
+answer its durable receipt even after the conversation moved. Only an explicit
+no-receipt/moved response permits retargeting. If that machine is unreachable,
+mail remains queued rather than risking duplicate processing. The minute tick,
+new mail and lease sync retry pending work. Torn-header recovery enrolls only
+newly recovered bodies; old mailbox history is never replayed. Copied-log hubs
+perform no owner handoff IO.
+
+Focused checks: `test/mailowner_test.bend`; runtime stand-ins:
+`bun test/tools/mailowner_e2e.ts APP WIRE_DIR`. These use disposable homes and
+loopback peers and never call `tell_person`.
