@@ -1,4 +1,5 @@
 import Base
+import ./telemetry.bend as TLM
 import ./mailprivate.bend as PM
 import ./accounts.bend as ACCT
 import ./improvements.bend as IMP
@@ -9899,6 +9900,81 @@ def Todos.edit(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) ->
             Bool.or(Bool.not(String.eq(J.Json.get_str(p, "op", ""), "add")), Bool.not(String.is_empty(String.trim(J.Json.get_str(p, "text", "")))))))))),
     s, now, client, id, p, J.Json.get_str(p, "thread", ""))
 
+# One durable append records the whole installation-wide choice. Expected
+# preferences protect existing opt-outs against concurrent stale UI replies.
+# A receipt names one human decision: the client's own decision id (kept in
+# its outbox text, so every transport retry repeats it, and new for every
+# click) bound to what that request asked. Two people choosing the same value
+# from the same displayed state are two decisions; only a retry of the very
+# same request is recognised as already done.
+def Hub.telemetry.choice.fingerprint(decision: String, expected: String, value: String, popup: Bool) -> String:
+  J.Json.show(J.Json.arr([J.Str{decision}, J.Str{expected}, J.Str{value}, J.Flag{popup}]))
+
+# Without a decision id nothing identifies a retry, so nothing is suppressed:
+# an Off always applies, and an On still needs the current expected token.
+def Hub.telemetry.choice.replay(+seen: List<&2, String>, +decision: String, fp: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(decision)), TLM.Tm.has(seen, fp))
+
+# Preserve the reusable-list quantity required by JSON arrays and state.
+def Hub.telemetry.choice.receipt.strings(xs: List<&2, J.Json>) -> List<&2, String>:
+  match xs:
+    case Nil{}: Nil{}
+    case x <> rest: J.Json.as_str(Some{x}, "") <> Hub.telemetry.choice.receipt.strings(rest)
+
+def Hub.telemetry.choice.receipt.jsons(xs: List<&2, String>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: Nil{}
+    case x <> rest: J.Str{x} <> Hub.telemetry.choice.receipt.jsons(rest)
+
+# Bounded replay receipts make lost acknowledgements idempotent, even if
+# another client makes a later choice before the retry arrives.
+def Hub.telemetry.choice.seen(+s: M.State) -> List<&2, String>:
+  Hub.telemetry.choice.receipt.strings(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(s, "telemetry.choice.receipts", "[]")), J.Null{})))
+
+def Hub.telemetry.choice.changes(ok: Bool, +s: M.State, +value: String, fingerprint: String, +now: Nat) -> List<&2, M.Change>:
+  match ok:
+    case False{}: Nil{}
+    case True{}:
+      [M.SettingSet{"telemetry.share", value, now}, M.SettingSet{"telemetry.asked", "1", now},
+        M.SettingSet{"telemetry.usage.asked", Bool.pick(String, String.eq(value, "on"), "1", "0"), now},
+        M.SettingSet{"telemetry.choice.revision", Nat.show(Nat.add(TLM.Tm.choice.revision(s), 1n)), now},
+        M.SettingSet{"telemetry.choice.receipts", J.Json.show(J.Json.arr(Hub.telemetry.choice.receipt.jsons(List.take(&2, String, fingerprint <> Hub.telemetry.choice.seen(s), 16n)))), now}]
+
+def Hub.telemetry.choice.reply(+s: M.State, +accepted: Bool, client: U32, id: String) -> Out:
+  SavedSend{client, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{id}}, J.KV{"ok", J.Flag{accepted}},
+    J.KV{"error", J.Str{Bool.pick(String, accepted, "", "Telemetry preferences changed. Your current saved choice is shown; choose again to change it.")}}, J.KV{"telemetryChoice", TLM.Tm.choice.json(s)}]))}
+
+def Hub.telemetry.choice(+s: M.State, +now: Nat, client: U32, id: String, +p: J.Json) -> Step:
+  +value = J.Json.get_str(p, "value", "")
+  +decision = J.Json.get_str(p, "decision", "")
+  +fp = Hub.telemetry.choice.fingerprint(decision, J.Json.get_str(p, "expected", ""), value, J.Json.get_bool(p, "popup", False{}))
+  +seen = Hub.telemetry.choice.replay(Hub.telemetry.choice.seen(s), decision, fp)
+  +ok = Bool.and(Bool.or(String.eq(value, "on"), String.eq(value, "off")),
+    Bool.or(String.eq(value, "off"), Bool.and(String.eq(J.Json.get_str(p, "expected", ""), TLM.Tm.choice.token(s)),
+      Bool.or(Bool.not(J.Json.get_bool(p, "popup", False{})), Bool.not(TLM.Tm.answered(s))))))
+  +cs = Hub.telemetry.choice.changes(Bool.and(ok, Bool.not(seen)), s, value, fp, now)
+  Step{cs, [Hub.telemetry.choice.reply(M.State.replay(cs, s), Bool.or(ok, seen), client, id)]}
+
+# Older clients may still disable telemetry or reset the id. Individual On,
+# answer-marker and internal revision writes cannot re-enable via a stale queue.
+def Hub.telemetry.setting.reserved(+key: String) -> Bool:
+  Bool.or(String.eq(key, "telemetry.share"), Bool.or(String.eq(key, "telemetry.asked"),
+    Bool.or(String.eq(key, "telemetry.usage.asked"), Bool.or(String.eq(key, "telemetry.usage.enabled"),
+      Bool.or(String.eq(key, "telemetry.usage.generation"), String.starts_with(key, "telemetry.choice."))))))
+
+def Hub.telemetry.setting(+s: M.State, +now: Nat, client: U32, id: String, +p: J.Json) -> Step:
+  +key = J.Json.get_str(p, "key", "")
+  +value = J.Json.get_str(p, "value", "")
+  +off = Bool.or(Bool.and(String.eq(key, "telemetry.share"), String.eq(value, "off")),
+    Bool.and(Bool.or(String.eq(key, "telemetry.asked"), String.eq(key, "telemetry.usage.asked")), Bool.or(String.is_empty(value), String.eq(value, "0"))))
+  +fp = Hub.telemetry.choice.fingerprint("", TLM.Tm.choice.token(s), "legacy-off", False{})
+  +cs = Hub.telemetry.choice.changes(off, s, "off", fp, now)
+  Step{cs, [Hub.telemetry.choice.reply(M.State.replay(cs, s), off, client, id)]}
+
+def Hub.setting(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Bool.pick(Step, Hub.telemetry.setting.reserved(J.Json.get_str(p, "key", "")), Hub.telemetry.setting(s, now, client, id, p),
+    Step{[M.SettingSet{J.Json.get_str(p, "key", ""), J.Json.get_str(p, "value", ""), now}], Bool.pick(List<&2, Out>, String.eq(J.Json.get_str(p, "key", ""), "kicad.path"), [Reply.ok(client, id), KiCadRetry{}], [Reply.ok(client, id)])})
+
 def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
   match i:
     case 0n:
@@ -9936,7 +10012,7 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case 15n:
       Update.ask(Nat.is_gt(M.Work.threads(s), 0n), now, client, id)
     case 16n:
-      Step{[M.SettingSet{J.Json.get_str(p, "key", ""), J.Json.get_str(p, "value", ""), now}], Bool.pick(List<&2, Out>, String.eq(J.Json.get_str(p, "key", ""), "kicad.path"), [Reply.ok(client, id), KiCadRetry{}], [Reply.ok(client, id)])}
+      Hub.setting(s, now, client, id, p)
     case 17n:
       Step.outs([Reply.ok(client, id), KiCadInstall{}])
     case 18n:
@@ -10010,9 +10086,15 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
       Hub.more(C.Codec.pos(Hub.methods.git(), m), s, now, client, id, p, m)
 
 # one client request {"id": n, "m": method, "p": params}
+def Hub.request.route(telemetry: Bool, +s: M.State, +now: Nat, +client: U32, +o: J.Json) -> Step:
+  match telemetry:
+    case True{}: Hub.telemetry.choice(s, now, client, J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"))
+    case False{}:
+      Hub.request.k(C.Codec.pos(Hub.methods(), J.Json.get_str(o, "m", "")), s, now, client,
+        J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), J.Json.get_str(o, "m", ""))
+
 def Hub.request(+s: M.State, +now: Nat, +client: U32, +o: J.Json) -> Step:
-  Hub.request.k(C.Codec.pos(Hub.methods(), J.Json.get_str(o, "m", "")), s, now, client,
-    J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), J.Json.get_str(o, "m", ""))
+  Hub.request.route(String.eq(J.Json.get_str(o, "m", ""), "telemetry.choice"), s, now, client, o)
 
 def Hub.request_text.k(m: Maybe<&2, J.Json>, +s: M.State, +now: Nat, +client: U32) -> Step:
   match m:

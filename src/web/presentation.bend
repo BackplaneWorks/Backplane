@@ -98,6 +98,29 @@ def Node.draft.go(nodes: List<&2, D.Node>, +text: String, acc: List<&2, D.Node>)
 def Node.draft(node: D.Node, text: String) -> D.Node:
   Node.read.first(Node.draft.go([node], text, Nil{}))
 
+# A local send is display-only until the authenticated action replies. It
+# never enters retained history, a cached picture, or a server session.
+def Node.pending.kids(timeline: Bool, kids: List<&2, D.Node>, rows: List<&2, D.Node>) -> List<&2, D.Node>:
+  match timeline:
+    case True{}: List.append(&2, D.Node, kids, rows)
+    case False{}: kids
+
+def Node.timeline(attrs: List<&2, D.Attr>) -> Bool:
+  match attrs:
+    case Nil{}: False{}
+    case D.At{"id", "timeline"} <> _: True{}
+    case _ <> tail: Node.timeline(tail)
+
+def Node.pending.go(nodes: List<&2, D.Node>, +rows: List<&2, D.Node>) -> List<&2, D.Node>:
+  match nodes:
+    case Nil{}: Nil{}
+    case D.Txt{t} <> tail: D.Txt{t} <> Node.pending.go(tail, rows)
+    case D.El{tag, key, +attrs, kids} <> tail:
+      D.El{tag, key, attrs, Node.pending.kids(Node.timeline(attrs), Node.pending.go(kids, rows), rows)} <> Node.pending.go(tail, rows)
+
+def Node.pending(node: D.Node, rows: List<&2, D.Node>) -> D.Node:
+  Node.read.first(Node.pending.go([node], rows))
+
 # An optimistic menu is a picture of server-supplied bounded choices only.
 # This never changes a session, sends a command or selects a model.
 def Node.models.attrs(attrs: List<&2, D.Attr>, +open: Bool) -> List<&2, D.Attr>:

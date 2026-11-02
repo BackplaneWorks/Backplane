@@ -17,7 +17,19 @@ function timeline(b,activity=false,direction='next',visible=true,inputRoot=root(
  return {scrollTop:100,scrollHeight:1600,clientHeight:600,getBoundingClientRect:()=>({top:0,bottom:600}),querySelectorAll:s=>all.filter(a=>s==='[data-body-start]'?a['data-body-start']!==undefined:a['data-body-edge']).map(a=>({dataset:{bodyId:a['data-body-id'],bodyStart:String(a['data-body-start']),bodyEdge:a['data-body-edge']},getBoundingClientRect:()=>({top:visible&&(!a['data-body-edge']||a['data-body-edge']===direction)?100:5000,bottom:visible&&(!a['data-body-edge']||a['data-body-edge']===direction)?140:5040,height:40})}))};
 }
 let checks=0;const check=(name,f)=>{f();checks++;console.log('ok '+name)};
-const setup=(automatic=true)=>{const requests=[];const b=new BodyWindows({request:(p,cursor,tail)=>{requests.push({entryId:p.id,bodyPage:1,bodyVersion:p.version,bodyThread:p.thread,cursor,generation:b.generation,viewId:b.viewId,accountBinding:b.owner,tail});return true},changed:()=>{}});b.bind('h',detail([part(automatic)]),'owner',root(!automatic));return {b,requests}};
+const setup=(automatic=true)=>{const requests=[];const b=new BodyWindows({request:(p,cursor,tail)=>{requests.push({entryId:p.id,bodyPage:1,bodyVersion:p.version,bodyThread:p.thread,localGeneration:p.localGeneration,cursor,generation:b.generation,viewId:b.viewId,accountBinding:b.owner,tail});return true},changed:()=>{}});b.bind('h',detail([part(automatic)]),'owner',root(!automatic));return {b,requests}};
+check('closing a tool run retires its body and an old reply cannot revive it after reopening',()=>{
+ const {b,requests}=setup(false);
+ const open=node('div','timeline',{id:'timeline'},[node('button','fold:r',{class:'fold open','data-value':'0r'},[text('1 tool call')]),node('div','m',{class:'act','data-id':'m','data-run':'r'},[text('tool summary')])]);
+ const closed=node('div','timeline',{id:'timeline'},[node('button','fold:r',{class:'fold','data-value':'1r'},[text('1 tool call')])]);
+ b.bind('h',detail([part(false)]),'owner',open);assert(b.open('m'));b.observe(timeline(b,true,'next',true,open),true);const old=requests.at(-1);assert(old);
+ b.bind('h',detail([]),'owner',closed);assert.equal(b.pending,null);assert.equal(b.parts.has('m'),false);assert(!read(b.project(closed)).includes('private tool payload'));
+ const message={id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:20,total:20,text:'private tool payload',hasMore:false,complete:true,cursor:'',previous:''};
+ assert.equal(b.accept(message,old),false,'collapse retires the outstanding body read');
+ b.bind('h',detail([part(false)]),'owner',open);assert(b.open('m'));b.observe(timeline(b,true,'next',true,open),true);const current=requests.at(-1);
+ assert.notEqual(current.localGeneration,old.localGeneration);assert.equal(b.accept(message,old),false,'same cursor/version cannot revive a previous expansion');
+ assert(b.accept(message,current));assert(read(b.project(open)).includes('private tool payload'));
+});
 check('collapsed tool body has no node construction or automatic request',()=>{const {b,requests}=setup(false);assert.equal(read(b.project(root(true))),'tool summary');b.observe(timeline(b,true),true);assert.equal(requests.length,0)});
 check('offscreen large message does not request its body',()=>{const {b,requests}=setup();b.observe(timeline(b,false,'next',false),true);assert.equal(requests.length,0);assert(read(b.project(root())).includes('real prefix'))});
 check('explicit tool expansion requests actual scoped body only once',()=>{const {b,requests}=setup(false);assert(b.open('m'));b.observe(timeline(b,true),true);b.observe(timeline(b,true),true);assert.equal(requests.length,1);assert.equal(requests[0].bodyThread,'a')});
@@ -31,7 +43,7 @@ check('append-only live versions retain painted pages and refresh only their bou
  const cursor=(version,start=0,until=0)=>JSON.stringify({version:1,epoch:'e',target:{kind:'thread',id:'a'},query:`body:${version}:${until}`,before:String(start)});
  const live=(version,blocks=24,generation='1',cut=false)=>({...part(),id,version:String(version),cursor:cursor(version),streamGeneration:generation,streamBlocks:blocks,streamCut:cut});
  const rr=node('div','timeline',{id:'timeline'},[node('bp-memo',id,{fn:'msg',who:'a'},[text('tail preview')])]);
- const b=new BodyWindows({request:(p,c,tail)=>{requests.push({entryId:id,bodyPage:1,bodyVersion:p.version,bodyThread:p.thread,cursor:c,generation:b.generation,viewId:b.viewId,accountBinding:b.owner,tail});return true},changed:()=>{}});
+ const b=new BodyWindows({request:(p,c,tail)=>{requests.push({entryId:id,bodyPage:1,bodyVersion:p.version,bodyThread:p.thread,localGeneration:p.localGeneration,cursor:c,generation:b.generation,viewId:b.viewId,accountBinding:b.owner,tail});return true},changed:()=>{}});
  b.bind('h',detail([live(7)]),'owner',rr);
  b.observe(timeline(b,false,'next',true,rr),true);
  assert(b.accept({id,thread:'a',version:'7',bodyPage:1,start:8,end:24,total:24,text:'READING TEXT',hasMore:false,complete:true,cursor:'',previous:cursor(7,0,8)},requests.at(-1)));
@@ -63,7 +75,7 @@ check('already rendered message preview keeps structured Markdown nodes',()=>{
 });
 check('five simultaneous visible body readers settle without eviction/refetch flashing',()=>{
  const requests=[],parts=Array.from({length:5},(_,i)=>({...part(),id:'m'+i})),rr=node('div','timeline',{id:'timeline'},parts.map(p=>node('bp-memo',p.id,{fn:'msg',who:'a'},[text('**preview**')])));
- const b=new BodyWindows({request:(p,cursor)=>{requests.push({entryId:p.id,bodyVersion:p.version,bodyThread:p.thread,cursor,generation:b.generation,viewId:b.viewId,accountBinding:b.owner});return true}});
+ const b=new BodyWindows({request:(p,cursor)=>{requests.push({entryId:p.id,bodyVersion:p.version,bodyThread:p.thread,localGeneration:p.localGeneration,cursor,generation:b.generation,viewId:b.viewId,accountBinding:b.owner});return true}});
  b.bind('h',detail(parts),'owner',rr);
  for(let i=0;i<20;i++){
   const n=requests.length;b.observe(timeline(b,false,'next',true,rr),true);

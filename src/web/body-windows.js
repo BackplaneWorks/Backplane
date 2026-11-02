@@ -25,6 +25,7 @@ export class BodyWindows {
     this.request = request;this.changed = changed;this.renderBody = renderBody;this.maxBytes = maxBytes;
     this.scopes = new Map();this.scope = '';this.fence = '';this.parts = new Map();this.pending = null;
     this.previews = new Map();this.previewBytes = 0;this.shells = new Map();
+    this.runs = new Map();this.readGeneration = 0;
   }
   bind(hub, detail, owner, currentNode, holding = false) {
     const scope = JSON.stringify([hub, owner, detail.epoch, detail.target]);
@@ -34,7 +35,7 @@ export class BodyWindows {
     if (scope !== this.scope) {
       const parked = this.scopes.get(this.scope);
       while (parked?.size > 4) parked.delete(parked.keys().next().value);
-      this.parts.clear();this.previews.clear();this.previewBytes = 0;
+      this.parts.clear();this.previews.clear();this.previewBytes = 0;this.runs.clear();
     }
     this.scope = scope;this.fence = fence;this.generation = detail.generation;this.viewId = detail.viewId;this.owner = owner;
     if (!this.scopes.has(scope)) this.scopes.set(scope, new Map());
@@ -62,13 +63,24 @@ export class BodyWindows {
       if (this.pending?.id === p.id && this.pending.version !== p.version) this.pending = null;
     }
     const issued = new Set(detail.window.partial.filter(p => p.bodyPage === 1).map(p => p.id));
-    const currentMessages = new Set();
+    const currentMessages = new Set(), closedRuns = new Set();
     const collect = n => { if (!is(n, 'El')) return;
+      const run = attr(n, 'data-run'), id = attr(n, 'data-id') || n.key;
+      if (run && id) this.runs.set(id, run);
+      const cls = classes(n);
+      if (cls.includes('fold') && !cls.includes('open')) closedRuns.add((attr(n, 'data-value') || '').slice(1));
       if (n.tag === 'bp-memo' && ['msg','row','live'].includes(attr(n, 'fn'))) currentMessages.add(n.key);
       else if ((attr(n, 'class') || '').split(/\s+/).some(c => c === 'msg' || c === 'act')) currentMessages.add(attr(n, 'data-id'));
       for (const child of items(n.kids)) collect(child);
     };
     if (currentNode) collect(currentNode);
+    for (const [id, run] of this.runs) if (closedRuns.has(run)) {
+      this.parts.delete(id);saved.delete(id);this.runs.delete(id);
+      const preview = this.previews.get(id);if (preview) { this.previewBytes -= preview.bytes || 0;this.previews.delete(id); }
+      this.shells.delete(id);
+      if (this.pending?.id === id) this.pending = null;
+    }
+    while (this.runs.size > 128) this.runs.delete(this.runs.keys().next().value);
     // Retained older timeline rows are outside the newly authoritative hub
     // page. Their cached bodies remain valid; only a current page can declare
     // its own entry short and retire its body-page metadata.
@@ -104,7 +116,7 @@ export class BodyWindows {
     } catch { return ''; }
   }
   disconnect() { this.pending = null;this.fence = ''; }
-  clear() { this.disconnect();this.parts.clear();this.scope = '';this.scopes.clear();this.previews.clear();this.previewBytes = 0; }
+  clear() { this.disconnect();this.parts.clear();this.runs.clear();this.scope = '';this.scopes.clear();this.previews.clear();this.previewBytes = 0; }
   reader(id, create = false) {
     const saved = this.scopes.get(this.scope), part = this.parts.get(id);
     if (!saved || !part) return null;
@@ -140,7 +152,8 @@ export class BodyWindows {
     const pending = this.pending;
     if (!pending || pending.fence !== this.fence || pending.id !== message.id || pending.cursor !== input.cursor
       || pending.version !== message.version || pending.thread !== message.thread || input.bodyVersion !== message.version
-      || input.generation !== pending.generation || input.viewId !== pending.viewId || input.accountBinding !== pending.owner) return false;
+      || input.generation !== pending.generation || input.viewId !== pending.viewId || input.accountBinding !== pending.owner
+      || input.localGeneration !== pending.localGeneration) return false;
     this.pending = null;
     const r = this.reader(message.id, true);
     if (!r || r.version !== message.version) return false;
@@ -163,6 +176,7 @@ export class BodyWindows {
     if (!this.pending || this.pending.fence !== this.fence || this.pending.id !== input.entryId
       || this.pending.cursor !== input.cursor || this.pending.version !== input.bodyVersion) return;
     if (input.generation !== this.pending.generation || input.viewId !== this.pending.viewId || input.accountBinding !== this.pending.owner) return;
+    if (input.localGeneration !== this.pending.localGeneration) return;
     const r = this.reader(input.entryId);this.pending = null;
     if (r && reason !== 'overtaken') r.error = reason;
     this.changed?.();
@@ -288,7 +302,8 @@ export class BodyWindows {
       const replacing = !previous && r.refreshTail && r.pages.length > 0;
       const cursor = replacing ? this.liveCursor(part, part.cursor, r.pages.at(-1).start) : previous ? r.pages[0]?.previous : r.pages.at(-1)?.cursor || (!r.pages.length ? part.cursor : '');
       if (!cursor) continue;
-      if (this.request?.(part, cursor, part.automatic && !r.pages.length && (part.id.startsWith('@live:') || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 16))) this.pending = { id, thread: part.thread, version: part.version, cursor, fence: this.fence, direction: replacing ? 'replace' : previous ? 'previous' : 'next', generation: this.generation, viewId: this.viewId, owner: this.owner };
+      const localGeneration = ++this.readGeneration;
+      if (this.request?.({ ...part, localGeneration }, cursor, part.automatic && !r.pages.length && (part.id.startsWith('@live:') || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 16))) this.pending = { id, thread: part.thread, version: part.version, cursor, fence: this.fence, direction: replacing ? 'replace' : previous ? 'previous' : 'next', generation: this.generation, viewId: this.viewId, owner: this.owner, localGeneration };
       return;
     }
   }

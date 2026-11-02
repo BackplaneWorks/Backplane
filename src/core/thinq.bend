@@ -82,6 +82,22 @@ def Q.sql.page.body(+keep: String) -> String:
   " UNION ALL SELECT * FROM (SELECT " ++ Q.cols.body() ++ " FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2" ++ keep ++ " ORDER BY seq DESC LIMIT ?3))" ++
   " ORDER BY seq DESC LIMIT ?3"
 
+# Only the visible first-line tool title is metadata while its fold is shut.
+# Fold.what uses the same first 160 scalars, stopping at LF; no detail follows.
+# Keep step JSON: Hist.seen needs its baseline flags and fold labels count
+# real design changes. Ordinary/error/info activities remain visible as before.
+def Q.cols.lazy_tools() -> String:
+  "seq, ord, id, thread, src, kind, role, akind, CASE WHEN kind='act' AND role='tool' THEN substr(text,1,CASE WHEN instr(substr(text,1,160),char(10))>0 THEN instr(substr(text,1,160),char(10))-1 ELSE 160 END) WHEN kind='msg' THEN substr(text,1,4097) ELSE substr(text,1,513) END AS text, at"
+
+def Q.sql.page.lazy_tools(+keep: String) -> String:
+  "SELECT * FROM (SELECT * FROM (SELECT " ++ Q.cols.lazy_tools() ++ " FROM entry WHERE thread=?1 AND seq<?2" ++ keep ++ " ORDER BY seq DESC LIMIT ?3)" ++
+  " UNION ALL SELECT * FROM (SELECT " ++ Q.cols.lazy_tools() ++ " FROM entry WHERE src=?1 AND src<>'' AND seq<?2" ++ keep ++ " ORDER BY seq DESC LIMIT ?3)) ORDER BY seq DESC LIMIT ?3"
+
+# The ordinals came from this selected, server-read page, not a caller's
+# guessed IDs. Bound each explicit expansion to its existing raw page.
+def Q.sql.tools() -> String:
+  "SELECT " ++ Q.cols.body() ++ " FROM entry WHERE kind='act' AND role='tool' AND (thread=?1 OR (src=?1 AND src<>'')) AND ord IN (SELECT value FROM json_each(?2)) ORDER BY seq DESC LIMIT 32"
+
 # how many rows of a thread are older than seq ?2
 def Q.sql.below() -> String:
   "SELECT (SELECT count(*) FROM entry WHERE thread = ?1 AND seq < ?2) + (SELECT count(*) FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2)"

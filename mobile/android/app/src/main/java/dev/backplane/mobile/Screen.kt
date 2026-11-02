@@ -54,7 +54,7 @@ data class Renaming(val id: String, val title: String, val text: String, val yes
 // "ob-back" (not on the first step) and "ob-next"
 data class Tour(val counter: String, val title: String, val body: String, val next: String, val back: String, val skip: String, val first: Boolean,
     // the uberbot step's buttons: each sends its action and value as they are
-    val choices: List<TourChoice> = emptyList())
+    val choices: List<TourChoice> = emptyList(), val off: String = "")
 
 data class TourChoice(val label: String, val action: String, val value: String)
 
@@ -832,7 +832,7 @@ fun parseScreen(o: JSONObject) = Screen(
     },
     tour = o.optJSONObject("tour")?.let {
         Tour(it.optString("counter"), it.optString("title"), it.optString("body"), it.optString("next"), it.optString("back"), it.optString("skip"), it.optBoolean("first"),
-            it.optJSONArray("choices")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { c -> TourChoice(c.optString("label"), c.optString("action"), c.optString("value")) } } } ?: emptyList())
+            it.optJSONArray("choices")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { c -> TourChoice(c.optString("label"), c.optString("action"), c.optString("value")) } } } ?: emptyList(), it.optString("off"))
     },
     locale = o.optString("locale", "en"),
     starNudge = o.optJSONObject("starNudge")?.let {

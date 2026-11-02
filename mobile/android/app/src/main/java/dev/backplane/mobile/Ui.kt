@@ -356,7 +356,12 @@ private fun AppContent(m: AppModel) {
                     for (c in t.choices) OutlinedButton(onClick = { m.act(c.action, c.value) }, Modifier.fillMaxWidth().padding(top = 8.dp)) { Text(c.label) }
                 }
             },
-            confirmButton = { TextButton(onClick = { m.act("ob-next") }) { Text(t.next) } },
+            confirmButton = {
+                Column(Modifier.fillMaxWidth()) {
+                    if (t.off.isNotEmpty()) OutlinedButton(onClick = { m.act("share", "off") }, Modifier.fillMaxWidth()) { Text(t.off) }
+                    TextButton(onClick = { m.act("ob-next") }, Modifier.fillMaxWidth()) { Text(t.next) }
+                }
+            },
             dismissButton = {
                 Row {
                     TextButton(onClick = { m.act("ob-skip") }) { Text(t.skip) }

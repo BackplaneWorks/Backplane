@@ -1450,3 +1450,20 @@ settings.voice.learned.note = 音声入力の後にした修正。2回すると�
 voice.learned.item = {heard} → {out}・{yes}回
 voice.dictate.here = この端末のマイクで音声入力
 native.permission.microphone = スレッドに音声入力する間だけ声を録音し、文字にするためにコンピューターへ送ります。
+
+# Settings status and empty states
+settings.voice.learned.empty = まだ学習した修正はありません。音声入力の後、聞き間違えた単語を「修正」で直すか、修正候補を選ぶとここに表示されます。2回確認すると自動で適用されます。ここで削除できます。
+settings.voice.dictionary.empty = 辞書はまだ空です。名前や専門用語を追加すると、音声入力で正しく表記しやすくなります。
+voice.model.checking = このマシンの音声ヘルパーを確認中…
+voice.model.check = 利用可能か確認
+voice.model.retry = ダウンロードを再試行
+voice.model.starting = ダウンロードを開始中…設定を閉じても続きます。
+voice.model.removing = ローカルモデルを削除中…
+voice.model.progress = {name} をダウンロード中 · {done} / {total} MB ({percent}%)
+voice.model.received = {name} をダウンロード中 · {done} MB 受信済み
+voice.model.unpack = {name} を検証・展開中…
+voice.model.failed = ダウンロード失敗: {error}
+voice.model.incomplete = 実行に必要なファイルが不足しています。ダウンロードしてセットアップを完了してください。
+voice.model.available = 未ダウンロード。約 {mb} MB と音声ランタイムが必要です。一度ダウンロードするとオフラインで使えます。
+voice.model.language.en = 英語
+voice.model.language.multi = 25言語

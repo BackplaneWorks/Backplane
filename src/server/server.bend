@@ -67,6 +67,7 @@ import ../core/cbor.bend as CB
 import ../mobile/session.bend as MSE
 import ./thin-view.bend as TV
 import ./thin-body.bend as TBODY
+import ../core/lazy-tools.bend as LTOOLS
 import ./thin-actor.bend as TA
 import ./terminal-output.bend as TOUT
 import ./thin-sidebar-wire.bend as TSW
@@ -7910,7 +7911,7 @@ def VoiceJob.fwd(m: Maybe<&1, String>, +inbox: Chan(Msg), +client: U32, k: Unit 
     case Some{+text}:
       do IO<Unit>:
         sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Push{client, text})
-        VoiceJob.fwd.k(String.contains(text, "\"ev\":\"idle\""), k)
+        VoiceJob.fwd.k(Bool.or(String.contains(text, "\"ev\":\"idle\""), String.contains(text, "\"ev\":\"local-result\"")), k)
     case None{}:
       IO.pure(Unit, Unit{})
 
@@ -7940,29 +7941,22 @@ def VoiceJob.live(+inbox: Chan(Msg), +home: String, +client: U32, +id: String, +
       key, VD.Vdc.of.json(p))
     VoiceJob.live.rq(rq, inbox, home, client, id, thread, device)
 
-def VoiceJob.local.m(m: Maybe<&2, J.Json>, +acc: J.Json) -> J.Json:
-  match m:
-    case Some{+o}:
-      Bool.pick(J.Json, String.eq(J.Json.get_str(o, "event", ""), "local"), o, Bool.pick(J.Json, Bool.and(String.eq(J.Json.get_str(o, "event", ""), "error"), String.is_empty(J.Json.get_str(acc, "error", ""))), J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(o, "error", "")}}]), acc))
-    case None{}:
-      acc
-
-# the local engine: what is downloaded ({"local": the helper's status}),
-# a model downloaded or removed (the status after)
-def VoiceJob.local.line(+l: String, +acc: J.Json) -> J.Json:
-  VoiceJob.local.m(J.Json.parse(l), acc)
-
-def VoiceJob.local.go(ls: List<&2, String>, +acc: J.Json) -> J.Json:
+# Status probes use the same error-preserving collector as downloads.
+def VoiceJob.local.go(ls: List<&2, String>, acc: J.Json) -> J.Json:
   match ls:
-    case Nil{}:
-      acc
+    case Nil{}: acc
     case +l <> t:
-      VoiceJob.local.go(t, VoiceJob.local.line(l, acc))
+      VoiceJob.local.go(t, VO.Vo.local.acc(Maybe.default(&2, J.Json, J.Json.parse(l), J.Null{}), acc))
+
+def VoiceJob.local.ran.k(+code: U32, +acc: J.Json) -> J.Json:
+  +local = J.Json.get_obj(acc, "local")
+  Bool.pick(J.Json, Bool.and(U32.is_eq(code, 0), Maybe.is_some(&2, J.Json, J.Json.get(local, "models"))), local,
+    J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(acc, "error", "The voice helper returned no model status. Check that it is installed beside Backplane.")}}]))
 
 def VoiceJob.local.ran(r: P.Ran) -> J.Json:
   match r:
-    case P.Ran{_, +out}:
-      VoiceJob.local.go(String.lines(out), J.Null{})
+    case P.Ran{code, out}:
+      VoiceJob.local.ran.k(code, VoiceJob.local.go(String.lines(out), J.Json.obj(Nil{})))
 
 # Dictation (server/voice.bend): the key, the dictionary, and live sessions
 # of this machine's microphone, whose messages go to the client that
@@ -7986,10 +7980,10 @@ def VoiceJob.done(+err: String, +inbox: Chan(Msg), +home: String, +client: U32, 
 
 def VoiceJob.local(+cmd: String, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U32, +id: String) -> IO(Unit):
   do IO<Unit>:
-    +exe : String <- VO.Vo.exe()
-    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(VO.Vo.local(home))
-    r : P.Ran <- P.Proc.run(exe, [cmd, "--local-dir", VO.Vo.local(home), "--model", VO.Vo.model.ok(J.Json.get_str(p, "id", J.Json.get_str(p, "model", "")))], "/")
-    BotJob.reply(inbox, client, id, True{}, [J.KV{"local", VoiceJob.local.ran(r)}])
+    +out : Chan(String) <- Chan.new(String, 32)
+    BotJob.reply(inbox, client, id, True{}, Nil{})
+    IO.spawn(Unit, VO.Vo.local.run(home, cmd, J.Json.get_str(p, "id", J.Json.get_str(p, "model", "")), out))
+    VoiceJob.forward(Fuel.forever(), out, inbox, client)
 
 def VoiceJob.stopped(on: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String) -> IO(Unit):
   match on:
@@ -8319,7 +8313,7 @@ def VoiceJob.op(i: Nat, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U
       BoatUse.go(p, inbox, home, client, id)
     # Settings' local engine
     case 12n:
-      VoiceJob.local("local-status", inbox, home, p, client, id)
+      VoiceJob.status(inbox, home, client, id)
     case 13n:
       VoiceJob.local("local-install", inbox, home, p, client, id)
     case 14n:
@@ -11002,7 +10996,7 @@ def Hub.telemetry.permit(h: Hub, gen: Nat, +view: TLM.TmView, reply: Chan(Bool))
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, Bool.and(TI.Tio.owns(Cfg.telemetry(cfg), gen), TLM.Tm.current(view, st)))
+        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, TLM.Tm.permit(TI.Tio.owns(Cfg.telemetry(cfg), gen), DQ.Dq.some(Hub.dq(cfg)), TLM.Tm.allowed(st), TLM.Tm.current(view, st)))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def TelemetryJob.permit(+inbox: Chan(Msg), gen: Nat, view: TLM.TmView) -> IO(Bool):
@@ -11016,7 +11010,7 @@ def Hub.telemetry.usage_permit(h: Hub, gen: Nat, +view: TLM.TmView, privacy_gen:
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, Bool.and(TI.Tio.owns(Cfg.telemetry(cfg), gen), Bool.and(TLM.Tm.current(view, st), TUS.Usage.current(privacy_gen, st))))
+        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, Bool.and(TLM.Tm.permit(TI.Tio.owns(Cfg.telemetry(cfg), gen), DQ.Dq.some(Hub.dq(cfg)), TLM.Tm.allowed(st), TLM.Tm.current(view, st)), TUS.Usage.current(privacy_gen, st)))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def TelemetryJob.usage_permit(+inbox: Chan(Msg), gen: Nat, view: TLM.TmView, privacy_gen: String) -> IO(Bool):
@@ -11045,8 +11039,8 @@ def Hub.telemetry.cfg(h: Hub) -> Cfg:
 
 def Hub.telemetry(h: Hub, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.telemetry.k(TI.Tio.can(Cfg.telemetry(cfg), now), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.telemetry.k(TLM.Tm.start(TI.Tio.can(Cfg.telemetry(cfg), now), DQ.Dq.some(Hub.dq(cfg)), TLM.Tm.allowed(st)), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
 
 # Unchanged minute results do not send redundant info frames to clients.
 def Hub.telemetry.id.changed(changed: Bool, h: Hub) -> IO(Hub):
@@ -11362,22 +11356,34 @@ def Hub.accounts.select.go(same: Bool, +st: M.State, +now: Nat, +client: U32, +r
       +seen = ACCT.Accounts.seen(st, th, provider, profile, epoch)
       B.Step{List.concat(&2, M.Change, [B.Switch.old(M.Queue.items(st, th), th, now),
         ACCT.Accounts.select(st, now, th, provider, profile, epoch, M.Switch.sess(B.Hub.thread(st, th)), count),
-        B.Switch.ctx(Nat.is_eq(count, seen), th, HD.Hand.prefix() ++ "switch:account:" ++ Nat.show(now), HD.Hand.text("Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId " ++ th ++ " for earlier history:", HD.Hand.newest(Nat.sub(count, seen), entries), th), now),
-        [M.ActivityLogged{th, "account:" ++ Nat.show(now), "info", "account", "Selected " ++ Bool.pick(String, String.is_empty(profile), "Default account", J.Json.get_str(ACCT.Accounts.profile(st, profile), "label", "account")) ++ "; conversation context is handed to this account with the next message.", now}]]),
+        B.Switch.ctx(Nat.is_eq(count, seen), th, HD.Hand.prefix() ++ B.Hub.id("switch:account", now, M.State.seq(st)), HD.Hand.text("Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId " ++ th ++ " for earlier history:", HD.Hand.newest(Nat.sub(count, seen), entries), th), now),
+        [M.ActivityLogged{th, B.Hub.id("account", now, M.State.seq(st)), "info", "account", "Selected " ++ Bool.pick(String, String.is_empty(profile), "Default account", J.Json.get_str(ACCT.Accounts.profile(st, profile), "label", "account")) ++ "; conversation context is handed to this account with the next message.", now}]]),
         [B.AgentStop{th}, B.Reply.ok(client, rid)]}
+
+def Hub.accounts.select.provider(+st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
+  +from = B.Hub.provider(B.Hub.thread(st, th))
+  +changes = Bool.pick(List<&2, M.Change>, String.eq(from, provider), Nil{}, B.Switch.changes(st, now, th, from, provider, "", Nil{}, False{}))
+  +switched = M.State.replay(changes, st)
+  +same = Bool.and(String.eq(ACCT.Accounts.id(switched, th, provider), profile), Nat.is_eq(ACCT.Accounts.epoch(switched, th, provider), epoch))
+  B.Step.before(changes, Bool.pick(List<&2, B.Out>, Bool.and(same, Bool.not(String.eq(from, provider))), [B.AgentStop{th}], Nil{}), Hub.accounts.select.go(same, switched, now, client, rid, th, provider, profile, epoch, count, entries))
 
 def Hub.accounts.select.valid(valid: Bool, +st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   match valid:
-    case False{}: B.Step.outs([B.Reply.err(client, rid, "Account selection is stale, unavailable, or a turn is running. Stop the turn and check account status first.")])
-    case True{}: Hub.accounts.select.go(Bool.and(String.eq(ACCT.Accounts.id(st, th, provider), profile), Nat.is_eq(ACCT.Accounts.epoch(st, th, provider), epoch)), st, now, client, rid, th, provider, profile, epoch, count, entries)
+    case False{}: B.Step.outs([B.Reply.err(client, rid, Bool.pick(String, B.Hub.running(B.Hub.thread(st, th)), "Finish or stop the current turn before selecting another account.",
+      Bool.pick(String, String.is_empty(profile), "The thread or account selection changed. Reopen the account menu and try again.", ACCT.Accounts.unavailable(ACCT.Accounts.profile(st, profile), epoch))))])
+    case True{}: Hub.accounts.select.provider(st, now, client, rid, th, provider, profile, epoch, count, entries)
 
 def Hub.accounts.select.step(+st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   +th = J.Json.get_str(p, "thread", "")
-  +provider = B.Hub.provider(B.Hub.thread(st, th))
   +profile = J.Json.get_str(p, "profile", "")
+  +current = B.Hub.provider(B.Hub.thread(st, th))
+  +owner = ACCT.Accounts.owner(st, th)
+  +provider = Bool.pick(String, String.is_empty(profile), current, J.Json.get_str(ACCT.Accounts.profile(st, profile), "provider", ""))
   +epoch = J.Json.get_nat(p, "epoch", 0n)
-  Hub.accounts.select.valid(Bool.and(Bool.and(B.Hub.owns(st, th), Bool.not(FR.Fr.is(th))), Bool.and(ACCT.Accounts.supported(provider), Bool.and(Bool.not(B.Hub.running(B.Hub.thread(st, th))),
-    Bool.and(String.eq(J.Json.get_str(p, "expected", ""), M.Setting.get(st, ACCT.Accounts.binding.key(th, provider), "")), Bool.or(String.is_empty(profile), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch)))))), st, now, client, rid, th, provider, profile, epoch, count, entries)
+  Hub.accounts.select.valid(B.Hub.owns(st, th) && Bool.not(FR.Fr.is(th)) && ACCT.Accounts.supported(provider) && Bool.not(B.Hub.running(B.Hub.thread(st, th))) &&
+    String.eq(J.Json.get_str(p, "expectedProvider", current), current) && String.eq(J.Json.get_str(p, "expectedOwner", owner), owner) &&
+    String.eq(J.Json.get_str(p, "expected", ""), M.Setting.get(st, ACCT.Accounts.binding.key(th, provider), "")) &&
+    Bool.or(String.is_empty(profile), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch)), st, now, client, rid, th, provider, profile, epoch, count, entries)
 
 def Hub.accounts.request.allowed(allowed: Bool, h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
   match allowed h:
@@ -11390,7 +11396,7 @@ def Hub.accounts.request.allowed(allowed: Bool, h: Hub, +client: U32, +rid: Stri
 def Hub.accounts.request(h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.accounts.request.allowed(Bool.or(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "login"), String.eq(J.Json.get_str(p, "op", ""), "disconnect"))),
+      Hub.accounts.request.allowed(Bool.or(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "remove"), Bool.or(String.eq(J.Json.get_str(p, "op", ""), "login"), String.eq(J.Json.get_str(p, "op", ""), "disconnect")))),
         Bool.not(Hub.accounts.active(ACCT.Accounts.threads(st), st, J.Json.get_str(p, "profile", "")))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, rid, p)
 
 # Teaching a bot's browser (docs/teach.md)
@@ -12671,6 +12677,13 @@ def Hub.thin.fetch.body(on: Bool, +memory: Bool, +cfg: Cfg, +st: M.State, +hide:
     case False{}: Hub.thin.fetch(memory, cfg, st, hide, thread, anchor)
     case True{}: TSTO.Ts.page.body(Cfg.thin.store(cfg), thread, anchor, Cfg.thin(cfg), hide)
 
+# A normal view does not materialize a closed tool's payload. Explicit body
+# reads retain fetch.body and its existing ownership/cursor validation.
+def Hub.thin.fetch.tools(on: Bool, +memory: Bool, +cfg: Cfg, +st: M.State, +hide: Bool, +thread: String, +anchor: Nat, p: J.Json) -> IO(TSTO.Page):
+  match on:
+    case False{}: Hub.thin.fetch(memory, cfg, st, hide, thread, anchor)
+    case True{}: TSTO.Ts.page.lazy_tools(Cfg.thin.store(cfg), thread, anchor, Cfg.thin(cfg), hide, st, p)
+
 # Negotiated native metadata is fitted before the normal mandatory reply
 # gate. Trials share a single post-action value and cannot repeat commands.
 def Hub.thin.native_fit.envelope(+o: J.Json, result: J.Json, context: ThinContext, revision: Nat) -> J.Json:
@@ -12906,7 +12919,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
         +prepared : TA.Actor = TA.Actor.native.prepare(actor, web, p, epoch, ThinContext.view(context), Cfg.thin.signal_seq(cfg), secret)
         Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
-          key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg)), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg),
+          key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, LTOOLS.Tools.mask.enabled(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg), p), thread, TSTO.Page.ids(pg)), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg),
           Hub.thin.page.memo(Bool.and(web, String.eq(J.Json.get_str(o, "m", ""), "view.page")), st, context, Hub.thin.memo.base(st, cfg, p, context, web, thread), ms, now))
 
 # Read only the selected auxiliary histories, then mask with the vault
@@ -12926,7 +12939,7 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        +pg : TSTO.Page <- Hub.thin.fetch.body(Bool.and(TBODY.Body.enabled(String.eq(Client.thin.mode(c), "view-web"), p), Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(TV.Target.thread(st, J.Json.get_obj(p, "target")))))), String.is_empty(Cfg.thin.store(cfg)), cfg, st, TCHAT.Chat.enabled(st, TV.Target.thread(st, J.Json.get_obj(p, "target"))), TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
+        +pg : TSTO.Page <- Hub.thin.fetch.tools(Bool.and(TBODY.Body.enabled(String.eq(Client.thin.mode(c), "view-web"), p), Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(TV.Target.thread(st, J.Json.get_obj(p, "target")))))), String.is_empty(Cfg.thin.store(cfg)), cfg, st, TCHAT.Chat.enabled(st, TV.Target.thread(st, J.Json.get_obj(p, "target"))), TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor, p)
         Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
 
 # a view.update whose render memo still holds (thin-actor.bend's
@@ -16701,7 +16714,6 @@ def Od.resume(+inbox: Chan(Msg), +home: String) -> IO(Unit):
   do IO<Unit>:
     r : P.Ran <- P.Proc.run("sh", ["-c", "ls -1 2>/dev/null | grep '^q_.*\\.json$' | head -n 200"], ODI.Od.orders(home))
     Od.resume.all(String.lines(ODI.Od.ran(r)), inbox, home)
-
 
 # Send (or allowed for the session): upload; Not now: the agent is told;
 # the empty answer (the run was retired: Stop, archive, delete) tells no one

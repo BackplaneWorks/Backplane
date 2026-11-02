@@ -1,4 +1,5 @@
 import Base
+import ../core/chat-pending.bend as CP
 import ../core/json.bend as J
 import ../core/thin.bend as T
 import ../core/thin-live.bend as TL
@@ -19,9 +20,9 @@ import ../web/presentation.bend as WP
 # anything but the live row starts a full one) the last reply is kept and
 # only the live row is written again, exactly as the renderers write it:
 # - web: the element `bp-memo` keyed by the live entry's id (View.memo.loc):
-#   its text kid is the new preview, its attributes (stamp, lang) kept;
+#   its text kid stays the static Working label; attributes are kept;
 # - mobile: the entry with the live id (Mob.own.s.loc for an assistant
-#   message): text and blocks (Mob.nodes of D.Md.render.loc) new, images and
+#   message): text and blocks stay the static Working label; images and
 #   stamp kept, its "partial" marker from the new window (MT.Partial.entry_if),
 #   in `shown` and in `overlay.j`;
 # - the reply's `window` is the new one; every field keeps its place.
@@ -90,18 +91,18 @@ def Live.count(j: J.Json, hit: Bool, +web: Bool, +id: String, +n: Nat) -> Nat:
 def Live.one(+j: J.Json, +web: Bool, +id: String) -> Bool:
   Nat.is_eq(Live.count(j, Live.is(j, web, id), web, id, 0n), 1n)
 
-def Live.web(+old: J.Json, +id: String, +text: String) -> J.Json:
+def Live.web(+old: J.Json, +id: String, +text: String, +lc: I.Loc) -> J.Json:
   J.Json.obj([J.KV{"type", J.Str{"element"}}, J.KV{"tag", J.Str{"bp-memo"}}, J.KV{"key", J.Str{id}},
-    J.KV{"attrs", J.Json.get_obj(old, "attrs")}, J.KV{"kids", J.Json.arr([J.Json.obj([J.KV{"type", J.Str{"text"}}, J.KV{"text", J.Str{text}}])])}])
+    J.KV{"attrs", J.Json.get_obj(old, "attrs")}, J.KV{"kids", J.Json.arr([J.Json.obj([J.KV{"type", J.Str{"text"}}, J.KV{"text", J.Str{CP.Pending.label(lc)}}])])}])
 
 def Live.mobile(+old: J.Json, +id: String, +text: String, +lc: I.Loc, +part: J.Json) -> J.Json:
-  MT.Partial.entry_if(part, J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("assistant")}, J.KV{"text", J.Json.str(text)},
-    J.KV{"blocks", J.Json.arr(SC.Mob.nodes(D.Md.render.loc(lc, text)))}, J.KV{"images", J.Json.get_obj(old, "images")}, J.KV{"stamp", J.Json.get_obj(old, "stamp")}]))
+  MT.Partial.entry_if(part, J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("assistant")}, J.KV{"text", J.Json.str(CP.Pending.label(lc))},
+    J.KV{"blocks", J.Json.arr(SC.Mob.nodes(D.Md.render.loc(lc, CP.Pending.label(lc))))}, J.KV{"images", J.Json.get_obj(old, "images")}, J.KV{"stamp", J.Json.get_obj(old, "stamp")}]))
 
 def Live.node(+web: Bool, +old: J.Json, +id: String, +text: String, +lc: I.Loc, +part: J.Json) -> J.Json:
   match web:
     case True{}:
-      Live.web(old, id, text)
+      Live.web(old, id, text, lc)
     case False{}:
       Live.mobile(old, id, text, lc, part)
 
@@ -215,7 +216,7 @@ def Splice.window(+old: J.Json, +stream: TL.Stream, +thread: String, +epoch: Str
 # with stream's live row and its window: None when its live row is not
 # found exactly once where the renderer puts it
 def Splice.reply(+web: Bool, +res: J.Json, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
-  Splice.k(Splice.ok.k(web, res, TL.Stream.id(thread)), web, res, Splice.window(J.Json.get_obj(res, "window"), stream, thread, epoch, target), TL.Stream.id(thread), BW.Body.live.preview(Bool.and(web, J.Json.get_bool(J.Json.get_obj(res, "window"), "bodyPages", False{})), stream), lc)
+  Splice.k(Splice.ok.k(web, res, TL.Stream.id(thread)), web, res, Splice.window(J.Json.get_obj(res, "window"), stream, thread, epoch, target), TL.Stream.id(thread), CP.Pending.label(lc), lc)
 
 # The page splice
 # ---------------
