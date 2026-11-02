@@ -22,7 +22,7 @@ with workflow_dispatch). The merge gate (`scripts/local-ci.py`) runs only
 `scripts/fast-tests.txt`, so the nightly is where the whole suite
 (`TEST_FULL=1`), the full type-check, the proof and the native smoke
 runs are held green. It tags and publishes nothing; each run keeps the
-hub for every target as the `backplane-serve-js` artifact for 7 days.
+hub for every target as the `backplane-serve-js-TARGET` artifacts for 7 days.
 A red nightly means main broke something the fast set does not cover:
 fix it on main, do not skip the test.
 
