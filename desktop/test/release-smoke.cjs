@@ -66,7 +66,12 @@ async function main(args){
   const s=read(path.join(stage,'STAGE.json'));assert.equal(s.target,hostTarget(),'A matching native host is required; no emulation substitution');
   assert.match(s.release.version,/^\d+\.\d+\.\d+$/);assert.equal(s.release.tag,'v'+s.release.version);assert.equal(s.electronVersion,'44.9.2');
   assert.deepEqual(s.lifecyclePolicy,{mode:'resident-service',managedStop:false,managedUpdate:false});
-  const inspected=producer.inspectStage(stage);assert.equal(inspected.payloadManifestSha256,s.payloadManifestSha256,'Stage payload changed');
+  const inspected=producer.inspectStage(stage);
+  let macosIntegrity;
+  if(process.platform==='darwin'){
+    producer.validateSigningChanges(stage,true);
+    macosIntegrity=JSON.parse(execFileSync(process.env.PYTHON||'python3',[path.join(__dirname,'../macos-bundle.py'),'verify',path.join(stage,'Backplane.app')],{encoding:'utf8',timeout:120000}));
+  }else assert.equal(inspected.payloadManifestSha256,s.payloadManifestSha256,'Stage payload changed');
   const layout=producer.TARGETS[s.target],resources=path.join(stage,layout.resources),appRoot=path.join(resources,'app');
   const binary=path.join(resources,'backplane-service',process.platform==='win32'?'backplane-serve.exe':'backplane-serve');
   const executable=path.join(stage,s.entrypoint),{Service}=require(path.join(appRoot,'service.cjs'));
@@ -86,7 +91,7 @@ async function main(args){
   const originalEnv=process.env;process.env=env;
   const service=new Service({home,binary,web:path.join(resources,'backplane-service/web'),expectedVersion:s.release.version,residentService:true});
   let app,uiChild,page,second,error,phase='prepare',serviceIdentity,sandbox,uiPid,origin;
-  const facts={checks:[],errors:[],reconnectMode:'automatic',deferredByUser:[],scope:'Minimal actual matching-host stable stage startup/discovery/auth, renderer OS sandbox, current content, automatic reconnect, single instance and resident close. Telemetry qualification is separate from this isolated runtime smoke. No Send/provider/scale/390/native-phone/IME/Browser parity or telemetry-upload claim.'};
+  const facts={...(macosIntegrity?{macosIntegrity}:{}),checks:[],errors:[],reconnectMode:'automatic',deferredByUser:[],scope:'Minimal actual matching-host stable stage startup/discovery/auth, renderer OS sandbox, current content, automatic reconnect, single instance and resident close. Telemetry qualification is separate from this isolated runtime smoke. No Send/provider/scale/390/native-phone/IME/Browser parity or telemetry-upload claim.'};
   const save=()=>write(path.join(out,'result.json'),{...facts,status:error||facts.cleanupError||facts.cleanup?.portClosed===false?'FAIL':phase==='done'?'PASS':'INCOMPLETE',phase,error:error?.message,home,target:s.target,version:s.release.version,commit:s.release.commit,tree:s.release.tree,stage:inspected,fixture:ref(__filename),serviceIdentity,sandbox,uiPid});
   const step=name=>{phase=name;save();console.log('phase '+name);};
   const record=name=>{facts.checks.push(name);save();};

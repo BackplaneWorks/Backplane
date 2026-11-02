@@ -11,6 +11,7 @@
 // wire format; its dictionaries come from there).
 
 import App from "./app.bend";
+import IssueScreen from "./screen.bend";
 import { BubMoveObserver } from "../web/bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
 const bubLive = new Set();
@@ -622,6 +623,29 @@ function step(r, quiet) {
 }
 
 globalThis.Backplane = {
+  // Public reports receive explicit fields only, including already sanitized,
+  // user-selected diagnostics. No hub, screen or draft context is consulted.
+  improvementsPreview(text, os, version, details = "", diagnostics = "") {
+    return JSON.stringify(plain(IssueScreen.improvements_preview(String(text ?? ""), String(os ?? ""), String(version ?? ""), String(details ?? ""), String(diagnostics ?? ""))));
+  },
+  issueReport(text, os, version, details = "", diagnostics = "") {
+    return IssueScreen.issue_report(String(text ?? ""), String(os ?? ""), String(version ?? ""), String(details ?? ""), String(diagnostics ?? ""));
+  },
+  issueTarget(saved, legacy = false) {
+    return IssueScreen.issue_target(String(saved ?? ""), legacy === true);
+  },
+  improvementsPreviewBody(body) {
+    return JSON.stringify(plain(IssueScreen.improvements_preview_body(String(body ?? ""))));
+  },
+  improvementIssueUrl(body) {
+    return IssueScreen.improvement_issue_url(String(body ?? ""));
+  },
+  improvementsTemplate() {
+    return IssueScreen.improvements_template();
+  },
+  improvementsPrompt(description, os, version, evidence = "", diagnostics = "") {
+    return IssueScreen.improvements_prompt(String(description ?? ""), String(os ?? ""), String(version ?? ""), String(evidence ?? ""), String(diagnostics ?? ""));
+  },
   // cid: this phone's id, part of every message id (a resend is stored once);
   // drafts: the drafts it kept, as JSON {"<hub>|<thread>": text}
   start(cid, drafts) {

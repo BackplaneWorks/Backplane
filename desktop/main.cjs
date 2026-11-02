@@ -178,6 +178,10 @@ function start() {
     if (!trusted(event)) throw new Error('Invalid sender');
     return { electron: process.versions.electron, service: connection.version, launchedAtMs, firstVisibleAtMs, serviceReadyAtMs };
   });
+  ipcMain.handle('desktop:diagnostics', (event, op = 'read') => {
+    if (!trusted(event)) throw new Error('Invalid diagnostics sender');
+    return op === 'read' ? connectionLog.snapshot() : connectionLog.command(op);
+  });
   ipcMain.handle('desktop:capture-app', async event => {
     if (!trusted(event)) throw new Error('Invalid capture sender');
     return require('./improvements-capture.cjs').captureAppWindow(window);

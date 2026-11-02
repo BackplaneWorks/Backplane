@@ -2,6 +2,8 @@ import { captureApp } from './improvements-capture.js';
 import { ImprovementsStore } from './improvements-store.js';
 import { ImprovementsFlow, improvementThread } from './improvements-flow.js';
 import { backplaneProject } from './improvements-context.js';
+import { osFamily, diagnosticReport, issueLink, IssueHandoff, ISSUE_URL } from './issue-report.js';
+import { ReportWriter } from './report-writer.js';
 
 export function improvementsShortcut(event, platform = '') {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.getModifierState?.('AltGraph') || event.shiftKey) return false;
@@ -18,10 +20,14 @@ const timed = (promise, ms, message) => new Promise((resolve, reject) => {
   Promise.resolve(promise).then(value => { clearTimeout(timer);resolve(value); }, error => { clearTimeout(timer);reject(error); });
 });
 export function installImprovements({ rpc, context, identity, ready, select, beforeCapture = async () => {}, overlayChanged = () => {},
-  capture = captureApp, store = new ImprovementsStore(), doc = document, win = window } = {}) {
+  capture = captureApp, store = new ImprovementsStore(), doc = document, win = window,
+  reportBody, reportPrompt, reportTemplate = () => '', previewBody = body => ({ body, url: issueLink(body) }), reportTarget = (saved, legacy) => ['issue', 'internal'].includes(saved) ? saved : legacy ? 'internal' : 'issue',
+  appVersion = async () => 'unknown', diagnostics = {}, openIssue = url => {
+    const link = doc.createElement('a');link.href = url;link.target = '_blank';link.rel = 'noopener noreferrer';link.click();
+  } } = {}) {
   let draft, scope, opening = false, busy = false, capturing = false, previousFocus, previousRange, url, operation = 0, pos = null;
   let saving = Promise.resolve();
-  let captureController, openEpoch = 0, projects = [];
+  let captureController, openEpoch = 0, projects = [], issuePreview = null, version = 'unknown';
   const chord = improvementsChord(win.navigator.platform);
   const el = (tag, text, attrs = {}) => { const n = doc.createElement(tag);if (text) n.textContent = text;for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);return n; };
   const popup = el('section', '', { class: 'improvements', role: 'dialog', 'aria-labelledby': 'improvements-title', hidden: '' });
@@ -32,6 +38,40 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   const input = el('textarea', '', { id: 'improvements-text', rows: '5', placeholder: 'Describe the change…' });
   const projectLabel = el('label', 'Backplane source project', { for: 'improvements-project' });
   const project = el('select', '', { id: 'improvements-project' });
+  const targetLabel = el('label', 'Destination', { for: 'improvements-target' });
+  const target = el('select', '', { id: 'improvements-target' });
+  target.append(el('option', 'Public GitHub issue', { value: 'issue' }), el('option', 'Internal implementation thread', { value: 'internal' }));
+  const writerProjectLabel = el('label', 'Report agent project', { for: 'improvements-writer-project' });
+  const writerProject = el('select', '', { id: 'improvements-writer-project' });
+  const publicBox = el('div', '', { class: 'improvements-public' });
+  const publicNote = el('p', 'Public on BackplaneWorks/Backplane, attributed to your GitHub account. Sign in on GitHub and press Submit there. Review your text and images for private information.');
+  const check = (id, text) => { const label = el('label');const input = el('input', '', { type: 'checkbox', id });label.append(input, doc.createTextNode(' ' + text));return { label, input }; };
+  const screenshot = check('improvements-screenshot', 'Select a screenshot (manual attachment on GitHub)');
+  const logs = check('improvements-logs', 'Include sanitized diagnostics in the public issue');
+  const extra = check('improvements-extra', 'Include additional details I enter');
+  const details = el('textarea', '', { id: 'improvements-details', rows: '2', 'aria-label': 'Additional public details', placeholder: 'Optional reproduction steps or other details…', hidden: '' });
+  const diagPreview = el('pre', '', { id: 'improvements-diagnostics', hidden: '' });
+  const review = el('textarea', '', { id: 'improvements-review', rows: '8', 'aria-label': 'Editable public issue body', hidden: '' });
+  const issueActions = el('div', '', { class: 'improvements-issue-actions', hidden: '' });
+  const copy = el('button', 'Copy issue text', { type: 'button' });
+  const download = el('button', 'Save report', { type: 'button' });
+  const saveImage = el('button', 'Save selected image', { type: 'button', hidden: '' });
+  const retryIssue = el('button', 'Allow another GitHub draft', { type: 'button', hidden: '' });
+  const confirm = el('button', 'Open GitHub draft', { type: 'button', id: 'improvements-open-issue' });
+  issueActions.append(copy, download, saveImage, retryIssue, confirm);
+  const evidence = el('textarea', '', { id: 'improvements-evidence', rows: '3', 'aria-label': 'Behavior evidence', placeholder: 'Describe the behavior in detail. Include what you did and what you saw. An image can supplement this description.' });
+  const evidenceOk = check('improvements-evidence-confirm', 'My report has a thorough behavior description, or I will attach the selected evidence image on GitHub.');
+  const writer = el('button', 'Write report with agent', { type: 'button', id: 'improvements-write-report' });
+  const loadReport = el('button', 'Load agent report', { type: 'button', hidden: '' });
+  const openWriter = el('button', 'Open report-writing thread', { type: 'button', hidden: '' });
+  const useTemplate = el('button', 'Use report template', { type: 'button' });
+  publicBox.append(publicNote, el('p', 'Write report sends the selected description, image and diagnostics to your configured agent in the selected project using its normal permissions. Review issue prepares text locally. Replace private images with a redacted image before sharing.'), evidence, screenshot.label, logs.label, extra.label, details, writerProjectLabel, writerProject, writer, loadReport, openWriter, useTemplate, diagPreview, review, evidenceOk.label, issueActions);
+  const collection = el('details');collection.append(el('summary', 'Local diagnostics'));
+  const collectionNote = el('p', 'Bounded connection and timing metadata only; no conversation text. Local collection is separate from telemetry. Nothing is shared until selected and reviewed.');
+  const collect = check('improvements-collect', 'Keep local diagnostics on this device');
+  const hubCollect = check('improvements-hub-collect', 'Keep local diagnostics on this hub');
+  const clearLogs = el('button', 'Clear local diagnostics', { type: 'button' });
+  collection.append(collectionNote, collect.label, hubCollect.label, clearLogs);
   const preview = el('img', '', { alt: 'App screenshot to send with this request', hidden: '' });
   const note = el('p', '', { role: 'status', 'aria-live': 'polite' });
   const help = el('p', '', { id: 'improvements-help' });
@@ -39,7 +79,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
   const again = el('button', 'Capture again', { type: 'button' }), choose = el('button', 'Choose image', { type: 'button' });
   const file = el('input', '', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: '' });
   const send = el('button', 'Send', { type: 'button', class: 'primary', 'aria-describedby': 'improvements-help', 'aria-keyshortcuts': 'Control+Enter' });buttons.append(again, choose, send);
-  popup.append(header, label, input, projectLabel, project, preview, help, note, buttons, file);doc.body.append(popup);
+  popup.append(header, targetLabel, target, label, input, projectLabel, project, publicBox, preview, collection, help, note, buttons, file);doc.body.append(popup);
   function announce(text) { note.textContent = text; }
   function viewport() { const v = win.visualViewport;return { x: v?.offsetLeft || 0, y: v?.offsetTop || 0, width: v?.width || win.innerWidth, height: v?.height || win.innerHeight }; }
   function place() {
@@ -56,14 +96,36 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     saving = saving.catch(() => {}).then(() => timed(store.write(savedScope, record), 5000, 'Could not keep this draft on this device. Retry Send.'));
     return saving;
   };
+  const isPublic = () => draft?.target === 'issue';
+  function invalidateIssue(changed = true) {
+    issuePreview = null;review.hidden = issueActions.hidden = true;
+    if (draft && changed) { delete draft.issueBody;delete draft.issueOpened; }
+  }
   function controls() {
-    const locked = busy || !!draft?.message;
-    input.disabled = !draft;input.readOnly = locked;project.disabled = !draft || locked || !!draft?.key;
+    const internal = !isPublic(), locked = busy || !!draft?.message;
+    input.disabled = !draft;input.readOnly = locked;
+    target.value = draft?.target || 'issue';target.disabled = locked || !!draft?.key;
+    project.disabled = !draft || locked || !!draft?.key;
+    projectLabel.hidden = project.hidden = !internal || !!backplaneProject(projects) && draft?.project === backplaneProject(projects)?.id;
+    publicBox.hidden = internal;
+    screenshot.input.checked = draft?.includeScreenshot === true;logs.input.checked = draft?.includeDiagnostics === true;extra.input.checked = draft?.includeDetails === true;
+    for (const node of [screenshot.input, logs.input, extra.input, details, evidence, writerProject, writer, useTemplate]) node.disabled = locked;
+    loadReport.hidden = openWriter.hidden = !draft?.writer?.thread;
+    loadReport.disabled = openWriter.disabled = locked;
+    writer.disabled = locked || !!draft?.writer?.started;
+    details.hidden = !draft?.includeDetails;details.readOnly = locked;
+    const hasImage = internal || draft?.includeScreenshot;
+    again.hidden = choose.hidden = !hasImage;
     again.disabled = choose.disabled = locked || capturing;
-    // Keep an incomplete request actionable: a press explains what is missing.
+    preview.hidden = !draft?.image || !hasImage;
+    saveImage.hidden = !draft?.image || !draft?.includeScreenshot;
     send.disabled = busy || capturing;
-    send.textContent = busy ? 'Sending…' : draft?.accepted ? 'Open thread' : 'Send';
-    help.textContent = !draft?.image ? 'Capture again or choose an image before sending.' : !draft?.project ? 'Choose the Backplane source project before sending.' : !draft?.text?.trim() ? 'Describe a change to Backplane. Ctrl+Enter sends it.' : 'Changes will be made in Backplane. Ctrl+Enter sends this request.';
+    review.readOnly = busy;evidenceOk.input.disabled = busy;
+    retryIssue.hidden = !draft?.issueOpened;retryIssue.disabled = busy;
+    confirm.disabled = busy || !!draft?.issueOpened || !evidenceOk.input.checked;
+    send.textContent = busy ? 'Working…' : internal ? draft?.accepted ? 'Open thread' : 'Send' : 'Review issue';
+    help.textContent = internal ? !draft?.image ? 'Capture again or choose an image before sending.' : !draft?.project ? 'Choose the Backplane source project before sending.' : 'Changes will be made in Backplane. Ctrl+Enter sends this request.' :
+      'OS family and app release are included. Images stay local until you attach them yourself on GitHub. Ctrl+Enter reviews the issue.';
   }
   function showPreview() {
     if (url) URL.revokeObjectURL(url);url = draft?.image ? URL.createObjectURL(draft.image) : null;
@@ -88,7 +150,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
       if (!image?.size || !/^image\/(png|jpeg|webp)$/.test(image.type)) throw Error('Choose a PNG, JPEG or WebP image.');
       await save({ ...draft, image, path: '' });
       if (stamp !== operation) { await save(draft);return; }
-      draft.image = image;draft.path = '';announce('Screenshot refreshed.');
+      draft.image = image;draft.path = '';forgetReport();invalidateIssue();announce('Screenshot refreshed.');
     } catch { captureAbort.abort();if (stamp === operation) announce('Capture was not completed. Your draft and previous image are kept. Capture again or choose an image.'); }
     finally {
       if (stamp === operation) {
@@ -98,23 +160,36 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
       }
     }
   }
-  async function open() {
+  async function open(requestedTarget = '', seededDescription) {
     if (opening || capturing || !popup.hidden) return;
     if (busy && draft) { show();return; }
     const epoch = ++openEpoch;
     opening = true;previousFocus = doc.activeElement;
     previousRange = typeof previousFocus?.selectionStart === 'number' ? [previousFocus.selectionStart, previousFocus.selectionEnd, previousFocus.selectionDirection] : null;
     try {
-      if (!ready()) throw Error('Connect to the hub before opening Improvements.');
-      const auth = identity();if (!auth) throw Error('Wait for the hub connection, then open Improvements again.');
-      const current = await context();if (epoch !== openEpoch) return;
+      const auth = ready() && identity() || 'offline-public';
+      let current = {};
+      if (ready() && identity()) { try { current = await context(); } catch { /* Public reports remain usable when the hub fails. */ } }
+      if (epoch !== openEpoch) return;
       scope = win.location.origin + ':' + auth;
       draft = await timed(store.read(scope), 5000, 'Could not restore the draft. Try Improvements again.');
       if (epoch !== openEpoch) return;
       if (draft?.accepted) { await select(draft.thread);await store.write(scope, null);draft = null; }
       const { projects: choices, accountBinding: sourceAccountBinding, ...viewContext } = current;
       projects = choices || [];const target = backplaneProject(projects);
+      const preference = await timed(store.read(scope + ':destination'), 5000, 'Could not read the destination preference.');
+      if (epoch !== openEpoch) return;
+      const legacy = !!draft;
       draft ||= { text: '', image: null, project: target?.id || '', context: viewContext, key: '' };
+      draft.target = reportTarget(draft.target || (!legacy ? requestedTarget || preference?.target || '' : ''), legacy);
+      if (seededDescription !== undefined && !legacy) draft.text = seededDescription;
+      version = await timed(Promise.resolve(appVersion()), 5000, 'Version check timed out.').catch(() => 'unknown');
+      if (epoch !== openEpoch) return;
+      collect.input.checked = diagnostics.enabled?.() !== false;
+      hubCollect.input.disabled = !ready() || !diagnostics.controlHub;
+      hubCollect.input.checked = false;
+      if (diagnostics.hubStatus && ready()) void diagnostics.hubStatus().then(s => { hubCollect.input.checked = s?.enabled === true;collectionNote.textContent = 'Local metadata only. Hub storage: ' + (Number.isSafeInteger(s?.stored_bytes) ? s.stored_bytes : '?') + ' / ' + (Number.isSafeInteger(s?.cap_bytes) ? s.cap_bytes : '?') + ' bytes; retention ' + ((s?.retention_seconds || 604800) / 86400) + ' days. No conversation text. Sharing requires selection and review.'; }).catch(() => {});
+      invalidateIssue(false);
       // Upgrade an unsent draft from the old origin-project behavior. A request
       // that has already created a thread keeps its stable identity for retry.
       if (!draft.key) {
@@ -122,39 +197,164 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
         if (!draft.context?.sourceThread) draft.context = viewContext;
         draft.context.implementationProject = target || projects.find(p => p.id === draft.project) || null;
       }
-      input.value = draft.text;project.replaceChildren(el('option', 'Choose the Backplane source project', { value: '' }));
+      const workspaces = projects.filter(p => p.id !== 'scratch' && p.root);
+      draft.writerProject ||= workspaces.find(p => p.id === draft.context?.sourceProject?.id)?.id || (workspaces.length === 1 ? workspaces[0].id : '');
+      writerProject.replaceChildren(el('option', 'Choose a project for the report agent', { value: '' }));
+      for (const p of workspaces) writerProject.append(el('option', p.title, { value: p.id }));
+      writerProject.value = draft.writerProject;
+      input.value = draft.text;details.value = draft.details || '';evidence.value = draft.evidence || '';evidenceOk.input.checked = false;diagPreview.hidden = true;project.replaceChildren(el('option', 'Choose the Backplane source project', { value: '' }));
       for (const p of projects) project.append(el('option', p.title, { value: p.id }));
       if (draft.project && ![...project.options].some(o => o.value === draft.project)) project.append(el('option', 'Saved project', { value: draft.project }));
       project.value = draft.project;
       projectLabel.hidden = project.hidden = !!target && draft.project === target.id;
       await save(draft);if (epoch !== openEpoch) return;
-      announce(draft.message ? 'This request is ready to retry. Send uses the same conversation.' : 'Send starts a new Backplane thread.');
-      if (draft.image) show();else await recapture(true);
+      announce(draft.message ? 'This request is ready to retry. Send uses the same conversation.' : draft.target === 'internal' ? 'Send starts a new Backplane thread.' : 'Review the issue before opening GitHub.');
+      if (isPublic() && draft.issueBody) { issuePreview = Object.freeze(previewBody(draft.issueBody));review.value = draft.issueBody;review.hidden = issueActions.hidden = false; }
+      if (draft.issueOpened) announce('This draft was already opened on GitHub. Check GitHub before explicitly allowing another copy.');
+      if (seededDescription !== undefined && legacy && seededDescription !== draft.text) announce('Your existing draft is kept. Copy the native description and paste it when ready.');
+      if (draft.image || isPublic()) show();else await recapture(true);
     } catch (error) { if (epoch !== openEpoch) return;announce(error.message);popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();place();close.focus(); }
     finally { if (epoch === openEpoch) { opening = false;controls(); } }
   }
   function toggle() { if (opening || capturing || !popup.hidden) hide();else void open(); }
-  input.addEventListener('input', () => { if (!draft || draft.message) return;draft.text = input.value;controls();void save(draft).catch(e => announce(e.message)); });
+  input.addEventListener('input', () => { if (!draft || draft.message) return;draft.text = input.value;forgetReport();invalidateIssue();controls();void save(draft).catch(e => announce(e.message)); });
   project.addEventListener('change', () => { if (!draft || draft.key) return;draft.project = project.value;draft.context.implementationProject = projects.find(p => p.id === project.value) || null;void save(draft).catch(e => announce(e.message));controls(); });
   close.addEventListener('click', hide);again.addEventListener('click', () => { void recapture(); });choose.addEventListener('click', () => file.click());
   file.addEventListener('change', async () => {
     const image = file.files?.[0];file.value = '';if (!image || busy || draft?.message) return;
     if (!image.size || !/^image\/(png|jpeg|webp)$/.test(image.type)) { announce('Choose a PNG, JPEG or WebP image.');return; }
-    draft.image = image;draft.path = '';showPreview();
+    draft.image = image;draft.path = '';forgetReport();invalidateIssue();showPreview();
     try { await save(draft);announce('Image refreshed.'); } catch (e) { announce(e.message); }
   });
-  const flow = new ImprovementsFlow({ rpc, save, select, status: announce, upload: async (thread, key, image) => {
+  target.addEventListener('change', async () => {
+    if (!draft || draft.key || busy) return;
+    draft.target = reportTarget(target.value, false);invalidateIssue();controls();showPreview();
+    try { await store.write(scope + ':destination', { target: draft.target });await save(draft); }
+    catch (e) { announce(e.message); }
+  });
+  writerProject.addEventListener('change', () => {
+    if (!draft || busy) return;draft.writerProject = writerProject.value;forgetReport();invalidateIssue();controls();void save(draft).catch(e => announce(e.message));
+  });
+  for (const [node, field] of [[screenshot.input, 'includeScreenshot'], [logs.input, 'includeDiagnostics'], [extra.input, 'includeDetails']]) node.addEventListener('change', () => {
+    if (!draft || busy) return;draft[field] = node.checked;forgetReport();invalidateIssue();diagPreview.hidden = true;controls();showPreview();void save(draft).catch(e => announce(e.message));
+  });
+  details.addEventListener('input', () => { if (!draft || busy) return;draft.details = details.value;forgetReport();invalidateIssue();void save(draft).catch(e => announce(e.message)); });
+  collect.input.addEventListener('change', async () => {
+    try { await diagnostics.setEnabled?.(collect.input.checked);announce(collect.input.checked ? 'Local collection enabled.' : 'Local collection disabled. Clear local diagnostics to remove earlier records.'); }
+    catch (e) { announce(e.message);collect.input.checked = diagnostics.enabled?.() !== false; }
+  });
+  hubCollect.input.addEventListener('change', async () => {
+    try { await diagnostics.controlHub(hubCollect.input.checked ? 'on' : 'off');announce('Hub diagnostics preference saved.'); }
+    catch (e) { announce(e.message); }
+  });
+  clearLogs.addEventListener('click', async () => {
+    try { await diagnostics.clear?.();if (ready() && diagnostics.controlHub) await diagnostics.controlHub('clear');if (draft) draft.includeDiagnostics = false;forgetReport();invalidateIssue();if (draft) await save(draft);diagPreview.hidden = true;controls();announce('Local diagnostics cleared.'); }
+    catch (e) { announce(e.message); }
+  });
+  async function prepareIssue() {
+    if (!reportBody) { announce('This page needs an update to prepare issues. Your draft is kept.');return; }
+    if (!evidence.value.trim() && !(draft.includeScreenshot && draft.image)) { announce('Add a thorough behavior description or select an evidence image before reviewing.');evidence.focus();return; }
+    busy = true;controls();
+    try {
+      let diag = '';
+      if (draft.includeDiagnostics) {
+        const value = await diagnostics.snapshot?.();
+        if (!value) throw Error('Diagnostics are unavailable. Uncheck diagnostics to continue.');
+        diag = diagnosticReport(value);diagPreview.textContent = diag;diagPreview.hidden = false;
+      }
+      const body = draft.report || reportBody(draft.text + '\n\nEvidence\n' + (draft.evidence || 'Selected image, attach manually on GitHub.'), osFamily(win.navigator), version, draft.includeDetails ? draft.details || '' : '', diag);
+      if (typeof body !== 'string' || !body.trim()) throw Error('Could not prepare the exact issue text. Your draft is kept.');
+      if (draft.issueBody !== body) delete draft.issueOpened;
+      draft.issueBody = body;
+      issuePreview = Object.freeze(previewBody(body));
+      await save(draft);
+      review.value = body;review.hidden = issueActions.hidden = false;
+      announce(issuePreview.url ? 'Review the exact public text below. Open GitHub draft sends this text to GitHub; sign in with your account and press Submit there.' : 'This report is too long for a GitHub link. Copy or save the complete text, then paste it into GitHub. Nothing is truncated.');
+      place();
+    } catch (e) { announce(e.message); }
+    finally { busy = false;controls(); }
+  }
+  function forgetReport() {
+    // Preserve earlier authored/generated reports locally across input changes.
+    // They are not reused after a changed sharing choice.
+    if (draft?.report) { draft.previousReport = draft.report;delete draft.report; }
+    if (draft?.writer) { draft.previousWriter = draft.writer;delete draft.writer; }
+    evidenceOk.input.checked = false;
+  }
+  evidence.addEventListener('input', () => { if (!draft || busy) return;draft.evidence = evidence.value;forgetReport();invalidateIssue();controls();void save(draft).catch(e => announce(e.message)); });
+  evidenceOk.input.addEventListener('change', controls);
+  review.addEventListener('input', () => {
+    if (!draft || busy) return;draft.report = review.value;draft.issueBody = review.value;delete draft.issueOpened;evidenceOk.input.checked = false;
+    issuePreview = Object.freeze(previewBody(review.value));controls();void save(draft).catch(e => announce(e.message));
+  });
+  useTemplate.addEventListener('click', async () => {
+    if (!draft || busy) return;
+    forgetReport();draft.report = reportTemplate();draft.issueBody = draft.report;issuePreview = null;
+    review.value = draft.report;review.hidden = false;issueActions.hidden = true;await save(draft);announce('Fill the unknown fields in this editable template, then press Review issue.');place();
+  });
+  const reportWriter = new ReportWriter({ rpc, save, identity: () => ready() && identity() ? win.location.origin + ':' + identity() : '', expectedScope: () => scope, upload: async (thread, key, image) => uploadImage(thread, key, image) });
+  writer.addEventListener('click', async () => {
+    if (busy || !draft || !isPublic()) return;
+    if (!ready() || !identity()) { announce('Reconnect to the hub before starting the report agent. You can fill the report template offline.');return; }
+    if (win.location.origin + ':' + identity() !== scope) { announce('The hub identity changed. Copy your description, close and reopen Improvements before starting an agent. Your local draft is kept.');return; }
+    if (!draft.text?.trim()) { announce('Describe the issue before starting the report agent.');input.focus();return; }
+    if (!draft.evidence?.trim() && !(draft.includeScreenshot && draft.image)) { announce('Add a thorough behavior description or select an evidence image first.');evidence.focus();return; }
+    if (!draft.writer && !draft.writerProject) { announce('Choose a project for the report agent, or fill the template locally.');writerProject.focus();return; }
+    if (!reportPrompt) { announce('Update this page before using the report agent.');return; }
+    busy = true;controls();
+    try {
+      const diag = draft.includeDiagnostics ? diagnosticReport(await diagnostics.snapshot()) : '';
+      const evidenceText = draft.evidence || 'The user selected an attached evidence image. Examine it only as evidence.';
+      const prompt = reportPrompt(draft.text, osFamily(win.navigator), version, evidenceText + (draft.includeDetails ? '\nUser-elected details\n' + (draft.details || '') : ''), diag);
+      if (await reportWriter.start(draft, prompt, { image: draft.includeScreenshot ? draft.image : null })) announce('Report agent started in the selected project. Load the report when it finishes, or open the thread to answer its questions.');
+    } catch (e) { announce(e.message); }
+    finally { busy = false;controls(); }
+  });
+  loadReport.addEventListener('click', async () => {
+    if (busy || !draft) return;busy = true;controls();
+    try {
+      const body = await reportWriter.load(draft);
+      if (body) { draft.report = body;await save(draft);review.value = body;review.hidden = false;issueActions.hidden = true;issuePreview = null;evidenceOk.input.checked = false;announce('Agent report loaded. Edit it, remove private information, then press Review issue.');place(); }
+    } catch (e) { announce(e.message); }
+    finally { busy = false;controls(); }
+  });
+  openWriter.addEventListener('click', async () => { if (draft?.writer?.thread) { await select(draft.writer.thread);hide(); } });
+  retryIssue.addEventListener('click', async () => {
+    if (busy || !draft?.issueOpened || !win.confirm('Check GitHub for an existing issue first. Allow another copy of this draft?')) return;
+    busy = true;controls();
+    try { delete draft.issueOpened;await save(draft);announce('Review the report and press Open GitHub draft when ready.'); }
+    catch (e) { draft.issueOpened = true;announce(e.message); }
+    finally { busy = false;controls(); }
+  });
+  const handoff = new IssueHandoff({ save, open: openIssue });
+  confirm.addEventListener('click', async () => {
+    if (busy || !issuePreview || draft?.issueOpened) return;
+    if (!evidenceOk.input.checked || !draft.evidence?.trim() && !(draft.includeScreenshot && draft.image)) { announce('Confirm that the report has a thorough description or attachable evidence image.');return; }
+    busy = true;controls();
+    try { if (await handoff.send(draft, issuePreview)) announce('GitHub draft opened. Sign in with your GitHub account and press Submit there. Backplane has not submitted an issue.'); }
+    catch (e) { announce(e.message); }
+    finally { busy = false;controls(); }
+  });
+  copy.addEventListener('click', async () => { try { await win.navigator.clipboard.writeText(issuePreview.body);announce('Exact issue text copied.'); } catch { review.focus();review.select();announce('Select and copy the issue text below.'); } });
+  function downloadBlob(blob, name) {
+    const u = URL.createObjectURL(blob), link = el('a', '', { href: u, download: name });link.click();setTimeout(() => URL.revokeObjectURL(u), 1000);
+  }
+  download.addEventListener('click', () => { if (issuePreview) downloadBlob(new Blob([issuePreview.body], { type: 'text/plain;charset=utf-8' }), 'backplane-issue.txt'); });
+  saveImage.addEventListener('click', () => { if (draft?.includeScreenshot && draft.image) downloadBlob(draft.image, 'backplane-screenshot.' + ({ 'image/jpeg': 'jpg', 'image/webp': 'webp' }[draft.image.type] || 'png')); });
+  const uploadImage = async (thread, key, image) => {
     if (!ready() || identity() !== scope.slice(win.location.origin.length + 1)) throw Error('Reconnect to the same hub before sending.');
     const query = new URLSearchParams({ thread, key, name: 'backplane.' + ({ 'image/jpeg': 'jpg', 'image/webp': 'webp' }[image.type] || 'png') });
     const response = await fetch('/attach?' + query, { method: 'POST', body: image, credentials: 'same-origin', signal: AbortSignal.timeout(60000) });
     const result = await response.json();
     if (!response.ok || result.thread !== thread || typeof result.attached !== 'string') throw Error(result.text || 'The image did not arrive. Retry Send.');
     return result.attached;
-  } });
+  };
+  const flow = new ImprovementsFlow({ rpc, save, select, status: announce, upload: uploadImage });
   async function submit() {
     if (busy || capturing) return;
     if (!draft) { announce('Reconnect, close Improvements, then open it again to restore your draft.');return; }
     if (!draft.text?.trim()) { announce('Describe the change to Backplane before sending.');input.focus();return; }
+    if (isPublic()) { await prepareIssue();return; }
     if (!draft.image) { announce('Capture again or choose an image, then retry Send. Your text is kept.');input.focus();return; }
     if (!draft.project) { announce('Choose the Backplane source project, then retry Send.');project.focus();return; }
     const target = backplaneProject(projects);
@@ -197,7 +397,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
       if (e.key === 'Enter' && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.repeat) { e.preventDefault();e.stopImmediatePropagation();void submit();return; }
       if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault();e.stopImmediatePropagation();hide();return; }
       if (e.key === 'Tab') {
-        const stops = [...popup.querySelectorAll('textarea,select,button,[tabindex="0"]')].filter(n => !n.disabled && !n.hidden), at = stops.indexOf(doc.activeElement);
+        const stops = [...popup.querySelectorAll('textarea,select,button,input[type="checkbox"],[tabindex="0"]')].filter(n => !n.disabled && !n.hidden && n.getClientRects().length), at = stops.indexOf(doc.activeElement);
         if (at < 0 || !e.shiftKey && at === stops.length - 1 || e.shiftKey && at === 0) { e.preventDefault();(e.shiftKey ? stops.at(-1) : stops[0]).focus(); }
       }
       // All other keys belong to this popup's native controls, including IME.
