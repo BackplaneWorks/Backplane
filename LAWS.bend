@@ -59,6 +59,7 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+import ./src/server/modelcache.bend as MCACHE
 import ./src/core/pathrecords.bend as PR
 
 import ./src/core/diskq.bend as DQ
@@ -15483,3 +15484,21 @@ law mech_primary_missing:
 # choosing a part explicitly always takes precedence over the configuration
 law mech_primary_selection:
   {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.choose(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step"), "/p/mech/assembly.step", "/p", "mech/lid.step"), MCH.MPart{"", "", Nil{}})) == "mech/assembly.step" : String}
+
+# Successful model cache publication (PR #243).
+law model_cache_missing_rejected:
+  for code: U32
+  for text: String
+  {MCACHE.ModelCache.nonempty(Fail{(code, text)}) == False{} : Bool}
+
+law model_cache_empty_rejected:
+  for modified: U32
+  {MCACHE.ModelCache.nonempty(Done{(0, (0, modified))}) == False{} : Bool}
+
+law model_cache_directory_rejected:
+  for size: U32
+  for modified: U32
+  {MCACHE.ModelCache.nonempty(Done{(1, (size, modified))}) == False{} : Bool}
+
+law model_cache_file_accepted:
+  {MCACHE.ModelCache.nonempty(Done{(0, (20, 0))}) == True{} : Bool}

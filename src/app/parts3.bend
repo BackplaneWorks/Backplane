@@ -3,6 +3,7 @@ import ../server/server.bend as S
 import ../server/host.bend as H
 import ../server/kicad.bend as K
 import ../server/proc.bend as P
+import ../server/modelcache.bend as CP
 import ../core/board.bend as B
 import ../core/pcb3d.bend as P3
 
@@ -107,7 +108,7 @@ def Parts.embed.run(have: Bool, +board: String, +name: String, +out: String) -> 
       do IO<String>:
         r : P.Ran <- P.Proc.run("sh", ["-c", "awk -v n=\"$3\" \"$4\" \"$1\" | tr -d ' \\t\\r\\n' | base64 -d | zstd -dqf -o \"$2.part\" && mv \"$2.part\" \"$2\"",
           "sh", board, out, name, Parts.embed.awk()], "/")
-        ok : Bool <- K.Io.is_file(out)
+        ok : Bool <- CP.ModelCache.have(out)
         return Bool.pick(String, ok, out, "")
 
 # a model inside the board file, written out as STEP once (kept by its
@@ -115,7 +116,7 @@ def Parts.embed.run(have: Bool, +board: String, +name: String, +out: String) -> 
 def Parts.embed(+board: String, +name: String, +sum: String, +cache: String) -> IO(String):
   do IO<String>:
     +out : String = cache ++ "/e" ++ U32.show(Str.hash(name ++ "#" ++ Bool.pick(String, String.is_empty(sum), board, sum), 2166136261)) ++ ".step"
-    have : Bool <- K.Io.is_file(out)
+    have : Bool <- CP.ModelCache.have(out)
     Parts.embed.run(have, board, name, out)
 
 def Parts.found.k(none: Bool, +found: String, +board: String, +name: String, +sum: String, +cache: String) -> IO(String):
@@ -174,35 +175,38 @@ def Parts.size(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> String:
     case Fail{_}:
       "0"
 
+def Parts.conv.done(r: P.Ran, out: String) -> String:
+  match r:
+    case P.Ran{0, _}: out
+    case P.Ran{_, _}: ""
+
 def Parts.conv(have: Bool, +src: String, +out: String, +step: String) -> IO(String):
   match have:
     case True{}:
       IO.pure(String, out)
     case False{}:
       do IO<String>:
-        r : P.Ran <- P.Proc.run(step, [src, out ++ ".part"], "/")
-        mv : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(out ++ ".part", out)
-        ok : Bool <- K.Io.is_file(out)
-        return Bool.pick(String, ok, out, "")
+        published : P.Ran <- CP.ModelCache.convert(out, from => P.Proc.run(step, [src, from], "/"))
+        return Parts.conv.done(published, out)
 
 # where the model's GLB is kept (a .glb is its own)
 def Parts.out(+src: String, +cache: String) -> IO(String):
   do IO<String>:
     st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(src)
-    return Bool.pick(String, String.ends_with(src, ".glb"), src, cache ++ "/" ++ U32.show(Str.hash(src ++ "|" ++ Parts.size(st), 2166136261)) ++ ".glb")
+    return Bool.pick(String, String.ends_with(src, ".glb"), src, cache ++ "/" ++ U32.show(Str.hash("step1|" ++ src ++ "|" ++ Parts.size(st), 2166136261)) ++ ".glb")
 
 # the model's GLB when it is ready to read, else ""
 def Parts.cached(+src: String, +cache: String) -> IO(String):
   do IO<String>:
     +out : String <- Parts.out(src, cache)
-    have : Bool <- K.Io.is_file(out)
+    have : Bool <- CP.ModelCache.have(out)
     return Bool.pick(String, Bool.and(have, Bool.not(String.is_empty(src))), out, "")
 
 # the model's GLB: from the cache, else converted into it
 def Parts.glb(+src: String, +cache: String, +step: String) -> IO(String):
   do IO<String>:
     +out : String <- Parts.out(src, cache)
-    have : Bool <- K.Io.is_file(out)
+    have : Bool <- CP.ModelCache.have(out)
     Parts.conv(have, src, out, step)
 
 def Parts.dir(+path: String) -> String:
