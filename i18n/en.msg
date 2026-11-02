@@ -389,6 +389,8 @@ sched.weekdays = weekdays at {time}
 # message times
 stamp.finished = Finished {clock}
 stamp.finished.took = Finished {clock} · {took}
+stamp.failed = Failed {clock}
+stamp.failed.took = Failed {clock} · {took}
 stamp.stopped = Stopped {clock}
 stamp.stopped.took = Stopped {clock} · {took}
 stamp.waiting = Waiting since {clock}
