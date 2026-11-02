@@ -4253,7 +4253,8 @@ def Set.page.agents(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v
     Set.chips(ty, ms, M.Setting.get(st, "agent.model", ""), "agent.model", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (y + 116 + fh + pr : U32)),
     Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, Set.model_line.loc(Ty.loc(ty), U.Models.label_of(mi, prov, M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", "")), (w - 32 : U32)),
       D.Clip.all(), (x + 16 : U32), (y + 126 + dy + pr : U32), 24, T.Th.dim())),
-    Set.fallback(ty, n, x, w, (y + 176 + dy + pr : U32))])
+    Set.fallback(ty, n, x, w, (y + 176 + dy + pr : U32)),
+    Set.agy(ty, n, x, w, (y + 176 + dy + pr + Set.fallback.h(ty, n, x, w) : U32))])
 
 def Set.page.agents.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
   +prov = M.Setting.get(st, "agent.provider", "claude")
@@ -4263,7 +4264,7 @@ def Set.page.agents.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, 
   +ms = U.Models.settings(mi, prov, U.Ui.scratch(S.Nui.ui(n), "@f.mq"), M.Setting.get(st, "agent.model", ""))
   +dy = {(Set.rows(ty, ms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 + 26 + fh : U32) : U32}
   +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
-  (176 + dy + pr + Set.agy.sum(U.Psv.rows(0n, S.Nui.ui(n)), ty, x, w) + Set.fallback.h(ty, n, x, w) : U32)
+  (176 + dy + pr + Set.agy.sum(U.Psv.rows(0n, S.Nui.ui(n)), ty, x, w) + Set.fallback.h(ty, n, x, w) + Set.agy.h(ty, n, x, w) : U32)
 
 def Set.page.writing(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +tp = U.TextGen.provider(st)
@@ -4490,12 +4491,12 @@ def Set.menu(ps: List<&2, String>, +ty: Ty, +x: U32, +w: U32, +y: U32) -> Out:
 
 def Set.body(root: Bool, +i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   match root:
-    case True{}: Set.menu(U.Settings.pages(), ty, x, w, y)
+    case True{}: Set.menu(U.Settings.menu.pages(), ty, x, w, y)
     case False{}: Set.page.draw(i, ty, st, n, info, v, note, x, w, y)
 
 def Set.height(root: Bool, +i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
   match root:
-    case True{}: Set.menu.h(U.Settings.pages(), ty, w)
+    case True{}: Set.menu.h(U.Settings.menu.pages(), ty, w)
     case False{}: Set.page.h(i, ty, st, n, info, v, note, x, w)
 
 def Set.back(root: Bool, +ty: Ty, +x: U32) -> Out:

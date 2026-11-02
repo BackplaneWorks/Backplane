@@ -177,11 +177,11 @@ def main() -> IO(Unit):
     C.Check.str("agy renewed rules", yes(String.contains(nth(sends(replay(["{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"sessionId\":\"NEW\"}}", "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{}}"], start(), turn("OLD", ""))), 1n), "backplane_instructions")), "yes")
     # failures
     C.Check.str("agy no key", emits(replay(["{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32000,\"message\":\"auth.type is set to 'gemini-api-key' in settings.json but the GEMINI_API_KEY environment variable is not set.\",\"data\":null}}"], start(), turn("", ""))),
-      "{\"type\":\"turn.failed\",\"message\":\"auth.type is set to 'gemini-api-key' in settings.json but the GEMINI_API_KEY environment variable is not set. (Settings › Antigravity: add a key or sign in)\"}")
+      "{\"type\":\"turn.failed\",\"message\":\"auth.type is set to 'gemini-api-key' in settings.json but the GEMINI_API_KEY environment variable is not set. (Settings › Agents › Antigravity: add a key or sign in)\"}")
     C.Check.str("agy bad model", emits(replay(["{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32602,\"message\":\"bad\"}}"], start(), turn("", "gemini-9"))), "{\"type\":\"turn.failed\",\"message\":\"Antigravity has no model gemini-9 for this sign-in: pick another in the composer.\"}")
     C.Check.str("agy mode refused goes on", method(nth(sends(replay(["{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32601,\"message\":\"no\"}}"], start(), turn("", ""))), 0n)), "session/prompt")
-    C.Check.str("agy wants a sign-in", emits(replay(["BACKPLANE-SIGNIN " ++ url()], start(), turn("", ""))), "{\"type\":\"turn.failed\",\"message\":\"Antigravity is not signed in: sign in under Settings › Antigravity first.\"}")
-    C.Check.str("agy missing", emits(replay(["BACKPLANE-MISSING"], start(), turn("", ""))), "{\"type\":\"turn.failed\",\"message\":\"Antigravity is not installed: install it under Settings › Antigravity.\"}")
+    C.Check.str("agy wants a sign-in", emits(replay(["BACKPLANE-SIGNIN " ++ url()], start(), turn("", ""))), "{\"type\":\"turn.failed\",\"message\":\"Antigravity is not signed in: sign in under Settings › Agents › Antigravity first.\"}")
+    C.Check.str("agy missing", emits(replay(["BACKPLANE-MISSING"], start(), turn("", ""))), "{\"type\":\"turn.failed\",\"message\":\"Antigravity is not installed: install it under Settings › Agents › Antigravity.\"}")
     C.Check.str("agy noise", emits(replay(["E1013 12:26:32 some log"], start(), turn("", ""))), "")
     C.Check.str("agy permission parks", asks(G.Agy.line(A.Acp.new(), turn("", ""), perm())), "session/request_permission")
     C.Check.str("agy permission yolo", (asks(G.Agy.line(A.Acp.new(), G.AgyTurn{A.AcpTurn{"/tmp/p", "u", "R", "h", "", False{}}, "gemini-api-key", "yolo", ""}, perm()))), "")
