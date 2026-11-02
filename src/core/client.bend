@@ -1114,10 +1114,28 @@ def Pending.go(xs: List<&2, String>, +thread: String, +es: List<&2, M.Entry>) ->
     case +x <> t:
       List.append(&2, String, Bool.pick(List<&2, String>, String.is_empty(x), Nil{}, Pending.one(x, thread, es)), Pending.go(t, thread, es))
 
+# A fitted view must also shrink messages awaiting their ordinary RPC ACK.
+# They are not stored/indexed yet, so the normal body-page budget cannot
+# shorten them. Project only their temporary bubbles; the reliable outbox
+# and Send command retain the complete message.
+def Pending.preview.k(rest: String, head: String) -> String:
+  match rest:
+    case SNil{}: head
+    case SCon{_, _}: head ++ "…"
+
+def Pending.preview(+text: String) -> String:
+  Pending.preview.k(String.drop(text, 1024n), String.take(text, 1024n))
+
+def Pending.project(small: Bool, xs: List<&2, String>) -> List<&2, String>:
+  match small xs:
+    case False{} rest: rest
+    case True{} Nil{}: Nil{}
+    case True{} text <> tail: Pending.preview(text) <> Pending.project(True{}, tail)
+
 def Ui.pending(u: Ui, +thread: String) -> List<&2, String>:
   match u:
-    case Ui{st, _, _, _, _, _, _, _, _, _, _, _, _, _, _, ob, tr}:
-      Pending.go(Map.values(&2, String, ob), thread, M.State.mine(st, thread))
+    case Ui{st, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, ob, tr}:
+      Pending.project(String.eq(Str.get(nf, "local.body.budget"), "1"), Pending.go(Map.values(&2, String, ob), thread, M.State.mine(st, thread)))
 
 # (a new connection has answered nothing: what the Mechanical page and a
 # part in 3D asked for is asked again)

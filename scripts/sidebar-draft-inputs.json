@@ -44,7 +44,7 @@
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
-    "src/core/client.bend": "d996712a5d3fdb24df31844e6aef2cafb2e404aaf4503bad6c1e74edee88a478",
+    "src/core/client.bend": "b1fe40abe2fff64513854996031ba7d6aa372e539e5fc0225b442a93c2318abd",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -682,5 +682,17 @@
       ],
       "qualification": "Source review only. Full-output24 and compiler/proof/runtime/device gates on this combined source remain UNRUN; earlier full-output receipts are not inherited."
     }
+  },
+  "longMessageSendReview": {
+    "scope": "Pending.preview/project/Ui.pending changes only temporary timeline bubbles under the existing local.body.budget flag. No sidebar draft reader, filter, key, transport or unknown @ retention changes. Preserve all current main review receipts and pins except the reviewed client.bend addition.",
+    "changedFiles": [
+      "src/core/client.bend"
+    ],
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputCases": 24,
+    "qualificationLogSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
+    "qualifiedBase": "ea5011afd32181ff13d630197ca865402c29a768 with the pending-send projection",
+    "rebasedMain": "208c90493f82b669125aa31557796238ca46132b",
+    "qualificationOnRebasedMain": "UNRUN: full-output24, Bend proof/mobile and exact-video runtime on rebased main. Earlier24 cases passed on the qualifiedBase only; not inherited. Current user permits immediate normal merges with unrun/failed gates recorded. Remote E2E synthetic run timed out before MessagePosted and diagnostic retry was refused admission; neither counts as a pass."
   }
 }
