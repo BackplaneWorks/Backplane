@@ -2014,8 +2014,9 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
    Where one row cannot hold the model chip, the account, the token chip
    and the buttons whole (a thread under about 60em), the chip and the
    account take a line over the buttons, and the chip keeps its words. */
-.account-chip { min-width: 0; flex: 0 1 auto; max-width: min(22rem, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (min-width: 761px) { .account-chip > .ico { display: none; } }
+.account-chip { min-width: 0; flex: 0 1 auto; max-width: min(22rem, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.account-chip > .ico { flex: none; }
+.account-chip .acct-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .account-picker { position: absolute; z-index: 4; bottom: 100%; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; max-width: 100%; max-height: min(45vh, 22rem); overflow-y: auto; border: 1px solid var(--line); background: var(--panel); }
 .account-picker button { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
 .setrow .field { min-width: 0; max-width: 100%; }
@@ -2211,7 +2212,7 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .composer-model { flex: 0 1 auto; flex-basis: auto; width: auto; gap: 4px; }
   .allowance-chip { width: auto; max-width: 11ch; min-height: 36px; overflow: hidden; text-overflow: ellipsis; }
   .composer-foot .account-chip { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 36px; padding: 0; }
-  .account-chip .acct-k, .account-chip .acct-v { display: none; }
+  .account-chip .acct-v { display: none; }
   .composer-foot > .attach.draw { margin-left: auto; }
   .composer-foot :is(.attach, .mic, .tok-chip) { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; width: 34px; height: 36px; min-height: 36px; padding: 0; margin: 0; }
   .composer-foot .tok-chip .tok-n { display: none; }

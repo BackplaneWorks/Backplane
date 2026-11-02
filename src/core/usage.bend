@@ -508,6 +508,13 @@ def Tk.usd(+c: Nat) -> String:
     "$" ++ Nat.show(Nat.div(c, 1000000000n)) ++ "." ++ M.Tok.pad2(Nat.div(Nat.mod(c, 1000000000n), 10000000n)),
     "$0." ++ Tk.pad4(Nat.show(Nat.div(c, 100000n))))
 
+# the composer's chip, at a glance: cents below $1 ("$0.41", "<$0.01"
+# under a cent), from $1 as Tk.usd ("$1.20"). Settings' usage page keeps
+# Tk.usd's four places.
+def Tk.cents(+c: Nat) -> String:
+  Bool.pick(String, Nat.is_ge(c, 1000000000n), Tk.usd(c),
+    Bool.pick(String, Nat.is_lt(c, 10000000n), "<$0.01", "$0." ++ M.Tok.pad2(Nat.div(c, 10000000n))))
+
 # turns whose tokens are not in the total (a session already running when
 # counting began: its share of the session could not be told)
 def Tk.unknown(+v: String) -> String:
@@ -771,8 +778,8 @@ def Ts.chip.parts(+tv: String, +used: Nat, +window: Nat) -> List<&2, String>:
   List.concat(&2, String, [
     Bool.pick(List<&2, String>, Nat.is_eq(Tk.part(tv, 0n), 0n), Nil{},
       [Use.tokens(Nat.add(Nat.add(Tk.part(tv, 1n), Tk.part(tv, 2n)), Nat.add(Tk.part(tv, 3n), Tk.part(tv, 4n)))) ++ " tok"]),
-    Bool.pick(List<&2, String>, Nat.is_eq(Tk.part(tv, 7n), 0n), Nil{}, [Tk.usd(Tk.part(tv, 6n))]),
-    Bool.pick(List<&2, String>, Nat.is_eq(used, 0n), Nil{}, [Bool.pick(String, Nat.is_eq(window, 0n), Use.tokens(used) ++ " ctx", Ts.pct(used, window))])])
+    Bool.pick(List<&2, String>, Nat.is_eq(Tk.part(tv, 7n), 0n), Nil{}, [Tk.cents(Tk.part(tv, 6n))]),
+    Bool.pick(List<&2, String>, Nat.is_eq(used, 0n), Nil{}, [Bool.pick(String, Nat.is_eq(window, 0n), Use.tokens(used) ++ " ctx", "ctx " ++ Ts.pct(used, window))])])
 
 def Ts.chip.k(+used: Nat, +window: Nat, +tv: String) -> String:
   String.join(Ts.chip.parts(tv, used, window), " · ")
