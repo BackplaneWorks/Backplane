@@ -88,3 +88,38 @@ def many_projects(+n: Nat, st: M.State) -> M.State:
 
 def top_many() -> List<&2, G.UgProject>:
   G.Ug.projects(many_projects(10n, state()), Nil{}, 1792359200n, "month")
+
+# Cross-year daily fixtures deliberately disagree with the monthly totals.
+# Five daily leaders beat "steady" each day, but steady wins across days.
+def rolling_base() -> M.State:
+  M.State.replay([
+    M.ProjectCreated{"steady", "Steady", "/tmp/usage-steady", 1n},
+    M.ThreadCreated{"ts", "steady", "Work", M.Local{}, "", "", "claude", "m", 1n},
+    M.TurnUsage{"ts", "claude", "m", "before", 999n, 0n, 0n, 0n, 0n, 0n, "io", "", 1798243199n},
+    M.TurnUsage{"ts", "claude", "m", "first", 40n, 0n, 0n, 10n, 5n, 100000000n, "ioct", "", 1798243200n},
+    M.TurnUsage{"ts", "codex", "m2", "second", 40n, 0n, 0n, 10n, 5n, 0n, "iot", "", 1798329600n},
+    M.TurnUsage{"ts", "claude", "m", "end", 0n, 0n, 0n, 0n, 0n, 0n, "", "", 1798761600n},
+    M.TurnUsage{"ts", "claude", "m", "future", 999n, 0n, 0n, 0n, 0n, 0n, "io", "", 1798848000n}], M.State.empty())
+
+def rolling_leaders(+n: Nat, st: M.State) -> M.State:
+  match n:
+    case 0n: st
+    case 1n+k: rolling_leaders(k, M.State.setting(M.State.setting(st, "tok.dp.2026-12-26|a" ++ Nat.show(k), "1/60/0/0/0/0/0/0/1"), "tok.dp.2026-12-27|b" ++ Nat.show(k), "1/60/0/0/0/0/0/0/1"))
+
+def rolling_state() -> M.State:
+  rolling_base()
+
+def rolling_ranked() -> List<&2, G.UgProject>:
+  G.Ug.projects(rolling_leaders(5n, rolling_base()), Nil{}, 1798761600n, "week")
+
+def rolling_total(period: String) -> String:
+  UP.Up.total(rolling_state(), 1798761600n, period)
+
+def rolling_projects(period: String) -> List<&2, G.UgProject>:
+  G.Ug.projects(rolling_state(), Nil{}, 1798761600n, period)
+
+def rolling_reset() -> String:
+  UP.Up.total(M.State.setting(rolling_state(), "tok.epoch", "reset"), 1798761600n, "week")
+
+def rolling_empty() -> String:
+  UP.Up.total(M.State.empty(), 1798761600n, "30days")

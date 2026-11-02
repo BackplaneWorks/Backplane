@@ -72,8 +72,8 @@ def Graph.top.k(ps: List<&2, G.UgProject>) -> List<&2, D.Node>:
 def Graph.top(+u: U.Ui) -> D.Node:
   +st = U.Ui.state.of(u)
   D.Dom.el("section", [D.At{"class", "usage-top"}, D.At{"aria-label", "Top 5 projects by token consumption"}], [D.Dom.el("h3", Nil{}, [D.Txt{"Top 5 projects"}]),
-    D.Dom.el("p", [D.At{"class", "usage-caption"}], [D.Txt{Bool.pick(String, String.eq(U.Usage.page.period(u), "today"), M.Tok.day(U.Side.now(u)), M.Tok.month(U.Side.now(u))) ++ " (UTC) · recorded tokens across all models and providers. Unreported usage is unknown." ++
-      Bool.pick(String, String.eq(U.Usage.page.period(u), "today"), " Daily project readings share the daily coverage shown above.", "")}]),
+    D.Dom.el("p", [D.At{"class", "usage-caption"}], [D.Txt{UP.Up.range(U.Side.now(u), U.Usage.page.period(u)) ++ " · recorded tokens across all models and providers. Unreported usage is unknown." ++
+      Bool.pick(String, Bool.not(String.eq(U.Usage.page.period(u), "month")), " Daily project readings share the daily coverage shown above.", "")}]),
     D.Dom.div("", Graph.top.k(G.Ug.projects(st, U.Ui.projects(st), U.Side.now(u), U.Usage.page.period(u))))])
 
 def Graph.visible(show: Bool, +u: U.Ui) -> List<&2, D.Node>:

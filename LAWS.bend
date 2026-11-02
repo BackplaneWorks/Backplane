@@ -1,5 +1,7 @@
 import ./src/core/allowance.bend as ALLOWANCE
 
+import ./src/core/usage_page.bend as UPERIOD
+
 import ./src/core/chat-pending.bend as CHATPENDING
 
 import ./src/core/i18n.bend as CHATLOC
@@ -15361,3 +15363,26 @@ law active_progress_other_soft:
 
 law active_progress_owner_urgent:
   {TPR1.Touch.level(TPR1.Touch.changes([M.SettingSet{"liveness.owner", "progress", 1n}], TPR1.Touch.none()), "owner") == 2n : Nat}
+
+# Rolling usage windows are fixed UTC day counts, regardless of the date.
+law usage_rolling_week:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "week") == 6n : Nat}
+
+law usage_rolling_two_weeks:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "2weeks") == 13n : Nat}
+
+law usage_rolling_four_weeks:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "4weeks") == 27n : Nat}
+
+law usage_rolling_month:
+  for now: Nat
+  {UPERIOD.Up.offset(now, "30days") == 29n : Nat}
+
+law usage_rolling_default:
+  {UPERIOD.Up.period("") == "30days" : String}
+
+law usage_rolling_empty_unknown:
+  {UPERIOD.Up.sum("", "") == "" : String}

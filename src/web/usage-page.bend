@@ -63,6 +63,6 @@ def Uv.pagers(cs: List<&2, UP.UpControl>) -> List<&2, D.Node>:
 
 def Uv.page(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   +cs = U.Usage.page.controls(u)
-  List.concat(&2, D.Node, [[Uv.setrow("Period", "UTC calendar boundaries", Uv.controls(List.take(&2, UP.UpControl, cs, 2n))),
-    Uv.setrow("View", "", Uv.controls(List.take(&2, UP.UpControl, List.drop(&2, UP.UpControl, cs, 2n), 3n)))],
-    G.Graph.page(u), Uv.rows.loc(lc, U.Usage.page.rows(u)), Uv.pagers(List.drop(&2, UP.UpControl, cs, 5n))])
+  List.concat(&2, D.Node, [[Uv.setrow("Period", "Rolling ranges include today (UTC); month = 30 days", Uv.controls(List.take(&2, UP.UpControl, cs, UP.Up.period.size()))),
+    Uv.setrow("View", "", Uv.controls(List.take(&2, UP.UpControl, List.drop(&2, UP.UpControl, cs, UP.Up.period.size()), 3n)))],
+    G.Graph.page(u), Uv.rows.loc(lc, U.Usage.page.rows(u)), Uv.pagers(List.drop(&2, UP.UpControl, cs, Nat.add(UP.Up.period.size(), 3n)))])
