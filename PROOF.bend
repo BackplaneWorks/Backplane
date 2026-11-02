@@ -1,4 +1,5 @@
 import ./src/core/range.bend as BRANGE
+
 import ./src/core/vdict.bend as VDICT
 
 import ./src/server/review-history.bend as REVIEWHISTORY
@@ -15059,4 +15060,11 @@ def Laws.alpha_usage_closed_tokens(st, at, i, r, w, o, known):
   {==}
 
 def Laws.alpha_usage_mirror_excluded():
+  {==}
+
+def Laws.provider_setup_missing_program(profile): {==}
+
+def Laws.provider_setup_failure_retry(): {==}
+
+def Laws.alpha_usage_empty_choice_declines():
   {==}

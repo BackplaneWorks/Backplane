@@ -91,7 +91,16 @@ let app,page;const start=performance.now();
  // (the chat stays open; a phone hides the sidebar while a thread is)
  await ready(bub);
  // (the jump above left the thread on the plan: back to its end, where the wide message is)
- for(let i=0;i<20&&!(await page.locator('[data-id="m-wide"] button.reply').count());i++){await page.evaluate(()=>{const t=document.getElementById('timeline');t.scrollTop=t.scrollHeight;});await page.waitForTimeout(200);}
+ // A retained message can already be in the DOM while still off screen.
+ // Scroll to the end after the resize/jump, then wait for the actual button
+ // to enter the timeline viewport before Playwright performs its normal click.
+ await page.waitForFunction(()=>{
+  const t=document.getElementById('timeline');if(!t)return false;
+  t.scrollTop=t.scrollHeight;
+  const b=t.querySelector('[data-id="m-wide"] button.reply');if(!b)return false;
+  const r=b.getBoundingClientRect(),v=t.getBoundingClientRect();
+  return r.height>0&&r.top>=v.top&&r.bottom<=v.bottom;
+ });
  await page.locator('[data-id="m-wide"] button.reply').click();
  await page.locator('.reply-chip').waitFor();
  await page.locator('#composer').fill('Reply is back');

@@ -82,7 +82,8 @@ def into(+u: U.Ui, +text: String) -> U.Ui:
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    C.Check.str("start asks the hub", sent(U.Ui.act(start(), "voice", "")), "{\"id\":0,\"m\":\"bots.voice\",\"p\":{\"op\":\"start\",\"thread\":\"t1\",\"device\":\"\"}}\n")
+    C.Check.str("start asks for the hub microphone", sent(U.Ui.act(start(), "voice", "")), "{\"id\":0,\"m\":\"bots.voice\",\"p\":{\"op\":\"start\",\"thread\":\"t1\",\"device\":\"\",\"src\":\"hub\"}}\n")
+    C.Check.str("client microphone source reaches the hub", sent(U.Ui.act(start(), "voice", "client")), "{\"id\":0,\"m\":\"bots.voice\",\"p\":{\"op\":\"start\",\"thread\":\"t1\",\"device\":\"\",\"src\":\"client\"}}\n")
     C.Check.str("starting", U.Ui.scratch(act(start(), "voice", ""), "@voice"), "starting")
     C.Check.str("live", U.Ui.scratch(live(), "@voice"), "live")
     C.Check.str("device shown", U.Ui.scratch(live(), "@voice.dev"), "HyperX")
@@ -99,9 +100,9 @@ def main() -> IO(Unit):
     C.Check.str("fix opens the field", sent(U.Ui.act(heard2(), "voice-fix", "0")), "focus voice-fix\n")
     C.Check.str("fix starts from the word", U.Ui.scratch(act(heard2(), "voice-fix", "0"), "@f.vfix"), "stm32f4")
     C.Check.str("fixed in the draft", U.Ui.draft_text(act(fixing(), "voice-fixed", "")), "open KiCad now check STM32F4")
-    C.Check.str("fixed joins the dictionary", sent(U.Ui.act(fixing(), "voice-fixed", "")), "{\"id\":1,\"m\":\"bots.voice\",\"p\":{\"op\":\"add\",\"term\":\"STM32F4\"}}\n")
+    C.Check.str("fixed spelling persists the learned pair and dictionary entry", sent(U.Ui.act(fixing(), "voice-fixed", "")), "{\"id\":2,\"m\":\"setting.set\",\"p\":{\"key\":\"voice.l.stm32f4\",\"value\":\"STM32F4\\t1\\t0\"}}\n{\"id\":3,\"m\":\"setting.set\",\"p\":{\"key\":\"voice.e.stm32f4\",\"value\":\"STM32F4\"}}\n")
     C.Check.str("fixed, gone", Nat.show(List.length(&2, V.Unsure, U.Voice.unsure(act(fixing(), "voice-fixed", "")))), "0")
-    C.Check.str("add as heard", sent(U.Ui.act(heard2(), "voice-add", "0")), "{\"id\":1,\"m\":\"bots.voice\",\"p\":{\"op\":\"add\",\"term\":\"stm32f4\"}}\n")
+    C.Check.str("add as heard persists a dictionary setting", sent(U.Ui.act(heard2(), "voice-add", "0")), "{\"id\":2,\"m\":\"setting.set\",\"p\":{\"key\":\"voice.e.stm32f4\",\"value\":\"stm32f4\"}}\n")
     C.Check.str("skipped is not asked again", Nat.show(List.length(&2, V.Unsure, U.Voice.unsure(zork(act(zork(start()), "voice-skip", "0"))))), "0")
     C.Check.str("not skipped is asked once", Nat.show(List.length(&2, V.Unsure, U.Voice.unsure(zork(zork(start()))))), "1")
     C.Check.str("idle", U.Ui.scratch(recv(live(), "{\"t\":\"voice\",\"thread\":\"t1\",\"ev\":\"idle\"}"), "@voice"), "")
@@ -113,7 +114,7 @@ def main() -> IO(Unit):
     C.Check.str("dictionary", Nat.show(List.length(&2, String, U.Voice.dict(status()))), "2")
     C.Check.str("microphones", Nat.show(List.length(&2, U.VDev, U.Voice.devices(status()))), "2")
     C.Check.str("default microphone", U.Voice.default(status()), "hx")
-    C.Check.str("take a term out", sent(U.Ui.act(status(), "voice-unterm", "kicad")), "{\"id\":0,\"m\":\"bots.voice\",\"p\":{\"op\":\"dict\",\"dict\":\"STM32F4\"}}\n")
+    C.Check.str("take a term out removes its setting and updates the hub dictionary", sent(U.Ui.act(status(), "voice-unterm", "kicad")), "{\"id\":0,\"m\":\"setting.set\",\"p\":{\"key\":\"voice.e.kicad\",\"value\":\"\"}}\n{\"id\":1,\"m\":\"bots.voice\",\"p\":{\"op\":\"dict\",\"dict\":\"STM32F4\"}}\n")
     C.Check.str("ring: our words first", RG.Ring.text(ring.form()), "open key cad")
     C.Check.str("ring: words to clarify", RG.Ring.unsure(ring.form()), "Possibly misheard: \"key cad\" (KiCad?). Ask if unsure.")
     C.Check.str("ring: heard by", RG.Ring.heard(ring.form()), "gpt-live-transcribe")

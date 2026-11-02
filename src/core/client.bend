@@ -52,6 +52,7 @@ import ./agy.bend as AGY
 import ./diff.bend as DF
 import ./fm.bend as FM
 import ./onboard.bend as OB
+import ./provider-setup.bend as PS
 import ./telemetry.bend as TLM
 import ./layers.bend as LY
 import ./slash.bend as SL
@@ -10904,7 +10905,7 @@ def Acv.provider(+u: Ui) -> String:
   Ui.scratch(u, "@acct.provider")
 
 def Acv.selected.provider(+u: Ui) -> String:
-  Bool.pick(String, String.eq(Acv.provider(u), "claude"), "claude", "codex")
+  Bool.pick(String, String.eq(Bool.pick(String, Ui.flag(u, "provider-setup"), Ui.scratch(u, "@setup.provider"), Acv.provider(u)), "claude"), "claude", "codex")
 
 def Acv.rpc(+u: Ui, +op: String, +id: String) -> Act:
   Ui.rpc(u, "accounts", [J.KV{"op", J.Str{op}}, J.KV{"profile", J.Str{id}}])
@@ -10926,7 +10927,7 @@ def Acv.add.k(blank: Bool, +u: Ui) -> Act:
     case True{}:
       Act{Ui.scratch_set(u, "@acct.label.err", MSG.T.account.label.required(Lang.loc(u))), [Focus{"agy-accountlabel"}]}
     case False{}:
-      Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@f.accountlabel", ""), "@acct.label.err", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{String.trim(Ui.scratch(u, "@f.accountlabel"))}}])
+      Ui.rpc(Ui.scratch_set(Ui.scratch_set(Bool.pick(Ui, Ui.flag(u, "provider-setup"), Ui.scratch_set(u, "@setup.profile", ""), u), "@f.accountlabel", ""), "@acct.label.err", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{String.trim(Ui.scratch(u, "@f.accountlabel"))}}])
 
 def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
   match action:
@@ -12647,7 +12648,7 @@ def Share.on(+st: M.State) -> Bool:
   TLM.Tm.share(st)
 
 def Share.asked(+st: M.State) -> Bool:
-  Bool.and(TLM.Tm.asked(st), Bool.or(Bool.not(TLM.Tm.share(st)), String.eq(M.Setting.get(st, "telemetry.usage.asked", ""), "1")))
+  Bool.and(TLM.Tm.asked(st), Bool.or(Bool.not(TLM.Tm.share(st)), TLM.Tm.has(["0", "1"], M.Setting.get(st, "telemetry.usage.asked", ""))))
 
 def Share.live(+u: Ui) -> Bool:
   String.eq(Ui.info(u, "telemetry.live"), "1")
@@ -12737,7 +12738,7 @@ def Tour.back(+u: Ui) -> Bool:
   Bool.and(Nat.is_gt(Tour.at(u), 0n), Bool.not(Tour.single(u)))
 
 def Tour.on(+u: Ui) -> Bool:
-  OB.Ob.live(Tour.at(u))
+  Bool.and(OB.Ob.live(Tour.at(u)), Bool.not(Bool.and(Ui.flag(u, "settings"), Ui.flag(u, "provider-setup"))))
 
 # The KiCad notice waits while the tour is up (the card would sit over it,
 # and it is one thing more at once): it shows once the tour ends
@@ -12837,7 +12838,9 @@ def Tour.share.choices(single: Bool, +u: Ui) -> List<&2, TChoice>:
 def Tour.choices.at(i: Nat, single: Bool, +u: Ui) -> List<&2, TChoice>:
   match i:
     case 0n:
-      [Tour.report(u)]
+      [TChoice{"Connect an agent", "provider-setup-open", ""}, Tour.report(u)]
+    case 5n:
+      [TChoice{"Set up an agent", "provider-setup-open", ""}]
     case 9n:
       Tour.share.choices(single, u)
     case 10n:
@@ -12953,10 +12956,159 @@ def Tour.back.k(has: Bool, +u: Ui) -> Act:
     case False{}:
       Act{u, Nil{}}
 
+# Guided setup uses the existing account RPC and sealed provider forms. It is
+# local presentation state: leaving never cancels a login or edits a session.
+def Psv.active(+u: Ui) -> Bool:
+  Ui.flag(u, "provider-setup")
+
+def Psv.provider(+u: Ui) -> String:
+  +p = Ui.scratch(u, "@setup.provider")
+  Bool.pick(String, String.is_empty(PS.Ps.docs(p)) && Bool.not(String.eq(p, "antigravity")), "codex", p)
+
+def Psv.installed(+u: Ui, +p: String) -> Bool:
+  Bool.not(String.is_empty(Models.cli(Ui.info(u, "models"), p)))
+
+def Psv.profiles(xs: List<&2, J.Json>, +provider: String) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: Nil{}
+    case +p <> +rest:
+      Bool.pick(List<&2, J.Json>, String.eq(J.Json.get_str(p, "provider", ""), provider), p <> Psv.profiles(rest, provider), Psv.profiles(rest, provider))
+
+def Psv.profile(+u: Ui) -> J.Json:
+  +ps = Psv.profiles(ACCT.Accounts.profiles(Ui.state(u)), Psv.provider(u))
+  +chosen = ACCT.Accounts.find(ps, Ui.scratch(u, "@setup.profile"))
+  Bool.pick(J.Json, String.is_empty(J.Json.get_str(chosen, "id", "")), Maybe.default(&2, J.Json, List.head(&2, J.Json, List.reverse(&2, J.Json, ps)), J.Null{}), chosen)
+
+def Psv.choices(ps: List<&2, String>, +cur: String) -> List<&2, AgBtn>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> rest: AgBtn{PS.Ps.label(p), "provider-setup-pick", p, String.eq(p, cur)} <> Psv.choices(rest, cur)
+
+def Psv.accounts(ps: List<&2, J.Json>, +cur: String) -> List<&2, AgBtn>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> rest:
+      +id = J.Json.get_str(p, "id", "")
+      AgBtn{J.Json.get_str(p, "label", "Account"), "provider-setup-profile", id, String.eq(id, cur)} <> Psv.accounts(rest, cur)
+
+def Psv.open(+u: Ui) -> Act:
+  Settings.go(Ui.scratch_set(Ui.scratch_set(Ui.flag_on(Settings.on(u), "provider-setup"), "@f.setq", ""), "@setup.tour", Bool.pick(String, OB.Ob.live(Tour.at(u)), "1", "")), "agents")
+
+def Psv.leave(+u: Ui) -> Act:
+  Act{Ui.scratch_set(Ui.flag_off(Ui.flag_off(u, "provider-setup"), "settings"), "@setup.pass", "1"), [Focus{Tour.focus(Ui.flag_off(u, "settings"))}]}
+
+# Only an explicit choice changes defaults for future threads. Old threads,
+# account bindings, provider sessions and the current draft are untouched.
+def Psv.use.k(ready: Bool, +u: Ui, +p: J.Json) -> Act:
+  match ready:
+    case False{}: Act{u, Nil{}}
+    case True{}:
+      +a = Ui.setting(u, "agent.model=")
+      +b = Ui.also(Ui.setting(Act.ui(a), "agent.provider=" ++ Psv.provider(u)), Act.cmds(a))
+      Ui.also(Acv.act(Act.ui(b), "acct-default", J.Json.get_str(p, "id", "")), Act.cmds(b))
+
+def Psv.act(+u: Ui, +action: String, +value: String) -> Act:
+  match action:
+    case "provider-setup-open": Psv.open(u)
+    case "provider-setup-close": Psv.leave(u)
+    case "provider-setup-pick": Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@setup.provider", value), "@acct.provider", value), "@setup.profile", ""), Nil{}}
+    case "provider-setup-profile": Act{Ui.scratch_set(u, "@setup.profile", value), Nil{}}
+    case "provider-setup-use-cli":
+      +a = Ui.setting(u, "agent.model=")
+      Ui.also(Ui.setting(Act.ui(a), "agent.provider=" ++ Psv.provider(u)), Act.cmds(a))
+    case "provider-setup-use": Psv.use.k(PS.Ps.ready(Psv.installed(u, Psv.provider(u)), Psv.profile(u)), u, Psv.profile(u))
+    case _: Act{u, Nil{}}
+
+def Psv.entry() -> List<&2, AgRow>:
+  [AgRow{"Connect an agent", "An agent is the AI that works with you. Choose one, install its program on the machine running this hub, then sign in with the provider.", Nil{}, [AgBtn{"Set up an agent", "provider-setup-open", "", True{}}]}]
+
+def Psv.exit(+u: Ui) -> AgRow:
+  AgRow{"You can come back any time", "Setup lives in Settings → Agents. You can explore Backplane while you decide. A sign-in already in progress can finish while you are away.", Nil{},
+    [AgBtn{Bool.pick(String, String.eq(Ui.scratch(u, "@setup.tour"), "1"), "Return to tour", "Return to Backplane"), "provider-setup-close", "", True{}}]}
+
+def Psv.install(+u: Ui, +p: String) -> AgRow:
+  AgRow{"2 · Install the agent program", Bool.pick(String, Psv.installed(u, p), "Program found: " ++ Models.cli(Ui.info(u, "models"), p) ++ ". Next, sign in. Installation alone does not confirm a connection.",
+    Bool.pick(String, String.is_empty(Ui.info(u, "models")), "Checking installed programs…", "Program not found yet. Open the installation guide and follow the steps for your operating system on the hub machine. Backplane checks for new installs every minute.")), Nil{},
+    Bool.pick(List<&2, AgBtn>, String.eq(p, "antigravity"), [AgBtn{"Open Antigravity setup", "settings-page", "antigravity", True{}}], [AgBtn{"Open installation guide", "open-url", PS.Ps.docs(p), False{}}])}
+
+# Keep the newest attempt for the selected profile; login replaces old attempts.
+def Psv.attempts(xs: List<&2, J.Json>, +profile: String) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: Nil{}
+    case +a <> rest:
+      Bool.pick(List<&2, J.Json>, String.eq(J.Json.get_str(a, "profile", ""), profile), [a], Psv.attempts(rest, profile))
+
+def Psv.attempt(+u: Ui) -> J.Json:
+  +id = J.Json.get_str(Psv.profile(u), "id", "")
+  Maybe.default(&2, J.Json, List.head(&2, J.Json, Psv.attempts(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")), id)), J.Null{})
+
+def Psv.attempt.row(+a: J.Json) -> List<&2, AgRow>:
+  +state = J.Json.get_str(a, "state", "")
+  +arg = J.Json.get_str(a, "profile", "") ++ ":" ++ J.Json.get_str(a, "id", "")
+  Bool.pick(List<&2, AgRow>, String.is_empty(J.Json.get_str(a, "id", "")), Nil{},
+    [AgRow{PS.Ps.progress(state), J.Json.get_str(a, "message", "") ++ Bool.pick(String, String.is_empty(J.Json.get_str(a, "userCode", "")), "", " Enter this device code on the provider page: " ++ J.Json.get_str(a, "userCode", "")),
+      Bool.pick(List<&2, AgField>, String.eq(state, "waiting") && String.is_empty(J.Json.get_str(a, "userCode", "")), [AgField{"account-" ++ J.Json.get_str(a, "id", ""), "Only if Claude asks: sign-in response", True{}, "", "acct-response:" ++ arg}], Nil{}),
+      List.concat(&2, AgBtn, [Bool.pick(List<&2, AgBtn>, String.eq(state, "waiting") && Bool.not(String.is_empty(J.Json.get_str(a, "url", ""))), [AgBtn{"Open provider sign-in", "open-url", J.Json.get_str(a, "url", ""), True{}}], Nil{}),
+        Bool.pick(List<&2, AgBtn>, String.eq(state, "waiting") && String.is_empty(J.Json.get_str(a, "userCode", "")), [AgBtn{"Complete sign-in", "acct-response:" ++ arg, "", True{}}], Nil{}),
+        Bool.pick(List<&2, AgBtn>, PS.Ps.busy(state), [AgBtn{"Cancel sign-in", "acct-cancel", arg, False{}}], Nil{})])}])
+
+def Psv.account.row(+u: Ui, +p: J.Json) -> AgRow:
+  +id = J.Json.get_str(p, "id", "")
+  +ready = PS.Ps.ready(Psv.installed(u, Psv.provider(u)), p)
+  +using = String.eq(M.Setting.get(Ui.state(u), "agent.provider", ""), Psv.provider(u)) && String.eq(J.Json.get_str(ACCT.Accounts.binding.raw(M.Setting.get(Ui.state(u), "account.default." ++ Psv.provider(u), "")), "id", ""), id)
+  AgRow{Bool.pick(String, ready, "Connected · " ++ J.Json.get_str(p, "label", "Account"), "3 · Connect your account"),
+    Bool.pick(String, ready, Bool.pick(String, using, "Ready for new threads. Return to Backplane, add a project and start a thread. Existing threads keep their current account.", "Connection verified. Choose Use for new threads to make this agent your starting choice."),
+      "Account status: " ++ J.Json.get_str(p, "state", "unchecked") ++ ". " ++ J.Json.get_str(p, "message", "") ++ " Finish sign-in in the provider page, then return here. If it fails or expires, try again. Use Refresh status to check an existing account."), Nil{},
+    Bool.pick(List<&2, AgBtn>, ready, Bool.pick(List<&2, AgBtn>, using, Nil{}, [AgBtn{"Use for new threads", "provider-setup-use", "", True{}}]),
+      Bool.pick(List<&2, AgBtn>, Bool.not(Psv.installed(u, Psv.provider(u))) || PS.Ps.busy(J.Json.get_str(Psv.attempt(u), "state", "")), Nil{}, [AgBtn{"Sign in / Try again", "acct-login", id, True{}}, AgBtn{"Refresh status", "acct-status", id, False{}}]))}
+
+def Psv.subscription(+u: Ui) -> List<&2, AgRow>:
+  +p = Psv.profile(u)
+  +ps = Psv.profiles(ACCT.Accounts.profiles(Ui.state(u)), Psv.provider(u))
+  List.concat(&2, AgRow, [[AgRow{"3 · Add or choose a subscription account", "Use your ChatGPT or Claude.ai account. An account label is just a name to help you recognize it. " ++ J.Json.get_str(Acv.live(u), "error", "") ++ " " ++ Ui.scratch(u, "@acct.label.err"),
+    [AgField{"accountlabel", "Account label (e.g. Personal)", False{}, Ui.scratch(u, "@f.accountlabel"), "acct-add"}],
+    List.append(&2, AgBtn, Psv.accounts(ps, J.Json.get_str(p, "id", "")), [AgBtn{"Add account", "acct-add", "", True{}}])}],
+    Bool.pick(List<&2, AgRow>, String.is_empty(J.Json.get_str(p, "id", "")), Nil{}, [Psv.account.row(u, p)]), Psv.attempt.row(Psv.attempt(u))])
+
+def Psv.connect(k: Nat, +u: Ui, +p: String) -> List<&2, AgRow>:
+  Bool.pick(List<&2, AgRow>, ACCT.Accounts.supported(p),
+    Bool.pick(List<&2, AgRow>, Nat.is_eq(k, 1n), Psv.subscription(u),
+      [AgRow{"3 · Connect in your browser", "Open this hub's Backplane address in a browser (on your phone or computer), then Settings → Agents → Set up an agent. Subscription account forms are available there. You can also use the existing CLI sign-in on the hub machine.", Nil{}, Bool.pick(List<&2, AgBtn>, String.is_empty(Pair.link(Ui.infos(u))), Nil{}, [AgBtn{"Open this hub in browser", "open-url", Pair.link(Ui.infos(u)), True{}}])}]),
+    [AgRow{"3 · Sign in with your provider", PS.Ps.login(p) ++ " Return here when you have finished. CLI sign-in status is not checked here; try a message in a new thread when ready." ++ Bool.pick(String, String.eq(M.Setting.get(Ui.state(u), "agent.provider", ""), p) && String.is_empty(M.Setting.get(Ui.state(u), "agent.model", "")), " Selected for new threads. Return to Backplane when ready.", ""), Nil{},
+      [AgBtn{"Use this agent for new threads", "provider-setup-use-cli", "", True{}}]}])
+
+def Psv.rows.k(k: Nat, active: Bool, +u: Ui) -> List<&2, AgRow>:
+  match active:
+    case False{}: Psv.entry()
+    case True{}:
+      +p = Psv.provider(u)
+      List.concat(&2, AgRow, [[AgRow{"1 · Choose your agent", "You only need one to get started. Use a provider account you already have, or follow its guide to get one. Backplane and provider subscriptions are separate. Setup runs on the machine hosting this hub, even when you use your phone.", Nil{}, Psv.choices(PS.Ps.providers(), p)}, Psv.install(u, p)],
+        [AgRow{"Already signed in on this machine?", PS.Ps.login(p) ++ " Existing CLI accounts and sessions stay available as Default accounts. Choose the provider beside the composer when you start a thread.", Nil{}, [AgBtn{"Keep my current setup / Set up later", "provider-setup-close", "", False{}}]}],
+        Psv.connect(k, u, p), [Psv.exit(u)]])
+
+def Psv.rows(k: Nat, +u: Ui) -> List<&2, AgRow>:
+  Psv.rows.k(k, Psv.active(u), u)
+
+# The first Next introduces setup once for a new install with no verified
+# account. Legacy CLI auth is unknown, so the person may keep it explicitly.
+# A completed tour is never reopened for existing users.
+def Psv.any.ready(xs: List<&2, J.Json>, +u: Ui) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case +p <> rest: PS.Ps.ready(Psv.installed(u, J.Json.get_str(p, "provider", "")), p) || Psv.any.ready(rest, u)
+
+def Psv.due(+u: Ui) -> Bool:
+  Nat.is_eq(Tour.at(u), 0n) && Bool.not(Tour.done(Ui.state(u))) && Bool.not(String.eq(Ui.scratch(u, "@setup.pass"), "1")) && Bool.not(String.is_empty(Ui.info(u, "models"))) && Bool.not(Psv.any.ready(ACCT.Accounts.profiles(Ui.state(u)), u))
+
+def Psv.next(setup: Bool, +u: Ui) -> Act:
+  match setup:
+    case True{}: Psv.open(u)
+    case False{}: Tour.go(OB.Ob.next(Tour.at(u)), u)
+
 def Tour.act.k(i: Nat, +u: Ui) -> Act:
   match i:
     case 0n:
-      Tour.go(OB.Ob.next(Tour.at(u)), u)
+      Psv.next(Psv.due(u), u)
     case 1n:
       Tour.back.k(Tour.back(u), u)
     case 2n:
@@ -12978,25 +13130,25 @@ def Tour.act.base(+u: Ui, +action: String) -> Act:
   Tour.act.on(Tour.on(u), u, action)
 
 # Anonymous usage: the choices, Settings' row and the tour's usage step
-# set telemetry.share and telemetry.asked together ("share on|off"); Next
-# or Skip on the step set telemetry.asked too (keeping the default, sharing).
+# set telemetry.share and telemetry.asked together ("share on|off"). Only
+# explicit On/Keep sharing accepts expanded usage; Next/Skip leave sharing off.
 # On the step, a choice moves on (asked alone: the card closes); "share-reset"
 # makes a new id and "open-url" is the client's own and never gets here.
-def Share.then.usage(a: Act) -> Act:
+def Share.then.usage(a: Act, answer: String) -> Act:
   match a:
     case Act{u, cs}:
-      Tour.finish.cat(Ui.setting(u, "telemetry.usage.asked=1"), cs)
+      Tour.finish.cat(Ui.setting(u, "telemetry.usage.asked=" ++ answer), cs)
 
 def Share.then(a: Act) -> Act:
   match a:
     case Act{u, cs}:
-      Share.then.usage(Tour.finish.cat(Ui.setting(u, "telemetry.asked=1"), cs))
+      Tour.finish.cat(Ui.setting(u, "telemetry.asked=1"), cs)
 
 def Share.val(+v: String) -> String:
-  Bool.pick(String, String.eq(v, "off"), "off", "on")
+  Bool.pick(String, String.eq(v, "on"), "on", "off")
 
 def Share.set(+u: Ui, +value: String) -> Act:
-  Share.then(Ui.setting(Ui.info_set(u, "telemetry.id", ""), "telemetry.share=" ++ Share.val(value)))
+  Share.then.usage(Share.then(Ui.setting(Ui.info_set(u, "telemetry.id", ""), "telemetry.share=" ++ Share.val(value))), Bool.pick(String, String.eq(value, "on"), "1", "0"))
 
 def Share.close(a: Act) -> Act:
   match a:
@@ -13023,7 +13175,7 @@ def Share.act(+u: Ui, +value: String) -> Act:
   Share.act.k(Nat.is_eq(Tour.at(u), OB.Ob.share()), Tour.single(u), u, value)
 
 def Share.reset(+u: Ui) -> Act:
-  Share.then(Ui.setting(Ui.info_set(u, "telemetry.id", ""), "telemetry.reset=" ++ Nat.show(Nat.add(OB.Ob.num(M.Setting.get(Ui.state.of(u), "telemetry.reset", ""), 0n), 1n))))
+  Ui.setting(Ui.info_set(u, "telemetry.id", ""), "telemetry.reset=" ++ Nat.show(Nat.add(OB.Ob.num(M.Setting.get(Ui.state.of(u), "telemetry.reset", ""), 0n), 1n)))
 
 def Share.route(isshare: Bool, +u: Ui, +value: String) -> Act:
   match isshare:
@@ -13035,12 +13187,13 @@ def Share.route(isshare: Bool, +u: Ui, +value: String) -> Act:
 def Share.is(+action: String) -> Bool:
   Bool.or(String.eq(action, "share"), String.eq(action, "share-reset"))
 
-def Tour.act.q(single: Bool, +u: Ui, +action: String) -> Act:
-  match single:
-    case True{}:
-      Share.close(Share.then(Act{u, Nil{}}))
-    case False{}:
-      Share.then(Tour.act.base(u, action))
+def Tour.act.q.finish(single: Bool, a: Act, action: String) -> Act:
+  match a:
+    case Act{+u, +cs}:
+      Bool.pick(Act, single, Share.close(Act{u, cs}), Tour.finish.cat(Tour.act.base(u, action), cs))
+
+def Tour.act.q(single: Bool, u: Ui, action: String) -> Act:
+  Tour.act.q.finish(single, Share.set(u, "off"), action)
 
 def Tour.act.m(moves: Bool, single: Bool, +u: Ui, +action: String) -> Act:
   match moves:
@@ -16149,8 +16302,15 @@ def Ui.act.rpl(rpl: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Act{Rpl.pick(String.eq(action, "reply-to"), u, value), [Focus{"composer"}]}
     case False{}: Ui.act.cpy(String.eq(action, "copy-entry"), u, action, value)
 
+# Setup actions precede the ordinary UI table without changing its indexes.
+def Psv.dispatch(setup: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match setup:
+    case True{}: Psv.act(u, action, value)
+    case False{}: Ui.act.rpl(Bool.or(String.eq(action, "reply-to"), String.eq(action, "reply-drop")), u, action, value)
+
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.act.rpl(Bool.or(String.eq(action, "reply-to"), String.eq(action, "reply-drop")), u, action, value)
+  Psv.dispatch(String.starts_with(action, "provider-setup-"), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

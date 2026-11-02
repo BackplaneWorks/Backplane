@@ -128,12 +128,22 @@ test('managed symlink refused without writing its target', () => {
   const f=fixture('link'),outside=path.join(f.root,'outside'); fs.mkdirSync(f.home,{recursive:true});fs.mkdirSync(outside);
   fs.symlinkSync(outside,path.join(f.home,'kicad-library'),'dir'); assert.match(load().prepare(f.runtime,f.home,f.custom),/symlink/); assert.deepEqual(fs.readdirSync(outside),[]);
 });
-test('concurrent setup lock refuses immediately and releases for retry', () => {
+test('a setup held past the wait is refused, and the lock releases for retry', () => {
   const f=fixture('lock'),api=load(),base=path.join(f.home,'kicad-library');fs.mkdirSync(base,{recursive:true});
   const release=api.lock(path.join(base,'.setup.lock'));
-  try { assert.match(load().prepare(f.runtime,f.home,f.custom),/active/); }
+  try { const t=Date.now(); assert.throws(() => load().lock(path.join(base,'.setup.lock'),200),/active/); assert(Date.now()-t>=150); }
   finally { release(); }
   assert.equal(api.prepare(f.runtime,f.home,f.custom),'');
+});
+test('a setup another process holds briefly is waited for', () => {
+  const f=fixture('lockwait'),base=path.join(f.home,'kicad-library'),lock=path.join(base,'.setup.lock'),held=path.join(f.root,'held');
+  fs.mkdirSync(base,{recursive:true});
+  // another process (a plot or render child) holds the lock for 400 ms
+  const holder=Bun.spawn([process.execPath,'-e',`const f=require('node:fs'),{dlopen}=require('bun:ffi');const c=dlopen(process.platform==='darwin'?'/usr/lib/libSystem.B.dylib':'libc.so.6',{flock:{args:['i32','i32'],returns:'i32'}}).symbols;const fd=f.openSync(${JSON.stringify(lock)},'a+');if(c.flock(fd,6)!==0)process.exit(3);f.writeFileSync(${JSON.stringify(held)},'');Bun.sleepSync(400);`]);
+  const until=Date.now()+5000; while(!fs.existsSync(held)&&Date.now()<until) Bun.sleepSync(10);
+  assert(fs.existsSync(held),'holder never took the lock');
+  const t=Date.now(); assert.equal(load().prepare(f.runtime,f.home,f.custom),''); assert(Date.now()-t>=200);
+  holder.kill();
 });
 test('interrupted lock file is reusable without stale-owner cleanup', () => {
   const f=fixture('interrupted'),lock=path.join(f.home,'kicad-library/.setup.lock');fs.mkdirSync(path.dirname(lock),{recursive:true});fs.writeFileSync(lock,'old owner');

@@ -97,11 +97,14 @@ assert.match(JSON.parse(raw.req('n\u001fp\u001ft\u001fshort')).error, /at least 
 assert.ok(JSON.parse(raw.req('garbage')).error);
 // Settings' API key Save on the web: one api-add request with the value,
 // the name as an environment variable, or why nothing goes (Keys.bad)
-const key = JSON.parse(raw.key_req(`openai key\u001f${F1}`));
+const key = JSON.parse(raw.key_req(`OPENAI_KEY\u001f${F1}`));
 assert.equal(key.name, 'OPENAI_KEY');
 const keyRpc = JSON.parse(key.rpc);
 assert.equal(keyRpc.m, 'bots.voice');
-assert.deepEqual(keyRpc.p, { op: 'api-add', name: 'openai key', value: F1 });
+assert.deepEqual(keyRpc.p, { op: 'api-add', name: 'OPENAI_KEY', value: F1 });
+// a name that is not already its variable's is refused, never changed
+// (apikeys.bend's Keys.bad)
+assert.equal(JSON.parse(raw.key_req(`openai key\u001f${F1}`)).error, 'Use the environment variable name: OPENAI_KEY');
 assert.equal(JSON.parse(raw.key_req(`  \u001f${F1}`)).error, 'Give the key a name');
 assert.equal(JSON.parse(raw.key_req('NAME\u001f  ')).error, 'Paste the key itself');
 assert.equal(JSON.parse(raw.key_req('garbage')).error, 'Give the key a name');
@@ -111,7 +114,8 @@ assert.equal(JSON.parse(raw.key_req('garbage')).error, 'Give the key a name');
 const sealed = (...ps) => JSON.parse(raw.sealed_req(ps.join('\u001f')));
 const sealedRpc = (...ps) => { const o = sealed(...ps); assert.ok(o.rpc, JSON.stringify(o)); return JSON.parse(o.rpc); };
 const refusals = [['key', '', F1], ['nothing', F1]];
-assert.deepEqual(sealedRpc('key', 'openai key', F1).p, { op: 'api-add', name: 'openai key', value: F1 });
+assert.deepEqual(sealedRpc('key', 'OPENAI_KEY', F1).p, { op: 'api-add', name: 'OPENAI_KEY', value: F1 });
+assert.equal(sealed('key', 'openai key', F1).error, 'Use the environment variable name: OPENAI_KEY');
 assert.equal(sealed('key', '', F1).error, 'Give the key a name');
 assert.equal(sealed('key', 'NAME', ' ').error, 'Paste the key itself');
 assert.equal(sealed('nothing', F1).error, 'Nothing to save');
@@ -370,4 +374,4 @@ try {
 } finally {
   for (const x of homes) { try { chmodSync(join(x, 'secrets', 'vault.json'), 0o600); } catch {} rmSync(x, { recursive: true, force: true }); }
 }
-console.log('secret: ok');
+console.log('ok secret: masks, the source gate and the vault');

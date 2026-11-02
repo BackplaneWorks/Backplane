@@ -17,13 +17,14 @@ The request includes a send timestamp and random nonce for authentication and
 replay protection; the server does not retain that timestamp as usage data.
 
 The tour asks once, before the uberbot step. Existing installs see that step
-alone, once their hub's state and version have arrived. Keep sharing, Opt out,
-Next and Skip answer it. Opening Privacy policy or Report an issue leaves the
+alone, once their hub's state and version have arrived. Only Keep sharing (or On in Settings) grants consent. Opt out, Next and Skip
+leave sharing off; Reset id never grants consent. Opening Privacy policy or Report an issue leaves the
 step open. Unanswered installs and updates remain local for three days, then
 leave as anonymous counts without an id. Daily activity requires an answer.
 
 Existing opt-ins see the expanded alpha disclosure once; the new counters
-require its separate `telemetry.usage.asked=1` answer. Existing opt-outs stay
+require its separate affirmative `telemetry.usage.asked=1` answer. An explicit
+decline records `0`, so it does not repeatedly reopen the prompt. Existing opt-outs stay
 off without another prompt. The old install/update/activity protocol and
 consent continue to work. Developer builds with no baked configuration never
 collect the new counters. No pre-alpha or pre-consent history is backfilled.

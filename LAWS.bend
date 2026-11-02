@@ -1,4 +1,7 @@
+import ./src/core/provider-setup.bend as PROVIDERSETUP
+
 import ./src/core/range.bend as BRANGE
+
 import ./src/core/vdict.bend as VDICT
 
 import ./src/mobile/session.bend as MCOMPOSER
@@ -80,7 +83,9 @@ import ./src/core/maildisposition.bend as MDSP
 import ./src/core/mailcontinuity.bend as MCN
 
 import ./src/core/telemetry.bend as TEL
+
 import ./src/core/telemetry-usage.bend as TUSAGE
+
 import ./src/core/usage-counts.bend as UCOUNT
 
 import ./test/telemetry_cases.bend as TCF
@@ -14895,3 +14900,15 @@ law alpha_usage_closed_tokens:
 
 law alpha_usage_mirror_excluded:
   {M.Metrics.local("peer~thread") == False{} : Bool}
+
+# Setup must not present a removed CLI as usable or a failed login as busy.
+law provider_setup_missing_program:
+  for profile: J.Json
+  {PROVIDERSETUP.Ps.ready(False{}, profile) == False{} : Bool}
+
+law provider_setup_failure_retry:
+  {PROVIDERSETUP.Ps.busy("failed") == False{} : Bool}
+
+# Consent requires the affirmative sharing action, not a default/empty choice.
+law alpha_usage_empty_choice_declines:
+  {U.Share.val("") == "off" : String}

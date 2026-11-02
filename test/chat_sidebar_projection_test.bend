@@ -61,8 +61,10 @@ def main() -> IO(Unit):
     C.Check.str("same actor and target retain one image", image.count(image.refresh("self", "view")), "1")
     C.Check.str("different target drops image", image.count(image.refresh("other", "view")), "0")
     C.Check.str("different view drops image", image.count(image.refresh("self", "other")), "0")
-    C.Check.str("dirty action drops image", image.count(A.Actor.mark_dirty(image.seed())), "0")
-    C.Check.str("accepted info update drops image", image.count(A.Actor.info(image.seed(), J.Json.obj([J.KV{"info", J.Json.obj([J.KV{"models.v", J.Str{"new"}}])}]))), "0")
+    # within the same view the image is kept: its key is every input it is
+    # drawn from, so a change misses it (c286c324f, Actor.same.view)
+    C.Check.str("dirty action keeps the keyed image", image.count(A.Actor.mark_dirty(image.seed())), "1")
+    C.Check.str("accepted info update keeps the keyed image", image.count(A.Actor.info(image.seed(), J.Json.obj([J.KV{"info", J.Json.obj([J.KV{"models.v", J.Str{"new"}}])}]))), "1")
     C.Check.str("schematic reply drops image", image.count(A.Actor.sheets(image.seed(), J.Json.obj(Nil{}))), "0")
     C.Check.str("remember preserves exactly one image", image.count(A.Actor.remember(image.seed(), A.Memo{"picture", 10n, False{}, J.Null{}})), "1")
     C.Check.str("replacement still retains only one image", image.count(A.SidebarImage.save(True{}, image.seed(), "next", J.Null{})), "1")

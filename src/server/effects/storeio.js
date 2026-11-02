@@ -30,7 +30,9 @@ function store_prepare(home,codec,from) {
 function store_promote(home,temp) {
   const fs=require('fs'),path=require('path');
   try {
-    if(path.dirname(temp)!==home || !path.basename(temp).startsWith('.store-rebuild-'))throw Error('invalid rebuild directory');
+    // home may be unnormalised (macOS's TMPDIR ends in '/', Windows mixes
+    // separators): compare resolved paths, never the spelling.
+    if(path.resolve(path.dirname(temp))!==path.resolve(home) || !path.basename(temp).startsWith('.store-rebuild-'))throw Error('invalid rebuild directory');
     const next=path.join(temp,'store.db'),target=path.join(home,'store.db');
     // Db.close can leave an empty WAL and its disposable shared index on
     // macOS. Refuse uncheckpointed data or unexpected members before moving

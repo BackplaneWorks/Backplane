@@ -30,7 +30,7 @@ if(provider==='claude'&&args[0]==='auth'){
   else if(q.method==='account/read'){const i=identity();result={account:i?{type:'chatgpt',email:i.email,planType:'fixture'}:null,workspaceRouting:i?{chatgptAccountId:i.workspace}:null};}
   else if(q.method==='account/rateLimits/read')result={rateLimitsByLimitId:{codex:{limitId:'codex',primary:{usedPercent:fixture().used||23,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+300}}}};
   else if(q.method==='model/list')result={data:[{model:'fixture-model',displayName:'Fixture model',supportedReasoningEfforts:[{reasoningEffort:'low'},{reasoningEffort:'high'}]}]};
-  else if(q.method==='account/login/start'){login='fixture-'+path.basename(store);result={loginId:login,verificationUrl:'https://auth.openai.com/codex/device',userCode:'FIXTURE-ONLY'};setTimeout(()=>{save();emit({method:'account/login/completed',params:{loginId:login,success:true}});},fixture().delay||150);}
+  else if(q.method==='account/login/start'){login='fixture-'+path.basename(store);result={loginId:login,verificationUrl:'https://auth.openai.com/codex/device',userCode:'FIXTURE-ONLY'};setTimeout(()=>{const success=!fixture().loginFailure;if(success)save();emit({method:'account/login/completed',params:{loginId:login,success}});},fixture().delay||150);}
   else if(q.method==='account/logout'){try{fs.unlinkSync(marker);}catch{}}
   else if(q.method==='account/login/cancel')setTimeout(()=>process.exit(0),5);
   else {emit({id:q.id,error:{code:-32601,message:'Unsupported fixture method'}});return;}
