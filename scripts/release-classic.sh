@@ -3,7 +3,7 @@
 # built (nothing is compiled or relabelled here):
 #
 #   scripts/release-classic.sh v0.12.1 OUT \
-#     linux-x64 SERVICE_PAYLOAD DESKTOP_ARCHIVE [linux-arm64 ... darwin-arm64 ...]
+#     linux-x64 SERVICE_PAYLOAD DESKTOP_ARCHIVE linux-arm64 ... darwin-arm64 ...
 #
 # SERVICE_PAYLOAD is the accepted service component's payload/ (its
 # backplane-serve, web/, licences and receipts, as built); DESKTOP_ARCHIVE is
@@ -36,6 +36,24 @@ mkdir -p "$out"
 out=$(cd "$out" && pwd)
 sum() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 seds=
+# install.sh advertises all three targets. A partial build must not produce a
+# public installer with an empty checksum (the failure in #467).
+require_targets() {
+  targets=
+  while [ $# -gt 0 ]; do
+    case $1 in
+      linux-x64|linux-arm64|darwin-arm64) ;;
+      *) echo "release-classic: no classic package for $1" >&2; return 1 ;;
+    esac
+    case $targets in *" $1 "*) echo "release-classic: duplicate target $1" >&2; return 1 ;; esac
+    targets="$targets $1 "
+    shift 3
+  done
+  for required in linux-x64 linux-arm64 darwin-arm64; do
+    case $targets in *" $required "*) ;; *) echo "release-classic: missing required installer target $required" >&2; return 1 ;; esac
+  done
+}
+require_targets "$@"
 while [ $# -gt 0 ]; do
   plat=$1 payload=$2 desktop=$3
   shift 3
