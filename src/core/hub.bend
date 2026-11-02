@@ -3185,13 +3185,34 @@ def Mail.request.mark(+valid: Bool, +s: M.State, +now: Nat, +client: U32, +id: S
 def Hub.inbox.id(+s: M.State, +now: Nat, +from: String, +to: String, role: M.Role, +text: String, +msg: String) -> Step:
   Hub.inbox.w(Hub.running(Hub.thread(s, to)), M.Worktree.gone(Hub.thread(s, to)), M.Worktree.waits(s, Hub.thread(s, to), now), s, now, from, to, role, text, msg)
 
+# what the person decided stays in the thread: an answered question as
+# "<question> → <answer>", an approval as Allowed/Denied and what it was
+# for (the card goes once answered, and the drawer's row named only the
+# tool); plans and the rest say nothing here
+def Ans.line(+k: String, +tool: String, +q: String, +answer: String) -> String:
+  Bool.pick(String, String.eq(k, "input"),
+    String.trim(String.take(Maybe.default(&2, String, List.head(&2, String, String.lines(q)), q), 200n)) ++ " → " ++ Bool.pick(String, String.is_empty(String.trim(answer)), "dismissed", String.trim(answer)),
+    Bool.pick(String, String.eq(answer, "accept"), "Allowed", Bool.pick(String, String.eq(answer, "session"), "Allowed for this session", "Denied")) ++ ": " ++ tool ++ " " ++ String.take(q, 160n))
+
+def Ans.said.k(say: Bool, +th: String, +k: String, +tool: String, +q: String, +answer: String, +id: String, +now: Nat) -> List<&2, M.Change>:
+  match say:
+    case True{}:
+      [M.ActivityLogged{th, id, "info", "answer", Ans.line(k, tool, q, answer), now}]
+    case False{}:
+      Nil{}
+
+def Ans.said(a: M.Ask, +answer: String, +id: String, +now: Nat) -> List<&2, M.Change>:
+  match a:
+    case M.Ask{_, +th, +k, +tool, +q, _, _, _}:
+      Ans.said.k(Bool.and(Bool.not(String.is_empty(th)), Bool.or(String.eq(k, "input"), String.eq(k, "approval"))), th, k, tool, q, answer, id, now)
+
 def Hub.answer.plan(impl: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String, +th: String) -> Step:
   match impl:
     case True{}:
       Step.before(M.AskClosed{ask, answer, now} <> Hub.implement.k(Hub.thread(s, th), now), [Reply.ok(client, id)],
         Hub.post(Hub.impl.state(s, th, now), now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, "Implement the proposed plan."))
     case False{}:
-      Step{[M.AskClosed{ask, answer, now}], [Reply.ok(client, id), AskAnswered{ask, answer}]}
+      Step{M.AskClosed{ask, answer, now} <> Ans.said(Ask.find(M.Asks.all(s), ask), answer, Hub.id("k", now, Hub.seq(s)), now), [Reply.ok(client, id), AskAnswered{ask, answer}]}
 
 # an order's question (order_ask, core/order.bend) parks nothing: the
 # person's answer is posted in its thread as their message, which starts
