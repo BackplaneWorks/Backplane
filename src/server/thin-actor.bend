@@ -558,7 +558,8 @@ def Actor.lean(+info: J.Json) -> J.Json:
 # Intent…, a reference, Fab.sync after a move) has its answer applied when
 # the page has moved there; moving to any other view drops it.
 def Actor.owed.scope(+value: String) -> String:
-  Bool.pick(String, String.starts_with(value, "term-input:"), String.drop(value, 11n), value)
+  Bool.pick(String, String.starts_with(value, "term-input:"), String.drop(value, 11n),
+    Bool.pick(String, String.starts_with(value, "kicad-watch:"), String.drop(value, 12n), value))
 
 def Actor.owed.go( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +scope: String, +acc: Map<&2, String>) -> Map<&2, String>:
   match xs:
@@ -645,7 +646,8 @@ def Actor.pending_put( +send: Bool, +command: J.Json, +pending: Map<&2, String>,
   match send:
     case False{}: pending
     case True{}: Map.set(&2, String, pending, J.Json.as_raw(J.Json.get(Actor.rpc(command), "id"), ""),
-      Bool.pick(String, String.eq(J.Json.get_str(Actor.rpc(command), "m", ""), "term.input"), "term-input:" ++ scope, scope))
+      Bool.pick(String, String.eq(J.Json.get_str(Actor.rpc(command), "m", ""), "term.input"), "term-input:" ++ scope,
+        Bool.pick(String, String.eq(J.Json.get_str(Actor.rpc(command), "m", ""), "kicad.watch"), "kicad-watch:" ++ scope, scope)))
 
 def Actor.note( +cs: List<&2, J.Json>, +pending: Map<&2, String>, +scope: String) -> Map<&2, String>:
   match cs:
@@ -1026,6 +1028,19 @@ def Actor.terminal.ack(owned: Bool, quiet: Bool, +a: Actor, +web: Bool, +key: St
     case True{} True{}: Actor.accept(a, Actor.receive(web, Actor.ui(a), key, Actor.now(Actor.ui(a)), o), True{})
     case True{} False{}: Actor.reply_if(True{}, a, web, key, o)
 
+# A successful kicad.watch ACK (the viewer's watch, sent each time it moves:
+# a history step, another board) carries no display state either: no
+# result, no error, and none showing that its answer would clear. Marking
+# the view dirty for it sent view.changed and the page asked for the whole
+# view again, a second full render for every history step (half a second
+# on a real thread). The plot itself comes on its own.
+def Actor.watch.ack(watch: Bool, +u: U.Ui, +o: J.Json) -> Bool:
+  match watch:
+    case False{}: False{}
+    case True{}:
+      Bool.and(J.Json.get_bool(o, "ok", False{}), Bool.and(String.is_empty(J.Json.get_str(o, "error", "")),
+        Bool.and(Maybe.is_none(&2, J.Json, J.Json.get(o, "result")), String.is_empty(U.Tzs.er(u)))))
+
 def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
   match a:
     case Actor{+u, view, +target, +pending, reads, dirty, memo}:
@@ -1034,7 +1049,8 @@ def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
       # owed to this view, or to the one the last action moved to before
       # the page has opened it (Actor.accept)
       Actor.terminal.ack(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "reply"), Bool.or(String.eq(scope, Actor.scope(target)), String.eq(scope, Actor.scope(V.Target.after(u))))),
-        Bool.and(TO.Output.enabled(web, u, U.Ui.scratch(u, "@terminal.owner")), Bool.and(String.starts_with(U.Str.get(pending, id), "term-input:"), Bool.and(J.Json.get_bool(o, "ok", False{}), String.is_empty(J.Json.get_str(o, "error", ""))))),
+        Bool.or(Bool.and(TO.Output.enabled(web, u, U.Ui.scratch(u, "@terminal.owner")), Bool.and(String.starts_with(U.Str.get(pending, id), "term-input:"), Bool.and(J.Json.get_bool(o, "ok", False{}), String.is_empty(J.Json.get_str(o, "error", ""))))),
+          Actor.watch.ack(String.starts_with(U.Str.get(pending, id), "kicad-watch:"), u, o)),
         Actor{u, view, target, Map.del(&2, String, pending, id), reads, dirty, memo}, web, key, o)
 
 # A sent receipt is not a render cache: keep only its bounded value so a
