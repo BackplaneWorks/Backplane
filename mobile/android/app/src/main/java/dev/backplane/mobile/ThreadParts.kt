@@ -636,11 +636,104 @@ fun SubsView(m: AppModel, subs: Subs) {
     }
 }
 
+// a buy thread's title mark: the cart and ORDER, in the accent
+@Composable
+fun OrderMark() {
+    Row(Modifier.padding(end = 8.dp).border(1.dp, PhaseColor.accent, corner).padding(horizontal = 5.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Icon(Icons.Filled.ShoppingCart, null, Modifier.size(12.dp), tint = PhaseColor.accent)
+        Text("ORDER", style = MaterialTheme.typography.labelSmall, color = PhaseColor.accent)
+    }
+}
+
+// a buy thread's Order card under the top bar (screen.bend's Mob.order):
+// "Order · <project>", the steps (done ✓, the one at work lit: violet while
+// the quote is on its way), what happens now, and once quoted the total,
+// the customs line and Buy now (opened in the browser)
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun OrderCardView(c: OrderCard) {
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    val lit = if (c.waiting) PhaseColor.waiting else PhaseColor.accent
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = corner,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).border(1.dp, lit.copy(alpha = 0.6f), corner)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Filled.ShoppingCart, null, Modifier.size(14.dp), tint = PhaseColor.accent)
+                Text("Order", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text("· " + c.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (st in c.steps) Text(if (st.mark == "done") "✓ " + st.label else if (st.mark == "on") "■ " + st.label else st.label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = mono),
+                    fontWeight = if (st.mark == "on") FontWeight.Bold else FontWeight.Normal,
+                    color = when (st.mark) { "done" -> PhaseColor.ok; "on" -> lit; else -> MaterialTheme.colorScheme.outline })
+            }
+            Text(c.line, style = MaterialTheme.typography.labelMedium, color = if (c.waiting) PhaseColor.waiting else MaterialTheme.colorScheme.onSurface)
+            if (c.total.isNotEmpty()) {
+                HorizontalDivider()
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(c.total, style = MaterialTheme.typography.titleSmall.copy(fontFamily = mono), fontWeight = FontWeight.Bold)
+                    Text(c.customs, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                }
+                if (c.pay.isNotEmpty()) Button(onClick = { runCatching { uri.openUri(c.pay) } }, shape = corner) { Text(c.label) }
+            }
+        }
+    }
+}
+
+// a buy thread's question: "Backplane needs", the question, its choices,
+// a box (leading when the answer is typed) sent with Continue or the
+// keyboard's Go as "answer" pre + text, and Skip
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun NeedsCard(m: AppModel, a: Ask) {
+    var text by remember(a.id) { mutableStateOf("") }
+    val send = { if (text.isNotBlank()) m.act("answer", a.pre + text.trim()) }
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = corner,
+        modifier = Modifier.fillMaxWidth().border(1.dp, PhaseColor.accent, corner)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(a.head, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = PhaseColor.accent)
+                a.skip?.let { sk -> TextButton(onClick = { m.act("answer", sk.value) }) { Text(sk.label, color = MaterialTheme.colorScheme.outline) } }
+            }
+            if (a.pre.isEmpty()) {
+                // the files' approval: what would be sent, Send / Not now
+                Box(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+                    Text(a.detail, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono))
+                }
+            } else Text(a.detail, style = MaterialTheme.typography.titleSmall)
+            val chips = @Composable {
+                if (a.buttons.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (b in a.buttons) {
+                        if (b.primary) Button(onClick = { m.act(b.action.ifEmpty { "answer" }, b.value) }, shape = corner) { Text(b.label) }
+                        else OutlinedButton(onClick = { m.act(b.action.ifEmpty { "answer" }, b.value) }, shape = corner) { Text(b.label) }
+                    }
+                }
+            }
+            val box = @Composable {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(text, { text = it }, Modifier.weight(1f), singleLine = true, shape = corner,
+                        placeholder = { Text(a.placeholder) },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Go),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { send() }))
+                    if (a.typed) Button(onClick = send, enabled = text.isNotBlank(), shape = corner) { Text(a.go) }
+                    else OutlinedButton(onClick = send, enabled = text.isNotBlank(), shape = corner) { Text(a.go) }
+                }
+            }
+            if (a.pre.isEmpty()) chips()
+            else if (a.typed) { box(); chips() } else { chips(); box() }
+        }
+    }
+}
+
 // an approval, question or plan waiting on the user
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AskCard(m: AppModel, a: Ask) {
     if (a.kind == "browser") { BrowserAsk(m, a); return }
+    if (a.needs) { NeedsCard(m, a); return }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = corner,
         modifier = Modifier.fillMaxWidth().border(1.dp, PhaseColor.bad, corner)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
