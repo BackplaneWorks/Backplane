@@ -1330,16 +1330,36 @@ html:lang(ja) :is(.body, .set-label, .set-note, .bot-note, .ask-head, .ask-detai
 html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .model-menu .find { padding: 2px 8px 6px; border-bottom: none; }
 
-.browser-tabs { display:flex; gap:4px; overflow-x:auto; align-items:center; padding:6px; flex-shrink:0; }
-.browser-tab { display:flex; flex-shrink:0; border:1px solid var(--line); max-width:220px; }
-.browser-tab.on { background:var(--raise); border-color:var(--accent); }
-.browser-tab-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:60px; }
-.browser-address { display:flex; gap:4px; padding:6px; flex-shrink:0; }
-.browser-address input { flex:1; min-width:40px; }
+.desktop-browser-drive { display:flex; align-items:center; gap:12px; flex-wrap:wrap; flex:none; padding:8px 10px; border-bottom:1px solid var(--line); background:var(--panel); }
+.browser-driver { display:inline-flex; align-items:center; gap:8px; flex:1; color:var(--dim); }
+.browser-driver::before { content:""; width:6px; height:6px; flex:none; background:var(--accent); }
+.desktop-browser-drive.person .browser-driver::before { background:var(--ok); }
+.desktop-browser-drive .browser-control { flex:none; width:auto; min-height:32px; padding:4px 12px; background:transparent; border-color:var(--accent); color:var(--accent); white-space:nowrap; }
+.desktop-browser-drive .browser-control:hover { background:var(--raise); color:var(--text); }
+.browser-tabs { display:flex; gap:4px; overflow-x:auto; align-items:center; padding:6px 10px 0; flex-shrink:0; min-width:0; border-bottom:1px solid var(--line); background:var(--panel); }
+.browser-tab { display:flex; flex:0 1 220px; min-width:88px; border:1px solid transparent; border-bottom:2px solid transparent; }
+.browser-tab.on { background:var(--bg); border-color:var(--line); border-bottom-color:var(--accent); }
+.browser-tab-title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; text-align:left; border:0; background:transparent; padding:6px 10px; }
+.browser-icon { display:inline-flex; align-items:center; justify-content:center; flex:none; width:32px; height:32px; padding:0; background:transparent; border-color:transparent; color:var(--dim); }
+.browser-icon:hover { color:var(--text); background:var(--raise); }
+.browser-tab-close { width:28px; }
+.browser-new { margin-bottom:4px; }
+.browser-address { display:flex; align-items:center; gap:4px; padding:8px 10px; flex-shrink:0; border-bottom:1px solid var(--line); background:var(--panel); }
+.browser-address input { flex:1; min-width:0; width:0; height:32px; padding:4px 10px; background:var(--bg); border:1px solid var(--line); }
+.browser-address .browser-go { color:var(--accent); }
+:is(.browser-tabs,.browser-address,.desktop-browser-drive,.desktop-browser) :focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .tk-live:has(> .desktop-browser) { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
 .bot-body:has(.desktop-browser) { overflow:hidden; }
 .desktop-browser { position:relative; flex:1; min-height:80px; overflow:hidden; background:var(--bg); }
-.desktop-browser-status { display:block; padding:16px; color:var(--dim); }
+.desktop-browser-status { display:block; padding:24px; color:var(--dim); max-width:520px; overflow-wrap:anywhere; }
+.desktop-browser-status:empty { display:none; }
+.browser-reconnect { display:inline-flex; align-items:center; gap:8px; width:auto; margin:0 24px 24px; padding:6px 12px; border-color:var(--accent); color:var(--accent); background:transparent; }
+@media (pointer:coarse) {
+  .browser-icon { width:40px; height:40px; }
+  .browser-tab-close { width:36px; }
+  .desktop-browser-drive .browser-control { min-height:40px; }
+  .browser-address input { height:40px; }
+}
 .settings-path { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .settings-path h2 { margin: 0; font-size: 1em; overflow-wrap: anywhere; }
 .settings-category { text-align: left; white-space: normal; overflow-wrap: anywhere; min-height: 48px; padding: 12px 16px; width: 100%; }
