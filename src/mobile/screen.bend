@@ -1124,15 +1124,27 @@ def Mob.sub.signals.loc(+lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>) -> J.
     case SB.SubRow{_, _, _, _, word, _, _, _, _, _}:
       Mob.sub.signal.obj(Mob.sub.loc(lc, r), U.StateWord.label(lc, word), SB.Subs.signal.of(info, r))
 
+# An additive wire field: old kept screens decode as ordinary rows. A
+# heading is presentation, has no action, and never owns Stop/Cancel.
+def Mob.sub.display(heading: Bool, +lc: I.Loc, +r: SB.SubRow, +info: Map<&2, String>) -> J.Json:
+  match heading:
+    case False{}: Mob.sub.signals.loc(lc, r, info)
+    case True{}:
+      J.Json.obj([J.KV{"id", J.Json.str(SB.Subs.key(r))}, J.KV{"heading", J.Json.bool(True{})},
+        J.KV{"title", J.Json.str(SB.Subs.display.label(lc, r))}, J.KV{"agent", J.Json.bool(False{})},
+        J.KV{"who", J.Json.str("")}, J.KV{"state", J.Json.str("")}, J.KV{"doing", J.Json.str("")},
+        J.KV{"live", J.Json.bool(False{})}, J.KV{"open", J.Json.bool(False{})}, J.KV{"n", J.Json.nat(0n)},
+        J.KV{"steps", J.Json.arr(Nil{})}, J.KV{"act", J.Json.str("")}, J.KV{"value", J.Json.str("")}, J.KV{"cancel", J.Json.str("")}])
+
 def Mob.subs.signals.go(+lc: I.Loc, rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> List<&2, J.Json>:
   match rs:
     case Nil{}: Nil{}
-    case r <> rest: Mob.sub.signals.loc(lc, r, info) <> Mob.subs.signals.go(lc, rest, info)
+    case +r <> rest: Mob.sub.display(SB.Subs.display.heading(r), lc, r, info) <> Mob.subs.signals.go(lc, rest, info)
 
 def Mob.subs.signal.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> J.Json:
   J.Json.obj([J.KV{"busy", J.Json.str(V.View.sub.busy(lc, SB.Subs.active(rs, info)))}, J.KV{"word", J.Json.str(V.View.sub.signal.panel(lc, rs, info))},
     J.KV{"open", J.Json.bool(open)}, J.KV{"act", J.Json.str(SB.Subs.panel.action(open))}, J.KV{"value", J.Json.str(SB.Subs.panel.ask(open, th, rs))},
-    J.KV{"rows", J.Json.arr(Mob.subs.signals.go(lc, SB.Subs.panel.rows(open, rs), info))}])
+    J.KV{"rows", J.Json.arr(Mob.subs.signals.go(lc, SB.Subs.display(SB.Subs.panel.rows(open, rs)), info))}])
 
 def Mob.subs.loc(+lc: I.Loc, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> J.Json:
   Bool.pick(J.Json, List.is_empty(&2, SB.SubRow, rs), J.Null{}, Mob.subs.signal.k(lc, SB.Subs.panel.open(info, th, rs), th, rs, info))

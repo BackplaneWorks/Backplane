@@ -2414,3 +2414,6 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .improvements #improvements-review{min-height:180px;max-height:45vh}
 .improvements #improvements-details,.improvements #improvements-evidence{min-height:70px}
 .improvements>details{font-size:12px}.improvements>details>label{margin:8px 0}
+
+/* Presentation headings share the panel scroll area and own no controls. */
+.sub-section { margin: 8px 0 2px; padding: 6px 10px 2px; border-top: 1px solid var(--line); font-size: 11px; font-weight: 600; color: var(--dim); }

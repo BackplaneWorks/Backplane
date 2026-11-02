@@ -139,6 +139,8 @@ data class SubRow(
     val cancel: String = "",
     // the state as shown, when it differs from the token (Japanese)
     val stateLabel: String = "",
+    // Presentation only; old kept screens omit it.
+    val heading: Boolean = false,
 )
 // word: "3 at work" or "3 done"; open: the rows show (done, it folds to its
 // head); a tap on the head sends act with value
@@ -604,7 +606,7 @@ private fun thread(o: JSONObject) = threadOf(o).copy(
             SubRow(it.optString("id"), it.optBoolean("agent"), it.optString("title"), it.optString("who"), it.optString("state"),
                 it.optString("doing"), it.optBoolean("live"), it.optBoolean("open"), it.optInt("n"),
                 it.optJSONArray("steps").map { st -> SubStep(st.optString("kind"), st.optString("text")) }, it.optString("act"), it.optString("value"),
-                it.optString("cancel"), it.optString("stateLabel"))
+                it.optString("cancel"), it.optString("stateLabel"), it.optBoolean("heading"))
         }, u.optString("word"), u.optBoolean("open", true), u.optString("act"), u.optString("value"))
     },
     asks = o.optJSONArray("asks").map(::askOf),
