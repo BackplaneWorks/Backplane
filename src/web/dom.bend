@@ -364,16 +364,30 @@ def Md.cells.end(+xs: List<&2, String>) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.is_empty(String.trim(Maybe.default(&2, String, List.last(&2, String, xs), "x"))),
     List.take(&2, String, xs, Nat.sub(List.length(&2, String, xs), 1n)), xs)
 
-def Md.trims(xs: List<&2, String>) -> List<&2, String>:
+def Md.trims.go(xs: List<&2, String>, acc: List<&2, String>) -> List<&2, String>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, String, acc)
     case x <> t:
-      String.trim(x) <> Md.trims(t)
+      Md.trims.go(t, String.trim(x) <> acc)
+
+def Md.trims(xs: List<&2, String>) -> List<&2, String>:
+  Md.trims.go(xs, Nil{})
+
+# Keep empty cells and Unicode while splitting in tail position, as for the
+# other Markdown scans. This shared parser also runs on both phone engines.
+def Md.split.go(s: String, cell: String, cells: List<&2, String>) -> List<&2, String>:
+  match s:
+    case SNil{}:
+      List.reverse(&2, String, String.reverse(cell) <> cells)
+    case SCon{Chr{124}, t}:
+      Md.split.go(t, "", String.reverse(cell) <> cells)
+    case SCon{c, t}:
+      Md.split.go(t, SCon{c, cell}, cells)
 
 # a row's cells: | a | b | gives a and b
 def Md.cells(+t: String) -> List<&2, String>:
-  Md.trims(Md.cells.end(List.drop(&2, String, String.split(String.trim(t), '|'), 1n)))
+  Md.trims(Md.cells.end(List.drop(&2, String, Md.split.go(String.trim(t), "", Nil{}), 1n)))
 
 def Md.line.text(blank: Bool, +l: String) -> Line:
   match blank:
