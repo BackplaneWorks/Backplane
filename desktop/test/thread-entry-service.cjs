@@ -18,6 +18,7 @@ const tail=Number(process.env.ENTRY_TAIL||128),sentinel='PRIVATE_TOOL_DETAIL_SEN
 for(let i=0;i<tail;i++)events.push({$:'ActivityLogged',thread:'chat',act:'tail-tool-'+i,tone:'tool',kind:'shell',summary:'Inspecting the saved design\n'+sentinel+' '+i+'\n'+'Large private detail. '.repeat(1000),at:100000+i});
 for(const [key,value]of [['restart.continue','off'],['mail.on','off'],['telemetry.share','off'],['onboard.done','1'],['onboard.uber','1']])events.push({$:'SettingSet',key,value,at:1});
 if(!process.env.ENTRY_REUSE)fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n',{mode:0o600});
+if(process.env.ENTRY_REUSE&&process.env.ENTRY_BOT==='1')fs.appendFileSync(path.join(home,'events.jsonl'),JSON.stringify({$:'BotSet',id:'fixture-bot',name:'Fixture bot',thread:'chat',look:0,persona:'',at:1})+'\n');
 const extraTools=Number(process.env.ENTRY_BUDGET_TAIL||0);
 if(extraTools){assert(extraTools>1024);fs.appendFileSync(path.join(home,'events.jsonl'),Array.from({length:extraTools},(_,i)=>JSON.stringify({$:'ActivityLogged',thread:'chat',act:'budget-tool-'+i,tone:'tool',kind:'shell',summary:'Bounded metadata probe',at:200000+i})).join('\n')+'\n');}
 Object.assign(process.env,{BACKPLANE_HOME:home,BACKPLANE_COPY:'1',BACKPLANE_AGENTS:agents,BACKPLANE_KISTACK_SYNC:'0',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',XDG_CACHE_HOME:home+'/cache',SHELL:'/bin/sh'});
@@ -48,22 +49,12 @@ let browser,page,phase='start';const privateFrames=[];
  try{await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds,{timeout:2500});result.firstMessageAndScrollMs=performance.now()-start;}catch{}
  result.snapshots.push({label:'entry-settled',...(await entry())});await page.screenshot({path:output+'.entry.png'});
  if(extraTools){
-  phase='budget';await page.getByRole('button',{name:'Earlier messages',exact:true}).waitFor();
-  result.budget={extraTools,initialPageRequests:result.wire.requests.filter(r=>r.method==='view.page').length,batches:[]};
-  assert(result.budget.initialPageRequests<=32,'automatic fill has bounded page cost');
-  for(let attempt=0;attempt<4&&!result.continuationMessageAndScrollMs;attempt++){
-   const prior=result.wire.requests.filter(r=>r.method==='view.page').length;
-   const control=page.getByRole('button',{name:'Earlier messages',exact:true});
-   let focused=false;for(let tab=0;tab<160;tab++){if(await control.evaluate(e=>document.activeElement===e)){focused=true;break;}await page.keyboard.press('Tab');}
-   assert(focused,'the bounded continuation is reachable through native Tab navigation');const previous=await control.elementHandle();
-   await page.keyboard.press('Enter');await page.waitForFunction(e=>!e.isConnected,previous);
-   await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return document.getElementById('history-fill-more')||t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds);
-   const snap=await entry();result.snapshots.push({label:'continuation-'+attempt,...snap});
-   const count=result.wire.requests.filter(r=>r.method==='view.page').length-prior;assert(count<=32,'one continuation grants at most32 raw page requests');result.budget.batches.push(count);
-   if(snap.height>snap.view+10&&snap.messages.some(e=>realIds.includes(e.id)))result.continuationMessageAndScrollMs=performance.now()-start;
-  }
-  assert(result.continuationMessageAndScrollMs,'the accessible bounded continuation reaches real message text and usable scrolling without expanding tools');
- }else {assert(result.firstMessageAndScrollMs,'Entering a long tool-heavy conversation immediately paints message text and provides scrollable history without a first wheel gesture');}
+  phase='bounded-recent';const initialPages=result.wire.requests.filter(r=>r.method==='view.page').length;
+  assert.equal(initialPages,0,'initial tool-only view stays within its recent window');assert(result.snapshots.at(-1).folds.length,'recent collapsed tool summary is visible');
+  const earlier=page.getByRole('button',{name:'Load earlier messages',exact:true});await earlier.click();
+  const deadline=Date.now()+3000;while(!result.wire.requests.some(r=>r.method==='view.page')&&Date.now()<deadline)await page.waitForTimeout(25);await page.waitForFunction(()=>!__bpRender.paging().paging);await page.waitForTimeout(300);
+  const pages=result.wire.requests.filter(r=>r.method==='view.page');assert(pages.length>0&&pages.length<=2,'one explicit earlier gesture asks at most two bounded pages');result.budget={extraTools,initialPageRequests:initialPages,explicitPageRequests:pages.length};
+ }else {assert(result.firstMessageAndScrollMs,'Entering a long conversation paints committed message text and provides scrollable history without a first wheel gesture');}
  assert.equal(result.wire.closedDetailBytes,0,'closed tool payloads do not ride ordinary view frames');assert.equal(result.wire.requests.filter(r=>r.phase==='entry'&&r.method==='view.message').length,0,'closed tools do not request body pages');
  assert.equal(result.wire.requests.filter(r=>r.method==='view.action'&&['send','send-alt'].includes(r.action)||['thread.send','thread.post'].includes(r.method)).length,0,'reader navigation never sends a composer turn');assert.deepEqual(result.errors,[]);result.state='passed';
 }catch(e){result.state='failed';result.phase=phase;result.error=e.stack;process.exitCode=1;

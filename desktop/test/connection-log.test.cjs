@@ -28,5 +28,5 @@ test('renderer preserves initiator through close, tracks frame and heartbeat age
  now+=200;c.initiate('heartbeat-expired');c.closed({code:1000,wasClean:true,reason:'contains token PRIVATE'});
  const r=entries.at(-1);assert.equal(r.cause,'heartbeat-expired');assert.equal(r.frameAgeMs,200);assert.equal(r.heartbeatAgeMs,200);
  assert.equal(r.generation,'12');assert.equal(r.visibility,'hidden');assert.equal(r.closeReason,'redacted');assert(!JSON.stringify(r).includes('PRIVATE'));
- for(let i=0;i<100;i++)journal.record('open');assert.equal(journal.rows.length,LIMIT);assert([...store.values()].every(x=>x.length<=MAX_BYTES));
+ for(let i=0;i<100;i++){now+=1000;journal.record('open');}assert.equal(journal.rows.length,LIMIT);assert([...store.values()].every(x=>x.length<=MAX_BYTES));
 });

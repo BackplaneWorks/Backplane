@@ -5,7 +5,7 @@ async function fixture(){
  const host=new ThinHost({hub:'https://fixture',cid:'test',now:()=>0,session:()=>session,target:s=>({kind:'thread',id:s.sel}),
   choice:(s,a,v)=>a==='select'?{...s,sel:v}:s,prepare:s=>s,counter(){},send:r=>sent.push(r),local(){},sessionChanged:s=>session=s,ack:s=>s,
   decode:n=>n,command:c=>commands.push(c),state(){},view:n=>views.push(n),anchor:()=>({id:'',offset:0}),blocked(){},viewerChoice:v=>feedback.push(v)},ThinViews,2**47);
- const reply=(r=sent.at(-1),extra={})=>({t:'reply',id:r.id,ok:true,result:{version:1,hub:'https://fixture',generation:'7',epoch:'test',requestRevision:r.p.requestRevision,target:r.p.target,viewId:r.p.viewId||'A',viewRevision:'1',remoteReady:true,renderer:'web',shown:{type:'text',text:r.p.value||'initial'},session:structuredClone(r.p.session),cmds:[],window:{ids:[],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]},...extra}});
+ const reply=(r=sent.at(-1),extra={})=>({t:'reply',id:r.id,ok:true,result:{version:1,hub:'https://fixture',generation:'7',epoch:'test',requestRevision:r.p.requestRevision,target:r.p.target,viewId:r.p.viewId||'A',viewRevision:'1',remoteReady:true,renderer:'web',shown:{type:'text',text:r.p.value||'initial'},session:structuredClone(r.p.session),cmds:[],window:{ids:[],older:'older-A',hasMore:true,anchor:{id:'',offset:0},partial:[]},...extra}});
  host.greeting({t:'view',version:1,renderer:'web',generation:'7',epoch:'test',limits:{...VIEW_LIMITS}});host.receive(reply());
  return{host,sent,views,commands,feedback,reply};
 }
@@ -35,4 +35,18 @@ test('viewer coalescing never crosses a message or destructive-action ordering f
 test('changing conversation clears visual intent and a late old reply cannot restore it',async()=>{
  const f=await fixture();f.host.request('view-kind','board');const old=f.sent.at(-1);f.host.request('select','B');assert.equal(f.feedback.at(-1),null);
  f.host.receive(f.reply());const count=f.views.length;f.host.receive(f.reply(old));assert.equal(f.views.length,count);
+});
+
+test('viewer switches issue while history is delayed; late history cannot restore the old pane',async()=>{
+ for(const order of ['page-first','viewer-first']) for(const kind of ['board','schematic','3d','split']){
+  const f=await fixture();assert(f.host.page());const page=f.sent.at(-1);
+  f.host.request('view-kind',kind);const action=f.sent.at(-1);
+  assert.equal(action.m,'view.action');assert.equal(action.p.value,kind,'history cannot require a second click');
+  if(order==='page-first'){f.host.receive(f.reply(page));f.host.receive(f.reply(action));}
+  else{f.host.receive(f.reply(action));const count=f.views.length;f.host.receive(f.reply(page));assert.equal(f.views.length,count,'late page must not redraw the old pane');}
+  assert.equal(f.views.at(-1).text,kind);assert.equal(f.feedback.at(-1),null);assert.equal(f.host.active,null);
+ }
+});
+test('closing the viewer does not wait for history',async()=>{
+ const f=await fixture();assert(f.host.page());f.host.request('panel','');assert.equal(f.sent.at(-1).m,'view.action');assert.equal(f.sent.at(-1).p.action,'panel');
 });

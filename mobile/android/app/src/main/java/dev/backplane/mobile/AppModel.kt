@@ -64,7 +64,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun field(name: String, text: String) = core.field(name, text)
     fun vault(text: String) = core.vault(text)
     fun web(path: String) = core.web(path)
+    suspend fun improvementsPreview(text: String, os: String, version: String, details: String) = core.improvementsPreview(text, os, version, details)
+    suspend fun improvementsPreviewBody(body: String) = core.improvementsPreviewBody(body)
     fun attach(data: ByteArray, name: String) = core.attach(data, name)
     fun attachStream(name: String, size: Long, open: () -> java.io.InputStream?) = core.attachStream(name, size, open)
+    fun voicePress(on: Boolean) = core.voicePress(on)
     fun hubUrl(path: String, query: String = "", token: Boolean = true) = core.hubUrl(path, query, token)
 }

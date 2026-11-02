@@ -47,6 +47,20 @@ the reviewed output (IoU >= 0.95), and saves actual PNGs plus source/wire/browse
 identity to build/solid-handedness. At verification, both scores were 1.0.
 The unchanged pre-fix source fails this regression (top silk IoU 0).
 
+Issue #45 was rechecked on `origin/main` at `a8339af0f` on 2026-11-02.
+The production WebGL renderer still shows readable `TOP F12` and
+`BOTTOM R37`, correctly placed asymmetric pads and the chamfer, and the
+authored reversed/rotated back text. Both faces match these reviewed silk
+masks exactly (IoU 1.0). The test now serves the renderer's mesh-worker
+dependency and pins the original reference camera distance: production Fit
+has since changed its framing, independently of handedness.
+
+PR #57's encoder negation was read as a reference and was not applied.
+The wire remains in board axes; WebGL's decoders and the phones' MVPs
+already negate Y. As a negative control, negating the frozen wire's signed
+Y deltas (the encoder change proposed in #57) makes the top render fail
+with silk IoU 0. Adding that negation would restore the reflection.
+
 The numerical check covers signed coordinate deltas, correct normal winding,
 colours, bounds, front/back orientation, and camera panning. The existing
 orbit test covers drag, zoom and pan behavior. No live UI or device is driven.

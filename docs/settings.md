@@ -1,6 +1,6 @@
 # Settings
 
-The web and desktop Settings menu groups the existing fourteen pages under
+The web and desktop Settings menu groups the thirteen pages under
 Your workspace, Agents, Hardware, and Machine & data. Each category has a
 fixed icon slot, its existing localized title, a short description, and a
 chevron. The menu uses two columns on wider screens and one on small screens.
@@ -21,9 +21,14 @@ privacy filtering, selection changes and other action behavior are unchanged.
 Focused evidence: `desktop/test/thin-host.test.cjs` includes failing-before,
 passing-after cases for both Settings open and submenu navigation raced by a
 background refresh. `test/tools/settings_review.mjs` runs the emitted production
-`settings_fixture.bend` in an isolated browser: fourteen categories, icons,
+`settings_fixture.bend` in an isolated browser: thirteen categories, icons,
 search/Enter, Japanese labels and a 390 px layout. It does not write live
-settings or claim live hub/device validation. Native phone UI was not changed.
+settings or claim live hub/device validation.
+
+Antigravity installation and sign-in controls live in Settings → Agents on
+web, desktop and phones. There is no separate Antigravity category; searching
+for Antigravity, Google or Gemini opens Agents. Existing Antigravity settings
+links also open Agents.
 
 ## Show thinking
 

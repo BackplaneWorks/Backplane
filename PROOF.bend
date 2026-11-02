@@ -1,3 +1,5 @@
+import ./src/core/allowance.bend as ALLOWANCE
+
 import ./src/core/lazy-tools.bend as LTOOLS
 
 import ./src/core/range.bend as BRANGE
@@ -9488,6 +9490,12 @@ def Laws.clipath_idempotent():
 
 def Laws.clipath_nvm_newest_first():
   {==}
+
+def Laws.clipath_windows_missing_probe(cur):
+  {==}
+
+def Laws.clipath_windows_claude():
+  {==}
 # ---- notif-policy ----
 
 def Laws.policy_no_alert_unless():
@@ -15270,3 +15278,51 @@ def Laws.project_drive_root_absolute():
 
 def Laws.project_unc_root():
   {==}
+
+def Laws.plot_stamp_opt_out():
+  {==}
+
+def Laws.plot_stamp_other_client():
+  {==}
+
+def Laws.allowance_remaining_reported(): {==}
+
+def Laws.allowance_refresh_held(): {==}
+
+def Laws.allowance_refresh_due(): {==}
+
+def Laws.allowance_future_unknown(): {==}
+
+def Laws.issue_report_new_default(): {==}
+
+def Laws.issue_report_legacy_internal(): {==}
+
+def Laws.issue_report_explicit_issue(legacy): {==}
+
+def Laws.issue_report_explicit_internal(legacy): {==}
+
+def Laws.issue_report_verbatim_text(text): {==}
+
+def Laws.issue_report_manual_details_verbatim(c, text): {==}
+
+def Laws.issue_report_diagnostics_absent(): {==}
+
+def Laws.issue_report_os_description_closed(): {==}
+
+def Laws.issue_report_version_omits_build(): {==}
+
+def Laws.issue_report_version_rejects_path(): {==}
+
+def Laws.issue_report_preview_retains_body(body): {==}
+
+def Laws.issue_report_url_overflow_closed(bs, budget, acc):
+  match bs budget:
+    case Nil{} _: {==}
+    case _ <> _ 0n: {==}
+    case _ <> _ 1n+k: {==}
+
+def Laws.issue_report_official_repository(): {==}
+
+def Laws.issue_report_template_revision(): {==}
+
+def Laws.issue_report_prompt_original_verbatim(description): {==}
