@@ -3605,9 +3605,21 @@ def Work.watch.key(+th: String) -> String:
 def Work.watch(+s: State, +th: String) -> List<&2, String>:
   Bg.lines(Setting.get(s, Work.watch.key(th), ""))
 
-# what a thread's own rows hold (its background rows and watched work)
+# a buy thread's quote on its way: set (to when) from the person's Send
+# until the quote, or why there is none, is posted (core/order.bend's
+# Order.wait.key; server.bend's Od.go, Hub.order.wake). The thread waits on
+# it as on its work: the sidebar's waiting dot, "Waiting since", never
+# Finished (test/ordercard_test.bend)
+def Work.order.key(+th: String) -> String:
+  "order.wait." ++ th
+
+def Work.order(+s: State, +th: String) -> Nat:
+  Bool.pick(Nat, String.is_empty(Setting.get(s, Work.order.key(th), "")), 0n, 1n)
+
+# what a thread's own rows hold (its background rows, watched work and a
+# quote on its way)
 def Work.rows(+s: State, +th: String) -> Nat:
-  Nat.add(Bg.live(Bg.of(s, th)), Bg.live(Work.watch(s, th)))
+  Nat.add(Nat.add(Bg.live(Bg.of(s, th)), Bg.live(Work.watch(s, th))), Work.order(s, th))
 
 # how much work a thread still waits on (0: none)
 def Work.busy(+s: State, +th: String) -> Nat:
@@ -3669,7 +3681,7 @@ def Work.rows.go(ks: List<&2, String>, +s: State, m: Map<&2, Nat>) -> Map<&2, Na
     case Nil{}:
       m
     case +k <> t:
-      Work.rows.go(t, s, Work.rows.put(s, Work.rows.id(k, "bg."), Work.rows.put(s, Work.rows.id(k, "watch."), m)))
+      Work.rows.go(t, s, Work.rows.put(s, Work.rows.id(k, "bg."), Work.rows.put(s, Work.rows.id(k, "watch."), Work.rows.put(s, Work.rows.id(k, "order.wait."), m))))
 
 # every thread's rows by walking every setting (the specification of
 # Work.rows.map; test/work_rows_test.bend holds them equal)
@@ -3683,11 +3695,12 @@ def Work.rows.ids(ks: List<&2, String>, +n: Nat, +s: State, m: Map<&2, Nat>) -> 
     case +k <> t:
       Work.rows.ids(t, n, s, Work.rows.put(s, String.drop(k, n), m))
 
-# Work.rows.map.all reading only the settings named "bg.*" and "watch.*"
-# (Pfx.keys): the sidebar asks it every frame, and walking every setting
-# (10k+ on a real log, each key sliced twice) grew each frame with history
+# Work.rows.map.all reading only the settings named "bg.*", "watch.*" and
+# "order.wait.*" (Pfx.keys): the sidebar asks it every frame, and walking
+# every setting (10k+ on a real log, each key sliced twice) grew each frame
+# with history
 def Work.rows.map(+s: State) -> Map<&2, Nat>:
-  Work.rows.ids(Setting.keys.pre(s, "watch."), 6n, s, Work.rows.ids(Setting.keys.pre(s, "bg."), 3n, s, Map.new(&2, Nat)))
+  Work.rows.ids(Setting.keys.pre(s, "order.wait."), 11n, s, Work.rows.ids(Setting.keys.pre(s, "watch."), 6n, s, Work.rows.ids(Setting.keys.pre(s, "bg."), 3n, s, Map.new(&2, Nat))))
 
 def Work.kids.at.k(r: Map<&2, Nat> & Nat) -> Nat:
   (_, n) = r

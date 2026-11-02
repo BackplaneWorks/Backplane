@@ -694,7 +694,7 @@ def Alert.ask.say.k(pause: Bool, plain: Bool, +tool: String, +detail: String) ->
       Bool.pick(String, Bool.or(plain, String.is_empty(tool)), detail, tool ++ " " ++ detail)
 
 def Alert.ask.say(+tool: String, +detail: String) -> String:
-  Alert.ask.say.k(String.eq(tool, "task_pause"), Bool.or(Bool.or(String.eq(tool, "order_ask"), String.eq(tool, "order_quote")), String.eq(tool, "checks_ok")), tool, detail)
+  Alert.ask.say.k(String.eq(tool, "task_pause"), Bool.or(Bool.or(String.starts_with(tool, "order_ask"), String.eq(tool, "order_quote")), String.eq(tool, "checks_ok")), tool, detail)
 
 def Policy.ask.k(on: Bool, +post: M.State, +now: Nat, +thread: String, +tool: String, +detail: String) -> List<&2, M.Change>:
   match on:
