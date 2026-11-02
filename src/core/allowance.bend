@@ -316,7 +316,7 @@ def Allowance.until.windows(ws: List<&2, J.Json>, until: Nat) -> Nat:
     case w <> t: Allowance.until.windows(t, Allowance.until.window(Allowance.number(J.Json.get(w, "resets_at")), until))
 
 def Allowance.until.parsed(+o: J.Json, provider: String, model: String) -> Nat:
-  Allowance.until.windows(Allowance.windows(o, provider, model), Nat.add(Allowance.nat(o, "at"), 1n + Allowance.ttl(o)))
+  Allowance.until.windows(Allowance.windows(o, provider, model), Nat.add(Allowance.nat(o, "at"), Nat.add(1n, Allowance.ttl(o))))
 
 def Allowance.until(snapshot: String, provider: String, model: String) -> Nat:
   Allowance.until.parsed(Allowance.parse(snapshot), provider, model)
