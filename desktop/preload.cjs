@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
     local: source => ipcRenderer.invoke('desktop:image-local', source),
     copy: png => ipcRenderer.invoke('desktop:image-copy', png),
     reveal: source => ipcRenderer.invoke('desktop:image-reveal', source),
+    save: (png, name) => ipcRenderer.invoke('desktop:image-save', {png, name}),
   }),
   ...(browser ? {browser} : {}),
   chooseFolder: () => ipcRenderer.invoke('desktop:choose-folder'),

@@ -83,7 +83,7 @@
     "src/core/mailrun.bend": "709d501d93ab531e8edd156700e1ba9470e8eefa17391de78f327bb240c15886",
     "src/core/mailtriage.bend": "b033b6f58722ad66612ed6497ddd42fac8365ad1eae20d925531932da4e5a503",
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
-    "src/core/mech.bend": "aed4b2df75b67f6ee8183f42ae6b06d918ea211324581b4a22e5f763c36abd73",
+    "src/core/mech.bend": "7a23d39dd737b3cf8f7cfdb062e2d38b43aec4e38416aff2bd0d375ae2500ea4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "f21634e6301ae9a885e9d9a5796e2d90374098fc0f159753e9ba95114cd17d27",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",

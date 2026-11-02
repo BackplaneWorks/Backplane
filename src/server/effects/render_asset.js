@@ -36,6 +36,9 @@ function ra_cache(create=false) {
 }
 function ra_authorize(cwd,requested,canonical,kind,expected) {
   const {fs,path}=ra_modules();
+  // a STEP's mesh level may follow the kind ("2@high"); it names the
+  // export and its memo, never what may be read
+  const level=/@(low|normal|high|max)$/.exec(String(kind));if(level)kind=String(kind).slice(0,-level[0].length);
   if(!['board','3d','mech','step','glb','2','3','4'].includes(kind))throw Error('Unsupported viewer asset kind.');
   const root=fs.realpathSync(cwd),source=path.resolve(cwd,requested||canonical||''),real=fs.realpathSync(source),ext=path.extname(source).toLowerCase();
   if(!['.kicad_pcb','.step','.stp','.glb'].includes(ext))throw Error('Only saved PCB, STEP or GLB assets are supported.');

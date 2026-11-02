@@ -31,6 +31,8 @@ export async function createPathTraceView({canvas,vendorUrl='/viewer/vendor/view
     setMaterialPolicy(policy){return send('material-policy',{policy});},
     setSolderPreview(enabled){flushCamera();return send('solder-preview',{enabled:!!enabled});},
     present(denoised=true){return send('present',{denoised});},
+    // the frame on screen as a PNG Blob (drawn again in the worker and read at once)
+    snapshot(){flushCamera();return send('snapshot',{});},
     status(){return {...status};},
     diagnostics(){return send('status',{});},
     dispose(){if(disposed)return;notify('dispose',{});disposed=true;generation++;resize.disconnect();document.removeEventListener('visibilitychange',visibility);canvas.removeEventListener('pointerdown',pointerDown);canvas.removeEventListener('pointerup',pointerUp);for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('Renderer disposed'));}pending.clear();worker.terminate();},

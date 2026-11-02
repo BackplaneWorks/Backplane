@@ -3,6 +3,7 @@ import ./kicad.bend as K
 import ./plot.bend as PV
 import ./proc.bend as PR
 import ../core/json.bend as J
+import ../core/mech.bend as MC
 
 # These effects receive only paths established by the trusted thread cwd and
 # canonical Files resolver. Binary GLB data never crosses the Bend JSON bridge.
@@ -31,15 +32,17 @@ def RenderAsset.exported(r: PR.Ran, +cwd: String, +path: String, +canonical: Str
       IO.bind(String, Unit, RenderAssetFx.publish(cwd, path, canonical, kind, revision, out, PV.Pv.missing.note(PV.Pv.missing(String.lines(log), 0n))), IO.print)
     case PR.Ran{_, log}: RenderAsset.error("Original GLB export failed: " ++ String.take(String.trim(log), 500n))
 
+# a kind may carry a STEP's mesh level ("2@high", core/mech.bend's
+# Mech.detail): the asset, and the memo naming it, are that level's
 def RenderAsset.export(cached: Bool, glb: Bool, step: Bool, +cwd: String, +path: String, +canonical: String, +kind: String, +revision: String, +out: String) -> IO(Unit):
   match cached:
     case True{}: RenderAsset.exported(PR.Ran{0, ""}, cwd, path, canonical, kind, revision, out)
     case False{}:
-      IO.bind(PR.Ran, Unit, PV.Pv.glb.run(glb, step, String.eq(kind, "3"), True{}, path, out), r => RenderAsset.exported(r, cwd, path, canonical, kind, revision, out))
+      IO.bind(PR.Ran, Unit, PV.Pv.glb.run(glb, step, String.eq(MC.Mech.detail.kind(kind), "3"), True{}, path, out, MC.Mech.detail.at(kind)), r => RenderAsset.exported(r, cwd, path, canonical, kind, revision, out))
 
 def RenderAsset.out(+cwd: String, +path: String, +canonical: String, +kind: String, +revision: String, +glb: Bool, +step: Bool) -> IO(Unit):
   do IO<Unit>:
-    +out : String <- PV.Pv.solid.out(glb, step, String.eq(kind, "3"), True{}, path)
+    +out : String <- PV.Pv.solid.out(glb, step, String.eq(MC.Mech.detail.kind(kind), "3"), True{}, path, MC.Mech.detail.at(kind))
     cached : String <- RenderAssetFx.cached(out)
     RenderAsset.export(Bool.or(glb, String.eq(cached, "1")), glb, step, cwd, path, canonical, kind, revision, out)
 
