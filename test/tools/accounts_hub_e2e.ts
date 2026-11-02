@@ -77,10 +77,16 @@ try{
  const legacy=binding();check('existing thread begins with legacy credentials',!legacy||JSON.parse(legacy).id==='');
  const A=await add('A'),B=await add('B');
  check('adding labels alone leaves profiles disconnected',A.state==='disconnected'&&B.state==='disconnected');
+ const unavailable=await rpc(client,'accounts.select',{thread,profile:A.id,epoch:A.epoch,expected:legacy||''});
+ check('disconnected account refuses selection with a sign-in next step',unavailable.ok===false&&unavailable.error?.includes('not connected')&&(binding()||'')===(legacy||''),unavailable);
+ const missing=await rpc(client,'accounts.select',{thread,profile:'00000000-0000-0000-0000-000000000000',epoch:1,expected:legacy||''});
+ check('missing account never changes provider or falls back',missing.ok===false&&missing.error?.includes('no longer available')&&(binding()||'')===(legacy||''),missing);
  const loginA=await account({op:'login',profile:A.id}),loginB=await account({op:'login',profile:B.id});
  check('two provider-owned device attempts initiated here',loginA.ok&&loginB.ok, [loginA,loginB]);
  const a=await connected(A.id),b=await connected(B.id);
  check('actual provider verification identifies separate accounts',a.identity?.email==='a@example.test'&&b.identity?.email==='b@example.test',[a,b]);
+ const staleEpoch=await rpc(client,'accounts.select',{thread,profile:a.id,epoch:a.epoch+1,expected:legacy||''});
+ check('stale sign-in generation refuses selection with refresh guidance',staleEpoch.ok===false&&staleEpoch.error?.includes('sign-in changed')&&(binding()||'')===(legacy||''),staleEpoch);
  check('actual catalog and quota belong to each profile',a.catalog?.length&&b.catalog?.length&&a.allowance?.windows?.[0]?.used_percent===12&&b.allowance?.windows?.[0]?.used_percent===63,[a,b]);
  await select(a);const ownerA=binding(),one=await turn('A1');await select(b);const ownerB=binding(),two=await turn('B1');await select(a);const three=await turn('A2');
  check('A to B to A uses separate stores and resumes only A',one.store!==two.store&&three.store===one.store&&three.resumed===one.session&&!two.resumed,[one,two,three]);
@@ -128,9 +134,28 @@ try{
  const cl=await add('Claude','claude');await account({op:'login',profile:cl.id});
  let ca:any;for(let i=0;i<100;i++){ca=(await list()).attempts?.find((x:any)=>x.profile===cl.id&&x.state==='waiting');if(ca?.url)break;await pause(30);}
  check('Claude login exposes its current code=true provider ceremony',ca?.url?.startsWith('https://claude.com/cai/oauth/authorize?code=true&'),ca);
- if(ca){const response=await account({op:'respond',profile:cl.id,attempt:ca.id,code:'fixture-code'});check('Claude in-app response accepted for its bound attempt',response.ok,response);const cp=await connected(cl.id);check('Claude authenticated identity and init-only model catalog',cp.identity?.email==='claude@example.test'&&cp.catalog?.length,cp);}
+ if(ca){const response=await account({op:'respond',profile:cl.id,attempt:ca.id,code:'fixture-code#'+new URL(ca.url).searchParams.get('state')});check('Claude in-app response accepted for its bound attempt',response.ok,response);const cp=await connected(cl.id);check('Claude authenticated identity and init-only model catalog',cp.identity?.email==='claude@example.test'&&cp.catalog?.length,cp);
+  const claudeKey='account.thread.'+thread+'.claude',beforeCodex=binding();
+  const staleOrigin=await rpc(client,'accounts.select',{thread,profile:cp.id,epoch:cp.epoch,expected:setting(claudeKey)||'',expectedProvider:'claude',expectedOwner:beforeCodex});
+  check('stale originating provider cannot redirect the thread',staleOrigin.ok===false&&binding()===beforeCodex,staleOrigin);
+  const cross=await rpc(client,'accounts.select',{thread,profile:cp.id,epoch:cp.epoch,expected:setting(claudeKey)||'',expectedProvider:'codex',expectedOwner:beforeCodex});
+  check('selecting Claude account from Codex switches provider atomically',cross.ok&&events().filter((e:any)=>e.$==='ProviderSet'&&e.id===thread).at(-1)?.provider==='claude',cross);
+  await until(()=>JSON.parse(setting(claudeKey)||'{}').id===cp.id);
+  const back=await rpc(client,'accounts.select',{thread,profile:a.id,epoch:a.epoch,expected:beforeCodex,expectedProvider:'claude',expectedOwner:setting(claudeKey)});
+  check('selecting Codex account returns to its existing binding',back.ok&&binding()===beforeCodex&&events().filter((e:any)=>e.$==='ProviderSet'&&e.id===thread).at(-1)?.provider==='codex',back);
+  const afterCross=await turn('A4-after-Claude-switch');check('provider account round trip resumes the original Codex native session',afterCross.resumed===one.session&&afterCross.store===one.store,afterCross);
+  await rpc(client,'thread.create',{project:project.id,title:'Fresh cross-provider account fixture',env:'local'});
+  const fresh:any=await until(()=>events().find((e:any)=>e.$==='ThreadCreated'&&e.title==='Fresh cross-provider account fixture'));
+  await until(()=>setting('account.thread.'+fresh.id+'.codex'));
+  const freshOriginal=setting('account.thread.'+fresh.id+'.codex');
+  const freshSelect=await rpc(client,'accounts.select',{thread:fresh.id,profile:cp.id,epoch:cp.epoch,expected:'',expectedProvider:'codex',expectedOwner:freshOriginal});
+  check('new thread selects saved account across providers',freshSelect.ok&&events().filter((e:any)=>e.$==='ProviderSet'&&e.id===fresh.id).at(-1)?.provider==='claude',freshSelect);
+  await until(()=>JSON.parse(setting('account.thread.'+fresh.id+'.claude')||'{}').id===cp.id);
+  check('new thread never inherits another thread native session',events().filter((e:any)=>e.$==='SessionSet'&&e.thread===fresh.id).at(-1)?.session==='');
+  check('new thread account selection preserves existing thread binding',binding()===beforeCodex);
+ }
  const logout=await account({op:'disconnect',profile:B.id});check('disconnect B succeeds',logout.ok,logout);const after=await list();check('disconnect B preserves A and legacy thread',after.profiles.find((x:any)=>x.id===A.id)?.state==='connected'&&binding()===ownerA);
- writeFileSync(join(root,'RESULT.json'),JSON.stringify({passed:!failed,scope:'fake CLI actual isolated hub only',home,port,thread,base:'7eccc1e6f29187929d24e0cbb4a8d85127f9d713'},null,2));
+ writeFileSync(join(root,'RESULT.json'),JSON.stringify({passed:!failed,scope:'fake CLI actual isolated hub only',home,port,thread,source:process.env.BACKPLANE_TEST_SOURCE||'unrecorded'},null,2));
 }catch(e){check('bounded actual-hub qualification completed',false,String(e));}
 finally{for(const c of clients)c.ws.close();proc?.kill();if(proc)await proc.exited;console.log('retained fixture '+root);}
 process.exit(failed?1:0);

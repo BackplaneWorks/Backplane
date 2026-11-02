@@ -41,6 +41,12 @@ try{
  const label='UI-'+Date.now();await page.locator('[data-bfield="accountlabel"]').fill(label);await click('acct-add');
  let added:any;for(let i=0;i<100;i++){added=registry().find((p:any)=>p.label===label);if(added)break;await pause(30);}check('Add account through actual UI creates private metadata',!!added);
  if(!added)throw Error('UI add failed');
+ await page.locator('[data-on-click="flag"][data-value="settings"]').first().click();await click('acct-open');await page.waitForSelector('.account-picker');
+ const disconnectedOption=page.getByRole('button',{name:new RegExp('codex · '+label+' · Connect in Settings')});await disconnectedOption.waitFor();
+ check('disconnected saved account is visible with authentication guidance and cannot be selected',await disconnectedOption.isDisabled());
+ await page.setViewportSize({width:390,height:844});check('account status guidance fits phone width',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await click('acct-open');await page.setViewportSize({width:1440,height:1000});
+ await page.locator('[data-on-click="flag"][data-value="settings"]').first().click();await click('settings-page','agents');await page.waitForSelector('[data-bfield="accountlabel"]');
  writeFileSync(join(home,'providers/accounts-v1',added.id,'fixture.json'),JSON.stringify({email:'ui@example.test',workspace:'ui-workspace',delay:2000,used:41}));
  await click('acct-login',added.id);await waitBody('FIXTURE-ONLY');
  await page.screenshot({path:join(out,'desktop-login.png'),fullPage:true});
@@ -57,7 +63,8 @@ try{
  writeFileSync(join(home,'providers/accounts-v1',claudeAdded.id,'fixture.json'),JSON.stringify({email:'ui-claude@example.test',workspace:'ui-claude-workspace'}));
  await click('acct-login',claudeAdded.id);await page.waitForSelector('[data-sealed^="account:"]');
  await page.screenshot({path:join(out,'desktop-claude-login.png'),fullPage:true});
- await page.locator('[data-sealed^="account:"]').fill('fixture-code');
+ const loginUrl=await page.getByRole('link',{name:'Open provider sign-in',exact:true}).getAttribute('href');
+ await page.locator('[data-sealed^="account:"]').fill('fixture-code#'+new URL(loginUrl).searchParams.get('state'));
  await page.getByRole('button',{name:'Complete sign-in',exact:true}).click();await waitBody('ui-claude@example.test');
  check('Claude completes provider ceremony through sealed in-app input',await page.getByText('ui-claude@example.test',{exact:false}).first().isVisible());
  check('provider response is absent from localStorage',await page.evaluate(()=>!Object.values(localStorage).some(x=>x.includes('fixture-code'))));
@@ -72,6 +79,10 @@ try{
  await click('acct-open');await page.waitForSelector('.account-picker');await page.screenshot({path:join(out,'phone-account-picker.png'),fullPage:true});
  check('phone account popup retains IME draft',await composer.inputValue()==='Draft preserved 日本語');
  check('phone popup fits screen',await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ check('Codex thread account popup also shows saved Claude accounts',await page.locator('[data-on-click="acct-select"][data-value="'+claudeAdded.id+'"]').isVisible());
+ await click('acct-select',claudeAdded.id);await page.waitForFunction((label:string)=>document.querySelector('.account-chip')?.textContent?.includes(label),claudeLabel);
+ check('selecting Claude account switches agent and retains draft',await composer.inputValue()==='Draft preserved 日本語');
+ await click('acct-open');await page.waitForSelector('.account-picker');
  await click('acct-select',added.id);await page.waitForFunction((label:string)=>document.querySelector('.account-chip')?.textContent?.includes(label),label);
  check('between-turn selection updates actual account label',await page.locator('.account-chip').textContent().then((x:string|null)=>(x||'').includes(label)));
  check('account switch preserves draft exactly',await composer.inputValue()==='Draft preserved 日本語');
@@ -80,8 +91,15 @@ try{
  await page.locator('[data-on-click="flag"][data-value="settings"]').first().click();await click('settings-page','agents');await click('acct-disconnect',added.id);
  await pause(500);
  check('UI Disconnect reports selected profile disconnected',await page.locator('[data-on-click="acct-login"][data-value="'+added.id+'"]').evaluate((el:any)=>el.parentElement.parentElement.textContent.includes('disconnected')));
+ await click('acct-delete',added.id);await page.getByRole('button',{name:'Confirm delete account',exact:true}).waitFor();check('Delete asks for confirmation',registry().some((p:any)=>p.id===added.id));
+ await click('acct-keep');await page.getByRole('button',{name:'Confirm delete account',exact:true}).waitFor({state:'detached'});check('Keep account cancels deletion',registry().some((p:any)=>p.id===added.id));
+ await click('acct-delete',added.id);await click('acct-delete',added.id);
+ for(let i=0;i<100&&registry().some((p:any)=>p.id===added.id);i++)await pause(30);
+ check('Delete removes the selected provider account',!registry().some((p:any)=>p.id===added.id));
+ check('Delete preserves other provider accounts',registry().some((p:any)=>p.id===claudeAdded.id));
  await pause(300);writeFileSync(join(out,'wire-trace.json'),JSON.stringify(wireTrace,null,2));
- check('Settings actions produce no account-compatibility refusals',!wireTrace.some((x:any)=>x.direction==='framereceived'&&x.error));
+ const accountRequests=new Set(wireTrace.filter((x:any)=>x.direction==='framesent'&&(x.m==='accounts'||x.m?.startsWith('accounts.')||x.p?.action?.startsWith('acct-'))).map((x:any)=>x.id));
+ check('Settings account actions produce no account-compatibility refusals',!wireTrace.some((x:any)=>x.direction==='framereceived'&&x.error&&accountRequests.has(x.id)));
  check('no browser runtime exceptions',errors.length===0,errors);
 }catch(e){check('actual browser flow completed',false,String(e));console.log(String(e));if(page)await page.screenshot({path:join(out,'failure.png'),fullPage:true}).catch(()=>{});}
 finally{writeFileSync(join(out,'wire-trace.json'),JSON.stringify(wireTrace,null,2));writeFileSync(join(out,'RESULT.json'),JSON.stringify({scope:'actual web, fake provider stores only',checks,errors,passed:!failed},null,2));ws?.close();await browser?.close();proc.kill();await proc.exited;}

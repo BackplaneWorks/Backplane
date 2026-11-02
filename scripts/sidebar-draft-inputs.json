@@ -24,7 +24,7 @@
   ],
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
-    "src/core/accounts.bend": "39081d0514b3dc48a6b3796bf2da4684bc7e3c1eb619b9f37df7713f84ab2729",
+    "src/core/accounts.bend": "c477544bc0984a54d7b80d3a0abdad2784efa5f46043f4070e6e500865892f34",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
     "src/core/agy.bend": "ec8c54a6e7d6fc9abd27476b48d76669393fc59d5ee8141bff3c699e3d476fab",
@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "c4e1139954cc06e41e1de8a68104cbf8722b8a40c6a7f924bcc07a54bf763733",
+    "src/core/client.bend": "fde5710e75d9d35c1cb57f571f00e42387f694876d8757d16e072d708db6c946",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -181,7 +181,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "67101494840171ae975d7667009c1e2fbb60879bfe1d055bb78d52d7c5ddcdd1"
+    "src/web/view.bend": "6878959798ac52b6659e6ca0eaf25263f2efd7a450a3a3fb93268f48ff45cb69"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -570,5 +570,19 @@
       "src/mobile/screen.bend",
       "src/web/view.bend"
     ]
+  },
+  "currentAccountSelectionReview": {
+    "baseCommit": "b3c31f74b817b3c6835b7a8049a9594e78a42a9a",
+    "priorManifestSHA256": "88bd5831e437a5c72b42334dc58daa8c21461a652544b933d953aaee9d47f5a5",
+    "changedFiles": [
+      "src/core/accounts.bend",
+      "src/core/client.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "Reviewed account availability, atomic provider/account selection and local deletion controls. Only existing public account inventory, selected thread/provider, binding and explicit account form scratch are read. No ordinary composer draft reader, sidebar image input/key/filter/fallback, unknown scratch retention, authority, bridge or scanner change. Existing settings proposal and onboarding behavior retained.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "fullOutputLogSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+    "accountGuardLogSHA256": "2fff078b00a8b7947478e517f33e384c532e5ebaa4daff49b56276862e495621",
+    "qualification": "Five strict pure suites and account IO suite passed; normal check/proof follow in same receipt."
   }
 }

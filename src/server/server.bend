@@ -11362,22 +11362,34 @@ def Hub.accounts.select.go(same: Bool, +st: M.State, +now: Nat, +client: U32, +r
       +seen = ACCT.Accounts.seen(st, th, provider, profile, epoch)
       B.Step{List.concat(&2, M.Change, [B.Switch.old(M.Queue.items(st, th), th, now),
         ACCT.Accounts.select(st, now, th, provider, profile, epoch, M.Switch.sess(B.Hub.thread(st, th)), count),
-        B.Switch.ctx(Nat.is_eq(count, seen), th, HD.Hand.prefix() ++ "switch:account:" ++ Nat.show(now), HD.Hand.text("Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId " ++ th ++ " for earlier history:", HD.Hand.newest(Nat.sub(count, seen), entries), th), now),
-        [M.ActivityLogged{th, "account:" ++ Nat.show(now), "info", "account", "Selected " ++ Bool.pick(String, String.is_empty(profile), "Default account", J.Json.get_str(ACCT.Accounts.profile(st, profile), "label", "account")) ++ "; conversation context is handed to this account with the next message.", now}]]),
+        B.Switch.ctx(Nat.is_eq(count, seen), th, HD.Hand.prefix() ++ B.Hub.id("switch:account", now, M.State.seq(st)), HD.Hand.text("Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId " ++ th ++ " for earlier history:", HD.Hand.newest(Nat.sub(count, seen), entries), th), now),
+        [M.ActivityLogged{th, B.Hub.id("account", now, M.State.seq(st)), "info", "account", "Selected " ++ Bool.pick(String, String.is_empty(profile), "Default account", J.Json.get_str(ACCT.Accounts.profile(st, profile), "label", "account")) ++ "; conversation context is handed to this account with the next message.", now}]]),
         [B.AgentStop{th}, B.Reply.ok(client, rid)]}
+
+def Hub.accounts.select.provider(+st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
+  +from = B.Hub.provider(B.Hub.thread(st, th))
+  +changes = Bool.pick(List<&2, M.Change>, String.eq(from, provider), Nil{}, B.Switch.changes(st, now, th, from, provider, "", Nil{}, False{}))
+  +switched = M.State.replay(changes, st)
+  +same = Bool.and(String.eq(ACCT.Accounts.id(switched, th, provider), profile), Nat.is_eq(ACCT.Accounts.epoch(switched, th, provider), epoch))
+  B.Step.before(changes, Bool.pick(List<&2, B.Out>, Bool.and(same, Bool.not(String.eq(from, provider))), [B.AgentStop{th}], Nil{}), Hub.accounts.select.go(same, switched, now, client, rid, th, provider, profile, epoch, count, entries))
 
 def Hub.accounts.select.valid(valid: Bool, +st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   match valid:
-    case False{}: B.Step.outs([B.Reply.err(client, rid, "Account selection is stale, unavailable, or a turn is running. Stop the turn and check account status first.")])
-    case True{}: Hub.accounts.select.go(Bool.and(String.eq(ACCT.Accounts.id(st, th, provider), profile), Nat.is_eq(ACCT.Accounts.epoch(st, th, provider), epoch)), st, now, client, rid, th, provider, profile, epoch, count, entries)
+    case False{}: B.Step.outs([B.Reply.err(client, rid, Bool.pick(String, B.Hub.running(B.Hub.thread(st, th)), "Finish or stop the current turn before selecting another account.",
+      Bool.pick(String, String.is_empty(profile), "The thread or account selection changed. Reopen the account menu and try again.", ACCT.Accounts.unavailable(ACCT.Accounts.profile(st, profile), epoch))))])
+    case True{}: Hub.accounts.select.provider(st, now, client, rid, th, provider, profile, epoch, count, entries)
 
 def Hub.accounts.select.step(+st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   +th = J.Json.get_str(p, "thread", "")
-  +provider = B.Hub.provider(B.Hub.thread(st, th))
   +profile = J.Json.get_str(p, "profile", "")
+  +current = B.Hub.provider(B.Hub.thread(st, th))
+  +owner = ACCT.Accounts.owner(st, th)
+  +provider = Bool.pick(String, String.is_empty(profile), current, J.Json.get_str(ACCT.Accounts.profile(st, profile), "provider", ""))
   +epoch = J.Json.get_nat(p, "epoch", 0n)
-  Hub.accounts.select.valid(Bool.and(Bool.and(B.Hub.owns(st, th), Bool.not(FR.Fr.is(th))), Bool.and(ACCT.Accounts.supported(provider), Bool.and(Bool.not(B.Hub.running(B.Hub.thread(st, th))),
-    Bool.and(String.eq(J.Json.get_str(p, "expected", ""), M.Setting.get(st, ACCT.Accounts.binding.key(th, provider), "")), Bool.or(String.is_empty(profile), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch)))))), st, now, client, rid, th, provider, profile, epoch, count, entries)
+  Hub.accounts.select.valid(B.Hub.owns(st, th) && Bool.not(FR.Fr.is(th)) && ACCT.Accounts.supported(provider) && Bool.not(B.Hub.running(B.Hub.thread(st, th))) &&
+    String.eq(J.Json.get_str(p, "expectedProvider", current), current) && String.eq(J.Json.get_str(p, "expectedOwner", owner), owner) &&
+    String.eq(J.Json.get_str(p, "expected", ""), M.Setting.get(st, ACCT.Accounts.binding.key(th, provider), "")) &&
+    Bool.or(String.is_empty(profile), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch)), st, now, client, rid, th, provider, profile, epoch, count, entries)
 
 def Hub.accounts.request.allowed(allowed: Bool, h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
   match allowed h:
@@ -11390,7 +11402,7 @@ def Hub.accounts.request.allowed(allowed: Bool, h: Hub, +client: U32, +rid: Stri
 def Hub.accounts.request(h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.accounts.request.allowed(Bool.or(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "login"), String.eq(J.Json.get_str(p, "op", ""), "disconnect"))),
+      Hub.accounts.request.allowed(Bool.or(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "remove"), Bool.or(String.eq(J.Json.get_str(p, "op", ""), "login"), String.eq(J.Json.get_str(p, "op", ""), "disconnect")))),
         Bool.not(Hub.accounts.active(ACCT.Accounts.threads(st), st, J.Json.get_str(p, "profile", "")))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, rid, p)
 
 # Teaching a bot's browser (docs/teach.md)
