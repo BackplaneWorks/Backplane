@@ -15476,3 +15476,13 @@ def Laws.model_cache_empty_rejected(modified): {==}
 def Laws.model_cache_directory_rejected(size, modified): {==}
 
 def Laws.model_cache_file_accepted(): {==}
+
+# Snapshot release report integrity (PR #247).
+def Laws.checks_report_missing_erc():
+  {==}
+
+def Laws.checks_report_missing_drc():
+  {==}
+
+def Laws.checks_execution_keeps_identity(kind, why):
+  {==}
