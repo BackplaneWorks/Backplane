@@ -23,14 +23,38 @@ def Watchdog.active.t(t: M.Thread) -> Bool:
 def Watchdog.held(+s: M.State, +th: String) -> Bool:
   Bool.not(String.is_empty(M.Setting.get(s, "provider.resume." ++ th, "")))
 
-# watched: a live thread that is neither an ephemeral run (B.Ephemeral.is) nor
-# held on a provider's limit, and works, starts, owns work, waits on the
-# person or waits on another thread
-def Watchdog.active.ix(+kids: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
+# A subscription is a notification route, not owned work. It may outlive
+# its target (or intentionally watch a future file change) without requiring
+# this agent to produce output. Watching it nudged completed/held threads
+# forever, reopening their shelf and resetting the inactivity window.
+# Open asks wait on the person even if the provider turn still says running.
+# Work deadlines remain independent (Watchdog.tick.after / WorkTimeout).
+def Watchdog.executing.ix(+kids: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
+  Bool.or(M.State.running.k(t), Bool.or(M.Queue.starting(s, M.Thread.id(t)),
+    Nat.is_gt(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n)))
+
+# Build the open-ask owner index once per tick/sampler pass; closed ask
+# history must not be scanned once for every executing thread.
+def Watchdog.asks.go(xs: List<&2, M.Ask>, acc: Map<&2, Nat>) -> Map<&2, Nat>:
+  match xs:
+    case Nil{}: acc
+    case M.Ask{_, th, _, _, _, _, True{}, _} <> rest:
+      Watchdog.asks.go(rest, Map.set(&2, Nat, acc, th, 1n))
+    case _ <> rest:
+      Watchdog.asks.go(rest, acc)
+
+def Watchdog.asks(s: M.State) -> Map<&2, Nat>:
+  Watchdog.asks.go(M.Asks.all(s), Map.new(&2, Nat))
+
+def Watchdog.asked(+asks: Map<&2, Nat>, +th: String) -> Bool:
+  Nat.is_gt(M.Work.kids.at.k(Map.get(Nat, 0n, asks, th)), 0n)
+
+def Watchdog.active.with(+kids: Map<&2, Nat>, +asks: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
   Bool.and(Bool.and(Watchdog.active.t(t), Bool.not(Bool.or(M.Config.held(s, M.Thread.id(t)), Bool.or(B.Ephemeral.is(s, M.Thread.id(t)), Watchdog.held(s, M.Thread.id(t)))))),
-    Bool.or(M.State.running.k(t), Bool.or(M.Queue.starting(s, M.Thread.id(t)),
-      Bool.or(Nat.is_gt(M.Work.busy.at(kids, s, M.Thread.id(t)), 0n), Bool.or(Nat.is_gt(B.Hub.pending(t), 0n),
-        Bool.not(List.is_empty(&2, String, M.Wake.ids(s, "wakes.by." ++ M.Thread.id(t)))))))))
+    Bool.and(Watchdog.executing.ix(kids, s, t), Bool.and(Nat.is_eq(B.Hub.pending(t), 0n), Bool.not(Watchdog.asked(asks, M.Thread.id(t))))))
+
+def Watchdog.active.ix(+kids: Map<&2, Nat>, +s: M.State, +t: M.Thread) -> Bool:
+  Watchdog.active.with(kids, Watchdog.asks(s), s, t)
 
 def Watchdog.active(+s: M.State, +t: M.Thread) -> Bool:
   Watchdog.active.ix(M.Work.kids.map(s), s, t)
@@ -144,6 +168,10 @@ def Watchdog.line(+s: M.State, +now: Nat, +th: String, +o: J.Json) -> B.Step:
 def Watchdog.after.go(cs: List<&2, M.Change>, +s: M.State, +now: Nat, step: B.Step) -> B.Step:
   match cs:
     case Nil{}: step
+    case M.AskClosed{+id, _, _} <> rest:
+      +th = B.Pend.thread(B.Ask.find(M.Asks.all(s), id))
+      Watchdog.after.go(rest, s, now, B.Step.cat(step,
+        Watchdog.progress.k(Bool.not(String.is_empty(th)), s, now, th, "request resolved")))
     case +c <> rest:
       Watchdog.after.go(rest, s, now, B.Step.cat(step, Watchdog.change(Bool.not(String.is_empty(Watchdog.source(c))), s, now, c)))
 
@@ -191,7 +219,7 @@ def Watchdog.decided(+d: L.Decision, +s: M.State, +now: Nat, +th: String) -> B.S
   +next = L.Liveness.write(L.Decision.live(d))
   +text = "Stalled thread " ++ th ++ ": no progress since " ++ Nat.show(L.Liveness.last(L.Decision.live(d))) ++ " at " ++ L.Liveness.reason(L.Decision.live(d)) ++ ". Busy work is still running."
   B.Step.cat(B.Step{Bool.pick(List<&2, M.Change>, String.eq(next, M.Setting.get(s, L.Liveness.key(th), "")), Nil{}, [M.SettingSet{L.Liveness.key(th), next, now}]), Nil{}},
-    B.Step.cat(Watchdog.nudge(L.Decision.nudge(d), s, now, th, L.Liveness.nudge.text(L.Liveness.reason(L.Decision.live(d)))),
+    B.Step.cat(Watchdog.nudge(Bool.and(L.Decision.nudge(d), Bool.not(RR.Retry.interrupted(M.Thread.turn(B.Hub.thread(s, th))))), s, now, th, L.Liveness.nudge.text(L.Liveness.reason(L.Decision.live(d)))),
       Watchdog.notify(L.Decision.notify(d), s, now, th, text)))
 
 def Watchdog.ask.reason(xs: List<&2, M.Ask>, +th: String) -> String:
@@ -224,13 +252,13 @@ def Watchdog.keep(known: Bool, +active: Bool, +s: M.State, +now: Nat, +t: M.Thre
     case False{}: B.Step.none()
     case True{}: Watchdog.one(Bool.and(active, Nat.is_eq(L.Liveness.last(Watchdog.live(s, M.Thread.id(t))), 0n)), active, s, now, t)
 
-def Watchdog.threads(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat, step: B.Step) -> B.Step:
+def Watchdog.threads(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +asks: Map<&2, Nat>, +s: M.State, +now: Nat, step: B.Step) -> B.Step:
   match ts:
     case Nil{}: step
     case +t <> rest:
-      +active = Bool.and(Watchdog.active.ix(kids, s, t), Bool.not(M.Dormant.of(s, t)))
+      +active = Bool.and(Watchdog.active.with(kids, asks, s, t), Bool.not(M.Dormant.of(s, t)))
       +one = Watchdog.keep(Bool.or(active, Nat.is_gt(L.Liveness.last(Watchdog.live(s, M.Thread.id(t))), 0n)), active, s, now, t)
-      Watchdog.threads(rest, kids, M.State.replay(B.Queue.changes(one), s), now, B.Step.cat(step, one))
+      Watchdog.threads(rest, kids, asks, M.State.replay(B.Queue.changes(one), s), now, B.Step.cat(step, one))
 
 def Watchdog.all(s: M.State) -> List<&2, M.Thread>:
   match s:
@@ -244,7 +272,7 @@ def Watchdog.tick.after(+s: M.State, +now: Nat, +step: B.Step) -> B.Step:
   B.Step.cat(step, B.Step.cat(timeouts, B.Step.cat(providers, RR.Retry.tick(M.State.replay(B.Queue.changes(providers), s3), now))))
 
 def Watchdog.tick(+s: M.State, +now: Nat) -> B.Step:
-  Watchdog.tick.after(s, now, Watchdog.threads(Watchdog.all(s), M.Work.kids.map(s), s, now, B.Step.none()))
+  Watchdog.tick.after(s, now, Watchdog.threads(Watchdog.all(s), M.Work.kids.map(s), Watchdog.asks(s), s, now, B.Step.none()))
 
 def Watchdog.plan.one(active: Bool, +s: M.State, +t: M.Thread, rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match active:
@@ -254,10 +282,10 @@ def Watchdog.plan.one(active: Bool, +s: M.State, +t: M.Thread, rest: List<&2, J.
         J.KV{"since", J.Json.nat(Nat.mul(L.Liveness.last(Watchdog.live(s, M.Thread.id(t))), 1000n))},
         J.KV{"work", J.Str{M.Bg.show(M.Work.watch(s, M.Thread.id(t)))}}]) <> rest
 
-def Watchdog.plan.go(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +s: M.State) -> List<&2, J.Json>:
+def Watchdog.plan.go(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +asks: Map<&2, Nat>, +s: M.State) -> List<&2, J.Json>:
   match ts:
     case Nil{}: Nil{}
-    case +t <> rest: Watchdog.plan.one(Watchdog.active.ix(kids, s, t), s, t, Watchdog.plan.go(rest, kids, s))
+    case +t <> rest: Watchdog.plan.one(Watchdog.active.with(kids, asks, s, t), s, t, Watchdog.plan.go(rest, kids, asks, s))
 
 def Watchdog.plan(+s: M.State) -> String:
-  J.Json.show(J.Json.arr(Watchdog.plan.go(Watchdog.all(s), M.Work.kids.map(s), s)))
+  J.Json.show(J.Json.arr(Watchdog.plan.go(Watchdog.all(s), M.Work.kids.map(s), Watchdog.asks(s), s)))
