@@ -11,6 +11,9 @@
 	<!-- pairing by QR code: the camera reads the code Settings shows -->
 	<key>NSCameraUsageDescription</key>
 	<string>@NSCameraUsageDescription@</string>
+	<!-- dictation: the composer's mic records while the person dictates -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>@NSMicrophoneUsageDescription@</string>
 	<!-- a pairing link: backplane://pair?url=http://host:3787/%23token=... -->
 	<key>CFBundleURLTypes</key>
 	<array>
