@@ -413,7 +413,24 @@ def Git.exclude(+cwd: String) -> IO(String):
 # KiCad's own droppings (backups, locks, autosaves, the footprint cache)
 # stay behind.
 def Git.carry.sh() -> String:
-  Git.safe.sh() ++ "cd \"$1\" || exit 1; bp_safe; git ls-files -z -m -o --exclude-standard | grep -zv -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | tar -c --null -T - -f - 2>/dev/null | tar -x -f - -C \"$2\" 2>/dev/null; git ls-files -z -d | (cd \"$2\" && xargs -0 -r rm -f --); exit 0"
+  Git.safe.sh() ++ String.join([
+    "set -eu",
+    "export GIT_OPTIONAL_LOCKS=0",
+    "cd \"$1\"",
+    "bp_safe",
+    "test -d \"$2\"",
+    "d=$(mktemp -d \"${TMPDIR:-/tmp}/bp-carry.XXXXXX\")",
+    "trap 'rm -rf \"$d\"' 0",
+    "git diff --no-renames --name-only -z --diff-filter=d HEAD -- > \"$d/changed\"",
+    "git ls-files -z -o --exclude-standard >> \"$d/changed\"",
+    "perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/changed\" > \"$d/copy\"",
+    "if [ -s \"$d/copy\" ]; then tar -c --null -T \"$d/copy\" -f \"$d/files.tar\"; tar -x -f \"$d/files.tar\" -C \"$2\"; fi",
+    "git diff --no-renames --name-only -z --diff-filter=D HEAD -- > \"$d/deleted\"",
+    "xargs -0 sh -c 'd=$1; shift; for p do if [ ! -e \"$p\" ] && [ ! -L \"$p\" ]; then rm -f -- \"$d/$p\" || exit; fi; done' sh \"$2\" < \"$d/deleted\"",
+    "git diff --no-renames --name-only -z --diff-filter=A HEAD -- > \"$d/added\"",
+    "perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/added\" > \"$d/track\"",
+    "xargs -0 sh -c 'd=$1; shift; for p do if [ -e \"$d/$p\" ] || [ -L \"$d/$p\" ]; then git -C \"$d\" add -N -f -- \"$p\" || exit; fi; done' sh \"$2\" < \"$d/track\""
+  ], "\n")
 
 def Git.carry(+top: String, +path: String) -> IO(String):
   Git.seq(P.Proc.run("sh", ["-c", Git.carry.sh(), "sh", top, path], top), _ => Git.done(""))
