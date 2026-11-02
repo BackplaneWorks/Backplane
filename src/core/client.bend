@@ -9515,12 +9515,16 @@ def Hs.go(+u: Ui, +ss: List<&2, HI.Step>, +i: Nat) -> Ui:
 def Hs.n(+ss: List<&2, HI.Step>) -> Nat:
   List.length(&2, HI.Step, ss)
 
-def Hs.step(fwd: Bool, +u: Ui) -> Ui:
+# (each Hs.track parses every step's record: made once here)
+def Hs.step.t(fwd: Bool, +u: Ui, +tr: List<&2, HI.Step>) -> Ui:
   match fwd:
     case True{}:
-      Hs.go(u, Hs.track(u), HI.Hist.fwd(Hs.n(Hs.track(u)), Hs.at(u, Hs.track(u))))
+      Hs.go(u, tr, HI.Hist.fwd(Hs.n(tr), Hs.at(u, tr)))
     case False{}:
-      Hs.go(u, Hs.track(u), HI.Hist.back(Hs.n(Hs.track(u)), Hs.at(u, Hs.track(u))))
+      Hs.go(u, tr, HI.Hist.back(Hs.n(tr), Hs.at(u, tr)))
+
+def Hs.step(fwd: Bool, +u: Ui) -> Ui:
+  Hs.step.t(fwd, u, Hs.track(u))
 
 # Playback: a step every Hs.beat() ms. Each start takes a new token, and a
 # tick only counts with the token still playing, so pausing and playing
@@ -9568,7 +9572,8 @@ def Hs.tick.go(last: Bool, +u: Ui, +ss: List<&2, HI.Step>, +at: Nat, +token: Str
 def Hs.tick.k(mine: Bool, +u: Ui, +token: String) -> Act:
   match mine:
     case True{}:
-      Hs.tick.go(Bool.or(Nat.is_eq(Hs.at(u, Hs.track(u)), 0n), Nat.is_ge(Hs.at(u, Hs.track(u)), Hs.n(Hs.track(u)))), u, Hs.track(u), Hs.at(u, Hs.track(u)), token)
+      +tr = Hs.track(u)
+      Hs.tick.go(Bool.or(Nat.is_eq(Hs.at(u, tr), 0n), Nat.is_ge(Hs.at(u, tr), Hs.n(tr))), u, tr, Hs.at(u, tr), token)
     case False{}:
       Act{u, Nil{}}
 
@@ -9587,9 +9592,10 @@ def Hs.tick.on(+u: Ui, +value: String) -> Act:
   Hs.tick.away(String.eq(HI.Hist.at(String.split(value, '\t'), 0n), Ui.sel(u)), u, HI.Hist.at(String.split(value, '\t'), 0n), HI.Hist.at(String.split(value, '\t'), 1n))
 
 def Hs.diff.flip(+u: Ui) -> Ui:
-  +at = Hs.at(u, Hs.track(u))
-  Hs.go(Hs.set(u, "hist.diff", Bool.pick(String, Bool.and(Hs.diff(u), Nat.is_gt(at, 0n)), "", "1")), Hs.track(u),
-    Bool.pick(Nat, Nat.is_eq(at, 0n), Hs.n(Hs.track(u)), at))
+  +tr = Hs.track(u)
+  +at = Hs.at(u, tr)
+  Hs.go(Hs.set(u, "hist.diff", Bool.pick(String, Bool.and(Hs.diff(u), Nat.is_gt(at, 0n)), "", "1")), tr,
+    Bool.pick(Nat, Nat.is_eq(at, 0n), Hs.n(tr), at))
 
 # Going back to the thread
 # ------------------------
@@ -9627,8 +9633,11 @@ def Hs.anchor.k(m: Maybe<&2, HI.Step>, +es: List<&2, M.Entry>) -> String:
       ""
 
 # the entry the step on show followed
+def Hs.anchor.t(+u: Ui, +tr: List<&2, HI.Step>, +es: List<&2, M.Entry>) -> String:
+  Hs.anchor.k(HI.Hist.nth(tr, Hs.at(u, tr)), es)
+
 def Hs.anchor(+u: Ui, +es: List<&2, M.Entry>) -> String:
-  Hs.anchor.k(HI.Hist.nth(Hs.track(u), Hs.at(u, Hs.track(u))), es)
+  Hs.anchor.t(u, Hs.track(u), es)
 
 # A compact off-page source label does not make its chat message
 # scrollable. Offer the existing jump only when that page holds it.
@@ -10490,11 +10499,28 @@ def Hs.bar.loc(+l: I.Loc, +u: Ui) -> HBar:
 def Hs.bar(+u: Ui) -> HBar:
   Hs.bar.loc(Lang.loc(u), u)
 
+# the bar and the track it was made from (Nil while it is off), so a view
+# draws the scrub's ticks without parsing every step again
+type HBarT is Data:
+  HBarT{bar: HBar, track: List<&2, HI.Step>}
+
+def Hs.bar.track.on(+l: I.Loc, on: Bool, +u: Ui) -> HBarT:
+  match on:
+    case True{}:
+      +tr = Hs.track(u)
+      HBarT{Hs.bar.t(l, tr, u), tr}
+    case False{}:
+      HBarT{Hs.bar.on(l, False{}, u), Nil{}}
+
+def Hs.bar.track(+l: I.Loc, +u: Ui) -> HBarT:
+  Hs.bar.track.on(l, Bool.and(Ui.panel(u), Bool.and(Nat.is_lt(Hs.kind(u), 2n), Bool.not(String.is_empty(Ui.sel(u))))), u)
+
 # Actions (Ui.actions from "hist-go")
 def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:
   match i:
     case 0n:
-      Act{Hs.go(Hs.set(u, "hist.play", ""), Hs.track(u), HI.Hist.index(Hs.track(u), value)), Nil{}}
+      +tr = Hs.track(u)
+      Act{Hs.go(Hs.set(u, "hist.play", ""), tr, HI.Hist.index(tr, value)), Nil{}}
     case 1n:
       Act{Hs.step(False{}, Hs.set(u, "hist.play", "")), Nil{}}
     case 2n:
@@ -10502,7 +10528,8 @@ def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 3n:
       Act{Hs.go(Hs.set(u, "hist.play", ""), Hs.track(u), 1n), Nil{}}
     case 4n:
-      Act{Hs.go(Hs.set(u, "hist.play", ""), Hs.track(u), Hs.n(Hs.track(u))), Nil{}}
+      +tr = Hs.track(u)
+      Act{Hs.go(Hs.set(u, "hist.play", ""), tr, Hs.n(tr)), Nil{}}
     case 5n:
       Hs.play(u)
     case 6n:
