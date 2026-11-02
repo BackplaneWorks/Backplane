@@ -421,7 +421,7 @@ enum NativeMessages {
 
   // native.file.pdf.error
   static func native_file_pdf_error(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? ((arg0 == "send" ? "ハブからPDFを取得できません（12 MBを超えている可能性があります）" : (arg0 == "http" ? "ハブの応答：" + arg1 : "このPDFは表示できません"))) : ((arg0 == "send" ? "The hub could not send this PDF (it may be over 12 MB)" : (arg0 == "http" ? "The hub answered " + arg1 : "This PDF cannot be shown here")))
+    tag == "ja" ? ((arg0 == "send" ? "ハブからPDFを取得できません" : (arg0 == "http" ? "ハブの応答：" + arg1 : "このPDFは表示できません"))) : ((arg0 == "send" ? "The hub could not read this PDF" : (arg0 == "http" ? "The hub answered " + arg1 : "This PDF cannot be shown here")))
   }
 
   // native.file.text.error

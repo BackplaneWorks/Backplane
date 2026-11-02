@@ -404,7 +404,7 @@ export class ThinHost {
         if (typeof text === 'string' && utf8Bytes(text) <= 131072 && this.api.previewSend?.(text) === true && this.api.composing?.(this.session.sel) !== true) {
           const preview = { key: '@sending:' + ++this.previewId, thread: this.session.sel, text };
           operation.preview = preview;this.sendPreviews.set(preview.key, preview);
-          operation.settled = accepted => { this.finishPreview(preview, !accepted && !preview.issued);settled?.(accepted); };
+          operation.settled = accepted => { if (!preview.issued) this.finishPreview(preview, !accepted);settled?.(accepted); };
           // The action keeps its immutable captured draft. Clearing the local
           // field is a newer edit, so a travelling Keep cannot eat later text.
           this.request('draft', '');
@@ -418,7 +418,16 @@ export class ThinHost {
     this.pump(true);return true;
   }
   pendingSends(thread) {
-    return [...this.sendPreviews.values()].filter(p => p.thread === thread).map(({ key, text }) => ({ key, text }));
+    return [...this.sendPreviews.values()].filter(p => p.thread === thread).map(({ key, text, accepted }) => ({ key, text, accepted: accepted === true }));
+  }
+  presentPreviews(thread, ids) {
+    // Preparing a Send only returns the ordinary RPC; even its ACK can
+    // precede the saved picture. Hand off by the client-named message id
+    // in the picture actually being presented, never by matching its text.
+    const shown = new Set(ids);
+    for (const preview of this.sendPreviews.values()) {
+      if (preview.thread === thread && preview.msg && shown.has(preview.msg)) this.finishPreview(preview, false);
+    }
   }
   restorePreview(preview) {
     if (!preview || preview.restored) return;
@@ -931,7 +940,7 @@ export class ThinHost {
         const rpc = JSON.parse(c.text);
         const preview = metadata?.operation?.preview;
         const issued = preview && ['turn.start', 'bots.say'].includes(rpc.m);
-        if (issued) preview.issued = true;
+        if (issued) { preview.issued = true;preview.msg = rpc.p?.msg; }
         this.ordinary.set(rpc.id, { revision: metadata?.revision ?? -1, thread: item.input.session?.sel || '', ...(issued ? { preview } : {}) });
       }
       this.api.command(c, item.input, result.current);
@@ -941,7 +950,7 @@ export class ThinHost {
       }
     }
     const fieldOperation = metadata?.operation;
-    if (fieldOperation?.preview) this.finishPreview(fieldOperation.preview, !fieldOperation.preview.issued);
+    if (fieldOperation?.preview && !fieldOperation.preview.issued) this.finishPreview(fieldOperation.preview, true);
     // (a send whose text is not due to come off the field is done with it)
     if (fieldOperation?.claim && !fieldOperation.claim.due) this.sent.drop(fieldOperation.claim);
     if (fieldOperation?.action === 'bfield') {
@@ -1000,6 +1009,7 @@ export class ThinHost {
         position = freshHistoryPosition(position, result.window.ids);
       } else if (paged || !this.held) this.heldShown(paged);
       else this.heldUpdate();
+      if (pictureCurrent) this.presentPreviews(r.session.sel, result.window.ids);
       if (pictureCurrent) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
         page: sentNewest ? { direction: 'newest' } : paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
@@ -1031,7 +1041,15 @@ export class ThinHost {
     for (const [thread, draft] of this.drafts) if (draft.revision > original.revision) {
       this.session = { ...this.session, drafts: { ...this.session.drafts, [thread]: before.drafts[thread] || '' } };
     }
-    if (envelope.ok === false && original.preview) this.restorePreview(original.preview);
+    if (original.preview) {
+      if (envelope.ok === false) this.finishPreview(original.preview, true);
+      else {
+        original.preview.accepted = true;
+        // Accepted text no longer belongs in the saved draft, while its
+        // display-only bubble still bridges the next timeline picture.
+        this.api.sendFeedback?.(false, original.preview.thread, this.session.drafts[original.preview.thread] || '');
+      }
+    }
     for (const thread of new Set([...Object.keys(before.drafts), ...Object.keys(this.session.drafts)])) {
       if (this.session.drafts[thread] !== before.drafts[thread]) this.draftChanged(thread, this.session.drafts[thread] || '');
     }
