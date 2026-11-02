@@ -322,6 +322,10 @@ type Msg is Data:
   # the review gate's verdict (core/order.bend's Order.gate): what the hub
   # posts and asks in the buy thread
   OrderGate{thread: String, kind: Nat, md: String}
+  # a quote as the buy thread's card shows it (core/order.bend's Order.sum):
+  # a fresh one (just posted) always, a quote's progress only while it is
+  # the card's (Order.sum.keeps)
+  OrderQuoted{thread: String, sum: String, id: String, fresh: Bool}
   # the uberbot's sync (core/ubersync.bend): a step touched its log or
   # promoted a bot ("kick": sync now; "init": log a new uberbot's first
   # ops, then sync); another machine's answer to our uber.sync request
@@ -16589,6 +16593,20 @@ def Od.progress(+inbox: Chan(Msg), +thread: String, +id: String, +text: String, 
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, OrderNote{thread, id, text, note})
     return Unit{}
 
+# the quote as the thread's card shows it (Hub.order.quoted)
+def Od.card(+inbox: Chan(Msg), +thread: String, +sum: String, +qid: String, fresh: Bool) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, OrderQuoted{thread, sum, qid, fresh})
+    return Unit{}
+
+# a quote's new state, for its card (nothing when it did not change)
+def Od.card.k(same: Bool, +inbox: Chan(Msg), +thread: String, +sum: String, +qid: String) -> IO(Unit):
+  match same:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      Od.card(inbox, thread, sum, qid, False{})
+
 def Od.status.k(+st: String, +last: String, +q: J.Json, +inbox: Chan(Msg), +thread: String, +qid: String) -> IO(Unit):
   Bool.pick(IO(Unit), Bool.or(String.eq(st, last), String.is_empty(OR.Order.status.text(st, J.Json.get_str(J.Json.get_obj(q, "order"), "tracking", "")))),
     IO.pure(Unit, Unit{}), Od.progress(inbox, thread, "o:" ++ qid ++ ":" ++ st, OR.Order.status.text(st, J.Json.get_str(J.Json.get_obj(q, "order"), "tracking", "")),
@@ -16610,12 +16628,63 @@ def Od.watch(n: Nat, +inbox: Chan(Msg), +home: String, +server: String, +qid: St
         +q : J.Json <- ODI.Od.get(home, server, install, qid, token)
         +st : String = OR.Order.state(q)
         Od.status.k(st, last, q, inbox, thread, qid)
+        Od.card.k(Bool.or(String.is_empty(st), String.eq(st, last)), inbox, thread, OR.Order.sum(q, ODI.Od.pay(server, qid, token)), qid)
         ODI.Od.keep(home, qid, token, thread, server, Bool.pick(String, String.is_empty(st), last, st))
         Od.watch.next(st, last, l => Od.watch(m, inbox, home, server, qid, token, thread, l))
 
+def Od.quoted.k(ok: Bool, +q: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      do IO<Unit>:
+        Od.post(inbox, thread, "q:" ++ qid, OR.Order.quote.md(OR.Order.quote.customs(J.Json.get_str(J.Json.get_obj(q, "quote"), "markdown", ""), OR.Order.ddp(q)), ODI.Od.pay(server, qid, token),
+          J.Json.get_str(J.Json.get_obj(q, "quote"), "pay_label", "Buy now"), OR.Order.payable(q)))
+        Od.card(inbox, thread, OR.Order.sum(q, ODI.Od.pay(server, qid, token)), qid, True{})
+        ODI.Od.keep(home, qid, token, thread, server, "quoted")
+        Od.wake(inbox, thread, "The quote is posted in this thread. " ++ OR.Order.said(q))
+        Od.watch(9000n, inbox, home, server, qid, token, thread, "quoted")
+    case False{}:
+      Od.wake(inbox, thread, "The quote could not be worked out: " ++ J.Json.get_str(q, "error", "no answer from the order server") ++ ".")
+
+def Od.quoted(+q: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String) -> IO(Unit):
+  Od.quoted.k(Bool.not(String.is_empty(J.Json.get_str(q, "status", ""))), q, inbox, home, server, qid, token, thread)
+
+def Od.sent(+up: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +install: String, +thread: String) -> IO(Unit):
+  Bool.pick(IO(Unit), String.is_empty(J.Json.get_str(up, "token", "")),
+    Od.wake(inbox, thread, "The files were not taken: " ++ J.Json.get_str(up, "error", "no answer") ++ "."),
+    IO.bind(J.Json, Unit, ODI.Od.poll(60n, home, server, install, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", "")),
+      q => Od.quoted(q, inbox, home, server, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", ""), thread)))
+
+# the person said yes: the thread waits on the quote (OR.Order.wait.set,
+# until Hub.order.wake), then upload, wait, post, and tell the agent
+def Od.go(+inbox: Chan(Msg), +home: String, +server: String, +dir: String, ps: List<&2, String>, +thread: String) -> IO(Unit):
+  do IO<Unit>:
+    +now : Nat <- Now.nat()
+    w : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[OR.Order.wait.set(thread, now)]})
+    +install : String <- ODI.Od.install(home)
+    +up : J.Json <- ODI.Od.upload(home, server, install, dir, ps)
+    ODI.Od.keep(home, J.Json.get_str(up, "id", "none"), J.Json.get_str(up, "token", ""), thread, server, "quoting")
+    Od.sent(up, inbox, home, server, install, thread)
+
+# a quote the hub was getting when it stopped (its record says quoting):
+# the thread waits on it again and its poll goes on, to post it (Od.sent;
+# before, it was only watched and never posted)
+def Od.resume.quoting(+inbox: Chan(Msg), +home: String, +j: J.Json) -> IO(Unit):
+  do IO<Unit>:
+    +now : Nat <- Now.nat()
+    w : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[OR.Order.wait.set(J.Json.get_str(j, "thread", ""), now)]})
+    +install : String <- ODI.Od.install(home)
+    Od.sent(j, inbox, home, J.Json.get_str(j, "server", ""), install, J.Json.get_str(j, "thread", ""))
+
+def Od.resume.k(quoting: Bool, +inbox: Chan(Msg), +home: String, +j: J.Json) -> IO(Unit):
+  match quoting:
+    case True{}:
+      Od.resume.quoting(inbox, home, j)
+    case False{}:
+      Od.watch(9000n, inbox, home, J.Json.get_str(j, "server", ""), J.Json.get_str(j, "id", ""), J.Json.get_str(j, "token", ""), J.Json.get_str(j, "thread", ""), J.Json.get_str(j, "status", ""))
+
 def Od.resume.one(+inbox: Chan(Msg), +home: String, +j: J.Json) -> IO(Unit):
   Bool.pick(IO(Unit), Bool.or(OR.Order.done(J.Json.get_str(j, "status", "")), String.is_empty(J.Json.get_str(j, "token", ""))), IO.pure(Unit, Unit{}),
-    Od.watch(9000n, inbox, home, J.Json.get_str(j, "server", ""), J.Json.get_str(j, "id", ""), J.Json.get_str(j, "token", ""), J.Json.get_str(j, "thread", ""), J.Json.get_str(j, "status", "")))
+    Od.resume.k(String.eq(J.Json.get_str(j, "status", ""), "quoting"), inbox, home, j))
 
 def Od.resume.all(ps: List<&2, String>, +inbox: Chan(Msg), +home: String) -> IO(Unit):
   match ps:
@@ -16633,34 +16702,6 @@ def Od.resume(+inbox: Chan(Msg), +home: String) -> IO(Unit):
     r : P.Ran <- P.Proc.run("sh", ["-c", "ls -1 2>/dev/null | grep '^q_.*\\.json$' | head -n 200"], ODI.Od.orders(home))
     Od.resume.all(String.lines(ODI.Od.ran(r)), inbox, home)
 
-def Od.quoted.k(ok: Bool, +q: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String) -> IO(Unit):
-  match ok:
-    case True{}:
-      do IO<Unit>:
-        Od.post(inbox, thread, "q:" ++ qid, OR.Order.quote.md(J.Json.get_str(J.Json.get_obj(q, "quote"), "markdown", ""), ODI.Od.pay(server, qid, token),
-          J.Json.get_str(J.Json.get_obj(q, "quote"), "pay_label", "Buy now"), OR.Order.payable(q)))
-        ODI.Od.keep(home, qid, token, thread, server, "quoted")
-        Od.wake(inbox, thread, "The quote is posted in this thread. " ++ OR.Order.said(q))
-        Od.watch(9000n, inbox, home, server, qid, token, thread, "quoted")
-    case False{}:
-      Od.wake(inbox, thread, "The quote could not be worked out: " ++ J.Json.get_str(q, "error", "no answer from the order server") ++ ".")
-
-def Od.quoted(+q: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String) -> IO(Unit):
-  Od.quoted.k(Bool.not(String.is_empty(J.Json.get_str(q, "status", ""))), q, inbox, home, server, qid, token, thread)
-
-def Od.sent(+up: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +install: String, +thread: String) -> IO(Unit):
-  Bool.pick(IO(Unit), String.is_empty(J.Json.get_str(up, "token", "")),
-    Od.wake(inbox, thread, "The files were not taken: " ++ J.Json.get_str(up, "error", "no answer") ++ "."),
-    IO.bind(J.Json, Unit, ODI.Od.poll(60n, home, server, install, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", "")),
-      q => Od.quoted(q, inbox, home, server, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", ""), thread)))
-
-# the person said yes: upload, wait, post, and tell the agent
-def Od.go(+inbox: Chan(Msg), +home: String, +server: String, +dir: String, ps: List<&2, String>, +thread: String) -> IO(Unit):
-  do IO<Unit>:
-    +install : String <- ODI.Od.install(home)
-    +up : J.Json <- ODI.Od.upload(home, server, install, dir, ps)
-    ODI.Od.keep(home, J.Json.get_str(up, "id", "none"), J.Json.get_str(up, "token", ""), thread, server, "quoting")
-    Od.sent(up, inbox, home, server, install, thread)
 
 # Send (or allowed for the session): upload; Not now: the agent is told;
 # the empty answer (the run was retired: Stop, archive, delete) tells no one
@@ -16734,8 +16775,16 @@ def Od.status.ask(+home: String, +thread: String, +rid: J.Json, +reply: Chan(Str
     +install : String <- ODI.Od.install(home)
     Od.status.said(String.is_empty(J.Json.get_str(j, "token", "")), j, home, install, rid, reply)
 
+# (and while the files are not sent or the quote is on its way, that:
+# OR.Order.status.of; an agent told the quote "can't be paid yet" while it
+# was being made invented problems for it)
+def Od.status.now(+now: String, +home: String, +thread: String, +rid: J.Json, +reply: Chan(String)) -> IO(Unit):
+  Bool.pick(IO(Unit), String.is_empty(now), Od.status.ask(home, thread, rid, reply), Gg.say(reply, rid, True{}, now))
+
 # order_ask: a question card with the choices as buttons (the person may
-# type instead); the answer goes back to the agent as it is
+# type instead), or with typed a box (OR.Order.ask.tool) whose quick choice
+# is the earlier order's answer (last: OR.Order.ask.choices); the answer
+# goes back to the agent as it is
 def Od.choices(xs: List<&2, J.Json>) -> List<&2, String>:
   match xs:
     case Nil{}:
@@ -16753,8 +16802,8 @@ def Od.question(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now:
       do IO<Hub>:
         +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
         Gg.say(reply, J.Json.get_obj(o, "id"), True{}, OR.Order.ask.asked())
-        Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "input", "order_ask",
-          J.Json.get_str(Gg.args(o), "question", ""), String.join(Od.choices(J.Json.elems(J.Json.get_obj(Gg.args(o), "options"))), "\n"), now}], Nil{}})
+        Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "input", OR.Order.ask.tool(J.Json.get_bool(Gg.args(o), "typed", False{})),
+          J.Json.get_str(Gg.args(o), "question", ""), OR.Order.ask.choices(J.Json.get_str(Gg.args(o), "last", ""), Od.choices(J.Json.elems(J.Json.get_obj(Gg.args(o), "options")))), now}], Nil{}})
 
 def Od.gate.said(+said: J.Json, +inbox: Chan(Msg), +thread: String, +rid: J.Json, +reply: Chan(String)) -> IO(Unit):
   do IO<Unit>:
@@ -16785,9 +16834,9 @@ def Hub.order.t(i: Nat, h: Hub, +thread: String, +o: J.Json, +reply: Chan(String
       do IO<Hub>:
         IO.spawn(Unit, Od.review.or.gate(String.eq(J.Json.get_str(Gg.args(o), "action", ""), "gate"), B.Hub.cwd(st, B.Hub.thread(st, thread)), inbox, thread, o, reply, now))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case _ Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+    case _ Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Od.status.ask(Cfg.home(cfg), thread, J.Json.get_obj(o, "id"), reply))
+        IO.spawn(Unit, Od.status.now(OR.Order.status.of(st, thread), Cfg.home(cfg), thread, J.Json.get_obj(o, "id"), reply))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def Hub.order.k(buy: Bool, h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
@@ -16832,10 +16881,17 @@ def Hub.order.note(h: Hub, +thread: String, +id: String, +text: String, +ping: S
       Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{M.MessagePosted{thread, id, M.Assistant{}, text, now} <>
         Hub.order.ping(Bool.and(Bool.not(String.is_empty(ping)), NO.Policy.on(st, "settled")), st, now, thread, id, ping), Nil{}})
 
+# (and a quote on its way is no longer: OR.Order.unwait)
 def Hub.order.wake(h: Hub, +thread: String, +text: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Hub.post(st, now, thread, B.Hub.id("m", now, B.Hub.seq(st)), M.System{}, "[Backplane] " ++ text))
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step.before(OR.Order.unwait(st, thread, now), Nil{}, B.Hub.post(st, now, thread, B.Hub.id("m", now, B.Hub.seq(st)), M.System{}, "[Backplane] " ++ text)))
+
+# a quote for the buy thread's card (OR.Order.sum.set)
+def Hub.order.quoted(h: Hub, +thread: String, +sum: String, +id: String, fresh: Bool, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{OR.Order.sum.set(st, thread, sum, id, fresh, now), Nil{}})
 
 # the review gate in the buy thread: nothing when passed; else the
 # question (an order_ask: the person's answer comes as their message), after
@@ -17168,6 +17224,8 @@ def Msg.kind(m: Msg) -> String:
       "order_wake"
     case OrderGate{_, _, _}:
       "order_gate"
+    case OrderQuoted{_, _, _, _}:
+      "order_quoted"
     case BoatThreads{_}:
       "boat_threads"
     case ThinWarm{_, _}:
@@ -18468,6 +18526,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.order.wake(h, thread, text, now)
     case OrderGate{+thread, kind, +md}:
       Hub.order.gate(kind, h, thread, md, now)
+    case OrderQuoted{+thread, +sum, +id, fresh}:
+      Hub.order.quoted(h, thread, sum, id, fresh, now)
     case BoatThreads{status}:
       Hub.chips(Hub.state(h), status, now)
     case ThinWarm{i, m}:

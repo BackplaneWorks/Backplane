@@ -41,7 +41,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "0fbaf24da084f9cf3ef139f7e2e8d0c30720727dd2d2ac9ba152351830311518",
+    "src/core/client.bend": "c4e1139954cc06e41e1de8a68104cbf8722b8a40c6a7f924bcc07a54bf763733",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -85,14 +85,14 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "7a23d39dd737b3cf8f7cfdb062e2d38b43aec4e38416aff2bd0d375ae2500ea4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "5d914d165c23c46b1549e453dc0dbae170b99341b4da0b6f7b49a26764d0e6bd",
+    "src/core/model.bend": "4cc163ecba3d604d54e3a62005b7b546c3376d10ac8c9c1e08119db561701525",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
     "src/core/msgs.bend": "c900c89d26a77210d01c43d83f40d3b67a17b5e1145a9a8aec798ee6e80997da",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
-    "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
+    "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
     "src/core/onboard.bend": "3da1d256efc3f426cfa4d49af80414e09e960aeb026ce01cf858e90f0e834394",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
-    "src/core/order.bend": "db37827a6d85d13b50add86e19e055417f4153bb0b44334e005ba3c4e93abae5",
+    "src/core/order.bend": "38ab09655ff3ef6df11dc93bad9932077d13264dfe527d3c63c06ffba07bcc82",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "3baf611ec774f024241959fbfec5f20474b3287c54d82ac548635d12b9e0f9ef",
     "src/core/presentation.bend": "33f6c5ceea7e42d55fdd324a6fa7067fb8a90aa0432363dac979960f91a24674",
@@ -119,7 +119,7 @@
     "src/core/sidebar-drafts.bend": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
     "src/core/sidebar-read.bend": "4695576d308745ba70284fb90dee0e4aad99ddce8b64f4400297676932b4d12d",
     "src/core/sign.bend": "f6c4b636f7be64f7a4a03e8cc4d0b19eae2696e8c08a92236ad7e378d7120edc",
-    "src/core/signal.bend": "f8c4c9d95ea321e42676af8fb4ac159bcf15f88a9b2c51ed25a379c3d28a1e34",
+    "src/core/signal.bend": "c532b51dc417bb7d5b3368a99f812aa4a9ce890da97e2a1792d4e2769315066e",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "65ab4ed3f26f023be1e76e47f4eec7e48a82eefc509b2f5366085ff1df4f140b",
@@ -181,7 +181,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "6ce23bdbf9edf6ab0f53c6c123ec10a8fd8ed3c7935bb24b92d8262c7f0e82ef"
+    "src/web/view.bend": "db69391e192d77c012db20ca4eff9c865bc39a1fe538a919b1a5705c933a1afc"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -507,7 +507,7 @@
     "changedMergedHashes": {
       "src/core/client.bend": "5ab997e47daf3bc8832495c3c4f23decc29bf05ded096fcd86c7487a2a71f0b9",
       "src/core/fold.bend": "ed6d3b880d90d6d50d5f70e73620097ace6c2e5101288041cd8c9bbb5ebfb851",
-      "src/core/model.bend": "5d914d165c23c46b1549e453dc0dbae170b99341b4da0b6f7b49a26764d0e6bd",
+      "src/core/model.bend": "4cc163ecba3d604d54e3a62005b7b546c3376d10ac8c9c1e08119db561701525",
       "src/core/msgs.bend": "c900c89d26a77210d01c43d83f40d3b67a17b5e1145a9a8aec798ee6e80997da"
     },
     "scope": "Normal merge preserves every new main feature and original telemetry reviews. Client older shelf retains selected project using already-keyed selection; review request scratch keys are retained by existing unknown-field policy; provider setup default reads existing model metadata. New subagent projections use existing full info inputs. Fold error fallback preserves compatibility wrappers. Model subagent token-line helpers do not alter private Ext usage storage. Catalog Retry duplicates had identical values; source catalogs deduplicated and generated msgs rebuilt, preserving incoming status/history labels. No changes to draft readers, scanner, key filtering, bridge authority or fallback policy.",
@@ -556,7 +556,7 @@
     "checks": 24,
     "fullOutputLogSHA256": "3bc3cb5debd33b5c0935602c82d7a8927335f023864d3f6847aca70fd1348101",
     "changed": {
-      "src/core/client.bend": "0fbaf24da084f9cf3ef139f7e2e8d0c30720727dd2d2ac9ba152351830311518",
+      "src/core/client.bend": "c4e1139954cc06e41e1de8a68104cbf8722b8a40c6a7f924bcc07a54bf763733",
       "src/server/thin-view.bend": "fe0859ebc70442a7a89b41bf6d53b19871642b982acddb1d2d64d2069c567d2c",
       "src/web/view.bend": "76828cdfd3608c94464e1677b1559fadbdb9cf9afcb5c16120c91fedf8f45ba1"
     }

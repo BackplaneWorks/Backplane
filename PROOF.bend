@@ -4796,6 +4796,9 @@ def Laws.recover_interrupts_running():
 def Laws.recover_closes_asks():
   {==}
 
+def Laws.recover_keeps_order_ask():
+  {==}
+
 def Laws.recover_leaves_idle():
   {==}
 
@@ -11872,6 +11875,45 @@ def Laws.order_gate_cuts_summary():
   {==}
 
 def Laws.order_ask_alert_plain(q):
+  {==}
+
+def Laws.order_ask_typed_alert_plain(q):
+  {==}
+
+def Laws.order_ask_typed_survives_retire():
+  {==}
+
+def Laws.order_ask_last_value():
+  {==}
+
+def Laws.order_card_files_first(st):
+  {==}
+
+def Laws.order_card_waits(st):
+  {==}
+
+def Laws.order_card_waiting_says(st, tracking):
+  {==}
+
+def Laws.order_card_question_first(i, st):
+  {==}
+
+def Laws.order_card_no_buy_paid():
+  {==}
+
+def Laws.order_card_buys_quoted():
+  {==}
+
+def Laws.order_customs_paid():
+  {==}
+
+def Laws.order_customs_courier():
+  {==}
+
+def Laws.order_status_sent_says():
+  {==}
+
+def Laws.order_status_unsent_says(sent):
   {==}
 
 def Laws.tool_summary_question():

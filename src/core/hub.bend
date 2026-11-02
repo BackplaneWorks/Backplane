@@ -3243,7 +3243,7 @@ def Order.skipped() -> String:
 def Hub.answer.order(said: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String, +th: String) -> Step:
   match said:
     case True{}:
-      Step.before([M.AskClosed{ask, answer, now}], [Reply.ok(client, id)], Hub.post(s, now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, String.trim(answer)))
+      Step.before([M.AskClosed{ask, answer, now}], [Reply.ok(client, id)], Hub.post(s, now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, OR.Order.ask.value(String.trim(answer))))
     case False{}:
       Step.before([M.AskClosed{ask, answer, now}], [Reply.ok(client, id)], Hub.post(s, now, th, Hub.id("m", now, Hub.seq(s)), M.User{}, Order.skipped()))
 
@@ -3257,7 +3257,8 @@ def Hub.answer.open(order: Bool, +s: M.State, +now: Nat, +client: U32, +id: Stri
 # the user's answer: the ask closes (once; law ask_closes_once), a parked
 # agent request gets its reply, implementing a plan leaves plan mode and
 # asks the agent to carry it out, and an order's question is answered in
-# its thread (Hub.answer.order)
+# its thread (Hub.answer.order; a quick choice "<it> · last time" as
+# <it>, OR.Order.ask.value)
 # A project's own checks wait for the person's OK (server/review.bend's
 # Rvc.trusted): the hub asks in the thread (an "input" ask, tool
 # "checks_ok", id "checks:<sha256>:<n>", server.bend's Hub.checks.ask);
@@ -3296,7 +3297,7 @@ def Hub.answer.cx.t(cx: Bool, order: Bool, +s: M.State, +now: Nat, +client: U32,
 def Hub.answer.k(a: M.Ask, +s: M.State, +now: Nat, +client: U32, +id: String, +ask: String, +answer: String) -> Step:
   match a:
     case M.Ask{_, +th, +k, +tool, _, _, True{}, _}:
-      Hub.answer.cx.t(String.eq(tool, "checks_ok"), String.eq(tool, "order_ask"), s, now, client, id, ask, answer, th, k)
+      Hub.answer.cx.t(String.eq(tool, "checks_ok"), OR.Order.ask.is(tool), s, now, client, id, ask, answer, th, k)
     case M.Ask{_, _, _, _, _, _, False{}, _}:
       Step.outs([Reply.ok(client, id)])
 
@@ -4734,7 +4735,7 @@ def Task.by.id(+s: M.State, +id: String) -> M.Task:
 def Retire.hit(a: M.Ask, +th: String) -> Bool:
   match a:
     case M.Ask{_, t, +kind, +tool, _, _, op, _}:
-      Bool.and(op, Bool.and(String.eq(t, th), Bool.not(Bool.or(String.eq(kind, "plan"), String.eq(tool, "order_ask")))))
+      Bool.and(op, Bool.and(String.eq(t, th), Bool.not(Bool.or(String.eq(kind, "plan"), OR.Order.ask.is(tool)))))
 
 def Retire.id(a: M.Ask) -> String:
   match a:
@@ -7792,10 +7793,20 @@ def Rec.turns(ts: List<&2, String>, r: Rec, +before: M.State, +now: Nat) -> Rec:
     case +th <> t:
       Rec.turns(t, Rec.turn(r, before, now, th), before, now)
 
+# (an order's question parks nothing, so it stays open: its answer starts
+# the agent again, Hub.answer.order; "Ship to which country?" went away
+# with every deploy; law recover_keeps_order_ask)
+def Rec.ask.close(order: Bool, +id: String, +th: String, +s: M.State, +now: Nat) -> Step:
+  match order:
+    case True{}:
+      Step.none()
+    case False{}:
+      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), "Backplane restarted: this request can no longer be answered")], Nil{}}
+
 def Rec.ask.k(a: M.Ask, +s: M.State, +now: Nat) -> Step:
   match a:
-    case M.Ask{+id, +th, _, _, _, _, True{}, _}:
-      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), "Backplane restarted: this request can no longer be answered")], Nil{}}
+    case M.Ask{+id, +th, _, +tool, _, _, True{}, _}:
+      Rec.ask.close(OR.Order.ask.is(tool), id, th, s, now)
     case _:
       Step.none()
 
