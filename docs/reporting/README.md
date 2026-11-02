@@ -136,6 +136,12 @@ capture only to its authenticated main frame after a user gesture. On Wayland,
 PipeWire's portal chooser selects the source. X11 uses an explicit local
 window/screen picker. Source names and thumbnails are never logged or stored.
 The session permission check and display request handler are both restricted;
-camera and microphone permissions remain denied. See Electron's
+camera and microphone permissions remain denied. Electron 44.9.2 uses a legacy
+`media` request with an empty `mediaTypes` array for display capture; only this
+request shape is accepted from the trusted main frame. Media permission checks
+and requests that name camera or microphone types are denied. The app uses
+`getDisplayMedia` so its display request handler still controls selection. The
+legacy Electron callback does not distinguish legacy desktop-capture APIs from
+this empty-array preflight; the app does not expose or use those APIs. See Electron's
 [display capture API](https://www.electronjs.org/docs/latest/api/session#sessetdisplaymediarequesthandlerhandler-opts)
 and [PipeWire behavior](https://github.com/electron/electron/blob/main/docs/api/desktop-capturer.md).
