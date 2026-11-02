@@ -5293,6 +5293,26 @@ def View.chrome.if(top: Bool, +lc: I.Loc, +settings: Bool, bv: BI.View, +u: U.Ui
     case True{}: [View.chrome.bar(lc, settings, bv, u)]
     case False{}: Nil{}
 
+# An optional suggestion in its own layout row, leaving the conversation
+# and composer usable. Keep the offer while a tour, setup or dialog is up.
+def View.star.visible(+u: U.Ui) -> Bool:
+  U.Star.visible(u) && Bool.not(U.CefUI.covered(u)) && Bool.not(U.Ui.flag(u, "settings")) && Bool.not(U.Psv.active(u)) &&
+    Bool.not(U.Intent.on(u)) && String.is_empty(U.Ui.row_deleting(u)) && String.is_empty(U.Ren.on(u)) && String.is_empty(U.Ui.scratch(u, "@rm"))
+
+def View.star.k(on: Bool, +token: String) -> List<&2, D.Node>:
+  match on:
+    case False{}: Nil{}
+    case True{}:
+      [D.El{"section", "star-nudge", [D.At{"class", "star-nudge"}, D.At{"role", "status"}], [
+        D.El{"p", "", [D.At{"class", "star-nudge-text"}], [D.Txt{U.Star.body()}]},
+        D.El{"a", "", [D.At{"class", "star-nudge-open"}, D.At{"href", U.Star.url()}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"},
+          D.At{"data-value", token}, D.On{"click", "star-open"}], [D.Txt{"Star on GitHub"}]},
+        D.El{"button", "", [D.At{"class", "star-nudge-dismiss"}, D.At{"type", "button"}, D.At{"aria-label", "Dismiss star suggestion"}, D.At{"title", "Dismiss star suggestion"},
+          D.At{"data-value", token}, D.On{"click", "star-dismiss"}], [WI.WIcon.svg("x", 16)]}]}]
+
+def View.star(+u: U.Ui) -> List<&2, D.Node>:
+  View.star.k(View.star.visible(u), U.Star.token(u))
+
 # the whole page
 def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D.Node:
   match u:
@@ -5303,7 +5323,8 @@ def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D
           View.main.b(lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
           D.Dom.cat(View.aside.if(lc, pa, U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
             D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.intent(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
-              D.Dom.cat(View.error(e), View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})))))))}
+              D.Dom.cat(View.error(e), D.Dom.cat(View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
+                View.star(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))))))))}
 
 def View.page.sidebar.node(reuse: Bool, +lc: I.Loc, u: U.Ui) -> D.Node:
   match reuse:

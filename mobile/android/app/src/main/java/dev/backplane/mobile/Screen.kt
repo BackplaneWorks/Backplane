@@ -58,6 +58,8 @@ data class Tour(val counter: String, val title: String, val body: String, val ne
 
 data class TourChoice(val label: String, val action: String, val value: String)
 
+data class StarNudge(val text: String, val url: String, val token: String)
+
 // the list's search, always at its top: its query ("proj-find-q"), the hint
 data class Search(val open: Boolean, val query: String, val hint: String)
 
@@ -477,6 +479,7 @@ data class Screen(
     // Legacy conversations remain selectable outside project sections.
     val legacy: List<Row> = emptyList(),
     val bubMove: BubMove? = null,
+    val starNudge: StarNudge? = null,
 )
 
 data class Cmd(
@@ -832,6 +835,13 @@ fun parseScreen(o: JSONObject) = Screen(
             it.optJSONArray("choices")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { c -> TourChoice(c.optString("label"), c.optString("action"), c.optString("value")) } } } ?: emptyList())
     },
     locale = o.optString("locale", "en"),
+    starNudge = o.optJSONObject("starNudge")?.let {
+        val text = it.opt("text") as? String
+        val url = it.opt("url") as? String
+        val token = it.opt("token") as? String
+        if (text.isNullOrBlank() || url.isNullOrBlank() || token.isNullOrBlank()) null
+        else StarNudge(text, url, token)
+    },
 )
 
 fun parseSettings(st: JSONObject) = Settings(st.optJSONArray("rows").map { r ->

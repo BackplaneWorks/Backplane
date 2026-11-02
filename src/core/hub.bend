@@ -60,6 +60,8 @@ type Out is Data:
   LockGuard{name: String, old: String, holder: String}
   # to one client
   Send{client: U32, text: String}
+  # Delivered only after all preceding queued changes reach durable storage.
+  SavedSend{client: U32, text: String}
   # to every client
   Broadcast{text: String}
   # ensure an agent process runs for a thread, then write a line to it
@@ -187,6 +189,7 @@ def Out.kind(o: Out) -> String:
     case MailRead{_, _, _, _, _}: "MailRead"
     case LockGuard{_, _, _}: "LockGuard"
     case Send{_, _}: "Send"
+    case SavedSend{_, _}: "SavedSend"
     case Broadcast{_}: "Broadcast"
     case AgentStart{_, _, _, _, _, _, _}: "AgentStart"
     case AgentSend{_, _}: "AgentSend"

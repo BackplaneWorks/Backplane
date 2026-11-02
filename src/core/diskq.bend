@@ -87,6 +87,7 @@ def Dq.revo(xs: List<&2, B.Out>, acc: List<&2, B.Out>) -> List<&2, B.Out>:
 def Dq.local(o: B.Out) -> Bool:
   match o:
     case B.Send{_, _}: True{}
+    case B.SavedSend{_, _}: False{}
     case B.Broadcast{_}: True{}
     case B.Watch{_, _, _, _, _, _, _}: True{}
     case B.ModelsRefresh{}: True{}

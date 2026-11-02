@@ -2166,6 +2166,15 @@ def Mob.tour.gate(+lc: I.Loc, covered: Bool, +u: U.Ui) -> J.Json:
     case False{}:
       Mob.tour(lc, u)
 
+# The shared offer remains pending while setup, the tour or a sheet covers
+# the screen. Native clients also defer for their own local presentations.
+def Mob.star(covered: Bool, +u: U.Ui) -> J.Json:
+  match covered:
+    case True{}: J.Null{}
+    case False{}:
+      Bool.pick(J.Json, U.Star.visible(u) && Bool.not(U.Tour.on(u)) && Bool.not(U.Psv.active(u)),
+        J.Json.obj([J.KV{"text", J.Str{U.Star.body()}}, J.KV{"url", J.Str{U.Star.url()}}, J.KV{"token", J.Str{U.Star.token(u)}}]), J.Null{})
+
 # The legacy island loop re-reads turn state from State. This display-only
 # loop instead uses the activity-filtered temporary thread, retaining the
 # existing top-level/personal-work policy and unchanged canonical State.
@@ -2398,6 +2407,7 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
       +newroom = MB.MBots.rnew(u)
       +thread = Mob.focus.thread(lc, focus, u, sel)
       +bot = Mob.focus.bot(lc, focus, u)
+      +covered = Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom], thread, bot)
       Mob.native.finish(NS.Ns.enabled(u), J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
         J.KV{"bubHome", HOP.Hop.snapshot(u)}, J.KV{"lang", Mob.lang.loc(lc, u)}, J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
         J.KV{"empty", J.Json.str(Mob.empty.loc(lc, List.length(&2, M.Project, U.Ui.projects(st))))},
@@ -2412,7 +2422,8 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
         J.KV{"deleting", deleting},
         J.KV{"renaming", renaming},
         J.KV{"removing", removing},
-        J.KV{"tour", Mob.tour.gate(lc, Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom], thread, bot), u)},
+        J.KV{"tour", Mob.tour.gate(lc, covered, u)},
+        J.KV{"starNudge", Mob.star(covered, u)},
         J.KV{"settings", settings},
         J.KV{"find", find},
         J.KV{"folders", folders},
