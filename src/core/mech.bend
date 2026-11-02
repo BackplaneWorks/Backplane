@@ -80,6 +80,42 @@ def Mech.is_step(+p: String) -> Bool:
 def Mech.is_model(+p: String) -> Bool:
   Bool.or(Mech.is_step(p), Mech.ext.is(p, ".glb"))
 
+# Detail
+# ------
+# How finely a STEP is meshed for the viewers: step2glb's linear (mm) and
+# angular (radians) deflection. The compact preview and an original model
+# asked for without a level are "normal". A 131-part assembly: low 62k
+# triangles (2.4 MB, 6 s), normal 162k (5.5 MB, 7 s), high 625k (18 MB,
+# 15 s), max 1.3M (37 MB, 38 s).
+
+def Mech.detail.levels() -> List<&2, String>:
+  ["low", "normal", "high", "max"]
+
+def Mech.detail.known(ls: List<&2, String>, +s: String) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      Bool.or(String.eq(l, s), Mech.detail.known(t, s))
+
+# a level as asked for; anything else is normal
+def Mech.detail.of(+s: String) -> String:
+  Bool.pick(String, Mech.detail.known(Mech.detail.levels(), s), s, "normal")
+
+def Mech.detail.args(+level: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.eq(level, "low"), ["--linear", "0.1", "--angular", "0.5"],
+    Bool.pick(List<&2, String>, String.eq(level, "high"), ["--linear", "0.015", "--angular", "0.08"],
+      Bool.pick(List<&2, String>, String.eq(level, "max"), ["--linear", "0.01", "--angular", "0.05"],
+        ["--linear", "0.03", "--angular", "0.2"])))
+
+# a viewer asset's kind may carry a level ("2@high"): the kind before it
+def Mech.detail.kind(+k: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(k, '@')), k)
+
+# and the level after it (normal when none)
+def Mech.detail.at(+k: String) -> String:
+  Mech.detail.of(Maybe.default(&2, String, List.head(&2, String, List.drop(&2, String, String.split(k, '@'), 1n)), ""))
+
 def Mech.last(+p: String) -> String:
   Maybe.default(&2, String, List.last(&2, String, String.split(p, '/')), p)
 

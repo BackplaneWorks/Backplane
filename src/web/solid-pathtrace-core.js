@@ -377,6 +377,19 @@ class OriginalModelView {
     this.state.denoisePasses=3;
     return true;
   }
+  // The canvas keeps no drawing buffer (convertToBlob on it reads a cleared
+  // one), so the frame on screen is drawn again (the path-traced image as
+  // present() shows it, else the raster view) and its pixels read at once.
+  async snapshot(){
+    if(!this.ready||this.disposed)throw Error('The original model is not ready');
+    if(this.mode==='pathtrace'&&this.tracer?.samples>=1)this.present(this.denoiseEnabled);else this.raster();
+    const gl=this.renderer.getContext(),w=this.canvas.width,h=this.canvas.height,px=new Uint8Array(w*h*4),row=w*4,out=new Uint8ClampedArray(w*h*4);
+    this.renderer.setRenderTarget(null);gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,px);
+    for(let y=0;y<h;y++)out.set(px.subarray((h-1-y)*row,(h-y)*row),y*row);
+    for(let i=3;i<out.length;i+=4)out[i]=255;
+    const c=new OffscreenCanvas(w,h);c.getContext('2d').putImageData(new ImageData(out,w,h),0,0);
+    return c.convertToBlob({type:'image/png'});
+  }
   present(denoised=true){
     this.denoiseEnabled=!!denoised;if(!this.tracer||this.tracer.samples<1)return this.status();
     let shown,filtered=false;if(denoised){filtered=this.denoise()!==false;shown=filtered||this.rawDenoiseFrameShown===true;}else {const resolved=this.resolveHDR();shown=!!resolved;if(resolved)this.drawHDR(resolved.texture);}

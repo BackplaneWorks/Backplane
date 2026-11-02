@@ -57,6 +57,16 @@ def sent(cs: List<&2, U.Cmd>) -> String:
     case _ <> r:
       sent(r)
 
+# where the keyboard goes (the Focus commands)
+def focused(cs: List<&2, U.Cmd>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case U.Focus{f} <> r:
+      f ++ ";" ++ focused(r)
+    case _ <> r:
+      focused(r)
+
 def asks(a: U.Act) -> String:
   match a:
     case U.Act{_, cs}:
@@ -135,3 +145,6 @@ def main() -> IO(Unit):
     C.Check.str("find error kept quiet", U.Ui.info(U.Ui.recv(ui(U.Ui.act(U.Ui.init(0n), "proj-open", "")), json("{\"t\":\"reply\",\"id\":1,\"ok\":false,\"error\":\"unknown\"}")), "proj.err"), "")
     C.Check.str("pasted path trims only its edges", U.Proj.query(U.Ui.scratch_set(U.Ui.init(0n), "@f.proj", "  /tmp/Plain notes  ")), "/tmp/Plain notes")
     C.Check.str("pasted home path", U.Proj.query(U.Ui.scratch_set(U.Ui.init(0n), "@f.proj", "  ~/Plain notes/  ")), "~/Plain notes/")
+    C.Check.str("a folder clicked puts the keyboard back in the field", focused(U.Act.cmds(U.Ui.act(listed(), "proj-cd", "/home/h/docs"))), "proj;")
+    C.Check.str("so Enter then takes the first row: Add it", Nat.show(U.Proj.index(ui(U.Ui.act(listed(), "proj-cd", "/home/h/docs")))), "0")
+    C.Check.str("back to the projects too", focused(U.Act.cmds(U.Ui.act(listed(), "proj-back", ""))), "proj;")

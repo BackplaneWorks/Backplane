@@ -3344,13 +3344,31 @@ def Fork.outs.s(scratch: Bool, +wt: String, +th: String, +root: String, +src: St
     case False{}:
       Fork.outs(wt, th, root, src)
 
+# a fork with no worktree of its own (its source works in the project
+# folder: no git repository, or local mode) shares that folder: it says so,
+# as a new thread's "working in the project folder" note does, since trying
+# an alternative there changes the source's own files
+def Fork.shared.say(+ti: String) -> String:
+  "working in the project folder with \"" ++ ti ++ "\" (no worktree of its own): its edits change the same files"
+
+def Fork.shared.k(shared: Bool, +th: String, +ti: String, +id: String, +now: Nat) -> List<&2, M.Change>:
+  match shared:
+    case True{}:
+      [M.ActivityLogged{th, id, "info", "git", Fork.shared.say(ti), now}]
+    case False{}:
+      Nil{}
+
+def Fork.shared(scratch: Bool, +wt: String, +th: String, +ti: String, +id: String, +now: Nat) -> List<&2, M.Change>:
+  Fork.shared.k(Bool.and(Bool.not(scratch), String.is_empty(wt)), th, ti, id, now)
+
 def Hub.fork.k(t: M.Thread, +s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:
   match t:
     case M.Thread{_, +p, +ti, _, _, _, _, _, _, _, _, _, _, _, +wt, +pr, +mo, rt, im, _, _}:
       +th = Hub.id("t", now, Hub.seq(s))
-      Step{[M.ThreadCreated{th, p, "Fork: " ++ ti, Fork.env.s(M.Scratch.is(p), wt), "", Hub.new.wt(M.Scratch.is(p), Hub.project.root(Hub.project(s, p)), th), pr, mo, now}, M.ModesSet{th, rt, im, mo, now}, M.ThreadForked{th, src, now},
+      Step{List.append(&2, M.Change, [M.ThreadCreated{th, p, "Fork: " ++ ti, Fork.env.s(M.Scratch.is(p), wt), "", Hub.new.wt(M.Scratch.is(p), Hub.project.root(Hub.project(s, p)), th), pr, mo, now}, M.ModesSet{th, rt, im, mo, now}, M.ThreadForked{th, src, now},
           M.TurnQueued{th, HD.Hand.prefix() ++ src, HD.Hand.fork(Hub.entries(s), src, ti), now},
           M.ActivityLogged{src, Hub.id("k", now, Hub.seq(s)), "info", "fork", "Forked into \"Fork: " ++ ti ++ "\"", now}],
+          Fork.shared(M.Scratch.is(p), wt, th, ti, Hub.id("g", now, Hub.seq(s)), now)),
         Reply.made(client, id, th) <> Fork.outs.s(M.Scratch.is(p), wt, th, Hub.project.root(Hub.project(s, p)), src)}
 
 def Hub.fork.if(known: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:

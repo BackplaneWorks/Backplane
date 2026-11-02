@@ -41,6 +41,8 @@ try {
  assert.match(publish(board,large,'3d').error,/64 MiB/);
  const a=call('authorize',project,source,board,'mech',revision(source));assert.equal(a.source,source);assert.equal(a.kind,'glb');
  assert(call('authorize',project,source,board,'mech','').error);assert(call('authorize',project,source,board,'invalid',revision(source)).error);
+// a STEP's mesh level may follow the kind; anything else after an @ is refused
+assert.equal(call('authorize',project,source,board,'2@high',revision(source)).source,source);assert(call('authorize',project,source,board,'2@ultra',revision(source)).error);
  const escape=join(outside,'model.glb');fs.writeFileSync(escape,bytes);
  assert(call('authorize',project,'../outside/model.glb',board,'mech',revision(escape)).error,'path traversal refused');
  fs.symlinkSync(escape,join(project,'escape.glb'));assert(call('authorize',project,'escape.glb',board,'mech',revision(escape)).error,'symlink escape refused');

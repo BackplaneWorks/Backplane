@@ -18,6 +18,7 @@ self.onmessage=async({data:{id,method,args}})=>{
   else if(method==='material-policy')result=view.setMaterialPolicy(args.policy);
   else if(method==='solder-preview'){camera();result=view.setSolderPreview(args.enabled);}
   else if(method==='present')result=view.present(args.denoised);
+  else if(method==='snapshot'){camera();result=await view.snapshot();}
   else if(method==='selection')view.selectComponent(args.id);
   else if(method==='bounds')result=view.componentBounds(args.id);
   else if(method==='pick'){camera();result=view.pick(args.x,args.y);}

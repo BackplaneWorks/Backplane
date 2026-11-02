@@ -982,6 +982,13 @@ def View.running(t: M.TurnState) -> Bool:
     case _:
       False{}
 
+def View.failed(t: M.TurnState) -> Bool:
+  match t:
+    case M.Failed{}:
+      True{}
+    case _:
+      False{}
+
 # a header tool (core/tools.bend): its icon and label, its sentence as the
 # tooltip; a group starts with a line before it (class "gap")
 def View.tool.cls(on: Bool, danger: Bool, gap: Bool) -> String:
@@ -3636,7 +3643,7 @@ def View.workbar(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, 
   +signal = SG.Signal.cached(info, id)
   +shown = SG.Signal.display.shown(signal, turn, pending, st, id)
   D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}],
-    List.append(&2, D.Node, [View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(TO.Tools.stop.loc(lc, running)))}
+    List.append(&2, D.Node, [View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(List.append(&2, TO.Tool, TO.Tools.stop.loc(lc, running), TO.Tools.retry.loc(lc, View.failed(turn)))))}
 
 # Keep a running Stop control, but never reserve a status strip for an
 # idle bot conversation. Ordinary thread workbars retain their summaries.
@@ -4283,7 +4290,7 @@ def View.hist.changes(+lc: I.Loc, +on: Bool, n: Nat) -> D.Node:
   D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", Bool.pick(String, on, "hbtn on", "hbtn")}, D.At{"title", MSG.T.history.changes.tip(lc)},
     D.At{"aria-pressed", Bool.pick(String, on, "true", "false")}, D.At{"data-value", ""}, D.On{"click", "hist-diff"}], View.hist.disabled(Nat.is_eq(n, 0n))), [D.Txt{MSG.T.viewer.history.changes(lc)}]}
 
-def View.hist.walk(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
+def View.hist.walk(+lc: I.Loc, b: U.HBar, +tr: List<&2, HS.Step>, +u: U.Ui) -> D.Node:
   match b:
     case U.HBar{_, +n, +at, +title, +entry, +label, +said, +pl, +df, _, _, _, _}:
       D.El{"div", "", [D.At{"class", "hist"}], [
@@ -4296,7 +4303,7 @@ def View.hist.walk(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
           D.Dom.span("title", title), D.Dom.span("grow", ""),
           View.hist.changes(lc, Bool.and(df, Nat.is_gt(at, 0n)), n),
           D.Dom.button("hbtn", "cmp", "a", MSG.T.history.compare.tip(lc), MSG.T.viewer.history.compare(lc))], View.hist.live.loc(lc, at))},
-        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.when(lc, U.Hs.track(u), 0n, n, at, SCH.Sched.person(U.Ui.state(u), 0n, True{}))},
+        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.when(lc, tr, 0n, n, at, SCH.Sched.person(U.Ui.state(u), 0n, True{}))},
         D.El{"div", "", [D.At{"class", "hist-said"}], View.hist.said.loc(lc, Bool.or(Nat.is_eq(at, 0n), Bool.not(U.Hs.jump.available(u, entry))), Bool.pick(String, Nat.is_eq(at, 0n), U.Hs.live.said.loc(lc, n), Bool.pick(String, String.is_empty(said), label, said)))},
         D.El{"div", "", [D.At{"class", "hist-legend"}], View.hist.legend.loc(lc, Bool.and(df, Nat.is_gt(at, 0n)))}]}
 
@@ -4315,17 +4322,25 @@ def View.hist.cmp.loc(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
 def View.hist.cmp(b: U.HBar, +u: U.Ui) -> D.Node:
   View.hist.cmp.loc(I.En{}, b, u)
 
-def View.hist.k(+lc: I.Loc, on: Bool, cmp: Bool, b: U.HBar, +u: U.Ui) -> List<&2, D.Node>:
+def View.hist.k(+lc: I.Loc, on: Bool, cmp: Bool, b: U.HBar, +tr: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
   match on cmp:
     case False{} _:
       Nil{}
     case True{} True{}:
       [View.hist.cmp.loc(lc, b, u)]
     case True{} False{}:
-      [View.hist.walk(lc, b, u)]
+      [View.hist.walk(lc, b, tr, u)]
+
+def View.hist.t(+lc: I.Loc, +b: U.HBar, +tr: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
+  View.hist.k(lc, U.HBar.on(b), U.HBar.cmp(b), b, tr, u)
+
+# (the bar and its track made once: each U.Hs.track parses every step)
+def View.hist.bt(+lc: I.Loc, bt: U.HBarT, +u: U.Ui) -> List<&2, D.Node>:
+  match bt:
+    case U.HBarT{+b, +tr}: View.hist.t(lc, b, tr, u)
 
 def View.hist(+lc: I.Loc, +b: U.HBar, +u: U.Ui) -> List<&2, D.Node>:
-  View.hist.k(lc, U.HBar.on(b), U.HBar.cmp(b), b, u)
+  View.hist.t(lc, b, U.Hs.track(u), u)
 
 # the menu of versions over the stage, a row each; a press outside shuts it
 def View.hist.rows(rs: List<&2, U.HRow>) -> List<&2, D.Node>:
@@ -4565,7 +4580,7 @@ def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
         D.At{"data-wait-tree", View.plot.wait.tree(String.eq(U.Solid.kind(u), "schematic"), u)}, D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", U.Solid.fam(u, U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], View.probe.attrs(u, String.eq(U.Solid.kind(u), "schematic"))), Nil{}}
         <> List.append(&2, D.Node, View.probe.chip(u), View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
-   <> View.hist(lc, U.Hs.bar.loc(lc, u), u)
+   <> View.hist.bt(lc, U.Hs.bar.track(lc, u), u)
 
 # over a part in 3D: the thread's parts and Renders; the board: its name
 # after the parts: Renders for one of them, or the name of another model
@@ -5065,7 +5080,7 @@ def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: Str
   D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)},
     D.At{"title", SG.Signal.display.label(lc, signal, shown, st, id)}],
     List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
-      View.tools(TO.Tools.stop.loc(lc, View.running(turn))))}
+      View.tools(TO.Tools.turn.loc(lc, turn)))}
 
 # the subagents: a click opens or shuts their rows under the bar (View.subs.dock)
 def View.chrome.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:

@@ -191,7 +191,7 @@ function start() {
     const result = await dialog.showOpenDialog(window, { properties: ['openDirectory'] });
     return result.canceled ? null : result.filePaths[0];
   });
-  for (const operation of ['local', 'copy', 'reveal']) ipcMain.handle('desktop:image-' + operation, (event, value) => {
+  for (const operation of ['local', 'copy', 'reveal', 'save']) ipcMain.handle('desktop:image-' + operation, (event, value) => {
     if (!trusted(event)) throw new Error('Invalid image sender');
     return imageActions[operation](value);
   });

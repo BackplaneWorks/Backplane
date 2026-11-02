@@ -1422,3 +1422,7 @@ settings.voice.learned.note = Fixes you made after dictating. Each applies by it
 voice.learned.item = {heard} → {out} · {yes}×
 voice.dictate.here = Dictate with this device''s microphone
 native.permission.microphone = Backplane records your voice while you dictate into a thread, and sends it to your computer to turn into text.
+
+# Retry a failed turn.
+tools.retry = Retry
+tools.tip.retry = The turn failed: send your last message again
