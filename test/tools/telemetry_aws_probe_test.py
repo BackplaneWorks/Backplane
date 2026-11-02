@@ -20,7 +20,7 @@ spec.loader.exec_module(probe)
 class AwsProbe(unittest.TestCase):
     def test_exact_numeric_contract_and_tokens(self):
         self.assertEqual(list(probe.counts(5)), list(probe.COUNTERS))
-        self.assertEqual(list(probe.counts(5).values()), [5, 5, 5, 5, 5, 500, 100, 150, 200, 5])
+        self.assertEqual(list(probe.counts(5).values()), [5, 5, 5, 5, 5, 500, 100, 150, 200, 5, 5, 5])
         row = probe.counts(5)
         self.assertEqual(sum(row[k] for k in ["input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]), 950)
 
@@ -28,6 +28,19 @@ class AwsProbe(unittest.TestCase):
         ident = "7d0c2f6e-3b1a-4f7e-9a51-2c8e0d4b6f10"
         self.assertTrue(probe.proof_ok(ident, "186d7"))
         self.assertFalse(probe.proof_ok(ident, "0"))
+
+    def test_payload_contains_only_integer_counters_and_allowed_enum_keys(self):
+        probe.validate_counts(probe.counts(5))
+        for forbidden in ["name", "path", "design_hash", "width", "layers", "mpn", "bom", "netlist", "price", "pcb", "3dp"]:
+            with self.subTest(key=forbidden), self.assertRaises(ValueError):
+                probe.validate_counts({**probe.counts(5), forbidden: 1})
+        for value in [True, False, "5", 1.5, None, {}, [], -1, 281474976710656]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                probe.validate_counts({**probe.counts(5), "boards_created": value})
+        row = probe.counts(5)
+        del row["boards_ordered"]
+        with self.assertRaises(ValueError):
+            probe.validate_counts(row)
 
     def test_hmac_known_vector(self):
         self.assertEqual(probe.signature(bytes(32), 1, b"{}"), "sha256=a07ac7cfc802ea7629f0933ebf00ef447832d56dcdcab022d121f329249e4ac3")

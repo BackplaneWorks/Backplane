@@ -4,7 +4,7 @@ Backplane counts installs and how many people use it. Only the hub sends:
 window, web, iOS and Android never contact the telemetry service.
 
 Alpha also sends aggregate daily counts of threads created, messages, model
-token usage and bot traffic for product and investor reporting. This is usage
+token usage, bot traffic and numeric board creation/completed-order counts for product and investor reporting. This is usage
 measurement, not token billing. API keys, authentication tokens, conversation
 content and credentials are never part of these counters.
 
@@ -114,7 +114,7 @@ Backplane is in beta.
 
 The additive wire-v1 event is `usage`. It has the same required `day`, `id`,
 `share`, `ver`, `ch`, `os` and `arch` metadata as identified activity, plus a
-`counts` object with exactly these nonnegative integer fields (maximum
+`counts` object with these fixed nonnegative integer fields (maximum
 281474976710655 each):
 
 | Field | Counts |
@@ -129,6 +129,25 @@ The additive wire-v1 event is `usage`. It has the same required `day`, `id`,
 | `cache_write_tokens` | Known cache-write input tokens in those reports. |
 | `output_tokens` | Known output tokens, including reasoning already included by the provider. |
 | `usage_turns` | Turns with known output-token usage; unknown provider usage is not estimated. |
+| `boards_created` | Newly added local KiCad project/PCB families observed after a Backplane tool call. A matching `.kicad_pro`/`.kicad_pcb` pair counts once; a later counterpart adds nothing. Existing baseline files, edits, deletions and detected renames add nothing. |
+| `boards_ordered` | Newly completed non-pilot Buy-it checkouts containing at least one board-kind part. One per order, regardless of quantity or number of designs. Quotes, unpaid/cancelled/refunded orders, mechanical-only orders and already-paid upgrade history add nothing. |
+
+The original ten fields remain required by the receiver. The two board fields
+are optional for older clients and default to zero. New clients send all twelve
+fixed integer counters. Neither arbitrary field names nor design-derived enum
+keys are accepted. No quantities or kind breakdowns are part of this extension.
+No names, paths, design hashes, dimensions, per-design layer counts, part
+numbers, BOMs, netlists or prices are transmitted. Only the existing install,
+package/platform/day metadata surrounds the numerical counts.
+
+Creation is detected from the same local design-history snapshot Backplane
+already takes, with rename detection. Opening/importing a project as an initial
+baseline adds nothing. A completed checkout is first observed as `paid` (or a
+later successful state when polling missed `paid`). Local once-only source
+markers are durable and never enter the usage wire; opting out/reset clears
+counters and leaves earlier observations ineligible for backfill. A design job
+also carries the privacy generation captured before it starts, so stale work
+cannot count into a new sharing session.
 
 Total model tokens are input + cache read + cache write + output. Reasoning
 is a subset of output and is not added again. Costs, provider/model names,

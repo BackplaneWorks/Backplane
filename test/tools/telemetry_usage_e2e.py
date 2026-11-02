@@ -120,7 +120,7 @@ def main():
                 return db.execute("SELECT install_id, day, counts FROM usage ORDER BY install_id, day").fetchall()
 
         def expected(n):
-            return dict(zip(telemetry.USAGE_COUNTS, [n, n, n, n, n, 100*n, 20*n, 30*n, 40*n, n]))
+            return dict(zip(telemetry.USAGE_COUNTS, [n, n, n, n, n, 100*n, 20*n, 30*n, 40*n, n, n, n]))
 
         def counts(n, ident):
             rows = [row for row in usage_rows() if row[0] == ident and row[1] == day]

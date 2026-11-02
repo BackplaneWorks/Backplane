@@ -1,4 +1,6 @@
 import Base
+import ../core/pcb-usage.bend as PC
+import ./pcb-telemetry.bend as PCB
 import ../core/folder.bend as FP
 import ./spawn.bend as SP
 import ./star-nudge.bend as STAR
@@ -322,6 +324,8 @@ type Msg is Data:
   Reexec{path: String, args: List<&2, String>}
   # changes a job off the hub made (a bot's home folder, a linked machine)
   Commit{changes: List<&2, M.Change>}
+  # Local numeric observations; generation rejects stale design jobs.
+  PcbObserved{source: String, created: Nat, ordered: Nat, generation: Maybe<&2, String>}
   # an order's progress: posted in its buy thread, and a note alert to the
   # person's devices when there is one (Hub.order.note)
   OrderNote{thread: String, id: String, text: String, note: String}
@@ -3193,21 +3197,35 @@ def KExportJob.route(exporting: Bool, +inbox: Chan(Msg), client: U32, id: String
 # an Act of tone "step" whose summary is its record. `entry` is the tool
 # call or message it follows ("" at a turn's end).
 
-def StepJob.log(+inbox: Chan(Msg), +thread: String, +id: String, +rec: String) -> IO(Unit):
+def StepJob.observed(on: Bool, +inbox: Chan(Msg), source: String, created: Nat, generation: String) -> IO(Unit):
+  match on:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PcbObserved{source, created, 0n, Some{generation}})
+        return Unit{}
+
+def StepJob.log(+inbox: Chan(Msg), +thread: String, +id: String, +rec: String, created: Nat, +scope: J.Json) -> IO(Unit):
   do IO<Unit>:
     now : Nat <- Now.nat()
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.ActivityLogged{thread, id, HI.Step.tone(), "kicad", rec, now}]})
-    return Unit{}
+    StepJob.observed(J.Json.get_bool(scope, "on", False{}), inbox, "step:" ++ thread ++ ":" ++ id, created, J.Json.get_str(scope, "generation", ""))
 
-def StepJob.done(+inbox: Chan(Msg), +thread: String, +entry: String, +when: String, +out: String) -> IO(Unit):
-  +rec = HI.Hist.record.at(out, entry, when)
-  Bool.pick(IO(Unit), String.is_empty(rec), IO.pure(Unit, Unit{}),
-    StepJob.log(inbox, thread, "step:" ++ String.trim(HI.Hist.at(String.split(out, '\n'), 0n)), rec))
+def StepJob.captured(count: Bool, +inbox: Chan(Msg), +thread: String, +cwd: String, +rec: String, +scope: J.Json, +out: String) -> IO(Unit):
+  do IO<Unit>:
+    +created : Nat <- Bool.pick(IO(Nat), Bool.and(count, J.Json.get_bool(scope, "on", False{})),
+      GT.Git.step.created(cwd, String.trim(HI.Hist.at(String.split(out, '\n'), 0n)), String.trim(HI.Hist.at(String.split(out, '\n'), 1n)), String.trim(HI.Hist.at(String.split(out, '\n'), 2n))), IO.pure(Nat, 0n))
+    Bool.pick(IO(Unit), String.is_empty(rec), IO.pure(Unit, Unit{}),
+      StepJob.log(inbox, thread, "step:" ++ String.trim(HI.Hist.at(String.split(out, '\n'), 0n)), rec, created, scope))
+
+def StepJob.done(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +scope: J.Json, +out: String) -> IO(Unit):
+  +rec = HI.Hist.record.at(out, entry, J.Json.get_str(scope, "when", "start"))
+  StepJob.captured(Bool.and(Bool.not(String.is_empty(rec)), Bool.not(String.eq(J.Json.get_str(scope, "when", "start"), "start"))), inbox, thread, cwd, rec, scope, out)
 
 # (when: "start" at a turn's start, core/hist.bend's Step.base)
-def StepJob.run(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +when: String, +home: String) -> IO(Unit):
+def StepJob.run(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +scope: String, +home: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.is_empty(cwd), IO.pure(Unit, Unit{}),
-    IO.bind(String, Unit, GT.Git.step.capture(cwd, thread, GT.Git.step.reg(home)), out => StepJob.done(inbox, thread, entry, when, out)))
+    IO.bind(String, Unit, GT.Git.step.capture(cwd, thread, GT.Git.step.reg(home)), out => StepJob.done(inbox, thread, cwd, entry, Maybe.default(&2, J.Json, J.Json.parse(scope), J.Null{}), out)))
 
 def RefsJob.files(f: K.Files) -> List<&2, J.KV>:
   match f:
@@ -10706,7 +10724,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread), M.Setting.get(st, AT.Att.key(), ""))))
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), PCB.Pcb.scope(String.eq(job, "step"), b, M.Metrics.allowed(st), M.Setting.get(st, "telemetry.usage.generation", "")), Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread), M.Setting.get(st, AT.Att.key(), ""))))
         return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
@@ -16808,6 +16826,14 @@ def Od.watch.next(+st: String, +last: String, again: String -> IO(Unit)) -> IO(U
 
 # one look at a quote's order every minute while it is unpaid, every ten
 # after; a change is said in the buy thread and kept in the record
+def Od.pcb(done: Bool, +inbox: Chan(Msg), source: String) -> IO(Unit):
+  match done:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PcbObserved{"order:" ++ source, 0n, 1n, None{}})
+        return Unit{}
+
 def Od.watch(n: Nat, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String, +last: String) -> IO(Unit):
   match n:
     case 0n:
@@ -16818,6 +16844,7 @@ def Od.watch(n: Nat, +inbox: Chan(Msg), +home: String, +server: String, +qid: St
         +install : String <- ODI.Od.install(home)
         +q : J.Json <- ODI.Od.get(home, server, install, qid, token)
         +st : String = OR.Order.state(q)
+        Od.pcb(PC.Pcb.ordered(q, last, st), inbox, qid)
         Od.status.k(st, last, q, inbox, thread, qid)
         Od.card.k(Bool.or(String.is_empty(st), String.eq(st, last)), inbox, thread, OR.Order.sum(q, ODI.Od.pay(server, qid, token)), qid)
         ODI.Od.keep(home, qid, token, thread, server, Bool.pick(String, String.is_empty(st), last, st))
@@ -17064,6 +17091,11 @@ def Hub.checks.ask(h: Hub, +thread: String, +hash: String, +text: String, +now: 
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.checks.ask.k(Bool.or(String.is_empty(thread), B.Checks.asked(st, hash)), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, hash, text, now)
+
+def Hub.pcb(h: Hub, source: String, created: Nat, ordered: Nat, generation: Maybe<&2, String>, now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{PCB.Pcb.changes(st, source, created, ordered, PCB.Pcb.epoch(generation, st), now), Nil{}})
 
 def Hub.order.note(h: Hub, +thread: String, +id: String, +text: String, +ping: String, +now: Nat) -> IO(Hub):
   match h:
@@ -17408,6 +17440,7 @@ def Msg.kind(m: Msg) -> String:
     case RunReady{_, _, _}: "run-ready"
     case Commit{_}:
       "commit"
+    case PcbObserved{_, _, _, _}: "pcb_observed"
     case OrderNote{_, _, _, _}:
       "order_note"
     case OrderWake{_, _}:
@@ -18724,6 +18757,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case RunReady{thread, head, bs}: Hub.run.ready(h, thread, head, bs, now)
     case Commit{cs}:
       Hub.step(h, B.Step{cs, Nil{}})
+    case PcbObserved{source, created, ordered, generation}:
+      Hub.pcb(h, source, created, ordered, generation, now)
     case OrderNote{thread, id, text, +ping}:
       Hub.order.note(h, thread, id, text, ping, now)
     case OrderWake{+thread, +text}:

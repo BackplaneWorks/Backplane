@@ -12875,7 +12875,7 @@ def Share.privacy() -> String:
   "https://backplane.works/privacy"
 
 def Share.note() -> String:
-  "All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens and bot traffic; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them."
+  "All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them."
 
 # the note ends with the install id the hub reported (info telemetry.id), which
 # the privacy page asks people to quote when they ask for their data to go
