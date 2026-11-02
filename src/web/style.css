@@ -389,6 +389,10 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 /* what a subagent said has no label: no empty chip (.kind's box) */
 .sub-step .kind:empty { border-color: transparent; background: none; }
 .sub-last .kind:empty { display: none; }
+/* a subagent's steps are drawn shut too: its row's click shows them at once */
+.sub:not(.open) > .sub-detail, .sub.open > .sub-last { display: none; }
+.sub .who.chev { display: inline-block; }
+.sub.open > .sub-row .who.chev { transform: rotate(90deg); }
 .sub-step .text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .sub-step:last-child { padding-bottom: 12px; }
 .sub-empty { display: block; padding: 0 16px 12px 32px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
