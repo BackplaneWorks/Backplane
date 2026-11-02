@@ -29,9 +29,9 @@ const browser=await chromium.launch({executablePath:process.env.BACKPLANE_CHROME
 try{
  const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));
  await page.goto(`http://127.0.0.1:${server.port}`);
- assert.equal(await page.locator('.settings-category').count(),14);
+ assert.equal(await page.locator('.settings-category').count(),13);
  assert.equal(await page.locator('.settings-group').count(),4);
- assert.equal(await page.locator('.settings-category-icon svg path').count()>14,true,'existing vector icons rendered');
+ assert.equal(await page.locator('.settings-category-icon svg path').count()>13,true,'existing vector icons rendered');
  // The production scroll container is captured as the user sees it.
  await page.screenshot({path:resolve(out,'settings-desktop.png')});
  const ids=await page.locator('.settings-category').evaluateAll(bs=>bs.map(b=>b.dataset.value));
@@ -40,6 +40,15 @@ try{
   await page.locator(`.settings-category[data-value="${id}"]`).click();
   await page.locator(`#settings-content[data-settings-page="${id}"]`).waitFor();
   assert.equal(actions.length,before+1,`${id} opens on one click`);
+  assert.equal(await page.locator('#settings-side-antigravity').count(),0,'Antigravity has no separate sidebar entry');
+  if(id==='agents'){
+   await page.locator('[data-on-click="agy-install"]').waitFor();
+   assert.equal(await page.locator('#agy-agykey').getAttribute('type'),'password','Antigravity API key stays sealed');
+   await page.screenshot({path:resolve(out,'settings-agents-desktop.png')});
+   await page.locator('[data-on-click="provider-setup-open"]').click();
+   await page.locator('[data-on-click="provider-setup-pick"]').first().waitFor();
+   assert.equal(await page.locator('[data-on-click="agy-install"]').count(),1,'Antigravity remains reachable during guided setup');
+  }
   await page.locator('button[data-on-click="settings-page"][data-value=""]').click();
   await page.locator('.settings-category').first().waitFor();
  }
@@ -85,8 +94,17 @@ try{
  await page.locator('#settings-find').press('Enter');
  await page.locator('#settings-content[data-settings-page="usage"]').waitFor();
  await page.screenshot({path:resolve(out,'settings-usage-390.png')});
+ await page.locator('button[data-on-click="settings-page"][data-value=""]').click();
+ await page.locator('#settings-find').fill('antigravity');
+ await page.locator('.settings-category[data-value="agents"]').waitFor();
+ assert.equal(await page.locator('.settings-category').count(),1,'Antigravity search offers Agents');
+ await page.locator('#settings-find').press('Enter');
+ await page.locator('#settings-content[data-settings-page="agents"]').waitFor();
+ await page.locator('[data-on-click="agy-install"]').waitFor();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390,'Agents has no horizontal overflow at 390px');
+ await page.screenshot({path:resolve(out,'settings-agents-390.png')});
  await page.goto(`http://127.0.0.1:${server.port}/ja`);
- assert.equal(await page.locator('.settings-category').count(),14);
+ assert.equal(await page.locator('.settings-category').count(),13);
  await page.getByRole('heading',{name:'ワークスペース',exact:true}).waitFor();
  // Open the advertised Agents page and exercise its real fallback controls.
  await page.setViewportSize({width:1280,height:1000});
@@ -118,6 +136,6 @@ try{
  await page.reload();
  await page.getByText('1. codex/gpt-6.1-sol',{exact:true}).waitFor();
  assert.deepEqual(errors,[],'no browser errors');
- const receipt={pass:true,scope:'actual production Settings fixture; isolated browser, no live hub writes',checks:['14 categories open with one click each','4 groups with existing SVG icons','390px no overflow and single column','search filters and Enter opens result','Japanese menu retains14 categories','Agents fallback enable/add/reorder/remove and duplicate prevention','fallback editor fits 390px and retains configured order on reload','voice: empty, download, progress, unpack, error, retry, ready','read-only rows are distinct from controls','zero page errors'],mobile};
+ const receipt={pass:true,scope:'actual production Settings fixture; isolated browser, no live hub writes',checks:['13 categories open with one click each','4 groups with existing SVG icons','390px no overflow and single column','search filters and Enter opens result','Japanese menu retains13 categories','Agents fallback enable/add/reorder/remove and duplicate prevention','fallback editor fits 390px and retains configured order on reload','voice: empty, download, progress, unpack, error, retry, ready','read-only rows are distinct from controls','Antigravity controls on Agents, including guided setup','Antigravity search opens Agents at 390px without overflow','zero page errors'],mobile};
  writeFileSync(resolve(out,'browser-checks.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify(receipt));
 }finally{await browser.close();server.stop(true);}

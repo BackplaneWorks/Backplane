@@ -462,7 +462,7 @@ def Proto.install(p: Proto) -> String:
     case PMsp{_}:
       "Install Muse Code, then sign in with `muse login`."
     case PAgy{_}:
-      "Install it under Settings › Antigravity."
+      "Install it under Settings › Agents › Antigravity."
     case POc{_}:
       "Install opencode (https://opencode.ai), then sign in with `opencode auth login`."
     case PPi{_}:
@@ -478,7 +478,7 @@ def Proto.gone(p: Proto) -> String:
     case PMsp{_}:
       "muse exited before the turn ended (is it signed in? run `muse login`)"
     case PAgy{_}:
-      "antigravity exited before the turn ended (is it installed and signed in? see Settings › Antigravity)"
+      "antigravity exited before the turn ended (is it installed and signed in? see Settings › Agents › Antigravity)"
     case POc{_}:
       "opencode exited before the turn ended (is it signed in? run `opencode auth login`)"
     case PPi{_}:
