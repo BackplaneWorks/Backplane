@@ -107,9 +107,43 @@ def Node.models.attrs(attrs: List<&2, D.Attr>, +open: Bool) -> List<&2, D.Attr>:
     case D.At{"aria-hidden", _} <> tail: D.At{"aria-hidden", Bool.pick(String, open, "false", "true")} <> Node.models.attrs(tail, open)
     case head <> tail: head <> Node.models.attrs(tail, open)
 
-def Node.overlay.attrs(key: String, +attrs: List<&2, D.Attr>, text: String, open: Bool) -> List<&2, D.Attr>:
+# The Subagents rows shown or shut at the click (subs-feedback.js), ahead of
+# the hub's view: "1" open, "0" shut, "" as the hub drew them. The hub
+# always sends the rows (view.bend's View.subs.dock), hidden while shut, so
+# the head's state and the section's " shut" are all that change here.
+def Node.subs.word(+open: Bool) -> String:
+  Bool.pick(String, open, "true", "false")
+
+def Node.subs.act(+open: Bool) -> String:
+  Bool.pick(String, open, "subs-shut", "subs-open")
+
+def Node.subs.head(attrs: List<&2, D.Attr>, +open: Bool) -> List<&2, D.Attr>:
+  match attrs:
+    case Nil{}: Nil{}
+    case D.At{"aria-expanded", _} <> tail: D.At{"aria-expanded", Node.subs.word(open)} <> Node.subs.head(tail, open)
+    case D.On{"click", _} <> tail: D.On{"click", Node.subs.act(open)} <> Node.subs.head(tail, open)
+    case head <> tail: head <> Node.subs.head(tail, open)
+
+def Node.subs.bare(+c: String) -> String:
+  Bool.pick(String, String.ends_with(c, " shut"), String.take(c, Nat.sub(String.length(c), 5n)), c)
+
+def Node.subs.section(attrs: List<&2, D.Attr>, +open: Bool) -> List<&2, D.Attr>:
+  match attrs:
+    case Nil{}: Nil{}
+    case D.At{"class", c} <> tail: D.At{"class", Node.subs.bare(c) ++ Bool.pick(String, open, "", " shut")} <> Node.subs.section(tail, open)
+    case head <> tail: head <> Node.subs.section(tail, open)
+
+def Node.subs.attrs(none: Bool, head: Bool, attrs: List<&2, D.Attr>, open: Bool) -> List<&2, D.Attr>:
+  match none head:
+    case True{} _: attrs
+    case False{} True{}: Node.subs.head(attrs, open)
+    case False{} False{}: Node.subs.section(attrs, open)
+
+def Node.overlay.attrs(key: String, +attrs: List<&2, D.Attr>, text: String, open: Bool, +subs: String) -> List<&2, D.Attr>:
   match key:
     case "model-layer": Node.models.attrs(attrs, open)
+    case "subs-head": Node.subs.attrs(String.is_empty(subs), True{}, attrs, String.eq(subs, "1"))
+    case "subs": Node.subs.attrs(String.is_empty(subs), False{}, attrs, String.eq(subs, "1"))
     case _: Node.draft.attrs(Node.composer(attrs), attrs, text)
 
 # The model picker shown here before the hub draws it open has the shade
@@ -141,13 +175,16 @@ def Node.overlay.kids(key: String, +open: Bool, kids: List<&2, D.Node>) -> List<
     case "model-layer": Node.models.kids(open, kids)
     case _: kids
 
-def Node.overlay.go(nodes: List<&2, D.Node>, +text: String, +open: Bool, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+def Node.overlay.go(nodes: List<&2, D.Node>, +text: String, +open: Bool, +subs: String, acc: List<&2, D.Node>) -> List<&2, D.Node>:
   match nodes:
     case Nil{}: acc
-    case D.Txt{value} <> tail: Node.overlay.go(tail, text, open, D.Txt{value} <> acc)
+    case D.Txt{value} <> tail: Node.overlay.go(tail, text, open, subs, D.Txt{value} <> acc)
     case D.El{tag, +key, attrs, kids} <> tail:
-      Node.overlay.go(tail, text, open, D.El{tag, key, Node.overlay.attrs(key, attrs, text, open),
-        Node.overlay.kids(key, open, List.reverse(&2, D.Node, Node.overlay.go(kids, text, open, Nil{})))} <> acc)
+      Node.overlay.go(tail, text, open, subs, D.El{tag, key, Node.overlay.attrs(key, attrs, text, open, subs),
+        Node.overlay.kids(key, open, List.reverse(&2, D.Node, Node.overlay.go(kids, text, open, subs, Nil{})))} <> acc)
+
+def Node.overlay.subs(node: D.Node, text: String, open: Bool, subs: String) -> D.Node:
+  Node.read.first(Node.overlay.go([node], text, open, subs, Nil{}))
 
 def Node.overlay(node: D.Node, text: String, open: Bool) -> D.Node:
-  Node.read.first(Node.overlay.go([node], text, open, Nil{}))
+  Node.overlay.subs(node, text, open, "")
