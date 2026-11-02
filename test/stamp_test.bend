@@ -3,6 +3,7 @@ import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/tz.bend as Z
 import ../src/core/stamp.bend as S
+import ../src/core/i18n.bend as I
 
 # Times under messages (core/stamp.bend): when each was sent, in the
 # person's zone, and when a turn finished on its last reply.
@@ -84,10 +85,22 @@ def marked() -> M.State:
 def utc() -> Z.TzRule:
   Z.Tz.utc0()
 
+# whether entry i is a reply inside a turn (time on hover)
+def sh(+es: List<&2, M.Entry>, +running: Bool, +i: Nat) -> String:
+  Bool.pick(String, S.Stamp.mid(ss(es, utc(), at(3600n), running), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n))), "mid", "shown")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("a message sent today shows its time", st(es(), utc(), at(3600n), True{}, 0n), "09:00")
     C.Check.str("a reply mid-turn shows its time", st(es(), utc(), at(3600n), True{}, 1n), "09:00")
+    C.Check.str("a reply mid-turn is mid (time on hover)", sh(es(), True{}, 1n), "mid")
+    C.Check.str("a reply mid-turn: phones show nothing", S.Stamp.shown(I.En{}, ss(es(), utc(), at(3600n), True{}), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es(), 1n), act("none", 0n))), "")
+    C.Check.str("a finished turn's last reply is not mid", sh(es(), True{}, 3n), "shown")
+    C.Check.str("the person's message is not mid", sh(es(), True{}, 5n), "shown")
+    C.Check.str("a running turn's newest reply is not mid", sh(es(), True{}, 6n), "shown")
+    C.Check.str("a finished last turn's reply is not mid", sh(es(), False{}, 6n), "shown")
+    C.Check.str("a page cut mid-turn: its last reply is not mid", sh([a("a0", 0n), a("a9", 10n), u("u9", 20n)], False{}, 1n), "shown")
+    C.Check.str("a page cut mid-turn: an earlier reply is mid", sh([a("a0", 0n), a("a9", 10n), u("u9", 20n)], False{}, 0n), "mid")
     C.Check.str("a tool call shows nothing", st(es(), utc(), at(3600n), True{}, 2n), "")
     C.Check.str("a finished turn's last reply: when, and how long", st(es(), utc(), at(3600n), True{}, 3n), "Finished 09:07 · 7m 13s")
     C.Check.str("the turn still running has not finished", st(es(), utc(), at(3600n), True{}, 6n), "09:16")
