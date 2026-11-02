@@ -19,14 +19,20 @@ def Eq.chr(a: Char, b: Char) -> Bool:
     case Chr{x} Chr{y}:
       U32.is_eq(x, y)
 
-def Eq.str(a: String, b: String) -> Bool:
-  match a b:
-    case SNil{} SNil{}:
+# Carry the verdict so the walk is a tail call and stops at the first
+# difference. A stack frame per character overflowed the macOS hub on
+# long board plot chunks (test/eq_str_test.bend).
+def Eq.str.go(a: String, b: String, ok: Bool) -> Bool:
+  match a b ok:
+    case SNil{} SNil{} True{}:
       True{}
-    case SCon{x, xt} SCon{y, yt}:
-      Bool.and(Eq.chr(x, y), Eq.str(xt, yt))
-    case _ _:
+    case SCon{x, xt} SCon{y, yt} True{}:
+      Eq.str.go(xt, yt, Eq.chr(x, y))
+    case _ _ _:
       False{}
+
+def Eq.str(a: String, b: String) -> Bool:
+  Eq.str.go(a, b, True{})
 
 def Eq.role(a: M.Role, b: M.Role) -> Bool:
   match a b:
