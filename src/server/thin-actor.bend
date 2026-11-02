@@ -1093,6 +1093,15 @@ def Actor.browser(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
 def Actor.voice(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
   Actor.reply_if(True{}, a, web, key, o)
 
+# A view the hub sends a thread's viewers (an agent's viewer_show, mcp.bend's
+# Mcp.view; the board an agent starting in a KiCad project opens, hub.bend's
+# Auto.view) goes into this connection's Ui as a legacy client takes it
+# (client.bend's Ui.view: the panel opens on it, an auto one only while
+# the person has not opened or shut it by hand). Without it a hub-drawn
+# page never followed either.
+def Actor.view(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
+  Actor.reply_if(True{}, a, web, key, o)
+
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
     case "term": Actor.terminal(a, web, key, o)
@@ -1101,6 +1110,7 @@ def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json
     case "sheets": Actor.sheets(a, o)
     case "shot": Actor.browser(a, web, key, o)
     case "voice": Actor.voice(a, web, key, o)
+    case "view": Actor.view(a, web, key, o)
     case _: a
 
 def Actor.message(a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
