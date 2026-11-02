@@ -198,19 +198,25 @@ def Board.key.k(+u: String, +t: String, +fallback: String) -> String:
 def Board.key(+x: S.Sx, +fallback: String) -> String:
   Board.key.k(S.Sx.attr(x, "uuid"), S.Sx.attr(x, "tstamp"), fallback)
 
-def Board.pts.k(xy: Bool, +x: S.Sx, +pl: Place, rest: List<&2, Pt>) -> List<&2, Pt>:
+def Board.pts.k(xy: Bool, +x: S.Sx, +pl: Place, acc: List<&2, Pt>) -> List<&2, Pt>:
   match xy:
     case True{}:
-      Geo.place(pl, Geo.pt(x)) <> rest
+      Geo.place(pl, Geo.pt(x)) <> acc
     case False{}:
-      rest
+      acc
 
-def Board.pts(xs: List<&2, S.Sx>, +pl: Place) -> List<&2, Pt>:
+# a polygon's points, one tail call each: a routed board's zone fills run to
+# tens of thousands of points, and a frame per point faulted the --plot
+# child's 64 MiB stack on macOS
+def Board.pts.go(xs: List<&2, S.Sx>, +pl: Place, acc: List<&2, Pt>) -> List<&2, Pt>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, Pt, acc)
     case +x <> t:
-      Board.pts.k(String.eq(S.Sx.name(x), "xy"), x, pl, Board.pts(t, pl))
+      Board.pts.go(t, pl, Board.pts.k(String.eq(S.Sx.name(x), "xy"), x, pl, acc))
+
+def Board.pts(xs: List<&2, S.Sx>, +pl: Place) -> List<&2, Pt>:
+  Board.pts.go(xs, pl, Nil{})
 
 def Board.home() -> Place:
   Place{0.0, 0.0, 0.0}
