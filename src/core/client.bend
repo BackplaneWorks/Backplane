@@ -9826,12 +9826,15 @@ def Hs.menu.steps() -> Nat:
 def Hs.row.last(+ss: List<&2, HI.Step>, +l: I.Loc, +u: Ui, +side: String, +es: List<&2, M.Entry>) -> List<&2, HRow>:
   Hs.row.steps(List.drop(&2, HI.Step, ss, Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps())), l, u, side, es, 1n+Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps()), Nil{})
 
-def Hs.menu.loc(+l: I.Loc, +u: Ui, +side: String) -> List<&2, HRow>:
+def Hs.menu.track.loc(+l: I.Loc, +ss: List<&2, HI.Step>, +u: Ui, +side: String) -> List<&2, HRow>:
   +r = Hs.refs(u)
   +es = Hs.entries(u)
   List.append(&2, HRow, [HRow{MSG.T.history.workingcopy(l), MSG.T.history.workingcopy.note(l), Hs.row.value(side, "", "Working copy", "", "")}],
-    List.append(&2, HRow, Hs.row.last(Hs.track(u), l, u, side, es),
+    List.append(&2, HRow, Hs.row.last(ss, l, u, side, es),
       Hs.row.refs(HI.Hist.refs(J.Json.get_str(r, "refs", "")), l, side, J.Json.get_str(r, "git", ""), J.Json.get_str(r, "top", ""))))
+
+def Hs.menu.loc(+l: I.Loc, +u: Ui, +side: String) -> List<&2, HRow>:
+  Hs.menu.track.loc(l, Hs.track(u), u, side)
 
 def Hs.menu(+u: Ui, side: String) -> List<&2, HRow>:
   Hs.menu.loc(Lang.loc(u), u, side)
