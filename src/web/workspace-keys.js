@@ -263,7 +263,9 @@ export function installComposerFocus({ document: doc = document, window: win = w
     if (!picked) held = '';
     const target = event.target, row = target?.closest?.('[data-on-click="select"]'), id = row?.getAttribute?.('data-value');
     if (target?.closest?.(TURN_BUTTONS)) { want = true;coming = Date.now() + COMING; }
-    if (id) { picked = id;coming = Date.now() + COMING; }
+    // (only the primary button opens a row: a right-click opens its menu,
+    // and a thread that never shows would keep every later key)
+    if (id && !event.button) { picked = id;coming = Date.now() + COMING; }
   }, true);
   // A key while the keyboard is on its way (above) is the draft's, not the
   // rail's: the composer takes the keyboard before the key's own action, so
