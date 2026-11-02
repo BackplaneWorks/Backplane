@@ -1,8 +1,12 @@
 # Qualification status
 
-PR #679 is separate from the installed urgent chat/account delivery. These
-checks do not change installed hubs, live telemetry settings, credentials or
-external issues. No reporting release or merge has been performed.
+PR #679 merged as `214cfd7fdcdf4090ee870b2d5540d98bc2137537`. Screen
+recording merged in #734 (`8e083b45d84967e7dd3c094b8ea4ea994fc0eb71`),
+with the Electron permission fix in #760
+(`b12e72c243b23b752233519deeb6a5aad546530c`). Source merge is separate
+from production compilation and installation, which belong to the installer.
+These checks do not change installed hubs, live telemetry settings, credentials
+or external issues.
 
 ## Rebased candidate
 
@@ -15,12 +19,30 @@ the CSP browser test lacked Playwright in the sandbox. Policy and web emits
 were not reached. The sandbox was deleted and verified.
 
 The two fixture bindings were corrected without changing their assertions;
-those 14 JavaScript cases passed locally. A pinned browser dependency and the
-remaining JavaScript/policy/web continuation are pending. Earlier passes below
-belong to the original source campaign and do not qualify this rebased tree.
+those 14 JavaScript cases passed locally. The remaining continuation later
+passed as described below. Earlier passes in the historical source campaign
+do not qualify this rebased tree.
 Global check, global proof and the default suite are omitted from the current
 Boat qualification because of its memory limit; they are not reported as pass.
 No existing law statement has been weakened or removed.
+
+## Reconstructed v3 continuation
+
+After external changes to the old working tree, the continuation was rebuilt
+from committed `a1d90d91b6fadd81065bd2d188afcf8159b3cc44` / tree
+`cc66c25e2093e3a0dc89a7151b2ab6c52f0a0200`. A new receipt checked every
+tracked byte against Git and preserved the retained controller. The original
+four focused Bend and 19 backend storage passes were not replayed.
+
+Boat job `j20261102203026-1020820` passed all 44 JavaScript cases, policy
+emission, the desktop/phone public issue popup, and normal web emission with
+production transforms. Playwright 1.64.1 and Chromium 156.0.8078.4 were pinned
+and verified. Source hashes before/after and returned output hashes matched.
+The sandbox was deleted and verified. This qualifies that source, not later
+recording changes or a production package. The previous JavaScript failures
+above remain part of the record. An earlier launch was refused before sandbox
+creation because it incorrectly supplied a $0.50 budget override; the successful
+launch used the configured Boat budget without that override.
 
 ## Historical source campaign
 
@@ -53,9 +75,9 @@ regression. No existing law statement was weakened or removed.
 
 ## Pending
 
-The current policy/web emits and JavaScript browser qualification remain
-pending. The final combined production build belongs to the installer after
-the reader and diagnostics source merges. Mobile emission, hub/service
+The recording-specific focused Bend test, policy emission and normal web
+emission remain pending. The final combined production build and startup
+verification belong to the installer. Mobile emission, hub/service
 emission, wire build and isolated-hub reporting E2E are outside the current
 Boat phase. Reporting E2E must use the final combined server artifact.
 
@@ -70,11 +92,44 @@ and submit through their own GitHub account.
 
 ## Screen recording addition
 
-The recording addition has separate validation from the reconstructed v3
-continuation above. Its local JavaScript suites passed 26/26 cases: recorder
-bounds/cancel, frame permissions and selection, private capped storage and
-quota faults, exact WebM attachment/retry paths, plus existing Improvements,
-public policy and preload regressions. Browser popup, emitted policy/web and
-an isolated X11 Electron capture fixture are pending. Wayland portal behavior
-has unit coverage; no compositor/portal runtime pass is claimed. There is no
-capture of a person's desktop in these tests.
+These results are separate from the reconstructed v3 source above:
+
+- Initial local JavaScript suites passed 26/26 cases for recorder bounds and
+  cancellation, permissions and selection, capped private storage and quota
+  faults, exact WebM attachments and retries, and existing reporting/preload
+  behavior. The later permission fix passed all eight recording unit cases.
+- The broad recording JavaScript run passed 57/64. Seven startup fixture cases
+  failed because their VM lacked `historyFillMore`; #746 added the binding
+  without changing the assertions. All 16 startup cases then passed in Boat
+  job `j20261102214216-1684587`. This is not a claim that the entire later
+  combined tree passed a fresh 64-case run.
+- The recording popup initially failed because its project path was not the
+  canonical Backplane project. #755 repaired the fixture. Job
+  `j20261102214938-1812289` then passed actual browser MediaRecorder/WebM and
+  origin-private storage, playback before attachment consent, exact local
+  attachment bytes, public opt-in, and hidden controls on mobile. Its picker,
+  agent and GitHub transport were stubbed; it published no issue.
+- Actual private X11 capture exposed Electron 44.9.2's legacy `media` request
+  with empty `mediaTypes`, which #760 now handles narrowly. Camera/microphone
+  request types and media permission checks remain denied. The callback's
+  legacy API limitation is documented in README.md.
+- Xvfb without a window manager listed its private monitor but not the test
+  window. #761 changed the fixture to select that monitor through the real
+  production picker and verify the captured pixels. Job
+  `j20261102215910-1926442` passed actual Electron 44.9.2 getDisplayMedia,
+  MediaRecorder, a 20,535-byte WebM with its expected header, 1152 by 720
+  playback and the synthetic green pixels. Fake camera and microphone requests
+  both returned NotAllowedError. No person's desktop or real device was used.
+  All returned output hashes and source before/after hashes were verified;
+  the sandbox was deleted and verified. This qualifies X11 monitor capture,
+  not X11 window enumeration or an installed desktop flow.
+- Recording compiler job `j20261102213509-1560712` was refused with exit 75
+  before compilation: the unchanged guard required 12 GiB available and saw
+  5.91 GiB. Focused Bend, policy emission and normal web emission did not run.
+  No memory guard was bypassed and no compiler pass is claimed.
+
+Wayland portal handling has unit coverage. A real compositor/portal runtime
+and installed desktop capture remain untested. Production build/startup and
+the missing recording compiler phases require a suitable admitted host; they
+must run serially. The passing frozen v3 web output is qualification evidence
+only and must not be installed as a current-main artifact.
