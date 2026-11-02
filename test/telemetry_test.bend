@@ -54,6 +54,7 @@ def main() -> IO(Unit):
     check("legacy opt-in is asked about expanded metrics", Bool.not(U.Share.asked(M.State.replay([M.SettingSet{"telemetry.asked", "1", 1n}], M.State.empty()))))
     check("existing opt-out is preserved without prompting", U.Share.asked(M.State.replay([M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.share", "off", 1n}], M.State.empty())))
     check("expanded consent discloses investor metrics", String.contains(O.Ob.body.share(), "investors"))
+    check("board counters disclosed in popup", String.contains(O.Ob.body.share(), "boards created") && String.contains(O.Ob.body.share(), "completed board orders"))
     C.Check.str("share off", F.Cases.setting(U.Ui.act(U.Ui.init(1n), "share", "off"), "telemetry.share"), "off")
     C.Check.str("share reset", F.Cases.setting(U.Ui.act(U.Ui.init(1n), "share-reset", ""), "telemetry.reset"), "1")
     C.Check.str("existing asks share first", Nat.show(U.Tour.at(F.Cases.version(F.Cases.old()))), Nat.show(O.Ob.share()))

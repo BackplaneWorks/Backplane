@@ -26,11 +26,19 @@ import uuid
 
 ENDPOINT = "https://backplaneworks.com/api/v1/events"
 COUNTERS = ("threads_created", "user_messages", "assistant_messages", "bot_messages", "bot_wakes",
-            "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens", "usage_turns")
+            "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens", "usage_turns", "boards_created", "boards_ordered")
 
 
 def counts(n):
-    return dict(zip(COUNTERS, (n, n, n, n, n, 100*n, 20*n, 30*n, 40*n, n)))
+    return dict(zip(COUNTERS, (n, n, n, n, n, 100*n, 20*n, 30*n, 40*n, n, n, n)))
+
+
+def validate_counts(value):
+    """The only design-related wire data is fixed-key integer counters."""
+    if not isinstance(value, dict) or set(value) != set(COUNTERS):
+        raise ValueError("usage counters must have exactly the allowed enum keys")
+    if any(type(n) is not int or not 0 <= n <= 281474976710655 for n in value.values()):
+        raise ValueError("usage counters must be bounded nonnegative integers")
 
 
 def proof_ok(ident, proof):
@@ -149,6 +157,8 @@ def main():
                 for event in body["events"]:
                     if event["e"] == "install" and not proof_ok(event["id"], event.get("pow", "")):
                         raise ValueError("native registration proof invalid")
+                    if event["e"] == "usage":
+                        validate_counts(event["counts"])
                 headers = {name: self.headers[name] for name in ("X-Backplane-Key", "X-Backplane-Timestamp", "X-Backplane-Signature")}
                 headers["Content-Type"] = "application/json"
                 # Forward exact body and signatures, with redirects disabled.
@@ -196,7 +206,7 @@ def main():
             usage = [e for e in events if e["e"] == "usage"]
             stage("native_registration_before_usage", bool(installs) and bool(usage) and events[0]["e"] == "install")
             stage("native_registration_18_bit_pow", all(proof_ok(e["id"], e["pow"]) for e in installs))
-            stage("initial_all_ten_counters", usage[-1]["counts"] == counts(3))
+            stage("initial_all_twelve_counters", usage[-1]["counts"] == counts(3))
             stage("aws_https_transport_initial_202", all(r["status"] == 202 for r in receipt["requests"]))
             original = usage[-1]
             before = len(receipt["requests"])
@@ -204,7 +214,7 @@ def main():
             stage("identical_snapshot_sends_nothing", len(receipt["requests"]) == before)
             run(5)
             usage = [e for e in events if e["e"] == "usage"]
-            stage("updated_all_ten_counters", usage[-1]["counts"] == counts(5))
+            stage("updated_all_twelve_counters", usage[-1]["counts"] == counts(5))
             stage("aws_https_transport_updated_202", receipt["requests"][-1]["status"] == 202)
             stage("older_snapshot_transport_202", post_events([original], "older_snapshot") == 202)
             invalid = dict(installs[0], id=str(uuid.uuid4()), pow="0")
