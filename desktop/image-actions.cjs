@@ -26,15 +26,35 @@ function localImagePath(source, origin, home = os.homedir()) {
   } catch { return null; }
 }
 
-function createImageActions({ electron, origin, runFile = run, platform = process.platform }) {
+// a PNG data URL's bytes, checked before anything decodes or writes them
+function pngBytes(png, limit) {
+  if (typeof png !== 'string' || png.length > limit || !/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(png)) throw Error('Image is too large or unavailable');
+  const bytes = Buffer.from(png.slice(22), 'base64');
+  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) || bytes.toString('ascii', 12, 16) !== 'IHDR') throw Error('Invalid image');
+  const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
+  if (!width || !height || width * height > MAX_PIXELS) throw Error('Image is too large');
+  return bytes;
+}
+
+function createImageActions({ electron, origin, runFile = run, platform = process.platform, pictures = () => electron.app?.getPath?.('pictures') || path.join(os.homedir(), 'Pictures') }) {
   return {
     local(source) { return localImagePath(source, origin()) !== null; },
+    // A 3D view's snapshot (Snap view) goes under the person's Pictures, in
+    // Backplane/, by a name the page chose; never over an existing file.
+    async save(value) {
+      const { png, name } = value && typeof value === 'object' ? value : {};
+      if (typeof name !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,119}\.png$/.test(name)) throw Error('Invalid snapshot name');
+      const bytes = pngBytes(png, 96 * 1024 * 1024), dir = path.join(pictures(), 'Backplane');
+      await fs.mkdir(dir, { recursive: true });
+      for (let i = 1; i <= 100; i++) {
+        const file = path.join(dir, i === 1 ? name : name.replace(/\.png$/, `-${i}.png`));
+        try { await fs.writeFile(file, bytes, { flag: 'wx' }); return { path: file }; }
+        catch (e) { if (e.code !== 'EEXIST') throw e; }
+      }
+      throw Error('Too many snapshots with this name');
+    },
     async copy(png) {
-      if (typeof png !== 'string' || png.length > 18 * 1024 * 1024 || !/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(png)) throw Error('Image is too large or unavailable');
-      const bytes = Buffer.from(png.slice(22), 'base64');
-      if (bytes.length < 24 || !bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) || bytes.toString('ascii', 12, 16) !== 'IHDR') throw Error('Invalid image');
-      const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
-      if (!width || !height || width * height > MAX_PIXELS) throw Error('Image is too large');
+      const bytes = pngBytes(png, 18 * 1024 * 1024);
       const image = electron.nativeImage.createFromBuffer(bytes);
       if (image.isEmpty()) throw Error('Image could not be decoded');
       await electron.clipboard.write([new electron.ClipboardItem({

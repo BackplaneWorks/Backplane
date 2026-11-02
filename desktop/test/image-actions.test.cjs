@@ -62,3 +62,16 @@ test('trusted editable fields have the native editing menu with Chromium edit av
   assert.deepEqual(items.filter(x=>x.role).map(x=>[x.role,x.enabled]),[['undo',true],['redo',false],['cut',true],['copy',true],['paste',false],['selectAll',true]]);
   listener({},{...params,frameURL:'https://other'});assert.equal(popups,1);
 });
+test('a view snapshot is saved under Pictures/Backplane by a plain name, never over another', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-snap-unit-'));t.after(() => fs.rmSync(dir, { recursive:true, force:true }));
+  const actions = createImageActions({ electron:{}, origin:()=>origin, pictures:()=>dir });
+  // a 1x1 PNG
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const first = await actions.save({ png, name:'band_assembly-20261102-021924.png' });
+  assert.equal(first.path, path.join(dir, 'Backplane', 'band_assembly-20261102-021924.png'));
+  assert.equal(fs.readFileSync(first.path).subarray(1, 4).toString(), 'PNG');
+  assert.equal((await actions.save({ png, name:'band_assembly-20261102-021924.png' })).path, path.join(dir, 'Backplane', 'band_assembly-20261102-021924-2.png'));
+  for (const name of ['../x.png', '.hidden.png', 'a/b.png', 'x.jpg', '', 'a'.repeat(130) + '.png']) await assert.rejects(actions.save({ png, name }), /Invalid snapshot name/, name);
+  await assert.rejects(actions.save({ png:'data:image/png;base64,AAAA', name:'x.png' }), /Invalid image/);
+  await assert.rejects(actions.save(null), /Invalid snapshot name/);
+});

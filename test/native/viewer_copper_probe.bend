@@ -24,18 +24,18 @@ def paths(+path: String) -> IO(Unit):
     c : String <- PV.Pv.board.out.recipe(path, False{}, False{})
     d : String <- PV.Pv.board.out.recipe(path, False{}, True{})
     e : String <- PV.Pv.board.out.recipe(path, True{}, True{})
-    f : String <- PV.Pv.solid.out(False{}, False{}, False{}, True{}, path)
-    g : String <- PV.Pv.solid.out(False{}, False{}, False{}, False{}, path)
+    f : String <- PV.Pv.solid.out(False{}, False{}, False{}, True{}, path, "normal")
+    g : String <- PV.Pv.solid.out(False{}, False{}, False{}, False{}, path, "normal")
     IO.print(J.Json.show(J.Json.obj([J.KV{"compactParts", J.Str{a}}, J.KV{"compactBare", J.Str{b}},
       J.KV{"recipeCompact", J.Str{c}}, J.KV{"fullParts", J.Str{d}}, J.KV{"fullBare", J.Str{e}},
       J.KV{"solidFull", J.Str{f}}, J.KV{"solidCompact", J.Str{g}}])))
 
 def sources(+path: String) -> IO(Unit):
   do IO<Unit>:
-    a : String <- PV.Pv.solid.out(True{}, False{}, False{}, False{}, path)
-    b : String <- PV.Pv.solid.out(True{}, False{}, False{}, True{}, path)
-    c : String <- PV.Pv.solid.out(False{}, True{}, False{}, False{}, path)
-    d : String <- PV.Pv.solid.out(False{}, True{}, False{}, True{}, path)
+    a : String <- PV.Pv.solid.out(True{}, False{}, False{}, False{}, path, "normal")
+    b : String <- PV.Pv.solid.out(True{}, False{}, False{}, True{}, path, "normal")
+    c : String <- PV.Pv.solid.out(False{}, True{}, False{}, False{}, path, "normal")
+    d : String <- PV.Pv.solid.out(False{}, True{}, False{}, True{}, path, "normal")
     IO.print(J.Json.show(J.Json.obj([J.KV{"glbCompact", J.Str{a}}, J.KV{"glbFull", J.Str{b}},
       J.KV{"stepCompact", J.Str{c}}, J.KV{"stepFull", J.Str{d}}])))
 
@@ -55,7 +55,7 @@ def dispatch(a: Bool, b: Bool, c: Bool, d: Bool, +path: String, out: String) -> 
 def args(xs: List<&1, String>) -> IO(Unit):
   match xs:
     case _ <> "export" <> path <> out <> _:
-      IO.bind(PR.Ran, Unit, PV.Pv.glb.run(False{}, False{}, False{}, True{}, path, out), ran)
+      IO.bind(PR.Ran, Unit, PV.Pv.glb.run(False{}, False{}, False{}, True{}, path, out, "normal"), ran)
     case _ <> +mode <> path <> rest:
       out = Maybe.default(&1, String, List.head(&1, String, rest), "")
       a = String.eq(mode, "flags")

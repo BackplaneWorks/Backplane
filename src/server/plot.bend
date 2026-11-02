@@ -566,30 +566,31 @@ def Pv.board.ran(r: PR.Ran, from: String, out: String) -> IO(PR.Ran):
 
 # Reloads can export the same revision at once. Each writer needs its own
 # staging file, or a later writer can change an already promoted model.
-def Pv.glb.export(step: Bool, +bare: Bool, +full: Bool, +path: String, +stage: String, +out: String) -> IO(PR.Ran):
+# a STEP is meshed at the level asked for (core/mech.bend's Mech.detail)
+def Pv.glb.export(step: Bool, +bare: Bool, +full: Bool, +path: String, +stage: String, +out: String, +level: String) -> IO(PR.Ran):
   match step:
     case True{}:
-      IO.bind(String, PR.Ran, Pv.step2glb(), x => IO.bind(PR.Ran, PR.Ran, PR.Proc.run(x, [path, stage], "/"), r => Pv.step.ran(r, stage, out)))
+      IO.bind(String, PR.Ran, Pv.step2glb(), x => IO.bind(PR.Ran, PR.Ran, PR.Proc.run(x, List.append(&2, String, [path, stage], MC.Mech.detail.args(level)), "/"), r => Pv.step.ran(r, stage, out)))
     case False{}:
       IO.bind(String, PR.Ran, Pv.cli(), c => IO.bind(PR.Ran, PR.Ran, K.KiCad.run(c, Pv.glb.flags(bare, full, stage, path)), r => Pv.board.ran(r, stage, out)))
 
-def Pv.glb.staged(m: Result<&1, &1, U32 & String, String>, step: Bool, bare: Bool, full: Bool, path: String, out: String) -> IO(PR.Ran):
+def Pv.glb.staged(m: Result<&1, &1, U32 & String, String>, step: Bool, bare: Bool, full: Bool, path: String, out: String, level: String) -> IO(PR.Ran):
   match m:
     case Fail{_}: IO.pure(PR.Ran, PR.Ran{3, "Unable to create model staging directory"})
     case Done{+dir}:
       do IO<PR.Ran>:
         +stage : String = dir ++ "/model.glb"
-        r : PR.Ran <- Pv.glb.export(step, bare, full, path, stage, out)
+        r : PR.Ran <- Pv.glb.export(step, bare, full, path, stage, out, level)
         _ : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(stage)
         _ : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(dir)
         return r
 
-def Pv.glb.run(glb: Bool, step: Bool, +bare: Bool, +full: Bool, +path: String, +out: String) -> IO(PR.Ran):
+def Pv.glb.run(glb: Bool, step: Bool, +bare: Bool, +full: Bool, +path: String, +out: String, +level: String) -> IO(PR.Ran):
   match glb:
     case True{}:
       IO.pure(PR.Ran, PR.Ran{0, ""})
     case False{}:
-      IO.bind(Result<&1, &1, U32 & String, String>, PR.Ran, H.FS.mkdtemp(out ++ ".export-"), m => Pv.glb.staged(m, step, bare, full, path, out))
+      IO.bind(Result<&1, &1, U32 & String, String>, PR.Ran, H.FS.mkdtemp(out ++ ".export-"), m => Pv.glb.staged(m, step, bare, full, path, out, level))
 
 # how many parts kicad-cli found no 3D model for ("Could not add 3D model
 # for R1."): the phone says so, else a bare board looks like a bug
@@ -701,11 +702,11 @@ def Pv.cache.revision(sm: U32 & String) -> String:
   (_, rev) = sm
   String.join(String.split(rev, ':'), ".")
 
-def Pv.step.out(+path: String) -> IO(String):
+def Pv.step.out(+path: String, +level: String) -> IO(String):
   do IO<String>:
     +dir : String <- Pv.cache()
     st : U32 & String <- Pv.stamp.read(path)
-    return dir ++ "/step3-" ++ U32.show(P.Key.hash(path, 2166136261)) ++ "." ++ Pv.cache.revision(st) ++ ".glb"
+    return dir ++ "/step3-" ++ U32.show(P.Key.hash(path, 2166136261)) ++ "." ++ Pv.cache.revision(st) ++ "." ++ level ++ ".glb"
 
 # a board's model, cached per exact revision of the board file and per
 # export (with its parts or bare): KiCad's export takes half a
@@ -733,21 +734,21 @@ def Pv.board.out.recipe(+path: String, +bare: Bool, full: Bool) -> IO(String):
 
 # where a model's GLB comes from: a .glb is its own; a STEP's and a board's
 # are cached per version
-def Pv.solid.out(isglb: Bool, step: Bool, +bare: Bool, +full: Bool, +path: String) -> IO(String):
+def Pv.solid.out(isglb: Bool, step: Bool, +bare: Bool, +full: Bool, +path: String, +level: String) -> IO(String):
   match isglb step:
     case True{} _:
       IO.pure(String, path)
     case False{} True{}:
-      Pv.step.out(path)
+      Pv.step.out(path, level)
     case False{} False{}:
       Pv.board.out.recipe(path, bare, full)
 
 def Pv.child.solid(+bare: Bool, +full: Bool, +path: String, +note: String) -> IO(Unit):
   do IO<Unit>:
     +isglb : Bool = String.ends_with(path, ".glb")
-    +out : String <- Pv.solid.out(isglb, Pv.is_step(path), bare, full, path)
+    +out : String <- Pv.solid.out(isglb, Pv.is_step(path), bare, full, path, "normal")
     have : Bool <- K.Io.is_file(out)
-    r : PR.Ran <- Pv.glb.run(Bool.or(isglb, have), Pv.is_step(path), bare, full, path, out)
+    r : PR.Ran <- Pv.glb.run(Bool.or(isglb, have), Pv.is_step(path), bare, full, path, out, "normal")
     exe : String <- H.Sys.exe_path()
     st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(exe)
     +v : String = Pv.ver(st)
@@ -1130,7 +1131,7 @@ def Pv.solid.known(solid: Bool, +kind: U32, +path: String) -> IO(U32):
   match solid:
     case True{}:
       do IO<U32>:
-        +out : String <- Pv.solid.out(String.ends_with(path, ".glb"), Pv.is_step(path), U32.is_eq(kind, 3), U32.is_eq(kind, 4), path)
+        +out : String <- Pv.solid.out(String.ends_with(path, ".glb"), Pv.is_step(path), U32.is_eq(kind, 3), U32.is_eq(kind, 4), path, "normal")
         r : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(out)
         return Pv.solid.size(r)
     case False{}:

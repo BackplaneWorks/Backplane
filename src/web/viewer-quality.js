@@ -3,6 +3,34 @@
 function button(label, action, title) {
   const n = document.createElement("button"); n.type = "button"; n.textContent = label; n.title = title || label; n.addEventListener("click", action); return n;
 }
+// How finely a STEP is meshed for the original model (core/mech.bend's
+// Mech.detail). Kept per device: what a GPU takes is this machine's question.
+const DETAIL_KEY = "bp.mech.detail";
+const DETAIL = [["low", "Low detail", "Fastest: the coarsest mesh"], ["normal", "Normal detail", "Smooth curves at a moderate size (the default)"],
+  ["high", "High detail", "About 4x the triangles of Normal: slower to load and orbit"], ["max", "Max detail", "About 8x Normal: large models take a while to convert and need a strong GPU"]];
+function detailLevel() {
+  try { const v = localStorage.getItem(DETAIL_KEY); return DETAIL.some(([k]) => k === v) ? v : "normal"; } catch { return "normal"; }
+}
+const isStep = path => /\.(step|stp)$/i.test(path);
+// a snapshot's file name: the model's name and the local time
+function snapName(path) {
+  const base = (path.split(/[\\/]/).filter(Boolean).pop() || "view").replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "view";
+  const d = new Date(), two = n => String(n).padStart(2, "0");
+  return `${base}-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}.png`;
+}
+// The desktop app saves it under the person's Pictures and says where; a
+// browser downloads it.
+async function saveSnap(blob, name) {
+  const desk = globalThis.backplaneDesktop?.image;
+  if (desk?.save) {
+    const png = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(r.error); r.readAsDataURL(blob); });
+    return (await desk.save(png, name)).path;
+  }
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return `your downloads (${name})`;
+}
 export class ViewerQuality {
   constructor({ root, solid, services, components, revision, state }) {
     Object.assign(this, { root, solid, services, components, revision, state });
@@ -16,6 +44,7 @@ export class ViewerQuality {
     this.mode.addEventListener("change", () => {
       state.renderMode = this.mode.value;
       this.samples.hidden = state.renderMode !== "pathtrace";
+      this.detail.hidden = !isStep(this.path()) || state.renderMode === "fast";
       if (state.renderMode === "fast") { void this.enable(false); return; }
       state.quality = true;
       if (this.renderer && this.asset?.revision === this.revision()) { this.renderer.setMode(state.renderMode === "pathtrace" ? "pathtrace" : "raster", { samples: Number(this.samples.value) }); this.sync(); }
@@ -26,8 +55,17 @@ export class ViewerQuality {
     for (const n of [32, 64, 128, 256]) { const o = document.createElement("option"); o.value = n; o.textContent = `${n} samples`; this.samples.append(o); }
     this.samples.value = state.samples || 64; this.samples.hidden = state.renderMode !== "pathtrace";
     this.samples.addEventListener("change", () => { state.samples = Number(this.samples.value); this.renderer?.setMode("pathtrace", { samples: state.samples }); });
+    this.detail = document.createElement("select"); this.detail.className = "solid-detail"; this.detail.setAttribute("aria-label", "Model detail");
+    for (const [value, label, title] of DETAIL) { const o = document.createElement("option"); o.value = value; o.textContent = label; o.title = title; this.detail.append(o); }
+    this.detail.value = detailLevel(); this.detail.title = "How finely STEP models are meshed in Studio and Path trace on this device";
+    this.detail.hidden = !isStep(this.path()) || state.renderMode === "fast";
+    this.detail.addEventListener("change", () => {
+      try { localStorage.setItem(DETAIL_KEY, this.detail.value); } catch {}
+      this.stop(); if (state.quality) void this.enable(true);
+    });
+    this.snapButton = button("Snap view", () => void this.snap(), "Save this view as a picture");
     const bar = root.querySelector(".solid-toolbar"), before = bar.querySelector(".solid-model-name");
-    for (const n of [this.mode, this.samples, this.frame]) bar.insertBefore(n, before);
+    for (const n of [this.mode, this.samples, this.detail, this.frame, this.snapButton]) bar.insertBefore(n, before);
     this.note = document.createElement("div"); this.note.className = "solid-render-status"; this.note.setAttribute("role", "status"); this.stage.append(this.note);
     state.materialPolicy ||= "cad-studio";
     this.materials = document.createElement("select"); this.materials.setAttribute("aria-label", "Material finish"); this.materials.disabled = true;
@@ -63,14 +101,16 @@ export class ViewerQuality {
     this.unsubscribe = components.subscribe(() => this.syncComponents());
     if (state.quality) void this.enable(true);
   }
+  path() { return this.root.dataset.key.split("|").slice(2).join("|"); }
   prepareAsset(revision) {
     if (!this.alive || !this.state.quality || !revision) return null;
-    if (this.preparedAsset?.revision === revision) return this.preparedAsset.promise;
+    const parts = this.root.dataset.key.split("|"), path = parts.slice(2).join("|");
+    const kind = isStep(path) ? `${parts[0]}@${detailLevel()}` : parts[0];
+    if (this.preparedAsset?.revision === revision && this.preparedAsset.kind === kind) return this.preparedAsset.promise;
     this.preparedAsset?.abort.abort();
     const abort = new AbortController();
-    const parts = this.root.dataset.key.split("|"), path = parts.slice(2).join("|");
-    const promise = this.services.asset(this.root.dataset.scope, path, parts[0], revision, { signal: abort.signal });
-    const prepared = { revision, abort, promise };
+    const promise = this.services.asset(this.root.dataset.scope, path, kind, revision, { signal: abort.signal });
+    const prepared = { revision, kind, abort, promise };
     this.preparedAsset = prepared;
     // Preparation may precede independent assembly revision confirmation. A
     // rejected speculative read must neither leak nor become a render result.
@@ -211,6 +251,27 @@ export class ViewerQuality {
     if (!!pose.thermal?.enabled !== this.heat) { this.heat = !!pose.thermal?.enabled; this.renderer.setInteractive(this.heat || this.pointers.size > 0); }
     this.syncComponents();
   }
+  // the view on screen (the original model's when shown, else the preview's)
+  // saved as a PNG, and where it went said under the toolbar
+  async snap() {
+    if (this.snapping) return;
+    this.snapping = true; this.snapButton.disabled = true;
+    try {
+      const blob = this.visible && this.renderer ? await this.renderer.snapshot() : await this.solid.snapshot?.(this.canvas);
+      if (!blob?.size) throw Error("nothing is drawn yet");
+      this.said(`Saved view in ${await saveSnap(blob, snapName(this.path() || this.root.dataset.key.split("|")[1] || ""))}`);
+    } catch (e) { this.said(`Could not save the view: ${e.message || e}`); }
+    finally { this.snapping = false; if (this.snapButton) this.snapButton.disabled = false; }
+  }
+  said(text) {
+    if (!this.snapNote) {
+      this.snapNote = document.createElement("div"); this.snapNote.className = "solid-snap-note"; this.snapNote.setAttribute("role", "status");
+      this.snapNote.title = "Click to dismiss"; this.snapNote.addEventListener("click", () => { this.snapNote.hidden = true; });
+      this.stage.append(this.snapNote);
+    }
+    this.snapNote.textContent = text; this.snapNote.hidden = false;
+    clearTimeout(this.snapTimer); this.snapTimer = setTimeout(() => { if (this.snapNote) this.snapNote.hidden = true; }, 15000);
+  }
   sourceChanged() { this.stop(this.revision()); if (this.state.quality) void this.enable(true); }
   async framePart() {
     const id = this.components.selected, renderer = this.renderer, generation = this.generation;
@@ -240,5 +301,5 @@ export class ViewerQuality {
     if (this.solderNote) this.solderNote.textContent = "Estimated joint shapes on supported pads and terminals. Not manufactured joint geometry.";
     this.lastStatus = null;
   }
-  dispose() { this.alive = false; this.stop(); this.unsubscribe?.(); clearTimeout(this.settleTimer); for (const fn of this.cleanup) fn(); this.note?.remove(); }
+  dispose() { this.alive = false; this.stop(); this.unsubscribe?.(); clearTimeout(this.settleTimer); clearTimeout(this.snapTimer); for (const fn of this.cleanup) fn(); this.note?.remove(); this.snapNote?.remove(); }
 }

@@ -1553,7 +1553,10 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .solid-render-status { position: absolute; top: 8px; left: 8px; max-width: calc(100% - 16px); color: var(--dim); background: var(--panel); border: 1px solid var(--line); padding: 3px 6px; font: 11px/1.5 var(--mono); z-index: 8; pointer-events: none; }
 .solid-render-status:empty { display: none; }
 .viewer-stage > .probe-chip ~ .solid-render-status { top: 44px; }
-.solid-samples, .solid-render-mode { min-height: 32px; padding: 3px; border: 1px solid var(--line); color: var(--text); background: var(--raise); }
+.solid-samples, .solid-render-mode, .solid-detail { min-height: 32px; padding: 3px; border: 1px solid var(--line); color: var(--text); background: var(--raise); }
+/* where Snap view saved the picture: selectable, a click puts it away */
+.solid-snap-note { position: absolute; bottom: 8px; left: 8px; max-width: calc(100% - 16px); color: var(--text); background: var(--panel); border: 1px solid var(--line); padding: 4px 8px; font: 11px/1.5 var(--mono); z-index: 8; overflow-wrap: anywhere; user-select: text; cursor: default; }
+.solid-snap-note[hidden] { display: none; }
 .solid-original-visible .component-selection-overlay { display: none; }
 @media (max-width: 700px) {
   .solid-toolbar { gap: 4px; padding: 4px; }

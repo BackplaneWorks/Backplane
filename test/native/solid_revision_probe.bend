@@ -11,7 +11,7 @@ def revision.show(sm: U32 & String) -> String:
 def revision.run(+path: String) -> IO(Unit):
   do IO<Unit>:
     stamp : U32 & String <- PV.Pv.stamp.of(path)
-    step : String <- PV.Pv.step.out(path)
+    step : String <- PV.Pv.step.out(path, "normal")
     board : String <- PV.Pv.board.out(path, False{})
     bare : String <- PV.Pv.board.out(path, True{})
     IO.print(revision.show(stamp))
