@@ -1330,27 +1330,31 @@ def View.subs.go(+lc: I.Loc, rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
       View.sub(lc, r) <> View.subs.go(lc, rest)
 
 # Shared head and scroll body keep the dock's controls available as rows grow.
+# The rows are drawn shut too, hidden (style.css's .subs.shut), and the head
+# carries what a shut keeps either way, so the page shows or hides them at
+# the click (subs-feedback.js, presentation.bend's Node.subs) while the hub
+# answers; its chevron turns by CSS.
 def View.subs.head(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, word: String) -> D.Node:
   D.El{"button", "subs-head", [D.At{"class", "subs-head"}, D.At{"type", "button"},
     D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}, D.At{"aria-controls", "subagent-rows"},
-    D.At{"data-value", SB.Subs.panel.ask(open, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
+    D.At{"data-value", SB.Subs.panel.ask(True{}, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
     D.At{"title", Bool.pick(String, open, MSG.T.subagents.hide(lc), MSG.T.subagents.show(lc))}],
-    [D.Dom.span("subs-label", MSG.T.thread.subagents(lc)), D.Dom.span("subs-summary", word), WI.WIcon.svg(Bool.pick(String, open, "chevron-down", "chevron-right"), 14)]}
+    [D.Dom.span("subs-label", MSG.T.thread.subagents(lc)), D.Dom.span("subs-summary", word), WI.WIcon.svg("chevron-down", 14)]}
 
 def View.subs.body(open: Bool, rows: List<&2, D.Node>) -> D.Node:
-  D.El{"div", "subagent-rows", [D.At{"id", "subagent-rows"}, D.At{"class", "subs-body"}], Bool.pick(List<&2, D.Node>, open, rows, Nil{})}
+  D.El{"div", "subagent-rows", [D.At{"id", "subagent-rows"}, D.At{"class", "subs-body"}], rows}
 
 # The head opens and shuts the dock; done, it folds to the head.
 def View.subs.k(+lc: I.Loc, +busy: String, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>) -> D.Node:
   D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs" ++ Bool.pick(String, String.is_empty(busy), "", " busy") ++ Bool.pick(String, open, "", " shut")}],
-    [View.subs.head(lc, open, th, rs, View.sub.panel(lc, rs)), View.subs.body(open, View.subs.go(lc, SB.Subs.panel.rows(open, rs)))]}
+    [View.subs.head(lc, open, th, rs, View.sub.panel(lc, rs)), View.subs.body(open, View.subs.go(lc, rs))]}
 
 def View.sub.signal.panel(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> String:
   MSG.T.subagents.panel(lc, View.sub.count(SB.Subs.waiting(rs)), View.sub.count(SB.Subs.active(rs, info)), Nat.show(SB.Subs.finished_n(rs)))
 
 def View.subs.signal.k(+lc: I.Loc, +busy: String, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:
   D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs" ++ Bool.pick(String, String.is_empty(busy), "", " busy") ++ Bool.pick(String, open, "", " shut")}],
-    [View.subs.head(lc, open, th, rs, View.sub.signal.panel(lc, rs, info)), View.subs.body(open, View.subs.signals.go(lc, SB.Subs.panel.rows(open, rs), info))]}
+    [View.subs.head(lc, open, th, rs, View.sub.signal.panel(lc, rs, info)), View.subs.body(open, View.subs.signals.go(lc, rs, info))]}
 
 def View.subs(+lc: I.Loc, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, List.is_empty(&2, SB.SubRow, rs), Nil{},
@@ -3442,16 +3446,17 @@ def View.thread.subs(+lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String
   Bool.pick(List<&2, D.Node>, US.Ub.chat.is(st, id), Nil{}, View.subs(lc, nf, id, SB.Subs.rows(st, nf, id, now)))
 
 # Under the top bar its Subagents cell is the dock's head: the dock is only
-# its rows, while that cell has them open
-def View.subs.dock.k(open: Bool, +lc: I.Loc, +info: Map<&2, String>, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
-  match open:
+# its rows, shown while that cell has them open and drawn hidden while shut
+# (so the page shows them at the click: View.subs.head)
+def View.subs.dock.k(some: Bool, +open: Bool, +lc: I.Loc, +info: Map<&2, String>, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
+  match some:
     case True{}:
-      [D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs dock"}], [View.subs.body(True{}, View.subs.signals.go(lc, SB.Subs.panel.rows(True{}, rs), info))]}]
+      [D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs dock" ++ Bool.pick(String, open, "", " shut")}], [View.subs.body(open, View.subs.signals.go(lc, rs, info))]}]
     case False{}:
       Nil{}
 
 def View.subs.dock(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
-  View.subs.dock.k(Bool.and(Bool.not(List.is_empty(&2, SB.SubRow, rs)), Bool.and(Bool.not(US.Ub.chat.is(st, th)), SB.Subs.panel.open(info, th, rs))), lc, info, rs)
+  View.subs.dock.k(Bool.and(Bool.not(List.is_empty(&2, SB.SubRow, rs)), Bool.not(US.Ub.chat.is(st, th))), SB.Subs.panel.open(info, th, rs), lc, info, rs)
 
 def View.tab(+cur: String, +kind: String, +action: String, +value: String, +title: String, +label: String) -> D.Node:
   D.El{"button", "", [D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")}, D.At{"type", "button"},
@@ -5054,7 +5059,7 @@ def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: Str
 def View.chrome.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:
   D.El{"button", "subs-head", [D.At{"class", "kv subs-head" ++ Bool.pick(String, String.is_empty(View.sub.busy(lc, SB.Subs.active(rs, info))), "", " busy")}, D.At{"type", "button"},
     D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}, D.At{"aria-controls", "subagent-rows"},
-    D.At{"data-value", SB.Subs.panel.ask(open, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
+    D.At{"data-value", SB.Subs.panel.ask(True{}, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
     D.At{"title", Bool.pick(String, open, MSG.T.subagents.hide(lc), MSG.T.subagents.show(lc))}],
     [D.Dom.span("k", MSG.T.thread.subagents(lc)), D.Dom.span("v", View.sub.signal.panel(lc, rs, info)), WI.WIcon.svg("chevron-down", 12)]}
 

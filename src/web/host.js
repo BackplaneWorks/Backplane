@@ -72,9 +72,14 @@ import { ThinHost, preservePresentationRoute, presentationTarget, refusedFallbac
 import { compactRoute } from "./thin.js";
 import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
+import { SubsFeedback } from "./subs-feedback.js";
 import { ReviewPosition } from "./review-position.js";
 const reviewPosition = new ReviewPosition(localStorage);
 const modelFeedback = new ModelFeedback(() => later());
+const subsFeedback = new SubsFeedback(() => later());
+// the session the hub's picture is drawn over: the model menu and the
+// Subagents rows as clicked, ahead of the hub's answer
+const feedbackSession = () => subsFeedback.project(modelFeedback.project(currentSession()));
 import { BodyWindows } from "./body-windows.js";
 import { ThinContinuations } from "./thin-continuations.js";
 import { previewTextFiles, previewMarkdownFiles } from "./text-preview.js";
@@ -973,7 +978,7 @@ function render() {
   }
   const tl = document.getElementById("timeline");
   const t0 = PERF || RR ? pnow() : 0;
-  let page = frontendNode ? App.presentation_overlay(historyGaps(frontendNode), presentationJson(modelFeedback.project(currentSession())))
+  let page = frontendNode ? App.presentation_overlay(historyGaps(frontendNode), presentationJson(feedbackSession()))
     : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
   // Saved transition/startup pictures contain the server's unprojected partial
@@ -1161,7 +1166,7 @@ function renderRegions() {
     if (!el?.__v || !hub || !same(el.__v, hub)) { if (RR) RR.n("land.bail." + r.name);later();return; }
     parts.push([r, el, hub]);
   }
-  const t0 = RR ? pnow() : 0, session = presentationJson(modelFeedback.project(currentSession()));
+  const t0 = RR ? pnow() : 0, session = presentationJson(feedbackSession());
   for (const [r, el, hub] of parts) {
     const a0 = RR ? pnow() : 0;
     let v = r.name === "timeline" ? overlayRows(historyGaps(hub), session) : App.presentation_overlay(hub, session);
@@ -1526,7 +1531,9 @@ function dispatch(action, value, timer) {
       if (action === "hold-away" || action === "hold-end") { thin.away?.(value, action === "hold-away" ? holdMark() : "");return true; }
       if (action === "hold-bottom") { holdBottom();return true; }
       const layer = document.querySelector('[data-local-models="1"]');
-      const settled = layer ? modelFeedback.choice(action, value, layer.style.display !== "none") : undefined;
+      const menu = layer ? modelFeedback.choice(action, value, layer.style.display !== "none") : undefined;
+      const subs = subsFeedback.choice(action, value);
+      const settled = menu || subs ? accepted => { menu?.(accepted);subs?.(accepted); } : undefined;
       const thread = currentSession().sel;
       const attachments = ["detach", "send", "send-alt"].includes(action) ? draftAttachmentPaths(currentSession(), thread) : [];
       return thin.request(action, value, accepted => {
@@ -1576,7 +1583,7 @@ function dispatch(action, value, timer) {
   if (action === "subs-shut" || action === "subs-open") {
     try {
       const sep = value.indexOf("\t");
-      const thread = action === "subs-open" ? value : value.slice(0, sep);
+      const thread = sep < 0 ? value : value.slice(0, sep);
       localStorage.setItem(SUBS_CHOICE + thread, action === "subs-open" ? "1" : "0" + value.slice(sep + 1));
     } catch {}
   }
@@ -2635,7 +2642,7 @@ function paintComposer() {
     const el = hub && [...document.querySelectorAll(".composer[data-lang]")].find(e => e.__v && isComposer(e.__v) && e.__v.key === hub.key && e.__v.tag === hub.tag);
     if (!el) { later();return; }
     const t0 = RR ? pnow() : 0;
-    patch(el, App.presentation_overlay(hub, presentationJson(modelFeedback.project(currentSession()))));
+    patch(el, App.presentation_overlay(hub, presentationJson(feedbackSession())));
     attachmentPreviews();
     composerGeometry();
     if (RR) { RR.n("render.part");RR.t("render.part", pnow() - t0); }
@@ -3090,7 +3097,7 @@ async function startThin(again = false, reason = "initial") {
       selection: (target, session) => {
         composerKeeper.selecting(target.kind === "thread" ? target.id : "");
         historyClear();
-        modelFeedback.clear();
+        modelFeedback.clear();subsFeedback.clear();
         thinMailDraft.clear();thinContinuations.clear();bodyWindows.disconnect();
         if (target.kind === "thread") { ui = App.presentation_select(ui, target.id);void restoreFocused(); }
         else { focusedRequestedKey = null;focusedView.invalidate(); }
@@ -3198,7 +3205,7 @@ async function startThin(again = false, reason = "initial") {
         if (becameReady) deskCheck();
         if (remoteReady && (attachmentController !== thin || attachmentView !== thin?.client.links.get(thin.hub)?.viewId || attachmentSelection !== currentSession().sel)) restoreDraftAttachments(currentSession());
         if (!remoteReady) {
-          modelFeedback.clear();
+          modelFeedback.clear();subsFeedback.clear();
           // Keep the last validated tree as a read-only picture. The local Ui
           // has no canonical bot/catalog state in view mode. Falling back to
           // it here removed the sidebar and cats after a refusal or disconnect.

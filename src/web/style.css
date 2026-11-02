@@ -366,6 +366,7 @@ button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; bord
 .subs-head svg { flex: none; margin-left: auto; }
 .subs-body { max-height: min(32vh, 300px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-top: 1px solid var(--line); }
 .subs.shut .subs-body { display: none; }
+section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90deg); }
 .sub { min-width: 0; border-bottom: 1px solid var(--line); }
 .sub:last-child { border-bottom: 0; }
 .sub-row { display: flex; gap: 10px; align-items: center; width: 100%; min-height: 40px; padding: 8px 16px; cursor: pointer; text-align: left; border: 0; background: none; }
@@ -1898,6 +1899,8 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .app.top .sidebar .find .side-fold:hover { color: var(--text); border-color: var(--line); }
 .app.top .sidebar-tools { position: static; }
 .thread-content > .subs.dock { border-bottom: 1px solid var(--line); }
+/* drawn shut too, so a click shows the rows at once (subs-feedback.js) */
+.thread-content > .subs.dock.shut { display: none; }
 .thread-content > .subs.dock .subs-body { border-top: 0; }
 @media (max-width: 1300px) { .topbar .kv.branch { display: none; } }
 @media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; container-type: normal; } .topbar .cmd-long { display: none; } .topbar .cmd-short { display: inline; } }
