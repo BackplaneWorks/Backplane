@@ -16,6 +16,7 @@ import { editStart } from "./sent-claims.js";
 import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
+import { EntryHistory } from "./entry-history.js";
 import { installImageActions } from "./image-actions.js";
 import { copyText, copyButton } from "./text-copy.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
@@ -349,7 +350,7 @@ function patch(el, v) {
       timelineLists.set(el, scroller);
     }
     const u0 = RR ? pnow() : 0, rows = [...each(v.kids)].map(expand), u1 = RR ? pnow() : 0;
-    scroller.update(rows, { follow: !(thin && thin.atNewest?.() === false) });
+    scroller.update(rows, { follow: entryHistory.active(historyFillOwner()) || !(thin && thin.atNewest?.() === false) });
     if (RR) { RR.t("patch.tl.rows", u1 - u0);RR.t("patch.tl.update", pnow() - u1); }
     el.__v = v;
     return;
@@ -812,9 +813,10 @@ let earlierAsked = false;
 // The host owns DOM lifetimes; Bend owns rows, geometry, range and following.
 const timelineLists = new WeakMap();
 let activeTimeline = null, historyNode = null, historyStatus = null;
+const entryHistory = new EntryHistory();
 let held = false, away = "", holdPending = null;
 function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
-function historyClear() { resumedConversation = null;historyNode = null;historyDirection = "";historyOlderDemand = 0;historyFillScope = "";historyFillMore(null, false);historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
+function historyClear() { entryHistory.cancel();resumedConversation = null;historyNode = null;historyDirection = "";historyOlderDemand = 0;historyFillScope = "";historyFillMore(null, false);historyPageState(null);historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.(); }
 // Rows let go past the cap (thin-host.js's heldTrim): their display keys,
 // by the side they went from, and the height they had, kept in their place
 // as a gap (timeline-history.bend's gaps) so the scrollbar and the reader's
@@ -905,6 +907,7 @@ function holdSay(now) {
 }
 function timelineScrolled(list, delta) {
   if (list !== activeTimeline || !delta) return;
+  entryHistory.cancel();
   historyFillMore(null, false);
   historyDirection = delta < 0 ? "older" : "newer";
   historyOlderDemand = delta < 0 ? 2 : 0;
@@ -913,6 +916,9 @@ function timelineChanged(list) {
   if (list !== activeTimeline || focusedNode && !frontendNode) return;
   if (!canonicalBoot && (!remoteReady || !frontendNode)) return;
   if (transitionPosition) return;
+  // Initial fill temporarily reads older source pages. It grants no reading
+  // acknowledgement until the merged newest source is painted again.
+  if (entryHistory.active(historyFillOwner())) { historyCheckSoon();return; }
   // The trail moves when newest is requested; the old viewport is still
   // unread until that request's content has actually been presented.
   held = !list.atEnd() || !!thin && (thin.atNewest?.() === false || thin.paging?.direction === "newest");
@@ -926,6 +932,7 @@ function holdMark() {
   return timelineList()?.rows.map(historyRow).filter(id => id && !id.startsWith("@") && !id.startsWith("control:")).at(-1) || "";
 }
 function holdBottom() {
+  entryHistory.cancel();
   if (thin && (thin.paging || thin.atNewest?.() === false)) { thin.newest();return; }
   const list = timelineList();
   // The current source page needs no network reply to retire the old
@@ -2482,6 +2489,13 @@ function earlierCheck(tl) {
   if (!owner) { historyFillMore(tl, false);return; }
   if (!historyFillScope) historyFillScope = owner;
   else if (owner !== historyFillScope) { historyFillScope = owner;historyOlderDemand = 0;historyFillMore(tl, false);return; }
+  if (entryHistory.active(owner)) {
+    const usable = tl.scrollHeight > tl.clientHeight + 10 && historyHasMessage(tl);
+    if (entryHistory.check(owner, thin, usable)) { historyFillMore(tl, false);return; }
+    // The accepted newest page has landed; reconcile following and the read
+    // boundary even if its geometry did not produce another scroll event.
+    const list = timelineList(tl);if (list) timelineChanged(list);
+  } else entryHistory.cancel();
   historyFillMore(tl, thin.hasAhead("older") && (tl.scrollHeight <= tl.clientHeight + 10 || !historyHasMessage(tl)));
   if (historyDirection !== "older" || historyOlderDemand <= 0) return;
   const gap = historyGap("older"), runway = historyRunway(tl), two = historyOlderDemand > 1 && runway > tl.clientHeight * 3;
@@ -2527,7 +2541,7 @@ document.addEventListener("scroll", e => {
 document.addEventListener("wheel", e => {
   if (!e.isTrusted || e.ctrlKey || !e.target.closest?.("#timeline")) return;
   const tl = document.getElementById("timeline");
-  if (e.deltaY) { historyFillMore(tl, false); }
+  if (e.deltaY) { entryHistory.cancel();historyFillMore(tl, false); }
   historyDirection = e.deltaY < 0 ? "older" : e.deltaY > 0 ? "newer" : historyDirection;
   if (e.deltaY) historyOlderDemand = e.deltaY < 0 ? 2 : 0;
   historyMoved(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? tl?.clientHeight || 800 : 1));
@@ -2535,8 +2549,16 @@ document.addEventListener("wheel", e => {
   else if (e.deltaY > 0) laterCheck(tl);
 }, { capture: true, passive: true });
 
+// A native thumb drag may start before it changes scrollTop. Retire entry
+// work at the press, including a tool expansion, so it cannot take the next
+// viewport back to the end while the person starts reading.
+document.addEventListener("pointerdown", e => {
+  if (e.isTrusted && e.target.closest?.("#timeline")) entryHistory.cancel();
+}, { capture: true, passive: true });
+
 for (const event of ["touchstart", "touchmove", "keydown"]) document.addEventListener(event, e => {
   if (!e.isTrusted || !e.target.closest?.("#timeline") && !(event === "keydown" && e.target === document.body)) return;
+  if (event !== "keydown" || ["PageUp", "Home", "ArrowUp", "PageDown", "End", "ArrowDown", " "].includes(e.key)) entryHistory.cancel();
   if (event === "touchstart") historyTouchY = e.touches[0]?.clientY ?? null;
   else if (event === "touchmove") {
     const y = e.touches[0]?.clientY;
@@ -3398,7 +3420,7 @@ async function startThin(again = false, reason = "initial") {
         if (!current()) return;
         const vw0 = RR ? pnow() : 0;
         RR?.n("view.apply." + (detail.page?.direction || "update"));
-        if (detail.page?.direction === "newest") scroll = true;
+        if (detail.page?.direction === "newest") { entryHistory.cancel();scroll = true; }
         if (detail.historyReset) { historyClear();transitionPosition = { top: 0, atEnd: false }; }
         // A bot may resolve to a new source conversation on this connection.
         // Its former timeline never supplies history to that new conversation.
@@ -3424,6 +3446,7 @@ async function startThin(again = false, reason = "initial") {
           historyDirection = "";historyOlderDemand = 0;historyFillMore(null, false);
           historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.();
         } else historyBack(detail.window?.ids);
+        if (detail.entry) entryHistory.arm(historyFillOwner(), detail.window?.remaining);
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
