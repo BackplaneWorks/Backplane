@@ -16,14 +16,18 @@ words of catalog.py; it alone knows the fab's option labels.
     assembly(spec) -> Price
         Assembly service fees for one board design, without the components.
         spec: boards, sides (1|2), smt_joints, tht_joints (per board),
-        unique_parts, extended_parts, and the board's options and features
-        (eligibility for the cheaper service depends on them).
+        unique_parts, extended_parts, standard_only (the MPNs of stocked parts
+        the fab places only with its standard service), and the board's
+        options and features (eligibility for the cheaper service depends on
+        them all).
 
     library(mpns) -> {mpn: Stocked | None}
         The fab's own parts stock, by manufacturer part number (case-folded).
         Stocked: {code, mpn, maker, library: "basic"|"preferred"|"extended",
-        stock, breaks: [[qty, unit_usd], ...], loss, least}
-        where a line of n placements buys max(n + loss, least) pieces.
+        stock, breaks: [[qty, unit_usd], ...], loss, least, standard_only}
+        where a line of n placements buys max(n + loss, least) pieces, and
+        standard_only is true for a part only the standard assembly service
+        places (BGA, LGA, modules...).
 
     sourcing_fees(lines) -> Price
         What the fab charges to buy parts it does not stock (lines:
