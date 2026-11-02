@@ -203,8 +203,11 @@ def Tool.shown(+l: I.Loc, +k: String) -> String:
 # what a row says after the name: the call's summary, or nothing when the
 # summary is only the name again (a call with no input to tell, as older
 # TodoWrite events stored)
+# (an agent's error result that gave no words, as older logs hold: it
+# still says what happened rather than an empty row)
 def Tool.text(+k: String, +summary: String) -> String:
-  Bool.pick(String, String.eq(summary, k), "", summary)
+  Bool.pick(String, Bool.and(String.eq(k, "result"), String.is_empty(String.trim(summary))), "The turn ended with an error; the agent gave no reason.",
+    Bool.pick(String, String.eq(summary, k), "", summary))
 
 def Fold.kinds.k(todo: Bool, +k: String, +acc: List<&2, String>) -> List<&2, String>:
   match todo:

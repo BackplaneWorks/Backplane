@@ -1548,8 +1548,22 @@ def Claude.result.k(err: Bool, +thread: String, +now: Nat, text: String) -> Step
     case False{}:
       Step{[M.TurnChanged{thread, M.Completed{}, now}], Nil{}}
 
+# an error result's words: its result, else its errors, else its subtype
+# (error_during_execution, error_max_turns...), so its row never reads empty
+def Claude.result.errs(es: List<&2, J.Json>) -> List<&2, String>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      J.Json.as_str(Some{e}, J.Json.show(e)) <> Claude.result.errs(t)
+
+def Claude.result.why(+o: J.Json) -> String:
+  +r = String.trim(J.Json.get_str(o, "result", ""))
+  +es = String.trim(String.join(Claude.result.errs(J.Json.elems(J.Json.get_obj(o, "errors"))), "; "))
+  Bool.pick(String, String.is_empty(r), Bool.pick(String, String.is_empty(es), J.Json.get_str(o, "subtype", ""), es), r)
+
 def Claude.result(+thread: String, +now: Nat, +o: J.Json) -> Step:
-  Claude.result.k(J.Json.get_bool(o, "is_error", False{}), thread, now, J.Json.get_str(o, "result", ""))
+  Claude.result.k(J.Json.get_bool(o, "is_error", False{}), thread, now, Claude.result.why(o))
 
 # Claude keeps its process across a Stop, and what it still says for the
 # stopped turn (its partial text, its result) changes nothing: only a
@@ -6899,7 +6913,7 @@ def Claude.line.v.k(v: Nat, +s: M.State, +thread: String, +now: Nat, +o: J.Json,
     case 3n:
       Step.after(Step.after(Claude.result.k(False{}, thread, now, text), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
     case 4n:
-      Step.after(Step.after(Claude.result.k(True{}, thread, now, text), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
+      Step.after(Step.after(Claude.result.k(True{}, thread, now, Bool.pick(String, String.is_empty(String.trim(text)), Claude.result.why(o), text)), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
     case 5n:
       Step{List.append(&2, M.Change, [M.TurnChanged{thread, M.Interrupted{}, now}], Bg.settle(s, thread, now)), Nil{}}
     case 6n:
