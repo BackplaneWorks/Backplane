@@ -982,7 +982,7 @@ object NativeMessages {
 
   // native.thread.subagents
   fun native_thread_subagents(tag: String, arg0: String): String =
-    if (tag == "ja") ("サブエージェント：" + arg0) else ("Subagents: " + arg0)
+    if (tag == "ja") ("サブスレッド：" + arg0) else ("Subthreads: " + arg0)
 
   // native.thread.todos
   fun native_thread_todos(tag: String, arg0: String): String =
@@ -1274,7 +1274,7 @@ object NativeMessages {
 
   // thread.subagents
   fun thread_subagents(tag: String): String =
-    if (tag == "ja") ("サブエージェント") else ("Subagents")
+    if (tag == "ja") ("サブスレッド") else ("Subthreads")
 
   // thread.todos
   fun thread_todos(tag: String): String =

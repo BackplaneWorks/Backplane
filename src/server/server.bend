@@ -1,10 +1,16 @@
 import Base
+import ../core/pcb-usage.bend as PC
+import ./pcb-telemetry.bend as PCB
+import ../core/folder.bend as FP
+import ./spawn.bend as SP
 import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
 import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
 import ../core/watchdog.bend as WD
+import ../core/tickplan.bend as TICK
+import ../core/stream-step.bend as SSTEP
 import ../core/restartretry.bend as RR
 import ./livenessio.bend as LFX
 import ../core/mailprivate.bend as PM
@@ -18,6 +24,7 @@ import ./mailcontext.bend as MCTX
 import ./telemetry.bend as TI
 import ./telemetry-ui.bend as TUI
 import ../core/telemetry.bend as TLM
+import ../core/winnote.bend as NT
 import ../core/telemetry-usage.bend as TUS
 import ../core/charter.bend as CH
 import ../core/mailrun.bend as RUN
@@ -67,6 +74,7 @@ import ../core/cbor.bend as CB
 import ../mobile/session.bend as MSE
 import ./thin-view.bend as TV
 import ./thin-body.bend as TBODY
+import ../core/lazy-tools.bend as LTOOLS
 import ./thin-actor.bend as TA
 import ./terminal-output.bend as TOUT
 import ./thin-sidebar-wire.bend as TSW
@@ -76,6 +84,7 @@ import ./thin-mail.bend as TMAIL
 import ../core/thin.bend as THIN
 import ../core/thin-chat.bend as TCHAT
 import ../core/thin-live.bend as TLIVE
+import ../core/stream-commit.bend as SCOM
 import ../core/thin-wire.bend as TVW
 import ../core/presentation.bend as PRESENT
 import ../web/session.bend as WEBFRONT
@@ -126,6 +135,7 @@ import ./voice.bend as VO
 import ../core/vdict.bend as VD
 import ./apikeys.bend as AKS
 import ./perf.bend as PS
+import ./diagnostics.bend as DIAG
 import ./freecad.bend as FC
 import ../core/perf.bend as PF
 import ../core/semver.bend as SV
@@ -162,6 +172,8 @@ import ../core/rules.bend as RLS
 import ../core/task.bend as TKS
 import ../core/teach.bend as TE
 import ../core/usage.bend as UZ
+import ./allowanceio.bend as ALIO
+import ../core/allowance.bend as ALQ
 import ./thinstore.bend as TSTO
 import ./design-history.bend as DHIST
 import ./thin-mirror.bend as TMIR
@@ -312,6 +324,8 @@ type Msg is Data:
   Reexec{path: String, args: List<&2, String>}
   # changes a job off the hub made (a bot's home folder, a linked machine)
   Commit{changes: List<&2, M.Change>}
+  # Local numeric observations; generation rejects stale design jobs.
+  PcbObserved{source: String, created: Nat, ordered: Nat, generation: Maybe<&2, String>}
   # an order's progress: posted in its buy thread, and a note alert to the
   # person's devices when there is one (Hub.order.note)
   OrderNote{thread: String, id: String, text: String, note: String}
@@ -431,6 +445,7 @@ type Msg is Data:
   # Boat's status.json, read again because it changed: the threads' Boat
   # chips (core/usage.bend's Chip)
   BoatThreads{status: String}
+  AllowanceSeen{snapshot: String}
   # the thin index and the mail cache, built off the hub after it
   # listened (Thin.warm)
   ThinWarm{index: THIN.Index, mail: TMAIL.Cache}
@@ -1372,7 +1387,7 @@ def Spawn.agent(+cmd: String, args: List<&2, String>, +cwd: String, +err: U32) -
   do IO<Result<&1, &1, U32 & String, U32 & Socket>>:
     xs : List<&2, String> <- VX.Vx.args(args)
     env : List<&2, String> <- K.KiCad.agent_env()
-    Spawn.agent.with_env(env, cmd, xs, cwd, err)
+    IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Result<&1, &1, U32 & String, U32 & Socket>, Spawn.agent.with_env(env, cmd, xs, cwd, err), res => SP.Spawn.checked(res, cwd))
 
 # each line to an agent's stdin (prompts, turn text, answers) masked
 def Agent.write.m(+line: String, s: Socket, k: Socket -> IO(Unit)) -> IO(Unit):
@@ -2320,7 +2335,7 @@ def Hub.push.bin(h: Hub, +client: U32, +bs: List<&2, U32>) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WBin{bs}, List.length(&2, U32, bs))
+        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WBin{bs}, W.Http.count(bs))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 # a ping answered through the client's credit
@@ -2412,11 +2427,11 @@ def Codex.fed(r: U.Lines & List<&2, String>, s: Socket, +ended: Bool, +thread: S
 
 # $d from $1: "" and ~ are home, ~/x and relative paths are under home
 def FsJob.path.sh() -> String:
-  "d=\"$1\"; case \"$d\" in ''|'~') d=\"$HOME\";; '~/'*) d=\"$HOME/${d#??}\";; /*) ;; *) d=\"$HOME/$d\";; esac; "
+  FP.Folder.path.sh()
 
-# a folder that exists and can be opened, printed resolved (symlinks too)
+# Resolve symlinks in the shell, then return a native path to the hub.
 def FsJob.dir.sh() -> String:
-  "[ -e \"$d\" ] || { echo \"no such folder: $d\"; exit 2; }; [ -d \"$d\" ] || { echo \"not a folder: $d\"; exit 2; }; [ -r \"$d\" ] && [ -x \"$d\" ] && d=$(cd -P -- \"$d\" && pwd -P) || { echo \"cannot open: $d\"; exit 2; }; "
+  FP.Folder.dir.sh() ++ FP.Folder.native.sh()
 
 def FsJob.list.sh() -> String:
   "exec 2>&1; set -e; " ++ FsJob.path.sh() ++ FsJob.dir.sh() ++ "echo \"$d\"; find \"$d\" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's|^.*/||' | LC_ALL=C sort | head -n 5000"
@@ -2512,13 +2527,21 @@ def FsJob.made(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Uni
 
 # a resolved folder becomes a project: the hub gets project.create as if
 # the asking client sent it, so the answer (or "already a project") is its
+def FsJob.register(st: Result<&1, &1, U32 & String, U32 & U32 & U32>, +inbox: Chan(Msg), +client: U32, +id: String, +path: String) -> IO(Unit):
+  match st:
+    case Done{(1, _)}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Rpc{client, J.Json.show(J.Json.obj([J.KV{"id", J.Num{id}}, J.KV{"m", J.Str{"project.create"}},
+          J.KV{"p", J.Json.obj([J.KV{"path", J.Str{path}}])}]))})
+        return Unit{}
+    case _:
+      FsJob.answer(inbox, client, id, J.Json.obj([J.KV{"error", J.Str{"invalid project folder: " ++ path}}]))
+
 def FsJob.create(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
   match r:
     case P.Ran{0, out}:
-      do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Rpc{client, J.Json.show(J.Json.obj([J.KV{"id", J.Num{id}}, J.KV{"m", J.Str{"project.create"}},
-          J.KV{"p", J.Json.obj([J.KV{"path", J.Str{FsJob.last(String.lines(String.trim(out)))}}])}]))})
-        return Unit{}
+      +path = FsJob.last(String.lines(String.trim(out)))
+      IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(path), st => FsJob.register(st, inbox, client, id, path))
     case P.Ran{_, out}:
       FsJob.answer(inbox, client, id, J.Json.obj([J.KV{"error", J.Str{String.trim(out)}}]))
 
@@ -3174,21 +3197,35 @@ def KExportJob.route(exporting: Bool, +inbox: Chan(Msg), client: U32, id: String
 # an Act of tone "step" whose summary is its record. `entry` is the tool
 # call or message it follows ("" at a turn's end).
 
-def StepJob.log(+inbox: Chan(Msg), +thread: String, +id: String, +rec: String) -> IO(Unit):
+def StepJob.observed(on: Bool, +inbox: Chan(Msg), source: String, created: Nat, generation: String) -> IO(Unit):
+  match on:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PcbObserved{source, created, 0n, Some{generation}})
+        return Unit{}
+
+def StepJob.log(+inbox: Chan(Msg), +thread: String, +id: String, +rec: String, created: Nat, +scope: J.Json) -> IO(Unit):
   do IO<Unit>:
     now : Nat <- Now.nat()
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.ActivityLogged{thread, id, HI.Step.tone(), "kicad", rec, now}]})
-    return Unit{}
+    StepJob.observed(J.Json.get_bool(scope, "on", False{}), inbox, "step:" ++ thread ++ ":" ++ id, created, J.Json.get_str(scope, "generation", ""))
 
-def StepJob.done(+inbox: Chan(Msg), +thread: String, +entry: String, +when: String, +out: String) -> IO(Unit):
-  +rec = HI.Hist.record.at(out, entry, when)
-  Bool.pick(IO(Unit), String.is_empty(rec), IO.pure(Unit, Unit{}),
-    StepJob.log(inbox, thread, "step:" ++ String.trim(HI.Hist.at(String.split(out, '\n'), 0n)), rec))
+def StepJob.captured(count: Bool, +inbox: Chan(Msg), +thread: String, +cwd: String, +rec: String, +scope: J.Json, +out: String) -> IO(Unit):
+  do IO<Unit>:
+    +created : Nat <- Bool.pick(IO(Nat), Bool.and(count, J.Json.get_bool(scope, "on", False{})),
+      GT.Git.step.created(cwd, String.trim(HI.Hist.at(String.split(out, '\n'), 0n)), String.trim(HI.Hist.at(String.split(out, '\n'), 1n)), String.trim(HI.Hist.at(String.split(out, '\n'), 2n))), IO.pure(Nat, 0n))
+    Bool.pick(IO(Unit), String.is_empty(rec), IO.pure(Unit, Unit{}),
+      StepJob.log(inbox, thread, "step:" ++ String.trim(HI.Hist.at(String.split(out, '\n'), 0n)), rec, created, scope))
+
+def StepJob.done(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +scope: J.Json, +out: String) -> IO(Unit):
+  +rec = HI.Hist.record.at(out, entry, J.Json.get_str(scope, "when", "start"))
+  StepJob.captured(Bool.and(Bool.not(String.is_empty(rec)), Bool.not(String.eq(J.Json.get_str(scope, "when", "start"), "start"))), inbox, thread, cwd, rec, scope, out)
 
 # (when: "start" at a turn's start, core/hist.bend's Step.base)
-def StepJob.run(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +when: String, +home: String) -> IO(Unit):
+def StepJob.run(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +scope: String, +home: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.is_empty(cwd), IO.pure(Unit, Unit{}),
-    IO.bind(String, Unit, GT.Git.step.capture(cwd, thread, GT.Git.step.reg(home)), out => StepJob.done(inbox, thread, entry, when, out)))
+    IO.bind(String, Unit, GT.Git.step.capture(cwd, thread, GT.Git.step.reg(home)), out => StepJob.done(inbox, thread, cwd, entry, Maybe.default(&2, J.Json, J.Json.parse(scope), J.Null{}), out)))
 
 def RefsJob.files(f: K.Files) -> List<&2, J.KV>:
   match f:
@@ -3540,7 +3577,7 @@ def Codex.refuse(+thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
 def AccountSpawn.named(legacy: Bool, +home: String, +profile: String, +epoch: String, +cmd: String, args: List<&2, String>, +cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   match legacy:
     case True{}: Spawn.agent("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> cmd <> args, cwd, err)
-    case False{}: ACFX.AccountsFx.spawn(home, profile, epoch, cmd, args, cwd, err)
+    case False{}: IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Result<&1, &1, U32 & String, U32 & Socket>, ACFX.AccountsFx.spawn(home, profile, epoch, cmd, args, cwd, err), res => SP.Spawn.checked(res, cwd))
 
 def AccountSpawn.run(+home: String, +st: M.State, +thread: String, +cmd: String, args: List<&2, String>, cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   AccountSpawn.named(String.is_empty(ACCT.Accounts.id(st, thread, cmd)), home, ACCT.Accounts.id(st, thread, cmd), Nat.show(ACCT.Accounts.epoch(st, thread, cmd)), cmd, args, cwd, err)
@@ -6191,6 +6228,15 @@ def Debug.serve(allowed: Bool, +i: Nat, s: Socket) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
+# Diagnostics are local-only until this authenticated read. A public draft
+# reads this endpoint only when the user elects diagnostics. No raw logs.
+def DiagnosticsHTTP.serve(allowed: Bool, s: Socket) -> IO(Unit):
+  match allowed:
+    case True{}:
+      IO.bind(String, Unit, DIAG.Diagnostics.export(), text => Conn.finish(s, W.Http.response.c("200 OK", "application/json", U.Utf8.encode(text), "no-store", "")))
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+
 # GET /plot/info?h=<the FNV-1a of a source's key, decimal>: the info file
 # the reading child wrote beside the source's newest plot (core/plot.bend's
 # Infos.file, server/plot.bend's Pv.infos), for the web's cross-probing,
@@ -6239,6 +6285,8 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
       Info.serve(allowed, s, W.Http.param(p, "h"))
     case 6n:
       RenderHTTP.serve(allowed, s, W.Http.param(p, "id"))
+    case 7n:
+      DiagnosticsHTTP.serve(allowed, s)
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), gz)
 
@@ -6253,7 +6301,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -6802,12 +6850,36 @@ def KSync.run(+home: String) -> IO(Unit):
 def KSync.start(+home: String) -> IO(Unit):
   IO.spawn(Unit, KSync.run(home))
 
+# Account limits are read after listening, on a worker, never on the event
+# loop or the model-selection path. The collector serializes/cache-bounds
+# all callers (including Check limits) to one read per five minutes.
+def AllowanceJob.post(+inbox: Chan(Msg), +home: String) -> IO(Unit):
+  do IO<Unit>:
+    snapshot : String <- ALIO.AllowanceIO.read(home ++ "/allowance-codex.json")
+    Self.post(inbox, AllowanceSeen{snapshot})
+
+def AllowanceJob.loop(fuel: Nat, +inbox: Chan(Msg), +home: String) -> IO(Unit):
+  match fuel:
+    case 0n: IO.pure(Unit, Unit{})
+    case 1n+f:
+      do IO<Unit>:
+        AllowanceJob.post(inbox, home)
+        IO.sleep(300000)
+        AllowanceJob.loop(f, inbox, home)
+
+def AllowanceJob.start(copy: Bool, +inbox: Chan(Msg), +home: String) -> IO(Unit):
+  match copy:
+    case True{}: IO.pure(Unit, Unit{})
+    case False{}: IO.spawn(Unit, AllowanceJob.loop(Fuel.forever(), inbox, home))
+
 def Refresh.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   do IO<Unit>:
     +user : String <- Env.get("HOME", "")
     xs : String <- Env.get("XDG_STATE_HOME", "")
     IO.spawn(Unit, Chips.loop(Fuel.forever(), inbox, UZ.Chip.path(xs, user), ""))
     IO.spawn(Unit, Refresh.loop(Fuel.forever(), inbox, user, Cfg.home(cfg), Models.cache(Cfg.home(cfg)), Net.models(Cfg.net(cfg)), "?", 0n))
+    copy : Bool <- P.Proc.copy()
+    AllowanceJob.start(copy, inbox, Cfg.home(cfg))
 
 def Main.prepare(+user: String, +exe: String) -> IO(Boot):
   do IO<Boot>:
@@ -6841,6 +6913,10 @@ def Sys.exe_dir.io() -> IO(String):
 
 def Media.fail(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +msg: String) -> IO(Unit):
   GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{msg}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}]))
+
+# Upload metadata is additive; older clients keep the English text fallback.
+def Media.fail.cap(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, lim: String) -> IO(Unit):
+  GitJob.reply(inbox, client, id, False{}, NT.Notice.upload.reply(thread, "upload.cap", Nat.show(AT.Att.mb(lim))))
 
 def Media.attached(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +path: String) -> IO(Unit):
   GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"attached", J.Str{path}}, J.KV{"thread", J.Str{thread}}]))
@@ -6894,7 +6970,7 @@ def Media.put.k(over: Bool, +first: Bool, +last: Bool, bs: List<&2, U32>, +inbox
     case True{}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Media.fail(inbox, client, id, thread, AT.Att.over(lim))
+        Media.fail.cap(inbox, client, id, thread, lim)
     case False{}:
       IO.bind(String, Unit, Media.put.file(path, Bool.pick(String, first, "w", "a"), bs), e => Media.put.done(e, last, inbox, client, id, thread, path))
 
@@ -6931,7 +7007,7 @@ def Media.copy.k(ok: Bool, fits: Bool, +src: String, +inbox: Chan(Msg), +client:
     case True{} True{}:
       IO.bind(P.Ran, Unit, P.Proc.run("cp", ["--", src, dest], "/"), r => Media.copied(r, inbox, client, id, thread, dest))
     case True{} False{}:
-      Media.fail(inbox, client, id, thread, AT.Att.over(lim))
+      Media.fail.cap(inbox, client, id, thread, lim)
     case False{} _:
       Media.fail(inbox, client, id, thread, "not a file: " ++ src)
 
@@ -7167,6 +7243,21 @@ def Cfg.thin.live(+cfg: Cfg, streams: Map<&2, TLIVE.Stream>, +th: String) -> Cfg
 def Live.with(+cfg: Cfg, +lv: List<&2, LV.Buf>) -> Cfg:
   Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.snapshot(lv, Cfg.thin.next(Cfg.thin.revision(cfg)), Map.new(&2, TLIVE.Stream)), "*")
 
+# Metadata commits cannot change live buffers. Stream endings update only
+# their own slots; Cfg.thin.committed supplies the revision and notices once.
+# Keep Live.with's global replacement for recovery and remote snapshots.
+def Live.committed.when(ending: Bool, +cfg: Cfg, cs: List<&2, M.Change>, +lv: List<&2, LV.Buf>) -> Cfg:
+  match ending:
+    case False{}: cfg
+    case True{}:
+      Cfg.with_thin_cache(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)),
+        ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg),
+          SCOM.Streams.commit(cs, lv, Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg)),
+          Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), Cfg.thin.notes(cfg), Cfg.thin.store(cfg), Cfg.thin.signal_seq(cfg)})
+
+def Live.committed(+cfg: Cfg, +cs: List<&2, M.Change>, lv: List<&2, LV.Buf>) -> Cfg:
+  Live.committed.when(SCOM.Streams.any(cs), cfg, cs, lv)
+
 def Live.with_delta(+cfg: Cfg, +lv: List<&2, LV.Buf>, +thread: String, text: String) -> Cfg:
   Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg))), TPACE.Touch.live(thread))
 
@@ -7260,7 +7351,7 @@ def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: L
         Bot.dir.changed.all(cs, inbox)
         +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
         Live.checkpoint.sync(cs, post, cfg, buffers)
-        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, buffers)), note)
+        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note)
     case False{}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
@@ -7357,7 +7448,7 @@ def Hub.commit.queue(+cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2
     +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
     +fd : Folded = Hub.fold(cs, disk, Folded{st, ls, Nil{}})
     Live.checkpoint.sync(cs, Hub.fold.st(fd), cfg, buffers)
-    return Hub.commit.held(fd, cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, buffers)), note, q, st, disk)
+    return Hub.commit.held(fd, cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.committed(cfg, cs, buffers)), note, q, st, disk)
 
 # steps wait: this one waits behind them when it may and there is room
 def Hub.commit.behind(ok: Bool, +cs: List<&2, M.Change>, +st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
@@ -7910,7 +8001,7 @@ def VoiceJob.fwd(m: Maybe<&1, String>, +inbox: Chan(Msg), +client: U32, k: Unit 
     case Some{+text}:
       do IO<Unit>:
         sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Push{client, text})
-        VoiceJob.fwd.k(String.contains(text, "\"ev\":\"idle\""), k)
+        VoiceJob.fwd.k(Bool.or(String.contains(text, "\"ev\":\"idle\""), String.contains(text, "\"ev\":\"local-result\"")), k)
     case None{}:
       IO.pure(Unit, Unit{})
 
@@ -7940,29 +8031,22 @@ def VoiceJob.live(+inbox: Chan(Msg), +home: String, +client: U32, +id: String, +
       key, VD.Vdc.of.json(p))
     VoiceJob.live.rq(rq, inbox, home, client, id, thread, device)
 
-def VoiceJob.local.m(m: Maybe<&2, J.Json>, +acc: J.Json) -> J.Json:
-  match m:
-    case Some{+o}:
-      Bool.pick(J.Json, String.eq(J.Json.get_str(o, "event", ""), "local"), o, Bool.pick(J.Json, Bool.and(String.eq(J.Json.get_str(o, "event", ""), "error"), String.is_empty(J.Json.get_str(acc, "error", ""))), J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(o, "error", "")}}]), acc))
-    case None{}:
-      acc
-
-# the local engine: what is downloaded ({"local": the helper's status}),
-# a model downloaded or removed (the status after)
-def VoiceJob.local.line(+l: String, +acc: J.Json) -> J.Json:
-  VoiceJob.local.m(J.Json.parse(l), acc)
-
-def VoiceJob.local.go(ls: List<&2, String>, +acc: J.Json) -> J.Json:
+# Status probes use the same error-preserving collector as downloads.
+def VoiceJob.local.go(ls: List<&2, String>, acc: J.Json) -> J.Json:
   match ls:
-    case Nil{}:
-      acc
+    case Nil{}: acc
     case +l <> t:
-      VoiceJob.local.go(t, VoiceJob.local.line(l, acc))
+      VoiceJob.local.go(t, VO.Vo.local.acc(Maybe.default(&2, J.Json, J.Json.parse(l), J.Null{}), acc))
+
+def VoiceJob.local.ran.k(+code: U32, +acc: J.Json) -> J.Json:
+  +local = J.Json.get_obj(acc, "local")
+  Bool.pick(J.Json, Bool.and(U32.is_eq(code, 0), Maybe.is_some(&2, J.Json, J.Json.get(local, "models"))), local,
+    J.Json.obj([J.KV{"error", J.Str{J.Json.get_str(acc, "error", "The voice helper returned no model status. Check that it is installed beside Backplane.")}}]))
 
 def VoiceJob.local.ran(r: P.Ran) -> J.Json:
   match r:
-    case P.Ran{_, +out}:
-      VoiceJob.local.go(String.lines(out), J.Null{})
+    case P.Ran{code, out}:
+      VoiceJob.local.ran.k(code, VoiceJob.local.go(String.lines(out), J.Json.obj(Nil{})))
 
 # Dictation (server/voice.bend): the key, the dictionary, and live sessions
 # of this machine's microphone, whose messages go to the client that
@@ -7986,10 +8070,10 @@ def VoiceJob.done(+err: String, +inbox: Chan(Msg), +home: String, +client: U32, 
 
 def VoiceJob.local(+cmd: String, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U32, +id: String) -> IO(Unit):
   do IO<Unit>:
-    +exe : String <- VO.Vo.exe()
-    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(VO.Vo.local(home))
-    r : P.Ran <- P.Proc.run(exe, [cmd, "--local-dir", VO.Vo.local(home), "--model", VO.Vo.model.ok(J.Json.get_str(p, "id", J.Json.get_str(p, "model", "")))], "/")
-    BotJob.reply(inbox, client, id, True{}, [J.KV{"local", VoiceJob.local.ran(r)}])
+    +out : Chan(String) <- Chan.new(String, 32)
+    BotJob.reply(inbox, client, id, True{}, Nil{})
+    IO.spawn(Unit, VO.Vo.local.run(home, cmd, J.Json.get_str(p, "id", J.Json.get_str(p, "model", "")), out))
+    VoiceJob.forward(Fuel.forever(), out, inbox, client)
 
 def VoiceJob.stopped(on: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String) -> IO(Unit):
   match on:
@@ -8319,7 +8403,7 @@ def VoiceJob.op(i: Nat, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U
       BoatUse.go(p, inbox, home, client, id)
     # Settings' local engine
     case 12n:
-      VoiceJob.local("local-status", inbox, home, p, client, id)
+      VoiceJob.status(inbox, home, client, id)
     case 13n:
       VoiceJob.local("local-install", inbox, home, p, client, id)
     case 14n:
@@ -8492,6 +8576,28 @@ def Tk.input(m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, +o: J.Json) -> IO(Unit):
 
 # one B.BotFx: home, gone, hook, unhook, send, invite, join, unpeer, google,
 # token, retoken, untoken, voice
+# The explicit read is a single worker, not a second polling loop.
+def AllowanceJob.once(copy: Bool, inbox: Chan(Msg), home: String) -> IO(Unit):
+  match copy:
+    case True{}: IO.pure(Unit, Unit{})
+    case False{}: AllowanceJob.post(inbox, home)
+
+def AllowanceJob.request(allowed: Bool, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
+  match allowed:
+    case False{}: BotJob.fail(inbox, client, id, "No default Codex allowance source for this thread")
+    case True{}:
+      do IO<Unit>:
+        BotJob.reply(inbox, client, id, True{}, Nil{})
+        copy : Bool <- P.Proc.copy()
+        AllowanceJob.once(copy, inbox, home)
+
+def AllowanceJob.dispatch(read: Bool, +st: M.State, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U32, +id: String) -> IO(Unit):
+  match read:
+    case False{}: VoiceJob.run(inbox, home, J.Json.show(p), client, id)
+    case True{}:
+      +th = J.Json.get_str(p, "thread", "")
+      AllowanceJob.request(ALQ.Allowance.read.allowed(st, th), inbox, home, client, id)
+
 def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: String, +c: String) -> IO(Unit):
   match i:
     case 0n:
@@ -8519,7 +8625,7 @@ def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: S
     case 11n:
       IO.spawn(Unit, BotJob.token(2n, inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), a, BotJob.client(b), BotJob.id(c)))
     case 12n:
-      IO.spawn(Unit, VoiceJob.run(inbox, Cfg.home(cfg), a, BotJob.client(b), BotJob.id(c)))
+      IO.spawn(Unit, AllowanceJob.dispatch(String.eq(J.Json.get_str(ACCT.Accounts.parse(a), "op", ""), "allowance"), st, inbox, Cfg.home(cfg), ACCT.Accounts.parse(a), BotJob.client(b), BotJob.id(c)))
     case 13n:
       BotJob.scratch(BN.Bn.safe(a), inbox, Cfg.home(cfg) ++ "/scratch/", a)
     case 14n:
@@ -9848,26 +9954,12 @@ def Claude.started.ok(started: U32 & Socket, +thread: String, +gen: String, +inp
   (+pid, s) = started
   IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Unit, H.Sock.dup(s), r => Claude.duped(r, pid, thread, gen, input, inbox))
 
-# why a process could not start, naming its folder when that is gone (a
-# thread whose worktree was removed: posix_spawn's chdir answers only
-# "No such file or directory", which reads as a missing program)
-def Spawn.why(st: Result<&1, &1, U32 & String, U32 & U32 & U32>, +cwd: String, +msg: String) -> String:
-  match st:
-    case Done{_}:
-      msg
-    case Fail{_}:
-      Bool.pick(String, String.is_empty(cwd), msg, "its folder " ++ cwd ++ " is gone (" ++ msg ++ ")")
-
-def Claude.started.fail(e: U32 & String, +thread: String, +gen: String, +cwd: String, +inbox: Chan(Msg)) -> IO(Unit):
-  (_, +msg) = e
-  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, Unit, H.FS.stat(cwd), st => Claude.fail(thread, gen, Spawn.why(st, cwd, msg), inbox))
-
 def Claude.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: String, +gen: String, +cwd: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   match r:
     case Done{started}:
       Claude.started.ok(started, thread, gen, input, inbox)
     case Fail{e}:
-      Claude.started.fail(e, thread, gen, cwd, inbox)
+      Claude.fail(thread, gen, SP.Spawn.message(e), inbox)
 
 def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, +effort: String, +gen: String, +input: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
@@ -10632,7 +10724,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread), M.Setting.get(st, AT.Att.key(), ""))))
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), PCB.Pcb.scope(String.eq(job, "step"), b, M.Metrics.allowed(st), M.Setting.get(st, "telemetry.usage.generation", "")), Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread), M.Setting.get(st, AT.Att.key(), ""))))
         return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
@@ -11002,7 +11094,7 @@ def Hub.telemetry.permit(h: Hub, gen: Nat, +view: TLM.TmView, reply: Chan(Bool))
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, Bool.and(TI.Tio.owns(Cfg.telemetry(cfg), gen), TLM.Tm.current(view, st)))
+        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, TLM.Tm.permit(TI.Tio.owns(Cfg.telemetry(cfg), gen), DQ.Dq.some(Hub.dq(cfg)), TLM.Tm.allowed(st), TLM.Tm.current(view, st)))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def TelemetryJob.permit(+inbox: Chan(Msg), gen: Nat, view: TLM.TmView) -> IO(Bool):
@@ -11016,7 +11108,7 @@ def Hub.telemetry.usage_permit(h: Hub, gen: Nat, +view: TLM.TmView, privacy_gen:
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, Bool.and(TI.Tio.owns(Cfg.telemetry(cfg), gen), Bool.and(TLM.Tm.current(view, st), TUS.Usage.current(privacy_gen, st))))
+        ok : Result<&1, &1, Bool, Unit> <- Chan.send(Bool, reply, Bool.and(TLM.Tm.permit(TI.Tio.owns(Cfg.telemetry(cfg), gen), DQ.Dq.some(Hub.dq(cfg)), TLM.Tm.allowed(st), TLM.Tm.current(view, st)), TUS.Usage.current(privacy_gen, st)))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def TelemetryJob.usage_permit(+inbox: Chan(Msg), gen: Nat, view: TLM.TmView, privacy_gen: String) -> IO(Bool):
@@ -11045,8 +11137,8 @@ def Hub.telemetry.cfg(h: Hub) -> Cfg:
 
 def Hub.telemetry(h: Hub, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.telemetry.k(TI.Tio.can(Cfg.telemetry(cfg), now), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.telemetry.k(TLM.Tm.start(TI.Tio.can(Cfg.telemetry(cfg), now), DQ.Dq.some(Hub.dq(cfg)), TLM.Tm.allowed(st)), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
 
 # Unchanged minute results do not send redundant info frames to clients.
 def Hub.telemetry.id.changed(changed: Bool, h: Hub) -> IO(Hub):
@@ -11282,8 +11374,20 @@ def Hub.step.fallback.captured(pair: String & List<Hub>, states: List<&2, M.Stat
   (models, held) = pair
   Hub.step.fallback.fold(states, Maybe.default(&2, J.Json, J.Json.parse(models), J.Null{}), now, step, held)
 
-def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
-  Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
+# After all lifecycle/lock/watchdog hooks, a step containing only live text
+# cannot switch a provider, edit settings or close a proposal. Avoid parsing
+# the entire model catalog for each token. stream_step_proof proves the
+# skipped validation and run transforms are identity for arbitrary Live lists.
+def Hub.step.fallback.choose(stream: Bool, h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  match stream:
+    case True{}:
+      do IO<Hub & Bool>:
+        PS.Perf.add("hub.step.stream", 1)
+        Hub.step.fallback.done([h], states, step)
+    case False{}: Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
+
+def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, +step: B.Step) -> IO(Hub & Bool):
+  Hub.step.fallback.choose(SSTEP.StreamStep.eligible(step), h, states, now, step)
 
 def Hub.step.k(p: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   (+st, h) = p
@@ -11362,22 +11466,34 @@ def Hub.accounts.select.go(same: Bool, +st: M.State, +now: Nat, +client: U32, +r
       +seen = ACCT.Accounts.seen(st, th, provider, profile, epoch)
       B.Step{List.concat(&2, M.Change, [B.Switch.old(M.Queue.items(st, th), th, now),
         ACCT.Accounts.select(st, now, th, provider, profile, epoch, M.Switch.sess(B.Hub.thread(st, th)), count),
-        B.Switch.ctx(Nat.is_eq(count, seen), th, HD.Hand.prefix() ++ "switch:account:" ++ Nat.show(now), HD.Hand.text("Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId " ++ th ++ " for earlier history:", HD.Hand.newest(Nat.sub(count, seen), entries), th), now),
-        [M.ActivityLogged{th, "account:" ++ Nat.show(now), "info", "account", "Selected " ++ Bool.pick(String, String.is_empty(profile), "Default account", J.Json.get_str(ACCT.Accounts.profile(st, profile), "label", "account")) ++ "; conversation context is handed to this account with the next message.", now}]]),
+        B.Switch.ctx(Nat.is_eq(count, seen), th, HD.Hand.prefix() ++ B.Hub.id("switch:account", now, M.State.seq(st)), HD.Hand.text("Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId " ++ th ++ " for earlier history:", HD.Hand.newest(Nat.sub(count, seen), entries), th), now),
+        [M.ActivityLogged{th, B.Hub.id("account", now, M.State.seq(st)), "info", "account", "Selected " ++ Bool.pick(String, String.is_empty(profile), "Default account", J.Json.get_str(ACCT.Accounts.profile(st, profile), "label", "account")) ++ "; conversation context is handed to this account with the next message.", now}]]),
         [B.AgentStop{th}, B.Reply.ok(client, rid)]}
+
+def Hub.accounts.select.provider(+st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
+  +from = B.Hub.provider(B.Hub.thread(st, th))
+  +changes = Bool.pick(List<&2, M.Change>, String.eq(from, provider), Nil{}, B.Switch.changes(st, now, th, from, provider, "", Nil{}, False{}))
+  +switched = M.State.replay(changes, st)
+  +same = Bool.and(String.eq(ACCT.Accounts.id(switched, th, provider), profile), Nat.is_eq(ACCT.Accounts.epoch(switched, th, provider), epoch))
+  B.Step.before(changes, Bool.pick(List<&2, B.Out>, Bool.and(same, Bool.not(String.eq(from, provider))), [B.AgentStop{th}], Nil{}), Hub.accounts.select.go(same, switched, now, client, rid, th, provider, profile, epoch, count, entries))
 
 def Hub.accounts.select.valid(valid: Bool, +st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   match valid:
-    case False{}: B.Step.outs([B.Reply.err(client, rid, "Account selection is stale, unavailable, or a turn is running. Stop the turn and check account status first.")])
-    case True{}: Hub.accounts.select.go(Bool.and(String.eq(ACCT.Accounts.id(st, th, provider), profile), Nat.is_eq(ACCT.Accounts.epoch(st, th, provider), epoch)), st, now, client, rid, th, provider, profile, epoch, count, entries)
+    case False{}: B.Step.outs([B.Reply.err(client, rid, Bool.pick(String, B.Hub.running(B.Hub.thread(st, th)), "Finish or stop the current turn before selecting another account.",
+      Bool.pick(String, String.is_empty(profile), "The thread or account selection changed. Reopen the account menu and try again.", ACCT.Accounts.unavailable(ACCT.Accounts.profile(st, profile), epoch))))])
+    case True{}: B.Step.before(B.AccountFallback.forget(th, now), Nil{}, Hub.accounts.select.provider(st, now, client, rid, th, provider, profile, epoch, count, entries))
 
 def Hub.accounts.select.step(+st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
   +th = J.Json.get_str(p, "thread", "")
-  +provider = B.Hub.provider(B.Hub.thread(st, th))
   +profile = J.Json.get_str(p, "profile", "")
+  +current = B.Hub.provider(B.Hub.thread(st, th))
+  +owner = ACCT.Accounts.owner(st, th)
+  +provider = Bool.pick(String, String.is_empty(profile), current, J.Json.get_str(ACCT.Accounts.profile(st, profile), "provider", ""))
   +epoch = J.Json.get_nat(p, "epoch", 0n)
-  Hub.accounts.select.valid(Bool.and(Bool.and(B.Hub.owns(st, th), Bool.not(FR.Fr.is(th))), Bool.and(ACCT.Accounts.supported(provider), Bool.and(Bool.not(B.Hub.running(B.Hub.thread(st, th))),
-    Bool.and(String.eq(J.Json.get_str(p, "expected", ""), M.Setting.get(st, ACCT.Accounts.binding.key(th, provider), "")), Bool.or(String.is_empty(profile), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch)))))), st, now, client, rid, th, provider, profile, epoch, count, entries)
+  Hub.accounts.select.valid(B.Hub.owns(st, th) && Bool.not(FR.Fr.is(th)) && ACCT.Accounts.supported(provider) && Bool.not(B.Hub.running(B.Hub.thread(st, th))) &&
+    String.eq(J.Json.get_str(p, "expectedProvider", current), current) && String.eq(J.Json.get_str(p, "expectedOwner", owner), owner) &&
+    String.eq(J.Json.get_str(p, "expected", ""), M.Setting.get(st, ACCT.Accounts.binding.key(th, provider), "")) &&
+    Bool.or(String.is_empty(profile), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch)), st, now, client, rid, th, provider, profile, epoch, count, entries)
 
 def Hub.accounts.request.allowed(allowed: Bool, h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
   match allowed h:
@@ -11390,7 +11506,7 @@ def Hub.accounts.request.allowed(allowed: Bool, h: Hub, +client: U32, +rid: Stri
 def Hub.accounts.request(h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.accounts.request.allowed(Bool.or(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "login"), String.eq(J.Json.get_str(p, "op", ""), "disconnect"))),
+      Hub.accounts.request.allowed(Bool.or(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "remove"), Bool.or(String.eq(J.Json.get_str(p, "op", ""), "login"), String.eq(J.Json.get_str(p, "op", ""), "disconnect")))),
         Bool.not(Hub.accounts.active(ACCT.Accounts.threads(st), st, J.Json.get_str(p, "profile", "")))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, rid, p)
 
 # Teaching a bot's browser (docs/teach.md)
@@ -11997,10 +12113,33 @@ def Hub.rpc.dq(refuse: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> 
     case False{}:
       Hub.rpc.k(Hub.state(h), client, text, now)
 
-def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+def Hub.rpc.normal(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.rpc.dq(Bool.and(DQ.Dq.full(Hub.dq(cfg)), Hub.rpc.starts(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "m", ""))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, text, now)
+
+# Mutating diagnostics controls use the normal authenticated WebSocket RPC,
+# never a GET/query parameter, a forwarded machine or a caller-supplied path.
+def Hub.diagnostics.control(result: String, h: Hub, client: U32, id: String) -> IO(Hub):
+  Hub.out(h, B.Reply.data(client, id, Maybe.default(&2, J.Json, J.Json.parse(result), J.Json.obj([J.KV{"ok", J.Flag{False{}}}, J.KV{"error", J.Str{"io"}}]))))
+
+def Hub.diagnostics.operation(action: String) -> IO(String):
+  match action:
+    case "status": DIAG.Diagnostics.status()
+    case _: DIAG.Diagnostics.control(action)
+
+def Hub.rpc.diagnostics(yes: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
+  match yes:
+    case False{}: Hub.rpc.normal(h, client, text, now)
+    case True{}:
+      IO.bind(String, Hub, Hub.diagnostics.operation(Bool.pick(String, String.eq(J.Json.get_str(o, "m", ""), "diagnostics.status"), "status", J.Json.get_str(J.Json.get_obj(o, "p"), "action", ""))),
+        result => Hub.diagnostics.control(result, h, client, J.Json.as_raw(J.Json.get(o, "id"), "0")))
+
+def Hub.rpc.diagnostics.o(h: Hub, client: U32, text: String, now: Nat, +o: J.Json) -> IO(Hub):
+  Hub.rpc.diagnostics(Bool.or(String.eq(J.Json.get_str(o, "m", ""), "diagnostics.control"), String.eq(J.Json.get_str(o, "m", ""), "diagnostics.status")), h, client, text, now, o)
+
+def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  Hub.rpc.diagnostics.o(h, client, text, now, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
 
 # This fixed method set is constructible only by server IO jobs, never by a
 # JSON origin marker or a client id. Reuse the canonical metadata deciders.
@@ -12671,6 +12810,13 @@ def Hub.thin.fetch.body(on: Bool, +memory: Bool, +cfg: Cfg, +st: M.State, +hide:
     case False{}: Hub.thin.fetch(memory, cfg, st, hide, thread, anchor)
     case True{}: TSTO.Ts.page.body(Cfg.thin.store(cfg), thread, anchor, Cfg.thin(cfg), hide)
 
+# A normal view does not materialize a closed tool's payload. Explicit body
+# reads retain fetch.body and its existing ownership/cursor validation.
+def Hub.thin.fetch.tools(on: Bool, +memory: Bool, +cfg: Cfg, +st: M.State, +hide: Bool, +thread: String, +anchor: Nat, p: J.Json) -> IO(TSTO.Page):
+  match on:
+    case False{}: Hub.thin.fetch(memory, cfg, st, hide, thread, anchor)
+    case True{}: TSTO.Ts.page.lazy_tools(Cfg.thin.store(cfg), thread, anchor, Cfg.thin(cfg), hide, st, p)
+
 # Negotiated native metadata is fitted before the normal mandatory reply
 # gate. Trials share a single post-action value and cannot repeat commands.
 def Hub.thin.native_fit.envelope(+o: J.Json, result: J.Json, context: ThinContext, revision: Nat) -> J.Json:
@@ -12906,7 +13052,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
         +prepared : TA.Actor = TA.Actor.native.prepare(actor, web, p, epoch, ThinContext.view(context), Cfg.thin.signal_seq(cfg), secret)
         Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
-          key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg)), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg),
+          key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, LTOOLS.Tools.mask.enabled(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg), p), thread, TSTO.Page.ids(pg)), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg),
           Hub.thin.page.memo(Bool.and(web, String.eq(J.Json.get_str(o, "m", ""), "view.page")), st, context, Hub.thin.memo.base(st, cfg, p, context, web, thread), ms, now))
 
 # Read only the selected auxiliary histories, then mask with the vault
@@ -12916,9 +13062,13 @@ def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: C
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +subs : M.State <- SUBHIST.SubHistory.read(Cfg.thin.store(cfg), Hub.thin.view_state(st, cfg, thread), thread)
+        t1 : U32 <- PS.Perf.span("thin.read.subagents", t0)
         +reviews : M.State <- REVHIST.ReviewHistory.read(Cfg.thin.store(cfg), subs, thread)
+        t2 : U32 <- PS.Perf.span("thin.read.reviews", t1)
         +shown : M.State <- DHIST.History.restore(Cfg.thin.store(cfg), thread, reviews)
+        t3 : U32 <- PS.Perf.span("thin.read.design", t2)
         +v : SEC.Vault <- VX.Vx.vault()
         Hub.thin.render.page.shown(v, pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms, shown)
 
@@ -12926,7 +13076,9 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        +pg : TSTO.Page <- Hub.thin.fetch.body(Bool.and(TBODY.Body.enabled(String.eq(Client.thin.mode(c), "view-web"), p), Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(TV.Target.thread(st, J.Json.get_obj(p, "target")))))), String.is_empty(Cfg.thin.store(cfg)), cfg, st, TCHAT.Chat.enabled(st, TV.Target.thread(st, J.Json.get_obj(p, "target"))), TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
+        t0 : U32 <- PS.Perf.us()
+        +pg : TSTO.Page <- Hub.thin.fetch.tools(Bool.and(TBODY.Body.enabled(String.eq(Client.thin.mode(c), "view-web"), p), Bool.and(Bool.not(String.is_empty(Cfg.thin.store(cfg))), Bool.not(FR.Fr.is(TV.Target.thread(st, J.Json.get_obj(p, "target")))))), String.is_empty(Cfg.thin.store(cfg)), cfg, st, TCHAT.Chat.enabled(st, TV.Target.thread(st, J.Json.get_obj(p, "target"))), TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor, p)
+        t1 : U32 <- PS.Perf.span("thin.read.page", t0)
         Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
 
 # a view.update whose render memo still holds (thin-actor.bend's
@@ -13182,7 +13334,12 @@ def Hub.thin.have(+c: Maybe<&2, Client>, h: Hub, +client: U32, +o: J.Json, +now:
 
 def Hub.thin.rpc.now(h: Hub, +client: U32, +o: J.Json, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, +cl, as, inbox, cfg, note}: Hub.thin.have(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
+        h2 : Hub <- Hub.thin.have(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+        t1 : U32 <- PS.Perf.span("thin.rpc." ++ Nat.show(C.Codec.pos(["view.open", "view.update", "view.page", "view.action", "view.send", "view.search", "view.body"], J.Json.get_str(o, "m", ""))), t0)
+        return h2
 
 # Until the index is built (THIN.Lazy, Thin.warm) a thin request waits in
 # the cache rather than build it on the hub's time; Hub.thin.warmed answers
@@ -13353,9 +13510,24 @@ def AccountsRpc.default.step(ok: Bool, +client: U32, +rid: String, +provider: St
     case False{}: B.Step.outs([B.Reply.err(client, rid, "Check and reconnect this account before making it the default.")])
     case True{}: B.Step.reply(client, rid, [M.SettingSet{"account.default." ++ provider, ACCT.Accounts.binding.show(profile, epoch), now}])
 
+def AccountsRpc.clear.step(ok: Bool, +st: M.State, +client: U32, +rid: String, +provider: String, profile: String, epoch: Nat, now: Nat) -> B.Step:
+  match ok:
+    case False{}: B.Step.outs([B.Reply.err(client, rid, "The account's sign-in changed. Refresh its status before clearing its availability hold.")])
+    case True{}: B.Step.also(B.AccountFallback.clear(st, now, provider, profile, epoch), [B.Reply.ok(client, rid)])
+
+def Hub.rpc.account.limit(clear: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
+  match clear:
+    case False{}: Hub.rpc.account.kind(select, h, st, client, rid, p, now)
+    case True{}:
+      +provider = J.Json.get_str(p, "provider", "")
+      +profile = J.Json.get_str(p, "profile", "!missing")
+      +epoch = J.Json.get_nat(p, "epoch", 0n)
+      Hub.step(h, AccountsRpc.clear.step(Bool.or(ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch),
+        String.is_empty(profile) && Nat.is_eq(epoch, 0n) && ACCT.Accounts.supported(provider)), st, client, rid, provider, profile, epoch, now))
+
 def Hub.rpc.account.default(default: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
   match default:
-    case False{}: Hub.rpc.account.kind(select, h, st, client, rid, p, now)
+    case False{}: Hub.rpc.account.limit(String.eq(J.Json.get_str(p, "op", ""), "clear-limit"), select, h, st, client, rid, p, now)
     case True{}:
       +provider = J.Json.get_str(p, "provider", "")
       +profile = J.Json.get_str(p, "profile", "")
@@ -13439,7 +13611,34 @@ def Hub.rpc(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
 # the threads' Boat chips that Boat's status changes (logged only then)
 def Hub.chips(p: M.State & Hub, +status: String, +now: Nat) -> IO(Hub):
   (st, h) = p
-  Hub.step(h, B.Step{UZ.Chip.changes(st, status, now), Nil{}})
+  Hub.step(h, B.Step{TICK.Tick.chips(st, status, now), Nil{}})
+
+# Publication ordering is independent of worker/cache completion order.
+# Pending cache observations never become provider readings. At equal attempt
+# time the first complete result is immutable; a newer attempt may clear an
+# old account even when its successful reading time is lower or unknown.
+def Hub.allowance.complete(+o: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(o, "phase", "complete"), "complete"),
+    Bool.or(String.eq(J.Json.get_str(o, "state", ""), "ok"), Bool.or(String.eq(J.Json.get_str(o, "state", ""), "error"), String.eq(J.Json.get_str(o, "state", ""), "unavailable"))))
+
+def Hub.allowance.ordered(+old: J.Json, +next: J.Json, +now: Nat) -> Bool:
+  +before = ALQ.Allowance.nat(old, "attempted_at")
+  +after = ALQ.Allowance.nat(next, "attempted_at")
+  Bool.and(Bool.and(Hub.allowance.complete(next), String.eq(J.Json.get_str(next, "phase", ""), "complete")), Bool.and(Nat.is_gt(after, 0n), Bool.and(Nat.is_le(after, now),
+    Bool.or(Nat.is_gt(after, before), Bool.and(Nat.is_eq(after, before), Bool.not(Hub.allowance.complete(old)))))))
+
+def Hub.allowance.changes.parsed(+st: M.State, +snapshot: String, +now: Nat, +next: J.Json) -> List<&2, M.Change>:
+  +old = Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(st, "allowance.codex", "")), J.Null{})
+  Bool.pick(List<&2, M.Change>, Bool.and(String.eq(J.Json.get_str(next, "provider", ""), "codex"),
+    Bool.and(String.eq(J.Json.get_str(next, "source", ""), "codex-app-server"), Hub.allowance.ordered(old, next, now))),
+    [M.SettingSet{"allowance.codex", snapshot, now}], Nil{})
+
+def Hub.allowance.changes(+st: M.State, +snapshot: String, +now: Nat) -> List<&2, M.Change>:
+  Hub.allowance.changes.parsed(st, snapshot, now, Maybe.default(&2, J.Json, J.Json.parse(snapshot), J.Null{}))
+
+def Hub.allowance(p: M.State & Hub, snapshot: String, now: Nat) -> IO(Hub):
+  (st, h) = p
+  Hub.step(h, B.Step{Hub.allowance.changes(st, snapshot, now), Nil{}})
 
 def Hub.line.k(p: M.State & Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
   (st, h) = p
@@ -13530,27 +13729,34 @@ def Hub.gone(h: Hub, +thread: String, +code: U32, +pid: U32, +why: String, +now:
 # a tool call. Apply observations before the watchdog judges the gap.
 def Hub.watchdog.decide(p: M.State & Hub, +now: Nat) -> IO(Hub):
   (+st, h) = p
-  +normal = B.Hub.tick(st, now)
+  +normal = TICK.Tick.main(st, now)
   Hub.step(h, B.Step.cat(normal, WD.Watchdog.tick(M.State.replay(B.Queue.changes(normal), st), now)))
 
 def Hub.watchdog(h: Hub, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         observed : String <- LFX.Progress.sample(WD.Watchdog.plan(st), Cfg.home(cfg))
+        t1 : U32 <- PS.Perf.span("hub.tick.sample", t0)
         h2 : Hub <- Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, WD.Watchdog.observed(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(observed), J.Null{})), st, now, B.Step.none()))
-        Hub.watchdog.decide(Hub.state(h2), now)
+        t2 : U32 <- PS.Perf.span("hub.tick.observed", t1)
+        h3 : Hub <- Hub.watchdog.decide(Hub.state(h2), now)
+        t3 : U32 <- PS.Perf.span("hub.tick.decide", t2)
+        return h3
 
 # each minute the hub's size goes into the gauges
 def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{+st, f, +ls, +cl0, +as, +inbox, cfg, note}:
+    case Hub{+st, f, +ls, +cl0, +as, +inbox, +cfg, note}:
       do IO<Hub>:
+        t0 : U32 <- PS.Perf.us()
         +cl : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl0), Nat.sub(now, 60n)), cl0, now)
         PS.Perf.set("hub.clients", U32.from_nat(List.length(&2, Client, cl)))
         PS.Perf.set("hub.agents", U32.from_nat(List.length(&2, Agent, as)))
-        PS.Perf.set("hub.changes", U32.from_nat(ST.Store.size(ls)))
+        PS.Perf.set("hub.changes", U32.from_nat(LogCount.n(cfg)))
         PS.Perf.set("hub.busy", U32.from_nat(M.Work.threads(st)))
+        t1 : U32 <- PS.Perf.span("hub.tick.gauges", t0)
         # children the last exec handed over that ended meanwhile are waited
         # for (effects/adopt.js), so none stays a zombie
         guards : U32 <- LG.Guard.reap()
@@ -15638,6 +15844,9 @@ def Upload.json(+status: String, +ok: Bool, +thread: String, +v: String) -> List
     [J.KV{"attached", J.Str{v}}, J.KV{"thread", J.Str{thread}}],
     [J.KV{"text", J.Str{v}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}])))), "")
 
+def Upload.failure(status: String, thread: String, id: String, detail: String) -> List<&2, U32>:
+  W.Http.response(status, "application/json", U.Utf8.encode(J.Json.show(NT.Notice.upload.reply(thread, id, detail))), "")
+
 def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String, +path: String) -> IO(Unit):
   (s, res) = r
   match res:
@@ -15646,7 +15855,7 @@ def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String
     case Fail{_}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Conn.finish(s, Upload.json("400 Bad Request", False{}, thread, "the upload did not arrive whole"))
+        Conn.finish(s, Upload.failure("400 Bad Request", thread, "upload.incomplete", ""))
 
 # the head's leftover (the body's start) is written; the rest is copied
 # (a body that came whole with the head has nothing left to copy: the copy
@@ -15680,7 +15889,7 @@ def Upload.go(cont: Bool, s: Socket) -> IO(Socket):
 def Upload.into.k(big: Bool, s: Socket, +cont: Bool, +lim: Nat, +dir: String, +thread: String, +name: String, +len: Nat, +rest: List<&2, U32>) -> IO(Unit):
   match big:
     case True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(Nat.div(lim, 1048576n)) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(Nat.div(lim, 1048576n))))
     case False{}:
       do IO<Unit>:
         s2 : Socket <- Upload.go(Bool.and(cont, List.is_empty(&2, U32, rest)), s)
@@ -15708,7 +15917,7 @@ def Upload.gate(ok: Bool, big: Bool, s: Socket, +cont: Bool, +thread: String, +n
     case False{} _:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
     case True{} True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(AT.Att.mb.ceiling()) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(AT.Att.mb.ceiling())))
     case True{} False{}:
       do IO<Unit>:
         +reply : Chan(String) <- Chan.new(String, 1)
@@ -16617,6 +16826,14 @@ def Od.watch.next(+st: String, +last: String, again: String -> IO(Unit)) -> IO(U
 
 # one look at a quote's order every minute while it is unpaid, every ten
 # after; a change is said in the buy thread and kept in the record
+def Od.pcb(done: Bool, +inbox: Chan(Msg), source: String) -> IO(Unit):
+  match done:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PcbObserved{"order:" ++ source, 0n, 1n, None{}})
+        return Unit{}
+
 def Od.watch(n: Nat, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String, +last: String) -> IO(Unit):
   match n:
     case 0n:
@@ -16627,6 +16844,7 @@ def Od.watch(n: Nat, +inbox: Chan(Msg), +home: String, +server: String, +qid: St
         +install : String <- ODI.Od.install(home)
         +q : J.Json <- ODI.Od.get(home, server, install, qid, token)
         +st : String = OR.Order.state(q)
+        Od.pcb(PC.Pcb.ordered(q, last, st), inbox, qid)
         Od.status.k(st, last, q, inbox, thread, qid)
         Od.card.k(Bool.or(String.is_empty(st), String.eq(st, last)), inbox, thread, OR.Order.sum(q, ODI.Od.pay(server, qid, token)), qid)
         ODI.Od.keep(home, qid, token, thread, server, Bool.pick(String, String.is_empty(st), last, st))
@@ -16701,7 +16919,6 @@ def Od.resume(+inbox: Chan(Msg), +home: String) -> IO(Unit):
   do IO<Unit>:
     r : P.Ran <- P.Proc.run("sh", ["-c", "ls -1 2>/dev/null | grep '^q_.*\\.json$' | head -n 200"], ODI.Od.orders(home))
     Od.resume.all(String.lines(ODI.Od.ran(r)), inbox, home)
-
 
 # Send (or allowed for the session): upload; Not now: the agent is told;
 # the empty answer (the run was retired: Stop, archive, delete) tells no one
@@ -16874,6 +17091,11 @@ def Hub.checks.ask(h: Hub, +thread: String, +hash: String, +text: String, +now: 
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.checks.ask.k(Bool.or(String.is_empty(thread), B.Checks.asked(st, hash)), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, hash, text, now)
+
+def Hub.pcb(h: Hub, source: String, created: Nat, ordered: Nat, generation: Maybe<&2, String>, now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{PCB.Pcb.changes(st, source, created, ordered, PCB.Pcb.epoch(generation, st), now), Nil{}})
 
 def Hub.order.note(h: Hub, +thread: String, +id: String, +text: String, +ping: String, +now: Nat) -> IO(Hub):
   match h:
@@ -17218,6 +17440,7 @@ def Msg.kind(m: Msg) -> String:
     case RunReady{_, _, _}: "run-ready"
     case Commit{_}:
       "commit"
+    case PcbObserved{_, _, _, _}: "pcb_observed"
     case OrderNote{_, _, _, _}:
       "order_note"
     case OrderWake{_, _}:
@@ -17226,6 +17449,7 @@ def Msg.kind(m: Msg) -> String:
       "order_gate"
     case OrderQuoted{_, _, _, _}:
       "order_quoted"
+    case AllowanceSeen{_}: "allowance_seen"
     case BoatThreads{_}:
       "boat_threads"
     case ThinWarm{_, _}:
@@ -18250,7 +18474,7 @@ type ThinReadJob is Data:
   ThinReadJob{client: U32, gen: U32, view: String, target: J.Json, text: String}
 
 type ThinDrained is Data:
-  ThinDrained{clients: List<&2, Client>, jobs: List<&2, ThinReadJob>, dirty: Bool}
+  ThinDrained{clients: List<&2, Client>, jobs: List<&2, ThinReadJob>, dirty: List<&2, String>}
 
 def ThinRead.jobs(cs: List<&2, J.Json>, +client: U32, +gen: U32, +view: String, +target: J.Json) -> List<&2, ThinReadJob>:
   match cs:
@@ -18261,16 +18485,16 @@ def Client.thin.drain(+c: Client) -> ThinDrained:
   match c:
     case Client{+id, out, look, +cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, +target, +view, revision, anchor, +actor <> _, control} <> _} <> _, +accountCap}:
       ThinDrained{[Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.clean(actor)], control}]}], accountCap}],
-        ThinRead.jobs(TA.Actor.queued(actor), id, OB.Cr.gen(cr), view, target), TA.Actor.dirty(actor)}
-    case _: ThinDrained{[c], Nil{}, False{}}
+        ThinRead.jobs(TA.Actor.queued(actor), id, OB.Cr.gen(cr), view, target), Bool.pick(List<&2, String>, TA.Actor.dirty(actor), [U32.show(id)], Nil{})}
+    case _: ThinDrained{[c], Nil{}, Nil{}}
 
 def ThinDrained.append(a: ThinDrained, b: ThinDrained) -> ThinDrained:
   match a b:
-    case ThinDrained{ac, ar, ad} ThinDrained{bc, br, bd}: ThinDrained{List.append(&2, Client, ac, bc), List.append(&2, ThinReadJob, ar, br), Bool.or(ad, bd)}
+    case ThinDrained{ac, ar, ad} ThinDrained{bc, br, bd}: ThinDrained{List.append(&2, Client, ac, bc), List.append(&2, ThinReadJob, ar, br), List.append(&2, String, ad, bd)}
 
 def Clients.thin.drain(cs: List<&2, Client>) -> ThinDrained:
   match cs:
-    case Nil{}: ThinDrained{Nil{}, Nil{}, False{}}
+    case Nil{}: ThinDrained{Nil{}, Nil{}, Nil{}}
     case c <> tail: ThinDrained.append(Client.thin.drain(c), Clients.thin.drain(tail))
 
 def ThinRead.post(jobs: List<&2, ThinReadJob>, +inbox: Chan(Msg)) -> IO(Unit):
@@ -18281,10 +18505,21 @@ def ThinRead.post(jobs: List<&2, ThinReadJob>, +inbox: Chan(Msg)) -> IO(Unit):
         Self.post(inbox, ThinRead{client, gen, view, target, text})
         ThinRead.post(tail, inbox)
 
-def Cfg.thin.dirty(dirty: Bool, cfg: Cfg) -> Cfg:
+def ThinDirty.notes(ids: List<&2, String>, notes: TPACE.Notes) -> TPACE.Notes:
+  match ids:
+    case Nil{}: notes
+    case id <> rest: ThinDirty.notes(rest, TPACE.Notes.touch(notes, TPACE.Touch.client(id)))
+
+# Actor replies/info/sheets change one connection's private Ui. A global
+# invalidation here makes every view refresh and repeat its own follow-up
+# reads. Retain the actual recipient IDs through the drain, so only those
+# views are told. Canonical changes still use the ordinary thread/all path.
+def Cfg.thin.dirty(+dirty: List<&2, String>, +cfg: Cfg) -> Cfg:
   match dirty:
-    case False{}: cfg
-    case True{}: Cfg.thin.bump(cfg)
+    case Nil{}: cfg
+    case _ <> _:
+      Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg),
+        ThinDirty.notes(dirty, Cfg.thin.notes(cfg)), Cfg.thin.store(cfg), Cfg.thin.signal_seq(cfg)})
 
 def Hub.thin.drained(result: ThinDrained, h: Hub) -> IO(Hub):
   match result h:
@@ -18353,7 +18588,7 @@ def Wire.thin.paced.thin(+thin: Bool, +c: Client, +st: M.State, +touch: TPACE.To
     case False{}: IO.pure(ThinNoticed, ThinNoticed.keep(Some{c}, rest))
     case True{}:
       +key = U32.show(Client.id(c))
-      Wire.thin.paced.one(TPACE.Pace.step(TPACE.Pace.of(ps, key), now, TPACE.Touch.level(touch, TV.Target.thread(st, ThinContext.target(Client.thin.context(c))))), c, epoch, revision, key, rest)
+      Wire.thin.paced.one(TPACE.Pace.step(TPACE.Pace.of(ps, key), now, TPACE.Touch.level.for(touch, TV.Target.thread(st, ThinContext.target(Client.thin.context(c))), key)), c, epoch, revision, key, rest)
 
 def Wire.thin.paced(clients: List<&2, Client>, +st: M.State, +touch: TPACE.Touch, +ps: Map<&2, TPACE.Pace>, +now: Nat, +epoch: String, +revision: Nat) -> IO(ThinNoticed):
   match clients:
@@ -18480,7 +18715,9 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case TelemetryDone{gen, view, id}:
       Hub.telemetry.done(h, gen, view, id, now)
     case Tick{}:
-      IO.bind(Hub, Hub, Hub.tick(h, now), Hub.reexec.poll)
+      do IO<Hub>:
+        DIAG.Diagnostics.tick()
+        IO.bind(Hub, Hub, Hub.tick(h, now), Hub.reexec.poll)
     case ThinFlush{}:
       IO.bind(Nat, Hub, IO.now(), ms => Hub.thin.flush(h, ms))
     case Heart{}:
@@ -18520,6 +18757,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case RunReady{thread, head, bs}: Hub.run.ready(h, thread, head, bs, now)
     case Commit{cs}:
       Hub.step(h, B.Step{cs, Nil{}})
+    case PcbObserved{source, created, ordered, generation}:
+      Hub.pcb(h, source, created, ordered, generation, now)
     case OrderNote{thread, id, text, +ping}:
       Hub.order.note(h, thread, id, text, ping, now)
     case OrderWake{+thread, +text}:
@@ -18528,6 +18767,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.order.gate(kind, h, thread, md, now)
     case OrderQuoted{+thread, +sum, +id, fresh}:
       Hub.order.quoted(h, thread, sum, id, fresh, now)
+    case AllowanceSeen{snapshot}: Hub.allowance(Hub.state(h), snapshot, now)
     case BoatThreads{status}:
       Hub.chips(Hub.state(h), status, now)
     case ThinWarm{i, m}:
@@ -18846,6 +19086,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
+        diagnosticStatus : String <- DIAG.Diagnostics.start(Main.version())
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
         +opened : STO.Opened <- STO.Sto.boot(home)

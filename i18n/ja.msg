@@ -471,7 +471,7 @@ sidebar.search.projects = プロジェクトを検索
 thread.title.placeholder = スレッド名
 # ja? sigils and their English kinds kept, as typed; A translated the words after them
 composer.placeholder = 何でも質問：@bot、>thread、%project、#room、$skill、/btw
-thread.subagents = サブエージェント
+thread.subagents = サブスレッド
 thread.todos = ToDo
 approval.implement = 実装
 approval.dismiss = 閉じる
@@ -811,7 +811,7 @@ history.old.label = 旧版：{label}
 history.new.label = 新版：{label}
 web.terminal.pinned = {title}・先頭にピン留め
 web.terminal.inactive = {title}・停止中、クリックで再開
-subagents.heading = サブエージェント・{state}
+subagents.heading = サブスレッド・{state}
 fold.tooltip = {kind, select, work {エージェントの作業} other {ツール呼び出し}}{open, select, yes {を隠す} other {を表示}}
 composer.enter.tip = Enter または Ctrl+Enterで送信
 bots.look.number = 外観{count}
@@ -847,8 +847,8 @@ thread.title.cancel = 名前を元に戻す
 thread.title.rename = クリックで名前を変更
 thread.boat.settings = 設定でBoatの使用状況を表示
 subagents.cancel.tip = 待機をキャンセル、または作業を停止
-subagents.hide = サブエージェントを隠す
-subagents.show = サブエージェントを表示
+subagents.hide = サブスレッドを隠す
+subagents.show = サブスレッドを表示
 ask.implement.tip = 計画を実行
 ask.draft.tip = 下書きで回答
 ask.allow.once = 今回のみ許可
@@ -1261,7 +1261,7 @@ native.thread.model = モデル
 native.thread.effort = 思考量
 native.thread.composer = エージェントに依頼
 native.thread.model.effort = モデル・思考量：{label}
-native.thread.subagents = サブエージェント：{word}
+native.thread.subagents = サブスレッド：{word}
 native.thread.todos = ToDo：{count}
 native.thread.board = 基板ビューアー
 native.thread.sending = 送信中…
@@ -1450,3 +1450,29 @@ settings.voice.learned.note = 音声入力の後にした修正。2回すると�
 voice.learned.item = {heard} → {out}・{yes}回
 voice.dictate.here = この端末のマイクで音声入力
 native.permission.microphone = スレッドに音声入力する間だけ声を録音し、文字にするためにコンピューターへ送ります。
+
+# Settings status and empty states
+settings.voice.learned.empty = まだ学習した修正はありません。音声入力の後、聞き間違えた単語を「修正」で直すか、修正候補を選ぶとここに表示されます。2回確認すると自動で適用されます。ここで削除できます。
+settings.voice.dictionary.empty = 辞書はまだ空です。名前や専門用語を追加すると、音声入力で正しく表記しやすくなります。
+voice.model.checking = このマシンの音声ヘルパーを確認中…
+voice.model.check = 利用可能か確認
+voice.model.retry = ダウンロードを再試行
+voice.model.starting = ダウンロードを開始中…設定を閉じても続きます。
+voice.model.removing = ローカルモデルを削除中…
+voice.model.progress = {name} をダウンロード中 · {done} / {total} MB ({percent}%)
+voice.model.received = {name} をダウンロード中 · {done} MB 受信済み
+voice.model.unpack = {name} を検証・展開中…
+voice.model.failed = ダウンロード失敗: {error}
+voice.model.incomplete = 実行に必要なファイルが不足しています。ダウンロードしてセットアップを完了してください。
+voice.model.available = 未ダウンロード。約 {mb} MB と音声ランタイムが必要です。一度ダウンロードするとオフラインで使えます。
+voice.model.language.en = 英語
+voice.model.language.multi = 25言語
+
+# Upload failure messages resolved at the client
+upload.network = アップロードがハブに届きませんでした
+upload.failed = アップロードに失敗しました
+upload.incomplete = アップロードが途中で途切れました
+upload.cap = 添付ファイルは{mb} MBまでです
+
+subagents.group.threads = サブスレッド
+subagents.group.background = バックグラウンド

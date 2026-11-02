@@ -660,3 +660,94 @@ def Vo.ring(+home: String, +nonce: String, +ct: String, +body: String, raw: List
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Vo.dir(home))
     ok : Bool <- Vo.bytes(Vo.dir(home) ++ "/ring-" ++ nonce ++ ".form", raw)
     Vo.ring.w(ok, home, Vo.dir(home) ++ "/ring-" ++ nonce ++ ".form", ct, body)
+
+# Local model commands stream every progress line. Keep only the latest
+# status and first error, so a final status cannot erase a failed download.
+def Vo.local.acc.k(ev: String, +o: J.Json, +acc: J.Json) -> J.Json:
+  match ev:
+    case "local": J.Json.obj([J.KV{"local", o}, J.KV{"error", J.Str{J.Json.get_str(acc, "error", "")}}])
+    case "error": J.Json.obj([J.KV{"local", J.Json.get_obj(acc, "local")}, J.KV{"error", J.Str{J.Json.get_str(o, "error", "Local model operation failed")}}])
+    case _: acc
+
+def Vo.local.acc(+o: J.Json, acc: J.Json) -> J.Json:
+  Vo.local.acc.k(J.Json.get_str(o, "event", ""), o, acc)
+
+def Vo.local.event(ev: String, +o: J.Json, +out: Chan(String), acc: J.Json) -> IO(J.Json):
+  match ev:
+    case "progress":
+      do IO<J.Json>:
+        Vo.send(out, Vo.msg("", "local-progress", [J.KV{"what", J.Str{J.Json.get_str(o, "what", "")}},
+          J.KV{"done", J.Num{Nat.show(J.Json.get_nat(o, "done", 0n))}}, J.KV{"total", J.Num{Nat.show(J.Json.get_nat(o, "total", 0n))}},
+          J.KV{"phase", J.Str{J.Json.get_str(o, "phase", "download")}}]))
+        return acc
+    case _: IO.pure(J.Json, Vo.local.acc(o, acc))
+
+def Vo.local.line(m: Maybe<&2, J.Json>, +out: Chan(String), acc: J.Json) -> IO(J.Json):
+  match m:
+    case None{}: IO.pure(J.Json, acc)
+    case Some{+o}:
+      Vo.local.event(J.Json.get_str(o, "event", ""), o, out, acc)
+
+def Vo.local.lines(ls: List<&2, String>, +out: Chan(String), acc: J.Json) -> IO(J.Json):
+  match ls:
+    case Nil{}: IO.pure(J.Json, acc)
+    case l <> t: IO.bind(J.Json, J.Json, Vo.local.line(J.Json.parse(l), out, acc), a => Vo.local.lines(t, out, a))
+
+def Vo.local.error(+code: U32, +acc: J.Json) -> String:
+  +err = J.Json.get_str(acc, "error", "")
+  Bool.pick(String, Bool.not(String.is_empty(err)), err,
+    Bool.pick(String, Bool.not(U32.is_eq(code, 0)), "The voice helper stopped before finishing. Try the download again.",
+      Bool.pick(String, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(acc, "local"), "models")), "", "The voice helper returned no model status. Check that it is installed.")))
+
+def Vo.local.end(s: Socket, +pid: U32, +out: Chan(String), +acc: J.Json) -> IO(Unit):
+  do IO<Unit>:
+    Socket.close(s)
+    +code : U32 <- H.Proc.wait(pid)
+    Vo.send(out, Vo.msg("", "local-result", [J.KV{"local", J.Json.get_obj(acc, "local")},
+      J.KV{"error", J.Str{Vo.local.error(code, acc)}}]))
+
+def Vo.local.fed(r: U.Lines & List<&2, String>, s: Socket, +out: Chan(String), acc: J.Json,
+    k: Socket -> U.Lines -> J.Json -> IO(Unit)) -> IO(Unit):
+  (carry, ls) = r
+  IO.bind(J.Json, Unit, Vo.local.lines(ls, out, acc), a => k(s, carry, a))
+
+def Vo.local.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, carry: U.Lines, +pid: U32, +out: Chan(String), acc: J.Json,
+    k: Socket -> U.Lines -> J.Json -> IO(Unit)) -> IO(Unit):
+  (s, res) = r
+  match res:
+    case Done{Nil{}}: Vo.local.end(s, pid, out, acc)
+    case Done{bs}: Vo.local.fed(U.Lines.feed(carry, bs), s, out, acc, k)
+    case Fail{_}: Vo.local.end(s, pid, out, acc)
+
+def Vo.local.reader(fuel: Nat, s: Socket, carry: U.Lines, +pid: U32, +out: Chan(String), acc: J.Json) -> IO(Unit):
+  match fuel:
+    case 0n: Vo.local.end(s, pid, out, acc)
+    case 1n+f:
+      IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536),
+        r => Vo.local.got(r, carry, pid, out, acc, s2 => c2 => a => Vo.local.reader(f, s2, c2, pid, out, a)))
+
+def Vo.local.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +out: Chan(String)) -> IO(Unit):
+  match r:
+    case Fail{_}:
+      Vo.send(out, Vo.msg("", "local-result", [J.KV{"error", J.Str{"The voice helper could not start. Check that it is installed beside Backplane."}}]))
+    case Done{started}:
+      (pid, s) = started
+      do IO<Unit>:
+        s2 : Socket <- H.Sock.shutdown(s)
+        Vo.local.reader(Vo.forever(), s2, U.Lines.new(), pid, out, J.Json.obj(Nil{}))
+
+def Vo.local.run.go(+home: String, +cmd: String, +model: String, +out: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    +exe : String <- Vo.exe()
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Vo.local(home))
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, [cmd, "--local-dir", Vo.local(home), "--model", Vo.model.ok(model)], "/", 1)
+    Vo.local.started(r, out)
+
+
+def Vo.local.run.k(copy: Bool, +home: String, +cmd: String, +model: String, +out: Chan(String)) -> IO(Unit):
+  match copy:
+    case True{}: Vo.send(out, Vo.msg("", "local-result", [J.KV{"error", J.Str{"A hub on a copied log cannot install or remove voice models."}}]))
+    case False{}: Vo.local.run.go(home, cmd, model, out)
+
+def Vo.local.run(+home: String, +cmd: String, +model: String, +out: Chan(String)) -> IO(Unit):
+  IO.bind(Bool, Unit, P.Proc.copy(), copy => Vo.local.run.k(copy, home, cmd, model, out))

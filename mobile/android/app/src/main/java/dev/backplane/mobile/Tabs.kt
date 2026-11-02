@@ -254,6 +254,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
     val ctx = LocalContext.current
     var bytes by remember { mutableStateOf(m.cacheSize()) }
     var confirm by remember { mutableStateOf(false) }
+    var improvements by remember { mutableStateOf(false) }
     val list = AppSettings.threadList.ifEmpty { s.view }
     val allowed = Notes.allowed(ctx)
     // ask the hub for its settings in the background (a select, on a tab change, closes it)
@@ -324,6 +325,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
             item { Header(NativeMessages.settings_tour(tag)) }
             item { ListItem(headlineContent = { Text(NativeMessages.settings_tour_show(tag)) }, modifier = Modifier.clickable { m.act("ob-open") }) }
             item { Header(NativeMessages.native_settings_about(tag)) }
+            item { ListItem(headlineContent = { Text("Improvements") }, modifier = Modifier.clickable { improvements = true }) }
             item { ListItem(headlineContent = { Text("Backplane") }, supportingContent = { Text(about) }) }
         }
     }
@@ -334,6 +336,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
         confirmButton = { TextButton(onClick = { confirm = false; m.clearCache(); bytes = 0 }) { Text(NativeMessages.common_clear(tag), color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text(NativeMessages.common_cancel(tag)) } },
     )
+    if (improvements) ImprovementsDialog(m) { improvements = false }
 }
 
 @Composable

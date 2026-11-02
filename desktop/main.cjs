@@ -24,6 +24,7 @@ if (!home || !path.isAbsolute(home)) throw new Error('Set an absolute, isolated 
 if (!app.isPackaged && path.resolve(home) === path.join(os.homedir(), '.backplane-bend')) throw new Error('Development Electron must use an isolated BACKPLANE_HOME');
 app.setPath('userData', path.join(home, 'electron-profile'));
 const connectionLog = createConnectionLog(home);
+const recordingStore = require('./improvements-recording-store.cjs').createRecordingStore(home);
 app.setName('Backplane');
 if (process.platform === 'linux') app.setDesktopName?.('backplane.desktop');
 const resourceRoot = path.join(process.resourcesPath, 'backplane-service');
@@ -44,6 +45,12 @@ let window, origin, connection, serviceReadyAtMs, firstVisibleAtMs, connecting;
 let connectTries = 0, connectTimer = null;
 let connectionStatus = {phase:'connecting', message:'Connecting to your service…'};
 let desktopBrowser;
+let browserStatus={phase:'connecting',message:'Connecting Browser…'};
+function browserState(value,browserWindow=window){
+  if(window!==browserWindow||!browserWindow||browserWindow.isDestroyed())return;
+  browserStatus=value;
+  browserWindow.webContents.send('desktop:browser-state',value);
+}
 const imageActions = createImageActions({ electron, origin: () => origin });
 let quitting = false;
 let terminalFocused = false;
@@ -137,7 +144,16 @@ async function connect(ses) {
 // one attempt at a time: the start after load and a Reconnect share it
 let browserStarting=null;
 function connectBrowser(ses,reconnect=false){
-  browserStarting??=startBrowser(ses,reconnect).finally(()=>{browserStarting=null;});
+  if(!browserStarting&&desktopBrowser&&!desktopBrowser.isClosed())return Promise.resolve();
+  if(!browserStarting){
+    const browserWindow=window;
+    browserState({phase:'connecting',message:'Connecting Browser…'},browserWindow);
+    browserStarting=startBrowser(ses,reconnect).catch(()=>{
+      // Discovery, credential reads and package validation can fail before a
+      // controller exists. Keep that failure queryable after renderer reload.
+      browserState({phase:'error',message:'Browser connection unavailable. Reconnect to try again.'},browserWindow);
+    }).finally(()=>{browserStarting=null;});
+  }
   return browserStarting;
 }
 async function startBrowser(ses,reconnect){
@@ -156,19 +172,23 @@ async function startBrowser(ses,reconnect){
     guestManagerSha256:config.guestManagerSha256||hash(guestPath),
     recorder:{preloadPath,preloadSha256:config.preloadSha256||hash(preloadPath),recorderSourceSha256:'2e4b03765cc4ae6595e32048555ffe27e750994a85c18b89027064f3c0c15350',subframePreload:true,popupPreloadVerified:false},
     unknownState:browserUnknown,executeCall:createBrowserActions(),
-    onState:value=>{if(window===browserWindow&&!browserWindow.isDestroyed())browserWindow.webContents.send('desktop:browser-state',value);},
+    onState:value=>browserState(value,browserWindow),
     onTakeover:value=>{if(window===browserWindow&&!browserWindow.isDestroyed())browserWindow.webContents.send('desktop:browser-takeover',value);}});
   desktopBrowser=controller;
   await controller.start();
   if(window!==browserWindow||browserWindow.isDestroyed())controller.close();
 }
 function start() {
+  require('./text-clipboard.cjs').installTextClipboard(ipcMain, electron.clipboard, trusted);
   const ses = session.fromPartition('persist:backplane-ui');
-  const permitted = (wc, permission, url) => {
-    try { return wc === window?.webContents && origin && new URL(url).origin === origin && ['notifications', 'clipboard-sanitized-write'].includes(permission); } catch { return false; }
+  const permitted = (wc, permission, url, details = {}) => {
+    try { return wc === window?.webContents && origin && new URL(url).origin === origin && (['notifications', 'clipboard-sanitized-write'].includes(permission) || require('./improvements-display-capture.cjs').displayCapturePermission(wc, permission, url, details, window, origin)); } catch { return false; }
   };
-  ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl)));
-  ses.setPermissionCheckHandler((wc, permission, requestingOrigin) => permitted(wc, permission, requestingOrigin));
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl, details)));
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permitted(wc, permission, requestingOrigin, details));
+  require('./improvements-display-capture.cjs').installDisplayCapture({ electron, session: ses, getWindow: () => window, origin: () => origin });
+  try { recordingStore.prune(); } catch {}
+  const recordingCleanup = setInterval(() => { try { recordingStore.prune(); } catch {} }, 15 * 60 * 1000);recordingCleanup.unref();
   ses.webRequest.onHeadersReceived((details, callback) => {
     if (new URL(details.url).origin !== origin) return callback({});
     // Files embeds PDFs served by this hub; keep foreign frames blocked.
@@ -177,6 +197,19 @@ function start() {
   ipcMain.handle('desktop:version', event => {
     if (!trusted(event)) throw new Error('Invalid sender');
     return { electron: process.versions.electron, service: connection.version, launchedAtMs, firstVisibleAtMs, serviceReadyAtMs };
+  });
+  ipcMain.handle('desktop:diagnostics', (event, op = 'read') => {
+    if (!trusted(event)) throw new Error('Invalid diagnostics sender');
+    return op === 'read' ? connectionLog.snapshot() : connectionLog.command(op);
+  });
+  ipcMain.handle('desktop:recording', (event, value) => {
+    if (!trusted(event)) throw new Error('Invalid recording sender');
+    if (!value || typeof value !== 'object') throw new Error('Invalid recording request');
+    if (value.op === 'put') return recordingStore.put(value.id, value.bytes);
+    if (value.op === 'read') return recordingStore.read(value.id);
+    if (value.op === 'remove') return recordingStore.remove(value.id);
+    if (value.op === 'clear') return recordingStore.clear();
+    throw new Error('Invalid recording operation');
   });
   ipcMain.handle('desktop:capture-app', async event => {
     if (!trusted(event)) throw new Error('Invalid capture sender');
@@ -210,8 +243,8 @@ function start() {
   ipcMain.handle('desktop:browser-hide',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');desktopBrowser?.hide();return true;});
   // Reloaded renderers subscribe after main may already have become ready or
   // failed. Query the current state instead of depending on a one-shot event.
-  ipcMain.handle('desktop:browser-state',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');return desktopBrowser?.state()??{phase:'connecting',message:'Connecting Browser…'};});
-  ipcMain.handle('desktop:browser-reconnect',async event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');await connectBrowser(ses,true);return desktopBrowser?.state()??{phase:'error',message:'Browser unavailable'};});
+  ipcMain.handle('desktop:browser-state',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');return browserStatus;});
+  ipcMain.handle('desktop:browser-reconnect',async event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');await connectBrowser(ses,true);return browserStatus;});
   Menu.setApplicationMenu(applicationMenu(Menu, process.platform));
   app.setAppUserModelId?.('works.backplane.desktop');
   if (process.platform === 'darwin') app.dock?.setIcon(iconPath());

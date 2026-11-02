@@ -6,8 +6,12 @@ import ./json.bend as J
 def Uc.names() -> List<&2, String>:
   ["threads_created", "user_messages", "assistant_messages", "bot_messages", "bot_wakes", "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens", "usage_turns"]
 
+# Keep the original ten-field contract available for legacy laws/readers.
+def Uc.all_names() -> List<&2, String>:
+  List.append(&2, String, Uc.names(), ["boards_created", "boards_ordered"])
+
 def Uc.zero() -> List<&2, Nat>:
-  [0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n]
+  [0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n]
 
 def Uc.num.go(s: String, n: Nat) -> Nat:
   match s:
@@ -49,7 +53,7 @@ def Uc.read.go(names: List<&2, String>, parts: List<&2, String>) -> List<&2, Nat
     case _ <> ns Nil{}: 0n <> Uc.read.go(ns, Nil{})
 
 def Uc.read(s: String) -> List<&2, Nat>:
-  Uc.read.go(Uc.names(), String.split(s, '/'))
+  Uc.read.go(Uc.all_names(), String.split(s, '/'))
 
 def Uc.strings(xs: List<&2, Nat>) -> List<&2, String>:
   match xs:
@@ -84,4 +88,4 @@ def Uc.fields(names: List<&2, String>, xs: List<&2, Nat>) -> List<&2, J.KV>:
     case _ _: Nil{}
 
 def Uc.json(xs: List<&2, Nat>) -> J.Json:
-  J.Json.obj(Uc.fields(Uc.names(), xs))
+  J.Json.obj(Uc.fields(Uc.all_names(), xs))

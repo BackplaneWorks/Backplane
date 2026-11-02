@@ -60,8 +60,9 @@ async function snapshot(label) {
   if (process.env.UNREAD_BOT === '1') {
     const button = page.locator('[data-on-click="bot"][data-value="' + bot + '"]');
     result.botButtons = await page.locator('[data-value="' + bot + '"]').evaluateAll(es => es.map(e => ({ action: e.getAttribute('data-on-click'), text: e.textContent })));
+    if(!await button.first().isVisible())await page.locator('button.back[data-on-click="select"][data-value=""]:visible').click();
     await button.first().click();
-    await page.waitForTimeout(250);
+    await page.waitForFunction(() => document.documentElement.dataset.backplaneRemoteReady === 'true' && __bpRender.paging().ready && !__bpRender.paging().pending);
   }
   await page.locator('#composer').fill('Unsent 日本語 draft');
   await snapshot('initial');
@@ -112,8 +113,10 @@ async function snapshot(label) {
     assert.equal(reached.pill, '');
   }
   step = 'away'; await page.locator('#timeline').evaluate(el => { el.scrollTop -= 450; }); await page.waitForTimeout(200);
+  const unseenCount=Number(process.env.UNREAD_COUNT||2);assert(unseenCount>=2);
+  for(let i=0;i<unseenCount-2;i++)await append('Additional reachable message '+i);
   await append('Reachable new one'); await append('Reachable new two');
-  await page.waitForTimeout(500); await snapshot('away-with-new');
+  await page.waitForFunction(n=>document.querySelector('#timeline .hold-pill')?.textContent===n+' new ↓',unseenCount); const unread=await snapshot('away-with-new');assert.equal(unread.pill,unseenCount+' new ↓','new count names the actual appended messages');
   await other.waitForFunction(() => document.getElementById('timeline')?.textContent.includes('Reachable new two'));
   assert.equal(await other.locator('#timeline .msg').filter({ hasText: 'Reachable new two' }).count(), 1, 'Other client receives the new message exactly once');
   assert.equal(await other.locator('#timeline .hold-pill').count(), 0, 'Following client does not inherit the other client read boundary');
@@ -143,4 +146,4 @@ async function snapshot(label) {
   assert.equal(manual.pill, '', 'Manual bottom clears badge'); assert.equal(manual.draft, 'Unsent 日本語 draft'); assert.deepEqual(result.errors, []);
   result.state = 'passed';
 } catch (e) { result.state = 'failed'; result.step = step; result.error = e.stack; if (page) await snapshot('failure').catch(() => {}); process.exitCode = 1;
-} finally { if (browser) await browser.close(); await service.stop(); fs.writeFileSync(output, JSON.stringify(result, null, 2) + '\n'); console.log(JSON.stringify({ state: result.state, step: result.step, error: result.error, output })); } })();
+} finally { if(page)await page.screenshot({path:output+'.final.png'}).catch(()=>{});if (browser) await browser.close(); await service.stop(); fs.writeFileSync(output, JSON.stringify(result, null, 2) + '\n'); console.log(JSON.stringify({ state: result.state, step: result.step, error: result.error, output })); } })();

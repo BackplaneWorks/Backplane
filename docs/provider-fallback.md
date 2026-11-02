@@ -1,6 +1,6 @@
 # Provider fallback
 
-Settings → Fallback hierarchy controls one opt-in ordered list for this hub.
+Settings → Agents → Fallback hierarchy controls one opt-in ordered list for this hub.
 It applies to every Backplane thread, bot, delegated task, routine and mail
 short-run. Add installed provider/model pairs, move them up or down, or remove
 them. Turning it on never changes the model already selected in a thread.

@@ -1,4 +1,5 @@
 import Base
+import ./telemetry-choice.bend as TC
 import ./bot.bend as BT
 import ./json.bend as J
 import ./ubop.bend as UO
@@ -2506,12 +2507,11 @@ def State.apply.go(s: State, e: Change) -> State:
 
 # Alpha aggregate telemetry is a bounded projection of the durable log, not a
 # second event stream. The hub enables it at startup only when its baked gate
-# is open; old logs have no enable marker and are never backfilled. Consent to
-# the expanded disclosure is separate from the legacy install/activity choice.
+# is open; old logs have no enable marker and are never backfilled. The saved
+# disclosure answer now gates every telemetry category together.
 def Metrics.allowed(+s: State) -> Bool:
   Bool.and(String.eq(Setting.get(s, "telemetry.usage.enabled", ""), "1"),
-    Bool.and(String.eq(Setting.get(s, "telemetry.usage.asked", ""), "1"),
-      Bool.and(String.eq(Setting.get(s, "telemetry.asked", ""), "1"), Bool.not(String.eq(Setting.get(s, "telemetry.share", "on"), "off")))))
+    TC.Choice.allowed(Setting.get(s, "telemetry.share", ""), Setting.get(s, "telemetry.asked", ""), Setting.get(s, "telemetry.usage.asked", "")))
 
 def Metrics.data(s: State) -> Map<&2, String>:
   match s:
@@ -2620,8 +2620,22 @@ def Metrics.privacy.clear(changed: Bool, +s: State) -> State:
     case False{}: s
     case True{}: State.setting(Metrics.clear(s), "telemetry.usage.generation", Metrics.generation.next(s))
 
+# Board observations are local once-only SettingSet records, produced by the
+# hub after successful design capture or a completed nonpilot Buy-it checkout.
+# The source key and record are never supplied to the usage serializer.
+def Metrics.pcb.k(go: Bool, s: State, +value: String) -> State:
+  match go:
+    case False{}: s
+    case True{}:
+      +o = Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{})
+      +at = J.Json.get_nat(o, "at", 0n)
+      Metrics.add(Metrics.add(Metrics.prepare(s, at), at, 10n, UC.Uc.cap(J.Json.get_nat(o, "created", 0n))), at, 11n, UC.Uc.cap(J.Json.get_nat(o, "ordered", 0n)))
+
+def Metrics.pcb(+s: State, +key: String, value: String) -> State:
+  Metrics.pcb.k(Bool.and(Metrics.allowed(s), Bool.and(String.starts_with(key, "telemetry.pcb."), String.is_empty(Setting.get(s, key, "")))), s, value)
+
 def Metrics.setting(+s: State, +key: String, +value: String) -> State:
-  Metrics.privacy.clear(Bool.and(Bool.or(String.eq(Setting.get(s, "telemetry.usage.enabled", ""), "1"), Bool.not(List.is_empty(&2, String, Map.keys(&2, String, Metrics.data(s))))), Bool.and(Metrics.privacy(key), Bool.not(String.eq(value, Setting.get(s, key, ""))))), s)
+  Metrics.privacy.clear(Bool.and(Bool.or(String.eq(Setting.get(s, "telemetry.usage.enabled", ""), "1"), Bool.not(List.is_empty(&2, String, Map.keys(&2, String, Metrics.data(s))))), Bool.and(Metrics.privacy(key), Bool.not(String.eq(value, Setting.get(s, key, ""))))), Metrics.pcb(s, key, value))
 
 def Metrics.sg(s: State) -> Map<&2, String>:
   match s:

@@ -193,7 +193,10 @@ export class TimelineScroller {
       const { wrapper } = row;
       const height = wrapper.getBoundingClientRect().height;
       RR?.n("tl.measure.row");
-      if (this.sizes[key] !== height) {
+      const previous = this.sizes[key];
+      // Translated DOMRects jitter by tiny fractions of a CSS pixel.
+      // Preserve real size changes without feeding noise into the planner.
+      if (previous === undefined || Math.abs(previous - height) > 0.001) {
         this.sizes[key] = height;
         changed = true;
       }

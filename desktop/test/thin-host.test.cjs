@@ -1,5 +1,14 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
+
+test('older paging records the newest source boundary before its picture is replaced',async()=>{
+ let mark='latest-committed-source';const f=await fixture({readingMark:()=>mark});
+ f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:{ids:['row'],older:'older-bound-to-A',hasMore:true,newer:0,anchor:{id:'row',offset:0},partial:[]}}));
+ assert(f.host.page());assert.equal(f.sent.at(-1).p.away,'latest-committed-source');
+ mark='older-page-source';f.host.receive(f.reply());f.host.away('A',mark);
+ assert.equal(f.host.awayOf('A'),'latest-committed-source','old loaded history does not become new output');
+ f.host.away('A','');assert.equal(f.host.awayOf('A'),'','reaching genuinely newest output still clears the mark');
+});
 async function fixture(overrides={}){
  const {ThinHost}=await import(process.env.THIN_HOST_MODULE||'../../src/web/thin-host.js'),{ThinViews,VIEW_LIMITS}=await import('../../src/web/thin.js');
  let at=0,session={sel:'A',drafts:{A:'original 日本語'},rid:1},persisted=0,fieldRefresh;
@@ -153,6 +162,28 @@ test('a send drops the older page still on its way: its late reply never puts th
  const f=await fixture();f.open();f.host.page();const pg=f.sent.at(-1);f.host.request('send','');const count=f.views.length;
  f.host.receive(f.reply(pg));assert.equal(f.views.length,count,'the old page is not shown');assert.equal(f.host.atNewest(),true);assert.equal(f.host.paging,null);
  assert(f.sent.some(x=>x.m==='view.action'),'the send still goes');
+});
+test('sending from retained history presents the newest page without old reading gaps',async()=>{
+ for(const kind of ['bot','thread'])for(const action of ['send','send-alt']){
+  const f=await fixture({target:()=>({kind,id:'A'})});f.open();f.host.page();f.host.receive(f.reply());
+  // An action already in flight can put the old history back after the
+  // UI's eager send cleanup. Only the accepted send knows its newest page.
+  f.host.request('flag','models');const earlier=f.sent.at(-1);
+  f.host.request(action,'');f.host.receive(f.reply(earlier));
+  assert.notEqual(f.views.at(-1).detail.page?.direction,'newest');
+  const request=f.sent.at(-1);
+  f.host.receive(f.reply(request,{window:{ids:['sent'],older:'older-newest',hasMore:true,newer:0,anchor:{id:'sent',offset:0},partial:[]},
+   cmds:[{type:'scroll'}]}));
+  assert.equal(f.views.at(-1).detail.page?.direction,'newest','the DOM must discard retained rows and their blank scroll spacers');
+  assert.equal(f.views.at(-1).detail.position?.atEnd,true,'the accepted latest page owns the viewport');
+ }
+});
+test('an empty or rejected send does not replace the displayed history',async()=>{
+ const f=await fixture();f.open();f.host.request('send','');f.host.receive(f.reply());
+ assert.notEqual(f.views.at(-1).detail.page?.direction,'newest','no server scroll command means no accepted navigation');
+ const count=f.views.length;f.host.request('send','');const request=f.sent.at(-1);
+ f.host.receive({t:'reply',id:request.id,ok:false,error:{code:'LIMIT'}});
+ assert.equal(f.views.length,count,'a refused send keeps the existing picture');
 });
 test('page and search are explicit requests; ordinary open and selected updates never fetch older pages',async()=>{
  const f=await fixture();f.open();assert.equal(f.sent.length,1);f.host.page();assert.equal(f.sent.at(-1).m,'view.page');assert.equal(f.sent.at(-1).p.cursor,'older-bound-to-A');
@@ -1021,20 +1052,22 @@ test('a reply whose delta changed nothing draws nothing, and its session and com
  f.host.update();f.host.receive(f.reply(f.sent.at(-1)));assert.equal(f.views.length,2);
 });
 
-for (const two of [false, true]) test('queued 3D choice preserves '+(two?'two':'one')+' in-flight history page bridges', async () => {
+for (const two of [false, true]) test('3D choice overtakes '+(two?'two':'one')+' pending history pages while keeping displayed history', async () => {
  const f=await fixture(); f.host.greeting(f.greeting);
  const win=(text,older,olderNext)=>({shown:{type:'text',text},window:{ids:[text],older,olderNext,hasMore:!!older,anchor:{id:text,offset:0},partial:[]}});
  f.host.receive(f.reply(undefined,win('Newest','c1',two?'c2':'')));
+ const held=structuredClone(f.host.held),cursor=f.host.cursor,back=f.host.back.slice();
  assert(f.host.ahead('older',{two})); const pages=f.sent.slice(-(two?2:1)), count=f.views.length;
- f.host.request('view-kind','3d');
- assert.equal(f.sent.at(-1).id,pages.at(-1).id,'viewer choice waits for its earlier history pages');
- for (let i=0;i<pages.length;i++) {
-  f.host.receive(f.reply(pages[i],win('Older bridge '+i,'c'+(i+2),'c'+(i+3))));
-  assert.equal(f.views.length,count+i+1,'accepted older page must display before the queued viewer choice');
-  assert.equal(f.views.at(-1).detail.page.direction,'older');
-  assert.equal(f.views.at(-1).n.text,'Older bridge '+i);
- }
- assert.equal(f.sent.at(-1).p.action,'view-kind');
+ f.host.request('view-kind','3d');const action=f.sent.at(-1);
+ assert.equal(action.p.action,'view-kind','viewer click must not wait for older pages');
+ assert.equal(f.host.paging,null);assert.equal(f.host.pagingNext,null);
+ assert.equal(f.host.cursor,cursor);assert.deepEqual(f.host.back,back);assert.deepEqual(f.host.held,held);
+ for (const page of pages) f.host.receive(f.reply(page,win('Old pane','c2','c3')));
+ assert.equal(f.views.length,count,'retired history reads cannot redraw the old viewer');
+ f.host.receive(f.reply(action,win('3D','c1',two?'c2':'')));
+ assert.equal(f.views.at(-1).n.text,'3D');assert.equal(f.host.ready,true);
+ assert(f.host.ahead('older',{two}),'history remains readable after the switch');
+ assert.equal(f.sent.at(-(two?2:1)).p.cursor,'c1','the skipped bridge is requested again, not lost');
 });
 
 test('reconnect bookmark names the held source page containing the visible anchor',async()=>{
@@ -1142,4 +1175,94 @@ test('same-conversation actions and explicit Keep still own their draft changes'
  f.host.receive(f.reply(action,{session:{...action.p.session,drafts:{A:'changed by action'}}}));assert.equal(f.getSession().drafts.A,'changed by action');
  f.host.request('bot','bot-B');const moving=f.sent.at(-1),response=f.reply(moving,{nextTarget:{kind:'bot',id:'bot-B'},remoteReady:false,session:{sel:'B',rid:3,drafts:{B:'suggested'}},cmds:[{type:'keep',thread:'B',text:''}]});delete response.result.shown;
  f.host.receive(response);assert.equal(f.getSession().drafts.B,'','explicit authoritative Keep remains effective');
+});
+
+test('local send clears the composer and publishes a bubble before the action ACK',async()=>{
+ const feedback=[];const f=await fixture({previewSend:()=>true,sendFeedback:on=>feedback.push(on)});f.open();
+ const text=f.getSession().drafts.A;f.host.request('send','');const sent=f.sent.at(-1);
+ assert.equal(f.getSession().drafts.A,'');assert.equal(f.disk.get('A'),'');
+ assert.deepEqual(f.host.pendingSends('A'),[{key:'@sending:1',text}]);assert.deepEqual(f.host.pendingSends('B'),[]);
+ assert.equal(sent.p.session.drafts.A,text,'the request still carries its immutable captured text');
+ f.host.request('draft','next 日本語');
+ f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'send',text:JSON.stringify({id:20,m:'turn.start',p:{thread:'A',msg:'sent-A',text}})},{type:'keep',thread:'A',text:''}]}));
+ assert.equal(f.getSession().drafts.A,'next 日本語');assert.deepEqual(f.host.pendingSends('A'),[]);assert.deepEqual(feedback,[true,false]);
+ assert.equal(f.commands.filter(c=>c.type==='send').length,1);
+});
+test('local send refusal and ordinary rejection restore captured text alongside newer typing',async()=>{
+ for(const ordinary of[false,true]){
+  const f=await fixture({previewSend:()=>true});f.open();const text=f.getSession().drafts.A;
+  f.host.request('send','');const sent=f.sent.at(-1);f.host.request('draft','new text');
+  if(ordinary){
+   f.host.receive(f.reply(sent,{session:{sel:'A',drafts:{A:''},rid:20},cmds:[{type:'send',text:JSON.stringify({id:20,m:'turn.start',p:{thread:'A',text}})},{type:'keep',thread:'A',text:''}]}));
+   f.host.ack({t:'reply',id:20,ok:false,error:'refused'});
+  }else f.host.receive({t:'reply',id:sent.id,ok:false,error:{code:'UNAVAILABLE'}});
+  assert.equal(f.getSession().drafts.A,text+'\n\nnew text');assert.equal(f.disk.get('A'),text+'\n\nnew text');assert.deepEqual(f.host.pendingSends('A'),[]);
+ }
+});
+test('local send failure stays with its original thread and is restored once',async()=>{
+ const f=await fixture({previewSend:()=>true});f.open();const text=f.getSession().drafts.A;
+ f.host.request('send','');f.host.request('select','B');f.host.receive(f.reply());f.host.request('draft','B draft');
+ f.host.disconnect();f.host.disconnect();assert.equal(f.getSession().drafts.A,text);assert.equal(f.getSession().drafts.B,'B draft');assert.deepEqual(f.host.pendingSends('A'),[]);
+});
+test('local send timeout and synchronous transport failure keep the text recoverable',async()=>{
+ for(const failure of['timeout','transport','invalid']){
+  const f=await fixture({previewSend:()=>true});f.open();const text=f.getSession().drafts.A;
+  if(failure==='transport')f.api.send=()=>{throw Error('closed');};
+  f.host.request('send','');
+  if(failure==='timeout')f.tick(5001);
+  if(failure==='invalid')f.host.receive(f.reply(undefined,{cmds:[{type:'INVALID'}]}));
+  assert.equal(f.getSession().drafts.A,text,failure);assert.deepEqual(f.host.pendingSends('A'),[],failure);
+ }
+});
+test('composer commands and an IME composition retain their existing draft path',async()=>{
+ for(const composing of[false,true]){
+  const f=await fixture({previewSend:()=>composing,composing:()=>composing});f.open();const text=f.getSession().drafts.A;f.host.request('send','');
+  assert.equal(f.getSession().drafts.A,text);assert.deepEqual(f.host.pendingSends('A'),[]);
+ }
+});
+test('a timeout with multiple immediate sends restores every capture in order',async()=>{
+ for(const disconnect of[false,true]){
+  const f=await fixture({previewSend:text=>!!text});f.open();const first=f.getSession().drafts.A;
+  f.host.request('send','');f.host.request('draft','second');f.host.request('send','');f.host.request('draft','third');
+  assert.equal(f.host.pendingSends('A').length,2);
+  if(disconnect)f.host.disconnect();else f.tick(5001);
+  assert.equal(f.getSession().drafts.A,first+'\n\nsecond\n\nthird');assert.deepEqual(f.host.pendingSends('A'),[]);
+ }
+});
+
+test('LIMIT on initial or live view keeps greeting, drafts and other-thread navigation usable',async()=>{
+ for(const initial of [true,false]){
+  const f=await fixture();if(initial)f.host.greeting(f.greeting);else{f.open();f.host.request('flag','palette');}
+  const failed=f.sent.at(-1),client=f.host.client,link=client.links.get(f.api.hub);
+  f.host.receive({t:'reply',id:failed.id,ok:false,error:{code:'LIMIT'}});
+  assert.equal(f.host.client,client);assert.equal(client.links.get(f.api.hub),link);assert.equal(f.host.greeted,true);assert.equal(f.getSession().drafts.A,'original 日本語');
+  assert(f.host.request('select','B'));const next=f.sent.at(-1);assert.equal(next.m,'view.open');assert.equal(next.p.generation,'7');assert.equal(next.p.target.id,'B');f.host.receive(f.reply(next));assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'B');assert.equal(f.getSession().drafts.A,'original 日本語');
+ }
+});
+
+test('bot navigation opens a fresh view after LIMIT without waiting for the failed picture',async()=>{
+ for(const initial of [true,false]){
+  const f=await fixture();if(initial)f.host.greeting(f.greeting);else{f.open();f.host.request('flag','palette');}
+  f.host.request('draft','STM32 unsent');const failed=f.sent.at(-1);
+  f.host.receive({t:'reply',id:failed.id,ok:false,error:{code:'LIMIT'}});
+  f.host.request('bot','bub');const next=f.sent.at(-1);
+  assert.notEqual(next.id,failed.id);assert.equal(next.m,'view.open');assert.deepEqual(next.p.target,{kind:'bot',id:'bub'});
+  assert(!f.sent.some(r=>r.m==='view.action'&&r.p.action==='bot'),'selection does not require a successful previous picture');
+  const session={...next.p.session,sel:'bub-conversation',drafts:{'bub-conversation':'saved Bub draft'}};
+  f.host.receive(f.reply(next,{session}));assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'bub-conversation');
+  assert.equal(f.getSession().drafts.A,'STM32 unsent');assert.equal(f.getSession().drafts['bub-conversation'],'saved Bub draft');
+ }
+});
+test('bot selection overtakes an opening view; late LIMIT cannot strand the new selection',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);const old=f.sent.at(-1);
+ f.host.request('bot','bub');const next=f.sent.at(-1);assert.notEqual(next.id,old.id);assert.equal(next.m,'view.open');assert.equal(next.p.target.kind,'bot');
+ f.host.receive(f.reply(next,{session:{...next.p.session,sel:'bub-conversation'}}));
+ f.host.receive({t:'reply',id:old.id,ok:false,error:{code:'LIMIT'}});
+ assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'bub-conversation');assert.equal(f.host.target.id,'bub');
+});
+test('bot recovery requires a live greeted link and a valid target',async()=>{
+ for(const value of ['',null,'x'.repeat(1025)]){
+  const f=await fixture();f.host.greeting(f.greeting);const count=f.sent.length;f.host.request('bot',value);assert.equal(f.sent.length,count);
+ }
+ const f=await fixture();f.open();f.host.disconnect();const count=f.sent.length;f.host.request('bot','bub');assert.equal(f.sent.length,count);assert.equal(f.host.ready,false);
 });

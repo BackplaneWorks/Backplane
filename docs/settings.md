@@ -1,6 +1,6 @@
 # Settings
 
-The web and desktop Settings menu groups the existing fourteen pages under
+The web and desktop Settings menu groups the thirteen pages under
 Your workspace, Agents, Hardware, and Machine & data. Each category has a
 fixed icon slot, its existing localized title, a short description, and a
 chevron. The menu uses two columns on wider screens and one on small screens.
@@ -21,9 +21,14 @@ privacy filtering, selection changes and other action behavior are unchanged.
 Focused evidence: `desktop/test/thin-host.test.cjs` includes failing-before,
 passing-after cases for both Settings open and submenu navigation raced by a
 background refresh. `test/tools/settings_review.mjs` runs the emitted production
-`settings_fixture.bend` in an isolated browser: fourteen categories, icons,
+`settings_fixture.bend` in an isolated browser: thirteen categories, icons,
 search/Enter, Japanese labels and a 390 px layout. It does not write live
-settings or claim live hub/device validation. Native phone UI was not changed.
+settings or claim live hub/device validation.
+
+Antigravity installation and sign-in controls live in Settings → Agents on
+web, desktop and phones. There is no separate Antigravity category; searching
+for Antigravity, Google or Gemini opens Agents. Existing Antigravity settings
+links also open Agents.
 
 ## Show thinking
 
@@ -40,3 +45,27 @@ turning it off hides the ones already logged (web and phones). Thoughts
 arrive whole, after the model finishes thinking, not streamed. The ACP
 agents (OpenCode, Grok, Oh My Pi, Antigravity) send thinking as chunks that
 are not collected yet, and Muse's reasoning is not read.
+
+
+## Status and empty rows
+
+Rows without controls are informational: web and desktop draw them as plain
+text with a left rule instead of another setting card. On iOS they do not
+create an empty boxed section; both phone clients dim their labels. Existing
+buttons and fields keep their normal treatment throughout Settings.
+
+Voice explains how an empty dictionary and Learned fixes become populated.
+Learned fixes are available now: choosing a suggested correction or using Fix
+after dictation adds one, and confirming the same correction twice lets it
+apply automatically. Existing fixes retain their forget controls.
+
+Local model setup shows starting, bytes received (and a percentage when the
+size is known), verification/unpacking, readiness, and errors with a retry.
+Unknown model metadata offers Check availability instead of a zero-size
+download. The same state and text drive the web, desktop and both phones.
+The web/desktop page also has an accessible progress bar and live status.
+
+Regression checks: `test/settings_status_test.bend`, the Voice states in
+`test/tools/settings_review.mjs`, and `test/tools/voice_download_e2e.ts` (an
+isolated hub with a deterministic helper, including fragmented progress lines,
+status racing a download, errors followed by status, retries and helper exit).

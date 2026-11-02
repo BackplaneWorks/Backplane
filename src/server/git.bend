@@ -1,4 +1,5 @@
 import Base
+import ../core/pcb-usage.bend as PC
 import ./proc.bend as P
 import ./gh.bend as GH
 import ../core/sha1.bend as S
@@ -412,7 +413,24 @@ def Git.exclude(+cwd: String) -> IO(String):
 # KiCad's own droppings (backups, locks, autosaves, the footprint cache)
 # stay behind.
 def Git.carry.sh() -> String:
-  Git.safe.sh() ++ "cd \"$1\" || exit 1; bp_safe; git ls-files -z -m -o --exclude-standard | grep -zv -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | tar -c --null -T - -f - 2>/dev/null | tar -x -f - -C \"$2\" 2>/dev/null; git ls-files -z -d | (cd \"$2\" && xargs -0 -r rm -f --); exit 0"
+  Git.safe.sh() ++ String.join([
+    "set -eu",
+    "export GIT_OPTIONAL_LOCKS=0",
+    "cd \"$1\"",
+    "bp_safe",
+    "test -d \"$2\"",
+    "d=$(mktemp -d \"${TMPDIR:-/tmp}/bp-carry.XXXXXX\")",
+    "trap 'rm -rf \"$d\"' 0",
+    "git diff --no-renames --name-only -z --diff-filter=d HEAD -- > \"$d/changed\"",
+    "git ls-files -z -o --exclude-standard >> \"$d/changed\"",
+    "perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/changed\" > \"$d/copy\"",
+    "if [ -s \"$d/copy\" ]; then tar -c --null -T \"$d/copy\" -f \"$d/files.tar\"; tar -x -f \"$d/files.tar\" -C \"$2\"; fi",
+    "git diff --no-renames --name-only -z --diff-filter=D HEAD -- > \"$d/deleted\"",
+    "xargs -0 sh -c 'd=$1; shift; for p do if [ ! -e \"$p\" ] && [ ! -L \"$p\" ]; then rm -f -- \"$d/$p\" || exit; fi; done' sh \"$2\" < \"$d/deleted\"",
+    "git diff --no-renames --name-only -z --diff-filter=A HEAD -- > \"$d/added\"",
+    "perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/added\" > \"$d/track\"",
+    "xargs -0 sh -c 'd=$1; shift; for p do if [ -e \"$d/$p\" ] || [ -L \"$d/$p\" ]; then git -C \"$d\" add -N -f -- \"$p\" || exit; fi; done' sh \"$2\" < \"$d/track\""
+  ], "\n")
 
 def Git.carry(+top: String, +path: String) -> IO(String):
   Git.seq(P.Proc.run("sh", ["-c", Git.carry.sh(), "sh", top, path], top), _ => Git.done(""))
@@ -442,6 +460,41 @@ def Git.upstream.of(r: P.Ran) -> String:
 def Git.upstream(+carry: Bool, +top: String) -> IO(String):
   IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Git.upstream.sh(), "sh", Bool.pick(String, carry, "1", "0")], top), r => IO.pure(String, Git.upstream.of(r)))
 
+# A subdirectory project may only exist on the checked-out branch. Keep
+# upstream when it contains the directory, else use HEAD when it does.
+# A blob at that path is not a directory. Empty base already means HEAD
+# (no origin, or uncommitted hardware work that will be carried over).
+def Git.thread_wt.tree(r: P.Ran) -> Bool:
+  match r:
+    case P.Ran{code, out}:
+      Bool.and(U32.is_eq(code, 0), String.eq(String.trim(out), "tree"))
+
+def Git.thread_wt.base.head(found: Bool, +base: String, +prefix: String) -> IO(String):
+  match found:
+    case True{}:
+      Git.done("")
+    case False{}:
+      Git.done("error: project directory " ++ Git.thread_wt.sub(prefix) ++ " is not a directory in " ++ base ++ " or HEAD")
+
+def Git.thread_wt.base.upstream(found: Bool, +top: String, +base: String, +prefix: String) -> IO(String):
+  match found:
+    case True{}:
+      Git.done(base)
+    case False{}:
+      IO.bind(P.Ran, String, Git.run(top, ["cat-file", "-t", "HEAD:" ++ Git.thread_wt.sub(prefix)]),
+        r => Git.thread_wt.base.head(Git.thread_wt.tree(r), base, prefix))
+
+def Git.thread_wt.base.check(needed: Bool, +top: String, +base: String, +prefix: String) -> IO(String):
+  match needed:
+    case True{}:
+      IO.bind(P.Ran, String, Git.run(top, ["cat-file", "-t", base ++ ":" ++ Git.thread_wt.sub(prefix)]),
+        r => Git.thread_wt.base.upstream(Git.thread_wt.tree(r), top, base, prefix))
+    case False{}:
+      Git.done(base)
+
+def Git.thread_wt.base(+top: String, +base: String, +prefix: String) -> IO(String):
+  Git.thread_wt.base.check(Bool.and(Bool.not(String.is_empty(base)), Bool.not(String.is_empty(prefix))), top, base, prefix)
+
 # --no-track: the thread's branch is its own; a push never goes to main
 def Git.thread_wt.add(+base: String, +carry: Bool, +top: String, +prefix: String, +b: String) -> IO(String):
   Git.seq(Git.run(top, List.append(&2, String, ["worktree", "add", "--no-track", "-b", b, Git.thread_wt.path(top, b)], Git.base_args(base))),
@@ -449,7 +502,8 @@ def Git.thread_wt.add(+base: String, +carry: Bool, +top: String, +prefix: String
 
 def Git.thread_wt.made(+carry: Bool, +top: String, +prefix: String, +b: String) -> IO(String):
   Git.and(Git.exclude(top), _ =>
-    IO.bind(String, String, Git.upstream(carry, top), base => Git.thread_wt.add(base, carry, top, prefix, b)))
+    IO.bind(String, String, Git.upstream(carry, top), base =>
+      Git.and(Git.thread_wt.base(top, base, prefix), chosen => Git.thread_wt.add(chosen, carry, top, prefix, b))))
 
 def Git.thread_wt.head(r: P.Ran, +carry: Bool, +top: String, +prefix: String, +b: String) -> IO(String):
   match r:
@@ -463,7 +517,8 @@ def Git.thread_wt.top(+top: String, +cwd: String, +carry: Bool, +b: String) -> I
     Git.and(Git.seq.raw(Git.run(cwd, ["rev-parse", "--show-prefix"]), p => Git.done(String.trim(p))),
       +prefix => IO.bind(P.Ran, String, Git.run(cwd, ["rev-parse", "--verify", "-q", "HEAD"]), r => Git.thread_wt.head(r, carry, top, prefix, b))))
 
-# a new thread's worktree on a new branch from upstream (Git.upstream), for the project folder
+# a new thread's worktree on a new branch from upstream (Git.upstream),
+# or HEAD when only HEAD contains the project's subdirectory, for the project folder
 # cwd; carry: bring the folder's uncommitted work along. Answers the
 # thread's directory, "skip: <why>" when there is no repository to branch
 # (the thread then works in the folder), or "error: ...".
@@ -538,11 +593,34 @@ def Git.checkpoint.prev(thread_id: String, n: Nat) -> String:
 def Git.index_path(gd: String, thread_id: String) -> String:
   gd ++ "/backplane-" ++ Git.b64url(thread_id) ++ ".index"
 
-# the whole work tree (tracked and untracked, less ignored files) as a tree
-# object, staged through the thread's own index file; answers the tree id
+# Seed tracked paths and staged blobs from the real index every time.
+# A fresh private index omits cached stat data and optimization flags: its
+# add -A must read today's working files, including ignored tracked paths.
+# Git reads split indexes itself; the source index is never rewritten.
+def Git.index.seed.sh() -> String:
+  String.join([
+    "set -eu",
+    "src=$(git rev-parse --path-format=absolute --git-path index)",
+    "if [ ! -f \"$src\" ]; then rm -f \"$1\"; exit 0; fi",
+    "paths=$(mktemp \"$1.paths.XXXXXX\")",
+    "trap 'rm -f \"$paths\"' 0",
+    "git ls-files --full-name --stage -z -- :/ > \"$paths\"",
+    "export GIT_INDEX_FILE=\"$1\"",
+    "rm -f \"$1\"",
+    "git read-tree --empty",
+    "git -c core.ignorestat=false update-index -z --index-info < \"$paths\""
+  ], "\n")
+
+def Git.index.seed(cwd: String, idx: String) -> IO(P.Ran):
+  P.Proc.run("sh", ["-c", Git.index.seed.sh(), "sh", idx], cwd)
+
+# the whole work tree (tracked, including ignored tracked files, and
+# untracked non-ignored files) as a tree object; answers the tree id
+# without changing the real index or its staged contents.
 def Git.snapshot.k(+cwd: String, +idx: String) -> IO(String):
-  Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
-    Git.seq(Git.run.idx(cwd, idx, ["write-tree"]), Git.done))
+  Git.seq(Git.index.seed(cwd, idx), _ =>
+    Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
+      Git.seq(Git.run.idx(cwd, idx, ["write-tree"]), Git.done)))
 
 def Git.snapshot(+cwd: String, thread_id: String) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--absolute-git-dir"]), gd => Git.snapshot.k(cwd, Git.index_path(gd, thread_id)))
@@ -583,11 +661,12 @@ def Git.checkpoint.diff_worktree(+cwd: String, +thread_id: String, n: Nat) -> IO
 
 def Git.revert.k(+cwd: String, +idx: String, r: String) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--verify", r ++ "^{tree}"]), tree =>
-    Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
-      Git.seq(Git.run.idx(cwd, idx, ["read-tree", "-u", "--reset", tree]), _ => Git.done(""))))
+    Git.seq(Git.index.seed(cwd, idx), _ =>
+      Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
+        Git.seq(Git.run.idx(cwd, idx, ["read-tree", "-u", "--reset", tree]), _ => Git.done("")))))
 
 # put the work tree back exactly as checkpoint n had it: changed files are
-# restored, files it did not have are removed, ignored files are left alone.
+# restored, files it did not have are removed; ignored untracked files stay.
 # HEAD, the branch and the real index do not move. "" when done.
 def Git.checkpoint.revert(+cwd: String, +thread_id: String, n: Nat) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--absolute-git-dir"]), gd =>
@@ -665,7 +744,7 @@ def Git.step.script() -> String:
     "else",
     "  top=$(pwd); gd=$top/.backplane/history.git; pd=$gd; shadow=1",
     "  [ \"$top\" = / ] || [ \"$top\" = \"$HOME\" ] && exit 0",
-    "  [ -d \"$gd\" ] || [ -L \"$gd\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' \\) -print | head -n 1)\" ] || exit 0",
+    "  [ -d \"$gd\" ] || [ -L \"$gd\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' \\) -print | head -n 1)\" ] || exit 0",
     "  if [ -e \"$gd\" ] || [ -L \"$gd\" ]; then",
     "    if ! { [ -n \"$reg\" ] && [ ! -L \"$gd\" ] && [ -d \"$gd\" ] && grep -qxF \"$(ino \"$gd\") $gd\" \"$reg\"; }; then",
     "      mv \"$gd\" \"$gd.untrusted-$(date +%s)\" || exit 0",
@@ -680,8 +759,8 @@ def Git.step.script() -> String:
     "fi",
     "bp_safe",
     "ref=refs/backplane/checkpoints/$name/steps",
-    "spec='*.kicad_[ps]c[bh]'",
-    "[ -n \"$shadow\" ] || git rev-parse -q --verify \"$ref\" >/dev/null || [ -n \"$(git ls-files -- \"$spec\" | head -n 1)\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' \\) -not -path './.backplane/*' -print | head -n 1)\" ] || exit 0",
+    "spec='*.kicad_[ps][cr][boh]'",
+    "[ -n \"$shadow\" ] || git rev-parse -q --verify \"$ref\" >/dev/null || [ -n \"$(git ls-files -- \"$spec\" | head -n 1)\" ] || [ -n \"$(find . -maxdepth 4 \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' \\) -not -path './.backplane/*' -print | head -n 1)\" ] || exit 0",
     "idx=$pd/backplane-$name.steps.index",
     "lock=$pd/backplane-$name.steps.lock",
     "n=0",
@@ -719,6 +798,20 @@ def Git.step.ran(r: P.Ran) -> IO(String):
 # (reg: the hub's record of the history.git folders it made, Git.step.reg)
 def Git.step.capture(+cwd: String, +thread_id: String, +reg: String) -> IO(String):
   IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Git.step.script(), "sh", cwd, Git.b64url(thread_id), reg], "/"), Git.step.ran)
+
+# Numerical creation evidence from the same successful local design step.
+# Rename detection is enabled only here; history's existing wire stays intact.
+# No paths or revision identities returned here reach a telemetry request.
+def Git.step.previous(+cwd: String, +gitdir: String, +prev: String) -> IO(String):
+  Bool.pick(IO(String), String.is_empty(prev), IO.pure(String, ""),
+    Git.seq.raw(Git.run(cwd, ["--git-dir", gitdir, "ls-tree", "-r", "-z", "--name-only", prev]), Git.done))
+
+def Git.step.created(+cwd: String, +commit: String, +prev: String, +gitdir: String) -> IO(Nat):
+  do IO<Nat>:
+    +added : String <- Git.seq.raw(Git.run(cwd, List.append(&2, String, ["--git-dir", gitdir, "diff-tree", "-r", "-z", "--no-commit-id", "--root", "--find-renames", "--diff-filter=A", "--name-only"],
+      List.append(&2, String, Bool.pick(List<&2, String>, String.is_empty(prev), Nil{}, [prev]), [commit]))), Git.done)
+    +before : String <- Git.step.previous(cwd, gitdir, prev)
+    return Bool.pick(Nat, Bool.or(Git.is_error(added), Git.is_error(before)), 0n, PC.Pcb.created(String.split(added, Chr{0}), String.split(before, Chr{0})))
 
 # What a file may be compared with: the git dir and top (as Git.step
 # finds them), then lines "kind\tlabel\tcommit": HEAD, the newest

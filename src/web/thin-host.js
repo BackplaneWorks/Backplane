@@ -1,6 +1,6 @@
 import { validatePresentation } from './startup.js';
 import { validateThinResult, MessageParts } from './thin-results.js';
-import { compactRoute, utf8Bytes } from './thin.js';
+import { compactRoute, utf8Bytes, viewTarget } from './thin.js';
 import { viewerChoice } from './viewer-feedback.js';
 import { terminalInputRequest } from './terminal-input.js';
 import { terminalOutputFrame } from './terminal-output.js';
@@ -138,7 +138,7 @@ export class ThinHost {
     if (!Number.isSafeInteger(rid) || rid < 0 || rid >= 2 ** 47) throw Error('Invalid ordinary request counter');
     this.session.rid = Math.max(rid, Date.now());
     this.viewerRevision = 0;this.localRevision = 0;this.selectionRevision = 0;this.drafts = new Map();this.draftChanges = new Map();this.fields = new Map();this.pending = new Map();this.actions = [];this.active = null;
-    this.terminalBytes = 0;this.sent = new SentClaims();
+    this.terminalBytes = 0;this.sent = new SentClaims();this.sendPreviews = new Map();this.previewId = 0;
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
     this.pendingNewest = false;
@@ -320,6 +320,14 @@ export class ThinHost {
       }
       return true;
     }
+    // Bot selection needs no action on the failed/unfinished picture. Open
+    // its target on the existing greeted link; the hub resolves its actual
+    // conversation and the new selection fences late replies from the old one.
+    if (action === 'bot' && !this.ready) {
+      const target = { kind: 'bot', id: value };
+      if (!this.greeted || !this.client.links.has(this.hub) || !viewTarget(target)) { settled?.(false);this.api.blocked();return true; }
+      const sent = this.select(target);settled?.(sent);return sent;
+    }
     // A press while the selected thread's view is on its way (a click right
     // after picking a thread) is for that view: it waits in the queue and
     // goes once the view is on show (pump). Only a terminal's keys, bound
@@ -358,6 +366,14 @@ export class ThinHost {
     const normalQueued = this.actions.filter(op => !op.terminal).length;
     if (!terminalInput && normalQueued >= 7) { settled?.(false);this.api.blocked();return true; }
     if (viewer) { this.viewerRevision++;this.api.viewerChoice?.({ action, value }); }
+    if ((viewer || action === 'panel') && this.paging) {
+      // Keep the history already displayed. Reads for older pages can be
+      // asked for again after the destination is shown; their late replies
+      // must not redraw the previous viewer or move the reading cursor.
+      this.cursor = this.paging.undo.cursor;this.back = this.paging.undo.back.slice();
+      for (const page of [this.paging, this.pagingNext]) if (page) this.overtaken.add(page.id);
+      this.paging = null;this.pagingNext = null;this.pageError = null;this.api.pageState?.(null);
+    }
     if (action === 'send' || action === 'send-alt' || action === 'mail-send') {
       const active = this.pending.get(this.active)?.operation;
       const draftRevision = action === 'mail-send' ? this.localRevision : this.drafts.get(this.session.sel)?.revision || 0;
@@ -383,12 +399,42 @@ export class ThinHost {
       const urgent = retire || action === 'stop' || action === 'interrupt';
       const operation = { action, value, viewer, viewerRevision: this.viewerRevision, input: clone(this.session), revision: this.localRevision, settled, scope, urgent };
       // what this send takes from the composer (sent-claims.js)
-      if (action === 'send' || action === 'send-alt') operation.claim = this.sent.capture(this.session.sel, operation.input.drafts?.[this.session.sel]);
+      if (action === 'send' || action === 'send-alt') {
+        const text = operation.input.drafts?.[this.session.sel];
+        if (typeof text === 'string' && utf8Bytes(text) <= 131072 && this.api.previewSend?.(text) === true && this.api.composing?.(this.session.sel) !== true) {
+          const preview = { key: '@sending:' + ++this.previewId, thread: this.session.sel, text };
+          operation.preview = preview;this.sendPreviews.set(preview.key, preview);
+          operation.settled = accepted => { this.finishPreview(preview, !accepted && !preview.issued);settled?.(accepted); };
+          // The action keeps its immutable captured draft. Clearing the local
+          // field is a newer edit, so a travelling Keep cannot eat later text.
+          this.request('draft', '');
+          this.api.sendFeedback?.(true, preview.thread, '');
+        } else operation.claim = this.sent.capture(this.session.sel, text);
+      }
       // Stop and explicit close/switch controls remain responsive during input.
       if (urgent) this.actions.unshift(operation);
       else this.actions.push(operation);
     }
     this.pump(true);return true;
+  }
+  pendingSends(thread) {
+    return [...this.sendPreviews.values()].filter(p => p.thread === thread).map(({ key, text }) => ({ key, text }));
+  }
+  restorePreview(preview) {
+    if (!preview || preview.restored) return;
+    preview.restored = true;
+    const newer = this.session.drafts[preview.thread] || '';
+    this.draftAt(preview.thread, preview.text + (newer ? '\n\n' + newer : ''));
+  }
+  finishPreview(preview, restore) {
+    if (!this.sendPreviews.delete(preview.key)) return;
+    if (restore) this.restorePreview(preview);
+    this.api.sendFeedback?.(false, preview.thread, this.session.drafts[preview.thread] || '');
+  }
+  rejectOperations(operations) {
+    // Restore newer captures first so the original send remains at the front
+    // when a connection fails with several messages waiting behind it.
+    for (const operation of operations.slice().reverse()) operation?.settled?.(false);
   }
   fieldValue(name, fallback) {
     const field = this.fields.get(name);
@@ -460,7 +506,7 @@ export class ThinHost {
       ...terminalInputRequest(operation.action, operation.input),
       ...modelMenuRequest(operation.action, operation.value, this.api.modelMenuReady?.() === true) });
     this.active = result.id || null;
-    this.flush(result, { viewerRevision: operation.viewerRevision ?? this.viewerRevision, revision: operation.revision, operation, selection: this.selectionRevision });
+    if (!this.flush(result, { viewerRevision: operation.viewerRevision ?? this.viewerRevision, revision: operation.revision, operation, selection: this.selectionRevision })) operation.settled?.(false);
   }
   // Scrolling pages: each older page overlaps the one before by half
   // (thin-view.bend's Page.mid), and the cursors that led here are kept so
@@ -471,6 +517,12 @@ export class ThinHost {
   // while the trail said newest, so new messages never showed). A page
   // that fails puts the trail back as it was.
   pageTo(cursor, undo, direction, position, second = false) {
+    // Leaving the newest source page must remember its boundary before an
+    // older picture replaces data-reading-seen. Old history is not new output.
+    if (direction === 'older' && !this.awayOf(this.session.sel) && this.window?.newer === 0) {
+      const mark = this.api.readingMark?.();
+      if (typeof mark === 'string' && mark) this.awayMark = { thread: this.session.sel, mark };
+    }
     const result = this.client.request(this.hub, 'view.page', { cursor, anchor: this.api.anchor(), session: requestSession(this.session, false, this.target) });
     if (!this.flush(result)) { this.cursor = undo.cursor;this.back = undo.back;return false; }
     const page = { id: result.id, undo, direction, before: this.window, position, destination: { cursor, back: this.back.slice() }, at: this.api.now?.() ?? Date.now(), olderNext: '' };
@@ -629,7 +681,7 @@ export class ThinHost {
   }
   body(part, cursor, tail = false) {
     if (!this.ready || this.active || this.paging || !part || part.bodyPage !== 1 || typeof cursor !== 'string' || !cursor) return false;
-    return this.flush(this.client.request(this.hub, 'view.message', { entryId: part.id, cursor, bodyPage: 1, bodyVersion: part.version, bodyThread: part.thread, bodyTail: tail }), { bodyRead: true, pictureAuthority: false });
+    return this.flush(this.client.request(this.hub, 'view.message', { entryId: part.id, cursor, bodyPage: 1, bodyVersion: part.version, bodyThread: part.thread, bodyTail: tail }), { bodyRead: true, bodyGeneration: part.localGeneration, pictureAuthority: false });
   }
   message(entryId, cursor) {
     if (!this.ready) return false;
@@ -764,7 +816,7 @@ export class ThinHost {
       this.client.links.get(this.hub).invalidated = true;this.api.pageState?.(null);
     }
     if (result.failed) {
-      if (metadata?.bodyRead) { this.api.bodyFailed?.(metadata.input, result.failed);this.pump(true);return true; }
+      if (metadata?.bodyRead) { this.api.bodyFailed?.({ ...metadata.input, localGeneration: metadata.bodyGeneration }, result.failed);this.pump(true);return true; }
       metadata?.operation?.settled?.(false);
       // a search refused (a query the hub does not take) is the search's
       // to say, not the view's: the view stays
@@ -780,13 +832,13 @@ export class ThinHost {
       // streaming elsewhere) is still the search asked; another view's is not
       if (result.method === 'view.search') { if (result.current || this.sameTarget(metadata)) this.api.search?.(r.search); }
       else if (result.current || metadata?.bodyRead && this.sameTarget(metadata)) {
-        if (result.method === 'view.message' && metadata?.bodyRead) this.api.body?.(r.message, metadata.input);
+        if (result.method === 'view.message' && metadata?.bodyRead) this.api.body?.(r.message, { ...metadata.input, localGeneration: metadata.bodyGeneration });
         else if (result.method === 'view.message') {
           try { this.api.message?.(this.messages.accept(r.message, metadata.input.cursor)); }
           catch { this.api.warning?.('Message continuation is unavailable; reopen it explicitly'); }
         } else this.api.cancelled?.(r.cancelled);
       }
-      if (metadata?.bodyRead && !result.current && !this.sameTarget(metadata)) this.api.bodyFailed?.(metadata.input, 'overtaken');
+      if (metadata?.bodyRead && !result.current && !this.sameTarget(metadata)) this.api.bodyFailed?.({ ...metadata.input, localGeneration: metadata.bodyGeneration }, 'overtaken');
       if (result.refreshDue) this.refreshSoon();
       return true; // query results neither replace shown nor establish readiness
     }
@@ -795,7 +847,11 @@ export class ThinHost {
     // its picture is the one on show, so it is neither validated nor decoded
     // again, and the page is not rendered for it. Its session and commands
     // still apply. A page or a navigation always draws.
-    const same = result.unchanged === true && !paged && !r.nextTarget && !this.historyResetPending;
+    // Send returns the server to its newest page. Give that picture the same
+    // projection as explicit newest navigation: merging it into deep retained
+    // history leaves the unloaded newer rows' spacers below the replies.
+    const sentNewest = ['send', 'send-alt'].includes(metadata?.operation?.action) && r.cmds.some(c => c.type === 'scroll');
+    const same = result.unchanged === true && !paged && !sentNewest && !r.nextTarget && !this.historyResetPending;
     // A queued viewer choice waits for history reads in pump(). The accepted
     // page still bridges the rows on screen to the next page; dropping only
     // its picture leaves held/cursor ahead of what the reader can reach.
@@ -845,7 +901,7 @@ export class ThinHost {
         this.session.drafts = { ...this.session.drafts, [thread]: draft.text };
       }
     }
-    if (this.ordinary.size + result.cmds.filter(c => c.command.type === 'send').length > 128) { this.fail('Ordinary reply backlog limit');return true; }
+    if (this.ordinary.size + result.cmds.filter(c => c.command.type === 'send').length > 128) { metadata?.operation?.settled?.(false);this.fail('Ordinary reply backlog limit');return true; }
     // Original actions settle once even when navigation overtook their view.
     // Only their own Keep may clear a draft, and never a newer edit.
     // An action that moves the page (nextTarget) and asks for a Focus or a
@@ -873,7 +929,10 @@ export class ThinHost {
       }
       if (c.type === 'send') {
         const rpc = JSON.parse(c.text);
-        this.ordinary.set(rpc.id, { revision: metadata?.revision ?? -1, thread: item.input.session?.sel || '' });
+        const preview = metadata?.operation?.preview;
+        const issued = preview && ['turn.start', 'bots.say'].includes(rpc.m);
+        if (issued) preview.issued = true;
+        this.ordinary.set(rpc.id, { revision: metadata?.revision ?? -1, thread: item.input.session?.sel || '', ...(issued ? { preview } : {}) });
       }
       this.api.command(c, item.input, result.current);
       if (c.type === 'keep') {
@@ -882,6 +941,7 @@ export class ThinHost {
       }
     }
     const fieldOperation = metadata?.operation;
+    if (fieldOperation?.preview) this.finishPreview(fieldOperation.preview, !fieldOperation.preview.issued);
     // (a send whose text is not due to come off the field is done with it)
     if (fieldOperation?.claim && !fieldOperation.claim.due) this.sent.drop(fieldOperation.claim);
     if (fieldOperation?.action === 'bfield') {
@@ -891,7 +951,8 @@ export class ThinHost {
     if (result.current) for (const [name, field] of this.fields) {
       if (field.acknowledged && field.revision <= (metadata?.revision ?? -1)) this.fields.delete(name);
     }
-    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly, unchanged: same && !!result.current && this.ready, paged: !!paged && !!result.current });
+    this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly, unchanged: same && !!result.current && this.ready, paged: !!paged && !!result.current,
+      presenting: pictureCurrent && !!result.current && !!result.remoteReady && !result.inputOnly && !same && !r.nextTarget });
     metadata?.operation?.settled?.(result.current && result.remoteReady && !r.nextTarget);
     if (moving) { this.forView = held.length ? { target: r.nextTarget, cmds: held } : null;this.select(r.nextTarget);return true; }
     if (result.current && result.remoteReady && result.inputOnly) {
@@ -920,7 +981,8 @@ export class ThinHost {
       }
       this.historyEpoch = incomingEpoch;
       this.ready = true;this.opening = false;this.window = result.window;
-      let position = paged?.position;
+      let position = sentNewest ? { atEnd: true } : paged?.position;
+      if (sentNewest) this.awayMark = null;
       if (changedHistory && !resumed) position = this.awayMark ? { top: 0, atEnd: false } : { atEnd: true };
       if (result.method === 'view.open' && this.restorePage) {
         const saved = this.restorePage;this.restorePage = null;position = saved.position;
@@ -940,10 +1002,10 @@ export class ThinHost {
       else this.heldUpdate();
       if (pictureCurrent) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
-        page: paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
+        page: sentNewest ? { direction: 'newest' } : paged && { direction: paged.direction, before: paged.before }, position, historyReset: this.historyResetPending, changed: result.changed });
       if (pictureCurrent) this.historyResetPending = false;
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
-      this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged });
+      this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId, paged: !!paged, painted: pictureCurrent });
       this.handOver();
     } else if (result.current && !this.refuse(metadata, 'Current view is not ready', true)) this.fail('Current view is not ready');
     // Send queued navigation before a background read can snapshot its old route.
@@ -969,6 +1031,7 @@ export class ThinHost {
     for (const [thread, draft] of this.drafts) if (draft.revision > original.revision) {
       this.session = { ...this.session, drafts: { ...this.session.drafts, [thread]: before.drafts[thread] || '' } };
     }
+    if (envelope.ok === false && original.preview) this.restorePreview(original.preview);
     for (const thread of new Set([...Object.keys(before.drafts), ...Object.keys(this.session.drafts)])) {
       if (this.session.drafts[thread] !== before.drafts[thread]) this.draftChanged(thread, this.session.drafts[thread] || '');
     }
@@ -988,9 +1051,10 @@ export class ThinHost {
     const expired = this.client.expire(this.api.viewTimeoutMs ?? 5000);
     if (!expired.length) return;
     let current = false, pageExpired = false;
+    const rejected = [];
     for (const call of expired) {
       const metadata = this.pending.get(call.id);
-      if (metadata?.bodyRead) { this.api.bodyFailed?.(metadata.input, 'timeout');this.pending.delete(call.id);continue; }
+      if (metadata?.bodyRead) { this.api.bodyFailed?.({ ...metadata.input, localGeneration: metadata.bodyGeneration }, 'timeout');this.pending.delete(call.id);continue; }
       if (this.pagingNext?.id === call.id) { pageExpired = true;this.pagingNext = null;this.pending.delete(call.id);continue; }
       if (this.paging?.id === call.id) {
         pageExpired = true;
@@ -1001,12 +1065,17 @@ export class ThinHost {
         this.pending.delete(call.id);continue;
       }
       current = this.abortField(metadata) || this.isCurrent(metadata) || current;
-      metadata?.operation?.settled?.(false);
+      rejected.push(metadata?.operation);
       this.pending.delete(call.id);
       if (this.active === call.id) this.active = null;
     }
-    if (current) { this.actions = [];this.fail('View request timed out; actions were not resent'); }
-    else if (!pageExpired) this.api.warning?.('Old request timed out; action was not resent');
+    if (current) {
+      this.rejectOperations([...rejected, ...this.actions]);this.actions = [];
+      this.fail('View request timed out; actions were not resent');
+    } else {
+      this.rejectOperations(rejected);
+      if (!pageExpired) this.api.warning?.('Old request timed out; action was not resent');
+    }
     this.pump();
     this.newestDue();
   }
@@ -1042,8 +1111,7 @@ export class ThinHost {
     this.retireTerminal('Queued terminal input was not sent because the connection failed.');
     this.refreshScheduled = null;
     this.api.viewerChoice?.(null);
-    for (const metadata of this.pending.values()) metadata.operation?.settled?.(false);
-    for (const operation of this.actions) operation.settled?.(false);
+    this.rejectOperations([...this.pending.values()].map(m => m.operation).concat(this.actions));
     this.ready = false;this.api.state({ phase: 'error', remoteReady: false, reason });
   }
   disconnect() {
@@ -1052,8 +1120,7 @@ export class ThinHost {
     this.retireTerminal('Queued terminal input was not sent because the connection closed.');
     this.refreshScheduled = null;
     this.api.viewerChoice?.(null);
-    for (const metadata of this.pending.values()) metadata.operation?.settled?.(false);
-    for (const operation of this.actions) operation.settled?.(false);
+    this.rejectOperations([...this.pending.values()].map(m => m.operation).concat(this.actions));
     this.client.disconnect(this.hub);this.pending.clear();this.actions = [];this.active = null;
     this.ready = false;this.api.state({ phase: 'disconnected', remoteReady: false });
   }
