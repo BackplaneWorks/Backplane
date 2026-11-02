@@ -1,4 +1,5 @@
 import Base
+import ./modelcache.bend as CP
 import ../core/refresh.bend as RF
 import ../core/exe.bend as EX
 import ./host.bend as H
@@ -560,7 +561,7 @@ def Pv.step.promoted(m: Result<&1, &1, U32 & String, Unit>, r: PR.Ran) -> PR.Ran
 # a STEP's GLB is written beside and moved in whole only after a successful
 # export: a reader never meets a partial or failed model.
 def Pv.step.ran.to(r: PR.Ran, +from: String, +out: String) -> IO(PR.Ran):
-  IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, Pv.step.promoted(m, r)))
+  CP.ModelCache.publish(r, from, out)
 
 def Pv.step.ran(r: PR.Ran, from: String, out: String) -> IO(PR.Ran):
   match r:
@@ -764,7 +765,7 @@ def Pv.child.solid(+bare: Bool, +full: Bool, +path: String, +note: String) -> IO
   do IO<Unit>:
     +isglb : Bool = String.ends_with(path, ".glb")
     +out : String <- Pv.solid.out(isglb, Pv.is_step(path), bare, full, path, "normal")
-    have : Bool <- K.Io.is_file(out)
+    have : Bool <- CP.ModelCache.have(out)
     r : PR.Ran <- Pv.glb.run(Bool.or(isglb, have), Pv.is_step(path), bare, full, path, out, "normal")
     exe : String <- H.Sys.exe_path()
     st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(exe)

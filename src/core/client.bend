@@ -5629,7 +5629,9 @@ def Mpage.has(+o: J.Json) -> Bool:
   Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(J.Json.get_obj(o, "result"), "mech"), J.Null{})), "null"))
 
 def Mpage.store(u: Ui, +r: J.Json) -> Ui:
-  Ui.info_set(Ui.info_set(u, "mech:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "mech", "")), "mech.root:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "root", ""))
+  Ui.info_set(Ui.info_set(Ui.info_set(u, "mech:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "mech", "")),
+    "mech.root:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "root", "")),
+    "mech.primary:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "primary", ""))
 
 # a render job's answer: the part is no longer busy; why it failed, if it did
 def Mpage.done.k(job: Bool, u: Ui, +th: String, +err: String) -> Ui:
@@ -5919,7 +5921,7 @@ def Mpage.on.at(+u: Ui, +th: String) -> Bool:
 
 # what the thread's fresh listing gives (a path from its project root)
 def Mpage.after(+u: Ui, +th: String) -> String:
-  MC.Mech.after(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "view.path:" ++ th), Ui.info(u, "mech.root:" ++ th))
+  Mpage.path.k(MC.Mech.choose(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "view.path:" ++ th), Ui.info(u, "mech.root:" ++ th), Ui.info(u, "mech.primary:" ++ th)))
 
 def Mpage.seen.k(sel: Bool, +u: Ui) -> Ui:
   match sel:
@@ -5956,7 +5958,7 @@ def Mpage.to3d.m(marked: Bool, +u: Ui, +th: String) -> Ui:
       u
 
 def Mpage.to3d(+u: Ui, +th: String) -> Ui:
-  Mpage.to3d.m(String.eq(Ui.scratch(u, "@mech.to3d:" ++ th), "1"), u, th)
+  Mpage.to3d.m(Bool.and(String.eq(Ui.scratch(u, "@mech.to3d:" ++ th), "1"), String.eq(Ui.scratch(u, "@mech.want:" ++ th), Ui.info(u, "view.n:" ++ th))), u, th)
 
 def Mpage.got(u: Ui, +r: J.Json) -> Ui:
   Mpage.to3d(Mpage.done.k(Bool.not(String.is_empty(J.Json.get_str(r, "rendered", ""))), Mpage.store(u, r), J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "error", "")), J.Json.get_str(r, "thread", ""))
@@ -5969,8 +5971,8 @@ def Mpage.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
       u
 
 # ask for a thread's parts
-def Mpage.ask(u: Ui, +th: String) -> Act:
-  Ui.rpc(u, "mech.list", [J.KV{"thread", J.Str{th}}])
+def Mpage.ask(+u: Ui, +th: String) -> Act:
+  Ui.rpc(Ui.scratch_set(u, "@mech.want:" ++ th, Ui.info(u, "view.n:" ++ th)), "mech.list", [J.KV{"thread", J.Str{th}}])
 
 # Reading the page: the selected thread's listing and root
 def Mpage.text(+u: Ui) -> String:
@@ -5984,7 +5986,7 @@ def Mpage.parts(+u: Ui) -> List<&2, MC.MPart>:
 
 # the part on show
 def Mpage.cur(+u: Ui) -> Maybe<&2, MC.MPart>:
-  MC.Mech.pick(Mpage.parts(u), Ui.view_get(u, "view.path"), Mpage.root(u))
+  MC.Mech.choose(Mpage.parts(u), Ui.view_get(u, "view.path"), Mpage.root(u), Ui.info(u, "mech.primary:" ++ Ui.sel(u)))
 
 # 0 while the parts are asked for, 1 when there are none, 2 with parts
 def Mpage.state(+u: Ui) -> Nat:
