@@ -19,12 +19,36 @@
 // 8 MiB again (host.js's host_child_stack). Sys.exec in place keeps both, so
 // a restart does not repeat this.
 //
-// Only a compiled hub on Linux or macOS (process.argv[1] under /$bunfs/):
+// Only a compiled hub (process.argv[1] under /$bunfs/ or Windows' B:/~BUN/):
 // `bun serve.js` and the tests run as they are. macOS's hard stack limit is
 // usually 64 MiB, below 4 GiB: there it takes what the hard limit allows. Anything
 // failing (no ffi, setrlimit or execve refused) runs on, never exits.
+// Windows has no RLIMIT_STACK or execve. Its PE already reserves 18 MB,
+// but JSC's default bound is much smaller (#420). Relaunch with a 16 MB
+// JSC bound before opening any hub resources, waiting with inherited stdio
+// and returning its exit status. The new process and its plot/review children
+// inherit the bound, so only the first launch needs a wrapper. An explicit
+// BUN_JSC_maxPerThreadStackUsage is respected on every platform.
 (() => {
   try {
+    const entry = String(process.argv[1] ?? "");
+    const compiled = entry.startsWith("/$bunfs/") || entry.startsWith("B:/~BUN/") || entry.startsWith("B:\\~BUN\\");
+    if (!compiled) {
+      return;
+    }
+    if (process.platform === "win32") {
+      if (process.env.BUN_JSC_maxPerThreadStackUsage) {
+        return;
+      }
+      process.env.BUN_JSC_maxPerThreadStackUsage = "16000000";
+      const child = require("node:child_process").spawnSync(process.execPath, process.argv.slice(2), {
+        env: process.env, stdio: "inherit", windowsHide: true,
+      });
+      if (child.error) {
+        return;
+      }
+      process.exit(child.status ?? 1);
+    }
     if (process.platform !== "linux" && process.platform !== "darwin") {
       return;
     }
@@ -32,7 +56,7 @@
     // has lowered its stack again. Only this same process's re-exec may skip
     // setup; an inherited parent marker (including the old "1") cannot.
     const pid = String(process.pid);
-    if (process.env.BACKPLANE_STACK_SET === pid || !String(process.argv[1] ?? "").startsWith("/$bunfs/")) {
+    if (process.env.BACKPLANE_STACK_SET === pid) {
       return;
     }
     process.env.BACKPLANE_STACK_SET = pid;
