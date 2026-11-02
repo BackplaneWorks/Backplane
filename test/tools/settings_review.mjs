@@ -79,7 +79,7 @@ try{
  assert.equal(mobile.scroll,390,'390px layout has no horizontal overflow');
  await page.screenshot({path:resolve(out,'settings-390.png')});
  await page.locator('#settings-find').fill('usage');
- await page.locator('.settings-category').filter({hasText:'Usage'}).waitFor();
+ await page.waitForFunction(()=>document.querySelectorAll('.settings-category').length===1 && document.querySelector('.settings-category')?.dataset.value==='usage');
  assert.equal(await page.locator('.settings-category').count(),1,'search keeps matching category');
  await page.locator('#settings-find').press('Enter');
  await page.locator('#settings-content[data-settings-page="usage"]').waitFor();
