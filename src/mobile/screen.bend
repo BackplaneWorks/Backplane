@@ -1970,7 +1970,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
       [Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, model),
       Mob.set.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), model), model, "agent.model"))],
       Mob.set.find(lc, u, nf, prov),
-      Mob.agy.rows(U.Fallbackv.rows(u))])
+      Mob.agy.rows(U.Fallbackv.rows(u)), Mob.agy.rows(U.Agv.rows.loc(lc, u))])
     case 3n: List.concat(&2, J.Json, [])
     case 4n: List.concat(&2, J.Json, [[Mob.set.row.f("KiCad", U.KN.summary(nf) ++ " · " ++ U.Str.get(nf, "kicad.cli"), [Mob.set.field("kpath", MSG.T.settings.kicad.path(lc), False{}, U.Ui.scratch(u, "@f.kpath"))], [Mob.set.btn(MSG.T.settings.kicad.path.save(lc), "kicad-path-save", "", False{})])],
       Mob.kn(U.KN.of(nf, st)),

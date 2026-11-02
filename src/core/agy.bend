@@ -338,16 +338,16 @@ def Agy.ended(a: AC.Acp) -> AC.Acp:
 # the turn fails: the reason, and how to fix a sign-in
 def Agy.hint(+msg: String) -> String:
   Bool.pick(String, Bool.or(Bool.or(String.contains(msg, "auth"), String.contains(msg, "API key")), Bool.or(String.contains(msg, "credential"), String.contains(msg, "sign"))),
-    msg ++ " (Settings › Antigravity: add a key or sign in)", msg)
+    msg ++ " (Settings › Agents › Antigravity: add a key or sign in)", msg)
 
 def Agy.fail(a: AC.Acp, +msg: String) -> AC.AcpOut:
   AC.AcpOut{Agy.ended(a), Nil{}, [AC.Acp.failed(msg)], Nil{}}
 
 def Agy.signin.msg() -> String:
-  "Antigravity is not signed in: sign in under Settings › Antigravity first."
+  "Antigravity is not signed in: sign in under Settings › Agents › Antigravity first."
 
 def Agy.missing.msg() -> String:
-  "Antigravity is not installed: install it under Settings › Antigravity."
+  "Antigravity is not installed: install it under Settings › Agents › Antigravity."
 
 # the session is open (fresh or resumed): note it, then set the mode
 def Agy.opened(fresh: Bool, a: AC.Acp, +t: AgyTurn, +sid: String) -> AC.AcpOut:

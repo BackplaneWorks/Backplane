@@ -12370,12 +12370,14 @@ def RefNav.copy.web(m: Maybe<&2, R.Ref>, +u: Ui) -> Act:
 def Settings.pages() -> List<&2, String>:
   ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy", "ordering"]
 
+# Visible menus omit Antigravity: its controls live on Agents. The internal
+# page table above retains its numeric slots for all clients.
 # the order the desktop and web menus list the pages in
 def Settings.menu.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "writing", "cad", "ordering", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "writing", "cad", "ordering", "network", "voice", "keys", "timezone", "usage", "about", "privacy"]
 
 def Settings.phone.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "cad", "ordering", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "cad", "ordering", "network", "voice", "keys", "timezone", "usage", "about", "privacy"]
 
 def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
   match ps:
@@ -12383,7 +12385,7 @@ def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
     case +p <> t: Bool.or(String.eq(p, page), Settings.known(t, page))
 
 def Settings.clean(+page: String) -> String:
-  Bool.pick(String, Settings.known(Settings.pages(), page), page, "")
+  Bool.pick(String, String.eq(page, "antigravity"), "agents", Bool.pick(String, Settings.known(Settings.pages(), page), page, ""))
 
 # Webhook (core/wnote.bend) in Settings: the address and the secret
 # file's path, one list of rows all four clients draw. The secret's
@@ -12491,7 +12493,7 @@ def Settings.rows.of(i: Nat, +l: I.Loc) -> List<&2, String>:
   match i:
     case 0n: [MSG.T.settings.theme(l), MSG.T.settings.lang(l), MSG.T.settings.sidebar(l), MSG.T.settings.textsize(l)]
     case 1n: [MSG.T.settings.settle(l), MSG.T.settings.settle.done(l), MSG.T.settings.restart(l), MSG.T.hook.title(l), MSG.T.hook.url(l), MSG.T.hook.secret(l)]
-    case 2n: [MSG.T.settings.provider(l), MSG.T.settings.model(l), "Fallback hierarchy", Think.label()]
+    case 2n: [MSG.T.settings.provider(l), MSG.T.settings.model(l), "Fallback hierarchy", Think.label(), "Antigravity", MSG.T.agy.method(l)]
     case 3n: [MSG.T.settings.writing.provider(l)]
     case 4n: ["KiCad", "FreeCAD", "KiCad IPC"]
     case 5n: ["Tailscale", MSG.T.settings.pair(l), MSG.T.settings.channel(l)]
@@ -12505,7 +12507,7 @@ def Settings.words(i: Nat) -> String:
   match i:
     case 0n: "appearance dark light theme font text size zoom scale language sidebar"
     case 1n: "threads settle done finished restart continue notifications alerts notify webhook hook url address secret post"
-    case 2n: "agents provider model claude codex grok opencode muse pi omp effort thinking reasoning chain of thought fallback hierarchy order quota availability"
+    case 2n: "agents provider model claude codex grok opencode muse pi omp effort thinking reasoning chain of thought fallback hierarchy order quota availability antigravity google gemini install sign in"
     case 3n: "writing titles summaries text model"
     case 4n: "cad kicad freecad ipc path schematic board"
     case 5n: "network tailscale tailnet pairing pair phone qr machines sync update channel nightly stable version"
@@ -13218,9 +13220,9 @@ def Psv.exit(+u: Ui) -> AgRow:
     [AgBtn{Bool.pick(String, String.eq(Ui.scratch(u, "@setup.tour"), "1"), "Return to tour", "Return to Backplane"), "provider-setup-close", "", True{}}]}
 
 def Psv.install(+u: Ui, +p: String) -> AgRow:
-  AgRow{"2 · Install the agent program", Bool.pick(String, Psv.installed(u, p), "Program found: " ++ Models.cli(Ui.info(u, "models"), p) ++ ". Next, sign in. Installation alone does not confirm a connection.",
-    Bool.pick(String, String.is_empty(Ui.info(u, "models")), "Checking installed programs…", "Program not found yet. Open the installation guide and follow the steps for your operating system on the hub machine. Backplane checks for new installs every minute.")), Nil{},
-    Bool.pick(List<&2, AgBtn>, String.eq(p, "antigravity"), [AgBtn{"Open Antigravity setup", "settings-page", "antigravity", True{}}], [AgBtn{"Open installation guide", "open-url", PS.Ps.docs(p), False{}}])}
+  AgRow{"2 · Install the agent program", Bool.pick(String, String.eq(p, "antigravity"), "Install and sign in using the Antigravity controls below.", Bool.pick(String, Psv.installed(u, p), "Program found: " ++ Models.cli(Ui.info(u, "models"), p) ++ ". Next, sign in. Installation alone does not confirm a connection.",
+    Bool.pick(String, String.is_empty(Ui.info(u, "models")), "Checking installed programs…", "Program not found yet. Open the installation guide and follow the steps for your operating system on the hub machine. Backplane checks for new installs every minute."))), Nil{},
+    Bool.pick(List<&2, AgBtn>, String.eq(p, "antigravity"), Nil{}, [AgBtn{"Open installation guide", "open-url", PS.Ps.docs(p), False{}}])}
 
 # Keep the newest attempt for the selected profile; login replaces old attempts.
 def Psv.attempts(xs: List<&2, J.Json>, +profile: String) -> List<&2, J.Json>:
