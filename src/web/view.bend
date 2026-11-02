@@ -1415,8 +1415,15 @@ def View.subs.k(+lc: I.Loc, +busy: String, +open: Bool, +th: String, +rs: List<&
   D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs" ++ Bool.pick(String, String.is_empty(busy), "", " busy") ++ Bool.pick(String, open, "", " shut")}],
     [View.subs.head(lc, open, th, rs, View.sub.panel(lc, rs)), View.subs.body(open, View.subs.go(lc, rs))]}
 
+# the rows that finished and are reporting to the agent (SB.Subs.reporting):
+# not at work, so the cell counts them done rather than say "0 done"
+def View.sub.reporting(rs: List<&2, SB.SubRow>) -> Nat:
+  match rs:
+    case Nil{}: 0n
+    case +r <> t: Nat.add(Bool.pick(Nat, String.eq(SB.Subs.word(r), "reporting"), 1n, 0n), View.sub.reporting(t))
+
 def View.sub.signal.panel(+lc: I.Loc, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> String:
-  MSG.T.subagents.panel(lc, View.sub.count(SB.Subs.waiting(rs)), View.sub.count(SB.Subs.active(rs, info)), Nat.show(SB.Subs.finished_n(rs)))
+  MSG.T.subagents.panel(lc, View.sub.count(SB.Subs.waiting(rs)), View.sub.count(SB.Subs.active(rs, info)), Nat.show(Nat.add(SB.Subs.finished_n(rs), View.sub.reporting(rs))))
 
 def View.subs.signal.k(+lc: I.Loc, +busy: String, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>, +st: M.State, +now: Nat) -> D.Node:
   D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs" ++ Bool.pick(String, String.is_empty(busy), "", " busy") ++ Bool.pick(String, open, "", " shut")}],
