@@ -4796,6 +4796,9 @@ def Laws.recover_interrupts_running():
 def Laws.recover_closes_asks():
   {==}
 
+def Laws.recover_keeps_order_ask():
+  {==}
+
 def Laws.recover_leaves_idle():
   {==}
 

@@ -54,3 +54,4 @@ def main() -> IO(Unit):
     C.Check.str("its quick choice without the mark", Bool.show(String.contains(answered.typed("Greece · last time"), "user@t1:Greece ")), "True")
     C.Check.str("and it closes", Bool.show(String.contains(answered.typed("Greece"), "closed:a4")), "True")
     C.Check.str("a Stop leaves a typed one open too", open(H.Retire.after(typed(M.Running{}), H.Hub.interrupt(typed(M.Running{}), 9n, 0, "r", "t1"))), "2")
+    C.Check.str("a restart leaves an order question open", open(H.Rec.after(typed(M.Completed{}), 9n)), "2")
