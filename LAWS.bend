@@ -1,3 +1,5 @@
+import ./src/core/mailowner.bend as MAILOWN
+
 import ./src/core/allowance.bend as ALLOWANCE
 
 import ./src/core/usage_page.bend as UPERIOD
@@ -59,7 +61,9 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+
 import ./src/server/modelcache.bend as MCACHE
+
 import ./src/core/pathrecords.bend as PR
 
 import ./src/core/diskq.bend as DQ
@@ -15514,3 +15518,17 @@ law checks_execution_keeps_identity:
   for +kind: String
   for +why: String
   {CHK.Checks.execution([CHK.Checks.finding("execution", "error", kind, why, "")]) == kind ++ ": " ++ why ++ "\n" : String}
+
+# Waiting owner mail follows the committed lease; transport status alone is
+# never a durable receipt, and copied homes perform no handoff IO.
+law owner_mail_local_holder:
+  {MAILOWN.Owner.remote(UBS.Ub.demo.a()) == False{} : Bool}
+
+law owner_mail_remote_holder:
+  {MAILOWN.Owner.remote(UBS.Ub.demo.away()) == True{} : Bool}
+
+law owner_mail_unknown_method_unacknowledged:
+  {MAILOWN.Owner.response.is("{\"ok\":false}", J.Null{}, "committed") == False{} : Bool}
+
+law owner_mail_copy_quiet:
+  {JCOPY.Copy.out(H.OwnerMail{}) == Nil{} : List<&2, H.Out>}

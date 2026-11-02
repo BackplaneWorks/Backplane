@@ -51,6 +51,7 @@ def Copy.out(o: B.Out) -> List<&2, B.Out>:
   match o:
     case B.RunStart{_, _, _}: Nil{}
     case B.RunNext{_, _}: Nil{}
+    case B.OwnerMail{}: Nil{}
     case B.CharterWrite{_, _}: Nil{}
     case B.LockGuard{_, _, _}: Nil{}
     case B.Upgrade{}: Nil{}
