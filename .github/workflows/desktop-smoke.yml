@@ -3,8 +3,8 @@ name: Desktop release smoke (evidence only)
 # The launch-and-connect smoke of one staged desktop target, on that target's
 # own hosted runner, with the OS sandbox on. The stage and the smoke tools come
 # from HTTPS URLs pinned by sha256 (a release's hand-off, docs/release-desktop.md);
-# the stage's bytes are not changed (macOS's ad-hoc re-seal of the .app only
-# with reseal: true, which the smoke's payload guard refuses today). Uploads the evidence folder as it is, pass
+# macOS is sealed before smoke; only the producer's allowed signature paths
+# may change. Uploads the evidence folder as it is, pass
 # or fail. Dispatch only: contents: read, no secrets, no publish, tag or push.
 on:
   workflow_dispatch:
@@ -30,7 +30,7 @@ on:
         type: string
         required: true
       reseal:
-        description: macOS only, re-seal the .app ad hoc first. Off for 0.12.x (unsigned-portable-allowed, as 0.12.0); the smoke's payload guard refuses a re-sealed stage
+        description: Compatibility input; macOS bundles are always sealed and verified before smoke
         type: boolean
         default: false
 permissions:
@@ -88,15 +88,14 @@ jobs:
           sudo apparmor_parser --replace "$RUNNER_TEMP/backplane-userns.profile"
           unshare --user --map-root-user /bin/true
           sudo apt-get install -y -q xvfb >/dev/null
-      - name: Re-seal the .app ad hoc (macOS, only when asked)
-        if: startsWith(inputs.target, 'darwin-') && inputs.reseal
+      - name: Seal and verify all macOS nested code
+        if: startsWith(inputs.target, 'darwin-')
         shell: bash
         run: |
           set -euo pipefail
           app=$(find "$W/stage" -maxdepth 1 -name '*.app' -type d | head -1)
           [ -n "$app" ]
-          codesign --force --deep -s - "$app"
-          codesign --verify --deep --strict "$app"
+          python3 "$W/tools/desktop/macos-bundle.py" seal "$app" | tee "$W/macos-integrity.json"
           codesign -dv "$app" 2>&1 | tee "$W/codesign.txt"
           # the archive is made from the stage the smoke ran: keep the re-sealed one
           # (tar: an artifact zip would drop the .app's symlinks and modes)
@@ -136,6 +135,7 @@ jobs:
           path: |
             smoke/evidence-${{ inputs.target }}/
             smoke/codesign.txt
+            smoke/macos-integrity.json
             smoke/stage-resealed.tar.gz
             smoke/stage-resealed.sha256
             smoke/homes/

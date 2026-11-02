@@ -2,9 +2,10 @@ import Base
 import ./i18n.bend as I
 import ./msgs.bend as MSG
 import ./codec.bend as C
+import ./json.bend as J
 
-# A notice the window makes for itself (a viewer's state, why a remote
-# file or link failed) travels as a stable id and its detail,
+# An app-generated UI notice (viewer state, remote file/link or upload
+# failure) travels as a stable id and its detail,
 # "\u{1}<id>\u{1f}<detail>", and becomes words only where it is shown, in
 # that frame's language. Anything else (a hub's or a tool's own words)
 # shows as it came.
@@ -22,7 +23,8 @@ def Notice.detail(+s: String) -> String:
 
 def Notice.ids() -> List<&2, String>:
   ["loading", "exporting", "browser", "noboard", "noschematic", "nomesh", "export", "unread",
-   "nosend", "silent", "denied", "nohandshake", "nohost", "keep", "notaken", "badreply", "away", "refused"]
+   "nosend", "silent", "denied", "nohandshake", "nohost", "keep", "notaken", "badreply", "away", "refused",
+   "upload.network", "upload.failed", "upload.incomplete", "upload.cap"]
 
 def Notice.words(+l: I.Loc, i: Nat, +d: String) -> String:
   match i:
@@ -44,6 +46,10 @@ def Notice.words(+l: I.Loc, i: Nat, +d: String) -> String:
     case 15n: MSG.T.remote.reply.failed(l)
     case 16n: MSG.T.remote.away(l)
     case 17n: MSG.T.remote.request.error(l, d)
+    case 18n: MSG.T.upload.network(l)
+    case 19n: MSG.T.upload.failed(l)
+    case 20n: MSG.T.upload.incomplete(l)
+    case 21n: MSG.T.upload.cap(l, d)
     case _: d
 
 def Notice.coded(code: Bool, +l: I.Loc, +s: String) -> String:
@@ -56,3 +62,21 @@ def Notice.coded(code: Bool, +l: I.Loc, +s: String) -> String:
 # what the person reads
 def Notice.shown(+l: I.Loc, +s: String) -> String:
   Notice.coded(Notice.is(s), l, s)
+
+# Transient upload replies accept only upload IDs. Unknown metadata is
+# never treated as an arbitrary catalog key, and its raw text passes through.
+def Notice.upload.k(i: Nat, detail: String, raw: String) -> String:
+  match i:
+    case 0n: Notice.make("upload.network", "")
+    case 1n: Notice.make("upload.failed", "")
+    case 2n: Notice.make("upload.incomplete", "")
+    case 3n: Notice.make("upload.cap", detail)
+    case _: raw
+
+def Notice.upload(id: String, detail: String, raw: String) -> String:
+  Notice.upload.k(C.Codec.pos(["upload.network", "upload.failed", "upload.incomplete", "upload.cap"], id), detail, raw)
+
+# Keep an English text fallback for clients predating the explicit ID.
+def Notice.upload.reply(thread: String, +id: String, +detail: String) -> J.Json:
+  J.Json.obj([J.KV{"text", J.Str{Notice.shown(I.En{}, Notice.upload(id, detail, MSG.T.upload.failed(I.En{})))}},
+    J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}, J.KV{"uiError", J.Str{id}}, J.KV{"uiDetail", J.Str{detail}}])

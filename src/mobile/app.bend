@@ -249,6 +249,10 @@ def session_failed(key: String, input: J.Json, action: String) -> J.Json:
 def session_issued(key: String, input: J.Json, action: String) -> J.Json:
   PS.Session.issued(key, input, action)
 
+# live dictated words into the phone's own draft (session.bend's Session.voice)
+def session_voice(keep: J.Json, draft: String, o: J.Json) -> J.Json:
+  PS.Session.voice(keep, draft, o)
+
 def session_local(session: J.Json, key: String, value: String) -> J.Json:
   TH.Session.local(session, key, value)
 

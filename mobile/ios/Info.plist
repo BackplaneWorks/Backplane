@@ -12,6 +12,9 @@
 	<!-- pairing by QR code: the camera reads the code Settings shows -->
 	<key>NSCameraUsageDescription</key>
 	<string>Backplane reads the pairing code your computer shows, to connect to it.</string>
+	<!-- dictation: the composer's mic records while the person dictates -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Backplane records your voice while you dictate into a thread, and sends it to your computer to turn into text.</string>
 	<!-- a pairing link: backplane://pair?url=http://host:3787/%23token=... -->
 	<key>CFBundleURLTypes</key>
 	<array>

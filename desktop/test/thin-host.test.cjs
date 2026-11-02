@@ -1030,20 +1030,22 @@ test('a reply whose delta changed nothing draws nothing, and its session and com
  f.host.update();f.host.receive(f.reply(f.sent.at(-1)));assert.equal(f.views.length,2);
 });
 
-for (const two of [false, true]) test('queued 3D choice preserves '+(two?'two':'one')+' in-flight history page bridges', async () => {
+for (const two of [false, true]) test('3D choice overtakes '+(two?'two':'one')+' pending history pages while keeping displayed history', async () => {
  const f=await fixture(); f.host.greeting(f.greeting);
  const win=(text,older,olderNext)=>({shown:{type:'text',text},window:{ids:[text],older,olderNext,hasMore:!!older,anchor:{id:text,offset:0},partial:[]}});
  f.host.receive(f.reply(undefined,win('Newest','c1',two?'c2':'')));
+ const held=structuredClone(f.host.held),cursor=f.host.cursor,back=f.host.back.slice();
  assert(f.host.ahead('older',{two})); const pages=f.sent.slice(-(two?2:1)), count=f.views.length;
- f.host.request('view-kind','3d');
- assert.equal(f.sent.at(-1).id,pages.at(-1).id,'viewer choice waits for its earlier history pages');
- for (let i=0;i<pages.length;i++) {
-  f.host.receive(f.reply(pages[i],win('Older bridge '+i,'c'+(i+2),'c'+(i+3))));
-  assert.equal(f.views.length,count+i+1,'accepted older page must display before the queued viewer choice');
-  assert.equal(f.views.at(-1).detail.page.direction,'older');
-  assert.equal(f.views.at(-1).n.text,'Older bridge '+i);
- }
- assert.equal(f.sent.at(-1).p.action,'view-kind');
+ f.host.request('view-kind','3d');const action=f.sent.at(-1);
+ assert.equal(action.p.action,'view-kind','viewer click must not wait for older pages');
+ assert.equal(f.host.paging,null);assert.equal(f.host.pagingNext,null);
+ assert.equal(f.host.cursor,cursor);assert.deepEqual(f.host.back,back);assert.deepEqual(f.host.held,held);
+ for (const page of pages) f.host.receive(f.reply(page,win('Old pane','c2','c3')));
+ assert.equal(f.views.length,count,'retired history reads cannot redraw the old viewer');
+ f.host.receive(f.reply(action,win('3D','c1',two?'c2':'')));
+ assert.equal(f.views.at(-1).n.text,'3D');assert.equal(f.host.ready,true);
+ assert(f.host.ahead('older',{two}),'history remains readable after the switch');
+ assert.equal(f.sent.at(-(two?2:1)).p.cursor,'c1','the skipped bridge is requested again, not lost');
 });
 
 test('reconnect bookmark names the held source page containing the visible anchor',async()=>{
@@ -1203,5 +1205,15 @@ test('a timeout with multiple immediate sends restores every capture in order',a
   assert.equal(f.host.pendingSends('A').length,2);
   if(disconnect)f.host.disconnect();else f.tick(5001);
   assert.equal(f.getSession().drafts.A,first+'\n\nsecond\n\nthird');assert.deepEqual(f.host.pendingSends('A'),[]);
+ }
+});
+
+test('LIMIT on initial or live view keeps greeting, drafts and other-thread navigation usable',async()=>{
+ for(const initial of [true,false]){
+  const f=await fixture();if(initial)f.host.greeting(f.greeting);else{f.open();f.host.request('flag','palette');}
+  const failed=f.sent.at(-1),client=f.host.client,link=client.links.get(f.api.hub);
+  f.host.receive({t:'reply',id:failed.id,ok:false,error:{code:'LIMIT'}});
+  assert.equal(f.host.client,client);assert.equal(client.links.get(f.api.hub),link);assert.equal(f.host.greeted,true);assert.equal(f.getSession().drafts.A,'original 日本語');
+  assert(f.host.request('select','B'));const next=f.sent.at(-1);assert.equal(next.m,'view.open');assert.equal(next.p.generation,'7');assert.equal(next.p.target.id,'B');f.host.receive(f.reply(next));assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'B');assert.equal(f.getSession().drafts.A,'original 日本語');
  }
 });

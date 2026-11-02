@@ -1,8 +1,12 @@
+import ./src/core/allowance.bend as ALLOWANCE
+
 import ./src/core/chat-pending.bend as CHATPENDING
 
 import ./src/core/i18n.bend as CHATLOC
 
 import ./src/core/lazy-tools.bend as LTOOLS
+
+import ./src/core/issue-report.bend as ISSUEPOLICY
 
 import ./src/core/star-nudge.bend as STARN
 
@@ -8148,6 +8152,14 @@ law clipath_idempotent:
 law clipath_nvm_newest_first:
   {CPA.CliPath.candidates("/h", ["/h/.nvm/versions/node/v9.11.2/bin", "/h/.nvm/versions/node/v24.13.1/bin", "/h/.nvm/versions/node/v18.0.0/bin"]) == ["/h/.nvm/versions/node/v24.13.1/bin", "/h/.nvm/versions/node/v18.0.0/bin", "/h/.nvm/versions/node/v9.11.2/bin"] : List<&2, String>}
 
+# A failed Windows probe cannot replace the native hub's PATH.
+law clipath_windows_missing_probe:
+  for cur: String
+  {CPA.CliPath.win.rows(Nil{}, cur, "", "", Nil{}) == cur : String}
+
+law clipath_windows_claude:
+  {CPA.CliPath.next("C:/Runtime/bin;C:/Windows/System32", "C:/Users/P", "winhome\tC:/Users/P\nwindir\tC:/Users/P/.local/bin\n") == "C:/Runtime/bin;C:/Windows/System32;C:/Users/P/.local/bin" : String}
+
 # harness-coord: wakes
 law wake_once_per_event:
   {H.Wake.demo.twice() == 0n : Nat}
@@ -15264,3 +15276,80 @@ law project_drive_root_absolute:
 
 law project_unc_root:
   {H.Hub.root.norm("//server/share/") == "//server/share" : String}
+
+# Saved-source stamps are opt-in and replay only to the joining client.
+law plot_stamp_opt_out:
+  {PLOTWATCH.Sub.wants.stamp(PLOTWATCH.Sub{7, "board", Nil{}, "", True{}, "", False{}}, "board") == False{} : Bool}
+
+law plot_stamp_other_client:
+  {PLOTWATCH.Sub.for_client([PLOTWATCH.Sub{7, "board", Nil{}, "", True{}, "", True{}}], 8) == Nil{} : List<&2, PLOTWATCH.Sub>}
+
+# Remaining allowance comes from the provider's share used; refreshes are bounded.
+law allowance_remaining_reported:
+  {ALLOWANCE.Allowance.remaining(280n) == 72n : Nat}
+
+law allowance_refresh_held:
+  {ALLOWANCE.Allowance.due.at(1000n, 1299n) == False{} : Bool}
+
+law allowance_refresh_due:
+  {ALLOWANCE.Allowance.due.at(1000n, 1300n) == True{} : Bool}
+
+law allowance_future_unknown:
+  {ALLOWANCE.Allowance.time.known(1001n, 1000n) == False{} : Bool}
+
+# Report destination is an explicit choice; old internal drafts stay internal.
+law issue_report_new_default:
+  {ISSUEPOLICY.Issue.target("", False{}) == "issue" : String}
+
+law issue_report_legacy_internal:
+  {ISSUEPOLICY.Issue.target("", True{}) == "internal" : String}
+
+law issue_report_explicit_issue:
+  for legacy: Bool
+  {ISSUEPOLICY.Issue.target("issue", legacy) == "issue" : String}
+
+law issue_report_explicit_internal:
+  for legacy: Bool
+  {ISSUEPOLICY.Issue.target("internal", legacy) == "internal" : String}
+
+# Automatic metadata cannot rewrite even one character of the person's text.
+law issue_report_verbatim_text:
+  for text: String
+  {ISSUEPOLICY.Issue.report(text, "linux", "v1.2.3", "", "") == text ++ "\n\n---\nOS: Linux\nApp version: 1.2.3\n" : String}
+
+law issue_report_manual_details_verbatim:
+  for c: Char
+  for text: String
+  {ISSUEPOLICY.Issue.optional("Details", SCon{c, text}) == "\n\nDetails\n" ++ SCon{c, text} : String}
+
+law issue_report_diagnostics_absent:
+  {ISSUEPOLICY.Issue.optional("Diagnostics (JSON)", "") == "" : String}
+
+law issue_report_os_description_closed:
+  {ISSUEPOLICY.Issue.os("Linux host.owner /private/path") == "Unknown" : String}
+
+law issue_report_version_omits_build:
+  {ISSUEPOLICY.Issue.version("v1.2.3+local.owner") == "1.2.3" : String}
+
+law issue_report_version_rejects_path:
+  {ISSUEPOLICY.Issue.version("/home/person/build/1.2.3") == "unknown" : String}
+
+law issue_report_preview_retains_body:
+  for body: String
+  {J.Json.get_str(ISSUEPOLICY.Issue.preview.body(body), "body", "") == body : String}
+
+law issue_report_url_overflow_closed:
+  for bs: List<&2, U32>
+  for budget: Nat
+  for acc: String
+  {ISSUEPOLICY.Issue.url.encode(bs, budget, acc, False{}) == "" : String}
+
+law issue_report_official_repository:
+  {ISSUEPOLICY.Issue.new_url() == "https://github.com/BackplaneWorks/Backplane/issues/new" : String}
+
+law issue_report_template_revision:
+  {ISSUEPOLICY.Issue.template.version() == "1" : String}
+
+law issue_report_prompt_original_verbatim:
+  for description: String
+  {ISSUEPOLICY.Issue.prompt.original(description) == "\nOriginal description, verbatim, until end of input\n" ++ description : String}

@@ -1,5 +1,6 @@
 import Base
 import ./check.bend as C
+import ../src/core/winnote.bend as NT
 import ./fixtures/i18n_webphone.bend as F
 import ../src/core/i18n.bend as I
 import ../src/core/json.bend as J
@@ -79,6 +80,13 @@ def model.about() -> J.Json:
 def model.picker() -> J.Json:
   S.Mob.picker.j.loc(I.Ja{}, J.Null{}, model.about(), "claude", "", "", "")
 
+# The same held upload error is drawn after switching locale, without retry.
+def upload.held() -> U.Ui:
+  U.Act.ui(U.Ui.act(F.Fixture.thread("en"), "attach-end", J.Json.show(NT.Notice.upload.reply("t43", "upload.network", ""))))
+
+def upload.locale(+tag: String) -> U.Ui:
+  U.Lang.apply(upload.held(), tag, tag)
+
 def main() -> IO(Unit):
   +en = web("en")
   +ja = web("ja")
@@ -87,6 +95,11 @@ def main() -> IO(Unit):
   +ve = settings("en", "voice")
   +vj = settings("ja", "voice")
   do IO<Unit>:
+    C.Check.str("web held upload en", seen(words(W.View.page(upload.locale("en"))), "the upload did not reach the hub"), "the upload did not reach the hub")
+    C.Check.str("web held upload ja", seen(words(W.View.page(upload.locale("ja"))), "アップロードがハブに届きませんでした"), "アップロードがハブに届きませんでした")
+    C.Check.str("phone held upload en", J.Json.get_str(S.Mob.screen(upload.locale("en")), "error", "?"), "the upload did not reach the hub")
+    C.Check.str("phone held upload ja", J.Json.get_str(S.Mob.screen(upload.locale("ja")), "error", "?"), "アップロードがハブに届きませんでした")
+    C.Check.str("phone held upload back to en", J.Json.get_str(S.Mob.screen(U.Lang.apply(upload.locale("ja"), "en", "en")), "error", "?"), "the upload did not reach the hub")
     C.Check.str("web sidebar en", seen(en, "Add project"), "Add project")
     C.Check.str("web sidebar ja", seen(ja, "プロジェクトを追加"), "プロジェクトを追加")
     C.Check.str("web thread en", seen(en, "New thread"), "New thread")
