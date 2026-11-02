@@ -1188,7 +1188,7 @@ test('local send clears the composer and publishes a bubble before the action AC
  assert.equal(f.getSession().drafts.A,'next 日本語');assert.equal(f.host.pendingSends('A').length,1);assert.deepEqual(feedback,[true]);
  assert.equal(f.commands.filter(c=>c.type==='send').length,1);
  f.host.ack({t:'reply',id:20,ok:true});assert.equal(f.host.pendingSends('A')[0].accepted,true);
- f.host.update();f.host.receive(f.reply(undefined,{window:{ids:['sent-A'],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]}}));
+ f.host.update();f.host.receive(f.reply(undefined,{window:{ids:['7'],older:'',hasMore:false,anchor:{id:'',offset:0},partial:[]},shown:{type:'element',tag:'div',key:'timeline',attrs:[{name:'id',value:'timeline'}],kids:[{type:'element',tag:'bp-memo',key:'sent-A',attrs:[{name:'fn',value:'msg'},{name:'who',value:'u'}],kids:[]}]}}));
  assert.deepEqual(f.host.pendingSends('A'),[]);assert.deepEqual(feedback,[true,false,false]);
 });
 test('local send refusal and ordinary rejection restore captured text alongside newer typing',async()=>{
