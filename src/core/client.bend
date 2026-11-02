@@ -15431,15 +15431,18 @@ def Proj.go(+u: Ui, +root: String) -> Act:
   Proj.go.route(ThreadTree.routing(u), u, root)
 
 # add (closes the picker), browse, create, go to a project, add one found,
-# browse folders, back to the projects
+# browse folders, back to the projects; a row that keeps the picker open
+# puts the keyboard back in its field (Proj.focus), so a click on a folder
+# leaves Enter on the highlighted row, not on the clicked button (which
+# the next listing reuses for another row)
 def Proj.run.k(i: Nat, +u: Ui, +v: String) -> Act:
   match i:
     case 0n:
       Proj.adding(u, "project.add", v)
     case 1n:
-      Proj.rpc(Proj.mode(u, "dir"), "fs.list", [J.KV{"path", J.Str{v}}])
+      Proj.focus(Proj.rpc(Proj.mode(u, "dir"), "fs.list", [J.KV{"path", J.Str{v}}]))
     case 2n:
-      Proj.rpc(Proj.reset(u, ""), "fs.mkdir", [J.KV{"path", J.Str{v}}])
+      Proj.focus(Proj.rpc(Proj.reset(u, ""), "fs.mkdir", [J.KV{"path", J.Str{v}}]))
     case 3n:
       Proj.adding(u, "project.new", v)
     case 4n:
@@ -15447,9 +15450,9 @@ def Proj.run.k(i: Nat, +u: Ui, +v: String) -> Act:
     case 5n:
       Proj.adding(u, "project.add", v)
     case 6n:
-      Proj.browse(u)
+      Proj.focus(Proj.browse(u))
     case 7n:
-      Act{Proj.mode(u, ""), Nil{}}
+      Act{Proj.mode(u, ""), [Focus{"proj"}]}
     case 8n:
       Proj.machine(u, v)
     case _:
