@@ -70,3 +70,18 @@ The `js` job (`.github/workflows/ci.yml`) does the following:
 - uploads `backplane-serve-js`.
 
 `js-native` runs the smoke test on arm64 Linux, both kinds of Mac and Windows. Windows only reports until Bend's JS runtime has Win32 syscalls (fast-hub J4).
+
+## File previews
+
+Authenticated `/img` previews stream from one open regular file in 64 KiB
+chunks, yielding between chunks and waiting for writable sockets. The host
+handles full-width single byte ranges, including offsets beyond 4 GiB,
+without passing the file size through Bend U32. Pairing and file-type
+allowlist decisions remain in Bend. A stalled transfer closes after
+30 seconds; truncation or an error after headers closes the connection.
+The existing no-follow policy is retained where the host supports it.
+Private model-asset bounds remain separate.
+
+`node --test test/tools/preview_file_test.mjs` exercises controlled sender
+behavior on disposable files. The compiled-hub/browser lane remains
+`test/tools/preview_e2e.ts`; controlled sender tests do not qualify it.
