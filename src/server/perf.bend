@@ -5,6 +5,9 @@ import ./host.bend as H
 # Measuring and logging, for any computation in the process (the hub, the
 # window, a connection). effects/perf.js keeps the numbers; core/perf.bend
 # reads them. See docs/perf.md.
+# The hub may start diagnostics.bend after taking its home lock: perf.js
+# then also aggregates only allowlisted numeric measurements locally.
+# Perf.emit/free-form logs never enter structured diagnostics.
 
 # microseconds since the first reading (wraps after 71 minutes; spans are
 # wrapping differences, so they stay right)
@@ -43,6 +46,10 @@ def Perf.emit(line: String) -> IO(Unit):
 def Perf.logs() -> IO(String):
   import "./effects/perf.js"
 
+# A level only: diagnostics never receives the log's area or message.
+def Perf.severity(level: U32) -> IO(Unit):
+  import "./effects/perf.js"
+
 def Perf.env.or(r: Result<&1, &1, U32 & String, String>, +d: String) -> String:
   match r:
     case Done{v}:
@@ -59,7 +66,10 @@ def Perf.env(+name: String, +d: String) -> IO(String):
 def Log.go(on: Bool, +l: Nat, +area: String, +msg: String) -> IO(Unit):
   match on:
     case True{}:
-      IO.bind(U32, Unit, H.Clock.epoch(), t => Perf.emit(PF.Log.line(l, U32.to_nat(t), area, msg)))
+      do IO<Unit>:
+        t : U32 <- H.Clock.epoch()
+        Perf.severity(U32.from_nat(l))
+        Perf.emit(PF.Log.line(l, U32.to_nat(t), area, msg))
     case False{}:
       IO.pure(Unit, Unit{})
 

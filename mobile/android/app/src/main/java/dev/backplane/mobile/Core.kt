@@ -717,6 +717,9 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         return if (i < 0) Pairing.http(l, path) else Pairing.http(l, path.substring(0, i), path.substring(i + 1))
     }
 
+    suspend fun improvementsPreview(text: String, os: String, version: String, details: String) = engine.improvementsPreview(text, os, version, details)
+    suspend fun improvementsPreviewBody(body: String) = engine.improvementsPreviewBody(body)
+
     // a file for the next message: one POST /attach to the thread's hub with
     // the file as the body (no base64, no pieces through the engine); the
     // hub's answer goes back as "attach-end", as an attach.put's would

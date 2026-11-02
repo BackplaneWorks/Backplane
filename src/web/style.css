@@ -2337,3 +2337,14 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .improvements>img[hidden]{display:none}.improvements>p{margin:0;font-size:12px;min-height:1.4em}.improvements>footer{display:flex;flex-wrap:wrap;gap:8px}.improvements button{min-height:36px;padding:6px 10px}.improvements .primary{margin-left:auto}.improvements :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:600px){.improvements{padding:12px}.improvements>header{cursor:default;touch-action:auto}.improvements kbd{display:none}.improvements textarea{font-size:16px}.improvements button{min-height:44px}.improvements>img{max-height:25vh}}
 @media(max-width:760px){.topbar .tb button[data-improvements]{width:44px;padding:0}.topbar .improvements-label{display:none}}
+
+.improvements [hidden]{display:none!important}
+.improvements-public{display:flex;flex-direction:column;gap:10px}
+.improvements-public p,.improvements>details p{font-size:12px;margin:0;line-height:1.5}
+.improvements label:has(input[type=checkbox]){display:flex;align-items:flex-start;gap:6px}
+.improvements input[type=checkbox]{flex:none;min-width:18px;min-height:18px}
+.improvements pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:22vh;overflow:auto;font-size:11px}
+.improvements-issue-actions{display:flex;flex-wrap:wrap;gap:8px}
+.improvements #improvements-review{min-height:180px;max-height:45vh}
+.improvements #improvements-details,.improvements #improvements-evidence{min-height:70px}
+.improvements>details{font-size:12px}.improvements>details>label{margin:8px 0}
