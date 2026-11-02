@@ -68,3 +68,31 @@ test('the JS (Bun) service launches with its native paths and no Cygwin helper',
  assert.equal(r.env.BACKPLANE_HOME,home);assert.equal(r.env.BACKPLANE_AGENTS,env.BACKPLANE_AGENTS);assert.equal(r.env.Path,env.Path);assert.equal(r.env.KEEP,'unchanged');
  await assert.rejects(()=>launchPaths({binary,home:'relative',web,env,platform:'win32',files:privateFs({serviceRuntime:'bun'}),run:()=>{}}),/fully qualified/);
 });
+
+test('native Bun supplies missing or empty HOME from the Windows profile without changing app data or the parent',async()=>{
+ const profile='C:\\Users\\Person 日本';
+ for(const extra of [{USERPROFILE:profile},{HOME:'',USERPROFILE:profile},{Home:'',UserProfile:profile},{userprofile:'\\\\server\\share\\Person 日本'}]){
+  const env=Object.freeze({Path:'C:\\Windows\\System32',...extra}),before={...env};
+  const r=await launchPaths({binary,home,web,env,platform:'win32',files:privateFs({serviceRuntime:'bun'}),run:()=>{throw Error('native HOME must not need cygpath');}});
+  assert.equal(r.env.HOME,extra.USERPROFILE||extra.UserProfile||extra.userprofile);
+  assert.deepEqual(Object.keys(r.env).filter(k=>k.toLowerCase()==='home'),['HOME']);
+  assert.equal(r.env.BACKPLANE_HOME,home);assert.equal(r.home,home);assert.equal(r.web,web);
+  assert.deepEqual(env,before);
+ }
+});
+
+test('native Bun preserves an explicit HOME by any Windows key casing',async()=>{
+ for(const key of ['HOME','Home','home']){
+  const env=Object.freeze({[key]:'D:\\Configured home',USERPROFILE:'C:\\Users\\Other'});
+  const r=await launchPaths({binary,home,web,env,platform:'win32',files:privateFs({serviceRuntime:'bun'})});
+  assert.deepEqual(r.env,{...env,BACKPLANE_HOME:home});
+ }
+});
+
+test('native Bun does not invent HOME from a missing or invalid Windows profile',async()=>{
+ for(const profile of [undefined,'','relative','C:relative','\\root-relative','C:\\bad\npath','C:\\bad\rpath','C:\\bad\0path']){
+  const env=Object.freeze({Home:'',...(profile===undefined?{}:{UserProfile:profile})});
+  const r=await launchPaths({binary,home,web,env,platform:'win32',files:privateFs({serviceRuntime:'bun'})});
+  assert.deepEqual(r.env,{...env,BACKPLANE_HOME:home});
+ }
+});

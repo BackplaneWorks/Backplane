@@ -10,6 +10,12 @@ def Show.probe(p: CP.CliProbe) -> String:
     case CP.CliProbe{l, ds}:
       l ++ "#" ++ Show.list(ds)
 
+def probe() -> String:
+  CP.CliPath.probe.sh()
+
+def next(cur: String, home: String, out: String) -> String:
+  CP.CliPath.next(cur, home, out)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("split drops empties", Show.list(CP.CliPath.split("/usr/bin::/bin:")), "/usr/bin|/bin")
@@ -35,3 +41,20 @@ def main() -> IO(Unit):
     C.Check.str("parse nothing", Show.probe(CP.CliPath.parse("")), "#")
     C.Check.str("next", CP.CliPath.next("/usr/bin:/bin", "/home/h", "login\t/l:/bin\ndir\t/home/h/.nvm/versions/node/v24.1.0/bin\ndir\t/usr/local/bin\n"), "/usr/bin:/bin:/l:/home/h/.nvm/versions/node/v24.1.0/bin:/usr/local/bin")
     C.Check.str("probe has marker and tmo", Bool.show(Bool.and(String.contains(CP.CliPath.probe.sh(), "__BP_PATH__"), String.contains(CP.CliPath.probe.sh(), "tmo 5"))), "True")
+    C.Check.str("native Windows merge keeps drive colons and semicolon separators",
+      CP.CliPath.next("C:\\Runtime\\bin;C:\\Windows\\System32", "C:\\Users\\Person 日本",
+        "login\t/usr/bin:/bin\ndir\t/cygdrive/c/Users/Person 日本/.local/bin\nwinhome\tC:/Users/Person 日本\nwinlogin\tC:/Runtime/bin;D:/Tools\nwindir\tC:/Users/Person 日本/.local/bin\n"),
+      "C:\\Runtime\\bin;C:\\Windows\\System32;C:/Runtime/bin;D:/Tools;C:/Users/Person 日本/.local/bin")
+    C.Check.str("native Windows missing probe preserves PATH",
+      CP.CliPath.next("C:\\Runtime\\bin", "C:\\Users\\Person", "login\t/usr/bin\ndir\t/cygdrive/c/Users/Person/.local/bin\n"), "C:\\Runtime\\bin")
+    C.Check.str("native Windows explicit HOME uses converted probe home",
+      CP.CliPath.next("C:/Runtime/bin", "D:\\Custom home", "winhome\tD:/Custom home\nwindir\tD:/Custom home/.local/bin\nwindir\tC:/Users/Other/.local/bin\n"),
+      "C:/Runtime/bin;D:/Custom home/.local/bin")
+    C.Check.str("native Windows UNC home and empty PATH",
+      CP.CliPath.next("", "\\\\server\\share\\Person", "winhome\t//server/share/Person\nwindir\t//server/share/Person/.local/bin\n"), "//server/share/Person/.local/bin")
+    C.Check.str("Cygwin keeps consuming POSIX probe rows",
+      CP.CliPath.next("/usr/bin", "/cygdrive/c/Users/Person", "login\t/usr/bin\ndir\t/cygdrive/c/Users/Person/.local/bin\nwinhome\tC:/Users/Person\nwindir\tC:/Users/Person/.local/bin\n"),
+      "/usr/bin:/cygdrive/c/Users/Person/.local/bin")
+    C.Check.str("native Windows refresh is idempotent",
+      CP.CliPath.next("C:/Runtime/bin;C:/Users/P/.local/bin", "C:/Users/P", "winhome\tC:/Users/P\nwinlogin\tC:/Runtime/bin\nwindir\tC:/Users/P/.local/bin\n"),
+      "C:/Runtime/bin;C:/Users/P/.local/bin")
