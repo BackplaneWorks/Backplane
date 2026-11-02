@@ -6,6 +6,7 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
  const {ViewerRpc}=await import('../../src/web/viewer-rpc.js'),{ReviewPosition}=await import('../../src/web/review-position.js');
  const {ImprovementsRpc}=await import('../../src/web/improvements-rpc.js');
  const {SubsFeedback}=await import('../../src/web/subs-feedback.js');
+ const {EntryHistory}=await import('../../src/web/entry-history.js');
  const {ThinHost,presentationTarget,preservePresentationRoute,refusedFallback}=await import('../../src/web/thin-host.js'),{Backoff,Retry,probeHub,QUIET_MS}=await import('../../src/web/reconnect.js'),{ThinViews,viewCapability,VIEW_LIMITS}=await import('../../src/web/thin.js'),{discoverViews}=await import('../../src/web/thin-discovery.js');
  let source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
  if(legacyProbe)source=source.replaceAll(' || attempt !== thinAttempt','');
@@ -19,7 +20,7 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
  const clearTimer=id=>timers.delete(id);
  class FixtureRetry extends Retry {constructor(){super({setTimer,clearTimer,now:()=>clock});}}
  class Socket{constructor(url){this.url=url;this.readyState=0;sockets.push(this);}open(){this.readyState=1;this.onopen?.();}send(b){requests.push(JSON.parse(decoder.decode(b)));}frame(v){this.onmessage?.({data:encoder.encode(JSON.stringify(v)).buffer});assert(!JSON.parse(store.get('bp.connection.log.v1')||'[]').some(r=>r.cause==='decode-error'),'host callback must not hide a missing fixture dependency as a decode error');}close(){this.readyState=3;this.onclose?.();}}
- const ctx={ConnectionLog,bubMoves:new BubMoveObserver(()=>null),terminalOutput:{clear(){calls.push('terminal-retired');},rebind(){}},refocusKeep(){},bodyWindows:{disconnect(){},bind(){}},sealedReply:()=>false,CONNECTION_BUNDLE:'chunk-fixture.js',ThinHost,ThinViews,viewCapability,discoverViews,WebSocket:Socket,location:{origin:'https://fixture',host:'fixture',protocol:'https:'},
+ const ctx={entryHistory:new EntryHistory(),ConnectionLog,bubMoves:new BubMoveObserver(()=>null),terminalOutput:{clear(){calls.push('terminal-retired');},rebind(){}},refocusKeep(){},bodyWindows:{disconnect(){},bind(){}},sealedReply:()=>false,CONNECTION_BUNDLE:'chunk-fixture.js',ThinHost,ThinViews,viewCapability,discoverViews,WebSocket:Socket,location:{origin:'https://fixture',host:'fixture',protocol:'https:'},
   thin:null,thinSocket:null,thinAttempt:0,thinExpiry:0,thinGreetingTimer:0,thinDraftTimer:0,thinFieldTimer:0,socket:null,viewMode:'discovering',remoteReady:false,remoteEpoch:'',canonicalBoot:false,pairingAccepted:false,
   thinSession:null,frontendNode:null,frontend:null,cid:'fixture',ui:{},heard:0n,thinMailDraft:{clear(){},bind(){},matches:()=>false,edit(){},scope:()=>'',needsSubmit:()=>false},mailReplyField:()=>undefined,focusedView:{invalidate(){},remote(){calls.push('cache-retired');}},desktopBrowser:{hide(){calls.push('hide');}},Solid:{reset(){},isPlot:()=>false},Plot2d:{reset(){}},
   localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,v)},performance:{now:()=>clock},pnow:()=>clock,enterImprovements(){calls.push('improvements-entry');},Date,Number,JSON,String,Math,Uint8Array,Error,BigInt,
@@ -49,6 +50,8 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
   targetKey:t=>t?t.kind+':'+t.id:'',holdPicture(){if(ctx.frontendNode){ctx.transitionNode=ctx.frontendNode;ctx.frontendNode=null;}},
   stopThin:undefined};
  vm.createContext(ctx);
+ const ownerStart=source.indexOf('function historyFillOwner()'),ownerEnd=source.indexOf('function historyHasMessage(tl)',ownerStart);
+ assert(ownerStart>0&&ownerEnd>ownerStart);vm.runInContext(source.slice(ownerStart,ownerEnd),ctx);
  for(const [start,end] of [['function keepThinReading(','// (the re-render harness'],['function keepSettingsRecovery(','async function recoverSettings('],['function restoreDraftAttachments(','function uploadScope(']]){
   const from=source.indexOf(start),to=source.indexOf(end,from);assert(from>0&&to>from);vm.runInContext(source.slice(from,to),ctx);
  }
