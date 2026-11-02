@@ -190,6 +190,8 @@ html[data-backplane-held="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 html[data-backplane-held="quiet"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, main > :not(.workspace-bar, .thread-content), main .thread-content > :not(.composer), .composer .model-chip, .app > aside.viewer) { pointer-events: none; }
 html[data-backplane-held="quiet"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, main > :not(.workspace-bar, .thread-content), main .thread-content > :not(.composer), .composer .model-chip, .composer .model-ctx, .app > aside.viewer) { visibility: hidden; }
 html[data-backplane-held="quiet"] .sidebar .thread.on { background: none; box-shadow: none; }
+/* Back selects the conversation list, independent of the retained picture. */
+html:is([data-backplane-held="true"], [data-backplane-held="quiet"]) .topbar .back[data-on-click="select"] { pointer-events: auto; visibility: visible; }
 /* The page before the hub's first view (host.js's wait shell): the frame
    where everything will be, nothing in it half-filled. The draft, rail and
    viewer wait for the same complete workspace as the sidebar and header. */
