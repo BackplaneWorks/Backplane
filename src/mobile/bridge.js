@@ -11,7 +11,8 @@
 // wire format; its dictionaries come from there).
 
 import App from "./app.bend";
-import IssueScreen from "./screen.bend";
+// Use one Bend entry point so the native bundle has one Base runtime.
+const IssueScreen = App;
 import { BubMoveObserver } from "../web/bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
 const bubLive = new Set();

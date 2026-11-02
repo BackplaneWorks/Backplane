@@ -5,12 +5,13 @@ export async function registerBridgeChecks(check,stage,root){
  for(const n of ['src/web/wire.js','src/web/bub-move.js','src/mobile/recent.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync((process.env.BP_NATIVE_THIN_SOURCE_ROOT ? path.join(process.env.BP_NATIVE_THIN_SOURCE_ROOT,n) : path.join(packet,fs.existsSync(path.join(packet,'qualified-dependencies'))?'qualified-dependencies':'dependencies',n)),q);}
  const stub=path.join(stage,'src/mobile/app-stub.mjs');fs.copyFileSync(path.join(root,'test/tools/native_thin_app_stub_307265.mjs'),stub);
  let code=fs.readFileSync(process.env.BP_NATIVE_BRIDGE_SOURCE||path.join(root,'src/mobile/bridge.js'),'utf8');
- const appImport='import App from "./app.bend";',screenImport='import IssueScreen from "./screen.bend";';
+ const appImport='import App from "./app.bend";',screenAlias='const IssueScreen = App;';
  assert.equal(code.split(appImport).length,2,'source adapter must substitute exactly one App import');
- assert.equal(code.split(screenImport).length,2,'source adapter must substitute exactly one IssueScreen import');
+ assert.equal([...code.matchAll(/^import .* from ["'][^"']+\.bend["'];/gm)].length,1,'native bridge must have one Bend entry point');
+ assert.equal(code.split(screenAlias).length,2,'source adapter must substitute exactly one IssueScreen alias');
  // Improvements rendering is outside these transport checks. Refuse any
  // accidental call rather than supplying a pretend Bend rendering result.
- code=code.replace(appImport,'import App from "./app-stub.mjs";').replace(screenImport,
+ code=code.replace(appImport,'import App from "./app-stub.mjs";').replace(screenAlias,
   'const IssueScreen=new Proxy({}, {get(_target,name){throw Error("IssueScreen export reached outside transport fixture: "+String(name));}});');
  fs.writeFileSync(path.join(stage,'src/mobile/bridge.js'),code);await import(pathToFileURL(path.join(stage,'src/mobile/bridge.js')));
  const {observed,screen,j,default:stubApp}=await import(pathToFileURL(stub));const B=globalThis.Backplane;

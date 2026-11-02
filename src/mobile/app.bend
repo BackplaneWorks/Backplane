@@ -332,3 +332,26 @@ def thin_search(screen: J.Json, search: J.Json) -> J.Json:
 # Tiny lease comparison shared by the web and phone presentation hosts.
 def bub_move(before: String, after: String) -> J.Json:
   HOP.Hop.text(before, after)
+
+# Stateless report helpers share the bridge's existing Bend entry point.
+# A second direct .bend import would emit another complete Base runtime.
+def issue_report(text: String, os: String, version: String, details: String, diagnostics: String) -> String:
+  S.issue_report(text, os, version, details, diagnostics)
+
+def issue_target(saved: String, legacy: Bool) -> String:
+  S.issue_target(saved, legacy)
+
+def improvements_preview(text: String, os: String, version: String, details: String, diagnostics: String) -> J.Json:
+  S.improvements_preview(text, os, version, details, diagnostics)
+
+def improvements_preview_body(body: String) -> J.Json:
+  S.improvements_preview_body(body)
+
+def improvement_issue_url(body: String) -> String:
+  S.improvement_issue_url(body)
+
+def improvements_template() -> String:
+  S.improvements_template()
+
+def improvements_prompt(description: String, os: String, version: String, evidence: String, diagnostics: String) -> String:
+  S.improvements_prompt(description, os, version, evidence, diagnostics)
