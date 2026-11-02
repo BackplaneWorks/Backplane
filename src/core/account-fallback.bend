@@ -187,7 +187,7 @@ def Preference.ready(+s: M.State, +now: Nat, +th: String) -> Bool:
     (String.is_empty(id) || (A.Accounts.ready(A.Accounts.profile(s, id), p, epoch) && Profile.model(A.Accounts.profile(s, id), model)))
 
 def Reset.earliest(+a: Nat, +b: Nat) -> Nat:
-  Bool.pick(Nat, Nat.is_eq(a, 0n), b, Bool.pick(Nat, Nat.is_eq(b, 0n), a, Nat.min(a, b)))
+  Bool.pick(Nat, Nat.is_eq(a, 0n), b, Bool.pick(Nat, Nat.is_eq(b, 0n), a, Bool.pick(Nat, Nat.is_le(a, b), a, b)))
 
 def Reset.profiles(xs: List<&2, J.Json>, +s: M.State, +now: Nat, +p: String, +model: String, +best: Nat) -> Nat:
   match xs:
