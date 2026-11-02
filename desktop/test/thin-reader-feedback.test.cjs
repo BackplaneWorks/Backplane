@@ -123,3 +123,22 @@ test('an oversized picture never closes the live socket or starts reconnect back
  const src=source(),a=src.indexOf('  const viewRecover = reason => {'),b=src.indexOf('\n  try {',a);assert(a>0&&b>a);
  let shown=0;const recover=vm.runInNewContext('('+src.slice(a+'  const viewRecover = '.length,b).trim().replace(/;$/,'')+')',{current:()=>true,showViewLimit(){shown++;},downNote:'',Date:{now(){throw Error('must not enter reconnect/backoff');}},disconnect(){throw Error('socket must stay live');},s:{close(){throw Error('socket must stay live');}}});for(const reason of ['LIMIT','invalid view presentation','invalid view delta','View request timed out; actions were not resent'])recover(reason);assert.equal(shown,4);
 });
+
+test('bottom reconciles a paging-owned unread boundary even when host away is already empty',()=>{
+ const src=source(),a=src.indexOf('function holdSay(now)'),b=src.indexOf('function timelineScrolled(',a),jobs=[],sent=[];
+ let mark='before-six-mailroom-posts';
+ const thin={ready:true,target:{kind:'bot',id:'bub'},awayOf:()=>mark};
+ const ctx=vm.createContext({focusedNode:null,frontendNode:{},away:'',holdPending:null,thin,App:{sel:()=> 'chat'},ui:{},queueMicrotask:f=>jobs.push(f),
+  dispatch:(action,thread)=>{sent.push([action,thread]);if(action==='hold-end'&&thread==='chat')mark='';}});
+ const say=vm.runInContext('('+src.slice(a,b)+')',ctx);say('');jobs.splice(0).forEach(f=>f());
+ assert.equal(mark,'','actual bottom must clear a controller boundary that was established by paging');
+ assert.deepEqual(sent,[['hold-end','chat']]);
+});
+
+test('queued reading progress is retired by bot navigation and cannot consume another target',()=>{
+ const src=source(),a=src.indexOf('function holdSay(now)'),b=src.indexOf('function timelineScrolled(',a),jobs=[],sent=[];
+ const thin={ready:true,target:{kind:'bot',id:'bub'},awayOf:()=> 'old-mark'};
+ const ctx=vm.createContext({focusedNode:null,frontendNode:{},away:'chat',holdPending:null,thin,App:{sel:()=> 'chat'},ui:{},queueMicrotask:f=>jobs.push(f),dispatch:(...args)=>sent.push(args)});
+ const say=vm.runInContext('('+src.slice(a,b)+')',ctx);say('');thin.target={kind:'bot',id:'other'};jobs.splice(0).forEach(f=>f());
+ assert.deepEqual(sent,[],'same source conversation alone cannot authorize a later bot target');
+});
