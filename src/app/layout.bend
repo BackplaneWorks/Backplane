@@ -3301,7 +3301,9 @@ def Ask.std.card(+ty: Ty, a: M.Ask, +draft: String, +info: Map<&2, String>, +x0:
         Out.ops(Lay.box(D.Clip.all(), x0, y, (x1 - x0 : U32), h, 0, T.Th.panel(), T.Th.warn())),
         Out.ops(Ty.text(ty, 2n, head, D.Clip.all(), (x0 + 14 : U32), (y + 4 : U32), 22, T.Th.warn())),
         Ask.body(ty, k, id, d, info, x0, x1, y, h),
-        Ask.buttons(ty, Ask.choices.loc(Ty.loc(ty), U.Ask.bkind(k, tool), id, o, draft), (y + h - 36 : U32), (x1 - 12 : U32))])
+        Ask.buttons(ty, Bool.pick(List<&2, S.Hit>, String.eq(tool, "settings_proposal"),
+          [S.Hit{0, 0, 0, 0, "Approve", id ++ "|accept"}, S.Hit{0, 0, 0, 0, "Reject", id ++ "|decline"}],
+          Ask.choices.loc(Ty.loc(ty), U.Ask.bkind(k, tool), id, o, draft)), (y + h - 36 : U32), (x1 - 12 : U32))])
 
 # the buttons of a paused task's card, right to left (the first is leftmost)
 def Ask.tbtns(bs: List<&2, U.TBtn>, +ty: Ty, +y: U32, +x: U32) -> Out:
