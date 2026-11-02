@@ -5552,12 +5552,21 @@ def Watch.word(+status: String, cancelling: Bool) -> String:
 def Watch.text(+note: String, +word: String, +detail: String) -> String:
   "[Backplane] Watched work \"" ++ note ++ "\" ended: " ++ word ++ Bool.pick(String, String.is_empty(detail), "", "\n" ++ detail)
 
+# An interrupted owner keeps its result in history for the next explicit
+# request. A timeout or a work outcome is not consent to resume its agent.
+def Watch.tell.chat(t: M.Thread, +s: M.State, +now: Nat, +th: String, +text: String) -> Step:
+  match t:
+    case M.Thread{_, _, _, _, _, M.Interrupted{}, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Step{[M.MessagePosted{th, M.Link.id("backplane", Hub.id("l", now, Hub.seq(s))), M.System{}, text, now}], Nil{}}
+    case _:
+      Lost.note(s, now, th, text)
+
 # watched work of the uberbot's own thread is filed (Operational.file);
 # any other thread is told in its chat as before
 def Watch.tell.to(owned: Bool, +s: M.State, +now: Nat, +th: String, +text: String) -> Step:
   match owned:
     case True{}: Operational.file(s, now, ML.Origin{"backplane", "system", "work"}, th, text, M.Link.id("backplane", Hub.id("l", now, Hub.seq(s))), Nil{})
-    case False{}: Lost.note(s, now, th, text)
+    case False{}: Watch.tell.chat(Hub.thread(s, th), s, now, th, text)
 
 def Watch.tell.k(live: Bool, +s: M.State, +now: Nat, +th: String, +text: String) -> Step:
   match live:
