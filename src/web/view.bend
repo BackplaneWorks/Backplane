@@ -3402,7 +3402,7 @@ def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D
     case False{}: Nil{}
     case True{}:
       [D.El{"div", "account-picker", [D.At{"class", "account-picker"}],
-        D.Txt{"Choose an account between turns. Selecting another agent's account switches the agent too. No automatic account fallback."} <>
+        D.Txt{"Choose an account between turns. Usage limits automatically try another connected account of the same agent, then your fallback hierarchy. Your choice returns after its reported reset, between turns."} <>
         D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default " ++ provider ++ " account") <>
         View.accounts.options(ACCT.Accounts.profiles(st), provider)}]
 
