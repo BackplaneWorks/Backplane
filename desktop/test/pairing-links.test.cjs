@@ -27,3 +27,24 @@ test('desktop protocol enrollment derives a platform name when no label was supp
  await pair({text:'https://hub/pair#code=ABCD2345',fetch:async(_url,options)=>{sent=options.headers['X-Backplane-Name'];return {ok:true}}});
  assert.equal(sent,({linux:'Linux',darwin:'macOS',win32:'Windows'}[process.platform]||'Device')+' / Desktop');
 });
+test('a link from outside the app pairs at once only with one of the person\'s own hubs',async()=>{
+ const {knownHub}=require('../pairing.cjs'), link=o=>'backplane://pair?url='+encodeURIComponent(o+'/pair#invite='+'a'.repeat(32));
+ let asked=[];const fetch=known=>async(url,options)=>{asked.push([url,options.headers['X-Backplane-Origin'],options.headers.Authorization,options.redirect]);return {ok:true,json:async()=>({known})}};
+ // this app's own service and the hub it is paired with: no question asked
+ assert.equal(await knownHub({text:link('http://127.0.0.1:4100'),local:'http://127.0.0.1:4100',saved:null,token:'t',fetch:fetch(false)}),true);
+ assert.equal(await knownHub({text:link('http://100.2.0.1:3787'),local:'http://127.0.0.1:4100',saved:'http://100.2.0.1:3787',token:'t',fetch:fetch(false)}),true);
+ assert.equal(asked.length,0);
+ // any other address: the own service says whether it is one of the owner's
+ assert.equal(await knownHub({text:link('http://100.3.0.1:3787'),local:'http://127.0.0.1:4100',saved:null,token:'t',fetch:fetch(true)}),true);
+ assert.deepEqual(asked[0],['http://127.0.0.1:4100/auth/known','http://100.3.0.1:3787','Bearer t','error']);
+ assert.equal(await knownHub({text:link('https://evil.example'),local:'http://127.0.0.1:4100',saved:null,token:'t',fetch:fetch(false)}),false);
+ // no answer (an older service, or none running) is not a yes
+ assert.equal(await knownHub({text:link('https://evil.example'),local:'http://127.0.0.1:4100',saved:null,token:'t',fetch:async()=>({ok:false,status:404})}),false);
+ assert.equal(await knownHub({text:link('https://evil.example'),local:'http://127.0.0.1:4100',saved:null,token:'t',fetch:async()=>{throw Error('down')}}),false);
+ assert.equal(await knownHub({text:link('https://evil.example'),local:null,saved:null,token:'t',fetch:fetch(true)}),false);
+ assert.equal(await knownHub({text:'https://evil.example/pair#invite=bad',local:'http://127.0.0.1:4100',saved:null,token:'t',fetch:fetch(true)}),false);
+});
+test('a revoked invitation says so',async()=>{
+ const r=await pair({text:'https://hub/pair#code=ABCD2345',fetch:async()=>({ok:false,json:async()=>({error:'revoked_code'})})});
+ assert.deepEqual(r,{ok:false,error:'revoked_code'});
+});

@@ -148,6 +148,12 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     }
     link.focus();
   }
+  function invitationState(x) {
+    if (x.state === 'used') return 'Used ' + new Date(x.usedAt).toLocaleString() + ' by ' + (x.deviceName || 'a device') + (x.deviceRevoked ? ' (revoked)' : '');
+    if (x.state === 'revoked') return 'Revoked' + (x.device ? ' with ' + (x.deviceName || 'the device it paired') : ', never used');
+    if (x.state === 'expired') return 'Expired, never used';
+    return 'Not used yet · expires ' + new Date(x.expiresAt).toLocaleTimeString();
+  }
   async function devices() {
     const card = frame('Devices', 'Add another computer or phone. Each invitation expires in 10 minutes and works once.', true);
     const status = element('p', '', card, {role: 'status', 'aria-live': 'polite', class: 'pairing-status'});
@@ -181,6 +187,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     });
     add.classList.add('primary');
     const list = element('section', '', card);element('h2', 'Paired devices', list);
+    const links = element('section', '', card);
     async function refresh(quiet = false) {
       try {
         const result = await request('/auth/devices');if (!panel?.contains(card)) return;
@@ -191,6 +198,22 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
           const row = element('div', '', list, {class: 'pairing-device'});element('strong', d.name, row);
           element('p', 'Last seen ' + new Date(d.lastSeen).toLocaleString(), row);
           button(row, 'Revoke', async () => { if (!globalThis.confirm('Revoke access for ' + d.name + '?')) return;try { await request('/auth/revoke', 'POST', {'X-Backplane-Device': d.id});await refresh(); } catch(e) { error(status, e.message); } });
+        }
+        // every pairing link this hub issued: when, used or not and by which
+        // device; revoking one this hub has not seen used stops it working,
+        // revoking a used one also revokes the device it paired
+        links.replaceChildren();element('h2', 'Pairing links', links);
+        const issued = result.invitations || [];
+        if (!issued.length) element('p', 'Links made with Add a device appear here.', links);
+        for (const x of issued) {
+          const row = element('div', '', links, {class: 'pairing-device'});
+          element('strong', 'Device invitation · ' + new Date(x.createdAt).toLocaleString(), row);
+          element('p', invitationState(x), row);
+          const live = x.state === 'open' || (x.state === 'used' && x.device && !x.deviceRevoked);
+          if (live) button(row, 'Revoke', async () => {
+            if (!globalThis.confirm(x.state === 'used' ? 'Revoke this link and the device it paired (' + (x.deviceName || 'unnamed') + ')?' : 'Revoke this link? It will no longer pair anything.')) return;
+            try { await request('/auth/revoke', 'POST', {'X-Backplane-Invitation': x.id});await refresh(); } catch(e) { error(status, e.message); }
+          });
         }
       } catch(e) { if (!quiet) error(status, e.message); }
     }
