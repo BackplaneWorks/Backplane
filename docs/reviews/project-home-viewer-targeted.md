@@ -44,3 +44,5 @@ qualification; its metric unit checks do not establish renderer parity.
 The installer receives the merged source identity and these limits. Installing
 or starting a combined build requires its separate authorization and an actual
 successful emission/startup receipt; this source review supplies neither.
+
+Baseline advanced by normally merging memory PR #850 (`8021937a45f0fc4a3aa18dde560833cacf9dbb75`). None of the four reviewed module bytes changed; their exact source bindings and narrow review remain valid. No acceptance of the combined emitted artifact is inferred.
