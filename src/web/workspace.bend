@@ -1,6 +1,7 @@
 import Base
 import ../core/presentation.bend as PRESENT
 import ../core/client.bend as U
+import ../core/signal.bend as SG
 import ../core/model.bend as M
 import ../core/json.bend as J
 import ../core/vt.bend as VT
@@ -299,9 +300,16 @@ def WS.projects(xs: List<&2, M.Project>) -> List<&2, U.PItem>:
     case M.Project{id, title, _, _, False{}} <> tail: U.PItem{"Project: " ++ title, "ws-project", id} <> WS.projects(tail)
     case _ <> tail: WS.projects(tail)
 
+# opened with nothing typed: the threads waiting on the person first
+# (U.Palette.needs), then the commands
+def WS.needs(blank: Bool, +u: U.Ui) -> List<&2, U.PItem>:
+  match blank:
+    case True{}: U.Palette.needs(U.Lang.loc(u), u)
+    case False{}: Nil{}
+
 def WS.items(+u: U.Ui) -> List<&2, U.PItem>:
-  List.take(&2, U.PItem, U.Palette.filter(List.concat(&2, U.PItem, [WS.commands(u), WS.projects(U.Ui.projects(U.Ui.state(u))),
-    U.Palette.threads(U.Lang.loc(u), U.Kids.keep(U.Ui.threads(U.Ui.state(u)), U.Kids.set(U.Ui.state(u))))]), U.Palette.query(u)), 24n)
+  List.take(&2, U.PItem, List.append(&2, U.PItem, WS.needs(String.is_empty(String.trim(U.Palette.query(u))), u), U.Palette.filter(List.concat(&2, U.PItem, [WS.commands(u), WS.projects(U.Ui.projects(U.Ui.state(u))),
+    U.Palette.threads(U.Lang.loc(u), U.Kids.keep(U.Ui.threads(U.Ui.state(u)), U.Kids.set(U.Ui.state(u))))]), U.Palette.query(u))), 24n)
 
 def WS.palette.move(+u: U.Ui, +delta: String) -> U.Act:
   +i = U.Palette.index(u)
@@ -380,21 +388,32 @@ def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
     case "term-paste": WS.term.send(u, VT.Vt.paste(U.Ui.term(u, WS.owner(u)), value))
     case _: WS.none(u)
 
-# a row's face: a command is its label; a thread is a thread's mark, its
-# title and its project (U.Palette.place), so it can't pass for a command
-def WS.row.face(thread: Bool, +label: String, +place: String) -> List<&2, D.Node>:
+# a thread row's dot: the sidebar's (view.bend's View.dot)
+def WS.dot(+lc: I.Loc, +name: String) -> D.Node:
+  D.El{"span", "", [D.At{"class", "dot " ++ name}, D.At{"role", "img"}, D.At{"aria-label", SG.Signal.label.loc(lc, name)}, D.At{"title", SG.Signal.label.loc(lc, name)}], Nil{}}
+
+def WS.row.thread(+u: U.Ui, +dot: String, +t: M.Thread, +label: String, +place: String) -> List<&2, D.Node>:
+  [WS.dot(U.Lang.loc(u), dot), D.Dom.span("name", label), D.Dom.span("want", U.Palette.want(U.Lang.loc(u), u, dot, t)), D.Dom.span("where", place)]
+
+# a row's face: a command is its label; a thread is its sidebar dot, its
+# title, what it wants (a red row's question, approval or failure: the
+# sidebar's word) and its project (U.Palette.place), so it can't pass for a
+# command
+def WS.row.face(thread: Bool, +u: U.Ui, +label: String, +place: String, +v: String) -> List<&2, D.Node>:
   match thread:
     case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{label}])
-    case True{}: [WI.WIcon.svg("message-square", 13), D.Dom.span("name", label), D.Dom.span("where", place)]
+    case True{}:
+      +t = U.Ui.thread(U.Ui.state(u), v)
+      WS.row.thread(u, U.Palette.dot(u, t), t, label, place)
 
-def WS.rows(xs: List<&2, U.PItem>, +st: M.State, +chosen: Nat, +i: Nat) -> List<&2, D.Node>:
+def WS.rows(xs: List<&2, U.PItem>, +u: U.Ui, +st: M.State, +chosen: Nat, +i: Nat) -> List<&2, D.Node>:
   match xs:
     case Nil{}: Nil{}
     case U.PItem{+label, +a, +v} <> tail:
       +thread = String.eq(a, "select")
       D.El{"button", "command:" ++ Nat.show(i), [D.At{"type", "button"}, D.At{"role", "option"}, D.At{"id", "workspace-command-" ++ Nat.show(i)},
         D.At{"aria-selected", Bool.pick(String, Nat.is_eq(chosen, i), "true", "false")}, D.At{"class", Bool.pick(String, Nat.is_eq(chosen, i), "workspace-command on", "workspace-command") ++ Bool.pick(String, thread, " thread", "")},
-        D.At{"title", Bool.pick(String, thread, "Thread · " ++ U.Palette.place(st, a, v), label)}, D.At{"data-value", Nat.show(i)}, D.On{"click", "ws-palette-run"}], WS.row.face(thread, label, U.Palette.place(st, a, v))} <> WS.rows(tail, st, chosen, 1n+i)
+        D.At{"title", Bool.pick(String, thread, "Thread · " ++ U.Palette.place(st, a, v), label)}, D.At{"data-value", Nat.show(i)}, D.On{"click", "ws-palette-run"}], WS.row.face(thread, u, label, U.Palette.place(st, a, v), v)} <> WS.rows(tail, u, st, chosen, 1n+i)
 
 # Nothing matches: a word said in a thread is not a command, a thread's or a
 # project's name. The search of every conversation (host.js's
@@ -421,7 +440,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
             D.At{"value", U.Palette.query(u)}, D.At{"data-bfield", "wspalette"}, D.At{"role", "combobox"}, D.At{"aria-label", "Search commands"}, D.At{"aria-expanded", "true"}, D.At{"aria-controls", "workspace-commands"},
             D.At{"aria-activedescendant", "workspace-command-" ++ Nat.show(U.Palette.index(u))}, D.On{"input", "bfield"}], Nil{}},
           D.El{"div", "workspace-commands", [D.At{"id", "workspace-commands"}, D.At{"role", "listbox"}],
-            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), WS.empty(U.Palette.query(u)), WS.rows(WS.items(u), U.Ui.state(u), U.Palette.index(u), 0n))},
+            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), WS.empty(U.Palette.query(u)), WS.rows(WS.items(u), u, U.Ui.state(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
             D.El{"details", "", Bool.pick(List<&2, D.Attr>, String.eq(U.Ui.scratch(u, "@ws.keys"), "1"), [D.At{"open", ""}], Nil{}), [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
               D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+. stop · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort · / composer."}]},
