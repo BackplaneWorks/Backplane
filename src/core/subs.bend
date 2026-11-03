@@ -887,9 +887,9 @@ def Subs.counts.ix(ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State) -> List<&2,
     case +t <> rest:
       Subs.count.ix(ix, st, M.Thread.id(t)) <> Subs.counts.ix(rest, ix, st)
 
-# a sidebar row's badge: "1 agent", "3 agents", or "" with none
+# a sidebar row's badge: "1 subthread", "3 subthreads", or "" with none
 def Subs.badge(+n: Nat) -> String:
-  Bool.pick(String, Nat.is_eq(n, 0n), "", Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " agent", " agents"))
+  Bool.pick(String, Nat.is_eq(n, 0n), "", Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " subthread", " subthreads"))
 
 # a step as a row shows it: the tool, or "" for what it wrote
 # a subagent's step: its tool as the timeline names it (FO.Tool.short: an
