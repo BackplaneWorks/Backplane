@@ -2986,27 +2986,71 @@ def View.dl.cls(+k: U32) -> String:
 def View.dl.no(+n: Nat) -> String:
   Bool.pick(String, Nat.is_eq(n, 0n), "", Nat.show(n))
 
-def View.dlines(ls: List<&2, DF.DLine>) -> List<&2, D.Node>:
-  match ls:
-    case Nil{}:
-      Nil{}
-    case DF.DLine{+k, t, +o, +n} <> rest:
+def View.dline(l: DF.DLine) -> D.Node:
+  match l:
+    case DF.DLine{+k, t, +o, +n}:
       D.El{"div", "", [D.At{"class", View.dl.cls(k)}], [D.Dom.span("no", View.dl.no(o)), D.Dom.span("no", View.dl.no(n)),
-        D.Dom.span("sign", Bool.pick(String, U32.is_eq(k, 1), "+", Bool.pick(String, U32.is_eq(k, 2), "-", " "))), D.Dom.span("code", t)]} <> View.dlines(rest)
+        D.Dom.span("sign", Bool.pick(String, U32.is_eq(k, 1), "+", Bool.pick(String, U32.is_eq(k, 2), "-", " "))), D.Dom.span("code", t)]}
 
-def View.dhunks(hs: List<&2, DF.DHunk>) -> List<&2, D.Node>:
+# The diff's lines are shown up to View.diff.lines() in all: a view page is
+# at most 256 KB, and a diff of a few MB (a thread that regenerated its STEP
+# models) showed nothing at all. Every file keeps its head; one cut short
+# says how many of its lines are not shown.
+def View.diff.lines() -> Nat:
+  120n
+
+# and up to View.diff.files() files (1788 heads alone passed the page; a
+# viewer of 150 files and 600 lines was 215 KB of a 229 KB page budget,
+# and one of 60 and 250 still left the page 235 KB)
+def View.diff.files() -> Nat:
+  30n
+
+# the first n lines
+def View.dlines.b(ls: List<&2, DF.DLine>, n: Nat) -> List<&2, D.Node>:
+  match ls n:
+    case +_ 0n:
+      Nil{}
+    case Nil{} 1n+_:
+      Nil{}
+    case +l <> rest 1n+k:
+      View.dline(l) <> View.dlines.b(rest, k)
+
+def View.dhunks.count(hs: List<&2, DF.DHunk>, acc: Nat) -> Nat:
+  match hs:
+    case Nil{}:
+      acc
+    case DF.DHunk{_, +ls} <> t:
+      View.dhunks.count(t, Nat.add(acc, List.length(&2, DF.DLine, ls)))
+
+# hunks with left lines to show between them (no head once none is left)
+def View.dhunks.b(hs: List<&2, DF.DHunk>, +left: Nat) -> List<&2, D.Node>:
   match hs:
     case Nil{}:
       Nil{}
-    case DF.DHunk{+hd, ls} <> t:
-      D.Dom.cat(Bool.pick(List<&2, D.Node>, String.is_empty(hd), Nil{}, [D.Dom.span("dhunk", hd)]), D.Dom.cat(View.dlines(ls), View.dhunks(t)))
+    case DF.DHunk{+hd, +ls} <> t:
+      D.Dom.cat(Bool.pick(List<&2, D.Node>, Bool.or(String.is_empty(hd), Nat.is_eq(left, 0n)), Nil{}, [D.Dom.span("dhunk", hd)]),
+        D.Dom.cat(View.dlines.b(ls, left), View.dhunks.b(t, Nat.sub(left, List.length(&2, DF.DLine, ls)))))
+
+def View.dfile.more(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, Nat.is_eq(n, 0n), Nil{}, [D.El{"div", "", [D.At{"class", "dl meta"}], [D.Dom.span("code", MSG.T.viewer.diff.more(lc, n))]}])
+
+def View.dfiles.rest(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, Nat.is_eq(n, 0n), Nil{}, [D.El{"div", "", [D.At{"class", "dfile"}], [D.El{"div", "", [D.At{"class", "dhead"}], [D.Dom.span("name", MSG.T.viewer.diff.files.more(lc, n))]}]}])
+
+# files with left lines and room files more to show
+def View.dfiles.b(fs: List<&2, DF.DFile>, +lc: I.Loc, +left: Nat, room: Nat) -> List<&2, D.Node>:
+  match fs room:
+    case +rest 0n:
+      View.dfiles.rest(lc, List.length(&2, DF.DFile, rest))
+    case Nil{} 1n+_:
+      Nil{}
+    case DF.DFile{_, +nw, st, +hs} <> t 1n+k:
+      +n = View.dhunks.count(hs, 0n)
+      D.El{"div", nw, [D.At{"class", "dfile"}], D.El{"div", "", [D.At{"class", "dhead"}], [D.Dom.span("name", nw), D.Dom.span("status", st)]}
+        <> List.append(&2, D.Node, View.dhunks.b(hs, left), View.dfile.more(lc, Nat.sub(n, left)))} <> View.dfiles.b(t, lc, Nat.sub(left, n), k)
 
 def View.dfiles(fs: List<&2, DF.DFile>) -> List<&2, D.Node>:
-  match fs:
-    case Nil{}:
-      Nil{}
-    case DF.DFile{_, +nw, st, hs} <> t:
-      D.El{"div", nw, [D.At{"class", "dfile"}], D.El{"div", "", [D.At{"class", "dhead"}], [D.Dom.span("name", nw), D.Dom.span("status", st)]} <> View.dhunks(hs)} <> View.dfiles(t)
+  View.dfiles.b(fs, I.En{}, View.diff.lines(), View.diff.files())
 
 # a git action of the diff's head; with no changes there is nothing to
 # commit, push or put back, and it is shown disabled (no accent)
@@ -3024,7 +3068,7 @@ def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
         View.diff.btn(none, "", "revert", "ask", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
         View.diff.btn(none, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
         View.diff.btn(none, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
-    D.El{"div", "", [D.At{"class", "diff-body"}], View.dfiles(fs)}]
+    D.El{"div", "", [D.At{"class", "diff-body"}], View.dfiles.b(fs, lc, View.diff.lines(), View.diff.files())}]
 
 def View.diff(+text: String) -> List<&2, D.Node>:
   View.diff.loc(I.En{}, text)
