@@ -18,7 +18,8 @@ test('restored navigation chords respect editors, IME, PTYs and platform modifie
   const editor = element('textarea', 'term', ['data-keys']);
   for (const input of [event('2', { altKey: true, target: editor }), event('2', { ctrlKey: true, target: editor }),
     event('}', { ctrlKey: true, shiftKey: true, target: editor }), event('U', { ctrlKey: true, shiftKey: true, target: editor }),
-    event('2', { altKey: true, target: element('textarea', 'composer') }),
+    event('2', { altKey: true, target: element('input', 'search') }),
+    event('2', { altKey: true, code: 'Numpad2', target: element('textarea', 'composer') }),
     event('P', { ctrlKey: true, shiftKey: true, isComposing: true }), event('2', { altKey: true, getModifierState: () => true })]) assert.equal(key(input, 'Linux'), null);
   assert.deepEqual(key(event('P', { ctrlKey: true, shiftKey: true, target: editor }), 'Linux'), ['ws-palette-open', '']);
   assert.deepEqual(key(event('P', { metaKey: true, shiftKey: true }), 'MacIntel'), ['ws-palette-open', '']);
@@ -271,6 +272,16 @@ test('bare keys and Alt+digit stay with a text field', async () => {
   }
   assert.equal(key(event('1', { altKey: true, target: composer }), 'MacIntel'), null);
   assert.deepEqual(key(event('1', { altKey: true }), 'MacIntel'), ['ws-key', 'alt+1']);
+});
+
+test('Alt+digit goes to a project from the composer on Linux and Windows', async () => {
+  // a project jump lands in the composer: the next Alt+digit must work there
+  const { workspaceShortcut: key } = await import('../../src/web/workspace-keys.js');
+  const composer = element('textarea', 'composer');
+  assert.deepEqual(key(event('2', { altKey: true, code: 'Digit2', target: composer }), 'Linux'), ['ws-key', 'alt+2']);
+  assert.deepEqual(key(event('3', { altKey: true, code: 'Digit3', target: composer }), 'Win32'), ['ws-key', 'alt+3']);
+  assert.equal(key(event('2', { altKey: true, code: 'Digit2', target: composer }), 'MacIntel'), null);
+  assert.equal(key(event('2', { altKey: true, code: 'Digit2', target: element('textarea', 'composer', ['data-keys']) }), 'Linux'), null);
 });
 
 test('Ctrl+K from the composer opens the palette once and keeps the draft', async () => {

@@ -47,8 +47,8 @@ export function workspaceShortcut(event, platform = '') {
   // The Ctrl/Cmd chords below work from the composer and every other text
   // field too: none of them edits text there (Ctrl+A/C/V/X/Z/Y, the arrows,
   // Home/End, Backspace/Delete and Ctrl+Enter stay the field's). A PTY keeps
-  // all of them; bare keys and Alt+digit (Option+1 types ¡ on a Mac) stay
-  // off in every field.
+  // all of them; bare keys stay off in every field, and Alt+digit (Option+1
+  // types ¡ on a Mac) in every field but a non-Mac composer (below).
   if (editor && event.target?.closest?.(PTY)) return null;
   if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && key === '.') return ['ws-stop', ''];
   if (command && !event.altKey && event.shiftKey) {
@@ -63,7 +63,12 @@ export function workspaceShortcut(event, platform = '') {
     if (action) return ['ws-key', action];
     if (/^[1-9]$/.test(key)) return ['ws-key', 'ctrl+' + key];
   }
-  if (!editor && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && /^[1-9]$/.test(key)) return ['ws-key', 'alt+' + key];
+  // Alt+digit also from the composer except on a Mac (Option+digit types
+  // there): moving project to project by keyboard lands in the composer,
+  // and the next Alt+digit must still work. Top-row digits only (Alt with
+  // the keypad's types a character code on Windows).
+  const composer = editor && editor.tagName === 'TEXTAREA' && editor.id === 'composer' && !mac && (!event.code || /^Digit[1-9]$/.test(event.code));
+  if ((!editor || composer) && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && /^[1-9]$/.test(key)) return ['ws-key', 'alt+' + key];
   return null;
 }
 
