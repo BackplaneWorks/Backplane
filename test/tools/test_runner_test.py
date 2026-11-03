@@ -47,6 +47,11 @@ class TestRunnerTest(unittest.TestCase):
             (self.root / folder).mkdir(parents=True)
         for name in ("test.sh", "test-shard.py"):
             shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
+        # This fixture executes only fake tools, not heavy work. Real lock/RAM
+        # admission has separate heavy_guard_test.py coverage. Never invoke the
+        # host's guard/offload policy from a dispatch unit test.
+        (self.root / "scripts/heavy-guard.sh").write_text(
+            "heavy_guard() { return 0; }\n")
         verified = self.root / "scripts/verified.sh"
         verified.write_text("#!/bin/sh\nexit 0\n")
         verified.chmod(0o755)
@@ -68,9 +73,12 @@ class TestRunnerTest(unittest.TestCase):
         (self.root / "test/tools" / f"{name}.mjs").write_text(body)
 
     def run_suite(self, **env: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(["sh", "scripts/test.sh"], cwd=self.root,
-                              env=self.env | env, capture_output=True,
-                              text=True, timeout=30)
+        result = subprocess.run(["sh", "scripts/test.sh"], cwd=self.root,
+                                env=self.env | env, capture_output=True,
+                                text=True, timeout=30)
+        self.assertNotIn("cannot open scripts/", result.stderr,
+                         "fixture setup failed before dispatch")
+        return result
 
     def calls(self) -> list[list[object]]:
         return [json.loads(line) for line in
@@ -98,7 +106,11 @@ class TestRunnerTest(unittest.TestCase):
         for mode in ("fail", "crash", "empty"):
             with self.subTest(mode=mode):
                 self.program("ordinary", f"# {mode}\ndef main() -> IO(Unit):\n")
-                self.assertNotEqual(self.run_suite().returncode, 0)
+                result = self.run_suite()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                expected = {"fail": "FAIL regression", "crash": "runtime crashed",
+                            "empty": "did not run"}[mode]
+                self.assertIn(expected, result.stdout)
 
     def test_fixture_needs_an_executed_driver(self) -> None:
         self.program("fixture", "def exported() -> String:\n")
@@ -111,15 +123,23 @@ class TestRunnerTest(unittest.TestCase):
         for mode in ("fail", "crash", "empty"):
             with self.subTest(mode=mode):
                 self.driver("fixture", f"# {mode}\n")
-                self.assertNotEqual(self.run_suite().returncode, 0)
+                result = self.run_suite()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                expected = {"fail": "FAIL regression", "crash": "runtime crashed",
+                            "empty": "did not run"}[mode]
+                self.assertIn(expected, result.stdout)
         self.driver("fixture")
         self.program("fixture", "# emit-error\ndef exported() -> String:\n")
-        self.assertNotEqual(self.run_suite().returncode, 0)
+        result = self.run_suite()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("exited non-zero", result.stdout)
 
     def test_main_failure_is_not_hidden_by_a_passing_driver(self) -> None:
         self.program("both", "# fail\ndef main() -> IO(Unit):\n")
         self.driver("both")
-        self.assertNotEqual(self.run_suite().returncode, 0)
+        result = self.run_suite()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL regression", result.stdout)
 
     def test_shards_cover_each_case_once_including_drivers(self) -> None:
         for name in ("a", "b", "c", "d"):
