@@ -122,6 +122,10 @@ def legacy(+p: String) -> M.State:
     M.SettingSet{FB.Limit.key(p), FB.Limit.json(FB.Limit{p, "Weekly limit reached", 200n}, 110n), 110n},
     M.SettingSet{"fallback.on", "on", 110n}, M.SettingSet{"fallback.chain", p ++ "/" ++ model(p) ++ ",codex/gpt-6.1-sol", 110n}], base(p))
 
+def legacy_dated() -> M.State:
+  M.State.replay([M.SettingSet{FB.Limit.key("claude"), FB.Limit.json(FB.Limit{"claude", "You've hit your weekly limit · resets Nov 4, 12pm (America/New_York)", 0n}, 1793635200n), 1793635200n},
+    M.SettingSet{"tz.rule.America/New_York", "EST5EDT,M3.2.0,M11.1.0", 1793635200n}], legacy("claude"))
+
 def permille() -> J.Json:
   A.Accounts.put(profile("claude", "normalized", "null"), "allowance", A.Accounts.parse("{\"provider\":\"claude\",\"state\":\"ok\",\"at\":100,\"windows\":[{\"scope\":\"shared\",\"used_permille\":125,\"resets_at\":200}]}"))
 
@@ -143,6 +147,11 @@ def main() -> IO(Unit):
     C.Check.str("provider fallback gate opens after all reported allowances exhausted", Bool.show(F.Pick.may_cross(M.State.setting(zero, "accounts.inventory", inventory([profile("claude", "empty", "100")])), 120n, "claude", "sonnet")), "True")
     +dated : M.State = M.State.setting(base("claude"), "tz.rule.America/New_York", "EST5EDT,M3.2.0,M11.1.0")
     C.Check.str("weekly named-date reset keeps provider wall time", Nat.show(H.Reset.words(dated, 1793635200n, "You've hit your weekly limit · resets Nov 4, 12pm (America/New_York)")), "1793811600")
+    +datedStep : H.Step = launch(legacy_dated(), 1793674000n)
+    +datedNext : M.State = fold(legacy_dated(), datedStep)
+    C.Check.str("cached legacy weekly words recover the account reset", Nat.show(F.Hold.reset(datedNext, "claude", "", 0n)), "1793811600")
+    C.Check.str("cached legacy provider hold also records recovered reset", Nat.show(J.Json.get_nat(FB.Limit.record(datedNext, "claude"), "reset", 0n)), "1793811600")
+    C.Check.str("cached weekly account restores after the dated reset", selected(fold(atrest(datedNext), H.ProviderResume.tick(atrest(datedNext), 1793811600n)), "claude"), "")
     +claude : H.Step = fail(base("claude"), 120n, limit())
     +codex : H.Step = fail(base("codex"), 120n, limit())
     C.Check.str("Claude retries most-remaining available connected account", selected(one("claude"), "claude"), "C")

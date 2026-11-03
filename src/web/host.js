@@ -1631,7 +1631,7 @@ function dispatch(action, value, timer) {
     restoreDraftAttachments(currentSession());
     if (socket?.readyState === 1 && ((!thin?.ready && !thin?.opening) || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) { showViewStatus(App.host_message(ui, "attachment-restoring"));return true; }
   }
-  if (["send", "send-alt"].includes(action)) historyClear();
+  if (["send", "send-alt"].includes(action)) { historyClear();if (socket?.readyState === 1) dropUnsentBack(); }
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
   if (action === "select" || action === "bot") { composerKeeper.selecting(action === "select" ? value : "");drawerShut(); }
   if (["term-toggle", "ws-term-hide", "ws-term-here"].includes(action) || action === "ws-go" && value === "term") terminalOutput.retire();
@@ -3059,10 +3059,26 @@ function downStatus(note) {
   const wait = Math.max(0, downSince + DOWN_QUIET_MS - Date.now());
   downTimer = setTimeout(() => { if (downSince) { reconnectNote(waiting(offlineSend ? App.host_message(ui, "offline-send") : offlineAttach ? App.host_message(ui, "offline-attachment") : downNote));connDot(true); } }, wait);
 }
+// A Send pressed while the link was down went nowhere: once it is back the
+// bar says so for a while (the "Not sent" note would just vanish, leaving
+// the text in the composer looking sent), until the next Send.
+let unsentBack = "";
+function holdViewNote(text, ms) {
+  clearTimeout(viewNoteTimer);
+  viewNote = text;
+  viewNoteTimer = setTimeout(() => { viewNote = "";unsentBack = "";if (remoteReady) showViewStatus(""); }, ms);
+  showViewStatus(viewNote);
+}
+function dropUnsentBack() {
+  if (!unsentBack || viewNote !== unsentBack) return;
+  clearTimeout(viewNoteTimer);viewNote = "";unsentBack = "";showViewStatus("");
+}
 function upStatus() {
+  const unsent = offlineSend;
   downSince = 0;clearTimeout(downTimer);downTimer = 0;offlineSend = false;offlineAttach = false;
   thinBackoff.reset();thinRetry.cancel();
   reconnectNote("");showViewStatus("");connDot(false);
+  if (unsent) { unsentBack = App.host_message(ui, "offline-send-back");holdViewNote(unsentBack, 20000); }
 }
 function thinReconnect() {
   if (!pairingAccepted || viewMode === "compatibility" || thinRetry.pending) return;
