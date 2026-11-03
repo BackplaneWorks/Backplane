@@ -29,6 +29,29 @@ def Touch.adds(ths: List<&2, String>, t: Touch) -> Touch:
     case +th <> rest:
       Touch.adds(rest, Touch.add(t, th))
 
+# Settlement receipts describe the policy's durable bookkeeping, not a
+# displayed value. The actual ThreadSettled/Unsettled events still notify
+# views. Keep this allowlist exact: policy settings and unknown keys remain
+# global, including malformed metadata names without an owner.
+def Touch.metadata.owner(+key: String, +prefix: String) -> Bool:
+  Bool.and(String.starts_with(key, prefix), Bool.not(String.is_empty(String.drop(key, String.length(prefix)))))
+
+def Touch.metadata(+key: String) -> Bool:
+  Bool.or(String.eq(key, "autosettle.version"),
+    Bool.or(Touch.metadata.owner(key, "autosettle.quiet."),
+      Bool.or(Touch.metadata.owner(key, "autosettle.output."),
+        Bool.or(Touch.metadata.owner(key, "autosettle.read."),
+          Bool.or(Touch.metadata.owner(key, "autosettle.delivery."),
+            Bool.or(Touch.metadata.owner(key, "autosettle.report."),
+              Bool.or(Touch.metadata.owner(key, "autosettle.audience."), Touch.metadata.owner(key, "autosettle.seed."))))))))
+
+def Touch.setting(private: Bool, +key: String) -> List<&2, String>:
+  match private:
+    case True{}: Nil{}
+    case False{}:
+      Bool.pick(List<&2, String>, Bool.and(String.starts_with(key, "liveness."), Bool.not(String.is_empty(String.drop(key, 9n)))),
+        [U.Touch.id(String.drop(key, 9n))], U.Touch.setting(key))
+
 # Liveness is a thread's display overlay. Its frequent progress stamps must
 # not promote every other view to the urgent lane. Other views still owe a
 # sidebar refresh, including a stalled/recovered dot, at the soft cadence.
@@ -36,8 +59,7 @@ def Touch.adds(ths: List<&2, String>, t: Touch) -> Touch:
 def Touch.change(c: M.Change) -> List<&2, String>:
   match c:
     case M.SettingSet{+key, _, _}:
-      Bool.pick(List<&2, String>, Bool.and(String.starts_with(key, "liveness."), Bool.not(String.is_empty(String.drop(key, 9n)))),
-        [U.Touch.id(String.drop(key, 9n))], U.Touch.setting(key))
+      Touch.setting(Touch.metadata(key), key)
     case _: U.Touch.of(c)
 
 # what a step's committed changes touch
