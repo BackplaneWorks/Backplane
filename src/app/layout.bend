@@ -7136,7 +7136,7 @@ def Ready.h(+line: String) -> U32:
   Bool.pick(U32, String.is_empty(line), 0, 44)
 
 def Ready.line(+st: M.State, +pics: Map<&2, String>, +sel: String, run: Bool) -> String:
-  U.Fab.ready.shown.k(U.Fab.min.of(st, sel), U.Fab.ready.k(U.Fab.buy.of(st, pics, sel), U.Str.get(pics, "fab.ready:" ++ sel), run))
+  U.Fab.ready.shown.k(U.Fab.min.of(st, sel), U.Fab.ready.k(U.Fab.buy.of(st, pics, sel), U.Str.get(pics, "fab.ready:" ++ sel), U.Fab.wait(st, sel, run)))
 
 def Lay.ready.k(none: Bool, +ty: Ty, +line: String, +buy: String, +x0: U32, +x1: U32, +y: U32) -> Out:
   match none:
