@@ -43,6 +43,7 @@ def lang(u: U.Ui) -> String:
 def host_message(+u: U.Ui, kind: String) -> String:
   match kind:
     case "offline-send": MSG.T.composer.offline(U.Lang.loc(u))
+    case "offline-send-back": MSG.T.composer.offline.back(U.Lang.loc(u))
     case "offline-attachment": MSG.T.composer.attachment.offline(U.Lang.loc(u))
     case "attachment-reload": MSG.T.composer.attachment.reload(U.Lang.loc(u))
     case _: MSG.T.composer.attachment.restoring(U.Lang.loc(u))
