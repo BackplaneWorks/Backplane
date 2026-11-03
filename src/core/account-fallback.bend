@@ -71,9 +71,68 @@ def Profile.model(+profile: J.Json, +model: String) -> Bool:
   +xs = J.Json.elems(J.Json.get_obj(profile, "catalog"))
   String.is_empty(model) || List.is_empty(&2, J.Json, xs) || Profile.supports(xs, model)
 
+# Rank by the most remaining allowance across applicable active windows.
+# Public raw percentages and #694/#757 permille snapshots share this path.
+# Missing, stale and expired readings stay unknown, never zero allowance.
+def Usage.number(x: Maybe<&2, F32>) -> Maybe<&2, U32>:
+  match x:
+    case None{}: None{}
+    case Some{+x}:
+      Bool.pick(Maybe<&2, U32>, F32.is_ge(x, 0.0) && F32.is_le(x, 100.0), Some{F32.to_u32(F32.mul(x, 1000.0))}, None{})
+
+def Usage.permille(x: Maybe<&2, F32>) -> Maybe<&2, U32>:
+  match x:
+    case None{}: None{}
+    case Some{x}: Usage.number(Some{F32.div(x, 10.0)})
+
+def Usage.first(a: Maybe<&2, U32>, b: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match a:
+    case Some{x}: Some{x}
+    case None{}: b
+
+def Usage.used(+w: J.Json) -> Maybe<&2, U32>:
+  Usage.first(Usage.number(F32.read(J.Json.as_raw(J.Json.get(w, "used_percent"), ""))),
+    Usage.permille(F32.read(J.Json.as_raw(J.Json.get(w, "used_permille"), ""))))
+
+def Usage.max(a: Maybe<&2, U32>, b: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match a b:
+    case Some{a} Some{b}: Some{U32.max(a, b)}
+    case None{} other: other
+    case other None{}: other
+
+def Usage.applies(+w: J.Json, +model: String) -> Bool:
+  +scope = J.Json.get_str(w, "scope", "")
+  (Bool.not(String.eq(scope, "seven_day_opus") || String.eq(scope, "opus")) || String.contains(model, "opus")) &&
+    (Bool.not(String.eq(scope, "seven_day_sonnet") || String.eq(scope, "sonnet")) || String.contains(model, "sonnet"))
+
+def Usage.windows(xs: List<&2, J.Json>, +now: Nat, +model: String) -> Maybe<&2, U32>:
+  match xs:
+    case Nil{}: None{}
+    case +h <> t:
+      +reset = J.Json.get_nat(h, "resets_at", 0n)
+      Usage.max(Bool.pick(Maybe<&2, U32>, Usage.applies(h, model) && (Nat.is_eq(reset, 0n) || Nat.is_gt(reset, now)),
+        Usage.used(h), None{}), Usage.windows(t, now, model))
+
+def Usage.left(x: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match x:
+    case None{}: None{}
+    case Some{x}: Some{U32.sub(100000, x)}
+
+def Usage.score(+profile: J.Json, +now: Nat, model: String) -> Maybe<&2, U32>:
+  +a = J.Json.get_obj(profile, "allowance")
+  +at = J.Json.get_nat(a, "at", 0n)
+  Bool.pick(Maybe<&2, U32>, String.eq(J.Json.get_str(a, "state", ""), "ok") && String.eq(J.Json.get_str(a, "phase", "complete"), "complete") && String.eq(J.Json.get_str(a, "provider", J.Json.get_str(profile, "provider", "")), J.Json.get_str(profile, "provider", "")) && Nat.is_gt(at, 0n) && Nat.is_le(at, now) && Nat.is_le(Nat.sub(now, at), 300n),
+    Usage.left(Usage.windows(J.Json.elems(J.Json.get_obj(a, "windows")), now, model)), None{})
+
+
+def Usage.exhausted(score: Maybe<&2, U32>) -> Bool:
+  match score:
+    case None{}: False{}
+    case Some{left}: U32.is_eq(left, 0)
+
 def Profile.eligible(+s: M.State, +now: Nat, +p: String, +model: String, +profile: J.Json) -> Bool:
   String.eq(J.Json.get_str(profile, "provider", ""), p) && String.eq(J.Json.get_str(profile, "state", ""), "connected") &&
-    Bool.not(String.is_empty(J.Json.get_str(profile, "id", ""))) && Profile.model(profile, model) &&
+    Bool.not(String.is_empty(J.Json.get_str(profile, "id", ""))) && Profile.model(profile, model) && Bool.not(Usage.exhausted(Usage.score(profile, now, model))) &&
     Bool.not(Hold.current(s, p, J.Json.get_str(profile, "id", ""), J.Json.get_nat(profile, "epoch", 0n), model, now))
 
 def Profile.filter(xs: List<&2, J.Json>, +s: M.State, +now: Nat, +p: String, +model: String) -> List<&2, J.Json>:
@@ -91,38 +150,14 @@ def Provider.has(xs: List<&2, J.Json>, +p: String) -> Bool:
 def Provider.managed(+s: M.State, +th: String, +p: String) -> Bool:
   Bool.not(String.is_empty(A.Accounts.id(s, th, p))) || Provider.has(A.Accounts.profiles(s), p)
 
-# Rank by the largest current reported utilization, in thousandths of a
-# percent. Missing, stale and expired readings are unknown, never zero usage.
-def Usage.number(x: Maybe<&2, F32>) -> Maybe<&2, U32>:
-  match x:
-    case None{}: None{}
-    case Some{+x}:
-      Bool.pick(Maybe<&2, U32>, F32.is_ge(x, 0.0) && F32.is_le(x, 100.0), Some{F32.to_u32(F32.mul(x, 1000.0))}, None{})
-
-def Usage.max(a: Maybe<&2, U32>, b: Maybe<&2, U32>) -> Maybe<&2, U32>:
-  match a b:
-    case Some{a} Some{b}: Some{U32.max(a, b)}
-    case None{} other: other
-    case other None{}: other
-
-def Usage.applies(+w: J.Json, +model: String) -> Bool:
-  +scope = J.Json.get_str(w, "scope", "")
-  (Bool.not(String.eq(scope, "seven_day_opus")) || String.contains(model, "opus")) &&
-    (Bool.not(String.eq(scope, "seven_day_sonnet")) || String.contains(model, "sonnet"))
-
-def Usage.windows(xs: List<&2, J.Json>, +now: Nat, +model: String) -> Maybe<&2, U32>:
-  match xs:
-    case Nil{}: None{}
-    case +h <> t:
-      +reset = J.Json.get_nat(h, "resets_at", 0n)
-      Usage.max(Bool.pick(Maybe<&2, U32>, Usage.applies(h, model) && (Nat.is_eq(reset, 0n) || Nat.is_gt(reset, now)),
-        Usage.number(F32.read(J.Json.as_raw(J.Json.get(h, "used_percent"), ""))), None{}), Usage.windows(t, now, model))
-
-def Usage.score(+profile: J.Json, +now: Nat, model: String) -> Maybe<&2, U32>:
-  +a = J.Json.get_obj(profile, "allowance")
-  +at = J.Json.get_nat(a, "at", 0n)
-  Bool.pick(Maybe<&2, U32>, String.eq(J.Json.get_str(a, "state", ""), "ok") && Nat.is_gt(at, 0n) && Nat.is_le(at, now) && Nat.is_le(Nat.sub(now, at), 300n),
-    Usage.windows(J.Json.elems(J.Json.get_obj(a, "windows")), now, model), None{})
+def Hold.inherit(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  +p = M.Thread.provider(M.State.thread.get(s, th))
+  +model = Thread.model(M.State.thread.get(s, th))
+  +target = F.Target{p, model}
+  +scope = Bool.pick(String, F.Limit.active(s, p, now), p, F.Target.key(target))
+  +o = F.Limit.record(s, scope)
+  Bool.pick(List<&2, M.Change>, Provider.managed(s, th, p) && String.is_empty(A.Accounts.id(s, th, p)) && F.Target.held(s, target, now) && Bool.not(Hold.current(s, p, "", 0n, model, now)),
+    Hold.mark(s, now, th, F.Limit{scope, J.Json.get_str(o, "reason", "Usage limit reached"), J.Json.get_nat(o, "reset", 0n)}), Nil{})
 
 def Usage.known(xs: List<&2, J.Json>, +now: Nat, +model: String) -> Bool:
   match xs:
@@ -136,8 +171,8 @@ def Usage.best(xs: List<&2, J.Json>, +now: Nat, +model: String, +best: J.Json, +
       +v = Maybe.default(&2, U32, Usage.score(h, now, model), 0)
       Usage.best(t, now, model, Bool.pick(J.Json, U32.is_gt(v, score), h, best), U32.max(v, score))
 
-# The saved profile list is the account hierarchy. If any eligible reading
-# is missing, retain that order; equal known scores also retain that order.
+# Prefer the largest known remaining allowance; unknown readings are eligible
+# after known available accounts. With no readings, retain saved profile order.
 def Pick.ranked(known: Bool, +xs: List<&2, J.Json>, +now: Nat, +model: String) -> Maybe<&2, J.Json>:
   match xs:
     case Nil{}: None{}
@@ -146,7 +181,16 @@ def Pick.ranked(known: Bool, +xs: List<&2, J.Json>, +now: Nat, +model: String) -
 
 def Pick.account(+s: M.State, +now: Nat, p: String, +model: String) -> Maybe<&2, J.Json>:
   +xs = Profile.filter(A.Accounts.profiles(s), s, now, p, model)
-  Pick.ranked(Usage.known(xs, now, model), xs, now, model)
+  Pick.ranked(True{}, xs, now, model)
+
+def Pick.none(choice: Maybe<&2, J.Json>) -> Bool:
+  match choice:
+    case Some{_}: False{}
+    case None{}: True{}
+
+# The hub gates every cross-provider account route on this actual selector.
+def Pick.may_cross(s: M.State, now: Nat, p: String, model: String) -> Bool:
+  Pick.none(Pick.account(s, now, p, model))
 
 def Pick.binding(+profile: J.Json) -> String:
   A.Accounts.binding.show(J.Json.get_str(profile, "id", ""), J.Json.get_nat(profile, "epoch", 0n))
