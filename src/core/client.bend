@@ -8493,7 +8493,7 @@ def Home.viewer.default(+u: Ui) -> Ui:
   +board = PH.Home.path(Home.contents(u), "board")
   +first = Bool.and(String.eq(Ui.info(u, "local.home.renderer"), "web"), Bool.and(Bool.not(String.is_empty(board)), String.is_empty(Ui.scratch(u, "@home.viewer:" ++ Ui.sel(u)))))
   Bool.pick(Ui, first, Ui.info_set(Ui.view.k(Ui.scratch_set(u, "@home.viewer:" ++ Ui.sel(u), "1"), Ui.sel(u),
-    J.Json.obj([J.KV{"kind", J.Str{"board"}}, J.KV{"path", J.Str{board}}])), "local.hub.view", "1"), u)
+    J.Json.obj([J.KV{"kind", J.Str{"3d"}}, J.KV{"path", J.Str{board}}])), "local.hub.view", "1"), u)
 
 def Home.reply.current(valid: Bool, +u: Ui, +r: J.Json) -> Ui:
   match valid:
@@ -8528,8 +8528,13 @@ def Home.open(+u: Ui, +project: String) -> Act:
   Home.sync(Act{Ui.reselect(Ui.sel(u), Ui.select.nav(u, PH.Home.owner(project))), Nil{}})
 
 def Home.view(+u: Ui, +kind: String) -> Act:
-  +path = PH.Home.path(Home.contents(u), Bool.pick(String, String.eq(kind, "3d"), "board", kind))
-  Bool.pick(Act, String.is_empty(path), Act{u, Nil{}}, Act{Ui.view.k(u, Ui.sel(u), J.Json.obj([J.KV{"kind", J.Str{kind}}, J.KV{"path", J.Str{path}}])), Nil{}})
+  +path = PH.Home.view_path(Home.contents(u), kind)
+  Bool.pick(Act, String.is_empty(path), Act{u, Nil{}}, Act{Ui.info_set(Ui.view.k(u, Ui.sel(u), J.Json.obj([J.KV{"kind", J.Str{kind}}, J.KV{"path", J.Str{path}}])), "view.tree:" ++ Ui.sel(u), PH.Home.path(Home.contents(u), "schematic")), Nil{}})
+
+# Expanding keeps the same owner, source, renderer and camera. It never creates
+# a conversation or substitutes a separately rendered project preview.
+def Home.viewer.size(+u: Ui, +value: String) -> Act:
+  Act{Ui.scratch_set(u, "@home.viewer.full:" ++ Ui.sel(u), Bool.pick(String, Bool.and(Home.viewer.allowed(u), String.eq(value, "1")), "1", "")), Nil{}}
 
 def Home.edit(+u: Ui) -> Act:
   Act{Ui.scratch_set(Ui.scratch_set(u, "@home.edit:" ++ Ui.sel(u), "1"), "@f.home-intent:" ++ Ui.sel(u), J.Json.get_str(Home.contents(u), "intent", "")), Nil{}}
@@ -8576,6 +8581,7 @@ def Home.dispatch(+u: Ui, +action: String, +value: String) -> Act:
     case "home-price": Home.request(u, [J.KV{"op", J.Str{"price"}}])
     case "home-poll": Bool.pick(Act, Bool.and(PH.Home.is(Ui.sel(u)), String.eq(value, Ui.scratch(u, "@home.at"))), Home.sync(Act{u, Nil{}}), Act{u, Nil{}})
     case "home-view": Home.view(u, value)
+    case "home-viewer-size": Home.viewer.size(u, value)
     case "send": Home.start(u)
     case "send-alt": Home.start(u)
     case "home-start": Home.start(Bool.pick(Ui, String.is_empty(value), u, Ui.scratch_set(u, Ui.sel(u), value)))
