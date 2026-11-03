@@ -22,6 +22,14 @@ Remote reports are acknowledged only after the receiving hub accepts them.
 A muted report has no delivery obligation. A worker the person starts
 chatting in retains unread reply protection.
 
+A delegated task's initial prompt historically has the `User` role even
+when another thread supplied it. For a task-backed child, the policy
+recognizes only the exact seed ID reserved by `Mcp.delegate.go`: child
+`t<time>-<seq>` uses seed `m<time>-<seq+1>`. New delegations also save that
+identity as `autosettle.seed.<child>`. A parent link alone grants no
+exemption. Any distinct human message, including one in the same second,
+keeps unread protection; a later worker message cannot erase it.
+
 Read receipts identify the actual reply, so a later reply in the same
 second is still unread. Focused desktop desk.look and explicitly opening
 the latest conversation on a phone acknowledge it. Background polling,
@@ -73,3 +81,13 @@ on `h@backplane` under its `bend` lock (work
 contained only the unsafe/foreign-code notice. The rebase also moved
 main's two handwritten diff-count labels into the message catalogs so
 regeneration preserves them.
+
+Post-deployment audit of copied snapshot 1358120 found nine old threads
+blocked only on unread replies. Five were personal UI-test conversations.
+Four were completed delegated workers whose tasks were already delivered;
+their plain seed prompts had been mistaken for human input. Launcher
+report delivery was not their blocker. The corrected policy makes those
+four eligible in the same copy while preserving the five personal holds.
+No live state was changed. Regression tests use the real delegation
+producer, cover delivered/undelivered tasks and genuine human follow-ups,
+and add two pure seed-identity laws.
