@@ -1,3 +1,4 @@
+import { restoreFrameAliases } from './conversation-frame.js';
 import { terminalInputReply } from './terminal-input.js';
 import { modelMenuReply } from './model-menu-input.js';
 import { sidebarOffer, sidebarPicture } from './sidebar-region.js';
@@ -115,7 +116,7 @@ export function viewCommand(c, hub) {
 }
 export class ThinViews {
   constructor(api, next = VIEW_ID_BASE + Date.now()) {
-    this.api = api; this.next = next; this.links = new Map(); this.calls = new Map();
+    this.api = api; this.next = next; this.links = new Map(); this.calls = new Map();this.controls = new Map();
   }
   allocate() {
     if (!integer(this.next, MAX_ID - 1) || this.next < VIEW_ID_BASE) throw new Error('view request counter exhausted');
@@ -131,7 +132,7 @@ export class ThinViews {
   disconnect(hub, reason = 'disconnected') {
     const abandoned = [];
     for (const [id, call] of this.calls) if (call.link.hub === hub) {
-      abandoned.push({ id, method: call.method, target: call.target, reason, retry: false, issued: false }); this.calls.delete(id);
+      abandoned.push({ id, method: call.method, target: call.target, reason, retry: false, issued: false }); this.calls.delete(id);this.controls.delete(id);
     }
     this.links.delete(hub); return abandoned;
   }
@@ -218,6 +219,16 @@ export class ThinViews {
     }
     return true;
   }
+  control(hub, e) {
+    if (e?.t !== 'view.control') return false;
+    const call = this.calls.get(e.id), link = this.links.get(hub);
+    if (!call || call.link !== link || !integer(e.part) || typeof e.last !== 'boolean' || !bounded(e.text, 32768)
+      || utf8Bytes(JSON.stringify(e)) > 65536) return true;
+    let value = this.controls.get(e.id);
+    if (!value) { if (e.part !== 0) return true;value = { link, parts: [], next: 0, done: false };this.controls.set(e.id, value); }
+    if (value.link !== link || value.done || e.part !== value.next) { this.controls.delete(e.id);return true; }
+    value.parts.push(e.text);value.next++;value.done = e.last;return true;
+  }
   reply(hub, e) {
     if (!record(e) || !integer(e.id, MAX_ID) || e.id <= VIEW_ID_BASE) return null;
     const c = this.calls.get(e.id), l = this.links.get(hub);
@@ -229,7 +240,17 @@ export class ThinViews {
     this.retireUpdate(c);
     if (e.ok !== true) return { failed: record(e.error) ? e.error.code : 'UNAVAILABLE', id: e.id, method: c.method, retry: false, cmds: [] };
     let r = e.result;
-    if (!record(r) || utf8Bytes(JSON.stringify(r)) > l.greeting.limits.replyBytes || r.version !== 1 ||
+    const rawBytes = utf8Bytes(JSON.stringify(e));
+    const control = this.controls.get(e.id);this.controls.delete(e.id);
+    const segmented = record(r) && r.controlId === e.id && control?.link === l && control.done;
+    if (segmented) {
+      try {
+        const values = JSON.parse(control.parts.join(''));
+        if (!record(values) || own(values, 'shown')) throw Error('Invalid control values');
+        r = { ...values, ...r };delete r.controlId;
+      } catch { return { failed: 'invalid view control', id: e.id, method: c.method, retry: false, cmds: [] }; }
+    }
+    if (!record(r) || rawBytes > l.greeting.limits.replyBytes || own(r, 'controlId') || r.version !== 1 ||
         r.hub !== hub || r.generation !== l.greeting.generation || r.epoch !== l.greeting.epoch ||
         r.requestRevision !== c.revision || !sameTarget(r.target, c.target) ||
         !bounded(r.viewId, 128) || !r.viewId || (c.method !== 'view.open' && r.viewId !== c.viewId) ||
@@ -261,7 +282,7 @@ export class ThinViews {
         // no ops: the very body this reply names (applyViewDelta hands the
         // base back), so the page has nothing to draw again
         unchanged = !!fromShown && Array.isArray(d.ops) && d.ops.length === 0 && picture.body === l.bases.map.get(d.base);
-        if (deltaBytes(picture.measure, picture.wire, utf8Bytes) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
+        if ((segmented ? utf8Bytes(JSON.stringify(r.shown)) : deltaBytes(picture.measure, picture.wire, utf8Bytes)) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
       } catch {
         // the next request asks for the whole view
         l.bases = deltaBases();
@@ -273,9 +294,11 @@ export class ThinViews {
       try {
         sidebar = sidebarPicture(r, c.input, c.sidebarBase);r = sidebar.result;
         // A compressed reply grants no larger logical presentation budget.
-        if (utf8Bytes(JSON.stringify(r)) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
+        if (utf8Bytes(JSON.stringify(segmented ? r.shown : r)) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
       } catch { return { failed: 'invalid sidebar region', id: e.id, method: c.method, retry: false, cmds: [] }; }
     }
+    try { if (r.entryAliases) r = { ...r, shown: restoreFrameAliases(r.shown, r.entryAliases, r.window) }; }
+    catch { return { failed: 'invalid source aliases', id: e.id, method: c.method, retry: false, cmds: [] }; }
     if (this.api.validateResult && this.api.validateResult(r, c.input) !== true) { l.bases = deltaBases();return { failed: 'invalid view presentation', id: e.id, method: c.method, retry: false, cmds: [] }; }
     // a body the hub kept under this token: the base of a later delta,
     // whether or not this reply is the one shown
@@ -315,7 +338,7 @@ export class ThinViews {
   expire(timeoutMs = 5000) {
     const failed = [];
     for (const [id, c] of this.calls) if (this.api.now() - c.began >= timeoutMs) {
-      this.calls.delete(id);
+      this.calls.delete(id);this.controls.delete(id);
       this.retireUpdate(c);
       failed.push({ id, hub: c.link.hub, method: c.method, target: c.target, retry: false, issued: false, cmds: [] });
     }

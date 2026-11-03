@@ -443,10 +443,13 @@ def Page.first(+ids: List<&2, String>) -> String:
 def Page.newer(+empty: Bool, +index: T.Index, +th: String, +ids: List<&2, String>) -> Nat:
   Bool.pick(Nat, empty, 0n, T.Index.newer(index, th, Page.number(Page.first(ids))))
 
+# Future presentation fitting is not known until that page is rendered.
+# Serialize reads through each accepted window's actual older cursor; an
+# index-only 32-row prediction could skip entries after an 8/2/1-row fit.
 def Page.window(+index: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>) -> J.Json:
   +last = Page.last(ids, "")
   +older = Page.older(Bool.not(List.is_empty(&2, String, ids)), index, th, Page.number(last))
-  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Page.older.cursor(index, th, p, epoch, ids)}}, J.KV{"olderNext", J.Str{Page.older.next(index, th, p, epoch, ids)}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))))}, J.KV{"newer", J.Json.nat(Page.newer(List.is_empty(&2, String, ids), index, th, ids))}, J.KV{"total", J.Json.nat(Nat.add(Nat.add(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))), List.length(&2, String, ids)), Page.newer(List.is_empty(&2, String, ids), index, th, ids)))}, J.KV{"partial", J.Json.arr(Partial.rows.body(Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), p, ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
+  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Page.older.cursor(index, th, p, epoch, ids)}}, J.KV{"olderNext", J.Str{""}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))))}, J.KV{"newer", J.Json.nat(Page.newer(List.is_empty(&2, String, ids), index, th, ids))}, J.KV{"total", J.Json.nat(Nat.add(Nat.add(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))), List.length(&2, String, ids)), Page.newer(List.is_empty(&2, String, ids), index, th, ids)))}, J.KV{"partial", J.Json.arr(Partial.rows.body(Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), p, ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
 
 type ActResult is Data:
   ActResult{ui: U.Ui, commands: List<&2, J.Json>}

@@ -8,6 +8,7 @@ import ./pcb-telemetry.bend as PCB
 import ../core/folder.bend as FP
 import ./spawn.bend as SP
 import ./view-capacity.bend as VCAP
+import ./conversation-frame.bend as CWIN
 import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
@@ -12862,13 +12863,46 @@ def Cfg.telemetry.ui_action(+st: M.State, cfg: Cfg, +o: J.Json, delivered: Bool,
       Cfg{h, w, ho, p, pr, ds, v, nt, TUI.Human.mark(True{}, delivered, st,
         J.Json.get_str(o, "m", ""), J.Json.get_str(J.Json.get_obj(o, "p"), "action", ""), tm, now), views, accountInfo}
 
-def Hub.thin.deliver(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +answer: J.Json, +size: Nat, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
-  match fits h:
-    case False{} _: Hub.thin.error(h, client, o, "LIMIT")
-    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+def Wire.control(fuel: Nat, more: Bool, text: String, +n: Nat, +rid: J.Json, cl: List<&2, Client>, +client: U32) -> IO(List<&2, Client>):
+  match fuel more:
+    case 0n _: IO.pure(List<&2, Client>, cl)
+    case _ False{}: IO.pure(List<&2, Client>, cl)
+    case 1n+k True{}:
+      +part = CWIN.Part.take(text, 32768n)
+      +rest = CWIN.Part.rest(part)
+      +packet = CWIN.Part.packet(rid, n, CWIN.Part.text(part), String.is_empty(rest))
+      do IO<List<&2, Client>>:
+        +next : List<&2, Client> <- Wire.to.view(cl, client, packet, J.Json.bytes(packet))
+        Wire.control(k, Bool.not(String.is_empty(rest)), rest, Nat.add(n, 1n), rid, next, client)
+
+def Wire.control.when(split: Bool, +text: String, rid: J.Json, cl: List<&2, Client>, client: U32) -> IO(List<&2, Client>):
+  match split:
+    case False{}: IO.pure(List<&2, Client>, cl)
+    case True{}: Wire.control(String.length(text), True{}, text, 0n, rid, cl, client)
+
+def Hub.thin.deliver.ready(h: Hub, +client: U32, +o: J.Json, +answer: J.Json, +c: Client, +context: ThinContext, +now: Nat, +split: Bool) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      +result = J.Json.get_obj(answer, "result")
+      +control = J.Json.show(CWIN.Control.of(result, False{}))
+      +rid = Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})
+      +picture = CWIN.Control.envelope(rid, result)
       do IO<Hub>:
-        +cl2 : List<&2, Client> <- Wire.to.view(Clients.swap(cl, client, Some{Client.thin.with(c, context)}), client, answer, size)
+        +base : List<&2, Client> = Clients.swap(cl, client, Some{Client.thin.with(c, context)})
+        +cl1 : List<&2, Client> <- Wire.control.when(split, control, rid, base, client)
+        +wire : J.Json = Bool.pick(J.Json, split, picture, answer)
+        +cl2 : List<&2, Client> <- Wire.to.view(cl1, client, wire, J.Json.bytes(wire))
         return Hub{st, f, ls, cl2, as, inbox, Cfg.telemetry.ui_action(st, cfg, o, Maybe.is_some(&2, Client, Clients.get(cl2, client)), now), note}
+
+def Hub.thin.deliver.oversize(search: Bool, h: Hub, client: U32, o: J.Json, answer: J.Json, c: Client, context: ThinContext, now: Nat) -> IO(Hub):
+  match search:
+    case True{}: Hub.thin.error(h, client, o, "LIMIT")
+    case False{}: Hub.thin.deliver.ready(h, client, o, answer, c, context, now, True{})
+
+def Hub.thin.deliver(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +answer: J.Json, +size: Nat, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match fits:
+    case True{}: Hub.thin.deliver.ready(h, client, o, answer, c, context, now, False{})
+    case False{}: Hub.thin.deliver.oversize(String.eq(J.Json.get_str(o, "m", ""), "view.search"), h, client, o, answer, c, context, now)
 
 def AccountsRpc.picture.legacy(named: Bool, +result: J.Json) -> J.Json:
   match named:
@@ -12898,9 +12932,15 @@ def Hub.thin.respond.region(output: TSW.Output, h: Hub, client: U32, o: J.Json, 
     case TSW.Output{actors, result}:
       Hub.thin.respond.full(h, client, o, result, c, ThinContext.with_actors(context, actors), now)
 
+def Hub.thin.respond.bounded(bounded: Bool, h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match bounded:
+    case True{}: Hub.thin.respond.full(h, client, o, result, c, ThinContext.with_actors(context, TA.Bodies.record(ThinContext.actors(context), result)), now)
+    case False{}:
+      Hub.thin.respond.region(TVD.Vd.output(String.eq(Client.thin.mode(c), "view-web"), TA.Bodies.record(ThinContext.actors(context), result), result, J.Json.get_obj(o, "p")),
+        h, client, o, c, context, now)
+
 def Hub.thin.respond(h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
-  Hub.thin.respond.region(TVD.Vd.output(String.eq(Client.thin.mode(c), "view-web"), TA.Bodies.record(ThinContext.actors(context), result), result, J.Json.get_obj(o, "p")),
-    h, client, o, c, context, now)
+  Hub.thin.respond.bounded(Nat.is_eq(J.Json.get_nat(result, "boundedFrame", 0n), 1n), h, client, o, result, c, context, now)
 
 def Hub.thin.cursor.empty(+empty: Bool, +text: String, +epoch: String, +target: J.Json, +query: String) -> Maybe<&2, Nat>:
   match empty:
@@ -12936,14 +12976,9 @@ def Hub.thin.input(+action: Bool, +p: J.Json, +cid: String) -> J.Json:
     case True{}: TV.Obj.put(p, "cid", J.Str{cid})
     case False{}: TV.Obj.put(TV.Obj.put(p, "cid", J.Str{cid}), "action", J.Str{""})
 
-def Hub.thin.rendered_valid(valid: Bool, actor: TA.Actor, result: J.Json, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, context: ThinContext) -> IO(Hub):
-  match valid:
-    case False{}: Hub.thin.error(h, client, o, "LIMIT")
-    case True{}: Hub.thin.respond(h, client, o, result, c, ThinContext.with_actors(context, [actor]), now)
-
 def Hub.thin.rendered(rendered: TA.Rendered, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, context: ThinContext) -> IO(Hub):
   match rendered:
-    case TA.Rendered{+actor, result}: Hub.thin.rendered_valid(TA.Actor.capacity(actor), actor, result, h, client, o, c, now, context)
+    case TA.Rendered{actor, result}: Hub.thin.respond(h, client, o, result, c, ThinContext.with_actors(context, [actor]), now)
 
 # Read only the selected, owner-linked mirror. Keep the canonical local
 # state/store as the authority for actions and its own history.
@@ -13054,9 +13089,9 @@ def Hub.thin.web_fit.region(output: TSW.Output, st: M.State, revision: Nat, c: C
 def Hub.thin.web_fit.fits(rendered: TA.Rendered, +st: M.State, +revision: Nat, +c: Client, +o: J.Json, +context: ThinContext) -> Bool:
   match rendered:
     case TA.Rendered{+actor, +result}:
-      Bool.and(TA.Actor.capacity(actor), Bool.and(
+      Bool.and(
         Nat.is_le(J.Json.bytes(Hub.thin.web_fit.answer(st, revision, c, o, context, result)), 229376n),
-        Hub.thin.web_fit.region(TSW.Region.output(True{}, [actor], result, J.Json.get_obj(o, "p")), st, revision, c, o, context)))
+        Hub.thin.web_fit.region(TSW.Region.output(True{}, [actor], result, J.Json.get_obj(o, "p")), st, revision, c, o, context))
 
 # A view over the budget is shrunk by its two levers, the thread's window
 # (TBODY.Body.window halves it, down to one row) and the sidebar's
@@ -13127,17 +13162,20 @@ def Hub.thin.web_fit.sent.s(s: FitS, h: Hub, +client: U32, +o: J.Json, +c: Clien
   match s:
     case FitS{_, _, best, +n}: Hub.thin.web_fit.sent(n, best, h, client, o, c, now, context)
 
-# At the compact floor a larger session/command set cannot be repaired by
-# deleting state. Keep LIMIT local and record numeric component attribution.
-def Hub.thin.web_fit.limited(+fl: TA.Rendered, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
+# Optional chrome and caches may outgrow every ordinary fitting tier. The
+# issued conversation window still paints: source bodies/cursors and the
+# canonical actor are retained, while display chrome has an independent budget.
+def Hub.thin.web_fit.compact(+fl: TA.Rendered, +shown: M.State, +index: THIN.Index, +rows: List<&2, String>, +p: J.Json, +epoch: String, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext) -> IO(Hub):
   match fl:
     case TA.Rendered{+actor, +result}:
-      IO.bind(Unit, Hub, PS.Perf.emit("thin.view.limit " ++ J.Json.show(VCAP.Capacity.report(result, TA.Actor.capacity(actor), J.Json.bytes(Hub.thin.web_fit.answer(st, crev, c, o, context, result))))),
-        _ => Hub.thin.error(h, client, o, "LIMIT"))
+      +ids = Hub.thin.web_fit.floor.rows(10n, rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", ""))
+      +bounded = TV.Obj.put(p, "bodyBudget", J.Num{"1"})
+      +window = TV.Render.window(TLIVE.Stream.blank(), index, TV.Target.thread(shown, J.Json.get_obj(p, "target")), bounded, epoch, ids)
+      Hub.thin.rendered(TA.Rendered{actor, CWIN.Frame.make(TA.Actor.ui(actor), index, ids, window, TV.Obj.put(result, "window", window))}, h, client, o, c, now, context)
 
 def Hub.thin.web_fit.floor(fits: Bool, +fl: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
   match fits:
-    case False{}: Hub.thin.web_fit.limited(fl, st, crev, c, o, context, h, client)
+    case False{}: Hub.thin.web_fit.compact(fl, shown, index, rows, p, epoch, h, client, o, c, now, context)
     case True{}: Hub.thin.web_fit.sent.s(Hub.thin.web_fit.search(4n, FitS{1n, Hub.thin.web_fit.halvings(), fl, 3}, acted, shown, index, p, epoch, now, rows, stream, revision, key, ms, st, crev, c, o, context), h, client, o, c, now, context)
 
 def Hub.thin.web_fit.one(fits: Bool, +l1: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
@@ -13234,6 +13272,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
       +web = String.eq(Client.thin.mode(c), "view-web")
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       +epoch = Hub.thin.view_epoch(st, cfg, thread)
+      +rows = TBODY.Body.window.bounded(TSTO.Page.ids(pg), TSTO.Page.index(pg), p)
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
       +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Hub.thin.pair(Client.legacy(c), cfg, SEC.Sec.json(v, Hub.info(cfg))),
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
@@ -13241,7 +13280,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
         +prepared : TA.Actor = TA.Actor.native.prepare(actor, web, p, epoch, ThinContext.view(context), Cfg.thin.signal_seq(cfg), secret)
         Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
-          key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, LTOOLS.Tools.mask.enabled(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg), p), thread, TSTO.Page.ids(pg)), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg),
+          key, ms, shown, TV.State.body.index(TBODY.Body.enabled(web, p), shown, LTOOLS.Tools.mask.enabled(TBODY.Body.enabled(web, p), shown, TSTO.Page.index(pg), thread, TSTO.Page.ids(pg), p), thread, TSTO.Page.ids(pg)), epoch, rows, stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg),
           Hub.thin.page.memo(Bool.and(web, String.eq(J.Json.get_str(o, "m", ""), "view.page")), st, context, Hub.thin.memo.base(st, cfg, p, context, web, thread), ms, now))
 
 # Read only the selected auxiliary histories, then mask with the vault
