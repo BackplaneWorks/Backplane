@@ -21,6 +21,7 @@ import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
 import { EntryHistory } from "./entry-history.js";
 import { installImageActions } from "./image-actions.js";
+import { installShotMissing, shotsMissing } from "./shot-missing.js";
 import { copyText, copyButton } from "./text-copy.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => Wire.plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
@@ -2060,7 +2061,9 @@ function attachmentPreviews() {
   for (const img of document.querySelectorAll('img.attachment-preview')) {
     if (img.complete) img.classList.toggle('failed', img.naturalWidth === 0);
   }
+  shotsMissing(document);
 }
+installShotMissing(document);
 
 document.addEventListener("load", e => {
   if (e.target.matches?.("img.attachment-preview")) e.target.classList.remove("failed");
