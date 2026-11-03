@@ -10696,25 +10696,52 @@ def Hs.bar.track.on(+l: I.Loc, on: Bool, +u: Ui) -> HBarT:
 def Hs.bar.track(+l: I.Loc, +u: Ui) -> HBarT:
   Hs.bar.track.on(l, Bool.and(Ui.panel(u), Bool.and(Nat.is_lt(Hs.kind(u), 2n), Bool.not(String.is_empty(Ui.sel(u))))), u)
 
+# Plotted ahead: when a step shows, the steps either side of it are read
+# into the hub's kept versions (kicad.warm, server/plot.bend's PWarm), so
+# the next ‹ or › finds its board ready, as a step seen before is (a new
+# step's board took about 1.1 s on the real neurband board, a kept one 0.4)
+def Hs.warm.spec(m: Maybe<&2, HI.Step>, +u: Ui, +k: Nat) -> String:
+  match m:
+    case Some{+s}: HI.Step.spec(s, k, Hs.file(u), Hs.diff(u))
+    case None{}: ""
+
+# the step before (none before the first: that is the live file) and after
+def Hs.warm.near(+u: Ui, +tr: List<&2, HI.Step>, +at: Nat, +k: Nat) -> List<&2, J.KV>:
+  [J.KV{"kind", J.Str{Hs.kname(k)}}, J.KV{"root", J.Str{Ui.root(u)}},
+   J.KV{"before", J.Str{Hs.warm.spec(HI.Hist.nth(tr, Nat.sub(at, 1n)), u, k)}}, J.KV{"after", J.Str{Hs.warm.spec(HI.Hist.nth(tr, 1n+at), u, k)}}]
+
+def Hs.warm.on(on: Bool, +u: Ui, cmds: List<&2, Cmd>) -> Act:
+  match on:
+    case False{}: Act{u, cmds}
+    case True{}:
+      +tr = Hs.track(u)
+      Ui.also(Ui.rpc(u, "kicad.warm", Hs.warm.near(u, tr, Hs.at(u, tr), Hs.kind(u))), cmds)
+
+# (only with a step on show in the viewer, of a board or a schematic)
+def Hs.warm(a: Act) -> Act:
+  match a:
+    case Act{+u, cmds}:
+      Hs.warm.on(Bool.and(Ui.panel(u), Bool.and(Nat.is_lt(Hs.kind(u), 2n), Nat.is_gt(Hs.at(u, Hs.track(u)), 0n))), u, cmds)
+
 # Actions (Ui.actions from "hist-go")
 def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:
   match i:
     case 0n:
       +tr = Hs.track(u)
-      Act{Hs.go(Hs.set(u, "hist.play", ""), tr, HI.Hist.index(tr, value)), Nil{}}
+      Hs.warm(Act{Hs.go(Hs.set(u, "hist.play", ""), tr, HI.Hist.index(tr, value)), Nil{}})
     case 1n:
-      Act{Hs.step(False{}, Hs.set(u, "hist.play", "")), Nil{}}
+      Hs.warm(Act{Hs.step(False{}, Hs.set(u, "hist.play", "")), Nil{}})
     case 2n:
-      Act{Hs.step(True{}, Hs.set(u, "hist.play", "")), Nil{}}
+      Hs.warm(Act{Hs.step(True{}, Hs.set(u, "hist.play", "")), Nil{}})
     case 3n:
-      Act{Hs.go(Hs.set(u, "hist.play", ""), Hs.track(u), 1n), Nil{}}
+      Hs.warm(Act{Hs.go(Hs.set(u, "hist.play", ""), Hs.track(u), 1n), Nil{}})
     case 4n:
       +tr = Hs.track(u)
-      Act{Hs.go(Hs.set(u, "hist.play", ""), tr, Hs.n(tr)), Nil{}}
+      Hs.warm(Act{Hs.go(Hs.set(u, "hist.play", ""), tr, Hs.n(tr)), Nil{}})
     case 5n:
       Hs.play(u)
     case 6n:
-      Hs.tick.on(u, value)
+      Hs.warm(Hs.tick.on(u, value))
     case 7n:
       Act{Hs.diff.flip(u), Nil{}}
     case 8n:
@@ -10722,7 +10749,7 @@ def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 9n:
       Hs.jump(u, value)
     case 10n:
-      Act{Hs.show.id(Hs.set(u, "hist.play", ""), value), Nil{}}
+      Hs.warm(Act{Hs.show.id(Hs.set(u, "hist.play", ""), value), Nil{}})
     case 11n:
       Hs.menu.k(Bool.not(String.is_empty(Ui.scratch(u, "@cmp.menu"))), u, Bool.pick(String, String.is_empty(value), "a", value))
     case 12n:

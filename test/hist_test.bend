@@ -112,6 +112,25 @@ def Show.cmds(cs: List<&2, U.Cmd>) -> String:
     case _ <> t:
       "other;" ++ Show.cmds(t)
 
+# the requests an action sends (their JSON texts)
+def Show.sends(cs: List<&2, U.Cmd>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case U.Send{+x} <> t:
+      x ++ "\n" ++ Show.sends(t)
+    case _ <> t:
+      Show.sends(t)
+
+def sends(a: U.Act) -> String:
+  match a:
+    case U.Act{_, cs}:
+      Show.sends(cs)
+
+# whether a step's move plots ahead, and which steps' versions it names
+def warms(+a: U.Act) -> String:
+  yes(String.contains(sends(a), "kicad.warm")) ++ "|" ++ yes(String.contains(sends(a), "c1")) ++ yes(String.contains(sends(a), "c2")) ++ yes(String.contains(sends(a), "c4"))
+
 def cmds(a: U.Act) -> String:
   match a:
     case U.Act{_, cs}:
@@ -181,10 +200,15 @@ def main() -> IO(Unit):
     C.Check.str("diff stays on", path(act(diffed, "hist-next", "")), "diff\ngit\t/r/.git\tc3\t2\t/r/b.kicad_pcb\ngit\t/r/.git\tc4\t2\t/r/b.kicad_pcb")
     C.Check.str("play starts at the first", path(ui(played)) ++ "|" ++ cmds(played), "git\t/r/.git\tc1\t2\t/r/b.kicad_pcb|later 1400 hist-tick t\t1;")
     C.Check.str("tick steps on", path(act(ui(played), "hist-tick", "t\t1")), "git\t/r/.git\tc2\t2\t/r/b.kicad_pcb")
-    C.Check.str("tick schedules the next", cmds(U.Ui.act(ui(played), "hist-tick", "t\t1")), "later 1400 hist-tick t\t1;")
+    C.Check.str("tick schedules the next", cmds(U.Ui.act(ui(played), "hist-tick", "t\t1")), "send;later 1400 hist-tick t\t1;")
+    C.Check.str("back from live plots the step before ahead", warms(U.Ui.act(u, "hist-prev", "")), "yes|noyesno")
+    C.Check.str("the first step plots the next ahead", warms(U.Ui.act(u, "hist-first", "")), "yes|noyesno")
+    C.Check.str("the middle step plots both ahead", warms(U.Ui.act(first, "hist-next", "")), "yes|yesnoyes")
+    C.Check.str("the last step plots the one before ahead, live nothing", warms(U.Ui.act(second, "hist-next", "")) ++ warms(U.Ui.act(second, "hist-live", "")), "yes|noyesno" ++ "no|nonono")
+    C.Check.str("a 3D view plots nothing ahead", warms(U.Ui.act(U.Ui.view_put(u, "3d", ""), "hist-prev", "")), "no|nonono")
     C.Check.str("a stale tick does nothing", path(act(ui(played), "hist-tick", "t\t0")), "git\t/r/.git\tc1\t2\t/r/b.kicad_pcb")
     C.Check.str("paused ticks do nothing", path(act(act(ui(played), "hist-play", ""), "hist-tick", "t\t1")), "git\t/r/.git\tc1\t2\t/r/b.kicad_pcb")
-    C.Check.str("playing ends at the last", cmds(U.Ui.act(act(act(ui(played), "hist-tick", "t\t1"), "hist-tick", "t\t1"), "hist-tick", "t\t1")) ++ Bool.show(U.Hs.playing(act(act(act(ui(played), "hist-tick", "t\t1"), "hist-tick", "t\t1"), "hist-tick", "t\t1"))), "False")
+    C.Check.str("playing ends at the last", cmds(U.Ui.act(act(act(ui(played), "hist-tick", "t\t1"), "hist-tick", "t\t1"), "hist-tick", "t\t1")) ++ Bool.show(U.Hs.playing(act(act(act(ui(played), "hist-tick", "t\t1"), "hist-tick", "t\t1"), "hist-tick", "t\t1"))), "send;False")
     C.Check.str("jump", cmds(U.Ui.act(second, "hist-jump", "")) ++ U.Ui.info(ui(U.Ui.act(second, "hist-jump", "")), "fold:a1"), "jump a1;1")
     C.Check.str("compare", path(cmp), "diff\ngit\t/r/.git\tc1\t2\t/r/b.kicad_pcb\n/r/b.kicad_pcb")
     C.Check.str("compare bar", bar(cmp), "True|3|0|Comparing||||FalseFalseTrue|Step 1|Working copy|")
