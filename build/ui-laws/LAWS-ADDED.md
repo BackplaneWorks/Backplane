@@ -5,7 +5,7 @@ Laws constrain the actual pure Bend functions named below. They do not prove the
 | Bug | Law name | Function constrained | Browser or rendered regression | Status |
 | --- | --- | --- | --- | --- |
 | 1. Phantom new-message pill | `ui_bottom_has_no_unread_pill`, `ui_seen_boundary_has_no_unread_pill`; existing `hold_shown_*` | `Hold.pill.k`, `Hold.shown` in `src/core/client.bend` | `test/tools/hold_e2e.ts` checks count, click, bottom gap and pill removal; reader-return owner has current host regression | Proved in complete candidate gate 1320540; Browser-owned viewport/unread bookkeeping remains a separate boundary. |
-| 2. View too large | Existing `view_window_newer_empty`; further capacity laws pending | `Page.*` in `src/server/thin-view.bend`, `Hub.thin.web_fit` in `src/server/server.bend` | `test/tools/thin_fit_e2e.ts`; capacity diagnostics owned by t1793584394-1163165 | Pending: a hard refusal state still exists in JS (`thinHostFailure` in `src/web/host.js`). Entry bounds alone cannot prove byte bounds or nonempty output. |
+| 2. View too large | `conversation_root_reference_envelope_bounded`, `conversation_root_region_retained`, `conversation_root_wire_picture_constant`; unchanged clipping/window laws | `Control.envelope(rid, Window.make(result))`, `Window.make`, `Window.root` in `src/server/conversation-{frame,window}.bend`; negotiated production path uses `Window.prepare` | `test/conversation_window_test.bend`, `test/tools/window_projection_test.mjs`; matching hub/web Chromium replay of 18,409-entry Bub, 55,228-entry triple, 51-tool prefix and 3D DOM/WebGL identity | Final producer-byte gap CLOSED in regular merged PR #807 (`5da5647b737e212fe1fa58549ce477f51bad611c`). Actual final envelope <=262144 under only independent `Json.bytes(rid)<=32`; the complete worst-size-ID reference witness is 244 JSON bytes, and projected root is retained exactly. Canonical 12-law candidate gate 1346309 passed; browser/runtime scope is separate. No aggregate DOM/control-size, arbitrary-history issuance or hardware strict-eight-case theorem. See the receipt below. |
 | 3. Blank running thread | Existing `native_history_page_visible`, `native_history_page_size`, `native_history_page_order`; web text-retention laws pending | `History.page` in `src/core/history-window.bend`; `H.historical`, `H.rows`, `H.bounds`, `H.edges`, `H.weave`, `H.without`, `H.unique`, `H.merge.rows`, `H.project` in `src/web/timeline-history.bend` | `test/tools/native_history_adoption_test.mjs` tests materialization; reader owner adds 8 running-fold cases in `test/timeline_history_test.bend`. Private actual-running browser driver: `reader-return-entry-1163165/build/reader-return/running-candidate/running-repro.cjs` (owner path) | OPEN, reader PR #774 unmerged. ID cardinality/order does not prove text retention. The owner reports 94 focused passes, but the old emitted candidate + 273 backend still fails both open-viewer browser cases; no universal or final content-acceptance claim. Reset, newest navigation, closed folds and transient retirement legitimately delete rows, so a future theorem must bind owner/history basis and authoritative replacement. |
 | 4. Navigation blocked | `ui_navigation_total` | `Ui.select.nav` in `src/core/client.bend`, called by `Session.select` | `test/tools/thin_transport_test.mjs` checks stale replies cannot replace navigation (transport test, not rendered); instant-action owner supplies browser regression | Added, universal over every `Ui` and target including errors/disconnection; complete candidate proof passed (1320540). PR #784 supplies actual Chromium/WebKit navigation/send gates and source-sensitive outgoing-view tests; browser behavior is tested, not proved universally. |
 | 5. Lost drafts | `ui_view_error_preserves_all_drafts`, `ui_state_adoption_preserves_all_drafts`; existing `draft_*` | `Ui.error_put`, `Ui.adopt.raw`; observation reads the complete real `Ui` draft map | `test/tools/native_history_adoption_test.mjs`; instant-action owner covers switch/reconnect/error in host/browser | Proved entire-map equality for error and raw state adoption in complete candidate gate 1320540. Partial: Selection and reconnect also update reserved scratch keys; arbitrary conversation-draft preservation still needs a stronger law. PR #784 adds source-sensitive switch/draft restoration tests and IndexedDB reload checks; these are runtime coverage, not a universal draft theorem. |
@@ -23,3 +23,29 @@ Managed work `w-t1793671361-1312951-1320540` passed on base `92ddc7e46ccab1ef281
 Runtime coverage: emitted JSON compares 1,305 ordinary values and 286 repaired-surrogate values, plus 2,500 strict JSON texts; exhaustive surrogate units and pair boundaries pass. The emitted credit reducer passes 360 delivery-order/duplicate-replay cases. Chromium 151.0.7922.34 renders repaired text at 390/1280 px with no page errors. The shared transport suite passes 29 fences. The browser regression is wired into shard 1 of `.github/workflows/ci.yml`; the JSON and credit drivers are discoverable by the full `scripts/test.sh` suite.
 
 The frozen candidate validation does not automatically cover later changes on main or a later parser fix. See `VALIDATION.json` for exact source and output hashes. PR #782 was normally merged as `e729204ccae6896e2e6e8c0384d34e466b16df25` (tree `634293397796219764caae0f9cbe0c189f32df1c`) and handed to installer t1792701529-415584. `MERGED.json` records its exact statements, source/tool hashes and seven proof-input differences from the checked candidate; it explicitly makes no full-proof claim on that later merged union.
+
+## Canonical root-reference follow-up — 2026-11-03
+
+Regular PR [#807](https://github.com/BackplaneWorks/Backplane/pull/807) merged as
+`5da5647b737e212fe1fa58549ce477f51bad611c`. This replaces the production source-row
+fallback with a constant root reference and a separately framed canonical root;
+the original nine conversation laws and all earlier audit laws remain intact.
+Only the final reference envelope has the 262144-byte theorem. Control fragments
+have at most 32768 escaped text payload bytes plus headers; aggregate control,
+logical root size, DOM work and browser/native behavior have separate limits.
+
+Focused proof 1343383 checked the actual envelope bound and exact root retention.
+The complete canonical candidate gate 1346309 then passed `scripts/check.sh proof`
+in 471 seconds: raw output listed only 2581 existing foreign/unsafe definitions,
+accepted by the unchanged verifier. It did not print literal "All terms check."
+Matching runtime qualification covered 45 Bend assertions, 235 JavaScript assertions,
+trusted read-only history replay and the synthetic 3D/software-WebGL identity
+fixture. It does not claim the separate hardware strict-eight-case reader gate.
+These are exact pre-merge candidate receipts, not an unqualified proof of every
+later merged union or installed payload. Installer t1792701529-415584 received
+the priority merge and receipts. See `ROOT-REGION-MERGED.json` and
+`docs/reviews/bounded-conversation-root.md` in the merged repository.
+
+The other rows retain the original audit's stated scope and pending items;
+this follow-up does not claim a universal web text-merge theorem, full draft
+lifecycle theorem or arbitrary-order canonical event convergence.
