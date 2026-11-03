@@ -3779,31 +3779,45 @@ def View.workspace.key.attrs(+key: String) -> List<&2, D.Attr>:
 
 # (tog: the rail's own buttons toggle, client.bend's Rail.*: the view on show
 # shuts the viewer; the menu's pick a view)
-def View.workspace.button(+tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
+# Native disclosure menus keep their labels, actions and shortcuts. Their
+# option icons repeated three times in a page and displaced real messages
+# from the bounded reply; only the visible rail needs those SVG children.
+def View.workspace.button.icon(show: Bool, kind: String) -> List<&2, D.Node>:
+  match show:
+    case False{}: Nil{}
+    case True{}: [WI.WIcon.svg(View.workspace.icon(kind), 18)]
+
+def View.workspace.button.mode(+icons: Bool, +tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
   +key = View.workspace.key(kind)
   D.El{"button", kind, List.append(&2, D.Attr, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")},
     D.At{"aria-label", View.workspace.label(lc, kind)}, D.At{"aria-current", Bool.pick(String, String.eq(cur, kind), "page", "false")},
     D.At{"aria-pressed", Bool.pick(String, Bool.and(tog, String.eq(cur, kind)), "true", "false")},
     D.At{"title", View.workspace.label(lc, kind) ++ Bool.pick(String, String.is_empty(key), "", " · " ++ String.to_upper(key))}, D.At{"data-value", Bool.pick(String, tog, U.Rail.value(cur, kind, value), value)}, D.On{"click", Bool.pick(String, tog, U.Rail.act(cur, kind, action), action)}], View.workspace.key.attrs(key)),
-    List.append(&2, D.Node, [WI.WIcon.svg(View.workspace.icon(kind), 18), D.Dom.span("workspace-label", View.workspace.label(lc, kind))], View.workspace.keycap(key))}
+    List.append(&2, D.Node, View.workspace.button.icon(icons, kind), D.Dom.span("workspace-label", View.workspace.label(lc, kind)) <> View.workspace.keycap(key))}
+
+def View.workspace.button(+tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
+  View.workspace.button.mode(True{}, tog, lc, cur, kind, action, value)
+
+def View.workspace.choices.mode(+icons: Bool, +tog: Bool, +lc: I.Loc, +cur: String, term: Bool, +palette: Bool) -> List<&2, D.Node>:
+  [D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Tools"}], [
+    View.workspace.button.mode(icons, False{}, lc, Bool.pick(String, term, "terminal", ""), "terminal", "term-toggle", "@term-size"),
+    View.workspace.button.mode(icons, False{}, lc, Bool.pick(String, palette, "commands", ""), "commands", U.Rail.palette(palette), "") ]},
+   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Design"}], [
+    View.workspace.button.mode(icons, tog, lc, cur, "board", "view-kind", "board"), View.workspace.button.mode(icons, tog, lc, cur, "schematic", "view-kind", "schematic"),
+    View.workspace.button.mode(icons, tog, lc, cur, "3d", "view-kind", "3d"), View.workspace.button.mode(icons, tog, lc, cur, "split", "view-kind", "split"), View.workspace.button.mode(icons, tog, lc, cur, "mech", "mech", "")]},
+   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Inspect"}], [
+    View.workspace.button.mode(icons, tog, lc, cur, "files", "fm", ""), View.workspace.button.mode(icons, tog, lc, cur, "diff", "diff", ""),
+    View.workspace.button.mode(icons, tog, lc, cur, "review", "rv-page", "bom"), View.workspace.button.mode(icons, tog, lc, cur, "browser", "view-kind", "browser")]}]
 
 def View.workspace.choices(+tog: Bool, +lc: I.Loc, +cur: String, term: Bool, +palette: Bool) -> List<&2, D.Node>:
-  [D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Tools"}], [
-    View.workspace.button(False{}, lc, Bool.pick(String, term, "terminal", ""), "terminal", "term-toggle", "@term-size"),
-    View.workspace.button(False{}, lc, Bool.pick(String, palette, "commands", ""), "commands", U.Rail.palette(palette), "") ]},
-   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Design"}], [
-    View.workspace.button(tog, lc, cur, "board", "view-kind", "board"), View.workspace.button(tog, lc, cur, "schematic", "view-kind", "schematic"),
-    View.workspace.button(tog, lc, cur, "3d", "view-kind", "3d"), View.workspace.button(tog, lc, cur, "split", "view-kind", "split"), View.workspace.button(tog, lc, cur, "mech", "mech", "")]},
-   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Inspect"}], [
-    View.workspace.button(tog, lc, cur, "files", "fm", ""), View.workspace.button(tog, lc, cur, "diff", "diff", ""),
-    View.workspace.button(tog, lc, cur, "review", "rv-page", "bom"), View.workspace.button(tog, lc, cur, "browser", "view-kind", "browser")]}]
+  View.workspace.choices.mode(True{}, tog, lc, cur, term, palette)
 
 def View.workspace.menu(+lc: I.Loc, +cur: String, term: Bool, palette: Bool) -> D.Node:
   D.El{"details", "view-menu", [D.At{"class", "local-menu workspace-menu"}], [
     D.El{"summary", "", [D.At{"aria-label", "Workspace views and tools"}, D.At{"title", "Workspace views and tools"}], [
       WI.WIcon.svg(Bool.pick(String, String.is_empty(cur), "message-square", View.workspace.icon(cur)), 16),
       D.Dom.span("workspace-current", Bool.pick(String, String.is_empty(cur), MSG.T.bots.tab.chat(lc), View.workspace.label(lc, cur))), WI.WIcon.svg("chevron-down", 14)]},
-    D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices(False{}, lc, cur, term, palette)}]}
+    D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices.mode(False{}, False{}, lc, cur, term, palette)}]}
 
 # the rail's foot: a toggle host.js answers, its buttons icons only (their
 # names as tooltips), kept in this browser

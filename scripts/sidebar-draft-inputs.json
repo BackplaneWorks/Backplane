@@ -818,5 +818,21 @@
       "src/web/view.bend"
     ],
     "scope": "roots.bend (imports model, far) reads only the setting projects.missing and project records; view.bend's View.gone.* reads the selected thread's project, that setting and the existing '@rm' remove-confirm scratch key (as the project menu's Remove already does). No sidebar draft readers, unknown @ retention, private image keys or transport authority change."
+  },
+  "readerMenuPayloadReview": {
+    "base": "92ddc7e46ccab1ef281b30a5a993df91ea4dac5e",
+    "qualifiedSourceIdentity": "85f661be69158fa402f7016ca46e8dc558ecb5cb9fed336c20c0a01706b052f4",
+    "scope": "View workspace choices use one shared action/label/shortcut table; omit only menu-option decorative SVG children, preserve visible rail and opener icons. Add newly imported main777 composer-bar.bend to conservative closure: pure D.Node wrappers and content-independent layout strings; no Ui/session/model/draft readers, no image-key/filter/authority change. All previous scoped reviews retained.",
+    "addedDependencies": [
+      "src/web/composer-bar.bend"
+    ],
+    "changedDependencies": [
+      "src/web/view.bend"
+    ],
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "assertions": 24,
+    "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+    "work": "w-t1793604413-1188217-1319751",
+    "qualification": "Exact full-output24 passed including composer module; menu40 and compact37 also passed. Pin-only successor, no runtime or final-global-proof qualification."
   }
 }
