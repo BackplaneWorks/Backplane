@@ -44,7 +44,7 @@ def Wire.version(j: J.Json) -> Bool:
 
 def Target.kind(+kind: String, +id: String) -> Bool:
   Bool.and(Wire.within(id, 1024n), Bool.or(Bool.and(String.eq(kind, "recent"), String.is_empty(id)),
-    Bool.and(Bool.not(String.is_empty(id)), Bool.or(String.eq(kind, "thread"), Bool.or(String.eq(kind, "bot"), String.eq(kind, "room"))))))
+    Bool.and(Bool.not(String.is_empty(id)), Bool.or(String.eq(kind, "project"), Bool.or(String.eq(kind, "thread"), Bool.or(String.eq(kind, "bot"), String.eq(kind, "room")))))))
 
 def Target.fields(fs: J.Json, +count: Nat) -> Bool:
   match fs:

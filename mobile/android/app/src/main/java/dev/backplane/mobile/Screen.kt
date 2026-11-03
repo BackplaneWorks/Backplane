@@ -34,6 +34,7 @@ data class Project(
     val value: String = "", val archOpen: Boolean = false, val archived: List<Row> = emptyList(),
     // no live thread: its header shows faded, after the live ones
     val quiet: Boolean = false,
+    val icon: String = "folder",
 )
 
 // the folded shelf of older projects at the end of the list ("side-older"),
@@ -482,6 +483,20 @@ data class BotView(
     val mailroom: MailroomModel? = null, val mailroomLoading: Boolean = false,
 )
 
+data class ProjectHomeNode(val tag: String, val text: String, val action: String, val payload: String,
+    val field: String, val content: String, val src: String, val href: String, val kids: List<ProjectHomeNode>,
+    val icon: String, val className: String, val style: String, val label: String) {
+    val plain: String get() = text.ifEmpty { kids.joinToString(" ") { it.plain } }
+}
+data class ProjectHome(val owner: String, val title: String, val draft: String, val pending: Boolean,
+    val cards: List<ProjectHomeNode>, val viewer: Viewer)
+private fun projectHomeNode(o: JSONObject): ProjectHomeNode = ProjectHomeNode(o.optString("tag"), o.optString("text"),
+    o.optString("action"), o.optString("payload"), o.optString("field"), o.optString("content"),
+    o.optString("src"), o.optString("href"), o.optJSONArray("kids").map(::projectHomeNode),
+    o.optString("icon"), o.optString("className"), o.optString("style"), o.optString("label"))
+private fun projectHome(o: JSONObject) = ProjectHome(o.optString("owner"), o.optString("title"), o.optString("draft"),
+    o.optBoolean("pending"), o.optJSONArray("cards").map(::projectHomeNode), viewer(o.getJSONObject("viewer")))
+
 // hub: the one in focus (its thread is shown, its plots are drawn)
 data class Screen(
     val online: Boolean, val version: String, val error: String, val note: String,
@@ -512,6 +527,7 @@ data class Screen(
     val legacy: List<Row> = emptyList(),
     val bubMove: BubMove? = null,
     val starNudge: StarNudge? = null,
+    val projectHome: ProjectHome? = null,
 )
 
 data class Cmd(
@@ -827,7 +843,7 @@ fun parseScreen(o: JSONObject) = Screen(
         Project(it.optString("id"), it.optString("title"), it.optString("root"), it.optString("machine"), it.optBoolean("open"),
             it.optJSONArray("threads").map(::row), it.optString("snoozedShelf"), it.optJSONArray("snoozed").map(::row),
             it.optString("shelf"), it.optJSONArray("settled").map(::row),
-            it.optString("value"), it.optBoolean("archOpen"), it.optJSONArray("archived").map(::row), it.optBoolean("quiet"))
+            it.optString("value"), it.optBoolean("archOpen"), it.optJSONArray("archived").map(::row), it.optBoolean("quiet"), it.optString("icon", "folder"))
     },
     o.optJSONObject("thread")?.let(::thread),
     island(o.optJSONObject("island")),
@@ -896,6 +912,7 @@ fun parseScreen(o: JSONObject) = Screen(
         if (text.isNullOrBlank() || url.isNullOrBlank() || token.isNullOrBlank()) null
         else StarNudge(text, url, token)
     },
+    projectHome = o.optJSONObject("projectHome")?.let(::projectHome),
 )
 
 fun parseSettings(st: JSONObject) = Settings(st.optJSONArray("rows").map { r ->

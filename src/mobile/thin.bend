@@ -1,4 +1,5 @@
 import Base
+import ../core/project-home.bend as PH
 import ../core/json.bend as J
 import ../core/client.bend as U
 import ../core/presentation.bend as P
@@ -35,7 +36,7 @@ def Target.json( +kind: String, +id: String) -> J.Json:
 def Target.thread( +empty: Bool, +session: J.Json) -> J.Json:
   match empty:
     case True{}: Target.json("recent", "")
-    case False{}: Target.json("thread", J.Json.get_str(session, "sel", ""))
+    case False{}: Target.json(Bool.pick(String, PH.Home.is(J.Json.get_str(session, "sel", "")), "project", "thread"), Bool.pick(String, PH.Home.is(J.Json.get_str(session, "sel", "")), PH.Home.project(J.Json.get_str(session, "sel", "")), J.Json.get_str(session, "sel", "")))
 
 def Target.route( +bot: Bool, +session: J.Json) -> J.Json:
   match bot:

@@ -21,7 +21,7 @@ def WIcon.paths(ls: List<&2, I.Layer>) -> List<&2, D.Node>:
 
 # the icon, px square
 def WIcon.svg(+name: String, +px: U32) -> D.Node:
-  D.El{"svg", "", [D.At{"class", "ico"}, D.At{"viewBox", "0 0 24 24"}, D.At{"width", U32.show(px)}, D.At{"height", U32.show(px)},
+  D.El{"svg", "", [D.At{"class", "ico"}, D.At{"data-icon", name}, D.At{"viewBox", "0 0 24 24"}, D.At{"width", U32.show(px)}, D.At{"height", U32.show(px)},
     D.At{"fill", "none"}, D.At{"stroke", "currentColor"}, D.At{"stroke-width", "2"}, D.At{"stroke-linecap", "round"}, D.At{"stroke-linejoin", "round"},
     D.At{"aria-hidden", "true"}], WIcon.paths(I.Icon.layers(name))}
 
