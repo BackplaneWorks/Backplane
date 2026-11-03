@@ -6271,7 +6271,7 @@ def Hello.busy(ss: List<&2, PF.Stat>) -> Nat:
 def Conn.get(hello: Bool, s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
   match hello:
     case True{}:
-      IO.bind(String, Unit, PS.Perf.take(), t => Conn.finish(s, W.Http.response("200 OK", "application/cbor", TN.Hello.answer.c(Main.version(), Hello.busy(PF.Stats.parse(t)), VR.Version.commit()), "")))
+      IO.bind(U32, Unit, PS.Perf.gauge("hub.busy"), busy => Conn.finish(s, W.Http.response("200 OK", "application/cbor", TN.Hello.answer.c(Main.version(), U32.to_nat(busy), VR.Version.commit()), "")))
     case False{}:
       Conn.static(s, web, path, gz)
 

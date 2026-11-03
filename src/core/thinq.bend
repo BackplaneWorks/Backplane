@@ -153,7 +153,10 @@ def Q.sql.search.in() -> String:
 # every thread with entries and its newest message from the person (0:
 # none): the recent order's ranks (T.Index.recent), before threads' seeds
 def Q.sql.recent() -> String:
-  "SELECT thread, max(CASE WHEN kind = 'msg' AND role = 'user' THEN at ELSE 0 END) FROM entry GROUP BY thread"
+  # Both scans are covering: entry_thread supplies every thread (including
+  # orphan/history-only threads), and entry_user supplies only human ranks.
+  # No text/tool-output table pages are read to discover recent order.
+  "SELECT e.thread, coalesce((SELECT max(u.at) FROM entry u WHERE u.thread = e.thread AND u.kind = 'msg' AND u.role = 'user'), 0) FROM (SELECT DISTINCT thread FROM entry) e"
 
 # Rows read back
 # --------------

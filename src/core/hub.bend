@@ -4894,6 +4894,10 @@ def Retire.answers(as: List<&2, M.Ask>, +th: String) -> List<&2, Out>:
 
 def Step.cat(a: Step, b: Step) -> Step:
   match a b:
+    case Step{Nil{}, Nil{}} right:
+      right
+    case left Step{Nil{}, Nil{}}:
+      left
     case Step{cs, os} Step{c2, o2}:
       Step{List.append(&2, M.Change, cs, c2), List.append(&2, Out, os, o2)}
 
@@ -8213,6 +8217,8 @@ type Rec is Data:
 
 def Rec.add(r: Rec, st: Step) -> Rec:
   match r st:
+    case kept Step{Nil{}, Nil{}}:
+      kept
     case Rec{s, cs, os} Step{+c2, o2}:
       Rec{M.State.replay(c2, s), List.append(&2, M.Change, cs, c2), List.append(&2, Out, os, o2)}
 
@@ -9030,7 +9036,7 @@ def Run.queue.recover.keys(ks: List<&2, String>, +s: M.State) -> List<&2, Out>:
   match ks:
     case Nil{}: Nil{}
     case +k <> rest:
-      List.append(&2, Out, Bool.pick(List<&2, Out>, String.starts_with(k, "triage.queue."), Run.queue.recover.one(TRI.Triage.queue.strings(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(String.drop(k, 13n)), J.Null{}))), s), Nil{}), Run.queue.recover.keys(rest, s))
+      List.append(&2, Out, Run.queue.recover.one(TRI.Triage.queue.key.parts(k), s), Run.queue.recover.keys(rest, s))
 
 def Run.recover(+s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
   +done = Run.recover.on(Bool.or(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.not(String.is_empty(UB.Uber.bot(s)))), s, now, kept, st)
