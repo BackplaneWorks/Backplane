@@ -148,3 +148,19 @@ def main() -> IO(Unit):
     C.Check.str("a folder clicked puts the keyboard back in the field", focused(U.Act.cmds(U.Ui.act(listed(), "proj-cd", "/home/h/docs"))), "proj;")
     C.Check.str("so Enter then takes the first row: Add it", Nat.show(U.Proj.index(ui(U.Ui.act(listed(), "proj-cd", "/home/h/docs")))), "0")
     C.Check.str("back to the projects too", focused(U.Act.cmds(U.Ui.act(listed(), "proj-back", ""))), "proj;")
+    # a path typed part way in the listed folder completes to its subfolders
+    C.Check.str("partial path offers its folders first", at("/home/h/dev"), "Development/|dev-notes/|Add /home/h/dev as a project|Go to /home/h/dev|Create project /home/h/dev|")
+    C.Check.str("so Enter goes into the folder", asks(U.Ui.act(U.Proj.set(listed(), "/home/h/Dev", 0n), "proj-enter", "")), "fs.list;")
+    C.Check.str("a folder typed whole is added", at("/home/h/docs"), "Add /home/h/docs as a project|Go to /home/h/docs|Create project /home/h/docs|")
+    C.Check.str("hidden only with a dot", at("/home/h/.c"), ".cache/|Add /home/h/.c as a project|Go to /home/h/.c|Create project /home/h/.c|")
+    C.Check.str("projects: ~ path completes once home is known", labels(U.Proj.items(U.Proj.set(U.Ui.recv(projects(), listing("0", "/home/h")), "~/De", 0n))),
+      "Development/|dev-notes/|Add ~/De as a project|Go to ~/De|Create project ~/De|")
+    C.Check.str("typing a path elsewhere lists its folder", asks(U.Ui.act(listed(), "bfield", "proj\u{1f}/tmp/W3/stick")), "fs.list;")
+    C.Check.str("not the folder already listed", asks(U.Ui.act(listed(), "bfield", "proj\u{1f}/home/h/dev")), "")
+    C.Check.str("not a path ending in a slash", asks(U.Ui.act(listed(), "bfield", "proj\u{1f}/tmp/W3/")), "")
+    C.Check.str("listed folder completes the typed name", labels(U.Proj.items(U.Ui.recv(ui(U.Ui.act(listed(), "bfield", "proj\u{1f}/tmp/W3/stick")),
+      json("{\"t\":\"reply\",\"id\":2,\"ok\":true,\"result\":{\"dir\":\"/tmp/W3\",\"entries\":[\"stickhub\",\"other\"]}}")))),
+      "stickhub/|Add /tmp/W3/stick as a project|Go to /tmp/W3/stick|Create project /tmp/W3/stick|")
+    C.Check.str("a folder not there is not an error", U.Ui.info(U.Ui.recv(ui(U.Ui.act(listed(), "bfield", "proj\u{1f}/nope/stick")),
+      json("{\"t\":\"reply\",\"id\":2,\"ok\":false,\"error\":\"no such folder: /nope\"}")), "proj.err"), "")
+    C.Check.str("nor asked again per key", asks(U.Ui.act(ui(U.Ui.act(listed(), "bfield", "proj\u{1f}/nope/stick")), "bfield", "proj\u{1f}/nope/sticks")), "")
