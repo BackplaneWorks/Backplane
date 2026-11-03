@@ -65,7 +65,7 @@
     "src/core/google.bend": "196ba6d77f7c0e4b8d982d3fb259302752db1f27974b2d49a0123d092fbbb09e",
     "src/core/handoff.bend": "690d78b37f32187a3356d3df2ccb90aafa6d8b1f7234a5583dcbd55baadb55e4",
     "src/core/hier.bend": "8800baee6c70fbf966724c95ebff781a002c67227a82c260818a3f049b28ab9b",
-    "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f",
+    "src/core/hist.bend": "c19be246b05753c77cc708309e71a8fce5a9e13b8b9c1545685acb15533beb53",
     "src/core/hot.bend": "541015b82fb97a7aa8c5f02206c53faa4d732529e8ab6e79f45a4d81f5403d36",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
@@ -488,7 +488,7 @@
     "previousQualifiedHead": "d50e3bdf4cbe10a23c5ec0110de69c38fa32ada1",
     "changedMergedHashes": {
       "src/core/client.bend": "c3efad258366d791103ab595bde852729acef2b9dfe38486e19510d3ee7b1565",
-      "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f"
+      "src/core/hist.bend": "c19be246b05753c77cc708309e71a8fce5a9e13b8b9c1545685acb15533beb53"
     },
     "scope": "Reviewed normal source merge: client history track is computed once, project picker focus and failed-turn Retry helpers are outside canonical sidebar projection; hist path match precedes kind check without changing result. Telemetry Share/Tour affirmative consent, private Ext usage map and adapters retained. Mech detail/tools/view/mobile changes retain upstream reviewed hashes. Existing draft readers, reduced input fields, scanner, bridge authority and fallback behavior unchanged.",
     "fullOutputCheck": "test/sidebar_draft_image_test.bend",
