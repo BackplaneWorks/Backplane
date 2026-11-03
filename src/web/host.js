@@ -6,6 +6,8 @@
 // is dumb).
 
 import App from "./app.bend";
+import { starAttention } from "./star-attention.js";
+const starAttentionSync = starAttention();
 import { allowanceDeadline } from "./allowance-deadline.js";
 const retireAllowance = allowanceDeadline();
 import { applyComposerDraft } from "./composer-draft.js";
@@ -1093,6 +1095,7 @@ function render() {
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
+  starAttentionSync(root);
   bubMoveSync();
   terminalOutput.apply(true);
   if (PERF) PERF.render.push([t1 - t0, pnow() - t1]);

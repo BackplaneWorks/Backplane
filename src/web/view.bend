@@ -5513,10 +5513,10 @@ def View.star.k(on: Bool, +token: String) -> List<&2, D.Node>:
   match on:
     case False{}: Nil{}
     case True{}:
-      [D.El{"section", "star-nudge", [D.At{"class", "star-nudge"}, D.At{"role", "status"}], [
-        D.El{"p", "", [D.At{"class", "star-nudge-text"}], [D.Txt{U.Star.body()}]},
-        D.El{"a", "", [D.At{"class", "star-nudge-open"}, D.At{"href", U.Star.url()}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"},
-          D.At{"data-value", token}, D.On{"click", "star-open"}], [D.Txt{"Star on GitHub"}]},
+      [D.El{"section", "star-nudge", [D.At{"class", "star-nudge"}, D.At{"role", "status"}, D.At{"data-star-offer", token}], [
+        D.El{"p", "", [D.At{"class", "star-nudge-text"}], [D.El{"span", "", [D.At{"class", "star-nudge-icon"}, D.At{"aria-hidden", "true"}], [D.Txt{"★"}]}, D.Dom.span("", U.Star.body())]},
+        D.El{"a", "", [D.At{"class", "star-nudge-open"}, D.At{"aria-label", "Star on GitHub (opens in a new tab)"}, D.At{"href", U.Star.url()}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"},
+          D.At{"data-value", token}, D.On{"click", "star-open"}], [D.El{"span", "", [D.At{"aria-hidden", "true"}], [D.Txt{"★"}]}, D.Txt{"Star on GitHub"}]},
         D.El{"button", "", [D.At{"class", "star-nudge-dismiss"}, D.At{"type", "button"}, D.At{"aria-label", "Dismiss star suggestion"}, D.At{"title", "Dismiss star suggestion"},
           D.At{"data-value", token}, D.On{"click", "star-dismiss"}], [WI.WIcon.svg("x", 16)]}]}]
 
