@@ -43,6 +43,20 @@ class HeavyGuardTest(unittest.TestCase):
         with patch.object(guard, 'available', return_value=guard.FLOORS['proof'] - 1):
             self.assertFalse(guard.admit('proof'))
 
+    def test_compile_only_profile_does_not_lower_other_floors_or_reserve(self):
+        self.assertEqual(guard.FLOORS['build'], 16 * guard.GIB)
+        self.assertEqual(guard.FLOORS['compile-js'], 3 * guard.GIB)
+        with patch.object(guard, 'available', return_value=3 * guard.GIB), patch.object(guard, 'host_available', return_value=11 * guard.GIB):
+            self.assertTrue(guard.admit('compile-js'))
+            self.assertFalse(guard.admit('build'))
+        with patch.object(guard, 'available', return_value=3 * guard.GIB), patch.object(guard, 'host_available', return_value=11 * guard.GIB - 1):
+            self.assertFalse(guard.admit('compile-js'))
+
+    def test_retained_bytes_never_use_source_only_automatic_transport(self):
+        with patch.object(guard.os, 'execvpe') as run:
+            self.assertEqual(guard.offload(['scripts/build-js.sh', 'a.bend', 'dist/a'], {'BACKPLANE_PREEMITTED_JS': '/retained/server.js'}), 75)
+            run.assert_not_called()
+
     def test_boat_uses_sandbox_headroom_not_local_reserve(self):
         expected = guard.FLOORS['web']
         with patch.dict(os.environ, {guard.BOAT_VAR: '1', 'BACKPLANE_HEAVY_OFFLOADED': '1'}), patch.object(guard, 'host_available', return_value=expected), patch.object(guard, 'available', return_value=expected):
