@@ -10,7 +10,10 @@ GIB = 1024 ** 3
 # Expected peak plus an execution margin, not process limits. Local jobs also
 # leave host headroom; Boat jobs are isolated and use their own capacity.
 FLOORS = {'check': 14 * GIB, 'proof': 19 * GIB, 'test': 14 * GIB,
-          'build': 16 * GIB, 'web': 10 * GIB, 'browser': 14 * GIB}
+          'build': 16 * GIB, 'web': 10 * GIB, 'browser': 14 * GIB,
+          # Stamping and Bun linking of exact verified pre-emission only.
+          # No Bend fallback is permitted by build-js.sh on this path.
+          'compile-js': 3 * GIB}
 HOST_RESERVE = 8 * GIB
 FD_VAR = 'BACKPLANE_HEAVY_LOCK_FD'
 BOAT_VAR = 'BACKPLANE_HEAVY_BOAT_SANDBOX'
@@ -97,6 +100,9 @@ def offload(command, env):
     if env.get('BACKPLANE_HEAVY_OFFLOADED'):
         print('heavy-guard: remote memory/lock admission failed; no recursive offload', file=sys.stderr)
         return 75
+    if any(env.get(name) for name in ('BACKPLANE_PREEMITTED_JS', 'BACKPLANE_PREEMITTED_SHA256', 'BACKPLANE_PREEMITTED_KEY')):
+        print('heavy-guard: retained emission needs an explicit verified transport; no automatic source-only offload', file=sys.stderr)
+        return 75
     root = Path(__file__).resolve().parent.parent
     allowed = {'scripts/check.sh', 'scripts/test.sh', 'scripts/build-js.sh', 'scripts/build-mobile.sh', 'scripts/dev.sh'}
     try:
@@ -158,7 +164,7 @@ def main(args):
     if held_only:
         args = args[1:]
     if not args or args[0] not in FLOORS:
-        print('usage: heavy-guard.py [--held] {check|proof|test|build|web|browser} [-- command ...]', file=sys.stderr)
+        print('usage: heavy-guard.py [--held] {' + '|'.join(FLOORS) + '} [-- command ...]', file=sys.stderr)
         return 2
     profile, rest = args[0], args[1:]
     path = lock_path()

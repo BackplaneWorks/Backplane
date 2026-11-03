@@ -398,10 +398,19 @@ class ProducerTests(unittest.TestCase):
                "webNotices": S.reference(self.root / "notices.json")}
         return req
 
-    def mocked_build(self, request=None, outname="actual-output", host=("Linux", "x86_64"), extra=None, drop=None, nokistack=False):
+    def mocked_build(self, request=None, outname="actual-output", host=("Linux", "x86_64"), extra=None, drop=None, nokistack=False, preemission=False):
         source = self.inputs()
         req = request or self.js_request("linux-x64", 62)
         out, calls = self.root / outname, []
+        retained = None
+        if preemission:
+            emitted = self.root / 'retained'
+            (emitted / 'logs').mkdir(parents=True)
+            (emitted / 'web').mkdir()
+            for name in ['logs/entries.log', 'logs/web.log', 'EMISSION.json', 'SOURCE.json', 'PHASES.json', 'web/index.html', 'web/chunk-test.js', 'server.js']:
+                (emitted / name).write_text('offline retained fixture')
+            retained = emitted, {'serverEmitKey': 'c' * 40, 'files': {'server.js': {'sha256': S.digest(emitted / 'server.js')}}}
+            req['preEmission'] = S.reference(emitted / 'EMISSION.json')
 
         def fake_run(args, log, env, timeout=2400):
             args = [str(a) for a in args]
@@ -421,6 +430,13 @@ class ProducerTests(unittest.TestCase):
                 self.assertEqual(env["BACKPLANE_JS_TARGET"], req["target"])
                 self.assertEqual(env["BACKPLANE_COMMIT_STAMP"], self.release["commit"])
                 self.assertEqual(env["BACKPLANE_JS_BUN_RUNTIME"], str(self.root / "bun-runtime"))
+                if preemission:
+                    self.assertEqual(env['BACKPLANE_PREEMITTED_JS'], str(retained[0] / 'server.js'))
+                    self.assertEqual(env['BACKPLANE_PREEMITTED_SHA256'], S.digest(retained[0] / 'server.js'))
+                    self.assertEqual(env['BACKPLANE_PREEMITTED_KEY'], 'c' * 40)
+                    self.assertEqual(env['BACKPLANE_EMIT_CACHE'], '0')
+                else:
+                    self.assertFalse(any(name.startswith('BACKPLANE_PREEMITTED_') for name in env))
                 for name in ("CC", "BACKPLANE_CFLAGS", "BACKPLANE_OBJ_CACHE"):
                     self.assertNotIn(name, env)
                 if req["target"] == "windows-x64":
@@ -433,6 +449,7 @@ class ProducerTests(unittest.TestCase):
                     (out / extra).write_text("stray")
                 return "stages: " + req["target"] + " emit (fresh)\n"
             if args[0] == "scripts/build-helpers.sh":
+                self.assertFalse(any(name.startswith('BACKPLANE_PREEMITTED_') for name in env))
                 self.assertEqual(args[1], str(out))
                 self.assertEqual(env["BACKPLANE_JS_TARGET"], req["target"])
                 self.assertEqual(env["BACKPLANE_JS_BUN_RUNTIME"], str(self.root / "bun-runtime"))
@@ -456,9 +473,22 @@ class ProducerTests(unittest.TestCase):
              patch.object(S, "check_tool", side_effect=lambda spec, base, name: self.root / name), \
              patch.object(S.subprocess, "check_output", return_value="1792559000000000000"), \
              patch.object(S, "git", return_value="LICENSE"), patch.object(S, "run", side_effect=fake_run), \
+             patch.object(S, "verified_preemission", return_value=retained), \
              patch.object(S.platform, "system", return_value=host[0]), patch.object(S.platform, "machine", return_value=host[1]):
             S.js(req, self.root, out)
         return out, calls, req
+
+    def test_verified_preemission_handoff_is_explicit_and_does_not_rerun_entries(self):
+        out, calls, _ = self.mocked_build(preemission=True)
+        self.assertFalse(any(c[0] == 'bash' for c in calls))
+        self.assertFalse(any('src/web/index.html' in c for c in calls))
+        self.assertFalse((out / 'verified-emission-cache').exists())
+        self.assertIn('preEmission', S.read(out / 'BUILD.json'))
+
+    def test_environment_cannot_inject_preemission_into_unqualified_request(self):
+        self.env.update(BACKPLANE_PREEMITTED_JS='/unverified', BACKPLANE_PREEMITTED_SHA256='0' * 64,
+                        BACKPLANE_PREEMITTED_KEY='0' * 40)
+        self.mocked_build()
 
     def test_js_calls_only_server_and_production_web_then_writes_witness(self):
         out, calls, req = self.mocked_build()
