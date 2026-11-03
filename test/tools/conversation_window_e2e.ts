@@ -28,7 +28,9 @@ events.push(thread('tools','Tool-prefix coverage'),event('MessagePosted',{thread
 for(let i=0;i<51;i++)events.push(event('ActivityLogged',{thread:'tools',act:`tool-${i}`,tone:'tool',kind:'shell',summary:`COLLAPSED TOOL DETAIL ${i}`}));
 events.push(event('MessagePosted',{thread:'other',msg:'control',role:'assistant',text:'Navigation is working'}));
 for(const [key,value]of [['restart.continue','off'],['onboard.done','1'],['onboard.uber','1']])events.push(event('SettingSet',{key,value}));
-for(let i=0;i<Number(process.env.E2E_PROJECTS||0);i++){events.push(event('ProjectCreated',{id:`pressure-${i}`,title:`Live project ${i} `+'long title '.repeat(8),root:join(root,`pressure-${i}`)}),event('ThreadCreated',{id:`pressure-thread-${i}`,title:`Live thread ${i}`,project:`pressure-${i}`,env:'local',branch:'',worktree:'',provider:'claude',model:''}));}
+const projectCount=Number(process.env.E2E_PROJECTS||12);
+for(let i=0;i<projectCount;i++){events.push(event('ProjectCreated',{id:`pressure-${i}`,title:`Live project ${i} `+'long title '.repeat(8),root:join(root,`pressure-${i}`)}),event('ThreadCreated',{id:`pressure-thread-${i}`,title:`Live thread ${i}`,project:`pressure-${i}`,env:'local',branch:'',worktree:'',provider:'claude',model:''}));}
+if(projectCount)events.push(event('MessagePosted',{thread:'pressure-thread-0',msg:'sidebar-control',role:'assistant',text:'Sidebar navigation is working'}));
 writeFileSync(join(home,'events.jsonl'),events.map(x=>JSON.stringify(x)).join('\n')+'\n');writeFileSync(join(home,'token'),token,{mode:0o600});
 console.log(JSON.stringify({root,realEntries:real.length,tripleEntries:3*real.length+1}));
 const hub=Bun.spawn([binary,'--home',home,'--port',String(port),'--host','127.0.0.1','--no-tailscale','--headless','--foreground','--web',web],{env:{...process.env,BACKPLANE_AGENTS:fake,BACKPLANE_LOCK_DIR:join(root,'locks'),BACKPLANE_NO_UPDATE:'1',BACKPLANE_KISTACK_SYNC:'0',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9'},stdout:Bun.file(join(root,'hub.out')),stderr:Bun.file(join(root,'hub.err'))});
@@ -52,6 +54,10 @@ try{
  },{viewerPressure,modelPath});
  await page.goto(`http://127.0.0.1:${port}/#token=${token}`);
  await page.locator('#composer').waitFor({timeout:60000});
+ const checkSidebar=async()=>{
+  for(let i=0;i<projectCount;i++)if(!await page.locator(`.sidebar [data-value="pressure-${i}"]`).count())throw Error(`open project ${i} disappeared from sidebar`);
+ };
+ await checkSidebar();
  if(viewerPressure){
   await page.locator('#viewer #solid-workbench canvas#solid').waitFor({timeout:30000});
   const initial=await page.evaluate(()=>{const canvas=document.querySelector('#solid') as HTMLCanvasElement,gl=canvas.getContext('webgl');(window as any).__pressureViewer={canvas,gl,viewer:document.querySelector('#viewer'),workbench:document.querySelector('#solid-workbench'),key:canvas.dataset.key,scope:canvas.dataset.scope};return{context:!!gl,key:canvas.dataset.key,scope:canvas.dataset.scope};});
@@ -72,10 +78,20 @@ try{
    if(Object.values(preserved).some(v=>v!==true))throw Error('pressure remounted requested viewer: '+JSON.stringify(preserved));console.log('PASS requested 3D DOM/WebGL identity under pressure',JSON.stringify(preserved));pressureChecked=true;
   }
   console.log(JSON.stringify({title,...state}));if(!state.content||!state.rows||state.bar)throw Error(`conversation did not paint: ${JSON.stringify(state)}`);
+  await checkSidebar();
   if(title==='Triple bot history'){
    const before=requests.filter(r=>r.m==='view.page').length;await page.locator('#timeline').evaluate((el:any)=>el.scrollTop=0);await page.locator('#timeline').hover();await page.mouse.wheel(0,-2000);await delay(2000);
    if(requests.filter(r=>r.m==='view.page').length===before)throw Error('older history navigation issued no page');
   }
+ }
+ if(projectCount){
+  const project=page.locator('.sidebar .project').filter({has:page.locator('[data-value="pressure-0"]')}).first();
+  // Expand through the project's normal control, then follow its thread row.
+  if(!await page.locator('.sidebar .thread[data-value="pressure-thread-0"]').isVisible())await project.locator('[data-on-click="toggle-settled"][data-value="pressure-0"]').click();
+  await page.locator('.sidebar .thread[data-value="pressure-thread-0"]').click();
+  await page.getByText('Sidebar navigation is working',{exact:true}).waitFor({timeout:30000});
+  await checkSidebar();
+  console.log('PASS open projects retained and another thread reachable directly from sidebar');
  }
  await page.keyboard.press('Control+Shift+U');await delay(2000);
  if(!requests.some(r=>r.m==='view.open'&&r.p.target.kind==='bot'))throw Error('bot navigation did not open a bot target');
