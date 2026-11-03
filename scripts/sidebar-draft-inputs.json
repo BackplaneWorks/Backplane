@@ -167,7 +167,7 @@
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
     "src/mobile/screen.bend": "9572ee36c3a422d4057139565bde895857d63eabe557ebcd0695e19844d06d1d",
     "src/server/thin-actor.bend": "2f0216c55b246af65bef75cd0ac3c8c270f53e1a73510f16313971078e4670d6",
-    "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
+    "src/server/thin-body.bend": "ab16161b452008ce790923b6e1c782896a7bc39580988c16c5b3a5f0121cdd5a",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
     "src/server/thin-sidebar.bend": "03a4481e05258eaead769ca352081b6782f0b20589fe29d33e3bb1151916844a",
