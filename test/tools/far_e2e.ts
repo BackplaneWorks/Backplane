@@ -1,7 +1,12 @@
 // End to end: threads elsewhere (far.bend, docs/bots.md "Threads
 // elsewhere") on two headless hubs that pair by themselves (no invite:
 // client.bend's Mate.*). Each hub lists the
-// other as one of the owner's machines (BACKPLANE_PEERS), so each shares
+// other as one of the owner's machines (BACKPLANE_PEERS). They pair with
+// no token of each other's: the asking hub proves its ask, and the asked
+// one checks that proof with the asker at its listed address. Neither
+// takes the link as one of the owner's machines until the owner says so
+// (Settings' Mine, bots.peer_own); a tokenless ask that is not the
+// listed hub's gets nothing. From then on each shares
 // its projects, bots and threads with the other. Checks that a bot made on
 // alpha appears on beta, mirrored and named by the link; that writing to
 // it from beta reaches alpha and alpha's answer comes back; that a client
@@ -166,6 +171,42 @@ try {
   const askedB = await fetch(`http://127.0.0.1:${pb}/bots/pair?name=alpha&url=http://127.0.0.1:${pa}&token=${hubToken(b.home)}`, { method: "POST" });
   check("a linked machine asking again is refused", asked.status === 409 && askedB.status === 409, [asked.status, askedB.status]);
 
+  // paired over plain addresses, neither hub takes the link as one of the
+  // owner's machines by itself, so nothing is shared yet
+  const ownKey = `peer.own.${link}`;
+  check("neither hub records the link as the owner's by itself",
+    !ca.seen.some((c) => c.$ === "SettingSet" && c.key === ownKey) && !cb.seen.some((c) => c.$ === "SettingSet" && c.key === ownKey));
+  const early = await rpc(ca, "bots.create", { name: "early", persona: "made before the owner answered" });
+  await sleep(5000);
+  check("nothing is mirrored before the owner says the link is theirs", !!early?.ok && farItems(cb, link).length === 0, farItems(cb, link).map((c) => c.$));
+
+  // a tokenless ask gets nothing: without a proof it is refused, and a
+  // proof the listed hub did not make is refused when the asked hub checks
+  // it with that hub. (beta first says the link is not theirs, so the ask
+  // is one beta would otherwise answer with an invite.)
+  const bare = await fetch(`http://127.0.0.1:${pa}/bots/pair?name=beta&url=http://127.0.0.1:${pb}`, { method: "POST" });
+  check("a tokenless ask without a proof is refused", bare.status === 401, bare.status);
+  const now = Math.floor(Date.now() / 1000);
+  const forgedCheck = await fetch(`http://127.0.0.1:${pa}/bots/pair/check?to=http://127.0.0.1:${pb}&at=${now}&proof=${"0".repeat(64)}`, { method: "POST" });
+  check("a hub does not vouch for a proof it did not make", forgedCheck.status === 403, forgedCheck.status);
+  const notMine = await rpc(cb, "bots.peer_own", { peer: link, own: false });
+  check("beta says the link is not theirs", !!notMine?.ok, notMine);
+  const peersBefore = cb.seen.filter((c) => c.$ === "PeerSet").length;
+  const forged = await fetch(`http://127.0.0.1:${pb}/bots/pair?name=alpha&url=http://127.0.0.1:${pa}&to=http://127.0.0.1:${pb}&at=${now}&proof=${"ab".repeat(32)}`, { method: "POST" });
+  const forgedBody = await forged.text();
+  check("a tokenless ask with a forged proof gets no invite", forged.status === 403 && !forgedBody.includes("bp1:"), [forged.status, forgedBody]);
+  const wrongPort = await fetch(`http://127.0.0.1:${pb}/bots/pair?name=alpha&url=http://127.0.0.1:${pa}&to=http://127.0.0.1:1&at=${now}&proof=${"ab".repeat(32)}`, { method: "POST" });
+  check("a proof made for another hub is refused", wrongPort.status === 403 && !(await wrongPort.text()).includes("bp1:"), wrongPort.status);
+  const browser = await fetch(`http://127.0.0.1:${pb}/bots/pair?name=alpha&url=http://127.0.0.1:${pa}&to=http://127.0.0.1:${pb}&at=${now}&proof=${"ab".repeat(32)}`, { method: "POST", headers: { origin: "https://example.invalid" } });
+  check("a web page cannot ask for one", browser.status === 401 || browser.status === 403, browser.status);
+  await sleep(2000);
+  check("and no link is made", cb.seen.filter((c) => c.$ === "PeerSet").length === peersBefore, cb.seen.filter((c) => c.$ === "PeerSet"));
+
+  // the owner says the link is theirs, on both machines (Settings' Mine)
+  const mineA = await rpc(ca, "bots.peer_own", { peer: link, own: true });
+  const mineB = await rpc(cb, "bots.peer_own", { peer: link, own: true });
+  check("the owner says the link is theirs on both", !!mineA?.ok && !!mineB?.ok, [mineA, mineB]);
+
   // a bot on alpha appears on beta, mirrored
   const t0 = Date.now();
   const miso = await rpc(ca, "bots.create", { name: "miso", persona: "a test bot" });
@@ -322,8 +363,8 @@ try {
   a.proc!.kill();
   await a.proc!.exited;
   const peerChange = ca.seen.find((c) => c.$ === "PeerSet" && c.id === link);
-  // (with how alpha knows the link is the owner's: paired through /bots/pair)
-  const ownChange = ca.seen.find((c) => c.$ === "SettingSet" && c.key === `peer.own.${link}`);
+  // (with how alpha knows the link is the owner's: the owner said so)
+  const ownChange = ca.seen.findLast((c) => c.$ === "SettingSet" && c.key === `peer.own.${link}`);
   const resetAt = Math.floor(Date.now() / 1000) + 1;
   const replacement = [
     { ...peerChange, at: resetAt },
@@ -332,7 +373,7 @@ try {
     { $: "BotSet", id: "reset-bot", name: "new-history", thread: "reset-thread", look: 2, persona: "", at: resetAt },
   ];
   check("replacement keeps the linked peer", !!peerChange, peerChange);
-  check("alpha recorded the link as the owner's when the two paired", ownChange?.value === "pair", ownChange);
+  check("alpha recorded the link as the owner's when the owner said so", ownChange?.value === "owner", ownChange);
   writeFileSync(join(a.home, "events.jsonl"), replacement.map((c) => JSON.stringify(c)).join("\n") + "\n");
   spawn(a);
   await up(a);
