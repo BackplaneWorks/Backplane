@@ -23,6 +23,7 @@ import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
 import { EntryHistory } from "./entry-history.js";
 import { installImageActions } from "./image-actions.js";
+import { installShotMissing, shotsMissing } from "./shot-missing.js";
 import { copyText, copyButton } from "./text-copy.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => Wire.plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
@@ -138,7 +139,7 @@ let desktopTheme = window.backplaneDesktop?.theme || "";
 if (!themeNow) themeNow = desktopTheme;
 function themeDocument() {
   document.documentElement.classList.toggle("light", themeNow === "light");
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeNow === "light" ? "#fafaf8" : "#111410");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
 }
 themeDocument();
 function themeSeen(app) {
@@ -1207,7 +1208,11 @@ function render() {
   // the next: still near the top after a render, it is asked for
 
   if (focus) {
-    document.getElementById(focus)?.focus();
+    const el = document.getElementById(focus);
+    el?.focus();
+    // a rename opens with the old title selected: typing replaces it ("New
+    // thread" was kept in front of what was typed), an arrow key keeps it
+    if (focus === "thread-title") el?.select?.();
     focus = null;
   }
   refocusGive();
@@ -2062,7 +2067,9 @@ function attachmentPreviews() {
   for (const img of document.querySelectorAll('img.attachment-preview')) {
     if (img.complete) img.classList.toggle('failed', img.naturalWidth === 0);
   }
+  shotsMissing(document);
 }
+installShotMissing(document);
 
 document.addEventListener("load", e => {
   if (e.target.matches?.("img.attachment-preview")) e.target.classList.remove("failed");
