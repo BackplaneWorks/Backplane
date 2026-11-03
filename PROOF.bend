@@ -1,3 +1,6 @@
+import ./src/core/mailtriage.bend as MTRI
+import ./src/core/mailowner.bend as MAILOWN
+import ./src/web/composer-bar.bend as CBAR
 import ./src/core/allowance.bend as ALLOWANCE
 
 import ./src/core/lazy-tools.bend as LTOOLS
@@ -12352,14 +12355,59 @@ def MailProof.pending_route(missing, c, m, text):
     case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
     case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
 
+# Owner tracking follows the header. Finding its conversation must ignore
+# that suffix, just as it ignores the optional metadata before the header.
+law MailProof.pending_route_tail:
+  for missing: Bool
+  for c: ML.Conv
+  for +m: ML.Mail
+  for text: String
+  for tail: List<&2, M.Change>
+  {H.Mail.pending.conv(List.append(&2, M.Change, H.Mail.pending(missing, MB.Body{c, m, text}), tail)) == ML.Mail.conv(m) : String}
+
+def MailProof.pending_route_tail(missing, c, m, text, tail):
+  match missing c m:
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+
 def Laws.mail_file_one_conv(s, now, o, to, text, msg):
   +body = H.Mail.body(s, now, o, to, text, msg, ML.Mail.route(o, to), H.Mail.subject(String.eq(ML.Origin.kind(o), "launch"), s, o, to), "")
   +missing = String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(MB.Body.mail(body)))))
-  Equal.trans(String, H.Mail.pending.conv(H.Mail.pending(missing, body)), ML.Mail.conv(MB.Body.mail(body)), ML.Mail.route(o, to),
-    MailProof.pending_route(missing, MB.Body.conv(body), MB.Body.mail(body), MB.Body.text(body)), {==})
+  +tail = MAILOWN.Owner.track(s, body, ML.Mail.at(MB.Body.mail(body)))
+  Equal.trans(String, H.Mail.pending.conv(List.append(&2, M.Change, H.Mail.pending(missing, body), tail)), ML.Mail.conv(MB.Body.mail(body)), ML.Mail.route(o, to),
+    MailProof.pending_route_tail(missing, MB.Body.conv(body), MB.Body.mail(body), MB.Body.text(body), tail), {==})
+
+law MailProof.pending_one_tracked:
+  for missing: Bool
+  for +c: ML.Conv
+  for +m: ML.Mail
+  for +text: String
+  for on: Bool
+  for s: M.State
+  for now: Nat
+  {H.Mail.pending.count(List.append(&2, M.Change, H.Mail.pending(missing, MB.Body{c, m, text}), MAILOWN.Owner.track.on(on, s, MB.Body{c, m, text}, now))) == 1n : Nat}
+
+def MailProof.pending_one_tracked(missing, c, m, text, on, s, now):
+  match missing c m on:
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _} False{}: {==}
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _} True{}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _} False{}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _} True{}: {==}
+
+law MailProof.file_one:
+  for +s: M.State
+  for +c: ML.Conv
+  for +m: ML.Mail
+  for +text: String
+  {H.Mail.file.count(H.Mail.file.body(s, MB.Body{c, m, text})) == 1n : Nat}
+
+def MailProof.file_one(s, c, m, text):
+  +body = {MB.Body{c, m, text} : MB.Body}
+  MailProof.pending_one_tracked(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(m)))), c, m, text,
+    Bool.and(Bool.and(MAILOWN.Owner.addressed(s, body), MTRI.Triage.inbound(m, UBR.Uber.bot(s))), String.is_empty(M.Setting.get(s, MAILOWN.Owner.map.key(ML.Mail.id(m)), ""))), s, ML.Mail.at(m))
 
 def Laws.mail_room_once(s, now, from, room, text, msg, parts, subject):
-  MailProof.pending_one(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room)))))),
+  MailProof.file_one(s,
     ML.Conv{ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), subject, ML.Conv.mail_kind(ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), "room"), parts, "", Nil{}, now, now, 0n},
     ML.Mail{msg, ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), from, MREF.Ref.addr(MREF.Ref.room(room)), "room", room, "fyi", ML.Mail.head(text), H.Mail.bytes(text, 0n), now}, text)
 # ---- i18n core ui ----
@@ -15501,3 +15549,7 @@ def Laws.owner_mail_remote_holder(): {==}
 def Laws.owner_mail_unknown_method_unacknowledged(): {==}
 
 def Laws.owner_mail_copy_quiet(): {==}
+
+def Laws.composer_bar_one_button(button): {==}
+
+def Laws.composer_bar_never_wraps(button): {==}

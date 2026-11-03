@@ -157,6 +157,12 @@ jobs:
       - run: TEST_FULL=1 TEST_JOBS=2 scripts/test.sh
         env:
           BACKPLANE_CHROME: /usr/bin/google-chrome
+      - name: Composer one-button layout contract
+        if: matrix.shard == 1
+        run: |
+          mkdir -p build/composer-bar
+          bend test/tools/composer_bar_fixture.bend > build/composer-bar/after.json
+          CHROME_BIN=/usr/bin/google-chrome bun test/tools/composer_bar_browser_test.mjs
 
   # The hub (docs/js-service.md): bend emits src/server/main.bend as JS
   # once (kept by a hash of what it reads, so a change that leaves the
