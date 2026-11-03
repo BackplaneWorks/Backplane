@@ -6421,12 +6421,21 @@ def TL.part.act(step: Bool, +ty: Ty, e: M.Entry, +px: U32) -> TLPart:
     case _ M.Msg{_, _, _, +text, _}:
       TLPart{[TLine{Ty.fit(ty, 2n, text, px), T.Th.dim(), 3, "", 0}], Nil{}, Nil{}}
 
+# a reply's lines: its markdown, or a provider's API error as one red
+# sentence (FO.ApiErr.say; its Copy still copies the raw text)
+def TL.reply.blocks(api: Bool, +ty: Ty, +text: String, +px: U32) -> List<&2, TLine>:
+  match api:
+    case True{}:
+      [TLine{Ty.fit(ty, 2n, FO.ApiErr.say(Ty.loc(ty), text), px), T.Th.bad(), 3, "", 0}]
+    case False{}:
+      TL.blocks(ty, N.Md.render(text), px)
+
 def TL.part.own(+ty: Ty, e: M.Entry, +px: U32) -> TLPart:
   match e:
     case M.Msg{_, _, M.User{}, +text, _}:
       TLPart{TL.bubble.a(ty, text, px), Nil{}, Nil{}}
     case M.Msg{_, _, _, +text, _}:
-      TLPart{TL.blocks(ty, N.Md.render(text), px), IM.Img.paths(text), [TLine{"", 0, 7, text, 0}, TLine{"", 0, 4, "", 0}]}
+      TLPart{TL.reply.blocks(FO.ApiErr.is(text), ty, text, px), IM.Img.paths(text), [TLine{"", 0, 7, text, 0}, TLine{"", 0, 4, "", 0}]}
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       TL.part.act(String.eq(tone, HS.Step.tone()), ty, M.Act{id, th, tone, kind, summary, at}, px)
 
