@@ -2312,14 +2312,37 @@ def View.error(e: String) -> List<&2, D.Node>:
 def View.prow.cls(+a: String) -> String:
   Bool.pick(String, Bool.or(String.eq(a, "proj-cd"), String.eq(a, "proj-pick")), "prow", Bool.pick(String, String.is_empty(a), "prow off", "prow act"))
 
-# a row: its label, and a project's path at the right
-def View.prows(+u: U.Ui, ps: List<&2, U.PItem>, +i: Nat, +sel: Nat) -> List<&2, D.Node>:
+# a completion's label: the part typed ("sens") bright, the rest dim
+# (client.bend's Proj.comps)
+def View.prow.label(comp: Bool, +l: String, +typed: Nat) -> List<&2, D.Node>:
+  match comp:
+    case True{}:
+      [D.Dom.span("pt", String.take(l, typed)), D.Dom.span("pr", String.drop(l, typed))]
+    case False{}:
+      [D.Txt{l}]
+
+# at the right: a project's path, or Tab for the completion it writes
+def View.prow.detail(tab: Bool, +u: U.Ui, it: U.PItem) -> String:
+  match tab:
+    case True{}:
+      "Tab"
+    case False{}:
+      U.Proj.detail(u, it)
+
+# a row: its label, and a project's path at the right (the first `comps`
+# rows a typed path's completions, `typed` characters of each typed)
+def View.prows(+u: U.Ui, ps: List<&2, U.PItem>, +i: Nat, +sel: Nat, +comps: Nat, +typed: Nat) -> List<&2, D.Node>:
   match ps:
     case Nil{}:
       Nil{}
     case U.PItem{+l, +a, +v} <> t:
       D.El{"button", "", [D.At{"class", View.prow.cls(a) ++ Bool.pick(String, Nat.is_eq(i, sel), " sel", "")}, D.At{"title", l}, D.At{"data-value", v}, D.On{"click", a}],
-        [D.El{"span", "", [D.At{"class", "pl"}], [D.Txt{l}]}, D.El{"span", "", [D.At{"class", "pd"}], [D.Txt{U.Proj.detail(u, U.PItem{l, a, v})}]}]} <> View.prows(u, t, 1n+i, sel)
+        [D.El{"span", "", [D.At{"class", "pl"}], View.prow.label(Nat.is_lt(i, comps), l, typed)}, D.El{"span", "", [D.At{"class", "pd"}], [D.Txt{View.prow.detail(Bool.and(Nat.is_eq(i, sel), Nat.is_lt(i, comps)), u, U.PItem{l, a, v})}]}]} <> View.prows(u, t, 1n+i, sel, comps, typed)
+
+# Tab writes the selected completion into the field, as typing would
+# (a form field's edit: thin-host keeps it), when there is one
+def View.ptab(+tab: String) -> List<&2, D.Attr>:
+  Bool.pick(List<&2, D.Attr>, String.is_empty(tab), Nil{}, [D.At{"data-tab", "bfield"}, D.At{"data-value", "proj\u{1f}" ++ tab}])
 
 # above the filter: "Projects", or the folder browsed and the way back
 def View.phead.loc(+lc: I.Loc, dir: Bool, +u: U.Ui) -> D.Node:
@@ -2340,10 +2363,10 @@ def View.picker(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
           View.phead.loc(lc, U.Proj.browsing(u), u),
           D.Dom.div("subthread-route-note", D.Dom.when(U.ThreadTree.routing(u), D.Dom.span("", U.ThreadTree.route.note()))),
           D.Dom.div("desktop-folder", D.Dom.when(Bool.and(String.eq(U.Ui.scratch(u, "@desktop"), "1"), Bool.not(U.ThreadTree.routing(u))), D.Dom.button("", "desktop-folder", "", "Choose a local folder", "Choose folder…"))),
-          D.El{"input", "proj", [D.At{"id", "proj"}, D.At{"placeholder", Bool.pick(String, U.Proj.browsing(u), MSG.T.picker.folder.placeholder(lc), MSG.T.picker.project.placeholder(lc))},
-            D.At{"autocomplete", "off"}, D.At{"value", U.Proj.query(u)}, D.At{"data-bfield", "proj"}, D.On{"input", "bfield"}, D.At{"data-enter", "proj-enter"}], Nil{}}],
+          D.El{"input", "proj", List.append(&2, D.Attr, [D.At{"id", "proj"}, D.At{"placeholder", Bool.pick(String, U.Proj.browsing(u), MSG.T.picker.folder.placeholder(lc), MSG.T.picker.project.placeholder(lc))},
+            D.At{"autocomplete", "off"}, D.At{"value", U.Proj.query(u)}, D.At{"data-bfield", "proj"}, D.On{"input", "bfield"}, D.At{"data-enter", "proj-enter"}], View.ptab(U.Proj.tab(u))), Nil{}}],
           D.Dom.cat(Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.info(u, "proj.err")), Nil{}, [D.El{"div", "", [D.At{"class", "perr"}], [D.Txt{U.Ui.info(u, "proj.err")}]}]),
-            [D.El{"div", "", [D.At{"class", "prows"}], View.prows(u, U.Proj.items.loc(lc, u), 0n, U.Proj.index(u))}]))}]
+            [D.El{"div", "", [D.At{"class", "prows"}], View.prows(u, U.Proj.items.loc(lc, u), 0n, U.Proj.index(u), U.Proj.comps.n(u), U.Proj.typed.n(u))}]))}]
     case False{}:
       Nil{}
 

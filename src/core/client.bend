@@ -5339,18 +5339,33 @@ def Proj.complete.k(here: Bool, +dir: String, +b: String, +ns: List<&2, String>)
     case False{}:
       Nil{}
 
-# a path typed part way ("~/proj/stick"), in the folder listed: the
-# subfolders it begins come first ("stickhub/"), so Enter goes into one
-# rather than adding a folder that is not there. A name typed whole adds it
-def Proj.complete(+u: Ui, +q: String) -> List<&2, PItem>:
+# a path typed part way ("~/proj/stick") in the folder listed, its last
+# part no folder's whole name there: so it is not a folder (yet)
+def Proj.here(+u: Ui, +q: String) -> Bool:
   +d = Proj.typed.dir(u, q)
-  +b = Proj.base(q)
-  Proj.complete.k(Bool.and(Bool.and(Bool.not(String.is_empty(d)), String.eq(d, Proj.dir(u))), Bool.not(Proj.exact(Proj.entries(u), b))), Proj.dir(u), b, Proj.entries(u))
+  Bool.and(Bool.and(Bool.not(String.is_empty(d)), String.eq(d, Proj.dir(u))), Bool.not(Proj.exact(Proj.entries(u), Proj.base(q))))
+
+# such a path: the subfolders it begins come first ("stickhub/"), so Enter
+# goes into one rather than adding a folder that is not there. A name
+# typed whole adds it
+def Proj.complete(+u: Ui, +q: String) -> List<&2, PItem>:
+  Proj.complete.k(Proj.here(u, q), Proj.dir(u), Proj.base(q), Proj.entries(u))
+
+# a typed path in the folder listed and not a folder there: what it
+# begins, then creating it (no Add or Go to for a folder that is not
+# there). Any other (typed whole, ending in a slash, its folder not listed
+# yet): Proj.path.rows
+def Proj.path.here(here: Bool, +l: I.Loc, +u: Ui, +q: String) -> List<&2, PItem>:
+  match here:
+    case True{}:
+      List.append(&2, PItem, Proj.complete(u, q), [PItem{MSG.T.proj.createat(l, q), "proj-new", q}])
+    case False{}:
+      Proj.path.rows(String.ends_with(q, "/"), l, q)
 
 def Proj.items.k(+l: I.Loc, path: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
   match path:
     case True{}:
-      List.append(&2, PItem, Proj.complete(u, q), Proj.path.rows(String.ends_with(q, "/"), l, q))
+      Proj.path.here(Proj.here(u, q), l, u, q)
     case False{}:
       Proj.items.q(l, String.is_empty(q), u, q, dir, ns)
 
@@ -5495,6 +5510,46 @@ def Proj.items.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
 
 def Proj.items(+u: Ui) -> List<&2, PItem>:
   Proj.items.loc(Lang.loc(u), u)
+
+# Tab in the picker
+# -----------------
+# A typed path's completions are its first rows (Proj.complete); the
+# selected one is what Tab writes into the field, as typed up to its last
+# part ("~/proj/sens" to "~/proj/sensor-hub/"), and view.bend marks the
+# part typed in each.
+
+def Proj.pathq(+q: String) -> Bool:
+  Bool.or(String.starts_with(q, "/"), String.starts_with(q, "~"))
+
+def Proj.comps.k(on: Bool, +u: Ui) -> List<&2, PItem>:
+  match on:
+    case True{}:
+      Proj.complete(u, Proj.query(u))
+    case False{}:
+      Nil{}
+
+# the rows a typed path completes to (none outside the picker, or routing
+# a subthread, which lists only projects)
+def Proj.comps(+u: Ui) -> List<&2, PItem>:
+  Proj.comps.k(Bool.and(Bool.and(Ui.flag(u, "proj"), Bool.not(ThreadTree.routing(u))), Proj.pathq(Proj.query(u))), u)
+
+# how many of the picker's rows are completions
+def Proj.comps.n(+u: Ui) -> Nat:
+  List.length(&2, PItem, Proj.comps(u))
+
+# how much of a completion's name is typed
+def Proj.typed.n(+u: Ui) -> Nat:
+  String.length(Proj.base(Proj.query(u)))
+
+def Proj.tab.k(+q: String, it: PItem) -> String:
+  match it:
+    case PItem{+l, _, _}:
+      Bool.pick(String, String.is_empty(l), "", String.take(q, Nat.sub(String.length(q), String.length(Proj.base(q)))) ++ l)
+
+# the path Tab writes into the field ("" when the selected row is no
+# completion: Tab moves on, as anywhere)
+def Proj.tab(+u: Ui) -> String:
+  Proj.tab.k(Proj.query(u), Palette.at(Proj.comps(u), Proj.index(u)))
 
 # the path a row of the projects list stands for, as it is shown beside it
 def Proj.detail(+u: Ui, it: PItem) -> String:

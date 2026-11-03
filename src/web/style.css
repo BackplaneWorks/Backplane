@@ -838,6 +838,10 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .prow .pl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .prow .pd { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--faint, var(--dim)); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .prow .pd:empty { display: none; }
+/* A typed path's completion (view.bend's View.prow.label): the part typed
+   bright, the rest dim but on the selected row, which Tab writes. */
+.prow .pl .pr { color: var(--dim); }
+.prow.sel .pl .pr { color: inherit; }
 .picker .pback { background: none; border: 1px solid var(--line); padding: 0 6px; margin-right: 8px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .prow:hover, .prow.sel { background: var(--sel, rgba(255,255,255,.06)); }
 .prow.act { color: var(--accent); }
