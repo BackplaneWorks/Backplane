@@ -73,13 +73,17 @@ import was moved into the import section. The projection fixture now matches
 and `bg` map layers. This was a stale-baseline difference, not a new product
 regression. No existing law statement was weakened or removed.
 
-## Pending
+## Remaining qualification
 
-The recording-specific focused Bend test, policy emission and normal web
-emission remain pending. The final combined production build and startup
-verification belong to the installer. Mobile emission, hub/service
-emission, wire build and isolated-hub reporting E2E are outside the current
-Boat phase. Reporting E2E must use the final combined server artifact.
+Recording-specific focused Bend and policy emission passed in the continuation
+below. The installer also completed the combined ACA production build, web
+emission, service startup and desktop adoption. These are scoped receipts for
+their frozen sources, not a qualification of later main.
+
+The isolated-hub reporting E2E still needs a receipt against a final combined
+server artifact and its matching wire output. The earlier source campaign did
+not run this integration test. No additional app build or installation is
+required merely to repeat the completed recording phases.
 
 The iOS model executable, SwiftUI compilation and device flows are unqualified
 on this Linux host. System pickers, native browser sign-in/chooser behavior and
@@ -129,7 +133,40 @@ These results are separate from the reconstructed v3 source above:
   No memory guard was bypassed and no compiler pass is claimed.
 
 Wayland portal handling has unit coverage. A real compositor/portal runtime
-and installed desktop capture remain untested. Production build/startup and
-the missing recording compiler phases require a suitable admitted host; they
-must run serially. The passing frozen v3 web output is qualification evidence
-only and must not be installed as a current-main artifact.
+and installed desktop capture remain untested. The passing frozen v3 web output
+is qualification evidence only and must not be installed as a current-main
+artifact.
+
+## Completed recording continuation
+
+The first admitted focused run failed exactly two stale image-only prompt
+expectations. PR #770 changed those expectations to "image or recording";
+production code and laws were unchanged. Later admission refusals did not run
+a compiler and remain part of the evidence.
+
+Boat job `j20261103011016-2975492`, work
+`w-t1793635403-1205889-1300284`, passed the corrected
+`test/issue_report_test.bend` and policy emission under the unchanged test
+admission guard. Its frozen source was
+`caf9d6e12e08e12d8308d799c38e6283e86c995a`, tree
+`69135c723b87d62879ddd240ce2f7cf6442b8a47`. The receipt records 2,828
+source files checked before and after, ten returned artifact hashes verified,
+and sandbox deletion verified. Policy SHA-256 is
+`dabb842c23bf7b643d95f71f7343226c385a5e92b56a3390e4ca0488ae543210`.
+The actual executed Bend hash was
+`b2b183bddc3c3fa4bc45d99f6a6bdbb192ebc616e6e697777f49e74c545b1643`;
+Bun was `795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822`.
+The runner's provenance Bend hash differs from the executed binary; the receipt
+retains both and relies on the command's actual toolchain attestation.
+
+The installer preserved these results in
+`RECORDING-QUALIFICATION-ADDENDUM.json`, SHA-256
+`ee331d8ed1ce387874cce65197f910ab91cfb4b625f8a4761d4ecf3076b8e14c`.
+During takeover, that receipt and all nine linked evidence files were read
+back and their hashes verified. It updates the pending recording phases in
+the immutable `FINAL-DELIVERY.json`, SHA-256
+`10b0abbf296b0151208df0ced0e1da73165307792be2853c57274968476bcb86`.
+That delivery used source `aca8c7b03372094ad00cba0e7e080210da1877cf`, tree
+`6ef5b7c4dd91761240c34f02602bf715e6a5a3fc`. Its successful app-web evidence
+and the prior popup/X11 passes were reused. No web rebuild, popup replay, X11
+replay or installation was part of the continuation.
