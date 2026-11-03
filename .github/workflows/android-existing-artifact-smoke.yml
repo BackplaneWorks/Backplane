@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       producer_run:
-        description: Successful release-bootstrap Android run containing bootstrap-android
+        description: Successful run containing configured-android-release/bootstrap-android
         type: string
         required: true
       source_commit:
@@ -48,7 +48,7 @@ jobs:
           java-version: '17'
       - uses: actions/download-artifact@v4
         with:
-          name: bootstrap-android
+          name: configured-android-release
           run-id: ${{ inputs.producer_run }}
           github-token: ${{ github.token }}
           path: build/android-existing/input
