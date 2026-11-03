@@ -8,7 +8,17 @@ name: CI
 # scripts/fast-tests.txt, so this is where the whole suite is held green.
 on:
   workflow_dispatch:
+    inputs:
+      memory_soak:
+        description: Run the two-hour isolated hub memory gate
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      memory_soak:
+        description: Run the two-hour isolated hub memory gate
+        type: boolean
+        default: false
 
 concurrency:
   # github.workflow is the caller's name when called, so a nightly and a
@@ -317,6 +327,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Hub retention effects and soak negative controls
+        run: |
+          node --test test/tools/hotboot_stream_test.cjs test/tools/wire_log_io_test.cjs test/tools/heap_growth_diagnostics_test.cjs
+          bun test/tools/wire_log_bun_test.cjs
+          bun test/tools/hub_memory_soak.ts --self-test
+      - name: Two-hour isolated hub memory soak
+        if: inputs.memory_soak
+        timeout-minutes: 135
+        run: bun test/tools/hub_memory_soak.ts --bin dist-js/linux-x64/backplane-serve --out build/hub-memory-soak/report.json
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.memory_soak
+        with:
+          name: hub-memory-soak
+          path: build/hub-memory-soak/
+          if-no-files-found: warn
       # the desktop app's thin client, discovery, reader, mail and search
       # pieces (node --test, headless, under a second)
       - name: Desktop thin and mail tests

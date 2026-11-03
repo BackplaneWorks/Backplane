@@ -60,6 +60,8 @@ import ./src/core/sidebar-read.bend as SIDEREAD
 
 import Base
 
+import ./src/core/wire-retention.bend as WRET
+
 import ./src/server/modelcache.bend as MCACHE
 
 import ./src/core/pathrecords.bend as PR
@@ -15759,6 +15761,12 @@ def Laws.autosettle_delegation_seed_not_personal(text):
   {==}
 
 def Laws.autosettle_human_followup_is_personal():
+  {==}
+
+def Laws.stored_wire_cache_is_empty(xs):
+  {==}
+
+def Laws.memory_wire_reference_is_exact(xs):
   {==}
 
 def Laws.autosettle_finished_work_wake_not_running(owned):
