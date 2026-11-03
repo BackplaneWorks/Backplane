@@ -5,7 +5,7 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 const log=x=>console.error(new Date().toISOString()+' '+x);
 const input=await new Response(Bun.stdin.stream()).json();
-const {origin,token,paths,out,entry,bot='Bub'}=input;
+const {origin,token,paths,out,entry,bot='Bub',botId}=input;
 mkdirSync(out,{recursive:true});
 const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE || '/home/h/.bun/install/cache/playwright-core@1.63.0@@@1/index.mjs'));
 log('Launch headless mobile Chromium');
@@ -20,6 +20,10 @@ try {
  log('Open paired Bub conversation');
  await page.goto(origin+'/#bot='+encodeURIComponent(bot));
  await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true',null,{timeout:60000});
+ if(botId && !(await page.locator('#timeline .msg').count())) {
+  log('Select Bub through the normal bot action');
+  await page.evaluate(id=>{const button=document.createElement('button');button.setAttribute('data-on-click','bot');button.setAttribute('data-value',id);document.body.append(button);button.click();button.remove();},botId);
+ }
  // In a live conversation history is paged; explicitly jump to the message
  // through its existing history controls when it is not on the newest page.
  if(entry && !(await page.locator('[data-id="'+entry+'"]').count())) {
@@ -63,5 +67,5 @@ try {
  await page.screenshot({path:out+'/unavailable.png'});
  receipt.checks.push('Missing-image negative control has text placeholder and no broken icon');
  receipt.state='passed';
-} catch(e) {receipt.state='failed';receipt.error=String(e.stack).replace(/[a-f0-9]{32}/g,'[redacted]');if(page)await page.screenshot({path:out+'/failure.png'}).catch(()=>{});process.exitCode=1;}
+} catch(e) {receipt.state='failed';receipt.dom=page?await page.evaluate(()=>({text:document.body.innerText.slice(0,1500),images:[...document.querySelectorAll('img')].map(i=>({src:i.getAttribute('src'),class:i.className})),actions:[...document.querySelectorAll('[data-on-click]')].slice(0,30).map(e=>({action:e.getAttribute('data-on-click'),value:e.getAttribute('data-value')}))})).catch(()=>null):null;receipt.error=String(e.stack).replace(/[a-f0-9]{32}/g,'[redacted]');if(page)await page.screenshot({path:out+'/failure.png'}).catch(()=>{});process.exitCode=1;}
 finally {await browser.close();writeFileSync(out+'/receipt.json',JSON.stringify(receipt,null,2)+'\n');console.log(JSON.stringify(receipt));}
