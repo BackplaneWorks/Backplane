@@ -294,7 +294,7 @@ test('Ctrl+K from the composer opens the palette once and keeps the draft', asyn
   assert.equal(h.press('v', { ctrlKey: true }).defaultPrevented, false);
   // a bare key before the palette has rendered is its query's, not the draft's
   assert.equal(h.press('s').defaultPrevented, true);
-  assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-key', 'settle'], ['ws-palette-query', 's']]);
+  assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-key', 'settle'], ['bfield', 'wspalette\u001fs']]);
   assert.equal(h.doc.activeElement, h.composer);
   assert.equal(h.composer.value, 'unsent draft');
 });
@@ -752,8 +752,8 @@ test('typing before the palette has rendered goes to its query, and Enter runs i
   h.press('k', { ctrlKey: true });
   for (const key of ['a', 'r', 'x', 'Backspace', 'c']) assert.equal(h.press(key).defaultPrevented, true);
   assert.equal(h.press('Enter').defaultPrevented, true);
-  assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-palette-query', 'a'], ['ws-palette-query', 'ar'], ['ws-palette-query', 'arx'],
-    ['ws-palette-query', 'ar'], ['ws-palette-query', 'arc'], ['ws-palette-enter', '']]);
+  const q = t => ['bfield', 'wspalette\u001f' + t];
+  assert.deepEqual(h.actions, [['ws-key', 'palette'], q('a'), q('ar'), q('arx'), q('ar'), q('arc'), ['ws-palette-enter', '']]);
   assert.equal(h.composer.value, 'unsent draft');
   // once Enter ran it, the keys are the draft's again
   assert.equal(h.press('z').defaultPrevented, false);
