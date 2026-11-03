@@ -1,37 +1,44 @@
-// Run from h@backplane against the installed hub. A disposable invitation is
-// read on stdin; all credentials stay in memory, and only the TEST device is revoked.
+// Run on a remote machine with an explicit binary and web assets. The only
+// target is a child hub created here with a fresh private home and fake agents.
 import fs from 'node:fs';
+import path from 'node:path';
 import {createRequire} from 'node:module';
-const require=createRequire(import.meta.url);
-const {chromium,webkit}=require(process.env.PLAYWRIGHT_MODULE || '/home/h/bp-reader-running-1163165-20261102c/playwright-core');
-const input=JSON.parse(fs.readFileSync(0,'utf8'));
-const origin=process.env.INSTANT_ORIGIN || 'http://100.64.84.41:3787';
-const out=process.env.INSTANT_OUT || '/tmp/instant-ui/baseline.json';
+import {createHash} from 'node:crypto';
+import {configuration,startFixture,assertOwnedURL,assertOwnedResource} from './instant_ui_fixture.mjs';
+// Validate before importing Playwright, starting a hub or touching the network.
+const config=configuration();
+if (!process.stdin.isTTY && fs.readFileSync(0,'utf8').trim()) throw Error('Pairing input is forbidden; the isolated fixture issues its own invitation');
 const engine=process.env.INSTANT_ENGINE || 'chromium';
-const report={origin,engine,started:new Date().toISOString(),viewport:{width:390,height:844},actions:[],errors:[],http:[],revoked:false};
+if (!['chromium','webkit'].includes(engine)) throw Error('Expected chromium or webkit');
+const require=createRequire(import.meta.url);
+const {chromium,webkit}=require(process.env.PLAYWRIGHT_MODULE || 'playwright-core');
+const out=path.resolve(process.env.INSTANT_OUT || 'build/instant-ui/isolated-'+engine+'.json');
+fs.mkdirSync(path.dirname(out),{recursive:true});
+const fixture=await startFixture(config), origin=fixture.origin;
+const report={origin,isolated:true,fixtureRoot:fixture.root,binary:{path:config.binary,sha256:createHash('sha256').update(fs.readFileSync(config.binary)).digest('hex')},engine,started:new Date().toISOString(),viewport:{width:390,height:844},actions:[],errors:[],warnings:[],http:[],revoked:false};
 let browser,context,device,activePage;
 try {
- browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{executablePath:process.env.CHROMIUM_PATH || '/home/h/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',args:['--no-sandbox']}:{executablePath:process.env.WEBKIT_PATH})});
+ browser=await (engine==='webkit'?webkit:chromium).launch({headless:true,...(engine==='chromium'?{executablePath:process.env.CHROMIUM_PATH,args:['--no-sandbox']}:{executablePath:process.env.WEBKIT_PATH})});
  context=await browser.newContext({serviceWorkers:'block',viewport:report.viewport,deviceScaleFactor:3,isMobile:true,hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'});
- const name='TEST instant-ui '+Date.now();
- const enrolled=await context.request.post(origin+'/auth/enroll',{headers:{Authorization:'Bearer '+input.code,'X-Backplane-Name':name}});
+ // Fail closed if this Playwright cannot intercept WebSockets as well as HTTP.
+ if(typeof context.routeWebSocket!=='function')throw Error('Playwright routeWebSocket support is required for isolation');
+ await context.route('**/*',route=>{
+  try{assertOwnedResource(route.request().url(),origin);return route.continue()}
+  catch{report.errors.push('Blocked HTTP outside isolated fixture ('+new URL(route.request().url()).protocol+' '+new URL(route.request().url()).origin+')');return route.abort('blockedbyclient')}
+ });
+ await context.routeWebSocket('**/*',socket=>{
+  try{assertOwnedURL(socket.url(),origin,true);socket.connectToServer()}
+  catch{report.errors.push('Blocked WebSocket outside isolated fixture');socket.close()}
+ });
+ const name='TEST isolated instant-ui '+Date.now();
+ const input={code:await fixture.invitation()};
+ const enrolled=await context.request.post(origin+'/auth/enroll',{headers:{Authorization:'Bearer '+input.code,'X-Backplane-Name':name},maxRedirects:0});
  if(!enrolled.ok())throw Error('TEST enrollment failed: '+enrolled.status());
- device=(await (await context.request.get(origin+'/auth/devices')).json()).devices.find(d=>d.name===name)?.id;
+ device=(await (await context.request.get(origin+'/auth/devices',{maxRedirects:0})).json()).devices.find(d=>d.name===name)?.id;
  if(!device)throw Error('TEST enrollment not listed');
- for(let i=0;i<5;i++){const t=performance.now();const r=await context.request.get(origin+'/hello');const body=await r.body();report.http.push({ms:performance.now()-t,status:r.status(),bytes:body.length});report.hubHello=body.toString('utf8').replace(/[^\x20-\x7e]/g,'');}
+ for(let i=0;i<5;i++){const t=performance.now();const r=await context.request.get(origin+'/hello',{maxRedirects:0});const body=await r.body();report.http.push({ms:performance.now()-t,status:r.status(),bytes:body.length});report.hubHello=body.toString('utf8').replace(/[^\x20-\x7e]/g,'');}
  const page=activePage=await context.newPage();
  report.requests=[];page.on('requestfailed',r=>report.requests.push({path:new URL(r.url()).pathname,failure:r.failure()?.errorText}));page.on('response',r=>{if(['/hello','/auth/cache','/client/capabilities'].includes(new URL(r.url()).pathname))report.requests.push({path:new URL(r.url()).pathname,status:r.status()});});
- if(process.env.INSTANT_WEB){
-  const {resolve,join}=await import('node:path'),{createHash}=await import('node:crypto');const root=resolve(process.env.INSTANT_WEB);
-  report.clientOverride={root,files:Object.fromEntries(fs.readdirSync(root).filter(n=>/\.(js|css|html)$/.test(n)).map(n=>[n,createHash('sha256').update(fs.readFileSync(join(root,n))).digest('hex')]))};
-  // Preserve the real document response/address space. Fulfilling HTML
-  // synthetically makes Chromium's Local Network Access gate block even
-  // same-origin tailnet fetches. Replace only the installed module's bytes.
-  const mains=fs.readdirSync(root).filter(n=>/^chunk-.*\.js$/.test(n));if(mains.length!==1)throw Error('Candidate must contain exactly one fresh main module');const main=mains[0];
-  report.clientOverride.document='real installed HTML; compiled module substituted at its installed URL';
-  await page.route('**/*',route=>{const path=new URL(route.request().url()).pathname;if(/^\/chunk-.*\.js$/.test(path))return route.fulfill({path:join(root,main),contentType:'text/javascript'});return route.continue();});
- }
-
  await page.addInitScript(()=>{
   window.__bpPerf={trace:[],render:[],recv:[],part:[],live:[],act:[]};
   window.__instant={received:[],times:{},counts:{},wire:[],connections:[]};
@@ -43,7 +50,7 @@ try {
 
   window.__bpRender={n(k,v=1){window.__instant.counts[k]=(window.__instant.counts[k]||0)+v},t(k,v){window.__instant.times[k]=(window.__instant.times[k]||0)+v},sent(id,method){window.__instant.sent ||= [];window.__instant.sent.push({at:performance.now(),id,method});},got(e,bytes,decodeMs){window.__instant.received.push({at:performance.now(),id:e.id,type:e.t,ok:e.ok,bytes,decodeMs,target:e.result?.target,nextTarget:e.result?.nextTarget,ready:e.result?.remoteReady})}};
  });
- page.on('pageerror',e=>report.errors.push(e.message.slice(0,300)));
+ page.on('pageerror',e=>{const bucket=e.message==='ResizeObserver loop completed with undelivered notifications.'?report.warnings:report.errors;bucket.push(e.message.slice(0,300))});
  const cdp=engine==='chromium'?await context.newCDPSession(page):null;
  if(cdp)await cdp.send('Performance.enable');
  const metrics=async()=>cdp?Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(x=>[x.name,x.value])):{};
@@ -52,10 +59,11 @@ try {
  report.bootMs=performance.now()-boot;
  const controls=await page.evaluate(()=>[...document.querySelectorAll('[data-on-click]')].map(e=>({action:e.getAttribute('data-on-click'),value:e.getAttribute('data-value'),name:e.querySelector('.bot-name')?.textContent,label:e.textContent.slice(0,80)})));
  const threads=controls.filter(c=>c.action==='select').filter((c,i,a)=>a.findIndex(x=>x.value===c.value)===i);
- const preferred=['t1793665018-1293799','t1793584394-1163165','t1793648028-1245355','t1793669258-1305224','t1793670038-1308809'];
+ const preferred=fixture.threads;
  const five=preferred.map(id=>threads.find(c=>c.value===id)).filter(Boolean);
- for(const t of threads)if(five.length<5&&!five.includes(t))five.push(t);
- const bots=controls.filter(c=>c.action==='bot').slice(0,2);
+ if(five.length!==5)throw Error('Missing isolated thread controls');
+ const bots=controls.filter(c=>c.action==='bot'&&c.value.startsWith('fixture-bot-')).slice(0,2);
+ if(bots.length!==2)throw Error('Missing isolated bot controls');
  report.targets={threads:five,bots};
  async function action(control,cached=false,sendText=null){
   const before=await metrics();
@@ -96,19 +104,21 @@ try {
  }
  for(let lap=0;lap<2;lap++)for(const t of five)await action(t,lap===1);
  for(let lap=0;lap<2;lap++)for(const b of bots)await action(b,lap===1);
- // Real sends are confined to a new, clearly labelled TEST conversation.
- const project=controls.find(c=>c.action==='new-thread');
- if(project){
-  const created=await action(project);
-  if(created.thread){report.testThread=created.thread;
-   const marker='TEST instant-ui latency. Reply only ACK. Do not run tools or change files.';
-   await action({action:'send',value:null},false,marker);
-   try{await page.waitForFunction(()=>[...document.querySelectorAll('#timeline .assistant')].some(e=>e.textContent.includes('ACK')),{},{timeout:90000});}catch{report.errors.push('TEST assistant ACK not observed within 90 s');}
-   await action({action:'send',value:null},false,'TEST instant-ui reply latency. Reply only ACK again. Do not run tools or change files.');
-  }
+ // Send and reply to an existing synthetic conversation in our private home.
+ await action(five[0],true);
+ report.testThread=five[0].value;
+ for(const marker of ['Isolated latency send','Isolated latency reply']) {
+  await action({action:'send',value:null},false,marker);
+  const expected=marker.endsWith('reply')?2:1;
+  await page.waitForFunction(n=>[...document.querySelectorAll('#timeline .assistant')].filter(e=>e.textContent.includes('ACK from isolated stand-in')).length>=n,expected,{timeout:15000});
  }
+ report.fixture=fixture.evidence();
+ if(report.fixture.standinACKs<2)throw Error('Both messages must reach the isolated stand-in and private event log');
+ if(report.fixture.threads.length!==7 || report.fixture.threads.some(id=>!id.startsWith('fixture-')))throw Error('Unexpected conversation outside seeded fixture');
+ if(report.actions.some(x=>x.firstContentMs===null||x.settledMs===null))throw Error('An isolated action did not paint and settle');
+ if(report.errors.length)throw Error('Browser errors or blocked external requests');
  report.connections=await page.evaluate(()=>window.__instant.connections);
- try{report.serverPerf=await (await context.request.get(origin+'/debug/perf.json')).json();}catch{report.errors.push('Server perf unavailable');}
+ try{report.serverPerf=await (await context.request.get(origin+'/debug/perf.json',{maxRedirects:0})).json();}catch{report.errors.push('Server perf unavailable');}
  await page.screenshot({path:out.replace(/\.json$/,'.png')});
  if(process.env.INSTANT_GATE==='1'){
   report.budgetFailures=report.actions.filter(x=>x.cached&&!(x.firstContentMs!==null&&x.firstContentMs<=100)||x.action==='send'&&!(x.firstContentMs!==null&&x.firstContentMs<=100)).map(x=>({action:x.action,target:x.target,ms:x.firstContentMs}));
@@ -120,6 +130,12 @@ try {
 }
 
 finally{
- if(context&&device){try{report.revoked=(await context.request.post(origin+'/auth/revoke',{headers:{'X-Backplane-Device':device}})).ok();}catch{report.errors.push('TEST revocation request failed');}}
- await browser?.close();report.ended=new Date().toISOString();fs.writeFileSync(out,JSON.stringify(report,null,2));console.log('report '+out+'; TEST revoked '+report.revoked);
+ try {
+  if(context&&device){try{report.revoked=(await context.request.post(origin+'/auth/revoke',{headers:{'X-Backplane-Device':device},maxRedirects:0})).ok();}catch{report.errors.push('Isolated TEST revocation request failed');}}
+  if(!report.revoked)process.exitCode=1;
+ } finally {
+  try{await browser?.close()}finally{
+   await fixture.stop();report.ended=new Date().toISOString();fs.writeFileSync(out,JSON.stringify(report,null,2));console.log('report '+out+'; isolated TEST revoked '+report.revoked+'; retained private fixture '+fixture.root);
+  }
+ }
 }

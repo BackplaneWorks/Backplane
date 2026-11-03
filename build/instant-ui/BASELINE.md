@@ -1,5 +1,7 @@
 # Baseline: mobile web actions
 
+**Test isolation correction:** These historical measurements came from the live hub. The harness wrongly created six real test conversations there. A TEST label and device pairing did not isolate those writes. Do not repeat this procedure. The replacement runner creates its own loopback hub, throwaway home and stand-in agents; it accepts no hub address or pairing input. The six live threads are left untouched for auto-settle. These numbers are retained as historical observations, not isolated-test results.
+
 Measured 2026-11-03T01:51:07.918Z from `h@backplane` to `http://100.64.84.41:3787` across Tailscale. Installed source baseline: `273b268cd`. Chromium, 390×844 CSS pixels, touch, DPR 3, iPhone Safari UA. This is mobile emulation on a Linux CPU, **not Safari/iPhone hardware**.
 
 First content is the first post-frame observation of the requested thread, bot header, or optimistic message. Settlement requires a ready reply for the destination and a subsequent paint; sends additionally require the committed row. A bot can paint a retained destination after its action response but before its open response.
