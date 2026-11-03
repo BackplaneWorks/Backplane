@@ -13376,7 +13376,7 @@ def Psv.exit(+u: Ui) -> AgRow:
 def Psv.install(+u: Ui, +p: String) -> AgRow:
   AgRow{"2 · Install the agent program", Bool.pick(String, String.eq(p, "antigravity"), "Install and sign in using the Antigravity controls below.", Bool.pick(String, Psv.installed(u, p), "Program found: " ++ Models.cli(Ui.info(u, "models"), p) ++ ". Next, sign in. Installation alone does not confirm a connection.",
     Bool.pick(String, String.is_empty(Ui.info(u, "models")), "Checking installed programs…", "Program not found yet. Open the installation guide and follow the steps for your operating system on the hub machine. Backplane checks for new installs every minute."))), Nil{},
-    Bool.pick(List<&2, AgBtn>, String.eq(p, "antigravity"), Nil{}, [AgBtn{"Open installation guide", "open-url", PS.Ps.docs(p), False{}}])}
+    Bool.pick(List<&2, AgBtn>, String.eq(p, "antigravity"), Nil{}, [AgBtn{"Open installation guide", "open-url", PS.Ps.docs(p), Bool.not(Psv.installed(u, p))}])}
 
 # Keep the newest attempt for the selected profile; login replaces old attempts.
 def Psv.attempts(xs: List<&2, J.Json>, +profile: String) -> List<&2, J.Json>:

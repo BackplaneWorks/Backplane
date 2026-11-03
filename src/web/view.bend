@@ -1874,7 +1874,7 @@ def View.keys.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
 # Save is "sealed" and their fields have no binding.
 def View.agy.btn.k(+l: String, +a: String, +v: String, +cls: String, +form: String) -> D.Node:
   Bool.pick(D.Node, String.eq(a, "open-url"),
-    D.El{"a", "", [D.At{"class", "btn primary"}, D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
+    D.El{"a", "", [D.At{"class", Bool.pick(String, String.eq(cls, "on"), "btn primary", "btn")}, D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
     Bool.pick(D.Node, String.is_empty(form), D.Dom.button(cls, a, v, l, l), D.Dom.button(cls, "sealed", form, l, l)))
 
 def View.agy.btn(+u: U.Ui, +b: U.AgBtn) -> D.Node:
