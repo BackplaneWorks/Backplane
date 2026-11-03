@@ -7967,13 +7967,15 @@ def Rec.note(+th: String, +now: Nat, +seq: Nat, +text: String) -> M.Change:
   M.ActivityLogged{th, Hub.id("r", now, seq), "error", "restart", text, now}
 
 # (a turn that carries on (Carry.will) keeps a delegated child's task
-# open: the child goes on and delivers it; law carry_keeps_child_task)
+# open: the child goes on and delivers it; law carry_keeps_child_task.
+# Either way the cut-off turn is marked stopped, so its partial reply does
+# not say "Finished")
 def Rec.turn.k(run: Bool, will: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
   match run will:
     case True{} False{}:
       Launch.tell(s, now, th, Task.finish(s, now, th, Step{Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished") <> M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), Nil{}}))
     case True{} True{}:
-      Step{[Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished"), M.TurnChanged{th, M.Interrupted{}, now}], Nil{}}
+      Step{Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished") <> M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), Nil{}}
     case False{} _:
       Step.none()
 
