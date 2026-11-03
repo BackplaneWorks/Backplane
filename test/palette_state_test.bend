@@ -3,6 +3,7 @@ import ./check.bend as C
 import ../src/core/client.bend as U
 import ../src/core/model.bend as M
 import ../src/web/workspace.bend as WS
+import ../src/web/dom.bend as D
 
 # The command palette lists only the thread commands that apply to the open
 # thread, as its ▾ does (workspace.bend's WS.cmds): Pin or Unpin, Settle or
@@ -62,6 +63,9 @@ def ran.routines(+u: U.Ui) -> String:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("a word said in a thread matches no command", found("stitching"), "")
+    C.Check.str("nothing matched: the conversation search is offered", Nat.show(List.length(&2, D.Node, WS.WS.empty("stitching"))), "2")
+    C.Check.str("nothing typed: no search offered", Nat.show(List.length(&2, D.Node, WS.WS.empty("  "))), "1")
     C.Check.str("plain: pin, settle, archive", shelf(at([])), "Pin thread,Settle thread · Ctrl+Shift+S,Archive thread")
     C.Check.str("plain: the snoozes", snooze(at([])), "Snooze thread for 1 hour,Snooze thread until tomorrow")
     C.Check.str("pinned: unpin", shelf(at([M.ThreadPinned{"t", True{}, 2n}])), "Unpin thread,Settle thread · Ctrl+Shift+S,Archive thread")

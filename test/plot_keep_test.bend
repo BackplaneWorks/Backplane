@@ -25,4 +25,5 @@ def main() -> IO(Unit):
     C.Check.str("a live plot no view watches goes", keys(PV.Src.gc([plotted("live", "/r/b.kicad_pcb")], Nil{}), ""), "")
     C.Check.str("a version's plot stays", keys(PV.Src.gc([plotted("v", "git\t/r/.git\tc1\tb.kicad_pcb")], Nil{}), ""), "v,")
     C.Check.str("the newest 8 versions stay", keys(PV.Src.gc(versions(10n, Nil{}), Nil{}), ""), "v0,v1,v2,v3,v4,v5,v6,v7,")
+    C.Check.str("a version being read stays (plotted ahead)", keys(PV.Src.gc([PV.Src{"w", 0, "git\t/r/.git\tc\tb.kicad_pcb", 0, "", 0n, True{}, None{}, ""}], Nil{}), ""), "w,")
     C.Check.str("a version not plotted yet goes", keys(PV.Src.gc([PV.Src{"w", 0, "git\t/r/.git\tc\tb.kicad_pcb", 0, "", 0n, False{}, None{}, ""}], Nil{}), ""), "")

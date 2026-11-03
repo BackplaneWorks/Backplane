@@ -822,6 +822,7 @@ let cacheReady = false;
 let queued = false;
 let scroll = false;
 let focus = null;
+let paletteSearch = ""; // a palette query to search conversations for once the palette is closed
 // the field that had the keyboard when the link to the hub dropped (its
 // id and selection): the view drawn again after the reconnect (a hub
 // restart builds it afresh) gives it back, unless the person put the
@@ -1204,6 +1205,7 @@ function render() {
   // calls) moves nothing and, at the very top, no scroll comes to ask for
   // the next: still near the top after a render, it is asked for
 
+  if (paletteSearch && !document.querySelector(".workspace-palette")) { const query = paletteSearch;paletteSearch = "";dispatch("thin-search-open", query); }
   if (focus) {
     const el = document.getElementById(focus);
     el?.focus();
@@ -1640,7 +1642,10 @@ function dispatch(action, value, timer) {
     }
   }
   if (action === "thin-search-open") {
-    if (viewMode === "view-v1" && thin?.ready) showThinSearch({ query: "", rows: [], cursor: "", hasMore: false });
+    // (value: a query the command palette could not match: the palette
+    // closes first, and the search opens running it once it is gone, render)
+    if (value && viewMode === "view-v1" && thin?.ready && document.querySelector(".workspace-palette")) { paletteSearch = value;dispatch("ws-palette-close", "");return true; }
+    if (viewMode === "view-v1" && thin?.ready) showThinSearch({ query: value || "", rows: [], cursor: "", hasMore: false });
     else showViewStatus("Search requires the current conversation connection.");
     return true;
   }
@@ -3284,7 +3289,8 @@ function showThinSearch(search) {
     }
   });
   if (search.rows?.length) draw(search, false);
-  else note.textContent = search.query ? "" : "Type a word said in any thread.";
+  else if (search.query) ask(search.query, "");
+  else note.textContent = "Type a word said in any thread.";
   query.focus();
 }
 function thinSearchAnswer(search) {

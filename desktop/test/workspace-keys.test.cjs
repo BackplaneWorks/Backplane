@@ -905,3 +905,26 @@ test('Escape cancels inline Revert before closing its viewer', async () => {
   overlayEscape(doc)();
   assert.equal(cancelled, 1);
 });
+
+// The composer's more-menu is an open <details> whose summary is hidden at
+// desktop widths (its options sit in the bar): Esc has nothing to put away
+// there and goes on to a dialog (the conversation search) or the viewer;
+// a real menu open beside it still closes first.
+test('Escape passes over the inline composer menu', async () => {
+  const { overlayEscape } = await import('../../src/web/workspace-keys.js');
+  const hidden = { getClientRects: () => [] }, visible = { getClientRects: () => [{}] };
+  let closed = '';
+  const menu = (name, summary) => ({ open: true, name, querySelector: q => q === ':scope > summary' ? summary : null,
+    removeAttribute() { closed = name; }, set open(v) { if (!v) closed = name; }, get open() { return true; } });
+  const more = menu('composer more', hidden), boards = menu('board selector', visible);
+  let open = [more];
+  const doc = { querySelector: q => q === '.local-menu[open]' ? open[0] || null : null,
+    querySelectorAll: q => q === '.local-menu[open]' ? open : [] };
+  assert.equal(overlayEscape(doc), null, 'the inline composer menu is not put away');
+  open = [more, boards];
+  const close = overlayEscape(doc);
+  assert.equal(typeof close, 'function', 'a real menu open beside it closes');
+  close();assert.equal(closed, 'board selector');
+  open = [menu('narrow composer more', visible)];
+  assert.equal(typeof overlayEscape(doc), 'function', 'at narrow widths the more-menu is a dropdown and closes');
+});

@@ -92,12 +92,17 @@ export function modelPickerKey(event) {
 // history version picker), the
 // topmost (the last) first; else an open ▾ menu. The model picker keeps its
 // own Escape. The answer closes it, or is null when nothing is open.
+const inlineMenu = menu => { const summary = menu.querySelector?.(':scope > summary');return !!summary && !shown(summary); };
 export function overlayEscape(doc) {
   const shades = [...(doc.querySelectorAll?.('.shade[data-on-click], .modal-back[data-on-click], .hist-scrim[data-on-click]') || [])]
     .filter(el => el.getAttribute('data-value') !== 'models');
   const shade = shades.at(-1);
   if (shade) return () => shade.click();
-  const menu = doc.querySelector?.('.local-menu[open]');
+  // (an open menu whose summary is hidden is a plain row, the composer's
+  // more-menu at desktop widths (style.css .composer-more): nothing to put
+  // away, so Esc goes on to the dialog, the probe or the viewer)
+  const open = doc.querySelector?.('.local-menu[open]');
+  const menu = open && inlineMenu(open) ? [...(doc.querySelectorAll?.('.local-menu[open]') || [])].find(m => m !== open && !inlineMenu(m)) : open;
   if (menu) return () => closeWorkspaceMenu(menu);
   // The inline editor already supplies its cancel action, like a dialog.
   if ([...(doc.querySelectorAll?.('.draw-back,dialog[open],[role="dialog"],[aria-modal="true"]') || [])].some(shown)) return null;
