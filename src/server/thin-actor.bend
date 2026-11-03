@@ -787,7 +787,7 @@ def Actor.render.web.fresh(+updated: Actor, +action: V.ActResult, +st: M.State, 
   +prepared = U.Ui.tick(V.Render.ui(u, st, index, J.Json.get_obj(p, "target"), rows, stream, now), VC.ViewClock.of(now))
   +key = SC.Sidebar.key(prepared, epoch, Sidebar.view(updated))
   +cached = Sidebar.lookup(SC.Sidebar.request(p, u), Sidebar.memos(updated), key)
-  +window = V.Render.window(stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
+  +window = V.Render.window.context(st, stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
   +res = V.Obj.put(V.Render.web.prepared(action, prepared, window, cached), "mailDraftContext", Actor.mail_context(u))
   +node = SS.Slot.sidebar(J.Json.get_obj(res, "shown"))
   Rendered{Sidebar.save(Bool.and(SC.Sidebar.bounded(key), SS.Slot.is(node, "aside")), updated, key, node), res}
@@ -807,7 +807,7 @@ def Actor.render.web.indexed(+updated: Actor, +action: V.ActResult, +st: M.State
   +key = SC.Sidebar.key.for(settings, prepared, epoch, Sidebar.view(updated), revision)
   +image = SidebarImage.key.input(settings, prepared, epoch, Sidebar.view(updated), revision)
   +cached = SidebarImage.cached(settings, Sidebar.memos(updated), key, image)
-  +window = V.Render.window(stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
+  +window = V.Render.window.context(st, stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
   +res = V.Obj.put(V.Render.web.prepared.materialized(action, prepared, window, cached, SGV.SignalCache.signals(signals), SIXV.IndexCache.index(metadata), SGT.SignalTextCache.values(text)), "mailDraftContext", Actor.mail_context(u))
   +node = SS.Slot.sidebar(J.Json.get_obj(res, "shown"))
   +saved = SignalText.save(SGT.SignalTextCache.bounded(text), SideIndex.save(SIXV.IndexCache.bounded(metadata), Signals.save(SGV.SignalCache.bounded(signals), Sidebar.save(Bool.and(SC.Sidebar.bounded(key), SS.Slot.is(node, "aside")), updated, key, node), signals), metadata), text)
@@ -962,7 +962,7 @@ def Actor.acted(+a: Actor, +web: Bool, +p: J.Json, +epoch: String, +now: Nat) ->
 # reference can hide a full tree from the subsequent complete-size checks.
 def Actor.render.compact(+updated: Actor, +action: V.ActResult, +st: M.State, +index: T.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream) -> Rendered:
   +prepared = U.Ui.info_set(U.Ui.tick(V.Render.ui(Actor.ui(updated), st, index, J.Json.get_obj(p, "target"), rows, stream, now), VC.ViewClock.of(now)), "local.view.compact", "1")
-  +window = V.Render.window(stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
+  +window = V.Render.window.context(st, stream, index, V.Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
   Rendered{updated, V.Obj.put(V.Render.web.prepared(action, prepared, window, J.Null{}), "mailDraftContext", Actor.mail_context(Actor.ui(updated)))}
 
 def Actor.render.compact.checked(same: Bool, updated: Actor, action: V.ActResult, st: M.State, index: T.Index, p: J.Json, epoch: String, now: Nat, rows: List<&2, String>, stream: TL.Stream, revision: Nat) -> Rendered:
@@ -989,7 +989,7 @@ def Actor.page.splice.go(ok: Bool, +acted: Acted, +res: J.Json, +st: M.State, +i
     case True{} Acted{+updated, _}:
       +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
       +prepared = U.Ui.tick(V.Render.ui(Actor.ui(updated), st, index, J.Json.get_obj(p, "target"), rows, stream, now), VC.ViewClock.of(now))
-      Actor.page.splice.k(S.Page.splice(res, prepared, thread, V.Render.window(stream, index, thread, p, epoch, rows)), updated)
+      Actor.page.splice.k(S.Page.splice(res, prepared, thread, V.Render.window.context(st, stream, index, thread, p, epoch, rows)), updated)
     case False{} _: None{}
 
 # A view.page from the last view of the same inputs (Memo.page): its

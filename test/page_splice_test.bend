@@ -85,7 +85,7 @@ def spliced.k(a: V.ActResult, +from: Nat, +to: Nat, +anchor: String, +s: TL.Stre
   match a:
     case V.ActResult{+u, _}:
       shown(S.Page.splice(full(from, anchor, s), V.Render.ui(u, st(), index(), J.Json.get_obj(p(anchor), "target"), rows(to), s, now()), "t1",
-        V.Render.window(s, index(), "t1", p(anchor), "1", rows(to))))
+        V.Render.window.context(st(), s, index(), "t1", p(anchor), "1", rows(to))))
 
 def spliced(+from: Nat, +to: Nat, +anchor: String, +s: TL.Stream) -> String:
   spliced.k(acted(anchor), from, to, anchor, s)

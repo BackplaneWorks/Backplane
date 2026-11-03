@@ -3530,7 +3530,7 @@ async function startThin(again = false, reason = "initial") {
           historyDirection = "";historyOlderDemand = 0;historyFillMore(null, false);
           historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.();
         } else historyBack(detail.window?.ids);
-        if (detail.entry) entryHistory.arm(historyFillOwner(), detail.window?.remaining);
+        if (detail.entry) entryHistory.arm(historyFillOwner(), detail.window?.remaining, detail.window?.contextMessages);
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
