@@ -1,6 +1,8 @@
 # Proof sharding and declaration slicing: negative result (lane 3, 2026-11-03)
 
-Status: prototype, NOT wired into CI or the release gate, NOT a qualification. Laws, proofs,
+Status: EXPERIMENTAL, UNQUALIFIED, UNWIRED to CI or the release gate. Does not claim full proof coverage.
+Known gap: `.js`/`.c` effect companions (imported by `bend`, listed by `scripts/bend-closure.py`) are neither sliced nor covered.
+Result: slicing alone did not reach 3.7 GB (221 -> 531 shards, 299 pass, 104 OOM-killed, > 300 Boat jobs). Laws, proofs,
 the checker and shared files are unchanged.
 
 Exact cap for every measurement below: systemd scope `MemoryMax=3700000000` (kernel value
