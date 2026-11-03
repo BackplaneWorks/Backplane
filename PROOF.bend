@@ -15768,4 +15768,3 @@ def Laws.autosettle_finished_work_wake_not_running(owned):
 
 def Laws.autosettle_live_thread_wake_held():
   {==}
-

@@ -15900,4 +15900,3 @@ law autosettle_finished_work_wake_not_running:
 
 law autosettle_live_thread_wake_held:
   {AUTOS.Auto.wake.active.kind("thread", "t", Map.new(&2, Nat), Map.set(&2, Nat, Map.new(&2, Nat), "t", 1n)) == True{} : Bool}
-
