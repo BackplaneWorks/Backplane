@@ -157,6 +157,12 @@ jobs:
       - run: TEST_FULL=1 TEST_JOBS=2 scripts/test.sh
         env:
           BACKPLANE_CHROME: /usr/bin/google-chrome
+      - name: Composer one-button layout contract
+        if: matrix.shard == 1
+        run: |
+          mkdir -p build/composer-bar
+          bend test/tools/composer_bar_fixture.bend > build/composer-bar/after.json
+          CHROME_BIN=/usr/bin/google-chrome bun test/tools/composer_bar_browser_test.mjs
 
   # The hub (docs/js-service.md): bend emits src/server/main.bend as JS
   # once (kept by a hash of what it reads, so a change that leaves the
@@ -215,6 +221,11 @@ jobs:
       # children back at 8 MiB
       - name: Hub stack
         run: bun test/tools/js_stack_test.ts dist-js/linux-x64/backplane-serve
+      - name: Native hub text and map paths match pure definitions
+        env:
+          JSON_SHOW_REFERENCE_EMIT: build/js/backplane-serve/all.js
+          MAP_REFERENCE_EMIT: build/js/backplane-serve/all.js
+        run: node --test test/tools/js_json_lex_test.cjs test/tools/js_map_test.cjs
       # the host effects and ptys on the loop the hub ships (Bun's event
       # loop): test.sh runs these in-process, on the runtime's sync loop
       - name: Effects on the Bun loop

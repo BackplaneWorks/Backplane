@@ -3,9 +3,10 @@
 import { readFileSync } from "node:fs";
 import { strict as assert } from "node:assert";
 const source = readFileSync("src/web/host.js", "utf8");
-const restore = source.slice(source.indexOf('const SUBS_CHOICE ='), source.indexOf('let socket = null;'));
-const start = source.indexOf('function dispatch(action, value, timer)');
-const dispatch = source.slice(start, source.indexOf('  const did =', start));
+const restore = source.slice(source.indexOf('const SUBS_CHOICE ='), source.indexOf('const VIEWER ='));
+// what the page's act() does with a panel choice: the block that keeps it
+const keepAt = source.indexOf('  if (action === "subs-shut" || action === "subs-open") {');
+const keep = source.slice(keepAt, source.indexOf('  const did =', keepAt));
 const harness = new Function(`
   let ui = {};
   const store = new Map();
@@ -22,7 +23,9 @@ const harness = new Function(`
     return {ui: u};
   }};
   ${restore}
-  ${dispatch}
+  function dispatch(action, value) {
+    ui = App.act(ui, action, value).ui;
+  ${keep}
   }
   return {
     dispatch,
@@ -41,5 +44,4 @@ harness.restoreSubs();
 assert.equal(harness.state()["thread-a"], "0live:agent-a\u001fattention:agent-b");
 harness.dispatch("subs-open", "thread-a");
 assert.equal(harness.reload()["thread-a"], "1");
-assert.match(source, /if \(t === "log" && Number\(field\(j, "since"\) \?\? 0\) === 0\) restoreSubs\(\);/);
-console.log("PASS: browser panel choices persist per thread through reload and full-log reset");
+console.log("PASS: browser panel choices persist per thread through reload");

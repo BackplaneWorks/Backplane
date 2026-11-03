@@ -82,6 +82,31 @@ const peakNotices = (times: number[]) => {
 };
 const streamHealthy = (times: number[], start: number, end: number, minHz: number) =>
   times.length >= (end - start) / 1000 * minHz && maxGap(times, start, end) <= params.maxGapMs;
+type PendingRow = { count: number; valid: boolean; texts: string[] };
+type Presentation = { at: number; pending: PendingRow };
+function pendingRow(shown: Row, thread: string): PendingRow {
+  const texts: string[] = [];
+  const textOf = (node: Row): string => node.type === "text" ? node.text ?? "" : (node.kids ?? []).map(textOf).join("");
+  const visit = (node: Row) => {
+    if (!node || node.type !== "element") return;
+    const attrs = Object.fromEntries((node.attrs ?? []).filter((a: Row) => typeof a.name === "string").map((a: Row) => [a.name, a.value]));
+    const classes = String(attrs.class ?? "").split(/\s+/);
+    const own = node.key === `@live:${thread}` || attrs["data-id"] === `@live:${thread}`;
+    if (own && (node.tag === "bp-memo" && attrs.fn === "live" || classes.includes("pending") && classes.includes("assistant") && attrs.role === "status"))
+      texts.push(textOf(node).trim());
+    for (const child of node.kids ?? []) visit(child);
+  };
+  visit(shown);
+  // The isolated fixture uses the default English locale. A historical
+  // message saying Working, another thread's row, or partial text is not it.
+  return { count: texts.length, valid: texts.length === 1 && /^Working(?:…|\.{3})?$/.test(texts[0]), texts };
+}
+function staticPendingState(pictures: Presentation[], start: number, end: number) {
+  const before = pictures.filter(p => p.at < start).at(-1), during = pictures.filter(p => p.at >= start && p.at < end);
+  const invalid = during.filter(p => !p.pending.valid);
+  return { ok: before?.pending.valid === true && during.length > 0 && invalid.length === 0,
+    atStart: before?.pending ?? null, successfulViewReplies: during.length, pendingReplies: during.length - invalid.length, invalid };
+}
 type Commit = { at: number; thread: string; kind: string; key: string };
 const watchdogCommit = (e: Commit) => e.kind === "SettingSet" && e.key.startsWith("liveness.") && ids.includes(e.key.slice(9));
 // Watchdog.line writes liveness.<thread> every five seconds even when an
@@ -208,6 +233,19 @@ createInterface({ input: process.stdin }).on('line', line => {
 `;
 
 if (options.has("--self-test")) {
+  const pending = { type: "element", tag: "bp-memo", key: "@live:active-00", attrs: [{ name: "fn", value: "live" }], kids: [{ type: "text", text: "Working" }] };
+  const row = pendingRow(pending, "active-00");
+  assert(row.valid);
+  assert(!pendingRow({ type: "element", tag: "main", kids: [] }, "active-00").valid, "missing pending row fails");
+  assert(!pendingRow(pending, "active-01").valid, "another thread's pending row fails");
+  assert(!pendingRow({ ...pending, key: "completed-message" }, "active-00").valid, "completed text saying Working is not pending");
+  assert(!pendingRow({ ...pending, kids: [{ type: "text", text: "partial answer" }] }, "active-00").valid);
+  assert(!pendingRow({ type: "element", kids: [pending, pending] }, "active-00").valid, "duplicate pending rows fail");
+  assert(pendingRow({ ...pending, tag: "div", attrs: [{ name: "class", value: "msg assistant pending" }, { name: "role", value: "status" }] }, "active-00").valid);
+  const pictures = [{ at: 0, pending: row }, { at: 20, pending: row }];
+  assert(staticPendingState(pictures, 10, 30).ok);
+  assert(!staticPendingState(pictures.slice(0, 1), 10, 30).ok, "no successful phase replies fails");
+  assert(!staticPendingState([...pictures, { at: 25, pending: { count: 0, valid: false, texts: [] } }], 10, 30).ok, "pending disappears in a phase reply fails");
   const catalog = metadataFixture("/fixture/project", 1000);
   assert.equal(catalog.filter(r => r.$ === "ProjectCreated").length, 40);
   assert.equal(catalog.filter(r => r.$ === "ThreadCreated").length, 1000);
@@ -276,7 +314,7 @@ if (options.has("--self-test")) {
     if (child && child.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
     rmSync(temp, { recursive: true, force: true });
   }
-  console.log("ok 1000 settled metadata/40 projects, codec, CPU samples, perf diffs, notice/liveness guards, producer phase switch/receipts (no hub started)");
+  console.log("ok static pending/missing-row guards, metadata, codec, CPU/perf, notice/liveness guards, producer phase switch (no hub started)");
   process.exit(0);
 }
 
@@ -354,6 +392,7 @@ class Client {
   views?: ThinViews;
   session: Row;
   shownMarks: Mark[] = [];
+  presentations: Presentation[] = [];
   n = 0;
   ready = false;
   constructor(readonly name: string, readonly target?: Row) {
@@ -410,7 +449,9 @@ class Client {
       const taken = this.views!.reply("fixture", raw);
       if (!taken?.current || !taken.remoteReady || !taken.shown) throw Error(`${this.name}: invalid thin reply ${JSON.stringify(taken).slice(0, 500)}`);
       this.session = taken.session;
-      this.shownMarks.push(...parseMarks(JSON.stringify(taken.shown), Date.now()));
+      const at = Date.now();
+      this.shownMarks.push(...parseMarks(JSON.stringify(taken.shown), at));
+      if (this.target?.kind === "thread") this.presentations.push({ at, pending: pendingRow(taken.shown, this.target.id) });
       if (taken.refreshDue) return this.issue(this.views!.request("fixture", "view.update", { session: this.session, anchor: { id: "", offset: 0 } }));
     }).catch(error => { if (!finishing) fault = error; });
   }
@@ -433,7 +474,7 @@ const hashFile = async (path: string) => { const h = createHash("sha256"); for a
 const sourceHashes = Object.fromEntries(["test/tools/active_threads_load.ts", "src/core/cbor.bend", "src/web/wire.js", "src/web/thin.js",
   "src/web/sidebar-region.js", "src/web/view-delta.js", "src/web/terminal-input.js", "src/web/model-menu-input.js", "src/web/startup.js"]
   .map(path => [path, createHash("sha256").update(readFileSync(resolve(import.meta.dir, "../..", path))).digest("hex")]));
-const report: Row = { schema: 1, fixture: "active-threads-v2", params, bin, out, root, port, sourceHashes,
+const report: Row = { schema: 1, fixture: "active-threads-v4", params, bin, out, root, port, sourceHashes,
   quietIsolationPolicy: metadataWindow,
   catalog: { settledThreads: params.metadata, activeThreads: ids.length, quietThreads: 1,
     totalThreads: params.metadata + ids.length + 1, projects: Math.ceil(params.metadata / 25) + 1, initialEvents: fixture.length },
@@ -479,7 +520,11 @@ try {
   await until("all 20 producers AND delivered streams", () => ids.every(id => receipts(id).length >= 10 && marks.filter(m => m.thread === id).length >= 10));
 
   const cpu = () => parseCpu(readFileSync(`/proc/${hub!.pid}/stat`, "utf8"));
-  for (const [name, duration] of [["mixed", params.secs], ["live-only", params.quietSecs]] as const) {
+  const memory = () => Object.fromEntries(readFileSync(`/proc/${hub!.pid}/status`, "utf8").split("\n")
+    .filter(line => /^(VmRSS|VmHWM|VmSwap):/.test(line)).map(line => { const [key, value] = line.split(":"); return [key, Number(value.trim().split(/\s+/)[0])]; }));
+  // A separate call gives every phase fresh callback bindings on pinned Bun.
+  // Capturing loop-scoped start/mode reused mixed filters in a recorded run.
+  const measurePhase = async (name: "mixed" | "live-only", duration: number) => {
     const mode = name === "mixed" ? "mixed" : "live", transitionAt = Date.now();
     control(mode);
     const warmEnd = performance.now() + params.warmupSecs * 1000;
@@ -502,6 +547,7 @@ try {
     const inWindow = (at: number) => at >= start && at < end;
     const phase: Row = { name, start, end, wallMs, transition, perfBefore, cpuTicks: c1.ticks - c0.ticks, cpuMs: (c1.ticks - c0.ticks) / tickHz * 1000,
       cpuPercent: (c1.ticks - c0.ticks) / tickHz / seconds * 100, threads: {}, clients: {} };
+    phase.hubMemoryKiB = memory();
     phases.push(phase);
     phase.perfAfter = await takePerf(); phase.perfDiff = perfDiff(perfBefore, phase.perfAfter);
     check(`${name}: performance snapshots and monotonic span/count differences available`,
@@ -545,14 +591,25 @@ try {
           streamHealthy(notices, start, end, client === own ? 1 : 0.5) && stat.replies >= seconds * 0.5 && stat.requests >= seconds * 0.5, stat);
       }
     }
-    // The active view must SHOW advancing, freshly emitted text; replies and
-    // heartbeats alone cannot stand in for presentation liveness.
-    let lastSeq = 0;
-    const advancing = own.shownMarks.filter(m => m.thread === ids[0] && inWindow(m.at) && m.emitted >= start && m.phase === mode)
-      .filter(m => { if (m.seq <= lastSeq) return false; lastSeq = m.seq; return true; });
-    phase.visible = { advancing: advancing.length, maxGapMs: maxGap(advancing.map(m => m.at), start, end), lagP99Ms: percentile(advancing.map(m => m.at - m.emitted), 0.99) };
-    check(`${name}: visible view shows fresh advancing own-thread text`, streamHealthy(advancing.map(m => m.at), start, end, 1) &&
-      phase.visible.lagP99Ms !== null && phase.visible.lagP99Ms <= params.maxGapMs, phase.visible);
+    if (name === "mixed") {
+      // Completed messages publish their text. Keep the existing >=1/s
+      // fresh-marker rate, <=2s phase-edge gaps and <=2s p99 lag checks.
+      let lastSeq = 0;
+      const advancing = own.shownMarks.filter(m => m.thread === ids[0] && inWindow(m.at) && m.emitted >= start && m.phase === mode)
+        .filter(m => { if (m.seq <= lastSeq) return false; lastSeq = m.seq; return true; });
+      phase.visible = { contract: "completed-content", advancing: advancing.length, maxGapMs: maxGap(advancing.map(m => m.at), start, end), lagP99Ms: percentile(advancing.map(m => m.at - m.emitted), 0.99) };
+      check(`${name}: visible view shows fresh completed own-thread content`, streamHealthy(advancing.map(m => m.at), start, end, 1) &&
+        phase.visible.lagP99Ms !== null && phase.visible.lagP99Ms <= params.maxGapMs, phase.visible);
+    } else {
+      // Partial responses intentionally remain private. Unchanged pending
+      // content needs no per-delta repaint or fixed-rate refresh request.
+      // Require an actual successful phase reply and inspect every accepted
+      // picture, including the one retained at the phase's beginning.
+      const pending = staticPendingState(own.presentations, start, end);
+      const partialMarkers = own.shownMarks.filter(m => inWindow(m.at) && m.phase === "live").length;
+      phase.visible = { contract: "static-pending", ...pending, partialMarkers };
+      check(`${name}: visible Working/pending row persists across successful view replies`, pending.ok && partialMarkers === 0, phase.visible);
+    }
     for (const client of [own, quiet, sidebar]) {
       const foreign = client.shownMarks.filter(m => inWindow(m.at) && m.thread !== client.target!.id);
       check(`${name}: ${client.name} has no foreign live text`, foreign.length === 0, foreign.length);
@@ -574,7 +631,9 @@ try {
         check(`live-only: ${client.name} receives no live-only invalidations outside watchdog metadata windows`, unexplained.length === 0, phase.isolation[client.name]);
       }
     }
-  }
+  };
+  await measurePhase("mixed", params.secs);
+  await measurePhase("live-only", params.quietSecs);
   report.totalCpuPercent = phases.reduce((n, p) => n + p.cpuMs, 0) / phases.reduce((n, p) => n + p.wallMs, 0) * 100;
   check(`total actual hub process CPU <= ${params.maxCpuPercent}%`, report.totalCpuPercent <= params.maxCpuPercent, report.totalCpuPercent);
   guard();

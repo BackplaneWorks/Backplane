@@ -6,8 +6,11 @@
 // is dumb).
 
 import App from "./app.bend";
+import { starAttention } from "./star-attention.js";
+const starAttentionSync = starAttention();
 import { allowanceDeadline } from "./allowance-deadline.js";
 const retireAllowance = allowanceDeadline();
+import { sizeComposer, sizeComposerControls } from "./composer-size.js";
 import { applyComposerDraft } from "./composer-draft.js";
 import { VoiceMic, hubHere } from "./voice-mic.js";
 import { homeDraftStorage } from "./home-drafts.js";
@@ -535,6 +538,8 @@ function composerTop(measure = !composerRoom) {
 // draws: a layout read in every render of a streaming reply costs frames.
 let composerFootHeld = false;
 function composerGeometry() {
+  sizeComposer(document.getElementById("composer"));
+  sizeComposerControls();
   composerTop();
   if (frontendNode || canonicalBoot) {
     // the hub's view: the footer's own height again
@@ -547,7 +552,7 @@ function composerGeometry() {
   try {
     const saved = JSON.parse(localStorage.getItem("backplane-composer-foot") || "null");
     if (saved?.thread === thread && Math.abs(saved.width - foot.getBoundingClientRect().width) < 1 && saved.height > 0 && saved.height < 300) {
-      foot.style.minHeight = saved.height + "px";composerFootHeld = true;
+      foot.style.minHeight = "min(" + saved.height + "px, var(--composer-button))";composerFootHeld = true;
     }
   } catch {}
 }
@@ -1093,6 +1098,7 @@ function render() {
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
+  starAttentionSync(root);
   bubMoveSync();
   terminalOutput.apply(true);
   if (PERF) PERF.render.push([t1 - t0, pnow() - t1]);

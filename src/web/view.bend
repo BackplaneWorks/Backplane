@@ -1,4 +1,5 @@
 import Base
+import ./composer-bar.bend as CBAR
 import ../core/chat-pending.bend as CP
 import ./terminal-cells.bend as TCELL
 import ../core/view-page.bend as VP
@@ -3350,23 +3351,23 @@ def View.tok.pop(open: Bool, +st: M.State, +th: String, +prov: String) -> List<&
       Nil{}
 
 def View.composer.p(+lc: I.Loc, +draft: String, +send: String, +act: String, +prov: String, menu: List<&2, D.Node>, chip: List<&2, D.Node>, +rs: List<&2, U.SkillRow>,
-    +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, tk: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
+    +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, tk: List<&2, D.Node>, more: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
   D.El{"div", "", [D.At{"class", "composer"}, D.At{"data-run", Bool.pick(String, run, "1", "")}, D.At{"data-atts", Nat.show(List.length(&2, String, atts))},
     D.At{"data-claude", Bool.pick(String, String.eq(prov, "claude"), "1", "")}, D.At{"data-lang", I.I18n.tag(lc)}], D.Dom.cat(
     menu, D.Dom.cat(tp, D.Dom.cat(View.skills(rs), D.Dom.cat(vo, D.Dom.cat(View.attaching.loc(lc, atts, up), [
-    D.El{"textarea", "composer", [D.At{"id", "composer"}, D.At{"rows", "3"}, D.At{"placeholder", MSG.T.composer.placeholder(lc)}, D.At{"value", draft}, D.On{"input", "draft"},
+    D.El{"textarea", "composer", [D.At{"id", "composer"}, D.At{"rows", "3"}, D.At{"placeholder", MSG.T.composer.placeholder(lc)}, D.At{"data-placeholder-full", MSG.T.composer.placeholder(lc)}, D.At{"data-placeholder-short", MSG.T.composer.ask(lc) ++ "…"}, D.At{"title", MSG.T.composer.placeholder(lc)}, D.At{"value", draft}, D.On{"input", "draft"},
       D.At{"data-enter", U.Draft.enter(Bool.not(List.is_empty(&2, U.SkillRow, rs)), draft)}, D.At{"data-enter-alt", "send-alt"}, D.At{"data-tab", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill")}, D.At{"data-arrows", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-move")}, D.At{"data-esc", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-close")}, D.At{"data-paste", "attach"}], Nil{}},
-    D.El{"div", "composer-foot", [D.At{"class", "composer-foot"}], List.append(&2, D.Node, chip, [
-      View.draw.loc(lc),
+    CBAR.ComposerBar.node(List.append(&2, D.Node, chip, [
+      CBAR.ComposerBar.more(List.append(&2, D.Node, more, View.draw.loc(lc) <> tk)),
       D.El{"label", "", [D.At{"class", "attach"}, D.At{"title", MSG.T.composer.attach.tip(lc)}], [WI.WIcon.svg("paperclip", 16),
         D.El{"input", "attach-file", [D.At{"type", "file"}, D.At{"multiple", ""}, D.At{"aria-label", MSG.T.composer.attach.tip(lc)}, D.At{"data-attach", "attach"}], Nil{}}]},
-      D.El{"span", "", [D.At{"class", "foot-end"}], D.Dom.cat(tk, [View.mic.loc(lc, mic),
-        View.send.loc(lc, act, send)])}])}])))))}
+      D.El{"span", "", [D.At{"class", "foot-end"}], [View.mic.loc(lc, mic),
+        View.send.loc(lc, act, send)]}]))])))))}
 
 def View.composer.loc(+lc: I.Loc, +draft: String, +send: String, +act: String, +label: String, +ctx: String, +picking: Bool, +ms: List<&2, String>, +model: String, +info: String, +prov: String, +es: List<&2, String>, +effort: String, +rs: List<&2, U.SkillRow>,
     +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, +q: String, srch: Bool, tk: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
   View.composer.p(lc, draft, send, act, prov, View.menu.loc(lc, picking, ms, model, info, prov, es, effort, q, srch), View.mp.chip(lc, VLabel.effort.label(lc, label, effort), ctx),
-    rs, atts, up, vo, mic, tk, tp, run)
+    rs, atts, up, vo, mic, tk, Nil{}, tp, run)
 
 # the thread's header, or the one given (a bot's)
 
@@ -3424,10 +3425,13 @@ def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D
         D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default " ++ provider ++ " account") <>
         View.accounts.options(ACCT.Accounts.profiles(st), provider)}]
 
-def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:
+def View.accounts.chip(+st: M.State, +sel: String, +provider: String) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, ACCT.Accounts.supported(provider),
     D.El{"button", "", [D.At{"class", "account-chip"}, D.At{"title", "Account: " ++ ACCT.Accounts.label(st, sel, provider) ++ " · Manage logins in Settings → Providers → Accounts"}, D.At{"aria-label", "Account: " ++ ACCT.Accounts.label(st, sel, provider)}, D.At{"data-value", ""}, D.On{"click", "acct-open"}],
-      [WI.WIcon.svg("user", 16), D.Dom.span("acct-v", ACCT.Accounts.short(ACCT.Accounts.label(st, sel, provider)))]} <> View.accounts.pop(open, st, provider), Nil{})
+      [WI.WIcon.svg("user", 16), D.Dom.span("acct-v", ACCT.Accounts.short(ACCT.Accounts.label(st, sel, provider)))]} <> Nil{}, Nil{})
+
+def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:
+  List.append(&2, D.Node, View.accounts.chip(st, sel, provider), View.accounts.pop(open, st, provider))
 
 # a draft over a message's bound says so over the composer (draftbound.bend)
 def View.draft.limit.k(+text: String) -> List<&2, D.Node>:
@@ -3444,10 +3448,9 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
   View.composer.p(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), pr,
     View.mp.loc(lc, U.Flag.get(op, "models"), ACCT.Accounts.nf(nf, st, sel), U.Mpk.cur.of(st, sel, drafts), U.Mpk.now(st, sel), U.Str.get(drafts, "@f.mq"), MPK.ModelPick.kept(U.Str.get(drafts, "@mp"), sel)),
     [D.El{"div", "composer-model", [D.At{"class", "composer-model"}], List.concat(&2, D.Node, [
-      View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))),
-      View.accounts(st, sel, pr, U.Flag.get(op, "accounts")), AW.AllowanceWeb.chip(quota, pr, mo, clock, U.Flag.get(op, "allowance"))])}],
+      View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel)))])}],
     U.Skills.shown(st, sel, drafts, nf), atts, up, D.Dom.cat(View.draft.limit.k(DB.Bound.say(lc, U.Str.get(drafts, "@draft.bound"))), vo), mic,
-    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), List.append(&2, D.Node, View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), AW.AllowanceWeb.pop(U.Flag.get(op, "allowance"), quota, pr, mo, clock)), View.running(turn))
+    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), List.append(&2, D.Node, View.accounts.chip(st, sel, pr), AW.AllowanceWeb.chip(quota, pr, mo, clock, U.Flag.get(op, "allowance"))), List.concat(&2, D.Node, [View.accounts.pop(U.Flag.get(op, "accounts"), st, pr), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), AW.AllowanceWeb.pop(U.Flag.get(op, "allowance"), quota, pr, mo, clock)]), View.running(turn))
 
 # A buy thread's asks: a "Backplane needs" card each, above the composer
 # (client.bend's Fab.order). An order question's choices are buttons (the
@@ -3741,31 +3744,45 @@ def View.workspace.key.attrs(+key: String) -> List<&2, D.Attr>:
 
 # (tog: the rail's own buttons toggle, client.bend's Rail.*: the view on show
 # shuts the viewer; the menu's pick a view)
-def View.workspace.button(+tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
+# Native disclosure menus keep their labels, actions and shortcuts. Their
+# option icons repeated three times in a page and displaced real messages
+# from the bounded reply; only the visible rail needs those SVG children.
+def View.workspace.button.icon(show: Bool, kind: String) -> List<&2, D.Node>:
+  match show:
+    case False{}: Nil{}
+    case True{}: [WI.WIcon.svg(View.workspace.icon(kind), 18)]
+
+def View.workspace.button.mode(+icons: Bool, +tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
   +key = View.workspace.key(kind)
   D.El{"button", kind, List.append(&2, D.Attr, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")},
     D.At{"aria-label", View.workspace.label(lc, kind)}, D.At{"aria-current", Bool.pick(String, String.eq(cur, kind), "page", "false")},
     D.At{"aria-pressed", Bool.pick(String, Bool.and(tog, String.eq(cur, kind)), "true", "false")},
     D.At{"title", View.workspace.label(lc, kind) ++ Bool.pick(String, String.is_empty(key), "", " · " ++ String.to_upper(key))}, D.At{"data-value", Bool.pick(String, tog, U.Rail.value(cur, kind, value), value)}, D.On{"click", Bool.pick(String, tog, U.Rail.act(cur, kind, action), action)}], View.workspace.key.attrs(key)),
-    List.append(&2, D.Node, [WI.WIcon.svg(View.workspace.icon(kind), 18), D.Dom.span("workspace-label", View.workspace.label(lc, kind))], View.workspace.keycap(key))}
+    List.append(&2, D.Node, View.workspace.button.icon(icons, kind), D.Dom.span("workspace-label", View.workspace.label(lc, kind)) <> View.workspace.keycap(key))}
+
+def View.workspace.button(+tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
+  View.workspace.button.mode(True{}, tog, lc, cur, kind, action, value)
+
+def View.workspace.choices.mode(+icons: Bool, +tog: Bool, +lc: I.Loc, +cur: String, term: Bool, +palette: Bool) -> List<&2, D.Node>:
+  [D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Tools"}], [
+    View.workspace.button.mode(icons, False{}, lc, Bool.pick(String, term, "terminal", ""), "terminal", "term-toggle", "@term-size"),
+    View.workspace.button.mode(icons, False{}, lc, Bool.pick(String, palette, "commands", ""), "commands", U.Rail.palette(palette), "") ]},
+   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Design"}], [
+    View.workspace.button.mode(icons, tog, lc, cur, "board", "view-kind", "board"), View.workspace.button.mode(icons, tog, lc, cur, "schematic", "view-kind", "schematic"),
+    View.workspace.button.mode(icons, tog, lc, cur, "3d", "view-kind", "3d"), View.workspace.button.mode(icons, tog, lc, cur, "split", "view-kind", "split"), View.workspace.button.mode(icons, tog, lc, cur, "mech", "mech", "")]},
+   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Inspect"}], [
+    View.workspace.button.mode(icons, tog, lc, cur, "files", "fm", ""), View.workspace.button.mode(icons, tog, lc, cur, "diff", "diff", ""),
+    View.workspace.button.mode(icons, tog, lc, cur, "review", "rv-page", "bom"), View.workspace.button.mode(icons, tog, lc, cur, "browser", "view-kind", "browser")]}]
 
 def View.workspace.choices(+tog: Bool, +lc: I.Loc, +cur: String, term: Bool, +palette: Bool) -> List<&2, D.Node>:
-  [D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Tools"}], [
-    View.workspace.button(False{}, lc, Bool.pick(String, term, "terminal", ""), "terminal", "term-toggle", "@term-size"),
-    View.workspace.button(False{}, lc, Bool.pick(String, palette, "commands", ""), "commands", U.Rail.palette(palette), "") ]},
-   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Design"}], [
-    View.workspace.button(tog, lc, cur, "board", "view-kind", "board"), View.workspace.button(tog, lc, cur, "schematic", "view-kind", "schematic"),
-    View.workspace.button(tog, lc, cur, "3d", "view-kind", "3d"), View.workspace.button(tog, lc, cur, "split", "view-kind", "split"), View.workspace.button(tog, lc, cur, "mech", "mech", "")]},
-   D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Inspect"}], [
-    View.workspace.button(tog, lc, cur, "files", "fm", ""), View.workspace.button(tog, lc, cur, "diff", "diff", ""),
-    View.workspace.button(tog, lc, cur, "review", "rv-page", "bom"), View.workspace.button(tog, lc, cur, "browser", "view-kind", "browser")]}]
+  View.workspace.choices.mode(True{}, tog, lc, cur, term, palette)
 
 def View.workspace.menu(+lc: I.Loc, +cur: String, term: Bool, palette: Bool) -> D.Node:
   D.El{"details", "view-menu", [D.At{"class", "local-menu workspace-menu"}], [
     D.El{"summary", "", [D.At{"aria-label", "Workspace views and tools"}, D.At{"title", "Workspace views and tools"}], [
       WI.WIcon.svg(Bool.pick(String, String.is_empty(cur), "message-square", View.workspace.icon(cur)), 16),
       D.Dom.span("workspace-current", Bool.pick(String, String.is_empty(cur), MSG.T.bots.tab.chat(lc), View.workspace.label(lc, cur))), WI.WIcon.svg("chevron-down", 14)]},
-    D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices(False{}, lc, cur, term, palette)}]}
+    D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices.mode(False{}, False{}, lc, cur, term, palette)}]}
 
 # the rail's foot: a toggle host.js answers, its buttons icons only (their
 # names as tooltips), kept in this browser
@@ -5513,10 +5530,10 @@ def View.star.k(on: Bool, +token: String) -> List<&2, D.Node>:
   match on:
     case False{}: Nil{}
     case True{}:
-      [D.El{"section", "star-nudge", [D.At{"class", "star-nudge"}, D.At{"role", "status"}], [
-        D.El{"p", "", [D.At{"class", "star-nudge-text"}], [D.Txt{U.Star.body()}]},
-        D.El{"a", "", [D.At{"class", "star-nudge-open"}, D.At{"href", U.Star.url()}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"},
-          D.At{"data-value", token}, D.On{"click", "star-open"}], [D.Txt{"Star on GitHub"}]},
+      [D.El{"section", "star-nudge", [D.At{"class", "star-nudge"}, D.At{"role", "status"}, D.At{"data-star-offer", token}], [
+        D.El{"p", "", [D.At{"class", "star-nudge-text"}], [D.El{"span", "", [D.At{"class", "star-nudge-icon"}, D.At{"aria-hidden", "true"}], [D.Txt{"★"}]}, D.Dom.span("", U.Star.body())]},
+        D.El{"a", "", [D.At{"class", "star-nudge-open"}, D.At{"aria-label", "Star on GitHub (opens in a new tab)"}, D.At{"href", U.Star.url()}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"},
+          D.At{"data-value", token}, D.On{"click", "star-open"}], [D.El{"span", "", [D.At{"aria-hidden", "true"}], [D.Txt{"★"}]}, D.Txt{"Star on GitHub"}]},
         D.El{"button", "", [D.At{"class", "star-nudge-dismiss"}, D.At{"type", "button"}, D.At{"aria-label", "Dismiss star suggestion"}, D.At{"title", "Dismiss star suggestion"},
           D.At{"data-value", token}, D.On{"click", "star-dismiss"}], [WI.WIcon.svg("x", 16)]}]}]
 

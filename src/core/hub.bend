@@ -1480,8 +1480,11 @@ def Delta.last(ls: List<&2, String>, acc: Bool) -> Bool:
 def Delta.streaming(ls: List<&2, String>) -> Bool:
   Delta.last(ls, False{})
 
+# A read ending in any stream_event pauses this reader for 200 ms.
+# Its complete batch is sent first; later arrivals can wait that interval.
+# Coalescing preserves text bytes and non-stream event order.
 def Delta.pace() -> U32:
-  60
+  200
 
 def Claude.stream.k(block: Bool, text: Bool, +thread: String, s: String) -> Step:
   match block text:
@@ -4332,9 +4335,10 @@ def Ended.turn(+thread: String, +state: String, +alert: String, g: WN.Got) -> Ou
       TurnEnded{thread, state, alert, err, WN.Wn.end.reason(state, err, reply), reply}
 
 # post: the state after the step; the policy's record (core/notice.bend)
-# is written with it
+# is written with it, and a failed turn's mark (stamp.bend: it keeps
+# "Failed" after the next turn starts)
 def Ended.out.p(+post: M.State, +s: M.State, +now: Nat, +state: String, +thread: String, +cwd: String, +cs: List<&2, M.Change>, os: List<&2, Out>) -> Step:
-  Step{List.append(&2, M.Change, List.append(&2, M.Change, List.append(&2, M.Change, cs, Run.settle(s, now, thread)), Sum.at(RF.Sum.due(s, thread, now), thread, now)), NO.Policy.end(post, now, thread, state)),
+  Step{List.append(&2, M.Change, List.append(&2, M.Change, List.append(&2, M.Change, List.append(&2, M.Change, cs, Run.settle(s, now, thread)), Sum.at(RF.Sum.due(s, thread, now), thread, now)), NO.Policy.end(post, now, thread, state)), STP.Stamp.fail.mark(String.eq(state, "failed"), post, thread, now)),
     List.append(&2, Out, os, Ended.turn(thread, state, NO.Policy.kind(NO.Policy.end(post, now, thread, state)), WN.Wn.cap(post, thread)) <> Git{0, "", "step", thread, cwd, "", ""} <> Git{0, "", "checkpoint", thread, cwd, "", ""}
       <> List.append(&2, Out, Sum.out(RF.Sum.due(s, thread, now), s, thread, "thread"), Answer.out(String.eq(state, "completed"), post, thread)))}
 
