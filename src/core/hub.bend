@@ -1368,7 +1368,7 @@ def Hub.methods() -> List<&2, String>:
    "thread.pin", "thread.unpin", "thread.rename", "thread.delete", "kicad.watch", "thread.modes", "app.update", "setting.set", "kicad.install",
    "ask.answer", "device.register", "device.drop", "kicad.info", "queue.resume",
    "queue.edit", "queue.remove", "queue.move", "queue.steer", "thread.fork", "thread.back", "thread.provider", "update.now", "work.cancel", "task.cancel", "wake.cancel", "deploy.restart", "deploy.cancel", "deploy.status", "lock.release", "lock.cancel", "kicad.retry", "mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send",
-   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move"]
+   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move", "kicad.warm"]
 
 # Agent output (Claude stream-json)
 # ---------------------------------
@@ -10214,6 +10214,19 @@ def Hub.project.move(cs: List<&2, M.Change>, +client: U32, +id: String) -> Step:
     case Nil{}: Step.outs([Reply.err(client, id, "Type the folder's full path, starting with /")])
     case +c <> t: Step.reply(client, id, c <> t)
 
+# kicad.warm's paths ("" none) as the plot actor's warm requests: a Watch of
+# kind "warm:board" or "warm:schematic" (server.bend's Plot.watch.all), no
+# client's view
+def Warm.keep(skip: Bool, o: Out, rest: List<&2, Out>) -> List<&2, Out>:
+  match skip:
+    case True{}: rest
+    case False{}: o <> rest
+
+def Warm.outs(+kind: String, +root: String, ps: List<&2, String>) -> List<&2, Out>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t: Warm.keep(String.is_empty(p), Watch{0, "warm:" ++ kind, root, p, "", "", ""}, Warm.outs(kind, root, t))
+
 def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
   match i:
     case 0n:
@@ -10325,6 +10338,10 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
       Step.outs([Reply.data(client, id, Improvements.context(s, J.Json.get_str(p, "sourceThread", "")))])
     case 50n:
       Step.reply(client, id, [M.ThreadParentSet{J.Json.get_str(p, "thread", ""), "", now}])
+    # the history steps before and after the one on show, plotted ahead
+    # (client.bend's Hs.warm; kind "board" or "schematic")
+    case 55n:
+      Step.outs(Reply.ok(client, id) <> Warm.outs(J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), [J.Json.get_str(p, "before", ""), J.Json.get_str(p, "after", "")]))
     case _:
       Hub.more(C.Codec.pos(Hub.methods.git(), m), s, now, client, id, p, m)
 
