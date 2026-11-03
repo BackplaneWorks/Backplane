@@ -91,6 +91,7 @@ import ../core/thin.bend as THIN
 import ../core/thin-chat.bend as TCHAT
 import ../core/thin-live.bend as TLIVE
 import ../core/stream-commit.bend as SCOM
+import ../core/pending-stream.bend as PSTREAM
 import ../core/thin-wire.bend as TVW
 import ../core/presentation.bend as PRESENT
 import ../web/session.bend as WEBFRONT
@@ -7244,8 +7245,20 @@ def Live.committed.when(ending: Bool, +cfg: Cfg, cs: List<&2, M.Change>, +lv: Li
 def Live.committed(+cfg: Cfg, +cs: List<&2, M.Change>, lv: List<&2, LV.Buf>) -> Cfg:
   Live.committed.when(SCOM.Streams.any(cs), cfg, cs, lv)
 
+# Pending replies are static Working rows. Once present, another text delta
+# changes no thin picture; retain all bytes/revisions without an RPC wake.
+# First text, a cleared row or a new generation still reconciles the view.
+def Cfg.thin.live.changed(changed: Bool, +cfg: Cfg, streams: Map<&2, TLIVE.Stream>, thread: String) -> Cfg:
+  match changed:
+    case True{}: Cfg.thin.live(cfg, streams, thread)
+    case False{}:
+      Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), streams,
+        Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), Cfg.thin.notes(cfg), Cfg.thin.store(cfg), Cfg.thin.signal_seq(cfg)})
+
 def Live.with_delta(+cfg: Cfg, +lv: List<&2, LV.Buf>, +thread: String, text: String) -> Cfg:
-  Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg))), TPACE.Touch.live(thread))
+  +streams = TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg)))
+  Cfg.thin.live.changed(PSTREAM.PendingStream.changed(TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), TLIVE.Stream.get(streams, thread)),
+    Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), streams, TPACE.Touch.live(thread))
 
 # the tool calls open now (core/deploy.bend's Open.*), kept in memory only:
 # after a restart there are none, which is right, the old processes are gone

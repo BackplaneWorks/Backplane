@@ -1480,8 +1480,11 @@ def Delta.last(ls: List<&2, String>, acc: Bool) -> Bool:
 def Delta.streaming(ls: List<&2, String>) -> Bool:
   Delta.last(ls, False{})
 
+# A read ending in any stream_event pauses this reader for 200 ms.
+# Its complete batch is sent first; later arrivals can wait that interval.
+# Coalescing preserves text bytes and non-stream event order.
 def Delta.pace() -> U32:
-  60
+  200
 
 def Claude.stream.k(block: Bool, text: Bool, +thread: String, s: String) -> Step:
   match block text:
