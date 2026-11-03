@@ -22,6 +22,10 @@ def code(r: P.Ran) -> String:
 def setup() -> String:
   "d=$(mktemp -d) && cd \"$d\" && git init -q -b main r && cd r && printf 'a\\nb\\nc\\n' > small.txt && git add . && git -c user.email=t@t -c user.name=t commit -q -m one && printf 'a\\nB\\nc\\n' > small.txt && seq 1 20000 | sed 's/^/line number /' > big.txt && git add . && git -c user.email=t@t -c user.name=t commit -q -m two && echo \"$d/r\""
 
+# a commit adding 160 one-line files
+def setup.many() -> String:
+  "d=$(mktemp -d) && cd \"$d\" && git init -q -b main r && cd r && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m one && for i in $(seq 1 160); do echo $i > f$i.txt; done && git add . && git -c user.email=t@t -c user.name=t commit -q -m two && echo \"$d/r\""
+
 def names(fs: List<&2, D.DFile>) -> String:
   match fs:
     case Nil{}: ""
@@ -41,5 +45,10 @@ def main() -> IO(Unit):
     C.Check.str("Diff still lists both files", names(D.Diff.parse(d)), "big.txt:added small.txt:modified ")
     +bad : P.Ran <- G.Git.run.capped(root, G.Git.diff.args("nosuchref", "HEAD"))
     C.Check.str("a failing git still fails", Bool.show(Bool.not(String.eq(code(bad), "0"))), "True")
+    many : P.Ran <- P.Proc.run("sh", ["-c", setup.many()], "/")
+    +root2 : String = String.trim(out(many))
+    +m : P.Ran <- G.Git.run.capped(root2, G.Git.diff.args("HEAD~1", "HEAD"))
+    C.Check.str("past 150 files they are counted, not listed", Nat.show(List.length(&2, D.DFile, D.Diff.parse(out(m)))) ++ " " ++ Bool.show(String.contains(out(m), "\\ 10 more changed files not shown here")), "150 True")
+    gone2 : P.Ran <- P.Proc.run("sh", ["-c", "rm -rf \"$(dirname \"$0\")\"", root2], "/")
     gone : P.Ran <- P.Proc.run("sh", ["-c", "rm -rf \"$(dirname \"$0\")\"", root], "/")
     C.Check.str("cleaned", code(gone), "0")
