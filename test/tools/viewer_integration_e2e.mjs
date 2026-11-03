@@ -3,6 +3,7 @@
 // bun test/tools/viewer_integration_e2e.mjs --bin BUILD/backplane-serve --web BUILD/web
 // Optional: --source-root ROOT --project READONLY_PROJECT --out DIR --quality required|auto|off --gpu software|hardware --expect-material realistic --render-material realistic|cad-studio|source-defaults --expect-trace available|unavailable --expect-asset-preparation --api-only --layout-only --load-only --render-only --fidelity-only --restore-only --mask-only --coating-only --geometry-receipt FILE --keep
 import assert from 'node:assert/strict';
+import { homeViewerParity } from './project_home_viewer_parity.mjs';
 import * as fs from 'node:fs';
 import {tmpdir, homedir} from 'node:os';
 import {resolve, join, dirname, basename} from 'node:path';
@@ -32,6 +33,8 @@ assert.ok(fs.existsSync(binary) && fs.existsSync(join(web, 'index.html')), 'cand
 if(option('expected-bin-sha'))assert.equal(digest(fs.readFileSync(binary)),option('expected-bin-sha'),'candidate binary hash differs from qualified build');
 const qualityMode = option('quality', 'auto');assert.ok(['auto','off','required'].includes(qualityMode));
 const apiOnly = args.includes('--api-only');
+const homeParity = args.includes('--home-parity');
+assert.ok(!homeParity || qualityMode === 'required' && !apiOnly, '--home-parity requires the real Studio UI');
 const layoutOnly = args.includes('--layout-only');
 const loadOnly = args.includes('--load-only'),renderOnly=args.includes('--render-only'),fidelityOnly=args.includes('--fidelity-only'),restoreOnly=args.includes('--restore-only'),maskOnly=args.includes('--mask-only'),coatingOnly=args.includes('--coating-only'), focused = layoutOnly || loadOnly || renderOnly || fidelityOnly || restoreOnly || maskOnly || coatingOnly;
 const expectAssetPreparation=args.includes('--expect-asset-preparation'),profileLoading=loadOnly||expectAssetPreparation||fidelityOnly;
@@ -76,7 +79,7 @@ for (const path of [home, cache, standins, fixtureProject]) fs.mkdirSync(path, {
 fs.writeFileSync(join(fixtureProject,'.backplane.json'),JSON.stringify({project:canonicalProject})+'\n');
 const output = resolve(option('out', join(dir, 'evidence')));fs.mkdirSync(output, {recursive:true});
 const token = randomBytes(16).toString('hex'), at = Math.floor(Date.now() / 1000);
-const events = [{$:'ProjectCreated', id:'p1', title:'Readonly SMU viewer fixture', root:fixtureProject, at},
+const events = [{$:'ProjectCreated', id:'p1', title:'Readonly SMU viewer fixture', root:homeParity ? project : fixtureProject, at},
   ...['t1','t2'].map((id, i) => ({$:'ThreadCreated', id, project:'p1', title:`Viewer acceptance ${i + 1}`, env:'local', branch:'', worktree:'', provider:'claude', model:'', at:at + i + 1})),
   ...[['restart.continue','off'],['onboard.done','1'],['onboard.uber','1'],['telemetry.enabled','off']].map(([key,value]) => ({$:'SettingSet', key, value, at:at + 3}))];
 fs.writeFileSync(join(home,'events.jsonl'), events.map(x => JSON.stringify(x)).join('\n') + '\n');
@@ -409,6 +412,7 @@ try {
     },{phase,revision:sourceRevision},{timeout:180000});
     assert.ok(!/failed|timed out|Preview available/i.test(await page.locator('.solid-render-status').textContent()));
   };
+  if(homeParity) await homeViewerParity({page,probeOriginal,waitOriginal,sourceRevision,pcb,output,record});
   if(qualityMode==='required'){
     await waitOriginal('raster');assert.match(await page.locator('.solid-render-status').textContent(),/Studio.*original model/i);
     gpuEvidence.workerContext=await page.evaluate(()=>new Promise(resolve=>{

@@ -2718,7 +2718,7 @@ def Hub.nav(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Jso
     case 2n:
       Step.outs([Git{client, id, "files", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
     case 3n:
-      Step.outs([Git{client, id, "kicad", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
+      Hub.git(s, client, id, "kicad", J.Json.get_str(p, "thread", ""), "", "")
     case 4n:
       Hub.reorder_projects(s, now, client, id, p)
     case 5n:

@@ -5040,18 +5040,22 @@ def View.solid.boardkey(+u: U.Ui) -> String:
 def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), MSG.T.viewer.orbit.tip(lc))
     <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", View.compact.text(View.compact(u), U.Ui.info(u, "plotnote:" ++ U.Solid.want(u))))),
-      [D.El{"div", "solid-workbench", [D.At{"id", "solid-workbench"}, D.At{"class", "solid-workbench"}, D.At{"data-key", U.Solid.want(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-board-key", View.solid.boardkey(u)}],
+      [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
+
+# One original-model renderer for standalone, project-home and Split views.
+def View.solid.workbench(+lc: I.Loc, +u: U.Ui, +key: String, +boardkey: String) -> D.Node:
+  D.El{"div", "solid-workbench", [D.At{"id", "solid-workbench"}, D.At{"class", "solid-workbench"}, D.At{"data-key", key}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-board-key", boardkey}],
         [D.El{"div", "solid-toolbar", [D.At{"class", "solid-toolbar"}], Nil{}},
          D.El{"div", "", [D.At{"class", "solid-layout"}],
-          [D.El{"div", "", [D.At{"class", "viewer-stage"}], List.append(&2, D.Node, [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Solid.want(u)}, D.At{"data-probe", U.Probe.get(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"tabindex", "0"}, D.At{"aria-label", "3D model. Drag or arrow keys to orbit; F fits the model."}], Nil{}},
+          [D.El{"div", "", [D.At{"class", "viewer-stage"}], List.append(&2, D.Node, [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", key}, D.At{"data-probe", U.Probe.get(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"tabindex", "0"}, D.At{"aria-label", "3D model. Drag or arrow keys to orbit; F fits the model."}], Nil{}},
             D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}], View.probe.chip(u))},
            D.El{"section", "solid-pcb", [D.At{"class", "solid-pcb viewer-stage"}, D.At{"aria-label", "PCB beside assembly"}],
              [D.El{"div", "solid-pcb-controls", [D.At{"class", "solid-pcb-controls"}, D.At{"aria-label", "PCB layer controls"}], [View.layers.loc(lc, False{}, False{}, U.Solid.off(u), U.Lfocus.of(u))]},
-              D.El{"canvas", "solid-pcb-plot", List.append(&2, D.Attr, View.probe.attrs(u, False{}), [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", View.solid.boardkey(u)}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))},
+              D.El{"canvas", "solid-pcb-plot", List.append(&2, D.Attr, View.probe.attrs(u, False{}), [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", boardkey}, D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))},
                 D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(0, U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
                 D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"tabindex", "0"}, D.At{"aria-label", "Saved PCB. Drag to pan, wheel or pinch to zoom."}]), Nil{}},
               D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]},
-           D.El{"aside", "solid-inspector", [D.At{"id", "solid-inspector"}, D.At{"class", "solid-inspector"}], Nil{}}]}]}])
+           D.El{"aside", "solid-inspector", [D.At{"id", "solid-inspector"}, D.At{"class", "solid-inspector"}], Nil{}}]}]}
 
 # The combined view (client.bend's Split): the schematic beside the board
 # and its 3D model, each pane under a head that names it, with a button
@@ -5070,6 +5074,13 @@ def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
   D.El{"button", "", [D.At{"type", "button"}, D.At{"class", Bool.pick(String, U.Split.on(u, pane), "combo-pick on", "combo-pick")},
     D.At{"aria-pressed", Bool.pick(String, U.Split.on(u, pane), "true", "false")}, D.At{"title", Bool.pick(String, U.Split.on(u, pane), "Hide the ", "Show the ") ++ name},
     D.At{"data-value", pane}, D.On{"click", "split-pane"}], [D.Txt{name}]}
+
+def View.combo.separator(+group: String, +first: String, +second: String, controls: String) -> D.Node:
+  D.El{"div", "combo-resize-" ++ group, [D.At{"id", "combo-resize-" ++ group}, D.At{"class", "combo-resize"},
+    D.At{"data-project-split", group}, D.At{"data-first-label", first}, D.At{"data-second-label", second},
+    D.At{"role", "separator"}, D.At{"tabindex", "0"}, D.At{"aria-controls", controls},
+    D.At{"aria-label", "Resize " ++ first ++ " and " ++ second},
+    D.At{"title", "Drag or use arrow keys to resize. Shift moves faster; Home/End go to the limits; Enter or double-click resets."}], Nil{}}
 
 # a plot pane's canvas: its source, and the layers its kind shows (k 0 a
 # board, 1 a schematic, as the single tabs keep them)
@@ -5103,20 +5114,19 @@ def View.combo.boxes(many: Bool, +u: U.Ui) -> String:
       ""
 
 def View.combo.sch(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  D.El{"section", "combo-sch", [D.At{"class", "combo-pane combo-main"}, D.At{"aria-label", MSG.T.viewer.schematic(lc)}],
+  D.El{"section", "combo-sch", [D.At{"id", "combo-sch"}, D.At{"class", "combo-pane combo-main"}, D.At{"aria-label", MSG.T.viewer.schematic(lc)}],
     View.combo.head("sch", MSG.T.viewer.schematic(lc), View.combo.nav(U.Sch.many(u), lc, u)) <> List.append(&2, D.Node, View.probe.away(u),
     [D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas(lc, "plot-sch", U.Split.src.sch(u), "schematic", 1, u, View.combo.boxes(U.Sch.many(u), u))]}])}
 
 def View.combo.pcb(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  D.El{"section", "combo-pcb", [D.At{"class", "combo-pane"}, D.At{"aria-label", MSG.T.viewer.board(lc)}], [
+  D.El{"section", "combo-pcb", [D.At{"id", "combo-pcb"}, D.At{"class", "combo-pane"}, D.At{"aria-label", MSG.T.viewer.board(lc)}], [
     View.combo.head("pcb", MSG.T.viewer.board(lc), Nil{}),
     D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas(lc, "plot-pcb", U.Split.src.pcb(u), "board", 0, u, "")]}]}
 
 def View.combo.solid(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  D.El{"section", "combo-3d", [D.At{"class", "combo-pane"}, D.At{"aria-label", "3D"}], [
+  D.El{"section", "combo-3d", [D.At{"id", "combo-3d"}, D.At{"class", "combo-pane"}, D.At{"aria-label", "3D"}], [
     View.combo.head("3d", "3D", Nil{}),
-    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-probe", U.Probe.get(u)}, D.At{"tabindex", "0"}, D.At{"aria-label", "3D model. Drag or arrow keys to orbit; F fits the model."}], Nil{}},
-      D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]}]}
+    View.solid.workbench(lc, u, U.Split.src.solid(u), U.Split.src.pcb(u))]}
 
 def View.combo.pane(i: Nat, +lc: I.Loc, +u: U.Ui) -> D.Node:
   match i:
@@ -5135,13 +5145,19 @@ def View.combo.if(on: Bool, +lc: I.Loc, +u: U.Ui, +i: Nat) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
+def View.combo.side.label(+lc: I.Loc, +u: U.Ui) -> String:
+  Bool.pick(String, U.Split.on(u, "pcb"), Bool.pick(String, U.Split.on(u, "3d"), MSG.T.viewer.board(lc) ++ " and 3D", MSG.T.viewer.board(lc)), "3D")
+
 def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [View.bar.loc(lc, List.append(&2, D.Node, View.boards(u, "Split"), D.El{"span", "", [D.At{"class", "combo-picks"}, D.At{"role", "group"}, D.At{"aria-label", "Panes"}], [
       View.combo.toggle(u, "sch", MSG.T.viewer.schematic(lc)), View.combo.toggle(u, "pcb", MSG.T.viewer.board(lc)), View.combo.toggle(u, "3d", "3D")]} <> View.probe.chip(u)),
      MSG.T.viewer.pan.tip(lc)),
-   D.El{"div", "combo", [D.At{"class", "combo"}], [D.El{"div", "", [D.At{"class", "combo-in"}],
-     List.append(&2, D.Node, View.combo.if(U.Split.on(u, "sch"), lc, u, 0n),
-       [D.El{"div", "", [D.At{"class", "combo-side"}], List.append(&2, D.Node, View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n), View.combo.if(U.Split.on(u, "3d"), lc, u, 2n))}])}]}]
+   D.El{"div", "combo", [D.At{"class", "combo"}, D.At{"data-split-project", U.Asset.project(u)}], [D.El{"div", "", [D.At{"class", "combo-in"}],
+     List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "sch"), lc, u, 0n),
+       D.Dom.when(Bool.and(U.Split.on(u, "sch"), Bool.or(U.Split.on(u, "pcb"), U.Split.on(u, "3d"))), View.combo.separator("primary", MSG.T.viewer.schematic(lc), View.combo.side.label(lc, u), "combo-sch combo-side")),
+       [D.El{"div", "combo-side", [D.At{"id", "combo-side"}, D.At{"class", "combo-side"}], List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n),
+         D.Dom.when(Bool.and(U.Split.on(u, "pcb"), U.Split.on(u, "3d")), View.combo.separator("secondary", MSG.T.viewer.board(lc), "3D", "combo-pcb combo-3d")),
+         View.combo.if(U.Split.on(u, "3d"), lc, u, 2n)])}]])}]}]
 
 # The viewer pane: a tab for each thing it shows (the one on show lit),
 # Close, then that thing
@@ -5347,7 +5363,7 @@ def View.home.tabs(home: Bool, +lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
     case False{}: View.tabs.for(View.rail(u), lc, Bool.pick(String, U.Mpage.onpart(u), "mech", U.Fm.tab(U.Solid.kind(u))))
 
 def View.aside(+lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
-  D.El{"aside", "viewer", [D.At{"class", "viewer " ++ Bool.pick(String, String.is_empty(kind), "board", kind)}, D.At{"id", "viewer"}],
+  D.El{"aside", "viewer", [D.At{"class", "viewer " ++ Bool.pick(String, String.is_empty(kind), "board", kind)}, D.At{"id", "viewer"}, D.At{"data-split-project", U.Asset.project(u)}],
     View.split.loc(lc) <> View.home.tabs(PH.Home.is(U.Ui.sel(u)), lc, kind, u) <> View.aside.k(lc, View.aside.n(kind), u)}
 
 def View.aside.if(+lc: I.Loc, open: Bool, +kind: String, +u: U.Ui) -> List<&2, D.Node>:

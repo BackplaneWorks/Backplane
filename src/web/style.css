@@ -582,7 +582,7 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 /* the combined view (Split): the schematic beside the board and its 3D
    model, stacked the other way on a pane taller than wide; each pane under
    a head that names it and puts it away */
-.viewer.split .combo { flex: 1; min-height: 0; container-type: size; }
+.viewer.split .combo { flex: 1; min-height: 0; container-type: size; --split-handle-size:12px; }
 .combo-in { display: flex; width: 100%; height: 100%; }
 .combo-side { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .combo-side:empty { display: none; }
@@ -590,6 +590,22 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .combo-main { flex: 1.15; }
 .combo-main + .combo-side { border-left: 1px solid var(--line); }
 .combo-side > .combo-pane + .combo-pane { border-top: 1px solid var(--line); }
+.combo-in[data-split-active] > :first-child,
+.combo-side[data-split-active] > :first-child { flex:0 0 calc((100% - var(--split-handle-size)) * var(--split-ratio,.5)); }
+.combo-in[data-split-active] > :last-child,
+.combo-side[data-split-active] > :last-child { flex:1 1 0; }
+.combo-resize { flex:0 0 var(--split-handle-size); align-self:stretch; background:var(--panel); touch-action:none; position:relative; cursor:col-resize; }
+.combo-resize[aria-orientation="horizontal"] { cursor:row-resize; }
+.combo-resize::after { content:""; position:absolute; top:0; bottom:0; left:calc(50% - 1px); width:2px; background:var(--line); }
+.combo-resize[aria-orientation="horizontal"]::after { top:calc(50% - 1px); bottom:auto; left:0; right:0; width:auto; height:2px; }
+.combo-resize:hover::after, .combo-resize.on::after, .combo-resize:focus-visible::after { background:var(--accent); }
+.combo-resize:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+body.resizing-project-split, body.resizing-project-split * { user-select:none !important; }
+body.resizing-project-split:has(.combo-resize.on[aria-orientation="vertical"]),
+body.resizing-project-split:has(.combo-resize.on[aria-orientation="vertical"]) * { cursor:col-resize !important; }
+body.resizing-project-split:has(.combo-resize.on[aria-orientation="horizontal"]),
+body.resizing-project-split:has(.combo-resize.on[aria-orientation="horizontal"]) * { cursor:row-resize !important; }
+@media(pointer:coarse) { .viewer.split .combo { --split-handle-size:44px; } }
 @container (orientation: portrait) {
   .combo-in { flex-direction: column; }
   .combo-side { flex-direction: row; }
@@ -2547,8 +2563,9 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .home-header > div { flex:1; min-width:0; overflow-wrap:anywhere; }
 .home-header .back { display:none; }
 .home-eyebrow { color:var(--dim); font-size:10px; letter-spacing:.12em; }
-.home-scroll { flex:1; min-height:0; overflow:auto; padding:20px; scrollbar-gutter:stable; }
-.home-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+.project-home { width:100%; min-width:0; max-width:none; }
+.home-scroll { flex:1; min-height:0; min-width:0; width:100%; max-width:none; overflow:auto; padding:16px; scrollbar-gutter:stable; }
+.home-grid { display:grid; width:100%; max-width:none; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
 .home-card { border:1px solid var(--line); padding:12px; min-width:0; background:var(--bg); overflow-wrap:anywhere; }
 .home-card h2 { margin:-12px -12px 12px; padding:10px 12px; font-size:12px; background:var(--panel); border-bottom:1px solid var(--line); }
 .home-card .body { max-height:260px; overflow:auto; font-size:12px; }
@@ -2571,15 +2588,22 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
  .home-intent-field { font-size:16px; }
 }
 .app.panel:has(> main.project-home), .app.top.panel:has(> main.project-home) { grid-template-columns:264px minmax(0,1fr); }
-.home-live-viewer { grid-column:1 / -1; min-width:0; min-height:360px; }
-.app .project-home .viewer { position:relative; inset:auto; width:100%; height:360px; min-height:360px; border:1px solid var(--line); }
+.app.top.panel:has(> main.project-home) { grid-template-areas:"top top" "side main"; }
+@media(min-width:761px) {
+ html[data-side="shut"] .app.panel:has(> main.project-home) { grid-template-columns:44px minmax(0,1fr); }
+}
+.home-live-viewer { grid-column:1 / -1; width:100%; max-width:none; min-width:0; min-height:360px; }
+.app .project-home .viewer { position:relative; inset:auto; width:100%; height:clamp(440px,70vh,800px); min-height:440px; flex:none; border:1px solid var(--line); }
+.app .project-home .viewer[class~="3d"] { max-width:none; height:clamp(440px,78vh,960px); margin-inline:0; }
 .project-home .viewer-split { display:none; }
 .home-thumbnail { display:block; width:100%; height:140px; object-fit:contain; background:var(--view); margin-bottom:10px; }
 .home-status { width:100%; text-align:left; color:var(--warn); min-height:36px; }
 @media(max-width:760px) {
  .app.panel:has(> main.project-home), .app.top.panel:has(> main.project-home) { grid-template-columns:minmax(0,1fr); }
+ .app.top.panel:has(> main.project-home) { grid-template-areas:"top" "body"; }
  .home-live-viewer { min-height:300px; }
- .app .project-home .viewer { height:300px; min-height:300px; }
+ .app .project-home .viewer { height:65vh; min-height:360px; }
+ .app .project-home .viewer[class~="3d"] { height:65vh; min-height:360px; }
 }
 .project-head.on { background:var(--raise); box-shadow:inset 2px 0 var(--accent); color:var(--text); }
 .project-head .project-disclosure { padding:0 4px 0 0; min-width:18px; }
@@ -2596,9 +2620,34 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .home-thread > .home-edit-name { flex:1; }
 .home-icon-picker .look { position:absolute; left:16px; top:80px; z-index:80; }
 .home-live-viewer > h2 { padding:8px 12px; margin:0; }
+.home-layout { display:flex; width:100%; min-width:0; align-items:stretch; --split-handle-size:16px; }
+.home-layout > .home-live-viewer { flex:0 0 68%; width:auto; min-width:0; }
+.home-layout > .home-details { flex:1; min-width:0; width:auto; grid-template-columns:minmax(0,1fr); }
+.home-layout:not(:has(> .home-live-viewer)) > .home-details { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.home-layout[data-split-active] > .home-live-viewer { flex-basis:calc((100% - var(--split-handle-size)) * var(--split-ratio,.68)); }
+.project-home[data-home-viewer-full="1"] > :is(.home-header,.home-icon-picker,.home-composer) { display:none; }
+.project-home[data-home-viewer-full="1"] .home-scroll { padding:0; overflow:hidden; scrollbar-gutter:auto; display:flex; flex-direction:column; }
+.project-home[data-home-viewer-full="1"] .home-scroll > :not(.home-layout) { display:none; }
+.project-home[data-home-viewer-full="1"] .home-layout { flex:1; min-height:0; }
+.project-home[data-home-viewer-full="1"] .home-layout > :not(.home-live-viewer) { display:none; }
+.project-home[data-home-viewer-full="1"] .home-live-viewer { flex:1; display:flex; flex-direction:column; min-height:0; }
+.project-home[data-home-viewer-full="1"] .home-live-viewer > h2 { display:none; }
+.app .project-home[data-home-viewer-full="1"] .viewer { flex:1; min-height:0; height:auto; max-height:none; border:0; }
+@media(max-width:1000px) {
+ .home-layout { flex-direction:column; }
+ .home-layout > .home-live-viewer, .home-layout[data-split-active] > .home-live-viewer { flex:0 0 auto; }
+ .home-layout > .home-resize { display:none; }
+ .home-layout > .home-details { margin-top:12px; }
+ .project-home[data-home-viewer-full="1"] .home-live-viewer { flex:1; }
+}
+@media(max-width:760px) { .home-layout:not(:has(> .home-live-viewer)) > .home-details { grid-template-columns:minmax(0,1fr); } }
+@media(pointer:coarse) {
+ .home-layout { --split-handle-size:44px; }
+ .project-home[data-home-viewer-full="1"] .viewer-tabs button { min-height:44px; }
+}
 
 .home-features { display:flex; flex-wrap:wrap; gap:6px 12px; }
 .home-card > .body { max-height:180px; overflow:hidden; }
 
 /* Embedded home viewers own their tabs; no outer workspace rail replaces them. */
-.project-home .viewer > .viewer-tabs { display:flex; }
+.project-home .viewer > .viewer-tabs { display:flex; flex-wrap:wrap; justify-content:flex-start; }

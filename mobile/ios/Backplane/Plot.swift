@@ -312,6 +312,8 @@ final class PlotStore {
     private(set) var frame: PlotFrame?
     private(set) var mesh: MeshFrame?
     @ObservationIgnored private var held: [PlotChunk] = []
+    @ObservationIgnored private var splitFrames: [String: PlotFrame] = [:]
+    @ObservationIgnored private var splitOrder: [String] = []
     @ObservationIgnored private let queue = DispatchQueue(label: "plot", qos: .userInitiated)
     private(set) var generation = 0
     @ObservationIgnored private let assets = PlotMeshAssets()
@@ -330,6 +332,17 @@ final class PlotStore {
     }
 
     func cachedMesh(_ key: String) -> MeshFrame? { assets.frame(key) }
+    func cachedFrame(_ key: String) -> PlotFrame? {
+        if frame?.key == key { return frame }
+        return splitFrames[key]
+    }
+    private func keepFrame() {
+        guard let frame else { return }
+        splitOrder.removeAll { $0 == frame.key }
+        splitOrder.append(frame.key)
+        splitFrames[frame.key] = frame
+        while splitOrder.count > 3 { splitFrames.removeValue(forKey: splitOrder.removeFirst()) }
+    }
 
     // a plot frame: a map whose first key is 1 ("t") and value "plot"
     static func isPlot(_ d: Data) -> Bool {
@@ -342,6 +355,8 @@ final class PlotStore {
         generation += 1
         assets.reset()
         held = []
+        splitFrames = [:]
+        splitOrder = []
         frame = nil
         mesh = nil
     }
@@ -383,6 +398,7 @@ final class PlotStore {
                         }
                         self.held = []
                         self.frame = PlotFrame(key: key, fam: fam, box: [], edge: [], thick: 0, chunks: [], fresh: [], none: why, at: Date())
+                        self.keepFrame()
                     }
                 }
                 return
@@ -444,11 +460,13 @@ final class PlotStore {
                     guard cs.allSatisfy({ $0 != nil }) else {
                         self.held = []
                         self.frame = PlotFrame(key: key, fam: fam, box: [], edge: [], thick: 0, chunks: [], fresh: [], none: "Invalid geometry reference. Retry to reload this view.", at: Date())
+                        self.keepFrame()
                         return
                     }
                     let all = cs.compactMap { $0 }
                     self.held = all
                     self.frame = PlotFrame(key: key, fam: fam, box: box, edge: edge, thick: thick, chunks: all, fresh: fresh, none: "", at: Date())
+                    self.keepFrame()
                 }
             }
         }

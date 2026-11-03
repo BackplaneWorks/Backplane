@@ -67,7 +67,7 @@ def HomeView.fab(+path: String, summary: String) -> D.Node:
 
 def HomeView.artifact(+u: U.Ui, kind: String, +path: String, +title: String, +summary: String, +row: J.Json) -> D.Node:
   match kind:
-    case "board": HomeView.named.section(u, path, title, [D.Dom.span("home-file", path), D.El{"div", "", [D.At{"class", "home-card-actions"}], [HomeView.view("board", "Board"), HomeView.view("3d", "3D")]}])
+    case "board": HomeView.named.section(u, path, title, [D.Dom.span("home-file", path), D.El{"div", "", [D.At{"class", "home-card-actions"}], List.append(&2, D.Node, [HomeView.view("board", "Board"), HomeView.view("3d", "3D")], D.Dom.when(PH.Home.can_split(U.Home.contents(u)), HomeView.view("split", "Split")))}])
     case "schematic": HomeView.section(title, [HomeView.view("schematic", "Open schematic"), D.Dom.button("", "home-bom", "", "Inspect components in the existing BOM viewer", "Inspect BOM")])
     case "drc": HomeView.check(title, path, summary)
     case "erc": HomeView.check(title, path, summary)
@@ -88,7 +88,7 @@ def HomeView.panels(+u: U.Ui, ps: List<&2, PH.Panel>, +c: J.Json, +embedded: Boo
   match ps:
     case Nil{}: Nil{}
     case PH.Panel{+k, p, t, s} <> rest:
-      List.append(&2, D.Node, HomeView.panel.keep(u, Bool.or(String.eq(k, "intent"), Bool.and(embedded, String.eq(k, "board"))), PH.Panel{k, p, t, s}, c), HomeView.panels(u, rest, c, embedded))
+      List.append(&2, D.Node, HomeView.panel.keep(u, Bool.or(String.eq(k, "intent"), Bool.and(embedded, Bool.or(String.eq(k, "board"), String.eq(k, "schematic")))), PH.Panel{k, p, t, s}, c), HomeView.panels(u, rest, c, embedded))
 
 def HomeView.thread(+u: U.Ui, +t: M.Thread) -> D.Node:
   match t:
@@ -153,7 +153,7 @@ def HomeView.more(+u: U.Ui, +c: J.Json) -> List<&2, D.Node>:
 # Use the existing one-button-high control row. New thread defaults are edited
 # by the existing agent Settings page; no model RPC targets a project owner.
 def HomeView.composer(+u: U.Ui, +project: String) -> D.Node:
-  D.El{"div", "composer", [D.At{"class", "composer home-composer"}], [
+  D.El{"div", "composer", [D.At{"class", "composer home-composer"}, D.At{"data-home-composer", "1"}], [
     D.El{"textarea", "composer-field", [D.At{"id", "composer"}, D.At{"aria-label", "Start a thread about this project"}, D.At{"placeholder", "Start a thread about this project…"}, D.At{"value", U.Ui.draft_text(u)}, D.At{"data-enter", "send"}, D.On{"input", "draft"}], Nil{}},
     CB.ComposerBar.node([D.Dom.button("model-chip", "settings-page", "agents", "Choose defaults for new threads", "New thread defaults"),
       CB.ComposerBar.more([D.Dom.button("", "new-thread", project, "Create an empty thread", "Empty thread")]),
@@ -198,14 +198,23 @@ def HomeView.intent.shown(has: Bool, +u: U.Ui, +c: J.Json) -> List<&2, D.Node>:
     case False{}: HomeView.intent.edit(String.eq(U.Ui.scratch(u, "@home.edit:" ++ U.Ui.sel(u)), "1"), u)
 
 # The home viewer offers only destinations backed by this contents snapshot.
+def HomeView.viewer.tab(+u: U.Ui, +kind: String, +label: String) -> D.Node:
+  +active = String.eq(U.Ui.view_get(u, "view.kind"), kind)
+  D.El{"button", "", [D.At{"class", Bool.pick(String, active, "tab on", "tab")}, D.At{"aria-pressed", Bool.pick(String, active, "true", "false")},
+    D.At{"data-value", kind}, D.On{"click", "home-view"}], [D.Txt{label}]}
+
 def HomeView.viewer.tabs(+u: U.Ui) -> D.Node:
   +c = U.Home.contents(u)
   D.El{"nav", "", [D.At{"class", "viewer-tabs"}], List.concat(&2, D.Node, [
-    D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "board"))), HomeView.view("board", "Board")),
-    D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "schematic"))), HomeView.view("schematic", "Schematic")),
-    D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "board"))), HomeView.view("3d", "3D")),
+    D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "board"))), HomeView.viewer.tab(u, "board", "Board")),
+    D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "schematic"))), HomeView.viewer.tab(u, "schematic", "Schematic")),
+    D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "board"))), HomeView.viewer.tab(u, "3d", "3D")),
+    D.Dom.when(PH.Home.can_split(c), HomeView.viewer.tab(u, "split", "Split")),
+    D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "schematic"))), D.Dom.button("", "home-bom", "", "Inspect components in the existing BOM viewer", "BOM")),
     D.Dom.when(Bool.not(String.is_empty(PH.Home.path(c, "mech"))), D.Dom.button("", "home-model", PH.Home.path(c, "mech"), "Open saved mechanical part", "Mech")),
-    [D.Dom.button("", "panel", "", "Close viewer", "Close")]])}
+    [D.Dom.button("", "home-viewer-size", Bool.pick(String, String.eq(U.Ui.scratch(u, "@home.viewer.full:" ++ U.Ui.sel(u)), "1"), "", "1"),
+      "Keep this saved view and camera while changing its size", Bool.pick(String, String.eq(U.Ui.scratch(u, "@home.viewer.full:" ++ U.Ui.sel(u)), "1"), "Back to project", "Open viewer")),
+     D.Dom.button("", "panel", "", "Close viewer", "Close")]])}
 
 def HomeView.price(shown: Bool, +price: J.Json) -> List<&2, D.Node>:
   match shown:
@@ -230,8 +239,13 @@ def HomeView.warning(+u: U.Ui) -> String:
 
 def HomeView.grid(+u: U.Ui, +project: String, +c: J.Json, +viewer: List<&2, D.Node>) -> D.Node:
   +generic = List.append(&2, D.Node, HomeView.intent.shown(Bool.not(String.is_empty(PH.Home.path(c, "intent"))), u, c), [HomeView.thread.card(u, project)])
-  D.El{"div", "", [D.At{"class", "home-grid"}],
-    List.concat(&2, D.Node, [HomeView.document(u), HomeView.price(Bool.and(Bool.not(String.is_empty(PH.Home.path(c, "fab"))), Maybe.is_some(&2, J.Json, J.Json.get(c, "price"))), J.Json.get_obj(c, "price")), Bool.pick(List<&2, D.Node>, List.is_empty(&2, D.Node, viewer), Nil{}, [D.El{"section", "home-live-viewer", [D.At{"class", "home-live-viewer"}], D.El{"h2", "", Nil{}, [HomeView.viewer.title(u, c)]} <> viewer}]), generic, HomeView.panels(u, PH.Home.panels(c), c, Bool.not(List.is_empty(&2, D.Node, viewer)))])}
+  +embedded = Bool.not(List.is_empty(&2, D.Node, viewer))
+  +details: D.Node = D.El{"div", "home-details", [D.At{"id", "home-details"}, D.At{"class", "home-grid home-details"}],
+    List.concat(&2, D.Node, [HomeView.document(u), HomeView.price(Bool.and(Bool.not(String.is_empty(PH.Home.path(c, "fab"))), Maybe.is_some(&2, J.Json, J.Json.get(c, "price"))), J.Json.get_obj(c, "price")), generic, HomeView.panels(u, PH.Home.panels(c), c, embedded)])}
+  D.El{"div", "home-layout", [D.At{"class", "home-layout"}, D.At{"data-split-project", project}], List.append(&2, D.Node,
+    Bool.pick(List<&2, D.Node>, embedded,
+      [D.El{"section", "home-live-viewer", [D.At{"id", "home-live-viewer"}, D.At{"class", "home-live-viewer"}], D.El{"h2", "", Nil{}, [HomeView.viewer.title(u, c)]} <> viewer},
+       D.El{"div", "home-resize", [D.At{"class", "home-resize combo-resize"}, D.At{"data-project-split", "home"}, D.At{"role", "separator"}, D.At{"tabindex", "0"}, D.At{"aria-label", "Resize viewer and project details"}, D.At{"aria-controls", "home-live-viewer home-details"}, D.At{"data-first-label", "Viewer"}, D.At{"data-second-label", "Project details"}], Nil{}}], Nil{}), [details])}
 
 def HomeView.scroll(+u: U.Ui, +project: String, +c: J.Json, viewer: List<&2, D.Node>) -> D.Node:
   D.El{"div", "", [D.At{"class", "home-scroll"}], [
@@ -240,7 +254,8 @@ def HomeView.scroll(+u: U.Ui, +project: String, +c: J.Json, viewer: List<&2, D.N
 
 def HomeView.node.picker(+u: U.Ui, viewer: List<&2, D.Node>, picker: List<&2, D.Node>) -> D.Node:
   +project = PH.Home.project(U.Ui.sel(u))
-  D.El{"main", "project-home", [D.At{"class", "thread-view project-home"}, D.At{"data-project-home", project}], [
+  D.El{"main", "project-home", [D.At{"class", "thread-view project-home"}, D.At{"data-project-home", project}, D.At{"data-thread", U.Ui.sel(u)},
+    D.At{"data-home-viewer-full", Bool.pick(String, Bool.and(U.Home.viewer.allowed(u), String.eq(U.Ui.scratch(u, "@home.viewer.full:" ++ U.Ui.sel(u)), "1")), "1", "0")}], [
     HomeView.header(u, project), D.El{"div", "", [D.At{"class", "home-icon-picker"}], picker}, HomeView.scroll(u, project, U.Home.contents(u), viewer), HomeView.composer(u, project)]}
 
 def HomeView.node(+u: U.Ui, viewer: List<&2, D.Node>) -> D.Node:

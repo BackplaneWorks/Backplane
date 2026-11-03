@@ -47,6 +47,17 @@ def Home.find(rows: List<&2, J.Json>, +kind: String) -> String:
 def Home.path(contents: J.Json, kind: String) -> String:
   Home.find(J.Json.elems(J.Json.get_obj(contents, "artifacts")), kind)
 
+def Home.can_split(+contents: J.Json) -> Bool:
+  Bool.and(Bool.not(String.is_empty(Home.path(contents, "board"))), Bool.not(String.is_empty(Home.path(contents, "schematic"))))
+
+# A combined viewer always anchors its board and its explicit root schematic
+# in this saved snapshot, even when their filenames differ.
+def Home.view_path(+contents: J.Json, kind: String) -> String:
+  match kind:
+    case "split": Bool.pick(String, Home.can_split(contents), Home.path(contents, "board"), "")
+    case "3d": Home.path(contents, "board")
+    case _: Home.path(contents, kind)
+
 # Message ids used as durable creation keys must also be safe path segments.
 def Home.token.chars(s: String) -> Bool:
   match s:

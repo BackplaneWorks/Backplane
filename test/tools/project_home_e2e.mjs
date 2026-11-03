@@ -73,11 +73,33 @@ try{
  await open('fixture-project');await page.getByRole('heading',{name:'Fab readiness',exact:true}).waitFor();
  await page.getByText('1 errors · 2 warnings · 1 unconnected',{exact:true}).waitFor();
  await page.locator('main .home-live-viewer .viewer').waitFor();check('saved board mounts lazily inside the project home',true);
+ check('saved board starts in the shared 3D viewer',await page.locator('main .viewer[class~="3d"] #solid').count()===1);
+ await click('home-view','board');await page.locator('main .viewer.board').waitFor();
  await page.waitForFunction(()=>{const c=document.querySelector('main .home-live-viewer canvas.plot2d');if(!c?.width||!c.height)return false;const ctx=c.getContext('2d');if(!ctx)return false;const d=ctx.getImageData(0,0,c.width,c.height).data;for(let i=0;i<d.length;i+=16){const r=d[i],g=d[i+1],b=d[i+2];if(r>110&&r>g*1.35&&r>b*1.35||g>100&&g>r*1.35&&g>b*1.35||r>130&&g>110&&b<75)return true;}return false;},null,{timeout:45000,polling:250});
  check('saved board geometry is rendered rather than a loading placeholder',true);
  check('opening a project creates no conversation',fixture.evidence().threads.length===initialThreads);
  check('board/schematic/DRC/ERC/mech/readiness controls are present',await page.locator('main [data-on-click="home-model"]').count()>=1&&await page.locator('main [data-on-click="home-bom"]').count()===1);
- const composer=page.locator('#composer');await composer.fill('Keep this draft through every name edit.');
+ const composer=page.locator('#composer');
+ await composer.click();await composer.pressSequentially('Typing works on the project home.',{delay:30});
+ check('real keystrokes reach the project composer',await composer.inputValue()==='Typing works on the project home.');
+ await page.reload();await ready();await page.locator('main .home-live-viewer .viewer').waitFor();
+ check('reload preserves the locally typed draft',await composer.inputValue()==='Typing works on the project home.');
+ check('embedded viewer has one schematic destination',await page.locator('main [data-on-click="home-view"][data-value="schematic"]').count()===1);
+ await click('home-view','split');await page.locator('main .viewer.split .combo').waitFor();
+ check('Split exposes schematic, board and 3D panes',await page.locator('main .combo-pane').count()===3);
+ const splitSources=await page.locator('main .combo canvas').evaluateAll(ns=>ns.map(n=>n.dataset.key));
+ check('Split uses this project canonical board and schematic',splitSources.some(k=>k.endsWith('/boards/ui/ui.kicad_pcb'))&&splitSources.some(k=>k.endsWith('/boards/ui/ui.kicad_sch')));
+ await click('home-view','3d');await page.locator('main .viewer[class~="3d"] #solid').waitFor();
+ const expanded=await page.locator('main .viewer').boundingBox(), available=await page.locator('main .home-live-viewer').boundingBox();
+ check('3D viewer uses the available project width and has room to orbit',Math.abs(expanded.width-available.width)<3&&expanded.height>=440);
+ for(const width of [2048,390]) {
+  await page.setViewportSize({width,height:1000});
+  const bounds=await page.locator('main .viewer').boundingBox();
+  const area=await page.locator('main .home-live-viewer').boundingBox();
+  check('3D viewer fills its project area at '+width+' px',bounds.height>=360&&bounds.width<=width&&Math.abs(bounds.width-area.width)<3);
+ }
+ await page.setViewportSize({width:1280,height:1000});await click('home-view','board');await page.locator('main .viewer.board').waitFor();
+ await composer.fill('Keep this draft through every name edit.');
  async function rename(kind,id,title,save=true){
   await page.evaluate(({kind,id})=>{const el=[...document.querySelectorAll('main [data-on-click="home-rename"]')].find(n=>{const v=JSON.parse(n.dataset.value);return v.kind===kind&&v.id===id});if(!el)throw Error('Missing inline name control '+kind);el.click();},{kind,id});
   const input=page.getByRole('textbox',{name:'Display name',exact:true});await input.waitFor();await input.fill(title);await input.press(save?'Enter':'Escape');await input.waitFor({state:'detached'});

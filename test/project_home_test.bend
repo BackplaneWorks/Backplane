@@ -12,6 +12,7 @@ import ../src/web/presentation.bend as WP
 import ../src/web/dom.bend as D
 import ../src/mobile/screen.bend as MB
 import ../src/mobile/thin.bend as MT
+import ../src/mobile/view.bend as MV
 import ../src/server/thin-actor.bend as A
 
 # Pure decisions only: no installed hub, provider, filesystem or CAD process.
@@ -47,7 +48,10 @@ def artifact(+kind: String, path: String) -> J.Json:
   J.Json.obj([J.KV{"kind", J.Str{kind}}, J.KV{"path", J.Str{path}}, J.KV{"title", J.Str{kind}}, J.KV{"summary", J.Str{"Saved text"}}])
 
 def home() -> U.Ui:
-  snapshot(ui(), "p", [artifact("board", "/tmp/p.kicad_pcb"), artifact("schematic", "/tmp/p.kicad_sch"), artifact("mech", "/tmp/mech/a.step"), artifact("intent", "/tmp/.backplane/intent.md")])
+  snapshot(ui(), "p", [artifact("board", "/tmp/project-home-test/boards/logic.kicad_pcb"), artifact("schematic", "/tmp/project-home-test/drawings/control.kicad_sch"), artifact("mech", "/tmp/mech/a.step"), artifact("intent", "/tmp/.backplane/intent.md")])
+
+def expanded() -> U.Ui:
+  U.Act.ui(U.Ui.act(U.Act.ui(U.Ui.act(U.Ui.scratch_set(home(), "project-home-p", "Exact retained draft"), "home-view", "3d")), "home-viewer-size", "1"))
 
 def first_send(cs: List<&2, U.Cmd>) -> String:
   match cs:
@@ -79,13 +83,29 @@ def mutation(cs: List<&2, U.Cmd>) -> Bool:
       Bool.or(Bool.or(String.eq(m, "project.rename"), Bool.or(String.eq(m, "thread.rename"), String.eq(m, "setting.set"))), mutation(rest))
     case _ <> rest: mutation(rest)
 
+def kicad_out(outs: List<&2, H.Out>) -> String:
+  match outs:
+    case Nil{}: ""
+    case H.Git{_, _, "kicad", _, cwd, _, _} <> _: cwd
+    case _ <> rest: kicad_out(rest)
+
+def kicad_step(step: H.Step) -> String:
+  match step:
+    case H.Step{_, outs}: kicad_out(outs)
+
+def kicad_root(+u: U.Ui) -> String:
+  kicad_step(H.Hub.nav(3n, U.Ui.state(u), 30n, 0, "open", J.Json.get_obj(sent(U.Ui.act(u, "kicad-open", "")), "p"), "kicad.open"))
+
+def native_split() -> U.Ui:
+  U.Act.ui(MV.View.open(home(), "split"))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("project route round trip", PH.Home.project(PH.Home.owner("p")), "p")
     C.Check.str("absent artifact has no panel", Nat.show(List.length(&2, PH.Panel, PH.Home.panel("board", "", "Board", ""))), "0")
     C.Check.str("empty snapshot has no CAD control", Bool.show(String.contains(web(ui()), "Open schematic")), "False")
     C.Check.str("foreign project snapshot is never displayed", Bool.show(String.contains(web(snapshot(ui(), "q", [artifact("schematic", "/tmp/q.kicad_sch")])), "Open schematic")), "False")
-    C.Check.str("saved schematic exposes viewer", Bool.show(String.contains(web(snapshot(ui(), "p", [artifact("schematic", "/tmp/p.kicad_sch")])), "Open schematic")), "True")
+    C.Check.str("saved schematic exposes viewer", Bool.show(String.contains(web(snapshot(ui(), "p", [artifact("schematic", "/tmp/project-home-test/drawings/control.kicad_sch")])), "Open schematic")), "True")
     C.Check.str("opening home creates no canonical conversation", Nat.show(List.length(&2, M.Change, H.Queue.changes(H.Home.request(state(), 0, "read", params())))), "0")
     C.Check.str("first send creates one exact human message", Nat.show(posted(H.Queue.changes(created()))), "1")
     C.Check.str("first send owns its project", ST.Tree.project(H.Hub.thread(after(), "home-message-1")), "p")
@@ -97,8 +117,17 @@ def main() -> IO(Unit):
     C.Check.str("native home is not a fabricated thread", J.Json.show(MB.Mob.focus.thread(I.En{}, True{}, ui(), PH.Home.owner("p"))), "null")
 
     C.Check.str("refresh performs the project contents RPC", J.Json.get_str(sent(U.Ui.act(home(), "home-refresh", "")), "m", ""), "project.home")
-    C.Check.str("board control opens exact saved board", U.Ui.view_get(U.Act.ui(U.Ui.act(home(), "home-view", "board")), "view.path"), "/tmp/p.kicad_pcb")
-    C.Check.str("schematic control opens exact saved schematic", U.Ui.view_get(U.Act.ui(U.Ui.act(home(), "home-view", "schematic")), "view.path"), "/tmp/p.kicad_sch")
+    C.Check.str("board control opens exact saved board", U.Ui.view_get(U.Act.ui(U.Ui.act(home(), "home-view", "board")), "view.path"), "/tmp/project-home-test/boards/logic.kicad_pcb")
+    C.Check.str("schematic control opens exact saved schematic", U.Ui.view_get(U.Act.ui(U.Ui.act(home(), "home-view", "schematic")), "view.path"), "/tmp/project-home-test/drawings/control.kicad_sch")
+    C.Check.str("split control opens saved board", U.Ui.view_get(U.Act.ui(U.Ui.act(home(), "home-view", "split")), "view.path"), "/tmp/project-home-test/boards/logic.kicad_pcb")
+    C.Check.str("split control selects combined viewer", U.Ui.view_get(U.Act.ui(U.Ui.act(home(), "home-view", "split")), "view.kind"), "split")
+    C.Check.str("split schematic uses the snapshot's exact path", U.Split.sheet(U.Act.ui(U.Ui.act(home(), "home-view", "split"))), "/tmp/project-home-test/drawings/control.kicad_sch")
+    C.Check.str("split requires both saved documents", PH.Home.view_path(J.Json.obj([J.KV{"artifacts", J.Json.arr([artifact("board", "/tmp/project-home-test/boards/logic.kicad_pcb")])}]), "split"), "")
+    C.Check.str("home composer carries its keyboard owner", Bool.show(String.contains(web(home()), "data-thread")), "True")
+    C.Check.str("KiCad home launch uses canonical project root", kicad_root(home()), "/tmp/project-home-test")
+    C.Check.str("native split watches the exact saved board", U.Ui.view_get(native_split(), "view.path"), "/tmp/project-home-test/boards/logic.kicad_pcb")
+    C.Check.str("native split has all three renderer panes", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(MV.View.json(I.En{}, native_split(), J.Null{}), "panes")))), "3")
+    C.Check.str("native CAD action uses exact saved schematic", MV.View.file(U.Act.ui(MV.View.open(home(), "schematic"))), "/tmp/project-home-test/drawings/control.kicad_sch")
     C.Check.str("Mech control opens exact saved model", U.Ui.view_get(U.Act.ui(U.Ui.act(home(), "home-model", "/tmp/mech/a.step")), "view.path"), "/tmp/mech/a.step")
     C.Check.str("thread composer launches the atomic project RPC", J.Json.get_str(sent(U.Ui.act(U.Ui.scratch_set(home(), "project-home-p", "A new question"), "home-start", "")), "m", ""), "project.start")
     C.Check.str("native send captures exact tap text", param("home-start", "Exact tap text", "text"), "Exact tap text")
@@ -129,6 +158,13 @@ def main() -> IO(Unit):
     C.Check.str("inline inputs carry Enter and Escape handlers", Bool.show(String.contains(web(naming("project", "p")), "rename-no")), "True")
 
     C.Check.str("default saved board survives the next stale client panel input", Bool.show(U.Ui.panel(A.Actor.merge(home(), U.Home.viewer.default(U.Ui.info_set(home(), "local.home.renderer", "web")), True{}, "project-home-p", False{}))), "True")
+    C.Check.str("home opens the real 3D mode by default", U.Ui.view_get(U.Home.viewer.default(U.Ui.info_set(home(), "local.home.renderer", "web")), "view.kind"), "3d")
+    C.Check.str("Open viewer retains the project owner", U.Ui.sel(expanded()), "project-home-p")
+    C.Check.str("Open viewer retains the saved source", U.Ui.view_get(expanded(), "view.path"), "/tmp/project-home-test/boards/logic.kicad_pcb")
+    C.Check.str("Open viewer retains the exact draft", U.Ui.draft_text(expanded()), "Exact retained draft")
+    C.Check.str("Open viewer uses a per-project presentation state", U.Ui.scratch(expanded(), "@home.viewer.full:project-home-p"), "1")
+    C.Check.str("Back to project resets only the presentation", U.Ui.scratch(U.Act.ui(U.Ui.act(expanded(), "home-viewer-size", "")), "@home.viewer.full:project-home-p"), "")
+    C.Check.str("missing artifact cannot be expanded", U.Ui.scratch(U.Act.ui(U.Ui.act(ui(), "home-viewer-size", "1")), "@home.viewer.full:project-home-p"), "")
     C.Check.str("common Send in a home starts a real project thread", J.Json.get_str(sent(U.Ui.act(U.Ui.scratch_set(home(), "project-home-p", "Keyboard send"), "send", "")), "m", ""), "project.start")
 
     C.Check.str("bounded home preview is never sent as the first message", Bool.show(String.eq(J.Json.get_str(sent(U.Ui.act(U.Ui.scratch_set(U.Ui.scratch_set(home(), "project-home-p", "head … tail"), "@draft.bound", "200000 hash"), "send", "")), "m", ""), "project.start")), "False")

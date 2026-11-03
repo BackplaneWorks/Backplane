@@ -10,8 +10,9 @@ function harness() {
   let serial = 0, draws = 0;
   const context = {
     AbortController,
-    performance: { now: () => 100 }, setTimeout() {},
+    performance: { now: () => 100 }, setTimeout() {}, clearTimeout() {}, cancelIdleCallback() {},
     requestAnimationFrame(fn) { const id = ++serial; frames.set(id, fn); return id; },
+    cancelAnimationFrame(id) { frames.delete(id); },
     setInterval(fn) { const id = ++serial; timers.set(id, fn); return id; },
     clearInterval(id) { timers.delete(id); },
     ResizeObserver: class {
@@ -19,7 +20,7 @@ function harness() {
       observe() { this.active = true; }
       disconnect() { this.active = false; }
     },
-    window: { devicePixelRatio: 1 },
+    window: { devicePixelRatio: 1, matchMedia: () => ({ addEventListener() {}, removeEventListener() {} }) },
     document: { documentElement: { lang: 'en' }, addEventListener() {}, querySelector: () => null, querySelectorAll: () => [] },
     getComputedStyle: () => ({ fontFamily: 'monospace' }),
     App: { plot_stats: () => '', plot_loading: () => '' }, P: {}, wheelKind: () => 'wheel',
@@ -39,7 +40,8 @@ function harness() {
   }
   return { ...context.plot, canvas, frames, timers, observers, draws: () => draws,
     flush() { const pending = [...frames.values()]; frames.clear(); for (const fn of pending) fn(); },
-    receive(c) { context.plot.got({ key: c.dataset.key, cs: [], box: [0, 0, 100, 100] }); },
+    receive(c, box = [0, 0, 100, 100]) { context.plot.got({ key: c.dataset.key, cs: [], box }); },
+    resize(c, width, height) { const v = context.plot.views.get(c);v.resize.fn([{ contentRect: { width, height } }]); },
     move(c) { c.handlers.wheel({ preventDefault() {}, deltaX: 0, deltaY: -300, deltaMode: 0, timeStamp: 1, clientX: 300, clientY: 200 }); },
   };
 }
@@ -93,4 +95,42 @@ test('a remounted canvas has only its current view’s gesture handlers', () => 
   h.mount([c]); h.move(c);
   assert.equal(old.scale, before);
   assert.notEqual(h.views.get(c).scale, before);
+});
+
+test('a schematic reopens fitted to the entire sheet rather than a parked zoom', () => {
+  const h = harness(), box = [-100, -200, 2870, 1900], c = h.canvas('project-home-A', '1|project|sheet');
+  h.mount([c]);h.receive(c, box);h.move(c);
+  assert.equal(h.views.get(c).touched, true);
+  h.mount([]);
+  const reopened = h.canvas('project-home-A', c.dataset.key, 420, 300);
+  h.mount([reopened]);
+  const v = h.views.get(reopened);
+  assert.equal(v.touched, false);
+  assert.equal(v.scale, .9 * Math.min(420 / 2970, 300 / 2100));
+  assert.deepEqual(pose(v).slice(1), [1385, 850]);
+});
+
+test('resizing a schematic fits every sheet corner; same-size reports preserve a manual zoom', () => {
+  const h = harness(), c = h.canvas('A', '1|project|sheet'), box = [-100, -200, 2870, 1900];
+  h.mount([c]);h.receive(c, box);h.move(c);
+  const v = h.views.get(c), zoomed = pose(v);
+  h.resize(c, 900, 600);assert.deepEqual(pose(v), zoomed);
+  for (const [w, height] of [[280, 480], [1400, 450]]) {
+    h.resize(c, w, height);
+    for (const [x, y] of [[box[0], box[1]], [box[2], box[3]]]) {
+      assert(x * v.scale + v.ox >= 0 && x * v.scale + v.ox <= w);
+      assert(y * v.scale + v.oy >= 0 && y * v.scale + v.oy <= height);
+    }
+    assert.equal(v.touched, false);h.move(c);
+  }
+});
+
+test('a hidden schematic waits for a positive viewport and a board resize keeps its inspected point', () => {
+  const h = harness(), c = h.canvas('A', '1|project|sheet', 0, 0);
+  h.mount([c]);h.receive(c);h.resize(c, 0, 0);h.resize(c, 360, 500);
+  const v = h.views.get(c);assert(Number.isFinite(v.scale));assert.equal(v.scale, 3.24);
+  h.mount([]);
+  const board = h.canvas();h.mount([board]);h.receive(board);h.move(board);
+  const b = h.views.get(board), inspected = pose(b);h.resize(board, 400, 300);
+  assert.deepEqual(pose(b), inspected);
 });
