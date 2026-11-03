@@ -769,6 +769,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 /* Asks: approvals, questions, proposed plans */
 .asks { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
 .asks:empty { display: none; }
+.gone-note { border: 1px solid var(--warn); padding: 10px 12px; }
+.gone-note p { color: var(--dim); margin: 6px 0 10px; overflow-wrap: anywhere; }
 .ask { border: 1px solid var(--st-need); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 860px; }
 .ask-head { color: var(--st-need); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .ask-detail { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
@@ -1059,6 +1061,9 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 
 /* Settings and the machine switch stay above the project and bot lists; a row's menu opens at the pointer */
 .project.quiet .project-head { opacity: 0.55; }
+/* a project whose folder is gone (view.bend's View.gone.*) */
+.project.missing .project-head .name { opacity: 0.6; text-decoration: line-through; text-decoration-color: var(--faint); }
+.project-head .missing-note { flex: none; font-size: 10px; color: var(--warn); text-transform: none; letter-spacing: 0; margin-right: 4px; }
 .thread.faded { opacity: 0.5; }
 .project.active .thread .ago { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-tools { position: sticky; top: 52px; z-index: 5; display: flex; align-items: center; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; flex-shrink: 0; }
