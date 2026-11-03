@@ -8,7 +8,13 @@ shift
 [ "${1:-}" = -- ] || { echo 'expected -- before command' >&2; exit 2; }
 shift
 [ "$#" -gt 0 ] || exit 2
-url=${BACKPLANE_LOCK_URL:-http://127.0.0.1:${BACKPLANE_PORT:-3787}}
+# The hub of this home (BACKPLANE_HOME, which the hub gives the programs it
+# starts, else ~/.backplane-bend): its port from its hub.lock, its pairing
+# token from its token file (sent on curl's stdin, never on a command line)
+home=${BACKPLANE_HOME:-${HOME:-/tmp}/.backplane-bend}
+lockport=$(sed -n 's/^[0-9][0-9]* \([0-9][0-9]*\) flock.*/\1/p' "$home/hub.lock" 2>/dev/null) || lockport=
+token=$(cat "$home/token" 2>/dev/null) || token=
+url=${BACKPLANE_LOCK_URL:-http://127.0.0.1:${BACKPLANE_PORT:-${lockport:-3787}}}
 case "$url" in http://127.0.0.1:*|http://localhost:*) ;; *) echo 'lock URL must use loopback HTTP' >&2; exit 2 ;; esac
 host=$(hostname | tr -cd 'A-Za-z0-9_.-')
 # Include a nonce: a reused PID must never inherit a killed helper's lease.
@@ -33,7 +39,7 @@ remove_nonce() {
 }
 holder="pid:$$@$host:${nonce##*/}"
 body="{\"name\":\"$name\",\"holder\":\"$holder\",\"note\":\"bp-lock.sh\",\"wait\":true}"
-post() { curl -fsS --connect-timeout 2 --max-time 35 -H 'Content-Type: application/json' -d "$body" "$url/lock/$1"; }
+post() { printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --connect-timeout 2 --max-time 35 -H @- -H 'Content-Type: application/json' -d "$body" "$url/lock/$1"; }
 held() { printf '%s' "$1" | tr -d ' \n\r\t' | grep -q '"held":true'; }
 if ! answer=$(post acquire 2>/dev/null); then
   remove_nonce
