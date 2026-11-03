@@ -232,8 +232,8 @@ tour.body.keys.phone = 他のサービスのAPIキーは、ハブのマシン上
 tour.body.keys.desktop = 他のサービスのAPIキーは、ハブのマシン上のファイルに保管され、そこで動くエージェントなら読める可能性があります。出力しないよう指示してありますが、強制はされません。音声入力にはOpenAIキーが必要で、設定の「音声」で入力します。
 tour.body.machines.phone = ホームフォルダごとに1つのハブが動きます。コンピューター上のハブはTailscale経由で互いを見つけ、プロジェクトとスレッドを裏で同期するので、どのハブからもすべて見えます。読み込み中のプロジェクトは薄く表示され、「同期中」と出ます。メッセージで>desktop:と書くと、desktopというマシンのスレッドを指します。「ハブ」ボタンには、このスマートフォンがペアリングしたハブが並びます。このスマートフォンも同じtailnetのTailscaleが必要です。
 tour.body.machines.desktop = ホームフォルダごとに1つのハブが動きます。Backplaneの起動時にTailscaleにサインインしていれば、ハブはtailnetで待ち受け、2分おきにオンラインの他のマシンでBackplaneが動いているか確認します。Tailscaleが自分のマシンであることを保証するので、ハブは自動でリンクし、プロジェクトとスレッドを裏でこのサイドバーに同期します。切り替えは不要です。読み込み中のプロジェクトは薄く表示され、「同期中」と出ますが、残りはその間も使えます。メッセージで>desktop:と書くと、desktopというマシンのスレッドを指します。設定の「自分のマシン」には各マシンが表示され、マシンごとに同期をオフにできます。設定にはTailscaleの状態も表示されます：オン、未接続（サインインしてからBackplaneを再起動）、オフ（--no-tailscaleで起動）。
-tour.body.phones.phone = ハブのコンピューターで、設定の「ペアリングリンク」から「QRコード」を開きます。こちらでは「ハブ」の「QRコードをスキャン」でペアリングします。このスマートフォンも同じtailnetのTailscaleが必要です。ブラウザでもハブのウェブアドレスを開けます。
-tour.body.phones.desktop = スマートフォンをペアリングするには、Tailscaleをインストールして同じtailnetに参加します。次に設定の「ペアリングリンク」から「QRコード」を開き、Backplaneアプリかスマートフォンのカメラで読み取ります。リンクがあるときは設定に表示されます。tailnet上の端末のブラウザでも、このハブのウェブアドレスを開けます。
+tour.body.phones.phone = ハブのコンピューターで、設定の「Devices」から「Add a device」を開きます。こちらでは「ハブ」の「QRコードをスキャン」でペアリングします。このスマートフォンも同じtailnetのTailscaleが必要です。ブラウザでもハブのウェブアドレスを開けます。
+tour.body.phones.desktop = スマートフォンをペアリングするには、Tailscaleをインストールして同じtailnetに参加します。次に設定の「Devices」で「Add a device」を押し、そのQRコードをBackplaneアプリかスマートフォンのカメラで読み取るか、短いコードを入力します。招待は1回だけ使えます。tailnet上の端末のブラウザでも、このハブのウェブアドレスを開けます。
 # ja? uberbot term
 tour.body.uber.have.phone = {name}が自分のメインボットです。一覧の先頭でタップすると、すべてのステータスを確認できます。
 # ja? uberbot term
@@ -1153,8 +1153,8 @@ native.common.ok = OK
 native.common.title = タイトル
 native.pair.title = ハブとペアリング
 native.pair.scan = QRコードを読み取る
-native.pair.computer = パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。
-native.pair.computer.android = パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。
+native.pair.computer = パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開きます。
+native.pair.computer.android = パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開くか、リンクを貼り付けます。
 native.pair.instructions = QRコードを読み取るか、Backplaneの「設定」→「ペアリングリンク」にあるtailnetリンクを貼り付けます。
 native.pair.connect = 接続
 native.pair.paired = ペアリング済み
