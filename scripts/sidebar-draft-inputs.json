@@ -128,7 +128,7 @@
     "src/core/signal.bend": "c532b51dc417bb7d5b3368a99f812aa4a9ce890da97e2a1792d4e2769315066e",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
-    "src/core/stamp.bend": "65ab4ed3f26f023be1e76e47f4eec7e48a82eefc509b2f5366085ff1df4f140b",
+    "src/core/stamp.bend": "6c619ef54b9ca159dce7336d98dd86b47c72840924da723e3754a398cdb5e3b3",
     "src/core/star-nudge.bend": "8a8b5ce5e4ad2cc0035fb1ffe0dfe999d4bb15b6ecf15f60ea48a6dac71ba933",
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
@@ -179,6 +179,7 @@
     "src/web/allowance.bend": "4feae6cd71dcc76c98875476d0d20fb223008a7f5adad4008ec5851272e4818a",
     "src/web/bots.bend": "2e5a1a0a9c7f10e48c824d44b6da84ebb62abbe9922ef53ee6f16801f297352c",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
+    "src/web/composer-bar.bend": "fd6b6110ff409c090bf03f7ccbe64ed59f5474d548dfd804d8d1a0a441c1f863",
     "src/web/dom.bend": "6e0ddb26a372a07cf2af0bbccdae476087fb50d6e2af5da9c6f8d6b9cc1ca0b5",
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
     "src/web/list-windows.bend": "965be3f9f1a13e97dd7dc36a4f21827d51e1a666fc37d13a619ae66cf8584dcc",
@@ -190,7 +191,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "e432f70586043b89ab620c1fa15c6c7fb37b2e1c55103d3784330fa71b54575a"
+    "src/web/view.bend": "701642f71eaa524fb9d4bb41ee8d76ced9e84c75fdf4e3513708111b2d55084f"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -801,5 +802,21 @@
       "logSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
       "qualification": "All 24 full-output cases executed and passed on combined source. Earlier platform runtime checks were run before this unrelated-main rebase; not a claim of fresh platform binaries."
     }
+  },
+  "readerMenuPayloadReview": {
+    "base": "92ddc7e46ccab1ef281b30a5a993df91ea4dac5e",
+    "qualifiedSourceIdentity": "85f661be69158fa402f7016ca46e8dc558ecb5cb9fed336c20c0a01706b052f4",
+    "scope": "View workspace choices use one shared action/label/shortcut table; omit only menu-option decorative SVG children, preserve visible rail and opener icons. Add newly imported main777 composer-bar.bend to conservative closure: pure D.Node wrappers and content-independent layout strings; no Ui/session/model/draft readers, no image-key/filter/authority change. All previous scoped reviews retained.",
+    "addedDependencies": [
+      "src/web/composer-bar.bend"
+    ],
+    "changedDependencies": [
+      "src/web/view.bend"
+    ],
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "assertions": 24,
+    "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+    "work": "w-t1793604413-1188217-1319751",
+    "qualification": "Exact full-output24 passed including composer module; menu40 and compact37 also passed. Pin-only successor, no runtime or final-global-proof qualification."
   }
 }

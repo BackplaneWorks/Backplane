@@ -12,9 +12,11 @@ import Base
 # (server.bend's Models.present) do not count a block. Laws standin_*;
 # test test/cli_test.bend, end to end bun test/tools/onehub_e2e.ts.
 
-# the CLIs looked up on PATH (Antigravity runs from <home>/antigravity)
+# the CLIs looked up on PATH (Antigravity runs from <home>/antigravity);
+# every provider that runs one from PATH must be here, or a test hub with
+# no stand-in for it runs the real one
 def Standin.names() -> List<&2, String>:
-  ["claude", "codex", "grok", "muse", "pi", "omp"]
+  ["claude", "codex", "grok", "muse", "pi", "omp", "opencode"]
 
 def Standin.mark() -> String:
   "BACKPLANE-STANDIN-MISSING"
