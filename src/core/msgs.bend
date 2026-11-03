@@ -3303,16 +3303,16 @@ def T.native.pair.another(l: I.Loc) -> String:
 def T.native.pair.computer(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "On your computer: Backplane, Settings, Pairing link, QR code."
+      "On your computer: Backplane, Settings, Devices, Add a device."
     case I.Ja{}:
-      "パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。"
+      "パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開きます。"
 
 def T.native.pair.computer.android(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:"
+      "On your computer: Backplane, Settings, Devices, Add a device. Or paste the link:"
     case I.Ja{}:
-      "パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。"
+      "パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開くか、リンクを貼り付けます。"
 
 def T.native.pair.connect(l: I.Loc) -> String:
   match l:
@@ -7755,16 +7755,16 @@ def T.tour.body.machines.phone(l: I.Loc) -> String:
 def T.tour.body.phones.desktop(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "To pair a phone, install Tailscale on it and join the same tailnet. Then open Settings, Pairing link, QR code and scan it with the Backplane app or the phone's camera. Settings shows the link when Backplane has one. A browser on a tailnet device can open this hub's web address too."
+      "To pair a phone, install Tailscale on it and join the same tailnet. Then open Settings, Devices, Add a device and scan its QR code with the Backplane app or the phone's camera, or type its short code there. Each invitation works once. A browser on a tailnet device can open this hub's web address too."
     case I.Ja{}:
-      "スマートフォンをペアリングするには、Tailscaleをインストールして同じtailnetに参加します。次に設定の「ペアリングリンク」から「QRコード」を開き、Backplaneアプリかスマートフォンのカメラで読み取ります。リンクがあるときは設定に表示されます。tailnet上の端末のブラウザでも、このハブのウェブアドレスを開けます。"
+      "スマートフォンをペアリングするには、Tailscaleをインストールして同じtailnetに参加します。次に設定の「Devices」で「Add a device」を押し、そのQRコードをBackplaneアプリかスマートフォンのカメラで読み取るか、短いコードを入力します。招待は1回だけ使えます。tailnet上の端末のブラウザでも、このハブのウェブアドレスを開けます。"
 
 def T.tour.body.phones.phone(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "On the hub's computer open Settings, Pairing link, QR code. Here, Hubs, Scan QR code pairs it. This phone needs Tailscale on the same tailnet. A browser can open a hub's web address too."
+      "On the hub's computer open Settings, Devices, Add a device. Here, Hubs, Scan QR code pairs it. This phone needs Tailscale on the same tailnet. A browser can open a hub's web address too."
     case I.Ja{}:
-      "ハブのコンピューターで、設定の「ペアリングリンク」から「QRコード」を開きます。こちらでは「ハブ」の「QRコードをスキャン」でペアリングします。このスマートフォンも同じtailnetのTailscaleが必要です。ブラウザでもハブのウェブアドレスを開けます。"
+      "ハブのコンピューターで、設定の「Devices」から「Add a device」を開きます。こちらでは「ハブ」の「QRコードをスキャン」でペアリングします。このスマートフォンも同じtailnetのTailscaleが必要です。ブラウザでもハブのウェブアドレスを開けます。"
 
 def T.tour.body.projects.desktop(l: I.Loc) -> String:
   match l:

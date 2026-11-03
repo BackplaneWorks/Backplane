@@ -7,7 +7,8 @@ test('capability discovery uses same-origin credentials without URL tokens or bo
  let request;assert.deepEqual(await run(async(url,options)=>{request={url,options};return response(JSON.stringify(capability));}),{supported:true});assert.match(request.url,/^\/client\/capabilities\?bpProbe=[0-9a-f]{32}$/);assert.equal(request.options.credentials,'same-origin');assert.equal(request.options.cache,'no-store');assert.equal(request.options.headers,undefined);
 });
 test('missing/denied/invalid capability stays unsupported rather than choosing a legacy protocol',async()=>{
- for(const r of [response('',404),response('',401),response('',403),response('{}'),response('{')])assert.deepEqual(await run(async()=>r),{supported:false});
+ for(const r of [response('',404),response('{}'),response('{')])assert.deepEqual(await run(async()=>r),{supported:false});
+ for(const status of [401,403])assert.deepEqual(await run(async()=>response('',status)),{supported:false,unauthorized:true},'denied pairing remains distinguishable from unsupported protocol');
 });
 test('oversized headers or streaming bodies are rejected before validation',async()=>{
  const {discoverViews}=await import('../../src/web/thin-discovery.js');let validations=0;

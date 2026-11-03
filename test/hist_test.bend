@@ -12,6 +12,10 @@ import ../src/core/json.bend as J
 def item(+k: String, +sig: U32, +layer: U32) -> B.Item:
   B.Item{k, sig, layer, B.PSeg{B.Pt{0.0, 0.0}, B.Pt{1.0, 1.0}, 0.2}, k}
 
+# a copper pour's fill: a square of side w with a notch at (nx, 1) (a via's clearance)
+def fill(+k: String, +sig: U32, +w: F32, +nx: F32) -> B.Item:
+  B.Item{k, sig, 3, B.PPoly{[B.Pt{0.0, 0.0}, B.Pt{w, 0.0}, B.Pt{w, w}, B.Pt{nx, 1.0}, B.Pt{0.0, w}], 0.0, True{}}, "zone;net=GND"}
+
 def Show.items(xs: List<&2, B.Item>) -> String:
   match xs:
     case Nil{}:
@@ -236,6 +240,9 @@ def main() -> IO(Unit):
     C.Check.str("label", H.Hist.label(newest(), "a1"), "Bash  python place.py")
     C.Check.str("mark", Show.items(H.Hist.mark([item("a", 1, 3), item("b", 2, 3), item("c", 3, 5)], [item("b", 2, 3), item("c", 9, 5), item("d", 4, 1)])),
       "a@26 b@3 c~was@26 c@27 d@28 ")
+    C.Check.str("mark: a pour filled again around a moved via dims", Show.items(H.Hist.mark([fill("z", 1, 5.0, 2.0), item("v", 2, 3)], [fill("z", 7, 5.0, 3.0), item("v", 8, 3)])),
+      "v~was@26 v@27 z@3 ")
+    C.Check.str("mark: a pour that grew is marked", Show.items(H.Hist.mark([fill("z", 1, 5.0, 2.0)], [fill("z", 7, 6.0, 2.0)])), "z~was@26 z@27 ")
     C.Check.str("mark same", Nat.show(H.Mark.count(H.Hist.mark([item("a", 1, 3), item("b", 2, 3)], [item("b", 2, 3), item("a", 1, 3)]))), "0")
     C.Check.str("mark from nothing", Show.items(H.Hist.mark(Nil{}, [item("a", 1, 3)])), "a@28 ")
     C.Check.str("mark to nothing", Show.items(H.Hist.mark([item("a", 1, 3)], Nil{})), "a@26 ")

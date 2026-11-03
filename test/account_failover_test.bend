@@ -25,7 +25,7 @@ def inventory(ps: List<&2, J.Json>) -> String:
 def base(+p: String) -> M.State:
   M.State.replay([M.ProjectCreated{"p", "Fixture", "/tmp/account-failover", 1n},
     M.ThreadCreated{"t", "p", "Fixture", M.Local{}, "", "/tmp/account-failover", p, model(p), 1n},
-    M.SettingSet{"accounts.inventory", inventory([profile(p, "A", "95"), profile(p, "B", "40"), profile(p, "C", "80")]), 100n},
+    M.SettingSet{"accounts.inventory", inventory([profile(p, "A", "95"), profile(p, "B", "80"), profile(p, "C", "40")]), 100n},
     M.SettingSet{A.Accounts.binding.key("t", p), A.Accounts.binding.show("A", 1n), 1n},
     M.SettingSet{"account.default." ++ p, A.Accounts.binding.show("A", 1n), 1n},
     M.SettingSet{A.Accounts.session.key("t", p, "C", 1n), "native-C", 1n},
@@ -114,12 +114,39 @@ def pending_exit() -> M.State:
   +s = M.State.replay([M.AskOpened{"old-ask", "t", "approval", "Bash", "old actor approval", "", 110n}, M.WorkSet{"t", "bg", "bg-task\tworking", 110n}], base("codex"))
   M.State.replay(H.AccountFallback.pending.save(s, 120n, "t", FB.Limit{"codex", "Usage limit reached", 200n}, J.Null{}), s)
 
+# Incident reproduction: legacy Default has a cached weekly provider hold,
+# while a connected Claude_Backplane profile has no allowance reading yet.
+def legacy(+p: String) -> M.State:
+  M.State.replay([M.SettingSet{A.Accounts.binding.key("t", p), A.Accounts.binding.show("", 0n), 110n},
+    M.SettingSet{"accounts.inventory", inventory([A.Accounts.put(profile(p, "Claude_Backplane", "40"), "allowance", J.Null{})]), 110n},
+    M.SettingSet{FB.Limit.key(p), FB.Limit.json(FB.Limit{p, "Weekly limit reached", 200n}, 110n), 110n},
+    M.SettingSet{"fallback.on", "on", 110n}, M.SettingSet{"fallback.chain", p ++ "/" ++ model(p) ++ ",codex/gpt-6.1-sol", 110n}], base(p))
+
+def permille() -> J.Json:
+  A.Accounts.put(profile("claude", "normalized", "null"), "allowance", A.Accounts.parse("{\"provider\":\"claude\",\"state\":\"ok\",\"at\":100,\"windows\":[{\"scope\":\"shared\",\"used_permille\":125,\"resets_at\":200}]}"))
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    +legacyStep : H.Step = launch(legacy("claude"), 120n)
+    +legacyNext : M.State = fold(legacy("claude"), legacyStep)
+    C.Check.str("legacy cached quota tries named Claude before Codex", M.Thread.provider(H.Hub.thread(legacyNext, "t")), "claude")
+    C.Check.str("legacy cached quota selects connected unknown allowance account", selected(legacyNext, "claude"), "Claude_Backplane")
+    C.Check.str("legacy original request launches exactly once", Nat.show(starts(H.Step.outs_of(legacyStep))), "1")
+    C.Check.str("legacy native session never crosses account identities", M.Switch.sess(H.Hub.thread(legacyNext, "t")), "")
+    C.Check.str("legacy imported hold retains reset for restoration", Nat.show(F.Hold.reset(legacyNext, "claude", "", 0n)), "200")
+    C.Check.str("legacy restores default at reported reset", selected(fold(atrest(legacyNext), H.ProviderResume.tick(atrest(legacyNext), 200n)), "claude"), "")
+    C.Check.str("cross-provider direct guard still tries available same-provider account", M.Thread.provider(H.Hub.thread(fold(legacy("claude"), H.AccountFallback.cross(True{}, legacy("claude"), caps(), 120n, "t", "/tmp/account-failover", "request", "uuid")), "t")), "claude")
+    C.Check.str("normalized permille allowance ranks remaining correctly", Nat.show(U32.to_nat(Maybe.default(&2, U32, F.Usage.score(permille(), 120n, "sonnet"), 0))), "87500")
+    +zero : M.State = M.State.setting(base("claude"), "accounts.inventory", inventory([profile("claude", "empty", "100"), profile("claude", "ready", "20")]))
+    C.Check.str("fresh zero allowance account is excluded", pick(F.Pick.account(zero, 120n, "claude", "sonnet")), "ready")
+    C.Check.str("provider fallback gate refuses while a same-provider account is available", Bool.show(F.Pick.may_cross(zero, 120n, "claude", "sonnet")), "False")
+    C.Check.str("provider fallback gate opens after all reported allowances exhausted", Bool.show(F.Pick.may_cross(M.State.setting(zero, "accounts.inventory", inventory([profile("claude", "empty", "100")])), 120n, "claude", "sonnet")), "True")
+    +dated : M.State = M.State.setting(base("claude"), "tz.rule.America/New_York", "EST5EDT,M3.2.0,M11.1.0")
+    C.Check.str("weekly named-date reset keeps provider wall time", Nat.show(H.Reset.words(dated, 1793635200n, "You've hit your weekly limit · resets Nov 4, 12pm (America/New_York)")), "1793811600")
     +claude : H.Step = fail(base("claude"), 120n, limit())
     +codex : H.Step = fail(base("codex"), 120n, limit())
-    C.Check.str("Claude retries most-used available connected account", selected(one("claude"), "claude"), "C")
-    C.Check.str("Codex retries most-used available connected account", selected(one("codex"), "codex"), "C")
+    C.Check.str("Claude retries most-remaining available connected account", selected(one("claude"), "claude"), "C")
+    C.Check.str("Codex retries most-remaining available connected account", selected(one("codex"), "codex"), "C")
     C.Check.str("same provider retained", M.Thread.provider(H.Hub.thread(one("claude"), "t")), "claude")
     C.Check.str("one replacement launch", Nat.show(starts(H.Step.outs_of(claude))), "1")
     C.Check.str("one stop at the account boundary", Nat.show(stops(H.Step.outs_of(claude))), "1")
@@ -137,7 +164,7 @@ def main() -> IO(Unit):
     C.Check.str("replacement identity never inherits old hold", Bool.show(F.Hold.active(one("claude"), "claude", "A", 2n, 121n)), "False")
     C.Check.str("no provider-wide hold for one exhausted account", Bool.show(FB.Limit.active(one("claude"), "claude", 121n)), "False")
     +unknown : M.State = M.State.setting(held(base("claude"), "claude", "A", 200n), "accounts.inventory", inventory([profile("claude", "B", "null"), profile("claude", "C", "80")]))
-    C.Check.str("missing utilization uses saved account hierarchy", pick(F.Pick.account(unknown, 120n, "claude", "sonnet")), "B")
+    C.Check.str("known remaining allowance precedes missing usage", pick(F.Pick.account(unknown, 120n, "claude", "sonnet")), "C")
     C.Check.str("stale utilization uses saved account hierarchy", pick(F.Pick.account(unknown, 500n, "claude", "sonnet")), "B")
     C.Check.str("wrong provider is excluded", pick(F.Pick.account(base("claude"), 120n, "codex", "gpt-6.1-sol")), "none")
     C.Check.str("unsupported model is excluded", pick(F.Pick.account(base("claude"), 120n, "claude", "unavailable-model")), "none")

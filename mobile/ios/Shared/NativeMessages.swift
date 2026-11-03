@@ -731,12 +731,12 @@ enum NativeMessages {
 
   // native.pair.computer
   static func native_pair_computer(_ tag: String) -> String {
-    tag == "ja" ? ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。") : ("On your computer: Backplane, Settings, Pairing link, QR code.")
+    tag == "ja" ? ("パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開きます。") : ("On your computer: Backplane, Settings, Devices, Add a device.")
   }
 
   // native.pair.computer.android
   static func native_pair_computer_android(_ tag: String) -> String {
-    tag == "ja" ? ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。") : ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:")
+    tag == "ja" ? ("パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開くか、リンクを貼り付けます。") : ("On your computer: Backplane, Settings, Devices, Add a device. Or paste the link:")
   }
 
   // native.pair.connect

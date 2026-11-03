@@ -38,6 +38,8 @@ def show(ls: List<&2, String>) -> String:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("stream pause stays within200ms latency budget", Bool.show(U32.is_le(B.Delta.pace(), 200)), "True")
+    C.Check.str("stream pause coalesces at least100ms", Bool.show(U32.is_ge(B.Delta.pace(), 100)), "True")
     C.Check.str("a run is one delta", show(B.Delta.merge([delta("0", "Hel"), delta("0", "lo, "), delta("0", "wörld \"q\"\n")])), "[Hello, wörld \"q\"\n] ")
     C.Check.str("one delta stays one", show(B.Delta.merge([delta("0", "a")])), "[a] ")
     C.Check.str("other lines keep their place", show(B.Delta.merge([other(), delta("0", "a"), delta("0", "b"), start(), delta("1", "c"), delta("1", "d"), other()])),

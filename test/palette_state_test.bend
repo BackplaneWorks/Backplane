@@ -36,6 +36,19 @@ def count(xs: List<&2, String>, +l: String) -> Nat:
 def has(+u: U.Ui, +l: String) -> String:
   Nat.show(count(labels(WS.WS.commands(u)), l))
 
+# what the palette offers for a typed query, its labels in order
+def found(+q: String) -> String:
+  String.join(labels(WS.WS.items(U.Palette.set(at([]), q, 0n))), ",")
+
+def ui.of(a: U.Act) -> U.Ui:
+  match a:
+    case U.Act{u, _}: u
+
+# running the first item found for q: Settings up, and its page
+def ran(+q: String) -> String:
+  +u = ui.of(WS.WS.palette.run(U.Palette.set(at([]), q, 0n), 0n))
+  Bool.show(U.Ui.flag(u, "settings")) ++ ":" ++ U.Settings.page(u)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("plain: pin, settle, archive", shelf(at([])), "Pin thread,Settle thread · Ctrl+Shift+S,Archive thread")
@@ -49,6 +62,12 @@ def main() -> IO(Unit):
     C.Check.str("listed once: archive", has(at([M.ThreadArchived{"t", True{}, 2n}]), "Archive thread") ++ has(at([M.ThreadArchived{"t", True{}, 2n}]), "Unarchive thread"), "01")
     C.Check.str("listed once: wake", has(at([M.ThreadSnoozed{"t", 5000n, 2n}]), "Wake thread") ++ has(at([M.ThreadSnoozed{"t", 5000n, 2n}]), "Snooze thread for 1 hour"), "10")
     C.Check.str("the rest stay", has(at([]), "Fork thread") ++ has(at([]), "Delete thread…") ++ has(at([]), "Settings"), "111")
+    # a new person types what they want (found on the e2e first-week walk:
+    # "release", "devices", "pair" found nothing)
+    C.Check.str("release is found", found("release"), "Release: tag and publish this project")
+    C.Check.str("pair finds Devices first", String.join(List.take(&2, String, String.split(found("pair"), ','), 1n), ""), "Settings: Devices · Pair a phone or another computer")
+    C.Check.str("a Settings page by what it is for", found("theme"), "Settings: Appearance · Theme, text size, language and sidebar")
+    C.Check.str("running it opens that page", ran("pair"), "True:devices")
     C.Check.str("idle hides Stop", has(at([]), "Stop the running turn · Ctrl+."), "0")
     C.Check.str("running offers Stop once", has(at([M.TurnChanged{"t", M.Running{}, 2n}]), "Stop the running turn · Ctrl+."), "1")
     C.Check.str("completed hides Stop", has(at([M.TurnChanged{"t", M.Completed{}, 2n}]), "Stop the running turn · Ctrl+."), "0")

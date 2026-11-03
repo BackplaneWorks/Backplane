@@ -443,7 +443,7 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .set-ctl a.btn { display: inline-block; padding: 3px 9px; background: var(--raise); border: 1px solid var(--line); text-decoration: none; color: inherit; }
 .set-ctl a.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .thread-head .back { display: none; }
-.empty { display: grid; place-items: center; color: var(--faint); height: 100%; }
+.empty { display: grid; place-items: center; align-content: center; color: var(--faint); height: 100%; }
 
 /* Viewer */
 .viewer { border-left: 1px solid var(--line); background: var(--view); position: relative; min-width: 0;
@@ -769,6 +769,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 /* Asks: approvals, questions, proposed plans */
 .asks { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
 .asks:empty { display: none; }
+.gone-note { border: 1px solid var(--warn); padding: 10px 12px; }
+.gone-note p { color: var(--dim); margin: 6px 0 10px; overflow-wrap: anywhere; }
 .ask { border: 1px solid var(--st-need); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 860px; }
 .ask-head { color: var(--st-need); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .ask-detail { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
@@ -1059,6 +1061,9 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 
 /* Settings and the machine switch stay above the project and bot lists; a row's menu opens at the pointer */
 .project.quiet .project-head { opacity: 0.55; }
+/* a project whose folder is gone (view.bend's View.gone.*) */
+.project.missing .project-head .name { opacity: 0.6; text-decoration: line-through; text-decoration-color: var(--faint); }
+.project-head .missing-note { flex: none; font-size: 10px; color: var(--warn); text-transform: none; letter-spacing: 0; margin-right: 4px; }
 .thread.faded { opacity: 0.5; }
 .project.active .thread .ago { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-tools { position: sticky; top: 52px; z-index: 5; display: flex; align-items: center; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; flex-shrink: 0; }
@@ -2441,3 +2446,48 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .msg .shot.image-unavailable { display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--bg); color: var(--faint); }
 .msg .shot.image-unavailable img { display: none; }
 .shot.image-unavailable .message-image-unavailable { display: block; }
+/* One control row at every pane width. The Bend layout owns the row's
+   height and nowrap contract; labels yield space, disclosures leave flow. */
+.composer { --composer-button: 28px; container: composer / inline-size; }
+.composer-foot { flex: none; gap: 5px; align-items: center; min-width: 0; }
+.composer-foot > *, .composer-foot .composer-model { grid-area: auto; }
+.composer-foot .composer-model { display: flex; flex: 1 1 0; width: auto; min-width: 0; flex-wrap: nowrap; gap: 4px; }
+.composer-foot .model-chip, .composer-foot .composer-model .model-chip { flex: 1 1 0; min-width: 32px; max-width: 100%; margin: 0; }
+.composer-foot .model-ctx { flex: 0 1 auto; }
+.composer-foot .composer-more, .composer-foot .composer-options { display: contents; }
+.composer-more > summary { display: none; }
+.composer-foot .composer-options > :is(button, .attach), .composer-foot > .attach,
+.composer-foot .model-chip, .composer-foot .foot-end > button {
+  height: var(--composer-button); min-height: var(--composer-button); max-height: var(--composer-button);
+  box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.composer-foot .composer-options > .account-chip { flex: 0 1 auto; max-width: 14ch; min-width: 28px; }
+.composer-foot .composer-options > .allowance-chip { flex: 0 1 auto; width: calc(19ch + 16px); min-width: 36px; max-width: 100%; }
+.composer-foot .composer-options > .attach.draw { margin: 0; }
+.composer-foot .foot-end { flex: none; flex-wrap: nowrap; margin: 0; }
+/* Placeholder text stays one line; actual input retains normal wrapping. */
+.composer textarea:placeholder-shown { white-space: pre; text-overflow: ellipsis; overflow-x: hidden; }
+@media (max-width: 760px) { .composer { --composer-button: 36px; } }
+@container composer (max-width: 700px) {
+  .composer-foot { gap: 4px; }
+  .composer-foot .model-ctx, .composer-foot .model-chip :is(kbd, .mp-eff) { display: none; }
+  .composer-foot .composer-more { display: block; position: static; flex: none; }
+  .composer-more > summary { display: flex; width: var(--composer-button); min-width: 0; height: var(--composer-button); min-height: 0; padding: 0; box-sizing: border-box; font-size: 22px; }
+  .composer-foot .composer-options { display: none; }
+  .composer-foot .composer-more[open] > .composer-options {
+    display: flex; position: absolute; top: auto; bottom: calc(100% + 6px); right: 0;
+    width: min(260px, calc(100vw - 32px)); max-height: min(60dvh, var(--composer-top, 60dvh)); overflow-y: auto;
+  }
+  .composer-foot .composer-options > :is(button, .attach) { display: flex; flex: none; width: 100%; max-width: 100%; min-width: 0; justify-content: flex-start; gap: 8px; height: auto; max-height: none; min-height: 36px; padding: 6px 10px; white-space: normal; overflow-wrap: anywhere; }
+  .composer-options .acct-v, .composer-options .tok-n { display: inline; }
+  .composer-options .account-chip .acct-v { white-space: normal; }
+  .composer-foot .composer-options .attach.draw::after { content: attr(title); }
+}
+/* Flatten the native details content box as well as its element on wide
+   panes. Closed disclosures otherwise retain an invisible block layout. */
+.composer-more::details-content { display: contents; content-visibility: visible; }
+.composer-foot .composer-options > :is(button, .attach) { width: auto; }
+.composer-foot .composer-options > .allowance-chip { width: calc(19ch + 16px); }
+@container composer (max-width: 700px) {
+  .composer-foot .composer-options > :is(button, .attach) { width: 100%; }
+}

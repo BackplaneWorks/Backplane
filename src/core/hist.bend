@@ -623,12 +623,74 @@ def Mark.all(+layer: U32, xs: List<&2, B.Item>) -> List<&2, B.Item>:
     case x <> t:
       Mark.on(layer, "", x) <> Mark.all(layer, t)
 
-def Mark.same.k(same: Bool, o: B.Item, n: B.Item, rest: List<&2, B.Item>) -> List<&2, B.Item>:
-  match same:
+# A copper pour is filled again after almost any edit near it (a via or a
+# track moved): its fill changes, its extent does not. Marked whole, every
+# step's comparison turned the board into one orange pour and hid the edits
+# that made it. A refilled pour (a zone's fill, the same box) dims like what
+# did not change; a pour that grew or shrank is still marked.
+type MBox is Data:
+  MBox{x0: F32, y0: F32, x1: F32, y1: F32}
+
+def Mark.box.add(+x: F32, +y: F32, b: MBox) -> MBox:
+  match b:
+    case MBox{x0, y0, x1, y1}:
+      MBox{F32.min(x0, x), F32.min(y0, y), F32.max(x1, x), F32.max(y1, y)}
+
+def Mark.box.go(ps: List<&2, B.Pt>, b: MBox) -> MBox:
+  match ps:
+    case Nil{}:
+      b
+    case B.Pt{+x, +y} <> t:
+      Mark.box.go(t, Mark.box.add(x, y, b))
+
+def Mark.pts(p: B.Prim) -> List<&2, B.Pt>:
+  match p:
+    case B.PPoly{ps, _, _}:
+      ps
+    case _:
+      Nil{}
+
+def Mark.box(i: B.Item) -> MBox:
+  match i:
+    case B.Item{_, _, _, p, _}:
+      Mark.box.go(Mark.pts(p), MBox{1000000.0, 1000000.0, F32.neg(1000000.0), F32.neg(1000000.0)})
+
+def Mark.near(+a: F32, +b: F32) -> Bool:
+  F32.is_lt(F32.abs(F32.sub(a, b)), 0.001)
+
+def Mark.box.eq(a: MBox, b: MBox) -> Bool:
+  match a b:
+    case MBox{+a0, +a1, +a2, +a3} MBox{+b0, +b1, +b2, +b3}:
+      Bool.and(Mark.near(a0, b0), Bool.and(Mark.near(a1, b1), Bool.and(Mark.near(a2, b2), Mark.near(a3, b3))))
+
+def Mark.zone(i: B.Item) -> Bool:
+  match i:
+    case B.Item{_, _, _, _, +info}:
+      String.starts_with(info, "zone")
+
+def Mark.refill.k(zone: Bool, +o: B.Item, +n: B.Item) -> Bool:
+  match zone:
+    case True{}:
+      Mark.box.eq(Mark.box(o), Mark.box(n))
+    case False{}:
+      False{}
+
+def Mark.refill(+o: B.Item, +n: B.Item) -> Bool:
+  Mark.refill.k(Mark.zone(n), o, n)
+
+def Mark.changed.k(refill: Bool, o: B.Item, n: B.Item, rest: List<&2, B.Item>) -> List<&2, B.Item>:
+  match refill:
     case True{}:
       Mark.dim(n) <> rest
     case False{}:
       Mark.on(Mark.removed(), "~was", o) <> Mark.on(Mark.changed(), "", n) <> rest
+
+def Mark.same.k(same: Bool, +o: B.Item, +n: B.Item, rest: List<&2, B.Item>) -> List<&2, B.Item>:
+  match same:
+    case True{}:
+      Mark.dim(n) <> rest
+    case False{}:
+      Mark.changed.k(Mark.refill(o, n), o, n, rest)
 
 def Mark.sig(i: B.Item) -> U32:
   match i:

@@ -65,7 +65,7 @@
     "src/core/google.bend": "196ba6d77f7c0e4b8d982d3fb259302752db1f27974b2d49a0123d092fbbb09e",
     "src/core/handoff.bend": "690d78b37f32187a3356d3df2ccb90aafa6d8b1f7234a5583dcbd55baadb55e4",
     "src/core/hier.bend": "8800baee6c70fbf966724c95ebff781a002c67227a82c260818a3f049b28ab9b",
-    "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f",
+    "src/core/hist.bend": "c19be246b05753c77cc708309e71a8fce5a9e13b8b9c1545685acb15533beb53",
     "src/core/hot.bend": "541015b82fb97a7aa8c5f02206c53faa4d732529e8ab6e79f45a4d81f5403d36",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
@@ -91,7 +91,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "6604b02d813f0c58ad51580a6713dc5c0f5837f3fa1a33e6eac6b1686ca216ec",
+    "src/core/msgs.bend": "7f417b9547f8106214194ca01b7965d85e15fee43d430fafd47bd3b46f42a040",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
     "src/core/onboard.bend": "fc10cb988f4fa6e8b2780e3ea3c4ebfea0088256daf5f65abebd10dfe2d746c8",
@@ -112,6 +112,7 @@
     "src/core/release.bend": "e057a8ffdc8232f50fd24084dc8584cd7b94f7263c83a8ad5700dfd825e07655",
     "src/core/reply.bend": "9e6f30962b274fa5595f4902f5ecd8f308275bea72ac4d558221bcd4b01ece0f",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
+    "src/core/roots.bend": "6bced7dc7f71c602843d6d049f79ce413316b54c4864c5aa1b02415dfaefa774",
     "src/core/rpcout.bend": "02803bf1bce06f2860b2f85a54e0b829548e62edeb1e33ff20b0bafadde6ba5d",
     "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
@@ -128,7 +129,7 @@
     "src/core/signal.bend": "c532b51dc417bb7d5b3368a99f812aa4a9ce890da97e2a1792d4e2769315066e",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
-    "src/core/stamp.bend": "65ab4ed3f26f023be1e76e47f4eec7e48a82eefc509b2f5366085ff1df4f140b",
+    "src/core/stamp.bend": "6c619ef54b9ca159dce7336d98dd86b47c72840924da723e3754a398cdb5e3b3",
     "src/core/star-nudge.bend": "8a8b5ce5e4ad2cc0035fb1ffe0dfe999d4bb15b6ecf15f60ea48a6dac71ba933",
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
@@ -167,7 +168,7 @@
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
     "src/mobile/screen.bend": "cff29d7416f2685d04a4a27c0f61be484eaa9169d9feb3b0652765c68f7bfe44",
     "src/server/thin-actor.bend": "2f0216c55b246af65bef75cd0ac3c8c270f53e1a73510f16313971078e4670d6",
-    "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
+    "src/server/thin-body.bend": "ab16161b452008ce790923b6e1c782896a7bc39580988c16c5b3a5f0121cdd5a",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
     "src/server/thin-sidebar.bend": "03a4481e05258eaead769ca352081b6782f0b20589fe29d33e3bb1151916844a",
@@ -179,18 +180,19 @@
     "src/web/allowance.bend": "4feae6cd71dcc76c98875476d0d20fb223008a7f5adad4008ec5851272e4818a",
     "src/web/bots.bend": "2e5a1a0a9c7f10e48c824d44b6da84ebb62abbe9922ef53ee6f16801f297352c",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
+    "src/web/composer-bar.bend": "fd6b6110ff409c090bf03f7ccbe64ed59f5474d548dfd804d8d1a0a441c1f863",
     "src/web/dom.bend": "6e0ddb26a372a07cf2af0bbccdae476087fb50d6e2af5da9c6f8d6b9cc1ca0b5",
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
     "src/web/list-windows.bend": "965be3f9f1a13e97dd7dc36a4f21827d51e1a666fc37d13a619ae66cf8584dcc",
     "src/web/mail-actions.bend": "da52f4d849410a7dbfe2484db0d1d07b010ff99e126668fdd05b30b12f495c8f",
     "src/web/mailroom.bend": "2b3fee92a16cc6f11df0fdcddecd19c2ec5f7e2212fefe72c300e198870c9270",
-    "src/web/settings-menu.bend": "7ea6b59ef43a25ea4062f65a15c9a0565b5bc0ed3d2b9f82799b257d0c13215d",
+    "src/web/settings-menu.bend": "231b31eae65cf8598d9ea78265e19a6e56169cb6a2361cacac6251e9573dd4cb",
     "src/web/sidebar-slot.bend": "1104967b7a84470cb9afcf6e1efdd911469de1cbef52c7ad34a16cad73754950",
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "ccbdded8ae8027ef49e3099de0d74f8e39b989e2cce38e8717593b6e8a396a27"
+    "src/web/view.bend": "ea3b17eeb37d88908621d10e452f3518b4bef6804c76b8342097cd2beb01ac39"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -400,7 +402,14 @@
       "assertions": 24,
       "work": "w-t1793671258-1312457-1317547",
       "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
-      "qualification": "All 24 full-output draft/IME/search/info fallback cases passed on this source; no native device runtime acceptance implied."
+      "qualification": "All 24 full-output draft/IME/search/info fallback cases passed on this source; no native device runtime acceptance implied.",
+      "currentMainIntegration": {
+        "base": "42f5b5173",
+        "work": "w-t1793671258-1312457-1328870",
+        "assertions": 24,
+        "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+        "scope": "Normal merge retains main mailbox law repair and reader/instant/composer work; additive unavailable-image styles retained beside composer rules. Changed image helpers read only explicit arguments. All24 full-output cases passed on combined source; browser artifacts remain from base7982813b plus the image product patch128fd23c3."
+      }
     }
   },
   "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged; 2026-11-01 combined main622/desktop dictation/Improvements: speech-only Vdict and @voice scratch, topbar/voice controls, existing wire privacy retained; no ordinary draft reader/key/filter/fallback change; all24 full-output cases PASS. Receipt MAIN-ALL-SOURCE-QUALIFICATION-CONTINUE-1.json.; 2026-11-01 catalog scope: retain only sidebar-global @f.pq across target changes; all other thread forms/mail replies still cleared;256KiBunchanged. Scope13/sidebar24PASS, CATALOG-FIX-SOURCE-QUALIFICATION.json.\n2026-11-02 ASAP scope review: Account state/picker; static pending chat; approved Settings/Voice presentation; durable opt-out choice and tour state; bounded tool-title projection and detail reads. Existing sidebar draft filter, unknown scratch retention, image key and authority/scanner implementations are unchanged. @voice and pending scratch remain conservative; no new draft readers. New lazy-tools helper operates only selected raw history/fold metadata and adds no sidebar draft read. Full24 output equivalence remains required before any pin refresh.",
@@ -495,7 +504,7 @@
     "previousQualifiedHead": "d50e3bdf4cbe10a23c5ec0110de69c38fa32ada1",
     "changedMergedHashes": {
       "src/core/client.bend": "c3efad258366d791103ab595bde852729acef2b9dfe38486e19510d3ee7b1565",
-      "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f"
+      "src/core/hist.bend": "c19be246b05753c77cc708309e71a8fce5a9e13b8b9c1545685acb15533beb53"
     },
     "scope": "Reviewed normal source merge: client history track is computed once, project picker focus and failed-turn Retry helpers are outside canonical sidebar projection; hist path match precedes kind check without changing result. Telemetry Share/Tour affirmative consent, private Ext usage map and adapters retained. Mech detail/tools/view/mobile changes retain upstream reviewed hashes. Existing draft readers, reduced input fields, scanner, bridge authority and fallback behavior unchanged.",
     "fullOutputCheck": "test/sidebar_draft_image_test.bend",
@@ -809,5 +818,20 @@
       "logSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
       "qualification": "All 24 full-output cases executed and passed on combined source. Earlier platform runtime checks were run before this unrelated-main rebase; not a claim of fresh platform binaries."
     }
+  },
+  "composerBarReview": {
+    "pr": 777,
+    "changedClosureFiles": [
+      "src/web/composer-bar.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "composer-bar.bend (29 lines, imports only dom.bend) builds the composer's one-row control bar from nodes view.bend passes in; it reads no Ui, state or drafts. Sidebar draft readers, unknown @ retention, private image keys and transport authority unchanged. Added so server builds of main pass the guard again (its import made the closure differ from the manifest)."
+  },
+  "missingFolderReview": {
+    "changedClosureFiles": [
+      "src/core/roots.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "roots.bend (imports model, far) reads only the setting projects.missing and project records; view.bend's View.gone.* reads the selected thread's project, that setting and the existing '@rm' remove-confirm scratch key (as the project menu's Remove already does). No sidebar draft readers, unknown @ retention, private image keys or transport authority change."
   }
 }

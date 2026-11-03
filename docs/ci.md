@@ -107,3 +107,36 @@ skip logic with dependency mutations, a deliberately dropped affected test,
 new/later edits, opaque IO and compiler/library changes. This plans only Bend
 tests; it cannot replace check/proof/build or other-language gates. Required
 integration and execution measurements are tracked in build/ci-speed/RESULTS.md.
+
+## Pinned JavaScript and TypeScript tools
+
+`tools/ci/README.md` documents exact installs and opt-in strict lint, read-only
+format checks and native TypeScript7 checks for the existing step2glb project.
+`bun run --cwd tools/ci test` exercises actual negative and positive lint/type/
+format cases. The duplicate-parameter compatibility rule is required; native
+Oxlint1.90.0 alone lacks that CommonJS rule.
+
+`uv run --no-project python scripts/ci-tool-bench.py --prepare` reproduces the
+matched-tool comparison with pinned baseline tools and captured source/runtime
+hashes. Repository-wide strict lint/format currently fail on existing debt;
+other TypeScript sources still need configured coverage. Commands remain
+opt-in while pre-push integration waits for the measured UI validator (3s
+inclusive within9s total; incomplete/cold=3, no heavy work or lock waits).
+
+## Checkout history
+
+All nine `ci.yml` checkout steps use `filter: blob:none` and `fetch-depth: 0`.
+Commit/tree history supports merge-base analysis, while historical file blobs
+are fetched only when read. The native smoke job retains its existing sparse
+paths. In [checkout v4's implementation](https://github.com/actions/checkout/blob/v4/src/git-source-provider.ts),
+explicit filtering and sparse working-tree configuration both apply. Other
+release/mobile workflows retain their existing checkout settings.
+
+`uv run --no-project python scripts/ci-checkout-probe.py` uses a disposable
+filter-enabled Git server over `file://` (no clone hardlinks). It checks exact
+head bytes/executable modes, complete history, a cross-branch merge-base,
+missing historical blobs and sparse paths. A shallow negative control cannot
+find that merge-base. The receipt includes timings and packed-object bytes;
+these local fixture timings do not estimate GitHub network or Actions latency.
+The audit's checkout median was already about3s. Full-history metadata may add
+cost on large repositories; measure the next real run before claiming a gain.

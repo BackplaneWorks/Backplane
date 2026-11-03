@@ -180,6 +180,24 @@ def Stamp.stop.mark.k(+msg: String, +now: Nat) -> List<&2, M.Change>:
 def Stamp.stop.mark(+st: M.State, +th: String, +now: Nat) -> List<&2, M.Change>:
   Stamp.stop.mark.k(Stamp.turn(st, th), now)
 
+# A failed turn keeps "Failed" the same way: when an error ends a turn the
+# hub sets "failed.<message>" for the message that started it
+# (Stamp.fail.mark, from hub.bend's Ended.out.p), so a retry or the next
+# message does not turn it into "Finished".
+def Stamp.fail.key(+msg: String) -> String:
+  "failed." ++ msg
+
+def Stamp.fail.mark.k(+msg: String, +now: Nat) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, String.is_empty(msg), Nil{}, [M.SettingSet{Stamp.fail.key(msg), "1", now}])
+
+# what the hub logs as an error ends a thread's turn (failed: it did)
+def Stamp.fail.mark(failed: Bool, +st: M.State, +th: String, +now: Nat) -> List<&2, M.Change>:
+  match failed:
+    case True{}:
+      Stamp.fail.mark.k(Stamp.turn(st, th), now)
+    case False{}:
+      Nil{}
+
 def Stamp.stops.close(stopped: Bool, +held: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
   match stopped:
     case True{}:
@@ -190,22 +208,10 @@ def Stamp.stops.close(stopped: Bool, +held: String, stops: Map<&2, Nat>) -> Map<
 def Stamp.marked(+st: M.State, +msg: String) -> Bool:
   String.eq(M.Setting.get(st, Stamp.stop.key(msg), ""), "1")
 
-# entries newest first, walked as Stamp.ends.go: at a person's message the
-# reply held ends its turn, stopped when the message is marked
-def Stamp.stops.go(es: List<&2, M.Entry>, +st: M.State, +open: Bool, +held: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
-  match es:
-    case Nil{}:
-      stops
-    case M.Msg{+id, _, M.User{}, _, _} <> t:
-      Stamp.stops.go(t, st, True{}, "", Stamp.stops.close(Bool.and(Bool.not(String.is_empty(held)), Stamp.marked(st, id)), held, stops))
-    case M.Msg{+id, _, M.Assistant{}, _, _} <> t:
-      Stamp.stops.go(t, st, Bool.and(open, STR.Steer.ahead.is(id)), Bool.pick(String, STR.Steer.ahead.is(id), held, Stamp.held(open, held, id)), stops)
-    case _ <> t:
-      Stamp.stops.go(t, st, open, held, stops)
-
-# the stopped turns' last replies on a page (entries oldest first)
-def Stamp.stops(+es: List<&2, M.Entry>, +st: M.State, +running: Bool) -> Map<&2, Nat>:
-  Stamp.stops.go(List.reverse(&2, M.Entry, es), st, Bool.not(running), "", Map.new(&2, Nat))
+# how the turn a message started ended, by its marks: 1 stopped, 3 failed,
+# 0 neither
+def Stamp.mark.kind(+st: M.State, +msg: String) -> Nat:
+  Bool.pick(Nat, Stamp.marked(st, msg), 1n, Bool.pick(Nat, String.eq(M.Setting.get(st, Stamp.fail.key(msg), ""), "1"), 3n, 0n))
 
 # the last turn, stopped (its message may not be marked: a log from before
 # the marks, or an interrupt that marks none) and over
@@ -222,6 +228,26 @@ def Stamp.ended.put(found: Bool, +kind: Nat, +held: String, stops: Map<&2, Nat>)
       Map.set(&2, Nat, stops, held, kind)
     case False{}:
       stops
+
+def Stamp.stops.at(+kind: Nat, +held: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  Stamp.ended.put(Bool.and(Nat.is_gt(kind, 0n), Bool.not(String.is_empty(held))), kind, held, stops)
+
+# entries newest first, walked as Stamp.ends.go: at a person's message the
+# reply held ends its turn, stopped or failed when the message is marked
+def Stamp.stops.go(es: List<&2, M.Entry>, +st: M.State, +open: Bool, +held: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  match es:
+    case Nil{}:
+      stops
+    case M.Msg{+id, _, M.User{}, _, _} <> t:
+      Stamp.stops.go(t, st, True{}, "", Stamp.stops.at(Stamp.mark.kind(st, id), held, stops))
+    case M.Msg{+id, _, M.Assistant{}, _, _} <> t:
+      Stamp.stops.go(t, st, Bool.and(open, STR.Steer.ahead.is(id)), Bool.pick(String, STR.Steer.ahead.is(id), held, Stamp.held(open, held, id)), stops)
+    case _ <> t:
+      Stamp.stops.go(t, st, open, held, stops)
+
+# the stopped turns' last replies on a page (entries oldest first)
+def Stamp.stops(+es: List<&2, M.Entry>, +st: M.State, +running: Bool) -> Map<&2, Nat>:
+  Stamp.stops.go(List.reverse(&2, M.Entry, es), st, Bool.not(running), "", Map.new(&2, Nat))
 
 # the last turn, over, ended as kind says (Stamp.end: 1 stopped, its
 # message maybe unmarked as Stamp.stops.last; 3 failed; 0 changes nothing)

@@ -47,3 +47,15 @@ function __bpMapRead(map, key, missing, has) {
   const found = node.$ === "MLeaf" && node.key === key;
   return {$: "Tuple", fst: map, snd: has ? found : found ? node.val : missing};
 }
+
+// Repeated status-index writes often set the same Nat already in the trie.
+// This is a pure no-op, not a cache: no input/key/value is retained or mutated.
+// Other values avoid an extra read; changed/missing numeric slots use Base.
+function __bpMapSet(map, key, value, fallback) {
+  if (typeof value === "number") {
+    let node = map;
+    while (node.$ === "MNode") node = __bpMapBitValue(key, node.pos) ? node.hi : node.lo;
+    if (node.$ === "MLeaf" && node.key === key && node.val === value) return map;
+  }
+  return fallback(map, key, value);
+}
