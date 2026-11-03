@@ -11,7 +11,7 @@ const diagnostics = fs.readFileSync(path.join(root, 'src/server/effects/diagnost
 const perf = fs.readFileSync(path.join(root, 'src/server/effects/perf.js'), 'utf8');
 const CAP = 1048576, SEGMENT = 65536, AGE = 7 * 86400;
 const methods = ['start', 'status', 'tick', 'flush', 'event', 'control', 'export'];
-const perfMethods = ['us', 'span', 'add', 'set', 'mark', 'done', 'take', 'emit', 'logs', 'severity'];
+const perfMethods = ['us', 'span', 'add', 'set', 'gauge', 'mark', 'done', 'take', 'emit', 'logs', 'severity'];
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-diagnostics-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));

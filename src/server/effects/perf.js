@@ -197,6 +197,27 @@ function perf_done(name) {
   return { $: "Unit" };
 }
 
+function perf_gauge(name) {
+  const s = perf_state().tab.get(name);
+  return s && s.kind === 1 ? Math.max(0, Math.min(0xffffffff, s.last)) : 0;
+}
+
+// Full JSC heap statistics walk the heap. Keep only two numeric values,
+// sampling at most once a minute when an explicit diagnostics read asks.
+// Discovery reads one gauge directly and never reaches this path.
+let perf_heap_sample = null;
+function perf_heap(memory) {
+  const now = performance.now();
+  if (perf_heap_sample && now - perf_heap_sample.at < 60000) return perf_heap_sample;
+  let used = Number(memory.heapUsed) || 0, total = Number(memory.heapTotal) || 0;
+  if (typeof Bun !== "undefined") try {
+    const heap = require("bun:jsc").heapStats();
+    used = heap.heapSize; total = heap.heapCapacity;
+  } catch (_) { /* Other runtimes retain their process-provided gauges. */ }
+  perf_heap_sample = { at: now, used, total };
+  return perf_heap_sample;
+}
+
 function perf_take() {
   const rows = [];
   const row = (name, s) => rows.push([name, s.kind, s.n, s.sum, s.max, s.last, (s.b.length ? s.b : [0]).join(",")].join("\t"));
@@ -211,15 +232,11 @@ function perf_take() {
     row(name, s);
   };
   const memory = typeof process !== "undefined" ? process.memoryUsage() : {};
-  let heapUsed = Number(memory.heapUsed) || 0, heapTotal = Number(memory.heapTotal) || 0;
-  if (typeof Bun !== "undefined") try {
-    const heap = require("bun:jsc").heapStats();
-    heapUsed = heap.heapSize; heapTotal = heap.heapCapacity;
-  } catch (_) { /* Other runtimes retain their process-provided gauges. */ }
+  const heap = perf_heap(memory);
   const ru = typeof process !== "undefined" && process.resourceUsage ? process.resourceUsage() : null;
   g("proc.rss_kb", Math.floor((memory.rss || 0) / 1024));
-  g("proc.heap_used_bytes", heapUsed);
-  g("proc.heap_total_bytes", heapTotal);
+  g("proc.heap_used_bytes", heap.used);
+  g("proc.heap_total_bytes", heap.total);
   g("proc.external_bytes", Number(memory.external) || 0);
   g("proc.peak_kb", ru ? ru.maxRSS : 0);
   g("proc.cpu_ms", ru ? Math.floor((ru.userCPUTime + ru.systemCPUTime) / 1000) : 0);
@@ -263,6 +280,7 @@ io_eff(CID(Perf.us), perf_us);
 io_eff(CID(Perf.span), perf_span);
 io_eff(CID(Perf.add), perf_add);
 io_eff(CID(Perf.set), perf_set);
+io_eff(CID(Perf.gauge), perf_gauge);
 io_eff(CID(Perf.mark), perf_mark);
 io_eff(CID(Perf.done), perf_done);
 io_eff(CID(Perf.take), perf_take);

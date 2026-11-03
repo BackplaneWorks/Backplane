@@ -26,6 +26,11 @@ def Perf.add(name: String, v: U32) -> IO(Unit):
 def Perf.set(name: String, v: U32) -> IO(Unit):
   import "./effects/perf.js"
 
+# One existing gauge, without formatting diagnostics or walking the heap.
+# Missing gauges read zero, as the discovery response always has.
+def Perf.gauge(name: String) -> IO(U32):
+  import "./effects/perf.js"
+
 # start a span under name, unless one is already started
 def Perf.mark(name: String) -> IO(Unit):
   import "./effects/perf.js"
