@@ -8109,6 +8109,20 @@ def T.viewer.diff(l: I.Loc) -> String:
     case I.Ja{}:
       "差分"
 
+def T.viewer.diff.more(l: I.Loc, +n: Nat) -> String:
+  match l:
+    case I.En{}:
+      Nat.show(n) ++ " more lines not shown here"
+    case I.Ja{}:
+      "ここに表示していない行があと" ++ Nat.show(n) ++ "行あります"
+
+def T.viewer.diff.files.more(l: I.Loc, +n: Nat) -> String:
+  match l:
+    case I.En{}:
+      Nat.show(n) ++ " more changed files not shown here"
+    case I.Ja{}:
+      "ここに表示していない変更ファイルがあと" ++ Nat.show(n) ++ "件あります"
+
 def T.viewer.diff.empty(l: I.Loc) -> String:
   match l:
     case I.En{}:
