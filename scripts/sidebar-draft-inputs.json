@@ -65,7 +65,7 @@
     "src/core/google.bend": "196ba6d77f7c0e4b8d982d3fb259302752db1f27974b2d49a0123d092fbbb09e",
     "src/core/handoff.bend": "690d78b37f32187a3356d3df2ccb90aafa6d8b1f7234a5583dcbd55baadb55e4",
     "src/core/hier.bend": "8800baee6c70fbf966724c95ebff781a002c67227a82c260818a3f049b28ab9b",
-    "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f",
+    "src/core/hist.bend": "c19be246b05753c77cc708309e71a8fce5a9e13b8b9c1545685acb15533beb53",
     "src/core/hot.bend": "541015b82fb97a7aa8c5f02206c53faa4d732529e8ab6e79f45a4d81f5403d36",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
@@ -112,6 +112,7 @@
     "src/core/release.bend": "e057a8ffdc8232f50fd24084dc8584cd7b94f7263c83a8ad5700dfd825e07655",
     "src/core/reply.bend": "9e6f30962b274fa5595f4902f5ecd8f308275bea72ac4d558221bcd4b01ece0f",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
+    "src/core/roots.bend": "6bced7dc7f71c602843d6d049f79ce413316b54c4864c5aa1b02415dfaefa774",
     "src/core/rpcout.bend": "02803bf1bce06f2860b2f85a54e0b829548e62edeb1e33ff20b0bafadde6ba5d",
     "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
@@ -167,7 +168,7 @@
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
     "src/mobile/screen.bend": "9572ee36c3a422d4057139565bde895857d63eabe557ebcd0695e19844d06d1d",
     "src/server/thin-actor.bend": "2f0216c55b246af65bef75cd0ac3c8c270f53e1a73510f16313971078e4670d6",
-    "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
+    "src/server/thin-body.bend": "ab16161b452008ce790923b6e1c782896a7bc39580988c16c5b3a5f0121cdd5a",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
     "src/server/thin-sidebar.bend": "03a4481e05258eaead769ca352081b6782f0b20589fe29d33e3bb1151916844a",
@@ -191,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "3b46be10506d964b6a81847e5b575bcc425103b5f1e55bac32f279406d2315da"
+    "src/web/view.bend": "cd33edbb99bd9714d35ba5e45bd125a6478723c72b022382853b8e2870888c67"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -488,7 +489,7 @@
     "previousQualifiedHead": "d50e3bdf4cbe10a23c5ec0110de69c38fa32ada1",
     "changedMergedHashes": {
       "src/core/client.bend": "c3efad258366d791103ab595bde852729acef2b9dfe38486e19510d3ee7b1565",
-      "src/core/hist.bend": "c7779148373271ef6f19c75b52697bb71f95d53405aaa15caf736737eac4709f"
+      "src/core/hist.bend": "c19be246b05753c77cc708309e71a8fce5a9e13b8b9c1545685acb15533beb53"
     },
     "scope": "Reviewed normal source merge: client history track is computed once, project picker focus and failed-turn Retry helpers are outside canonical sidebar projection; hist path match precedes kind check without changing result. Telemetry Share/Tour affirmative consent, private Ext usage map and adapters retained. Mech detail/tools/view/mobile changes retain upstream reviewed hashes. Existing draft readers, reduced input fields, scanner, bridge authority and fallback behavior unchanged.",
     "fullOutputCheck": "test/sidebar_draft_image_test.bend",
@@ -810,5 +811,12 @@
       "src/web/view.bend"
     ],
     "scope": "composer-bar.bend (29 lines, imports only dom.bend) builds the composer's one-row control bar from nodes view.bend passes in; it reads no Ui, state or drafts. Sidebar draft readers, unknown @ retention, private image keys and transport authority unchanged. Added so server builds of main pass the guard again (its import made the closure differ from the manifest)."
+  },
+  "missingFolderReview": {
+    "changedClosureFiles": [
+      "src/core/roots.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "roots.bend (imports model, far) reads only the setting projects.missing and project records; view.bend's View.gone.* reads the selected thread's project, that setting and the existing '@rm' remove-confirm scratch key (as the project menu's Remove already does). No sidebar draft readers, unknown @ retention, private image keys or transport authority change."
   }
 }
