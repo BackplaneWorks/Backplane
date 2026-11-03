@@ -889,3 +889,60 @@ Total3,894credit-s (**$0.03894**), all terminal sandboxes deleted and deletion
 verified. No installer files,
 installed compiler, app execution, live auth/settings, telemetry or release
 authorization changed.
+
+### Saved V21 phase audit (2026-11-03)
+
+[The reproducible summary](compiler-memory/phase-audit/SUMMARY.json) binds
+the existing raw journals and result files by SHA256. This is offline analysis:
+**zero new compiler jobs and $0 additional Boat cost**. Regenerate it with
+`python3 build/ci-speed/compiler-memory/phase-audit/summarize.py --output /tmp/v21-phases.json`.
+A measured regeneration takes 0.08s and 32,332KiB peak RSS and reproduces
+the committed summary byte-for-byte. The script requires the three saved job directories under
+`~/.local/state/backplane/boat/jobs`, or an explicit `--jobs-root`.
+
+| Measured interval | Hub, partial 600.277s run | Mobile, completed 149.628s source check |
+|---|---:|---:|
+| Completed checker groups | 365 | 285 |
+| Inside unchanged `Bend.book_valid` | 256.312s | 104.872s |
+| Validated group through storage/cache/collection/yield completion | 298.701s | 26.023s |
+| Outside those completed intervals, including load/preparation and partial work | 45.263s | 18.732s |
+
+Intervals are wall time, not CPU samples. They are disjoint within each
+single-book run; the incomplete hub group is excluded. The post-check
+interval includes spill serialization, cache work, collection and scheduler
+yields, so it must not be described as pure disk I/O. Mobile's check-only
+mode discards accepted emitter IR; hub must retain it. This difference helps
+locate the next investigation, but these different programs and incomplete
+outcomes do not establish a causal performance comparison.
+
+The slowest completed hub modules, including checking and post-check work:
+
+| Module | Time | Added declarations |
+|---|---:|---:|
+| `src/web/view.bend` | 88.872s | 890 |
+| `src/core/hub.bend` | 81.267s | 1,683 |
+| `src/core/refview.bend` | 72.790s | 81 |
+| `src/web/workspace.bend` | 57.277s | 77 |
+
+Refview's one completed group spends 9.411s checking and 63.285s after
+validation. Workspace spends 12.066s checking and 45.191s after validation.
+These are better targets for retained-result storage work than source line
+count alone. Hub reaches only 245 completed module checks before timeout;
+these are not a ranking of the entire program.
+
+Web starts three loader invocations at 0.007s, 0.061s and 0.101s for
+timeline-plan, timeline-history and app. Their journals share unqualified
+event ranges. The summary deliberately refuses per-group attribution for
+web: existing trace IDs cannot distinguish overlapping books soundly.
+Process RSS is shared by all invocations, not memory owned by one file.
+Two small analysis passes finish in 1.981s and 10.005s. App analysis starts
+at 331.144s and is unfinished at OOM 66.501s later. Anonymous memory grows
+from 1,594,904,576 bytes at that start to 3,638,951,936 in the last sample;
+only 10,330,112 bytes of file cache remain there. The final failure is
+dominated by anonymous memory, not the metadata pack's resident file cache.
+The journal does not identify the exact analysis allocation responsible.
+
+No final GNU RSS exists for the killed/timed-out compiler processes; reported
+checkpoint maxima are lower bounds. No separate per-law proof time or pure
+parse time can be recovered from these marks, and no full proof suite was
+run. PR #856 remains opt-in and nonqualifying for a complete build or release.
