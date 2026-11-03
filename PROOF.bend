@@ -1,3 +1,4 @@
+import ./test/conversation-proof/window_final.bend as CONVROOT
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
 
 import ./test/conversation-proof/production_clipping.bend as CONVPROOF
@@ -15667,3 +15668,13 @@ def Laws.conversation_floor_retains_source_row(u, index, id, window):
 
 def Laws.conversation_floor_visible_text_nonempty(index, id):
   CONVSHAPE.source_visible_text(index, id)
+
+
+def Laws.conversation_root_reference_envelope_bounded(rid, result, admitted):
+  CONVROOT.producer_bound(rid, result, admitted)
+
+def Laws.conversation_root_region_retained(result):
+  CONVROOT.retained_root(result)
+
+def Laws.conversation_root_wire_picture_constant(result):
+  CONVROOT.made_shown(result)

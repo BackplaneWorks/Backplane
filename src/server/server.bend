@@ -9,6 +9,7 @@ import ../core/folder.bend as FP
 import ./spawn.bend as SP
 import ./view-capacity.bend as VCAP
 import ./conversation-frame.bend as CWIN
+import ./conversation-window.bend as CWINDOW
 import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
@@ -12894,10 +12895,10 @@ def Hub.thin.deliver.ready(h: Hub, +client: U32, +o: J.Json, +answer: J.Json, +c
         +cl2 : List<&2, Client> <- Wire.to.view(cl1, client, wire, J.Json.bytes(wire))
         return Hub{st, f, ls, cl2, as, inbox, Cfg.telemetry.ui_action(st, cfg, o, Maybe.is_some(&2, Client, Clients.get(cl2, client)), now), note}
 
-def Hub.thin.deliver.oversize(search: Bool, h: Hub, client: U32, o: J.Json, answer: J.Json, c: Client, context: ThinContext, now: Nat) -> IO(Hub):
+def Hub.thin.deliver.oversize(search: Bool, h: Hub, client: U32, +o: J.Json, answer: J.Json, c: Client, context: ThinContext, now: Nat) -> IO(Hub):
   match search:
     case True{}: Hub.thin.error(h, client, o, "LIMIT")
-    case False{}: Hub.thin.deliver.ready(h, client, o, answer, c, context, now, True{})
+    case False{}: Hub.thin.deliver.ready(h, client, o, answer, c, context, now, Nat.is_eq(J.Json.get_nat(J.Json.get_obj(o, "p"), "viewControl", 0n), 1n))
 
 def Hub.thin.deliver(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +answer: J.Json, +size: Nat, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
   match fits:
@@ -13168,10 +13169,7 @@ def Hub.thin.web_fit.sent.s(s: FitS, h: Hub, +client: U32, +o: J.Json, +c: Clien
 def Hub.thin.web_fit.compact(+fl: TA.Rendered, +shown: M.State, +index: THIN.Index, +rows: List<&2, String>, +p: J.Json, +epoch: String, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext) -> IO(Hub):
   match fl:
     case TA.Rendered{+actor, +result}:
-      +ids = Hub.thin.web_fit.floor.rows(10n, rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", ""))
-      +bounded = TV.Obj.put(p, "bodyBudget", J.Num{"1"})
-      +window = TV.Render.window(TLIVE.Stream.blank(), index, TV.Target.thread(shown, J.Json.get_obj(p, "target")), bounded, epoch, ids)
-      Hub.thin.rendered(TA.Rendered{actor, CWIN.Frame.make(TA.Actor.ui(actor), index, ids, window, TV.Obj.put(result, "window", window))}, h, client, o, c, now, context)
+      Hub.thin.rendered(TA.Rendered{actor, CWINDOW.Window.prepare(Nat.is_eq(J.Json.get_nat(p, "windowProjection", 0n), 1n), result)}, h, client, o, c, now, context)
 
 def Hub.thin.web_fit.floor(fits: Bool, +fl: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
   match fits:
@@ -13185,15 +13183,20 @@ def Hub.thin.web_fit.one(fits: Bool, +l1: TA.Rendered, +acted: TA.Acted, +shown:
       +fl = Hub.thin.web_fit.level(Hub.thin.web_fit.halvings(), acted, shown, index, p, epoch, now, rows, stream, revision, key, ms)
       Hub.thin.web_fit.floor(Hub.thin.web_fit.fits(fl, st, crev, c, o, context), fl, acted, shown, index, p, epoch, now, rows, stream, revision, key, ms, st, crev, c, o, context, h, client)
 
-def Hub.thin.web_fit.first(fits: Bool, +trial: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
-  match fits:
-    case True{}: Hub.thin.web_fit.sent(1, trial, h, client, o, c, now, context)
+def Hub.thin.web_fit.first.failed(regions: Bool, +trial: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
+  match regions:
+    case True{}: Hub.thin.web_fit.compact(trial, shown, index, rows, p, epoch, h, client, o, c, now, context)
     case False{}:
       # The first fitted tier also compacts optional chrome. Keep the desired
       # viewer/session and the anchor; all later trials use this same tier.
       +compact = TV.Obj.put(p, "@compactChrome", J.Flag{True{}})
       +l1 = Hub.thin.web_fit.level(1n, acted, shown, index, compact, epoch, now, rows, stream, revision, key, ms)
       Hub.thin.web_fit.one(Hub.thin.web_fit.fits(l1, st, crev, c, o, context), l1, acted, shown, index, compact, epoch, now, rows, stream, revision, key, ms, st, crev, c, o, context, h, client)
+
+def Hub.thin.web_fit.first(fits: Bool, +trial: TA.Rendered, +acted: TA.Acted, +shown: M.State, +index: THIN.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +key: String, +ms: Nat, +st: M.State, +crev: Nat, +c: Client, +o: J.Json, +context: ThinContext, h: Hub, +client: U32) -> IO(Hub):
+  match fits:
+    case True{}: Hub.thin.web_fit.sent(1, trial, h, client, o, c, now, context)
+    case False{}: Hub.thin.web_fit.first.failed(Nat.is_eq(J.Json.get_nat(p, "windowProjection", 0n), 1n), trial, acted, shown, index, p, epoch, now, rows, stream, revision, key, ms, st, crev, c, o, context, h, client)
 
 def Hub.thin.web_fit.full(+acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
     +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat) -> IO(Hub):
@@ -13259,7 +13262,7 @@ def Hub.thin.native_key(on: Bool, a: TA.Actor, p: J.Json, epoch: String, view: S
 # what a view's render memo is keyed by but its page (thin-actor.bend's
 # Memo.key.base, the native and loading keys); the page (Memo.at) goes last
 def Hub.thin.memo.base(+st: M.State, +cfg: Cfg, +p: J.Json, +context: ThinContext, +web: Bool, +thread: String) -> String:
-  TA.Memo.key.base(M.State.seq(st), Hub.thin.view_key(st, cfg, thread), p, ThinContext.view(context), web, thread) ++ TA.Actor.native.key(ThinContext.actors(context)) ++ TA.Actor.loading.key(ThinContext.actors(context))
+  TA.Memo.key.base(M.State.seq(st), Hub.thin.view_key(st, cfg, thread), p, ThinContext.view(context), web, thread) ++ TA.Actor.native.key(ThinContext.actors(context)) ++ TA.Actor.loading.key(ThinContext.actors(context)) ++ "\twindow-protocol:" ++ Nat.show(J.Json.get_nat(p, "windowProjection", 0n)) ++ ":" ++ Nat.show(J.Json.get_nat(p, "viewControl", 0n))
 
 def Hub.thin.page.memo(on: Bool, +st: M.State, +context: ThinContext, +base: String, +ms: Nat, +now: Nat) -> Maybe<&2, J.Json>:
   match on:
