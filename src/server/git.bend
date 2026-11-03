@@ -447,8 +447,13 @@ def Git.thread_wt.carry(carry: Bool, +top: String, +path: String, +cwd: String) 
 # starts behind upstream. "" (HEAD) when there is no origin, or when the
 # folder's uncommitted work is carried over (it belongs on the HEAD it was
 # made against; copied onto a newer tree it would undo upstream's edits).
+# The fetch runs unasked, so it is skipped (the last fetched one is used)
+# when the repository's own config names a command or helper a fetch would
+# run (a folder from a zip can ship its .git: an upload-pack, ssh or proxy
+# command, credential helpers, protocol or URL rewrites), and it never
+# recurses into submodules (their configs are theirs too).
 def Git.upstream.sh() -> String:
-  Git.safe.sh() ++ "bp_safe; [ \"$1\" = 1 ] && git ls-files -m -o -d --exclude-standard | grep -v -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | grep -q . && exit 0; git remote get-url origin >/dev/null 2>&1 || exit 0; b=$(git symbolic-ref -q --short refs/remotes/origin/HEAD); b=${b:-origin/main}; t=; command -v timeout >/dev/null 2>&1 && t='timeout 30'; GIT_TERMINAL_PROMPT=0 $t git fetch -q origin \"${b#origin/}\" </dev/null >/dev/null 2>&1; git rev-parse -q --verify \"refs/remotes/$b\" >/dev/null && printf %s \"$b\"; exit 0"
+  Git.safe.sh() ++ "bp_safe; bp_fetchable() { c=$(git config --show-scope --name-only --list 2>/dev/null) || return 1; ! printf '%s\\n' \"$c\" | awk -F '\\t' '$1 == \"local\" || $1 == \"worktree\" { print tolower($2) }' | grep -Eq '^(core[.](sshcommand|gitproxy|askpass|alternaterefscommand)|credential[.].*|protocol[.].*|url[.].*|ssh[.].*|uploadpack[.].*|remote[.].*[.](uploadpack|receivepack|vcs|proxy))$'; }; [ \"$1\" = 1 ] && git ls-files -m -o -d --exclude-standard | grep -v -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | grep -q . && exit 0; git remote get-url origin >/dev/null 2>&1 || exit 0; b=$(git symbolic-ref -q --short refs/remotes/origin/HEAD); b=${b:-origin/main}; t=; command -v timeout >/dev/null 2>&1 && t='timeout 30'; bp_fetchable && GIT_TERMINAL_PROMPT=0 $t git fetch -q --no-recurse-submodules origin \"${b#origin/}\" </dev/null >/dev/null 2>&1; git rev-parse -q --verify \"refs/remotes/$b\" >/dev/null && printf %s \"$b\"; exit 0"
 
 def Git.upstream.of(r: P.Ran) -> String:
   match r:
