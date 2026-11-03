@@ -387,7 +387,9 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
       if (key.length === 1 || key === 'Backspace') {
         event.preventDefault(); event.stopImmediatePropagation();
         pendingText = key === 'Backspace' ? pendingText.slice(0, -1) : pendingText + key;
-        dispatch('ws-palette-query', pendingText); return;
+        // (as its field's own edits: adjacent ones coalesce in the host's
+        // queue, which holds 7, so a long word and its Enter all arrive)
+        dispatch('bfield', 'wspalette\u001f' + pendingText); return;
       }
       if (key === 'Enter' && !event.shiftKey) {
         event.preventDefault(); event.stopImmediatePropagation();
