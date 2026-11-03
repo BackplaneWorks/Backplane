@@ -15,6 +15,8 @@ import ../core/hub.bend as HB
 import ../core/subs.bend as SB
 import ../core/thin-live.bend as TL
 import ../core/fold.bend as FO
+import ../core/message-context.bend as MC
+import ../core/lazy-tools.bend as LT
 import ../mobile/thin.bend as MT
 import ../web/dom.bend as D
 import ../web/presentation.bend as WP
@@ -504,6 +506,17 @@ def Render.window(+s: TL.Stream, +index: T.Index, +thread: String, +p: J.Json, +
   +window = Window.live(Page.window(index, thread, p, epoch, rows), Partial.live.body(on, s, thread, epoch, J.Json.get_obj(p, "target")))
   Render.window.marker(on, window)
 
+# Keep wire cursors/counts in source rows. Retention and initial message
+# context use the identities actually displayed after folding instead.
+def Render.window.context(+st: M.State, +s: TL.Stream, +index: T.Index, +thread: String, +p: J.Json, +epoch: String, +rows: List<&2, String>) -> J.Json:
+  +es = HI.Hist.seen(LT.Tools.entries(rows, index, Nil{}))
+  +around = LT.Tools.context(FO.Fold.context(Nil{}, M.State.mine(st, thread), Nil{}, FO.Fold.shown(es)))
+  +roles = FO.Fold.roles.all(I.En{}, around, es, LT.Tools.info(p), False{})
+  Obj.put(Obj.put(Obj.put(Render.window(s, index, thread, p, epoch, rows),
+    "historyUnits", J.Json.arr(Ids.json(MC.Context.units(es, roles)))),
+    "messageIds", J.Json.arr(Ids.json(MC.Context.messages(es)))),
+    "contextMessages", J.Json.arr(Ids.json(MC.Context.latest(M.State.mine(st, thread), False{}, False{}))))
+
 # Away from the end (host.js's hold), the page says what came after the
 # newest entry the reader had then ("@away.<thread>", sent by the page):
 # client.bend's "N new ↓" (Hold.label), counted over the whole thread, not
@@ -712,7 +725,7 @@ def Render.current_live( +same: Bool, +web: Bool, +u: U.Ui, +cmds: List<&2, J.Js
   match same:
     case False{}: J.Json.obj([J.KV{"remoteReady", J.Flag{False{}}}, J.KV{"nextTarget", Target.after(u)}, J.KV{"session", Route.pack(u)}, J.KV{"cmds", J.Json.arr(cmds)}])
     case True{}:
-      +window = Render.window(stream, index, Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
+      +window = Render.window.context(st, stream, index, Target.thread(st, J.Json.get_obj(p, "target")), p, epoch, rows)
       Obj.put(Obj.put(Obj.put(Obj.put(Render.display(web, Render.ui(u, st, index, J.Json.get_obj(p, "target"), rows, stream, now), p, now, window),
         "remoteReady", J.Flag{True{}}), "session", Route.pack(u)), "cmds", J.Json.arr(cmds)), "window", window)
 
