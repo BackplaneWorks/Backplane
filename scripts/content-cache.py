@@ -22,14 +22,18 @@ written only by trusted main builds), and nothing here claims to provide that.
       JSON: {"hit": [...], "miss": [...], "uncacheable": {...}}. --plan P
       saves the keys as taken BEFORE the check runs, and the misses.
   content-cache.py run-check --plan P [--cache D]
-      check the plan's misses with bend (one manifest; LAWS.bend alone) under
+      needs the inherited heavy-guard lock and admission (it is run by
+      scripts/cached-check.sh); re-reads the tool identity before and after
+      bend runs; check the plan's misses with bend (one manifest; LAWS.bend alone) under
       the verdict policy, then record only those whose key is still the
       planned one. LAWS.bend counts only on a clean verdict (a TODO or any
       other line fails); scripts/check.sh stays the gate for a LAWS with TODO.
   content-cache.py plan-proof PARTITION_DIR [--cache D] [--all]
   content-cache.py record-proof PARTITION_DIR --receipt R...
       proof shards of a verified canonical partition; a receipt is recorded
-      only if it is a real pass for that partition
+      only if it is a passing receipt for that partition. Receipts are read
+      from trusted same-user inputs; this code does not authenticate them
+      (the worker that wrote one is not proven here)
   content-cache.py audit [--cache D]
       every entry must be whole and authentic; prints the others
 
@@ -315,6 +319,22 @@ def run_check(root, plan_file, local=None):
     todo = list(miss)  # an uncacheable module is still checked, only never recorded
     if not todo:
         return 0
+    # bend starts only inside the shared heavy slot: the actual inherited
+    # flock (taken by scripts/heavy-guard.py for scripts/cached-check.sh) and
+    # the guard's own memory admission, here too, so a direct call cannot
+    # skip either
+    guard = _module('heavy-guard.py')
+    if guard.inherited_lock(guard.lock_path()) is None:
+        raise CacheError('run-check needs the inherited heavy-guard lock (run scripts/cached-check.sh)')
+    if not guard.admit('check'):
+        raise CacheError('run-check: heavy-guard admission refused')
+    # the identity is read again, not remembered: a plan made under another
+    # compiler, library or setting is stale, and so is one whose tools change
+    # while bend runs (checked again below)
+    reset_tool_identity()
+    for m, (k, _) in check_units(root, todo).items():
+        if k != keys[m]:
+            raise CacheError('inputs or tools of %s changed since they were planned; nothing run' % m)
     env = {**os.environ, 'BEND_NO_TELEMETRY': '1'}
     work = Path(tempfile.mkdtemp(prefix='.bend-check.', dir=root))
     try:
@@ -342,6 +362,7 @@ def run_check(root, plan_file, local=None):
                 print(out, file=sys.stderr)
                 return 1
             results['LAWS.bend'] = True
+        reset_tool_identity()
         now = check_units(root, list(results))
         for m in results:
             if now[m][0] != keys[m]:  # None (uncacheable) on both sides is equal and is not recorded
