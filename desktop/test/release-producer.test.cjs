@@ -190,3 +190,26 @@ test('macOS sealing permits only declared Electron signature deltas and keeps se
  const service=path.join(dir,producer.TARGETS[f.target].resources,'backplane-service/backplane-serve');fs.appendFileSync(service,'changed service');
  assert.throws(()=>producer.validateSigningChanges(dir,true),/Unexpected post-stage|cannot rewrite/);
 });
+
+
+test('macOS signable mapping renames only the main executable and preserves all helper names',t=>{
+ const f=fixture(t,'darwin-arm64'),suffixes=['',' (GPU)',' (Plugin)',' (Renderer)'];
+ const helpers=suffixes.map(s=>'Electron.app/Contents/Frameworks/Electron Helper'+s+'.app/Contents/MacOS/Electron Helper'+s);
+ for(const n of helpers)put(path.join(f.electron,n),binary(f.target),0o755);
+ f.electronReceipt.signablePaths.push(...helpers);f.electronReceipt.members=producer.inventory(f.electron,f.target);
+ f.request.electron.receipt=ref(write(path.join(f.root,'electron.json'),f.electronReceipt));
+ f.freeze.components[f.target].electronReceiptSha256=f.request.electron.receipt.sha256;f.refresh();
+ const dir=path.join(f.root,'stage');producer.stage(f.requestPath,dir);const s=JSON.parse(fs.readFileSync(path.join(dir,'STAGE.json')));
+ assert(s.signablePaths.includes('Backplane.app/Contents/MacOS/Backplane'));
+ for(const n of helpers){const mapped=n.replace(/^Electron\.app\//,'Backplane.app/');assert(s.signablePaths.includes(mapped));assert(!s.signablePaths.includes(mapped.replace('/MacOS/Electron','/MacOS/Backplane')));fs.appendFileSync(path.join(dir,mapped),'signature-only fixture delta');}
+ assert.doesNotThrow(()=>producer.validateSigningChanges(dir,true));
+ for(const n of ['Backplane.app/Contents/Resources/app/main.cjs','Backplane.app/Contents/Resources/backplane-service/backplane-serve','Backplane.app/Contents/Resources/backplane-service/web/index.html']){
+  const file=path.join(dir,n),before=fs.readFileSync(file);fs.appendFileSync(file,'forbidden application mutation');assert.throws(()=>producer.validateSigningChanges(dir,true),/mutation|cannot rewrite/);fs.writeFileSync(file,before);
+ }
+});
+test('Windows KiStack requires exact canonical LF bytes even with a rebound component inventory',t=>{
+ const f=fixture(t,'windows-x64',true),file=path.join(f.service,'kistack/.claude-plugin/plugin.json'),canonical=fs.readFileSync(file);
+ const refresh=()=>{f.serviceReceipt.members=producer.inventory(f.service,f.target);f.request.service.receipt=ref(write(path.join(f.root,'service.json'),f.serviceReceipt));f.freeze.components[f.target].serviceReceiptSha256=f.request.service.receipt.sha256;f.refresh();};
+ fs.writeFileSync(file,canonical.toString().replace(/\n/g,'\r\n'));refresh();assert.throws(()=>producer.stage(f.requestPath,path.join(f.root,'reject')),/plugin.json/);
+ fs.writeFileSync(file,canonical);refresh();assert.equal(producer.stage(f.requestPath,path.join(f.root,'accept')).status,'STAGED_UNQUALIFIED');
+});

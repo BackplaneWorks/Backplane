@@ -150,7 +150,11 @@ def verify(manifest, expected, complete=True, transport=None):
                 if path.is_symlink():
                     raise ValueError('packet contains a symbolic link')
             actual.update((Path(folder)/name).as_posix() for name in files)
-        expected_files = {f for f in data['files'] if not f.startswith('build/')} | {manifest} | set(transport or {})
+        # The manifest may accompany explicitly declared generated roots under
+        # build/. Its digest and every declared input were verified above, just
+        # like build/ source files; the output-area walk omits both consistently.
+        expected_files = {f for f in {*data['files'], manifest, *(transport or {})}
+                          if not f.startswith('build/')}
         if actual != expected_files:
             raise ValueError('packet contains missing/unexpected source: ' +
                              repr(sorted(actual ^ expected_files)[:8]))
@@ -253,8 +257,11 @@ def run(manifest, expected, command, timeout, size):
         raise ValueError('transport bootstrap/archive is ignored or missing; no Boat job started')
     argv = ['scripts/boat-job.sh', '--size', size, '--timeout', str(timeout),
             '--wait', '0', '--idle', '0', '--artifact', 'build/ci-packet']
-    for f in sorted(known - kept):
-        argv += ['--exclude', literal_pattern(f)]
+    # The runner inventories later, while other jobs can create new archives.
+    # An exclusion snapshot can leak those new files into this job. The exact
+    # allowlist is applied to the runner's own inventory immediately at staging.
+    for f in sorted(kept):
+        argv += ['--include-file', f]
     argv += ['--', 'python3', SELF, 'unpack-execute', '--manifest', manifest,
              '--expect', expected, '--archive', str(archive), '--archive-sha256', checksum, '--', *command]
     print(f'packet {expected}: transferring {len(kept)} files for {len(data["files"])} source inputs; identities verified remotely', flush=True)

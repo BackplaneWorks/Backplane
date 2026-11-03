@@ -130,9 +130,25 @@ struct DeviceManagerView: View {
     @State private var invitation: DeviceInvitation?
     @State private var status = ""
     @State private var revokeTarget: PairedDevice?
+    @State private var links: [IssuedLink] = []
+    @State private var uninviteTarget: IssuedLink?
     struct PairedDevice: Identifiable { let id: String; let name: String; let lastSeen: Date }
+    // a pairing link this hub issued (/auth/devices "invitations"): when, used
+    // or not and by which device; revoking a used one revokes that device too
+    struct IssuedLink: Identifiable {
+        let id: String; let state: String; let created: Date; let expires: Date; let used: Date?; let device: String; let deviceName: String; let deviceRevoked: Bool
+        var revocable: Bool { state == "open" || (state == "used" && !device.isEmpty && !deviceRevoked) }
+        var summary: String {
+            switch state {
+            case "used": return "Used " + (used.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "") + " by " + (deviceName.isEmpty ? "a device" : deviceName) + (deviceRevoked ? " (revoked)" : "")
+            case "revoked": return device.isEmpty ? "Revoked, never used" : "Revoked with " + (deviceName.isEmpty ? "the device it paired" : deviceName)
+            case "expired": return "Expired, never used"
+            default: return "Not used yet · expires " + expires.formatted(date: .omitted, time: .shortened)
+            }
+        }
+    }
     struct DeviceInvitation { let link: String; let code: String; let address: String; let expires: Date; let qr: [String] }
-    private func request(_ path: String, method: String = "GET", device: String? = nil) async throws -> [String: Any] {
+    private func request(_ path: String, method: String = "GET", device: String? = nil, invitation: String? = nil) async throws -> [String: Any] {
         guard let url = Pairing.http(link, path: path, token: false),
               let token = Pairing.socket(link).flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) })?.queryItems?.first(where: { $0.name == "token" })?.value else { throw URLError(.badURL) }
         var request = URLRequest(url: url);request.httpMethod = method;request.timeoutInterval = 8
@@ -140,6 +156,7 @@ struct DeviceManagerView: View {
         request.setValue("native", forHTTPHeaderField: "X-Backplane-Client")
         request.setValue(url.scheme ?? "http", forHTTPHeaderField: "X-Backplane-Scheme")
         if let device { request.setValue(device, forHTTPHeaderField: "X-Backplane-Device") }
+        if let invitation { request.setValue(invitation, forHTTPHeaderField: "X-Backplane-Invitation") }
         let config = URLSessionConfiguration.ephemeral;config.httpShouldSetCookies = false;config.urlCache = nil
         let session = URLSession(configuration: config, delegate: Pairing.NoPairRedirect(), delegateQueue: nil);defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(for: request)
@@ -151,6 +168,11 @@ struct DeviceManagerView: View {
             devices = (result["devices"] as? [[String: Any]] ?? []).filter { $0["revoked"] as? Bool != true }.compactMap { d in
                 guard let id = d["id"] as? String, let name = d["name"] as? String, let seen = d["lastSeen"] as? Double else { return nil }
                 return PairedDevice(id: id, name: name, lastSeen: Date(timeIntervalSince1970: seen / 1000))
+            }
+            links = (result["invitations"] as? [[String: Any]] ?? []).compactMap { x in
+                guard let id = x["id"] as? String, let state = x["state"] as? String, let created = x["createdAt"] as? Double, let expires = x["expiresAt"] as? Double else { return nil }
+                return IssuedLink(id: id, state: state, created: Date(timeIntervalSince1970: created / 1000), expires: Date(timeIntervalSince1970: expires / 1000),
+                    used: (x["usedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }, device: x["device"] as? String ?? "", deviceName: x["deviceName"] as? String ?? "", deviceRevoked: x["deviceRevoked"] as? Bool == true)
             }
         } catch { status = "Could not load devices. Check your connection and pairing." }
     }
@@ -195,6 +217,15 @@ struct DeviceManagerView: View {
                             Button("Revoke", role: .destructive) { revokeTarget = device }
                         }.padding(.vertical, 8)
                     }
+                    Text("Pairing links").font(.headline)
+                    if links.isEmpty { Text("Links made with Add a device appear here.").foregroundStyle(.secondary) }
+                    ForEach(links) { x in
+                        VStack(alignment: .leading) {
+                            Text("Device invitation · " + x.created.formatted(date: .abbreviated, time: .shortened)).font(.headline)
+                            Text(x.summary).foregroundStyle(.secondary)
+                            if x.revocable { Button("Revoke", role: .destructive) { uninviteTarget = x } }
+                        }.padding(.vertical, 8)
+                    }
                 }.frame(maxWidth: 520, alignment: .leading).padding(24)
             }
             .navigationTitle("Devices")
@@ -204,6 +235,10 @@ struct DeviceManagerView: View {
                 Button("Revoke", role: .destructive) { if let device = revokeTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", device: device.id);await refresh() } catch { status = "Could not revoke this device." } } };revokeTarget = nil }
                 Button("Cancel", role: .cancel) { revokeTarget = nil }
             } message: { Text("This device will need a new invitation to reconnect.") }
+            .alert("Revoke this link?", isPresented: Binding(get: { uninviteTarget != nil }, set: { if !$0 { uninviteTarget = nil } })) {
+                Button("Revoke", role: .destructive) { if let x = uninviteTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", invitation: x.id);await refresh() } catch { status = "Could not revoke this link." } } };uninviteTarget = nil }
+                Button("Cancel", role: .cancel) { uninviteTarget = nil }
+            } message: { Text(uninviteTarget?.state == "used" ? "The device it paired (" + ((uninviteTarget?.deviceName).flatMap { $0.isEmpty ? nil : $0 } ?? "unnamed") + ") loses access too." : "It will no longer pair anything.") }
         }
     }
 }

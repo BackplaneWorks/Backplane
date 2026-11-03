@@ -383,10 +383,12 @@ type Msg is Data:
   # screen, Google's sign-in redirect); the reply is the whole response
   # (`ct` its content type; `raw` its bytes, kept only for a form with a
   # recording, which is not text)
-  BotHttp{kind: String, arg: String, peer: String, ts: String, sig: String, gh: String, delivery: String, body: String, ct: String, raw: List<&2, U32>, reply: Chan(List<&2, U32>)}
+  # (`own`: Tailscale said a linked machine's request came from one of
+  # the owner's own devices: Auth.owner.peer)
+  BotHttp{kind: String, arg: String, peer: String, ts: String, sig: String, gh: String, delivery: String, body: String, ct: String, raw: List<&2, U32>, reply: Chan(List<&2, U32>), own: Bool}
   # the same, its signature checked off the hub: `key` is its replay key
   # ("" when it is not genuine); `me` is this machine's name
-  BotVerified{kind: String, arg: String, key: String, body: String, me: String, reply: Chan(List<&2, U32>)}
+  BotVerified{kind: String, arg: String, key: String, body: String, me: String, reply: Chan(List<&2, U32>), own: Bool}
   # a browser page has a new frame: {"t":"shot",...} for every client
   Shot{text: String}
   # a frame only the clients showing its page get (its "all" is false)
@@ -5731,11 +5733,31 @@ def Hub.att_dir(h: Hub, +thread: String, +reply: Chan(String)) -> IO(Hub):
         ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, Nat.show(AT.Att.max(M.Setting.get(st, AT.Att.key(), ""))) ++ "\t" ++ AT.Att.dir(Cfg.home(cfg), thread))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
-# the owner's other machines changed: every client hears
+# the urls of the links that are the owner's machines (Far.own)
+def Hub.machines.url(ok: Bool, p: BO.Peer, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match ok p:
+    case True{} BO.Peer{_, _, u, _, _}:
+      J.Str{u} <> rest
+    case False{} _:
+      rest
+
+def Hub.machines.urls(ps: List<&2, BO.Peer>, +st: M.State, +j: J.Json) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      Hub.machines.url(UC.Far.mine(st, j, p), p, Hub.machines.urls(t, st, j))
+
+# the owner's other machines changed: every client hears (and the pairing
+# links' check learns them, with the urls of the links that are the
+# owner's machines: PAIR.Pairing.known)
 def Hub.machines(h: Hub, +mc: String) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
-      Hub.models.k(Hub{st, f, ls, cl, as, inbox, Cfg.with_machines(cfg, mc), note})
+    case Hub{+st, f, ls, +cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +c2 : Cfg = Cfg.with_machines(cfg, mc)
+        PAIR.Pairing.known(mc, J.Json.show(J.Json.arr(Hub.machines.urls(BO.World.peers(M.State.bots(st)), st, Maybe.default(&2, J.Json, J.Json.parse(mc), J.Null{})))))
+        Hub.models.k(Hub{st, f, ls, cl, as, inbox, c2, note})
 
 # the providers' models changed: new threads' prompts and every client see
 # the new list
@@ -7882,39 +7904,49 @@ def BotJob.invite(+inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: Strin
     ok : Bool <- BN.Bn.peer.save(home, peer, secret)
     BotJob.invited(ok, inbox, client, id, Bool.pick(String, String.is_empty(String.trim(given)), here, String.trim(given)), peer, secret)
 
-def BotJob.linked.k(ok: Bool, +name: String, +code: Nat, +body: String, +inbox: Chan(Msg), +home: String, +url: String, +peer: String, +client: U32, +id: String, +now: Nat) -> IO(Unit):
+# (own: this hub asked one of the owner's machines to pair, Pair.ask, so
+# the link is recorded as the owner's: UC.Far.own.key; a pasted invite
+# may be anyone's)
+def BotJob.linked.own(own: Bool, +peer: String, +now: Nat) -> List<&2, M.Change>:
+  match own:
+    case True{}:
+      [M.SettingSet{UC.Far.own.key(peer), "pair", now}]
+    case False{}:
+      Nil{}
+
+def BotJob.linked.k(ok: Bool, +name: String, +code: Nat, +body: String, +inbox: Chan(Msg), +home: String, +url: String, +peer: String, +client: U32, +id: String, +now: Nat, own: Bool) -> IO(Unit):
   match ok:
     case True{}:
       do IO<Unit>:
         +shown : String = Bool.pick(String, String.is_empty(name), peer, name)
-        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.PeerSet{peer, shown, url, False{}, now}]})
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{List.append(&2, M.Change, BotJob.linked.own(own, peer, now), [M.PeerSet{peer, shown, url, False{}, now}])})
         BotJob.reply(inbox, client, id, True{}, [J.KV{"peer", J.Str{peer}}, J.KV{"name", J.Str{shown}}])
     case False{}:
       do IO<Unit>:
         BN.Bn.peer.forget(home, peer)
         BotJob.fail(inbox, client, id, "the other machine did not link (" ++ Nat.show(code) ++ ") " ++ String.take(String.trim(body), 200n))
 
-def BotJob.linked(r: BN.Resp, +inbox: Chan(Msg), +home: String, +url: String, +peer: String, +client: U32, +id: String, +now: Nat) -> IO(Unit):
+def BotJob.linked(r: BN.Resp, +inbox: Chan(Msg), +home: String, +url: String, +peer: String, +client: U32, +id: String, +now: Nat, own: Bool) -> IO(Unit):
   match r:
     case BN.Resp{+code, +body}:
       BotJob.linked.k(Nat.is_eq(code, 200n), BN.Bn.clean(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "name", "")), code, body,
-        inbox, home, url, peer, client, id, now)
+        inbox, home, url, peer, client, id, now, own)
 
 # joining with an invite: keep its secret, tell the inviter where we are
 # (signed POST /bots/link), and link once it answers with its name
-def BotJob.join(+inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32, +url: String, +peer: String, +secret: String, +client: U32, +id: String) -> IO(Unit):
+def BotJob.join(+inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32, +url: String, +peer: String, +secret: String, +client: U32, +id: String, own: Bool) -> IO(Unit):
   do IO<Unit>:
     ok : Bool <- BN.Bn.peer.save(home, peer, secret)
     +here : String <- BN.Bn.url.here(tailnet, host, port)
     +me : String <- BN.Bn.name()
     +now : Nat <- Now.nat()
     r : BN.Resp <- BN.Bn.signed(home, url, peer, secret, now, "/bots/link", True{}, J.Json.show(J.Json.obj([J.KV{"url", J.Str{here}}, J.KV{"name", J.Str{me}}])))
-    BotJob.linked(r, inbox, home, url, peer, client, id, now)
+    BotJob.linked(r, inbox, home, url, peer, client, id, now, own)
 
 def BotJob.join.go(ok: Bool, linked: Bool, +inbox: Chan(Msg), +cfg: Cfg, +url: String, +peer: String, +secret: String, +client: U32, +id: String) -> IO(Unit):
   match ok linked:
     case True{} False{}:
-      IO.spawn(Unit, BotJob.join(inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), url, peer, secret, client, id))
+      IO.spawn(Unit, BotJob.join(inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), url, peer, secret, client, id, False{}))
     case True{} True{}:
       BotJob.fail(inbox, client, id, "already linked to that machine")
     case False{} _:
@@ -9127,11 +9159,11 @@ def Far.some(m: Maybe<&2, String>) -> Bool:
     case None{}:
       False{}
 
-# (and not one the owner turned sync off with: "sync.<name>", UC.Mate.off)
+# (and not one the owner turned sync off with: "sync.<name>", UC.Mate.off;
+# and one this hub verified as the owner's, never from what it says of
+# itself: UC.Far.mine, UC.Far.verified)
 def Far.own(+st: M.State, +cfg: Cfg, p: BO.Peer) -> Bool:
-  match p:
-    case BO.Peer{_, +n, +u, _, r}:
-      Bool.and(Bool.and(Bool.not(r), Bool.not(UC.Mate.off(st, n))), Far.some(UC.Far.machine(Far.machines(cfg), n, u)))
+  UC.Far.mine(st, Far.machines(cfg), p)
 
 def Far.keep(ok: Bool, p: BO.Peer, rest: List<&2, BO.Peer>) -> List<&2, BO.Peer>:
   match ok:
@@ -14734,7 +14766,7 @@ def Hub.dir.refresh(h: Hub, +peer: String) -> IO(Hub):
 def Pair.joined(m: Maybe<&2, SG.Inv>, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32) -> IO(Unit):
   match m:
     case Some{SG.Inv{+url, +peer, +secret}}:
-      BotJob.join(inbox, home, tailnet, host, port, url, peer, secret, Far.client(), "0")
+      BotJob.join(inbox, home, tailnet, host, port, url, peer, secret, Far.client(), "0", True{})
     case None{}:
       Log.info("pair: the answer held no invite")
 
@@ -15710,7 +15742,7 @@ def Bot.me(+link: Bool) -> IO(String):
 # replay key (or "") back to the hub
 def Bot.refuse(+id: String, +key: String, body: String, +reply: Chan(List<&2, U32>), +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotVerified{"hook", id, key, body, "", reply})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotVerified{"hook", id, key, body, "", reply, False{}})
     return Unit{}
 
 # a form (the Pebble Index ring's) becomes a JSON object; any other body
@@ -15734,17 +15766,17 @@ def Bot.heard(+home: String, +kind: String, +id: String, +key: String, +ct: Stri
     +nonce : String <- BN.Bn.random(6n)
     +heard : String <- VO.Vo.ring(home, nonce, ct, body, raw)
     +none : Chan(List<&2, U32>) <- Chan.new(List<&2, U32>, 1)
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotVerified{kind, id, key, Bot.bearer.body(form, heard, size), me, none})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotVerified{kind, id, key, Bot.bearer.body(form, heard, size), me, none, False{}})
     return Unit{}
 
 def Bot.verify.go(heard: Bool, +home: String, +kind: String, +id: String, +key: String, +ct: String, +body: String, raw: List<&2, U32>, +me: String,
-    +reply: Chan(List<&2, U32>), +inbox: Chan(Msg)) -> IO(Unit):
+    +reply: Chan(List<&2, U32>), +inbox: Chan(Msg), own: Bool) -> IO(Unit):
   match heard:
     case True{}:
       Bot.heard(home, kind, id, key, ct, body, raw, me, False{}, "", reply, inbox)
     case False{}:
       do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotVerified{kind, id, key, body, me, reply})
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotVerified{kind, id, key, body, me, reply, own})
         return Unit{}
 
 # the replay key: a form with a recording is checked over its bytes (the
@@ -15760,13 +15792,13 @@ def Bot.verify.key(text: Bool, +hook: Bool, +secret: String, +now: Nat, +key: St
 # the secret of the hook or the peer, the signature against it, and the
 # replay key (or "") back to the hub
 def Bot.verify(+hook: Bool, +home: String, +kind: String, +id: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
-    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat, +inbox: Chan(Msg)) -> IO(Unit):
+    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat, +inbox: Chan(Msg), own: Bool) -> IO(Unit):
   do IO<Unit>:
     +secret : String <- BN.Bn.secret.of(hook, home, id)
     +me : String <- Bot.me(String.eq(kind, "link"))
     +key : String = Bot.verify.key(List.is_empty(&2, U32, raw), hook, secret, now, kind ++ ":" ++ id, ts, sig, gh, dl, body, raw)
     Bot.verify.go(Bool.and(Bool.not(List.is_empty(&2, U32, raw)), Bool.not(String.is_empty(key))), home, kind, id, key, ct, body, raw,
-      Bool.pick(String, String.contains(key, ":i:"), "ring", me), reply, inbox)
+      Bool.pick(String, String.contains(key, ":i:"), "ring", me), reply, inbox, own)
 
 def Bot.bearer.go(heard: Bool, form: Bool, +home: String, +key: String, +ct: String, +size: String, +id: String, +body: String, raw: List<&2, U32>,
     +reply: Chan(List<&2, U32>), +inbox: Chan(Msg)) -> IO(Unit):
@@ -15808,10 +15840,10 @@ def Bot.hook.in(i: Nat, +home: String, +id: String, +ts: String, +sig: String, +
     case 1n:
       Bot.bearer(String.split(gh, '\n'), home, id, body, ct, raw, reply, now, inbox)
     case _:
-      Bot.verify(True{}, home, "hook", id, ts, sig, gh, dl, body, ct, raw, reply, now, inbox)
+      Bot.verify(True{}, home, "hook", id, ts, sig, gh, dl, body, ct, raw, reply, now, inbox, False{})
 
 def Bot.http.job(i: Nat, +home: String, +port: U32, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String,
-    +body: String, +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat, +inbox: Chan(Msg)) -> IO(Unit):
+    +body: String, +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat, +inbox: Chan(Msg), own: Bool) -> IO(Unit):
   match i:
     case 0n:
       Bot.shot(home, arg, reply)
@@ -15820,7 +15852,7 @@ def Bot.http.job(i: Nat, +home: String, +port: U32, +kind: String, +arg: String,
     case 2n:
       Bot.hook.in(Bot.hook.how(sig, gh), home, arg, ts, sig, gh, dl, body, ct, raw, reply, now, inbox)
     case _:
-      Bot.verify(False{}, home, kind, peer, ts, sig, gh, dl, body, "", Nil{}, reply, now, inbox)
+      Bot.verify(False{}, home, kind, peer, ts, sig, gh, dl, body, "", Nil{}, reply, now, inbox, own)
 
 def Bot.page.sent(none: Bool, +html: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
   match none:
@@ -15846,11 +15878,11 @@ def Hub.bot.page(h: Hub, +bot: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def Hub.bot_http.job(h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
-    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat, own: Bool) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Bot.http.job(C.Codec.pos(["shot", "oauth", "hook"], kind), Cfg.home(cfg), Cfg.port(cfg), kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, inbox))
+        IO.spawn(Unit, Bot.http.job(C.Codec.pos(["shot", "oauth", "hook"], kind), Cfg.home(cfg), Cfg.port(cfg), kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, inbox, own))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # POST /bots/pair?name=<its name>&url=<its address>: one of the owner's
@@ -15865,20 +15897,25 @@ def Pair.invited(ok: Bool, +code: String, +reply: Chan(List<&2, U32>)) -> IO(Uni
     case False{}:
       Bot.answer(reply, W.Http.text("500 Internal Server Error", "could not keep the invite's secret"))
 
-def Pair.invite(+home: String, +tailnet: Bool, +host: String, +port: U32, +reply: Chan(List<&2, U32>)) -> IO(Unit):
+# (the invite's link is recorded as one of the owner's machines before
+# the answer goes: only the owner's own devices get this far, and the
+# machine that asked links with it next: UC.Far.own.key)
+def Pair.invite(+home: String, +tailnet: Bool, +host: String, +port: U32, +reply: Chan(List<&2, U32>), +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     +here : String <- BN.Bn.url.here(tailnet, host, port)
     +r : String <- BN.Bn.random(2n)
     +peer : String = "p" ++ r
     +secret : String <- BN.Bn.secret.fresh()
+    +now : Nat <- Now.nat()
+    sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.SettingSet{UC.Far.own.key(peer), "pair", now}]})
     ok : Bool <- BN.Bn.peer.save(home, peer, secret)
     Pair.invited(ok, SG.Invite.make(here, peer, secret), reply)
 
 def Hub.bot.pair.k(i: Nat, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
   match i h:
-    case 0n Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+    case 0n Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Pair.invite(Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), reply))
+        IO.spawn(Unit, Pair.invite(Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), reply, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case 1n _:
       Hub.answer(h, reply, W.Http.text("403 Forbidden", "sync with that machine is off here"))
@@ -16022,31 +16059,47 @@ def Hub.bot.act(i: Nat, h: Hub, +arg: String, +body: String, +me: String, +reply
     case _ _:
       Hub.answer(h, reply, W.Http.text("404 Not Found", "not found"))
 
-def Hub.bot.seen(bad: Bool, m: Maybe<&2, SG.Seen>, h: Hub, +why: String, +kind: String, +arg: String, body: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+# a linked machine's genuine request that Tailscale says came from one of
+# the owner's own devices (Auth.owner.peer) makes its link one of the
+# owner's machines ("tailnet": UC.Far.own.key), unless this hub already
+# knows how it stands (or the owner said it is not theirs). This is how
+# links made before the hub recorded it become the owner's again.
+def Hub.bot.vouched(go: Bool, h: Hub, +arg: String, +now: Nat) -> IO(Hub):
+  match go:
+    case True{}:
+      do IO<Hub>:
+        Log.info("far: Tailscale says link " ++ arg ++ " is one of your machines")
+        Hub.step(h, B.Step{[M.SettingSet{UC.Far.own.key(arg), "tailnet", now}], Nil{}})
+    case False{}:
+      IO.pure(Hub, h)
+
+def Hub.bot.seen(bad: Bool, m: Maybe<&2, SG.Seen>, h: Hub, +why: String, +kind: String, +arg: String, body: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat, own: Bool) -> IO(Hub):
   match bad m h:
     case True{} _ _:
       Hub.answer(h, reply, W.Http.text("401 Unauthorized", why))
     case False{} None{} _:
       Hub.answer(h, reply, W.Http.text("401 Unauthorized", "already seen"))
-    case False{} Some{s} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+    case False{} Some{s} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
         Bot.dir.awake(Bool.and(Bool.or(String.eq(kind, "dir"), String.eq(kind, "deliver")), BH.Dir.stale(
           J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(BN.Bn.dir(Cfg.bn(cfg))), J.Null{})), arg)), inbox, arg)
-        Hub.bot.act(C.Codec.pos(["hook", "deliver", "link", "dir", "far-push", "far-log", "far-rpc"], kind), Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_seen(Cfg.bn(cfg), s)), note},
-        arg, body, me, reply, now)
+        h2 : Hub <- Hub.bot.vouched(Bool.and(own, Bool.and(Bool.not(String.eq(kind, "hook")), String.is_empty(UC.Far.own.how(st, arg)))),
+          Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_seen(Cfg.bn(cfg), s)), note}, arg, now)
+        Hub.bot.act(C.Codec.pos(["hook", "deliver", "link", "dir", "far-push", "far-log", "far-rpc"], kind), h2, arg, body, me, reply, now)
 
 # a signed request (or a webhook's bearer token), checked: genuine (key),
 # not seen before, then acted on; a refusal says why
-def Hub.bot_verified(h: Hub, +kind: String, +arg: String, +key: String, body: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+def Hub.bot_verified(h: Hub, +kind: String, +arg: String, +key: String, body: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat, own: Bool) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.bot.seen(BN.Bn.refused(key), BN.Bn.accept(Cfg.bn(cfg), key, now), Hub{st, f, ls, cl, as, inbox, cfg, note}, BN.Bn.denied(key), kind, arg, body, me, reply, now)
+      Hub.bot.seen(BN.Bn.refused(key), BN.Bn.accept(Cfg.bn(cfg), key, now), Hub{st, f, ls, cl, as, inbox, cfg, note}, BN.Bn.denied(key), kind, arg, body, me, reply, now, own)
 
 # Connections for bots' routes
 # ----------------------------
 
+# (own: Auth.owner.peer, only ever for a linked machine's signed request)
 type BotReq is Data:
-  BotReq{kind: String, arg: String, peer: String, ts: String, sig: String, gh: String, delivery: String}
+  BotReq{kind: String, arg: String, peer: String, ts: String, sig: String, gh: String, delivery: String, own: Bool}
 
 def Conn.bot.kind.k(+post: Bool, +get: Bool, +r: String) -> Nat:
   Bool.pick(Nat, Bool.and(post, String.starts_with(r, "/hook/")), 1n,
@@ -16085,7 +16138,7 @@ def Hub.bot.tshot(h: Hub, +arg: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
 
 def Hub.bot_http.page(i: Nat, h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
     +ct: String, +raw: List<&2, U32>,
-    +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+    +reply: Chan(List<&2, U32>), +now: Nat, own: Bool) -> IO(Hub):
   match i:
     case 0n:
       Hub.bot.page(h, arg, reply)
@@ -16096,11 +16149,11 @@ def Hub.bot_http.page(i: Nat, h: Hub, +kind: String, +arg: String, +peer: String
     case 3n:
       Hub.bot.tshot(h, arg, reply)
     case _:
-      Hub.bot_http.job(h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now)
+      Hub.bot_http.job(h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, own)
 
 def Hub.bot_http(h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
-    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
-  Hub.bot_http.page(C.Codec.pos(["page", "pair", "view", "tshot"], kind), h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now)
+    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat, own: Bool) -> IO(Hub):
+  Hub.bot_http.page(C.Codec.pos(["page", "pair", "view", "tshot"], kind), h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, own)
 
 # /bots/<id>/space.html: the id ("" when it is not a plain id)
 # (a plain id, or a mirrored bot's "<link>~<id>" of two plain ids)
@@ -16165,10 +16218,10 @@ def Conn.bot.codec.request(kind: String, body: String) -> Bool:
 # the hub answers the whole response on a channel made for this request
 def Conn.bot.ask(s: Socket, rq: BotReq, +body: String, +ct: String, raw: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
   match rq:
-    case BotReq{+k, a, p, t, sg, g, d}:
+    case BotReq{+k, a, p, t, sg, g, d, o}:
       do IO<Unit>:
         +reply : Chan(List<&2, U32>) <- Chan.new(List<&2, U32>, 1)
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotHttp{k, a, p, t, sg, g, d, body, ct, raw, reply})
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BotHttp{k, a, p, t, sg, g, d, body, ct, raw, reply, o})
         m : Maybe<&1, List<&2, U32>> <- Chan.recv(List<&2, U32>, reply)
         Conn.bot.answer.codec(Conn.bot.codec.request(k, body), m, s)
 
@@ -16230,11 +16283,15 @@ def Bot.gh.k(ring: Bool, +hs: List<&2, W.Header>) -> String:
 def Bot.gh(+hs: List<&2, W.Header>) -> String:
   Bot.gh.k(Bool.not(String.is_empty(W.Http.header_of(hs, "x-index-signature"))), hs)
 
-# a signed request (no token: webhooks come from outside; peers sign)
-def Conn.bot.signed(+kind: String, +arg: String, s: Socket, +hs: List<&2, W.Header>, rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
+# a signed request (no token: webhooks come from outside; peers sign;
+# own: Tailscale said it came from one of the owner's devices)
+def Conn.bot.signed.o(own: Bool, +kind: String, +arg: String, s: Socket, +hs: List<&2, W.Header>, rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
   Conn.bot.signed.k(BN.Bn.safe(arg), Nat.is_gt(Conn.bot.len(hs), Bot.cap.of(W.Http.header_of(hs, "content-type"))), s, rest, Conn.bot.len(hs),
     BotReq{kind, arg, W.Http.header_of(hs, "x-backplane-peer"), W.Http.header_of(hs, "x-backplane-timestamp"), W.Http.header_of(hs, "x-backplane-signature"),
-      Bot.gh(hs), W.Http.header_of(hs, "x-github-delivery")}, W.Http.header_of(hs, "content-type"), inbox)
+      Bot.gh(hs), W.Http.header_of(hs, "x-github-delivery"), own}, W.Http.header_of(hs, "content-type"), inbox)
+
+def Conn.bot.signed(+kind: String, +arg: String, s: Socket, +hs: List<&2, W.Header>, rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
+  Conn.bot.signed.o(False{}, kind, arg, s, hs, rest, inbox)
 
 # a client's own route (a bot's screen, Google's redirect): the same
 # authorisation as the websocket's
@@ -16429,11 +16486,11 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case 4n W.Request{_, _, +hs}:
       Conn.bot.signed("dir", W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
     case 5n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"shot", Conn.bot.shot_id(W.Http.route(p)), "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"shot", Conn.bot.shot_id(W.Http.route(p)), "", "", "", "", "", False{}}, inbox)
     case 6n W.Request{+method, +p, +hs}:
-      Conn.bot.own(AUTH.Auth.oauth(trusted, hs, method, p, token), s, BotReq{"oauth", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(AUTH.Auth.oauth(trusted, hs, method, p, token), s, BotReq{"oauth", p, "", "", "", "", "", False{}}, inbox)
     case 7n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"page", Conn.bot.page_id(W.Http.route(p)), "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"page", Conn.bot.page_id(W.Http.route(p)), "", "", "", "", "", False{}}, inbox)
     case 8n W.Request{_, _, +hs}:
       Conn.bot.signed("far-push", W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
     case 9n W.Request{_, _, +hs}:
@@ -16441,11 +16498,11 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case 10n W.Request{_, _, +hs}:
       Conn.bot.signed("far-rpc", W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
     case 11n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"pair", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"pair", p, "", "", "", "", "", False{}}, inbox)
     case 12n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"view", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"view", p, "", "", "", "", "", False{}}, inbox)
     case 13n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"tshot", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"tshot", p, "", "", "", "", "", False{}}, inbox)
     case _ _:
       Conn.route.vin(Conn.is_vin(req), s, req, rest, web, id, inbox, trusted, token)
 
@@ -16592,7 +16649,10 @@ def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Requ
   match route req:
     case "/auth/invitations" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "create", "", inbox)
     case "/auth/devices" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "GET"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "list", "", inbox)
-    case "/auth/revoke" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "revoke", W.Http.header_of(hs, "x-backplane-device"), inbox)
+    case "/auth/revoke" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs,
+      Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), "revoke", "uninvite"),
+      Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), W.Http.header_of(hs, "x-backplane-device"), W.Http.header_of(hs, "x-backplane-invitation")), inbox)
+    case "/auth/known" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "known", W.Http.header_of(hs, "x-backplane-origin"), inbox)
     case _ _: Conn.devices.fallback(String.is_empty(token), token, s, req, rest, web, id, inbox, trusted)
 
 
@@ -16621,19 +16681,41 @@ def Conn.route(s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +i
       Desktop.route(String.eq(W.Http.route(path), "/desktop/browser/v1"), s, W.Request{method, path, hs}, rest, web, id, inbox, trusted, token)
 
 # A whois-verified native machine may request an auto-pair invite on
-# this tailnet listener's own authorities. All other requests go through
-# the original routing/auth gates with their original headers intact.
-def Conn.owner.gate(go: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+# this tailnet listener's own authorities. A linked machine's signed
+# request from one of the owner's devices (Auth.owner.peer) goes to the
+# bots' routes with that said (its signature is still checked there).
+# All other requests go through the original routing/auth gates with
+# their original headers intact.
+def Conn.owner.peer.kind(k: Nat) -> String:
+  match k:
+    case 2n: "deliver"
+    case 3n: "link"
+    case 4n: "dir"
+    case 8n: "far-push"
+    case 9n: "far-log"
+    case 10n: "far-rpc"
+    case _: ""
+
+def Conn.owner.peer.go(other: Bool, +peer: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+  match other req:
+    case True{} _:
+      Conn.route(s, req, rest, web, id, inbox, trusted, token)
+    case False{} W.Request{_, _, +hs}:
+      Conn.bot.signed.o(True{}, peer, W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
+
+def Conn.owner.gate(go: Bool, +peer: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match go req:
     case True{} W.Request{_, p, _}:
-      Conn.bot.own(True{}, s, BotReq{"pair", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(True{}, s, BotReq{"pair", p, "", "", "", "", "", False{}}, inbox)
     case False{} _:
-      Conn.route(s, req, rest, web, id, inbox, trusted, token)
+      Conn.owner.peer.go(String.is_empty(peer), peer, s, req, rest, web, id, inbox, trusted, token)
 
 def Conn.owner.route(s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String, +own: List<&2, String>) -> IO(Unit):
   match req:
     case W.Request{+method, +path, +hs}:
-      Conn.owner.gate(AUTH.Auth.owner.pair(trusted, own, hs, method, path), s, W.Request{method, path, hs}, rest, web, id, inbox, trusted, token)
+      Conn.owner.gate(AUTH.Auth.owner.pair(trusted, own, hs, method, path),
+        Bool.pick(String, AUTH.Auth.owner.peer(trusted, own, hs), Conn.owner.peer.kind(Conn.bot.kind(W.Request{method, path, hs})), ""),
+        s, W.Request{method, path, hs}, rest, web, id, inbox, trusted, token)
 
 def Conn.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg),
     +trusted: Bool, +token: String, +own: List<&2, String>, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
@@ -17975,9 +18057,9 @@ def Msg.kind(m: Msg) -> String:
       "bots_found"
     case BotsRefresh{_}:
       "bots_refresh"
-    case BotHttp{_, _, _, _, _, _, _, _, _, _, _}:
+    case BotHttp{_, _, _, _, _, _, _, _, _, _, _, _}:
       "bot_http"
-    case BotVerified{_, _, _, _, _, _}:
+    case BotVerified{_, _, _, _, _, _, _}:
       "bot_verified"
     case ShotTo{_, _}:
       "shot"
@@ -19355,10 +19437,10 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.bots_found(h, peer, url, result)
     case BotsRefresh{peer}:
       Hub.dir.refresh(h, peer)
-    case BotHttp{kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply}:
-      Hub.bot_http(h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now)
-    case BotVerified{kind, arg, key, body, me, reply}:
-      Hub.bot_verified(h, kind, arg, key, body, me, reply, now)
+    case BotHttp{kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, own}:
+      Hub.bot_http(h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, own)
+    case BotVerified{kind, arg, key, body, me, reply, own}:
+      Hub.bot_verified(h, kind, arg, key, body, me, reply, now, own)
     case NewProject{_, root, name, id, reply}:
       Hub.newproj.made(h, root, name, id, reply, now)
     case CalAsk{thread, tool, args, detail, id, reply, ask}:

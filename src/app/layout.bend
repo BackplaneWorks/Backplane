@@ -3951,16 +3951,29 @@ def Set.pair(+ty: Ty, +info: Map<&2, String>, +on: Bool, +x: U32, +w: U32, +y: U
 # the first-run tour again (core/onboard.bend: action "ob-open")
 # Your machines (U.Mate.rows): what the hub found of the owner's other
 # machines, each with how its sync goes and On/Off ("sync.<name>")
-def Set.mates.rows(rs: List<&2, U.MateRow>, +ty: Ty, +x: U32, +w: U32, +y: U32) -> List<&2, Out>:
-  match rs:
-    case Nil{}:
-      Nil{}
-    case U.MateRow{+nm, +note, +on, +key} <> t:
+# (a link nothing verified asks the owner instead: Mine / Not mine, action
+# "peer-own" with "<link>=1" or "<link>=0")
+def Set.mates.row(ask: Bool, +ty: Ty, +nm: String, +note: String, +on: String, +key: String, +link: String, +x: U32, +w: U32, +y: U32) -> Out:
+  match ask:
+    case True{}:
+      +label0 = MSG.T.machines.mine(Ty.loc(ty))
+      +label1 = MSG.T.machines.notmine(Ty.loc(ty))
+      Out.all([Set.row.r(ty, nm, note, x, y, w, (Lay.button.w(ty, label0) + Lay.button.w(ty, label1) + 22 : U32)),
+        Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label1) - 6 - Lay.button.w(ty, label0) : U32), (y + 12 : U32), label0, False{}, "peer-own", link ++ "=1"),
+        Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label1) : U32), (y + 12 : U32), label1, False{}, "peer-own", link ++ "=0")])
+    case False{}:
       +label0 = MSG.T.settings.lang.on(Ty.loc(ty))
       +label1 = MSG.T.settings.lang.off(Ty.loc(ty))
       Out.all([Set.row.r(ty, nm, note, x, y, w, (Lay.button.w(ty, label0) + Lay.button.w(ty, label1) + 22 : U32)),
         Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label1) - 6 - Lay.button.w(ty, label0) : U32), (y + 12 : U32), label0, String.eq(on, "on"), "setting", key ++ "=on"),
-        Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label1) : U32), (y + 12 : U32), label1, String.eq(on, "off"), "setting", key ++ "=off")]) <> Set.mates.rows(t, ty, x, w, (y + 52 : U32))
+        Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label1) : U32), (y + 12 : U32), label1, String.eq(on, "off"), "setting", key ++ "=off")])
+
+def Set.mates.rows(rs: List<&2, U.MateRow>, +ty: Ty, +x: U32, +w: U32, +y: U32) -> List<&2, Out>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case U.MateRow{+nm, +note, +on, +key, +ask} <> t:
+      Set.mates.row(Bool.not(String.is_empty(ask)), ty, nm, note, on, key, ask, x, w, y) <> Set.mates.rows(t, ty, x, w, (y + 52 : U32))
 
 # the section's height, its head included
 def Set.mates.h(+n: S.Nui) -> U32:

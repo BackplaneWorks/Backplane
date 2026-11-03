@@ -49,7 +49,7 @@ def more() -> List<&2, FR.Item>:
   numbered([M.MessagePosted{"bt1", "m2", M.Assistant{}, "hi there", 103n}, M.TurnChanged{"bt1", M.Completed{}, 104n}], 20n)
 
 def here() -> List<&2, M.Change>:
-  [M.PeerSet{"p1", "box", "http://box:3787", False{}, 50n},
+  [M.PeerSet{"p1", "box", "http://box:3787", False{}, 50n}, M.SettingSet{"peer.own.p1", "pair", 50n},
    M.ThreadCreated{"t1", "", "Pip", M.Local{}, "", "", "claude", "", 90n}, M.BotSet{"b9", "Pip", "t1", 3n, "", 90n}]
 
 def recv(+u: U.Ui, +o: J.Json) -> U.Ui:
@@ -172,7 +172,7 @@ def mates(rs: List<&2, U.MateRow>) -> String:
   match rs:
     case Nil{}:
       ""
-    case U.MateRow{n, note, on, key} <> t:
+    case U.MateRow{n, note, on, key, _} <> t:
       n ++ " " ++ on ++ " " ++ key ++ ": " ++ note ++ "\n" ++ mates(t)
 
 def main() -> IO(Unit):
@@ -188,7 +188,7 @@ def main() -> IO(Unit):
     C.Check.str("ids", FR.Fr.id("p1", "t~x") ++ " " ++ FR.Fr.link("p1~t~x") ++ " " ++ FR.Fr.local("p1~t~x") ++ " [" ++ FR.Fr.link("t1") ++ "] " ++ FR.Fr.local("t1"),
       "p1~t~x p1 t~x [] t1")
     C.Check.str("thread folded in under its link", count(u, "p1~bt1") ++ " " ++ title(U.Ui.thread(U.Ui.state(u), "p1~bt1")), "1 Kit")
-    C.Check.str("its hub's sequence untouched", Nat.show(M.State.seq(U.Ui.state(u))), "3")
+    C.Check.str("its hub's sequence untouched", Nat.show(M.State.seq(U.Ui.state(u))), "4")
     C.Check.str("bot listed once, as a bot with its machine", rows(BU.BU.rows(u)),
       "b9|Pip|sleep|False||;p1~b1|Kit|work|True|box|p1;")
     C.Check.str("rows open as bots", acts(BU.BU.rows(u)), "bot;bot;")
@@ -234,7 +234,7 @@ def main() -> IO(Unit):
     +e3 : U.Ui = recv(e2, Maybe.default(&2, J.Json, J.Json.parse(FR.Fr.msg.epoch("p1", "box", False{}, 0n, 1n,
       numbered([M.ThreadCreated{"new", "", "New history", M.Local{}, "", "", "claude", "", 200n}], 1n), "new")), J.Null{}))
     C.Check.str("reset removes old entries and bot", count(e3, "p1~bt1") ++ " " ++ Bool.show(BT.Maybe.is(BT.Bot, BT.World.find.id(BT.World.bot(M.State.bots(U.Ui.state(e3)), "p1~b1")))), "0 False")
-    C.Check.str("reset preserves local and other mirror", Nat.show(M.State.seq(U.Ui.state(e3))) ++ " " ++ count(e3, "p2~bt1") ++ " " ++ title(U.Ui.thread(U.Ui.state(e3), "t1")), "3 1 Pip")
+    C.Check.str("reset preserves local and other mirror", Nat.show(M.State.seq(U.Ui.state(e3))) ++ " " ++ count(e3, "p2~bt1") ++ " " ++ title(U.Ui.thread(U.Ui.state(e3), "t1")), "4 1 Pip")
     C.Check.str("reset takes the lower new head", Nat.show(FR.Fr.head(U.Ui.state(e3), "p1")) ++ " " ++ title(U.Ui.thread(U.Ui.state(e3), "p1~new")), "1 New history")
     +disk : FR.In = FR.Fr.file.read("{\"epoch\":\"new\"}\n" ++ FR.Fr.file.batch(numbered([M.ThreadCreated{"new", "", "New history", M.Local{}, "", "", "claude", "", 200n}], 1n), 1n), "p1", "box")
     C.Check.str("disk keeps epoch and head", FR.In.epoch(disk) ++ " " ++ Nat.show(FR.In.head(disk)) ++ " " ++ Bool.show(FR.In.away(disk)), "new 1 True")

@@ -65,7 +65,7 @@ jobs:
           spec=importlib.util.spec_from_file_location('ki',root/'scripts/kistack.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
           f=raw/'kistack/.claude-plugin/plugin.json'
           if not f.exists():
-              f.parent.mkdir(parents=True,exist_ok=True);f.write_text(m.MANIFEST)
+              f.parent.mkdir(parents=True,exist_ok=True);f.write_bytes(m.MANIFEST.encode('utf-8'))
           pin=m.check(raw/'kistack',root)
           b=json.loads((raw/'BUILD.json').read_text());binary=raw/b['service']
           assert hashlib.sha256(binary.read_bytes()).hexdigest()==b['binary_sha256']

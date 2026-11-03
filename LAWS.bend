@@ -85,6 +85,7 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+
 import ./src/core/wire-retention.bend as WRET
 
 import ./src/core/project-home.bend as PHOME
@@ -15892,4 +15893,11 @@ law stored_wire_cache_is_empty:
 law memory_wire_reference_is_exact:
   for xs: List<&2, String>
   {WRET.WireRetention.keep(False{}, xs) == xs : List<&2, String>}
+
+law autosettle_finished_work_wake_not_running:
+  for owned: Map<&2, Nat>
+  {AUTOS.Auto.wake.active.kind("work", "ended", Map.new(&2, Nat), owned) == False{} : Bool}
+
+law autosettle_live_thread_wake_held:
+  {AUTOS.Auto.wake.active.kind("thread", "t", Map.new(&2, Nat), Map.set(&2, Nat, Map.new(&2, Nat), "t", 1n)) == True{} : Bool}
 

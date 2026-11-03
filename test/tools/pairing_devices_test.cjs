@@ -17,8 +17,53 @@ test('wrong, expired and reused codes have explicit errors; a hub-wide bucket li
  for(let i=0;i<9;i++) assert.equal(f.store.enroll('NOPE0000','').error,'wrong_code');assert.equal(f.store.enroll(invite.code,'').error,'rate_limited');f.advance(60001);assert.equal(f.store.enroll(invite.code,'').error,'expired_code');
 });
 test('failed durable write cannot consume an invite or replace an existing registry',t=>{
- const f=fixture(t);const first=f.store.enroll(f.store.create(['http://hub']).code,'Old');const before=fs.readFileSync(path.join(f.home,'devices-v1.json'),'utf8');let refuse=true;
- const store=factory({...f.opts,fs:{...fs,renameSync(...a){if(refuse)throw Error('synthetic');return fs.renameSync(...a)}}});const invite=store.create(['http://hub']);assert.throws(()=>store.enroll(invite.code,'New'));assert.equal(fs.readFileSync(path.join(f.home,'devices-v1.json'),'utf8'),before);refuse=false;assert.ok(store.enroll(invite.code,'New').token);assert.equal(store.resolve(first.token,1,'/ws'),first.token);
+ const f=fixture(t);const first=f.store.enroll(f.store.create(['http://hub']).code,'Old');let refuse=false;
+ const store=factory({...f.opts,fs:{...fs,renameSync(...a){if(refuse)throw Error('synthetic');return fs.renameSync(...a)}}});const invite=store.create(['http://hub']);const before=fs.readFileSync(path.join(f.home,'devices-v1.json'),'utf8');refuse=true;assert.throws(()=>store.enroll(invite.code,'New'));assert.equal(fs.readFileSync(path.join(f.home,'devices-v1.json'),'utf8'),before);refuse=false;assert.ok(store.enroll(invite.code,'New').token);assert.equal(store.resolve(first.token,1,'/ws'),first.token);
+});
+test('an invitation that cannot be recorded is not issued',t=>{
+ const f=fixture(t);const store=factory({...f.opts,fs:{...fs,renameSync(){throw Error('synthetic')}}});assert.throws(()=>store.create(['http://hub']));
+ assert.equal(factory(f.opts).list().invitations.length,0);
+});
+test('every invitation is recorded: issued, used by which device, revoked; a hub refuses one it did not issue',t=>{
+ const f=fixture(t), a=f.store.create(['http://hub:3787']), b=f.store.create(['http://hub:3787']), c=f.store.create(['http://hub:3787']);
+ const listed=()=>Object.fromEntries(factory(f.opts).list().invitations.map(x=>[x.id,x]));
+ assert.deepEqual(Object.values(listed()).map(x=>x.state),['open','open','open']);
+ const laptop=f.store.enroll(a.code,'Laptop');assert.ok(laptop.token);
+ assert.equal(listed()[a.id].state,'used');assert.equal(listed()[a.id].deviceName,'Laptop');assert.equal(listed()[a.id].device,laptop.id);assert.equal(listed()[a.id].usedAt,1000000);
+ // a link this hub never issued, and one it revoked, do not pair
+ assert.equal(f.store.enroll('f'.repeat(32),'Forged').error,'wrong_code');
+ assert.deepEqual(f.store.uninvite(b.id),{ok:true,clients:[]});assert.equal(listed()[b.id].state,'revoked');
+ assert.equal(f.store.enroll(new URLSearchParams(new URL(b.link).hash.slice(1)).get('invite'),'Phone').error,'revoked_code');
+ assert.equal(f.store.enroll(b.code,'Phone').error,'revoked_code');
+ // a restarted hub still honours an open one and refuses the revoked one
+ const restarted=factory(f.opts);assert.ok(restarted.enroll(c.code,'Tablet').token);assert.equal(restarted.enroll(b.code,'Phone').error,'revoked_code');
+ // revoking a used link revokes the device it paired, and drops its sockets
+ assert.equal(f.store.resolve(laptop.token,7,'/ws'),laptop.token);
+ assert.deepEqual(f.store.uninvite(a.id),{ok:true,clients:[7]});assert.equal(f.store.active(7),false);
+ assert.equal(f.store.resolve(laptop.token,8,'/ws'),'');assert.equal(listed()[a.id].state,'revoked');assert.equal(listed()[a.id].deviceRevoked,true);
+ assert.equal(f.store.uninvite('0'.repeat(32)).error,'unknown_invitation');
+ const disk=fs.readFileSync(path.join(f.home,'devices-v1.json'),'utf8');for(const x of [a,b,c])for(const secret of [x.code,new URLSearchParams(new URL(x.link).hash.slice(1)).get('invite')])assert.ok(!disk.includes(secret));
+ assert.ok(!JSON.stringify(f.store.list()).includes('hash'));
+});
+test('a registry from before invitations were recorded still loads; a broken invitation list fails closed',t=>{
+ const f=fixture(t),file=path.join(f.home,'devices-v1.json');f.store.enroll(f.store.create(['http://hub']).code,'Old');
+ const data=JSON.parse(fs.readFileSync(file,'utf8'));delete data.invitations;fs.writeFileSync(file,JSON.stringify(data));
+ const old=factory(f.opts);assert.equal(old.list().devices.length,1);assert.equal(old.list().invitations.length,0);
+ data.invitations=[{id:'x'}];fs.writeFileSync(file,JSON.stringify(data));assert.throws(()=>factory(f.opts));
+});
+test('only sixteen open invitations at once; old used ones are dropped from the list after a hundred',t=>{
+ const f=fixture(t);for(let i=0;i<16;i++)assert.ok(f.store.create(['http://hub']).code);assert.equal(f.store.create(['http://hub']).error,'too_many_invitations');
+ f.advance(600001);for(let i=0;i<110;i++){f.advance(1);assert.ok(f.store.create(['http://hub']).code);f.advance(600001);}
+ // (trimmed as each is issued: the hundred newest closed ones, and the new one)
+ assert.equal(f.store.list().invitations.length,101);
+});
+test('a pairing link is known only for the owner\'s hubs',t=>{
+ const code=fs.readFileSync('src/server/effects/pairing.js','utf8').split('let bp_pairing;')[0];
+ const known=new Function('require',code+';return pairingKnown;')(require);
+ const machines={self:{name:'laptop',url:'http://100.1.0.1:3787',domain:'t.ts.net'},peers:[{name:'desk',url:'http://100.2.0.1:3787'}]};
+ for(const o of ['http://100.1.0.1:3787','http://100.2.0.1:3787','https://desk.t.ts.net','http://hub.lan:4000','http://127.0.0.1:3787'])assert.equal(known(o,{routes:['http://127.0.0.1:3787'],machines,peers:['http://hub.lan:4000']}),true,o);
+ for(const o of ['http://100.2.0.1:3788','https://evil.example','https://desk.other.ts.net','https://desk.t.ts.net.evil.example','http://user:pw@100.2.0.1:3787','file:///x','not a url'])assert.equal(known(o,{routes:['http://127.0.0.1:3787'],machines,peers:['http://hub.lan:4000']}),false,o);
+ assert.equal(known('https://desk.t.ts.net',{}),false);
 });
 test('malformed registry fails closed; no existing files rewritten',t=>{const f=fixture(t),file=path.join(f.home,'devices-v1.json');fs.writeFileSync(file,'broken');assert.throws(()=>factory(f.opts));assert.equal(fs.readFileSync(file,'utf8'),'broken');});
 test('listener route hints strip credentials and precede local desktop origins',t=>{

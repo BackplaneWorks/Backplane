@@ -74,7 +74,7 @@ def main() -> IO(Unit):
     expect("secret request held", base(True{}, [M.SettingSet{"secret.ask.example", "{\"thread\":\"t\"}", 6n}]), 50000n, False{})
     expect("grandchild launch work propagates", base(True{}, [M.ThreadCreated{"child", "p", "Child", M.Local{}, "", "", "codex", "", 1n}, M.ThreadLaunched{"child", "t", True{}, 6n}, M.ThreadCreated{"grandchild", "p", "Grandchild", M.Local{}, "", "", "codex", "", 1n}, M.ThreadLaunched{"grandchild", "child", True{}, 6n}, M.TurnChanged{"grandchild", M.Running{}, 6n}]), 50000n, False{})
     expect("approval held even without pending count", base(True{}, [M.AskOpened{"ask", "t", "approval", "Bash", "Proceed", "", 6n}]), 50000n, False{})
-    expect("wake subscription held", base(True{}, [M.WakeSet{"wake", "t", "thread", "child", ["end"], True{}, "Wait", 6n}]), 50000n, False{})
+    expect("wake on a running thread held", base(True{}, [M.ThreadCreated{"child", "p", "Child", M.Local{}, "", "", "codex", "", 1n}, M.TurnChanged{"child", M.Running{}, 6n}, M.WakeSet{"wake", "t", "thread", "child", ["end"], True{}, "Wait", 6n}]), 50000n, False{})
     expect("owned lock held", base(True{}, [M.LockChanged{"bend", L.NamedLock{Some{party("t")}, Nil{}, False{}, None{}}, 6n}]), 50000n, False{})
     expect("queued lock held", base(True{}, [M.LockChanged{"bend", L.NamedLock{None{}, [party("t")], False{}, None{}}, 6n}]), 50000n, False{})
     expect("report missing held", base(True{}, [M.SettingSet{"autosettle.report.t", "", 6n}]), 50000n, False{})
