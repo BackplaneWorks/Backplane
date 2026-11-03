@@ -35,7 +35,7 @@ class Slices(unittest.TestCase):
         self.assertEqual({k[0] for k in kept}, {'src/a.bend', 'src/b.bend'})
         entry = (out/'PROOF.bend').read_text()
         self.assertEqual(entry.count('import ./t/'), 1)      # one member of the component
-        sl.verify_output(out, kept)                           # both modules reachable from it
+        sl.verify_output(out, kept, self.root)                           # both modules reachable from it
 
     def test_entry_with_only_base_is_rejected(self):
         s = self.cycle()
@@ -43,7 +43,7 @@ class Slices(unittest.TestCase):
         kept = s.write_shard(s.blocks('src/a.bend', 'f'), out)
         (out/'PROOF.bend').write_text('import Base\n')
         with self.assertRaisesRegex(ValueError, 'unreachable'):
-            sl.verify_output(out, kept)
+            sl.verify_output(out, kept, self.root)
 
     def test_scc_helper_groups_cycles_and_orders_components(self):
         comp = sl.scc({'a': {'b'}, 'b': {'a'}, 'c': {'a'}})
@@ -83,10 +83,10 @@ class Slices(unittest.TestCase):
         path = out/'t/src/b.bend'
         path.write_text('import Base\nimport ./a.bend as A\n\n')
         with self.assertRaisesRegex(ValueError, 'differ'):
-            sl.verify_output(out, kept)
+            sl.verify_output(out, kept, self.root)
         path.write_text(path.read_text() + 'def g(n):\n  A.f(n)\n\ndef extra():\n  0\n')
         with self.assertRaisesRegex(ValueError, 'differ'):
-            sl.verify_output(out, kept)
+            sl.verify_output(out, kept, self.root)
 
     def test_unaccounted_line_and_bad_import_in_output_are_detected(self):
         s, out, kept = self.shard()
@@ -94,10 +94,10 @@ class Slices(unittest.TestCase):
         original = path.read_text()
         path.write_text(original + '\nmystery line\n')
         with self.assertRaisesRegex(ValueError, 'unaccounted'):
-            sl.verify_output(out, kept)
+            sl.verify_output(out, kept, self.root)
         path.write_text(original.replace('import ./b.bend as B', 'import ../../outside.bend as B'))
-        with self.assertRaisesRegex(ValueError, 'does not resolve'):
-            sl.verify_output(out, kept)
+        with self.assertRaisesRegex(ValueError, 'not present in the original|does not resolve'):
+            sl.verify_output(out, kept, self.root)
 
     def test_union_of_slices_equals_every_original_declaration(self):
         s = self.cycle()
@@ -116,6 +116,97 @@ class Slices(unittest.TestCase):
         self.assertLess(names.index('m.low'), names.index('m.mid'))
         self.assertLess(names.index('m.mid'), names.index('m.top'))
         self.assertLess(names.index('m.p'), names.index('m.q'))
+
+    # exact declaration text, imports, effects --------------------------------------
+    def laws(self):
+        self.write('src/l.bend', 'import Base\n\nlaw t:\n  {0n == 0n : Nat}\n\ndef Laws.t():\n  {==}\n')
+        s = self.slicer('src/l.bend')
+        out = self.root/'lo'
+        return s, out, s.write_shard(s.blocks('src/l.bend', 't') + s.blocks('src/l.bend', 'Laws.t'), out)
+
+    def test_same_name_statement_or_proof_change_is_detected(self):
+        s, out, kept = self.laws()
+        path = out/'t/src/l.bend'
+        original = path.read_text()
+        for old, new in (('{0n == 0n : Nat}', '{0n == 1n : Nat}'), ('{==}', '{=}'), ('def Laws.t():', 'def Laws.t(x):')):
+            path.write_text(original.replace(old, new))
+            with self.assertRaisesRegex(ValueError, 'differs from the original'):
+                sl.verify_output(out, kept, self.root)
+        path.write_text(original)
+        sl.verify_output(out, kept, self.root)
+
+    def test_duplicate_declaration_in_output_is_detected(self):
+        s, out, kept = self.laws()
+        path = out/'t/src/l.bend'
+        path.write_text(path.read_text() + '\ndef Laws.t():\n  {==}\n')
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            sl.verify_output(out, kept, self.root)
+
+    def test_original_duplicate_declaration_is_rejected(self):
+        self.write('src/d.bend', 'import Base\ndef f():\n  0\ndef f():\n  1\n')
+        with self.assertRaisesRegex(ValueError, 'duplicate'):
+            sl.scan_module((self.root/'src/d.bend').read_text(), 'd')
+
+    def test_import_changes_are_detected(self):
+        s, out, kept = self.shard()
+        path = out/'t/src/a.bend'
+        original = path.read_text()
+        path.write_text(original.replace('import ./b.bend as B', 'import ./b.bend as Z'))
+        with self.assertRaisesRegex(ValueError, 'not present in the original'):
+            sl.verify_output(out, kept, self.root)
+        path.write_text(original.replace('import ./b.bend as B\n', ''))
+        with self.assertRaisesRegex(ValueError, 'no longer imports'):
+            sl.verify_output(out, kept, self.root)
+
+    def effects(self):
+        (self.root/'src/effects').mkdir()
+        self.write('src/effects/host.c', '#include "host.h"\nint x;\n')
+        self.write('src/effects/host.h', 'int y;\n')
+        self.write('src/e.bend', 'import Base\n\ndef E.now() -> U32:\n  import "./effects/host.c"\n  0\n\ndef E.other():\n  1\n')
+        s = self.slicer('src/e.bend')
+        out = self.root/'eo'
+        return s, out, s.write_shard(s.blocks('src/e.bend', 'E.now'), out)
+
+    def test_effect_companions_are_copied_with_their_headers_and_checked(self):
+        s, out, kept = self.effects()
+        self.assertTrue((out/'t/src/effects/host.c').is_file() and (out/'t/src/effects/host.h').is_file())
+        sl.verify_output(out, kept, self.root)
+        (out/'t/src/effects/host.h').write_text('int changed;\n')
+        with self.assertRaisesRegex(ValueError, 'effect companion'):
+            sl.verify_output(out, kept, self.root)
+        (out/'t/src/effects/host.h').write_text('int y;\n')
+        (out/'t/src/effects/host.c').unlink()
+        with self.assertRaisesRegex(ValueError, 'effect companion'):
+            sl.verify_output(out, kept, self.root)
+
+    def test_extra_effect_file_and_missing_original_companion_are_rejected(self):
+        s, out, kept = self.effects()
+        (out/'t/src/effects/stray.js').write_text('x')
+        with self.assertRaisesRegex(ValueError, 'effect companions do not match'):
+            sl.verify_output(out, kept, self.root)
+        (self.root/'src/effects/host.c').unlink()
+        with self.assertRaisesRegex(ValueError, 'missing'):
+            s.write_shard(s.blocks('src/e.bend', 'E.now'), self.root/'eo2')
+
+    def test_real_indented_effect_import_matches_bend_closure(self):
+        import subprocess
+        import sys
+        s = sl.Slicer(ROOT)
+        rel = 'src/server/mailstore.bend'
+        seed = next(b for b in s.module(rel).blocks if b['name'] == 'MailFile.open')
+        out = self.root/'real'
+        kept = s.write_shard([seed], out)
+        copied = sorted(p.relative_to(out/'t').as_posix() for p in (out/'t').rglob('*') if p.is_file() and not p.name.endswith('.bend'))
+        self.assertEqual(copied, ['src/server/effects/mailstore.js'])
+        closure = subprocess.check_output([sys.executable, str(ROOT/'scripts/bend-closure.py'), 'PROOF.bend'], cwd=out, text=True).split()
+        self.assertEqual(sorted(c[2:] for c in closure if c.startswith('t/') and not c.endswith('.bend')), copied)
+        sl.verify_output(out, kept, ROOT)
+        (out/'t'/copied[0]).write_bytes((out/'t'/copied[0]).read_bytes() + b' ')
+        with self.assertRaisesRegex(ValueError, 'effect companion'):
+            sl.verify_output(out, kept, ROOT)
+        (out/'t'/copied[0]).unlink()
+        with self.assertRaisesRegex(ValueError, 'effect companion'):
+            sl.verify_output(out, kept, ROOT)
 
     def test_every_module_in_the_canonical_closure_parses_strictly(self):
         import subprocess
