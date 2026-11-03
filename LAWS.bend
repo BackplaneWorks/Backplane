@@ -86,6 +86,8 @@ import ./src/core/signal.bend as SIGREV
 
 import Base
 
+import ./src/core/wire-retention.bend as WRET
+
 import ./src/core/project-home.bend as PHOME
 
 import ./src/server/modelcache.bend as MCACHE
@@ -15882,6 +15884,15 @@ law autosettle_delegation_seed_not_personal:
 
 law autosettle_human_followup_is_personal:
   {AUTOS.Auto.direct.seed("human-followup", "More work", "m100-4") == True{} : Bool}
+
+# Indexed history is durable; a hub/client replay cache never owns its past.
+law stored_wire_cache_is_empty:
+  for xs: List<&2, String>
+  {WRET.WireRetention.keep(True{}, xs) == Nil{} : List<&2, String>}
+
+law memory_wire_reference_is_exact:
+  for xs: List<&2, String>
+  {WRET.WireRetention.keep(False{}, xs) == xs : List<&2, String>}
 
 law autosettle_finished_work_wake_not_running:
   for owned: Map<&2, Nat>
