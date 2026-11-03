@@ -2663,7 +2663,7 @@ def View.act.g.loc(+lc: I.Loc, rem: Bool, +id: String, +tone: String, +kind: Str
       D.El{"div", id, [D.At{"class", "act remind entry-remind"}, D.At{"data-id", id}],
         [WI.WIcon.svg("bell", 14), D.Dom.span("kind", MSG.T.sched.kind.reminder(lc)), D.Dom.span("summary", summary), D.Dom.span("when", TZ.Tz.show.nz(SCH.Sched.person(st, 0n, True{}), at))]}
     case False{}:
-      View.memo.loc(lc, id, [D.At{"fn", "act"}, D.At{"tone", tone}, D.At{"kind", kind}], summary)
+      View.memo.loc(lc, id, [D.At{"fn", "act"}, D.At{"tone", FO.Tool.tone(tone, kind)}, D.At{"kind", kind}], summary)
 
 def View.act.g(rem: Bool, +id: String, +tone: String, +kind: String, +summary: String, +at: Nat, +st: M.State) -> D.Node:
   View.act.g.loc(I.En{}, rem, id, tone, kind, summary, at, st)
@@ -2887,6 +2887,21 @@ def View.err.attrs(+lc: I.Loc, api: Bool, +text: String) -> List<&2, D.Attr>:
     case True{}: [D.At{"err", FO.ApiErr.say(lc, text)}]
     case False{}: Nil{}
 
+# Backplane's continue message after a restart is not the person's: it is
+# the "Continuing after the restart" row, what it said under
+# "› what it was told" (FO.Restart.told; the hub's own row after it is
+# left out, FO.Fold.shown)
+def View.carry.row(+lc: I.Loc, +id: String, +text: String) -> D.Node:
+  D.El{"div", id, [D.At{"class", "act info restart"}, D.At{"data-id", id}], [View.act.kind(lc, "restart"), D.Dom.span("summary", MSG.T.restart.continuing(lc)),
+    D.El{"details", "told:" ++ id, [D.At{"class", "carry-told"}], [D.El{"summary", "", Nil{}, [D.Txt{MSG.T.restart.told(lc)}]}, D.El{"div", "", [D.At{"class", "told"}], [D.Txt{text}]}]}]}
+
+def View.entry.user(carry: Bool, +lc: I.Loc, +id: String, +th: String, +text: String, +st: M.State, +stamp: String, +unread: Bool) -> D.Node:
+  match carry:
+    case True{}:
+      View.carry.row(lc, id, text)
+    case False{}:
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", STP.Stamp.unread.text(unread, lc, stamp)}, D.At{"unread", Bool.pick(String, unread, "1", "")}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
+
 # (mid: a reply inside a turn, its time shown on hover: core/stamp.bend's
 # Stamp.mid)
 # (unread: a person's message the agent has not read yet, core/stamp.bend's
@@ -2894,7 +2909,7 @@ def View.err.attrs(+lc: I.Loc, api: Bool, +text: String) -> List<&2, D.Attr>:
 def View.entry.u.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool, +unread: Bool) -> D.Node:
   match e:
     case M.Msg{+id, +th, M.User{}, +text, _}:
-      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", STP.Stamp.unread.text(unread, lc, stamp)}, D.At{"unread", Bool.pick(String, unread, "1", "")}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
+      View.entry.user(FO.Restart.told(text), lc, id, th, text, st, stamp, unread)
     case M.Msg{+id, +th, _, +text, _}:
       View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", Bool.pick(String, CP.Pending.synthetic(id), "live", "msg")}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], List.append(&2, D.Attr, View.err.attrs(lc, FO.ApiErr.is(text), text), View.ctx.attrs(RTO.Rto.chat(st, th), st, CP.Pending.text(lc, id, text)))), CP.Pending.text(lc, id, text))
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
