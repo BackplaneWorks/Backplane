@@ -1,3 +1,4 @@
+import ./autosettle.bend as AUTO
 import Base
 import ./folder.bend as FP
 import ./telemetry.bend as TLM
@@ -4782,8 +4783,15 @@ def Lr.far.lines(+s: M.State) -> List<&2, String>:
   M.Launch.lines(M.Setting.get(s, Lr.far.key(), ""))
 
 # the outbox once `key` was taken
+def Lr.far.receipt(xs: List<&2, String>, +key: String, +now: Nat) -> List<&2, M.Change>:
+  match xs:
+    case Nil{}: Nil{}
+    case +line <> rest:
+      Bool.pick(List<&2, M.Change>, String.starts_with(line, key ++ "\t"),
+        [M.SettingSet{"autosettle.report." ++ M.Bg.field(line, 2n), Maybe.default(&2, String, List.head(&2, String, String.split(String.drop(key, 1n), Chr{45})), "0"), now}], Lr.far.receipt(rest, key, now))
+
 def Lr.far.sent(+s: M.State, +now: Nat, +key: String) -> Step:
-  Step{[M.SettingSet{Lr.far.key(), String.join(Lr.far.keep(Lr.far.lines(s), key), "\n"), now}], Nil{}}
+  Step{List.append(&2, M.Change, [M.SettingSet{Lr.far.key(), String.join(Lr.far.keep(Lr.far.lines(s), key), "\n"), now}], Lr.far.receipt(Lr.far.lines(s), key, now)), Nil{}}
 
 # each minute: the outbox is sent again while anything is in it
 def Lr.far.tick.k(none: Bool) -> Step:
@@ -5080,7 +5088,7 @@ def Lr.kind(+thread: String) -> String:
 def Lr.send.here(ok: Bool, +s: M.State, +now: Nat, +thread: String, +to: String, +text: String) -> Step:
   match ok:
     case True{}:
-      Operational.inbox(s, now, Lr.kind(thread), thread, to, M.User{}, text, Lr.msg(thread, Hub.id("r", now, Hub.seq(s))), Nil{})
+      Operational.inbox(s, now, Lr.kind(thread), thread, to, M.User{}, text, Lr.msg(thread, Hub.id("r", now, Hub.seq(s))), [M.SettingSet{"autosettle.report." ++ thread, Nat.show(now), now}])
     case False{}:
       Step.none()
 
@@ -7880,10 +7888,87 @@ def Shelve.ticked(+s: M.State, +now: Nat) -> List<&2, M.Change>:
 # stranded worktree waits run. Legacy conversations never expire.
 # (nothing settles, expires or loses its worktree while it waits on work:
 # M.Work.busy, the children counted once for all threads)
+# Production commit/tick boundary. Old Shelve.step/ticked helpers above
+# preserve the previous policy's law fixtures; their immediate/by-age
+# settlements must never bypass Auto.allow in a live hub.
+def Shelve.wakes(cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}: Nil{}
+    case M.ThreadWoke{th, at} <> rest: M.ThreadWoke{th, at} <> Shelve.wakes(rest)
+    case _ <> rest: Shelve.wakes(rest)
+
+def AutoSettled.is(sh: M.Shelf) -> Bool:
+  match sh:
+    case M.Settled{}: True{}
+    case _: False{}
+
+def Shelve.auto.tick(+s: M.State, +now: Nat, +kids: Map<&2, Nat>) -> List<&2, M.Change>:
+  List.append(&2, M.Change, AUTO.Auto.changes(s, now), Shelve.wakes(Shelve.tick.post(s, now, kids)))
+
+def Shelve.auto.message.gated(eligible: Bool, +s: M.State, +th: String, +id: String, +at: Nat) -> List<&2, M.Change>:
+  match eligible:
+    case False{}: Nil{}
+    case True{}:
+      Bool.pick(List<&2, M.Change>, Bool.not(Shelve.input.seen(M.State.mine(s, th), id)), [M.ThreadWoke{th, at}], Nil{})
+
+def Shelve.auto.message(+s: M.State, +cs: List<&2, M.Change>, c: M.Change) -> List<&2, M.Change>:
+  match c:
+    case M.MessagePosted{+th, +id, _, _, +at}:
+      Shelve.auto.message.gated(Bool.and(AutoSettled.is(M.Shelf.of(M.State.thread.get(s, th))),
+        Bool.and(Shelve.recent(s, th, at), Bool.not(Shelve.held(cs, th)))), s, th, id, at)
+    case _: Nil{}
+
+def Shelve.auto.messages(xs: List<&2, M.Change>, +s: M.State, +cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match xs:
+    case Nil{}: Nil{}
+    case c <> rest: List.append(&2, M.Change, Shelve.auto.message(s, cs, c), Shelve.auto.messages(rest, s, cs))
+
+# Every automatic producer goes through the same gate, including old
+# private-run cleanup and merge observations. A merge records evidence;
+# it cannot silently settle a failed, unread or still-working thread.
+def Shelve.auto.has(cs: List<&2, M.Change>) -> Bool:
+  match cs:
+    case Nil{}: False{}
+    case M.ThreadSettled{_, False{}, _} <> _: True{}
+    case M.ThreadMerged{_, _, _} <> _: True{}
+    case _ <> rest: Shelve.auto.has(rest)
+
+def Shelve.auto.base(cs: List<&2, M.Change>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}: List.reverse(&2, M.Change, acc)
+    case M.ThreadSettled{_, False{}, _} <> rest: Shelve.auto.base(rest, acc)
+    case M.ThreadMerged{id, url, at} <> rest: Shelve.auto.base(rest, M.SettingSet{M.Merge.key(id), url, at} <> acc)
+    case c <> rest: Shelve.auto.base(rest, c <> acc)
+
+def Shelve.auto.keep(cs: List<&2, M.Change>, +post: M.State, +ix: AUTO.Index, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}: List.reverse(&2, M.Change, acc)
+    case M.ThreadSettled{+th, False{}, +at} <> rest:
+      Shelve.auto.keep(rest, post, ix, AUTO.Auto.emit(AUTO.Auto.due(post, M.State.thread.get(post, th), at, ix), th, at, acc))
+    case M.ThreadMerged{id, url, at} <> rest: Shelve.auto.keep(rest, post, ix, M.SettingSet{M.Merge.key(id), url, at} <> acc)
+    case c <> rest: Shelve.auto.keep(rest, post, ix, c <> acc)
+
+def Shelve.auto.clean(on: Bool, +s: M.State, +cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match on:
+    case False{}: cs
+    case True{}:
+      +base = Shelve.auto.base(cs, Nil{})
+      +post = M.State.replay(AUTO.Auto.quiet.changes(Map.to_list(&2, Nat, AUTO.Auto.quiet.collect(base, s, Map.new(&2, Nat))), s), M.State.replay(base, s))
+      Shelve.auto.keep(cs, post, AUTO.Auto.index(post), Nil{})
+
+def Shelve.auto.fix(+s: M.State, +raw: List<&2, M.Change>) -> List<&2, M.Change>:
+  +pending = Pend.fix(s, raw)
+  +cs = Shelve.auto.clean(Shelve.auto.has(pending), s, pending)
+  +wakes = Shelve.wakes(Shelve.step(s, cs))
+  List.append(&2, M.Change, cs, List.append(&2, M.Change,
+    AUTO.Auto.quiet.changes(Map.to_list(&2, Nat, AUTO.Auto.quiet.collect(cs, s, Map.new(&2, Nat))), s),
+    List.append(&2, M.Change, AUTO.Auto.messages.metadata(cs, s), List.append(&2, M.Change, wakes, Shelve.auto.messages(cs, M.State.replay(wakes, s), cs)))))
+
+
 def Hub.tick.k(+s: M.State, +now: Nat, +kids: Map<&2, Nat>) -> Step:
   match s:
     case M.State{ps, +ts, _, _, _, _, _, _, _, _, _}:
-      Step.before(Shelve.after(Hub.settle.go(Map.values(&2, M.Thread, ts), M.State.navs(s), kids, s, now, Hub.settle.window(s)), s, now, kids),
+      Step.before(Shelve.auto.tick(s, now, kids),
         List.append(&2, Out, Merge.asks(Map.values(&2, M.Project, ps), Map.values(&2, M.Thread, ts), s), Drop.asks(Map.values(&2, M.Thread, ts), kids, s, now, Hub.wt.window(s))),
         Wt.stale(Map.values(&2, M.Thread, ts), s, now))
 

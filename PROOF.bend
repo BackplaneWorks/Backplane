@@ -1,4 +1,5 @@
 import ./test/conversation-proof/window_final.bend as CONVROOT
+
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
 
 import ./test/conversation-proof/production_clipping.bend as CONVPROOF
@@ -15678,3 +15679,38 @@ def Laws.conversation_root_region_retained(result):
 
 def Laws.conversation_root_wire_picture_constant(result):
   CONVROOT.made_shown(result)
+
+def Laws.autosettle_owned_work_held(turn, ask, unread, delivered, quiet, shelf, override):
+  match turn:
+    case M.Idle{}: {==}
+    case M.Running{}: {==}
+    case M.Completed{}: {==}
+    case M.Interrupted{}: {==}
+    case M.Failed{}: {==}
+
+def Laws.autosettle_pending_ask_held(unread, delivered, quiet):
+  {==}
+
+def Laws.autosettle_unread_held(delivered, quiet):
+  {==}
+
+def Laws.autosettle_failed_held(work, ask, unread, delivered, quiet):
+  {==}
+
+def Laws.autosettle_interrupted_held(work, ask, unread, delivered, quiet):
+  {==}
+
+def Laws.autosettle_report_held(quiet):
+  {==}
+
+def Laws.autosettle_grace_held():
+  {==}
+
+def Laws.autosettle_ready():
+  {==}
+
+def Laws.autosettle_new_assistant_message_reopens():
+  {==}
+
+def Laws.autosettle_new_turn_reopens():
+  {==}
