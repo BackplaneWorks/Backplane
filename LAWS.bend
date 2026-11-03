@@ -496,6 +496,7 @@ import ./src/server/thin-still-picture.bend as STILLPICTURE
 import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
 
 import ./src/core/secret.bend as SEC
+import ./src/core/secret-box.bend as SBOX
 
 import ./src/server/thin-mirror.bend as TMR
 
@@ -13319,6 +13320,11 @@ law hot_demo_threads:
 # committed change's JSON (the log, the store, FTS, mail, every client),
 # each MCP answer, each agent output line as read and each line written to
 # an agent with these defs.
+# Every action has a dispatch slot, including the secure host's Save.
+# Source/behavior tests connect those slots to state and secure-host handlers.
+law sec_box_handlers:
+  {SBOX.Sbox.routes(SBOX.Sbox.actions()) == [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n] : List<&2, Nat>}
+
 law sec_mask_total:
   for +v: SEC.Vault
   for +s: String
