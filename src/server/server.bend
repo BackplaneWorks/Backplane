@@ -1,5 +1,6 @@
 import Base
 import ./pairing.bend as PAIR
+import ./message-image.bend as MIMG
 import ./pdf.bend as PDF
 import ./filelist.bend as FL
 import ../core/pcb-usage.bend as PC
@@ -6147,6 +6148,23 @@ def Img.serve(allowed: Bool, s: Socket, +path: String, range: String) -> IO(Unit
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
+# Authenticated message images: an exact reference in a saved assistant reply.
+def MessageImageHTTP.found(empty: Bool, s: Socket, +snapshot: String) -> IO(Unit):
+  match empty:
+    case True{}: Conn.finish(s, W.Http.text("404 Not Found", "Image unavailable"))
+    case False{}: Img.send(snapshot, s, "")
+
+def MessageImageHTTP.grant(found: Bool, s: Socket, entry: String, path: String) -> IO(Unit):
+  match found:
+    case False{}: Conn.finish(s, W.Http.text("404 Not Found", "Image unavailable"))
+    case True{}: IO.bind(String, Unit, MIMG.MessageImage.snapshot(entry, path), +snapshot => MessageImageHTTP.found(String.is_empty(snapshot), s, snapshot))
+
+def MessageImageHTTP.serve(allowed: Bool, s: Socket, +entry: String, +path: String) -> IO(Unit):
+  match allowed:
+    case False{}: Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+    case True{}:
+      IO.bind(String, Unit, MIMG.MessageImage.text(entry), text => MessageImageHTTP.grant(IM.Img.message_allowed(text, path), s, entry, path))
+
 # Original GLB assets are private, content-addressed snapshots prepared by a
 # trusted thread job. This route never accepts a filesystem path.
 def RenderHTTP.found(ok: Bool, s: Socket, +path: String, +size: U32) -> IO(Unit):
@@ -6273,6 +6291,8 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
       RenderHTTP.serve(allowed, s, W.Http.param(p, "id"))
     case 7n:
       DiagnosticsHTTP.serve(allowed, s)
+    case 8n:
+      MessageImageHTTP.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "entry")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")))
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), gz)
 
@@ -6287,7 +6307,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(trusted, hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -7334,6 +7354,7 @@ def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: L
   match ok:
     case True{}:
       do IO<Hub & Wrote>:
+        MIMG.MessageImage.changes(cs)
         Bot.dir.changed.all(cs, inbox)
         +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
         Live.checkpoint.sync(cs, post, cfg, buffers)

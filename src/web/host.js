@@ -1,3 +1,5 @@
+import { installMessageImages } from "./message-images.js";
+installMessageImages();
 // Backplane browser host.
 //
 // This file only moves data: JSON <-> Bend values, a keyed DOM patch of the

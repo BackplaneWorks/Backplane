@@ -69,7 +69,7 @@
     "src/core/hot.bend": "541015b82fb97a7aa8c5f02206c53faa4d732529e8ab6e79f45a4d81f5403d36",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
-    "src/core/images.bend": "5e00c7c36ef76ff7d458f381e829534f62eeef6c3dc3208789b5b20b4cb7a376",
+    "src/core/images.bend": "99025ca6b7562c0ef3cf71e8d2e4ec6e40299603bb5e60de8044c33f485e2bac",
     "src/core/json.bend": "039105b99a83af70a1f62042fde42e5a4e89e937983e42dfc22135590b3ac075",
     "src/core/kexport.bend": "e7c768d51b7909761458296102e9aefb66d8ffd9ea37c3487ccc7fdb2defc86d",
     "src/core/kihealth.bend": "0f31f804fddef557d7a038dd39022219455d5b9e0990fa19ccef5a388e511460",
@@ -165,7 +165,7 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
-    "src/mobile/screen.bend": "9572ee36c3a422d4057139565bde895857d63eabe557ebcd0695e19844d06d1d",
+    "src/mobile/screen.bend": "cff29d7416f2685d04a4a27c0f61be484eaa9169d9feb3b0652765c68f7bfe44",
     "src/server/thin-actor.bend": "2f0216c55b246af65bef75cd0ac3c8c270f53e1a73510f16313971078e4670d6",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -190,7 +190,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "e432f70586043b89ab620c1fa15c6c7fb37b2e1c55103d3784330fa71b54575a"
+    "src/web/view.bend": "ccbdded8ae8027ef49e3099de0d74f8e39b989e2cce38e8717593b6e8a396a27"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -393,6 +393,14 @@
       "fullOutputCheck": "test/sidebar_draft_image_test.bend",
       "fullOutputLogSHA256": "ab373540db60b3eb7d2f955e64a66a54f542a6f1299ab766314d29ff8d116d67",
       "limits": "Focused executed checks (9 files) only; global proof, package and device acceptance are the integrator/installer's."
+    },
+    "messageImages": {
+      "scope": "Added entry-bound URL and exact-reference validation in images.bend; only message thumbnail URLs/markup changed in view.bend and screen.bend. These definitions read passed text/paths/entry IDs, no Ui drafts or scratch values. Sidebar draft readers, private image key, source-reference graph, bridge authority, scanner, scratch projection and full picture inputs unchanged.",
+      "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+      "assertions": 24,
+      "work": "w-t1793671258-1312457-1317547",
+      "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+      "qualification": "All 24 full-output draft/IME/search/info fallback cases passed on this source; no native device runtime acceptance implied."
     }
   },
   "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged; 2026-11-01 combined main622/desktop dictation/Improvements: speech-only Vdict and @voice scratch, topbar/voice controls, existing wire privacy retained; no ordinary draft reader/key/filter/fallback change; all24 full-output cases PASS. Receipt MAIN-ALL-SOURCE-QUALIFICATION-CONTINUE-1.json.; 2026-11-01 catalog scope: retain only sidebar-global @f.pq across target changes; all other thread forms/mail replies still cleared;256KiBunchanged. Scope13/sidebar24PASS, CATALOG-FIX-SOURCE-QUALIFICATION.json.\n2026-11-02 ASAP scope review: Account state/picker; static pending chat; approved Settings/Voice presentation; durable opt-out choice and tour state; bounded tool-title projection and detail reads. Existing sidebar draft filter, unknown scratch retention, image key and authority/scanner implementations are unchanged. @voice and pending scratch remain conservative; no new draft readers. New lazy-tools helper operates only selected raw history/fold metadata and adds no sidebar draft read. Full24 output equivalence remains required before any pin refresh.",
