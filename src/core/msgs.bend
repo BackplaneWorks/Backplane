@@ -6992,7 +6992,7 @@ def T.state.waitingon(l: I.Loc) -> String:
 def T.subagents.badge(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
     case I.En{}:
-      arg0 ++ " " ++ I.I18n.sel(arg1, "one", "agent", "agents")
+      arg0 ++ " " ++ I.I18n.sel(arg1, "one", "subthread", "subthreads")
     case I.Ja{}:
       "エージェント" ++ arg0 ++ "件" ++ ""
 
