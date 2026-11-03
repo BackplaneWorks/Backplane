@@ -100,9 +100,9 @@ fun DeviceManager(link: String, close: () -> Unit) {
             // every pairing link this hub issued: when, used or not and by
             // which device; revoking a used one revokes that device too
             Text("Pairing links", style = MaterialTheme.typography.titleLarge)
-            if (invitations.isEmpty()) Text("Links made with Add a device appear here.")
+            if (invitations.isEmpty()) Text("Links made with Add a device, and invites made in Bots to link a machine, appear here.")
             invitations.forEach { x ->
-                Text("Device invitation · " + Date(x.optLong("createdAt")).toString(), style = MaterialTheme.typography.titleMedium)
+                Text((if (x.optString("kind") == "machine") "Machine invite · " else "Device invitation · ") + Date(x.optLong("createdAt")).toString(), style = MaterialTheme.typography.titleMedium)
                 Text(invitationState(x))
                 if (x.optString("state") == "open" || (x.optString("state") == "used" && x.optString("device").isNotEmpty() && !x.optBoolean("deviceRevoked")))
                     TextButton(onClick = { uninvite = x }) { Text("Revoke") }
@@ -111,7 +111,7 @@ fun DeviceManager(link: String, close: () -> Unit) {
         }
     }
     if (uninvite != null) AlertDialog(onDismissRequest = { uninvite = null }, title = { Text("Revoke this link?") },
-        text = { Text(if (uninvite?.optString("state") == "used") "The device it paired (" + (uninvite?.optString("deviceName")?.ifEmpty { "unnamed" } ?: "unnamed") + ") loses access too." else "It will no longer pair anything.") },
+        text = { Text(if (uninvite?.optString("state") == "used") (if (uninvite?.optString("kind") == "machine") "The machine it linked (" else "The device it paired (") + (uninvite?.optString("deviceName")?.ifEmpty { "unnamed" } ?: "unnamed") + (if (uninvite?.optString("kind") == "machine") ") is unlinked too." else ") loses access too.") else "It will no longer pair anything.") },
         confirmButton = { TextButton(onClick = { val id = uninvite?.optString("id");uninvite = null;scope.launch {
             try { request("/auth/revoke", "POST", invitationId = id);refresh() } catch (_: Exception) { status = "Could not revoke this link." }
         } }) { Text("Revoke") } }, dismissButton = { TextButton(onClick = { uninvite = null }) { Text("Cancel") } })
@@ -123,8 +123,9 @@ fun DeviceManager(link: String, close: () -> Unit) {
 
 // what became of a pairing link (the hub's /auth/devices "invitations")
 fun invitationState(x: JSONObject): String = when (x.optString("state")) {
-    "used" -> "Used " + Date(x.optLong("usedAt")).toString() + " by " + x.optString("deviceName").ifEmpty { "a device" } + (if (x.optBoolean("deviceRevoked")) " (revoked)" else "")
-    "revoked" -> if (x.optString("device").isNotEmpty()) "Revoked with " + x.optString("deviceName").ifEmpty { "the device it paired" } else "Revoked, never used"
+    "used" -> "Used " + Date(x.optLong("usedAt")).toString() + " by " + x.optString("deviceName").ifEmpty { if (x.optString("kind") == "machine") "a machine" else "a device" } +
+        (if (x.optBoolean("deviceRevoked")) (if (x.optString("kind") == "machine") " (unlinked)" else " (revoked)") else "")
+    "revoked" -> if (x.optString("device").isNotEmpty()) "Revoked with " + x.optString("deviceName").ifEmpty { if (x.optString("kind") == "machine") "the machine it linked" else "the device it paired" } else "Revoked, never used"
     "expired" -> "Expired, never used"
     else -> "Not used yet · expires " + Date(x.optLong("expiresAt")).toString()
 }

@@ -42,6 +42,14 @@ export class TimelineScroller {
   // first). The host still hears of the scroll (onChange).
   _scrolled() {
     const p = this.lastPlan, top = this.el.scrollTop;
+    // Resize can clamp scrollTop before ResizeObserver runs. Send clearing
+    // the composer is one such resize, not an upward reading gesture.
+    const view = this.el.clientHeight;
+    if (p && view !== p.view) {
+      this._view = view;
+      this._request('measure');
+      return;
+    }
     const delta = top - (this._observedTop ?? top);
     this._observedTop = top;
     if (delta) this.callbacks.onScroll(this, delta);
@@ -214,6 +222,9 @@ export class TimelineScroller {
 
   _request(mode, extra = {}, preservePending = false) {
     if (this._destroyed) return;
+    // A snapshot may arrive in the same frame as a viewport resize, before
+    // ResizeObserver invalidates its cached height. Read before DOM writes.
+    if (mode === 'update') this._view = null;
     if (!preservePending || !this._pending) this._pending = { mode, ...extra };
     if (!this._attached || !this.el.isConnected || this._busy) return;
     this._busy = true;

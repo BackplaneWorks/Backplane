@@ -5058,7 +5058,6 @@ def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
     <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", View.compact.text(View.compact(u), U.Ui.info(u, "plotnote:" ++ U.Solid.want(u))))),
       [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
 
-
 # The combined view (client.bend's Split): the schematic beside the board
 # and its 3D model, each pane under a head that names it, with a button
 # that puts it away (the bar's toggles bring it back). The panes draw as on
