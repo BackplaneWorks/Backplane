@@ -7886,23 +7886,48 @@ def BotJob.send(+home: String, +url: String, +peer: String, +path: String, +body
     r : BN.Resp <- BN.Bn.to_peer(home, url, peer, now, path, True{}, body)
     BotJob.sent(r, peer, path)
 
-def BotJob.invited(ok: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +url: String, +peer: String, +secret: String) -> IO(Unit):
+def BotJob.invited(ok: Bool, +why: String, +inbox: Chan(Msg), +client: U32, +id: String, +url: String, +peer: String, +secret: String) -> IO(Unit):
   match ok:
     case True{}:
       BotJob.reply(inbox, client, id, True{}, [J.KV{"invite", J.Str{SG.Invite.make(url, peer, secret)}}, J.KV{"peer", J.Str{peer}}])
     case False{}:
-      BotJob.fail(inbox, client, id, "could not keep the invite's secret")
+      BotJob.fail(inbox, client, id, why)
 
-# an invite: a new peer id and secret, kept here; the other machine links
-# with it (POST /bots/link) and both keep the secret
+# A hub-to-hub invite is recorded with the device invitations before it is
+# handed out (effects/pairing.js's machine: listed in Settings > Devices,
+# revocable, good for ten minutes and once); one that cannot be recorded
+# is not made. The answer is the record's error ("" when recorded).
+def BotJob.record.why(+j: J.Json) -> String:
+  Bool.pick(String, J.Json.get_bool(j, "ok", False{}), "", Bool.pick(String, String.eq(J.Json.get_str(j, "error", ""), "too_many_invitations"),
+    "too many open invites: wait for one to expire, or revoke one in Settings > Devices", "could not record the invite"))
+
+def BotJob.record(+peer: String) -> IO(String):
+  IO.bind(String, String, PAIR.Pairing.request("machine", peer, "", "", False{}),
+    r => IO.pure(String, BotJob.record.why(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}))))
+
+def BotJob.keep(+why: String, +home: String, +peer: String, +secret: String) -> IO(Bool):
+  Bool.pick(IO(Bool), String.is_empty(why), BN.Bn.peer.save(home, peer, secret), IO.pure(Bool, False{}))
+
+# an invite: a new peer id and secret, recorded and kept here; the other
+# machine links with it (POST /bots/link) and both keep the secret
 def BotJob.invite(+inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32, +given: String, +client: U32, +id: String) -> IO(Unit):
   do IO<Unit>:
     +here : String <- BN.Bn.url.here(tailnet, host, port)
     +r : String <- BN.Bn.random(2n)
     +peer : String = "p" ++ r
     +secret : String <- BN.Bn.secret.fresh()
-    ok : Bool <- BN.Bn.peer.save(home, peer, secret)
-    BotJob.invited(ok, inbox, client, id, Bool.pick(String, String.is_empty(String.trim(given)), here, String.trim(given)), peer, secret)
+    +why : String <- BotJob.record(peer)
+    ok : Bool <- BotJob.keep(why, home, peer, secret)
+    BotJob.invited(ok, Bool.pick(String, String.is_empty(why), "could not keep the invite's secret", why), inbox, client, id,
+      Bool.pick(String, String.is_empty(String.trim(given)), here, String.trim(given)), peer, secret)
+
+# a link removed (bots.unpeer): its secret goes, and the invite that made
+# it is shown as unlinked in Settings > Devices
+def BotJob.unpeer(+home: String, +peer: String) -> IO(Unit):
+  do IO<Unit>:
+    BN.Bn.peer.forget(home, peer)
+    r : String <- PAIR.Pairing.request("unlinked", peer, "", "", False{})
+    return Unit{}
 
 # (own: this hub asked one of the owner's machines to pair, Pair.ask, so
 # the link is recorded as the owner's: UC.Far.own.key; a pasted invite
@@ -8755,7 +8780,7 @@ def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: S
     case 6n:
       BotJob.join.k(SG.Invite.parse(a), st, inbox, cfg, BotJob.client(b), BotJob.id(c))
     case 7n:
-      IO.spawn(Unit, BN.Bn.peer.forget(Cfg.home(cfg), a))
+      IO.spawn(Unit, BotJob.unpeer(Cfg.home(cfg), a))
     case 8n:
       IO.spawn(Unit, BotJob.google(inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), a, BotJob.client(b), BotJob.id(c)))
     case 9n:
@@ -15934,8 +15959,9 @@ def Pair.invite(+home: String, +tailnet: Bool, +host: String, +port: U32, +reply
     +peer : String = "p" ++ r
     +secret : String <- BN.Bn.secret.fresh()
     +now : Nat <- Now.nat()
-    sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{Pair.own(own, peer, now)})
-    ok : Bool <- BN.Bn.peer.save(home, peer, secret)
+    +why : String <- BotJob.record(peer)
+    sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{Bool.pick(List<&2, M.Change>, String.is_empty(why), Pair.own(own, peer, now), Nil{})})
+    ok : Bool <- BotJob.keep(why, home, peer, secret)
     Pair.invited(ok, SG.Invite.make(here, peer, secret), reply)
 
 def Hub.bot.pair.k(i: Nat, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
@@ -16092,12 +16118,38 @@ def Hub.bot.deliver(live: Bool, m: Maybe<&2, J.Json>, h: Hub, +peer: String, +re
     case False{} _ _:
       Hub.answer(h, reply, W.Http.text("401 Unauthorized", "not a linked machine"))
 
-def Hub.bot.link.k(ok: Bool, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
-  match ok:
-    case True{}:
+# (the invite must be one this hub recorded and that is unused, unexpired
+# and unrevoked: effects/pairing.js's link. One that can never link again,
+# an invite from before invites were recorded among them, loses its
+# secret; a record that could not be read leaves it.)
+def Hub.bot.link.why(+error: String) -> String:
+  Bool.pick(String, String.eq(error, "expired_code"), "this invite has expired: make a new one",
+    Bool.pick(String, String.eq(error, "revoked_code"), "this invite was revoked",
+      Bool.pick(String, String.eq(error, "used_code"), "this invite was used already", "this hub has no record of this invite: make a new one")))
+
+def Hub.bot.link.dead(+error: String) -> Bool:
+  Bool.or(String.eq(error, "expired_code"), Bool.or(String.eq(error, "revoked_code"), Bool.or(String.eq(error, "used_code"), String.eq(error, "unknown_invitation"))))
+
+def Hub.bot.link.rec(fine: Bool, +error: String, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match fine h:
+    case True{} _:
       do IO<Hub>:
         Bot.answer(reply, Bot.json("200 OK", J.Json.show(J.Json.obj([J.KV{"name", J.Str{me}}]))))
         Hub.step(h, B.Step{[M.PeerSet{peer, Bool.pick(String, String.is_empty(name), peer, name), url, False{}, now}], Nil{}})
+    case False{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Bool.pick(IO(Unit), Hub.bot.link.dead(error), BN.Bn.peer.forget(Cfg.home(cfg), peer), IO.pure(Unit, Unit{})))
+        Log.info("bots: refused a link with invite " ++ peer ++ " (" ++ error ++ ")")
+        Hub.answer(Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, W.Http.text("401 Unauthorized", Hub.bot.link.why(error)))
+
+def Hub.bot.link.got(+r: String, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  Hub.bot.link.rec(J.Json.get_bool(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}), "ok", False{}),
+    J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}), "error", "storage_unavailable"), h, url, name, peer, me, reply, now)
+
+def Hub.bot.link.k(ok: Bool, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match ok:
+    case True{}:
+      IO.bind(String, Hub, PAIR.Pairing.request("link", peer, name, "", False{}), r => Hub.bot.link.got(r, h, url, name, peer, me, reply, now))
     case False{}:
       Hub.answer(h, reply, W.Http.text("400 Bad Request", "no http address"))
 
@@ -16728,9 +16780,22 @@ def Conn.devices.left(xs: List<&2, J.Json>, +inbox: Chan(Msg)) -> IO(Unit):
         sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{U32.from_nat(J.Json.get_nat(J.Json.obj([J.KV{"id", x}]), "id", 0n))})
         Conn.devices.left(rest, inbox)
 
+# a revoked hub-to-hub invite that had made a link: the link is removed as
+# bots.unpeer removes it (its secret is gone already: effects/pairing.js)
+def Conn.devices.unpeer(go: Bool, +peer: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match go:
+    case True{}:
+      do IO<Unit>:
+        +now : Nat <- Now.nat()
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.PeerSet{peer, "", "", True{}, now}]})
+        return Unit{}
+    case False{}:
+      IO.pure(Unit, Unit{})
+
 def Conn.devices.reply(+j: J.Json, s: Socket, +native: Bool, +https: Bool, +op: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     Conn.devices.left(J.Json.elems(J.Json.get_obj(j, "clients")), inbox)
+    Conn.devices.unpeer(Bool.and(String.eq(op, "uninvite"), Bool.not(String.is_empty(J.Json.get_str(j, "peer", "")))), J.Json.get_str(j, "peer", ""), inbox)
     +error : String = J.Json.get_str(j, "error", "")
     +credential : String = J.Json.get_str(j, "token", "")
     +link : String = J.Json.get_str(j, "link", "")

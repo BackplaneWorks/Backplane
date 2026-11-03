@@ -75,3 +75,32 @@ test('listener route hints strip credentials and precede local desktop origins',
  const issued=JSON.parse(effects.get('Pairing.request')('create','','','127.0.0.1:3787',false));
  assert.equal(issued.routes[0],'https://fixture.ts.net');assert.equal(issued.localOnly,false);assert.ok(!issued.link.includes(f.opts.root));
 });
+test('hub-to-hub invites are recorded: they expire like device invitations, link once, and revoking one unlinks its machine',t=>{
+ const f=fixture(t), peers=path.join(f.home,'secrets','peers');fs.mkdirSync(peers,{recursive:true});
+ const secret=p=>{fs.writeFileSync(path.join(peers,p),'{"secret":"x"}');return p;};
+ const p1=secret('p'+'1'.repeat(16)),p2=secret('p'+'2'.repeat(16)),p3=secret('p'+'3'.repeat(16)),p4=secret('p'+'4'.repeat(16));
+ const a=f.store.machine(p1),b=f.store.machine(p2),c=f.store.machine(p3);assert.ok(a.ok&&b.ok&&c.ok);assert.equal(a.expiresAt,1000000+600000);
+ assert.equal(f.store.machine('../x').error,'invalid_request');assert.equal(f.store.machine(p1).error,'invalid_request');
+ const listed=()=>Object.fromEntries(factory(f.opts).list().invitations.map(x=>[x.id,x]));
+ assert.deepEqual([a,b,c].map(x=>listed()[x.id].kind),['machine','machine','machine']);assert.equal(listed()[a.id].state,'open');
+ // used once, by the machine that linked; a peer never recorded is refused
+ assert.deepEqual(f.store.link(p1,'desk'),{ok:true});assert.equal(f.store.link(p1,'desk').error,'used_code');
+ assert.equal(listed()[a.id].state,'used');assert.equal(listed()[a.id].deviceName,'desk');assert.equal(listed()[a.id].device,p1);assert.equal(listed()[a.id].deviceRevoked,false);
+ assert.equal(f.store.link(p4,'old').error,'unknown_invitation');
+ // a device code never matches a machine invite, and the other way round
+ assert.equal(f.store.enroll(p2,'x').error,'wrong_code');
+ // revoked before use: it never links and its secret is gone
+ assert.deepEqual(f.store.uninvite(b.id),{ok:true,clients:[]});assert.equal(f.store.link(p2,'x').error,'revoked_code');assert.ok(!fs.existsSync(path.join(peers,p2)));
+ // revoked after use: the hub is told which link to remove
+ assert.deepEqual(f.store.uninvite(a.id),{ok:true,clients:[],peer:p1});assert.equal(listed()[a.id].deviceRevoked,true);assert.ok(!fs.existsSync(path.join(peers,p1)));
+ // unused past ten minutes: it expires and its secret is swept
+ f.advance(600000);assert.equal(f.store.link(p3,'late').error,'expired_code');assert.equal(listed()[c.id].state,'expired');assert.ok(!fs.existsSync(path.join(peers,p3)));
+ assert.ok(fs.existsSync(path.join(peers,p4)));
+ // a link removed in Bots is shown as such
+ const d=f.store.machine(secret('p'+'5'.repeat(16)));f.store.link('p'+'5'.repeat(16),'lab');f.store.unlinked('p'+'5'.repeat(16));assert.equal(listed()[d.id].deviceRevoked,true);
+ // sixteen open at once, apart from device invitations
+ for(let i=0;i<16;i++)assert.ok(f.store.machine('p'+i.toString(16).padStart(16,'a')).ok);assert.equal(f.store.machine('p'+'f'.repeat(16)).error,'too_many_invitations');assert.ok(f.store.create(['http://hub']).code);
+ const disk=fs.readFileSync(path.join(f.home,'devices-v1.json'),'utf8');assert.ok(!disk.includes('"secret"'));
+ // an older hub's validator (device invitations only) still reads the registry
+ const data=JSON.parse(disk);assert.ok(data.invitations.every(x=>/^[a-f0-9]{32}$/.test(x.id)&&/^[a-f0-9]{64}$/.test(x.hash)&&/^[a-f0-9]{64}$/.test(x.codeHash)));
+});

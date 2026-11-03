@@ -16,7 +16,8 @@
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,chmodSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
-import {createHmac,randomBytes} from 'node:crypto';
+import {createHmac} from 'node:crypto';
+import {connect} from '../../skills/backplane-e2e/rpc.mjs';
 const args=process.argv.slice(2), [binary]=args.filter(x=>!x.startsWith('--'));
 if(!binary)throw Error('BINARY required');
 const baseline=args.includes('--baseline');
@@ -77,13 +78,21 @@ function signed(source:string,path:string,link:string,secret:string,body:string,
 // /far/log as a linked hub pulls: the first ask builds the feed ("503 not
 // ready", past the gate), so ask again until it answers otherwise
 async function pull(source:string,link:string,secret:string){
- // (each ask its own body: a signature is accepted once)
- let r=await signed(source,'/far/log',link,secret,JSON.stringify({since:0,ask:0}));
- for(let i=1;i<50&&r.status===503;i++){await sleep(200);r=await signed(source,'/far/log',link,secret,JSON.stringify({since:0,ask:i}));}
+ // (each ask its own body, unique across pulls too: a signature is
+ // accepted once, and two pulls can fall in the same second)
+ const nonce=()=>`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+ let r=await signed(source,'/far/log',link,secret,JSON.stringify({since:0,ask:0,nonce:nonce()}));
+ for(let i=1;i<50&&r.status===503;i++){await sleep(200);r=await signed(source,'/far/log',link,secret,JSON.stringify({since:0,ask:i,nonce:nonce()}));}
  return r;
 }
-// an invite's secret, as this hub keeps the ones it made
-function invite(link:string){const d=join(home,'secrets','peers');mkdirSync(d,{recursive:true,mode:0o700});const secret=randomBytes(32).toString('hex');writeFileSync(join(d,link),JSON.stringify({secret}),{mode:0o600});chmodSync(d,0o700);return secret;}
+// an invite this hub made and recorded, as Bots > link a machine makes one
+// (bots.invite over the main listener with the token; a hub links only
+// with an invite it recorded)
+async function invite(){
+ const c=await connect(port,readFileSync(join(home,'token'),'utf8').trim());
+ try{const r=await c.call('bots.invite',{}), m=/^bp1:.*:(p[0-9a-f]+):([0-9a-f]{64})$/.exec(r.invite||'');if(!m)throw Error('no invite: '+JSON.stringify(r));return {link:m[1],secret:m[2]};}
+ finally{c.close();}
+}
 function own(link:string){
  let how='';
  for(const l of readFileSync(join(home,'events.jsonl'),'utf8').split('\n'))if(l.includes(`"peer.own.${link}"`)){try{how=JSON.parse(l).value??JSON.parse(l).v??how;}catch{const m=/"value":"([a-z]*)"/.exec(l);if(m)how=m[1];}}
@@ -99,15 +108,15 @@ try{
  const inv=JSON.parse(pair?.body||'{}').invite||'', m=/^bp1:(.*):([A-Za-z0-9_-]+):([0-9a-f]+)$/.exec(inv);
  check('the invite reads',!!m,inv);
  // someone else's device holds an invite (made for them) and says it is desk
- const evil=invite('pevil1');
- const l1=await signed('127.0.0.4','/bots/link','pevil1',evil,claim);check('an invite\'s holder links',l1.status===200,l1);
+ const E=await invite(), evil=E.secret;
+ const l1=await signed('127.0.0.4','/bots/link',E.link,evil,claim);check('an invite\'s holder links',l1.status===200,l1);
  await sleep(500);
- const f1=await pull('127.0.0.4','pevil1',evil);
+ const f1=await pull('127.0.0.4',E.link,evil);
  if(baseline)check('baseline: the link that says it is desk was let in',f1.status===200,f1.status);
  else{
   check('a link that only says it is desk is refused on /far/log',f1.status===403,f1);
-  const r1=await signed('127.0.0.4','/far/rpc','pevil1',evil,JSON.stringify({id:'1',m:'fs.list',p:{path:'/'}}));check('and on /far/rpc',r1.status===403,r1);
-  check('nothing recorded it as the owner\'s',own('pevil1')==='',own('pevil1'));
+  const r1=await signed('127.0.0.4','/far/rpc',E.link,evil,JSON.stringify({id:'1',m:'fs.list',p:{path:'/'}}));check('and on /far/rpc',r1.status===403,r1);
+  check('nothing recorded it as the owner\'s',own(E.link)==='',own(E.link));
   // the pair invite, linked from a machine Tailscale does not vouch for (a
   // LAN BACKPLANE_PEERS machine): its link is the owner's from the pairing
   const l2=await signed('127.0.0.4','/bots/link',m![2],m![3],claim);check('the paired machine links',l2.status===200,l2);
@@ -116,21 +125,21 @@ try{
   const f2=await pull('127.0.0.4',m![2],m![3]);check('the paired machine may pull',f2.status===200,f2.status);
   // a link made before the hub recorded this (no record), from one of the
   // owner's devices: its first signed request over the tailnet verifies it
-  const old=invite('pold1');
-  const l3=await signed('127.0.0.4','/bots/link','pold1',old,claim);check('an older link',l3.status===200,l3);
+  const O=await invite(), old=O.secret;
+  const l3=await signed('127.0.0.4','/bots/link',O.link,old,claim);check('an older link',l3.status===200,l3);
   await sleep(500);
-  const f3=await pull('127.0.0.4','pold1',old);check('unverified, it is refused',f3.status===403,f3.status);
-  const d3=await signed('127.0.0.5','/bots/dir','pold1',old,'','GET');check('it asks for the directory from the owner\'s device',d3.status===200,d3);
+  const f3=await pull('127.0.0.4',O.link,old);check('unverified, it is refused',f3.status===403,f3.status);
+  const d3=await signed('127.0.0.5','/bots/dir',O.link,old,'','GET');check('it asks for the directory from the owner\'s device',d3.status===200,d3);
   await sleep(500);
-  check('Tailscale vouched: recorded',own('pold1')==='tailnet',own('pold1'));
-  const f4=await pull('127.0.0.4','pold1',old);check('then it may pull',f4.status===200,f4.status);
+  check('Tailscale vouched: recorded',own(O.link)==='tailnet',own(O.link));
+  const f4=await pull('127.0.0.4',O.link,old);check('then it may pull',f4.status===200,f4.status);
   // someone else's device never verifies a link, however often it asks
-  for(let i=0;i<2;i++)await signed('127.0.0.4','/bots/dir','pevil1',evil,'','GET');
+  for(let i=0;i<2;i++)await signed('127.0.0.4','/bots/dir',E.link,evil,'','GET');
   await sleep(500);
-  check('someone else\'s device verified nothing',own('pevil1')==='',own('pevil1'));
+  check('someone else\'s device verified nothing',own(E.link)==='',own(E.link));
   // a forged signature from the owner's device verifies nothing either
-  const forged=await signed('127.0.0.5','/bots/dir','pevil1','00'.repeat(32),'','GET');check('a bad signature is refused',forged.status===401,forged.status);
-  check('and recorded nothing',own('pevil1')==='',own('pevil1'));
+  const forged=await signed('127.0.0.5','/bots/dir',E.link,'00'.repeat(32),'','GET');check('a bad signature is refused',forged.status===401,forged.status);
+  check('and recorded nothing',own(E.link)==='',own(E.link));
  }
 }catch(e){failed=true;console.error('fixture error: '+String(e));}
 finally{
