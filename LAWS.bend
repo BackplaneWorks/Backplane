@@ -1,3 +1,5 @@
+import ./src/core/ws-fragments.bend as WSFRAG
+import ./src/core/http.bend as WSFRAME
 import ./src/server/conversation-window.bend as CONVWINDOW
 
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
@@ -15840,3 +15842,8 @@ law home_missing_artifact_has_no_panel:
 law home_owner_round_trip:
   for project: String
   {PHOME.Home.project(PHOME.Home.owner(project)) == project : String}
+
+# A continuation cannot become a standalone request.
+law websocket_orphan_continuation_is_rejected:
+  for bytes: List<&2, U32>
+  {WSFRAG.Fragment.step(WSFRAG.FragIdle{}, WSFRAME.Frame{True{}, 0, bytes}) == WSFRAG.FragReject{} : WSFRAG.Taken}

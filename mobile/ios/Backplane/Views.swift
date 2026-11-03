@@ -1696,7 +1696,7 @@ struct ProjectHomeScreen: View {
                 HStack {
                     Button("Defaults") { model.act("settings-page", "agents") }
                     Spacer()
-                    Button(home.pending ? "Starting…" : "Start thread") { model.act("home-start", draft) }
+                    Button(home.pending ? "Starting…" : "Start thread") { model.act("draft", draft); model.act("send") }
                         .disabled(home.pending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }.frame(height: 36)
             }.padding(12).background(BackplaneDesign.panel)

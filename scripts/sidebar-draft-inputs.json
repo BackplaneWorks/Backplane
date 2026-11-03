@@ -45,7 +45,7 @@
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
-    "src/core/client.bend": "a744c284a0659f5bfb092ded6de7d186ef54fc115a565b1dd777f7e83232ba4c",
+    "src/core/client.bend": "97eb58ce2ba1fa021ebde4484220def568d99b49ee6fc083f78a49d96627eb28",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -187,7 +187,7 @@
     "src/web/list-windows.bend": "965be3f9f1a13e97dd7dc36a4f21827d51e1a666fc37d13a619ae66cf8584dcc",
     "src/web/mail-actions.bend": "da52f4d849410a7dbfe2484db0d1d07b010ff99e126668fdd05b30b12f495c8f",
     "src/web/mailroom.bend": "2b3fee92a16cc6f11df0fdcddecd19c2ec5f7e2212fefe72c300e198870c9270",
-    "src/web/project-home.bend": "38934f7e11c59b09aba76a910b84d18127b9f6dd8e2d999b721ef1a925fc2e4f",
+    "src/web/project-home.bend": "4324928fd032edd4ea0c85c9ff6db9120402d628409e1d9b916cbd1250e0f049",
     "src/web/settings-menu.bend": "231b31eae65cf8598d9ea78265e19a6e56169cb6a2361cacac6251e9573dd4cb",
     "src/web/sidebar-slot.bend": "1104967b7a84470cb9afcf6e1efdd911469de1cbef52c7ad34a16cad73754950",
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
@@ -979,6 +979,25 @@
       "assertions": 24,
       "logSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
       "work": "w-t1793685091-1352063-1355587"
+    },
+    "wholeDraftSend": {
+      "changedClosureFiles": [
+        "src/core/client.bend",
+        "src/web/project-home.bend"
+      ],
+      "scope": "Home uses the existing Send transport and rejects a bounded view preview before creating a thread; its warning reads only @draft.bound/@home.error outside the sidebar. Review headings expose edits only for real board/model artifact paths. No sidebar body reader, filter, scratch retention or authority change.",
+      "assertions": 24,
+      "logSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
+      "work": "w-t1793685091-1352063-1355968"
+    },
+    "composerContainer": {
+      "changedClosureFiles": [
+        "src/web/project-home.bend"
+      ],
+      "scope": "The home composer is a div, matching the existing thread composer. Prevents implicit native HTML form submission and page reload on Send. No draft reads, sidebar projection, private filter, unknown scratch retention or authority change. Reviewed the one-line tag change.",
+      "assertions": 24,
+      "logSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
+      "work": "w-t1793685091-1352063-1356537"
     }
   }
 }

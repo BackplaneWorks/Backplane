@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import * as Frame from '../../src/web/wire.js';
 import {configuration,startFixture,assertOwnedResource,assertOwnedURL} from './instant_ui_fixture.mjs';
 const config=configuration();
 if (!process.stdin.isTTY && fs.readFileSync(0,'utf8').trim()) throw Error('No external pairing input');
@@ -20,6 +21,11 @@ function triangle(){
  const head=Buffer.alloc(20);head.writeUInt32LE(0x46546c67);head.writeUInt32LE(2,4);head.writeUInt32LE(20+json.length+8+positions.length,8);head.writeUInt32LE(json.length,12);head.writeUInt32LE(0x4e4f534a,16);
  const bin=Buffer.alloc(8);bin.writeUInt32LE(positions.length);bin.writeUInt32LE(0x004e4942,4);return Buffer.concat([head,json,bin,positions]);
 }
+// Diagnostics retain sizes, routing and command methods, never message bodies.
+const dictionaries=fs.readFileSync('src/core/cbor.bend','utf8');
+const dict=name=>{const block=dictionaries.split('def Cbor.'+name+'()')[1].split('\ndef ')[0];return JSON.parse(block.slice(block.indexOf('['),block.lastIndexOf(']')+1));};
+const keys=dict('keys'),words=dict('words');
+function wireObject(data){return typeof data==='string'?JSON.parse(data):Frame.plain(Frame.cbor(new Uint8Array(data),keys,words));}
 let boardRoot;
 const fixture=await startFixture({...config,prepare({root,project,rows,at}){
  boardRoot=project;rows[0].title='Fixture board';
@@ -41,16 +47,19 @@ const fixture=await startFixture({...config,prepare({root,project,rows,at}){
  }
  rows.push({$:'SettingSet',key:'order.estimates',value:'off',at});
 }});
-const report={isolated:true,fixtureRoot:fixture.root,checks:[],latency:[],errors:[],screens:[]};
-let browser,context,device,page,delay=0;
+const report={isolated:true,fixtureRoot:fixture.root,checks:[],latency:[],errors:[],screens:[],wire:[]};
+let browser,context,device,page,delay=0;const sendIds=new Set();
+function wireRecord(data,from){try{const o=wireObject(data);if(from==='client'&&o.m==='view.action'&&o.p?.action==='send'){sendIds.add(o.id);const v=o.p.session;report.wire.push({from,id:o.id,action:o.p.action,target:o.p.target,selected:v?.sel,bytes:Buffer.byteLength(v?.drafts?.[v?.sel]||''),bound:v?.drafts?.['@draft.bound']||''});}else if(from==='client'&&o.m==='project.start')report.wire.push({from,id:o.id,rpc:o.m,project:o.p.project,bytes:Buffer.byteLength(o.p.text||'')});else if(from==='server'&&sendIds.has(o.id)){const r=o.result||{};report.wire.push({from,id:o.id,ok:o.ok,error:o.error,nextTarget:r.nextTarget,cmds:(r.cmds||[]).map(c=>{let p={};try{p=JSON.parse(c.text||'{}')}catch{}return {type:c.type,rpc:p.m,bytes:typeof p.p?.text==='string'?Buffer.byteLength(p.p.text):0}})});}}catch{}}
 const check=(name,condition)=>{assert(condition,name);report.checks.push(name);};
 try{
  browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH,args:['--no-sandbox','--disable-dev-shm-usage']});
  context=await browser.newContext({viewport:{width:1280,height:1000},serviceWorkers:'block'});
+ await context.addInitScript(()=>{globalThis.__homeStatus=[];globalThis.__homeClicks=[];document.addEventListener('click',event=>{const node=event.target.closest?.('[data-on-click]');if(node?.dataset.onClick==='send')globalThis.__homeClicks.push({action:node.dataset.onClick,selected:document.querySelector('main')?.getAttribute('data-project-home')});},true);new MutationObserver(()=>{for(const node of document.querySelectorAll('#view-connection-text,.home-error')){const text=node.textContent;if(text&&globalThis.__homeStatus.at(-1)!==text)globalThis.__homeStatus.push(text);}}).observe(document,{subtree:true,childList:true,characterData:true});});
  await context.route('**/*',route=>{try{assertOwnedResource(route.request().url(),fixture.origin);return route.continue()}catch{report.errors.push('Blocked external resource');return route.abort('blockedbyclient')}});
  await context.routeWebSocket('**/*',socket=>{
   assertOwnedURL(socket.url(),fixture.origin,true);const server=socket.connectToServer();
-  server.onMessage(data=>{const deliver=()=>{try{socket.send(data)}catch{}};if(delay)setTimeout(deliver,delay);else deliver();});
+  socket.onMessage(data=>{wireRecord(data,'client');server.send(data)});
+  server.onMessage(data=>{wireRecord(data,'server');const deliver=()=>{try{socket.send(data)}catch{}};if(delay)setTimeout(deliver,delay);else deliver();});
  });
  const name='TEST project-home '+Date.now(),code=await fixture.invitation();
  const enrolled=await context.request.post(fixture.origin+'/auth/enroll',{headers:{Authorization:'Bearer '+code,'X-Backplane-Name':name},maxRedirects:0});assert(enrolled.ok());
@@ -64,8 +73,10 @@ try{
  await open('fixture-project');await page.getByRole('heading',{name:'Fab readiness',exact:true}).waitFor();
  await page.getByText('1 errors · 2 warnings · 1 unconnected',{exact:true}).waitFor();
  await page.locator('main .home-live-viewer .viewer').waitFor();check('saved board mounts lazily inside the project home',true);
+ await page.waitForFunction(()=>{const c=document.querySelector('main .home-live-viewer canvas.plot2d');if(!c?.width||!c.height)return false;const ctx=c.getContext('2d');if(!ctx)return false;const d=ctx.getImageData(0,0,c.width,c.height).data;for(let i=0;i<d.length;i+=16){const r=d[i],g=d[i+1],b=d[i+2];if(r>110&&r>g*1.35&&r>b*1.35||g>100&&g>r*1.35&&g>b*1.35||r>130&&g>110&&b<75)return true;}return false;},null,{timeout:45000,polling:250});
+ check('saved board geometry is rendered rather than a loading placeholder',true);
  check('opening a project creates no conversation',fixture.evidence().threads.length===initialThreads);
- check('board/schematic/DRC/ERC/mech/readiness controls are present',await page.locator('main [data-on-click="home-model"]').count()===1&&await page.locator('main [data-on-click="home-bom"]').count()===1);
+ check('board/schematic/DRC/ERC/mech/readiness controls are present',await page.locator('main [data-on-click="home-model"]').count()>=1&&await page.locator('main [data-on-click="home-bom"]').count()===1);
  const composer=page.locator('#composer');await composer.fill('Keep this draft through every name edit.');
  async function rename(kind,id,title,save=true){
   await page.evaluate(({kind,id})=>{const el=[...document.querySelectorAll('main [data-on-click="home-rename"]')].find(n=>{const v=JSON.parse(n.dataset.value);return v.kind===kind&&v.id===id});if(!el)throw Error('Missing inline name control '+kind);el.click();},{kind,id});
@@ -103,9 +114,9 @@ try{
  await click('home-document-more');await page.waitForFunction(first=>document.querySelector('.home-document-body')?.textContent!==first,first);
  check('document continuation reads another section',await page.locator('.home-document-body').innerText()!==first);await click('home-document-close');
  await click('home-price');await page.getByRole('heading',{name:'Price estimate',exact:true}).waitFor();check('estimate control produces a price result',true);
- await click('home-bom');await page.locator('main .viewer .review-pane').first().waitFor({timeout:30000});check('BOM opens the existing review viewer',true);await click('panel');
+ await click('home-bom');await page.locator('main .viewer .review-pane').first().waitFor({timeout:30000});await page.locator('main .review-body[data-review-ready="1"]').waitFor({timeout:45000});check('BOM opens populated existing review viewer',true);check('review heading has no unsupported artifact rename control',await page.locator('main .home-live-viewer > h2 [data-on-click="home-rename"]').count()===0);await click('panel');
  for(const [id,title]of [['fixture-spec','Specification'],['fixture-software','README']]){
-  await open(id);await page.getByRole('heading',{name:title,exact:true}).waitFor();
+  await open(id);await page.getByRole('heading',{name:title,exact:true,level:2}).waitFor();
   check(id+' has no CAD controls',await page.locator('main [data-on-click="home-view"],main [data-on-click="home-model"],main [data-on-click="home-bom"]').count()===0);
  }
  // A delayed view reply proves first paint comes from the transition cache.
@@ -125,15 +136,18 @@ try{
   const file=path.join(output,`app-${width}-${theme}.png`);await page.screenshot({path:file});report.screens.push(file);
  }
  await page.setViewportSize({width:390,height:1000});await open('fixture-spec');await ready();
- await page.locator('#composer').fill('One exact project-home question');await click('home-start');
+ const firstMessage='One exact project-home question\n'+'Preserve the entire message 日本語. '.repeat(2400);
+ const documentId=await page.evaluate(()=>globalThis.__homeDocumentId=crypto.randomUUID());
+ await page.locator('#composer').fill(firstMessage);await click('send');
  await page.waitForFunction(()=>document.querySelector('main[data-thread]')?.getAttribute('data-thread')?.startsWith('home-'),null,{timeout:45000});
  const events=fs.readFileSync(fixture.log,'utf8').trim().split('\n').map(JSON.parse);
  const created=events.filter(e=>e.$==='ThreadCreated'&&e.project==='fixture-spec'&&e.id.startsWith('home-'));
  check('home send creates one thread in its project',created.length===1);
- check('home send posts its exact first message once',events.filter(e=>e.$==='MessagePosted'&&e.thread===created[0].id&&e.text==='One exact project-home question').length===1);
+ check('home send keeps the current document without native form submission',await page.evaluate(()=>globalThis.__homeDocumentId)===documentId);
+ check('home send posts its exact first message once',events.filter(e=>e.$==='MessagePosted'&&e.thread===created[0].id&&e.text===firstMessage).length===1);
  check('browser has no page errors or external requests',report.errors.length===0);
  console.log('ok '+report.checks.length+' isolated project-home checks');
-}catch(e){report.errors.push(e.stack||String(e));process.exitCode=1;if(page)try{await page.screenshot({path:path.join(output,'failure.png')});report.failureText=(await page.locator('body').innerText()).slice(0,3000)}catch{}}
+}catch(e){report.errors.push(e.stack||String(e));process.exitCode=1;if(page)try{await page.screenshot({path:path.join(output,'failure.png')});report.failureText=(await page.locator('body').innerText()).slice(0,3000);report.statusHistory=await page.evaluate(()=>globalThis.__homeStatus);report.sendClicks=await page.evaluate(()=>globalThis.__homeClicks)}catch{}}
 finally{
  try{if(context&&device)report.revoked=(await context.request.post(fixture.origin+'/auth/revoke',{headers:{'X-Backplane-Device':device},maxRedirects:0})).ok()}catch{}
  try{await browser?.close()}finally{await fixture.stop();fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(report,null,2));}

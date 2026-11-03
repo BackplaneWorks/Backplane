@@ -2560,3 +2560,6 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 
 .home-features { display:flex; flex-wrap:wrap; gap:6px 12px; }
 .home-card > .body { max-height:180px; overflow:hidden; }
+
+/* Embedded home viewers own their tabs; no outer workspace rail replaces them. */
+.project-home .viewer > .viewer-tabs { display:flex; }

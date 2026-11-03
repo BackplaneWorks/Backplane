@@ -130,3 +130,7 @@ def main() -> IO(Unit):
 
     C.Check.str("default saved board survives the next stale client panel input", Bool.show(U.Ui.panel(A.Actor.merge(home(), U.Home.viewer.default(U.Ui.info_set(home(), "local.home.renderer", "web")), True{}, "project-home-p", False{}))), "True")
     C.Check.str("common Send in a home starts a real project thread", J.Json.get_str(sent(U.Ui.act(U.Ui.scratch_set(home(), "project-home-p", "Keyboard send"), "send", "")), "m", ""), "project.start")
+
+    C.Check.str("bounded home preview is never sent as the first message", Bool.show(String.eq(J.Json.get_str(sent(U.Ui.act(U.Ui.scratch_set(U.Ui.scratch_set(home(), "project-home-p", "head … tail"), "@draft.bound", "200000 hash"), "send", "")), "m", ""), "project.start")), "False")
+    C.Check.str("bounded home preview keeps the user's retained draft", U.Ui.draft_text(U.Act.ui(U.Ui.act(U.Ui.scratch_set(U.Ui.scratch_set(home(), "project-home-p", "head … tail"), "@draft.bound", "200000 hash"), "send", ""))), "head … tail")
+    C.Check.str("review heading never exposes an unsupported artifact rename", Bool.show(String.contains(J.Json.show(WP.Node.write(W.HomeView.viewer.title(U.Ui.view.k(home(), "project-home-p", J.Json.obj([J.KV{"kind", J.Str{"review"}}, J.KV{"path", J.Str{"bom"}}])), U.Home.contents(home())))), "home-rename")), "False")

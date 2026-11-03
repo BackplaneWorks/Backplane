@@ -8427,12 +8427,21 @@ def Home.save(+u: Ui) -> Act:
   Home.request(u, [J.KV{"op", J.Str{"intent"}}, J.KV{"revision", J.Str{J.Json.get_str(Home.contents(u), "intentRevision", "")}}, J.KV{"text", J.Str{Ui.scratch(u, "@f.home-intent:" ++ Ui.sel(u))}},
     J.KV{"editor", J.Num{Nat.show(J.Json.get_nat(Home.contents(u), "intentOffset", 0n))}}, J.KV{"removeBytes", J.Num{Nat.show(J.Json.get_nat(Home.contents(u), "intentBytes", 0n))}}])
 
-def Home.start(+u: Ui) -> Act:
+def Home.start.ready(+u: Ui) -> Act:
   +waiting = Bool.not(String.is_empty(Ui.scratch(u, "@home.send.rid")))
   Bool.pick(Act, Bool.or(waiting, String.is_empty(String.trim(Ui.draft_text(u)))), Act{u, [Focus{"composer"}]},
     Ui.rpc.keep.msg(Made.want(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u,
       "@home.send.owner", Ui.sel(u)), "@home.send.text", Ui.draft_text(u)), "@home.send.rid", Nat.show(Made.rid(u)))),
       "project.start", [J.KV{"project", J.Str{PH.Home.project(Ui.sel(u))}}, J.KV{"text", J.Str{Ui.draft_text(u)}}]))
+
+# A bounded view preview is never promoted into a first message.
+def Home.start.whole(bounded: Bool, +u: Ui) -> Act:
+  match bounded:
+    case True{}: Act{Ui.scratch_set(u, "@home.error", DB.Bound.refuse(Lang.loc(u), Ui.scratch(u, "@draft.bound"))), Nil{}}
+    case False{}: Home.start.ready(u)
+
+def Home.start(+u: Ui) -> Act:
+  Home.start.whole(DB.Bound.is(Ui.scratch(u, "@draft.bound")), u)
 
 # Inline edits share Ren's save/cancel actions, with an independent field.
 def Home.rename.kind(+kind: String, +u: Ui, +id: String) -> Act:
