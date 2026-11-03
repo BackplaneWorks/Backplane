@@ -2761,7 +2761,7 @@ def View.msg.body(+lc: I.Loc, +err: String, +id: String, +text: String) -> List<
 def View.msg.x.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String, +as: List<&2, D.Attr>) -> D.Node:
   match user:
     case True{}:
-      D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
+      D.El{"div", id, [D.At{"class", Bool.pick(String, String.eq(View.attr(as, "unread"), "1"), "msg user unread", "msg user")}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
     case False{}:
       D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat(View.msg.body(lc, View.attr(as, "err"), id, text), D.Dom.cat(View.message.images(id, IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
 
@@ -2866,14 +2866,19 @@ def View.err.attrs(+lc: I.Loc, api: Bool, +text: String) -> List<&2, D.Attr>:
 
 # (mid: a reply inside a turn, its time shown on hover: core/stamp.bend's
 # Stamp.mid)
-def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool) -> D.Node:
+# (unread: a person's message the agent has not read yet, core/stamp.bend's
+# Stamp.unread: its time says so and it is a step dimmer)
+def View.entry.u.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool, +unread: Bool) -> D.Node:
   match e:
     case M.Msg{+id, +th, M.User{}, +text, _}:
-      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", STP.Stamp.unread.text(unread, lc, stamp)}, D.At{"unread", Bool.pick(String, unread, "1", "")}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
     case M.Msg{+id, +th, _, +text, _}:
       View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", Bool.pick(String, CP.Pending.synthetic(id), "live", "msg")}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], List.append(&2, D.Attr, View.err.attrs(lc, FO.ApiErr.is(text), text), View.ctx.attrs(RTO.Rto.chat(st, th), st, CP.Pending.text(lc, id, text)))), CP.Pending.text(lc, id, text))
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       View.act.loc(lc, String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at}, st, ec)
+
+def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool) -> D.Node:
+  View.entry.u.loc(lc, e, st, ec, stamp, mid, False{})
 
 def View.entry.s.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
   View.entry.m.loc(lc, e, st, ec, stamp, False{})
@@ -2884,7 +2889,7 @@ def View.entry.s(e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
   View.entry.s.loc(I.En{}, e, st, ec, stamp)
 
 def View.entry.own(+lc: I.Loc, +e: M.Entry, +st: M.State, +ec: U.Ec, +sp: STP.Stamps) -> D.Node:
-  View.entry.m.loc(lc, e, st, ec, STP.Stamp.text.loc(lc, sp, e), STP.Stamp.mid(sp, e))
+  View.entry.u.loc(lc, e, st, ec, STP.Stamp.text.loc(lc, sp, e), STP.Stamp.mid(sp, e), STP.Stamp.unread(st, e))
 
 # an entry of this thread (headed by the thread that sent it) or a message
 # this thread sent to another (a link)

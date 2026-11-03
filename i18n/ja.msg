@@ -410,6 +410,7 @@ stamp.stopped = {clock}に停止
 stamp.stopped.took = {clock}に停止 · {took}
 stamp.waiting = {clock}から完了待ち
 stamp.waiting.took = {clock}から完了待ち · {took}
+stamp.unread = 未読 · {clock}
 
 # subagent states
 state.running = 実行中
