@@ -1,3 +1,5 @@
+import { installMessageImages, messageImages } from "./message-images.js";
+installMessageImages();
 // Backplane browser host.
 //
 // This file only moves data: JSON <-> Bend values, a keyed DOM patch of the
@@ -19,6 +21,7 @@ import History from "./timeline-history.bend";
 import { TimelineScroller } from "./timeline-scroller.js";
 import { EntryHistory } from "./entry-history.js";
 import { installImageActions } from "./image-actions.js";
+import { installShotMissing, shotsMissing } from "./shot-missing.js";
 import { copyText, copyButton } from "./text-copy.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => Wire.plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
@@ -115,6 +118,9 @@ import { ThinViews, viewCapability } from "./thin.js";
 import * as Wire from "./wire.js";
 import { openDraw } from "./draw.js";
 import { ViewTransition, withTheme } from "./view-transition.js";
+import { RecentViews } from "./recent-views.js";
+import { ViewPrefetch } from "./view-prefetch.js";
+import { validatePresentation } from "./startup.js";
 import { T, is, learnJson, learnDom } from "./wire.js";
 
 const CONNECTION_BUNDLE = bundleOf(import.meta.url);
@@ -131,7 +137,7 @@ let desktopTheme = window.backplaneDesktop?.theme || "";
 if (!themeNow) themeNow = desktopTheme;
 function themeDocument() {
   document.documentElement.classList.toggle("light", themeNow === "light");
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeNow === "light" ? "#fafaf8" : "#111410");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
 }
 themeDocument();
 function themeSeen(app) {
@@ -648,7 +654,9 @@ const bodyWindows = new BodyWindows({renderBody: node => App.make(node), request
 let frontend = null, frontendNode = null, wantFrontend = true, fallbackIntent = null;
 let viewMode = "discovering", remoteReady = false, remoteEpoch = "", thinSession = null;
 let pairingAccepted = false;
-const transitionViews = new ViewTransition();
+const transitionViews = new ViewTransition({ store: new RecentViews({ indexedDB, validate: (shown, scope) => {
+  try { validatePresentation({ session: {sel:scope.selected, rid:0, drafts:{}}, view:shown, cmds:[] });return true; } catch {return false;}
+} }) });
 // The picture on screen while the next view is on its way: a retained
 // picture of the thread picked (put back as it was last seen), else the one
 // already showing, kept (holdPicture). What it was drawn for is
@@ -701,8 +709,31 @@ function focusedScope() {
 }
 function transitionScope(target = presentationTarget(currentSession())) {
   return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui),
-    epoch: thin?.epoch || remoteEpoch, target, selected:currentSession().sel, settings:currentSession().open?.settings===true, route: currentSession().route || null };
+    epoch: thin?.epoch || remoteEpoch, bundle: import.meta.url, target, selected:currentSession().sel, settings:currentSession().open?.settings===true, route: currentSession().route || null };
 }
+const previewViews = new ViewPrefetch({
+  hub:location.origin, scope:()=>transitionScope(),
+  has:target=>!!transitionViews.destination(transitionScope(), target),
+  idle:()=>remoteReady && !document.hidden && !thin?.active && !thin?.paging,
+  socket:()=>new WebSocket(location.origin.replace(/^http/, "ws") + "/ws?view=1&frontend=1"),
+  encode:request=>fromList(App.wire_out_json(Wire.json(request))),
+  decode:data=>Wire.plain(Wire.cbor(new Uint8Array(data), KEYS, WORDS)),
+  picture:(shown, session, target, scope)=>{
+    transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
+  },
+});
+function warmDestinations() {
+  for (const el of [...document.querySelectorAll('[data-on-click="select"],[data-on-click="bot"]')].filter(el=>el.getAttribute("data-value")).slice(0,3)) {
+    const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":"thread",id:el.getAttribute("data-value")};
+    if (targetKey(target)!==targetKey(thin?.target)) previewViews.enqueue(target);
+  }
+}
+for (const name of ["pointerover", "touchstart"]) document.addEventListener(name, event=>{
+  const el=event.target.closest?.('[data-on-click="select"],[data-on-click="bot"]');
+  if (!el) return;
+  void transitionViews.warm(transitionScope());
+  if (name==="pointerover") previewViews.enqueue({kind:el.getAttribute("data-on-click")==="bot"?"bot":"thread",id:el.getAttribute("data-value")},true);
+}, {passive:true});
 const targetKey = target => target ? target.kind + ":" + target.id : "";
 // Nothing is drawn in between two views: a thread picked, a reconnect, a
 // failure keep the hub's last view on screen until the next one comes.
@@ -771,7 +802,7 @@ async function refreshFocusedIdentityFor(generation) {
   }
   if (before !== cacheIdentity(document.cookie) || result.state === "denied" || result.state === "invalid") {
     void draftAttachments.prune().catch(() => {});
-    transitionViews.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
+    previewViews.stop();transitionViews.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
     if (!canonicalBoot && !remoteReady) void restoreFocused();
     else saveFocusedSoon();
   }
@@ -1092,7 +1123,7 @@ function render() {
     node => frontendNode && node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node), !!frontendNode);
   const tb = RR ? pnow() : 0;
   if (frontendNode) page = bodyWindows.project(page);
-  if (frontendNode && remoteReady) page = pendingPresentation(page);
+  if (frontendNode && remoteReady || transitionNode && transitionFor === targetKey(presentationTarget(currentSession()))) page = pendingPresentation(page);
   const t1 = PERF || RR ? pnow() : 0;
   if (RR) { RR.t("render.continuations", tb - tc);RR.t("render.bodies", t1 - tb); }
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
@@ -1174,7 +1205,11 @@ function render() {
   // the next: still near the top after a render, it is asked for
 
   if (focus) {
-    document.getElementById(focus)?.focus();
+    const el = document.getElementById(focus);
+    el?.focus();
+    // a rename opens with the old title selected: typing replaces it ("New
+    // thread" was kept in front of what was typed), an arrow key keeps it
+    if (focus === "thread-title") el?.select?.();
     focus = null;
   }
   refocusGive();
@@ -1590,11 +1625,11 @@ function dispatch(action, value, timer) {
   if (action === "voice-unkey") for (const field of sealedFields("vkey")) field.value = "";
   if (["send", "send-alt", "detach"].includes(action) && viewMode !== "compatibility") {
     restoreDraftAttachments(currentSession());
-    if (socket?.readyState === 1 && (!thin?.ready || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) { showViewStatus(App.host_message(ui, "attachment-restoring"));return true; }
+    if (socket?.readyState === 1 && ((!thin?.ready && !thin?.opening) || attachmentIdentityPending || draftAttachments.pending(currentSession().sel))) { showViewStatus(App.host_message(ui, "attachment-restoring"));return true; }
   }
-  if (["send", "send-alt"].includes(action)) historyClear();
+  if (["send", "send-alt"].includes(action)) { historyClear();if (socket?.readyState === 1) dropUnsentBack(); }
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
-  if (action === "select") { composerKeeper.selecting(value);drawerShut(); }
+  if (action === "select" || action === "bot") { composerKeeper.selecting(action === "select" ? value : "");drawerShut(); }
   if (["term-toggle", "ws-term-hide", "ws-term-here"].includes(action) || action === "ws-go" && value === "term") terminalOutput.retire();
   else if (["select", "bot", "bot-tab", "uber", "uber-bot", "remote"].includes(action)) terminalOutput.clear();
   if (["select", "ref-go", "ref-back", "ref-fwd", "bot", "bot-tab", "uber", "uber-bot", "remote"].includes(action)) {
@@ -1623,7 +1658,7 @@ function dispatch(action, value, timer) {
     }
     // An explicit destination does not depend on the previous picture
     // succeeding. ThinHost validates the live greeting and opens the bot.
-    if (action === "bot" && thin?.greeted && !thin.ready && socket?.readyState === 1) return thin.request(action, value);
+    if (action === "bot" && thin?.greeted && socket?.readyState === 1) return thin.request(action, value);
     // (a press while a thread's view is on its way waits for it: thin-host.js)
     if (thin?.ready || thin?.opening) {
       if (action === "earlier" || action === "view-page") return thin.page();
@@ -2028,7 +2063,10 @@ function attachmentPreviews() {
   for (const img of document.querySelectorAll('img.attachment-preview')) {
     if (img.complete) img.classList.toggle('failed', img.naturalWidth === 0);
   }
+  shotsMissing(document);
+  messageImages(document);
 }
+installShotMissing(document);
 
 document.addEventListener("load", e => {
   if (e.target.matches?.("img.attachment-preview")) e.target.classList.remove("failed");
@@ -2806,9 +2844,9 @@ function persistDraft(thread, text) {
   } catch {}
 }
 function localPresentation(action, value, session) {
-  if (action === "select") {
-    ui = App.presentation_select(ui, value);
-    try { localStorage.setItem("backplane-selected", value); } catch {}
+  if (action === "select" || action === "bot") {
+    ui = App.presentation_select(ui, session.sel);
+    try { localStorage.setItem("backplane-selected", session.sel); } catch {}
     holdPicture();
     remoteReady = false;
     if (!restoreTransition(presentationTarget(session))) void restoreFocused();
@@ -3016,10 +3054,26 @@ function downStatus(note) {
   const wait = Math.max(0, downSince + DOWN_QUIET_MS - Date.now());
   downTimer = setTimeout(() => { if (downSince) { reconnectNote(waiting(offlineSend ? App.host_message(ui, "offline-send") : offlineAttach ? App.host_message(ui, "offline-attachment") : downNote));connDot(true); } }, wait);
 }
+// A Send pressed while the link was down went nowhere: once it is back the
+// bar says so for a while (the "Not sent" note would just vanish, leaving
+// the text in the composer looking sent), until the next Send.
+let unsentBack = "";
+function holdViewNote(text, ms) {
+  clearTimeout(viewNoteTimer);
+  viewNote = text;
+  viewNoteTimer = setTimeout(() => { viewNote = "";unsentBack = "";if (remoteReady) showViewStatus(""); }, ms);
+  showViewStatus(viewNote);
+}
+function dropUnsentBack() {
+  if (!unsentBack || viewNote !== unsentBack) return;
+  clearTimeout(viewNoteTimer);viewNote = "";unsentBack = "";showViewStatus("");
+}
 function upStatus() {
+  const unsent = offlineSend;
   downSince = 0;clearTimeout(downTimer);downTimer = 0;offlineSend = false;offlineAttach = false;
   thinBackoff.reset();thinRetry.cancel();
   reconnectNote("");showViewStatus("");connDot(false);
+  if (unsent) { unsentBack = App.host_message(ui, "offline-send-back");holdViewNote(unsentBack, 20000); }
 }
 function thinReconnect() {
   if (!pairingAccepted || viewMode === "compatibility" || thinRetry.pending) return;
@@ -3308,6 +3362,7 @@ async function startThin(again = false, reason = "initial") {
   const current = () => !ended && attempt === thinAttempt && viewMode === "view-v1";
   const disconnect = event => {
     if (!current()) return;
+    previewViews.stop();
     if (typeof event === "string") diagnostic.initiate(event);
     trace("thin-disconnect", { reason: typeof event === "string" ? event : event?.type || "connection-ended", code: event?.code });
     ended = true;
@@ -3329,7 +3384,7 @@ async function startThin(again = false, reason = "initial") {
   // transport handlers below; never turn a renderer refusal into one.
   const viewRecover = reason => {
     if (!current()) return;
-    downNote = "";showViewLimit(reason);
+    previewViews.stop();downNote = "";showViewLimit(reason);
   };
 
   try {
@@ -3354,6 +3409,12 @@ async function startThin(again = false, reason = "initial") {
       choice: choosePresentation, prepare: (session, input, action) => preservePresentationRoute(
         action === "send" || action === "send-alt" ? input : session,
         Wire.plain(App.presentation_prepare(presentationJson(session), presentationJson(input), action))),
+      navigation: (target, session) => {
+        const cached = transitionViews.destination(transitionScope(), target);
+        const selected = cached?.scope.selected;
+        const next = choosePresentation(session, "select", selected || "");
+        return { ...next, route: cached?.scope.route || {kind:"bot-tab", bot:target.id, tab:"chat"} };
+      },
       selection: (target, session) => {
         composerKeeper.selecting(target.kind === "thread" ? target.id : "");
         const saved = takeReadingHistory(target, session);
@@ -3368,6 +3429,18 @@ async function startThin(again = false, reason = "initial") {
         else { focusedRequestedKey = null;focusedView.invalidate(); }
         if (saved) transitionPosition = null;
         else restoreTransition(target);
+        const scope = transitionScope(target), controller = thin, revision = controller?.selectionRevision;
+        void transitionViews.warm(scope).then(() => {
+          if (thin !== controller || thin?.selectionRevision !== revision || remoteReady || targetKey(thin?.target) !== targetKey(target)) return;
+          if (target.kind === "bot" && !currentSession().sel) {
+            const cached = transitionViews.destination(scope, target);
+            if (cached) {
+              const session = { ...choosePresentation(currentSession(), "select", cached.scope.selected), route:cached.scope.route };
+              thin.adoptLocalSession(session);localPresentation("bot", target.id, session);
+            }
+          }
+          if (restoreTransition(target)) later();
+        });
         return saved?.held;
       },
       local: localPresentation,
@@ -3474,6 +3547,7 @@ async function startThin(again = false, reason = "initial") {
         else if (!remoteReady && !detail.historyReset) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
+        void transitionViews.warm(transitionScope(detail.target)).then(warmDestinations);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });
         const region = historyRegion(detail, projection);
         if (region === "page") later();else laterRegions(region.split(" ").filter(Boolean));

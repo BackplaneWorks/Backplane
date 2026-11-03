@@ -4,6 +4,8 @@ const { localImagePath, createImageActions, installImageMenu } = require('../ima
 const origin = 'http://127.0.0.1:3788';
 test('desktop file reveal stays on the selected local service image endpoint', () => {
   assert.equal(localImagePath('/img?path=%2Ftmp%2Fa%20b.png', origin), '/tmp/a b.png');
+  assert.equal(localImagePath('/message-image?entry=m%3A1&path=/tmp/a.png', origin), '/tmp/a.png');
+  assert.equal(localImagePath('/message-image?entry=m&path=/tmp/a.png&token=secret', origin), null);
   assert.equal(localImagePath('/img?path=~/a.png', origin, '/home/person'), '/home/person/a.png');
   for (const source of ['/tmp/a.png', 'file:///tmp/a.png', '/img?path=relative.png', '/img?path=/tmp/a.pdf',
     '/img?path=/tmp/a.png&token=secret', '/img?path=/tmp/a.png&path=/tmp/b.png',

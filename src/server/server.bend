@@ -1,5 +1,6 @@
 import Base
 import ./pairing.bend as PAIR
+import ./message-image.bend as MIMG
 import ./pdf.bend as PDF
 import ./filelist.bend as FL
 import ../core/pcb-usage.bend as PC
@@ -49,6 +50,7 @@ import ../core/utf8.bend as U
 import ../core/http.bend as W
 import ../core/auth.bend as AUTH
 import ../core/model.bend as M
+import ../core/roots.bend as ROOTS
 import ../core/codec.bend as C
 import ../core/hub.bend as B
 import ../core/deploy.bend as DP
@@ -227,6 +229,8 @@ type JobReceipt is Data:
   JobSnoozed{thread: String, until: Nat}
   JobWorktree{thread: String, branch: String, path: String, provider: String, binding: String}
   JobLocal{thread: String, provider: String, binding: String}
+  # a Stop cancelled these Claude commands before they started
+  JobUnread{thread: String, uuids: List<&2, String>}
 
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
@@ -2987,11 +2991,16 @@ def GitJob.repo(ok: Bool, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clie
 
 # one git job; nothing happens outside a git repository (checkpoints are
 # skipped, requests answer why)
+# (Diff's "Make it a git repository", git.act "init", is the one job that
+# runs outside a repository: Git.step.init)
+def GitJob.init(+job: String, +a: String) -> Bool:
+  Bool.and(String.eq(job, "act"), String.eq(a, "init"))
+
 def GitJob.run.git(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   do IO<Unit>:
     ok : Bool <- GT.Git.is_repo(cwd)
     t : U32 <- H.Clock.epoch()
-    GitJob.repo(ok, tx, job, inbox, client, id, thread, cwd, a, b, home, U32.to_nat(t))
+    GitJob.repo(Bool.or(ok, GitJob.init(job, a)), tx, job, inbox, client, id, thread, cwd, a, b, home, U32.to_nat(t))
 
 # Sidebar jobs
 # ------------
@@ -4845,12 +4854,28 @@ def Claude.put.kind(+line: String) -> Nat:
   Bool.pick(Nat, String.starts_with(line, "{\"uuid\":"), 1n,
     Bool.pick(Nat, Bool.and(String.starts_with(line, "{\"type\":\"control_request\""), String.contains(line, "\"subtype\":\"interrupt\"")), 2n, 0n))
 
+# the messages an interrupt cancels before Claude started them (uuids) are
+# named in their thread (hub.bend's Unread.note, by Hub.job.report): they
+# still look sent
+def Claude.unread.k(none: Bool, h: Hub, +thread: String, uuids: List<&2, String>) -> IO(Hub):
+  match none h:
+    case True{} _:
+      IO.pure(Hub, h)
+    case False{} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        GitJob.report(inbox, JobUnread{thread, uuids})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Claude.unread(h: Hub, +thread: String, +uuids: List<&2, String>) -> IO(Hub):
+  Claude.unread.k(List.is_empty(&2, String, uuids), h, thread, uuids)
+
 def Claude.put.k(i: Nat, +r: ARun, h: Hub, +thread: String, +line: String) -> IO(Hub):
   match i:
     case 1n:
       Claude.flush(ARun.put(r, CM.Cmds.accept(ARun.cmds(r), B.Claude.uuid.of(line)), CM.Held.push(ARun.held(r), B.Claude.uuid.of(line), line, True{})), h, thread)
     case 2n:
-      IO.bind(Hub, Hub, Claude.raw(h, thread, line), h2 => Claude.flush(ARun.put(r, CM.Cmds.stop(ARun.cmds(r), Nil{}), ARun.held(r)), h2, thread))
+      IO.bind(Hub, Hub, Claude.raw(h, thread, line), h2 => IO.bind(Hub, Hub, Claude.unread(h2, thread, CM.Cmds.waiting(ARun.cmds(r))),
+        h3 => Claude.flush(ARun.put(r, CM.Cmds.stop(ARun.cmds(r), Nil{}), ARun.held(r)), h3, thread)))
     case _:
       Claude.raw(h, thread, line)
 
@@ -6148,6 +6173,23 @@ def Img.serve(allowed: Bool, s: Socket, +path: String, range: String) -> IO(Unit
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
+# Authenticated message images: an exact reference in a saved assistant reply.
+def MessageImageHTTP.found(empty: Bool, s: Socket, +snapshot: String) -> IO(Unit):
+  match empty:
+    case True{}: Conn.finish(s, W.Http.text("404 Not Found", "Image unavailable"))
+    case False{}: Img.send(snapshot, s, "")
+
+def MessageImageHTTP.grant(found: Bool, s: Socket, entry: String, path: String) -> IO(Unit):
+  match found:
+    case False{}: Conn.finish(s, W.Http.text("404 Not Found", "Image unavailable"))
+    case True{}: IO.bind(String, Unit, MIMG.MessageImage.snapshot(entry, path), +snapshot => MessageImageHTTP.found(String.is_empty(snapshot), s, snapshot))
+
+def MessageImageHTTP.serve(allowed: Bool, s: Socket, +entry: String, +path: String) -> IO(Unit):
+  match allowed:
+    case False{}: Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+    case True{}:
+      IO.bind(String, Unit, MIMG.MessageImage.text(entry), text => MessageImageHTTP.grant(IM.Img.message_allowed(text, path), s, entry, path))
+
 # Original GLB assets are private, content-addressed snapshots prepared by a
 # trusted thread job. This route never accepts a filesystem path.
 def RenderHTTP.found(ok: Bool, s: Socket, +path: String, +size: U32) -> IO(Unit):
@@ -6274,6 +6316,8 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
       RenderHTTP.serve(allowed, s, W.Http.param(p, "id"))
     case 7n:
       DiagnosticsHTTP.serve(allowed, s)
+    case 8n:
+      MessageImageHTTP.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "entry")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")))
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), gz)
 
@@ -6288,7 +6332,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(trusted, hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -7347,6 +7391,7 @@ def Hub.commit.stored.result(ok: Bool, +post: M.State, +result: String, +disk: L
   match ok:
     case True{}:
       do IO<Hub & Wrote>:
+        MIMG.MessageImage.changes(cs)
         Bot.dir.changed.all(cs, inbox)
         +buffers : List<&2, LV.Buf> = STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg)))
         Live.checkpoint.sync(cs, post, cfg, buffers)
@@ -7662,6 +7707,32 @@ def BotJob.client(+b: String) -> U32:
 
 def BotJob.id(+c: String) -> String:
   Bool.pick(String, String.is_empty(c), "0", c)
+
+# Projects whose folder is gone (core/roots.bend): looked for at every tick
+# (once a minute), the missing ones' ids kept in "projects.missing", written
+# only when they change (so the log grows only when a folder goes or comes)
+def RootJob.set(same: Bool, +inbox: Chan(Msg), +v: String) -> IO(Unit):
+  match same:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        +now : Nat <- Now.nat()
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.SettingSet{ROOTS.Roots.key(), v, now}]})
+        return Unit{}
+
+def RootJob.got(+v: String, +inbox: Chan(Msg), +was: String) -> IO(Unit):
+  RootJob.set(String.eq(v, was), inbox, v)
+
+def RootJob.done(r: P.Ran, +inbox: Chan(Msg), +was: String) -> IO(Unit):
+  match r:
+    case P.Ran{0, out}:
+      RootJob.got(ROOTS.Roots.value(out), inbox, was)
+    case _:
+      IO.pure(Unit, Unit{})
+
+def RootJob.run(+inbox: Chan(Msg), args: List<&2, String>, +was: String) -> IO(Unit):
+  IO.bind(P.Ran, Unit, P.Proc.run("sh", List.append(&2, String, ["-c", ROOTS.Roots.sh(), "sh"], args), "/"), r => RootJob.done(r, inbox, was))
 
 # a bot's home folder (dir <home>/bots/), or a scratch thread's
 # (<home>/scratch/, M.Scratch), a git repository (so its turns get
@@ -12249,6 +12320,11 @@ def Hub.job.ready(h: Hub, +thread: String, +provider: String, +binding: String, 
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, Hub.job.ready.step(st, thread, provider, binding, change, now))
 
+def Hub.job.unread(h: Hub, +thread: String, +uuids: List<&2, String>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{B.Unread.note(st, thread, uuids, now), Nil{}})
+
 def Hub.job.report(h: Hub, receipt: JobReceipt, +now: Nat) -> IO(Hub):
   match receipt:
     case JobNote{thread, tone, summary}:
@@ -12265,6 +12341,8 @@ def Hub.job.report(h: Hub, receipt: JobReceipt, +now: Nat) -> IO(Hub):
       Hub.job.ready(h, thread, provider, binding, M.WorktreeSet{thread, branch, path, now}, now)
     case JobLocal{+thread, provider, binding}:
       Hub.job.ready(h, thread, provider, binding, M.WorktreeSkipped{thread, now}, now)
+    case JobUnread{+thread, +uuids}:
+      Hub.job.unread(h, thread, uuids, now)
 
 # A client's request about something elsewhere goes to its machine; any
 # other stays here
@@ -13876,6 +13954,7 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         Self.post(inbox, Silence{})
+        IO.spawn(Unit, RootJob.run(inbox, ROOTS.Roots.args(st), M.Setting.get(st, ROOTS.Roots.key(), "")))
         h2 : Hub <- Hub.telemetry(Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
         h3 : Hub <- Hub.dq.try(h2, now)
         Hub.watchdog(h3, now)

@@ -40,9 +40,9 @@ test('Electron passes shell control keys to a focused PTY and keeps terminal cli
 // Exercise the installed capture listener and the focus transition, not only
 // the chord normalizer: Escape must release navigation without losing a draft.
 function composerHarness(installWorkspaceKeys) {
-  let listener;
+  let listener, clicked;
   const actions = [], doc = { querySelector: () => null, activeElement: null,
-    addEventListener: (name, callback) => { assert.equal(name, 'keydown'); listener = callback; } };
+    addEventListener: (name, callback) => { if (name === 'click') clicked = callback; else { assert.equal(name, 'keydown'); listener = callback; } } };
   const body = { tagName: 'BODY', closest: () => null };
   const composer = Object.assign(element('textarea', 'composer'), { value: 'unsent draft', completion: '',
     getAttribute: () => composer.completion, blur: () => { doc.activeElement = body; } });
@@ -53,7 +53,8 @@ function composerHarness(installWorkspaceKeys) {
       preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() {}, ...fields });
     listener(input); return input;
   };
-  return { doc, composer, body, actions, press };
+  const click = target => clicked({ target });
+  return { doc, composer, body, actions, press, click };
 }
 
 test('composer Escape leaves the field and preserves the unsent draft; Ctrl+2 jumps from either side', async () => {
@@ -292,8 +293,9 @@ test('Ctrl+K from the composer opens the palette once and keeps the draft', asyn
   assert.equal(h.press('S', { ctrlKey: true, shiftKey: true }).defaultPrevented, true);
   assert.equal(h.press('a', { ctrlKey: true }).defaultPrevented, false);
   assert.equal(h.press('v', { ctrlKey: true }).defaultPrevented, false);
-  assert.equal(h.press('s').defaultPrevented, false);
-  assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-key', 'settle']]);
+  // a bare key before the palette has rendered is its query's, not the draft's
+  assert.equal(h.press('s').defaultPrevented, true);
+  assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-key', 'settle'], ['bfield', 'wspalette\u001fs']]);
   assert.equal(h.doc.activeElement, h.composer);
   assert.equal(h.composer.value, 'unsent draft');
 });
@@ -743,6 +745,46 @@ test('Escape cancels a palette before the open has rendered', async () => {
   h.press('k', { ctrlKey: true });h.press('Escape');
   assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-palette-close', '']]);
   assert.equal(h.composer.value, 'unsent draft');
+});
+
+test('typing before the palette has rendered goes to its query, and Enter runs it', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = composerHarness(installWorkspaceKeys);
+  h.press('k', { ctrlKey: true });
+  for (const key of ['a', 'r', 'x', 'Backspace', 'c']) assert.equal(h.press(key).defaultPrevented, true);
+  assert.equal(h.press('Enter').defaultPrevented, true);
+  const q = t => ['bfield', 'wspalette\u001f' + t];
+  assert.deepEqual(h.actions, [['ws-key', 'palette'], q('a'), q('ar'), q('arx'), q('ar'), q('arc'), ['ws-palette-enter', '']]);
+  assert.equal(h.composer.value, 'unsent draft');
+  // once Enter ran it, the keys are the draft's again
+  assert.equal(h.press('z').defaultPrevented, false);
+});
+
+test('a click on the command field holds the keys typed before Commands shows too', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = composerHarness(installWorkspaceKeys);
+  const field = { closest: s => s === '[data-on-click="ws-palette-open"]' ? field : null };
+  h.click(field);
+  for (const key of ['c', 'a', 'b']) assert.equal(h.press(key).defaultPrevented, true, 'no rail key, nothing in the draft');
+  const q = t => ['bfield', 'wspalette\u001f' + t];
+  assert.deepEqual(h.actions, [q('c'), q('ca'), q('cab')]);
+  // a click elsewhere asks for nothing
+  const g = composerHarness(installWorkspaceKeys);
+  g.click({ closest: () => null });
+  assert.equal(g.press('b').defaultPrevented, false);
+});
+
+test('a palette that never renders gives the keys back after 2 s', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  let t = 1000, listener;
+  const actions = [], doc = { querySelector: () => null, activeElement: { tagName: 'TEXTAREA', id: 'composer', closest: () => null },
+    addEventListener: (_, fn) => { listener = fn; } };
+  installWorkspaceKeys({ dispatch: (...a) => actions.push(a), document: doc, platform: 'Linux', now: () => t });
+  const press = (key, f = {}) => { const e = { key, code: '', target: doc.activeElement, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() {}, ...f }; listener(e); return e; };
+  press('k', { ctrlKey: true }); t += 2500;
+  assert.equal(press('a').defaultPrevented, false);
+  assert.deepEqual(actions, [['ws-key', 'palette']]);
 });
 
 test('Escape presses the bot form existing Cancel control', async () => {

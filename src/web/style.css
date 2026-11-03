@@ -769,6 +769,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 /* Asks: approvals, questions, proposed plans */
 .asks { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
 .asks:empty { display: none; }
+.gone-note { border: 1px solid var(--warn); padding: 10px 12px; }
+.gone-note p { color: var(--dim); margin: 6px 0 10px; overflow-wrap: anywhere; }
 .ask { border: 1px solid var(--st-need); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 860px; }
 .ask-head { color: var(--st-need); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .ask-detail { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
@@ -867,6 +869,10 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 
 .msg .shot { display: block; margin: 8px 0; width: min(100%, 560px); aspect-ratio: 4 / 3; }
 .msg .shot img { display: block; width: 100%; height: 100%; object-fit: contain; border: 1px solid var(--line); background: var(--bg); }
+/* a picture whose file is gone: one line naming it, not an empty 4:3 box (shot-missing.js) */
+.msg .shot.missing { width: auto; aspect-ratio: auto; color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.msg .shot.missing img { display: none; }
+.msg .shot.missing::before { content: "\26A0\FE0E  " attr(title); }
 
 .msg a.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; border: 0; padding: 0; font-size: inherit; white-space: normal; max-width: none; }
 .msg a.link.file code { color: inherit; }
@@ -1059,6 +1065,9 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 
 /* Settings and the machine switch stay above the project and bot lists; a row's menu opens at the pointer */
 .project.quiet .project-head { opacity: 0.55; }
+/* a project whose folder is gone (view.bend's View.gone.*) */
+.project.missing .project-head .name { opacity: 0.6; text-decoration: line-through; text-decoration-color: var(--faint); }
+.project-head .missing-note { flex: none; font-size: 10px; color: var(--warn); text-transform: none; letter-spacing: 0; margin-right: 4px; }
 .thread.faded { opacity: 0.5; }
 .project.active .thread .ago { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-tools { position: sticky; top: 52px; z-index: 5; display: flex; align-items: center; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; flex-shrink: 0; }
@@ -1118,7 +1127,8 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 ::highlight(search-word) { background-color: rgba(95, 179, 255, 0.35); color: var(--text); }
 @keyframes jumped { from { background: rgba(95, 179, 255, 0.18); } to { background: transparent; } }
 .pair-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 16px 12px; cursor: pointer; }
-.pair-qr svg { width: min(320px, 80vw); height: auto; background: #fff; fill: #000; }
+.pair-qr svg { width: min(320px, 80vw); height: auto; }
+.pair-qr svg, .pairing-qr { background: #fff; fill: #000; }
 
 /* the first-run tour (view.bend's View.tour): the page dims, the part it points at is lifted over the dimming */
 .tour-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; }
@@ -2431,6 +2441,10 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .improvements-recording-bar{position:fixed;top:8px;left:8px;z-index:100000;display:flex;align-items:center;flex-wrap:wrap;gap:8px;max-width:calc(100vw - 16px);padding:8px 12px;background:#111410;color:#f0f2e9;border:2px solid #e16955;font:14px sans-serif}
 .improvements-recording-bar[hidden]{display:none}.improvements-recording-bar button{min-height:36px;padding:6px 10px;background:#222a1e;color:inherit;border:1px solid #c7cfba}
 
+.message-image-unavailable { display: none; }
+.msg .shot.image-unavailable { display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--bg); color: var(--faint); }
+.msg .shot.image-unavailable img { display: none; }
+.shot.image-unavailable .message-image-unavailable { display: block; }
 /* One control row at every pane width. The Bend layout owns the row's
    height and nowrap contract; labels yield space, disclosures leave flow. */
 .composer { --composer-button: 28px; container: composer / inline-size; }
@@ -2446,7 +2460,8 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
   height: var(--composer-button); min-height: var(--composer-button); max-height: var(--composer-button);
   box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.composer-foot .composer-options > .account-chip { flex: 0 1 auto; max-width: 14ch; min-width: 28px; }
+/* 14 characters of name beside its icon and padding (14ch alone cut "Default" to "Defa…") */
+.composer-foot .composer-options > .account-chip { flex: 0 1 auto; max-width: calc(14ch + 2.75rem); min-width: 28px; }
 .composer-foot .composer-options > .allowance-chip { flex: 0 1 auto; width: calc(19ch + 16px); min-width: 36px; max-width: 100%; }
 .composer-foot .composer-options > .attach.draw { margin: 0; }
 .composer-foot .foot-end { flex: none; flex-wrap: nowrap; margin: 0; }
@@ -2476,3 +2491,5 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 @container composer (max-width: 700px) {
   .composer-foot .composer-options > :is(button, .attach) { width: 100%; }
 }
+
+.shot.image-unavailable.missing::before { content: none; }

@@ -31,9 +31,9 @@ async function fixture(supported=false, legacyProbe=false, legacyPaint=false){
   presentationJson:x=>x,fromList:x=>x,presentationCommand:c=>calls.push(c),anchorOf:()=>null,
   History:{project:(_before,fresh)=>fresh,project_block:(_before,fresh)=>fresh},historyNode:null,timelineList:()=>null,
   App:{wire_out:t=>encoder.encode(t),wire_out_json:v=>encoder.encode(JSON.stringify(v)),viewer_input:(_u,_info,s)=>s,desk_reset:u=>u,presentation_node:n=>n,presentation_prepare:(s,input)=>({...input,rid:s.rid}),presentation_reply:s=>s,presentation_select:(u,id)=>({...u,sel:id}),presentation_handoff:(u,s)=>({...u,sel:s.sel}),unsync:u=>u,lang:()=> 'en'},
-  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x,json:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){}},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
+  Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x,json:x=>x},document:{getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],documentElement:{classList:{toggle(){}},style:{setProperty(){}}}},pairingReady:Promise.resolve(true),pendingInvitation:null,pairingCause:'',pairingUI:{show(){calls.push('pairing-screen');}},
   fallbackIntent:null,wantFrontend:true,Backoff,Retry:FixtureRetry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
-  fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
+  fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,previewViews:{stop(){}},warmDestinations(){},transitionViews:{put(){},position:()=>null,warm:()=>Promise.resolve(false),destination:()=>null},
   thinReading:null,resumedConversation:null,readingIdentity:()=> 'fixture-account',historyDirection:'',
   historyFillMore(){calls.push('history-fill-cleared');},historyPageState(){},historyClear(){},thinSearchAnswer(){},thinSearchFailed(){},showThinMessage(){},keepViewer(){},held:null,
   modelFeedback:{clear(){}},subsFeedback:new SubsFeedback(()=>{}),viewerFeedback:{choice(){}},
@@ -98,7 +98,7 @@ test('wrong-owner view result cannot ready the host or cause canonical fallback'
  assert.equal(f.ctx.remoteReady,false);assert.equal(f.ctx.canonicalBoot,false);assert.equal(f.ctx.frontendNode,null);assert(!f.calls.includes('FULL-CACHE'));assert(!f.requests.some(r=>r.m.includes('history')));
 });
 test('failed explicit pairing cannot restore a previous profile or open any legacy socket',async()=>{
- const f=await fixture(true);f.ctx.pairingReady=Promise.resolve(false);await f.runBoot();assert.equal(f.sockets.length,0);assert(!f.calls.includes('focused-read'));assert(!f.calls.includes('/client/capabilities'));assert(!f.calls.includes('FULL-CACHE'));assert.equal(f.ctx.pairingAccepted,false);
+ const f=await fixture(true);f.ctx.pairingReady=Promise.resolve(false);await f.runBoot();await new Promise(setImmediate);assert.equal(f.sockets.length,0);assert(!f.calls.includes('focused-read'));assert(!f.calls.includes('/client/capabilities'));assert(!f.calls.includes('FULL-CACHE'));assert.equal(f.ctx.pairingAccepted,false);assert(f.calls.includes('pairing-screen'));
 });
 test('actual current Mailroom callback binds displayed text and preserves a newer deliberately empty field',async()=>{
  const f=await fixture(true),bound=[];const {mailReplyField}=await import('../../src/web/mail-drafts.js');f.ctx.mailReplyField=mailReplyField;f.ctx.thinMailDraft={clear(){},matches:()=>true,bind:(...args)=>bound.push(args),edit(){},scope:()=>'',needsSubmit:()=>false};

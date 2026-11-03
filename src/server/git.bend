@@ -647,17 +647,40 @@ def Git.checkpoint.capture(+cwd: String, +thread_id: String, +n: Nat) -> IO(Stri
     IO.bind(P.Ran, String, Git.run(cwd, ["rev-parse", "--verify", "-q", Git.checkpoint.prev(thread_id, n)]), prev =>
       Git.capture.k(cwd, Git.checkpoint.ref(thread_id, n), tree, prev, "backplane checkpoint " ++ thread_id ++ " turn " ++ Nat.show(n))))
 
+# A diff the hub hands on is capped (Git.diff.cap): a file whose changes
+# pass Git.diff.per() bytes, and every file once the diff has passed
+# Git.diff.max(), keeps its header and says "\ Too big to show here: +N -M
+# lines" in place of its lines (a hunk with no lines and a meta line, which
+# Diff.parse reads). A thread that regenerated STEP models had a 165 MB diff:
+# the hub grew to 12 GB putting it in one reply and stalled 27 s, and the
+# viewer could not have shown it anyway.
+def Git.diff.per() -> String:
+  "262144"
+
+def Git.diff.max() -> String:
+  "2097152"
+
+def Git.diff.cap.awk() -> String:
+  "function flush() { if (!infile) return; if (big) printf \"%s@@ -0,0 +0,0 @@\\n\\\\ Too big to show here: +%d -%d lines\\n\", head, adds, dels; else { printf \"%s%s\", head, body; total += size }; infile = 0; inbody = 0; head = \"\"; body = \"\"; big = 0; adds = 0; dels = 0; size = 0 } /^diff --git / { flush(); infile = 1 } { if (!infile) { print; next }; if (!inbody && substr($0, 1, 3) == \"@@ \") inbody = 1; if (!inbody) { head = head $0 \"\\n\"; next }; c = substr($0, 1, 1); if (c == \"+\") adds++; else if (c == \"-\") dels++; if (big) next; size += length($0) + 1; if (size > per || total + size > max) { big = 1; body = \"\"; next }; body = body $0 \"\\n\" } END { flush() }"
+
+# git "$@" through the cap, with git's own exit status
+def Git.diff.cap.sh() -> String:
+  "bp_safe; t=$(mktemp) || exit 1; { git \"$@\"; echo $? > \"$t\"; } | LC_ALL=C awk -v per=" ++ Git.diff.per() ++ " -v max=" ++ Git.diff.max() ++ " '" ++ Git.diff.cap.awk() ++ "'; c=$(cat \"$t\"); rm -f \"$t\"; exit ${c:-1}"
+
+def Git.run.capped(cwd: String, args: List<&2, String>) -> IO(P.Ran):
+  P.Proc.run("sh", List.append(&2, String, ["-c", Git.safe.sh() ++ Git.diff.cap.sh(), "sh"], args), cwd)
+
 def Git.diff.args(a: String, b: String) -> List<&2, String>:
   ["-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "-M", a, b, "--"]
 
 # unified diff text from checkpoint a to checkpoint b ("" when equal)
 def Git.checkpoint.diff(cwd: String, +thread_id: String, +from_n: Nat, +to_n: Nat) -> IO(String):
-  Git.seq.raw(Git.run(cwd, Git.diff.args(Git.checkpoint.ref(thread_id, from_n), Git.checkpoint.ref(thread_id, to_n))), Git.done)
+  Git.seq.raw(Git.run.capped(cwd, Git.diff.args(Git.checkpoint.ref(thread_id, from_n), Git.checkpoint.ref(thread_id, to_n))), Git.done)
 
 # unified diff text from checkpoint n to the files as they are now
 def Git.checkpoint.diff_worktree(+cwd: String, +thread_id: String, n: Nat) -> IO(String):
   Git.and(Git.snapshot(cwd, thread_id), tree =>
-    Git.seq.raw(Git.run(cwd, Git.diff.args(Git.checkpoint.ref(thread_id, n), tree)), Git.done))
+    Git.seq.raw(Git.run.capped(cwd, Git.diff.args(Git.checkpoint.ref(thread_id, n), tree)), Git.done))
 
 def Git.revert.k(+cwd: String, +idx: String, r: String) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--verify", r ++ "^{tree}"]), tree =>
@@ -880,13 +903,15 @@ type AStep is Data:
   ACommit{}
   APush{}
   APr{}
+  AInit{}
 
 def Git.act.steps(+a: String) -> Maybe<&2, List<&2, AStep>>:
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit"), Some{[ACommit{}]},
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "push"), Some{[APush{}]},
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "create_pr"), Some{[APr{}]},
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit_push"), Some{[ACommit{}, APush{}]},
-  Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit_push_pr"), Some{[ACommit{}, APush{}, APr{}]}, None{})))))
+  Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit_push_pr"), Some{[ACommit{}, APush{}, APr{}]},
+  Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "init"), Some{[AInit{}]}, None{}))))))
 
 # "error: x" -> "error: <step>: x"
 def Git.label.k(bad: Bool, name: String, +s: String) -> String:
@@ -960,8 +985,22 @@ def Git.step.pr(+cwd: String, title: String, body: String) -> IO(String):
     Git.need_branch(b, b2 =>
       Git.seq(GH.GhRun.gh(cwd, Git.pr.args(b2, title, body)), out => Git.done("pr: " ++ Git.last_line(out))))))
 
+# Diff's "Make it a git repository" for a project folder that is none (the
+# hub lets "init" through outside a repository: GitJob.run.git): git init
+# there, Backplane's own folder kept out of it (as the worktrees' and the
+# design history's are), and the folder committed as it is, so new threads
+# get worktrees of their own. Inside a repository (a page left open), or
+# when git has no name and email to commit with, it changes nothing.
+def Git.init.sh() -> String:
+  "if git rev-parse --git-dir >/dev/null 2>&1; then echo 'already a git repository'; exit 1; fi; if ! git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then echo 'git does not know your name and email on this machine yet, so nothing was changed. Set them once (git config --global user.name \"Your Name\" and git config --global user.email you@example.com), then press it again.'; exit 1; fi; git init -q && mkdir -p .git/info && printf '/.backplane/\\n' >> .git/info/exclude && git add -A && git commit -q -m start && git log -1 --format='%h %s'"
+
+def Git.step.init(+cwd: String) -> IO(String):
+  Git.seq(P.Proc.run("sh", ["-c", Git.init.sh()], cwd), out => Git.done(cwd ++ " is a git repository now (commit " ++ out ++ "); new threads get their own worktree"))
+
 def Git.act.step(s: AStep, +cwd: String, +message: String, +title: String, +body: String) -> IO(String):
   match s:
+    case AInit{}:
+      Git.step.init(cwd)
     case ACommit{}:
       Git.step.commit(cwd, message)
     case APush{}:

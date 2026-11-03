@@ -544,6 +544,8 @@ viewer.diff.empty = スレッド開始後の変更はありません。
 viewer.diff.nogit = gitリポジトリではありません
 viewer.diff.nogit.why = {path} はgitリポジトリではないため、このスレッドのファイルを比べる元がありません。
 viewer.diff.nogit.how = スレッドの変更を見るには、gitリポジトリにしてください（新しいスレッドはそれぞれのワークツリーで動きます）：
+viewer.diff.nogit.init = Gitリポジトリにする
+viewer.diff.nogit.init.tip = 上のコマンドを代わりに実行します。ここでgit initし、フォルダーを今のままコミットします（Backplane自身の.backplaneフォルダーは含めません）
 viewer.board = 基板
 viewer.schematic = 回路図
 viewer.mech = Mech
@@ -1476,3 +1478,5 @@ upload.cap = 添付ファイルは{mb} MBまでです
 
 subagents.group.threads = サブスレッド
 subagents.group.background = バックグラウンド
+
+composer.offline.back = 再接続しました。メッセージは送信されていません。入力欄に残っているので、送信してください。

@@ -2,12 +2,12 @@
 // It never restores sessions, cursors or authority. The host overlays the
 // current draft and still refuses actions until the new view is ready.
 export class ViewTransition {
-  constructor({limit = 8, bytes = 512 * 1024} = {}) { this.limit = limit;this.bytes = bytes;this.views = new Map();this.positions = new Map(); }
+  constructor({limit = 8, bytes = 512 * 1024, store = null} = {}) { this.limit = limit;this.bytes = bytes;this.store = store;this.views = new Map();this.positions = new Map();this.scopes = new Map();this.loads = new Map();this.generation = 0; }
   key(scope) {
     if (!scope?.identity || !scope.epoch || !scope.target?.kind) return '';
     return JSON.stringify([scope.origin, scope.identity, scope.language, scope.epoch, scope.target, scope.selected, scope.settings === true, scope.route || null]);
   }
-  put(scope, shown) {
+  put(scope, shown, persist = true) {
     const key = this.key(scope);
     const has = (n, test) => n?.type === 'element' && (test(n) || n.kids.some(c => has(c, test)));
     const composer = n => n.attrs.some(a => a.name === 'class' && a.value.split(/\s+/).includes('composer'));
@@ -17,8 +17,12 @@ export class ViewTransition {
     // Settings, Mailroom and other forms retain their existing field ownership;
     // never restore their mutable fields as a conversation picture.
     if (!key || !scope.selected || !conversation(shown) || new TextEncoder().encode(JSON.stringify(shown)).length > this.bytes) return false;
-    this.views.delete(key);this.views.set(key, shown);
-    while (this.views.size > this.limit) { const old=this.views.keys().next().value;this.views.delete(old);this.positions.delete(old); }
+    this.views.delete(key);this.views.set(key, shown);this.scopes.set(key, { ...scope });
+    while (this.views.size > this.limit) { const old=this.views.keys().next().value;this.views.delete(old);this.positions.delete(old);this.scopes.delete(old); }
+    if (persist && this.store) {
+      if (this.store.schedule) this.store.schedule(scope, key, shown);
+      else void this.store.save(scope, key, shown).catch(() => {});
+    }
     return true;
   }
   get(scope) { return this.views.get(this.key(scope)) || null; }
@@ -27,7 +31,30 @@ export class ViewTransition {
     if (this.views.has(key)) this.positions.set(key, position);
   }
   position(scope) { return this.positions.get(this.key(scope)) || null; }
-  clear() { this.views.clear();this.positions.clear(); }
+  // Explicit bot navigation may precede knowing its backing conversation.
+  // This lookup returns only a visual destination; it never restores a session.
+  destination(scope, target) {
+    for (const [key, candidate] of [...this.scopes].reverse()) {
+      if (candidate.origin === scope.origin && candidate.identity === scope.identity && candidate.epoch === scope.epoch
+        && candidate.language === scope.language && candidate.bundle === scope.bundle && candidate.settings !== true
+        && candidate.target.kind === target.kind && candidate.target.id === target.id) return {scope:candidate, shown:this.views.get(key)};
+    }
+    return null;
+  }
+  warm(scope) {
+    if (!this.store) return Promise.resolve(false);
+    const partition = JSON.stringify([scope.origin, scope.identity, scope.language, scope.epoch, scope.bundle]);
+    if (this.loads.has(partition)) return this.loads.get(partition);
+    const generation = this.generation;
+    const loading = this.store.load(scope).then(rows => {
+      if (generation !== this.generation) return false;
+      // Disk cannot overtake a picture already validated on this connection.
+      for (const row of rows.slice().reverse()) if (!this.views.has(this.key(row.scope))) this.put(row.scope, row.shown, false);
+      return true;
+    }).catch(() => false);
+    this.loads.set(partition, loading);return loading;
+  }
+  clear() { this.generation++;this.views.clear();this.positions.clear();this.scopes.clear();this.loads.clear(); }
 }
 
 // Light or dark is one fact for the whole page (the hub's ui.theme), never a
