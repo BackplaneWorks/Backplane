@@ -218,12 +218,17 @@ def run_capped(cmd, cap, report, timeout=3000):
         return None, None, False
 
 
+REAL_LOCK = '/tmp/bp-bend.lock'
+
+
 def native_flock():
-    """True only when this process inherited the actual bend flock from heavy-guard (real admission)."""
+    """(held, lock path): True only when this process inherited the actual bend flock from heavy-guard. The path
+    can be overridden for tests (LOWMEM_LOCK_PATH); a receipt records it and one that is not the real lock never qualifies."""
     spec = importlib.util.spec_from_file_location('heavy_guard', ROOT / 'scripts' / 'heavy-guard.py')
     guard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(guard)
-    return guard.inherited_lock(guard.lock_path()) is not None
+    path = Path(os.environ.get('LOWMEM_LOCK_PATH') or guard.lock_path())
+    return guard.inherited_lock(path) is not None, str(path)
 
 
 def worker(args):
@@ -253,7 +258,7 @@ def worker(args):
             name, _, path = item.partition('=')
             receipt['protected'][name] = sha(Path(path).read_bytes())
         phases.append('protected')
-        receipt['flock'] = native_flock()
+        receipt['flock'], receipt['flock_path'] = native_flock()
         if receipt['flock']:
             phases.append('flock')
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
@@ -316,8 +321,8 @@ def receipt_problems(r, cap, require_boat=True):
         why.append('no finite timeout recorded')
     if r.get('timed_out') is not False:
         why.append('TIMED OUT or timeout not recorded')
-    if r.get('flock') is not True:
-        why.append('native bend flock was not held (no real admission)')
+    if r.get('flock') is not True or r.get('flock_path') != REAL_LOCK:
+        why.append('native bend flock on %s was not held (no real admission)' % REAL_LOCK)
     if r.get('phases') != PHASES:
         why.append('incomplete phase set: %s' % r.get('phases'))
     if r.get('env') != PINNED_ENV:
