@@ -383,3 +383,27 @@ no new Actions run was dispatched, and GitHub network/all-ref history cost
 remains unmeasured. Packed bytes are local object storage, not billed network
 bytes. No Boat credit or paid runner time was spent. No broad proof/build was
 repeated, per the user's current tooling-only constraints.
+
+## Restore dispatch guards after heavy-guard integration
+
+The dispatch unit fixture copied `test.sh` but omitted its newly sourced
+`heavy-guard.sh`. All invocations exited before fake Bend/Bun ran: four tests
+failed and four negative tests accidentally passed on that setup error. The
+fixture now supplies an explicit no-op guard only inside its disposable fake
+repository. Real admission remains covered by `heavy_guard_test.py`; production
+lock, memory floors, heap settings and worker count are unchanged. Negative
+cases now require exit1 plus their actual failure/crash/empty-output diagnostic,
+so missing fixture setup cannot satisfy them.
+
+| Change | Before | After |
+|---|---|---|
+|Fake-tool dispatch unit suite |4 failures /8 tests;4 setup-error false positives;0.035s |8/8 pass;1.094s; intended negative diagnostics verified |
+
+[Exact-source receipt](test-dispatch-fixture.json). This is a guard correctness
+repair, not a speedup; no actual Bend/app execution, broad proof/build, Boat
+credit or installer work was used. Inspection also confirmed `test.sh` forces
+serial execution despite CI's `TEST_JOBS=2`. Build owner1188217 confirmed that
+two tests can each reach about8.2GiB RSS, so blindly restoring parallelism on
+a16GiB runner would be unsafe. Production scheduling stays serial pending
+trusted capacity/admission and representative measurements; no twofold/nightly
+speed claim is made.
