@@ -86,6 +86,8 @@ def main() -> IO(Unit):
     C.Check.str("no bot: routines says how to get one", found("routines"), "Routines: add a bot first (a bot runs routines on a schedule),Settings: Time zone · Local time for routines and reminders")
     C.Check.str("a bot: its routines", found.at(with.bot(), "routines"), "Routines: scout · what it runs and when,Settings: Time zone · Local time for routines and reminders")
     C.Check.str("running it opens the bot's Routines tab", ran.routines(with.bot()), "bot1:routines")
+    C.Check.str("no Buy it while the rail has none", found("order this board"), "")
+    C.Check.str("Buy it when the rail offers it", found.at(U.Ui.info_set(at([]), "fab.buy:t", "Buy it"), "buy"), "Buy it: order this board (a quote first; nothing is charged until you pay)")
     C.Check.str("idle hides Stop", has(at([]), "Stop the running turn · Ctrl+."), "0")
     C.Check.str("running offers Stop once", has(at([M.TurnChanged{"t", M.Running{}, 2n}]), "Stop the running turn · Ctrl+."), "1")
     C.Check.str("completed hides Stop", has(at([M.TurnChanged{"t", M.Completed{}, 2n}]), "Stop the running turn · Ctrl+."), "0")
