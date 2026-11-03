@@ -10,6 +10,7 @@ import ../core/term-scroll.bend as TS
 import ./dom.bend as D
 import ./icon.bend as WI
 import ./settings-menu.bend as SM
+import ../core/bot.bend as BT
 import ../core/i18n.bend as I
 
 # Web desktop commands reuse the native sidebar keymap and normal actions.
@@ -198,6 +199,27 @@ def WS.settings.items(ps: List<&2, String>, +lc: I.Loc) -> List<&2, U.PItem>:
     case Nil{}: Nil{}
     case +p <> t: U.PItem{U.Settings.title(lc, "") ++ ": " ++ U.Settings.title(lc, p) ++ " · " ++ SM.Menu.note(lc, p), "ws-settings", p} <> WS.settings.items(t, lc)
 
+# Routines live in a bot's Routines tab: one entry per bot here, so typing
+# "routines" finds them; with no bot yet, how to make one (Bots + in the
+# sidebar, or the tour's uberbot)
+def WS.routines.go(bs: List<&2, BT.Bot>) -> List<&2, U.PItem>:
+  match bs:
+    case Nil{}: Nil{}
+    case +b <> t: U.PItem{"Routines: " ++ BT.Bot.name(b) ++ " · what it runs and when", "ws-routines", BT.Bot.id(b)} <> WS.routines.go(t)
+
+def WS.routines.k(none: Bool, bs: List<&2, BT.Bot>) -> List<&2, U.PItem>:
+  match none:
+    case True{}: [U.PItem{"Routines: add a bot first (a bot runs routines on a schedule)", "bot-new", ""}]
+    case False{}: WS.routines.go(bs)
+
+def WS.routines(+st: M.State) -> List<&2, U.PItem>:
+  WS.routines.k(List.is_empty(&2, BT.Bot, BT.World.bots.here(M.State.bots(st))), BT.World.bots.here(M.State.bots(st)))
+
+# opening a bot, then its Routines tab
+def WS.routines.open(a: U.Act) -> U.Act:
+  match a:
+    case U.Act{u, cs}: U.Act{U.Ui.scratch_set(U.Ui.scratch_set(u, "@f.delroutine", ""), "@btab", "routines"), cs}
+
 def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
   List.append(&2, U.PItem, Bool.pick(List<&2, U.PItem>, U.ThreadTree.can_route(U.Ui.state(u), U.Ui.sel(u)),
     [U.PItem{Bool.pick(String, U.ThreadTree.can_create(U.Ui.state(u), U.Ui.sel(u)), "New subthread of current thread", "Choose project conversation…"), "thread-child", U.Ui.sel(u)}], Nil{}),
@@ -214,7 +236,7 @@ def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
    U.PItem{"Diff · Ctrl+D", "diff", ""}, U.PItem{"Design review: BOM, checks, comments", "rv-page", "bom"},
    U.PItem{"Release: tag and publish this project", "rv-page", "release"},
    U.PItem{"Agent, model and effort · Ctrl+M", "flag", "models"},
-   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c), WS.settings.items(U.Settings.menu.pages(), U.Lang.loc(u))]))
+   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c), WS.settings.items(U.Settings.menu.pages(), U.Lang.loc(u)), WS.routines(U.Ui.state(u))]))
 
 def WS.stop.running(turn: M.TurnState) -> Bool:
   match turn:
@@ -263,6 +285,7 @@ def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
     case "ws-prev": WS.neighbour(u, False{})
     case "ws-next": WS.neighbour(u, True{})
     case "ws-settings": U.Settings.go(U.Settings.on(u), value)
+    case "ws-routines": WS.routines.open(U.Ui.act(u, "bot", value))
     case _: U.Ui.act(u, action, value)
 
 def WS.palette.run.item(item: U.PItem, u: U.Ui) -> U.Act:
