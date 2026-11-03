@@ -91,7 +91,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "7f417b9547f8106214194ca01b7965d85e15fee43d430fafd47bd3b46f42a040",
+    "src/core/msgs.bend": "6d295c89dfd382a14f54e4f08cb26abb78705ef49ae13fa833c4d941649c95c6",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
     "src/core/onboard.bend": "fc10cb988f4fa6e8b2780e3ea3c4ebfea0088256daf5f65abebd10dfe2d746c8",
@@ -192,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "ea3b17eeb37d88908621d10e452f3518b4bef6804c76b8342097cd2beb01ac39"
+    "src/web/view.bend": "52c66fc65985d0588e0d292996b8537bc5a51e6cbbc941a4de2c25241ad77e08"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -411,6 +411,12 @@
         "scope": "Normal merge retains main mailbox law repair and reader/instant/composer work; additive unavailable-image styles retained beside composer rules. Changed image helpers read only explicit arguments. All24 full-output cases passed on combined source; browser artifacts remain from base7982813b plus the image product patch128fd23c3.",
         "inheritedGuardRepair": "Current main account-fallback digest was stale. Reviewed its same-provider eligibility/ranking functions: only explicit State/JSON/time/model inputs, no Ui or draft readers; current State remains in full sidebar inputs. The24 combined-source full-output cases already include this exact account-fallback code. Refresh this one conservative digest without altering source or projection.",
         "additionalMain": "2864599ee (#792): no Bend input changed from42f5b5173; preserve all pairing-theme and generic missing-shot hunks."
+      },
+      "finalAdoption": {
+        "base": "d6151541240e261953037537ee15413b9abc0ff6",
+        "scope": "Preserves current main Git-init, JSON escaping, pairing theme, reader/instant, account hierarchy and sound mail-proof repair. Since2864599ee, message rendering changes only unrelated Diff no-git action and composer account-chip width; JSON helpers have only explicit data inputs and add no Ui/draft readers. Image route/auth/storage/limits unchanged. Earlier24-case combined run is tied to42f5b5173 inputs; no claim of a fresh full-tree runtime after later main adoption. Preserve all upstream review receipts.",
+        "fallbackCompositionWork": "w-t1793671258-1312457-1330764",
+        "fallbackComposition": "PASS current #792 missing-shot module/CSS plus image failure state, including DOM patches; no app build."
       }
     }
   },
@@ -835,5 +841,12 @@
       "src/web/view.bend"
     ],
     "scope": "roots.bend (imports model, far) reads only the setting projects.missing and project records; view.bend's View.gone.* reads the selected thread's project, that setting and the existing '@rm' remove-confirm scratch key (as the project menu's Remove already does). No sidebar draft readers, unknown @ retention, private image keys or transport authority change."
+  },
+  "gitInitReview": {
+    "changedClosureFiles": [
+      "src/core/msgs.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "Diff's no-git page gains a button (action git, value init) and two catalog strings; no Ui, draft or sidebar reader changes."
   }
 }

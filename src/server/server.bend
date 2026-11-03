@@ -2991,11 +2991,16 @@ def GitJob.repo(ok: Bool, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clie
 
 # one git job; nothing happens outside a git repository (checkpoints are
 # skipped, requests answer why)
+# (Diff's "Make it a git repository", git.act "init", is the one job that
+# runs outside a repository: Git.step.init)
+def GitJob.init(+job: String, +a: String) -> Bool:
+  Bool.and(String.eq(job, "act"), String.eq(a, "init"))
+
 def GitJob.run.git(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   do IO<Unit>:
     ok : Bool <- GT.Git.is_repo(cwd)
     t : U32 <- H.Clock.epoch()
-    GitJob.repo(ok, tx, job, inbox, client, id, thread, cwd, a, b, home, U32.to_nat(t))
+    GitJob.repo(Bool.or(ok, GitJob.init(job, a)), tx, job, inbox, client, id, thread, cwd, a, b, home, U32.to_nat(t))
 
 # Sidebar jobs
 # ------------

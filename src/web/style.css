@@ -2466,7 +2466,8 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
   height: var(--composer-button); min-height: var(--composer-button); max-height: var(--composer-button);
   box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.composer-foot .composer-options > .account-chip { flex: 0 1 auto; max-width: 14ch; min-width: 28px; }
+/* 14 characters of name beside its icon and padding (14ch alone cut "Default" to "Defa…") */
+.composer-foot .composer-options > .account-chip { flex: 0 1 auto; max-width: calc(14ch + 2.75rem); min-width: 28px; }
 .composer-foot .composer-options > .allowance-chip { flex: 0 1 auto; width: calc(19ch + 16px); min-width: 36px; max-width: 100%; }
 .composer-foot .composer-options > .attach.draw { margin: 0; }
 .composer-foot .foot-end { flex: none; flex-wrap: nowrap; margin: 0; }
