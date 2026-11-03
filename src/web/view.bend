@@ -205,6 +205,12 @@ def View.rows(ps: List<&2, M.Project>, +ts: List<&2, M.Thread>) -> List<&2, PRow
 def View.note(+badge: String, +other: String) -> D.Node:
   Bool.pick(D.Node, String.is_empty(badge), D.Dom.span("ago", other), D.El{"span", "", [D.At{"class", "ago agents"}, D.At{"title", badge}], [D.Txt{badge}]})
 
+# a red row says what it wants there instead (U.Side.want: approval,
+# question, failed), its age kept in the tooltip
+def View.note.want(+want: String, +badge: String, +other: String) -> D.Node:
+  Bool.pick(D.Node, String.is_empty(want), View.note(badge, other),
+    D.El{"span", "", [D.At{"class", "ago want"}, D.At{"title", Bool.pick(String, String.is_empty(other), want, want ++ " · " ++ other)}], [D.Txt{want}]})
+
 # A piece of the page left for the host to make: a "bp-memo" element keyed
 # like the node it stands for, its attributes all it is made from ("fn"
 # first, saying how), its one child a text. host.js makes it with
@@ -251,27 +257,27 @@ def View.pin(+lc: I.Loc, pin: Bool) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
-def View.row.p.loc(+lc: I.Loc, pin: Bool, +id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
+def View.row.p.loc(+lc: I.Loc, pin: Bool, +id: String, +title: String, +ago: String, +badge: String, +want: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
   D.El{"div", id, [D.At{"class", Bool.pick(String, String.eq(id, sel), "thread on", "thread")}, D.At{"role", "button"}, D.At{"tabindex", "0"},
     D.At{"aria-current", Bool.pick(String, String.eq(id, sel), "page", "false")}, D.At{"data-value", id}, D.On{"click", "select"}, D.On{"contextmenu", "row-menu"}],
     D.Dom.cat([View.dot(lc, dot), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", title}], [D.Txt{title}]}],
       D.Dom.cat(View.pin(lc, pin), D.Dom.cat(Bool.pick(List<&2, D.Node>, movable, [D.El{"span", "", [D.At{"class", "moves"}], [D.Dom.button("move", "move", id ++ "|up", MSG.T.sidebar.move.up(lc), "↑"), D.Dom.button("move", "move", id ++ "|down", MSG.T.sidebar.move.down(lc), "↓")]}], Nil{}),
-        [View.note(badge, ago)])))}
+        [View.note.want(want, badge, ago)])))}
 
 def View.row.k.loc(+lc: I.Loc, +id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
-  View.row.p.loc(lc, False{}, id, title, ago, badge, dot, sel, movable)
+  View.row.p.loc(lc, False{}, id, title, ago, badge, "", dot, sel, movable)
 
 # a sidebar row is made by the host from these alone (View.make)
 
 def View.row.k(+id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
   View.row.k.loc(I.En{}, id, title, ago, badge, dot, sel, movable)
 
-def View.row.m.p.loc(+lc: I.Loc, pin: Bool, +id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
-  View.memo.loc(lc, id, [D.At{"fn", "row"}, D.At{"ago", ago}, D.At{"badge", badge}, D.At{"dot", dot}, D.At{"on", Bool.pick(String, String.eq(id, sel), "1", "")}, D.At{"mov", Bool.pick(String, movable, "1", "")},
+def View.row.m.p.loc(+lc: I.Loc, pin: Bool, +id: String, +title: String, +ago: String, +badge: String, +want: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
+  View.memo.loc(lc, id, [D.At{"fn", "row"}, D.At{"ago", ago}, D.At{"badge", badge}, D.At{"want", want}, D.At{"dot", dot}, D.At{"on", Bool.pick(String, String.eq(id, sel), "1", "")}, D.At{"mov", Bool.pick(String, movable, "1", "")},
     D.At{"pin", Bool.pick(String, pin, "1", "")}], title)
 
 def View.row.m.loc(+lc: I.Loc, +id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
-  View.row.m.p.loc(lc, False{}, id, title, ago, badge, dot, sel, movable)
+  View.row.m.p.loc(lc, False{}, id, title, ago, badge, "", dot, sel, movable)
 
 def View.row.m(+id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
   View.row.m.loc(I.En{}, id, title, ago, badge, dot, sel, movable)
@@ -280,7 +286,8 @@ def View.row.m(+id: String, +title: String, +ago: String, +badge: String, +dot: 
 def View.row.s(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, snoozed: Bool, settled: Bool) -> D.Node:
   match t:
     case M.Thread{+id, _, +title, _, +a, _, _, _, _, _, _, pinned, _, _, _, _, _, _, _, _, _}:
-      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), SG.Signal.display.note(lc, st, id, View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))), SG.Signal.dot.thread(SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), t), sel, movable)
+      +dot = SG.Signal.dot.thread(SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), t)
+      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), SG.Signal.display.note(lc, st, id, View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))), U.Side.want(lc, dot, U.SIx.open(ix, M.Thread.id(t)), t), dot, sel, movable)
 
 def View.row(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> D.Node:
   View.row.s(lc, t, ix, st, sel, now, movable, snoozed, False{})
@@ -477,11 +484,12 @@ def View.arow(+lc: I.Loc, r: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> 
   match r:
     case U.ARow{_, _, +t, +pid, +pt, +faded}:
       +tt = U.Label.title(st, M.Thread.id(t), TTL.Title.shown(lc, U.Active.title(t)))
+      +dot = SG.Signal.dot.thread(SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), t)
       D.El{"div", M.Thread.id(t), [D.At{"class", Bool.pick(String, String.eq(M.Thread.id(t), sel), "thread on", Bool.pick(String, faded, "thread faded", "thread"))},
           D.At{"role", "button"}, D.At{"tabindex", "0"}, D.At{"aria-current", Bool.pick(String, String.eq(M.Thread.id(t), sel), "page", "false")},
           D.At{"style", "--tint:" ++ BG.Badge.css_of(st, pid)}, D.At{"data-shortcut-project", pid}, D.At{"data-value", M.Thread.id(t)}, D.On{"click", "select"}, D.On{"contextmenu", "row-menu"}],
-        List.concat(&2, D.Node, [[View.dot(lc, SG.Signal.dot.thread(SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), t)), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", tt}], [D.Txt{tt}]}], View.pin(lc, U.Active.pinned(t)),
-          [View.note(SG.Signal.display.note(lc, st, M.Thread.id(t), View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t)))), pt)]])}
+        List.concat(&2, D.Node, [[View.dot(lc, dot), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", tt}], [D.Txt{tt}]}], View.pin(lc, U.Active.pinned(t)),
+          [View.note.want(U.Side.want(lc, dot, U.SIx.open(ix, M.Thread.id(t)), t), SG.Signal.display.note(lc, st, M.Thread.id(t), View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t)))), pt)]])}
 
 def View.atree.step(root: Bool, anchors: List<&2, U.ARow>, fallback: U.ARow) -> List<&2, U.ARow> & U.ARow:
   match root anchors:
@@ -2772,7 +2780,7 @@ def View.msg(+id: String, +who: String, +text: String, +stamp: String) -> D.Node
 def View.make.r.loc(+lc: I.Loc, row: Bool, +k: String, +as: List<&2, D.Attr>, +text: String) -> D.Node:
   match row:
     case True{}:
-      View.row.p.loc(lc, String.eq(View.attr(as, "pin"), "1"), k, text, View.attr(as, "ago"), View.attr(as, "badge"), View.attr(as, "dot"), Bool.pick(String, String.eq(View.attr(as, "on"), "1"), k, ""), String.eq(View.attr(as, "mov"), "1"))
+      View.row.p.loc(lc, String.eq(View.attr(as, "pin"), "1"), k, text, View.attr(as, "ago"), View.attr(as, "badge"), View.attr(as, "want"), View.attr(as, "dot"), Bool.pick(String, String.eq(View.attr(as, "on"), "1"), k, ""), String.eq(View.attr(as, "mov"), "1"))
     case False{}:
       View.act.in(lc, k, View.attr(as, "tone"), View.attr(as, "kind"), text, View.attr(as, "data-run"), String.eq(View.attr(as, "data-now"), "1"))
 
