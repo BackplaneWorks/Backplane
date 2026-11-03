@@ -54,6 +54,22 @@ class BundleTest(unittest.TestCase):
         self.assertTrue(all('--deep' not in c for c in signs))
         self.assertIn(('/usr/bin/codesign', '--verify', '--strict', str(self.service)), calls)
 
+    def test_verify_only_keeps_bytes_and_checks_every_nested_code(self):
+        before = {str(p.relative_to(self.app)): p.read_bytes()
+                  for p in self.app.rglob('*') if p.is_file() and not p.is_symlink()}
+        calls = []
+        with patch.object(mac.sys, 'platform', 'darwin'), patch.object(mac, 'run', side_effect=lambda *a: calls.append(a)):
+            result = mac.bundle(self.app, seal=False)
+        self.assertEqual(result['status'], 'PASS')
+        self.assertFalse(any('--sign' in c or 'xattr' in c[0] for c in calls))
+        binaries, bundles = mac.contents(self.app)
+        for p in binaries:
+            self.assertIn(('/usr/bin/codesign', '--verify', '--strict', str(p)), calls)
+        for p in bundles:
+            self.assertIn(('/usr/bin/codesign', '--verify', '--deep', '--strict', str(p)), calls)
+        self.assertEqual(before, {str(p.relative_to(self.app)): p.read_bytes()
+                                 for p in self.app.rglob('*') if p.is_file() and not p.is_symlink()})
+
     def test_verification_failure_propagates(self):
         with patch.object(mac.sys, 'platform', 'darwin'), patch.object(mac, 'run', side_effect=subprocess.CalledProcessError(1, 'codesign')):
             with self.assertRaises(subprocess.CalledProcessError):
