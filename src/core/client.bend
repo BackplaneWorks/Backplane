@@ -11211,7 +11211,7 @@ def Acv.windows(xs: List<&2, J.Json>) -> String:
 
 def Acv.note(+p: J.Json) -> String:
   J.Json.get_str(p, "provider", "") ++ " · " ++ J.Json.get_str(p, "state", "unchecked") ++ " · " ++ J.Json.get_str(J.Json.get_obj(p, "identity"), "email", "Identity unverified") ++ " · " ++ J.Json.get_str(J.Json.get_obj(p, "identity"), "plan", "") ++
-    " · allowance: " ++ J.Json.get_str(J.Json.get_obj(p, "allowance"), "state", "unknown") ++ Acv.windows(J.Json.elems(J.Json.get_obj(J.Json.get_obj(p, "allowance"), "windows"))) ++
+    Acv.windows(J.Json.elems(J.Json.get_obj(J.Json.get_obj(p, "allowance"), "windows"))) ++
     " · checked " ++ Nat.show(J.Json.get_nat(p, "checkedAt", 0n)) ++ "; provider pools may be shared across profiles. " ++ J.Json.get_str(p, "message", "")
 
 def Acv.limit.arg(p: String, id: String, epoch: Nat) -> String:

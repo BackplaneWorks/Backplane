@@ -12,7 +12,6 @@ const owner = value => typeof value === 'string' && value.length > 0 && value.le
 const browser = process.argv.includes('--backplane-direct-browser=1') ? Object.freeze({
   present: value => ipcRenderer.invoke('desktop:browser-present', value),
   hide: () => ipcRenderer.invoke('desktop:browser-hide'),
-  reconnect: () => ipcRenderer.invoke('desktop:browser-reconnect'),
   state: () => ipcRenderer.invoke('desktop:browser-state'),
   onState: listenBrowser('desktop:browser-state', value => {
     if (!['connecting', 'ready', 'error'].includes(value?.phase)) return null;

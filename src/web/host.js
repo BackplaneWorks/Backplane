@@ -10,8 +10,6 @@ installMessageImages();
 import App from "./app.bend";
 import { starAttention } from "./star-attention.js";
 const starAttentionSync = starAttention();
-import { allowanceDeadline } from "./allowance-deadline.js";
-const retireAllowance = allowanceDeadline();
 import { sizeComposer, sizeComposerControls } from "./composer-size.js";
 import { applyComposerDraft } from "./composer-draft.js";
 import { VoiceMic, hubHere } from "./voice-mic.js";
@@ -1149,7 +1147,6 @@ function render() {
   const heldFor = !frontendNode && !!transitionNode && transitionFor !== targetKey(presentationTarget(currentSession()));
   htmlData("backplaneHeld", !heldFor ? "false" : heldAt && performance.now() - heldAt >= QUIET_MS ? "quiet" : "true");
   htmlData("backplaneWait", String(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot));
-  retireAllowance(root, remoteReady && !!frontendNode || canonicalBoot && App.synced(ui));
   trace("dom", { seq: App.seq(ui) });
   if (PERF?.trace) requestAnimationFrame(() => trace("paint", { seq: App.seq(ui) }));
   mailRestore(mail);
@@ -1341,7 +1338,6 @@ function renderRegions() {
     laterAsked = false;
     if (thin?.ready) historyCheckSoon();
   }
-  retireAllowance(root, remoteReady);
   saveFocusedSoon();
   if (RR) { RR.n("render.regions");RR.t("render.regions", pnow() - t0); }
 }
@@ -2932,7 +2928,6 @@ function paintComposer() {
     if (!el) { later();return; }
     const t0 = RR ? pnow() : 0;
     patch(el, App.presentation_overlay(hub, presentationJson(feedbackSession())));
-    retireAllowance(root, remoteReady);
     attachmentPreviews();
     composerGeometry();
     if (RR) { RR.n("render.part");RR.t("render.part", pnow() - t0); }

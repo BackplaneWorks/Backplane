@@ -137,14 +137,13 @@ def Allowance.pool(ws: List<&2, J.Json>, +now: Nat) -> Pool:
 
 def Allowance.chip.pool(p: Pool, +fresh: Bool) -> String:
   match p:
-    case Pool{+scope, left, valid, stale, multiple}:
-      Bool.pick(String, Bool.not(fresh) || stale, "Limits stale",
-        Bool.pick(String, Bool.not(valid), "Limits unknown",
-          Bool.pick(String, multiple, "Shared limits", Nat.show(left) ++ "% left · shared")))
+    case Pool{_, left, valid, _, multiple}:
+      Bool.pick(String, valid,
+        Bool.pick(String, multiple, "Shared limits", Nat.show(left) ++ "% left · shared"), "")
 
 def Allowance.chip.given(ok: Bool, +o: J.Json, +provider: String, +model: String, +now: Nat) -> String:
   match ok:
-    case False{}: "Limits unknown"
+    case False{}: ""
     case True{}:
       Allowance.chip.pool(Allowance.pool(Allowance.windows(o, provider, model), now), Allowance.fresh(o, now))
 
@@ -195,8 +194,7 @@ def Allowance.duration(+w: J.Json) -> String:
 def Allowance.window.left(v: Maybe<&2, Nat>, +stale: Bool) -> String:
   match v:
     case Some{n}:
-      Bool.pick(String, stale, "Last reported ", "") ++ Nat.show(Allowance.remaining(n)) ++ "% left" ++
-        Bool.pick(String, stale, " · stale", "")
+      Nat.show(Allowance.remaining(n)) ++ "% left"
     case None{}: "Remaining unknown · invalid or missing used_permille"
 
 def Allowance.window.row(+w: J.Json, +provider: String, +fresh: Bool, +now: Nat) -> U.URow:
@@ -221,20 +219,17 @@ def Allowance.updated(+o: J.Json, +now: Nat) -> String:
     Allowance.utc(at) ++ " (" ++ Allowance.relative(Nat.sub(now, at)) ++ " ago)",
     "Update time unknown (missing, invalid, zero or future at)")
 
+# Presentation keeps the last measurement. Freshness remains independent for
+# automatic account selection; displaying an old reading never renews it.
 def Allowance.status.current(+o: J.Json, +now: Nat) -> String:
-  Bool.pick(String, Allowance.fresh(o, now), "Reported limits", "Limits stale · reading age cannot establish a current percentage")
+  "Reported limits"
 
 def Allowance.status(+o: J.Json, +now: Nat) -> String:
-  +state = J.Json.get_str(o, "state", "")
-  Bool.pick(String, String.eq(state, "error"), "Refresh error · last reported windows are stale",
-    Bool.pick(String, String.eq(state, "unavailable"), "Limits unavailable · remaining unknown",
-      Bool.pick(String, String.eq(state, "ok") || String.eq(state, "stale"),
-        Allowance.status.current(o, now),
-        "Limits unknown · invalid or legacy snapshot")))
+  "Reported limits"
 
 def Allowance.rows.given(ok: Bool, +o: J.Json, +provider: String, +model: String, +now: Nat) -> List<&2, U.URow>:
   match ok:
-    case False{}: [U.URow{"Limits unknown", "No matching valid provider snapshot; unavailable, invalid or legacy reading", ""}]
+    case False{}: Nil{}
     case True{}:
       U.URow{"Account limits", Allowance.status(o, now), ""} <>
         U.URow{"Account scope", J.Json.get_str(o, "account_label", "Default CLI account") ++ " · " ++ Allowance.auth(o) ++

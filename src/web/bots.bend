@@ -293,8 +293,7 @@ def WB.browser.surface.k(direct: Bool, +lc: I.Loc, +u: U.Ui, +id: String, +name:
   match direct:
     case True{}:
       D.El{"div", "desktop-browser:" ++ id, [D.At{"class", "desktop-browser"}, D.At{"data-desktop-browser-owner", id}, D.At{"aria-label", MSG.T.browser.owner(lc, name)}],
-        [D.El{"span", "desktop-browser-status:" ++ id, [D.At{"class", "desktop-browser-status"}, D.At{"role", "status"}, D.At{"aria-live", "polite"}], [D.Txt{"Connecting Browser…"}]},
-         D.El{"button", "desktop-browser-reconnect:" ++ id, [D.At{"class", "browser-reconnect"}, D.At{"type", "button"}, D.At{"data-desktop-browser-reconnect", ""}, D.At{"hidden", ""}, D.At{"style", "display:none"}], [WI.WIcon.svg("repeat", 16), D.Txt{"Reconnect"}]}]}
+        [D.El{"span", "desktop-browser-status:" ++ id, [D.At{"class", "desktop-browser-status"}, D.At{"role", "status"}, D.At{"aria-live", "polite"}], [D.Txt{"Connecting Browser…"}]}]}
     case False{}:
       WB.browser.in.loc(lc, U.Teach.input(u, id), String.is_empty(U.Ui.info(u, "shot." ++ id)), U.Ui.info(u, "shot." ++ id), id, name)
 

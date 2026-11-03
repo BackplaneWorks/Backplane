@@ -15567,6 +15567,15 @@ law composer_bar_never_wraps:
   for button: String
   {CBAR.ComposerBar.wrap(CBAR.ComposerBar.layout(button)) == "nowrap" : String}
 
+# An absent measurement has no allowance label. A measured percentage remains
+# visible while background refresh runs; freshness for switching is separate.
+law allowance_no_measurement_hidden:
+  {ALLOWANCE.Allowance.chip("", "codex", "", 1000n) == "" : String}
+
+law allowance_last_measurement_visible:
+  for fresh: Bool
+  {ALLOWANCE.Allowance.chip.pool(ALLOWANCE.Pool{"shared", 72n, True{}, False{}, False{}}, fresh) == "72% left · shared" : String}
+
 # A provider fallback never happens while another account of that provider has
 # allowance. The actual hub cross-provider gate uses this account selector.
 law provider_fallback_only_when_accounts_exhausted:

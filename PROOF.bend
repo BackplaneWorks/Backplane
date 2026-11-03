@@ -15573,6 +15573,12 @@ def Laws.composer_bar_one_button(button): {==}
 
 def Laws.composer_bar_never_wraps(button): {==}
 
+def Laws.allowance_no_measurement_hidden():
+  {==}
+
+def Laws.allowance_last_measurement_visible(fresh):
+  {==}
+
 def Laws.provider_fallback_only_when_accounts_exhausted(s, now, provider, model, account, h):
   %Equal.sym(Maybe<&2, J.Json>, ACCOUNTRECOVERY.Pick.account(s, now, provider, model), Some{account}, h) : {ACCOUNTRECOVERY.Pick.none(_) == False{} : Bool}
   {==}
