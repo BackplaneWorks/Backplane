@@ -96,10 +96,28 @@ def closure_identity(root=ROOT):
     return sha(json.dumps(items).encode())
 
 
+def content_identity(root=ROOT):
+    """Hash of every tracked file's path and blob, with modes left out: a Boat sandbox re-commits the pushed files
+    (0600, no executable bits), so its git tree and commit differ from the host's while the content is the same."""
+    items = []
+    for line in git('ls-files', '-s', cwd=root).splitlines():
+        _, blob, _, name = line.split(None, 3)
+        items.append([name, blob])
+    return sha(json.dumps(sorted(items)).encode())
+
+
+SOURCE_KEYS = ('content_sha256', 'closure_sha256')  # what must match across hosts; head/tree are informational
+
+
+def source_matches(a, b):
+    return (isinstance(a, dict) and isinstance(b, dict) and a.get('clean') is True and b.get('clean') is True
+            and all(a.get(k) and a.get(k) == b.get(k) for k in SOURCE_KEYS))
+
+
 def source_identity(root=ROOT):
     return {'head': git('rev-parse', 'HEAD', cwd=root), 'tree': git('rev-parse', 'HEAD^{tree}', cwd=root),
             'clean': git('status', '--porcelain', '--untracked-files=no', cwd=root) == '',
-            'closure_sha256': closure_identity(root)}
+            'content_sha256': content_identity(root), 'closure_sha256': closure_identity(root)}
 
 
 def tool_identity():
@@ -430,13 +448,11 @@ def judge(job, receipt, reference, expected_source, qual, cap_bytes, proof=None,
     why = receipt_problems(receipt, cap_bytes, require_boat)
     if receipt.get('id') != job['id']:
         why.append('receipt belongs to %r' % receipt.get('id'))
-    if receipt.get('source') != expected_source:
-        why.append('source/import-closure mismatch: %s' % receipt.get('source'))
-    elif not expected_source.get('clean'):
-        why.append('source tree is not clean')
+    if not source_matches(receipt.get('source'), expected_source):
+        why.append('source content/import-closure mismatch or not clean: %s' % receipt.get('source'))
     qsrc = qual.get('source') or {}
-    if any(qsrc.get(k) != expected_source.get(k) for k in ('tree', 'closure_sha256')):
-        why.append('qualification names another source tree/import closure')
+    if any(qsrc.get(k) != expected_source.get(k) for k in SOURCE_KEYS):
+        why.append('qualification names another source content/import closure')
     tools = qual.get('tools')
     if not tools or {k: (receipt.get('tools') or {}).get(k) for k in ('bend', 'bun')} != {k: tools.get(k) for k in ('bend', 'bun')} and job['kind'] != 'proof':
         why.append('tool provenance mismatch with the qualified compiler/Bun: %s' % receipt.get('tools'))
@@ -531,7 +547,7 @@ def qualified(path, source):
     if q.get('qualified') is not True or q.get('schema') != 3:
         return False, q.get('reason', 'compiler is not marked qualified (schema 3)'), None
     src, tools = q.get('source') or {}, q.get('tools') or {}
-    if any(src.get(k) != source.get(k) for k in ('head', 'tree', 'closure_sha256')) or not source.get('clean'):
+    if any(src.get(k) != source.get(k) for k in ('head', 'tree', *SOURCE_KEYS)) or not source.get('clean'):
         return False, 'qualification is for another source commit/tree/import closure', None
     if not all(isinstance(tools.get(k), dict) and tools[k].get('sha256') for k in ('bend', 'bun')):
         return False, 'qualification does not name the compiler and Bun hashes', None
