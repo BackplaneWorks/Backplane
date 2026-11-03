@@ -364,6 +364,20 @@ def WS.rows(xs: List<&2, U.PItem>, +st: M.State, +chosen: Nat, +i: Nat) -> List<
         D.At{"aria-selected", Bool.pick(String, Nat.is_eq(chosen, i), "true", "false")}, D.At{"class", Bool.pick(String, Nat.is_eq(chosen, i), "workspace-command on", "workspace-command") ++ Bool.pick(String, thread, " thread", "")},
         D.At{"title", Bool.pick(String, thread, "Thread · " ++ U.Palette.place(st, a, v), label)}, D.At{"data-value", Nat.show(i)}, D.On{"click", "ws-palette-run"}], WS.row.face(thread, label, U.Palette.place(st, a, v))} <> WS.rows(tail, st, chosen, 1n+i)
 
+# Nothing matches: a word said in a thread is not a command, a thread's or a
+# project's name. The search of every conversation (host.js's
+# thin-search-open, the top bar's magnifier) is offered with it.
+def WS.empty.k(blank: Bool, +q: String) -> List<&2, D.Node>:
+  match blank:
+    case True{}: [D.Dom.span("workspace-empty", "No matching commands")]
+    case False{}:
+      [D.Dom.span("workspace-empty", "No matching commands"),
+       D.El{"button", "search-all", [D.At{"type", "button"}, D.At{"class", "workspace-command search-all"}, D.At{"data-value", String.trim(q)}, D.On{"click", "thin-search-open"}],
+         [D.Txt{"Search conversations for “" ++ String.trim(q) ++ "”"}]}]
+
+def WS.empty(+q: String) -> List<&2, D.Node>:
+  WS.empty.k(String.is_empty(String.trim(q)), q)
+
 def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case False{}: Nil{}
@@ -375,7 +389,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
             D.At{"value", U.Palette.query(u)}, D.At{"data-bfield", "wspalette"}, D.At{"role", "combobox"}, D.At{"aria-label", "Search commands"}, D.At{"aria-expanded", "true"}, D.At{"aria-controls", "workspace-commands"},
             D.At{"aria-activedescendant", "workspace-command-" ++ Nat.show(U.Palette.index(u))}, D.On{"input", "bfield"}], Nil{}},
           D.El{"div", "workspace-commands", [D.At{"id", "workspace-commands"}, D.At{"role", "listbox"}],
-            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), [D.Dom.span("workspace-empty", "No matching commands")], WS.rows(WS.items(u), U.Ui.state(u), U.Palette.index(u), 0n))},
+            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), WS.empty(U.Palette.query(u)), WS.rows(WS.items(u), U.Ui.state(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
             D.El{"details", "", Nil{}, [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
               D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+. stop · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort · / composer."}]},
