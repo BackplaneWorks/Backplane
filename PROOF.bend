@@ -15566,7 +15566,7 @@ def Laws.composer_bar_one_button(button): {==}
 def Laws.composer_bar_never_wraps(button): {==}
 
 def Laws.provider_fallback_only_when_accounts_exhausted(s, now, provider, model, account, h):
-  %h : {ACCOUNTRECOVERY.Pick.none(_) == False{} : Bool}
+  %Equal.sym(Maybe<&2, J.Json>, ACCOUNTRECOVERY.Pick.account(s, now, provider, model), Some{account}, h) : {ACCOUNTRECOVERY.Pick.none(_) == False{} : Bool}
   {==}
 
 # ---- recurring UI invariants, 2026-11-02 ----
