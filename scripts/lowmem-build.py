@@ -7,7 +7,8 @@ the reference emit.
 
   scripts/lowmem-build.py run --reference REF.json --qualification Q.json \\
         [--proof-dir build/proof] [--jobs hub,web,mobile,proof] [--dry-run]
-  scripts/lowmem-build.py reference --from-dir DIR --out REF.json   (from the CURRENT compiler's output)
+  scripts/lowmem-build.py reference --from-emission DIR --out REF.json [--expect-server-sha H]
+                                  (only from a saved, verified official producer emission)
   scripts/lowmem-build.py worker ...                                 (runs inside a job)
 
 Exit: 0 all gates passed; 1 a gate failed (cap, swap, source/tool, bytes, exit);
@@ -70,9 +71,35 @@ def git(*args, cwd=ROOT):
     return subprocess.check_output(['git', *args], cwd=cwd, text=True).strip()
 
 
+ENTRY_ROOTS = ['src/server/main.bend', 'src/web/app.bend', 'src/mobile/app.bend']
+ENTRY_EXTRA = ['src/web/index.html', 'src/mobile/index.html']
+PINNED_ENV = {'BEND_NO_TELEMETRY': '1', 'BUN_JSC_forceRAMSize': '4294967296', 'DO_NOT_TRACK': '1', 'BUN_CONFIG_NO_ANALYTICS': '1'}
+PHASES = ['source-closure', 'tools', 'protected', 'flock', 'enforce', 'command', 'outputs']
+PROTECTED = ('bend.ts', 'safe.ts', 'base')   # a qualification must name all three
+MAX_TIMEOUT = 7200
+
+
+def closure_identity(root=ROOT):
+    """Content AND mode of every file the three entry points read (bend-closure.py, fail closed) plus the HTML entries."""
+    files = subprocess.check_output([sys.executable, str(root / 'scripts/bend-closure.py'), *ENTRY_ROOTS], cwd=root, text=True).splitlines()
+    files = sorted(set(files) | set(ENTRY_EXTRA))
+    modes = {}
+    for line in git('ls-files', '-s', '--', *files, cwd=root).splitlines():
+        mode, _, _, name = line.split(None, 3)
+        modes[name] = mode
+    items = []
+    for f in files:
+        p = root / f
+        if f not in modes or p.is_symlink() or not p.is_file():
+            raise ValueError('closure member not a tracked regular file: ' + f)
+        items.append([f, modes[f], sha(p.read_bytes())])
+    return sha(json.dumps(items).encode())
+
+
 def source_identity(root=ROOT):
     return {'head': git('rev-parse', 'HEAD', cwd=root), 'tree': git('rev-parse', 'HEAD^{tree}', cwd=root),
-            'clean': git('status', '--porcelain', '--untracked-files=no', cwd=root) == ''}
+            'clean': git('status', '--porcelain', '--untracked-files=no', cwd=root) == '',
+            'closure_sha256': closure_identity(root)}
 
 
 def tool_identity():
@@ -166,23 +193,37 @@ def shim(args):
     before = read_enforcement(cg, overridden)
     code = None
     if not enforcement_problems({**before, 'memory_peak': 1}, args.cap_bytes):
-        code = subprocess.run(args.cmd, cwd=ROOT).returncode
+        code = subprocess.run(args.cmd, cwd=ROOT, env={**os.environ, **PINNED_ENV}).returncode
     else:
         print('lowmem-shim: kernel cap not in force; the command was NOT run', file=sys.stderr)
     Path(args.report).write_text(json.dumps({'exit': code, 'enforcement': read_enforcement(cg, overridden)}))
     return 0 if code == 0 else 1
 
 
-def run_capped(cmd, cap, report):
+def run_capped(cmd, cap, report, timeout=3000):
     """The compiler in a kernel scope of its own (MemoryMax=cap, MemorySwapMax=0); (exit, enforcement) read from inside it."""
     argv = systemd_scope(cap, [sys.executable, str(Path(__file__).resolve()), 'shim', '--cap-bytes', str(cap), '--report', str(report), '--', *cmd])
+    proc = subprocess.Popen(argv, cwd=ROOT, start_new_session=True)
     try:
-        subprocess.run(argv, cwd=ROOT)
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)  # the scope's whole tree; a timeout never qualifies
+        proc.wait()
+        return None, None, True
+    try:
         data = json.loads(Path(report).read_text())
-        return data.get('exit'), data.get('enforcement')
+        return data.get('exit'), data.get('enforcement'), False
     except (OSError, ValueError) as error:
         print('lowmem-worker: no enforced compiler scope: %s' % error, file=sys.stderr)
-        return None, None
+        return None, None, False
+
+
+def native_flock():
+    """True only when this process inherited the actual bend flock from heavy-guard (real admission)."""
+    spec = importlib.util.spec_from_file_location('heavy_guard', ROOT / 'scripts' / 'heavy-guard.py')
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    return guard.inherited_lock(guard.lock_path()) is not None
 
 
 def worker(args):
@@ -198,44 +239,65 @@ def worker(args):
             os.execvp(scope[0], scope)
         except OSError as error:
             print('lowmem-worker: no systemd scope to enforce the cap: %s' % error, file=sys.stderr)
-    swap_total = meminfo().get('SwapTotal', 0)
-    before = swap_counters()
+    receipt = {'schema': 3, 'id': args.id, 'cmd_template': args.cmd, 'cmd': cmd, 'cap_bytes': args.cap_bytes,
+               'env': PINNED_ENV, 'timeout_seconds': args.timeout, 'timed_out': False, 'exit': None,
+               'enforcement': None, 'controller': None, 'phases': [], 'flock': False, 'protected': {},
+               'outputs': {}, 'output_bytes': {}}
+    phases = receipt['phases']
+    swap_before = swap_counters()
     start = time.monotonic()
-    code, compiler = run_capped(cmd, args.cap_bytes, out.parent / (args.id + '.enforcement.json'))
-    seconds = time.monotonic() - start
-    after = swap_counters()
     try:
-        cg, overridden = cgroup_dir()
-        controller = read_enforcement(cg, overridden)
-    except (OSError, IndexError):
-        controller = None
+        receipt['source'] = source_identity(); phases.append('source-closure')
+        receipt['tools'] = tool_identity(); phases.append('tools')
+        for item in args.protect:
+            name, _, path = item.partition('=')
+            receipt['protected'][name] = sha(Path(path).read_bytes())
+        phases.append('protected')
+        receipt['flock'] = native_flock()
+        if receipt['flock']:
+            phases.append('flock')
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print('lowmem-worker: provenance step failed: %s' % error, file=sys.stderr)
+    if phases == PHASES[:4]:
+        code, compiler, timed_out = run_capped(cmd, args.cap_bytes, out.parent / (args.id + '.enforcement.json'), args.timeout)
+        receipt.update(exit=code, enforcement=compiler, timed_out=timed_out)
+        try:
+            cg, overridden = cgroup_dir()
+            receipt['controller'] = read_enforcement(cg, overridden)
+        except (OSError, IndexError):
+            pass
+        if compiler is not None:
+            phases.append('enforce')
+        if code is not None:
+            phases.append('command')
     try:
         outputs = tree_hashes(out)
-    except ValueError as error:
-        outputs = {}
+        if args.copy and Path(ROOT / args.copy).is_file():
+            (out / 'result.json').write_bytes((ROOT / args.copy).read_bytes())
+            outputs = tree_hashes(out)
+        receipt['outputs'] = outputs
+        receipt['output_bytes'] = {n: (out / n).stat().st_size for n in outputs}
+        if outputs:
+            phases.append('outputs')
+    except (OSError, ValueError) as error:
         print('lowmem-worker: %s' % error, file=sys.stderr)
-    if args.copy and Path(ROOT / args.copy).is_file():
-        (out / 'result.json').write_bytes((ROOT / args.copy).read_bytes())
-        outputs = tree_hashes(out)
-    receipt = {'schema': 2, 'id': args.id, 'cmd': cmd, 'exit': code, 'seconds': round(seconds, 2),
-               'cap_bytes': args.cap_bytes, 'peak_bytes': (compiler or {}).get('memory_peak'),
-               'enforcement': compiler, 'controller': controller, 'swap_total_bytes': swap_total,
-               'swap_before': before, 'swap_after': after,
-               'swap_activity': after != before, 'mem_total_bytes': meminfo().get('MemTotal'),
-               'boat_sandbox': os.environ.get('BACKPLANE_HEAVY_BOAT_SANDBOX') == '1',
-               'source': source_identity(), 'tools': tool_identity(), 'outputs': outputs}
+    after = swap_counters()
+    receipt.update(seconds=round(time.monotonic() - start, 2), peak_bytes=(receipt['enforcement'] or {}).get('memory_peak'),
+                   swap_total_bytes=meminfo().get('SwapTotal', 0), swap_before=swap_before, swap_after=after,
+                   swap_activity=after != swap_before, mem_total_bytes=meminfo().get('MemTotal'),
+                   boat_sandbox=os.environ.get('BACKPLANE_HEAVY_BOAT_SANDBOX') == '1')
     (out / (args.id + '.receipt.json')).write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
     why = receipt_problems(receipt, args.cap_bytes, require_boat=False)
     print('lowmem-worker: %s exit %s peak %s of %.2f GiB, %.0f s%s' % (
-        args.id, code, ('%.2f GiB' % (receipt['peak_bytes'] / GIB)) if isinstance(receipt['peak_bytes'], int) else 'unknown',
-        args.cap_bytes / GIB, seconds, ' -- ' + '; '.join(why) if why else ''), flush=True)
-    return 0 if code == 0 and not why and bool(outputs) else 1
+        args.id, receipt['exit'], ('%.2f GiB' % (receipt['peak_bytes'] / GIB)) if isinstance(receipt['peak_bytes'], int) else 'unknown',
+        args.cap_bytes / GIB, receipt['seconds'], ' -- ' + '; '.join(why) if why else ''), flush=True)
+    return 0 if not why else 1
 
 
 def receipt_problems(r, cap, require_boat=True):
     """Executor/cap/swap/exit problems of one worker receipt (shared with service-release.py's report check)."""
-    if not isinstance(r, dict) or r.get('schema') != 2:
-        return ['receipt is not a schema 2 worker receipt']
+    if not isinstance(r, dict) or r.get('schema') != 3:
+        return ['receipt is not a schema 3 worker receipt']
     why = enforcement_problems(r.get('enforcement'), cap)
     if cap == COMPILER_CAP:
         why += ['controller: ' + w for w in enforcement_problems(r.get('controller'), CONTROLLER_CAP)]
@@ -249,12 +311,27 @@ def receipt_problems(r, cap, require_boat=True):
         why.append('worker exit %s' % r.get('exit'))
     if r.get('swap_activity'):
         why.append('SWAP used (kernel swap counters moved)')
+    t = r.get('timeout_seconds')
+    if type(t) is not int or not 0 < t <= MAX_TIMEOUT:
+        why.append('no finite timeout recorded')
+    if r.get('timed_out') is not False:
+        why.append('TIMED OUT or timeout not recorded')
+    if r.get('flock') is not True:
+        why.append('native bend flock was not held (no real admission)')
+    if r.get('phases') != PHASES:
+        why.append('incomplete phase set: %s' % r.get('phases'))
+    if r.get('env') != PINNED_ENV:
+        why.append('environment differs from the pinned environment')
+    if not isinstance(r.get('protected'), dict) or set(r['protected']) != set(PROTECTED):
+        why.append('protected bend.ts/safe.ts/base hashes missing')
+    if not isinstance(r.get('tools'), dict) or not all(isinstance(r['tools'].get(k), dict) and r['tools'][k].get('sha256') for k in (('bend',) if str(r.get('id', '')).startswith('proof-') else ('bend', 'bun'))):
+        why.append('compiler and Bun binary hashes required')
     if require_boat and (not r.get('boat_sandbox') or not isinstance(r.get('mem_total_bytes'), int) or r['mem_total_bytes'] > 8 * GIB):
         why.append('not a normal-size Boat sandbox')
     return why
 
 
-PROOF_WRAPPER = ['python3', 'scripts/heavy-guard.py', 'proof-shard', '--']  # lane 3's profile (PR #854); exits 75 when the cgroup is not <=3.7 GiB with swap 0
+PROOF_WRAPPER = []  # the worker itself runs under the guard (see PROFILES), so the shard inherits the real flock
 
 
 def proof_jobs(proof_dir, wrapper=PROOF_WRAPPER):
@@ -285,11 +362,25 @@ def plan(kinds, proof_dir):
     return jobs
 
 
-def boat_argv(job, run_dir, timeout, python=sys.executable):
+# The worker is launched under heavy-guard so it inherits the actual bend flock. proof-shard is lane 3's profile
+# (PR #854, exits 75 unless the cgroup is <=3.7 GiB with swap 0); compile-shard does not exist yet and must be
+# added by lane 3 with the same cgroup rule: until then heavy-guard refuses it and the job cannot qualify.
+PROFILES = {'proof': 'proof-shard', 'hub': 'compile-shard', 'web': 'compile-shard', 'mobile': 'compile-shard'}
+
+
+def boat_argv(job, run_dir, timeout, protect=(), python=sys.executable):
     rel = 'build/lowmem/%s/%s' % (run_dir.name, job['id'])
     worker_cmd = ['python3', 'scripts/lowmem-build.py', 'worker', '--id', job['id'], '--out', rel,
-                  '--cap-bytes', str(CAP_BYTES), *(['--copy', job['copy']] if job.get('copy') else []), '--', *[c.replace('{out}', rel) for c in job['cmd']]]
-    return [str(BOAT_JOB), '--size', 'default', '--timeout', str(timeout), '--artifact', rel, '--', *worker_cmd], rel
+                  '--cap-bytes', str(CAP_BYTES), '--timeout', str(timeout), *[x for p in protect for x in ('--protect', p)],
+                  *(['--copy', job['copy']] if job.get('copy') else []), '--', *job['cmd']]
+    guard = ['python3', 'scripts/heavy-guard.py', PROFILES[job['kind']], '--']
+    return [str(BOAT_JOB), '--size', 'default', '--timeout', str(timeout + 300), '--artifact', rel, '--', *guard, *worker_cmd], rel
+
+
+def protect_args(args):
+    q = load_json(args.qualification) if args.qualification else None
+    prot = (q or {}).get('protected') or {}
+    return ['%s=%s' % (n, v['path']) for n, v in sorted(prot.items()) if isinstance(v, dict) and v.get('path')]
 
 
 def launch(job, run_dir, args):
@@ -297,10 +388,11 @@ def launch(job, run_dir, args):
     if args.runner == 'local':
         out = run_dir / job['id']
         wc = [sys.executable, str(Path(__file__)), 'worker', '--id', job['id'], '--out', str(out),
-              '--cap-bytes', str(args.cap_bytes), *(['--copy', job['copy']] if job.get('copy') else []), '--', *[c.replace('{out}', str(out)) for c in job['cmd']]]
+              '--cap-bytes', str(args.cap_bytes), '--timeout', str(args.timeout), *[x for p in protect_args(args) for x in ('--protect', p)],
+              *(['--copy', job['copy']] if job.get('copy') else []), '--', *job['cmd']]
         p = subprocess.run(wc, cwd=ROOT)
         return p.returncode, out
-    argv, rel = boat_argv(job, run_dir, args.timeout)
+    argv, rel = boat_argv(job, run_dir, args.timeout, protect_args(args))
     log = run_dir / (job['id'] + '.log')
     with log.open('w') as handle:
         p = subprocess.run(argv, cwd=ROOT, stdout=handle, stderr=subprocess.STDOUT, text=True)
@@ -308,25 +400,42 @@ def launch(job, run_dir, args):
     return p.returncode, (Path(m.group(1)) / 'artifacts' / Path(rel).name if m else None)
 
 
-def judge(job, receipt, reference, expected_source, expected_tools, cap_bytes, proof=None, require_boat=True):
-    """Every reason this job fails the gate (empty list = passed)."""
+def judge(job, receipt, reference, expected_source, qual, cap_bytes, proof=None, require_boat=True):
+    """Every reason this job fails the gate (empty list = passed). qual is the qualification record."""
     if receipt is None:
         return ['no worker receipt (job never finished or artifact lost)']
+    qual = qual if isinstance(qual, dict) else {}
     why = receipt_problems(receipt, cap_bytes, require_boat)
     if receipt.get('id') != job['id']:
         why.append('receipt belongs to %r' % receipt.get('id'))
     if receipt.get('source') != expected_source:
-        why.append('source mismatch: %s' % receipt.get('source'))
+        why.append('source/import-closure mismatch: %s' % receipt.get('source'))
     elif not expected_source.get('clean'):
         why.append('source tree is not clean')
-    if not expected_tools or receipt.get('tools') != expected_tools:
-        why.append('tool provenance mismatch with the qualified compiler: %s' % receipt.get('tools'))
-    if not receipt.get('tools') or not receipt['tools'].get('bend'):
-        why.append('no bend tool provenance')
+    qsrc = qual.get('source') or {}
+    if any(qsrc.get(k) != expected_source.get(k) for k in ('tree', 'closure_sha256')):
+        why.append('qualification names another source tree/import closure')
+    tools = qual.get('tools')
+    if not tools or {k: (receipt.get('tools') or {}).get(k) for k in ('bend', 'bun')} != {k: tools.get(k) for k in ('bend', 'bun')} and job['kind'] != 'proof':
+        why.append('tool provenance mismatch with the qualified compiler/Bun: %s' % receipt.get('tools'))
+    elif job['kind'] == 'proof' and (receipt.get('tools') or {}).get('bend') != (tools or {}).get('bend'):
+        why.append('compiler mismatch with the qualification')
+    if receipt.get('env') != qual.get('env'):
+        why.append('environment/flags differ from the qualification')
+    if receipt.get('protected') != {n: (v or {}).get('sha256') for n, v in (qual.get('protected') or {}).items()}:
+        why.append('protected bend.ts/safe.ts/base differ from the qualification')
     if job['kind'] == 'proof':
         # a proof passes only on the planner's own result semantics; no verdict, no pass
         why.extend(proof if proof is not None else ['proof result was not validated'])
         return why
+    spec = (qual.get('jobs') or {}).get(job['id']) or {}
+    if receipt.get('cmd_template') != spec.get('cmd') or not spec.get('cmd'):
+        why.append('command/flags differ from the qualification')
+    if receipt.get('timeout_seconds') != spec.get('timeout_seconds'):
+        why.append('timeout differs from the qualification')
+    final = {n: {'sha256': h, 'bytes': (receipt.get('output_bytes') or {}).get(n)} for n, h in (receipt.get('outputs') or {}).items()}
+    if final != spec.get('artifacts') or not final:
+        why.append('final artifact names/sizes/SHA differ from the qualification')
     want = (reference or {}).get('outputs', {}).get(job['id'])
     if want is None:
         why.append('no reference emit for %s' % job['id'])
@@ -391,17 +500,35 @@ def load_json(path):
 
 
 def qualified(path, source):
-    """(ok, reason, qualification). It must name this exact source tree and the low-memory compiler it qualifies."""
+    """(ok, reason, qualification). Bare {qualified:true} is not enough: it must name this exact commit, tree and
+    import closure, the compiler and Bun binaries, the three protected inputs, the flags/environment, and each
+    job's command, timeout and final artifact names, sizes and SHA."""
     q = load_json(path) if path else None
     if not isinstance(q, dict):
         return False, 'no readable qualification file', None
-    if q.get('qualified') is not True:
-        return False, q.get('reason', 'compiler is not marked qualified'), None
-    tools = q.get('tools')
-    if not isinstance(tools, dict) or not isinstance(tools.get('bend'), dict) or not tools['bend'].get('sha256'):
-        return False, 'qualification does not name the compiler it qualifies', None
-    if (q.get('source') or {}).get('tree') != source['tree']:
-        return False, 'qualification is for another source tree', None
+    if q.get('qualified') is not True or q.get('schema') != 3:
+        return False, q.get('reason', 'compiler is not marked qualified (schema 3)'), None
+    src, tools = q.get('source') or {}, q.get('tools') or {}
+    if any(src.get(k) != source.get(k) for k in ('head', 'tree', 'closure_sha256')) or not source.get('clean'):
+        return False, 'qualification is for another source commit/tree/import closure', None
+    if not all(isinstance(tools.get(k), dict) and tools[k].get('sha256') for k in ('bend', 'bun')):
+        return False, 'qualification does not name the compiler and Bun hashes', None
+    prot = q.get('protected')
+    if not isinstance(prot, dict) or set(prot) != set(PROTECTED) or not all(
+            isinstance(v, dict) and v.get('path') and re.fullmatch(r'[0-9a-f]{64}', str(v.get('sha256', ''))) for v in prot.values()):
+        return False, 'qualification must hash protected bend.ts, safe.ts and base', None
+    if q.get('env') != PINNED_ENV:
+        return False, 'qualification environment is not the pinned one', None
+    jobs = q.get('jobs')
+    if not isinstance(jobs, dict) or not {'hub', 'web', 'mobile'} <= set(jobs):
+        return False, 'qualification lacks hub, web or mobile', None
+    for name, spec in jobs.items():
+        arts = spec.get('artifacts') if isinstance(spec, dict) else None
+        if (not isinstance(arts, dict) or not arts or not spec.get('cmd') or spec.get('phases') != PHASES
+                or type(spec.get('timeout_seconds')) is not int or not 0 < spec['timeout_seconds'] <= MAX_TIMEOUT
+                or not all(isinstance(a, dict) and re.fullmatch(r'[0-9a-f]{64}', str(a.get('sha256', ''))) and type(a.get('bytes')) is int and a['bytes'] > 0
+                           for a in arts.values())):
+            return False, 'qualification job %s lacks command, timeout, phases or final artifact size/SHA' % name, None
     return True, '', q
 
 
@@ -432,7 +559,7 @@ def run(args):
         for j in jobs:
             print('  %-22s %s' % (j['id'], shlex.join(j['cmd'])))
             if args.runner == 'boat':
-                print('  %-22s %s' % ('', shlex.join(boat_argv(j, run_dir, args.timeout)[0])))
+                print('  %-22s %s' % ('', shlex.join(boat_argv(j, run_dir, args.timeout, protect_args(args))[0])))
         if 'proof' in kinds and not any(j['kind'] == 'proof' for j in jobs):
             print('  proof: no manifest at --proof-dir; run scripts/proof-shards.py generate first')
         return 0
@@ -446,9 +573,9 @@ def run(args):
         return unqualified(args, report, reason)
     run_dir.mkdir(parents=True, exist_ok=True)
     reference = load_json(args.reference) if args.reference else None
-    tools = qual['tools']
-    if not isinstance(reference, dict) or (reference.get('source') or {}).get('tree') != source['tree']:
-        report.update(state='unqualified', reason='reference emit is missing or for another source tree')
+    if (not isinstance(reference, dict) or reference.get('schema') != 2 or not reference.get('producer')
+            or any((reference.get('source') or {}).get(k) != source[k] for k in ('head', 'tree'))):
+        report.update(state='unqualified', reason='reference emit is missing, not from a verified producer, or for another commit/tree')
         return unqualified(args, report, report['reason'])
     t0 = time.monotonic()
     results = {}
@@ -471,7 +598,7 @@ def run(args):
     failed = {}
     for j in jobs:
         rc, receipt, folder = results[j['id']]
-        why = judge(j, receipt, reference, source, tools, args.cap_bytes,
+        why = judge(j, receipt, reference, source, qual, args.cap_bytes,
                     proof_check.get(j['id'], ['no proof result']) if j['kind'] == 'proof' else None,
                     require_boat=args.runner == 'boat')
         if rc != 0 and not why:
@@ -488,7 +615,7 @@ def run(args):
             entry['receipt'] = ref_to(dest, run_dir)
         if why:
             failed[j['id']] = why
-    report.update(source=source, tools=tools, cap_bytes=args.cap_bytes, release=bool(args.release),
+    report.update(source=source, tools=qual['tools'], protected={n: v['sha256'] for n, v in qual['protected'].items()}, cap_bytes=args.cap_bytes, release=bool(args.release),
                   complete={'hub', 'web', 'mobile'} <= {k for k, e in report['jobs'].items() if e.get('ok')},
                   qualification=ref_to(Path(args.qualification), Path(args.qualification).parent),
                   reference=ref_to(Path(args.reference), Path(args.reference).parent),
@@ -527,17 +654,48 @@ def unqualified(args, report, reason):
     return UNQUALIFIED
 
 
+def reference_from_emission(d, expect_server_sha=None):
+    """The reference emit comes only from a saved, verified official producer (EMISSION.json + inventory), never
+    from bytes a caller picks: its exact commit/tree, compiler, phases and every file hash are checked."""
+    d = Path(d)
+    e = json.loads((d / 'EMISSION.json').read_text())
+    if not (e.get('schema') == 1 and e.get('kind') == 'backplane-secret-free-js-emission' and e.get('status') == 'VERIFIED'
+            and e.get('channel') == 'release' and e.get('published') is False
+            and re.fullmatch(r'[0-9a-f]{40}', str(e.get('sourceCommit'))) and re.fullmatch(r'[0-9a-f]{40}', str(e.get('sourceTree')))):
+        raise ValueError('not a verified producer emission')
+    actual = {}
+    for p in sorted(d.rglob('*')):
+        if p.is_symlink():
+            raise ValueError('symlink in producer emission')
+        if p.is_file() and p.name != 'EMISSION.json':
+            actual[p.relative_to(d).as_posix()] = {'sha256': sha(p.read_bytes()), 'bytes': p.stat().st_size}
+    if actual != e.get('files'):
+        raise ValueError('producer emission member/hash mismatch')
+    src = json.loads((d / 'SOURCE.json').read_text())
+    if src.get('commit') != e['sourceCommit'] or src.get('tree', e['sourceTree']) != e['sourceTree']:
+        raise ValueError('producer source manifest differs from its emission')
+    phases = json.loads((d / 'PHASES.json').read_text())
+    if [x.get('phase') for x in phases] != ['entries', 'server', 'web'] or any(x.get('exitCode') != 0 for x in phases):
+        raise ValueError('producer phases incomplete or failed')
+    server = actual['server.js']['sha256']
+    if expect_server_sha and server != expect_server_sha:
+        raise ValueError('producer server.js is not the pinned %s' % expect_server_sha)
+    web = {'web/' + k[len('web/'):]: v['sha256'] for k, v in actual.items() if k.startswith('web/')}
+    if not web:
+        raise ValueError('producer has no web output')
+    return {'schema': 2, 'source': {'head': e['sourceCommit'], 'tree': e['sourceTree']},
+            'producer': {'emission_sha256': sha((d / 'EMISSION.json').read_bytes()), 'compiler': e['compiler'],
+                         'emitterSha256': e.get('emitterSha256'), 'serverEmitKey': e.get('serverEmitKey'),
+                         'phases': [x['phase'] for x in phases], 'files': actual},
+            'outputs': {'hub': {'hub.js': server}, 'web': web}}
+
+
 def make_reference(args):
-    d = Path(args.from_dir)
-    outputs = {}
-    for k in ('hub', 'web', 'mobile'):
-        p = d / k
-        if p.exists():
-            outputs[k] = tree_hashes(p)
-    ref = {'schema': 1, 'source': source_identity(), 'tools': tool_identity(), 'outputs': outputs}
+    ref = reference_from_emission(args.from_emission, args.expect_server_sha)
     Path(args.out).write_text(json.dumps(ref, indent=2, sort_keys=True) + '\n')
-    print('reference for %s written to %s' % (', '.join(sorted(outputs)) or 'nothing', args.out))
-    return 0 if outputs else 1
+    print('reference from producer %s written to %s (hub and web only: no mobile producer is available)' % (
+        ref['source']['head'][:12], args.out))
+    return 0
 
 
 def main(argv=None):
@@ -558,7 +716,8 @@ def main(argv=None):
     r.add_argument('--allow-large-fallback', action='store_true')
     r.add_argument('--fallback-cmd')
     f = sub.add_parser('reference')
-    f.add_argument('--from-dir', required=True)
+    f.add_argument('--from-emission', required=True)
+    f.add_argument('--expect-server-sha')
     f.add_argument('--out', required=True)
     w = sub.add_parser('worker')
     w.add_argument('--id', required=True)
@@ -567,6 +726,8 @@ def main(argv=None):
     w.add_argument('--poll', type=float, default=0.1)
     w.add_argument('--no-scope', action='store_true', help='tests only: the receipt will not qualify')
     w.add_argument('--copy')
+    w.add_argument('--timeout', type=int, default=3000)
+    w.add_argument('--protect', action='append', default=[], help='NAME=PATH of bend.ts, safe.ts, base')
     w.add_argument('cmd', nargs=argparse.REMAINDER)
     h = sub.add_parser('shim')
     h.add_argument('--cap-bytes', type=int, required=True)
