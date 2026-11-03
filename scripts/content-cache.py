@@ -413,7 +413,7 @@ def shard_units(root, folder):
                 if manifest['sources'].get(name) != digest:
                     raise CacheError('proof input absent from verified inventory: ' + name)
                 label = 'src/' + name
-            inputs[label] = {'sha256': digest, 'mode': path.stat().st_mode & 0o777}
+            inputs[label] = {'sha256': digest, 'mode': ps.portable_mode(path)}
         # Numeric slots can move when a different law changes. Bind logical
         # membership and exact executable closure instead of the numeric slot.
         membership = {'primary_laws': s['primary_laws'], 'declarations': s['declarations']}
