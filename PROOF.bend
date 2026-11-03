@@ -15717,3 +15717,11 @@ def Laws.autosettle_new_turn_reopens():
 
 def Laws.conversation_root_preserves_navigation(root):
   {==}
+
+def Laws.home_missing_artifact_has_no_panel(kind, title, summary):
+  {==}
+
+def Laws.home_owner_round_trip(project):
+  match project:
+    case SNil{}: {==}
+    case SCon{h, t}: {==}

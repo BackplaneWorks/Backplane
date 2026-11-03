@@ -81,6 +81,7 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+import ./src/core/project-home.bend as PHOME
 
 import ./src/server/modelcache.bend as MCACHE
 
@@ -15827,3 +15828,15 @@ law autosettle_new_turn_reopens:
 law conversation_root_preserves_navigation:
   for root: J.Json
   {CONVWINDOW.Window.root(root) == root : J.Json}
+
+# Project-home artifact panels are constructed by this same pure projection.
+# An absent path cannot produce a panel, regardless of label or contents.
+law home_missing_artifact_has_no_panel:
+  for kind: String
+  for title: String
+  for summary: String
+  {PHOME.Home.panel(kind, "", title, summary) == Nil{} : List<&2, PHOME.Panel>}
+
+law home_owner_round_trip:
+  for project: String
+  {PHOME.Home.project(PHOME.Home.owner(project)) == project : String}

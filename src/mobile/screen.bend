@@ -1,4 +1,7 @@
 import Base
+import ../core/project-home.bend as PH
+import ../core/badge.bend as BG
+import ../web/project-home.bend as PHV
 import ../core/chat-pending.bend as CP
 
 import ../core/issue-report.bend as ISSUE
@@ -176,7 +179,7 @@ def Mob.legacy(ts: List<&2, M.Thread>, +lc: I.Loc, +ix: U.SIx, +st: M.State, +no
 def Mob.project(+lc: I.Loc, r: U.SRow, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat, +selected: String) -> J.Json:
   match r:
     case U.SRow{_, M.Project{+id, title, root, _, _}, M.Shelves{pinned, active, +settled, hidden, snoozed}}:
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, title))}, J.KV{"root", J.Json.str(root)},
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, title))}, J.KV{"root", J.Json.str(root)}, J.KV{"icon", J.Str{BG.Badge.icon(st, id)}},
         J.KV{"open", J.Json.bool(U.Flag.get(open, id))},
         J.KV{"threads", J.Json.arr(Mob.rows.selected(lc, List.append(&2, M.Thread, pinned, active), ix, st, now, selected))},
         J.KV{"snoozedShelf", J.Json.str(MSG.T.sidebar.snoozed(lc))},
@@ -1698,7 +1701,7 @@ def Mob.renaming.k(none: Bool, +lc: I.Loc, +id: String, +value: String) -> J.Jso
         J.KV{"yes", J.Json.str(MSG.T.menu.rename(lc))}, J.KV{"no", J.Json.str(MSG.T.common.cancel(lc))}])
 
 def Mob.renaming(+lc: I.Loc, +u: U.Ui) -> J.Json:
-  Mob.renaming.k(String.is_empty(U.Ren.on(u)), lc, U.Ren.on(u), U.Ui.scratch(u, "@f.title"))
+  Mob.renaming.k(Bool.or(String.is_empty(U.Ren.on(u)), String.eq(U.Ui.scratch(u, "@ren.inline"), "1")), lc, U.Ren.on(u), U.Ui.scratch(u, "@f.title"))
 
 # the first-run tour (core/onboard.bend), while a step is on screen: its
 # number, count and counter, its title and text, and the buttons (actions
@@ -2281,10 +2284,46 @@ def Mob.find(+lc: I.Loc, open: Bool, +u: U.Ui) -> J.Json:
     case False{}:
       J.Null{}
 
+# A bounded home picture shares the web's panel/control plan; the native apps
+# draw it with native controls. It carries no conversation/history surrogate.
+def Mob.home.attr(attrs: List<&2, D.Attr>, +key: String) -> String:
+  match attrs:
+    case Nil{}: ""
+    case D.At{+k, v} <> rest: Bool.pick(String, String.eq(k, key), v, Mob.home.attr(rest, key))
+    case _ <> rest: Mob.home.attr(rest, key)
+
+def Mob.home.action(attrs: List<&2, D.Attr>) -> String:
+  match attrs:
+    case Nil{}: ""
+    case D.On{"click", a} <> _: a
+    case _ <> rest: Mob.home.action(rest)
+
+def Mob.home.nodes(ns: List<&2, D.Node>) -> List<&2, J.Json>:
+  match ns:
+    case Nil{}: Nil{}
+    case D.Txt{t} <> rest: J.Json.obj([J.KV{"text", J.Str{t}}]) <> Mob.home.nodes(rest)
+    case D.El{tag, _, +attrs, kids} <> rest:
+      J.Json.obj([J.KV{"tag", J.Str{tag}}, J.KV{"action", J.Str{Mob.home.action(attrs)}},
+        J.KV{"payload", J.Str{Mob.home.attr(attrs, "data-value")}}, J.KV{"field", J.Str{Mob.home.attr(attrs, "data-bfield")}},
+        J.KV{"content", J.Str{Mob.home.attr(attrs, "value")}}, J.KV{"src", J.Str{Mob.home.attr(attrs, "src")}},
+        J.KV{"href", J.Str{Mob.home.attr(attrs, "href")}}, J.KV{"icon", J.Str{Mob.home.attr(attrs, "data-icon")}},
+        J.KV{"className", J.Str{Mob.home.attr(attrs, "class")}}, J.KV{"style", J.Str{Mob.home.attr(attrs, "style")}}, J.KV{"label", J.Str{Mob.home.attr(attrs, "title")}},
+        J.KV{"kids", J.Json.arr(Mob.home.nodes(kids))}]) <> Mob.home.nodes(rest)
+
+def Mob.home.shown(show: Bool, +lc: I.Loc, +u: U.Ui) -> J.Json:
+  match show:
+    case False{}: J.Null{}
+    case True{}:
+      +project = PH.Home.project(U.Ui.sel(u))
+      J.Json.obj([J.KV{"owner", J.Str{U.Ui.sel(u)}}, J.KV{"title", J.Str{U.Ui.project_title(U.Ui.state(u), project)}},
+        J.KV{"draft", J.Str{U.Ui.draft_text(u)}}, J.KV{"pending", J.Flag{Bool.not(String.is_empty(U.Ui.scratch(u, "@home.send.rid")))}},
+        J.KV{"cards", J.Json.arr(Mob.home.nodes(List.append(&2, D.Node, [PHV.HomeView.header.name(u, project), PHV.HomeView.scroll(u, project, U.Home.contents(u), Nil{})], V.View.look.loc(lc, String.eq(U.Ui.scratch(u, "@look"), project), U.Ui.state(u), project, String.eq(U.Ui.scratch(u, "@rm"), project)))))},
+        J.KV{"viewer", VW.View.json(lc, u, Mob.review.loc(lc, String.eq(VW.View.kind(u), "review"), u))}])
+
 def Mob.focus.thread.r(+lc: I.Loc, focus: Bool, +u: U.Ui, +sel: String, render: Bool) -> J.Json:
   match focus:
     case True{}:
-      Mob.main.r(lc, String.is_empty(sel), u, sel, render)
+      Mob.main.r(lc, Bool.or(String.is_empty(sel), PH.Home.is(sel)), u, sel, render)
     case False{}:
       J.Null{}
 
@@ -2485,7 +2524,7 @@ def Mob.native.project(+lc: I.Loc, +r: U.SRow, +u: U.Ui, +ix: U.SIx, +limit: Nat
       +sleeping = Mob.native.list(True{}, lc, snoozed, u, ix, "snoozed", id, limit)
       +done = Mob.native.list(U.Ui.flag(u, id), lc, settled, u, ix, "settled", id, limit)
       +archive = Mob.native.list(U.Ui.flag(u, "arch:" ++ id), lc, M.Archive.of(hidden), u, ix, "archived", id, limit)
-      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{U.Label.title(U.Ui.state(u), id, title)}}, J.KV{"root", J.Str{root}},
+      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{U.Label.title(U.Ui.state(u), id, title)}}, J.KV{"root", J.Str{root}}, J.KV{"icon", J.Str{BG.Badge.icon(U.Ui.state(u), id)}},
         J.KV{"open", J.Flag{U.Ui.flag(u, id)}}, J.KV{"threads", J.Json.arr(NRows.rows(threads))}, J.KV{"threadsPage", NRows.pager(threads)},
         J.KV{"snoozedShelf", J.Str{MSG.T.sidebar.snoozed(lc)}}, J.KV{"snoozed", J.Json.arr(NRows.rows(sleeping))}, J.KV{"snoozedPage", NRows.pager(sleeping)},
         J.KV{"shelf", J.Str{MSG.T.sidebar.settled.count(lc, Nat.show(List.length(&2, M.Thread, settled)))}},
@@ -2641,6 +2680,7 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
         J.KV{"island", N.Note.compact.json.loc(lc, compact, st)},
         J.KV{"islandAt", J.Json.nat(NO.Island.compact.at(compact))},
         J.KV{"thread", thread},
+        J.KV{"projectHome", Mob.home.shown(Bool.and(focus, PH.Home.is(sel)), lc, u)},
         J.KV{"uber", J.Null{}},
         J.KV{"plane", J.Null{}},
         J.KV{"bots", J.Json.arr(MB.MBots.rows(lc, B.BU.rows(u)))},

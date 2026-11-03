@@ -1,5 +1,6 @@
 import ./autosettle.bend as AUTO
 import Base
+import ./project-home.bend as PH
 import ./folder.bend as FP
 import ./telemetry.bend as TLM
 import ./mailprivate.bend as PM
@@ -442,6 +443,12 @@ def Hub.project.root(p: M.Project) -> String:
   match p:
     case M.Project{_, _, root, _, _}:
       root
+
+# Removed projects never grant a home read or a new conversation.
+def Hub.project.home_root(p: M.Project) -> String:
+  match p:
+    case M.Project{_, _, root, _, False{}}: root
+    case _: ""
 
 # the directory a thread's agent works in
 def Hub.cwd(+s: M.State, t: M.Thread) -> String:
@@ -929,8 +936,11 @@ def Rename.changes(+th: String, +title: String, +now: Nat) -> List<&2, M.Change>
 def Hub.methods.git() -> List<&2, String>:
   ["git.diff", "git.revert", "git.act", "git.status", "thread.worktree", "thread.note", "term.open", "term.input", "term.resize", "term.snap", "term.restart"]
 
+def Hub.root_for(+s: M.State, +owner: String) -> String:
+  Bool.pick(String, PH.Home.is(owner), Hub.project.root(Hub.project(s, PH.Home.project(owner))), Hub.cwd(s, Hub.thread(s, owner)))
+
 def Hub.git(+s: M.State, +client: U32, +id: String, +job: String, +thread: String, +a: String, +b: String) -> Step:
-  Step.outs([Git{client, id, job, thread, Hub.cwd(s, Hub.thread(s, thread)), a, b}])
+  Step.outs([Git{client, id, job, thread, Hub.root_for(s, thread), a, b}])
 
 # a request's byte array, in tail calls only (a 64 KB paste is 64K
 # elements: a frame each overflowed the JS stack)
@@ -1369,7 +1379,7 @@ def Hub.methods() -> List<&2, String>:
    "thread.pin", "thread.unpin", "thread.rename", "thread.delete", "kicad.watch", "thread.modes", "app.update", "setting.set", "kicad.install",
    "ask.answer", "device.register", "device.drop", "kicad.info", "queue.resume",
    "queue.edit", "queue.remove", "queue.move", "queue.steer", "thread.fork", "thread.back", "thread.provider", "update.now", "work.cancel", "task.cancel", "wake.cancel", "deploy.restart", "deploy.cancel", "deploy.status", "lock.release", "lock.cancel", "kicad.retry", "mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send",
-   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move", "kicad.warm"]
+   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move", "kicad.warm", "project.home", "project.start", "project.rename"]
 
 # Agent output (Claude stream-json)
 # ---------------------------------
@@ -10312,6 +10322,48 @@ def Warm.outs(+kind: String, +root: String, ps: List<&2, String>) -> List<&2, Ou
     case Nil{}: Nil{}
     case +p <> t: Warm.keep(String.is_empty(p), Watch{0, "warm:" ++ kind, root, p, "", "", ""}, Warm.outs(kind, root, t))
 
+# File discovery always uses the canonical project root, never a thread cwd.
+# ProjectCreated is the canonical project upsert, also used by project.move.
+# A title edit retains the id, root and original creation timestamp.
+def Home.rename.project(p: M.Project, +title: String) -> List<&2, M.Change>:
+  match p:
+    case M.Project{id, _, root, at, False{}}:
+      Bool.pick(List<&2, M.Change>, String.is_empty(String.trim(title)), Nil{}, [M.ProjectCreated{id, String.trim(title), root, at}])
+    case _: Nil{}
+
+def Home.request.valid(valid: Bool, +s: M.State, +client: U32, +id: String, +p: J.Json) -> Step:
+  match valid:
+    case False{}: Step.outs([Reply.err(client, id, "Choose an existing project.")])
+    case True{}: Step.outs([Git{client, id, "project-home", "", Hub.project.home_root(Hub.project(s, J.Json.get_str(p, "project", ""))), J.Json.show(p), Buy.est(s) ++ "\n" ++ Buy.server(s)}])
+
+def Home.request(+s: M.State, +client: U32, +id: String, +p: J.Json) -> Step:
+  Home.request.valid(Bool.not(String.is_empty(Hub.project.home_root(Hub.project(s, J.Json.get_str(p, "project", ""))))), s, client, id, p)
+
+# A home send atomically creates one real conversation and its first message.
+# The same retained message id resolves to the same thread on every retry.
+def Home.start.retry(exists: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +th: String) -> Step:
+  match exists:
+    case True{}:
+      Hub.thread_create.reused(Bool.and(ST.Tree.alive(Hub.thread(s, th)), String.eq(ST.Tree.project(Hub.thread(s, th)), J.Json.get_str(p, "project", ""))), client, id, th)
+    case False{}:
+      +project = J.Json.get_str(p, "project", "")
+      +env = M.Setting.get(s, "thread.env", "auto")
+      +cs = {[M.ThreadCreated{th, project, String.take(J.Json.get_str(p, "text", ""), 80n), Hub.new.env(M.Scratch.is(project), env), "",
+        Hub.new.wt(M.Scratch.is(project), Hub.project.home_root(Hub.project(s, project)), th), M.Setting.get(s, "agent.provider", "claude"), M.Setting.get(s, "agent.model", ""), now}] : List<&2, M.Change>}
+      Step.before(cs, Reply.made(client, id, th) <> Hub.new.outs(M.Scratch.is(project), th, Hub.project.home_root(Hub.project(s, project)), env),
+        Hub.post(M.State.replay(cs, s), now, th, J.Json.get_str(p, "msg", ""), M.User{}, J.Json.get_str(p, "text", "")))
+
+def Home.start.valid(valid: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  match valid:
+    case False{}: Step.outs([Reply.err(client, id, "Choose a project and enter a message before starting a thread.")])
+    case True{}:
+      +th = "home-" ++ J.Json.get_str(p, "msg", "")
+      Home.start.retry(Hub.owns(s, th), s, now, client, id, p, th)
+
+def Home.start(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Home.start.valid(Bool.and(Bool.not(String.is_empty(Hub.project.home_root(Hub.project(s, J.Json.get_str(p, "project", ""))))),
+    Bool.and(PH.Home.token(J.Json.get_str(p, "msg", "")), Bool.not(String.is_empty(String.trim(J.Json.get_str(p, "text", "")))))), s, now, client, id, p)
+
 def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
   match i:
     case 0n:
@@ -10425,6 +10477,9 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
       Step.reply(client, id, [M.ThreadParentSet{J.Json.get_str(p, "thread", ""), "", now}])
     # the history steps before and after the one on show, plotted ahead
     # (client.bend's Hs.warm; kind "board" or "schematic")
+    case 56n: Home.request(s, client, id, p)
+    case 57n: Home.start(s, now, client, id, p)
+    case 58n: Step.reply(client, id, Home.rename.project(Hub.project(s, J.Json.get_str(p, "project", "")), J.Json.get_str(p, "title", "")))
     case 55n:
       Step.outs(Reply.ok(client, id) <> Warm.outs(J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), [J.Json.get_str(p, "before", ""), J.Json.get_str(p, "after", "")]))
     case _:

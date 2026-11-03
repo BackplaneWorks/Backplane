@@ -1,4 +1,5 @@
 import Base
+import ../core/project-home.bend as PH
 import ../core/i18n.bend as I
 import ../core/chat-pending.bend as CP
 import ../core/json.bend as J
@@ -65,8 +66,14 @@ def Target.thread.kind(+kind: String, +st: M.State, +id: String) -> String:
 def Target.thread(+st: M.State, +target: J.Json) -> String:
   Target.thread.kind(J.Json.get_str(target, "kind", ""), st, J.Json.get_str(target, "id", ""))
 
+# Draft/viewer ownership is distinct from conversation-history ownership.
+# Project views have no history thread, but their own retained draft and canvas.
+def Target.owner(+st: M.State, +target: J.Json) -> String:
+  Bool.pick(String, String.eq(J.Json.get_str(target, "kind", ""), "project"), PH.Home.owner(J.Json.get_str(target, "id", "")), Target.thread(st, target))
+
 def Target.bind.kind(+kind: String, +u: U.Ui, +st: M.State, +id: String) -> U.Ui:
   match kind:
+    case "project": U.Bots.views(U.Bots.sel.set(u, PH.Home.owner(id)), "", "", "")
     case "thread": U.Bots.views(U.Bots.sel.set(u, id), "", "", "")
     case "bot": U.Bots.views(U.Bots.sel.set(u, Target.thread.kind("bot", st, id)), id, "", "")
     case "room": U.Bots.views(u, "", id, "")
@@ -78,7 +85,7 @@ def Target.bind(+u: U.Ui, +st: M.State, +target: J.Json) -> U.Ui:
 def Target.after.room(+empty: Bool, +u: U.Ui) -> J.Json:
   match empty:
     case False{}: Target.json("room", U.Ui.scratch(u, "@room"))
-    case True{}: Bool.pick(J.Json, String.is_empty(U.Ui.sel.of(u)), Target.json("recent", ""), Target.json("thread", U.Ui.sel.of(u)))
+    case True{}: Bool.pick(J.Json, String.is_empty(U.Ui.sel.of(u)), Target.json("recent", ""), Bool.pick(J.Json, PH.Home.is(U.Ui.sel.of(u)), Target.json("project", PH.Home.project(U.Ui.sel.of(u))), Target.json("thread", U.Ui.sel.of(u))))
 
 def Target.after.bot(+empty: Bool, +u: U.Ui) -> J.Json:
   match empty:
@@ -98,6 +105,7 @@ def Threads.has.k( p: Map<&2, M.Thread> & Bool) -> Bool:
 
 def Target.exists.kind(+kind: String, +st: M.State, +id: String) -> Bool:
   match kind:
+    case "project": Bool.not(String.is_empty(U.Ui.project_root(st, id)))
     case "thread": Threads.has.k(Map.has(&2, M.Thread, Threads.get(st), id))
     case "bot": B.Bot.live(B.World.bot(M.State.bots(st), id))
     case "room": B.Room.live(B.World.room(M.State.bots(st), id))
@@ -318,12 +326,15 @@ def Session.native_local(+u: U.Ui, +p: J.Json) -> U.Ui:
 def Session.catalog(u: U.Ui, +p: J.Json) -> U.Ui:
   U.Ui.info_set(u, "local.board.catalog.version", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "boardCatalog", 0n), 1n), "1", ""))
 
-def Session.renderer( +web: Bool, +u: U.Ui, +p: J.Json) -> U.Ui:
+def Session.renderer.go( +web: Bool, +u: U.Ui, +p: J.Json) -> U.Ui:
   match web:
     case True{}:
       A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(Session.catalog(u, p), "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
         "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")), "local.body.pages", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.view.lazy", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.plotstamp", Bool.pick(String, String.eq(J.Json.get_str(p, "plotStamp", ""), "v1"), "1", "")))
     case False{}: Session.native_local(u, p)
+
+def Session.renderer(+web: Bool, u: U.Ui, p: J.Json) -> U.Ui:
+  Session.renderer.go(web, U.Ui.info_set(u, "local.home.renderer", Bool.pick(String, web, "web", "native")), p)
 
 def Session.input(+st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json) -> U.Ui:
   Target.bind(U.Ui.scratch_set(P.Session.input(st, info, live, now, J.Json.get_str(p, "cid", ""), J.Json.get_obj(p, "session")), "@presentation", ""), st, J.Json.get_obj(p, "target"))

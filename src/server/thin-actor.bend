@@ -203,7 +203,7 @@ def Actor.away.input(valid: Bool, +thread: String, +p: J.Json, out: J.Json) -> J
 # supplied by the renderer. Typed mail stores, request markers, form fields
 # and outbox are retained from this actor, never reconstructed from the wire.
 def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
-  +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
+  +thread = V.Target.owner(st, J.Json.get_obj(p, "target"))
   +session = J.Json.get_obj(p, "session")
   +drafts = Actor.intent.input(thread, J.Json.get_obj(session, "drafts"), Actor.sheet.input(thread, J.Json.get_obj(session, "drafts"), Actor.away.input(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, p,
     Actor.bound.input(J.Json.get_obj(session, "drafts"), Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts")))))))
@@ -610,7 +610,7 @@ def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json
     case Nil{}: Actor.make(U.Refs.refresh(V.Session.current(web, st, info, live, now, Actor.safe_input(st, p))), view, J.Json.get_obj(p, "target"))
     case Actor{+old, oldView, +target, pending, reads, dirty, +memo} <> _:
       +input = Actor.safe_input(st, p)
-      +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
+      +thread = V.Target.owner(st, J.Json.get_obj(p, "target"))
       # the fresh Ui gives only its preferences (Actor.merge): the info,
       # models and all, is merged once, over the actor's own (Actor.lean)
       +fresh = V.Session.current(web, st, Actor.lean(info), live, now, input)
@@ -637,9 +637,14 @@ def Actor.rpc(+command: J.Json) -> J.Json:
 # Mech's parts, listed when Mech comes on screen, Mpage.sync, a thread on
 # it chosen again included, which on this page is no action; files.dir
 # reads a restored Files panel's folder the same way)
-def Actor.read_only(+command: J.Json) -> Bool:
+def Actor.read_only.legacy(+command: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
     Nat.is_lt(U.Keys.pos(["mail.list", "mail.read", "mail.find", "git.diff", "mech.list", "review.bom", "review.checks", "history.refs", "files.dir", "browser.seen"], J.Json.get_str(Actor.rpc(command), "m", "")), 10n))
+
+def Actor.read_only(+command: J.Json) -> Bool:
+  Bool.or(Actor.read_only.legacy(command), Bool.and(String.eq(J.Json.get_str(command, "type", ""), "send"),
+    Bool.and(String.eq(J.Json.get_str(Actor.rpc(command), "m", ""), "project.home"),
+      Bool.not(String.eq(J.Json.get_str(J.Json.get_obj(Actor.rpc(command), "p"), "op", ""), "intent")))))
 
 # The viewer's watch (kicad.watch: which board, schematic or model this
 # socket is sent) when a reply moved the viewer: Mech opened before its
@@ -690,7 +695,7 @@ def Actor.accept( +a: Actor, +r: V.ActResult, +queue: Bool) -> Actor:
 # Mech's parts and a restored Files folder, Mpage.sync.m and Fm.sync: once per thread and
 # view, so a render that changed nothing asks for nothing)
 def Actor.mail_ready( +a: Actor) -> Actor:
-  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Fm.sync(U.Mpage.sync.m(U.Act{Actor.ui(a), Nil{}}))))))), True{})
+  Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Rp.sync(U.Dv.sync(U.Fm.sync(U.Mpage.sync.m(U.Home.refresh(U.Act{Actor.ui(a), Nil{}})))))))), True{})
 
 def Actor.origin( +a: Actor, +origin: String) -> Actor:
   match a:

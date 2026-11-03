@@ -1,4 +1,5 @@
 import Base
+import ../core/project-home.bend as PH
 import ../core/i18n.bend as I
 import ../core/msgs.bend as MSG
 import ../core/json.bend as J
@@ -543,16 +544,16 @@ def View.sheet.at(+u: U.Ui, +rs: List<&2, HI.Row>, +cur: String) -> Nat:
   Bool.pick(Nat, String.eq(HI.Hier.file(rs, View.sheet.i(u)), cur), View.sheet.i(u), HI.Hier.at(rs, 0n, cur))
 
 # the project's boards for the same menu, when it has several
-def View.board.rows(fs: List<&2, String>, +cur: String) -> List<&2, J.Json>:
+def View.board.rows(+u: U.Ui, fs: List<&2, String>, +cur: String) -> List<&2, J.Json>:
   match fs:
     case Nil{}:
       Nil{}
     case +f <> t:
-      J.Json.obj([J.KV{"label", J.Str{U.Bd.name(f)}}, J.KV{"value", J.Str{"b:" ++ f}}, J.KV{"on", J.Flag{U.Bd.on(cur, f)}}, J.KV{"loop", J.Flag{False{}}}]) <> View.board.rows(t, cur)
+      J.Json.obj([J.KV{"label", J.Str{U.Asset.name(u, MC.Mech.abs(U.Ui.root(u), f), U.Bd.name(f))}}, J.KV{"value", J.Str{"b:" ++ f}}, J.KV{"on", J.Flag{U.Bd.on(cur, f)}}, J.KV{"loop", J.Flag{False{}}}]) <> View.board.rows(u, t, cur)
 
 def View.board.list(+u: U.Ui) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, Bool.and(U.Bd.many(u), Bool.or(String.eq(View.kind(u), "board"), Bool.or(String.eq(View.kind(u), "schematic"), String.eq(View.kind(u), "3d")))),
-    View.board.rows(U.Bd.files(u), U.Bd.shown(u, View.file(u))), Nil{})
+    View.board.rows(u, U.Bd.files(u), U.Bd.shown(u, View.file(u))), Nil{})
 
 # with a file shown in place of the project's own (a board picked from the
 # Sheet menu, a sheet opened from the Files tab), the sheet picked is shown
@@ -804,12 +805,12 @@ def Insp.json(+info: String) -> J.Json:
 # no parts, the parts as chips (action "mech-part"), the part on show
 # (Open in 3D: "mech-3d" with its path) and its renders (hub URLs), and
 # where to get FreeCAD when the hub has none (client.bend's Mpage)
-def Mech.chips(ps: List<&2, MC.MPart>, +cur: String) -> List<&2, J.Json>:
+def Mech.chips(+u: U.Ui, ps: List<&2, MC.MPart>, +cur: String) -> List<&2, J.Json>:
   match ps:
     case Nil{}:
       Nil{}
     case MC.MPart{+p, n, _} <> t:
-      J.Json.obj([J.KV{"label", J.Str{n}}, J.KV{"value", J.Str{p}}, J.KV{"on", J.Flag{String.eq(p, cur)}}]) <> Mech.chips(t, cur)
+      J.Json.obj([J.KV{"label", J.Str{U.Asset.name(u, MC.Mech.abs(U.Mpage.root(u), p), n)}}, J.KV{"value", J.Str{p}}, J.KV{"on", J.Flag{String.eq(p, cur)}}]) <> Mech.chips(u, t, cur)
 
 def Mech.shots(fs: List<&2, MC.MFile>, +root: String) -> List<&2, J.Json>:
   match fs:
@@ -838,7 +839,7 @@ def Mech.json(+lc: I.Loc, on: Bool, +u: U.Ui) -> J.Json:
   match on:
     case True{}:
       J.Json.obj(List.append(&2, J.KV, [J.KV{"say", J.Str{Mech.say.loc(lc, U.Mpage.state(u))}}, J.KV{"note", J.Str{U.Mpage.note.loc(lc, u)}},
-        J.KV{"parts", J.Json.arr(Mech.chips(U.Mpage.parts(u), U.Mpage.cur.path(u)))}, J.KV{"rel", J.Str{U.Mpage.cur.path(u)}},
+        J.KV{"parts", J.Json.arr(Mech.chips(u, U.Mpage.parts(u), U.Mpage.cur.path(u)))}, J.KV{"rel", J.Str{U.Mpage.cur.path(u)}},
         J.KV{"busy", J.Flag{Bool.not(String.is_empty(U.Mpage.busy(u)))}}, J.KV{"render", J.Str{U.Mpage.render.label.loc(lc, u)}}, J.KV{"err", J.Str{U.Mpage.err(u)}}],
         Mech.part(U.Mpage.cur(u), U.Mpage.root(u))))
     case False{}:
@@ -1023,6 +1024,26 @@ def Rc.open.json(m: Maybe<&2, U.RcOpen>) -> J.Json:
 def Rc.json(+u: U.Ui) -> J.Json:
   J.Json.obj([J.KV{"pins", J.Json.arr(Rc.pins(U.Rc.pins(u)))}, J.KV{"open", Rc.open.json(U.Rc.open(u))}, J.KV{"at", J.Str{U.Rc.at(u)}}])
 
+def View.home.choice(has: Bool, +label: String, +kind: String, +u: U.Ui) -> List<&2, J.Json>:
+  match has:
+    case True{}: [View.choice(label, kind, View.kind(u))]
+    case False{}: Nil{}
+
+def View.home.choices(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  +c = U.Home.contents(u)
+  List.concat(&2, J.Json, [
+    View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "board"))), MSG.T.viewer.board(lc), "board", u),
+    View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "schematic"))), MSG.T.viewer.schematic(lc), "schematic", u),
+    View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "board"))), "3D", "3d", u),
+    View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "mech"))), MSG.T.viewer.mech(lc), "mech", u)])
+
+def View.choices(home: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  match home:
+    case True{}: View.home.choices(lc, u)
+    case False{}: Bool.pick(List<&2, J.Json>, String.is_empty(U.Ui.root(u)), Nil{},
+      [View.choice(MSG.T.viewer.board(lc), "board", View.kind(u)), View.choice(MSG.T.viewer.schematic(lc), "schematic", View.kind(u)), View.choice("3D", "3d", View.kind(u)), View.choice(MSG.T.viewer.mech(lc), "mech", Bool.pick(String, View.mech(u), "mech", "")),
+       View.choice(MSG.T.viewer.files(lc), "files", Bool.pick(String, View.fm(u), "files", "")), View.choice(MSG.T.viewer.review(lc), "review", View.kind(u))])
+
 def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
   J.Json.obj([J.KV{"open", J.Str{Bool.pick(String, Bool.or(Bool.or(Bool.or(Bool.not(String.is_empty(View.want(u))), View.mech(u)), View.fm(u)), String.eq(View.kind(u), "review")), View.kind(u), "")}}, J.KV{"key", J.Str{View.want(u)}},
     J.KV{"comments", Rc.json(u)},
@@ -1035,9 +1056,7 @@ def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
     J.KV{"off", J.Num{U32.show(LY.Masks.off(View.masks(u)))}}, J.KV{"dim", J.Num{U32.show(LY.Masks.dim(View.masks(u)))}}, J.KV{"lift", J.Num{U32.show(LY.Lyr.top(View.focus(u)))}},
     J.KV{"layerMode", J.Num{U32.show(View.lmode(u))}}, J.KV{"layerModes", J.Flag{String.eq(View.kind(u), "board")}}, J.KV{"layerHead", J.Str{View.lhead.loc(lc, u)}},
     J.KV{"parts", J.Flag{Bool.not(View.bare(u))}}, J.KV{"note", J.Str{View.note(u)}},
-    J.KV{"choices", J.Json.arr(Bool.pick(List<&2, J.Json>, String.is_empty(U.Ui.root(u)), Nil{},
-      [View.choice(MSG.T.viewer.board(lc), "board", View.kind(u)), View.choice(MSG.T.viewer.schematic(lc), "schematic", View.kind(u)), View.choice("3D", "3d", View.kind(u)), View.choice(MSG.T.viewer.mech(lc), "mech", Bool.pick(String, View.mech(u), "mech", "")),
-       View.choice(MSG.T.viewer.files(lc), "files", Bool.pick(String, View.fm(u), "files", "")), View.choice(MSG.T.viewer.review(lc), "review", View.kind(u))]))},
+    J.KV{"choices", J.Json.arr(View.choices(PH.Home.is(U.Ui.sel(u)), lc, u))},
     J.KV{"bg", J.Num{U32.show(View.bg(View.kind(u), View.light(u)))}}, J.KV{"light", J.Json.bool(View.light(u))}, J.KV{"look", J.Json.arr(View.look(View.light(u), View.kind(u)))}, J.KV{"fade", J.Num{Nat.show(V.Fade.ms())}}, J.KV{"margin", J.Num{"0.9"}},
     J.KV{"zmin", J.Num{"0.5"}}, J.KV{"zmax", J.Num{"0.5"}}, J.KV{"tap", J.Num{"14"}},
     J.KV{"top", J.Json.arr(View.nums(View.top()))}, J.KV{"bottom", J.Json.arr(View.nums(View.bottom()))},

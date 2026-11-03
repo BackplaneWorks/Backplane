@@ -92,7 +92,7 @@ def Session.read.flags(j: J.Json, acc: Map<&2, Bool>) -> Map<&2, Bool>:
 # viewer, open or shut, its kind and file, which the page keeps across a
 # reload (client.bend's Viewer.keep)
 def Session.info.key(+k: String) -> Bool:
-  Bool.or(Bool.or(String.starts_with(k, "fold:"), Bool.or(String.starts_with(k, "subs:"), Bool.or(String.starts_with(k, "@f."), String.starts_with(k, "fab.")))),
+  Bool.or(Bool.or(Bool.or(Bool.or(String.eq(k, "home.snapshot"), String.eq(k, "home.document")), String.starts_with(k, "fold:")), Bool.or(String.starts_with(k, "subs:"), Bool.or(String.starts_with(k, "@f."), String.starts_with(k, "fab.")))),
     Bool.or(String.starts_with(k, "panel:"), Bool.or(String.starts_with(k, "view.kind:"), Bool.or(String.starts_with(k, "view.path:"), Bool.or(String.starts_with(k, "view.design:"), Bool.or(String.starts_with(k, "view.tree:"), String.starts_with(k, "view.sheet:")))))))
 
 def Session.info.put(keep: Bool, acc: Map<&2, String>, k: String, v: String) -> Map<&2, String>:

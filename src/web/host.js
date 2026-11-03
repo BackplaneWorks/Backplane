@@ -723,16 +723,16 @@ const previewViews = new ViewPrefetch({
   },
 });
 function warmDestinations() {
-  for (const el of [...document.querySelectorAll('[data-on-click="select"],[data-on-click="bot"]')].filter(el=>el.getAttribute("data-value")).slice(0,3)) {
-    const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":"thread",id:el.getAttribute("data-value")};
+  for (const el of [...document.querySelectorAll('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]')].filter(el=>el.getAttribute("data-value")).slice(0,3)) {
+    const target={kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")};
     if (targetKey(target)!==targetKey(thin?.target)) previewViews.enqueue(target);
   }
 }
 for (const name of ["pointerover", "touchstart"]) document.addEventListener(name, event=>{
-  const el=event.target.closest?.('[data-on-click="select"],[data-on-click="bot"]');
+  const el=event.target.closest?.('[data-on-click="select"],[data-on-click="bot"],[data-on-click="proj-home"]');
   if (!el) return;
   void transitionViews.warm(transitionScope());
-  if (name==="pointerover") previewViews.enqueue({kind:el.getAttribute("data-on-click")==="bot"?"bot":"thread",id:el.getAttribute("data-value")},true);
+  if (name==="pointerover") previewViews.enqueue({kind:el.getAttribute("data-on-click")==="bot"?"bot":el.getAttribute("data-on-click")==="proj-home"?"project":"thread",id:el.getAttribute("data-value")},true);
 }, {passive:true});
 const targetKey = target => target ? target.kind + ":" + target.id : "";
 // Nothing is drawn in between two views: a thread picked, a reconnect, a
@@ -3409,7 +3409,7 @@ async function startThin(again = false, reason = "initial") {
         return { ...next, route: cached?.scope.route || {kind:"bot-tab", bot:target.id, tab:"chat"} };
       },
       selection: (target, session) => {
-        composerKeeper.selecting(target.kind === "thread" ? target.id : "");
+        composerKeeper.selecting(target.kind === "project" ? "project-home-" + target.id : target.kind === "thread" ? target.id : "");
         const saved = takeReadingHistory(target, session);
         historyClear();
         if (saved) {
