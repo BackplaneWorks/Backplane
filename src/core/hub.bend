@@ -5695,6 +5695,73 @@ def Unread.note.k(+xs: List<&2, String>, +s: M.State, +thread: String, +now: Nat
 def Unread.note(+s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
   Unread.note.k(Unread.go(M.State.mine(s, thread), thread, Unread.max(), uuids, Nil{}), s, thread, now)
 
+# Messages not read yet
+# ---------------------
+# The same queue before a Stop: a message sent while the agent works waits
+# in the CLI until the command ahead of it ends, and looked delivered. At
+# each line that can move the ledger the server passes the commands still
+# waiting (CM.Cmds.unread); the hub keeps their messages' ids in the
+# setting wait.<thread> (oldest first, a space between, "" none), so every
+# client shows them as not read yet while the thread runs (core/stamp.bend's
+# Stamp.unread; laws wait_*).
+
+def Wait.key(+thread: String) -> String:
+  "wait." ++ thread
+
+def Wait.add(+id: String, +acc: String) -> String:
+  Bool.pick(String, String.is_empty(acc), id, id ++ " " ++ acc)
+
+def Wait.of.k(hit: Bool, +id: String, +acc: String) -> String:
+  match hit:
+    case True{}:
+      Wait.add(id, acc)
+    case False{}:
+      acc
+
+def Wait.of(e: M.Entry, +thread: String, +uuids: List<&2, String>, +acc: String) -> String:
+  match e:
+    case M.Msg{+id, +t, M.User{}, _, +at}:
+      Wait.of.k(Bool.and(String.eq(t, thread), CM.Cmds.in(uuids, Hub.uuid(at, thread ++ "/" ++ id))), id, acc)
+    case _:
+      acc
+
+# entries newest first, n more to look at: the ids found, oldest first
+def Wait.go(es: List<&2, M.Entry>, +thread: String, n: Nat, +uuids: List<&2, String>, acc: String) -> String:
+  match es n:
+    case +_ 0n:
+      acc
+    case Nil{} 1n+_:
+      acc
+    case +e <> t 1n+k:
+      Wait.go(t, thread, k, uuids, Wait.of(e, thread, uuids, acc))
+
+def Wait.ids(none: Bool, +s: M.State, +thread: String, +uuids: List<&2, String>) -> String:
+  match none:
+    case True{}:
+      ""
+    case False{}:
+      Wait.go(M.State.mine(s, thread), thread, Unread.max(), uuids, "")
+
+def Wait.put(same: Bool, +thread: String, +ids: String, +now: Nat) -> List<&2, M.Change>:
+  match same:
+    case True{}:
+      Nil{}
+    case False{}:
+      [M.SettingSet{Wait.key(thread), ids, now}]
+
+def Wait.set(+s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
+  +ids = Wait.ids(List.is_empty(&2, String, uuids), s, thread, uuids)
+  Wait.put(String.eq(ids, M.Setting.get(s, Wait.key(thread), "")), thread, ids, now)
+
+# what a Claude line changes about the waiting messages (moves: the line
+# can move the ledger, CM.Cmds.moves; uuids: CM.Cmds.unread after it)
+def Wait.line(moves: Bool, +s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
+  match moves:
+    case True{}:
+      Wait.set(s, thread, uuids, now)
+    case False{}:
+      Nil{}
+
 # Explicit stop paths (client and MCP) durably pause the conversation's
 # mail FIFO. An internal restart/fallback Interrupted event is not consent
 # to clear this register. Keep an undisposed seed at the front for review.

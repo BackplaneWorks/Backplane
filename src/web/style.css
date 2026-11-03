@@ -263,6 +263,10 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
    on hover or focus; the turn's last reply and the person's keep theirs. */
 .msg.assistant:not(:hover):not(:focus-within) .stamp.mid { display: none; }
 .msg.user .stamp { text-align: right; }
+/* A message the agent has not read yet (core/stamp.bend's Stamp.unread):
+   its text a step dimmer, its "not read yet" time in the queued colour. */
+.msg.user.unread .body { color: var(--dim); }
+.msg.user.unread .stamp { color: var(--queued); }
 .body p { margin: 0 0 8px; white-space: pre-wrap; }
 .body code { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); background: var(--raise); padding: 0 3px; }
 .body h3, .body h4, .body h5 { margin: 12px 0 6px; }

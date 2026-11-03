@@ -306,6 +306,32 @@ def Cmds.waiting(c: Cmds) -> List<&2, String>:
     case Cmds{cs, _, _}:
       Cmds.waiting.go(cs)
 
+def Cmds.unread.k(hit: Bool, v: String, rest: List<&2, String>) -> List<&2, String>:
+  match hit:
+    case True{}:
+      v <> rest
+    case False{}:
+      rest
+
+# oldest first; ahead: an unanswered command came before (wake: a turn the
+# CLI started by itself runs, so every one waits)
+def Cmds.unread.go(cs: List<&2, Cmd>, +ahead: Bool) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case Cmd{v, +st, _, _} <> t:
+      Cmds.unread.k(Bool.and(ahead, Nat.is_eq(st, 1n)), v, Cmds.unread.go(t, Bool.or(ahead, Cmds.outstanding.one(st))))
+
+# the commands the CLI holds behind another one it has not answered (or
+# behind a turn it started by itself): the person's messages it has not
+# read yet, shown so while they wait (hub.bend's Wait.*). The oldest one
+# written is next: the command that starts a turn, or the one the CLI is
+# about to start as the one before it ends, is never listed
+def Cmds.unread(c: Cmds) -> List<&2, String>:
+  match c:
+    case Cmds{cs, _, w}:
+      Cmds.unread.go(cs, w)
+
 def Cmds.stop.go(cs: List<&2, Cmd>, +still: List<&2, String>) -> List<&2, Cmd>:
   match cs:
     case Nil{}:
@@ -423,6 +449,11 @@ def Cmds.see.k(i: Nat, +c: Cmds, +o: J.Json) -> Cmds:
 # a line seen
 def Cmds.see(c: Cmds, +o: J.Json) -> Cmds:
   Cmds.see.k(Cmds.kind(o), Cmds.mode.see(c, o), o)
+
+# a line that can change which commands wait (Cmds.unread): a lifecycle,
+# a result, the interrupt's answer
+def Cmds.moves(+o: J.Json) -> Bool:
+  Nat.is_lt(Cmds.kind(o), 5n)
 
 # Verdicts
 # --------
