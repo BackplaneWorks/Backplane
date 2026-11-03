@@ -147,4 +147,10 @@ def main() -> IO(Unit):
     C.Check.str("the native window: a stopped turn marked stays Stopped", st.e2(I.En{}, es3(), marked(), False{}, M.Completed{}, 1n), "Stopped 09:00 · 5s")
     C.Check.str("a Stop marks the message that started the turn", marks(S.Stamp.stop.mark(state(posted(es3())), "t", at(140n))), "stopped.u3=1 ")
     C.Check.str("a reply sent to another thread is not its message", marks(S.Stamp.stop.mark(state(posted([u("u1", 0n), a("a1", 5n), M.Msg{"x", "t2", M.User{}, "hi", at(6n)}])), "t", at(10n))), "stopped.u1=1 ")
+    # a failed turn keeps Failed after a retry or the next message
+    C.Check.str("an error marks the message that started the turn", marks(S.Stamp.fail.mark(True{}, state(posted(es3())), "t", at(140n))), "failed.u3=1 ")
+    C.Check.str("a turn that did not fail marks nothing", marks(S.Stamp.fail.mark(False{}, state(posted(es3())), "t", at(140n))), "")
+    C.Check.str("a failed turn still says Failed once the next has started", st.of(es3(), state([M.SettingSet{"failed.u1", "1", 6n}]), True{}, False{}, 1n), "Failed 09:00 · 5s")
+    C.Check.str("a failed turn says Failed after the next has finished", st.e(I.En{}, es3(), state([M.SettingSet{"failed.u1", "1", 6n}]), False{}, M.Completed{}, False{}, 1n), "Failed 09:00 · 5s")
+    C.Check.str("the turn after a failed one says Finished", st.e(I.En{}, es3(), state([M.SettingSet{"failed.u1", "1", 6n}]), False{}, M.Completed{}, False{}, 3n), "Finished 09:01 · 10s")
     C.Check.str("a turn with no message of the person marks nothing", marks(S.Stamp.stop.mark(state(posted([a("a1", 5n)])), "t", at(10n))), "")
