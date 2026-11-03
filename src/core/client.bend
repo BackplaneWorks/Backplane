@@ -5362,18 +5362,33 @@ def Proj.complete.k(here: Bool, +dir: String, +b: String, +ns: List<&2, String>)
     case False{}:
       Nil{}
 
-# a path typed part way ("~/proj/stick"), in the folder listed: the
-# subfolders it begins come first ("stickhub/"), so Enter goes into one
-# rather than adding a folder that is not there. A name typed whole adds it
-def Proj.complete(+u: Ui, +q: String) -> List<&2, PItem>:
+# a path typed part way ("~/proj/stick") in the folder listed, its last
+# part no folder's whole name there: so it is not a folder (yet)
+def Proj.here(+u: Ui, +q: String) -> Bool:
   +d = Proj.typed.dir(u, q)
-  +b = Proj.base(q)
-  Proj.complete.k(Bool.and(Bool.and(Bool.not(String.is_empty(d)), String.eq(d, Proj.dir(u))), Bool.not(Proj.exact(Proj.entries(u), b))), Proj.dir(u), b, Proj.entries(u))
+  Bool.and(Bool.and(Bool.not(String.is_empty(d)), String.eq(d, Proj.dir(u))), Bool.not(Proj.exact(Proj.entries(u), Proj.base(q))))
+
+# such a path: the subfolders it begins come first ("stickhub/"), so Enter
+# goes into one rather than adding a folder that is not there. A name
+# typed whole adds it
+def Proj.complete(+u: Ui, +q: String) -> List<&2, PItem>:
+  Proj.complete.k(Proj.here(u, q), Proj.dir(u), Proj.base(q), Proj.entries(u))
+
+# a typed path in the folder listed and not a folder there: what it
+# begins, then creating it (no Add or Go to for a folder that is not
+# there). Any other (typed whole, ending in a slash, its folder not listed
+# yet): Proj.path.rows
+def Proj.path.here(here: Bool, +l: I.Loc, +u: Ui, +q: String) -> List<&2, PItem>:
+  match here:
+    case True{}:
+      List.append(&2, PItem, Proj.complete(u, q), [PItem{MSG.T.proj.createat(l, q), "proj-new", q}])
+    case False{}:
+      Proj.path.rows(String.ends_with(q, "/"), l, q)
 
 def Proj.items.k(+l: I.Loc, path: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
   match path:
     case True{}:
-      List.append(&2, PItem, Proj.complete(u, q), Proj.path.rows(String.ends_with(q, "/"), l, q))
+      Proj.path.here(Proj.here(u, q), l, u, q)
     case False{}:
       Proj.items.q(l, String.is_empty(q), u, q, dir, ns)
 
@@ -5518,6 +5533,46 @@ def Proj.items.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
 
 def Proj.items(+u: Ui) -> List<&2, PItem>:
   Proj.items.loc(Lang.loc(u), u)
+
+# Tab in the picker
+# -----------------
+# A typed path's completions are its first rows (Proj.complete); the
+# selected one is what Tab writes into the field, as typed up to its last
+# part ("~/proj/sens" to "~/proj/sensor-hub/"), and view.bend marks the
+# part typed in each.
+
+def Proj.pathq(+q: String) -> Bool:
+  Bool.or(String.starts_with(q, "/"), String.starts_with(q, "~"))
+
+def Proj.comps.k(on: Bool, +u: Ui) -> List<&2, PItem>:
+  match on:
+    case True{}:
+      Proj.complete(u, Proj.query(u))
+    case False{}:
+      Nil{}
+
+# the rows a typed path completes to (none outside the picker, or routing
+# a subthread, which lists only projects)
+def Proj.comps(+u: Ui) -> List<&2, PItem>:
+  Proj.comps.k(Bool.and(Bool.and(Ui.flag(u, "proj"), Bool.not(ThreadTree.routing(u))), Proj.pathq(Proj.query(u))), u)
+
+# how many of the picker's rows are completions
+def Proj.comps.n(+u: Ui) -> Nat:
+  List.length(&2, PItem, Proj.comps(u))
+
+# how much of a completion's name is typed
+def Proj.typed.n(+u: Ui) -> Nat:
+  String.length(Proj.base(Proj.query(u)))
+
+def Proj.tab.k(+q: String, it: PItem) -> String:
+  match it:
+    case PItem{+l, _, _}:
+      Bool.pick(String, String.is_empty(l), "", String.take(q, Nat.sub(String.length(q), String.length(Proj.base(q)))) ++ l)
+
+# the path Tab writes into the field ("" when the selected row is no
+# completion: Tab moves on, as anywhere)
+def Proj.tab(+u: Ui) -> String:
+  Proj.tab.k(Proj.query(u), Palette.at(Proj.comps(u), Proj.index(u)))
 
 # the path a row of the projects list stands for, as it is shown beside it
 def Proj.detail(+u: Ui, it: PItem) -> String:
@@ -8160,6 +8215,36 @@ def Fab.turn(t: M.Thread) -> String:
 def Fab.ready.k(+buy: String, +line: String, run: Bool) -> String:
   Bool.pick(String, Bool.or(run, String.is_empty(buy)), "", Bool.pick(String, String.is_empty(line), "Ready to order", line))
 
+def Fab.said(es: List<&2, M.Entry>) -> Bool:
+  match es:
+    case Nil{}:
+      False{}
+    case M.Msg{_, _, _, _, _} <> _:
+      True{}
+    case _ <> t:
+      Fab.said(t)
+
+def Fab.fresh.k(idle: Bool, +st: M.State, +th: String) -> Bool:
+  match idle:
+    case True{}:
+      Bool.not(Fab.said(M.State.mine(st, th)))
+    case False{}:
+      False{}
+
+# a thread nothing was said in yet: no turn, no message. Its bar waits for
+# the first turn to end (the rail's Buy it is the way in meanwhile)
+def Fab.fresh(+st: M.State, +th: String) -> Bool:
+  Fab.fresh.k(String.eq(Fab.turn(Ui.thread(st, th)), "idle"), st, th)
+
+# a project's thread t, then cs (laws fab_ready_fresh_*)
+def Fab.demo(cs: List<&2, M.Change>) -> M.State:
+  M.State.replay(List.append(&2, M.Change, [M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t", "p1", "x", M.Local{}, "", "", "claude", "", 1n}], cs), M.State.empty())
+
+# when the bar waits: while the agent works (run), and in a thread that has
+# had no turn yet (laws fab_ready_fresh_*)
+def Fab.wait(+st: M.State, +th: String, run: Bool) -> Bool:
+  Bool.or(run, Fab.fresh(st, th))
+
 # the bar's button: Buy it with its price, or Buy again once ordered
 def Fab.ready.btn.k(again: Bool, +buy: String) -> String:
   Bool.pick(String, Bool.or(Bool.not(again), String.is_empty(buy)), buy, "Buy again")
@@ -8203,7 +8288,7 @@ def Fab.mini.tools.k(show: Bool, again: Bool, +th: String) -> List<&2, TO.Tool>:
       Nil{}
 
 def Fab.ready.all(+u: Ui) -> String:
-  Fab.ready.k(Fab.buy(u), Ui.info(u, "fab.ready:" ++ Ui.sel(u)), String.eq(Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u))), "running"))
+  Fab.ready.k(Fab.buy(u), Ui.info(u, "fab.ready:" ++ Ui.sel(u)), Fab.wait(Ui.state.of(u), Ui.sel(u), String.eq(Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u))), "running")))
 
 def Fab.ready(+u: Ui) -> String:
   Fab.ready.shown.k(Fab.min.of(Ui.state.of(u), Ui.sel(u)), Fab.ready.all(u))
@@ -8227,7 +8312,7 @@ def Fab.mini.tools(+u: Ui) -> List<&2, TO.Tool>:
 
 # the same from the state and the info a window or phone frame has
 def Fab.mini.tools.of(+st: M.State, +nf: Map<&2, String>, +th: String, run: Bool) -> List<&2, TO.Tool>:
-  Fab.mini.tools.k(Fab.mini.k(Fab.min.of(st, th), Fab.ready.k(Fab.buy.of(st, nf, th), Str.get(nf, "fab.ready:" ++ th), run)), String.eq(Str.get(nf, "fab.again:" ++ th), "1"), th)
+  Fab.mini.tools.k(Fab.mini.k(Fab.min.of(st, th), Fab.ready.k(Fab.buy.of(st, nf, th), Str.get(nf, "fab.ready:" ++ th), Fab.wait(st, th, run))), String.eq(Str.get(nf, "fab.again:" ++ th), "1"), th)
 
 # (nothing for a thread with no project: no fab.min. without one)
 def Fab.min.set.k(none: Bool, +u: Ui, +project: String, +v: String) -> Act:

@@ -5705,6 +5705,73 @@ def Unread.note.k(+xs: List<&2, String>, +s: M.State, +thread: String, +now: Nat
 def Unread.note(+s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
   Unread.note.k(Unread.go(M.State.mine(s, thread), thread, Unread.max(), uuids, Nil{}), s, thread, now)
 
+# Messages not read yet
+# ---------------------
+# The same queue before a Stop: a message sent while the agent works waits
+# in the CLI until the command ahead of it ends, and looked delivered. At
+# each line that can move the ledger the server passes the commands still
+# waiting (CM.Cmds.unread); the hub keeps their messages' ids in the
+# setting wait.<thread> (oldest first, a space between, "" none), so every
+# client shows them as not read yet while the thread runs (core/stamp.bend's
+# Stamp.unread; laws wait_*).
+
+def Wait.key(+thread: String) -> String:
+  "wait." ++ thread
+
+def Wait.add(+id: String, +acc: String) -> String:
+  Bool.pick(String, String.is_empty(acc), id, id ++ " " ++ acc)
+
+def Wait.of.k(hit: Bool, +id: String, +acc: String) -> String:
+  match hit:
+    case True{}:
+      Wait.add(id, acc)
+    case False{}:
+      acc
+
+def Wait.of(e: M.Entry, +thread: String, +uuids: List<&2, String>, +acc: String) -> String:
+  match e:
+    case M.Msg{+id, +t, M.User{}, _, +at}:
+      Wait.of.k(Bool.and(String.eq(t, thread), CM.Cmds.in(uuids, Hub.uuid(at, thread ++ "/" ++ id))), id, acc)
+    case _:
+      acc
+
+# entries newest first, n more to look at: the ids found, oldest first
+def Wait.go(es: List<&2, M.Entry>, +thread: String, n: Nat, +uuids: List<&2, String>, acc: String) -> String:
+  match es n:
+    case +_ 0n:
+      acc
+    case Nil{} 1n+_:
+      acc
+    case +e <> t 1n+k:
+      Wait.go(t, thread, k, uuids, Wait.of(e, thread, uuids, acc))
+
+def Wait.ids(none: Bool, +s: M.State, +thread: String, +uuids: List<&2, String>) -> String:
+  match none:
+    case True{}:
+      ""
+    case False{}:
+      Wait.go(M.State.mine(s, thread), thread, Unread.max(), uuids, "")
+
+def Wait.put(same: Bool, +thread: String, +ids: String, +now: Nat) -> List<&2, M.Change>:
+  match same:
+    case True{}:
+      Nil{}
+    case False{}:
+      [M.SettingSet{Wait.key(thread), ids, now}]
+
+def Wait.set(+s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
+  +ids = Wait.ids(List.is_empty(&2, String, uuids), s, thread, uuids)
+  Wait.put(String.eq(ids, M.Setting.get(s, Wait.key(thread), "")), thread, ids, now)
+
+# what a Claude line changes about the waiting messages (moves: the line
+# can move the ledger, CM.Cmds.moves; uuids: CM.Cmds.unread after it)
+def Wait.line(moves: Bool, +s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
+  match moves:
+    case True{}:
+      Wait.set(s, thread, uuids, now)
+    case False{}:
+      Nil{}
+
 # Explicit stop paths (client and MCP) durably pause the conversation's
 # mail FIFO. An internal restart/fallback Interrupted event is not consent
 # to clear this register. Keep an undisposed seed at the front for review.
@@ -8156,12 +8223,52 @@ def Rec.note(+th: String, +now: Nat, +seq: Nat, +text: String) -> M.Change:
 # open: the child goes on and delivers it; law carry_keeps_child_task.
 # Either way the cut-off turn is marked stopped, so its partial reply does
 # not say "Finished")
+# One row a turn: "Backplane restarted at 06:04 during this turn.", and
+# when an ask was open, which one went unanswered (Rec.ask.close writes
+# it, and the turn then adds no note of its own: Rec.told). Its time is
+# the person's, as the messages' stamps (core/stamp.bend).
+def Rec.cut(+s: M.State, +now: Nat) -> String:
+  "Backplane restarted at " ++ TZ.Tz.show.time(SC.Sched.person(s, 0n, True{}), now) ++ " during this turn."
+
+# a text's first line, quoted ("" for none)
+def Rec.quote(+x: String) -> String:
+  +l = String.trim(Maybe.default(&2, String, List.head(&2, String, String.split(x, Chr{10})), ""))
+  Bool.pick(String, String.is_empty(l), "", ": “" ++ l ++ "”")
+
+# what went unanswered: a question, a tool's approval, a plan
+def Rec.unanswered(+kind: String, +tool: String, +detail: String) -> String:
+  Bool.pick(String, String.eq(kind, "input"), " Its question was not answered" ++ Rec.quote(detail),
+    Bool.pick(String, String.eq(kind, "approval"), " Its request to use " ++ tool ++ " was not answered" ++ Rec.quote(detail),
+      Bool.pick(String, String.eq(kind, "plan"), " Its plan was not answered.", " Its request was not answered.")))
+
+# whether this recovery already wrote the thread's restart row (an open
+# ask's, closed first: Hub.recover.k)
+def Rec.told.k(es: List<&2, M.Entry>, +now: Nat) -> Bool:
+  match es:
+    case M.Act{_, _, _, +kind, _, +at} <> _:
+      Bool.and(String.eq(kind, "restart"), Nat.is_eq(at, now))
+    case _:
+      False{}
+
+def Rec.told(+s: M.State, +th: String, +now: Nat) -> Bool:
+  Rec.told.k(M.State.mine(s, th), now)
+
+def Rec.turn.note(told: Bool, +s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  match told:
+    case True{}:
+      Nil{}
+    case False{}:
+      [Rec.note(th, now, Hub.seq(s), Rec.cut(s, now))]
+
+def Rec.turn.cs(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  List.append(&2, M.Change, Rec.turn.note(Rec.told(s, th, now), s, now, th), M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now))
+
 def Rec.turn.k(run: Bool, will: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
   match run will:
     case True{} False{}:
-      Launch.tell(s, now, th, Task.finish(s, now, th, Step{Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished") <> M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), Nil{}}))
+      Launch.tell(s, now, th, Task.finish(s, now, th, Step{Rec.turn.cs(s, now, th), Nil{}}))
     case True{} True{}:
-      Step{Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished") <> M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), Nil{}}
+      Step{Rec.turn.cs(s, now, th), Nil{}}
     case False{} _:
       Step.none()
 
@@ -8180,17 +8287,19 @@ def Rec.turns(ts: List<&2, String>, r: Rec, +before: M.State, +now: Nat) -> Rec:
 # (an order's question parks nothing, so it stays open: its answer starts
 # the agent again, Hub.answer.order; "Ship to which country?" went away
 # with every deploy; law recover_keeps_order_ask)
-def Rec.ask.close(order: Bool, +id: String, +th: String, +s: M.State, +now: Nat) -> Step:
+# (the row says which ask went unanswered, so it can be answered in the
+# composer; the turn's own row joins it: Rec.told)
+def Rec.ask.close(order: Bool, +id: String, +th: String, +kind: String, +tool: String, +detail: String, +s: M.State, +now: Nat) -> Step:
   match order:
     case True{}:
       Step.none()
     case False{}:
-      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), "Backplane restarted: this request can no longer be answered")], Nil{}}
+      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), Rec.cut(s, now) ++ Rec.unanswered(kind, tool, detail))], Nil{}}
 
 def Rec.ask.k(a: M.Ask, +s: M.State, +now: Nat) -> Step:
   match a:
-    case M.Ask{+id, +th, _, +tool, _, _, True{}, _}:
-      Rec.ask.close(OR.Order.ask.is(tool), id, th, s, now)
+    case M.Ask{+id, +th, +kind, +tool, +detail, _, True{}, _}:
+      Rec.ask.close(OR.Order.ask.is(tool), id, th, kind, tool, detail, s, now)
     case _:
       Step.none()
 

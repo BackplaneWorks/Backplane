@@ -117,3 +117,18 @@ Final combined source with #813/#814 passed the full type/proof gate
 delayed reply. The eight required regressions and final fresh iOS build/seven
 private native checks passed in `w-t1793685091-1352063-1358990`. No source
 changed between these checks.
+
+Integration with queued main changes through `17a16b3f9` (#815–#818) passed
+focused home assertions, all 24 full-output sidebar cases and nine affected
+regression files in `w-t1793685091-1352063-1359371`. Manual review confirms
+project-path completion retains existing conservative scratch inputs, fab
+waiting reads canonical entries, and restart-row formatting stays outside
+the sidebar body-draft projection. Unread command accounting preserves the
+home's separate owner. All prior manifest records and authority/private-input
+fences remain intact; three combined hashes needed refreshing.
+
+The complete integration through `17a16b3f9` passed every build, all 29
+rendered-web checks, the full type/proof gate (472 seconds), all eight
+required regressions and seven private native smoke checks in
+`w-t1793685091-1352063-1359664`. Cached paint measured 20.8 ms under an
+800 ms delayed reply.

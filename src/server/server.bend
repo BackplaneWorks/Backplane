@@ -13951,14 +13951,16 @@ def Hub.line.prog(+r: ARun, h: Hub, +thread: String, +line: String, +o: J.Json, 
   Hub.line.prog.k(B.Prog.line(ARun.prog_at(r), ARun.prog_last(r), now, line, o), r, h, thread, o, now)
 
 # a Claude line judged by its process's ledger, which sees it before the
-# step runs (the step may send the next command)
+# step runs (the step may send the next command); the messages still
+# waiting behind another are named (hub.bend's Wait.line)
 def Hub.line.run.k(prog: Bool, +r: ARun, h: Hub, +thread: String, +line: String, +o: J.Json, +now: Nat) -> IO(Hub):
   match prog h:
     case True{} _:
       Hub.line.prog(r, h, thread, line, o, now)
     case False{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.step(Hub{st, f, ls, cl, Agents.with(as, thread, ARun.heard.set(ARun.put(r, CM.Cmds.see(ARun.cmds(r), o), ARun.held(r)), now)), inbox, cfg, note},
-        B.Hub.agent_line.vo(CM.Cmds.verdict(ARun.cmds(r), B.Hub.running(B.Hub.thread(st, thread)), o), st, now, thread, line, o, CM.Cmds.text(ARun.cmds(r), o)))
+        B.Step.after(B.Hub.agent_line.vo(CM.Cmds.verdict(ARun.cmds(r), B.Hub.running(B.Hub.thread(st, thread)), o), st, now, thread, line, o, CM.Cmds.text(ARun.cmds(r), o)),
+          B.Wait.line(CM.Cmds.moves(o), st, thread, CM.Cmds.unread(CM.Cmds.see(ARun.cmds(r), o)), now)))
 
 def Hub.line.run(+r: ARun, h: Hub, +thread: String, +line: String, +o: J.Json, +now: Nat) -> IO(Hub):
   Hub.line.run.k(B.Prog.is(o), r, h, thread, line, o, now)

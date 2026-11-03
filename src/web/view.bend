@@ -2315,14 +2315,37 @@ def View.error(e: String) -> List<&2, D.Node>:
 def View.prow.cls(+a: String) -> String:
   Bool.pick(String, Bool.or(String.eq(a, "proj-cd"), String.eq(a, "proj-pick")), "prow", Bool.pick(String, String.is_empty(a), "prow off", "prow act"))
 
-# a row: its label, and a project's path at the right
-def View.prows(+u: U.Ui, ps: List<&2, U.PItem>, +i: Nat, +sel: Nat) -> List<&2, D.Node>:
+# a completion's label: the part typed ("sens") bright, the rest dim
+# (client.bend's Proj.comps)
+def View.prow.label(comp: Bool, +l: String, +typed: Nat) -> List<&2, D.Node>:
+  match comp:
+    case True{}:
+      [D.Dom.span("pt", String.take(l, typed)), D.Dom.span("pr", String.drop(l, typed))]
+    case False{}:
+      [D.Txt{l}]
+
+# at the right: a project's path, or Tab for the completion it writes
+def View.prow.detail(tab: Bool, +u: U.Ui, it: U.PItem) -> String:
+  match tab:
+    case True{}:
+      "Tab"
+    case False{}:
+      U.Proj.detail(u, it)
+
+# a row: its label, and a project's path at the right (the first `comps`
+# rows a typed path's completions, `typed` characters of each typed)
+def View.prows(+u: U.Ui, ps: List<&2, U.PItem>, +i: Nat, +sel: Nat, +comps: Nat, +typed: Nat) -> List<&2, D.Node>:
   match ps:
     case Nil{}:
       Nil{}
     case U.PItem{+l, +a, +v} <> t:
       D.El{"button", "", [D.At{"class", View.prow.cls(a) ++ Bool.pick(String, Nat.is_eq(i, sel), " sel", "")}, D.At{"title", l}, D.At{"data-value", v}, D.On{"click", a}],
-        [D.El{"span", "", [D.At{"class", "pl"}], [D.Txt{l}]}, D.El{"span", "", [D.At{"class", "pd"}], [D.Txt{U.Proj.detail(u, U.PItem{l, a, v})}]}]} <> View.prows(u, t, 1n+i, sel)
+        [D.El{"span", "", [D.At{"class", "pl"}], View.prow.label(Nat.is_lt(i, comps), l, typed)}, D.El{"span", "", [D.At{"class", "pd"}], [D.Txt{View.prow.detail(Bool.and(Nat.is_eq(i, sel), Nat.is_lt(i, comps)), u, U.PItem{l, a, v})}]}]} <> View.prows(u, t, 1n+i, sel, comps, typed)
+
+# Tab writes the selected completion into the field, as typing would
+# (a form field's edit: thin-host keeps it), when there is one
+def View.ptab(+tab: String) -> List<&2, D.Attr>:
+  Bool.pick(List<&2, D.Attr>, String.is_empty(tab), Nil{}, [D.At{"data-tab", "bfield"}, D.At{"data-value", "proj\u{1f}" ++ tab}])
 
 # above the filter: "Projects", or the folder browsed and the way back
 def View.phead.loc(+lc: I.Loc, dir: Bool, +u: U.Ui) -> D.Node:
@@ -2343,10 +2366,10 @@ def View.picker(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
           View.phead.loc(lc, U.Proj.browsing(u), u),
           D.Dom.div("subthread-route-note", D.Dom.when(U.ThreadTree.routing(u), D.Dom.span("", U.ThreadTree.route.note()))),
           D.Dom.div("desktop-folder", D.Dom.when(Bool.and(String.eq(U.Ui.scratch(u, "@desktop"), "1"), Bool.not(U.ThreadTree.routing(u))), D.Dom.button("", "desktop-folder", "", "Choose a local folder", "Choose folder…"))),
-          D.El{"input", "proj", [D.At{"id", "proj"}, D.At{"placeholder", Bool.pick(String, U.Proj.browsing(u), MSG.T.picker.folder.placeholder(lc), MSG.T.picker.project.placeholder(lc))},
-            D.At{"autocomplete", "off"}, D.At{"value", U.Proj.query(u)}, D.At{"data-bfield", "proj"}, D.On{"input", "bfield"}, D.At{"data-enter", "proj-enter"}], Nil{}}],
+          D.El{"input", "proj", List.append(&2, D.Attr, [D.At{"id", "proj"}, D.At{"placeholder", Bool.pick(String, U.Proj.browsing(u), MSG.T.picker.folder.placeholder(lc), MSG.T.picker.project.placeholder(lc))},
+            D.At{"autocomplete", "off"}, D.At{"value", U.Proj.query(u)}, D.At{"data-bfield", "proj"}, D.On{"input", "bfield"}, D.At{"data-enter", "proj-enter"}], View.ptab(U.Proj.tab(u))), Nil{}}],
           D.Dom.cat(Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.info(u, "proj.err")), Nil{}, [D.El{"div", "", [D.At{"class", "perr"}], [D.Txt{U.Ui.info(u, "proj.err")}]}]),
-            [D.El{"div", "", [D.At{"class", "prows"}], View.prows(u, U.Proj.items.loc(lc, u), 0n, U.Proj.index(u))}]))}]
+            [D.El{"div", "", [D.At{"class", "prows"}], View.prows(u, U.Proj.items.loc(lc, u), 0n, U.Proj.index(u), U.Proj.comps.n(u), U.Proj.typed.n(u))}]))}]
     case False{}:
       Nil{}
 
@@ -2643,7 +2666,7 @@ def View.act.g.loc(+lc: I.Loc, rem: Bool, +id: String, +tone: String, +kind: Str
       D.El{"div", id, [D.At{"class", "act remind entry-remind"}, D.At{"data-id", id}],
         [WI.WIcon.svg("bell", 14), D.Dom.span("kind", MSG.T.sched.kind.reminder(lc)), D.Dom.span("summary", summary), D.Dom.span("when", TZ.Tz.show.nz(SCH.Sched.person(st, 0n, True{}), at))]}
     case False{}:
-      View.memo.loc(lc, id, [D.At{"fn", "act"}, D.At{"tone", tone}, D.At{"kind", kind}], summary)
+      View.memo.loc(lc, id, [D.At{"fn", "act"}, D.At{"tone", FO.Tool.tone(tone, kind)}, D.At{"kind", kind}], summary)
 
 def View.act.g(rem: Bool, +id: String, +tone: String, +kind: String, +summary: String, +at: Nat, +st: M.State) -> D.Node:
   View.act.g.loc(I.En{}, rem, id, tone, kind, summary, at, st)
@@ -2764,7 +2787,7 @@ def View.msg.body(+lc: I.Loc, +err: String, +id: String, +text: String) -> List<
 def View.msg.x.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String, +as: List<&2, D.Attr>) -> D.Node:
   match user:
     case True{}:
-      D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
+      D.El{"div", id, [D.At{"class", Bool.pick(String, String.eq(View.attr(as, "unread"), "1"), "msg user unread", "msg user")}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
     case False{}:
       D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat(View.msg.body(lc, View.attr(as, "err"), id, text), D.Dom.cat(View.message.images(id, IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
 
@@ -2867,16 +2890,36 @@ def View.err.attrs(+lc: I.Loc, api: Bool, +text: String) -> List<&2, D.Attr>:
     case True{}: [D.At{"err", FO.ApiErr.say(lc, text)}]
     case False{}: Nil{}
 
+# Backplane's continue message after a restart is not the person's: it is
+# the "Continuing after the restart" row, what it said under
+# "› what it was told" (FO.Restart.told; the hub's own row after it is
+# left out, FO.Fold.shown)
+def View.carry.row(+lc: I.Loc, +id: String, +text: String) -> D.Node:
+  D.El{"div", id, [D.At{"class", "act info restart"}, D.At{"data-id", id}], [View.act.kind(lc, "restart"), D.El{"span", "", [D.At{"class", "summary"}], [D.Txt{MSG.T.restart.continuing(lc)},
+    D.El{"details", "told:" ++ id, [D.At{"class", "carry-told"}], [D.El{"summary", "", Nil{}, [D.Txt{MSG.T.restart.told(lc)}]}, D.El{"div", "", [D.At{"class", "told"}], [D.Txt{text}]}]}]}]}
+
+def View.entry.user(carry: Bool, +lc: I.Loc, +id: String, +th: String, +text: String, +st: M.State, +stamp: String, +unread: Bool) -> D.Node:
+  match carry:
+    case True{}:
+      View.carry.row(lc, id, text)
+    case False{}:
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", STP.Stamp.unread.text(unread, lc, stamp)}, D.At{"unread", Bool.pick(String, unread, "1", "")}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
+
 # (mid: a reply inside a turn, its time shown on hover: core/stamp.bend's
 # Stamp.mid)
-def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool) -> D.Node:
+# (unread: a person's message the agent has not read yet, core/stamp.bend's
+# Stamp.unread: its time says so and it is a step dimmer)
+def View.entry.u.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool, +unread: Bool) -> D.Node:
   match e:
     case M.Msg{+id, +th, M.User{}, +text, _}:
-      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
+      View.entry.user(FO.Restart.told(text), lc, id, th, text, st, stamp, unread)
     case M.Msg{+id, +th, _, +text, _}:
       View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", Bool.pick(String, CP.Pending.synthetic(id), "live", "msg")}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], List.append(&2, D.Attr, View.err.attrs(lc, FO.ApiErr.is(text), text), View.ctx.attrs(RTO.Rto.chat(st, th), st, CP.Pending.text(lc, id, text)))), CP.Pending.text(lc, id, text))
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       View.act.loc(lc, String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at}, st, ec)
+
+def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool) -> D.Node:
+  View.entry.u.loc(lc, e, st, ec, stamp, mid, False{})
 
 def View.entry.s.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
   View.entry.m.loc(lc, e, st, ec, stamp, False{})
@@ -2887,7 +2930,7 @@ def View.entry.s(e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String) -> D.Node:
   View.entry.s.loc(I.En{}, e, st, ec, stamp)
 
 def View.entry.own(+lc: I.Loc, +e: M.Entry, +st: M.State, +ec: U.Ec, +sp: STP.Stamps) -> D.Node:
-  View.entry.m.loc(lc, e, st, ec, STP.Stamp.text.loc(lc, sp, e), STP.Stamp.mid(sp, e))
+  View.entry.u.loc(lc, e, st, ec, STP.Stamp.text.loc(lc, sp, e), STP.Stamp.mid(sp, e), STP.Stamp.unread(st, e))
 
 # an entry of this thread (headed by the thread that sent it) or a message
 # this thread sent to another (a link)
