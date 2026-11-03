@@ -10557,7 +10557,8 @@ def AccountFallback.pick.choice(choice: Maybe<&2, J.Json>, +s: M.State, +caps: J
 
 def AccountFallback.preflight(held: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
   match held:
-    case False{}: Step.after(Fallback.attempt.quota(s, caps, now, th, cwd, text, uuid, original),
+    case False{}: Step.after(Bool.pick(Step, AF.Provider.managed(s, th, Hub.provider(Hub.thread(s, th))),
+      Fallback.attempt.k(False{}, s, caps, now, th, cwd, text, uuid, original), Fallback.attempt.quota(s, caps, now, th, cwd, text, uuid, original)),
       Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "account.failover.waiting." ++ th, "")), Nil{}, [M.SettingSet{"account.failover.waiting." ++ th, "", now}]))
     case True{}: AccountFallback.pick.choice(AF.Pick.account(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
 
@@ -10586,7 +10587,8 @@ def AccountFallback.attempt.restore(restore: Bool, +s: M.State, +caps: J.Json, +
         Step.outs(Hub.run(Hub.thread(next, th), cwd, actual, uuid)))
     case False{}:
       +p = Hub.provider(Hub.thread(s, th))
-      +inherited = AF.Hold.inherit(s, now, th)
+      +scope = Bool.pick(String, FB.Limit.active(s, p, now), p, FB.Target.key(Fallback.target(Hub.thread(s, th))))
+      +inherited = AF.Hold.inherit(s, now, th, Pending.of(s, now, FB.Limit.record(s, scope)))
       +next = M.State.replay(inherited, s)
       Step.before(inherited, Nil{}, AccountFallback.preflight(AF.Hold.current(next, p, ACCT.Accounts.id(next, th, p), ACCT.Accounts.epoch(next, th, p), FB.Target.model(Fallback.target(Hub.thread(next, th))), now), next, caps, now, th, cwd, text, uuid, original))
 
