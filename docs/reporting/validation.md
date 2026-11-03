@@ -80,10 +80,9 @@ below. The installer also completed the combined ACA production build, web
 emission, service startup and desktop adoption. These are scoped receipts for
 their frozen sources, not a qualification of later main.
 
-The isolated-hub reporting E2E still needs a receipt against a final combined
-server artifact and its matching wire output. The earlier source campaign did
-not run this integration test. No additional app build or installation is
-required merely to repeat the completed recording phases.
+The isolated-hub reporting E2E subsequently passed against the delivered 273
+server artifact, as recorded below. The earlier source campaign did not run
+this integration test. No additional app build or installation was required.
 
 The iOS model executable, SwiftUI compilation and device flows are unqualified
 on this Linux host. System pickers, native browser sign-in/chooser behavior and
@@ -170,3 +169,49 @@ That delivery used source `aca8c7b03372094ad00cba0e7e080210da1877cf`, tree
 `6ef5b7c4dd91761240c34f02602bf715e6a5a3fc`. Its successful app-web evidence
 and the prior popup/X11 passes were reused. No web rebuild, popup replay, X11
 replay or installation was part of the continuation.
+
+## Delivered 273 reporting integration
+
+Boat job `j20261103023643-3866025`, managed work
+`w-t1793672732-1318856-1322528`, passed wire fixture emission and the unchanged
+`test/tools/reporting_e2e.ts`. It reused the installer's immutable server from
+`273b268cd1c56661ead5cc8ba0ae1b5a33ed375f`, SHA-256
+`389fda451c2bb4d1fe57532ca970617a63c355c443040ffc5ccd33606ed70449`.
+All nine test, writer and codec inputs matched that revision exactly. The
+qualification checkout was `2a26aa19f03cb8a07d2fa1aae3ada2d00e5b4c84`
+with explicit untracked qualification inputs, not a clean-source build claim.
+The unchanged native TEST12 guard admitted the campaign on a fresh large
+sandbox. No app build or installation ran.
+
+The actual assertions passed for isolated hub startup, no-store diagnostics
+export, the measured logical/allocated 1 MiB cap, a selected-project report
+agent returning the exact expected body, keyed retry with one thread creation,
+durable off/clear/on controls, and exclusion of the synthetic description,
+private root and stand-in session identifier from diagnostics. The test used
+only a temporary home/project and stand-in providers. It submitted no issue.
+
+All 14 frozen inputs passed before/after hash checks; all 11 returned artifacts
+were independently rehashed. The emitted wire JavaScript SHA-256 is
+`4915896e0c7cd5db31af518981397df636714930b739acfc1a4e6d986614f918`.
+The E2E log SHA-256 is
+`9b0ceb1fe7a5cef3cc15d8c4d0b21692d75234f934905b507eae073875a6c5b5`.
+Sandbox `bx_jqgngn53` was deleted and verified. The final local receipt is
+`FINAL-REPORTING-QUALIFICATION.json`, SHA-256
+`9eb6d7dee4dd6e8f98b1edb62e3ac82903970d538a1679101971046d47efed5b`.
+
+Bend release 2.0.36 came from pinned archive
+`02089dc0eed0fd5fd6d73c74cc9cffcb2c6638dd3b02ae83f7b8cc57fbe381ba`.
+Its executed binary hash was `b2b183bddc3c3fa4bc45d99f6a6bdbb192ebc616e6e697777f49e74c545b1643`.
+The separately attested Bun 1.3.10 hash was
+`3632a4fae998deaad2358e22ae74d1fd6c673b9be760a470e3a0044267cb4438`;
+it is not the earlier `795b37` Bun binary. Remote resource attestation hashes
+`base.bend` only. A separate local inventory covers all 66 library files in
+the verified archive; it is not a per-file remote library closure claim.
+
+Two earlier launches failed in preflight, before guard admission, compilation
+or assertions: `j20261103023143-3804004` used unsupported `bend --version`,
+and `j20261103023337-3831336` tried to hash the `bend2` directory as a file.
+Both failures and their verified sandbox deletion records remain preserved.
+The complete corrected no-compiler preflight passed locally against the
+verified pinned package. This result qualifies reporting on delivered 273,
+not a later combined source, device flow or real Wayland capture.
