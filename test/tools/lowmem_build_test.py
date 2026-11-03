@@ -520,7 +520,7 @@ class Cli(unittest.TestCase):
             src = lm.source_identity()
             if not src['clean']:
                 self.skipTest('needs a clean tree')
-            q = {**QUAL, 'source': {k: src[k] for k in ('head', 'tree', 'closure_sha256')}, 'clean': True}
+            q = {**QUAL, 'source': {k: src[k] for k in ('head', 'tree', 'content_sha256', 'closure_sha256')}, 'clean': True}
             q['source']['clean'] = True
             ref = {'schema': 2, 'source': {'head': src['head'], 'tree': src['tree']}, 'producer': {'x': 1},
                    'outputs': {'hub': {'hub.js': H('1')}, 'web': {'web/a.js': H('2')}}}
