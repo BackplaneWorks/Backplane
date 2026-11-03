@@ -137,7 +137,7 @@ let desktopTheme = window.backplaneDesktop?.theme || "";
 if (!themeNow) themeNow = desktopTheme;
 function themeDocument() {
   document.documentElement.classList.toggle("light", themeNow === "light");
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", themeNow === "light" ? "#fafaf8" : "#111410");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
 }
 themeDocument();
 function themeSeen(app) {

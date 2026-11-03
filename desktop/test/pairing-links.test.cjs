@@ -22,3 +22,8 @@ test('capability discovery distinguishes revoked access from an old hub',async()
  for (const status of [401,403]) assert.deepEqual(await discoverViews({fetch:async()=>({status}),validate:()=>false}),{supported:false,unauthorized:true});
  assert.deepEqual(await discoverViews({fetch:async()=>({status:404}),validate:()=>false}),{supported:false});
 });
+test('desktop protocol enrollment derives a platform name when no label was supplied',async()=>{
+ let sent;
+ await pair({text:'https://hub/pair#code=ABCD2345',fetch:async(_url,options)=>{sent=options.headers['X-Backplane-Name'];return {ok:true}}});
+ assert.equal(sent,({linux:'Linux',darwin:'macOS',win32:'Windows'}[process.platform]||'Device')+' / Desktop');
+});
