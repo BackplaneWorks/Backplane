@@ -252,6 +252,9 @@ def run(directory, operation, target, source, checkout):
                            'bunRuntime': bun_runtime(target, directory.parent / ('bun-runtime-' + target))},
              'sourceQualification': str(directory / relative(inputs['sourceQualification'])),
              'webNotices': str(directory / relative(inputs['webNotices']))}
+        if 'preEmission' in inputs:
+            ep = directory / relative(inputs['preEmission'])
+            r['preEmission'] = {'path': str(ep), 'sha256': sha(ep), 'bytes': ep.stat().st_size}
         for key in ('sourceQualification', 'webNotices'):
             p = Path(r[key])
             r[key] = {'path': str(p), 'sha256': sha(p), 'bytes': p.stat().st_size}

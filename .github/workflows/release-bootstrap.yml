@@ -49,7 +49,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-bootstrap-${{ inputs.ref }}-${{ inputs.operation }}
+  group: release-bootstrap-${{ inputs.ref }}-${{ inputs.operation }}-${{ inputs.targets }}
   cancel-in-progress: false
 
 env:
@@ -115,6 +115,7 @@ jobs:
         if: always()
         with:
           name: configured-service-build-${{ matrix.target }}
+          include-hidden-files: true
           path: |
             build/bootstrap-js/
             build/bootstrap-execution.json
@@ -122,7 +123,7 @@ jobs:
           retention-days: 14
 
   js-runtime:
-    if: inputs.operation == 'js'
+    if: inputs.operation == 'js' && inputs.runtime_targets != '[]'
     needs: js
     strategy:
       fail-fast: false
@@ -154,6 +155,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: configured-service-build-${{ matrix.target }}
+          include-hidden-files: true
           path: build
       - name: Run the service on its own target
         shell: bash
@@ -184,11 +186,12 @@ jobs:
             mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
             set -- --windows-runtime "$RUNNER_TEMP/winrt"
           fi
-          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 ae60a25ad3f42a6b906b5deae2cfc0b6be2a65863172c64a3b69b207b0b6fef2 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 e06a9052a7c7cfd65e2216b105aa37f608b48e3e4922be043bd828f75d03e11c --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: configured-service-${{ matrix.target }}
+          include-hidden-files: true
           path: |
             build/bootstrap-js/
             build/bootstrap-service/
