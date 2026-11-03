@@ -87,6 +87,35 @@ type Summary is Data:
 def Auto.direct(+id: String, +text: String) -> Bool:
   Bool.and(String.is_empty(M.Link.from(id)), Bool.or(Bool.not(String.starts_with(text, "[")), String.starts_with(text, "[message from person@")))
 
+# Mcp.delegate.go reserves child t<at>-<seq+1>, then its initial prompt
+# m<at>-<seq+2>. Only a task-backed child (or its durable TaskDelegated
+# receipt) may use this provenance; a parent link alone proves nothing.
+def Auto.seed.nums(stamp: Maybe<&2, Nat>, seq: Maybe<&2, Nat>, +raw: String) -> String:
+  match stamp seq:
+    case Some{_} Some{n}: "m" ++ raw ++ "-" ++ Nat.show(1n+n)
+    case _ _: ""
+
+def Auto.seed.parts(xs: List<&2, String>) -> String:
+  match xs:
+    case +stamp <> seq <> Nil{}: Auto.seed.nums(Nat.read(stamp), Nat.read(seq), stamp)
+    case _: ""
+
+def Auto.seed.id(known: Bool, th: String) -> String:
+  match known th:
+    case True{} SCon{Chr{116}, rest}: Auto.seed.parts(String.split(rest, Chr{45}))
+    case _ _: ""
+
+def Auto.seed.for(+s: M.State, +th: String, workers: Map<&2, Nat>) -> String:
+  M.Setting.get(s, "autosettle.seed." ++ th, Auto.seed.id(Nat.is_gt(Auto.get(workers, th), 0n), th))
+
+def Auto.direct.seed.is(seed: Bool, id: String, text: String) -> Bool:
+  match seed:
+    case True{}: False{}
+    case False{}: Auto.direct(id, text)
+
+def Auto.direct.seed(+id: String, text: String, +seed: String) -> Bool:
+  Auto.direct.seed.is(Bool.and(Bool.not(String.is_empty(seed)), String.eq(id, seed)), id, text)
+
 def Auto.user(role: M.Role) -> Bool:
   match role:
     case M.User{}: True{}
@@ -97,19 +126,28 @@ def Auto.assistant(role: M.Role) -> Bool:
     case M.Assistant{}: True{}
     case _: False{}
 
-def Auto.summary(xs: List<&2, M.Entry>, +th: String, +by: String, a: Summary) -> Summary:
+def Auto.summary.seed(xs: List<&2, M.Entry>, +th: String, +by: String, +seed: String, a: Summary) -> Summary:
   match xs a:
     case Nil{} result: result
     case M.Msg{+id, +t, +role, +text, +at} <> rest Summary{q, +found, person, +output, oa, report}:
       +own = String.eq(t, th)
       +user = Bool.and(own, Auto.user(role))
-      Auto.summary(rest, th, by, Summary{M.Time.max(q, at), Bool.or(found, user),
-        Bool.pick(Bool, Bool.and(user, Bool.not(found)), Auto.direct(id, text), person),
+      Auto.summary.seed(rest, th, by, seed, Summary{M.Time.max(q, at), Bool.or(found, user),
+        Bool.or(person, Bool.and(user, Auto.direct.seed(id, text, seed))),
         Bool.pick(String, Bool.and(own, Bool.and(Auto.assistant(role), String.is_empty(output))), id, output),
         M.Time.max(oa, Bool.pick(Nat, Bool.and(own, Auto.assistant(role)), at, 0n)),
         M.Time.max(report, Bool.pick(Nat, Bool.and(String.eq(M.Link.from(id), th), String.eq(t, by)), at, 0n))})
     case M.Act{_, _, _, _, _, at} <> rest Summary{q, f, p, o, oa, r}:
-      Auto.summary(rest, th, by, Summary{M.Time.max(q, at), f, p, o, oa, r})
+      Auto.summary.seed(rest, th, by, seed, Summary{M.Time.max(q, at), f, p, o, oa, r})
+
+def Auto.summary(xs: List<&2, M.Entry>, th: String, by: String, a: Summary) -> Summary:
+  Auto.summary.seed(xs, th, by, "", a)
+
+def Auto.summary.index(ix: Index, +s: M.State, +t: M.Thread) -> Summary:
+  match ix:
+    case Index{workers, _, _, _}:
+      Auto.summary.seed(M.State.mine(s, M.Thread.id(t)), M.Thread.id(t), M.Launch.by(s, M.Thread.id(t)),
+        Auto.seed.for(s, M.Thread.id(t), workers), Summary{0n, False{}, False{}, "", 0n, 0n})
 
 def Auto.activity(t: M.Thread) -> Nat:
   match t:
@@ -164,10 +202,10 @@ def Auto.due.summary(+s: M.State, +t: M.Thread, +now: Nat, ix: Index, a: Summary
           M.Time.max(Auto.num(s, "autosettle.quiet." ++ th, 0n), M.Nav.until(M.Nav.get(M.State.navs(s), th)))), window)),
         M.Shelf.of(t), M.Lifecycle.override(t))
 
-def Auto.due.gated(turn: M.TurnState, shelf: M.Shelf, override: M.Override, +s: M.State, +t: M.Thread, +now: Nat, ix: Index) -> Bool:
+def Auto.due.gated(turn: M.TurnState, shelf: M.Shelf, override: M.Override, +s: M.State, +t: M.Thread, +now: Nat, +ix: Index) -> Bool:
   match turn shelf override:
     case M.Completed{} M.Active{} M.NoOverride{}:
-      Auto.due.summary(s, t, now, ix, Auto.summary(M.State.mine(s, M.Thread.id(t)), M.Thread.id(t), M.Launch.by(s, M.Thread.id(t)), Summary{0n, False{}, False{}, "", 0n, 0n}))
+      Auto.due.summary(s, t, now, ix, Auto.summary.index(ix, s, t))
     case _ _ _: False{}
 
 def Auto.due(+s: M.State, +t: M.Thread, +now: Nat, ix: Index) -> Bool:
@@ -379,9 +417,12 @@ def Auto.quiet.collect(cs: List<&2, M.Change>, +s: M.State, m: Map<&2, Nat>) -> 
 # Reply identity is durable even when the store keeps only a recent window.
 def Auto.message.metadata(c: M.Change, +s: M.State) -> List<&2, M.Change>:
   match c:
+    case M.TaskDelegated{_, _, +child, _, _, _, at}:
+      [M.SettingSet{"autosettle.seed." ++ child, Auto.seed.id(True{}, child), at}]
     case M.MessagePosted{+th, +id, M.User{}, +text, +at}:
-      Bool.pick(List<&2, M.Change>, Bool.or(Auto.direct(id, text), String.is_empty(M.Setting.get(s, "autosettle.audience." ++ th, ""))),
-        [M.SettingSet{"autosettle.audience." ++ th, Bool.pick(String, Auto.direct(id, text), "person", "worker"), at}], Nil{})
+      +personal = Auto.direct.seed(id, text, M.Setting.get(s, "autosettle.seed." ++ th, ""))
+      Bool.pick(List<&2, M.Change>, Bool.or(personal, String.is_empty(M.Setting.get(s, "autosettle.audience." ++ th, ""))),
+        [M.SettingSet{"autosettle.audience." ++ th, Bool.pick(String, personal, "person", "worker"), at}], Nil{})
     case M.MessagePosted{th, id, M.Assistant{}, _, at}:
       [M.SettingSet{"autosettle.output." ++ th, id, at}]
     case _: Nil{}
