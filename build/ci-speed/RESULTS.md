@@ -263,7 +263,7 @@ unchanged until integration and actual full coverage/performance validation.
 | Every job on fast runners, queue~8s, cost | Incomplete. Existing queue3s median; defaults still in use. Org runner authorization unavailable; no live auth/settings changed. |
 | Fast lint/checkers; per-file proof profile/cache | Partial: pinned Oxlint/TypeScript7 commands and measured controls below; global lint debt/type coverage and production proof splitting/pass-cache remain. |
 | Shared/reset test workers, core-aware shards | Incomplete; no unvalidated state sharing enabled. |
-| Cache setup/outputs; blobless clones | Partial: verified lean closure transport/cache landed. Workflow clone strategy and broader dependency caches remain. |
+| Cache setup/outputs; blobless clones | Partial: verified lean closure transport/cache landed. ci.yml now uses full-history blobless checkouts (fixture below); other release/mobile workflows and broader dependency caches remain. |
 | Parallel independent gates, split slow job | Incomplete; current local controller remains serial. |
 | Affected PRs, full nightly, mutation guard | Partial: opt-in planner/negative controls; existing nightly is full, but no new PR integration or green-nightly claim. |
 | Actual pre-push hook under10s | Incomplete; accepted UI3s/total9s contract, waiting for measured UI command; no placeholder hook/settings changed. |
@@ -342,7 +342,44 @@ paths including deletions and both rename ends. Report schema/head/status/
 elapsed/checks/diagnostics/cache identity and explicit outcomes for all four
 approaches. Static route/handler coverage always runs; simulator reuse binds
 complete closure+specification+actual runtime/tool identity. No heavy job or
-lock wait starts from the hook. UI owner accepted this contract and reports a
-0.05s literal scan (101 literal bindings,19 computed); its measured complete
-command is still pending. Computed/unmodelled coverage must remain explicit or
+lock wait starts from the hook. UI owner accepted this contract and reports the
+latest static inventory of 306 literal bindings, 37 computed bindings and 31 URL
+expressions. Ten cheap immutable-export/cache/timeout controls passed in 1.07s.
+The computed bindings and URL expressions remain unresolved: static and overall
+status are incomplete/exit 3, even with a valid simulator receipt. Full
+qualification is still pending. Computed/unmodelled coverage must remain explicit or
 incomplete. No placeholder hook has been installed.
+
+## Full-history blobless CI checkouts
+
+All nine `ci.yml` checkout steps now request `filter: blob:none` and
+`fetch-depth: 0`, including the native smoke job's unchanged sparse paths.
+Nightly/manual/release callers of this reusable CI inherit it; separate release
+and mobile workflow checkout settings are outside this change. No job, test,
+proof, runner label, permission or publish step changed.
+
+The [self-validating probe](../../scripts/ci-checkout-probe.py) creates a tiny
+disposable filter-enabled Git server and transfers over `file://`, avoiding
+local clone hardlinks. Git2.53.0, one sample per mode, warm local filesystem:
+
+| Change / fixture | Before | After |
+|---|---:|---:|
+|Default shallow -> full-history blobless |15.45ms /263,179 packed bytes /1 commit |20.33ms /264,376 packed bytes /7 commits |
+|Native sparse shallow -> sparse full-history blobless |11.63ms /977 packed bytes /1 commit |14.41ms /2,142 packed bytes /7 commits |
+|Full unfiltered reference -> full-history blobless |75.62ms /1,837,753 packed bytes |20.33ms /264,376 packed bytes |
+
+Both new modes found the exact cross-branch merge-base; both shallow controls
+could not. Current head file bytes and executable modes matched exactly; the
+sparse job excluded its existing nonselected asset directory. Historical
+obsolete blobs remained missing in both full-history filtered clones. The
+probe exits on any semantic mismatch and removes a stale receipt before work.
+[Raw receipt](checkout-probe.json) binds the exact probe hash and fixture head.
+
+This fulfills the full-history/filter requirement for the reusable CI. It is
+**not an observed checkout speedup over shallow clones**: this fixture added
+about 5ms (normal) /3ms (sparse), while preserving history with very little
+extra object storage. The audit's real checkout median was already about3s;
+no new Actions run was dispatched, and GitHub network/all-ref history cost
+remains unmeasured. Packed bytes are local object storage, not billed network
+bytes. No Boat credit or paid runner time was spent. No broad proof/build was
+repeated, per the user's current tooling-only constraints.
