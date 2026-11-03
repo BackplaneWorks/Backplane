@@ -586,3 +586,104 @@ New Boat spend **$0**: no VM was started, controls used the existing owned host.
 The protected checker and project laws/proofs were not edited. Broad proof,
 release and installer builds remain omitted; no memory target or full-CI pass
 is inferred from these small controls.
+
+
+## Module-mode cap failure and proof parallelism (2026-11-03)
+
+The frozen273 module/compact hub trial **failed the6GB target**. Matching
+systemd scope `run-p1355330-i1355738.scope` reports kernel `oom-kill`,
+MemoryMax6,000,000,000B, MemoryPeak5,999,996,928B and285.809s wall. The
+process stopped after152 module boundaries, with15,985 definitions reached;
+no emit or web measurement exists. Sampled process high-water5,426,972KiB
+is not the final aggregate scope peak. Small module boundaries repeatedly
+spent about4.8s in check/compaction/collection, so this candidate also fails
+our speed goal. Its unchanged cap will not be retried. [Failure receipt and
+raw checkpoints](compiler-memory/module-cap-failure/RESULT.json).
+
+| Change / trial | Before | After / decision |
+|---|---|---|
+| Module-prefix checks, compact interfaces, boundary collection | Completed frozen273 hub emit13.56GiB /108.928s; instrumented source baseline13.37GiB /162.116s | **OOM**,6GB scope /285.809s, no output. Rejected as a deployable improvement; platforms/instrumentation differ |
+| Exact proof partition planning | One canonical root containing3,149 laws |32 partitions planned in4.74s /51,524KiB; all declaration blocks unchanged, exact-once primary law ownership, all original imports and444-file source union covered. **Planning only**, worker wall/RSS and critical path unmeasured |
+
+`scripts/proof-shards.py` generates conservative local helper/method/import
+closures; unknown canonical syntax fails closed. Unused helpers and imports
+are still checked somewhere. Every selected canonical declaration is copied
+byte-for-byte, and every generated pair passes the existing shape check.
+The partition and actual compiler/library/verdict/guard bytes are bound by a
+manifest. Execution requires an inherited native bend flock and a finite
+no-swap cgroup or isolated default-size Boat VM no larger than8GiB; a passing worker must also peak below3GiB. The join requires every distinct expected
+worker receipt and rechecks the existing bendok verdict, source/tool identity,
+input stability and finite measurements. Missing, failed, duplicated, corrupt
+or stale results cannot make a passing gate. No proof pass cache is enabled.
+
+Eleven fast controls pass in0.31s /27,512KiB, including dropped-law and
+unused-import-change controls, compiler-byte/mode drift, unknown syntax,
+symlink parents and missing/duplicated/false-green worker results. The existing
+full proof gate is not replaced until all required shards and typed theorem mutations
+qualify the generated programs. No full release-proof success, <3GiB actual
+worker peak, new parallel critical path or2-minute complete CI is claimed.
+Next execution must use available admitted workers without duplicating the
+build owner's productive proof/store-recovery campaigns. Hub emit, complete
+web bundle, proofs and tests can run on separate hosts; independent module
+compilation/linking remains unavailable in this compiler experiment.
+New Boat spend for the failed cap run and planning/tests: **$0** (owned h@ host
+and cheap local planning only). No Alpha, installed app or live PID action.
+
+
+Parallel shard transport attempts025/026 (jobs j20261103172959-1014215 and
+j20261103173000-1014525) both stopped **before Bend execution**. An ignored
+build/ manifest was incorrectly included in the non-build inventory comparison;
+025 also received026's archive created between the controller's exclusion
+snapshot and runner staging. The closed-inventory verifier rejected both.
+Neither is proof or memory evidence. Both sandboxes were deleted and verified;
+14+7credit-s cost **$0.00021**. Seventeen packet controls pass in0.37s /28,804KiB,
+including build-manifest hash verification and unexpected-source rejection.
+An exact bootstrap allowlist is being coordinated with runner owner1188217;
+no replacement proof job starts with the racy exclusion-only transport.
+
+
+## Two actual small proof partitions and parallel transport correction
+
+The first two generated partitions now ran successfully on independent default
+Boat VMs, with the canonical statement/proof bytes unchanged and the standard
+pinned compiler. These are198 distinct primary laws out of3,149; the complete
+32-partition gate is **not** replaced or claimed passing.
+
+| Partition | Canonical proofs included | Bend wall | Peak child RSS | Kernel swap I/O |
+|---|---:|---:|---:|---:|
+|025 |99 |0.819s |189,136KiB (185MiB) |0 pages |
+|026 |102 (99 primary) |2.156s |207,984KiB (203MiB) |0 pages |
+
+026 returned0. 025 returned1 **only for the existing 16-definition unsafe/foreign
+notice** (font/text effects); the unchanged `bendok.sh` accepts that notice,
+as it does in the original full gate. Its raw warning remains in the receipt.
+No checker error or failed theorem was accepted. A typed `{0n == 1n : Nat}`
+negative control reached its `{==}` proof body and was rejected with
+expected0n/observed1n. These checks do not establish external effect correctness
+or a Lean-kernel verdict.
+
+[Exact input and tool identities, raw results and provenance](proof-shards/receipts/SUMMARY.json)
+are retained with the measured runner and partition manifest. Both jobs checked
+source/tool bytes before and after, held the actual native bend flock, and
+used default VMs (about7.76GiB physical cap). The guests provisioned2GiB swap;
+**pswpin and pswpout stayed0 before/after each command**. The worker and join
+reject any swap activity, so paging cannot masquerade as a small-memory pass.
+Host workers still require a finite no-swap cgroup. Successful worker RSS is
+capped by the verdict policy at<3GiB; larger VMs are rejected.
+
+VM lifetimes overlapped; the very short Bend subprocesses did not, due to
+startup skew. Max Bend duration2.156s; outer commands1.35s/2.49s; the observed
+command window was about5.49s with1s timestamp resolution. Per-job startup
+2s/4s, push2s each, setup2s each. The full-suite parallel critical path and its
+largest worker are still unmeasured; the largest planned import closure must
+be reduced or qualified before any all-suite speed/memory claim.
+
+The exact3-file allowlist from runner PR841 fixes the concurrent-archive race;
+`ci-packet.py` now uses it, rather than a snapshot of exclusions. Its build/
+manifest inventory comparison was corrected without relaxing source/hash
+verification. Eighteen packet controls pass in0.39s /28,060KiB; runner include
+controls3/3 pass in1.712s. Proof partition controls12/12 pass in0.29s /26,220KiB.
+Two preceding v2 resource attempts stopped before Bend and cost8credit-s each.
+Successful pilots cost9+11credit-s (**$0.00020**) with deletion verified; all
+six setup/transport/success attempts total57credit-s (**$0.00057**).
+No source law/proof, release workflow, installed compiler or live hub changed.
