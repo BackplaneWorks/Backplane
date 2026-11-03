@@ -2366,6 +2366,14 @@ def View.images(ps: List<&2, String>) -> List<&2, D.Node>:
       D.El{"a", "", [D.At{"class", "shot"}, D.At{"href", IM.Img.url(p)}, D.At{"target", "_blank"}, D.At{"title", p}, D.At{"data-lightbox", IM.Img.url(p)}],
         [D.El{"img", "", [D.At{"src", IM.Img.url(p)}, D.At{"alt", p}, D.At{"loading", "lazy"}], Nil{}}]} <> View.images(t)
 
+def View.message.images(+entry: String, ps: List<&2, String>) -> List<&2, D.Node>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      D.El{"a", "", [D.At{"class", "shot"}, D.At{"href", IM.Img.message_url(entry, p)}, D.At{"target", "_blank"}, D.At{"title", p}, D.At{"data-lightbox", IM.Img.message_url(entry, p)}],
+        [D.El{"img", "", [D.At{"src", IM.Img.message_url(entry, p)}, D.At{"alt", p}, D.At{"loading", "lazy"}, D.At{"decoding", "async"}, D.At{"data-message-image", "1"}], Nil{}}, D.Dom.span("message-image-unavailable", "Image unavailable")]} <> View.message.images(entry, t)
+
 # a run of tool calls, or a turn's work, folded into one row: a drawer's
 # head, one line (FO.Fold decides the runs, their labels and which are
 # open: only the person's click opens one); a click opens or shuts it. The
@@ -2730,7 +2738,7 @@ def View.msg.x.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: S
     case True{}:
       D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
     case False{}:
-      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.images(IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
+      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.message.images(id, IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
 
 def View.msg.k.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String) -> D.Node:
   View.msg.x.loc(lc, user, id, text, stamp, Nil{})

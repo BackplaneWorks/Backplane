@@ -96,7 +96,7 @@ struct Thumb: View {
             AsyncImage(url: u) { phase in
                 switch phase {
                 case .success(let img): img.resizable().scaledToFit()
-                case .failure: Image(systemName: "photo").foregroundStyle(.tertiary).frame(width: 80, height: 60)
+                case .failure: Text("Image unavailable").font(.caption).foregroundStyle(.secondary).frame(width: 260, height: 200)
                 default: ProgressView().frame(width: 80, height: 60)
                 }
             }
