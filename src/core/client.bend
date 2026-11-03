@@ -3635,6 +3635,25 @@ def Side.phase.ix(+ix: SIx, +st: M.State, t: M.Thread) -> M.Phase:
     case M.Thread{+id, _, _, _, _, turn, +pending, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       Side.phase.ix.k(st, ix, id, turn, pending, SIx.open(ix, id))
 
+# What a red row wants, said where its age goes: a red dot (blocked)
+# names its open approval or question, a failed turn's (failed) says
+# failed; any other dot, or a red one waiting on something else (a
+# subthread's ask, a sign-in), says nothing and the row keeps its age
+def Side.want.word(+lc: I.Loc, +ja: String, +en: String) -> String:
+  Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), ja, en)
+
+def Side.want.k(+lc: I.Loc, blocked: Bool, p: M.Phase) -> String:
+  match blocked p:
+    case True{} M.PhApproval{}:
+      Side.want.word(lc, "承認", "approval")
+    case True{} M.PhInput{}:
+      Side.want.word(lc, "質問", "question")
+    case _ _:
+      ""
+
+def Side.want(+lc: I.Loc, +dot: String, p: M.Phase) -> String:
+  Bool.pick(String, String.eq(dot, "failed"), Side.want.word(lc, "失敗", "failed"), Side.want.k(lc, String.eq(dot, "blocked"), p))
+
 # when a thread's snooze ends (0: not snoozed)
 def Side.wakes.span(l: I.Loc, +d: Nat) -> String:
   match l:
