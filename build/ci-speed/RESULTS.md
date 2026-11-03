@@ -1046,3 +1046,28 @@ it measures key retention, not executed cache hits or proof/CI speed. Full
 comparison **0.12s /28,456KiB peak RSS**, cost **$0**. No proof, compiler,
 Boat, app, package, install or release job ran. Shared cache trust, mixed
 cached/fresh gate wiring and actual proof timing remain pending.
+
+### Reject stale cached check plans (2026-11-03)
+
+Saved all-hit plans previously returned success without checking their keys,
+tools or cache entries again; mixed runs revalidated only misses. Plans now
+contain a complete versioned inventory, and every success path revalidates all
+current keys, inventory and authenticated hits. Miss runs also revalidate hits
+after execution before recording anything. The shell's all-hit route consumes
+the plan through that validator. Existing heavy guards/floors are unchanged.
+
+| Change | Before | After |
+|---|---|---|
+| Saved all-hit plan after dependency edit, new module, or deleted pass (four-module fixture) | Incorrect success in all 3 cases | All 3 refused; no Bend |
+| Unchanged all-hit consumption, one fixture observation each | 0.020ms | 0.722ms; no Bend/heavy admission |
+
+[Receipt](cache-plan/MEASURE.json), [time](cache-plan/MEASURE.time),
+[controls](cache-plan/TESTS.txt) and [contract/limits](cache-plan/README.md).
+The fixture uses mocked tools and test-only authenticated passes: these are
+validation/correctness measurements, not proof execution or real PR timing.
+Complete comparison **0.07s /28,244KiB peak RSS**, cost **$0**. Thirteen new
+negative/positive controls pass; all 111 relevant cache/closure/planner/guard
+tests pass in 2.117s, with independent lane-4 review and 70 repeated controls.
+Old plans or vanished entries require re-planning. Production callers still
+need immutable input snapshots; shared cache trust and actual bounded proof
+gate/timing remain pending. No full proof, compiler, Boat or release work ran.
