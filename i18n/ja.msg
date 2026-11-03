@@ -159,6 +159,10 @@ machines.title = 自分のマシン
 machines.lead.none = Tailscale上でBackplaneを動かしている他のマシンがここに表示されます。プロジェクトとスレッドは自動でこのサイドバーに同期されます。
 machines.lead = これらのマシンのプロジェクトとスレッドは裏でこのサイドバーに同期されるので、切り替える必要はありません。分けておきたいマシンはオフにしてください。
 machines.self = このマシン
+machines.unsure = リンクされていますが、あなたのマシンであることを確認できていないため同期しません。このリンクはあなたのものですか？
+machines.notmine.note = あなたのものではないと回答したリンクです。同期しません。
+machines.mine = 自分のもの
+machines.notmine = 自分のものではない
 # ja? uberbot term
 bots.name.uber = メインボットの名前
 bots.name = 名前
