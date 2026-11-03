@@ -288,6 +288,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .act.error { color: var(--bad); }
 /* Backplane's continue message after a restart (view.bend's
    View.carry.row): "› what it was told" opens what it said */
+.act.restart { align-items: flex-start; }
 .act.restart .summary { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 .carry-told { display: inline; margin-left: 6px; }
 .carry-told > summary { display: inline; cursor: pointer; list-style: none; color: var(--faint); }
