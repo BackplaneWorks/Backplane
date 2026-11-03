@@ -935,7 +935,10 @@ struct ProjectsView: View {
         } header: {
             HStack {
                 VStack(alignment: .leading) {
-                    Text(p.title).font(.subheadline.weight(.semibold)).textCase(nil)
+                    Button {
+                        let nav = p.id.replacingOccurrences(of: "|", with: "|project-home-", options: [], range: p.id.range(of: "|"))
+                        model.open(nav: nav, action: "select", value: nav, title: p.title)
+                    } label: { Label(p.title, systemImage: projectHomeSymbol(p.icon ?? "folder")).font(.subheadline.weight(.semibold)).textCase(nil) }
                     Text(p.machine.isEmpty ? p.root : p.machine + ": " + p.root)
                         .font(.caption2).textCase(nil).lineLimit(1).truncationMode(.head)
                 }
@@ -1098,7 +1101,7 @@ struct ThreadDestination: View {
     private var selected: Bool { model.screen.map { AppModel.nav($0) == id } ?? false }
     private var active: Bool { model.path.last == id }
     private var ready: Bool {
-        selected && model.contentReady && (model.screen?.bot != nil || model.screen?.thread != nil)
+        selected && model.contentReady && (model.screen?.bot != nil || model.screen?.thread != nil || model.screen?.projectHome != nil)
     }
     private var watchKey: WatchKey {
         WatchKey(id: id, attempt: attempt, active: active, ready: ready, links: model.links)
@@ -1136,6 +1139,9 @@ struct ThreadDestination: View {
                                cachedPlane: selected ? model.screen.flatMap { model.plane($0) } : model.seenPlanes[id])
                     .allowsHitTesting(ready || readableChat)
                     .disabled(!(ready || readableChat))
+                    .overlay(alignment: .top) { if !ready { loadingStatus } }
+            } else if let h = (selected ? model.screen?.projectHome : nil) ?? model.seenHomes[id] {
+                ProjectHomeScreen(model: model, home: h, live: ready).id(id)
                     .overlay(alignment: .top) { if !ready { loadingStatus } }
             } else if let t = (selected ? model.screen?.thread : nil) ?? model.seen[id] {
                 ThreadScreen(model: model, thread: t, live: ready).id(id)
@@ -1633,5 +1639,146 @@ struct LiveRow: View {
         let _ = RenderCount.tick("liveRow")
         #endif
         MarkdownView(blocks: blocks)
+    }
+}
+
+// Use the same semantic icon choices as Badge.icons on native platforms.
+private func projectHomeSymbol(_ icon: String) -> String {
+    switch icon {
+    case "circuit-board": return "rectangle.connected.to.line.below"
+    case "cpu": return "cpu"
+    case "zap": return "bolt"
+    case "radio": return "antenna.radiowaves.left.and.right"
+    case "box": return "shippingbox"
+    case "layers": return "square.3.layers.3d"
+    case "code": return "chevron.left.forwardslash.chevron.right"
+    case "terminal": return "terminal"
+    case "globe": return "globe"
+    case "wrench": return "wrench"
+    case "flask-conical": return "flask"
+    case "book": return "book"
+    case "star": return "star"
+    default: return "folder"
+    }
+}
+
+// Panels and their actions come from the same bounded Bend plan as the web.
+struct ProjectHomeScreen: View {
+    let model: AppModel
+    let home: ProjectHome
+    var live = true
+    @State private var draft = ""
+    @State private var fields: [String: String] = [:]
+    @FocusState private var composing: Bool
+    private func act(_ action: String, _ payload: String) {
+        guard live else { return }
+        if action == "select" {
+            let value = payload.isEmpty ? "" : (model.screen?.hub ?? "") + "|" + payload
+            model.open(nav: value, action: "select", value: value, title: "Thread")
+        } else if action == "home-view" { model.act("view", payload) }
+        else if action == "home-bom" { model.act("view", "review") }
+        else if action == "home-save" { model.act(action, fields["home-intent:" + home.owner] ?? payload) }
+        else { model.act(action, payload) }
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(home.cards.enumerated()), id: \.offset) { _, node in
+                        ProjectHomeNodeView(model: model, node: node, fields: $fields, act: act)
+                    }
+                }.padding()
+            }
+            VStack(spacing: 4) {
+                TextField("Start a thread about this project…", text: $draft, axis: .vertical)
+                    .lineLimit(1...5).focused($composing)
+                    .onChange(of: draft) { _, text in if live { model.act("draft", text) } }
+                HStack {
+                    Button("Defaults") { model.act("settings-page", "agents") }
+                    Spacer()
+                    Button(home.pending ? "Starting…" : "Start thread") { model.act("home-start", draft) }
+                        .disabled(home.pending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.frame(height: 36)
+            }.padding(12).background(BackplaneDesign.panel)
+        }
+        .navigationTitle(home.title).navigationBarTitleDisplayMode(.inline)
+        .toolbar { Button("Refresh") { model.act("home-refresh") }.disabled(!live) }
+        .onAppear { draft = home.draft }
+        .onChange(of: home.draft) { _, value in if !composing { draft = value } }
+        .disabled(!live)
+    }
+}
+
+private struct ProjectHomeNodeView: View {
+    let model: AppModel
+    let node: ProjectHomeNode
+    @Binding var fields: [String: String]
+    @FocusState private var editingName: Bool
+    let act: (String, String) -> Void
+    private var children: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array((node.kids ?? []).enumerated()), id: \.offset) { _, child in
+                ProjectHomeNodeView(model: model, node: child, fields: $fields, act: act)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var swatch: Color {
+        let hex = (node.style ?? "").components(separatedBy: "#").last ?? ""
+        guard let rgb = UInt32(hex, radix: 16) else { return .primary }
+        return Color(red: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255, blue: Double(rgb & 255) / 255)
+    }
+    var body: some View {
+        Group {
+            if node.tag == "svg" || node.tag == "path" || node.className == "shade" { EmptyView() }
+            else if node.className == "home-project-name" {
+                HStack(alignment: .center, spacing: 12) {
+                    ForEach(Array((node.kids ?? []).enumerated()), id: \.offset) { _, child in
+                        ProjectHomeNodeView(model: model, node: child, fields: $fields, act: act)
+                    }
+                }
+            } else if node.className == "glyphs" || node.className == "swatches" {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: node.className == "glyphs" ? 4 : 5), spacing: 8) {
+                    ForEach(Array((node.kids ?? []).enumerated()), id: \.offset) { _, child in
+                        ProjectHomeNodeView(model: model, node: child, fields: $fields, act: act)
+                    }
+                }
+            } else if node.className == "home-eyebrow" {
+                Text(node.plain).font(.caption2).foregroundStyle(.secondary)
+            } else if node.tag == "button" {
+                Button {
+                    if node.action == "rename-save" { act("rename-save", (node.payload ?? "") + "\u{1f}" + (fields["title:" + (node.payload ?? "")] ?? "")) }
+                    else { act(node.action ?? "", node.payload ?? "") }
+                } label: {
+                    HStack { if let glyph = node.kids?.first(where: { $0.tag == "svg" })?.icon { Image(systemName: projectHomeSymbol(glyph)) }
+                        if !node.plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text(node.plain) }
+                        else if node.className?.contains("swatch") == true { Circle().fill(swatch).frame(width: 24, height: 24) }
+                    }
+                }.accessibilityLabel(node.label ?? node.plain).buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 0))
+            } else if node.tag == "input", let field = node.field {
+                let id = node.payload ?? ""
+                let key = field + ":" + id
+                TextField("Display name", text: Binding(get: { fields[key] ?? node.content ?? "" }, set: {
+                    fields[key] = $0; model.act("bfield", field + "\u{1f}" + $0)
+                })).textFieldStyle(.plain).padding(6).overlay(Rectangle().stroke(BackplaneDesign.accent.opacity(0.4))).focused($editingName)
+                    .onAppear { fields[key] = node.content ?? ""; editingName = true }
+                    .onSubmit { act("rename-save", id + "\u{1f}" + (fields[key] ?? node.content ?? "")) }
+                    .onKeyPress(.escape) { act("rename-no", ""); return .handled }
+            } else if node.tag == "textarea", let field = node.field {
+                TextEditor(text: Binding(get: { fields[field] ?? node.content ?? "" }, set: {
+                    fields[field] = $0; model.act("bfield", field + "\u{1f}" + $0)
+                })).frame(minHeight: 180).accessibilityLabel("Goal, parts and notes")
+            } else if node.tag == "img", let src = node.src, let url = model.web(src) {
+                AsyncImage(url: url) { image in image.resizable().scaledToFit() } placeholder: { ProgressView() }
+                    .frame(maxHeight: 180)
+            } else if node.tag == "section" {
+                AnyView(children.padding(12).background(BackplaneDesign.panel)
+                    .overlay(Rectangle().stroke(BackplaneDesign.accent.opacity(0.25))))
+            } else if node.tag == "h1" || node.tag == "h2" {
+                AnyView(children.font(.headline))
+            } else if node.tag == "a", let href = node.href, !href.isEmpty {
+                Button(node.plain) { if let action = node.action, !action.isEmpty { act(action, node.payload ?? href) } else { model.act("open-url", href) } }
+            } else if let text = node.text { Text(text).textSelection(.enabled) }
+            else { AnyView(children) }
+        }
     }
 }

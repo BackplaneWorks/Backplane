@@ -235,10 +235,18 @@ def Composer.names(rows: List<&2, J.Json>) -> List<&2, String>:
 def Composer.thread(+thread: J.Json, +draft: String, +lc: I.Loc) -> J.Json:
   Composer.put(Composer.fields(), thread, Composer.of(thread, draft, lc))
 
+def Session.shown.home(has: Bool, +shown: J.Json, +session: J.Json) -> J.Json:
+  match has:
+    case False{}: shown
+    case True{}:
+      Session.object.set(shown, "projectHome", Session.object.set(J.Json.get_obj(shown, "projectHome"), "draft",
+        J.Str{J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), "")}))
+
 def Session.shown.draft(+shown: J.Json, +session: J.Json, +lc: I.Loc) -> J.Json:
-  Session.object.set(shown, "j", Session.object.set(J.Json.get_obj(shown, "j"), "thread",
-    Composer.thread(J.Json.get_obj(J.Json.get_obj(shown, "j"), "thread"),
-      J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), ""), lc)))
+  +screen = J.Json.get_obj(shown, "j")
+  Session.object.set(shown, "j", Session.shown.home(Bool.not(String.is_empty(J.Json.get_str(J.Json.get_obj(screen, "projectHome"), "owner", ""))),
+    Session.object.set(screen, "thread", Composer.thread(J.Json.get_obj(screen, "thread"),
+      J.Json.get_str(J.Json.get_obj(session, "drafts"), J.Json.get_str(session, "sel", ""), ""), lc)), session))
 
 def Session.issued.go(cs: List<&2, J.Json>) -> List<&2, J.Json>:
   match cs:

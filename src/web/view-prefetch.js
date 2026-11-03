@@ -6,7 +6,7 @@ import {validateThinResult} from './thin-results.js';
 export class ViewPrefetch {
   constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;}
   enqueue(target, priority=false) {
-    if (!viewTarget(target) || !['thread','bot'].includes(target.kind) || this.api.has(target)) return;
+    if (!viewTarget(target) || !['thread','bot','project'].includes(target.kind) || this.api.has(target)) return;
     const scope=this.api.scope(),key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target]);
     if (!scope.identity || !scope.epoch || this.attempted.has(key)) return;
     this.queue=this.queue.filter(x=>x.key!==key);
@@ -24,7 +24,7 @@ export class ViewPrefetch {
     if(this.attempted.size>=16)return;
     this.attempted.add(job.key);
     this.active={...job,scope};
-    const target=job.target,session={sel:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:{},adding:false,panel:false,wantNew:false,
+    const target=job.target,session={sel:target.kind==='project'?'project-home-'+target.id:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:{},adding:false,panel:false,wantNew:false,
       ...(target.kind==='bot'?{route:{kind:'bot-tab',bot:target.id,tab:'chat'}}:{})};
     const result=this.client.select(this.api.hub,target,session,'preview');
     if(result.failed){this.active=null;return;}

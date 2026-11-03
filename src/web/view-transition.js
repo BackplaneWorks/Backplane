@@ -14,9 +14,11 @@ export class ViewTransition {
     // the selected thread's own view, its composer anywhere in it (the rail
     // layout keeps it in .thread-content)
     const conversation = n => has(n, m => m.tag === 'main' && m.attrs.some(a => a.name === 'data-thread' && a.value === scope.selected) && has(m, composer));
+    const home = n => scope.target.kind === 'project' && scope.selected === 'project-home-' + scope.target.id &&
+      has(n, m => m.tag === 'main' && m.attrs.some(a => a.name === 'data-project-home' && a.value === scope.target.id) && has(m, composer));
     // Settings, Mailroom and other forms retain their existing field ownership;
     // never restore their mutable fields as a conversation picture.
-    if (!key || !scope.selected || !conversation(shown) || new TextEncoder().encode(JSON.stringify(shown)).length > this.bytes) return false;
+    if (!key || !scope.selected || !(conversation(shown) || home(shown)) || new TextEncoder().encode(JSON.stringify(shown)).length > this.bytes) return false;
     this.views.delete(key);this.views.set(key, shown);this.scopes.set(key, { ...scope });
     while (this.views.size > this.limit) { const old=this.views.keys().next().value;this.views.delete(old);this.positions.delete(old);this.scopes.delete(old); }
     if (persist && this.store) {

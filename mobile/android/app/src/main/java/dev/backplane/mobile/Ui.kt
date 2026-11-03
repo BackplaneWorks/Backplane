@@ -33,6 +33,17 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.DeveloperBoard
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -112,6 +123,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -132,6 +144,11 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
@@ -182,7 +199,8 @@ private fun OpeningDestination(m: AppModel, s: Screen, o: Core.Opening) {
         Box(Modifier.fillMaxSize().padding(padding).clearAndSetSemantics { }) {
             val b = m.seenBots[o.nav]
             val t = m.seenThreads[o.nav]
-            if (b != null && page != null) BotDestination(m, page, b)
+            if (page?.projectHome != null) ProjectHomeScreen(m, page, page.projectHome, live = false)
+            else if (b != null && page != null) BotDestination(m, page, b)
             else if (t != null) ThreadScreen(m, page ?: s.copy(thread = t, bot = null), t)
             else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -253,6 +271,14 @@ private fun AppContent(m: AppModel) {
                     m.opening != null -> {
                         BackHandler { m.back() }
                         OpeningDestination(m, s, m.opening!!)
+                    }
+                    s.projectHome != null -> {
+                        BackHandler { if (s.projectHome.viewer.open.isEmpty()) m.back() else m.act("view", "") }
+                        when {
+                            s.projectHome.viewer.open == "review" && s.projectHome.viewer.review != null -> ReviewScreen(m, s.projectHome.viewer, s.projectHome.viewer.review)
+                            s.projectHome.viewer.open.isNotEmpty() -> PlotScreen(m, s.projectHome.viewer)
+                            else -> ProjectHomeScreen(m, s, s.projectHome)
+                        }
                     }
                     s.thread != null && s.thread.viewer.open == "files" && s.thread.viewer.files != null -> {
                         BackHandler { m.act("view", "") }
@@ -745,6 +771,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                         val haptic = LocalHapticFeedback.current
                         ListItem(
                             headlineContent = { Text(p.title, style = MaterialTheme.typography.titleMedium) },
+                            leadingContent = { Icon(projectHomeIcon(p.icon), p.icon) },
                             supportingContent = {
                                 Text(if (p.machine.isEmpty()) p.root else p.machine + ": " + p.root,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -755,7 +782,10 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                             modifier = Modifier.combinedClickableCompat(onLong = {
                                 if (AppSettings.haptics) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 m.act("proj-menu", p.id)
-                            }) {},
+                            }) {
+                                val nav = p.id.substringBefore('|') + "|project-home-" + p.id.substringAfter('|')
+                                m.open(nav, "select", nav, p.title)
+                            },
                             // quiet (no live thread): faded, as on iOS
                             colors = if (p.quiet) ListItemDefaults.colors(
                                 headlineColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -1709,4 +1739,117 @@ private fun plotError(raw: String, lang: String): String = when {
     raw.startsWith("@bp.file-missing:") -> NativeMessages.viewer_file_missing(lang, raw.removePrefix("@bp.file-missing:"))
     raw == "@bp.file-unread" -> NativeMessages.viewer_file_unread(lang)
     else -> raw
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+private fun projectHomeIcon(name: String) = when (name) {
+    "folder" -> Icons.Filled.Folder
+    "circuit-board" -> Icons.Filled.DeveloperBoard
+    "cpu" -> Icons.Filled.Memory
+    "zap" -> Icons.Filled.Bolt
+    "radio" -> Icons.Filled.Radio
+    "box" -> Icons.Filled.Inventory2
+    "layers" -> Icons.Filled.Layers
+    "code" -> Icons.Filled.Code
+    "terminal" -> Icons.Filled.Terminal
+    "globe" -> Icons.Filled.Public
+    "wrench" -> Icons.Filled.Build
+    "flask-conical" -> Icons.Filled.Science
+    "book" -> Icons.Filled.MenuBook
+    "star" -> Icons.Filled.Star
+    else -> Icons.Filled.Folder
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProjectHomeScreen(m: AppModel, s: Screen, h: ProjectHome, live: Boolean = true) {
+    var draft by remember(s.hub, h.owner) { mutableStateOf(h.draft) }
+    val fields = remember(s.hub, h.owner) { mutableStateMapOf<String, String>() }
+    Scaffold(topBar = {
+        TopAppBar(title = { Text(h.title) }, navigationIcon = {
+            IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Projects") }
+        }, actions = { TextButton(onClick = { m.act("home-refresh") }, enabled = live) { Text("Refresh") } })
+    }, bottomBar = {
+        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).imePadding().navigationBarsPadding().padding(12.dp)) {
+            OutlinedTextField(draft, { draft = it; m.act("draft", it) }, Modifier.fillMaxWidth(), enabled = live,
+                placeholder = { Text("Start a thread about this project…") }, maxLines = 5)
+            Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { m.act("settings-page", "agents") }, enabled = live) { Text("Defaults") }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { m.act("home-start", draft) }, enabled = live && !h.pending && draft.isNotBlank()) {
+                    Text(if (h.pending) "Starting…" else "Start thread")
+                }
+            }
+        }
+    }) { pad ->
+        LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(12.dp)) {
+            items(h.cards) { node -> ProjectHomeNodeView(m, s, h, node, fields, live) }
+        }
+    }
+}
+
+@Composable
+private fun ProjectHomeNodeView(m: AppModel, s: Screen, h: ProjectHome, n: ProjectHomeNode,
+    fields: MutableMap<String, String>, live: Boolean) {
+    if (n.className == "home-project-name") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            n.kids.forEach { ProjectHomeNodeView(m, s, h, it, fields, live) }
+        }
+        return
+    }
+    if (n.className == "glyphs" || n.className == "swatches") {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            n.kids.chunked(if (n.className == "glyphs") 4 else 5).forEach { row ->
+                Row { row.forEach { ProjectHomeNodeView(m, s, h, it, fields, live) } }
+            }
+        }
+        return
+    }
+    if (n.className == "home-eyebrow") {
+        Text(n.plain, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    when (n.tag) {
+        "button" -> TextButton(enabled = live, onClick = {
+            when (n.action) {
+                "select" -> { val nav = s.hub + "|" + n.payload; m.open(nav, "select", nav, n.plain) }
+                "home-view" -> m.act("view", n.payload)
+                "home-bom" -> m.act("view", "review")
+                "home-save" -> m.act(n.action, fields["home-intent:" + h.owner] ?: "")
+                "rename-save" -> m.act("rename-save", n.payload + "\u001f" + (fields["title:" + n.payload] ?: ""))
+                else -> m.act(n.action, n.payload)
+            }
+        }) { Row(verticalAlignment = Alignment.CenterVertically) {
+            n.kids.firstOrNull { it.tag == "svg" }?.let { Icon(projectHomeIcon(it.icon), n.label.ifEmpty { it.icon }) }
+            if (n.plain.isNotBlank()) Text(n.plain)
+            else if (n.className.contains("swatch")) {
+                val color = runCatching { Color(android.graphics.Color.parseColor(n.style.substringAfter("background:"))) }.getOrDefault(MaterialTheme.colorScheme.primary)
+                Box(Modifier.size(24.dp).background(color, CircleShape))
+            }
+        } }
+        "input" -> {
+            val key = n.field + ":" + n.payload
+            val focus = remember { FocusRequester() }
+            val save = { m.act("rename-save", n.payload + "\u001f" + (fields[key] ?: n.content)) }
+            LaunchedEffect(key) { fields[key] = n.content; focus.requestFocus() }
+            OutlinedTextField(fields[key] ?: n.content, { fields[key] = it; m.act("bfield", n.field + "\u001f" + it) },
+                Modifier.fillMaxWidth().focusRequester(focus).onPreviewKeyEvent { if (it.key == Key.Escape) { m.act("rename-no"); true } else false },
+                enabled = live, singleLine = true, label = { Text("Display name") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { save() }))
+        }
+        "svg", "path" -> Unit
+        "textarea" -> OutlinedTextField(fields[n.field] ?: n.content,
+            { fields[n.field] = it; m.act("bfield", n.field + "\u001f" + it) },
+            Modifier.fillMaxWidth().heightIn(min = 180.dp), enabled = live, label = { Text("Goal, parts and notes") })
+        "h1", "h2" -> Column { n.kids.forEach { ProjectHomeNodeView(m, s, h, it, fields, live) } }
+        "a" -> TextButton(onClick = { if (n.action.isNotEmpty()) m.act(n.action, n.payload) else m.act("open-url", n.href) }, enabled = live) { Text(n.plain) }
+        "img" -> HubPicture(m, n.src, Modifier.fillMaxWidth().heightIn(max = 180.dp))
+        "section" -> Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            n.kids.forEach { ProjectHomeNodeView(m, s, h, it, fields, live) }
+        }
+        else -> if (n.className == "shade") Unit else if (n.text.isNotEmpty()) Text(n.text) else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            n.kids.forEach { ProjectHomeNodeView(m, s, h, it, fields, live) }
+        }
+    }
 }

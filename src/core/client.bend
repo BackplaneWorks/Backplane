@@ -1,4 +1,5 @@
 import Base
+import ./project-home.bend as PH
 import ./pathrecords.bend as PR
 import ./rpcout.bend as RPO
 import ./star-nudge.bend as STAR
@@ -1700,7 +1701,7 @@ def Ui.actions() -> List<&2, String>:
    "attach-up", "attach-end",
    "hist-go", "hist-prev", "hist-next", "hist-first", "hist-last", "hist-play", "hist-tick", "hist-diff", "hist-live", "hist-jump",
    "hist-show", "cmp", "cmp-pick", "cmp-close", "cmp-side", "cmp-shut", "key-add", "key-del", "fm", "fm-cd", "fm-up", "fm-open", "pdf-page", "fm-page", "update-now", "work-cancel", "task-cancel",
-   "view-layer-pick", "view-layer-mode", "skill-close", "wake-cancel", "deploy-cancel", "lock-release", "lock-cancel", "ref-go", "ref-back", "ref-fwd", "ref-copy", "ref-copy-web", "kicad-retry", "kicad-path", "kicad-path-save"]
+   "view-layer-pick", "view-layer-mode", "skill-close", "wake-cancel", "deploy-cancel", "lock-release", "lock-cancel", "ref-go", "ref-back", "ref-fwd", "ref-copy", "ref-copy-web", "kicad-retry", "kicad-path", "kicad-path-save", "proj-home", "home-refresh", "home-view", "home-start", "home-threads", "home-model", "home-intent", "home-save", "home-cancel", "home-more", "home-scan", "home-edit-page", "home-document", "home-document-close", "home-document-more", "home-bom", "home-poll", "home-price", "home-rename"]
 
 # Reading the client state
 # ------------------------
@@ -1845,8 +1846,11 @@ def Ui.dir(+st: M.State, +wt: String, +project: String) -> String:
 
 # the selected thread's directory: its worktree, else its project's folder
 # ("" with nothing selected). The viewer shows the board the thread edits.
-def Ui.root.here(+st: M.State, +sel: String) -> String:
+def Ui.root.thread(+st: M.State, +sel: String) -> String:
   Bool.pick(String, String.is_empty(sel), "", Ui.dir(st, Ui.thread_worktree(Ui.thread(st, sel)), Ui.thread_project(Ui.thread(st, sel))))
+
+def Ui.root.here(+st: M.State, +sel: String) -> String:
+  Bool.pick(String, PH.Home.is(sel), Ui.project_root(st, PH.Home.project(sel)), Ui.root.thread(st, sel))
 
 # A thread elsewhere shows the folder its hub keeps its files in (the
 # cache core/fview.bend names; "" until the first answer of far.view says
@@ -4317,11 +4321,24 @@ def Menu.shut(a: Act) -> Act:
 # the thread's header, the phones in a dialog), "rename-save" keeps the
 # field (the phones send "id\u001ftitle" as its value), "rename-no" leaves
 # it as it was. A blank title is never sent (laws ren_*).
+# Artifact labels are project-relative settings; CAD and STEP paths never move.
+def Asset.project(+u: Ui) -> String:
+  Bool.pick(String, PH.Home.is(Ui.sel(u)), PH.Home.project(Ui.sel(u)), Ui.thread_project(Ui.thread(Ui.state(u), Ui.sel(u))))
+
+def Asset.key(+u: Ui, +path: String) -> String:
+  "project.artifact.name." ++ Asset.project(u) ++ ":" ++ Bool.pick(String, String.starts_with(path, Ui.root(u) ++ "/"), String.drop(path, Nat.add(String.length(Ui.root(u)), 1n)), path)
+
+def Asset.name(+u: Ui, +path: String, fallback: String) -> String:
+  M.Setting.get(Ui.state(u), Asset.key(u, path), fallback)
+
 def Ren.clear(+u: Ui) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(u, "@ren", ""), "@f.title", "")
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@ren", ""), "@ren.kind", ""), "@ren.owner", ""), "@ren.inline", ""), "@f.title", "")
+
+def Ren.named(+u: Ui, kind: String, id: String, title: String) -> Act:
+  Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@menu", ""), "@ren", id), "@ren.kind", kind), "@ren.owner", Ui.sel(u)), "@f.title", title), [Focus{"thread-title"}]}
 
 def Ren.open(+u: Ui, +id: String) -> Act:
-  Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@menu", ""), "@ren", id), "@f.title", Active.title(Ui.thread(Side.st(u), id))), [Focus{"thread-title"}]}
+  Ren.named(Ui.scratch_set(u, "@ren.inline", ""), "thread", id, Active.title(Ui.thread(Side.st(u), id)))
 
 # the thread and the title a save names ("" for none)
 def Ren.id(+u: Ui, +v: String) -> String:
@@ -4330,12 +4347,18 @@ def Ren.id(+u: Ui, +v: String) -> String:
 def Ren.title(+u: Ui, +v: String) -> String:
   String.trim(Bool.pick(String, String.contains(v, "\u{1f}"), String.join(List.drop(&2, String, String.split(v, '\u{1f}'), 1n), " "), Ui.scratch(u, "@f.title")))
 
+def Ren.commit(kind: String, +u: Ui, +id: String, title: String) -> Act:
+  match kind:
+    case "project": Ui.rpc(Ren.clear(u), "project.rename", [J.KV{"project", J.Str{id}}, J.KV{"title", J.Str{title}}])
+    case "artifact": Ui.setting(Ren.clear(u), Asset.key(u, id) ++ "=" ++ title)
+    case _: Ui.rpc(Ren.clear(u), "thread.rename", [J.KV{"thread", J.Str{id}}, J.KV{"title", J.Str{title}}])
+
 def Ren.save.k(blank: Bool, +u: Ui, +id: String, +title: String) -> Act:
   match blank:
     case True{}:
       Act{Ren.clear(u), Nil{}}
     case False{}:
-      Ui.rpc(Ren.clear(u), "thread.rename", [J.KV{"thread", J.Str{id}}, J.KV{"title", J.Str{title}}])
+      Ren.commit(Ui.scratch(u, "@ren.kind"), u, id, title)
 
 def Ren.save(+u: Ui, +v: String) -> Act:
   Ren.save.k(Bool.or(String.is_empty(Ren.id(u, v)), String.is_empty(Ren.title(u, v))), u, Ren.id(u, v), Ren.title(u, v))
@@ -8336,10 +8359,132 @@ def Fab.sync.k(want: Bool, +u: Ui, cmds: List<&2, Cmd>) -> Act:
     case False{}:
       Act{u, cmds}
 
+# Project home is a route/owner, not a persisted conversation.
+def Home.contents(+u: Ui) -> J.Json:
+  +c = Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "home.snapshot")), J.Null{})
+  Bool.pick(J.Json, String.eq(J.Json.get_str(c, "project_home", ""), PH.Home.project(Ui.sel(u))), c, J.Null{})
+
+def Home.request(+u: Ui, +extra: List<&2, J.KV>) -> Act:
+  Ui.rpc(Ui.scratch_set(u, "@home.request", Nat.show(Made.rid(u))), "project.home", J.KV{"project", J.Str{PH.Home.project(Ui.sel(u))}} <> List.append(&2, J.KV, extra, Bool.pick(List<&2, J.KV>, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.obj(extra), "editor")), Nil{}, [J.KV{"editor", J.Num{Nat.show(J.Json.get_nat(Home.contents(u), "intentOffset", 0n))}}])))
+
+def Home.sync(a: Act) -> Act:
+  match a:
+    case Act{+u, +cs}:
+      +stamp = Ui.sel(u) ++ ":" ++ Nat.show(Nat.div(Side.now(u), 15n))
+      Bool.pick(Act, String.eq(Ui.scratch(u, "@home.at"), stamp), Act{u, cs},
+        Ui.first(cs, Ui.also(Home.request(Ui.scratch_set(u, "@home.at", stamp), Nil{}), [Later{15000n, "home-poll", stamp}])))
+
+def Home.viewer.allowed(+u: Ui) -> Bool:
+  Bool.and(Ui.panel(u), Bool.or(PH.Home.has_path(Home.contents(u), Ui.view_get(u, "view.path")),
+    Bool.and(String.eq(Ui.view_get(u, "view.kind"), "review"), Bool.not(String.is_empty(PH.Home.path(Home.contents(u), "schematic"))))))
+
+def Home.viewer.default(+u: Ui) -> Ui:
+  +board = PH.Home.path(Home.contents(u), "board")
+  +first = Bool.and(String.eq(Ui.info(u, "local.home.renderer"), "web"), Bool.and(Bool.not(String.is_empty(board)), String.is_empty(Ui.scratch(u, "@home.viewer:" ++ Ui.sel(u)))))
+  Bool.pick(Ui, first, Ui.info_set(Ui.view.k(Ui.scratch_set(u, "@home.viewer:" ++ Ui.sel(u), "1"), Ui.sel(u),
+    J.Json.obj([J.KV{"kind", J.Str{"board"}}, J.KV{"path", J.Str{board}}])), "local.hub.view", "1"), u)
+
+def Home.reply.current(valid: Bool, +u: Ui, +r: J.Json) -> Ui:
+  match valid:
+    case False{}: u
+    case True{}:
+      Bool.pick(Ui, String.is_empty(J.Json.get_str(r, "error", "")),
+        Home.viewer.default(Ui.info_set(Ui.scratch_set(Ui.scratch_set(u, "@home.error", ""), "@home.edit:" ++ Ui.sel(u), Bool.pick(String, J.Json.get_bool(r, "intentSaved", False{}), "", Ui.scratch(u, "@home.edit:" ++ Ui.sel(u)))), "home.snapshot", J.Json.show(r))),
+        Ui.scratch_set(u, "@home.error", J.Json.get_str(r, "error", "")))
+
+def Home.reply.result(document: Bool, +u: Ui, +r: J.Json) -> Ui:
+  match document:
+    case True{}: Ui.info_set(u, "home.document", J.Json.show(r))
+    case False{}: Home.reply.current(True{}, u, r)
+
+def Home.reply.valid(valid: Bool, +u: Ui, +r: J.Json) -> Ui:
+  match valid:
+    case False{}: u
+    case True{}: Home.reply.result(Maybe.is_some(&2, J.Json, J.Json.get(r, "document")), u, r)
+
+def Home.reply(+u: Ui, +o: J.Json) -> Ui:
+  +r = J.Json.get_obj(o, "result")
+  Home.reply.valid(Bool.and(String.eq(J.Json.as_raw(J.Json.get(o, "id"), ""), Ui.scratch(u, "@home.request")),
+    Bool.and(PH.Home.is(Ui.sel(u)), String.eq(J.Json.get_str(r, "project_home", ""), PH.Home.project(Ui.sel(u))))), u, r)
+
+# This read-only refresh is also run for a newly materialized thin actor.
+def Home.refresh(a: Act) -> Act:
+  match a:
+    case Act{+u, +cs}:
+      Bool.pick(Act, PH.Home.is(Ui.sel(u)), Home.sync(Act{u, cs}), Act{u, cs})
+
+def Home.open(+u: Ui, +project: String) -> Act:
+  Home.sync(Act{Ui.reselect(Ui.sel(u), Ui.select.nav(u, PH.Home.owner(project))), Nil{}})
+
+def Home.view(+u: Ui, +kind: String) -> Act:
+  +path = PH.Home.path(Home.contents(u), Bool.pick(String, String.eq(kind, "3d"), "board", kind))
+  Bool.pick(Act, String.is_empty(path), Act{u, Nil{}}, Act{Ui.view.k(u, Ui.sel(u), J.Json.obj([J.KV{"kind", J.Str{kind}}, J.KV{"path", J.Str{path}}])), Nil{}})
+
+def Home.edit(+u: Ui) -> Act:
+  Act{Ui.scratch_set(Ui.scratch_set(u, "@home.edit:" ++ Ui.sel(u), "1"), "@f.home-intent:" ++ Ui.sel(u), J.Json.get_str(Home.contents(u), "intent", "")), Nil{}}
+
+def Home.save(+u: Ui) -> Act:
+  Home.request(u, [J.KV{"op", J.Str{"intent"}}, J.KV{"revision", J.Str{J.Json.get_str(Home.contents(u), "intentRevision", "")}}, J.KV{"text", J.Str{Ui.scratch(u, "@f.home-intent:" ++ Ui.sel(u))}},
+    J.KV{"editor", J.Num{Nat.show(J.Json.get_nat(Home.contents(u), "intentOffset", 0n))}}, J.KV{"removeBytes", J.Num{Nat.show(J.Json.get_nat(Home.contents(u), "intentBytes", 0n))}}])
+
+def Home.start(+u: Ui) -> Act:
+  +waiting = Bool.not(String.is_empty(Ui.scratch(u, "@home.send.rid")))
+  Bool.pick(Act, Bool.or(waiting, String.is_empty(String.trim(Ui.draft_text(u)))), Act{u, [Focus{"composer"}]},
+    Ui.rpc.keep.msg(Made.want(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u,
+      "@home.send.owner", Ui.sel(u)), "@home.send.text", Ui.draft_text(u)), "@home.send.rid", Nat.show(Made.rid(u)))),
+      "project.start", [J.KV{"project", J.Str{PH.Home.project(Ui.sel(u))}}, J.KV{"text", J.Str{Ui.draft_text(u)}}]))
+
+# Inline edits share Ren's save/cancel actions, with an independent field.
+def Home.rename.kind(+kind: String, +u: Ui, +id: String) -> Act:
+  match kind:
+    case "project": Ren.named(u, kind, PH.Home.project(Ui.sel(u)), Ui.project_title(Ui.state(u), PH.Home.project(Ui.sel(u))))
+    case "thread":
+      Bool.pick(Act, String.eq(Ui.thread_project(Ui.thread(Ui.state(u), id)), PH.Home.project(Ui.sel(u))), Ren.named(u, kind, id, Active.title(Ui.thread(Ui.state(u), id))), Act{u, Nil{}})
+    case "artifact":
+      Bool.pick(Act, PH.Home.has_path(Home.contents(u), id), Ren.named(u, kind, id, Asset.name(u, id, J.Json.get_str(PH.Home.row(Home.contents(u), id), "title", id))), Act{u, Nil{}})
+    case _: Act{u, Nil{}}
+
+def Home.rename(+u: Ui, +value: String) -> Act:
+  +r = Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{})
+  Home.rename.kind(J.Json.get_str(r, "kind", ""), Ui.scratch_set(u, "@ren.inline", "1"), J.Json.get_str(r, "id", ""))
+
+def Home.dispatch(+u: Ui, +action: String, +value: String) -> Act:
+  match action:
+    case "proj-home": Home.open(u, value)
+    case "home-refresh": Home.request(u, Nil{})
+    case "home-rename": Home.rename(u, value)
+    case "home-price": Home.request(u, [J.KV{"op", J.Str{"price"}}])
+    case "home-poll": Bool.pick(Act, Bool.and(PH.Home.is(Ui.sel(u)), String.eq(value, Ui.scratch(u, "@home.at"))), Home.sync(Act{u, Nil{}}), Act{u, Nil{}})
+    case "home-view": Home.view(u, value)
+    case "send": Home.start(u)
+    case "send-alt": Home.start(u)
+    case "home-start": Home.start(Bool.pick(Ui, String.is_empty(value), u, Ui.scratch_set(u, Ui.sel(u), value)))
+    case "home-threads": Act{Ui.scratch_set(u, "@home.threads", value), Nil{}}
+    case "home-model":
+      Bool.pick(Act, PH.Home.has_path(Home.contents(u), value), Act{Ui.view.k(u, Ui.sel(u), J.Json.obj([J.KV{"kind", J.Str{"3d"}}, J.KV{"path", J.Str{value}}])), Nil{}}, Act{u, Nil{}})
+    case "home-document": Home.request(Ui.scratch_set(u, "@home.document.path", value), [J.KV{"op", J.Str{"document"}}, J.KV{"path", J.Str{value}}])
+    case "home-document-close": Act{Ui.info_set(u, "home.document", ""), Nil{}}
+    case "home-document-more":
+      Home.request(u, [J.KV{"op", J.Str{"document"}}, J.KV{"path", J.Str{Ui.scratch(u, "@home.document.path")}}, J.KV{"offset", J.Num{value}}])
+    case "home-intent": Home.edit(u)
+    case "home-save": Home.save(Bool.pick(Ui, String.is_empty(value), u, Ui.scratch_set(u, "@f.home-intent:" ++ Ui.sel(u), value)))
+    case "home-edit-page": Home.request(Ui.scratch_set(u, "@home.edit:" ++ Ui.sel(u), ""), [J.KV{"editor", J.Num{value}}])
+    case "home-cancel": Act{Ui.scratch_set(u, "@home.edit:" ++ Ui.sel(u), ""), Nil{}}
+    case "home-more": Home.request(u, [J.KV{"after", J.Num{value}}])
+    case "home-scan": Home.request(u, [J.KV{"scan", J.Num{value}}])
+    case _: Act{u, Nil{}}
+
+def Fab.sync.home(home: Bool, a: Act) -> Act:
+  match home:
+    case True{}: Home.sync(a)
+    case False{}:
+      match a:
+        case Act{+u, cmds}: Fab.sync.k(Fab.want(u), u, cmds)
+
 def Fab.sync(a: Act) -> Act:
   match a:
     case Act{+u, cmds}:
-      Fab.sync.k(Fab.want(u), u, cmds)
+      Fab.sync.home(PH.Home.is(Ui.sel(u)), Act{u, cmds})
 
 # the hub's card for a thread
 def Fab.has(+o: J.Json) -> Bool:
@@ -16946,11 +17091,30 @@ def Ui.act.allowance(i: Nat, +u: Ui, +action: String, +value: String) -> Act:
     case 2n: Allowancev.act(2n, u)
     case _: Star.dispatch(Bool.or(String.eq(action, "star-open"), String.eq(action, "star-dismiss")), u, action, value)
 
-def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.act.allowance(C.Codec.pos(["allowance-open", "allowance-close", "allowance-read"], action), u, action, value)
+def Ui.act.home(home: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match home:
+    case True{}: Bool.pick(Act, String.eq(action, "home-bom"), Rp.open(u, "bom"), Home.dispatch(u, action, value))
+    case False{}: Ui.act.allowance(C.Codec.pos(["allowance-open", "allowance-close", "allowance-read"], action), u, action, value)
 
-def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
-  Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))
+def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
+  Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)
+
+def Home.sent.clear(clear: Bool, +u: Ui, +owner: String, cs: List<&2, Cmd>) -> Act:
+  match clear:
+    case False{}: Act{u, cs}
+    case True{}: Act{Ui.scratch_set(u, owner, ""), List.append(&2, Cmd, cs, [Keep{owner, ""}])}
+
+def Home.sent.finish(mine: Bool, +a: Act, +o: J.Json) -> Act:
+  match mine a:
+    case False{} _: a
+    case True{} Act{+u, cs}:
+      +owner = Ui.scratch(u, "@home.send.owner")
+      Home.sent.clear(Bool.and(J.Json.get_bool(o, "ok", False{}), String.eq(Ui.scratch(u, owner), Ui.scratch(u, "@home.send.text"))),
+        Ui.scratch_set(u, "@home.send.rid", ""), owner, cs)
+
+def Ui.recv_act(+u: Ui, +o: J.Json) -> Act:
+  Home.sent.finish(Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@home.send.rid"))), String.eq(J.Json.as_raw(J.Json.get(o, "id"), ""), Ui.scratch(u, "@home.send.rid"))),
+    Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), Home.reply(u, o), o)), o)
 
 # The index may be supplied by a server-owned canonical-revision memo.
 # Online visibility and every unrelated info value are applied anew.

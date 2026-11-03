@@ -1,5 +1,6 @@
 import ../core/autosettle.bend as AUTO
 import Base
+import ./project-home.bend as PHOME
 import ./pairing.bend as PAIR
 import ./message-image.bend as MIMG
 import ./pdf.bend as PDF
@@ -3319,6 +3320,28 @@ def PdfJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +path: S
 def PdfJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +home: String, +path: String, +page: String) -> IO(Unit):
   IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", PDF.Pdf.sh(), "sh", path, page, home ++ "/pdf"], "/"), r => PdfJob.sent(r, inbox, client, id, path, page))
 
+# Price estimates use only the bounded, re-read fab metadata. No full intent,
+# project scan from the ordering card, upload or ordering action runs here.
+def ProjectHomeJob.fabs(rows: List<&2, J.Json>) -> List<&2, OR.FabFile>:
+  match rows:
+    case Nil{}: Nil{}
+    case +row <> rest:
+      +tail = ProjectHomeJob.fabs(rest)
+      Bool.pick(List<&2, OR.FabFile>, String.eq(J.Json.get_str(row, "kind", ""), "fab"),
+        OR.FabFile{J.Json.get_str(row, "path", ""), J.Json.get_str(row, "summary", "")} <> tail, tail)
+
+def ProjectHomeJob.with_price(r: J.Json, price: J.Json) -> J.Json:
+  match r:
+    case J.Obj{fields}: J.Obj{J.Field{"price", price, fields}}
+    case _: r
+
+def ProjectHomeJob.finish(price: Bool, +r: J.Json, +inbox: Chan(Msg), +client: U32, +id: String, +home: String, +cwd: String, +opts: String) -> IO(Unit):
+  match price:
+    case False{}: GitJob.reply(inbox, client, id, True{}, r)
+    case True{}:
+      IO.bind(J.Json, Unit, ODI.Od.look.ps(OR.Order.parts(ProjectHomeJob.fabs(J.Json.elems(J.Json.get_obj(r, "artifacts")))), home, cwd, "", "", Bool.not(String.starts_with(opts, "off")), ODI.Od.nth(String.lines(opts), 1n), Nil{}, "", ""),
+        p => GitJob.reply(inbox, client, id, True{}, ProjectHomeJob.with_price(r, p)))
+
 def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   match i:
     case 0n:
@@ -3360,6 +3383,8 @@ def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clien
       IO.bind(J.Json, Unit, ODI.Od.intent(home, cwd, thread, a, b), r => GitJob.reply(inbox, client, id, True{}, r))
     case 18n:
       BoardsJob.run(String.is_empty(cwd), inbox, client, id, thread, cwd)
+    case 19n:
+      IO.bind(String, Unit, PHOME.ProjectHome.read(cwd, a), raw => ProjectHomeJob.finish(String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(a), J.Null{}), "op", ""), "price"), Maybe.default(&2, J.Json, J.Json.parse(raw), J.Null{}), inbox, client, id, home, cwd, b))
     case _:
       GitJob.run.git(tx, job, inbox, client, id, thread, cwd, a, b, home)
 
@@ -3382,7 +3407,7 @@ def GitJob.run.r(rv: Bool, +tx: TextScope, +job: String, +inbox: Chan(Msg), +cli
     case True{}:
       IO.bind(RVS.Res, Unit, RVS.RvJob.run(job, thread, cwd, a, b, home), r => RvJob.reply(r, inbox, client, id))
     case False{}:
-      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent", "boards"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
+      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent", "boards", "project-home"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
 
 # a job the hub asked for: a git job, or one of the sidebar's
 def GitJob.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):

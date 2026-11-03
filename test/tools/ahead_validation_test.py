@@ -41,6 +41,15 @@ class Coverage(unittest.TestCase):
         self.assertTrue(C.inventory(src)['copy_local_gesture'])
         self.assertFalse(C.inventory(Deleted())['copy_local_gesture'])
 
+    def test_local_search_owner_must_exist(self):
+        src=C.Source()
+        class Deleted(C.Source):
+            def read(self,path):
+                text=src.read(path)
+                return text.replace('action === "thin-search-open"','action === "REMOVED_SEARCH_HANDLER"') if path=='src/web/host.js' else text
+        self.assertFalse(any(a['action']=='thin-search-open' for a in C.inventory(src)['missing']))
+        self.assertTrue(any(a['action']=='thin-search-open' for a in C.inventory(Deleted())['missing']))
+
     def test_indexed_handler_becomes_noop(self):
         src=C.Source()
         class Noop(C.Source):

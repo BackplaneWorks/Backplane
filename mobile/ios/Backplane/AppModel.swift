@@ -194,6 +194,8 @@ final class AppModel {
     private(set) var tapTimes: [String] = []
     #endif
     @ObservationIgnored private var seenOrder: [String] = []
+    private(set) var seenHomes: [String: ProjectHome] = [:]
+    @ObservationIgnored private var homeOrder: [String] = []
     // messages sent from this phone the client has not answered yet: shown
     // at once as sending, dropped when the answer (with its own sending
     // row) is on screen
@@ -551,6 +553,8 @@ final class AppModel {
             mailroomPositions = mailroomPositions.filter { $0.key.hub != key }
             if mailroomReturn?.hub == key { mailroomReturn = nil }
         }
+        seenHomes = retirement.keeping(seenHomes)
+        homeOrder = retirement.keeping(homeOrder)
         seen = retirement.keeping(seen)
         seenOrder = retirement.keeping(seenOrder)
         seenBots = retirement.keeping(seenBots)
@@ -1023,7 +1027,7 @@ final class AppModel {
                !cachedPresentation, !s.hub.isEmpty, startup[s.hub] == .thin,
                hubs[s.hub] != nil, let status = conn[s.hub], status.phase == .syncing || status.phase == .online,
                thinRequests[s.hub] != nil, (awaitedNav == nil || awaitedNav == Self.nav(s)),
-               ((action == "view" && s.thread != nil) || (action == "bot-tab" && s.bot != nil)) {
+               ((action == "view" && s.currentViewer != nil) || (action == "bot-tab" && s.bot != nil)) {
                 presentationIntent.offer(action, value, context: PresentationIntent.Context(hub: s.hub, selection: s.sel,
                     nav: Self.nav(s), epoch: status.epoch, pairing: pairingGeneration))
                 return
@@ -1079,11 +1083,11 @@ final class AppModel {
     }
 
     func viewerChoices(for thread: String) -> [Choice] {
-        guard !cachedPresentation, let s = screen, let current = s.thread, current.id == thread,
+        guard !cachedPresentation, let s = screen, let viewer = s.currentViewer,
               Self.nav(s) == thread, path.last == thread, awaitedNav == nil || awaitedNav == thread,
               hubs[s.hub] != nil, links.contains(where: { Pairing.key($0) == s.hub }),
               let status = conn[s.hub], status.phase == .online || status.phase == .syncing else { return [] }
-        return current.viewer.choices
+        return viewer.choices
     }
     func openViewer(_ kind: String, for thread: String) {
         // Recheck the actual owner at the tap boundary; a cached destination
@@ -1111,14 +1115,14 @@ final class AppModel {
         engine.viewerToken(nil)
     }
     private func beginViewerOpen(_ kind: String, continuingLoad: Bool = false) -> ViewerCloseIntent.Token? {
-        guard let s = screen, let thread = s.thread, !s.hub.isEmpty else { return nil }
+        guard let s = screen, let viewer = s.currentViewer, !s.hub.isEmpty else { return nil }
         if !continuingLoad { viewerLoadAttempt &+= 1 }
         viewerResume.cancel()
         viewerResumeExpected = nil
         viewerResumeFailed = nil
         viewerClosedStamp = nil
         ViewerClosedStamp.clear()
-        let token = viewerClose.reserve(owner: viewerOwner(s), source: .init(kind: kind, key: thread.viewer.key, layers: thread.viewer.layers))
+        let token = viewerClose.reserve(owner: viewerOwner(s), source: .init(kind: kind, key: viewer.key, layers: viewer.layers))
         viewerOpening = token
         viewerReceipt = nil
         viewerCloseSending = nil
@@ -1126,8 +1130,8 @@ final class AppModel {
         return token
     }
     private func reconcileViewer(_ s: Screen) {
-        guard let thread = s.thread else { cancelViewer(); return }
-        let owner = viewerOwner(s), source = viewerSource(thread.viewer)
+        guard let viewer = s.currentViewer else { cancelViewer(); return }
+        let owner = viewerOwner(s), source = viewerSource(viewer)
         if let requested = viewerOpening, requested.owner == owner {
             // A same-kind cached/refresh picture is not an acknowledgement of
             // this open. Receipt comes only from its accepted host operation.
@@ -1142,7 +1146,7 @@ final class AppModel {
             let accepted = ViewerCloseIntent.Token(owner: owner, source: source, presentation: requested.presentation)
             if let expected = viewerResumeExpected, expected.request == requested {
                 viewerResumeExpected = nil
-                guard ViewerResumeIntent.matchesSource(expected.captured, accepted: source), Self.defaultViewer(thread.viewer) else {
+                guard ViewerResumeIntent.matchesSource(expected.captured, accepted: source), Self.defaultViewer(viewer) else {
                     viewerOpening = nil
                     viewerReceipt = nil
                     viewerResumeFailed = viewerClose.current
@@ -1151,7 +1155,7 @@ final class AppModel {
                 }
             }
             viewerClose.accept(accepted)
-            viewerPublished = thread.viewer
+            viewerPublished = viewer
             viewerOpening = nil
             viewerReceipt = nil
             engine.viewerToken(accepted)
@@ -1170,7 +1174,7 @@ final class AppModel {
             if current.source != source { viewerClose.sent(current); engine.viewerToken(nil) }
             return
         }
-        viewerPublished = thread.viewer
+        viewerPublished = viewer
         if viewerClose.current?.owner != owner || viewerClose.current?.source != source {
             viewerLoadAttempt &+= 1
             let token = viewerClose.open(owner: owner, source: source)
@@ -1255,10 +1259,10 @@ final class AppModel {
     }
     func viewerNeedsSelection(_ token: ViewerCloseIntent.Token) -> Bool { viewerResumeFailed == token }
     private func advanceViewerResume() {
-        guard let s = screen, let thread = s.thread, let status = conn[s.hub],
-              let current = visibleViewerToken(for: thread.id), current.owner == viewerOwner(s),
+        guard let s = screen, let viewer = s.currentViewer, let status = conn[s.hub],
+              let current = visibleViewerToken(for: Self.nav(s)), current.owner == viewerOwner(s),
               path.last == current.owner.nav, awaitedNav == nil else { return }
-        let allowed = Set(thread.viewer.choices.map(\.value))
+        let allowed = Set(viewer.choices.map(\.value))
         if contentReady, viewerResume.preserves(current), !allowed.contains(current.source.kind) {
             viewerResume.cancel()
             viewerResumeFailed = current
@@ -1288,8 +1292,8 @@ final class AppModel {
         engine.viewerToken(expected.captured)
     }
     private func advanceViewerClose() {
-        guard let token = viewerClose.pending, viewerCloseSending == nil, let s = screen, let thread = s.thread,
-              viewerClose.canSend(token, owner: viewerOwner(s), source: viewerSource(thread.viewer), ready: contentReady) else { return }
+        guard let token = viewerClose.pending, viewerCloseSending == nil, let s = screen, let viewer = s.currentViewer,
+              viewerClose.canSend(token, owner: viewerOwner(s), source: viewerSource(viewer), ready: contentReady) else { return }
         viewerCloseSending = token
         let generation = pairingGeneration, e = engine
         Task {
@@ -2260,6 +2264,12 @@ final class AppModel {
             if label != langLabel { langLabel = label; refreshTexts() }
             if s.uber == nil { lastUber = nil; lastPlane = nil } else if s.plane != nil { lastUber = s.uber; lastPlane = s.plane }
             if let t = s.thread, !s.sel.isEmpty { remember(s.sel, t) }
+            if let home = s.projectHome, !s.sel.isEmpty {
+                seenHomes[s.sel] = home
+                homeOrder.removeAll { $0 == s.sel }
+                homeOrder.append(s.sel)
+                if homeOrder.count > 24 { seenHomes[homeOrder.removeFirst()] = nil }
+            }
             if s.hub != shownHub {
                 shownHub = s.hub
                 plots.reset()

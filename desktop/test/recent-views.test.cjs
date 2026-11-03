@@ -25,3 +25,17 @@ test('persisted picture validation rejects cross-owner, expired, oversized or ma
  assert(!cache.valid({...good,scope:{...scope,identity:'b'.repeat(64)}},partition));assert(!cache.valid({...good,savedAt:-1e10},partition));assert(!cache.valid({...good,shown:{type:'text',text:'x'}},partition));
  assert.equal(await cache.load({...scope,identity:''}).then(x=>x.length),0);
 });
+
+test('project homes use the same bounded picture cache with exact artifact-owner fences',async()=>{
+ const {ViewTransition}=await import('../../src/web/view-transition.js');
+ const {pictureOnly}=await import('../../src/web/recent-views.js');
+ const cache=new ViewTransition(), homeScope={...scope,selected:'project-home-project',target:{kind:'project',id:'project'},route:null};
+ const home=el('main',[{name:'data-project-home',value:'project'}],[el('form',[{name:'class',value:'composer home-composer'}],[el('textarea',[{name:'value',value:'Private project draft'}])])]);
+ assert(cache.put(homeScope,home));
+ assert.equal(cache.get(homeScope),home);
+ assert.equal(cache.destination(homeScope,{kind:'project',id:'project'}).shown,home);
+ assert.equal(cache.destination(homeScope,{kind:'project',id:'other'}),null);
+ assert(!cache.put({...homeScope,selected:'project-home-other'},home));
+ assert(!cache.put({...homeScope,target:{kind:'project',id:'other'}},home));
+ assert(!JSON.stringify(pictureOnly(home)).includes('Private project draft'));
+});

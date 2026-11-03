@@ -35,6 +35,7 @@ struct Row: Decodable, Identifiable, Hashable {
 struct Project: Decodable, Identifiable {
     // machine: the hub it is on, named when the phone has several
     let id, title, root, machine: String
+    let icon: String?
     let open: Bool
     let threads: [Row]
     let snoozedShelf: String
@@ -976,6 +977,18 @@ struct HubIsland: Decodable {
     let island: IslandAttributes.ContentState
 }
 
+struct ProjectHomeNode: Decodable {
+    let tag, text, action, payload, field, content, src, href, icon, className, style, label: String?
+    let kids: [ProjectHomeNode]?
+    var plain: String { text ?? (kids ?? []).map(\.plain).joined(separator: " ") }
+}
+struct ProjectHome: Decodable {
+    let owner, title, draft: String
+    let pending: Bool
+    let cards: [ProjectHomeNode]
+    let viewer: Viewer
+}
+
 struct Screen: Decodable {
     let bubMove: BubMove?
     let locale: String?
@@ -1021,6 +1034,13 @@ struct Screen: Decodable {
     // Hubs.islands); island above is all of them, for the picker
     let islands: [HubIsland]?
     let thread: ThreadView?
+    let projectHome: ProjectHome?
+    var currentViewer: Viewer? {
+        if let home = projectHome {
+            return sel == home.owner || sel == hub + "|" + home.owner ? home.viewer : nil
+        }
+        return thread?.id == sel ? thread?.viewer : nil
+    }
     // the hub's theme ("light", "dark"; empty follows the phone's): read only
     // once, to carry it into App settings (AppSettings.migrate)
     let theme: String?
@@ -1177,7 +1197,7 @@ extension Screen {
     private enum K: String, CodingKey {
         case bubMove, locale, online, version, error, note, sel, empty, hub, hubs, usageMachines, found, projects, sidebarPages, lang, view, making, active, legacy, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
-             folders, settings, find, island, islands, thread, theme, tabs, starNudge
+             folders, settings, find, island, islands, thread, projectHome, theme, tabs, starNudge
     }
 
     init(from decoder: Decoder) throws {
@@ -1238,6 +1258,7 @@ extension Screen {
         island = c.lossy(.island) ?? IslandAttributes.ContentState(running: 0, headline: "", lines: [])
         islands = c.lossy(.islands).map { (l: [Lossy<HubIsland>]) in l.compactMap(\.value) }
         thread = c.lossy(.thread)
+        projectHome = c.lossy(.projectHome)
         theme = c.lossy(.theme)
         tabs = c.lossy(.tabs)
     }

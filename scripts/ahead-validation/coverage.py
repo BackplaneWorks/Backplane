@@ -89,7 +89,7 @@ def inventory(src):
     # Do not count arbitrary host comparisons as handlers: e.g. bookkeeping
     # before forwarding "select" does not implement selection. Only these
     # local effect owners are admitted, and still need behavioral checks.
-    for action in ['copy', 'hold-bottom', 'load-earlier', 'sealed', 'secret-save', 'devices-open', 'desktop-folder']:
+    for action in ['copy', 'hold-bottom', 'load-earlier', 'sealed', 'secret-save', 'devices-open', 'desktop-folder', 'thin-search-open']:
         if re.search(r'action\s*===\s*[\'"]'+action+r'[\'"]', host):
             names.add(action)
     app = code(src.read('src/web/app.bend'))
