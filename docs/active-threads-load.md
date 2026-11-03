@@ -79,10 +79,24 @@ must remain live. Every phase asserts:
   both averaged over the phase and in sliding 975-ms arrival windows (25 ms
   receive jitter allowance). These bounds count received notices before client
   coalescing, so client request suppression cannot conceal notification floods.
-- The visible active view shows fresh advancing text at least once a second,
-  with at most a two-second gap and p99 lag. All thin views reject foreign text
-  and legacy broadcast frames. Closed sockets, bad replies, undecodable frames
-  and five-second request deadlines fail.
+- In the mixed phase, completed own-thread content must advance at the existing
+  minimum rate of one fresh marker per second, with at most a two-second gap
+  (including phase edges) and p99 lag at most two seconds.
+- Pure streaming follows the product's **static pending** contract: partial
+  response text remains private until `MessagePosted`. The selected active
+  thread must retain exactly one `@live:<thread>` Working/pending row at the
+  phase start and in every accepted view reply during the phase. At least one
+  successful phase reply is required; missing, wrong-thread, duplicate or
+  invalid pending rows fail. A pending row alone cannot prove transport
+  liveness: all twenty legacy-observed streams must still meet the unchanged
+  production/delivery rate, two-second gap and lag bounds. Fresh partial text
+  is not expected in `shown`, and appearing there fails this contract. The
+  harness sends no extra polling requests and requires no per-delta repaint
+  for an unchanged label; watchdog metadata can still trigger view replies.
+- All thin views reject foreign text and legacy broadcast frames. Closed
+  sockets, bad replies, undecodable frames and five-second request deadlines
+  fail. Notice and CPU bounds apply to both phases without exceptions for
+  pending presentation.
 - Actual hub process CPU is at most **80% of one core**, per phase and over
   the measured phases combined. `/proc/<owned-pid>/stat` user + system ticks
   cover all threads of that process; child agents and the measuring client are
@@ -121,4 +135,19 @@ This checks the actual codec, CPU sample parsing, notice window calculation,
 guards and one synthetic producer's protocol
 and receipts (about 300 ms of output, no hub), including the phase switch that
 must stop committed messages/tool calls/results, plus synthetic span/count diffs.
+It also checks both pending-row representations, rejects missing/wrong-thread/
+duplicate pending rows and rejects a phase with no successful view replies.
 It is not evidence that the live-hub CPU or rate limits pass.
+
+The `active-threads-v3` report marks presentation checks as `completed-content`
+or `static-pending`. Its raw production fixture and load parameters are unchanged
+from v2; its fixture hash changes with these assertion/source changes. Freeze
+this version and the same client dependencies for both comparison runs. Earlier
+v2 pure-streaming `advancing=0` failures are not evidence that the static pending
+view froze; the independent CPU, delivery, latency and isolation findings remain.
+
+The v4 fixture measures each phase in a fresh function call, avoiding the stale
+mixed-phase callback selection observed in a v3 report. Each phase also records
+`hubMemoryKiB` from the owned hub PID's `/proc/status`: current RSS, lifetime
+high-water RSS and swap. These are hub-process values, not the surrounding
+runner's combined memory peak.
