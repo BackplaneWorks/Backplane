@@ -134,7 +134,7 @@ test('a matching retained reconnect history keeps the current viewport instead o
  const callback=src.slice(a+'selection: '.length,b).trim().replace(/,$/,'');
  for(const retained of [true,false]){
   const saved=retained?{node:{history:true},direction:'older',conversation:'A',gone:{older:['a'],newer:[]},held:{pages:[{ids:['a']}]}}:null;
-  let transitions=0;const ctx={composerKeeper:{selecting(){}},takeReadingHistory:()=>saved,historyClear(){},historyNode:null,historyDirection:'',resumedConversation:null,historyGone:{older:new Set(),newer:new Set()},
+  let transitions=0;const ctx={transitionScope:()=>({}),thin:null,remoteReady:true,targetKey:()=>'',transitionViews:{warm:()=>Promise.resolve(false)},composerKeeper:{selecting(){}},takeReadingHistory:()=>saved,historyClear(){},historyNode:null,historyDirection:'',resumedConversation:null,historyGone:{older:new Set(),newer:new Set()},
    modelFeedback:{clear(){}},subsFeedback:{clear(){}},thinMailDraft:{clear(){}},thinContinuations:{clear(){}},bodyWindows:{disconnect(){}},App:{presentation_select:u=>u},ui:{},restoreFocused(){},restoreTransition(){transitions++;},transitionPosition:{atEnd:true}};
   vm.createContext(ctx);const select=vm.runInContext('('+callback+')',ctx);assert.equal(select({kind:'thread',id:'A'},{sel:'A'}),saved?.held);
   assert.equal(transitions,retained?0:1);if(retained){assert.equal(ctx.transitionPosition,null);assert.equal(ctx.historyNode,saved.node);assert.equal(ctx.resumedConversation,'A');}
@@ -157,7 +157,7 @@ test('owning-history reset drops retained DOM rows before normal history project
 
 test('an oversized picture never closes the live socket or starts reconnect backoff',()=>{
  const src=source(),a=src.indexOf('  const viewRecover = reason => {'),b=src.indexOf('\n  try {',a);assert(a>0&&b>a);
- let shown=0;const recover=vm.runInNewContext('('+src.slice(a+'  const viewRecover = '.length,b).trim().replace(/;$/,'')+')',{current:()=>true,showViewLimit(){shown++;},downNote:'',Date:{now(){throw Error('must not enter reconnect/backoff');}},disconnect(){throw Error('socket must stay live');},s:{close(){throw Error('socket must stay live');}}});for(const reason of ['LIMIT','invalid view presentation','invalid view delta','View request timed out; actions were not resent'])recover(reason);assert.equal(shown,4);
+ let shown=0;const recover=vm.runInNewContext('('+src.slice(a+'  const viewRecover = '.length,b).trim().replace(/;$/,'')+')',{previewViews:{stop(){}},current:()=>true,showViewLimit(){shown++;},downNote:'',Date:{now(){throw Error('must not enter reconnect/backoff');}},disconnect(){throw Error('socket must stay live');},s:{close(){throw Error('socket must stay live');}}});for(const reason of ['LIMIT','invalid view presentation','invalid view delta','View request timed out; actions were not resent'])recover(reason);assert.equal(shown,4);
 });
 
 test('bottom reconciles a paging-owned unread boundary even when host away is already empty',()=>{
