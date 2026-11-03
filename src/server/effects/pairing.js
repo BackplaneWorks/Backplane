@@ -117,9 +117,27 @@ function pairingStore({home, root, now = () => Date.now(), random = n => require
 function pairingAddress(link) {
   try { const u = new URL(link);return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password ? u.origin : ''; } catch { return ''; }
 }
+// Whether an origin is one of the owner's hubs, as this hub knows them: its
+// own listener-confirmed routes, the owner's machines it found (Tailscale's
+// same-owner peers and BACKPLANE_PEERS, by address, or by MagicDNS name in
+// the owner's tailnet domain) and the linked hubs it verified as the
+// owner's (server.bend's Far.own). A desktop app asks before following a
+// pairing link (desktop/main.cjs): a link to any other origin is not paired
+// without the person saying so.
+function pairingKnown(origin, {routes = [], machines = {}, peers = []} = {}) {
+  let u;try { u = new URL(origin); } catch { return false; }
+  if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) return false;
+  const at = x => { try { const v = new URL(x);return v.protocol + '//' + v.host; } catch { return ''; } };
+  const self = machines.self || {}, others = Array.isArray(machines.peers) ? machines.peers : [];
+  const urls = [...routes, self.url, ...others.map(m => m && m.url), ...peers].filter(x => typeof x === 'string' && x).map(at).filter(Boolean);
+  if (urls.includes(u.protocol + '//' + u.host)) return true;
+  const domain = typeof self.domain === 'string' ? self.domain.toLowerCase().replace(/\.$/, '') : '';
+  const host = u.hostname.toLowerCase(), names = [self.name, ...others.map(m => m && m.name)].filter(x => typeof x === 'string' && x).map(x => x.toLowerCase());
+  return !!domain && host.endsWith('.' + domain) && names.includes(host.slice(0, host.indexOf('.')));
+}
 let bp_pairing;
 function pairing_start(home, root, host, port) {
-  try { bp_pairing = {store: pairingStore({home, root}), host, port, routes: []};return ''; }
+  try { bp_pairing = {store: pairingStore({home, root}), host, port, routes: [], machines: {}, peers: []};return ''; }
   catch { return 'Cannot read or initialize device registry; existing pairings were preserved'; }
 }
 function pairing_address(link) {
@@ -130,6 +148,14 @@ function pairing_address(link) {
 function pairing_resolve(token, client, route) {
   try { return bp_pairing.store.resolve(token, Number(client), route); } catch { return ''; }
 }
+// (the machines this hub found, and the urls of the linked hubs it verified
+// as the owner's: server.bend's Hub.machines)
+function pairing_known(machines, peers) {
+  if (!bp_pairing) return {$: 'Unit'};
+  try { bp_pairing.machines = JSON.parse(machines) || {}; } catch { bp_pairing.machines = {}; }
+  try { const p = JSON.parse(peers);bp_pairing.peers = Array.isArray(p) ? p.filter(x => typeof x === 'string') : []; } catch { bp_pairing.peers = []; }
+  return {$: 'Unit'};
+}
 function pairing_active(client) { return {$: bp_pairing?.store.active(Number(client)) ? 'True' : 'False'}; }
 function pairing_forget(client) { bp_pairing?.store.forget(Number(client));return {$: 'Unit'}; }
 function pairing_request(op, secret, name, authority, https) {
@@ -139,6 +165,7 @@ function pairing_request(op, secret, name, authority, https) {
     if (op === 'list') return JSON.stringify(store.list());
     if (op === 'revoke') return JSON.stringify(store.revoke(secret));
     if (op === 'uninvite') return JSON.stringify(store.uninvite(secret));
+    if (op === 'known') return JSON.stringify({known: pairingKnown(secret, {routes: [...bp_pairing.routes, 'http://' + host + ':' + port], machines: bp_pairing.machines, peers: bp_pairing.peers})});
     if (op === 'create') {
       const routes = [...bp_pairing.routes], scheme = https ? 'https://' : 'http://';
       // This exact origin already authenticated the issuing client. Other
@@ -162,3 +189,5 @@ io_eff(CID(Pairing.forget), pairing_forget);
 io_eff(CID(Pairing.active), pairing_active);
 
 io_eff(CID(Pairing.address), pairing_address);
+
+io_eff(CID(Pairing.known), pairing_known);

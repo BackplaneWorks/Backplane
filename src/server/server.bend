@@ -5716,11 +5716,31 @@ def Hub.att_dir(h: Hub, +thread: String, +reply: Chan(String)) -> IO(Hub):
         ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, Nat.show(AT.Att.max(M.Setting.get(st, AT.Att.key(), ""))) ++ "\t" ++ AT.Att.dir(Cfg.home(cfg), thread))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
-# the owner's other machines changed: every client hears
+# the urls of the links that are the owner's machines (Far.own)
+def Hub.machines.url(ok: Bool, p: BO.Peer, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match ok p:
+    case True{} BO.Peer{_, _, u, _, _}:
+      J.Str{u} <> rest
+    case False{} _:
+      rest
+
+def Hub.machines.urls(ps: List<&2, BO.Peer>, +st: M.State, +j: J.Json) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      Hub.machines.url(UC.Far.mine(st, j, p), p, Hub.machines.urls(t, st, j))
+
+# the owner's other machines changed: every client hears (and the pairing
+# links' check learns them, with the urls of the links that are the
+# owner's machines: PAIR.Pairing.known)
 def Hub.machines(h: Hub, +mc: String) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
-      Hub.models.k(Hub{st, f, ls, cl, as, inbox, Cfg.with_machines(cfg, mc), note})
+    case Hub{+st, f, ls, +cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +c2 : Cfg = Cfg.with_machines(cfg, mc)
+        PAIR.Pairing.known(mc, J.Json.show(J.Json.arr(Hub.machines.urls(BO.World.peers(M.State.bots(st)), st, Maybe.default(&2, J.Json, J.Json.parse(mc), J.Null{})))))
+        Hub.models.k(Hub{st, f, ls, cl, as, inbox, c2, note})
 
 # the providers' models changed: new threads' prompts and every client see
 # the new list
@@ -16556,6 +16576,7 @@ def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Requ
     case "/auth/revoke" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs,
       Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), "revoke", "uninvite"),
       Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), W.Http.header_of(hs, "x-backplane-device"), W.Http.header_of(hs, "x-backplane-invitation")), inbox)
+    case "/auth/known" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "known", W.Http.header_of(hs, "x-backplane-origin"), inbox)
     case _ _: Conn.devices.fallback(String.is_empty(token), token, s, req, rest, web, id, inbox, trusted)
 
 
