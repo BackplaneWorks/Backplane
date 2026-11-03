@@ -34,7 +34,7 @@ class Handoff(unittest.TestCase):
             self.job(name, out)
 
     def job(self, name, out, **patch):
-        r = {'schema': 3, 'id': name, 'cmd_template': ['x'], 'timeout_seconds': 3000, 'timed_out': False, 'flock': True,
+        r = {'schema': 3, 'id': name, 'cmd_template': ['x'], 'timeout_seconds': 3000, 'timed_out': False, 'flock': True, 'flock_path': low.REAL_LOCK,
              'phases': list(low.PHASES), 'env': low.PINNED_ENV, 'protected': PROT, 'output_bytes': {}, 'exit': 0, 'cap_bytes': CAP, 'enforcement': enf(CAP, 10 ** 9),
              'controller': enf(low.CONTROLLER_CAP, 10 ** 8), 'swap_activity': False, 'boat_sandbox': True,
              'mem_total_bytes': 8 * low.GIB, 'source': self.source, 'tools': self.tools, 'outputs': out}
@@ -98,7 +98,7 @@ class Handoff(unittest.TestCase):
         self.bun = None; self.reject()
 
     def test_receipt_missing_flock_timeout_phases(self):
-        for kw in ({'flock': False}, {'timed_out': True}, {'timeout_seconds': None}, {'phases': ['command']}, {'protected': {}}):
+        for kw in ({'flock': False}, {'flock_path': '/tmp/x.lock'}, {'timed_out': True}, {'timeout_seconds': None}, {'phases': ['command']}, {'protected': {}}):
             self.job('web', {'index.html': '3' * 64}, **kw); self.reject(); self.setUp()
 
     def test_missing_bindings(self):

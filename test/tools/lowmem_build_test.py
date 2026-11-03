@@ -34,7 +34,7 @@ def receipt(**kw):
          'controller': enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=100 * 1024 ** 2),
          'swap_activity': False, 'boat_sandbox': True, 'mem_total_bytes': 8 * lm.GIB, 'source': SRC, 'tools': TOOLS,
          'outputs': {'hub.js': H('1')}, 'output_bytes': {'hub.js': 100}, 'cmd_template': CMD, 'timeout_seconds': 3000,
-         'timed_out': False, 'flock': True, 'phases': list(lm.PHASES), 'env': lm.PINNED_ENV, 'protected': PROT}
+         'timed_out': False, 'flock': True, 'flock_path': lm.REAL_LOCK, 'phases': list(lm.PHASES), 'env': lm.PINNED_ENV, 'protected': PROT}
     r.update(kw)
     return r
 
@@ -79,7 +79,7 @@ class Judge(unittest.TestCase):
 
     def test_timeout_flock_phases(self):
         for r in (receipt(timed_out=True), receipt(timed_out=None), receipt(timeout_seconds=None), receipt(timeout_seconds=0),
-                  receipt(timeout_seconds=10 ** 6), receipt(flock=False), receipt(phases=lm.PHASES[:-1]),
+                  receipt(timeout_seconds=10 ** 6), receipt(flock=False), receipt(flock_path='/tmp/other.lock'), receipt(phases=lm.PHASES[:-1]),
                   receipt(phases=lm.PHASES[::-1]), receipt(phases=[])):
             self.assertTrue(self.j(r), r['phases'] if r else r)
 
@@ -271,7 +271,7 @@ class Worker(unittest.TestCase):
         ctl = controller or enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=1000)
         with patch.object(lm, 'run_capped', capped), patch.object(lm, 'cgroup_dir', return_value=(Path(tmp), False)), \
                 patch.object(lm, 'read_enforcement', return_value=ctl), patch.object(lm, 'source_identity', return_value=SRC), \
-                patch.object(lm, 'tool_identity', return_value=TOOLS), patch.object(lm, 'native_flock', return_value=flock):
+                patch.object(lm, 'tool_identity', return_value=TOOLS), patch.object(lm, 'native_flock', return_value=(flock, lm.REAL_LOCK)):
             rc = lm.worker(a)
         return rc, json.loads((Path(a.out) / 'hub.receipt.json').read_text())
 
@@ -371,6 +371,30 @@ class RealScope(unittest.TestCase):
             self.assertEqual(p.returncode, 1); self.assertFalse(marker.exists())
             self.assertFalse(r['flock']); self.assertIsNone(r['exit']); self.assertNotIn('command', r['phases'])
             self.assertEqual(r['controller']['memory_max'], lm.CONTROLLER_CAP)  # the controller was really capped
+
+    def test_flock_inherited_through_the_scoped_worker(self):
+        """The real worker re-execs itself into a capped systemd scope; the held lock must arrive there, and only then."""
+        import fcntl
+        with tempfile.TemporaryDirectory() as t:
+            lock = Path(t) / 'lock'
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR); self.addCleanup(os.close, fd)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); os.set_inheritable(fd, True)
+            def worker(out, env):
+                p = subprocess.run([sys.executable, str(ROOT / 'scripts/lowmem-build.py'), 'worker', '--id', 'hub', '--out', str(Path(t) / out),
+                                    '--timeout', '60', '--', 'sh', '-c', 'echo x > {out}/hub.js'],
+                                   capture_output=True, text=True, env=env, cwd=ROOT, pass_fds=(fd,))
+                return json.loads((Path(t) / out / 'hub.receipt.json').read_text())
+            env = {**os.environ, 'LOWMEM_LOCK_PATH': str(lock), 'BACKPLANE_HEAVY_LOCK_FD': str(fd)}
+            held = worker('held', env)
+            self.assertTrue(held['flock']); self.assertEqual(held['exit'], 0)
+            self.assertEqual(held['phases'], lm.PHASES)
+            self.assertEqual(held['controller']['memory_max'], lm.CONTROLLER_CAP)
+            self.assertEqual(held['enforcement']['memory_max'], lm.COMPILER_CAP)
+            self.assertLess(held['enforcement']['memory_max'] + held['controller']['memory_max'], 4 * lm.GIB)
+            # a private lock is never the real admission: its receipt is refused even though everything else ran
+            self.assertTrue(any('flock' in w for w in lm.receipt_problems(held, lm.COMPILER_CAP, require_boat=False)))
+            lost = worker('lost', {k: v for k, v in env.items() if k != 'BACKPLANE_HEAVY_LOCK_FD'})
+            self.assertFalse(lost['flock']); self.assertIsNone(lost['exit'])
 
     def test_inherited_flock_survives_the_scope_and_is_refused_without_it(self):
         import fcntl
