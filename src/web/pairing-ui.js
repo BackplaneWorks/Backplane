@@ -155,7 +155,10 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       try {
         const invite = await request('/auth/invitations', 'POST');if (!panel?.contains(card)) return;
         const until = element('p', '', invitation, {role: 'status'});
-        const update = () => { const seconds = Math.max(0, Math.ceil((invite.expiresAt - Date.now()) / 1000));until.textContent = seconds ? 'Works once · expires in ' + Math.ceil(seconds / 60) + ' minutes' : 'Expired — create a new invitation';if (!seconds) { clearInterval(expiryTimer);for (const b of invitation.querySelectorAll('button')) b.disabled = true; } };
+        // (while it can still be used, the list below looks again every 3 s,
+        // so the device it brings in shows up without leaving this page)
+        let ticks = 0;
+        const update = () => { const seconds = Math.max(0, Math.ceil((invite.expiresAt - Date.now()) / 1000));if (seconds && ++ticks % 3 === 0) void refresh(true);until.textContent = seconds ? 'Works once · expires in ' + Math.ceil(seconds / 60) + ' minutes' : 'Expired — create a new invitation';if (!seconds) { clearInterval(expiryTimer);for (const b of invitation.querySelectorAll('button')) b.disabled = true; } };
         expiryTimer = setInterval(update, 1000);update();
         element('p', invite.code, invitation, {class: 'pairing-code'});
         element('p', 'Hub address: ' + invite.routes[0], invitation);
@@ -172,7 +175,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     });
     add.classList.add('primary');
     const list = element('section', '', card);element('h2', 'Paired devices', list);
-    async function refresh() {
+    async function refresh(quiet = false) {
       try {
         const result = await request('/auth/devices');if (!panel?.contains(card)) return;
         list.replaceChildren();element('h2', 'Paired devices', list);
@@ -183,7 +186,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
           element('p', 'Last seen ' + new Date(d.lastSeen).toLocaleString(), row);
           button(row, 'Revoke', async () => { if (!globalThis.confirm('Revoke access for ' + d.name + '?')) return;try { await request('/auth/revoke', 'POST', {'X-Backplane-Device': d.id});await refresh(); } catch(e) { error(status, e.message); } });
         }
-      } catch(e) { error(status, e.message); }
+      } catch(e) { if (!quiet) error(status, e.message); }
     }
     await refresh();
   }
