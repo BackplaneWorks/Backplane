@@ -2538,3 +2538,67 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 }
 
 .shot.image-unavailable.missing::before { content: none; }
+
+/* Project home: saved contents first, CAD opens through the existing viewer. */
+.project-home-link { border:0; background:none; padding:0; text-align:left; color:inherit; font:inherit; text-transform:inherit; letter-spacing:inherit; cursor:pointer; }
+.project-home-link:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.project-home .home-header { display:flex; align-items:center; gap:16px; padding:16px 20px; border-bottom:1px solid var(--line); }
+.home-header h1 { margin:3px 0 0; font-size:20px; font-weight:600; }
+.home-header > div { flex:1; min-width:0; overflow-wrap:anywhere; }
+.home-header .back { display:none; }
+.home-eyebrow { color:var(--dim); font-size:10px; letter-spacing:.12em; }
+.home-scroll { flex:1; min-height:0; overflow:auto; padding:20px; scrollbar-gutter:stable; }
+.home-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+.home-card { border:1px solid var(--line); padding:12px; min-width:0; background:var(--bg); overflow-wrap:anywhere; }
+.home-card h2 { margin:-12px -12px 12px; padding:10px 12px; font-size:12px; background:var(--panel); border-bottom:1px solid var(--line); }
+.home-card .body { max-height:260px; overflow:auto; font-size:12px; }
+.home-card-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding-top:10px; }
+.home-file { display:block; color:var(--dim); font:11px/1.6 var(--mono); overflow-wrap:anywhere; }
+.home-thread { display:flex; gap:12px; align-items:center; width:100%; text-align:left; border:0; border-bottom:1px solid var(--line); padding:10px 0; background:none; min-height:44px; }
+.home-thread-title { flex:1; min-width:0; overflow-wrap:anywhere; }
+.home-thread-state { color:var(--dim); font-size:10px; flex:none; }
+.home-intent-field { width:100%; min-height:240px; background:var(--panel); border:1px solid var(--line); padding:10px; margin-bottom:10px; }
+.home-error:empty { display:none; }
+.home-error { color:var(--bad); display:block; padding-bottom:12px; }
+.home-composer textarea { min-height:48px; }
+@media(max-width:760px) {
+ .project-home .home-header { padding:10px 12px; gap:8px; flex-wrap:wrap; }
+ .home-header .back { display:block; min-height:44px; width:100%; text-align:left; background:none; border:0; color:var(--accent); }
+ .home-header h1 { font-size:18px; }
+ .home-scroll { padding:12px; }
+ .home-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
+ .home-card button { min-height:44px; }
+ .home-intent-field { font-size:16px; }
+}
+.app.panel:has(> main.project-home), .app.top.panel:has(> main.project-home) { grid-template-columns:264px minmax(0,1fr); }
+.home-live-viewer { grid-column:1 / -1; min-width:0; min-height:360px; }
+.app .project-home .viewer { position:relative; inset:auto; width:100%; height:360px; min-height:360px; border:1px solid var(--line); }
+.project-home .viewer-split { display:none; }
+.home-thumbnail { display:block; width:100%; height:140px; object-fit:contain; background:var(--view); margin-bottom:10px; }
+.home-status { width:100%; text-align:left; color:var(--warn); min-height:36px; }
+@media(max-width:760px) {
+ .app.panel:has(> main.project-home), .app.top.panel:has(> main.project-home) { grid-template-columns:minmax(0,1fr); }
+ .home-live-viewer { min-height:300px; }
+ .app .project-home .viewer { height:300px; min-height:300px; }
+}
+.project-head.on { background:var(--raise); box-shadow:inset 2px 0 var(--accent); color:var(--text); }
+.project-head .project-disclosure { padding:0 4px 0 0; min-width:18px; }
+.home-document-body { white-space:pre-wrap; overflow-wrap:anywhere; max-height:400px; overflow:auto; font:12px/1.6 var(--mono); }
+
+/* Project names share the canonical rename field; never the message draft. */
+.home-project-name { display:flex; align-items:center; gap:12px; min-width:0; }
+.home-project-name h1 { margin:0; min-width:0; }
+.home-project-icon { flex:none; width:44px; height:44px; display:grid; place-items:center; }
+.home-edit-name { font:inherit; color:inherit; background:transparent; text-align:left; border:0; padding:2px 0; max-width:100%; overflow-wrap:anywhere; }
+.home-edit-name::after { content:' ✎'; font-size:0.7em; color:var(--dim); }
+.home-inline-edit { display:flex; gap:6px; align-items:center; flex-wrap:wrap; min-width:0; }
+.home-inline-edit input { min-width:80px; width:180px; max-width:100%; font:inherit; }
+.home-thread > .home-edit-name { flex:1; }
+.home-icon-picker .look { position:absolute; left:16px; top:80px; z-index:80; }
+.home-live-viewer > h2 { padding:8px 12px; margin:0; }
+
+.home-features { display:flex; flex-wrap:wrap; gap:6px 12px; }
+.home-card > .body { max-height:180px; overflow:hidden; }
+
+/* Embedded home viewers own their tabs; no outer workspace rail replaces them. */
+.project-home .viewer > .viewer-tabs { display:flex; }

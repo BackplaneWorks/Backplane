@@ -1,4 +1,6 @@
 import Base
+import ./project-home.bend as PHV
+import ../core/project-home.bend as PH
 import ./composer-bar.bend as CBAR
 import ../core/chat-pending.bend as CP
 import ./terminal-cells.bend as TCELL
@@ -385,6 +387,7 @@ def View.look.loc(+lc: I.Loc, open: Bool, +st: M.State, +id: String, +rm: Bool) 
        D.El{"div", "", [D.At{"class", "look"}], [
          D.El{"div", "", [D.At{"class", "swatches"}], View.swatches(BG.Badge.colors(), BG.Badge.color(st, id), id)},
          D.El{"div", "", [D.At{"class", "glyphs"}], View.glyphs(BG.Badge.icons(), BG.Badge.icon(st, id), id)},
+         D.Dom.button("", "look", "", "Close icon picker", "Close"),
          D.Dom.button("remove", "proj-remove", id, MSG.T.sidebar.remove.note(lc), Bool.pick(String, rm, MSG.T.menu.remove.confirm(lc), MSG.T.menu.project.remove(lc)))]}]
     case False{}:
       Nil{}
@@ -426,14 +429,14 @@ def View.project(+lc: I.Loc, r: U.SRow, +quiet: Bool, +open: Map<&2, Bool>, +ix:
   match r:
     case U.SRow{_, M.Project{+id, title, root, _, _}, M.Shelves{pinned, active, settled, hidden, snoozed}}:
       D.El{"section", id, [D.At{"class", Bool.pick(String, Bool.or(quiet, U.Label.syncing(st, id)), Bool.pick(String, U.Label.syncing(st, id), "project quiet syncing", "project quiet"), "project") ++ Bool.pick(String, ROOTS.Roots.missing(st, id), " missing", "")}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, id)}, D.At{"data-drag-to", id}, D.At{"data-drag-act", "reorder-project"}],
-        List.concat(&2, D.Node, [[D.El{"div", "", [D.At{"class", "project-head"}, D.At{"title", View.gone.title(ROOTS.Roots.missing(st, id), root)}, D.At{"draggable", "true"}, D.At{"data-drag", id}, D.At{"data-drag-act", "reorder-project"}, D.At{"data-value", id}, D.On{"contextmenu", "proj-menu"}],
-            List.concat(&2, D.Node, [[WI.WIcon.button("badge", "look", id, MSG.T.menu.look(lc), BG.Badge.icon(st, id), 14, ""), D.Dom.span("name", U.Label.title(st, id, title))], View.gone.chip(ROOTS.Roots.missing(st, id)), [WI.WIcon.button("icon", "new-thread", id, MSG.T.thread.new(lc), "plus", 16, "")]])}],
-          View.look.loc(lc, String.eq(look, id), st, id, String.eq(rm, id)),
-          View.rows_in(lc, pinned, ix, st, sel, now, True{}, False{}),
+        List.concat(&2, D.Node, [[D.El{"div", "", [D.At{"class", "project-head" ++ Bool.pick(String, String.eq(sel, PH.Home.owner(id)), " on", "")}, D.At{"title", View.gone.title(ROOTS.Roots.missing(st, id), root)}, D.At{"draggable", "true"}, D.At{"data-drag", id}, D.At{"data-drag-act", "reorder-project"}, D.At{"data-value", id}, D.On{"contextmenu", "proj-menu"}],
+            List.concat(&2, D.Node, [[WI.WIcon.button("icon project-disclosure", "toggle-settled", "project-closed:" ++ id, "Expand or collapse project threads", Bool.pick(String, U.Flag.get(open, "project-closed:" ++ id), "chevron-right", "chevron-down"), 14, ""), WI.WIcon.button("badge", "look", id, MSG.T.menu.look(lc), BG.Badge.icon(st, id), 14, ""), D.Dom.button("name project-home-link", "proj-home", id, "Open project home", U.Label.title(st, id, title))], View.gone.chip(ROOTS.Roots.missing(st, id)), [WI.WIcon.button("icon", "new-thread", id, MSG.T.thread.new(lc), "plus", 16, "")]])}],
+          View.look.loc(lc, Bool.and(String.eq(look, id), Bool.not(PH.Home.is(sel))), st, id, String.eq(rm, id)),
+          [D.El{"div", "", [D.At{"class", "project-threads"}, D.At{"style", Bool.pick(String, U.Flag.get(open, "project-closed:" ++ id), "display:none", "display:contents")}], List.concat(&2, D.Node, [View.rows_in(lc, pinned, ix, st, sel, now, True{}, False{}),
           View.rows_in(lc, active, ix, st, sel, now, True{}, False{}),
           View.snoozed(lc, snoozed, ix, st, sel, now),
           View.shelf(lc, U.Flag.get(open, id), id, MSG.T.notify.settled(lc), settled, ix, st, sel, now),
-          View.shelf(lc, U.Flag.get(open, "arch:" ++ id), "arch:" ++ id, MSG.T.sidebar.archived(lc), M.Archive.of(hidden), ix, st, sel, now)])}
+          View.shelf(lc, U.Flag.get(open, "arch:" ++ id), "arch:" ++ id, MSG.T.sidebar.archived(lc), M.Archive.of(hidden), ix, st, sel, now)])}]])}
 
 def View.projects(+lc: I.Loc, rs: List<&2, U.SRow>, +quiet: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
   match rs:
@@ -4108,32 +4111,6 @@ def View.bot.h(+lc: I.Loc, +u: U.Ui, +b: BT.Bot, +hd: BI.Head) -> D.Node:
 def View.bot(+lc: I.Loc, +u: U.Ui, +b: BT.Bot) -> D.Node:
   View.bot.h(lc, u, b, BI.BU.head.bot(u, b))
 
-def View.main.s(+lc: I.Loc, settings: Bool, none: Bool, tour: Bool, u: U.Ui, +sel: String, +n: Nat) -> D.Node:
-  match settings none u:
-    case True{} _ U.Ui{+st, s2, d, l, o, on, now, ad, pa, +v, r, w, e, +note, +nf, ob, tr}:
-      View.settings.loc(lc, U.Ui{st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, st, nf, v, note)
-    case False{} True{} U.Ui{st, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
-      View.empty.t.loc(lc, tour, n, nf, st)
-    case False{} False{} U.Ui{+st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}:
-      View.thread(lc, U.Ui{st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, U.Ui.thread(st, sel))
-
-def View.main.k(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
-  match none u:
-    case _ U.Ui{+st, _, _, _, +o, _, _, _, _, +v, _, _, _, +note, +nf, +ob, +tr}:
-      View.main.s(lc, U.Flag.get(o, "settings"), none, U.Tour.on(u), u, sel, n)
-
-# settings, else a bot, a room or a bot elsewhere, else the thread
-def View.main.b(+lc: I.Loc, settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
-  match settings bv:
-    case False{} BI.VBot{b}:
-      View.bot(lc, u, b)
-    case False{} BI.VRoom{r}:
-      WB.WB.room.loc(lc, u, r)
-    case False{} BI.VRemote{id}:
-      WB.WB.remote(lc, u, id)
-    case _ _:
-      View.main.k(lc, String.is_empty(sel), u, sel, n)
-
 # the thread's own browser page (a bot's is the bot's), as a bot's
 # Browser tab shows it
 def View.browser.back.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
@@ -4165,12 +4142,15 @@ def View.browser.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.browser(+u: U.Ui) -> List<&2, D.Node>:
   View.browser.loc(I.En{}, u)
 
-def View.mech.chips(ps: List<&2, MC.MPart>, +cur: String) -> List<&2, D.Node>:
+def View.mech.chips.named(+u: U.Ui, ps: List<&2, MC.MPart>, +cur: String) -> List<&2, D.Node>:
   match ps:
     case Nil{}:
       Nil{}
     case MC.MPart{+p, +n, _} <> t:
-      D.Dom.button(Bool.pick(String, String.eq(p, cur), "on", ""), "mech-part", p, p, n) <> View.mech.chips(t, cur)
+      D.Dom.button(Bool.pick(String, String.eq(p, cur), "on", ""), "mech-part", p, p, U.Asset.name(u, MC.Mech.abs(U.Mpage.root(u), p), n)) <> View.mech.chips.named(u, t, cur)
+
+def View.mech.chips(ps: List<&2, MC.MPart>, cur: String) -> List<&2, D.Node>:
+  View.mech.chips.named(U.Ui.init(0n), ps, cur)
 
 def View.mech.shots(fs: List<&2, MC.MFile>, +root: String) -> List<&2, D.Node>:
   match fs:
@@ -4199,7 +4179,7 @@ def View.mech.k(+lc: I.Loc, state: Nat, +u: U.Ui) -> List<&2, D.Node>:
     case 1n:
       D.Dom.span("mech-say", MC.Mech.none()) <> View.mech.error(lc, u)
     case _:
-      D.El{"div", "", [D.At{"class", "mech-head"}], List.append(&2, D.Node, View.mech.chips(U.Mpage.parts(u), U.Mpage.cur.path(u)),
+      D.El{"div", "", [D.At{"class", "mech-head"}], List.append(&2, D.Node, View.mech.chips.named(u, U.Mpage.parts(u), U.Mpage.cur.path(u)),
         [D.Dom.button("", "mech-3d", MC.Mech.abs(U.Mpage.root(u), U.Mpage.cur.path(u)), MSG.T.mech.turn(lc), "3D"),
          D.Dom.button(Bool.pick(String, String.is_empty(U.Mpage.busy(u)), "primary", "busy"), Bool.pick(String, String.is_empty(U.Mpage.busy(u)), "mech-render", ""),
            U.Mpage.cur.path(u), MSG.T.mech.render.tip(lc), U.Mpage.render.label.loc(lc, u)),
@@ -4297,6 +4277,17 @@ def View.board.rows(fs: List<&2, String>, +cur: String, +own: String, +seen: Lis
           D.Dom.span("board-default", Bool.pick(String, String.eq(own, f), "Default board", ""))]}),
       View.board.rows(t, cur, own, f <> seen))
 
+def View.board.rows.named(+u: U.Ui, fs: List<&2, String>, +cur: String, +own: String, +seen: List<&2, String>) -> List<&2, D.Node>:
+  match fs:
+    case Nil{}: Nil{}
+    case +f <> t:
+      List.append(&2, D.Node, D.Dom.when(Bool.not(View.board.has(seen, f)),
+        D.El{"button", f, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, String.eq(cur, f), "board-option on", "board-option")},
+          D.At{"aria-current", Bool.pick(String, String.eq(cur, f), "true", "false")}, D.On{"click", "board-pick"}, D.At{"data-value", f}, D.At{"data-board-path", f}, D.At{"title", f}], [
+          D.Dom.span("board-name", U.Asset.name(u, MC.Mech.abs(U.Ui.root(u), f), MC.Mech.stem(f))), D.El{"small", "", Nil{}, [D.Txt{f}]},
+          D.Dom.span("board-default", Bool.pick(String, String.eq(own, f), "Default board", ""))]}),
+      View.board.rows.named(u, t, cur, own, f <> seen))
+
 def View.board.chips(+fs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
   View.board.rows(fs, View.board.current(fs, cur), "", Nil{})
 
@@ -4305,7 +4296,7 @@ def View.board.chips(+fs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
 # time it opens it reads the project's boards again (host.js runs its
 # data-on-open, "board-list": client.bend's Bd.look); the rows are keyed by
 # their paths, so a list that came back the same leaves them as they are
-def View.boards.selector(fs: List<&2, String>, +path: String, +own: String, +root: String) -> List<&2, D.Node>:
+def View.boards.selector.named(+u: U.Ui, fs: List<&2, String>, +path: String, +own: String, +root: String) -> List<&2, D.Node>:
   match fs:
     case Nil{}: [D.Dom.span("what", MC.Mech.last(HS.Hist.family(path)))]
     case +f <> +t:
@@ -4316,22 +4307,26 @@ def View.boards.selector(fs: List<&2, String>, +path: String, +own: String, +roo
         D.El{"div", "", [D.At{"class", "local-menu-body"}], [
           D.El{"label", "", Nil{}, [D.Txt{"Find a board"}, D.El{"input", "board-search", [D.At{"type", "search"}, D.At{"data-board-filter", ""}, D.At{"aria-label", "Find a board by name or path"}, D.At{"placeholder", "Name or path"}], Nil{}}]},
           D.Dom.span("board-origin", "Folder: " ++ root),
-          D.El{"div", "", [D.At{"class", "board-options"}], View.board.rows(f <> t, cur, own, Nil{})},
+          D.El{"div", "", [D.At{"class", "board-options"}], View.board.rows.named(u, f <> t, cur, own, Nil{})},
           D.El{"p", "", [D.At{"class", "board-no-match"}, D.At{"hidden", ""}], [D.Txt{"No matching boards"}]}]}]}]
 
 # Unlike native <details> hiding, the shut catalog never builds option
 # nodes. Search and continuation operate on metadata at the owning actor.
+# Compatibility projection for callers without a client/settings context.
+def View.boards.selector(fs: List<&2, String>, path: String, own: String, root: String) -> List<&2, D.Node>:
+  View.boards.selector.named(U.Ui.init(0n), fs, path, own, root)
+
 def View.boards.catalog.button(show: Bool, source: String, query: String, offset: Nat, +label: String) -> List<&2, D.Node>:
   match show:
     case False{}: Nil{}
     case True{}: [D.Dom.button("shelf", "board-catalog", BC.Catalog.command(source, True{}, query, offset), label, label)]
 
-def View.boards.catalog.page(page: VP.Page, +cur: String, own: String, +source: String, +query: String) -> List<&2, D.Node>:
+def View.boards.catalog.page(+u: U.Ui, page: VP.Page, +cur: String, own: String, +source: String, +query: String) -> List<&2, D.Node>:
   match page:
     case VP.Page{_, +total, +start, +limit, ids}:
       [D.El{"div", "", [D.At{"class", "local-menu-body"}], List.append(&2, D.Node, [
         D.El{"label", "", Nil{}, [D.Txt{"Find a board"}, D.El{"input", "board-search", [D.At{"type", "search"}, D.At{"data-board-query", ""}, D.At{"data-render-query", query}, D.At{"value", query}, D.At{"maxlength", "160"}, D.At{"aria-label", "Find a board by name or path"}, D.At{"placeholder", "Name or path"}], Nil{}}]},
-        D.El{"div", "", [D.At{"class", "board-options"}], View.board.rows(ids, cur, own, Nil{})},
+        D.El{"div", "", [D.At{"class", "board-options"}], View.board.rows.named(u, ids, cur, own, Nil{})},
         D.Dom.span("board-count", Nat.show(total) ++ " boards · selected board kept visible")],
         List.append(&2, D.Node, View.boards.catalog.button(Nat.is_gt(start, 0n), source, query, Nat.sub(start, limit), "Previous boards"),
           View.boards.catalog.button(Nat.is_lt(Nat.add(start, limit), total), source, query, Nat.add(start, limit), "Next boards")))}]
@@ -4342,7 +4337,7 @@ def View.boards.catalog.options(open: Bool, +u: U.Ui, +ids: List<&2, String>, +c
     case True{}:
       +query = BC.Catalog.query(state, source)
       +page = BC.Catalog.page(ids, cur, source, state, VP.Page.limit("boards", U.Ui.info(u, "local.view.budget")))
-      View.boards.catalog.page(page, cur, U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), source, query)
+      View.boards.catalog.page(u, page, cur, U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), source, query)
 
 def View.boards.catalog(+u: U.Ui) -> List<&2, D.Node>:
   +ids = BC.Catalog.unique(U.Bd.files(u))
@@ -4366,7 +4361,7 @@ def View.board.legacy(fs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
 def View.boards.contract(current: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match current:
     case True{}: View.boards.catalog(u)
-    case False{}: View.boards.selector(U.Bd.files(u), U.Bd.or(U.Bd.id(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), U.Ui.root(u))
+    case False{}: View.boards.selector.named(u, U.Bd.files(u), U.Bd.or(U.Bd.id(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), U.Ui.info(u, "fab.board:" ++ U.Ui.sel(u)), U.Ui.root(u))
 
 def View.boards.for(rail: Bool, +u: U.Ui, +what: String) -> List<&2, D.Node>:
   match rail:
@@ -5012,7 +5007,7 @@ def View.solid.more(listed: Bool, +u: U.Ui) -> List<&2, D.Node>:
 
 def View.solid.parts(compact: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   match compact:
-    case False{}: List.append(&2, D.Node, View.mech.chips(U.Mpage.parts(u), U.Mpage.shown(u)), View.solid.more.loc(lc, U.Mpage.listed(u), u))
+    case False{}: List.append(&2, D.Node, View.mech.chips.named(u, U.Mpage.parts(u), U.Mpage.shown(u)), View.solid.more.loc(lc, U.Mpage.listed(u), u))
     case True{}: List.append(&2, D.Node, [D.Dom.span("what", MC.Mech.last(U.Ui.view_get(u, "view.path")))], [D.Dom.button("", "mech", "", "Browse mechanical parts", "Parts")])
 
 def View.solid.what.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
@@ -5337,9 +5332,14 @@ def View.split.loc(+lc: I.Loc) -> D.Node:
 def View.split() -> D.Node:
   View.split.loc(I.En{})
 
+def View.home.tabs(home: Bool, +lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
+  match home:
+    case True{}: PHV.HomeView.viewer.tabs(u)
+    case False{}: View.tabs.for(View.rail(u), lc, Bool.pick(String, U.Mpage.onpart(u), "mech", U.Fm.tab(U.Solid.kind(u))))
+
 def View.aside(+lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
   D.El{"aside", "viewer", [D.At{"class", "viewer " ++ Bool.pick(String, String.is_empty(kind), "board", kind)}, D.At{"id", "viewer"}],
-    View.split.loc(lc) <> View.tabs.for(View.rail(u), lc, Bool.pick(String, U.Mpage.onpart(u), "mech", U.Fm.tab(U.Solid.kind(u)))) <> View.aside.k(lc, View.aside.n(kind), u)}
+    View.split.loc(lc) <> View.home.tabs(PH.Home.is(U.Ui.sel(u)), lc, kind, u) <> View.aside.k(lc, View.aside.n(kind), u)}
 
 def View.aside.if(+lc: I.Loc, open: Bool, +kind: String, +u: U.Ui) -> List<&2, D.Node>:
   match open:
@@ -5347,6 +5347,41 @@ def View.aside.if(+lc: I.Loc, open: Bool, +kind: String, +u: U.Ui) -> List<&2, D
       [View.aside(lc, kind, u)]
     case False{}:
       Nil{}
+
+def View.main.s(+lc: I.Loc, settings: Bool, none: Bool, tour: Bool, u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+  match settings none u:
+    case True{} _ U.Ui{+st, s2, d, l, o, on, now, ad, pa, +v, r, w, e, +note, +nf, ob, tr}:
+      View.settings.loc(lc, U.Ui{st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, st, nf, v, note)
+    case False{} True{} U.Ui{st, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
+      View.empty.t.loc(lc, tour, n, nf, st)
+    case False{} False{} U.Ui{+st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}:
+      View.thread(lc, U.Ui{st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, U.Ui.thread(st, sel))
+
+def View.main.thread(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+  match none u:
+    case _ U.Ui{+st, _, _, _, +o, _, _, _, _, +v, _, _, _, +note, +nf, +ob, +tr}:
+      View.main.s(lc, U.Flag.get(o, "settings"), none, U.Tour.on(u), u, sel, n)
+
+def View.main.home(home: Bool, +lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, n: Nat) -> D.Node:
+  match home:
+    case True{}:
+      PHV.HomeView.node.picker(u, View.aside.if(lc, U.Home.viewer.allowed(u), U.Ui.view_get(u, "view.kind"), u), View.look.loc(lc, String.eq(U.Ui.scratch(u, "@look"), PH.Home.project(sel)), U.Ui.state(u), PH.Home.project(sel), String.eq(U.Ui.scratch(u, "@rm"), PH.Home.project(sel))))
+    case False{}: View.main.thread(lc, none, u, sel, n)
+
+def View.main.k(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, n: Nat) -> D.Node:
+  View.main.home(Bool.and(PH.Home.is(sel), Bool.not(U.Ui.flag(u, "settings"))), lc, none, u, sel, n)
+
+# settings, else a bot, a room or a bot elsewhere, else the thread
+def View.main.b(+lc: I.Loc, settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+  match settings bv:
+    case False{} BI.VBot{b}:
+      View.bot(lc, u, b)
+    case False{} BI.VRoom{r}:
+      WB.WB.room.loc(lc, u, r)
+    case False{} BI.VRemote{id}:
+      WB.WB.remote(lc, u, id)
+    case _ _:
+      View.main.k(lc, String.is_empty(sel), u, sel, n)
 
 # The first-run tour (core/onboard.bend): a dimmed page and a dialog with
 # the step, Skip, Back and Next. The page's class names what the step
@@ -5696,7 +5731,7 @@ def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D
         ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ Bool.pick(String, View.chrome(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), " top", "") ++ View.tour.cls(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})}],
         D.Dom.cat(View.chrome.if(View.chrome(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat([sidebar,
           View.main.b(lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
-          D.Dom.cat(View.aside.if(lc, pa, U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
+          D.Dom.cat(View.aside.if(lc, Bool.and(pa, Bool.not(PH.Home.is(sel))), U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
             D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.intent(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
               D.Dom.cat(View.error(U.Ui.error.shown(lc, e)), D.Dom.cat(View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
                 View.star(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))))))))}

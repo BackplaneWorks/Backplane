@@ -1,5 +1,7 @@
 import ../core/autosettle.bend as AUTO
 import Base
+import ../core/ws-fragments.bend as WSF
+import ./project-home.bend as PHOME
 import ./pairing.bend as PAIR
 import ./message-image.bend as MIMG
 import ./pdf.bend as PDF
@@ -1616,7 +1618,7 @@ type Scan is Data:
   Scan{fr: Maybe<&2, W.Frame>, rest: List<&2, U32>, done: Bool}
 
 def Conn.quiet.k(+op: U32, +last: Nat, +now: Nat) -> Bool:
-  Bool.or(Bool.and(U32.is_eq(op, 9), Bool.not(OB.Pong.due(last, now))), Bool.or(U32.is_eq(op, 1), Bool.or(U32.is_eq(op, 10), U32.is_eq(op, 0))))
+  Bool.or(Bool.and(U32.is_eq(op, 9), Bool.not(OB.Pong.due(last, now))), U32.is_eq(op, 10))
 
 def Conn.quiet(fr: W.Frame, +last: Nat, +now: Nat) -> Bool:
   match fr:
@@ -1688,41 +1690,46 @@ def Bytes.rev(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
 def Bytes.cat(a: List<&2, U32>, b: List<&2, U32>) -> List<&2, U32>:
   Bytes.rev(Bytes.rev(a, Nil{}), b)
 
-def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat,
-    k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&2, U32>, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +last: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   (s, res) = r
   match res:
-    case Done{Nil{}}:
-      Conn.leave(s, id, inbox)
+    case Done{Nil{}}: Conn.leave(s, id, inbox)
     case Done{bs}:
-      IO.bind(Nat, Unit, IO.now(), now => k(s, Bytes.cat(buf, bs), last, now))
-    case Fail{_}:
-      Conn.leave(s, id, inbox)
+      IO.bind(Nat, Unit, IO.now(), now => k(s, Bytes.cat(buf, bs), pending, last, now))
+    case Fail{_}: Conn.leave(s, id, inbox)
 
-def Conn.after(m: Maybe<&2, Nat>, s: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +now: Nat, k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.after(m: Maybe<&2, Nat>, s: Socket, rest: List<&2, U32>, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +now: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{last}:
-      k(s, rest, last, now)
-    case None{}:
-      Conn.leave(s, id, inbox)
+    case Some{last}: k(s, rest, pending, last, now)
+    case None{}: Conn.leave(s, id, inbox)
 
-def Conn.scanned(sc: Scan, s: Socket, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat,
-    k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.assembled(taken: WSF.Taken, s: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+  match taken:
+    case WSF.FragReject{}: Conn.leave(s, id, inbox)
+    case WSF.FragHold{pending}: k(s, rest, pending, last, now)
+    case WSF.FragEmit{pending, fr}:
+      IO.bind(Maybe<&2, Nat>, Unit, Conn.frame(fr, id, inbox, last, now), go => Conn.after(go, s, rest, pending, id, inbox, now, k))
+
+def Conn.scanned(sc: Scan, s: Socket, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   match sc:
     case Scan{Some{fr}, rest, _}:
-      IO.bind(Maybe<&2, Nat>, Unit, Conn.frame(fr, id, inbox, last, now), go => Conn.after(go, s, rest, id, inbox, now, k))
+      Conn.assembled(WSF.Fragment.step(pending, fr), s, rest, id, inbox, last, now, k)
     case Scan{None{}, rest, _}:
       IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536),
-        r => Conn.more(r, rest, id, inbox, last, k))
+        r => Conn.more(r, rest, pending, id, inbox, last, k))
 
-# the frames in buf; more read when they run out
-def Conn.reader(fuel: Nat, s: Socket, buf: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat) -> IO(Unit):
+# Socket reads and WebSocket fragments are independent boundaries. Pending
+# bytes survive both, and are decoded only after the final continuation.
+def Conn.reader(fuel: Nat, s: Socket, buf: List<&2, U32>, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat) -> IO(Unit):
   match fuel:
-    case 0n:
-      Conn.leave(s, id, inbox)
+    case 0n: Conn.leave(s, id, inbox)
     case 1n+f:
-      Conn.scanned(Conn.scan(65536n, Scan{None{}, buf, False{}}, last, now), s, id, inbox, last, now,
-        s2 => b2 => l2 => n2 => Conn.reader(f, s2, b2, id, inbox, l2, n2))
+      Conn.scanned(Conn.scan(65536n, Scan{None{}, buf, False{}}, last, now), s, pending, id, inbox, last, now,
+        s2 => b2 => p2 => l2 => n2 => Conn.reader(f, s2, b2, p2, id, inbox, l2, n2))
 
 # A client let in the legacy way (core/auth.bend's Auth.legacy: no pairing
 # token, trusted as this machine's or the owner's tailnet device) is told,
@@ -1750,7 +1757,7 @@ def Conn.raw(r: Socket & U32, rd: Socket, rest: List<&2, U32>, +id: U32, +inbox:
     IO.spawn(Unit, Conn.writer(Fuel.forever(), wr, out, OB.Wr.new(), id, id, inbox))
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Conn.join.mobile(mobile, id, out, since, origin, fd, legacy))
     Conn.legacy(legacy, id, inbox)
-    Conn.reader(Fuel.forever(), rd, rest, id, inbox, 0n, 0n)
+    Conn.reader(Fuel.forever(), rd, rest, WSF.FragIdle{}, id, inbox, 0n, 0n)
 
 def Conn.ws.dup(r: Socket & Result<&1, &1, U32 & String, Socket>, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
   (rd, res) = r
@@ -3319,6 +3326,28 @@ def PdfJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +path: S
 def PdfJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +home: String, +path: String, +page: String) -> IO(Unit):
   IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", PDF.Pdf.sh(), "sh", path, page, home ++ "/pdf"], "/"), r => PdfJob.sent(r, inbox, client, id, path, page))
 
+# Price estimates use only the bounded, re-read fab metadata. No full intent,
+# project scan from the ordering card, upload or ordering action runs here.
+def ProjectHomeJob.fabs(rows: List<&2, J.Json>) -> List<&2, OR.FabFile>:
+  match rows:
+    case Nil{}: Nil{}
+    case +row <> rest:
+      +tail = ProjectHomeJob.fabs(rest)
+      Bool.pick(List<&2, OR.FabFile>, String.eq(J.Json.get_str(row, "kind", ""), "fab"),
+        OR.FabFile{J.Json.get_str(row, "path", ""), J.Json.get_str(row, "summary", "")} <> tail, tail)
+
+def ProjectHomeJob.with_price(r: J.Json, price: J.Json) -> J.Json:
+  match r:
+    case J.Obj{fields}: J.Obj{J.Field{"price", price, fields}}
+    case _: r
+
+def ProjectHomeJob.finish(price: Bool, +r: J.Json, +inbox: Chan(Msg), +client: U32, +id: String, +home: String, +cwd: String, +opts: String) -> IO(Unit):
+  match price:
+    case False{}: GitJob.reply(inbox, client, id, True{}, r)
+    case True{}:
+      IO.bind(J.Json, Unit, ODI.Od.look.ps(OR.Order.parts(ProjectHomeJob.fabs(J.Json.elems(J.Json.get_obj(r, "artifacts")))), home, cwd, "", "", Bool.not(String.starts_with(opts, "off")), ODI.Od.nth(String.lines(opts), 1n), Nil{}, "", ""),
+        p => GitJob.reply(inbox, client, id, True{}, ProjectHomeJob.with_price(r, p)))
+
 def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   match i:
     case 0n:
@@ -3360,6 +3389,8 @@ def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clien
       IO.bind(J.Json, Unit, ODI.Od.intent(home, cwd, thread, a, b), r => GitJob.reply(inbox, client, id, True{}, r))
     case 18n:
       BoardsJob.run(String.is_empty(cwd), inbox, client, id, thread, cwd)
+    case 19n:
+      IO.bind(String, Unit, PHOME.ProjectHome.read(cwd, a), raw => ProjectHomeJob.finish(String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(a), J.Null{}), "op", ""), "price"), Maybe.default(&2, J.Json, J.Json.parse(raw), J.Null{}), inbox, client, id, home, cwd, b))
     case _:
       GitJob.run.git(tx, job, inbox, client, id, thread, cwd, a, b, home)
 
@@ -3382,7 +3413,7 @@ def GitJob.run.r(rv: Bool, +tx: TextScope, +job: String, +inbox: Chan(Msg), +cli
     case True{}:
       IO.bind(RVS.Res, Unit, RVS.RvJob.run(job, thread, cwd, a, b, home), r => RvJob.reply(r, inbox, client, id))
     case False{}:
-      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent", "boards"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
+      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent", "boards", "project-home"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
 
 # a job the hub asked for: a git job, or one of the sidebar's
 def GitJob.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):

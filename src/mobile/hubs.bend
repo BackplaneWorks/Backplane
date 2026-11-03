@@ -214,7 +214,7 @@ def Q.kind.k(may: Bool, +k: String) -> Nat:
       0n
 
 def Q.kind(+k: String) -> Nat:
-  Bool.pick(Nat, String.eq(k, "nav"), 3n, Q.kind.k(Q.may(k), k))
+  Bool.pick(Nat, String.eq(k, "projectHome"), 1n, Bool.pick(Nat, String.eq(k, "nav"), 3n, Q.kind.k(Q.may(k), k)))
 
 # whether every name is its own kind through Q.kind (law q_kind_names)
 def Q.own(ns: List<&2, QN>) -> Bool:
@@ -379,8 +379,15 @@ def One.act.mail(i: Nat, +u: U.Ui, +action: String, +value: String) -> U.Act:
     case 2n: One.mail.send(u, Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}))
     case _: One.act.k(C.Codec.pos(["view", "view-mention", "view-pick", "view-unpick", "picker-open", "picker-type", "picker-mkdir", "find-open", "find-q", "find-close", "form-close", "view-sheet", "view-layer", "view-parts", "mech-3d", "mech-renders", "fm", "fm-cd", "fm-up", "fm-open", "fm-page", "view-layer-pick", "view-layer-mode", "hub-settings"], action), u, action, value)
 
+def One.act.home(+u: U.Ui, +action: String, +value: String) -> U.Act:
+  match action:
+    case "home-view": VW.View.open(u, value)
+    case "home-model": VW.View.fm.to(U.Home.dispatch(u, action, value), "3d", value)
+    case "home-bom": VW.View.open(u, "review")
+    case _: One.act.mail(C.Codec.pos(["mail-window", "mail-body-window", "mailroom-send"], action), u, action, value)
+
 def One.act(+u: U.Ui, +action: String, +value: String) -> U.Act:
-  U.Rc.sync.of(One.act.mail(C.Codec.pos(["mail-window", "mail-body-window", "mailroom-send"], action), u, action, value))
+  U.Rc.sync.of(One.act.home(u, action, value))
 
 # what a step does to one hub's client
 type Op is Data:
@@ -2378,6 +2385,7 @@ def Hubs.screen.p.loc(+lc: I.Loc, +pl: MPL.MUber, +ss: List<&2, Shown>, +cur: St
     J.KV{"island", Hubs.compact.go.loc(lc, ss, 0n, [], 0n)},
     J.KV{"islands", J.Json.arr(Hubs.islands(ss))},
     J.KV{"thread", Hubs.origin.focus(ss, cur, "thread")},
+    J.KV{"projectHome", J.Json.get_obj(Hubs.of(ss, cur), "projectHome")},
     J.KV{"uber", MPL.MUber.uber(pl)},
     J.KV{"bots", J.Json.arr(Hubs.bots(ss, list, Nat.is_gt(List.length(&2, Shown, ss), 1n)))},
     J.KV{"rooms", J.Json.arr(Hubs.rooms(ss, Nat.is_gt(List.length(&2, Shown, ss), 1n)))},

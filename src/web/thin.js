@@ -33,7 +33,7 @@ function coverChanged(link, shownRevision) {
   } else if (link.changedRevision !== null) link.invalidated = true;
 }
 export function viewTarget(t) {
-  return record(t) && Object.keys(t).length === 2 && Object.keys(t).every(k => k === 'kind' || k === 'id') && ['thread', 'bot', 'room', 'recent'].includes(t.kind) &&
+  return record(t) && Object.keys(t).length === 2 && Object.keys(t).every(k => k === 'kind' || k === 'id') && ['thread', 'bot', 'room', 'recent', 'project'].includes(t.kind) &&
     bounded(t.id, 1024) && (t.kind === 'recent' ? t.id === '' : t.id.length > 0);
 }
 const snapshot = o => JSON.parse(JSON.stringify(o));

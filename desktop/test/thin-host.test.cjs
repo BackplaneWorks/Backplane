@@ -1457,3 +1457,17 @@ test('an error reply retires its unfinished control collection',async()=>{
  f.host.receive({t:'view.control',id:req.id,part:0,last:false,text:'{"incomplete":'});assert.equal(f.host.client.controls.size,1);
  f.host.receive({t:'reply',id:req.id,ok:false,error:{code:'UNAVAILABLE'}});assert.equal(f.host.client.controls.size,0);
 });
+
+test('project-name navigation uses a project owner and preserves its separate cached draft',async()=>{
+ const target=s=>s.sel?.startsWith('project-home-')?{kind:'project',id:s.sel.slice(13)}:s.sel?{kind:'thread',id:s.sel}:{kind:'recent',id:''};
+ const f=await fixture({target});f.open();
+ assert(f.host.request('proj-home','board-project'));
+ assert.equal(f.getSession().sel,'project-home-board-project');
+ assert.deepEqual(f.sent.at(-1).p.target,{kind:'project',id:'board-project'});
+ assert.equal(f.getSession().drafts.A,'original 日本語');
+ f.host.receive(f.reply(undefined,{window:{ids:[],older:'',hasMore:false,partial:[]}}));
+ f.host.request('draft','New project question');f.host.request('select','A');f.host.receive(f.reply());
+ f.host.request('proj-home','board-project');
+ assert.equal(f.getSession().drafts['project-home-board-project'],'New project question');
+ assert.deepEqual(f.sent.at(-1).p.target,{kind:'project',id:'board-project'});
+});

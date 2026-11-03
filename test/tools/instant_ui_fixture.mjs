@@ -67,6 +67,9 @@ done
   rows.push({$:'TurnChanged',thread:id,state:'completed',at:at+count});
   if(t>=5) rows.push({$:'BotSet',id:'fixture-bot-'+(t-5),name:'Fixture bot '+(t-5),thread:id,look:0,persona:'Isolated fixture only',at});
  }
+ // Trusted test builders can seed additional synthetic files/events before
+ // the owned child starts. No target/home/token is accepted from callers.
+ if (config.prepare) await config.prepare({root,project,rows,at});
  const log=path.join(home,'events.jsonl');fs.writeFileSync(log,rows.map(x=>JSON.stringify(x)).join('\n')+'\n');
  const listener=net.createServer();await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(0,'127.0.0.1',resolve)});
  const port=listener.address().port;await new Promise(resolve=>listener.close(resolve));

@@ -114,7 +114,7 @@ export function preservePresentationRoute(before, after) {
 }
 export function presentationTarget(session) {
   const route = compactRoute(session?.route);
-  return route ? { kind: 'bot', id: route.bot } : session?.sel ? { kind: 'thread', id: session.sel } : { kind: 'recent', id: '' };
+  return route ? { kind: 'bot', id: route.bot } : session?.sel?.startsWith('project-home-') ? {kind:'project',id:session.sel.slice(13)} : session?.sel ? { kind: 'thread', id: session.sel } : { kind: 'recent', id: '' };
 }
 // Where a refused view (ThinHost.refuse) leaves the page, as a selection:
 // the thread on show before, unless that is the one refused or was refused
@@ -295,6 +295,7 @@ export class ThinHost {
     if (retired) this.api.warning?.(reason);
   }
   request(action, value, settled) {
+    if (action === "proj-home") { action = "select"; value = "project-home-" + value; }
     const terminalInput = action === 'term-key' || action === 'term-paste';
     const retire = ['select','bot','bot-tab','uber','uber-bot','remote','ws-term-hide','term-toggle','ws-term-here'].includes(action) || action === 'ws-go' && value === 'term';
     if (retire) this.retireTerminal('Queued terminal input was cancelled when the view changed.');

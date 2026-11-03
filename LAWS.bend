@@ -1,3 +1,7 @@
+import ./src/core/ws-fragments.bend as WSFRAG
+
+import ./src/core/http.bend as WSFRAME
+
 import ./src/server/conversation-window.bend as CONVWINDOW
 
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
@@ -81,6 +85,8 @@ import ./src/server/thin-signals.bend as SGV
 import ./src/core/signal.bend as SIGREV
 
 import Base
+
+import ./src/core/project-home.bend as PHOME
 
 import ./src/server/modelcache.bend as MCACHE
 
@@ -15841,6 +15847,23 @@ law autosettle_new_turn_reopens:
 law conversation_root_preserves_navigation:
   for root: J.Json
   {CONVWINDOW.Window.root(root) == root : J.Json}
+
+# Project-home artifact panels are constructed by this same pure projection.
+# An absent path cannot produce a panel, regardless of label or contents.
+law home_missing_artifact_has_no_panel:
+  for kind: String
+  for title: String
+  for summary: String
+  {PHOME.Home.panel(kind, "", title, summary) == Nil{} : List<&2, PHOME.Panel>}
+
+law home_owner_round_trip:
+  for project: String
+  {PHOME.Home.project(PHOME.Home.owner(project)) == project : String}
+
+# A continuation cannot become a standalone request.
+law websocket_orphan_continuation_is_rejected:
+  for bytes: List<&2, U32>
+  {WSFRAG.Fragment.step(WSFRAG.FragIdle{}, WSFRAME.Frame{True{}, 0, bytes}) == WSFRAG.FragReject{} : WSFRAG.Taken}
 
 # A delegation seed has system provenance despite its historical User role.
 # Only its exact generated ID is exempt; a distinct human input stays personal.
