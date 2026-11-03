@@ -716,9 +716,11 @@ def Order.sum.set.k(keep: Bool, +thread: String, +sum: String, +now: Nat) -> Lis
     case False{}:
       Nil{}
 
-# what the hub keeps of a quote (server.bend's Hub.order.quoted)
+# what the hub keeps of a quote (server.bend's Hub.order.quoted); the
+# same again writes nothing (a resumed watcher posts its quote once more)
 def Order.sum.set(+s: M.State, +thread: String, +sum: String, +id: String, fresh: Bool, +now: Nat) -> List<&2, M.Change>:
-  Order.sum.set.k(Order.sum.keeps(fresh, M.Setting.get(s, Order.quote.key(thread), ""), id), thread, sum, now)
+  +cur = M.Setting.get(s, Order.quote.key(thread), "")
+  Order.sum.set.k(Bool.and(Order.sum.keeps(fresh, cur, id), Bool.not(String.eq(cur, sum))), thread, sum, now)
 
 # the quote on its way from the person's Send (server.bend's Od.go) ...
 def Order.wait.set(+thread: String, +now: Nat) -> M.Change:

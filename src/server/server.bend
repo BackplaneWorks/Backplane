@@ -17261,12 +17261,23 @@ def Od.resume.quoting(+inbox: Chan(Msg), +home: String, +j: J.Json) -> IO(Unit):
     +install : String <- ODI.Od.install(home)
     Od.sent(j, inbox, home, J.Json.get_str(j, "server", ""), install, J.Json.get_str(j, "thread", ""))
 
+# a quote watched again after a restart: its card is filled from a first
+# look whatever its state (a quote posted before buy threads had a card, or
+# whose card was missed, kept "Details" while its reply had Buy now; the
+# watch posts the card only when the state moves), then the watch goes on
+def Od.resume.watch(+inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String, +last: String) -> IO(Unit):
+  do IO<Unit>:
+    +install : String <- ODI.Od.install(home)
+    +q : J.Json <- ODI.Od.get(home, server, install, qid, token)
+    Od.card.k(String.is_empty(OR.Order.state(q)), inbox, thread, OR.Order.sum(q, ODI.Od.pay(server, qid, token)), qid)
+    Od.watch(9000n, inbox, home, server, qid, token, thread, last)
+
 def Od.resume.k(quoting: Bool, +inbox: Chan(Msg), +home: String, +j: J.Json) -> IO(Unit):
   match quoting:
     case True{}:
       Od.resume.quoting(inbox, home, j)
     case False{}:
-      Od.watch(9000n, inbox, home, J.Json.get_str(j, "server", ""), J.Json.get_str(j, "id", ""), J.Json.get_str(j, "token", ""), J.Json.get_str(j, "thread", ""), J.Json.get_str(j, "status", ""))
+      Od.resume.watch(inbox, home, J.Json.get_str(j, "server", ""), J.Json.get_str(j, "id", ""), J.Json.get_str(j, "token", ""), J.Json.get_str(j, "thread", ""), J.Json.get_str(j, "status", ""))
 
 def Od.resume.one(+inbox: Chan(Msg), +home: String, +j: J.Json) -> IO(Unit):
   Bool.pick(IO(Unit), Bool.or(OR.Order.done(J.Json.get_str(j, "status", "")), String.is_empty(J.Json.get_str(j, "token", ""))), IO.pure(Unit, Unit{}),

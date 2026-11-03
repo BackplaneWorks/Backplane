@@ -88,6 +88,9 @@ def main() -> IO(Unit):
     C.Check.str("a fresh quote is kept", Bool.show(OR.Order.sum.keeps(True{}, "{\"id\":\"q_1\"}", "q_2")), "True")
     C.Check.str("an older quote's progress is not", Bool.show(OR.Order.sum.keeps(False{}, "{\"id\":\"q_2\"}", "q_1")), "False")
     C.Check.str("its own is", Bool.show(OR.Order.sum.keeps(False{}, "{\"id\":\"q_2\"}", "q_2")), "True")
+    # a watcher resumed after a restart posts its quote's card again: once is enough
+    C.Check.str("a quote with no card yet gets one", Nat.show(List.length(&2, M.Change, OR.Order.sum.set(st([]), "t1", "{\"id\":\"q_1\",\"state\":\"ready\"}", "q_1", False{}, 9n))), "1")
+    C.Check.str("the same again writes nothing", Nat.show(List.length(&2, M.Change, OR.Order.sum.set(st([M.SettingSet{"order.quote.t1", "{\"id\":\"q_1\",\"state\":\"ready\"}", 5n}]), "t1", "{\"id\":\"q_1\",\"state\":\"ready\"}", "q_1", False{}, 9n))), "0")
     # the posted quote says it too
     C.Check.str("the quote's customs line", OR.Order.quote.customs("**Your quote: $5.00**", False{}), "**Your quote: $5.00**\n\nExcludes customs: the courier will contact you to pay any duties and taxes before delivery.")
     # what the agent hears
