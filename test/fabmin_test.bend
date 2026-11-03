@@ -66,6 +66,12 @@ def hidden() -> U.Ui:
 def go(+u: U.Ui, +th: String) -> U.Ui:
   ui(U.Ui.act(u, "select", th))
 
+# a new thread in the lamp project, nothing said in it yet (its git note
+# is no word), then once its first turn ended
+def fresh(cs: List<&2, M.Change>) -> U.Ui:
+  card(U.Ui.fold(List.append(&2, M.Change, [M.ThreadCreated{"d", "p1", "New", M.Local{}, "", "", "claude", "", 950n},
+    M.ActivityLogged{"d", "g1", "info", "git", "working in the project folder: not a git repository", 951n}], cs), base()), "d")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("the bar shows", U.Fab.ready(base()), "Ready to order · Lamp")
@@ -89,6 +95,11 @@ def main() -> IO(Unit):
     C.Check.str("the bar shows by default", U.Fab.ready(plain()), "Ready to order · Lamp")
     C.Check.str("the person's own Off keeps it off", U.Fab.rail(U.Ui.fold([M.SettingSet{"order.enabled", "off", 1000n}], plain())), "")
     C.Check.str("and no bar", U.Fab.ready(U.Ui.fold([M.SettingSet{"order.enabled", "off", 1000n}], plain())), "")
+    C.Check.str("an empty thread has no bar", U.Fab.ready(fresh(Nil{})), "")
+    C.Check.str("nor a header Buy it", labels(U.Fab.mini.tools(ui(U.Ui.act(fresh(Nil{}), "fab-hide", "")))), "")
+    C.Check.str("the rail's Buy it is the way in", U.Fab.rail(fresh(Nil{})), "Buy it · from $5.00")
+    C.Check.str("none while its first turn runs", U.Fab.ready(fresh([M.MessagePosted{"d", "m1", M.User{}, "route it", 960n}, M.TurnChanged{"d", M.Running{}, 960n}])), "")
+    C.Check.str("the bar once it ended", U.Fab.ready(fresh([M.MessagePosted{"d", "m1", M.User{}, "route it", 960n}, M.TurnChanged{"d", M.Running{}, 960n}, M.TurnChanged{"d", M.Completed{}, 970n}])), "Ready to order · Lamp")
     C.Check.str("the rail's words", U.Fab.rail.word("Buy it · from $5.00"), "Buy it")
     C.Check.str("the rail's price", U.Fab.rail.price("Buy it · from $5.00"), "from $5.00")
     C.Check.str("no price without an estimate", U.Fab.rail.price("Buy it"), "")

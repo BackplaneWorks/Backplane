@@ -10109,6 +10109,20 @@ law fab_ready_needs_buy:
   for line: String
   {U.Fab.ready.k("", line, False{}) == "" : String}
 
+# the bar waits for the thread's first turn: a thread nothing was said in
+# draws none (an activity note is not a word), one whose turn ended does
+# (the rail's Buy it is the way in meanwhile)
+law fab_ready_fresh_hidden:
+  for line: String
+  {U.Fab.ready.k("Buy it", line, U.Fab.wait(U.Fab.demo([]), "t", False{})) == "" : String}
+
+law fab_ready_fresh_note_hidden:
+  for line: String
+  {U.Fab.ready.k("Buy it", line, U.Fab.wait(U.Fab.demo([M.ActivityLogged{"t", "a1", "info", "git", "working in the project folder: not a git repository", 2n}]), "t", False{})) == "" : String}
+
+law fab_ready_after_first_turn:
+  {U.Fab.ready.k("Buy it", "", U.Fab.wait(U.Fab.demo([M.MessagePosted{"t", "m1", M.User{}, "hi", 2n}, M.TurnChanged{"t", M.Running{}, 2n}, M.TurnChanged{"t", M.Completed{}, 3n}]), "t", False{})) == "Ready to order" : String}
+
 # a manufacturing review is current only for the design it was recorded
 # with (its fingerprint); a verdict is ok or issues, nothing else
 law order_review_none:
