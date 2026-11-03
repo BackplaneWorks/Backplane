@@ -1,15 +1,36 @@
 # Installation
 
+## Linux
+
 ```sh
 curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 backplane
 ```
 
-Linux (x64, arm64) and macOS (Apple silicon). It installs into `~/.local/share/backplane` and keeps itself up to date (`BACKPLANE_NO_UPDATE=1` turns that off). On Linux it also adds Backplane to your applications menu (`BACKPLANE_NO_DESKTOP=1` skips that). Releases also carry an AppImage, a `.deb`, an AUR `PKGBUILD` and the Android APK. You need at least one agent CLI (`claude`, `codex`, `grok` or `muse`; Antigravity installs from Settings) and KiCad; FreeCAD for mechanical work. `backplane --headless` runs it without a window. To pair a phone, scan the QR code in Settings (Pairing link, QR code) with the app, or paste the pairing link.
+x64 and arm64. It installs into `~/.local/share/backplane`, adds Backplane to your applications menu (`BACKPLANE_NO_DESKTOP=1` skips that) and keeps itself up to date (`BACKPLANE_NO_UPDATE=1` turns that off). Add `~/.local/bin` to your `PATH` if asked. Alternatives from the [release page](https://github.com/BackplaneWorks/Backplane/releases/latest): a `.deb` (`sudo apt install ./backplane_0.14.0_amd64.deb`, or `_arm64.deb`) or the AppImage. `backplane --headless` runs without a window.
+
+## macOS (Apple silicon)
+
+Run the install.sh one-liner above, or download `backplane-v0.14.0-darwin-arm64.tar.gz`, extract it and move `Backplane.app` to Applications. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub.
+
+**macOS builds are not notarized yet** (notarization will follow once an Apple Developer ID exists). If macOS refuses to open the downloaded app, once only: open it from Finder with right-click (or Control-click) → Open → Open; or on macOS 15+, try to open it, then System Settings → Privacy & Security → "Open Anyway"; or run `xattr -dr com.apple.quarantine /Applications/Backplane.app`. The installer checks the release checksum and signatures, and clears quarantine only on the payload it downloaded.
+
+## Windows (x64, experimental)
+
+Download `backplane-v0.14.0-windows-x64.zip`, extract the **whole** archive into a writable folder, and run `Backplane.exe` (keep `resources/` beside it). No WSL is needed. Shell commands need Cygwin tools: use the bundled runtime if present, otherwise run [the Windows setup script](../scripts/setup-windows.ps1). Install your agent CLIs separately. FreeCAD and the [Backplane KiCad runtime](https://github.com/BackplaneWorks/Backplane_KiCad/releases) are installed separately too: set `BACKPLANE_FREECAD` and `BACKPLANE_KICAD` to them, then restart. Closing the window leaves the hub running.
+
+## Phones
+
+- **iOS:** install through TestFlight with an invitation.
+- **Android:** download the signed APK from the release and install it.
+
+To pair a phone or another browser, open **Settings → Devices → Add a device** and use the pairing link, the QR code or the short code. The same menu lists paired devices and revokes them.
+
+## First run
+
+You need at least one agent CLI (`claude`, `codex`, `grok` or `muse`; Antigravity installs from Settings), KiCad for board work and FreeCAD for mechanical work. The first run asks about anonymous usage counts in a clear popup. They are on by default, nothing is sent before you answer, and Settings turns them off at any time. See [telemetry](telemetry.md).
 
 Treat pairing links and QR codes as credentials. Browser pairing exchanges the fragment for an HttpOnly, SameSite=Strict cookie (Secure over HTTPS), then removes the fragment; existing browser tokens migrate out of local storage after a successful exchange. Native phone clients retain their pairing-link protocol. Every client needs the pairing credential, on this machine too: the desktop app reads the hub's token from its home (`<home>/token`, readable only by your user), and a browser on this machine pairs like any other (a pairing link from Settings, or `backplane` opening it on an install without the desktop app). Full Access runs agent tools with your user’s access; choose a more restrictive thread permission mode when wanted. Pairing controls access to the hub, and does not provide OS isolation for a Full Access agent.
-
-On Apple Silicon, the installer includes the macOS desktop app. Add `~/.local/bin` to your `PATH` if requested, then run `backplane`. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub. The installer checks the release checksum and code signatures before replacing files and clears quarantine only on that downloaded payload. Portable macOS apps are ad-hoc sealed, not notarized; a browser-extracted app may still require an explicit Gatekeeper override.
 
 The hub preserves the existing `<home>/token` file byte for byte, including a symlink to a regular file. As before, surrounding whitespace is ignored for pairing. Empty, unreadable or non-regular token files stop startup with an error instead of generating a replacement. Restore the original token from backup to retain paired clients. On Unix the opened file is restricted to mode 0600; Windows access control comes from the home folder's ACL; POSIX mode bits do not establish a private Windows ACL.
 
