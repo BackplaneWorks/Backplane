@@ -57,8 +57,9 @@ export function installWorkspaceHints({ document: doc = document, window: win = 
       for (const row of sidebar.querySelectorAll('.thread[data-on-click="select"][data-value]')) {
         bind(row.querySelector('.title'), 'threads', threads.get(row.getAttribute('data-value')));
         // Active view names its project in the note, except when an agent
-        // count replaces that name. Never label an agent count as a project.
-        bind(row.querySelector('.ago:not(.agents)'), 'projects', projects.get(row.getAttribute('data-shortcut-project')));
+        // count or what a red row wants replaces that name. Never label
+        // either as a project.
+        bind(row.querySelector('.ago:not(.agents):not(.want)'), 'projects', projects.get(row.getAttribute('data-shortcut-project')));
       }
     }
     for (const element of annotated) if (!desired.has(element)) {
