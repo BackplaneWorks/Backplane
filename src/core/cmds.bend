@@ -306,27 +306,31 @@ def Cmds.waiting(c: Cmds) -> List<&2, String>:
     case Cmds{cs, _, _}:
       Cmds.waiting.go(cs)
 
-# a command started or with its result: one sent after it waits
-def Cmds.ahead(cs: List<&2, Cmd>) -> Bool:
+def Cmds.unread.k(hit: Bool, v: String, rest: List<&2, String>) -> List<&2, String>:
+  match hit:
+    case True{}:
+      v <> rest
+    case False{}:
+      rest
+
+# oldest first; ahead: an unanswered command came before (wake: a turn the
+# CLI started by itself runs, so every one waits)
+def Cmds.unread.go(cs: List<&2, Cmd>, +ahead: Bool) -> List<&2, String>:
   match cs:
     case Nil{}:
-      False{}
-    case Cmd{_, +st, _, _} <> t:
-      Bool.or(Bool.or(Nat.is_eq(st, 2n), Nat.is_eq(st, 3n)), Cmds.ahead(t))
-
-def Cmds.unread.k(ahead: Bool, c: Cmds) -> List<&2, String>:
-  match ahead:
-    case True{}:
-      Cmds.waiting(c)
-    case False{}:
       Nil{}
+    case Cmd{v, +st, _, _} <> t:
+      Cmds.unread.k(Bool.and(ahead, Nat.is_eq(st, 1n)), v, Cmds.unread.go(t, Bool.or(ahead, Cmds.outstanding.one(st))))
 
-# the commands the CLI holds behind the one it works on (or behind a turn
-# it started by itself): the person's messages it has not read yet, shown
-# so while they wait (hub.bend's Wait.*). The command that starts a turn
-# is written a moment before it starts, with nothing ahead: never listed
-def Cmds.unread(+c: Cmds) -> List<&2, String>:
-  Cmds.unread.k(Bool.or(Cmds.wake(c), Cmds.ahead(Cmds.cs(c))), c)
+# the commands the CLI holds behind another one it has not answered (or
+# behind a turn it started by itself): the person's messages it has not
+# read yet, shown so while they wait (hub.bend's Wait.*). The oldest one
+# written is next: the command that starts a turn, or the one the CLI is
+# about to start as the one before it ends, is never listed
+def Cmds.unread(c: Cmds) -> List<&2, String>:
+  match c:
+    case Cmds{cs, _, w}:
+      Cmds.unread.go(cs, w)
 
 def Cmds.stop.go(cs: List<&2, Cmd>, +still: List<&2, String>) -> List<&2, Cmd>:
   match cs:

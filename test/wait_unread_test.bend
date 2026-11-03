@@ -67,6 +67,13 @@ def s4() -> CM.Cmds:
 def s5() -> CM.Cmds:
   CM.Cmds.see(CM.Cmds.see(s4(), lc("a", "completed")), lc("b", "started"))
 
+# c sent while a works, behind b: between a's end and b's start, c still waits
+def t1() -> CM.Cmds:
+  CM.Cmds.see(CM.Cmds.sent(CM.Cmds.accept(s3(), "c"), "c"), lc("c", "queued"))
+
+def t2() -> CM.Cmds:
+  CM.Cmds.see(CM.Cmds.see(t1(), result()), lc("a", "completed"))
+
 def unread(+s: M.State, +id: String, +at: Nat) -> String:
   Bool.pick(String, STP.Stamp.unread(s, M.Msg{id, "t", M.User{}, "x", at}), "unread", "read")
 
@@ -77,6 +84,9 @@ def main() -> IO(Unit):
     C.Check.str("one sent while it works waits", waits(s3()), "b")
     C.Check.str("still after the first's result", waits(s4()), "b")
     C.Check.str("read once it starts", waits(s5()), "")
+    C.Check.str("two wait behind it", waits(t1()), "b c")
+    C.Check.str("as the first ends, the next is about to start; the other still waits", waits(t2()), "c")
+    C.Check.str("and while the next works", waits(CM.Cmds.see(t2(), lc("b", "started"))), "c")
     C.Check.str("behind a turn the CLI started by itself", waits(CM.Cmds{[CM.Cmd{"w", 1n, False{}, ""}], 1n, True{}}), "w")
     C.Check.str("a stop's tombs wait for nothing", waits(CM.Cmds.stop(s3(), Nil{})), "")
     C.Check.str("lifecycles and results move the ledger", Bool.pick(String, Bool.and(CM.Cmds.moves(lc("a", "queued")), CM.Cmds.moves(result())), "yes", "no"), "yes")
