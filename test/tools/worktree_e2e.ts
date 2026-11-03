@@ -15,6 +15,7 @@
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [bin = "build/backplane-serve", wire = "build/wire"] = process.argv.slice(2);
 let failed = false;
 const check = (name: string, ok: boolean, got?: unknown) => { console.log(ok ? `ok ${name}` : `FAIL ${name}: ${JSON.stringify(got)?.slice(0, 600)}`); if (!ok) failed = true; };
@@ -40,7 +41,7 @@ const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "-
 try {
   for (let i = 0; i < 300; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/hello`)).ok) break; } catch {} await sleep(100); }
   const seen: any[] = []; const replies = new Map<number, any>(); let n = 0;
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => { const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer))); for (const x of o.items ?? []) seen.push(x); if (o.t === "reply") replies.set(Number(o.id), o); };
   await new Promise((r) => (ws.onopen = r));
   const rpc = async (m: string, p: object) => { const id = ++n; ws.send(W.encode(JSON.stringify({ id, m, p }))); for (let i = 0; i < 200 && !replies.has(id); i++) await sleep(50); return replies.get(id); };

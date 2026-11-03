@@ -14,6 +14,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const args = process.argv.slice(2);
 const [bin = "build/backplane-serve", wire = "build/wire"] = args.filter((a) => !a.startsWith("--"));
@@ -76,7 +77,7 @@ async function up(h: Hub) {
 
 async function connect(h: Hub): Promise<Client> {
   const c: Client = { ws: null as any, seen: [], replies: new Map(), n: 0, info: {} };
-  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws?token=${hubToken(h.home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));
@@ -115,7 +116,7 @@ const routineRuns = (c: Client, thread: string) => c.seen.filter((x) => x.$ === 
 // an MCP tools/call from the agent of a thread (the hub's /mcp/<thread>)
 let mcpId = 0;
 async function mcp(h: Hub, thread: string, name: string, args: object): Promise<{ isError: boolean; text: string }> {
-  const r: any = await fetch(`http://127.0.0.1:${h.port}/mcp/${thread}`, {
+  const r: any = await fetch(`http://127.0.0.1:${h.port}/mcp/${thread}?token=${hubToken(h.home)}`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: ++mcpId, method: "tools/call", params: { name, arguments: args } }),
   }).then((x) => x.json());
@@ -205,7 +206,7 @@ try {
   await rpc(ca, "thread.create", { project: pcP?.id, title: "WAITS ON YOU" });
   const tP = await until(5000, () => ca.seen.find((c) => c.$ === "ThreadCreated" && c.project === pcP?.id && c.title === "WAITS ON YOU"));
   const waiting = tP?.id as string;
-  void fetch(`http://127.0.0.1:${pa}/mcp/${waiting}`, {
+  void fetch(`http://127.0.0.1:${pa}/mcp/${waiting}?token=${hubToken(a.home)}`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 900, method: "tools/call", params: { name: "permission_prompt", arguments: { tool_name: "Bash", input: { command: "ls" } } } }),
   }).catch(() => {});

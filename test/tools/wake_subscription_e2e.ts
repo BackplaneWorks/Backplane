@@ -3,6 +3,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 if (!(globalThis as any).Wire) for (const f of readdirSync(wire).filter(f => f.endsWith(".js"))) (0, eval)(readFileSync(join(wire, f), "utf8"));
 const W = (globalThis as any).Wire;
@@ -30,7 +31,7 @@ let ws: WebSocket | undefined;
 const seen: any[] = [];
 try {
   for (let i = 0; i < 200; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/hello`)).status === 200) break; } catch {} await sleep(100); }
-  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = "arraybuffer";
   ws.onmessage = e => { const o = JSON.parse(typeof e.data === "string" ? e.data : W.decode(new Uint8Array(e.data))); seen.push(...(o.items ?? [])); };
   await new Promise((r, j) => { ws!.onopen = r; ws!.onerror = j; });
   let seq = 0;
@@ -79,7 +80,7 @@ try {
 } finally {
   if (process.env.KEEP) {
     writeFileSync(join(root, "seen.json"), JSON.stringify(seen, null, 2));
-    try { writeFileSync(join(root, "perf.txt"), await (await fetch(`http://127.0.0.1:${port}/debug/perf`, { signal: AbortSignal.timeout(2000) })).text()); } catch {}
+    try { writeFileSync(join(root, "perf.txt"), await (await fetch(`http://127.0.0.1:${port}/debug/perf?token=${hubToken(home)}`, { signal: AbortSignal.timeout(2000) })).text()); } catch {}
   }
   ws?.close();
   process.kill(hub.pid, "SIGTERM"); await hub.exited;

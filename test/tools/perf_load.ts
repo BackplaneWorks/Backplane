@@ -18,6 +18,7 @@ import { homedir, tmpdir } from "node:os";
 import { standinScript as claude } from "./perf_standin";
 import { completeOpens, FixtureBots, streamWindow } from "./perf_guard";
 import { dirname, join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const argv = process.argv.slice(2);
 if (argv.includes("--help")) {
@@ -335,7 +336,7 @@ const traffic = (): Record<string, number> => Object.fromEntries(deltas);
 const replies = new Map<number, any>();
 const replyWaiters = new Map<number, (reply: any) => void>();
 let wsMsgs = 0, wsBytes = 0;
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?since=${since}`);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}&since=${since}`);
 ws.binaryType = "arraybuffer";
 ws.onmessage = (e) => {
   const u = new Uint8Array(e.data as ArrayBuffer);

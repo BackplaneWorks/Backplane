@@ -4,6 +4,7 @@ import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
 const args = process.argv.slice(3);
 const emit = (o: object) => console.log(JSON.stringify(o));
@@ -108,7 +109,7 @@ if (process.argv[2] === "--claude") {
     let ready = false;
     for (let i = 0; i < 200; i++) { try { ready = (await fetch(`http://127.0.0.1:${port}/hello`)).ok; } catch {} if (ready) break; await delay(50); }
     check(ready, "isolated hub ready");
-    ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = e => {
       desktopMessages.push(JSON.parse(typeof e.data === "string" ? e.data : W.decode(new Uint8Array(e.data as ArrayBuffer))));

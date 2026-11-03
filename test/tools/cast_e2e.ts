@@ -14,6 +14,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -57,7 +58,7 @@ try {
   check(up, "the hub is up");
   const seen: any[] = [];
   const shots: { page: string; n: number; at: number }[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     let o: any = null;

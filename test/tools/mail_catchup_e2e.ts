@@ -6,6 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFile
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { standinScript } from "./perf_standin";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [binArg, wireArg, outArg] = process.argv.slice(2);
 if (!binArg || !wireArg || !outArg) throw new Error("BINARY WIREDIR OUT required");
 const bin = resolve(binArg), wire = resolve(wireArg), out = resolve(outArg);
@@ -75,7 +76,7 @@ let rid=0, measuredStart=0, measuredEnd=0;
 type Client={ws:WebSocket,seen:any[],deltas:Map<string,number[]>,frames:any[],opened:number,bootEnd:number,rpc:(m:string,p:object)=>Promise<any>};
 const clients:Client[]=[];
 async function client(suffix=""):Promise<Client>{
-  const ws=new WebSocket(base.replace("http:","ws:")+"/ws"+suffix); ws.binaryType="arraybuffer"; sockets.push(ws);
+  const ws=new WebSocket(base.replace("http:","ws:")+"/ws?token="+hubToken(home)+(suffix?"&"+suffix.replace(/^\?/,""):"")); ws.binaryType="arraybuffer"; sockets.push(ws);
   const pending=new Map<number,{resolve:(v:any)=>void,reject:(e:Error)=>void,timer:Timer}>();
   const c:Client={ws,seen:[],deltas:new Map(),frames:[],opened:performance.now(),bootEnd:0,rpc:async(m,p)=>{
     const id=++rid; const answer=new Promise<any>((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(new Error(m+" timeout"));},30000);pending.set(id,{resolve,reject,timer});});
@@ -94,7 +95,7 @@ async function client(suffix=""):Promise<Client>{
   };
   await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject;});clients.push(c);return c;
 }
-const perf=async()=>await(await fetch(base+"/debug/perf.json",{signal:AbortSignal.timeout(10000)})).json();
+const perf=async()=>await(await fetch(base+"/debug/perf.json?token="+hubToken(home),{signal:AbortSignal.timeout(10000)})).json();
 try{
   const start=performance.now();for(;;){try{if((await fetch(base+"/hello",{signal:AbortSignal.timeout(500)})).ok)break;}catch{}if(proc.exitCode!==null||performance.now()-start>60000)throw new Error("startup timeout");await sleep(25);}
   const control=await client();await until(()=>!!control.bootEnd,"initial retained join cutoff");

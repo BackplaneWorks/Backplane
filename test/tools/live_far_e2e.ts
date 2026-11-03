@@ -16,6 +16,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const args = process.argv.slice(2);
 const [bin = "build/backplane", wire = "build/wire"] = args.filter((a) => !a.startsWith("--"));
@@ -96,7 +97,7 @@ async function up(h: Hub) {
 
 async function connect(h: Hub): Promise<Client> {
   const c: Client = { ws: null as any, seen: [], far: [], deltas: [], lives: [], notifies: [], replies: new Map(), n: 0, info: {} };
-  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws?token=${hubToken(h.home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const at = performance.now();

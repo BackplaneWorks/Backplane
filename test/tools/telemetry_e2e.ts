@@ -5,6 +5,7 @@ import { createHmac, createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir, hostname, userInfo } from "node:os";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter(f => f.endsWith(".js"))) (0, eval)(readFileSync(join(wire, f), "utf8"));
 const W = (globalThis as any).Wire;
@@ -40,13 +41,14 @@ const fake = join(root, "bin"); mkdirSync(fake);
 for (const n of ["claude", "codex", "grok", "muse", "antigravity"]) { const f = join(fake, n); writeFileSync(f, "#!/bin/sh\nexit 1\n"); chmodSync(f, 0o755); }
 const homes: string[] = [];
 const owned: ReturnType<typeof Bun.spawn>[] = [];
-let hub: ReturnType<typeof Bun.spawn> | undefined, port = 0;
+let hub: ReturnType<typeof Bun.spawn> | undefined, port = 0, hubHome = "";
 const state = (home: string) => { try { return JSON.parse(readFileSync(join(home, "telemetry/state.json"), "utf8")); } catch { return undefined; } };
 const home = (label: string) => { const h = join(root, label); mkdirSync(h); writeFileSync(join(h, "events.jsonl"), ""); homes.push(h); return h; };
 const baseEnv = { ...process.env, HOME: root, XDG_CACHE_HOME: join(root, "cache"), DISPLAY: "", WAYLAND_DISPLAY: "", CI: "", DO_NOT_TRACK: "", BACKPLANE_SANDBOX: "", BACKPLANE_TELEMETRY: "on", BACKPLANE_TELEMETRY_TEST: "1", BACKPLANE_TELEMETRY_CHANNEL: "dev", BACKPLANE_TELEMETRY_URL: `http://127.0.0.1:${stub.port}/api/v1/events`, BACKPLANE_TELEMETRY_KID: kid, BACKPLANE_TELEMETRY_KEY: key.toString("hex"), BACKPLANE_TELEMETRY_DAY_SECS: "3", BACKPLANE_WAKE_TICK_MS: "500", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_PEERS: "", BEND_NO_TELEMETRY: "1", BACKPLANE_LOCK_DIR: join(root, "locks"), PATH: `${fake}:${process.env.PATH}` };
 const start = async (h: string, extra: Record<string, string> = {}, args: string[] = []) => {
   const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); port = s.port; s.stop(true);
   if (port === 3787) throw new Error("refusing live port");
+  hubHome = h;
   hub = Bun.spawn([resolve(bin), "--home", h, "--web", resolve("build/telemetry-web"), "--port", String(port), "--no-tailscale", "--foreground", "--headless", ...args], { env: { ...baseEnv, ...extra }, stdout: Bun.file(join(h, "stdout.log")), stderr: Bun.file(join(h, "hub.log")) }); owned.push(hub);
   const end = Date.now() + 30000;
   while (Date.now() < end) { try { if ((await fetch(`http://127.0.0.1:${port}/hello`)).ok) return; } catch {} if (hub.exitCode != null) throw new Error(`hub exited: ${readFileSync(join(h, "hub.log"), "utf8")}`); await delay(100); }
@@ -56,7 +58,7 @@ const stop = async () => { ws?.close(); ws = undefined; if (hub && hub.exitCode 
 let infoId = "";
 const pending = new Map<string, (o: any) => void>();
 const connect = async () => {
-  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(hubHome)}`); ws.binaryType = "arraybuffer";
   ws.onmessage = e => { const o = JSON.parse(typeof e.data === "string" ? e.data : W.decode(new Uint8Array(e.data))); if (o.info && "telemetry.id" in o.info) infoId = o.info["telemetry.id"]; if (o.t === "reply") { pending.get(String(o.id))?.(o); pending.delete(String(o.id)); } };
   await new Promise((r, j) => { ws!.onopen = r; ws!.onerror = j; });
 };

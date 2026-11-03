@@ -2,6 +2,7 @@
 // frames, through the hub's own codec built from test/wire), one project +
 // thread, persisted log. Usage: bun test/smoke.ts PORT HOME WIREDIR
 import { readdirSync, readFileSync } from "fs";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [port, home, wire] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
 const W = (globalThis as any).Wire;
@@ -15,7 +16,7 @@ const hello = await fetch(base + "/hello");
 if (hello.headers.get("content-type") !== "application/cbor" || !JSON.parse(W.decode(new Uint8Array(await hello.arrayBuffer()))).backplane)
   fail("/hello did not answer CBOR");
 
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
 ws.binaryType = "arraybuffer";
 const seen: any[] = [];
 let n = 0;

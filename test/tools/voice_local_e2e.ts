@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin, wire, localDir, ...wavs] = process.argv.slice(2);
 if (!bin || !wire || !localDir || !wavs.length) {
@@ -98,7 +99,7 @@ try {
   if (!(await until(() => existsSync(join(home, "token")), 15000))) throw new Error("the hub did not start");
   const token = readFileSync(join(home, "token"), "utf8").trim();
   await sleep(300);
-  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data)));

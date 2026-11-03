@@ -19,6 +19,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Database } from "bun:sqlite";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [oldBin, newBin, wire = "build/wire"] = process.argv.slice(2);
 if (!oldBin || !newBin) throw new Error("usage: far_line_peer_e2e.ts OLD_HUB NEW_HUB [WIREDIR]");
@@ -45,7 +46,7 @@ const up = async (h: Hub) => { for (let i = 0; i < 600; i++) { try { if ((await 
 const stop = async (h: Hub) => { h.proc?.kill("SIGTERM"); await h.proc?.exited; h.proc = null; };
 const connect = async (h: Hub): Promise<Client> => {
   const c: Client = { ws: null as any, seen: [], far: [], replies: new Map(), n: 0, info: {} };
-  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws?token=${hubToken(h.home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));

@@ -20,6 +20,7 @@ const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
 const fixture = join(root, 'echo.cjs');
 fs.writeFileSync(fixture, `
 const fs=require('node:fs'),rl=require('node:readline');
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 if(process.argv.includes('--version')) { console.log('2.0.0'); process.exit(0); }
 const args=process.argv.slice(2),mi=args.indexOf('--mcp-config');
 let url='';try{url=JSON.parse(args[mi+1]).mcpServers.backplane.url}catch{}
@@ -108,7 +109,7 @@ const start = async () => {
     if (hub!.exitCode !== null) throw new Error('fixture hub exited before listening');
     try { return (await fetch(`http://127.0.0.1:${port}/hello`, { signal: AbortSignal.timeout(1000) })).ok; } catch { return false; }
   });
-  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = 'arraybuffer';
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = 'arraybuffer';
   ws.onmessage = e => {
     const value = JSON.parse(typeof e.data === 'string' ? e.data : W.decode(new Uint8Array(e.data as ArrayBuffer)));
     frames.push(...(value.items ?? []));
