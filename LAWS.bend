@@ -15918,3 +15918,15 @@ law home_viewer_size_is_local:
   for u: U.Ui
   for value: String
   {U.Act.cmds(U.Home.viewer.size(u, value)) == Nil{} : List<&2, U.Cmd>}
+
+# Browser clamping after the composer shrinks keeps a following reader at
+# the end. A reader above that enlarged viewport's end keeps their place.
+law timeline_follow_grown_viewport:
+  for held: TLVIRTUAL.Px
+  for +end: TLVIRTUAL.Px
+  {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(True{}, TLVIRTUAL.End.at(TLVIRTUAL.Px.int(1000n), TLVIRTUAL.Px.int(600n), TLVIRTUAL.Follow.viewport(TLVIRTUAL.Px.int(200n), TLVIRTUAL.Px.int(400n)))), held, end) == end : TLVIRTUAL.Px}
+
+law timeline_follow_grown_viewport_away:
+  for +held: TLVIRTUAL.Px
+  for end: TLVIRTUAL.Px
+  {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(True{}, TLVIRTUAL.End.at(TLVIRTUAL.Px.int(1000n), TLVIRTUAL.Px.int(400n), TLVIRTUAL.Follow.viewport(TLVIRTUAL.Px.int(200n), TLVIRTUAL.Px.int(400n)))), held, end) == held : TLVIRTUAL.Px}
