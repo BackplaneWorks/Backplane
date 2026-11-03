@@ -146,6 +146,9 @@ def main() -> IO(Unit):
     # a thread open in a project folded under Older (settled long ago, so
     # not held live) keeps its project on screen, and the shelf says so
     C.Check.str("older shut shows the open thread's project", pids(act(older(), "select", "g")) ++ "|" ++ pids(older()), "p1,p4,p2,p3|p1,p4,p2")
+    # settling a project's only thread by hand is a move on it: the project stays (quiet), not folded into Older
+    C.Check.str("just settled by hand: still listed", pids(U.Ui.fold(List.append(&2, M.Change, log(), [M.ThreadCreated{"g", "p3", "Bootloader", M.Local{}, "", "", "claude", "", 600n}, M.ThreadSettled{"g", True{}, 999900n}]), U.Ui.init(now()))), "p1,p4,p3,p2")
+    C.Check.str("auto-settled: folded as before", pids(U.Ui.fold(List.append(&2, M.Change, log(), [M.ThreadCreated{"g", "p3", "Bootloader", M.Local{}, "", "", "claude", "", 600n}, M.ThreadSettled{"g", False{}, 999900n}]), U.Ui.init(now()))), "p1,p4,p2")
     C.Check.str("older shut words", U.Shelf.words(I.En{}, "Older 1", List.length(&2, U.SRow, U.Side.older.sel(U.Side.rows(U.Side.st(older()), now()), "p3"))), "Older 1 · 1 shown")
     C.Check.str("older open lists it once", pids(act(act(older(), "select", "g"), "toggle-settled", "old-projects")), "p1,p4,p2,p3")
     C.Check.str("shut fold shows the open row", String.join(U.Side.ids(U.Side.sel(U.Ui.threads(st()), "d")), ",") ++ "|" ++ String.join(U.Side.ids(U.Side.sel(U.Ui.threads(st()), "")), ","), "d|")
