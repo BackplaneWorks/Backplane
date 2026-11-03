@@ -2436,3 +2436,49 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .improvements-recording p{margin:0;font-size:12px;line-height:1.5}
 .improvements-recording-bar{position:fixed;top:8px;left:8px;z-index:100000;display:flex;align-items:center;flex-wrap:wrap;gap:8px;max-width:calc(100vw - 16px);padding:8px 12px;background:#111410;color:#f0f2e9;border:2px solid #e16955;font:14px sans-serif}
 .improvements-recording-bar[hidden]{display:none}.improvements-recording-bar button{min-height:36px;padding:6px 10px;background:#222a1e;color:inherit;border:1px solid #c7cfba}
+
+/* One control row at every pane width. The Bend layout owns the row's
+   height and nowrap contract; labels yield space, disclosures leave flow. */
+.composer { --composer-button: 28px; container: composer / inline-size; }
+.composer-foot { flex: none; gap: 5px; align-items: center; min-width: 0; }
+.composer-foot > *, .composer-foot .composer-model { grid-area: auto; }
+.composer-foot .composer-model { display: flex; flex: 1 1 0; width: auto; min-width: 0; flex-wrap: nowrap; gap: 4px; }
+.composer-foot .model-chip, .composer-foot .composer-model .model-chip { flex: 1 1 0; min-width: 32px; max-width: 100%; margin: 0; }
+.composer-foot .model-ctx { flex: 0 1 auto; }
+.composer-foot .composer-more, .composer-foot .composer-options { display: contents; }
+.composer-more > summary { display: none; }
+.composer-foot .composer-options > :is(button, .attach), .composer-foot > .attach,
+.composer-foot .model-chip, .composer-foot .foot-end > button {
+  height: var(--composer-button); min-height: var(--composer-button); max-height: var(--composer-button);
+  box-sizing: border-box; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.composer-foot .composer-options > .account-chip { flex: 0 1 auto; max-width: 14ch; min-width: 28px; }
+.composer-foot .composer-options > .allowance-chip { flex: 0 1 auto; width: calc(19ch + 16px); min-width: 36px; max-width: 100%; }
+.composer-foot .composer-options > .attach.draw { margin: 0; }
+.composer-foot .foot-end { flex: none; flex-wrap: nowrap; margin: 0; }
+/* Placeholder text stays one line; actual input retains normal wrapping. */
+.composer textarea:placeholder-shown { white-space: pre; text-overflow: ellipsis; overflow-x: hidden; }
+@media (max-width: 760px) { .composer { --composer-button: 36px; } }
+@container composer (max-width: 700px) {
+  .composer-foot { gap: 4px; }
+  .composer-foot .model-ctx, .composer-foot .model-chip :is(kbd, .mp-eff) { display: none; }
+  .composer-foot .composer-more { display: block; position: static; flex: none; }
+  .composer-more > summary { display: flex; width: var(--composer-button); min-width: 0; height: var(--composer-button); min-height: 0; padding: 0; box-sizing: border-box; font-size: 22px; }
+  .composer-foot .composer-options { display: none; }
+  .composer-foot .composer-more[open] > .composer-options {
+    display: flex; position: absolute; top: auto; bottom: calc(100% + 6px); right: 0;
+    width: min(260px, calc(100vw - 32px)); max-height: min(60dvh, var(--composer-top, 60dvh)); overflow-y: auto;
+  }
+  .composer-foot .composer-options > :is(button, .attach) { display: flex; flex: none; width: 100%; max-width: 100%; min-width: 0; justify-content: flex-start; gap: 8px; height: auto; max-height: none; min-height: 36px; padding: 6px 10px; white-space: normal; overflow-wrap: anywhere; }
+  .composer-options .acct-v, .composer-options .tok-n { display: inline; }
+  .composer-options .account-chip .acct-v { white-space: normal; }
+  .composer-foot .composer-options .attach.draw::after { content: attr(title); }
+}
+/* Flatten the native details content box as well as its element on wide
+   panes. Closed disclosures otherwise retain an invisible block layout. */
+.composer-more::details-content { display: contents; content-visibility: visible; }
+.composer-foot .composer-options > :is(button, .attach) { width: auto; }
+.composer-foot .composer-options > .allowance-chip { width: calc(19ch + 16px); }
+@container composer (max-width: 700px) {
+  .composer-foot .composer-options > :is(button, .attach) { width: 100%; }
+}
