@@ -8213,12 +8213,52 @@ def Rec.note(+th: String, +now: Nat, +seq: Nat, +text: String) -> M.Change:
 # open: the child goes on and delivers it; law carry_keeps_child_task.
 # Either way the cut-off turn is marked stopped, so its partial reply does
 # not say "Finished")
+# One row a turn: "Backplane restarted at 06:04 during this turn.", and
+# when an ask was open, which one went unanswered (Rec.ask.close writes
+# it, and the turn then adds no note of its own: Rec.told). Its time is
+# the person's, as the messages' stamps (core/stamp.bend).
+def Rec.cut(+s: M.State, +now: Nat) -> String:
+  "Backplane restarted at " ++ TZ.Tz.show.time(SC.Sched.person(s, 0n, True{}), now) ++ " during this turn."
+
+# a text's first line, quoted ("" for none)
+def Rec.quote(+x: String) -> String:
+  +l = String.trim(Maybe.default(&2, String, List.head(&2, String, String.split(x, Chr{10})), ""))
+  Bool.pick(String, String.is_empty(l), "", ": “" ++ l ++ "”")
+
+# what went unanswered: a question, a tool's approval, a plan
+def Rec.unanswered(+kind: String, +tool: String, +detail: String) -> String:
+  Bool.pick(String, String.eq(kind, "input"), " Its question was not answered" ++ Rec.quote(detail),
+    Bool.pick(String, String.eq(kind, "approval"), " Its request to use " ++ tool ++ " was not answered" ++ Rec.quote(detail),
+      Bool.pick(String, String.eq(kind, "plan"), " Its plan was not answered.", " Its request was not answered.")))
+
+# whether this recovery already wrote the thread's restart row (an open
+# ask's, closed first: Hub.recover.k)
+def Rec.told.k(es: List<&2, M.Entry>, +now: Nat) -> Bool:
+  match es:
+    case M.Act{_, _, _, +kind, _, +at} <> _:
+      Bool.and(String.eq(kind, "restart"), Nat.is_eq(at, now))
+    case _:
+      False{}
+
+def Rec.told(+s: M.State, +th: String, +now: Nat) -> Bool:
+  Rec.told.k(M.State.mine(s, th), now)
+
+def Rec.turn.note(told: Bool, +s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  match told:
+    case True{}:
+      Nil{}
+    case False{}:
+      [Rec.note(th, now, Hub.seq(s), Rec.cut(s, now))]
+
+def Rec.turn.cs(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  List.append(&2, M.Change, Rec.turn.note(Rec.told(s, th, now), s, now, th), M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now))
+
 def Rec.turn.k(run: Bool, will: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
   match run will:
     case True{} False{}:
-      Launch.tell(s, now, th, Task.finish(s, now, th, Step{Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished") <> M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), Nil{}}))
+      Launch.tell(s, now, th, Task.finish(s, now, th, Step{Rec.turn.cs(s, now, th), Nil{}}))
     case True{} True{}:
-      Step{Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished") <> M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), Nil{}}
+      Step{Rec.turn.cs(s, now, th), Nil{}}
     case False{} _:
       Step.none()
 
@@ -8237,17 +8277,19 @@ def Rec.turns(ts: List<&2, String>, r: Rec, +before: M.State, +now: Nat) -> Rec:
 # (an order's question parks nothing, so it stays open: its answer starts
 # the agent again, Hub.answer.order; "Ship to which country?" went away
 # with every deploy; law recover_keeps_order_ask)
-def Rec.ask.close(order: Bool, +id: String, +th: String, +s: M.State, +now: Nat) -> Step:
+# (the row says which ask went unanswered, so it can be answered in the
+# composer; the turn's own row joins it: Rec.told)
+def Rec.ask.close(order: Bool, +id: String, +th: String, +kind: String, +tool: String, +detail: String, +s: M.State, +now: Nat) -> Step:
   match order:
     case True{}:
       Step.none()
     case False{}:
-      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), "Backplane restarted: this request can no longer be answered")], Nil{}}
+      Step{[M.AskClosed{id, "", now}, Rec.note(th, now, Hub.seq(s), Rec.cut(s, now) ++ Rec.unanswered(kind, tool, detail))], Nil{}}
 
 def Rec.ask.k(a: M.Ask, +s: M.State, +now: Nat) -> Step:
   match a:
-    case M.Ask{+id, +th, _, +tool, _, _, True{}, _}:
-      Rec.ask.close(OR.Order.ask.is(tool), id, th, s, now)
+    case M.Ask{+id, +th, +kind, +tool, +detail, _, True{}, _}:
+      Rec.ask.close(OR.Order.ask.is(tool), id, th, kind, tool, detail, s, now)
     case _:
       Step.none()
 
