@@ -4,9 +4,9 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
 // Run the actual renderer controller with Settings in front and no guest
 // surface. The private bridge is the only permitted recovery effect.
-async function fixture({phase='error',reconnect=async()=>({phase:'ready'}),surface=false,overlays=[],present=async()=>({shown:false,message:'Enter an address to open a page.'}),onRestore=()=>false}={}){
+async function fixture({phase='error',reconnect,surface=false,overlays=[],present=async()=>({shown:false,message:'Enter an address to open a page.'}),onRestore=()=>false}={}){
  const {installDesktopBrowser}=await import('../../src/web/desktop-browser.js');
- const listeners=new Map(),frames=new Map(),calls=[];
+ const listeners=new Map(),frames=new Map(),calls=[],timers=[];
  let nextFrame=0,onState;
  const button={hidden:true,disabled:false,style:{display:'none'}};
  const label={textContent:'Connecting Browser…'};
@@ -17,22 +17,85 @@ async function fixture({phase='error',reconnect=async()=>({phase:'ready'}),surfa
   addEventListener(name,fn){listeners.set(name,fn);},removeEventListener(name,fn){if(listeners.get(name)===fn)listeners.delete(name);}};
  const win={innerWidth:800,innerHeight:600,getComputedStyle:node=>node.css||({visibility:'visible',display:'block'}),ResizeObserver:class{observe(){assert(surface,'No guest surface');}disconnect(){}},
   requestAnimationFrame(fn){frames.set(++nextFrame,fn);return nextFrame;},cancelAnimationFrame(id){frames.delete(id);},
+  setTimeout(fn,ms){const timer={fn,ms};timers.push(timer);return timer;},clearTimeout(timer){timer.cancelled=true;},
   addEventListener(){},removeEventListener(){}};
  doc.defaultView=win;
  const bridge={state:async()=>({phase}),onState(fn){onState=fn;return()=>{onState=null;};},
   restored(owner){calls.push('restored:'+owner);},
   hide(){calls.push('hide');},present(value){calls.push('present');assert(surface,'No presentation allowed');return present(value);}};
+ if(reconnect)bridge.reconnect=()=>{calls.push('reconnect');return reconnect();};
  const controller=installDesktopBrowser({bridge,root:doc,onRestore});
  function frame(){const pending=[...frames.values()];frames.clear();for(const fn of pending)fn();}
  function click(recovery=true){let prevented=false;listeners.get('click')?.({target:{closest:()=>recovery?button:null},preventDefault(){prevented=true;}});return prevented;}
  await tick();frame();
- return{button,label,calls,controller,frame,click,state:value=>onState?.(value),listeners};
+ return{button,label,calls,timers,controller,frame,click,state:value=>onState?.(value),listeners};
 }
 
 test('connection errors stay within Browser with no recovery control or click handler',async()=>{
  const h=await fixture({phase:'error'});
- try{assert(!h.listeners.has('click'));assert.deepEqual(h.calls,[]);assert.equal(h.button.hidden,true);}
+ try{assert(!h.listeners.has('click'));assert.deepEqual(h.calls,[]);assert.equal(h.button.hidden,true);assert.equal(h.timers.length,0,'current desktops keep recovery in main');}
  finally{h.controller.dispose();}
+});
+
+test('updated web UI recovers an older manual-reconnect desktop even with Settings open',async()=>{
+ const h=await fixture({reconnect:async()=>({phase:'ready'})});
+ try{
+  assert.equal(h.timers.length,1);assert.equal(h.timers[0].ms,500);
+  h.timers[0].fn();await tick();h.frame();
+  assert.deepEqual(h.calls,['reconnect']);assert(!h.listeners.has('click'));
+  assert.equal(h.timers.length,1,'ready ends recovery without touching the conversation or opening a page');
+ }finally{h.controller.dispose();}
+});
+
+test('legacy recovery coalesces errors and backs off until the selected service returns',async()=>{
+ let finish;const h=await fixture({reconnect:()=>new Promise(r=>{finish=r;})});
+ try{
+  h.state({phase:'error'});assert.equal(h.timers.length,1);
+  h.timers[0].fn();await tick();
+  h.state({phase:'connecting'});h.state({phase:'error'});assert.equal(h.timers.length,1);
+  finish({phase:'ready'});await tick();
+  assert.equal(h.timers.length,2,'a stale ready reply cannot replace the newer error');
+  assert.equal(h.timers[1].ms,1000);assert.deepEqual(h.calls,['reconnect']);
+  h.timers[1].fn();await tick();finish({phase:'ready'});await tick();
+  h.state({phase:'error'});assert.equal(h.timers.at(-1).ms,500,'success resets backoff');
+ }finally{h.controller.dispose();}
+});
+
+test('legacy recovery handles rejected and synchronously throwing reconnect calls',async()=>{
+ let attempts=0;const h=await fixture({reconnect:()=>{
+  if(++attempts===1)return Promise.reject(Error('service stopped'));
+  throw Error('service not ready');
+ }});
+ try{
+  for(const ms of [500,1000,2000,4000,8000,16000,30000,30000]){
+   const timer=h.timers.at(-1);assert.equal(timer.ms,ms);timer.fn();await tick();
+  }
+  assert.equal(attempts,8);
+ }finally{h.controller.dispose();assert(h.timers.at(-1).cancelled);}
+});
+
+test('legacy recovery keeps a newer ready event over a stale failed reply',async()=>{
+ let finish;const h=await fixture({reconnect:()=>new Promise(r=>{finish=r;})});
+ try{
+  h.timers[0].fn();await tick();h.state({phase:'ready'});
+  finish({phase:'error'});await tick();assert.equal(h.timers.length,1);
+ }finally{h.controller.dispose();}
+});
+
+test('legacy recovery cancels timers and ignores in-flight completion after renderer disposal',async()=>{
+ const queued=await fixture({reconnect:async()=>({phase:'ready'})});
+ queued.controller.dispose();assert(queued.timers[0].cancelled);queued.timers[0].fn();await tick();assert.deepEqual(queued.calls,[]);
+ let finish;const pending=await fixture({reconnect:()=>new Promise(r=>{finish=r;})});
+ pending.timers[0].fn();await tick();pending.controller.dispose();finish({phase:'error'});await tick();
+ assert.equal(pending.timers.length,1);assert.deepEqual(pending.calls,['reconnect']);
+});
+
+test('a legacy presentation error explains automatic recovery and preserves the tracked text node',async()=>{
+ const h=await fixture({surface:true,reconnect:async()=>({phase:'ready'}),present:async()=>({shown:false,phase:'error',message:'Browser unavailable'})});
+ try{
+  await tick();assert.equal(h.label.textContent,'Browser unavailable · reconnecting automatically…');
+  h.state({phase:'error',message:'Reconnect to try again.'});assert.equal(h.label.textContent,'Browser unavailable · reconnecting automatically…');
+ }finally{h.controller.dispose();}
 });
 
 test('ordinary web clients do not install a desktop controller',async()=>{
