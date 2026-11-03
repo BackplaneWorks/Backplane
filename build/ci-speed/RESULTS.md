@@ -407,3 +407,58 @@ two tests can each reach about8.2GiB RSS, so blindly restoring parallelism on
 a16GiB runner would be unsafe. Production scheduling stays serial pending
 trusted capacity/admission and representative measurements; no twofold/nightly
 speed claim is made.
+
+## Refresh the slow-test scheduling profile from existing nightly logs
+
+Reused [nightly 41444167520](https://github.com/BackplaneWorks/Backplane/actions/runs/41444167520)
+at source 8ec64e3d40c9dd1fb7b72a1374a05220f1a46be9. Its four downloaded test
+logs contain every one of 514 positive-suite programs exactly once: 513 timed
+passes and `subagent_rows_cost_test.bend: did not run`. That failed result is
+retained in the receipt and remains scheduled with an unknown duration. No
+nightly, proof or build was restarted.
+
+The old profile contained only 90 estimates. Current full-tree partitioning
+keeps all 572 programs exactly once; 513 have recorded weights, 59 use the
+existing unknown fallback. `import-test-timings.py` verifies checked-out source
+identity, exact historical inventory, no duplicates and the original shard
+assignment before writing any weights. No pass/cache/skip logic changes.
+
+| Change | Before | After |
+|---|---|---|
+|Recorded historical shard work, seconds |3797.6 /3146.8 /4822.2 /4671.5 |4109.4 /4109.8 /4109.4 /4109.5 |
+|Largest recorded-work shard |4822.2s |4109.8s (14.8% smaller model) |
+|Profile recorder with inherited focused/sharded environment |Runs narrowed selection and overwrites full profile |Forces full/serial, clears selection; failed run preserves old profile |
+
+[Profile receipt](nightly-profile/profile.json) binds the four job-log hashes,
+source revision, importer/output hashes and failed test. These are recorded-work
+sums from the old concurrent run, **not an observed nightly wall-time gain**.
+They omit the failed test's unknown duration and cannot predict effects of
+contention, new code/tests or the current serial worker policy. Real historical
+shard job walls were 31.6–50.4 minutes. No two-minute full-suite claim is made.
+
+The saved logs also show larger memory use than the previous 8.2GiB examples:
+workspace_layout 164.9s/12.3GiB; lang 119s/11.2GiB; body_sidebar_issued 119.7s/11GiB;
+thin_mirror 141.6s/10.1GiB. RSS is each test's largest measured process, not an
+aggregate concurrent memory bound. Production lock/heap/floor/worker settings
+are unchanged; unsafe parallelism is not enabled.
+
+The timing recorder previously omitted `TEST_FULL=1` and inherited
+`TEST_FILES`/shard variables. A real fake-runner baseline reproduced exit 0 and
+profile replacement with TEST_FULL=0 and the narrowed selection. The repair
+forces complete serial selection and atomically replaces only on success.
+Six import/recorder controls pass in 0.043s, including missing/foreign inventory,
+duplicate/stale revision, wrong shard order and failed-record preservation.
+[Control receipt](nightly-profile/controls.json). YAML parsed and the current
+572-test partition at the source base was checked independently.
+
+Future CI shards retain small per-test timing artifacts for three days even
+on failure; artifact transfer overhead remains unmeasured. This pass spent
+**$0 Boat credit**, ran only fake-tool/metadata checks and changed no Bend app,
+law, proof, installer or design source. Full proof/build intentionally omitted
+under the current user instruction.
+
+UI handoff settled: regular PR #790 normal-merged as 34c7f0d92a4ff15a2d1ca3be85e55d4a70cc96bc.
+Exact pushed head b248be1c978cf236292ae71f05c75d9d0eaa2da6 Git-free export took 0.260s,
+with cached simulator pass. Static/overall remain incomplete/exit 3 for 37
+computed bindings and 31 URL expressions; trace remains incomplete with its
+fixture separately passing. No pre-push hook is wired.

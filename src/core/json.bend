@@ -361,6 +361,7 @@ type Tok is Data:
   TBad{}
 
 type Lex is Data:
+  LBad{}
   LIdle{}
   LStr{acc: String}
   LEsc{acc: String}
@@ -480,6 +481,12 @@ def Lex.hexval.k(d: Bool, up: Bool, +u: U32) -> U32:
 def Lex.hexval(+u: U32) -> U32:
   Lex.hexval.k(U32.is_le(u, 57), U32.is_le(u, 70), u)
 
+# Check the full ASCII ranges before subtraction or scalar construction.
+# A non-hex character is not a nibble, including a quote in a short escape.
+def Lex.is_hex(+u: U32) -> Bool:
+  Bool.or(Bool.and(U32.is_ge(u, 48), U32.is_le(u, 57)),
+    Bool.or(Bool.and(U32.is_ge(u, 65), U32.is_le(u, 70)), Bool.and(U32.is_ge(u, 97), U32.is_le(u, 102))))
+
 # A \uXXXX escape is one UTF-16 unit: a character past U+FFFF comes as a
 # high and a low surrogate escape (Python's json.dumps writes every emoji
 # so). The pair is one Char; a surrogate without its partner is U+FFFD, as
@@ -518,15 +525,25 @@ def Lex.unit.after(wait: Bool, lo: Bool, +hi: U32, +code: U32, acc: String) -> L
 def Lex.unit.end(+code: U32, +hi: U32, acc: String) -> Lex:
   Lex.unit.after(Bool.not(U32.is_eq(hi, 0)), Lex.is_lo(code), hi, code, acc)
 
+# Only checked digits reach the existing UTF-16-unit/surrogate handling.
+def Lex.uni.checked(ok: Bool, acc: String, left: Nat, +code: U32, +hi: U32, +u: U32) -> Lex:
+  match ok:
+    case False{}:
+      LBad{}
+    case True{}:
+      match left:
+        case 1n+0n:
+          Lex.unit.end(U32.or(U32.shln(code, 4n), Lex.hexval(u)), hi, acc)
+        case 1n+p:
+          LUni{acc, p, U32.or(U32.shln(code, 4n), Lex.hexval(u)), hi}
+        case 0n:
+          LStr{acc}
+
 # one more hex digit of a \uXXXX escape
-def Lex.uni(acc: String, left: Nat, +code: U32, +hi: U32, c: Char) -> Lex:
-  match left c:
-    case 1n+0n Chr{+u}:
-      Lex.unit.end(U32.or(U32.shln(code, 4n), Lex.hexval(u)), hi, acc)
-    case 1n+p Chr{+u}:
-      LUni{acc, p, U32.or(U32.shln(code, 4n), Lex.hexval(u)), hi}
-    case 0n _:
-      LStr{acc}
+def Lex.uni(acc: String, left: Nat, code: U32, hi: U32, c: Char) -> Lex:
+  match c:
+    case Chr{+u}:
+      Lex.uni.checked(Lex.is_hex(u), acc, left, code, hi, u)
 
 # a finished string read once at its head. In the JS build a string grown
 # a character at a time is a rope (one string cell per character) until
@@ -580,6 +597,8 @@ def Lex.hie.k(uu: Bool, +hi: U32, c: Char, acc: String) -> Lex:
 
 def Lex.step(st: Lex, c: Char, out: List<&2, Tok>) -> Lex & List<&2, Tok>:
   match st c:
+    case LBad{} _:
+      (LBad{}, out)
     case LIdle{} Chr{+u}:
       Lex.idle(Lex.cls.p(u), Chr{u}, out)
     case LStr{acc} _:

@@ -70,7 +70,7 @@
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
     "src/core/images.bend": "5e00c7c36ef76ff7d458f381e829534f62eeef6c3dc3208789b5b20b4cb7a376",
-    "src/core/json.bend": "039105b99a83af70a1f62042fde42e5a4e89e937983e42dfc22135590b3ac075",
+    "src/core/json.bend": "f500b30686fc4eea0f6d7ac00bda03e524676f59dd00c6244696e678536560af",
     "src/core/kexport.bend": "e7c768d51b7909761458296102e9aefb66d8ffd9ea37c3487ccc7fdb2defc86d",
     "src/core/kihealth.bend": "0f31f804fddef557d7a038dd39022219455d5b9e0990fa19ccef5a388e511460",
     "src/core/kserve.bend": "f375590578eaba849f6523cbf5719da104ac0073f4adcbfd7c0b7157bd1f2100",
@@ -91,7 +91,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "7f417b9547f8106214194ca01b7965d85e15fee43d430fafd47bd3b46f42a040",
+    "src/core/msgs.bend": "204f1ac2b10d853dc577771d8e42bbacf43cbd163ef12e098e4dbad592144f14",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
     "src/core/onboard.bend": "fc10cb988f4fa6e8b2780e3ea3c4ebfea0088256daf5f65abebd10dfe2d746c8",
@@ -192,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "cd33edbb99bd9714d35ba5e45bd125a6478723c72b022382853b8e2870888c67"
+    "src/web/view.bend": "cd9c717815570e02e412420155bb7ce3f9eab5f52fd62b77be3557861386c1e6"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -818,6 +818,26 @@
       "src/web/view.bend"
     ],
     "scope": "roots.bend (imports model, far) reads only the setting projects.missing and project records; view.bend's View.gone.* reads the selected thread's project, that setting and the existing '@rm' remove-confirm scratch key (as the project menu's Remove already does). No sidebar draft readers, unknown @ retention, private image keys or transport authority change."
+  },
+  "gitInitReview": {
+    "changedClosureFiles": [
+      "src/core/msgs.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "Diff's no-git page gains a button (action git, value init) and two catalog strings; no Ui, draft or sidebar reader changes."
+  },
+  "jsonAccountFallbackReview": {
+    "commits": [
+      "c81ca7506",
+      "316a3c91c",
+      "a84fe4880",
+      "66b1ed0e0"
+    ],
+    "changedClosureFiles": [
+      "src/core/json.bend",
+      "src/core/account-fallback.bend"
+    ],
+    "scope": "JSON parser: UTF-16 surrogate pairs and invalid \\u digits rejected before building a scalar; account fallback: remaining same-provider accounts preferred before another provider. Neither reads Ui drafts, @ fields, sidebar image keys or transport; re-hashed so server builds of main pass the guard again."
   },
   "accountFallbackReview": {
     "review": "docs/reviews/account-fallback-sidebar-20261103.md",
