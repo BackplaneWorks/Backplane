@@ -2289,12 +2289,23 @@ def SIx.work(+ix: SIx, +th: String) -> Nat:
     case SIx{_, _, _, wk}:
       M.Work.kids.at.k(Map.get(Nat, 0n, wk, th))
 
+# a thread's last move for its project's place: settling it by hand counts,
+# as unsettling does (M.Thread.unsettled), so a project whose only thread
+# was just settled stays among the quiet ones instead of vanishing into
+# Older; an auto-settle (the inactivity tick: no override) does not
+def Side.touched(o: M.Override, +a: Nat, +sa: Nat) -> Nat:
+  match o:
+    case M.ForcedSettled{}:
+      M.Time.max(a, sa)
+    case _:
+      a
+
 def Side.latest(ts: List<&2, M.Thread>, +acc: Nat) -> Nat:
   match ts:
     case Nil{}:
       acc
-    case M.Thread{_, _, _, _, +a, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} <> t:
-      Side.latest(t, M.Time.max(acc, a))
+    case M.Thread{_, _, _, _, +a, _, _, _, o, +sa, _, _, _, _, _, _, _, _, _, _, _} <> t:
+      Side.latest(t, M.Time.max(acc, Side.touched(o, a, sa)))
 
 def Side.rows.k(+st: M.State, removed: Bool, p: M.Project, +mine: List<&2, M.Thread>, +c: Nat, +navs: Map<&2, M.Nav>, +now: Nat, +key: String, rest: List<&2, PSlot>) -> List<&2, PSlot>:
   match removed:
