@@ -1393,6 +1393,7 @@ tasks.origin.launch = ← launched by {title}
 tasks.origin.delegate = ← delegated by {title}
 tasks.origin.parent = ← parent thread · {title}
 composer.offline = Not sent: reconnecting by itself. Your draft is kept; send it again once connected.
+composer.offline.back = Connected again. Your message was not sent: it is still in the composer, ready to send.
 composer.attachment.reload = This attachment could not be kept for reload. Send it before leaving this page.
 composer.attachment.restoring = Restoring attachments. Wait before sending or removing files.
 viewer.file.missing = The file is no longer in the folder: {name}

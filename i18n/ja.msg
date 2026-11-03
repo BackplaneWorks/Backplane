@@ -1416,6 +1416,7 @@ tasks.origin.launch = ← 起動元: {title}
 tasks.origin.delegate = ← 委任元: {title}
 tasks.origin.parent = ← 親スレッド · {title}
 composer.offline = 送信されていません。自動で再接続しています。下書きは保存されています。接続後にもう一度送信してください。
+composer.offline.back = 再接続しました。メッセージは送信されていません。入力欄に残っているので、送信してください。
 composer.attachment.reload = この添付ファイルを再読み込み用に保存できませんでした。このページを離れる前に送信してください。
 composer.attachment.restoring = 添付ファイルを復元しています。送信や削除は完了までお待ちください。
 viewer.file.missing = ファイルがフォルダーにありません: {name}
