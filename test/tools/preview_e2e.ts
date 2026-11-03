@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {deflateSync} from 'node:zlib';
 import {createRequire} from 'node:module';
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [binary, web, wire, playwright] = process.argv.slice(2);
 assert.ok(binary, 'usage: bun test/tools/preview_e2e.ts HUB [WEB WIRE [PLAYWRIGHT_MODULE]]');
@@ -144,7 +145,7 @@ try {
     assert.ok(web && wire, 'browser gate requires matching WEB and WIRE');
     for (const name of readdirSync(wire).filter(f => f.endsWith('.js'))) (0, eval)(readFileSync(join(wire, name), 'utf8'));
     const W = (globalThis as any).Wire, messages: any[] = []; let id = 0;
-    ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = 'arraybuffer';
+    ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = 'arraybuffer';
     ws.onmessage = event => { try { messages.push(JSON.parse(W.decode(new Uint8Array(event.data as ArrayBuffer)))); } catch {} };
     await new Promise<void>(resolve => { ws!.onopen = () => resolve(); });
     const request = async (m: string, p: any) => {

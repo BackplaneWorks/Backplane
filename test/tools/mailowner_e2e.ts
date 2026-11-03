@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHmac, randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const pause = (ms: number) => new Promise(r => setTimeout(r, ms));
 async function until(f: () => unknown, ms = 20000) {
   const end = Date.now() + ms;
@@ -86,7 +87,7 @@ else {
     let ready = false;
     for (let i = 0; i < 250 && !ready; i++) { try { ready = (await fetch(`http://127.0.0.1:${h.port}/hello`)).ok; } catch {} if (!ready) await pause(40); }
     if (!ready) throw Error(`hub ${h.site} did not start`);
-    h.ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws?since=999999999`);
+    h.ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws?token=${hubToken(h.home)}&since=999999999`);
     h.ws.binaryType = 'arraybuffer';
     h.ws.onmessage = e => { const o = JSON.parse(W.decode(new Uint8Array(e.data))); if (o.t === 'reply') h.replies.set(Number(o.id), o); };
     await new Promise((ok, no) => { h.ws!.onopen = ok; h.ws!.onerror = no; });

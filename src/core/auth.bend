@@ -58,40 +58,34 @@ def Auth.owner.header_count(hs: List<&2, H.Header>, +name: String) -> Nat:
 
 # trusted here is the socket peer's whois-verified owner identity. Only a
 # native POST /bots/pair may use it, only to an exact own authority, with
-# no browser Origin or proxy identity. Other routes keep their existing
-# token/localhost/signature gates, including locks, OAuth and MCP.
+# no browser Origin or proxy identity. Other routes keep their own
+# token/signature gates, including locks, OAuth and MCP.
 def Auth.owner.pair(+trusted: Bool, +own: List<&2, String>, +hs: List<&2, H.Header>, +method: String, +path: String) -> Bool:
   Bool.and(trusted, Bool.and(Nat.is_eq(Auth.owner.header_count(hs, "host"), 1n), Bool.and(String.eq(method, "POST"), Bool.and(String.eq(H.Http.route(path), "/bots/pair"),
     Bool.and(Auth.browser(hs), Bool.and(String.is_empty(H.Http.header_of(hs, "origin")),
       Bool.and(String.is_empty(H.Http.header_of(hs, "tailscale-user-login")),
         Auth.owner.host(own, String.to_lower(H.Http.header_of(hs, "host"))))))))))
 
-# A browser cannot use DNS rebinding to inherit a localhost exemption.
+# A Host naming this machine (DNS rebinding cannot fake one in a browser).
 def Auth.local.host(+host: String) -> Bool:
   Bool.or(String.eq(host, "localhost"), Bool.or(String.starts_with(host, "localhost:"),
     Bool.or(String.eq(host, "127.0.0.1"), Bool.or(String.starts_with(host, "127.0.0.1:"),
       Bool.or(String.eq(host, "[::1]"), String.starts_with(host, "[::1]:"))))))
 
+# a request from this machine (trusted: a loopback socket), not proxied by
+# tailscale serve: where the OAuth callback and the locks' helper come from.
+# Never a credential by itself.
 def Auth.trusted(+trusted: Bool, +hs: List<&2, H.Header>) -> Bool:
   Bool.and(trusted, Bool.and(String.is_empty(H.Http.header_of(hs, "tailscale-user-login")),
     Bool.or(Auth.local.host(String.to_lower(H.Http.header_of(hs, "host"))),
       Bool.and(String.is_empty(H.Http.header_of(hs, "host")), String.is_empty(H.Http.header_of(hs, "origin"))))))
 
-# Every client presents the pairing token. Before, the owner's tailnet
-# devices (Tailscale's whois) and this machine's programs (loopback) were
-# let in without it, Host saying localhost, which any program can send.
-# Those are still let in, the legacy way, while clients move to the token:
-# the hub tells such a client to pair again and logs it (server.bend's
-# Conn.legacy). Auth.legacy.on() turning False ends the legacy way.
-def Auth.legacy.on() -> Bool:
-  True{}
-
-def Auth.allowed(+trusted: Bool, +hs: List<&2, H.Header>, +path: String, +token: String) -> Bool:
-  Bool.and(Auth.browser(hs), Bool.or(Bool.and(Auth.legacy.on(), Auth.trusted(trusted, hs)), Auth.credential(hs, path, token)))
-
-# let in the legacy way: allowed, and without the token
-def Auth.legacy(+trusted: Bool, +hs: List<&2, H.Header>, +path: String, +token: String) -> Bool:
-  Bool.and(Auth.allowed(trusted, hs, path, token), Bool.not(Auth.credential(hs, path, token)))
+# Every client presents the pairing token or a paired device's credential,
+# from this machine too: a loopback socket or a Host naming this machine is
+# not a credential. Programs on this machine read the token from the home
+# (<home>/token), as the desktop app does.
+def Auth.allowed(+hs: List<&2, H.Header>, +path: String, +token: String) -> Bool:
+  Bool.and(Auth.browser(hs), Auth.credential(hs, path, token))
 
 # An agent's MCP endpoint (/mcp/<seg>, server.bend's Hub.mcp_url) takes a
 # key of its own instead of the token: the token's HMAC of the segment
@@ -103,27 +97,30 @@ def Auth.mcp.key(+token: String, +seg: String) -> String:
 def Auth.mcp.keyed(+path: String, +token: String, +seg: String) -> Bool:
   Bool.and(Bool.not(String.is_empty(token)), Auth.same(H.Http.param(path, "k"), Auth.mcp.key(token, seg)))
 
-def Auth.mcp(+trusted: Bool, +hs: List<&2, H.Header>, +path: String, +token: String, +seg: String) -> Bool:
-  Bool.or(Auth.allowed(trusted, hs, path, token), Bool.and(Auth.browser(hs), Auth.mcp.keyed(path, token, seg)))
-
-# an MCP call let in the legacy way: neither the token nor the key
-def Auth.mcp.legacy(+trusted: Bool, +hs: List<&2, H.Header>, +path: String, +token: String, +seg: String) -> Bool:
-  Bool.and(Auth.legacy(trusted, hs, path, token), Bool.not(Auth.mcp.keyed(path, token, seg)))
+def Auth.mcp(+hs: List<&2, H.Header>, +path: String, +token: String, +seg: String) -> Bool:
+  Bool.or(Auth.allowed(hs, path, token), Bool.and(Auth.browser(hs), Auth.mcp.keyed(path, token, seg)))
 
 # Google's browser redirect is a cross-site document navigation. It has
 # neither the native pairing token nor a SameSite=Strict pairing cookie.
 # Only an unproxied loopback callback may reach the pending PKCE/state
 # check this way; ordinary HTTP, websocket, upload and MCP gates stay as-is.
+# A browser that sends no Fetch Metadata at all (an older one) is a plain
+# document request too.
+def Auth.oauth.document(+hs: List<&2, H.Header>) -> Bool:
+  Bool.or(Bool.and(String.eq(String.to_lower(H.Http.header_of(hs, "sec-fetch-mode")), "navigate"),
+      String.eq(String.to_lower(H.Http.header_of(hs, "sec-fetch-dest")), "document")),
+    Bool.and(String.is_empty(H.Http.header_of(hs, "sec-fetch-mode")), Bool.and(String.is_empty(H.Http.header_of(hs, "sec-fetch-dest")),
+      String.is_empty(H.Http.header_of(hs, "sec-fetch-site")))))
+
 def Auth.oauth.navigation(+trusted: Bool, +hs: List<&2, H.Header>) -> Bool:
   Bool.and(String.is_empty(H.Http.header_of(hs, "origin")), Bool.and(
-    String.eq(String.to_lower(H.Http.header_of(hs, "sec-fetch-mode")), "navigate"), Bool.and(
-    String.eq(String.to_lower(H.Http.header_of(hs, "sec-fetch-dest")), "document"), Bool.and(
+    Auth.oauth.document(hs), Bool.and(
     Auth.local.host(String.to_lower(H.Http.header_of(hs, "host"))),
-    Auth.trusted(trusted, hs)))))
+    Auth.trusted(trusted, hs))))
 
 def Auth.oauth(+trusted: Bool, +hs: List<&2, H.Header>, +method: String, +path: String, +token: String) -> Bool:
   Bool.and(String.eq(method, "GET"), Bool.and(String.eq(H.Http.route(path), "/oauth/google"),
-    Bool.or(Auth.allowed(trusted, hs, path, token), Auth.oauth.navigation(trusted, hs))))
+    Bool.or(Auth.allowed(hs, path, token), Auth.oauth.navigation(trusted, hs))))
 
 # Pairing never inherits the localhost exemption; it proves the shared secret.
 def Auth.pair(+hs: List<&2, H.Header>, +token: String) -> Bool:

@@ -20,6 +20,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHmac } from "node:crypto";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const args = process.argv.slice(2);
 const [bin = "build/backplane", wire = "build/wire"] = args.filter((a) => !a.startsWith("--"));
@@ -92,7 +93,7 @@ async function up(h: Hub) {
 
 async function connect(h: Hub): Promise<Client> {
   const c: Client = { ws: null as any, seen: [], far: [], replies: new Map(), n: 0, info: {}, raw: [] };
-  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws?token=${hubToken(h.home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const text = W.decode(new Uint8Array(e.data as ArrayBuffer));
@@ -161,8 +162,8 @@ try {
   await sleep(65000);
   check("and only once (the next minute asks nothing)", cb.seen.filter((c) => c.$ === "PeerSet").length === 1 && ca.seen.filter((c) => c.$ === "PeerSet").length === 1,
     [cb.seen.filter((c) => c.$ === "PeerSet"), ca.seen.filter((c) => c.$ === "PeerSet")]);
-  const asked = await fetch(`http://127.0.0.1:${pa}/bots/pair?name=beta&url=http://127.0.0.1:${pb}`, { method: "POST" });
-  const askedB = await fetch(`http://127.0.0.1:${pb}/bots/pair?name=alpha&url=http://127.0.0.1:${pa}`, { method: "POST" });
+  const asked = await fetch(`http://127.0.0.1:${pa}/bots/pair?name=beta&url=http://127.0.0.1:${pb}&token=${hubToken(a.home)}`, { method: "POST" });
+  const askedB = await fetch(`http://127.0.0.1:${pb}/bots/pair?name=alpha&url=http://127.0.0.1:${pa}&token=${hubToken(b.home)}`, { method: "POST" });
   check("a linked machine asking again is refused", asked.status === 409 && askedB.status === 409, [asked.status, askedB.status]);
 
   // a bot on alpha appears on beta, mirrored
@@ -232,7 +233,7 @@ try {
   check("remote Stop is mirrored", !!await until(8000, () => farItems(cb, link).find((c) => c.$ === "TurnChanged" && c.thread === th && c.state === "interrupted")));
 
   // A real approval waits on alpha; beta answers the namespaced ask.
-  const approval = fetch(`http://127.0.0.1:${a.port}/mcp/${th}`, {
+  const approval = fetch(`http://127.0.0.1:${a.port}/mcp/${th}?token=${hubToken(a.home)}`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "project_create", arguments: { path: join(root, "declined-project") } } }),
   }).then((r) => r.json());

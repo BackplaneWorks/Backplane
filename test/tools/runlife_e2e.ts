@@ -6,6 +6,7 @@ import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtemp
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const NL = String.fromCharCode(10), TAB = String.fromCharCode(9);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const read = (p: string) => existsSync(p) ? readFileSync(p, 'utf8') : '';
@@ -99,7 +100,7 @@ if (process.argv[2] === '--mcp-child') {
   const state = (id: string) => events().filter(e => e.$ === 'TurnChanged' && e.thread === id).at(-1)?.state;
   let ws: WebSocket | undefined, request = 0, failures = 0;
   const check = (ok: boolean, label: string) => { console.log(`${ok ? 'ok' : 'FAIL'} ${label}`); if (!ok) failures++; };
-  const connect = async () => { ws = new WebSocket(`ws://127.0.0.1:${port}/ws?since=999999999`); await new Promise((r, j) => { ws!.onopen = r; ws!.onerror = j; }); };
+  const connect = async () => { ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}&since=999999999`); await new Promise((r, j) => { ws!.onopen = r; ws!.onerror = j; }); };
   const send = (m: string, p: object) => ws!.send(W.encode(JSON.stringify({ id: ++request, m, p })));
   const input = (id: string, text: string) => send('turn.start', { thread: id, msg: `input-${++request}`, text });
   const upgrade = async (name: string) => {

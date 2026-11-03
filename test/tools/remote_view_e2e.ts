@@ -22,6 +22,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const args = process.argv.slice(2);
 const [bin = "build/backplane", wire = "build/wire", sync = "build/rvw_sync"] = args.filter((a) => !a.startsWith("--"));
@@ -91,7 +92,7 @@ try {
   // a project and a thread, made as a client does
   const replies = new Map<number, any>();
   const seen: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));

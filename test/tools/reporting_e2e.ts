@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ReportWriter } from '../../src/web/report-writer.js';
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [binary='build/reporting-hub',wire='build/reporting-wire']=process.argv.slice(2);
 for(const f of readdirSync(wire).filter(x=>x.endsWith('.js'))) (0,eval)(readFileSync(join(wire,f),'utf8'));
 const W=(globalThis as any).Wire;
@@ -18,9 +19,9 @@ const origin='http://127.0.0.1:'+port;let ws:WebSocket|undefined;
 const nap=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 try{
  let started=false;for(let n=0;n<150;n++){try{if((await fetch(origin+'/hello')).ok){started=true;break;}}catch{}await nap(100);}assert(started,'test hub starts');
- const get=async()=>{const r=await fetch(origin+'/debug/diagnostics.json');assert.equal(r.headers.get('cache-control'),'no-store');assert(r.ok);return r.json() as Promise<any>;};
+ const get=async()=>{const r=await fetch(origin+'/debug/diagnostics.json?token='+hubToken(home));assert.equal(r.headers.get('cache-control'),'no-store');assert(r.ok);return r.json() as Promise<any>;};
  const first=await get();assert.equal(first.status.cap_bytes,1048576);assert.equal(first.status.enabled,true);assert(first.status.allocated_bytes<=first.status.cap_bytes);
- ws=new WebSocket(origin.replace('http:','ws:')+'/ws');ws.binaryType='arraybuffer';
+ ws=new WebSocket(origin.replace('http:','ws:')+'/ws?token='+hubToken(home));ws.binaryType='arraybuffer';
  const pending=new Map<number,{resolve:(v:any)=>void,reject:(e:Error)=>void,timer:ReturnType<typeof setTimeout>}>();let next=0;const changes:any[]=[];
  ws.onmessage=e=>{const value=JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));for(const c of value.items||[])changes.push(c);if(value.t==='reply'){const p=pending.get(Number(value.id));if(p){pending.delete(Number(value.id));clearTimeout(p.timer);value.ok===false?p.reject(Error(value.error)):p.resolve(value.result??value);}}};
  await new Promise<void>((r,j)=>{ws!.onopen=()=>r();ws!.onerror=()=>j(Error('test websocket failed'));});

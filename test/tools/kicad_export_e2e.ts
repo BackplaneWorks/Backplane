@@ -22,6 +22,7 @@ const cli = join(rt, 'bin/kicad-cli');
 writeFileSync(cli, `#!/usr/bin/env bun
 import {readFileSync,writeFileSync,appendFileSync,mkdirSync,existsSync,readdirSync} from 'node:fs';
 import {join,basename} from 'node:path';
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const a=process.argv.slice(2); if(a[0]==='version'){console.log('10.99.0-bp.1');process.exit(0)}
 if(a[0]!=='project'||a[1]!=='downgrade')process.exit(2);
 appendFileSync(process.env.EXPORT_ARGV,JSON.stringify(a)+'\\n');
@@ -44,7 +45,7 @@ const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 async function until<T>(f:()=>T|undefined,ms=40000):Promise<T>{const end=Date.now()+ms;while(Date.now()<end){const v=f();if(v!==undefined)return v;await sleep(40)}throw Error('timeout; hub stderr: '+readFileSync(join(home,'stderr.log'),'utf8').slice(-4000))}
 await until(()=>existsSync(join(home,'token'))?true:undefined);
 let ready=false;for(let i=0;i<400;i++){try{ready=(await fetch(`http://127.0.0.1:${port}/hello`)).ok}catch{}if(ready)break;await sleep(50)}if(!ready)throw Error('hub unavailable');
-const seen:any[]=[], changes:any[]=[];const ws=new WebSocket(`ws://127.0.0.1:${port}/ws`);ws.binaryType='arraybuffer';ws.onmessage=e=>{const o=JSON.parse(W.decode(new Uint8Array(e.data)));seen.push(o);changes.push(...(o.items??[]))};await new Promise<void>((r,j)=>{ws.onopen=()=>r();ws.onerror=j});
+const seen:any[]=[], changes:any[]=[];const ws=new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);ws.binaryType='arraybuffer';ws.onmessage=e=>{const o=JSON.parse(W.decode(new Uint8Array(e.data)));seen.push(o);changes.push(...(o.items??[]))};await new Promise<void>((r,j)=>{ws.onopen=()=>r();ws.onerror=j});
 let id=0;async function rpc(m:string,p:any={}){const n=++id;ws.send(W.encode(JSON.stringify({id:n,m,p})));return await until(()=>seen.find(o=>o.t==='reply'&&String(o.id)===String(n)))}
 await until(()=>seen.find(o=>(o.t==='info'||o.t==='log')&&o.info?.['kicad.status']==='ok'));
 await rpc('project.add',{path:project});

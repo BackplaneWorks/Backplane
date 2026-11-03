@@ -71,6 +71,7 @@ while IFS= read -r line; do
       sed -i 's/(at 141.605 99.695 90)/(at 151.605 104.695 90)/' ecc83-pp.kicad_pcb
       python3 - <<'PY'
 import re
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 s=open("ecc83-pp.kicad_pcb").read()
 i=s.index("(segment")
 j=s.index("\\n\\t)", i)+3
@@ -152,7 +153,7 @@ try {
   const seen: any[] = [];
   const plots: any[] = [];
   const replies = new Map<number, any>();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const text = typeof e.data === "string";

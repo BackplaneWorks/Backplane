@@ -372,7 +372,7 @@ const parseMarks = (text: string, at: number): Mark[] => Array.from(text.matchAl
 async function takePerf(): Promise<Row> {
   const startedAt = Date.now();
   try {
-    const response = await fetch(url + "/debug/perf.json", { signal: AbortSignal.timeout(params.requestTimeoutMs) });
+    const response = await fetch(url + "/debug/perf.json?token=" + token, { signal: AbortSignal.timeout(params.requestTimeoutMs) });
     if (!response.ok) throw Error(`HTTP ${response.status}`);
     const data = await response.json() as Row;
     if (data.unit !== "us" || !Array.isArray(data.rows) || !data.rows.length || !data.rows.every((r: Row) =>

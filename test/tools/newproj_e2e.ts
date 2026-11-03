@@ -10,6 +10,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -64,7 +65,7 @@ try {
   }
   const seen: any[] = [];
   const replies = new Map<number, any>();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));
@@ -86,14 +87,14 @@ try {
   check("a bot to call from", !!thread, bot);
 
   const call = (th: string, args: object) =>
-    fetch(`http://127.0.0.1:${port}/mcp/${th}`, {
+    fetch(`http://127.0.0.1:${port}/mcp/${th}?token=${hubToken(home)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "project_create", arguments: args } }),
     }).then((r) => r.json());
   const text = (r: any) => String(r?.result?.content?.[0]?.text ?? "");
 
-  const tools = await fetch(`http://127.0.0.1:${port}/mcp/${thread}`, {
+  const tools = await fetch(`http://127.0.0.1:${port}/mcp/${thread}?token=${hubToken(home)}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
   }).then((r) => r.json());
   check("a bot sees project_create", JSON.stringify(tools).includes("\"project_create\""));

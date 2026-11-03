@@ -24,6 +24,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const argv = process.argv.slice(2);
 const opt = (name: string, d: string) => {
@@ -236,7 +237,7 @@ async function record() {
     const frames: { at: number; b: string }[] = [];
     const items: any[] = [];
     let last = Date.now();
-    const ws = new WebSocket(`ws://${key}/ws?since=0&origin=`);
+    const ws = new WebSocket(`ws://${key}/ws?token=${hubToken(home)}&since=0&origin=`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = (e) => {
       const u = new Uint8Array(e.data as ArrayBuffer);

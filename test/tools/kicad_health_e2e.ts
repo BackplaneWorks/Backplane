@@ -3,6 +3,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [binary = "build/backplane-health", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter(f => f.endsWith(".js"))) (0, eval)(readFileSync(join(wire, f), "utf8"));
 const W = (globalThis as any).Wire;
@@ -74,7 +75,7 @@ async function start(name: string, path: string, homeOverride?: string) {
     await sleep(50);
   }
   const seen: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); sockets.push(ws); ws.binaryType = "arraybuffer";
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); sockets.push(ws); ws.binaryType = "arraybuffer";
   ws.onmessage = e => seen.push(JSON.parse(W.decode(new Uint8Array(e.data))));
   await new Promise<void>((r, reject) => { ws.onopen = () => r(); ws.onerror = reject; });
   let id = 0;

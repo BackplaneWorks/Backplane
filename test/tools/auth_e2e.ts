@@ -69,8 +69,14 @@ try {
     await Bun.sleep(50);
   }
   if (process.env.AUTH_E2E_REMAINING !== "1") {
-    check("native loopback socket needs no shared token", (await ws()).status, 101);
-    check("same-origin local browser connects", (await ws({ Origin: origin })).status, 101);
+    check("native loopback socket without the token refused", (await ws()).status, 401);
+    check("localhost Host without the token refused", (await ws({ Host: `localhost:${port}` })).status, 401);
+    check("native loopback socket with the token", (await ws({}, `?token=${token}`)).status, 101);
+    check("native loopback socket with a bearer token", (await ws({ Authorization: `Bearer ${token}` })).status, 101);
+    check("same-origin local browser without its cookie refused", (await ws({ Origin: origin })).status, 401);
+    check("same-origin local browser with its cookie connects", (await ws({ Origin: origin, Cookie: `bp_token=${token}` })).status, 101);
+    check("loopback MCP call without the token or its key refused", (await request("/mcp/t1", {}, "POST")).status, 401);
+    check("loopback debug page without the token refused", (await request("/debug/perf")).status, 401);
     check("foreign browser cannot inherit loopback trust", (await ws({ Origin: "https://foreign.invalid" })).status, 401);
     check("foreign browser with valid cookie still refused", (await ws({ Origin: "https://foreign.invalid", Cookie: `bp_token=${token}` })).status, 401);
     check("null browser origin refused", (await ws({ Origin: "null" })).status, 401);
@@ -101,8 +107,10 @@ try {
     });
     check("rebound hostname GET without Origin refused", rebound.status, 401);
   }
-  check("rebound hostname cannot reach local build locks", (await request("/lock/status", { Host: "foreign.invalid" }, "POST")).status, 403);
-  check("proxy cannot inherit local build-lock access", (await request("/lock/status", { "Tailscale-User-Login": "test@example.invalid" }, "POST")).status, 403);
+  check("rebound hostname cannot reach local build locks", (await request(`/lock/status?token=${token}`, { Host: "foreign.invalid" }, "POST")).status, 401);
+  check("proxy cannot inherit local build-lock access", (await request(`/lock/status?token=${token}`, { "Tailscale-User-Login": "test@example.invalid" }, "POST")).status, 401);
+  check("local build locks need the token", (await request("/lock/status", {}, "POST")).status, 401);
+  check("local build locks with the token", (await request("/lock/status", { Authorization: `Bearer ${token}` }, "POST")).status !== 401, true);
   const lan = Object.values(networkInterfaces()).flat().find(a => a?.family === "IPv4" && !a.internal)?.address;
   assert(lan, "a non-loopback local interface is required for wildcard listener regression");
   check("wildcard listener does not trust nonloopback peer", (await request("/debug/perf", {}, "GET", lan)).status, 401);

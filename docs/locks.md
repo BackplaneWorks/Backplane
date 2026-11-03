@@ -38,8 +38,11 @@ scripts/bp-lock.sh bend -- scripts/check.sh
 scripts/bp-lock.sh render -- blender --background scene.blend
 ```
 
-The helper uses loopback HTTP (`BACKPLANE_LOCK_URL`, or
-`http://127.0.0.1:${BACKPLANE_PORT:-3787}`). `/lock/acquire`, `/lock/status`,
+The helper uses loopback HTTP to the hub of its home (`BACKPLANE_HOME`,
+which the hub gives the programs it starts, else `~/.backplane-bend`): the
+port from `BACKPLANE_LOCK_URL`, `BACKPLANE_PORT` or the home's `hub.lock`,
+and the hub's pairing token from the home's `token` file, which the hub
+needs on every lock request. `/lock/acquire`, `/lock/status`,
 `/lock/renew`, `/lock/release` and `/lock/cancel` accept `{name, holder, note}`.
 An external holder begins `pid:`; helpers add a per-invocation nonce to avoid
 PID reuse. Acquisition with `wait:true` long-polls for up to 25 seconds on

@@ -13,6 +13,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -61,7 +62,7 @@ const full = (tag: string, n = 40) => Array.from({ length: n }, (_, i) => `${tag
 type Cl = { ws: WebSocket; live: Map<string, string>; snaps: any[]; changes: any[]; posted: Map<string, string[]>; atPost: Map<string, string[]>; deltas: number };
 const port = freePort();
 const connect = async (q = ""): Promise<Cl> => {
-  const c: Cl = { ws: new WebSocket(`ws://127.0.0.1:${port}/ws${q}`), live: new Map(), snaps: [], changes: [], posted: new Map(), atPost: new Map(), deltas: 0 };
+  const c: Cl = { ws: new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}${q ? '&' + q.replace(/^\?/, '') : ''}`), live: new Map(), snaps: [], changes: [], posted: new Map(), atPost: new Map(), deltas: 0 };
   c.ws.binaryType = "arraybuffer";
   c.ws.onmessage = (e) => {
     let o: any = null;

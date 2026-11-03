@@ -17,6 +17,7 @@
 // HUB: the server as JS (run with bun) or a single-file build.
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [hub, wire = "build/wire"] = process.argv.slice(2);
 if (!hub) { console.log("usage: bun test/tools/copy_e2e.ts HUB [WIREDIR]"); process.exit(2); }
@@ -70,7 +71,7 @@ try {
   procs.push(h1);
   check(!!(await up()), "the first hub is up");
   const seen: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${hubToken(home1)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     let o: any = null;

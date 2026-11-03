@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [binary, webDir, outDir, rawPort = "3820", onlyScene = ""] = process.argv.slice(2);
 if (!binary || !webDir || !outDir) throw new Error("BINARY WEB_DIR SHOTS_DIR required");
@@ -68,7 +69,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.on("pageerror", (e: Error) => pageErrors.push(String(e)));
   // Playwright waits on a condition; no message is ever sent to the fixture hub.
-  await page.goto(`http://127.0.0.1:${port}/?lang=ja`, { waitUntil: "networkidle", timeout: 60000 });
+  await page.goto(`http://127.0.0.1:${port}/?lang=ja#token=${hubToken(home)}`, { waitUntil: "networkidle", timeout: 60000 });
   await page.locator('[data-on-click="select"][data-value="t43"]').first().waitFor();
   const children = Bun.spawnSync(["ps", "--ppid", String(hub.pid), "-o", "pid=,args="]).stdout.toString();
   if (/\b(?:claude|codex)(?:\s|$)/.test(children)) throw new Error("unexpected provider child");

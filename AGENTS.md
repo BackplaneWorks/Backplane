@@ -139,7 +139,7 @@ Releases: `scripts/package.sh` makes the tarball the updater and install.sh use 
 
 Builds need bend, Bun (CI pins 1.4.3) and Python 3.12+. Nothing builds C. The hub's emit takes about 45 s and 8 GB, once per change to what the server reads; the compile takes seconds. A bench or tool under `test/native` builds the same way: `scripts/build-js.sh test/native/X.bend build/X`.
 
-Performance: every process keeps counters (`docs/perf.md`). ctrl+shift+h in the window shows the overlay, `curl -s 127.0.0.1:3787/debug/perf` gives the table, `BACKPLANE_TRACE=/tmp/t.json` writes a Perfetto trace, `BACKPLANE_LOG=debug` and `BACKPLANE_SLOW_MS=50` log more.
+Performance: every process keeps counters (`docs/perf.md`). ctrl+shift+h in the window shows the overlay, `curl -s -H @- 127.0.0.1:3787/debug/perf` with `Authorization: Bearer <home/token>` on stdin gives the table (docs/perf.md), `BACKPLANE_TRACE=/tmp/t.json` writes a Perfetto trace, `BACKPLANE_LOG=debug` and `BACKPLANE_SLOW_MS=50` log more.
 
 Typing speed: `scripts/build-js.sh test/native/type_bench.bend build/type_bench && build/type_bench` replays keys through the event, memo, layout and tiles with no window and prints ms per key. Scrolling: `test/native/scroll_bench.bend` the same for wheel notches up and down, and checks each frame against one drawn from scratch.
 
