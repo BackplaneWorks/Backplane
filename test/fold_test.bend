@@ -22,6 +22,9 @@ def user(+id: String, +at: Nat) -> M.Entry:
 def said(+id: String, +at: Nat) -> M.Entry:
   M.Msg{id, "t", M.Assistant{}, "done", at}
 
+def overloaded(+id: String, +at: Nat) -> M.Entry:
+  M.Msg{id, "t", M.Assistant{}, "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}", at}
+
 def ran(+id: String, +kind: String, +at: Nat) -> M.Entry:
   M.Act{id, "t", "tool", kind, "x", at}
 
@@ -250,5 +253,7 @@ def main() -> IO(Unit):
       "<button.fold open=0a>^<span>2 tool calls · shell, edit</span></button><div.act tool~a><span.kind>shell</span><span.summary>x</span></div><div.act tool~a><span.kind>edit</span><span.summary>x</span></div><div.msg assistant><div.body><p>hi</p></div><span.stamp>Finished 00:00</span><button.copy=hi>Copy</button></div>")
     C.Check.str("web: a failed turn's last reply says Failed", Web.shows(V.View.expand(V.View.entries(I.En{}, [user("u", 100n), said("m", 122n)], failed(), "t", none(), False{}))),
       "<div.msg user><div.body plain>do it</div><span.stamp>00:01</span><button.copy=do it>Copy</button></div><div.msg assistant><div.body><p>done</p></div><span.stamp>Failed 00:02 · 22s</span><button.copy=done>Copy</button></div>")
+    C.Check.str("web: a failed turn's API error reads as one red sentence, its raw text under details, the empty error row left out", Web.shows(V.View.expand(V.View.entries(I.En{}, [user("u", 100n), overloaded("m", 122n), M.Act{"e", "t", "error", "result", "", 123n}], failed(), "t", none(), False{}))),
+      "<div.msg user><div.body plain>do it</div><span.stamp>00:01</span><button.copy=do it>Copy</button></div><div.msg assistant><div.body apierr><span.say>Claude's API was overloaded (529) and ended the turn.</span><details.apierr-raw><summary>details</summary><pre>API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}</pre></details></div><span.stamp>Failed 00:02 · 22s</span><button.copy=API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}>Copy</button></div>")
     C.Check.str("web opened live: open and pulsing", Web.shows(V.View.expand(V.View.entries(I.En{}, [tool("a", "shell")], M.State.empty(), "t", Map.set(&2, String, none(), "fold:a", "1"), True{}))),
       "<button.fold open live=0a>^<span>1 tool call · running: x</span></button><div.act tool now~a><span.kind>shell</span><span.summary>x</span><span.now>running</span></div>")
