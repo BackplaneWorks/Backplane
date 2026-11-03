@@ -7886,23 +7886,48 @@ def BotJob.send(+home: String, +url: String, +peer: String, +path: String, +body
     r : BN.Resp <- BN.Bn.to_peer(home, url, peer, now, path, True{}, body)
     BotJob.sent(r, peer, path)
 
-def BotJob.invited(ok: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +url: String, +peer: String, +secret: String) -> IO(Unit):
+def BotJob.invited(ok: Bool, +why: String, +inbox: Chan(Msg), +client: U32, +id: String, +url: String, +peer: String, +secret: String) -> IO(Unit):
   match ok:
     case True{}:
       BotJob.reply(inbox, client, id, True{}, [J.KV{"invite", J.Str{SG.Invite.make(url, peer, secret)}}, J.KV{"peer", J.Str{peer}}])
     case False{}:
-      BotJob.fail(inbox, client, id, "could not keep the invite's secret")
+      BotJob.fail(inbox, client, id, why)
 
-# an invite: a new peer id and secret, kept here; the other machine links
-# with it (POST /bots/link) and both keep the secret
+# A hub-to-hub invite is recorded with the device invitations before it is
+# handed out (effects/pairing.js's machine: listed in Settings > Devices,
+# revocable, good for ten minutes and once); one that cannot be recorded
+# is not made. The answer is the record's error ("" when recorded).
+def BotJob.record.why(+j: J.Json) -> String:
+  Bool.pick(String, J.Json.get_bool(j, "ok", False{}), "", Bool.pick(String, String.eq(J.Json.get_str(j, "error", ""), "too_many_invitations"),
+    "too many open invites: wait for one to expire, or revoke one in Settings > Devices", "could not record the invite"))
+
+def BotJob.record(+peer: String) -> IO(String):
+  IO.bind(String, String, PAIR.Pairing.request("machine", peer, "", "", False{}),
+    r => IO.pure(String, BotJob.record.why(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}))))
+
+def BotJob.keep(+why: String, +home: String, +peer: String, +secret: String) -> IO(Bool):
+  Bool.pick(IO(Bool), String.is_empty(why), BN.Bn.peer.save(home, peer, secret), IO.pure(Bool, False{}))
+
+# an invite: a new peer id and secret, recorded and kept here; the other
+# machine links with it (POST /bots/link) and both keep the secret
 def BotJob.invite(+inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32, +given: String, +client: U32, +id: String) -> IO(Unit):
   do IO<Unit>:
     +here : String <- BN.Bn.url.here(tailnet, host, port)
     +r : String <- BN.Bn.random(2n)
     +peer : String = "p" ++ r
     +secret : String <- BN.Bn.secret.fresh()
-    ok : Bool <- BN.Bn.peer.save(home, peer, secret)
-    BotJob.invited(ok, inbox, client, id, Bool.pick(String, String.is_empty(String.trim(given)), here, String.trim(given)), peer, secret)
+    +why : String <- BotJob.record(peer)
+    ok : Bool <- BotJob.keep(why, home, peer, secret)
+    BotJob.invited(ok, Bool.pick(String, String.is_empty(why), "could not keep the invite's secret", why), inbox, client, id,
+      Bool.pick(String, String.is_empty(String.trim(given)), here, String.trim(given)), peer, secret)
+
+# a link removed (bots.unpeer): its secret goes, and the invite that made
+# it is shown as unlinked in Settings > Devices
+def BotJob.unpeer(+home: String, +peer: String) -> IO(Unit):
+  do IO<Unit>:
+    BN.Bn.peer.forget(home, peer)
+    r : String <- PAIR.Pairing.request("unlinked", peer, "", "", False{})
+    return Unit{}
 
 # (own: this hub asked one of the owner's machines to pair, Pair.ask, so
 # the link is recorded as the owner's: UC.Far.own.key; a pasted invite
@@ -8755,7 +8780,7 @@ def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: S
     case 6n:
       BotJob.join.k(SG.Invite.parse(a), st, inbox, cfg, BotJob.client(b), BotJob.id(c))
     case 7n:
-      IO.spawn(Unit, BN.Bn.peer.forget(Cfg.home(cfg), a))
+      IO.spawn(Unit, BotJob.unpeer(Cfg.home(cfg), a))
     case 8n:
       IO.spawn(Unit, BotJob.google(inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), a, BotJob.client(b), BotJob.id(c)))
     case 9n:
@@ -14763,18 +14788,21 @@ def Hub.dir.refresh(h: Hub, +peer: String) -> IO(Hub):
 # asked for an invite (POST /bots/pair), and the invite it answers is
 # joined like a pasted one. Only the minute asks, so two asks never
 # overlap (the ask and the link take at most 15 s each).
-def Pair.joined(m: Maybe<&2, SG.Inv>, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32) -> IO(Unit):
+# (own: the machine was asked over the tailnet, where Tailscale says whose
+# it is; one named in BACKPLANE_PEERS answered at a plain address, so its
+# link waits for the owner's word: UC.Far.unsure)
+def Pair.joined(m: Maybe<&2, SG.Inv>, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32, own: Bool) -> IO(Unit):
   match m:
     case Some{SG.Inv{+url, +peer, +secret}}:
-      BotJob.join(inbox, home, tailnet, host, port, url, peer, secret, Far.client(), "0", True{})
+      BotJob.join(inbox, home, tailnet, host, port, url, peer, secret, Far.client(), "0", own)
     case None{}:
       Log.info("pair: the answer held no invite")
 
-def Pair.got(r: BN.Resp, +from: String, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32) -> IO(Unit):
+def Pair.got(r: BN.Resp, +from: String, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32, own: Bool) -> IO(Unit):
   match r:
     case BN.Resp{+code, +body}:
       Bool.pick(IO(Unit), Nat.is_eq(code, 200n),
-        Pair.joined(SG.Invite.parse(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "invite", "")), inbox, home, tailnet, host, port),
+        Pair.joined(SG.Invite.parse(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "invite", "")), inbox, home, tailnet, host, port, own),
         Log.info("pair: " ++ from ++ " did not pair (" ++ Nat.show(code) ++ ") " ++ String.take(String.trim(body), 120n)))
 
 # (this hub's address as its machines list found it, the one the other
@@ -14783,12 +14811,26 @@ def Pair.got(r: BN.Resp, +from: String, +inbox: Chan(Msg), +home: String, +tailn
 def Pair.here(+self: String, +tailnet: Bool, +host: String, +port: U32) -> IO(String):
   Bool.pick(IO(String), String.is_empty(self), BN.Bn.url.here(tailnet, host, port), IO.pure(String, self))
 
-def Pair.ask(+url: String, +self: String, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32) -> IO(Unit):
+# (the ask carries a proof made with this hub's token, AUTH.Auth.pair.proof:
+# a hub with no credential of this one's checks it with this hub before it
+# answers, Hub.bot.pair.lan; one that Tailscale vouches for ignores it)
+def Pair.ask(+url: String, +self: String, +inbox: Chan(Msg), +home: String, +tailnet: Bool, +host: String, +port: U32, +token: String, named: Bool) -> IO(Unit):
   do IO<Unit>:
     +here : String <- Pair.here(self, tailnet, host, port)
     +me : String <- BN.Bn.name()
-    r : BN.Resp <- BN.Bn.plain(BN.Bn.url.base(url) ++ "/bots/pair?name=" ++ me ++ "&url=" ++ here)
-    Pair.got(r, url, inbox, home, tailnet, host, port)
+    +now : Nat <- Now.nat()
+    +to : String = BN.Bn.url.base(url)
+    r : BN.Resp <- BN.Bn.plain(to ++ "/bots/pair?name=" ++ me ++ "&url=" ++ here ++ "&to=" ++ to ++ "&at=" ++ Nat.show(now) ++ "&proof=" ++ AUTH.Auth.pair.proof(token, to, now))
+    Pair.got(r, url, inbox, home, tailnet, host, port, Bool.not(named))
+
+# whether the machine at url is one named in BACKPLANE_PEERS (Machines.keep's
+# "named"), not one Tailscale listed
+def Pair.named(ms: List<&2, J.Json>, +url: String) -> Bool:
+  match ms:
+    case Nil{}:
+      False{}
+    case +m <> t:
+      Bool.or(Bool.and(String.eq(J.Json.get_str(m, "url", ""), url), J.Json.get_bool(m, "named", False{})), Pair.named(t, url))
 
 def Pair.go(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   match ms:
@@ -14796,7 +14838,8 @@ def Pair.go(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case UC.MRow{_, +url, _} <> t:
       do IO<Unit>:
-        IO.spawn(Unit, Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg)))
+        IO.spawn(Unit, Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg),
+          Net.token(Cfg.net(cfg)), Pair.named(J.Json.elems(J.Json.get_obj(Far.machines(cfg), "peers")), url)))
         Pair.go(t, inbox, cfg)
 
 def Hub.pair(h: Hub) -> IO(Hub):
@@ -15897,25 +15940,35 @@ def Pair.invited(ok: Bool, +code: String, +reply: Chan(List<&2, U32>)) -> IO(Uni
     case False{}:
       Bot.answer(reply, W.Http.text("500 Internal Server Error", "could not keep the invite's secret"))
 
-# (the invite's link is recorded as one of the owner's machines before
+# (own: the invite's link is recorded as one of the owner's machines before
 # the answer goes: only the owner's own devices get this far, and the
-# machine that asked links with it next: UC.Far.own.key)
-def Pair.invite(+home: String, +tailnet: Bool, +host: String, +port: U32, +reply: Chan(List<&2, U32>), +inbox: Chan(Msg)) -> IO(Unit):
+# machine that asked links with it next: UC.Far.own.key. An ask checked
+# with a machine named in BACKPLANE_PEERS (Hub.bot.pair.lan) is not: the
+# owner answers for that link in Settings)
+def Pair.own(own: Bool, +peer: String, +now: Nat) -> List<&2, M.Change>:
+  match own:
+    case True{}:
+      [M.SettingSet{UC.Far.own.key(peer), "pair", now}]
+    case False{}:
+      Nil{}
+
+def Pair.invite(+home: String, +tailnet: Bool, +host: String, +port: U32, +reply: Chan(List<&2, U32>), +inbox: Chan(Msg), own: Bool) -> IO(Unit):
   do IO<Unit>:
     +here : String <- BN.Bn.url.here(tailnet, host, port)
     +r : String <- BN.Bn.random(2n)
     +peer : String = "p" ++ r
     +secret : String <- BN.Bn.secret.fresh()
     +now : Nat <- Now.nat()
-    sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.SettingSet{UC.Far.own.key(peer), "pair", now}]})
-    ok : Bool <- BN.Bn.peer.save(home, peer, secret)
+    +why : String <- BotJob.record(peer)
+    sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{Bool.pick(List<&2, M.Change>, String.is_empty(why), Pair.own(own, peer, now), Nil{})})
+    ok : Bool <- BotJob.keep(why, home, peer, secret)
     Pair.invited(ok, SG.Invite.make(here, peer, secret), reply)
 
 def Hub.bot.pair.k(i: Nat, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
   match i h:
     case 0n Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Pair.invite(Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), reply, inbox))
+        IO.spawn(Unit, Pair.invite(Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), reply, inbox, True{}))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case 1n _:
       Hub.answer(h, reply, W.Http.text("403 Forbidden", "sync with that machine is off here"))
@@ -15929,6 +15982,57 @@ def Hub.bot.pair(h: Hub, +arg: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.bot.pair.k(UC.Mate.answer(Far.machines(cfg), BO.World.peers(M.State.bots(st)), st,
         BN.Bn.clean(AT.Att.unpct(W.Http.param(arg, "name"))), AT.Att.unpct(W.Http.param(arg, "url"))), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply)
+
+# POST /bots/pair with a proof and no credential (Conn.pair.asked): a hub
+# named in BACKPLANE_PEERS, on this machine or the LAN, where Tailscale
+# cannot say whose it is. The ask is answered as Hub.bot.pair's, but only
+# once the asker, called back at the address this hub's machines list has
+# for it (never the one the ask names), says it made the proof
+# (POST /bots/pair/check, AUTH.Auth.pair.checked), and the proof is for
+# this hub's port. Its link is not taken as one of the owner's machines
+# (Pair.invite own False): Settings asks the owner (UC.Far.unsure).
+def Pair.check.url(+to: String, +at: String, +proof: String) -> String:
+  "/bots/pair/check?to=" ++ to ++ "&at=" ++ at ++ "&proof=" ++ proof
+
+def Pair.checked(r: BN.Resp, +home: String, +tailnet: Bool, +host: String, +port: U32, +reply: Chan(List<&2, U32>), +inbox: Chan(Msg)) -> IO(Unit):
+  match r:
+    case BN.Resp{+code, _}:
+      Bool.pick(IO(Unit), Nat.is_eq(code, 204n), Pair.invite(home, tailnet, host, port, reply, inbox, False{}),
+        Bot.answer(reply, W.Http.text("403 Forbidden", "the asking hub did not confirm this request")))
+
+def Pair.check(ok: Bool, +found: String, +q: String, +home: String, +tailnet: Bool, +host: String, +port: U32, +reply: Chan(List<&2, U32>), +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.bind(BN.Resp, Unit, BN.Bn.plain(BN.Bn.url.base(found) ++ q), r => Pair.checked(r, home, tailnet, host, port, reply, inbox))
+    case False{}:
+      Bot.answer(reply, W.Http.text("403 Forbidden", "not a pairing request for this hub"))
+
+# (the proof's fields as the asker sent them: an http address with no query
+# or fragment of its own, a time, a hex digest)
+def Pair.plain(+to: String, +at: String, +proof: String) -> Bool:
+  Bool.and(Bool.and(BN.Bn.url.ok(to), Bool.not(Bool.or(String.contains(to, "?"), Bool.or(String.contains(to, "&"), String.contains(to, "#"))))),
+    Bool.and(String.eq(Nat.show(Maybe.default(&2, Nat, Nat.read(at), 0n)), at), Bool.and(Nat.is_eq(String.length(proof), 64n), BN.Bn.safe(proof))))
+
+def Hub.bot.pair.lan.k(i: Nat, h: Hub, +found: String, +arg: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match i h:
+    case 0n Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        +to : String = W.Http.param(arg, "to")
+        +at : String = W.Http.param(arg, "at")
+        +proof : String = W.Http.param(arg, "proof")
+        IO.spawn(Unit, Pair.check(Bool.and(Bool.and(Pair.plain(to, at, proof), Bool.not(String.is_empty(found))), String.eq(UC.Far.port(to), U32.show(Cfg.port(cfg)))),
+          found, Pair.check.url(to, at, proof), Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg), reply, inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case 1n+k _:
+      Hub.bot.pair.k(Nat.add(k, 1n), h, reply)
+
+def Hub.bot.pair.lan(h: Hub, +arg: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +n : String = BN.Bn.clean(AT.Att.unpct(W.Http.param(arg, "name")))
+      +u : String = AT.Att.unpct(W.Http.param(arg, "url"))
+      Hub.bot.pair.lan.k(UC.Mate.answer(Far.machines(cfg), BO.World.peers(M.State.bots(st)), st, n, u), Hub{st, f, ls, cl, as, inbox, cfg, note},
+        Maybe.default(&2, String, UC.Far.machine(Far.machines(cfg), n, u), ""), arg, reply)
 
 # A window on this hub from another machine (core/rview.bend): the files
 # of a thread's folder for its viewers, read only. /view/ver lists them
@@ -16014,12 +16118,38 @@ def Hub.bot.deliver(live: Bool, m: Maybe<&2, J.Json>, h: Hub, +peer: String, +re
     case False{} _ _:
       Hub.answer(h, reply, W.Http.text("401 Unauthorized", "not a linked machine"))
 
-def Hub.bot.link.k(ok: Bool, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
-  match ok:
-    case True{}:
+# (the invite must be one this hub recorded and that is unused, unexpired
+# and unrevoked: effects/pairing.js's link. One that can never link again,
+# an invite from before invites were recorded among them, loses its
+# secret; a record that could not be read leaves it.)
+def Hub.bot.link.why(+error: String) -> String:
+  Bool.pick(String, String.eq(error, "expired_code"), "this invite has expired: make a new one",
+    Bool.pick(String, String.eq(error, "revoked_code"), "this invite was revoked",
+      Bool.pick(String, String.eq(error, "used_code"), "this invite was used already", "this hub has no record of this invite: make a new one")))
+
+def Hub.bot.link.dead(+error: String) -> Bool:
+  Bool.or(String.eq(error, "expired_code"), Bool.or(String.eq(error, "revoked_code"), Bool.or(String.eq(error, "used_code"), String.eq(error, "unknown_invitation"))))
+
+def Hub.bot.link.rec(fine: Bool, +error: String, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match fine h:
+    case True{} _:
       do IO<Hub>:
         Bot.answer(reply, Bot.json("200 OK", J.Json.show(J.Json.obj([J.KV{"name", J.Str{me}}]))))
         Hub.step(h, B.Step{[M.PeerSet{peer, Bool.pick(String, String.is_empty(name), peer, name), url, False{}, now}], Nil{}})
+    case False{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Bool.pick(IO(Unit), Hub.bot.link.dead(error), BN.Bn.peer.forget(Cfg.home(cfg), peer), IO.pure(Unit, Unit{})))
+        Log.info("bots: refused a link with invite " ++ peer ++ " (" ++ error ++ ")")
+        Hub.answer(Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, W.Http.text("401 Unauthorized", Hub.bot.link.why(error)))
+
+def Hub.bot.link.got(+r: String, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  Hub.bot.link.rec(J.Json.get_bool(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}), "ok", False{}),
+    J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}), "error", "storage_unavailable"), h, url, name, peer, me, reply, now)
+
+def Hub.bot.link.k(ok: Bool, h: Hub, +url: String, +name: String, +peer: String, +me: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match ok:
+    case True{}:
+      IO.bind(String, Hub, PAIR.Pairing.request("link", peer, name, "", False{}), r => Hub.bot.link.got(r, h, url, name, peer, me, reply, now))
     case False{}:
       Hub.answer(h, reply, W.Http.text("400 Bad Request", "no http address"))
 
@@ -16113,7 +16243,8 @@ def Conn.bot.kind.k(+post: Bool, +get: Bool, +r: String) -> Nat:
                   Bool.pick(Nat, Bool.and(post, String.eq(r, "/far/log")), 9n,
                     Bool.pick(Nat, Bool.and(post, String.eq(r, "/far/rpc")), 10n,
                       Bool.pick(Nat, Bool.and(post, String.eq(r, "/bots/pair")), 11n, Bool.pick(Nat, Bool.and(get, Nat.is_gt(RVW.Rview.kind(r), 0n)), 12n,
-                        Bool.pick(Nat, Bool.and(get, Bool.and(String.starts_with(r, "/bots/"), String.ends_with(r, "/tasks/shot"))), 13n, 0n)))))))))))))
+                        Bool.pick(Nat, Bool.and(get, Bool.and(String.starts_with(r, "/bots/"), String.ends_with(r, "/tasks/shot"))), 13n,
+                          Bool.pick(Nat, Bool.and(post, String.eq(r, "/bots/pair/check")), 14n, 0n))))))))))))))
 
 # which bots' route a request is (0: none)
 def Conn.bot.kind(req: W.Request) -> Nat:
@@ -16148,12 +16279,14 @@ def Hub.bot_http.page(i: Nat, h: Hub, +kind: String, +arg: String, +peer: String
       Hub.bot.view(h, arg, reply)
     case 3n:
       Hub.bot.tshot(h, arg, reply)
+    case 4n:
+      Hub.bot.pair.lan(h, arg, reply)
     case _:
       Hub.bot_http.job(h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, own)
 
 def Hub.bot_http(h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
     +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat, own: Bool) -> IO(Hub):
-  Hub.bot_http.page(C.Codec.pos(["page", "pair", "view", "tshot"], kind), h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, own)
+  Hub.bot_http.page(C.Codec.pos(["page", "pair", "view", "tshot", "pair-lan"], kind), h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now, own)
 
 # /bots/<id>/space.html: the id ("" when it is not a plain id)
 # (a plain id, or a mirrored bot's "<link>~<id>" of two plain ids)
@@ -16475,6 +16608,33 @@ def Conn.route.vin(vin: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +
     case False{} _:
       Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
 
+# POST /bots/pair: the token or a device's credential as before; else a
+# native ask carrying a pairing proof (AUTH.Auth.pair.proof) goes on to be
+# checked with the asker (Hub.bot.pair.lan). Anything else is refused.
+def Conn.pair.asked(+hs: List<&2, W.Header>, +p: String) -> Bool:
+  Bool.and(AUTH.Auth.browser(hs), Bool.and(String.is_empty(W.Http.header_of(hs, "origin")), Bool.not(String.is_empty(W.Http.param(p, "proof")))))
+
+def Conn.bot.pair(ok: Bool, asked: Bool, s: Socket, +p: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case True{}:
+      Conn.bot.own(True{}, s, BotReq{"pair", p, "", "", "", "", "", False{}}, inbox)
+    case False{}:
+      Conn.bot.own(asked, s, BotReq{"pair-lan", p, "", "", "", "", "", False{}}, inbox)
+
+# POST /bots/pair/check?to=<address>&at=<time>&proof=<proof>: a hub this
+# one asked to pair checks that the ask was this hub's (Hub.bot.pair.lan).
+# 204 when this hub made that proof within the last minute, else 403; the
+# answer says nothing more.
+def Conn.pair.checked(ok: Bool, s: Socket) -> IO(Unit):
+  match ok:
+    case True{}:
+      Conn.finish(s, W.Http.response("204 No Content", "text/plain", Nil{}, "Cache-Control: no-store\r\n"))
+    case False{}:
+      Conn.finish(s, W.Http.text("403 Forbidden", "not a pairing request of this hub's"))
+
+def Conn.pair.check(s: Socket, +p: String, +token: String) -> IO(Unit):
+  IO.bind(Nat, Unit, Now.nat(), now => Conn.pair.checked(AUTH.Auth.pair.checked(token, W.Http.param(p, "to"), Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "at")), 0n), now, W.Http.param(p, "proof")), s))
+
 def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match k req:
     case 1n W.Request{_, +p, +hs}:
@@ -16498,11 +16658,13 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case 10n W.Request{_, _, +hs}:
       Conn.bot.signed("far-rpc", W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
     case 11n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"pair", p, "", "", "", "", "", False{}}, inbox)
+      Conn.bot.pair(Conn.allowed(hs, p, token), Conn.pair.asked(hs, p), s, p, inbox)
     case 12n W.Request{_, +p, +hs}:
       Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"view", p, "", "", "", "", "", False{}}, inbox)
     case 13n W.Request{_, +p, +hs}:
       Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"tshot", p, "", "", "", "", "", False{}}, inbox)
+    case 14n W.Request{_, +p, _}:
+      Conn.pair.check(s, p, token)
     case _ _:
       Conn.route.vin(Conn.is_vin(req), s, req, rest, web, id, inbox, trusted, token)
 
@@ -16618,9 +16780,22 @@ def Conn.devices.left(xs: List<&2, J.Json>, +inbox: Chan(Msg)) -> IO(Unit):
         sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{U32.from_nat(J.Json.get_nat(J.Json.obj([J.KV{"id", x}]), "id", 0n))})
         Conn.devices.left(rest, inbox)
 
+# a revoked hub-to-hub invite that had made a link: the link is removed as
+# bots.unpeer removes it (its secret is gone already: effects/pairing.js)
+def Conn.devices.unpeer(go: Bool, +peer: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match go:
+    case True{}:
+      do IO<Unit>:
+        +now : Nat <- Now.nat()
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.PeerSet{peer, "", "", True{}, now}]})
+        return Unit{}
+    case False{}:
+      IO.pure(Unit, Unit{})
+
 def Conn.devices.reply(+j: J.Json, s: Socket, +native: Bool, +https: Bool, +op: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     Conn.devices.left(J.Json.elems(J.Json.get_obj(j, "clients")), inbox)
+    Conn.devices.unpeer(Bool.and(String.eq(op, "uninvite"), Bool.not(String.is_empty(J.Json.get_str(j, "peer", "")))), J.Json.get_str(j, "peer", ""), inbox)
     +error : String = J.Json.get_str(j, "error", "")
     +credential : String = J.Json.get_str(j, "token", "")
     +link : String = J.Json.get_str(j, "link", "")

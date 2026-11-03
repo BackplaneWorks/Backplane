@@ -13392,6 +13392,28 @@ law auth_owner_pair_rebound:
   {AUTH.Auth.owner.pair(True{}, ["100.64.0.8:3787"], [HTTPAUTH.Header{"host", "attacker.invalid:3787"}], "POST", "/bots/pair") == False{} : Bool}
 # ---- end native owner tailnet pairing ----
 
+# ---- tokenless pairing proofs ----
+# A hub asking another to pair over a plain address proves the ask with an
+# HMAC of its own token; a hub without a token, an empty proof or a stale
+# one never passes (Auth.pair.checked)
+law auth_pair_proof_needs_token:
+  for to: String
+  for at: Nat
+  for now: Nat
+  for proof: String
+  {AUTH.Auth.pair.checked("", to, at, now, proof) == False{} : Bool}
+
+law auth_pair_proof_not_empty:
+  for to: String
+  for at: Nat
+  for now: Nat
+  {AUTH.Auth.pair.checked("secret", to, at, now, "") == False{} : Bool}
+
+law auth_pair_proof_stale:
+  for to: String
+  {AUTH.Auth.pair.checked("secret", to, 1000n, 1061n, "ab") == False{} : Bool}
+# ---- end tokenless pairing proofs ----
+
 # ---- far queue: calls for the owner's machines that are away (hub.bend's Fq.*) ----
 # thread_send and thread_launch wait for a machine that is away; nothing else does
 law fq_tools:
