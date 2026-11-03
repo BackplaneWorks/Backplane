@@ -23,6 +23,12 @@ IMPORT = re.compile(r'^import (Base|(?:\./|\.\./)[\w./-]+\.bend)(?: as ([A-Za-z_
 LEX = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|#[^\n]*|([A-Za-z_][A-Za-z_0-9]*(?:\.[A-Za-z_][A-Za-z_0-9]*)*)')
 
 
+def portable_mode(path):
+    """The git-tracked mode: only the executable bit counts, so identities do not
+    depend on a host's umask (a Boat sandbox writes 0600/0700, a workstation 0664)."""
+    return 0o755 if path.stat().st_mode & 0o111 else 0o644
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -270,7 +276,7 @@ def plan(root, folder, count):
     tool = module('ci-packet.py').toolchain()
     manifest = {'schema': 1, 'kind': 'canonical proof partitions; all receipts required',
                 'count': count, 'laws': laws, 'sources': source,
-                'source_modes': {n:(root/n).stat().st_mode & 0o777 for n in source}, 'shards': shards,
+                'source_modes': {n: portable_mode(root/n) for n in source}, 'shards': shards,
                 'toolchain': tool, 'planner_sha256': sha(Path(__file__).read_bytes()),
                 'verdict_sha256': sha((ROOT/'scripts/bendok.sh').read_bytes()),
                 'guard_sha256': sha((ROOT/'scripts/heavy-guard.py').read_bytes())}
@@ -307,7 +313,7 @@ def worker_verify(root, folder, manifest, identity, shard):
     for name in shard['source_files']:
         p = root/name
         regular(root, p)
-        if sha(p.read_bytes()) != manifest['sources'][name] or p.stat().st_mode & 0o777 != manifest['source_modes'][name]:
+        if sha(p.read_bytes()) != manifest['sources'][name] or portable_mode(p) != manifest['source_modes'][name]:
             raise ValueError('worker source drift: ' + name)
     for name, digest in shard['files'].items():
         p = folder/name

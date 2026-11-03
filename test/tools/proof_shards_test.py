@@ -80,6 +80,19 @@ class Partitions(unittest.TestCase):
         with self.assertRaises(ValueError):
             shards.verify(self.root, self.folder)
 
+    def test_identity_ignores_umask_but_not_the_executable_bit(self):
+        want = shards.encoded(self.manifest)
+        for path in self.root.rglob('*'):
+            if path.is_file() and path.parent != self.folder and 'shards' not in path.parts:
+                path.chmod(0o600)          # Boat: umask 077
+        manifest, _ = shards.plan(self.root, self.folder, 2)
+        self.assertEqual(shards.encoded(manifest), want)
+        self.assertEqual(set(manifest['source_modes'].values()), {0o644})
+        shards.verify(self.root, self.folder)
+        (self.root/'src/unused.bend').chmod(0o700)
+        with self.assertRaises(ValueError):
+            shards.verify(self.root, self.folder)
+
     def test_unknown_top_syntax_is_not_skipped(self):
         with self.assertRaises(ValueError):
             shards.parse('import Base\ntype New is Data:\n  New{}\n', 'future')
