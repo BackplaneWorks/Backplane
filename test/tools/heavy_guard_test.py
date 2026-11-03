@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('heavy_guard', ROOT / 'scripts/heavy-guard.py')
 guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guard)
+real_lock_path = guard.lock_path
 
 
 class HeavyGuardTest(unittest.TestCase):
@@ -22,6 +23,11 @@ class HeavyGuardTest(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         os.environ.pop(guard.FD_VAR, None)
+        os.environ.pop(guard.BOAT_VAR, None)
+        os.environ.pop('BACKPLANE_HEAVY_OFFLOADED', None)
+        lock = patch.object(guard, 'lock_path', return_value=Path(self.temp.name) / 'bp-bend.lock')
+        lock.start()
+        self.addCleanup(lock.stop)
         host = patch.object(guard, 'host_available', return_value=100 * guard.GIB)
         host.start()
         self.addCleanup(host.stop)
@@ -36,6 +42,31 @@ class HeavyGuardTest(unittest.TestCase):
     def test_cgroup_headroom_cannot_be_replaced_by_host_memory(self):
         with patch.object(guard, 'available', return_value=guard.FLOORS['proof'] - 1):
             self.assertFalse(guard.admit('proof'))
+
+    def test_boat_uses_sandbox_headroom_not_local_reserve(self):
+        expected = guard.FLOORS['web']
+        with patch.dict(os.environ, {guard.BOAT_VAR: '1', 'BACKPLANE_HEAVY_OFFLOADED': '1'}), patch.object(guard, 'host_available', return_value=expected), patch.object(guard, 'available', return_value=expected):
+            self.assertTrue(guard.admit('web'))
+        with patch.dict(os.environ, {guard.BOAT_VAR: '1', 'BACKPLANE_HEAVY_OFFLOADED': '1'}), patch.object(guard, 'available', return_value=expected - 1):
+            self.assertFalse(guard.admit('web'))
+
+    def test_one_boat_marker_does_not_skip_host_reserve(self):
+        expected = guard.FLOORS['web']
+        with patch.dict(os.environ, {guard.BOAT_VAR: '1'}), patch.object(guard, 'host_available', return_value=expected), patch.object(guard, 'available', return_value=expected):
+            self.assertFalse(guard.admit('web'))
+
+    def test_named_lock_directory_does_not_change_shared_slot(self):
+        with patch.dict(os.environ, {'BACKPLANE_LOCK_DIR': '/tmp/other-name'}):
+            self.assertEqual(real_lock_path(), Path('/tmp/bp-bend.lock'))
+
+    def test_different_profiles_contend_on_same_native_slot(self):
+        with open(Path(self.temp.name) / 'bp-bend.lock', 'w') as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard.os, 'execvpe') as run:
+                for name, profile in [('bend', 'proof'), ('backplane-build', 'build'), ('browser', 'browser')]:
+                    with patch.dict(os.environ, {'BACKPLANE_LOCK_NAME': name}):
+                        self.assertEqual(guard.main([profile, '--', 'anything']), 75)
+                run.assert_not_called()
 
     def test_low_memory_refuses_without_starting(self):
         with patch.object(guard, 'available', return_value=guard.FLOORS['test'] - 1), patch.object(guard.os, 'execvpe') as run:
