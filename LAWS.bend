@@ -1,5 +1,11 @@
 import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
+
 import ./src/web/composer-bar.bend as CBAR
+
+import ./test/sync_report_proof.bend as SYNCREPORT
+
+import ./test/ui_laws_proof.bend as UILAWS
+
 import ./src/core/mailowner.bend as MAILOWN
 
 import ./src/core/allowance.bend as ALLOWANCE
@@ -15556,3 +15562,96 @@ law provider_fallback_only_when_accounts_exhausted:
   for +account: J.Json
   for h: {ACCOUNTRECOVERY.Pick.account(s, now, provider, model) == Some{account} : Maybe<&2, J.Json>}
   {ACCOUNTRECOVERY.Pick.may_cross(s, now, provider, model) == False{} : Bool}
+
+# ---- recurring UI invariants, 2026-11-02 (append-only) ----
+# Ui.select.nav is the selection transition used by Session.select. No
+# error, phase, disconnected flag or missing thread can veto this choice.
+law ui_navigation_total:
+  for u: U.Ui
+  for +id: String
+  {U.Ui.sel(U.Ui.select.nav(u, id)) == id : String}
+
+# Observe the entire draft/scratch map, not just the selected composer.
+law ui_view_error_preserves_all_drafts:
+  for +u: U.Ui
+  for error: String
+  {UILAWS.drafts(U.Ui.error_put(u, error)) == UILAWS.drafts(u) : Map<&2, String>}
+
+law ui_state_adoption_preserves_all_drafts:
+  for +u: U.Ui
+  for state: M.State
+  {UILAWS.drafts(U.Ui.adopt.raw(u, state)) == UILAWS.drafts(u) : Map<&2, String>}
+
+# Following the bottom never invents an unread pill, regardless of the
+# history or live reply; the browser must supply the correct away flag.
+law ui_bottom_has_no_unread_pill:
+  for u: U.Ui
+  for thread: String
+  {U.Hold.pill.k(False{}, u, thread) == "" : String}
+
+# The newest entry equals the seen boundary: no entries can be counted.
+law ui_seen_boundary_has_no_unread_pill:
+  for +e: M.Entry
+  for rest: List<&2, M.Entry>
+  for chat: Bool
+  {U.Hold.shown(chat, e <> rest, M.Idx.id(e), False{}) == "" : String}
+
+# Universal lexer transitions; #733's json_surrogate_pair remains intact.
+# Guard hypotheses state the real classification, not caller permission.
+law json_low_surrogate_replaced:
+  for +code: U32
+  for acc: String
+  for hi: {J.Lex.is_hi(code) == False{} : Bool}
+  for lo: {J.Lex.is_lo(code) == True{} : Bool}
+  {J.Lex.unit.end(code, 0, acc) == J.LStr{SCon{Chr{65533}, acc}} : J.Lex}
+
+law json_high_surrogate_waits:
+  for +code: U32
+  for acc: String
+  for hi: {J.Lex.is_hi(code) == True{} : Bool}
+  {J.Lex.unit.end(code, 0, acc) == J.LHi{acc, code} : J.Lex}
+
+law json_pair_unit_combines:
+  for hi: U32
+  for code: U32
+  for acc: String
+  {J.Lex.unit.after(True{}, True{}, hi, code, acc) == J.LStr{SCon{Chr{J.Lex.pair(hi, code)}, acc}} : J.Lex}
+
+law json_unpaired_high_preserves_next_character:
+  for hi: U32
+  for c: Char
+  for acc: String
+  for out: List<&2, J.Tok>
+  {J.Lex.hi.k(False{}, hi, c, acc, out) == J.Lex.str(c, SCon{Chr{65533}, acc}, out) : J.Lex & List<&2, J.Tok>}
+
+law json_unpaired_high_preserves_next_escape:
+  for hi: U32
+  for c: Char
+  for acc: String
+  {J.Lex.hie.k(False{}, hi, c, acc) == J.Lex.esc(c, SCon{Chr{65533}, acc}) : J.Lex}
+
+# The Bend outbox preview disappears as soon as its exact message ID is
+# committed, even when the RPC ACK is still travelling. JS local previews
+# have their own reconciliation tests; this is the canonical Bend branch.
+law ui_stored_echo_removes_pending_preview:
+  for +p: J.Json
+  for +thread: String
+  for +entries: List<&2, M.Entry>
+  for stored: {U.Pending.stored(entries, J.Json.get_str(p, "msg", "")) == True{} : Bool}
+  {U.Pending.one.k(p, thread, entries) == Nil{} : List<&2, String>}
+
+# Only cumulative credit reports form this commutative/idempotent join.
+# Canonical text/lifecycle event replay deliberately remains ordered.
+law sync_credit_report_duplicate:
+  for +c: OB.Cr
+  for +n: Nat
+  for +bytes: Nat
+  {OB.Cr.drained.k(True{}, OB.Cr.drained.k(True{}, c, n, bytes), n, bytes) == OB.Cr.drained.k(True{}, c, n, bytes) : OB.Cr}
+
+law sync_credit_reports_commute:
+  for +c: OB.Cr
+  for +n: Nat
+  for +bytes: Nat
+  for +m: Nat
+  for +more: Nat
+  {OB.Cr.drained.k(True{}, OB.Cr.drained.k(True{}, c, n, bytes), m, more) == OB.Cr.drained.k(True{}, OB.Cr.drained.k(True{}, c, m, more), n, bytes) : OB.Cr}

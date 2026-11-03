@@ -1,7 +1,17 @@
 import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
+
 import ./src/core/mailtriage.bend as MTRI
+
 import ./src/core/mailowner.bend as MAILOWN
+
 import ./src/web/composer-bar.bend as CBAR
+
+import ./src/core/outbox.bend as OB
+
+import ./test/sync_report_proof.bend as SYNCREPORT
+
+import ./test/ui_laws_proof.bend as UILAWS
+
 import ./src/core/allowance.bend as ALLOWANCE
 
 import ./src/core/lazy-tools.bend as LTOOLS
@@ -15558,3 +15568,49 @@ def Laws.composer_bar_never_wraps(button): {==}
 def Laws.provider_fallback_only_when_accounts_exhausted(s, now, provider, model, account, h):
   %h : {ACCOUNTRECOVERY.Pick.none(_) == False{} : Bool}
   {==}
+
+# ---- recurring UI invariants, 2026-11-02 ----
+def Laws.ui_navigation_total(u, id):
+  UILAWS.selection(u, id)
+
+def Laws.ui_view_error_preserves_all_drafts(u, error):
+  UILAWS.error_drafts(u, error)
+
+def Laws.ui_state_adoption_preserves_all_drafts(u, state):
+  UILAWS.adoption_drafts(u, state)
+
+def Laws.ui_bottom_has_no_unread_pill(u, thread):
+  {==}
+
+def Laws.ui_seen_boundary_has_no_unread_pill(e, rest, chat):
+  %Equal.sym(Bool, String.eq(M.Idx.id(e), M.Idx.id(e)), True{}, Laws.string_eq_refl(M.Idx.id(e))) : {U.Hold.shown.scan(e <> rest, Bool.or(_, Nat.is_ge(0n, U.Hold.most())), chat, M.Idx.id(e), 0n, False{}) == "" : String}
+  {==}
+
+def Laws.json_low_surrogate_replaced(code, acc, hi, lo):
+  %Equal.sym(Bool, J.Lex.is_hi(code), False{}, hi) : {J.Lex.unit(_, J.Lex.is_lo(code), code, acc) == J.LStr{SCon{Chr{65533}, acc}} : J.Lex}
+  %Equal.sym(Bool, J.Lex.is_lo(code), True{}, lo) : {J.Lex.unit(False{}, _, code, acc) == J.LStr{SCon{Chr{65533}, acc}} : J.Lex}
+  {==}
+
+def Laws.json_high_surrogate_waits(code, acc, hi):
+  %Equal.sym(Bool, J.Lex.is_hi(code), True{}, hi) : {J.Lex.unit(_, J.Lex.is_lo(code), code, acc) == J.LHi{acc, code} : J.Lex}
+  UILAWS.high_unit(code, acc, J.Lex.is_lo(code))
+
+def Laws.json_pair_unit_combines(hi, code, acc):
+  {==}
+
+def Laws.json_unpaired_high_preserves_next_character(hi, c, acc, out):
+  {==}
+
+def Laws.json_unpaired_high_preserves_next_escape(hi, c, acc):
+  {==}
+
+def Laws.ui_stored_echo_removes_pending_preview(p, thread, entries, stored):
+  %Equal.sym(Bool, U.Pending.stored(entries, J.Json.get_str(p, "msg", "")), True{}, stored) : {Bool.pick(List<&2, String>, Bool.and(String.eq(J.Json.get_str(p, "thread", ""), thread), Bool.not(_)), [J.Json.get_str(p, "text", "")], Nil{}) == Nil{} : List<&2, String>}
+  %Equal.sym(Bool, Bool.and(String.eq(J.Json.get_str(p, "thread", ""), thread), False{}), False{}, and_false_r(String.eq(J.Json.get_str(p, "thread", ""), thread))) : {Bool.pick(List<&2, String>, _, [J.Json.get_str(p, "text", "")], Nil{}) == Nil{} : List<&2, String>}
+  {==}
+
+def Laws.sync_credit_report_duplicate(c, n, bytes):
+  SYNCREPORT.duplicate(c, n, bytes)
+
+def Laws.sync_credit_reports_commute(c, n, bytes, m, more):
+  SYNCREPORT.commute(c, n, bytes, m, more)
