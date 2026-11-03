@@ -220,6 +220,11 @@ def WS.routines.open(a: U.Act) -> U.Act:
   match a:
     case U.Act{u, cs}: U.Act{U.Ui.scratch_set(U.Ui.scratch_set(u, "@f.delroutine", ""), "@btab", "routines"), cs}
 
+# Buy it, when the thread's tool rail offers it (Ordering on, a design
+# ready: client.bend's Fab.buy names its button, else "")
+def WS.buy(+label: String) -> List<&2, U.PItem>:
+  Bool.pick(List<&2, U.PItem>, String.is_empty(label), Nil{}, [U.PItem{label ++ ": order this board (a quote first; nothing is charged until you pay)", "buy", ""}])
+
 def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
   List.append(&2, U.PItem, Bool.pick(List<&2, U.PItem>, U.ThreadTree.can_route(U.Ui.state(u), U.Ui.sel(u)),
     [U.PItem{Bool.pick(String, U.ThreadTree.can_create(U.Ui.state(u), U.Ui.sel(u)), "New subthread of current thread", "Choose project conversation…"), "thread-child", U.Ui.sel(u)}], Nil{}),
@@ -234,7 +239,7 @@ def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
    U.PItem{"Board viewer", "view-kind", "board"}, U.PItem{"Schematic viewer", "view-kind", "schematic"},
    U.PItem{"3D viewer", "view-kind", "3d"}, U.PItem{"Mechanical parts", "mech", ""}, U.PItem{"Browser", "view-kind", "browser"},
    U.PItem{"Diff · Ctrl+D", "diff", ""}, U.PItem{"Design review: BOM, checks, comments", "rv-page", "bom"},
-   U.PItem{"Release: tag and publish this project", "rv-page", "release"},
+   U.PItem{"Release: tag and publish this project", "rv-page", "release"}], WS.buy(U.Fab.buy(u)), [
    U.PItem{"Agent, model and effort · Ctrl+M", "flag", "models"},
    U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c), WS.settings.items(U.Settings.menu.pages(), U.Lang.loc(u)), WS.routines(U.Ui.state(u))]))
 
