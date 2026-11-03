@@ -410,6 +410,12 @@ def End.at(total: Px, top: Px, view: Px) -> Bool:
 
 def Follow.allowed(follow: Bool, atEnd: Bool) -> Bool: Bool.and(follow, atEnd)
 
+# Growing the viewport (Send clearing a multiline draft, a panel closing)
+# can clamp the browser's top before its resize/scroll events arrive. Test
+# the old content against both viewport sizes: that clamp is still its end.
+# A shrinking viewport must retain the old height until layout catches up.
+def Follow.viewport(previous: Px, current: Px) -> Px: Px.max(previous, current)
+
 def Follow.choose(allowed: Bool, held: Px, end: Px) -> Px:
   match allowed:
     case False{}: held
@@ -467,7 +473,7 @@ def Plan.top(+mode: String, +input: J.Json, +items: List<&2, Item>, +total: Px, 
     case "key": Key.top(Items.find(items, J.Json.get_str(input, "key", "")), J.Json.get_str(input, "align", "start"), Px.get(input, "offset", "0"), top, view, total)
     case _:
       +held = Anchor.top(Items.find(items, Anchor.key(a)), a, top)
-      Follow.choose(Follow.allowed(J.Json.get_bool(input, "follow", True{}), End.at(Px.get(previous, "total", "0"), top, Px.get(previous, "view", Px.show(view)))), held, End.top(total, view))
+      Follow.choose(Follow.allowed(J.Json.get_bool(input, "follow", True{}), End.at(Px.get(previous, "total", "0"), top, Follow.viewport(Px.get(previous, "view", Px.show(view)), view))), held, End.top(total, view))
 
 def Window.keep(anchorHit: Bool, inRange: Bool) -> Bool: Bool.or(anchorHit, inRange)
 
