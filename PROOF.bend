@@ -15737,3 +15737,9 @@ def Laws.home_owner_round_trip(project):
 
 def Laws.websocket_orphan_continuation_is_rejected(bytes):
   {==}
+
+def Laws.autosettle_delegation_seed_not_personal(text):
+  {==}
+
+def Laws.autosettle_human_followup_is_personal():
+  {==}

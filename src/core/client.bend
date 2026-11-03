@@ -17286,6 +17286,80 @@ def Side.signal.has(+ix: SIx, +id: String) -> Bool:
     case SIx{_, _, _, work}:
       SG.Signal.has(work, SG.Signal.key(id))
 
+# The command palette's thread rows
+# ---------------------------------
+# A thread row shows its sidebar dot (Signal.dot.thread of the signal the
+# sidebar draws) and what it wants (Side.want), and opened with nothing
+# typed the palette lists the threads waiting on the person first: those
+# with a want, live (not settled, snoozed, archived or deleted), in the
+# sidebar's order (Urg.rank: an approval, a question, then a failure,
+# pinned ahead; newest first), so Ctrl+K Enter opens the first one.
+
+def Palette.dot(+u: Ui, +t: M.Thread) -> String:
+  SG.Signal.dot.thread(SG.Signal.display.name(Side.signal(u, t), Ui.state(u), M.Thread.id(t)), t)
+
+# a red dot's want (its open asks read only then)
+def Palette.red(+dot: String) -> Bool:
+  Bool.or(String.eq(dot, "blocked"), String.eq(dot, "failed"))
+
+def Palette.want.k(red: Bool, +lc: I.Loc, +dot: String, +st: M.State, +t: M.Thread) -> String:
+  match red:
+    case True{}: Side.want(lc, dot, Asks.open(st, M.Thread.id(t)), t)
+    case False{}: ""
+
+def Palette.want(+lc: I.Loc, +u: Ui, +dot: String, +t: M.Thread) -> String:
+  Palette.want.k(Palette.red(dot), lc, dot, Ui.state(u), t)
+
+def Palette.live(+now: Nat, +st: M.State, +t: M.Thread) -> Bool:
+  Bool.not(Bool.or(M.Thread.hidden(t), Bool.or(Side.settled(t), M.Snooze.on(now, Side.until(st, M.Thread.id(t))))))
+
+# Urg.rank's order of what a row wants (an approval, a question, then a
+# failure; 0: nothing), from the asks as the row's word is (Side.want.kind)
+def Palette.need.rank(+kind: String) -> Nat:
+  Bool.pick(Nat, String.eq(kind, "approval"), Urg.rank(M.PhApproval{}), Bool.pick(Nat, String.eq(kind, "question"), Urg.rank(M.PhInput{}), Bool.pick(Nat, String.eq(kind, "failed"), Urg.rank(M.PhFailed{}), 0n)))
+
+def Palette.need.r(+r: Nat, +t: M.Thread, acc: List<&2, ARow>) -> List<&2, ARow>:
+  Active.keep(Nat.is_gt(r, 0n), ARow{Nat.add(Nat.mul(r, 2n), Bool.pick(Nat, Active.pinned(t), 1n, 0n)), Active.activity(t), t, "", "", False{}}, acc)
+
+def Palette.need.t(red: Bool, +dot: String, +st: M.State, +t: M.Thread, acc: List<&2, ARow>) -> List<&2, ARow>:
+  match red:
+    case True{}: Palette.need.r(Palette.need.rank(Side.want.kind(dot, Asks.open(st, M.Thread.id(t)), t)), t, acc)
+    case False{}: acc
+
+def Palette.need.go(ts: List<&2, M.Thread>, +u: Ui, +now: Nat, acc: List<&2, ARow>) -> List<&2, ARow>:
+  match ts:
+    case Nil{}: acc
+    case +t <> rest:
+      +dot = Palette.dot(u, t)
+      Palette.need.go(rest, u, now, Palette.need.t(Bool.and(Palette.red(dot), Palette.live(now, Ui.state(u), t)), dot, Ui.state(u), t, acc))
+
+def Palette.need.items(rs: List<&2, ARow>, +l: I.Loc) -> List<&2, PItem>:
+  match rs:
+    case Nil{}: Nil{}
+    case ARow{_, _, +t, _, _, _} <> rest:
+      PItem{TTL.Title.shown(l, Active.title(t)), "select", M.Thread.id(t)} <> Palette.need.items(rest, l)
+
+def Palette.needs.k(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Palette.need.items(List.sort(~ARow, ~ARow.before, Palette.need.go(Kids.keep(Ui.threads(Ui.state(u)), Kids.set(Ui.state(u))), u, Side.now(u), Nil{})), l)
+
+# the Ui with this frame's signals, as the sidebar draws them: the client's
+# own Ui carries none (the page decorates a copy, Side.with_signals), and
+# the palette's rows and its Enter must read the same ones
+def Palette.signals.k(has: Bool, u: Ui) -> Ui:
+  match has:
+    case True{}: u
+    case False{}: Side.with_signals(u)
+
+def Palette.signals.has(r: Map<&2, String> & Bool) -> Bool:
+  (_, yes) = r
+  yes
+
+def Palette.signals(+u: Ui) -> Ui:
+  Palette.signals.k(Palette.signals.has(Map.has(&2, String, Ui.infos(u), "@signal.online")), u)
+
+def Palette.needs(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Palette.needs.k(l, Palette.signals(u))
+
 # Only ordinary chat text gets a provisional timeline bubble. Composer
 # commands have their own panels and must keep their original field.
 def Draft.preview(+text: String) -> Bool:

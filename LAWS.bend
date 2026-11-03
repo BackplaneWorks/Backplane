@@ -15864,3 +15864,12 @@ law home_owner_round_trip:
 law websocket_orphan_continuation_is_rejected:
   for bytes: List<&2, U32>
   {WSFRAG.Fragment.step(WSFRAG.FragIdle{}, WSFRAME.Frame{True{}, 0, bytes}) == WSFRAG.FragReject{} : WSFRAG.Taken}
+
+# A delegation seed has system provenance despite its historical User role.
+# Only its exact generated ID is exempt; a distinct human input stays personal.
+law autosettle_delegation_seed_not_personal:
+  for text: String
+  {AUTOS.Auto.direct.seed("m100-4", text, "m100-4") == False{} : Bool}
+
+law autosettle_human_followup_is_personal:
+  {AUTOS.Auto.direct.seed("human-followup", "More work", "m100-4") == True{} : Bool}
