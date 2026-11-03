@@ -136,12 +136,14 @@ struct DeviceManagerView: View {
     // a pairing link this hub issued (/auth/devices "invitations"): when, used
     // or not and by which device; revoking a used one revokes that device too
     struct IssuedLink: Identifiable {
-        let id: String; let state: String; let created: Date; let expires: Date; let used: Date?; let device: String; let deviceName: String; let deviceRevoked: Bool
+        // (machine: a hub-to-hub invite made in Bots; its "device" is the link it made)
+        let id: String; let state: String; let created: Date; let expires: Date; let used: Date?; let device: String; let deviceName: String; let deviceRevoked: Bool; let machine: Bool
         var revocable: Bool { state == "open" || (state == "used" && !device.isEmpty && !deviceRevoked) }
+        var title: String { machine ? "Machine invite" : "Device invitation" }
         var summary: String {
             switch state {
-            case "used": return "Used " + (used.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "") + " by " + (deviceName.isEmpty ? "a device" : deviceName) + (deviceRevoked ? " (revoked)" : "")
-            case "revoked": return device.isEmpty ? "Revoked, never used" : "Revoked with " + (deviceName.isEmpty ? "the device it paired" : deviceName)
+            case "used": return "Used " + (used.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "") + " by " + (deviceName.isEmpty ? (machine ? "a machine" : "a device") : deviceName) + (deviceRevoked ? (machine ? " (unlinked)" : " (revoked)") : "")
+            case "revoked": return device.isEmpty ? "Revoked, never used" : "Revoked with " + (deviceName.isEmpty ? (machine ? "the machine it linked" : "the device it paired") : deviceName)
             case "expired": return "Expired, never used"
             default: return "Not used yet · expires " + expires.formatted(date: .omitted, time: .shortened)
             }
@@ -172,7 +174,7 @@ struct DeviceManagerView: View {
             links = (result["invitations"] as? [[String: Any]] ?? []).compactMap { x in
                 guard let id = x["id"] as? String, let state = x["state"] as? String, let created = x["createdAt"] as? Double, let expires = x["expiresAt"] as? Double else { return nil }
                 return IssuedLink(id: id, state: state, created: Date(timeIntervalSince1970: created / 1000), expires: Date(timeIntervalSince1970: expires / 1000),
-                    used: (x["usedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }, device: x["device"] as? String ?? "", deviceName: x["deviceName"] as? String ?? "", deviceRevoked: x["deviceRevoked"] as? Bool == true)
+                    used: (x["usedAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }, device: x["device"] as? String ?? "", deviceName: x["deviceName"] as? String ?? "", deviceRevoked: x["deviceRevoked"] as? Bool == true, machine: x["kind"] as? String == "machine")
             }
         } catch { status = "Could not load devices. Check your connection and pairing." }
     }
@@ -218,10 +220,10 @@ struct DeviceManagerView: View {
                         }.padding(.vertical, 8)
                     }
                     Text("Pairing links").font(.headline)
-                    if links.isEmpty { Text("Links made with Add a device appear here.").foregroundStyle(.secondary) }
+                    if links.isEmpty { Text("Links made with Add a device, and invites made in Bots to link a machine, appear here.").foregroundStyle(.secondary) }
                     ForEach(links) { x in
                         VStack(alignment: .leading) {
-                            Text("Device invitation · " + x.created.formatted(date: .abbreviated, time: .shortened)).font(.headline)
+                            Text(x.title + " · " + x.created.formatted(date: .abbreviated, time: .shortened)).font(.headline)
                             Text(x.summary).foregroundStyle(.secondary)
                             if x.revocable { Button("Revoke", role: .destructive) { uninviteTarget = x } }
                         }.padding(.vertical, 8)
@@ -238,7 +240,7 @@ struct DeviceManagerView: View {
             .alert("Revoke this link?", isPresented: Binding(get: { uninviteTarget != nil }, set: { if !$0 { uninviteTarget = nil } })) {
                 Button("Revoke", role: .destructive) { if let x = uninviteTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", invitation: x.id);await refresh() } catch { status = "Could not revoke this link." } } };uninviteTarget = nil }
                 Button("Cancel", role: .cancel) { uninviteTarget = nil }
-            } message: { Text(uninviteTarget?.state == "used" ? "The device it paired (" + ((uninviteTarget?.deviceName).flatMap { $0.isEmpty ? nil : $0 } ?? "unnamed") + ") loses access too." : "It will no longer pair anything.") }
+            } message: { Text(uninviteTarget?.state == "used" ? (uninviteTarget?.machine == true ? "The machine it linked (" : "The device it paired (") + ((uninviteTarget?.deviceName).flatMap { $0.isEmpty ? nil : $0 } ?? "unnamed") + (uninviteTarget?.machine == true ? ") is unlinked too." : ") loses access too.") : "It will no longer pair anything.") }
         }
     }
 }
