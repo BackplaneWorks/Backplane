@@ -1206,7 +1206,11 @@ function render() {
   // the next: still near the top after a render, it is asked for
 
   if (focus) {
-    document.getElementById(focus)?.focus();
+    const el = document.getElementById(focus);
+    el?.focus();
+    // a rename opens with the old title selected: typing replaces it ("New
+    // thread" was kept in front of what was typed), an arrow key keeps it
+    if (focus === "thread-title") el?.select?.();
     focus = null;
   }
   refocusGive();
