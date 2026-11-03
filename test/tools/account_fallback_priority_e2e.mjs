@@ -73,7 +73,12 @@ async function scenario(cached) {
     socket.onmessage = event => { const value = plain(cbor(new Uint8Array(event.data), keys, words)); if (value.t === 'reply') replies.set(String(value.id), value); };
     await new Promise((r, j) => { socket.onopen = r; socket.onerror = j; });
     const rpc = async (m, p) => { const id = ++seq; socket.send(Uint8Array.from(encode({id, m, p}))); return until(() => replies.get(String(id)), m); };
-    await rpc('accounts', {op: 'list'});
+    // Account operations must not silently proceed before capability negotiation.
+    const unsupported = await rpc('accounts', {op: 'list'});
+    assert.equal(unsupported.ok, false, 'unnegotiated account operation must be rejected');
+    // Match the supported web client's explicit account-profile capability offer.
+    const listed = await rpc('accounts', {op: 'list', accountProfiles: 1});
+    assert.equal(listed.ok, true, 'synthetic account list rejected: ' + JSON.stringify(listed));
     await until(() => events().filter(e => e.$ === 'SettingSet' && e.key === 'accounts.inventory').some(e => JSON.parse(e.value).profiles?.some(p => p.id === profile && p.state === 'connected')), 'synthetic account status');
     const text = 'Synthetic original request: do this exactly once';
     const response = await rpc('turn.start', {thread: 't', text, msg: 'original', mode: 'queue'}); assert(response.ok, JSON.stringify(response));
@@ -85,7 +90,7 @@ async function scenario(cached) {
     assert.equal(first.filter(t => t.provider === 'claude' && t.owner === 'Default').length, cached ? 0 : 1);
     assert(first.find(t => t.owner === profile).text.includes(text));
     assert.equal(first.find(t => t.owner === profile).resumed, '', 'replacement must not resume the Default session');
-    assert.equal(events().filter(e => e.$ === 'MessagePosted' && e.id === 'original').length, 1);
+    assert.equal(events().filter(e => e.$ === 'MessagePosted' && e.msg === 'original').length, 1);
     const binding = JSON.parse(events().filter(e => e.$ === 'SettingSet' && e.key === 'account.thread.t.claude').at(-1).value);
     assert.equal(binding.id, profile); assert(binding.epoch > 0);
     assert(events().some(e => e.$ === 'ActivityLogged' && e.kind === 'account-switch' && e.summary.includes('Claude_Backplane')));
