@@ -34,7 +34,7 @@ shown=0
 [ "$(uname -s)" != Darwin ] || shown=1
 if [ $headless = 0 ] && [ -n "$desktop" ] && [ $shown = 1 ]; then
   [ -z "$home" ] || export BACKPLANE_HOME="$home"
-  exec "$desktop"
+  exec "$desktop" "$@"
 fi
 if [ $headless = 1 ] && [ $fg = 0 ]; then
   dir=${home:-${HOME:-/tmp}/.backplane-bend}

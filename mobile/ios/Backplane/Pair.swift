@@ -122,3 +122,88 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         found?(code)
     }
 }
+
+struct DeviceManagerView: View {
+    let link: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var devices: [PairedDevice] = []
+    @State private var invitation: DeviceInvitation?
+    @State private var status = ""
+    @State private var revokeTarget: PairedDevice?
+    struct PairedDevice: Identifiable { let id: String; let name: String; let lastSeen: Date }
+    struct DeviceInvitation { let link: String; let code: String; let address: String; let expires: Date; let qr: [String] }
+    private func request(_ path: String, method: String = "GET", device: String? = nil) async throws -> [String: Any] {
+        guard let url = Pairing.http(link, path: path, token: false),
+              let token = Pairing.socket(link).flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) })?.queryItems?.first(where: { $0.name == "token" })?.value else { throw URLError(.badURL) }
+        var request = URLRequest(url: url);request.httpMethod = method;request.timeoutInterval = 8
+        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        request.setValue("native", forHTTPHeaderField: "X-Backplane-Client")
+        request.setValue(url.scheme ?? "http", forHTTPHeaderField: "X-Backplane-Scheme")
+        if let device { request.setValue(device, forHTTPHeaderField: "X-Backplane-Device") }
+        let config = URLSessionConfiguration.ephemeral;config.httpShouldSetCookies = false;config.urlCache = nil
+        let session = URLSession(configuration: config, delegate: Pairing.NoPairRedirect(), delegateQueue: nil);defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200, let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw URLError(.userAuthenticationRequired) }
+        return result
+    }
+    private func refresh() async {
+        do { let result = try await request("/auth/devices")
+            devices = (result["devices"] as? [[String: Any]] ?? []).filter { $0["revoked"] as? Bool != true }.compactMap { d in
+                guard let id = d["id"] as? String, let name = d["name"] as? String, let seen = d["lastSeen"] as? Double else { return nil }
+                return PairedDevice(id: id, name: name, lastSeen: Date(timeIntervalSince1970: seen / 1000))
+            }
+        } catch { status = "Could not load devices. Check your connection and pairing." }
+    }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Add another computer or phone. Invitations work once and expire in 10 minutes.")
+                    if !status.isEmpty { Text(status).foregroundStyle(.secondary) }
+                    Button("Add a device") { Task {
+                        status = "Creating invitation…"
+                        do { let result = try await request("/auth/invitations", method: "POST")
+                            guard let value = result["link"] as? String, let code = result["code"] as? String,
+                                  let until = result["expiresAt"] as? Double else { status = "Could not create invitation.";return }
+                            invitation = DeviceInvitation(link: value, code: code, address: (result["routes"] as? [String])?.first ?? "", expires: Date(timeIntervalSince1970: until / 1000), qr: (result["qr"] as? String ?? "").components(separatedBy: "\n").filter { !$0.isEmpty })
+                            status = "Invitation ready. Share it with the device you want to authorize."
+                        } catch { status = "Could not create invitation. Check the hub connection." }
+                    } }.buttonStyle(.borderedProminent)
+                    if let invitation {
+                        TimelineView(.periodic(from: .now, by: 1)) { clock in
+                            VStack(alignment: .leading, spacing: 12) {
+                                if clock.date < invitation.expires {
+                                    Text(invitation.code).font(.largeTitle.monospaced().bold()).privacySensitive()
+                                    Text("Hub address: " + invitation.address)
+                                    Text("Expires ").font(.footnote) + Text(invitation.expires, style: .relative).font(.footnote)
+                                    QRCodeView(rows: invitation.qr).privacySensitive()
+                                    HStack {
+                                        Button("Copy link") { UIPasteboard.general.string = invitation.link }
+                                        ShareLink("Share", item: invitation.link)
+                                        Button("Copy code") { UIPasteboard.general.string = invitation.code }
+                                    }
+                                } else { Text("Expired — create a new invitation.") }
+                            }
+                        }
+                    }
+                    Text("Paired devices").font(.headline)
+                    if devices.isEmpty { Text("Existing pairings are preserved. New devices appear here after connecting.").foregroundStyle(.secondary) }
+                    ForEach(devices) { device in
+                        VStack(alignment: .leading) {
+                            Text(device.name).font(.headline)
+                            Text("Last seen ") + Text(device.lastSeen, style: .relative)
+                            Button("Revoke", role: .destructive) { revokeTarget = device }
+                        }.padding(.vertical, 8)
+                    }
+                }.frame(maxWidth: 520, alignment: .leading).padding(24)
+            }
+            .navigationTitle("Devices")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .task { await refresh() }
+            .alert("Revoke access?", isPresented: Binding(get: { revokeTarget != nil }, set: { if !$0 { revokeTarget = nil } })) {
+                Button("Revoke", role: .destructive) { if let device = revokeTarget { Task { do { _ = try await request("/auth/revoke", method: "POST", device: device.id);await refresh() } catch { status = "Could not revoke this device." } } };revokeTarget = nil }
+                Button("Cancel", role: .cancel) { revokeTarget = nil }
+            } message: { Text("This device will need a new invitation to reconnect.") }
+        }
+    }
+}

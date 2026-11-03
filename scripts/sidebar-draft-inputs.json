@@ -45,7 +45,7 @@
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
-    "src/core/client.bend": "2633cb6f47b7c9dabfb88dd5144a94450377cacb3239b430ccd63e64bbccde16",
+    "src/core/client.bend": "3e8f3217a0eec608e4b36470305af97fa4da3accd893916cf3a5719e9df63b8c",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -165,7 +165,7 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
-    "src/mobile/screen.bend": "7704f13c0164fa8761ed572d7f98ee842a552a056b1ff54860939a12bf76a9c7",
+    "src/mobile/screen.bend": "9572ee36c3a422d4057139565bde895857d63eabe557ebcd0695e19844d06d1d",
     "src/server/thin-actor.bend": "2f0216c55b246af65bef75cd0ac3c8c270f53e1a73510f16313971078e4670d6",
     "src/server/thin-body.bend": "313a512c4bc3096b5a15ae13a603688327164baebf5ee86dc9d54169b5323a0c",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -190,7 +190,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "739738e3896ecbbe3e7dabfa310706a82c6206203268199a23ed536bfdd3d68a"
+    "src/web/view.bend": "e432f70586043b89ab620c1fa15c6c7fb37b2e1c55103d3784330fa71b54575a"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -765,6 +765,41 @@
       "base": "f6324bba95aff48c739c1cfc7936d48ce652857c",
       "scope": "Concurrent #771 adds Setting.has and preserves a manual parent choice when delegation seeds a child. Reviewed model diff: no draft/body reader, filter, image key or transport change. Badge/count functions are byte-unchanged by this concurrent change; its source and parent-law additions are retained.",
       "qualification": "The 223 assertions, sidebar24 and two selected proofs executed before rebase on aca8c7b03 plus this wording patch. Three input files changed on rebase: model.bend and the global LAWS/PROOF additions. No rerun or full combined-source execution is claimed; selected badge expressions and proof definitions are unchanged."
+    }
+  },
+  "pairingUXReview": {
+    "review": "docs/reviews/pairing-ux-sidebar.md",
+    "changes": {
+      "added": [
+        "src/core/board-catalog.bend",
+        "src/core/pathrecords.bend",
+        "src/core/rpcout.bend"
+      ],
+      "removed": [],
+      "changed": [
+        "src/core/client.bend",
+        "src/core/mech.bend",
+        "src/core/msgs.bend",
+        "src/core/presentation.bend",
+        "src/core/release.bend",
+        "src/mobile/screen.bend",
+        "src/server/thin-actor.bend",
+        "src/server/thin-view.bend",
+        "src/web/view.bend"
+      ]
+    },
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "assertions": 24,
+    "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+    "qualification": "Executed all 24 current full-output cases; roots, bridges, scanner, scratch filter and authority unchanged. Does not imply native device or full repository acceptance.",
+    "rebasedMainReview": {
+      "base": "e2fe649ec114943a23c0562f82e5bc6b8739c022",
+      "scope": "Concurrent parent-link precedence and subthread badge wording reviewed: no new draft readers, scratch inputs, image key, scanner, filter or authority changes. All upstream review receipts retained.",
+      "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+      "assertions": 24,
+      "work": "w-t1793665018-1293799-1301092",
+      "logSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
+      "qualification": "All 24 full-output cases executed and passed on combined source. Earlier platform runtime checks were run before this unrelated-main rebase; not a claim of fresh platform binaries."
     }
   }
 }
