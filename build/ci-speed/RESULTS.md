@@ -1071,3 +1071,19 @@ tests pass in 2.117s, with independent lane-4 review and 70 repeated controls.
 Old plans or vanished entries require re-planning. Production callers still
 need immutable input snapshots; shared cache trust and actual bounded proof
 gate/timing remain pending. No full proof, compiler, Boat or release work ran.
+
+### Real repository cache metadata cost (2026-11-03)
+
+| Measurement after #873 | Before | Measured now |
+|---|---|---|
+| Actual 1,180-module repository key planning | Previously only a fixture measurement; no comparable baseline | 0.203s initial plan; 0.202s complete revalidation |
+
+[Raw receipt](cache-plan/REAL-PLAN.json), [GNU time](cache-plan/REAL-PLAN.time),
+[bounded reproducer and limits](cache-plan/README.md). Work
+`w-t1793650867-1261555-1460917` exits 0 with unchanged source/tool metadata.
+Enforced scope: **512MiB /swap 0**; aggregate peak **45,858,816 bytes**, no max,
+OOM or OOM-kill events. Whole process **0.43s /55,976KiB GNU peak RSS**; cost
+**$0**. Every module has a content key. No Bend executable, checker/proof,
+pass seed, compiler, Boat, app or release job runs. This is metadata-only
+planning cost, not warm execution or typical-PR timing. It rules out planning
+as the current large bottleneck; execution/memory and trusted reuse remain.
