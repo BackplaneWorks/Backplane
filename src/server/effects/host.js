@@ -286,7 +286,7 @@ function sock_send_preview(socket, path, ctype, range, k) {
   };
   const header = (status, size, extra = '') => Buffer.from(
     'HTTP/1.1 ' + status + '\r\nContent-Type: ' + ctype
-    + '\r\nContent-Length: ' + size + '\r\nCache-Control: no-cache'
+    + '\r\nContent-Length: ' + size + '\r\nCache-Control: private, no-cache'
     + '\r\nAccept-Ranges: bytes\r\nX-Content-Type-Options: nosniff'
     + '\r\nConnection: close\r\n' + extra + '\r\n');
   const error = (status, message, extra = '') => {

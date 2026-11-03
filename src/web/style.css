@@ -2436,3 +2436,8 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 .improvements-recording p{margin:0;font-size:12px;line-height:1.5}
 .improvements-recording-bar{position:fixed;top:8px;left:8px;z-index:100000;display:flex;align-items:center;flex-wrap:wrap;gap:8px;max-width:calc(100vw - 16px);padding:8px 12px;background:#111410;color:#f0f2e9;border:2px solid #e16955;font:14px sans-serif}
 .improvements-recording-bar[hidden]{display:none}.improvements-recording-bar button{min-height:36px;padding:6px 10px;background:#222a1e;color:inherit;border:1px solid #c7cfba}
+
+.message-image-unavailable { display: none; }
+.msg .shot.image-unavailable { display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--bg); color: var(--faint); }
+.msg .shot.image-unavailable img { display: none; }
+.shot.image-unavailable .message-image-unavailable { display: block; }
