@@ -10,6 +10,7 @@ import { starAttention } from "./star-attention.js";
 const starAttentionSync = starAttention();
 import { allowanceDeadline } from "./allowance-deadline.js";
 const retireAllowance = allowanceDeadline();
+import { sizeComposer, sizeComposerControls } from "./composer-size.js";
 import { applyComposerDraft } from "./composer-draft.js";
 import { VoiceMic, hubHere } from "./voice-mic.js";
 import { homeDraftStorage } from "./home-drafts.js";
@@ -537,6 +538,8 @@ function composerTop(measure = !composerRoom) {
 // draws: a layout read in every render of a streaming reply costs frames.
 let composerFootHeld = false;
 function composerGeometry() {
+  sizeComposer(document.getElementById("composer"));
+  sizeComposerControls();
   composerTop();
   if (frontendNode || canonicalBoot) {
     // the hub's view: the footer's own height again
@@ -549,7 +552,7 @@ function composerGeometry() {
   try {
     const saved = JSON.parse(localStorage.getItem("backplane-composer-foot") || "null");
     if (saved?.thread === thread && Math.abs(saved.width - foot.getBoundingClientRect().width) < 1 && saved.height > 0 && saved.height < 300) {
-      foot.style.minHeight = saved.height + "px";composerFootHeld = true;
+      foot.style.minHeight = "min(" + saved.height + "px, var(--composer-button))";composerFootHeld = true;
     }
   } catch {}
 }

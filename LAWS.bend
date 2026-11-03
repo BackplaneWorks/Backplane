@@ -1,3 +1,4 @@
+import ./src/web/composer-bar.bend as CBAR
 import ./src/core/mailowner.bend as MAILOWN
 
 import ./src/core/allowance.bend as ALLOWANCE
@@ -15532,3 +15533,14 @@ law owner_mail_unknown_method_unacknowledged:
 
 law owner_mail_copy_quiet:
   {JCOPY.Copy.out(H.OwnerMail{}) == Nil{} : List<&2, H.Out>}
+
+# Approved invariant: the composer control bar can never exceed one button
+# height. Content and viewport do not enter the layout; disclosures are outside
+# normal flow. The browser gate also measures this contract in rendered pixels.
+law composer_bar_one_button:
+  for +button: String
+  {CBAR.ComposerBar.height(CBAR.ComposerBar.layout(button)) == button : String}
+
+law composer_bar_never_wraps:
+  for button: String
+  {CBAR.ComposerBar.wrap(CBAR.ComposerBar.layout(button)) == "nowrap" : String}
