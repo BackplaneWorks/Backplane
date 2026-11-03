@@ -3,42 +3,51 @@
 
 A unit (a module's type-check, a proof shard) is keyed by the SHA-256 of
 everything it reads: the unit, its full dependency closure (every imported
-.bend, effect file and local header, by content), the compiler/library
-identity, the environment bend reads, and the verdict logic. An entry exists
-only for a pass that was recorded after the inputs were re-hashed unchanged.
-Anything else - an unknown import, an unreadable file, an unidentifiable
-compiler, a damaged or mislabelled entry - is a miss (or an error), never a
-pass.
+.bend, effect file and local header, by content; a quoted include that is
+missing makes the unit uncacheable), the compiler/library identity, the
+environment bend reads, and the verdict logic.
 
-  content-cache.py plan-check [--cache D] [--shared D] [--all] [--plan P]
-      JSON: {"hit": [...], "miss": [...]} over the tracked modules
-      (LAWS.bend is a module; PROOF.bend is proved by shards, not checked here).
-      --plan P saves each module's key as taken BEFORE the check runs.
-  content-cache.py record-check FILE... --plan P [--shared-write]
-      record the named modules as passed after a real passing check; a module
-      whose key now differs from the planned one (edited while checking, or
-      not planned) is refused, so a pass is never filed under other inputs
-  content-cache.py plan-proof PARTITION_DIR [--cache D] [--shared D] [--all]
-      JSON: shards of a verified proof-shards partition, hit or miss
-  content-cache.py record-proof PARTITION_DIR --receipt R... [--shared-write]
+Trust boundary. An entry is a pass only if it carries a MAC, made with a
+secret key that lives beside the local cache (mode 0600, created on first
+use), over its key and body. The only code that records an entry is `run-check`
+below, which runs bend itself and applies scripts/bendok.sh's verdict; there
+is no command that records a caller-declared pass. The boundary is therefore
+the local user account that owns the cache folder: anyone who can read that
+key can forge entries, and entries copied from another cache (another key) are
+misses. There is NO shared or CI-seeded cache yet: a shared cache needs
+signatures that readers can verify without being able to sign (asymmetric,
+written only by trusted main builds), and nothing here claims to provide that.
+
+  content-cache.py plan-check [--cache D] [--all] [--plan P]
+      JSON: {"hit": [...], "miss": [...], "uncacheable": {...}}. --plan P
+      saves the keys as taken BEFORE the check runs, and the misses.
+  content-cache.py run-check --plan P [--cache D]
+      check the plan's misses with bend (one manifest; LAWS.bend alone) under
+      the verdict policy, then record only those whose key is still the
+      planned one. LAWS.bend counts only on a clean verdict (a TODO or any
+      other line fails); scripts/check.sh stays the gate for a LAWS with TODO.
+  content-cache.py plan-proof PARTITION_DIR [--cache D] [--all]
+  content-cache.py record-proof PARTITION_DIR --receipt R...
+      proof shards of a verified canonical partition; a receipt is recorded
+      only if it is a real pass for that partition
   content-cache.py audit [--cache D]
-      every entry must still be self-consistent; prints the stale ones
-      (a stale entry is harmless: its key is never asked for again)
+      every entry must be whole and authentic; prints the others
 
---all ignores the cache for planning (the nightly full run): every unit is a
-miss. Local cache: $BP_CONTENT_CACHE or ~/.cache/backplane-bend/content.
-Shared caches (read-only unless --shared-write, which only trusted main
-builds pass): $BP_CONTENT_CACHE_SHARED, a path list separated by ':'.
+--all ignores the cache for planning (the nightly full run).
+Local cache: $BP_CONTENT_CACHE or ~/.cache/backplane-bend/content.
 """
 import argparse
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +61,10 @@ ENV = ['BEND_LIB', 'BENDTT', 'CC']
 
 class CacheError(ValueError):
     """Anything that makes a key or an entry untrustworthy."""
+
+
+class Uncacheable(CacheError):
+    """A unit whose inputs cannot be fully named: always a miss, never recorded."""
 
 
 def sha(data):
@@ -130,8 +143,11 @@ def imports_of(root, f, text):
             m = INCLUDE.match(line)
             if m:
                 p = rel(root, os.path.join(here, m.group(1)))
-                if (root/p).exists():
-                    out.append(p)
+                if not (root/p).exists():
+                    # generated or system header, or one not made yet: either
+                    # way its bytes are not an input we can name
+                    raise Uncacheable('%s: quoted include not in the checkout: %s' % (f, p))
+                out.append(p)
     return out
 
 
@@ -196,7 +212,11 @@ def check_units(root, files=None):
     tool = tool_identity()
     units = {}
     for f in files if files is not None else tracked_modules(root):
-        key, body = unit_key('check', f, tree.closure(f), tool)
+        try:
+            key, body = unit_key('check', f, tree.closure(f), tool)
+        except Uncacheable as error:
+            units[f] = (None, str(error))
+            continue
         units[f] = (key, body)
     return units
 
@@ -208,39 +228,53 @@ def local_dir():
                 Path(os.environ.get('XDG_CACHE_HOME') or Path.home()/'.cache')/'backplane-bend'/'content')
 
 
-def shared_dirs():
-    return [Path(p) for p in os.environ.get('BP_CONTENT_CACHE_SHARED', '').split(':') if p]
-
-
 def entry_path(folder, key):
     return Path(folder)/key[:2]/(key + '.json')
 
 
-def valid_entry(entry, key):
-    """An entry is a pass only if it is whole and names exactly this key."""
+def secret(folder, create):
+    path = Path(folder)/'.mac-key'
     try:
-        return (isinstance(entry, dict) and entry.get('schema') == SCHEMA
+        data = path.read_bytes()
+        if len(data) == 32:
+            return data
+    except OSError:
+        pass
+    if not create:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(os.urandom(32))
+    return path.read_bytes()
+
+
+def mac(secret_key, key, body):
+    return hmac.new(secret_key, key.encode() + b'\0' + canonical(body), hashlib.sha256).hexdigest()
+
+
+def valid_entry(entry, key, secret_key):
+    """A pass only if whole, naming exactly this key, and made with this cache's secret."""
+    try:
+        return (secret_key is not None and isinstance(entry, dict) and entry.get('schema') == SCHEMA
                 and entry.get('verdict') == 'passed' and entry.get('key') == key
                 and isinstance(entry.get('body'), dict)
-                and sha(canonical(entry['body'])) == key)
+                and sha(canonical(entry['body'])) == key
+                and isinstance(entry.get('mac'), str)
+                and hmac.compare_digest(entry['mac'], mac(secret_key, key, entry['body'])))
     except (TypeError, ValueError):
         return False
 
 
-def lookup(key, local=None, shared=None):
-    """'local' | 'shared' | None. A shared hit is copied to the local cache."""
+def lookup(key, local=None):
+    """True only for an authentic recorded pass."""
     local = local_dir() if local is None else Path(local)
-    for where, folders in (('local', [local]), ('shared', shared_dirs() if shared is None else shared)):
-        for folder in folders:
-            try:
-                entry = json.loads(entry_path(folder, key).read_text())
-            except (OSError, ValueError):
-                continue
-            if valid_entry(entry, key):
-                if where == 'shared':
-                    _write(entry_path(local, key), entry)
-                return where
-    return None
+    k = secret(local, False)
+    try:
+        entry = json.loads(entry_path(local, key).read_text())
+    except (OSError, ValueError):
+        return False
+    return valid_entry(entry, key, k)
 
 
 def _write(path, entry):
@@ -250,24 +284,74 @@ def _write(path, entry):
     os.replace(tmp, path)
 
 
-def record(key, body, local=None, shared_write=False, shared=None):
-    """Store a pass. body must hash to key; callers re-key just before."""
-    if sha(canonical(body)) != key:
+def _record(key, body, local=None):
+    """Internal: only run-check and record-proof call this, after a real pass."""
+    if key is None or sha(canonical(body)) != key:
         raise CacheError('record: body does not hash to its key')
-    entry = {'schema': SCHEMA, 'key': key, 'verdict': 'passed', 'body': body, 'recorded': int(time.time())}
-    _write(entry_path(local_dir() if local is None else local, key), entry)
-    if shared_write:
-        folders = shared_dirs() if shared is None else shared
-        if not folders:
-            raise CacheError('--shared-write without a shared cache')
-        _write(entry_path(folders[0], key), entry)
+    local = local_dir() if local is None else Path(local)
+    entry = {'schema': SCHEMA, 'key': key, 'verdict': 'passed', 'body': body,
+             'mac': mac(secret(local, True), key, body), 'recorded': int(time.time())}
+    _write(entry_path(local, key), entry)
 
 
-def plan(units, use_cache=True, local=None, shared=None):
+def plan(units, use_cache=True, local=None):
     hit, miss = [], []
     for name, (key, _) in sorted(units.items()):
-        (hit if use_cache and lookup(key, local, shared) else miss).append(name)
+        (hit if use_cache and key is not None and lookup(key, local) else miss).append(name)
     return hit, miss
+
+
+def verdict(code, text):
+    """scripts/bendok.sh's policy, exactly: nothing else is a pass."""
+    r = subprocess.run(['sh', '-c', '. "$1"; bend_verdict "$2" "$3"', 'verdict',
+                        str(ROOT/'scripts/bendok.sh'), str(code), text], capture_output=True)
+    return r.returncode == 0
+
+
+def run_check(root, plan_file, local=None):
+    """Check the planned misses with bend and record the ones that pass."""
+    planned = json.loads(Path(plan_file).read_text())
+    keys, miss = planned['keys'], planned['miss']
+    todo = list(miss)  # an uncacheable module is still checked, only never recorded
+    if not todo:
+        return 0
+    env = {**os.environ, 'BEND_NO_TELEMETRY': '1'}
+    work = Path(tempfile.mkdtemp(prefix='.bend-check.', dir=root))
+    try:
+        rest = [m for m in todo if m != 'LAWS.bend']
+        results = {}
+        if rest:
+            (work/'m').mkdir()
+            for step in ('generate', 'verify'):
+                cmd = [sys.executable, str(ROOT/'scripts/check-manifest.py'), step, str(work/'m')]
+                if step == 'generate':
+                    cmd.append('1')
+                subprocess.run(cmd + rest, cwd=root, check=True, capture_output=True)
+            r = subprocess.run(['bend', str(work/'m/manifest-0.bend'), '--check-only'], cwd=root,
+                               env=env, capture_output=True, text=True)
+            out = r.stdout + r.stderr
+            if not verdict(r.returncode, out):
+                print(out, file=sys.stderr)
+                return 1
+            results.update({m: True for m in rest})
+        if 'LAWS.bend' in todo:
+            r = subprocess.run(['bend', 'LAWS.bend', '--check-only'], cwd=root, env=env,
+                               capture_output=True, text=True)
+            out = r.stdout + r.stderr
+            if not verdict(r.returncode, out):  # a TODO is no pass here, and no error is hidden by one
+                print(out, file=sys.stderr)
+                return 1
+            results['LAWS.bend'] = True
+        now = check_units(root, list(results))
+        for m in results:
+            if now[m][0] != keys[m]:  # None (uncacheable) on both sides is equal and is not recorded
+                raise CacheError('inputs of %s changed since they were planned; nothing recorded' % m)
+        for m in results:
+            if now[m][0] is not None:
+                _record(now[m][0], now[m][1], local)
+        return 0
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 # ---- proof shards ----
@@ -298,38 +382,31 @@ def receipt_passes(receipt, manifest_sha, ps):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('action', choices=['plan-check', 'record-check', 'plan-proof', 'record-proof', 'audit'])
+    p.add_argument('action', choices=['plan-check', 'run-check', 'plan-proof', 'record-proof', 'audit'])
     p.add_argument('paths', nargs='*')
     p.add_argument('--root', type=Path, default=ROOT)
     p.add_argument('--cache', type=Path)
-    p.add_argument('--shared', type=Path, action='append')
     p.add_argument('--all', action='store_true')
     p.add_argument('--plan', type=Path)
-    p.add_argument('--shared-write', action='store_true')
     p.add_argument('--receipt', type=Path, action='append', default=[])
     a = p.parse_args(argv)
     root = a.root.resolve()
     if a.action == 'plan-check':
         units = check_units(root)
-        hit, miss = plan(units, not a.all, a.cache, a.shared)
+        hit, miss = plan(units, not a.all, a.cache)
         if a.plan:
-            a.plan.write_text(json.dumps({n: k for n, (k, _) in units.items()}, sort_keys=True))
-        print(json.dumps({'hit': hit, 'miss': miss}))
-    elif a.action == 'record-check':
-        if not a.paths or not a.plan:
-            raise CacheError('record-check needs the modules that passed and --plan')
-        planned = json.loads(a.plan.read_text())
-        now = check_units(root, a.paths)
-        for name, (key, body) in now.items():
-            if planned.get(name) != key:
-                raise CacheError('inputs of %s changed since they were planned; nothing recorded' % name)
-        for name, (key, body) in now.items():
-            record(key, body, a.cache, a.shared_write, a.shared)
+            a.plan.write_text(json.dumps({'keys': {n: k for n, (k, _) in units.items()}, 'miss': miss}, sort_keys=True))
+        print(json.dumps({'hit': hit, 'miss': miss,
+                          'uncacheable': {n: b for n, (k, b) in units.items() if k is None}}))
+    elif a.action == 'run-check':
+        if not a.plan:
+            raise CacheError('run-check needs --plan')
+        return run_check(root, a.plan, a.cache)
     elif a.action == 'plan-proof':
         if len(a.paths) != 1:
             raise CacheError('plan-proof needs the partition folder')
         units, _ = shard_units(root, Path(a.paths[0]).resolve())
-        hit, miss = plan(units, not a.all, a.cache, a.shared)
+        hit, miss = plan(units, not a.all, a.cache)
         print(json.dumps({'hit': hit, 'miss': miss}))
     elif a.action == 'record-proof':
         if len(a.paths) != 1 or not a.receipt:
@@ -343,12 +420,14 @@ def main(argv=None):
             name = receipt.get('shard')
             if name not in units or not receipt_passes(receipt, msha, ps):
                 raise CacheError('receipt is not a pass for this partition: %s' % r)
-            record(units[name][0], units[name][1], a.cache, a.shared_write, a.shared)
+            _record(units[name][0], units[name][1], a.cache)
     else:
         bad = []
-        for f in sorted((a.cache or local_dir()).glob('*/*.json')):
+        folder = a.cache or local_dir()
+        k = secret(folder, False)
+        for f in sorted(folder.glob('*/*.json')):
             try:
-                ok = valid_entry(json.loads(f.read_text()), f.stem)
+                ok = valid_entry(json.loads(f.read_text()), f.stem, k)
             except (OSError, ValueError):
                 ok = False
             if not ok:

@@ -49,8 +49,16 @@ stage() {
 stage baseline scripts/check.sh check
 stage cold scripts/cached-check.sh
 stage warm scripts/cached-check.sh
-printf '\n' >> src/core/fm.bend
-stage edit-leaf scripts/cached-check.sh
-git checkout src/core/fm.bend 2>/dev/null || true
+# the edit stage changes a source file, so only after every stage before it
+# passed (a refused admission mutates nothing); the file's exact bytes,
+# including any edit it already had, are put back from a copy, never by git
+if [ "$failed" = 0 ]; then
+  cp -p src/core/fm.bend /tmp/lane4.fm.orig || { echo "lane4-bench: cannot save src/core/fm.bend" >&2; exit 1; }
+  printf '\n' >> src/core/fm.bend
+  stage edit-leaf scripts/cached-check.sh
+  cp -p /tmp/lane4.fm.orig src/core/fm.bend
+else
+  echo "lane4-bench: skipped edit-leaf (an earlier stage did not pass); no source touched" >&2
+fi
 # a stage that did not pass (a refused admission included) is not a benchmark
 [ "$failed" = 0 ] || { echo "lane4-bench: not every stage passed; this is no benchmark result" >&2; exit 1; }

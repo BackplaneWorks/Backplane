@@ -46,7 +46,7 @@ class Base(unittest.TestCase):
 
     def mark_all_passed(self):
         for k, body in cc.check_units(self.root).values():
-            cc.record(k, body)
+            cc._record(k, body)
 
 
 class Keys(Base):
@@ -147,90 +147,169 @@ class FailClosed(Base):
 
 class Entries(Base):
     def entry(self, name='src/other.bend'):
-        k, body = cc.check_units(self.root, [name])[name]
-        return k, body
+        return cc.check_units(self.root, [name])[name]
 
     def test_damaged_entries_are_misses(self):
         k, body = self.entry()
-        cc.record(k, body)
+        cc._record(k, body)
         path = cc.entry_path(self.cache, k)
         good = json.loads(path.read_text())
         for bad in ('', '{', '[]', json.dumps({**good, 'verdict': 'failed'}),
                     json.dumps({**good, 'key': 'f'*64}), json.dumps({**good, 'schema': 99}),
-                    json.dumps({**good, 'body': {**good['body'], 'unit': 'src/mid.bend'}})):
+                    json.dumps({**good, 'body': {**good['body'], 'unit': 'src/mid.bend'}}),
+                    json.dumps({**good, 'mac': '0'*64}),
+                    json.dumps({x: y for x, y in good.items() if x != 'mac'})):
             path.write_text(bad)
-            self.assertIsNone(cc.lookup(k), bad)
+            self.assertFalse(cc.lookup(k), bad)
+
+    def test_forged_pass_with_a_valid_body_and_key_is_a_miss(self):
+        # a writer who can build the exact key and body (all public inputs)
+        # but has no MAC secret must not produce a pass
+        k, body = self.entry()
+        path = cc.entry_path(self.cache, k)
+        path.parent.mkdir(parents=True)
+        forged = {'schema': 1, 'key': k, 'verdict': 'passed', 'body': body, 'recorded': 1}
+        path.write_text(json.dumps(forged))
+        self.assertFalse(cc.lookup(k))
+        cc.secret(self.cache, True)  # even once this cache has a secret
+        self.assertFalse(cc.lookup(k))
+        path.write_text(json.dumps({**forged, 'mac': cc.mac(b'x' * 32, k, body)}))
+        self.assertFalse(cc.lookup(k))
+        hit, miss = cc.plan(cc.check_units(self.root))
+        self.assertIn('src/other.bend', miss)
+
+    def test_entry_copied_from_another_cache_is_a_miss(self):
+        k, body = self.entry()
+        cc._record(k, body, local=self.shared)
+        dest = cc.entry_path(self.cache, k)
+        dest.parent.mkdir(parents=True)
+        dest.write_text(cc.entry_path(self.shared, k).read_text())
+        cc._record(*self.entry('src/leaf.bend'))  # gives this cache its own secret
+        self.assertFalse(cc.lookup(k))
+        self.assertTrue(cc.lookup(k, self.shared))
 
     def test_entry_filed_under_another_key_is_a_miss(self):
         k, body = self.entry('src/other.bend')
         k2, _ = self.entry('src/leaf.bend')
-        cc.record(k, body)
+        cc._record(k, body)
         dest = cc.entry_path(self.cache, k2)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(cc.entry_path(self.cache, k).read_text())
-        self.assertIsNone(cc.lookup(k2))
+        self.assertFalse(cc.lookup(k2))
 
-    def test_record_refuses_mismatched_body(self):
+    def test_record_refuses_mismatched_body_or_no_key(self):
         k, body = self.entry()
         with self.assertRaises(cc.CacheError):
-            cc.record(k, {**body, 'unit': 'x'})
-
-    def test_shared_hit_is_copied_local_and_validated(self):
-        k, body = self.entry()
-        cc.record(k, body, local=self.shared)
-        self.assertEqual(cc.lookup(k, shared=[self.shared]), 'shared')
-        self.assertEqual(cc.lookup(k, shared=[]), 'local')
-
-    def test_forged_shared_entry_is_ignored(self):
-        k, body = self.entry()
-        path = cc.entry_path(self.shared, k)
-        path.parent.mkdir(parents=True)
-        path.write_text(json.dumps({'schema': 1, 'key': k, 'verdict': 'passed', 'body': {'unit': 'forged'}}))
-        self.assertIsNone(cc.lookup(k, shared=[self.shared]))
-
-    def test_shared_write_needs_a_shared_cache(self):
-        k, body = self.entry()
+            cc._record(k, {**body, 'unit': 'x'})
         with self.assertRaises(cc.CacheError):
-            cc.record(k, body, shared_write=True, shared=[])
+            cc._record(None, body)
 
-    def test_shared_not_written_by_default(self):
+    def test_no_command_records_a_declared_pass(self):
+        with self.assertRaises(SystemExit):
+            cc.main(['--root', str(self.root), 'record-check', 'src/other.bend'])
+
+    def test_no_shared_cache_is_read(self):
         k, body = self.entry()
-        cc.record(k, body, shared=[self.shared])
-        self.assertFalse(cc.entry_path(self.shared, k).exists())
+        cc._record(k, body, local=self.shared)
+        with patch.dict(os.environ, {'BP_CONTENT_CACHE_SHARED': str(self.shared)}):
+            self.assertFalse(cc.lookup(k))
 
 
-class Cli(Base):
-    def run_cli(self, *args):
-        return cc.main(['--root', str(self.root), *args])
-
-    def test_record_refuses_inputs_edited_during_the_check(self):
-        plan = self.root.parent/'plan.json'
-        self.run_cli('plan-check', '--plan', str(plan))
-        self.write('src/other.bend', 'import Base\ndef other() -> U32:\n  99\n')
-        with self.assertRaises(cc.CacheError):
-            self.run_cli('record-check', 'src/other.bend', '--plan', str(plan))
-        self.assertIsNone(cc.lookup(self.keys(['src/other.bend'])['src/other.bend']))
-
-    def test_record_refuses_unplanned_module(self):
-        plan = self.root.parent/'plan.json'
-        self.run_cli('plan-check', '--plan', str(plan))
-        self.write('src/new.bend', 'import Base\n')
-        with self.assertRaises(cc.CacheError):
-            self.run_cli('record-check', 'src/new.bend', '--plan', str(plan))
-
-    def test_record_needs_a_plan(self):
-        with self.assertRaises(cc.CacheError):
-            self.run_cli('record-check', 'src/other.bend')
-
-    def test_roundtrip_and_audit(self):
-        plan = self.root.parent/'plan.json'
-        self.run_cli('plan-check', '--plan', str(plan))
-        self.run_cli('record-check', 'src/other.bend', 'src/leaf.bend', '--plan', str(plan))
+class Includes(Base):
+    def test_missing_include_is_uncacheable_then_created_is_keyed(self):
+        self.write('src/e.c', '#include "e.h"\n')
+        self.write('src/c.bend', 'import Base\nimport ./e.c\ndef c() -> U32:\n  0\n')
+        k, why = cc.check_units(self.root, ['src/c.bend'])['src/c.bend']
+        self.assertIsNone(k)
+        self.assertIn('e.h', why)
+        cc._record(*cc.check_units(self.root, ['src/other.bend'])['src/other.bend'])
         hit, miss = cc.plan(cc.check_units(self.root))
-        self.assertEqual(sorted(hit), ['src/leaf.bend', 'src/other.bend'])
-        self.assertEqual(self.run_cli('audit'), 0)
+        self.assertIn('src/c.bend', miss)          # never a hit while the header is missing
+        self.write('src/e.h', 'int a;\n')
+        k1 = cc.check_units(self.root, ['src/c.bend'])['src/c.bend'][0]
+        self.assertIsNotNone(k1)
+        self.write('src/e.h', 'int b;\n')
+        self.assertNotEqual(k1, cc.check_units(self.root, ['src/c.bend'])['src/c.bend'][0])
+
+    def test_uncacheable_is_never_recorded(self):
+        self.write('src/e.c', '#include "gone.h"\n')
+        self.write('src/c.bend', 'import Base\nimport ./e.c\n')
+        with self.assertRaises(cc.CacheError):
+            cc._record(*cc.check_units(self.root, ['src/c.bend'])['src/c.bend'])
+
+
+class Verdict(unittest.TestCase):
+    def test_policy(self):
+        self.assertTrue(cc.verdict(0, 'All terms check.\n'))
+        self.assertTrue(cc.verdict(1, 'SOME PROOFS FAIL\nError: 1 def relies on unsafe or foreign code:\n- x\n'))
+        self.assertFalse(cc.verdict(0, 'TODO: hole in foo\nAll terms check.\n'))
+        self.assertFalse(cc.verdict(1, 'TODO: hole in foo\nError: type mismatch in bar\n'))
+        self.assertFalse(cc.verdict(0, 'All terms check.\nError: type mismatch in bar\n'))
+        self.assertFalse(cc.verdict(0, ''))
+
+
+class RunCheck(Base):
+    """run-check with a stand-in bend: the verdict, not the caller, decides."""
+
+    def fake_bend(self, script):
+        d = self.root.parent/'bin'
+        d.mkdir(exist_ok=True)
+        (d/'bend').write_text('#!/bin/sh\n' + script)
+        (d/'bend').chmod(0o755)
+        p = patch.dict(os.environ, {'PATH': str(d) + os.pathsep + os.environ['PATH']})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def plan_file(self):
+        plan = self.root.parent/'plan.json'
+        cc.main(['--root', str(self.root), 'plan-check', '--plan', str(plan)])
+        return plan
+
+    def run_check(self, plan):
+        return cc.run_check(self.root, plan)
+
+    def test_pass_is_recorded_after_a_real_pass(self):
+        self.fake_bend('echo "All terms check."\n')
+        self.assertEqual(self.run_check(self.plan_file()), 0)
+        self.assertEqual(len(cc.plan(cc.check_units(self.root))[0]), 4)
+
+    def test_failing_check_records_nothing(self):
+        self.fake_bend('echo "Error: type mismatch"; exit 1\n')
+        self.assertEqual(self.run_check(self.plan_file()), 1)
+        self.assertEqual(cc.plan(cc.check_units(self.root))[0], [])
+
+    def test_mixed_todo_and_error_laws_is_no_pass(self):
+        self.write('LAWS.bend', 'import Base\n')
+        self.fake_bend('case "$1" in LAWS.bend) printf "TODO: x\\nError: type mismatch\\n"; exit 1;; *) echo "All terms check.";; esac\n')
+        self.assertEqual(self.run_check(self.plan_file()), 1)
+        self.assertFalse(any('LAWS' in n for n in cc.plan(cc.check_units(self.root))[0]))
+
+    def test_todo_only_laws_is_not_recorded_either(self):
+        self.write('LAWS.bend', 'import Base\n')
+        self.fake_bend('case "$1" in LAWS.bend) printf "TODO: x\\n"; exit 0;; *) echo "All terms check.";; esac\n')
+        self.assertEqual(self.run_check(self.plan_file()), 1)
+
+    def test_edit_during_the_check_records_nothing(self):
+        self.fake_bend('echo "All terms check."\necho "def z() -> U32:\n  9" >> ' + str(self.root/'src/other.bend') + '\n')
+        with self.assertRaises(cc.CacheError):
+            self.run_check(self.plan_file())
+        self.assertEqual(cc.plan(cc.check_units(self.root))[0], [])
+
+    def test_uncacheable_module_is_checked_not_recorded(self):
+        self.write('src/e.c', '#include "gone.h"\n')
+        self.write('src/c.bend', 'import Base\nimport ./e.c\n')
+        log = self.root.parent/'seen'
+        self.fake_bend('cat "$1" >> %s; echo "All terms check."\n' % log)
+        self.assertEqual(self.run_check(self.plan_file()), 0)
+        self.assertIn('src/c.bend', log.read_text())
+        self.assertNotIn('src/c.bend', cc.plan(cc.check_units(self.root))[0])
+
+    def test_audit(self):
+        self.fake_bend('echo "All terms check."\n')
+        self.run_check(self.plan_file())
+        self.assertEqual(cc.main(['--root', str(self.root), 'audit']), 0)
         next(self.cache.glob('*/*.json')).write_text('{')
-        self.assertEqual(self.run_cli('audit'), 1)
+        self.assertEqual(cc.main(['--root', str(self.root), 'audit']), 1)
 
 
 class Shards(unittest.TestCase):
