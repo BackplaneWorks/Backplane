@@ -91,7 +91,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "2d0ac1a890b12a83e4b9d3f8e4ffcc65a71efe0ba7ab8f726c31854e41ffe201",
+    "src/core/msgs.bend": "116e1dcfe2d81eeadec7d3f557aa1964da33d1b89f612af08c14b4ceee08b0ba",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
     "src/core/onboard.bend": "fc10cb988f4fa6e8b2780e3ea3c4ebfea0088256daf5f65abebd10dfe2d746c8",
@@ -129,7 +129,7 @@
     "src/core/signal.bend": "c532b51dc417bb7d5b3368a99f812aa4a9ce890da97e2a1792d4e2769315066e",
     "src/core/slash.bend": "7876373d4a582848dc3c98d2e4b7bc7f2e3385ef32ebcd6b0be5e1a64722c7f6",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
-    "src/core/stamp.bend": "6c619ef54b9ca159dce7336d98dd86b47c72840924da723e3754a398cdb5e3b3",
+    "src/core/stamp.bend": "8bdebadba27575d4932f728f199fcf952ecd8154f1f177ef15a9a6434a2e20f0",
     "src/core/star-nudge.bend": "8a8b5ce5e4ad2cc0035fb1ffe0dfe999d4bb15b6ecf15f60ea48a6dac71ba933",
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
@@ -192,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "8c2dd4bc70bc451642d0758eee1c19f9193a2d1f5ebbfdd66ac8371fdee8665c"
+    "src/web/view.bend": "7490220095f5f17c4ff171863f5cc2e7c4535d7f7ee05e95e64eeb88a25a09c9"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
