@@ -18,6 +18,7 @@ import ./conversation-window.bend as CWINDOW
 import ./star-nudge.bend as STAR
 import ./subagent-history.bend as SUBHIST
 import ./review-history.bend as REVHIST
+import ./message-context.bend as MSGHIST
 import ../core/fm.bend as FMP
 import ./restart-hold.bend as RHOLD
 import ../core/watchdog.bend as WD
@@ -13431,8 +13432,9 @@ def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: C
         t2 : U32 <- PS.Perf.span("thin.read.reviews", t1)
         +shown : M.State <- DHIST.History.restore(Cfg.thin.store(cfg), thread, reviews)
         t3 : U32 <- PS.Perf.span("thin.read.design", t2)
+        +with_context : M.State <- MSGHIST.ContextHistory.read(Cfg.thin.store(cfg), shown, thread, TSTO.Page.ids(pg))
         +v : SEC.Vault <- VX.Vx.vault()
-        Hub.thin.render.page.shown(v, pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms, shown)
+        Hub.thin.render.page.shown(v, pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms, with_context)
 
 def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:
