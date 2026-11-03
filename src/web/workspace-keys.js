@@ -368,6 +368,12 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
   // (the time Commands was asked for while the hub draws it; 0 once drawn,
   // or after 2 s if it never was)
   let palettePending = 0, pendingText = '';
+  // A click on the command field asks for Commands as Ctrl+K does: keys
+  // typed before it shows are its query's too (they pressed rail keys: "cab"
+  // opened Board, "d" Diff)
+  doc.addEventListener('click', event => {
+    if (event.target?.closest?.('[data-on-click="ws-palette-open"]') && !doc.querySelector('.workspace-palette')) { palettePending = now(); pendingText = ''; }
+  }, true);
   doc.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
     if (doc.querySelector('.tour,.lightbox') || doc.querySelector('.draw-back') || doc.querySelector('.improvements:not([hidden])')) return; // The active overlay owns every key.
