@@ -49,7 +49,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-bootstrap-${{ inputs.ref }}-${{ inputs.operation }}
+  group: release-bootstrap-${{ inputs.ref }}-${{ inputs.operation }}-${{ inputs.targets }}
   cancel-in-progress: false
 
 env:
