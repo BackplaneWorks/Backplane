@@ -45,7 +45,7 @@ def Probe.link(url: String, since: Nat, origin: String) -> IO(Unit):
     +inbox : Chan(S.Msg) <- L.Link.start(url)
     +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
     +t0 : Nat <- IO.now()
-    ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.Join{0, out, since, origin, 1, 0, False{}})
+    ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.Join{0, out, since, origin, 1, 0})
     +text : String <- Probe.read(10n, out)
     +t1 : Nat <- IO.now()
     IO.print("link elapsed ms=" ++ Nat.show(Nat.sub(t1, t0)) ++ " " ++ text)

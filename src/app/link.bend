@@ -263,8 +263,7 @@ def Link.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +inbox: Chan(S.Msg
       Link.unreachable(s, inbox, out)
 
 # (token: the hub's pairing token, which a window on this machine reads from
-# its home: a link to another machine's hub has none yet, and is let in the
-# legacy way, by Tailscale's word)
+# its home: a link to another machine's hub has none, and is refused)
 def Link.path(since: Nat, origin: String, +token: String) -> String:
   "/ws?since=" ++ Nat.show(since) ++ "&origin=" ++ origin ++ "&enc=cbor" ++ Bool.pick(String, String.is_empty(token), "", "&token=" ++ token)
 
@@ -280,7 +279,7 @@ def Link.connected(r: Result<&1, &1, U32 & String, Socket>, +url: String, since:
 
 def Link.joined(m: Maybe<&1, S.Msg>, +url: String, +token: String, +inbox: Chan(S.Msg)) -> IO(Unit):
   match m:
-    case Some{S.Join{_, out, since, origin, _, _, _}}:
+    case Some{S.Join{_, out, since, origin, _, _}}:
       IO.bind(Result<&1, &1, U32 & String, Socket>, Unit, Link.connect(Link.host(url), Link.port(url), 5000), r => Link.connected(r, url, since, origin, token, inbox, out))
     case _:
       IO.pure(Unit, Unit{})

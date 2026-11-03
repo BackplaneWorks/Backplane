@@ -847,8 +847,8 @@ tools). Routes:
 | `POST /bots/link` | the holder of an invite | the same; once per peer id |
 | `GET /bots/dir` | a linked machine | the same, over the empty body |
 | `POST /far/push`, `/far/log`, `/far/rpc` | one of the owner's linked machines | the same |
-| `GET /bots/<id>/screen.jpg` | clients | loopback, or the pairing token |
-| `GET /oauth/google` | the user's browser | loopback, or the pairing token; Google's state |
+| `GET /bots/<id>/screen.jpg` | clients | the pairing token or a paired device's |
+| `GET /oauth/google` | the user's browser | its document navigation on loopback, or the pairing token; Google's state |
 
 The signature is checked off the hub (the secret read from its file);
 the hub then accepts the replay key once and only then changes anything.

@@ -13338,13 +13338,25 @@ def Laws.mail_plane_indexed_build(u): {==}
 
 def Laws.mail_plane_indexed_hidden(u, ix): {==}
 
-def Laws.auth_foreign_origin_denied(trusted, path, token):
+def Laws.auth_foreign_origin_denied(path, token):
   {==}
 
 def Laws.auth_empty_remote_token_denied():
   {==}
 
 def Laws.auth_cookie_prefix_denied():
+  {==}
+
+def Laws.auth_loopback_host_needs_token():
+  {==}
+
+def Laws.auth_localhost_needs_token():
+  {==}
+
+def Laws.auth_no_host_needs_token():
+  {==}
+
+def Laws.auth_loopback_with_token():
   {==}
 
 def Laws.auth_oauth_post_denied(trusted, hs, path, token):
@@ -13359,7 +13371,7 @@ def Laws.auth_oauth_foreign_origin_denied(trusted, token):
 def Laws.auth_oauth_local_document_reaches_state_check(token):
   {==}
 
-def Laws.auth_oauth_document_does_not_authorize_websocket(trusted, token):
+def Laws.auth_oauth_document_does_not_authorize_websocket(token):
   {==}
 
 # ---- PCB viewer text ----
@@ -13839,7 +13851,6 @@ def Laws.pair_msg_no_link_qr(): {==}
 
 def Laws.thin_pair_told(): {==}
 
-def Laws.thin_pair_legacy(): {==}
 # ---- F1: far feed slices ----
 def Laws.far_feed_sliced(): {==}
 

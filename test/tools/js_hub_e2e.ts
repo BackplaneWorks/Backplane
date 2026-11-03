@@ -18,6 +18,7 @@
 // the single file `bun build --compile` makes of it (scripts/build-js.sh).
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [hub, wire = "build/wire"] = process.argv.slice(2);
 if (!hub) { console.log("usage: bun test/tools/js_hub_e2e.ts HUB [WIREDIR]"); process.exit(2); }
@@ -101,7 +102,7 @@ try {
   const seen: any[] = [];
   const deltas: { thread: string; at: number }[] = [];
   const connect = async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws?token=${hubToken(home)}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = (e) => {
       let o: any = null;
@@ -137,8 +138,10 @@ try {
   console.log(`     WorktreeSet recorded: ${!!wt} (advisory, as C)`);
 
   const tok = read(join(home, "token")).trim();
-  const lockList = await fetch(`http://127.0.0.1:${PORT}/lock/list`, { method: "POST", body: "{}" }).then((r) => r.status).catch(() => 0);
-  check(lockList !== 403 && lockList !== 0, `a loopback client is trusted by the lock API (Sock.peer; ${lockList})`);
+  const lockBare = await fetch(`http://127.0.0.1:${PORT}/lock/list`, { method: "POST", body: "{}" }).then((r) => r.status).catch(() => 0);
+  check(lockBare === 401, `a loopback client without the token is refused by the lock API (${lockBare})`);
+  const lockList = await fetch(`http://127.0.0.1:${PORT}/lock/list?token=${hubToken(home)}`, { method: "POST", body: "{}" }).then((r) => r.status).catch(() => 0);
+  check(lockList !== 401 && lockList !== 403 && lockList !== 0, `a loopback client with the token reaches the lock API (Sock.peer; ${lockList})`);
 
   c.send("turn.start", { thread: S, text: "mode:stream go w", msg: "s-1" });
   const pidsOf = (th: string) => [...read(log).matchAll(/^MCP (\d+) \S*\/mcp\/([^.?/]+)/gm)].filter((m) => m[2] === th).map((m) => Number(m[1]));
