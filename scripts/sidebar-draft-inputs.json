@@ -50,7 +50,7 @@
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
     "src/core/desk.bend": "01fdb8ddcfdd0316c370568a70b671566a4ff2fa5b4f2dc021534b02b3a2af5b",
-    "src/core/diff.bend": "eb7b53917e3b587cb423379946a9b8da8035c8a39b8b6d8e4f3a819b25a7497d",
+    "src/core/diff.bend": "b0c3decfd54552eefeb9cf512ca481fceefbfc2172e0ffffc7fbf08f410e606d",
     "src/core/draftbound.bend": "1d973f0181f4cd4d753da6b956025e2abd2ec31c3ae54acb911a802ae4af6f28",
     "src/core/emb.bend": "48012888273e4de02f0618ca1f308fc6d87e42499aa1dafe504837c2b14e2904",
     "src/core/fallback.bend": "b8604144a115b0de6f43af2b294f7cf09f6cabb882afb962c13829a21ea50601",
