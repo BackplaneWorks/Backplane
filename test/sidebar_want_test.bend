@@ -15,7 +15,7 @@ import ../src/web/presentation.bend as W
 def st() -> M.State:
   M.State.replay([M.ProjectCreated{"p", "Test", "/tmp/sidebar-want", 1n},
     M.ThreadCreated{"ap", "p", "Battery life estimate", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"ap", M.Running{}, 2n}, M.PendingChanged{"ap", 1n, 3n},
-    M.ThreadCreated{"q", "p", "Grounding plan", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"q", M.Running{}, 2n}, M.AskOpened{"a1", "q", "input", "AskUserQuestion", "Which ground?", "", 3n},
+    M.ThreadCreated{"q", "p", "Grounding plan", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"q", M.Running{}, 2n}, M.AskOpened{"a1", "q", "input", "AskUserQuestion", "Which ground?", "", 3n}, M.PendingChanged{"q", 1n, 3n},
     M.ThreadCreated{"f", "p", "Firmware pin map", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"f", M.Running{}, 2n}, M.TurnChanged{"f", M.Failed{}, 3n},
     M.ThreadCreated{"w", "p", "I2C pull-ups", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"w", M.Running{}, 2n},
     M.ThreadCreated{"d", "p", "Bias the tube stage", M.Local{}, "", "", "claude", "", 1n}, M.TurnChanged{"d", M.Running{}, 2n}, M.TurnChanged{"d", M.Completed{}, 3n}], M.State.empty())
@@ -52,5 +52,7 @@ def main() -> IO(Unit):
     C.Check.str("the word takes the age's place", Bool.show(String.contains(html("q"), "ago want")), "True")
     C.Check.str("the age moves to the tooltip", Bool.show(String.contains(html("q"), "question · ")), "True")
     C.Check.str("a working row draws its age", Bool.show(String.contains(html("w"), "ago want")), "False")
-    C.Check.str("helper: a red dot without an ask of its own says nothing", U.Side.want(I.En{}, "blocked", M.PhWorking{}), "")
-    C.Check.str("helper: a green dot says nothing", U.Side.want(I.En{}, "finished", M.PhApproval{}), "")
+    C.Check.str("a question counted pending still says question", U.Side.want.ask([M.Ask{"a", "q", "input", "AskUserQuestion", "?", "", True{}, ""}], 1n), "question")
+    C.Check.str("an approval before a question", U.Side.want.ask([M.Ask{"a", "q", "input", "AskUserQuestion", "?", "", True{}, ""}, M.Ask{"b", "q", "approval", "Bash", "ls", "", True{}, ""}], 2n), "approval")
+    C.Check.str("a red dot without an ask of its own says nothing", U.Side.want(I.En{}, "blocked", Nil{}, U.Ui.thread(st(), "w")), "")
+    C.Check.str("a green dot says nothing", U.Side.want(I.En{}, "finished", Nil{}, U.Ui.thread(st(), "ap")), "")
