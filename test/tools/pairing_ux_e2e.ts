@@ -93,13 +93,14 @@ try {
  const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true}), phone=await mobile.newPage();await phone.goto(origin);await phone.getByRole('heading',{name:'Connect to your Backplane hub',exact:true}).waitFor();
  check(await phone.evaluate(()=>document.querySelector('.pairing-screen')!.scrollWidth<=innerWidth),'mobile web gate has no horizontal overflow');await phone.screenshot({path:resolve('build/pairing-ux/fresh-mobile.png')});
  // Exercise manual code and QR-image controls, not only their HTTP endpoint.
- const manual=await invite();await phone.getByText('Type a short code',{exact:true}).click();
+ const manual=await invite();await phone.getByRole('tab',{name:'Short code',exact:true}).click();
  await phone.getByLabel('Hub address',{exact:true}).fill(origin);await phone.getByLabel('8-character code',{exact:true}).fill(manual.code);
  await phone.getByRole('button',{name:'Connect with code',exact:true}).click();await phone.waitForURL(origin+'/');
  await waitFor(async()=>await mobile.cookies().then((c:any[])=>c.some(x=>x.name==='bp_token'&&x.httpOnly)),'manual code cookie');check(true,'mobile-width manual code controls complete pairing');
  const qrContext=await browser.newContext(),qrPage=await qrContext.newPage(),imageInvite=await invite();
  const png=await page.evaluate((rows:string[])=>{const s=(rows.length+8)*6,c=document.createElement('canvas');c.width=c.height=s;const ctx=c.getContext('2d')!;ctx.fillStyle='white';ctx.fillRect(0,0,s,s);ctx.fillStyle='black';rows.forEach((r,y)=>[...r].forEach((v,x)=>{if(v==='1')ctx.fillRect((x+4)*6,(y+4)*6,6,6)}));return c.toDataURL('image/png').split(',')[1]},String(imageInvite.qr).split('\n'));
  await qrPage.goto(origin);await qrPage.getByRole('heading',{name:'Connect to your Backplane hub',exact:true}).waitFor();
+ await qrPage.getByRole('tab',{name:'QR code',exact:true}).click();
  await qrPage.getByLabel('Or choose a QR image',{exact:true}).setInputFiles({name:'fixture-qr.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
  await waitFor(async()=>await qrContext.cookies().then((c:any[])=>c.some(x=>x.name==='bp_token'&&x.httpOnly)),'QR image cookie');check(true,'actual QR image control completes pairing locally');
  if(process.env.ANDROID_SERIAL) {
