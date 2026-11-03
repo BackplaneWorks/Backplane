@@ -6734,7 +6734,7 @@ def Path.refresh(+home: String) -> IO(Unit):
     +next : String = CPA.CliPath.next(cur, home, Path.out(r))
     Path.set(String.eq(cur, next), next)
 
-# which of the four CLIs are on PATH now (Antigravity's agy lives in
+# which of the provider CLIs are on PATH now (Antigravity's agy lives in
 # <home>/antigravity, AGX.Agx.probe, not on PATH), "claude codex " style;
 # a stand-in's block (core/standin.bend) is none
 def Models.present() -> IO(String):

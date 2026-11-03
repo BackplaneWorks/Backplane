@@ -74,6 +74,7 @@ def main() -> IO(Unit):
     C.Check.str("second hub says", OH.OneHub.says("/h", "12", "3799"), "a hub already serves /h (pid 12, port 3799)")
     C.Check.str("holder", OH.OneHub.holder(OH.OneHub.got("held 12 3799")), "12 3799")
     C.Check.str("holder ours", OH.OneHub.holder(OH.OneHub.got("ok")), "")
+    C.Check.str("every provider CLI on PATH gets a block", String.join(SI.Standin.names(), " "), "claude codex grok muse pi omp opencode")
     C.Check.str("stand-ins first on PATH", SI.Standin.path("/f", "/b", "/usr/bin"), "/f:/b:/usr/bin")
     C.Check.str("stand-ins, no PATH", SI.Standin.path("/f", "/b", ""), "/f:/b")
     C.Check.str("the login PATH merges in behind the stand-ins", CPA.CliPath.merge(SI.Standin.path("/f", "/b", "/usr/bin"), "/u/.local/bin:/usr/bin", ["/u/.local/bin"]), "/f:/b:/usr/bin:/u/.local/bin")
