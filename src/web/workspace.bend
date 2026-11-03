@@ -11,6 +11,7 @@ import ./dom.bend as D
 import ./icon.bend as WI
 import ./settings-menu.bend as SM
 import ../core/bot.bend as BT
+import ../core/todo.bend as TD
 import ../core/i18n.bend as I
 
 # Web desktop commands reuse the native sidebar keymap and normal actions.
@@ -225,6 +226,31 @@ def WS.routines.open(a: U.Act) -> U.Act:
 def WS.buy(+label: String) -> List<&2, U.PItem>:
   Bool.pick(List<&2, U.PItem>, String.is_empty(label), Nil{}, [U.PItem{label ++ ": order this board (a quote first; nothing is charged until you pay)", "buy", ""}])
 
+# The thread's to-do list (the agent's steps and the person's own): shown
+# or hidden as its head's click does; with none yet, where it will show.
+# The words carry "todo" too, which is how people type it
+def WS.todos.k(none: Bool, +u: U.Ui, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, U.PItem>:
+  match none:
+    case True{}: [U.PItem{"To-do list (todo): none in this thread yet; the agent's to-dos show at its top", "", ""}]
+    case False{}: [U.PItem{"To-do list (todo) " ++ TD.Todo.count(ts) ++ ": show or hide this thread's to-dos", "fold", U.Todos.toggle(U.Todos.open(U.Ui.infos(u), U.Ui.state(u), th), th)}]
+
+def WS.todos.running(turn: M.TurnState) -> Bool:
+  match turn:
+    case M.Running{}: True{}
+    case _: False{}
+
+def WS.todos(+u: U.Ui) -> List<&2, U.PItem>:
+  +ts = U.Todos.shown(U.Ui.state(u), U.Ui.sel(u), WS.todos.running(M.Thread.turn(U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)))))
+  WS.todos.k(List.is_empty(&2, TD.Todo, ts), u, U.Ui.sel(u), ts)
+
+# found by "history", "shortcuts", "keyboard" (the e2e first-week walk):
+# the board's design history (its bar of steps is in the Board viewer),
+# the sidebar's earlier conversations, and the palette's own key list
+def WS.findable() -> List<&2, U.PItem>:
+  [U.PItem{"Design history: the board's earlier versions, step by step (‹ ›, Highlight edits)", "view-kind", "board"},
+   U.PItem{"Conversation history: show or hide earlier threads in the sidebar", "thread-history", ""},
+   U.PItem{"Keyboard shortcuts: Alt+1…9 project, Ctrl+1…9 thread, Ctrl+N, Ctrl+P, Ctrl+D, Esc…", "ws-keys", ""}]
+
 def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
   List.append(&2, U.PItem, Bool.pick(List<&2, U.PItem>, U.ThreadTree.can_route(U.Ui.state(u), U.Ui.sel(u)),
     [U.PItem{Bool.pick(String, U.ThreadTree.can_create(U.Ui.state(u), U.Ui.sel(u)), "New subthread of current thread", "Choose project conversation…"), "thread-child", U.Ui.sel(u)}], Nil{}),
@@ -241,7 +267,7 @@ def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
    U.PItem{"Diff · Ctrl+D", "diff", ""}, U.PItem{"Design review: BOM, checks, comments", "rv-page", "bom"},
    U.PItem{"Release: tag and publish this project", "rv-page", "release"}], WS.buy(U.Fab.buy(u)), [
    U.PItem{"Agent, model and effort · Ctrl+M", "flag", "models"},
-   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c), WS.settings.items(U.Settings.menu.pages(), U.Lang.loc(u)), WS.routines(U.Ui.state(u))]))
+   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c), WS.todos(u), WS.findable(), WS.settings.items(U.Settings.menu.pages(), U.Lang.loc(u)), WS.routines(U.Ui.state(u))]))
 
 def WS.stop.running(turn: M.TurnState) -> Bool:
   match turn:
@@ -291,6 +317,7 @@ def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
     case "ws-next": WS.neighbour(u, True{})
     case "ws-settings": U.Settings.go(U.Settings.on(u), value)
     case "ws-routines": WS.routines.open(U.Ui.act(u, "bot", value))
+    case "ws-keys": WS.none(U.Palette.set(U.Ui.scratch_set(U.Ui.flag_on(u, "palette"), "@ws.keys", "1"), "", 0n))
     case _: U.Ui.act(u, action, value)
 
 def WS.palette.run.item(item: U.PItem, u: U.Ui) -> U.Act:
@@ -396,7 +423,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
           D.El{"div", "workspace-commands", [D.At{"id", "workspace-commands"}, D.At{"role", "listbox"}],
             Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), WS.empty(U.Palette.query(u)), WS.rows(WS.items(u), U.Ui.state(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
-            D.El{"details", "", Nil{}, [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
+            D.El{"details", "", Bool.pick(List<&2, D.Attr>, String.eq(U.Ui.scratch(u, "@ws.keys"), "1"), [D.At{"open", ""}], Nil{}), [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
               D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+. stop · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort · / composer."}]},
               D.El{"p", "", Nil{}, [D.Txt{"Esc puts away the floating terminal, else the probe, else the viewer, and puts the keyboard back in the composer; in the composer with nothing to put away it leaves the composer, so a bare key presses its rail button (hold Ctrl to see the keys). Shift+Esc hides the terminal from inside it. / outside a text field puts the keyboard in the composer."}]},
               D.El{"p", "", Nil{}, [D.Txt{"Backtick (`) toggles Terminal from the workspace or composer. In the shell and other text fields, backtick types normally; use Ctrl+J to toggle. Super+grave / tilde also works if your desktop delivers it. Navigation shortcuts leave editors, IME and PTYs alone. Pin is in Commands (its former Ctrl+Shift+P opens this palette)."}]}]}]}]}]}]

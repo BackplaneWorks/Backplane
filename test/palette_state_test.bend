@@ -61,6 +61,11 @@ def ran.routines(+u: U.Ui) -> String:
   +r = ui.of(WS.WS.palette.run(U.Palette.set(u, "routines", 0n), 0n))
   U.Ui.scratch(r, "@bot") ++ ":" ++ U.Ui.scratch(r, "@btab")
 
+# the key list asked for: Commands stays up, its filter cleared, the list open
+def ran.keys() -> String:
+  +u = ui.of(WS.WS.palette.run(U.Palette.set(at([]), "shortcuts", 0n), 0n))
+  Bool.show(U.Ui.flag(u, "palette")) ++ ":" ++ U.Palette.query(u) ++ ":" ++ U.Ui.scratch(u, "@ws.keys")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("a word said in a thread matches no command", found("stitching"), "")
@@ -88,6 +93,14 @@ def main() -> IO(Unit):
     C.Check.str("running it opens the bot's Routines tab", ran.routines(with.bot()), "bot1:routines")
     C.Check.str("no Buy it while the rail has none", found("order this board"), "")
     C.Check.str("Buy it when the rail offers it", found.at(U.Ui.info_set(at([]), "fab.buy:t", "Buy it"), "buy"), "Buy it: order this board (a quote first; nothing is charged until you pay)")
+    # still found nothing on the walk: history, shortcuts, to-dos
+    C.Check.str("history finds the board's and the sidebar's", found("history"), "Design history: the board's earlier versions, step by step (‹ ›, Highlight edits),Conversation history: show or hide earlier threads in the sidebar")
+    C.Check.str("shortcuts", found("shortcuts"), "Keyboard shortcuts: Alt+1…9 project, Ctrl+1…9 thread, Ctrl+N, Ctrl+P, Ctrl+D, Esc…")
+    C.Check.str("keyboard shortcuts", found("keyboard shortcuts"), "Keyboard shortcuts: Alt+1…9 project, Ctrl+1…9 thread, Ctrl+N, Ctrl+P, Ctrl+D, Esc…")
+    C.Check.str("running it keeps Commands up with its key list open", ran.keys(), "True::1")
+    C.Check.str("todo, no list yet", found("todo"), "To-do list (todo): none in this thread yet; the agent's to-dos show at its top")
+    C.Check.str("to-dos with a list: show or hide it", found.at(at([M.TodosSet{"t", "[{\"id\":\"1\",\"text\":\"a\",\"status\":\"pending\"},{\"id\":\"2\",\"text\":\"b\",\"status\":\"completed\"}]", 2n}]), "to-dos"),
+      "To-do list (todo) 1/2: show or hide this thread's to-dos")
     C.Check.str("idle hides Stop", has(at([]), "Stop the running turn · Ctrl+."), "0")
     C.Check.str("running offers Stop once", has(at([M.TurnChanged{"t", M.Running{}, 2n}]), "Stop the running turn · Ctrl+."), "1")
     C.Check.str("completed hides Stop", has(at([M.TurnChanged{"t", M.Completed{}, 2n}]), "Stop the running turn · Ctrl+."), "0")
