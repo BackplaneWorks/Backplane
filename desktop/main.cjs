@@ -78,10 +78,26 @@ async function pairRemote(text, name) {
   } catch { return {ok:false,error:'hub_unreachable'}; }
   finally { pairingRemote = false; }
 }
+// A link from outside the app pairs at once only with one of the person's
+// own hubs (pairing.cjs's knownHub); for any other address the person is
+// asked first, Cancel the default, the address named.
+async function pairExternal(text) {
+  const pairing = require('./pairing.cjs'), p = pairing.invitation(text);
+  if (!p || !window || window.isDestroyed()) return {ok:false,error:'invalid_link'};
+  let known = false;
+  try { known = await pairing.knownHub({text, local: connection?.origin, saved: savedRemote, token: await service.token(), fetch: window.webContents.session.fetch.bind(window.webContents.session)}); } catch {}
+  if (!known) {
+    const {response} = await dialog.showMessageBox(window, {type: 'warning', buttons: ['Cancel', 'Pair with this hub'], defaultId: 0, cancelId: 0, noLink: true,
+      title: 'Pair with an unknown hub?', message: 'Pair this app with ' + p.origin + '?',
+      detail: 'None of your hubs knows this address. A pairing link on a web page or in a message can point anywhere. Pair only if you made this invitation on that hub yourself.'});
+    if (response !== 1) return {ok:false,error:'cancelled'};
+  }
+  return pairRemote(text, os.hostname());
+}
 function receivePairLink(text) {
   if (!require('./pairing.cjs').invitation(text)) return;
   pendingPairLink = text;
-  if (origin && window && !window.isDestroyed()) { pendingPairLink = null;void pairRemote(text, os.hostname()).then(r => { if (!r.ok) dialog.showErrorBox('Could not pair this device', 'Create a fresh invitation in Settings → Devices and try again.'); }); }
+  if (origin && window && !window.isDestroyed()) { pendingPairLink = null;void pairExternal(text).then(r => { if (!r.ok && r.error !== 'cancelled') dialog.showErrorBox('Could not pair this device', 'Create a fresh invitation in Settings → Devices and try again.'); }); }
 }
 app.on('open-url', (event, url) => { event.preventDefault();receivePairLink(url); });
 if (app.isPackaged) app.setAsDefaultProtocolClient('backplane');
@@ -157,7 +173,7 @@ async function connect(ses) {
       const response = await ses.fetch(`${origin}/auth/pair`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${await service.token()}` }, redirect: 'error' });
       if (!response.ok) throw new Error('Could not authenticate with the service');
       if (!quitting && window && !window.isDestroyed()) {
-        if (pendingPairLink) { const link = pendingPairLink;pendingPairLink = null;const result = await pairRemote(link, os.hostname());if (!result.ok) await window.loadURL(origin); }
+        if (pendingPairLink) { const link = pendingPairLink;pendingPairLink = null;const result = await pairExternal(link);if (!result.ok) { if (result.error === 'cancelled' && savedRemote) origin = savedRemote;await window.loadURL(origin); } }
         else { if (savedRemote) origin = savedRemote;await window.loadURL(origin); }
       }
       // Start independently of the UI; failed private channels retry in main.
