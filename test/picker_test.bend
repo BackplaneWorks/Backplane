@@ -149,18 +149,27 @@ def main() -> IO(Unit):
     C.Check.str("so Enter then takes the first row: Add it", Nat.show(U.Proj.index(ui(U.Ui.act(listed(), "proj-cd", "/home/h/docs")))), "0")
     C.Check.str("back to the projects too", focused(U.Act.cmds(U.Ui.act(listed(), "proj-back", ""))), "proj;")
     # a path typed part way in the listed folder completes to its subfolders
-    C.Check.str("partial path offers its folders first", at("/home/h/dev"), "Development/|dev-notes/|Add /home/h/dev as a project|Go to /home/h/dev|Create project /home/h/dev|")
+    C.Check.str("partial path offers its folders first", at("/home/h/dev"), "Development/|dev-notes/|Create project /home/h/dev|")
     C.Check.str("so Enter goes into the folder", asks(U.Ui.act(U.Proj.set(listed(), "/home/h/Dev", 0n), "proj-enter", "")), "fs.list;")
     C.Check.str("a folder typed whole is added", at("/home/h/docs"), "Add /home/h/docs as a project|Go to /home/h/docs|Create project /home/h/docs|")
-    C.Check.str("hidden only with a dot", at("/home/h/.c"), ".cache/|Add /home/h/.c as a project|Go to /home/h/.c|Create project /home/h/.c|")
+    C.Check.str("hidden only with a dot", at("/home/h/.c"), ".cache/|Create project /home/h/.c|")
     C.Check.str("projects: ~ path completes once home is known", labels(U.Proj.items(U.Proj.set(U.Ui.recv(projects(), listing("0", "/home/h")), "~/De", 0n))),
-      "Development/|dev-notes/|Add ~/De as a project|Go to ~/De|Create project ~/De|")
+      "Development/|dev-notes/|Create project ~/De|")
     C.Check.str("typing a path elsewhere lists its folder", asks(U.Ui.act(listed(), "bfield", "proj\u{1f}/tmp/W3/stick")), "fs.list;")
     C.Check.str("not the folder already listed", asks(U.Ui.act(listed(), "bfield", "proj\u{1f}/home/h/dev")), "")
     C.Check.str("not a path ending in a slash", asks(U.Ui.act(listed(), "bfield", "proj\u{1f}/tmp/W3/")), "")
     C.Check.str("listed folder completes the typed name", labels(U.Proj.items(U.Ui.recv(ui(U.Ui.act(listed(), "bfield", "proj\u{1f}/tmp/W3/stick")),
       json("{\"t\":\"reply\",\"id\":2,\"ok\":true,\"result\":{\"dir\":\"/tmp/W3\",\"entries\":[\"stickhub\",\"other\"]}}")))),
-      "stickhub/|Add /tmp/W3/stick as a project|Go to /tmp/W3/stick|Create project /tmp/W3/stick|")
+      "stickhub/|Create project /tmp/W3/stick|")
     C.Check.str("a folder not there is not an error", U.Ui.info(U.Ui.recv(ui(U.Ui.act(listed(), "bfield", "proj\u{1f}/nope/stick")),
       json("{\"t\":\"reply\",\"id\":2,\"ok\":false,\"error\":\"no such folder: /nope\"}")), "proj.err"), "")
+    # what is there, then Create; Add and Go to only for a folder that is (r07)
+    C.Check.str("nothing there begins it: only Create", at("/home/h/zz"), "Create project /home/h/zz|")
+    C.Check.str("its folder not listed yet: as before", at("/tmp/x/sens"), "Add /tmp/x/sens as a project|Go to /tmp/x/sens|Create project /tmp/x/sens|")
+    C.Check.str("two completions, three characters typed", Nat.show(U.Proj.comps.n(U.Proj.set(listed(), "/home/h/dev", 0n))) ++ " " ++ Nat.show(U.Proj.typed.n(U.Proj.set(listed(), "/home/h/dev", 0n))), "2 3")
+    C.Check.str("Tab writes the selected completion", U.Proj.tab(U.Proj.set(listed(), "/home/h/dev", 0n)), "/home/h/Development/")
+    C.Check.str("as typed, ~ and all", U.Proj.tab(U.Proj.set(U.Ui.recv(projects(), listing("0", "/home/h")), "~/De", 0n)), "~/Development/")
+    C.Check.str("no completion: Tab moves on", U.Proj.tab(U.Proj.set(listed(), "/home/h/docs", 0n)) ++ "|" ++ U.Proj.tab(U.Proj.set(listed(), "dev", 0n)), "|")
+    C.Check.str("once written, Enter goes in", at(U.Proj.tab(U.Proj.set(listed(), "/home/h/dev", 0n))), "Go to /home/h/Development/|Add /home/h/Development/ as a project|Create project /home/h/Development/|")
+    C.Check.str("the field holds it", U.Proj.query(ui(U.Ui.act(U.Proj.set(listed(), "/home/h/dev", 0n), "bfield", "proj\u{1f}" ++ U.Proj.tab(U.Proj.set(listed(), "/home/h/dev", 0n))))), "/home/h/Development/")
     C.Check.str("nor asked again per key", asks(U.Ui.act(ui(U.Ui.act(listed(), "bfield", "proj\u{1f}/nope/stick")), "bfield", "proj\u{1f}/nope/sticks")), "")
