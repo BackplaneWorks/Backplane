@@ -21,9 +21,15 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     document.getElementById('root')?.setAttribute('inert', '');
     const card = element('section', '', panel, {class: 'pairing-card'});
     element('h1', title, card);element('p', lead, card, {class: 'pairing-lead'});
-    if (dismissible) button(card, 'Back', close);
+    if (dismissible) { button(card, 'Back', close);panel.dataset.dismissible = '1'; }
     return card;
   }
+  // Esc leaves a screen that has Back (Devices), before any other key
+  // handler (the workspace's Esc would act on the page underneath)
+  (document.defaultView || globalThis).addEventListener?.('keydown', event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || panel?.dataset.dismissible !== '1') return;
+    event.preventDefault();event.stopImmediatePropagation();close();
+  }, true);
   function button(parent, text, click) { const b = element('button', text, parent, {type: 'button'});b.addEventListener('click', click);return b; }
   function input(parent, label, placeholder, type = 'text') {
     const l = element('label', label, parent), i = element('input', '', l, {class: 'field', placeholder, type, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false'});
