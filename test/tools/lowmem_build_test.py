@@ -260,18 +260,23 @@ class ProofResults(unittest.TestCase):
 
 
 class Worker(unittest.TestCase):
-    """The worker only trusts limits the kernel reports from inside the cgroup (mocked here; no cgroup is created)."""
+    """The worker only trusts limits the kernel reports from inside its cgroup (mocked here; see RealScope for the kernel)."""
 
-    def run_worker(self, tmp, compiler, controller=None, code=0, write=True, flock=True, timed_out=False):
-        a = argparse.Namespace(id='hub', out=str(Path(tmp) / 'o'), cap_bytes=CAP, cmd=CMD, copy=None, no_scope=True,
-                               timeout=3000, protect=['%s=%s' % (n, __file__) for n in lm.PROTECTED])
-        def capped(cmd, cap, report, timeout):
+    def run_worker(self, tmp, compiler, controller='default', code=0, write=True, flock=True, timed_out=False):
+        a = argparse.Namespace(id='hub', out=str(Path(tmp) / 'o'), cap_bytes=CAP, cmd=CMD, copy=None, timeout=3000,
+                               protect=['%s=%s' % (n, __file__) for n in lm.PROTECTED])
+        def inner(cmd, timeout):
             if write: (Path(tmp) / 'o' / 'hub.js').write_text('hi')
-            return code, compiler, timed_out
-        ctl = controller or enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=1000)
-        with patch.object(lm, 'run_capped', capped), patch.object(lm, 'cgroup_dir', return_value=(Path(tmp), False)), \
-                patch.object(lm, 'read_enforcement', return_value=ctl), patch.object(lm, 'source_identity', return_value=SRC), \
-                patch.object(lm, 'tool_identity', return_value=TOOLS), patch.object(lm, 'native_flock', return_value=(flock, lm.REAL_LOCK)):
+            return code, timed_out
+        ctl = enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=1000) if controller == 'default' else controller
+        reads = [compiler, compiler]  # before, after
+        def read(cg, overridden):
+            return ctl if cg == 'CTL' else (reads.pop(0) if reads else compiler)
+        with patch.object(lm, 'run_inner', inner), patch.object(lm, 'cgroup_dir', return_value=('CG', False)), \
+                patch.object(lm, 'controller_cgroup', return_value='CTL' if controller is not None else None), \
+                patch.object(lm, 'read_enforcement', read), \
+                patch.object(lm, 'source_identity', return_value=SRC), patch.object(lm, 'tool_identity', return_value=TOOLS), \
+                patch.object(lm, 'native_flock', return_value=(flock, lm.REAL_LOCK)):
             rc = lm.worker(a)
         return rc, json.loads((Path(a.out) / 'hub.receipt.json').read_text())
 
@@ -287,9 +292,14 @@ class Worker(unittest.TestCase):
             self.assertEqual(r['timeout_seconds'], 3000)
             self.assertEqual(sorted(r['protected']), sorted(lm.PROTECTED))
 
-    def test_compiler_without_kernel_cap_fails(self):
-        for e in (None, enforcement(memory_max='max'), enforcement(memory_swap_max='max'), enforcement(oom_kill=1),
-                  enforcement(memory_peak=CAP + 1)):
+    def test_compiler_without_kernel_cap_never_runs_and_fails(self):
+        for e in (enforcement(memory_max='max'), enforcement(memory_swap_max='max'), enforcement(memory_max=lm.CONTROLLER_CAP)):
+            with tempfile.TemporaryDirectory() as t:
+                rc, r = self.run_worker(t, e)
+                self.assertEqual(rc, 1, e); self.assertIsNone(r['exit']); self.assertNotIn('command', r['phases'])
+
+    def test_after_the_fact_violations_fail(self):
+        for e in (enforcement(oom_kill=1), enforcement(memory_peak=CAP + 1), enforcement(swap_peak=4096), enforcement(memory_peak=None)):
             with tempfile.TemporaryDirectory() as t:
                 self.assertEqual(self.run_worker(t, e)[0], 1, e)
 
@@ -303,25 +313,47 @@ class Worker(unittest.TestCase):
             rc, r = self.run_worker(t, enforcement(), flock=False)
             self.assertIsNone(r['exit']); self.assertNotIn('command', r['phases'])
 
-    def test_unenforced_controller_fails(self):
-        with tempfile.TemporaryDirectory() as t:
-            self.assertEqual(self.run_worker(t, enforcement(), controller=enforcement(memory_max='max'))[0], 1)
+    def test_unenforced_or_missing_controller_fails(self):
+        for c in (enforcement(memory_max='max'), None):
+            with tempfile.TemporaryDirectory() as t:
+                self.assertEqual(self.run_worker(t, enforcement(), controller=c)[0], 1)
 
-    def test_shim_does_not_run_command_without_cap(self):
-        with tempfile.TemporaryDirectory() as t:
-            marker, rep = Path(t) / 'ran', Path(t) / 'rep.json'
-            a = argparse.Namespace(cap_bytes=CAP, report=str(rep), cmd=['touch', str(marker)])
-            with patch.object(lm, 'cgroup_dir', return_value=(Path(t), False)):
-                self.assertEqual(lm.shim(a), 1)
-            self.assertFalse(marker.exists())
 
-    def test_real_timeout_kills_and_never_qualifies(self):
-        with tempfile.TemporaryDirectory() as t:
-            marker = Path(t) / 'late'
-            with patch.object(lm, 'systemd_scope', lambda cap, argv: ['sh', '-c', 'sleep 5; touch %s' % marker]):
-                code, enf, timed_out = lm.run_capped(['x'], CAP, Path(t) / 'r.json', 0.3)
-            self.assertTrue(timed_out); self.assertIsNone(code)
-            time.sleep(0.2); self.assertFalse(marker.exists())
+class Contract(unittest.TestCase):
+    """The exact command shapes lane 3's heavy-guard profiles (PR #854) admit."""
+
+    def test_sum_of_caps_and_decimal_shard_cap(self):
+        self.assertLessEqual(lm.COMPILER_CAP, 3_700_000_000)
+        self.assertLess(lm.COMPILER_CAP + lm.CONTROLLER_CAP, 4 * lm.GIB)
+
+    def test_profiles(self):
+        self.assertEqual(lm.PROFILES, {'proof': 'proof-shard', 'hub': 'compile-shard', 'web': 'compile-shard', 'mobile': 'compile-shard'})
+
+    def test_compile_inner_commands_are_exactly_the_allowed_ones(self):
+        self.assertEqual({k: tuple(v[0]) for k, v in lm.FIXED.items()},
+                         {'hub': ('bend', 'src/server/main.bend', '-o', '{out}/hub.js'),
+                          'web': ('bend', 'src/web/index.html', '-o', '{out}/web'),
+                          'mobile': ('bend', 'src/mobile/index.html', '-o', '{out}/mobile-web')})
+
+    def test_proof_job_is_structured_not_sh_c(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as t:
+            d = Path(t); (d / 'manifest.json').write_text(json.dumps({'shards': [{'id': '000'}]}))
+            (job,) = lm.proof_jobs(d)
+        self.assertEqual(job['cmd'][:3], ['python3', 'scripts/proof-shards.py', 'run'])
+        for o in ('--out', '--shard', '--expect', '--result'):
+            self.assertEqual(job['cmd'].count(o), 1)
+        self.assertTrue(job['pre'] and 'generate' in job['pre'][0])  # generate runs in the launcher, not under the guard
+
+    def test_boat_command_nests_controller_launcher_only(self):
+        job = {'id': 'hub', 'kind': 'hub', 'cmd': lm.FIXED['hub'][0]}
+        argv, rel = lm.boat_argv(job, Path('/x/r1'), 3000, ['bend.ts=/p'])
+        cmd = argv[argv.index('--') + 1:]
+        self.assertEqual(cmd[:3], ['systemd-run', '--user', '--scope'])
+        self.assertIn('MemoryMax=%d' % lm.CONTROLLER_CAP, cmd); self.assertIn('MemorySwapMax=0', cmd)
+        self.assertTrue(any(c.startswith('--unit=lowmem-ctl-hub-') for c in cmd))
+        self.assertIn('launch', cmd)
+        self.assertNotIn('heavy-guard.py', ' '.join(cmd))  # the launcher creates the compiler scope and runs the guard in it
+        self.assertNotIn('xlarge', argv); self.assertEqual(argv[argv.index('--size') + 1], 'default')
 
 
 def real_scope_works():
@@ -332,86 +364,78 @@ def real_scope_works():
         return False
 
 
+LM = str(ROOT / 'scripts/lowmem-build.py')
+LOAD = "import importlib.util as u;s=u.spec_from_file_location('lm',%r);lm=u.module_from_spec(s);s.loader.exec_module(lm);" % LM
+
+
 @unittest.skipUnless(real_scope_works(), 'needs a systemd user scope with the memory controller')
 class RealScope(unittest.TestCase):
-    """Negative controls against the actual kernel, with a small cap and a private lock file (never the shared bend lock)."""
+    """Negative controls against the actual kernel. A private lock file stands in for the shared bend lock: this shows the
+    process hierarchy and descriptor inheritance, NOT the guard-to-worker chain on /tmp/bp-bend.lock."""
     SMALL = 64 * 1024 * 1024
 
-    def test_limits_read_back_from_inside_the_scope(self):
-        with tempfile.TemporaryDirectory() as t:
-            code, enf, timed_out = lm.run_capped([sys.executable, '-c', 'pass'], self.SMALL, Path(t) / 'r.json', 60)
-        self.assertEqual(code, 0); self.assertFalse(timed_out)
-        self.assertEqual((enf['memory_max'], enf['memory_swap_max']), (self.SMALL, 0))
-        self.assertGreater(enf['memory_peak'], 0)
-        self.assertEqual(lm.enforcement_problems(enf, self.SMALL), [])
+    def chain(self, inner_code, fd=None):
+        """controller scope (lowmem-ctl-*) -> compiler scope -> inner_code: the hierarchy `launch` builds."""
+        unit = 'lowmem-ctl-test-%d-%d' % (os.getpid(), time.monotonic_ns())
+        outer = (LOAD + "import subprocess,sys;r=subprocess.run(lm.systemd_scope(%d,['--',sys.executable,'-c',%r]),pass_fds=%r);sys.exit(r.returncode)"
+                 % (lm.COMPILER_CAP, LOAD + inner_code, [fd] if fd is not None else []))
+        argv = lm.systemd_scope(lm.CONTROLLER_CAP, ['--unit=' + unit, '--', sys.executable, '-c', outer])
+        return subprocess.run(argv, capture_output=True, text=True, pass_fds=[fd] if fd is not None else [], timeout=120)
 
-    def test_a_memory_hog_is_killed_and_never_qualifies(self):
+    def test_hierarchy_limits_are_truthful_and_sum_under_4gib(self):
+        inner = ("import json,sys;cg,ov=lm.cgroup_dir();ctl=lm.controller_cgroup();"
+                 "print(json.dumps({'own':lm.read_enforcement(cg,ov),'ctl':ctl and lm.read_enforcement(ctl,False),"
+                 "'child':lm.run_inner([sys.executable,'-c','pass'],20)}))")
+        p = self.chain(inner)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        data = json.loads(p.stdout.strip().splitlines()[-1])
+        own, ctl = data['own'], data['ctl']
+        self.assertEqual((own['memory_max'], own['memory_swap_max']), (lm.COMPILER_CAP, 0))
+        self.assertEqual((ctl['memory_max'], ctl['memory_swap_max']), (lm.CONTROLLER_CAP, 0))
+        self.assertNotEqual(own['cgroup'], ctl['cgroup'])
+        self.assertLess(own['memory_max'] + ctl['memory_max'], 4 * lm.GIB)
+        self.assertEqual(lm.enforcement_problems(own, lm.COMPILER_CAP), [])
+        self.assertEqual(data['child'], [0, False])
+
+    def test_controller_not_discoverable_outside_a_lowmem_scope(self):
+        p = subprocess.run([sys.executable, '-c', LOAD + "print(lm.controller_cgroup())"], capture_output=True, text=True)
+        self.assertEqual(p.stdout.strip(), 'None')
+
+    def test_hog_in_the_compiler_scope_is_killed_by_the_kernel(self):
         with tempfile.TemporaryDirectory() as t:
             marker = Path(t) / 'finished'
             hog = "b=bytearray(400*1024*1024)\nfor i in range(0,len(b),4096): b[i]=1\nopen(%r,'w')" % str(marker)
-            code, enf, timed_out = lm.run_capped([sys.executable, '-c', hog], self.SMALL, Path(t) / 'r.json', 60)
-            self.assertFalse(marker.exists())
-        self.assertTrue(code != 0 or enf is not None)
-        self.assertTrue(code is None or code != 0 or lm.enforcement_problems(enf, self.SMALL))
-
-    def test_shim_outside_a_capped_scope_refuses_to_run(self):
-        with tempfile.TemporaryDirectory() as t:
-            marker = Path(t) / 'ran'
-            p = subprocess.run([sys.executable, str(ROOT / 'scripts/lowmem-build.py'), 'shim', '--cap-bytes', str(self.SMALL),
-                                '--report', str(Path(t) / 'r.json'), '--', 'touch', str(marker)], capture_output=True, text=True)
+            p = subprocess.run(lm.systemd_scope(self.SMALL, ['--', sys.executable, '-c', hog]), capture_output=True, timeout=120)
             self.assertNotEqual(p.returncode, 0); self.assertFalse(marker.exists())
 
-    def test_whole_worker_without_admission_fails_closed_and_runs_nothing(self):
-        env = {k: v for k, v in os.environ.items() if k != 'BACKPLANE_HEAVY_LOCK_FD'}
+    def test_run_inner_timeout_kills(self):
+        with tempfile.TemporaryDirectory() as t:
+            marker = Path(t) / 'late'
+            self.assertEqual(lm.run_inner(['sh', '-c', 'sleep 5; touch %s' % marker], 0.3), (None, True))
+            time.sleep(0.3); self.assertFalse(marker.exists())
+
+    def test_lock_descriptor_survives_the_chain_and_run_inner(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as t:
+            lock, sink = Path(t) / 'lock', Path(t) / 'ino.txt'
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR); self.addCleanup(os.close, fd)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); os.set_inheritable(fd, True)
+            child = "import os;open(%r,'w').write(str(os.fstat(int(os.environ['BACKPLANE_HEAVY_LOCK_FD'])).st_ino))" % str(sink)
+            inner = "import sys;print(lm.run_inner([sys.executable,'-c',%r],20))" % child
+            with patch.dict(os.environ, {'BACKPLANE_HEAVY_LOCK_FD': str(fd)}):
+                p = self.chain(inner, fd)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(sink.read_text(), str(os.fstat(fd).st_ino))
+
+    def test_unadmitted_worker_runs_nothing(self):
         with tempfile.TemporaryDirectory() as t:
             marker = Path(t) / 'ran'
-            p = subprocess.run([sys.executable, str(ROOT / 'scripts/lowmem-build.py'), 'worker', '--id', 'hub', '--out', str(Path(t) / 'o'),
-                                '--', 'touch', str(marker)], capture_output=True, text=True, env=env, cwd=ROOT)
+            env = {k: v for k, v in os.environ.items() if k != 'BACKPLANE_HEAVY_LOCK_FD'}
+            p = subprocess.run([sys.executable, LM, 'worker', '--id', 'hub', '--out', str(Path(t) / 'o'),
+                                '--timeout', '60', '--', 'touch', str(marker)], capture_output=True, text=True, env=env, cwd=ROOT)
             r = json.loads((Path(t) / 'o/hub.receipt.json').read_text())
             self.assertEqual(p.returncode, 1); self.assertFalse(marker.exists())
-            self.assertFalse(r['flock']); self.assertIsNone(r['exit']); self.assertNotIn('command', r['phases'])
-            self.assertEqual(r['controller']['memory_max'], lm.CONTROLLER_CAP)  # the controller was really capped
-
-    def test_flock_inherited_through_the_scoped_worker(self):
-        """The real worker re-execs itself into a capped systemd scope; the held lock must arrive there, and only then."""
-        import fcntl
-        with tempfile.TemporaryDirectory() as t:
-            lock = Path(t) / 'lock'
-            fd = os.open(lock, os.O_CREAT | os.O_RDWR); self.addCleanup(os.close, fd)
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); os.set_inheritable(fd, True)
-            def worker(out, env):
-                p = subprocess.run([sys.executable, str(ROOT / 'scripts/lowmem-build.py'), 'worker', '--id', 'hub', '--out', str(Path(t) / out),
-                                    '--timeout', '60', '--', 'sh', '-c', 'echo x > {out}/hub.js'],
-                                   capture_output=True, text=True, env=env, cwd=ROOT, pass_fds=(fd,))
-                return json.loads((Path(t) / out / 'hub.receipt.json').read_text())
-            env = {**os.environ, 'LOWMEM_LOCK_PATH': str(lock), 'BACKPLANE_HEAVY_LOCK_FD': str(fd)}
-            held = worker('held', env)
-            self.assertTrue(held['flock']); self.assertEqual(held['exit'], 0)
-            self.assertEqual(held['phases'], lm.PHASES)
-            self.assertEqual(held['controller']['memory_max'], lm.CONTROLLER_CAP)
-            self.assertEqual(held['enforcement']['memory_max'], lm.COMPILER_CAP)
-            self.assertLess(held['enforcement']['memory_max'] + held['controller']['memory_max'], 4 * lm.GIB)
-            # a private lock is never the real admission: its receipt is refused even though everything else ran
-            self.assertTrue(any('flock' in w for w in lm.receipt_problems(held, lm.COMPILER_CAP, require_boat=False)))
-            lost = worker('lost', {k: v for k, v in env.items() if k != 'BACKPLANE_HEAVY_LOCK_FD'})
-            self.assertFalse(lost['flock']); self.assertIsNone(lost['exit'])
-
-    def test_inherited_flock_survives_the_scope_and_is_refused_without_it(self):
-        import fcntl
-        spec = importlib.util.spec_from_file_location('heavy_guard', ROOT / 'scripts/heavy-guard.py')
-        guard = importlib.util.module_from_spec(spec); spec.loader.exec_module(guard)
-        with tempfile.TemporaryDirectory() as t:
-            lock = Path(t) / 'lock'
-            fd = os.open(lock, os.O_CREAT | os.O_RDWR); self.addCleanup(os.close, fd)
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB); os.set_inheritable(fd, True)
-            code = ("import importlib.util as u;from pathlib import Path;s=u.spec_from_file_location('g',%r);g=u.module_from_spec(s);"
-                    "s.loader.exec_module(g);print(g.inherited_lock(Path(%r)) is not None)" % (str(ROOT / 'scripts/heavy-guard.py'), str(lock)))
-            def inside(env):
-                return subprocess.run(lm.systemd_scope(lm.CONTROLLER_CAP, ['--', sys.executable, '-c', code]), env=env,
-                                      capture_output=True, text=True, pass_fds=(fd,)).stdout.strip()
-            self.assertEqual(inside({**os.environ, 'BACKPLANE_HEAVY_LOCK_FD': str(fd)}), 'True')
-            self.assertEqual(inside({k: v for k, v in os.environ.items() if k != 'BACKPLANE_HEAVY_LOCK_FD'}), 'False')
-            self.assertEqual(inside({**os.environ, 'BACKPLANE_HEAVY_LOCK_FD': '2'}), 'False')
+            self.assertIsNone(r['exit']); self.assertNotIn('command', r['phases']); self.assertIsNone(r['controller'])
 
 
 class Cli(unittest.TestCase):
