@@ -1464,7 +1464,7 @@ def View.subs.go(+lc: I.Loc, rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
 def View.subs.head(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, word: String) -> D.Node:
   D.El{"button", "subs-head", [D.At{"class", "subs-head"}, D.At{"type", "button"},
     D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}, D.At{"aria-controls", "subagent-rows"},
-    D.At{"data-value", SB.Subs.panel.ask(True{}, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
+    D.At{"data-value", SB.Subs.panel.ask(open, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
     D.At{"title", Bool.pick(String, open, MSG.T.subagents.hide(lc), MSG.T.subagents.show(lc))}],
     [D.Dom.span("subs-label", MSG.T.thread.subagents(lc)), D.Dom.span("subs-summary", word), WI.WIcon.svg("chevron-down", 14)]}
 
@@ -5443,7 +5443,7 @@ def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: Str
 def View.chrome.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:
   D.El{"button", "subs-head", [D.At{"class", "kv subs-head" ++ Bool.pick(String, String.is_empty(View.sub.busy(lc, SB.Subs.active(rs, info))), "", " busy")}, D.At{"type", "button"},
     D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}, D.At{"aria-controls", "subagent-rows"},
-    D.At{"data-value", SB.Subs.panel.ask(True{}, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
+    D.At{"data-value", SB.Subs.panel.ask(open, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
     D.At{"title", Bool.pick(String, open, MSG.T.subagents.hide(lc), MSG.T.subagents.show(lc))}],
     [D.Dom.span("k", MSG.T.thread.subagents(lc)), D.Dom.span("v", View.sub.signal.panel(lc, rs, info)), WI.WIcon.svg("chevron-down", 12)]}
 

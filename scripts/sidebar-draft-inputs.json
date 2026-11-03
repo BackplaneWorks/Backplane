@@ -45,7 +45,7 @@
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
-    "src/core/client.bend": "624c5bc81bb3112ac79905887064e3379960b04b5371ba1532b0a1afc36be8fb",
+    "src/core/client.bend": "356d82de2ad621dcf11ce14a4dcd442a2bbb22949806604160acd2e6550a9b12",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -134,7 +134,7 @@
     "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
-    "src/core/subs.bend": "1098b05635355b5dcfc78d33bc38fbfa5d4e0aedd55e35ed0514dfe0cd8fcffe",
+    "src/core/subs.bend": "35c76f42ee106848dbbb40573d2329c61fc57f89067c96848e3d0a65e11bf1b4",
     "src/core/subthreads.bend": "48b0d1c078222b3ba94d9a95c7e59edd9c49705a39a89b6de33ae96ecf398fb0",
     "src/core/svg.bend": "dc334fd62bc35e0fa3c9cdac414ee563a31f99a3fd538810d42d35c148c30c14",
     "src/core/task.bend": "8280585ed265c028ae6fa6bc72be4b56e527e4f162262e1a4a61401d693457b2",
@@ -192,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "eff804607d4b2a74466b538505bfbf120131f6e6d071fd6e0ddb058801307414"
+    "src/web/view.bend": "51df44858136856e1414f5824fb6168067077cfe52cc60cbf120342a8056f492"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

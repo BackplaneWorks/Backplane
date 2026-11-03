@@ -806,8 +806,21 @@ def Subs.panel.open(+info: Map<&2, String>, +th: String, +rs: List<&2, SubRow>) 
 def Subs.panel.action(open: Bool) -> String:
   Bool.pick(String, open, "subs-shut", "subs-open")
 
+# all a panel holds is the finished fold ("▸ 2 done"): nothing at work,
+# waiting or failed
+def Subs.only_done(rs: List<&2, SubRow>) -> Bool:
+  match rs:
+    case Nil{}:
+      True{}
+    case +r <> t:
+      Bool.and(Bool.or(String.starts_with(Subs.key(r), "subs.done:"), Subs.is_done(r)), Subs.only_done(t))
+
+# shutting records the rows seen; opening a panel that holds only the
+# finished fold opens the fold too ("\tdone"), so one click shows which
+# ones finished rather than "▸ 2 done" to click again
 def Subs.panel.ask(+open: Bool, +th: String, +rs: List<&2, SubRow>) -> String:
-  Bool.pick(String, open, th ++ "\t" ++ String.join(Subs.recorded_keys(rs), "\u{001f}"), th)
+  Bool.pick(String, open, th ++ "\t" ++ String.join(Subs.recorded_keys(rs), "\u{001f}"),
+    Bool.pick(String, Bool.and(Bool.not(List.is_empty(&2, SubRow, rs)), Subs.only_done(rs)), th ++ "\tdone", th))
 
 # Finished count comes from the toggle, never counting it twice when expanded.
 def Subs.panel.word(+rs: List<&2, SubRow>) -> String:
