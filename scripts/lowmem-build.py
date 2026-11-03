@@ -92,6 +92,10 @@ def closure_identity(root=ROOT):
         p = root / f
         if f not in modes or p.is_symlink() or not p.is_file():
             raise ValueError('closure member not a tracked regular file: ' + f)
+        if modes[f] != '100644':
+            # Boat sandboxes drop executable bits, so a mode inside the closure could never be compared across hosts:
+            # the closure must be plain data (bend reads it; nothing in it is executed), and anything else is refused.
+            raise ValueError('closure member is not mode 100644: ' + f)
         items.append([f, modes[f], sha(p.read_bytes())])
     return sha(json.dumps(items).encode())
 
@@ -106,7 +110,18 @@ def content_identity(root=ROOT):
     return sha(json.dumps(sorted(items)).encode())
 
 
+def exec_identity(root=ROOT):
+    """Hash of the tracked paths whose git mode is 100755. A Boat sandbox cannot report this (it drops the bits), so it
+    is bound host-side only: the qualification and the report carry the host's value and service-release.py compares
+    it with the release checkout. The lowmem jobs run only `bend` and `python3 <script>` (the interpreter is named, the
+    script's own executable bit is never used), so no executed file depends on a mode, but a flipped bit anywhere is
+    still caught here."""
+    return sha(json.dumps(sorted(l.split(None, 3)[3] for l in git('ls-files', '-s', cwd=root).splitlines()
+                                 if l.split(None, 1)[0] == '100755')).encode())
+
+
 SOURCE_KEYS = ('content_sha256', 'closure_sha256')  # what must match across hosts; head/tree are informational
+HOST_KEYS = ('head', 'tree', *SOURCE_KEYS, 'exec_set_sha256')  # what a qualification/report binds on the host
 
 
 def source_matches(a, b):
@@ -117,7 +132,8 @@ def source_matches(a, b):
 def source_identity(root=ROOT):
     return {'head': git('rev-parse', 'HEAD', cwd=root), 'tree': git('rev-parse', 'HEAD^{tree}', cwd=root),
             'clean': git('status', '--porcelain', '--untracked-files=no', cwd=root) == '',
-            'content_sha256': content_identity(root), 'closure_sha256': closure_identity(root)}
+            'content_sha256': content_identity(root), 'closure_sha256': closure_identity(root),
+            'exec_set_sha256': exec_identity(root)}
 
 
 def tool_identity():
@@ -547,7 +563,7 @@ def qualified(path, source):
     if q.get('qualified') is not True or q.get('schema') != 3:
         return False, q.get('reason', 'compiler is not marked qualified (schema 3)'), None
     src, tools = q.get('source') or {}, q.get('tools') or {}
-    if any(src.get(k) != source.get(k) for k in ('head', 'tree', *SOURCE_KEYS)) or not source.get('clean'):
+    if any(src.get(k) != source.get(k) for k in HOST_KEYS) or not source.get('clean'):
         return False, 'qualification is for another source commit/tree/import closure', None
     if not all(isinstance(tools.get(k), dict) and tools[k].get('sha256') for k in ('bend', 'bun')):
         return False, 'qualification does not name the compiler and Bun hashes', None

@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import copy, hashlib, importlib.util, json, pathlib, tempfile, unittest
 
 w = pathlib.Path(__file__).resolve().parents[2]
@@ -23,7 +24,7 @@ class Handoff(unittest.TestCase):
         self.release = {'commit': COMMIT, 'tree': TREE}
         self.compiler = {'sha256': BEND, 'version': '2.0.36'}
         self.pre = (self.root, {'files': {'server.js': {'sha256': HUB}}})
-        self.source = {'head': COMMIT, 'tree': TREE, 'clean': True, 'content_sha256': '8' * 64, 'closure_sha256': '9' * 64}
+        self.source = {'head': COMMIT, 'tree': TREE, 'clean': True, 'content_sha256': '8' * 64, 'closure_sha256': '9' * 64, 'exec_set_sha256': '6' * 64}
         self.tools = {'bend': {'version': 'v', 'sha256': BEND}, 'bun': {'version': '1.2.3', 'sha256': BUN}}
         self.bun = {'sha256': BUN}
         self.report = {'schema': 2, 'kind': 'backplane-lowmem-build-report', 'state': 'passed', 'release': True,
@@ -45,6 +46,7 @@ class Handoff(unittest.TestCase):
                                      'receipt': m.local_reference(path, self.root)}
 
     def check(self):
+        self.pe = patch.object(low, 'exec_identity', return_value='6' * 64); self.pe.start(); self.addCleanup(self.pe.stop)
         (self.root / 'report.json').write_text(json.dumps(self.report))
         return m.verified_lowmemory(m.local_reference(self.root / 'report.json', self.root), self.root, self.release,
                                     self.compiler, self.pre, low, self.bun)
@@ -105,6 +107,11 @@ class Handoff(unittest.TestCase):
         self.job('web', {'index.html': '3' * 64}, source={**self.source, 'head': 'f' * 40, 'tree': 'e' * 40})
         self.check()  # a Boat sandbox's own head/tree are informational; content and closure must match
         self.job('web', {'index.html': '3' * 64}, source={**self.source, 'content_sha256': '7' * 64}); self.reject()
+
+    def test_exec_bit_flip_outside_the_closure_rejects_the_report(self):
+        self.report['source']['exec_set_sha256'] = '5' * 64   # the release checkout's executable set is '6'*64
+        self.reject()
+        self.setUp(); del self.report['source']['exec_set_sha256']; self.reject()
 
     def test_missing_bindings(self):
         del self.report['qualification']; self.reject()

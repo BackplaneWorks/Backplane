@@ -11,7 +11,7 @@ import argparse
 from unittest.mock import patch
 
 H = lambda c: c * 64
-SRC = {'head': 'a' * 40, 'tree': 'b' * 40, 'clean': True, 'content_sha256': H('8'), 'closure_sha256': H('9')}
+SRC = {'head': 'a' * 40, 'tree': 'b' * 40, 'clean': True, 'content_sha256': H('8'), 'closure_sha256': H('9'), 'exec_set_sha256': H('6')}
 TOOLS = {'bend': {'version': '1', 'sha256': H('c')}, 'bun': {'version': '1.2.3', 'sha256': H('d')}}
 CAP = lm.CAP_BYTES
 CMD = ['bend', 'src/server/main.bend', '-o', '{out}/hub.js']
@@ -99,6 +99,40 @@ class Judge(unittest.TestCase):
             (r / 'a.sh').write_text('y'); run('add', '-A'); run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'content')
             self.assertNotEqual(lm.content_identity(r), before)
 
+    def repo(self, t):
+        r = Path(t)
+        run = lambda *a: subprocess.run(['git', *a], cwd=r, check=True, capture_output=True)
+        (r / 'scripts').mkdir(); (r / 'scripts/bend-closure.py').write_bytes((ROOT / 'scripts/bend-closure.py').read_bytes())
+        for f in lm.ENTRY_ROOTS + lm.ENTRY_EXTRA:
+            (r / f).parent.mkdir(parents=True, exist_ok=True); (r / f).write_text('# entry\n')
+        (r / 'tool.sh').write_text('#!/bin/sh\n'); os.chmod(r / 'tool.sh', 0o755)
+        run('init', '-q'); run('add', '-A'); run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'one')
+        return r, run
+
+    def test_exec_bit_outside_the_closure_is_caught_host_side_only(self):
+        """content/closure ignore (or cannot see) a flipped executable bit outside the closure; exec_set must catch it."""
+        with tempfile.TemporaryDirectory() as t:
+            r, run = self.repo(t)
+            a = (lm.content_identity(r), lm.closure_identity(r), lm.exec_identity(r))
+            run('update-index', '--chmod=-x', 'tool.sh'); run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'mode')
+            b = (lm.content_identity(r), lm.closure_identity(r), lm.exec_identity(r))
+            self.assertEqual(a[:2], b[:2])       # the cross-host keys cannot see it ...
+            self.assertNotEqual(a[2], b[2])      # ... the host-side exec set does
+            q = qual(); src = {**lm.source_identity(r)}
+            q['source'] = {k: src[k] for k in lm.HOST_KEYS}
+            qf = r.parent / (r.name + '.q.json'); qf.write_text(json.dumps(q)); self.addCleanup(qf.unlink)
+            q['source']['exec_set_sha256'] = a[2]       # a qualification made before the bit flipped
+            qf.write_text(json.dumps(q))
+            ok, why, _ = lm.qualified(str(qf), src)
+            self.assertFalse(ok); self.assertIn('another source', why)
+
+    def test_executable_closure_member_is_refused(self):
+        with tempfile.TemporaryDirectory() as t:
+            r, run = self.repo(t)
+            os.chmod(r / 'src/server/main.bend', 0o755)
+            run('update-index', '--chmod=+x', 'src/server/main.bend')
+            with self.assertRaises(ValueError): lm.closure_identity(r)
+
     def test_source_closure_commit_tree_mismatch(self):
         for k in ('closure_sha256', 'content_sha256'):
             self.assertTrue(self.j(receipt(source={**SRC, k: H('7')})), k)
@@ -153,7 +187,7 @@ class Qualified(unittest.TestCase):
 
     def test_each_mismatch_refuses(self):
         for m in (lambda q: q['source'].update(closure_sha256=H('7')), lambda q: q['source'].update(content_sha256=H('7')),
-                  lambda q: q['source'].update(tree='d' * 40),
+                  lambda q: q['source'].update(tree='d' * 40), lambda q: q['source'].update(exec_set_sha256=H('7')),
                   lambda q: q['source'].update(head='d' * 40), lambda q: q['tools'].pop('bun'),
                   lambda q: q['tools']['bend'].pop('sha256'), lambda q: q['protected'].pop('safe.ts'),
                   lambda q: q['protected']['base'].update(sha256='z'),
@@ -520,7 +554,7 @@ class Cli(unittest.TestCase):
             src = lm.source_identity()
             if not src['clean']:
                 self.skipTest('needs a clean tree')
-            q = {**QUAL, 'source': {k: src[k] for k in ('head', 'tree', 'content_sha256', 'closure_sha256')}, 'clean': True}
+            q = {**QUAL, 'source': {k: src[k] for k in lm.HOST_KEYS}, 'clean': True}
             q['source']['clean'] = True
             ref = {'schema': 2, 'source': {'head': src['head'], 'tree': src['tree']}, 'producer': {'x': 1},
                    'outputs': {'hub': {'hub.js': H('1')}, 'web': {'web/a.js': H('2')}}}
