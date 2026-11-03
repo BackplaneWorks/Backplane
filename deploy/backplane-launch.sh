@@ -55,10 +55,22 @@ if [ $headless = 0 ] && [ $shown = 1 ]; then
   for a in "$@"; do [ "$prev" != --port ] || port=$a; prev=$a; done
   opener=xdg-open
   [ "$(uname -s)" != Darwin ] || opener=open
+  dir=${home:-${HOME:-/tmp}/.backplane-bend}
+  # The page pairs like any browser: a one-time invitation, asked for with
+  # the home's token (on curl's stdin, never on a command line), opens it
+  # at /pair; without one it opens at / and asks to be paired.
+  page() {
+    tok=$(cat "$dir/token" 2>/dev/null) || tok=
+    inv=
+    [ -z "$tok" ] || inv=$(printf 'Authorization: Bearer %s\n' "$tok" |
+      curl -fs --max-time 3 -X POST -H @- "http://127.0.0.1:$port/auth/invitations" 2>/dev/null |
+      sed -n 's/.*invite=\([0-9a-f]\{32\}\).*/\1/p')
+    if [ -n "$inv" ]; then echo "http://127.0.0.1:$port/pair#invite=$inv"; else echo "http://127.0.0.1:$port/"; fi
+  }
   if command -v "$opener" >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     ( i=0
       while [ $i -lt 150 ]; do
-        curl -fs -o /dev/null --max-time 1 "http://127.0.0.1:$port/hello" && { "$opener" "http://127.0.0.1:$port/"; break; }
+        curl -fs -o /dev/null --max-time 1 "http://127.0.0.1:$port/hello" && { "$opener" "$(page)"; break; }
         sleep 0.2; i=$((i + 1))
       done ) >/dev/null 2>&1 </dev/null &
   fi
