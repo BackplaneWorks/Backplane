@@ -321,6 +321,45 @@ def license_sources(web_notices):
                 "License content differs from declared package")
 
 
+def verified_preemission(ref, base, release, compiler):
+    """Accept only a separately attested, exact-source, secret-free raw emit."""
+    receipt = bound(ref, base)
+    root = receipt.parent
+    value = read(receipt)
+    require(value.get("schema") == 1 and value.get("kind") == "backplane-secret-free-js-emission"
+            and value.get("status") == "VERIFIED" and value.get("sourceCommit") == release["commit"]
+            and value.get("sourceTree") == release["tree"] and value.get("version") == VERSION
+            and value.get("channel") == "release", "Pre-emission source identity mismatch")
+    require(value.get("compiler", {}).get("sha256") == compiler["sha256"]
+            and value["compiler"].get("version") == compiler["version"], "Pre-emission compiler mismatch")
+    expected = value.get("files")
+    require(isinstance(expected, dict) and expected, "Pre-emission inventory missing")
+    actual = {}
+    for path in sorted(root.rglob("*")):
+        require(not path.is_symlink(), "Pre-emission symlink refused")
+        if path.is_file() and path != receipt:
+            actual[path.relative_to(root).as_posix()] = {"sha256": digest(path), "bytes": path.stat().st_size}
+    require(actual == expected, "Pre-emission member/hash mismatch")
+    require(value.get("sourceManifest") == "SOURCE.json" and value.get("server") == "server.js"
+            and value.get("web") == "web" and value.get("entryCheckLog") == "logs/entries.log",
+            "Pre-emission paths differ from contract")
+    source = read(root / "SOURCE.json")
+    require(source.get("commit") == release["commit"] and source.get("tree") == release["tree"]
+            and source.get("members") == {n: digest(ROOT / n) for n in git("ls-files").splitlines()},
+            "Pre-emission source manifest mismatch")
+    require("EXACT_SERVER_AND_WEB_ENTRY_CHECKS_PASS" in (root / "logs/entries.log").read_text(),
+            "Pre-emission entry checks not proven")
+    phases = read(root / "PHASES.json")
+    require([p.get("phase") for p in phases] == ["entries", "server", "web"]
+            and all(p.get("exitCode") == 0 for p in phases), "Pre-emission phase failed or missing")
+    key = subprocess.check_output(["sh", "scripts/build-js.sh", "--key", "src/server/main.bend"], cwd=ROOT, text=True).strip()
+    require(value.get("serverEmitKey") == key and re.fullmatch(r"[0-9a-f]{40,64}", key),
+            "Pre-emission import closure key mismatch")
+    require((root / "server.js").stat().st_size > 0 and list((root / "web").glob("chunk-*.js")),
+            "Pre-emission server/web outputs missing")
+    return root, value
+
+
 def js(request, base, out):
     release = identity(request)
     require(request.get("kind") == "backplane-service-js-inputs", "Wrong build request kind")
@@ -360,18 +399,34 @@ def js(request, base, out):
             and isinstance(web_notices.get("licenses"), dict) and web_notices["licenses"],
             "Frozen web redistribution notices required")
     license_sources(web_notices)
+    pre = verified_preemission(request["preEmission"], base, release, request["toolchain"]["bend"]) if "preEmission" in request else None
     new_output(out)
     out.mkdir(parents=True)
     logs = out / "logs"
     logs.mkdir()
     service = out / service_name(target)
     try:
-        run(["bash", "-c", 'set -e; source scripts/bendok.sh; bend_check src/server/main.bend; bend_check src/web/app.bend'], logs / "entries.log", env, 600)
+        if pre:
+            root, emitted = pre
+            shutil.copyfile(root / "logs/entries.log", logs / "entries.log")
+            shutil.copyfile(root / "EMISSION.json", out / "PRE-EMISSION.json")
+            shutil.copyfile(root / "SOURCE.json", out / "PRE-EMISSION-SOURCE.json")
+            shutil.copyfile(root / "PHASES.json", out / "PRE-EMISSION-PHASES.json")
+            cache = out / "verified-emission-cache"
+            cache.mkdir()
+            key = emitted["serverEmitKey"]
+            shutil.copyfile(root / "server.js", cache / (key + ".js"))
+            (cache / (key + ".js.ok")).write_text(str((cache / (key + ".js")).stat().st_size))
+            env["BACKPLANE_EMIT_CACHE"] = str(cache)
+        else:
+            run(["bash", "-c", 'set -e; source scripts/bendok.sh; bend_check src/server/main.bend; bend_check src/web/app.bend'], logs / "entries.log", env, 600)
         run(["scripts/build-js.sh", "src/server/main.bend", out / "backplane-serve"], logs / "js.log", env)
     finally:
         # the private prelude holds the protected values; build-js.sh removes it, and so does this
         for name in ("baked.js", "bin.js", "baked-t.js", "baked-g.js"):
             (ROOT / "build/js/backplane-serve" / name).unlink(missing_ok=True)
+    if pre:
+        shutil.rmtree(out / "verified-emission-cache")
     helpers = built_helpers(target)
     if helpers:
         # the same target and pinned runtime as the service (and KiStack)
@@ -380,7 +435,7 @@ def js(request, base, out):
         # Windows' helpers come in its runtime bundle; KiStack is built here
         build_kistack(out)
     require(sorted(p.name for p in out.iterdir())
-            == sorted(["logs", service.name, KISTACK, *helpers, *(["licenses"] if helpers else [])]), "Unexpected build outputs")
+            == sorted(["logs", service.name, KISTACK, *helpers, *(["licenses"] if helpers else []), *(["PRE-EMISSION.json", "PRE-EMISSION-SOURCE.json", "PRE-EMISSION-PHASES.json"] if pre else [])]), "Unexpected build outputs")
     architecture(service, target)
     helper_files = check_helpers(out, target) if helpers else {}
     kistack = check_kistack(out)
@@ -394,7 +449,11 @@ def js(request, base, out):
         bound(request["toolchain"][name], base)
     shutil.copyfile(Path(__file__), out / "EXECUTION-HELPER.py")
     web = out / "web"
-    run([bend, "src/web/index.html", "-o", web], logs / "web.log", env, 900)
+    if pre:
+        shutil.copytree(pre[0] / "web", web)
+        shutil.copyfile(pre[0] / "logs/web.log", logs / "web.log")
+    else:
+        run([bend, "src/web/index.html", "-o", web], logs / "web.log", env, 900)
     chunks = sorted(web.glob("chunk-*.js"))
     require(chunks, "No emitted web chunks")
     run([sys.executable, "scripts/js-unmarshal.py", "../core/client.Ui", *chunks], logs / "unmarshal.log", env)
@@ -449,6 +508,11 @@ def js(request, base, out):
               "serviceRuntime": "bun",
               "logs": {p.name: local_reference(p, out) for p in sorted(logs.iterdir())},
               "runtimeAcceptance": "PENDING", "published": False}
+    if pre:
+        result["preEmission"] = {"receipt": local_reference(out / "PRE-EMISSION.json", out),
+            "source": local_reference(out / "PRE-EMISSION-SOURCE.json", out),
+            "phases": local_reference(out / "PRE-EMISSION-PHASES.json", out),
+            "scope": "Exact-source raw server/web emitted once on the qualified large-memory executor; protected target compilation performed here."}
     result["executionHelper"] = local_reference(out / "EXECUTION-HELPER.py", out)
     write(out / "BUILD.json", result)
     return {"status": result["status"], "buildReceipt": reference(out / "BUILD.json"), "payload": str(out)}
@@ -523,6 +587,10 @@ def component(request, base, out):
     for name in (service, "BUILD.json", "SOURCE.json", "WEB.json", "LICENSE.Backplane",
                  "WEB-EMISSION.json", "SOURCE-QUALIFICATION.json", "SOURCE-QUALIFICATION-BOUND.json"):
         shutil.copy2(source / name, payload / name)
+    for ref in build_data.get("preEmission", {}).values():
+        if isinstance(ref, dict) and "path" in ref:
+            original = bound(ref, source)
+            shutil.copy2(original, payload / original.name)
     for name in helpers:
         shutil.copy2(source / name, payload / name)
         # an artifact upload drops file modes on the way to this host
