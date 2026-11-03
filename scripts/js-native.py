@@ -52,6 +52,25 @@ parsed for every step of the thread, two or three times a render, while
 the viewer is open (2026-11-02, a real 181-step thread: over half of the
 viewer's render time, the viewer half of every view the hub sent).
 
+Server-only `Json.lex(s)` scans token boundaries and unescaped string slices
+without a new tail string and continuation for each character. It preserves
+number lexemes, duplicate fields, the reference's whitespace/close tokens and
+escaped surrogate replacement. Unsupported escapes/incomplete strings use the
+retained pure lexer. Its entry shape and whole JSON module hash are fenced.
+Server-only `String.reverse.go(s, acc)` reverses Unicode code points once and
+appends acc; its exact complete Base body fences the substitution.
+
+Server-only Utf8.decode and Lines.feed loop over immutable byte lists without
+per-byte state rebuilding, preserving permissive overlong/invalid decoding and
+reversed carry/queued-line ordering. Exact entries/callees and the pure module
+hash fence both substitutions. No TextDecoder normalization is used.
+
+Server-only String.to_lower/take, ASCII Fold.text and Utf8.encode remove
+recursive text rebuilding in database search indexing. Base lowercase stays
+ASCII-only; raw-surrogate errors and non-ASCII search folding retain their
+pure paths. Prefixes count code points and encoding preserves raw surrogate
+bytes. Complete Base hashes and pure module/wrapper/callee fences apply.
+
 Server-only `Json.show(j)`: an iterative compact serializer preserving the
 pure encoder's exact escapes, raw number text, field order and duplicate
 keys. The original body remains the fallback for non-ASCII raw numbers.
@@ -79,6 +98,8 @@ On the 5,750-thread catalog these primitives dominate synchronous sidebar
 generation. Complete emitted entry/callee hashes fence Base's definitions;
 the pure map, its callers, cache budgets and every protocol stay unchanged.
 Map.get/has walk that immutable trie without reconstructing equal ancestors.
+Map.set retains the root for an existing identical numeric value, avoiding
+status projection no-op rebuilding; all other updates use the pure setter.
 Their input root is returned unchanged alongside the original value/default.
 
 Web-only `Refs.last.go(s, cur)` (src/core/refs.bend: the word being typed,
@@ -102,6 +123,7 @@ remain exactly-one.
   scripts/js-native.py dist/web/chunk-*.js
 """
 import re
+import json
 import hashlib
 import sys
 from pathlib import Path
@@ -169,6 +191,43 @@ PARSE_HELPER = (
     "m.set(s,v)}return v}\n"
 )
 
+# Exact pure lexer entry and state constructors; the full JSON module hash
+# below also fences escape, surrogate and token-boundary behavior.
+JSON_LEX = re.compile(
+    r'function (' + I + r'\$058Json\$lex\$)\((' + I + r')\)\{return (' + I +
+    r'\$058Lex\$go\$)\(\2,\{\$:"Tuple",fst:\{\$:"([^"\n]+)\.LIdle"\},snd:\{\$:"Nil"\}\}\)\}'
+)
+REVERSE_GO = re.compile(
+    r'function \$String\$reverse\$go\$\(\$0,\$1\)\{for\(;;\)\{let _s_0=\$0,_acc_0=\$1;if\(_s_0===""\)return _acc_0;else\{let _h_0=_s_0\.codePointAt\(0\)>65535\?_s_0\.slice\(0,2\):_s_0\[0\];\$0=_s_0\.codePointAt\(0\)>65535\?_s_0\.slice\(2\):_s_0\.slice\(1\),\$1=_h_0\+_acc_0;continue\}\}\}'
+)
+
+# Exact emitted entry wrappers plus the whole pure UTF-8/framing module.
+# Framing keeps reversed carry bytes and newest-first queued lines unchanged.
+UTF8_DECODE = re.compile(
+    r'function (' + I + r'\$058Utf8\$decode\$)\((' + I + r')\)\{return (' + I +
+    r'\$058Utf8\$fin\$)\((' + I + r'\$058Utf8\$go\$)\(\2,\{\$:"([^"\n]+)\.Dec",acc:"",cp:0,owe:0\}\)\)\}'
+)
+LINES_FEED = re.compile(
+    r'function (' + I + r'\$058Lines\$feed\$)\((' + I + r'),(' + I + r')\)\{return (' + I +
+    r'\$058Lines\$split\$)\((' + I + r'\$058Lines\$go\$)\(\3,\2\)\)\}'
+)
+UTF8_SOURCE_SHA256 = "0202c5087fd255df10413080cda57f2a4a00aa9b90b5b425a00a729f9563627b"
+
+UTF8_ENCODE = re.compile(
+    r'function (' + I + r'\$058Utf8\$encode\$)\((' + I + r')\)\{return (' + I +
+    r'\$058Utf8\$encode_onto\$)\(\2,\{\$:"Nil"\}\)\}'
+)
+FOLD_TEXT = re.compile(
+    r'function (' + I + r'\$058Fold\$text\$)\((' + I + r')\)\{return (' + I + r'\$058Fold\$go\$)\(\2,""\)\}'
+)
+FOLD_SOURCE_SHA256 = "9f5bd7f7249b7ece879f3fb991af03a8ca198a0de68a26d643701ace430742ad"
+TEXT_DEFS = {
+    "$String$to_lower$": "68a284ae5e968b09d4b5e3defa9949eca24fe1670f4c1409ebe8a53bfc4630ba",
+    "$Char$to_lower$": "a882f9514c243fb49890e458e03f422632d970100a6e2834e74f851514d68c61",
+    "$Char$is_upper$": "cd25201f239e1b822957470ab197fc16973d6e677ff2a3b05b8a30d5e2710fac",
+    "$String$take$": "8ce2088bba133bf0a09fe1a4aa357a4e1235eac7bc5c268276ee68503ab64daa",
+}
+
 # Match the whole unchanged Json.show body and its exact Json.emit callee.
 # Unlike a prefix match, any body change must stop this optimization.
 SHOW = re.compile(
@@ -231,6 +290,7 @@ def refs_fenced(src, m):
 # Unlike the existing prefix rewrites, these fences cover whole definitions
 # and the complete Map.diff helper chain. Compiler/Base drift needs review.
 MAP_DEFS = {
+    "$Map$set$": "cd028def3d1ecccffb11be69c9d5bae9c6ecde4275a5b79e2944f167f6f31a23",
     "$Map$bit$": "dd4233a5037a0d20842d148e7b38363f363fe1d52a811a39b9328667948dc4d9",
     "$Map$bit$at$": "95c255398d9ee74d17c933422bfeb2405c1cdb4be0113dc02aa3b4da2cc28309",
     "$Map$diff$": "7ce09b0adfd68677f26d35b394c01ec5f15eb05a0a4b7bbf5a25978c4597f0fe",
@@ -257,13 +317,14 @@ server = "--server" in args
 files = [a for a in args if a != "--server"]
 srcs = {f: open(f, encoding="utf-8").read() for f in files}
 if server:
-    for name, digest in MAP_DEFS.items():
+    for name, digest in {**MAP_DEFS, **TEXT_DEFS}.items():
         definitions = [m.group() for s in srcs.values() for m in map_def(name).finditer(s)]
         if len(definitions) != 1 or hashlib.sha256(definitions[0].encode()).hexdigest() != digest:
             sys.exit(f"js-native: {name} needs its exact Base definition once")
 found = {}
 found["Map.bit"] = found["Map.diff"] = int(server)
-found["Map.get"] = found["Map.has"] = int(server)
+found["Map.get"] = found["Map.has"] = found["Map.set"] = int(server)
+found["String.to_lower"] = found["String.take"] = int(server)
 for name, rx, required in (("String.cmp", CMP, True), ("Map.bit.go", BIT, True),
                            ("String.split", SPLIT, server), ("List.length", LEN, server),
                            ("String.starts_with", PRE, server), ("String.contains", HAS, server)):
@@ -298,6 +359,46 @@ for s in srcs.values():
             sys.exit("js-native: Sec.fine needs its exact Sec.fine.go")
 found["Cbor.Enc.text"] = sum(len(CBOR_TEXT.findall(s)) for s in srcs.values()) if server else 0
 found["Json.parse"] = sum(len(PARSE.findall(s)) for s in srcs.values()) if server else 0
+found["Json.lex"] = sum(len(JSON_LEX.findall(s)) for s in srcs.values()) if server else 0
+found["String.reverse.go"] = sum(len(REVERSE_GO.findall(s)) for s in srcs.values()) if server else 0
+if server and (found["Json.lex"] != 1 or found["String.reverse.go"] != 1):
+    sys.exit("js-native: Json.lex and String.reverse.go need their exact definitions once")
+if server:
+    for s in srcs.values():
+        for m in JSON_LEX.finditer(s):
+            expected = m.group(1).replace("$058Json$lex$", "$058Lex$go$")
+            if m.group(3) != expected or len(re.findall(r"function " + re.escape(expected) + r"\(", s)) != 1:
+                sys.exit("js-native: Json.lex needs its exact Lex.go once")
+            if not re.search(r'\$:"' + re.escape(m.group(4)) + r'\.TStr"', s):
+                sys.exit("js-native: Json.lex token namespace changed")
+for name, rx in (("Utf8.decode", UTF8_DECODE), ("Lines.feed", LINES_FEED), ("Utf8.encode", UTF8_ENCODE), ("Fold.text", FOLD_TEXT)):
+    found[name] = sum(len(rx.findall(s)) for s in srcs.values()) if server else 0
+    if server and found[name] != 1:
+        sys.exit(f"js-native: {name} needs its exact definition once")
+if server:
+    if hashlib.sha256(Path(__file__).parent.parent.joinpath("src/core/utf8.bend").read_bytes()).hexdigest() != UTF8_SOURCE_SHA256:
+        sys.exit("js-native: UTF-8/framing pure source changed")
+    for s in srcs.values():
+        for rx, pairs in ((UTF8_DECODE, ((3, "$058Utf8$fin$"), (4, "$058Utf8$go$"))),
+                          (LINES_FEED, ((4, "$058Lines$split$"), (5, "$058Lines$go$")))):
+            for m in rx.finditer(s):
+                for group, suffix in pairs:
+                    expected = m.group(1).rsplit("$058", 1)[0] + suffix
+                    if m.group(group) != expected or len(re.findall(r"function " + re.escape(expected) + r"\(", s)) != 1:
+                        sys.exit("js-native: UTF-8/framing callee changed")
+        for m in UTF8_DECODE.finditer(s):
+            if not re.search(r'\$:"' + re.escape(m.group(5)) + r'\.Lines",part:', s):
+                sys.exit("js-native: UTF-8/framing constructor namespace changed")
+if server:
+    if hashlib.sha256(Path(__file__).parent.parent.joinpath("src/core/search-fold.bend").read_bytes()).hexdigest() != FOLD_SOURCE_SHA256:
+        sys.exit("js-native: search folding pure source changed")
+    for s in srcs.values():
+        for rx, old, new in ((UTF8_ENCODE, "$058Utf8$encode$", "$058Utf8$encode_onto$"),
+                             (FOLD_TEXT, "$058Fold$text$", "$058Fold$go$")):
+            for m in rx.finditer(s):
+                expected = m.group(1).replace(old, new)
+                if m.group(3) != expected or len(re.findall(r"function " + re.escape(expected) + r"\(", s)) != 1:
+                    sys.exit("js-native: encoding/folding callee changed")
 found["Json.show"] = sum(len(SHOW.findall(s)) for s in srcs.values()) if server else 0
 found["ContentEq.same"] = sum(len(CONTENT_EQ.findall(s)) for s in srcs.values()) if server else 0
 for name, rx in (("Json.bytes.esc", BYTE_ESC), ("Json.bytes.str", BYTE_STR)):
@@ -350,6 +451,7 @@ for f, s in srcs.items():
     if server:
         s = map_def("$Map$bit$").sub('function $Map$bit$(_key_0,_pos_0){return __bpMapBit(_key_0,_pos_0)}', s)
         s = map_def("$Map$diff$").sub('function $Map$diff$(_a_0,_b_0){return __bpMapDiff(_a_0,_b_0,nat_chk)}', s)
+        s = map_def("$Map$set$").sub(lambda m: 'function $Map$set$(_m_0,_key_0,_x_0){return __bpMapSet(_m_0,_key_0,_x_0,$bpMapSetRaw)}' + m.group().replace('function $Map$set$(', 'function $bpMapSetRaw('), s)
         s = map_def("$Map$get$").sub('function $Map$get$(_d_0,_m_0,_key_0){return __bpMapRead(_m_0,_key_0,_d_0,false)}', s)
         s = map_def("$Map$has$").sub('function $Map$has$(_m_0,_key_0){return __bpMapRead(_m_0,_key_0,false,true)}', s)
         s = Path(__file__).with_name("js-map.js").read_text(encoding="utf-8") + "\n" + s
@@ -363,6 +465,25 @@ for f, s in srcs.items():
     if server and PARSE.search(s):
         s = PARSE.sub(lambda m: 'function %s(%s){return __bpParsed(%s,%s$raw)}function %s$raw(%s){' % (m.group(1), m.group(2), m.group(2), m.group(1), m.group(1), m.group(2)), s)
         s = PARSE_HELPER + s
+    if server and JSON_LEX.search(s):
+        s = JSON_LEX.sub(lambda m: 'function %s(%s){return __bpJsonLex(%s,%s$raw,%s)}function %s$raw(%s){return %s(%s,{$:"Tuple",fst:{$:%s},snd:{$:"Nil"}})}' %
+            (m.group(1), m.group(2), m.group(2), m.group(1), json.dumps(m.group(4)), m.group(1), m.group(2), m.group(3), m.group(2), json.dumps(m.group(4) + ".LIdle")), s)
+        s = Path(__file__).with_name("js-json-lex.js").read_text(encoding="utf-8") + "\n" + s
+    if server:
+        s = map_def("$String$to_lower$").sub(lambda m: 'function $String$to_lower$(_s_0){return __bpLower(_s_0,$bpLowerRaw)}' + m.group().replace('$String$to_lower$', '$bpLowerRaw'), s)
+        s = map_def("$String$take$").sub('function $String$take$(_s_0,_n_0){return __bpTake(_s_0,_n_0)}', s)
+        s = FOLD_TEXT.sub(lambda m: 'function %s(%s){return __bpFoldText(%s,%s$raw)}function %s$raw(%s){return %s(%s,"")}' %
+            (m.group(1), m.group(2), m.group(2), m.group(1), m.group(1), m.group(2), m.group(3), m.group(2)), s)
+        s = UTF8_ENCODE.sub(lambda m: 'function %s(%s){return __bpUtf8Encode(%s)}' % (m.group(1), m.group(2), m.group(2)), s)
+        s = Path(__file__).with_name("js-text.js").read_text(encoding="utf-8") + "\n" + s
+        s = REVERSE_GO.sub('function $String$reverse$go$($0,$1){return Array.from($0).reverse().join("")+$1}', s)
+    if server:
+        s = UTF8_DECODE.sub(lambda m: 'function %s(%s){return __bpUtf8Decode(%s)}' % (m.group(1), m.group(2), m.group(2)), s)
+        # The decode constructor namespace is fenced above and shared by Lines.
+        ns = UTF8_DECODE.search(srcs[f]).group(5)
+        s = LINES_FEED.sub(lambda m: 'function %s(%s,%s){return __bpLinesFeed(%s,%s,%s)}' %
+            (m.group(1), m.group(2), m.group(3), m.group(2), m.group(3), json.dumps(ns + ".Lines")), s)
+        s = Path(__file__).with_name("js-utf8.js").read_text(encoding="utf-8") + "\n" + s
     if server and SHOW.search(s):
         s = SHOW.sub(lambda m: 'function %s(%s){return __bpJsonShow(%s,%s$raw)}function %s$raw(%s){return %s(%s,!0,"")}' %
             (m.group(1), m.group(2), m.group(2), m.group(1), m.group(1), m.group(2), m.group(3), m.group(2)), s)
@@ -393,6 +514,10 @@ for name, call in (("Map.bit", "{return __bpMapBit("), ("Map.diff", "{return __b
                    ("String.split", "return __bpSplit("), ("List.length", 'x.$!=="Nil";x=x.tail)n++;return '),
                    ("String.starts_with", "return __bpPre("), ("String.contains", "return __bpHas("),
                    ("Cbor.Enc.text", "return __bpCborText("), ("Json.parse", "){return __bpParsed("),
+                   ("Json.lex", "){return __bpJsonLex("), ("String.reverse.go", '{return Array.from($0).reverse().join("")+$1}'),
+                   ("String.to_lower", "){return __bpLower("), ("String.take", "){return __bpTake("),
+                   ("Utf8.encode", "){return __bpUtf8Encode("), ("Fold.text", "){return __bpFoldText("),
+                   ("Utf8.decode", "){return __bpUtf8Decode("), ("Lines.feed", "){return __bpLinesFeed("),
                    ("Json.show", "){return __bpJsonShow("), ("ContentEq.same", "){return __bpContentEq("),
                    ("Json.bytes.esc", "){return __bpJsonBytesEsc("), ("Json.bytes.str", "){return __bpJsonBytesStr("),
                    ("Sec.fine", "){return __bpSecFine("), ("Refs.last.go", "){return __bpRefsLast(")):
