@@ -1343,6 +1343,16 @@ def Queue.waiting(s: State, +th: String) -> Bool:
 def Queue.of(s: State, +th: String) -> String:
   Queue.texts(Queue.items(s, th))
 
+# Presence matters for an explicit empty parent: it means detached.
+def Setting.has.k(r: Map<&2, String> & Bool) -> Bool:
+  (_, found) = r
+  found
+
+def Setting.has(s: State, k: String) -> Bool:
+  match s:
+    case State{_, _, _, _, _, sg, _, _, _, _, _}:
+      Setting.has.k(Map.has(&2, String, sg, k))
+
 def Setting.get(s: State, +k: String, d: String) -> String:
   match s:
     case State{_, _, _, _, _, sg, qu, ak, _, _, _}:
@@ -2231,10 +2241,17 @@ def State.bots(s: State) -> BT.World:
     case State{_, _, _, _, _, _, _, _, _, _, bw}:
       State.bots.k(bw)
 
-def State.task_parent(bot: Bool, s: State, +parent: String, +child: String) -> State:
-  match bot:
+def State.task_parent.seed(known: Bool, s: State, parent: String, child: String) -> State:
+  match known:
     case True{}: s
     case False{}: State.setting(s, "thread.parent." ++ child, parent)
+
+# Delegation only seeds an absent relationship. A present empty value is
+# a manual detach, and later task activity must not replace that choice.
+def State.task_parent(bot: Bool, +s: State, parent: String, +child: String) -> State:
+  match bot:
+    case True{}: s
+    case False{}: State.task_parent.seed(Setting.has(s, "thread.parent." ++ child), s, parent, child)
 
 # Delivery remains the task's; the conversation belongs under a thread
 # delegator until explicitly moved. A bot's work stays in its project.

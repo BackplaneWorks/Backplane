@@ -87,9 +87,10 @@ def main() -> IO(Unit):
     C.Check.str("moved delegated child remains a project root candidate", Bool.show(String.contains(root_candidates(M.State.apply(delegated(), M.ThreadParentSet{"task-child", "", 15n})), "task-child")), "True")
     C.Check.str("archived parent leaves delegated child reachable", Bool.show(String.contains(root_candidates(M.State.apply(delegated(), M.ThreadArchived{"parent", True{}, 15n})), "task-child")), "True")
     C.Check.str("deleted parent leaves delegated child reachable", Bool.show(String.contains(root_candidates(M.State.apply(delegated(), M.ThreadDeleted{"parent", 15n})), "task-child")), "True")
-    C.Check.str("cross-project bot work stays at project root", ST.Tree.parent(M.State.apply(delegated(), M.TaskDelegated{"other-task", "other", "task-child", 1n, "claude", "", 13n}), "task-child"), "")
+    C.Check.str("cross-project bot work stays at project root", ST.Tree.parent(M.State.replay([M.ThreadCreated{"task-child", "p", "Cross-project task", M.Local{}, "", "", "claude", "", 12n}, M.TaskDelegated{"other-task", "other", "task-child", 1n, "claude", "", 13n}], base()), "task-child"), "")
     +bot : M.State = M.State.replay([M.ThreadCreated{"bot-child", "p", "Bot work", M.Local{}, "", "", "claude", "", 11n},
       M.BotSet{"b", "Manager bot", "parent", 1n, "", 11n}, M.TaskDelegated{"bot-task", "parent", "bot-child", 1n, "claude", "", 12n}], base())
+    C.Check.str("later cross-project task cannot replace an existing conversation parent", ST.Tree.parent(M.State.apply(delegated(), M.TaskDelegated{"other-task", "other", "task-child", 1n, "claude", "", 13n}), "task-child"), "parent")
     C.Check.str("bot delegation never seeds a hidden sidebar parent", M.Setting.get(bot, "thread.parent.bot-child", ""), "")
     C.Check.str("same-project bot work stays a project root candidate", Bool.show(String.contains(root_candidates(bot), "bot-child")), "True")
     C.Check.str("drag order remains authoritative", projects(U.Side.rows(M.State.apply(base(), M.ProjectOrdered{"p", "8", 100n}), 101n)), "p,q,")

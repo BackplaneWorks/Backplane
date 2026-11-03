@@ -14776,6 +14776,7 @@ def Laws.sdb_up_parents_exact():
   {==}
 
 def Laws.sdb_up_parents_demo():
+  # Approved expectation: manual c5 = ty survives its later delegation.
   {==}
 
 def Laws.sdb_up_keep_kinds():
