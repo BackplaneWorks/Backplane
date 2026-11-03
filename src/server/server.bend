@@ -1,3 +1,4 @@
+import ../core/autosettle.bend as AUTO
 import Base
 import ./pairing.bend as PAIR
 import ./message-image.bend as MIMG
@@ -11492,7 +11493,7 @@ def Hub.step.go(+st: M.State, h: Hub, cs: List<&2, M.Change>, os: List<&2, B.Out
   do IO<Hub & Bool>:
     t0 : U32 <- PS.Perf.us()
     +v : SEC.Vault <- VX.Vx.vault()
-    +cs2 : List<&2, M.Change> = B.Secret.changes(v, B.Shelve.fix(st, cs))
+    +cs2 : List<&2, M.Change> = B.Secret.changes(v, B.Shelve.auto.fix(st, cs))
     t1 : U32 <- PS.Perf.span("hub.step.pend", t0)
     r : Hub & Wrote <- Hub.commit.q(True{}, cs2, h)
     t2 : U32 <- PS.Perf.span("hub.step.commit", t1)
@@ -12270,9 +12271,22 @@ def Hub.rpc.recorded(pair: Hub & Bool, client: U32, id: String) -> IO(Hub):
     case True{}: IO.pure(Hub, h)
     case False{}: Hub.out(h, B.Reply.err(client, id, "Backplane could not confirm this write; check the current state before retrying"))
 
+# Read receipt travels through the authenticated RPC's normal commit,
+# before DeskLook is applied. The output handler must not re-enter writer IO.
+def Hub.autosettle.desk(look: Bool, +st: M.State, +p: J.Json, +now: Nat) -> List<&2, M.Change>:
+  match look:
+    case False{}: Nil{}
+    case True{}: AUTO.Auto.read(st, J.Json.get_str(p, "thread", ""), now)
+
+def Hub.autosettle.rpc(+st: M.State, +now: Nat, +text: String, step: B.Step) -> B.Step:
+  +o = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+  +p = J.Json.get_obj(o, "p")
+  B.Step.before(Hub.autosettle.desk(Bool.and(String.eq(J.Json.get_str(o, "m", ""), "desk.look"),
+    J.Json.get_bool(p, "focused", False{})), st, p, now), Nil{}, step)
+
 def Hub.rpc.k(p: M.State & Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
-  (st, h) = p
-  IO.bind(Hub & Bool, Hub, Hub.step.ok(h, Bot.request.client(st, now, client, text)),
+  (+st, h) = p
+  IO.bind(Hub & Bool, Hub, Hub.step.ok(h, Hub.autosettle.rpc(st, now, text, Bot.request.client(st, now, client, text))),
     pair => Hub.rpc.recorded(pair, client, J.Json.as_raw(J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "id"), "null")))
 
 # new turns are refused while too much waits to be saved (core/diskq.bend)
@@ -12977,9 +12991,27 @@ def Hub.thin.input(+action: Bool, +p: J.Json, +cid: String) -> J.Json:
     case True{}: TV.Obj.put(p, "cid", J.Str{cid})
     case False{}: TV.Obj.put(TV.Obj.put(p, "cid", J.Str{cid}), "action", J.Str{""})
 
-def Hub.thin.rendered(rendered: TA.Rendered, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, context: ThinContext) -> IO(Hub):
+# Explicitly opening the newest conversation acknowledges its resident
+# reply on phones too. Searches, history pages, stale/error responses and
+# passive view.update polling never acknowledge unseen content.
+def Hub.autosettle.read_view.on(acknowledge: Bool, h: Hub, +th: String, +now: Nat) -> IO(Hub):
+  match acknowledge h:
+    case False{} kept: IO.pure(Hub, kept)
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{AUTO.Auto.read(st, th, now), Nil{}})
+
+def Hub.autosettle.read_view(h: Hub, +o: J.Json, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      +th = TV.Target.thread(st, ThinContext.target(context))
+      Hub.autosettle.read_view.on(Bool.and(String.eq(J.Json.get_str(o, "m", ""), "view.open"),
+        Bool.and(Nat.is_eq(ThinContext.anchor(context), 0n), Bool.not(FR.Fr.is(th)))), Hub{st, f, ls, cl, as, inbox, cfg, note}, th, now)
+
+def Hub.thin.rendered(rendered: TA.Rendered, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext) -> IO(Hub):
   match rendered:
-    case TA.Rendered{actor, result}: Hub.thin.respond(h, client, o, result, c, ThinContext.with_actors(context, [actor]), now)
+    case TA.Rendered{actor, result}:
+      IO.bind(Hub, Hub, Hub.thin.respond(h, client, o, result, c, ThinContext.with_actors(context, [actor]), now),
+        h2 => Hub.autosettle.read_view(h2, o, context, now))
 
 # Read only the selected, owner-linked mirror. Keep the canonical local
 # state/store as the authority for actions and its own history.
@@ -14535,8 +14567,13 @@ def Hub.vault.open(h: Hub) -> IO(Hub):
         PS.Log.info("vault", r)
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
+def Hub.autosettle.upgrade(h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{AUTO.Auto.upgrade(st, now), Nil{}})
+
 def Hub.recover.v(h: Hub, +now: Nat) -> IO(Hub):
-  IO.bind(Hub, Hub, Hub.mail.recover.start(h), h0 => IO.bind(Hub, Hub, Far.start(h0), h2 => IO.bind(Hub, Hub, Hub.recover.stale(h2, now), h3 => Hub.owner.flush(h3, now))))
+  IO.bind(Hub, Hub, Hub.mail.recover.start(h), h0 => IO.bind(Hub, Hub, Far.start(h0), h2 => IO.bind(Hub, Hub, Hub.recover.stale(h2, now), h3 => IO.bind(Hub, Hub, Hub.owner.flush(h3, now), h4 => Hub.autosettle.upgrade(h4, now)))))
 
 def Hub.metrics.start(h: Hub, +now: Nat) -> IO(Hub):
   match h:

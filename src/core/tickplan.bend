@@ -85,7 +85,7 @@ def Tick.drops(+ts: List<&2, M.Thread>, kids: Map<&2, Nat>, +s: M.State, now: Na
 def Tick.base(+s: M.State, +now: Nat, +kids: Map<&2, Nat>) -> B.Step:
   match s:
     case M.State{ps, +ts, _, _, _, _, _, _, _, _, _}:
-      B.Step.before(B.Shelve.after(Tick.settles(Map.values(&2, M.Thread, ts), Tick.parents(s), M.State.navs(s), kids, s, now, B.Hub.settle.window(s), B.Hub.settle.idle(s)), s, now, kids),
+      B.Step.before(B.Shelve.auto.tick(s, now, kids),
         List.append(&2, B.Out, B.Merge.asks(Map.values(&2, M.Project, ps), Map.values(&2, M.Thread, ts), s), Tick.drops(Map.values(&2, M.Thread, ts), kids, s, now, B.Hub.wt.window(s))),
         B.Wt.stale(Map.values(&2, M.Thread, ts), s, now))
 

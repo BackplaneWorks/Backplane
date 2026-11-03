@@ -1,4 +1,5 @@
 import ./src/server/conversation-window.bend as CONVWINDOW
+
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
 
 import ./src/server/conversation-frame.bend as CONVFRAME
@@ -8,6 +9,8 @@ import ./src/core/thin.bend as CONVINDEX
 import ./src/core/images.bend as MIMAGES
 
 import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
+
+import ./src/core/autosettle.bend as AUTOS
 
 import ./src/web/composer-bar.bend as CBAR
 
@@ -15759,3 +15762,62 @@ law conversation_root_region_retained:
 law conversation_root_wire_picture_constant:
   for +result: J.Json
   {J.Json.get(CONVWINDOW.Window.make(result), "shown") == Some{CONVWINDOW.Window.picture()} : Maybe<&2, J.Json>}
+
+# Live automatic settling: a pure decision from the supplied snapshot and
+# time. These guards are used by Auto.changes, the production minute and
+# upgrade passes; the older settle_idle_* laws describe legacy helpers.
+
+law autosettle_owned_work_held:
+  for turn: M.TurnState
+  for ask: Bool
+  for unread: Bool
+  for delivered: Bool
+  for quiet: Bool
+  for shelf: M.Shelf
+  for override: M.Override
+  {AUTOS.Auto.allow(turn, True{}, ask, unread, delivered, quiet, shelf, override) == False{} : Bool}
+
+law autosettle_pending_ask_held:
+  for unread: Bool
+  for delivered: Bool
+  for quiet: Bool
+  {AUTOS.Auto.allow(M.Completed{}, False{}, True{}, unread, delivered, quiet, M.Active{}, M.NoOverride{}) == False{} : Bool}
+
+law autosettle_unread_held:
+  for delivered: Bool
+  for quiet: Bool
+  {AUTOS.Auto.allow(M.Completed{}, False{}, False{}, True{}, delivered, quiet, M.Active{}, M.NoOverride{}) == False{} : Bool}
+
+law autosettle_failed_held:
+  for work: Bool
+  for ask: Bool
+  for unread: Bool
+  for delivered: Bool
+  for quiet: Bool
+  {AUTOS.Auto.allow(M.Failed{}, work, ask, unread, delivered, quiet, M.Active{}, M.NoOverride{}) == False{} : Bool}
+
+law autosettle_interrupted_held:
+  for work: Bool
+  for ask: Bool
+  for unread: Bool
+  for delivered: Bool
+  for quiet: Bool
+  {AUTOS.Auto.allow(M.Interrupted{}, work, ask, unread, delivered, quiet, M.Active{}, M.NoOverride{}) == False{} : Bool}
+
+law autosettle_report_held:
+  for quiet: Bool
+  {AUTOS.Auto.allow(M.Completed{}, False{}, False{}, False{}, False{}, quiet, M.Active{}, M.NoOverride{}) == False{} : Bool}
+
+law autosettle_grace_held:
+  {AUTOS.Auto.allow(M.Completed{}, False{}, False{}, False{}, True{}, False{}, M.Active{}, M.NoOverride{}) == False{} : Bool}
+
+law autosettle_ready:
+  {AUTOS.Auto.allow(M.Completed{}, False{}, False{}, False{}, True{}, True{}, M.Active{}, M.NoOverride{}) == True{} : Bool}
+
+law autosettle_new_assistant_message_reopens:
+  {M.Shelf.of(M.State.thread.get(M.State.replay(H.Shelve.auto.fix(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 6n}]),
+    [M.MessagePosted{"t1", "new-reply", M.Assistant{}, "New result", 7n}]), H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 6n}])), "t1")) == M.Active{} : M.Shelf}
+
+law autosettle_new_turn_reopens:
+  {M.Shelf.of(M.State.thread.get(M.State.replay(H.Shelve.auto.fix(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 6n}]),
+    [M.TurnChanged{"t1", M.Running{}, 7n}]), H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 6n}])), "t1")) == M.Active{} : M.Shelf}
