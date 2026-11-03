@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """scripts/check-helpers.py over packaged desktop apps (issue #510): synthetic
 headers in .tar.gz, .zip and folders, never executed."""
+import atexit
 import importlib.util
 import io
 from pathlib import Path
+import shutil
 import struct
 import tarfile
 import tempfile
@@ -15,6 +17,12 @@ spec = importlib.util.spec_from_file_location("check_helpers", SOURCE)
 C = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(C)
 S = C.S
+
+# KiStack as a build ships it (scripts/kistack.py build), once
+KISTACK = Path(tempfile.mkdtemp(prefix="kistack-")) / "kistack"
+atexit.register(shutil.rmtree, KISTACK.parent, True)
+S.build_kistack(KISTACK.parent)
+PINNED = (KISTACK / "REVISION").read_text().strip()
 
 SERVICE = {"darwin-arm64": "backplane-darwin-arm64/Backplane.app/Contents/Resources/backplane-service",
            "linux-x64": "backplane-linux-x64/runtime/resources/backplane-service",
@@ -45,13 +53,19 @@ class CheckHelpers(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
 
-    def members(self, target, drop=(), mode=0o755, signed=True):
+    def members(self, target, drop=(), mode=0o755, signed=True, kistack=True, skill=None):
         service = S.service_name(target)
         files = {SERVICE[target] + "/" + service: (header(target), 0o755),
                  SERVICE[target] + "/BUILD.json": (b"{}", 0o644)}
         for name in S.helper_names(target):
             if name not in drop:
                 files[SERVICE[target] + "/" + name] = (header(target, signed), mode)
+        if kistack:
+            for p in sorted(KISTACK.rglob("*")):
+                if p.is_file():
+                    rel = p.relative_to(KISTACK).as_posix()
+                    data = skill if skill is not None and rel == "skills/pcb/SKILL.md" else p.read_bytes()
+                    files[SERVICE[target] + "/kistack/" + rel] = (data, 0o644)
         return files
 
     def tar(self, target, **kw):
@@ -84,11 +98,25 @@ class CheckHelpers(unittest.TestCase):
     def test_complete_apps_pass_on_every_target(self):
         for target in ("darwin-arm64", "linux-x64"):
             found = C.check(self.tar(target), target)
-            self.assertEqual(sorted(found[SERVICE[target]]), sorted(S.HELPERS))
+            self.assertEqual(sorted(found[SERVICE[target]]), sorted([*S.HELPERS, "kistack"]))
+            self.assertEqual(found[SERVICE[target]]["kistack"], PINNED)
             C.check(self.folder(target), target)
             C.check(self.folder(target) / SERVICE[target], target, service_dir=True)
         found = C.check(self.zip("windows-x64"), "windows-x64")
-        self.assertEqual(sorted(found[SERVICE["windows-x64"]]), sorted(S.WINDOWS_HELPERS))
+        self.assertEqual(sorted(found[SERVICE["windows-x64"]]), sorted([*S.WINDOWS_HELPERS, "kistack"]))
+
+    def test_an_app_without_kistack_is_refused(self):
+        # release packages carried none from 0.12.0 on
+        for make in (self.tar, self.zip, self.folder):
+            with self.subTest(make=make.__name__), self.assertRaisesRegex(ValueError, "No KiStack"):
+                C.check(make("linux-x64", kistack=False), "linux-x64")
+        with self.assertRaisesRegex(ValueError, "No KiStack"):
+            C.check(self.folder("linux-x64", kistack=False) / SERVICE["linux-x64"], "linux-x64", service_dir=True)
+
+    def test_another_kistack_is_refused(self):
+        for make in (self.tar, self.zip, self.folder):
+            with self.subTest(make=make.__name__), self.assertRaisesRegex(ValueError, "not the pinned"):
+                C.check(make("linux-x64", skill=b"---\nname: pcb\n---\nchanged\n"), "linux-x64")
 
     def test_the_0_13_0_mac_app_is_refused(self):
         # the service and nothing beside it, as v0.13.0 shipped

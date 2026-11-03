@@ -10,6 +10,9 @@ done
 launcher=0
 [ ! -e "$src/backplane" ] || launcher=1
 [ -d "$src/web" ] || { echo 'release missing web' >&2; exit 1; }
+# KiStack's skills ship with every release (scripts/kistack.py); one
+# without them is not installed
+[ -f "$src/kistack/.claude-plugin/plugin.json" ] && [ -d "$src/kistack/skills" ] || { echo 'release missing kistack' >&2; exit 1; }
 # The caller has checked the archive's release SHA256. Verify macOS code
 # before replacing anything, then remove quarantine only from that payload.
 # A portable ad-hoc bundle has integrity but no notarization ticket.
@@ -42,13 +45,11 @@ fi
 rm -rf "$prefix/web.old"
 [ ! -d "$prefix/web" ] || mv "$prefix/web" "$prefix/web.old"
 mv "$src/web" "$prefix/web"
-# Carry the bundled KiStack skills added by the security release. The CEF
-# preflight above must succeed before any installed skill tree is replaced.
-if [ -d "$src/kistack" ]; then
-  rm -rf "$prefix/kistack.old"
-  [ ! -d "$prefix/kistack" ] || mv "$prefix/kistack" "$prefix/kistack.old"
-  mv "$src/kistack" "$prefix/kistack"
-fi
+# KiStack's skills, as the release ships them. The CEF preflight above must
+# succeed before any installed skill tree is replaced.
+rm -rf "$prefix/kistack.old"
+[ ! -d "$prefix/kistack" ] || mv "$prefix/kistack" "$prefix/kistack.old"
+mv "$src/kistack" "$prefix/kistack"
 for file in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do
   if [ -e "$src/$file" ]; then mv -f "$src/$file" "$prefix/$file"; fi
 done

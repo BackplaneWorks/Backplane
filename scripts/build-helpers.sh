@@ -1,7 +1,8 @@
 #!/bin/sh
 # The helper programs the hub runs (src/server/kicad.bend's Helper.find:
 # backplane-kipc, -step2glb, -voice, -browser) for one target, into DIR,
-# beside where the service goes, with their notices in DIR/licenses/helpers.
+# beside where the service goes, with their notices in DIR/licenses/helpers,
+# and KiStack's skills as DIR/kistack (scripts/kistack.py, the pinned copy).
 # A release builds them with the service (scripts/service-release.py js), so
 # the desktop app's backplane-service folder carries them: 0.13.0 shipped
 # none on macOS and Linux, and KiCad IPC never started (issue #510).
@@ -62,4 +63,5 @@ for tool in ('kipc', 'browser'):
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(p, dest)
 PY
+scripts/build-kistack.sh "$out/kistack"
 python3 scripts/check-helpers.py "$out" --target "${target:-host}" --service-dir

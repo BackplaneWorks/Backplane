@@ -33,6 +33,16 @@ do the desktop producer and `scripts/check-helpers.py ARCHIVE --target T`, which
 `release.yml` runs on every staged and archived desktop app. 0.13.0's macOS and
 Linux apps shipped none, and KiCad IPC never started (issue #510).
 
+KiStack's skills sit beside the service too, as `kistack/`, on every target:
+exactly the commit `deploy/kistack.lock` pins, from the copy tracked in
+`deploy/kistack` (`scripts/kistack.py`). `js` builds it (`build-helpers.sh`, or
+the producer itself for Windows) and records its commit and skills tree hash in
+BUILD.json's `kistack`; `component` copies it and lists it as a package with its
+LICENSE. Each step, the desktop producer, `scripts/check-helpers.py` and
+`scripts/release-classic.sh` refuse a service folder without it or with another
+commit: release packages carried none from 0.12.0 on, and the hub then fetched
+KiStack's newest commit at every start. The hub fetches nothing now.
+
 The checkout must be clean at the final committed release identity, checked
 before and after the build. Inputs and outputs should live outside the checkout
 or in an ignored build directory. Source check receipts must already refer to
