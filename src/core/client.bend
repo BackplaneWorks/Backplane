@@ -5037,7 +5037,7 @@ def Proj.find(a: Act) -> Act:
 # opens on the projects; the folder list is fetched where it was last
 # (home the first time)
 def Proj.open(+u: Ui) -> Act:
-  Proj.focus(Proj.find(Proj.rpc(Proj.mode(Ui.flag_on(u, "proj"), ""), "fs.list", [J.KV{"path", J.Str{Proj.dir(u)}}])))
+  Proj.focus(Proj.find(Proj.rpc(Proj.mode(Ui.scratch_set(Ui.flag_on(u, "proj"), "@proj.peek", ""), ""), "fs.list", [J.KV{"path", J.Str{Proj.dir(u)}}])))
 
 # a machine chosen: its folders and projects are asked for afresh
 def Proj.machine(+u: Ui, +on: String) -> Act:
@@ -5132,6 +5132,19 @@ def Proj.found.put(ok: Bool, +u: Ui, +o: J.Json) -> Ui:
     case False{}:
       Ui.error_put(u, "")
 
+def Proj.peek.mine(+u: Ui, +o: J.Json) -> Bool:
+  Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@proj.prid"))), String.eq(J.Json.as_raw(J.Json.get(o, "id"), ""), Ui.scratch(u, "@proj.prid")))
+
+# the folder a typed path is in, listed quietly (Proj.peek): it replaces the
+# listing; a folder that is not there leaves things as they were, unsaid
+def Proj.peek.put(ok: Bool, +u: Ui, +o: J.Json) -> Ui:
+  match ok:
+    case True{}:
+      Ui.info_set(Ui.info_set(u, "proj.dir", J.Json.get_str(J.Json.get_obj(o, "result"), "dir", Proj.dir(u))), "proj.entries",
+        String.join(Proj.names(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "result"), "entries"))), SCon{Proj.sep(), SNil{}}))
+    case False{}:
+      Ui.error_put(u, "")
+
 def Proj.reply.f(found: Bool, +o: J.Json, +u: Ui) -> Ui:
   match found:
     case True{}:
@@ -5141,8 +5154,15 @@ def Proj.reply.f(found: Bool, +o: J.Json, +u: Ui) -> Ui:
 
 # an answer to the picker: the projects found fill its list, a listing
 # replaces the one shown, an added project closes it, an error shows in it
+def Proj.reply.p(peek: Bool, +o: J.Json, +u: Ui) -> Ui:
+  match peek:
+    case True{}:
+      Proj.peek.put(J.Json.get_bool(o, "ok", True{}), Ui.scratch_set(u, "@proj.prid", ""), o)
+    case False{}:
+      Proj.reply.f(Proj.found.mine(u, o), o, u)
+
 def Proj.reply(+o: J.Json, +u: Ui) -> Ui:
-  Proj.reply.f(Proj.found.mine(u, o), o, u)
+  Proj.reply.p(Proj.peek.mine(u, o), o, u)
 
 def Proj.join(+dir: String, +name: String) -> String:
   Bool.pick(String, String.ends_with(dir, "/"), dir ++ name, dir ++ "/" ++ name)
@@ -5233,10 +5253,67 @@ def Proj.path.rows(into: Bool, +l: I.Loc, +q: String) -> List<&2, PItem>:
     case False{}:
       [PItem{MSG.T.proj.add(l, q), "proj-add", q}, PItem{MSG.T.proj.goto(l, q), "proj-cd", q}, PItem{MSG.T.proj.createat(l, q), "proj-new", q}]
 
+# a folder's own name
+def Proj.base(+p: String) -> String:
+  Maybe.default(&2, String, List.last(&2, String, Proj.nonempty(String.split(p, '/'))), p)
+
+# a typed path with ~ written out (as typed while home is not known)
+def Proj.expand(+home: String, +p: String) -> String:
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(home)), Bool.or(String.eq(p, "~"), String.starts_with(p, "~/"))), home ++ String.drop(p, 1n), p)
+
+# the folder a typed path is being typed in ("" for one ending in a slash,
+# or a ~ path while home is not known)
+def Proj.typed.dir(+u: Ui, +q: String) -> String:
+  +x = Proj.expand(Ui.info(u, "proj.home"), q)
+  Bool.pick(String, Bool.or(Bool.or(String.ends_with(q, "/"), Bool.not(String.starts_with(x, "/"))), Bool.not(Bool.or(String.starts_with(q, "/"), String.starts_with(q, "~")))), "", Proj.parent(x))
+
+# typing a path: the folder it is typed in is listed (once each), so its
+# subfolders can complete it (Proj.complete)
+def Proj.peek.k(go: Bool, +u: Ui, +d: String) -> Act:
+  match go:
+    case True{}:
+      Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@proj.prid", Nat.show(Ui.rid(u))), "@proj.peek", d), "fs.list", Proj.on.kv(Proj.on(u), [J.KV{"path", J.Str{d}}]))
+    case False{}:
+      Act{u, Nil{}}
+
+def Proj.peek(+u: Ui) -> Act:
+  +d = Proj.typed.dir(u, Proj.query(u))
+  Proj.peek.k(Bool.and(Bool.and(Ui.flag(u, "proj"), Bool.not(String.is_empty(d))), Bool.and(Bool.not(String.eq(d, Proj.dir(u))), Bool.not(String.eq(d, Ui.scratch(u, "@proj.peek"))))), u, d)
+
+# the subfolders a typed name begins (hidden ones only for a name with a dot)
+def Proj.begun(ns: List<&2, String>, +b: String) -> List<&2, String>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      Proj.nonempty.k(Bool.or(Bool.not(String.starts_with(String.to_lower(n), String.to_lower(b))), Bool.and(String.starts_with(n, "."), Bool.not(String.starts_with(b, ".")))), n, Proj.begun(t, b))
+
+def Proj.names.rows(ns: List<&2, String>, +dir: String) -> List<&2, PItem>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> t:
+      PItem{n ++ "/", "proj-cd", Proj.join(dir, n)} <> Proj.names.rows(t, dir)
+
+def Proj.complete.k(here: Bool, +dir: String, +b: String, +ns: List<&2, String>) -> List<&2, PItem>:
+  match here:
+    case True{}:
+      Proj.names.rows(Proj.begun(ns, b), dir)
+    case False{}:
+      Nil{}
+
+# a path typed part way ("~/proj/stick"), in the folder listed: the
+# subfolders it begins come first ("stickhub/"), so Enter goes into one
+# rather than adding a folder that is not there. A name typed whole adds it
+def Proj.complete(+u: Ui, +q: String) -> List<&2, PItem>:
+  +d = Proj.typed.dir(u, q)
+  +b = Proj.base(q)
+  Proj.complete.k(Bool.and(Bool.and(Bool.not(String.is_empty(d)), String.eq(d, Proj.dir(u))), Bool.not(Proj.exact(Proj.entries(u), b))), Proj.dir(u), b, Proj.entries(u))
+
 def Proj.items.k(+l: I.Loc, path: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
   match path:
     case True{}:
-      Proj.path.rows(String.ends_with(q, "/"), l, q)
+      List.append(&2, PItem, Proj.complete(u, q), Proj.path.rows(String.ends_with(q, "/"), l, q))
     case False{}:
       Proj.items.q(l, String.is_empty(q), u, q, dir, ns)
 
@@ -5251,10 +5328,6 @@ def Proj.folders(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
 def Proj.tilde(+home: String, +p: String) -> String:
   Bool.pick(String, Bool.and(Bool.not(String.is_empty(home)), Bool.or(String.eq(p, home), String.starts_with(p, home ++ "/"))),
     "~" ++ String.drop(p, String.length(home)), p)
-
-# a folder's own name
-def Proj.base(+p: String) -> String:
-  Maybe.default(&2, String, List.last(&2, String, Proj.nonempty(String.split(p, '/'))), p)
 
 # a project the list may offer: live ones rank above the rest
 type PCand is Data:
@@ -16036,7 +16109,7 @@ def Bots.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 5n:
       Bots.edit(u)
     case 6n:
-      Act{Bots.bfield(u, value), Nil{}}
+      Proj.peek(Bots.bfield(u, value))
     case 7n:
       Bots.room.select(u, value)
     case 8n:
@@ -16241,7 +16314,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 29n:
       Proj.run.k(2n, u, value)
     case 30n:
-      Act{Proj.set(u, value, 0n), Nil{}}
+      Proj.peek(Proj.set(u, value, 0n))
     case 31n:
       Act{Ui.flag_off(u, "proj"), Nil{}}
     case 32n:
