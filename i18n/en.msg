@@ -1456,3 +1456,7 @@ upload.cap = attachments are limited to {mb} MB
 
 subagents.group.threads = Subthreads
 subagents.group.background = Background
+
+viewer.diff.more = {n, number} more lines not shown here
+
+viewer.diff.files.more = {n, number} more changed files not shown here

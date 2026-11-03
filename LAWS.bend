@@ -1,3 +1,4 @@
+import ./src/server/conversation-window.bend as CONVWINDOW
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
 
 import ./src/server/conversation-frame.bend as CONVFRAME
@@ -15741,3 +15742,20 @@ law conversation_floor_visible_text_nonempty:
   for +index: CONVINDEX.Index
   for +id: String
   {String.is_empty(CONVSHAPE.source_text(index, id)) == False{} : Bool}
+
+# Only independent validated RPC-ID admission; no root-size/fits premise.
+law conversation_root_reference_envelope_bounded:
+  for +rid: J.Json
+  for +result: J.Json
+  for admitted: {Nat.is_le(J.Json.bytes(rid), 32n) == True{} : Bool}
+  {Nat.is_le(J.Json.bytes(CONVFRAME.Control.envelope(rid, CONVWINDOW.Window.make(result))), 262144n) == True{} : Bool}
+
+# Canonical rendered content (with sidebar substitution) is retained exactly
+# in the separately framed control value. No aggregate-size claim.
+law conversation_root_region_retained:
+  for +result: J.Json
+  {J.Json.get_obj(J.Json.get_obj(CONVWINDOW.Window.make(result), "windowProjection"), "root") == CONVWINDOW.Window.root(J.Json.get_obj(result, "shown")) : J.Json}
+
+law conversation_root_wire_picture_constant:
+  for +result: J.Json
+  {J.Json.get(CONVWINDOW.Window.make(result), "shown") == Some{CONVWINDOW.Window.picture()} : Maybe<&2, J.Json>}

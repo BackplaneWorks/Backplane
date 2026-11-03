@@ -73,7 +73,7 @@ function bodyOf(r) {
 // The draft as the page holds it, where the hub has the draft as it went
 // on the wire (bounded, thin-host.js's boundedDraft): copied only along the
 // paths that hold it, so every other subtree stays the same object.
-function refill(n, wire, full) {
+export function refill(n, wire, full) {
   if (n === wire) return full;
   if (Array.isArray(n)) {
     let out = null;
