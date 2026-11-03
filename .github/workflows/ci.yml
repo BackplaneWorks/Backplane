@@ -157,6 +157,12 @@ jobs:
       - run: TEST_FULL=1 TEST_JOBS=2 scripts/test.sh
         env:
           BACKPLANE_CHROME: /usr/bin/google-chrome
+      - name: JSON surrogate browser contract
+        if: matrix.shard == 1
+        run: |
+          mkdir -p build/ui-laws
+          bend test/json_native_test.bend -o build/ui-laws/json_native.mjs
+          BACKPLANE_CHROME=/usr/bin/google-chrome bun test/tools/json_surrogate_browser_test.mjs build/ui-laws/json_native.mjs build/ui-laws/browser
       - name: Composer one-button layout contract
         if: matrix.shard == 1
         run: |
