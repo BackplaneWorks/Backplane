@@ -153,7 +153,7 @@ def Provider.managed(+s: M.State, +th: String, +p: String) -> Bool:
 def Hold.inherit(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
   +p = M.Thread.provider(M.State.thread.get(s, th))
   +model = Thread.model(M.State.thread.get(s, th))
-  +target = F.Target{p, model}
+  +target = {F.Target{p, model} : F.Target}
   +scope = Bool.pick(String, F.Limit.active(s, p, now), p, F.Target.key(target))
   +o = F.Limit.record(s, scope)
   Bool.pick(List<&2, M.Change>, Provider.managed(s, th, p) && String.is_empty(A.Accounts.id(s, th, p)) && F.Target.held(s, target, now) && Bool.not(Hold.current(s, p, "", 0n, model, now)),
