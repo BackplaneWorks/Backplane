@@ -687,3 +687,28 @@ Two preceding v2 resource attempts stopped before Bend and cost8credit-s each.
 Successful pilots cost9+11credit-s (**$0.00020**) with deletion verified; all
 six setup/transport/success attempts total57credit-s (**$0.00057**).
 No source law/proof, release workflow, installed compiler or live hub changed.
+
+### Retained emission admission and unsuccessful paging experiments (2026-11-03)
+
+| Change | Before | After |
+|---|---|---|
+| Normal `service-release.py js` retained-emission handoff | Copied verified JS into the legacy size-only cache; `build-js.sh` requested whole-build16GiB before looking up that cache, refusing small consumers before compile | Pass exact verified producer path/SHA256/import-tool key; verify before separate `compile-js`3GiB admission and again during atomic copy. All existing whole-build/check/proof floors and8GiB host reserve remain unchanged. Missing/corrupt/drifted input fails; no Bend fallback. |
+| Verify/copy retained33ce raw hub emission,15,919,342bytes | Old consumer did not reach reuse after admission refusal | Three actual copies:0.03/0.03/0.04s,22,244/21,836/21,336KiB peak RSS; every output SHA256 exactly `ca921838988fe844f7e1bc3f0040d5d30f4d9d139facecd76014c17c0c94185f`. Copy-only measurement, **not a Bun/producer/release qualification**. No paid compute. |
+| Paged module prototype, frozen33ce hub/web/mobile | Official hub147.340s /19,189,172KiB; web72.539s /8,773,704KiB (completed existing producer reused) | All three new compiler scopes OOM-killed at3,699,998,720bytes during `core/refview.bend`. No qualified output or speedup. Hub/web/mobile scope wall times40.129/22.702/44.353s; GNU compiler RSS unavailable after scope kill. |
+| Bounded groups within a module | Module-level paging failed at refview | Tiny16cases×4modes passed in11.837s /264,484KiB maximum child RSS under actual2GiB/no-swap scope; forward-call/forward-proof/late-false-proof controls reject. Focused refview still OOM after~52s. Last independent sample:anonymous3,626,995,712bytes,file35,483,648bytes,kernel27,246,592bytes. File cache was already reclaimed; anonymous allocation is the remaining problem. |
+
+Consumer controls13/13 (0.229s), admission16/16 (0.048s), existing producer
+attestation13/13 (0.010s), producer integration47/47 (0.674s) pass. These are
+offline boundary checks; no app binary, protected bake, full proof suite or
+release packaging was run. Streaming copy preserves raw bytes and does not
+stand in for the still-required final-output identity. The3GiB admission floor
+is an expected working-set allowance, **not a hard memory cap**; execution
+qualification must retain the runner's actual sub-4GiB no-swap caps.
+
+[Exact copy measurements](retained-emission-copy.json) and
+[paging experiment receipts](compiler-memory/paging-experiments/refview-v3.json)
+retain identities and raw-artifact hashes. Hub/web/mobile failed attempts cost
+67+37+71credit-s ($0.00175); focused refview64credit-s ($0.00064);
+tiny v3 controls21credit-s ($0.00021). All default Boat sandboxes were deleted
+and deletion verified. No larger VM or cap increase was used. **No qualified
+memory-fix trigger exists yet; RC2 remains paused.**
