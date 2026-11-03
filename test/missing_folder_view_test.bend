@@ -33,6 +33,7 @@ def main() -> IO(Unit):
     C.Check.str("a thread of the gone project says so", Bool.show(String.contains(gone("t2", ""), "This project's folder is missing")), "True")
     C.Check.str("it names the path", Bool.show(String.contains(gone("t2", ""), "/work/gone")), "True")
     C.Check.str("it offers Remove project", Bool.show(String.contains(gone("t2", ""), "proj-remove")) ++ Bool.show(String.contains(gone("t2", ""), "Remove project")), "TrueTrue")
+    C.Check.str("it asks where the folder is now", Bool.show(String.contains(gone("t2", ""), "ws-proj-move")) ++ Bool.show(String.contains(gone("t2", ""), "Use this folder")), "TrueTrue")
     C.Check.str("a second click removes (armed)", Bool.show(String.contains(gone("t2", "p2"), "Click again to remove")), "True")
     C.Check.str("a thread of a project that is there: nothing", gone("t1", ""), html(Nil{}))
     C.Check.str("the sidebar chip only when missing", html(V.View.gone.chip(True{})) ++ "|" ++ html(V.View.gone.chip(False{})), html([D.Dom.span("missing-note", "folder missing")]) ++ "|" ++ html(Nil{}))
