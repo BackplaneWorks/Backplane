@@ -26,7 +26,7 @@
 #                                  hub's deploy_main runs this (docs/deploy.md)
 #   BACKPLANE_DEV_SERVICE_ONLY=1 scripts/dev.sh stage DIR
 #                                  stage only the hub, the launcher, the
-#                                  matching web and LICENSE; no KiStack,
+#                                  matching web, KiStack and LICENSE; no
 #                                  helpers or CEF
 #   BACKPLANE_SKIP_CHECK=1           stage without type-checking (a follow
 #                                  deploy of main: CI checked it)
@@ -118,6 +118,8 @@ build_app() {
   mv -f "$dev/backplane-serve.new" "$dev/backplane-serve"
   cp deploy/backplane-launch.sh "$dev/backplane.new" && chmod 755 "$dev/backplane.new"
   mv -f "$dev/backplane.new" "$dev/backplane"
+  # KiStack's skills, as every build ships them (scripts/kistack.py)
+  scripts/build-kistack.sh "$dev/kistack"
   rm -f "$dev/backplane-voice"
   build_voice "$dev/backplane-voice"
   rm -f "$dev/backplane-kipc"
@@ -227,11 +229,13 @@ build_dist() {
     [ "$hubrc" = 0 ] || { say "the hub did not build"; exit 1; }
   fi
   cp deploy/backplane-launch.sh dist/backplane && chmod 755 dist/backplane
+  # KiStack's skills, pinned in this repository (deploy/kistack), in every
+  # build, the hub-only one too: a hub-only deploy once left it stale
+  scripts/build-kistack.sh dist/kistack
   if [ "$service_only" = 1 ]; then
     say "built $ver"
     return 0
   fi
-  scripts/build-kistack.sh dist/kistack
   build_voice dist/backplane-voice
   build_kipc dist/backplane-kipc || true
   build_browser dist/backplane-browser.tmp && mv -f dist/backplane-browser.tmp dist/backplane-browser && mv -f dist/backplane-browser.tmp.stamp dist/backplane-browser.stamp || true
@@ -280,12 +284,14 @@ stage() {
   cp -R dist/web build/dev-pkg/web
   # the hub ships Bun's and Bend's notices (scripts/js-licenses.sh)
   scripts/js-licenses.sh build/dev-pkg/licenses
+  # KiStack beside the hub, exactly the pinned commit, or no package
+  cp -R dist/kistack build/dev-pkg/kistack
+  python3 scripts/kistack.py check build/dev-pkg/kistack
   if [ "$service_only" = 1 ]; then
     cp dist/backplane dist/backplane-serve build/dev-pkg/
     [ -e LICENSE ] && cp LICENSE build/dev-pkg/
     return 0
   fi
-  [ -d dist/kistack ] && cp -R dist/kistack build/dev-pkg/kistack
   for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc; do
     [ -e "dist/$f" ] && cp "dist/$f" build/dev-pkg/
   done

@@ -181,7 +181,7 @@ jobs:
             mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
             set -- --windows-runtime "$RUNNER_TEMP/winrt"
           fi
-          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 3548e6f076e428dab4c6950b23d6deb06aa39f4a71523db95f78f0fb76245a1f --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 b7fcf1f3f3a4cf9860a24f72ea8d7de6a783272c626beb65325f4b895120d0d0 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

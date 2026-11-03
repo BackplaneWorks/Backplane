@@ -5,6 +5,7 @@ import gzip
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import struct
 import sys
@@ -13,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[2] / "scripts/service-release.py"
+REPO = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("service_release", SOURCE)
 S = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(S)
@@ -79,6 +81,8 @@ class ProducerTests(unittest.TestCase):
             (build / "licenses" / sub).mkdir(parents=True)
             (build / "licenses" / sub / name).write_text("fixture notice")
         helpers = self.helpers(build, target)
+        # KiStack, built from this repository's pinned copy
+        kistack = S.build_kistack(build)
         (web / "index.html.gz").write_bytes(gzip.compress((web / "index.html").read_bytes(), mtime=0))
         (web / "LICENSE.Backplane").write_text("fixture license")
         (build / "LICENSE.Backplane").write_text("fixture license")
@@ -91,7 +95,7 @@ class ProducerTests(unittest.TestCase):
         self.write(build / "SOURCE.json", {"fixture": True})
         self.write(build / "BUILD.json", {
             "status": "VERIFIED_GENUINE_SERVICE_ONLY_CONFIGURED_BUILD", "target": target, "serviceRuntime": "bun",
-            "service": service.name, "helpers": helpers,
+            "service": service.name, "helpers": helpers, "kistack": kistack,
             "source_commit": self.release["commit"], "source_tree": self.release["tree"], "version": S.VERSION,
             "versionStamp": S.VERSION, "telemetryChannel": "release", "compileInputs": S.compile_inputs(),
             "binary_sha256": S.digest(service), "webManifestSha256": S.digest(build / "WEB.json"),
@@ -357,6 +361,11 @@ class ProducerTests(unittest.TestCase):
         (source / "src/web").mkdir(parents=True, exist_ok=True)
         (source / "src/web/sw.js").write_text("// fixture worker")
         (source / "build/js/backplane-serve").mkdir(parents=True, exist_ok=True)
+        # the product's pinned KiStack (scripts/kistack.py reads it from the source)
+        if not (source / "deploy").exists():
+            (source / "deploy").mkdir()
+            shutil.copytree(REPO / "deploy/kistack", source / "deploy/kistack")
+            shutil.copyfile(REPO / "deploy/kistack.lock", source / "deploy/kistack.lock")
         for name in ("baked.js", "bin.js"):
             (source / "build/js/backplane-serve" / name).write_text("private fixture input")
         for name in ("bend", "bun"):
@@ -389,7 +398,7 @@ class ProducerTests(unittest.TestCase):
                "webNotices": S.reference(self.root / "notices.json")}
         return req
 
-    def mocked_build(self, request=None, outname="actual-output", host=("Linux", "x86_64"), extra=None, drop=None):
+    def mocked_build(self, request=None, outname="actual-output", host=("Linux", "x86_64"), extra=None, drop=None, nokistack=False):
         source = self.inputs()
         req = request or self.js_request("linux-x64", 62)
         out, calls = self.root / outname, []
@@ -428,6 +437,8 @@ class ProducerTests(unittest.TestCase):
                 self.assertEqual(env["BACKPLANE_JS_TARGET"], req["target"])
                 self.assertEqual(env["BACKPLANE_JS_BUN_RUNTIME"], str(self.root / "bun-runtime"))
                 self.helpers(out, req["target"])
+                if not nokistack:
+                    S.build_kistack(out)
                 if drop:
                     (out / drop).unlink()
                 return ""
@@ -522,6 +533,53 @@ class ProducerTests(unittest.TestCase):
         out, calls, req = self.mocked_build(request=self.js_request("windows-x64", 0x8664), outname="js-win-helpers")
         self.assertFalse(any(c[0] == "scripts/build-helpers.sh" for c in calls))
         self.assertEqual(S.read(out / "BUILD.json")["helpers"], {})
+        # but KiStack, as on every target
+        self.assertEqual(S.read(out / "BUILD.json")["kistack"]["rev"], self.pinned())
+
+    def pinned(self):
+        return [l.split()[1] for l in (REPO / "deploy/kistack.lock").read_text().splitlines() if l.startswith("rev ")][0]
+
+    def test_js_ships_the_pinned_kistack(self):
+        # release packages carried no KiStack from 0.12.0 on: every build has it now
+        out, calls, req = self.mocked_build(outname="js-kistack")
+        build = S.read(out / "BUILD.json")
+        self.assertEqual(build["kistack"]["rev"], self.pinned())
+        self.assertEqual((out / "kistack/REVISION").read_text().strip(), self.pinned())
+        self.assertTrue((out / "kistack/.claude-plugin/plugin.json").is_file())
+
+    def test_js_builds_kistack_when_the_helpers_did_not(self):
+        # an older product's build-helpers.sh makes none: the producer does
+        out, calls, req = self.mocked_build(outname="js-kistack-self", nokistack=True)
+        self.assertEqual(S.read(out / "BUILD.json")["kistack"]["rev"], self.pinned())
+
+    def test_js_refuses_a_source_without_kistack(self):
+        source = self.inputs()
+        shutil.rmtree(source / "deploy/kistack")
+        with self.assertRaisesRegex(ValueError, "deploy/kistack is missing"):
+            self.mocked_build(outname="js-nokistack", nokistack=True)
+
+    def test_component_carries_kistack_and_its_notice(self):
+        req = self.fixture()
+        out = self.root / "component"
+        S.component(req, self.root, out)
+        receipt = S.read(out / "SERVICE.json")
+        self.assertIn("kistack/REVISION", receipt["members"])
+        self.assertIn("kistack/skills/pcb/SKILL.md", receipt["members"])
+        self.assertEqual([p["version"] for p in receipt["packages"] if p["name"] == "kistack"], [self.pinned()])
+        S.check_kistack(out / "payload")
+        S.notices(out / "payload", receipt["packages"])
+
+    def test_component_refuses_a_build_without_kistack(self):
+        req = self.fixture()
+        shutil.rmtree(self.root / "build/kistack")
+        with self.assertRaisesRegex(ValueError, "No KiStack"):
+            S.component(req, self.root, self.root / "out")
+
+    def test_component_refuses_another_kistack(self):
+        req = self.fixture()
+        (self.root / "build/kistack/skills/pcb/SKILL.md").write_text("---\nname: pcb\n---\nsomething else\n")
+        with self.assertRaisesRegex(ValueError, "not the pinned"):
+            S.component(req, self.root, self.root / "out")
 
     def test_component_carries_every_helper_executable(self):
         req = self.fixture()

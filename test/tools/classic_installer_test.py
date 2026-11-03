@@ -28,6 +28,9 @@ class ClassicInstallerTest(unittest.TestCase):
             (service / 'backplane-serve').write_text('#!/bin/sh\nexit 91\n')
             (service / 'backplane-serve').chmod(0o755)
             (service / 'LICENSE').write_text('fixture')
+            # KiStack as the service component carries it (scripts/kistack.py)
+            subprocess.run(['python3', str(ROOT / 'scripts/kistack.py'), 'build', str(service / 'kistack')],
+                           check=True, capture_output=True)
             app = self.root / target / ('backplane-' + target)
             app.mkdir()
             (app / 'desktop-fixture').write_text('fixture')
@@ -47,6 +50,14 @@ class ClassicInstallerTest(unittest.TestCase):
             self.assertNotIn('backplane-bend/releases/', text, name)
         self.assertIn(f'REPO="{REPO}"', (ROOT / 'deploy/install.sh.in').read_text())
 
+    def test_a_payload_without_the_pinned_kistack_never_generates_a_public_installer(self):
+        # release packages carried none from 0.12.0 on
+        (Path(self.inputs[1]) / 'kistack/REVISION').write_text('0' * 40 + '\n')
+        result = self.generate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('has no pinned KiStack', result.stderr)
+        self.assertFalse((self.out / 'install.sh').exists())
+
     def test_missing_apple_silicon_never_generates_a_public_installer(self):
         result = self.generate(self.inputs[:6])
         self.assertNotEqual(result.returncode, 0)
@@ -64,6 +75,7 @@ class ClassicInstallerTest(unittest.TestCase):
             self.assertIn(f'{key}="{hashlib.sha256(archive.read_bytes()).hexdigest()}"', script)
             with tarfile.open(archive) as t:
                 self.assertIn(f'backplane-{target}/desktop/desktop-fixture', t.getnames())
+                self.assertIn(f'backplane-{target}/kistack/.claude-plugin/plugin.json', t.getnames())
         # Run the actual generated Darwin selector, stopping at the first network
         # call. No extraction, install, launch or remote mutation can occur.
         tools = self.root / 'tools'
