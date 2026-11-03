@@ -220,7 +220,7 @@ tour.body.buttons.phone = In a thread's toolbar menu, Settle takes it out of the
 tour.body.buttons.desktop = Settle takes a thread out of the active list. Snooze hides it until later. Fork starts a new thread from this one. Viewer opens the board, schematic, 3D and files beside it. Pin, archive and delete are there too.
 tour.body.bots.phone = A bot is an agent that stays between chats, with a name, a cat and a memory. Add one under Bots in the list, then mention it in any message: @scout look at the BOM.
 tour.body.bots.desktop = A bot is an agent that stays between chats, with a name, a cat and a memory. Add one under Bots in the sidebar, then mention it in any message: @scout look at the BOM.
-tour.body.agents = Backplane runs the Claude Code, Codex, Grok or Muse Code command-line program: install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads.
+tour.body.agents = Backplane runs an agent's command-line program (Claude Code, Codex, Grok, Muse Code, OpenCode, Pi or Oh My Pi): install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads.
 tour.body.keys.phone = API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. Dictation's OpenAI key is set in Settings on a computer or the web page.
 tour.body.keys.desktop = API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. Dictation needs an OpenAI key, set under Voice in Settings.
 tour.body.machines.phone = Each home folder runs one hub. Hubs on your computers find each other over Tailscale and sync each other's projects and threads in the background, so any one of them shows them all. A project still loading is faded and says syncing. In a message, >desktop: names a thread on the machine called desktop. The Hubs button lists the hubs this phone is paired with; this phone needs Tailscale on the same tailnet.
@@ -1393,6 +1393,7 @@ tasks.origin.launch = ← launched by {title}
 tasks.origin.delegate = ← delegated by {title}
 tasks.origin.parent = ← parent thread · {title}
 composer.offline = Not sent: reconnecting by itself. Your draft is kept; send it again once connected.
+composer.offline.back = Connected again. Your message was not sent: it is still in the composer, ready to send.
 composer.attachment.reload = This attachment could not be kept for reload. Send it before leaving this page.
 composer.attachment.restoring = Restoring attachments. Wait before sending or removing files.
 viewer.file.missing = The file is no longer in the folder: {name}
@@ -1455,5 +1456,3 @@ upload.cap = attachments are limited to {mb} MB
 
 subagents.group.threads = Subthreads
 subagents.group.background = Background
-
-composer.offline.back = Connected again. Your message was not sent: it is still in the composer, ready to send.

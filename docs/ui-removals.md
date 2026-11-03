@@ -31,12 +31,11 @@ an old allowance eligible as a fresh reading. A changed verified identity clears
 its former measurement. The composer layout and shared-pool phone label are
 unchanged.
 
-The sidebar dependency review covers the six changed modules in
+The sidebar dependency review covers the five changed modules in
 `sidebar-draft-inputs.json`: allowance projection and web output use only the
 existing snapshot/provider/model/clock inputs; `Acv.note` removes a status label;
-`View.chrome.tools` and `WB.browser.surface.k` remove static buttons. The merged-main translation source also restores the already-used
-`composer.offline.back` key, and its lookup tables are regenerated. No draft
-reader, sidebar key or bridge projection was added. The complete retained/full-output allowance and
+`View.chrome.tools` and `WB.browser.surface.k` remove static buttons. Main supplies the missing `composer.offline.back` catalog key and regenerated
+lookup tables. No draft reader, sidebar key or bridge projection was added. The complete retained/full-output allowance and
 sidebar hit tests qualify this source review before the full server build.
 
 Validation: full `scripts/check.sh` typechecking and the repository's accepted
