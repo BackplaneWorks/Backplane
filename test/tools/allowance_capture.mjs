@@ -44,9 +44,13 @@ try {
   assert.equal(await page.locator('#composer').inputValue(),'Draft 日本語 👩🏽‍💻');
   const heights=[];for(const scenario of ['stale','unknown','reset']) {
    await page.evaluate(s=>window.allowanceFixture(s),scenario);
-   const label=await page.locator('#allowance-chip').innerText();assert.equal(label,scenario==='unknown'?'Limits unknown':'Limits stale');
-   heights.push(await page.locator('.composer-model').evaluate(el=>el.getBoundingClientRect().height));
-   await page.locator('#allowance-chip').click();await page.locator('#allowance-details').waitFor();
+   if(scenario==='unknown')assert.equal(await page.locator('#allowance-chip').count(),0);
+   else {
+    assert.equal(await page.locator('#allowance-chip').innerText(),'39% left · shared');
+    heights.push(await page.locator('.composer-model').evaluate(el=>el.getBoundingClientRect().height));
+    await page.locator('#allowance-chip').click();await page.locator('#allowance-details').waitFor();
+    assert(!/stale|expired|Limits unknown/i.test(await page.locator('#allowance-details').innerText()));
+   }
    await page.screenshot({path:resolve(out,`${width}-${scenario}.png`)});
   }
   assert(heights.every(h=>Math.abs(h-heights[0])<1));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
@@ -55,6 +59,6 @@ try {
  assert.deepEqual(pageErrors,[]);
  const receipt={pageErrors,result:'PASS',scope:'Chromium rendered production Bend page/composer with synthetic snapshots and real Bend UI actions; not installed app or live provider data',fixtureSha256:sha(process.argv[2]),styleSha256:sha('src/web/style.css'),keyboardSha256:sha('src/web/workspace-keys.js'),captureScriptSha256:sha('test/tools/allowance_capture.mjs'),evidence};
  writeFileSync(resolve(out,'receipt.json'),JSON.stringify(receipt,null,2)+'\n');
- console.log('ok production composer rendered at 1440,390,320 widths; details, shared scope, drafts, Escape/focus, stale/unknown/reset and stable height');
+ console.log('ok production composer rendered at 1440,390,320 widths; details, shared scope, drafts, Escape/focus, last-known/empty/reset and stable height');
 } finally {await browser.close();}
 process.exit(0);

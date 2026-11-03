@@ -11529,10 +11529,20 @@ def Hub.accounts.retire(h: Hub, +now: Nat) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, AccountsRpc.retire.step(ACCT.Accounts.threads(st), st, now))
 
+# The private collector publishes only bounded default-Claude windows. Named
+# accounts already enter accounts.inventory and the same-provider selector.
+def Hub.accounts.allowance(+st: M.State, +snapshot: String, +now: Nat) -> List<&2, M.Change>:
+  +o = J.Json.get_obj(ACCT.Accounts.parse(snapshot), "default_allowance")
+  +value = J.Json.show(o)
+  Bool.pick(List<&2, M.Change>, String.eq(J.Json.get_str(o, "provider", ""), "claude") &&
+    String.eq(J.Json.get_str(o, "source", ""), "claude-cli-usage") &&
+    Nat.is_le(J.Json.get_nat(o, "attempted_at", 0n), now) &&
+    Bool.not(String.eq(M.Setting.get(st, "allowance.claude", ""), value)), [M.SettingSet{"allowance.claude", value, now}], Nil{})
+
 def Hub.accounts.found(h: Hub, +snapshot: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      IO.bind(Hub, Hub, Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{ACCT.Accounts.changes(st, now, snapshot), Nil{}}), h2 => IO.bind(Hub, Hub, Hub.accounts.retire(h2, now), h3 => Hub.accounts.broadcast(h3, snapshot)))
+      IO.bind(Hub, Hub, Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{List.append(&2, M.Change, ACCT.Accounts.changes(st, now, snapshot), Hub.accounts.allowance(st, snapshot, now)), Nil{}}), h2 => IO.bind(Hub, Hub, Hub.accounts.retire(h2, now), h3 => Hub.accounts.broadcast(h3, snapshot)))
 
 def Hub.accounts.active(ts: List<&2, M.Thread>, +st: M.State, +profile: String) -> Bool:
   match ts:
