@@ -192,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "51df44858136856e1414f5824fb6168067077cfe52cc60cbf120342a8056f492"
+    "src/web/view.bend": "69b9794e0b9353f4c324b77c5ff435327a59bd0c4eab6a022dc0aa31a87be834"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -946,5 +946,18 @@
     "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
     "work": "w-t1793604413-1188217-1319751",
     "qualification": "Exact full-output24 passed including composer module; menu40 and compact37 also passed. Pin-only successor, no runtime or final-global-proof qualification."
+  },
+  "readerMainUnionReview": {
+    "merge": "fc3609aecf42579b32a455a3e5324525e00a85cf",
+    "reader": "c6e47e0fafeaab62b5cf3c5c949dd360de1636d1",
+    "main": "41b988b220e2c3854e727ce446cf54a70c2df60c",
+    "changedDependencies": [
+      "src/web/view.bend"
+    ],
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "assertions": 24,
+    "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+    "work": "w-t1792701529-415584-1349602",
+    "scope": "Union of the reader menu/history change with main through #807; no new sidebar draft readers, unknown @ retention, private image keys or transport authority beyond the two reviewed sides."
   }
 }
