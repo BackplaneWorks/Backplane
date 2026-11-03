@@ -389,7 +389,9 @@ def verified_lowmemory(ref, base, release, compiler, pre, low=None, bun=None):
     tools = report.get("tools")
     require(isinstance(tools, dict) and isinstance(tools.get("bend"), dict) and tools["bend"].get("sha256") == compiler["sha256"],
             "Low-memory report used another compiler")
-    require(all(HEX.fullmatch(str(source.get(k, ""))) for k in low.SOURCE_KEYS), "Low-memory report lacks the content or import-closure identity")
+    require(all(HEX.fullmatch(str(source.get(k, ""))) for k in (*low.SOURCE_KEYS, "exec_set_sha256")),
+            "Low-memory report lacks the content, import-closure or executable-set identity")
+    require(source["exec_set_sha256"] == low.exec_identity(ROOT), "Low-memory report is for another executable-bit set")
     require(bun is not None and isinstance(tools.get("bun"), dict) and tools["bun"].get("sha256") == bun["sha256"],
             "Low-memory report used another Bun binary")
     require(isinstance(report.get("protected"), dict) and set(report["protected"]) == set(low.PROTECTED)
