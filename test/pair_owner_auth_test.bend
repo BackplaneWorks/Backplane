@@ -41,4 +41,4 @@ def main() -> IO(Unit):
     C.Check.str("lock route unaffected", allowed(True{}, hs("100.64.0.8:3787"), "POST", "/lock/acquire"), "False")
     C.Check.str("OAuth unaffected", allowed(True{}, hs("100.64.0.8:3787"), "POST", "/oauth/google"), "False")
     C.Check.str("pair prefix cannot grant", allowed(True{}, hs("100.64.0.8:3787"), "POST", "/bots/pair-extra"), "False")
-    C.Check.str("general auth still denies unpaired tailnet request", Bool.show(A.Auth.allowed(True{}, hs("100.64.0.8:3787"), "/debug/perf", "AUTH-FIXTURE")), "False")
+    C.Check.str("general auth still denies unpaired tailnet request", Bool.show(A.Auth.allowed(hs("100.64.0.8:3787"), "/debug/perf", "AUTH-FIXTURE")), "False")

@@ -757,7 +757,7 @@ def Shell.joined(+i2: Chan(S.Msg), +q: Chan(ShellMsg), +tag: String, since: Nat,
   do IO<Unit>:
     +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
     +gen : U32 <- Fwd.gen()
-    ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, i2, S.Join{0, out, since, origin, gen, 0, False{}})
+    ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, i2, S.Join{0, out, since, origin, gen, 0})
     IO.spawn(Unit, Fwd.loop(S.Fuel.forever(), out, q, tag, i2, gen, 0n))
 
 # Save the departing installed state before an input step replaces it.
@@ -3128,7 +3128,7 @@ def Shell.fonts(m: Maybe<&1, L.Ty>) -> IO(L.Ty):
 # the first join: the in-process hub hands its state over (JoinHere); a
 # hub joined over a link sends its log like any other machine's
 def Shell.join.first(+inbox: Chan(S.Msg), +out: Chan(S.Wire), +lo: String, +gen: U32) -> IO(Result<&1, &1, S.Msg, Unit>):
-  Bool.pick(IO(Result<&1, &1, S.Msg, Unit>), String.is_empty(lo), Chan.send(S.Msg, inbox, S.JoinHere{0, out, gen}), Chan.send(S.Msg, inbox, S.Join{0, out, 0n, "", gen, 0, False{}}))
+  Bool.pick(IO(Result<&1, &1, S.Msg, Unit>), String.is_empty(lo), Chan.send(S.Msg, inbox, S.JoinHere{0, out, gen}), Chan.send(S.Msg, inbox, S.Join{0, out, 0n, "", gen, 0}))
 
 def Shell.twin.go(ev: Window, x: Window & U32, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String, +tok: String) -> IO(Unit):
   (pw, +xid) = x

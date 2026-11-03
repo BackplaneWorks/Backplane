@@ -18,8 +18,8 @@ difference between two readings (`PF.Stats.since`), so the overlay,
   (spans in ms, heaviest first, then counts, then gauges). Also
   `/debug/perf.json` (spans in µs, with `kind`, `mean`, `p50`, `p90`,
   `p99`) and `/debug/log` (the last 512 log lines). They are gated like
-  `/img`: loopback and the owner's tailnet devices, or the pairing token.
-  `curl -s 127.0.0.1:3787/debug/perf`
+  `/img`: the pairing token (from `<home>/token`) or a paired device's.
+  `printf 'Authorization: Bearer %s\n' "$(cat ~/.backplane-bend/token)" | curl -s -H @- 127.0.0.1:3787/debug/perf`
 - **Trace**: `BACKPLANE_TRACE=/tmp/t.json dist/backplane` writes every
   span, count and log line as a Chrome trace event. Open it in
   ui.perfetto.dev. Each area (ui, hub, boot, ...) gets its own row. Events

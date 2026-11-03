@@ -11797,18 +11797,32 @@ law mail_plane_indexed_hidden:
   for +u: U.Ui
   for ix: U.SIx
   {BV.Bv.plane.build.ix(False{}, u, ix) == BV.Bv.plane.none() : PLN.Plane}
-# Browser provenance is mandatory even when a connection is otherwise trusted.
+# Browser provenance is mandatory even with the token.
 law auth_foreign_origin_denied:
-  for +trusted: Bool
   for +path: String
   for +token: String
-  {AUTH.Auth.allowed(trusted, [HTTPAUTH.Header{"origin", "https://foreign.example"}, HTTPAUTH.Header{"host", "localhost:3787"}], path, token) == False{} : Bool}
+  {AUTH.Auth.allowed([HTTPAUTH.Header{"origin", "https://foreign.example"}, HTTPAUTH.Header{"host", "localhost:3787"}], path, token) == False{} : Bool}
 
 law auth_empty_remote_token_denied:
-  {AUTH.Auth.allowed(False{}, Nil{}, "/ws?token=", "") == False{} : Bool}
+  {AUTH.Auth.allowed(Nil{}, "/ws?token=", "") == False{} : Bool}
 
 law auth_cookie_prefix_denied:
-  {AUTH.Auth.allowed(False{}, [HTTPAUTH.Header{"cookie", "bp_token=secret-extra"}], "/ws", "secret") == False{} : Bool}
+  {AUTH.Auth.allowed([HTTPAUTH.Header{"cookie", "bp_token=secret-extra"}], "/ws", "secret") == False{} : Bool}
+
+# This machine is no credential: a request with a Host naming it, or with
+# no Host at all, and without the token, is refused like any other
+law auth_loopback_host_needs_token:
+  {AUTH.Auth.allowed([HTTPAUTH.Header{"host", "127.0.0.1:3787"}], "/ws", "secret") == False{} : Bool}
+
+law auth_localhost_needs_token:
+  {AUTH.Auth.allowed([HTTPAUTH.Header{"host", "localhost:3787"}], "/mcp/t1", "secret") == False{} : Bool}
+
+law auth_no_host_needs_token:
+  {AUTH.Auth.allowed(Nil{}, "/ws", "secret") == False{} : Bool}
+
+# and with the token it is let in
+law auth_loopback_with_token:
+  {AUTH.Auth.allowed([HTTPAUTH.Header{"host", "127.0.0.1:3787"}], "/ws?token=secret", "secret") == True{} : Bool}
 
 # The OAuth navigation envelope is separate from general connection trust.
 # These laws do not replace the pending-state and PKCE checks in Google.finish.
@@ -11835,9 +11849,8 @@ law auth_oauth_local_document_reaches_state_check:
   {AUTH.Auth.oauth(True{}, [HTTPAUTH.Header{"host", "127.0.0.1:3787"}, HTTPAUTH.Header{"sec-fetch-site", "cross-site"}, HTTPAUTH.Header{"sec-fetch-mode", "navigate"}, HTTPAUTH.Header{"sec-fetch-dest", "document"}], "GET", "/oauth/google?state=pending&code=code", token) == True{} : Bool}
 
 law auth_oauth_document_does_not_authorize_websocket:
-  for +trusted: Bool
   for +token: String
-  {AUTH.Auth.allowed(trusted, [HTTPAUTH.Header{"host", "127.0.0.1:3787"}, HTTPAUTH.Header{"sec-fetch-site", "cross-site"}, HTTPAUTH.Header{"sec-fetch-mode", "navigate"}, HTTPAUTH.Header{"sec-fetch-dest", "document"}], "/ws", token) == False{} : Bool}
+  {AUTH.Auth.allowed([HTTPAUTH.Header{"host", "127.0.0.1:3787"}, HTTPAUTH.Header{"sec-fetch-site", "cross-site"}, HTTPAUTH.Header{"sec-fetch-mode", "navigate"}, HTTPAUTH.Header{"sec-fetch-dest", "document"}], "/ws", token) == False{} : Bool}
 # ---- PCB viewer text ----
 law pcb2_hidden_text_draws_nothing:
   for +at: B.Pt
@@ -12677,11 +12690,7 @@ law pair_msg_no_link_qr:
 # found before any window joins, so Wire.pair, which reaches only an open
 # view, never told it, and Settings said there was none)
 law thin_pair_told:
-  {J.Json.show(MPCREDIT.Hub.thin.pair.k(False{}, "{\"t\":\"info\",\"info\":{\"pair\":\"http://h:1/#token=t\",\"pair.qr\":\"10\"}}", J.Json.obj([J.KV{"a", J.Str{"1"}}]))) == "{\"pair.qr\":\"10\",\"pair\":\"http://h:1/#token=t\",\"a\":\"1\"}" : String}
-
-# one let in the legacy way (no token) never does
-law thin_pair_legacy:
-  {J.Json.show(MPCREDIT.Hub.thin.pair.k(True{}, "{\"t\":\"info\",\"info\":{\"pair\":\"http://h:1/#token=t\",\"pair.qr\":\"10\"}}", J.Json.obj([J.KV{"a", J.Str{"1"}}]))) == "{\"a\":\"1\"}" : String}
+  {J.Json.show(MPCREDIT.Hub.thin.pair.k("{\"t\":\"info\",\"info\":{\"pair\":\"http://h:1/#token=t\",\"pair.qr\":\"10\"}}", J.Json.obj([J.KV{"a", J.Str{"1"}}]))) == "{\"pair.qr\":\"10\",\"pair\":\"http://h:1/#token=t\",\"a\":\"1\"}" : String}
 # ---- F1: the far feed made a slice at a time (far.bend Fr.feed.some) ----
 # folding every slice of 2 lines is the feed made from the whole log at once
 law far_feed_sliced:
