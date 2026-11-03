@@ -124,6 +124,21 @@ class PacketTest(unittest.TestCase):
         self.assertIn('build/generated.bend', data['files'])
         self.assertIn('lib.bend', data['files'])
 
+    def test_generated_manifest_under_build_is_still_hash_verified(self):
+        Path('packet.json').unlink()
+        name = 'build/packets/packet.json'
+        with contextlib.redirect_stdout(io.StringIO()):
+            packet.create(['root.bend'], [], name, [])
+        key = packet.digest(name)
+        packet.verify(name, key)
+        Path('unexpected.bend').write_text('import Base\n')
+        with self.assertRaisesRegex(ValueError, 'unexpected source'):
+            packet.verify(name, key)
+        Path('unexpected.bend').unlink()
+        Path(name).write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'manifest hash mismatch'):
+            packet.verify(name, key)
+
     def test_archive_cannot_bypass_private_file_filter(self):
         Path('.env').write_text('private fixture, never packed')
         with self.assertRaisesRegex(ValueError, 'private/generated capture'):
@@ -143,6 +158,23 @@ class PacketTest(unittest.TestCase):
             pattern = packet.literal_pattern(name)
             self.assertTrue(fnmatch.fnmatch(name, pattern))
             self.assertFalse(fnmatch.fnmatch(name+'x', pattern))
+
+    def test_parallel_transport_uses_exact_runner_allowlist(self):
+        captured = []
+
+        def execute(program, argv):
+            # A second worker creates its archive after our initial inventory.
+            Path('.ci-packet/late-other-job.tar.gz').write_bytes(b'other job')
+            captured.extend(argv)
+            raise RuntimeError('captured exec')
+
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(packet.os, 'execvp', side_effect=execute):
+            with self.assertRaisesRegex(RuntimeError, 'captured exec'):
+                packet.run('packet.json', self.key, ['true'], 30, 'default')
+        includes = {captured[i+1] for i, value in enumerate(captured) if value == '--include-file'}
+        self.assertEqual(includes, {packet.SELF, packet.PIN, '.ci-packet/'+self.key+'.tar.gz'})
+        self.assertNotIn('.ci-packet/late-other-job.tar.gz', includes)
+        self.assertNotIn('--exclude', captured)
 
     def test_transport_cache_is_deterministic_and_repairs_corruption(self):
         with contextlib.redirect_stdout(io.StringIO()):
