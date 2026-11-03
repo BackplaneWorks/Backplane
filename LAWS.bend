@@ -4841,7 +4841,7 @@ law subs_shell_not_agent:
   {SB.Subs.count(M.State.replay([M.SettingSet{"bg.t1", "b\tRunning\tc2\tscripts/check.sh\tshell\na\tx\tc1\tList files\tsubagent", 1n}], M.State.empty()), "t1") == 1n : Nat}
 
 law subs_badge:
-  {SB.Subs.badge(0n) ++ "|" ++ SB.Subs.badge(1n) ++ "|" ++ SB.Subs.badge(3n) == "|1 agent|3 agents" : String}
+  {SB.Subs.badge(0n) ++ "|" ++ SB.Subs.badge(1n) ++ "|" ++ SB.Subs.badge(3n) == "|1 subthread|3 subthreads" : String}
 
 # A presentation page uses actual identities, including finished rows;
 # the signatures saved when closing a panel are a different list.
@@ -11440,7 +11440,7 @@ law webphone_model_name_kept:
   {WPH.VLabel.option(I18.Ja{}, "agent.model", "dark") == "dark" : String}
 
 law webphone_count_ungrouped:
-  {WPH.View.sub.badge(I18.En{}, 1200n) == "1200 agents" : String}
+  {WPH.View.sub.badge(I18.En{}, 1200n) == "1200 subthreads" : String}
 
 law webphone_count_japanese:
   {WPH.View.sub.badge(I18.Ja{}, 1200n) == "エージェント1200件" : String}

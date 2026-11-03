@@ -141,7 +141,7 @@ def main() -> IO(Unit):
     C.Check.str("phone plane ja", seen(phone.plane("ja"), "ここをホームにする"), "ここをホームにする")
     C.Check.str("compact idle en", J.Json.get_str(J.Json.get_obj(screen("en"), "island"), "headline", "?"), "All agents idle")
     C.Check.str("compact idle ja", J.Json.get_str(J.Json.get_obj(screen("ja"), "island"), "headline", "?"), "すべてのエージェントが待機中")
-    C.Check.str("subagent badge en", W.View.sub.badge(I.En{}, 1200n), "1200 agents")
+    C.Check.str("subthread badge en", W.View.sub.badge(I.En{}, 1200n), "1200 subthreads")
     C.Check.str("subagent badge ja", W.View.sub.badge(I.Ja{}, 1200n), "エージェント1200件")
     C.Check.str("subagent idle panel en", W.View.sub.panel(I.En{}, Nil{}), "0 done")
     C.Check.str("subagent idle panel ja", W.View.sub.panel(I.Ja{}, Nil{}), "完了0件")

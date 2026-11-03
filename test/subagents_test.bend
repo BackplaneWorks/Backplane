@@ -269,7 +269,7 @@ def main() -> IO(Unit):
     C.Check.str("shut by hand, a working panel stays shut", panel.with(stepped(), U.Ui.infos(act.ui(U.Ui.act(U.Ui.init(110n), "subs-shut", SB.Subs.panel.ask(True{}, "t100-1", SB.Subs.rows(state(stepped()), Map.new(&2, String), "t100-1", 110n)))))), "0|1 at work|0")
     C.Check.str("a background shell is listed by its kind", rows(shell()), "b3|shell: scripts/check.sh|running|scripts/check.sh|open|0|0;")
     C.Check.str("a background shell is not an agent", SB.Subs.badge(SB.Subs.count(state(shell()), "t100-1")), "")
-    C.Check.str("the sidebar's count", SB.Subs.badge(SB.Subs.count(state(stepped()), "t100-1")) ++ "/" ++ SB.Subs.badge(SB.Subs.count(state(stepped.ended()), "t100-1")), "1 agent/")
+    C.Check.str("the sidebar's count", SB.Subs.badge(SB.Subs.count(state(stepped()), "t100-1")) ++ "/" ++ SB.Subs.badge(SB.Subs.count(state(stepped.ended()), "t100-1")), "1 subthread/")
     C.Check.str("working while the turn runs", status(started()), "working")
     C.Check.str("waiting after the turn", status(done()), "waiting")
     C.Check.str("phase after the turn", phase(done()), "Monitoring 1 task")
