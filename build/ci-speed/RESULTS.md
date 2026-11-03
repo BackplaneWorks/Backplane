@@ -586,3 +586,45 @@ New Boat spend **$0**: no VM was started, controls used the existing owned host.
 The protected checker and project laws/proofs were not edited. Broad proof,
 release and installer builds remain omitted; no memory target or full-CI pass
 is inferred from these small controls.
+
+
+## Module-mode cap failure and proof parallelism (2026-11-03)
+
+The frozen273 module/compact hub trial **failed the6GB target**. Matching
+systemd scope `run-p1355330-i1355738.scope` reports kernel `oom-kill`,
+MemoryMax6,000,000,000B, MemoryPeak5,999,996,928B and285.809s wall. The
+process stopped after152 module boundaries, with15,985 definitions reached;
+no emit or web measurement exists. Sampled process high-water5,426,972KiB
+is not the final aggregate scope peak. Small module boundaries repeatedly
+spent about4.8s in check/compaction/collection, so this candidate also fails
+our speed goal. Its unchanged cap will not be retried. [Failure receipt and
+raw checkpoints](compiler-memory/module-cap-failure/RESULT.json).
+
+| Change / trial | Before | After / decision |
+|---|---|---|
+| Module-prefix checks, compact interfaces, boundary collection | Completed frozen273 hub emit13.56GiB /108.928s; instrumented source baseline13.37GiB /162.116s | **OOM**,6GB scope /285.809s, no output. Rejected as a deployable improvement; platforms/instrumentation differ |
+| Exact proof partition planning | One canonical root containing3,149 laws |32 partitions planned in4.74s /51,524KiB; all declaration blocks unchanged, exact-once primary law ownership, all original imports and444-file source union covered. **Planning only**, worker wall/RSS and critical path unmeasured |
+
+`scripts/proof-shards.py` generates conservative local helper/method/import
+closures; unknown canonical syntax fails closed. Unused helpers and imports
+are still checked somewhere. Every selected canonical declaration is copied
+byte-for-byte, and every generated pair passes the existing shape check.
+The partition and actual compiler/library/verdict/guard bytes are bound by a
+manifest. Execution requires an inherited native bend flock and a finite
+no-swap scope no larger than7GiB; a passing worker must also peak below3GiB. The join requires every distinct expected
+worker receipt and rechecks the existing bendok verdict, source/tool identity,
+input stability and finite measurements. Missing, failed, duplicated, corrupt
+or stale results cannot make a passing gate. No proof pass cache is enabled.
+
+Eleven fast controls pass in0.31s /27,512KiB, including dropped-law and
+unused-import-change controls, compiler-byte/mode drift, unknown syntax,
+symlink parents and missing/duplicated/false-green worker results. The existing
+full proof gate is not replaced until real shards and typed theorem mutations
+qualify the generated programs. No full release-proof success, <3GiB actual
+worker peak, new parallel critical path or2-minute complete CI is claimed.
+Next execution must use available admitted workers without duplicating the
+build owner's productive proof/store-recovery campaigns. Hub emit, complete
+web bundle, proofs and tests can run on separate hosts; independent module
+compilation/linking remains unavailable in this compiler experiment.
+New Boat spend for the failed cap run and planning/tests: **$0** (owned h@ host
+and cheap local planning only). No Alpha, installed app or live PID action.
