@@ -364,18 +364,36 @@ export function installComposerFocus({ document: doc = document, window: win = w
   };
 }
 
-export function installWorkspaceKeys({ dispatch, document: doc = document, platform = navigator.platform, escNext = null, clearProbe = null, composer = null }) {
-  let palettePending = false;
+export function installWorkspaceKeys({ dispatch, document: doc = document, platform = navigator.platform, escNext = null, clearProbe = null, composer = null, now = () => Date.now() }) {
+  // (the time Commands was asked for while the hub draws it; 0 once drawn,
+  // or after 2 s if it never was)
+  let palettePending = 0, pendingText = '';
   doc.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
     if (doc.querySelector('.tour,.lightbox') || doc.querySelector('.draw-back') || doc.querySelector('.improvements:not([hidden])')) return; // The active overlay owns every key.
     const palette = doc.querySelector('.workspace-palette');
-    if (palette) palettePending = false;
+    if (palette || now() - palettePending > 2000) { palettePending = 0; pendingText = ''; }
     // Queue the explicit close even while the hub is still drawing the open.
     if (palettePending && event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-      palettePending = false;
+      palettePending = 0; pendingText = '';
       event.preventDefault(); event.stopImmediatePropagation();
       dispatch('ws-palette-close', ''); composer?.claim(true); return;
+    }
+    // Typing meanwhile is the query's, not the draft's, and Enter runs the
+    // command it finds (a quick "Ctrl+K archive Enter" put its first letters
+    // in the composer, and Enter ran the unfiltered first command)
+    if (palettePending && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const key = typeof event.key === 'string' ? event.key : '';
+      if (key.length === 1 || key === 'Backspace') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        pendingText = key === 'Backspace' ? pendingText.slice(0, -1) : pendingText + key;
+        dispatch('ws-palette-query', pendingText); return;
+      }
+      if (key === 'Enter' && !event.shiftKey) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        palettePending = 0; pendingText = '';
+        dispatch('ws-palette-enter', ''); return;
+      }
     }
     if (palette) {
       const action = { Escape: 'ws-palette-close', Enter: 'ws-palette-enter', ArrowUp: 'ws-palette-move', ArrowDown: 'ws-palette-move' }[event.key];
@@ -448,7 +466,8 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
     }
     event.preventDefault(); event.stopImmediatePropagation();
     if (event.repeat && (action[0] === 'ws-palette-open' || action[1] === 'palette' || action[1] === 'term')) return;
-    if (action[0] === 'ws-palette-open' || action[0] === 'ws-key' && action[1] === 'palette') palettePending = true;
+    // (only an open: the same chord shuts a palette on screen)
+    if ((action[0] === 'ws-palette-open' || action[0] === 'ws-key' && action[1] === 'palette') && !palette) { palettePending = now(); pendingText = ''; }
     dispatch(...action);
   }, true);
 }
