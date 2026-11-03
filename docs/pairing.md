@@ -12,12 +12,30 @@ editable; no permission or network lookup is needed.
 
 An invitation expires after ten minutes and works once, whether redeemed by
 link, QR or code. Create a separate invitation for each device. Wrong, expired,
-used and rate-limited codes have separate responses. A short code needs the hub
+used, revoked and rate-limited codes have separate responses.
+
+The hub records every invitation it issues (hashes only, in `devices-v1.json`
+beside the devices): when it was issued, whether it was used, when and by which
+device, and whether it was revoked. **Settings → Devices → Pairing links** lists
+them, newest first, and each one not yet used, or used by a device that still
+has access, has its own Revoke. Revoking an unused link stops it from pairing
+anything; revoking a used one also revokes the device it paired and closes that
+device's connections. A hub pairs only with a link it issued, recorded and has
+not revoked; one it cannot record is never issued. The newest hundred finished
+links stay listed. A short code needs the hub
 address: Backplane does not introduce a public code-resolver service. Both
 devices need a route to the hub, usually its LAN or tailnet.
 
 The HTTPS/HTTP link opens a web connection page and offers **Open in Backplane**
-for installed apps. iOS/Android handle the existing `backplane://pair` scheme;
+for installed apps. A `backplane://pair` link reaches the desktop app from
+anywhere (a web page, a message), so the app pairs at once only with one of
+the person's own hubs: its own service, the hub it is already paired with, or
+one its own service knows (`POST /auth/known`: the hub's own addresses, the
+owner's machines it found on the tailnet or in `BACKPLANE_PEERS`, and the
+linked hubs it verified as the owner's). That hub then refuses a link it did
+not issue or has revoked. For any other address the app asks first, naming
+it, with Cancel the default. Links pasted, scanned or typed inside the app
+pair as before. iOS/Android handle the existing `backplane://pair` scheme;
 desktop packages register it too. This explicit web fallback works with
 user-owned hub domains; universal/app links on arbitrary hub domains are not
 claimed. A hosted HTTPS page does not bypass browser mixed-content rules.
@@ -34,7 +52,7 @@ Invitation secrets are in fragments, removed from browser history before normal
 app handling, and exchanged in POST authorization headers. They never contain
 the hub's long-lived credential. Issued device tokens are random; the private
 atomic `devices-v1.json` registry stores their hashes, names and activity times.
-Invitations live only in memory and are invalid after a hub restart. Enrollment
+An invitation still open when the hub restarts keeps working until it expires. Enrollment
 uses a hub-wide ten-attempt/minute bucket. Registry read/write failures fail
 closed and never rotate or rewrite the existing hub token file.
 
@@ -56,7 +74,9 @@ linking and its existing owner-authentication rules are unchanged.
 
 `node --test desktop/test/pair-browser.test.cjs desktop/test/pairing-links.test.cjs test/tools/pairing_devices_test.cjs`
 checks the existing exchange, strict link parsing, persistence, single-use
-link/code state, expiry, rate limiting, write failures and listener route hints.
+link/code state, expiry, rate limiting, write failures, listener route hints,
+the invitation records and their revocation, and which origins count as the
+owner's hubs.
 
 `bun test/tools/pairing_ux_e2e.ts EMITTED_HUB_JS WEB_DIRECTORY` uses a private hub,
 stand-in providers and a fixture-only clock preload. It covers the HTTP flow,
