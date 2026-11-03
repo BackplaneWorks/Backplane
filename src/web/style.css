@@ -771,6 +771,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .asks:empty { display: none; }
 .gone-note { border: 1px solid var(--warn); padding: 10px 12px; }
 .gone-note p { color: var(--dim); margin: 6px 0 10px; overflow-wrap: anywhere; }
+.gone-move { display: flex; gap: 8px; margin-bottom: 8px; }
+.gone-move .field { flex: 1; min-width: 0; }
 .ask { border: 1px solid var(--st-need); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 860px; }
 .ask-head { color: var(--st-need); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .ask-detail { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
