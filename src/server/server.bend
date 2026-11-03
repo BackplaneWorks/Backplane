@@ -4699,6 +4699,15 @@ def Plot.watch.all(split: Bool, +client: U32, +kind: String, +root: String, +pat
     case False{}:
       [Plot.watch(client, kind, root, path, tree, stamps)]
 
+# a history step plotted ahead (hub.bend's Warm.outs: kind "warm:board"
+# or "warm:schematic"), kept as a version no view watches (PV.PWarm)
+def Plot.watch.any(warm: Bool, +client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String, +stamps: Bool) -> List<&2, PV.PMsg>:
+  match warm:
+    case True{}:
+      [PV.PWarm{Bool.pick(U32, String.eq(kind, "warm:schematic"), 1, 0), root, path}]
+    case False{}:
+      Plot.watch.all(String.starts_with(kind, "split:"), client, kind, root, path, tree, sheet, stamps)
+
 def Plot.puts(ms: List<&2, PV.PMsg>, +m: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
   match ms:
     case Nil{}:
@@ -10722,7 +10731,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet, +stamps}:
       do IO<Hub>:
-        Plot.puts(Plot.watch.all(String.starts_with(kind, "split:"), client, kind, root, path, tree, sheet, String.eq(stamps, "1")), Cfg.pv(cfg))
+        Plot.puts(Plot.watch.any(String.starts_with(kind, "warm:"), client, kind, root, path, tree, sheet, String.eq(stamps, "1")), Cfg.pv(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:
