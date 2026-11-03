@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -35,6 +36,26 @@ class ExistingArtifactTests(unittest.TestCase):
 
     def test_accepts_matching_existing_artifact(self):
         self.assertEqual(self.bind()[0], self.apk)
+
+    def test_accepts_actual_configured_artifact_layout(self):
+        downloaded = self.root / "downloaded"
+        nested = downloaded / "bootstrap-android"
+        nested.mkdir(parents=True)
+        shutil.copy2(self.apk, nested / self.apk.name)
+        shutil.copy2(self.root / "receipt.json", nested / "receipt.json")
+        apk, receipt = smoke.bound_apk(smoke.producer_input(downloaded),
+                                       self.source, "0.14.0", "2026110302")
+        self.assertEqual(apk, nested / self.apk.name)
+        self.assertEqual(receipt, self.receipt)
+
+    def test_rejects_flat_and_linked_download_layout(self):
+        with self.assertRaises(ValueError):
+            smoke.producer_input(self.root)
+        downloaded = self.root / "downloaded"
+        downloaded.mkdir()
+        (downloaded / "bootstrap-android").symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            smoke.producer_input(downloaded)
 
     def test_rejects_other_source_channel_version_and_package(self):
         for field, bad in [("sourceCommit", "2" * 40), ("channel", "dev"),
