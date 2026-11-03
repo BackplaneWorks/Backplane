@@ -179,6 +179,7 @@
     "src/web/allowance.bend": "4feae6cd71dcc76c98875476d0d20fb223008a7f5adad4008ec5851272e4818a",
     "src/web/bots.bend": "2e5a1a0a9c7f10e48c824d44b6da84ebb62abbe9922ef53ee6f16801f297352c",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
+    "src/web/composer-bar.bend": "fd6b6110ff409c090bf03f7ccbe64ed59f5474d548dfd804d8d1a0a441c1f863",
     "src/web/dom.bend": "6e0ddb26a372a07cf2af0bbccdae476087fb50d6e2af5da9c6f8d6b9cc1ca0b5",
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
     "src/web/list-windows.bend": "965be3f9f1a13e97dd7dc36a4f21827d51e1a666fc37d13a619ae66cf8584dcc",
@@ -190,7 +191,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "f2edd813455eefd51377f7202aa3a05c33b94adbbe82a19e5a53d58ef2c425e4"
+    "src/web/view.bend": "3b46be10506d964b6a81847e5b575bcc425103b5f1e55bac32f279406d2315da"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -801,5 +802,13 @@
       "logSHA256": "f3b8821a6757e35f4f3f58736b2d8ae35ef9b716af4f9460aba19fe6ddfe93ec",
       "qualification": "All 24 full-output cases executed and passed on combined source. Earlier platform runtime checks were run before this unrelated-main rebase; not a claim of fresh platform binaries."
     }
+  },
+  "composerBarReview": {
+    "pr": 777,
+    "changedClosureFiles": [
+      "src/web/composer-bar.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "composer-bar.bend (29 lines, imports only dom.bend) builds the composer's one-row control bar from nodes view.bend passes in; it reads no Ui, state or drafts. Sidebar draft readers, unknown @ retention, private image keys and transport authority unchanged. Added so server builds of main pass the guard again (its import made the closure differ from the manifest)."
   }
 }
