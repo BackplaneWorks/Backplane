@@ -21,10 +21,12 @@ binding, before `Agents.only(home)` and `t0 <- PS.Perf.us()`:
 ```python
 Lock.refuse(String.is_empty(held), held, home)
 H.Env.put("BACKPLANE_HOME", home)
-diagnosticStatus : String <- DIAG.Diagnostics.start()
+diagnosticStatus : String <- DIAG.Diagnostics.start(Main.version())
 ```
 
-The effect reads `BACKPLANE_HOME` once and binds that home for its process
+`Main.version()` is the application's stamped version; the effect retains only its
+numeric release portion for private exit records. The effect reads
+`BACKPLANE_HOME` once and binds that home for its process
 lifetime. It requires an absolute home and the hub's exclusive home lock.
 Subsequent `start()` calls are idempotent and cannot switch destinations.
 Only the hub calls start; helper children and browser clients do not.
