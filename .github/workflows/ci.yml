@@ -394,6 +394,7 @@ jobs:
           fetch-depth: 0
           sparse-checkout: |
             scripts
+            deploy
             src/server/effects
             src/core
             test/tools

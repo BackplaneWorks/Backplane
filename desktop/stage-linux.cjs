@@ -35,6 +35,13 @@ if(directBrowser){
 }
 fs.copyFileSync(service,path.join(resourceRoot,'backplane-serve'));
 fs.chmodSync(path.join(resourceRoot,'backplane-serve'),0o755);
+// KiStack's skills beside the hub, as the stage built them (scripts/dev.sh
+// stage: scripts/kistack.py, the commit deploy/kistack.lock pins); a stage
+// without them is refused, never shipped
+const kistack=path.join(path.dirname(service),'kistack');
+assert(fs.existsSync(path.join(kistack,'.claude-plugin/plugin.json'))&&fs.existsSync(path.join(kistack,'skills')),'No KiStack beside '+service+' (scripts/dev.sh stage builds it)');
+fs.cpSync(kistack,path.join(resourceRoot,'kistack'),{recursive:true});
+require('node:child_process').execFileSync('python3',[path.join(__dirname,'../scripts/kistack.py'),'check',path.join(resourceRoot,'kistack')],{stdio:['ignore','ignore','inherit']});
 // Follow only the emitted index's asset graph. Never package old build chunks,
 // homes, source trees, user fonts, caches, experiments, or node_modules.
 const webRoot=path.join(resourceRoot,'web');fs.mkdirSync(webRoot);

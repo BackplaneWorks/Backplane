@@ -6,7 +6,9 @@ import io
 import os
 from pathlib import Path
 import shutil
+import runpy
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -15,6 +17,7 @@ SOURCE = Path(__file__).parents[2]
 spec = importlib.util.spec_from_file_location('cef_runtime', SOURCE / 'scripts/cef-runtime.py')
 runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
+kistack = runpy.run_path(str(SOURCE / 'scripts/kistack.py'))
 
 
 class PublicRelease(unittest.TestCase):
@@ -24,7 +27,7 @@ class PublicRelease(unittest.TestCase):
         self.repo = self.root / 'repo'
         for directory in ('scripts', 'deploy', 'assets/icon', 'dist/web', 'bin', 'home', 'cache'):
             (self.repo / directory).mkdir(parents=True)
-        for file in ('package.sh', 'package-linux.sh', 'install-release.sh', 'cef-runtime.py'):
+        for file in ('package.sh', 'package-linux.sh', 'install-release.sh', 'cef-runtime.py', 'kistack.py'):
             shutil.copy2(SOURCE / 'scripts' / file, self.repo / 'scripts' / file)
         shutil.copy2(SOURCE / 'deploy/backplane.desktop', self.repo / 'deploy/backplane.desktop')
         shutil.copytree(SOURCE / 'assets/icon', self.repo / 'assets/icon', dirs_exist_ok=True)
@@ -49,8 +52,15 @@ class PublicRelease(unittest.TestCase):
         dist = self.repo / 'dist'
         (dist / 'web').mkdir(exist_ok=True)
         (dist / 'web/index.html').write_text('web-' + label)
-        (dist / 'kistack/skills').mkdir(parents=True, exist_ok=True)
-        (dist / 'kistack/skills/README.md').write_text('skills-' + label)
+        # a KiStack pinned for this label in the fixture repo, built as a build does
+        src = self.repo / 'deploy/kistack'
+        shutil.rmtree(src, ignore_errors=True)
+        (src / 'skills/x').mkdir(parents=True)
+        (src / 'skills/x/SKILL.md').write_text('skills-' + label)
+        (src / 'LICENSE').write_text('KiStack license fixture')
+        rev = hashlib.sha256(label.encode()).hexdigest()[:40]
+        (self.repo / 'deploy/kistack.lock').write_text('rev ' + rev + '\nskills ' + kistack['tree'](src) + '\n')
+        subprocess.run([sys.executable, 'scripts/kistack.py', 'build', 'dist/kistack'], cwd=self.repo, check=True, capture_output=True)
         helper = dist / 'backplane-browser'
         helper.write_text('#!/bin/sh\necho helper-' + label + '\n')
         helper.chmod(0o755)
@@ -104,15 +114,15 @@ class PublicRelease(unittest.TestCase):
         self.install()
         self.assertIn('helper-first', self.pair()[0])
         self.assertIn('host-first', self.pair()[1])
-        self.assertEqual((self.prefix / 'kistack/skills/README.md').read_text(), 'skills-first')
+        self.assertEqual((self.prefix / 'kistack/skills/x/SKILL.md').read_text(), 'skills-first')
         first = (self.prefix / 'browser-current').resolve()
         self.build_payload('second')
         ok, output = self.update(self.package())
         self.assertTrue(ok, output)
         self.assertIn('helper-second', self.pair()[0])
         self.assertIn('host-second', self.pair()[1])
-        self.assertEqual((self.prefix / 'kistack/skills/README.md').read_text(), 'skills-second')
-        self.assertEqual((self.prefix / 'kistack.old/skills/README.md').read_text(), 'skills-first')
+        self.assertEqual((self.prefix / 'kistack/skills/x/SKILL.md').read_text(), 'skills-second')
+        self.assertEqual((self.prefix / 'kistack.old/skills/x/SKILL.md').read_text(), 'skills-first')
         self.assertEqual((self.prefix / 'browser-previous').resolve(), first)
         runtime.rollback(self.prefix)
         self.assertIn('helper-first', self.pair()[0])
@@ -130,8 +140,24 @@ class PublicRelease(unittest.TestCase):
         self.assertIn('hash mismatch', output)
         self.assertEqual(before, self.pair())
         self.assertEqual(app, hashlib.sha256((self.prefix / 'backplane').read_bytes()).hexdigest())
-        self.assertEqual((self.prefix / 'kistack/skills/README.md').read_text(), 'skills-first')
+        self.assertEqual((self.prefix / 'kistack/skills/x/SKILL.md').read_text(), 'skills-first')
         self.assertFalse((self.prefix / 'kistack.old').exists())
+
+    def test_a_release_without_the_pinned_kistack_is_neither_packaged_nor_installed(self):
+        # release packages carried none from 0.12.0 on
+        self.install()
+        self.build_payload('second')
+        (self.repo / 'dist/kistack/skills/x/SKILL.md').write_text('changed after the build')
+        result = subprocess.run(['sh', 'scripts/package.sh', 'v9', 'linux-x64'], cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('not the pinned', result.stderr)
+        subprocess.run([sys.executable, 'scripts/kistack.py', 'build', 'dist/kistack'], cwd=self.repo, check=True, capture_output=True)
+        package = self.package()
+        shutil.rmtree(package / 'kistack')
+        ok, output = self.update(package)
+        self.assertFalse(ok, output)
+        self.assertIn('release missing kistack', output)
+        self.assertEqual((self.prefix / 'kistack/skills/x/SKILL.md').read_text(), 'skills-first')
 
     def test_package_refuses_unmatched_helper_and_missing_runtime(self):
         (self.repo / 'dist/backplane-browser').write_text('unmatched')

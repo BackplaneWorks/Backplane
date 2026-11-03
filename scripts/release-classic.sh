@@ -59,6 +59,8 @@ while [ $# -gt 0 ]; do
   shift 3
   case $plat in linux-x64|linux-arm64|darwin-arm64) ;; *) echo "release-classic: no classic package for $plat" >&2; exit 2 ;; esac
   [ -x "$payload/backplane-serve" ] && [ -f "$payload/web/index.html" ] || { echo "release-classic: $payload is no service payload" >&2; exit 1; }
+  # KiStack's skills, exactly the pinned commit (scripts/kistack.py)
+  python3 scripts/kistack.py check "$payload/kistack" >/dev/null || { echo "release-classic: $payload has no pinned KiStack" >&2; exit 1; }
   [ "$(basename "$desktop")" = "backplane-$ver-$plat.tar.gz" ] || { echo "release-classic: $desktop is not backplane-$ver-$plat.tar.gz" >&2; exit 1; }
   tar -tzf "$desktop" "backplane-$plat/" >/dev/null 2>&1 || tar -tzf "$desktop" | grep -q "^backplane-$plat/" || { echo "release-classic: $desktop has no backplane-$plat/" >&2; exit 1; }
   # the service must say this version (it runs on the matching host only)
