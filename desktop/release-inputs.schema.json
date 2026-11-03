@@ -300,10 +300,10 @@
       ],
       "properties": {
         "version": {
-          "const": "0.12.3"
+          "const": "0.14.0"
         },
         "tag": {
-          "const": "v0.12.3"
+          "const": "v0.14.0"
         },
         "channel": {
           "const": "release"
@@ -369,10 +369,10 @@
           "const": "FROZEN"
         },
         "version": {
-          "const": "0.12.3"
+          "const": "0.14.0"
         },
         "tag": {
-          "const": "v0.12.3"
+          "const": "v0.14.0"
         },
         "channel": {
           "const": "release"

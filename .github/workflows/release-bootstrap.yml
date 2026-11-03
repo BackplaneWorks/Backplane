@@ -54,8 +54,8 @@ concurrency:
 
 env:
   BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.13.0
-  BACKPLANE_VERSION_STAMP: '0.13.0'
+  BACKPLANE_VERSION: v0.14.0
+  BACKPLANE_VERSION_STAMP: '0.14.0'
   BACKPLANE_TELEMETRY_CHANNEL: release
   # Source scanners and receipts must use UTF-8 on Windows too.
   PYTHONUTF8: '1'
@@ -162,7 +162,7 @@ jobs:
           chmod 755 "$SERVICE"  # artifacts drop file modes
           v=$("$SERVICE" --version)
           echo "$v"
-          [ "$v" = "backplane 0.13.0" ]
+          [ "$v" = "backplane 0.14.0" ]
       - name: Measure matching-host system ABI and assemble genuine service component
         shell: bash
         env:

@@ -30,7 +30,7 @@ class PairingPackaging(unittest.TestCase):
     def test_macos_bundle_registers_the_pairing_scheme(self):
         with tempfile.TemporaryDirectory() as temp:
             file=Path(temp)/'Info.plist';file.write_bytes(plistlib.dumps({'Unrelated':'kept'}))
-            release.plist(file,'dev.backplane.desktop','0.13.0')
+            release.plist(file,'dev.backplane.desktop','0.14.0')
             data=plistlib.loads(file.read_bytes())
             self.assertEqual(data['Unrelated'],'kept')
             self.assertEqual(data['CFBundleURLTypes'][0]['CFBundleURLSchemes'],['backplane'])
