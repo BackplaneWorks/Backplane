@@ -261,15 +261,15 @@ def worker(args):
     if phases == PHASES[:4]:
         code, compiler, timed_out = run_capped(cmd, args.cap_bytes, out.parent / (args.id + '.enforcement.json'), args.timeout)
         receipt.update(exit=code, enforcement=compiler, timed_out=timed_out)
-        try:
-            cg, overridden = cgroup_dir()
-            receipt['controller'] = read_enforcement(cg, overridden)
-        except (OSError, IndexError):
-            pass
         if compiler is not None:
             phases.append('enforce')
         if code is not None:
             phases.append('command')
+    try:  # the controller's own cgroup is recorded whether or not the command ran
+        cg, overridden = cgroup_dir()
+        receipt['controller'] = read_enforcement(cg, overridden)
+    except (OSError, IndexError):
+        pass
     try:
         outputs = tree_hashes(out)
         if args.copy and Path(ROOT / args.copy).is_file():
