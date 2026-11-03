@@ -1,4 +1,5 @@
 diff --git a/bend2/comp.ts b/bend2/comp.ts
+index ee934d4..18e2070 100644
 --- a/bend2/comp.ts
 +++ b/bend2/comp.ts
 @@ -11,6 +11,8 @@
@@ -10,7 +11,7 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
  
  // Types
  // =====
-@@ -530,6 +532,19 @@
+@@ -530,6 +532,19 @@ const PROBES: Of<"Var">[] = [];
  const DUMMY = probe("~");
  
  let FUEL = 0;
@@ -30,7 +31,7 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
  
  // The book being compiled and all that is memoized about it.
  let FL: File;
-@@ -1177,6 +1192,10 @@
+@@ -1177,6 +1192,10 @@ function mat_ops(eq: (k: Name) => string): string {
  // def it calls have no fork, no bang call and only tail self-calls.
  // loop_of gives a def's tail cycle (Tarjan over its tail callees).
  
@@ -41,7 +42,7 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
  function fun_of(k: Name): Fun {
    return memo(FL.funs, k, () => {
      const tld = FL.book.tlds[k];
-@@ -1184,7 +1203,8 @@
+@@ -1184,7 +1203,8 @@ function fun_of(k: Name): Fun {
        return { n: 0, h: null, live: [], lays: [BOX, BOX], ret: BOX };
      }
      const doms = tele_unbind(tld.T).doms;
@@ -51,7 +52,7 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
      const n = tld.n + (h === null ? 0
        : Math.min(def_raise(h, tld.n), doms.length - tld.n));
      const live = doms.slice(0, n).filter(dom_live);
-@@ -1195,8 +1215,9 @@
+@@ -1195,8 +1215,9 @@ function fun_of(k: Name): Fun {
      const ret = lay_of(Bend.tele_fill(FL.book, tld.T,
        Array(n).fill(DUMMY), Bend.ctx_nil()));
      const wide = lays.flatMap((l) => l.ks).length > WIDE;
@@ -62,7 +63,7 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
    });
  }
  
-@@ -1228,7 +1249,7 @@
+@@ -1228,7 +1249,7 @@ function def_foreign(tld: Bend.TLD | undefined):
  }
  
  function done_live(tld: Bend.TLD | undefined): tld is Bend.Def {
@@ -71,7 +72,7 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
  }
  
  function fun_runs(tld: Bend.TLD | undefined): tld is Bend.Def {
-@@ -1316,6 +1337,7 @@
+@@ -1316,6 +1337,7 @@ export function io_run(book: Bend.Book, args: string[]): number {
  
  function file_new(book: Bend.Book, js: boolean): File {
    PROBES.length = 1;
@@ -79,7 +80,7 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
    return {
      book,
      js,
-@@ -3211,18 +3233,24 @@
+@@ -3211,18 +3233,24 @@ function js_host(k: Name): string {
  // A module (for the .bend loader and -o <out>.mjs) roots and exports each
  // def a host can call.
  export function js_lib(book: Bend.Book, mod = false): string {
@@ -98,14 +99,13 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
      memo_gc();
 +    profile("jsdef:start", {name:k, funs:FL.funs.size, probes:PROBES.length});
      js_def(sc, k, def);
--  }
 +    profile("jsdef:end", {name:k, funs:FL.funs.size, probes:PROBES.length, lines:sc.seg.lines.length});
-+  }
+   }
 +  profile("functions:end", {funs:FL.funs.size, srcs:FL.srcs.size, probes:PROBES.length, lines:sc.seg.lines.length});
    const srcs = effect_srcs(".js", "a foreign def without a .js import: ");
    const effs = srcs.map((t) => `(() => {\n${t}\n})();\n\n`).join("");
    const lib = outs === null ? "" : `export default {\n${outs.map((k) =>
-@@ -3231,9 +3259,11 @@
+@@ -3231,9 +3259,11 @@ export function js_lib(book: Bend.Book, mod = false): string {
    const jmps = new Map<Name, boolean>();
    const jmp = (k: Name): boolean => k === CLO_APPLY || memo(jmps, k, () =>
      (jmps.set(k, true), [...FL.tails.get(k) ?? []].some(jmp)));
@@ -118,9 +118,10 @@ diff --git a/bend2/comp.ts b/bend2/comp.ts
      .map(([r, i]) => `const TAB_${i} = [${r}];`)].join("\n") + lib;
  }
 diff --git a/bend2/main.ts b/bend2/main.ts
+index d34bdc0..c23f804 100644
 --- a/bend2/main.ts
 +++ b/bend2/main.ts
-@@ -23,6 +23,9 @@
+@@ -23,6 +23,9 @@ import type { BunPlugin } from "bun";
  import * as Bend from "./bend.ts";
  import * as Comp from "./comp.ts";
  import * as Safe from "./safe.ts";
@@ -130,7 +131,7 @@ diff --git a/bend2/main.ts b/bend2/main.ts
  
  // Main
  // ====
-@@ -300,7 +303,7 @@
+@@ -300,7 +303,7 @@ async function cli_file(args: string[]): Promise<void> {
        return await cli_checkup(file);
      }
      const seen = new Map<string, string | null>();
@@ -139,7 +140,7 @@ diff --git a/bend2/main.ts b/bend2/main.ts
      if (only || verdict) {
        process.exitCode = cli_verdict(book, verdict);
        return;
-@@ -360,6 +363,7 @@
+@@ -360,6 +363,7 @@ function path_real(p: string): string {
  }
  
  function cli_emit(book: Bend.Book, out: string): void {
@@ -147,7 +148,7 @@ diff --git a/bend2/main.ts b/bend2/main.ts
    if (out.endsWith(".mjs")) {
      fs.writeFileSync(out, Comp.js_lib(book, true));
    } else if (/\.c?js$/.test(out)) {
-@@ -478,6 +482,7 @@
+@@ -478,6 +482,7 @@ function cli_base(what?: string): void {
  }
  
  async function cli_bundle(page: string, dir: string): Promise<void> {
@@ -155,7 +156,7 @@ diff --git a/bend2/main.ts b/bend2/main.ts
    const out = await Bun.build({
      entrypoints: [page],
      outdir: dir,
-@@ -485,6 +490,7 @@
+@@ -485,6 +490,7 @@ async function cli_bundle(page: string, dir: string): Promise<void> {
      minify: true,
      plugins: [PLUGIN],
    });
@@ -163,7 +164,7 @@ diff --git a/bend2/main.ts b/bend2/main.ts
    for (const a of out.outputs) {
      cli_say(1, a.path + " (" + (a.size / 1024).toFixed(1) + "kb)\n");
    }
-@@ -759,8 +765,10 @@
+@@ -759,8 +765,10 @@ function book_promises(book: Bend.Book): string[] {
        for (const c of t.$ === "ADT" ? [t, ...t.c] : [t]) {
          term_refs(Bend.term_lower(c.T), rs);
        }
@@ -176,12 +177,10 @@ diff --git a/bend2/main.ts b/bend2/main.ts
        }
        for (const r of rs) {
          (uses[r] ??= []).push(k);
-@@ -772,24 +780,6 @@
-     uses[k]?.forEach((j) => bad.add(j));
-   }
+@@ -774,24 +782,6 @@ function book_promises(book: Bend.Book): string[] {
    return own.filter((k) => bad.has(k));
--}
--
+ }
+ 
 -// term_refs adds to out the names a term (a span skipped) refers to.
 -function term_refs(t: object, out: Set<string>): void {
 -  const seen = new Set([t]);
@@ -198,10 +197,12 @@ diff --git a/bend2/main.ts b/bend2/main.ts
 -      }
 -    }
 -  }
- }
- 
+-}
+-
  // cli_say writes text to fd, and drops it if the reader has left (EPIPE).
-@@ -812,19 +802,36 @@
+ function cli_say(fd: number, text: string): void {
+   try {
+@@ -812,19 +802,36 @@ function cli_fail(msg: string): never {
  // ====
  
  async function book_read(file: string, base?: Bend.Book,
@@ -242,7 +243,7 @@ diff --git a/bend2/main.ts b/bend2/main.ts
      if (book.hols > 0) {
        throw "Error: " + String(book.hols) + " TODO" + (book.hols === 1 ? "" : "s")
          + " found.\nThe code is incomplete, and not a valid proof yet.";
-@@ -843,7 +850,7 @@
+@@ -843,7 +850,7 @@ class Check_Fail {
  function book_seed(base: Bend.Book): Bend.Book {
    const book = Bend.book_nil();
    for (const k of Object.keys(base.tlds)) {
@@ -253,9 +254,10 @@ diff --git a/bend2/main.ts b/bend2/main.ts
    for (const k of Object.keys(base.tmps)) {
 diff --git a/bend2/modules.ts b/bend2/modules.ts
 new file mode 100644
+index 0000000..88be4be
 --- /dev/null
 +++ b/bend2/modules.ts
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,194 @@
 +// Experimental bounded-lifetime checking; the language checker is unchanged.
 +import * as fs from "node:fs";
 +import * as path from "node:path";
@@ -391,8 +393,10 @@ new file mode 100644
 +    }
 +    const done = book.order.length;
 +    const previous = new Set(Object.keys(book.tlds));
++    const sourceSeed=store?.captureSource(book) ?? null;
 +    await Bend.book_load(book, module.file, module.ns, seen, undefined, top);
 +    const added = book.order.slice(done);
++    store?.registerSource(book,sourceSeed,added,module.file,module.ns);
 +    // A declaration filled from a later file needs the full original book.
 +    // This also catches a law written after another declaration on one line.
 +    if (added.some(k => {
@@ -445,14 +449,15 @@ new file mode 100644
 +      throw new Error("source changed during module checking: " + module.file);
 +    }
 +  }
-+  profile("modules:complete", { files: count, discard_results: discardResults, compact: shouldCompact, paged: store !== null, stored_bytes: store?.bytes });
++  profile("modules:complete", { files: count, discard_results: discardResults, compact: shouldCompact, paged: store !== null, stored_bytes: store?.bytes, source_bodies:store?.sourceBodies, source_replays:store?.sourceReplays, source_capsule_reads:store?.sourceCapsuleReads, source_capsule_hits:store?.sourceCapsuleHits, metadata_records:store?.metadataRecords, metadata_files:store?.metadataFiles, metadata_packed_bytes:store?.metadataPackedBytes });
 +  return true;
 +}
 diff --git a/bend2/offload.ts b/bend2/offload.ts
 new file mode 100644
+index 0000000..9f4522f
 --- /dev/null
 +++ b/bend2/offload.ts
-@@ -0,0 +1,512 @@
+@@ -0,0 +1,706 @@
 +// Experimental storage for terms already accepted by the unchanged checker.
 +// This is process-private spill storage, never a persisted proof-pass cache.
 +import * as fs from "node:fs";
@@ -471,9 +476,18 @@ new file mode 100644
 +}
 +
 +type Stored = { value: unknown; bytes: number };
++function priorSourceType(): never {
++  throw new Error('source parser unexpectedly read a prior type interface');
++}
 +
 +export class TermStore {
 +  readonly directory = fs.mkdtempSync(path.join(os.tmpdir(), "bend-checked-terms-"));
++  private metadataPath = path.join(this.directory,'metadata.pack');
++  private metadataFD = -1;
++  private metadataIndex = new Map<string,{offset:number;bytes:number}>();
++  metadataPackedBytes = 0;
++  get metadataRecords(): number { return this.metadataIndex.size; }
++  get metadataFiles(): number { return this.metadataFD<0 ? 0 : 1; }
 +  private files = new WeakMap<object, string>();
 +  private parsedFiles = new Set<Bend.File>();
 +  private decodedFiles = new Map<string, Bend.File>();
@@ -487,13 +501,25 @@ new file mode 100644
 +  private openIds = new WeakMap<object, number>();
 +  private readonly identity = randomBytes(16).toString('hex');
 +  private replaced = new WeakSet<object>();
++  private sourceRecipes = new WeakMap<object, {key:string; index:number}>();
++  private sourceLive = new Map<string, WeakRef<object>>();
++  private sourceCapsules = new Map<string,{raw:any;tlds:Bend.Book['tlds'];ctrs:Bend.Book['ctrs'];bytes:number}>();
++  private sourceCapsuleBytes = 0;
++  sourceCapsuleReads = 0;
++  sourceCapsuleHits = 0;
++  sourceCapsuleRevalidations = 0;
++  sourceBodies = 0;
++  sourceReplays = 0;
 +  writes = 0;
 +  reads = 0;
 +  bytes = 0;
 +
 +  constructor(private limit = 32 * 1024 ** 2, private discardResults = false) {
 +    // Do not leave process-private checked state reusable after a failed run.
-+    process.once("exit", () => fs.rmSync(this.directory, { recursive: true, force: true }));
++    process.once("exit", () => {
++      if(this.metadataFD>=0)fs.closeSync(this.metadataFD);
++      fs.rmSync(this.directory, { recursive: true, force: true });
++    });
 +  }
 +
 +  private digest(bytes: Buffer): string {
@@ -501,25 +527,40 @@ new file mode 100644
 +  }
 +
 +  private put(value: unknown): string {
-+    // Binary structured serialization preserves graph sharing. JSON would
-+    // expand each repeated lower subtree even after annotation interning.
-+    const bytes = serialize(value);
-+    const key = this.digest(bytes);
-+    const target = path.join(this.directory, key);
-+    if (!fs.existsSync(target)) {
-+      fs.writeFileSync(target, bytes, { flag: "wx", mode: 0o600 });
-+      this.writes++;
-+      this.bytes += bytes.length;
-+    }
-+    return key;
++    const bytes=serialize(value),key=this.digest(bytes);
++    if(this.metadataIndex.has(key))return key;
++    if(this.metadataFD<0)this.metadataFD=fs.openSync(this.metadataPath,'wx+',0o600);
++    const offset=this.metadataPackedBytes;
++    try {
++      for(let at=0;at<bytes.length;)at+=fs.writeSync(this.metadataFD,bytes,at,bytes.length-at,offset+at);
++      // Publish the in-memory index only after the complete immutable record.
++      // No index survives a process; this is not a persisted proof-pass cache.
++      this.metadataIndex.set(key,{offset,bytes:bytes.length});
++      this.metadataPackedBytes+=bytes.length;this.writes++;this.bytes+=bytes.length;
++      return key;
++    } catch(error) {fs.ftruncateSync(this.metadataFD,offset);throw error;}
 +  }
 +
-+  private get(key: string): { value: any; bytes: number } {
-+    if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("invalid checked-term identity");
-+    const bytes = fs.readFileSync(path.join(this.directory, key));
-+    if (this.digest(bytes) !== key) throw new Error("checked-term storage changed");
++  // Bytes of one record, bounds-checked and digest-verified against its key.
++  private record(key:string): Buffer {
++    if(!/^[a-f0-9]{64}$/.test(key))throw new Error('invalid checked-term identity');
++    const record=this.metadataIndex.get(key);
++    if(record===undefined || this.metadataFD<0)throw new Error('missing checked metadata record');
++    if(fs.fstatSync(this.metadataFD).size<record.offset+record.bytes)throw new Error('checked-term storage changed');
++    const bytes=Buffer.alloc(record.bytes);
++    for(let at=0;at<bytes.length;) {
++      const count=fs.readSync(this.metadataFD,bytes,at,bytes.length-at,record.offset+at);
++      if(count===0)throw new Error('checked-term storage changed');
++      at+=count;
++    }
++    if(this.digest(bytes)!==key)throw new Error('checked-term storage changed');
++    return bytes;
++  }
++
++  private get(key:string): {value:any;bytes:number} {
++    const bytes=this.record(key);
 +    this.reads++;
-+    return { value: deserialize(bytes), bytes: bytes.length };
++    return {value:deserialize(bytes),bytes:bytes.length};
 +  }
 +
 +  private span(span: Bend.Span): unknown {
@@ -859,7 +900,162 @@ new file mode 100644
 +    this.attach(target, name, key, term === null ? null : undefined, higher);
 +  }
 +
-+  private retainBody(target: object, value: Bend.HTerm | null): void {
++  // A recipe contains immutable source and parser-only declaration headers,
++  // never a checked-pass cache. Later checker calls still use the unchanged
++  // kernel. Cold source bodies are rebuilt by the unchanged parse_def API.
++  captureSource(book:Bend.Book): any | null {
++    if (process.env.BP_BEND_SOURCE_BODIES !== '1') return null;
++    const tlds:any[]=[];
++    for (const [name,tld] of Object.entries(book.tlds)) {
++      if (tld.$==='Def') {
++        const filled=bodies.get(tld) ?? (tld.v!==null);
++        if (!filled && tld.b!==true && !tld.i) return null;
++        tlds.push([name,this.sourceHeader(tld)]);
++      } else tlds.push([name,this.sourceHeader(tld)]);
++    }
++    return {tlds,ctrs:Object.entries(book.ctrs).map(([name,c])=>[name,{k:c.k,n:c.n}])};
++  }
++
++  private sourceHeader(tld:Bend.TLD): any {
++    if (tld.$==='ADT') return {$:tld.$,n:tld.n,g:tld.g,
++      c:tld.c.map(c=>({k:c.k,n:c.n})),b:tld.b};
++    return {$:tld.$,n:tld.n,x:tld.x,b:tld.b,u:tld.u,i:tld.i?.slice(),m:tld.m,
++      filled:bodies.get(tld) ?? (tld.v!==null)};
++  }
++
++  registerSource(book:Bend.Book,seed:any,names:string[],file:string,ns:string): void {
++    if (seed===null || !names.length || new Set(names).size!==names.length) return;
++    // Cross-file laws/fills and unsupported source layouts retain their exact
++    // original bodies. No approximation advances a validated prefix.
++    const before=new Set(seed.tlds.map((entry:any)=>entry[0]));
++    if (names.some(name=>before.has(name) || (book.tlds[name].$==='Def'
++      && (book.tlds[name] as Bend.Def).v===null && !(book.tlds[name] as Bend.Def).i))) return;
++    let parsed:Bend.File|undefined;
++    for (const name of names) {
++      const t=book.tlds[name];const span=t.T.s ?? (t.$==='Def' ? t.v?.s : t.c[0]?.T.s);
++      if (span && span.file.ns===ns) {parsed=span.file;break;}
++    }
++    if (parsed===undefined) return;
++    const source=parsed.str;
++    const markers:{start:number;end:number;kind:string;name?:string;unsafe?:boolean}[]=[];
++    let quote='',atLine=true;
++    for (let i=0;i<source.length;i++) {
++      const c=source[i];
++      if (quote) {if(c==='\\'){i++;continue;}if(c===quote)quote='';if(c==='\n')atLine=true;continue;}
++      if(c==='"' || c==="'"){quote=c;atLine=false;continue;}
++      if(c==='#'){while(i<source.length && source[i]!=='\n')i++;atLine=true;continue;}
++      if(atLine && c!=='\n' && c!=='\r') {
++        if(c===' ' || c==='\t'){atLine=false;continue;}
++        const end=source.indexOf('\n',i),line=source.slice(i,end<0?source.length:end);
++        const definition=/^def[ \t]+([A-Za-z_][A-Za-z_0-9.]*)[ \t]*\(/.exec(line);
++        const unsafe=/^@unsafe(?:[ \t]+def[ \t]+([A-Za-z_][A-Za-z_0-9.]*)[ \t]*\()?/.exec(line);
++        const kind=/^(type|law)\b/.exec(line);
++        if(definition) {
++          const prior=markers[markers.length-1];
++          if(prior?.kind==='unsafe') {prior.kind='def';prior.name=definition[1];prior.unsafe=true;}
++          else markers.push({start:i,end:0,kind:'def',name:definition[1]});
++        } else if(unsafe) markers.push({start:i,end:0,kind:unsafe[1]?'def':'unsafe',name:unsafe[1],unsafe:true});
++        else if(kind) markers.push({start:i,end:0,kind:kind[1]});
++        atLine=false;
++      }
++      if(c==='\n')atLine=true;
++    }
++    markers.forEach((marker,i)=>marker.end=markers[i+1]?.start ?? source.length);
++    const recipes=new Map(markers.filter(m=>m.kind==='def' && m.name).map(m=>[ns?ns+':'+m.name:m.name!,m]));
++    const entries=names.map(name=>({name,header:this.sourceHeader(book.tlds[name]),recipe:recipes.get(name)}));
++    const capsule={format:'bend-source-bodies-1',store:this.identity,source,dir:path.dirname(file)+'/',ns,
++      al:{...parsed.al},seed,entries};
++    const key=this.put(capsule);
++    for(let index=0;index<entries.length;index++) {
++      const {name,header,recipe}=entries[index];
++      if(header.$==='Def' && header.filled && !header.i && recipe!==undefined) {
++        this.sourceRecipes.set(book.tlds[name],{key,index}); this.sourceBodies++;
++      }
++    }
++  }
++
++  private sourceCapsule(key:string): {raw:any;tlds:Bend.Book['tlds'];ctrs:Bend.Book['ctrs'];bytes:number} {
++    const hit=this.sourceCapsules.get(key);
++    if(hit!==undefined) {
++      // Warm hit: the decoded copy is reused, but its backing record is re-hashed and
++      // bounds-checked exactly as a cold read would be, so a changed, truncated or
++      // missing record still fails closed. Only deserialize and header rebuild are skipped.
++      this.record(key);this.sourceCapsuleRevalidations++;
++      this.sourceCapsules.delete(key);this.sourceCapsules.set(key,hit);this.sourceCapsuleHits++;
++      return hit;
++    }
++    const loaded=this.get(key),raw=loaded.value;
++    if(raw?.format!=='bend-source-bodies-1' || raw.store!==this.identity)throw new Error('source recipe belongs to another process store');
++    this.sourceCapsuleReads++;
++    const tlds:Bend.Book['tlds']=Object.create(null),ctrs:Bend.Book['ctrs']=Object.create(null);
++    const header=(raw:any):Bend.TLD=> {
++      const out={...raw} as any;delete out.filled;
++      if(out.$==='Def')out.v=raw.filled ? Object.freeze(Bend.Rfl()) : null;
++      Object.defineProperty(out,'T',{get:priorSourceType});
++      return Object.freeze(out);
++    };
++    for(const [name,value] of raw.seed.tlds)tlds[name]=header(value);
++    for(const [name,value] of raw.seed.ctrs)ctrs[name]=Object.freeze({...value}) as Bend.Ctr;
++    // Read-only prior headers are shared, never the parser's writable table.
++    // A per-replay prototype view gives exact `in`/lookup semantics while the
++    // unchanged parse_def writes only its fresh declaration in the own table.
++    for(const entry of raw.entries)entry.parsedHeader=header(entry.header);
++    Object.freeze(tlds);Object.freeze(ctrs);
++    const value={raw,tlds,ctrs,bytes:loaded.bytes*8};
++    const limit=32*1024**2;
++    if(value.bytes<=limit) {
++      this.sourceCapsules.set(key,value);this.sourceCapsuleBytes+=value.bytes;
++      while(this.sourceCapsuleBytes>limit) {
++        const oldest=this.sourceCapsules.keys().next().value!;
++        this.sourceCapsuleBytes-=this.sourceCapsules.get(oldest)!.bytes;this.sourceCapsules.delete(oldest);
++      }
++    }
++    return value;
++  }
++
++  private replayBody(key:string,index:number): Bend.HTerm {
++    const id='V:'+key+':'+index;
++    const alive=this.sourceLive.get(id)?.deref();
++    if(alive!==undefined)return alive as Bend.HTerm;
++    const cached=this.cached(id);if(cached!==undefined)return cached.value as Bend.HTerm;
++    const capsule=this.sourceCapsule(key),raw=capsule.raw;
++    const entry=raw.entries[index];
++    if(!entry?.recipe || entry.header.$!=='Def' || !entry.header.filled || entry.header.i)throw new Error('invalid source body recipe');
++    const book=Bend.book_nil();
++    book.tlds=Object.create(capsule.tlds);book.ctrs=Object.create(capsule.ctrs);
++    for(const prior of raw.entries.slice(0,index)) {
++      book.tlds[prior.name]=prior.parsedHeader;
++      if(prior.header.$==='ADT')for(const c of prior.header.c)book.ctrs[c.k]=c as Bend.Ctr;
++    }
++    const parser:Bend.Parse={book,dir:raw.dir,str:raw.source,ns:raw.ns,al:{...raw.al},
++      pos:entry.recipe.start,stk:[],frs:0};
++    let unsafe=false;
++    if(Bend.parse_take(parser,'@')) {if(!Bend.parse_word(parser,'unsafe'))throw new Error('source recipe decorator changed');unsafe=true;}
++    if(unsafe!==!!entry.recipe.unsafe || !Bend.parse_word(parser,'def'))throw new Error('source recipe header changed');
++    Bend.parse_def(parser,unsafe);Bend.parse_skip(parser);
++    if(parser.pos!==entry.recipe.end || book.order.length!==1 || book.order[0]!==entry.name)throw new Error('source recipe declaration boundary changed');
++    const def=book.tlds[entry.name];
++    if(def.$!=='Def' || def.v===null || def.i || def.n!==entry.header.n || def.x!==entry.header.x
++      || def.m!==entry.header.m || !!def.u!==!!entry.header.u)throw new Error('source recipe declaration metadata changed');
++    const value=def.v;
++    Bend.parse_close(parser,0);
++    // Public File fields keep exact source/spans. The temporary parser's table
++    // must not keep every preceding declaration alive through one returned body.
++    delete (parser as Partial<Bend.Parse>).book;
++    this.sourceReplays++;
++    this.sourceLive.set(id,new WeakRef(value));
++    this.remember(id,{value,bytes:Math.max(1,entry.recipe.end-entry.recipe.start)*32});
++    return value;
++  }
++
++  private retainBody(target: object, value: Bend.HTerm | null, recipe?:{key:string;index:number}): void {
++    if(recipe!==undefined && value!==null) {
++      let assigned=false,override:Bend.HTerm|null=null;
++      Object.defineProperty(target,'v',{enumerable:false,configurable:true,
++        get:()=>assigned?override:this.replayBody(recipe.key,recipe.index),
++        set:v=>{assigned=true;override=v;bodies.set(target,v!==null);}});
++      return;
++    }
 +    // Retain the parser's exact higher-order body. Re-lowering its branching
 +    // closures can expand a small source DAG into a huge tree. Checked results
 +    // (e) are already lower terms and can be spilled without that conversion.
@@ -905,7 +1101,9 @@ new file mode 100644
 +        bodies.set(next, original.v !== null);
 +        this.interface(next, T);
 +        if (process.env.BP_COMPILER_SPILL_PROFILE === '1') profile('spill:body', { name });
-+        this.retainBody(next, original.v);
++        const recipe=this.sourceRecipes.get(original);
++        this.retainBody(next, original.v,recipe);
++        if(recipe!==undefined)delete (original as Partial<Bend.Def>).v;
 +        if (process.env.BP_COMPILER_SPILL_PROFILE === '1') profile('spill:result', { name });
 +        if (original.e !== undefined) {
 +          if (this.discardResults) {
@@ -963,10 +1161,12 @@ new file mode 100644
 +  clear(): void {
 +    this.loaded.clear();
 +    this.loadedBytes = 0;
++    this.sourceCapsules.clear();this.sourceCapsuleBytes=0;
 +  }
 +}
 diff --git a/bend2/profile.ts b/bend2/profile.ts
 new file mode 100644
+index 0000000..1779690
 --- /dev/null
 +++ b/bend2/profile.ts
 @@ -0,0 +1,42 @@
@@ -1014,6 +1214,7 @@ new file mode 100644
 +}
 diff --git a/bend2/references.ts b/bend2/references.ts
 new file mode 100644
+index 0000000..b40c7ae
 --- /dev/null
 +++ b/bend2/references.ts
 @@ -0,0 +1,35 @@

@@ -75,6 +75,29 @@ def Auth.owner.peer(+trusted: Bool, +own: List<&2, String>, +hs: List<&2, H.Head
   Bool.and(trusted, Bool.and(Nat.is_eq(Auth.owner.header_count(hs, "host"), 1n), Bool.and(String.is_empty(H.Http.header_of(hs, "origin")),
     Bool.and(String.is_empty(H.Http.header_of(hs, "tailscale-user-login")), Auth.owner.host(own, String.to_lower(H.Http.header_of(hs, "host")))))))
 
+# Two hubs that name each other in BACKPLANE_PEERS (one machine, or a LAN
+# without Tailscale) have no credential of each other's before they pair.
+# The asking hub sends, with POST /bots/pair, a proof made from its own
+# token: an HMAC of the address it asked and the time. The asked hub does
+# not take the proof's word: it calls the asker back at the address its
+# own machines list has for it (POST /bots/pair/check), and only the hub
+# holding that token can say the proof is its own. The token never
+# leaves the asker, and a proof is good for Auth.pair.window() seconds.
+def Auth.pair.proof(+token: String, +to: String, +at: Nat) -> String:
+  SH.Hex.encode(SH.Hmac.sha256(U8.Utf8.encode(token), U8.Utf8.encode("bots-pair\n" ++ to ++ "\n" ++ Nat.show(at))))
+
+def Auth.pair.window() -> Nat:
+  60n
+
+def Auth.pair.fresh(+now: Nat, +at: Nat) -> Bool:
+  Nat.is_le(Nat.add(Nat.sub(now, at), Nat.sub(at, now)), Auth.pair.window())
+
+# whether this hub (token) made the proof, for an ask to `to` at `at`, and
+# it is still fresh at now
+def Auth.pair.checked(+token: String, +to: String, +at: Nat, +now: Nat, +proof: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(token)), Bool.and(Bool.not(String.is_empty(proof)),
+    Bool.and(Auth.pair.fresh(now, at), Auth.same(proof, Auth.pair.proof(token, to, at)))))
+
 # A Host naming this machine (DNS rebinding cannot fake one in a browser).
 def Auth.local.host(+host: String) -> Bool:
   Bool.or(String.eq(host, "localhost"), Bool.or(String.starts_with(host, "localhost:"),

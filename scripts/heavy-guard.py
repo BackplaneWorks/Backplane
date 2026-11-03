@@ -2,6 +2,7 @@
 """Serialize heavy work with Backplane's bend flock and require RAM headroom."""
 import fcntl
 import os
+import shutil
 from pathlib import Path
 import sys
 import subprocess
@@ -13,7 +14,23 @@ FLOORS = {'check': 14 * GIB, 'proof': 19 * GIB, 'test': 14 * GIB,
           'build': 16 * GIB, 'web': 10 * GIB, 'browser': 14 * GIB,
           # Stamping and Bun linking of exact verified pre-emission only.
           # No Bend fallback is permitted by build-js.sh on this path.
-          'compile-js': 3 * GIB}
+          'compile-js': 3 * GIB,
+          # One bounded shard worker only (see worker_contract). Admission is
+          # not a cap: the worker must also sit in a verified, no-swap cgroup.
+          'proof-shard': 3 * GIB, 'compile-shard': 3 * GIB}
+# Compiler cap: 3.7 GB (decimal). The lane-6 controller (512 MiB) is accounted
+# separately; 3.7e9 + 536870912 stays under the 4 GiB combined ceiling.
+SHARD_CAP = 3_700_000_000
+CONTROLLER_CAP = 536_870_912
+SHARD_PROFILES = ('proof-shard', 'compile-shard')
+# compile-shard runs only these exact compiler invocations ({out} is substituted
+# by the worker); nothing else can use the lower floor.
+COMPILE_COMMANDS = (
+    ('bend', 'src/server/main.bend', '-o', '{out}/hub.js'),
+    ('bend', 'src/web/index.html', '-o', '{out}/web'),
+    ('bend', 'src/mobile/index.html', '-o', '{out}/mobile-web'),
+)
+WORKER_OPTIONS = {'--id', '--out', '--cap-bytes', '--timeout', '--protect', '--copy'}
 HOST_RESERVE = 8 * GIB
 FD_VAR = 'BACKPLANE_HEAVY_LOCK_FD'
 BOAT_VAR = 'BACKPLANE_HEAVY_BOAT_SANDBOX'
@@ -58,6 +75,95 @@ def available():
             used = int(v1_current.read_text().strip())
             fields['available'] = min(fields['available'], max(0, maximum - used))
     return fields['available']
+
+
+def own_cgroup():
+    groups = Path('/proc/self/cgroup').read_text().splitlines()
+    group = next((line.split(':', 2)[2] for line in groups if line.startswith('0::')), None)
+    root = Path('/sys/fs/cgroup')
+    if group is None or '..' in Path(group).parts or not (root / 'cgroup.controllers').exists():
+        raise ValueError('cannot locate cgroup v2')
+    return root / group.lstrip('/')
+
+
+def verify_shard_cgroup(directory=None):
+    """The worker's own cgroup must hold a finite <=3.7 GiB limit and no swap."""
+    try:
+        directory = directory or own_cgroup()
+        limit = (directory / 'memory.max').read_text().strip()
+        swap = (directory / 'memory.swap.max').read_text().strip()
+        return limit.isdigit() and 0 < int(limit) <= SHARD_CAP and swap == '0'
+    except (OSError, ValueError):
+        return False
+
+
+def trusted_python(name):
+    """The interpreter must be the one running this guard, never a substitute."""
+    found = shutil.which(name) if '/' not in name else name
+    try:
+        return found is not None and Path(found).resolve() == Path(sys.executable).resolve() and found
+    except OSError:
+        return False
+
+
+def shard_run_ok(command):
+    """python3 scripts/proof-shards.py run with exactly one --out/--shard/--expect/--result."""
+    script = Path(__file__).resolve().parent / 'proof-shards.py'
+    if len(command) < 3 or not trusted_python(command[0]) or command[2] != 'run':
+        return False
+    try:
+        if Path(command[1]).resolve() != script:
+            return False
+    except OSError:
+        return False
+    return all(command.count(o) == 1 for o in ('--out', '--shard', '--expect', '--result'))
+
+
+def worker_contract(profile, command):
+    """Return the argv to exec (interpreter pinned to an absolute path) or None.
+
+    Direct (proof-shard): python3 scripts/proof-shards.py run ...
+    Wrapped (both): python3 scripts/lowmem-build.py worker <known options> -- CMD
+    with --cap-bytes <= SHARD_CAP, no scope bypass, and CMD limited to the
+    profile's one allowed command shape. Unknown options or shapes are refused.
+    """
+    if profile not in SHARD_PROFILES or not command:
+        return None
+    python = trusted_python(command[0])
+    if not python:
+        return None
+    pinned = [str(Path(sys.executable).resolve()), *command[1:]]
+    if profile == 'proof-shard' and shard_run_ok(command):
+        return pinned
+    wrapper = Path(__file__).resolve().parent / 'lowmem-build.py'
+    try:
+        if len(command) < 4 or Path(command[1]).resolve() != wrapper or command[2] != 'worker' or '--' not in command[3:]:
+            return None
+    except OSError:
+        return None
+    split = command.index('--', 3)
+    options, inner = command[3:split], command[split + 1:]
+    seen = {}
+    i = 0
+    while i < len(options):
+        name = options[i]
+        if name not in WORKER_OPTIONS or i + 1 >= len(options):
+            return None
+        if name != '--protect':
+            if name in seen:
+                return None
+            seen[name] = options[i + 1]
+        i += 2
+    try:
+        if not {'--id', '--out', '--cap-bytes', '--timeout'} <= set(seen) or not 0 < int(seen['--cap-bytes']) <= SHARD_CAP:
+            return None
+    except ValueError:
+        return None
+    if profile == 'compile-shard':
+        ok = tuple(inner) in COMPILE_COMMANDS
+    else:
+        ok = shard_run_ok([python, *inner[1:]]) if inner and trusted_python(inner[0]) else False
+    return pinned if ok else None
 
 
 def lock_path():
@@ -167,6 +273,17 @@ def main(args):
         print('usage: heavy-guard.py [--held] {' + '|'.join(FLOORS) + '} [-- command ...]', file=sys.stderr)
         return 2
     profile, rest = args[0], args[1:]
+    if profile in SHARD_PROFILES:
+        # Bound to one concrete worker command and a verified cgroup; no --held
+        # form (nothing to bind), no Boat/source offload fallback.
+        pinned = None if held_only or len(rest) < 2 or rest[0] != '--' else worker_contract(profile, rest[1:])
+        if pinned is None:
+            print('heavy-guard: ' + profile + ' runs only its exact bounded worker command', file=sys.stderr)
+            return 2
+        if not verify_shard_cgroup():
+            print('heavy-guard: ' + profile + ' needs its own cgroup memory.max <= 3.7 GB (3700000000) and memory.swap.max = 0', file=sys.stderr)
+            return 75
+        rest = ['--', *pinned]
     path = lock_path()
     fd = inherited_lock(path)
     owned = fd is not None
@@ -182,10 +299,14 @@ def main(args):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             print('heavy-guard: bend lock unavailable: ' + str(error), file=sys.stderr)
+            if profile in SHARD_PROFILES:
+                return 75
             return offload(rest[1:], os.environ.copy())
     if not admit(profile):
         if not owned:
             os.close(fd)
+            if profile in SHARD_PROFILES:
+                return 75
             return offload(rest[1:], os.environ.copy())
         return 75
     os.set_inheritable(fd, True)

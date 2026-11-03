@@ -101,8 +101,8 @@ class HeavyGuardTest(unittest.TestCase):
 
     def test_nested_process_inherits_real_lock(self):
         script = """import importlib.util,sys
-s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;g.host_available=lambda:100*g.GIB;sys.exit(g.main(sys.argv[2:]))"""
-        wrapper = [sys.executable, '-c', script, str(ROOT / 'scripts/heavy-guard.py')]
+s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;g.host_available=lambda:100*g.GIB;g.lock_path=lambda:__import__('pathlib').Path(sys.argv[2]);sys.exit(g.main(sys.argv[3:]))"""
+        wrapper = [sys.executable, '-c', script, str(ROOT / 'scripts/heavy-guard.py'), str(Path(self.temp.name) / 'nested.lock')]
         child = [*wrapper, 'check', '--', sys.executable, '-c', 'print("nested-ok")']
         p = subprocess.run([*wrapper, 'check', '--', *child], text=True, capture_output=True, timeout=5)
         self.assertEqual(p.returncode, 0, p.stderr)
@@ -131,6 +131,134 @@ s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.modul
     def test_false_descriptor_does_not_bypass_lock(self):
         os.environ[guard.FD_VAR] = '9999'
         self.assertIsNone(guard.inherited_lock(Path(self.temp.name) / 'bp-bend.lock'))
+
+    def cgroup(self, limit, swap):
+        d = Path(self.temp.name) / ('cg-%s-%s' % (limit, swap))
+        d.mkdir(exist_ok=True)
+        if limit is not None:
+            (d / 'memory.max').write_text(limit + '\n')
+        if swap is not None:
+            (d / 'memory.swap.max').write_text(swap + '\n')
+        return d
+
+    def test_shard_profile_keeps_existing_floors_and_has_own_lower_floor(self):
+        self.assertEqual(guard.FLOORS['proof'], 19 * guard.GIB)
+        self.assertEqual(guard.FLOORS['check'], 14 * guard.GIB)
+        self.assertEqual(guard.HOST_RESERVE, 8 * guard.GIB)
+        self.assertEqual(guard.FLOORS['proof-shard'], 3 * guard.GIB)
+        self.assertEqual(guard.FLOORS['compile-shard'], 3 * guard.GIB)
+        self.assertEqual(guard.SHARD_CAP, 3_700_000_000)
+        self.assertLess(guard.SHARD_CAP + guard.CONTROLLER_CAP, 4 * guard.GIB)
+
+    def test_shard_cgroup_must_be_finite_capped_and_noswap(self):
+        cap = str(guard.SHARD_CAP)
+        self.assertTrue(guard.verify_shard_cgroup(self.cgroup(cap, '0')))
+        for limit, swap in [('max', '0'), (str(guard.SHARD_CAP + 1), '0'), (cap, 'max'), (cap, '1'),
+                            ('0', '0'), (cap, None), (None, '0'), ('-5', '0')]:
+            self.assertFalse(guard.verify_shard_cgroup(self.cgroup(limit, swap)), (limit, swap))
+
+    def test_shard_profile_refuses_unverifiable_cgroup(self):
+        argv = ['proof-shard', '--', sys.executable, str(ROOT / 'scripts/proof-shards.py'), 'run', '--out', 'd', '--shard', '000', '--expect', 'x', '--result', 'r']
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', side_effect=ValueError('none')), patch.object(guard.os, 'execvpe') as run:
+            self.assertEqual(guard.main(argv), 75)
+            run.assert_not_called()
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=self.cgroup('max', '0')), patch.object(guard.os, 'execvpe') as run:
+            self.assertEqual(guard.main(argv), 75)
+            run.assert_not_called()
+
+    def test_shard_profile_cannot_run_full_proof_or_other_commands(self):
+        good = self.cgroup(str(guard.SHARD_CAP), '0')
+        shard = [sys.executable, str(ROOT / 'scripts/proof-shards.py'), 'run']
+        full = [['bend', 'PROOF.bend'], ['scripts/check.sh', 'proof'], ['sh', '-c', 'bend PROOF.bend'],
+                [sys.executable, str(ROOT / 'scripts/proof-shards.py'), 'generate', '--out', 'x'],
+                [sys.executable, str(ROOT / 'scripts/proof-shards.py'), 'join', '--out', 'x'],
+                [sys.executable, '/tmp/proof-shards.py', 'run', '--shard', '0', '--expect', 'x', '--result', 'r'],
+                [*shard, '--result', 'r'], [*shard, '--shard', '0', '--shard', '1', '--expect', 'x', '--result', 'r']]
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+            for command in full:
+                self.assertEqual(guard.main(['proof-shard', '--', *command]), 2, command)
+            self.assertEqual(guard.main(['--held', 'proof-shard']), 2)
+            run.assert_not_called()
+
+    def test_shard_profile_runs_exact_worker_when_capped_and_never_offloads(self):
+        good = self.cgroup(str(guard.SHARD_CAP), '0')
+        argv = ['proof-shard', '--', sys.executable, str(ROOT / 'scripts/proof-shards.py'), 'run', '--out', 'd', '--shard', '000', '--expect', 'x', '--result', 'r']
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+            guard.main(argv)
+            self.assertEqual(run.call_args.args[0], str(Path(sys.executable).resolve()))
+        other = Path(self.temp.name) / 'second.lock'
+        with open(other, 'w') as held, patch.object(guard, 'lock_path', return_value=other):
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run, patch.object(guard, 'offload') as off:
+                self.assertEqual(guard.main(argv), 75)
+                run.assert_not_called()
+                off.assert_not_called()
+
+    def test_shard_floor_is_admission_only_low_memory_refuses(self):
+        with patch.object(guard, 'available', return_value=guard.FLOORS['proof-shard'] - 1):
+            self.assertFalse(guard.admit('proof-shard'))
+
+    def wrapped(self, inner, **over):
+        opts = {'--id': 'x', '--out': 'build/x', '--cap-bytes': str(guard.SHARD_CAP), '--timeout': '900'}
+        opts.update(over)
+        flat = [t for k, v in opts.items() if v is not None for t in (k, v)]
+        return [sys.executable, str(ROOT / 'scripts/lowmem-build.py'), 'worker', *flat, '--', *inner]
+
+    SHARD = ['python3', str(ROOT / 'scripts/proof-shards.py'), 'run', '--out', 'd', '--shard', '1', '--expect', 'h', '--result', 'r']
+
+    def test_compile_shard_allows_only_the_three_exact_compiles(self):
+        for command in guard.COMPILE_COMMANDS:
+            self.assertIsNotNone(guard.worker_contract('compile-shard', self.wrapped(list(command))), command)
+        for bad in [['bend', 'PROOF.bend'], ['bend', 'src/server/main.bend', '-o', '/tmp/x'], ['sh', '-c', 'bend PROOF.bend'],
+                    ['bend', 'src/server/main.bend', '-o', '{out}/hub.js', '--extra'], ['scripts/check.sh', 'proof'],
+                    ['bend', 'src/web/index.html', '-o', '{out}/hub.js']]:
+            self.assertIsNone(guard.worker_contract('compile-shard', self.wrapped(bad)), bad)
+        # compile-shard cannot run proof shards, nor proof-shard compiles
+        self.assertIsNone(guard.worker_contract('compile-shard', self.wrapped(self.SHARD)))
+        self.assertIsNone(guard.worker_contract('proof-shard', self.wrapped(list(guard.COMPILE_COMMANDS[0]))))
+
+    def test_wrapper_options_are_closed_and_cap_bounded(self):
+        hub = list(guard.COMPILE_COMMANDS[0])
+        for over in [{'--cap-bytes': str(guard.SHARD_CAP + 1)}, {'--cap-bytes': '0'}, {'--cap-bytes': 'big'}, {'--cap-bytes': None}, {'--timeout': None},
+                     {'--no-scope': ''}, {'--unknown': '1'}]:
+            self.assertIsNone(guard.worker_contract('compile-shard', self.wrapped(hub, **over)), over)
+        dup = self.wrapped(hub)
+        dup[3:3] = ['--id', 'again']
+        self.assertIsNone(guard.worker_contract('compile-shard', dup))
+        self.assertIsNone(guard.worker_contract('compile-shard', self.wrapped(hub)[:2] + ['worker']))
+
+    def test_proof_shard_wrapped_requires_the_exact_shard_run(self):
+        self.assertIsNotNone(guard.worker_contract('proof-shard', self.wrapped(self.SHARD)))
+        self.assertIsNone(guard.worker_contract('proof-shard', self.wrapped(['sh', '-c', 'bend PROOF.bend'])))
+        self.assertIsNone(guard.worker_contract('proof-shard', self.wrapped(self.SHARD[:3])))
+
+    def test_interpreter_must_be_the_guards_own(self):
+        other = Path(self.temp.name) / 'python3'
+        other.write_text('#!/bin/sh\nexit 0\n')
+        other.chmod(0o755)
+        for exe in [str(other), '/bin/sh', 'python3.99']:
+            self.assertIsNone(guard.worker_contract('proof-shard', [exe, *self.SHARD[1:]]), exe)
+            self.assertIsNone(guard.worker_contract('compile-shard', [exe, *self.wrapped(list(guard.COMPILE_COMMANDS[0]))[1:]]), exe)
+        pinned = guard.worker_contract('proof-shard', self.SHARD)
+        self.assertEqual(pinned[0], str(Path(sys.executable).resolve()))
+
+    def test_compile_shard_fails_closed_and_never_offloads(self):
+        command = self.wrapped(list(guard.COMPILE_COMMANDS[1]))
+        argv = ['compile-shard', '--', *command]
+        for limit, swap in [('max', '0'), (str(guard.SHARD_CAP + 1), '0'), (str(guard.SHARD_CAP), 'max'), (str(guard.SHARD_CAP), '1')]:
+            with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=self.cgroup(limit, swap)), patch.object(guard.os, 'execvpe') as run, patch.object(guard, 'offload') as off:
+                self.assertEqual(guard.main(argv), 75, (limit, swap))
+                run.assert_not_called()
+                off.assert_not_called()
+        good = self.cgroup(str(guard.SHARD_CAP), '0')
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+            guard.main(argv)
+            self.assertEqual(run.call_args.args[0], str(Path(sys.executable).resolve()))
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+            self.assertEqual(guard.main(['compile-shard', '--held']), 2)
+            self.assertEqual(guard.main(['--held', 'compile-shard']), 2)
+            self.assertEqual(guard.main(['compile-shard', '--', 'bend', 'PROOF.bend']), 2)
+            run.assert_not_called()
 
 
 if __name__ == '__main__':

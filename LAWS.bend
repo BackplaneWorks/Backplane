@@ -13394,6 +13394,28 @@ law auth_owner_pair_rebound:
   {AUTH.Auth.owner.pair(True{}, ["100.64.0.8:3787"], [HTTPAUTH.Header{"host", "attacker.invalid:3787"}], "POST", "/bots/pair") == False{} : Bool}
 # ---- end native owner tailnet pairing ----
 
+# ---- tokenless pairing proofs ----
+# A hub asking another to pair over a plain address proves the ask with an
+# HMAC of its own token; a hub without a token, an empty proof or a stale
+# one never passes (Auth.pair.checked)
+law auth_pair_proof_needs_token:
+  for to: String
+  for at: Nat
+  for now: Nat
+  for proof: String
+  {AUTH.Auth.pair.checked("", to, at, now, proof) == False{} : Bool}
+
+law auth_pair_proof_not_empty:
+  for to: String
+  for at: Nat
+  for now: Nat
+  {AUTH.Auth.pair.checked("secret", to, at, now, "") == False{} : Bool}
+
+law auth_pair_proof_stale:
+  for to: String
+  {AUTH.Auth.pair.checked("secret", to, 1000n, 1061n, "ab") == False{} : Bool}
+# ---- end tokenless pairing proofs ----
+
 # ---- far queue: calls for the owner's machines that are away (hub.bend's Fq.*) ----
 # thread_send and thread_launch wait for a machine that is away; nothing else does
 law fq_tools:
@@ -15932,3 +15954,15 @@ law home_viewer_size_is_local:
   for u: U.Ui
   for value: String
   {U.Act.cmds(U.Home.viewer.size(u, value)) == Nil{} : List<&2, U.Cmd>}
+
+# Browser clamping after the composer shrinks keeps a following reader at
+# the end. A reader above that enlarged viewport's end keeps their place.
+law timeline_follow_grown_viewport:
+  for held: TLVIRTUAL.Px
+  for +end: TLVIRTUAL.Px
+  {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(True{}, TLVIRTUAL.End.at(TLVIRTUAL.Px.int(1000n), TLVIRTUAL.Px.int(600n), TLVIRTUAL.Follow.viewport(TLVIRTUAL.Px.int(200n), TLVIRTUAL.Px.int(400n)))), held, end) == end : TLVIRTUAL.Px}
+
+law timeline_follow_grown_viewport_away:
+  for +held: TLVIRTUAL.Px
+  for end: TLVIRTUAL.Px
+  {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(True{}, TLVIRTUAL.End.at(TLVIRTUAL.Px.int(1000n), TLVIRTUAL.Px.int(400n), TLVIRTUAL.Follow.viewport(TLVIRTUAL.Px.int(200n), TLVIRTUAL.Px.int(400n)))), held, end) == held : TLVIRTUAL.Px}

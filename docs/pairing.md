@@ -22,7 +22,11 @@ has access, has its own Revoke. Revoking an unused link stops it from pairing
 anything; revoking a used one also revokes the device it paired and closes that
 device's connections. A hub pairs only with a link it issued, recorded and has
 not revoked; one it cannot record is never issued. The newest hundred finished
-links stay listed. A short code needs the hub
+links stay listed. Hub-to-hub invites (`bp1:`, made in Bots to link a
+machine, and the ones hubs give each other when they pair by themselves) are
+recorded and listed here too, as machine invites: they expire after ten
+minutes and work once like a device invitation, and revoking a used one
+unlinks the machine it linked. A short code needs the hub
 address: Backplane does not introduce a public code-resolver service. Both
 devices need a route to the hub, usually its LAN or tailnet.
 

@@ -817,3 +817,132 @@ corrected V17 emission including new original reference187; V18 focused90;
 V18 mobile117. Total944credit-s (**$0.00944**), all sandboxes deleted and
 verified. This cumulative section includes failed/scoped experiments; its
 passes do not establish a complete low-memory hub/web build.
+
+### Cold source recipes, metadata cache and full-run limits (2026-11-03)
+
+These experiments preserve the protected2.0.36 checker and actual3.7GB
+compiler +512MiB controller caps, sum4,236,870,912bytes<4GiB, swap0.
+All full-run references below are frozen33ce. No low-memory hub/web final
+output has qualified; PR852 remains opt-in tooling, not a release trigger.
+
+| Change | Before | After |
+|---|---|---|
+| V18 complete hub/web after bounded storage | Original official hub147.340s/19,189,172KiB; web72.539s/8,773,704KiB | OOM at362.557s hub /399.23s web; same3.7GB compiler cap. Hub reached24,264definitions before workspace checking; web completed workspace checking before storage failed. No final-output identity. |
+| V19 cold source bodies rebuilt by unchanged parser | V18 retains original parsed v ASTs | Exact type interfaces remain resident; ordinary cold v uses hash-bound source/offset/prefix-header recipes. Unsupported layouts and law/fill cases retain the original body. Every original kernel check remains required. |
+| V19 qualification fixtures | New reference used Base's existing name Word; next same-file alias needed no cold replay | First fixture fails fresh-name parsing, then strict replay-coverage guard rejects unexercised path. Neither is a compiler pass. Imported type fixture forces replay; remaining6 calls include passing/false theorems through a paged dependency. Prior22 completed cases and codec reused by exact hashes. |
+| V19 real retained-storage focused gate | V18 focused62.400s/2,977,024KiB | V19c83.596s whole scope /2,932,636KiB;2,228 bodies paged/411 replays. Exact final JS bytes match original reference. Slower; no speedup claim. |
+| V19 mobile check and retained bridge reuse | V18 mobile88.149s/2,770,720KiB; post-check RSS1,997,938,688bytes |183.311s/2,715,740KiB; post-check RSS1,035,329,536bytes.20,126 bodies paged,8,411 replays/metadata reads. Exact existing ddb9 bridge preserved; no new bridge/SDK/package. Lower steady RSS, wall regression. |
+| V19 complete hub/web | V18 OOM | Both stop at600s configured timeout without OOM, no final output. Hub last module botnet with5,442,452,055bytes stored; web still storing accepted workspace results. Last hub cgroup:anonymous836,059,136bytes,file cache1,831,563,264,kernel795,906,048. Memory pressure moved toward file/cache overhead; these are failed partial runs. |
+| V20 bounded32MiB immutable parser-metadata cache | V19c source metadata read per replay | Focused scope171.203s/2,867,012KiB, exact JS match;407 replays need44 reads with363 hits. Wall regresses despite fewer reads. GNU CPU:106.27s user/64.19s system versus V19c77.55/7.36, with99%/101% CPU and no major faults. Do not attribute this to VM queueing or claim a speed win. |
+| V21 mobile check plus exact retained bridge reuse | V19 mobile183.311s/2,715,740KiB; V18 mobile88.149s/2,770,720KiB |149.628s/2,717,832KiB (2.59GiB), cgroup peak2,775,441,408bytes, swap0 and no OOM.8,446 source replays require2,813 capsule reads/5,633 hits;182 metadata records in one file. Exact ddb9 bridge reused; no fresh bridge/SDK/package.18.4% faster than V19, still slower than V18. Full hub/web failures below. |
+| V21 complete web with packed metadata | V19 web600s timeout without final output |397.645s then systemd Result=oom-kill at3,699,998,720byte compiler cgroup peak, swap0. Module checking completes331.121s; failure occurs during JS analysis, before analysis:end. Last sample anonymous3,638,951,936bytes/file10,330,112/kernel49,225,728. Final GNU RSS unavailable after kill; outer264,964KiB measures controller. No final output identity and no retry. |
+| V21 complete hub with packed metadata | V19 hub600s timeout |600.277s controlled timeout: timed_out=true/raw_exit124; no OOM observed. Last completed module ring at598.826s/25,771defs; next rules group still checking.4,772,389,115bytes stored. Checkpoint peak2,950,448KiB; final GNU RSS unavailable. No modules:complete, JS analysis or server.js. No final-byte qualification or retry. |
+
+The V21 candidate packs metadata into one append-only private file while
+retaining per-segment SHA256 and bounds verification. This targets the
+hundreds of thousands of small metadata files and repeated existence/open
+operations observed in the earlier store. Lower-term files retain their
+previous format. V21 passes25 changed-mode controls plus codec corruption,
+truncation and isolation checks. The focused scope passes106.574s /2,846,192KiB
+(2.71GiB), with exact reference JS bytes.43,956 metadata records occupy one
+53,670,557-byte file; ending kernel memory38,268,928bytes versus V20
+101,896,192bytes. It improves V20 time171.203s but remains slower than
+V19c83.596s and the unchanged whole-book focused reference22.003s.
+Cgroup peak reaches the3.7GB cap (file cache included); no full-program
+qualification is implied. Job j20261103203918-2786061, packet
+`db7531b95c94f5e58d81f605156f9c542b3e29b2a05657c2583baea786c1951d`.
+
+Promotion hold: static inspection after the V21 mobile run confirmed that
+`sourceCapsule(key)` returns a cached value before `get(key)` revalidates the
+backing segment. Existing corruption controls clear the caches first, so they
+do not cover tampering after a successful first read. In-memory decoded data
+was previously verified, but the promised fail-loud storage-mutation contract
+is not established for this path. V20/V21 receipts remain experimental timing
+evidence and cannot qualify promotion. Lane5 owns the isolated correction
+and negative controls; the immutable V21 hub/web jobs ended as reported above.
+
+Lane5 isolated warm-hit correction (reviewed and applied in private checkout only):
+`offload.ts` reuses the decoded capsule only after rechecking its backing
+record bounds and SHA256.18 controls pass, including warm same-size edit,
+truncation and missing record rejection. Live/loaded bodies explicitly remain
+verified in-memory snapshots; clear() alone does not invalidate live WeakRefs.
+Job j20261103205550-2996607 compiler scope82.690s /2,928,256KiB; packet86.165s.
+Exact focused JS matches, enforced caps and swap0 retained.95credit-s
+(**$0.00095**), reused receipt with no duplicate run. This isolated single
+measurement cannot establish a causal speedup or qualify full output.
+After all three V21 jobs became terminal, the exact isolated offload delta
+was applied to the CI owner private compiler only. Protected checker/safe/Base
+and original experiment snapshots remain unchanged; no normal build rollout.
+Corrected upstream patch SHA256
+`4405d272062f81d713743aab104af0c5943888b65dfd33d124b66492f7340d12`
+is handed to the swarm integrator; no full candidate is repeated.
+
+Original source, reconstructed-body identity, typed false theorems,
+forward references, corruption/truncation/missing/cross-store records,
+and exact output bytes remain mandatory controls. A focused constant main
+imports and checks the real25-file refview closure but does not emit every
+refview function; its receipt cannot qualify a complete hub/web program.
+
+Costs: V18 full hub/web378+420credit-s; V19 fixture/corrected focused
+13+9+101; V19 full hub/web/mobile617+617+200; V20 focused197; V21 focused141/mobile164/web411/hub626.
+Total3,894credit-s (**$0.03894**), all terminal sandboxes deleted and deletion
+verified. No installer files,
+installed compiler, app execution, live auth/settings, telemetry or release
+authorization changed.
+
+### Saved V21 phase audit (2026-11-03)
+
+[The reproducible summary](compiler-memory/phase-audit/SUMMARY.json) binds
+the existing raw journals and result files by SHA256. This is offline analysis:
+**zero new compiler jobs and $0 additional Boat cost**. Regenerate it with
+`python3 build/ci-speed/compiler-memory/phase-audit/summarize.py --output /tmp/v21-phases.json`.
+A measured regeneration takes 0.08s and 32,332KiB peak RSS and reproduces
+the committed summary byte-for-byte. The script requires the three saved job directories under
+`~/.local/state/backplane/boat/jobs`, or an explicit `--jobs-root`.
+
+| Measured interval | Hub, partial 600.277s run | Mobile, completed 149.628s source check |
+|---|---:|---:|
+| Completed checker groups | 365 | 285 |
+| Inside unchanged `Bend.book_valid` | 256.312s | 104.872s |
+| Validated group through storage/cache/collection/yield completion | 298.701s | 26.023s |
+| Outside those completed intervals, including load/preparation and partial work | 45.263s | 18.732s |
+
+Intervals are wall time, not CPU samples. They are disjoint within each
+single-book run; the incomplete hub group is excluded. The post-check
+interval includes spill serialization, cache work, collection and scheduler
+yields, so it must not be described as pure disk I/O. Mobile's check-only
+mode discards accepted emitter IR; hub must retain it. This difference helps
+locate the next investigation, but these different programs and incomplete
+outcomes do not establish a causal performance comparison.
+
+The slowest completed hub modules, including checking and post-check work:
+
+| Module | Time | Added declarations |
+|---|---:|---:|
+| `src/web/view.bend` | 88.872s | 890 |
+| `src/core/hub.bend` | 81.267s | 1,683 |
+| `src/core/refview.bend` | 72.790s | 81 |
+| `src/web/workspace.bend` | 57.277s | 77 |
+
+Refview's one completed group spends 9.411s checking and 63.285s after
+validation. Workspace spends 12.066s checking and 45.191s after validation.
+These are better targets for retained-result storage work than source line
+count alone. Hub reaches only 245 completed module checks before timeout;
+these are not a ranking of the entire program.
+
+Web starts three loader invocations at 0.007s, 0.061s and 0.101s for
+timeline-plan, timeline-history and app. Their journals share unqualified
+event ranges. The summary deliberately refuses per-group attribution for
+web: existing trace IDs cannot distinguish overlapping books soundly.
+Process RSS is shared by all invocations, not memory owned by one file.
+Two small analysis passes finish in 1.981s and 10.005s. App analysis starts
+at 331.144s and is unfinished at OOM 66.501s later. Anonymous memory grows
+from 1,594,904,576 bytes at that start to 3,638,951,936 in the last sample;
+only 10,330,112 bytes of file cache remain there. The final failure is
+dominated by anonymous memory, not the metadata pack's resident file cache.
+The journal does not identify the exact analysis allocation responsible.
+
+No final GNU RSS exists for the killed/timed-out compiler processes; reported
+checkpoint maxima are lower bounds. No separate per-law proof time or pure
+parse time can be recovered from these marks, and no full proof suite was
+run. PR #856 remains opt-in and nonqualifying for a complete build or release.

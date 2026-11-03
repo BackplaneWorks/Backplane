@@ -194,7 +194,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "9bc808dfa197c9aae8d986aa5277513cf9f211034f7575863468ba24c5cdb50f",
+    "src/web/view.bend": "0e598f9dfa50005948f0550c3e74e3dae8d953f2d31a4defd686b1cd312c919f",
     "src/core/message-context.bend": "7e19596b3acec6ec7a1a10e6643c423ada897a6ee490a58b4a2b39a9767b677d"
   },
   "review": {
@@ -1070,5 +1070,18 @@
     "broaderModuleCheck": "UNQUALIFIED scope143; no PASS or code failure inferred",
     "proofBrowserNative": "DEFERRED_NOT_PASS",
     "targetedProducerReceipt": "/home/h/.local/state/backplane/boat/jobs/j20261103195023-2113266/artifacts/report.json"
+  },
+  "workbenchDefinitionOrderReview": {
+    "scope": "Only View.solid.loc declaration moves below unchanged View.solid.workbench in web/view.bend. Every definition body is identical to frozen c7. No sidebar reader, filter, key, scanner, authority or unknown @ retention changes. Other PR859 timeline changes are separate existing main content.",
+    "repairCommit": "fc92fc968",
+    "repairMerge": "b7aaff1e4872215c1df11d688059c77030b40a58",
+    "before": "68e37010e56361a21f3d79a072430b0a088ab000345db22ed16eee13488b5fec",
+    "after": "7ced34096836655e4a058704fd45c16d0ca7b02e916e2392e7fec995a0bb8ce8",
+    "independentReview": "Root t1792701529-415584 independently confirmed the exact five-line declaration move against c7.",
+    "fullOutput24": "UNRUN; no inherited PASS",
+    "validation": "One official server-entry check-only on normal LARGE; no emission/full-proof/web-entry/XLARGE. See docs/reviews/rc3-workbench-definition-order.md.",
+    "review": "docs/reviews/rc3-viewer-order-pin.json",
+    "reviewSHA256": "a123279d29a138569380c5bbdfff1225524d700cdb5268fe5a235626fd12f40b",
+    "serverEntryCheck": "PENDING; sole normal LARGE work w-t1793685091-1352063-1438949"
   }
 }
