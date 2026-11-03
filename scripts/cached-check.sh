@@ -3,8 +3,9 @@
 # (the module, its full import closure, the compiler: scripts/content-cache.py)
 # has no recorded pass. A module whose dependency changed is a miss, so a
 # cached pass never covers changed inputs. PROOF.bend is not touched (see
-# content-cache.py plan-proof). Not a replacement for check.sh: the nightly
-# main run uses `scripts/cached-check.sh --all`, which ignores every entry.
+# content-cache.py plan-proof). Not a replacement for check.sh: no
+# workflow runs this yet. Proposed, not wired: the nightly main run would use
+# `scripts/cached-check.sh --all`, which ignores every entry.
 #
 #   scripts/cached-check.sh [--all]       exit 0 only when every module passed
 # BP_CONTENT_CACHE: the local cache (see content-cache.py; no shared cache yet).
