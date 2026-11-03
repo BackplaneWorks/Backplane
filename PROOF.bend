@@ -291,6 +291,7 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+import ./test/secret_box_proof.bend as SECBP
 
 import ./src/core/landing.bend as LAND
 
@@ -14160,6 +14161,8 @@ def Laws.far_items_projects(): {==}
 def Laws.hot_demo_threads(): {==}
 # ---- end F1 ----
 # ---- secret box ----
+def Laws.sec_box_handlers(): SECBP.secp_box_handlers()
+
 def Laws.sec_mask_total(v, s, h):
   SECPROOF.secp_mask_total(v, s, h)
 

@@ -37,7 +37,7 @@ Every prompt carries a `<secrets>` block: the names set, how to use them, and "n
 
 ## Where a value travels
 
-1. The box's field. The field has no binding. At Save, the host (`host.js`'s `secretSave`; on phones, `Backplane.secret`, fed by the app's vault field) reads it once and sends the `secret.set` request that `Sbox.req` builds. It travels only in that request: never as a view action, a draft, the outbox or the client's state. A `bfield` named `sval` (an older phone) is dropped.
+1. The box's field. The field has no binding. At Save, the host (`host.js`'s `secretSave`; on phones, `Backplane.secret`, fed by the app's vault field) reads it once and sends the `secret.set` request that `Sbox.req` builds. The raw secure request carries the named-account binding of the presented conversation, as ordinary `Ui.rpc` requests do; the hub still rejects a stale owner. It travels only in that request: never as a view action, a draft, the outbox or the client's state. The box closes only after its own successful hub acknowledgment. Request-building failures, refusals, disconnections and a 15-second acknowledgment timeout leave an inline error. Pending saves keep only IDs, ownership and a deadline; they never keep or retry the value. A `bfield` named `sval` (an older phone) is dropped.
 2. The hub's `Hub.rpc.parse` hands it to `VaultFx.put`. It goes into no change, no out, no reply and no log line.
 3. The sealed file and the effect's memory.
 4. A `secret_run` child's environment, or a temporary file.
@@ -76,6 +76,8 @@ Stored values live only in `SecVal`, gathered in a `Vault`. `test/tools/secret.m
 Agents run as the same OS user as the hub. The box stops accidental exposure: transcripts, logs, the model's context, other clients, backups. A determined agent with a shell could still read the keychain or the key file. What it prints reaches the hub masked, but its own tool output reaches its model directly. Lines logged before a secret was stored aren't rewritten.
 
 Tests:
+- `node test/tools/secret_save_test.mjs` and `python3 test/tools/secret_box_handler_test.py`: secure transport failure/success, reply correlation, no value in pending metadata, and rendered-action handler coverage (also checked by `sec_box_handlers`).
+- `node test/tools/secret_box_e2e.cjs BINARY WEB`: a real `secret_request` in an isolated named-account bot conversation, Save, `secret_list`, a sealed vault and a closed box. With `SECRET_BOX_FAULT=rename`, a failed write must remain an inline error. Uses the browser helper's Playwright dependency and `BACKPLANE_CHROME` when set.
 - `bend test/secret_test.bend -o X.mjs && bun test/tools/secret.mjs X.mjs`: masks, pure and native; the source gate; and the vault's fail-closed, fault-injection, run-lifecycle and race negatives.
 - `bun test/tools/secret_mcp_e2e.ts BINARY WIRE`: the tools through a real hub's gates. A copied log refuses `secret_run` and runs nothing; an ordinary hub runs it with masked output; an old process's call is refused as stale.
 - `bun test/tools/secret_e2e.ts BINARY WIRE`: stand-in claude and codex capture their argv and stdin; the event log, the store and every frame are checked for the value.
