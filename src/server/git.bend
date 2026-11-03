@@ -966,10 +966,10 @@ def Git.step.pr(+cwd: String, title: String, body: String) -> IO(String):
 # hub lets "init" through outside a repository: GitJob.run.git): git init
 # there, Backplane's own folder kept out of it (as the worktrees' and the
 # design history's are), and the folder committed as it is, so new threads
-# get worktrees of their own. Inside a repository (a page left open) it
-# does nothing.
+# get worktrees of their own. Inside a repository (a page left open), or
+# when git has no name and email to commit with, it changes nothing.
 def Git.init.sh() -> String:
-  "if git rev-parse --git-dir >/dev/null 2>&1; then echo 'already a git repository'; exit 1; fi; git init -q && mkdir -p .git/info && printf '/.backplane/\\n' >> .git/info/exclude && git add -A && git commit -q -m start && git log -1 --format='%h %s'"
+  "if git rev-parse --git-dir >/dev/null 2>&1; then echo 'already a git repository'; exit 1; fi; if ! git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then echo 'git does not know your name and email on this machine yet, so nothing was changed. Set them once (git config --global user.name \"Your Name\" and git config --global user.email you@example.com), then press it again.'; exit 1; fi; git init -q && mkdir -p .git/info && printf '/.backplane/\\n' >> .git/info/exclude && git add -A && git commit -q -m start && git log -1 --format='%h %s'"
 
 def Git.step.init(+cwd: String) -> IO(String):
   Git.label("init", Git.seq(P.Proc.run("sh", ["-c", Git.init.sh()], cwd), out => Git.done("init: " ++ cwd ++ " is a git repository now (commit " ++ out ++ "); new threads get their own worktree")))

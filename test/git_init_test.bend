@@ -36,5 +36,6 @@ def main() -> IO(Unit):
     C.Check.str("init: one step (git init, exclude, commit)", steps("init"), "init ")
     C.Check.str("the others stay", steps("commit_push") ++ "|" ++ steps("nonsense"), "commit push |none")
     C.Check.str("the repository leaves .backplane out, and a repository is left alone", Bool.show(String.contains(G.Git.init.sh(), "/.backplane/")) ++ Bool.show(String.starts_with(G.Git.init.sh(), "if git rev-parse --git-dir")), "TrueTrue")
+    C.Check.str("no identity: nothing changes (checked before git init)", Bool.show(String.contains(G.Git.init.sh(), "git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then echo 'git does not know your name")), "True")
     C.Check.str("Diff offers the button", Bool.show(String.contains(html(V.View.diff.nogit(I.En{}, "/work/x")), "Make it a git repository")), "True")
     C.Check.str("it runs git.act init", Bool.show(String.contains(html(V.View.diff.nogit(I.En{}, "/work/x")), "\"init\"")), "True")
