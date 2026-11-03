@@ -76,6 +76,7 @@ class BPAccountsIO {
     this.privateDir(this.path.join(canonicalHome, "providers"));
     this.root = this.path.join(canonicalHome, "providers", "accounts-v1");
     this.profiles = []; this.attempts = new Map(); this.jobs = new Map(); this.launchQueues = new Map(); this.children = new Map(); this.revision = 0;
+    this.refreshing=null; this.refreshAttempts=new Map(); this.defaultAllowance=null; this.defaultIdentity="";
     this.privateDir(this.root);
     this.index = this.path.join(this.root, "profiles.json");
     try {
@@ -140,6 +141,7 @@ class BPAccountsIO {
     if(child && child.exitCode===null && child.signalCode===null){child.once("exit",clean);child.once("error",clean);}else clean();
   }
   environment(p) {
+    if(!p)return {...process.env};
     const env = {...process.env}; for (const key of bp_account_unset) delete env[key];
     for (const key of Object.keys(env)) {
       if (/^(OPENAI_|ANTHROPIC_|CODEX_.*(?:TOKEN|AUTH|WIF)|CLAUDE_CODE_USE_|CLAUDE_CODE_(?:OAUTH|API_KEY|AUTH|PROFILE|SESSION))/.test(key)) delete env[key];
@@ -161,7 +163,7 @@ class BPAccountsIO {
   async cli(p, args, timeout=12000) {
     const cp = require("node:child_process");
     return await new Promise((resolve, reject) => {
-      let out = ""; const child = cp.spawn(p.provider, args, {env:this.environment(p), stdio:["ignore","pipe","ignore"], windowsHide:true});
+      let out = ""; const child = cp.spawn(p?.provider||"claude", args, {env:this.environment(p), stdio:["ignore","pipe","ignore"], windowsHide:true});
       const timer = setTimeout(() => { child.kill(); reject(new Error("Provider status timed out")); }, timeout);
       child.stdout.on("data", b => {out += b.toString(); if (Buffer.byteLength(out)>131072) {child.kill(); reject(new Error("Provider response exceeded its limit"));}});
       child.on("error", () => {clearTimeout(timer); reject(new Error("Provider CLI could not start"));});
@@ -187,6 +189,72 @@ class BPAccountsIO {
     }
     return windows;
   }
+  async claudeUsage(p) {
+    // Provider-owned read-only /usage control request. No prompt, inference,
+    // transcript scan, direct OAuth request or credential extraction.
+    const cp=require("node:child_process");
+    return new Promise(resolve=>{
+      let buffer="",settled=false;
+      const child=cp.spawn("claude",["--setting-sources","user","--settings",'{"forceLoginMethod":"claudeai"}',"-p","--input-format","stream-json","--output-format","stream-json","--verbose"],{env:this.environment(p),stdio:["pipe","pipe","ignore"],windowsHide:true,cwd:this.root});
+      const finish=value=>{if(settled)return;settled=true;clearTimeout(timer);child.stdin.destroy();child.stdout.destroy();child.kill();resolve(value);};
+      const timer=setTimeout(()=>finish(null),12000);
+      child.on("error",()=>finish(null));child.on("exit",()=>finish(null));child.stdin.on("error",()=>finish(null));
+      child.stdout.on("data",chunk=>{
+        buffer+=chunk.toString();if(Buffer.byteLength(buffer)>131072)return finish(null);
+        for(let cut;(cut=buffer.indexOf("\n"))>=0;){
+          const line=buffer.slice(0,cut);buffer=buffer.slice(cut+1);
+          try{const r=JSON.parse(line);if(r.type!=="control_response")continue;
+            if(r.response?.request_id==="init"){
+              if(r.response.subtype==="error")return finish(null);
+              child.stdin.write(JSON.stringify({type:"control_request",request_id:"usage",request:{subtype:"get_usage",skip_behaviors:true}})+"\n");
+            }else if(r.response?.request_id==="usage")finish(r.response.subtype==="error"?null:r.response.response);
+          }catch(_){/* Raw provider output is never published. */}
+        }
+      });
+      child.stdin.write(JSON.stringify({type:"control_request",request_id:"init",request:{subtype:"initialize"}})+"\n");
+    });
+  }
+  claudeWindows(reading) {
+    if(reading?.rate_limits_available!==true)return [];
+    const windows=[];
+    for(const [scope,minutes]of [["five_hour",300],["seven_day",10080],["seven_day_opus",10080],["seven_day_sonnet",10080]]){
+      const w=reading.rate_limits?.[scope];if(!w||typeof w.utilization!=="number"||!Number.isFinite(w.utilization)||w.utilization<0||w.utilization>100)continue;
+      const reset=typeof w.resets_at==="string"?Date.parse(w.resets_at)/1000:NaN;
+      windows.push({name:scope,scope,shared:scope==="five_hour"||scope==="seven_day",used_percent:w.utilization,window_minutes:minutes,...(Number.isSafeInteger(reset)&&reset>0?{resets_at:reset}:{})});
+    }
+    return windows;
+  }
+  async refresh() {
+    if(this.refreshing||this.loadError)return this.refreshing;
+    // Tick/focus/turn callers all share the same per-account attempt budget.
+    this.refreshing=(async()=>{
+      const now=Math.floor(Date.now()/1000);
+      for(const p of this.profiles){
+        if(!["connected","unchecked"].includes(p.state)||this.jobs.has(p.id)||this.launchQueues.has(p.id)||this.busy(p.id))continue;
+        const at=Math.max(this.refreshAttempts.get(p.id)||0,p.allowance?.at||0);
+        if(at&&now-at<300)continue;
+        this.refreshAttempts.set(p.id,now);
+        const guard={refresh:true};this.jobs.set(p.id,guard);
+        try{await this.verify(p,false,guard);}catch(_){/* Keep last verified identity/sample on transient errors. */}
+        finally{if(this.jobs.get(p.id)===guard)this.jobs.delete(p.id);}
+      }
+      const at=this.refreshAttempts.get("default-claude")||0;
+      if((!at||now-at>=300)&&!process.env.ANTHROPIC_API_KEY){
+        this.refreshAttempts.set("default-claude",now);
+        try{
+          const {code,data}=await this.cli(null,["auth","status"]);
+          if(code===0&&data.loggedIn===true&&data.authMethod==="claude.ai"){
+            const identity=this.crypto.createHash("sha256").update(JSON.stringify([data.email,data.accountUuid||data.userId,data.orgUuid||data.organizationId])).digest("hex");
+            if(this.defaultIdentity!==identity)this.defaultAllowance=null;
+            this.defaultIdentity=identity;
+            const windows=this.claudeWindows(await this.claudeUsage(null));
+            if(windows.length){const at=Math.floor(Date.now()/1000);this.defaultAllowance={provider:"claude",state:"ok",auth:"claude.ai",at,attempted_at:at,source:"claude-cli-usage",windows:windows.map(w=>({...w,scope:["five_hour","seven_day"].includes(w.scope)?"shared":w.scope.replace("seven_day_",""),used_permille:Math.ceil(w.used_percent*10),duration_minutes:w.window_minutes}))};}
+          }else{this.defaultIdentity="";this.defaultAllowance={provider:"claude",state:"unavailable",at:0,attempted_at:now,source:"claude-cli-usage",windows:[]};}
+        }catch(_){/* A failed read never manufactures a newer measurement. */}
+      }
+    })().finally(()=>{this.refreshing=null;});
+    return this.refreshing;
+  }
   async claudeModels(p) {
     const cp=require("node:child_process");
     return await new Promise((resolve)=>{
@@ -209,21 +277,29 @@ class BPAccountsIO {
     });
   }
   async verify(p, newLogin=false, guard=null) {
-    let identity, fingerprintIdentity, catalog=[], allowance=null;
+    let identity, fingerprintIdentity, catalog=[], allowance=p.allowance;
     if (p.provider === "claude") {
       const {code,data} = await this.cli(p, ["auth","status"]);
       if (code !== 0 || data.loggedIn !== true || data.authMethod !== "claude.ai") throw new Error("Claude subscription sign-in could not be verified; Console profiles and API credentials use a different store.");
       if (typeof data.configDirectory!=="string" || this.path.resolve(data.configDirectory) !== this.directory(p)) throw new Error("Claude must report its isolated account directory (Claude Code 2.1.268 or later)");
       identity={email:this.label(data.email), plan:this.label(data.subscriptionType), auth:"claude.ai"};
       fingerprintIdentity=[identity.email, this.label(data.accountUuid || data.userId), this.label(data.orgUuid || data.organizationId)];
-      catalog=await this.claudeModels(p);
+      catalog=p.catalog?.length?p.catalog:await this.claudeModels(p);
+      const at=Math.max(this.refreshAttempts.get("usage:"+p.id)||0,p.allowance?.at||0);
+      if(newLogin||!at||Date.now()/1000-at>=300){
+        this.refreshAttempts.set("usage:"+p.id,Math.floor(Date.now()/1000));
+        const windows=this.claudeWindows(await this.claudeUsage(p));
+        if(windows.length){const now=Math.floor(Date.now()/1000);allowance={provider:"claude",state:"ok",at:now,attempted_at:now,auth:"claude.ai",source:"claude-cli-usage",windows};}
+      }
     } else {
       const rpc=this.codex(p);
       try {
         await rpc.initialize(); const a=await rpc.request("account/read", {refreshToken:false});
         if (a?.account?.type !== "chatgpt") throw new Error("Codex ChatGPT sign-in could not be verified");
         identity={email:this.label(a.account.email), plan:this.label(a.account.planType), auth:"chatgpt"};
-        const fresh=!newLogin && p.allowance?.at && Date.now()/1000-p.allowance.at<300;
+        const lastAttempt=Math.max(this.refreshAttempts.get("usage:"+p.id)||0,p.allowance?.at||0);
+        const fresh=!newLogin && lastAttempt && Date.now()/1000-lastAttempt<300;
+        if(!fresh)this.refreshAttempts.set("usage:"+p.id,Math.floor(Date.now()/1000));
         let limits; if(!fresh)try {limits=await rpc.request("account/rateLimits/read");} catch (_) { /* honest unknown */ }
         fingerprintIdentity=[identity.email, this.label(a.workspaceRouting?.chatgptAccountId)];
         catalog=fresh?p.catalog:[];
@@ -232,7 +308,7 @@ class BPAccountsIO {
           catalog=(m?.data ?? []).slice(0,40).filter(x=>typeof x.model==="string").map(x=>({id:this.label(x.model), label:this.label(x.displayName || x.model), efforts:(x.supportedReasoningEfforts??[]).slice(0,12).map(y=>this.label(y.reasoningEffort))}));
         } catch (_) { /* catalog unavailable, never copy another profile */ }
         const windows=this.windows(limits); const now=Math.floor(Date.now()/1000);
-        allowance=fresh?p.allowance:{provider:"codex", state:windows.length?"ok":"unavailable", at:now, attempted_at:now, auth:"chatgpt", source:"codex-app-server", windows};
+        allowance=fresh||!windows.length?p.allowance:{provider:"codex", state:windows.length?"ok":"unavailable", at:now, attempted_at:now, auth:"chatgpt", source:"codex-app-server", windows};
       } finally {rpc.close();}
     }
     if (guard && this.jobs.get(p.id)!==guard) throw new Error("Account request was replaced");
@@ -267,7 +343,7 @@ class BPAccountsIO {
       message:p.message || ""};
   }
   snapshot() {
-    return {version:1, revision:this.revision, error:this.loadError || "", profiles:this.profiles.map(p=>this.publicProfile(p)),
+    return {version:1, revision:this.revision, default_allowance:this.defaultAllowance, error:this.loadError || "", profiles:this.profiles.map(p=>this.publicProfile(p)),
       attempts:[...this.attempts.values()].map(a=>({id:a.id, profile:a.profile, state:a.state, url:a.url||"", userCode:a.userCode||"", expiresAt:a.expiresAt, message:a.message||""}))};
   }
   url(value, provider) {
@@ -428,7 +504,9 @@ function accountsfx_request(home, text, k) {
   return io_park_promise(p,k,(v,e)=>e===undefined?v:JSON.stringify({...bp_accounts_manager(home).snapshot(),error:"Account operation failed. Check its current status before retrying."}));
 }
 function accountsfx_snapshot(home) {
-  try {return JSON.stringify(bp_accounts_manager(home).snapshot());} catch (_) {return '{"error":"Account registry unavailable","profiles":[],"attempts":[]}';}
+  try {const manager=bp_accounts_manager(home);
+    if(!process.env.BACKPLANE_COPY&&!process.env.BACKPLANE_AGENTS)void manager.refresh().catch(()=>{});
+    return JSON.stringify(manager.snapshot());} catch (_) {return '{"error":"Account registry unavailable","profiles":[],"attempts":[]}';}
 }
 function accountsfx_observe(home, profile, epoch, reading) {
   try{return JSON.stringify(bp_accounts_manager(home).observe(profile,epoch,reading));}catch(_){return accountsfx_snapshot(home);}

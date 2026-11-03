@@ -15553,3 +15553,9 @@ def Laws.owner_mail_copy_quiet(): {==}
 def Laws.composer_bar_one_button(button): {==}
 
 def Laws.composer_bar_never_wraps(button): {==}
+
+def Laws.allowance_no_measurement_hidden():
+  {==}
+
+def Laws.allowance_last_measurement_visible(fresh):
+  {==}

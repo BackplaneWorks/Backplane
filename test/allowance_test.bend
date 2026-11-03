@@ -52,48 +52,48 @@ def chips() -> List<&2, Case>:
    Case{"multiple pools never choose a bucket", chip(multi), "Shared limits"},
    Case{"reversing pools preserves summary", chip(good("codex", [win("account-b", "900"), win("account-a", "280")])), "Shared limits"},
    Case{"Codex does not map selected model", A.Allowance.chip(multi, "codex", "account-a", 1792100000n), "Shared limits"},
-   Case{"unknown provider", A.Allowance.chip(one, "pi", "", 1792100000n), "Limits unknown"},
-   Case{"provider mismatch", A.Allowance.chip(one, "claude", "opus", 1792100000n), "Limits unknown"},
-   Case{"malformed snapshot", chip("not json"), "Limits unknown"},
-   Case{"legacy snapshot", chip("{\"used_percent\":28}"), "Limits unknown"},
-   Case{"null snapshot", chip("null"), "Limits unknown"},
-   Case{"no pools", chip(good("codex", Nil{})), "Limits unknown"},
-   Case{"unavailable", chip(snapshot("codex", "unavailable", J.Num{"1792100000"}, Nil{}, Nil{})), "Limits unknown"}]
+   Case{"unknown provider", A.Allowance.chip(one, "pi", "", 1792100000n), ""},
+   Case{"provider mismatch", A.Allowance.chip(one, "claude", "opus", 1792100000n), ""},
+   Case{"malformed snapshot", chip("not json"), ""},
+   Case{"legacy snapshot", chip("{\"used_percent\":28}"), ""},
+   Case{"null snapshot", chip("null"), ""},
+   Case{"no pools", chip(good("codex", Nil{})), ""},
+   Case{"unavailable", chip(snapshot("codex", "unavailable", J.Num{"1792100000"}, Nil{}, Nil{})), ""}]
 
 def invalid() -> List<&2, Case>:
-  [Case{"out of range", chip(good("codex", [win("shared", "1001")])), "Limits unknown"},
-   Case{"negative consumed", chip(good("codex", [win("shared", "-1")])), "Limits unknown"},
-   Case{"fractional consumed", chip(good("codex", [win("shared", "28.5")])), "Limits unknown"},
-   Case{"exponent consumed", chip(good("codex", [win("shared", "2e2")])), "Limits unknown"},
-   Case{"string consumed is not an integer", chip(good("codex", [window("five", "shared", J.Str{"280"}, J.Null{})])), "Limits unknown"},
-   Case{"null consumed", chip(good("codex", [window("five", "shared", J.Null{}, J.Null{})])), "Limits unknown"},
-   Case{"absent consumed", chip(good("codex", [J.Json.obj([J.KV{"scope", J.Str{"shared"}}])])), "Limits unknown"},
-   Case{"bool consumed", chip(good("codex", [window("five", "shared", J.Flag{False{}}, J.Null{})])), "Limits unknown"},
+  [Case{"out of range", chip(good("codex", [win("shared", "1001")])), ""},
+   Case{"negative consumed", chip(good("codex", [win("shared", "-1")])), ""},
+   Case{"fractional consumed", chip(good("codex", [win("shared", "28.5")])), ""},
+   Case{"exponent consumed", chip(good("codex", [win("shared", "2e2")])), ""},
+   Case{"string consumed is not an integer", chip(good("codex", [window("five", "shared", J.Str{"280"}, J.Null{})])), ""},
+   Case{"null consumed", chip(good("codex", [window("five", "shared", J.Null{}, J.Null{})])), ""},
+   Case{"absent consumed", chip(good("codex", [J.Json.obj([J.KV{"scope", J.Str{"shared"}}])])), ""},
+   Case{"bool consumed", chip(good("codex", [window("five", "shared", J.Flag{False{}}, J.Null{})])), ""},
    lacks("invalid rows never fabricate full remaining", rows(good("codex", [win("shared", "1001")]), "codex", ""), "100% left"),
    has("invalid rows explain the missing measurement", rows(good("codex", [window("five", "shared", J.Null{}, J.Null{})]), "codex", ""), "Remaining unknown"),
-   Case{"missing pool scope is unknown", chip(good("codex", [win("", "280")])), "Limits unknown"}]
+   Case{"missing pool scope is unknown", chip(good("codex", [win("", "280")])), ""}]
 
 def freshness() -> List<&2, Case>:
   +one = good("codex", [win("shared", "280")])
   +failed = snapshot("codex", "error", J.Num{"1792100000"}, [win("shared", "280")], [J.KV{"attempted_at", J.Num{"1792100100"}}])
   +noat = {"{\"provider\":\"codex\",\"state\":\"ok\",\"windows\":[{\"scope\":\"shared\",\"used_permille\":280}]}" : String}
   [Case{"exactly fifteen minutes still fresh", A.Allowance.chip(one, "codex", "", 1792100900n), "72% left · shared"},
-   Case{"over fifteen minutes stale", A.Allowance.chip(one, "codex", "", 1792100901n), "Limits stale"},
-   Case{"reset reached exactly", A.Allowance.chip(good("codex", [window("five", "shared", J.Num{"280"}, J.Num{"1792100000"})]), "codex", "", 1792100000n), "Limits stale"},
-   Case{"reset in past", chip(good("codex", [window("five", "shared", J.Num{"280"}, J.Num{"1792099999"})])), "Limits stale"},
-   Case{"epoch reset is passed not unknown", chip(good("codex", [window("five", "shared", J.Num{"280"}, J.Num{"0"})])), "Limits stale"},
-   Case{"one expired time window invalidates current pool", chip(good("codex", [win("shared", "280"), window("week", "shared", J.Num{"900"}, J.Num{"1792099999"})])), "Limits stale"},
+   Case{"over fifteen minutes stale", A.Allowance.chip(one, "codex", "", 1792100901n), "72% left · shared"},
+   Case{"reset reached exactly", A.Allowance.chip(good("codex", [window("five", "shared", J.Num{"280"}, J.Num{"1792100000"})]), "codex", "", 1792100000n), "72% left · shared"},
+   Case{"reset in past", chip(good("codex", [window("five", "shared", J.Num{"280"}, J.Num{"1792099999"})])), "72% left · shared"},
+   Case{"epoch reset is passed not unknown", chip(good("codex", [window("five", "shared", J.Num{"280"}, J.Num{"0"})])), "72% left · shared"},
+   Case{"past reset keeps last limiting reading", chip(good("codex", [win("shared", "280"), window("week", "shared", J.Num{"900"}, J.Num{"1792099999"})])), "10% left · shared"},
    Case{"missing reset does not invent one", chip(good("codex", [window("five", "shared", J.Num{"280"}, J.Null{})])), "72% left · shared"},
-   Case{"missing reading timestamp", chip(noat), "Limits stale"},
-   Case{"zero reading timestamp", chip(snapshot("codex", "ok", J.Num{"0"}, [win("shared", "280")], Nil{})), "Limits stale"},
-   Case{"future reading timestamp", chip(snapshot("codex", "ok", J.Num{"1792100001"}, [win("shared", "280")], Nil{})), "Limits stale"},
-   Case{"timestamp string is not trusted", chip(snapshot("codex", "ok", J.Str{"1792100000"}, [win("shared", "280")], Nil{})), "Limits stale"},
-   Case{"refresh error overrides recent at", chip(failed), "Limits stale"},
-   has("failed refresh rows say error", rows(failed, "codex", ""), "Refresh error"),
-   has("failed refresh retains only last report", rows(failed, "codex", ""), "Last reported 72% left · stale"),
+   Case{"missing reading timestamp", chip(noat), "72% left · shared"},
+   Case{"zero reading timestamp", chip(snapshot("codex", "ok", J.Num{"0"}, [win("shared", "280")], Nil{})), "72% left · shared"},
+   Case{"future reading timestamp", chip(snapshot("codex", "ok", J.Num{"1792100001"}, [win("shared", "280")], Nil{})), "72% left · shared"},
+   Case{"timestamp string is not trusted", chip(snapshot("codex", "ok", J.Str{"1792100000"}, [win("shared", "280")], Nil{})), "72% left · shared"},
+   Case{"refresh error overrides recent at", chip(failed), "72% left · shared"},
+   has("failed refresh rows say error", rows(failed, "codex", ""), "Reported limits"),
+   has("failed refresh retains only last report", rows(failed, "codex", ""), "72% left"),
    has("missing update is explicit", rows(noat, "codex", ""), "Update time unknown"),
    lacks("missing update does not invent epoch date", rows(noat, "codex", ""), "1970-01-01"),
-   Case{"attempt time never freshens old reading", chip(snapshot("codex", "ok", J.Num{"1792098000"}, [win("shared", "280")], [J.KV{"attempted_at", J.Num{"1792100000"}}])), "Limits stale"}]
+   Case{"attempt time never freshens old reading", chip(snapshot("codex", "ok", J.Num{"1792098000"}, [win("shared", "280")], [J.KV{"attempted_at", J.Num{"1792100000"}}])), "72% left · shared"}]
 
 def claude() -> List<&2, Case>:
   +s = good("claude", [window("five_hour", "shared", J.Num{"280"}, J.Null{}),
@@ -135,8 +135,8 @@ def detail() -> List<&2, Case>:
    has("missing reset key stays unknown", missing, "reset unknown"),
    has("missing duration stays unknown", missing, "duration unknown"),
    lacks("missing reset has no manufactured epoch", missing, "1970-01-01"),
-   has("unavailable state explicit", rows(snapshot("codex", "unavailable", J.Num{"1792100000"}, Nil{}, Nil{}), "codex", ""), "Limits unavailable"),
-   has("invalid snapshot explicit", rows("broken", "codex", ""), "invalid or legacy"),
+   has("unavailable state explicit", rows(snapshot("codex", "unavailable", J.Num{"1792100000"}, Nil{}, Nil{}), "codex", ""), "Reported limits"),
+   lacks("invalid snapshot has no limits status", rows("broken", "codex", ""), "Limits"),
    has("unknown auth is an honest label", rows("{\"provider\":\"codex\",\"state\":\"unavailable\",\"auth\":\"user@example.com\"}", "codex", ""), "Account auth unknown"),
    lacks("account email is not projected", rows("{\"provider\":\"codex\",\"auth\":\"user@example.com\",\"email\":\"user@example.com\"}", "codex", ""), "user@example.com"),
    has("API auth label", rows("{\"provider\":\"codex\",\"auth\":\"apikey\"}", "codex", ""), "API key account")]

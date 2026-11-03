@@ -14,9 +14,9 @@ function preload(enabled){
 test('only configured Electron shells advertise the geometry-only Browser bridge',async()=>{
  const ordinary=preload(false);assert.equal(ordinary.api.browser,undefined);
  const {api,calls}=preload(true);assert(api.browser);
- await api.browser.state();await api.browser.present({owner:'fixture',bounds:{x:0,y:0,width:100,height:100}});await api.browser.hide();await api.browser.reconnect();
- assert.deepEqual(calls.map(x=>x[0]),['desktop:browser-state','desktop:browser-present','desktop:browser-hide','desktop:browser-reconnect']);
- for(const key of ['token','command','evaluate','webContents','session','debugger'])assert.equal(api.browser[key],undefined);
+ await api.browser.state();await api.browser.present({owner:'fixture',bounds:{x:0,y:0,width:100,height:100}});await api.browser.hide();
+ assert.deepEqual(calls.map(x=>x[0]),['desktop:browser-state','desktop:browser-present','desktop:browser-hide']);
+ for(const key of ['reconnect','token','command','evaluate','webContents','session','debugger'])assert.equal(api.browser[key],undefined);
 });
 test('Browser event subscriptions expose bounded UI state and retire cleanly',()=>{
  const {api,listeners}=preload(true),seen=[];

@@ -10,6 +10,7 @@ const os = require('node:os');
 const { Service } = require('./service.cjs');
 const { createBrowserUnknownState } = require('./browser-dispatch.cjs');
 const { createDesktopBrowserController } = require('./browser-controller.cjs');
+const { createBrowserRecovery } = require('./browser-recovery.cjs');
 const { createBrowserActions } = require('./browser-actions.cjs');
 const { exactObject } = require('./browser-wire.cjs');
 const { createHash } = require('node:crypto');
@@ -44,11 +45,18 @@ const launchedAtMs = Date.now();
 let window, origin, connection, serviceReadyAtMs, firstVisibleAtMs, connecting;
 let connectTries = 0, connectTimer = null;
 let connectionStatus = {phase:'connecting', message:'Connecting to your service…'};
-let desktopBrowser;
+let desktopBrowser, browserSession;
+const browserRestore=new Map(),browserRestoreTasks=new Map(),browserRestoreErrors=new Map();
+function makeBrowserRecovery(){return createBrowserRecovery({
+  active:()=>directBrowser&&!quitting&&window&&!window.isDestroyed()&&origin===connection?.origin,
+  attempt:async()=>{await connectBrowser(browserSession,true);return browserStatus;}
+});}
+let browserRecovery=makeBrowserRecovery();
 let browserStatus={phase:'connecting',message:'Connecting Browser…'};
 function browserState(value,browserWindow=window){
   if(window!==browserWindow||!browserWindow||browserWindow.isDestroyed())return;
   browserStatus=value;
+  browserRecovery.changed(value);
   browserWindow.webContents.send('desktop:browser-state',value);
 }
 let pendingPairLink = process.argv.find(x => x.startsWith('backplane://pair?'));
@@ -139,6 +147,7 @@ ipcMain.on('desktop:connection-now', event => {
   event.returnValue = senderIsWindow(event) && event.senderFrame.url === startupURL ? connectionStatus : null;
 });
 async function connect(ses) {
+  browserSession=ses;
   if (connecting) return connecting;
   status('connecting', 'Connecting to your service…');
   connecting = (async () => {
@@ -151,10 +160,7 @@ async function connect(ses) {
         if (pendingPairLink) { const link = pendingPairLink;pendingPairLink = null;const result = await pairRemote(link, os.hostname());if (!result.ok) await window.loadURL(origin); }
         else { if (savedRemote) origin = savedRemote;await window.loadURL(origin); }
       }
-      // The in-app browser starts only after the UI is up and never holds it:
-      // a hub that does not serve it (started by systemd, --headless or an
-      // older install), or one that never answers, leaves the browser
-      // unavailable with Reconnect (desktop:browser-reconnect) and nothing else.
+      // Start independently of the UI; failed private channels retry in main.
       if(directBrowser)void connectBrowser(ses).catch(()=>{});
       connectTries = 0;
     } catch (error) {
@@ -170,7 +176,7 @@ async function connect(ses) {
   })();
   return connecting;
 }
-// one attempt at a time: the start after load and a Reconnect share it
+// Startup, wake and retry share one connection attempt.
 let browserStarting=null;
 function connectBrowser(ses,reconnect=false){
   if(!browserStarting&&desktopBrowser&&!desktopBrowser.isClosed())return Promise.resolve();
@@ -180,7 +186,7 @@ function connectBrowser(ses,reconnect=false){
     browserStarting=startBrowser(ses,reconnect).catch(()=>{
       // Discovery, credential reads and package validation can fail before a
       // controller exists. Keep that failure queryable after renderer reload.
-      browserState({phase:'error',message:'Browser connection unavailable. Reconnect to try again.'},browserWindow);
+      browserState({phase:'error',message:'Browser unavailable · reconnecting automatically…'},browserWindow);
     }).finally(()=>{browserStarting=null;});
   }
   return browserStarting;
@@ -188,7 +194,7 @@ function connectBrowser(ses,reconnect=false){
 async function startBrowser(ses,reconnect){
   if(desktopBrowser&&!desktopBrowser.isClosed())return;
   const browserWindow=window,selectedConnection=connection;
-  // A user-requested fresh controller binds to the currently authenticated
+  // A replacement controller binds to the currently authenticated
   // service version at this same selected origin. Never replay a prior call.
   const browserConnection=reconnect?await service.discover({browserReconnectOrigin:selectedConnection.origin}):selectedConnection;
   if(!browserConnection)throw new Error('Selected Browser service unavailable');
@@ -202,6 +208,7 @@ async function startBrowser(ses,reconnect){
     recorder:{preloadPath,preloadSha256:config.preloadSha256||hash(preloadPath),recorderSourceSha256:'2e4b03765cc4ae6595e32048555ffe27e750994a85c18b89027064f3c0c15350',subframePreload:true,popupPreloadVerified:false},
     unknownState:browserUnknown,executeCall:createBrowserActions(),
     onState:value=>browserState(value,browserWindow),
+    onRecover:rows=>{for(const row of rows){browserRestore.set(row.owner,row.url);browserRestoreErrors.delete(row.owner);}},
     onTakeover:value=>{if(window===browserWindow&&!browserWindow.isDestroyed())browserWindow.webContents.send('desktop:browser-takeover',value);}});
   desktopBrowser=controller;
   await controller.start();
@@ -210,6 +217,8 @@ async function startBrowser(ses,reconnect){
 function start() {
   require('./text-clipboard.cjs').installTextClipboard(ipcMain, electron.clipboard, trusted);
   const ses = session.fromPartition('persist:backplane-ui');
+  browserSession=ses;
+  electron.powerMonitor?.on('resume',()=>{if(browserStatus.phase==='error')void browserRecovery.retry();});
   const permitted = (wc, permission, url, details = {}, phase = 'check') => {
     try { return wc === window?.webContents && origin && new URL(url).origin === origin && ((['notifications', 'clipboard-sanitized-write'].includes(permission) || permission === 'media' && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'video') || require('./improvements-display-capture.cjs').displayCapturePermission(wc, permission, url, details, window, origin, phase)); } catch { return false; }
   };
@@ -268,13 +277,34 @@ function start() {
     const width=Math.min(box.width-x,Math.round(value.bounds.width*zoom)),height=Math.min(box.height-y,Math.round(value.bounds.height*zoom));
     if(!desktopBrowser||desktopBrowser.isClosed())return{shown:false,phase:'error',message:'Browser unavailable'};
     if(width<1||height<1){desktopBrowser.hide();return{shown:false,message:'Browser panel is hidden'};}
-    return desktopBrowser.present({owner:value.owner,bounds:{x,y,width,height}}).then(result=>({shown:result.shown===true,...(result.message?{message:result.message}:{}),...(result.phase?{phase:result.phase}:{})}));
+    const controller=desktopBrowser,owner=value.owner;
+    const restoreURL=browserRestore.get(owner);
+    if(restoreURL&&!browserRestoreTasks.has(owner)){
+      // A captured idle URL gets one new, service-authorized open. Credentials
+      // remain in main; no old gesture or uncertain operation is replayed.
+      browserRestore.delete(owner);
+      const task=(async()=>{
+        if(browserUnknown.has(owner)||origin!==connection?.origin)throw Error('Browser restoration unavailable');
+        const response=await browserSession.fetch(origin+'/mcp/'+encodeURIComponent(owner),{
+          method:'POST',redirect:'error',signal:AbortSignal.timeout(20000),
+          headers:{Authorization:'Bearer '+await service.token(),'Content-Type':'application/json'},
+          body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'preview_open',arguments:{url:restoreURL}}})});
+        if(!response.ok)throw Error('Browser restoration unavailable');
+        const result=await response.json();
+        if(result.error||result.result?.isError!==false)throw Error('Browser restoration unavailable');
+      })().catch(()=>{browserRestoreErrors.set(owner,'Browser page could not be restored automatically.');}).finally(()=>browserRestoreTasks.delete(owner));
+      browserRestoreTasks.set(owner,task);
+    }
+    return Promise.resolve(browserRestoreTasks.get(owner)).then(()=>{
+      if(browserRestoreErrors.has(owner))return{shown:false,phase:'error',message:browserRestoreErrors.get(owner)};
+      if(desktopBrowser!==controller||controller.isClosed())return{shown:false,phase:'connecting',message:'Reconnecting Browser…'};
+      return controller.present({owner,bounds:{x,y,width,height}}).then(result=>({shown:result.shown===true,...(result.message?{message:result.message}:{}),...(result.phase?{phase:result.phase}:{})}));
+    });
   });
   ipcMain.handle('desktop:browser-hide',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');desktopBrowser?.hide();return true;});
   // Reloaded renderers subscribe after main may already have become ready or
   // failed. Query the current state instead of depending on a one-shot event.
   ipcMain.handle('desktop:browser-state',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');return browserStatus;});
-  ipcMain.handle('desktop:browser-reconnect',async event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');await connectBrowser(ses,true);return browserStatus;});
   Menu.setApplicationMenu(applicationMenu(Menu, process.platform));
   app.setAppUserModelId?.('works.backplane.desktop');
   if (process.platform === 'darwin') app.dock?.setIcon(iconPath());
@@ -282,6 +312,7 @@ function start() {
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) void createWindow(ses).then(() => connect(ses)); });
 }
 function createWindow(ses) {
+  browserRecovery.dispose();browserRecovery=makeBrowserRecovery();
   const boundsFile = path.join(app.getPath('userData'), 'window-bounds.json');
   window = new BrowserWindow({ width: 1400, height: 940, ...restoreWindowBounds(boundsFile, electron.screen), minWidth: 360, minHeight: 480, title: 'Backplane', icon: iconPath(), backgroundColor: themeBackground(), show: false,
     webPreferences: { session: ses, preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, spellcheck: true,additionalArguments:rendererBrowser?['--backplane-direct-browser=1']:[] } });
@@ -303,13 +334,13 @@ function createWindow(ses) {
   window.webContents.on('will-navigate', (event, url) => { if (url !== startupURL && new URL(url).origin !== origin) { event.preventDefault(); external(url); } });
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   let closingWindow = false;
-  window.on('close', () => { connectionLog.record({event:'window-close',cause:quitting?'app-quit':'window-close'});closingWindow = true;desktopBrowser?.close();desktopBrowser=null; });
+  window.on('close', () => { connectionLog.record({event:'window-close',cause:quitting?'app-quit':'window-close'});closingWindow = true;browserRecovery.dispose();desktopBrowser?.close();desktopBrowser=null; });
   window.webContents.on('render-process-gone', (_event, details) => {connectionLog.record({event:'renderer-gone',cause:'renderer',rendererReason:details.reason,exitCode:details.exitCode});desktopBrowser?.hide();if (!quitting && !closingWindow && details.reason !== 'clean-exit' && !window.isDestroyed()) { void window.loadFile(startupPath).then(() => connect(ses)); } });
   void window.loadFile(startupPath);
   return shown;
 }
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { connectionLog.record({event:'app-quit',cause:'app-quit'});quitting = true; });
+app.on('before-quit', () => { connectionLog.record({event:'app-quit',cause:'app-quit'});quitting = true;browserRecovery.dispose(); });
 // The Bend service belongs to the product, independently of UI windows. Closing,
 // reloading, or crashing the renderer must not terminate agents, mail or jobs.
 // Explicit service shutdown is a separate service-owned authenticated contract.
