@@ -112,6 +112,7 @@
     "src/core/release.bend": "e057a8ffdc8232f50fd24084dc8584cd7b94f7263c83a8ad5700dfd825e07655",
     "src/core/reply.bend": "9e6f30962b274fa5595f4902f5ecd8f308275bea72ac4d558221bcd4b01ece0f",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
+    "src/core/roots.bend": "6bced7dc7f71c602843d6d049f79ce413316b54c4864c5aa1b02415dfaefa774",
     "src/core/rpcout.bend": "02803bf1bce06f2860b2f85a54e0b829548e62edeb1e33ff20b0bafadde6ba5d",
     "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
@@ -191,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "3b46be10506d964b6a81847e5b575bcc425103b5f1e55bac32f279406d2315da"
+    "src/web/view.bend": "cd33edbb99bd9714d35ba5e45bd125a6478723c72b022382853b8e2870888c67"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -810,5 +811,12 @@
       "src/web/view.bend"
     ],
     "scope": "composer-bar.bend (29 lines, imports only dom.bend) builds the composer's one-row control bar from nodes view.bend passes in; it reads no Ui, state or drafts. Sidebar draft readers, unknown @ retention, private image keys and transport authority unchanged. Added so server builds of main pass the guard again (its import made the closure differ from the manifest)."
+  },
+  "missingFolderReview": {
+    "changedClosureFiles": [
+      "src/core/roots.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "roots.bend (imports model, far) reads only the setting projects.missing and project records; view.bend's View.gone.* reads the selected thread's project, that setting and the existing '@rm' remove-confirm scratch key (as the project menu's Remove already does). No sidebar draft readers, unknown @ retention, private image keys or transport authority change."
   }
 }
