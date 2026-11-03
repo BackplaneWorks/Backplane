@@ -7,13 +7,15 @@ import sys
 import subprocess
 
 GIB = 1024 ** 3
-# Conservative available-memory floors, not process limits.
+# Expected peaks, not process limits. Leave host headroom in addition to the
+# amount a job may consume; cgroup headroom is checked independently.
 FLOORS = {'check': 12 * GIB, 'proof': 18 * GIB, 'test': 12 * GIB,
           'build': 14 * GIB, 'browser': 12 * GIB}
+HOST_RESERVE = 8 * GIB
 FD_VAR = 'BACKPLANE_HEAVY_LOCK_FD'
 
 
-def available():
+def host_available():
     fields = {}
     for line in Path('/proc/meminfo').read_text().splitlines():
         parts = line.split()
@@ -21,6 +23,11 @@ def available():
             fields['available'] = int(parts[1]) * 1024
     if 'available' not in fields:
         raise ValueError('MemAvailable is unavailable')
+    return fields['available']
+
+
+def available():
+    fields = {'available': host_available()}
     cgroup_root = Path('/sys/fs/cgroup')
     if (cgroup_root / 'cgroup.controllers').exists():
         groups = Path('/proc/self/cgroup').read_text().splitlines()
@@ -66,12 +73,16 @@ def inherited_lock(path):
 
 def admit(profile):
     try:
+        host = host_available()
         free = available()
     except (OSError, ValueError) as error:
         print('heavy-guard: cannot establish available memory: ' + str(error), file=sys.stderr)
         return False
     if free < FLOORS[profile]:
         print(f'heavy-guard: {profile} requires {FLOORS[profile] / GIB:.0f} GiB available; {free / GIB:.2f} GiB available', file=sys.stderr)
+        return False
+    if host < FLOORS[profile] + HOST_RESERVE:
+        print(f'heavy-guard: {profile} needs {FLOORS[profile] / GIB:.0f} GiB expected peak plus {HOST_RESERVE / GIB:.0f} GiB host reserve; {host / GIB:.2f} GiB host available', file=sys.stderr)
         return False
     return True
 

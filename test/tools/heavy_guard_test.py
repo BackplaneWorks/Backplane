@@ -22,6 +22,20 @@ class HeavyGuardTest(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         os.environ.pop(guard.FD_VAR, None)
+        host = patch.object(guard, 'host_available', return_value=100 * guard.GIB)
+        host.start()
+        self.addCleanup(host.stop)
+
+    def test_expected_peak_and_host_reserve_are_both_required(self):
+        expected = guard.FLOORS['build']
+        with patch.object(guard, 'available', return_value=expected), patch.object(guard, 'host_available', return_value=expected + guard.HOST_RESERVE - 1):
+            self.assertFalse(guard.admit('build'))
+        with patch.object(guard, 'available', return_value=expected), patch.object(guard, 'host_available', return_value=expected + guard.HOST_RESERVE):
+            self.assertTrue(guard.admit('build'))
+
+    def test_cgroup_headroom_cannot_be_replaced_by_host_memory(self):
+        with patch.object(guard, 'available', return_value=guard.FLOORS['proof'] - 1):
+            self.assertFalse(guard.admit('proof'))
 
     def test_low_memory_refuses_without_starting(self):
         with patch.object(guard, 'available', return_value=guard.FLOORS['test'] - 1), patch.object(guard.os, 'execvpe') as run:
@@ -42,7 +56,7 @@ class HeavyGuardTest(unittest.TestCase):
 
     def test_nested_process_inherits_real_lock(self):
         script = """import importlib.util,sys
-s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;sys.exit(g.main(sys.argv[2:]))"""
+s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;g.host_available=lambda:100*g.GIB;sys.exit(g.main(sys.argv[2:]))"""
         wrapper = [sys.executable, '-c', script, str(ROOT / 'scripts/heavy-guard.py')]
         child = [*wrapper, 'check', '--', sys.executable, '-c', 'print("nested-ok")']
         p = subprocess.run([*wrapper, 'check', '--', *child], text=True, capture_output=True, timeout=5)
