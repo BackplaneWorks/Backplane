@@ -23,7 +23,7 @@ class Handoff(unittest.TestCase):
         self.release = {'commit': COMMIT, 'tree': TREE}
         self.compiler = {'sha256': BEND, 'version': '2.0.36'}
         self.pre = (self.root, {'files': {'server.js': {'sha256': HUB}}})
-        self.source = {'head': COMMIT, 'tree': TREE, 'clean': True, 'closure_sha256': '9' * 64}
+        self.source = {'head': COMMIT, 'tree': TREE, 'clean': True, 'content_sha256': '8' * 64, 'closure_sha256': '9' * 64}
         self.tools = {'bend': {'version': 'v', 'sha256': BEND}, 'bun': {'version': '1.2.3', 'sha256': BUN}}
         self.bun = {'sha256': BUN}
         self.report = {'schema': 2, 'kind': 'backplane-lowmem-build-report', 'state': 'passed', 'release': True,
@@ -91,7 +91,7 @@ class Handoff(unittest.TestCase):
         self.report['jobs']['web']['outputs'] = {'index.html': '9' * 64}; self.reject()
 
     def test_closure_bun_protected_bindings(self):
-        for mut in (lambda r: r['source'].pop('closure_sha256'), lambda r: r.update(protected={}),
+        for mut in (lambda r: r['source'].pop('closure_sha256'), lambda r: r['source'].pop('content_sha256'), lambda r: r.update(protected={}),
                     lambda r: r.update(protected={**PROT, 'base': 'zz'}), lambda r: r['tools'].update(bun={'sha256': 'f' * 64})):
             mut(self.report); self.reject(); self.setUp()
         self.bun = {'sha256': 'f' * 64}; self.reject(); self.setUp()
@@ -100,6 +100,11 @@ class Handoff(unittest.TestCase):
     def test_receipt_missing_flock_timeout_phases(self):
         for kw in ({'flock': False}, {'flock_path': '/tmp/x.lock'}, {'timed_out': True}, {'timeout_seconds': None}, {'phases': ['command']}, {'protected': {}}):
             self.job('web', {'index.html': '3' * 64}, **kw); self.reject(); self.setUp()
+
+    def test_sandbox_recommit_is_accepted_but_other_content_is_not(self):
+        self.job('web', {'index.html': '3' * 64}, source={**self.source, 'head': 'f' * 40, 'tree': 'e' * 40})
+        self.check()  # a Boat sandbox's own head/tree are informational; content and closure must match
+        self.job('web', {'index.html': '3' * 64}, source={**self.source, 'content_sha256': '7' * 64}); self.reject()
 
     def test_missing_bindings(self):
         del self.report['qualification']; self.reject()

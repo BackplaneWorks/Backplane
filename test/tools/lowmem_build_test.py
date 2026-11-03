@@ -11,7 +11,7 @@ import argparse
 from unittest.mock import patch
 
 H = lambda c: c * 64
-SRC = {'head': 'a' * 40, 'tree': 'b' * 40, 'clean': True, 'closure_sha256': H('9')}
+SRC = {'head': 'a' * 40, 'tree': 'b' * 40, 'clean': True, 'content_sha256': H('8'), 'closure_sha256': H('9')}
 TOOLS = {'bend': {'version': '1', 'sha256': H('c')}, 'bun': {'version': '1.2.3', 'sha256': H('d')}}
 CAP = lm.CAP_BYTES
 CMD = ['bend', 'src/server/main.bend', '-o', '{out}/hub.js']
@@ -87,11 +87,27 @@ class Judge(unittest.TestCase):
         q = qual(); q['jobs']['hub']['timeout_seconds'] = 600
         self.assertTrue(self.j(receipt(), q=q))
 
+    def test_content_identity_ignores_modes_but_not_content(self):
+        with tempfile.TemporaryDirectory() as t:
+            r = Path(t)
+            run = lambda *a: subprocess.run(['git', *a], cwd=r, check=True, capture_output=True)
+            run('init', '-q'); (r / 'a.sh').write_text('x'); os.chmod(r / 'a.sh', 0o755)
+            run('add', '-A'); run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'one')
+            before = lm.content_identity(r)
+            run('update-index', '--chmod=-x', 'a.sh'); run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'mode')
+            self.assertEqual(lm.content_identity(r), before)
+            (r / 'a.sh').write_text('y'); run('add', '-A'); run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'content')
+            self.assertNotEqual(lm.content_identity(r), before)
+
     def test_source_closure_commit_tree_mismatch(self):
-        for k, v in (('closure_sha256', H('8')), ('tree', 'd' * 40), ('head', 'd' * 40)):
-            self.assertTrue(self.j(receipt(source={**SRC, k: v})), k)
-        q = qual(); q['source']['closure_sha256'] = H('8')
-        self.assertTrue(self.j(receipt(), q=q))
+        for k in ('closure_sha256', 'content_sha256'):
+            self.assertTrue(self.j(receipt(source={**SRC, k: H('7')})), k)
+            self.assertTrue(self.j(receipt(source={k2: v for k2, v in SRC.items() if k2 != k})), k)
+        # a Boat sandbox re-commits: its head and tree differ from the host's by design and must not matter
+        self.assertEqual(self.j(receipt(source={**SRC, 'head': 'd' * 40, 'tree': 'e' * 40})), [])
+        for k in ('closure_sha256', 'content_sha256'):
+            q = qual(); q['source'][k] = H('7')
+            self.assertTrue(self.j(receipt(), q=q), k)
         dirty = {**SRC, 'clean': False}
         self.assertTrue(self.j(receipt(source=dirty), src=dirty, q=qual(source=dirty)))
 
@@ -136,7 +152,8 @@ class Qualified(unittest.TestCase):
         self.assertFalse(self.q(lambda q: [q.pop(k) for k in list(q) if k not in ('qualified',)])[0])
 
     def test_each_mismatch_refuses(self):
-        for m in (lambda q: q['source'].update(closure_sha256=H('8')), lambda q: q['source'].update(tree='d' * 40),
+        for m in (lambda q: q['source'].update(closure_sha256=H('7')), lambda q: q['source'].update(content_sha256=H('7')),
+                  lambda q: q['source'].update(tree='d' * 40),
                   lambda q: q['source'].update(head='d' * 40), lambda q: q['tools'].pop('bun'),
                   lambda q: q['tools']['bend'].pop('sha256'), lambda q: q['protected'].pop('safe.ts'),
                   lambda q: q['protected']['base'].update(sha256='z'),

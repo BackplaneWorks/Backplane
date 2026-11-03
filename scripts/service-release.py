@@ -389,7 +389,7 @@ def verified_lowmemory(ref, base, release, compiler, pre, low=None, bun=None):
     tools = report.get("tools")
     require(isinstance(tools, dict) and isinstance(tools.get("bend"), dict) and tools["bend"].get("sha256") == compiler["sha256"],
             "Low-memory report used another compiler")
-    require(HEX.fullmatch(str(source.get("closure_sha256", ""))), "Low-memory report lacks the import-closure identity")
+    require(all(HEX.fullmatch(str(source.get(k, ""))) for k in low.SOURCE_KEYS), "Low-memory report lacks the content or import-closure identity")
     require(bun is not None and isinstance(tools.get("bun"), dict) and tools["bun"].get("sha256") == bun["sha256"],
             "Low-memory report used another Bun binary")
     require(isinstance(report.get("protected"), dict) and set(report["protected"]) == set(low.PROTECTED)
@@ -408,7 +408,7 @@ def verified_lowmemory(ref, base, release, compiler, pre, low=None, bun=None):
         receipt = read(bound(ref_, root))
         require(not low.receipt_problems(receipt, low.CAP_BYTES, True), "Low-memory %s receipt: %s" % (
             name, "; ".join(low.receipt_problems(receipt, low.CAP_BYTES, True))))
-        require(receipt.get("id") == name and receipt.get("source") == source and receipt.get("tools") == tools
+        require(receipt.get("id") == name and low.source_matches(receipt.get("source"), source) and receipt.get("tools") == tools
                 and receipt.get("protected") == report["protected"]
                 and receipt.get("outputs") == job.get("outputs") and job["outputs"], "Low-memory %s receipt differs from report" % name)
     hub = jobs["hub"]["outputs"]
