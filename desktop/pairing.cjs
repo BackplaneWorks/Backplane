@@ -18,7 +18,7 @@ async function pair({text, name, fetch}) {
   try {
     const r = await fetch(p.origin + (p.kind === 'token' ? '/auth/pair' : '/auth/enroll'), {
       method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(8000),
-      headers: {Authorization: 'Bearer ' + p.secret, 'X-Backplane-Name': String(name || 'Computer').replace(/[^\x20-\x7e]/g, '').slice(0,80), 'X-Backplane-Client': 'native', 'X-Backplane-Scheme': new URL(p.origin).protocol.slice(0,-1)},
+      headers: {Authorization: 'Bearer ' + p.secret, 'X-Backplane-Name': String(name || ({linux:'Linux',darwin:'macOS',win32:'Windows'}[process.platform] || 'Device') + ' / Desktop').replace(/[^\x20-\x7e]/g, '').slice(0,80), 'X-Backplane-Client': 'native', 'X-Backplane-Scheme': new URL(p.origin).protocol.slice(0,-1)},
     });
     if (!r.ok) { const j = await r.json().catch(()=>({}));return {ok: false, error: ['wrong_code','expired_code','used_code','rate_limited','storage_unavailable'].includes(j.error) ? j.error : 'pairing_required'}; }
     return {ok: true, origin: p.origin};

@@ -1,6 +1,7 @@
 // Connection-boundary UI: available before a client can ask the hub for views.
 // Invitation material stays in this closure/DOM, never in Ui, logs or caches.
 import jsQR from './vendor/jsqr.cjs';
+import {defaultDeviceName} from './pairing-device.js';
 import {pairingInput, codeLink, pairingErrors} from './pairing-link.js';
 export function installPairingUI({document, location, fetch, onPaired, navigator = globalThis.navigator}) {
   let panel, camera, scanGeneration = 0, expiryTimer, pairingShown = false;
@@ -19,17 +20,16 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     close();panel = element('main', '', document.body, {class: 'pairing-screen', 'aria-label': title});
     document.getElementById('root')?.setAttribute('inert', '');
     const card = element('section', '', panel, {class: 'pairing-card'});
-    element('p', 'BACKPLANE / CONNECT', card, {class: 'pairing-brand'});
     element('h1', title, card);element('p', lead, card, {class: 'pairing-lead'});
     if (dismissible) button(card, 'Back', close);
     return card;
   }
   function button(parent, text, click) { const b = element('button', text, parent, {type: 'button'});b.addEventListener('click', click);return b; }
   function input(parent, label, placeholder, type = 'text') {
-    const l = element('label', label, parent), i = element('input', '', l, {placeholder, type, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false'});
+    const l = element('label', label, parent), i = element('input', '', l, {class: 'field', placeholder, type, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false'});
     return i;
   }
-  function error(target, cause) { target.textContent = pairingErrors[cause] || 'Connection could not be completed. Try again.'; }
+  function error(target, cause) { target.classList.add('bad');target.textContent = pairingErrors[cause] || 'Connection could not be completed. Try again.'; }
   async function enroll(secret, name) {
     const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 8000);
     try {
@@ -44,11 +44,34 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     const card = frame(repair ? 'Re-pair this device' : 'Connect to your Backplane hub',
       'On your paired computer, open Settings → Devices → Add a device. Choose how to connect below.', false);
     pairingShown = true;
-    const name = input(card, 'Device name', 'My laptop');name.value = /Android|iPhone|iPad/.test(navigator?.userAgent || '') ? 'Phone or tablet' : 'Computer';
+    const name = input(card, 'Device name', 'Name this device');name.value = defaultDeviceName(navigator, !!globalThis.window?.backplaneDesktop);
     const status = element('p', '', card, {role: 'status', 'aria-live': 'polite', class: 'pairing-status'});if (cause) error(status, cause);
-    const link = input(card, 'Paste a pairing link', 'https://your-hub/pair#invite=…');
+    const choices = element('div', '', card, {class: 'pairing-methods', role: 'tablist', 'aria-label': 'Connection method'});
+    const methods = ['Pairing link', 'QR code', 'Short code'].map((label, index) => {
+      const tab = button(choices, label, () => selectMethod(index));
+      tab.id = 'pairing-tab-' + index;tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', 'pairing-method-' + index);
+      const content = element('section', '', card, {class: 'pairing-method', role: 'tabpanel', id: 'pairing-method-' + index, 'aria-labelledby': tab.id});
+      tab.addEventListener('keydown', e => {
+        const next = e.key === 'ArrowRight' ? (index + 1) % 3 : e.key === 'ArrowLeft' ? (index + 2) % 3 : e.key === 'Home' ? 0 : e.key === 'End' ? 2 : -1;
+        if (next < 0) return;e.preventDefault();selectMethod(next);methods[next].tab.focus();
+      });
+      return {tab, content};
+    });
+    function stopScanning() {
+      ++scanGeneration;camera?.getTracks().forEach(t => t.stop());camera = null;
+      card.querySelectorAll('.pairing-camera, .pairing-stop').forEach(n => n.remove());
+    }
+    function selectMethod(index) {
+      stopScanning();methods.forEach(({tab, content}, i) => {
+        tab.setAttribute('aria-selected', String(i === index));tab.tabIndex = i === index ? 0 : -1;
+        tab.classList.toggle('on', i === index);content.hidden = i !== index;
+      });
+    }
+    const [links, qr, codes] = methods.map(m => m.content);
+    const link = input(links, 'Paste a pairing link', 'https://your-hub/pair#invite=…');
     async function connect(text) {
-      status.textContent = 'Connecting…';
+      status.classList.remove('bad');status.textContent = 'Connecting…';
       try {
         const p = pairingInput(text, location.origin);
         if (globalThis.window?.backplaneDesktop?.pair) { const result = await window.backplaneDesktop.pair(text, name.value);if (!result?.ok) throw Error(result?.error || 'hub_unreachable');return; }
@@ -57,17 +80,18 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
         await enroll(p.secret, name.value);
       } catch (e) { error(status, e.message); }
     }
-    button(card, 'Connect with link', () => connect(link.value));
+    button(links, 'Connect with link', () => connect(link.value)).classList.add('primary');
     link.addEventListener('keydown', e => { if (e.key === 'Enter') void connect(link.value); });
-    const scanStatus = element('p', '', card, {class: 'pairing-help'});
-    button(card, 'Scan a QR code', async () => {
-      if (!navigator?.mediaDevices?.getUserMedia) { scanStatus.textContent = 'Camera scanning is unavailable in this browser. Use your phone’s camera to open the QR link, or paste the link below.';return; }
+    element('p', 'Scan the invitation on your paired device, or choose a saved QR image.', qr, {class: 'pairing-help'});
+    const scanStatus = element('p', '', qr, {class: 'pairing-help', role: 'status'});
+    button(qr, 'Scan a QR code', async () => {
+      if (!navigator?.mediaDevices?.getUserMedia) { scanStatus.textContent = 'Camera scanning is unavailable in this browser. Use your phone’s camera to open the QR link, or choose Pairing link.';return; }
       let video;const generation = ++scanGeneration;
       try {
         camera?.getTracks().forEach(t => t.stop());camera = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}});
         if (generation !== scanGeneration) { camera.getTracks().forEach(t => t.stop());return; }
-        video = element('video', '', card, {autoplay: '', playsinline: '', class: 'pairing-camera'});video.srcObject = camera;await video.play();
-        button(card, 'Stop scanning', () => { ++scanGeneration;camera?.getTracks().forEach(t => t.stop());video.remove(); });
+        video = element('video', '', qr, {autoplay: '', playsinline: '', class: 'pairing-camera'});video.srcObject = camera;await video.play();
+        button(qr, 'Stop scanning', stopScanning).classList.add('pairing-stop');
         const detector = globalThis.BarcodeDetector ? new globalThis.BarcodeDetector({formats: ['qr_code']}) : null;
         const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', {willReadFrequently: true});
         const next = async () => {
@@ -87,7 +111,8 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
         };void next();
       } catch { scanStatus.textContent = 'Camera unavailable. Allow camera access or paste a link.';camera?.getTracks().forEach(t => t.stop());video?.remove(); }
     });
-    const qrFile = input(card, 'Or choose a QR image', '', 'file');qrFile.accept = 'image/*';
+    const qrFile = element('input', '', qr, {type: 'file', accept: 'image/*', class: 'pairing-file', 'aria-label': 'Or choose a QR image', tabindex: '-1'});
+    button(qr, 'Choose QR image', () => qrFile.click());
     qrFile.addEventListener('change', async () => {
       const file = qrFile.files?.[0];if (!file) return;
       if (file.size > 10 * 1024 * 1024) { scanStatus.textContent = 'Choose an image smaller than 10 MB.';return; }
@@ -103,27 +128,30 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       } catch { scanStatus.textContent = 'Could not read this QR image. Try another image or paste the link.'; }
       finally { bitmap?.close();qrFile.value = ''; }
     });
-    const codes = element('details', '', card);element('summary', 'Type a short code', codes);
+    element('p', 'Enter the code and hub address shown on your paired device.', codes, {class: 'pairing-help'});
     const address = input(codes, 'Hub address', 'http://computer:3787');address.value = location.origin;
     element('p', 'Use the hub address shown beside the code. Both computers must be on the same LAN or tailnet.', codes, {class: 'pairing-help'});
     const code = input(codes, '8-character code', 'ABCD 2345');code.maxLength = 12;
-    button(codes, 'Connect with code', () => { try { void connect(codeLink(address.value, code.value)); } catch (e) { error(status, e.message); } });
+    const connectCode = () => { try { void connect(codeLink(address.value, code.value)); } catch (e) { error(status, e.message); } };
+    button(codes, 'Connect with code', connectCode).classList.add('primary');
+    code.addEventListener('keydown', e => { if (e.key === 'Enter') connectCode(); });
+    selectMethod(0);
     if (pending) {
-      button(card, 'Connect this device', async () => { status.textContent = 'Connecting…';try { await enroll(pending.secret, name.value); } catch(e) { error(status,e.message); } });
+      button(card, 'Connect this device', async () => { status.classList.remove('bad');status.textContent = 'Connecting…';try { await enroll(pending.secret, name.value); } catch(e) { error(status,e.message); } }).classList.add('primary');
       element('a', 'Open in Backplane', card, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
     }
     link.focus();
   }
   async function devices() {
     const card = frame('Devices', 'Add another computer or phone. Each invitation expires in 10 minutes and works once.', true);
-    const status = element('p', '', card, {role: 'status', 'aria-live': 'polite'});
+    const status = element('p', '', card, {role: 'status', 'aria-live': 'polite', class: 'pairing-status'});
     async function request(path, method = 'GET', headers = {}) {
       const r = await fetch(path, {method, credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers, signal: AbortSignal.timeout(8000)});
       const value = await r.json();if (!r.ok || value.error) throw Error(value.error || 'pairing_required');return value;
     }
     const invitation = element('section', '', card, {class: 'pairing-invitation'});
-    button(card, 'Add a device', async () => {
-      status.textContent = 'Creating invitation…';invitation.replaceChildren();clearInterval(expiryTimer);
+    const add = button(card, 'Add a device', async () => {
+      status.classList.remove('bad');status.textContent = 'Creating invitation…';invitation.replaceChildren();clearInterval(expiryTimer);
       try {
         const invite = await request('/auth/invitations', 'POST');if (!panel?.contains(card)) return;
         const until = element('p', '', invitation, {role: 'status'});
@@ -142,6 +170,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
         status.textContent = invite.localOnly ? 'This address works only on this computer. Enable tailnet access in Settings → Network to connect a remote device.' : 'Invitation ready. Share only with the device you want to authorize.';
       } catch(e) { error(status, e.message); }
     });
+    add.classList.add('primary');
     const list = element('section', '', card);element('h2', 'Paired devices', list);
     async function refresh() {
       try {
