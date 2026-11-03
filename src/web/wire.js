@@ -222,8 +222,8 @@ export function json(value, known) {
 // 2^53), the fields' order (an object puts integer-like keys first) and
 // duplicate keys. Only strict JSON is read (Bend's lexer is looser: it
 // skips commas and colons, takes any bare word); a \uD800-\uDFFF escape is
-// null too, as Bend's runtime refuses to make a Char of a surrogate, so a
-// pair written as two escapes is one Bend cannot read either.
+// null too: the fast path defers UTF-16 normalization to Bend's lexer,
+// which combines pairs and replaces unpaired units with U+FFFD.
 const NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
 const NOPE = {};
 export function jsonText(s) {
