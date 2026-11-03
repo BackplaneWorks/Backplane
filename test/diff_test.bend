@@ -154,6 +154,9 @@ def main() -> IO(Unit):
     C.Check.str("diff stats", show.stats(D.Diff.stats(fs)), "6 6 4")
     C.Check.str("diff summary", D.Diff.summary(fs), "6 files, +6 −4")
     C.Check.str("diff summary one", D.Diff.summary(D.Diff.parse(fixture())), "6 files, +6 −4")
+    # a capped diff (git.bend's Git.diff.cap) counts what it left out
+    C.Check.str("a capped diff's summary counts what it left out", D.Diff.summary(D.Diff.parse("diff --git a/big.step b/big.step\n--- a/big.step\n+++ b/big.step\n@@ -0,0 +0,0 @@\n\\ Too big to show here: +412827 -399001 lines\ndiff --git a/s.txt b/s.txt\n--- a/s.txt\n+++ b/s.txt\n@@ -1 +1 @@\n-a\n+b\n\\ 1638 more changed files not shown here\n")), "1640 files, +412828 −399002")
+    C.Check.str("git's own meta line counts nothing", D.Diff.summary(D.Diff.parse("diff --git a/s.txt b/s.txt\n--- a/s.txt\n+++ b/s.txt\n@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n")), "1 file, +1 −1")
     C.Check.str("diff pure rename", show.at(gs, 0n), "renamed a b/c.txt > a b/d.txt ")
     C.Check.str("diff mode change", show.at(gs, 1n), "modified run.sh > run.sh ")
     C.Check.str("diff empty", D.Diff.summary(D.Diff.parse("")), "0 files, +0 −0")

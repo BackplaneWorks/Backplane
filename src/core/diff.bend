@@ -442,10 +442,37 @@ def Diff.parse(text: String) -> List<&2, DFile>:
 # Stats
 # -----
 
-def Diff.count.line(l: DLine, s: DStats) -> DStats:
-  match l s:
-    case DLine{+k, _, _, _} DStats{f, a, d}:
+# A capped diff (server/git.bend's Git.diff.cap) still counts what it left
+# out: its meta lines "\ Too big to show here: +N -M lines" and
+# "\ N more changed files not shown here"
+def Diff.word(+ws: List<&2, String>, +i: Nat) -> String:
+  Maybe.default(&2, String, List.get(&2, String, ws, i), "")
+
+def Diff.count.more(more: Bool, +ws: List<&2, String>, s: DStats) -> DStats:
+  match more s:
+    case True{} DStats{f, a, d}:
+      DStats{Nat.add(f, Diff.num(Diff.word(ws, 1n))), a, d}
+    case False{} _:
+      s
+
+def Diff.count.meta(big: Bool, +t: String, s: DStats) -> DStats:
+  match big s:
+    case True{} DStats{f, a, d}:
+      DStats{f, Nat.add(a, Diff.num(String.drop(Diff.word(String.split(t, ' '), 6n), 1n))), Nat.add(d, Diff.num(String.drop(Diff.word(String.split(t, ' '), 7n), 1n)))}
+    case False{} _:
+      Diff.count.more(String.ends_with(t, " more changed files not shown here"), String.split(t, ' '), s)
+
+def Diff.count.line.k(meta: Bool, +k: U32, +t: String, s: DStats) -> DStats:
+  match meta s:
+    case True{} _:
+      Diff.count.meta(String.starts_with(t, "\\ Too big to show here: +"), t, s)
+    case False{} DStats{f, a, d}:
       DStats{f, Nat.add(a, U32.to_nat(Bool.to_u32(U32.is_eq(k, 1)))), Nat.add(d, U32.to_nat(Bool.to_u32(U32.is_eq(k, 2))))}
+
+def Diff.count.line(l: DLine, s: DStats) -> DStats:
+  match l:
+    case DLine{+k, +t, _, _}:
+      Diff.count.line.k(U32.is_eq(k, 3), k, t, s)
 
 def Diff.count.lines(ls: List<&2, DLine>, s: DStats) -> DStats:
   match ls:
