@@ -2892,8 +2892,8 @@ def View.err.attrs(+lc: I.Loc, api: Bool, +text: String) -> List<&2, D.Attr>:
 # "› what it was told" (FO.Restart.told; the hub's own row after it is
 # left out, FO.Fold.shown)
 def View.carry.row(+lc: I.Loc, +id: String, +text: String) -> D.Node:
-  D.El{"div", id, [D.At{"class", "act info restart"}, D.At{"data-id", id}], [View.act.kind(lc, "restart"), D.Dom.span("summary", MSG.T.restart.continuing(lc)),
-    D.El{"details", "told:" ++ id, [D.At{"class", "carry-told"}], [D.El{"summary", "", Nil{}, [D.Txt{MSG.T.restart.told(lc)}]}, D.El{"div", "", [D.At{"class", "told"}], [D.Txt{text}]}]}]}
+  D.El{"div", id, [D.At{"class", "act info restart"}, D.At{"data-id", id}], [View.act.kind(lc, "restart"), D.El{"span", "", [D.At{"class", "summary"}], [D.Txt{MSG.T.restart.continuing(lc)},
+    D.El{"details", "told:" ++ id, [D.At{"class", "carry-told"}], [D.El{"summary", "", Nil{}, [D.Txt{MSG.T.restart.told(lc)}]}, D.El{"div", "", [D.At{"class", "told"}], [D.Txt{text}]}]}]}]}
 
 def View.entry.user(carry: Bool, +lc: I.Loc, +id: String, +th: String, +text: String, +st: M.State, +stamp: String, +unread: Bool) -> D.Node:
   match carry:
