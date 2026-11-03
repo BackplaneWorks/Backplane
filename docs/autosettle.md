@@ -64,3 +64,12 @@ only its unsafe/foreign-code dependency notice; it did not report a failed
 law. Logs are in Boat job `j20261103041641-536529`, with separate order
 and required-regression runs `j20261103042031-563596` and
 `j20261103042155-574148`.
+
+After rebasing onto main `1209f0bde`, the server check, settling/sidebar/order
+suites and diff-cap render test passed in `j20261103044800-751935`. The
+full proof exceeded Boat's 16 GiB machine; the identical source passed
+on `h@backplane` under its `bend` lock (work
+`w-t1793673649-1323966-1346575`, 8m08s, peak 16,454,660 KiB). Its verdict
+contained only the unsafe/foreign-code notice. The rebase also moved
+main's two handwritten diff-count labels into the message catalogs so
+regeneration preserves them.
