@@ -8,6 +8,7 @@ no kept declaration uses. A name that is dropped by mistake makes the compiler
 fail (never a silent pass). Coverage is a separate, exact set computation:
 `coverage()` lists every canonical declaration no shard keeps.
 """
+import hashlib
 import re
 from pathlib import Path
 
@@ -51,46 +52,147 @@ def scc(edges):
     return comp
 
 
-def verify_output(out, expected):
-    """Independent check of what was written: a plain line scanner (not Module) follows the
-    entry file's imports on disk. Every emitted module must be reachable, every import must
-    resolve to an emitted file, no top-level line may be unaccounted for, and the declarations
-    found must equal `expected` exactly."""
-    out = Path(out)
-    head = re.compile(r'^(def|type|law) (\S+?)[\s(:<]')
-    imp = re.compile(r'^import (\S+)(?: as (\w+))?\s*(?:#.*)?$')
-    emitted = {p.relative_to(out/'t').as_posix() for p in (out/'t').rglob('*') if p.is_file()}
-    if any(not n.endswith('.bend') for n in emitted):
-        raise ValueError('non-module file in shard tree')
-    seen, found, pending = set(), set(), [out/'PROOF.bend']
+EFFECT = re.compile(r'^\s+import\s+"([^"]+)"')
+INCLUDE = re.compile(r'^\s*#\s*include\s+"([^"]+)"')
+HEAD2 = re.compile(r'^(def|type|law) (\S+?)[\s(:<]')
+IMP2 = re.compile(r'^import (\S+)(?: as (\w+))?\s*(?:#.*)?$')
+
+
+def scan_module(text, origin):
+    """Plain, separate line scanner (not Module). Returns (import lines, {(kind, name): sha256 of the
+    declaration with trailing blank/comment lines removed}, {(kind, name): [effect paths]}).
+    Unsupported top-level text and duplicate declarations raise."""
+    imports, digests, effects, cur = [], {}, {}, None
+
+    def close():
+        if cur is not None:
+            lines = cur[2]
+            while lines and (not lines[-1].strip() or lines[-1].startswith('#')):
+                lines = lines[:-1]
+            digests[cur[:2]] = hashlib.sha256(''.join(lines).encode()).hexdigest()
+
+    for n, line in enumerate(text.splitlines(keepends=True), 1):
+        plain = line.rstrip('\r\n')
+        if plain.strip() and plain[0] not in ' \t#':
+            if IMP2.match(plain) and cur is None:
+                imports.append(plain)
+                continue
+            h = HEAD2.match(plain)
+            if not h:
+                raise ValueError('%s:%d: unaccounted top-level line: %s' % (origin, n, plain[:60]))
+            close()
+            if (h[1], h[2]) in digests:
+                raise ValueError('%s: duplicate declaration %s %s' % (origin, h[1], h[2]))
+            cur = (h[1], h[2], [])
+            effects[(h[1], h[2])] = []
+        if cur is not None:
+            cur[2].append(line)
+            e = EFFECT.match(plain)
+            if e:
+                effects[cur[:2]].append(e[1])
+    close()
+    return imports, digests, effects
+
+
+def effect_closure(root, module, path):
+    """Repo-relative effect files a module's `import "x"` needs: the file and its local #include "y.h" headers."""
+    root = Path(root)
+    found, pending = set(), [(root/module).parent.joinpath(path).resolve()]
+    while pending:
+        f = pending.pop()
+        rel = f.relative_to(root.resolve()).as_posix()
+        if rel in found:
+            continue
+        if not f.is_file():
+            raise ValueError('effect companion missing: %s (from %s)' % (rel, module))
+        found.add(rel)
+        if f.suffix in ('.c', '.h'):
+            for line in f.read_text().splitlines():
+                m = INCLUDE.match(line)
+                if m:
+                    pending.append((f.parent/m[1]).resolve())
+    return found
+
+
+def verify_output(out, kept, root):
+    """Independent check against the ORIGINAL files. A separate scanner re-reads every emitted
+    module from disk, follows the entry file's imports, and requires: every emitted module reachable;
+    every import line copied verbatim from the original and resolving inside the shard; no
+    unaccounted top-level line; no duplicate declaration; each declaration's exact text digest equal
+    to the original's (law statements and proof bodies included); every alias used by a kept
+    declaration still imported; and every effect companion a kept declaration imports present and
+    byte-identical, with no extra companion files."""
+    out, root = Path(out), Path(root).resolve()
+    tree = (out/'t').resolve()
+    original = {}
+    expected = {}
+    for rel, kind, name in kept:
+        if rel not in original:
+            original[rel] = scan_module((root/rel).read_text(), rel)
+        if (kind, name) not in original[rel][1]:
+            raise ValueError('kept declaration missing from the original: %s %s %s' % (rel, kind, name))
+        expected[(rel, kind, name)] = original[rel][1][(kind, name)]
+    disk = {p.relative_to(out/'t').as_posix() for p in (out/'t').rglob('*') if p.is_file()}
+    emitted = {n for n in disk if n.endswith('.bend')}
+    seen, found, needed, pending = set(), {}, set(), [out/'PROOF.bend']
     while pending:
         path = pending.pop()
-        rel = path.relative_to(out/'t').as_posix() if path != out/'PROOF.bend' else None
+        rel = None if path == out/'PROOF.bend' else path.relative_to(tree).as_posix()
         if rel in seen:
             continue
         seen.add(rel)
-        top = 0
-        for line in path.read_text().splitlines():
-            if not line.strip() or line[0] in ' \t#':
-                continue
-            m = imp.match(line)
-            if m:
-                top += 1
-                if m[1] != 'Base':
-                    target = (path.parent/m[1]).resolve()
-                    if not target.is_file() or (out/'t').resolve() not in target.parents:
-                        raise ValueError('import does not resolve inside the shard: ' + line)
-                    pending.append(target)
-                continue
-            h = head.match(line)
-            if not h or rel is None:
-                raise ValueError('unaccounted top-level line in %s: %s' % (rel or 'PROOF.bend', line[:60]))
-            top += 1
-            found.add((rel, h[1], h[2]))
+        text = path.read_text()
+        imports, digests, effects = scan_module(text, rel or 'PROOF.bend')
+        if rel is None:
+            if digests:
+                raise ValueError('entry file must not declare anything')
+        else:
+            orig_imports = set(original[rel][0]) if rel in original else None
+            if orig_imports is None:
+                raise ValueError('emitted module has no kept declaration: ' + rel)
+            aliases = {}
+            for line in original[rel][0]:
+                m = IMP2.match(line)
+                aliases[m[2] or m[1]] = line
+            kept_aliases = set()
+            for line in imports:
+                if line not in orig_imports:
+                    raise ValueError('import not present in the original %s: %s' % (rel, line))
+                m = IMP2.match(line)
+                kept_aliases.add(m[2] or m[1])
+            body = ''.join(l for l in text.splitlines(keepends=True) if not (l and l[0] not in ' \t#\n' and IMP2.match(l.rstrip('\r\n'))))
+            for m in LEX.finditer(body):
+                first = m[1].split('.')[0] if m[1] else None
+                if first in aliases and first != 'Base' and first not in kept_aliases:
+                    raise ValueError('%s uses alias %s but no longer imports it' % (rel, first))
+            for key, digest in digests.items():
+                if (rel, *key) in found:
+                    raise ValueError('duplicate declaration in output: %s %s %s' % (rel, *key))
+                found[(rel, *key)] = digest
+            for key, paths in effects.items():
+                for e in paths:
+                    for f in effect_closure(root, rel, e):
+                        needed.add(f)
+                        copy = tree/f
+                        if not copy.is_file() or copy.read_bytes() != (root/f).read_bytes():
+                            raise ValueError('effect companion missing or changed in the shard: ' + f)
+        for line in imports:
+            m = IMP2.match(line)
+            if m[1] != 'Base':
+                target = (path.parent/m[1]).resolve()
+                if not target.is_file() or tree not in target.parents:
+                    raise ValueError('import does not resolve inside the shard: ' + line)
+                pending.append(target)
     if {r for r in seen if r} != emitted:
         raise ValueError('emitted modules unreachable from the entry: ' + ', '.join(sorted(emitted - seen)))
-    if found != set(expected):
-        raise ValueError('output declarations differ from the kept set: %d missing, %d extra' % (len(set(expected) - found), len(found - set(expected))))
+    if set(found) != set(expected):
+        raise ValueError('output declarations differ from the kept set: %d missing, %d extra' % (len(set(expected) - set(found)), len(set(found) - set(expected))))
+    changed = sorted(k for k in expected if found[k] != expected[k])
+    if changed:
+        raise ValueError('declaration text differs from the original: %s %s %s' % changed[0])
+    extra = disk - emitted - {str(f) for f in needed}
+    if extra or needed - (disk - emitted):
+        raise ValueError('effect companions do not match the declarations that import them')
 
 
 class Module:
@@ -302,9 +404,19 @@ class Slicer:
         out = Path(out)
         out.mkdir(parents=True, exist_ok=True)
         self.emit(keep, used, out/'t')
+        for rel, ids in keep.items():
+            for b in self.module(rel).blocks:
+                if id(b) in ids:
+                    for line in b['text'].splitlines():
+                        e = EFFECT.match(line)
+                        if e:
+                            for f in effect_closure(self.root, rel, e[1]):
+                                dest = out/'t'/f
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                dest.write_bytes((self.root/f).read_bytes())
         (out/'PROOF.bend').write_text(self.entry(keep, used))
         kept = {(rel, b['kind'], b['name']) for rel, ids in keep.items() for b in self.module(rel).blocks if id(b) in ids}
-        verify_output(out, kept)
+        verify_output(out, kept, self.root)
         return kept
 
     def all_declarations(self, rels):
