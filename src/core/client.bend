@@ -8192,6 +8192,36 @@ def Fab.turn(t: M.Thread) -> String:
 def Fab.ready.k(+buy: String, +line: String, run: Bool) -> String:
   Bool.pick(String, Bool.or(run, String.is_empty(buy)), "", Bool.pick(String, String.is_empty(line), "Ready to order", line))
 
+def Fab.said(es: List<&2, M.Entry>) -> Bool:
+  match es:
+    case Nil{}:
+      False{}
+    case M.Msg{_, _, _, _, _} <> _:
+      True{}
+    case _ <> t:
+      Fab.said(t)
+
+def Fab.fresh.k(idle: Bool, +st: M.State, +th: String) -> Bool:
+  match idle:
+    case True{}:
+      Bool.not(Fab.said(M.State.mine(st, th)))
+    case False{}:
+      False{}
+
+# a thread nothing was said in yet: no turn, no message. Its bar waits for
+# the first turn to end (the rail's Buy it is the way in meanwhile)
+def Fab.fresh(+st: M.State, +th: String) -> Bool:
+  Fab.fresh.k(String.eq(Fab.turn(Ui.thread(st, th)), "idle"), st, th)
+
+# a project's thread t, then cs (laws fab_ready_fresh_*)
+def Fab.demo(cs: List<&2, M.Change>) -> M.State:
+  M.State.replay(List.append(&2, M.Change, [M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t", "p1", "x", M.Local{}, "", "", "claude", "", 1n}], cs), M.State.empty())
+
+# when the bar waits: while the agent works (run), and in a thread that has
+# had no turn yet (laws fab_ready_fresh_*)
+def Fab.wait(+st: M.State, +th: String, run: Bool) -> Bool:
+  Bool.or(run, Fab.fresh(st, th))
+
 # the bar's button: Buy it with its price, or Buy again once ordered
 def Fab.ready.btn.k(again: Bool, +buy: String) -> String:
   Bool.pick(String, Bool.or(Bool.not(again), String.is_empty(buy)), buy, "Buy again")
@@ -8235,7 +8265,7 @@ def Fab.mini.tools.k(show: Bool, again: Bool, +th: String) -> List<&2, TO.Tool>:
       Nil{}
 
 def Fab.ready.all(+u: Ui) -> String:
-  Fab.ready.k(Fab.buy(u), Ui.info(u, "fab.ready:" ++ Ui.sel(u)), String.eq(Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u))), "running"))
+  Fab.ready.k(Fab.buy(u), Ui.info(u, "fab.ready:" ++ Ui.sel(u)), Fab.wait(Ui.state.of(u), Ui.sel(u), String.eq(Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u))), "running")))
 
 def Fab.ready(+u: Ui) -> String:
   Fab.ready.shown.k(Fab.min.of(Ui.state.of(u), Ui.sel(u)), Fab.ready.all(u))
@@ -8259,7 +8289,7 @@ def Fab.mini.tools(+u: Ui) -> List<&2, TO.Tool>:
 
 # the same from the state and the info a window or phone frame has
 def Fab.mini.tools.of(+st: M.State, +nf: Map<&2, String>, +th: String, run: Bool) -> List<&2, TO.Tool>:
-  Fab.mini.tools.k(Fab.mini.k(Fab.min.of(st, th), Fab.ready.k(Fab.buy.of(st, nf, th), Str.get(nf, "fab.ready:" ++ th), run)), String.eq(Str.get(nf, "fab.again:" ++ th), "1"), th)
+  Fab.mini.tools.k(Fab.mini.k(Fab.min.of(st, th), Fab.ready.k(Fab.buy.of(st, nf, th), Str.get(nf, "fab.ready:" ++ th), Fab.wait(st, th, run))), String.eq(Str.get(nf, "fab.again:" ++ th), "1"), th)
 
 # (nothing for a thread with no project: no fab.min. without one)
 def Fab.min.set.k(none: Bool, +u: Ui, +project: String, +v: String) -> Act:

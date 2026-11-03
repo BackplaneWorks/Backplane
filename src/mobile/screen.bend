@@ -1512,7 +1512,7 @@ def Mob.fab.goal(asked: Bool, +lc: I.Loc, +nf: Map<&2, String>, +id: String) -> 
 def Mob.fab.k(shown: Bool, +st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
   match shown:
     case True{}:
-      Mob.fab.ready(U.Fab.ready.shown.k(U.Fab.min.of(st, id), U.Fab.ready.k(U.Fab.buy.of(st, nf, id), U.Str.get(nf, "fab.ready:" ++ id), run)), U.Fab.ready.btn.of(st, nf, id), id)
+      Mob.fab.ready(U.Fab.ready.shown.k(U.Fab.min.of(st, id), U.Fab.ready.k(U.Fab.buy.of(st, nf, id), U.Str.get(nf, "fab.ready:" ++ id), U.Fab.wait(st, id, run))), U.Fab.ready.btn.of(st, nf, id), id)
     case False{}:
       Nil{}
 
