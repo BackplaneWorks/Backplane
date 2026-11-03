@@ -1,3 +1,9 @@
+import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
+
+import ./src/server/conversation-frame.bend as CONVFRAME
+
+import ./src/core/thin.bend as CONVINDEX
+
 import ./src/core/images.bend as MIMAGES
 
 import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
@@ -15679,3 +15685,59 @@ law sync_credit_reports_commute:
   for +m: Nat
   for +more: Nat
   {OB.Cr.drained.k(True{}, OB.Cr.drained.k(True{}, c, n, bytes), m, more) == OB.Cr.drained.k(True{}, OB.Cr.drained.k(True{}, c, m, more), n, bytes) : OB.Cr}
+
+# BEGIN bounded conversation presentation
+# These constrain the production mapper/serializer, including arbitrary
+# Unicode source bodies and lossless separately framed control values.
+law conversation_preview_encoded_bytes:
+  for +body: String
+  for +limit: Nat
+  {Nat.is_le(J.Json.bytes.esc(CONVFRAME.Frame.text(body, limit), 0n), limit) == True{} : Bool}
+
+law conversation_control_chunk_encoded_bytes:
+  for +body: String
+  {Nat.is_le(J.Json.bytes.esc(CONVFRAME.Part.text(CONVFRAME.Part.take(body, 32768n)), 0n), 32768n) == True{} : Bool}
+
+law conversation_control_split_lossless:
+  for +body: String
+  for +limit: Nat
+  {CONVFRAME.Part.text(CONVFRAME.Part.take(body, limit)) ++ CONVFRAME.Part.rest(CONVFRAME.Part.take(body, limit)) == body : String}
+
+law conversation_source_window_nonempty:
+  for ids: List<&2, String>
+  for index: CONVINDEX.Index
+  {List.is_empty(&2, DM.Node, CONVFRAME.Frame.rows(ids, index)) == List.is_empty(&2, String, ids) : Bool}
+
+law conversation_source_window_cardinality:
+  for ids: List<&2, String>
+  for +index: CONVINDEX.Index
+  {List.length(&2, DM.Node, CONVFRAME.Frame.rows(ids, index)) == List.length(&2, String, ids) : Nat}
+
+law conversation_final_envelope_not_refused:
+  for +rid: J.Json
+  for result: J.Json
+  {J.Json.get_bool(CONVFRAME.Control.envelope(rid, result), "ok", False{}) == True{} : Bool}
+
+# A speculative next page can be fitted differently. Only the accepted
+# window's actual older cursor grants the next read; helper laws stay intact.
+law conversation_paging_uses_actual_window:
+  for +index: CONVINDEX.Index
+  for +thread: String
+  for +request: J.Json
+  for +epoch: String
+  for +ids: List<&2, String>
+  {J.Json.get_str(TVIEWH.Page.window(index, thread, request, epoch, ids), "olderNext", "missing") == "" : String}
+# END bounded conversation presentation
+
+# Checked shape support, independent of arbitrary history issuance.
+law conversation_floor_retains_source_row:
+  for +u: U.Ui
+  for +index: CONVINDEX.Index
+  for +id: String
+  for +window: J.Json
+  {CONVSHAPE.source_key(CONVFRAME.Frame.floor(u, index, [id], window), J.Json.get_bool(window, "hasMore", False{})) == "@compact.entry" : String}
+
+law conversation_floor_visible_text_nonempty:
+  for +index: CONVINDEX.Index
+  for +id: String
+  {String.is_empty(CONVSHAPE.source_text(index, id)) == False{} : Bool}

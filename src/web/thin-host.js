@@ -141,7 +141,7 @@ export class ThinHost {
     this.terminalBytes = 0;this.sent = new SentClaims();this.sendPreviews = new Map();this.previewId = 0;
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
-    this.pendingNewest = false;
+    this.pendingNewest = false;this.windowBudgets = new Map();this.recoveryTimer = null;this.recoveryAttempts = 0;
     // The pages whose rows the page holds (timeline-history.bend keeps every
     // row drawn since the view was last reset), oldest first, each its trail
     // (cursor, back), the cursor older than it and its entry ids: the first
@@ -164,9 +164,9 @@ export class ThinHost {
       viewDelta: (api.renderer || 'web') === 'web' && api.viewDelta !== false,
       bodyPages: api.bodyPages === true,
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
-        p: { ...request.p, boardCatalog: api.boardCatalog === true ? 1 : 0, session: requestSession(request.p.session, request.m === 'view.action' ? request.p.action : '', request.p.target, true), away: this.awayOf(request.p.session.sel) } } : request }),
+        p: { ...request.p, viewEntries: this.viewBudget(request.p.target), boardCatalog: api.boardCatalog === true ? 1 : 0, session: requestSession(request.p.session, request.m === 'view.action' ? request.p.action : '', request.p.target, true), away: this.awayOf(request.p.session.sel) } } : request }),
       // what the request limit measures: the request as it goes on the wire
-      shape: (p, method) => p.session ? { ...p, boardCatalog: api.boardCatalog === true ? 1 : 0, session: requestSession(p.session, method === 'view.action' ? p.action : '', this.target, true) } : p,
+      shape: (p, method) => p.session ? { ...p, viewEntries: this.viewBudget(this.target), boardCatalog: api.boardCatalog === true ? 1 : 0, session: requestSession(p.session, method === 'view.action' ? p.action : '', this.target, true) } : p,
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: api.validateResult || validateThinResult,
     }, next);
@@ -201,6 +201,7 @@ export class ThinHost {
     this.select(this.api.target(this.session));
   }
   select(target, {remember = true} = {}) {
+    this.cancelRecovery();
     if (remember) this.rememberPage();
     this.pendingNewest = false;
     // A new view may have a fresh actor. Its response alone owns the upload
@@ -834,6 +835,7 @@ export class ThinHost {
       }
       return true;
     }
+    if (this.client.control(this.hub, envelope)) return true;
     if (envelope?.t !== 'reply') return false;
     const metadata = this.pending.get(envelope.id);
     const RR = globalThis.__bpRender, c0 = RR ? performance.now() : 0;
@@ -1026,7 +1028,7 @@ export class ThinHost {
         if (old) { this.pagePositionBytes -= old.bytes;this.pagePositions.delete(key); }
       }
       this.historyEpoch = incomingEpoch;
-      this.ready = true;this.opening = false;this.window = result.window;
+      this.cancelRecovery();this.ready = true;this.recoveryAttempts = 0;this.opening = false;this.window = result.window;
       let position = sentNewest ? { atEnd: true } : paged?.position;
       if (sentNewest) this.awayMark = null;
       if (changedHistory && !resumed) position = this.awayMark ? { top: 0, atEnd: false } : { atEnd: true };
@@ -1154,14 +1156,36 @@ export class ThinHost {
   // no such thread, as a search result in a subagent's log once named) or
   // not one the page can show, is not asked for again, nor kept: the page
   // goes where it can (api.refused selects it) rather than stopping on
-  // "Conversation unavailable", which every reload asked for again. Too
-  // big a view (LIMIT) still says so.
+  // "Conversation unavailable", which every reload asked for again.
+  // A size refusal from an older hub stays on this target for automatic
+  // recovery with a smaller window.
   refuse(metadata, reason, current) {
     if (metadata?.selection !== true || reason === 'LIMIT' || !current || !this.api.refused) return false;
     this.api.pageState?.(null);this.forView = null;this.opening = false;this.restorePage = null;
     for (const operation of this.actions) operation.settled?.(false);
     this.actions = [];this.ready = false;
     return this.api.refused(metadata.target, reason) === true;
+  }
+  cancelRecovery() {
+    clearTimeout(this.recoveryTimer);this.recoveryTimer = null;
+  }
+  viewBudget(target = this.target) {
+    return this.windowBudgets.get(JSON.stringify(target)) || 32;
+  }
+  recover() {
+    if (!this.greeted || !viewTarget(this.target) || this.recoveryTimer !== null) return false;
+    const target = clone(this.target), selection = this.selectionRevision, epoch = this.epoch;
+    const link = this.client.links.get(this.hub), key = JSON.stringify(target);
+    this.windowBudgets.set(key, Math.max(1, Math.floor(this.viewBudget() / 2)));
+    if (this.windowBudgets.size > 16) this.windowBudgets.delete(this.windowBudgets.keys().next().value);
+    // Never replay an action whose side effects may already have happened.
+    // A fresh read establishes the same target with a smaller issued window.
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null;
+      if (this.greeted && !this.ready && this.selectionRevision === selection && this.epoch === epoch
+        && this.client.links.get(this.hub) === link && JSON.stringify(this.target) === key) this.select(target, { remember: false });
+    }, Math.min(5000, 100 * 2 ** Math.min(6, this.recoveryAttempts++)));
+    return true;
   }
   fail(reason) {
     this.api.pageState?.(null);this.forView = null;this.opening = false;
@@ -1172,6 +1196,7 @@ export class ThinHost {
     this.ready = false;this.api.state({ phase: 'error', remoteReady: false, reason });
   }
   disconnect() {
+    this.cancelRecovery();
     this.pendingNewest = false;
     this.api.pageState?.(null);this.forView = null;this.opening = false;
     this.retireTerminal('Queued terminal input was not sent because the connection closed.');

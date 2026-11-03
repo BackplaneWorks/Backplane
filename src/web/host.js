@@ -2965,19 +2965,6 @@ function showViewStatus(message) {
   document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
 }
 
-function showViewLimit(reason) {
-  showViewStatus((reason === "LIMIT" ? "This conversation's view is too large. " : "This conversation's view could not be displayed. ") + "Your draft is kept; other threads remain available.");
-  document.getElementById("view-retry")?.remove();
-  const controller = thin, revision = thin?.selectionRevision, target = thin?.target;
-  if (!controller?.greeted || !target) return;
-  const button = document.createElement("button");button.id = "view-retry";button.type = "button";
-  button.textContent = "Retry view";
-  button.onclick = () => {
-    if (thin !== controller || thin?.selectionRevision !== revision || thin?.target !== target) return;
-    button.remove();thin.select(target);
-  };
-  document.getElementById("view-connection").append(button);
-}
 
 // A view the hub refused (thin-host.js's refuse): a search result or a
 // reload that named something it has no view of. The page goes back to
@@ -3390,7 +3377,7 @@ async function startThin(again = false, reason = "initial") {
   // transport handlers below; never turn a renderer refusal into one.
   const viewRecover = reason => {
     if (!current()) return;
-    previewViews.stop();downNote = "";showViewLimit(reason);
+    previewViews.stop();downNote = "";showViewStatus("");thin?.recover();
   };
 
   try {
@@ -3577,7 +3564,7 @@ async function startThin(again = false, reason = "initial") {
         }
         if (state.phase === "error") {
           composerKeeper.navigationFailed();
-          diagnostic.note("view-error", { cause: state.reason === "LIMIT" ? "view-limit" : /timed out/.test(state.reason || "") ? "view-timeout" : "view-refused" });
+          diagnostic.note("view-error", { cause: /timed out/.test(state.reason || "") ? "view-timeout" : "view-retry" });
           trace("thin-error", { reason: state.reason });
           // Never a page to unfreeze by hand: the view is asked for again on
           // a fresh view on the same connection (viewRecover), with the last
