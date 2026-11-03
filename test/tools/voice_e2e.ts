@@ -78,6 +78,7 @@ const fake = join(home, "fakebin");
 mkdirSync(fake);
 writeFileSync(join(fake, "pw-record"), `#!/usr/bin/env python3
 import math, struct, sys, time
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 out = sys.stdout.buffer
 for i in range(80):
     loud = i < 20
@@ -113,7 +114,7 @@ const reply = (id: number) => until(() => msgs.find((o) => o.t === "reply" && St
 try {
   if (!(await until(() => existsSync(join(home, "token")), 10000))) throw new Error("the hub did not start");
   await sleep(300);
-  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     let o: any;

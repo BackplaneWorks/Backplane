@@ -5,6 +5,7 @@
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,existsSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const args=process.argv.slice(2), [binary,wire]=args.filter(x=>!x.startsWith('--'));
 if(!binary||!wire)throw Error('BINARY WIREDIR required');
 for(const f of readdirSync(wire).filter(f=>f.endsWith('.js')))(0,eval)(readFileSync(join(wire,f),'utf8'));
@@ -81,7 +82,7 @@ try{
   }
   console.log(JSON.stringify({mode:'fixture-only',passed:!failed,scope:'Only binary HTTP transport/source binding against a disposable hub; not pairing or queue qualification'}));
  }else{
- ws=new WebSocket(`ws://127.0.0.1:${port}/ws`);ws.binaryType='arraybuffer';ws.onmessage=e=>{try{const m=JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));if(m.t==='info'&&m.info?.machines){const x=m.info.machines;machines=typeof x==='string'?JSON.parse(x):x;}}catch{}};
+ ws=new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);ws.binaryType='arraybuffer';ws.onmessage=e=>{try{const m=JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));if(m.t==='info'&&m.info?.machines){const x=m.info.machines;machines=typeof x==='string'?JSON.parse(x):x;}}catch{}};
  const row=await until(150000,()=>machines?.peers?.find((x:any)=>x.url===dummyUrl));check('actor discovers the synthetic requester first',!!row);if(!row)throw Error('synthetic requester not discovered');
  const path=`/bots/pair?name=${encodeURIComponent(row.name)}&url=${encodeURIComponent(dummyUrl)}`;
  const before=peerFiles();

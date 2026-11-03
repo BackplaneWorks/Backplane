@@ -27,6 +27,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const argv = process.argv.slice(2);
 const opt = (name: string, d: string) => {
@@ -153,7 +154,7 @@ async function run(n: number): Promise<Result> {
   const lag: number[] = [];
   let lastMsg = Date.now();
   let counting = false;
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const now = Date.now();
@@ -225,7 +226,7 @@ async function run(n: number): Promise<Result> {
   const tEnd = Date.now();
   await until(120000, () => (Date.now() - lastMsg > 1500 ? true : undefined));
   const drain = Math.max(0, lastMsg - tEnd);
-  const perf = await (await fetch(`http://127.0.0.1:${port}/debug/perf`)).text();
+  const perf = await (await fetch(`http://127.0.0.1:${port}/debug/perf?token=${hubToken(home)}`)).text();
   ws.close();
   proc.kill();
   await proc.exited;

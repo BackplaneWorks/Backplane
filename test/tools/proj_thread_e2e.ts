@@ -10,6 +10,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -65,7 +66,7 @@ try {
   // every message in arrival order: changes and replies
   const order: any[] = [];
   const replies = new Map<number, any>();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));
@@ -139,7 +140,7 @@ else printf '%s\\n' "$3"; fi
   // two clients create at once: each answer names that client's thread
   // (client.bend's Made.reply selects only it; laws made_*)
   const other: any = { replies: new Map<number, any>() };
-  const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws2 = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws2.binaryType = "arraybuffer";
   ws2.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));

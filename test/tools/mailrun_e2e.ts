@@ -7,6 +7,7 @@ import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, readdi
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function agent() {
@@ -76,7 +77,7 @@ if (process.argv[2] === "--agent") { await agent(); } else {
     let ready = false;
     for (let i = 0; i < 200; i++) { try { ready = (await fetch(`http://127.0.0.1:${port}/hello`)).ok; } catch {} if (ready) break; await sleep(50); }
     if (!ready) throw new Error("test hub failed to start");
-    ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
     await new Promise((r, j) => { ws!.onopen = r; ws!.onerror = j; });
     ws.send(W.encode(JSON.stringify({ id: 1, m: "turn.start", p: { thread: "worker", text: "MAILRUN_E2E_SEND", msg: "person-start" } })));
     const events = () => readFileSync(logPath, "utf8").trim().split("\n").map((x) => JSON.parse(x));

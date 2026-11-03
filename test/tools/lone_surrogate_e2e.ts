@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { json, learnJson, plain } from "../../src/web/wire.js";
 import { ThinViews } from "../../src/web/thin.js";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin, mod] = process.argv.slice(2);
 if (!bin || !mod) throw new Error("usage: lone_surrogate_e2e.ts HUB MODULE");
@@ -70,7 +71,7 @@ const stop = async () => { if (proc) { proc.kill(); await proc.exited; proc = nu
 
 type Conn = { ws: WebSocket; seen: any[]; frames: any[]; n: number };
 const connect = async (q = ""): Promise<Conn> => {
-  const c: Conn = { ws: new WebSocket(`ws://127.0.0.1:${port}/ws${q}`), seen: [], frames: [], n: 0 };
+  const c: Conn = { ws: new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}${q ? '&' + q.replace(/^\?/, '') : ''}`), seen: [], frames: [], n: 0 };
   c.ws.binaryType = "arraybuffer";
   c.ws.onmessage = (e) => {
     if (typeof e.data === "string") return;

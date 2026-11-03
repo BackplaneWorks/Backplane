@@ -14,6 +14,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -114,7 +115,7 @@ try {
   const frames: string[] = [];
   const info: Record<string, string> = {};
   const replies = new Map<number, any>();
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const text = W.decode(new Uint8Array(e.data as ArrayBuffer));
@@ -134,7 +135,7 @@ try {
   const change = (tag: string, f: (c: any) => boolean = () => true) => until(10000, () => seen.find((c) => c.$ === tag && f(c)));
   const base = `http://127.0.0.1:${port}`;
   const mcp = (th: string, name: string, args: object) =>
-    fetch(`${base}/mcp/${th}`, {
+    fetch(`${base}/mcp/${th}?token=${hubToken(home)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } }),
@@ -147,7 +148,7 @@ try {
   const thread: string = set?.thread ?? "";
   check("a bot to teach", !!bot && !!thread, created);
 
-  const tools = await fetch(`${base}/mcp/${thread}`, {
+  const tools = await fetch(`${base}/mcp/${thread}?token=${hubToken(home)}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
   }).then((r) => r.json());
   const names = (tools?.result?.tools ?? []).map((t: any) => t.name);

@@ -19,6 +19,7 @@
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [binary = "build/backplane-serve", wire = "build/wire", runtimeArg = ""] = process.argv.slice(2);
 if (!runtimeArg || !existsSync(join(runtimeArg, "bin/kicad-cli"))) {
@@ -96,7 +97,7 @@ try {
   }
   const seen: any[] = [];
   const items: any[] = [];
-  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data)));

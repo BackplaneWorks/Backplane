@@ -10,6 +10,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFile
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const emit = (o: object) => console.log(JSON.stringify(o));
@@ -92,7 +93,7 @@ if (process.argv[2] === "--claude") {
     let ready = false;
     for (let i = 0; i < 300 && !ready; i++) { try { ready = (await fetch(`http://127.0.0.1:${port}/hello`)).ok; } catch {} if (!ready) await sleep(100); }
     if (!ready) throw new Error("hub not ready");
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
     ws.binaryType = "arraybuffer";
     await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
     let id = 0;

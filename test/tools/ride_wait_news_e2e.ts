@@ -9,6 +9,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [binArg, wire] = process.argv.slice(2);
 if (!binArg || !wire) throw new Error("usage: ride_wait_news_e2e.ts BINARY WIREDIR");
@@ -50,7 +51,7 @@ try {
   let up = false;
   for (let i = 0; i < 300 && !up; i++) { try { up = (await fetch(`http://127.0.0.1:${port}/hello`)).ok; } catch {} if (!up) await sleep(100); }
   if (!up) throw new Error("hub did not start");
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = "arraybuffer";
   const replies = new Map<number, any>(); const seen: any[] = []; let n = 0;
   ws.onmessage = (e) => { const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer))); for (const x of o.items ?? []) seen.push(x); if (o.t === "reply") replies.set(Number(o.id), o); };
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
@@ -59,7 +60,7 @@ try {
   check(started?.ok && await until(15000, () => seen.some((x) => x.$ === "TurnChanged" && x.thread === "tb" && x.state === "running")), "the worker's turn runs");
   const wait = async (ms: number) => {
     const t0 = Date.now();
-    const r = await (await fetch(`http://127.0.0.1:${port}/mcp/ta`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "thread_wait", arguments: { threadId: "tb", timeoutMs: ms } } }) })).json();
+    const r = await (await fetch(`http://127.0.0.1:${port}/mcp/ta?token=${hubToken(home)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "thread_wait", arguments: { threadId: "tb", timeoutMs: ms } } }) })).json();
     const inner = JSON.parse(r?.result?.content?.[0]?.text ?? "{}");
     return { secs: (Date.now() - t0) / 1000, inner };
   };

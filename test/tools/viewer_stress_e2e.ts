@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const argv = process.argv.slice(2);
 const opt = (name: string, d: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : d; };
@@ -106,7 +107,7 @@ function cborEnc(v: any, out: number[]) {
   else { const ks = Object.keys(v); head(0xa0, ks.length); for (const k of ks) { const i = KEYS.indexOf(k); if (i >= 0) head(0x00, i); else str(k); cborEnc(v[k], out); } }
 }
 {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?since=0&enc=cbor`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(join(root, "home"))}&since=0&enc=cbor`);
   ws.binaryType = "arraybuffer";
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
   const replies: string[] = [];
@@ -257,7 +258,7 @@ const pageState = await page.evaluate(() => {
 const ticks: number[] = pageState.vs.ticks ?? [];
 probing = false;await probe;
 let hubPerf = "";
-try { hubPerf = await (await fetch(`http://127.0.0.1:${port}/debug/perf`, { signal: AbortSignal.timeout(5000) })).text(); } catch {}
+try { hubPerf = await (await fetch(`http://127.0.0.1:${port}/debug/perf?token=${hubToken(join(root, "home"))}`, { signal: AbortSignal.timeout(5000) })).text(); } catch {}
 await browser.close();
 await stopHub();
 

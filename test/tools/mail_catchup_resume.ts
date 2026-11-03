@@ -5,6 +5,7 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirS
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { standinScript } from "./perf_standin";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [binArg, wireArg, priorArg, outArg]=process.argv.slice(2);
 const bin=resolve(binArg),wire=resolve(wireArg),out=resolve(outArg),prior=JSON.parse(readFileSync(priorArg,"utf8"));
 if(!String(prior.root).startsWith("/tmp/bp-mail-catchup-"))throw new Error("only retained synthetic fixture allowed");
@@ -53,7 +54,7 @@ const until=async(f:()=>boolean,why:string)=>{const end=performance.now()+30000;
 let rid=0;const sockets:WebSocket[]=[],threads:string[]=[];let control:any;
 const report:any={root,binary_sha256:prior.binary_sha256,retained_source_root:prior.root,retained_disk_sha256:retainedSha,prior_test_sha256:prior.benchmark_sha256,test_sha256:sha(readFileSync(import.meta.path)),checks:{},error:null};
 async function client(query=""){
- const ws=new WebSocket(`ws://127.0.0.1:${port}/ws${query}`);ws.binaryType="arraybuffer";sockets.push(ws);
+ const ws=new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}${query ? '&' + query.replace(/^\?/, '') : ''}`);ws.binaryType="arraybuffer";sockets.push(ws);
  const c:any={ws,seen:[],wire_count:0,live_rows:0,origin:"",log:null,boot:false,deltas:new Map()};
  const pending=new Map<number,{resolve:(v:any)=>void,reject:(e:Error)=>void,timer:Timer}>();
  c.rpc=async(m:string,p:object)=>{const id=++rid;const answer=new Promise<any>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error(m+" timeout")),15000);pending.set(id,{resolve,reject,timer});});ws.send(W.encode(JSON.stringify({id,m,p})));const r=await answer;if(!r.ok||r.error)throw new Error(JSON.stringify(r));return r.result;};

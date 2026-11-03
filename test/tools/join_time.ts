@@ -3,13 +3,14 @@
 // the first frame, each chunk, and the frame that makes it live
 // ("boot": false); then counts what it gets live for a few seconds.
 //
-//   bun test/tools/join_time.ts PORT [LIVE_SECS]
+//   bun test/tools/join_time.ts PORT [LIVE_SECS] [HOME]   (HOME: the hub's, for its token)
 //
 // Never the live hub (3787).
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const [portS, liveS = "5"] = process.argv.slice(2);
+const [portS, liveS = "5", home = ""] = process.argv.slice(2);
+const token = home ? readFileSync(join(home, "token"), "utf8").trim() : (process.env.BACKPLANE_TOKEN ?? "");
 const port = Number(portS);
 if (!port || port === 3787) throw new Error("a test hub's port, never 3787");
 const here = resolve(import.meta.dir, "../..");
@@ -48,7 +49,7 @@ function cborDec(b: Uint8Array): any {
 
 const t0 = performance.now();
 let first = 0, live = 0, frames = 0, bytes = 0, items = 0, gapMax = 0, lastAt = 0, liveMsgs = 0, liveDeltas = 0;
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
 ws.binaryType = "arraybuffer";
 ws.onmessage = (e) => {
   const u = new Uint8Array(e.data as ArrayBuffer);

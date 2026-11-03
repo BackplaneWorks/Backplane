@@ -9,6 +9,7 @@
 // point it at the live hub (3787).
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [portS, home, secsS = "20"] = process.argv.slice(2);
 const port = Number(portS);
@@ -54,7 +55,7 @@ const origin = String(JSON.parse(logLines[0]).at ?? 0); // the hub resumes only 
 const tally = new Map<string, { n: number; bytes: number }>();
 const add = (k: string, b: number) => { const r = tally.get(k) ?? { n: 0, bytes: 0 }; r.n++; r.bytes += b; tally.set(k, r); };
 let total = 0, bytes = 0;
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?since=${since}&origin=${origin}`);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}&since=${since}&origin=${origin}`);
 ws.binaryType = "arraybuffer";
 let start = 0;
 ws.onmessage = (e) => {

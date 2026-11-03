@@ -26,6 +26,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [binArg = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 const bin = resolve(binArg);
@@ -155,7 +156,7 @@ try {
 
   // 3. stand-ins only
   const seen: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${P1}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${P1}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   let closed = false;
   ws.onclose = () => { closed = true; };

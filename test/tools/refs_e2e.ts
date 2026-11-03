@@ -5,13 +5,14 @@
 // Usage: bun test/tools/refs_e2e.ts PORT HOME WIREDIR   (WIREDIR from
 // `bend test/wire/index.html -o build/wire`)
 import { mkdirSync, readdirSync, readFileSync } from "fs";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [port, home, wire] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
 const W = (globalThis as any).Wire;
 const fail = (m: string) => { console.error("refs_e2e: " + m); process.exit(1); };
 for (const d of ["bend", "board"]) mkdirSync(`${home}/${d}`, { recursive: true });
 
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
 ws.binaryType = "arraybuffer";
 const seen: any[] = [];
 let n = 0;

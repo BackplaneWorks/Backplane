@@ -15,6 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const argv = process.argv.slice(2);
 const opt = (name: string, d: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : d; };
@@ -55,7 +56,7 @@ let browser: any = null;
 let page: any = null;
 try {
   if (!(await until(60000, async () => { try { return (await fetch(`http://127.0.0.1:${port}/hello`)).status === 200; } catch { return undefined; } }))) throw new Error("the hub never answered");
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   const changes: any[] = [];
   ws.onmessage = (e) => {

@@ -3,6 +3,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter(f => f.endsWith(".js"))) (0, eval)(readFileSync(join(wire, f), "utf8"));
 const W = (globalThis as any).Wire;
@@ -17,7 +18,7 @@ for (const n of ["codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bi
 const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = socket.port; socket.stop(true);
 if (port === 3787) throw new Error("refusing the live port");
-const env = { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_LOCK_DIR: locks, BACKPLANE_LOCK_URL: `http://127.0.0.1:${port}`, BP_WORK_MS: "100", FAKE_LOG: log, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root };
+const env = { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_LOCK_DIR: locks, BACKPLANE_LOCK_URL: `http://127.0.0.1:${port}`, BACKPLANE_HOME: home, BP_WORK_MS: "100", FAKE_LOG: log, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root };
 let hub = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground", "--headless"], { env, stdout: "ignore", stderr: Bun.file(join(root, "hub.log")) });
 const owned: ReturnType<typeof Bun.spawn>[] = [];
 let ws: WebSocket | undefined, fail = 0, seq = 0, crashWorkPid = 0;
@@ -30,7 +31,7 @@ const until = async <T>(ms: number, f: () => T | undefined, label = "condition")
 const content = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : "";
 const spawn = (args: string[]) => { const p = Bun.spawn(args, { env, stdout: "ignore", stderr: "inherit" }); owned.push(p); return p; };
 const post = async (op: string, name: string, holder: string) => {
-  const r = await fetch(`${env.BACKPLANE_LOCK_URL}/lock/${op}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, holder, note: "e2e" }) });
+  const r = await fetch(`${env.BACKPLANE_LOCK_URL}/lock/${op}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${hubToken(home)}` }, body: JSON.stringify({ name, holder, note: "e2e" }) });
   if (!r.ok) throw new Error(`${op}: ${r.status}`); return await r.json() as any;
 };
 const waitHub = async () => {
@@ -38,7 +39,7 @@ const waitHub = async () => {
   throw new Error("hub did not start");
 };
 const connect = async () => {
-  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = "arraybuffer";
   ws.onmessage = e => { const o = JSON.parse(typeof e.data === "string" ? e.data : W.decode(new Uint8Array(e.data))); seen.push(...(o.items ?? [])); };
   await new Promise((r, j) => { ws!.onopen = r; ws!.onerror = j; });
 };

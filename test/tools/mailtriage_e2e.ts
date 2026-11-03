@@ -5,6 +5,7 @@ import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, readdi
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 async function agent() {
@@ -133,7 +134,7 @@ else {
     proc = Bun.spawn([bin, '--home', home, '--port', String(port), '--no-tailscale', '--foreground'], { env, stdout: Bun.file(join(root, 'stdout')), stderr: Bun.file(join(root, 'stderr')) });
     let ready = false; for (let i = 0; i < 300; i++) { try { ready = (await fetch(`http://127.0.0.1:${port}/hello`)).ok; } catch {} if (ready) break; await sleep(40); }
     if (!ready) throw Error('isolated hub did not start');
-    ws = new WebSocket(`ws://127.0.0.1:${port}/ws?since=999999999`);
+    ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}&since=999999999`);
     await new Promise((r, j) => { ws!.onopen = r; ws!.onerror = j; });
   };
   const stop = async () => { ws?.close(); if (proc?.exitCode === null) proc.kill('SIGTERM'); if (proc) await proc.exited; };
