@@ -361,6 +361,56 @@ def verified_preemission(ref, base, release, compiler):
     return root, value
 
 
+def lowmem_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lowmem_build", ROOT / "scripts/lowmem-build.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def verified_lowmemory(ref, base, release, compiler, pre, low=None):
+    """Extra admission for a low-memory build report. It never replaces verified_preemission: the report must
+    bind the same commit/tree/compiler and the raw hub bytes that admission accepted. Any fault raises, so a
+    stale, partial or mismatched report can never fall through to the whole-program emitter."""
+    require(pre is not None, "A low-memory report is only accepted together with the verified pre-emission")
+    low = low or lowmem_module()
+    path = bound(ref, base)
+    report = read(path)
+    root = path.parent
+    require(isinstance(report, dict) and report.get("schema") == 2 and report.get("kind") == "backplane-lowmem-build-report"
+            and report.get("state") == "passed" and report.get("release") is True and report.get("complete") is True
+            and report.get("qualified") is True and report.get("fallback") is False and report.get("runner") == "boat",
+            "Low-memory report is not a complete passing Boat release report")
+    require(report.get("cap_bytes") == low.CAP_BYTES, "Low-memory cap is not the required cap")
+    source = report.get("source")
+    require(isinstance(source, dict) and source.get("head") == release["commit"] and source.get("tree") == release["tree"]
+            and source.get("clean") is True, "Low-memory report is for another source")
+    tools = report.get("tools")
+    require(isinstance(tools, dict) and isinstance(tools.get("bend"), dict) and tools["bend"].get("sha256") == compiler["sha256"],
+            "Low-memory report used another compiler")
+    for name in ("qualification", "reference"):
+        require(isinstance(report.get(name), dict) and HEX.fullmatch(str(report[name].get("sha256", ""))),
+                "Low-memory report lacks its %s binding" % name)
+    jobs = report.get("jobs")
+    require(isinstance(jobs, dict) and {"hub", "web", "mobile"} <= set(jobs), "Low-memory report lacks hub, web or mobile")
+    for name in ("hub", "web", "mobile"):
+        job = jobs[name]
+        require(isinstance(job, dict) and job.get("ok") is True and not job.get("why") and job.get("kind") == name,
+                "Low-memory %s job did not pass" % name)
+        ref_ = job.get("receipt")
+        require(isinstance(ref_, dict) and str(ref_.get("path", "")).startswith("receipts/"), "Low-memory %s receipt unbound" % name)
+        receipt = read(bound(ref_, root))
+        require(not low.receipt_problems(receipt, low.CAP_BYTES, True), "Low-memory %s receipt: %s" % (
+            name, "; ".join(low.receipt_problems(receipt, low.CAP_BYTES, True))))
+        require(receipt.get("id") == name and receipt.get("source") == source and receipt.get("tools") == tools
+                and receipt.get("outputs") == job.get("outputs") and job["outputs"], "Low-memory %s receipt differs from report" % name)
+    hub = jobs["hub"]["outputs"]
+    require(set(hub) == {"hub.js"} and hub["hub.js"] == pre[1]["files"]["server.js"]["sha256"],
+            "Low-memory hub bytes differ from the admitted raw emission")
+    return path
+
+
 def js(request, base, out):
     release = identity(request)
     require(request.get("kind") == "backplane-service-js-inputs", "Wrong build request kind")
@@ -401,12 +451,17 @@ def js(request, base, out):
             "Frozen web redistribution notices required")
     license_sources(web_notices)
     pre = verified_preemission(request["preEmission"], base, release, request["toolchain"]["bend"]) if "preEmission" in request else None
+    low = None
+    if "lowMemory" in request:
+        low = verified_lowmemory(request["lowMemory"], base, release, request["toolchain"]["bend"], pre)
     new_output(out)
     out.mkdir(parents=True)
     logs = out / "logs"
     logs.mkdir()
     service = out / service_name(target)
     try:
+        if low:
+            shutil.copyfile(low, out / "LOW-MEMORY.json")
         if pre:
             root, emitted = pre
             shutil.copyfile(root / "logs/entries.log", logs / "entries.log")
@@ -433,7 +488,7 @@ def js(request, base, out):
         # Windows' helpers come in its runtime bundle; KiStack is built here
         build_kistack(out)
     require(sorted(p.name for p in out.iterdir())
-            == sorted(["logs", service.name, KISTACK, *helpers, *(["licenses"] if helpers else []), *(["PRE-EMISSION.json", "PRE-EMISSION-SOURCE.json", "PRE-EMISSION-PHASES.json"] if pre else [])]), "Unexpected build outputs")
+            == sorted(["logs", service.name, KISTACK, *helpers, *(["licenses"] if helpers else []), *(["PRE-EMISSION.json", "PRE-EMISSION-SOURCE.json", "PRE-EMISSION-PHASES.json"] if pre else []), *(["LOW-MEMORY.json"] if low else [])]), "Unexpected build outputs")
     architecture(service, target)
     helper_files = check_helpers(out, target) if helpers else {}
     kistack = check_kistack(out)
