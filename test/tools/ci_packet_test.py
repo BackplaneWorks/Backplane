@@ -159,6 +159,23 @@ class PacketTest(unittest.TestCase):
             self.assertTrue(fnmatch.fnmatch(name, pattern))
             self.assertFalse(fnmatch.fnmatch(name+'x', pattern))
 
+    def test_parallel_transport_uses_exact_runner_allowlist(self):
+        captured = []
+
+        def execute(program, argv):
+            # A second worker creates its archive after our initial inventory.
+            Path('.ci-packet/late-other-job.tar.gz').write_bytes(b'other job')
+            captured.extend(argv)
+            raise RuntimeError('captured exec')
+
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(packet.os, 'execvp', side_effect=execute):
+            with self.assertRaisesRegex(RuntimeError, 'captured exec'):
+                packet.run('packet.json', self.key, ['true'], 30, 'default')
+        includes = {captured[i+1] for i, value in enumerate(captured) if value == '--include-file'}
+        self.assertEqual(includes, {packet.SELF, packet.PIN, '.ci-packet/'+self.key+'.tar.gz'})
+        self.assertNotIn('.ci-packet/late-other-job.tar.gz', includes)
+        self.assertNotIn('--exclude', captured)
+
     def test_transport_cache_is_deterministic_and_repairs_corruption(self):
         with contextlib.redirect_stdout(io.StringIO()):
             archive = packet.bundle('packet.json', self.key)

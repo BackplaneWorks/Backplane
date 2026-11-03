@@ -257,8 +257,11 @@ def run(manifest, expected, command, timeout, size):
         raise ValueError('transport bootstrap/archive is ignored or missing; no Boat job started')
     argv = ['scripts/boat-job.sh', '--size', size, '--timeout', str(timeout),
             '--wait', '0', '--idle', '0', '--artifact', 'build/ci-packet']
-    for f in sorted(known - kept):
-        argv += ['--exclude', literal_pattern(f)]
+    # The runner inventories later, while other jobs can create new archives.
+    # An exclusion snapshot can leak those new files into this job. The exact
+    # allowlist is applied to the runner's own inventory immediately at staging.
+    for f in sorted(kept):
+        argv += ['--include-file', f]
     argv += ['--', 'python3', SELF, 'unpack-execute', '--manifest', manifest,
              '--expect', expected, '--archive', str(archive), '--archive-sha256', checksum, '--', *command]
     print(f'packet {expected}: transferring {len(kept)} files for {len(data["files"])} source inputs; identities verified remotely', flush=True)
