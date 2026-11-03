@@ -27,9 +27,8 @@
 #                 the hub's PATH says its address is 127.0.0.2, no peers), so
 #                 the hub listens there too and has a pairing link; the real
 #                 tailnet and the person's own hubs on it are never touched
-# BACKPLANE_KISTACK_SOURCE  a KiStack (.tar.gz like GitHub's, or a folder) the
-#                 hub syncs into HOME_DIR/kistack at start; unset, it syncs
-#                 none (stand-in agents; BACKPLANE_KISTACK_SYNC=1: GitHub's newest)
+# KiStack is the build's (kistack/ beside the binary, scripts/kistack.py);
+#                 the hub fetches none
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse a packaged app whose service folder lacks a helper the hub runs.
+"""Refuse a packaged app whose service folder lacks a helper the hub runs, or KiStack.
 
   check-helpers.py PATH --target TARGET [--service-dir]
 
@@ -10,7 +10,9 @@ backplane-service folder in it must hold the target's helpers
 -browser; on Windows kipc and step2glb as .exe) beside backplane-serve, as
 regular executable files of the target's architecture, code signed on macOS.
 0.13.0's macOS and Linux apps shipped none, and KiCad IPC never started
-(issue #510). TARGET "host" is this machine's.
+(issue #510). Each must also hold KiStack's skills as kistack/, exactly the
+commit deploy/kistack.lock pins (scripts/kistack.py): release packages
+carried none from 0.12.0 on. TARGET "host" is this machine's.
 """
 import argparse
 import importlib.util
@@ -45,9 +47,22 @@ def folders(names):
     return sorted(found)
 
 
+def kistack_members(names, folder):
+    # an archive's members under FOLDER/kistack/, as paths inside kistack/
+    prefix = folder + "/" + S.KISTACK + "/"
+    return {n: n[len(prefix):] for n in names if n.startswith(prefix) and n[len(prefix):]}
+
+
+def safe(inside):
+    S.require(all(p not in ("", ".", "..") for p in PurePosixPath(inside).parts) and not inside.startswith("/"),
+              "Unsafe KiStack member " + inside)
+    return inside
+
+
 def extract(path, target, into):
-    """The helpers of each service folder in an archive, copied out with the
-    modes the archive records. Answers the folders made under INTO."""
+    """The helpers and KiStack of each service folder in an archive, copied
+    out with the modes the archive records. Answers the folders made under
+    INTO."""
     wanted = S.helper_names(target)
     made = []
     if str(path).endswith(".zip"):
@@ -56,6 +71,12 @@ def extract(path, target, into):
             for n, folder in enumerate(folders(infos)):
                 dest = into / str(n)
                 dest.mkdir()
+                for name, inside in kistack_members(infos, folder).items():
+                    S.require(((infos[name].external_attr >> 16) & 0o170000) in (0, 0o100000), "KiStack member " + name + " is not a regular file")
+                    out = dest / S.KISTACK / safe(inside)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with z.open(infos[name]) as src, out.open("wb") as o:
+                        shutil.copyfileobj(src, o)
                 for name in wanted:
                     info = infos.get(folder + "/" + name)
                     if info is None:
@@ -72,6 +93,15 @@ def extract(path, target, into):
             for n, folder in enumerate(folders(members)):
                 dest = into / str(n)
                 dest.mkdir()
+                for name, inside in kistack_members(members, folder).items():
+                    m = members[name]
+                    if m.isdir():
+                        continue
+                    S.require(m.isfile(), "KiStack member " + name + " is not a regular file")
+                    out = dest / S.KISTACK / safe(inside)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    with tar.extractfile(m) as src, out.open("wb") as o:
+                        shutil.copyfileobj(src, o)
                 for name in wanted:
                     m = members.get(folder + "/" + name)
                     if m is None:
@@ -84,22 +114,35 @@ def extract(path, target, into):
     return made
 
 
+def complete(root, target):
+    # the helpers and KiStack of one service folder
+    found = S.check_helpers(root, target)
+    found[S.KISTACK] = S.check_kistack(root)["rev"]
+    return found
+
+
 def check(path, target, service_dir=False):
     path = Path(path)
     if service_dir:
-        return {str(path): S.check_helpers(path, target)}
+        return {str(path): complete(path, target)}
     if path.is_dir():
         names = [p.relative_to(path).as_posix() for p in path.rglob("*") if p.is_file() or p.is_symlink()]
         places = [(f, path / f) for f in folders(names)]
         S.require(places, "No " + SERVICE_DIR + " folder with a service in " + str(path))
-        return {f: S.check_helpers(d, target) for f, d in places}
+        result = {}
+        for f, d in places:
+            try:
+                result[f] = complete(d, target)
+            except ValueError as e:
+                raise ValueError(str(e) + " (" + f + ")") from None
+        return result
     with tempfile.TemporaryDirectory() as tmp:
         places = extract(path, target, Path(tmp))
         S.require(places, "No " + SERVICE_DIR + " folder with a service in " + str(path))
         result = {}
         for folder, dest in places:
             try:
-                result[folder] = S.check_helpers(dest, target)
+                result[folder] = complete(dest, target)
             except ValueError as e:
                 raise ValueError(str(e) + " (" + folder + ")") from None
         return result
@@ -114,7 +157,8 @@ def main():
     target = host() if args.target == "host" else args.target
     S.require(target in S.TARGETS, "Unknown target " + target)
     for folder, helpers in check(args.path, target, args.service_dir).items():
-        print("helpers ok: " + folder + ": " + ", ".join(sorted(helpers)))
+        print("helpers ok: " + folder + ": " + ", ".join(sorted(n for n in helpers if n != S.KISTACK))
+              + "; kistack " + helpers[S.KISTACK])
 
 
 if __name__ == "__main__":

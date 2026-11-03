@@ -25,6 +25,8 @@ class DesktopInstallTest(unittest.TestCase):
         package.mkdir(parents=True)
         (package / "web").mkdir()
         (package / "web" / "index.html").write_text("fixture\n")
+        # KiStack ships with every release (scripts/kistack.py)
+        subprocess.run([sys.executable, str(ROOT / "scripts/kistack.py"), "build", str(package / "kistack")], check=True, capture_output=True)
         executable = '#!/bin/sh\nprintf "%s\\n" "$0" "$@" > "$DESKTOP_LAUNCH_RECORD"\n'
         # backplane is the launcher (deploy/backplane-launch.sh); a stub stands in
         for name in ["backplane", "backplane-serve"]:

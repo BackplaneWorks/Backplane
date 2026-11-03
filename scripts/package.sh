@@ -20,6 +20,7 @@ cp dist/backplane-serve LICENSE "$dir/"
 [ -f dist/backplane ] && cp dist/backplane "$dir/"
 cp -R dist/web "$dir/web"
 cp -R dist/kistack "$dir/kistack"
+python3 scripts/kistack.py check "$dir/kistack"
 for h in backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc; do
   [ -f "dist/$h" ] && cp "dist/$h" "$dir/"
 done

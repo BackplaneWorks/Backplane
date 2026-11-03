@@ -12,6 +12,9 @@ subprocess.run(['bun', 'test/tools/store_checkpoint_io_test.cjs'], cwd=root, che
 subprocess.run(['bun', 'test/tools/store_promote_test.cjs'], cwd=root, check=True)
 subprocess.run(['bun', 'test/tools/hotboot_wire_test.cjs'], cwd=root, check=True)
 subprocess.run([sys.executable, 'test/tools/kicad_library_header_test.py'], cwd=root, check=True)
+# KiStack ships from deploy/kistack, exactly the commit deploy/kistack.lock pins
+subprocess.run([sys.executable, 'scripts/kistack.py', 'verify'], cwd=root, check=True)
+subprocess.run([sys.executable, 'test/tools/kistack_test.py'], cwd=root, check=True)
 if '--focused-only' not in sys.argv:
     subprocess.run([sys.executable, 'scripts/local.py', 'deps'], cwd=root, check=True)
     for name in ['service_runtime_test.py', 'release_bootstrap_test.py', 'release_assets_test.py',

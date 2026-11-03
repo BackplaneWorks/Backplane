@@ -186,6 +186,38 @@ def check_helpers(root, target):
     return found
 
 
+# KiStack's skills (scripts/kistack.py): the pinned copy tracked in this
+# repository, beside the service as kistack/ in every service folder, on
+# every target. Release packages carried none from 0.12.0 on (this producer
+# never built it), and the hub then fetched KiStack's newest commit at every
+# start; a component, and a packaged app (scripts/check-helpers.py), without
+# exactly the pinned commit is refused.
+KISTACK = "kistack"
+
+
+def kistack_module():
+    import importlib.util
+    # pinned beside this producer; the copy it checks is the product's (ROOT)
+    spec = importlib.util.spec_from_file_location("kistack", Path(__file__).resolve().with_name("kistack.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_kistack(root):
+    """ROOT/kistack is exactly the pinned KiStack. Answers {rev, skillsSha256}."""
+    try:
+        pin = kistack_module().check(Path(root) / KISTACK, ROOT)
+    except ValueError as e:
+        raise ValueError("KiStack beside the service: " + str(e)) from None
+    return {"rev": pin["rev"], "skillsSha256": pin["skills"]}
+
+
+def build_kistack(out):
+    kistack_module().build(Path(out) / KISTACK, ROOT)
+    return check_kistack(out)
+
+
 def identity(request):
     release = request.get("release", {})
     require(request.get("schema") == 1 and request.get("target") in TARGETS, "Unsupported target/schema")
@@ -342,12 +374,16 @@ def js(request, base, out):
             (ROOT / "build/js/backplane-serve" / name).unlink(missing_ok=True)
     helpers = built_helpers(target)
     if helpers:
-        # the same target and pinned runtime as the service
+        # the same target and pinned runtime as the service (and KiStack)
         run(["scripts/build-helpers.sh", out], logs / "helpers.log", env)
+    if not (out / KISTACK).exists():
+        # Windows' helpers come in its runtime bundle; KiStack is built here
+        build_kistack(out)
     require(sorted(p.name for p in out.iterdir())
-            == sorted(["logs", service.name, *helpers, *(["licenses"] if helpers else [])]), "Unexpected build outputs")
+            == sorted(["logs", service.name, KISTACK, *helpers, *(["licenses"] if helpers else [])]), "Unexpected build outputs")
     architecture(service, target)
     helper_files = check_helpers(out, target) if helpers else {}
+    kistack = check_kistack(out)
     # a cross-built service is run on its target by runtime acceptance
     if actual_host == target:
         version = run([service, "--version"], logs / "version.log", env, 30).strip()
@@ -406,6 +442,7 @@ def js(request, base, out):
               "source_commit": release["commit"], "source_tree": release["tree"], "compileInputs": compile_inputs(),
               "service": service.name, "binary_sha256": digest(service), "webManifestSha256": digest(out / "WEB.json"),
               "helpers": {name: helper_files[name]["sha256"] for name in helpers},
+              "kistack": kistack,
               "sourceManifestSha256": digest(out / "SOURCE.json"),
               "toolchain": {name: {key: request["toolchain"][name][key] for key in ("path", "bytes", "sha256", "version")}
                             for name in tool_names},
@@ -467,6 +504,7 @@ def component(request, base, out):
     require(sorted(build_data.get("helpers", {})) == sorted(helpers), "Build lacks the target's helpers")
     for name in helpers:
         require(digest(source / name) == build_data["helpers"][name], "Built helper changed: " + name)
+    require(build_data.get("kistack") == check_kistack(source), "Build lacks the pinned KiStack")
     require(web_manifest(source / "web", release) == read(source / "WEB.json"), "Web manifest mismatch")
     runtime_root = (base / request["runtimeDirectory"]).resolve()
     approval_path = bound(request["runtimeQualification"], base)
@@ -494,6 +532,7 @@ def component(request, base, out):
         require(helper == source / "EXECUTION-HELPER.py", "Execution helper provenance path mismatch")
         shutil.copy2(helper, payload / "EXECUTION-HELPER.py")
     shutil.copytree(source / "web", payload / "web")
+    shutil.copytree(source / KISTACK, payload / KISTACK)
     shutil.copytree(source / "logs", payload / "logs")
     require((source / "licenses/bun/LICENSE.md").is_file() and (source / "licenses/bend/LICENSE").is_file(),
             "Built service lacks its Bun and Bend notices")
@@ -506,7 +545,12 @@ def component(request, base, out):
             shutil.copy2(child, payload / child.name, follow_symlinks=False)
     runtime = runtime_closure(payload, request["target"])
     check_helpers(payload, request["target"])
+    kistack = check_kistack(payload)
     packages = list(runtime["packages"])
+    packages.append({"name": "kistack", "version": kistack["rev"],
+                     "sourceDisposition": "https://github.com/BackplaneWorks/kistack/tree/" + kistack["rev"]
+                                          + " (skills/ and LICENSE, tracked in Backplane's deploy/kistack)",
+                     "licenses": [{"path": KISTACK + "/LICENSE", "sha256": digest(payload / KISTACK / "LICENSE")}]})
     for name in helpers:
         folder = payload / "licenses/helpers" / HELPER_NOTICES.get(name, "")
         files = sorted(p for p in folder.rglob("*") if p.is_file()) if name in HELPER_NOTICES else []

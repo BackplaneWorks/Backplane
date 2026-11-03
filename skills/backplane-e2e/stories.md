@@ -521,9 +521,11 @@ YAML one (`description: >`) as its text, never ">". On D the hub is the
 desktop app's own (`desktop/runtime/resources/backplane-service`, KiStack in
 the install's `kistack/` beside `desktop/`): the same list. A Claude thread's
 agent runs with `--plugin-dir <install>/kistack` (the stand-in's arguments);
-with `BACKPLANE_KISTACK_SOURCE` (hub.sh passes it) the hub syncs that copy
-into `HOME_DIR/kistack` after it starts ("kistack sync:" in hub.log), and the
-`$` list and a Claude thread started after that use it
-(`--plugin-dir HOME_DIR/kistack`);
+a release's desktop app has KiStack beside its own hub
+(`backplane-service/kistack`) and uses that one. hub.log names the commit in
+use ("kistack: <commit> in <dir>", the one deploy/kistack.lock pins), or warns
+"kistack: NONE at ..." for a build without it; nothing is fetched, and a
+`HOME_DIR/kistack` an older build synced is removed at start ("kistack:
+removed ...");
 a delegated child and a launched thread offer the same `$` list as their
 parent.

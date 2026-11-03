@@ -23,7 +23,7 @@ function fixture(t,target='linux-x64',resident=false,releaseSource={}){
  const electronReceipt={...identity('backplane-electron-runtime'),electronVersion:'44.9.2',signablePaths:[exe],packages:[notice(electron,'electron')]};electronReceipt.runtimeManifest='RUNTIME.json';electronReceipt.closureManifest='CLOSURE.json';
  write(path.join(electron,'RUNTIME.json'),{schema:1,target,inventory:[{path:exe,package:'Electron',version:'44.9.2',architecture:target,sha256:hash(path.join(electron,exe)),bytes:512}],packages:electronReceipt.packages});
  write(path.join(electron,'CLOSURE.json'),{schema:1,target,measured:true,status:'PASS',edges:[],unresolvedMandatory:[]});electronReceipt.runtimeManifestSha256=hash(path.join(electron,'RUNTIME.json'));electronReceipt.closureSha256=hash(path.join(electron,'CLOSURE.json'));electronReceipt.members=producer.inventory(electron,target);
- const serviceExe=target==='windows-x64'?'backplane-serve.exe':'backplane-serve';put(path.join(service,serviceExe),binary(target),0o755);for(const n of producer.helperFiles(target))put(path.join(service,n),binary(target),0o755);
+ const serviceExe=target==='windows-x64'?'backplane-serve.exe':'backplane-serve';put(path.join(service,serviceExe),binary(target),0o755);for(const n of producer.helperFiles(target))put(path.join(service,n),binary(target),0o755);execFileSync('python3',[path.join(__dirname,'../../scripts/kistack.py'),'build',path.join(service,'kistack')]);
  const packageNotice=notice(service,'Backplane');put(path.join(service,'web/index.html'),'<main>synthetic stable fixture</main>');put(path.join(service,'web/index.html.gz'),require('node:zlib').gzipSync(fs.readFileSync(path.join(service,'web/index.html'))));
  const web={schema:1,kind:'matching-generated-web',sourceCommit:release.commit,sourceTree:release.tree,entrypoint:'src/web/index.html',members:{}};
  for(const n of fs.readdirSync(path.join(service,'web')))web.members[n]={sha256:hash(path.join(service,'web',n)),bytes:fs.statSync(path.join(service,'web',n)).size};write(path.join(service,'WEB.json'),web);
@@ -164,6 +164,15 @@ test('helpers must be executables of the target',t=>{
  put(path.join(f.service,'backplane-voice'),binary('linux-x64'),0o644);assert.throws(()=>producer.helpers(f.service,'linux-x64'),/not executable/);
  const w=fixture(t,'windows-x64',true);producer.helpers(w.service,'windows-x64');fs.unlinkSync(path.join(w.service,'backplane-step2glb.exe'));
  assert.throws(()=>producer.helpers(w.service,'windows-x64'),/backplane-step2glb\.exe/);
+});
+
+test('every service folder carries the pinned KiStack: none, or another, is refused',t=>{
+ // release packages carried none from 0.12.0 on
+ const f=fixture(t,'linux-x64');producer.helpers(f.service,'linux-x64');
+ const skill=path.join(f.service,'kistack/skills/pcb/SKILL.md'),before=fs.readFileSync(skill);
+ fs.writeFileSync(skill,'---\nname: pcb\n---\nchanged\n');assert.throws(()=>producer.helpers(f.service,'linux-x64'),/not the pinned skills tree/);
+ fs.writeFileSync(skill,before);fs.writeFileSync(path.join(f.service,'kistack/REVISION'),'0'.repeat(40)+'\n');assert.throws(()=>producer.helpers(f.service,'linux-x64'),/not the pinned/);
+ fs.rmSync(path.join(f.service,'kistack'),{recursive:true});assert.throws(()=>producer.helpers(f.service,'linux-x64'),/Missing KiStack/);
 });
 
 test('macOS cannot archive an unsealed portable app or missing nested-code verification (#661)',t=>{
