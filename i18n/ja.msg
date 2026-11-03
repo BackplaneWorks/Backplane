@@ -288,6 +288,8 @@ fold.running = 実行中: {kind}
 fold.now = 実行中
 apierr.say = {kind, select, overloaded {ClaudeのAPIが過負荷になり} rate {ClaudeのAPIがレート制限に達し} server {ClaudeのAPIで内部エラーが起き} auth {ClaudeのAPIがサインインを拒否し} other {ClaudeのAPIがエラーを返し}}{code}、ターンが終了しました{why}。
 apierr.details = 詳細
+restart.continuing = 再起動のあと続けています
+restart.told = 伝えた内容
 
 # bot tabs and moods
 bots.tab.chat = チャット

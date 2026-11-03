@@ -276,6 +276,32 @@ def ApiErr.say(+l: I.Loc, +x: String) -> String:
   +code = Bool.pick(String, ApiErr.d3(r), String.take(r, 3n), "")
   ApiErr.say.k(l, code, String.trim(String.drop(r, String.length(code))))
 
+# Restarts
+# --------
+# A restart asks nothing of the person, so its rows are never red
+# (Tool.tone: older logs wrote them as errors). The message Backplane
+# tells a cut turn to go on with (hub.bend's Carry.k, M.Carry.text) is
+# not the person's: it is drawn as the "Continuing after the restart" row
+# with what it said one click away, and the row the hub logged after it
+# is left out (Fold.shown).
+
+# the tone a row is drawn in (the web's classes: a restart's "info restart")
+def Tool.tone(+tone: String, +kind: String) -> String:
+  Bool.pick(String, String.eq(kind, "restart"), "info restart", tone)
+
+# Backplane's continue message after a restart (its first character
+# asked first: every message passes here)
+def Restart.told(+x: String) -> Bool:
+  match x:
+    case SCon{Chr{66}, _}:
+      String.starts_with(x, M.Carry.text())
+    case _:
+      False{}
+
+# the row the hub logs after its continue message
+def Restart.row(+kind: String, +summary: String) -> Bool:
+  Bool.and(String.eq(kind, "restart"), String.eq(summary, "Continuing after the restart"))
+
 def Fold.kinds.k(todo: Bool, +k: String, +acc: List<&2, String>) -> List<&2, String>:
   match todo:
     case True{}:
@@ -731,22 +757,34 @@ def Fold.shown.k(b: Bool, e: M.Entry, rest: List<&2, M.Entry>) -> List<&2, M.Ent
 # a turn's error row that only repeats the API error reply before it
 # (p: that reply's text, "" when the last shown entry is none), or says
 # nothing: the reply already says why (ApiErr)
+# (or the hub's "Continuing after the restart" row right after its
+# continue message, which is drawn as that row: Restart.told)
 def Fold.dup(e: M.Entry, +p: String) -> Bool:
   match e:
     case M.Act{_, _, +tone, +kind, +summary, _}:
-      Bool.and(Bool.not(String.is_empty(p)), Bool.and(String.eq(tone, "error"), Bool.and(String.eq(kind, "result"),
-        Bool.or(String.is_empty(String.trim(summary)), String.eq(String.trim(summary), String.trim(p))))))
+      Bool.or(Bool.and(Restart.row(kind, summary), Restart.told(p)),
+        Bool.and(ApiErr.is(p), Bool.and(String.eq(tone, "error"), Bool.and(String.eq(kind, "result"),
+          Bool.or(String.is_empty(String.trim(summary)), String.eq(String.trim(summary), String.trim(p)))))))
     case M.Msg{_, _, _, _, _}:
       False{}
 
-# what Fold.dup asks of the next entry: an API error reply's text, else ""
-# (a blank one between keeps the last)
+def Fold.api.k(mark: Bool, +x: String) -> String:
+  match mark:
+    case True{}:
+      x
+    case False{}:
+      ""
+
+# what Fold.dup asks of the next entry: an API error reply's text or
+# Backplane's continue message, else "" (a blank one between keeps the last)
 def Fold.api(blank: Bool, e: M.Entry, +p: String) -> String:
   match blank e:
     case True{} _:
       p
     case False{} M.Msg{_, _, M.Assistant{}, +x, _}:
-      Bool.pick(String, ApiErr.is(x), x, "")
+      Fold.api.k(ApiErr.is(x), x)
+    case False{} M.Msg{_, _, M.User{}, +x, _}:
+      Fold.api.k(Restart.told(x), x)
     case False{} _:
       ""
 
@@ -758,8 +796,9 @@ def Fold.shown.go(es: List<&2, M.Entry>, +p: String) -> List<&2, M.Entry>:
       +b = Fold.blank(e)
       Fold.shown.k(Bool.or(b, Fold.dup(e, p)), e, Fold.shown.go(t, Fold.api(b, e, p)))
 
-# the entries that show, in order: blank messages left out, and an error
-# row an API error reply already says (Fold.dup)
+# the entries that show, in order: blank messages left out, an error row
+# an API error reply already says, and the restart row its continue
+# message stands for (Fold.dup)
 def Fold.shown(es: List<&2, M.Entry>) -> List<&2, M.Entry>:
   Fold.shown.go(es, "")
 
