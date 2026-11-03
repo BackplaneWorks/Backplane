@@ -32,3 +32,11 @@ Final acceptance: Boat job `j20261103213009-3380607` passed desktop and
 Job `j20261103213635-3448305` passed the 390 px entry/expansion case, the
 full `scripts/check.sh` type/proof gate and all eight required regressions.
 The server, web client and shared phone bridge were built from those sources.
+
+After merge, the Secrets action routing change added `secret-box.bend` to the
+client import closure. Its route table consumes only the action name; it does
+not read composer drafts or alter sidebar inputs. The unknown-action branch
+only sets the secret-box error scratch field. Boat job
+`j20261103223807-3929408` passed the complete sidebar output comparison on
+merged main and the proof verdict accepted by `scripts/bendok.sh`. The client
+hash and added closure member are refreshed after that qualification.
