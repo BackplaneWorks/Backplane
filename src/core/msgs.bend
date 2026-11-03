@@ -1144,6 +1144,13 @@ def T.composer.offline(l: I.Loc) -> String:
     case I.Ja{}:
       "送信されていません。自動で再接続しています。下書きは保存されています。接続後にもう一度送信してください。"
 
+def T.composer.offline.back(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Connected again. Your message was not sent: it is still in the composer, ready to send."
+    case I.Ja{}:
+      "再接続しました。メッセージは送信されていません。入力欄に残っているので、送信してください。"
+
 def T.composer.placeholder(l: I.Loc) -> String:
   match l:
     case I.En{}:
