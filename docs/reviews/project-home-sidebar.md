@@ -99,3 +99,21 @@ The complete combined source with #813 passed in
 `w-t1793685091-1352063-1357327`: full type/proof gate (621 seconds), all eight
 required regressions, 29 browser acceptance checks including the exact long
 first message, Android/iOS builds and all seven isolated native smoke checks.
+
+Integration with main `75ab3ab0a` (#814) passed focused home assertions, all
+24 full-output sidebar cases, API-error/fold/fragmentation regressions and
+`sidebar_want_test.bend` in `w-t1793685091-1352063-1357436`. Manual review of
+the combined client/view changes confirms Side.want reads canonical open
+asks and thread state already retained by the sidebar input; the renderer
+carries that label beside the age. No conversation-body draft reader,
+private key/filter, unknown scratch retention or authority changes. Existing
+review records remain intact; only the two combined hashes changed. Eight
+static browser layouts also passed across desktop/phone, English/Japanese
+and 100/200 percent text scales in `w-t1793685091-1352063-1357580`.
+
+Final combined source with #813/#814 passed the full type/proof gate
+(592 seconds), Android and web builds and all 29 browser checks in
+`w-t1793685091-1352063-1358085`; cached paint was 25.1 ms under an 800 ms
+delayed reply. The eight required regressions and final fresh iOS build/seven
+private native checks passed in `w-t1793685091-1352063-1358990`. No source
+changed between these checks.
