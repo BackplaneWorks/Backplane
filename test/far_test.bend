@@ -49,7 +49,7 @@ def more() -> List<&2, FR.Item>:
   numbered([M.MessagePosted{"bt1", "m2", M.Assistant{}, "hi there", 103n}, M.TurnChanged{"bt1", M.Completed{}, 104n}], 20n)
 
 def here() -> List<&2, M.Change>:
-  [M.PeerSet{"p1", "box", "http://box:3787", False{}, 50n},
+  [M.PeerSet{"p1", "box", "http://box:3787", False{}, 50n}, M.SettingSet{"peer.own.p1", "pair", 50n},
    M.ThreadCreated{"t1", "", "Pip", M.Local{}, "", "", "claude", "", 90n}, M.BotSet{"b9", "Pip", "t1", 3n, "", 90n}]
 
 def recv(+u: U.Ui, +o: J.Json) -> U.Ui:
@@ -172,7 +172,7 @@ def mates(rs: List<&2, U.MateRow>) -> String:
   match rs:
     case Nil{}:
       ""
-    case U.MateRow{n, note, on, key} <> t:
+    case U.MateRow{n, note, on, key, _} <> t:
       n ++ " " ++ on ++ " " ++ key ++ ": " ++ note ++ "\n" ++ mates(t)
 
 def main() -> IO(Unit):
