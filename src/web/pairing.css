@@ -1,21 +1,30 @@
-body.pairing-pending #root {visibility:hidden}
-.pairing-screen {position:fixed;inset:0;z-index:12000;overflow:auto;overscroll-behavior:contain;background:#0c100f;color:#e3e9df;box-sizing:border-box;padding:clamp(20px,6vw,80px);font:16px/1.5 system-ui,sans-serif}
-.pairing-card {max-width:620px;margin:0 auto;border-top:4px solid #b2f66b;padding-top:24px;padding-bottom:40px}
-.pairing-brand {font:700 12px monospace;letter-spacing:.15em;color:#b2f66b}
-.pairing-card h1 {font-size:clamp(28px,5vw,42px);line-height:1.12;margin:18px 0}
-.pairing-card h2 {font-size:20px;margin-top:32px}
-.pairing-card p {overflow-wrap:anywhere}
-.pairing-lead,.pairing-help {color:#b3c0af}.pairing-help {font-size:14px}
-.pairing-card label {display:block;margin:20px 0 10px;font-weight:600}
-.pairing-card input {display:block;box-sizing:border-box;width:100%;min-height:48px;padding:12px;margin-top:8px;border:1px solid #64705e;background:#151b17;color:inherit;border-radius:0;font:inherit}
-.pairing-card button {min-height:44px;padding:10px 18px;margin:8px 12px 8px 0;border:1px solid #b2f66b;border-radius:0;background:#202d1c;color:#e3e9df;font:600 15px system-ui;cursor:pointer}
-.pairing-card button:disabled {opacity:.45;cursor:default}
-.pairing-card :focus-visible {outline:3px solid #d5ff99;outline-offset:4px}
-.pairing-card a {display:block;color:#b2f66b;margin-top:16px}
-.pairing-card details {margin-top:24px;border-top:1px solid #3c4937;padding-top:20px}
-.pairing-card summary {cursor:pointer;min-height:44px;font-weight:600}
-.pairing-status {min-height:24px;color:#eacb88}
-.pairing-code {font:700 36px monospace;letter-spacing:.12em;color:#b2f66b}
-.pairing-qr {display:block;width:min(100%,300px);margin:24px 0;background:white;shape-rendering:crispEdges;fill:black}
-.pairing-device {padding:16px 0;border-bottom:1px solid #3c4937}
-.pairing-camera {display:block;width:100%;max-height:320px;object-fit:contain}
+body.pairing-pending #root { visibility: hidden; }
+/* Colour and control styles come from style.css, including html.light before
+   the first authenticated view. Keep connection screens in that same theme. */
+.pairing-screen { position: fixed; inset: 0; z-index: 12000; overflow: auto; overscroll-behavior: contain; background: var(--bg); color: var(--text); padding: clamp(20px, 5vw, 64px); font: 14px/1.5 var(--sans); }
+.pairing-card { max-width: 680px; margin: 0 auto; padding-bottom: 32px; }
+.pairing-card h1 { font-size: clamp(24px, 4vw, 30px); line-height: 1.2; margin: 0 0 16px; }
+.pairing-card h2 { font-size: 18px; margin: 24px 0 12px; }
+.pairing-card p { overflow-wrap: anywhere; }
+.pairing-lead, .pairing-help { color: var(--dim); }
+.pairing-help { font-size: 13px; }
+.pairing-card label { display: block; margin: 16px 0 10px; font-weight: 600; }
+.pairing-card input.field { display: block; width: 100%; min-height: 44px; padding: 10px 12px; margin-top: 8px; font: inherit; }
+.pairing-card button { min-height: 44px; padding: 8px 14px; margin: 4px 8px 4px 0; font: inherit; }
+.pairing-card button:disabled { opacity: .45; cursor: default; }
+.pairing-card :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pairing-card a { display: inline-block; color: var(--accent); margin: 12px 0; }
+.pairing-methods { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 24px; }
+.pairing-methods button { width: 100%; margin: 0; padding: 10px 6px; }
+.pairing-method { margin-top: 16px; padding: 0 16px 16px; border: 1px solid var(--line); background: var(--panel); }
+.pairing-method[hidden], .pairing-file { display: none; }
+.pairing-status { margin: 12px 0; color: var(--dim); }
+.pairing-status:empty { display: none; }
+.pairing-status.bad { color: var(--bad); }
+.pairing-code { font: 700 32px var(--mono); letter-spacing: .12em; color: var(--text); }
+/* QR modules require a light quiet zone in either theme, independent of UI
+   contrast. Reuse the app's existing QR rules instead of theme inversion. */
+.pairing-qr { display: block; width: min(100%, 280px); margin: 20px 0; shape-rendering: crispEdges; }
+.pairing-device { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.pairing-camera { display: block; width: 100%; max-height: 320px; object-fit: contain; }
+.pairing-invitation:not(:empty) { padding: 0 16px 16px; margin: 16px 0; border: 1px solid var(--line); background: var(--panel); }
