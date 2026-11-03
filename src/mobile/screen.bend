@@ -568,7 +568,7 @@ def Mob.act.k(term: Bool, +lc: I.Loc, +id: String, +th: String, +tone: String, +
     case True{}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("emb")}, J.KV{"key", J.Json.str(EM.Emb.key(th, id))}, J.KV{"text", J.Json.str(EM.Emb.title(summary))}])
     case False{}:
-      J.Json.obj(List.append(&2, J.KV, [J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str(tone)}],
+      J.Json.obj(List.append(&2, J.KV, [J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str(FO.Tool.tone(tone, kind))}],
         Mob.act.words(String.eq(tone, RVW.Review.tone()), lc, tone, kind, summary)))
 
 # a tool call or other activity; a design step (core/hist.bend) is a row
@@ -582,6 +582,17 @@ def Mob.act(step: Bool, +lc: I.Loc, e: M.Entry) -> J.Json:
     case _ M.Msg{+id, _, _, text, _}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str("")}, J.KV{"label", J.Json.str("")}, J.KV{"text", J.Json.str(text)}])
 
+# a person's message; Backplane's continue message after a restart is the
+# "Continuing after the restart" row instead (FO.Restart.told, as the
+# web's View.carry.row; the hub's own row after it is left out)
+def Mob.user(carry: Bool, +lc: I.Loc, +id: String, +text: String, +stamp: String) -> J.Json:
+  match carry:
+    case True{}:
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str("info restart")}, J.KV{"label", J.Json.str("restart")}, J.KV{"text", J.Json.str(MSG.T.restart.continuing(lc))}])
+    case False{}:
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("user")}, J.KV{"text", J.Json.str(AT.Att.body(text))},
+        J.KV{"attachments", J.Json.arr(Mob.chips(AT.Att.paths(text)))}, J.KV{"stamp", J.Json.str(stamp)}])
+
 # what a reply's blocks say: a provider's API error as its sentence
 # (FO.ApiErr.say, as the web's View.msg.body), its "text" still the raw
 # one for Copy
@@ -594,9 +605,8 @@ def Mob.reply.shown(api: Bool, +lc: I.Loc, +text: String) -> String:
 # its attachments; a reply its markdown and the images it names
 def Mob.own.s.loc(+lc: I.Loc, e: M.Entry, +dr: Map<&2, String>, +stamp: String) -> J.Json:
   match e:
-    case M.Msg{id, _, M.User{}, +text, _}:
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("user")}, J.KV{"text", J.Json.str(AT.Att.body(text))},
-        J.KV{"attachments", J.Json.arr(Mob.chips(AT.Att.paths(text)))}, J.KV{"stamp", J.Json.str(stamp)}])
+    case M.Msg{+id, _, M.User{}, +text, _}:
+      Mob.user(FO.Restart.told(text), lc, id, text, stamp)
     case M.Msg{+id, _, _, +raw, _}:
       +text = CP.Pending.text(lc, id, raw)
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("assistant")}, J.KV{"text", J.Json.str(text)},
@@ -1515,7 +1525,7 @@ def Mob.fab.goal(asked: Bool, +lc: I.Loc, +nf: Map<&2, String>, +id: String) -> 
 def Mob.fab.k(shown: Bool, +st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
   match shown:
     case True{}:
-      Mob.fab.ready(U.Fab.ready.shown.k(U.Fab.min.of(st, id), U.Fab.ready.k(U.Fab.buy.of(st, nf, id), U.Str.get(nf, "fab.ready:" ++ id), run)), U.Fab.ready.btn.of(st, nf, id), id)
+      Mob.fab.ready(U.Fab.ready.shown.k(U.Fab.min.of(st, id), U.Fab.ready.k(U.Fab.buy.of(st, nf, id), U.Str.get(nf, "fab.ready:" ++ id), U.Fab.wait(st, id, run))), U.Fab.ready.btn.of(st, nf, id), id)
     case False{}:
       Nil{}
 

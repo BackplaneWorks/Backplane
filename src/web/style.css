@@ -263,6 +263,10 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
    on hover or focus; the turn's last reply and the person's keep theirs. */
 .msg.assistant:not(:hover):not(:focus-within) .stamp.mid { display: none; }
 .msg.user .stamp { text-align: right; }
+/* A message the agent has not read yet (core/stamp.bend's Stamp.unread):
+   its text a step dimmer, its "not read yet" time in the queued colour. */
+.msg.user.unread .body { color: var(--dim); }
+.msg.user.unread .stamp { color: var(--queued); }
 .body p { margin: 0 0 8px; white-space: pre-wrap; }
 .body code { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); background: var(--raise); padding: 0 3px; }
 .body h3, .body h4, .body h5 { margin: 12px 0 6px; }
@@ -282,6 +286,16 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .act .kind { color: var(--faint); flex: none; }
 .act .summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act.error { color: var(--bad); }
+/* Backplane's continue message after a restart (view.bend's
+   View.carry.row): "› what it was told" opens what it said */
+.act.restart { align-items: flex-start; }
+.act.restart .summary { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+.carry-told { display: inline; margin-left: 6px; }
+.carry-told > summary { display: inline; cursor: pointer; list-style: none; color: var(--faint); }
+.carry-told > summary::-webkit-details-marker { display: none; }
+.carry-told > summary::before { content: "›"; display: inline-block; margin-right: 5px; transition: transform .1s; }
+.carry-told[open] > summary::before { transform: rotate(90deg); }
+.carry-told > .told { display: block; margin: 4px 0 2px; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 720px; }
 /* a failure says all of why it failed: its row wraps, never cut */
 .act.error .summary { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 /* A run of tool calls is a drawer (view.bend's View.fold.row.live): one
@@ -834,6 +848,10 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .prow .pl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .prow .pd { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--faint, var(--dim)); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .prow .pd:empty { display: none; }
+/* A typed path's completion (view.bend's View.prow.label): the part typed
+   bright, the rest dim but on the selected row, which Tab writes. */
+.prow .pl .pr { color: var(--dim); }
+.prow.sel .pl .pr { color: inherit; }
 .picker .pback { background: none; border: 1px solid var(--line); padding: 0 6px; margin-right: 8px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .prow:hover, .prow.sel { background: var(--sel, rgba(255,255,255,.06)); }
 .prow.act { color: var(--accent); }

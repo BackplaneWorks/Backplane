@@ -400,6 +400,41 @@ def Stamp.text.loc(+l: I.Loc, +s: Stamps, e: M.Entry) -> String:
 def Stamp.text(+s: Stamps, e: M.Entry) -> String:
   Stamp.text.loc(I.En{}, s, e)
 
+# Messages not read yet
+# ---------------------
+# A person's message sent while the agent works waits until the command
+# ahead of it ends (the hub keeps the waiting ones in the setting
+# wait.<thread>, hub.bend's Wait.*). While its thread runs it says so:
+# "not read yet · 06:13", a step dimmer (view.bend's class unread); it
+# reads as any other the moment the agent picks it up (laws wait_*).
+
+def Stamp.waits(+ids: String, +id: String) -> Bool:
+  String.contains(" " ++ ids ++ " ", " " ++ id ++ " ")
+
+def Stamp.unread.k(none: Bool, +s: M.State, +th: String, +ids: String, +id: String) -> Bool:
+  match none:
+    case True{}:
+      False{}
+    case False{}:
+      Bool.and(Stamp.waits(ids, id), M.State.running.k(M.State.thread.get(s, th)))
+
+def Stamp.unread.ids(+s: M.State, +th: String, +id: String, +ids: String) -> Bool:
+  Stamp.unread.k(String.is_empty(ids), s, th, ids, id)
+
+def Stamp.unread(+s: M.State, e: M.Entry) -> Bool:
+  match e:
+    case M.Msg{+id, +th, M.User{}, _, _}:
+      Stamp.unread.ids(s, th, id, M.Setting.get(s, "wait." ++ th, ""))
+    case _:
+      False{}
+
+def Stamp.unread.text(unread: Bool, +l: I.Loc, +stamp: String) -> String:
+  match unread:
+    case True{}:
+      MSG.T.stamp.unread(l, stamp)
+    case False{}:
+      stamp
+
 # Replies inside a turn
 # ---------------------
 # A turn of several short replies would read as a column of the same

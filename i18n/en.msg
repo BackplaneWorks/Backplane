@@ -275,6 +275,8 @@ fold.running = running: {kind}
 fold.now = running
 apierr.say = {kind, select, overloaded {Claude's API was overloaded} rate {Claude's API hit its rate limit} server {Claude's API had an internal error} auth {Claude's API refused the sign-in} other {Claude's API answered with an error}}{code} and ended the turn{why}.
 apierr.details = details
+restart.continuing = Continuing after the restart
+restart.told = what it was told
 
 # bot tabs and moods
 bots.tab.chat = Chat
@@ -397,6 +399,7 @@ stamp.stopped = Stopped {clock}
 stamp.stopped.took = Stopped {clock} · {took}
 stamp.waiting = Waiting since {clock}
 stamp.waiting.took = Waiting since {clock} · {took}
+stamp.unread = not read yet · {clock}
 
 # subagent states
 state.running = running

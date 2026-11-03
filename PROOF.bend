@@ -11788,6 +11788,15 @@ def Laws.fab_ready_running_hidden(line):
 def Laws.fab_ready_needs_buy(line):
   {==}
 
+def Laws.fab_ready_fresh_hidden(line):
+  {==}
+
+def Laws.fab_ready_fresh_note_hidden(line):
+  {==}
+
+def Laws.fab_ready_after_first_turn():
+  {==}
+
 def Laws.order_review_none():
   {==}
 
