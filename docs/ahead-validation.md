@@ -100,8 +100,8 @@ The reviewed aggregate diagnostics contract is `d92814f7eef950dfe5faea041b1abbe7
 rows and unknown fields, and reports **zero replayable UI actions**. A join
 or measured span is not evidence of reconnect, selection or a button press.
 
-Invariant alignment with t1793671361-1312951 uses the audit's uncommitted
-snapshot based on `92ddc7e46`, not an assumed merged theorem: navigation is
+Invariant alignment with t1793671361-1312951 uses its frozen audit based on
+`92ddc7e46`, now normally merged in PR #782 (`e729204ccae6896e2e6e8c0384d34e466b16df25`): navigation is
 `ui_navigation_total` (`Ui.select.nav`); draft observations correspond to
 `ui_view_error_preserves_all_drafts`/`ui_state_adoption_preserves_all_drafts`
 (`Ui.error_put`/`Ui.adopt.raw`); unread corresponds to
@@ -115,3 +115,12 @@ entry-ID cardinality/order does not prove text retention or byte capacity.
 Measured findings and runtimes are delivered in
 `build/ahead-validation/REPORT.md`. The report must keep misses, unresolved
 coverage, exploratory failures and uninstalled hooks explicit.
+
+The audit's candidate subsequently passed its full proof/type-check, JSON
+corpus, 360 credit replays, Chromium codec/render fixture and 29 transport
+checks (work `w-t1793671361-1312951-1320540`). PR #786 recorded the merge
+receipt in [build/ui-laws/MERGED.json](../build/ui-laws/MERGED.json). That
+frozen-candidate receipt does not certify later proof-input changes in main.
+Universal capacity/nonempty/no-refusal, web text retention/order and JS
+optimistic-lifecycle guarantees remain open. Runtime coverage from #784 is
+credited without upgrading it into those universal theorems.
