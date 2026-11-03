@@ -269,6 +269,7 @@ data class Viewer(
     // each), the one drawn last (255 none), the list's All/Dim/Only (0-2)
     // and whether it has one (a board), and the Layers button's words
     val dim: Int = 0, val lift: Int = 255, val layerMode: Int = 0, val layerModes: Boolean = false, val layerHead: String = "Layers",
+    val panes: List<Viewer> = emptyList(),
 )
 
 // the Files tab: where the folder is, its rows (a tap sends action with
@@ -708,7 +709,7 @@ private fun picker(o: JSONObject) =
 
 private fun ints(a: JSONArray?): IntArray = if (a == null) IntArray(0) else IntArray(a.length()) { a.optInt(it) }
 
-private fun viewer(o: JSONObject) = Viewer(
+private fun viewer(o: JSONObject): Viewer = Viewer(
     o.optString("open"), o.optString("key"), o.optString("layers"),
     o.optJSONArray("choices").map { Choice(it.optString("label"), it.optString("value"), it.optBoolean("on")) },
     o.optInt("bg"), o.optDouble("fade", 220.0).toFloat(), o.optDouble("margin", 0.9).toFloat(),
@@ -760,6 +761,7 @@ private fun viewer(o: JSONObject) = Viewer(
     },
     dim = o.optInt("dim"), lift = o.optInt("lift", 255), layerMode = o.optInt("layerMode"), layerModes = o.optBoolean("layerModes"),
     layerHead = o.optString("layerHead", "Layers"),
+    panes = o.optJSONArray("panes").map(::viewer),
 )
 
 private fun strs(a: JSONArray?): List<String> =

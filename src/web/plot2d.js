@@ -520,12 +520,14 @@ class View {
       const x = (e.clientX - b.left - this.ox) / this.scale / 1000, y = (e.clientY - b.top - this.oy) / this.scale / 1000;
       if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
     });
-    // a new size refits the view, unless the user has moved it
+    // A schematic opens and resizes to its whole sheet. Boards retain the
+    // person's inspected point when their pane changes size.
     this.resize = new ResizeObserver(entries => {
       this.gesture++;
       const { width, height } = this.viewport;
       this.viewport = entries[0].contentRect;
-      if (!this.fitted || !this.touched) this.fit();
+      const changed = width !== this.viewport.width || height !== this.viewport.height;
+      if (!this.fitted || !this.touched || this.schematic() && changed) this.fit();
       else {
         // Keep the same board point in the middle as the pane changes size.
         this.ox += (this.viewport.width - width) / 2;
@@ -681,10 +683,12 @@ class View {
     return this.waitingTree && this.asked != null && performance.now() - this.asked < DRAWN_MS;
   }
 
+  schematic() { return this.key.startsWith("1|"); }
+
   fit() {
     this.gesture++;
     const { width: w, height: h } = this.viewport;
-    if (!this.plot || !this.plot.box || w === 0 || h === 0) { this.later(); return; }
+    if (!this.plot || !this.plot.box || w <= 0 || h <= 0) { this.later(); return; }
     const [x0, y0, x1, y1] = this.plot.box;
     this.scale = 0.9 * Math.min(w / Math.max(x1 - x0, 1), h / Math.max(y1 - y0, 1));
     this.ox = w / 2 - (x0 + x1) / 2 * this.scale;
@@ -701,7 +705,9 @@ class View {
     const moved = this.plot?.box && p?.box && p.box.some((value, i) => value !== this.plot.box[i]);
     this.plot = p;
     this.hl = null;
-    // a sheet seen before comes back as it was left
+    // Boards restore their inspected point; opening a schematic fits the
+    // whole sheet, including when its canvas was parked in another layout.
+    if (this.schematic()) this.back = null;
     if (first && this.back && p && p.box) {
       this.scale = this.back.scale;
       this.ox = this.viewport.width / 2 - this.back.cx * this.scale;
@@ -1036,7 +1042,7 @@ function park(v) {
   const key = v.stateKey || v.key;
   // Fit replaces a source's earlier pan, including when it is left again.
   if (v.key && v.plot && v.plot.chunks) left.delete(key);
-  if (v.key && v.plot && v.plot.chunks && v.touched) {
+  if (v.key && v.plot && v.plot.chunks && v.touched && !v.schematic()) {
     left.set(key, { scale: v.scale,
       cx: (v.viewport.width / 2 - v.ox) / v.scale,
       cy: (v.viewport.height / 2 - v.oy) / v.scale });

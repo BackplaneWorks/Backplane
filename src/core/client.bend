@@ -8493,7 +8493,7 @@ def Home.viewer.default(+u: Ui) -> Ui:
   +board = PH.Home.path(Home.contents(u), "board")
   +first = Bool.and(String.eq(Ui.info(u, "local.home.renderer"), "web"), Bool.and(Bool.not(String.is_empty(board)), String.is_empty(Ui.scratch(u, "@home.viewer:" ++ Ui.sel(u)))))
   Bool.pick(Ui, first, Ui.info_set(Ui.view.k(Ui.scratch_set(u, "@home.viewer:" ++ Ui.sel(u), "1"), Ui.sel(u),
-    J.Json.obj([J.KV{"kind", J.Str{"board"}}, J.KV{"path", J.Str{board}}])), "local.hub.view", "1"), u)
+    J.Json.obj([J.KV{"kind", J.Str{"3d"}}, J.KV{"path", J.Str{board}}])), "local.hub.view", "1"), u)
 
 def Home.reply.current(valid: Bool, +u: Ui, +r: J.Json) -> Ui:
   match valid:
@@ -8528,8 +8528,13 @@ def Home.open(+u: Ui, +project: String) -> Act:
   Home.sync(Act{Ui.reselect(Ui.sel(u), Ui.select.nav(u, PH.Home.owner(project))), Nil{}})
 
 def Home.view(+u: Ui, +kind: String) -> Act:
-  +path = PH.Home.path(Home.contents(u), Bool.pick(String, String.eq(kind, "3d"), "board", kind))
-  Bool.pick(Act, String.is_empty(path), Act{u, Nil{}}, Act{Ui.view.k(u, Ui.sel(u), J.Json.obj([J.KV{"kind", J.Str{kind}}, J.KV{"path", J.Str{path}}])), Nil{}})
+  +path = PH.Home.view_path(Home.contents(u), kind)
+  Bool.pick(Act, String.is_empty(path), Act{u, Nil{}}, Act{Ui.info_set(Ui.view.k(u, Ui.sel(u), J.Json.obj([J.KV{"kind", J.Str{kind}}, J.KV{"path", J.Str{path}}])), "view.tree:" ++ Ui.sel(u), PH.Home.path(Home.contents(u), "schematic")), Nil{}})
+
+# Expanding keeps the same owner, source, renderer and camera. It never creates
+# a conversation or substitutes a separately rendered project preview.
+def Home.viewer.size(+u: Ui, +value: String) -> Act:
+  Act{Ui.scratch_set(u, "@home.viewer.full:" ++ Ui.sel(u), Bool.pick(String, Bool.and(Home.viewer.allowed(u), String.eq(value, "1")), "1", "")), Nil{}}
 
 def Home.edit(+u: Ui) -> Act:
   Act{Ui.scratch_set(Ui.scratch_set(u, "@home.edit:" ++ Ui.sel(u), "1"), "@f.home-intent:" ++ Ui.sel(u), J.Json.get_str(Home.contents(u), "intent", "")), Nil{}}
@@ -8576,6 +8581,7 @@ def Home.dispatch(+u: Ui, +action: String, +value: String) -> Act:
     case "home-price": Home.request(u, [J.KV{"op", J.Str{"price"}}])
     case "home-poll": Bool.pick(Act, Bool.and(PH.Home.is(Ui.sel(u)), String.eq(value, Ui.scratch(u, "@home.at"))), Home.sync(Act{u, Nil{}}), Act{u, Nil{}})
     case "home-view": Home.view(u, value)
+    case "home-viewer-size": Home.viewer.size(u, value)
     case "send": Home.start(u)
     case "send-alt": Home.start(u)
     case "home-start": Home.start(Bool.pick(Ui, String.is_empty(value), u, Ui.scratch_set(u, Ui.sel(u), value)))
@@ -8863,13 +8869,14 @@ def Notify.lead(+l: I.Loc) -> String:
 # background (far.bend). The setting "sync.<name>" = "off" keeps a
 # machine out, on either side.
 
-# whether a live link already reaches the machine called n at url
-def Mate.linked(ps: List<&2, BT.Peer>, +n: String, +url: String, +domain: String) -> Bool:
+# whether a live link already reaches the machine called n at url (one
+# the owner said is not theirs does not: Far.own.how "no")
+def Mate.linked(ps: List<&2, BT.Peer>, +s: M.State, +n: String, +url: String, +domain: String) -> Bool:
   match ps:
     case Nil{}:
       False{}
-    case BT.Peer{_, +pn, +pu, _, _} <> t:
-      Bool.or(Far.hit(n, url, pn, pu, domain), Mate.linked(t, n, url, domain))
+    case BT.Peer{+i, +pn, +pu, _, _} <> t:
+      Bool.or(Bool.and(Far.hit(n, url, pn, pu, domain), Bool.not(String.eq(M.Setting.get(s, "peer.own." ++ i, ""), "no"))), Mate.linked(t, s, n, url, domain))
 
 # whether this hub (at `me`) asks the machine called n at url: it is not
 # this one, this one's address is the lower (so of two hubs one asks),
@@ -8886,7 +8893,7 @@ def Mate.me(+me: String, +url: String) -> String:
 
 def Mate.wants(+n: String, +url: String, +ps: List<&2, BT.Peer>, +s: M.State, +me: String, +domain: String) -> Bool:
   Bool.and(Bool.and(Bool.and(Bool.not(String.is_empty(url)), Bool.not(String.is_empty(me))), LV.Live.cmp.lt(String.cmp(Mate.me(me, url), url))),
-    Bool.and(Bool.not(Mate.off(s, n)), Bool.not(Mate.linked(ps, n, url, domain))))
+    Bool.and(Bool.not(Mate.off(s, n)), Bool.not(Mate.linked(ps, s, n, url, domain))))
 
 def Mate.due.k(go: Bool, +n: String, +url: String, rest: List<&2, MRow>) -> List<&2, MRow>:
   match go:
@@ -8923,7 +8930,7 @@ def Mate.known(m: Maybe<&2, String>) -> Bool:
 def Mate.answer(+j: J.Json, +ps: List<&2, BT.Peer>, +s: M.State, +n: String, +url: String) -> Nat:
   Bool.pick(Nat, Bool.not(Mate.known(Far.machine(j, n, url))), 3n,
     Bool.pick(Nat, Mate.off(s, n), 1n,
-      Bool.pick(Nat, Mate.linked(ps, n, url, J.Json.get_str(J.Json.get_obj(j, "self"), "domain", "")), 2n, 0n)))
+      Bool.pick(Nat, Mate.linked(ps, s, n, url, J.Json.get_str(J.Json.get_obj(j, "self"), "domain", "")), 2n, 0n)))
 
 # the owner's machines as a hub at `me` found them: one other, "desk" (for laws)
 def Mate.demo(+me: String) -> J.Json:
@@ -8936,19 +8943,77 @@ def Mate.demo.lo(+port: String) -> J.Json:
   J.Json.obj([J.KV{"self", J.Json.obj([J.KV{"name", J.Str{"box"}}, J.KV{"url", J.Str{"http://100.9.0.1:" ++ port}}, J.KV{"domain", J.Str{"t.ts.net"}}])},
     J.KV{"peers", J.Json.arr([J.Json.obj([J.KV{"name", J.Str{"127.0.0.1"}}, J.KV{"url", J.Str{"http://127.0.0.1:4002"}}, J.KV{"version", J.Str{"1"}}, J.KV{"named", J.Flag{True{}}}])])}])
 
+# Which links are the owner's own machines (only those get this hub's
+# threads, or may act on them: server.bend's Far.own). What a link says of
+# itself (its name, its address) never makes it one: the hub records how
+# it knows, in the setting "peer.own.<link>", which only the hub writes
+# (Hub.setting refuses it from clients): "pair" when the two paired through
+# POST /bots/pair (Tailscale vouched for the asker), "tailnet" when
+# Tailscale said a signed request of the link's came from one of the
+# owner's devices, "owner" when the owner said so in Settings; "no" when
+# the owner said it is not theirs.
+def Far.own.key(+link: String) -> String:
+  "peer.own." ++ link
+
+def Far.own.how(+s: M.State, +link: String) -> String:
+  M.Setting.get(s, Far.own.key(link), "")
+
+def Far.verified.k(+how: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(how)), Bool.not(String.eq(how, "no")))
+
+def Far.verified(+s: M.State, +link: String) -> Bool:
+  Far.verified.k(Far.own.how(s, link))
+
+def Far.is.some(m: Maybe<&2, String>) -> Bool:
+  match m:
+    case Some{_}:
+      True{}
+    case None{}:
+      False{}
+
+# a link that is one of the owner's machines: verified, not revoked, sync
+# with it not off, and one of the machines this hub found (j)
+def Far.mine(+s: M.State, +j: J.Json, p: BT.Peer) -> Bool:
+  match p:
+    case BT.Peer{+i, +n, +u, _, r}:
+      Bool.and(Far.verified(s, i), Bool.and(Bool.and(Bool.not(r), Bool.not(Mate.off(s, n))), Far.is.some(Far.machine(j, n, u))))
+
+# a live link that looks like one of the owner's machines (j) but that
+# nothing verified and the owner has not answered for: Settings asks them
+# once (Mate.row)
+def Far.unsure(+s: M.State, +j: J.Json, p: BT.Peer) -> Bool:
+  match p:
+    case BT.Peer{+i, +n, +u, _, r}:
+      Bool.and(String.is_empty(Far.own.how(s, i)), Bool.and(Bool.not(r), Far.is.some(Far.machine(j, n, u))))
+
 # Settings' machines: each of the owner's other machines this hub found,
 # whether it syncs with it ("sync.<name>": on unless "off"), and how that
 # goes: linking (within the minute), synced, catching up (how many of its
 # projects), away; nothing syncs with one turned off
+# (ask: the link the owner is asked about, "" when none: Far.unsure)
 type MateRow is Data:
-  MateRow{name: String, note: String, on: String, key: String}
+  MateRow{name: String, note: String, on: String, key: String, ask: String}
 
-def Mate.link(ps: List<&2, BT.Peer>, +n: String, +url: String, +domain: String) -> String:
+def Mate.link.any(ps: List<&2, BT.Peer>, +n: String, +url: String, +domain: String) -> String:
   match ps:
     case Nil{}:
       ""
     case BT.Peer{+i, +pn, +pu, _, _} <> t:
-      Bool.pick(String, Far.hit(n, url, pn, pu, domain), i, Mate.link(t, n, url, domain))
+      Bool.pick(String, Far.hit(n, url, pn, pu, domain), i, Mate.link.any(t, n, url, domain))
+
+def Mate.link.v(ps: List<&2, BT.Peer>, +s: M.State, +n: String, +url: String, +domain: String) -> String:
+  match ps:
+    case Nil{}:
+      ""
+    case BT.Peer{+i, +pn, +pu, _, _} <> t:
+      Bool.pick(String, Bool.and(Far.hit(n, url, pn, pu, domain), Far.verified(s, i)), i, Mate.link.v(t, s, n, url, domain))
+
+# the link that reaches the machine called n at url: a verified one first
+def Mate.link.k(+v: String, ps: List<&2, BT.Peer>, +n: String, +url: String, +domain: String) -> String:
+  Bool.pick(String, String.is_empty(v), Mate.link.any(ps, n, url, domain), v)
+
+def Mate.link(+ps: List<&2, BT.Peer>, +s: M.State, +n: String, +url: String, +domain: String) -> String:
+  Mate.link.k(Mate.link.v(ps, s, n, url, domain), ps, n, url, domain)
 
 def Mate.behind(ps: List<&2, M.Project>, +s: M.State, +link: String, +acc: Nat) -> Nat:
   match ps:
@@ -8964,17 +9029,27 @@ def Mate.note.linked(+l: I.Loc, +n: Nat, away: Bool) -> String:
     case False{}:
       Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.machines.sync(l), MSG.T.machines.behind(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other")))
 
+# a link nothing verified: the owner is asked (or answered "not mine")
+def Mate.note.own(+l: I.Loc, +how: String, +link: String, +u: Ui) -> String:
+  Bool.pick(String, String.is_empty(how), MSG.T.machines.unsure(l),
+    Bool.pick(String, String.eq(how, "no"), MSG.T.machines.notmine.note(l),
+      Mate.note.linked(l, Mate.behind(Ui.projects(Ui.state(u)), Ui.state(u), link, 0n), String.eq(Ui.info(u, "far.away." ++ link), "1"))))
+
 def Mate.note.k(+l: I.Loc, off: Bool, +link: String, +u: Ui) -> String:
   match off:
     case True{}:
       MSG.T.machines.off(l)
     case False{}:
-      Bool.pick(String, String.is_empty(link), MSG.T.machines.linking(l),
-        Mate.note.linked(l, Mate.behind(Ui.projects(Ui.state(u)), Ui.state(u), link, 0n), String.eq(Ui.info(u, "far.away." ++ link), "1")))
+      Bool.pick(String, String.is_empty(link), MSG.T.machines.linking(l), Mate.note.own(l, Far.own.how(Ui.state(u), link), link, u))
+
+def Mate.ask(+s: M.State, +link: String) -> String:
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(link)), String.is_empty(Far.own.how(s, link))), link, "")
+
+def Mate.row.k(+l: I.Loc, +n: String, +link: String, +u: Ui) -> MateRow:
+  MateRow{n, Mate.note.k(l, Mate.off(Ui.state(u), n), link, u), Bool.pick(String, Mate.off(Ui.state(u), n), "off", "on"), Mate.key(n), Mate.ask(Ui.state(u), link)}
 
 def Mate.row(+l: I.Loc, +n: String, +url: String, +domain: String, +u: Ui) -> MateRow:
-  MateRow{n, Mate.note.k(l, Mate.off(Ui.state(u), n), Mate.link(BT.World.peers(M.State.bots(Ui.state(u))), n, url, domain), u),
-    Bool.pick(String, Mate.off(Ui.state(u), n), "off", "on"), Mate.key(n)}
+  Mate.row.k(l, n, Mate.link(BT.World.peers(M.State.bots(Ui.state(u))), Ui.state(u), n, url, domain), u)
 
 def Mate.rows.k(+l: I.Loc, skip: Bool, +m: J.Json, +domain: String, +u: Ui, rest: List<&2, MateRow>) -> List<&2, MateRow>:
   match skip:
@@ -17211,10 +17286,24 @@ def Ui.act.allowance(i: Nat, +u: Ui, +action: String, +value: String) -> Act:
     case 2n: Allowancev.act(2n, u)
     case _: Star.dispatch(Bool.or(String.eq(action, "star-open"), String.eq(action, "star-dismiss")), u, action, value)
 
+# Settings' Mine / Not mine on a link nothing verified (Mate.row's "peer-own",
+# "<link>=1" or "<link>=0"): the hub records the owner's answer
+# (bots.peer_own), shown here at once
+def Far.own.say.k(+link: String, +how: String, u: Ui) -> Act:
+  Ui.rpc(Ui.setting.here(u, [Far.own.key(link), how]), "bots.peer_own", [J.KV{"peer", J.Str{link}}, J.KV{"own", J.Flag{String.eq(how, "owner")}}])
+
+def Far.own.say(u: Ui, +value: String) -> Act:
+  Far.own.say.k(String.take(value, Nat.sub(String.length(value), 2n)), Bool.pick(String, String.ends_with(value, "=1"), "owner", "no"), u)
+
+def Ui.act.own(own: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match own:
+    case True{}: Far.own.say(u, value)
+    case False{}: Ui.act.allowance(C.Codec.pos(["allowance-open", "allowance-close", "allowance-read"], action), u, action, value)
+
 def Ui.act.home(home: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match home:
     case True{}: Bool.pick(Act, String.eq(action, "home-bom"), Rp.open(u, "bom"), Home.dispatch(u, action, value))
-    case False{}: Ui.act.allowance(C.Codec.pos(["allowance-open", "allowance-close", "allowance-read"], action), u, action, value)
+    case False{}: Ui.act.own(String.eq(action, "peer-own"), u, action, value)
 
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
   Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)

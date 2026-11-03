@@ -44,8 +44,11 @@ type RK is Data:
 # Version 6 rebuilds term postings with Unicode-normalized search keys.
 # Version 7 records the sidebar parent derived from delegation, including
 # older tasks rebuilt from the log and subsequent explicit moves.
+# Version 8 repairs incremental checkpoints: daily usage records and the
+# privacy generation are now written for every changed event. Codec 7 stores
+# may be incomplete, so they are rebuilt from the authoritative event log.
 def Sdb.codec() -> Nat:
-  7n
+  8n
 
 def Sdb.schema() -> String:
   String.join([
@@ -1065,8 +1068,11 @@ def K.metrics(+pre: M.State, +post: M.State) -> List<&2, RK>:
   List.append(&2, RK, Bool.pick(List<&2, RK>, String.eq(M.Setting.get(pre, "telemetry.usage.generation", ""), M.Setting.get(post, "telemetry.usage.generation", "")), Nil{}, [K.set("telemetry.usage.generation")]),
     K.metrics.changed(List.append(&2, String, Map.keys(&2, String, M.Metrics.data(pre)), Map.keys(&2, String, M.Metrics.data(post))), pre, post))
 
+def Sdb.records(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
+  List.append(&2, RK, Sdb.keys(pre, post, c), K.metrics(pre, post))
+
 def Sdb.step.k(+pre: M.State, +post: M.State, +a: At, +c: M.Change) -> Step:
-  Step{post, Sdb.facts(pre, a, c), Row.ofs(RK{"state", "seq"} <> List.append(&2, RK, Sdb.keys(pre, post, c), K.metrics(pre, post)), post, Nil{}), Sdb.ord(c, At.ord(a))}
+  Step{post, Sdb.facts(pre, a, c), Row.ofs(RK{"state", "seq"} <> Sdb.records(pre, post, c), post, Nil{}), Sdb.ord(c, At.ord(a))}
 
 def Sdb.step(+pre: M.State, +a: At, +c: M.Change) -> Step:
   Sdb.step.k(pre, M.State.apply(pre, c), a, c)
@@ -1578,7 +1584,7 @@ def Demo.small.log() -> List<&2, LL>:
 # codec in one transaction (server/storeio.bend's Sto.upgrade); on any
 # failure the store is rebuilt from the log as before. Laws sdb_up_*.
 #
-# 6 -> 7: codec 7 adds the setting thread.parent.<child> that a
+# 6 -> 7 (retained as the safe 6 -> 8 predecessor): codec 7 adds the setting thread.parent.<child> that a
 # TaskDelegated now writes (State.delegated) unless its parent is a bot's
 # thread at that moment, and only when no parent key exists. Explicit
 # ThreadParentSet/SettingSet values then win, including an empty detach.

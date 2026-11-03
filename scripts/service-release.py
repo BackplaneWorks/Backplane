@@ -241,7 +241,8 @@ def configured_environment(source):
     require(re.fullmatch(r"rel-[a-z0-9-]{1,28}", env.get("BACKPLANE_TELEMETRY_KID", "")), "Release telemetry key ID required")
     require(re.fullmatch(r"[0-9a-f]{64}", env.get("BACKPLANE_TELEMETRY_KEY", "")), "Protected telemetry key required")
     # Only the request selects the target and its runtime; the stamps are the release's.
-    for name in ("BACKPLANE_JS_TARGET", "BACKPLANE_JS_BUN_RUNTIME", "BACKPLANE_COMMIT_STAMP"):
+    for name in ("BACKPLANE_JS_TARGET", "BACKPLANE_JS_BUN_RUNTIME", "BACKPLANE_COMMIT_STAMP",
+                 "BACKPLANE_PREEMITTED_JS", "BACKPLANE_PREEMITTED_SHA256", "BACKPLANE_PREEMITTED_KEY"):
         env.pop(name, None)
     env.update(BACKPLANE_VERSION=VERSION, BACKPLANE_VERSION_STAMP=VERSION,
                BACKPLANE_GOOGLE_BAKE="1", BACKPLANE_TELEMETRY_BAKE="1",
@@ -412,21 +413,18 @@ def js(request, base, out):
             shutil.copyfile(root / "EMISSION.json", out / "PRE-EMISSION.json")
             shutil.copyfile(root / "SOURCE.json", out / "PRE-EMISSION-SOURCE.json")
             shutil.copyfile(root / "PHASES.json", out / "PRE-EMISSION-PHASES.json")
-            cache = out / "verified-emission-cache"
-            cache.mkdir()
-            key = emitted["serverEmitKey"]
-            shutil.copyfile(root / "server.js", cache / (key + ".js"))
-            (cache / (key + ".js.ok")).write_text(str((cache / (key + ".js")).stat().st_size))
-            env["BACKPLANE_EMIT_CACHE"] = str(cache)
+            env.update(BACKPLANE_PREEMITTED_JS=str(root / "server.js"),
+                       BACKPLANE_PREEMITTED_SHA256=emitted["files"]["server.js"]["sha256"],
+                       BACKPLANE_PREEMITTED_KEY=emitted["serverEmitKey"])
         else:
             run(["bash", "-c", 'set -e; source scripts/bendok.sh; bend_check src/server/main.bend; bend_check src/web/app.bend'], logs / "entries.log", env, 600)
         run(["scripts/build-js.sh", "src/server/main.bend", out / "backplane-serve"], logs / "js.log", env)
     finally:
+        for name in ("BACKPLANE_PREEMITTED_JS", "BACKPLANE_PREEMITTED_SHA256", "BACKPLANE_PREEMITTED_KEY"):
+            env.pop(name, None)
         # the private prelude holds the protected values; build-js.sh removes it, and so does this
         for name in ("baked.js", "bin.js", "baked-t.js", "baked-g.js"):
             (ROOT / "build/js/backplane-serve" / name).unlink(missing_ok=True)
-    if pre:
-        shutil.rmtree(out / "verified-emission-cache")
     helpers = built_helpers(target)
     if helpers:
         # the same target and pinned runtime as the service (and KiStack)

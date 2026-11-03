@@ -41,6 +41,9 @@ this native JSON projection; the required dependency guard remains enabled.
 
 Focused regressions:
 
+- `bend test/storeio_telemetry_test.bend`: actual Plan SQL materialization,
+  SQLite hotboot/cold-fold parity, reset/off/on recovery, all twelve usage
+  counters and board source keys.
 - `bend test/store_checkpoint_test.bend`: commits, crash tails, atomic SQL
   rollback, ordinal continuity, clean reopen, torn tails and schema/log fallback.
 - `bun test/tools/store_checkpoint_io_test.cjs`: hash/prefix validation,
@@ -77,16 +80,33 @@ is a bot's changes only with `BotSet` and `BotDeleted`. Laws `sdb_up_*`.
 On a 910 MB log: 437 lines picked, 419 rows, 12 s, against a 547 s, 8 GB
 rebuild.
 
-A newer codec whose additions cannot be derived this way must not list the
-old codec in `Sdb.codec.from()`; the old store is then rebuilt.
+7 → 8: codec 8 repairs the incremental materializer's missing telemetry
+records. Codec 7 caches are not upgraded in place because their missing usage
+rows cannot be recovered from a bounded subset of log lines, so they are
+retained as invalid and rebuilt from the authoritative event log. Codec 6
+remains in `Sdb.codec.from()` for the historical parent-setting upgrade, but
+the native validator rejects codec-6 caches containing telemetry settings,
+usage rows, or telemetry history in the applied authoritative log prefix.
+The prefix is inspected in bounded chunks even if all derived telemetry rows
+are missing; unreadable/truncated prefixes also force a rebuild. These caches
+take the authoritative rebuild path. Conservative text/escape matches may
+also choose a rebuild for a telemetry-free predecessor.
 
-Tests: `bun test/tools/store_checkpoint_io_test.cjs` (the JS checks keep a
-store at an upgradable codec, a prepared store must be current, the line
-picker), `bun test/tools/store_upgrade_e2e.ts OLD_HUB
-test/native/store_up_probe.bend [EVENTS | OLD_HOME]` (a hub from before the
-bump makes the old store; it is upgraded in place and must equal a rebuild
-of the same log, every table; an upgrade made to fail falls back to the
-rebuild and leaves the old store as it was).
+A newer codec whose additions cannot be derived this way must not list the
+old codec in `Sdb.codec.from()` unless a native validator can prove that the
+specific old cache does not contain the unrecoverable projection; otherwise
+the old store is rebuilt. Codec 8 uses that guarded exception for codec 6 and
+does not list codec 7.
+
+Tests: `bun test/tools/store_checkpoint_io_test.cjs` (the JS checks preserve
+the codec-6 predecessor only when telemetry-free, reject codec 6 with
+telemetry and codec 7, require prepared stores to be current, and exercise
+the line picker), `bun test/tools/store_upgrade_e2e.ts OLD_HUB
+test/native/store_up_probe.bend [EVENTS | OLD_HOME]` (historic parent-setting
+upgrade, rollback and rebuild coverage), and
+`bun test/tools/store_telemetry_rebuild_e2e.ts BUILT_STORE_UP_PROBE` (current
+probe codec-7/6 recovery, exact invalid-cache backup, codec-8 rebuild and
+reopen parity).
 
 ## far_line after a rebuild
 

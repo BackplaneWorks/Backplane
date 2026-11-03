@@ -897,7 +897,28 @@ whole log over the link (11 to 20 s for a 13 MB log, `test/native/link_bench.ben
 messages, tool calls, asks, delegated tasks, bot space, memory and routines) with the owner's other machines it is
 linked to. It shares no settings, devices, links, webhooks or rooms (rooms
 travel on their own, above), and nothing with a machine that is not the
-owner's (`Far.own` in server.bend: the machines list; laws `far_*_stay_home`).
+owner's (`Far.own` in server.bend, client.bend's `Far.mine`: the machines
+list, and a link the hub verified as the owner's; laws `far_*_stay_home`).
+
+What a link says of itself (the address and name in its `POST /bots/link`)
+never makes it one of the owner's machines: the hub records how it knows,
+in the setting `peer.own.<link>`, which only the hub writes (a client's
+`setting.set` of it is refused):
+
+- `pair`: the two paired through `POST /bots/pair`, which only the owner's
+  own devices reach (Tailscale vouches for the asker): the asked hub
+  records the invite's link before it answers, the asking hub records the
+  link it makes with that invite.
+- `tailnet`: a signed request of the link's came over this hub's tailnet
+  listener, to its own address, from a device Tailscale says is the
+  owner's (`Auth.owner.peer`). This is how links made before the hub
+  recorded it verify themselves, the first time the other machine talks
+  to this one (the minute's directory exchange at the latest).
+- `owner`: the owner said so in Settings → Your machines, which asks
+  (Mine / Not mine, `bots.peer_own`) about a link that looks like one of
+  their machines but nothing verified, such as one over a LAN address;
+  `no` when they said it is not theirs (it syncs nothing and does not keep
+  that machine from pairing).
 
 - Names. A thing on the machine behind link `L` is `L~<its id>` here
   (`Fr.id`; local ids never hold a `~`). So nothing from elsewhere can take

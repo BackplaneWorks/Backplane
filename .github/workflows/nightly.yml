@@ -28,3 +28,5 @@ jobs:
   ci:
     name: Full CI on main
     uses: ./.github/workflows/ci.yml
+    with:
+      memory_soak: true

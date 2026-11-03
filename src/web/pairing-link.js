@@ -23,6 +23,7 @@ export const pairingErrors = {
   invalid_link: 'Paste the complete pairing link from Settings → Devices → Add a device.',
   expired_code: 'This invitation has expired. Create a new one on your paired machine.',
   used_code: 'This invitation has already been used. Create a new one for this device.',
+  revoked_code: 'This invitation was revoked. Create a new one on your paired machine.',
   rate_limited: 'Too many attempts. Wait a minute before trying again.',
   hub_unreachable: 'Hub unreachable. Check that it is running and that you are on its LAN or tailnet.',
   pairing_required: 'Access was revoked or pairing is missing. Connect with a new invitation.',
