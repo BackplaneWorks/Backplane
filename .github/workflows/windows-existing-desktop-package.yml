@@ -1,0 +1,76 @@
+name: Existing Windows desktop component packaging (artifact only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_commit:
+        type: string
+        required: true
+      product_tree:
+        type: string
+        required: true
+      packet_url:
+        type: string
+        required: true
+      packet_sha256:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-existing-desktop-${{ inputs.product_commit }}-${{ inputs.packet_sha256 }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      PRODUCT_COMMIT: ${{ inputs.product_commit }}
+      PRODUCT_TREE: ${{ inputs.product_tree }}
+      PACKET_URL: ${{ inputs.packet_url }}
+      PACKET_SHA256: ${{ inputs.packet_sha256 }}
+      PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      BACKPLANE_TELEMETRY: 'off'
+      BACKPLANE_DESKTOP_BROWSER: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve frozen source bytes
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          path: tools
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.product_commit }}
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install smoke dependencies with native npm
+        run: npm --prefix product/desktop ci --ignore-scripts --no-audit --no-fund
+      - name: Stage existing component, brand on Windows, smoke and archive
+        run: python tools/scripts/windows-existing-desktop-package.py --product product --out build/windows-existing
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-existing-desktop-package
+          path: |
+            build/windows-existing/RESULT.json
+            build/windows-existing/evidence/
+            build/windows-existing/acceptance/
+            build/windows-existing/dist/
+            build/windows-existing/stage/STAGE.json
+            build/windows-existing/stage.request.json
+          if-no-files-found: warn
+          retention-days: 30
