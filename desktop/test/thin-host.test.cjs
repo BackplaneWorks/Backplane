@@ -1224,19 +1224,24 @@ test('linked newest-in-flight intent and draft survive an owning-history replace
  assert.equal(g.views.at(-1).detail.historyReset,true);assert.equal(g.views.at(-1).detail.position.atEnd,true);assert.equal(g.host.session.drafts['peer~A'],'unsent');
 });
 
-test('bot navigation preserves the private destination draft omitted from its source-thread request',async()=>{
- const f=await fixture();f.open();f.host.draftAt('B','Saved 日本語 bot draft');f.host.request('bot','bot-B');const action=f.sent.at(-1);
- assert.equal(action.p.session.sel,'A');assert.equal(action.p.session.drafts.B,undefined,'destination draft remains private on source-thread action');
- const response=f.reply(action,{nextTarget:{kind:'bot',id:'bot-B'},remoteReady:false,session:{sel:'B',rid:2,drafts:{B:'','@bot':'bot-B'}}});delete response.result.shown;
- f.host.receive(response);assert.equal(f.getSession().drafts.B,'Saved 日本語 bot draft');
- assert.equal(f.sent.at(-1).m,'view.open');assert.equal(f.sent.at(-1).p.session.drafts.B,'Saved 日本語 bot draft','new bot view carries its own saved destination draft');
- f.host.receive(f.reply());assert.equal(f.getSession().drafts.B,'Saved 日本語 bot draft');assert.equal(f.getSession().drafts.A,'original 日本語');
+test('bot navigation opens its destination in one request and preserves private drafts',async()=>{
+ const f=await fixture();f.open();f.host.draftAt('B','Saved 日本語 bot draft');f.host.request('bot','bot-B');const opening=f.sent.at(-1);
+ assert.equal(opening.m,'view.open');assert.deepEqual(opening.p.target,{kind:'bot',id:'bot-B'});
+ assert.equal(opening.p.session.sel,'');assert.equal(opening.p.session.drafts.A,undefined,'source draft is not sent to the destination bot');
+ assert.equal(opening.p.session.drafts.B,undefined,'unknown destination draft stays local until the hub resolves the backing conversation');
+ f.host.receive(f.reply(opening,{session:{sel:'B',rid:2,drafts:{B:'','@bot':'bot-B'}}}));
+ assert.equal(f.getSession().drafts.B,'Saved 日本語 bot draft');assert.equal(f.getSession().drafts.A,'original 日本語');
+});
+test('cached bot navigation publishes its selection before the request and sends only its local draft',async()=>{
+ const events=[];const f=await fixture({navigation:(target,s)=>({...s,sel:'B',route:{kind:'bot-tab',bot:target.id,tab:'chat'}}),local:(a)=>events.push(a)});f.open();
+ f.host.draftAt('B','Current local draft');const before=f.sent.length;f.host.request('bot','bot-B');
+ assert.equal(f.sent.length,before+1);assert.equal(f.sent.at(-1).m,'view.open');assert.equal(f.sent.at(-1).p.session.drafts.B,'Current local draft');assert.equal(f.sent.at(-1).p.session.drafts.A,undefined);assert(events.includes('bot'));
 });
 test('same-conversation actions and explicit Keep still own their draft changes',async()=>{
  const f=await fixture();f.open();f.host.request('flag','models');const action=f.sent.at(-1);
  f.host.receive(f.reply(action,{session:{...action.p.session,drafts:{A:'changed by action'}}}));assert.equal(f.getSession().drafts.A,'changed by action');
- f.host.request('bot','bot-B');const moving=f.sent.at(-1),response=f.reply(moving,{nextTarget:{kind:'bot',id:'bot-B'},remoteReady:false,session:{sel:'B',rid:3,drafts:{B:'suggested'}},cmds:[{type:'keep',thread:'B',text:''}]});delete response.result.shown;
- f.host.receive(response);assert.equal(f.getSession().drafts.B,'','explicit authoritative Keep remains effective');
+ f.host.request('flag','models');const moving=f.sent.at(-1);
+ f.host.receive(f.reply(moving,{cmds:[{type:'keep',thread:'A',text:''}]}));assert.equal(f.getSession().drafts.A,'','explicit authoritative Keep remains effective');
 });
 
 test('local send clears the composer and publishes a bubble before the action ACK',async()=>{
@@ -1338,4 +1343,32 @@ test('bounded board catalog protocol is explicitly negotiated and measured on ou
   assert.equal(f.sent.at(-1).p.boardCatalog,enabled?1:0);
   f.host.receive(f.reply());f.host.update();assert.equal(f.sent.at(-1).p.boardCatalog,enabled?1:0);
  }
+});
+
+test('send during a cached opening paints before any response and preserves its immutable draft',async()=>{
+ const f=await fixture({previewSend:()=>true});f.open();f.host.request('select','B');const opening=f.sent.at(-1);f.host.request('draft','reply immediately');
+ f.host.request('send','');assert.equal(f.sent.at(-1),opening,'send waits for destination authority');assert.equal(f.host.pendingSends('B')[0].text,'reply immediately');assert.equal(f.getSession().drafts.B,'');
+ f.host.receive(f.reply(opening));assert.equal(f.sent.at(-1).m,'view.action');assert.equal(f.sent.at(-1).p.session.drafts.B,'reply immediately');
+});
+test('a bot backing conversation change refuses an unissued optimistic send and restores its draft',async()=>{
+ const f=await fixture({previewSend:()=>true,navigation:(target,s)=>({...s,sel:'B',route:{kind:'bot-tab',bot:target.id,tab:'chat'}})});f.open();f.host.draftAt('B','reply');f.host.request('bot','bot');const opening=f.sent.at(-1);
+ f.host.request('send','');assert.equal(f.host.pendingSends('B').length,1);
+ f.host.receive(f.reply(opening,{session:{sel:'C',rid:5,drafts:{C:''}}}));assert.equal(f.sent.at(-1),opening);assert.equal(f.host.pendingSends('B').length,0);assert.equal(f.getSession().drafts.B,'reply');assert(f.warnings.some(s=>s.includes('Conversation changed')));
+});
+
+for (const fromBot of [false,true]) test((fromBot?'bot→thread':'thread→bot')+' captures source viewport and unread before cached selection exactly once',async()=>{
+ let f;const captured=[],from=fromBot?'bot-chat':'thread-chat',to=fromBot?'thread-chat':'bot-chat',bot='bot';
+ const choice=(s,a,v)=>a==='select'?{...s,sel:v,route:undefined}:a==='draft'?{...s,drafts:{...s.drafts,[s.sel]:v}}:s;
+ f=await fixture({session:()=>({sel:from,rid:1,drafts:{[from]:'source draft',[to]:'destination draft'},...(fromBot?{route:{kind:'bot-tab',bot,tab:'chat'}}:{})}),choice,
+  target:s=>s.route?{kind:'bot',id:s.route.bot}:{kind:'thread',id:s.sel},
+  navigation:(_target,s)=>({...choice(s,'select',to),route:{kind:'bot-tab',bot,tab:'chat'}}),
+  pagePosition:()=>{const selected=f.getSession().sel;captured.push(selected);return {position:{anchor:selected+'-visible',offset:selected===from?27:999,atEnd:false},adjacent:''};}});
+ f.open();f.host.cursor='source-cursor';f.host.back=[''];f.host.awayMark={thread:from,mark:from+'-last-read'};
+ const source={...f.host.target},awayCalls=[],away=f.host.awayOf.bind(f.host);
+ f.host.awayOf=thread=>{awayCalls.push({thread,selected:f.getSession().sel});return away(thread)};
+ f.host.request(fromBot?'select':'bot',fromBot?to:bot);
+ const saved=f.host.pagePositions.get(JSON.stringify([f.host.hub,f.host.epoch,source]));
+ assert.deepEqual(captured,[from]);assert.equal(saved.position.anchor,from+'-visible');assert.equal(saved.position.offset,27);assert.equal(saved.away,from+'-last-read');assert.equal(saved.cursor,'source-cursor');
+ assert(awayCalls.some(x=>x.thread===from&&x.selected===from),'unread is captured against outgoing selection');
+ assert.equal(f.getSession().drafts[from],'source draft');assert.equal(f.getSession().drafts[to],'destination draft');
 });

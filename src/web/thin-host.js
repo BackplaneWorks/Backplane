@@ -200,7 +200,8 @@ export class ThinHost {
     }
     this.select(this.api.target(this.session));
   }
-  select(target) {
+  select(target, {remember = true} = {}) {
+    if (remember) this.rememberPage();
     this.pendingNewest = false;
     // A new view may have a fresh actor. Its response alone owns the upload
     // paths; locally retained bytes are admitted again by the upload helper.
@@ -208,7 +209,6 @@ export class ThinHost {
     for (const key of Object.keys(drafts)) if (key.startsWith('@att:') || key.startsWith('@att.up:')) delete drafts[key];
     this.session = { ...this.session, drafts };
     if (this.forView && (this.forView.target.kind !== target?.kind || this.forView.target.id !== target?.id)) this.forView = null;
-    this.rememberPage();
     this.restorePage = this.pagePositions.get(JSON.stringify([this.hub, this.epoch, target])) || null;
     this.retireTerminal('Queued terminal input was cancelled when the view changed.');
     this.refreshScheduled = null;
@@ -284,6 +284,7 @@ export class ThinHost {
       this.session.drafts?.['@terminal.owner'], this.api.terminalLifetime?.() || '']);
   }
   operationScope(action, value) {
+    if (action === 'send' || action === 'send-alt') return JSON.stringify([this.target, this.session.sel]);
     return action === 'term-key' || action === 'term-paste' ? this.terminalScope() : this.api.operationScope?.(action, value);
   }
   retireTerminal(reason) {
@@ -297,6 +298,7 @@ export class ThinHost {
     const retire = ['select','bot','bot-tab','uber','uber-bot','remote','ws-term-hide','term-toggle','ws-term-here'].includes(action) || action === 'ws-go' && value === 'term';
     if (retire) this.retireTerminal('Queued terminal input was cancelled when the view changed.');
     if (action === 'draft' || action === 'select') {
+      if (action === 'select') this.rememberPage();
       this.localRevision++;
       this.session = this.api.choice(this.session, action, value);
       this.session = localBound(this.session);
@@ -310,7 +312,7 @@ export class ThinHost {
       this.api.sessionChanged(this.session, action === 'draft' ? { inputOnly: true } : undefined);
       this.api.local(action, value, this.session);
       if (action === 'select') {
-        if (this.greeted) this.select(this.api.target(this.session));
+        if (this.greeted) this.select(this.api.target(this.session), {remember:false});
       } else {
         this.api.draftRefresh?.(() => {
           const link = this.client.links.get(this.hub);
@@ -320,13 +322,17 @@ export class ThinHost {
       }
       return true;
     }
-    // Bot selection needs no action on the failed/unfinished picture. Open
-    // its target on the existing greeted link; the hub resolves its actual
-    // conversation and the new selection fences late replies from the old one.
-    if (action === 'bot' && !this.ready) {
+    // Bot navigation is a new target on the greeted link, just like a
+    // thread pick. Preparing it on the old actor added a sequential RTT.
+    if (action === 'bot') {
       const target = { kind: 'bot', id: value };
       if (!this.greeted || !this.client.links.has(this.hub) || !viewTarget(target)) { settled?.(false);this.api.blocked();return true; }
-      const sent = this.select(target);settled?.(sent);return sent;
+      this.rememberPage();
+      this.localRevision++;
+      this.session = localBound(this.api.navigation?.(target, this.session) || { ...this.api.choice(this.session, "select", ""), route: {kind:"bot-tab", bot:value, tab:"chat"} });
+      this.api.sessionChanged(this.session);
+      this.api.local(action, value, this.session);
+      const sent = this.select(target, {remember:false});settled?.(sent);return sent;
     }
     // A press while the selected thread's view is on its way (a click right
     // after picking a thread) is for that view: it waits in the queue and
