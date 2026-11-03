@@ -1,4 +1,5 @@
 import Base
+import ../core/message-context.bend as CTXT
 import ./project-home.bend as PHV
 import ../core/project-home.bend as PH
 import ./composer-bar.bend as CBAR
@@ -3015,7 +3016,7 @@ def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st
 # a thread's entries, its runs of tool calls folded (the last stays open
 # while its turn runs)
 def View.entries.folded(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +running: Bool, +ec: U.Ec) -> List<&2, D.Node>:
-  View.entries.r(lc, es, FO.Fold.roles.ctx(lc, View.around(st, sel, es), es, info, running), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.end(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
+  View.entries.r(lc, es, CTXT.Context.roles(es, FO.Fold.roles.ctx(lc, View.around(st, sel, es), es, info, running), st, sel, info), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.end(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
 
 # blank messages left out, and a run cut by the page's edge folded whole
 # (FO.Fold.roles.ctx)
@@ -5037,11 +5038,6 @@ def View.solid.boardkey(+u: U.Ui) -> String:
   Bool.pick(String, Bool.or(String.is_empty(U.Ui.view_get(u, "view.path")), String.ends_with(U.Ui.view_get(u, "view.path"), ".kicad_pcb")),
     "0|" ++ U.Ui.root(u) ++ "|" ++ U.Ui.view_get(u, "view.path"), "")
 
-def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), MSG.T.viewer.orbit.tip(lc))
-    <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", View.compact.text(View.compact(u), U.Ui.info(u, "plotnote:" ++ U.Solid.want(u))))),
-      [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
-
 # One original-model renderer for standalone, project-home and Split views.
 def View.solid.workbench(+lc: I.Loc, +u: U.Ui, +key: String, +boardkey: String) -> D.Node:
   D.El{"div", "solid-workbench", [D.At{"id", "solid-workbench"}, D.At{"class", "solid-workbench"}, D.At{"data-key", key}, D.At{"data-scope", U.Ui.sel(u)}, D.At{"data-board-key", boardkey}],
@@ -5056,6 +5052,12 @@ def View.solid.workbench(+lc: I.Loc, +u: U.Ui, +key: String, +boardkey: String) 
                 D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"tabindex", "0"}, D.At{"aria-label", "Saved PCB. Drag to pan, wheel or pinch to zoom."}]), Nil{}},
               D.El{"div", "", [D.At{"class", "viewer-note"}, D.At{"role", "status"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]},
            D.El{"aside", "solid-inspector", [D.At{"id", "solid-inspector"}, D.At{"class", "solid-inspector"}], Nil{}}]}]}
+
+def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), MSG.T.viewer.orbit.tip(lc))
+    <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", View.compact.text(View.compact(u), U.Ui.info(u, "plotnote:" ++ U.Solid.want(u))))),
+      [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
+
 
 # The combined view (client.bend's Split): the schematic beside the board
 # and its 3D model, each pane under a head that names it, with a button

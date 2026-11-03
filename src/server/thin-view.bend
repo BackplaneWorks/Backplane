@@ -249,10 +249,13 @@ def State.window.around.k(c: FO.Around, +th: String, into: M.State) -> M.State:
 def State.window.around(+st: M.State, +th: String, +es: List<&2, M.Entry>, into: M.State) -> M.State:
   State.window.around.k(FO.Fold.context(Nil{}, M.State.mine(st, th), Nil{}, FO.Fold.shown(es)), th, into)
 
+def State.window.context(+st: M.State, +th: String, into: M.State) -> M.State:
+  State.window.file(State.window.file(into, MC.Context.key(th), M.State.mine(st, MC.Context.key(th))), MC.Context.runs.key(th), M.State.mine(st, MC.Context.runs.key(th)))
+
 def State.window.body(bounded: Bool, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
   +es = State.window.rows.body(bounded, rows, st, index, Nil{})
-  HI.Hist.window(st, Target.thread(st, target), State.window.reviews.keep(st, Target.thread(st, target), State.window.around(st, Target.thread(st, target), es, State.window.add(es,
-    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st)))))))
+  HI.Hist.window(st, Target.thread(st, target), State.window.context(st, Target.thread(st, target), State.window.reviews.keep(st, Target.thread(st, target), State.window.around(st, Target.thread(st, target), es, State.window.add(es,
+    State.window.subs.keep(st, target, State.window.empty(st, Threads.get(st))))))))
 
 # A route restores only transient selection. The normal bot tab policy
 # decides whether that content route is still available for this exact bot.
@@ -511,11 +514,11 @@ def Render.window(+s: TL.Stream, +index: T.Index, +thread: String, +p: J.Json, +
 def Render.window.context(+st: M.State, +s: TL.Stream, +index: T.Index, +thread: String, +p: J.Json, +epoch: String, +rows: List<&2, String>) -> J.Json:
   +es = HI.Hist.seen(LT.Tools.entries(rows, index, Nil{}))
   +around = LT.Tools.context(FO.Fold.context(Nil{}, M.State.mine(st, thread), Nil{}, FO.Fold.shown(es)))
-  +roles = FO.Fold.roles.all(I.En{}, around, es, LT.Tools.info(p), False{})
+  +roles = MC.Context.roles(es, FO.Fold.roles.all(I.En{}, around, es, LT.Tools.info(p), False{}), st, thread, LT.Tools.info(p))
   Obj.put(Obj.put(Obj.put(Render.window(s, index, thread, p, epoch, rows),
-    "historyUnits", J.Json.arr(Ids.json(MC.Context.units(es, roles)))),
+    "historyUnits", J.Json.arr(Ids.json(MC.Context.units.stored(es, roles, MC.Context.roots(M.State.mine(st, MC.Context.runs.key(thread)), Map.new(&2, String)))))),
     "messageIds", J.Json.arr(Ids.json(MC.Context.messages(es)))),
-    "contextMessages", J.Json.arr(Ids.json(MC.Context.latest(M.State.mine(st, thread), False{}, False{}))))
+    "contextMessages", J.Json.arr(Ids.json(MC.Context.targets(st, thread))))
 
 # Away from the end (host.js's hold), the page says what came after the
 # newest entry the reader had then ("@away.<thread>", sent by the page):

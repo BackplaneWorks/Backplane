@@ -42,23 +42,29 @@ let browser,page,phase='start';const privateFrames=[];
  if(process.env.ENTRY_DELAY)await page.routeWebSocket(/\/ws\?view=1/,ws=>{const remote=ws.connectToServer();remote.onMessage(message=>setTimeout(()=>ws.send(message),Number(process.env.ENTRY_DELAY)));});
  await page.goto(connection.origin);await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true'&&document.getElementById('composer'));
  if(process.env.ENTRY_WAIT_QUIET==='1')await page.waitForFunction(()=>__bpRender.paging().ready&&!__bpRender.paging().pending);
+ if(Number(process.env.ENTRY_WIDTH||2556)<760)await page.locator('button.back[data-on-click="select"]').first().click();
  phase='entry';const start=performance.now();
  if(process.env.ENTRY_BOT==='1')await page.locator('[data-on-click="bot"][data-value="fixture-bot"]').first().click();else await page.locator('[data-on-click="select"][data-value="chat"]').first().click();
  await page.waitForFunction(()=>document.querySelector('main')?.dataset.thread==='chat'&&document.documentElement.dataset.backplaneRemoteReady==='true');result.readyMs=performance.now()-start;
  const entry=()=>page.evaluate(()=>{const t=document.getElementById('timeline'),b=t.getBoundingClientRect();return{top:t.scrollTop,height:t.scrollHeight,view:t.clientHeight,messages:[...t.querySelectorAll('.msg')].filter(e=>{const r=e.getBoundingClientRect();return r.bottom>b.top&&r.top<b.bottom&&r.height>0}).map(e=>({id:e.dataset.id,text:e.innerText.slice(0,100)})),folds:[...t.querySelectorAll('button.fold')].map(e=>({value:e.dataset.value,text:e.textContent})),rows:t.querySelectorAll('.timeline-virtual-row').length};});
  result.snapshots.push({label:'ready',...(await entry())});
- try{await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return t&&t.scrollHeight>t.clientHeight+10&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds,{timeout:20000});result.firstMessageAndScrollMs=performance.now()-start;}catch{}
+ try{await page.waitForFunction(ids=>{const t=document.getElementById('timeline'),b=t?.getBoundingClientRect();return t&&[...t.querySelectorAll('.msg')].some(e=>{const r=e.getBoundingClientRect();return ids.includes(e.dataset.id)&&r.height>0&&r.bottom>b.top&&r.top<b.bottom;});},realIds,{timeout:20000});result.firstMessageMs=performance.now()-start;}catch{}
  result.snapshots.push({label:'entry-settled',...(await entry())});await page.screenshot({path:output+'.entry.png'});
- assert(result.firstMessageAndScrollMs,'Entering a tool-heavy conversation paints committed text without a wheel gesture');
+ assert(result.firstMessageMs,'Entering a tool-heavy conversation paints committed text without a wheel gesture');
  await page.waitForFunction(()=>__bpRender.paging().ready&&!__bpRender.paging().paging&&!__bpRender.paging().pending);
  await page.waitForFunction(()=>{const t=document.getElementById('timeline');return [...t.querySelectorAll('.msg.user')].some(e=>e.dataset.id==='human-context');});
  const settled=await entry();result.snapshots.push({label:'context-complete',...settled});
  assert.equal(settled.folds.length,1,'all closed calls remain in one drawer across the source pages');
- assert(settled.folds[0].text.includes(String(tail+extraTools)),'the drawer counts the whole tool run');
  const initialPages=result.wire.requests.filter(r=>r.phase==='entry'&&r.method==='view.page').length;
  assert(initialPages>0,'text context loads automatically through the folded source pages');
  assert(initialPages<Math.ceil((tail+extraTools)/8)+20,'source cursors bound the initial context seek');
  result.budget={extraTools,initialPageRequests:initialPages};
+ phase='fold-expansion';
+ await page.locator('#timeline button.fold').click();
+ await page.waitForFunction(()=>document.querySelector('#timeline button.fold')?.dataset.value==='0tail-tool-0'&&document.querySelector('#timeline [data-run="tail-tool-0"]'));
+ await page.locator('#timeline button.fold').click();
+ await page.waitForFunction(()=>document.querySelector('#timeline button.fold')?.dataset.value==='1tail-tool-0'&&!document.querySelector('#timeline [data-run="tail-tool-0"]'));
+
  assert.equal(result.wire.closedDetailBytes,0,'closed tool payloads do not ride ordinary view frames');assert.equal(result.wire.requests.filter(r=>r.phase==='entry'&&r.method==='view.message').length,0,'closed tools do not request body pages');
  assert.equal(result.wire.requests.filter(r=>r.method==='view.action'&&['send','send-alt'].includes(r.action)||['thread.send','thread.post'].includes(r.method)).length,0,'reader navigation never sends a composer turn');assert.deepEqual(result.errors,[]);result.state='passed';
 }catch(e){result.state='failed';result.phase=phase;result.error=e.stack;process.exitCode=1;

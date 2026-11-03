@@ -1,4 +1,5 @@
 import Base
+import ./message-context.bend as CTXT
 import ./model.bend as M
 import ./thin.bend as T
 import ./fold.bend as F
@@ -46,7 +47,8 @@ def Tools.context(c: F.Around) -> F.Around:
 def Tools.allowed(+st: M.State, +index: T.Index, +thread: String, +ids: List<&2, String>, p: J.Json) -> Map<&2, Bool>:
   +es = H.Hist.seen(Tools.entries(ids, index, Nil{}))
   +context = Tools.context(F.Fold.context(Nil{}, M.State.mine(st, thread), Nil{}, F.Fold.shown(es)))
-  Tools.names(es, F.Fold.roles.all(I.En{}, context, es, Tools.info(p), False{}), Map.new(&2, Bool))
+  +info = Tools.info(p)
+  Tools.names(es, CTXT.Context.roles(es, F.Fold.roles.all(I.En{}, context, es, info, False{}), st, thread, info), Map.new(&2, Bool))
 
 def Tools.tool(e: M.Entry) -> Bool:
   match e:
