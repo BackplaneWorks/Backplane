@@ -5,6 +5,7 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [bin = "build/dir-after", wire = "build/wire"] = process.argv.slice(2).filter(x => !x.startsWith("--"));
 const baseline = process.argv.includes("--baseline");
 for (const f of readdirSync(wire).filter(x => x.endsWith(".js"))) (0, eval)(readFileSync(join(wire, f), "utf8"));
@@ -27,7 +28,7 @@ async function start(name: string, port = freePort()): Promise<Hub> {
   const h: Hub = { name, home, port, proc, ws: null as any, n: 0, replies: new Map(), info: null, seen: [], started, infoAt: 0, log: "" };
   void (async () => { for await (const b of proc.stderr as any) h.log += new TextDecoder().decode(b); })();
   for (let i = 0; i < 500; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/hello`)).ok) break; } catch {} await sleep(20); }
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = "arraybuffer";
   ws.onmessage = e => { const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer))); if (o.info) { h.info = o.info; if (!h.infoAt) h.infoAt = Date.now(); } if (o.t === "reply") h.replies.set(Number(o.id), o); h.seen.push(...(o.items ?? [])); };
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; }); h.ws = ws;
   await until(10000, () => h.info); return h;

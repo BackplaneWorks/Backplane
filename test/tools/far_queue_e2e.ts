@@ -17,6 +17,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createHmac } from "node:crypto";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const args = process.argv.slice(2);
 const [bin = "build/backplane", wire = "build/wire"] = args.filter((a) => !a.startsWith("--"));
@@ -89,7 +90,7 @@ async function up(h: Hub) {
 
 async function connect(h: Hub): Promise<Client> {
   const c: Client = { ws: null as any, seen: [], far: [], replies: new Map(), n: 0, info: {}, raw: [] };
-  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws?token=${hubToken(h.home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const text = W.decode(new Uint8Array(e.data as ArrayBuffer));
@@ -128,7 +129,7 @@ const lastFar = (c: Client, link: string) => c.far.filter((o) => o.link === link
 
 let mcpId = 0;
 async function mcp(h: Hub, thread: string, name: string, args: object): Promise<{ isError: boolean; body: any }> {
-  const r: any = await fetch(`http://127.0.0.1:${h.port}/mcp/${thread}`, {
+  const r: any = await fetch(`http://127.0.0.1:${h.port}/mcp/${thread}?token=${hubToken(h.home)}`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: ++mcpId, method: "tools/call", params: { name, arguments: args } }),
   }).then((x) => x.json());

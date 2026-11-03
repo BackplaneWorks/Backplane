@@ -3,6 +3,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [binary = "build/settings-proposal/backplane-serve", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter(f => f.endsWith(".js"))) (0, eval)(readFileSync(join(wire, f), "utf8"));
@@ -50,7 +51,7 @@ const call = async (url: string, name: string, args: object) => {
 try {
   await until("hub ready", async () => { try { return (await fetch(`http://127.0.0.1:${port}/hello`)).ok ? true : undefined; } catch { return undefined; } });
   for (let i = 0; i < 2; i++) {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = "arraybuffer";
     await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; }); sockets.push(ws);
   }
   send(sockets[0], "turn.start", { thread: "worker", text: "fixture", msg: "fixture-start" });

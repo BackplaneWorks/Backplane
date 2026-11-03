@@ -264,9 +264,9 @@ type Msg is Data:
   # gen: the connection's generation (a socket's id; the window's client 0
   # joins again under a new one); sock: a raw descriptor on its socket (0
   # for none), shut at once when it falls too far behind (core/outbox.bend)
-  Join{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32, legacy: Bool}
+  Join{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32}
   # the window in this process: it takes the read model, not the log
-  MobileJoin{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32, legacy: Bool, mode: String}
+  MobileJoin{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32, mode: String}
   MobileTimeout{client: U32, gen: U32}
   ThinRead{client: U32, gen: U32, view: String, target: J.Json, text: String}
   JoinHere{client: U32, out: Chan(Wire), gen: U32}
@@ -650,27 +650,25 @@ type MobileStart is Data:
 type Client is Data:
   # look: what the client last said it shows (desk.look; core/desk.bend);
   # cr: what it was offered and has taken, and whether it still takes its
-  # log (core/outbox.bend); sock: a raw descriptor on its socket (0: none);
-  # legacy: let in without its pairing token (core/auth.bend), so never
-  # told the pairing link (Hub.pair)
-  Client{id: U32, out: Chan(Wire), look: DK.Look, cr: OB.Cr, sock: U32, legacy: Bool, mobile: List<&2, MobileStart>, accounts: Bool}
+  # log (core/outbox.bend); sock: a raw descriptor on its socket (0: none)
+  Client{id: U32, out: Chan(Wire), look: DK.Look, cr: OB.Cr, sock: U32, mobile: List<&2, MobileStart>, accounts: Bool}
 
 def Client.id(c: Client) -> U32:
   match c:
-    case Client{id, _, _, _, _, _, _, +accountCap}: id
+    case Client{id, _, _, _, _, _, +accountCap}: id
 
 def Client.accounts(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, _, _, _, _, supported}: supported
+    case Client{_, _, _, _, _, _, supported}: supported
 
 def Client.accounts.with(c: Client, supported: Bool) -> Client:
   match c:
-    case Client{id, out, look, cr, sock, legacy, mobile, _}: Client{id, out, look, cr, sock, legacy, mobile, supported}
+    case Client{id, out, look, cr, sock, mobile, _}: Client{id, out, look, cr, sock, mobile, supported}
 
 def Client.thin.mode(c: Client) -> String:
   match c:
-    case Client{_, _, _, _, _, _, MobileStart{_, _, mode} <> _, +accountCap}: mode
-    case Client{_, _, _, _, _, _, ThinStart{mode, _} <> _, +accountCap}: mode
+    case Client{_, _, _, _, _, MobileStart{_, _, mode} <> _, +accountCap}: mode
+    case Client{_, _, _, _, _, ThinStart{mode, _} <> _, +accountCap}: mode
     case _: ""
 
 def Client.thin(+c: Client) -> Bool:
@@ -771,7 +769,7 @@ def Store.path(+home: String) -> String:
 
 def Clients.hit(cs: List<&2, Client>, +id: U32) -> Bool:
   match cs:
-    case Client{i, _, _, _, _, _, _, +accountCap} <> _:
+    case Client{i, _, _, _, _, _, +accountCap} <> _:
       U32.is_eq(i, id)
     case Nil{}:
       False{}
@@ -799,13 +797,13 @@ def Clients.drop(cs: List<&2, Client>, +id: U32) -> List<&2, Client>:
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k, lgc, mb, +accountCap} <> t:
-      Clients.drop.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb, accountCap}, Clients.drop(t, id))
+    case Client{+i, o, l, r, k, mb, +accountCap} <> t:
+      Clients.drop.k(U32.is_eq(i, id), Client{i, o, l, r, k, mb, accountCap}, Clients.drop(t, id))
 
 def Clients.look.k(same: Bool, c: Client, +look: DK.Look) -> Client:
   match same c:
-    case True{} Client{i, o, _, r, k, lgc, mb, +accountCap}:
-      Client{i, o, look, r, k, lgc, mb, accountCap}
+    case True{} Client{i, o, _, r, k, mb, +accountCap}:
+      Client{i, o, look, r, k, mb, accountCap}
     case False{} _:
       c
 
@@ -814,20 +812,20 @@ def Clients.look(cs: List<&2, Client>, +id: U32, +look: DK.Look) -> List<&2, Cli
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k, lgc, mb, +accountCap} <> t:
-      Clients.look.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb, accountCap}, look) <> Clients.look(t, id, look)
+    case Client{+i, o, l, r, k, mb, +accountCap} <> t:
+      Clients.look.k(U32.is_eq(i, id), Client{i, o, l, r, k, mb, accountCap}, look) <> Clients.look(t, id, look)
 
 def Clients.looks(cs: List<&2, Client>) -> List<&2, DK.At>:
   match cs:
     case Nil{}:
       Nil{}
-    case Client{i, _, l, _, _, _, _, +accountCap} <> t:
+    case Client{i, _, l, _, _, _, +accountCap} <> t:
       DK.At{i, l} <> Clients.looks(t)
 
 def Clients.cr.k(same: Bool, c: Client, +gen: U32, +n: Nat, +b: Nat) -> Client:
   match same c:
-    case True{} Client{i, o, l, r, k, lgc, mb, +accountCap}:
-      Client{i, o, l, OB.Cr.drained(r, gen, n, b), k, lgc, mb, accountCap}
+    case True{} Client{i, o, l, r, k, mb, +accountCap}:
+      Client{i, o, l, OB.Cr.drained(r, gen, n, b), k, mb, accountCap}
     case False{} _:
       c
 
@@ -836,14 +834,14 @@ def Clients.cr(cs: List<&2, Client>, +id: U32, +gen: U32, +n: Nat, +b: Nat) -> L
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k, lgc, mb, +accountCap} <> t:
-      Clients.cr.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb, accountCap}, gen, n, b) <> Clients.cr(t, id, gen, n, b)
+    case Client{+i, o, l, r, k, mb, +accountCap} <> t:
+      Clients.cr.k(U32.is_eq(i, id), Client{i, o, l, r, k, mb, accountCap}, gen, n, b) <> Clients.cr(t, id, gen, n, b)
 
 def Clients.sockets(cs: List<&2, Client>) -> Nat:
   match cs:
     case Nil{}:
       0n
-    case Client{_, _, _, r, _, _, _, +accountCap} <> t:
+    case Client{_, _, _, r, _, _, +accountCap} <> t:
       Nat.add(Bool.pick(Nat, OB.Cr.native(r), 0n, 1n), Clients.sockets(t))
 
 # whether a broadcast is worth encoding once on the hub (two or more
@@ -949,7 +947,7 @@ def Agents.with(as: List<&2, Agent>, +th: String, +r: ARun) -> List<&2, Agent>:
 
 def Wire.cut(c: Client) -> IO(Unit):
   match c:
-    case Client{i, o, _, _, k, _, _, +accountCap}:
+    case Client{i, o, _, _, k, _, +accountCap}:
       do IO<Unit>:
         PS.Perf.add("hub.client_drop", 1)
         Log.info("client " ++ U32.show(i) ++ " fell too far behind: dropped (it reconnects from its sequence)")
@@ -973,12 +971,12 @@ def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
 
 def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   match c:
-    case Client{i, +o, l, +r, k, lgc, mb, +accountCap}:
+    case Client{i, +o, l, +r, k, mb, +accountCap}:
       do IO<Maybe<&2, Client>>:
         +charge : Nat = Bool.pick(Nat, OB.Cr.native(r), 0n, n)
         ok : Result<&1, &1, Wire, Unit> <- Chan.send(Wire, o, Wire.charged(OB.Cr.native(r), w, charge))
         +r2 : OB.Cr = OB.Cr.offer(r, charge)
-        Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k, lgc, mb, accountCap})
+        Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k, mb, accountCap})
 
 # one frame of n bytes for a client: kept, or None when it was dropped
 def Wire.offer(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
@@ -986,7 +984,7 @@ def Wire.offer(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
 
 def Wire.native(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _, _, _, +accountCap}:
+    case Client{_, _, _, r, _, _, +accountCap}:
       OB.Cr.native(r)
 
 def Wire.offer.bs(c: Client, +bs: List<&2, U32>) -> IO(Maybe<&2, Client>):
@@ -1010,8 +1008,8 @@ def Client.thin.reply_actors(xs: List<&2, TA.Actor>, web: Bool, key: String, +o:
 
 def Client.thin.message(c: Client, +o: J.Json) -> Client:
   match c:
-    case Client{id, out, look, cr, sock, legacy, ThinStart{+mode, ThinContext{+hub, cid, target, view, revision, anchor, actors, control} <> _} <> _, +accountCap}:
-      Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor,
+    case Client{id, out, look, cr, sock, ThinStart{+mode, ThinContext{+hub, cid, target, view, revision, anchor, actors, control} <> _} <> _, +accountCap}:
+      Client{id, out, look, cr, sock, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor,
         Client.thin.reply_actors(actors, String.eq(mode, "view-web"), hub, o), control}]}], accountCap}
     case _: c
 
@@ -1052,7 +1050,7 @@ def Wire.text.if(empty: Bool, m: Maybe<&2, Client>, +text: String) -> IO(Maybe<&
 
 def Client.is(c: Client, +id: U32) -> Bool:
   match c:
-    case Client{i, _, _, _, _, _, _, +accountCap}:
+    case Client{i, _, _, _, _, _, +accountCap}:
       U32.is_eq(i, id)
 
 def Wire.to.one(hit: Bool, text: Bool, c: Client, w: Wire, +n: Nat, +t: String) -> IO(Maybe<&2, Client>):
@@ -1106,12 +1104,12 @@ def Wire.all.as(native: Bool, c: Client, +text: String, +bs: List<&2, U32>, +n: 
 
 def Wire.booting(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _, _, _, +accountCap}:
+    case Client{_, _, _, r, _, _, +accountCap}:
       OB.Cr.boot(r)
 
 def Wire.behind(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _, _, _, +accountCap}:
+    case Client{_, _, _, r, _, _, +accountCap}:
       OB.Cr.behind(r)
 
 # how a message goes to every client: kind 0 to all; 1 log changes (a
@@ -1160,10 +1158,10 @@ def Wire.post(qs: List<&2, Chan(Msg)>, +m: Msg) -> IO(Unit):
 
 def Wire.catch(c: Client, +a: All) -> IO(Maybe<&2, Client>):
   match c a:
-    case Client{+i, o, l, +r, k, lgc, mb, +accountCap} All{_, +log, +fresh, +fl, +qs}:
+    case Client{+i, o, l, +r, k, mb, +accountCap} All{_, +log, +fresh, +fl, +qs}:
       do IO<Maybe<&2, Client>>:
         Wire.post(qs, JoinMore{i, OB.Cr.gen(r)})
-        return Some{Client{i, o, l, OB.Cr.wait.set(OB.Cr.catch(r, All.at(log, fresh), fl), True{}), k, lgc, mb, accountCap}}
+        return Some{Client{i, o, l, OB.Cr.wait.set(OB.Cr.catch(r, All.at(log, fresh), fl), True{}), k, mb, accountCap}}
 
 def Wire.all.k3(behind: Bool, +c: Client, +a: All, +text: String, +bs: List<&2, U32>, +n: Nat) -> IO(Maybe<&2, Client>):
   match behind:
@@ -1240,20 +1238,15 @@ def Wire.all(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
 def Wire.beat(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
   Wire.all.of(cs, text, All{3n, Nil{}, 0n, 0n, Nil{}})
 
-def Client.legacy(c: Client) -> Bool:
-  match c:
-    case Client{_, _, _, _, _, lg, mb, +accountCap}:
-      lg
-
-# a message (the pairing link, Hub.pair_msg) for every client but those let in
-# the legacy way; the clients still there
+# a message (the pairing link, Hub.pair_msg) for every client (each came
+# with its credential, core/auth.bend); the clients still there
 def Wire.pair(cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
   match cs:
     case Nil{}:
       IO.pure(List<&2, Client>, Nil{})
     case +c <> t:
       do IO<List<&2, Client>>:
-        m : Maybe<&2, Client> <- Wire.text.if(Client.legacy(c), Some{c}, text)
+        m : Maybe<&2, Client> <- Wire.text(c, text)
         rest : List<&2, Client> <- Wire.pair(t, text)
         return Clients.add(m, rest)
 
@@ -1731,47 +1724,32 @@ def Conn.reader(fuel: Nat, s: Socket, buf: List<&2, U32>, pending: WSF.Pending, 
       Conn.scanned(Conn.scan(65536n, Scan{None{}, buf, False{}}, last, now), s, pending, id, inbox, last, now,
         s2 => b2 => p2 => l2 => n2 => Conn.reader(f, s2, b2, p2, id, inbox, l2, n2))
 
-# A client let in the legacy way (core/auth.bend's Auth.legacy: no pairing
-# token, trusted as this machine's or the owner's tailnet device) is told,
-# after its join, to pair again (info "auth.legacy", which every client
-# shows once), and it is logged. Gone with Auth.legacy.on().
-def Conn.legacy(legacy: Bool, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
-  match legacy:
-    case True{}:
-      do IO<Unit>:
-        PS.Log.warn("auth", "client " ++ U32.show(id) ++ " joined without its pairing token (legacy; asked to pair again)")
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Push{id, "{\"t\":\"info\",\"info\":{\"auth.legacy\":\"1\"}}"})
-        return Unit{}
-    case False{}:
-      IO.pure(Unit, Unit{})
-
-def Conn.join.mobile(mobile: String, +id: U32, out: Chan(Wire), since: Nat, origin: String, fd: U32, legacy: Bool) -> Msg:
+def Conn.join.mobile(mobile: String, +id: U32, out: Chan(Wire), since: Nat, origin: String, fd: U32) -> Msg:
   match mobile:
-    case "": Join{id, out, since, origin, id, fd, legacy}
-    case _: MobileJoin{id, out, since, origin, id, fd, legacy, mobile}
+    case "": Join{id, out, since, origin, id, fd}
+    case _: MobileJoin{id, out, since, origin, id, fd, mobile}
 
-def Conn.raw(r: Socket & U32, rd: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.raw(r: Socket & U32, rd: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: String) -> IO(Unit):
   (wr, +fd) = r
   do IO<Unit>:
     +out : Chan(Wire) <- Chan.new(Wire, 1024)
     IO.spawn(Unit, Conn.writer(Fuel.forever(), wr, out, OB.Wr.new(), id, id, inbox))
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Conn.join.mobile(mobile, id, out, since, origin, fd, legacy))
-    Conn.legacy(legacy, id, inbox)
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Conn.join.mobile(mobile, id, out, since, origin, fd))
     Conn.reader(Fuel.forever(), rd, rest, WSF.FragIdle{}, id, inbox, 0n, 0n)
 
-def Conn.ws.dup(r: Socket & Result<&1, &1, U32 & String, Socket>, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.ws.dup(r: Socket & Result<&1, &1, U32 & String, Socket>, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: String) -> IO(Unit):
   (rd, res) = r
   match res:
     case Done{wr}:
-      IO.bind(Socket & U32, Unit, H.Sock.raw(wr), x => Conn.raw(x, rd, rest, id, inbox, since, origin, legacy, mobile))
+      IO.bind(Socket & U32, Unit, H.Sock.raw(wr), x => Conn.raw(x, rd, rest, id, inbox, since, origin, mobile))
     case Fail{_}:
       Socket.close(rd)
 
-def Conn.ws(s: Socket, key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.ws(s: Socket, key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: String) -> IO(Unit):
   do IO<Unit>:
     s2 : Socket <- Conn.send(s, W.Ws.accept(key))
     r : Socket & Result<&1, &1, U32 & String, Socket> <- H.Sock.dup(s2)
-    Conn.ws.dup(r, rest, id, inbox, since, origin, legacy, mobile)
+    Conn.ws.dup(r, rest, id, inbox, since, origin, mobile)
 
 def Conn.safe(+p: String) -> Bool:
   Bool.and(Bool.not(String.contains(p, "..")), String.starts_with(p, "/"))
@@ -1785,8 +1763,8 @@ def Conn.cache(+path: String) -> String:
   Bool.pick(String, String.starts_with(path, "/chunk-"), "public, max-age=31536000, immutable", "no-cache")
 
 # One authentication boundary for browser, native, upload and MCP requests.
-def Conn.allowed(+trusted: Bool, +hs: List<&2, W.Header>, +path: String, +token: String) -> Bool:
-  AUTH.Auth.allowed(trusted, hs, path, token)
+def Conn.allowed(+hs: List<&2, W.Header>, +path: String, +token: String) -> Bool:
+  AUTH.Auth.allowed(hs, path, token)
 
 # a websocket from this machine's loopback, not proxied by tailscale serve,
 # is marked for the hub: only such a window (or the one in this process)
@@ -1800,23 +1778,23 @@ def Conn.near.say(near: Bool, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
-def Conn.near.k(r: Socket & String, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.near.k(r: Socket & String, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: String) -> IO(Unit):
   (s, +ip) = r
   do IO<Unit>:
     Conn.near.say(CF.Cef.loopback(ip), id, inbox)
-    Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
+    Conn.ws(s, key, rest, id, inbox, since, origin, mobile)
 
-def Conn.near(plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.near(plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: String) -> IO(Unit):
   match plain:
     case True{}:
-      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Conn.near.k(r, key, rest, id, inbox, since, origin, legacy, mobile))
+      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Conn.near.k(r, key, rest, id, inbox, since, origin, mobile))
     case False{}:
-      Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
+      Conn.ws(s, key, rest, id, inbox, since, origin, mobile)
 
-def Conn.gate(ok: Bool, plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.gate(ok: Bool, plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: String) -> IO(Unit):
   match ok:
     case True{}:
-      Conn.near(plain, s, key, rest, id, inbox, since, origin, legacy, mobile)
+      Conn.near(plain, s, key, rest, id, inbox, since, origin, mobile)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -1900,20 +1878,10 @@ def Mcp.body(fuel: Nat, s: Socket, +buf: List<&2, U32>, +len: Nat, +thread: Stri
 # One POST per JSON-RPC message; the reply is JSON (or 202 for a
 # notification). The hub answers on a channel made for this request.
 
-# an MCP call with neither the token nor its key (an agent the hub started
-# before keys, or another program on this machine): let in the legacy way
-# and logged; goes with the legacy way (core/auth.bend)
-def Mcp.legacy(legacy: Bool, +thread: String) -> IO(Unit):
-  match legacy:
-    case True{}:
-      PS.Log.warn("auth", "an MCP call for " ++ thread ++ " came without its key (legacy)")
-    case False{}:
-      IO.pure(Unit, Unit{})
-
-def Mcp.gate(ok: Bool, legacy: Bool, s: Socket, +thread: String, +len: Nat, rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
+def Mcp.gate(ok: Bool, s: Socket, +thread: String, +len: Nat, rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
     case True{}:
-      IO.bind(Unit, Unit, Mcp.legacy(legacy, thread), _ => Mcp.body(64n, s, rest, len, thread, inbox))
+      Mcp.body(64n, s, rest, len, thread, inbox)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -2016,8 +1984,8 @@ def Info.masked(+text: String) -> IO(String):
   IO.bind(SEC.Vault, String, VX.Vx.vault(), v => IO.pure(String, Info.masked.k(J.Json.parse(text), v, text)))
 
 # the pairing link (the tailnet address and the token) and its QR code: not
-# in the info every client hears, but told only to clients that came with
-# the token (Hub.join.k, Wire.pair), never to one let in the legacy way
+# in the info every client hears, but told to each client as it joins
+# (Hub.join.k, Wire.pair)
 # the pairing message for a link report (its QR code is made here: ~2 s on
 # the JS target, so Cfg.with_link keeps it in Bn and joins reuse it)
 # Shared root credentials never leave the hub in new invitations. Settings
@@ -2047,19 +2015,16 @@ def Hub.pair_msg(c: Cfg) -> String:
 # into the view's Ui; no info goes on a thin socket), and the link is found
 # at start, before any window joins and opens a view: a view made from
 # Hub.info alone never had it, and Settings said "Shown once Backplane
-# listens on your tailnet." on a hub that did. So a client that came with
-# the token takes the link with the info its view is made from; one let in
-# the legacy way never does (laws thin_pair_*).
+# listens on your tailnet." on a hub that did. So a client takes the link
+# with the info its view is made from (law thin_pair_told).
 def Hub.thin.pair.put(+kv: J.Json, +info: J.Json) -> J.Json:
   TV.Obj.put(TV.Obj.put(info, "pair", J.Str{J.Json.get_str(kv, "pair", "")}), "pair.qr", J.Str{J.Json.get_str(kv, "pair.qr", "")})
 
-def Hub.thin.pair.k(legacy: Bool, +msg: String, +info: J.Json) -> J.Json:
-  match legacy:
-    case True{}: info
-    case False{}: Hub.thin.pair.put(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(msg), J.Null{}), "info"), info)
+def Hub.thin.pair.k(+msg: String, +info: J.Json) -> J.Json:
+  Hub.thin.pair.put(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(msg), J.Null{}), "info"), info)
 
-def Hub.thin.pair(legacy: Bool, c: Cfg, +info: J.Json) -> J.Json:
-  Hub.thin.pair.k(legacy, Hub.pair_msg(c), info)
+def Hub.thin.pair(c: Cfg, +info: J.Json) -> J.Json:
+  Hub.thin.pair.k(Hub.pair_msg(c), info)
 
 # A link change is handled after it has been stored, through the inbox,
 # so both sides of an invite refresh immediately (revokes prune rows).
@@ -2347,7 +2312,7 @@ def Hub.desk(h: Hub, +client: U32, +thread: String, +focused: Bool) -> IO(Hub):
 
 def Hub.leave.close(m: Maybe<&2, Client>) -> IO(Unit):
   match m:
-    case Some{Client{_, c, _, _, k, _, _, +accountCap}}:
+    case Some{Client{_, c, _, _, k, _, +accountCap}}:
       do IO<Unit>:
         Chan.close(Wire, c)
         H.Fd.shut(k)
@@ -5334,14 +5299,14 @@ def Preview.shows(+o: J.Json) -> Bool:
 # inline terminals retain their normal bounded-view invalidation path.
 def Wire.terminal.fallback(c: Client) -> Client:
   match c:
-    case Client{id, out, look, cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _, +accountCap}:
-      Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.fallback(actor)], control}]}], accountCap}
+    case Client{id, out, look, cr, sock, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _, +accountCap}:
+      Client{id, out, look, cr, sock, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.fallback(actor)], control}]}], accountCap}
     case _: c
 
 def Wire.terminal.offered(c: Client, ordinal: Nat) -> Client:
   match c:
-    case Client{id, out, look, cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _, +accountCap}:
-      Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.offered(actor, ordinal)], control}]}], accountCap}
+    case Client{id, out, look, cr, sock, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _, +accountCap}:
+      Client{id, out, look, cr, sock, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.offered(actor, ordinal)], control}]}], accountCap}
     case _: c
 
 def Wire.terminal.written(cr: OB.Cr) -> Nat:
@@ -5364,7 +5329,7 @@ def Wire.terminal.ready(fast: Bool, +c: Client, u: UC.Ui, owner: String, generat
 
 def Wire.terminal.one(+c: Client, +owner: String, +epoch: String) -> IO(Maybe<&2, Client>):
   match c:
-    case Client{_, _, _, +cr, _, _, ThinStart{mode, ThinContext{_, _, target, view, _, _, +actor <> _, _} <> _} <> _, +accountCap}:
+    case Client{_, _, _, +cr, _, ThinStart{mode, ThinContext{_, _, target, view, _, _, +actor <> _, _} <> _} <> _, +accountCap}:
       +actual = Bool.pick(String, String.is_empty(owner), UC.Ui.scratch(TA.Actor.ui(actor), "@terminal.owner"), owner)
       Wire.terminal.ready(Bool.and(Bool.not(String.is_empty(view)), TOUT.Output.pending(String.eq(mode, "view-web"), TA.Actor.ui(actor), actual, Wire.terminal.written(cr))), c,
         TA.Actor.ui(actor), actual, U32.show(OB.Cr.gen(cr)), epoch, view, target, Nat.add(OB.Cr.sent(cr), 1n))
@@ -5386,7 +5351,7 @@ def Wire.terminal.drain_one(same: Bool, c: Client, epoch: String) -> IO(Maybe<&2
 
 def Wire.terminal.same(c: Client, +id: U32, +gen: U32) -> Bool:
   match c:
-    case Client{i, _, _, cr, _, _, _, +accountCap}: Bool.and(U32.is_eq(i, id), U32.is_eq(OB.Cr.gen(cr), gen))
+    case Client{i, _, _, cr, _, _, +accountCap}: Bool.and(U32.is_eq(i, id), U32.is_eq(OB.Cr.gen(cr), gen))
 
 def Wire.terminal.drained(cs: List<&2, Client>, +id: U32, +gen: U32, +epoch: String) -> IO(List<&2, Client>):
   match cs:
@@ -6368,10 +6333,10 @@ def Conn.view.mode(view: String, +mobile: String, +frontend: String) -> String:
 def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ws req:
     case True{} W.Request{_, +p, +hs}:
-      Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
-        Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
+      Conn.gate(Conn.allowed(hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
+        Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(trusted, hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
@@ -6436,7 +6401,7 @@ def Conn.route.mcp.raw(mcp: Bool, s: Socket, +req: W.Request, rest: List<&2, U32
   match mcp req:
     case True{} W.Request{_, +p, +hs}:
       +seg = String.drop(W.Http.route(p), 5n)
-      Mcp.gate(AUTH.Auth.mcp(trusted, hs, p, token, seg), AUTH.Auth.mcp.legacy(trusted, hs, p, token, seg), s, seg,
+      Mcp.gate(AUTH.Auth.mcp(hs, p, token, seg), s, seg,
         Maybe.default(&2, Nat, Nat.read(W.Http.header_of(hs, "content-length")), 0n), rest, inbox)
     case False{} _:
       Conn.route.k(Conn.is_ws(req), s, req, rest, web, id, inbox, trusted, token)
@@ -6451,12 +6416,14 @@ def Conn.lock.browser(ok: Bool, s: Socket, +op: String, +len: Nat, rest: List<&2
     case True{}:
       IO.bind(Socket & String, Unit, H.Sock.peer(s), r => LockHttp.peer(r, op, len, rest, inbox))
     case False{}:
-      Conn.finish(s, W.Http.text("403 Forbidden", "cross-origin request refused"))
+      Conn.finish(s, W.Http.text("401 Unauthorized", "locks need this Backplane's pairing token, from this machine"))
 
+# The locks' helper (scripts/bp-lock.sh) presents the token from the home,
+# like every client, and only from this machine (LockHttp.peer)
 def Conn.route.lock(lock: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match lock req:
     case True{} W.Request{_, +p, +hs}:
-      Conn.lock.browser(Bool.and(AUTH.Auth.browser(hs), AUTH.Auth.trusted(True{}, hs)), s, String.drop(W.Http.route(p), 6n), J.Json.get_nat(J.Json.obj([J.KV{"n", J.Num{W.Http.header_of(hs, "content-length")}}]), "n", 0n), rest, inbox)
+      Conn.lock.browser(Bool.and(Conn.allowed(hs, p, token), AUTH.Auth.trusted(True{}, hs)), s, String.drop(W.Http.route(p), 6n), J.Json.get_nat(J.Json.obj([J.KV{"n", J.Num{W.Http.header_of(hs, "content-length")}}]), "n", 0n), rest, inbox)
     case False{} _:
       Conn.route.mcp.raw(Conn.is_mcp(req), s, req, rest, web, id, inbox, trusted, token)
 
@@ -11043,17 +11010,17 @@ def Clients.swap(cs: List<&2, Client>, +id: U32, +m: Maybe<&2, Client>) -> List<
 
 def Boot.due(c: Client, +gen: U32) -> Bool:
   match c:
-    case Client{_, _, _, +r, _, _, _, +accountCap}:
+    case Client{_, _, _, +r, _, _, +accountCap}:
       Bool.and(Bool.and(OB.Cr.boot(r), U32.is_eq(OB.Cr.gen(r), gen)), OB.Cr.room(r))
 
 def Boot.cr(c: Client, +r: OB.Cr) -> Client:
   match c:
-    case Client{i, o, l, _, k, lgc, mb, +accountCap}:
-      Client{i, o, l, r, k, lgc, mb, accountCap}
+    case Client{i, o, l, _, k, mb, +accountCap}:
+      Client{i, o, l, r, k, mb, accountCap}
 
 def Boot.r(c: Client) -> OB.Cr:
   match c:
-    case Client{_, _, _, r, _, _, _, +accountCap}:
+    case Client{_, _, _, r, _, _, +accountCap}:
       r
 
 def Boot.next(more: Bool, h: Hub, k: Hub -> IO(Hub)) -> IO(Hub):
@@ -11068,10 +11035,10 @@ def Boot.next(more: Bool, h: Hub, k: Hub -> IO(Hub)) -> IO(Hub):
 # message it reads and anything else waits behind at most a few
 def Kick.k(go: Bool, c: Client, +inbox: Chan(Msg)) -> IO(Client):
   match go c:
-    case True{} Client{+i, o, l, +r, k, lgc, mb, +accountCap}:
+    case True{} Client{+i, o, l, +r, k, mb, +accountCap}:
       do IO<Client>:
         Self.post.later(inbox, JoinMore{i, OB.Cr.gen(r)})
-        return Client{i, o, l, OB.Cr.wait.set(r, True{}), k, lgc, mb, accountCap}
+        return Client{i, o, l, OB.Cr.wait.set(r, True{}), k, mb, accountCap}
     case False{} _:
       IO.pure(Client, c)
 
@@ -11080,7 +11047,7 @@ def Kick.due(+r: OB.Cr) -> Bool:
 
 def Client.mobile.pending(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, _, _, _, mb, +accountCap}: Bool.not(List.is_empty(&2, MobileStart, mb))
+    case Client{_, _, _, _, _, mb, +accountCap}: Bool.not(List.is_empty(&2, MobileStart, mb))
 
 def Kick.one(+c: Client, +id: U32, +inbox: Chan(Msg)) -> IO(Client):
   Kick.k(Bool.and(Bool.not(Client.mobile.pending(c)), Bool.and(Client.is(c, id), Kick.due(Boot.r(c)))), c, inbox)
@@ -11189,8 +11156,8 @@ def Boot.m(m: Maybe<&2, Client>, h: Hub, +id: U32, +gen: U32) -> IO(Hub):
 
 def Boot.unwait.k(same: Bool, c: Client) -> Client:
   match same c:
-    case True{} Client{i, o, l, r, k, lgc, mb, +accountCap}:
-      Client{i, o, l, OB.Cr.wait.set(r, False{}), k, lgc, mb, accountCap}
+    case True{} Client{i, o, l, r, k, mb, +accountCap}:
+      Client{i, o, l, OB.Cr.wait.set(r, False{}), k, mb, accountCap}
     case False{} _:
       c
 
@@ -12708,11 +12675,11 @@ def Hub.presentation.first(mode: String, gen: U32, epoch: String) -> String:
     case "view-invalid": J.Json.show(J.Json.obj([J.KV{"t", J.Str{"view.error"}}, J.KV{"error", TVW.Wire.error("INVALID_REQUEST")}]))
     case _: Hub.presentation.greeting(mode, gen)
 
-def Hub.mobile.join(h: Hub, +client: U32, out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32, legacy: Bool, +mode: String) -> IO(Hub):
+def Hub.mobile.join(h: Hub, +client: U32, out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32, +mode: String) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Wire.text(Client{client, out, DK.Look.none(), OB.Cr.wait.set(OB.Cr.new(gen, False{}, True{}, 0n), True{}), sock, legacy, [MobileStart{since, origin, mode}], False{}},
+        m : Maybe<&2, Client> <- Wire.text(Client{client, out, DK.Look.none(), OB.Cr.wait.set(OB.Cr.new(gen, False{}, True{}, 0n), True{}), sock, [MobileStart{since, origin, mode}], False{}},
           Hub.presentation.first(mode, gen, Cfg.thin.epoch(cfg)) )
         Hub.presentation.timeout(mode, inbox, client, gen)
         return Hub{st, f, ls, Clients.add(m, cl), as, inbox, cfg, note}
@@ -12722,13 +12689,13 @@ def Hub.mobile.join(h: Hub, +client: U32, out: Chan(Wire), since: Nat, origin: S
 # while the same writer still reports the presentation frames it sent.
 def Hub.mobile.history.begin(+n: Nat, +s0: Nat, +origin: String, +xs: List<&2, String>, h: Hub, c: Client) -> IO(Hub):
   match h c:
-    case Hub{st, f, +ls, cl, as, +inbox, +cfg, note} Client{+id, out, look, +cr, sock, legacy, _, +accountCap}:
+    case Hub{st, f, +ls, cl, as, +inbox, +cfg, note} Client{+id, out, look, +cr, sock, _, +accountCap}:
       +k = List.length(&2, String, OB.Join.next(xs))
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
         +info : String <- Info.shown(cfg)
         m : Maybe<&2, Client> <- Wire.offer(Client{id, out, look,
-          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}, accountCap},
+          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, OB.Join.from(ls, n, Nat.add(s0, k))), sock, Nil{}, accountCap},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more, info), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         Hub.join.more(more, inbox, id, OB.Cr.gen(cr))
@@ -12740,9 +12707,9 @@ def Hub.mobile.history.window(+n: Nat, +origin: String, +since: Nat, oldOrigin: 
 
 def Hub.mobile.history.start(h: Hub, c: Client) -> IO(Hub):
   match h c:
-    case Hub{st, f, +ls, cl, as, inbox, +cfg, note} Client{id, out, look, cr, sock, legacy, MobileStart{since, origin, _} <> _, +accountCap}:
+    case Hub{st, f, +ls, cl, as, inbox, +cfg, note} Client{id, out, look, cr, sock, MobileStart{since, origin, _} <> _, +accountCap}:
       Hub.mobile.history.window(LogCount.n(cfg), Hub.origin(ls), since, origin, ls,
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, Client{id, out, look, cr, sock, legacy, Nil{}, accountCap})
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, Client{id, out, look, cr, sock, Nil{}, accountCap})
     case _ _:
       IO.pure(Hub, h)
 
@@ -12765,14 +12732,14 @@ def Hub.mobile.timeout(h: Hub, +client: U32, gen: U32) -> IO(Hub):
 
 def Client.presentation.mode(c: Client) -> String:
   match c:
-    case Client{_, _, _, _, _, _, MobileStart{_, _, mode} <> _, +accountCap}: mode
-    case Client{_, _, _, _, _, _, ThinStart{mode, _} <> _, +accountCap}: mode
+    case Client{_, _, _, _, _, MobileStart{_, _, mode} <> _, +accountCap}: mode
+    case Client{_, _, _, _, _, ThinStart{mode, _} <> _, +accountCap}: mode
     case _: ""
 
 def Client.presentation.resume(c: Client, resume: PRESENT.Resume) -> Client:
   match c resume:
-    case Client{id, out, look, cr, sock, legacy, MobileStart{_, _, mode} <> _, +accountCap} PRESENT.Cursor{since, origin}:
-      Client{id, out, look, cr, sock, legacy, [MobileStart{since, origin, mode}], accountCap}
+    case Client{id, out, look, cr, sock, MobileStart{_, _, mode} <> _, +accountCap} PRESENT.Cursor{since, origin}:
+      Client{id, out, look, cr, sock, [MobileStart{since, origin, mode}], accountCap}
     case _ _: c
 
 def Hub.presentation.history.valid(valid: Bool, h: Hub, +client: U32, +id: String, c: Client) -> IO(Hub):
@@ -12851,7 +12818,7 @@ def ThinContext.blank() -> ThinContext:
 
 def Client.thin.context(+c: Client) -> ThinContext:
   match c:
-    case Client{_, _, _, _, _, _, ThinStart{_, contexts} <> _, +accountCap}: Maybe.default(&2, ThinContext, List.head(&2, ThinContext, contexts), ThinContext.blank())
+    case Client{_, _, _, _, _, ThinStart{_, contexts} <> _, +accountCap}: Maybe.default(&2, ThinContext, List.head(&2, ThinContext, contexts), ThinContext.blank())
     case _: ThinContext.blank()
 
 def ThinContext.view(+c: ThinContext) -> String:
@@ -12892,8 +12859,8 @@ def ThinContext.with_control(c: ThinContext, control: Nat) -> ThinContext:
 
 def Client.thin.with(+c: Client, +context: ThinContext) -> Client:
   match c:
-    case Client{i, out, look, cr, sock, legacy, MobileStart{_, _, mode} <> _, +accountCap}: Client{i, out, look, cr, sock, legacy, [ThinStart{mode, [context]}], accountCap}
-    case Client{i, out, look, cr, sock, legacy, ThinStart{mode, _} <> _, +accountCap}: Client{i, out, look, cr, sock, legacy, [ThinStart{mode, [context]}], accountCap}
+    case Client{i, out, look, cr, sock, MobileStart{_, _, mode} <> _, +accountCap}: Client{i, out, look, cr, sock, [ThinStart{mode, [context]}], accountCap}
+    case Client{i, out, look, cr, sock, ThinStart{mode, _} <> _, +accountCap}: Client{i, out, look, cr, sock, [ThinStart{mode, [context]}], accountCap}
     case _: c
 
 def Hub.thin.error(h: Hub, +client: U32, +o: J.Json, +code: String) -> IO(Hub):
@@ -13348,7 +13315,7 @@ def Hub.thin.render.page.shown(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U
       +epoch = Hub.thin.view_epoch(st, cfg, thread)
       +rows = TBODY.Body.window.bounded(TSTO.Page.ids(pg), TSTO.Page.index(pg), p)
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Hub.thin.pair(Client.legacy(c), cfg, SEC.Sec.json(v, Hub.info(cfg))),
+      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, Hub.thin.pair(cfg, SEC.Sec.json(v, Hub.info(cfg))),
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
       do IO<Hub>:
         +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
@@ -16361,7 +16328,7 @@ def Vin.gate(ok: Bool, s: Socket, +cont: Bool, +key: String, +len: Nat, +last: B
 def Conn.route.att(att: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match att req:
     case True{} W.Request{_, +p, +hs}:
-      Upload.gate(Conn.allowed(trusted, hs, p, token), Nat.is_gt(Conn.bot.len(hs), AT.Att.ceiling()), s,
+      Upload.gate(Conn.allowed(hs, p, token), Nat.is_gt(Conn.bot.len(hs), AT.Att.ceiling()), s,
         String.contains(String.to_lower(W.Http.header_of(hs, "expect")), "100-continue"),
         AT.Att.unpct(W.Http.param(p, "thread")), AT.Att.stored(AT.Att.unpct(W.Http.param(p, "key")), AT.Att.unpct(W.Http.param(p, "name"))), Conn.bot.len(hs), rest, inbox)
     case False{} _:
@@ -16370,7 +16337,7 @@ def Conn.route.att(att: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +
 def Conn.route.vin(vin: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match vin req:
     case True{} W.Request{_, +p, +hs}:
-      Vin.gate(Conn.allowed(trusted, hs, p, token), s, String.contains(String.to_lower(W.Http.header_of(hs, "expect")), "100-continue"),
+      Vin.gate(Conn.allowed(hs, p, token), s, String.contains(String.to_lower(W.Http.header_of(hs, "expect")), "100-continue"),
         AT.Att.unpct(W.Http.param(p, "s")), Conn.bot.len(hs), String.eq(W.Http.param(p, "end"), "1"), rest)
     case False{} _:
       Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
@@ -16386,11 +16353,11 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case 4n W.Request{_, _, +hs}:
       Conn.bot.signed("dir", W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
     case 5n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"shot", Conn.bot.shot_id(W.Http.route(p)), "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"shot", Conn.bot.shot_id(W.Http.route(p)), "", "", "", "", ""}, inbox)
     case 6n W.Request{+method, +p, +hs}:
       Conn.bot.own(AUTH.Auth.oauth(trusted, hs, method, p, token), s, BotReq{"oauth", p, "", "", "", "", ""}, inbox)
     case 7n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"page", Conn.bot.page_id(W.Http.route(p)), "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"page", Conn.bot.page_id(W.Http.route(p)), "", "", "", "", ""}, inbox)
     case 8n W.Request{_, _, +hs}:
       Conn.bot.signed("far-push", W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
     case 9n W.Request{_, _, +hs}:
@@ -16398,11 +16365,11 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case 10n W.Request{_, _, +hs}:
       Conn.bot.signed("far-rpc", W.Http.header_of(hs, "x-backplane-peer"), s, hs, rest, inbox)
     case 11n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"pair", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"pair", p, "", "", "", "", ""}, inbox)
     case 12n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"view", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"view", p, "", "", "", "", ""}, inbox)
     case 13n W.Request{_, +p, +hs}:
-      Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"tshot", p, "", "", "", "", ""}, inbox)
+      Conn.bot.own(Conn.allowed(hs, p, token), s, BotReq{"tshot", p, "", "", "", "", ""}, inbox)
     case _ _:
       Conn.route.vin(Conn.is_vin(req), s, req, rest, web, id, inbox, trusted, token)
 
@@ -16497,7 +16464,7 @@ def Conn.devices.path(req: W.Request) -> String:
   match req: case W.Request{_, path, _}: path
 
 # A validated session becomes this request's expected credential. Unknown or
-# revoked credentials are rejected before the legacy loopback exemption.
+# revoked credentials are refused (no credential to compare with).
 def Conn.devices.secret.cookie(xs: List<&2, String>) -> String:
   match xs:
     case Nil{}: ""
@@ -17819,9 +17786,9 @@ def Msg.kind(m: Msg) -> String:
       "mcp_shut"
     case Announce{_}:
       "announce"
-    case Join{_, _, _, _, _, _, _}:
+    case Join{_, _, _, _, _, _}:
       "join"
-    case MobileJoin{_, _, _, _, _, _, _, _}:
+    case MobileJoin{_, _, _, _, _, _, _}:
       "mobile_join"
     case MobileTimeout{_, _}:
       "mobile_timeout"
@@ -18931,7 +18898,7 @@ def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) 
     case Hub{+st, f, +ls, +cl, as, inbox, +cfg, +note}:
       do IO<Hub>:
         +info : String <- Info.shown(cfg)
-        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, False{}, Nil{}, False{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n, info)})
+        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, Nil{}, False{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n, info)})
         m1 : Maybe<&2, Client> <- Far.join.here(Far.mirrors(cfg), m)
         m2 : Maybe<&2, Client> <- Wire.text.m(m1, LV.Live.msg(Live.of(cfg)))
         m3 : Maybe<&2, Client> <- Hub.join.notes(m2, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -18939,18 +18906,18 @@ def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) 
         Desktop.refresh(Cfg.br(cfg))
         return Hub{st, f, ls, Clients.add(m4, cl), as, inbox, cfg, note}
 
-def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +out: Chan(Wire), +origin: String, +gen: U32, +sock: U32, +legacy: Bool, +now: Nat) -> IO(Hub):
+def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +out: Chan(Wire), +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, +ls, +cl, as, +inbox, +cfg, +note}:
       +k = List.length(&2, String, OB.Join.next(xs))
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
         +info : String <- Info.shown(cfg)
-        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}, False{}},
+        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, Nil{}, False{}},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more, info), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         m2 : Maybe<&2, Client> <- Hub.join.notes(m1, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
-        m3 : Maybe<&2, Client> <- Wire.text.if(legacy, m2, Hub.pair_msg(cfg))
+        m3 : Maybe<&2, Client> <- Wire.text.m(m2, Hub.pair_msg(cfg))
         Hub.join.more(more, inbox, client, gen)
         Desktop.refresh(Cfg.br(cfg))
         return Hub{st, f, ls, Clients.add(m3, cl), as, inbox, cfg, note}
@@ -18958,28 +18925,28 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
 # a client joined: the log from what it has (`since`, if it came from this
 # log), its first chunk now and the rest a chunk at a time (Hub.boot); the
 # origin and the log's length are found once
-def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +legacy: Bool, +now: Nat) -> IO(Hub):
+def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, +ls, cl, as, inbox, cfg, note}:
       +n = ST.Store.size(ls)
       +o = Hub.origin(ls)
       +s0 = Bool.pick(Nat, Bool.and(String.eq(origin, o), Nat.is_le(since, n)), since, 0n)
-      Hub.join.k(n, s0, OB.Join.window(ls, n, s0), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, legacy, now)
+      Hub.join.k(n, s0, OB.Join.window(ls, n, s0), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, now)
 
-def Hub.session.admitted(active: Bool, h: Hub, +client: U32, +out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32, legacy: Bool, mode: String, now: Nat) -> IO(Hub):
+def Hub.session.admitted(active: Bool, h: Hub, +client: U32, +out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32, mode: String, now: Nat) -> IO(Hub):
   match active mode:
     case False{} _:
       do IO<Hub>:
         Chan.close(Wire, out)
         H.Fd.shut(sock)
         return h
-    case True{} "": Hub.join(h, client, out, since, origin, gen, sock, legacy, now)
-    case True{} _: Hub.mobile.join(h, client, out, since, origin, gen, sock, legacy, mode)
+    case True{} "": Hub.join(h, client, out, since, origin, gen, sock, now)
+    case True{} _: Hub.mobile.join(h, client, out, since, origin, gen, sock, mode)
 
-def Hub.session.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +legacy: Bool, +mode: String, +now: Nat) -> IO(Hub):
+def Hub.session.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +mode: String, +now: Nat) -> IO(Hub):
   do IO<Hub>:
     active : Bool <- PAIR.Pairing.active(client)
-    Hub.session.admitted(active, h, client, out, since, origin, gen, sock, legacy, mode, now)
+    Hub.session.admitted(active, h, client, out, since, origin, gen, sock, mode, now)
 
 type ThinReadJob is Data:
   ThinReadJob{client: U32, gen: U32, view: String, target: J.Json, text: String}
@@ -18994,8 +18961,8 @@ def ThinRead.jobs(cs: List<&2, J.Json>, +client: U32, +gen: U32, +view: String, 
 
 def Client.thin.drain(+c: Client) -> ThinDrained:
   match c:
-    case Client{+id, out, look, +cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, +target, +view, revision, anchor, +actor <> _, control} <> _} <> _, +accountCap}:
-      ThinDrained{[Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.clean(actor)], control}]}], accountCap}],
+    case Client{+id, out, look, +cr, sock, ThinStart{mode, ThinContext{hub, cid, +target, +view, revision, anchor, +actor <> _, control} <> _} <> _, +accountCap}:
+      ThinDrained{[Client{id, out, look, cr, sock, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.clean(actor)], control}]}], accountCap}],
         ThinRead.jobs(TA.Actor.queued(actor), id, OB.Cr.gen(cr), view, target), Bool.pick(List<&2, String>, TA.Actor.dirty(actor), [U32.show(id)], Nil{})}
     case _: ThinDrained{[c], Nil{}, Nil{}}
 
@@ -19185,10 +19152,10 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.mcp.shut(h, B.Gen.thread(B.Tag.thread(thread)), call)
     case Announce{text}:
       Hub.note(h, text)
-    case Join{client, out, since, origin, gen, sock, legacy}:
-      Hub.session.join(h, client, out, since, origin, gen, sock, legacy, "", now)
-    case MobileJoin{client, out, since, origin, gen, sock, legacy, mode}:
-      Hub.session.join(h, client, out, since, origin, gen, sock, legacy, mode, now)
+    case Join{client, out, since, origin, gen, sock}:
+      Hub.session.join(h, client, out, since, origin, gen, sock, "", now)
+    case MobileJoin{client, out, since, origin, gen, sock, mode}:
+      Hub.session.join(h, client, out, since, origin, gen, sock, mode, now)
     case MobileTimeout{client, gen}:
       Hub.mobile.timeout(h, client, gen)
     case JoinHere{client, out, gen}:

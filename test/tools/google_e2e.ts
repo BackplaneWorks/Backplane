@@ -18,6 +18,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, chmodSync, mkdirSync, openSync, ftruncateSync, closeSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -163,7 +164,7 @@ for (const n of ["claude", "codex", "grok", "muse"]) {
   chmodSync(join(fake, n), 0o755);
 }
 
-type Hub = { port: number; proc: ReturnType<typeof Bun.spawn>; ws: WebSocket; seen: any[]; replies: Map<number, any>; n: number; log: string[] };
+type Hub = { home: string; port: number; proc: ReturnType<typeof Bun.spawn>; ws: WebSocket; seen: any[]; replies: Map<number, any>; n: number; log: string[] };
 async function start(name: string, env: Record<string, string>): Promise<Hub> {
   const port = freePort();
   const proc = Bun.spawn([resolve(bin), "--home", join(root, name), "--port", String(port), "--no-tailscale", "--headless", "--foreground"], {
@@ -181,8 +182,8 @@ async function start(name: string, env: Record<string, string>): Promise<Hub> {
     } catch {}
     await sleep(100);
   }
-  const h: Hub = { port, proc, ws: null as any, seen: [], replies: new Map(), n: 0, log };
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const h: Hub = { home: join(root, name), port, proc, ws: null as any, seen: [], replies: new Map(), n: 0, log };
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(h.home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));
@@ -200,7 +201,7 @@ async function rpc(h: Hub, m: string, p: object): Promise<any> {
 }
 const op = (h: Hub, o: string, extra: object = {}) => rpc(h, "bots.google", { op: o, clientId: "", clientSecret: "", pasted: "", ...extra });
 const tool = (h: Hub, th: string, name: string, args: object = {}) =>
-  fetch(`http://127.0.0.1:${h.port}/mcp/${th}`, {
+  fetch(`http://127.0.0.1:${h.port}/mcp/${th}?token=${hubToken(h.home)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } }),

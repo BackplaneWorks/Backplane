@@ -3,6 +3,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [binary, wiredir] = process.argv.slice(2);
 for (const f of readdirSync(wiredir).filter((x) => x.endsWith(".js"))) (0, eval)(readFileSync(join(wiredir, f), "utf8"));
 const W = (globalThis as any).Wire;
@@ -22,7 +23,7 @@ function ledger() {
 }
 const sockets: WebSocket[] = []; let id = 0;
 async function client() {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer"; sockets.push(ws);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`); ws.binaryType = "arraybuffer"; sockets.push(ws);
   const pending = new Map<number, { resolve: (x: any) => void; timer: Timer }>();
   const seen: any[] = [];
   ws.onmessage = (e) => {

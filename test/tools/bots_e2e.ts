@@ -18,6 +18,7 @@ import { createHmac } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const args = process.argv.slice(2);
 const quick = args.includes("--quick");
@@ -81,7 +82,7 @@ async function start(name: string): Promise<Hub> {
     } catch {}
     await sleep(100);
   }
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer)));
@@ -337,8 +338,10 @@ try {
   check("a peer id that is not a plain id is refused (401)", d5.status === 401, d5);
 
   // screens are for clients only
-  const s1 = await fetch(`${A}/bots/${miso.bot}/screen.jpg`);
-  check("a bot's screen from loopback: 404 until it has one", s1.status === 404, s1.status);
+  const s0 = await fetch(`${A}/bots/${miso.bot}/screen.jpg`);
+  check("a bot's screen without the token is refused, from loopback too", s0.status === 401 || s0.status === 403, s0.status);
+  const s1 = await fetch(`${A}/bots/${miso.bot}/screen.jpg?token=${hubToken(a.home)}`);
+  check("a bot's screen with the token: 404 until it has one", s1.status === 404, s1.status);
 
   // secrets never reach the logs or a broadcast
   const logA = readFileSync(join(a.home, "events.jsonl"), "utf8");

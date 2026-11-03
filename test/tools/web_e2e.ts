@@ -15,6 +15,7 @@ import { chromium } from "../../tools/browser/node_modules/playwright-core/index
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 const [bin = "build/backplane", wire = "build/wire", chrome = "/usr/bin/google-chrome"] = process.argv.slice(2);
 const WT = resolve(new URL("../..", import.meta.url).pathname);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -40,12 +41,12 @@ try {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   page.on("console", (m: any) => { if (m.type() === "error") errors.push("console: " + m.text()); });
   page.on("pageerror", (e: any) => errors.push("pageerror: " + e.message));
-  await page.goto(`http://127.0.0.1:${port}/`);
+  await page.goto(`http://127.0.0.1:${port}/#token=${hubToken(join(root, "home"))}`);
   await sleep(2500);
   check("page loaded: body has text", (await page.innerText("body")).length > 0);
   // drive the hub from a second client
   const replies = new Map<number, any>(); const evs: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); ws.binaryType = "arraybuffer";
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(join(root, "home"))}`); ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => { const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer))); for (const c of o.items ?? []) evs.push(c); if (o.t === "reply") replies.set(Number(o.id), o); };
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; }); await sleep(300);
   let n = 0; const rpc = async (m: string, p: object) => { const id = ++n; ws.send(W.encode(JSON.stringify({ id, m, p }))); for (let i = 0; i < 100 && !replies.has(id); i++) await sleep(100); return replies.get(id); };

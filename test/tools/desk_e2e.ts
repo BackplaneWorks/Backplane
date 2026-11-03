@@ -12,6 +12,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -56,7 +57,7 @@ const check = (name: string, ok: boolean, got?: unknown) => {
 type Conn = { ws: WebSocket; msgs: any[]; send: (m: string, p: object) => void };
 async function connect(port: number): Promise<Conn> {
   const msgs: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     try {

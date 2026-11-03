@@ -133,7 +133,7 @@ build_app() {
 run() {
   [ -x "$dev/backplane" ] || { say "no dev build yet: run scripts/dev.sh"; exit 1; }
   mkdir -p "$home"
-  say "http://127.0.0.1:$port  home $home  (ctrl-c stops it)"
+  say "http://127.0.0.1:$port  home $home  (ctrl-c stops it; a browser pairs with the token in $home/token: open /#token=<it>)"
   BACKPLANE_NO_UPDATE=1 exec "$dev/backplane" --home "$home" --port "$port" --no-tailscale
 }
 

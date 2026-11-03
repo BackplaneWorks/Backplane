@@ -22,6 +22,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const argv = process.argv.slice(2);
 const opt = (name: string, d: string) => {
@@ -129,7 +130,7 @@ async function driver() {
     if (l.includes('"ThreadCreated"') && l.includes('"title":"zqrun')) runs.push(JSON.parse(l).id);
     if (l.includes('"RoomSet"')) { const o = JSON.parse(l); if (String(o.members ?? "").split("\n").some((m: string) => m && !m.includes("@"))) rooms.push(o.id); }
   }
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?since=${lines.length}&enc=cbor`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(join(root, "home"))}&since=${lines.length}&enc=cbor`);
   ws.binaryType = "arraybuffer";
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
   let rid = 0;
@@ -180,7 +181,7 @@ if (cpu > 1) await (await page.context().newCDPSession(page)).send("Emulation.se
 page.on("pageerror", (e: any) => say(`page error: ${e.message}`));
 
 const t0 = Date.now();
-await page.goto(`http://127.0.0.1:${port}/`);
+await page.goto(`http://127.0.0.1:${port}/#token=${hubToken(join(root, "home"))}`);
 await page.waitForSelector(".sidebar .thread", { timeout: 120000 });
 say(`first rows after ${Date.now() - t0} ms`);
 // the log's fold: wait until messages stop arriving in bursts

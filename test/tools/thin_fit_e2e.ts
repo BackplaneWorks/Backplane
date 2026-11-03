@@ -16,6 +16,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const here = resolve(import.meta.dir, "../..");
 const bin = resolve(process.argv[2] ?? join(here, "build/backplane-serve"));
@@ -92,7 +93,7 @@ try {
     await page.getByRole("button", { name: /^(Send|Queue|Give)$/ }).first().click().catch(() => page.keyboard.press("Control+Enter"));
     await sleep(6000);
   }
-  const perf = await (await fetch(`http://127.0.0.1:${PORT}/debug/perf`)).text();
+  const perf = await (await fetch(`http://127.0.0.1:${PORT}/debug/perf?token=${hubToken(home)}`)).text();
   const row = perf.split("\n").find((l) => l.startsWith("thin.fit.renders"))?.trim().split(/\s+/) ?? [];
   // name n total mean p50 p99 max
   const n = Number(row[1] ?? 0), max = Number(row[6] ?? 0);

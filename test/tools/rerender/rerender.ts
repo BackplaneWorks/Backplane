@@ -21,6 +21,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { real, synthetic, type Fixture, type Target } from "./fixture";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const argv = process.argv.slice(2);
 const opt = (name: string, d: string) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : d; };
@@ -84,7 +85,7 @@ const hubCpu = () => {
 const hubRss = () => { try { return Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${hub.pid}/status`, "utf8"))?.[1] ?? 0) / 1024; } catch { return 0; } };
 type PerfRow = { n: number; total: number; max: number };
 async function hubPerf(): Promise<Record<string, PerfRow>> {
-  const t = await (await fetch(`http://127.0.0.1:${port}/debug/perf`)).text();
+  const t = await (await fetch(`http://127.0.0.1:${port}/debug/perf?token=${hubToken(home)}`)).text();
   const out: Record<string, PerfRow> = {};
   for (const l of t.split("\n").slice(1)) { const c = l.trim().split(/\s+/); if (c.length >= 7 && !out[c[0]]) out[c[0]] = { n: Number(c[1]), total: Number(c[2]), max: Number(c[6]) }; }
   return out;

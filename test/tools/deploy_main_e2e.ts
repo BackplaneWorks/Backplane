@@ -20,6 +20,7 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane"] = process.argv.slice(2);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -100,7 +101,7 @@ const start = async (): Promise<Hub> => {
   return p;
 };
 const call = async (thread: string, name: string, args: object = {}) => {
-  const r = await fetch(`http://127.0.0.1:${PORT}/mcp/${thread}`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
+  const r = await fetch(`http://127.0.0.1:${PORT}/mcp/${thread}?token=${hubToken(home)}`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
   const o: any = await r.json();
   try { return JSON.parse(o.result.content[0].text); } catch { return o; }

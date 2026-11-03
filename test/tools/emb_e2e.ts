@@ -9,6 +9,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
@@ -74,7 +75,7 @@ try {
   const token = readFileSync(join(home, "token"), "utf8").trim();
   const seen: any[] = [];
   const msgs: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     let o: any = null;

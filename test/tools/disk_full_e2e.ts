@@ -12,6 +12,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+const hubToken = (dir: string): string => require('node:fs').readFileSync(dir + '/token', 'utf8').trim();
 
 const [binArg, wire] = process.argv.slice(2);
 if (!binArg || !wire) throw new Error("usage: disk_full_e2e.ts BINARY WIREDIR");
@@ -59,7 +60,7 @@ const hub = async () => {
   let up = false;
   for (let i = 0; i < 300 && !up; i++) { try { up = (await fetch(`http://127.0.0.1:${port}/hello`)).ok; } catch {} if (!up) await sleep(100); }
   if (!up) throw new Error("hub did not start");
-  const c: C = { ws: new WebSocket(`ws://127.0.0.1:${port}/ws`), seen: [], updates: [], replies: new Map(), n: 0 };
+  const c: C = { ws: new WebSocket(`ws://127.0.0.1:${port}/ws?token=${hubToken(home)}`), seen: [], updates: [], replies: new Map(), n: 0 };
   c.ws.binaryType = "arraybuffer";
   c.ws.onmessage = (e) => { const o = JSON.parse(W.decode(new Uint8Array(e.data as ArrayBuffer))); for (const x of o.items ?? []) c.seen.push(x); if (o.t === "update") c.updates.push(o); if (o.t === "reply") c.replies.set(Number(o.id), o); };
   await new Promise((r, j) => { c.ws.onopen = r; c.ws.onerror = j; });
@@ -92,7 +93,7 @@ try {
   const note = await until(10000, () => h.c.updates.find((u) => String(u.error ?? "").startsWith("Disk full")));
   check(note, "every client is told: Disk full, changes waiting", h.c.updates.map((u) => u.error));
   // an agent's tool call that writes is refused; one that reads is answered
-  const tool = async (name: string, args: object) => (await fetch(`http://127.0.0.1:${h.port}/mcp/t1`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) })).json();
+  const tool = async (name: string, args: object) => (await fetch(`http://127.0.0.1:${h.port}/mcp/t1?token=${hubToken(home)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) })).json();
   const wrote = await tool("thread_update", { title: "via-tool" });
   check(JSON.stringify(wrote).includes("Disk full"), "a tool call that writes is refused while steps wait", wrote);
   const read = await tool("thread_list", {});
