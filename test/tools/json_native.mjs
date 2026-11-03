@@ -31,25 +31,23 @@ function shape(j) {
 const tagsOf = (j) => { const s = new Set(); const go = x => { s.add(x.$); for (const f of ['items', 'fields', 'head', 'tail', 'value']) if (x[f] && typeof x[f] === 'object') go(x[f]); }; go(j); return s; };
 const tagOk = (got, want) => { const w = tagsOf(want); return [...tagsOf(got)].every(t => w.has(t) || /End|Null/.test(t)); };
 
-// JSON.stringify escapes a lone surrogate (\ud800), and Bend's JS runtime
-// refuses to make a Char of one ("not a Unicode scalar value"): there the old
-// path threw out of the render. json() makes each one U+FFFD, so it gives what
-// Json.parse gives for the same value with them replaced.
+// Escaped UTF-16 surrogate pairs decode as a scalar; each unpaired unit
+// becomes U+FFFD in both the emitted Bend lexer and wire.js's json().
 const fix = (t) => { let o = ''; for (let i = 0; i < t.length; i += 1) { const c = t.charCodeAt(i), d = t.charCodeAt(i + 1);
   if (c >= 0xd800 && c < 0xdc00 && d >= 0xdc00 && d < 0xe000) { o += t[i] + t[i + 1]; i += 1; } else o += c >= 0xd800 && c < 0xe000 ? '\ufffd' : t[i]; } return o; };
 const whole = (v) => typeof v === 'string' ? fix(v)
   : Array.isArray(v) ? v.map(whole)
   : v && typeof v === 'object' && typeof v.toJSON !== 'function' && !(v instanceof Number || v instanceof String || v instanceof Boolean)
     ? Object.fromEntries(Object.keys(v).map(k => [whole(k), whole(v[k])])) : v;
-let n = 0, refused = 0;
+let n = 0, repaired = 0;
 function same(v, name) {
   const text = JSON.stringify(v);
   if (text !== undefined && /\\ud[89a-f][0-9a-f]{2}/i.test(text)) {
-    assert.throws(() => F.parse(text), /not a Unicode scalar value/, name + ' (Bend refuses a lone surrogate)');
     const fixed = JSON.stringify(whole(v));
     assert.ok(!/\\ud[89a-f][0-9a-f]{2}/i.test(fixed), name + ' (replaced) ' + fixed);
-    assert.deepEqual(shape(json(v)), shape(F.parse(fixed)), name + ' (U+FFFD in place)');
-    refused += 1;
+    assert.deepEqual(shape(F.parse(text)), shape(F.parse(fixed)), name + ' (escaped surrogate repaired by Bend)');
+    assert.deepEqual(shape(json(v)), shape(F.parse(text)), name + ' (wire/lexer agreement)');
+    repaired += 1;
     return;
   }
   const want = text === undefined ? F.parse('') : F.parse(text);
@@ -59,6 +57,19 @@ function same(v, name) {
   assert.equal(F.show(got), F.show(want), name + ' (Json.show)');
   if (text !== undefined) assert.deepEqual(plain(got), JSON.parse(text), name + ' (plain)');
   n += 1;
+}
+
+// Every surrogate unit, not just one emoji: exercise the emitted lexer
+// on quoted text, keys, a following ordinary escape and a following scalar.
+for (let unit = 0xd800; unit <= 0xdfff; unit += 1) {
+  const escape = '\\u' + unit.toString(16).padStart(4, '0');
+  assert.equal(F.show(F.parse('"' + escape + '"')), '"\ufffd"');
+  assert.equal(F.show(F.parse('"' + escape + '\\nX"')), '"\ufffd\\nX"');
+  assert.deepEqual(plain(F.parse('{"' + escape + '":"ok"}')), { '\ufffd': 'ok' });
+}
+for (const [high, low] of [[0xd800, 0xdc00], [0xdbff, 0xdfff], [0xd83d, 0xdc69]]) {
+  const escaped = '"\\u' + high.toString(16) + '\\u' + low.toString(16) + '"';
+  assert.equal(plain(F.parse(escaped)), String.fromCodePoint(0x10000 + ((high - 0xd800) << 10) + low - 0xdc00));
 }
 
 class Point { constructor() { this.x = 1; this.y = -2; } }
@@ -170,5 +181,5 @@ for (let k = 0; k < 2000; k += 1) {
   if (strict && b.isWellFormed() && !/\\ud[89a-f][0-9a-f]{2}/i.test(b)) sameText(b, 'broken but strict ' + k); else refuse(b, 'broken ' + k);
 }
 console.log(`ok jsonText: ${texts_n} texts equal to Json.parse, ${nulls} refused (left to Bend)`);
-assert.ok(refused >= 50 && n >= 500, `coverage: ${n} compared, ${refused} refused`);
-console.log(`ok json_native: ${n} values (${refused} with lone surrogates, which Bend refuses and json() makes U+FFFD), each equal to Json.parse(JSON.stringify(v))`);
+assert.ok(repaired >= 50 && n >= 500, `coverage: ${n} compared, ${repaired} repaired`);
+console.log(`ok json_native: ${n} values (${repaired} with lone surrogates repaired as U+FFFD), each equal to Json.parse(JSON.stringify(v))`);
