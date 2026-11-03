@@ -994,3 +994,33 @@ opt-in; existing full-build failures and RC4 gates remain unqualified.
 
 Cost: **97 credit-s ($0.00097)**; sandbox deletion verified. Baseline receipts
 were reused without another baseline run or another charge.
+
+### Retain unchanged canonical proof shard keys (2026-11-03)
+
+Previously every shard key included the entire canonical LAWS/PROOF contents.
+It now keys the actual generated proof/import closure after independently
+re-verifying the complete canonical partition. Content, modes, logical
+membership and tool/planner/closure/verdict/guard identities remain bound.
+Actual transitive imports of full canonical files are retained, not omitted.
+
+| Change | Before | After |
+|---|---|---|
+| One-line proof comment edit, real 3,165-law /128-shard Git export | 128 keys invalidated; 0 retained | 1 invalidated; 127 retained |
+| Replan/key after that edit (one observation each, same host) | 2.604s | 3.108s |
+
+[Measurement](proof-cache/MEASURE.json), [GNU time](proof-cache/MEASURE.time),
+[reproducer and trust limits](proof-cache/README.md). These are key-retention
+counts, not executed proof-cache hits or proof/CI speed. The complete offline
+comparison took **17.11s /204,628KiB peak RSS**, with no Bend execution or pass
+recording. Cost **$0**, no Boat job. The earlier export omitted imported test
+modules and failed before measurement; its failure receipt is preserved.
+
+Sixteen dedicated controls pass, including stale false-theorem keys, dependent
+proofs, shared/transitive imports, full canonical imports, modes, changed policy,
+slot renumbering, missing/corrupt inputs and forged dropped-law manifests.
+Lane 4 independently reviewed the patch and passed these 16 plus the existing
+39 cache tests. Canonical laws and proofs are unchanged; no broad proof run was
+made. A shard hit remains a local same-user trust result, not a complete gate.
+All shards must be accounted for in a verified full partition; a production
+mixed cached/fresh join, shared signed cache and actual capped proof timings
+are still pending. Compiler and installer lanes are untouched.
