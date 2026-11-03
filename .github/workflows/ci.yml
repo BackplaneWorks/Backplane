@@ -173,13 +173,25 @@ jobs:
       - name: Browser fixture dependencies
         working-directory: tools/browser
         run: bun install --frozen-lockfile
-      # Real render-tree tests can use several GiB each. Keep two workers
-      # per runner; the four shards still execute on separate machines.
+      # Measured render cases reach 12.3GiB each. test.sh's admission policy
+      # currently forces one worker despite the requested two below; the four
+      # shards execute on separate machines. Raising concurrency needs capacity
+      # qualification, not just extra cores.
       # TEST_FULL: the whole suite, never the merge gate's fast set (which
       # would also run the shard's tests one at a time)
       - run: TEST_FULL=1 TEST_JOBS=2 scripts/test.sh
         env:
           BACKPLANE_CHROME: /usr/bin/google-chrome
+          TEST_TIMINGS_OUT: ${{ runner.temp }}/test-timings-${{ matrix.shard }}.txt
+      - name: Retain per-test scheduling measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timings-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-timings-${{ matrix.shard }}.txt
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: warn
       - name: JSON surrogate browser contract
         if: matrix.shard == 1
         run: |
