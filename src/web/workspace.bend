@@ -9,6 +9,8 @@ import ../core/tools.bend as TO
 import ../core/term-scroll.bend as TS
 import ./dom.bend as D
 import ./icon.bend as WI
+import ./settings-menu.bend as SM
+import ../core/i18n.bend as I
 
 # Web desktop commands reuse the native sidebar keymap and normal actions.
 # The actor owns the query and PTY owner; no canonical log or shell bytes
@@ -189,6 +191,13 @@ def WS.cmds.snooze(c: WSCmds) -> List<&2, U.PItem>:
   match c:
     case WSCmds{_, z}: z
 
+# each Settings page by name and what it is for ("Settings: Devices · Pair
+# a phone or another computer…"), so typing "pair", "theme" or "keys" finds it
+def WS.settings.items(ps: List<&2, String>, +lc: I.Loc) -> List<&2, U.PItem>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t: U.PItem{U.Settings.title(lc, "") ++ ": " ++ U.Settings.title(lc, p) ++ " · " ++ SM.Menu.note(lc, p), "ws-settings", p} <> WS.settings.items(t, lc)
+
 def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
   List.append(&2, U.PItem, Bool.pick(List<&2, U.PItem>, U.ThreadTree.can_route(U.Ui.state(u), U.Ui.sel(u)),
     [U.PItem{Bool.pick(String, U.ThreadTree.can_create(U.Ui.state(u), U.Ui.sel(u)), "New subthread of current thread", "Choose project conversation…"), "thread-child", U.Ui.sel(u)}], Nil{}),
@@ -202,9 +211,10 @@ def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
    U.PItem{"Find file · Ctrl+P", "fm", ""},
    U.PItem{"Board viewer", "view-kind", "board"}, U.PItem{"Schematic viewer", "view-kind", "schematic"},
    U.PItem{"3D viewer", "view-kind", "3d"}, U.PItem{"Mechanical parts", "mech", ""}, U.PItem{"Browser", "view-kind", "browser"},
-   U.PItem{"Diff · Ctrl+D", "diff", ""}, U.PItem{"Design review", "rv-page", "bom"},
+   U.PItem{"Diff · Ctrl+D", "diff", ""}, U.PItem{"Design review: BOM, checks, comments", "rv-page", "bom"},
+   U.PItem{"Release: tag and publish this project", "rv-page", "release"},
    U.PItem{"Agent, model and effort · Ctrl+M", "flag", "models"},
-   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c)]))
+   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c), WS.settings.items(U.Settings.menu.pages(), U.Lang.loc(u))]))
 
 def WS.stop.running(turn: M.TurnState) -> Bool:
   match turn:
@@ -252,6 +262,7 @@ def WS.run.kind(+action: String, +u: U.Ui, value: String) -> U.Act:
     case "ws-project": WS.project(u, value)
     case "ws-prev": WS.neighbour(u, False{})
     case "ws-next": WS.neighbour(u, True{})
+    case "ws-settings": U.Settings.go(U.Settings.on(u), value)
     case _: U.Ui.act(u, action, value)
 
 def WS.palette.run.item(item: U.PItem, u: U.Ui) -> U.Act:
