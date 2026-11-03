@@ -1,3 +1,5 @@
+import ./src/core/message-context.bend as MSGCONTEXT
+
 import ./src/core/ws-fragments.bend as WSFRAG
 
 import ./src/core/http.bend as WSFRAME
@@ -15919,6 +15921,18 @@ law autosettle_delegation_seed_not_personal:
 
 law autosettle_human_followup_is_personal:
   {AUTOS.Auto.direct.seed("human-followup", "More work", "m100-4") == True{} : Bool}
+
+# Tool activity cannot spend the allowance for human/assistant text.
+law context_tool_keeps_text_allowance:
+  for es: List<&2, M.Entry>
+  {MSGCONTEXT.Context.latest(M.Act{"call", "t", "tool", "shell", "work", 1n} <> es, False{}, False{}) == MSGCONTEXT.Context.latest(es, False{}, False{}) : List<&2, String>}
+
+law context_closed_run_is_one_display_row:
+  for e: M.Entry
+  for +id: String
+  for label: String
+  for live: Bool
+  {MSGCONTEXT.Context.unit(e, FO.RHead{id, label, False{}, live}) == ["fold:" ++ id] : List<&2, String>}
 
 # Indexed history is durable; a hub/client replay cache never owns its past.
 law stored_wire_cache_is_empty:

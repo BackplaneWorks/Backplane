@@ -281,6 +281,17 @@ check('room or remote navigation cancels an older held Bub open',()=>{
 check('bot tab waits for presentation and does not admit arbitrary action',()=>{const x=harness();x.open();const s=x.h.states.get('h');s.target={kind:'bot',id:'bot'};s.shownTarget={kind:'bot',id:'bot'};x.h.client.links.get('h').target=clone(s.target);x.h.update(s);const update=x.h.drain().cmds[0].request;x.h.request('h','bot-tab','space');x.h.request('h','send','');assert.deepEqual(x.h.drain().cmds,[]);const out=x.answer(update.id);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.p.action,'bot-tab');assert.equal(out.cmds[0].request.p.value,'space');});
 check('selection change cancels held viewer intent and stale reply cannot run it',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const old=x.h.drain().cmds[0].request;x.h.request('h','view','board');x.h.request('h','select','h|b');const selection=x.h.drain().cmds[0].request;const fresh=x.answer(selection.id);assert(!fresh.cmds.some(c=>c.request?.p?.action==='view'));const late=x.answer(old.id);assert(!late.cmds.some(c=>c.request?.p?.action==='view'));});
 check('connection replacement and forget discard held viewer intent',()=>{for(const forget of [false,true]){const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);x.h.drain();x.h.request('h','view','board');if(forget){x.h.forgetHub('h');x.h.hubs(['h']);}x.h.connection('h','2','view-v1');const greeting=x.greeting('h','2');const fresh=x.answer(greeting.cmds[0].request.id);assert(!fresh.cmds.some(c=>c.request?.p?.action==='view'));}});
+check('native entry loads named human and assistant context through folded pages',()=>{
+ const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');const open=x.greeting().cmds[0].request;
+ const shown=x.screen();shown.thread.entries=[{id:'fold:call',kind:'fold',text:'1100 tool calls',value:'1call',open:false}];
+ const win=(id,older)=>({ids:[id],older,hasMore:!!older,remaining:1100,newer:id==='tail'?0:16,anchor:{id:'',offset:0},partial:[],historyUnits:['fold:call'],messageIds:[],contextMessages:['human','agent']});
+ let out=x.answer(open.id,{shown,overlay:{key:'h',name:'h',j:clone(shown)},window:win('tail','next')});
+ let request=out.cmds.find(c=>c.request?.m==='view.page')?.request;assert(request);assert.equal(request.p.cursor,'next');
+ const context=x.screen();context.thread.entries=[{id:'human',kind:'user',text:'Please inspect'},{id:'agent',kind:'assistant',text:'Checking now'},{id:'fold:call',kind:'fold',text:'1100 tool calls',value:'1call',open:false}];
+ out=x.answer(request.id,{shown:context,overlay:{key:'h',name:'h',j:clone(context)},window:win('text','older')});
+ request=out.cmds.find(c=>c.request?.m==='view.page')?.request;assert(request);assert.equal(request.p.cursor,'','context returns to newest via the merged path');
+ x.h.request('h','earlier','');assert.equal(x.h.states.get('h').contextFill,null,'a reader gesture retires automatic context loading');
+});
 check('older page is only an explicit gesture request',()=>{const x=harness();x.open();assert.equal(x.h.client.calls.size,0);x.h.request('h','earlier','');const o=x.h.drain();assert.equal(o.cmds[0].request.m,'view.page');assert.equal(o.cmds[0].request.p.cursor,'older');assert.equal(o.sync[0].phase,'presenting');});
 check('newest tap during pagination is retained and sent after the issued page settles',()=>{
  const x=harness();x.open();x.h.request('h','draft','Unsent 日本語');x.h.drain();

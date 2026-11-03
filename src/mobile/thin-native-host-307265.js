@@ -553,7 +553,22 @@ export class NativeThinHost307265 {
     s.paging = { id: result.id, undo, direction };
   }
 
+  fillContext(s) {
+    const fill = s.contextFill;
+    if (!fill || !s.ready || s.paging || s.active || s.queue.length || s.pendingNewest || s.deferredNavigation) return;
+    const messages = new Set((s.shown?.thread?.entries || []).filter(e => ['user', 'assistant'].includes(e.kind)).map(e => e.id));
+    const complete = [...fill.wanted].every(id => messages.has(id));
+    if (fill.phase === 'fill' && !complete && !s.historyParked && fill.left && s.window?.hasMore && s.window.older && !fill.cursors.has(s.window.older)) {
+      fill.cursors.add(s.window.older);fill.left--;
+      this.pageTo(s, s.window.older, [...s.back, s.cursor], 'older');return;
+    }
+    fill.phase = 'return';
+    if (s.cursor) { this.pageTo(s, '', [], 'newer');return; }
+    s.contextFill = null;
+  }
+
   select(s, target, session) {
+    s.contextFill = null;
     s.pendingNewest = false;
     if (this.projectSearch?.owners.has(s.hub)) this.projectSearchEnd(this.projectSearch.scope);
     s.deferredNavigation = null; s.attachmentEnds = [];
@@ -621,6 +636,7 @@ export class NativeThinHost307265 {
     }
     if (!admission) intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
     if (!intent || intent.kind === 'blocked') return true;
+    if (['page', 'later', 'newest', 'select', 'action'].includes(intent.kind)) s.contextFill = null;
     if (action === 'proj-find-q' && intent.kind === 'action' && typeof value === 'string' && utf8Bytes(value) <= 4096) {
       s.projectQuery = { value, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
       this.pumpProjectQuery(s);
@@ -958,6 +974,7 @@ export class NativeThinHost307265 {
     if (paged && result.failed) { s.cursor = paged.undo.cursor; s.back = paged.undo.back; }
     if (!metadata || metadata.epoch !== s.epoch) return true;
     if (result.failed) {
+      s.contextFill = null;
       s.historyReset = false;
       if (presentation(result.method) && this.isCurrent(metadata)) this.fail(hub, result.failed);
       else this.pump(s);
@@ -1041,6 +1058,8 @@ export class NativeThinHost307265 {
       }
       s.presentedRevision = r.requestRevision;
       s.ready = true; s.window = { ...copy(result.window), partial: [...partial.values()] };
+      if (result.method === 'view.open' && !s.cursor && Array.isArray(result.window.contextMessages))
+        s.contextFill = { wanted: new Set(result.window.contextMessages), cursors: new Set(), phase: 'fill', left: result.window.remaining || 0 };
       if (!s.viewport) s.anchor = copy(result.window.anchor);
       s.historyPage = copy(pageRows);
       for (const entry of view.shown.thread?.entries || []) {
@@ -1069,6 +1088,7 @@ export class NativeThinHost307265 {
     this.pump(s);
     this.newestDue(s);
     this.pumpProjectGo();
+    this.fillContext(s);
     // Person work gets the next request; ThinViews retains invalidation until
     // a later accepted picture covers it, or a new selection retires it.
     if (result.refreshDue && s.ready) this.deferRefresh(s);
