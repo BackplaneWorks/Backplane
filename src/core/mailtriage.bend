@@ -77,6 +77,16 @@ def Triage.queue.strings(xs: List<&2, J.Json>) -> List<&2, String>:
     case J.Str{x} <> t: x <> Triage.queue.strings(t)
     case _ <> t: Triage.queue.strings(t)
 
+# Recovery walks the settings key index. Unrelated keys must never enter
+# the JSON parser: Bool.pick evaluates both arguments on the JS target.
+def Triage.queue.key.parts.if(queued: Bool, key: String) -> List<&2, String>:
+  match queued:
+    case False{}: Nil{}
+    case True{}: Triage.queue.strings(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(String.drop(key, 13n)), J.Null{})))
+
+def Triage.queue.key.parts(+key: String) -> List<&2, String>:
+  Triage.queue.key.parts.if(String.starts_with(key, "triage.queue."), key)
+
 def Triage.queue.json(xs: List<&2, String>) -> List<&2, J.Json>:
   match xs:
     case Nil{}: Nil{}
