@@ -331,6 +331,8 @@ def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
     case "ws-stop": WS.stop(u)
     case "ws-palette-open": WS.palette.press(u)
     case "ws-palette-close": WS.palette.close(u)
+    # the missing-folder notice's "Use this folder" (view.bend's View.gone.k)
+    case "ws-proj-move": U.Ui.rpc(U.Ui.scratch_set(u, "@f.mv", ""), "project.move", [J.KV{"project", J.Str{value}}, J.KV{"path", J.Str{String.trim(U.Ui.scratch(u, "@f.mv"))}}])
     case "ws-palette-query": WS.none(U.Palette.set(u, value, 0n))
     case "bfield": WS.none(U.Palette.set(u, String.drop(value, 10n), 0n))
     case "ws-palette-move": WS.palette.move(u, value)
