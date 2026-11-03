@@ -8,7 +8,8 @@ const session = 'synthetic-' + owner + '-session';
 const audit = row => fs.appendFileSync(process.env.BP_ACCOUNT_FALLBACK_AUDIT, JSON.stringify({provider, owner, ...row}) + '\n');
 if (args.includes('--version')) { console.log(provider === 'claude' ? '2.1.300 (synthetic)' : 'codex-cli 0.165.0'); process.exit(0); }
 if (provider === 'claude' && args[0] === 'auth') {
-  emit({loggedIn: true, authMethod: 'claude.ai', email: 'synthetic@example.test', orgUuid: 'synthetic', subscriptionType: 'fixture'});
+  audit({kind: 'status', configDirectory: store});
+  emit({loggedIn: true, authMethod: 'claude.ai', email: 'synthetic@example.test', orgUuid: 'synthetic', configDirectory: store, subscriptionType: 'fixture'});
   process.exit(0);
 }
 if (provider === 'claude' && args.includes('--input-format')) {
