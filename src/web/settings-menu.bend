@@ -29,6 +29,7 @@ def Menu.icon.i(i: Nat) -> String:
     case 11n: "book"
     case 12n: "circle-check"
     case 13n: "box"
+    case 14n: "link"
     case _: "settings"
 
 def Menu.icon(page: String) -> String:
@@ -50,6 +51,7 @@ def Menu.note.i(i: Nat, +lc: I.Loc) -> String:
     case 11n: Menu.text(lc, "About Backplane and the guided tour", "Backplaneについて、使い方のツアー")
     case 12n: Menu.text(lc, "Control anonymous usage sharing", "匿名の使用状況の共有設定")
     case 13n: Menu.text(lc, "Manufacturing, quotes and price estimates", "製造、見積もり、概算価格")
+    case 14n: Menu.text(lc, "Pair a phone or another computer, revoke a device", "スマートフォンや別のコンピューターのペアリング、デバイスの取り消し")
     case _: ""
 
 def Menu.note(+lc: I.Loc, page: String) -> String:
@@ -80,7 +82,7 @@ def Menu.group.pages(i: Nat) -> List<&2, String>:
     case 0n: ["appearance", "threads", "timezone"]
     case 1n: ["agents", "writing", "voice", "keys"]
     case 2n: ["cad", "ordering"]
-    case _: ["network", "usage", "privacy", "about"]
+    case _: ["devices", "network", "usage", "privacy", "about"]
 
 def Menu.group(+i: Nat, +lc: I.Loc) -> D.Node:
   D.El{"section", "settings-group-" ++ Nat.show(i), [D.At{"class", "settings-group"}, D.At{"aria-labelledby", "settings-group-" ++ Nat.show(i)}],

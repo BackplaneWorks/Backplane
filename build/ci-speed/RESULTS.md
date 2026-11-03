@@ -261,14 +261,149 @@ unchanged until integration and actual full coverage/performance validation.
 |---|---|
 | Audit150 CI runs plus local/Boat | Done; aggregates and source receipts above. |
 | Every job on fast runners, queue~8s, cost | Incomplete. Existing queue3s median; defaults still in use. Org runner authorization unavailable; no live auth/settings changed. |
-| Fast lint/checkers; per-file proof profile/cache | Incomplete. Two proof slices only; no production proof splitting/pass-cache or linter/type-checker migration. |
+| Fast lint/checkers; per-file proof profile/cache | Partial: pinned Oxlint/TypeScript7 commands and measured controls below; global lint debt/type coverage and production proof splitting/pass-cache remain. |
 | Shared/reset test workers, core-aware shards | Incomplete; no unvalidated state sharing enabled. |
-| Cache setup/outputs; blobless clones | Partial: verified lean closure transport/cache landed. Workflow clone strategy and broader dependency caches remain. |
+| Cache setup/outputs; blobless clones | Partial: verified lean closure transport/cache landed. ci.yml now uses full-history blobless checkouts (fixture below); other release/mobile workflows and broader dependency caches remain. |
 | Parallel independent gates, split slow job | Incomplete; current local controller remains serial. |
 | Affected PRs, full nightly, mutation guard | Partial: opt-in planner/negative controls; existing nightly is full, but no new PR integration or green-nightly claim. |
-| Actual pre-push hook under10s | Incomplete; no global hook/settings changed. |
+| Actual pre-push hook under10s | Incomplete; accepted UI3s/total9s contract, waiting for measured UI command; no placeholder hook/settings changed. |
 | Incremental low-memory local/deploy builds, auto-offload | Existing owner1188217 retains this lane. No duplicate broad proof/build or installer work in this pass. |
 
 The approximately120s complete PR gate and minute-scale complete build targets
 remain unproven. Preserve these requirements; do not redefine success around
 the tooling already delivered.
+
+## Pinned fast JavaScript/TypeScript tooling
+
+New isolated worktree `ci-speed-next-1261555` at source998f536bd; the original
+367b checkout had unrelated uncommitted app changes and was preserved. New
+`tools/ci` commands pin Oxlint1.90.0, Oxfmt0.75.0, TypeScript7.0.2 and Bun
+types1.4.3 with an exact lock. Installed Bun1.3.10 has no type-check command in
+its help; the measured checker is native TypeScript7. The existing step2glb
+strict tsconfig needed `allowImportingTsExtensions` for its already-used Bun
+`.ts` imports (both checkers initially reportedTS5097). Adding that syntax
+option preserves strict/noUncheckedIndexedAccess/noEmit and makes both checkers
+pass. No executable or application build was performed.
+
+| Matched workload / largest process RSS | Before | After |
+|---|---:|---:|
+|337 JavaScript files, same eight correctness checks | ESLint10.14.0: 2.245s /482,936KiB | Oxlint1.90.0 + compatibility rule: **0.329s /174,136KiB** |
+|Existing strict step2glb project and imported platform helper | TypeScript6.0.2:0.375s /236,604KiB | TypeScript7.0.2: **0.051s /75,876KiB** |
+
+These are medians of five fresh processes per command on the same warm local
+filesystem/dependency cache, Node24.13.1. Approximately6.8x faster matched lint,
+7.4x faster configured type-check; peak RSS is the largest descendant process,
+not aggregate concurrent memory. Tool/package locks, source/config hashes and
+actual runtime/native implementation hashes are in
+[the benchmark receipt](fast-tools/benchmark.json). The existing source has no
+ESLint/Oxlint gate: the before column is a measured comparison baseline, not
+prior CI time. No whole-repository type coverage or complete hook timing is
+claimed. The configuration change is checker syntax support, not a weaker
+strictness setting.
+
+A negative control found a real native-linter coverage gap: CLI
+`-D no-dupe-args` enabled zero native rules for a sloppy CommonJS duplicate
+parameter and returned0; specifying that unsupported rule in JSON correctly
+failed configuration. A pinned local JS plugin now preserves the duplicate
+binding check. The **reported lint time includes that plugin**, rather than
+claiming the faster seven-rule result was equivalent. Both matched profiles
+reject all eight deliberately bad cases; both compilers rejectTS2322 in the
+same deliberately wrong project fixture. Production tool tests additionally
+check nested scopes, binding patterns, valid strict source and format failures.
+[Compatibility controls](fast-tools/compatibility-controls.json) retain the
+native CLI/config distinction. Oxlint's JS plugin API is alpha; its exact
+version and these controls must remain pinned during upgrades.
+
+Full Oxlint correctness+suspicious categories run as errors with warnings fatal:
+**exit1, 1,513 existing diagnostics, 0.343s** across the337-file source corpus.
+Oxfmt check is also **exit1**, with existing formatting differences in334 files
+(0.050s). These failures are retained as debt, not waived or presented as a
+passing global gate; no application source was reformatted. New tool files
+pass their own strict lint, formatting and actual negative/positive tool tests.
+Only the existing configured TypeScript project is covered; other TypeScript
+sources require coverage before repository-wide integration. No default gate,
+Git hook, live settings/auth, telemetry send, installer/design or native-transform
+change was made. No Boat credit was spent on this narrow local tooling pass;
+maximum observed individual tool RSS was under0.5GiB.
+
+Reproduce with pinned `tools/ci` install and
+`uv run --no-project python scripts/ci-tool-bench.py --prepare`.
+Comparison install scripts are disabled; the saved baseline lock is reused
+frozen when available. The benchmark exercises real tool binaries and failures;
+a failed invocation produces no passing benchmark receipt.
+
+## Accepted UI/pre-push integration contract
+
+UI validation owns **3s inclusive** (startup/cache validation/static/simulator),
+inside a **9s total pre-push deadline**. Cold/unknown/stale/timeout is exit3,
+validation failure1, every required check passed0. The integration layer supplies
+an exact pushed snapshot, immutable base/head IDs and NUL-delimited changed
+paths including deletions and both rename ends. Report schema/head/status/
+elapsed/checks/diagnostics/cache identity and explicit outcomes for all four
+approaches. Static route/handler coverage always runs; simulator reuse binds
+complete closure+specification+actual runtime/tool identity. No heavy job or
+lock wait starts from the hook. UI owner accepted this contract and reports the
+latest static inventory of 306 literal bindings, 37 computed bindings and 31 URL
+expressions. Ten cheap immutable-export/cache/timeout controls passed in 1.07s.
+The computed bindings and URL expressions remain unresolved: static and overall
+status are incomplete/exit 3, even with a valid simulator receipt. Full
+qualification is still pending. Computed/unmodelled coverage must remain explicit or
+incomplete. No placeholder hook has been installed.
+
+## Full-history blobless CI checkouts
+
+All nine `ci.yml` checkout steps now request `filter: blob:none` and
+`fetch-depth: 0`, including the native smoke job's unchanged sparse paths.
+Nightly/manual/release callers of this reusable CI inherit it; separate release
+and mobile workflow checkout settings are outside this change. No job, test,
+proof, runner label, permission or publish step changed.
+
+The [self-validating probe](../../scripts/ci-checkout-probe.py) creates a tiny
+disposable filter-enabled Git server and transfers over `file://`, avoiding
+local clone hardlinks. Git2.53.0, one sample per mode, warm local filesystem:
+
+| Change / fixture | Before | After |
+|---|---:|---:|
+|Default shallow -> full-history blobless |15.45ms /263,179 packed bytes /1 commit |20.33ms /264,376 packed bytes /7 commits |
+|Native sparse shallow -> sparse full-history blobless |11.63ms /977 packed bytes /1 commit |14.41ms /2,142 packed bytes /7 commits |
+|Full unfiltered reference -> full-history blobless |75.62ms /1,837,753 packed bytes |20.33ms /264,376 packed bytes |
+
+Both new modes found the exact cross-branch merge-base; both shallow controls
+could not. Current head file bytes and executable modes matched exactly; the
+sparse job excluded its existing nonselected asset directory. Historical
+obsolete blobs remained missing in both full-history filtered clones. The
+probe exits on any semantic mismatch and removes a stale receipt before work.
+[Raw receipt](checkout-probe.json) binds the exact probe hash and fixture head.
+
+This fulfills the full-history/filter requirement for the reusable CI. It is
+**not an observed checkout speedup over shallow clones**: this fixture added
+about 5ms (normal) /3ms (sparse), while preserving history with very little
+extra object storage. The audit's real checkout median was already about3s;
+no new Actions run was dispatched, and GitHub network/all-ref history cost
+remains unmeasured. Packed bytes are local object storage, not billed network
+bytes. No Boat credit or paid runner time was spent. No broad proof/build was
+repeated, per the user's current tooling-only constraints.
+
+## Restore dispatch guards after heavy-guard integration
+
+The dispatch unit fixture copied `test.sh` but omitted its newly sourced
+`heavy-guard.sh`. All invocations exited before fake Bend/Bun ran: four tests
+failed and four negative tests accidentally passed on that setup error. The
+fixture now supplies an explicit no-op guard only inside its disposable fake
+repository. Real admission remains covered by `heavy_guard_test.py`; production
+lock, memory floors, heap settings and worker count are unchanged. Negative
+cases now require exit1 plus their actual failure/crash/empty-output diagnostic,
+so missing fixture setup cannot satisfy them.
+
+| Change | Before | After |
+|---|---|---|
+|Fake-tool dispatch unit suite |4 failures /8 tests;4 setup-error false positives;0.035s |8/8 pass;1.094s; intended negative diagnostics verified |
+
+[Exact-source receipt](test-dispatch-fixture.json). This is a guard correctness
+repair, not a speedup; no actual Bend/app execution, broad proof/build, Boat
+credit or installer work was used. Inspection also confirmed `test.sh` forces
+serial execution despite CI's `TEST_JOBS=2`. Build owner1188217 confirmed that
+two tests can each reach about8.2GiB RSS, so blindly restoring parallelism on
+a16GiB runner would be unsafe. Production scheduling stays serial pending
+trusted capacity/admission and representative measurements; no twofold/nightly
+speed claim is made.

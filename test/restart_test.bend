@@ -71,6 +71,11 @@ def child() -> M.State:
     M.WorkSet{"t1", "bg", "b1\tsleep 60\tc1\tsleep 60\tshell", 3n}, M.MessagePosted{"t1", "a1", M.Assistant{}, "started it", 3n},
     M.TurnChanged{"t1", M.Completed{}, 4n}])
 
+# t1's turn cut off mid-reply by a restart (a1 so far)
+def partial() -> M.State:
+  state([M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "one", M.Local{}, "", "", "claude", "", 1n},
+    M.MessagePosted{"t1", "u1", M.User{}, "do it", 2n}, M.TurnChanged{"t1", M.Running{}, 2n}, M.MessagePosted{"t1", "a1", M.Assistant{}, "half of it", 3n}])
+
 def task.k(m: Maybe<&2, M.Task>) -> M.TaskState:
   match m:
     case Some{M.Task{_, _, _, _, st, _, _, _, _}}:
@@ -93,6 +98,8 @@ def delivers(cs: List<&2, M.Change>) -> Nat:
 def main() -> IO(Unit):
   do IO<Unit>:
     +r1 : M.State = restart(ten(), 10n)
+    # a turn the restart cut off carries on, and its partial reply is not "Finished"
+    C.Check.str("a cut-off turn carries on, marked stopped", Bool.show(H.Hub.running(H.Hub.thread(restart(partial(), 20n), "t1"))) ++ "/" ++ M.Setting.get(restart(partial(), 20n), "stopped.u1", ""), "True/1")
     C.Check.str("ten threads: four start at once", Nat.show(H.Lost.running(r1)), "4")
     C.Check.str("the rest are marked", Nat.show(List.length(&2, String, H.Resume.ids(r1))), "6")
     +r2 : M.State = released(r1, 11n)

@@ -1,3 +1,17 @@
+import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
+
+import ./src/core/mailtriage.bend as MTRI
+
+import ./src/core/mailowner.bend as MAILOWN
+
+import ./src/web/composer-bar.bend as CBAR
+
+import ./src/core/outbox.bend as OB
+
+import ./test/sync_report_proof.bend as SYNCREPORT
+
+import ./test/ui_laws_proof.bend as UILAWS
+
 import ./src/core/allowance.bend as ALLOWANCE
 
 import ./src/core/lazy-tools.bend as LTOOLS
@@ -12352,14 +12366,59 @@ def MailProof.pending_route(missing, c, m, text):
     case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
     case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
 
+# Owner tracking follows the header. Finding its conversation must ignore
+# that suffix, just as it ignores the optional metadata before the header.
+law MailProof.pending_route_tail:
+  for missing: Bool
+  for c: ML.Conv
+  for +m: ML.Mail
+  for text: String
+  for tail: List<&2, M.Change>
+  {H.Mail.pending.conv(List.append(&2, M.Change, H.Mail.pending(missing, MB.Body{c, m, text}), tail)) == ML.Mail.conv(m) : String}
+
+def MailProof.pending_route_tail(missing, c, m, text, tail):
+  match missing c m:
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+
 def Laws.mail_file_one_conv(s, now, o, to, text, msg):
   +body = H.Mail.body(s, now, o, to, text, msg, ML.Mail.route(o, to), H.Mail.subject(String.eq(ML.Origin.kind(o), "launch"), s, o, to), "")
   +missing = String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(MB.Body.mail(body)))))
-  Equal.trans(String, H.Mail.pending.conv(H.Mail.pending(missing, body)), ML.Mail.conv(MB.Body.mail(body)), ML.Mail.route(o, to),
-    MailProof.pending_route(missing, MB.Body.conv(body), MB.Body.mail(body), MB.Body.text(body)), {==})
+  +tail = MAILOWN.Owner.track(s, body, ML.Mail.at(MB.Body.mail(body)))
+  Equal.trans(String, H.Mail.pending.conv(List.append(&2, M.Change, H.Mail.pending(missing, body), tail)), ML.Mail.conv(MB.Body.mail(body)), ML.Mail.route(o, to),
+    MailProof.pending_route_tail(missing, MB.Body.conv(body), MB.Body.mail(body), MB.Body.text(body), tail), {==})
+
+law MailProof.pending_one_tracked:
+  for missing: Bool
+  for +c: ML.Conv
+  for +m: ML.Mail
+  for +text: String
+  for on: Bool
+  for s: M.State
+  for now: Nat
+  {H.Mail.pending.count(List.append(&2, M.Change, H.Mail.pending(missing, MB.Body{c, m, text}), MAILOWN.Owner.track.on(on, s, MB.Body{c, m, text}, now))) == 1n : Nat}
+
+def MailProof.pending_one_tracked(missing, c, m, text, on, s, now):
+  match missing c m on:
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _} False{}: {==}
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _} True{}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _} False{}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _} True{}: {==}
+
+law MailProof.file_one:
+  for +s: M.State
+  for +c: ML.Conv
+  for +m: ML.Mail
+  for +text: String
+  {H.Mail.file.count(H.Mail.file.body(s, MB.Body{c, m, text})) == 1n : Nat}
+
+def MailProof.file_one(s, c, m, text):
+  +body = {MB.Body{c, m, text} : MB.Body}
+  MailProof.pending_one_tracked(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(m)))), c, m, text,
+    Bool.and(Bool.and(MAILOWN.Owner.addressed(s, body), MTRI.Triage.inbound(m, UBR.Uber.bot(s))), String.is_empty(M.Setting.get(s, MAILOWN.Owner.map.key(ML.Mail.id(m)), ""))), s, ML.Mail.at(m))
 
 def Laws.mail_room_once(s, now, from, room, text, msg, parts, subject):
-  MailProof.pending_one(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room)))))),
+  MailProof.file_one(s,
     ML.Conv{ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), subject, ML.Conv.mail_kind(ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), "room"), parts, "", Nil{}, now, now, 0n},
     ML.Mail{msg, ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), from, MREF.Ref.addr(MREF.Ref.room(room)), "room", room, "fyi", ML.Mail.head(text), H.Mail.bytes(text, 0n), now}, text)
 # ---- i18n core ui ----
@@ -15509,3 +15568,57 @@ def Laws.message_image_traversal_denied(): {==}
 def Laws.message_image_text_denied(): {==}
 
 def Laws.message_image_entry_bound_url(): {==}
+
+def Laws.composer_bar_one_button(button): {==}
+
+def Laws.composer_bar_never_wraps(button): {==}
+
+def Laws.provider_fallback_only_when_accounts_exhausted(s, now, provider, model, account, h):
+  %Equal.sym(Maybe<&2, J.Json>, ACCOUNTRECOVERY.Pick.account(s, now, provider, model), Some{account}, h) : {ACCOUNTRECOVERY.Pick.none(_) == False{} : Bool}
+  {==}
+
+# ---- recurring UI invariants, 2026-11-02 ----
+def Laws.ui_navigation_total(u, id):
+  UILAWS.selection(u, id)
+
+def Laws.ui_view_error_preserves_all_drafts(u, error):
+  UILAWS.error_drafts(u, error)
+
+def Laws.ui_state_adoption_preserves_all_drafts(u, state):
+  UILAWS.adoption_drafts(u, state)
+
+def Laws.ui_bottom_has_no_unread_pill(u, thread):
+  {==}
+
+def Laws.ui_seen_boundary_has_no_unread_pill(e, rest, chat):
+  %Equal.sym(Bool, String.eq(M.Idx.id(e), M.Idx.id(e)), True{}, Laws.string_eq_refl(M.Idx.id(e))) : {U.Hold.shown.scan(e <> rest, Bool.or(_, Nat.is_ge(0n, U.Hold.most())), chat, M.Idx.id(e), 0n, False{}) == "" : String}
+  {==}
+
+def Laws.json_low_surrogate_replaced(code, acc, hi, lo):
+  %Equal.sym(Bool, J.Lex.is_hi(code), False{}, hi) : {J.Lex.unit(_, J.Lex.is_lo(code), code, acc) == J.LStr{SCon{Chr{65533}, acc}} : J.Lex}
+  %Equal.sym(Bool, J.Lex.is_lo(code), True{}, lo) : {J.Lex.unit(False{}, _, code, acc) == J.LStr{SCon{Chr{65533}, acc}} : J.Lex}
+  {==}
+
+def Laws.json_high_surrogate_waits(code, acc, hi):
+  %Equal.sym(Bool, J.Lex.is_hi(code), True{}, hi) : {J.Lex.unit(_, J.Lex.is_lo(code), code, acc) == J.LHi{acc, code} : J.Lex}
+  UILAWS.high_unit(code, acc, J.Lex.is_lo(code))
+
+def Laws.json_pair_unit_combines(hi, code, acc):
+  {==}
+
+def Laws.json_unpaired_high_preserves_next_character(hi, c, acc, out):
+  {==}
+
+def Laws.json_unpaired_high_preserves_next_escape(hi, c, acc):
+  {==}
+
+def Laws.ui_stored_echo_removes_pending_preview(p, thread, entries, stored):
+  %Equal.sym(Bool, U.Pending.stored(entries, J.Json.get_str(p, "msg", "")), True{}, stored) : {Bool.pick(List<&2, String>, Bool.and(String.eq(J.Json.get_str(p, "thread", ""), thread), Bool.not(_)), [J.Json.get_str(p, "text", "")], Nil{}) == Nil{} : List<&2, String>}
+  %Equal.sym(Bool, Bool.and(String.eq(J.Json.get_str(p, "thread", ""), thread), False{}), False{}, and_false_r(String.eq(J.Json.get_str(p, "thread", ""), thread))) : {Bool.pick(List<&2, String>, _, [J.Json.get_str(p, "text", "")], Nil{}) == Nil{} : List<&2, String>}
+  {==}
+
+def Laws.sync_credit_report_duplicate(c, n, bytes):
+  SYNCREPORT.duplicate(c, n, bytes)
+
+def Laws.sync_credit_reports_commute(c, n, bytes, m, more):
+  SYNCREPORT.commute(c, n, bytes, m, more)

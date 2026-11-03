@@ -1,0 +1,63 @@
+import {ThinViews, viewTarget} from './thin.js';
+import {validateThinResult} from './thin-results.js';
+// One serial, read-only transport for a few likely destinations. It never
+// shares the foreground actor, sends an action, follows history, executes a
+// command, acknowledges unread content, or installs a returned session.
+export class ViewPrefetch {
+  constructor(api) {this.api=api;this.queue=[];this.attempted=new Set();this.generation=0;}
+  enqueue(target, priority=false) {
+    if (!viewTarget(target) || !['thread','bot'].includes(target.kind) || this.api.has(target)) return;
+    const scope=this.api.scope(),key=JSON.stringify([scope.origin,scope.identity,scope.epoch,target]);
+    if (!scope.identity || !scope.epoch || this.attempted.has(key)) return;
+    this.queue=this.queue.filter(x=>x.key!==key);
+    if (priority) this.queue.unshift({target,key});else this.queue.push({target,key});
+    this.queue=this.queue.slice(0,5);
+    if (!this.timer) this.timer=setTimeout(()=>{this.timer=null;this.pump();},priority?75:750);
+  }
+  pump() {
+    if (this.active || !this.queue.length || !this.api.idle()) return;
+    while(this.queue.length && this.api.has(this.queue[0].target))this.queue.shift();
+    if(!this.queue.length)return;
+    if(!this.socket){this.connect();return;}
+    if(!this.greeted)return;
+    const job=this.queue.shift(),scope=this.api.scope();
+    if(this.attempted.size>=16)return;
+    this.attempted.add(job.key);
+    this.active={...job,scope};
+    const target=job.target,session={sel:target.kind==='thread'?target.id:'',rid:1,drafts:{'@lang':scope.language},open:{},info:{},adding:false,panel:false,wantNew:false,
+      ...(target.kind==='bot'?{route:{kind:'bot-tab',bot:target.id,tab:'chat'}}:{})};
+    const result=this.client.select(this.api.hub,target,session,'preview');
+    if(result.failed){this.active=null;return;}
+    this.deadline=setTimeout(()=>this.stop(),10000);
+  }
+  connect() {
+    const generation=this.generation,scope=this.api.scope(),socket=this.api.socket();this.socket=socket;
+    socket.binaryType='arraybuffer';
+    this.client=new ThinViews({now:()=>performance.now(),validateResult:validateThinResult,
+      send:(_hub,request)=>{socket.send(this.api.encode({...request,p:{...request.p,workspaceLayout:'rail-v1',workspaceChrome:'top-v1'}}));return null;},command:()=>null});
+    this.deadline=setTimeout(()=>this.stop(),10000);
+    socket.onmessage=event=>{
+      if(this.generation!==generation)return;
+      try{
+        const frame=this.api.decode(event.data);
+        if(frame.t==='view'){
+          if(frame.epoch!==scope.epoch || this.client.connect(this.api.hub,frame).connected!==true){this.stop();return;}
+          clearTimeout(this.deadline);this.greeted=true;this.pump();return;
+        }
+        if(frame.t!=='reply' || !this.active)return;
+        const reply=this.client.reply(this.api.hub,frame),job=this.active;
+        if(!reply)return;
+        clearTimeout(this.deadline);this.active=null;
+        const current=this.api.scope();
+        if(reply.remoteReady && reply.shown && !reply.result.cmds.length && current.identity===job.scope.identity && current.epoch===job.scope.epoch
+          && current.origin===job.scope.origin && !this.api.has(job.target))this.api.picture(reply.shown,reply.session,job.target,job.scope);
+        if(this.queue.length)this.timer=setTimeout(()=>{this.timer=null;this.pump();},750);
+      }catch{this.stop();}
+    };
+    socket.onclose=socket.onerror=()=>{if(this.generation===generation)this.stop();};
+  }
+  stop() {
+    this.generation++;clearTimeout(this.timer);clearTimeout(this.deadline);this.timer=null;this.active=null;this.queue=[];this.greeted=false;
+    const socket=this.socket;this.socket=null;this.client=null;socket?.close();
+  }
+}

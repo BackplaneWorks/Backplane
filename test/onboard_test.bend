@@ -217,7 +217,7 @@ def main() -> IO(Unit):
     C.Check.str("keys: no guarantee claimed", Bool.show(holds(OB.Ob.body(I.En{}, 0n, "7", 6n), "nothing enforces it")), "True")
     C.Check.str("agents: signed in on the hub", Bool.show(holds(OB.Ob.body(I.En{}, 0n, "7", 5n), "sign in to it on the machine that runs this hub")), "True")
     C.Check.str("tailnet: sign in, restart", Bool.show(holds(OB.Ob.body(I.En{}, 1n, "7", 7n), "sign in, then restart Backplane")), "True")
-    C.Check.str("pairing: the QR code", Bool.show(holds(OB.Ob.body(I.En{}, 0n, "7", 8n), "Pairing link, QR code")), "True")
+    C.Check.str("pairing: Settings' Devices page", Bool.show(Bool.and(holds(OB.Ob.body(I.En{}, 0n, "7", 8n), "Settings, Devices, Add a device"), holds(OB.Ob.body(I.En{}, 2n, "7", 8n), "Settings, Devices, Add a device"))), "True")
     C.Check.str("phones: folder-plus, not the sidebar", Bool.show(holds(OB.Ob.body(I.En{}, 2n, "7", 1n), "folder-plus")) ++ Bool.show(holds(OB.Ob.body(I.En{}, 0n, "7", 1n), "folder-plus")), "TrueFalse")
     C.Check.str("phones: no voice-key field", Bool.show(holds(OB.Ob.body(I.En{}, 2n, "7", 6n), "on a computer or the web page")), "True")
     C.Check.str("phones point at nothing, the head needs a thread", OB.Ob.target(2n, 3n) ++ "|" ++ U.Tour.target(0n, act(fresh(), "ob-next")) ++ "|" ++ U.Tour.target(0n, act(act(act(U.Ui.select.k(fresh(), "t1"), "ob-next"), "ob-next"), "ob-next")), "|add|head")

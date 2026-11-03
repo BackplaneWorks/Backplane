@@ -582,11 +582,11 @@ object NativeMessages {
 
   // native.pair.computer
   fun native_pair_computer(tag: String): String =
-    if (tag == "ja") ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。") else ("On your computer: Backplane, Settings, Pairing link, QR code.")
+    if (tag == "ja") ("パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開きます。") else ("On your computer: Backplane, Settings, Devices, Add a device.")
 
   // native.pair.computer.android
   fun native_pair_computer_android(tag: String): String =
-    if (tag == "ja") ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。") else ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:")
+    if (tag == "ja") ("パソコンのBackplaneで「設定」→「Devices」→「Add a device」を開くか、リンクを貼り付けます。") else ("On your computer: Backplane, Settings, Devices, Add a device. Or paste the link:")
 
   // native.pair.connect
   fun native_pair_connect(tag: String): String =

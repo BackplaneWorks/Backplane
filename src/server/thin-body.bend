@@ -277,6 +277,10 @@ def Body.legacy.read(h: String, +p: J.Json) -> IO(T.Row):
 
 # Pressure keeps the actual reading identity while reducing both sides of
 # its window. Keeping every newer row up to an old anchor cannot converge.
+# The ids are newest first, and the anchor is the row at the top of the
+# reader's screen: what they read is the anchor and the rows newer than it,
+# so the window ends at the anchor and keeps as many newer rows as fit (a
+# reader at the end keeps the newest reply; test/thin_pressure_window_test).
 def Body.window.anchor.go(ids: List<&2, String>, found: Bool, +index: T.Index, +anchor: String, +at: Nat) -> Nat:
   match ids found:
     case _ True{}: Nat.sub(at, 1n)
@@ -290,5 +294,5 @@ def Body.window.anchor(ids: List<&2, String>, index: T.Index, anchor: String, at
 def Body.window(+ids: List<&2, String>, index: T.Index, anchor: String) -> List<&2, String>:
   +n = List.length(&2, String, ids)
   +count = Nat.max(1n, Nat.div(n, 2n))
-  +start = Nat.min(Body.window.anchor(ids, index, anchor, 0n), Nat.sub(n, count))
+  +start = Nat.min(Nat.sub(Nat.add(Body.window.anchor(ids, index, anchor, 0n), 1n), count), Nat.sub(n, count))
   List.take(&2, String, List.drop(&2, String, ids, start), count)

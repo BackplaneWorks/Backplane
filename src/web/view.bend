@@ -1,4 +1,5 @@
 import Base
+import ./composer-bar.bend as CBAR
 import ../core/chat-pending.bend as CP
 import ./terminal-cells.bend as TCELL
 import ../core/view-page.bend as VP
@@ -15,6 +16,8 @@ import ../core/kexport.bend as KEX
 import ../core/json.bend as J
 import ../core/kihealth.bend as KH
 import ../core/model.bend as M
+import ../core/roots.bend as ROOTS
+import ../core/far.bend as FR
 import ../core/sidebar-read.bend as SR
 import ../core/signal.bend as SG
 import ../core/i18n.bend as I
@@ -382,12 +385,37 @@ def View.look.loc(+lc: I.Loc, open: Bool, +st: M.State, +id: String, +rm: Bool) 
 def View.look(open: Bool, +st: M.State, +id: String, +rm: Bool) -> List<&2, D.Node>:
   View.look.loc(I.En{}, open, st, id, rm)
 
+# A project whose folder is gone (core/roots.bend): its sidebar head says so
+# (the hover names the path), and its threads say what to do above the
+# composer, before a message fails with "its folder ... is gone"
+def View.gone.title(missing: Bool, +root: String) -> String:
+  Bool.pick(String, missing, "Folder missing: " ++ root ++ " (moved, renamed or deleted)", root)
+
+def View.gone.chip(missing: Bool) -> List<&2, D.Node>:
+  match missing:
+    case True{}: [D.Dom.span("missing-note", "folder missing")]
+    case False{}: Nil{}
+
+def View.gone.k(missing: Bool, +lc: I.Loc, +root: String, +pid: String, +armed: Bool) -> List<&2, D.Node>:
+  match missing:
+    case True{}:
+      [D.El{"div", "gone-note", [D.At{"class", "gone-note"}, D.At{"role", "status"}], [
+        D.El{"strong", "", Nil{}, [D.Txt{"This project's folder is missing"}]},
+        D.El{"p", "", Nil{}, [D.Txt{"Backplane can't find " ++ root ++ ": it was moved, renamed or deleted, and agents can't start here until it is back at that path. If it moved for good, remove the project and add the folder where it is now."}]},
+        D.Dom.button("", "proj-remove", pid, MSG.T.sidebar.remove.note(lc), Bool.pick(String, armed, MSG.T.menu.remove.confirm(lc), MSG.T.menu.project.remove(lc)))]}]
+    case False{}: Nil{}
+
+# (a thread elsewhere is its own hub's to judge: none)
+def View.gone(+lc: I.Loc, +st: M.State, +id: String, +dr: Map<&2, String>) -> List<&2, D.Node>:
+  +pid = U.Ui.thread_project(U.Ui.thread(st, id))
+  View.gone.k(Bool.and(Bool.not(FR.Fr.is(id)), ROOTS.Roots.missing(st, pid)), lc, U.Ui.project_root(st, pid), pid, String.eq(U.Str.get(dr, "@rm"), pid))
+
 def View.project(+lc: I.Loc, r: U.SRow, +quiet: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> D.Node:
   match r:
     case U.SRow{_, M.Project{+id, title, root, _, _}, M.Shelves{pinned, active, settled, hidden, snoozed}}:
-      D.El{"section", id, [D.At{"class", Bool.pick(String, Bool.or(quiet, U.Label.syncing(st, id)), Bool.pick(String, U.Label.syncing(st, id), "project quiet syncing", "project quiet"), "project")}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, id)}, D.At{"data-drag-to", id}, D.At{"data-drag-act", "reorder-project"}],
-        List.concat(&2, D.Node, [[D.El{"div", "", [D.At{"class", "project-head"}, D.At{"title", root}, D.At{"draggable", "true"}, D.At{"data-drag", id}, D.At{"data-drag-act", "reorder-project"}, D.At{"data-value", id}, D.On{"contextmenu", "proj-menu"}],
-            [WI.WIcon.button("badge", "look", id, MSG.T.menu.look(lc), BG.Badge.icon(st, id), 14, ""), D.Dom.span("name", U.Label.title(st, id, title)), WI.WIcon.button("icon", "new-thread", id, MSG.T.thread.new(lc), "plus", 16, "")]}],
+      D.El{"section", id, [D.At{"class", Bool.pick(String, Bool.or(quiet, U.Label.syncing(st, id)), Bool.pick(String, U.Label.syncing(st, id), "project quiet syncing", "project quiet"), "project") ++ Bool.pick(String, ROOTS.Roots.missing(st, id), " missing", "")}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, id)}, D.At{"data-drag-to", id}, D.At{"data-drag-act", "reorder-project"}],
+        List.concat(&2, D.Node, [[D.El{"div", "", [D.At{"class", "project-head"}, D.At{"title", View.gone.title(ROOTS.Roots.missing(st, id), root)}, D.At{"draggable", "true"}, D.At{"data-drag", id}, D.At{"data-drag-act", "reorder-project"}, D.At{"data-value", id}, D.On{"contextmenu", "proj-menu"}],
+            List.concat(&2, D.Node, [[WI.WIcon.button("badge", "look", id, MSG.T.menu.look(lc), BG.Badge.icon(st, id), 14, ""), D.Dom.span("name", U.Label.title(st, id, title))], View.gone.chip(ROOTS.Roots.missing(st, id)), [WI.WIcon.button("icon", "new-thread", id, MSG.T.thread.new(lc), "plus", 16, "")]])}],
           View.look.loc(lc, String.eq(look, id), st, id, String.eq(rm, id)),
           View.rows_in(lc, pinned, ix, st, sel, now, True{}, False{}),
           View.rows_in(lc, active, ix, st, sel, now, True{}, False{}),
@@ -2239,9 +2267,17 @@ def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, 
 def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   View.settings.loc(U.Lang.loc(u), u, st, nf, v, note)
 
+# with no project yet, its first step is a button too (the folder picker,
+# as the sidebar's +), ahead of the agent setup
+def View.empty.add(none: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match none:
+    case True{}: [D.Dom.button("primary", "proj-open", "", MSG.T.sidebar.add.project(lc), MSG.T.sidebar.add.project(lc))]
+    case False{}: Nil{}
+
 # (tour: the first-run tour is up, and the KiCad notice waits for it: U.Tour.kn)
-def View.empty.t.loc(+lc: I.Loc, tour: Bool, n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
-  D.El{"main", "empty", [D.At{"class", "empty"}], D.Dom.cat([D.Txt{Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.empty.add(lc), MSG.T.empty.thread(lc))}, D.Dom.button("", "provider-setup-open", "", "Choose and connect an agent", "Set up an agent")], View.kn.loc(lc, U.Tour.kn.k(tour, U.KN.visible(nf, st)), True{}))}
+def View.empty.t.loc(+lc: I.Loc, tour: Bool, +n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
+  D.El{"main", "empty", [D.At{"class", "empty"}], List.concat(&2, D.Node, [[D.Txt{Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.empty.add(lc), MSG.T.empty.thread(lc))}], View.empty.add(Nat.is_eq(n, 0n), lc),
+    [D.Dom.button("", "provider-setup-open", "", "Choose and connect an agent", "Set up an agent")], View.kn.loc(lc, U.Tour.kn.k(tour, U.KN.visible(nf, st)), True{})])}
 
 def View.empty.loc(+lc: I.Loc, n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
   View.empty.t.loc(lc, False{}, n, nf, st)
@@ -3358,23 +3394,23 @@ def View.tok.pop(open: Bool, +st: M.State, +th: String, +prov: String) -> List<&
       Nil{}
 
 def View.composer.p(+lc: I.Loc, +draft: String, +send: String, +act: String, +prov: String, menu: List<&2, D.Node>, chip: List<&2, D.Node>, +rs: List<&2, U.SkillRow>,
-    +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, tk: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
+    +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, tk: List<&2, D.Node>, more: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
   D.El{"div", "", [D.At{"class", "composer"}, D.At{"data-run", Bool.pick(String, run, "1", "")}, D.At{"data-atts", Nat.show(List.length(&2, String, atts))},
     D.At{"data-claude", Bool.pick(String, String.eq(prov, "claude"), "1", "")}, D.At{"data-lang", I.I18n.tag(lc)}], D.Dom.cat(
     menu, D.Dom.cat(tp, D.Dom.cat(View.skills(rs), D.Dom.cat(vo, D.Dom.cat(View.attaching.loc(lc, atts, up), [
-    D.El{"textarea", "composer", [D.At{"id", "composer"}, D.At{"rows", "3"}, D.At{"placeholder", MSG.T.composer.placeholder(lc)}, D.At{"value", draft}, D.On{"input", "draft"},
+    D.El{"textarea", "composer", [D.At{"id", "composer"}, D.At{"rows", "3"}, D.At{"placeholder", MSG.T.composer.placeholder(lc)}, D.At{"data-placeholder-full", MSG.T.composer.placeholder(lc)}, D.At{"data-placeholder-short", MSG.T.composer.ask(lc) ++ "…"}, D.At{"title", MSG.T.composer.placeholder(lc)}, D.At{"value", draft}, D.On{"input", "draft"},
       D.At{"data-enter", U.Draft.enter(Bool.not(List.is_empty(&2, U.SkillRow, rs)), draft)}, D.At{"data-enter-alt", "send-alt"}, D.At{"data-tab", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill")}, D.At{"data-arrows", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-move")}, D.At{"data-esc", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-close")}, D.At{"data-paste", "attach"}], Nil{}},
-    D.El{"div", "composer-foot", [D.At{"class", "composer-foot"}], List.append(&2, D.Node, chip, [
-      View.draw.loc(lc),
+    CBAR.ComposerBar.node(List.append(&2, D.Node, chip, [
+      CBAR.ComposerBar.more(List.append(&2, D.Node, more, View.draw.loc(lc) <> tk)),
       D.El{"label", "", [D.At{"class", "attach"}, D.At{"title", MSG.T.composer.attach.tip(lc)}], [WI.WIcon.svg("paperclip", 16),
         D.El{"input", "attach-file", [D.At{"type", "file"}, D.At{"multiple", ""}, D.At{"aria-label", MSG.T.composer.attach.tip(lc)}, D.At{"data-attach", "attach"}], Nil{}}]},
-      D.El{"span", "", [D.At{"class", "foot-end"}], D.Dom.cat(tk, [View.mic.loc(lc, mic),
-        View.send.loc(lc, act, send)])}])}])))))}
+      D.El{"span", "", [D.At{"class", "foot-end"}], [View.mic.loc(lc, mic),
+        View.send.loc(lc, act, send)]}]))])))))}
 
 def View.composer.loc(+lc: I.Loc, +draft: String, +send: String, +act: String, +label: String, +ctx: String, +picking: Bool, +ms: List<&2, String>, +model: String, +info: String, +prov: String, +es: List<&2, String>, +effort: String, +rs: List<&2, U.SkillRow>,
     +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, +q: String, srch: Bool, tk: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
   View.composer.p(lc, draft, send, act, prov, View.menu.loc(lc, picking, ms, model, info, prov, es, effort, q, srch), View.mp.chip(lc, VLabel.effort.label(lc, label, effort), ctx),
-    rs, atts, up, vo, mic, tk, tp, run)
+    rs, atts, up, vo, mic, tk, Nil{}, tp, run)
 
 # the thread's header, or the one given (a bot's)
 
@@ -3432,10 +3468,13 @@ def View.accounts.pop(open: Bool, +st: M.State, +provider: String) -> List<&2, D
         D.Dom.button("", "acct-select", "", "Use existing CLI authentication", "Default " ++ provider ++ " account") <>
         View.accounts.options(ACCT.Accounts.profiles(st), provider)}]
 
-def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:
+def View.accounts.chip(+st: M.State, +sel: String, +provider: String) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, ACCT.Accounts.supported(provider),
     D.El{"button", "", [D.At{"class", "account-chip"}, D.At{"title", "Account: " ++ ACCT.Accounts.label(st, sel, provider) ++ " · Manage logins in Settings → Providers → Accounts"}, D.At{"aria-label", "Account: " ++ ACCT.Accounts.label(st, sel, provider)}, D.At{"data-value", ""}, D.On{"click", "acct-open"}],
-      [WI.WIcon.svg("user", 16), D.Dom.span("acct-v", ACCT.Accounts.short(ACCT.Accounts.label(st, sel, provider)))]} <> View.accounts.pop(open, st, provider), Nil{})
+      [WI.WIcon.svg("user", 16), D.Dom.span("acct-v", ACCT.Accounts.short(ACCT.Accounts.label(st, sel, provider)))]} <> Nil{}, Nil{})
+
+def View.accounts(+st: M.State, +sel: String, +provider: String, +open: Bool) -> List<&2, D.Node>:
+  List.append(&2, D.Node, View.accounts.chip(st, sel, provider), View.accounts.pop(open, st, provider))
 
 # a draft over a message's bound says so over the composer (draftbound.bend)
 def View.draft.limit.k(+text: String) -> List<&2, D.Node>:
@@ -3452,10 +3491,9 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
   View.composer.p(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), pr,
     View.mp.loc(lc, U.Flag.get(op, "models"), ACCT.Accounts.nf(nf, st, sel), U.Mpk.cur.of(st, sel, drafts), U.Mpk.now(st, sel), U.Str.get(drafts, "@f.mq"), MPK.ModelPick.kept(U.Str.get(drafts, "@mp"), sel)),
     [D.El{"div", "composer-model", [D.At{"class", "composer-model"}], List.concat(&2, D.Node, [
-      View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))),
-      View.accounts(st, sel, pr, U.Flag.get(op, "accounts")), AW.AllowanceWeb.chip(quota, pr, mo, clock, U.Flag.get(op, "allowance"))])}],
+      View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel)))])}],
     U.Skills.shown(st, sel, drafts, nf), atts, up, D.Dom.cat(View.draft.limit.k(DB.Bound.say(lc, U.Str.get(drafts, "@draft.bound"))), vo), mic,
-    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), List.append(&2, D.Node, View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), AW.AllowanceWeb.pop(U.Flag.get(op, "allowance"), quota, pr, mo, clock)), View.running(turn))
+    View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), List.append(&2, D.Node, View.accounts.chip(st, sel, pr), AW.AllowanceWeb.chip(quota, pr, mo, clock, U.Flag.get(op, "allowance"))), List.concat(&2, D.Node, [View.accounts.pop(U.Flag.get(op, "accounts"), st, pr), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), AW.AllowanceWeb.pop(U.Flag.get(op, "allowance"), quota, pr, mo, clock)]), View.running(turn))
 
 # A buy thread's asks: a "Backplane needs" card each, above the composer
 # (client.bend's Fab.order). An order question's choices are buttons (the
@@ -3528,7 +3566,7 @@ def View.asks.of(+lc: I.Loc, buying: Bool, as: List<&2, M.Ask>, +draft: String, 
       View.asks(lc, as, draft, nf)
 
 def View.asks.box(+lc: I.Loc, +st: M.State, +id: String, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> D.Node:
-  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], List.append(&2, D.Node, View.sbox(lc, U.Sbox.box.d(st, dr, id)), View.asks.of(lc, U.Fab.buying(st, id), U.Asks.open(st, id), draft, nf, dr))}
+  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], List.concat(&2, D.Node, [View.gone(lc, st, id, dr), View.sbox(lc, U.Sbox.box.d(st, dr, id)), View.asks.of(lc, U.Fab.buying(st, id), U.Asks.open(st, id), draft, nf, dr)])}
 
 # the same two from the Ui alone (app.bend's composer and asks)
 def View.composer.k(+lc: I.Loc, u: U.Ui, t: M.Thread, +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:

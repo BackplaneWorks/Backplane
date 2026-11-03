@@ -50,6 +50,7 @@ import ../core/utf8.bend as U
 import ../core/http.bend as W
 import ../core/auth.bend as AUTH
 import ../core/model.bend as M
+import ../core/roots.bend as ROOTS
 import ../core/codec.bend as C
 import ../core/hub.bend as B
 import ../core/deploy.bend as DP
@@ -92,6 +93,7 @@ import ../core/thin.bend as THIN
 import ../core/thin-chat.bend as TCHAT
 import ../core/thin-live.bend as TLIVE
 import ../core/stream-commit.bend as SCOM
+import ../core/pending-stream.bend as PSTREAM
 import ../core/thin-wire.bend as TVW
 import ../core/presentation.bend as PRESENT
 import ../web/session.bend as WEBFRONT
@@ -227,6 +229,8 @@ type JobReceipt is Data:
   JobSnoozed{thread: String, until: Nat}
   JobWorktree{thread: String, branch: String, path: String, provider: String, binding: String}
   JobLocal{thread: String, provider: String, binding: String}
+  # a Stop cancelled these Claude commands before they started
+  JobUnread{thread: String, uuids: List<&2, String>}
 
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
@@ -4845,12 +4849,28 @@ def Claude.put.kind(+line: String) -> Nat:
   Bool.pick(Nat, String.starts_with(line, "{\"uuid\":"), 1n,
     Bool.pick(Nat, Bool.and(String.starts_with(line, "{\"type\":\"control_request\""), String.contains(line, "\"subtype\":\"interrupt\"")), 2n, 0n))
 
+# the messages an interrupt cancels before Claude started them (uuids) are
+# named in their thread (hub.bend's Unread.note, by Hub.job.report): they
+# still look sent
+def Claude.unread.k(none: Bool, h: Hub, +thread: String, uuids: List<&2, String>) -> IO(Hub):
+  match none h:
+    case True{} _:
+      IO.pure(Hub, h)
+    case False{} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        GitJob.report(inbox, JobUnread{thread, uuids})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Claude.unread(h: Hub, +thread: String, +uuids: List<&2, String>) -> IO(Hub):
+  Claude.unread.k(List.is_empty(&2, String, uuids), h, thread, uuids)
+
 def Claude.put.k(i: Nat, +r: ARun, h: Hub, +thread: String, +line: String) -> IO(Hub):
   match i:
     case 1n:
       Claude.flush(ARun.put(r, CM.Cmds.accept(ARun.cmds(r), B.Claude.uuid.of(line)), CM.Held.push(ARun.held(r), B.Claude.uuid.of(line), line, True{})), h, thread)
     case 2n:
-      IO.bind(Hub, Hub, Claude.raw(h, thread, line), h2 => Claude.flush(ARun.put(r, CM.Cmds.stop(ARun.cmds(r), Nil{}), ARun.held(r)), h2, thread))
+      IO.bind(Hub, Hub, Claude.raw(h, thread, line), h2 => IO.bind(Hub, Hub, Claude.unread(h2, thread, CM.Cmds.waiting(ARun.cmds(r))),
+        h3 => Claude.flush(ARun.put(r, CM.Cmds.stop(ARun.cmds(r), Nil{}), ARun.held(r)), h3, thread)))
     case _:
       Claude.raw(h, thread, line)
 
@@ -7264,8 +7284,20 @@ def Live.committed.when(ending: Bool, +cfg: Cfg, cs: List<&2, M.Change>, +lv: Li
 def Live.committed(+cfg: Cfg, +cs: List<&2, M.Change>, lv: List<&2, LV.Buf>) -> Cfg:
   Live.committed.when(SCOM.Streams.any(cs), cfg, cs, lv)
 
+# Pending replies are static Working rows. Once present, another text delta
+# changes no thin picture; retain all bytes/revisions without an RPC wake.
+# First text, a cleared row or a new generation still reconciles the view.
+def Cfg.thin.live.changed(changed: Bool, +cfg: Cfg, streams: Map<&2, TLIVE.Stream>, thread: String) -> Cfg:
+  match changed:
+    case True{}: Cfg.thin.live(cfg, streams, thread)
+    case False{}:
+      Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), streams,
+        Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), Cfg.thin.notes(cfg), Cfg.thin.store(cfg), Cfg.thin.signal_seq(cfg)})
+
 def Live.with_delta(+cfg: Cfg, +lv: List<&2, LV.Buf>, +thread: String, text: String) -> Cfg:
-  Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg))), TPACE.Touch.live(thread))
+  +streams = TLIVE.Streams.delta(Cfg.thin.streams(cfg), lv, thread, text, Cfg.thin.next(Cfg.thin.revision(cfg)))
+  Cfg.thin.live.changed(PSTREAM.PendingStream.changed(TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), TLIVE.Stream.get(streams, thread)),
+    Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), streams, TPACE.Touch.live(thread))
 
 # the tool calls open now (core/deploy.bend's Open.*), kept in memory only:
 # after a restart there are none, which is right, the old processes are gone
@@ -7670,6 +7702,32 @@ def BotJob.client(+b: String) -> U32:
 
 def BotJob.id(+c: String) -> String:
   Bool.pick(String, String.is_empty(c), "0", c)
+
+# Projects whose folder is gone (core/roots.bend): looked for at every tick
+# (once a minute), the missing ones' ids kept in "projects.missing", written
+# only when they change (so the log grows only when a folder goes or comes)
+def RootJob.set(same: Bool, +inbox: Chan(Msg), +v: String) -> IO(Unit):
+  match same:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        +now : Nat <- Now.nat()
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.SettingSet{ROOTS.Roots.key(), v, now}]})
+        return Unit{}
+
+def RootJob.got(+v: String, +inbox: Chan(Msg), +was: String) -> IO(Unit):
+  RootJob.set(String.eq(v, was), inbox, v)
+
+def RootJob.done(r: P.Ran, +inbox: Chan(Msg), +was: String) -> IO(Unit):
+  match r:
+    case P.Ran{0, out}:
+      RootJob.got(ROOTS.Roots.value(out), inbox, was)
+    case _:
+      IO.pure(Unit, Unit{})
+
+def RootJob.run(+inbox: Chan(Msg), args: List<&2, String>, +was: String) -> IO(Unit):
+  IO.bind(P.Ran, Unit, P.Proc.run("sh", List.append(&2, String, ["-c", ROOTS.Roots.sh(), "sh"], args), "/"), r => RootJob.done(r, inbox, was))
 
 # a bot's home folder (dir <home>/bots/), or a scratch thread's
 # (<home>/scratch/, M.Scratch), a git repository (so its turns get
@@ -12247,6 +12305,11 @@ def Hub.job.ready(h: Hub, +thread: String, +provider: String, +binding: String, 
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, Hub.job.ready.step(st, thread, provider, binding, change, now))
 
+def Hub.job.unread(h: Hub, +thread: String, +uuids: List<&2, String>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{B.Unread.note(st, thread, uuids, now), Nil{}})
+
 def Hub.job.report(h: Hub, receipt: JobReceipt, +now: Nat) -> IO(Hub):
   match receipt:
     case JobNote{thread, tone, summary}:
@@ -12263,6 +12326,8 @@ def Hub.job.report(h: Hub, receipt: JobReceipt, +now: Nat) -> IO(Hub):
       Hub.job.ready(h, thread, provider, binding, M.WorktreeSet{thread, branch, path, now}, now)
     case JobLocal{+thread, provider, binding}:
       Hub.job.ready(h, thread, provider, binding, M.WorktreeSkipped{thread, now}, now)
+    case JobUnread{+thread, +uuids}:
+      Hub.job.unread(h, thread, uuids, now)
 
 # A client's request about something elsewhere goes to its machine; any
 # other stays here
@@ -13874,6 +13939,7 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         Self.post(inbox, Silence{})
+        IO.spawn(Unit, RootJob.run(inbox, ROOTS.Roots.args(st), M.Setting.get(st, ROOTS.Roots.key(), "")))
         h2 : Hub <- Hub.telemetry(Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
         h3 : Hub <- Hub.dq.try(h2, now)
         Hub.watchdog(h3, now)
