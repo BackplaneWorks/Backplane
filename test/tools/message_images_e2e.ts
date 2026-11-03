@@ -20,7 +20,7 @@ const paths=['dark-1280','dark-390','light-1280','light-390'].map(x=>'/home/h/.b
 paths.forEach(p=>assert(existsSync(p),p));
 const thread='t1790292962-8017',bot='b1790292962-8017',entry='test-star-nudge-regenerated';
 const ev=($:string,fields:object)=>({$,at:1793670000,...fields});
-const events=[ev('ProjectCreated',{id:'p-images',title:'TEST image acceptance',root}),ev('ThreadCreated',{id:thread,project:'p-images',title:'Bub',env:'local',branch:'',worktree:'',provider:'claude',model:''}),ev('BotSet',{id:bot,name:'Bub',thread,look:0,persona:''}),ev('SettingSet',{key:'onboard.done',value:'1'}),ev('MessagePosted',{thread,msg:entry,role:'assistant',text:'Regenerated #775 comparison sheets: before, version A, and version B preview.\n\n'+paths.join('\n')})];
+const events=[ev('ProjectCreated',{id:'p-images',title:'TEST image acceptance',root}),ev('ThreadCreated',{id:thread,project:'p-images',title:'Bub',env:'local',branch:'',worktree:'',provider:'claude',model:''}),ev('BotSet',{id:bot,name:'Bub',thread,look:0,persona:''}),ev('SettingSet',{key:'onboard.done',value:'1'}),ev('SettingSet',{key:'onboard.uber',value:'1'}),ev('MessagePosted',{thread,msg:entry,role:'assistant',text:'Regenerated #775 comparison sheets: before, version A, and version B preview.\n\n'+paths.join('\n')})];
 writeFileSync(join(home,'events.jsonl'),events.map(e=>JSON.stringify(e)+'\n').join(''));
 const lease=Bun.listen({hostname:'0.0.0.0',port:0,socket:{data(){}}});const port=lease.port;lease.stop(true);
 const base='http://127.0.0.1:'+port,origin='http://desktop.tail9e0cf2.ts.net:'+port;
@@ -39,7 +39,7 @@ try{
  const invitation=await(await api('/auth/invitations',rootToken,'POST')).json();assert(invitation.code);
  device=await(await api('/auth/enroll',invitation.code,'POST',{'X-Backplane-Client':'native','X-Backplane-Name':'TEST remote message images'})).json();assert(device.token&&device.id);
  browser=Bun.spawn(['ssh','h@backplane','cd /home/h/bp-message-images && timeout --kill-after=5 180 /home/h/.bun/bin/bun test/tools/message_images_browser.mjs'],{stdin:'pipe',stdout:'pipe',stderr:'pipe'});
- browser.stdin.write(JSON.stringify({origin,token:device.token,paths,entry,out:'/home/h/bp-message-images/build/message-images/acceptance',bot:'Bub'}));browser.stdin.end();
+ browser.stdin.write(JSON.stringify({origin,token:device.token,paths,entry,out:'/home/h/bp-message-images/build/message-images/acceptance',bot:'Bub',botId:bot}));browser.stdin.end();
  await step('Remote paired browser assertions',Promise.all([capture(browser.stdout),capture(browser.stderr)]),200000);
  writeFileSync(join(out,'remote.log'),remoteLog.join(''));assert.equal(await browser.exited,0,'remote paired mobile browser');
  route='/message-image?entry='+entry+'&path='+encodeURIComponent(paths[0]);
