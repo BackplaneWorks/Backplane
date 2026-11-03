@@ -286,6 +286,8 @@ fold.worked = {took}作業 · {ago}
 fold.working = 作業中 · {ago}から
 fold.running = 実行中: {kind}
 fold.now = 実行中
+apierr.say = {kind, select, overloaded {ClaudeのAPIが過負荷になり} rate {ClaudeのAPIがレート制限に達し} server {ClaudeのAPIで内部エラーが起き} auth {ClaudeのAPIがサインインを拒否し} other {ClaudeのAPIがエラーを返し}}{code}、ターンが終了しました{why}。
+apierr.details = 詳細
 
 # bot tabs and moods
 bots.tab.chat = チャット

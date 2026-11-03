@@ -85,3 +85,17 @@ Node tests, including persisted project-message retries and keeping home
 drafts visible. The strict inventory found no missing literal actions, with
 all 33 home literal actions matched; computed actions elsewhere remain outside
 the inventory's static claim. These receipts use isolated hubs and stand-ins.
+
+Integration with main `5fe916af3` (#813) passed focused home assertions, all
+24 full-output sidebar cases, the new phone API-error test, error-row/fold
+regressions and fragmentation tests in `w-t1793685091-1352063-1357286`. Manual
+diff review confirms main's API-error formatting additions affect message
+bodies/reply blocks, alongside the existing home changes. Both reviewed
+fold/msgs inputs and all prior manifest records are preserved. Only the two
+combined web/mobile renderer hashes needed updating. No private key, scratch
+filter, unknown-input retention or authority change.
+
+The complete combined source with #813 passed in
+`w-t1793685091-1352063-1357327`: full type/proof gate (621 seconds), all eight
+required regressions, 29 browser acceptance checks including the exact long
+first message, Android/iOS builds and all seven isolated native smoke checks.
