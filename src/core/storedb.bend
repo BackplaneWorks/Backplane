@@ -1580,10 +1580,10 @@ def Demo.small.log() -> List<&2, LL>:
 #
 # 6 -> 7: codec 7 adds the setting thread.parent.<child> that a
 # TaskDelegated now writes (State.delegated) unless its parent is a bot's
-# thread at that moment. Its last value is the last of: such a
-# TaskDelegated, a ThreadParentSet, a SettingSet of the key. Which thread
-# is a bot's changes only with BotSet and BotDeleted, and none of these
-# folds reads anything else, so these five kinds alone give every
+# thread at that moment, and only when no parent key exists. Explicit
+# ThreadParentSet/SettingSet values then win, including an empty detach.
+# Which thread is a bot's changes only with BotSet and BotDeleted, and
+# these folds read no other state, so the five kept kinds still give every
 # thread.parent.* exactly as the whole log does.
 
 # a setting's key and value

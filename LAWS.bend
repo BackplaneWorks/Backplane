@@ -14400,7 +14400,7 @@ law sdb_up_parents_exact:
 
 # and they are these
 law sdb_up_parents_demo:
-  {SDB.Up.parents(M.State.replay(SDB.Up.demo(), M.State.empty())) == [SDB.UpKV{"thread.parent.c1", "tp"}, SDB.UpKV{"thread.parent.c2", ""}, SDB.UpKV{"thread.parent.c3", "tq"}, SDB.UpKV{"thread.parent.c4", "tx"}, SDB.UpKV{"thread.parent.c5", "tp"}, SDB.UpKV{"thread.parent.c6", "tz"}, SDB.UpKV{"thread.parent.c7", "tb"}] : List<&2, SDB.UpKV>}
+  {SDB.Up.parents(M.State.replay(SDB.Up.demo(), M.State.empty())) == [SDB.UpKV{"thread.parent.c1", "tp"}, SDB.UpKV{"thread.parent.c2", ""}, SDB.UpKV{"thread.parent.c3", "tq"}, SDB.UpKV{"thread.parent.c4", "tx"}, SDB.UpKV{"thread.parent.c5", "ty"}, SDB.UpKV{"thread.parent.c6", "tz"}, SDB.UpKV{"thread.parent.c7", "tb"}] : List<&2, SDB.UpKV>}
 
 # the changes are chosen by their decoded kind, never by a prefix of a name
 law sdb_up_keep_kinds:
