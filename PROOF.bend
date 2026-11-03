@@ -1,3 +1,11 @@
+import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
+
+import ./test/conversation-proof/production_clipping.bend as CONVPROOF
+
+import ./src/server/conversation-frame.bend as CONVFRAME
+
+import ./src/core/thin.bend as CONVINDEX
+
 import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
 
 import ./src/core/mailtriage.bend as MTRI
@@ -15628,3 +15636,34 @@ def Laws.sync_credit_report_duplicate(c, n, bytes):
 
 def Laws.sync_credit_reports_commute(c, n, bytes, m, more):
   SYNCREPORT.commute(c, n, bytes, m, more)
+
+# BEGIN bounded conversation presentation
+
+def Laws.conversation_preview_encoded_bytes(body, limit):
+  CONVPROOF.text_bound(body, limit)
+
+def Laws.conversation_control_chunk_encoded_bytes(body):
+  CONVPROOF.part_32768(body)
+
+def Laws.conversation_control_split_lossless(body, limit):
+  CONVPROOF.part_lossless(body, limit)
+
+def Laws.conversation_source_window_nonempty(ids, index):
+  CONVPROOF.rows_empty(ids, index)
+
+def Laws.conversation_source_window_cardinality(ids, index):
+  CONVPROOF.rows_count(ids, index)
+
+def Laws.conversation_final_envelope_not_refused(rid, result):
+  {==}
+
+def Laws.conversation_paging_uses_actual_window(index, thread, request, epoch, ids):
+  {==}
+# END bounded conversation presentation
+
+
+def Laws.conversation_floor_retains_source_row(u, index, id, window):
+  CONVSHAPE.floor_source(u, index, id, window)
+
+def Laws.conversation_floor_visible_text_nonempty(index, id):
+  CONVSHAPE.source_visible_text(index, id)

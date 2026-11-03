@@ -15,19 +15,17 @@ import ../core/reply.bend as RTO
 # Negotiated read-only body windows. Ordinary short messages remain whole;
 # large bodies retain their immutable source and use bounded UTF-8 pages.
 # Neither a body page nor its local rendering grants action authority.
+# Reply quotes use the same body budget: a quote may itself contain megabytes.
 def Body.enabled(web: Bool, p: J.Json) -> Bool:
   Bool.and(web, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n))
 
 def Body.large.entry(e: M.Entry, blocks: T.Blocks, threshold: Nat) -> Bool:
   match e:
-    # a person's reply stays whole: its "In reply to" line comes from the
-    # block its pages would show raw (core/reply.bend)
-    case M.Msg{_, _, M.User{}, +x, _}: Bool.and(Bool.not(RTO.Rto.is(x)), Nat.is_gt(T.Blocks.n(blocks), threshold))
     case M.Msg{_, _, _, _, _}: Nat.is_gt(T.Blocks.n(blocks), threshold)
     case _: Nat.is_gt(T.Blocks.n(blocks), 1n)
 
 def Body.threshold(p: J.Json) -> Nat:
-  Bool.pick(Nat, Nat.is_eq(J.Json.get_nat(p, "bodyBudget", 0n), 1n), 1n, 8n)
+  Bool.pick(Nat, Nat.is_eq(J.Json.get_nat(p, "bodyBudget", 0n), 1n), 1n, 4n)
 
 def Body.large(+r: T.Row, p: J.Json) -> Bool:
   Body.large.entry(T.Row.entry(r), T.Row.blocks(r), Body.threshold(p))
@@ -38,7 +36,7 @@ def Body.row.pick(large: Bool, r: T.Row, preview: Nat) -> T.Row:
     case False{} _: r
 
 def Body.row(+r: T.Row, +p: J.Json) -> T.Row:
-  Body.row.pick(Body.large(r, p), r, Bool.pick(Nat, Nat.is_eq(Body.threshold(p), 1n), 1n, 8n))
+  Body.row.pick(Body.large(r, p), r, Bool.pick(Nat, Nat.is_eq(Body.threshold(p), 1n), 1n, 4n))
 
 def Body.rows(ids: List<&2, String>, +index: T.Index, +p: J.Json, acc: List<&2, T.Row>) -> List<&2, T.Row>:
   match ids:
@@ -296,3 +294,34 @@ def Body.window(+ids: List<&2, String>, index: T.Index, anchor: String) -> List<
   +count = Nat.max(1n, Nat.div(n, 2n))
   +start = Nat.min(Nat.sub(Nat.add(Body.window.anchor(ids, index, anchor, 0n), 1n), count), Nat.sub(n, count))
   List.take(&2, String, List.drop(&2, String, ids, start), count)
+
+# Bound the source window before Markdown rendering. Count escaped JSON bytes,
+# including the body's preview and entry identity. Fitting may shrink further,
+# but never imports more history or loses the selected anchor to an older page.
+def Body.window.bytes(ids: List<&2, String>, +index: T.Index, +p: J.Json) -> Nat:
+  match ids:
+    case Nil{}: 0n
+    case id <> rest:
+      +row = Body.row(T.Index.row(index, Q.Q.num(id)), p)
+      Nat.add(J.Json.bytes(J.Json.obj([J.KV{"id", J.Str{M.Idx.id(T.Row.entry(row))}}, J.KV{"thread", J.Str{M.Idx.thread(T.Row.entry(row))}}, J.KV{"body", J.Str{T.Entry.text(T.Row.entry(row))}}])), Body.window.bytes(rest, index, p))
+
+def Body.window.bound(fuel: Nat, fits: Bool, +ids: List<&2, String>, +index: T.Index, +p: J.Json) -> List<&2, String>:
+  match fuel fits:
+    case 0n _: ids
+    case _ True{}: ids
+    case 1n+k False{}:
+      +next = Body.window(ids, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", ""))
+      Body.window.bound(k, Nat.is_le(Body.window.bytes(next, index, p), 32768n), next, index, p)
+
+def Body.window.limit(fuel: Nat, enough: Bool, +ids: List<&2, String>, +index: T.Index, +p: J.Json, +limit: Nat) -> List<&2, String>:
+  match fuel enough:
+    case 0n _: ids
+    case _ True{}: ids
+    case 1n+k False{}:
+      +next = Body.window(ids, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", ""))
+      Body.window.limit(k, Nat.is_le(List.length(&2, String, next), limit), next, index, p, limit)
+
+def Body.window.bounded(+ids: List<&2, String>, +index: T.Index, +p: J.Json) -> List<&2, String>:
+  +requested = Nat.max(1n, Nat.min(32n, J.Json.get_nat(p, "viewEntries", 32n)))
+  +selected = Body.window.limit(6n, Nat.is_le(List.length(&2, String, ids), requested), ids, index, p, requested)
+  Body.window.bound(6n, Nat.is_le(Body.window.bytes(selected, index, p), 32768n), selected, index, p)
