@@ -187,35 +187,32 @@ def systemd_scope(cap, argv):
             '-p', 'MemoryMax=%d' % cap, '-p', 'MemorySwapMax=0', *argv]
 
 
-def shim(args):
-    """Inside the compiler's own cgroup: check the kernel limits, run the command, read the limits and peak back."""
-    cg, overridden = cgroup_dir()
-    before = read_enforcement(cg, overridden)
-    code = None
-    if not enforcement_problems({**before, 'memory_peak': 1}, args.cap_bytes):
-        code = subprocess.run(args.cmd, cwd=ROOT, env={**os.environ, **PINNED_ENV}).returncode
-    else:
-        print('lowmem-shim: kernel cap not in force; the command was NOT run', file=sys.stderr)
-    Path(args.report).write_text(json.dumps({'exit': code, 'enforcement': read_enforcement(cg, overridden)}))
-    return 0 if code == 0 else 1
+def controller_cgroup():
+    """The cgroup of the nearest ancestor that sits in a lowmem-ctl-*.scope (the launcher's own capped scope).
+    Found by walking real process ancestry, so it cannot be named by a flag or an environment variable."""
+    pid = os.getppid()
+    while pid > 1:
+        try:
+            group = Path('/proc/%d/cgroup' % pid).read_text().split('0::', 1)[1].strip()
+            if re.search(r'/lowmem-ctl-[^/]+\.scope$', group):
+                return Path('/sys/fs/cgroup') / group.lstrip('/')
+            pid = int(Path('/proc/%d/stat' % pid).read_text().rsplit(')', 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            return None
+    return None
 
 
-def run_capped(cmd, cap, report, timeout=3000):
-    """The compiler in a kernel scope of its own (MemoryMax=cap, MemorySwapMax=0); (exit, enforcement) read from inside it."""
-    argv = systemd_scope(cap, [sys.executable, str(Path(__file__).resolve()), 'shim', '--cap-bytes', str(cap), '--report', str(report), '--', *cmd])
-    proc = subprocess.Popen(argv, cwd=ROOT, start_new_session=True)
+def run_inner(cmd, timeout):
+    """The compiler/proof command as a child of the worker, in the SAME kernel cgroup the guard admitted. The bend
+    flock descriptor is passed on explicitly (subprocess would close it). (exit, timed_out)."""
+    keep = [int(os.environ['BACKPLANE_HEAVY_LOCK_FD'])] if os.environ.get('BACKPLANE_HEAVY_LOCK_FD', '').isdigit() else []
+    proc = subprocess.Popen(cmd, cwd=ROOT, env={**os.environ, **PINNED_ENV}, start_new_session=True, pass_fds=keep)
     try:
-        proc.wait(timeout=timeout)
+        return proc.wait(timeout=timeout), False
     except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)  # the scope's whole tree; a timeout never qualifies
+        os.killpg(proc.pid, signal.SIGKILL)  # a timeout never qualifies
         proc.wait()
-        return None, None, True
-    try:
-        data = json.loads(Path(report).read_text())
-        return data.get('exit'), data.get('enforcement'), False
-    except (OSError, ValueError) as error:
-        print('lowmem-worker: no enforced compiler scope: %s' % error, file=sys.stderr)
-        return None, None, False
+        return None, True
 
 
 REAL_LOCK = '/tmp/bp-bend.lock'
@@ -232,18 +229,12 @@ def native_flock():
 
 
 def worker(args):
-    """Runs inside one job. The controller is itself held to CONTROLLER_CAP and the command to its own cgroup of
-    COMPILER_CAP (swap 0 both): the kernel enforces, and the receipt carries both cgroups read back from inside."""
+    """Runs under heavy-guard, which admitted it inside the COMPILER scope (MemoryMax=cap, MemorySwapMax=0, the bend
+    flock inherited). It reads that cgroup's limits from inside, runs the command in the same cgroup, reads them back,
+    and also records the controller scope that launched the chain. The kernel enforces; this only reports."""
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     cmd = [c.replace('{out}', str(out)) for c in args.cmd]
-    if not os.environ.get('LOWMEM_SCOPED') and not args.no_scope:
-        scope = systemd_scope(CONTROLLER_CAP, ['--setenv=LOWMEM_SCOPED=1', '--', sys.executable, str(Path(__file__).resolve()),
-                                               'worker', *sys.argv[sys.argv.index('worker') + 1:]])
-        try:
-            os.execvp(scope[0], scope)
-        except OSError as error:
-            print('lowmem-worker: no systemd scope to enforce the cap: %s' % error, file=sys.stderr)
     receipt = {'schema': 3, 'id': args.id, 'cmd_template': args.cmd, 'cmd': cmd, 'cap_bytes': args.cap_bytes,
                'env': PINNED_ENV, 'timeout_seconds': args.timeout, 'timed_out': False, 'exit': None,
                'enforcement': None, 'controller': None, 'phases': [], 'flock': False, 'protected': {},
@@ -263,18 +254,20 @@ def worker(args):
             phases.append('flock')
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print('lowmem-worker: provenance step failed: %s' % error, file=sys.stderr)
-    if phases == PHASES[:4]:
-        code, compiler, timed_out = run_capped(cmd, args.cap_bytes, out.parent / (args.id + '.enforcement.json'), args.timeout)
-        receipt.update(exit=code, enforcement=compiler, timed_out=timed_out)
-        if compiler is not None:
-            phases.append('enforce')
+    cg, overridden = cgroup_dir()
+    before = read_enforcement(cg, overridden)
+    if phases == PHASES[:4] and not enforcement_problems({**before, 'memory_peak': 1}, args.cap_bytes):
+        code, timed_out = run_inner(cmd, args.timeout)
+        receipt.update(exit=code, timed_out=timed_out, enforcement=read_enforcement(cg, overridden))
+        phases.append('enforce')
         if code is not None:
             phases.append('command')
-    try:  # the controller's own cgroup is recorded whether or not the command ran
-        cg, overridden = cgroup_dir()
-        receipt['controller'] = read_enforcement(cg, overridden)
-    except (OSError, IndexError):
-        pass
+    else:
+        receipt['enforcement'] = before
+        print('lowmem-worker: not admitted (kernel cap or flock missing); the command was NOT run', file=sys.stderr)
+    ctl = controller_cgroup()
+    if ctl is not None:
+        receipt['controller'] = read_enforcement(ctl, False)
     try:
         outputs = tree_hashes(out)
         if args.copy and Path(ROOT / args.copy).is_file():
@@ -297,6 +290,28 @@ def worker(args):
         args.id, receipt['exit'], ('%.2f GiB' % (receipt['peak_bytes'] / GIB)) if isinstance(receipt['peak_bytes'], int) else 'unknown',
         args.cap_bytes / GIB, receipt['seconds'], ' -- ' + '; '.join(why) if why else ''), flush=True)
     return 0 if not why else 1
+
+
+def launcher(args):
+    """Runs in the CONTROLLER scope (MemoryMax=CONTROLLER_CAP, swap 0), which stays alive to hold the chain:
+    controller scope -> systemd-run compiler scope (3.7e9 decimal max, swap 0) -> heavy-guard <profile> -> worker -> command.
+    The compiler scope is created before the guard so the guard's own-cgroup check is truthful; compiler + controller
+    stay under 4 GiB. Pre-steps (proof partition `generate`) run here, outside the guard's exact-command contract."""
+    py = str(Path(sys.executable).resolve())
+    for pre in args.pre:
+        step = shlex.split(pre)
+        if subprocess.run(step, cwd=ROOT).returncode != 0:
+            print('lowmem-launch: pre-step failed: %s' % pre, file=sys.stderr)
+            return 1
+    worker_argv = [py, str(ROOT / 'scripts/lowmem-build.py'), 'worker', '--id', args.id, '--out', args.out,
+                   '--cap-bytes', str(args.cap_bytes), '--timeout', str(args.timeout),
+                   *[x for p in args.protect for x in ('--protect', p)], *(['--copy', args.copy] if args.copy else []),
+                   '--', *args.cmd]
+    chain = systemd_scope(args.cap_bytes, ['--', py, str(ROOT / 'scripts/heavy-guard.py'), PROFILES[args.kind], '--', *worker_argv])
+    try:
+        return subprocess.run(chain, cwd=ROOT, timeout=args.timeout + 120).returncode
+    except subprocess.TimeoutExpired:
+        return 124
 
 
 def receipt_problems(r, cap, require_boat=True):
@@ -336,10 +351,7 @@ def receipt_problems(r, cap, require_boat=True):
     return why
 
 
-PROOF_WRAPPER = []  # the worker itself runs under the guard (see PROFILES), so the shard inherits the real flock
-
-
-def proof_jobs(proof_dir, wrapper=PROOF_WRAPPER):
+def proof_jobs(proof_dir):
     if not proof_dir:
         return []
     ps = Path(proof_dir) / 'manifest.json'
@@ -352,11 +364,10 @@ def proof_jobs(proof_dir, wrapper=PROOF_WRAPPER):
     jobs = []
     for s in manifest['shards']:
         result = '%s/receipts/%s.json' % (rel, s['id'])
-        # the partition is deterministic: a job regenerates it, and --expect pins its identity
-        script = ('[ -f %(d)s/manifest.json ] || python3 scripts/proof-shards.py generate --out %(d)s --shards %(n)d >/dev/null; '
-                  '%(w)s python3 scripts/proof-shards.py run --out %(d)s --shard %(s)s --expect %(i)s --result %(r)s'
-                  % {'d': rel, 'n': count, 'w': shlex.join(wrapper), 's': shlex.quote(s['id']), 'i': identity, 'r': result})
-        jobs.append({'id': 'proof-' + s['id'], 'kind': 'proof', 'cmd': ['sh', '-c', script], 'copy': result, 'shard': s['id'], 'identity': identity})
+        # the guard runs ONLY the structured proof-shards.py run; the deterministic partition is regenerated beforehand
+        pre = 'sh -c %s' % shlex.quote('[ -f %(d)s/manifest.json ] || python3 scripts/proof-shards.py generate --out %(d)s --shards %(n)d >/dev/null' % {'d': rel, 'n': count})
+        jobs.append({'id': 'proof-' + s['id'], 'kind': 'proof', 'pre': [pre], 'copy': result, 'shard': s['id'], 'identity': identity,
+                     'cmd': ['python3', 'scripts/proof-shards.py', 'run', '--out', rel, '--shard', s['id'], '--expect', identity, '--result', result]})
     return jobs
 
 
@@ -367,19 +378,28 @@ def plan(kinds, proof_dir):
     return jobs
 
 
-# The worker is launched under heavy-guard so it inherits the actual bend flock. proof-shard is lane 3's profile
-# (PR #854, exits 75 unless the cgroup is <=3.7 GiB with swap 0); compile-shard does not exist yet and must be
-# added by lane 3 with the same cgroup rule: until then heavy-guard refuses it and the job cannot qualify.
+# Process hierarchy (agreed with lane 3, PR #854): the controller scope (512 MiB, swap 0) holds `launch`, which creates
+# the compiler scope (3699998720 <= 3.7e9, swap 0) and runs heavy-guard <profile> in it; the guard takes the real bend
+# flock, checks its own cgroup and execs the worker, which runs the one allowed command. 3699998720 + 536870912 < 4 GiB.
 PROFILES = {'proof': 'proof-shard', 'hub': 'compile-shard', 'web': 'compile-shard', 'mobile': 'compile-shard'}
+
+
+def launch_argv(job, out, timeout, cap, protect=()):
+    """The launcher command line (it must itself run inside the controller scope)."""
+    return ['python3', 'scripts/lowmem-build.py', 'launch', '--id', job['id'], '--kind', job['kind'], '--out', out,
+            '--cap-bytes', str(cap), '--timeout', str(timeout), *[x for p in protect for x in ('--protect', p)],
+            *(['--copy', job['copy']] if job.get('copy') else []), *[x for p in job.get('pre', []) for x in ('--pre', p)], '--', *job['cmd']]
+
+
+def controller_argv(job, out, timeout, cap, protect=()):
+    unit = 'lowmem-ctl-%s-%d' % (re.sub(r'[^A-Za-z0-9]', '-', job['id']), os.getpid())
+    return systemd_scope(CONTROLLER_CAP, ['--unit=' + unit, '--', *launch_argv(job, out, timeout, cap, protect)])
 
 
 def boat_argv(job, run_dir, timeout, protect=(), python=sys.executable):
     rel = 'build/lowmem/%s/%s' % (run_dir.name, job['id'])
-    worker_cmd = ['python3', 'scripts/lowmem-build.py', 'worker', '--id', job['id'], '--out', rel,
-                  '--cap-bytes', str(CAP_BYTES), '--timeout', str(timeout), *[x for p in protect for x in ('--protect', p)],
-                  *(['--copy', job['copy']] if job.get('copy') else []), '--', *job['cmd']]
-    guard = ['python3', 'scripts/heavy-guard.py', PROFILES[job['kind']], '--']
-    return [str(BOAT_JOB), '--size', 'default', '--timeout', str(timeout + 300), '--artifact', rel, '--', *guard, *worker_cmd], rel
+    return [str(BOAT_JOB), '--size', 'default', '--timeout', str(timeout + 300), '--artifact', rel, '--',
+            *controller_argv(job, rel, timeout, CAP_BYTES, protect)], rel
 
 
 def protect_args(args):
@@ -392,10 +412,7 @@ def launch(job, run_dir, args):
     """Run one job; returns (exit code, folder where its artifacts landed or None)."""
     if args.runner == 'local':
         out = run_dir / job['id']
-        wc = [sys.executable, str(Path(__file__)), 'worker', '--id', job['id'], '--out', str(out),
-              '--cap-bytes', str(args.cap_bytes), '--timeout', str(args.timeout), *[x for p in protect_args(args) for x in ('--protect', p)],
-              *(['--copy', job['copy']] if job.get('copy') else []), '--', *job['cmd']]
-        p = subprocess.run(wc, cwd=ROOT)
+        p = subprocess.run(controller_argv(job, str(out), args.timeout, args.cap_bytes, protect_args(args)), cwd=ROOT)
         return p.returncode, out
     argv, rel = boat_argv(job, run_dir, args.timeout, protect_args(args))
     log = run_dir / (job['id'] + '.log')
@@ -728,21 +745,25 @@ def main(argv=None):
     w.add_argument('--id', required=True)
     w.add_argument('--out', required=True)
     w.add_argument('--cap-bytes', type=int, default=CAP_BYTES)
-    w.add_argument('--poll', type=float, default=0.1)
-    w.add_argument('--no-scope', action='store_true', help='tests only: the receipt will not qualify')
     w.add_argument('--copy')
     w.add_argument('--timeout', type=int, default=3000)
     w.add_argument('--protect', action='append', default=[], help='NAME=PATH of bend.ts, safe.ts, base')
     w.add_argument('cmd', nargs=argparse.REMAINDER)
-    h = sub.add_parser('shim')
-    h.add_argument('--cap-bytes', type=int, required=True)
-    h.add_argument('--report', required=True)
+    h = sub.add_parser('launch')
+    h.add_argument('--id', required=True)
+    h.add_argument('--kind', required=True, choices=sorted(PROFILES))
+    h.add_argument('--out', required=True)
+    h.add_argument('--cap-bytes', type=int, default=CAP_BYTES)
+    h.add_argument('--timeout', type=int, default=3000)
+    h.add_argument('--protect', action='append', default=[])
+    h.add_argument('--copy')
+    h.add_argument('--pre', action='append', default=[])
     h.add_argument('cmd', nargs=argparse.REMAINDER)
     args = p.parse_args(argv)
-    if args.op == 'shim':
+    if args.op == 'launch':
         if args.cmd[:1] == ['--']:
             args.cmd = args.cmd[1:]
-        return shim(args) if args.cmd else 2
+        return launcher(args) if args.cmd else 2
     if args.op == 'worker':
         if args.cmd[:1] == ['--']:
             args.cmd = args.cmd[1:]
