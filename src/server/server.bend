@@ -16553,7 +16553,9 @@ def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Requ
   match route req:
     case "/auth/invitations" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "create", "", inbox)
     case "/auth/devices" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "GET"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "list", "", inbox)
-    case "/auth/revoke" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "revoke", W.Http.header_of(hs, "x-backplane-device"), inbox)
+    case "/auth/revoke" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs,
+      Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), "revoke", "uninvite"),
+      Bool.pick(String, String.is_empty(W.Http.header_of(hs, "x-backplane-invitation")), W.Http.header_of(hs, "x-backplane-device"), W.Http.header_of(hs, "x-backplane-invitation")), inbox)
     case _ _: Conn.devices.fallback(String.is_empty(token), token, s, req, rest, web, id, inbox, trusted)
 
 
