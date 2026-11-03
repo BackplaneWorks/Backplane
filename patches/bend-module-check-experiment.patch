@@ -454,10 +454,10 @@ index 0000000..88be4be
 +}
 diff --git a/bend2/offload.ts b/bend2/offload.ts
 new file mode 100644
-index 0000000..9f4522f
+index 0000000..8389d4a
 --- /dev/null
 +++ b/bend2/offload.ts
-@@ -0,0 +1,706 @@
+@@ -0,0 +1,709 @@
 +// Experimental storage for terms already accepted by the unchanged checker.
 +// This is process-private spill storage, never a persisted proof-pass cache.
 +import * as fs from "node:fs";
@@ -1147,6 +1147,9 @@ index 0000000..9f4522f
 +  replace(book: Bend.Book, names: string[]): void {
 +    let collectedAt=process.memoryUsage().rss;
 +    for (const name of names) {
++      // Accepted prefix objects need no work here. Keep the initial RSS sample
++      // and poll after every new snapshot, where graph allocations can occur.
++      if (this.replaced.has(book.tlds[name])) continue;
 +      // Separate activation: destructuring temporaries from one large e are
 +      // unreachable before collecting the next accepted definition.
 +      this.replaceOne(book,name);

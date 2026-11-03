@@ -11,6 +11,8 @@
 // wire format; its dictionaries come from there).
 
 import App from "./app.bend";
+import { SecretSave } from "../web/secret-save.js";
+const secretSaves = new SecretSave(packed => App.secret_req(packed));
 // Use one Bend entry point so the native bundle has one Base runtime.
 const IssueScreen = App;
 import { BubMoveObserver } from "../web/bub-move.js";
@@ -377,8 +379,40 @@ function voiceHeard(k, envelope, o) {
   return { done: true, cmds, draw };
 }
 
+const secretErrors = new Map();
+let secretDirty = false;
+function secretScope(key) {
+  const state = thin.states.get(key) || recent.links.get(key);
+  return JSON.stringify([key, state?.target, state?.session?.sel, state?.session?.open?.settings === true]);
+}
+function secretApply(result) {
+  if (!result || result.scope !== secretScope(result.hub)) return [];
+  const { hub, action, value } = result;
+  secretDirty = true;
+  if (action === "secret-err") secretErrors.set(hub, result);else secretErrors.delete(hub);
+  if (thin.thin(hub)) { thin.request(hub, action, value);return []; }
+  if (recent.active(hub)) return recent.request(hub, action, value);
+  if (hub !== foregroundHub()) return [];
+  const r = App.act(hubs, action, value);hubs = r.hubs;
+  return commandList(r.cmds);
+}
+
+function secretInline(screen) {
+  const error = secretErrors.get(foregroundHub());
+  if (!screen || !error || error.scope !== secretScope(error.hub)) return;
+  const pending = [screen];
+  while (pending.length) {
+    const node = pending.pop();
+    if (!node || typeof node !== "object") continue;
+    if (node.fields?.some(field => field.name === "sval" && field.vault === true)) node.note = error.value;
+    for (const value of Object.values(node)) if (value && typeof value === "object") pending.push(value);
+  }
+}
+
 function currentDeadline() {
   const deadlines = [...recent.links.values()].filter(l => l.flight).map(l => l.flight.began + 5001);
+  const secretDeadline = secretSaves.deadline();
+  if (secretDeadline !== null) deadlines.push(secretDeadline);
   const deadline = thin.deadline();
   if (deadline !== null) deadlines.push(deadline);
   return deadlines.length ? Math.min(...deadlines) : null;
@@ -405,8 +439,10 @@ function direct(cmds, draw, updates = [], composer = null) {
     if (c.text) kept[c.thread] = c.text;
     else delete kept[c.thread];
   }
-  const canDraw = draw && (!thin.thin(foregroundHub()) || thin.views() !== null);
+  const canDraw = (draw || secretDirty) && (!thin.thin(foregroundHub()) || thin.views() !== null);
+  secretDirty = false;
   const screen = canDraw ? bubMovingScreen() : null;
+  secretInline(screen);
   const composerEdit = nativeDraftEdits.get(screen?.thread?.id)?.edit;
   return JSON.stringify({ screen, cmds, sync: syncUpdates.splice(0).concat(updates), deadline: currentDeadline(),
     ...(composerEdit === undefined ? {} : { composerEdit }), ...(composer && !screen ? { composer } : {}) });
@@ -414,7 +450,7 @@ function direct(cmds, draw, updates = [], composer = null) {
 
 function expired(followups = false) {
   thin.expire(followups);
-  const cs = [];
+  const cs = secretSaves.expire().flatMap(result => secretApply(result));
   for (const failure of recent.expire()) {
     cs.push(...failure.cmds);
     syncUpdates.push({ hub: failure.key, phase: "failed", detail: failure.failed });
@@ -650,7 +686,7 @@ globalThis.Backplane = {
   // cid: this phone's id, part of every message id (a resend is stored once);
   // drafts: the drafts it kept, as JSON {"<hub>|<thread>": text}
   start(cid, drafts) {
-    thin.reset();
+    thin.reset();secretErrors.clear();secretSaves.reset();secretDirty = false;
     nativeDraftEdits.clear(); nativeSubmits.clear();
     clientID = cid;
     hubs = App.init(secs(Date.now() / 1000), cid);
@@ -677,7 +713,7 @@ globalThis.Backplane = {
   },
   // Explicit pairing retirement; ordinary socket reconnects do not call it.
   forgetHub(key) {
-    thin.forgetHub(key);
+    thin.forgetHub(key);secretErrors.delete(key);secretSaves.cancel(key);
     for (const thread of nativeDraftEdits.keys()) if (thread.startsWith(key + "|")) nativeDraftEdits.delete(thread);
     for (const thread of nativeSubmits.keys()) if (thread.startsWith(key + "|")) nativeSubmits.delete(thread);
     // Remove the compact Bend client as well; a new pairing at the same
@@ -781,6 +817,10 @@ globalThis.Backplane = {
     }
     const o = decode(bytes(data), KEYS, WORDS);
     const type = fieldValue(o, "t");
+    if (type === "reply") {
+      const result = secretSaves.receive(k, plain(o));
+      if (result) return direct(secretApply(result), true);
+    }
     if (thin.thin(k)) {
       const envelope = plain(o);
       const voiced = voiceHeard(k, envelope, o);
@@ -990,16 +1030,16 @@ globalThis.Backplane = {
   // kept state, not a draft.
   secret(packed) {
     if (packed.startsWith("@apikey\u001f")) return this.apiKey(packed.slice(8));
-    const key = previewCur || App.current(hubs);
-    let r;
-    try { r = JSON.parse(App.secret_req(packed)); } catch { r = { error: "The secret could not be sent" }; }
+    const key = foregroundHub(), scope = secretScope(key);
+    let request = secretSaves.begin(packed, key, scope, thin.client?.links.get(key)?.accountBinding || "");
     packed = "";
-    if (r.error) return this.act("secret-err", r.error);
-    const send = { type: "send", hub: key, data: App.wire(r.rpc) };
-    r = null;
-    const after = JSON.parse(this.act("secret-sent", ""));
-    after.cmds = [send].concat(after.cmds || []);
-    return JSON.stringify(after);
+    if (request.error) return direct(secretApply({ hub: key, scope, action: "secret-err", value: request.error }), true);
+    if (request.busy) return direct([], false);
+    let send;
+    try { send = { type: "send", hub: key, data: App.wire(JSON.stringify(request.rpc)) }; }
+    catch { return direct(secretApply(secretSaves.finish(request.id, false, "The secret could not be sent. Paste it again and retry.")), true); }
+    request = null;
+    return direct([send], false);
   },
   // Settings' API key Save, by the same vault Save (screen.bend's
   // Mob.keys.form): "<the hub's name>\u001f<value>". The name is the one
@@ -1049,10 +1089,13 @@ globalThis.Backplane = {
   // (no screen either when the hub already was so: app.bend's online_same)
   online(k, b, quiet, epoch) {
     if (epoch && transportEpoch.get(k) !== epoch) return direct([], false);
-    if (!b) { bubLive.delete(k);bubMoves.disconnect(k); }
+    if (!b) {
+      bubLive.delete(k);bubMoves.disconnect(k);
+      for (const result of secretSaves.cancel(k)) secretApply(result);
+    }
     if (thin.thin(k)) {
       if (!b) { thin.disconnect(k); thin.fail(k, "connection closed"); }
-      return direct([], false);
+      return direct([], !b && secretErrors.has(k));
     }
     if (!b) {
       booting.delete(k);

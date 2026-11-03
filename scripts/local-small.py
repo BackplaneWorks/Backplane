@@ -6,6 +6,8 @@ import re
 import sys
 
 root = Path(__file__).resolve().parent.parent
+subprocess.run(['bun', 'test/tools/secret_save_test.mjs'], cwd=root, check=True)
+subprocess.run([sys.executable, 'test/tools/secret_box_handler_test.py'], cwd=root, check=True)
 # Required in every local lane, including focused-only and guards-only.
 subprocess.run([sys.executable, 'test/tools/sidebar_draft_guard_test.py'], cwd=root, check=True)
 subprocess.run(['bun', 'test/tools/store_checkpoint_io_test.cjs'], cwd=root, check=True)

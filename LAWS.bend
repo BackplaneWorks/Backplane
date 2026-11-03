@@ -1,3 +1,5 @@
+import ./src/core/message-context.bend as MSGCONTEXT
+
 import ./src/core/ws-fragments.bend as WSFRAG
 
 import ./src/core/http.bend as WSFRAME
@@ -496,6 +498,7 @@ import ./src/server/thin-still-picture.bend as STILLPICTURE
 import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
 
 import ./src/core/secret.bend as SEC
+import ./src/core/secret-box.bend as SBOX
 
 import ./src/server/thin-mirror.bend as TMR
 
@@ -13319,6 +13322,11 @@ law hot_demo_threads:
 # committed change's JSON (the log, the store, FTS, mail, every client),
 # each MCP answer, each agent output line as read and each line written to
 # an agent with these defs.
+# Every action has a dispatch slot, including the secure host's Save.
+# Source/behavior tests connect those slots to state and secure-host handlers.
+law sec_box_handlers:
+  {SBOX.Sbox.routes(SBOX.Sbox.actions()) == [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n] : List<&2, Nat>}
+
 law sec_mask_total:
   for +v: SEC.Vault
   for +s: String
@@ -13391,6 +13399,28 @@ law auth_owner_pair_routes:
 law auth_owner_pair_rebound:
   {AUTH.Auth.owner.pair(True{}, ["100.64.0.8:3787"], [HTTPAUTH.Header{"host", "attacker.invalid:3787"}], "POST", "/bots/pair") == False{} : Bool}
 # ---- end native owner tailnet pairing ----
+
+# ---- tokenless pairing proofs ----
+# A hub asking another to pair over a plain address proves the ask with an
+# HMAC of its own token; a hub without a token, an empty proof or a stale
+# one never passes (Auth.pair.checked)
+law auth_pair_proof_needs_token:
+  for to: String
+  for at: Nat
+  for now: Nat
+  for proof: String
+  {AUTH.Auth.pair.checked("", to, at, now, proof) == False{} : Bool}
+
+law auth_pair_proof_not_empty:
+  for to: String
+  for at: Nat
+  for now: Nat
+  {AUTH.Auth.pair.checked("secret", to, at, now, "") == False{} : Bool}
+
+law auth_pair_proof_stale:
+  for to: String
+  {AUTH.Auth.pair.checked("secret", to, 1000n, 1061n, "ab") == False{} : Bool}
+# ---- end tokenless pairing proofs ----
 
 # ---- far queue: calls for the owner's machines that are away (hub.bend's Fq.*) ----
 # thread_send and thread_launch wait for a machine that is away; nothing else does
@@ -15891,6 +15921,18 @@ law autosettle_delegation_seed_not_personal:
 
 law autosettle_human_followup_is_personal:
   {AUTOS.Auto.direct.seed("human-followup", "More work", "m100-4") == True{} : Bool}
+
+# Tool activity cannot spend the allowance for human/assistant text.
+law context_tool_keeps_text_allowance:
+  for es: List<&2, M.Entry>
+  {MSGCONTEXT.Context.latest(M.Act{"call", "t", "tool", "shell", "work", 1n} <> es, False{}, False{}) == MSGCONTEXT.Context.latest(es, False{}, False{}) : List<&2, String>}
+
+law context_closed_run_is_one_display_row:
+  for e: M.Entry
+  for +id: String
+  for label: String
+  for live: Bool
+  {MSGCONTEXT.Context.unit(e, FO.RHead{id, label, False{}, live}) == ["fold:" ++ id] : List<&2, String>}
 
 # Indexed history is durable; a hub/client replay cache never owns its past.
 law stored_wire_cache_is_empty:

@@ -8,6 +8,7 @@ installMessageImages();
 // is dumb).
 
 import App from "./app.bend";
+import { SecretSaveHost } from "./secret-save.js";
 import { starAttention } from "./star-attention.js";
 const starAttentionSync = starAttention();
 import { sizeComposer, sizeComposerControls } from "./composer-size.js";
@@ -1192,6 +1193,7 @@ function render() {
   }
   searchLight(tl2);
   panes();
+  secretSaves.paint();
   projectSplitters.sync();
   Solid.mount(document.getElementById("solid"));
   ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
@@ -1509,20 +1511,21 @@ function fabLook(target) {
   setTimeout(() => { if (thin?.ready) thin.request("fab-look", ""); }, 0);
 }
 
-// The secret box's Save: valueOf read the masked field once (and emptied
-// it); the value goes in one secret.set request straight to the hub, never
-// through a view action, the outbox, a draft or the client's state. Bend
-// builds and checks it (app.bend's secret_req); only the name comes back.
-function secretSave(packed) {
-  let r;
-  try { r = JSON.parse(App.secret_req(packed)); } catch { return true; }
-  packed = "";
-  if (r.error) return dispatch("secret-err", r.error);
-  if (!socket || socket.readyState !== 1) return dispatch("secret-err", "Not connected to the hub");
-  socket.send(fromList(App.wire_out(r.rpc)));
-  r = null;
-  return dispatch("secret-sent", "");
-}
+// The secure field is read only at Save. Keep metadata until the matching
+// hub ACK, never the value, body, a view action or a retry outbox entry.
+const secretSaves = new SecretSaveHost({
+  build: packed => App.secret_req(packed),
+  scope: () => JSON.stringify([presentationTarget(currentSession()), currentSession().sel, currentSession().open?.settings === true]),
+  binding: () => thin?.client.links.get(location.origin)?.accountBinding || "",
+  send: rpc => {
+    if (!socket || socket.readyState !== 1) throw Error("Disconnected");
+    socket.send(fromList(App.wire_out_json(Wire.json(rpc))));
+  },
+  dispatch,
+  note: text => { const note = document.querySelector(".sbox-note");if (note) note.textContent = text; },
+});
+function secretSave(packed) { return secretSaves.save(packed); }
+setInterval(() => secretSaves.expire(), 250);
 
 // A sealed form's Save (Enter in its fields too; client.bend's Sealed),
 // as the secret box's: the form's fields have no binding, so what is typed
@@ -3385,6 +3388,7 @@ async function startThin(again = false, reason = "initial") {
     checkpointFocused();remoteReady = false;desktopBrowser.hide();ViewerTools.reset();viewerRpc.reset();improvementsRpc.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
     keepThinReading();bodyWindows.disconnect();thin?.disconnect();if (socket === s) socket = null;
+    secretSaves.disconnect();
     if (!frontendNode) void restoreFocused(true);
     later();thinReconnect();
   };
@@ -3546,7 +3550,7 @@ async function startThin(again = false, reason = "initial") {
           historyDirection = "";historyOlderDemand = 0;historyFillMore(null, false);
           historyGone.older.clear();historyGone.newer.clear();thin?.heldReset?.();
         } else historyBack(detail.window?.ids);
-        if (detail.entry) entryHistory.arm(historyFillOwner(), detail.window?.remaining);
+        if (detail.entry) entryHistory.arm(historyFillOwner(), detail.window?.remaining, detail.window?.contextMessages);
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
@@ -3632,6 +3636,7 @@ async function startThin(again = false, reason = "initial") {
       if (envelope.t === "plotrevision") { ViewerTools.sourceRevision(envelope.key, envelope.revision); return; }
       if (envelope.t === "plotstamp") { ViewerTools.sourceStamp(envelope.key, envelope.revision); return; }
       voiceMicHeard(envelope);
+      if (secretSaves.receive(envelope)) return;
       if (envelope.t === "reply" && sealedReply(envelope)) return;
       if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { diagnostic.greeting(envelope);clearTimeout(thinGreetingTimer);thin.greeting(envelope); }

@@ -149,8 +149,9 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     link.focus();
   }
   function invitationState(x) {
-    if (x.state === 'used') return 'Used ' + new Date(x.usedAt).toLocaleString() + ' by ' + (x.deviceName || 'a device') + (x.deviceRevoked ? ' (revoked)' : '');
-    if (x.state === 'revoked') return 'Revoked' + (x.device ? ' with ' + (x.deviceName || 'the device it paired') : ', never used');
+    const thing = x.kind === 'machine' ? 'a machine' : 'a device', its = x.kind === 'machine' ? 'the machine it linked' : 'the device it paired';
+    if (x.state === 'used') return 'Used ' + new Date(x.usedAt).toLocaleString() + ' by ' + (x.deviceName || thing) + (x.deviceRevoked ? (x.kind === 'machine' ? ' (unlinked)' : ' (revoked)') : '');
+    if (x.state === 'revoked') return 'Revoked' + (x.device ? ' with ' + (x.deviceName || its) : ', never used');
     if (x.state === 'expired') return 'Expired, never used';
     return 'Not used yet · expires ' + new Date(x.expiresAt).toLocaleTimeString();
   }
@@ -204,14 +205,14 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
         // revoking a used one also revokes the device it paired
         links.replaceChildren();element('h2', 'Pairing links', links);
         const issued = result.invitations || [];
-        if (!issued.length) element('p', 'Links made with Add a device appear here.', links);
+        if (!issued.length) element('p', 'Links made with Add a device, and invites made in Bots to link a machine, appear here.', links);
         for (const x of issued) {
           const row = element('div', '', links, {class: 'pairing-device'});
-          element('strong', 'Device invitation · ' + new Date(x.createdAt).toLocaleString(), row);
+          element('strong', (x.kind === 'machine' ? 'Machine invite · ' : 'Device invitation · ') + new Date(x.createdAt).toLocaleString(), row);
           element('p', invitationState(x), row);
           const live = x.state === 'open' || (x.state === 'used' && x.device && !x.deviceRevoked);
           if (live) button(row, 'Revoke', async () => {
-            if (!globalThis.confirm(x.state === 'used' ? 'Revoke this link and the device it paired (' + (x.deviceName || 'unnamed') + ')?' : 'Revoke this link? It will no longer pair anything.')) return;
+            if (!globalThis.confirm(x.state === 'used' ? (x.kind === 'machine' ? 'Revoke this invite and unlink the machine it linked (' : 'Revoke this link and the device it paired (') + (x.deviceName || 'unnamed') + ')?' : 'Revoke this link? It will no longer pair anything.')) return;
             try { await request('/auth/revoke', 'POST', {'X-Backplane-Invitation': x.id});await refresh(); } catch(e) { error(status, e.message); }
           });
         }

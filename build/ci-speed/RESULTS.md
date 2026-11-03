@@ -946,3 +946,144 @@ No final GNU RSS exists for the killed/timed-out compiler processes; reported
 checkpoint maxima are lower bounds. No separate per-law proof time or pure
 parse time can be recovered from these marks, and no full proof suite was
 run. PR #856 remains opt-in and nonqualifying for a complete build or release.
+
+### Skip redundant stored-prefix RSS polls (candidate D, 2026-11-03)
+
+The opt-in checked-result store revisits the accepted prefix after every
+bounded group. Previously each already-stored object returned immediately
+from `replaceOne`, then still sampled RSS. The change skips those no-ops
+before that sample. The initial boundary sample and RSS/GC check after every
+newly stored object remain; replacing the object at an existing name still
+stores it and polls. No kernel invocation or law/proof check is skipped.
+
+| Change | Before | After |
+|---|---|---|
+| Candidate D on V21 plus warm-hit revalidation | Saved matching focused run 82.690s /2,928,256KiB | 71.297s /2,841,160KiB (2.71GiB), exact output bytes; observed 13.8% shorter wall and 3.0% lower RSS, one sample each on separate default Boat VMs. |
+
+[Identity and measurement scope](compiler-memory/rss-polls/IDENTITY.json),
+[actual result](compiler-memory/rss-polls/RESULT.json),
+[GC-boundary controls](compiler-memory/rss-polls/rss-boundaries.txt),
+[integrity/snapshot controls](compiler-memory/rss-polls/controls.json) and
+[compiler controls](compiler-memory/rss-polls/compiler-controls.json) bind
+this change to the exact revalidated `e40ce511...` base and `4c4941f5...`
+postimage. The 4 synthetic RSS-boundary cases verify the initial sample,
+collection threshold/reset, 4,096 no-op names, duplicate names and new objects
+at old names; 18 integrity/snapshot cases and 25 changed-mode compiler cases
+pass, reusing completed full-mode references. Typed false theorems still fail.
+The GC fixture overrides RSS/GC only inside the test; the actual measurement
+uses enforced compiler 3,699,998,720-byte and controller 536,870,912-byte caps,
+zero swap, the real native bend flock and zero observed OOM events.
+
+The matching saved baseline is job `j20261103205550-2996607`; this run is
+`j20261103223844-3932649`, work `w-t1793650867-1261555-1450578`.
+Packet `56661233c1e83886ced7c12c8bda57bd3a3215d2dc55220d75fd602d7ac76142`
+verifies the source/tool inputs before and after execution. Final focused JS
+SHA256 remains `a7401f2712f024aa9f4b7c2101b454e15c6fba0001eb9f5ec7bafb5419b7097f`.
+The saved fixture imports the real refview closure and emits a constant main;
+it is not a complete hub/web build. This single observation does not establish
+causal or typical-PR speedup. The diagnostic profiler's inflated per-call timer
+figures are not used as an estimate of time saved.
+
+The [RSS fixture](compiler-memory/rss-polls/rss-controls.ts) expects an adjacent
+`compiler/` directory containing the pinned upstream checkout with this patch
+applied; it must run with the manifest's checksum-pinned Bun binary.
+This delta is separate from lane 5's lazy-prepare candidate. Original
+`bend.ts`, `safe.ts` and Base hashes are unchanged. No full hub/web, full
+proof, C/BendTT or app/install/release work was run. The experiment stays
+opt-in; existing full-build failures and RC4 gates remain unqualified.
+
+Cost: **97 credit-s ($0.00097)**; sandbox deletion verified. Baseline receipts
+were reused without another baseline run or another charge.
+
+### Retain unchanged canonical proof shard keys (2026-11-03)
+
+Previously every shard key included the entire canonical LAWS/PROOF contents.
+It now keys the actual generated proof/import closure after independently
+re-verifying the complete canonical partition. Content, modes, logical
+membership and tool/planner/closure/verdict/guard identities remain bound.
+Actual transitive imports of full canonical files are retained, not omitted.
+
+| Change | Before | After |
+|---|---|---|
+| One-line proof comment edit, real 3,165-law /128-shard Git export | 128 keys invalidated; 0 retained | 1 invalidated; 127 retained |
+| Replan/key after that edit (one observation each, same host) | 2.604s | 3.108s |
+
+[Measurement](proof-cache/MEASURE.json), [GNU time](proof-cache/MEASURE.time),
+[reproducer and trust limits](proof-cache/README.md). These are key-retention
+counts, not executed proof-cache hits or proof/CI speed. The complete offline
+comparison took **17.11s /204,628KiB peak RSS**, with no Bend execution or pass
+recording. Cost **$0**, no Boat job. The earlier export omitted imported test
+modules and failed before measurement; its failure receipt is preserved.
+
+Sixteen dedicated controls pass, including stale false-theorem keys, dependent
+proofs, shared/transitive imports, full canonical imports, modes, changed policy,
+slot renumbering, missing/corrupt inputs and forged dropped-law manifests.
+Lane 4 independently reviewed the patch and passed these 16 plus the existing
+39 cache tests. Canonical laws and proofs are unchanged; no broad proof run was
+made. A shard hit remains a local same-user trust result, not a complete gate.
+All shards must be accounted for in a verified full partition; a production
+mixed cached/fresh join, shared signed cache and actual capped proof timings
+are still pending. Compiler and installer lanes are untouched.
+
+### Portable source and proof-cache modes (2026-11-03)
+
+Regular PR #860 normal-merged at `d20e1db4e44d8746ee367252611b7d04de28c99e`
+after independent exact-head review, 41 planner/guard controls in 0.394s and a
+fresh merged LAWS/PROOF shape check. It fixes raw 0664/0600 source-mode identity
+mismatches across host and Boat without changing resource floors or the
+compiler. The cache input key now uses the same checked Git-mode convention.
+
+| Change | Before | After |
+|---|---|---|
+| Partition mode identity across host/Boat umasks (#860) | 0664 and 0600 differ; worker identity refuses | Both map to 0644; executable-bit changes and special/unreadable/non-regular modes still fail |
+| Two-law fixture cache keys after chmod of all inputs 0644 to0600 | 0/2 retained | 2/2 retained |
+| That fixture's key plan, one observation each | 10.640ms | 10.446ms |
+
+[Receipt and scope](proof-cache/MODES.json), [GNU time](proof-cache/MODES.time),
+[test summary](proof-cache/PORTABLE-TESTS.txt) and [details](proof-cache/README.md).
+The comparison uses the real partition/key code with a mocked toolchain;
+it measures key retention, not executed cache hits or proof/CI speed. Full
+comparison **0.12s /28,456KiB peak RSS**, cost **$0**. No proof, compiler,
+Boat, app, package, install or release job ran. Shared cache trust, mixed
+cached/fresh gate wiring and actual proof timing remain pending.
+
+### Reject stale cached check plans (2026-11-03)
+
+Saved all-hit plans previously returned success without checking their keys,
+tools or cache entries again; mixed runs revalidated only misses. Plans now
+contain a complete versioned inventory, and every success path revalidates all
+current keys, inventory and authenticated hits. Miss runs also revalidate hits
+after execution before recording anything. The shell's all-hit route consumes
+the plan through that validator. Existing heavy guards/floors are unchanged.
+
+| Change | Before | After |
+|---|---|---|
+| Saved all-hit plan after dependency edit, new module, or deleted pass (four-module fixture) | Incorrect success in all 3 cases | All 3 refused; no Bend |
+| Unchanged all-hit consumption, one fixture observation each | 0.020ms | 0.722ms; no Bend/heavy admission |
+
+[Receipt](cache-plan/MEASURE.json), [time](cache-plan/MEASURE.time),
+[controls](cache-plan/TESTS.txt) and [contract/limits](cache-plan/README.md).
+The fixture uses mocked tools and test-only authenticated passes: these are
+validation/correctness measurements, not proof execution or real PR timing.
+Complete comparison **0.07s /28,244KiB peak RSS**, cost **$0**. Thirteen new
+negative/positive controls pass; all 111 relevant cache/closure/planner/guard
+tests pass in 2.117s, with independent lane-4 review and 70 repeated controls.
+Old plans or vanished entries require re-planning. Production callers still
+need immutable input snapshots; shared cache trust and actual bounded proof
+gate/timing remain pending. No full proof, compiler, Boat or release work ran.
+
+### Real repository cache metadata cost (2026-11-03)
+
+| Measurement after #873 | Before | Measured now |
+|---|---|---|
+| Actual 1,180-module repository key planning | Previously only a fixture measurement; no comparable baseline | 0.203s initial plan; 0.202s complete revalidation |
+
+[Raw receipt](cache-plan/REAL-PLAN.json), [GNU time](cache-plan/REAL-PLAN.time),
+[bounded reproducer and limits](cache-plan/README.md). Work
+`w-t1793650867-1261555-1460917` exits 0 with unchanged source/tool metadata.
+Enforced scope: **512MiB /swap 0**; aggregate peak **45,858,816 bytes**, no max,
+OOM or OOM-kill events. Whole process **0.43s /55,976KiB GNU peak RSS**; cost
+**$0**. Every module has a content key. No Bend executable, checker/proof,
+pass seed, compiler, Boat, app or release job runs. This is metadata-only
+planning cost, not warm execution or typical-PR timing. It rules out planning
+as the current large bottleneck; execution/memory and trusted reuse remain.

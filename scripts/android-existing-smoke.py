@@ -16,6 +16,14 @@ INPUT = BASE / "input"
 OUT = BASE / "evidence"
 
 
+def producer_input(download):
+    """The configured-android-release artifact retains its bootstrap directory."""
+    root = download / "bootstrap-android"
+    if not root.is_dir() or root.is_symlink():
+        raise ValueError("Expected configured Android artifact's bootstrap-android directory")
+    return root
+
+
 def bound_apk(root, source, version, code):
     if not re.fullmatch(r"[0-9a-f]{40}", source):
         raise ValueError("Expected full source commit")
@@ -45,7 +53,7 @@ def adb(*args, timeout=25, check=True):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    apk, receipt = bound_apk(INPUT, os.environ["EXPECTED_SOURCE"],
+    apk, receipt = bound_apk(producer_input(INPUT), os.environ["EXPECTED_SOURCE"],
                             os.environ["EXPECTED_VERSION"], os.environ["EXPECTED_CODE"])
     binding = {"sourceCommit": receipt["sourceCommit"], "channel": receipt["channel"],
                "version": receipt["version"], "versionCode": receipt["version_code"],

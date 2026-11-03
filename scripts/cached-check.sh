@@ -26,6 +26,8 @@ python3 scripts/content-cache.py plan-check $all --plan "$work/plan.json" >"$wor
 misses=$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["miss"]))' "$work/plan.out")
 total=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(len(d["hit"])+len(d["miss"]))' "$work/plan.out")
 if [ -z "$misses" ]; then
+  # Planning is not a gate: source/tools/entries may have changed since lookup.
+  python3 scripts/content-cache.py run-check --plan "$work/plan.json"
   echo "cached-check: all $total modules cached ($(( $(date +%s) - start ))s)"
   exit 0
 fi
