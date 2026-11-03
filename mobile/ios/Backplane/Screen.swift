@@ -303,6 +303,7 @@ struct Card: Decodable {
 // piece picked ("chunk,info" of the held chunks) and its card
 struct Viewer: Decodable {
     let open, key, layers: String
+    let panes: [Viewer]?
     let choices: [Choice]
     let bg: UInt32
     let fade: Int

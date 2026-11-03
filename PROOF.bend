@@ -60,6 +60,8 @@ import ./src/core/sidebar-read.bend as SIDEREAD
 
 import Base
 
+import ./src/core/wire-retention.bend as WRET
+
 import ./src/server/modelcache.bend as MCACHE
 
 import ./src/core/pathrecords.bend as PR
@@ -15746,6 +15748,12 @@ def Laws.home_owner_round_trip(project):
     case SNil{}: {==}
     case SCon{h, t}: {==}
 
+def Laws.home_split_requires_saved_documents():
+  {==}
+
+def Laws.home_3d_uses_saved_board(contents):
+  {==}
+
 def Laws.websocket_orphan_continuation_is_rejected(bytes):
   {==}
 
@@ -15759,4 +15767,23 @@ def Laws.context_tool_keeps_text_allowance(es):
   {==}
 
 def Laws.context_closed_run_is_one_display_row(e, id, label, live):
+  {==}
+
+def Laws.stored_wire_cache_is_empty(xs):
+  {==}
+
+def Laws.memory_wire_reference_is_exact(xs):
+  {==}
+
+def Laws.autosettle_finished_work_wake_not_running(owned):
+  {==}
+
+def Laws.autosettle_live_thread_wake_held():
+  {==}
+
+def Laws.home_viewer_size_keeps_owner(u, value):
+  match u:
+    case U.Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}: {==}
+
+def Laws.home_viewer_size_is_local(u, value):
   {==}

@@ -22,6 +22,10 @@
 #   BACKPLANE_EMIT_CACHE  the emitted JS kept by a hash of everything bend
 #                     reads (default ~/.cache/backplane-bend/emit-js; 0 =
 #                     none); three are kept
+#   BACKPLANE_PREEMITTED_JS / BACKPLANE_PREEMITTED_SHA256 /
+#   BACKPLANE_PREEMITTED_KEY  exact producer-verified raw JS and its import/tool
+#                     key (service-release.py verifies the producer receipt).
+#                     No Bend fallback; separate compile-js admission applies.
 # Prints one "stages:" line: emit (fresh or reused), stamp, compile seconds
 # and the emit's peak RSS.
 set -eu
@@ -36,7 +40,6 @@ fi
 # Reject unreviewed source before reserving memory or offloading a build.
 # The same review also runs in the admitted child before any cached emit.
 . scripts/heavy-guard.sh
-[ "${1:-}" = --key ] || heavy_guard build "$@"
 # the key the emit is kept under: only what bend reads for $src (its
 # imports, effects and headers), so a change elsewhere (the web client, a
 # script) reuses the last emit
@@ -46,6 +49,18 @@ emit_key() {
 if [ "${1:-}" = --key ]; then
   emit_key "${2:?build-js.sh --key SRC}"
   exit
+fi
+# Retained, producer-verified emission has no Bend phase. Validate before
+# selecting its separate admission profile, then validate again while copying
+# under the real bend lock. Even a missing/corrupt input must never fall back
+# to the whole-program emitter under the compile-only budget.
+retained=0
+if [ -n "${BACKPLANE_PREEMITTED_JS:-}${BACKPLANE_PREEMITTED_SHA256:-}${BACKPLANE_PREEMITTED_KEY:-}" ]; then
+  python3 scripts/retained-js.py --actual-key "$(emit_key "$1")"
+  heavy_guard compile-js "$@"
+  retained=1
+else
+  heavy_guard build "$@"
 fi
 src=$1
 out=$2
@@ -68,7 +83,10 @@ if [ -n "$EMIT_CACHE" ]; then
 fi
 how=fresh
 rm -f "$work/emit.rss" "$work/emit.resources.json" "$work/stamp.resources.json" "$work/compile.resources.json"
-if [ -n "$key" ] && [ -f "$EMIT_CACHE/$key.js" ] && [ -f "$EMIT_CACHE/$key.js.ok" ] \
+if [ "$retained" = 1 ]; then
+  python3 scripts/retained-js.py --actual-key "$(emit_key "$src")" --output "$work/all.js"
+  how=retained-verified
+elif [ -n "$key" ] && [ -f "$EMIT_CACHE/$key.js" ] && [ -f "$EMIT_CACHE/$key.js.ok" ] \
     && [ "$(cat "$EMIT_CACHE/$key.js.ok")" = "$(wc -c <"$EMIT_CACHE/$key.js" | tr -d ' ')" ]; then
   cp "$EMIT_CACHE/$key.js" "$work/all.tmp.js" && mv "$work/all.tmp.js" "$work/all.js"
   touch "$EMIT_CACHE/$key.js" "$EMIT_CACHE/$key.js.ok"

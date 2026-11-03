@@ -1,8 +1,8 @@
 #!/bin/bash
 # Run one command on a disposable Boat sandbox (boat.dev), from this worktree.
 #
-#   scripts/boat-job.sh [--size small|default] [--timeout SECS] [--artifact PATH]...
-#                       [--exclude GLOB]... [--budget-usd X] [--wait SECS] [--setup-bend|--no-setup-bend] -- CMD...
+#   scripts/boat-job.sh [--size small|default|large|xlarge] [--timeout SECS] [--artifact PATH]...
+#                       [--include-file PATH]... [--exclude GLOB]... [--budget-usd X] [--wait SECS] [--setup-bend|--no-setup-bend] -- CMD...
 #   scripts/boat-job.sh sweep      delete sandboxes this tool started whose job is gone
 #   scripts/boat-job.sh status [--json] [--refresh]   the ledger and the cached account limits
 #
@@ -10,7 +10,7 @@
 # It never takes the local "bend" lock. Admission follows Boat's live limits:
 # active sandboxes and the rolling start windows (minute, hour, day), counting
 # other clients' starts, our own attempts and jobs still starting; a full slot
-# or minute/hour window waits (--wait, default 1 h), a full day refuses. Opt-in: nothing runs unless this
+# or start window refuses immediately; jobs never queue for admission. Opt-in: nothing runs unless this
 # project's root is listed in $ROOT/enabled (one absolute path per line).
 #
 # What it does, in order (any failure before create: nothing created):
@@ -194,7 +194,7 @@ limits_live() { local l; l=$(BT=30 b limits --json 2>/dev/null) || { account_cac
 
 # credit-seconds a sandbox used since a time (a job's share of a reused one)
 usage_since() { BT=30 b usage "$1" --since "$2" --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(int(d.get("seconds",0))*int(d.get("billingMultiplier",1)))' 2>/dev/null; }
-rate2() { case $1 in small) echo 1 ;; large) echo 4 ;; *) echo 2 ;; esac; }
+rate2() { case $1 in small) echo 1 ;; large) echo 4 ;; xlarge) echo 12 ;; *) echo 2 ;; esac; }
 
 # delete one sandbox of ours and check it is gone; 0 when verified
 delete_verify() {
@@ -315,7 +315,7 @@ now = int(time.time())
 for j in jobs.values():
     if "started_at" in j: j["runtime_s"] = j.get("ended_at", now) - j["started_at"]
 # per thread (the thread header chip): running beats warm beats starting; the largest size
-rank = {"small": 0, "default": 1, "large": 2}; srank = {"starting": 0, "warm": 1, "running": 2}
+rank = {"small": 0, "default": 1, "large": 2, "xlarge": 3}; srank = {"starting": 0, "warm": 1, "running": 2}
 threads = {}
 def put(t, state, size, since, until=None):
     if not t: return
@@ -341,7 +341,7 @@ try:
     bv = float(open(bpath).read().strip()); budget = {"usd": bv, "cs": int(round(bv * 100000)), "source": "file", "file": bpath}
 except FileNotFoundError: budget = {"usd": 0.5, "cs": 50000, "source": "default", "file": bpath}
 except Exception: budget = {"usd": 0.5, "cs": 50000, "source": "default (budget-usd unreadable)", "file": bpath}
-print(json.dumps({"rate": {"credit_s_per_usd": 100000, "small": 0.5, "default": 1, "large": 2}, "account": account, "budget": budget,
+print(json.dumps({"rate": {"credit_s_per_usd": 100000, "small": 0.5, "default": 1, "large": 2, "xlarge": 6}, "account": account, "budget": budget,
   "ambiguous": sum(1 for j in out if j["state"] in ("ambiguous", "unresolved")),
   "unresolved": sum(1 for j in out if j["state"] == "unresolved"),
   "running": sum(1 for j in out if j["state"] in ("starting", "running")),
@@ -400,15 +400,16 @@ case ${1:-} in
     fold ids; exit 0 ;;
 esac
 
-SIZE="" TIMEOUT=1800 WAIT=${BOAT_JOB_WAIT:-3600} BUDGET_ASK="" SETUP_BEND=auto
-IDLE=${BOAT_JOB_IDLE:-1200} KEEP_BUILD=0 NOREUSE=0 GUARD=${BOAT_JOB_START_GUARD:-0.8}
-ARTS=() EXCL=()
+SIZE="" TIMEOUT=1800 WAIT=${BOAT_JOB_WAIT:-0} BUDGET_ASK="" SETUP_BEND=auto
+IDLE=${BOAT_JOB_IDLE:-1200} KEEP_BUILD=0 NOREUSE=0
+ARTS=() EXCL=() INCLUDE=()
 while [ $# -gt 0 ]; do
   case $1 in
     --size) SIZE=$2; shift 2 ;;
     --timeout) TIMEOUT=$2; shift 2 ;;
     --artifact) ARTS+=("$2"); shift 2 ;;
     --exclude) EXCL+=("$2"); shift 2 ;;
+    --include-file) INCLUDE+=("$2"); shift 2 ;;
     --budget-usd) BUDGET_ASK=$2; shift 2 ;;
     --wait) WAIT=$2; shift 2 ;;
     --idle) IDLE=$2; shift 2 ;;
@@ -435,8 +436,9 @@ sys.exit(0 if proof else 1)'; then
     SIZE=large; echo "this runs PROOF: large (16 GB) by default (the proof outgrew 8 GB with #149); --size to choose"
   else SIZE=default; fi
 fi
-case $SIZE in small) RATE2=1 ;; default) RATE2=2 ;; large) RATE2=4 ;; *) say "size $SIZE is not supported (small, default or large; large only when the job is measured to need it)"; exit 75 ;; esac
+case $SIZE in small) RATE2=1 ;; default) RATE2=2 ;; large) RATE2=4 ;; xlarge) RATE2=12 ;; *) say "size $SIZE is not supported (small, default, large or xlarge)"; exit 75 ;; esac
 case $TIMEOUT$WAIT$IDLE in ''|*[!0-9]*) say "bad --timeout, --wait or --idle"; exit 75 ;; esac
+[ "$WAIT" = 0 ] || { say "queueing is disabled; --wait must be 0"; exit 75; }
 [ "$IDLE" -le 3600 ] || { say "--idle is at most 3600 s"; exit 75; }
 TTL=$(( TIMEOUT + 600 )); [ $TTL -lt 900 ] && TTL=900; [ $TTL -gt 7200 ] && TTL=7200
 [ $(( TIMEOUT + 300 )) -le $TTL ] || { say "--timeout too long for the 2 h lifetime"; exit 75; }
@@ -482,7 +484,7 @@ admit() {
     local pick wl pid_ psize pres wres
     pick=$(fold warm | python3 -c '
 import sys, time
-thread, size = sys.argv[1], sys.argv[2]; rank = {"small": 0, "default": 1, "large": 2}; now = time.time(); c = []
+thread, size = sys.argv[1], sys.argv[2]; rank = {"small": 0, "default": 1, "large": 2, "xlarge": 3}; now = time.time(); c = []
 for l in sys.stdin:
     f = l.split()
     if len(f) < 7 or f[2] != thread or int(f[3]) < now + 60 or rank.get(f[1], 1) < rank.get(size, 1): continue
@@ -507,7 +509,7 @@ if c: c.sort(); print(c[0][2], c[0][3], c[0][4])
   lim=$(limits_live) || { echo "cannot read Boat limits"; return 1; }
   why=$(printf '%s' "$lim" | python3 -c '
 import json, sys
-need, size, n, am, ah, ad = int(sys.argv[1]), sys.argv[2], *map(int, sys.argv[3:7]); guard = float(sys.argv[7])
+need, size, n, am, ah, ad = int(sys.argv[1]), sys.argv[2], *map(int, sys.argv[3:7])
 try: d = json.load(sys.stdin)
 except Exception: print("NO Boat limits unreadable"); sys.exit()
 try:
@@ -532,15 +534,8 @@ if not st.get("unlimited"):
         # starts at once), less the jobs of ours already admitted and starting
         if min(rem, lim - mine) - n <= 0:
             print((f"WAIT {pause} " if pause else "NO ") + f"start limit per {w}: {lim - rem} of {lim} used (Backplane {mine}), {n} starting"); sys.exit()
-    # start guard: past this share of the hourly or daily starts, no new
-    # sandboxes; jobs from a thread with a warm one reuse it instead
-    for w, mine in (("hour", ah), ("day", ad)):
-        rem, lim = int(st[w]["remaining"]), int(st[w]["limit"])
-        used = max(lim - rem, mine) + n
-        if used + 1 > guard * lim:
-            print(f"NO start guard: {used} of {lim} Boat starts used this {w} (over {round(guard * 100)}%), and this thread has no free warm sandbox to reuse. Run the job from a thread whose sandbox is warm, wait for the {w} window, or run it locally"); sys.exit()
 print("OK")
-' "$RESERVE" "$SIZE" "$n" "$am" "$ah" "$ad" "$GUARD")
+' "$RESERVE" "$SIZE" "$n" "$am" "$ah" "$ad")
   case $why in
     OK) ;;
     WAIT*) echo "${why#WAIT }"; return 2 ;;
@@ -552,25 +547,15 @@ print("OK")
 }
 refuse() { FINISHING=1; rm -rf "${STAGE:-}"; say "refused: $1"; ledger ev=refused job="$JOB" why="$1" budget="$BUDGET" budget_src="$BUDGET_SRC" thread="$THREAD" work="$WORK" project="$PROJECT" machine="$MACHINE" size="$SIZE"; exit 75; }
 FINISHING=0 STAGE=""
-# wait in line (bounded by --wait) while a slot or a minute/hour start window
-# is full; one limits read per pause per job, never faster than 15 s
+# A full slot or start window is refused immediately; no admission queue.
 WAITED=0
-admit_wait() {
-  local why arc p
-  while :; do
-    why=$(with_lock admit "$@"); arc=$?
-    [ $arc = 0 ] && { ADMIT_OUT=$why; return 0; }
-    [ $arc = 2 ] || refuse "$why"
-    p=${why%% *}; why=${why#* }; [ "$p" -ge 15 ] 2>/dev/null || p=15
-    [ $(( WAITED + p )) -le "$WAIT" ] || refuse "still waiting after ${WAITED}s: $why"
-    echo "waiting ${p}s: $why"
-    sleep "$p" & wait $!; WAITED=$(( WAITED + p ))
-  done
-}
-trap 'say "cancelled while waiting"; exit 143' TERM INT HUP
+trap 'say "cancelled before admission"; exit 143' TERM INT HUP
 ADMIT_OUT="" CLAIMED=0 HB=0 JSTART=0
-admit_wait "$@"
-[ $WAITED = 0 ] || echo "admitted after ${WAITED}s"
+ADMIT_OUT=$(with_lock admit "$@"); arc=$?
+if [ "$arc" != 0 ]; then
+  [ "$arc" != 2 ] || ADMIT_OUT=${ADMIT_OUT#* }
+  refuse "$ADMIT_OUT"
+fi
 case $ADMIT_OUT in claim\ *) read -r _ CLAIM_ID CLAIM_SIZE <<<"$ADMIT_OUT"; CLAIMED=1; SIZE=$CLAIM_SIZE; RATE2=$(rate2 "$SIZE"); RESERVE=$(( TTL * RATE2 / 2 )) ;; esac
 
 ID="" CANCELLED=0 STAGE="" IN_CREATE=0 BEFORE="" ATTEMPT_AT=0
@@ -644,19 +629,30 @@ trap 'r=$?; [ "$FINISHING" = 1 ] || { say "unexpected exit $r: cleaning up"; fin
 
 # manifest: tracked + untracked-not-ignored files, secrets/logs/build output dropped
 STAGE=$(mktemp -d); NAME=$(basename "$SRC"); mkdir -p "$STAGE/$NAME"
-git -C "$SRC" ls-files -co --exclude-standard -z | python3 -c '
+(set -o pipefail; git -C "$SRC" ls-files -co --exclude-standard -z | python3 -c '
 import sys, fnmatch, os
-excl = sys.argv[1:]
+root = sys.argv[1]; n = int(sys.argv[2]); requested = sys.argv[3:3+n]; excl = sys.argv[3+n:]
+if any(not p or p.startswith("/") or any(x in ("", ".", "..") for x in p.split("/")) for p in requested):
+    print("invalid --include-file path", file=sys.stderr); sys.exit(1)
+include = set(requested)
+found = set()
 deny = [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", "id_ecdsa*", "auth.json", "credentials*", "*.keystore", "*.jks", "*.log"]
 dirs = ("shots-snap/", "dist/", "build/", "node_modules/", ".claude/", ".backplane/", ".backplane-bend/")
 for p in sys.stdin.buffer.read().split(b"\0"):
     if not p: continue
     s = p.decode("utf-8", "surrogateescape"); base = os.path.basename(s)
+    if include and s not in include: continue
     if s.startswith(dirs) or any(fnmatch.fnmatch(base, g) for g in deny) or any(fnmatch.fnmatch(s, g) for g in excl): continue
     if s.endswith(".jsonl") and not s.startswith("test/"): continue
+    if not os.path.lexists(os.path.join(root, s)): continue
+    found.add(s)
     sys.stdout.buffer.write(p + b"\0")
-' "${EXCL[@]}" > "$OUT/manifest.z"
-(cd "$SRC" && tar --null -T "$OUT/manifest.z" -cf - 2>/dev/null) | tar -xf - -C "$STAGE/$NAME" || { say "staging failed"; finish 76; }
+missing = include - found
+if missing:
+    print("--include-file missing or excluded: " + ", ".join(sorted(missing)), file=sys.stderr)
+    sys.exit(1)
+' "$SRC" "${#INCLUDE[@]}" "${INCLUDE[@]}" "${EXCL[@]}" > "$OUT/manifest.z") || { say "source inventory failed"; finish 76; }
+(set -o pipefail; (cd "$SRC" && tar --null -T "$OUT/manifest.z" -cf - 2>/dev/null) | tar -xf - -C "$STAGE/$NAME") || { say "staging failed"; finish 76; }
 (cd "$STAGE/$NAME" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$OUT/manifest.sha256"
 REV=$(git -C "$SRC" rev-parse HEAD); DIRTY=$( [ -n "$(git -C "$SRC" status --porcelain)" ] && echo yes || echo no )
 echo "source: $SRC @ $REV (dirty: $DIRTY), $(wc -l < "$OUT/manifest.sha256") files, $(du -sh "$STAGE/$NAME" | cut -f1)"
@@ -699,12 +695,8 @@ else: print("-", "UNCLEAR", 0)
   case $CLS in
     RATE)
       ledger ev=released job="$JOB" why=rate-limited; IN_CREATE=0; ID=""
-      TRIES=$(( TRIES + 1 )); [ $TRIES -lt 5 ] || refuse "Boat kept answering rate-limited"
-      p=$(( 15 << (TRIES - 1) )); [ "${RA:-0}" -gt $p ] 2>/dev/null && p=$RA; [ $p -gt 300 ] && p=300
-      [ $(( WAITED + p )) -le "$WAIT" ] || refuse "rate-limited, and the wait would pass --wait"
-      echo "Boat rate-limited the create; retrying in ${p}s"
-      sleep "$p" & wait $!; WAITED=$(( WAITED + p ))
-      NOREUSE=1; admit_wait "$@" ;;
+      refuse "Boat rate-limited the create; no retry or queue"
+      ;;
     REJECT)
       IN_CREATE=0; ID=""; ledger ev=released job="$JOB"
       refuse "Boat rejected the create: $(printf '%s' "$new" | nourl | head -c 200)" ;;
@@ -747,7 +739,7 @@ nourl < "$OUT/setup.log"; echo "setup in $(( $(date +%s) - T2 ))s"
 
 # the command, streamed; check.sh asks for a 1 GiB stack, so the hard limit is raised first
 CMD=$(printf '%q ' "$@")
-REMOTE="cd /home/user/$NAME && export PATH=\$HOME/.bend/bin:\$PATH BEND_NO_TELEMETRY=1 CI=1 && ulimit -s 1048576 2>/dev/null || { echo insufficient-unprivileged-stack >&2; exit 76; }; echo \"[boat-job] \$(nproc) cpu, \$(free -g | awk '/Mem:/{print \$2}') GiB, stack \$(ulimit -s)\"; if [ -x /usr/bin/time ]; then /usr/bin/time -f '[boat-job] peak RSS %M KiB, wall %e s, exit %x' $CMD; else $CMD; fi; rc=\$?; echo \"[boat-job] job $JOB exit \$rc\"; exit \$rc"
+REMOTE="cd /home/user/$NAME && export PATH=\$HOME/.bend/bin:\$PATH BEND_NO_TELEMETRY=1 CI=1 BACKPLANE_HEAVY_BOAT_SANDBOX=1 BACKPLANE_HEAVY_OFFLOADED=1 && ulimit -s 1048576 2>/dev/null || { echo insufficient-unprivileged-stack >&2; exit 76; }; echo \"[boat-job] \$(nproc) cpu, \$(free -g | awk '/Mem:/{print \$2}') GiB, stack \$(ulimit -s)\"; if [ -x /usr/bin/time ]; then /usr/bin/time -f '[boat-job] peak RSS %M KiB, wall %e s, exit %x' $CMD; else $CMD; fi; rc=\$?; echo \"[boat-job] job $JOB exit \$rc\"; exit \$rc"
 T3=$(date +%s)
 # status.json stays fresh while a long job runs (the Usage screen and the
 # thread chips read it); this loop is our own child, stopped by its pid

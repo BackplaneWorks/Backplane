@@ -285,10 +285,18 @@ class PlotStore {
     var mesh by mutableStateOf<MeshFrame?>(null)
         private set
     private var held: List<PlotChunk> = emptyList()
+    private val splitFrames = LinkedHashMap<String, PlotFrame>()
     private var generation = 0
     private val assets = PlotMeshAssets()
     private val meshQueue = Executors.newSingleThreadExecutor()
     fun cachedMesh(key: String): MeshFrame? = assets.frame(key)
+    fun cachedFrame(key: String): PlotFrame? = frame?.takeIf { it.key == key } ?: splitFrames[key]
+    private fun keepFrame() {
+        val f = frame ?: return
+        splitFrames.remove(f.key)
+        splitFrames[f.key] = f
+        while (splitFrames.size > 3) splitFrames.remove(splitFrames.keys.first())
+    }
     private val main = Handler(Looper.getMainLooper())
     // one plot at a time, in arrival order; its new chunks decode side by side
     private val queue = Executors.newSingleThreadExecutor()
@@ -299,6 +307,7 @@ class PlotStore {
         generation += 1
         assets.reset()
         held = emptyList()
+        splitFrames.clear()
         frame = null
         mesh = null
     }
@@ -325,6 +334,7 @@ class PlotStore {
                     }
                     held = emptyList()
                     frame = PlotFrame(key, FloatArray(0), FloatArray(0), 0f, emptyList(), emptySet(), why, System.currentTimeMillis(), fam)
+                    keepFrame()
                 }
                 return@execute
             }
@@ -371,6 +381,7 @@ class PlotStore {
                 }
                 held = all
                 frame = PlotFrame(key, box, edge, thick, all, decoded.keys, "", System.currentTimeMillis(), fam)
+                keepFrame()
             }
         }
     }

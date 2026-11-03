@@ -6,10 +6,13 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' 0
 export BOAT_FAKE_DIR=$T/fake BOAT_JOB_ROOT=$T/root BACKPLANE_BOAT=$here/test/tools/boat-fake
+# A test launched through work_run has a real thread ancestor. Start the
+# non-reuse cases with no idle window even when that ancestor is detected.
+export BOAT_JOB_IDLE=0
 mkdir -p "$BOAT_FAKE_DIR" "$BOAT_JOB_ROOT"
 pass=0 failn=0
 ok() { if [ "$1" = "$2" ]; then pass=$((pass+1)); [ -z "${BOAT_TEST_VERBOSE:-}" ] || echo "ok   $3"; else failn=$((failn+1)); echo "FAIL $3: got '$1' want '$2'"; fi; }
-limits() { echo "{\"activeSandboxes\":ACTIVE,\"maxActiveSandboxes\":${1:-2},\"canStart\":true,\"subscriptionRemainingSeconds\":${2:-90000},\"creditBalanceSeconds\":2000000,\"trialComputeCapSeconds\":90000,\"creditUsedSeconds\":0,\"starts\":STARTS,\"machineTypes\":[{\"type\":\"small\",\"available\":true},{\"type\":\"default\",\"available\":true},{\"type\":\"large\",\"available\":${3:-false}}]}" > "$BOAT_FAKE_DIR/limits.json"; }
+limits() { echo "{\"activeSandboxes\":ACTIVE,\"maxActiveSandboxes\":${1:-2},\"canStart\":true,\"subscriptionRemainingSeconds\":${2:-90000},\"creditBalanceSeconds\":2000000,\"trialComputeCapSeconds\":90000,\"creditUsedSeconds\":0,\"starts\":STARTS,\"machineTypes\":[{\"type\":\"small\",\"available\":true},{\"type\":\"default\",\"available\":true},{\"type\":\"large\",\"available\":${3:-false}},{\"type\":\"xlarge\",\"available\":true}]}" > "$BOAT_FAKE_DIR/limits.json"; }
 newcalls() { wc -l < "$BOAT_FAKE_DIR/newcalls" 2>/dev/null || echo 0; }
 boxes() { find "$BOAT_FAKE_DIR/boxes" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l; }
 ended() { grep -c '"ev": "ended"' "$BOAT_JOB_ROOT/ledger.jsonl" 2>/dev/null || echo 0; }
@@ -102,15 +105,10 @@ ok "$(sort "$T/par1" "$T/par2" | tr '\n' ' ')" "0 75 " "budget race: one admitte
 limits 1
 for i in 1 2; do ( "$J" --no-setup-bend --wait 0 -- sleep 2 >/dev/null 2>&1; echo $? > "$T/slot$i" ) & done; wait
 ok "$(sort "$T/slot1" "$T/slot2" | tr '\n' ' ')" "0 75 " "slot race: one admitted"
-# three jobs on two slots, waiting: all succeed, never more than two sandboxes at once
-limits 2; : > "$T/peak"
-( for i in $(seq 200); do boxes >> "$T/peak"; sleep 0.1; done ) & mon=$!
-for i in 1 2 3; do ( "$J" --no-setup-bend --wait 120 -- sleep 3 >/dev/null 2>&1; echo $? > "$T/w$i" ) & done
-wait $(jobs -p | grep -v "^$mon$") 2>/dev/null; kill "$mon" 2>/dev/null; wait "$mon" 2>/dev/null
-ok "$(cat "$T/w1" "$T/w2" "$T/w3" | tr '\n' ' ')" "0 0 0 " "three jobs on two slots all ran"
-ok "$(sort -n "$T/peak" | tail -1)" 2 "at most two sandboxes at once"
-ok "$(boxes)" 0 "all deleted"
-grep -q "refused" "$BOAT_FAKE_DIR/calls"; ok $? 1 "no other subcommand used"
+# A nonzero wait is rejected, rather than queuing.
+limits 2; c0=$(newcalls)
+"$J" --no-setup-bend --wait 120 -- true >/dev/null 2>&1; ok $? 75 "nonzero wait refused"
+ok "$(newcalls)" "$c0" "nonzero wait creates nothing"
 # ---- Boat's start windows (rolling), other clients, stale data, 429, unclear creates ----
 F=$BOAT_FAKE_DIR; limits 100
 # a fresh ledger per case, so our own start record is only that case's
@@ -119,15 +117,12 @@ fresh m
 # minute window full (other clients' starts): refused at once with --wait 0, nothing created
 echo "2 60 200" > "$F/startlimits"; now=$(date +%s); printf '%s\n' $((now-50)) $((now-50)) >> "$F/starts"
 c0=$(newcalls); "$J" --no-setup-bend --wait 0 -- true >/dev/null 2>&1; ok $? 75 "minute full: refused"; ok "$(newcalls)" "$c0" "minute full: no create"
-# ...and waits for it to roll over with --wait
-out=$("$J" --no-setup-bend --wait 120 -- true 2>&1); ok $? 0 "minute full: waited then ran"
-case $out in *"start limit per minute"*) ok 1 1 "minute wait reason" ;; *) ok 0 1 "minute wait reason" ;; esac
 fresh h
 # hour window full: refused with --wait 0; day window full: refused even with --wait
 : > "$F/starts"; echo "12 3 200" > "$F/startlimits"; printf '%s\n' $((now-1000)) $((now-1000)) $((now-1000)) >> "$F/starts"
 "$J" --no-setup-bend --wait 0 -- true >/dev/null 2>&1; ok $? 75 "hour full: refused"
 : > "$F/starts"; echo "12 60 2" > "$F/startlimits"; printf '%s\n' $((now-40000)) $((now-40000)) >> "$F/starts"
-c0=$(newcalls); "$J" --no-setup-bend --wait 300 -- true >/dev/null 2>&1; ok $? 75 "day full: refused without waiting"; ok "$(newcalls)" "$c0" "day full: no create"
+c0=$(newcalls); "$J" --no-setup-bend --wait 0 -- true >/dev/null 2>&1; ok $? 75 "day full: refused without waiting"; ok "$(newcalls)" "$c0" "day full: no create"
 # the race for the last start of the minute: exactly one creates
 fresh r; echo "1 60 200" > "$F/startlimits"; c0=$(newcalls)
 for i in 1 2; do ( "$J" --no-setup-bend --wait 0 -- sleep 1 >/dev/null 2>&1; echo $? > "$T/last$i" ) & done; wait
@@ -141,14 +136,11 @@ rm -f "$F/stale"; : > "$F/starts"; echo "12 60 200" > "$F/startlimits"
 # start limits missing: refused
 sed 's/"starts":STARTS,//' "$F/limits.json" > "$F/l2" && mv "$F/l2" "$F/limits.json"; "$J" --no-setup-bend -- true >/dev/null 2>&1; ok $? 75 "start limits missing: refused"; limits 100
 fresh q
-# 429 twice, then created: backs off, one sandbox, three requests recorded
-echo 2 > "$F/rate429"; echo 1 > "$F/retryafter"; c0=$(newcalls); b0=$(boxes)
-out=$("$J" --no-setup-bend --wait 600 -- true 2>&1); rc=$?
-ok $rc 0 "429: retried and ran"; ok $(( $(newcalls) - c0 )) 3 "429: three requests"; ok "$(boxes)" "$b0" "429: no sandbox left"
-ok "$(grep -o 'retrying in [0-9]*s' <<<"$out" | tr '\n' ' ')" "retrying in 15s retrying in 30s " "429: backoff 15 s then 30 s"
-ok "$(grep -c '"ev": "attempt"' "$BOAT_JOB_ROOT/ledger.jsonl")" 3 "429: every attempt recorded"
-# 429 forever: gives up within --wait, no sandbox
-echo 99 > "$F/rate429"; "$J" --no-setup-bend --wait 20 -- true >/dev/null 2>&1; ok $? 75 "429 forever: refused"; echo 0 > "$F/rate429"; ok "$(boxes)" 0 "429 forever: nothing made"
+# Rate limiting never retries or queues.
+echo 2 > "$F/rate429"; c0=$(newcalls)
+"$J" --no-setup-bend -- true >/dev/null 2>&1; ok $? 75 "429: refused immediately"
+ok $(( $(newcalls) - c0 )) 1 "429: exactly one request"
+echo 0 > "$F/rate429"; ok "$(boxes)" 0 "429: no sandbox left"
 # an unclear create beside ONE matching sandbox (ours or another client's: indistinguishable):
 # never adopted or deleted, not retried, reservation held
 echo made > "$F/unclear"; c0=$(newcalls)
@@ -248,6 +240,7 @@ ok "$(sz --size default -- scripts/check.sh)" default "--size wins"
 rm -rf "$P/scripts"
 
 # ---- warm sandboxes: one per thread, reused, kept for an idle window, then deleted ----
+unset BOAT_JOB_IDLE
 fresh w; limits 100 90000 true; echo "12 60 200" > "$F/startlimits"
 tj() { t=$1; shift; BACKPLANE_THREAD=$t "$J" --no-setup-bend "$@"; }
 thr() { "$J" status --json | python3 -c "import json,sys; d=json.load(sys.stdin); x=d['threads'].get('$1'); print('none' if not x else x['state']+' '+str(x['size'])+(' left' if x.get('idle_until') else ''))"; }
@@ -291,7 +284,7 @@ ok $(( $(grep -c '"ev": "deleted"' "$BOAT_JOB_ROOT/ledger.jsonl") - d0 )) "$nw" 
 rm -rf "$F/boxes/bx_foreign"
 # --idle 0, no thread, a cancel, a failed command: deleted at once
 tj tC --idle 0 -- true >/dev/null 2>&1; ok "$(boxes)" 0 "--idle 0: deleted"
-"$J" --no-setup-bend -- true >/dev/null 2>&1; ok "$(boxes)" 0 "no thread: deleted"
+"$J" --no-setup-bend --idle 0 -- true >/dev/null 2>&1; ok "$(boxes)" 0 "no idle window: deleted"
 BACKPLANE_THREAD=tK setsid "$J" --no-setup-bend -- sleep 30 > "$T/wk.out" 2>&1 & pg=$!
 for i in $(seq 50); do grep -q running: "$T/wk.out" && break; sleep 0.2; done
 [ "$pg" -gt 1 ] && kill -TERM -- "-$pg"; wait $pg; ok "$(boxes)" 0 "cancel: deleted, not kept"
@@ -299,13 +292,14 @@ for i in $(seq 50); do grep -q running: "$T/wk.out" && break; sleep 0.2; done
 tj tE -- true >/dev/null 2>&1; c2=$(newcalls)
 BOAT_FAKE_FAIL=extend tj tE -- true >/dev/null 2>&1; ok $? 0 "reuse failed: ran on a new sandbox"; ok $(( $(newcalls) - c2 )) 1 "reuse failed: one new create"
 ok "$(boxes)" 0 "reuse failed: old deleted, new not kept (extend refused)"
-# the start guard: past 80% of the hourly starts, no new sandbox; a warm one is still reused
+# The actual limit, rather than an 80% soft guard, controls new starts.
 fresh g; limits 100; echo "12 10 200" > "$F/startlimits"
-tj tG -- true >/dev/null 2>&1; now=$(date +%s); for i in 1 2 3 4 5 6 7; do echo $((now-1000)) >> "$F/starts"; done
-out=$(tj tH --wait 0 -- true 2>&1); rc=$?
-ok $rc 75 "start guard: new create refused"; case $out in *"start guard"*) ok 1 1 "start guard: says why" ;; *) ok 0 1 "start guard: says why" ;; esac
-tj tG -- true >/dev/null 2>&1; ok $? 0 "start guard: the warm sandbox is still reused"
-BACKPLANE_THREAD=tG "$J" --no-setup-bend --idle 0 -- true >/dev/null 2>&1; rm -rf "$F/boxes"/*; : > "$F/starts"
+now=$(date +%s); for i in 1 2 3 4 5 6 7 8; do echo $((now-1000)) >> "$F/starts"; done
+"$J" --no-setup-bend --idle 0 -- true >/dev/null 2>&1; ok $? 0 "above 80% but below account limit: admitted"
+# XLARGE is accepted and reserves at its conservative 6 credit-seconds/second.
+fresh xl; limits 100
+"$J" --size xlarge --timeout 300 --no-setup-bend --idle 0 -- true >/dev/null 2>&1; ok $? 0 "xlarge accepted"
+ok "$(python3 -c "import json; d=[json.loads(x) for x in open('$BOAT_JOB_ROOT/ledger.jsonl')]; r=next(x for x in d if x.get('ev')=='reserve'); print(r['size'], r['reserved'])")" "xlarge 5400" "xlarge worst-case budget reservation"
 
 st=$("$J" status --json)
 ok "$(printf '%s' "$st" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["running"], d["orphans"], all(j["state"] in ("ended","swept","refused","reconciled") for j in d["jobs"]), any(j.get("cost_cs",0)>0 and j.get("runtime_s",-1)>=0 and j.get("sandbox") for j in d["jobs"]))')" "0 0 True True" "status --json"

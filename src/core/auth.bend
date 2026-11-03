@@ -66,6 +66,15 @@ def Auth.owner.pair(+trusted: Bool, +own: List<&2, String>, +hs: List<&2, H.Head
       Bool.and(String.is_empty(H.Http.header_of(hs, "tailscale-user-login")),
         Auth.owner.host(own, String.to_lower(H.Http.header_of(hs, "host"))))))))))
 
+# The same whois-verified owner identity on a linked machine's signed
+# request (its signature is still checked): with no browser Origin or proxy
+# identity, to an exact own authority, it says the link is one of the
+# owner's own machines (server.bend's Hub.bot.vouched). It grants nothing
+# else: the request still needs a live link's signature.
+def Auth.owner.peer(+trusted: Bool, +own: List<&2, String>, +hs: List<&2, H.Header>) -> Bool:
+  Bool.and(trusted, Bool.and(Nat.is_eq(Auth.owner.header_count(hs, "host"), 1n), Bool.and(String.is_empty(H.Http.header_of(hs, "origin")),
+    Bool.and(String.is_empty(H.Http.header_of(hs, "tailscale-user-login")), Auth.owner.host(own, String.to_lower(H.Http.header_of(hs, "host")))))))
+
 # A Host naming this machine (DNS rebinding cannot fake one in a browser).
 def Auth.local.host(+host: String) -> Bool:
   Bool.or(String.eq(host, "localhost"), Bool.or(String.starts_with(host, "localhost:"),

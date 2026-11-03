@@ -48,6 +48,24 @@ BOM opens the existing review viewer for the saved schematic. DRC/ERC chips
 show saved report counts and whether the source changed after the report;
 opening a home never starts those checks.
 
+The home viewer offers Split when both saved CAD documents exist, using the
+exact board and root schematic paths from the snapshot. Its pane controls
+show or hide the schematic, board and 3D model. CAD navigation and BOM stay
+in the viewer toolbar while it is open; closing it restores the artifact
+cards. The viewer uses the available project width, including when the sidebar
+is folded, with a taller 3D workspace. The embedded view reserves no unused
+external-viewer column.
+Split pane handles work by pointer or keyboard and retain proportions per hub
+and project. Arrow keys resize, Shift moves faster, Home/End reach the limits,
+and Enter or double-click resets. The handles follow the layout's orientation
+and keep both panes reachable on narrow screens. Schematic views fit the whole
+sheet when opened and after pane resizing; board inspection cameras are retained.
+Native phone Split views show all three panes, stacked in portrait and
+side by side in landscape, with Expand returning to the selected full view.
+The home composer carries its project owner through keyboard focus, local
+draft paints, refreshes and sends. KiCad opens from that canonical project
+root, so `.backplane.json` selects the same project as the saved-file viewer.
+
 Fab panels read the source's `.fab.json` options and measured features.
 An explicit price action uses the existing estimator and hub pricing
 preferences, with bounded, freshly read metadata. It does not upload files,
@@ -90,3 +108,34 @@ valid. The message composer has its own owner-scoped draft throughout.
 The home header and sidebar read `Badge.icon` from the same project setting.
 The header opens the existing icon/color picker and uses its `look-set` handler.
 Native clients render the same semantic choices with platform glyphs.
+
+The web home opens a saved board in 3D using `View.aside.if`, the same
+`Solid` camera, `Workbench`, original-model Studio worker and authenticated
+saved-revision asset as the full viewer. Board, Schematic and Split use their
+existing viewers too. There is no home-specific model export, material recipe
+or image pipeline. Loading remains lazy; preparation uses the same revision
+fences and resource lifecycle as the full viewer.
+
+Open viewer expands the mounted viewer in place. Back to project restores its
+compact presentation. The owner, saved source, renderer, materials, selection
+and camera stay with that same component; presentation never creates a thread.
+
+`project_home_handler_test.py` runs the #790/#794 source inventory for every
+literal home control, with a deleted-handler negative control. It is separate
+from runtime behavior. `viewer_integration_e2e.mjs --home-parity --quality required`
+uses a temporary isolated hub with blocked stand-in agents and reads the saved
+project without modifying it. It compares real Studio canvas pixels at equal
+dimensions, source/revision/GLB digest, material policy and default camera
+between home and full 3D, then checks that expand/return retain the same canvas,
+worker and edited camera. Pixel tolerance is 8 channel levels, at most 0.1%
+differing pixels and mean channel error at most 0.3; blank frames are rejected.
+The metric has negative checks for mirroring, a missing model and wrong sizes.
+This browser gate requires qualified candidate assets; it must not run during
+a build halt.
+
+Split's 3D pane calls the same `View.solid.workbench` factory as standalone
+3D. It does not bypass Studio by mounting a separate fast-only canvas. The
+pixel gate also compares the retained pose and pixels after switching to Split.
+On wide homes, the viewer and project details share an accessible separator
+with its own saved proportion. Narrow layouts stack those sections; Open viewer
+fills the main pane without changing the mounted viewer's identity.

@@ -2718,7 +2718,7 @@ def Hub.nav(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Jso
     case 2n:
       Step.outs([Git{client, id, "files", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
     case 3n:
-      Step.outs([Git{client, id, "kicad", J.Json.get_str(p, "thread", ""), Hub.cwd(s, Hub.thread(s, J.Json.get_str(p, "thread", ""))), "", ""}])
+      Hub.git(s, client, id, "kicad", J.Json.get_str(p, "thread", ""), "", "")
     case 4n:
       Hub.reorder_projects(s, now, client, id, p)
     case 5n:
@@ -10406,9 +10406,15 @@ def Hub.telemetry.setting(+s: M.State, +now: Nat, client: U32, id: String, +p: J
   +cs = Hub.telemetry.choice.changes(off, s, "off", fp, now)
   Step{cs, [Hub.telemetry.choice.reply(M.State.replay(cs, s), off, client, id)]}
 
+# which links are the owner's machines ("peer.own.<link>", client.bend's
+# Far.own.key) only the hub records, never a client's setting.set
+def Hub.setting.hub(+key: String) -> Bool:
+  String.starts_with(key, "peer.own.")
+
 def Hub.setting(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Bool.pick(Step, Hub.setting.hub(J.Json.get_str(p, "key", "")), Step.outs([Reply.err(client, id, "that setting is the hub's own")]),
   Bool.pick(Step, Hub.telemetry.setting.reserved(J.Json.get_str(p, "key", "")), Hub.telemetry.setting(s, now, client, id, p),
-    Step{[M.SettingSet{J.Json.get_str(p, "key", ""), J.Json.get_str(p, "value", ""), now}], Bool.pick(List<&2, Out>, String.eq(J.Json.get_str(p, "key", ""), "kicad.path"), [Reply.ok(client, id), KiCadRetry{}], [Reply.ok(client, id)])})
+    Step{[M.SettingSet{J.Json.get_str(p, "key", ""), J.Json.get_str(p, "value", ""), now}], Bool.pick(List<&2, Out>, String.eq(J.Json.get_str(p, "key", ""), "kicad.path"), [Reply.ok(client, id), KiCadRetry{}], [Reply.ok(client, id)])}))
 
 # a project pointed at its folder's new place (core/roots.bend's Roots.move;
 # the missing-folder notice's "Use this folder"): an absolute path is asked

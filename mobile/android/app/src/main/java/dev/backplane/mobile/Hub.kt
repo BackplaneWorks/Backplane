@@ -55,6 +55,7 @@ object Pairing {
         "wrong_code" -> "That code is not correct. Check it and try again."
         "expired_code" -> "This invitation expired. Create another in Settings → Devices."
         "used_code" -> "This invitation has already been used. Create a new one."
+        "revoked_code" -> "This invitation was revoked. Create a new one in Settings → Devices."
         "rate_limited" -> "Too many attempts. Wait a minute and try again."
         "pairing_required" -> "Re-pair this device with a new invitation."
         else -> "Hub unreachable. Check its address, LAN or tailnet connection."

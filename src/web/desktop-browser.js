@@ -5,6 +5,27 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
   const doc=root.ownerDocument||root,win=doc.defaultView;
   let current=null,signature='',ticket=0,raf=0,disposed=false,stateRevision=0;
   let state={phase:'connecting',message:'Connecting Browser…'};
+  // A hub can update its web UI while the resident desktop still exposes
+  // the old manual reconnect bridge. That shell has no main-owned retry.
+  // Only recover its private connection; never repeat a page operation.
+  const legacy=typeof bridge.reconnect==='function';
+  let legacyPhase='connecting',recoveryTimer=null,recoveryPending=false,recoveryTries=0;
+  const recovering='Browser unavailable · reconnecting automatically…';
+  function clearRecovery(){if(recoveryTimer!==null)win.clearTimeout(recoveryTimer);recoveryTimer=null;}
+  function recoverLegacy(){
+    if(!legacy||disposed)return;
+    if(legacyPhase==='ready'){recoveryTries=0;clearRecovery();return;}
+    if(legacyPhase!=='error'||recoveryPending||recoveryTimer!==null)return;
+    recoveryTimer=win.setTimeout(()=>{
+      recoveryTimer=null;if(disposed)return;
+      recoveryPending=true;const revision=stateRevision;
+      void Promise.resolve().then(()=>bridge.reconnect()).then(value=>{
+        if(!disposed&&revision===stateRevision)receiveState(value||{phase:'error',message:recovering});
+      }).catch(()=>{
+        if(!disposed&&revision===stateRevision)receiveState({phase:'error',message:recovering});
+      }).finally(()=>{recoveryPending=false;recoverLegacy();});
+    },Math.min(30000,500*2**Math.min(recoveryTries++,6)));
+  }
   const ownerOf=node=>node?.getAttribute('data-desktop-browser-owner');
   const observers=[];
   const resize=new win.ResizeObserver(()=>sync());
@@ -48,14 +69,14 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
     return Promise.resolve(bridge.present({owner,bounds})).then(result=>{
       if(disposed||stamp!==ticket||current!==node||revision!==stateRevision)return;
       // No tab is an idle browser, not an outstanding connection attempt.
-      state=result?.shown===true?{owner,phase:'ready',message:''}:{owner,phase:result?.phase||'empty',message:result?.message||'Enter an address to open a page.'};status(node);
+      state=result?.shown===true?{owner,phase:'ready',message:''}:{owner,phase:result?.phase||'empty',message:legacy&&result?.phase==='error'?recovering:result?.message||'Enter an address to open a page.'};status(node);
     }).catch(()=>{if(!disposed&&stamp===ticket&&revision===stateRevision){state={owner,phase:'error',message:'Browser unavailable · reconnecting automatically…'};status(node);}});
   }
   function sync(){if(!disposed&&!raf)raf=win.requestAnimationFrame(measure);}
   const listen=(target,event,callback,options)=>{target.addEventListener(event,callback,options);observers.push(()=>target.removeEventListener(event,callback,options));};
   listen(win,'resize',sync);listen(doc,'scroll',sync,true);listen(doc,'visibilitychange',()=>{if(doc.hidden)hide();else{signature='';sync();}});
   if(win.visualViewport){listen(win.visualViewport,'resize',sync);listen(win.visualViewport,'scroll',sync);}
-  const receiveState=value=>{if(disposed||!value)return;stateRevision++;state=value;signature='';status(current);sync();};
+  const receiveState=value=>{if(disposed||!value)return;stateRevision++;legacyPhase=value.phase;state=legacy&&value.phase==='error'?{...value,message:recovering}:value;signature='';status(current);sync();recoverLegacy();};
   if(bridge.onState)observers.push(bridge.onState(receiveState));
   // Main may already be ready (or unavailable) before this renderer loads.
   // An event that arrives during the query always wins over its older answer.
@@ -66,7 +87,7 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
   if(bridge.onFocusAddress)observers.push(bridge.onFocusAddress(()=>{
     const address=root.querySelector('[data-bfield^="brurl:"]');if(address){address.focus();address.select();}
   }));
-  function dispose(){if(disposed)return;hide();disposed=true;if(raf)win.cancelAnimationFrame(raf);resize.disconnect();for(const remove of observers)if(typeof remove==='function')remove();}
+  function dispose(){if(disposed)return;hide();disposed=true;clearRecovery();if(raf)win.cancelAnimationFrame(raf);resize.disconnect();for(const remove of observers)if(typeof remove==='function')remove();}
   listen(win,'pagehide',dispose,{once:true});
   return Object.freeze({sync,hide,dispose,async forCapture(){if(raf){win.cancelAnimationFrame(raf);raf=0;}await measure();}});
 }

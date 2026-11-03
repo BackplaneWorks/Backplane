@@ -15,6 +15,8 @@ import { applyComposerDraft } from "./composer-draft.js";
 import { VoiceMic, hubHere } from "./voice-mic.js";
 import { homeDraftStorage } from "./home-drafts.js";
 const localStorage = homeDraftStorage(window.localStorage, window.backplaneDesktop?.drafts);
+import { installProjectSplitters } from "./project-splitters.js";
+const projectSplitters = installProjectSplitters({ storage: localStorage, scope: () => thin?.hub || location.origin });
 import { editStart } from "./sent-claims.js";
 import Planner from "./timeline-plan.bend";
 import History from "./timeline-history.bend";
@@ -1189,10 +1191,11 @@ function render() {
     } else if (thin?.ready) searchJump = null;
   }
   searchLight(tl2);
+  panes();
+  projectSplitters.sync();
   Solid.mount(document.getElementById("solid"));
   ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
-  panes();
   attachmentPreviews();
   previewTextFiles();
   previewMarkdownFiles((text, node) => create(App.md(text, App.lang(ui), node.dataset.mdRoot || "", node.dataset.mdPath || "")));
@@ -2697,7 +2700,11 @@ const SIDE_W = 264;
 let sideKept = false;
 const wide = () => window.matchMedia("(min-width: 761px)").matches;
 const splitOn = () => !!document.querySelector("#viewer.split");
-const viewerKey = () => (splitOn() ? VIEWER_W_SPLIT : VIEWER_W);
+const viewerKey = () => {
+  const base = splitOn() ? VIEWER_W_SPLIT : VIEWER_W;
+  const project = document.querySelector("#viewer[data-split-project]")?.dataset.splitProject;
+  return project ? base + ":" + JSON.stringify([thin?.hub || location.origin, project]) : base;
+};
 function viewerWidth(w, s, side = document.documentElement.dataset.fold ? s.strip : s.side) {
   const root = document.documentElement;
   if (w == null) { root.style.removeProperty("--viewer-w"); return; }
@@ -2740,6 +2747,14 @@ function drawerShut() {
 }
 function panes() {
   const root = document.documentElement;
+  // A home embeds the viewer inside main. Reserve no third column or
+  // automatic sidebar fold for a second viewer beside that main area.
+  if (document.querySelector(".app > main.project-home")) {
+    sideKept = false; drawerSel = null;
+    delete root.dataset.fold;
+    root.style.removeProperty("--viewer-w");
+    return;
+  }
   if (!document.querySelector(".app.panel") || !wide()) {
     // the viewer shut (or a phone-sized page): the sidebar as it was
     sideKept = false;
@@ -2901,8 +2916,9 @@ function paintDraft(sel, text) {
 // and not the whole page. Anything else still goes through render().
 const hubComposers = new WeakMap();
 const composerAttr = (v, name) => { for (const a of each(v.attrs)) if (is(a, "At") && a.name === name) return a.value; return null; };
-// View.local.go's composer: class exactly "composer", with a data-lang
-const isComposer = v => is(v, "El") && composerAttr(v, "class") === "composer" && !!composerAttr(v, "data-lang");
+// Ordinary composers use View.local; the home keeps its own Start thread
+// controls and shares Node.overlay's local textarea update.
+const isComposer = v => is(v, "El") && (composerAttr(v, "data-home-composer") === "1" || composerAttr(v, "class") === "composer" && !!composerAttr(v, "data-lang"));
 function hubComposer(node) {
   if (hubComposers.has(node)) return hubComposers.get(node);
   let found = null;
@@ -2924,7 +2940,7 @@ function paintComposer() {
     composerPainting = false;
     if (queued) return;
     const hub = frontendNode && hubComposer(frontendNode);
-    const el = hub && [...document.querySelectorAll(".composer[data-lang]")].find(e => e.__v && isComposer(e.__v) && e.__v.key === hub.key && e.__v.tag === hub.tag);
+    const el = hub && [...document.querySelectorAll(".composer[data-lang],.composer[data-home-composer]")].find(e => e.__v && isComposer(e.__v) && e.__v.key === hub.key && e.__v.tag === hub.tag);
     if (!el) { later();return; }
     const t0 = RR ? pnow() : 0;
     patch(el, App.presentation_overlay(hub, presentationJson(feedbackSession())));

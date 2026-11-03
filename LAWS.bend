@@ -88,6 +88,8 @@ import ./src/core/signal.bend as SIGREV
 
 import Base
 
+import ./src/core/wire-retention.bend as WRET
+
 import ./src/core/project-home.bend as PHOME
 
 import ./src/server/modelcache.bend as MCACHE
@@ -15871,6 +15873,13 @@ law home_owner_round_trip:
   for project: String
   {PHOME.Home.project(PHOME.Home.owner(project)) == project : String}
 
+law home_split_requires_saved_documents:
+  {PHOME.Home.view_path(J.Null{}, "split") == "" : String}
+
+law home_3d_uses_saved_board:
+  for contents: J.Json
+  {PHOME.Home.view_path(contents, "3d") == PHOME.Home.path(contents, "board") : String}
+
 # A continuation cannot become a standalone request.
 law websocket_orphan_continuation_is_rejected:
   for bytes: List<&2, U32>
@@ -15896,3 +15905,30 @@ law context_closed_run_is_one_display_row:
   for label: String
   for live: Bool
   {MSGCONTEXT.Context.unit(e, FO.RHead{id, label, False{}, live}) == ["fold:" ++ id] : List<&2, String>}
+
+# Indexed history is durable; a hub/client replay cache never owns its past.
+law stored_wire_cache_is_empty:
+  for xs: List<&2, String>
+  {WRET.WireRetention.keep(True{}, xs) == Nil{} : List<&2, String>}
+
+law memory_wire_reference_is_exact:
+  for xs: List<&2, String>
+  {WRET.WireRetention.keep(False{}, xs) == xs : List<&2, String>}
+
+law autosettle_finished_work_wake_not_running:
+  for owned: Map<&2, Nat>
+  {AUTOS.Auto.wake.active.kind("work", "ended", Map.new(&2, Nat), owned) == False{} : Bool}
+
+law autosettle_live_thread_wake_held:
+  {AUTOS.Auto.wake.active.kind("thread", "t", Map.new(&2, Nat), Map.set(&2, Nat, Map.new(&2, Nat), "t", 1n)) == True{} : Bool}
+
+# Compact/full presentation retains the viewer owner and cannot launch work.
+law home_viewer_size_keeps_owner:
+  for u: U.Ui
+  for value: String
+  {U.Ui.sel(U.Act.ui(U.Home.viewer.size(u, value))) == U.Ui.sel(u) : String}
+
+law home_viewer_size_is_local:
+  for u: U.Ui
+  for value: String
+  {U.Act.cmds(U.Home.viewer.size(u, value)) == Nil{} : List<&2, U.Cmd>}
