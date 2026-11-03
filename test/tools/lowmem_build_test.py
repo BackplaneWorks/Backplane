@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, unittest
+import json, os, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -10,9 +10,16 @@ lm = importlib.util.module_from_spec(spec); spec.loader.exec_module(lm)
 import argparse
 from unittest.mock import patch
 
-SRC = {'head': 'a' * 40, 'tree': 'b' * 40, 'clean': True}
-TOOLS = {'bend': {'version': '1', 'sha256': 'c' * 64}, 'bun': None}
+H = lambda c: c * 64
+SRC = {'head': 'a' * 40, 'tree': 'b' * 40, 'clean': True, 'closure_sha256': H('9')}
+TOOLS = {'bend': {'version': '1', 'sha256': H('c')}, 'bun': {'version': '1.2.3', 'sha256': H('d')}}
 CAP = lm.CAP_BYTES
+CMD = ['bend', 'src/server/main.bend', '-o', '{out}/hub.js']
+PROT = {n: H('e') for n in lm.PROTECTED}
+QUAL = {'schema': 3, 'qualified': True, 'source': SRC, 'tools': TOOLS, 'env': lm.PINNED_ENV,
+        'protected': {n: {'path': '/p/' + n, 'sha256': h} for n, h in PROT.items()},
+        'jobs': {k: {'cmd': CMD, 'phases': lm.PHASES, 'timeout_seconds': 3000,
+                     'artifacts': {'hub.js': {'sha256': H('1'), 'bytes': 100}}} for k in ('hub', 'web', 'mobile')}}
 
 
 def enforcement(**kw):
@@ -23,20 +30,26 @@ def enforcement(**kw):
 
 
 def receipt(**kw):
-    r = {'schema': 2, 'id': 'hub', 'exit': 0, 'cap_bytes': CAP, 'peak_bytes': 2 * lm.GIB, 'enforcement': enforcement(), 'controller': enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=100 * 1024 ** 2),
+    r = {'schema': 3, 'id': 'hub', 'exit': 0, 'cap_bytes': CAP, 'peak_bytes': 2 * lm.GIB, 'enforcement': enforcement(),
+         'controller': enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=100 * 1024 ** 2),
          'swap_activity': False, 'boat_sandbox': True, 'mem_total_bytes': 8 * lm.GIB, 'source': SRC, 'tools': TOOLS,
-         'outputs': {'hub.js': 'x'}}
+         'outputs': {'hub.js': H('1')}, 'output_bytes': {'hub.js': 100}, 'cmd_template': CMD, 'timeout_seconds': 3000,
+         'timed_out': False, 'flock': True, 'phases': list(lm.PHASES), 'env': lm.PINNED_ENV, 'protected': PROT}
     r.update(kw)
     return r
 
 
 JOB = {'id': 'hub', 'kind': 'hub'}
-REF = {'outputs': {'hub': {'hub.js': 'x'}}}
+REF = {'outputs': {'hub': {'hub.js': H('1')}}}
+
+
+def qual(**kw):
+    q = json.loads(json.dumps(QUAL)); q.update(kw); return q
 
 
 class Judge(unittest.TestCase):
-    def j(self, r, ref=REF, src=SRC, tools=TOOLS):
-        return lm.judge(JOB, r, ref, src, tools, CAP)
+    def j(self, r, ref=REF, src=SRC, q=None):
+        return lm.judge(JOB, r, ref, src, q or QUAL, CAP)
 
     def test_pass(self):
         self.assertEqual(self.j(receipt()), [])
@@ -48,11 +61,6 @@ class Judge(unittest.TestCase):
                   enforcement(executor='rss-poller'), enforcement(swap_peak=4096), None):
             self.assertTrue(self.j(receipt(enforcement=e)), e)
 
-    def test_not_a_normal_boat_job(self):
-        self.assertTrue(self.j(receipt(boat_sandbox=False)))
-        self.assertTrue(self.j(receipt(mem_total_bytes=64 * lm.GIB)))
-        self.assertTrue(self.j(receipt(schema=1)))
-
     def test_controller_cap_enforced_and_sum_under_4gib(self):
         self.assertEqual(lm.COMPILER_CAP, 3699998720); self.assertEqual(lm.CONTROLLER_CAP, 536870912)
         self.assertLess(lm.COMPILER_CAP + lm.CONTROLLER_CAP, 4 * lm.GIB)
@@ -60,28 +68,134 @@ class Judge(unittest.TestCase):
                   enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=lm.CONTROLLER_CAP + 1)):
             self.assertTrue(self.j(receipt(controller=c)), c)
 
-    def test_exit_75_is_a_reported_refusal(self):
-        self.assertTrue(self.j(receipt(exit=75)))
-
-    def test_cap_must_be_under_4gib(self):
-        self.assertTrue(lm.receipt_problems(receipt(cap_bytes=4 * lm.GIB), 4 * lm.GIB))
+    def test_not_a_normal_boat_job(self):
+        self.assertTrue(self.j(receipt(boat_sandbox=False)))
+        self.assertTrue(self.j(receipt(mem_total_bytes=64 * lm.GIB)))
+        self.assertTrue(self.j(receipt(schema=2)))
 
     def test_exit_swap_missing(self):
-        self.assertTrue(self.j(receipt(exit=1)))
-        self.assertTrue(self.j(receipt(exit=None)))
-        self.assertTrue(any('SWAP' in w for w in self.j(receipt(swap_activity=True))))
-        self.assertTrue(self.j(None))
+        for r in (receipt(exit=1), receipt(exit=None), receipt(exit=75), receipt(swap_activity=True), None):
+            self.assertTrue(self.j(r))
 
-    def test_bytes_differ_or_missing_reference(self):
-        self.assertTrue(any('BYTE-IDENTICAL' in w for w in self.j(receipt(outputs={'hub.js': 'y'}))))
+    def test_timeout_flock_phases(self):
+        for r in (receipt(timed_out=True), receipt(timed_out=None), receipt(timeout_seconds=None), receipt(timeout_seconds=0),
+                  receipt(timeout_seconds=10 ** 6), receipt(flock=False), receipt(phases=lm.PHASES[:-1]),
+                  receipt(phases=lm.PHASES[::-1]), receipt(phases=[])):
+            self.assertTrue(self.j(r), r['phases'] if r else r)
+
+    def test_qualification_timeout_must_match_receipt(self):
+        q = qual(); q['jobs']['hub']['timeout_seconds'] = 600
+        self.assertTrue(self.j(receipt(), q=q))
+
+    def test_source_closure_commit_tree_mismatch(self):
+        for k, v in (('closure_sha256', H('8')), ('tree', 'd' * 40), ('head', 'd' * 40)):
+            self.assertTrue(self.j(receipt(source={**SRC, k: v})), k)
+        q = qual(); q['source']['closure_sha256'] = H('8')
+        self.assertTrue(self.j(receipt(), q=q))
+        dirty = {**SRC, 'clean': False}
+        self.assertTrue(self.j(receipt(source=dirty), src=dirty, q=qual(source=dirty)))
+
+    def test_compiler_and_bun_hashes(self):
+        for k in ('bend', 'bun'):
+            self.assertTrue(self.j(receipt(tools={**TOOLS, k: {**TOOLS[k], 'sha256': H('0')}})), k)
+            self.assertTrue(self.j(receipt(tools={**TOOLS, k: None})), k)
+
+    def test_protected_inputs(self):
+        for n in lm.PROTECTED:
+            self.assertTrue(self.j(receipt(protected={**PROT, n: H('0')})), n)
+        self.assertTrue(self.j(receipt(protected={k: v for k, v in PROT.items() if k != 'base'})))
+
+    def test_flags_and_environment(self):
+        self.assertTrue(self.j(receipt(env={**lm.PINNED_ENV, 'BEND_NO_TELEMETRY': '0'})))
+        self.assertTrue(self.j(receipt(cmd_template=CMD + ['--extra'])))
+
+    def test_final_artifact_size_and_sha(self):
+        self.assertTrue(self.j(receipt(output_bytes={'hub.js': 99})))
+        self.assertTrue(self.j(receipt(outputs={'hub.js': H('2')})))
+        self.assertTrue(self.j(receipt(outputs={'hub.js': H('1'), 'x.js': H('1')}, output_bytes={'hub.js': 100, 'x.js': 1})))
+
+    def test_bytes_differ_from_reference(self):
+        q = qual(); q['jobs']['hub']['artifacts']['hub.js']['sha256'] = H('2')
+        r = receipt(outputs={'hub.js': H('2')})
+        self.assertTrue(any('BYTE-IDENTICAL' in w for w in self.j(r, q=q)))
         self.assertTrue(any('no reference' in w for w in self.j(receipt(), ref={'outputs': {}})))
 
-    def test_provenance_bound_to_qualified_compiler(self):
-        self.assertTrue(self.j(receipt(source={**SRC, 'tree': 'd' * 40})))
-        self.assertTrue(self.j(receipt(tools={'bend': {'version': '2', 'sha256': 'c' * 64}, 'bun': None})))
-        self.assertTrue(self.j(receipt(), tools=None))
-        dirty = {**SRC, 'clean': False}
-        self.assertTrue(self.j(receipt(source=dirty), src=dirty))
+
+class Qualified(unittest.TestCase):
+    def q(self, mutate=None):
+        q = qual()
+        if mutate: mutate(q)
+        with tempfile.TemporaryDirectory() as t:
+            f = Path(t) / 'q.json'; f.write_text(json.dumps(q))
+            return lm.qualified(str(f), SRC)
+
+    def test_valid(self):
+        self.assertTrue(self.q()[0])
+
+    def test_bare_true_is_insufficient(self):
+        self.assertFalse(self.q(lambda q: [q.pop(k) for k in list(q) if k not in ('qualified',)])[0])
+
+    def test_each_mismatch_refuses(self):
+        for m in (lambda q: q['source'].update(closure_sha256=H('8')), lambda q: q['source'].update(tree='d' * 40),
+                  lambda q: q['source'].update(head='d' * 40), lambda q: q['tools'].pop('bun'),
+                  lambda q: q['tools']['bend'].pop('sha256'), lambda q: q['protected'].pop('safe.ts'),
+                  lambda q: q['protected']['base'].update(sha256='z'),
+                  lambda q: q.update(env={}), lambda q: q['jobs'].pop('mobile'),
+                  lambda q: q['jobs']['web'].update(artifacts={}), lambda q: q['jobs']['web']['artifacts']['hub.js'].update(bytes=0),
+                  lambda q: q['jobs']['web']['artifacts']['hub.js'].update(sha256='short'),
+                  lambda q: q['jobs']['web'].update(phases=[]), lambda q: q['jobs']['web'].update(timeout_seconds=0),
+                  lambda q: q['jobs']['web'].update(cmd=[]), lambda q: q.update(qualified=False), lambda q: q.update(schema=2)):
+            self.assertFalse(self.q(m)[0])
+        self.assertFalse(lm.qualified(None, SRC)[0])
+        self.assertFalse(lm.qualified('/nonexistent', SRC)[0])
+
+
+class Producer(unittest.TestCase):
+    """The reference comes only from a saved verified producer emission."""
+    def make(self, t, **mut):
+        d = Path(t); (d / 'web').mkdir(); (d / 'logs').mkdir()
+        (d / 'server.js').write_text('raw'); (d / 'web/chunk-a.js').write_text('w')
+        (d / 'SOURCE.json').write_text(json.dumps({'commit': 'a' * 40, 'tree': 'b' * 40, 'members': {}}))
+        (d / 'PHASES.json').write_text(json.dumps([{'phase': p, 'exitCode': 0} for p in ('entries', 'server', 'web')]))
+        files = {p.relative_to(d).as_posix(): {'sha256': lm.sha(p.read_bytes()), 'bytes': p.stat().st_size}
+                 for p in d.rglob('*') if p.is_file()}
+        e = {'schema': 1, 'kind': 'backplane-secret-free-js-emission', 'status': 'VERIFIED', 'channel': 'release', 'published': False,
+             'sourceCommit': 'a' * 40, 'sourceTree': 'b' * 40, 'compiler': {'sha256': H('c')}, 'files': files}
+        e.update(mut)
+        (d / 'EMISSION.json').write_text(json.dumps(e))
+        return d
+
+    def test_valid_and_pinned(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = self.make(t)
+            ref = lm.reference_from_emission(d, lm.sha(b'raw'))
+            self.assertEqual(ref['outputs']['hub'], {'hub.js': lm.sha(b'raw')})
+            self.assertEqual(ref['source']['head'], 'a' * 40)
+
+    def test_each_tamper_refuses(self):
+        for mut in ({'status': 'DRAFT'}, {'kind': 'x'}, {'published': True}, {'sourceCommit': 'short'}):
+            with tempfile.TemporaryDirectory() as t:
+                with self.assertRaises(ValueError): lm.reference_from_emission(self.make(t, **mut))
+        with tempfile.TemporaryDirectory() as t:
+            d = self.make(t); (d / 'server.js').write_text('tampered')
+            with self.assertRaises(ValueError): lm.reference_from_emission(d)
+        with tempfile.TemporaryDirectory() as t:
+            d = self.make(t); (d / 'extra').write_text('x')
+            with self.assertRaises(ValueError): lm.reference_from_emission(d)
+        with tempfile.TemporaryDirectory() as t:
+            d = self.make(t)
+            with self.assertRaises(ValueError): lm.reference_from_emission(d, H('0'))
+        with tempfile.TemporaryDirectory() as t:
+            d = self.make(t); (d / 'PHASES.json').write_text('[]')
+            e = json.loads((d / 'EMISSION.json').read_text())
+            e['files']['PHASES.json'] = {'sha256': lm.sha(b'[]'), 'bytes': 2}; (d / 'EMISSION.json').write_text(json.dumps(e))
+            with self.assertRaises(ValueError): lm.reference_from_emission(d)
+
+    @unittest.skipUnless(Path('/home/h/.local/state/backplane/boat/jobs/j20261103173955-1133029/artifacts/rc-emission').is_dir(), 'frozen33ce not here')
+    def test_frozen33ce(self):
+        ref = lm.reference_from_emission('/home/h/.local/state/backplane/boat/jobs/j20261103173955-1133029/artifacts/rc-emission',
+                                         'ca921838988fe844f7e1bc3f0040d5d30f4d9d139facecd76014c17c0c94185f')
+        self.assertEqual(ref['source']['head'][:4], '33ce')
 
 
 class ProofResults(unittest.TestCase):
@@ -141,22 +255,23 @@ class ProofResults(unittest.TestCase):
     def test_judge_never_passes_unvalidated_proof(self):
         job = {'id': 'proof-s0', 'kind': 'proof'}
         r = receipt(id='proof-s0')
-        self.assertTrue(lm.judge(job, r, REF, SRC, TOOLS, CAP))
-        self.assertEqual(lm.judge(job, r, REF, SRC, TOOLS, CAP, proof=[]), [])
+        self.assertTrue(lm.judge(job, r, REF, SRC, QUAL, CAP))
+        self.assertEqual(lm.judge(job, r, REF, SRC, QUAL, CAP, proof=[]), [])
 
 
 class Worker(unittest.TestCase):
     """The worker only trusts limits the kernel reports from inside the cgroup (mocked here; no cgroup is created)."""
 
-    def run_worker(self, tmp, compiler, controller=None, code=0, write=True):
-        a = argparse.Namespace(id='hub', out=str(Path(tmp) / 'o'), cap_bytes=CAP, cmd=['true'], copy=None, no_scope=True)
-        def capped(cmd, cap, report):
+    def run_worker(self, tmp, compiler, controller=None, code=0, write=True, flock=True, timed_out=False):
+        a = argparse.Namespace(id='hub', out=str(Path(tmp) / 'o'), cap_bytes=CAP, cmd=CMD, copy=None, no_scope=True,
+                               timeout=3000, protect=['%s=%s' % (n, __file__) for n in lm.PROTECTED])
+        def capped(cmd, cap, report, timeout):
             if write: (Path(tmp) / 'o' / 'hub.js').write_text('hi')
-            return code, compiler
+            return code, compiler, timed_out
         ctl = controller or enforcement(memory_max=lm.CONTROLLER_CAP, memory_peak=1000)
         with patch.object(lm, 'run_capped', capped), patch.object(lm, 'cgroup_dir', return_value=(Path(tmp), False)), \
                 patch.object(lm, 'read_enforcement', return_value=ctl), patch.object(lm, 'source_identity', return_value=SRC), \
-                patch.object(lm, 'tool_identity', return_value=TOOLS):
+                patch.object(lm, 'tool_identity', return_value=TOOLS), patch.object(lm, 'native_flock', return_value=flock):
             rc = lm.worker(a)
         return rc, json.loads((Path(a.out) / 'hub.receipt.json').read_text())
 
@@ -166,7 +281,11 @@ class Worker(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(r['peak_bytes'], 123456789)
             self.assertEqual(r['outputs'], {'hub.js': lm.sha(b'hi')})
+            self.assertEqual(r['output_bytes'], {'hub.js': 2})
+            self.assertEqual(r['phases'], lm.PHASES)
             self.assertEqual(r['controller']['memory_max'], lm.CONTROLLER_CAP)
+            self.assertEqual(r['timeout_seconds'], 3000)
+            self.assertEqual(sorted(r['protected']), sorted(lm.PROTECTED))
 
     def test_compiler_without_kernel_cap_fails(self):
         for e in (None, enforcement(memory_max='max'), enforcement(memory_swap_max='max'), enforcement(oom_kill=1),
@@ -174,11 +293,15 @@ class Worker(unittest.TestCase):
             with tempfile.TemporaryDirectory() as t:
                 self.assertEqual(self.run_worker(t, e)[0], 1, e)
 
-    def test_nonzero_or_no_output_fails(self):
+    def test_nonzero_no_output_timeout_or_no_flock_fail(self):
+        for kw in ({'code': 1}, {'write': False}, {'timed_out': True, 'code': None}, {'flock': False}):
+            with tempfile.TemporaryDirectory() as t:
+                self.assertEqual(self.run_worker(t, enforcement(), **kw)[0], 1, kw)
+
+    def test_no_flock_never_runs_the_command(self):
         with tempfile.TemporaryDirectory() as t:
-            self.assertEqual(self.run_worker(t, enforcement(), code=1)[0], 1)
-        with tempfile.TemporaryDirectory() as t:
-            self.assertEqual(self.run_worker(t, enforcement(), write=False)[0], 1)
+            rc, r = self.run_worker(t, enforcement(), flock=False)
+            self.assertIsNone(r['exit']); self.assertNotIn('command', r['phases'])
 
     def test_unenforced_controller_fails(self):
         with tempfile.TemporaryDirectory() as t:
@@ -191,6 +314,14 @@ class Worker(unittest.TestCase):
             with patch.object(lm, 'cgroup_dir', return_value=(Path(t), False)):
                 self.assertEqual(lm.shim(a), 1)
             self.assertFalse(marker.exists())
+
+    def test_real_timeout_kills_and_never_qualifies(self):
+        with tempfile.TemporaryDirectory() as t:
+            marker = Path(t) / 'late'
+            with patch.object(lm, 'systemd_scope', lambda cap, argv: ['sh', '-c', 'sleep 5; touch %s' % marker]):
+                code, enf, timed_out = lm.run_capped(['x'], CAP, Path(t) / 'r.json', 0.3)
+            self.assertTrue(timed_out); self.assertIsNone(code)
+            time.sleep(0.2); self.assertFalse(marker.exists())
 
 
 class Cli(unittest.TestCase):
@@ -214,10 +345,10 @@ class Cli(unittest.TestCase):
     def test_qualification_for_another_tree_is_unqualified(self):
         with tempfile.TemporaryDirectory() as t:
             q = Path(t) / 'q.json'
-            q.write_text(json.dumps({'qualified': True, 'source': {'tree': '0' * 40}, 'tools': TOOLS}))
+            q.write_text(json.dumps({'qualified': True, 'schema': 3, 'source': {'tree': '0' * 40}, 'tools': TOOLS}))
             p = self.cli('run', '--jobs', 'hub', '--workdir', t, '--runner', 'local', '--qualification', str(q))
             self.assertEqual(p.returncode, 20)
-            self.assertIn('another source tree', p.stderr)
+            self.assertIn('NOT USED', p.stderr)
 
     def test_explicit_fallback_is_announced(self):
         with tempfile.TemporaryDirectory() as t:

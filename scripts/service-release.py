@@ -369,7 +369,7 @@ def lowmem_module():
     return module
 
 
-def verified_lowmemory(ref, base, release, compiler, pre, low=None):
+def verified_lowmemory(ref, base, release, compiler, pre, low=None, bun=None):
     """Extra admission for a low-memory build report. It never replaces verified_preemission: the report must
     bind the same commit/tree/compiler and the raw hub bytes that admission accepted. Any fault raises, so a
     stale, partial or mismatched report can never fall through to the whole-program emitter."""
@@ -389,6 +389,11 @@ def verified_lowmemory(ref, base, release, compiler, pre, low=None):
     tools = report.get("tools")
     require(isinstance(tools, dict) and isinstance(tools.get("bend"), dict) and tools["bend"].get("sha256") == compiler["sha256"],
             "Low-memory report used another compiler")
+    require(HEX.fullmatch(str(source.get("closure_sha256", ""))), "Low-memory report lacks the import-closure identity")
+    require(bun is not None and isinstance(tools.get("bun"), dict) and tools["bun"].get("sha256") == bun["sha256"],
+            "Low-memory report used another Bun binary")
+    require(isinstance(report.get("protected"), dict) and set(report["protected"]) == set(low.PROTECTED)
+            and all(HEX.fullmatch(str(v)) for v in report["protected"].values()), "Low-memory report lacks protected input hashes")
     for name in ("qualification", "reference"):
         require(isinstance(report.get(name), dict) and HEX.fullmatch(str(report[name].get("sha256", ""))),
                 "Low-memory report lacks its %s binding" % name)
@@ -404,6 +409,7 @@ def verified_lowmemory(ref, base, release, compiler, pre, low=None):
         require(not low.receipt_problems(receipt, low.CAP_BYTES, True), "Low-memory %s receipt: %s" % (
             name, "; ".join(low.receipt_problems(receipt, low.CAP_BYTES, True))))
         require(receipt.get("id") == name and receipt.get("source") == source and receipt.get("tools") == tools
+                and receipt.get("protected") == report["protected"]
                 and receipt.get("outputs") == job.get("outputs") and job["outputs"], "Low-memory %s receipt differs from report" % name)
     hub = jobs["hub"]["outputs"]
     require(set(hub) == {"hub.js"} and hub["hub.js"] == pre[1]["files"]["server.js"]["sha256"],
@@ -453,7 +459,7 @@ def js(request, base, out):
     pre = verified_preemission(request["preEmission"], base, release, request["toolchain"]["bend"]) if "preEmission" in request else None
     low = None
     if "lowMemory" in request:
-        low = verified_lowmemory(request["lowMemory"], base, release, request["toolchain"]["bend"], pre)
+        low = verified_lowmemory(request["lowMemory"], base, release, request["toolchain"]["bend"], pre, bun=request["toolchain"]["bun"])
     new_output(out)
     out.mkdir(parents=True)
     logs = out / "logs"
