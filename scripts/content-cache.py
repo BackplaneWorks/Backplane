@@ -37,7 +37,8 @@ written only by trusted main builds), and nothing here claims to provide that.
   content-cache.py audit [--cache D]
       every entry must be whole and authentic; prints the others
 
---all ignores the cache for planning (the nightly full run).
+--all ignores the cache for planning (what a nightly full run would use; no
+nightly job runs these scripts yet).
 Local cache: $BP_CONTENT_CACHE or ~/.cache/backplane-bend/content.
 """
 import argparse
