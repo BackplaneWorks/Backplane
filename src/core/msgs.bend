@@ -7699,9 +7699,9 @@ def T.tour.back.tip(l: I.Loc) -> String:
 def T.tour.body.agents(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Backplane runs the Claude Code, Codex, Grok or Muse Code command-line program: install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads."
+      "Backplane runs an agent's command-line program (Claude Code, Codex, Grok, Muse Code, OpenCode, Pi or Oh My Pi): install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads."
     case I.Ja{}:
-      "Backplaneは、Claude Code、Codex、Grok、Muse Codeのコマンドラインプログラムを実行します。このハブを動かすマシンにいずれかをインストールし、サインインしてください。設定には各プログラムが見つかったかどうかが表示されますが、サインイン状態は表示されません。GoogleのAntigravityエージェントは設定からインストールとサインインができます。プロバイダーとモデルは、スレッドの入力欄で、新しいスレッド用には設定で選びます。"
+      "Backplaneは、エージェントのコマンドラインプログラム（Claude Code、Codex、Grok、Muse Code、OpenCode、Pi、Oh My Pi）を実行します。このハブを動かすマシンにいずれかをインストールし、サインインしてください。設定には各プログラムが見つかったかどうかが表示されますが、サインイン状態は表示されません。GoogleのAntigravityエージェントは設定からインストールとサインインができます。プロバイダーとモデルは、スレッドの入力欄で、新しいスレッド用には設定で選びます。"
 
 def T.tour.body.bots.desktop(l: I.Loc) -> String:
   match l:
