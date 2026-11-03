@@ -396,19 +396,24 @@ def View.gone.chip(missing: Bool) -> List<&2, D.Node>:
     case True{}: [D.Dom.span("missing-note", "folder missing")]
     case False{}: Nil{}
 
-def View.gone.k(missing: Bool, +lc: I.Loc, +root: String, +pid: String, +armed: Bool) -> List<&2, D.Node>:
+def View.gone.k(missing: Bool, +lc: I.Loc, +root: String, +pid: String, +armed: Bool, +typed: String) -> List<&2, D.Node>:
   match missing:
     case True{}:
       [D.El{"div", "gone-note", [D.At{"class", "gone-note"}, D.At{"role", "status"}], [
         D.El{"strong", "", Nil{}, [D.Txt{"This project's folder is missing"}]},
-        D.El{"p", "", Nil{}, [D.Txt{"Backplane can't find " ++ root ++ ": it was moved, renamed or deleted, and agents can't start here until it is back at that path. If it moved for good, remove the project and add the folder where it is now."}]},
+        D.El{"p", "", Nil{}, [D.Txt{"Backplane can't find " ++ root ++ ": it was moved, renamed or deleted, and agents can't start here until it is back at that path. If it moved, type where it is now; its threads come with it."}]},
+        D.El{"div", "", [D.At{"class", "gone-move"}], [
+          D.El{"input", "gone-path", [D.At{"id", "gone-path"}, D.At{"class", "field"}, D.At{"type", "text"}, D.At{"autocomplete", "off"}, D.At{"spellcheck", "false"},
+            D.At{"aria-label", "The folder's new place"}, D.At{"placeholder", "/full/path/to/the/folder"}, D.At{"value", typed},
+            D.At{"data-bfield", "mv"}, D.On{"input", "bfield"}, D.At{"data-enter", "ws-proj-move"}, D.At{"data-value", pid}], Nil{}},
+          D.Dom.button("primary", "ws-proj-move", pid, "Point this project at that folder", "Use this folder")]},
         D.Dom.button("", "proj-remove", pid, MSG.T.sidebar.remove.note(lc), Bool.pick(String, armed, MSG.T.menu.remove.confirm(lc), MSG.T.menu.project.remove(lc)))]}]
     case False{}: Nil{}
 
 # (a thread elsewhere is its own hub's to judge: none)
 def View.gone(+lc: I.Loc, +st: M.State, +id: String, +dr: Map<&2, String>) -> List<&2, D.Node>:
   +pid = U.Ui.thread_project(U.Ui.thread(st, id))
-  View.gone.k(Bool.and(Bool.not(FR.Fr.is(id)), ROOTS.Roots.missing(st, pid)), lc, U.Ui.project_root(st, pid), pid, String.eq(U.Str.get(dr, "@rm"), pid))
+  View.gone.k(Bool.and(Bool.not(FR.Fr.is(id)), ROOTS.Roots.missing(st, pid)), lc, U.Ui.project_root(st, pid), pid, String.eq(U.Str.get(dr, "@rm"), pid), U.Str.get(dr, "@f.mv"))
 
 def View.project(+lc: I.Loc, r: U.SRow, +quiet: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> D.Node:
   match r:
@@ -1869,7 +1874,7 @@ def View.keys.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
 # Save is "sealed" and their fields have no binding.
 def View.agy.btn.k(+l: String, +a: String, +v: String, +cls: String, +form: String) -> D.Node:
   Bool.pick(D.Node, String.eq(a, "open-url"),
-    D.El{"a", "", [D.At{"class", "btn primary"}, D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
+    D.El{"a", "", [D.At{"class", Bool.pick(String, String.eq(cls, "on"), "btn primary", "btn")}, D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
     Bool.pick(D.Node, String.is_empty(form), D.Dom.button(cls, a, v, l, l), D.Dom.button(cls, "sealed", form, l, l)))
 
 def View.agy.btn(+u: U.Ui, +b: U.AgBtn) -> D.Node:

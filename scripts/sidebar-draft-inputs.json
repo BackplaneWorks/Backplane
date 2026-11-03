@@ -45,7 +45,7 @@
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
-    "src/core/client.bend": "4ade691889a67fbee5dba01edeb5de53ef28f6e32233590ccbf6458bd4845744",
+    "src/core/client.bend": "8568da8ca0bbe54f2524f4ffbd4e760fd80484ff8cc26c787ec1a43eb1a36e12",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -112,7 +112,7 @@
     "src/core/release.bend": "e057a8ffdc8232f50fd24084dc8584cd7b94f7263c83a8ad5700dfd825e07655",
     "src/core/reply.bend": "9e6f30962b274fa5595f4902f5ecd8f308275bea72ac4d558221bcd4b01ece0f",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
-    "src/core/roots.bend": "6bced7dc7f71c602843d6d049f79ce413316b54c4864c5aa1b02415dfaefa774",
+    "src/core/roots.bend": "57f316916b74a82394f496bfb22c6cea417f42e537e4ca93dde4fb0f589eb3fc",
     "src/core/rpcout.bend": "02803bf1bce06f2860b2f85a54e0b829548e62edeb1e33ff20b0bafadde6ba5d",
     "src/core/sched.bend": "0c14646b73a747d27cd5659eaee513993a53a9907b5a88592a6a6dbc624ba52e",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
@@ -192,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "5581813ae1e3232145816a38cd1fb37eae84b9874ed54337d30918ae985e096f"
+    "src/web/view.bend": "62d1731dbe899192ca2aead442b42ab7e4ab3ec7586026d390fe20d858c7a33f"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -895,5 +895,19 @@
     "work": "w-improvement-2df314cba25c4e9ae5c5fdd6a33314b3-1330605",
     "boatJob": "j20261103030141-4140898",
     "qualification": "Executed on exact sourceCommit; this review changes only the account-fallback dependency pin. Later unrelated main changes require their own review and combined qualification. No full repository proof, app build, installed runtime or real provider calls claimed."
+  },
+  "missingFolderMoveReview": {
+    "changedClosureFiles": [
+      "src/core/roots.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "roots.bend gains Roots.move (pure: project/thread records and the projects.missing setting); view.bend's missing-folder notice gains a path field (bfield mv, '@f.mv') and a ws-proj-move button. No sidebar draft readers, unknown @ retention, image keys or transport change."
+  },
+  "agentSetupLinkReview": {
+    "changedClosureFiles": [
+      "src/core/client.bend",
+      "src/web/view.bend"
+    ],
+    "scope": "Agent setup only: a link button's primary class follows its AgBtn flag, and the install guide's flag follows whether the program is found. No sidebar, draft or transport change."
   }
 }
