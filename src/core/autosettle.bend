@@ -4,6 +4,7 @@ import ./json.bend as J
 import ./locks.bend as LK
 import ./mail.bend as ML
 import ./bot.bend as BT
+import ./improvements.bend as IMP
 
 # Live hub policy. No IO, wall clock reads, transcript mutation or agent
 # decisions: the caller supplies the state snapshot and time. Historical
@@ -84,8 +85,12 @@ def Auto.addr(+s: M.State, +th: String) -> String:
 type Summary is Data:
   Summary{quiet: Nat, input: Bool, personal: Bool, output: String, output_at: Nat, report: Nat}
 
-def Auto.direct(+id: String, +text: String) -> Bool:
-  Bool.and(String.is_empty(M.Link.from(id)), Bool.or(Bool.not(String.starts_with(text, "[")), String.starts_with(text, "[message from person@")))
+def Auto.origin.personal(o: ML.Origin) -> Bool:
+  match o:
+    case ML.Origin{_, kind, _}: String.eq(kind, "person")
+
+def Auto.direct(+id: String, text: String) -> Bool:
+  Auto.origin.personal(ML.Mail.classify(M.Link.from(id), id, False{}, text))
 
 # Mcp.delegate.go reserves child t<at>-<seq+1>, then its initial prompt
 # m<at>-<seq+2>. Only a task-backed child (or its durable TaskDelegated
@@ -105,8 +110,17 @@ def Auto.seed.id(known: Bool, th: String) -> String:
     case True{} SCon{Chr{116}, rest}: Auto.seed.parts(String.split(rest, Chr{45}))
     case _ _: ""
 
+def Auto.improvement(+th: String) -> Bool:
+  Bool.and(String.starts_with(th, "improvement-"), IMP.Improvements.key(String.drop(th, 12n)))
+
+def Auto.improvement.seed(th: String, ordinary: String, job: Bool) -> String:
+  match job:
+    case True{}: "improvement-request-" ++ String.drop(th, 12n)
+    case False{}: ordinary
+
 def Auto.seed.for(+s: M.State, +th: String, workers: Map<&2, Nat>) -> String:
-  M.Setting.get(s, "autosettle.seed." ++ th, Auto.seed.id(Nat.is_gt(Auto.get(workers, th), 0n), th))
+  M.Setting.get(s, "autosettle.seed." ++ th, Auto.improvement.seed(th,
+    Auto.seed.id(Nat.is_gt(Auto.get(workers, th), 0n), th), Auto.improvement(th)))
 
 def Auto.direct.seed.is(seed: Bool, id: String, text: String) -> Bool:
   match seed:
@@ -126,6 +140,12 @@ def Auto.assistant(role: M.Role) -> Bool:
     case M.Assistant{}: True{}
     case _: False{}
 
+def Auto.personal.add(known: Bool, user: Bool, id: String, text: String, seed: String) -> Bool:
+  match known user:
+    case True{} _: True{}
+    case False{} True{}: Auto.direct.seed(id, text, seed)
+    case False{} False{}: False{}
+
 def Auto.summary.seed(xs: List<&2, M.Entry>, +th: String, +by: String, +seed: String, a: Summary) -> Summary:
   match xs a:
     case Nil{} result: result
@@ -133,7 +153,7 @@ def Auto.summary.seed(xs: List<&2, M.Entry>, +th: String, +by: String, +seed: St
       +own = String.eq(t, th)
       +user = Bool.and(own, Auto.user(role))
       Auto.summary.seed(rest, th, by, seed, Summary{M.Time.max(q, at), Bool.or(found, user),
-        Bool.or(person, Bool.and(user, Auto.direct.seed(id, text, seed))),
+        Auto.personal.add(person, user, id, text, seed),
         Bool.pick(String, Bool.and(own, Bool.and(Auto.assistant(role), String.is_empty(output))), id, output),
         M.Time.max(oa, Bool.pick(Nat, Bool.and(own, Auto.assistant(role)), at, 0n)),
         M.Time.max(report, Bool.pick(Nat, Bool.and(String.eq(M.Link.from(id), th), String.eq(t, by)), at, 0n))})
@@ -154,8 +174,8 @@ def Auto.activity(t: M.Thread) -> Nat:
     case M.Thread{_, _, _, _, at, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: at
 
 def Auto.worker(+s: M.State, +th: String, workers: Map<&2, Nat>) -> Bool:
-  Bool.or(Bool.or(Bool.not(String.is_empty(M.Launch.by(s, th))), Bool.not(String.is_empty(M.Setting.get(s, "thread.parent." ++ th, "")))), Bool.or(Nat.is_gt(Auto.get(workers, th), 0n),
-    Bool.or(String.starts_with(th, "run"), String.starts_with(th, "mailcoord-"))))
+  Bool.or(Auto.improvement(th), Bool.or(Bool.or(Bool.not(String.is_empty(M.Launch.by(s, th))), Bool.not(String.is_empty(M.Setting.get(s, "thread.parent." ++ th, "")))), Bool.or(Nat.is_gt(Auto.get(workers, th), 0n),
+    Bool.or(String.starts_with(th, "run"), String.starts_with(th, "mailcoord-")))))
 
 def Auto.output(+s: M.State, +th: String, fallback: String) -> String:
   M.Setting.get(s, "autosettle.output." ++ th, fallback)
@@ -342,38 +362,146 @@ def Auto.queued(xs: List<&2, Sigma<&2, &2, String, _ => List<&2, M.QItem>>>, m: 
     case Nil{}: m
     case (th, qs) <> rest: Auto.queued(rest, Auto.put(Bool.not(List.is_empty(&2, M.QItem, qs)), m, th, 1n))
 
-def Auto.wakes(keys: List<&2, String>, +s: M.State, m: Map<&2, Nat>) -> Map<&2, Nat>:
+def Auto.work.ids.rows(xs: List<&2, String>, m: Map<&2, Nat>) -> Map<&2, Nat>:
+  match xs:
+    case Nil{}: m
+    case row <> rest: Auto.work.ids.rows(rest, Auto.put(True{}, m, M.Bg.field(row, 0n), 1n))
+
+def Auto.work.ids(keys: List<&2, String>, +s: M.State, m: Map<&2, Nat>) -> Map<&2, Nat>:
   match keys:
     case Nil{}: m
-    case +key <> rest: Auto.wakes(rest, s, Auto.put(Bool.not(String.is_empty(M.Setting.get(s, key, ""))), m, String.drop(key, 9n), 1n))
+    case key <> rest: Auto.work.ids(rest, s, Auto.work.ids.rows(M.Bg.lines(M.Setting.get(s, key, "")), m))
+
+# Subscription existence is not running work. Work/thread subscriptions
+# block only while their target owns work; file/PR subscriptions are passive
+# and retire after their completed owner settles. Unknown kinds stay held.
+def Auto.wake.active.kind(kind: String, target: String, work: Map<&2, Nat>, owned: Map<&2, Nat>) -> Bool:
+  match kind:
+    case "work": Nat.is_gt(Auto.get(work, target), 0n)
+    case "thread": Nat.is_gt(Auto.get(owned, target), 0n)
+    case "file": False{}
+    case "pr": False{}
+    case _: True{}
+
+def Auto.wake.active(+o: J.Json, work: Map<&2, Nat>, owned: Map<&2, Nat>) -> Bool:
+  Auto.wake.active.kind(J.Json.get_str(o, "kind", ""), J.Json.get_str(o, "target", ""), work, owned)
+
+type WakeRoots is Data:
+  WakeRoots{links: Map<&2, List<&2, String>>, live: Map<&2, Nat>}
+
+def Auto.wake.list(pair: Map<&2, List<&2, String>> & List<&2, String>) -> List<&2, String>:
+  (_, xs) = pair
+  xs
+
+def Auto.wake.neighbors(+links: Map<&2, List<&2, String>>, +id: String) -> List<&2, String>:
+  Auto.wake.list(Map.get(List<&2, String>, Nil{}, links, id))
+
+def Auto.wake.link.kind(kind: String, +target: String, +by: String, +work: Map<&2, Nat>, +links: Map<&2, List<&2, String>>, live: Map<&2, Nat>) -> WakeRoots:
+  match kind:
+    case "thread": WakeRoots{Map.set(&2, List<&2, String>, links, target, by <> Auto.wake.neighbors(links, target)), live}
+    case "work": WakeRoots{links, Auto.put(Nat.is_gt(Auto.get(work, target), 0n), live, by, 1n)}
+    case "file": WakeRoots{links, live}
+    case "pr": WakeRoots{links, live}
+    case _: WakeRoots{links, Auto.put(True{}, live, by, 1n)}
+
+def Auto.wake.link(+o: J.Json, work: Map<&2, Nat>, graph: WakeRoots) -> WakeRoots:
+  match graph:
+    case WakeRoots{links, live}: Auto.wake.link.kind(J.Json.get_str(o, "kind", ""), J.Json.get_str(o, "target", ""), J.Json.get_str(o, "by", ""), work, links, live)
+
+def Auto.wake.links.ids(ids: List<&2, String>, +s: M.State, +work: Map<&2, Nat>, graph: WakeRoots) -> WakeRoots:
+  match ids:
+    case Nil{}: graph
+    case id <> rest: Auto.wake.links.ids(rest, s, work, Auto.wake.link(M.Wake.get(s, id), work, graph))
+
+def Auto.wake.links(keys: List<&2, String>, +s: M.State, +work: Map<&2, Nat>, graph: WakeRoots) -> WakeRoots:
+  match keys:
+    case Nil{}: graph
+    case key <> rest: Auto.wake.links(rest, s, work, Auto.wake.links.ids(M.Wake.ids(s, key), s, work, graph))
+
+# Traverse each reached owner once. Reverse thread-wake edges also retain
+# chains of subscribers waiting indirectly on real work, without treating
+# a cycle of idle subscriptions as running work.
+def Auto.owners.next(fresh: Bool, +s: M.State, +parents: Map<&2, String>, +links: Map<&2, List<&2, String>>, +id: String, rest: List<&2, String>) -> List<&2, String>:
+  match fresh:
+    case False{}: rest
+    case True{}: List.append(&2, String, Auto.wake.neighbors(links, id), Auto.parent(s, parents, id) <> rest)
+
+def Auto.owners(+s: M.State, +parents: Map<&2, String>, +links: Map<&2, List<&2, String>>, fuel: Nat, pending: List<&2, String>, +seen: Map<&2, Nat>) -> Map<&2, Nat>:
+  match fuel pending:
+    case 0n _: seen
+    case _ Nil{}: seen
+    case 1n+n +id <> rest:
+      +fresh = Bool.and(Bool.not(String.is_empty(id)), Nat.is_eq(Auto.get(seen, id), 0n))
+      Auto.owners(s, parents, links, n, Auto.owners.next(fresh, s, parents, links, id, rest), Auto.put(fresh, seen, id, 1n))
 
 def Auto.rows(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>, m: Map<&2, Nat>) -> Map<&2, Nat>:
   match xs:
     case Nil{}: m
     case (th, n) <> rest: Auto.rows(rest, Auto.put(Nat.is_gt(n, 0n), m, th, 1n))
 
+def Auto.index.graph(graph: WakeRoots, workers: Map<&2, Nat>, +s: M.State, parents: Map<&2, String>, +fuel: Nat, +count: Nat) -> Index:
+  match graph:
+    case WakeRoots{links, +live}: Index{workers, live, Auto.old.reports(s), Auto.owners(s, parents, links,
+      Nat.mul(4n, Nat.add(1n, Nat.add(fuel, Nat.add(count, List.length(&2, String, Map.keys(&2, Nat, live)))))), Map.keys(&2, Nat, live), Map.new(&2, Nat))}
+
+def Auto.index.parents(+workers: Map<&2, Nat>, +blocked: Map<&2, Nat>, +s: M.State, +parents: Map<&2, String>, +fuel: Nat) -> Index:
+  +keys = M.Setting.keys.pre(s, "wakes.by.")
+  Auto.index.graph(Auto.wake.links(keys, s,
+    Auto.work.ids(List.append(&2, String, M.Setting.keys.pre(s, "watch."), M.Setting.keys.pre(s, "bg.")), s, Map.new(&2, Nat)), WakeRoots{Map.new(&2, List<&2, String>), blocked}), workers, s, parents, fuel,
+    List.length(&2, String, M.Setting.keys.pre(s, "wake.")))
+
 def Auto.index.blocked(+workers: Map<&2, Nat>, +blocked: Map<&2, Nat>, +s: M.State) -> Index:
   match s:
     case M.State{_, ts, _, _, tasks, _, _, _, _, _, _}:
-      Index{workers, blocked, Auto.old.reports(s), Auto.ancestors(Map.keys(&2, Nat, blocked), s,
-        Auto.task.parents(Map.values(&2, M.Task, tasks), Map.new(&2, String)), List.length(&2, M.Thread, Map.values(&2, M.Thread, ts)), blocked)}
+      Auto.index.parents(workers, blocked, s, Auto.task.parents(Map.values(&2, M.Task, tasks), Map.new(&2, String)), List.length(&2, M.Thread, Map.values(&2, M.Thread, ts)))
 
 def Auto.index.tasks(pair: Map<&2, Nat> & Map<&2, Nat>, +s: M.State) -> Index:
   (workers, blocked) = pair
   match s:
     case M.State{_, ts, _, _, _, _, qs, _, _, _, _}:
       Auto.index.blocked(workers, Auto.rows(Map.to_list(&2, Nat, M.Work.rows.map(s)), Auto.running(Map.values(&2, M.Thread, ts),
-        Auto.queued(Map.to_list(&2, List<&2, M.QItem>, qs), Auto.wakes(M.Setting.keys.pre(s, "wakes.by."), s,
-          Auto.secrets(M.Setting.keys.pre(s, "secret.ask."), s, Auto.asks(M.Asks.all(s), Auto.locks(M.Locks.names(s), s, blocked))))))), s)
+        Auto.queued(Map.to_list(&2, List<&2, M.QItem>, qs),
+          Auto.secrets(M.Setting.keys.pre(s, "secret.ask."), s, Auto.asks(M.Asks.all(s), Auto.locks(M.Locks.names(s), s, blocked)))))), s)
 
 def Auto.index(+s: M.State) -> Index:
   match s:
     case M.State{_, _, _, _, tasks, _, _, _, _, _, _}:
       Auto.index.tasks(Auto.tasks(Map.values(&2, M.Task, tasks), Map.new(&2, Nat), Map.new(&2, Nat)), s)
 
-def Auto.changes(+s: M.State, now: Nat) -> List<&2, M.Change>:
+def Auto.expired.ids(ids: List<&2, String>, +s: M.State, +now: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, +acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match ids:
+    case Nil{}: acc
+    case +id <> rest: Auto.expired.ids(rest, s, now, work, owned,
+      Bool.pick(List<&2, M.Change>, Auto.wake.active(M.Wake.get(s, id), work, owned), acc, M.WakeDropped{id, now} <> acc))
+
+def Auto.expired.owner(eligible: Bool, ids: List<&2, String>, +s: M.State, +now: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match eligible:
+    case False{}: acc
+    case True{}: Auto.expired.ids(ids, s, now, work, owned, acc)
+
+def Auto.expired.done(shelf: M.Shelf, turn: M.TurnState) -> Bool:
+  match shelf turn:
+    case M.Settled{} M.Completed{}: True{}
+    case _ _: False{}
+
+def Auto.expired.go(keys: List<&2, String>, +s: M.State, +now: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match keys:
+    case Nil{}: List.reverse(&2, M.Change, acc)
+    case +key <> rest:
+      +th = String.drop(key, 9n)
+      +t = M.State.thread.get(s, th)
+      Auto.expired.go(rest, s, now, work, owned, Auto.expired.owner(
+        Bool.and(Auto.expired.done(M.Shelf.of(t), M.Thread.turn(t)), Nat.is_eq(Auto.get(owned, th), 0n)), M.Wake.ids(s, key), s, now, work, owned, acc))
+
+def Auto.changes.index(+ix: Index, +s: M.State, +now: Nat) -> List<&2, M.Change>:
+  match ix s:
+    case Index{_, _, _, owned} M.State{_, ts, _, _, _, _, _, _, _, _, _}:
+      List.append(&2, M.Change, Auto.go(Map.values(&2, M.Thread, ts), s, now, ix), Auto.expired.go(M.Setting.keys.pre(s, "wakes.by."), s, now,
+        Auto.work.ids(List.append(&2, String, M.Setting.keys.pre(s, "watch."), M.Setting.keys.pre(s, "bg.")), s, Map.new(&2, Nat)), owned, Nil{}))
+
+def Auto.changes(+s: M.State, +now: Nat) -> List<&2, M.Change>:
   match s:
-    case M.State{_, ts, _, _, _, _, _, _, _, _, _}: Auto.go(Map.values(&2, M.Thread, ts), s, now, Auto.index(s))
+    case M.State{_, _, _, _, _, _, _, _, _, _, _}: Auto.changes.index(Auto.index(s), s, now)
 
 # A receipt names the actual assistant message, rather than a timestamp:
 # two replies in the same second cannot acknowledge each other.
@@ -420,7 +548,7 @@ def Auto.message.metadata(c: M.Change, +s: M.State) -> List<&2, M.Change>:
     case M.TaskDelegated{_, _, +child, _, _, _, at}:
       [M.SettingSet{"autosettle.seed." ++ child, Auto.seed.id(True{}, child), at}]
     case M.MessagePosted{+th, +id, M.User{}, +text, +at}:
-      +personal = Auto.direct.seed(id, text, M.Setting.get(s, "autosettle.seed." ++ th, ""))
+      +personal = Auto.direct.seed(id, text, M.Setting.get(s, "autosettle.seed." ++ th, Auto.improvement.seed(th, "", Auto.improvement(th))))
       Bool.pick(List<&2, M.Change>, Bool.or(personal, String.is_empty(M.Setting.get(s, "autosettle.audience." ++ th, ""))),
         [M.SettingSet{"autosettle.audience." ++ th, Bool.pick(String, personal, "person", "worker"), at}], Nil{})
     case M.MessagePosted{th, id, M.Assistant{}, _, at}:

@@ -15882,3 +15882,10 @@ law autosettle_delegation_seed_not_personal:
 
 law autosettle_human_followup_is_personal:
   {AUTOS.Auto.direct.seed("human-followup", "More work", "m100-4") == True{} : Bool}
+
+law autosettle_finished_work_wake_not_running:
+  for owned: Map<&2, Nat>
+  {AUTOS.Auto.wake.active.kind("work", "ended", Map.new(&2, Nat), owned) == False{} : Bool}
+
+law autosettle_live_thread_wake_held:
+  {AUTOS.Auto.wake.active.kind("thread", "t", Map.new(&2, Nat), Map.set(&2, Nat, Map.new(&2, Nat), "t", 1n)) == True{} : Bool}
