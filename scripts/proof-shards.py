@@ -11,6 +11,7 @@ import json
 import os
 import math
 import resource
+import stat
 import time
 from pathlib import Path
 import re
@@ -26,7 +27,10 @@ LEX = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|#[^\n]*|([A-Za-z_][A-Z
 def portable_mode(path):
     """The git-tracked mode: only the executable bit counts, so identities do not
     depend on a host's umask (a Boat sandbox writes 0600/0700, a workstation 0664)."""
-    return 0o755 if path.stat().st_mode & 0o111 else 0o644
+    mode = path.stat().st_mode
+    if not stat.S_ISREG(mode) or mode & 0o7000 or not mode & 0o400:
+        raise ValueError('unexpected source type/mode: ' + str(path))
+    return 0o755 if mode & 0o111 else 0o644
 
 
 def sha(data):
