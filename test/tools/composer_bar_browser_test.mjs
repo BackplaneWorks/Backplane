@@ -62,6 +62,8 @@ try {
    const m=await measure();const hint=await page.locator('#composer').getAttribute('placeholder');if(pane<=700)assert(hint.length<16,'narrow placeholder must be short '+JSON.stringify({width,pane,hint}));if(m.overflow)await page.screenshot({path:path.join(out,'failure.png')});
    assert(m.height<=m.button+0.5,JSON.stringify({width,long,reply,account,...m}));assert.equal(m.wrap,'nowrap');assert(!m.overflow,JSON.stringify({width,long,reply,account,...m}));assert(!m.overlap,JSON.stringify({width,long,reply,account,...m}));
    for(const c of m.controls){assert(c.left>=-0.5&&c.right<=width+0.5,JSON.stringify({width,c}));assert(c.top>=m.controls.at(-1).top-1&&c.bottom<=m.controls.at(-1).bottom+1,JSON.stringify({width,c,m}));}
+   // the usual short account name ("Default") is not cut to "Defa…" where the bar has room
+   if(account&&!long&&pane===width&&width>=1024){const cut=await page.evaluate(()=>{const v=document.querySelector('.account-chip .acct-v');return v.scrollWidth-v.clientWidth;});assert(cut<=0.5,`account name cut by ${cut}px at ${width}`);}
    const summary=page.locator('.composer-more > summary');
    if(await summary.isVisible()) {
     await summary.click();

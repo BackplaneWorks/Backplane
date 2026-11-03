@@ -140,3 +140,31 @@ find that merge-base. The receipt includes timings and packed-object bytes;
 these local fixture timings do not estimate GitHub network or Actions latency.
 The audit's checkout median was already about3s. Full-history metadata may add
 cost on large repositories; measure the next real run before claiming a gain.
+
+## Keep shard estimates current
+
+The test job retains `test-timings-SHARD` artifacts for three days, including
+failed-suite runs when the runner reached its duration writer. Scheduling
+measurements never certify test passes. Saved job logs can refresh weights
+without rerunning the suite:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 uv run --no-project python scripts/import-test-timings.py \
+  --revision FULL_SOURCE_SHA --run-url ACTIONS_RUN_URL \
+  --log SHARD1.log --log SHARD2.log --log SHARD3.log --log SHARD4.log \
+  --report build/ci-speed/nightly-profile/profile.json
+```
+
+Logs must contain the exact checked-out revision, cover its complete test
+inventory once and match its original shard assignment in order. Only passing
+program durations become weights; failed/untimed/new tests remain scheduled
+with the sharder fallback. Estimates do not alter any test verdict or skip
+policy. Recorded-work totals in the report omit unknown durations and are a
+scheduling model, not a prediction of complete CI wall time.
+
+`record-test-timings.sh` explicitly selects the full suite serially and clears
+inherited focused/shard selection. It retains the old profile if execution
+fails. This is heavy work and requires the normal bend lock and admission; do
+not run it just to refresh a profile when saved logs are available. The cheap
+`test_timings_test.py` fixtures exercise import rejection and recorder
+selection/failure behavior without Bend or app execution.

@@ -880,13 +880,15 @@ type AStep is Data:
   ACommit{}
   APush{}
   APr{}
+  AInit{}
 
 def Git.act.steps(+a: String) -> Maybe<&2, List<&2, AStep>>:
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit"), Some{[ACommit{}]},
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "push"), Some{[APush{}]},
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "create_pr"), Some{[APr{}]},
   Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit_push"), Some{[ACommit{}, APush{}]},
-  Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit_push_pr"), Some{[ACommit{}, APush{}, APr{}]}, None{})))))
+  Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "commit_push_pr"), Some{[ACommit{}, APush{}, APr{}]},
+  Bool.pick(Maybe<&2, List<&2, AStep>>, String.eq(a, "init"), Some{[AInit{}]}, None{}))))))
 
 # "error: x" -> "error: <step>: x"
 def Git.label.k(bad: Bool, name: String, +s: String) -> String:
@@ -960,8 +962,22 @@ def Git.step.pr(+cwd: String, title: String, body: String) -> IO(String):
     Git.need_branch(b, b2 =>
       Git.seq(GH.GhRun.gh(cwd, Git.pr.args(b2, title, body)), out => Git.done("pr: " ++ Git.last_line(out))))))
 
+# Diff's "Make it a git repository" for a project folder that is none (the
+# hub lets "init" through outside a repository: GitJob.run.git): git init
+# there, Backplane's own folder kept out of it (as the worktrees' and the
+# design history's are), and the folder committed as it is, so new threads
+# get worktrees of their own. Inside a repository (a page left open), or
+# when git has no name and email to commit with, it changes nothing.
+def Git.init.sh() -> String:
+  "if git rev-parse --git-dir >/dev/null 2>&1; then echo 'already a git repository'; exit 1; fi; if ! git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then echo 'git does not know your name and email on this machine yet, so nothing was changed. Set them once (git config --global user.name \"Your Name\" and git config --global user.email you@example.com), then press it again.'; exit 1; fi; git init -q && mkdir -p .git/info && printf '/.backplane/\\n' >> .git/info/exclude && git add -A && git commit -q -m start && git log -1 --format='%h %s'"
+
+def Git.step.init(+cwd: String) -> IO(String):
+  Git.seq(P.Proc.run("sh", ["-c", Git.init.sh()], cwd), out => Git.done(cwd ++ " is a git repository now (commit " ++ out ++ "); new threads get their own worktree"))
+
 def Git.act.step(s: AStep, +cwd: String, +message: String, +title: String, +body: String) -> IO(String):
   match s:
+    case AInit{}:
+      Git.step.init(cwd)
     case ACommit{}:
       Git.step.commit(cwd, message)
     case APush{}:
