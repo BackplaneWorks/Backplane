@@ -324,7 +324,7 @@ fun Thumb(m: AppModel, path: String, show: (String) -> Unit) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         }
         Got.Failed -> Box(Modifier.size(260.dp, 200.dp), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.BrokenImage, NativeMessages.native_image_missing(lang), tint = MaterialTheme.colorScheme.outline)
+            Text("Image unavailable", color = MaterialTheme.colorScheme.outline)
         }
         is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_plain(lang), Modifier.size(260.dp, 200.dp)
             .clip(corner).clickable { show(u) }, contentScale = ContentScale.Fit)

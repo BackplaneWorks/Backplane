@@ -1,3 +1,5 @@
+import ./src/core/images.bend as MIMAGES
+
 import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
 
 import ./src/web/composer-bar.bend as CBAR
@@ -15540,6 +15542,19 @@ law owner_mail_unknown_method_unacknowledged:
 
 law owner_mail_copy_quiet:
   {JCOPY.Copy.out(H.OwnerMail{}) == Nil{} : List<&2, H.Out>}
+
+# A message image URL grants no path by itself; exact assistant text is required.
+law message_image_reference_required:
+  {MIMAGES.Img.message_allowed("/tmp/shared.png", "/tmp/private.png") == False{} : Bool}
+
+law message_image_traversal_denied:
+  {MIMAGES.Img.message_allowed("/tmp/../private.png", "/tmp/../private.png") == False{} : Bool}
+
+law message_image_text_denied:
+  {MIMAGES.Img.message_allowed("/tmp/private.txt", "/tmp/private.txt") == False{} : Bool}
+
+law message_image_entry_bound_url:
+  {MIMAGES.Img.message_url("m:1", "/tmp/x.png") == "/message-image?entry=m%3A1&path=/tmp/x.png" : String}
 
 # Approved invariant: the composer control bar can never exceed one button
 # height. Content and viewport do not enter the layout; disclosures are outside

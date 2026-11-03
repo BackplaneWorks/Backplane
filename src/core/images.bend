@@ -194,3 +194,12 @@ def Img.viewable(+p: String) -> Bool:
 # a U32 size holds (core/attach.bend's Att.ceiling)
 def Img.cap() -> U32:
   4194304000
+
+# Message previews use an entry-bound capability checked against the saved
+# assistant text, separately from the Files tab's general preview route.
+def Img.message_url(+entry: String, +p: String) -> String:
+  "/message-image?entry=" ++ Img.enc.bytes(U.Utf8.encode(entry)) ++ "&path=" ++ Img.enc.bytes(U.Utf8.encode(p))
+
+# Both the saved message and the exact spelling must authorize the path.
+def Img.message_allowed(+text: String, +path: String) -> Bool:
+  Bool.and(Img.is_image(path), Bool.and(Bool.not(Bool.or(String.contains(path, "/../"), Bool.or(String.contains(path, "/./"), String.contains(path, "\\")))), Img.has(Img.paths(text), path)))

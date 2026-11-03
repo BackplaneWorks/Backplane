@@ -1,3 +1,5 @@
+import { installMessageImages, messageImages } from "./message-images.js";
+installMessageImages();
 // Backplane browser host.
 //
 // This file only moves data: JSON <-> Bend values, a keyed DOM patch of the
@@ -2066,6 +2068,7 @@ function attachmentPreviews() {
     if (img.complete) img.classList.toggle('failed', img.naturalWidth === 0);
   }
   shotsMissing(document);
+  messageImages(document);
 }
 installShotMissing(document);
 

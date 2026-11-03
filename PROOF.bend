@@ -15561,6 +15561,14 @@ def Laws.owner_mail_unknown_method_unacknowledged(): {==}
 
 def Laws.owner_mail_copy_quiet(): {==}
 
+def Laws.message_image_reference_required(): {==}
+
+def Laws.message_image_traversal_denied(): {==}
+
+def Laws.message_image_text_denied(): {==}
+
+def Laws.message_image_entry_bound_url(): {==}
+
 def Laws.composer_bar_one_button(button): {==}
 
 def Laws.composer_bar_never_wraps(button): {==}
