@@ -2211,6 +2211,11 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .dot.stalled { background: var(--warn); border-radius: 0; transform: rotate(45deg); animation: none; }
 .plane-row .why.stalled { color: var(--warn); }
 .thread:has(.dot.stalled) .ago.agents { color: var(--warn); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A red row says what it wants where its age goes; a failed turn's square
+   is hollow and its word grey: it waits on nothing. */
+.thread:has(.dot.blocked) .ago.want { color: var(--st-need); }
+.thread:has(.dot.failed) .ago.want { color: var(--dim); }
+.dot.failed { background: transparent; box-shadow: inset 0 0 0 1.5px var(--st-need); }
 
 .todos-body { max-height: min(35vh, 300px); overflow-y: auto; }
 .todos .todo, .todos .todo-add { display: flex; align-items: center; gap: 4px; min-height: 36px; }
