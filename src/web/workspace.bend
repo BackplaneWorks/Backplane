@@ -433,6 +433,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case False{}: Nil{}
     case True{}:
+      +su = U.Palette.signals(u)
       [D.El{"div", "workspace-palette", [D.At{"class", "workspace-palette-backdrop"}], [
         D.El{"section", "", [D.At{"class", "workspace-palette"}, D.At{"role", "dialog"}, D.At{"aria-label", "Command palette"}, D.At{"aria-modal", "true"}], [
           D.El{"header", "", Nil{}, [D.Txt{"Commands"}, D.Dom.button("", "ws-palette-close", "", "Close command palette · Esc", "Close")]},
@@ -440,7 +441,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
             D.At{"value", U.Palette.query(u)}, D.At{"data-bfield", "wspalette"}, D.At{"role", "combobox"}, D.At{"aria-label", "Search commands"}, D.At{"aria-expanded", "true"}, D.At{"aria-controls", "workspace-commands"},
             D.At{"aria-activedescendant", "workspace-command-" ++ Nat.show(U.Palette.index(u))}, D.On{"input", "bfield"}], Nil{}},
           D.El{"div", "workspace-commands", [D.At{"id", "workspace-commands"}, D.At{"role", "listbox"}],
-            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), WS.empty(U.Palette.query(u)), WS.rows(WS.items(u), u, U.Ui.state(u), U.Palette.index(u), 0n))},
+            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(su)), WS.empty(U.Palette.query(u)), WS.rows(WS.items(su), su, U.Ui.state(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
             D.El{"details", "", Bool.pick(List<&2, D.Attr>, String.eq(U.Ui.scratch(u, "@ws.keys"), "1"), [D.At{"open", ""}], Nil{}), [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
               D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+. stop · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort · / composer."}]},

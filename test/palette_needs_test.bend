@@ -28,6 +28,10 @@ def log() -> List<&2, M.Change>:
 def ui() -> U.Ui:
   U.Side.with_signals(U.Ui.select.k(U.Ui.fold(log(), U.Ui.init(1000n)), "t"))
 
+# the client's own Ui: no signals in it (the page decorates a copy)
+def plain() -> U.Ui:
+  U.Ui.select.k(U.Ui.fold(log(), U.Ui.init(1000n)), "t")
+
 def labels(xs: List<&2, U.PItem>) -> List<&2, String>:
   match xs:
     case Nil{}: Nil{}
@@ -53,4 +57,7 @@ def main() -> IO(Unit):
     C.Check.str("a thread row draws its dot, not the bubble", Bool.show(String.contains(html(""), "dot blocked")) ++ Bool.show(String.contains(html(""), "dot failed")) ++ Bool.show(String.contains(html(""), "\"svg\"")), "TrueTrueFalse")
     C.Check.str("and says what it wants", Bool.show(String.contains(html(""), "\"approval\"")) ++ Bool.show(String.contains(html(""), "\"question\"")) ++ Bool.show(String.contains(html(""), "\"failed\"")), "TrueTrueTrue")
     C.Check.str("a typed thread row has its dot and word too", Bool.show(String.contains(html("grounding"), "dot blocked")) ++ Bool.show(String.contains(html("grounding"), "\"question\"")) ++ Bool.show(String.contains(html("pull-ups"), "dot inactive")), "TrueTrueTrue")
+    C.Check.str("the client's own Ui lists them too", String.join(List.take(&2, String, labels(WS.WS.items(U.Palette.set(plain(), "", 0n))), 2n), ","), "Battery life estimate,Grounding plan")
+    C.Check.str("and its Enter opens the row shown first", U.Ui.sel(ui.of(WS.WS.palette.run(U.Palette.set(plain(), "", 0n), 0n))), "ap")
+    C.Check.str("and its rows draw the sidebar's dots", Bool.show(String.contains(J.Json.show(J.Json.arr(W.Node.write.go(WS.WS.palette(True{}, U.Palette.set(plain(), "", 0n)), Nil{}))), "dot blocked")), "True")
     C.Check.str("helpers: want of a red row", U.Palette.want(U.Lang.loc(ui()), ui(), "blocked", U.Ui.thread(U.Ui.state(ui()), "q")), "question")

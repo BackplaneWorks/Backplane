@@ -17166,8 +17166,26 @@ def Palette.need.items(rs: List<&2, ARow>, +l: I.Loc) -> List<&2, PItem>:
     case ARow{_, _, +t, _, _, _} <> rest:
       PItem{TTL.Title.shown(l, Active.title(t)), "select", M.Thread.id(t)} <> Palette.need.items(rest, l)
 
-def Palette.needs(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+def Palette.needs.k(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
   Palette.need.items(List.sort(~ARow, ~ARow.before, Palette.need.go(Kids.keep(Ui.threads(Ui.state(u)), Kids.set(Ui.state(u))), u, Side.now(u), Nil{})), l)
+
+# the Ui with this frame's signals, as the sidebar draws them: the client's
+# own Ui carries none (the page decorates a copy, Side.with_signals), and
+# the palette's rows and its Enter must read the same ones
+def Palette.signals.k(has: Bool, u: Ui) -> Ui:
+  match has:
+    case True{}: u
+    case False{}: Side.with_signals(u)
+
+def Palette.signals.has(r: Map<&2, String> & Bool) -> Bool:
+  (_, yes) = r
+  yes
+
+def Palette.signals(+u: Ui) -> Ui:
+  Palette.signals.k(Palette.signals.has(Map.has(&2, String, Ui.infos(u), "@signal.online")), u)
+
+def Palette.needs(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Palette.needs.k(l, Palette.signals(u))
 
 # Only ordinary chat text gets a provisional timeline bubble. Composer
 # commands have their own panels and must keep their original field.
