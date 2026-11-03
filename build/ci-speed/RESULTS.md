@@ -1024,3 +1024,25 @@ made. A shard hit remains a local same-user trust result, not a complete gate.
 All shards must be accounted for in a verified full partition; a production
 mixed cached/fresh join, shared signed cache and actual capped proof timings
 are still pending. Compiler and installer lanes are untouched.
+
+### Portable source and proof-cache modes (2026-11-03)
+
+Regular PR #860 normal-merged at `d20e1db4e44d8746ee367252611b7d04de28c99e`
+after independent exact-head review, 41 planner/guard controls in 0.394s and a
+fresh merged LAWS/PROOF shape check. It fixes raw 0664/0600 source-mode identity
+mismatches across host and Boat without changing resource floors or the
+compiler. The cache input key now uses the same checked Git-mode convention.
+
+| Change | Before | After |
+|---|---|---|
+| Partition mode identity across host/Boat umasks (#860) | 0664 and 0600 differ; worker identity refuses | Both map to 0644; executable-bit changes and special/unreadable/non-regular modes still fail |
+| Two-law fixture cache keys after chmod of all inputs 0644 to0600 | 0/2 retained | 2/2 retained |
+| That fixture's key plan, one observation each | 10.640ms | 10.446ms |
+
+[Receipt and scope](proof-cache/MODES.json), [GNU time](proof-cache/MODES.time),
+[test summary](proof-cache/PORTABLE-TESTS.txt) and [details](proof-cache/README.md).
+The comparison uses the real partition/key code with a mocked toolchain;
+it measures key retention, not executed cache hits or proof/CI speed. Full
+comparison **0.12s /28,456KiB peak RSS**, cost **$0**. No proof, compiler,
+Boat, app, package, install or release job ran. Shared cache trust, mixed
+cached/fresh gate wiring and actual proof timing remain pending.

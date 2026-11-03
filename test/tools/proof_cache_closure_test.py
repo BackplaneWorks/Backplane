@@ -130,6 +130,27 @@ class ProofClosure(unittest.TestCase):
         path.chmod(path.stat().st_mode ^ 0o100)
         self.assertNotEqual(before, self.keys())
 
+    def test_umask_change_retains_verified_source_and_generated_keys(self):
+        (self.root/'src/unused.bend').chmod(0o755)
+        self.generate()
+        before = self.keys()
+        for path in self.root.rglob('*'):
+            if path.is_file():
+                path.chmod(0o700 if path.stat().st_mode & 0o111 else 0o600)
+        self.assertEqual(before, self.keys())  # no partition regeneration
+        self.assertTrue(any(body['inputs'].get('src/src/unused.bend', {}).get('mode') == 0o755
+                            for _, body in self.units().values()))
+
+    def test_generated_special_or_unreadable_modes_fail(self):
+        path = self.folder/'000/PROOF.bend'
+        for mode in (0o4644, 0o2644, 0o1644, 0o000, 0o200):
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                with self.assertRaises((ValueError, cc.CacheError, OSError)):
+                    self.units()
+        path.chmod(0o600)
+        self.units()
+
     def test_canonical_mode_change_invalidates_keys(self):
         before = self.keys()
         path = self.root/'PROOF.bend'
