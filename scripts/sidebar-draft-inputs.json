@@ -166,7 +166,7 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
-    "src/mobile/screen.bend": "42d78137755e67369ab2a0553459def2f189ba62f57c13d3bf537704ccbc0c48",
+    "src/mobile/screen.bend": "ec42387d8ca79a6f1c4bfe4e4bc50e4b4014dc0aa107601e642164856c05c9e4",
     "src/server/thin-actor.bend": "2f0216c55b246af65bef75cd0ac3c8c270f53e1a73510f16313971078e4670d6",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -192,7 +192,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "6ee3f277a973d6faca323b6d132efa7533d38d58c21376d7294b845321d5ec8f"
+    "src/web/view.bend": "7725412b31ce4fb2d5a0a47ca25d1e7550d119cc31407cff492d6287a0c51c57"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
