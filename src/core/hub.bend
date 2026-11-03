@@ -7178,9 +7178,35 @@ def Reset.first(+t: String, +c: Char) -> String:
 def Reset.rule(+s: M.State, +zone: String) -> TZ.TzRule:
   Maybe.default(&2, TZ.TzRule, SC.Zone.rule(s, zone), SC.Sched.person(s, 0n, False{}))
 
+def Reset.month.go(xs: List<&2, String>, +name: String, +n: Nat) -> Nat:
+  match xs:
+    case Nil{}: 0n
+    case h <> t: Bool.pick(Nat, String.eq(h, name), n, Reset.month.go(t, name, 1n+n))
+
+def Reset.pad(+n: Nat) -> String:
+  Bool.pick(String, Nat.is_lt(n, 10n), "0", "") ++ Nat.show(n)
+
+def Reset.date.at(day: Maybe<&2, Nat>, clock: Maybe<&2, Nat>, rule: TZ.TzRule, +now: Nat) -> Nat:
+  match day clock:
+    case Some{day} Some{secs}:
+      +at = TZ.Tz.at(rule, Nat.add(day, secs))
+      Bool.pick(Nat, Nat.is_gt(at, now), at, 0n)
+    case _ _: 0n
+
+def Reset.date.words(ws: List<&2, String>, +rule: TZ.TzRule, +now: Nat) -> Nat:
+  match ws:
+    case month <> +day <> clock <> _:
+      +m = Reset.month.go(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], month, 1n)
+      +d = Maybe.default(&2, Nat, Nat.read(Reset.first(day, ',')), 0n)
+      +iso = String.take(TZ.Tz.iso(rule, now), 4n) ++ "-" ++ Reset.pad(m) ++ "-" ++ Reset.pad(d)
+      Reset.date.at(WH.When.date(iso), WH.When.hm(clock), rule, now)
+    case _: 0n
+
 def Reset.words(+s: M.State, +now: Nat, +why: String) -> Nat:
   +rest = Reset.from(why, "resets ", 7n)
-  Maybe.default(&2, Nat, WH.When.parse(Reset.first(rest, ' '), now, Reset.rule(s, Reset.first(Reset.from(rest, "(", 1n), ')'))), 0n)
+  +rule = Reset.rule(s, Reset.first(Reset.from(rest, "(", 1n), ')'))
+  +dated = Reset.date.words(String.split(rest, ' '), rule, now)
+  Bool.pick(Nat, Nat.is_gt(dated, 0n), dated, Maybe.default(&2, Nat, WH.When.parse(Reset.first(rest, ' '), now, rule), 0n))
 
 def Reset.fill.w(l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
   match l:
@@ -10449,10 +10475,18 @@ def AccountFallback.chain(xs: List<&2, FB.Target>, +s: M.State, +caps: J.Json, +
     case Nil{}: AccountFallback.block(s, now, th, text)
     case +h <> t: AccountFallback.chain.choice(AccountFallback.pick.target(s, caps, now, th, h), h, AccountFallback.chain(t, s, caps, now, th, cwd, text, uuid), s, now, th, cwd, text, uuid)
 
-def AccountFallback.cross(on: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String) -> Step:
+def AccountFallback.cross.empty(on: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String) -> Step:
   match on:
     case False{}: AccountFallback.block(s, now, th, text)
     case True{}: AccountFallback.chain(FB.Chain.suffix(FB.Chain.of(s), FB.Target.key(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
+
+def AccountFallback.cross.choice(choice: Maybe<&2, J.Json>, on: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  match choice:
+    case Some{profile}: AccountFallback.use(s, now, th, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), AF.Pick.binding(profile), cwd, text, uuid)
+    case None{}: AccountFallback.cross.empty(on && AF.Pick.may_cross(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
+
+def AccountFallback.cross(on: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  AccountFallback.cross.choice(AF.Pick.account(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), on, s, caps, now, th, cwd, text, uuid)
 
 def AccountFallback.pick.choice(choice: Maybe<&2, J.Json>, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
   match choice:
@@ -10490,7 +10524,9 @@ def AccountFallback.attempt.restore(restore: Bool, +s: M.State, +caps: J.Json, +
         Step.outs(Hub.run(Hub.thread(next, th), cwd, actual, uuid)))
     case False{}:
       +p = Hub.provider(Hub.thread(s, th))
-      AccountFallback.preflight(AF.Hold.current(s, p, ACCT.Accounts.id(s, th, p), ACCT.Accounts.epoch(s, th, p), FB.Target.model(Fallback.target(Hub.thread(s, th))), now), s, caps, now, th, cwd, text, uuid, original)
+      +inherited = AF.Hold.inherit(s, now, th)
+      +next = M.State.replay(inherited, s)
+      Step.before(inherited, Nil{}, AccountFallback.preflight(AF.Hold.current(next, p, ACCT.Accounts.id(next, th, p), ACCT.Accounts.epoch(next, th, p), FB.Target.model(Fallback.target(Hub.thread(next, th))), now), next, caps, now, th, cwd, text, uuid, original))
 
 def AccountFallback.safe(+s: M.State, +th: String) -> Bool:
   Hub.owns(s, th) && Lost.live(Hub.thread(s, th)) && Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n) &&
