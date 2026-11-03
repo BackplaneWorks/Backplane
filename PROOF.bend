@@ -15754,3 +15754,9 @@ def Laws.autosettle_delegation_seed_not_personal(text):
 
 def Laws.autosettle_human_followup_is_personal():
   {==}
+
+def Laws.autosettle_finished_work_wake_not_running(owned):
+  {==}
+
+def Laws.autosettle_live_thread_wake_held():
+  {==}
