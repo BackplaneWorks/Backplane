@@ -5622,6 +5622,68 @@ def Retire.turn.f(run: Bool, +s: M.State, +now: Nat, +th: String, +from: String,
 def Retire.turn(run: Bool, +s: M.State, +now: Nat, +th: String, st: Step) -> Step:
   Retire.turn.f(run, s, now, th, "", st)
 
+# Messages a Stop cancelled unread
+# --------------------------------
+# Claude Code runs the person's messages one at a time: one sent while a
+# turn works waits queued in the CLI, and Stop cancels it with the turn.
+# It still looks sent in the thread, so the server, which knows from its
+# ledger which commands never started (CM.Cmds.waiting), has the hub
+# name those messages (server.bend's Claude.unread), and the person can
+# send them again.
+
+def Unread.max() -> Nat:
+  200n
+
+def Unread.of.k(hit: Bool, text: String) -> String:
+  match hit:
+    case True{}:
+      text
+    case False{}:
+      ""
+
+# a person's message in thread whose command (its uuid as Hub.post.go
+# made it) is one of uuids: its text, else ""
+def Unread.of(e: M.Entry, +thread: String, +uuids: List<&2, String>) -> String:
+  match e:
+    case M.Msg{+id, +t, M.User{}, text, +at}:
+      Unread.of.k(Bool.and(String.eq(t, thread), CM.Cmds.in(uuids, Hub.uuid(at, thread ++ "/" ++ id))), text)
+    case _:
+      ""
+
+def Unread.add(+text: String, +acc: List<&2, String>) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.is_empty(text), acc, text <> acc)
+
+# entries newest first, n more to look at: the texts found, oldest first
+def Unread.go(es: List<&2, M.Entry>, +thread: String, n: Nat, +uuids: List<&2, String>, acc: List<&2, String>) -> List<&2, String>:
+  match es n:
+    case +_ 0n:
+      acc
+    case Nil{} 1n+_:
+      acc
+    case +e <> t 1n+k:
+      Unread.go(t, thread, k, uuids, Unread.add(Unread.of(e, thread, uuids), acc))
+
+def Unread.join(xs: List<&2, String>, first: Bool) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case x <> t:
+      Bool.pick(String, first, "", " · ") ++ "\u{201C}" ++ NO.Alert.text(x, 80n) ++ "\u{201D}" ++ Unread.join(t, False{})
+
+def Unread.say(+n: Nat, +qs: String) -> String:
+  Bool.pick(String, Nat.is_eq(n, 1n),
+    "Stop cancelled a message the agent had not read yet: " ++ qs ++ ". Send it again if you still want it.",
+    "Stop cancelled " ++ Nat.show(n) ++ " messages the agent had not read yet: " ++ qs ++ ". Send them again if you still want them.")
+
+def Unread.note.k(+xs: List<&2, String>, +s: M.State, +thread: String, +now: Nat) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, List.is_empty(&2, String, xs), Nil{},
+    [M.ActivityLogged{thread, Hub.id("u", now, Hub.seq(s)), "error", "stop", Unread.say(List.length(&2, String, xs), Unread.join(xs, True{})), now}])
+
+# what the hub logs for the commands a Stop cancelled before they started
+# (uuids; none: nothing)
+def Unread.note(+s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
+  Unread.note.k(Unread.go(M.State.mine(s, thread), thread, Unread.max(), uuids, Nil{}), s, thread, now)
+
 # Explicit stop paths (client and MCP) durably pause the conversation's
 # mail FIFO. An internal restart/fallback Interrupted event is not consent
 # to clear this register. Keep an undisposed seed at the front for review.

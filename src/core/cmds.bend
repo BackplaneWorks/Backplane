@@ -284,6 +284,28 @@ def Cmds.in(xs: List<&2, String>, +u: String) -> Bool:
     case x <> t:
       Bool.or(String.eq(x, u), Cmds.in(t, u))
 
+# the commands written but never started (the CLI holds them queued): a
+# Stop cancels them unread, so the person is told which (hub.bend's
+# Unread.note)
+def Cmds.waiting.k(w: Bool, v: String, rest: List<&2, String>) -> List<&2, String>:
+  match w:
+    case True{}:
+      v <> rest
+    case False{}:
+      rest
+
+def Cmds.waiting.go(cs: List<&2, Cmd>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case Cmd{v, +st, _, _} <> t:
+      Cmds.waiting.k(Nat.is_eq(st, 1n), v, Cmds.waiting.go(t))
+
+def Cmds.waiting(c: Cmds) -> List<&2, String>:
+  match c:
+    case Cmds{cs, _, _}:
+      Cmds.waiting.go(cs)
+
 def Cmds.stop.go(cs: List<&2, Cmd>, +still: List<&2, String>) -> List<&2, Cmd>:
   match cs:
     case Nil{}:
