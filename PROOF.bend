@@ -15781,3 +15781,7 @@ def Laws.home_viewer_size_keeps_owner(u, value):
 
 def Laws.home_viewer_size_is_local(u, value):
   {==}
+
+def Laws.timeline_follow_grown_viewport(held, end): {==}
+
+def Laws.timeline_follow_grown_viewport_away(held, end): {==}
