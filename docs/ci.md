@@ -107,3 +107,18 @@ skip logic with dependency mutations, a deliberately dropped affected test,
 new/later edits, opaque IO and compiler/library changes. This plans only Bend
 tests; it cannot replace check/proof/build or other-language gates. Required
 integration and execution measurements are tracked in build/ci-speed/RESULTS.md.
+
+## Pinned JavaScript and TypeScript tools
+
+`tools/ci/README.md` documents exact installs and opt-in strict lint, read-only
+format checks and native TypeScript7 checks for the existing step2glb project.
+`bun run --cwd tools/ci test` exercises actual negative and positive lint/type/
+format cases. The duplicate-parameter compatibility rule is required; native
+Oxlint1.90.0 alone lacks that CommonJS rule.
+
+`uv run --no-project python scripts/ci-tool-bench.py --prepare` reproduces the
+matched-tool comparison with pinned baseline tools and captured source/runtime
+hashes. Repository-wide strict lint/format currently fail on existing debt;
+other TypeScript sources still need configured coverage. Commands remain
+opt-in while pre-push integration waits for the measured UI validator (3s
+inclusive within9s total; incomplete/cold=3, no heavy work or lock waits).
