@@ -60,7 +60,7 @@ def Plan.change(+c: M.Change, +line: String, +len: Nat, p: Plan) -> Plan:
   match p:
     case Plan{+pre, +cnt, +seq, +off, +ord, items}:
       +post : M.State = SB.Stb.apply(pre, cnt, c)
-      +ops = List.append(&2, S.Op, S.Sdb.facts(pre, S.At{1n+seq, off, len, ord}, c), S.Row.ofs(S.RK{"state", "seq"} <> S.Sdb.keys(pre, post, c), post, Nil{}))
+      +ops = List.append(&2, S.Op, S.Sdb.facts(pre, S.At{1n+seq, off, len, ord}, c), S.Row.ofs(S.RK{"state", "seq"} <> S.Sdb.records(pre, post, c), post, Nil{}))
       Plan{post, SB.Stb.bump(S.F.posts(c), cnt), 1n+seq, Nat.add(off, 1n+len), S.Sdb.ord(c, ord), Plan.far(F.Fr.fact(post, c, 1n+seq), SB.Stb.sqls(ops, items))}
 
 def Plan.decoded(m: Maybe<&2, M.Change>, +line: String, +len: Nat, p: Plan) -> Plan:

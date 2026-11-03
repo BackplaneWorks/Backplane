@@ -145,10 +145,37 @@ function store_hash(file,limit) {
     return hash.digest('hex');
   }finally{fs.closeSync(fd)}
 }
+// The line table's wire column is client-facing and may be blank for an
+// ordinary SettingSet. For an accepted legacy cache, inspect the authoritative
+// event-log prefix named by applied_off instead. The scan is bounded, carries
+// enough bytes for a needle split across chunks, and fails closed if the log
+// cannot prove the complete prefix was read.
+function store_legacy_telemetry(log,limit) {
+  // Conservatively rebuild for any telemetry text or Unicode escape. This
+  // also covers whitespace/escaped spellings of an ASCII setting key; a
+  // false positive only chooses the authoritative rebuild over an upgrade.
+  const fs=require('fs'),needles=[Buffer.from('telemetry'),Buffer.from('\\u')],carrySize=8,chunkSize=65536;
+  if(!log||!Number.isSafeInteger(limit)||limit<0)return true;
+  let fd;
+  try {
+    fd=fs.openSync(log,'r');
+    if(fs.fstatSync(fd).size<limit)return true;
+    const chunk=Buffer.allocUnsafe(chunkSize);let pos=0,carry=Buffer.alloc(0);
+    while(pos<limit){
+      const want=Math.min(chunkSize,limit-pos),n=fs.readSync(fd,chunk,0,want,pos);
+      if(n!==want)return true;
+      const buf=carry.length?Buffer.concat([carry,chunk.subarray(0,n)]):chunk.subarray(0,n);
+      if(needles.some(needle=>buf.indexOf(needle)>=0))return true;
+      carry=Buffer.from(buf.subarray(Math.max(0,buf.length-carrySize)));pos+=n;
+    }
+    return false;
+  }catch(error){return true}
+  finally{if(fd!==undefined)fs.closeSync(fd)}
+}
 // codec: storedb.bend's Sdb.codec() as text, passed in by Disk.prepare; from:
 // Sdb.codec.from()'s, space-separated, the codecs the hub upgrades in place
 // (storeio.bend's Sto.upgrade), so such a store is kept for it
-function store_validate(file,codec,from) {
+function store_validate(file,codec,from,log) {
   const {Database}=require('bun:sqlite'),db=new Database(file,{readonly:true,safeIntegers:true});
   try {
     const m=Object.fromEntries(db.query('SELECT k,v FROM meta').values());
@@ -166,6 +193,12 @@ function store_validate(file,codec,from) {
       'SELECT k,v,cold FROM setting LIMIT 0','SELECT domain,key,json FROM obj LIMIT 0',
       ...['project','thread','task','ask','queue','bot','room','routine','conv','mark'].map(t=>'SELECT json FROM '+t+' LIMIT 0')
     ])db.query(sql).values();
+    // An accepted legacy predecessor may still support a historical in-place
+    // migration, but that migration cannot reconstruct the telemetry
+    // projection. Inspect the applied authoritative log prefix as well:
+    // derived rows may all be missing, and ordinary line.wire values are
+    // empty (their offsets refer back to the log).
+    if(m.codec!==String(codec) && (db.query("SELECT 1 FROM setting WHERE k LIKE 'telemetry.%' LIMIT 1").get()||db.query("SELECT 1 FROM obj WHERE domain='usage' LIMIT 1").get()||store_legacy_telemetry(log,Number(m.applied_off))))throw Error('legacy telemetry projection requires authoritative rebuild');
     const [count,last,end]=db.query('SELECT count(*),coalesce(max(seq),0),coalesce(max(off+len+1),0) FROM line').values()[0];
     const [ordinal]=db.query('SELECT coalesce(max(ord),0)+1 FROM entry').values()[0];
     if(BigInt(m.applied_seq)!==count||count!==last||end>BigInt(m.applied_off)||BigInt(m.ord)!==ordinal)throw Error('snapshot fact/checkpoint mismatch');
@@ -175,7 +208,7 @@ function store_validate(file,codec,from) {
 function store_existing(home,codec,from) {
   const fs=require('fs'),path=require('path'),file=path.join(home,'store.db');
   if(!fs.existsSync(file))return;
-  try{store_validate(file,codec,from)}catch(error){
+  try{store_validate(file,codec,from,path.join(home,'events.jsonl'))}catch(error){
     // Retain the complete old cache and its WAL evidence. Sto.open will build
     // a new cache atomically from the authoritative log, before serving views.
     const old=file+'.invalid-'+Date.now();
