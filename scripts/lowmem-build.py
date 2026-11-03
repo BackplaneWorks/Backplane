@@ -19,6 +19,7 @@ It does not publish or install anything.
 import argparse
 import concurrent.futures
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -31,7 +32,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 GIB = 1024 ** 3
-CAP_BYTES = int(3.7 * GIB)
+COMPILER_CAP = 3699998720    # the compiler's own cgroup
+CONTROLLER_CAP = 536870912   # this controller's cgroup: the sum, 4236870912, stays under 4 GiB
+CAP_BYTES = COMPILER_CAP
 BOAT_JOB = ROOT / 'scripts' / 'boat-job.sh'
 UNQUALIFIED = 20
 
@@ -95,94 +98,163 @@ def swap_counters():
     return {k: int(v) for k, v in (l.split() for l in Path('/proc/vmstat').read_text().splitlines()) if k in ('pswpin', 'pswpout')}
 
 
-def tree_rss(root_pid):
-    """Sum of RSS in bytes over root_pid and its descendants."""
-    kids, rss = {}, {}
-    for d in os.listdir('/proc'):
-        if not d.isdigit():
-            continue
-        try:
-            stat = Path('/proc/%s/stat' % d).read_text()
-            ppid = int(stat.rsplit(')', 1)[1].split()[1])
-            kids.setdefault(ppid, []).append(int(d))
-            for line in Path('/proc/%s/status' % d).read_text().splitlines():
-                if line.startswith('VmRSS:'):
-                    rss[int(d)] = int(line.split()[1]) * 1024
-        except (OSError, ValueError, IndexError):
-            continue
-    total, stack = 0, [root_pid]
-    while stack:
-        p = stack.pop()
-        total += rss.get(p, 0)
-        stack.extend(kids.get(p, []))
-    return total
+def cgroup_dir():
+    """The cgroup this process runs in. LOWMEM_CGROUP_DIR exists for tests; a receipt records the override and is refused."""
+    override = os.environ.get('LOWMEM_CGROUP_DIR')
+    if override:
+        return Path(override), True
+    group = Path('/proc/self/cgroup').read_text().split('0::', 1)[1].strip().lstrip('/')
+    return Path('/sys/fs/cgroup') / group, False
 
 
-def cgroup_peak():
+def cgroup_text(cg, name):
     try:
-        group = Path('/proc/self/cgroup').read_text().split('0::', 1)[1].strip().lstrip('/')
-        return int((Path('/sys/fs/cgroup') / group / 'memory.peak').read_text())
-    except (OSError, IndexError, ValueError):
+        return (cg / name).read_text().strip()
+    except OSError:
         return None
 
 
+def cgroup_events(cg):
+    text = cgroup_text(cg, 'memory.events') or ''
+    return {k: int(v) for k, v in (l.split() for l in text.splitlines() if len(l.split()) == 2)}
+
+
+def read_enforcement(cg, overridden):
+    """What the kernel actually applies to this cgroup, read from its files (never from a flag we were given)."""
+    def number(name):
+        v = cgroup_text(cg, name)
+        return int(v) if v is not None and v.isdigit() else v
+    events = cgroup_events(cg)
+    return {'executor': 'cgroup-v2', 'cgroup': str(cg), 'overridden': overridden,
+            'raw': {n: cgroup_text(cg, n) for n in ('memory.max', 'memory.swap.max', 'memory.peak', 'memory.events')},
+            'memory_max': number('memory.max'), 'memory_swap_max': number('memory.swap.max'),
+            'memory_peak': number('memory.peak'), 'swap_peak': number('memory.swap.peak'),
+            'oom': events.get('oom', 0), 'oom_kill': events.get('oom_kill', 0), 'oom_group_kill': events.get('oom_group_kill', 0)}
+
+
+def enforcement_problems(e, cap):
+    """Reasons the kernel-level admission is not what a qualifying job needs (empty = enforced)."""
+    if not isinstance(e, dict):
+        return ['no cgroup enforcement record']
+    why = []
+    if e.get('executor') != 'cgroup-v2' or e.get('overridden'):
+        why.append('executor is not an unmodified cgroup v2 scope')
+    if e.get('memory_max') != cap:
+        why.append('kernel memory.max %r is not the cap %s (unknown/unlimited refused)' % (e.get('memory_max'), cap))
+    if e.get('memory_swap_max') != 0:
+        why.append('kernel memory.swap.max %r is not 0' % (e.get('memory_swap_max'),))
+    peak = e.get('memory_peak')
+    if type(peak) is not int or peak <= 0:
+        why.append('kernel memory.peak missing')
+    elif peak > cap:
+        why.append('OVER CAP: kernel memory.peak %.2f GiB > %.2f GiB' % (peak / GIB, cap / GIB))
+    if type(e.get('swap_peak')) is int and e['swap_peak'] > 0:
+        why.append('SWAP used: memory.swap.peak %d' % e['swap_peak'])
+    if (e.get('oom') or 0) or (e.get('oom_kill') or 0) or (e.get('oom_group_kill') or 0):
+        why.append('kernel OOM event in the job cgroup')
+    return why
+
+
+def systemd_scope(cap, argv):
+    return ['systemd-run', '--user', '--scope', '-q', '--collect', '-p', 'MemoryAccounting=yes',
+            '-p', 'MemoryMax=%d' % cap, '-p', 'MemorySwapMax=0', *argv]
+
+
+def shim(args):
+    """Inside the compiler's own cgroup: check the kernel limits, run the command, read the limits and peak back."""
+    cg, overridden = cgroup_dir()
+    before = read_enforcement(cg, overridden)
+    code = None
+    if not enforcement_problems({**before, 'memory_peak': 1}, args.cap_bytes):
+        code = subprocess.run(args.cmd, cwd=ROOT).returncode
+    else:
+        print('lowmem-shim: kernel cap not in force; the command was NOT run', file=sys.stderr)
+    Path(args.report).write_text(json.dumps({'exit': code, 'enforcement': read_enforcement(cg, overridden)}))
+    return 0 if code == 0 else 1
+
+
+def run_capped(cmd, cap, report):
+    """The compiler in a kernel scope of its own (MemoryMax=cap, MemorySwapMax=0); (exit, enforcement) read from inside it."""
+    argv = systemd_scope(cap, [sys.executable, str(Path(__file__).resolve()), 'shim', '--cap-bytes', str(cap), '--report', str(report), '--', *cmd])
+    try:
+        subprocess.run(argv, cwd=ROOT)
+        data = json.loads(Path(report).read_text())
+        return data.get('exit'), data.get('enforcement')
+    except (OSError, ValueError) as error:
+        print('lowmem-worker: no enforced compiler scope: %s' % error, file=sys.stderr)
+        return None, None
+
+
 def worker(args):
+    """Runs inside one job. The controller is itself held to CONTROLLER_CAP and the command to its own cgroup of
+    COMPILER_CAP (swap 0 both): the kernel enforces, and the receipt carries both cgroups read back from inside."""
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     cmd = [c.replace('{out}', str(out)) for c in args.cmd]
+    if not os.environ.get('LOWMEM_SCOPED') and not args.no_scope:
+        scope = systemd_scope(CONTROLLER_CAP, ['--setenv=LOWMEM_SCOPED=1', '--', sys.executable, str(Path(__file__).resolve()),
+                                               'worker', *sys.argv[sys.argv.index('worker') + 1:]])
+        try:
+            os.execvp(scope[0], scope)
+        except OSError as error:
+            print('lowmem-worker: no systemd scope to enforce the cap: %s' % error, file=sys.stderr)
     swap_total = meminfo().get('SwapTotal', 0)
     before = swap_counters()
     start = time.monotonic()
-    proc = subprocess.Popen(cmd, cwd=ROOT, start_new_session=True)
-    peak, over, status = 0, False, None
-    while status is None:
-        pid, st, ru = os.wait4(proc.pid, os.WNOHANG)
-        if pid:
-            status = st
-            # a lower bound for the largest single process, so a short job still records a peak
-            peak = max(peak, ru.ru_maxrss * 1024)
-            break
-        peak = max(peak, tree_rss(proc.pid))
-        if peak > args.cap_bytes:
-            over = True
-            os.killpg(proc.pid, signal.SIGKILL)
-            _, status, ru = os.wait4(proc.pid, 0)
-            break
-        time.sleep(args.poll)
-    proc.returncode = os.waitstatus_to_exitcode(status)
-    if peak > args.cap_bytes:
-        over = True
+    code, compiler = run_capped(cmd, args.cap_bytes, out.parent / (args.id + '.enforcement.json'))
     seconds = time.monotonic() - start
-    cg = cgroup_peak()
-    # The sandbox cgroup also holds the harness; its peak is a second witness, never a relaxation.
-    if cg is not None and cg > args.cap_bytes and args.cgroup_binding:
-        over = True
     after = swap_counters()
-    swapped = after != before
     try:
-        outputs = tree_hashes(out) if out.exists() else {}
+        cg, overridden = cgroup_dir()
+        controller = read_enforcement(cg, overridden)
+    except (OSError, IndexError):
+        controller = None
+    try:
+        outputs = tree_hashes(out)
     except ValueError as error:
         outputs = {}
         print('lowmem-worker: %s' % error, file=sys.stderr)
     if args.copy and Path(ROOT / args.copy).is_file():
         (out / 'result.json').write_bytes((ROOT / args.copy).read_bytes())
         outputs = tree_hashes(out)
-    receipt = {'schema': 1, 'id': args.id, 'cmd': cmd, 'exit': proc.returncode, 'seconds': round(seconds, 2),
-               'cap_bytes': args.cap_bytes, 'peak_bytes': max(peak, 0), 'cgroup_peak_bytes': cg,
-               'over_cap': over, 'swap_total_bytes': swap_total, 'swap_before': before, 'swap_after': after,
-               'swap_activity': swapped, 'mem_total_bytes': meminfo().get('MemTotal'),
+    receipt = {'schema': 2, 'id': args.id, 'cmd': cmd, 'exit': code, 'seconds': round(seconds, 2),
+               'cap_bytes': args.cap_bytes, 'peak_bytes': (compiler or {}).get('memory_peak'),
+               'enforcement': compiler, 'controller': controller, 'swap_total_bytes': swap_total,
+               'swap_before': before, 'swap_after': after,
+               'swap_activity': after != before, 'mem_total_bytes': meminfo().get('MemTotal'),
+               'boat_sandbox': os.environ.get('BACKPLANE_HEAVY_BOAT_SANDBOX') == '1',
                'source': source_identity(), 'tools': tool_identity(), 'outputs': outputs}
     (out / (args.id + '.receipt.json')).write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
-    ok = proc.returncode == 0 and not over and not swapped and bool(outputs)
-    print('lowmem-worker: %s exit %s peak %.2f GiB of %.2f, %.0f s%s' % (
-        args.id, proc.returncode, peak / GIB, args.cap_bytes / GIB, seconds,
-        ' OVER CAP' if over else (' SWAP ACTIVITY' if swapped else '')), flush=True)
-    return 0 if ok else 1
+    why = receipt_problems(receipt, args.cap_bytes, require_boat=False)
+    print('lowmem-worker: %s exit %s peak %s of %.2f GiB, %.0f s%s' % (
+        args.id, code, ('%.2f GiB' % (receipt['peak_bytes'] / GIB)) if isinstance(receipt['peak_bytes'], int) else 'unknown',
+        args.cap_bytes / GIB, seconds, ' -- ' + '; '.join(why) if why else ''), flush=True)
+    return 0 if code == 0 and not why and bool(outputs) else 1
 
 
-# ---------------------------------------------------------------- orchestrator
+def receipt_problems(r, cap, require_boat=True):
+    """Executor/cap/swap/exit problems of one worker receipt (shared with service-release.py's report check)."""
+    if not isinstance(r, dict) or r.get('schema') != 2:
+        return ['receipt is not a schema 2 worker receipt']
+    why = enforcement_problems(r.get('enforcement'), cap)
+    if cap == COMPILER_CAP:
+        why += ['controller: ' + w for w in enforcement_problems(r.get('controller'), CONTROLLER_CAP)]
+        if cap + CONTROLLER_CAP >= 4 * GIB:
+            why.append('compiler plus controller caps must stay under 4 GiB')
+    if r.get('cap_bytes') != cap:
+        why.append('cap %s is not the required %s' % (r.get('cap_bytes'), cap))
+    if not 0 < cap < 4 * GIB:
+        why.append('cap must be under 4 GiB')
+    if r.get('exit') != 0:
+        why.append('worker exit %s' % r.get('exit'))
+    if r.get('swap_activity'):
+        why.append('SWAP used (kernel swap counters moved)')
+    if require_boat and (not r.get('boat_sandbox') or not isinstance(r.get('mem_total_bytes'), int) or r['mem_total_bytes'] > 8 * GIB):
+        why.append('not a normal-size Boat sandbox')
+    return why
 
-PROOF_WRAPPER = ['python3', 'scripts/heavy-guard.py', 'proof', '--']  # lane 3 may supply a shard-sized profile
+
+PROOF_WRAPPER = ['python3', 'scripts/heavy-guard.py', 'proof-shard', '--']  # lane 3's profile (PR #854); exits 75 when the cgroup is not <=3.7 GiB with swap 0
 
 
 def proof_jobs(proof_dir, wrapper=PROOF_WRAPPER):
@@ -202,7 +274,7 @@ def proof_jobs(proof_dir, wrapper=PROOF_WRAPPER):
         script = ('[ -f %(d)s/manifest.json ] || python3 scripts/proof-shards.py generate --out %(d)s --shards %(n)d >/dev/null; '
                   '%(w)s python3 scripts/proof-shards.py run --out %(d)s --shard %(s)s --expect %(i)s --result %(r)s'
                   % {'d': rel, 'n': count, 'w': shlex.join(wrapper), 's': shlex.quote(s['id']), 'i': identity, 'r': result})
-        jobs.append({'id': 'proof-' + s['id'], 'kind': 'proof', 'cmd': ['sh', '-c', script], 'copy': result})
+        jobs.append({'id': 'proof-' + s['id'], 'kind': 'proof', 'cmd': ['sh', '-c', script], 'copy': result, 'shard': s['id'], 'identity': identity})
     return jobs
 
 
@@ -216,7 +288,7 @@ def plan(kinds, proof_dir):
 def boat_argv(job, run_dir, timeout, python=sys.executable):
     rel = 'build/lowmem/%s/%s' % (run_dir.name, job['id'])
     worker_cmd = ['python3', 'scripts/lowmem-build.py', 'worker', '--id', job['id'], '--out', rel,
-                  '--cap-bytes', str(CAP_BYTES), '--cgroup-binding', *(['--copy', job['copy']] if job.get('copy') else []), '--', *[c.replace('{out}', rel) for c in job['cmd']]]
+                  '--cap-bytes', str(CAP_BYTES), *(['--copy', job['copy']] if job.get('copy') else []), '--', *[c.replace('{out}', rel) for c in job['cmd']]]
     return [str(BOAT_JOB), '--size', 'default', '--timeout', str(timeout), '--artifact', rel, '--', *worker_cmd], rel
 
 
@@ -236,32 +308,24 @@ def launch(job, run_dir, args):
     return p.returncode, (Path(m.group(1)) / 'artifacts' / Path(rel).name if m else None)
 
 
-def judge(job, receipt, reference, expected_source, expected_tools, cap_bytes):
+def judge(job, receipt, reference, expected_source, expected_tools, cap_bytes, proof=None, require_boat=True):
     """Every reason this job fails the gate (empty list = passed)."""
-    why = []
     if receipt is None:
         return ['no worker receipt (job never finished or artifact lost)']
+    why = receipt_problems(receipt, cap_bytes, require_boat)
     if receipt.get('id') != job['id']:
         why.append('receipt belongs to %r' % receipt.get('id'))
-    if receipt.get('exit') != 0:
-        why.append('worker exit %s' % receipt.get('exit'))
-    if receipt.get('cap_bytes') != cap_bytes:
-        why.append('cap %s is not the required %s' % (receipt.get('cap_bytes'), cap_bytes))
-    if receipt.get('over_cap') or (receipt.get('peak_bytes') or 0) > cap_bytes:
-        why.append('OVER CAP: peak %.2f GiB > %.2f GiB' % ((receipt.get('peak_bytes') or 0) / GIB, cap_bytes / GIB))
-    if receipt.get('swap_activity'):
-        why.append('SWAP used (kernel swap counters moved)')
     if receipt.get('source') != expected_source:
         why.append('source mismatch: %s' % receipt.get('source'))
     elif not expected_source.get('clean'):
         why.append('source tree is not clean')
-    if expected_tools and receipt.get('tools') != expected_tools:
-        why.append('tool provenance mismatch: %s' % receipt.get('tools'))
+    if not expected_tools or receipt.get('tools') != expected_tools:
+        why.append('tool provenance mismatch with the qualified compiler: %s' % receipt.get('tools'))
     if not receipt.get('tools') or not receipt['tools'].get('bend'):
         why.append('no bend tool provenance')
     if job['kind'] == 'proof':
-        if not receipt.get('outputs'):
-            why.append('no proof receipt output')
+        # a proof passes only on the planner's own result semantics; no verdict, no pass
+        why.extend(proof if proof is not None else ['proof result was not validated'])
         return why
     want = (reference or {}).get('outputs', {}).get(job['id'])
     if want is None:
@@ -273,6 +337,52 @@ def judge(job, receipt, reference, expected_source, expected_tools, cap_bytes):
     return why
 
 
+def planner():
+    spec = importlib.util.spec_from_file_location('proof_shards', ROOT / 'scripts' / 'proof-shards.py')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def validate_proof(jobs, results, proof_dir, ps=None):
+    """{job id: [reasons]} for proof jobs. Each shard result must be the worker-hashed file, name its shard and
+    the exact partition identity, and the planner's fail-closed join must accept ALL shards of the verified manifest."""
+    proofs = [j for j in jobs if j['kind'] == 'proof']
+    if not proofs:
+        return {}
+    ps = ps or planner()
+    out = {j['id']: [] for j in proofs}
+    paths = []
+    for j in proofs:
+        rc, receipt, folder = results.get(j['id'], (None, None, None))
+        path = Path(folder) / 'result.json' if folder else None
+        if not receipt or not path or not path.is_file():
+            out[j['id']].append('shard result missing')
+            continue
+        data = path.read_bytes()
+        if (receipt.get('outputs') or {}).get('result.json') != sha(data):
+            out[j['id']].append('shard result does not match the worker-hashed bytes')
+            continue
+        try:
+            r = json.loads(data)
+        except ValueError:
+            out[j['id']].append('shard result is not JSON')
+            continue
+        if r.get('shard') != j['shard'] or r.get('manifest_sha256') != j['identity'] or r.get('state') != 'passed':
+            out[j['id']].append('shard result is not a passing result for this shard and partition (state %r)' % r.get('state'))
+            continue
+        paths.append(path)
+    try:
+        manifest = ps.verify(ROOT, Path(proof_dir).resolve())
+        joined = ps.join(manifest, Path(proof_dir).resolve(), paths)
+        if joined.get('state') != 'passed':
+            raise ValueError('join did not pass')
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        for k in out:
+            out[k].append('proof join refused: %s' % error)
+    return out
+
+
 def load_json(path):
     try:
         return json.loads(Path(path).read_text())
@@ -280,13 +390,24 @@ def load_json(path):
         return None
 
 
-def qualified(path):
+def qualified(path, source):
+    """(ok, reason, qualification). It must name this exact source tree and the low-memory compiler it qualifies."""
     q = load_json(path) if path else None
     if not isinstance(q, dict):
-        return False, 'no readable qualification file'
+        return False, 'no readable qualification file', None
     if q.get('qualified') is not True:
-        return False, q.get('reason', 'compiler is not marked qualified')
-    return True, ''
+        return False, q.get('reason', 'compiler is not marked qualified'), None
+    tools = q.get('tools')
+    if not isinstance(tools, dict) or not isinstance(tools.get('bend'), dict) or not tools['bend'].get('sha256'):
+        return False, 'qualification does not name the compiler it qualifies', None
+    if (q.get('source') or {}).get('tree') != source['tree']:
+        return False, 'qualification is for another source tree', None
+    return True, '', q
+
+
+def ref_to(path, base):
+    path = Path(path)
+    return {'path': path.relative_to(base).as_posix(), 'sha256': sha(path.read_bytes()), 'bytes': path.stat().st_size}
 
 
 def banner(text):
@@ -300,7 +421,8 @@ def run(args):
         print('unknown job kind', file=sys.stderr)
         return 2
     jobs = plan(kinds, args.proof_dir)
-    ok, reason = qualified(args.qualification)
+    source = source_identity()
+    ok, reason, qual = qualified(args.qualification, source)
     stamp = time.strftime('%Y%m%dT%H%M%S')
     run_dir = Path(args.workdir) / ('lowmem-' + stamp)
     if args.dry_run:
@@ -314,9 +436,9 @@ def run(args):
         if 'proof' in kinds and not any(j['kind'] == 'proof' for j in jobs):
             print('  proof: no manifest at --proof-dir; run scripts/proof-shards.py generate first')
         return 0
-    report = {'schema': 1, 'started': stamp, 'runner': args.runner, 'qualified': ok, 'fallback': False, 'jobs': {}}
-    if args.release and args.runner != 'boat':
-        print('--release needs the boat runner', file=sys.stderr)
+    report = {'schema': 2, 'kind': 'backplane-lowmem-build-report', 'started': stamp, 'runner': args.runner, 'qualified': ok, 'fallback': False, 'jobs': {}}
+    if args.release and (args.runner != 'boat' or not {'hub', 'web', 'mobile'} <= kinds):
+        print('--release needs the boat runner and all of hub, web and mobile', file=sys.stderr)
         return 2
     if not ok or not jobs:
         reason = reason or 'no jobs planned (proof manifest missing?)'
@@ -324,8 +446,10 @@ def run(args):
         return unqualified(args, report, reason)
     run_dir.mkdir(parents=True, exist_ok=True)
     reference = load_json(args.reference) if args.reference else None
-    source = source_identity()
-    tools = (reference or {}).get('tools')
+    tools = qual['tools']
+    if not isinstance(reference, dict) or (reference.get('source') or {}).get('tree') != source['tree']:
+        report.update(state='unqualified', reason='reference emit is missing or for another source tree')
+        return unqualified(args, report, report['reason'])
     t0 = time.monotonic()
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel or len(jobs)) as pool:
@@ -343,24 +467,42 @@ def run(args):
             results[j['id']] = (rc, receipt, folder)
             print('job %-22s exit %s' % (j['id'], rc), flush=True)
     wall = time.monotonic() - t0
+    proof_check = validate_proof(jobs, results, args.proof_dir)
     failed = {}
     for j in jobs:
         rc, receipt, folder = results[j['id']]
-        why = judge(j, receipt, reference, source, tools, args.cap_bytes)
+        why = judge(j, receipt, reference, source, tools, args.cap_bytes,
+                    proof_check.get(j['id'], ['no proof result']) if j['kind'] == 'proof' else None,
+                    require_boat=args.runner == 'boat')
         if rc != 0 and not why:
             why.append('boat-job exit %s' % rc)
+        if rc == 75 or (receipt or {}).get('exit') == 75:
+            why.append('REFUSED (exit 75): the job was not admitted at the required cap; reported as fallback, never a pass')
         entry = report['jobs'].setdefault(j['id'], {})
         entry.update(exit=rc, seconds=(receipt or {}).get('seconds'), peak_bytes=(receipt or {}).get('peak_bytes'),
-                     ok=not why, why=why)
+                     ok=not why, why=why, kind=j['kind'], outputs=(receipt or {}).get('outputs'))
+        if receipt is not None:  # an immutable copy of the worker receipt, bound by hash
+            dest = run_dir / 'receipts' / (j['id'] + '.receipt.json')
+            dest.parent.mkdir(exist_ok=True)
+            dest.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+            entry['receipt'] = ref_to(dest, run_dir)
         if why:
             failed[j['id']] = why
-    report.update(wall_seconds=round(wall, 1), state='failed' if failed else 'passed',
+    report.update(source=source, tools=tools, cap_bytes=args.cap_bytes, release=bool(args.release),
+                  complete={'hub', 'web', 'mobile'} <= {k for k, e in report['jobs'].items() if e.get('ok')},
+                  qualification=ref_to(Path(args.qualification), Path(args.qualification).parent),
+                  reference=ref_to(Path(args.reference), Path(args.reference).parent),
+                  wall_seconds=round(wall, 1), state='failed' if failed else 'passed',
                   peak_bytes=max([e.get('peak_bytes') or 0 for e in report['jobs'].values()] or [0]))
     write_report(run_dir, report)
     print('\nend-to-end wall %.0f s, %d jobs, peak per job:' % (wall, len(jobs)))
     for k, e in sorted(report['jobs'].items()):
         print('  %-22s %s  peak %s  %s' % (k, 'ok  ' if e.get('ok') else 'FAIL',
               '%.2f GiB' % (e['peak_bytes'] / GIB) if e.get('peak_bytes') else 'n/a', '; '.join(e.get('why', []))))
+    if args.release and not report['complete'] and not failed:
+        failed['report'] = ['release needs hub, web and mobile all passing']
+        report['state'] = 'failed'
+        write_report(run_dir, report)
     if failed:
         banner('LOW-MEMORY BUILD FAILED: %s' % ', '.join(sorted(failed)))
         return 1
@@ -423,10 +565,18 @@ def main(argv=None):
     w.add_argument('--out', required=True)
     w.add_argument('--cap-bytes', type=int, default=CAP_BYTES)
     w.add_argument('--poll', type=float, default=0.1)
-    w.add_argument('--cgroup-binding', action='store_true')
+    w.add_argument('--no-scope', action='store_true', help='tests only: the receipt will not qualify')
     w.add_argument('--copy')
     w.add_argument('cmd', nargs=argparse.REMAINDER)
+    h = sub.add_parser('shim')
+    h.add_argument('--cap-bytes', type=int, required=True)
+    h.add_argument('--report', required=True)
+    h.add_argument('cmd', nargs=argparse.REMAINDER)
     args = p.parse_args(argv)
+    if args.op == 'shim':
+        if args.cmd[:1] == ['--']:
+            args.cmd = args.cmd[1:]
+        return shim(args) if args.cmd else 2
     if args.op == 'worker':
         if args.cmd[:1] == ['--']:
             args.cmd = args.cmd[1:]
