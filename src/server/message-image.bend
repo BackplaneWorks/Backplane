@@ -21,10 +21,20 @@ def MessageImage.paths(+entry: String, paths: List<&2, String>) -> IO(Unit):
         MessageImage.retain(entry, path)
         MessageImage.paths(entry, rest)
 
+# The existing negative image-extension scan is shared with native clients.
+# It avoids tokenizing every ordinary assistant reply into path candidates.
+def MessageImage.found(may: Bool, text: String) -> List<&2, String>:
+  match may:
+    case False{}: Nil{}
+    case True{}: IM.Img.paths(text)
+
+def MessageImage.candidates(+text: String) -> List<&2, String>:
+  MessageImage.found(IM.Img.may(text), text)
+
 def MessageImage.change(c: M.Change) -> IO(Unit):
   match c:
     case M.MessagePosted{_, entry, M.Assistant{}, text, _}:
-      MessageImage.paths(entry, IM.Img.paths(text))
+      MessageImage.paths(entry, MessageImage.candidates(text))
     case _: IO.pure(Unit, Unit{})
 
 # After commit, before announcing the message. A missing or rejected image
