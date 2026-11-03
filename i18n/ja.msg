@@ -1479,3 +1479,7 @@ upload.cap = 添付ファイルは{mb} MBまでです
 
 subagents.group.threads = サブスレッド
 subagents.group.background = バックグラウンド
+
+viewer.diff.more = ここに表示していない行があと{n, number}行あります
+
+viewer.diff.files.more = ここに表示していない変更ファイルがあと{n, number}件あります

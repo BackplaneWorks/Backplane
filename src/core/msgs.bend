@@ -8109,26 +8109,26 @@ def T.viewer.diff(l: I.Loc) -> String:
     case I.Ja{}:
       "差分"
 
-def T.viewer.diff.more(l: I.Loc, +n: Nat) -> String:
-  match l:
-    case I.En{}:
-      Nat.show(n) ++ " more lines not shown here"
-    case I.Ja{}:
-      "ここに表示していない行があと" ++ Nat.show(n) ++ "行あります"
-
-def T.viewer.diff.files.more(l: I.Loc, +n: Nat) -> String:
-  match l:
-    case I.En{}:
-      Nat.show(n) ++ " more changed files not shown here"
-    case I.Ja{}:
-      "ここに表示していない変更ファイルがあと" ++ Nat.show(n) ++ "件あります"
-
 def T.viewer.diff.empty(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "No changes since this thread began."
     case I.Ja{}:
       "スレッド開始後の変更はありません。"
+
+def T.viewer.diff.files.more(l: I.Loc, arg0: Nat) -> String:
+  match l:
+    case I.En{}:
+      I.I18n.num(I.En{}, arg0) ++ " more changed files not shown here"
+    case I.Ja{}:
+      "ここに表示していない変更ファイルがあと" ++ I.I18n.num(I.Ja{}, arg0) ++ "件あります"
+
+def T.viewer.diff.more(l: I.Loc, arg0: Nat) -> String:
+  match l:
+    case I.En{}:
+      I.I18n.num(I.En{}, arg0) ++ " more lines not shown here"
+    case I.Ja{}:
+      "ここに表示していない行があと" ++ I.I18n.num(I.Ja{}, arg0) ++ "行あります"
 
 def T.viewer.diff.nogit(l: I.Loc) -> String:
   match l:
@@ -9567,16 +9567,16 @@ def T.keys.part17() -> List<&2, String>:
   ["tools.tip.retry", "tools.tip.settle", "tools.tip.snooze", "tools.tip.stop", "tools.tip.terminal", "tools.tip.unarchive", "tools.tip.unpin", "tools.tip.unsettle", "tools.tip.wake", "tour.back", "tour.back.tip", "tour.body.agents", "tour.body.bots.desktop", "tour.body.bots.phone", "tour.body.buttons.desktop", "tour.body.buttons.phone", "tour.body.keys.desktop", "tour.body.keys.phone", "tour.body.machines.desktop", "tour.body.machines.phone", "tour.body.phones.desktop", "tour.body.phones.phone", "tour.body.projects.desktop", "tour.body.projects.phone", "tour.body.threads", "tour.body.uber.have.desktop", "tour.body.uber.have.phone", "tour.body.uber.join", "tour.body.uber.none", "tour.body.uber.pick", "tour.body.welcome.phone", "tour.body.welcome.web", "tour.body.welcome.window", "tour.counter", "tour.done", "tour.end.tip", "tour.next", "tour.next.tip", "tour.skip", "tour.title.agents", "tour.title.bots", "tour.title.buttons", "tour.title.keys", "tour.title.machines", "tour.title.phones", "tour.title.projects", "tour.title.threads", "tour.title.uber", "tour.title.welcome", "tour.uber.create", "tour.uber.first", "tour.uber.make", "tour.uber.new", "turn.by", "tz.invalid", "tz.source.machine", "tz.source.none", "tz.source.phone", "tz.source.set", "upload.cap", "upload.failed", "upload.incomplete", "upload.network", "viewer.board"]
 
 def T.keys.part18() -> List<&2, String>:
-  ["viewer.board.tip", "viewer.board3d.tip", "viewer.browser.empty", "viewer.browser.tip", "viewer.close", "viewer.diff", "viewer.diff.empty", "viewer.diff.nogit", "viewer.diff.nogit.how", "viewer.diff.nogit.init", "viewer.diff.nogit.init.tip", "viewer.diff.nogit.why", "viewer.diff.pr", "viewer.diff.tip", "viewer.empty.board", "viewer.empty.schematic", "viewer.export.failed", "viewer.exporting", "viewer.field.drill", "viewer.field.file", "viewer.field.footprint", "viewer.field.ktype", "viewer.field.layer", "viewer.field.lib", "viewer.field.name", "viewer.field.net", "viewer.field.netclass", "viewer.field.ref", "viewer.field.shape", "viewer.field.sheet", "viewer.field.size", "viewer.field.symbol", "viewer.field.text", "viewer.field.value", "viewer.field.width", "viewer.file.missing", "viewer.file.unread", "viewer.files", "viewer.files.back", "viewer.files.empty", "viewer.files.loading", "viewer.files.range", "viewer.files.tip", "viewer.fit", "viewer.fit.tip", "viewer.help.board", "viewer.help.browser", "viewer.help.scroll", "viewer.help.solid", "viewer.history.added", "viewer.history.changed", "viewer.history.changes", "viewer.history.compare", "viewer.history.compare.new", "viewer.history.compare.old", "viewer.history.new", "viewer.history.old", "viewer.history.pick", "viewer.history.ref", "viewer.history.removed", "viewer.item.footprint", "viewer.item.globallabel", "viewer.item.hierlabel", "viewer.item.label"]
+  ["viewer.board.tip", "viewer.board3d.tip", "viewer.browser.empty", "viewer.browser.tip", "viewer.close", "viewer.diff", "viewer.diff.empty", "viewer.diff.files.more", "viewer.diff.more", "viewer.diff.nogit", "viewer.diff.nogit.how", "viewer.diff.nogit.init", "viewer.diff.nogit.init.tip", "viewer.diff.nogit.why", "viewer.diff.pr", "viewer.diff.tip", "viewer.empty.board", "viewer.empty.schematic", "viewer.export.failed", "viewer.exporting", "viewer.field.drill", "viewer.field.file", "viewer.field.footprint", "viewer.field.ktype", "viewer.field.layer", "viewer.field.lib", "viewer.field.name", "viewer.field.net", "viewer.field.netclass", "viewer.field.ref", "viewer.field.shape", "viewer.field.sheet", "viewer.field.size", "viewer.field.symbol", "viewer.field.text", "viewer.field.value", "viewer.field.width", "viewer.file.missing", "viewer.file.unread", "viewer.files", "viewer.files.back", "viewer.files.empty", "viewer.files.loading", "viewer.files.range", "viewer.files.tip", "viewer.fit", "viewer.fit.tip", "viewer.help.board", "viewer.help.browser", "viewer.help.scroll", "viewer.help.solid", "viewer.history.added", "viewer.history.changed", "viewer.history.changes", "viewer.history.compare", "viewer.history.compare.new", "viewer.history.compare.old", "viewer.history.new", "viewer.history.old", "viewer.history.pick", "viewer.history.ref", "viewer.history.removed", "viewer.item.footprint", "viewer.item.globallabel"]
 
 def T.keys.part19() -> List<&2, String>:
-  ["viewer.item.netclassflag", "viewer.item.pad", "viewer.item.pin", "viewer.item.sheet", "viewer.item.sheetpin", "viewer.item.symbol", "viewer.item.track", "viewer.item.via", "viewer.item.zone", "viewer.kicad.tip", "viewer.kicad10", "viewer.kicad10.tip", "viewer.layer.focus", "viewer.layer.toggle", "viewer.layers", "viewer.layers.active", "viewer.layers.all", "viewer.layers.all.tip", "viewer.layers.dim", "viewer.layers.dim.tip", "viewer.layers.only", "viewer.layers.only.tip", "viewer.layers.reset", "viewer.layers.restore", "viewer.layers.tip", "viewer.loading", "viewer.mech", "viewer.mech.loading", "viewer.mech.renders", "viewer.mech.tip", "viewer.mention", "viewer.mesh.failed", "viewer.orbit.tip", "viewer.page.empty", "viewer.page.loading", "viewer.pan.tip", "viewer.parts3d.tip", "viewer.pdf.drawing", "viewer.pdf.page", "viewer.picture.failed", "viewer.plot.stats", "viewer.render.failed", "viewer.resize", "viewer.review", "viewer.review.tip", "viewer.sch.back", "viewer.sch.back.tip", "viewer.sch.fold", "viewer.sch.forward", "viewer.sch.forward.tip", "viewer.sch.gone", "viewer.sch.inside", "viewer.sch.outside", "viewer.sch.position", "viewer.sch.root.tip", "viewer.sch.trail", "viewer.sch.tree", "viewer.sch.tree.tip", "viewer.sch.unfold", "viewer.sch.up", "viewer.sch.up.tip", "viewer.schematic", "viewer.schematic.tip", "viewer.sheet.open"]
+  ["viewer.item.hierlabel", "viewer.item.label", "viewer.item.netclassflag", "viewer.item.pad", "viewer.item.pin", "viewer.item.sheet", "viewer.item.sheetpin", "viewer.item.symbol", "viewer.item.track", "viewer.item.via", "viewer.item.zone", "viewer.kicad.tip", "viewer.kicad10", "viewer.kicad10.tip", "viewer.layer.focus", "viewer.layer.toggle", "viewer.layers", "viewer.layers.active", "viewer.layers.all", "viewer.layers.all.tip", "viewer.layers.dim", "viewer.layers.dim.tip", "viewer.layers.only", "viewer.layers.only.tip", "viewer.layers.reset", "viewer.layers.restore", "viewer.layers.tip", "viewer.loading", "viewer.mech", "viewer.mech.loading", "viewer.mech.renders", "viewer.mech.tip", "viewer.mention", "viewer.mesh.failed", "viewer.orbit.tip", "viewer.page.empty", "viewer.page.loading", "viewer.pan.tip", "viewer.parts3d.tip", "viewer.pdf.drawing", "viewer.pdf.page", "viewer.picture.failed", "viewer.plot.stats", "viewer.render.failed", "viewer.resize", "viewer.review", "viewer.review.tip", "viewer.sch.back", "viewer.sch.back.tip", "viewer.sch.fold", "viewer.sch.forward", "viewer.sch.forward.tip", "viewer.sch.gone", "viewer.sch.inside", "viewer.sch.outside", "viewer.sch.position", "viewer.sch.root.tip", "viewer.sch.trail", "viewer.sch.tree", "viewer.sch.tree.tip", "viewer.sch.unfold", "viewer.sch.up", "viewer.sch.up.tip", "viewer.schematic"]
 
 def T.keys.part20() -> List<&2, String>:
-  ["viewer.sheet.title", "viewer.sheet.top", "viewer.solid", "viewer.solid.stats", "viewer.solid.waiting", "viewer.terminal.title", "viewer.unread", "voice.choose", "voice.default", "voice.device.default", "voice.device.note", "voice.dictate", "voice.dictate.here", "voice.dictionary.add", "voice.dictionary.tip", "voice.dropped", "voice.engine.auto", "voice.engine.cloud", "voice.engine.local", "voice.error", "voice.finishing", "voice.fix", "voice.fix.tip", "voice.fixed", "voice.guess.tip", "voice.heard", "voice.learned.item", "voice.leave", "voice.listening", "voice.loading", "voice.microphone", "voice.model.available", "voice.model.busy", "voice.model.check", "voice.model.checking", "voice.model.download", "voice.model.failed", "voice.model.incomplete", "voice.model.language.en", "voice.model.language.multi", "voice.model.none", "voice.model.progress", "voice.model.ready", "voice.model.received", "voice.model.remove", "voice.model.removing", "voice.model.retry", "voice.model.starting", "voice.model.unpack", "voice.model.unsupported", "voice.noaudio", "voice.replace", "voice.silent", "voice.spelling", "voice.starting", "voice.stop", "voice.undo.tip", "voice.writing", "web.bots.persona.placeholder", "web.google.callback", "web.google.client.id", "web.google.client.save", "web.hooks.revoke", "web.hooks.secret"]
+  ["viewer.schematic.tip", "viewer.sheet.open", "viewer.sheet.title", "viewer.sheet.top", "viewer.solid", "viewer.solid.stats", "viewer.solid.waiting", "viewer.terminal.title", "viewer.unread", "voice.choose", "voice.default", "voice.device.default", "voice.device.note", "voice.dictate", "voice.dictate.here", "voice.dictionary.add", "voice.dictionary.tip", "voice.dropped", "voice.engine.auto", "voice.engine.cloud", "voice.engine.local", "voice.error", "voice.finishing", "voice.fix", "voice.fix.tip", "voice.fixed", "voice.guess.tip", "voice.heard", "voice.learned.item", "voice.leave", "voice.listening", "voice.loading", "voice.microphone", "voice.model.available", "voice.model.busy", "voice.model.check", "voice.model.checking", "voice.model.download", "voice.model.failed", "voice.model.incomplete", "voice.model.language.en", "voice.model.language.multi", "voice.model.none", "voice.model.progress", "voice.model.ready", "voice.model.received", "voice.model.remove", "voice.model.removing", "voice.model.retry", "voice.model.starting", "voice.model.unpack", "voice.model.unsupported", "voice.noaudio", "voice.replace", "voice.silent", "voice.spelling", "voice.starting", "voice.stop", "voice.undo.tip", "voice.writing", "web.bots.persona.placeholder", "web.google.callback", "web.google.client.id", "web.google.client.save"]
 
 def T.keys.part21() -> List<&2, String>:
-  ["web.plane.idle", "web.routine.prompt", "web.routine.prompt.once", "web.settings.voice.dictionary.note", "web.settings.writing.model", "web.settings.writing.note", "web.terminal.inactive", "web.terminal.pinned", "web.viewer.layers.active", "web.voice.heard", "web.voice.listening"]
+  ["web.hooks.revoke", "web.hooks.secret", "web.plane.idle", "web.routine.prompt", "web.routine.prompt.once", "web.settings.voice.dictionary.note", "web.settings.writing.model", "web.settings.writing.note", "web.terminal.inactive", "web.terminal.pinned", "web.viewer.layers.active", "web.voice.heard", "web.voice.listening"]
 
 def T.keys() -> List<&2, String>:
   T.catalog.join([T.keys.part0(), T.keys.part1(), T.keys.part2(), T.keys.part3(), T.keys.part4(), T.keys.part5(), T.keys.part6(), T.keys.part7(), T.keys.part8(), T.keys.part9(), T.keys.part10(), T.keys.part11(), T.keys.part12(), T.keys.part13(), T.keys.part14(), T.keys.part15(), T.keys.part16(), T.keys.part17(), T.keys.part18(), T.keys.part19(), T.keys.part20(), T.keys.part21()], [])

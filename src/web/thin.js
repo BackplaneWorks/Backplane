@@ -1,8 +1,8 @@
-import { restoreFrameAliases } from './conversation-frame.js';
+import { restoreFrameAliases, restoreWindowProjection } from './conversation-frame.js';
 import { terminalInputReply } from './terminal-input.js';
 import { modelMenuReply } from './model-menu-input.js';
 import { sidebarOffer, sidebarPicture } from './sidebar-region.js';
-import { deltaOffer, deltaPicture, deltaKeep, deltaBases, deltaBytes, deltaDraft } from './view-delta.js';
+import { deltaOffer, deltaPicture, deltaKeep, deltaBases, deltaBytes, deltaDraft, refill } from './view-delta.js';
 
 // Bounded view transport shared by the web and native bridge. Product actions
 // and rendering remain in Bend. No canonical replay is initiated here.
@@ -183,7 +183,7 @@ export class ThinViews {
     else if (method !== 'view.cancel') l.pagesFrom = null;
     let id; try { id = this.allocate(); } catch (e) { return { failed: e.message, cmds: [] }; }
     const p = { ...extra, version: 1, hub, generation: l.greeting.generation, epoch: l.greeting.epoch,
-      requestRevision: l.revision, target: snapshot(l.target), viewId: l.viewId };
+      viewControl:1, windowProjection:l.greeting.renderer === 'web' ? 1 : 0, requestRevision: l.revision, target: snapshot(l.target), viewId: l.viewId };
     if (l.greeting.renderer === 'web') { p.accountProfiles = 1; p.accountBinding = l.accountBinding || ''; }
     if (l.greeting.renderer === 'web' && this.api.bodyPages === true) p.bodyPages = 1;
     const regionEnabled = this.api.sidebarRegions === true && l.greeting.renderer === 'web'
@@ -225,8 +225,11 @@ export class ThinViews {
     if (!call || call.link !== link || !integer(e.part) || typeof e.last !== 'boolean' || !bounded(e.text, 32768)
       || utf8Bytes(JSON.stringify(e)) > 65536) return true;
     let value = this.controls.get(e.id);
-    if (!value) { if (e.part !== 0) return true;value = { link, parts: [], next: 0, done: false };this.controls.set(e.id, value); }
+    if (!value) { if (e.part !== 0) return true;value = { link, parts: [], bytes:0, next: 0, done: false };this.controls.set(e.id, value); }
     if (value.link !== link || value.done || e.part !== value.next) { this.controls.delete(e.id);return true; }
+    value.bytes += utf8Bytes(e.text);
+    if (value.bytes > 64 * 1024 * 1024 || value.next >= 16384) { value.parts = [];value.invalid = true;value.done = false;return true; }
+    if (value.invalid) return true;
     value.parts.push(e.text);value.next++;value.done = e.last;return true;
   }
   reply(hub, e) {
@@ -238,10 +241,10 @@ export class ThinViews {
     if (!current && c.method === 'view.page' && typeof l.pagesFrom === 'number' && c.revision >= l.pagesFrom && c.revision > (l.pageShown || 0) &&
         l.viewId === c.viewId && sameTarget(l.target, c.target)) current = true;
     this.retireUpdate(c);
+    const control = this.controls.get(e.id);this.controls.delete(e.id);
     if (e.ok !== true) return { failed: record(e.error) ? e.error.code : 'UNAVAILABLE', id: e.id, method: c.method, retry: false, cmds: [] };
     let r = e.result;
     const rawBytes = utf8Bytes(JSON.stringify(e));
-    const control = this.controls.get(e.id);this.controls.delete(e.id);
     const segmented = record(r) && r.controlId === e.id && control?.link === l && control.done;
     if (segmented) {
       try {
@@ -267,7 +270,9 @@ export class ThinViews {
       return { failed: 'invalid compact action reply', id: e.id, method: c.method, retry: false, cmds: [] };
     }
     let picture = null, changed = null, unchanged = false;
-    if (Object.hasOwn(r, 'viewDelta')) {
+    const projected = Object.hasOwn(r, 'windowProjection');
+    if (projected && !record(r.windowProjection)) return { failed:'invalid canonical region', id:e.id, method:c.method, retry:false, cmds:[] };
+    if (!projected && Object.hasOwn(r, 'viewDelta')) {
       // the paths a delta wrote (null: a whole reply, everything), for the
       // region the page redraws (core/landing.bend)
       const d = r.viewDelta;
@@ -290,14 +295,22 @@ export class ThinViews {
       }
     }
     let sidebar;
-    if (Object.hasOwn(r, 'sidebarRegion')) {
+    if (!projected && Object.hasOwn(r, 'sidebarRegion')) {
       try {
         sidebar = sidebarPicture(r, c.input, c.sidebarBase);r = sidebar.result;
         // A compressed reply grants no larger logical presentation budget.
         if (utf8Bytes(JSON.stringify(segmented ? r.shown : r)) > l.greeting.limits.replyBytes) throw Error('Expanded view limit');
       } catch { return { failed: 'invalid sidebar region', id: e.id, method: c.method, retry: false, cmds: [] }; }
     }
-    try { if (r.entryAliases) r = { ...r, shown: restoreFrameAliases(r.shown, r.entryAliases, r.window) }; }
+    try {
+      if (r.windowProjection) {
+        const wire = this.api.shape ? deltaDraft(this.api.shape(c.input, c.method)) : deltaDraft(c.input);
+        const full = deltaDraft(c.input), root = restoreWindowProjection(r.shown, r.windowProjection);
+        r = { ...r, shown: typeof wire === 'string' && typeof full === 'string' && wire !== full ? refill(root, wire, full) : root };
+        picture = null;changed = null;unchanged = false;
+      }
+      if (r.entryAliases) r = { ...r, shown: restoreFrameAliases(r.shown, r.entryAliases, r.window) };
+    }
     catch { return { failed: 'invalid source aliases', id: e.id, method: c.method, retry: false, cmds: [] }; }
     if (this.api.validateResult && this.api.validateResult(r, c.input) !== true) { l.bases = deltaBases();return { failed: 'invalid view presentation', id: e.id, method: c.method, retry: false, cmds: [] }; }
     // a body the hub kept under this token: the base of a later delta,
@@ -315,6 +328,7 @@ export class ThinViews {
     const presentation = ['view.open', 'view.page', 'view.update', 'view.action'].includes(c.method);
     const displayed = current && presentation && record(r.shown) && r.remoteReady === true;
     if (displayed) {
+      if (projected) { l.sidebar = null;l.bases = deltaBases();l.displayedBase = ''; }
       l.viewId = r.viewId; l.viewRevision = r.viewRevision; l.shown = r.shown;l.pageShown = c.revision;l.displayedBase = picture?.token || '';
       if (l.greeting.renderer === 'web') l.accountBinding = typeof r.accountBinding === 'string' ? r.accountBinding : '';
       l.terminalOpen = r.session?.open?.term === true;

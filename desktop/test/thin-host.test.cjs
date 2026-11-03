@@ -1432,3 +1432,28 @@ test('an empty server hint pages serially from the first accepted cursor',async(
  f.host.receive(f.reply(first,{window:{ids:['92'],older:'85',olderNext:'',hasMore:true,anchor:{id:'92',offset:0},partial:[]}}));
  f.host.page();assert.equal(f.sent.at(-1).p.cursor,'85','continue from actual first-page fit');
 });
+
+test('canonical root regions always paint changed content and preserve the requested viewer',async()=>{
+ const f=await fixture();f.open();
+ const slot={type:'element',tag:'div',key:'workspace-root',attrs:[{name:'data-window-region',value:'root'}],kids:[]};
+ for(const text of ['first stream','second stream']){
+  const before=f.views.length;f.host.update();const req=f.sent.at(-1),canvas={type:'element',tag:'canvas',key:'solid',attrs:[],kids:[]};
+  const root={type:'element',tag:'div',key:'workspace-root',attrs:[{name:'class',value:'exact outer layout'}],kids:[{type:'text',text},canvas]};
+  f.host.receive(f.reply(req,{shown:slot,windowProjection:{root},viewDelta:{version:99},sidebarRegion:{version:99}}));
+  assert.deepEqual(f.views.at(-1).n,root);assert.equal(f.views.length,before+1);
+ }
+ f.host.update();f.host.receive(f.reply());assert.equal(f.views.at(-1).n.type,'text','ordinary whole view works after region fallback');
+});
+test('canonical root region refills a captured 300KB Unicode draft and fences navigation',async()=>{
+ const f=await fixture(),big='日本語😀'.repeat(30000);f.host.request('draft',big);f.host.greeting(f.greeting);const req=f.sent.at(-1);
+ const slot={type:'element',tag:'div',key:'workspace-root',attrs:[{name:'data-window-region',value:'root'}],kids:[]};
+ const root={type:'element',tag:'div',key:'workspace-root',attrs:[],kids:[{type:'element',tag:'textarea',key:'composer-input',attrs:[{name:'value',value:req.p.session.drafts.A}],kids:[]}]};
+ f.host.receive(f.reply(req,{shown:slot,windowProjection:{root}}));assert.equal(f.views.at(-1).n.kids[0].attrs[0].value,big);assert.equal(f.getSession().drafts.A,big);
+ f.host.update();const stale=f.sent.at(-1);f.host.request('select','B');const count=f.views.length;
+ f.host.receive(f.reply(stale,{shown:slot,windowProjection:{root}}));assert.equal(f.views.length,count);assert.equal(f.host.target.id,'B');
+});
+test('an error reply retires its unfinished control collection',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);const req=f.sent.at(-1);
+ f.host.receive({t:'view.control',id:req.id,part:0,last:false,text:'{"incomplete":'});assert.equal(f.host.client.controls.size,1);
+ f.host.receive({t:'reply',id:req.id,ok:false,error:{code:'UNAVAILABLE'}});assert.equal(f.host.client.controls.size,0);
+});

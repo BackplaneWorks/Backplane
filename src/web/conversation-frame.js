@@ -22,3 +22,14 @@ export function restoreFrameAliases(shown, aliases, window) {
   };
   return visit(shown);
 }
+
+// Viewer and conversation regions belong to the same authenticated reply.
+// Reassemble before the normal validator/diff sees either region, so a canvas
+// with the normal renderer's key is never removed for an intermediate slot.
+export function restoreWindowProjection(shown, projection) {
+  if (!projection) return shown;
+  if (shown?.type !== 'element' || shown.key !== 'workspace-root' || shown.kids?.length !== 0 ||
+      !shown.attrs?.some(a => a.name === 'data-window-region' && a.value === 'root') ||
+      projection.root?.type !== 'element' || projection.root.key !== 'workspace-root') throw Error('Invalid canonical root region');
+  return projection.root;
+}
