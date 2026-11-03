@@ -46,6 +46,9 @@ type PMsg is Data:
   PGot{key: String, sz: U32, mt: String, plot: Maybe<&2, P.Plot>, err: String}
   # a phone asks what a piece it tapped is (reply id)
   PInfo{client: U32, id: String, key: String, at: Nat, idx: Nat}
+  # a saved version (a history step beside the one on show) plotted ahead,
+  # kept as one no view watches (Pv.warm.ver)
+  PWarm{kind: U32, root: String, path: String}
 
 # a message for a phone: JSON text (the hub makes it CBOR), or a frame's
 # CBOR bytes as they are (a plot: never parsed again)
@@ -182,10 +185,12 @@ def Src.idle(+s: Src, +subs: List<&2, Sub>, +n: Nat) -> Bool:
 # commit, a comparison): it never changes, and scrubbing the history comes
 # back to it; it was dropped as soon as the view moved on, and each step
 # shown again was plotted again (about a second on a real board)
+# (or one being read: a history step plotted ahead, Pv.warm.ver, no view
+# watches yet; dropped while it was read, its plot was thrown away)
 def Src.version(s: Src) -> Bool:
   match s:
-    case Src{_, +kd, +path, _, _, _, _, pl, _}:
-      Bool.and(Bool.not(Pv.solid.kind(kd)), Bool.and(Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), Maybe.is_some(&2, P.Plot, pl)))
+    case Src{_, +kd, +path, _, _, _, busy, pl, _}:
+      Bool.and(Bool.not(Pv.solid.kind(kd)), Bool.and(Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), Bool.or(busy, Maybe.is_some(&2, P.Plot, pl))))
 
 # how many such version plots no view watches are kept (the newest first)
 def Src.versions.kept() -> Nat:
@@ -1567,6 +1572,19 @@ def Pv.watch.stamped(st: PSt, +client: U32, on: Bool, +out: Chan(POut)) -> IO(PS
         Pv.stamp.subscribed(ss, stamped, client, out)
         return PSt{ss, stamped, polling}
 
+# A history step plotted ahead (PWarm, client.bend's Hs.warm): a version
+# not kept yet is read at low priority and kept as one no view watches
+# (Src.gc keeps the last Src.versions.kept()), so the next ‹ or › shows it
+# as fast as a step seen before. One kept, watched or being read is left
+# as it is (Pv.warm.srcs).
+def Pv.warm.ver(st: PSt, +kind: U32, +root: String, +path: String, +q: Chan(PMsg), +dir: String) -> IO(PSt):
+  match st:
+    case PSt{+ss, +subs, polling}:
+      do IO<PSt>:
+        +key : String = Src.key(kind, root, path)
+        ss2 : List<&2, Src> <- Pv.warm.srcs(Src.add(Src.has(ss, key), key, kind, path, ss), key, Sub.watched(subs, key), q, dir)
+        return PSt{Src.gc(ss2, subs), subs, polling}
+
 # (n: the generation of this message: how many messages the actor took
 # before this one, Pv.tree.gen)
 def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, +n: String) -> IO(PSt):
@@ -1588,6 +1606,8 @@ def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, 
         ss2 : List<&2, Src> <- Pv.poll(ss, subs, q, out, dir)
         p2 : Bool <- Pv.next(Bool.not(List.is_empty(&2, Sub, subs)), q)
         return PSt{ss2, subs, p2}
+    case _ PWarm{+kind, +root, +path}:
+      Pv.warm.ver(st, kind, root, path, q, dir)
     case PSt{ss, +subs, polling} PInfo{+client, +id, +key, at, +idx}:
       do IO<PSt>:
         IO.spawn(Unit, Pv.info(client, id, Pv.infos(dir, key), P.Chunk.sig(P.Plot.at(at, Sub.held(subs, client, key))), idx, out))
