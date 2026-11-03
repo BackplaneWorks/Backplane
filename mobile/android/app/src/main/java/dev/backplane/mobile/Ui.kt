@@ -222,6 +222,8 @@ fun App(m: AppModel) {
 
 @Composable
 private fun AppContent(m: AppModel) {
+    if (m.showingDevices) { m.devicesLink?.let { DeviceManager(it) { m.closeDevices() } };return }
+    val rejected = m.links.firstOrNull { m.startup[Pairing.key(it)] == StartupPolicy.PAIRING_REFUSED }
     var pairing by rememberSaveable { mutableStateOf(false) }
     val s = m.screen
     // New Thread's page, left with Back before the hub made the thread
@@ -236,7 +238,7 @@ private fun AppContent(m: AppModel) {
             }
             Box(Modifier.weight(1f).then(if (starUp) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
                 when {
-                    m.links.isEmpty() -> Pair(s?.locale ?: "en", "", cancel = null) { m.pair(it) }
+                    m.links.isEmpty() || rejected != null -> Pair(s?.locale ?: "en", "", cancel = null, status = m.pairingError, repair = rejected != null) { m.pair(it) }
                     s == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                     pairing -> {
                         BackHandler { pairing = false }
@@ -402,24 +404,31 @@ private fun SearchField(m: AppModel, f: Search, first: String?) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Pair(tag: String, link: String, cancel: (() -> Unit)?, done: (String) -> Unit) {
-    var text by rememberSaveable { mutableStateOf(link) }
+private fun Pair(tag: String, link: String, cancel: (() -> Unit)?, status: String = "", repair: Boolean = false, done: (String) -> Unit) {
+    var text by remember { mutableStateOf(link) }
+    var address by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
     Scaffold(topBar = {
-        TopAppBar(title = { Text(NativeMessages.native_pair_title(tag)) }, navigationIcon = {
+        TopAppBar(title = { Text(if (repair) "Re-pair this device" else "Connect to your Backplane hub") }, navigationIcon = {
             if (cancel != null) IconButton(onClick = cancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(tag)) }
         })
     }) { pad ->
-        Column(Modifier.padding(pad).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val ctx = LocalContext.current
             Button(onClick = { scanPairing(ctx, tag, done) }) {
                 Icon(Icons.Filled.QrCodeScanner, null)
                 Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
             }
-            Text(NativeMessages.native_pair_computer_android(tag),
+            Text("On your paired computer, open Settings → Devices → Add a device.",
                 style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), singleLine = true,
-                label = { Text(NativeMessages.settings_pair(tag)) }, placeholder = { Text("http://host:3787/#token=…") })
+                label = { Text(NativeMessages.settings_pair(tag)) }, placeholder = { Text("http://host:3787/pair#invite=…") })
             Button(onClick = { done(text) }, enabled = text.isNotBlank()) { Text(NativeMessages.native_pair_connect(tag)) }
+            if (status.isNotEmpty()) Text(status, color = MaterialTheme.colorScheme.tertiary)
+            Text("Type a short code", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(address, { address = it }, Modifier.fillMaxWidth(), label = { Text("Hub address") }, singleLine = true)
+            OutlinedTextField(code, { code = it }, Modifier.fillMaxWidth(), label = { Text("8-character code") }, singleLine = true)
+            Button(onClick = { Pairing.codeLink(address, code)?.let(done) }, enabled = Pairing.codeLink(address, code) != null) { Text("Connect with code") }
         }
     }
 }

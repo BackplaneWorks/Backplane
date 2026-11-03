@@ -8,6 +8,10 @@ import androidx.lifecycle.AndroidViewModel
 class AppModel(app: Application) : AndroidViewModel(app) {
     private val core = app.core
 
+    val pairingError get() = core.pairingError
+    val showingDevices get() = core.showingDevices
+    val devicesLink get() = core.devicesLink
+    fun closeDevices() { core.showingDevices = false }
     val links get() = core.links
     val screen get() = core.screen
     // the key's composer patch while it is for this thread and the text shown

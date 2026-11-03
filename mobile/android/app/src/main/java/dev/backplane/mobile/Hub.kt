@@ -27,6 +27,50 @@ import javax.net.SocketFactory
 // A pairing link as the desktop shows it (http://host:3787/#token=abc)
 // becomes the hub's socket address (ws://host:3787/ws?token=abc).
 object Pairing {
+    data class Invitation(val origin: String, val secret: String)
+    fun invitation(text: String): Invitation? {
+        var raw = text.trim()
+        if (raw.startsWith("backplane://")) raw = Uri.parse(raw).getQueryParameter("url") ?: return null
+        val u = Uri.parse(raw)
+        if (u.scheme !in setOf("http", "https") || u.host.isNullOrEmpty() || u.userInfo != null) return null
+        val f = Uri.parse("https://pair/?" + (u.encodedFragment ?: ""))
+        val secret = f.getQueryParameter("invite") ?: f.getQueryParameter("code") ?: return null
+        if (!Regex("(?:[a-f0-9]{32}|[A-Z2-9]{8})").matches(secret)) return null
+        return Invitation(u.buildUpon().path("").clearQuery().fragment(null).build().toString().trimEnd('/'), secret)
+    }
+    fun malformedInvitation(text: String): Boolean {
+        var raw = text.trim()
+        if (raw.startsWith("backplane://")) raw = Uri.parse(raw).getQueryParameter("url") ?: return false
+        val fields = Uri.parse("https://pair/?" + (Uri.parse(raw).encodedFragment ?: ""))
+        return fields.queryParameterNames.any { it == "invite" || it == "code" }
+    }
+    fun codeLink(address: String, code: String): String? {
+        val compact = code.replace(" ", "").replace("-", "").uppercase()
+        if (!Regex("[A-Z2-9]{8}").matches(compact)) return null
+        val u = Uri.parse(if (address.contains("://")) address else "http://$address")
+        if (u.scheme !in setOf("http", "https") || u.host.isNullOrEmpty() || u.userInfo != null) return null
+        return u.buildUpon().path("/pair").clearQuery().fragment("code=$compact").build().toString()
+    }
+    fun message(error: String): String = when(error) {
+        "wrong_code" -> "That code is not correct. Check it and try again."
+        "expired_code" -> "This invitation expired. Create another in Settings → Devices."
+        "used_code" -> "This invitation has already been used. Create a new one."
+        "rate_limited" -> "Too many attempts. Wait a minute and try again."
+        "pairing_required" -> "Re-pair this device with a new invitation."
+        else -> "Hub unreachable. Check its address, LAN or tailnet connection."
+    }
+    suspend fun exchange(invite: Invitation): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val r = okhttp3.Request.Builder().url(invite.origin + "/auth/enroll")
+            .post(okhttp3.RequestBody.create(null, ByteArray(0))).header("Authorization", "Bearer " + invite.secret)
+            .header("X-Backplane-Client", "native").header("X-Backplane-Name", android.os.Build.MODEL.filter { it.code in 32..126 }).build()
+        val client = okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).callTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build()
+        client.newCall(r).execute().use { response ->
+            val json = org.json.JSONObject(response.body?.string() ?: "{}")
+            val token = json.optString("token")
+            if (!response.isSuccessful || !Regex("[a-f0-9]{32}").matches(token)) throw IllegalArgumentException(message(json.optString("error")))
+            invite.origin + "/#token=" + token
+        }
+    }
     fun socket(link: String): String? {
         var s = link.trim()
         if (s.isEmpty()) return null

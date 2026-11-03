@@ -1,0 +1,21 @@
+body.pairing-pending #root {visibility:hidden}
+.pairing-screen {position:fixed;inset:0;z-index:12000;overflow:auto;overscroll-behavior:contain;background:#0c100f;color:#e3e9df;box-sizing:border-box;padding:clamp(20px,6vw,80px);font:16px/1.5 system-ui,sans-serif}
+.pairing-card {max-width:620px;margin:0 auto;border-top:4px solid #b2f66b;padding-top:24px;padding-bottom:40px}
+.pairing-brand {font:700 12px monospace;letter-spacing:.15em;color:#b2f66b}
+.pairing-card h1 {font-size:clamp(28px,5vw,42px);line-height:1.12;margin:18px 0}
+.pairing-card h2 {font-size:20px;margin-top:32px}
+.pairing-card p {overflow-wrap:anywhere}
+.pairing-lead,.pairing-help {color:#b3c0af}.pairing-help {font-size:14px}
+.pairing-card label {display:block;margin:20px 0 10px;font-weight:600}
+.pairing-card input {display:block;box-sizing:border-box;width:100%;min-height:48px;padding:12px;margin-top:8px;border:1px solid #64705e;background:#151b17;color:inherit;border-radius:0;font:inherit}
+.pairing-card button {min-height:44px;padding:10px 18px;margin:8px 12px 8px 0;border:1px solid #b2f66b;border-radius:0;background:#202d1c;color:#e3e9df;font:600 15px system-ui;cursor:pointer}
+.pairing-card button:disabled {opacity:.45;cursor:default}
+.pairing-card :focus-visible {outline:3px solid #d5ff99;outline-offset:4px}
+.pairing-card a {display:block;color:#b2f66b;margin-top:16px}
+.pairing-card details {margin-top:24px;border-top:1px solid #3c4937;padding-top:20px}
+.pairing-card summary {cursor:pointer;min-height:44px;font-weight:600}
+.pairing-status {min-height:24px;color:#eacb88}
+.pairing-code {font:700 36px monospace;letter-spacing:.12em;color:#b2f66b}
+.pairing-qr {display:block;width:min(100%,300px);margin:24px 0;background:white;shape-rendering:crispEdges;fill:black}
+.pairing-device {padding:16px 0;border-bottom:1px solid #3c4937}
+.pairing-camera {display:block;width:100%;max-height:320px;object-fit:contain}

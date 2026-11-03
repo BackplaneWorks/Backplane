@@ -61,9 +61,17 @@ installFloatingTerminal({ dispatch });
 import { ConnectionLog } from "./connection-log.js";
 import { frameSummary } from "./frame-summary.js";
 import { pairBrowser } from "./auth.js";
+import { installPairingUI } from "./pairing-ui.js";
+import { pairingInput } from "./pairing-link.js";
+let pairingCause = "";
+const pairingUI = installPairingUI({document, location, fetch: window.fetch.bind(window), onPaired: () => location.assign("/")});
 
 // Consume the secret before the generic deeplink handler clears the fragment.
-const pairingReady = pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window) }).catch(() => false);
+let pendingInvitation = null;
+try { const p = pairingInput(location.href, location.origin);if (p.kind !== "token") { pendingInvitation = p;history.replaceState(null, "", location.pathname + location.search); } } catch {}
+const pairingReady = pendingInvitation ? Promise.resolve(false) : pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window), report: cause => { pairingCause = cause; } }).catch(() => false);
+if (!document.cookie.split(";").some(c => c.trim().startsWith("bp_cache_v1=")) && !pendingInvitation) pairingUI.show();
+
 import * as Solid from "./solid.js";
 import * as ViewerTools from "./viewer-tools.js";
 import { ViewerRpc } from "./viewer-rpc.js";
@@ -751,11 +759,12 @@ async function refreshFocusedIdentityFor(generation) {
   if (generation !== attachmentIdentityGeneration) return;
   trace("cache-identity", { state: result.state });
   attachmentIdentity = result.state === "verified" ? result.identity : "";
+  if (result.state === "verified") pairingUI.accepted();
   if (result.state === "denied") {
     attachmentIdentityPending = false;
     void draftAttachments.clear().catch(() => {});
     stopThin(false, "auth-denied");viewMode = "read-only";focusedView.invalidate();
-    showViewStatus("Pairing is required to reconnect.");later();return;
+    pairingUI.show({repair: !!before, cause: before ? "pairing_required" : ""});later();return;
   }
   if (before !== cacheIdentity(document.cookie) || result.state === "denied" || result.state === "invalid") {
     void draftAttachments.prune().catch(() => {});
@@ -1570,6 +1579,7 @@ function voiceMicHeard(envelope) {
 }
 
 function dispatch(action, value, timer) {
+  if (action === "devices-open" || action === "settings-page" && value === "devices") { void pairingUI.devices();return true; }
   if (action === "voice" && !timer) value = voiceMicPress(value);
   if (action === "fork") reviewPosition.fork(value || currentSession().sel);
   if (action === "secret-save") return secretSave(value);
@@ -3275,6 +3285,12 @@ async function startThin(again = false, reason = "initial") {
   later();
   const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability });
   if (attempt !== thinAttempt || viewMode === "compatibility") return;
+  if (capability.unauthorized) {
+    stopThin(false, "auth-denied");viewMode = "read-only";focusedView.invalidate();
+    const repair = !!cacheIdentity(document.cookie);
+    pairingUI.show({repair, cause: repair ? "pairing_required" : ""});
+    void refreshFocusedIdentity();later();return;
+  }
   if (!capability.supported && capability.offline) {
     viewMode = "offline";later();thinReconnect();return;
   }
@@ -3595,8 +3611,9 @@ render();
 pairingReady.then(paired => {
   pairingAccepted = paired === true;
   if (!pairingAccepted) {
-    viewMode = "read-only";focusedView.invalidate();showViewStatus("Pairing failed. Reopen the pairing link.");return;
+    viewMode = "read-only";focusedView.invalidate();pairingUI.show({cause: pendingInvitation ? "" : pairingCause || "pairing_required", pending: pendingInvitation});return;
   }
+  if (location.pathname === "/devices") void pairingUI.devices();
   // Neither IO path awaits the other: a blocked IndexedDB request cannot
   // delay capability discovery or the first selected network view.
   void restoreFocused();
