@@ -14199,6 +14199,14 @@ def Laws.auth_owner_pair_routes(): {==}
 def Laws.auth_owner_pair_rebound(): {==}
 # ---- end native owner tailnet pairing ----
 
+# ---- tokenless pairing proofs ----
+def Laws.auth_pair_proof_needs_token(to, at, now, proof): {==}
+
+def Laws.auth_pair_proof_not_empty(to, at, now): {==}
+
+def Laws.auth_pair_proof_stale(to): {==}
+# ---- end tokenless pairing proofs ----
+
 # ---- far queue ----
 def Laws.fq_tools(): {==}
 
