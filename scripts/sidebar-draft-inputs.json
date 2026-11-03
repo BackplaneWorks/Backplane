@@ -96,7 +96,7 @@
     "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
     "src/core/onboard.bend": "fc10cb988f4fa6e8b2780e3ea3c4ebfea0088256daf5f65abebd10dfe2d746c8",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
-    "src/core/order.bend": "d15226a49ea3952b021b452ffa6daa9b702d22640048ad6ca8cacedc7e8e3561",
+    "src/core/order.bend": "2162673c946ff086ad96d3c28ba101f00c161b35c7f87ccecd615265688f0c39",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/pathrecords.bend": "3513a61b677944d344d99f1669bd1cf63c5484b2a0ab43c45153f9f3b10bcc04",
     "src/core/plane.bend": "3baf611ec774f024241959fbfec5f20474b3287c54d82ac548635d12b9e0f9ef",
