@@ -11,6 +11,9 @@ def row(+id: String, text: String) -> D.Node:
 def fold(+state: String) -> D.Node:
   D.El{"button", "", [D.On{"click", "fold"}, D.At{"data-value", state ++ "run"}], [D.Txt{state}]}
 
+def live_fold(+state: String, label: String) -> D.Node:
+  D.El{"button", "fold:run", [D.On{"click", "fold"}, D.At{"data-value", state ++ "run"}, D.At{"class", "fold live"}], [D.Txt{label}]}
+
 def tl(xs: List<&2, D.Node>) -> D.Node:
   D.El{"div", "timeline", [D.At{"id", "timeline"}], xs}
 
@@ -75,6 +78,19 @@ def main() -> IO(Unit):
     same("fresh duplicate shared rows appear once", H.project(tl([a, b, c]), tl([b1, b1, c1]), "older"), tl([a, b1, c1]))
     +memo : D.Node = D.El{"bp-memo", "memo", [D.At{"fn", "msg"}], [D.Txt{"memo text"}]}
     +memoRow : D.Node = D.El{"bp-memo", "memo-row", [D.At{"fn", "row"}], [D.Txt{"row text"}]}
+    +runningHead : D.Node = live_fold("1", "51 tool calls · running: shell")
+    +runningFresh : D.Node = live_fold("1", "52 tool calls · running: shell")
+    +completedHead : D.Node = D.El{"button", "fold:run", [D.On{"click", "fold"}, D.At{"data-value", "1run"}, D.At{"class", "fold"}], [D.Txt{"52 tool calls"}]}
+    same("running newest fold retains the loaded message prefix", H.project(tl([a, runningHead]), tl([runningFresh]), "newer"), tl([a, runningFresh]))
+    same("running-only update retains historical text", H.project(tl([a, runningHead]), tl([runningFresh]), "update"), tl([a, runningFresh]))
+    same("running block newer retains historical text", unmarked(H.project_block(tl([a, runningHead]), tl([runningFresh]), "newer")), tl([a, runningFresh]))
+    same("running block update retains historical text", unmarked(H.project_block(tl([a, runningHead]), tl([runningFresh]), "update")), tl([a, runningFresh]))
+    same("running fold completion preserves held messages", H.project(tl([a, runningHead]), tl([completedHead, d]), "update"), tl([a, completedHead, d]))
+    same("closing a live run still removes its detail rows", H.project(tl([a, live_fold("0", "51 tool calls"), rb, rc]), tl([runningFresh]), "update"), tl([a, runningFresh]))
+    +transportedHead : D.Node = D.El{"button", "fold:run", [D.At{"data-on-click", "fold"}, D.At{"data-value", "1run"}, D.At{"class", "fold live"}], [D.Txt{"52 tool calls"}]}
+    same("transported live fold is stable history", H.project(tl([a, runningHead]), tl([transportedHead]), "update"), tl([a, transportedHead]))
+    +streamPreview : D.Node = D.El{"div", "preview", [D.At{"class", "msg live"}, D.At{"data-id", "preview"}], [D.Txt{"streaming"}]}
+    same("live class without a fold action stays transient", H.project(tl([a, streamPreview]), tl([d]), "newer"), tl([a, d]))
     +live : D.Node = D.El{"bp-memo", "live:t", [D.At{"fn", "live"}], [D.Txt{"old live"}]}
     +sending : D.Node = D.El{"div", "sending", [D.At{"class", "msg sending"}, D.At{"data-id", "pending"}], [D.Txt{"old sending"}]}
     +liveId : D.Node = D.El{"div", "live:t", [D.At{"data-id", "live:t"}], [D.Txt{"live keyed"}]}
