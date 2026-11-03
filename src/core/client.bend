@@ -3636,23 +3636,30 @@ def Side.phase.ix(+ix: SIx, +st: M.State, t: M.Thread) -> M.Phase:
       Side.phase.ix.k(st, ix, id, turn, pending, SIx.open(ix, id))
 
 # What a red row wants, said where its age goes: a red dot (blocked)
-# names its open approval or question, a failed turn's (failed) says
-# failed; any other dot, or a red one waiting on something else (a
-# subthread's ask, a sign-in), says nothing and the row keeps its age
-def Side.want.word(+lc: I.Loc, +ja: String, +en: String) -> String:
-  Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), ja, en)
+# names its open asks' kind, an approval before a question (an approval
+# still pending with no ask open says approval; the phase can't tell:
+# every permission prompt counts as pending, a question too), a failed
+# turn's dot (failed) says failed; any other dot, or a red one waiting on
+# something else (a subthread's ask, a sign-in), says nothing and the row
+# keeps its age. "approval", "question", "failed" or ""; Side.want says it.
+def Side.want.ask(+as: List<&2, M.Ask>, +pending: Nat) -> String:
+  Bool.pick(String, Asks.kind(as, "approval"), "approval", Bool.pick(String, Asks.question(as), "question", Bool.pick(String, Nat.is_gt(pending, 0n), "approval", "")))
 
-def Side.want.k(+lc: I.Loc, blocked: Bool, p: M.Phase) -> String:
-  match blocked p:
-    case True{} M.PhApproval{}:
-      Side.want.word(lc, "承認", "approval")
-    case True{} M.PhInput{}:
-      Side.want.word(lc, "質問", "question")
-    case _ _:
+def Side.want.k(blocked: Bool, +as: List<&2, M.Ask>, t: M.Thread) -> String:
+  match blocked t:
+    case True{} M.Thread{_, _, _, _, _, _, +pending, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Side.want.ask(as, pending)
+    case False{} _:
       ""
 
-def Side.want(+lc: I.Loc, +dot: String, p: M.Phase) -> String:
-  Bool.pick(String, String.eq(dot, "failed"), Side.want.word(lc, "失敗", "failed"), Side.want.k(lc, String.eq(dot, "blocked"), p))
+def Side.want.kind(+dot: String, +as: List<&2, M.Ask>, +t: M.Thread) -> String:
+  Bool.pick(String, String.eq(dot, "failed"), "failed", Side.want.k(String.eq(dot, "blocked"), as, t))
+
+def Side.want.say(+lc: I.Loc, +kind: String) -> String:
+  Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), Bool.pick(String, String.eq(kind, "approval"), "承認", Bool.pick(String, String.eq(kind, "question"), "質問", Bool.pick(String, String.eq(kind, "failed"), "失敗", ""))), kind)
+
+def Side.want(+lc: I.Loc, +dot: String, +as: List<&2, M.Ask>, +t: M.Thread) -> String:
+  Side.want.say(lc, Side.want.kind(dot, as, t))
 
 # when a thread's snooze ends (0: not snoozed)
 def Side.wakes.span(l: I.Loc, +d: Nat) -> String:

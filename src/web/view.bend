@@ -287,7 +287,7 @@ def View.row.s(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String,
   match t:
     case M.Thread{+id, _, +title, _, +a, _, _, _, _, _, _, pinned, _, _, _, _, _, _, _, _, _}:
       +dot = SG.Signal.dot.thread(SG.Signal.display.name(U.Side.signal.ix(ix, t), st, M.Thread.id(t)), t)
-      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), SG.Signal.display.note(lc, st, id, View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))), U.Side.want(lc, dot, U.Side.phase.ix(ix, st, t)), dot, sel, movable)
+      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), SG.Signal.display.note(lc, st, id, View.sub.badge(lc, SB.Subs.count.ix(ix, st, id))), U.Side.want(lc, dot, U.SIx.open(ix, M.Thread.id(t)), t), dot, sel, movable)
 
 def View.row(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> D.Node:
   View.row.s(lc, t, ix, st, sel, now, movable, snoozed, False{})
@@ -489,7 +489,7 @@ def View.arow(+lc: I.Loc, r: U.ARow, +ix: U.SIx, +st: M.State, +sel: String) -> 
           D.At{"role", "button"}, D.At{"tabindex", "0"}, D.At{"aria-current", Bool.pick(String, String.eq(M.Thread.id(t), sel), "page", "false")},
           D.At{"style", "--tint:" ++ BG.Badge.css_of(st, pid)}, D.At{"data-shortcut-project", pid}, D.At{"data-value", M.Thread.id(t)}, D.On{"click", "select"}, D.On{"contextmenu", "row-menu"}],
         List.concat(&2, D.Node, [[View.dot(lc, dot), D.El{"span", "", [D.At{"class", "title"}, D.At{"title", tt}], [D.Txt{tt}]}], View.pin(lc, U.Active.pinned(t)),
-          [View.note.want(U.Side.want(lc, dot, U.Side.phase.ix(ix, st, t)), SG.Signal.display.note(lc, st, M.Thread.id(t), View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t)))), pt)]])}
+          [View.note.want(U.Side.want(lc, dot, U.SIx.open(ix, M.Thread.id(t)), t), SG.Signal.display.note(lc, st, M.Thread.id(t), View.sub.badge(lc, SB.Subs.count.ix(ix, st, M.Thread.id(t)))), pt)]])}
 
 def View.atree.step(root: Bool, anchors: List<&2, U.ARow>, fallback: U.ARow) -> List<&2, U.ARow> & U.ARow:
   match root anchors:
