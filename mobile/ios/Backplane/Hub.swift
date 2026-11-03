@@ -293,3 +293,71 @@ final class Hub {
         DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: r)
     }
 }
+
+// Disposable invitation material is exchanged before AppModel changes its
+// saved links. Failed/expired invites never replace a working pairing.
+extension Pairing {
+    final class NoPairRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    }
+    struct Invitation {
+        let origin: URL
+        let secret: String
+    }
+    static func invitation(_ text: String) -> Invitation? {
+        var raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("backplane://") { raw = URLComponents(string: raw)?.queryItems?.first(where: { $0.name == "url" })?.value ?? "" }
+        guard var c = URLComponents(string: raw), ["https", "http"].contains(c.scheme), c.host != nil,
+              c.user == nil, c.password == nil else { return nil }
+        let f = URLComponents(string: "?" + (c.fragment ?? ""))?.queryItems ?? []
+        guard let secret = f.first(where: { $0.name == "invite" || $0.name == "code" })?.value,
+              secret.range(of: "^(?:[a-f0-9]{32}|[A-Z2-9]{8})$", options: .regularExpression) != nil else { return nil }
+        c.path = ""; c.query = nil; c.fragment = nil
+        guard let origin = c.url else { return nil }
+        return Invitation(origin: origin, secret: secret)
+    }
+    static func malformedInvitation(_ text: String) -> Bool {
+        var raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("backplane://") { raw = URLComponents(string: raw)?.queryItems?.first(where: { $0.name == "url" })?.value ?? "" }
+        let fragment = URLComponents(string: raw)?.fragment ?? ""
+        let fields = URLComponents(string: "?" + fragment)?.queryItems ?? []
+        return fields.contains { $0.name == "invite" || $0.name == "code" }
+    }
+    static func codeLink(address: String, code: String) -> String? {
+        let code = code.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+        guard code.range(of: "^[A-Z2-9]{8}$", options: .regularExpression) != nil,
+              var c = URLComponents(string: address.contains("://") ? address : "http://" + address),
+              ["http", "https"].contains(c.scheme), c.host != nil, c.user == nil, c.password == nil else { return nil }
+        c.path = "/pair";c.query = nil;c.fragment = "code=" + code
+        return c.string
+    }
+    static func message(_ error: String) -> String {
+        switch error {
+        case "wrong_code": "That code is not correct. Check it and try again."
+        case "expired_code": "This invitation expired. Create another in Settings → Devices."
+        case "used_code": "This invitation has already been used. Create a new one."
+        case "rate_limited": "Too many attempts. Wait a minute and try again."
+        case "storage_unavailable": "The hub could not save this pairing. Try again later."
+        case "pairing_required": "Re-pair this device with a new invitation."
+        default: "Hub unreachable. Check its address, LAN or tailnet connection."
+        }
+    }
+    static func exchange(_ invite: Invitation, name: String) async throws -> String {
+        var request = URLRequest(url: invite.origin.appendingPathComponent("auth/enroll"))
+        request.httpMethod = "POST";request.timeoutInterval = 8
+        request.setValue("Bearer " + invite.secret, forHTTPHeaderField: "Authorization")
+        request.setValue("native", forHTTPHeaderField: "X-Backplane-Client")
+        request.setValue(name.unicodeScalars.filter { $0.isASCII && $0.value >= 32 }.map(String.init).joined(), forHTTPHeaderField: "X-Backplane-Name")
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false;config.urlCache = nil
+        let session = URLSession(configuration: config, delegate: NoPairRedirect(), delegateQueue: nil);defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request)
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard (response as? HTTPURLResponse)?.statusCode == 200, let token = json["token"] as? String,
+              token.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
+            throw NSError(domain: "BackplanePairing", code: 1, userInfo: [NSLocalizedDescriptionKey: message(json["error"] as? String ?? "hub_unreachable")])
+        }
+        return invite.origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/#token=" + token
+    }
+}

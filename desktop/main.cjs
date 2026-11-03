@@ -51,12 +51,38 @@ function browserState(value,browserWindow=window){
   browserStatus=value;
   browserWindow.webContents.send('desktop:browser-state',value);
 }
+let pendingPairLink = process.argv.find(x => x.startsWith('backplane://pair?'));
+let pairingRemote = false;
+const remoteFile = path.join(home, 'desktop-remote.json');
+let savedRemote = null;
+try { const u = new URL(JSON.parse(fs.readFileSync(remoteFile, 'utf8')).origin);if (['http:', 'https:'].includes(u.protocol) && !u.username && !u.password && u.origin === u.href.replace(/\/$/, '')) savedRemote = u.origin; } catch {}
+async function pairRemote(text, name) {
+  if (pairingRemote || !window || window.isDestroyed()) return {ok:false,error:'hub_unreachable'};
+  pairingRemote = true;
+  try {
+    const result = await require('./pairing.cjs').pair({text, name, fetch: window.webContents.session.fetch.bind(window.webContents.session)});
+    if (!result.ok) return result;
+    desktopBrowser?.close();desktopBrowser = null;
+    savedRemote = result.origin;origin = result.origin;
+    fs.writeFileSync(remoteFile + '.tmp', JSON.stringify({origin}), {mode:0o600});fs.renameSync(remoteFile + '.tmp', remoteFile);
+    await window.loadURL(origin);
+    return {ok:true};
+  } catch { return {ok:false,error:'hub_unreachable'}; }
+  finally { pairingRemote = false; }
+}
+function receivePairLink(text) {
+  if (!require('./pairing.cjs').invitation(text)) return;
+  pendingPairLink = text;
+  if (origin && window && !window.isDestroyed()) { pendingPairLink = null;void pairRemote(text, os.hostname()).then(r => { if (!r.ok) dialog.showErrorBox('Could not pair this device', 'Create a fresh invitation in Settings → Devices and try again.'); }); }
+}
+app.on('open-url', (event, url) => { event.preventDefault();receivePairLink(url); });
+if (app.isPackaged) app.setAsDefaultProtocolClient('backplane');
 const imageActions = createImageActions({ electron, origin: () => origin });
 let quitting = false;
 let terminalFocused = false;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { window?.show(); if (window?.isMinimized()) window.restore(); window?.focus(); });
+  app.on('second-instance', (_event, argv) => { const link = argv.find(x => x.startsWith('backplane://pair?'));if (link) receivePairLink(link); window?.show(); if (window?.isMinimized()) window.restore(); window?.focus(); });
   app.whenReady().then(start).catch(error => { dialog.showErrorBox('Backplane could not start', error.message); app.quit(); });
 }
 function senderIsWindow(event) {
@@ -121,7 +147,10 @@ async function connect(ses) {
       // Credential material stays in main and the service's HttpOnly cookie.
       const response = await ses.fetch(`${origin}/auth/pair`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${await service.token()}` }, redirect: 'error' });
       if (!response.ok) throw new Error('Could not authenticate with the service');
-      if (!quitting && window && !window.isDestroyed()) await window.loadURL(origin);
+      if (!quitting && window && !window.isDestroyed()) {
+        if (pendingPairLink) { const link = pendingPairLink;pendingPairLink = null;const result = await pairRemote(link, os.hostname());if (!result.ok) await window.loadURL(origin); }
+        else { if (savedRemote) origin = savedRemote;await window.loadURL(origin); }
+      }
       // The in-app browser starts only after the UI is up and never holds it:
       // a hub that does not serve it (started by systemd, --headless or an
       // older install), or one that never answers, leaves the browser
@@ -182,7 +211,7 @@ function start() {
   require('./text-clipboard.cjs').installTextClipboard(ipcMain, electron.clipboard, trusted);
   const ses = session.fromPartition('persist:backplane-ui');
   const permitted = (wc, permission, url, details = {}, phase = 'check') => {
-    try { return wc === window?.webContents && origin && new URL(url).origin === origin && (['notifications', 'clipboard-sanitized-write'].includes(permission) || require('./improvements-display-capture.cjs').displayCapturePermission(wc, permission, url, details, window, origin, phase)); } catch { return false; }
+    try { return wc === window?.webContents && origin && new URL(url).origin === origin && ((['notifications', 'clipboard-sanitized-write'].includes(permission) || permission === 'media' && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'video') || require('./improvements-display-capture.cjs').displayCapturePermission(wc, permission, url, details, window, origin, phase)); } catch { return false; }
   };
   ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl, details, 'request')));
   ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permitted(wc, permission, requestingOrigin, details));
@@ -194,6 +223,7 @@ function start() {
     // Files embeds PDFs served by this hub; keep foreign frames blocked.
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; object-src 'none'; frame-src 'self'; base-uri 'none'; form-action 'self'; worker-src 'self' blob:"] } });
   });
+  ipcMain.handle('desktop:pair', (event, value) => { if (!trusted(event)) return {ok:false,error:'pairing_required'};return pairRemote(value?.text, value?.name); });
   ipcMain.handle('desktop:version', event => {
     if (!trusted(event)) throw new Error('Invalid sender');
     return { electron: process.versions.electron, service: connection.version, launchedAtMs, firstVisibleAtMs, serviceReadyAtMs };

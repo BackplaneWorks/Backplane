@@ -12519,16 +12519,16 @@ def RefNav.copy.web(m: Maybe<&2, R.Ref>, +u: Ui) -> Act:
 # (a page's place here is its number in every client's rows: a new page
 # goes at the end; the menus list them in their own order below)
 def Settings.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy", "ordering"]
+  ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy", "ordering", "devices"]
 
 # Visible menus omit Antigravity: its controls live on Agents. The internal
 # page table above retains its numeric slots for all clients.
 # the order the desktop and web menus list the pages in
 def Settings.menu.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "writing", "cad", "ordering", "network", "voice", "keys", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "writing", "cad", "ordering", "devices", "network", "voice", "keys", "timezone", "usage", "about", "privacy"]
 
 def Settings.phone.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "cad", "ordering", "network", "voice", "keys", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "cad", "ordering", "devices", "network", "voice", "keys", "timezone", "usage", "about", "privacy"]
 
 def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
   match ps:
@@ -12627,6 +12627,7 @@ def Settings.label(i: Nat, +l: I.Loc) -> String:
     case 9n: MSG.T.settings.zone(l)
     case 10n: MSG.T.settings.usage(l)
     case 12n: MSG.T.settings.privacy(l)
+    case 14n: "Devices"
     case 13n: Fab.set.order.label()
     case _: MSG.T.settings.tour(l)
 
@@ -12650,6 +12651,7 @@ def Settings.rows.of(i: Nat, +l: I.Loc) -> List<&2, String>:
     case 5n: ["Tailscale", MSG.T.settings.pair(l), MSG.T.settings.channel(l)]
     case 11n: [MSG.T.settings.tour(l)]
     case 10n: [UZ.Ts.label()]
+    case 14n: ["Devices", "Add a device", "Revoke"]
     case 13n: [Fab.set.order.label(), Fab.set.label()]
     case _: Nil{}
 
@@ -12669,6 +12671,7 @@ def Settings.words(i: Nat) -> String:
     case 10n: "usage limits tokens cost token stats speed tok/s context cache"
     case 11n: "about tour help version"
     case 12n: "privacy share data"
+    case 14n: "devices pairing pair phone qr short code invite link revoke"
     case 13n: "ordering order buy fab manufacturing quote price estimates stripe payment checkout fee"
     case _: ""
 

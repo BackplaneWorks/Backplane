@@ -477,7 +477,24 @@ final class AppModel {
     }
 
     // a new hub, or a new link to one already paired (it replaces the old)
+    var pairingError = ""
+    var pairingBusy = false
+    var showingDevices = false
+    var devicesLink: String? { links.first { Pairing.key($0) == screen?.hub } ?? links.first }
+
     @discardableResult func pair(_ text: String) -> Bool {
+        if let invite = Pairing.invitation(text) {
+            guard !pairingBusy else { return false }
+            pairingBusy = true;pairingError = "Connecting…"
+            Task { @MainActor in
+                defer { pairingBusy = false }
+                do { let saved = try await Pairing.exchange(invite, name: UIDevice.current.name);pairingError = "";_ = pair(saved) }
+                catch { pairingError = (error as NSError).domain == "BackplanePairing" ? error.localizedDescription : Pairing.message("hub_unreachable") }
+            }
+            return true
+        }
+
+        if Pairing.malformedInvitation(text) { pairingError = "Enter the complete invitation link or a valid eight-character code.";return false }
         let l = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let k = Pairing.key(l) else { return false }
         endProjectSearch()
@@ -980,6 +997,7 @@ final class AppModel {
         }
         // a web address a settings row offers (Antigravity's sign-in):
         // opened in the browser here, never sent to the engine
+        if action == "devices-open" || (action == "settings-page" && value == "devices") { showingDevices = true;return }
         if action == "open-url" {
             if let u = URL(string: value), u.scheme == "https" || u.scheme == "http" { UIApplication.shared.open(u) }
             return

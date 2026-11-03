@@ -2179,7 +2179,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
       Mob.kx.settings(u)])
     case 5n: List.concat(&2, J.Json, [[Mob.set.row(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})],
       Mob.mates(lc, u),
-      [Mob.set.pair(lc, U.Ui.flag(u, "pairqr"), nf)],
+      [Mob.set.row("Devices", "Connect another computer or phone with a one-time invitation.", [Mob.set.btn("Add a device", "devices-open", "", False{})])],
       [Mob.set.row(MSG.T.settings.channel(lc), MSG.T.settings.channel.note(lc), Mob.set.chips.loc(lc, ["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel"))],
       [Mob.set.row("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), Mob.update.btn.loc(lc, U.Update.btn(st, nf, note)))]])
     case 6n: Mob.voice.page(lc, u, st)
@@ -2190,6 +2190,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
     case 11n: List.concat(&2, J.Json, [[Mob.set.row.l(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [Mob.set.btn(MSG.T.settings.tour.show(lc), "ob-open", "", False{})])],
       more])
     case 12n: Mob.agy.rows(U.Share.rows(u))
+    case 14n: [Mob.set.row("Devices", "One-time invitations and individual device access.", [Mob.set.btn("Manage devices", "devices-open", "", False{})])]
     case 13n: List.concat(&2, J.Json, [[Mob.set.row("How it works", U.Fab.set.about(), Nil{})],
       [Mob.set.row(U.Fab.set.order.label(), U.Fab.set.order.note(), Mob.set.chips.loc(lc, ["on", "off"], U.Fab.set.enabled(st), "order.enabled"))],
       [Mob.set.row(U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), Bool.pick(List<&2, J.Json>, U.Fab.enabled(st), Mob.set.chips.loc(lc, ["on", "off"], U.Fab.set.on(st), "order.estimates"), Nil{}))]])

@@ -23,6 +23,7 @@ struct BackplaneApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
+                .sheet(isPresented: $model.showingDevices) { if let link = model.devicesLink { DeviceManagerView(link: link) } }
                 .tint(BackplaneDesign.accent)
                 .accentColor(BackplaneDesign.accent)
                 .safeAreaInset(edge: .top, spacing: 0) {
