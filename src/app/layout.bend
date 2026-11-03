@@ -1,4 +1,5 @@
 import Base
+import ../core/message-context.bend as CTXT
 import ../core/chat-pending.bend as CP
 import ../core/textscale.bend as TS
 import ./side_row_types.bend as ST
@@ -6629,7 +6630,7 @@ def TL.turn(t: M.Thread) -> Bool:
 # the roles of the open thread's entries (every run shut until the
 # person opens it; the live one's row says what runs now)
 def TL.roles.loc(+l: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +pics: Map<&2, String>) -> List<&2, FO.Role>:
-  FO.Fold.roles.all(l, FO.Fold.context.of(st, sel, FO.Fold.shown(es)), es, pics, TL.turn(U.Ui.thread(st, sel)))
+  CTXT.Context.roles(es, FO.Fold.roles.all(l, FO.Fold.context.of(st, sel, FO.Fold.shown(es)), es, pics, TL.turn(U.Ui.thread(st, sel))), st, sel, pics)
 
 def TL.roles(es: List<&2, M.Entry>, +st: M.State, +sel: String, +pics: Map<&2, String>) -> List<&2, FO.Role>:
   TL.roles.loc(I.En{}, es, st, sel, pics)

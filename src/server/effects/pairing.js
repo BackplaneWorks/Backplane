@@ -5,14 +5,25 @@
 // devices: when, whether and by which device it was used, and whether it was
 // revoked. Only a recorded, unexpired, unused, unrevoked invitation enrolls;
 // revoking a used one revokes the device it paired.
+// Hub-to-hub invites (bp1:, Bots > Link a machine, and the ones hubs answer
+// each other with when they pair by themselves) are recorded here too, as
+// kind "machine": the link they are for (its peer id; the secret stays in
+// <home>/secrets/peers/<peer>, botnet.bend's Bn.peer.path), when it expires
+// (as a device invitation does) and which machine used it. A machine links
+// only with a recorded, unexpired, unused, unrevoked one; revoking a used
+// one unlinks the machine. (Their hash fields are random: they enroll
+// nothing, and an older hub still reads the registry.)
 function pairingStore({home, root, now = () => Date.now(), random = n => require('node:crypto').randomBytes(n), fs = require('node:fs')}) {
   const crypto = require('node:crypto'), path = require('node:path');
   const digest = x => crypto.createHash('sha256').update(x).digest('hex');
   const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   const file = path.join(home, 'devices-v1.json');
   const hex = (x, n) => typeof x === 'string' && new RegExp('^[a-f0-9]{' + n + '}$').test(x);
-  const validInvite = x => x && hex(x.id, 32) && hex(x.hash, 64) && hex(x.codeHash, 64) && Number.isFinite(x.createdAt) && Number.isFinite(x.expiresAt) && typeof x.used === 'boolean' && typeof x.revoked === 'boolean' && (x.device === undefined || hex(x.device, 32)) && (x.usedAt === undefined || Number.isFinite(x.usedAt));
-  let devices = [], invites = [], attempts = [], clients = new Map(), retiredClients = new Set();
+  const validMachine = x => x.kind === 'machine' && /^p[a-f0-9]{16}$/.test(x.peer) && (x.name === undefined || typeof x.name === 'string') && (x.unlinked === undefined || typeof x.unlinked === 'boolean');
+  const validInvite = x => x && (x.kind === undefined || validMachine(x)) && hex(x.id, 32) && hex(x.hash, 64) && hex(x.codeHash, 64) && Number.isFinite(x.createdAt) && Number.isFinite(x.expiresAt) && typeof x.used === 'boolean' && typeof x.revoked === 'boolean' && (x.device === undefined || hex(x.device, 32)) && (x.usedAt === undefined || Number.isFinite(x.usedAt));
+  let devices = [], invites = [], attempts = [], clients = new Map(), retiredClients = new Set(), swept = new Set();
+  const isMachine = x => x.kind === 'machine';
+  const open = (x, at) => !x.used && !x.revoked && x.expiresAt > at;
   if (fs.existsSync(file)) {
     const data = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (data.version !== 1 || data.owner !== digest(root) || !Array.isArray(data.devices) || data.devices.some(d => !/^[a-f0-9]{32}$/.test(d.id) || !/^[a-f0-9]{64}$/.test(d.hash) || typeof d.name !== 'string' || !Number.isFinite(d.lastSeen))) throw new Error('Invalid device registry');
@@ -25,9 +36,9 @@ function pairingStore({home, root, now = () => Date.now(), random = n => require
   // expired or revoked; an open one is never dropped)
   const keep = 100;
   function trim(xs) {
-    const at = now(), open = x => !x.used && !x.revoked && x.expiresAt > at;
-    const old = xs.filter(x => !open(x)).sort((a, b) => b.createdAt - a.createdAt).slice(0, keep);
-    return xs.filter(x => open(x) || old.includes(x));
+    const at = now();
+    const old = xs.filter(x => !open(x, at)).sort((a, b) => b.createdAt - a.createdAt).slice(0, keep);
+    return xs.filter(x => open(x, at) || old.includes(x));
   }
   function persist(nextDevices, nextInvites = invites) {
     const tmp = file + '.' + random(8).toString('hex') + '.tmp';
@@ -52,7 +63,7 @@ function pairingStore({home, root, now = () => Date.now(), random = n => require
   }
   function create(routes) {
     const at = now();
-    if (invites.filter(x => !x.used && !x.revoked && x.expiresAt > at).length >= 16) return {error: 'too_many_invitations'};
+    if (invites.filter(x => !isMachine(x) && open(x, at)).length >= 16) return {error: 'too_many_invitations'};
     const token = random(16).toString('hex'), alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const code = Array.from(random(8), x => alphabet[x & 31]).join('');
     const unique = [...new Set(routes)].filter(x => {
@@ -72,7 +83,7 @@ function pairingStore({home, root, now = () => Date.now(), random = n => require
     if (attempts.length >= 10) return {error: 'rate_limited'};
     attempts.push(at);
     const compact = secret.replace(/[ -]/g, '').toUpperCase();
-    const invite = invites.find(x => same(x.hash, digest(secret)) || same(x.codeHash, digest(compact)));
+    const invite = invites.find(x => !isMachine(x) && (same(x.hash, digest(secret)) || same(x.codeHash, digest(compact))));
     if (!invite) return {error: 'wrong_code'};
     if (invite.revoked) return {error: 'revoked_code'};
     if (invite.used) return {error: 'used_code'};
@@ -84,12 +95,55 @@ function pairingStore({home, root, now = () => Date.now(), random = n => require
     persist([...devices, entry], invites.map(x => x === invite ? {...x, used: true, usedAt: at, device: entry.id} : x));
     return {token, id: entry.id};
   }
+  // the secret of a machine invite nobody can use any more (expired or
+  // revoked before it was used) is removed from the home
+  const secretFile = peer => path.join(home, 'secrets', 'peers', peer);
+  function sweep() {
+    const at = now();
+    for (const x of invites) if (isMachine(x) && !x.used && (x.revoked || x.expiresAt <= at) && !swept.has(x.peer)) {
+      try { fs.rmSync(secretFile(x.peer), {force: true});swept.add(x.peer); } catch {}
+    }
+  }
+  // a hub-to-hub invite for the link `peer`, recorded before it is handed
+  // out (server.bend's BotJob.invite and Pair.invite)
+  function machine(peer) {
+    const at = now();
+    if (!/^p[a-f0-9]{16}$/.test(peer)) return {error: 'invalid_request'};
+    if (invites.some(x => isMachine(x) && x.peer === peer)) return {error: 'invalid_request'};
+    if (invites.filter(x => isMachine(x) && open(x, at)).length >= 16) return {error: 'too_many_invitations'};
+    const entry = {id: random(16).toString('hex'), kind: 'machine', peer, hash: digest(random(32)), codeHash: digest(random(32)), createdAt: at, expiresAt: at + 600000, used: false, revoked: false};
+    persist(devices, trim([...invites, entry]));
+    sweep();
+    return {ok: true, id: entry.id, expiresAt: entry.expiresAt};
+  }
+  // a machine links with the invite for `peer` (server.bend's Hub.bot.link):
+  // once, before it expires, unless revoked
+  function link(peer, name) {
+    const at = now(), invite = invites.find(x => isMachine(x) && x.peer === peer);
+    if (!invite) return {error: 'unknown_invitation'};
+    if (invite.revoked) return {error: 'revoked_code'};
+    if (invite.used) return {error: 'used_code'};
+    if (invite.expiresAt <= at) return {error: 'expired_code'};
+    persist(devices, invites.map(x => x === invite ? {...x, used: true, usedAt: at, name: String(name || '').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 80)} : x));
+    return {ok: true};
+  }
+  // the link a machine invite made was removed (bots.unpeer)
+  function unlinked(peer) {
+    if (!invites.some(x => isMachine(x) && x.peer === peer && x.used && !x.unlinked)) return {ok: true};
+    persist(devices, invites.map(x => isMachine(x) && x.peer === peer ? {...x, unlinked: true} : x));
+    return {ok: true};
+  }
   function state(x, at) { return x.revoked ? 'revoked' : x.used ? 'used' : x.expiresAt <= at ? 'expired' : 'open'; }
+  function listed(x, at, names) {
+    const base = {id: x.id, kind: isMachine(x) ? 'machine' : 'device', createdAt: x.createdAt, expiresAt: x.expiresAt, state: state(x, at), ...(x.usedAt ? {usedAt: x.usedAt} : {})};
+    if (isMachine(x)) return {...base, ...(x.used ? {device: x.peer, deviceName: x.name || '', deviceRevoked: !!x.unlinked} : {})};
+    return {...base, ...(x.device ? {device: x.device, deviceName: names.get(x.device)?.name || '', deviceRevoked: !!names.get(x.device)?.revoked} : {})};
+  }
   function list() {
+    sweep();
     const at = now(), names = new Map(devices.map(d => [d.id, d]));
     return {devices: devices.map(({hash, ...d}) => d),
-      invitations: [...invites].sort((a, b) => b.createdAt - a.createdAt).map(x => ({id: x.id, kind: 'device', createdAt: x.createdAt, expiresAt: x.expiresAt,
-        state: state(x, at), ...(x.usedAt ? {usedAt: x.usedAt} : {}), ...(x.device ? {device: x.device, deviceName: names.get(x.device)?.name || '', deviceRevoked: !!names.get(x.device)?.revoked} : {})}))};
+      invitations: [...invites].sort((a, b) => b.createdAt - a.createdAt).map(x => listed(x, at, names))};
   }
   function retire(ids) {
     const disconnected = [...clients].filter(([, d]) => ids.includes(d)).map(([c]) => c);
@@ -105,11 +159,19 @@ function pairingStore({home, root, now = () => Date.now(), random = n => require
   // paired loses access too (and its open connections close)
   function uninvite(id) {
     const invite = invites.find(x => x.id === id);if (!invite) return {error: 'unknown_invitation'};
+    // (a machine invite: its secret goes, and a link it made is removed by
+    // the hub, server.bend's Conn.devices.unpeer)
+    if (isMachine(invite)) {
+      const linked = invite.used && !invite.unlinked;
+      persist(devices, invites.map(x => x === invite ? {...x, revoked: true, revokedAt: now(), ...(linked ? {unlinked: true} : {})} : x));
+      try { fs.rmSync(secretFile(invite.peer), {force: true}); } catch {}
+      return {ok: true, clients: [], ...(linked ? {peer: invite.peer} : {})};
+    }
     const paired = invite.device && devices.some(d => d.id === invite.device) ? [invite.device] : [];
     persist(devices.map(d => paired.includes(d.id) ? {...d, revoked: true} : d), invites.map(x => x === invite ? {...x, revoked: true, revokedAt: now()} : x));
     return {ok: true, clients: retire(paired)};
   }
-  return {resolve, create, enroll, list, revoke, uninvite, active: id => !retiredClients.has(id), forget: id => clients.delete(id)};
+  return {resolve, create, enroll, list, revoke, uninvite, machine, link, unlinked, active: id => !retiredClients.has(id), forget: id => clients.delete(id)};
 }
 
 // A listener advertises its own addresses only after bind/Serve succeeded.
@@ -165,6 +227,9 @@ function pairing_request(op, secret, name, authority, https) {
     if (op === 'list') return JSON.stringify(store.list());
     if (op === 'revoke') return JSON.stringify(store.revoke(secret));
     if (op === 'uninvite') return JSON.stringify(store.uninvite(secret));
+    if (op === 'machine') return JSON.stringify(store.machine(secret));
+    if (op === 'link') return JSON.stringify(store.link(secret, name));
+    if (op === 'unlinked') return JSON.stringify(store.unlinked(secret));
     if (op === 'known') return JSON.stringify({known: pairingKnown(secret, {routes: [...bp_pairing.routes, 'http://' + host + ':' + port], machines: bp_pairing.machines, peers: bp_pairing.peers})});
     if (op === 'create') {
       const routes = [...bp_pairing.routes], scheme = https ? 'https://' : 'http://';

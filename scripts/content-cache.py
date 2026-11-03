@@ -313,12 +313,47 @@ def verdict(code, text):
     return r.returncode == 0
 
 
+def check_plan_fields(planned):
+    """Old, partial or malformed plans cannot authorize a skip."""
+    if (not isinstance(planned, dict) or type(planned.get('schema')) is not int
+            or planned['schema'] != 1 or not isinstance(planned.get('keys'), dict)):
+        raise CacheError('check plan needs schema1, full modules, keys and miss list; re-plan')
+    for field in ('modules', 'miss'):
+        values = planned.get(field)
+        if (not isinstance(values, list) or not all(isinstance(n, str) for n in values)
+                or len(values) != len(set(values))):
+            raise CacheError('check plan has invalid/duplicate ' + field)
+    if (set(planned['modules']) != set(planned['keys'])
+            or not set(planned['miss']) <= set(planned['modules'])):
+        raise CacheError('check plan module/key/miss inventories differ')
+
+
+def validate_check_plan(root, planned, local=None):
+    """Re-read the complete inventory, keys and MACs, including claimed hits.
+
+    A plan describes a snapshot, not permission to trust old lookup results.
+    Forced misses (--all) are allowed; every omitted unit needs a current pass.
+    """
+    check_plan_fields(planned)
+    reset_tool_identity()
+    units = check_units(root)
+    if (set(units) != set(planned['modules'])
+            or {n: k for n, (k, _) in units.items()} != planned['keys']):
+        raise CacheError('check plan module inventory, inputs or tools changed; re-plan')
+    misses = set(planned['miss'])
+    for name, (key, _) in units.items():
+        if name not in misses and (key is None or not lookup(key, local)):
+            raise CacheError('check plan hit is missing or unauthentic: ' + name)
+    return units
+
+
 def run_check(root, plan_file, local=None):
     """Check the planned misses with bend and record the ones that pass."""
     planned = json.loads(Path(plan_file).read_text())
-    keys, miss = planned['keys'], planned['miss']
-    todo = list(miss)  # an uncacheable module is still checked, only never recorded
+    check_plan_fields(planned)
+    todo = list(planned['miss'])  # an uncacheable module is checked, never recorded
     if not todo:
+        validate_check_plan(root, planned, local)
         return 0
     # bend starts only inside the shared heavy slot: the actual inherited
     # flock (taken by scripts/heavy-guard.py for scripts/cached-check.sh) and
@@ -332,10 +367,7 @@ def run_check(root, plan_file, local=None):
     # the identity is read again, not remembered: a plan made under another
     # compiler, library or setting is stale, and so is one whose tools change
     # while bend runs (checked again below)
-    reset_tool_identity()
-    for m, (k, _) in check_units(root, todo).items():
-        if k != keys[m]:
-            raise CacheError('inputs or tools of %s changed since they were planned; nothing run' % m)
+    validate_check_plan(root, planned, local)
     env = {**os.environ, 'BEND_NO_TELEMETRY': '1'}
     work = Path(tempfile.mkdtemp(prefix='.bend-check.', dir=root))
     try:
@@ -363,11 +395,11 @@ def run_check(root, plan_file, local=None):
                 print(out, file=sys.stderr)
                 return 1
             results['LAWS.bend'] = True
-        reset_tool_identity()
-        now = check_units(root, list(results))
-        for m in results:
-            if now[m][0] != keys[m]:  # None (uncacheable) on both sides is equal and is not recorded
-                raise CacheError('inputs of %s changed since they were planned; nothing recorded' % m)
+        # A hit may change while an unrelated miss runs. Revalidate ALL planned
+        # units and hit MACs before recording anything or returning success.
+        now = validate_check_plan(root, planned, local)
+        # Records retain these exact validated keys. A later source edit gets
+        # a different key; it cannot consume this pass for the old content.
         for m in results:
             if now[m][0] is not None:
                 _record(now[m][0], now[m][1], local)
@@ -379,17 +411,45 @@ def run_check(root, plan_file, local=None):
 # ---- proof shards ----
 
 def shard_units(root, folder):
+    root, folder = Path(root).resolve(), Path(folder).resolve()
     ps = _module('proof-shards.py')
-    manifest = ps.verify(Path(root), Path(folder))  # fails unless it is the canonical partition
+    # Re-derive the entire canonical partition before trusting ANY cached pass.
+    # The originals remain coverage/provenance inputs, but are execution inputs
+    # only when a generated shard actually imports them.
+    manifest = ps.verify(root, folder)
     tool = tool_identity()
     if manifest.get('toolchain') != tool['toolchain']:
         raise CacheError('partition was planned with another compiler')
+    proof_tool = {**tool, 'partition_logic': {
+        name: manifest[name] for name in
+        ('planner_sha256', 'verdict_sha256', 'guard_sha256')},
+        # proof-shards.py uses this helper for its independent root inventory.
+        'closure_sha256': sha((ROOT/'scripts/bend-closure.py').read_bytes()),
+        'canonical_modes': {n: manifest['source_modes'][n]
+                            for n in ('LAWS.bend', 'PROOF.bend')}}
+    tree = Tree(root)
     units = {}
     for s in manifest['shards']:
-        inputs = {'gen/' + k: v for k, v in s['files'].items()}
-        for n in s['source_files']:
-            inputs['src/' + n] = manifest['sources'][n]
-        key, body = unit_key('proof', s['id'], inputs, tool)
+        at = folder/s['id']
+        entry = (at/'PROOF.bend').relative_to(root).as_posix()
+        inputs = {}
+        for name, digest in tree.closure(entry).items():
+            path = root/name
+            ps.regular(root, path)
+            if at in path.parents:
+                generated = path.relative_to(folder).as_posix()
+                if s['files'].get(generated) != digest:
+                    raise CacheError('unexpected generated proof input: ' + name)
+                label = 'gen/' + path.relative_to(at).as_posix()
+            else:
+                if manifest['sources'].get(name) != digest:
+                    raise CacheError('proof input absent from verified inventory: ' + name)
+                label = 'src/' + name
+            inputs[label] = {'sha256': digest, 'mode': ps.portable_mode(path)}
+        # Numeric slots can move when a different law changes. Bind logical
+        # membership and exact executable closure instead of the numeric slot.
+        membership = {'primary_laws': s['primary_laws'], 'declarations': s['declarations']}
+        key, body = unit_key('proof', sha(canonical(membership)), inputs, proof_tool)
         units[s['id']] = (key, body)
     return units, manifest
 
@@ -417,7 +477,9 @@ def main(argv=None):
         units = check_units(root)
         hit, miss = plan(units, not a.all, a.cache)
         if a.plan:
-            a.plan.write_text(json.dumps({'keys': {n: k for n, (k, _) in units.items()}, 'miss': miss}, sort_keys=True))
+            a.plan.write_text(json.dumps({'schema': 1, 'modules': sorted(units),
+                                         'keys': {n: k for n, (k, _) in units.items()},
+                                         'miss': miss}, sort_keys=True))
         print(json.dumps({'hit': hit, 'miss': miss,
                           'uncacheable': {n: b for n, (k, b) in units.items() if k is None}}))
     elif a.action == 'run-check':

@@ -2,7 +2,7 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';
 export async function registerBridgeChecks(check,stage,root){
  const packet=path.join(root,'build/phone-cache/native-thin-bridge-proposal-01');
- for(const n of ['src/web/wire.js','src/web/bub-move.js','src/mobile/recent.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync((process.env.BP_NATIVE_THIN_SOURCE_ROOT ? path.join(process.env.BP_NATIVE_THIN_SOURCE_ROOT,n) : path.join(packet,fs.existsSync(path.join(packet,'qualified-dependencies'))?'qualified-dependencies':'dependencies',n)),q);}
+ for(const n of ['src/web/wire.js','src/web/bub-move.js','src/web/secret-save.js','src/mobile/recent.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync((process.env.BP_NATIVE_THIN_SOURCE_ROOT ? path.join(process.env.BP_NATIVE_THIN_SOURCE_ROOT,n) : path.join(packet,fs.existsSync(path.join(packet,'qualified-dependencies'))?'qualified-dependencies':'dependencies',n)),q);}
  const stub=path.join(stage,'src/mobile/app-stub.mjs');fs.copyFileSync(path.join(root,'test/tools/native_thin_app_stub_307265.mjs'),stub);
  let code=fs.readFileSync(process.env.BP_NATIVE_BRIDGE_SOURCE||path.join(root,'src/mobile/bridge.js'),'utf8');
  const appImport='import App from "./app.bend";',screenAlias='const IssueScreen = App;';
@@ -26,6 +26,24 @@ export async function registerBridgeChecks(check,stage,root){
  function selectB(){const changed=read(B.act('select','h|b'));const call=request(changed);answer(call);return call;}
  function failures(out,owner,text){return out.cmds.some(c=>c.type==='send-failed'&&c.thread===owner&&c.text===text);}
  function busyComposer(){boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};return request(receive(changed));}
+ check('actual secure Save keeps value out of view state and waits for its own ACK',()=>{
+  const previous=stubApp.secret_req;
+  stubApp.secret_req=packed=>JSON.stringify({rpc:JSON.stringify({id:0,m:'secret.set',p:{name:'fixture',thread:'a',value:packed}})});
+  try {
+   boot();answer();
+   const saved=read(B.secret('DUMMY-SECRET-NATIVE-1234')),rpc=request(saved);
+   assert.equal(rpc.m,'secret.set');assert.equal(rpc.p.value,'DUMMY-SECRET-NATIVE-1234');
+   assert.equal(saved.cmds.filter(c=>c.type==='send').length,1,'no optimistic secret-sent view action');
+   assert(!B.save().includes('DUMMY-SECRET-NATIVE-1234'));
+   const rejected=receive({t:'reply',id:rpc.id,ok:false,error:'vault is locked'});
+   assert.equal(request(rejected).p.action,'secret-err');assert.equal(request(rejected).p.value,'vault is locked');
+   answer(request(rejected));
+   const next=request(read(B.secret('DUMMY-SECRET-NATIVE-1234')));
+   assert.notEqual(next.id,rpc.id);
+   const accepted=receive({t:'reply',id:next.id,ok:true});assert.equal(request(accepted).p.action,'secret-sent');
+   answer(request(accepted));
+  } finally {if(previous)stubApp.secret_req=previous;else delete stubApp.secret_req;}
+ });
  check('bridge navigation reports actual local admission without changing act',()=>{
   B.start('install','{}');B.hubs(['h']);B.connection('h','1','view-v1');
   assert.equal(read(B.navigation('uber','bot')).navigationAccepted,false);

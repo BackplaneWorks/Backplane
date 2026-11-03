@@ -291,6 +291,7 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+import ./test/secret_box_proof.bend as SECBP
 
 import ./src/core/landing.bend as LAND
 
@@ -14160,6 +14161,8 @@ def Laws.far_items_projects(): {==}
 def Laws.hot_demo_threads(): {==}
 # ---- end F1 ----
 # ---- secret box ----
+def Laws.sec_box_handlers(): SECBP.secp_box_handlers()
+
 def Laws.sec_mask_total(v, s, h):
   SECPROOF.secp_mask_total(v, s, h)
 
@@ -14198,6 +14201,14 @@ def Laws.auth_owner_pair_routes(): {==}
 
 def Laws.auth_owner_pair_rebound(): {==}
 # ---- end native owner tailnet pairing ----
+
+# ---- tokenless pairing proofs ----
+def Laws.auth_pair_proof_needs_token(to, at, now, proof): {==}
+
+def Laws.auth_pair_proof_not_empty(to, at, now): {==}
+
+def Laws.auth_pair_proof_stale(to): {==}
+# ---- end tokenless pairing proofs ----
 
 # ---- far queue ----
 def Laws.fq_tools(): {==}
@@ -15761,6 +15772,12 @@ def Laws.autosettle_delegation_seed_not_personal(text):
   {==}
 
 def Laws.autosettle_human_followup_is_personal():
+  {==}
+
+def Laws.context_tool_keeps_text_allowance(es):
+  {==}
+
+def Laws.context_closed_run_is_one_display_row(e, id, label, live):
   {==}
 
 def Laws.stored_wire_cache_is_empty(xs):

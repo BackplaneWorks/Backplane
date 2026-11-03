@@ -520,7 +520,14 @@ Project drag ordering remains saved. Projects without a chosen order use creatio
 
 A peer is another hub, linked by an invite: the inviting hub makes
 `bp1:<url>:<peer id>:<secret hex>`; the other pastes it, and both keep the
-32-byte secret. Every hub-to-hub request is signed like a webhook (below),
+32-byte secret. The inviting hub records each invite it makes with the
+device invitations (`effects/pairing.js`, kind `machine`): an invite links
+once, within ten minutes, unless it was revoked. **Settings → Devices →
+Pairing links** lists them beside the device invitations, each with the
+machine that used it; revoking one not yet used stops it, and revoking a
+used one unlinks that machine. An unused invite's secret is removed once it
+expires or is revoked, and an invite the hub has no record of (one made
+before invites were recorded) no longer links. Every hub-to-hub request is signed like a webhook (below),
 so the same verification guards both. Linked hubs exchange their bot
 directory (name, look, mood) every minute and deliver messages with
 `POST /bots/deliver`.
@@ -844,7 +851,9 @@ tools). Routes:
 |---|---|---|
 | `POST /hook/<id>` | anyone with the hook's secret or token | our signature, GitHub's or the ring's, replay cache; or the hook's bearer token; 256 KB |
 | `POST /bots/deliver` | a linked machine | `X-Backplane-Peer` + signature with its secret, replay cache |
-| `POST /bots/link` | the holder of an invite | the same; once per peer id |
+| `POST /bots/link` | the holder of an invite | the same; once per peer id, only for a recorded, unused, unexpired, unrevoked invite |
+| `POST /bots/pair` | one of the owner's machines asking to pair | Tailscale's `whois` (tailnet listener), the pairing token, or a proof the asker confirms at its listed address (below) |
+| `POST /bots/pair/check` | a hub this one asked to pair | answers only whether this hub made the proof (204/403) |
 | `GET /bots/dir` | a linked machine | the same, over the empty body |
 | `POST /far/push`, `/far/log`, `/far/rpc` | one of the owner's linked machines | the same |
 | `GET /bots/<id>/screen.jpg` | clients | the pairing token or a paired device's |
@@ -908,7 +917,8 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
 - `pair`: the two paired through `POST /bots/pair`, which only the owner's
   own devices reach (Tailscale vouches for the asker): the asked hub
   records the invite's link before it answers, the asking hub records the
-  link it makes with that invite.
+  link it makes with that invite. Hubs that paired over a plain address
+  (`BACKPLANE_PEERS`, below) record nothing: Settings asks the owner.
 - `tailnet`: a signed request of the link's came over this hub's tailnet
   listener, to its own address, from a device Tailscale says is the
   owner's (`Auth.owner.peer`). This is how links made before the hub
@@ -1030,6 +1040,23 @@ in the setting `peer.own.<link>`, which only the hub writes (a client's
   only with hubs `BACKPLANE_PEERS` names (`named`), so a throwaway hub
   never links itself to real ones. Laws `mate_*`; `test/tools/far_e2e.ts`
   pairs its two hubs this way.
+- Pairing without Tailscale. Two hubs that name each other in
+  `BACKPLANE_PEERS` (on one machine, or on a LAN) hold no credential of
+  each other's, and Tailscale cannot say whose the asker is. The ask then
+  carries `&to=<the address asked>&at=<time>&proof=<HMAC of both with the
+  asker's own token>` (`Auth.pair.proof`). The asked hub does not take its
+  word: it calls the asker back at the address its own machines list has
+  for it (never one the ask names) with `POST /bots/pair/check`, and
+  answers with an invite only if that hub says the proof is its own, made
+  within the last minute for this hub's port (`Hub.bot.pair.lan`,
+  `Auth.pair.checked`). The token never leaves the asker; a tokenless ask
+  without a proof is refused (401), and one with a proof the listed hub did
+  not make gets no invite (403). Neither hub takes such a link as one of the
+  owner's machines: nothing syncs until the owner answers Mine on both
+  (Settings → Your machines). Over plain HTTP this is as private as the
+  network; on a LAN with the default port, a hub one of yours asked could
+  pass its proof on to another of yours, which is why the link still
+  waits for Mine.
 - Choosing. Settings, Your machines (all four clients, `Mate.rows`) lists
   each machine found, how its sync goes (linking, in sync, catching up N
   projects, away) and On/Off: the setting `sync.<name>`. Off, nothing is

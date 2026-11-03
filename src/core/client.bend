@@ -77,6 +77,7 @@ import ./mailview.bend as MV
 import ./mail.bend as ML
 import ./thin-chat.bend as TC
 import ./secret.bend as SEC
+import ./secret-box.bend as SBOX
 import ./modelpick.bend as MPK
 import ./reply.bend as RTO
 import ./draftbound.bend as DB
@@ -11461,11 +11462,13 @@ def Sbox.act.k(i: Nat, +u: Ui, +value: String) -> Act:
       Sbox.dismiss(u, value)
     case 8n:
       Sbox.open.set(u, value)
-    case _:
+    case 7n:
       Sbox.list(u)
+    case _:
+      Act{Ui.scratch_set(u, "@sbox.err", "Unknown secret box action"), Nil{}}
 
 def Sbox.act(+u: Ui, +action: String, +value: String) -> Act:
-  Sbox.act.k(C.Codec.pos(["secret-open", "secret-open-here", "secret-shut", "secret-sent", "secret-err", "secret-del", "secret-dismiss", "secret-list", "secret-open-set"], action), u, value)
+  Sbox.act.k(SBOX.Sbox.route(action), u, value)
 
 # Settings' rows: the vault's metadata as the hub answered it
 def Sbox.metas(+u: Ui) -> List<&2, SEC.SecMeta>:

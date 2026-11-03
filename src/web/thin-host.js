@@ -639,7 +639,8 @@ export class ThinHost {
   // a page as held: the trail its own request took (paged.destination; a
   // second page on its way has moved this.cursor on already)
   heldPage(at = this) {
-    return { cursor: at.cursor, back: at.back.slice(), older: this.window?.older || '', olderNext: this.window?.olderNext || '', ids: (this.window?.ids || []).slice() };
+    return { cursor: at.cursor, back: at.back.slice(), older: this.window?.older || '', olderNext: this.window?.olderNext || '', ids: (this.window?.ids || []).slice(),
+      units: (this.window?.historyUnits || this.window?.ids || []).slice(), messages: (this.window?.messageIds || []).slice() };
   }
   heldHere() { return { pages: [this.heldPage()] }; }
   // the rows held are only the page on show (host.js reset its history)
@@ -662,11 +663,11 @@ export class ThinHost {
     const at = this.held.pages.findIndex(p => p.cursor === this.cursor && p.back.length === this.back.length);
     if (at >= 0) this.held.pages[at] = this.heldPage();
   }
-  // More than HELD_IDS entries held: the pages at the far end from the way
+  // More than HELD_IDS displayed rows held: the pages at the far end from the way
   // the reader goes are let go, never the two nearest; host.js takes their
   // rows off the page (api.letGo) and keeps their height in their place.
   heldTrim(direction) {
-    const pages = this.held.pages, count = () => new Set(pages.flatMap(p => p.ids)).size;
+    const pages = this.held.pages, count = () => new Set(pages.flatMap(p => p.units || p.ids)).size;
     while (pages.length > 2 && count() > HELD_IDS) {
       const gone = direction === 'older' ? pages.pop() : pages.shift();
       const kept = new Set(pages.flatMap(p => p.ids));
