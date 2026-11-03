@@ -24,7 +24,7 @@
   ],
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
-    "src/core/account-fallback.bend": "47038326046bc869ea113d81fbe5d204634a82afe7d6634b4466a4c20b1c08ac",
+    "src/core/account-fallback.bend": "8344b22ff006509ab38f6c8de1787cc0740a804853ba09e5b676e9f716d44cc5",
     "src/core/accounts.bend": "c477544bc0984a54d7b80d3a0abdad2784efa5f46043f4070e6e500865892f34",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
@@ -408,7 +408,9 @@
         "work": "w-t1793671258-1312457-1328870",
         "assertions": 24,
         "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
-        "scope": "Normal merge retains main mailbox law repair and reader/instant/composer work; additive unavailable-image styles retained beside composer rules. Changed image helpers read only explicit arguments. All24 full-output cases passed on combined source; browser artifacts remain from base7982813b plus the image product patch128fd23c3."
+        "scope": "Normal merge retains main mailbox law repair and reader/instant/composer work; additive unavailable-image styles retained beside composer rules. Changed image helpers read only explicit arguments. All24 full-output cases passed on combined source; browser artifacts remain from base7982813b plus the image product patch128fd23c3.",
+        "inheritedGuardRepair": "Current main account-fallback digest was stale. Reviewed its same-provider eligibility/ranking functions: only explicit State/JSON/time/model inputs, no Ui or draft readers; current State remains in full sidebar inputs. The24 combined-source full-output cases already include this exact account-fallback code. Refresh this one conservative digest without altering source or projection.",
+        "additionalMain": "2864599ee (#792): no Bend input changed from42f5b5173; preserve all pairing-theme and generic missing-shot hunks."
       }
     }
   },

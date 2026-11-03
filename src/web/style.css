@@ -2496,3 +2496,5 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 @container composer (max-width: 700px) {
   .composer-foot .composer-options > :is(button, .attach) { width: 100%; }
 }
+
+.shot.image-unavailable.missing::before { content: none; }
