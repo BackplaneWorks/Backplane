@@ -286,6 +286,16 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .act .kind { color: var(--faint); flex: none; }
 .act .summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act.error { color: var(--bad); }
+/* Backplane's continue message after a restart (view.bend's
+   View.carry.row): "› what it was told" opens what it said */
+.act.restart { align-items: flex-start; }
+.act.restart .summary { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+.carry-told { display: inline; margin-left: 6px; }
+.carry-told > summary { display: inline; cursor: pointer; list-style: none; color: var(--faint); }
+.carry-told > summary::-webkit-details-marker { display: none; }
+.carry-told > summary::before { content: "›"; display: inline-block; margin-right: 5px; transition: transform .1s; }
+.carry-told[open] > summary::before { transform: rotate(90deg); }
+.carry-told > .told { display: block; margin: 4px 0 2px; color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 720px; }
 /* a failure says all of why it failed: its row wraps, never cut */
 .act.error .summary { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 /* A run of tool calls is a drawer (view.bend's View.fold.row.live): one

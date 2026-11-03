@@ -6417,7 +6417,7 @@ def TL.part.act(step: Bool, +ty: Ty, e: M.Entry, +px: U32) -> TLPart:
       TLPart{[TLine{Ty.fit(ty, 2n, HS.Hist.row(e), (px - 22 : U32)), T.Th.accent(), 16, id, 0}], Nil{}, Nil{}}
     case _ M.Act{_, _, +tone, +kind, +summary, _}:
       Bool.pick(TLPart, String.eq(tone, EM.Emb.tone()), TLPart{Nil{}, Nil{}, Nil{}},
-        TLPart{[TLine{Ty.fit(ty, 2n, TL.act.text(String.eq(tone, RVW.Review.tone()), ty, tone, kind, summary), px), Bool.pick(U32, String.eq(tone, "error"), T.Th.bad(), T.Th.dim()), 3, "", 0}], Nil{}, Nil{}})
+        TLPart{[TLine{Ty.fit(ty, 2n, TL.act.text(String.eq(tone, RVW.Review.tone()), ty, tone, kind, summary), px), Bool.pick(U32, String.eq(FO.Tool.tone(tone, kind), "error"), T.Th.bad(), T.Th.dim()), 3, "", 0}], Nil{}, Nil{}})
     case _ M.Msg{_, _, _, +text, _}:
       TLPart{[TLine{Ty.fit(ty, 2n, text, px), T.Th.dim(), 3, "", 0}], Nil{}, Nil{}}
 
@@ -6430,10 +6430,19 @@ def TL.reply.blocks(api: Bool, +ty: Ty, +text: String, +px: U32) -> List<&2, TLi
     case False{}:
       TL.blocks(ty, N.Md.render(text), px)
 
+# a person's message, or Backplane's continue message after a restart as
+# its dim "Continuing after the restart" line (FO.Restart.told)
+def TL.user.part(carry: Bool, +ty: Ty, +text: String, +px: U32) -> TLPart:
+  match carry:
+    case True{}:
+      TLPart{[TLine{Ty.fit(ty, 2n, "restart  " ++ MSG.T.restart.continuing(Ty.loc(ty)), px), T.Th.dim(), 3, "", 0}], Nil{}, Nil{}}
+    case False{}:
+      TLPart{TL.bubble.a(ty, text, px), Nil{}, Nil{}}
+
 def TL.part.own(+ty: Ty, e: M.Entry, +px: U32) -> TLPart:
   match e:
     case M.Msg{_, _, M.User{}, +text, _}:
-      TLPart{TL.bubble.a(ty, text, px), Nil{}, Nil{}}
+      TL.user.part(FO.Restart.told(text), ty, text, px)
     case M.Msg{_, _, _, +text, _}:
       TLPart{TL.reply.blocks(FO.ApiErr.is(text), ty, text, px), IM.Img.paths(text), [TLine{"", 0, 7, text, 0}, TLine{"", 0, 4, "", 0}]}
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
