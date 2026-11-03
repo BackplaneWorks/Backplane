@@ -18,12 +18,12 @@ const diagnostics_operations = new Set([
   "thin.warm", "mail.warm",
 ]);
 const diagnostics_errors = new Set([
-  "store_write", "mail_append", "disk_full", "io", "timeout", "protocol", "agent_exit", "log_error", "log_warn",
+  "heap_growth", "store_write", "mail_append", "disk_full", "io", "timeout", "protocol", "agent_exit", "log_error", "log_warn",
 ]);
 const diagnostics_connections = new Set([
   "join", "mobile_join", "leave", "drop", "connect", "disconnect", "reconnect", "failed",
 ]);
-const diagnostics_gauges = new Set(["hub.clients", "hub.agents", "hub.busy"]);
+const diagnostics_gauges = new Set(["hub.clients", "hub.agents", "hub.busy", "memory.rss_kib", "memory.heap_kib", "memory.external_kib"]);
 
 function diagnostics_now() { return Date.now(); }
 function diagnostics_mono() { return performance.now(); }
@@ -360,8 +360,37 @@ function diagnostics_flush() {
   const s = diagnostics_state(), ok = diagnostics_flush_value(s);
   return JSON.stringify(diagnostics_status_value(s, ok));
 }
+// Minute samples, at most 61 numeric points. Compare low-water windows
+// rather than GC peaks; no collection, snapshot, timer or network call.
+// Both resident and JS/external memory must rise persistently. Respect the
+// existing diagnostics control and emit only a closed local error code.
+function diagnostics_memory(s, now, usage) {
+  if (!s?.ready || !s.enabled || s.error !== "") return;
+  const rss = Math.floor(usage.rss / 1024), heap = Math.floor(usage.heapUsed / 1024), external = Math.floor((usage.external || 0) / 1024);
+  if (![rss, heap, external].every(n => diagnostics_uint(n))) return;
+  const m = s.memory || (s.memory = { points: [], last: -Infinity, alert: -Infinity });
+  if (now < m.last) { m.points = []; m.alert = -Infinity; }
+  if (now - m.last < 60000) return;
+  m.last = now;
+  m.points = m.points.filter(p => now - p.at <= 3600000).slice(-60);
+  m.points.push({ at: now, rss, heap: heap + external });
+  diagnostics_note(s, "sample", "memory.rss_kib", rss);
+  diagnostics_note(s, "sample", "memory.heap_kib", heap);
+  diagnostics_note(s, "sample", "memory.external_kib", external);
+  if (m.points.length < 31 || now - m.points[0].at < 1800000 || now - m.alert < 3600000) return;
+  const base = m.points.filter(p => p.at < m.points[0].at + 600000), recent = m.points.filter(p => p.at >= now - 600000);
+  const low = (xs, key) => Math.min(...xs.map(p => p[key]));
+  const beforeRss = low(base, "rss"), beforeHeap = low(base, "heap");
+  if (low(recent, "rss") - beforeRss >= Math.max(131072, beforeRss * .25) && low(recent, "heap") - beforeHeap >= Math.max(65536, beforeHeap * .25)) {
+    diagnostics_note(s, "error", "heap_growth", 1); m.alert = now;
+  }
+}
+
 function diagnostics_tick() {
   const s = diagnostics_state(), now = diagnostics_mono();
+  if (s?.ready && s.enabled && s.error === "" && (!s.memory || now - s.memory.last >= 60000)) {
+    try { diagnostics_memory(s, now, process.memoryUsage()); } catch (_) { /* diagnostic sampling never affects hub progress */ }
+  }
   if (s?.ready && (now - s.flushed >= diagnostics_limits.flush_ms || now - s.swept >= diagnostics_limits.sweep_ms)) {
     diagnostics_flush_value(s);
     // Also pace an idle or disabled hub; no rescan on every message.
@@ -380,7 +409,7 @@ function diagnostics_control(action) {
     return JSON.stringify({ ...diagnostics_status_value(s, false), error: "invalid_action" });
   }
   // Disable and clear discard pending data BEFORE touching disk.
-  if (action !== "on") s.pending.clear();
+  if (action !== "on") { s.pending.clear(); s.memory = undefined; }
   if (action === "off") s.enabled = false;
   try {
     diagnostics_directory(s);

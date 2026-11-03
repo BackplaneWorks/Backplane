@@ -210,9 +210,17 @@ function perf_take() {
     perf_put(s, v);
     row(name, s);
   };
-  const mem = typeof process !== "undefined" ? process.memoryUsage().rss : 0;
+  const memory = typeof process !== "undefined" ? process.memoryUsage() : {};
+  let heapUsed = Number(memory.heapUsed) || 0, heapTotal = Number(memory.heapTotal) || 0;
+  if (typeof Bun !== "undefined") try {
+    const heap = require("bun:jsc").heapStats();
+    heapUsed = heap.heapSize; heapTotal = heap.heapCapacity;
+  } catch (_) { /* Other runtimes retain their process-provided gauges. */ }
   const ru = typeof process !== "undefined" && process.resourceUsage ? process.resourceUsage() : null;
-  g("proc.rss_kb", Math.floor(mem / 1024));
+  g("proc.rss_kb", Math.floor((memory.rss || 0) / 1024));
+  g("proc.heap_used_bytes", heapUsed);
+  g("proc.heap_total_bytes", heapTotal);
+  g("proc.external_bytes", Number(memory.external) || 0);
   g("proc.peak_kb", ru ? ru.maxRSS : 0);
   g("proc.cpu_ms", ru ? Math.floor((ru.userCPUTime + ru.systemCPUTime) / 1000) : 0);
   g("proc.up_ms", Math.floor(perf_now_us() / 1000));
