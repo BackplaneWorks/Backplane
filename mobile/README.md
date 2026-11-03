@@ -20,7 +20,7 @@ runs xcodebuild there. Debug builds read `BACKPLANE_LINK` and
 `BACKPLANE_SELECT` from the environment (`SIMCTL_CHILD_…`) to pair and open
 a thread without taps.
 
-Pairing: scan the code Settings shows (Pairing link, QR code) from the
+Pairing: scan the code Settings shows (Devices, Add a device) from the
 pairing screen or Hubs (iOS reads it with the camera, Android with Google
 Play services' code scanner), paste the hub's tailnet link
 (`http://host:3787/#token=…`), or open
