@@ -70,7 +70,7 @@
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "7510777ce55fee4e2bc842dcf1b30f435eba8a10942d92a18dc63b02e02817ea",
     "src/core/images.bend": "99025ca6b7562c0ef3cf71e8d2e4ec6e40299603bb5e60de8044c33f485e2bac",
-    "src/core/json.bend": "039105b99a83af70a1f62042fde42e5a4e89e937983e42dfc22135590b3ac075",
+    "src/core/json.bend": "f500b30686fc4eea0f6d7ac00bda03e524676f59dd00c6244696e678536560af",
     "src/core/kexport.bend": "e7c768d51b7909761458296102e9aefb66d8ffd9ea37c3487ccc7fdb2defc86d",
     "src/core/kihealth.bend": "0f31f804fddef557d7a038dd39022219455d5b9e0990fa19ccef5a388e511460",
     "src/core/kserve.bend": "f375590578eaba849f6523cbf5719da104ac0073f4adcbfd7c0b7157bd1f2100",
@@ -416,7 +416,15 @@
         "base": "d6151541240e261953037537ee15413b9abc0ff6",
         "scope": "Preserves current main Git-init, JSON escaping, pairing theme, reader/instant, account hierarchy and sound mail-proof repair. Since2864599ee, message rendering changes only unrelated Diff no-git action and composer account-chip width; JSON helpers have only explicit data inputs and add no Ui/draft readers. Image route/auth/storage/limits unchanged. Earlier24-case combined run is tied to42f5b5173 inputs; no claim of a fresh full-tree runtime after later main adoption. Preserve all upstream review receipts.",
         "fallbackCompositionWork": "w-t1793671258-1312457-1330764",
-        "fallbackComposition": "PASS current #792 missing-shot module/CSS plus image failure state, including DOM patches; no app build."
+        "fallbackComposition": "PASS current #792 missing-shot module/CSS plus image failure state, including DOM patches; no app build.",
+        "finalFullOutputQualification": {
+          "source": "3c77b550862ac7ae39b9fdac7feedfe9f86dd79c",
+          "base": "d6151541240e261953037537ee15413b9abc0ff6",
+          "work": "w-t1793671258-1312457-1331380",
+          "assertions": 24,
+          "logSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+          "scope": "All24 full-output cases passed on exact final combined Bend source, including current-main JSON and Git-init; refresh the reviewed JSON digest. No app build or repeated full proof."
+        }
       }
     }
   },
