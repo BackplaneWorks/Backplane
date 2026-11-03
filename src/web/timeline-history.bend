@@ -93,9 +93,12 @@ def H.word.go.k(s: String, sp: Bool, +word: String, acc: String) -> Bool:
 def H.word.go(+s: String, +word: String, acc: String) -> Bool:
   H.word.go.k(s, H.space(s), word, acc)
 
+# A committed tool run remains history while its header animates as live.
+# Synthetic stream keys, live memo bodies and pending sends remain transient.
 def H.transient(+k: String, +as: List<&2, D.Attr>) -> Bool:
   Bool.or(TV.Item.live.key(k), Bool.or(String.eq(H.attr(as, "fn"), "live"),
-    Bool.or(H.word.go(H.attr(as, "class"), "live", ""), H.word.go(H.attr(as, "class"), "sending", ""))))
+    Bool.or(Bool.and(Bool.not(H.fold(as)), H.word.go(H.attr(as, "class"), "live", "")),
+      H.word.go(H.attr(as, "class"), "sending", ""))))
 
 def H.historical.allowed(blocked: Bool, +tag: String, +k: String, +as: List<&2, D.Attr>) -> Bool:
   match blocked:

@@ -3414,7 +3414,9 @@ async function startThin(again = false, reason = "initial") {
       readingMark: () => holdMark(),
       pagePosition: () => {
         const list = timelineList();
-        return list ? { position: { ...list.position(), atEnd: thin.atNewest() && list.atEnd() }, adjacent: "" } : null;
+        if (!list) return null;
+        const followNewest = entryHistory.active(historyFillOwner()) && list.atEnd();
+        return { position: { ...list.position(), atEnd: (thin.atNewest() || followNewest) && list.atEnd() }, adjacent: "", followNewest };
       },
       // Give an immediately following user action priority over an unsent
       // notification read. Timer is bounded and works while the page is hidden.
