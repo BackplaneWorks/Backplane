@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
@@ -266,7 +267,10 @@ class RunCheck(Base):
         return plan
 
     def run_check(self, plan):
-        return cc.run_check(self.root, plan)
+        guard = types.SimpleNamespace(inherited_lock=lambda path: 3, lock_path=lambda: Path('/x'),
+                                      admit=lambda profile: True)
+        with patch.object(cc, '_module', return_value=guard):
+            return cc.run_check(self.root, plan)
 
     def test_pass_is_recorded_after_a_real_pass(self):
         self.fake_bend('echo "All terms check."\n')
@@ -303,6 +307,49 @@ class RunCheck(Base):
         self.assertEqual(self.run_check(self.plan_file()), 0)
         self.assertIn('src/c.bend', log.read_text())
         self.assertNotIn('src/c.bend', cc.plan(cc.check_units(self.root))[0])
+
+    def test_direct_call_without_the_heavy_lock_starts_no_bend(self):
+        marker = self.root.parent/'started'
+        self.fake_bend('touch %s; echo "All terms check."\n' % marker)
+        plan = self.plan_file()
+        for lock, admit in ((None, True), (3, False)):
+            guard = types.SimpleNamespace(inherited_lock=lambda path, v=lock: v, lock_path=lambda: Path('/x'),
+                                          admit=lambda profile, v=admit: v)
+            with patch.object(cc, '_module', return_value=guard):
+                with self.assertRaises(cc.CacheError):
+                    cc.run_check(self.root, plan)
+        self.assertFalse(marker.exists())
+        self.assertEqual(cc.plan(cc.check_units(self.root))[0], [])
+
+    def test_cli_run_check_without_the_lock_refuses(self):
+        marker = self.root.parent/'started'
+        self.fake_bend('touch %s; echo "All terms check."\n' % marker)
+        plan = self.plan_file()
+        with patch.dict(os.environ):
+            os.environ.pop('BACKPLANE_HEAVY_LOCK_FD', None)
+            with self.assertRaises(cc.CacheError):
+                cc.main(['--root', str(self.root), 'run-check', '--plan', str(plan)])
+        self.assertFalse(marker.exists())
+
+    def test_tool_change_during_the_check_records_nothing(self):
+        # the real, memoizing tool_identity: a library file changed by bend
+        # itself must not be recorded under the identity read before
+        lib = self.root.parent/'lib'
+        lib.mkdir()
+        (lib/'base.bend').write_text('v1')
+        real = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(real)
+        toolchain = lambda: {'binary_sha256': 'bin', 'bundled': {'base.bend': real.sha((lib/'base.bend').read_bytes())}}
+        mod = types.SimpleNamespace(toolchain=toolchain)
+        guard = types.SimpleNamespace(inherited_lock=lambda path: 3, lock_path=lambda: Path('/x'), admit=lambda p: True)
+        real._module = lambda name: guard if name == 'heavy-guard.py' else mod
+        self.fake_bend('echo "All terms check."\necho v2 > %s\n' % (lib/'base.bend'))
+        real.reset_tool_identity()
+        real.main(['--root', str(self.root), 'plan-check', '--plan', str(self.root.parent/'plan.json')])
+        with self.assertRaises(real.CacheError):
+            real.run_check(self.root, self.root.parent/'plan.json')
+        real.reset_tool_identity()
+        self.assertEqual(real.plan(real.check_units(self.root))[0], [])
 
     def test_audit(self):
         self.fake_bend('echo "All terms check."\n')
