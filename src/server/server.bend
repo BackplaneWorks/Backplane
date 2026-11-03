@@ -49,6 +49,7 @@ import ../core/utf8.bend as U
 import ../core/http.bend as W
 import ../core/auth.bend as AUTH
 import ../core/model.bend as M
+import ../core/roots.bend as ROOTS
 import ../core/codec.bend as C
 import ../core/hub.bend as B
 import ../core/deploy.bend as DP
@@ -7663,6 +7664,32 @@ def BotJob.client(+b: String) -> U32:
 def BotJob.id(+c: String) -> String:
   Bool.pick(String, String.is_empty(c), "0", c)
 
+# Projects whose folder is gone (core/roots.bend): looked for at every tick
+# (once a minute), the missing ones' ids kept in "projects.missing", written
+# only when they change (so the log grows only when a folder goes or comes)
+def RootJob.set(same: Bool, +inbox: Chan(Msg), +v: String) -> IO(Unit):
+  match same:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        +now : Nat <- Now.nat()
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.SettingSet{ROOTS.Roots.key(), v, now}]})
+        return Unit{}
+
+def RootJob.got(+v: String, +inbox: Chan(Msg), +was: String) -> IO(Unit):
+  RootJob.set(String.eq(v, was), inbox, v)
+
+def RootJob.done(r: P.Ran, +inbox: Chan(Msg), +was: String) -> IO(Unit):
+  match r:
+    case P.Ran{0, out}:
+      RootJob.got(ROOTS.Roots.value(out), inbox, was)
+    case _:
+      IO.pure(Unit, Unit{})
+
+def RootJob.run(+inbox: Chan(Msg), args: List<&2, String>, +was: String) -> IO(Unit):
+  IO.bind(P.Ran, Unit, P.Proc.run("sh", List.append(&2, String, ["-c", ROOTS.Roots.sh(), "sh"], args), "/"), r => RootJob.done(r, inbox, was))
+
 # a bot's home folder (dir <home>/bots/), or a scratch thread's
 # (<home>/scratch/, M.Scratch), a git repository (so its turns get
 # checkpoints), becomes its thread's folder
@@ -13866,6 +13893,7 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         Self.post(inbox, Silence{})
+        IO.spawn(Unit, RootJob.run(inbox, ROOTS.Roots.args(st), M.Setting.get(st, ROOTS.Roots.key(), "")))
         h2 : Hub <- Hub.telemetry(Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
         h3 : Hub <- Hub.dq.try(h2, now)
         Hub.watchdog(h3, now)
