@@ -168,14 +168,14 @@
     "src/mobile/hubs.bend": "02dd7d0184edcf20ca85ad7914ce473757c5af3673c8ae165973d09ef936a62d",
     "src/mobile/screen.bend": "cff29d7416f2685d04a4a27c0f61be484eaa9169d9feb3b0652765c68f7bfe44",
     "src/server/thin-actor.bend": "2f0216c55b246af65bef75cd0ac3c8c270f53e1a73510f16313971078e4670d6",
-    "src/server/thin-body.bend": "ab16161b452008ce790923b6e1c782896a7bc39580988c16c5b3a5f0121cdd5a",
+    "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
     "src/server/thin-sidebar.bend": "03a4481e05258eaead769ca352081b6782f0b20589fe29d33e3bb1151916844a",
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
-    "src/server/thin-view.bend": "bfb8262aa994596c74c40e42fcc81557b16d0fd04a41e1d7eeda64f21acaf577",
+    "src/server/thin-view.bend": "cb8aa4b16f83b28ac54376ac9f3991247274d0e0309479d2becb3cdd6be77846",
     "src/server/thinstore.bend": "23c378c87b43907157c88b61a6a259df969b51011bcfc97d27015577cc905f2b",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
     "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
@@ -909,5 +909,14 @@
       "src/web/view.bend"
     ],
     "scope": "Agent setup only: a link button's primary class follows its AgBtn flag, and the install guide's flag follows whether the program is found. No sidebar, draft or transport change."
+  },
+  "boundedConversationReview": {
+    "changedClosureFiles": [
+      "src/server/thin-body.bend",
+      "src/server/thin-view.bend"
+    ],
+    "scope": "Source window caps and uniform quoted-reply body clipping; speculative olderNext omitted because future fitting cannot guarantee coverage. No new sidebar draft reader, scratch filtering, private image key or authority change. All 24 full-output sidebar cases passed on main 2ec3c0edd merged with this implementation before these two pins were updated.",
+    "review": "docs/reviews/bounded-conversation-sidebar.md",
+    "fullOutputLogSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c"
   }
 }

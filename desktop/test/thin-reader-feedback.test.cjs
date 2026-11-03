@@ -157,7 +157,7 @@ test('owning-history reset drops retained DOM rows before normal history project
 
 test('an oversized picture never closes the live socket or starts reconnect backoff',()=>{
  const src=source(),a=src.indexOf('  const viewRecover = reason => {'),b=src.indexOf('\n  try {',a);assert(a>0&&b>a);
- let shown=0;const recover=vm.runInNewContext('('+src.slice(a+'  const viewRecover = '.length,b).trim().replace(/;$/,'')+')',{previewViews:{stop(){}},current:()=>true,showViewLimit(){shown++;},downNote:'',Date:{now(){throw Error('must not enter reconnect/backoff');}},disconnect(){throw Error('socket must stay live');},s:{close(){throw Error('socket must stay live');}}});for(const reason of ['LIMIT','invalid view presentation','invalid view delta','View request timed out; actions were not resent'])recover(reason);assert.equal(shown,4);
+ let shown=0;const recover=vm.runInNewContext('('+src.slice(a+'  const viewRecover = '.length,b).trim().replace(/;$/,'')+')',{previewViews:{stop(){}},current:()=>true,showViewStatus(message){assert.equal(message,'');},thin:{recover(){shown++;}},assert,downNote:'',Date:{now(){throw Error('must not enter reconnect/backoff');}},disconnect(){throw Error('socket must stay live');},s:{close(){throw Error('socket must stay live');}}});for(const reason of ['LIMIT','invalid view presentation','invalid view delta','View request timed out; actions were not resent'])recover(reason);assert.equal(shown,4);
 });
 
 test('bottom reconciles a paging-owned unread boundary even when host away is already empty',()=>{

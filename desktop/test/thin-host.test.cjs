@@ -1372,3 +1372,63 @@ for (const fromBot of [false,true]) test((fromBot?'bot→thread':'thread→bot')
  assert(awayCalls.some(x=>x.thread===from&&x.selected===from),'unread is captured against outgoing selection');
  assert.equal(f.getSession().drafts[from],'source draft');assert.equal(f.getSession().drafts[to],'destination draft');
 });
+
+test('large exact control state is reassembled outside the bounded picture and effects run once',async()=>{
+ const f=await fixture();f.open();f.host.request('flag','palette');const req=f.sent.at(-1);
+ const large='😀\\\"\u0001'.repeat(40000), whole=f.reply(req,{session:{...req.p.session,drafts:{...req.p.session.drafts,'@form':large},outbox:{owned:large}},cmds:[{type:'copy',text:'exact effect'}]});
+ const{shown,window,...control}=whole.result,text=JSON.stringify(control),cps=Array.from(text);
+ for(let i=0,n=0;i<cps.length;i+=5000,n++){
+  const part={t:'view.control',id:req.id,part:n,last:i+5000>=cps.length,text:cps.slice(i,i+5000).join('')};
+  assert(Buffer.byteLength(JSON.stringify(part))<65536);assert(f.host.receive(part));assert.equal(f.commands.length,0,'no partial control adoption/effects');
+ }
+ const reply={...whole,result:{shown,window,controlId:req.id}};assert(Buffer.byteLength(JSON.stringify(reply))<262144);
+ f.host.receive(reply);assert.equal(f.host.ready,true);assert.equal(f.getSession().drafts['@form'],large);assert.equal(f.getSession().outbox.owned,large);
+ assert.deepEqual(f.commands,[{type:'copy',text:'exact effect'}]);f.host.receive(reply);assert.equal(f.commands.length,1);
+});
+test('out of order, retired or wrong-request control shards cannot dispatch effects',async()=>{
+ for(const mode of['missing','out-of-order','retired']){
+  const f=await fixture();f.open();f.host.request('flag','palette');const req=f.sent.at(-1),full=f.reply(req,{cmds:[{type:'copy',text:'must not run'}]});
+  const{shown,window,...values}=full.result;
+  f.host.receive({t:'view.control',id:mode==='retired'?req.id-1:req.id,part:mode==='out-of-order'?1:0,last:mode!=='missing',text:JSON.stringify(values)});
+  f.host.receive({...full,result:{shown,window,controlId:req.id}});assert.equal(f.commands.length,0);assert.equal(f.getSession().drafts.A,'original 日本語');
+ }
+});
+test('unforeseen view failure retries a smaller read and never replays an action',async()=>{
+ const f=await fixture();f.open();f.host.request('flag','palette');const action=f.sent.at(-1);
+ f.host.receive({t:'reply',id:action.id,ok:false,error:{code:'UNFORESEEN'}});assert(f.host.recover());
+ await new Promise(r=>setTimeout(r,130));const retry=f.sent.at(-1);assert.equal(retry.m,'view.open');assert.equal(retry.p.viewEntries,16);
+ assert.equal(f.sent.filter(r=>r.m==='view.action').length,1);assert.equal(f.getSession().drafts.A,'original 日本語');
+ f.host.receive(f.reply(retry));assert.equal(f.host.ready,true);
+});
+
+test('bounded aliases restore exact body and history identities before adoption',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);const req=f.sent.at(-1);
+ const shown={type:'element',tag:'div',key:'@compact.entry',attrs:[{name:'class',value:'msg assistant'},{name:'data-id',value:'@compact.entry'}],kids:[{type:'text',text:'source content'}]};
+ const full=f.reply(req,{shown,entryAliases:{'@compact.entry':'exact-source-identity','@compact.thread':'A'}}),{shown:tree,...values}=full.result;
+ f.host.receive({t:'view.control',id:req.id,part:0,last:true,text:JSON.stringify(values)});
+ f.host.receive({...full,result:{shown:tree,controlId:req.id}});
+ assert.equal(f.host.ready,true);assert.equal(f.views.at(-1).n.key,'exact-source-identity');assert.equal(f.views.at(-1).n.attrs[1].value,'exact-source-identity');
+ assert.equal(f.getSession().drafts.A,'original 日本語');
+});
+
+test('a recovery timer cannot reopen a newer selection or discard its queued send',async()=>{
+ const f=await fixture({previewSend:text=>!!text});f.open();f.host.fail('temporary renderer failure');assert(f.host.recover());
+ f.host.request('select','B');f.host.request('draft','B queued draft');f.host.request('send','');
+ const count=f.sent.length,actions=[...f.host.actions];assert(actions.length>0);
+ await new Promise(r=>setTimeout(r,160));assert.equal(f.sent.length,count);assert.deepEqual(f.host.actions,actions);assert.equal(f.host.target.id,'B');
+});
+test('an arriving successful picture cancels the pending recovery read',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);const request=f.sent.at(-1);assert(f.host.recover());
+ f.host.receive(f.reply(request));const count=f.sent.length;await new Promise(r=>setTimeout(r,160));assert.equal(f.sent.length,count);assert.equal(f.host.ready,true);
+});
+test('disconnect cancels recovery and a smaller budget belongs only to its conversation',async()=>{
+ const f=await fixture();f.open();f.host.fail('temporary');assert(f.host.recover());assert.equal(f.host.viewBudget(),16);
+ f.host.request('select','B');assert.equal(f.sent.at(-1).p.viewEntries,32);f.host.disconnect();const count=f.sent.length;
+ await new Promise(r=>setTimeout(r,160));assert.equal(f.sent.length,count);
+});
+test('an empty server hint pages serially from the first accepted cursor',async()=>{
+ const f=await fixture();f.host.greeting(f.greeting);f.host.receive(f.reply(undefined,{window:{ids:['100'],older:'93',olderNext:'',hasMore:true,anchor:{id:'100',offset:0},partial:[]}}));
+ f.host.page();const first=f.sent.at(-1),count=f.sent.length;f.host.page();assert.equal(f.sent.length,count,'one page outstanding');
+ f.host.receive(f.reply(first,{window:{ids:['92'],older:'85',olderNext:'',hasMore:true,anchor:{id:'92',offset:0},partial:[]}}));
+ f.host.page();assert.equal(f.sent.at(-1).p.cursor,'85','continue from actual first-page fit');
+});
