@@ -14,7 +14,9 @@ body = re.search(r'^def Laws\.' + name + r'\([^\n]*\n(?:  .*\n|\n)*', proof, re.
 imports = 'import Base\nimport ../../src/core/account-fallback.bend as ACCOUNTRECOVERY\nimport ../../src/core/model.bend as M\nimport ../../src/core/json.bend as J\n'
 Path('build/account-priority/policy.bend').write_text(imports + '\n' + law + '\n' + body.replace('def Laws.', 'def ', 1))
 PY
-scripts/heavy bend build/account-priority/policy.bend > build/account-priority/policy.log 2>&1 || { cat build/account-priority/policy.log; exit 1; }
+rc=0
+scripts/heavy bend build/account-priority/policy.bend > build/account-priority/policy.log 2>&1 || rc=1
 cat build/account-priority/policy.log
-TEST_FILES='test/account_failover_test.bend test/fallback_test.bend test/accounts_test.bend' scripts/test.sh > build/account-priority/focused.log 2>&1 || { cat build/account-priority/focused.log; exit 1; }
+TEST_FILES='test/account_failover_test.bend test/fallback_test.bend test/accounts_test.bend' scripts/test.sh > build/account-priority/focused.log 2>&1 || rc=1
 cat build/account-priority/focused.log
+exit "$rc"
