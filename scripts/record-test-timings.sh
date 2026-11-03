@@ -7,10 +7,14 @@
 set -eu
 cd "$(dirname "$0")/.."
 out=$(mktemp scripts/test-timings.XXXXXX)
-trap 'rm -f "$out"' 0 1 2 15
-TEST_JOBS=1 TEST_TIMINGS_OUT="$out" scripts/test.sh
+trap 'rm -f "$out" "$out.profile"' 0 1 2 15
+# A caller's focused/fast/sharded selection must never overwrite the full
+# duration profile. Production guard and serial admission still apply.
+unset TEST_FILES TEST_SHARD TEST_SHARD_COUNT
+TEST_FULL=1 TEST_JOBS=1 TEST_TIMINGS_OUT="$out" scripts/test.sh
 { echo "# Recorded by scripts/record-test-timings.sh (seconds, longest first)."
   echo "# Regenerate with: scripts/record-test-timings.sh"
   cat "$out"
-} > scripts/test-timings.txt
+} > "$out.profile"
+mv "$out.profile" scripts/test-timings.txt
 echo "wrote scripts/test-timings.txt"
