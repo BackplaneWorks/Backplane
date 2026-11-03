@@ -13,7 +13,12 @@ FLOORS = {'check': 14 * GIB, 'proof': 19 * GIB, 'test': 14 * GIB,
           'build': 16 * GIB, 'web': 10 * GIB, 'browser': 14 * GIB,
           # Stamping and Bun linking of exact verified pre-emission only.
           # No Bend fallback is permitted by build-js.sh on this path.
-          'compile-js': 3 * GIB}
+          'compile-js': 3 * GIB,
+          # One proof-shard worker only (see worker_contract). Admission is not
+          # a cap: the worker must also sit in a verified <=3.7 GiB, no-swap cgroup.
+          'proof-shard': 3 * GIB}
+SHARD_CAP = int(3.7 * GIB)
+SHARD_PROFILE = 'proof-shard'
 HOST_RESERVE = 8 * GIB
 FD_VAR = 'BACKPLANE_HEAVY_LOCK_FD'
 BOAT_VAR = 'BACKPLANE_HEAVY_BOAT_SANDBOX'
@@ -58,6 +63,39 @@ def available():
             used = int(v1_current.read_text().strip())
             fields['available'] = min(fields['available'], max(0, maximum - used))
     return fields['available']
+
+
+def own_cgroup():
+    groups = Path('/proc/self/cgroup').read_text().splitlines()
+    group = next((line.split(':', 2)[2] for line in groups if line.startswith('0::')), None)
+    root = Path('/sys/fs/cgroup')
+    if group is None or '..' in Path(group).parts or not (root / 'cgroup.controllers').exists():
+        raise ValueError('cannot locate cgroup v2')
+    return root / group.lstrip('/')
+
+
+def verify_shard_cgroup(directory=None):
+    """The worker's own cgroup must hold a finite <=3.7 GiB limit and no swap."""
+    try:
+        directory = directory or own_cgroup()
+        limit = (directory / 'memory.max').read_text().strip()
+        swap = (directory / 'memory.swap.max').read_text().strip()
+        return limit.isdigit() and 0 < int(limit) <= SHARD_CAP and swap == '0'
+    except (OSError, ValueError):
+        return False
+
+
+def worker_contract(command):
+    """Only `proof-shards.py run` of one shard; never the full proof or anything else."""
+    script = Path(__file__).resolve().parent / 'proof-shards.py'
+    try:
+        runner = Path(command[1]).resolve()
+    except (IndexError, OSError):
+        return False
+    return (len(command) >= 3 and Path(command[0]).name in {'python3', 'python'}
+            and runner == script and command[2] == 'run'
+            and command.count('--shard') == 1 and command.count('--expect') == 1
+            and command.count('--result') == 1)
 
 
 def lock_path():
@@ -167,6 +205,15 @@ def main(args):
         print('usage: heavy-guard.py [--held] {' + '|'.join(FLOORS) + '} [-- command ...]', file=sys.stderr)
         return 2
     profile, rest = args[0], args[1:]
+    if profile == SHARD_PROFILE:
+        # Bound to one concrete worker command and a verified cgroup; no --held
+        # form (nothing to bind), no Boat/source offload fallback.
+        if held_only or len(rest) < 2 or rest[0] != '--' or not worker_contract(rest[1:]):
+            print('heavy-guard: proof-shard runs only proof-shards.py run --shard --expect --result', file=sys.stderr)
+            return 2
+        if not verify_shard_cgroup():
+            print('heavy-guard: proof-shard needs its own cgroup memory.max <= 3.7 GiB and memory.swap.max = 0', file=sys.stderr)
+            return 75
     path = lock_path()
     fd = inherited_lock(path)
     owned = fd is not None
@@ -182,10 +229,14 @@ def main(args):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             print('heavy-guard: bend lock unavailable: ' + str(error), file=sys.stderr)
+            if profile == SHARD_PROFILE:
+                return 75
             return offload(rest[1:], os.environ.copy())
     if not admit(profile):
         if not owned:
             os.close(fd)
+            if profile == SHARD_PROFILE:
+                return 75
             return offload(rest[1:], os.environ.copy())
         return 75
     os.set_inheritable(fd, True)
