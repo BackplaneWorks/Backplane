@@ -2240,9 +2240,17 @@ def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, 
 def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   View.settings.loc(U.Lang.loc(u), u, st, nf, v, note)
 
+# with no project yet, its first step is a button too (the folder picker,
+# as the sidebar's +), ahead of the agent setup
+def View.empty.add(none: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match none:
+    case True{}: [D.Dom.button("primary", "proj-open", "", MSG.T.sidebar.add.project(lc), MSG.T.sidebar.add.project(lc))]
+    case False{}: Nil{}
+
 # (tour: the first-run tour is up, and the KiCad notice waits for it: U.Tour.kn)
-def View.empty.t.loc(+lc: I.Loc, tour: Bool, n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
-  D.El{"main", "empty", [D.At{"class", "empty"}], D.Dom.cat([D.Txt{Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.empty.add(lc), MSG.T.empty.thread(lc))}, D.Dom.button("", "provider-setup-open", "", "Choose and connect an agent", "Set up an agent")], View.kn.loc(lc, U.Tour.kn.k(tour, U.KN.visible(nf, st)), True{}))}
+def View.empty.t.loc(+lc: I.Loc, tour: Bool, +n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
+  D.El{"main", "empty", [D.At{"class", "empty"}], List.concat(&2, D.Node, [[D.Txt{Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.empty.add(lc), MSG.T.empty.thread(lc))}], View.empty.add(Nat.is_eq(n, 0n), lc),
+    [D.Dom.button("", "provider-setup-open", "", "Choose and connect an agent", "Set up an agent")], View.kn.loc(lc, U.Tour.kn.k(tour, U.KN.visible(nf, st)), True{})])}
 
 def View.empty.loc(+lc: I.Loc, n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
   View.empty.t.loc(lc, False{}, n, nf, st)
