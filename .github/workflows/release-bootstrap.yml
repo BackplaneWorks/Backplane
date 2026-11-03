@@ -108,6 +108,9 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation js --target "$TARGET" --directory "$RUNNER_TEMP/release-inputs"
+          # Public receipt for the telemetry release gate: the key ID only. Never the key, the
+          # Google secret or the environment; written only after the build above succeeded.
+          python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.0","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -181,7 +184,7 @@ jobs:
             mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
             set -- --windows-runtime "$RUNNER_TEMP/winrt"
           fi
-          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 b7fcf1f3f3a4cf9860a24f72ea8d7de6a783272c626beb65325f4b895120d0d0 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 ae60a25ad3f42a6b906b5deae2cfc0b6be2a65863172c64a3b69b207b0b6fef2 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
