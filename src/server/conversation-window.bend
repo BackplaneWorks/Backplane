@@ -10,23 +10,11 @@ import ./thin-view.bend as V
 # and body budgets are enforced before rendering; wire packet budgets are
 # independent of aggregate region/control bytes. No row renderer, clipping,
 # stream, read boundary, continuation or viewer lifecycle is changed here.
-def Window.sidebar() -> J.Json:
-  W.Node.write(D.El{"aside", "sidebar", [D.At{"class", "sidebar"}], [D.Dom.button("cmd", "ws-palette-open", "", "Jump or run a command", "Jump or run a command"), D.Dom.button("", "select", "", "Projects", "Projects")]})
-
-def Window.replace(yes: Bool, original: J.Json) -> J.Json:
-  match yes:
-    case True{}: Window.sidebar()
-    case False{}: original
-
-# Structural traversal preserves all ancestors, attrs and typed children.
-# Only the normal, keyed sidebar element is substituted.
+# Framing transports the complete canonical picture, including project and
+# thread navigation. Packet budgets are enforced by control chunking; they
+# must never replace the sidebar with a reduced navigation stub.
 def Window.root(j: J.Json) -> J.Json:
-  match j:
-    case J.Obj{+fs}: Window.replace(Bool.and(String.eq(J.Json.get_str(J.Obj{fs}, "type", ""), "element"), String.eq(J.Json.get_str(J.Obj{fs}, "key", ""), "sidebar")), J.Obj{Window.root(fs)})
-    case J.Arr{xs}: J.Arr{Window.root(xs)}
-    case J.Field{k, value, rest}: J.Field{k, Window.root(value), Window.root(rest)}
-    case J.Item{value, rest}: J.Item{Window.root(value), Window.root(rest)}
-    case other: other
+  j
 
 def Window.picture() -> J.Json:
   W.Node.write(D.El{"div", "workspace-root", [D.At{"data-window-region", "root"}], Nil{}})
@@ -36,7 +24,7 @@ def Window.make(+result: J.Json) -> J.Json:
   +projection = J.Json.obj([J.KV{"root", root}, J.KV{"logicalBytes", J.Json.nat(J.Json.bytes(root))}])
   V.Obj.put(V.Obj.put(V.Obj.put(result, "shown", Window.picture()), "windowProjection", projection), "boundedFrame", J.Num{"1"})
 
-# Legacy clients receive a normal whole canonical tree with compact sidebar.
+# Legacy clients receive the normal whole canonical tree.
 # Region/control framing is used only after explicit request negotiation.
 def Window.drop(j: J.Json, key: String) -> J.Json:
   match j:

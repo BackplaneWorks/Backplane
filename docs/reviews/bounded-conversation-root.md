@@ -7,8 +7,8 @@ conversation content through them.
 
 The negotiated web path reuses the original canonical render after the source
 window has been bounded to at most 32 entries and 32 KiB of encoded previews.
-Fixed chrome no longer reduces that window to a single row. A compact command
-navigator substitutes only for the sidebar; the complete canonical outer tree,
+Fixed chrome no longer reduces that window to a single row. The full sidebar
+stays available alongside the conversation; the complete canonical outer tree,
 message roles, visibility, folds, live/pending messages, source read boundary,
 body continuations, requested viewer and canvas keys remain intact. The actual
 stream/window metadata is retained, without rebuilding it from a blank stream.
@@ -23,7 +23,8 @@ to 64 MiB and 16,384 parts; it adopts no partial state or effects.
 
 Wire framing applies to the new host offer `windowProjection: 1, viewControl: 1`.
 Partial/mixed capability offers are excluded from that runtime framing claim.
-Legacy requests retain the ordinary whole-tree format with compact sidebar.
+Legacy requests retain the ordinary whole-tree format. Both paths preserve the
+complete canonical sidebar, including open projects and thread navigation.
 Each control fragment has at most 32 KiB of escaped text payload, plus headers;
 this is not a claim that the whole packet is exactly 32 KiB. Aggregate control,
 logical root bytes and DOM workload are distinct from the per-frame wire cap.

@@ -15753,7 +15753,7 @@ law conversation_root_reference_envelope_bounded:
   for admitted: {Nat.is_le(J.Json.bytes(rid), 32n) == True{} : Bool}
   {Nat.is_le(J.Json.bytes(CONVFRAME.Control.envelope(rid, CONVWINDOW.Window.make(result))), 262144n) == True{} : Bool}
 
-# Canonical rendered content (with sidebar substitution) is retained exactly
+# Canonical rendered content is retained exactly
 # in the separately framed control value. No aggregate-size claim.
 law conversation_root_region_retained:
   for +result: J.Json
@@ -15821,3 +15821,9 @@ law autosettle_new_assistant_message_reopens:
 law autosettle_new_turn_reopens:
   {M.Shelf.of(M.State.thread.get(M.State.replay(H.Shelve.auto.fix(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 6n}]),
     [M.TurnChanged{"t1", M.Running{}, 7n}]), H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", False{}, 6n}])), "t1")) == M.Active{} : M.Shelf}
+
+# Transport pressure cannot remove project/thread navigation or any other
+# canonical region before the existing retention law applies.
+law conversation_root_preserves_navigation:
+  for root: J.Json
+  {CONVWINDOW.Window.root(root) == root : J.Json}
