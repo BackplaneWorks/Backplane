@@ -273,6 +273,8 @@ fold.worked = Worked for {took} · {ago}
 fold.working = Working · started {ago}
 fold.running = running: {kind}
 fold.now = running
+apierr.say = {kind, select, overloaded {Claude's API was overloaded} rate {Claude's API hit its rate limit} server {Claude's API had an internal error} auth {Claude's API refused the sign-in} other {Claude's API answered with an error}}{code} and ended the turn{why}.
+apierr.details = details
 
 # bot tabs and moods
 bots.tab.chat = Chat

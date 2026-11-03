@@ -2739,12 +2739,23 @@ def View.ctx.head(+uri: String, +title: String, +n: String) -> List<&2, D.Node>:
     case SCon{+h, +t}:
       [D.El{"div", "", [D.At{"class", "msg-ctx"}], D.Dom.cat([D.El{"a", "", [D.At{"class", "ref ctx"}, D.At{"href", SCon{h, t}}, D.At{"data-ref", SCon{h, t}}, D.At{"data-bare", "0"}, D.At{"data-value", SCon{h, t}}, D.On{"click", "ref-go"}], [D.Txt{title}]}], View.ctx.more(Bool.or(String.is_empty(n), String.eq(n, "0")), n))}]
 
+# a reply's body: its markdown, or for a provider's API error (the memo's
+# "err": core/fold.bend's ApiErr.say) one red sentence with the raw text
+# under "› details" (its Copy still copies the raw text)
+def View.msg.body(+lc: I.Loc, +err: String, +id: String, +text: String) -> List<&2, D.Node>:
+  match err:
+    case SNil{}:
+      [D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}]
+    case SCon{+h, +t}:
+      [D.El{"div", "", [D.At{"class", "body apierr"}], [D.Dom.span("say", SCon{h, t}),
+        D.El{"details", "apierr:" ++ id, [D.At{"class", "apierr-raw"}], [D.El{"summary", "", Nil{}, [D.Txt{MSG.T.apierr.details(lc)}]}, D.El{"pre", "", Nil{}, [D.Txt{text}]}]}]}]
+
 def View.msg.x.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String, +as: List<&2, D.Attr>) -> D.Node:
   match user:
     case True{}:
       D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
     case False{}:
-      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.message.images(id, IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
+      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat(View.msg.body(lc, View.attr(as, "err"), id, text), D.Dom.cat(View.message.images(id, IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
 
 def View.msg.k.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String) -> D.Node:
   View.msg.x.loc(lc, user, id, text, stamp, Nil{})
@@ -2838,6 +2849,13 @@ def View.ctx.attrs(chat: Bool, +st: M.State, +text: String) -> List<&2, D.Attr>:
     case False{}: Nil{}
     case True{}: D.At{"rpl", "1"} <> View.ctx.kv(RTO.Ctx.of(st, text))
 
+# a reply that is a provider's API error: its sentence (FO.ApiErr.say),
+# made only for one
+def View.err.attrs(+lc: I.Loc, api: Bool, +text: String) -> List<&2, D.Attr>:
+  match api:
+    case True{}: [D.At{"err", FO.ApiErr.say(lc, text)}]
+    case False{}: Nil{}
+
 # (mid: a reply inside a turn, its time shown on hover: core/stamp.bend's
 # Stamp.mid)
 def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: String, mid: Bool) -> D.Node:
@@ -2845,7 +2863,7 @@ def View.entry.m.loc(+lc: I.Loc, e: M.Entry, +st: M.State, +ec: U.Ec, +stamp: St
     case M.Msg{+id, +th, M.User{}, +text, _}:
       View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", "msg"}, D.At{"who", "u"}, D.At{"stamp", stamp}], View.rto.attrs(RTO.Rto.chat(st, th), RTO.Rto.of(text))), RTO.Rto.text(text))
     case M.Msg{+id, +th, _, +text, _}:
-      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", Bool.pick(String, CP.Pending.synthetic(id), "live", "msg")}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], View.ctx.attrs(RTO.Rto.chat(st, th), st, CP.Pending.text(lc, id, text))), CP.Pending.text(lc, id, text))
+      View.memo.loc(lc, id, List.append(&2, D.Attr, [D.At{"fn", Bool.pick(String, CP.Pending.synthetic(id), "live", "msg")}, D.At{"who", "a"}, D.At{"stamp", stamp}, D.At{"mid", Bool.pick(String, mid, "1", "")}], List.append(&2, D.Attr, View.err.attrs(lc, FO.ApiErr.is(text), text), View.ctx.attrs(RTO.Rto.chat(st, th), st, CP.Pending.text(lc, id, text)))), CP.Pending.text(lc, id, text))
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       View.act.loc(lc, String.eq(tone, HS.Step.tone()), M.Act{id, th, tone, kind, summary, at}, st, ec)
 

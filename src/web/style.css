@@ -238,6 +238,15 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg.assistant .body > :first-child { margin-top: 0; }
 .msg.assistant .body > :last-child { margin-bottom: 0; }
 .msg.live { opacity: 0.9; }
+/* a provider's API error reply (view.bend's View.msg.body): one red
+   sentence, "› details" beside it opens the raw text */
+.body.apierr { color: var(--bad); }
+.apierr-raw { display: inline; margin-left: 6px; }
+.apierr-raw > summary { display: inline; cursor: pointer; list-style: none; color: var(--faint); }
+.apierr-raw > summary::-webkit-details-marker { display: none; }
+.apierr-raw > summary::before { content: "›"; display: inline-block; margin-right: 5px; transition: transform .1s; }
+.apierr-raw[open] > summary::before { transform: rotate(90deg); }
+.apierr-raw > pre { margin: 6px 0 0; color: var(--dim); font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.assistant.pending { align-self: flex-start; width: fit-content; min-width: 0; max-width: 100%; padding: 8px 12px; background: var(--raise); border: 1px solid var(--line); color: var(--dim); }
 /* Keep all three dots in layout; reveal one, two, then three without
    resizing the Working bubble or moving the conversation below it. */
