@@ -16,7 +16,9 @@ function harness(installWorkspaceHints) {
   const label = () => element(), p2 = label(), p1 = label(), parent = label(), child = label(), excluded = label(), activeProject = label();
   const head = (id, name) => ({ ...element({'data-value':id}), querySelector: () => name });
   const row = (id, title, pid) => ({ ...element({'data-value':id, ...(pid ? {'data-shortcut-project':pid} : {})}),
-    querySelector: selector => selector === '.title' ? title : pid ? activeProject : null });
+    // the note names the project only when it is no agent count and no
+    // red row's want (question, approval, failed)
+    querySelector: selector => selector === '.title' ? title : pid && selector === '.ago:not(.agents):not(.want)' ? activeProject : null });
   const sidebar = element({'data-shortcut-projects':'["absent","p2","p1"]', 'data-shortcut-threads':'["parent","child"]'});
   sidebar.querySelectorAll = selector => selector.startsWith('.project-head') ? [head('p1', p1), head('p2', p2)] :
     [row('child', child, 'p2'), row('excluded', excluded), row('parent', parent)];
