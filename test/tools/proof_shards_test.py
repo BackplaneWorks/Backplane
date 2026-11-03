@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import types
@@ -78,6 +79,30 @@ class Partitions(unittest.TestCase):
         p = self.root/'src/unused.bend'
         p.chmod(p.stat().st_mode ^ 0o100)
         with self.assertRaises(ValueError):
+            shards.verify(self.root, self.folder)
+
+    def test_identity_ignores_umask_but_not_the_executable_bit(self):
+        want = shards.encoded(self.manifest)
+        for path in self.root.rglob('*'):
+            if path.is_file() and path.parent != self.folder and 'shards' not in path.parts:
+                path.chmod(0o600)          # Boat: umask 077
+        manifest, _ = shards.plan(self.root, self.folder, 2)
+        self.assertEqual(shards.encoded(manifest), want)
+        self.assertEqual(set(manifest['source_modes'].values()), {0o644})
+        shards.verify(self.root, self.folder)
+        target = self.root/'src/unused.bend'
+        for bad in (0o700, 0o2644, 0o4644, 0o1644, 0o000, 0o200):
+            target.chmod(bad)
+            with self.assertRaises((ValueError, subprocess.CalledProcessError), msg=oct(bad)):
+                shards.verify(self.root, self.folder)
+        target.chmod(0o600)
+        shards.verify(self.root, self.folder)
+
+    def test_replaced_source_type_is_rejected(self):
+        target = self.root/'src/unused.bend'
+        target.unlink()
+        target.mkdir()
+        with self.assertRaises((ValueError, subprocess.CalledProcessError)):
             shards.verify(self.root, self.folder)
 
     def test_unknown_top_syntax_is_not_skipped(self):
