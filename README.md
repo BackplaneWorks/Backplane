@@ -20,20 +20,24 @@ Backplane is an open-source workspace for agentic hardware development. Your age
 
 ## Install
 
+**Linux**
+
 ```sh
 curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
 backplane
 ```
 
-<h3>Windows (x64, experimental)</h3>
+Linux (x64, arm64) also has a `.deb` and an AppImage on the [latest release](https://github.com/BackplaneWorks/Backplane/releases/latest).
 
-Download `backplane-v<version>-windows-x64.zip` from the [latest release](https://github.com/BackplaneWorks/Backplane/releases/latest), extract the entire archive into a writable folder, and open `Backplane.exe`. Keep `resources/` and the other extracted files beside it. This is a portable Electron app with a Bun hub; no WSL is required. Shell commands still need Cygwin tools: keep the bundled runtime when supplied. If those tools are missing, [the Windows setup script](scripts/setup-windows.ps1) installs Cygwin; add its `bin` directory to `PATH` before launching Backplane. Install your agent CLIs and sign in separately; [the provider setup script](scripts/install-windows-providers.ps1) installs Claude and Codex.
+**macOS (Apple silicon).** Use the same one-liner, or download `backplane-v<version>-darwin-arm64.tar.gz`. Builds are **not notarized yet**: if macOS refuses to open the app, right-click (or Control-click) it in Finder → Open → Open, or on macOS 15+ use System Settings → Privacy & Security → "Open Anyway", or run `xattr -dr com.apple.quarantine /Applications/Backplane.app`.
 
-Install FreeCAD and the [Backplane KiCad runtime](https://github.com/BackplaneWorks/Backplane_KiCad/releases) separately. Set `BACKPLANE_FREECAD` to the actual `bin/FreeCADCmd.exe` (with the GUI executable beside it) and `BACKPLANE_KICAD` to the runtime root or its `bin/kicad-cli.exe`, then restart Backplane. Stock KiCad lacks some required IPC capabilities.
+**Windows (x64, experimental).** Download `backplane-v<version>-windows-x64.zip`, extract the whole archive into a writable folder, and run `Backplane.exe`.
 
-Windows managed service stop and update are unsupported; closing the window leaves the hub running. Windows CI smoke checks currently report failures without gating the build, so a published ZIP alone does not establish full Windows validation.
+**Phones.** iOS installs through a TestFlight invitation; Android uses the APK on the release. Pair one in Settings → Devices → Add a device with a pairing link, QR code or short code.
 
-See [installation](docs/install.md) for setup, phone pairing and uninstalling. You need an agent CLI, KiCad for board and schematic work, and FreeCAD for mechanical work. Antigravity can be installed from Settings.
+The first run asks about anonymous usage counts in a popup; they are on by default and Settings turns them off.
+
+See [installation](docs/install.md) for details, Windows setup, phone pairing and uninstalling. You need an agent CLI, KiCad for board and schematic work, and FreeCAD for mechanical work. Antigravity can be installed from Settings.
 
 ## Quick start
 
