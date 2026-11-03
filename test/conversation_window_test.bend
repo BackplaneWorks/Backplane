@@ -10,6 +10,7 @@ import ../src/web/view.bend as V
 import ../src/server/conversation-window.bend as F
 import ../src/server/conversation-frame.bend as CF
 import ../src/server/thin-view.bend as TV
+import ../src/web/sidebar-slot.bend as SLOT
 
 
 def state() -> M.State:
@@ -24,8 +25,25 @@ def projected(+u: U.Ui) -> J.Json:
 def painted(+u: U.Ui) -> String:
   J.Json.show(W.Node.write(W.Node.read.first(V.View.expand([W.Node.read(J.Json.get_obj(J.Json.get_obj(projected(u), "windowProjection"), "root"))]))))
 
+# Exercise the actual rendered sidebar, not a hand-built navigation stub.
+# Both negotiated and legacy framing must retain its rows and action targets.
+def navigation(+u: U.Ui, +regions: Bool) -> Bool:
+  +shown = TV.Render.web(u, J.Json.obj(Nil{}))
+  +prepared = F.Window.prepare(regions, J.Json.obj([J.KV{"shown", shown}]))
+  +after = Bool.pick(J.Json, regions, J.Json.get_obj(J.Json.get_obj(prepared, "windowProjection"), "root"), J.Json.get_obj(prepared, "shown"))
+  C.Check.same(J.Json.show(SLOT.Slot.sidebar(shown)), J.Json.show(SLOT.Slot.sidebar(after)))
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    +projects : M.State = M.State.replay([M.ProjectCreated{"other-project", "Other open project", "/tmp/other", 1n}, M.ThreadCreated{"other-thread", "other-project", "Other open thread", M.Local{}, "", "", "codex", "", 1n}], state())
+    +nav : U.Ui = U.Ui.flag_on(U.Ui.flag_on(ui(projects), "p"), "other-project")
+    +canonical : String = J.Json.show(SLOT.Slot.sidebar(TV.Render.web(nav, J.Json.obj(Nil{}))))
+    C.Check.str("navigation fixture includes other project", Bool.show(String.contains(canonical, "Other open project")), "True")
+    C.Check.str("navigation fixture includes other thread", Bool.show(String.contains(canonical, "Other open thread")), "True")
+    C.Check.str("framed conversation retains complete sidebar", Bool.show(navigation(nav, True{})), "True")
+    C.Check.str("legacy conversation retains complete sidebar", Bool.show(navigation(nav, False{})), "True")
+    C.Check.str("active sidebar survives framing", Bool.show(navigation(U.Ui.adopt.raw(nav, M.State.setting(projects, "sidebar.view", "active")), True{})), "True")
+    C.Check.str("filtered sidebar survives framing", Bool.show(navigation(U.Ui.scratch_set(nav, "@f.pq", "Other"), True{})), "True")
     +person : M.State = M.State.replay([M.MessagePosted{"t", "person", M.User{}, "Real user text", 2n}], state())
     +blank : M.State = M.State.replay([M.MessagePosted{"t", "blank", M.Assistant{}, " \n\t", 2n}], state())
     +internal : M.State = M.State.replay([M.ActivityLogged{"t", "ride:receipt", "info", "ride", "Hidden receipt", 3n}], state())
