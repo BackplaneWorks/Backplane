@@ -101,8 +101,8 @@ class HeavyGuardTest(unittest.TestCase):
 
     def test_nested_process_inherits_real_lock(self):
         script = """import importlib.util,sys
-s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;g.host_available=lambda:100*g.GIB;sys.exit(g.main(sys.argv[2:]))"""
-        wrapper = [sys.executable, '-c', script, str(ROOT / 'scripts/heavy-guard.py')]
+s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.module_from_spec(s);s.loader.exec_module(g);g.available=lambda:100*g.GIB;g.host_available=lambda:100*g.GIB;g.lock_path=lambda:__import__('pathlib').Path(sys.argv[2]);sys.exit(g.main(sys.argv[3:]))"""
+        wrapper = [sys.executable, '-c', script, str(ROOT / 'scripts/heavy-guard.py'), str(Path(self.temp.name) / 'nested.lock')]
         child = [*wrapper, 'check', '--', sys.executable, '-c', 'print("nested-ok")']
         p = subprocess.run([*wrapper, 'check', '--', *child], text=True, capture_output=True, timeout=5)
         self.assertEqual(p.returncode, 0, p.stderr)
