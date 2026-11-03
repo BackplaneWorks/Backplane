@@ -46,6 +46,28 @@ def Copy.fx.k(home: Bool, o: B.Out) -> List<&2, B.Out>:
     case False{}:
       Nil{}
 
+# A new thread's worktree (the server's own "worktree" job) is git that
+# writes: a copy makes none, but runs the job on "/", no repository, so the
+# server says at once that the thread works in the project folder
+# (WtJob.skip). Dropped, the thread's first message waited for the hub's
+# 120 s fallback (Wt.stale), and every timing on a copy started late.
+def Copy.nowhere() -> String:
+  "/"
+
+def Copy.git.wt(wt: Bool, o: B.Out, +client: U32, +id: String) -> List<&2, B.Out>:
+  match wt o:
+    case True{} B.Git{c, i, j, th, _, a, b}:
+      [B.Git{c, i, j, th, Copy.nowhere(), a, b}]
+    case _ _:
+      Copy.git.k(False{}, o, client, id)
+
+def Copy.git.pick(reads: Bool, wt: Bool, o: B.Out, +client: U32, +id: String) -> List<&2, B.Out>:
+  match reads:
+    case True{}:
+      [o]
+    case False{}:
+      Copy.git.wt(wt, o, client, id)
+
 # what a copy hub does of one out: nothing for what acts outside
 def Copy.out(o: B.Out) -> List<&2, B.Out>:
   match o:
@@ -73,7 +95,8 @@ def Copy.out(o: B.Out) -> List<&2, B.Out>:
     case B.ShipNext{_}: Nil{}
     case B.Teach{_, _, _, _}: Nil{}
     case B.FarQueued{}: Nil{}
-    case B.Git{+client, +id, +job, th, cwd, a, b}: Copy.git.k(Copy.git.reads(job), B.Git{client, id, job, th, cwd, a, b}, client, id)
+    case B.Git{+client, +id, +job, th, cwd, a, b}:
+      Copy.git.pick(Copy.git.reads(job), Bool.and(String.eq(job, "worktree"), U32.is_eq(client, 0)), B.Git{client, id, job, th, cwd, a, b}, client, id)
     case B.BotFx{+kind, a, b, c}: Copy.fx.k(Copy.fx.home(kind), B.BotFx{kind, a, b, c})
     case _: [o]
 
