@@ -712,3 +712,64 @@ retain identities and raw-artifact hashes. Hub/web/mobile failed attempts cost
 tiny v3 controls21credit-s ($0.00021). All default Boat sandboxes were deleted
 and deletion verified. No larger VM or cap increase was used. **No qualified
 memory-fix trigger exists yet; RC2 remains paused.**
+
+### Focused refview regression isolation (2026-11-03)
+
+These use the same frozen33ce closure, unchanged2.0.36 checker and pinned
+Bun1.3.10. Each compiler scope has a3.7GB hard cap and zero swap; the separate
+512MiB controller keeps the sum of hard caps below4GiB. They are focused
+memory experiments, not hub/web/mobile release qualifications.
+
+| Change | Before | After |
+|---|---|---|
+| Matched original whole-book refview baseline | Paging variants failed without a matched focused original measurement | Original passes in22.50s at2,671,396KiB actual GNU peak RSS; sampled cgroup peak2,699,665,408bytes. Profile checkpoints alone miss the real peak (1,917,216KiB). Subsequent qualification readers now require actual GNU receipts. |
+| Lazy-body paging v4, annotation interning v5, weak identities v6 | Refview fails at3.7GB cap | Still fail at the same cap; scope wall56.504/24.635/27.168s respectively. V5 isolates failure inside kernel checking `Card.of`, before spilling. Annotation disk size falls but this does not qualify memory. |
+| Retain exact type-interface graphs v7 | Paging reconstructed interface graphs; `Card.of` checking exceeded cap | `Card.of` kernel check finishes at26.425s/RSS1,907,806,208bytes. Failure moves to spill storage, scope killed42.401s. No qualified output. |
+| Preserve binary lower-term graph sharing v8 | JSON storage expands shared graph nodes | Tiny graph-sharing/byte-verdict controls pass, but the focused run still fails89.201s into its compiler scope. Markers isolate the remaining expansion to re-lowering the original higher-order source body, before writing the checked result. |
+
+Later candidates retain exact parsed source bodies and interfaces, paging
+only checked lower results. The measurements below establish their outcomes. No checker/law/proof
+change or source rewrite is used. Original positive tiny outputs are reused
+by hash; only changed paging modes are rerun. Exact source/tool input checks,
+typed false-proof, forward-reference and corruption controls remain required.
+
+[Baseline resource evidence](compiler-memory/paging-experiments/baseline-v6.json)
+and [latest failed phase evidence](compiler-memory/paging-experiments/v8.json)
+include raw artifact hashes. New v4 tiny controls23credit-s, focused v4/v5/v6
+73/59/49credit-s, original baseline34credit-s, v7/v8 combined controls+focus
+65/123credit-s:426credit-s total (**$0.00426**). Every sandbox was deleted and
+deletion verified. These results do not authorize release resume.
+
+### Checked-result paging and resident-memory diagnosis (2026-11-03)
+
+All measurements retain the same frozen33ce source and unmodified checker.
+The compiler cap remains3,699,998,720bytes, zero swap, with a separate512MiB
+controller. Controller-only peak RSS near264MiB is **not compiler RSS**.
+
+| Change | Before | After |
+|---|---|---|
+| V9 retain source bodies; v10b higher-interface handles | Re-lowering source bodies expands shared graphs | Both still hit compiler cap:47.038/54.565s scope wall. No usable output. |
+| V11 stream checked graphs with shared higher interfaces | Spill construction exceeded cap | Module checking and spill finish, but verdict traversal reloads checked results and hits cap at87.711s. |
+| V12 separate exact dependency walk | Verdict reloads results | Additional graph walk exceeds cap at66.136s. |
+| V13 collect exact dependency names during the same streamed traversal | V12 exceeds cap | Focused refview passes:61.776s, actual GNU peak3,540,544KiB, zero swap. Original whole-book focused baseline22.50s/2,671,396KiB remains faster and smaller; this is a paging milestone, **not a standalone improvement or release qualification**.38 changed-mode controls and32 exact graph-reference comparisons pass. |
+| V13 frozen complete hub/web/mobile phases | Official hub147.340s/19,189,172KiB; web72.539s/8,773,704KiB | All three hit the unchanged3.7GB compiler cap:254.310/186.245/73.825s scope wall. Hub fails after core/cef; web reaches JS emission; mobile fails during Card.of. No final output identity can be claimed. |
+| V14 mobile check-only discards emitter IR after unchanged checker accepts it | V13 retains paged emitter IR | All41 tiny controls completed across the same-compiler v14/v14b receipts, with nine remaining invocations rerun after correcting expected PASS text. Actual mobile still hits cap at102.946s in core/msgs, with stored_bytes=0/store_reads=0. No mobile pass or new bridge emission. |
+| Owned mobile prefix memory diagnostic | OOM receipts lack resident-memory attribution | Captured live process mappings and JSC counters; deliberately stopped only its own compiler scope at56.968s near3.0GB cgroup usage. Last mapping sample:anonymous2,760,568,832bytes; stack569,344bytes; file44,969,984bytes; anonymous executable2,289,664bytes. Stack limits reserve address space but stack residency is small here. **Diagnostic completion is not a compile pass.** |
+
+The one-shot JSC census was taken before an explicit collection: its
+heapSize/objectCount describe the last collection, while objectTypeCounts
+include subsequent allocations. Do not interpret its4.6MB heapSize as the
+live retained heap. A separate post-collection comparison is required;
+[Bun documents this counter distinction](https://bun.sh/reference/bun/jsc/heapStats).
+
+[Focused v13 receipt](compiler-memory/paging-experiments/v13.json),
+[full hub](compiler-memory/paging-experiments/hub-v13.json),
+[web](compiler-memory/paging-experiments/web-v13.json),
+[mobile](compiler-memory/paging-experiments/mobile-v13.json),
+[check-only mobile](compiler-memory/paging-experiments/mobile-v14b.json) and
+[diagnostic](compiler-memory/paging-experiments/mobile-diagnostic-v14.json)
+retain exact source/tool identities and hashes of raw artifacts. V9/v10b/v11/v12
+cost68/74/108/107credit-s; focused v13 costs85; complete v13 phases283/203/90;
+v14 harness-only14; v14b137; diagnostic76. Total1,245credit-s (**$0.01245**).
+All sandboxes were deleted and deletion verified. No release resume, installed
+compiler replacement, app execution or proof/law change follows these receipts.
