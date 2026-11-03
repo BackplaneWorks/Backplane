@@ -58,3 +58,31 @@ Proof receipts remain trusted same-user inputs, and the local cache uses a
 same-user MAC. Shared/CI main-seeded trust, sliced-worker integration and actual
 capped cold/warm/changed proof timing remain follow-ups. This change neither
 qualifies a release nor claims the two-minute PR target has been reached.
+
+## Portable input modes after PR #860
+
+PR #860 makes canonical partition modes portable across host 0664 and Boat 0600
+umasks: executable files use Git mode 0755, other readable regular files 0644.
+It rejects special permission bits and unreadable or non-regular source inputs.
+The CI owner independently reviewed its exact head and passed 41 planner/guard
+controls in 0.394s before normal merge, with a fresh merged LAWS/PROOF shape
+check. No proof or Boat run was needed. Its merge receipt and tests are saved
+as `PR860-MERGED.json` and `PR860-TESTS.txt` beside this document.
+
+The cache now uses that same mode function for generated and imported inputs.
+Raw permission bits previously caused safe false misses despite an identical
+portable partition. A two-law fixture retains 0/2 raw-mode keys versus 2/2
+portable keys after chmod of every input from 0644 to0600. The real planner/key
+code runs with a mocked toolchain; no proofs or passes are produced. Key plans
+took 10.640ms versus 10.446ms, one observation each; no speed claim. The complete
+comparison took 0.12s /28,456KiB peak RSS, $0 ([MODES.json](MODES.json),
+[time](MODES.time), [reproducer](measure-modes.py)). Existing executable-bit
+invalidation remains; new controls reject special/unreadable generated files.
+Lane 4 independently reviewed the one-line change and passed 57 cache/closure
+controls. Its suggested extra executable-source check is included: 0755 to0700
+retains a 0755 key while non-executable 0644 to0600 retains 0644.
+
+The first test run expected only value/cache errors for unreadable generated
+files; verification correctly rejected those files earlier with PermissionError.
+The test now also accepts that rejection class. The original runner summary is
+retained as `PORTABLE-TESTS-first.txt`; production behavior was not relaxed.
