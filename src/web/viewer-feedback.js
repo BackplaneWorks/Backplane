@@ -1,7 +1,7 @@
 // Only workspace destinations coalesce; sends, destructive actions, field edits
 // and terminal toggles retain their ordered, once-only transport semantics.
 export function viewerChoice(action, value) {
-  return action === 'view-kind' && ['board','schematic','3d','split','browser'].includes(value)
+  return ['view-kind','home-view'].includes(action) && ['board','schematic','3d','split','browser'].includes(value)
     || ['mech','fm','diff'].includes(action) && value === ''
     || action === 'rv-page' && value === 'bom';
 }

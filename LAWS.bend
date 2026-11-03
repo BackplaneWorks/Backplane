@@ -15871,6 +15871,13 @@ law home_owner_round_trip:
   for project: String
   {PHOME.Home.project(PHOME.Home.owner(project)) == project : String}
 
+law home_split_requires_saved_documents:
+  {PHOME.Home.view_path(J.Null{}, "split") == "" : String}
+
+law home_3d_uses_saved_board:
+  for contents: J.Json
+  {PHOME.Home.view_path(contents, "3d") == PHOME.Home.path(contents, "board") : String}
+
 # A continuation cannot become a standalone request.
 law websocket_orphan_continuation_is_rejected:
   for bytes: List<&2, U32>
@@ -15900,3 +15907,14 @@ law autosettle_finished_work_wake_not_running:
 
 law autosettle_live_thread_wake_held:
   {AUTOS.Auto.wake.active.kind("thread", "t", Map.new(&2, Nat), Map.set(&2, Nat, Map.new(&2, Nat), "t", 1n)) == True{} : Bool}
+
+# Compact/full presentation retains the viewer owner and cannot launch work.
+law home_viewer_size_keeps_owner:
+  for u: U.Ui
+  for value: String
+  {U.Ui.sel(U.Act.ui(U.Home.viewer.size(u, value))) == U.Ui.sel(u) : String}
+
+law home_viewer_size_is_local:
+  for u: U.Ui
+  for value: String
+  {U.Act.cmds(U.Home.viewer.size(u, value)) == Nil{} : List<&2, U.Cmd>}

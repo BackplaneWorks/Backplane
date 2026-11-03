@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -1325,7 +1326,53 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
 // source choices, and a way back.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun SplitPlotPane(m: AppModel, v: Viewer, modifier: Modifier) {
+    val frame = m.plots.cachedFrame(v.layers)
+    val mesh = m.plots.cachedMesh(v.key)
+    Column(modifier) {
+        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(v.choices.firstOrNull { it.value == v.open }?.label ?: v.open, Modifier.weight(1f))
+            TextButton(onClick = { m.act("view", v.open) }) { Text("Expand") }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize(), update = { s ->
+                s.bindSource((m.screen?.sel ?: "") + "|split|" + v.key)
+                s.margin = v.margin; s.zmin = v.zmin; s.zmax = v.zmax; s.fadeMs = v.fade
+                s.renderer.top = v.top; s.renderer.bottom = v.bottom; s.renderer.orbit.fov = v.fov
+                s.setThree(v.open == "3d")
+                if (frame != null && frame.none.isEmpty()) s.show(frame, v.bg, v.slab, v.look)
+                if (v.open == "3d") s.mesh(mesh)
+                if (s.renderer.off != v.off || s.renderer.dim != v.dim || s.renderer.lift != v.lift) {
+                    s.renderer.off = v.off; s.renderer.dim = v.dim; s.renderer.lift = v.lift; s.requestRender()
+                }
+            })
+            if (frame == null) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            else if (frame.none.isNotEmpty()) Text(frame.none, Modifier.align(Alignment.Center).padding(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun SplitPlotScreen(m: AppModel, v: Viewer) {
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Split", Modifier.weight(1f).padding(12.dp))
+            IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, "Close viewer") }
+        }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            if (maxWidth > maxHeight) Row(Modifier.fillMaxSize()) {
+                v.panes.forEach { pane -> key(pane.key) { SplitPlotPane(m, pane, Modifier.weight(1f).fillMaxSize()) } }
+            } else Column(Modifier.fillMaxSize()) {
+                v.panes.forEach { pane -> key(pane.key) { SplitPlotPane(m, pane, Modifier.weight(1f).fillMaxWidth()) } }
+            }
+        }
+    }
+}
+
+@Composable
 private fun PlotScreen(m: AppModel, v: Viewer) {
+    if (v.open == "split") { SplitPlotScreen(m, v); return }
     var showReflow by remember { mutableStateOf(false) }
     if (showReflow) ReflowSheet(m) { showReflow = false }
     val lang = LocalBackplaneLanguage.current

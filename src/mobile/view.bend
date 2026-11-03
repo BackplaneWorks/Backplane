@@ -127,10 +127,13 @@ def View.on_part(+u: U.Ui) -> Bool:
   Bool.not(String.is_empty(View.part(u)))
 
 # the source the screen shows now
-def View.want(+u: U.Ui) -> String:
+def View.want.single(+u: U.Ui) -> String:
   Bool.pick(String, Bool.and(View.on_part(u), Bool.not(String.is_empty(U.Ui.root(u)))), "2|" ++ U.Ui.root(u) ++ "|" ++ View.part(u),
     Bool.pick(String, Bool.and(String.eq(View.kind(u), "3d"), Bool.not(String.is_empty(View.file(u)))), "2|" ++ U.Ui.root(u) ++ "|" ++ View.file(u),
     View.key.at(View.kind(u), U.Ui.root(u), View.src(u), Bool.and(String.eq(View.kind(u), "3d"), View.bare(u)))))
+
+def View.want(+u: U.Ui) -> String:
+  Bool.pick(String, String.eq(View.kind(u), "split"), U.Solid.want(u), View.want.single(u))
 
 # the file a source names: a version, a schematic's sheet, or Mech's part
 def View.path(+u: U.Ui) -> String:
@@ -149,8 +152,15 @@ def View.join(a: U.Act, cmds: List<&2, U.Cmd>) -> U.Act:
 # (tree: where a schematic's hierarchy starts, client.bend's Bd.tree: in a
 # project with several boards, the board's own, so the Sheet menu lists its
 # sheets)
+def View.sync.ask.split(split: Bool, +u: U.Ui, +want: String, +kind: String, +root: String, +path: String, cmds: List<&2, U.Cmd>) -> U.Act:
+  match split:
+    case True{}:
+      U.Solid.sync.k(False{}, U.Ui.scratch_set(u, "@view.at", want), want, "split:sb3", path, root, U.Bd.tree(u, path), U.Split.sheet(u), cmds)
+    case False{}:
+      View.join(U.Ui.rpc(U.Ui.scratch_set(u, "@view.at", want), "kicad.watch", List.append(&2, J.KV, View.ask(want, kind, root, path), [J.KV{"tree", J.Str{U.Bd.tree(u, path)}}])), cmds)
+
 def View.sync.ask(+u: U.Ui, +want: String, +kind: String, +root: String, +path: String, cmds: List<&2, U.Cmd>) -> U.Act:
-  View.join(U.Ui.rpc(U.Ui.scratch_set(u, "@view.at", want), "kicad.watch", List.append(&2, J.KV, View.ask(want, kind, root, path), [J.KV{"tree", J.Str{U.Bd.tree(u, path)}}])), cmds)
+  View.sync.ask.split(String.eq(kind, "split"), u, want, kind, root, path, cmds)
 
 def View.sync.k(same: Bool, u: U.Ui, +want: String, +kind: String, +root: String, +path: String, cmds: List<&2, U.Cmd>) -> U.Act:
   match same:
@@ -314,8 +324,23 @@ def View.open.go.k(mech: Bool, +u: U.Ui, +v: String) -> U.Act:
     case False{}:
       View.open.back(Bool.and(String.eq(U.Ui.view_get(u, "view.kind"), "review"), Bool.or(String.eq(v, "board"), String.eq(v, "schematic"))), u, v)
 
+def View.open.home(a: U.Act, +v: String) -> U.Act:
+  match a:
+    case U.Act{+u, cs}:
+      View.join(View.fm.to(U.Act{u, Nil{}}, v, U.Ui.view_get(u, "view.path")), cs)
+
+def View.open.home.valid(valid: Bool, u: U.Ui, +v: String) -> U.Act:
+  match valid:
+    case True{}: View.open.home(U.Home.view(u, v), v)
+    case False{}: U.Act{u, Nil{}}
+
+def View.open.cad(home: Bool, +u: U.Ui, +v: String) -> U.Act:
+  match home:
+    case True{}: View.open.home.valid(Bool.not(String.is_empty(PH.Home.view_path(U.Home.contents(u), v))), u, v)
+    case False{}: View.open.go.k(String.eq(v, "mech"), u, v)
+
 def View.open.go(+u: U.Ui, +v: String) -> U.Act:
-  View.open.go.k(String.eq(v, "mech"), u, v)
+  View.open.cad(Bool.and(PH.Home.is(U.Ui.sel(u)), Bool.or(View.boards.on(v), String.eq(v, "split"))), u, v)
 
 # (Files asks the hub for the folder last shown)
 def View.open.rv(rv: Bool, +u: U.Ui, +v: String) -> U.Act:
@@ -1035,6 +1060,7 @@ def View.home.choices(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
     View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "board"))), MSG.T.viewer.board(lc), "board", u),
     View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "schematic"))), MSG.T.viewer.schematic(lc), "schematic", u),
     View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "board"))), "3D", "3d", u),
+    View.home.choice(PH.Home.can_split(c), "Split", "split", u),
     View.home.choice(Bool.not(String.is_empty(PH.Home.path(c, "mech"))), MSG.T.viewer.mech(lc), "mech", u)])
 
 def View.choices(home: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
@@ -1044,7 +1070,7 @@ def View.choices(home: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
       [View.choice(MSG.T.viewer.board(lc), "board", View.kind(u)), View.choice(MSG.T.viewer.schematic(lc), "schematic", View.kind(u)), View.choice("3D", "3d", View.kind(u)), View.choice(MSG.T.viewer.mech(lc), "mech", Bool.pick(String, View.mech(u), "mech", "")),
        View.choice(MSG.T.viewer.files(lc), "files", Bool.pick(String, View.fm(u), "files", "")), View.choice(MSG.T.viewer.review(lc), "review", View.kind(u))])
 
-def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
+def View.json.single(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
   J.Json.obj([J.KV{"open", J.Str{Bool.pick(String, Bool.or(Bool.or(Bool.or(Bool.not(String.is_empty(View.want(u))), View.mech(u)), View.fm(u)), String.eq(View.kind(u), "review")), View.kind(u), "")}}, J.KV{"key", J.Str{View.want(u)}},
     J.KV{"comments", Rc.json(u)},
     J.KV{"review", Rv.json(lc, String.eq(View.kind(u), "review"), u, rb)},
@@ -1062,6 +1088,27 @@ def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
     J.KV{"top", J.Json.arr(View.nums(View.top()))}, J.KV{"bottom", J.Json.arr(View.nums(View.bottom()))},
     J.KV{"slab", J.Num{"2375219"}}, J.KV{"fov", J.Num{"35"}},
     J.KV{"picked", J.Str{U.Ui.scratch(u, "@pick")}}, J.KV{"card", Insp.json(U.Ui.scratch(u, "@card"))}])
+
+# The enclosing Split owns one watch and all navigation. Each native pane
+# uses its existing renderer, with an exact saved source key.
+def View.split.pane(+lc: I.Loc, +u: U.Ui, +kind: String, path: String) -> J.Json:
+  View.json.single(lc, U.Ui.scratch_set(U.Ui.scratch_set(u, View.slot(u), kind), "@view.file:" ++ U.Ui.sel(u), path), J.Null{})
+
+def View.split.panes(on: Bool, +lc: I.Loc, +u: U.Ui) -> J.Json:
+  match on:
+    case False{}: J.Null{}
+    case True{}:
+      J.Json.arr([View.split.pane(lc, u, "schematic", U.Split.sheet(u)),
+        View.split.pane(lc, u, "board", U.Ui.view_get(u, "view.path")),
+        View.split.pane(lc, u, "3d", U.Ui.view_get(u, "view.path"))])
+
+def View.json.panes(node: J.Json, panes: J.Json) -> J.Json:
+  match node:
+    case J.Obj{fs}: J.Obj{J.Field{"panes", panes, fs}}
+    case other: other
+
+def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
+  View.json.panes(View.json.single(lc, u, rb), View.split.panes(String.eq(View.kind(u), "split"), lc, u))
 
 def View.mention.text(+draft: String, +info: String) -> String:
   draft ++ Bool.pick(String, String.is_empty(draft), "", " ") ++ "[" ++ info ++ "] "
