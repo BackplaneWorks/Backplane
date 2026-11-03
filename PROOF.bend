@@ -15726,3 +15726,9 @@ def Laws.autosettle_new_turn_reopens():
 
 def Laws.conversation_root_preserves_navigation(root):
   {==}
+
+def Laws.autosettle_delegation_seed_not_personal(text):
+  {==}
+
+def Laws.autosettle_human_followup_is_personal():
+  {==}

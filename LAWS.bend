@@ -15841,3 +15841,12 @@ law autosettle_new_turn_reopens:
 law conversation_root_preserves_navigation:
   for root: J.Json
   {CONVWINDOW.Window.root(root) == root : J.Json}
+
+# A delegation seed has system provenance despite its historical User role.
+# Only its exact generated ID is exempt; a distinct human input stays personal.
+law autosettle_delegation_seed_not_personal:
+  for text: String
+  {AUTOS.Auto.direct.seed("m100-4", text, "m100-4") == False{} : Bool}
+
+law autosettle_human_followup_is_personal:
+  {AUTOS.Auto.direct.seed("human-followup", "More work", "m100-4") == True{} : Bool}
