@@ -24,7 +24,7 @@
   ],
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
-    "src/core/account-fallback.bend": "8344b22ff006509ab38f6c8de1787cc0740a804853ba09e5b676e9f716d44cc5",
+    "src/core/account-fallback.bend": "05ba18dd4ee4f3c1787f69711e376e9934f6782e12454f7fe25bb1d18f2f82fc",
     "src/core/accounts.bend": "c477544bc0984a54d7b80d3a0abdad2784efa5f46043f4070e6e500865892f34",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
@@ -838,5 +838,27 @@
       "src/core/account-fallback.bend"
     ],
     "scope": "JSON parser: UTF-16 surrogate pairs and invalid \\u digits rejected before building a scalar; account fallback: remaining same-provider accounts preferred before another provider. Neither reads Ui drafts, @ fields, sidebar image keys or transport; re-hashed so server builds of main pass the guard again."
+  },
+  "accountFallbackReview": {
+    "review": "docs/reviews/account-fallback-sidebar-20261103.md",
+    "sourceCommit": "3f43f3440697dec014a971783f627135feb9e2bd",
+    "changedClosureFiles": [
+      "src/core/account-fallback.bend"
+    ],
+    "priorManifestSHA256": "c9b3c75a74eacf9fd3ea050a6645593b03bb3b657123b11a757b1b3258418ab5",
+    "scope": "Only client call sites use unchanged Hold.profile.active in account Settings. Replacement ranking and legacy reset recovery read public account metadata, bindings and availability settings. No sidebar draft readers, unknown @ retention, private image keys, scanner, transport or recipient authority changes.",
+    "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+    "assertions": 24,
+    "fullOutputLogSHA256": "cd83cd83cb66e6c0ea17d490d0baf8502c2b965f711f5e731bbd391a9cd5612c",
+    "focusedSuites": [
+      "test/account_failover_test.bend",
+      "test/fallback_test.bend",
+      "test/accounts_test.bend"
+    ],
+    "focusedLogSHA256": "e01f1607c2f79f0b0c4822acde208ec04593ed08144e61c06d0a61b55850dc3c",
+    "policyProofLogSHA256": "931f1e664a679af1355a9ca547ac1daef9f7b14137bc7cc21b110b0cc504b5b1",
+    "work": "w-improvement-2df314cba25c4e9ae5c5fdd6a33314b3-1330605",
+    "boatJob": "j20261103030141-4140898",
+    "qualification": "Executed on exact sourceCommit; this review changes only the account-fallback dependency pin. Later unrelated main changes require their own review and combined qualification. No full repository proof, app build, installed runtime or real provider calls claimed."
   }
 }
