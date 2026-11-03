@@ -2,6 +2,14 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const idleEntry={active:()=>false,cancel(){}};
 const source=()=>fs.readFileSync(process.env.READER_HOST_SOURCE||path.join(__dirname,'../../src/web/host.js'),'utf8');
+test('only uninterrupted initial fill advertises newest intent while its older source page travels',()=>{
+ const src=source(),a=src.indexOf('pagePosition: () => {'),b=src.indexOf('\n      },',a);assert(a>0&&b>a);
+ let active=false,bottom=true;const position={anchor:'retained-message',offset:10},list={position:()=>position,atEnd:()=>bottom};
+ const read=vm.runInNewContext('('+src.slice(a+'pagePosition: '.length,b)+'})',{timelineList:()=>list,thin:{atNewest:()=>false},entryHistory:{active:()=>active},historyFillOwner:()=> 'owner'});
+ assert.equal(read().position.atEnd,false);assert.equal(read().followNewest,false);
+ active=true;assert.equal(read().followNewest,true);assert.equal(read().position.atEnd,true);
+ bottom=false;assert.equal(read().followNewest,false);assert.equal(read().position.atEnd,false);
+});
 test('entry fill waits for painted geometry and reconciles newest only after the merged return',async()=>{
  const {EntryHistory}=await import('../../src/web/entry-history.js'),entryHistory=new EntryHistory(),src=source(),
   check=src.slice(src.indexOf('function earlierCheck(tl)'),src.indexOf('function laterCheck(tl)')),
