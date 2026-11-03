@@ -1,5 +1,7 @@
 # Instant UI results
 
+**Test isolation correction:** These historical measurements came from the live hub. The harness wrongly created six real test conversations there. A TEST label and device pairing did not isolate those writes. Do not repeat this procedure. The replacement runner creates its own loopback hub, throwaway home and stand-in agents; it accepts no hub address or pairing input. The six live threads are left untouched for auto-settle. These numbers are retained as historical observations, not isolated-test results.
+
 Client candidate: merged-main base `92ddc7e46` plus the instant-actions changes, normally emitted with pinned Bend 2.0.36. Both final runs used the **installed 273b268cd backend**. The candidate module alone was substituted at its installed URL; the real hub HTML, origin, cookies, HTTP and WebSocket paths were retained. Raw artifact/source SHA256 receipts are in `web-manifest.json` and the Boat manifest. Nothing was installed by the test.
 
 Tests ran on `h@backplane` over Tailscale to `100.64.84.41:3787`, at 390×844 CSS pixels, DPR3, touch and an iPhone Safari UA. Chromium is emulation; WebKit is the real Linux WPE engine, not iPhone hardware or Mobile Safari. These are observed ranges from five thread switches, two bot switches and one send plus one reply, not p95/p99 claims.
@@ -19,7 +21,7 @@ Tests ran on `h@backplane` over Tailscale to `100.64.84.41:3787`, at 390×844 CS
 
 Cached/optimistic first-content gate passes in both engines. Cached bot navigation now issues **one `view.open`**, removing the previous sequential `view.action:bot` then `view.open`. Existing text-send optimism remains immediate and now also works during a cached view opening; an unresolved/changed backing conversation refuses an unissued send and restores the captured draft.
 
-**The entire request is not yet met:** completely uncached first content still exceeds 300 ms on the old hub. This client patch does not claim next-frame delivery of unknown server data or a fast canonical settlement. Server performance PR776 has merged but was not installed for these comparisons. Re-measure the installed merged build before claiming the cold target.
+**The entire request is not yet met:** completely uncached first content still exceeds 300 ms on the old hub. This client patch does not claim next-frame delivery of unknown server data or a fast canonical settlement. Server performance PR776 has merged but was not installed for these comparisons. Repeat measurements against an isolated hub built from the merged revision before claiming the cold target; never run this write harness on the installed live hub.
 
 ## Per-action final measurements
 
@@ -88,3 +90,18 @@ No real device was revoked. Real messages were confined to dedicated TEST conver
 ## Proof and final source checks
 
 On integrated92ddc7e, the explicit `bend PROOF.bend` run completed with the repository-accepted foreign-code notice (2558 effect-dependent definitions), no other failure lines. This does not prove those foreign effects or the JavaScript state machine. Targeted final Node suite:256 pass; the send lifecycle test also reports13 internal cases. The `scripts/check.sh check` type-check phase is recorded separately.
+
+## Isolated harness correction validation
+
+The replacement runner was validated on `h@backplane` using a separately spawned loopback hub, a fresh `bp-instant-isolated-*` home and stand-in agents. These runs did not access the live hub or its data. Each fixture had seven seeded synthetic conversations (five threads and two bot backing threads); both user messages and both stand-in ACKs were recorded in that private event log. No additional conversation was created by either browser. The child process groups stopped after private-device revocation; fixture directories remain available for inspection.
+
+| Engine | Cached switch first content ms | Send / reply first content ms | Private stand-in ACKs | Private device revoked |
+|---|---:|---:|---:|---|
+| Chromium | 19.4–28.1 | 21.5 / 9.8 | 2 | True |
+| Webkit | 25.0–40.0 | 19.0 / 28.0 | 2 | True |
+
+Both runs passed the unchanged 100 ms cached/send gate. Chromium had no browser diagnostics; WebKit retained its pre-existing ResizeObserver notification as a warning. Seven isolation regression tests pass, including zero requests to a canary under legacy target invocation, credential/home/CLI/stdin rejection, child environment isolation and HTTP/WebSocket/blob origin fences. Together with the existing cache/prefetch/send tests, the focused run passed 14 tests.
+
+Raw reports: `isolation-chromium-final.json`, `isolation-webkit-final.json` (local artifacts). Frozen hub binary SHA256: `64e4f1adebde1859b87624a10c8eb2d714d3292c3fdd7acb6ea0f8abaf9f0f6c`. This loopback fixture does not measure tailnet transport or physical iPhone performance and does not replace the historical measurements above.
+
+The correction’s required `bend PROOF.bend` ran on `h@backplane` with a private pinned Bend 2.0.36/Base copy, the unchanged Bend closure at `d8bd865d2`, the remote bend guard and 18 GiB admission. The repository’s `bend_verdict` accepted only the foreign-effect notice (exit 0 wrapper); no pure proof failure was accepted. No Bend laws or source were changed by this correction.
