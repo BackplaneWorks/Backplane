@@ -1471,3 +1471,27 @@ test('project-name navigation uses a project owner and preserves its separate ca
  assert.equal(f.getSession().drafts['project-home-board-project'],'New project question');
  assert.deepEqual(f.sent.at(-1).p.target,{kind:'project',id:'board-project'});
 });
+
+test('folded tools cannot exhaust loading or evict the latest human and assistant text',async()=>{
+ const {EntryHistory}=await import('../../src/web/entry-history.js'),fill=new EntryHistory(),gone=[],f=await fixture({letGo:ids=>gone.push(...ids)});
+ f.host.greeting(f.greeting);
+ const window=(n,messages=[])=>({ids:Array.from({length:32},(_,i)=>'raw-'+n+'-'+i),historyUnits:['fold:first-call',...messages],messageIds:messages,contextMessages:['human','agent'],older:'older-'+n,hasMore:true,newer:n*16,remaining:2000-n*16,anchor:{id:'',offset:0},partial:[]});
+ f.host.receive(f.reply(undefined,{window:window(0,['agent'])}));
+ fill.arm('owner',f.host.window.remaining,f.host.window.contextMessages);
+ for(let n=1;n<=40;n++){
+  assert(fill.check('owner',f.host,true),'one visible assistant message does not replace the human context');
+  assert.notEqual(f.sent.at(-1).p.cursor,'');
+  f.host.receive(f.reply(undefined,{window:window(n,n===40?['human']:[])}));
+ }
+ assert.equal(gone.length,0,'more than 1200 folded source rows do not evict text or the newest bridge');
+ assert(fill.check('owner',f.host,false));assert.equal(f.sent.at(-1).p.cursor,'');
+ f.host.receive(f.reply(undefined,{window:{...window(0,['agent']),newer:0}}));
+ assert.equal(fill.check('owner',f.host,false),false);
+ assert(f.host.held.pages.some(p=>p.messages.includes('human')));assert(f.host.held.pages.some(p=>p.messages.includes('agent')));
+ const sent=f.sent.length;for(let n=0;n<10;n++)fill.check('owner',f.host,false);assert.equal(f.sent.length,sent,'completed context does not rearm on live paints');
+});
+
+test('a conversation with no text does not scan tool history on entry',async()=>{
+ const {EntryHistory}=await import('../../src/web/entry-history.js'),fill=new EntryHistory(),f=await fixture();f.open();
+ fill.arm('owner',100000,[]);assert.equal(fill.check('owner',f.host,false),false);assert.equal(f.sent.length,1);
+});

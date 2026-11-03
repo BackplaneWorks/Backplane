@@ -45,6 +45,7 @@ export function validateThinResult(r, input) {
     if (r.nextTarget) return true;
     const w = r.window;
     return object(w) && Array.isArray(w.ids) && w.ids.length <= 32 && w.ids.every(id => string(id) && !!id)
+      && ['historyUnits', 'messageIds', 'contextMessages'].every(key => w[key] === undefined || Array.isArray(w[key]) && w[key].length <= (key === 'historyUnits' ? 64 : key === 'messageIds' ? 32 : 2) && w[key].every(id => string(id) && !!id))
       && new Set(w.ids).size === w.ids.length && string(w.older) && flag(w.hasMore) && (!w.hasMore || !!w.older)
       && (w.olderNext === undefined || string(w.olderNext) && (!w.olderNext || !!w.older))
       && object(w.anchor) && string(w.anchor.id) && Number.isInteger(w.anchor.offset) && w.anchor.offset >= 0 && w.anchor.offset <= 2 ** 32 - 1

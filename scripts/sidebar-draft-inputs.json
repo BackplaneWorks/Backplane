@@ -145,7 +145,7 @@
     "src/core/thin-chat.bend": "b654c26082a5b02b40a3eb6092744fd4e2f6befda5d4757eb2f8a55368fdceae",
     "src/core/thin-wire.bend": "95299885f65f3dea85bf8a3bea4e0e5ae8bcbf3ebfb44b699cacb2cf6690454c",
     "src/core/thin.bend": "49445e60244e4820224d39989d0d22fc6ff59f049018d26bd29915b25ba091f0",
-    "src/core/thinq.bend": "af71723c48b16bff269fdeb5871277749d57e42783c81dd6e1f0153477c7dcbf",
+    "src/core/thinq.bend": "8ced231068c9ba4001e5ef98cd6c248bfd1657b671949529906dff7f613b8a4a",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
     "src/core/todo.bend": "a06c2128de2e9e5de4f2ec6a4134bc740de953c316f3343cd149ec37ecee796f",
     "src/core/tools.bend": "4f104e255ae1222506c72fdf9f68f649091f7fe32add53950837c0d459e02a6b",
@@ -167,8 +167,8 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "5ca0102839562f4129987deec77baba90fb75337bdb032816e50ae853c2855a0",
-    "src/mobile/screen.bend": "bd9c954d773e63646fdb525226e6ba78fb8dd4c5dabaedbe4d8acaa069a932da",
-    "src/server/thin-actor.bend": "de615c65081cfb79184c48159131c72e9dbd00b06d9b57a99994fc3db76edd63",
+    "src/mobile/screen.bend": "3ba150863ace5caaae9ec4bfa06bbda243cdf5d4fa6873da5cbe0b93ef58b32f",
+    "src/server/thin-actor.bend": "c21deea066c798c1b49b4ca90ddb4c04c6dfa01bfe3794631affc5bc6683ca14",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-side-index.bend": "a90f7c343b70767d371cc2d44c989684489f70c03a7f96fa04911b8b4509e4b2",
@@ -176,7 +176,7 @@
     "src/server/thin-signal-text.bend": "9340744b270552b7f88a8fb31864fb639b62f013921649a733bc5e0aa0b12994",
     "src/server/thin-signals.bend": "43d380d04ab73c9fcb3fc7dcc307c47b3c93be43a5a2dda09c7f549c254274ef",
     "src/server/thin-splice.bend": "d1bc1c8e7710e0efba2abcf3fa599391d5d480eb37ced2a8a4f079d7b079a2be",
-    "src/server/thin-view.bend": "cbe73569ef35120bd159c8ad0dfe9b4ae37513ef258c5e29a0c6af129bb63418",
+    "src/server/thin-view.bend": "49110d1eff65f1760aceeafdd446b48083227e5ddac4a18e13b4c5ab42f0a92f",
     "src/server/thinstore.bend": "23c378c87b43907157c88b61a6a259df969b51011bcfc97d27015577cc905f2b",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
     "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
@@ -194,7 +194,8 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "7ced34096836655e4a058704fd45c16d0ca7b02e916e2392e7fec995a0bb8ce8"
+    "src/web/view.bend": "0e598f9dfa50005948f0550c3e74e3dae8d953f2d31a4defd686b1cd312c919f",
+    "src/core/message-context.bend": "7e19596b3acec6ec7a1a10e6643c423ada897a6ee490a58b4a2b39a9767b677d"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

@@ -15774,6 +15774,12 @@ def Laws.autosettle_delegation_seed_not_personal(text):
 def Laws.autosettle_human_followup_is_personal():
   {==}
 
+def Laws.context_tool_keeps_text_allowance(es):
+  {==}
+
+def Laws.context_closed_run_is_one_display_row(e, id, label, live):
+  {==}
+
 def Laws.stored_wire_cache_is_empty(xs):
   {==}
 
