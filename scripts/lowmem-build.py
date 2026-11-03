@@ -599,6 +599,10 @@ def run(args):
             or any((reference.get('source') or {}).get(k) != source[k] for k in ('head', 'tree'))):
         report.update(state='unqualified', reason='reference emit is missing, not from a verified producer, or for another commit/tree')
         return unqualified(args, report, report['reason'])
+    missing = sorted(k for k in kinds & {'hub', 'web', 'mobile'} if not (reference.get('outputs') or {}).get(k))
+    if missing:  # no reference, no comparison: refuse before spending any job (the frozen producer has no mobile output)
+        report.update(state='unqualified', reason='reference emit has no output for: ' + ', '.join(missing))
+        return unqualified(args, report, report['reason'])
     t0 = time.monotonic()
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel or len(jobs)) as pool:

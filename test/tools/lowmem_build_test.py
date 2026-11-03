@@ -438,6 +438,39 @@ class RealScope(unittest.TestCase):
             self.assertIsNone(r['exit']); self.assertNotIn('command', r['phases']); self.assertIsNone(r['controller'])
 
 
+class MergedGuard(unittest.TestCase):
+    """The worker argv this harness builds is accepted by the repository's own heavy-guard (merged PR #854)."""
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('guard', ROOT / 'scripts/heavy-guard.py')
+        self.g = importlib.util.module_from_spec(spec); spec.loader.exec_module(self.g)
+        self.py = str(Path(sys.executable).resolve())
+
+    def worker(self, job, out='build/lowmem/r/x'):
+        return [self.py, str(ROOT / 'scripts/lowmem-build.py'), 'worker', '--id', job['id'], '--out', out, '--cap-bytes', str(CAP),
+                '--timeout', '3000', '--protect', 'bend.ts=/p', *(['--copy', job['copy']] if job.get('copy') else []), '--', *job['cmd']]
+
+    def test_compile_shapes_accepted_and_others_refused(self):
+        for kind in ('hub', 'web', 'mobile'):
+            job = {'id': kind, 'cmd': lm.FIXED[kind][0]}
+            self.assertTrue(self.g.worker_contract('compile-shard', self.worker(job)), kind)
+        bad = {'id': 'hub', 'cmd': ['bend', 'src/server/main.bend', '-o', '/tmp/evil.js']}
+        self.assertFalse(self.g.worker_contract('compile-shard', self.worker(bad)))
+        self.assertFalse(self.g.worker_contract('compile-shard', self.worker({'id': 'h', 'cmd': ['sh', '-c', 'bend PROOF.bend']})))
+
+    def test_proof_shape_accepted_and_sh_c_refused(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as t:
+            d = Path(t); (d / 'manifest.json').write_text(json.dumps({'shards': [{'id': '000'}]}))
+            (job,) = lm.proof_jobs(d)
+        self.assertTrue(self.g.worker_contract('proof-shard', self.worker(job)))
+        self.assertFalse(self.g.worker_contract('proof-shard', self.worker({**job, 'cmd': ['sh', '-c', 'x']})))
+
+    def test_cap_over_shard_cap_refused(self):
+        w = self.worker({'id': 'hub', 'cmd': lm.FIXED['hub'][0]})
+        w[w.index('--cap-bytes') + 1] = str(self.g.SHARD_CAP + 1)
+        self.assertFalse(self.g.worker_contract('compile-shard', w))
+
+
 class Cli(unittest.TestCase):
     def cli(self, *a):
         return subprocess.run([sys.executable, str(ROOT / 'scripts/lowmem-build.py'), *a], capture_output=True, text=True)
@@ -463,6 +496,22 @@ class Cli(unittest.TestCase):
             p = self.cli('run', '--jobs', 'hub', '--workdir', t, '--runner', 'local', '--qualification', str(q))
             self.assertEqual(p.returncode, 20)
             self.assertIn('NOT USED', p.stderr)
+
+    def test_reference_without_mobile_refuses_before_any_job(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            src = lm.source_identity()
+            if not src['clean']:
+                self.skipTest('needs a clean tree')
+            q = {**QUAL, 'source': {k: src[k] for k in ('head', 'tree', 'closure_sha256')}, 'clean': True}
+            q['source']['clean'] = True
+            ref = {'schema': 2, 'source': {'head': src['head'], 'tree': src['tree']}, 'producer': {'x': 1},
+                   'outputs': {'hub': {'hub.js': H('1')}, 'web': {'web/a.js': H('2')}}}
+            (t / 'q.json').write_text(json.dumps(q)); (t / 'r.json').write_text(json.dumps(ref))
+            p = self.cli('run', '--jobs', 'hub,web,mobile', '--workdir', str(t / 'w'), '--qualification', str(t / 'q.json'),
+                         '--reference', str(t / 'r.json'))
+            self.assertEqual(p.returncode, 20)
+            self.assertIn('no output for: mobile', p.stderr)
 
     def test_explicit_fallback_is_announced(self):
         with tempfile.TemporaryDirectory() as t:
