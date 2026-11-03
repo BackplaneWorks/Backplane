@@ -525,7 +525,10 @@ normalization fixture was eliminated as unused and was discarded. The
 that distinction. The original strict-output failure is preserved, not
 relabelled. The later small-heap emit matched the source-compiler baseline
 SHA 5f2b021aa080e2424f77db1c56e98e2f447e05aed2ecfdb19f610bf325841666
-exactly; both jobs rejected the false theorem.
+exactly. **Correction:** both jobs rejected malformed equality syntax (missing
+`: Nat`) at the parser. Their negative control did not establish theorem
+rejection; the raw failure logs are preserved. This changes that qualification,
+not the recorded memory, time or output hashes.
 
 First job j20261103161034-146641 cost 734credit-s (**$0.00734**); second
 j20261103162034-268193 cost 1414credit-s (**$0.01414**). Total **$0.02148**.
@@ -540,3 +543,46 @@ in production. Next work must reduce retained compiler representations and
 qualify a complete frontend closure; no 6GB release or 120s complete CI success
 is claimed. Completed experiment sources were archived under ignored build/
 to avoid polluting future whole-checkout source inventories.
+
+
+## Typed compiler controls and module experiment (2026-11-03)
+
+The opt-in [module-check experiment](../../patches/bend-module-check-experiment.patch)
+keeps the v2.0.36 checker unchanged and calls its existing prefix-check API at
+local module boundaries. It retains all definitions, bodies and erased terms;
+an optional lower/higher roundtrip compacts checked interfaces. Cycles, missing
+or unfamiliar imports and canonical LAWS/PROOF use the original full path.
+Unfilled/cross-file declarations also fall back. This is **not installed or
+selected by production builds**. Its complete hub/web memory and output
+qualification is pending; it is not yet a 6GB improvement or a pass cache.
+
+| Control / trial | Before | After / qualification |
+|---|---|---|
+| Memory-profile false-theorem control | Missing `: Nat`: parser failure, incorrectly described as proof rejection | Typed `{0n == 1n : Nat}` reaches proof body: expected0n/observed1n in all three modes; failing cross-file law also rejected |
+| Tiny module controls on h@backplane | Original full-check mode | Six remaining cases /18 invocations in2.314s; largest child143,332KiB;2GiB cap/no swap; six valid cases from earlier attempt retained as described below. No whole-hub memory comparison |
+
+The earlier terminal attempt passed six valid cases in all three modes
+(diamond imports, template specialization, imported type error, cyclic and
+missing imports, datatype emission), then stopped at a malformed law fixture.
+Those18 results were reused with exact identical compiler/toolchain inputs.
+The remaining18 calls cover typed false theorem, passing/failing LAWS+PROOF,
+a successful filled module-local law, and two official files whose missing Base
+APIs remain expected failures. Those two files are not successful functional
+tests. Passing emissions must have identical raw hashes across full, per-module
+and compact modes; the float fixture records the common hash explicitly.
+Canonical LAWS/PROOF never reported modular completion.
+
+[Raw receipts and source manifests](compiler-memory/module-qualification/SUMMARY.json)
+bind unchanged checker SHA1d133151652b597a1a035c77c172475e6de096da37f3b9e3adc23c2f75bdfe49
+and pinned Bun SHA795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822.
+The final batch measured cgroup peak110,202,880B; child RSS and cgroup accounting
+are distinct metrics. Both batches used actual native bend flock, sole-slot
+ledger admission, unchanged2GiB no-swap cap and8GiB reserve; no installer work,
+application build or live hub action. One preceding transport attempt stopped
+before admission because Python's data filter stripped group-write modes;
+the corrected private packet restores only validated ordinary manifest modes.
+All source bytes/modes and runtime hash were reverified after execution.
+New Boat spend **$0**: no VM was started, controls used the existing owned host.
+The protected checker and project laws/proofs were not edited. Broad proof,
+release and installer builds remain omitted; no memory target or full-CI pass
+is inferred from these small controls.
