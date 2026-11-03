@@ -27,3 +27,9 @@ def Pairing.active(client: U32) -> IO(Bool):
 # Listener-owned reachable origins, never the root credential itself.
 def Pairing.address(link: String) -> IO(Unit):
   import "./effects/pairing.js"
+
+# The owner's machines this hub found (Machines.ask's JSON) and the urls of
+# the links it verified as the owner's: what POST /auth/known compares a
+# pairing link's origin with (effects/pairing.js's pairingKnown).
+def Pairing.known(machines: String, peers: String) -> IO(Unit):
+  import "./effects/pairing.js"

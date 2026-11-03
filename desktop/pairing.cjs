@@ -20,8 +20,25 @@ async function pair({text, name, fetch}) {
       method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(8000),
       headers: {Authorization: 'Bearer ' + p.secret, 'X-Backplane-Name': String(name || ({linux:'Linux',darwin:'macOS',win32:'Windows'}[process.platform] || 'Device') + ' / Desktop').replace(/[^\x20-\x7e]/g, '').slice(0,80), 'X-Backplane-Client': 'native', 'X-Backplane-Scheme': new URL(p.origin).protocol.slice(0,-1)},
     });
-    if (!r.ok) { const j = await r.json().catch(()=>({}));return {ok: false, error: ['wrong_code','expired_code','used_code','rate_limited','storage_unavailable'].includes(j.error) ? j.error : 'pairing_required'}; }
+    if (!r.ok) { const j = await r.json().catch(()=>({}));return {ok: false, error: ['wrong_code','expired_code','used_code','revoked_code','rate_limited','storage_unavailable'].includes(j.error) ? j.error : 'pairing_required'}; }
     return {ok: true, origin: p.origin};
   } catch { return {ok: false, error: 'hub_unreachable'}; }
 }
-module.exports = {invitation, pair};
+// Whether a pairing link that came from outside the app (the OS's
+// backplane:// handler, which any web page or message can open) is for one
+// of the person's own hubs: this app's own service, the hub it is paired
+// with, or one the own service knows as the owner's (its machines and
+// verified links: POST /auth/known). That hub then pairs only with a link it
+// issued and has not revoked. Any other origin is paired only when the
+// person says so (main.cjs's pairExternal).
+async function knownHub({text, local, saved, token, fetch}) {
+  const p = invitation(text);if (!p || !local) return false;
+  if (p.origin === local || p.origin === saved) return true;
+  try {
+    const r = await fetch(local + '/auth/known', {method: 'POST', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(5000),
+      headers: {Authorization: 'Bearer ' + token, 'X-Backplane-Origin': p.origin, 'X-Backplane-Client': 'native'}});
+    if (!r.ok) return false;
+    return (await r.json()).known === true;
+  } catch { return false; }
+}
+module.exports = {invitation, pair, knownHub};
