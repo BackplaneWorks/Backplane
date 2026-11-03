@@ -124,6 +124,21 @@ class PacketTest(unittest.TestCase):
         self.assertIn('build/generated.bend', data['files'])
         self.assertIn('lib.bend', data['files'])
 
+    def test_generated_manifest_under_build_is_still_hash_verified(self):
+        Path('packet.json').unlink()
+        name = 'build/packets/packet.json'
+        with contextlib.redirect_stdout(io.StringIO()):
+            packet.create(['root.bend'], [], name, [])
+        key = packet.digest(name)
+        packet.verify(name, key)
+        Path('unexpected.bend').write_text('import Base\n')
+        with self.assertRaisesRegex(ValueError, 'unexpected source'):
+            packet.verify(name, key)
+        Path('unexpected.bend').unlink()
+        Path(name).write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'manifest hash mismatch'):
+            packet.verify(name, key)
+
     def test_archive_cannot_bypass_private_file_filter(self):
         Path('.env').write_text('private fixture, never packed')
         with self.assertRaisesRegex(ValueError, 'private/generated capture'):

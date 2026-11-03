@@ -150,7 +150,11 @@ def verify(manifest, expected, complete=True, transport=None):
                 if path.is_symlink():
                     raise ValueError('packet contains a symbolic link')
             actual.update((Path(folder)/name).as_posix() for name in files)
-        expected_files = {f for f in data['files'] if not f.startswith('build/')} | {manifest} | set(transport or {})
+        # The manifest may accompany explicitly declared generated roots under
+        # build/. Its digest and every declared input were verified above, just
+        # like build/ source files; the output-area walk omits both consistently.
+        expected_files = {f for f in {*data['files'], manifest, *(transport or {})}
+                          if not f.startswith('build/')}
         if actual != expected_files:
             raise ValueError('packet contains missing/unexpected source: ' +
                              repr(sorted(actual ^ expected_files)[:8]))
