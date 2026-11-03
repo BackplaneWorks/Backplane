@@ -1,3 +1,4 @@
+import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
 import ./src/core/mailtriage.bend as MTRI
 import ./src/core/mailowner.bend as MAILOWN
 import ./src/web/composer-bar.bend as CBAR
@@ -15553,3 +15554,7 @@ def Laws.owner_mail_copy_quiet(): {==}
 def Laws.composer_bar_one_button(button): {==}
 
 def Laws.composer_bar_never_wraps(button): {==}
+
+def Laws.provider_fallback_only_when_accounts_exhausted(s, now, provider, model, account, h):
+  %h : {ACCOUNTRECOVERY.Pick.none(_) == False{} : Bool}
+  {==}
