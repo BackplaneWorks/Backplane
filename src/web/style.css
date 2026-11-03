@@ -1118,7 +1118,8 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 ::highlight(search-word) { background-color: rgba(95, 179, 255, 0.35); color: var(--text); }
 @keyframes jumped { from { background: rgba(95, 179, 255, 0.18); } to { background: transparent; } }
 .pair-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 16px 12px; cursor: pointer; }
-.pair-qr svg { width: min(320px, 80vw); height: auto; background: #fff; fill: #000; }
+.pair-qr svg { width: min(320px, 80vw); height: auto; }
+.pair-qr svg, .pairing-qr { background: #fff; fill: #000; }
 
 /* the first-run tour (view.bend's View.tour): the page dims, the part it points at is lifted over the dimming */
 .tour-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 30; }
