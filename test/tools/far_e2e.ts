@@ -322,13 +322,17 @@ try {
   a.proc!.kill();
   await a.proc!.exited;
   const peerChange = ca.seen.find((c) => c.$ === "PeerSet" && c.id === link);
+  // (with how alpha knows the link is the owner's: paired through /bots/pair)
+  const ownChange = ca.seen.find((c) => c.$ === "SettingSet" && c.key === `peer.own.${link}`);
   const resetAt = Math.floor(Date.now() / 1000) + 1;
   const replacement = [
     { ...peerChange, at: resetAt },
+    { ...ownChange, at: resetAt },
     { $: "ThreadCreated", id: "reset-thread", project: "", title: "New history", env: "local", provider: "claude", at: resetAt },
     { $: "BotSet", id: "reset-bot", name: "new-history", thread: "reset-thread", look: 2, persona: "", at: resetAt },
   ];
   check("replacement keeps the linked peer", !!peerChange, peerChange);
+  check("alpha recorded the link as the owner's when the two paired", ownChange?.value === "pair", ownChange);
   writeFileSync(join(a.home, "events.jsonl"), replacement.map((c) => JSON.stringify(c)).join("\n") + "\n");
   spawn(a);
   await up(a);

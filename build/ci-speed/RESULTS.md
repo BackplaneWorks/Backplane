@@ -462,3 +462,314 @@ Exact pushed head b248be1c978cf236292ae71f05c75d9d0eaa2da6 Git-free export took 
 with cached simulator pass. Static/overall remain incomplete/exit 3 for 37
 computed bindings and 31 URL expressions; trace remains incomplete with its
 fixture separately passing. No pre-push hook is wired.
+
+## Hub/web compiler memory: profile and rejected small-heap experiment
+
+The current priority is a release compile below **6 GB**. This remains
+unproven. Neither the hub nor web import closure includes `LAWS.bend` or
+`PROOF.bend`, so separating those files out of emission cannot reduce these
+builds. The law/proof gates remain required separately.
+
+Reused build owner1188217's completed source 273b268cd1c56661ead5cc8ba0ae1b5a33ed375f
+baseline instead of replaying it: backend emit 108.928s /14,217,712KiB
+(13.56GiB), web 59.309s /8,146,460KiB (7.77GiB), stamp 0.662s /404,400KiB,
+Bun packaging 0.672s /354,240KiB. That job used a 16GiB no-swap scope, a 4GiB
+JSC RAM hint, 1GiB OS stack and 512MiB JS stack. The stack settings are limits,
+not a measurement of committed stack memory.
+
+Instrumented public Bend v2.0.36 source at
+ae1101ca7d15364f9274fa6b1367d175884a7da7: main/comp diagnostics only, with
+**no change to human-owned bend.ts, checker calls, laws or proofs**.
+[Observation patch](../../patches/bend-memory-profile.patch) applies to the
+clean tag. It is a Bun-only diagnostic patch for an isolated source checkout,
+not a deployed compiler; the Node loader was not qualified. Both probes use
+pinned Bun 1.3.10 executable
+SHA 795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822,
+frozen source 273b268c, a verified 552-input packet and one 8CPU/15GiB Boat VM.
+
+| Boundary | RSS at checkpoint | Cumulative process peak |
+|---|---:|---:|
+| Load/parse complete |3.91GiB |3.92GiB |
+| Type-check complete |9.27GiB |9.27GiB |
+| Compiler analysis complete |12.13GiB |12.17GiB |
+| JS function emission complete |13.36GiB |13.37GiB |
+| Output strings joined |13.16GiB |13.37GiB |
+
+These are checkpoint values and cumulative high-water marks, **not isolated
+phase allocations or net live heap sizes**. The final census reported about
+216 million JSC cells at its most recent GC. That count does not establish
+current reachability: both objectCount and heapSize describe the previous
+collection; objectTypeCounts has different allocation semantics. This
+[Bun API distinction](https://bun.com/reference/bun/jsc/HeapStats) was also
+checked with a tiny allocation fixture on the pinned runtime.
+
+The roughly 15MB emitted file and ~0.1GiB joining increase are small relative
+to the checked/compiler representations. Instrumented wall time 162.116s
+includes expensive census walks; it is not an uninstrumented speed baseline.
+[Raw checkpoints](compiler-memory/baseline-server-profile.jsonl),
+[GNU time](compiler-memory/baseline-server.time),
+[summary](compiler-memory/baseline-summary.json).
+
+| Change / trial | Before | After / decision |
+|---|---|---|
+| Small-heap policy, exact frozen hub | Source-compiler profile 13.37GiB /162.116s with census | `--smol` 12.64GiB /255.494s without census; **rejected**, above 6GB and slower |
+| Full web bundle in experimental packet | Saved complete baseline 7.77GiB /59.309s | **Failed** after 65.672s: packet omitted desktop/connection-record.cjs. Observed 7.64GiB is a failed partial run, no bundle gain/pass claim |
+
+The source compiler's raw output initially differed from the saved official
+executable's emit: only embedded f32_round Function.toString formatting
+changed. Every byte before and after that helper matched. Both exported
+helpers normalize to the same 467-byte function under the pinned production
+minifier; a deliberately changed helper does not. An initial unexported
+normalization fixture was eliminated as unused and was discarded. The
+[qualified format control](compiler-memory/format-control/result.json) records
+that distinction. The original strict-output failure is preserved, not
+relabelled. The later small-heap emit matched the source-compiler baseline
+SHA 5f2b021aa080e2424f77db1c56e98e2f447e05aed2ecfdb19f610bf325841666
+exactly. **Correction:** both jobs rejected malformed equality syntax (missing
+`: Nat`) at the parser. Their negative control did not establish theorem
+rejection; the raw failure logs are preserved. This changes that qualification,
+not the recorded memory, time or output hashes.
+
+First job j20261103161034-146641 cost 734credit-s (**$0.00734**); second
+j20261103162034-268193 cost 1414credit-s (**$0.01414**). Total **$0.02148**.
+Both original --idle0 runners deleted their VMs and verified deletion.
+No Alpha release output, installed compiler, installer-owned release file,
+start guard, live PID 3103745 or live/private home was changed.
+
+`bend-memory-report.py` summarizes saved data without compiling anything.
+Four cheap controls pass, covering truncated/duplicated/nonmonotonic profiles
+and failed/contradictory process receipts. The small-heap policy is not enabled
+in production. Next work must reduce retained compiler representations and
+qualify a complete frontend closure; no 6GB release or 120s complete CI success
+is claimed. Completed experiment sources were archived under ignored build/
+to avoid polluting future whole-checkout source inventories.
+
+
+## Typed compiler controls and module experiment (2026-11-03)
+
+The opt-in [module-check experiment](../../patches/bend-module-check-experiment.patch)
+keeps the v2.0.36 checker unchanged and calls its existing prefix-check API at
+local module boundaries. It retains all definitions, bodies and erased terms;
+an optional lower/higher roundtrip compacts checked interfaces. Cycles, missing
+or unfamiliar imports and canonical LAWS/PROOF use the original full path.
+Unfilled/cross-file declarations also fall back. This is **not installed or
+selected by production builds**. Its complete hub/web memory and output
+qualification is pending; it is not yet a 6GB improvement or a pass cache.
+
+| Control / trial | Before | After / qualification |
+|---|---|---|
+| Memory-profile false-theorem control | Missing `: Nat`: parser failure, incorrectly described as proof rejection | Typed `{0n == 1n : Nat}` reaches proof body: expected0n/observed1n in all three modes; failing cross-file law also rejected |
+| Tiny module controls on h@backplane | Original full-check mode | Six remaining cases /18 invocations in2.314s; largest child143,332KiB;2GiB cap/no swap; six valid cases from earlier attempt retained as described below. No whole-hub memory comparison |
+
+The earlier terminal attempt passed six valid cases in all three modes
+(diamond imports, template specialization, imported type error, cyclic and
+missing imports, datatype emission), then stopped at a malformed law fixture.
+Those18 results were reused with exact identical compiler/toolchain inputs.
+The remaining18 calls cover typed false theorem, passing/failing LAWS+PROOF,
+a successful filled module-local law, and two official files whose missing Base
+APIs remain expected failures. Those two files are not successful functional
+tests. Passing emissions must have identical raw hashes across full, per-module
+and compact modes; the float fixture records the common hash explicitly.
+Canonical LAWS/PROOF never reported modular completion.
+
+[Raw receipts and source manifests](compiler-memory/module-qualification/SUMMARY.json)
+bind unchanged checker SHA1d133151652b597a1a035c77c172475e6de096da37f3b9e3adc23c2f75bdfe49
+and pinned Bun SHA795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822.
+The final batch measured cgroup peak110,202,880B; child RSS and cgroup accounting
+are distinct metrics. Both batches used actual native bend flock, sole-slot
+ledger admission, unchanged2GiB no-swap cap and8GiB reserve; no installer work,
+application build or live hub action. One preceding transport attempt stopped
+before admission because Python's data filter stripped group-write modes;
+the corrected private packet restores only validated ordinary manifest modes.
+All source bytes/modes and runtime hash were reverified after execution.
+New Boat spend **$0**: no VM was started, controls used the existing owned host.
+The protected checker and project laws/proofs were not edited. Broad proof,
+release and installer builds remain omitted; no memory target or full-CI pass
+is inferred from these small controls.
+
+
+## Module-mode cap failure and proof parallelism (2026-11-03)
+
+The frozen273 module/compact hub trial **failed the6GB target**. Matching
+systemd scope `run-p1355330-i1355738.scope` reports kernel `oom-kill`,
+MemoryMax6,000,000,000B, MemoryPeak5,999,996,928B and285.809s wall. The
+process stopped after152 module boundaries, with15,985 definitions reached;
+no emit or web measurement exists. Sampled process high-water5,426,972KiB
+is not the final aggregate scope peak. Small module boundaries repeatedly
+spent about4.8s in check/compaction/collection, so this candidate also fails
+our speed goal. Its unchanged cap will not be retried. [Failure receipt and
+raw checkpoints](compiler-memory/module-cap-failure/RESULT.json).
+
+| Change / trial | Before | After / decision |
+|---|---|---|
+| Module-prefix checks, compact interfaces, boundary collection | Completed frozen273 hub emit13.56GiB /108.928s; instrumented source baseline13.37GiB /162.116s | **OOM**,6GB scope /285.809s, no output. Rejected as a deployable improvement; platforms/instrumentation differ |
+| Exact proof partition planning | One canonical root containing3,149 laws |32 partitions planned in4.74s /51,524KiB; all declaration blocks unchanged, exact-once primary law ownership, all original imports and444-file source union covered. **Planning only**, worker wall/RSS and critical path unmeasured |
+
+`scripts/proof-shards.py` generates conservative local helper/method/import
+closures; unknown canonical syntax fails closed. Unused helpers and imports
+are still checked somewhere. Every selected canonical declaration is copied
+byte-for-byte, and every generated pair passes the existing shape check.
+The partition and actual compiler/library/verdict/guard bytes are bound by a
+manifest. Execution requires an inherited native bend flock and a finite
+no-swap cgroup or isolated default-size Boat VM no larger than8GiB; a passing worker must also peak below3GiB. The join requires every distinct expected
+worker receipt and rechecks the existing bendok verdict, source/tool identity,
+input stability and finite measurements. Missing, failed, duplicated, corrupt
+or stale results cannot make a passing gate. No proof pass cache is enabled.
+
+Eleven fast controls pass in0.31s /27,512KiB, including dropped-law and
+unused-import-change controls, compiler-byte/mode drift, unknown syntax,
+symlink parents and missing/duplicated/false-green worker results. The existing
+full proof gate is not replaced until all required shards and typed theorem mutations
+qualify the generated programs. No full release-proof success, <3GiB actual
+worker peak, new parallel critical path or2-minute complete CI is claimed.
+Next execution must use available admitted workers without duplicating the
+build owner's productive proof/store-recovery campaigns. Hub emit, complete
+web bundle, proofs and tests can run on separate hosts; independent module
+compilation/linking remains unavailable in this compiler experiment.
+New Boat spend for the failed cap run and planning/tests: **$0** (owned h@ host
+and cheap local planning only). No Alpha, installed app or live PID action.
+
+
+Parallel shard transport attempts025/026 (jobs j20261103172959-1014215 and
+j20261103173000-1014525) both stopped **before Bend execution**. An ignored
+build/ manifest was incorrectly included in the non-build inventory comparison;
+025 also received026's archive created between the controller's exclusion
+snapshot and runner staging. The closed-inventory verifier rejected both.
+Neither is proof or memory evidence. Both sandboxes were deleted and verified;
+14+7credit-s cost **$0.00021**. Seventeen packet controls pass in0.37s /28,804KiB,
+including build-manifest hash verification and unexpected-source rejection.
+An exact bootstrap allowlist is being coordinated with runner owner1188217;
+no replacement proof job starts with the racy exclusion-only transport.
+
+
+## Two actual small proof partitions and parallel transport correction
+
+The first two generated partitions now ran successfully on independent default
+Boat VMs, with the canonical statement/proof bytes unchanged and the standard
+pinned compiler. These are198 distinct primary laws out of3,149; the complete
+32-partition gate is **not** replaced or claimed passing.
+
+| Partition | Canonical proofs included | Bend wall | Peak child RSS | Kernel swap I/O |
+|---|---:|---:|---:|---:|
+|025 |99 |0.819s |189,136KiB (185MiB) |0 pages |
+|026 |102 (99 primary) |2.156s |207,984KiB (203MiB) |0 pages |
+
+026 returned0. 025 returned1 **only for the existing 16-definition unsafe/foreign
+notice** (font/text effects); the unchanged `bendok.sh` accepts that notice,
+as it does in the original full gate. Its raw warning remains in the receipt.
+No checker error or failed theorem was accepted. A typed `{0n == 1n : Nat}`
+negative control reached its `{==}` proof body and was rejected with
+expected0n/observed1n. These checks do not establish external effect correctness
+or a Lean-kernel verdict.
+
+[Exact input and tool identities, raw results and provenance](proof-shards/receipts/SUMMARY.json)
+are retained with the measured runner and partition manifest. Both jobs checked
+source/tool bytes before and after, held the actual native bend flock, and
+used default VMs (about7.76GiB physical cap). The guests provisioned2GiB swap;
+**pswpin and pswpout stayed0 before/after each command**. The worker and join
+reject any swap activity, so paging cannot masquerade as a small-memory pass.
+Host workers still require a finite no-swap cgroup. Successful worker RSS is
+capped by the verdict policy at<3GiB; larger VMs are rejected.
+
+VM lifetimes overlapped; the very short Bend subprocesses did not, due to
+startup skew. Max Bend duration2.156s; outer commands1.35s/2.49s; the observed
+command window was about5.49s with1s timestamp resolution. Per-job startup
+2s/4s, push2s each, setup2s each. The full-suite parallel critical path and its
+largest worker are still unmeasured; the largest planned import closure must
+be reduced or qualified before any all-suite speed/memory claim.
+
+The exact3-file allowlist from runner PR841 fixes the concurrent-archive race;
+`ci-packet.py` now uses it, rather than a snapshot of exclusions. Its build/
+manifest inventory comparison was corrected without relaxing source/hash
+verification. Eighteen packet controls pass in0.39s /28,060KiB; runner include
+controls3/3 pass in1.712s. Proof partition controls12/12 pass in0.29s /26,220KiB.
+Two preceding v2 resource attempts stopped before Bend and cost8credit-s each.
+Successful pilots cost9+11credit-s (**$0.00020**) with deletion verified; all
+six setup/transport/success attempts total57credit-s (**$0.00057**).
+No source law/proof, release workflow, installed compiler or live hub changed.
+
+### Retained emission admission and unsuccessful paging experiments (2026-11-03)
+
+| Change | Before | After |
+|---|---|---|
+| Normal `service-release.py js` retained-emission handoff | Copied verified JS into the legacy size-only cache; `build-js.sh` requested whole-build16GiB before looking up that cache, refusing small consumers before compile | Pass exact verified producer path/SHA256/import-tool key; verify before separate `compile-js`3GiB admission and again during atomic copy. All existing whole-build/check/proof floors and8GiB host reserve remain unchanged. Missing/corrupt/drifted input fails; no Bend fallback. |
+| Verify/copy retained33ce raw hub emission,15,919,342bytes | Old consumer did not reach reuse after admission refusal | Three actual copies:0.03/0.03/0.04s,22,244/21,836/21,336KiB peak RSS; every output SHA256 exactly `ca921838988fe844f7e1bc3f0040d5d30f4d9d139facecd76014c17c0c94185f`. Copy-only measurement, **not a Bun/producer/release qualification**. No paid compute. |
+| Paged module prototype, frozen33ce hub/web/mobile | Official hub147.340s /19,189,172KiB; web72.539s /8,773,704KiB (completed existing producer reused) | All three new compiler scopes OOM-killed at3,699,998,720bytes during `core/refview.bend`. No qualified output or speedup. Hub/web/mobile scope wall times40.129/22.702/44.353s; GNU compiler RSS unavailable after scope kill. |
+| Bounded groups within a module | Module-level paging failed at refview | Tiny16cases×4modes passed in11.837s /264,484KiB maximum child RSS under actual2GiB/no-swap scope; forward-call/forward-proof/late-false-proof controls reject. Focused refview still OOM after~52s. Last independent sample:anonymous3,626,995,712bytes,file35,483,648bytes,kernel27,246,592bytes. File cache was already reclaimed; anonymous allocation is the remaining problem. |
+
+Consumer controls13/13 (0.229s), admission16/16 (0.048s), existing producer
+attestation13/13 (0.010s), producer integration47/47 (0.674s) pass. These are
+offline boundary checks; no app binary, protected bake, full proof suite or
+release packaging was run. Streaming copy preserves raw bytes and does not
+stand in for the still-required final-output identity. The3GiB admission floor
+is an expected working-set allowance, **not a hard memory cap**; execution
+qualification must retain the runner's actual sub-4GiB no-swap caps.
+
+[Exact copy measurements](retained-emission-copy.json) and
+[paging experiment receipts](compiler-memory/paging-experiments/refview-v3.json)
+retain identities and raw-artifact hashes. Hub/web/mobile failed attempts cost
+67+37+71credit-s ($0.00175); focused refview64credit-s ($0.00064);
+tiny v3 controls21credit-s ($0.00021). All default Boat sandboxes were deleted
+and deletion verified. No larger VM or cap increase was used. **No qualified
+memory-fix trigger exists yet; RC2 remains paused.**
+
+### Focused refview regression isolation (2026-11-03)
+
+These use the same frozen33ce closure, unchanged2.0.36 checker and pinned
+Bun1.3.10. Each compiler scope has a3.7GB hard cap and zero swap; the separate
+512MiB controller keeps the sum of hard caps below4GiB. They are focused
+memory experiments, not hub/web/mobile release qualifications.
+
+| Change | Before | After |
+|---|---|---|
+| Matched original whole-book refview baseline | Paging variants failed without a matched focused original measurement | Original passes in22.50s at2,671,396KiB actual GNU peak RSS; sampled cgroup peak2,699,665,408bytes. Profile checkpoints alone miss the real peak (1,917,216KiB). Subsequent qualification readers now require actual GNU receipts. |
+| Lazy-body paging v4, annotation interning v5, weak identities v6 | Refview fails at3.7GB cap | Still fail at the same cap; scope wall56.504/24.635/27.168s respectively. V5 isolates failure inside kernel checking `Card.of`, before spilling. Annotation disk size falls but this does not qualify memory. |
+| Retain exact type-interface graphs v7 | Paging reconstructed interface graphs; `Card.of` checking exceeded cap | `Card.of` kernel check finishes at26.425s/RSS1,907,806,208bytes. Failure moves to spill storage, scope killed42.401s. No qualified output. |
+| Preserve binary lower-term graph sharing v8 | JSON storage expands shared graph nodes | Tiny graph-sharing/byte-verdict controls pass, but the focused run still fails89.201s into its compiler scope. Markers isolate the remaining expansion to re-lowering the original higher-order source body, before writing the checked result. |
+
+Later candidates retain exact parsed source bodies and interfaces, paging
+only checked lower results. The measurements below establish their outcomes. No checker/law/proof
+change or source rewrite is used. Original positive tiny outputs are reused
+by hash; only changed paging modes are rerun. Exact source/tool input checks,
+typed false-proof, forward-reference and corruption controls remain required.
+
+[Baseline resource evidence](compiler-memory/paging-experiments/baseline-v6.json)
+and [latest failed phase evidence](compiler-memory/paging-experiments/v8.json)
+include raw artifact hashes. New v4 tiny controls23credit-s, focused v4/v5/v6
+73/59/49credit-s, original baseline34credit-s, v7/v8 combined controls+focus
+65/123credit-s:426credit-s total (**$0.00426**). Every sandbox was deleted and
+deletion verified. These results do not authorize release resume.
+
+### Checked-result paging and resident-memory diagnosis (2026-11-03)
+
+All measurements retain the same frozen33ce source and unmodified checker.
+The compiler cap remains3,699,998,720bytes, zero swap, with a separate512MiB
+controller. Controller-only peak RSS near264MiB is **not compiler RSS**.
+
+| Change | Before | After |
+|---|---|---|
+| V9 retain source bodies; v10b higher-interface handles | Re-lowering source bodies expands shared graphs | Both still hit compiler cap:47.038/54.565s scope wall. No usable output. |
+| V11 stream checked graphs with shared higher interfaces | Spill construction exceeded cap | Module checking and spill finish, but verdict traversal reloads checked results and hits cap at87.711s. |
+| V12 separate exact dependency walk | Verdict reloads results | Additional graph walk exceeds cap at66.136s. |
+| V13 collect exact dependency names during the same streamed traversal | V12 exceeds cap | Focused refview passes:61.776s, actual GNU peak3,540,544KiB, zero swap. Original whole-book focused baseline22.50s/2,671,396KiB remains faster and smaller; this is a paging milestone, **not a standalone improvement or release qualification**.38 changed-mode controls and32 exact graph-reference comparisons pass. |
+| V13 frozen complete hub/web/mobile phases | Official hub147.340s/19,189,172KiB; web72.539s/8,773,704KiB | All three hit the unchanged3.7GB compiler cap:254.310/186.245/73.825s scope wall. Hub fails after core/cef; web reaches JS emission; mobile fails during Card.of. No final output identity can be claimed. |
+| V14 mobile check-only discards emitter IR after unchanged checker accepts it | V13 retains paged emitter IR | All41 tiny controls completed across the same-compiler v14/v14b receipts, with nine remaining invocations rerun after correcting expected PASS text. Actual mobile still hits cap at102.946s in core/msgs, with stored_bytes=0/store_reads=0. No mobile pass or new bridge emission. |
+| Owned mobile prefix memory diagnostic | OOM receipts lack resident-memory attribution | Captured live process mappings and JSC counters; deliberately stopped only its own compiler scope at56.968s near3.0GB cgroup usage. Last mapping sample:anonymous2,760,568,832bytes; stack569,344bytes; file44,969,984bytes; anonymous executable2,289,664bytes. Stack limits reserve address space but stack residency is small here. **Diagnostic completion is not a compile pass.** |
+
+The one-shot JSC census was taken before an explicit collection: its
+heapSize/objectCount describe the last collection, while objectTypeCounts
+include subsequent allocations. Do not interpret its4.6MB heapSize as the
+live retained heap. A separate post-collection comparison is required;
+[Bun documents this counter distinction](https://bun.sh/reference/bun/jsc/heapStats).
+
+[Focused v13 receipt](compiler-memory/paging-experiments/v13.json),
+[full hub](compiler-memory/paging-experiments/hub-v13.json),
+[web](compiler-memory/paging-experiments/web-v13.json),
+[mobile](compiler-memory/paging-experiments/mobile-v13.json),
+[check-only mobile](compiler-memory/paging-experiments/mobile-v14b.json) and
+[diagnostic](compiler-memory/paging-experiments/mobile-diagnostic-v14.json)
+retain exact source/tool identities and hashes of raw artifacts. V9/v10b/v11/v12
+cost68/74/108/107credit-s; focused v13 costs85; complete v13 phases283/203/90;
+v14 harness-only14; v14b137; diagnostic76. Total1,245credit-s (**$0.01245**).
+All sandboxes were deleted and deletion verified. No release resume, installed
+compiler replacement, app execution or proof/law change follows these receipts.

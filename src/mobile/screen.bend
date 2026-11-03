@@ -1977,13 +1977,21 @@ def Mob.set.pair(+lc: I.Loc, +on: Bool, +nf: Map<&2, String>) -> J.Json:
   Mob.set.pair.k(lc, on, btns, nf)
 
 # Your machines (U.Mate.rows): each of the owner's other machines, how its
-# sync goes, and On/Off ("sync.<name>")
+# sync goes, and On/Off ("sync.<name>"); a link nothing verified asks
+# Mine / Not mine instead ("peer-own")
+def Mob.mates.one(ask: Bool, +lc: I.Loc, +nm: String, +note: String, +on: String, +key: String, +link: String) -> J.Json:
+  match ask:
+    case True{}:
+      Mob.set.row(nm, note, [Mob.set.btn(MSG.T.machines.mine(lc), "peer-own", link ++ "=1", False{}), Mob.set.btn(MSG.T.machines.notmine(lc), "peer-own", link ++ "=0", False{})])
+    case False{}:
+      Mob.set.row(nm, note, Mob.set.chips.loc(lc, ["on", "off"], on, key))
+
 def Mob.mates.go.loc(+lc: I.Loc, rs: List<&2, U.MateRow>) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
-    case U.MateRow{+nm, +note, +on, +key} <> t:
-      Mob.set.row(nm, note, Mob.set.chips.loc(lc, ["on", "off"], on, key)) <> Mob.mates.go.loc(lc, t)
+    case U.MateRow{+nm, +note, +on, +key, +ask} <> t:
+      Mob.mates.one(Bool.not(String.is_empty(ask)), lc, nm, note, on, key, ask) <> Mob.mates.go.loc(lc, t)
 
 def Mob.mates.go(rs: List<&2, U.MateRow>) -> List<&2, J.Json>:
   Mob.mates.go.loc(I.En{}, rs)

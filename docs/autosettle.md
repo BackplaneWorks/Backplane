@@ -14,7 +14,7 @@ the short worker grace for read, completed personal conversations. It never
 bypasses the safety gates. The former `settle.days` setting is obsolete.
 
 A turn must have completed, with no running or undelivered owned work,
-queued input, pending ask or approval, wake subscription, held or queued
+queued input, pending ask or approval, wake targeting real running work, held or queued
 lock, or unread personal reply. A required report must already have reached
 the launcher. Delegated results use TaskDelivered; local launch reports use
 a receipt committed with the inbox message or durable Mailroom header.
@@ -29,6 +29,22 @@ recognizes only the exact seed ID reserved by `Mcp.delegate.go`: child
 identity as `autosettle.seed.<child>`. A parent link alone grants no
 exemption. Any distinct human message, including one in the same second,
 keeps unread protection; a later worker message cannot erase it.
+
+Improvement-button jobs use their validated `improvement-<32 hex>` identity
+and exact `improvement-request-<same key>` seed as background-job provenance,
+so an unopened report uses the worker grace. This does not exempt subsequent
+human messages. Automatic restart continuations use the existing Mailroom
+origin classifier and do not turn a worker into a personal conversation.
+Ordinary personal conversations still retain unread protection.
+
+Wake subscriptions are dependencies, not evidence that their targets remain
+alive. A transient reverse index follows thread-wake chains to real work,
+including background/watched work, asks, queues, delegated results and locks.
+Ended work and cycles of idle subscriptions cannot keep a completed thread
+active forever. Unknown wake kinds remain conservative. Passive file/PR
+subscriptions allow the completed owner to settle after its normal grace;
+the next status tick retires inactive subscriptions of a settled owner.
+Subscriptions targeting real work are preserved.
 
 Read receipts identify the actual reply, so a later reply in the same
 second is still unread. Focused desktop desk.look and explicitly opening

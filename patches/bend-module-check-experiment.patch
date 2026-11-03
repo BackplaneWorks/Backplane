@@ -1,0 +1,266 @@
+diff --git a/bend2/comp.ts b/bend2/comp.ts
+index ee934d4d..f1f0f43a 100644
+--- a/bend2/comp.ts
++++ b/bend2/comp.ts
+@@ -11,6 +11,7 @@
+ import * as fs from "node:fs";
+ 
+ import * as Bend from "./bend.ts";
++import { profile } from "./profile.ts";
+ 
+ // Types
+ // =====
+@@ -3211,18 +3212,24 @@ function js_host(k: Name): string {
+ // A module (for the .bend loader and -o <out>.mjs) roots and exports each
+ // def a host can call.
+ export function js_lib(book: Bend.Book, mod = false): string {
++  profile("jslib:start", {mod});
+   FL = file_new(book, true);
+   const outs = !mod ? null : [...new Set(FL.book.order)].filter((k) => {
+     const t = FL.book.tlds[k];
+     return done_live(t) && !def_foreign(t) && t.b !== true && t.x === 0
+       && io_base(FL.book, t.T) === null;
+   });
++  profile("analysis:start");
+   file_book(outs ?? ["main"]);
++  profile("analysis:end", {funs:FL.funs.size, srcs:FL.srcs.size, probes:PROBES.length});
+   const sc = scope_new();
+   for (const [k, def] of done_defs(fun_runs)) {
+     memo_gc();
++    profile("jsdef:start", {name:k, funs:FL.funs.size, probes:PROBES.length});
+     js_def(sc, k, def);
++    profile("jsdef:end", {name:k, funs:FL.funs.size, probes:PROBES.length, lines:sc.seg.lines.length});
+   }
++  profile("functions:end", {funs:FL.funs.size, srcs:FL.srcs.size, probes:PROBES.length, lines:sc.seg.lines.length});
+   const srcs = effect_srcs(".js", "a foreign def without a .js import: ");
+   const effs = srcs.map((t) => `(() => {\n${t}\n})();\n\n`).join("");
+   const lib = outs === null ? "" : `export default {\n${outs.map((k) =>
+@@ -3231,9 +3238,11 @@ export function js_lib(book: Bend.Book, mod = false): string {
+   const jmps = new Map<Name, boolean>();
+   const jmp = (k: Name): boolean => k === CLO_APPLY || memo(jmps, k, () =>
+     (jmps.set(k, true), [...FL.tails.get(k) ?? []].some(jmp)));
++  profile("join:start", {spins:FL.spins.length});
+   const funs = [sc.seg, ...FL.spins].flatMap((f) => seg_text(f.lines, 0))
+     .join("\n").replace(/\x01([^\x02]*)\x02/g, (_, k) => jmp(k) ? "run_loop"
+       : "");
++  profile("join:end", {characters:funs.length});
+   return RUNTIME + effs + "// Program\n// =======\n\n" + [funs, ...[...FL.tabs]
+     .map(([r, i]) => `const TAB_${i} = [${r}];`)].join("\n") + lib;
+ }
+diff --git a/bend2/main.ts b/bend2/main.ts
+index d34bdc03..e7d410b0 100755
+--- a/bend2/main.ts
++++ b/bend2/main.ts
+@@ -23,6 +23,8 @@ import type { BunPlugin } from "bun";
+ import * as Bend from "./bend.ts";
+ import * as Comp from "./comp.ts";
+ import * as Safe from "./safe.ts";
++import { profile } from "./profile.ts";
++import { check_modules, FullBookRequired } from "./modules.ts";
+ 
+ // Main
+ // ====
+@@ -360,6 +362,7 @@ function path_real(p: string): string {
+ }
+ 
+ function cli_emit(book: Bend.Book, out: string): void {
++  profile("emit:start", {out});
+   if (out.endsWith(".mjs")) {
+     fs.writeFileSync(out, Comp.js_lib(book, true));
+   } else if (/\.c?js$/.test(out)) {
+@@ -478,6 +481,7 @@ function cli_base(what?: string): void {
+ }
+ 
+ async function cli_bundle(page: string, dir: string): Promise<void> {
++  profile("bundle:start", {page});
+   const out = await Bun.build({
+     entrypoints: [page],
+     outdir: dir,
+@@ -485,6 +489,7 @@ async function cli_bundle(page: string, dir: string): Promise<void> {
+     minify: true,
+     plugins: [PLUGIN],
+   });
++  profile("bundle:end", {page, outputs:out.outputs.length});
+   for (const a of out.outputs) {
+     cli_say(1, a.path + " (" + (a.size / 1024).toFixed(1) + "kb)\n");
+   }
+@@ -813,18 +818,35 @@ function cli_fail(msg: string): never {
+ 
+ async function book_read(file: string, base?: Bend.Book,
+   seen = new Map<string, string | null>()): Promise<Bend.Book> {
+-  const book = base === undefined ? Bend.book_nil() : book_seed(base);
++  let book = base === undefined ? Bend.book_nil() : book_seed(base);
+   if (base !== undefined) {
+     seen.set(BASE, "");
+   }
+   try {
+-    await Bend.book_load(book, file, "", seen);
++    profile("load:start", {file});
++    let checked = false;
++    if (process.env.BP_BEND_MODULES === "1") {
++      const initial = new Map(seen);
++      try {
++        checked = await check_modules(book, file, seen);
++      } catch (error) {
++        if (!(error instanceof FullBookRequired)) throw error;
++        book = base === undefined ? Bend.book_nil() : book_seed(base);
++        seen.clear();
++        for (const [name, ns] of initial) seen.set(name, ns);
++        profile("modules:fallback", {file});
++      }
++    }
++    if (!checked) await Bend.book_load(book, file, "", seen);
++    profile("load:end", {file, files:seen.size, definitions:Object.keys(book.tlds).length, order:book.order.length});
+     const laws = path.join(path.dirname(file), "LAWS.bend");
+     if (path.basename(file) === "PROOF.bend" && fs.existsSync(laws)
+       && !seen.has(fs.realpathSync(laws))) {
+       throw "Error: PROOF.bend must import ./LAWS.bend";
+     }
+-    Bend.book_valid(book, base?.order.length ?? 0);
++    profile("check:start", {file});
++    if (!checked) Bend.book_valid(book, base?.order.length ?? 0);
++    profile("check:end", {file});
+     if (book.hols > 0) {
+       throw "Error: " + String(book.hols) + " TODO" + (book.hols === 1 ? "" : "s")
+         + " found.\nThe code is incomplete, and not a valid proof yet.";
+diff --git a/bend2/modules.ts b/bend2/modules.ts
+new file mode 100644
+index 00000000..76d12b70
+--- /dev/null
++++ b/bend2/modules.ts
+@@ -0,0 +1,104 @@
++// Experimental bounded-lifetime checking; the language checker is unchanged.
++import * as fs from "node:fs";
++import * as path from "node:path";
++import * as Bend from "./bend.ts";
++import { profile } from "./profile.ts";
++
++type Module = { file: string; ns: string; text: string };
++export class FullBookRequired extends Error {}
++
++// Plan local imports. Canonical LAWS/PROOF files, named packages, cycles and
++// unfamiliar headers use the full checker. Module-local filled laws are still
++// checked by the unchanged checker; unfilled/cross-file declarations fall back.
++export function plan_modules(file: string, loaded: Map<string, string | null>): Module[] | null {
++  const root = fs.realpathSync(file);
++  const top = path.dirname(root);
++  const active = new Set<string>();
++  const done = new Set(loaded.keys());
++  const ordered: Module[] = [];
++  const visit = (name: string): boolean => {
++    const real = fs.realpathSync(name);
++    if (done.has(real)) return true;
++    if (active.has(real) || ["LAWS.bend", "PROOF.bend"].includes(path.basename(real))) return false;
++    active.add(real);
++    const text = fs.readFileSync(real, "utf8");
++    for (const raw of text.split("\n")) {
++      const line = raw.trim();
++      if (!line || line.startsWith("#")) continue;
++      if (!/^import(?:\s|$)/.test(line)) break;
++      if (/^import\s+Base\s*(?:#.*)?$/.test(line)) {
++        if (!visit(Bend.BASE_BEND)) return false;
++        continue;
++      }
++      const match = /^import\s+((?:\.\.?\/)[\w./-]+\.bend)\s+as\s+[A-Za-z_]\w*\s*(?:#.*)?$/.exec(line);
++      if (!match || !visit(path.resolve(path.dirname(real), match[1]))) return false;
++    }
++    active.delete(real);
++    done.add(real);
++    ordered.push({ file: real, text, ns: real === root || real === Bend.BASE_BEND
++      ? "" : path.relative(top, real).replace(/\.bend$/, "") });
++    return true;
++  };
++  try {
++    return visit(root) ? ordered : null;
++  } catch {
++    return null; // Canonical loader supplies the original error/diagnostic.
++  }
++}
++
++// Rebuild checked interfaces through the same lower/higher conversion the
++// parser already uses. Keep every body, erased term, flag and source span.
++function compact(tld: Bend.TLD): void {
++  tld.T = Bend.term_higher(Bend.term_lower(tld.T));
++  if (tld.$ === "Def") {
++    if (tld.v !== null) tld.v = Bend.term_higher(Bend.term_lower(tld.v));
++  } else {
++    for (const ctr of tld.c) ctr.T = Bend.term_higher(Bend.term_lower(ctr.T));
++  }
++}
++
++export async function check_modules(book: Bend.Book, file: string,
++  seen: Map<string, string | null>): Promise<boolean> {
++  const modules = plan_modules(file, seen);
++  if (modules === null) return false;
++  const top = path.dirname(fs.realpathSync(file));
++  const shouldCompact = process.env.BP_BEND_COMPACT === "1";
++  let count = 0;
++  for (const module of modules) {
++    if (fs.readFileSync(module.file, "utf8") !== module.text) {
++      throw new Error("source changed during module planning: " + module.file);
++    }
++    const done = book.order.length;
++    const previous = new Set(Object.keys(book.tlds));
++    await Bend.book_load(book, module.file, module.ns, seen, undefined, top);
++    const added = book.order.slice(done);
++    // A declaration filled from a later file needs the full original book.
++    // This also catches a law written after another declaration on one line.
++    if (added.some(k => {
++      const tld = book.tlds[k];
++      return previous.has(k) || (tld.$ === "Def" && tld.v === null
++        && tld.b !== true && !tld.i);
++    })) {
++      throw new FullBookRequired();
++    }
++    profile("module:check:start", { file: module.file, done, added: added.length });
++    Bend.book_valid(book, done);
++    if (shouldCompact) {
++      for (const [name, tld] of Object.entries(book.tlds)) {
++        if (!previous.has(name)) compact(tld);
++      }
++      // A phase boundary, not a changed heap/stack limit or omitted check.
++      if (process.memoryUsage().rss > 3 * 1024 ** 3) Bun.gc(true);
++    }
++    profile("module:check:end", { file: module.file, definitions: Object.keys(book.tlds).length,
++      added: added.length, compact: shouldCompact });
++    count++;
++  }
++  for (const module of modules) {
++    if (fs.readFileSync(module.file, "utf8") !== module.text) {
++      throw new Error("source changed during module checking: " + module.file);
++    }
++  }
++  profile("modules:complete", { files: count, compact: shouldCompact });
++  return true;
++}
+diff --git a/bend2/profile.ts b/bend2/profile.ts
+new file mode 100644
+index 00000000..bcd5bc32
+--- /dev/null
++++ b/bend2/profile.ts
+@@ -0,0 +1,25 @@
++// Optional local compiler diagnostics. Never changes checking or emitted code.
++import * as fs from "node:fs";
++import { heapStats } from "bun:jsc";
++
++const target = process.env.BP_COMPILER_PROFILE;
++const started = performance.now();
++let sampledRSS = 0;
++
++export function profile(phase: string, details: Record<string, unknown> = {}): void {
++  if (!target) return;
++  const memory = process.memoryUsage();
++  const perDefinition = phase.startsWith("jsdef:");
++  if (perDefinition && memory.rss < sampledRSS + 32 * 1024 * 1024) return;
++  sampledRSS = Math.max(sampledRSS, memory.rss);
++  const heap = !perDefinition && process.env.BP_COMPILER_CENSUS === "1" ? heapStats() : null;
++  const usage = process.resourceUsage();
++  fs.appendFileSync(target, JSON.stringify({
++    phase, seconds: (performance.now() - started) / 1000,
++    rss_bytes: memory.rss, max_rss_kib: usage.maxRSS,
++    heap_used_bytes: memory.heapUsed, heap_total_bytes: memory.heapTotal,
++    external_bytes: memory.external, jsc_heap_bytes: heap?.heapSize,
++    jsc_capacity_bytes: heap?.heapCapacity, jsc_extra_bytes: heap?.extraMemorySize,
++    jsc_objects: heap?.objectCount, ...details,
++  }) + "\n");
++}

@@ -29,19 +29,13 @@ Idle time counts against the daily cap. Runs without a thread (by hand),
 cancelled jobs and failed setups delete at once. `--no-reuse` always
 starts a new one.
 
-Start guard: past 80% of Boat's hourly or daily start limit
-(`BOAT_JOB_START_GUARD`), no new sandbox is started; a job from a thread
-with a free warm sandbox still runs. The refusal says so.
-
 Each job gets its own sandbox, deleted when it ends; no lock is needed.
 Admission follows Boat's live limits, read before every create: active
 sandboxes and the rolling start windows per minute, hour and day (other
 clients' starts included, through Boat's own remaining counts; ours also
 from our own record, whichever is stricter, less jobs still starting). A
-full slot or minute/hour window waits (`--wait`, default 1 h, one limits
-read per pause, at least 15 s apart); a full day refuses. A rate-limited
-create (429) backs off (retry-after, else 15 s, 30 s, ...; at most 5 tries)
-and is admitted again; a create whose answer is unclear is never retried,
+full slot or start window is refused immediately; jobs do not queue. A
+rate-limited create (429) is refused without retry; a create whose answer is unclear is never retried,
 so it never makes a second sandbox, and nothing is ever adopted: only an
 id Boat returned is treated as ours (size, lifetime and creation time can
 match another client's sandbox, so matches are only named for review). It
@@ -77,20 +71,25 @@ Every job's files are in `~/.local/state/backplane/boat/jobs/<job>/`:
 flag, manifest hash, Bend version and sha256, sandbox, size, command, exit).
 
 ## Options
-- `--size small|default|large`: 2 vCPU / 4 GB at half rate, 4 vCPU / 8 GB, or 8 vCPU / 16 GB at twice the rate. Default: large for PROOF, default for the rest; ask for large otherwise only when the job is measured to need it.
+- `--size small|default|large|xlarge`: 2 vCPU / 4 GB at half rate, 4 vCPU / 8 GB, 8 vCPU / 16 GB at twice the rate, or 16 vCPU / 32 GB at a conservative six times the default rate. Default: large for PROOF, default for the rest; ask for large otherwise only when the job is measured to need it.
 - `--idle SECS`, `--keep-build`, `--no-reuse`: the warm sandbox (above).
 - `--timeout SECS` (default 1800): the command's limit; the sandbox lives at most that + 10 min, and never more than 2 h.
 - `--artifact PATH` (repeat): copied back from the sandbox before it is deleted.
 - `--exclude GLOB` (repeat): more files to keep out of the upload.
+- `--include-file PATH` (repeat): upload only these exact repository-relative
+  files from Git's tracked and unignored inventory. Every requested path must
+  exist and survive the normal privacy filters and all `--exclude` patterns,
+  or the job fails before a sandbox is created. Ignored `build/` files cannot
+  be included; copy reviewed inputs into an unignored source packet first.
 - `--budget-usd X` (or `BOAT_JOB_BUDGET_USD`): a lower daily cap for this job; it can only lower the shared cap, never raise it.
-- `--wait SECS` (default 3600, or `BOAT_JOB_WAIT`): how long to wait for a free slot before refusing.
+- `--wait 0`: accepted for compatibility; nonzero waits are refused because jobs do not queue.
 - `--no-setup-bend`: skip installing Bend (the pinned version and sha256 come from `.github/actions/setup-bend/action.yml`).
 - `scripts/boat-job.sh sweep`: delete sandboxes this tool started whose job is gone. `status` (or `status --json`, `status --refresh` to read Boat's limits first; the same view is kept in `status.json` after every ledger change, and the last limits read in `account.json`, for the Usage settings): jobs, their state, owner thread, size, runtime, reserved and actual credits, today's spend.
 
 ## Rules it keeps
 - Off unless the repository's root is listed in `~/.local/state/backplane/boat/enabled`.
 - The runner runs from a private copy of itself, so editing or rebasing the worktree during a job doesn't change it; any unexpected exit still deletes the sandbox.
-- Fail closed. A job is refused (exit 75) and nothing is created when Boat's limits can't be read, the account can't start, no slot frees up within `--wait` (jobs still starting count as taken), compute is short, the size isn't offered, the daily budget would be exceeded, or an earlier delete was never verified.
+- Fail closed. A job is refused (exit 75) and nothing is created when Boat's limits can't be read, the account can't start, no slot is available (jobs still starting count as taken), compute is short, the size isn't offered, the daily budget would be exceeded, or an earlier delete was never verified.
 - Budget: the daily cap (UTC day) is shared by every job: `~/.local/state/backplane/boat/budget-usd` (set by the person; $0.50 when there is none, or when it can't be read). Each job reserves its worst case (lifetime × rate) under a ledger lock, so jobs started together can't overspend. The real cost (`boat usage`) is recorded when it ends. Boat has no spend cap of its own, so this is the only one.
 - Source: `git ls-files -co --exclude-standard` (tracked and untracked-not-ignored files), without `.env*`, keys and certificates, `auth.json`, `*.log`, `*.jsonl` outside `test/`, `build/`, `dist/`, `node_modules/`, `shots-snap/`, `.claude/` and `.backplane*/`. Nothing from the home directory.
 - Sandboxes: `boat new --no-env` (none of the account's stored secrets), `--no-snapshots` (erased when stopped), a bounded `--ttl`.

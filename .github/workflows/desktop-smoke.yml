@@ -3,8 +3,9 @@ name: Desktop release smoke (evidence only)
 # The launch-and-connect smoke of one staged desktop target, on that target's
 # own hosted runner, with the OS sandbox on. The stage and the smoke tools come
 # from HTTPS URLs pinned by sha256 (a release's hand-off, docs/release-desktop.md);
-# macOS is sealed before smoke; only the producer's allowed signature paths
-# may change. Uploads the evidence folder as it is, pass
+# macOS is sealed before smoke by default; an already sealed stage can use
+# verify-only mode, which keeps every payload member and receipt unchanged.
+# Uploads the evidence folder as it is, pass
 # or fail. Dispatch only: contents: read, no secrets, no publish, tag or push.
 on:
   workflow_dispatch:
@@ -30,7 +31,11 @@ on:
         type: string
         required: true
       reseal:
-        description: Compatibility input; macOS bundles are always sealed and verified before smoke
+        description: Compatibility input; macOS seals by default unless macos_verify_only is selected
+        type: boolean
+        default: false
+      macos_verify_only:
+        description: Verify an already sealed macOS stage without signing or changing its payload
         type: boolean
         default: false
 permissions:
@@ -88,18 +93,34 @@ jobs:
           sudo apparmor_parser --replace "$RUNNER_TEMP/backplane-userns.profile"
           unshare --user --map-root-user /bin/true
           sudo apt-get install -y -q xvfb >/dev/null
-      - name: Seal and verify all macOS nested code
+      - name: Seal or verify all macOS nested code
         if: startsWith(inputs.target, 'darwin-')
         shell: bash
+        env:
+          MACOS_VERIFY_ONLY: ${{ inputs.macos_verify_only }}
         run: |
           set -euo pipefail
           app=$(find "$W/stage" -maxdepth 1 -name '*.app' -type d | head -1)
           [ -n "$app" ]
-          python3 "$W/tools/desktop/macos-bundle.py" seal "$app" | tee "$W/macos-integrity.json"
-          codesign -dv "$app" 2>&1 | tee "$W/codesign.txt"
-          # the archive is made from the stage the smoke ran: keep the re-sealed one
-          # (tar: an artifact zip would drop the .app's symlinks and modes)
-          (cd "$W" && tar -czf stage-resealed.tar.gz stage && shasum -a 256 stage-resealed.tar.gz | tee stage-resealed.sha256)
+          inspect() { node -e 'console.log(JSON.stringify(require(process.argv[1]).inspectStage(process.argv[2])))' "$W/tools/desktop/produce-release.cjs" "$W/stage"; }
+          inspect > "$W/macos-stage-before.json"
+          if [[ $MACOS_VERIFY_ONLY == true ]]; then
+            python3 "$W/tools/desktop/macos-bundle.py" verify "$app" | tee "$W/macos-integrity.json"
+            returned=stage-verified
+          else
+            python3 "$W/tools/desktop/macos-bundle.py" seal "$app" | tee "$W/macos-integrity.json"
+            returned=stage-resealed
+          fi
+          codesign --verify --deep --strict "$app" 2>&1 | tee "$W/codesign-verify.txt"
+          codesign -dv --verbose=4 "$app" 2>&1 | tee "$W/codesign.txt"
+          inspect > "$W/macos-stage-after.json"
+          if [[ $MACOS_VERIFY_ONLY == true ]]; then
+            cmp "$W/macos-stage-before.json" "$W/macos-stage-after.json"
+          fi
+          # Record the hosted launch context without environment or global logs.
+          { stat -f 'console %Su %u' /dev/console; launchctl managername; launchctl manageruid; } > "$W/macos-session.txt"
+          # Preserve the exact native stage, including symlinks and file modes.
+          (cd "$W" && tar -czf "$returned.tar.gz" stage && shasum -a 256 "$returned.tar.gz" | tee "$returned.sha256")
       - name: Smoke
         shell: bash
         # as the 0.12.0 hosted runtime did: the hub the smoke starts serves the
@@ -136,6 +157,12 @@ jobs:
             smoke/evidence-${{ inputs.target }}/
             smoke/codesign.txt
             smoke/macos-integrity.json
+            smoke/codesign-verify.txt
+            smoke/macos-stage-before.json
+            smoke/macos-stage-after.json
+            smoke/macos-session.txt
+            smoke/stage-verified.tar.gz
+            smoke/stage-verified.sha256
             smoke/stage-resealed.tar.gz
             smoke/stage-resealed.sha256
             smoke/homes/

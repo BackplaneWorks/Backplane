@@ -27,13 +27,19 @@ function linuxSandbox(pid,mainPid){
   assert(Object.values(namespaces).some(n=>n.renderer!==n.main),'No distinct Chromium sandbox namespace');
   return facts;
 }
+function windowsProcessCommand(pid){
+  assert(Number.isSafeInteger(pid)&&pid>0,'Captured native PID required');
+  // Read the owned process directly. CIM first-use initialization can exceed
+  // the probe's bound even after the captured service has become ready.
+  return `$ErrorActionPreference='Stop'; try { $p=[System.Diagnostics.Process]::GetProcessById(${pid}); @{pid=$p.Id;birth=$p.StartTime.ToUniversalTime().ToString('o');executable=$p.MainModule.FileName}|ConvertTo-Json -Compress } catch { exit 2 }`;
+}
 function nativeIdentity(child){
   assert(child?.pid&&child.exitCode===null,'Missing captured native child');
   if(process.platform==='linux')return {pid:child.pid,birth:fs.readFileSync(`/proc/${child.pid}/stat`,'utf8').split(')').slice(1).join(')').trim().split(/\s+/)[19],executable:fs.readlinkSync(`/proc/${child.pid}/exe`)};
   if(process.platform==='darwin')return {pid:child.pid,birth:execFileSync('/bin/ps',['-p',String(child.pid),'-o','lstart='],{encoding:'utf8',timeout:5000}).trim(),executable:execFileSync('/bin/ps',['-p',String(child.pid),'-o','comm='],{encoding:'utf8',timeout:5000}).trim()};
   // This is Node's captured native child PID, never the POSIX hub.lock field.
   const shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const text=execFileSync(shell,['-NoProfile','-NonInteractive','-Command',`$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${child.pid}'; if(!$p){exit 2}; @{pid=$p.ProcessId;birth=$p.CreationDate.ToUniversalTime().ToString('o');executable=$p.ExecutablePath}|ConvertTo-Json -Compress`],{encoding:'utf8',timeout:10000});
+  const text=execFileSync(shell,['-NoProfile','-NonInteractive','-Command',windowsProcessCommand(child.pid)],{encoding:'utf8',timeout:10000});
   return JSON.parse(text);
 }
 async function bounded(p,label,ms=15000){let timer;try{return await Promise.race([p,new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Timed out: '+label)),ms))]);}finally{clearTimeout(timer);}}
@@ -144,5 +150,5 @@ async function main(args){
     process.env=originalEnv;save();
   }
 }
-module.exports={hostTarget,journalCheck,linuxSandbox,argumentsFor,windowAuthWitness,childAlive,cleanupOwnedUi};
+module.exports={hostTarget,journalCheck,linuxSandbox,argumentsFor,windowAuthWitness,childAlive,cleanupOwnedUi,windowsProcessCommand};
 if(require.main===module)main(process.argv.slice(2)).catch(e=>{console.error(e.message);process.exitCode=1;});
