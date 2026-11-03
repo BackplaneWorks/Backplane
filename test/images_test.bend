@@ -31,3 +31,7 @@ def main() -> IO(Unit):
     C.Check.str("paths: separators", String.join(I.Img.paths("a\r/tmp/r.png|/tmp/p.png;'/tmp/q.png'"), "|"), "/tmp/r.png|/tmp/p.png|/tmp/q.png")
     C.Check.str("url", I.Img.url("/tmp/my board (1).png"), "/img?path=/tmp/my%20board%20%281%29.png")
     C.Check.str("url round trip", AT.Att.from_uri("file://" ++ String.drop(I.Img.url("/tmp/résumé 2.png"), 10n)), "/tmp/résumé 2.png")
+    C.Check.str("message url binds entry", I.Img.message_url("m:1", "/tmp/x.png"), "/message-image?entry=m%3A1&path=/tmp/x.png")
+    C.Check.str("message exact reference", Bool.show(I.Img.message_allowed("See `/tmp/x.png`", "/tmp/x.png")), "True")
+    C.Check.str("message unreferenced image", Bool.show(I.Img.message_allowed("/tmp/x.png", "/tmp/y.png")), "False")
+    C.Check.str("message traversal", Bool.show(I.Img.message_allowed("/tmp/../x.png", "/tmp/../x.png")), "False")

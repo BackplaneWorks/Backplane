@@ -4,7 +4,11 @@ An unpaired web or desktop client starts at **Connect to your Backplane hub**.
 A revoked device starts at **Re-pair this device**. On an already paired machine,
 open **Settings → Devices → Add a device**. Copy or share its invitation link,
 scan its QR code, or enter the eight-character code and the shown hub address.
-Web clients can also choose a local QR image; images are decoded locally.
+Web clients show Pairing link, QR code and Short code as equal choices. The
+QR choice includes an app-styled image picker; images are decoded locally.
+Connection and device screens use the same light/dark theme as Settings.
+Device names start with the advertised OS and browser (or Desktop) and remain
+editable; no permission or network lookup is needed.
 
 An invitation expires after ten minutes and works once, whether redeemed by
 link, QR or code. Create a separate invitation for each device. Wrong, expired,

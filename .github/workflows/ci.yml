@@ -16,6 +16,8 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Complete commit history supports merge-base/affected analysis; historical blobs
+# stay lazy. js-native keeps its existing sparse working tree.
 permissions:
   contents: read
 
@@ -25,6 +27,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -49,6 +54,9 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.3'
@@ -60,6 +68,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - run: |
           python3 test/tools/desktop_install_test.py
           python3 test/tools/classic_installer_test.py
@@ -72,6 +83,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - run: python3 test/tools/macos_bundle_test.py
 
   check:
@@ -79,6 +93,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - uses: ./.github/actions/setup-bend
       - uses: ./.github/actions/more-swap
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
@@ -88,6 +105,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - uses: ./.github/actions/setup-bend
       - uses: ./.github/actions/more-swap
       # The proof reads only PROOF.bend's imports (scripts/bend-closure.py),
@@ -140,6 +160,9 @@ jobs:
       TEST_SHARD_COUNT: "4"
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
         with:
@@ -150,13 +173,31 @@ jobs:
       - name: Browser fixture dependencies
         working-directory: tools/browser
         run: bun install --frozen-lockfile
-      # Real render-tree tests can use several GiB each. Keep two workers
-      # per runner; the four shards still execute on separate machines.
+      # Measured render cases reach 12.3GiB each. test.sh's admission policy
+      # currently forces one worker despite the requested two below; the four
+      # shards execute on separate machines. Raising concurrency needs capacity
+      # qualification, not just extra cores.
       # TEST_FULL: the whole suite, never the merge gate's fast set (which
       # would also run the shard's tests one at a time)
       - run: TEST_FULL=1 TEST_JOBS=2 scripts/test.sh
         env:
           BACKPLANE_CHROME: /usr/bin/google-chrome
+          TEST_TIMINGS_OUT: ${{ runner.temp }}/test-timings-${{ matrix.shard }}.txt
+      - name: Retain per-test scheduling measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timings-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-timings-${{ matrix.shard }}.txt
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: warn
+      - name: JSON surrogate browser contract
+        if: matrix.shard == 1
+        run: |
+          mkdir -p build/ui-laws
+          bend test/json_native_test.bend -o build/ui-laws/json_native.mjs
+          BACKPLANE_CHROME=/usr/bin/google-chrome bun test/tools/json_surrogate_browser_test.mjs build/ui-laws/json_native.mjs build/ui-laws/browser
       - name: Composer one-button layout contract
         if: matrix.shard == 1
         run: |
@@ -175,6 +216,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          fetch-depth: 0
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
         with:
@@ -343,6 +387,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          filter: blob:none
+          fetch-depth: 0
           sparse-checkout: |
             scripts
             src/server/effects

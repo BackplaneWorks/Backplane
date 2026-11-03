@@ -15,7 +15,8 @@ function localImagePath(source, origin, home = os.homedir()) {
     const base = new URL(origin), url = new URL(source, base);
     if (base.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(base.hostname) ||
         url.origin !== base.origin || url.username || url.password || url.hash ||
-        url.pathname !== '/img' || [...url.searchParams.keys()].join(',') !== 'path') return null;
+        !((url.pathname === '/img' && [...url.searchParams.keys()].join(',') === 'path') ||
+          (url.pathname === '/message-image' && [...url.searchParams.keys()].join(',') === 'entry,path' && url.searchParams.get('entry')))) return null;
     let file = url.searchParams.get('path');
     if (!file || file.length > 4096 || /[\x00-\x1f]/.test(file) || !/\.(png|jpe?g|gif|webp|bmp)$/i.test(file)) return null;
     if (file.startsWith('~/')) file = home + file.slice(1);

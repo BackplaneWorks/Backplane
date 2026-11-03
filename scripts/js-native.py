@@ -254,7 +254,7 @@ def byte_loop(kind):
 
 BYTE_ESC, BYTE_STR = byte_loop("esc"), byte_loop("str")
 # Lexer-only surrogate repair reviewed; byte counters/callees remain unchanged.
-JSON_BYTES_SOURCE_SHA256 = "039105b99a83af70a1f62042fde42e5a4e89e937983e42dfc22135590b3ac075"
+JSON_BYTES_SOURCE_SHA256 = "f500b30686fc4eea0f6d7ac00bda03e524676f59dd00c6244696e678536560af"
 
 SEC_FINE = re.compile(
     r'function (' + I + r'\$058Sec\$fine\$)\((' + I + r'),(' + I + r')\)\{return (' + I + r'\$058Sec\$fine\$go\$)\(\3,0,\2,""\)\}'

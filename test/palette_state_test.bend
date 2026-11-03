@@ -49,6 +49,17 @@ def ran(+q: String) -> String:
   +u = ui.of(WS.WS.palette.run(U.Palette.set(at([]), q, 0n), 0n))
   Bool.show(U.Ui.flag(u, "settings")) ++ ":" ++ U.Settings.page(u)
 
+# with a bot "scout" (its chat thread b1)
+def with.bot() -> U.Ui:
+  at([M.ThreadCreated{"b1", "", "scout", M.Local{}, "", "", "claude", "", 2n}, M.BotSet{"bot1", "scout", "b1", 3n, "", 2n}])
+
+def found.at(+u: U.Ui, +q: String) -> String:
+  String.join(labels(WS.WS.items(U.Palette.set(u, q, 0n))), ",")
+
+def ran.routines(+u: U.Ui) -> String:
+  +r = ui.of(WS.WS.palette.run(U.Palette.set(u, "routines", 0n), 0n))
+  U.Ui.scratch(r, "@bot") ++ ":" ++ U.Ui.scratch(r, "@btab")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("plain: pin, settle, archive", shelf(at([])), "Pin thread,Settle thread · Ctrl+Shift+S,Archive thread")
@@ -68,6 +79,9 @@ def main() -> IO(Unit):
     C.Check.str("pair finds Devices first", String.join(List.take(&2, String, String.split(found("pair"), ','), 1n), ""), "Settings: Devices · Pair a phone or another computer")
     C.Check.str("a Settings page by what it is for", found("theme"), "Settings: Appearance · Theme, text size, language and sidebar")
     C.Check.str("running it opens that page", ran("pair"), "True:devices")
+    C.Check.str("no bot: routines says how to get one", found("routines"), "Routines: add a bot first (a bot runs routines on a schedule),Settings: Time zone · Local time for routines and reminders")
+    C.Check.str("a bot: its routines", found.at(with.bot(), "routines"), "Routines: scout · what it runs and when,Settings: Time zone · Local time for routines and reminders")
+    C.Check.str("running it opens the bot's Routines tab", ran.routines(with.bot()), "bot1:routines")
     C.Check.str("idle hides Stop", has(at([]), "Stop the running turn · Ctrl+."), "0")
     C.Check.str("running offers Stop once", has(at([M.TurnChanged{"t", M.Running{}, 2n}]), "Stop the running turn · Ctrl+."), "1")
     C.Check.str("completed hides Stop", has(at([M.TurnChanged{"t", M.Completed{}, 2n}]), "Stop the running turn · Ctrl+."), "0")

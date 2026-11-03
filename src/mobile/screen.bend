@@ -474,12 +474,12 @@ def Mob.chips(ps: List<&2, String>) -> List<&2, J.Json>:
     case +p <> t:
       Mob.chip(p) <> Mob.chips(t)
 
-def Mob.urls(ps: List<&2, String>) -> List<&2, J.Json>:
+def Mob.urls(+entry: String, ps: List<&2, String>) -> List<&2, J.Json>:
   match ps:
     case Nil{}:
       Nil{}
     case +p <> t:
-      J.Json.obj([J.KV{"path", J.Json.str(p)}, J.KV{"url", J.Json.str(IM.Img.url(p))}]) <> Mob.urls(t)
+      J.Json.obj([J.KV{"path", J.Json.str(p)}, J.KV{"url", J.Json.str(IM.Img.message_url(entry, p))}]) <> Mob.urls(entry, t)
 
 # The images a reply names, found once when it arrives and kept in the
 # scratch ("@img:<id>": "=" then the paths, a line each; the scratch, unlike
@@ -546,7 +546,7 @@ def Mob.imgs.list(+s: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.is_empty(s), Nil{}, String.split(s, '\n'))
 
 def Mob.imgs(+dr: Map<&2, String>, +id: String) -> List<&2, J.Json>:
-  Mob.urls(Mob.imgs.list(String.drop(U.Str.get(dr, Mob.imgs.key(id)), 1n)))
+  Mob.urls(id, Mob.imgs.list(String.drop(U.Str.get(dr, Mob.imgs.key(id)), 1n)))
 
 # a terminal's row or any other activity's: matched, not Bool.pick (which
 # built both, so every tool call's summary was cut as a terminal's title)

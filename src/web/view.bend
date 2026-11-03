@@ -16,6 +16,8 @@ import ../core/kexport.bend as KEX
 import ../core/json.bend as J
 import ../core/kihealth.bend as KH
 import ../core/model.bend as M
+import ../core/roots.bend as ROOTS
+import ../core/far.bend as FR
 import ../core/sidebar-read.bend as SR
 import ../core/signal.bend as SG
 import ../core/i18n.bend as I
@@ -383,12 +385,37 @@ def View.look.loc(+lc: I.Loc, open: Bool, +st: M.State, +id: String, +rm: Bool) 
 def View.look(open: Bool, +st: M.State, +id: String, +rm: Bool) -> List<&2, D.Node>:
   View.look.loc(I.En{}, open, st, id, rm)
 
+# A project whose folder is gone (core/roots.bend): its sidebar head says so
+# (the hover names the path), and its threads say what to do above the
+# composer, before a message fails with "its folder ... is gone"
+def View.gone.title(missing: Bool, +root: String) -> String:
+  Bool.pick(String, missing, "Folder missing: " ++ root ++ " (moved, renamed or deleted)", root)
+
+def View.gone.chip(missing: Bool) -> List<&2, D.Node>:
+  match missing:
+    case True{}: [D.Dom.span("missing-note", "folder missing")]
+    case False{}: Nil{}
+
+def View.gone.k(missing: Bool, +lc: I.Loc, +root: String, +pid: String, +armed: Bool) -> List<&2, D.Node>:
+  match missing:
+    case True{}:
+      [D.El{"div", "gone-note", [D.At{"class", "gone-note"}, D.At{"role", "status"}], [
+        D.El{"strong", "", Nil{}, [D.Txt{"This project's folder is missing"}]},
+        D.El{"p", "", Nil{}, [D.Txt{"Backplane can't find " ++ root ++ ": it was moved, renamed or deleted, and agents can't start here until it is back at that path. If it moved for good, remove the project and add the folder where it is now."}]},
+        D.Dom.button("", "proj-remove", pid, MSG.T.sidebar.remove.note(lc), Bool.pick(String, armed, MSG.T.menu.remove.confirm(lc), MSG.T.menu.project.remove(lc)))]}]
+    case False{}: Nil{}
+
+# (a thread elsewhere is its own hub's to judge: none)
+def View.gone(+lc: I.Loc, +st: M.State, +id: String, +dr: Map<&2, String>) -> List<&2, D.Node>:
+  +pid = U.Ui.thread_project(U.Ui.thread(st, id))
+  View.gone.k(Bool.and(Bool.not(FR.Fr.is(id)), ROOTS.Roots.missing(st, pid)), lc, U.Ui.project_root(st, pid), pid, String.eq(U.Str.get(dr, "@rm"), pid))
+
 def View.project(+lc: I.Loc, r: U.SRow, +quiet: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> D.Node:
   match r:
     case U.SRow{_, M.Project{+id, title, root, _, _}, M.Shelves{pinned, active, settled, hidden, snoozed}}:
-      D.El{"section", id, [D.At{"class", Bool.pick(String, Bool.or(quiet, U.Label.syncing(st, id)), Bool.pick(String, U.Label.syncing(st, id), "project quiet syncing", "project quiet"), "project")}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, id)}, D.At{"data-drag-to", id}, D.At{"data-drag-act", "reorder-project"}],
-        List.concat(&2, D.Node, [[D.El{"div", "", [D.At{"class", "project-head"}, D.At{"title", root}, D.At{"draggable", "true"}, D.At{"data-drag", id}, D.At{"data-drag-act", "reorder-project"}, D.At{"data-value", id}, D.On{"contextmenu", "proj-menu"}],
-            [WI.WIcon.button("badge", "look", id, MSG.T.menu.look(lc), BG.Badge.icon(st, id), 14, ""), D.Dom.span("name", U.Label.title(st, id, title)), WI.WIcon.button("icon", "new-thread", id, MSG.T.thread.new(lc), "plus", 16, "")]}],
+      D.El{"section", id, [D.At{"class", Bool.pick(String, Bool.or(quiet, U.Label.syncing(st, id)), Bool.pick(String, U.Label.syncing(st, id), "project quiet syncing", "project quiet"), "project") ++ Bool.pick(String, ROOTS.Roots.missing(st, id), " missing", "")}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, id)}, D.At{"data-drag-to", id}, D.At{"data-drag-act", "reorder-project"}],
+        List.concat(&2, D.Node, [[D.El{"div", "", [D.At{"class", "project-head"}, D.At{"title", View.gone.title(ROOTS.Roots.missing(st, id), root)}, D.At{"draggable", "true"}, D.At{"data-drag", id}, D.At{"data-drag-act", "reorder-project"}, D.At{"data-value", id}, D.On{"contextmenu", "proj-menu"}],
+            List.concat(&2, D.Node, [[WI.WIcon.button("badge", "look", id, MSG.T.menu.look(lc), BG.Badge.icon(st, id), 14, ""), D.Dom.span("name", U.Label.title(st, id, title))], View.gone.chip(ROOTS.Roots.missing(st, id)), [WI.WIcon.button("icon", "new-thread", id, MSG.T.thread.new(lc), "plus", 16, "")]])}],
           View.look.loc(lc, String.eq(look, id), st, id, String.eq(rm, id)),
           View.rows_in(lc, pinned, ix, st, sel, now, True{}, False{}),
           View.rows_in(lc, active, ix, st, sel, now, True{}, False{}),
@@ -2339,6 +2366,14 @@ def View.images(ps: List<&2, String>) -> List<&2, D.Node>:
       D.El{"a", "", [D.At{"class", "shot"}, D.At{"href", IM.Img.url(p)}, D.At{"target", "_blank"}, D.At{"title", p}, D.At{"data-lightbox", IM.Img.url(p)}],
         [D.El{"img", "", [D.At{"src", IM.Img.url(p)}, D.At{"alt", p}, D.At{"loading", "lazy"}], Nil{}}]} <> View.images(t)
 
+def View.message.images(+entry: String, ps: List<&2, String>) -> List<&2, D.Node>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      D.El{"a", "", [D.At{"class", "shot"}, D.At{"href", IM.Img.message_url(entry, p)}, D.At{"target", "_blank"}, D.At{"title", p}, D.At{"data-lightbox", IM.Img.message_url(entry, p)}],
+        [D.El{"img", "", [D.At{"src", IM.Img.message_url(entry, p)}, D.At{"alt", p}, D.At{"loading", "lazy"}, D.At{"decoding", "async"}, D.At{"data-message-image", "1"}], Nil{}}, D.Dom.span("message-image-unavailable", "Image unavailable")]} <> View.message.images(entry, t)
+
 # a run of tool calls, or a turn's work, folded into one row: a drawer's
 # head, one line (FO.Fold decides the runs, their labels and which are
 # open: only the person's click opens one); a click opens or shuts it. The
@@ -2703,7 +2738,7 @@ def View.msg.x.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: S
     case True{}:
       D.El{"div", id, [D.At{"class", "msg user"}, D.At{"data-id", id}], D.Dom.cat(View.rto.line(lc, View.attr(as, "rto"), View.attr(as, "rtoq")), D.Dom.cat(View.user_body(text), D.Dom.cat(View.images(AT.Att.images(text)), D.Dom.cat([D.Dom.span("stamp", stamp), D.Dom.copy.loc(lc, AT.Att.body(text))], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
     case False{}:
-      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.images(IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
+      D.El{"div", id, [D.At{"class", "msg assistant"}, D.At{"data-id", id}], D.Dom.cat(View.ctx.head(View.attr(as, "ctx"), View.attr(as, "ctxt"), View.attr(as, "ctxn")), D.Dom.cat([D.El{"div", "", [D.At{"class", "body"}], D.Md.render.loc(lc, text)}], D.Dom.cat(View.message.images(id, IM.Img.paths(text)), D.Dom.cat([D.Dom.span(Bool.pick(String, String.eq(View.attr(as, "mid"), "1"), "stamp mid", "stamp"), stamp), D.Dom.copy.loc(lc, text)], View.rpl.button(lc, String.eq(View.attr(as, "rpl"), "1"), id)))))}
 
 def View.msg.k.loc(+lc: I.Loc, user: Bool, +id: String, +text: String, +stamp: String) -> D.Node:
   View.msg.x.loc(lc, user, id, text, stamp, Nil{})
@@ -2996,7 +3031,8 @@ def View.diff.nogit(+lc: I.Loc, +path: String) -> List<&2, D.Node>:
    D.El{"div", "", [D.At{"class", "diff-body diff-none"}], [
      D.El{"p", "", Nil{}, [D.Txt{MSG.T.viewer.diff.nogit.why(lc, path)}]},
      D.El{"p", "", Nil{}, [D.Txt{MSG.T.viewer.diff.nogit.how(lc)}]},
-     D.El{"pre", "", Nil{}, [D.Txt{"cd " ++ CAD.Cad.quote(path) ++ "\ngit init\ngit add -A\ngit commit -m start"}]}]}]
+     D.El{"pre", "", Nil{}, [D.Txt{"cd " ++ CAD.Cad.quote(path) ++ "\ngit init\ngit add -A\ngit commit -m start"}]},
+     D.Dom.button("primary", "git", "init", MSG.T.viewer.diff.nogit.init.tip(lc), MSG.T.viewer.diff.nogit.init(lc))]}]
 
 def View.diff.at.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
   match git:
@@ -3531,7 +3567,7 @@ def View.asks.of(+lc: I.Loc, buying: Bool, as: List<&2, M.Ask>, +draft: String, 
       View.asks(lc, as, draft, nf)
 
 def View.asks.box(+lc: I.Loc, +st: M.State, +id: String, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> D.Node:
-  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], List.append(&2, D.Node, View.sbox(lc, U.Sbox.box.d(st, dr, id)), View.asks.of(lc, U.Fab.buying(st, id), U.Asks.open(st, id), draft, nf, dr))}
+  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], List.concat(&2, D.Node, [View.gone(lc, st, id, dr), View.sbox(lc, U.Sbox.box.d(st, dr, id)), View.asks.of(lc, U.Fab.buying(st, id), U.Asks.open(st, id), draft, nf, dr)])}
 
 # the same two from the Ui alone (app.bend's composer and asks)
 def View.composer.k(+lc: I.Loc, u: U.Ui, t: M.Thread, +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:

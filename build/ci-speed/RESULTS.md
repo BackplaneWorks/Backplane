@@ -263,7 +263,7 @@ unchanged until integration and actual full coverage/performance validation.
 | Every job on fast runners, queue~8s, cost | Incomplete. Existing queue3s median; defaults still in use. Org runner authorization unavailable; no live auth/settings changed. |
 | Fast lint/checkers; per-file proof profile/cache | Partial: pinned Oxlint/TypeScript7 commands and measured controls below; global lint debt/type coverage and production proof splitting/pass-cache remain. |
 | Shared/reset test workers, core-aware shards | Incomplete; no unvalidated state sharing enabled. |
-| Cache setup/outputs; blobless clones | Partial: verified lean closure transport/cache landed. Workflow clone strategy and broader dependency caches remain. |
+| Cache setup/outputs; blobless clones | Partial: verified lean closure transport/cache landed. ci.yml now uses full-history blobless checkouts (fixture below); other release/mobile workflows and broader dependency caches remain. |
 | Parallel independent gates, split slow job | Incomplete; current local controller remains serial. |
 | Affected PRs, full nightly, mutation guard | Partial: opt-in planner/negative controls; existing nightly is full, but no new PR integration or green-nightly claim. |
 | Actual pre-push hook under10s | Incomplete; accepted UI3s/total9s contract, waiting for measured UI command; no placeholder hook/settings changed. |
@@ -342,7 +342,123 @@ paths including deletions and both rename ends. Report schema/head/status/
 elapsed/checks/diagnostics/cache identity and explicit outcomes for all four
 approaches. Static route/handler coverage always runs; simulator reuse binds
 complete closure+specification+actual runtime/tool identity. No heavy job or
-lock wait starts from the hook. UI owner accepted this contract and reports a
-0.05s literal scan (101 literal bindings,19 computed); its measured complete
-command is still pending. Computed/unmodelled coverage must remain explicit or
+lock wait starts from the hook. UI owner accepted this contract and reports the
+latest static inventory of 306 literal bindings, 37 computed bindings and 31 URL
+expressions. Ten cheap immutable-export/cache/timeout controls passed in 1.07s.
+The computed bindings and URL expressions remain unresolved: static and overall
+status are incomplete/exit 3, even with a valid simulator receipt. Full
+qualification is still pending. Computed/unmodelled coverage must remain explicit or
 incomplete. No placeholder hook has been installed.
+
+## Full-history blobless CI checkouts
+
+All nine `ci.yml` checkout steps now request `filter: blob:none` and
+`fetch-depth: 0`, including the native smoke job's unchanged sparse paths.
+Nightly/manual/release callers of this reusable CI inherit it; separate release
+and mobile workflow checkout settings are outside this change. No job, test,
+proof, runner label, permission or publish step changed.
+
+The [self-validating probe](../../scripts/ci-checkout-probe.py) creates a tiny
+disposable filter-enabled Git server and transfers over `file://`, avoiding
+local clone hardlinks. Git2.53.0, one sample per mode, warm local filesystem:
+
+| Change / fixture | Before | After |
+|---|---:|---:|
+|Default shallow -> full-history blobless |15.45ms /263,179 packed bytes /1 commit |20.33ms /264,376 packed bytes /7 commits |
+|Native sparse shallow -> sparse full-history blobless |11.63ms /977 packed bytes /1 commit |14.41ms /2,142 packed bytes /7 commits |
+|Full unfiltered reference -> full-history blobless |75.62ms /1,837,753 packed bytes |20.33ms /264,376 packed bytes |
+
+Both new modes found the exact cross-branch merge-base; both shallow controls
+could not. Current head file bytes and executable modes matched exactly; the
+sparse job excluded its existing nonselected asset directory. Historical
+obsolete blobs remained missing in both full-history filtered clones. The
+probe exits on any semantic mismatch and removes a stale receipt before work.
+[Raw receipt](checkout-probe.json) binds the exact probe hash and fixture head.
+
+This fulfills the full-history/filter requirement for the reusable CI. It is
+**not an observed checkout speedup over shallow clones**: this fixture added
+about 5ms (normal) /3ms (sparse), while preserving history with very little
+extra object storage. The audit's real checkout median was already about3s;
+no new Actions run was dispatched, and GitHub network/all-ref history cost
+remains unmeasured. Packed bytes are local object storage, not billed network
+bytes. No Boat credit or paid runner time was spent. No broad proof/build was
+repeated, per the user's current tooling-only constraints.
+
+## Restore dispatch guards after heavy-guard integration
+
+The dispatch unit fixture copied `test.sh` but omitted its newly sourced
+`heavy-guard.sh`. All invocations exited before fake Bend/Bun ran: four tests
+failed and four negative tests accidentally passed on that setup error. The
+fixture now supplies an explicit no-op guard only inside its disposable fake
+repository. Real admission remains covered by `heavy_guard_test.py`; production
+lock, memory floors, heap settings and worker count are unchanged. Negative
+cases now require exit1 plus their actual failure/crash/empty-output diagnostic,
+so missing fixture setup cannot satisfy them.
+
+| Change | Before | After |
+|---|---|---|
+|Fake-tool dispatch unit suite |4 failures /8 tests;4 setup-error false positives;0.035s |8/8 pass;1.094s; intended negative diagnostics verified |
+
+[Exact-source receipt](test-dispatch-fixture.json). This is a guard correctness
+repair, not a speedup; no actual Bend/app execution, broad proof/build, Boat
+credit or installer work was used. Inspection also confirmed `test.sh` forces
+serial execution despite CI's `TEST_JOBS=2`. Build owner1188217 confirmed that
+two tests can each reach about8.2GiB RSS, so blindly restoring parallelism on
+a16GiB runner would be unsafe. Production scheduling stays serial pending
+trusted capacity/admission and representative measurements; no twofold/nightly
+speed claim is made.
+
+## Refresh the slow-test scheduling profile from existing nightly logs
+
+Reused [nightly 41444167520](https://github.com/BackplaneWorks/Backplane/actions/runs/41444167520)
+at source 8ec64e3d40c9dd1fb7b72a1374a05220f1a46be9. Its four downloaded test
+logs contain every one of 514 positive-suite programs exactly once: 513 timed
+passes and `subagent_rows_cost_test.bend: did not run`. That failed result is
+retained in the receipt and remains scheduled with an unknown duration. No
+nightly, proof or build was restarted.
+
+The old profile contained only 90 estimates. Current full-tree partitioning
+keeps all 572 programs exactly once; 513 have recorded weights, 59 use the
+existing unknown fallback. `import-test-timings.py` verifies checked-out source
+identity, exact historical inventory, no duplicates and the original shard
+assignment before writing any weights. No pass/cache/skip logic changes.
+
+| Change | Before | After |
+|---|---|---|
+|Recorded historical shard work, seconds |3797.6 /3146.8 /4822.2 /4671.5 |4109.4 /4109.8 /4109.4 /4109.5 |
+|Largest recorded-work shard |4822.2s |4109.8s (14.8% smaller model) |
+|Profile recorder with inherited focused/sharded environment |Runs narrowed selection and overwrites full profile |Forces full/serial, clears selection; failed run preserves old profile |
+
+[Profile receipt](nightly-profile/profile.json) binds the four job-log hashes,
+source revision, importer/output hashes and failed test. These are recorded-work
+sums from the old concurrent run, **not an observed nightly wall-time gain**.
+They omit the failed test's unknown duration and cannot predict effects of
+contention, new code/tests or the current serial worker policy. Real historical
+shard job walls were 31.6–50.4 minutes. No two-minute full-suite claim is made.
+
+The saved logs also show larger memory use than the previous 8.2GiB examples:
+workspace_layout 164.9s/12.3GiB; lang 119s/11.2GiB; body_sidebar_issued 119.7s/11GiB;
+thin_mirror 141.6s/10.1GiB. RSS is each test's largest measured process, not an
+aggregate concurrent memory bound. Production lock/heap/floor/worker settings
+are unchanged; unsafe parallelism is not enabled.
+
+The timing recorder previously omitted `TEST_FULL=1` and inherited
+`TEST_FILES`/shard variables. A real fake-runner baseline reproduced exit 0 and
+profile replacement with TEST_FULL=0 and the narrowed selection. The repair
+forces complete serial selection and atomically replaces only on success.
+Six import/recorder controls pass in 0.043s, including missing/foreign inventory,
+duplicate/stale revision, wrong shard order and failed-record preservation.
+[Control receipt](nightly-profile/controls.json). YAML parsed and the current
+572-test partition at the source base was checked independently.
+
+Future CI shards retain small per-test timing artifacts for three days even
+on failure; artifact transfer overhead remains unmeasured. This pass spent
+**$0 Boat credit**, ran only fake-tool/metadata checks and changed no Bend app,
+law, proof, installer or design source. Full proof/build intentionally omitted
+under the current user instruction.
+
+UI handoff settled: regular PR #790 normal-merged as 34c7f0d92a4ff15a2d1ca3be85e55d4a70cc96bc.
+Exact pushed head b248be1c978cf236292ae71f05c75d9d0eaa2da6 Git-free export took 0.260s,
+with cached simulator pass. Static/overall remain incomplete/exit 3 for 37
+computed bindings and 31 URL expressions; trace remains incomplete with its
+fixture separately passing. No pre-push hook is wired.

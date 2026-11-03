@@ -1199,10 +1199,12 @@ def Title.got(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String
 
 # Commit & push and Open PR without a message: the server writes one from
 # the thread's diff (the thread's title when it cannot)
+# (Make it a git repository: the folder's first commit is "start", as the
+# commands Diff shows say)
 def Hub.act(+s: M.State, +client: U32, +id: String, +thread: String, +action: String, +p: J.Json) -> Step:
   Bool.pick(Step, Bool.and(String.contains(action, "commit"), String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(p, "message"), J.Null{})), "null")),
     Hub.git(s, client, id, "act_gen", thread, action, Hub.thread_title(Hub.thread(s, thread))),
-    Hub.git(s, client, id, "act", thread, action, J.Json.get_str(p, "message", Hub.thread_title(Hub.thread(s, thread)))))
+    Hub.git(s, client, id, "act", thread, action, J.Json.get_str(p, "message", Bool.pick(String, String.eq(action, "init"), "start", Hub.thread_title(Hub.thread(s, thread))))))
 
 # A thread's worktree is ready (thread.worktree) or cannot be made
 # (thread.local): what waited for it runs now, in the thread's directory.
@@ -5622,6 +5624,68 @@ def Retire.turn.f(run: Bool, +s: M.State, +now: Nat, +th: String, +from: String,
 def Retire.turn(run: Bool, +s: M.State, +now: Nat, +th: String, st: Step) -> Step:
   Retire.turn.f(run, s, now, th, "", st)
 
+# Messages a Stop cancelled unread
+# --------------------------------
+# Claude Code runs the person's messages one at a time: one sent while a
+# turn works waits queued in the CLI, and Stop cancels it with the turn.
+# It still looks sent in the thread, so the server, which knows from its
+# ledger which commands never started (CM.Cmds.waiting), has the hub
+# name those messages (server.bend's Claude.unread), and the person can
+# send them again.
+
+def Unread.max() -> Nat:
+  200n
+
+def Unread.of.k(hit: Bool, text: String) -> String:
+  match hit:
+    case True{}:
+      text
+    case False{}:
+      ""
+
+# a person's message in thread whose command (its uuid as Hub.post.go
+# made it) is one of uuids: its text, else ""
+def Unread.of(e: M.Entry, +thread: String, +uuids: List<&2, String>) -> String:
+  match e:
+    case M.Msg{+id, +t, M.User{}, text, +at}:
+      Unread.of.k(Bool.and(String.eq(t, thread), CM.Cmds.in(uuids, Hub.uuid(at, thread ++ "/" ++ id))), text)
+    case _:
+      ""
+
+def Unread.add(+text: String, +acc: List<&2, String>) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.is_empty(text), acc, text <> acc)
+
+# entries newest first, n more to look at: the texts found, oldest first
+def Unread.go(es: List<&2, M.Entry>, +thread: String, n: Nat, +uuids: List<&2, String>, acc: List<&2, String>) -> List<&2, String>:
+  match es n:
+    case +_ 0n:
+      acc
+    case Nil{} 1n+_:
+      acc
+    case +e <> t 1n+k:
+      Unread.go(t, thread, k, uuids, Unread.add(Unread.of(e, thread, uuids), acc))
+
+def Unread.join(xs: List<&2, String>, first: Bool) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case x <> t:
+      Bool.pick(String, first, "", " · ") ++ "\u{201C}" ++ NO.Alert.text(x, 80n) ++ "\u{201D}" ++ Unread.join(t, False{})
+
+def Unread.say(+n: Nat, +qs: String) -> String:
+  Bool.pick(String, Nat.is_eq(n, 1n),
+    "Stop cancelled a message the agent had not read yet: " ++ qs ++ ". Send it again if you still want it.",
+    "Stop cancelled " ++ Nat.show(n) ++ " messages the agent had not read yet: " ++ qs ++ ". Send them again if you still want them.")
+
+def Unread.note.k(+xs: List<&2, String>, +s: M.State, +thread: String, +now: Nat) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, List.is_empty(&2, String, xs), Nil{},
+    [M.ActivityLogged{thread, Hub.id("u", now, Hub.seq(s)), "error", "stop", Unread.say(List.length(&2, String, xs), Unread.join(xs, True{})), now}])
+
+# what the hub logs for the commands a Stop cancelled before they started
+# (uuids; none: nothing)
+def Unread.note(+s: M.State, +thread: String, +uuids: List<&2, String>, +now: Nat) -> List<&2, M.Change>:
+  Unread.note.k(Unread.go(M.State.mine(s, thread), thread, Unread.max(), uuids, Nil{}), s, thread, now)
+
 # Explicit stop paths (client and MCP) durably pause the conversation's
 # mail FIFO. An internal restart/fallback Interrupted event is not consent
 # to clear this register. Keep an undisposed seed at the front for review.
@@ -7178,9 +7242,35 @@ def Reset.first(+t: String, +c: Char) -> String:
 def Reset.rule(+s: M.State, +zone: String) -> TZ.TzRule:
   Maybe.default(&2, TZ.TzRule, SC.Zone.rule(s, zone), SC.Sched.person(s, 0n, False{}))
 
+def Reset.month.go(xs: List<&2, String>, +name: String, +n: Nat) -> Nat:
+  match xs:
+    case Nil{}: 0n
+    case h <> t: Bool.pick(Nat, String.eq(h, name), n, Reset.month.go(t, name, 1n+n))
+
+def Reset.pad(+n: Nat) -> String:
+  Bool.pick(String, Nat.is_lt(n, 10n), "0", "") ++ Nat.show(n)
+
+def Reset.date.at(day: Maybe<&2, Nat>, clock: Maybe<&2, Nat>, rule: TZ.TzRule, +now: Nat) -> Nat:
+  match day clock:
+    case Some{day} Some{secs}:
+      +at = TZ.Tz.at(rule, Nat.add(day, secs))
+      Bool.pick(Nat, Nat.is_gt(at, now), at, 0n)
+    case _ _: 0n
+
+def Reset.date.words(ws: List<&2, String>, +rule: TZ.TzRule, +now: Nat) -> Nat:
+  match ws:
+    case month <> +day <> clock <> _:
+      +m = Reset.month.go(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], month, 1n)
+      +d = Maybe.default(&2, Nat, Nat.read(Reset.first(day, ',')), 0n)
+      +iso = String.take(TZ.Tz.iso(rule, now), 4n) ++ "-" ++ Reset.pad(m) ++ "-" ++ Reset.pad(d)
+      Reset.date.at(WH.When.date(iso), WH.When.hm(clock), rule, now)
+    case _: 0n
+
 def Reset.words(+s: M.State, +now: Nat, +why: String) -> Nat:
   +rest = Reset.from(why, "resets ", 7n)
-  Maybe.default(&2, Nat, WH.When.parse(Reset.first(rest, ' '), now, Reset.rule(s, Reset.first(Reset.from(rest, "(", 1n), ')'))), 0n)
+  +rule = Reset.rule(s, Reset.first(Reset.from(rest, "(", 1n), ')'))
+  +dated = Reset.date.words(String.split(rest, ' '), rule, now)
+  Bool.pick(Nat, Nat.is_gt(dated, 0n), dated, Maybe.default(&2, Nat, WH.When.parse(Reset.first(rest, ' '), now, rule), 0n))
 
 def Reset.fill.w(l: FB.Limit, +s: M.State, +now: Nat) -> FB.Limit:
   match l:
@@ -10449,19 +10539,28 @@ def AccountFallback.chain(xs: List<&2, FB.Target>, +s: M.State, +caps: J.Json, +
     case Nil{}: AccountFallback.block(s, now, th, text)
     case +h <> t: AccountFallback.chain.choice(AccountFallback.pick.target(s, caps, now, th, h), h, AccountFallback.chain(t, s, caps, now, th, cwd, text, uuid), s, now, th, cwd, text, uuid)
 
-def AccountFallback.cross(on: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String) -> Step:
+def AccountFallback.cross.empty(on: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String) -> Step:
   match on:
     case False{}: AccountFallback.block(s, now, th, text)
     case True{}: AccountFallback.chain(FB.Chain.suffix(FB.Chain.of(s), FB.Target.key(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
+
+def AccountFallback.cross.choice(choice: Maybe<&2, J.Json>, on: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  match choice:
+    case Some{profile}: AccountFallback.use(s, now, th, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), AF.Pick.binding(profile), cwd, text, uuid)
+    case None{}: AccountFallback.cross.empty(on && AF.Pick.may_cross(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
+
+def AccountFallback.cross(on: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  AccountFallback.cross.choice(AF.Pick.account(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), on, s, caps, now, th, cwd, text, uuid)
 
 def AccountFallback.pick.choice(choice: Maybe<&2, J.Json>, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
   match choice:
     case Some{profile}: AccountFallback.use(s, now, th, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), AF.Pick.binding(profile), cwd, text, uuid)
     case None{}: AccountFallback.cross(FB.Chain.on(s), s, caps, now, th, cwd, text, uuid)
 
-def AccountFallback.preflight(held: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
+def AccountFallback.preflight(held: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String, +original: List<&2, Out>) -> Step:
   match held:
-    case False{}: Step.after(Fallback.attempt.quota(s, caps, now, th, cwd, text, uuid, original),
+    case False{}: Step.after(Bool.pick(Step, AF.Provider.managed(s, th, Hub.provider(Hub.thread(s, th))),
+      Fallback.attempt.k(False{}, s, caps, now, th, cwd, text, uuid, original), Fallback.attempt.quota(s, caps, now, th, cwd, text, uuid, original)),
       Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "account.failover.waiting." ++ th, "")), Nil{}, [M.SettingSet{"account.failover.waiting." ++ th, "", now}]))
     case True{}: AccountFallback.pick.choice(AF.Pick.account(s, now, Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th)))), s, caps, now, th, cwd, text, uuid)
 
@@ -10490,7 +10589,10 @@ def AccountFallback.attempt.restore(restore: Bool, +s: M.State, +caps: J.Json, +
         Step.outs(Hub.run(Hub.thread(next, th), cwd, actual, uuid)))
     case False{}:
       +p = Hub.provider(Hub.thread(s, th))
-      AccountFallback.preflight(AF.Hold.current(s, p, ACCT.Accounts.id(s, th, p), ACCT.Accounts.epoch(s, th, p), FB.Target.model(Fallback.target(Hub.thread(s, th))), now), s, caps, now, th, cwd, text, uuid, original)
+      +scope = Bool.pick(String, FB.Limit.active(s, p, now), p, FB.Target.key(Fallback.target(Hub.thread(s, th))))
+      +inherited = AF.Hold.inherit(s, now, th, Pending.of(s, now, FB.Limit.record(s, scope)))
+      +next = M.State.replay(inherited, s)
+      Step.before(inherited, Nil{}, AccountFallback.preflight(AF.Hold.current(next, p, ACCT.Accounts.id(next, th, p), ACCT.Accounts.epoch(next, th, p), FB.Target.model(Fallback.target(Hub.thread(next, th))), now), next, caps, now, th, cwd, text, uuid, original))
 
 def AccountFallback.safe(+s: M.State, +th: String) -> Bool:
   Hub.owns(s, th) && Lost.live(Hub.thread(s, th)) && Nat.is_eq(Hub.pending(Hub.thread(s, th)), 0n) &&
