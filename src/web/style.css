@@ -443,7 +443,7 @@ section.subs > .subs-head[aria-expanded="false"] > svg { transform: rotate(-90de
 .set-ctl a.btn { display: inline-block; padding: 3px 9px; background: var(--raise); border: 1px solid var(--line); text-decoration: none; color: inherit; }
 .set-ctl a.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .thread-head .back { display: none; }
-.empty { display: grid; place-items: center; color: var(--faint); height: 100%; }
+.empty { display: grid; place-items: center; align-content: center; color: var(--faint); height: 100%; }
 
 /* Viewer */
 .viewer { border-left: 1px solid var(--line); background: var(--view); position: relative; min-width: 0;
