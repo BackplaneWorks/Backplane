@@ -228,6 +228,8 @@ type JobReceipt is Data:
   JobSnoozed{thread: String, until: Nat}
   JobWorktree{thread: String, branch: String, path: String, provider: String, binding: String}
   JobLocal{thread: String, provider: String, binding: String}
+  # a Stop cancelled these Claude commands before they started
+  JobUnread{thread: String, uuids: List<&2, String>}
 
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
@@ -4846,12 +4848,28 @@ def Claude.put.kind(+line: String) -> Nat:
   Bool.pick(Nat, String.starts_with(line, "{\"uuid\":"), 1n,
     Bool.pick(Nat, Bool.and(String.starts_with(line, "{\"type\":\"control_request\""), String.contains(line, "\"subtype\":\"interrupt\"")), 2n, 0n))
 
+# the messages an interrupt cancels before Claude started them (uuids) are
+# named in their thread (hub.bend's Unread.note, by Hub.job.report): they
+# still look sent
+def Claude.unread.k(none: Bool, h: Hub, +thread: String, uuids: List<&2, String>) -> IO(Hub):
+  match none h:
+    case True{} _:
+      IO.pure(Hub, h)
+    case False{} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        GitJob.report(inbox, JobUnread{thread, uuids})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Claude.unread(h: Hub, +thread: String, +uuids: List<&2, String>) -> IO(Hub):
+  Claude.unread.k(List.is_empty(&2, String, uuids), h, thread, uuids)
+
 def Claude.put.k(i: Nat, +r: ARun, h: Hub, +thread: String, +line: String) -> IO(Hub):
   match i:
     case 1n:
       Claude.flush(ARun.put(r, CM.Cmds.accept(ARun.cmds(r), B.Claude.uuid.of(line)), CM.Held.push(ARun.held(r), B.Claude.uuid.of(line), line, True{})), h, thread)
     case 2n:
-      IO.bind(Hub, Hub, Claude.raw(h, thread, line), h2 => Claude.flush(ARun.put(r, CM.Cmds.stop(ARun.cmds(r), Nil{}), ARun.held(r)), h2, thread))
+      IO.bind(Hub, Hub, Claude.raw(h, thread, line), h2 => IO.bind(Hub, Hub, Claude.unread(h2, thread, CM.Cmds.waiting(ARun.cmds(r))),
+        h3 => Claude.flush(ARun.put(r, CM.Cmds.stop(ARun.cmds(r), Nil{}), ARun.held(r)), h3, thread)))
     case _:
       Claude.raw(h, thread, line)
 
@@ -12266,6 +12284,11 @@ def Hub.job.ready(h: Hub, +thread: String, +provider: String, +binding: String, 
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, Hub.job.ready.step(st, thread, provider, binding, change, now))
 
+def Hub.job.unread(h: Hub, +thread: String, +uuids: List<&2, String>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{B.Unread.note(st, thread, uuids, now), Nil{}})
+
 def Hub.job.report(h: Hub, receipt: JobReceipt, +now: Nat) -> IO(Hub):
   match receipt:
     case JobNote{thread, tone, summary}:
@@ -12282,6 +12305,8 @@ def Hub.job.report(h: Hub, receipt: JobReceipt, +now: Nat) -> IO(Hub):
       Hub.job.ready(h, thread, provider, binding, M.WorktreeSet{thread, branch, path, now}, now)
     case JobLocal{+thread, provider, binding}:
       Hub.job.ready(h, thread, provider, binding, M.WorktreeSkipped{thread, now}, now)
+    case JobUnread{+thread, +uuids}:
+      Hub.job.unread(h, thread, uuids, now)
 
 # A client's request about something elsewhere goes to its machine; any
 # other stays here
