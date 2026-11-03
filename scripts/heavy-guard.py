@@ -7,13 +7,16 @@ import sys
 import subprocess
 
 GIB = 1024 ** 3
-# Conservative available-memory floors, not process limits.
-FLOORS = {'check': 12 * GIB, 'proof': 18 * GIB, 'test': 12 * GIB,
-          'build': 14 * GIB, 'browser': 12 * GIB}
+# Expected peak plus an execution margin, not process limits. Local jobs also
+# leave host headroom; Boat jobs are isolated and use their own capacity.
+FLOORS = {'check': 14 * GIB, 'proof': 19 * GIB, 'test': 14 * GIB,
+          'build': 16 * GIB, 'web': 10 * GIB, 'browser': 14 * GIB}
+HOST_RESERVE = 8 * GIB
 FD_VAR = 'BACKPLANE_HEAVY_LOCK_FD'
+BOAT_VAR = 'BACKPLANE_HEAVY_BOAT_SANDBOX'
 
 
-def available():
+def host_available():
     fields = {}
     for line in Path('/proc/meminfo').read_text().splitlines():
         parts = line.split()
@@ -21,6 +24,11 @@ def available():
             fields['available'] = int(parts[1]) * 1024
     if 'available' not in fields:
         raise ValueError('MemAvailable is unavailable')
+    return fields['available']
+
+
+def available():
+    fields = {'available': host_available()}
     cgroup_root = Path('/sys/fs/cgroup')
     if (cgroup_root / 'cgroup.controllers').exists():
         groups = Path('/proc/self/cgroup').read_text().splitlines()
@@ -50,7 +58,9 @@ def available():
 
 
 def lock_path():
-    return Path(os.environ.get('BACKPLANE_LOCK_DIR', '/tmp')) / 'bp-bend.lock'
+    # The hub's bend guard uses this same host-wide inode. Named-lock and
+    # fixture-directory overrides must not create separate heavy-work slots.
+    return Path('/tmp/bp-bend.lock')
 
 
 def inherited_lock(path):
@@ -66,12 +76,17 @@ def inherited_lock(path):
 
 def admit(profile):
     try:
+        host = host_available()
         free = available()
     except (OSError, ValueError) as error:
         print('heavy-guard: cannot establish available memory: ' + str(error), file=sys.stderr)
         return False
     if free < FLOORS[profile]:
         print(f'heavy-guard: {profile} requires {FLOORS[profile] / GIB:.0f} GiB available; {free / GIB:.2f} GiB available', file=sys.stderr)
+        return False
+    in_boat = os.environ.get(BOAT_VAR) == '1' and os.environ.get('BACKPLANE_HEAVY_OFFLOADED') == '1'
+    if not in_boat and host < FLOORS[profile] + HOST_RESERVE:
+        print(f'heavy-guard: {profile} needs {FLOORS[profile] / GIB:.0f} GiB expected peak plus {HOST_RESERVE / GIB:.0f} GiB host reserve; {host / GIB:.2f} GiB host available', file=sys.stderr)
         return False
     return True
 
@@ -143,7 +158,7 @@ def main(args):
     if held_only:
         args = args[1:]
     if not args or args[0] not in FLOORS:
-        print('usage: heavy-guard.py [--held] {check|proof|test|build|browser} [-- command ...]', file=sys.stderr)
+        print('usage: heavy-guard.py [--held] {check|proof|test|build|web|browser} [-- command ...]', file=sys.stderr)
         return 2
     profile, rest = args[0], args[1:]
     path = lock_path()
