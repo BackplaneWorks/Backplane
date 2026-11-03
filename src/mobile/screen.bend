@@ -582,6 +582,14 @@ def Mob.act(step: Bool, +lc: I.Loc, e: M.Entry) -> J.Json:
     case _ M.Msg{+id, _, _, text, _}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("act")}, J.KV{"tone", J.Json.str("")}, J.KV{"label", J.Json.str("")}, J.KV{"text", J.Json.str(text)}])
 
+# what a reply's blocks say: a provider's API error as its sentence
+# (FO.ApiErr.say, as the web's View.msg.body), its "text" still the raw
+# one for Copy
+def Mob.reply.shown(api: Bool, +lc: I.Loc, +text: String) -> String:
+  match api:
+    case True{}: FO.ApiErr.say(lc, text)
+    case False{}: text
+
 # an entry of the thread itself: a user message is what was written and
 # its attachments; a reply its markdown and the images it names
 def Mob.own.s.loc(+lc: I.Loc, e: M.Entry, +dr: Map<&2, String>, +stamp: String) -> J.Json:
@@ -592,7 +600,7 @@ def Mob.own.s.loc(+lc: I.Loc, e: M.Entry, +dr: Map<&2, String>, +stamp: String) 
     case M.Msg{+id, _, _, +raw, _}:
       +text = CP.Pending.text(lc, id, raw)
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("assistant")}, J.KV{"text", J.Json.str(text)},
-        J.KV{"blocks", J.Json.arr(Mob.nodes(D.Md.render.loc(lc, text)))}, J.KV{"images", J.Json.arr(Mob.imgs(dr, id))}, J.KV{"stamp", J.Json.str(Bool.pick(String, CP.Pending.synthetic(id), "", stamp))}])
+        J.KV{"blocks", J.Json.arr(Mob.nodes(D.Md.render.loc(lc, Mob.reply.shown(FO.ApiErr.is(text), lc, text))))}, J.KV{"images", J.Json.arr(Mob.imgs(dr, id))}, J.KV{"stamp", J.Json.str(Bool.pick(String, CP.Pending.synthetic(id), "", stamp))}])
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       Mob.act(String.eq(tone, HS.Step.tone()), lc, M.Act{id, th, tone, kind, summary, at})
 
