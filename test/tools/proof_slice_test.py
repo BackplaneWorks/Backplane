@@ -208,6 +208,55 @@ class Slices(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'effect companion'):
             sl.verify_output(out, kept, ROOT)
 
+    # independent plan coverage and fail-closed references ---------------------------
+    def repo(self):
+        self.write('LAWS.bend', 'import Base\n\nlaw one:\n  {0n == 0n : Nat}\n\nlaw two:\n  {1n == 1n : Nat}\n')
+        self.write('PROOF.bend', 'import Base\nimport ./LAWS.bend as Laws\nimport ./src/h.bend as H\n\ndef Laws.one():\n  {==}\n\ndef Laws.two():\n  H.help()\n')
+        self.write('src/h.bend', 'import Base\n\ndef help():\n  {==}\n\ndef lonely():\n  0\n')
+        s = sl.Slicer(self.root, ['LAWS.bend', 'PROOF.bend', 'src/h.bend'])
+        a = s.write_shard(s.law_seeds('one'), self.root/'o1')
+        b = s.write_shard(s.law_seeds('two'), self.root/'o2')
+        c = s.write_shard(s.blocks('src/h.bend', 'lonely'), self.root/'o3')
+        return s, [{'id': 'A', 'kept': a, 'laws': ['one']}, {'id': 'B', 'kept': b, 'laws': ['two']}, {'id': 'C', 'kept': c, 'laws': []}]
+
+    def test_complete_plan_is_accepted(self):
+        s, shards = self.repo()
+        self.assertEqual(sl.verify_plan(self.root, shards)['laws'], 2)
+
+    def test_plan_with_missing_duplicate_or_unknown_coverage_is_rejected(self):
+        s, shards = self.repo()
+        for bad, why in ((shards[:2], 'checked by no shard'),
+                         ([shards[0], shards[2]], 'checked by no shard'),
+                         ([*shards, {'id': 'D', 'kept': set(), 'laws': ['one']}], 'law partition'),
+                         ([shards[0], {**shards[1], 'laws': []}, shards[2]], 'law partition'),
+                         ([shards[0], {**shards[1], 'laws': ['two', 'ghost']}, shards[2]], 'law partition'),
+                         ([*shards, {'id': 'E', 'kept': {('src/h.bend', 'def', 'invented')}, 'laws': []}], 'not canonical')):
+            with self.assertRaisesRegex(ValueError, why):
+                sl.verify_plan(self.root, bad)
+
+    def test_unresolved_alias_reference_fails_closed(self):
+        self.write('src/h.bend', 'import Base\n\ndef help():\n  0\n')
+        self.write('src/u.bend', 'import Base\nimport ./h.bend as H\n\ndef use():\n  H.nothing_here()\n')
+        s = self.slicer('src/u.bend', 'src/h.bend')
+        with self.assertRaisesRegex(ValueError, 'unresolved reference'):
+            s.write_shard(s.blocks('src/u.bend', 'use'), self.root/'ou')
+
+    def test_js_effect_dependencies_are_followed_and_dynamic_imports_rejected(self):
+        (self.root/'src/effects').mkdir()
+        self.write('src/effects/a.js', "const b = require('./b.js');\nexport {b};\n")
+        self.write('src/effects/b.js', "export const x = 1;\n")
+        self.write('src/j.bend', 'import Base\n\ndef J.f():\n  import "./effects/a.js"\n  0\n')
+        s = self.slicer('src/j.bend')
+        out = self.root/'oj'
+        kept = s.write_shard(s.blocks('src/j.bend', 'J.f'), out)
+        self.assertTrue((out/'t/src/effects/b.js').is_file())
+        (out/'t/src/effects/b.js').unlink()
+        with self.assertRaisesRegex(ValueError, 'effect companion'):
+            sl.verify_output(out, kept, self.root)
+        self.write('src/effects/b.js', "const n = './c'; import(n);\n")
+        with self.assertRaisesRegex(ValueError, 'dynamic import'):
+            s.write_shard(s.blocks('src/j.bend', 'J.f'), self.root/'oj2')
+
     def test_every_module_in_the_canonical_closure_parses_strictly(self):
         import subprocess
         import sys

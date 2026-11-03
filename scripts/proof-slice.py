@@ -94,8 +94,14 @@ def scan_module(text, origin):
     return imports, digests, effects
 
 
+JS_REL = re.compile(r"""(?:require\(\s*|from\s+|import\s*\(\s*|import\s+)(['"])(\.{1,2}/[^'"]+)\1""")
+JS_DYNAMIC = re.compile(r"""(?:\bimport|\brequire)\s*\(\s*[^'"\s)]""")
+
+
 def effect_closure(root, module, path):
-    """Repo-relative effect files a module's `import "x"` needs: the file and its local #include "y.h" headers."""
+    """Repo-relative effect files a module's `import "x"` needs: the file, its local #include "y.h"
+    headers, and for .js the relative files it requires/imports. A dynamic import/require whose
+    target is not a string literal cannot be followed, so it raises (fail closed)."""
     root = Path(root)
     found, pending = set(), [(root/module).parent.joinpath(path).resolve()]
     while pending:
@@ -106,11 +112,20 @@ def effect_closure(root, module, path):
         if not f.is_file():
             raise ValueError('effect companion missing: %s (from %s)' % (rel, module))
         found.add(rel)
+        text = f.read_text() if f.suffix in ('.c', '.h', '.js', '.cjs', '.mjs') else ''
         if f.suffix in ('.c', '.h'):
-            for line in f.read_text().splitlines():
+            for line in text.splitlines():
                 m = INCLUDE.match(line)
                 if m:
                     pending.append((f.parent/m[1]).resolve())
+        elif f.suffix in ('.js', '.cjs', '.mjs'):
+            if JS_DYNAMIC.search(text):
+                raise ValueError('effect companion has a dynamic import/require that cannot be followed: ' + rel)
+            for m in JS_REL.finditer(text):
+                target = (f.parent/m[2]).resolve()
+                if not target.suffix:
+                    target = target.with_suffix('.js')
+                pending.append(target)
     return found
 
 
@@ -297,7 +312,10 @@ class Slicer:
                 if first in imports and imports[first] != 'Base':
                     used.setdefault(b['mod'], set()).add(first)
                     if rest:
-                        for x in self.module(imports[first]).find(rest):
+                        hits = self.module(imports[first]).find(rest)
+                        if not hits and t not in mod.by_name:
+                            raise ValueError('unresolved reference %s in %s %s (%s): not found in %s' % (t, b['kind'], b['name'], b['mod'], imports[first]))
+                        for x in hits:
                             push(x)
                     # `Laws.x` is also a local declaration name in PROOF.bend
                     for x in mod.by_name.get(t, ()):
@@ -424,3 +442,37 @@ class Slicer:
 
     def law_seeds(self, law):
         return self.blocks('LAWS.bend', law, 'law') + self.blocks('PROOF.bend', 'Laws.' + law, 'def')
+
+
+def verify_plan(root, shards):
+    """Independent root/law coverage. `shards`: [{'id', 'kept': set of (module, kind, name), 'laws': [names]}].
+    The canonical set is rebuilt here from the files bend would read (scripts/bend-closure.py on
+    LAWS.bend and PROOF.bend) with the separate plain scanner; nothing comes from the slicer's own parser or
+    from the shards' roots. Requires: every canonical declaration kept by some shard, nothing kept that is
+    not canonical, every `law` of LAWS.bend named by exactly one shard and no unknown law."""
+    import subprocess
+    import sys
+    root = Path(root).resolve()
+    closure = subprocess.check_output([sys.executable, str(Path(__file__).resolve().parent/'bend-closure.py'), './LAWS.bend', './PROOF.bend'],
+                                      cwd=root, text=True).split()
+    canonical, laws = set(), []
+    for rel in sorted(set(closure) | {'LAWS.bend', 'PROOF.bend'}):
+        if not rel.endswith('.bend'):
+            continue
+        _, digests, _ = scan_module((root/rel).read_text(), rel)
+        canonical |= {(rel, k, n) for k, n in digests}
+        if rel == 'LAWS.bend':
+            laws = sorted(n for k, n in digests if k == 'law')
+    kept = set()
+    for shard in shards:
+        kept |= set(shard['kept'])
+    if kept - canonical:
+        raise ValueError('shards keep %d declarations that are not canonical' % len(kept - canonical))
+    if canonical - kept:
+        raise ValueError('%d canonical declarations are checked by no shard, e.g. %s %s %s' % ((len(canonical - kept),) + sorted(canonical - kept)[0]))
+    named = sorted(n for shard in shards for n in shard.get('laws', []))
+    if named != laws:
+        missing, extra = set(laws) - set(named), set(named) - set(laws)
+        dup = {n for n in named if named.count(n) > 1}
+        raise ValueError('law partition differs from LAWS.bend: %d missing, %d unknown, %d duplicated' % (len(missing), len(extra), len(dup)))
+    return {'canonical_declarations': len(canonical), 'laws': len(laws), 'shards': len(shards)}
