@@ -132,3 +132,19 @@ rendered-web checks, the full type/proof gate (472 seconds), all eight
 required regressions and seven private native smoke checks in
 `w-t1793685091-1352063-1359664`. Cached paint measured 20.8 ms under an
 800 ms delayed reply.
+
+Integration through `c86d5dac8` passed home/palette/autosettle assertions and
+all 24 full-output sidebar cases on the 16 GB Boat worker in
+`w-t1793685091-1352063-1360688`. Manual review of the combined client helpers
+confirms the palette reads canonical asks and existing signal info; all
+conservative scratch dependencies and home-owner fences remain intact.
+Autosettle and Git configuration hardening stay outside the sidebar draft
+projection. Only the combined client hash required refreshing; every earlier
+manifest review record is preserved. The five production-shell Git config
+hardening regressions also passed on disposable repositories.
+
+The complete integration through `c86d5dac8` passed the full type/proof gate
+(481 seconds), all eight required regressions, Android compilation and all
+29 rendered-web acceptance checks in `w-t1793685091-1352063-1360713`. Cached
+paint measured 22.8 ms under an 800 ms delayed reply. Native final transfer
+and smoke receipts are recorded separately after resuming a transport error.
