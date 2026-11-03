@@ -462,3 +462,81 @@ Exact pushed head b248be1c978cf236292ae71f05c75d9d0eaa2da6 Git-free export took 
 with cached simulator pass. Static/overall remain incomplete/exit 3 for 37
 computed bindings and 31 URL expressions; trace remains incomplete with its
 fixture separately passing. No pre-push hook is wired.
+
+## Hub/web compiler memory: profile and rejected small-heap experiment
+
+The current priority is a release compile below **6 GB**. This remains
+unproven. Neither the hub nor web import closure includes `LAWS.bend` or
+`PROOF.bend`, so separating those files out of emission cannot reduce these
+builds. The law/proof gates remain required separately.
+
+Reused build owner1188217's completed source 273b268cd1c56661ead5cc8ba0ae1b5a33ed375f
+baseline instead of replaying it: backend emit 108.928s /14,217,712KiB
+(13.56GiB), web 59.309s /8,146,460KiB (7.77GiB), stamp 0.662s /404,400KiB,
+Bun packaging 0.672s /354,240KiB. That job used a 16GiB no-swap scope, a 4GiB
+JSC RAM hint, 1GiB OS stack and 512MiB JS stack. The stack settings are limits,
+not a measurement of committed stack memory.
+
+Instrumented public Bend v2.0.36 source at
+ae1101ca7d15364f9274fa6b1367d175884a7da7: main/comp diagnostics only, with
+**no change to human-owned bend.ts, checker calls, laws or proofs**.
+[Observation patch](../../patches/bend-memory-profile.patch) applies to the
+clean tag. It is a Bun-only diagnostic patch for an isolated source checkout,
+not a deployed compiler; the Node loader was not qualified. Both probes use
+pinned Bun 1.3.10 executable
+SHA 795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822,
+frozen source 273b268c, a verified 552-input packet and one 8CPU/15GiB Boat VM.
+
+| Boundary | RSS at checkpoint | Cumulative process peak |
+|---|---:|---:|
+| Load/parse complete |3.91GiB |3.92GiB |
+| Type-check complete |9.27GiB |9.27GiB |
+| Compiler analysis complete |12.13GiB |12.17GiB |
+| JS function emission complete |13.36GiB |13.37GiB |
+| Output strings joined |13.16GiB |13.37GiB |
+
+These are checkpoint values and cumulative high-water marks, **not isolated
+phase allocations or net live heap sizes**. The final census reported about
+216 million JSC cells at its most recent GC. That count does not establish
+current reachability: both objectCount and heapSize describe the previous
+collection; objectTypeCounts has different allocation semantics. This
+[Bun API distinction](https://bun.com/reference/bun/jsc/HeapStats) was also
+checked with a tiny allocation fixture on the pinned runtime.
+
+The roughly 15MB emitted file and ~0.1GiB joining increase are small relative
+to the checked/compiler representations. Instrumented wall time 162.116s
+includes expensive census walks; it is not an uninstrumented speed baseline.
+[Raw checkpoints](compiler-memory/baseline-server-profile.jsonl),
+[GNU time](compiler-memory/baseline-server.time),
+[summary](compiler-memory/baseline-summary.json).
+
+| Change / trial | Before | After / decision |
+|---|---|---|
+| Small-heap policy, exact frozen hub | Source-compiler profile 13.37GiB /162.116s with census | `--smol` 12.64GiB /255.494s without census; **rejected**, above 6GB and slower |
+| Full web bundle in experimental packet | Saved complete baseline 7.77GiB /59.309s | **Failed** after 65.672s: packet omitted desktop/connection-record.cjs. Observed 7.64GiB is a failed partial run, no bundle gain/pass claim |
+
+The source compiler's raw output initially differed from the saved official
+executable's emit: only embedded f32_round Function.toString formatting
+changed. Every byte before and after that helper matched. Both exported
+helpers normalize to the same 467-byte function under the pinned production
+minifier; a deliberately changed helper does not. An initial unexported
+normalization fixture was eliminated as unused and was discarded. The
+[qualified format control](compiler-memory/format-control/result.json) records
+that distinction. The original strict-output failure is preserved, not
+relabelled. The later small-heap emit matched the source-compiler baseline
+SHA 5f2b021aa080e2424f77db1c56e98e2f447e05aed2ecfdb19f610bf325841666
+exactly; both jobs rejected the false theorem.
+
+First job j20261103161034-146641 cost 734credit-s (**$0.00734**); second
+j20261103162034-268193 cost 1414credit-s (**$0.01414**). Total **$0.02148**.
+Both original --idle0 runners deleted their VMs and verified deletion.
+No Alpha release output, installed compiler, installer-owned release file,
+start guard, live PID 3103745 or live/private home was changed.
+
+`bend-memory-report.py` summarizes saved data without compiling anything.
+Four cheap controls pass, covering truncated/duplicated/nonmonotonic profiles
+and failed/contradictory process receipts. The small-heap policy is not enabled
+in production. Next work must reduce retained compiler representations and
+qualify a complete frontend closure; no 6GB release or 120s complete CI success
+is claimed. Completed experiment sources were archived under ignored build/
+to avoid polluting future whole-checkout source inventories.
