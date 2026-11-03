@@ -1,3 +1,4 @@
+import ./src/core/account-fallback.bend as ACCOUNTRECOVERY
 import ./src/web/composer-bar.bend as CBAR
 import ./src/core/mailowner.bend as MAILOWN
 
@@ -15544,3 +15545,14 @@ law composer_bar_one_button:
 law composer_bar_never_wraps:
   for button: String
   {CBAR.ComposerBar.wrap(CBAR.ComposerBar.layout(button)) == "nowrap" : String}
+
+# A provider fallback never happens while another account of that provider has
+# allowance. The actual hub cross-provider gate uses this account selector.
+law provider_fallback_only_when_accounts_exhausted:
+  for +s: M.State
+  for +now: Nat
+  for +provider: String
+  for +model: String
+  for +account: J.Json
+  for h: {ACCOUNTRECOVERY.Pick.account(s, now, provider, model) == Some{account} : Maybe<&2, J.Json>}
+  {ACCOUNTRECOVERY.Pick.may_cross(s, now, provider, model) == False{} : Bool}
