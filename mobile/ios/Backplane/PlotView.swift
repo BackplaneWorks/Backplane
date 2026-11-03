@@ -1146,6 +1146,53 @@ struct ViewerControls: View {
 
 // The viewer over the thread: the plot of the screen's source, the source
 // choices, the card of what was tapped, and a way back.
+private struct SplitPlotScreen: View {
+    @Environment(\.dismissBackplaneViewer) private var dismissViewer
+    let model: AppModel
+    let viewer: Viewer
+
+    private func pane(_ v: Viewer) -> some View {
+        let frame = model.plots.cachedFrame(v.layers)
+        let mesh = model.plots.cachedMesh(v.key)
+        return VStack(spacing: 0) {
+            HStack {
+                Text(v.choices.first(where: { $0.value == v.open })?.label ?? v.open).font(.caption)
+                Spacer()
+                Button("Expand") { model.act("view", v.open) }
+            }.padding(8).background(BackplaneDesign.panel)
+            ZStack {
+                Color(rgb: v.bg)
+                PlotCanvasView(frame: frame?.none.isEmpty == true ? frame : nil, mesh: mesh,
+                               scope: (model.screen?.sel ?? "") + "|split|" + v.key,
+                               thermal: model.reflowThermal, viewer: v, pick: { _ in }, sheet: { _ in },
+                               onNote: { _, _ in }, onPin: { _ in })
+                if let why = frame?.none, !why.isEmpty { Text(why).font(.caption).padding() }
+                else if frame == nil { ProgressView() }
+            }.clipped()
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("viewer.split." + v.open)
+    }
+
+    var body: some View {
+        VStack(spacing: 1) {
+            HStack {
+                Text("Split").font(.headline)
+                ViewerConnectionStatus(model: model)
+                Spacer()
+                Button { dismissViewer() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                    .accessibilityIdentifier("viewer.close")
+            }.padding(.horizontal, 12).background(BackplaneDesign.panel)
+            GeometryReader { geometry in
+                let layout = geometry.size.width > geometry.size.height
+                    ? AnyLayout(HStackLayout(spacing: 1)) : AnyLayout(VStackLayout(spacing: 1))
+                layout {
+                    ForEach(Array((viewer.panes ?? []).enumerated()), id: \.offset) { _, v in pane(v) }
+                }
+            }
+        }.background(BackplaneDesign.panel)
+    }
+}
+
 struct PlotScreen: View {
     @Environment(\.dismissBackplaneViewer) private var dismissViewer
     @State private var showReflow = false
@@ -1220,6 +1267,9 @@ struct PlotScreen: View {
         // a plot for any other source is stale (a switch in flight), except,
         // while the design history shows, the last version of this kind and
         // project: it stays until the next arrives (no blank between steps)
+        if viewer.open == "split" {
+            SplitPlotScreen(model: model, viewer: viewer)
+        } else {
         let f = plotFrame
         let m = meshFrame
         VStack(spacing: 0) {
@@ -1359,6 +1409,7 @@ struct PlotScreen: View {
             if let h = model.screen?.thread?.viewer.hist, let rows = h.menu {
                 HistMenuSheet(model: model, side: h.side, rows: rows)
             }
+        }
         }
     }
 
