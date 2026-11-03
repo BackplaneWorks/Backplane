@@ -77,8 +77,13 @@ Controls now in `proof-slice.py` (all light, no Bend run; 22 tests):
 - `reach()` now raises on an alias-qualified reference it cannot resolve (no real source triggers it).
   Unqualified unresolved names (builtins, locals) are still not errors: that part stays name-based and is
   not proven complete.
-- `effect_closure` follows relative `require`/`from`/`import` string literals in `.js` effect files and raises
-  on a dynamic `import(...)`/`require(expr)`. No current effect file has either.
+- `effect_closure` follows relative specifiers of `.js` effect files through a comment/string-aware scanner
+  (`js_dependencies`): each `require`/`import` must be a static import/`from` with a literal, or a call whose
+  ENTIRE argument is one string literal. Concatenation (`require("./a.js" + s)`), template substitution, a comma,
+  a conditional, `import.meta`, a variable or any computed form raises, so a literal prefix is never mistaken for the
+  whole target (found by independent audit of #872). The scanner is light, not a JavaScript parser: it is conservative
+  by rejection and its handling of regex literals and unusual syntax is untested beyond its unit tests. All current
+  `src/**/effects/*.js` files pass.
 Still open: this is name-based slicing, not a proof that the sliced program checks the same statements as
 the whole; gate/cache use requires independent review. Deep roots (`Main.boot` reaches 25,399
 declarations) are NOT addressed by slicing. Decision: investigate compiler-level bounded memory or

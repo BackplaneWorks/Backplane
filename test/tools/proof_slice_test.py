@@ -254,8 +254,32 @@ class Slices(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'effect companion'):
             sl.verify_output(out, kept, self.root)
         self.write('src/effects/b.js', "const n = './c'; import(n);\n")
-        with self.assertRaisesRegex(ValueError, 'dynamic import'):
+        with self.assertRaisesRegex(ValueError, 'string-literal'):
             s.write_shard(s.blocks('src/j.bend', 'J.f'), self.root/'oj2')
+
+    def test_js_dependency_scanner_accepts_only_whole_literal_arguments(self):
+        deps = lambda src: sl.js_dependencies(src, 't')
+        for src in ('require("./a.js")', "require('./a.js')", 'require(`./a.js`)', 'import x from "./a.js"',
+                    'import "./a.js"', 'import("./a.js")', '// import(x)\nrequire("./a.js")', "const s='require(x)'; require('./a.js')",
+                    '/* require(p) */ require("./a.js")', 'export {y} from "./a.js"', 'const r = /require(x)/; require("./a.js")'):
+            self.assertEqual(deps(src), ['./a.js'], src)
+        self.assertEqual(deps('require("fs")'), [])
+        for src in ('require("./child.js" + suffix)', 'require("./child.js", s)', 'require(c ? "./a.js" : "./b.js")',
+                    'require("./a.js".concat(s))', 'require(`./a${s}.js`)', 'require("./a.js" + "x")', 'import(n)', 'require(p)',
+                    'import.meta.url', 'const r = require', 'import("./a.js", {assert: {}})', 'require(("./a.js"))',
+                    'require("./a.js', "require('./a.js\n')", '/* unterminated require("./a.js")'):
+            with self.assertRaises(ValueError, msg=src):
+                deps(src)
+
+    def test_computed_js_path_is_rejected_by_the_effect_closure(self):
+        (self.root/'src/effects').mkdir()
+        self.write('src/effects/entry.js', 'const suffix = ".extra.js";\nmodule.exports = require("./child.js" + suffix);\n')
+        self.write('src/effects/child.js', 'x\n')
+        self.write('src/effects/child.js.extra.js', 'y\n')
+        self.write('src/c.bend', 'import Base\n\ndef C.f():\n  import "./effects/entry.js"\n  0\n')
+        s = self.slicer('src/c.bend')
+        with self.assertRaisesRegex(ValueError, 'not a static or single string-literal'):
+            s.write_shard(s.blocks('src/c.bend', 'C.f'), self.root/'oc')
 
     def test_every_module_in_the_canonical_closure_parses_strictly(self):
         import subprocess

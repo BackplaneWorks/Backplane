@@ -94,8 +94,101 @@ def scan_module(text, origin):
     return imports, digests, effects
 
 
-JS_REL = re.compile(r"""(?:require\(\s*|from\s+|import\s*\(\s*|import\s+)(['"])(\.{1,2}/[^'"]+)\1""")
-JS_DYNAMIC = re.compile(r"""(?:\bimport|\brequire)\s*\(\s*[^'"\s)]""")
+def _js_code(text, where):
+    """Light JavaScript scanner: returns (code with comments removed and every string literal replaced by
+    a \\x00S<n>\\x00 placeholder, strings). A template literal containing ${ becomes \\x00T\\x00 (computed).
+    Regex literals are skipped. Unterminated strings/comments/templates raise."""
+    out, strings, i, n = [], [], 0, len(text)
+    prev = ''
+    while i < n:
+        c = text[i]
+        if c == '/' and text[i+1:i+2] == '/':
+            j = text.find('\n', i)
+            i = n if j < 0 else j
+            continue
+        if c == '/' and text[i+1:i+2] == '*':
+            j = text.find('*/', i + 2)
+            if j < 0:
+                raise ValueError('effect companion %s: unterminated comment' % where)
+            i = j + 2
+            continue
+        if c in '\'"':
+            j = i + 1
+            while j < n and text[j] != c:
+                if text[j] == '\\':
+                    j += 1
+                if j < n and text[j] == '\n':
+                    raise ValueError('effect companion %s: unterminated string' % where)
+                j += 1
+            if j >= n:
+                raise ValueError('effect companion %s: unterminated string' % where)
+            strings.append(text[i+1:j])
+            out.append('\x00S%d\x00' % (len(strings) - 1))
+            i, prev = j + 1, 'S'
+            continue
+        if c == '`':
+            j, computed = i + 1, False
+            while j < n and text[j] != '`':
+                if text[j] == '\\':
+                    j += 1
+                elif text[j] == '$' and text[j+1:j+2] == '{':
+                    computed = True
+                j += 1
+            if j >= n:
+                raise ValueError('effect companion %s: unterminated template' % where)
+            if computed:
+                out.append('\x00T\x00')
+            else:
+                strings.append(text[i+1:j])
+                out.append('\x00S%d\x00' % (len(strings) - 1))
+            i, prev = j + 1, 'S'
+            continue
+        if c == '/' and (prev == '' or prev in '(,=:[!&|?{};' ):
+            j, cls = i + 1, False
+            while j < n and (text[j] != '/' or cls):
+                if text[j] == '\\':
+                    j += 1
+                elif text[j] == '[':
+                    cls = True
+                elif text[j] == ']':
+                    cls = False
+                elif text[j] == '\n':
+                    raise ValueError('effect companion %s: unterminated regex' % where)
+                j += 1
+            i, prev = j + 1, 'S'
+            out.append('\x00R\x00')
+            continue
+        out.append(c)
+        if not c.isspace():
+            prev = c
+        i += 1
+    return ''.join(out), strings
+
+
+JS_WORD = re.compile(r"\b(require|import)\b")
+JS_STR = r"\x00S(\d+)\x00"
+
+
+def js_dependencies(text, where):
+    """Relative module specifiers a JS effect file loads. Comments and string contents are ignored, but
+    every `require`/`import` in code must be a static import / `from` with a string literal, or a call
+    whose ENTIRE argument is one string literal. Concatenation, template substitution, a comma, a
+    conditional, `import.meta`, a variable or any other computed form raises, so a computed target is
+    never treated as its literal prefix."""
+    code, strings = _js_code(text, where)
+    found = []
+    for m in JS_WORD.finditer(code):
+        rest = code[m.end():]
+        call = re.match(r"\s*\(\s*" + JS_STR + r"\s*\)", rest)
+        static = re.match(r"\s*" + JS_STR, rest) if m[1] == 'import' else None
+        if not static and m[1] == 'import' and not rest.lstrip().startswith('('):
+            static = re.match(r"[^;()]*?\bfrom\s*" + JS_STR, rest)
+        hit = call or static
+        if not hit:
+            raise ValueError('effect companion %s has a %s that is not a static or single string-literal form' % (where, m[1]))
+        found.append(strings[int(hit.group(1))])
+    found += [strings[int(m[1])] for m in re.finditer(r"\bfrom\s*" + JS_STR, code)]   # export ... from "x"
+    return [f for f in dict.fromkeys(found) if f.startswith(('./', '../'))]
 
 
 def effect_closure(root, module, path):
@@ -119,10 +212,8 @@ def effect_closure(root, module, path):
                 if m:
                     pending.append((f.parent/m[1]).resolve())
         elif f.suffix in ('.js', '.cjs', '.mjs'):
-            if JS_DYNAMIC.search(text):
-                raise ValueError('effect companion has a dynamic import/require that cannot be followed: ' + rel)
-            for m in JS_REL.finditer(text):
-                target = (f.parent/m[2]).resolve()
+            for spec in js_dependencies(text, rel):
+                target = (f.parent/spec).resolve()
                 if not target.suffix:
                     target = target.with_suffix('.js')
                 pending.append(target)
