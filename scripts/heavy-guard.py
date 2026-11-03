@@ -7,12 +7,13 @@ import sys
 import subprocess
 
 GIB = 1024 ** 3
-# Expected peaks, not process limits. Leave host headroom in addition to the
-# amount a job may consume; cgroup headroom is checked independently.
-FLOORS = {'check': 12 * GIB, 'proof': 18 * GIB, 'test': 12 * GIB,
-          'build': 14 * GIB, 'browser': 12 * GIB}
+# Expected peak plus an execution margin, not process limits. Local jobs also
+# leave host headroom; Boat jobs are isolated and use their own capacity.
+FLOORS = {'check': 14 * GIB, 'proof': 19 * GIB, 'test': 14 * GIB,
+          'build': 16 * GIB, 'web': 10 * GIB, 'browser': 14 * GIB}
 HOST_RESERVE = 8 * GIB
 FD_VAR = 'BACKPLANE_HEAVY_LOCK_FD'
+BOAT_VAR = 'BACKPLANE_HEAVY_BOAT_SANDBOX'
 
 
 def host_available():
@@ -57,7 +58,9 @@ def available():
 
 
 def lock_path():
-    return Path(os.environ.get('BACKPLANE_LOCK_DIR', '/tmp')) / 'bp-bend.lock'
+    # The hub's bend guard uses this same host-wide inode. Named-lock and
+    # fixture-directory overrides must not create separate heavy-work slots.
+    return Path('/tmp/bp-bend.lock')
 
 
 def inherited_lock(path):
@@ -81,7 +84,8 @@ def admit(profile):
     if free < FLOORS[profile]:
         print(f'heavy-guard: {profile} requires {FLOORS[profile] / GIB:.0f} GiB available; {free / GIB:.2f} GiB available', file=sys.stderr)
         return False
-    if host < FLOORS[profile] + HOST_RESERVE:
+    in_boat = os.environ.get(BOAT_VAR) == '1' and os.environ.get('BACKPLANE_HEAVY_OFFLOADED') == '1'
+    if not in_boat and host < FLOORS[profile] + HOST_RESERVE:
         print(f'heavy-guard: {profile} needs {FLOORS[profile] / GIB:.0f} GiB expected peak plus {HOST_RESERVE / GIB:.0f} GiB host reserve; {host / GIB:.2f} GiB host available', file=sys.stderr)
         return False
     return True
@@ -154,7 +158,7 @@ def main(args):
     if held_only:
         args = args[1:]
     if not args or args[0] not in FLOORS:
-        print('usage: heavy-guard.py [--held] {check|proof|test|build|browser} [-- command ...]', file=sys.stderr)
+        print('usage: heavy-guard.py [--held] {check|proof|test|build|web|browser} [-- command ...]', file=sys.stderr)
         return 2
     profile, rest = args[0], args[1:]
     path = lock_path()

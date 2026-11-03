@@ -747,7 +747,7 @@ nourl < "$OUT/setup.log"; echo "setup in $(( $(date +%s) - T2 ))s"
 
 # the command, streamed; check.sh asks for a 1 GiB stack, so the hard limit is raised first
 CMD=$(printf '%q ' "$@")
-REMOTE="cd /home/user/$NAME && export PATH=\$HOME/.bend/bin:\$PATH BEND_NO_TELEMETRY=1 CI=1 && ulimit -s 1048576 2>/dev/null || { echo insufficient-unprivileged-stack >&2; exit 76; }; echo \"[boat-job] \$(nproc) cpu, \$(free -g | awk '/Mem:/{print \$2}') GiB, stack \$(ulimit -s)\"; if [ -x /usr/bin/time ]; then /usr/bin/time -f '[boat-job] peak RSS %M KiB, wall %e s, exit %x' $CMD; else $CMD; fi; rc=\$?; echo \"[boat-job] job $JOB exit \$rc\"; exit \$rc"
+REMOTE="cd /home/user/$NAME && export PATH=\$HOME/.bend/bin:\$PATH BEND_NO_TELEMETRY=1 CI=1 BACKPLANE_HEAVY_BOAT_SANDBOX=1 BACKPLANE_HEAVY_OFFLOADED=1 && ulimit -s 1048576 2>/dev/null || { echo insufficient-unprivileged-stack >&2; exit 76; }; echo \"[boat-job] \$(nproc) cpu, \$(free -g | awk '/Mem:/{print \$2}') GiB, stack \$(ulimit -s)\"; if [ -x /usr/bin/time ]; then /usr/bin/time -f '[boat-job] peak RSS %M KiB, wall %e s, exit %x' $CMD; else $CMD; fi; rc=\$?; echo \"[boat-job] job $JOB exit \$rc\"; exit \$rc"
 T3=$(date +%s)
 # status.json stays fresh while a long job runs (the Usage screen and the
 # thread chips read it); this loop is our own child, stopped by its pid
