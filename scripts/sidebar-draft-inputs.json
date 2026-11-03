@@ -89,7 +89,7 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "be262b768558a21e6c401c48e2158e6156d2db6c7d174f14cda55e379d3d88f4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "dbb7bd4f9040822f0654a2b95cb96bfe10b8a2617578724f5bcc319267b03a94",
+    "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
     "src/core/msgs.bend": "6604b02d813f0c58ad51580a6713dc5c0f5837f3fa1a33e6eac6b1686ca216ec",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
@@ -760,6 +760,11 @@
         "service builds",
         "native devices"
       ]
+    },
+    "rebasedMainReview": {
+      "base": "f6324bba95aff48c739c1cfc7936d48ce652857c",
+      "scope": "Concurrent #771 adds Setting.has and preserves a manual parent choice when delegation seeds a child. Reviewed model diff: no draft/body reader, filter, image key or transport change. Badge/count functions are byte-unchanged by this concurrent change; its source and parent-law additions are retained.",
+      "qualification": "The 223 assertions, sidebar24 and two selected proofs executed before rebase on aca8c7b03 plus this wording patch. Three input files changed on rebase: model.bend and the global LAWS/PROOF additions. No rerun or full combined-source execution is claimed; selected badge expressions and proof definitions are unchanged."
     }
   }
 }
