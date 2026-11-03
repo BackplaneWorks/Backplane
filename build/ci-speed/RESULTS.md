@@ -611,7 +611,7 @@ are still checked somewhere. Every selected canonical declaration is copied
 byte-for-byte, and every generated pair passes the existing shape check.
 The partition and actual compiler/library/verdict/guard bytes are bound by a
 manifest. Execution requires an inherited native bend flock and a finite
-no-swap scope no larger than7GiB; a passing worker must also peak below3GiB. The join requires every distinct expected
+no-swap cgroup or isolated default-size Boat VM no larger than8GiB; a passing worker must also peak below3GiB. The join requires every distinct expected
 worker receipt and rechecks the existing bendok verdict, source/tool identity,
 input stability and finite measurements. Missing, failed, duplicated, corrupt
 or stale results cannot make a passing gate. No proof pass cache is enabled.
@@ -628,3 +628,15 @@ web bundle, proofs and tests can run on separate hosts; independent module
 compilation/linking remains unavailable in this compiler experiment.
 New Boat spend for the failed cap run and planning/tests: **$0** (owned h@ host
 and cheap local planning only). No Alpha, installed app or live PID action.
+
+
+Parallel shard transport attempts025/026 (jobs j20261103172959-1014215 and
+j20261103173000-1014525) both stopped **before Bend execution**. An ignored
+build/ manifest was incorrectly included in the non-build inventory comparison;
+025 also received026's archive created between the controller's exclusion
+snapshot and runner staging. The closed-inventory verifier rejected both.
+Neither is proof or memory evidence. Both sandboxes were deleted and verified;
+14+7credit-s cost **$0.00021**. Seventeen packet controls pass in0.37s /28,804KiB,
+including build-manifest hash verification and unexpected-source rejection.
+An exact bootstrap allowlist is being coordinated with runner owner1188217;
+no replacement proof job starts with the racy exclusion-only transport.

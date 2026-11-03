@@ -330,9 +330,17 @@ def execute(root, folder, name, identity, output):
         raise ValueError('worker needs actual inherited bend flock from its admitted executor')
     group = Path('/proc/self/cgroup').read_text().split('0::', 1)[1].strip().lstrip('/')
     cg = Path('/sys/fs/cgroup')/group
-    cap = int((cg/'memory.max').read_text())
-    if cap > 7*1024**3 or (cg/'memory.swap.max').read_text().strip() != '0':
-        raise ValueError('worker needs a finite <=7GiB no-swap scope')
+    maximum = (cg/'memory.max').read_text().strip() if (cg/'memory.max').is_file() else 'max'
+    physical = {k:int(v.split()[0])*1024 for k,v in (l.split(':',1) for l in Path('/proc/meminfo').read_text().splitlines()) if k in {'MemTotal','SwapTotal'}}
+    isolated = os.environ.get('BACKPLANE_HEAVY_BOAT_SANDBOX') == '1' and os.environ.get('BACKPLANE_HEAVY_OFFLOADED') == '1'
+    cap = min(int(maximum) if maximum != 'max' else physical['MemTotal'], physical['MemTotal'])
+    if isolated:
+        if physical['MemTotal'] > 8*1024**3 or physical['SwapTotal'] != 0:
+            raise ValueError('proof worker needs a default-or-smaller isolated Boat VM without swap')
+    elif maximum == 'max' or (cg/'memory.swap.max').read_text().strip() != '0':
+        raise ValueError('host worker needs a finite no-swap cgroup from its admitted executor')
+    if cap > 8*1024**3:
+        raise ValueError('proof worker cap exceeds8GiB; larger machines are not a workaround')
     resource.setrlimit(resource.RLIMIT_STACK, (1024**3, resource.getrlimit(resource.RLIMIT_STACK)[1]))
     environment = {**os.environ, 'BEND_NO_TELEMETRY':'1', 'DO_NOT_TRACK':'1',
                    'BUN_CONFIG_NO_ANALYTICS':'1', 'BUN_JSC_forceRAMSize':'4294967296',
@@ -354,7 +362,7 @@ def execute(root, folder, name, identity, output):
                'state':'passed' if verdict(result.returncode, text) and resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss*1024 < 3*1024**3 else 'failed',
                'exit':result.returncode, 'output':text, 'seconds':seconds,
                'peak_rss_kib':resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
-               'memory_max_bytes':cap, 'aggregate_peak_bytes':int((cg/'memory.peak').read_text()),
+               'memory_max_bytes':cap, 'cap_origin':'isolated Boat VM' if isolated else 'cgroup', 'aggregate_peak_bytes':int((cg/'memory.peak').read_text()) if (cg/'memory.peak').is_file() else None,
                'actual_bend_flock_held':True, 'executor_pid':os.getpid(), 'cgroup':group,
                'inputs_unchanged':True}
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -378,7 +386,7 @@ def join(manifest, folder, receipts):
                 or not verdict(r.get('exit'), r.get('output', ''))
                 or not all(isinstance(r.get(k), (int, float)) and not isinstance(r[k], bool) and math.isfinite(r[k]) and r[k] > 0 for k in ['seconds', 'peak_rss_kib'])
                 or r.get('peak_rss_kib', 0)*1024 >= 3*1024**3
-                or not isinstance(r.get('memory_max_bytes'), int) or not 0 < r['memory_max_bytes'] <= 7*1024**3):
+                or not isinstance(r.get('memory_max_bytes'), int) or not 0 < r['memory_max_bytes'] <= 8*1024**3):
             raise ValueError('failed/stale shard receipt')
         found[name] = r
     return {'state': 'passed', 'manifest_sha256': identity, 'law_count': len(manifest['laws']),
