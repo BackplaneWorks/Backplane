@@ -379,17 +379,45 @@ def run_check(root, plan_file, local=None):
 # ---- proof shards ----
 
 def shard_units(root, folder):
+    root, folder = Path(root).resolve(), Path(folder).resolve()
     ps = _module('proof-shards.py')
-    manifest = ps.verify(Path(root), Path(folder))  # fails unless it is the canonical partition
+    # Re-derive the entire canonical partition before trusting ANY cached pass.
+    # The originals remain coverage/provenance inputs, but are execution inputs
+    # only when a generated shard actually imports them.
+    manifest = ps.verify(root, folder)
     tool = tool_identity()
     if manifest.get('toolchain') != tool['toolchain']:
         raise CacheError('partition was planned with another compiler')
+    proof_tool = {**tool, 'partition_logic': {
+        name: manifest[name] for name in
+        ('planner_sha256', 'verdict_sha256', 'guard_sha256')},
+        # proof-shards.py uses this helper for its independent root inventory.
+        'closure_sha256': sha((ROOT/'scripts/bend-closure.py').read_bytes()),
+        'canonical_modes': {n: manifest['source_modes'][n]
+                            for n in ('LAWS.bend', 'PROOF.bend')}}
+    tree = Tree(root)
     units = {}
     for s in manifest['shards']:
-        inputs = {'gen/' + k: v for k, v in s['files'].items()}
-        for n in s['source_files']:
-            inputs['src/' + n] = manifest['sources'][n]
-        key, body = unit_key('proof', s['id'], inputs, tool)
+        at = folder/s['id']
+        entry = (at/'PROOF.bend').relative_to(root).as_posix()
+        inputs = {}
+        for name, digest in tree.closure(entry).items():
+            path = root/name
+            ps.regular(root, path)
+            if at in path.parents:
+                generated = path.relative_to(folder).as_posix()
+                if s['files'].get(generated) != digest:
+                    raise CacheError('unexpected generated proof input: ' + name)
+                label = 'gen/' + path.relative_to(at).as_posix()
+            else:
+                if manifest['sources'].get(name) != digest:
+                    raise CacheError('proof input absent from verified inventory: ' + name)
+                label = 'src/' + name
+            inputs[label] = {'sha256': digest, 'mode': path.stat().st_mode & 0o777}
+        # Numeric slots can move when a different law changes. Bind logical
+        # membership and exact executable closure instead of the numeric slot.
+        membership = {'primary_laws': s['primary_laws'], 'declarations': s['declarations']}
+        key, body = unit_key('proof', sha(canonical(membership)), inputs, proof_tool)
         units[s['id']] = (key, body)
     return units, manifest
 
