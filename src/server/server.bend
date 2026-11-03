@@ -1,5 +1,6 @@
 import ../core/autosettle.bend as AUTO
 import Base
+import ../core/ws-fragments.bend as WSF
 import ./project-home.bend as PHOME
 import ./pairing.bend as PAIR
 import ./message-image.bend as MIMG
@@ -1617,7 +1618,7 @@ type Scan is Data:
   Scan{fr: Maybe<&2, W.Frame>, rest: List<&2, U32>, done: Bool}
 
 def Conn.quiet.k(+op: U32, +last: Nat, +now: Nat) -> Bool:
-  Bool.or(Bool.and(U32.is_eq(op, 9), Bool.not(OB.Pong.due(last, now))), Bool.or(U32.is_eq(op, 1), Bool.or(U32.is_eq(op, 10), U32.is_eq(op, 0))))
+  Bool.or(Bool.and(U32.is_eq(op, 9), Bool.not(OB.Pong.due(last, now))), U32.is_eq(op, 10))
 
 def Conn.quiet(fr: W.Frame, +last: Nat, +now: Nat) -> Bool:
   match fr:
@@ -1689,41 +1690,46 @@ def Bytes.rev(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
 def Bytes.cat(a: List<&2, U32>, b: List<&2, U32>) -> List<&2, U32>:
   Bytes.rev(Bytes.rev(a, Nil{}), b)
 
-def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat,
-    k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&2, U32>, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +last: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   (s, res) = r
   match res:
-    case Done{Nil{}}:
-      Conn.leave(s, id, inbox)
+    case Done{Nil{}}: Conn.leave(s, id, inbox)
     case Done{bs}:
-      IO.bind(Nat, Unit, IO.now(), now => k(s, Bytes.cat(buf, bs), last, now))
-    case Fail{_}:
-      Conn.leave(s, id, inbox)
+      IO.bind(Nat, Unit, IO.now(), now => k(s, Bytes.cat(buf, bs), pending, last, now))
+    case Fail{_}: Conn.leave(s, id, inbox)
 
-def Conn.after(m: Maybe<&2, Nat>, s: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +now: Nat, k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.after(m: Maybe<&2, Nat>, s: Socket, rest: List<&2, U32>, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +now: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{last}:
-      k(s, rest, last, now)
-    case None{}:
-      Conn.leave(s, id, inbox)
+    case Some{last}: k(s, rest, pending, last, now)
+    case None{}: Conn.leave(s, id, inbox)
 
-def Conn.scanned(sc: Scan, s: Socket, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat,
-    k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.assembled(taken: WSF.Taken, s: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
+  match taken:
+    case WSF.FragReject{}: Conn.leave(s, id, inbox)
+    case WSF.FragHold{pending}: k(s, rest, pending, last, now)
+    case WSF.FragEmit{pending, fr}:
+      IO.bind(Maybe<&2, Nat>, Unit, Conn.frame(fr, id, inbox, last, now), go => Conn.after(go, s, rest, pending, id, inbox, now, k))
+
+def Conn.scanned(sc: Scan, s: Socket, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat,
+    k: Socket -> List<&2, U32> -> WSF.Pending -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   match sc:
     case Scan{Some{fr}, rest, _}:
-      IO.bind(Maybe<&2, Nat>, Unit, Conn.frame(fr, id, inbox, last, now), go => Conn.after(go, s, rest, id, inbox, now, k))
+      Conn.assembled(WSF.Fragment.step(pending, fr), s, rest, id, inbox, last, now, k)
     case Scan{None{}, rest, _}:
       IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536),
-        r => Conn.more(r, rest, id, inbox, last, k))
+        r => Conn.more(r, rest, pending, id, inbox, last, k))
 
-# the frames in buf; more read when they run out
-def Conn.reader(fuel: Nat, s: Socket, buf: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat) -> IO(Unit):
+# Socket reads and WebSocket fragments are independent boundaries. Pending
+# bytes survive both, and are decoded only after the final continuation.
+def Conn.reader(fuel: Nat, s: Socket, buf: List<&2, U32>, pending: WSF.Pending, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat) -> IO(Unit):
   match fuel:
-    case 0n:
-      Conn.leave(s, id, inbox)
+    case 0n: Conn.leave(s, id, inbox)
     case 1n+f:
-      Conn.scanned(Conn.scan(65536n, Scan{None{}, buf, False{}}, last, now), s, id, inbox, last, now,
-        s2 => b2 => l2 => n2 => Conn.reader(f, s2, b2, id, inbox, l2, n2))
+      Conn.scanned(Conn.scan(65536n, Scan{None{}, buf, False{}}, last, now), s, pending, id, inbox, last, now,
+        s2 => b2 => p2 => l2 => n2 => Conn.reader(f, s2, b2, p2, id, inbox, l2, n2))
 
 # A client let in the legacy way (core/auth.bend's Auth.legacy: no pairing
 # token, trusted as this machine's or the owner's tailnet device) is told,
@@ -1751,7 +1757,7 @@ def Conn.raw(r: Socket & U32, rd: Socket, rest: List<&2, U32>, +id: U32, +inbox:
     IO.spawn(Unit, Conn.writer(Fuel.forever(), wr, out, OB.Wr.new(), id, id, inbox))
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Conn.join.mobile(mobile, id, out, since, origin, fd, legacy))
     Conn.legacy(legacy, id, inbox)
-    Conn.reader(Fuel.forever(), rd, rest, id, inbox, 0n, 0n)
+    Conn.reader(Fuel.forever(), rd, rest, WSF.FragIdle{}, id, inbox, 0n, 0n)
 
 def Conn.ws.dup(r: Socket & Result<&1, &1, U32 & String, Socket>, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
   (rd, res) = r

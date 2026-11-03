@@ -3096,8 +3096,9 @@ function outboxKeep(text) {
   if (viewMode === "compatibility") return;
   let r;try { r = JSON.parse(text); } catch { return; }
   const msg = r?.p?.msg;
-  if (r?.m !== "turn.start" || typeof msg !== "string" || !msg) return;
-  outbox.set(msg, { msg, id: r.id, text, thread: String(r.p.thread || ""), body: String(r.p.text || ""), at: Date.now() });
+  if (!["turn.start", "project.start"].includes(r?.m) || typeof msg !== "string" || !msg) return;
+  const thread = r.m === "project.start" ? "project-home-" + r.p.project : String(r.p.thread || "");
+  outbox.set(msg, { msg, id: r.id, text, thread, body: String(r.p.text || ""), at: Date.now() });
   outboxSave();
 }
 function outboxReply(envelope) {
@@ -3437,7 +3438,7 @@ async function startThin(again = false, reason = "initial") {
         return saved?.held;
       },
       local: localPresentation,
-      previewSend: text => App.presentation_send_preview(text),
+      previewSend: text => presentationTarget(currentSession()).kind !== "project" && App.presentation_send_preview(text),
       sendFeedback: (started, thread, text) => { persistDraft(thread, text);if (started) scroll = true;later(); },
       composing: thread => composerComposing && document.querySelector("main.thread-view[data-thread]")?.getAttribute("data-thread") === thread,
       modelMenuReady: () => {

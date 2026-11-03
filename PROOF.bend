@@ -15725,3 +15725,6 @@ def Laws.home_owner_round_trip(project):
   match project:
     case SNil{}: {==}
     case SCon{h, t}: {==}
+
+def Laws.websocket_orphan_continuation_is_rejected(bytes):
+  {==}

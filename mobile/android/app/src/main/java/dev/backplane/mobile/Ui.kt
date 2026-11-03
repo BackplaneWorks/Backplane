@@ -1776,7 +1776,7 @@ private fun ProjectHomeScreen(m: AppModel, s: Screen, h: ProjectHome, live: Bool
             Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { m.act("settings-page", "agents") }, enabled = live) { Text("Defaults") }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { m.act("home-start", draft) }, enabled = live && !h.pending && draft.isNotBlank()) {
+                TextButton(onClick = { m.act("draft", draft); m.act("send") }, enabled = live && !h.pending && draft.isNotBlank()) {
                     Text(if (h.pending) "Starting…" else "Start thread")
                 }
             }

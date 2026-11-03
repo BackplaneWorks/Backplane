@@ -9,6 +9,7 @@ import ../core/images.bend as IM
 import ./dom.bend as D
 import ./composer-bar.bend as CB
 import ../core/badge.bend as BG
+import ../core/draftbound.bend as DB
 import ./icon.bend as WI
 
 # The home renders a bounded, saved contents snapshot. It performs no discovery.
@@ -152,11 +153,11 @@ def HomeView.more(+u: U.Ui, +c: J.Json) -> List<&2, D.Node>:
 # Use the existing one-button-high control row. New thread defaults are edited
 # by the existing agent Settings page; no model RPC targets a project owner.
 def HomeView.composer(+u: U.Ui, +project: String) -> D.Node:
-  D.El{"form", "composer", [D.At{"class", "composer home-composer"}], [
-    D.El{"textarea", "composer-field", [D.At{"id", "composer"}, D.At{"aria-label", "Start a thread about this project"}, D.At{"placeholder", "Start a thread about this project…"}, D.At{"value", U.Ui.draft_text(u)}, D.At{"data-enter", "home-start"}, D.On{"input", "draft"}], Nil{}},
+  D.El{"div", "composer", [D.At{"class", "composer home-composer"}], [
+    D.El{"textarea", "composer-field", [D.At{"id", "composer"}, D.At{"aria-label", "Start a thread about this project"}, D.At{"placeholder", "Start a thread about this project…"}, D.At{"value", U.Ui.draft_text(u)}, D.At{"data-enter", "send"}, D.On{"input", "draft"}], Nil{}},
     CB.ComposerBar.node([D.Dom.button("model-chip", "settings-page", "agents", "Choose defaults for new threads", "New thread defaults"),
       CB.ComposerBar.more([D.Dom.button("", "new-thread", project, "Create an empty thread", "Empty thread")]),
-      D.El{"div", "", [D.At{"class", "foot-end"}], [D.Dom.button("primary", "home-start", "", "Start a new thread with this message", "Start thread")]}])]}
+      D.El{"div", "", [D.At{"class", "foot-end"}], [D.Dom.button("primary", "send", "", "Start a new thread with this message", "Start thread")]}])]}
 
 def HomeView.header.name(+u: U.Ui, +project: String) -> D.Node:
   D.El{"div", "", [D.At{"class", "home-project-name"}], [
@@ -211,14 +212,30 @@ def HomeView.price(shown: Bool, +price: J.Json) -> List<&2, D.Node>:
     case False{}: Nil{}
     case True{}: [HomeView.section("Price estimate", [D.Dom.span("", Bool.pick(String, String.is_empty(J.Json.get_str(price, "label", "")), "No estimate returned; check included parts and pricing settings", J.Json.get_str(price, "label", "")) ++ " " ++ J.Json.get_str(price, "error", "") ++ " " ++ J.Json.get_str(price, "estimate_problems", ""))])]
 
+def HomeView.viewer.title.kind(editable: Bool, +u: U.Ui, +path: String, title: String) -> D.Node:
+  match editable:
+    case True{}: HomeView.name(u, "artifact", path, U.Asset.name(u, path, title))
+    case False{}: D.Dom.span("home-view-title", title)
+
+def HomeView.viewer.title(+u: U.Ui, +c: J.Json) -> D.Node:
+  +path = U.Ui.view_get(u, "view.path")
+  +row = PH.Home.row(c, path)
+  +kind = J.Json.get_str(row, "kind", "")
+  HomeView.viewer.title.kind(Bool.or(String.eq(kind, "board"), String.eq(kind, "mech")), u, path,
+    J.Json.get_str(row, "title", Bool.pick(String, String.eq(U.Ui.view_get(u, "view.kind"), "review"), "Design review", "Saved view")))
+
+def HomeView.warning(+u: U.Ui) -> String:
+  +limit = DB.Bound.say(U.Lang.loc(u), U.Ui.scratch(u, "@draft.bound"))
+  Bool.pick(String, String.is_empty(limit), U.Ui.scratch(u, "@home.error"), limit)
+
 def HomeView.grid(+u: U.Ui, +project: String, +c: J.Json, +viewer: List<&2, D.Node>) -> D.Node:
   +generic = List.append(&2, D.Node, HomeView.intent.shown(Bool.not(String.is_empty(PH.Home.path(c, "intent"))), u, c), [HomeView.thread.card(u, project)])
   D.El{"div", "", [D.At{"class", "home-grid"}],
-    List.concat(&2, D.Node, [HomeView.document(u), HomeView.price(Bool.and(Bool.not(String.is_empty(PH.Home.path(c, "fab"))), Maybe.is_some(&2, J.Json, J.Json.get(c, "price"))), J.Json.get_obj(c, "price")), Bool.pick(List<&2, D.Node>, List.is_empty(&2, D.Node, viewer), Nil{}, [D.El{"section", "home-live-viewer", [D.At{"class", "home-live-viewer"}], D.El{"h2", "", Nil{}, [HomeView.name(u, "artifact", U.Ui.view_get(u, "view.path"), U.Asset.name(u, U.Ui.view_get(u, "view.path"), J.Json.get_str(PH.Home.row(c, U.Ui.view_get(u, "view.path")), "title", "Saved view")))]} <> viewer}]), generic, HomeView.panels(u, PH.Home.panels(c), c, Bool.not(List.is_empty(&2, D.Node, viewer)))])}
+    List.concat(&2, D.Node, [HomeView.document(u), HomeView.price(Bool.and(Bool.not(String.is_empty(PH.Home.path(c, "fab"))), Maybe.is_some(&2, J.Json, J.Json.get(c, "price"))), J.Json.get_obj(c, "price")), Bool.pick(List<&2, D.Node>, List.is_empty(&2, D.Node, viewer), Nil{}, [D.El{"section", "home-live-viewer", [D.At{"class", "home-live-viewer"}], D.El{"h2", "", Nil{}, [HomeView.viewer.title(u, c)]} <> viewer}]), generic, HomeView.panels(u, PH.Home.panels(c), c, Bool.not(List.is_empty(&2, D.Node, viewer)))])}
 
 def HomeView.scroll(+u: U.Ui, +project: String, +c: J.Json, viewer: List<&2, D.Node>) -> D.Node:
   D.El{"div", "", [D.At{"class", "home-scroll"}], [
-    D.Dom.span("home-error", U.Ui.scratch(u, "@home.error")), HomeView.grid(u, project, c, viewer),
+    D.Dom.span("home-error", HomeView.warning(u)), HomeView.grid(u, project, c, viewer),
     D.El{"div", "", [D.At{"class", "home-card-actions"}], List.append(&2, D.Node, D.Dom.when(Nat.is_gt(J.Json.get_nat(c, "after", 0n), 0n), D.Dom.button("", "home-more", "0", "Return to the first parts window", "First parts")), HomeView.more(u, c))}]}
 
 def HomeView.node.picker(+u: U.Ui, viewer: List<&2, D.Node>, picker: List<&2, D.Node>) -> D.Node:
