@@ -1,8 +1,8 @@
-# KiStack (github.com/American-Embedded/KiStack, now BackplaneWorks/kistack),
-# bundled with the app at build time by scripts/build-kistack.sh as the
-# offline fallback (the hub syncs the newest commit into its home at each
-# start, src/server/kicad.bend's KiStack.sync): the commit, and the sha256 of its
-# skills/ tree (each file's sha256 and path, sorted, hashed again: GitHub's
-# tarballs are not byte-stable, the tree is). Change both together.
+# KiStack (github.com/BackplaneWorks/kistack), tracked in Backplane's git: its skills/ and
+# LICENSE at this commit live in deploy/kistack, and every build ships exactly
+# that beside the hub (scripts/kistack.py; the hub fetches nothing). The
+# sha256 of the skills/ tree (each file's sha256 and path, sorted, hashed
+# again) is checked at every build. Change all three only with
+#   python3 scripts/kistack.py bump <commit>
 rev 641ade9041bb0844c4530dfff11010eef30919af
 skills cc68df39e9965f7797ca4f79ba63e77a4f5a3b4b4d04678587ee33d9573e475f
