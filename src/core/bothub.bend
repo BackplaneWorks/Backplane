@@ -1032,7 +1032,7 @@ def Reply.request(+thread: String, +state: String) -> String:
 def Bots.methods() -> List<&2, String>:
   ["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.routine", "bots.routine_delete",
    "bots.routine_run", "bots.hook", "bots.hook_revoke", "bots.forget", "bots.remember", "bots.space", "bots.invite", "bots.join", "bots.unpeer",
-   "bots.google", "bots.tell", "bots.hook_token", "bots.voice", "bots.answered", "bots.give", "bots.uber", "bots.uber_join", "bots.pin", "bots.uber_home", "bots.browser", "bots.teach", "bots.task"]
+   "bots.google", "bots.tell", "bots.hook_token", "bots.voice", "bots.answered", "bots.give", "bots.uber", "bots.uber_join", "bots.pin", "bots.uber_home", "bots.browser", "bots.teach", "bots.task", "bots.peer_own"]
 
 def Bots.is(+m: String) -> Bool:
   String.starts_with(m, "bots.")
@@ -1338,6 +1338,16 @@ def Vreq.with(+s: M.State, p: J.Json) -> J.Json:
     "learned", J.Json.arr(Vreq.pairs(M.Setting.keys.pre(s, "voice.l."), s, Nil{}))),
     "engine", J.Str{M.Setting.get(s, "voice.engine", "auto")}), "model", J.Str{M.Setting.get(s, "voice.model", "parakeet-v2")})
 
+# the owner says whether a link is one of their machines (Settings' Mine /
+# Not mine: client.bend's Mate.row): "peer.own.<link>" (client.bend's
+# Far.own.key), which only this hub writes
+def Bots.peer_own(live: Bool, +now: Nat, +client: U32, +id: String, +peer: String, own: Bool) -> B.Step:
+  match live:
+    case True{}:
+      B.Step.reply(client, id, [M.SettingSet{"peer.own." ++ peer, Bool.pick(String, own, "owner", "no"), now}])
+    case False{}:
+      Bots.err(client, id, "no such link")
+
 def Bots.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> B.Step:
   match i:
     case 0n:
@@ -1405,6 +1415,8 @@ def Bots.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p
       Bots.teach.out(Bots.live(s, J.Json.get_str(p, "bot", "")), client, id, "bots.teach", p)
     case 30n:
       Bots.task.req(Bots.live(s, J.Json.get_str(p, "bot", "")), s, now, client, id, p)
+    case 31n:
+      Bots.peer_own(BT.Peer.live(BT.World.peer(M.State.bots(s), J.Json.get_str(p, "peer", ""))), now, client, id, J.Json.get_str(p, "peer", ""), J.Json.get_bool(p, "own", False{}))
     case _:
       Bots.err(client, id, "unknown bots request")
 

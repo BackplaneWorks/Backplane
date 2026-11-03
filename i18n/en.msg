@@ -156,6 +156,10 @@ machines.title = Your machines
 machines.lead.none = Other machines of yours on Tailscale that run Backplane show here. Their projects and threads sync into this sidebar by themselves.
 machines.lead = Projects and threads on these machines sync into this sidebar in the background, so you never have to switch. Turn one off to keep it apart.
 machines.self = This machine
+machines.unsure = Linked, but not verified as one of your machines, so nothing syncs. Is this link yours?
+machines.notmine.note = You said this link is not yours. Nothing syncs with it.
+machines.mine = Mine
+machines.notmine = Not mine
 bots.name.uber = Name your uberbot
 bots.name = Name
 
