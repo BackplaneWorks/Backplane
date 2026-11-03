@@ -2,6 +2,7 @@ import Base
 import ./i18n.bend as I
 import ./msgs.bend as MSG
 import ./model.bend as M
+import ./json.bend as J
 
 # Tool calls folded
 # -----------------
@@ -208,6 +209,72 @@ def Tool.shown(+l: I.Loc, +k: String) -> String:
 def Tool.text(+k: String, +summary: String) -> String:
   Bool.pick(String, Bool.and(String.eq(k, "result"), String.is_empty(String.trim(summary))), "The turn ended with an error; the agent gave no reason.",
     Bool.pick(String, String.eq(summary, k), "", summary))
+
+# Provider API errors
+# -------------------
+# Claude Code ends a turn the API refused with a reply of its own,
+# 'API Error: 529 {"type":"error","error":{"type":"overloaded_error",
+# "message":"Overloaded"}}'. The reply reads as one sentence from its code
+# and type (ApiErr.say: "Claude's API was overloaded (529) and ended the
+# turn."), its raw text one click away and in its Copy (view.bend's
+# View.msg.err), and the turn's error row that only repeats it or says
+# nothing is left out (Fold.shown).
+
+# a reply that is Claude Code's API error (its first character asked
+# first: every reply passes here)
+def ApiErr.is(+x: String) -> Bool:
+  match x:
+    case SCon{Chr{65}, _}:
+      String.starts_with(x, "API Error")
+    case _:
+      False{}
+
+def ApiErr.dig(c: Char) -> Bool:
+  match c:
+    case Chr{+n}:
+      Bool.and(U32.is_ge(n, 48), U32.is_le(n, 57))
+
+# three digits first: an HTTP status
+def ApiErr.d3(s: String) -> Bool:
+  match s:
+    case SCon{a, SCon{b, SCon{c, _}}}:
+      Bool.and(ApiErr.dig(a), Bool.and(ApiErr.dig(b), ApiErr.dig(c)))
+    case _:
+      False{}
+
+# what follows "API Error", its ":" left out
+def ApiErr.rest(+x: String) -> String:
+  +r = String.trim(String.drop(x, 9n))
+  String.trim(Bool.pick(String, String.starts_with(r, ":"), String.drop(r, 1n), r))
+
+# the kind of error the sentence names, from its type, else its status
+def ApiErr.kind(+ty: String, +code: String) -> String:
+  Bool.pick(String, Bool.or(String.eq(ty, "overloaded_error"), String.eq(code, "529")), "overloaded",
+    Bool.pick(String, Bool.or(String.eq(ty, "rate_limit_error"), String.eq(code, "429")), "rate",
+      Bool.pick(String, Bool.or(String.eq(ty, "api_error"), String.starts_with(code, "5")), "server",
+        Bool.pick(String, Bool.or(String.eq(ty, "authentication_error"), String.eq(code, "401")), "auth", "other"))))
+
+# an error of no kind it names says the API's own words after a ":"
+# (without their last "."); a named one says nothing more
+def ApiErr.why(other: Bool, +msg: String) -> String:
+  match other:
+    case True{}:
+      Bool.pick(String, String.is_empty(msg), "", ": " ++ Bool.pick(String, String.ends_with(msg, "."), String.take(msg, Nat.sub(String.length(msg), 1n)), msg))
+    case False{}:
+      ""
+
+def ApiErr.say.k(+l: I.Loc, +code: String, +body: String) -> String:
+  +o = Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{})
+  +err = J.Json.get_obj(o, "error")
+  +kind = ApiErr.kind(J.Json.get_str(err, "type", ""), code)
+  +msg = String.trim(J.Json.get_str(err, "message", J.Json.get_str(o, "message", Bool.pick(String, String.starts_with(body, "{"), "", body))))
+  MSG.T.apierr.say(l, kind, Bool.pick(String, String.is_empty(code), "", " (" ++ code ++ ")"), ApiErr.why(String.eq(kind, "other"), msg))
+
+# the sentence an API error reply reads as (x: one, ApiErr.is)
+def ApiErr.say(+l: I.Loc, +x: String) -> String:
+  +r = ApiErr.rest(x)
+  +code = Bool.pick(String, ApiErr.d3(r), String.take(r, 3n), "")
+  ApiErr.say.k(l, code, String.trim(String.drop(r, String.length(code))))
 
 def Fold.kinds.k(todo: Bool, +k: String, +acc: List<&2, String>) -> List<&2, String>:
   match todo:
@@ -661,13 +728,40 @@ def Fold.shown.k(b: Bool, e: M.Entry, rest: List<&2, M.Entry>) -> List<&2, M.Ent
     case False{}:
       e <> rest
 
-# the entries that show, in order: blank messages left out
-def Fold.shown(es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+# a turn's error row that only repeats the API error reply before it
+# (p: that reply's text, "" when the last shown entry is none), or says
+# nothing: the reply already says why (ApiErr)
+def Fold.dup(e: M.Entry, +p: String) -> Bool:
+  match e:
+    case M.Act{_, _, +tone, +kind, +summary, _}:
+      Bool.and(Bool.not(String.is_empty(p)), Bool.and(String.eq(tone, "error"), Bool.and(String.eq(kind, "result"),
+        Bool.or(String.is_empty(String.trim(summary)), String.eq(String.trim(summary), String.trim(p))))))
+    case M.Msg{_, _, _, _, _}:
+      False{}
+
+# what Fold.dup asks of the next entry: an API error reply's text, else ""
+# (a blank one between keeps the last)
+def Fold.api(blank: Bool, e: M.Entry, +p: String) -> String:
+  match blank e:
+    case True{} _:
+      p
+    case False{} M.Msg{_, _, M.Assistant{}, +x, _}:
+      Bool.pick(String, ApiErr.is(x), x, "")
+    case False{} _:
+      ""
+
+def Fold.shown.go(es: List<&2, M.Entry>, +p: String) -> List<&2, M.Entry>:
   match es:
     case Nil{}:
       Nil{}
     case +e <> t:
-      Fold.shown.k(Fold.blank(e), e, Fold.shown(t))
+      +b = Fold.blank(e)
+      Fold.shown.k(Bool.or(b, Fold.dup(e, p)), e, Fold.shown.go(t, Fold.api(b, e, p)))
+
+# the entries that show, in order: blank messages left out, and an error
+# row an API error reply already says (Fold.dup)
+def Fold.shown(es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  Fold.shown.go(es, "")
 
 # the tool calls just outside a page, oldest first
 type Around is Data:
