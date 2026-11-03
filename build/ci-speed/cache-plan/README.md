@@ -58,3 +58,36 @@ Reproduce the small comparison:
 Canonical laws/proofs and compiler code are unchanged. No full proof,
 Boat/compiler/app/package/install/release job ran. Cache helpers remain opt-in;
 this neither enables a workflow nor qualifies the sliced proof gate or release.
+
+## Real repository metadata profile
+
+[REAL-PLAN.json](REAL-PLAN.json) and [GNU time](REAL-PLAN.time) record the actual
+repository/tool identity at source head `edad38ab9040c496057d0b58357dbdc1d4d343fb`.
+All 1,180 modules have named cache keys. Initial key planning takes 0.203s;
+complete inventory/tool/key revalidation takes 0.202s. Inputs are unchanged
+between those phases. The entire process takes 0.43s /55,976KiB GNU peak RSS.
+
+The process reads its own enforced cgroup cap: `memory.max=536870912` and
+`memory.swap.max=0`. Aggregate cgroup peak is 45,858,816 bytes, with zero max,
+OOM or OOM-kill events. Process RSS and cgroup accounting are separate metrics.
+Work `w-t1793650867-1261555-1460917` exits 0; paid cost $0.
+
+This is real input metadata, unlike the small fixture above, but it is still
+**not a cached check or proof benchmark**. The profiler declares all units
+misses and only calls the metadata validator against an empty temporary cache.
+It never invokes Bend or `run_check`, creates a signing key/cache entry, or records a
+pass. The toolchain is identified by reading its files. Thus it establishes
+planning cost, not successful checks or the two-minute PR goal.
+
+The [profiler](profile-real.py) refuses to run outside the exact bounded scope:
+
+```sh
+systemd-run --user --scope --quiet --unit=bp-cache-metadata-$$ \
+  -p MemoryMax=536870912 -p MemorySwapMax=0 \
+  python3 -IB build/ci-speed/cache-plan/profile-real.py
+```
+
+The new receipt is written beside the profiler. No heavy Bend slot, paid VM,
+compiler/proof/app/release execution or shared-cache authentication is involved.
+Planning is small relative to the target; qualified execution and trusted
+cross-run reuse remain the work ahead.
