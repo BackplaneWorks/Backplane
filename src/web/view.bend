@@ -2134,12 +2134,21 @@ def View.update.btn.loc(+lc: I.Loc, i: Nat) -> List<&2, D.Node>:
 def View.update.btn(i: Nat) -> List<&2, D.Node>:
   View.update.btn.loc(I.En{}, i)
 
+# (a link nothing verified asks Mine / Not mine instead: "peer-own")
+def View.mates.one(ask: Bool, +lc: I.Loc, +nm: String, +note: String, +on: String, +key: String, +link: String) -> D.Node:
+  match ask:
+    case True{}:
+      View.setrow(nm, note, [D.Dom.button("", "peer-own", link ++ "=1", MSG.T.machines.mine(lc), MSG.T.machines.mine(lc)),
+        D.Dom.button("", "peer-own", link ++ "=0", MSG.T.machines.notmine(lc), MSG.T.machines.notmine(lc))])
+    case False{}:
+      View.setrow(nm, note, View.chips.loc(lc, ["on", "off"], on, key))
+
 def View.mates.go.loc(+lc: I.Loc, rs: List<&2, U.MateRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
-    case U.MateRow{+nm, +note, +on, +key} <> t:
-      View.setrow(nm, note, View.chips.loc(lc, ["on", "off"], on, key)) <> View.mates.go.loc(lc, t)
+    case U.MateRow{+nm, +note, +on, +key, +ask} <> t:
+      View.mates.one(Bool.not(String.is_empty(ask)), lc, nm, note, on, key, ask) <> View.mates.go.loc(lc, t)
 
 def View.mates.go(rs: List<&2, U.MateRow>) -> List<&2, D.Node>:
   View.mates.go.loc(I.En{}, rs)
