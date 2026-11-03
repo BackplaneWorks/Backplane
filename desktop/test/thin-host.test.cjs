@@ -31,6 +31,38 @@ async function fixture(overrides={}){
  const open=()=>{host.greeting(greeting);const r=reply();host.receive(r);return r;};
  return{host,api,sent,commands,views,states,warnings,searches,messages,disk,reply,open,greeting,flushFields:()=>fieldRefresh?.(),getSession:()=>session,tick:ms=>{at+=ms;host.expire();}};
 }
+test('returning from a newest viewport never restores an older source merely because its anchor is retained there',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{anchor:'older-visible',offset:12,atEnd:true},adjacent:''})});f.open();
+ f.host.window.newer=0;
+ f.host.held={pages:[{cursor:'issued-older',back:[''],older:'before',ids:['older-visible']},{cursor:'',back:[],older:'issued-older',ids:['latest']}]};
+ f.host.rememberPage();const saved=[...f.host.pagePositions.values()][0];
+ assert.equal(saved.cursor,'','newest intent owns the source cursor, even when the first visible row is older');
+ assert.deepEqual(saved.back,[]);assert.deepEqual(saved.position,{atEnd:true});
+ f.host.request('select','B');f.host.receive(f.reply());f.host.request('select','A');const open=f.sent.at(-1),count=f.sent.length;f.host.receive(f.reply(open));
+ assert.equal(f.sent.length,count,'re-entry cannot silently issue an older bookmark restore');
+ assert.equal(f.views.at(-1).detail.entry,true);assert.equal(f.host.atNewest(),true);
+ assert.equal(f.getSession().drafts.A,'original 日本語');
+});
+test('leaving during initial fill preserves newest intent and unread boundary until actual newest content paints',async()=>{
+ const f=await fixture({readingMark:()=> 'before-output',pagePosition:()=>({position:{anchor:'latest',offset:0,atEnd:false},adjacent:'',followNewest:true})});f.open();f.host.window.newer=0;
+ assert(f.host.ahead('older'));f.host.rememberPage();const saved=[...f.host.pagePositions.values()][0];
+ assert.equal(saved.cursor,'');assert.deepEqual(saved.back,[]);assert.deepEqual(saved.position,{atEnd:true});assert.equal(saved.away,'before-output','saving follow intent cannot acknowledge output');
+ f.host.request('select','B');f.host.receive(f.reply());f.host.request('select','A');const request=f.sent.at(-1),count=f.sent.length;
+ f.host.receive(f.reply(request,{window:{ids:['latest'],older:'issued-older',hasMore:true,newer:0,anchor:{id:'latest',offset:0},partial:[]}}));
+ assert.equal(f.sent.length,count);assert.equal(f.views.at(-1).detail.entry,true,'explicit newest resume can finish its interrupted fill');
+ assert.equal(f.host.awayOf('A'),'before-output','the accepted source alone still cannot consume unread');
+});
+test('a reader held on an older anchor keeps its exact issued cursor, offset and genuine unread',async()=>{
+ const f=await fixture({pagePosition:()=>({position:{anchor:'older-visible',offset:27,atEnd:false},adjacent:'',followNewest:false})});f.open();f.host.window.newer=0;
+ f.host.away('A','last-seen');f.host.held={pages:[{cursor:'issued-older',back:[''],older:'before',ids:['older-visible']},{cursor:'',back:[],older:'issued-older',ids:['latest']}]};f.host.rememberPage();
+ const saved=[...f.host.pagePositions.values()][0];assert.equal(saved.cursor,'issued-older');assert.deepEqual(saved.back,['']);assert.deepEqual(saved.position,{anchor:'older-visible',offset:27,atEnd:false});assert.equal(saved.away,'last-seen');
+});
+test('optimistic selection captures outgoing viewport ownership once before replacing its session',async()=>{
+ const seen=[],f=await fixture();f.open();f.host.away('A','genuine-unread-boundary');
+ f.api.pagePosition=()=>{seen.push([f.host.session.sel,f.host.target.id]);return{position:{anchor:'row',offset:9,atEnd:false}};};
+ f.host.request('select','B');assert.deepEqual(seen,[['A','A']]);
+ const saved=[...f.host.pagePositions.values()][0];assert.equal(saved.conversation,'A');assert.equal(saved.away,'genuine-unread-boundary');
+});
 test('only accepted newest entry may arm viewport fill; updates and away restores cannot',async()=>{
  const f=await fixture({pagePosition:()=>({position:{anchor:'row',offset:0,atEnd:false}})});f.open();assert.equal(f.views.at(-1).detail.entry,true);
  f.host.update();f.host.receive(f.reply());assert.equal(f.views.at(-1).detail.entry,false);

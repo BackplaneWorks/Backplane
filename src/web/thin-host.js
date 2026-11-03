@@ -246,9 +246,13 @@ export class ThinHost {
     else if (position.adjacent === 'older' && this.window?.older) { back.push(cursor);cursor = this.window.older; }
     else if (reading) { cursor = reading.cursor;back = reading.back.slice(); }
     if (back.length > 512) return;
-    const wantsNewest = this.pendingNewest || this.paging?.direction === 'newest';
+    // A newest viewport may span prefetched older pages. Its preferred
+    // anchor names a visible row, not an intent to reopen that older source.
+    // Initial fill also follows newest while an older read is in flight.
+    const wantsNewest = this.pendingNewest || this.paging?.direction === 'newest' || position.followNewest === true ||
+      !this.paging && this.atNewest() && position.position?.atEnd === true;
     const saved = { cursor: wantsNewest ? '' : cursor, back: wantsNewest ? [] : back,
-      position: wantsNewest ? { atEnd: true } : position.position, conversation: this.conversation, away: this.awayOf(this.session.sel), historyEpoch: this.historyEpoch };
+      position: wantsNewest ? { atEnd: true } : position.position, conversation: this.conversation, away: this.awayOf(this.conversation || this.session.sel), historyEpoch: this.historyEpoch };
     const bytes = utf8Bytes(JSON.stringify(saved)), key = JSON.stringify([this.hub, this.epoch, this.target]);
     const old = this.pagePositions.get(key);
     if (old) { this.pagePositionBytes -= old.bytes;this.pagePositions.delete(key); }
@@ -298,6 +302,9 @@ export class ThinHost {
     const retire = ['select','bot','bot-tab','uber','uber-bot','remote','ws-term-hide','term-toggle','ws-term-here'].includes(action) || action === 'ws-go' && value === 'term';
     if (retire) this.retireTerminal('Queued terminal input was cancelled when the view changed.');
     if (action === 'draft' || action === 'select') {
+      // The viewport and its unread mark still belong to the outgoing
+      // conversation. Capture them before optimistic selection changes sel
+      // and the host's ownership/position callbacks.
       if (action === 'select') this.rememberPage();
       this.localRevision++;
       this.session = this.api.choice(this.session, action, value);
@@ -1050,7 +1057,7 @@ export class ThinHost {
       if (pictureCurrent) this.api.view(node, { epoch: this.epoch, generation: r.generation, viewId: r.viewId, accountBinding: r.accountBinding,
         target: r.target, window: result.window, shown: r.shown, mailDraftContext: r.mailDraftContext,
         page: sentNewest ? { direction: 'newest' } : paged && { direction: paged.direction, before: paged.before },
-        entry: result.method === 'view.open' && !this.historyResetPending && !this.awayMark && this.atNewest() && (!resumed || position?.atEnd === true),
+        entry: result.method === 'view.open' && !this.historyResetPending && (!this.awayMark || resumed?.position?.atEnd === true) && this.atNewest() && (!resumed || position?.atEnd === true),
         position, historyReset: this.historyResetPending, changed: result.changed });
       if (pictureCurrent) this.historyResetPending = false;
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
