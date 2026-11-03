@@ -547,12 +547,13 @@ to avoid polluting future whole-checkout source inventories.
 
 ## Typed compiler controls and module experiment (2026-11-03)
 
-The opt-in [module-check experiment](../../patches/bend-module-check-experiment.patch)
-keeps the v2.0.36 checker unchanged and calls its existing prefix-check API at
-local module boundaries. It retains all definitions, bodies and erased terms;
-an optional lower/higher roundtrip compacts checked interfaces. Cycles, missing
-or unfamiliar imports and canonical LAWS/PROOF use the original full path.
-Unfilled/cross-file declarations also fall back. This is **not installed or
+The initial PR836 module-check experiment kept the v2.0.36 checker unchanged
+and called its existing prefix-check API at local module boundaries. That
+revision retained all definitions, bodies and erased terms, with an optional
+lower/higher roundtrip. Cycles, missing or unfamiliar imports, canonical
+LAWS/PROOF and unfilled/cross-file declarations used the original full path.
+The current [opt-in patch](../../patches/bend-module-check-experiment.patch)
+evolves that storage strategy as documented in the later V18 measurements. This is **not installed or
 selected by production builds**. Its complete hub/web memory and output
 qualification is pending; it is not yet a 6GB improvement or a pass cache.
 
@@ -773,3 +774,46 @@ cost68/74/108/107credit-s; focused v13 costs85; complete v13 phases283/203/90;
 v14 harness-only14; v14b137; diagnostic76. Total1,245credit-s (**$0.01245**).
 All sandboxes were deleted and deletion verified. No release resume, installed
 compiler replacement, app execution or proof/law change follows these receipts.
+
+### Bounded declaration batches and checked-result storage (2026-11-03)
+
+The updated opt-in patch and [exact source/tool manifest](../../patches/bend-module-check-experiment.json)
+reproduce the measured V18 compiler from clean upstream commit
+`ae1101ca7d15364f9274fa6b1367d175884a7da7`. Applying the patch in a fresh
+export reproduces all nine compiler/Base hashes; human-owned bend.ts and
+safe.ts remain byte-identical. This is still an experimental Bun-only path:
+normal build admission and the installed compiler are unchanged. Full
+hub/web qualification is pending. No local/release trigger is implied.
+
+| Change | Before | After |
+|---|---|---|
+| Remove weak decoded-IR cache, V15 | V13 web reaches emission but exceeds3.7GB cap | V15 still exceeds cap during checking at150.021s. No claimed gain. |
+| Explicit collection at the same mobile prefix checkpoint | RSS2,148,741,120bytes before collection | Bun.gc(true):2,097,881,088; gcAndSweep():1,992,044,544. Post-GC live heap761,940,430bytes includes463,363,038bytes external. Diagnostic only; intentionally stopped at23.872s after capture. |
+| Batch128 declarations instead of one at a time | Mobile V14b OOM at3.7GB after102.946s; repeated prefix-table construction per event | Same frozen33ce mobile check passes96.804s /2,768,116KiB (2.64GiB), raw exit0.28 compiler invocations plus one CLI rejection control pass; beyond128 forward-reference and false-proof cases reject,300-def positive emission matches full reference. |
+| Apply batch128 to complete hub/web | One-event variants exceed cap | Both still fail while spilling accepted refview results:45.982s hub /80.582s web. Kernel had returned successfully; no final byte qualification. |
+| V17 page higher type annotations, preserving free-variable identity | Retained higher graphs keep IR alive | First focused check passes35.873s /2,649,048KiB, but receipt shows discard_results=true and stored_bytes=0. This check does **not** exercise the new paging codec. Corrected emission gate below supersedes it. |
+| V17 actual retained-storage synthetic emission over frozen refview imports | Matched unchanged whole-book emission22.003s /1,864,996KiB | Exact output bytes match, but122.724s /3,612,472KiB is a regression.1.07million resident annotation handles correspond to only46,300 distinct blobs. |
+| V18 content-intern handles, bound identity cache256, free obsolete accepted e after successful hash write | V17 emission122.724s /3,612,472KiB; post-check RSS2,824,450,048bytes | Same actual retained-storage gate62.400s /2,977,024KiB (2.84GiB); post-check RSS889,204,736bytes. Final SHA256 exactly `a7401f2712f024aa9f4b7c2101b454e15c6fba0001eb9f5ec7bafb5419b7097f`, matching unchanged whole-book reference. Still slower/larger than that original focused baseline. |
+| V18 same-compiler mobile check | Earlier batch128 compiler96.804s /2,768,116KiB |88.149s whole compiler scope (check:end87.860s) /2,770,720KiB; cgroup peak2,802,311,168bytes, swap0. Exact6,037,027-byte ddb9 bridge reused from its previously qualified unchanged closure; no new bridge emission, SDK build or app package. |
+
+[The exact codec fixture and completed controls](compiler-memory/storage-controls/IDENTITY.json)
+cover open dependent annotations and caller-variable identity, corruption,
+cross-store/missing handles, Unicode boundaries, DAG sharing, exact dependency
+sets, bounded identity cache, content interning, release of obsolete accepted
+emitter IR, and typed false-proof/forward-reference rejection.22 changed-mode
+compiler invocations reuse the already completed original full-mode references.
+Source T/v graphs remain exact; no theorem or law is omitted or changed.
+Every experiment retains3.7GB compiler plus512MiB controller hard caps
+(sum4,236,870,912bytes<4GiB), zero swap and the actual native bend flock.
+
+[Mobile batch receipt](compiler-memory/paging-experiments/mobile-batch128.json),
+[corrected V17 emit](compiler-memory/paging-experiments/refview-emit-v17.json),
+[V18 emit](compiler-memory/paging-experiments/refview-emit-v18.json),
+[V18 mobile](compiler-memory/paging-experiments/mobile-v18.json) and
+[post-GC census](compiler-memory/paging-experiments/mobile-postgc-v14.json)
+include raw artifact hashes. V15 web170credit-s; post-GC diagnostic38;
+mobile batch128120; hub/web batch12860/102; initial V17 check60;
+corrected V17 emission including new original reference187; V18 focused90;
+V18 mobile117. Total944credit-s (**$0.00944**), all sandboxes deleted and
+verified. This cumulative section includes failed/scoped experiments; its
+passes do not establish a complete low-memory hub/web build.
