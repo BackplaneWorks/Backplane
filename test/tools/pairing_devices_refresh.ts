@@ -1,5 +1,5 @@
-// Devices (pairing-ui.js): a device that pairs while its invitation is on
-// screen shows in "Paired devices" without leaving the page (it showed only
+// Devices (pairing-ui.js): Esc leaves it, and a device that pairs while its
+// invitation is on screen shows in "Paired devices" without leaving the page (it showed only
 // after Back and Manage devices again). Fixture responses only, no hub.
 //   bun test/tools/pairing_devices_refresh.ts   (CHROMIUM_PATH optional)
 import {mkdirSync, writeFileSync, readFileSync} from 'node:fs';
@@ -36,5 +36,11 @@ try {
   assert.equal(await page.locator('.pairing-device').count(), 0);
   await page.waitForFunction(() => document.querySelector('.pairing-device')?.innerText.includes('Phone in the lab'), null, {timeout: 8000});
   assert.ok(!(await page.locator('.pairing-screen [role="status"]').first().innerText()).includes('could not'));
+  // Esc leaves Devices (as Back does); the connection screen has no Back and stays
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.pairing-screen'), null, {timeout: 3000});
+  await page.evaluate(() => (window as any).ui.show());
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.pairing-screen').count(), 1);
   console.log('pairing_devices_refresh: ok');
 } finally { await browser.close();server.stop(true); }
