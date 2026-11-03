@@ -6,6 +6,9 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' 0
 export BOAT_FAKE_DIR=$T/fake BOAT_JOB_ROOT=$T/root BACKPLANE_BOAT=$here/test/tools/boat-fake
+# A test launched through work_run has a real thread ancestor. Start the
+# non-reuse cases with no idle window even when that ancestor is detected.
+export BOAT_JOB_IDLE=0
 mkdir -p "$BOAT_FAKE_DIR" "$BOAT_JOB_ROOT"
 pass=0 failn=0
 ok() { if [ "$1" = "$2" ]; then pass=$((pass+1)); [ -z "${BOAT_TEST_VERBOSE:-}" ] || echo "ok   $3"; else failn=$((failn+1)); echo "FAIL $3: got '$1' want '$2'"; fi; }
@@ -237,6 +240,7 @@ ok "$(sz --size default -- scripts/check.sh)" default "--size wins"
 rm -rf "$P/scripts"
 
 # ---- warm sandboxes: one per thread, reused, kept for an idle window, then deleted ----
+unset BOAT_JOB_IDLE
 fresh w; limits 100 90000 true; echo "12 60 200" > "$F/startlimits"
 tj() { t=$1; shift; BACKPLANE_THREAD=$t "$J" --no-setup-bend "$@"; }
 thr() { "$J" status --json | python3 -c "import json,sys; d=json.load(sys.stdin); x=d['threads'].get('$1'); print('none' if not x else x['state']+' '+str(x['size'])+(' left' if x.get('idle_until') else ''))"; }
@@ -280,7 +284,7 @@ ok $(( $(grep -c '"ev": "deleted"' "$BOAT_JOB_ROOT/ledger.jsonl") - d0 )) "$nw" 
 rm -rf "$F/boxes/bx_foreign"
 # --idle 0, no thread, a cancel, a failed command: deleted at once
 tj tC --idle 0 -- true >/dev/null 2>&1; ok "$(boxes)" 0 "--idle 0: deleted"
-"$J" --no-setup-bend -- true >/dev/null 2>&1; ok "$(boxes)" 0 "no thread: deleted"
+"$J" --no-setup-bend --idle 0 -- true >/dev/null 2>&1; ok "$(boxes)" 0 "no idle window: deleted"
 BACKPLANE_THREAD=tK setsid "$J" --no-setup-bend -- sleep 30 > "$T/wk.out" 2>&1 & pg=$!
 for i in $(seq 50); do grep -q running: "$T/wk.out" && break; sleep 0.2; done
 [ "$pg" -gt 1 ] && kill -TERM -- "-$pg"; wait $pg; ok "$(boxes)" 0 "cancel: deleted, not kept"

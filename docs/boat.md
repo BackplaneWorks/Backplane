@@ -76,6 +76,11 @@ flag, manifest hash, Bend version and sha256, sandbox, size, command, exit).
 - `--timeout SECS` (default 1800): the command's limit; the sandbox lives at most that + 10 min, and never more than 2 h.
 - `--artifact PATH` (repeat): copied back from the sandbox before it is deleted.
 - `--exclude GLOB` (repeat): more files to keep out of the upload.
+- `--include-file PATH` (repeat): upload only these exact repository-relative
+  files from Git's tracked and unignored inventory. Every requested path must
+  exist and survive the normal privacy filters and all `--exclude` patterns,
+  or the job fails before a sandbox is created. Ignored `build/` files cannot
+  be included; copy reviewed inputs into an unignored source packet first.
 - `--budget-usd X` (or `BOAT_JOB_BUDGET_USD`): a lower daily cap for this job; it can only lower the shared cap, never raise it.
 - `--wait 0`: accepted for compatibility; nonzero waits are refused because jobs do not queue.
 - `--no-setup-bend`: skip installing Bend (the pinned version and sha256 come from `.github/actions/setup-bend/action.yml`).

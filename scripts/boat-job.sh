@@ -2,7 +2,7 @@
 # Run one command on a disposable Boat sandbox (boat.dev), from this worktree.
 #
 #   scripts/boat-job.sh [--size small|default|large|xlarge] [--timeout SECS] [--artifact PATH]...
-#                       [--exclude GLOB]... [--budget-usd X] [--wait SECS] [--setup-bend|--no-setup-bend] -- CMD...
+#                       [--include-file PATH]... [--exclude GLOB]... [--budget-usd X] [--wait SECS] [--setup-bend|--no-setup-bend] -- CMD...
 #   scripts/boat-job.sh sweep      delete sandboxes this tool started whose job is gone
 #   scripts/boat-job.sh status [--json] [--refresh]   the ledger and the cached account limits
 #
@@ -402,13 +402,14 @@ esac
 
 SIZE="" TIMEOUT=1800 WAIT=${BOAT_JOB_WAIT:-0} BUDGET_ASK="" SETUP_BEND=auto
 IDLE=${BOAT_JOB_IDLE:-1200} KEEP_BUILD=0 NOREUSE=0
-ARTS=() EXCL=()
+ARTS=() EXCL=() INCLUDE=()
 while [ $# -gt 0 ]; do
   case $1 in
     --size) SIZE=$2; shift 2 ;;
     --timeout) TIMEOUT=$2; shift 2 ;;
     --artifact) ARTS+=("$2"); shift 2 ;;
     --exclude) EXCL+=("$2"); shift 2 ;;
+    --include-file) INCLUDE+=("$2"); shift 2 ;;
     --budget-usd) BUDGET_ASK=$2; shift 2 ;;
     --wait) WAIT=$2; shift 2 ;;
     --idle) IDLE=$2; shift 2 ;;
@@ -628,19 +629,30 @@ trap 'r=$?; [ "$FINISHING" = 1 ] || { say "unexpected exit $r: cleaning up"; fin
 
 # manifest: tracked + untracked-not-ignored files, secrets/logs/build output dropped
 STAGE=$(mktemp -d); NAME=$(basename "$SRC"); mkdir -p "$STAGE/$NAME"
-git -C "$SRC" ls-files -co --exclude-standard -z | python3 -c '
+(set -o pipefail; git -C "$SRC" ls-files -co --exclude-standard -z | python3 -c '
 import sys, fnmatch, os
-excl = sys.argv[1:]
+root = sys.argv[1]; n = int(sys.argv[2]); requested = sys.argv[3:3+n]; excl = sys.argv[3+n:]
+if any(not p or p.startswith("/") or any(x in ("", ".", "..") for x in p.split("/")) for p in requested):
+    print("invalid --include-file path", file=sys.stderr); sys.exit(1)
+include = set(requested)
+found = set()
 deny = [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", "id_ecdsa*", "auth.json", "credentials*", "*.keystore", "*.jks", "*.log"]
 dirs = ("shots-snap/", "dist/", "build/", "node_modules/", ".claude/", ".backplane/", ".backplane-bend/")
 for p in sys.stdin.buffer.read().split(b"\0"):
     if not p: continue
     s = p.decode("utf-8", "surrogateescape"); base = os.path.basename(s)
+    if include and s not in include: continue
     if s.startswith(dirs) or any(fnmatch.fnmatch(base, g) for g in deny) or any(fnmatch.fnmatch(s, g) for g in excl): continue
     if s.endswith(".jsonl") and not s.startswith("test/"): continue
+    if not os.path.lexists(os.path.join(root, s)): continue
+    found.add(s)
     sys.stdout.buffer.write(p + b"\0")
-' "${EXCL[@]}" > "$OUT/manifest.z"
-(cd "$SRC" && tar --null -T "$OUT/manifest.z" -cf - 2>/dev/null) | tar -xf - -C "$STAGE/$NAME" || { say "staging failed"; finish 76; }
+missing = include - found
+if missing:
+    print("--include-file missing or excluded: " + ", ".join(sorted(missing)), file=sys.stderr)
+    sys.exit(1)
+' "$SRC" "${#INCLUDE[@]}" "${INCLUDE[@]}" "${EXCL[@]}" > "$OUT/manifest.z") || { say "source inventory failed"; finish 76; }
+(set -o pipefail; (cd "$SRC" && tar --null -T "$OUT/manifest.z" -cf - 2>/dev/null) | tar -xf - -C "$STAGE/$NAME") || { say "staging failed"; finish 76; }
 (cd "$STAGE/$NAME" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$OUT/manifest.sha256"
 REV=$(git -C "$SRC" rev-parse HEAD); DIRTY=$( [ -n "$(git -C "$SRC" status --porcelain)" ] && echo yes || echo no )
 echo "source: $SRC @ $REV (dirty: $DIRTY), $(wc -l < "$OUT/manifest.sha256") files, $(du -sh "$STAGE/$NAME" | cut -f1)"
