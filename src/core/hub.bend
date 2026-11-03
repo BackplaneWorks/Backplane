@@ -1199,10 +1199,12 @@ def Title.got(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String
 
 # Commit & push and Open PR without a message: the server writes one from
 # the thread's diff (the thread's title when it cannot)
+# (Make it a git repository: the folder's first commit is "start", as the
+# commands Diff shows say)
 def Hub.act(+s: M.State, +client: U32, +id: String, +thread: String, +action: String, +p: J.Json) -> Step:
   Bool.pick(Step, Bool.and(String.contains(action, "commit"), String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(p, "message"), J.Null{})), "null")),
     Hub.git(s, client, id, "act_gen", thread, action, Hub.thread_title(Hub.thread(s, thread))),
-    Hub.git(s, client, id, "act", thread, action, J.Json.get_str(p, "message", Hub.thread_title(Hub.thread(s, thread)))))
+    Hub.git(s, client, id, "act", thread, action, J.Json.get_str(p, "message", Bool.pick(String, String.eq(action, "init"), "start", Hub.thread_title(Hub.thread(s, thread))))))
 
 # A thread's worktree is ready (thread.worktree) or cannot be made
 # (thread.local): what waited for it runs now, in the thread's directory.
