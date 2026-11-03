@@ -271,6 +271,29 @@ def apply(stage):
         'prepare_and_queue_seconds':round(time.monotonic()-started,3), 'state':'scheduled'},indent=2)+'\n')
 
 
+def desktop_lines(lines, icon):
+    """Add the URL handler in Desktop Entry without changing its actions."""
+    section = False
+    have_mime = False
+    updated = []
+    def finish():
+        if not have_mime: updated.append('MimeType=x-scheme-handler/backplane;')
+        updated.extend(['Icon='+str(icon), 'StartupWMClass=backplane'])
+    for line in lines:
+        if line.startswith('['):
+            if section: finish()
+            section = line == '[Desktop Entry]'
+        if section and line.startswith('Exec=') and '%u' not in line and '%U' not in line:
+            line += ' %u'
+        if section and line.startswith('MimeType='):
+            have_mime = True
+            if 'x-scheme-handler/backplane;' not in line:
+                line += ('' if line.endswith(('=', ';')) else ';') + 'x-scheme-handler/backplane;'
+        if not (section and line.startswith(('Icon=', 'StartupWMClass='))): updated.append(line)
+    if section: finish()
+    return updated
+
+
 def activate(stage):
     installed = STORE / stage.name
     info = json.loads((installed / 'stage/LOCAL.json').read_text())
@@ -290,15 +313,8 @@ def activate(stage):
         lines = desktop_entry.read_text().splitlines()
     else:
         executable = str(launcher).replace('\\','\\\\').replace('"','\\"').replace('$','\\$').replace('`','\\`').replace('%','%%')
-        lines = ['[Desktop Entry]','Type=Application','Name=Backplane','Exec="'+executable+'"','Terminal=false','Categories=Development;']
-    # Preserve desktop actions and unrelated fields in an existing launcher.
-    section = False; updated = []
-    for line in lines:
-        if line.startswith('['):
-            if section: updated += ['Icon='+str(installed/'stage/desktop/runtime/resources/app/backplane.png'),'StartupWMClass=backplane']
-            section = line == '[Desktop Entry]'
-        if not (section and line.startswith(('Icon=','StartupWMClass='))): updated.append(line)
-    if section: updated += ['Icon='+str(installed/'stage/desktop/runtime/resources/app/backplane.png'),'StartupWMClass=backplane']
+        lines = ['[Desktop Entry]','Type=Application','Name=Backplane','Exec="'+executable+'" %u','Terminal=false','Categories=Development;']
+    updated = desktop_lines(lines, installed/'stage/desktop/runtime/resources/app/backplane.png')
     desktop_entry.parent.mkdir(parents=True,exist_ok=True)
     temp = desktop_entry.with_suffix('.local-new');temp.write_text('\n'.join(updated)+'\n');temp.replace(desktop_entry)
     receipt = installed/'DEPLOY.json'

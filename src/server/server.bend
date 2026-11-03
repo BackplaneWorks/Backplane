@@ -1,4 +1,5 @@
 import Base
+import ./pairing.bend as PAIR
 import ./pdf.bend as PDF
 import ./filelist.bend as FL
 import ../core/pcb-usage.bend as PC
@@ -1580,6 +1581,7 @@ def Conn.writer(fuel: Nat, s: Socket, +out: Chan(Wire), w: OB.Wr, +id: U32, +gen
 
 def Conn.leave(s: Socket, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
+    PAIR.Pairing.forget(id)
     Socket.close(s)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{id})
     return Unit{}
@@ -1760,7 +1762,7 @@ def Conn.safe(+p: String) -> Bool:
   Bool.and(Bool.not(String.contains(p, "..")), String.starts_with(p, "/"))
 
 def Conn.file(+p: String) -> String:
-  Bool.pick(String, String.eq(p, "/"), "/index.html", p)
+  Bool.pick(String, Bool.or(String.eq(p, "/"), Bool.or(String.eq(p, "/pair"), String.eq(p, "/devices"))), "/index.html", p)
 
 # hashed bundle chunks never change under their name; the page and the
 # service worker are checked every time
@@ -2003,8 +2005,10 @@ def Info.masked(+text: String) -> IO(String):
 # the token (Hub.join.k, Wire.pair), never to one let in the legacy way
 # the pairing message for a link report (its QR code is made here: ~2 s on
 # the JS target, so Cfg.with_link keeps it in Bn and joins reuse it)
+# Shared root credentials never leave the hub in new invitations. Settings
+# requests a private, expiring invite through /auth/invitations instead.
 def Hub.pair_msg.of(+lk: String) -> String:
-  "{\"t\":\"info\",\"info\":" ++ J.Json.show(J.Json.obj([J.KV{"pair", J.Str{TN.Tailnet.report.link(lk)}}, J.KV{"pair.qr", J.Str{Info.qr(TN.Tailnet.report.link(lk))}}])) ++ "}"
+  "{\"t\":\"info\",\"info\":{\"pair\":\"\",\"pair.qr\":\"\"}}"
 
 def Hub.pair_msg.k(hit: Bool, +kept: String, +lk: String) -> String:
   match hit:
@@ -2331,7 +2335,7 @@ def Hub.leave.close(m: Maybe<&2, Client>) -> IO(Unit):
     case Some{Client{_, c, _, _, k, _, _, +accountCap}}:
       do IO<Unit>:
         Chan.close(Wire, c)
-        H.Fd.close(k)
+        H.Fd.shut(k)
     case None{}:
       IO.pure(Unit, Unit{})
 
@@ -5667,7 +5671,9 @@ def Cfg.with_link(c: Cfg, +lk: String) -> Cfg:
 def Hub.link(h: Hub, +lk: String) -> IO(Hub):
   match h:
     case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
-      Hub.models.k(Hub{st, f, ls, cl, as, inbox, Cfg.with_link(cfg, lk), note})
+      do IO<Hub>:
+        PAIR.Pairing.address(TN.Tailnet.report.link(lk))
+        Hub.models.k(Hub{st, f, ls, cl, as, inbox, Cfg.with_link(cfg, lk), note})
 
 # where a thread's attachments go (the upload itself runs off the hub)
 def Hub.att_dir(h: Hub, +thread: String, +reply: Chan(String)) -> IO(Hub):
@@ -16256,12 +16262,84 @@ def Desktop.peer(r: Socket & String, req: W.Request, rest: List<&2, U32>, client
 def Desktop.request_path(req: W.Request) -> String:
   match req: case W.Request{_, p, _}: p
 
+def Conn.devices.path(req: W.Request) -> String:
+  match req: case W.Request{_, path, _}: path
+
+# A validated session becomes this request's expected credential. Unknown or
+# revoked credentials are rejected before the legacy loopback exemption.
+def Conn.devices.secret.cookie(xs: List<&2, String>) -> String:
+  match xs:
+    case Nil{}: ""
+    case +x <> rest:
+      Bool.pick(String, String.starts_with(String.trim(x), "bp_token="), String.drop(String.trim(x), 9n), Conn.devices.secret.cookie(rest))
+
+def Conn.devices.secret(+hs: List<&2, W.Header>, +path: String) -> String:
+  +bearer = W.Http.header_of(hs, "authorization")
+  +cookie = Conn.devices.secret.cookie(String.split(W.Http.header_of(hs, "cookie"), ';'))
+  Bool.pick(String, String.starts_with(bearer, "Bearer "), String.drop(bearer, 7n),
+    Bool.pick(String, String.is_empty(cookie), W.Http.param(path, "token"), cookie))
+
+def Conn.devices.left(xs: List<&2, J.Json>, +inbox: Chan(Msg)) -> IO(Unit):
+  match xs:
+    case Nil{}: IO.pure(Unit, Unit{})
+    case x <> rest:
+      do IO<Unit>:
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{U32.from_nat(J.Json.get_nat(J.Json.obj([J.KV{"id", x}]), "id", 0n))})
+        Conn.devices.left(rest, inbox)
+
+def Conn.devices.reply(+j: J.Json, s: Socket, +native: Bool, +https: Bool, +op: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    Conn.devices.left(J.Json.elems(J.Json.get_obj(j, "clients")), inbox)
+    +error : String = J.Json.get_str(j, "error", "")
+    +credential : String = J.Json.get_str(j, "token", "")
+    +link : String = J.Json.get_str(j, "link", "")
+    +body : J.Json = Bool.pick(J.Json, String.eq(op, "enroll"),
+      Bool.pick(J.Json, Bool.or(native, Bool.not(String.is_empty(error))), j, J.Json.obj([J.KV{"ok", J.Flag{True{}}}])),
+      Bool.pick(J.Json, String.is_empty(link), j, TV.Obj.put(j, "qr", J.Str{QR.Qr.text(link)})))
+    Conn.finish(s, W.Http.response(Bool.pick(String, String.is_empty(error), "200 OK", Bool.pick(String, String.eq(error, "rate_limited"), "429 Too Many Requests", "400 Bad Request")),
+      "application/json", U.Utf8.encode(J.Json.show(body)), "Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n" ++
+        Bool.pick(String, String.is_empty(credential), "", AUTH.Auth.pair.cookies(credential, https))))
+
+def Conn.devices.request(ok: Bool, s: Socket, +hs: List<&2, W.Header>, +op: String, secret: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case False{}: Conn.finish(s, W.Http.response("401 Unauthorized", "application/json", U.Utf8.encode("{\"error\":\"pairing_required\"}"), "Cache-Control: no-store\r\n"))
+    case True{}:
+      do IO<Unit>:
+        +https : Bool = Bool.or(String.starts_with(W.Http.header_of(hs, "origin"), "https://"), Bool.and(String.is_empty(W.Http.header_of(hs, "origin")), String.eq(W.Http.header_of(hs, "x-backplane-scheme"), "https")))
+        result : String <- PAIR.Pairing.request(op, secret, W.Http.header_of(hs, "x-backplane-name"), W.Http.header_of(hs, "host"), https)
+        Conn.devices.reply(Maybe.default(&2, J.Json, J.Json.parse(result), J.Null{}), s,
+          Bool.and(String.is_empty(W.Http.header_of(hs, "origin")), String.eq(W.Http.header_of(hs, "x-backplane-client"), "native")), https, op, inbox)
+
+def Conn.devices.fallback(denied: Bool, +token: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool) -> IO(Unit):
+  Conn.route.auth(String.eq(W.Http.route(Conn.devices.path(req)), "/auth/pair"), s, req, rest, web, id, inbox, Bool.and(trusted, Bool.not(denied)), token)
+
+
+def Conn.devices.dispatch(route: String, +token: String, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool) -> IO(Unit):
+  match route req:
+    case "/auth/invitations" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "create", "", inbox)
+    case "/auth/devices" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "GET"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "list", "", inbox)
+    case "/auth/revoke" W.Request{method, _, +hs}: Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.cache_request("GET", hs, token)), s, hs, "revoke", W.Http.header_of(hs, "x-backplane-device"), inbox)
+    case _ _: Conn.devices.fallback(String.is_empty(token), token, s, req, rest, web, id, inbox, trusted)
+
+
+def Conn.devices.gate(enroll: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +root: String) -> IO(Unit):
+  match enroll req:
+    case True{} W.Request{method, _, +hs}:
+      Conn.devices.request(Bool.and(String.eq(method, "POST"), AUTH.Auth.browser(hs)), s, hs, "enroll", String.drop(W.Http.header_of(hs, "authorization"), 7n), inbox)
+    case False{} W.Request{_, +path, +hs}:
+      do IO<Unit>:
+        token : String <- PAIR.Pairing.resolve(Conn.devices.secret(hs, path), id, W.Http.route(path))
+        Conn.devices.dispatch(W.Http.route(path), token, s, req, rest, web, id, inbox, trusted)
+
+def Conn.devices(s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +root: String) -> IO(Unit):
+  Conn.devices.gate(String.eq(W.Http.route(Conn.devices.path(req)), "/auth/enroll"), s, req, rest, web, id, inbox, trusted, root)
+
 def Desktop.route(desktop: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match desktop:
     case True{}:
       IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Desktop.peer(r, req, rest, id, inbox, token))
     case False{}:
-      Conn.route.auth(String.eq(W.Http.route(Desktop.request_path(req)), "/auth/pair"), s, req, rest, web, id, inbox, trusted, token)
+      Conn.devices(s, req, rest, web, id, inbox, trusted, token)
 
 def Conn.route(s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match req:
@@ -18646,6 +18724,21 @@ def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: Strin
       +s0 = Bool.pick(Nat, Bool.and(String.eq(origin, o), Nat.is_le(since, n)), since, 0n)
       Hub.join.k(n, s0, OB.Join.window(ls, n, s0), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, legacy, now)
 
+def Hub.session.admitted(active: Bool, h: Hub, +client: U32, +out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32, legacy: Bool, mode: String, now: Nat) -> IO(Hub):
+  match active mode:
+    case False{} _:
+      do IO<Hub>:
+        Chan.close(Wire, out)
+        H.Fd.shut(sock)
+        return h
+    case True{} "": Hub.join(h, client, out, since, origin, gen, sock, legacy, now)
+    case True{} _: Hub.mobile.join(h, client, out, since, origin, gen, sock, legacy, mode)
+
+def Hub.session.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +legacy: Bool, +mode: String, +now: Nat) -> IO(Hub):
+  do IO<Hub>:
+    active : Bool <- PAIR.Pairing.active(client)
+    Hub.session.admitted(active, h, client, out, since, origin, gen, sock, legacy, mode, now)
+
 type ThinReadJob is Data:
   ThinReadJob{client: U32, gen: U32, view: String, target: J.Json, text: String}
 
@@ -18851,9 +18944,9 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case Announce{text}:
       Hub.note(h, text)
     case Join{client, out, since, origin, gen, sock, legacy}:
-      Hub.join(h, client, out, since, origin, gen, sock, legacy, now)
+      Hub.session.join(h, client, out, since, origin, gen, sock, legacy, "", now)
     case MobileJoin{client, out, since, origin, gen, sock, legacy, mode}:
-      Hub.mobile.join(h, client, out, since, origin, gen, sock, legacy, mode)
+      Hub.session.join(h, client, out, since, origin, gen, sock, legacy, mode, now)
     case MobileTimeout{client, gen}:
       Hub.mobile.timeout(h, client, gen)
     case JoinHere{client, out, gen}:
@@ -19262,14 +19355,16 @@ def Boot.state(+home: String, warm: Maybe<&2, HB.Warm>) -> IO(HB.Hot):
 
 def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
-    case Cfg{+home, w, h, +p, pr, ds, v, nt, +tcfg, +views, +accountInfo}:
+    case Cfg{+home, w, +h, +p, pr, ds, v, nt, +tcfg, +views, +accountInfo}:
       do IO<Unit>:
         # the home's lock first: a second hub ends before the event store
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
         # Refuse credential filesystem errors before opening/migrating data.
-        tok : String <- Token.load(home)
+        +tok : String <- Token.load(home)
+        +pairingStatus : String <- PAIR.Pairing.start(home, tok, h, p)
+        PAIR.Pairing.ready(String.is_empty(pairingStatus), pairingStatus)
         diagnosticStatus : String <- DIAG.Diagnostics.start(Main.version())
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()

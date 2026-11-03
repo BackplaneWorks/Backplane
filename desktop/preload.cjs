@@ -34,6 +34,7 @@ if (document.documentElement) paintTheme();
 else new MutationObserver((_, seen) => { if (document.documentElement) { seen.disconnect();paintTheme(); } }).observe(document, {childList:true});
 contextBridge.exposeInMainWorld('backplaneDesktop', Object.freeze({
   theme,
+  pair: (text, name) => ipcRenderer.invoke('desktop:pair', {text, name}),
   captureApp: () => ipcRenderer.invoke('desktop:capture-app'),
   recording: Object.freeze({
     put: (id, bytes) => ipcRenderer.invoke('desktop:recording', { op: 'put', id, bytes }),

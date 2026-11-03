@@ -61,7 +61,9 @@ struct RootView: View {
 
     @ViewBuilder private var content: some View {
         if model.links.isEmpty {
-            NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "") { _ = model.pair($0) } }
+            NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "", status: model.pairingError) { _ = model.pair($0) } }
+        } else if authKey != nil {
+            NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "", status: model.pairingError, repair: true) { _ = model.pair($0) } }
         } else if !hasUsableContent, let key = recoveryKey ?? authKey {
             ConnectionStartupView(model: model, initialKey: key)
         } else if let s = model.screen {
@@ -295,7 +297,7 @@ private struct ConnectionStartupView: View {
             .background(BackplaneDesign.background)
             .sheet(isPresented: $addingAddress) {
                 NavigationStack {
-                    PairView(tag: tag, link: "") { address in
+                    PairView(tag: tag, link: "", status: model.pairingError, repair: true) { address in
                         chosenKey = Pairing.key(address)
                         _ = model.pair(address)
                         addingAddress = false
@@ -326,8 +328,16 @@ struct PairView: View {
     let tag: String
     @State var link: String
     let done: (String) -> Void
+    var status: String = ""
+    var repair = false
+    @State private var code = ""
+    @State private var hubAddress = ""
     @State private var scanning = false
     @State private var invalid = false
+
+    init(tag: String, link: String, status: String = "", repair: Bool = false, done: @escaping (String) -> Void) {
+        self.tag = tag;self._link = State(initialValue: link);self.status = status;self.repair = repair;self.done = done
+    }
 
     private func connect(_ text: String) {
         guard Pairing.key(text) != nil else { invalid = true; return }
@@ -343,8 +353,9 @@ struct PairView: View {
                     Text("BACKPLANE")
                         .font(.system(.caption, design: .monospaced).weight(.bold))
                         .tracking(2).foregroundStyle(BackplaneDesign.accent)
-                    Text(NativeMessages.native_pair_title(tag)).font(.largeTitle.weight(.bold))
-                    Text(NativeMessages.native_pair_computer(tag)).foregroundStyle(.secondary)
+                    Text(repair ? "Re-pair this device" : "Connect to your Backplane hub").font(.largeTitle.weight(.bold))
+                    Text("On your paired computer, open Settings → Devices → Add a device.").foregroundStyle(.secondary)
+                    if !status.isEmpty { Text(status).foregroundStyle(PhaseColor.warn).accessibilityIdentifier("pair.status") }
                 }
                 Button { scanning = true } label: {
                     Label(NativeMessages.native_pair_scan(tag), systemImage: "qrcode.viewfinder")
@@ -364,7 +375,7 @@ struct PairView: View {
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     Text(NativeMessages.settings_pair(tag)).font(.headline)
-                    TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
+                    TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/pair#invite=…"))
                         .privacySensitive()
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -375,12 +386,20 @@ struct PairView: View {
                         .background(BackplaneDesign.panel)
                         .overlay(Rectangle().stroke(invalid ? PhaseColor.bad : BackplaneDesign.line, lineWidth: 1))
                         .accessibilityIdentifier("pair.address")
-                    Text(NativeMessages.native_pair_instructions(tag)).font(.footnote).foregroundStyle(.secondary)
+                    Text("Use a fresh link, QR code, or short code from Settings → Devices.").font(.footnote).foregroundStyle(.secondary)
                     if invalid {
                         Text(tag == "ja" ? "有効な接続アドレスを入力してください。" : "Enter a valid hub address or pairing link.")
                             .font(.footnote).foregroundStyle(PhaseColor.bad)
                             .accessibilityIdentifier("pair.address.error")
                     }
+                }
+                DisclosureGroup("Type a short code") {
+                    TextField("Hub address", text: $hubAddress).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField("8-character code", text: $code).textInputAutocapitalization(.characters).autocorrectionDisabled().privacySensitive()
+                    Button("Connect with code") {
+                        guard let value = Pairing.codeLink(address: hubAddress, code: code) else { invalid = true;return }
+                        connect(value)
+                    }.buttonStyle(PairActionStyle())
                 }
                 Button(NativeMessages.native_pair_connect(tag)) { connect(link) }
                     .buttonStyle(PairActionStyle())

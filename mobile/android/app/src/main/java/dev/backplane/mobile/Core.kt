@@ -399,7 +399,23 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     }
 
     // a new hub, or a new link to one already paired (it replaces the old)
+    var pairingError by mutableStateOf("")
+    var pairingBusy by mutableStateOf(false)
+    var showingDevices by mutableStateOf(false)
+    val devicesLink get() = links.firstOrNull { Pairing.key(it) == screen?.hub } ?: links.firstOrNull()
     fun pair(text: String) {
+        Pairing.invitation(text)?.let { invite ->
+            if (pairingBusy) return
+            pairingBusy = true;pairingError = "Connecting…"
+            scope.launch {
+                try { val saved = Pairing.exchange(invite);pairingError = "";pair(saved) }
+                catch (e: Exception) { pairingError = if (e is IllegalArgumentException) e.message ?: Pairing.message("") else Pairing.message("") }
+                finally { pairingBusy = false }
+            }
+            return
+        }
+
+        if (Pairing.malformedInvitation(text)) { pairingError = "Enter the complete invitation link or a valid eight-character code.";return }
         val l = text.trim()
         val k = Pairing.key(l) ?: return
         retireScreenCache()
@@ -624,6 +640,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         }
         // a web address a settings row offers (Antigravity's sign-in):
         // opened in the browser here, never sent to the engine
+        if (action == "devices-open" || (action == "settings-page" && value == "devices")) { showingDevices = true;return }
         if (action == "open-url") {
             val u = android.net.Uri.parse(value)
             if (u.scheme == "https" || u.scheme == "http")

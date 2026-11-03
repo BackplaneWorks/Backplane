@@ -136,6 +136,7 @@ def plist(filename, identifier, version):
     data.update(CFBundleExecutable='Backplane', CFBundleIdentifier=identifier,
                 CFBundleName='Backplane', CFBundleDisplayName='Backplane',
                 CFBundleVersion=version, CFBundleShortVersionString=version)
+    data['CFBundleURLTypes'] = [{'CFBundleURLName': 'Backplane pairing', 'CFBundleURLSchemes': ['backplane']}]
     p.write_bytes(plistlib.dumps(data, fmt=plistlib.FMT_XML, sort_keys=True))
 
 
