@@ -68,13 +68,17 @@ def Proc.run.k(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(Ran):
 # settings that win over a project's own .git/config: no fsmonitor command,
 # no hooks, no pager (a folder from a zip could ship a .git, or a
 # .backplane/history.git, whose config runs commands on the hub's git).
+# Nor does it look inside submodules for dirt (diff.ignoreSubmodules=dirty:
+# a submodule's own git would run its own filters) or check signatures in a
+# log (log.showSignature runs gpg.program).
 # git.bend's Git.safe.sh also blanks the filters a repository defines
 # itself, and the hub's diffs take --no-ext-diff --no-textconv (an empty
 # diff.external is a command too). Agents' own git is theirs: their
 # processes start elsewhere (H.Proc.spawn).
 def Proc.git.env() -> List<&2, String>:
-  ["GIT_CONFIG_COUNT=3", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false", "GIT_CONFIG_KEY_1=core.hooksPath", "GIT_CONFIG_VALUE_1=/dev/null",
-   "GIT_CONFIG_KEY_2=core.pager", "GIT_CONFIG_VALUE_2=cat", "GIT_PAGER=cat"]
+  ["GIT_CONFIG_COUNT=5", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false", "GIT_CONFIG_KEY_1=core.hooksPath", "GIT_CONFIG_VALUE_1=/dev/null",
+   "GIT_CONFIG_KEY_2=core.pager", "GIT_CONFIG_VALUE_2=cat", "GIT_CONFIG_KEY_3=diff.ignoreSubmodules", "GIT_CONFIG_VALUE_3=dirty",
+   "GIT_CONFIG_KEY_4=log.showSignature", "GIT_CONFIG_VALUE_4=false", "GIT_PAGER=cat"]
 
 # whether this hub is on a copied log (core/copy.bend)
 def Proc.copy() -> IO(Bool):
