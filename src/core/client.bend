@@ -16596,12 +16596,21 @@ def Ui.act.z(tz: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.bd(String.eq(action, "board-list"), u, action, value)
 
+# a panel opened that holds only finished rows: their fold opens with it
+# (subs.bend's Subs.panel.ask)
+def Ui.subs.open(done: Bool, +u: Ui, +th: String) -> Ui:
+  match done:
+    case True{}:
+      Ui.info_set(u, FO.Fold.key("subs.done:" ++ th), "1")
+    case False{}:
+      u
+
 def Ui.act.subs(shut: Bool, open: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match shut open:
     case True{} _:
       Act{Ui.subs.shut(u, value), Nil{}}
     case False{} True{}:
-      Act{Ui.info_set(u, "subs:" ++ Ui.subs.thread(value, ""), "1"), Nil{}}
+      Act{Ui.subs.open(String.ends_with(value, "\tdone"), Ui.info_set(u, "subs:" ++ Ui.subs.thread(value, ""), "1"), Ui.subs.thread(value, "")), Nil{}}
     case False{} False{}:
       Ui.act.z(String.starts_with(action, "tz-"), u, action, value)
 
