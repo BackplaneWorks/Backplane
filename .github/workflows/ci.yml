@@ -40,6 +40,9 @@ jobs:
           python3 test/tools/release_assets_test.py
           python3 test/tools/kicad_library_header_test.py
           python3 test/tools/check_helpers_test.py
+          # KiStack: the tracked copy is the pinned one, and builds ship exactly it
+          python3 scripts/kistack.py verify
+          python3 test/tools/kistack_test.py
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
