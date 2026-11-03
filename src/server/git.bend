@@ -649,23 +649,28 @@ def Git.checkpoint.capture(+cwd: String, +thread_id: String, +n: Nat) -> IO(Stri
 
 # A diff the hub hands on is capped (Git.diff.cap): a file whose changes
 # pass Git.diff.per() bytes, and every file once the diff has passed
-# Git.diff.max(), keeps its header and says "\ Too big to show here: +N -M
+# Git.diff.max(), keeps its header (past Git.diff.files() files, none) and says "\ Too big to show here: +N -M
 # lines" in place of its lines (a hunk with no lines and a meta line, which
 # Diff.parse reads). A thread that regenerated STEP models had a 165 MB diff:
 # the hub grew to 12 GB putting it in one reply and stalled 27 s, and the
 # viewer could not have shown it anyway.
 def Git.diff.per() -> String:
-  "262144"
+  "65536"
 
 def Git.diff.max() -> String:
-  "2097152"
+  "131072"
+
+# (the files after these are counted in a last meta line: the page refuses
+# a frame over 256 KB, and 1788 files' heads alone were 270 KB)
+def Git.diff.files() -> String:
+  "150"
 
 def Git.diff.cap.awk() -> String:
-  "function flush() { if (!infile) return; if (big) printf \"%s@@ -0,0 +0,0 @@\\n\\\\ Too big to show here: +%d -%d lines\\n\", head, adds, dels; else { printf \"%s%s\", head, body; total += size }; infile = 0; inbody = 0; head = \"\"; body = \"\"; big = 0; adds = 0; dels = 0; size = 0 } /^diff --git / { flush(); infile = 1 } { if (!infile) { print; next }; if (!inbody && substr($0, 1, 3) == \"@@ \") inbody = 1; if (!inbody) { head = head $0 \"\\n\"; next }; c = substr($0, 1, 1); if (c == \"+\") adds++; else if (c == \"-\") dels++; if (big) next; size += length($0) + 1; if (size > per || total + size > max) { big = 1; body = \"\"; next }; body = body $0 \"\\n\" } END { flush() }"
+  "function flush() { if (!infile) return; if (big) printf \"%s@@ -0,0 +0,0 @@\\n\\\\ Too big to show here: +%d -%d lines\\n\", head, adds, dels; else { printf \"%s%s\", head, body; total += size }; infile = 0; inbody = 0; head = \"\"; body = \"\"; big = 0; adds = 0; dels = 0; size = 0 } /^diff --git / { flush(); files++; if (files > maxfiles) { extra++; skip = 1; next }; infile = 1 } { if (skip) next; if (!infile) { print; next }; if (!inbody && substr($0, 1, 3) == \"@@ \") inbody = 1; if (!inbody) { head = head $0 \"\\n\"; next }; c = substr($0, 1, 1); if (c == \"+\") adds++; else if (c == \"-\") dels++; if (big) next; size += length($0) + 1; if (size > per || total + size > max) { big = 1; body = \"\"; next }; body = body $0 \"\\n\" } END { flush(); if (extra) printf \"\\\\ %d more changed files not shown here\\n\", extra }"
 
 # git "$@" through the cap, with git's own exit status
 def Git.diff.cap.sh() -> String:
-  "bp_safe; t=$(mktemp) || exit 1; { git \"$@\"; echo $? > \"$t\"; } | LC_ALL=C awk -v per=" ++ Git.diff.per() ++ " -v max=" ++ Git.diff.max() ++ " '" ++ Git.diff.cap.awk() ++ "'; c=$(cat \"$t\"); rm -f \"$t\"; exit ${c:-1}"
+  "bp_safe; t=$(mktemp) || exit 1; { git \"$@\"; echo $? > \"$t\"; } | LC_ALL=C awk -v per=" ++ Git.diff.per() ++ " -v max=" ++ Git.diff.max() ++ " -v maxfiles=" ++ Git.diff.files() ++ " '" ++ Git.diff.cap.awk() ++ "'; c=$(cat \"$t\"); rm -f \"$t\"; exit ${c:-1}"
 
 def Git.run.capped(cwd: String, args: List<&2, String>) -> IO(P.Ran):
   P.Proc.run("sh", List.append(&2, String, ["-c", Git.safe.sh() ++ Git.diff.cap.sh(), "sh"], args), cwd)
