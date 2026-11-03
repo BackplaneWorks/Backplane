@@ -45,7 +45,7 @@ async function settleBrowserCallRegistry({drain,leases,acknowledgedRevisions},ta
 // Private main-only controller. Renderer intents contain owner+geometry only;
 // a service browser.prepare/call and its exact live grant authorize all work.
 function createDesktopBrowserController({electron,window,appSession,origin,version,token,
- guestManagerSha256,recorder,unknownState,executeCall,onState=()=>{},onTakeover=()=>{},
+ guestManagerSha256,recorder,unknownState,executeCall,onState=()=>{},onTakeover=()=>{},onRecover=()=>{},
  channelFactory=openBrowserChannel,managerFactory=createBrowserGuestManager,surfaceFactory=createBrowserSurface}){
  if(typeof executeCall!=='function'||!unknownState)throw new TypeError('Missing Browser action/UNKNOWN integration');
  const actualSha=createHash('sha256').update(fs.readFileSync(path.join(__dirname,'browser-guest.cjs'))).digest('hex');
@@ -67,7 +67,17 @@ function createDesktopBrowserController({electron,window,appSession,origin,versi
   if(Number.isFinite(deadline))expiry=setTimeout(()=>leases.expire(),Math.max(1,Math.ceil(deadline-performance.now())));
  }
  const leases=createBrowserLeases({onChange:reconcile});
- function fail(){if(closed)return;close();announce('error','Browser connection unavailable');}
+ function fail(){
+  if(closed)return;
+  // Remember only an idle selected document. UNKNOWN/active operations are
+  // never retried; a new controller gets fresh grants for URL restoration.
+  const restore=[];
+  for(const tab of tabs.values())if(tab.activeCall)unknownState.latch(tab.target.owner);
+  for(const tab of tabs.values())if(tab.active&&tab.offered&&tab.creationCompleted&&!unknownState.has(tab.target.owner)&&/^https?:\/\//.test(tab.url)){
+   restore.push({owner:tab.target.owner,url:tab.url});
+  }
+  onRecover(restore);close();announce('error','Browser unavailable · reconnecting automatically…');
+ }
  function write(op,payload,id=nonce()){
   if(closed||!channel||clientSequence>=MAX_SEQUENCE)throw Object.assign(new Error('Private Browser writer unavailable'),{dispatched:false});
   const message={v:1,op,id,clientSequence:++clientSequence,...(identity?identity:{}),payload};
@@ -143,14 +153,9 @@ function createDesktopBrowserController({electron,window,appSession,origin,versi
    const tab=tabs.get(key);if(!tab)return;
    if(event.type==='file-guard-lost'){
     tab.guardLost=true;manager.reconcileInput();surface.hide();
-    if(tab.activeCall){unknownState.latch(target.owner);fail();}
-    else if(tab.prep&&phaseCurrent(tab.prep)){
-     tab.prep.phase='failed';tab.prep.failureSent=true;write('browser.prepare-failed',{owner:target.owner,phase:'preparation',prepareId:tab.prep.prepareId,createId:tab.prep.createId});
-    }else if(tab.offered)void append(tab,async()=>{
-     const accepted=registryAck(await rpc('guest.guard-lost',{owner:target.owner,event}),target);
-     tab.revision=accepted;acknowledgedRevisions.set(target.owner,accepted);
-    });
-    return;
+    // A lost debugger/file guard is never reused. Retire this controller;
+    // automatic recovery creates a guarded document with fresh service grants.
+    fail();return;
    }
    if(tab.guardLost&&['recorder-ready','record','navigated','load-state'].includes(event.type))return;
    const cancelling=preparing.get(target.owner)?.tab===tab&&preparing.get(target.owner)?.phase==='cancelled';

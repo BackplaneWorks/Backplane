@@ -5540,7 +5540,6 @@ def View.chrome.tools(+lc: I.Loc, settings: Bool) -> D.Node:
   D.El{"div", "", [D.At{"class", "tb"}], [
     D.El{"button", "", [D.At{"type", "button"}, D.At{"data-improvements", ""}, D.At{"title", "Improvements"}, D.At{"aria-label", "Improvements"}], [WI.WIcon.svg("message-square", 15), D.Dom.span("improvements-label", "Improvements")]},
     WI.WIcon.button("find-open", "thin-search-open", "", "Search conversations · Ctrl+Shift+F", "search", 15, ""),
-    D.El{"button", "desktop-browser-global-reconnect", [D.At{"type", "button"}, D.At{"data-desktop-browser-reconnect", ""}, D.At{"data-desktop-browser-global-reconnect", ""}, D.At{"hidden", ""}, D.At{"style", "display:none"}, D.At{"title", "Reconnect Browser"}, D.At{"aria-label", "Reconnect Browser"}], [WI.WIcon.svg("link", 15)]},
     WI.WIcon.button(Bool.pick(String, settings, "gear on", "gear"), "flag", "settings", MSG.T.palette.settings(lc), "settings", 15, "")]}
 
 def View.chrome.bar(+lc: I.Loc, +settings: Bool, bv: BI.View, +u: U.Ui) -> D.Node:
