@@ -1544,6 +1544,10 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .thread-tree-row > .thread, .thread-tree-row > bp-memo { min-width:0; width:100%; }
 .thread-tree-row .thread { margin:0; min-width:0; }
 .thread-tree-row .thread .title { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+/* The active list: a title keeps most of its row and the project's name beside it gives way first (at 115 %
+   text the name's fixed room left titles ~9 characters) */
+.project.active .thread .title { min-width: 55%; }
+.project.active .thread .ago { flex: 0 1 auto; min-width: 0; }
 .thread-expander { display:grid; place-items:center; padding:0; width:24px; min-width:24px; min-height:32px; border:0; background:transparent; color:var(--dim); cursor:pointer; }
 .thread-expander:hover { background:var(--raise); color:var(--text); }
 .thread-expander:focus-visible, .thread-create button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
