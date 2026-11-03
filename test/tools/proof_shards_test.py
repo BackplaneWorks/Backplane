@@ -97,12 +97,18 @@ class Partitions(unittest.TestCase):
         with self.assertRaises(ValueError):
             shards.plan(self.root, self.folder, 2)
 
+    def test_swap_availability_cannot_mask_paging(self):
+        self.assertTrue(shards.no_swap_activity({'pswpin':3,'pswpout':7},{'pswpin':3,'pswpout':7}))
+        self.assertFalse(shards.no_swap_activity({'pswpin':3,'pswpout':7},{'pswpin':3,'pswpout':8}))
+        self.assertFalse(shards.no_swap_activity({},{}))
+
     def receipts(self):
         paths = []
         for s in self.manifest['shards']:
             p = self.root/(s['id']+'.json')
             p.write_text(json.dumps({'shard':s['id'],'manifest_sha256':shards.sha(shards.encoded(self.manifest)),
                 'state':'passed','exit':0,'output':'ALL PROOFS CHECK\n','seconds':1.0,'peak_rss_kib':100,
+                'swap_before':{'pswpin':0,'pswpout':0},'swap_after':{'pswpin':0,'pswpout':0},
                 'memory_max_bytes':1024**3,'inputs_unchanged':True,'actual_bend_flock_held':True}))
             paths.append(p)
         return paths
@@ -117,7 +123,7 @@ class Partitions(unittest.TestCase):
     def test_join_rejects_false_green_and_stale_source(self):
         for field, value in [('output','SOME PROOFS FAIL\nError: false theorem\n'),
                              ('manifest_sha256','old'),('inputs_unchanged',False),
-                             ('peak_rss_kib',float('nan')),('memory_max_bytes',20*1024**3)]:
+                             ('peak_rss_kib',float('nan')),('swap_after',{'pswpin':0,'pswpout':1}),('memory_max_bytes',20*1024**3)]:
             ps = self.receipts()
             r = json.loads(ps[0].read_text());r[field] = value;ps[0].write_text(json.dumps(r))
             with self.assertRaises(ValueError):

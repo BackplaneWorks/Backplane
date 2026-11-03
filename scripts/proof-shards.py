@@ -316,6 +316,17 @@ def worker_verify(root, folder, manifest, identity, shard):
             raise ValueError('worker generated proof changed: ' + name)
 
 
+def swap_counters():
+    values = {k:int(v) for k,v in (line.split() for line in Path('/proc/vmstat').read_text().splitlines()) if k in {'pswpin','pswpout'}}
+    if set(values) != {'pswpin','pswpout'} or any(v < 0 for v in values.values()):
+        raise ValueError('cannot establish swap activity counters')
+    return values
+
+
+def no_swap_activity(before, after):
+    return set(before) == set(after) == {'pswpin','pswpout'} and before == after
+
+
 def execute(root, folder, name, identity, output):
     manifest = json.loads((folder/'manifest.json').read_text())
     shard = next((s for s in manifest['shards'] if s['id'] == name), None)
@@ -335,8 +346,11 @@ def execute(root, folder, name, identity, output):
     isolated = os.environ.get('BACKPLANE_HEAVY_BOAT_SANDBOX') == '1' and os.environ.get('BACKPLANE_HEAVY_OFFLOADED') == '1'
     cap = min(int(maximum) if maximum != 'max' else physical['MemTotal'], physical['MemTotal'])
     if isolated:
-        if physical['MemTotal'] > 8*1024**3 or physical['SwapTotal'] != 0:
-            raise ValueError('proof worker needs a default-or-smaller isolated Boat VM without swap')
+        if physical['MemTotal'] > 8*1024**3:
+            raise ValueError('proof worker needs a default-or-smaller isolated Boat VM')
+        # Some fresh Boat VMs provision swap. Do not claim memory savings by
+        # paging: require unchanged kernel swap-in/out counters around execution.
+        # Host workers still require an actual no-swap cgroup below.
     elif maximum == 'max' or (cg/'memory.swap.max').read_text().strip() != '0':
         raise ValueError('host worker needs a finite no-swap cgroup from its admitted executor')
     if cap > 8*1024**3:
@@ -346,6 +360,7 @@ def execute(root, folder, name, identity, output):
                    'BUN_CONFIG_NO_ANALYTICS':'1', 'BUN_JSC_forceRAMSize':'4294967296',
                    'BUN_JSC_maxPerThreadStackUsage':'536870912'}
     worker_verify(root, folder, manifest, identity, shard)
+    swap_before = swap_counters()
     output.parent.mkdir(parents=True, exist_ok=True)
     marker = {'shard':name, 'manifest_sha256':identity, 'pid':os.getpid(),
               'pid_start':Path('/proc/self/stat').read_text().split(') ')[1].split()[19],
@@ -356,12 +371,14 @@ def execute(root, folder, name, identity, output):
     result = subprocess.run(['bend', str(folder/name/'PROOF.bend'), '--check-only'],
                             cwd=root, env=environment, text=True, capture_output=True)
     seconds = time.monotonic()-started
+    swap_after = swap_counters()
     worker_verify(root, folder, manifest, identity, shard)
     text = result.stdout+result.stderr
     receipt = {'shard':name, 'manifest_sha256':identity,
-               'state':'passed' if verdict(result.returncode, text) and resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss*1024 < 3*1024**3 else 'failed',
+               'state':'passed' if verdict(result.returncode, text) and resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss*1024 < 3*1024**3 and no_swap_activity(swap_before, swap_after) else 'failed',
                'exit':result.returncode, 'output':text, 'seconds':seconds,
                'peak_rss_kib':resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
+               'swap_before':swap_before, 'swap_after':swap_after, 'swap_total_bytes':physical['SwapTotal'],
                'memory_max_bytes':cap, 'cap_origin':'isolated Boat VM' if isolated else 'cgroup', 'aggregate_peak_bytes':int((cg/'memory.peak').read_text()) if (cg/'memory.peak').is_file() else None,
                'actual_bend_flock_held':True, 'executor_pid':os.getpid(), 'cgroup':group,
                'inputs_unchanged':True}
@@ -383,6 +400,7 @@ def join(manifest, folder, receipts):
             raise ValueError('duplicate/unknown shard receipt')
         if (r.get('manifest_sha256') != identity or r.get('state') != 'passed'
                 or not r.get('inputs_unchanged') or not r.get('actual_bend_flock_held')
+                or not no_swap_activity(r.get('swap_before', {}), r.get('swap_after', {}))
                 or not verdict(r.get('exit'), r.get('output', ''))
                 or not all(isinstance(r.get(k), (int, float)) and not isinstance(r[k], bool) and math.isfinite(r[k]) and r[k] > 0 for k in ['seconds', 'peak_rss_kib'])
                 or r.get('peak_rss_kib', 0)*1024 >= 3*1024**3
