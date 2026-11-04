@@ -2951,6 +2951,11 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone .ask-btns > button { min-height: 48px; padding: 6px 10px; font-size: calc(15px * var(--text-scale, 100) / 100); white-space: normal; overflow-wrap: anywhere; }
 .app.phone .ask-btns > button:only-child, .app.phone .ask-btns > button:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .app.phone .ask input, .app.phone .ask textarea { font-size: 16px; min-height: 44px; }
+/* the "project's folder is missing" card over the composer: its field and
+   button a thumb wide, the field over the button on a narrow screen */
+.app.phone .gone-move { flex-wrap: wrap; }
+.app.phone .gone-move .field { flex: 1 1 200px; min-height: 44px; font-size: 16px; }
+.app.phone .gone-move button { min-height: 44px; flex: 1 0 auto; }
 /* the composer: the field grows with the draft up to a third of the
    screen; under it one row of the model and the tools, Send at the thumb */
 .app.phone .composer { --composer-button: 44px; flex: none; gap: 6px; padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left)); background: var(--bg); }
