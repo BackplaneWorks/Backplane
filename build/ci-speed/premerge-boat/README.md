@@ -62,6 +62,18 @@ and exit recorded. BASE shape validation remains mandatory. External Git,
 Python, systemd and Boat installations remain environment trust dependencies;
 this procedural guard is not an independent execution attestation.
 
-The final suite has 12 controls, including checker/driver replacement,
+The final suite has 14 controls, including checker/driver replacement,
 conflicting ordinary files, altered guard sources, and mislabelled or absent
 acknowledgements. No final schema3 qualification has run yet.
+
+Residual trust root: this version still executes the dispatcher and worker
+from the candidate checkout. Its matrix cannot authenticate itself against a
+candidate that rewrites the matrix logic. Reviewers must independently diff
+all three guard files against the base before trusting a result, for ordinary
+PRs too. A future trusted-base dispatcher accepting a separate PR head as data
+would remove this procedural dependency; that mode is not implemented here.
+An acknowledgement when the files match is refused, so it cannot be ambient.
+On a changed guard, failure prints the matrix and exact-head flag. This first
+guard PR can qualify only as `passed-reviewed-guard-change`.
+
+History remains blobless and non-shallow as required by repository policy.

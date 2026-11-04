@@ -112,7 +112,9 @@ def guard_files(repo, base, head):
 
 
 def guard_authorized(head, matched, acknowledgement):
-    return matched or (isinstance(acknowledgement, str) and acknowledgement == head and HEX40.fullmatch(head) is not None)
+    if matched:
+        return acknowledgement == ''
+    return isinstance(acknowledgement, str) and acknowledgement == head and HEX40.fullmatch(head) is not None
 
 
 def guard_matrix_ok(matrix, matched):
@@ -174,7 +176,11 @@ def worker(head, base, expected, acknowledgement):
             report.update({'base': base_oid, 'guard_files': matrix, 'guard_files_match_base': matched,
                            'guard_change_ack': acknowledgement})
             if not guard_authorized(head, matched, acknowledgement):
-                raise ValueError('guard files differ from base; explicit reviewed exact-head acknowledgement required')
+                if matched:
+                    raise ValueError('guard sources match base; remove the needless guard-change acknowledgement')
+                print('pre-merge guard source matrix: '+json.dumps(matrix, sort_keys=True), flush=True)
+                raise ValueError('guard files differ from base; after reviewing those changes use '
+                                 '--allow-reviewed-guard-change '+head)
             shape_path, driver_sha = trusted_verifiers(repo, base_oid, temp/'trusted')
             report.update({'verification_base': base_oid, 'merge_driver_sha256': driver_sha})
             # Dedicated guard controls also run only here, under the same cap.
