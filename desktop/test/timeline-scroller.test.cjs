@@ -267,3 +267,29 @@ test('timeline DOM effects preserve nodes, measure, forward commands and detach'
   assert.deepEqual(destroyed, { extraCalls: 0, wrappers: 0 });
   assert.deepEqual(errors, []);
 });
+
+test('a key met twice (one tool call twice in a log) draws both rows instead of throwing', async t => {
+  const source = fs.readFileSync(process.env.TIMELINE_SCROLLER_SOURCE || path.resolve(__dirname, '../../src/web/timeline-scroller.js'));
+  const server = http.createServer((req, res) => {
+    res.setHeader('content-type', req.url.endsWith('.js') ? 'text/javascript' : 'text/html');
+    res.end(req.url.endsWith('.js') ? source : '<style>#timeline{height:300px;width:400px;overflow:auto;display:block}</style><div id="timeline"></div>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));t.after(() => new Promise(resolve => server.close(resolve)));
+  const browser=await chromium.launch({executablePath:process.env.BACKPLANE_CHROME||'/home/h/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome',headless:true});t.after(()=>browser.close());
+  const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);
+  const got = await page.evaluate(async()=>{
+    const {TimelineScroller}=await import('/timeline-scroller.js');
+    const list=new TimelineScroller(document.getElementById('timeline'),{
+      key:r=>r.key,
+      create(r){const e=document.createElement('div');e.textContent=r.text;return e;},
+      patch(e,r){e.textContent=r.text;return e;},
+      plan(input){let start=0;const items=input.keys.map((key,index)=>{const item={key,index,start,size:30};start+=30;return item;});return{items,visible:items,total:start,top:0,view:300,valid:[0,0],atEnd:true,anchor:input.keys[0],offset:0};}
+    });
+    try { list.update([{key:'m1',text:'one'},{key:'fold:t9',text:'run A'},{key:'fold:t9',text:'run B'}]).mount(); }
+    catch (e) { return { error: String(e) }; }
+    return { keys: list._keys, text: list.el.innerText };
+  });
+  assert.equal(got.error, undefined, 'no throw');
+  assert.deepEqual(got.keys, ['m1', 'fold:t9', 'fold:t9\u001f1'], 'the first keeps its key, the second is told apart');
+  assert.match(got.text, /run A[\s\S]*run B/, 'both runs drawn');
+});
