@@ -12363,7 +12363,12 @@ law MailProof.keeps:
 def MailProof.keeps(on, st, s, now, o, to, text, msg):
   match on st:
     case False{} _: {==}
-    case True{} H.Step{cs, os}: MailProof.append_nil(cs)
+    case True{} H.Step{cs, os}:
+      # Step.cat selects its empty-step fast paths before appending changes.
+      match cs os:
+        case Nil{} Nil{}: {==}
+        case Nil{} _ <> _: {==}
+        case h <> t _: MailProof.append_nil(h <> t)
 
 law MailProof.pending_one:
   for missing: Bool
