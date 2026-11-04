@@ -1,0 +1,18 @@
+{
+  "tools": {
+    "node": {
+      "path": "/home/user/.local/backplane-ci/bin/node",
+      "sha256": "d95de52ccb76fb2c5775bf176f29f3025e4b19352c092aad51ce5d930717359f",
+      "version": "v24.13.1"
+    },
+    "bun": {
+      "path": "/home/user/.local/backplane-ci/bin/bun",
+      "sha256": "795b37d736a88d746b0e8bb5fcde92bf29bd0f9ac6a1dd1a950fd37440cf5822",
+      "version": "1.3.10"
+    }
+  },
+  "python": "3.12.3 (main, Jun 19 2026, 12:46:00) [GCC 13.3.0]",
+  "hostname": "box-node-bc1898f11bb92b6b",
+  "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+  "concurrent_load": "Runtime-only hub-latency lock, serial independent component. No compiler in this Boat VM; author/build jobs may run in other Boat VMs; physical host placement unknown."
+}

@@ -4,6 +4,32 @@ Release status: **blocked**. These receipts support functional changes after
 the exact-c25c9959 postmerge REQUEST CHANGES. They are not release acceptance,
 a full-hub latency result, or permission to merge this follow-up.
 
+Lane A subsequently approved the scoped static/component corrections on
+exact source `cc5d2e196c4cdd283209fc2f9387c93b0e657f26`, tree
+`d9bca91fe9c01b810a9aa701efde9bb7eda49947`. Its byte-identical
+[verdict](independent-3961313/REVIEW-935-cc5d2e19.md), raw results, incremental
+samples, audit and exact probe packet are preserved in
+[independent-3961313](independent-3961313/). See also the
+[independent review comment](https://github.com/BackplaneWorks/Backplane/pull/935#issuecomment-6636717127).
+The later receipt integration changes documentation/artifacts only; the 27
+source hashes stay bound to the functional and independent receipts.
+
+The full independent v2 job `j20261104165509-3961313` passed with 32 paired
+idle/install trials per tool, variant and phase. Both real TCP probes issued
+and completed inside each measured download/unpack/cleanup phase. The worker
+used peak `575176704` bytes under max `3699998720`, controller peak `9973760`
+under max `536870912`, swap 0 and no OOM events; sandbox deletion was verified.
+Largest observed median increases were during KiCad unpack: hello +0.268 ms,
+256 KiB response +0.282 ms. These are component observations, with the full-hub
+boundaries and canonical proof still unqualified. The verdict retains the
+initial independent timeout as FAIL/INCOMPLETE and excludes the one-pair
+diagnostic from latency evidence.
+
+The separate dispatch-only source continuation `d31603680` has not been
+integrated here and is not qualified by these receipts. RC0142's explicit
+exclusion of #932 remains separate; this approval does not alter its source
+composition or authorize merging/shipping the held feature.
+
 The tested source is based on merged #932, commit
 `397cb47edeb9a5eb4f3eabf44b3be7d56b936591`. The accompanying source-sha256.json
 matches the passing Boat manifest for every listed source file. Receipt-only
