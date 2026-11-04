@@ -575,6 +575,57 @@ def plot_stats(tag: String, size: String, waited: String, delayed: Bool) -> Stri
 def viewer_mention(tag: String) -> String:
   MSG.T.viewer.mention(I.I18n.of_tag(tag))
 
+# its title: what was tapped, by its kind in the plot's info ("pad" and
+# its number, "part" and its ref...), "" for a kind the catalog lacks
+def viewer_item_k(+lc: I.Loc, +kind: String, +arg: String) -> String:
+  match kind:
+    case "part": MSG.T.viewer.card.part(lc, arg)
+    case "pad": MSG.T.viewer.item.pad(lc, arg)
+    case "pin": MSG.T.viewer.item.pin(lc, arg)
+    case "via": MSG.T.viewer.item.via(lc)
+    case "track": MSG.T.viewer.item.track(lc)
+    case "footprint": MSG.T.viewer.item.footprint(lc)
+    case "zone": MSG.T.viewer.item.zone(lc)
+    case "symbol": MSG.T.viewer.item.symbol(lc)
+    case "label": MSG.T.viewer.item.label(lc)
+    case "global": MSG.T.viewer.item.globallabel(lc)
+    case "hier": MSG.T.viewer.item.hierlabel(lc)
+    case "sheet": MSG.T.viewer.item.sheet(lc)
+    case _: ""
+
+def viewer_item(+tag: String, +kind: String, +arg: String) -> String:
+  viewer_item_k(I.I18n.of_tag(tag), kind, arg)
+
+# and its rows' names (an info field, or a saved component's), "" for one
+# the catalog lacks; "@top" / "@bottom" the side's values
+def viewer_field_k(+lc: I.Loc, +name: String) -> String:
+  match name:
+    case "net": MSG.T.viewer.field.net(lc)
+    case "layer": MSG.T.viewer.field.layer(lc)
+    case "width": MSG.T.viewer.field.width(lc)
+    case "ref": MSG.T.viewer.field.ref(lc)
+    case "value": MSG.T.viewer.field.value(lc)
+    case "footprint": MSG.T.viewer.field.footprint(lc)
+    case "size": MSG.T.viewer.field.size(lc)
+    case "drill": MSG.T.viewer.field.drill(lc)
+    case "type": MSG.T.viewer.field.ktype(lc)
+    case "shape": MSG.T.viewer.field.shape(lc)
+    case "name": MSG.T.viewer.field.name(lc)
+    case "symbol": MSG.T.viewer.field.symbol(lc)
+    case "lib": MSG.T.viewer.field.lib(lc)
+    case "text": MSG.T.viewer.field.text(lc)
+    case "sheet": MSG.T.viewer.field.sheet(lc)
+    case "file": MSG.T.viewer.field.file(lc)
+    case "netclass": MSG.T.viewer.field.netclass(lc)
+    case "side": MSG.T.viewer.field.side(lc)
+    case "pads": MSG.T.viewer.field.pads(lc)
+    case "@top": MSG.T.viewer.side.top(lc)
+    case "@bottom": MSG.T.viewer.side.bottom(lc)
+    case _: ""
+
+def viewer_field(+tag: String, +name: String) -> String:
+  viewer_field_k(I.I18n.of_tag(tag), name)
+
 # and its other one, the view that shows it too ("schematic" or "board")
 def viewer_kind(+tag: String, +kind: String) -> String:
   Bool.pick(String, String.eq(kind, "schematic"), MSG.T.viewer.schematic(I.I18n.of_tag(tag)), MSG.T.viewer.board(I.I18n.of_tag(tag)))

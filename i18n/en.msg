@@ -774,6 +774,11 @@ viewer.field.text = text
 viewer.field.sheet = sheet
 viewer.field.file = file
 viewer.field.netclass = netclass
+viewer.card.part = part {ref}
+viewer.field.side = side
+viewer.field.pads = pads
+viewer.side.top = top
+viewer.side.bottom = bottom
 
 # ---- i18n web phone ----
 web.viewer.layers.active = Layers · {name}
