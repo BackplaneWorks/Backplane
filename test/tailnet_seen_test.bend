@@ -28,6 +28,16 @@ def me(m: TN.Machine) -> String:
     case TN.Machine{n, ip, _}:
       n ++ "=" ++ ip
 
+def nats(ts: List<&2, Nat>) -> String:
+  match ts:
+    case Nil{}:
+      ""
+    case t <> rest:
+      Nat.show(t) ++ "|" ++ nats(rest)
+
+def yes(b: Bool) -> String:
+  Bool.pick(String, b, "yes", "no")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("on the tailnet: the owner's online machines are asked", ips(TN.Tailnet.asked(True{}, status())), "desk=100.2.2.2|box=100.3.3.3|")
@@ -36,3 +46,12 @@ def main() -> IO(Unit):
     C.Check.str("--no-tailscale: self has no tailnet address (Machines.me uses loopback)", me(TN.Tailnet.self(TN.Tailnet.seen(False{}, status()))), "=")
     C.Check.str("--no-tailscale: no MagicDNS domain", TN.Tailnet.domain(TN.Tailnet.seen(False{}, status())), "")
     C.Check.str("on the tailnet: self and domain as before", me(TN.Tailnet.self(TN.Tailnet.seen(True{}, status()))) ++ " " ++ TN.Tailnet.domain(TN.Tailnet.seen(True{}, status())), "laptop=100.1.1.1 tail1.ts.net")
+    # pairing's schedule (TN.Pairing.plan, run by server.bend's
+    # Machines.loop): the first ask right after the first list, asks a
+    # minute apart however late finding the machines is
+    C.Check.str("the first ask follows the first list at once", nats(TN.Tailnet.asks([580n], 0n)), "580|60580|")
+    C.Check.str("a slow first list (70 s) moves every ask", nats(TN.Tailnet.asks([70000n, 3000n], 0n)), "70000|130000|193000|253000|")
+    C.Check.str("a list found just before the old minute tick never doubles an ask", nats(TN.Tailnet.asks([59999n, 0n], 0n)), "59999|119999|179999|239999|")
+    C.Check.str("asks stay a minute apart, any delays", yes(TN.Tailnet.apart(TN.Tailnet.asks([59999n, 13000n, 0n, 125000n, 1n, 3003n], 0n), 60000n)), "yes")
+    C.Check.str("and the check sees a pair closer than that", yes(TN.Tailnet.apart([0n, 60000n, 119999n], 60000n)), "no")
+    C.Check.str("only the plan asks: two asks, two waits of half a period each, per find", nats(TN.Tailnet.asks([0n], 0n)), "0|60000|")
