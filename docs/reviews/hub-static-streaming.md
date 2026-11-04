@@ -36,7 +36,10 @@ swap and peak counters are retained in
 [the receipts](../../extra/hub-static-qualification/SUMMARY.json). Compiler RSS
 peaked at 146,024 KiB; the controller peaked at 473,956,352 bytes. OOM, swap
 activity and memory-limit event counters stayed zero. The policy relocation and five server
-delegates receive a separate source-only audit.
+delegates receive a separate source-only audit. Fresh merged law shape and
+exact preservation of all scoped inputs/delegates passed in Boat job
+`j20261104025751-182681`, under 512 MiB/no swap, with no new proof execution.
+The pre-merge scope peaked at 22,355,968 bytes, with no limit/OOM events.
 
 This does not qualify the full server/application closure, execute a packaged
 hub or establish startup, memory, CPU or p99 improvements. Those still require
