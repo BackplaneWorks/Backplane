@@ -168,3 +168,16 @@ test('a one-finger pan flicked off coasts to a stop, and a finger down stops it'
   h.fire('pointerup', { pointerType: 'mouse', timeStamp: 2090, clientX: 200, clientY: 100 });
   assert.equal(h.frames.filter(Boolean).length, n, 'a mouse drag does not coast');
 });
+
+test("a touch's system long press (Android's, also in a slow drag) never comments; a mouse right click does", () => {
+  const h = harness();
+  h.view.fit();
+  h.fire('pointerdown', { pointerType: 'touch', timeStamp: 1000, clientX: 100, clientY: 100 });
+  h.fire('pointermove', { pointerType: 'touch', timeStamp: 1100, clientX: 140, clientY: 100 });
+  h.fire('contextmenu', { clientX: 140, clientY: 100 });
+  assert.equal(h.places.length, 0, 'the system long press of a dragging finger is ignored');
+  h.fire('pointerup', { pointerType: 'touch', timeStamp: 1600, clientX: 140, clientY: 100 });
+  h.fire('pointerdown', { pointerType: 'mouse', button: 2, timeStamp: 3000 });
+  h.fire('contextmenu');
+  assert.equal(h.places.length, 1, 'a right click asks to comment there');
+});

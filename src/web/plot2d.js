@@ -428,12 +428,15 @@ class View {
       // a finger held still is a right click: comment there (not every
       // touch browser sends contextmenu for it; iOS does not)
       clearTimeout(this.pressing);
+      this.pointerKind = e.pointerType;
       if (this.tap && e.pointerType === "touch") {
-        const at = this.tap;
+        const at = this.tap, id = e.pointerId;
         // (a busy page runs the timer late with the lift still queued: let
         // queued input go first, as phone-shell.js's long press does)
         this.pressing = setTimeout(() => { this.pressing = setTimeout(() => {
-          if (this.tap !== at || this.pts.size !== 1) return;
+          // (still down, and still where it was: a slow drag is no press)
+          const now = this.pts.get(id);
+          if (this.tap !== at || this.pts.size !== 1 || !now || Math.hypot(now.x - at.x, now.y - at.y) > 8) return;
           this.tap = null;
           this.longPressed = performance.now();
           navigator.vibrate?.(10);
@@ -518,6 +521,7 @@ class View {
     });
     on("pointerup", up);
     on("pointercancel", up);
+    on("lostpointercapture", () => clearTimeout(this.pressing));
     // Use the browser's click count, including its platform double-click
     // interval. A second click restores the probe that preceded the gesture.
     on("click", e => {
@@ -560,8 +564,9 @@ class View {
     // coordinates); the page decides what to do (host.js)
     on("contextmenu", (e) => {
       e.preventDefault();
-      // (a long press already answered: pointerdown)
-      if (this.longPressed !== undefined && performance.now() - this.longPressed < 1500) return;
+      // (a finger's long press is the timer's, pointerdown: the system's own
+      // long press, which Android's WebView also sends in a slow drag, is not)
+      if (this.pointerKind === "touch") return;
       this.placeAt(e.clientX, e.clientY);
     });
     // A schematic opens and resizes to its whole sheet. Boards retain the
