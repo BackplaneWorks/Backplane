@@ -2569,7 +2569,9 @@ function earlierCheck(tl) {
     // boundary even if its geometry did not produce another scroll event.
     const list = timelineList(tl);if (list) timelineChanged(list);
   } else entryHistory.cancel();
-  historyFillMore(tl, thin.hasAhead("older") && (tl.scrollHeight <= tl.clientHeight + 10 || !historyHasMessage(tl)));
+  // (a timeline with no box, e.g. behind the phone's full-screen viewer, has
+  // no range either: its fixed button would sit over that screen's header)
+  historyFillMore(tl, thin.hasAhead("older") && tl.clientHeight > 0 && (tl.scrollHeight <= tl.clientHeight + 10 || !historyHasMessage(tl)));
   if (historyDirection !== "older" || historyOlderDemand <= 0) return;
   const gap = historyGap("older"), runway = historyRunway(tl), two = historyOlderDemand > 1 && runway > tl.clientHeight * 3;
   if (thin.paging ? !two || !!thin.pagingNext : earlierAsked) return;
