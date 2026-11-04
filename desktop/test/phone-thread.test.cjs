@@ -2,11 +2,11 @@ const { test } = require('node:test'), assert = require('node:assert/strict');
 
 // A stand-in page: html carries the phone shell's class or not; listeners
 // and one ResizeObserver are captured so a test can drive them.
-const page = (phone) => {
-  const on = {}, observers = [];
+const page = (phone, mic = true) => {
+  const on = {}, observers = [], classes = new Set(phone ? ['phone'] : []);
   const timeline = { id: 'timeline', scrollTop: 0, scrollHeight: 2000, clientHeight: 500 };
   const doc = {
-    documentElement: { classList: { contains: c => phone && c === 'phone' } },
+    documentElement: { classList: { contains: c => classes.has(c), add: c => classes.add(c) } },
     activeElement: null,
     getElementById: id => id === 'timeline' ? timeline : null,
     addEventListener: (type, f) => { (on[type] ||= []).push(f); },
@@ -14,7 +14,7 @@ const page = (phone) => {
   class RO { constructor(f) { this.f = f; observers.push(this); } observe(t) { this.t = t; } disconnect() { this.t = null; } }
   const fire = (type, target = timeline) => (on[type] || []).forEach(f => f({ target }));
   const resize = h => { timeline.clientHeight = h; for (const o of observers) if (o.t) o.f([{ target: o.t }]); };
-  return { doc, win: { ResizeObserver: RO }, timeline, fire, resize };
+  return { doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined } }, timeline, fire, resize, classes };
 };
 
 test('Return in the draft is a new line on a phone only, Send still sends', async () => {
@@ -44,4 +44,13 @@ test('the keyboard keeps the end in view on a phone, and the bottom edge elsewhe
   const d = page(false);
   installPhoneThread({ document: d.doc, window: d.win });
   d.timeline.scrollTop = 1500; d.fire('touchstart'); d.resize(160); assert.equal(d.timeline.scrollTop, 1500);
+});
+
+test('a page that cannot record says so (the composer hides its mic on a phone)', async () => {
+  const { installPhoneThread } = await import('../../src/web/phone-thread.js');
+  const plain = page(true, false), secure = page(true, true);
+  installPhoneThread({ document: plain.doc, window: plain.win });
+  installPhoneThread({ document: secure.doc, window: secure.win });
+  assert.equal(plain.classes.has('ph-nomic'), true);
+  assert.equal(secure.classes.has('ph-nomic'), false);
 });
