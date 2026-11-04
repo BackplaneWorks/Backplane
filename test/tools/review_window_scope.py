@@ -56,7 +56,7 @@ def main():
     tools = importlib.util.module_from_spec(phase)
     phase.loader.exec_module(tools)
     tools.tools()
-    run(['bun', 'test/tools/review_window_test.cjs'], OUT / 'bun-boundary.log')
+    run(['bun', 'test', './test/tools/review_window_test.cjs'], OUT / 'bun-boundary.log')
     run([PYTHON, '-IB', 'scripts/laws-shape.py'], OUT / 'laws-shape.log')
     spec = importlib.util.spec_from_file_location('proof_slice', ROOT / 'scripts/proof-slice.py')
     module = importlib.util.module_from_spec(spec)

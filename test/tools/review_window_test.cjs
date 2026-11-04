@@ -68,7 +68,7 @@ test('indexed thread/seq windows preserve every column and ascending seq rather 
     for (;;) { const p=f.page(at,305); assert.equal(p.error,'');const xs=rows(p);assert.ok(xs.length<=128);got.push(...xs);pages++; if(p.done.$==='True')break;assert.ok(p.next>at);at=p.next; }
     assert.equal(pages,3);assert.deepEqual(got,expected);
     const plan=f.db.query("EXPLAIN QUERY PLAN SELECT seq FROM entry INDEXED BY entry_thread WHERE thread='a' AND kind='act' AND role='review' AND seq>0 AND seq<=305 ORDER BY seq LIMIT 129").values();
-    assert.match(JSON.stringify(plan),/entry_thread.*thread=.*seq>/);
+    assert.match(plan.flat().map(String).join(' '),/entry_thread.*thread=.*seq>/);
   } finally { f.close(); }
 });
 
