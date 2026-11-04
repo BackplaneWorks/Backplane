@@ -302,6 +302,10 @@ import ./src/core/landing.bend as LAND
 
 import ./src/server/cacheio.bend as CACHEIO
 
+import ./src/server/static-http.bend as STATICHTTP
+
+import ./src/server/host.bend as STATICIO
+
 # Lemmas
 # ------
 
@@ -15845,3 +15849,17 @@ def Laws.cache_effect_slots(): {==}
 def Laws.cache_effect_budget(): {==}
 
 def Laws.cache_effect_global_budget(): {==}
+
+def Laws.static_effect_coding(): {==}
+
+def Laws.static_effect_piece(): {==}
+
+def Laws.static_http_paths(): {==}
+
+def Laws.static_http_landing_aliases(): {==}
+
+def Laws.static_http_cached_chunks(): {==}
+
+def Laws.static_http_fresh_pages(): {==}
+
+def Laws.static_http_frame_policy(): {==}

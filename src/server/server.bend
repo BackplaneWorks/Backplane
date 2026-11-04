@@ -1,5 +1,6 @@
 import ./wire.bend as WIRE
 import ./adopt-plan.bend as ADOPTPLAN
+import ./static-http.bend as SHTTP
 import ./desktop-info.bend as DESKINFO
 import ./pairing-info.bend as PAIRINFO
 import ./watch-plan.bend as WATCHPLAN
@@ -1736,15 +1737,15 @@ def Conn.ws(s: Socket, key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(
     Conn.ws.dup(r, rest, id, inbox, since, origin, mobile)
 
 def Conn.safe(+p: String) -> Bool:
-  Bool.and(Bool.not(String.contains(p, "..")), String.starts_with(p, "/"))
+  SHTTP.Static.safe(p)
 
 def Conn.file(+p: String) -> String:
-  Bool.pick(String, Bool.or(String.eq(p, "/"), Bool.or(String.eq(p, "/pair"), String.eq(p, "/devices"))), "/index.html", p)
+  SHTTP.Static.file(p)
 
 # hashed bundle chunks never change under their name; the page and the
 # service worker are checked every time
 def Conn.cache(+path: String) -> String:
-  Bool.pick(String, String.starts_with(path, "/chunk-"), "public, max-age=31536000, immutable", "no-cache")
+  SHTTP.Static.cache(path)
 
 # One authentication boundary for browser, native, upload and MCP requests.
 def Conn.allowed(+hs: List<&2, W.Header>, +path: String, +token: String) -> Bool:
@@ -6102,7 +6103,7 @@ type Found is Data:
 # the app's pages are never framed by another page (clickjacking): the
 # PDFs the Files tab frames itself (/img) are not pages
 def Conn.frames(+path: String) -> String:
-  Bool.pick(String, String.starts_with(W.Http.ctype(path), "text/html"), "X-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n", "")
+  SHTTP.Static.frames(path)
 
 def Conn.served(s: Socket, +path: String, +gz: Bool, bs: List<&2, U32>) -> IO(Unit):
   match bs:
@@ -6119,12 +6120,8 @@ def Conn.gz(bs: List<&2, U32>, s: Socket, +web: String, +path: String) -> IO(Uni
     case b <> t:
       Conn.served(s, path, True{}, b <> t)
 
-def Conn.static.go(gz: Bool, s: Socket, +web: String, +path: String) -> IO(Unit):
-  match gz:
-    case True{}:
-      IO.bind(List<&2, U32>, Unit, Files.read(web ++ path ++ ".gz"), bs => Conn.gz(bs, s, web, path))
-    case False{}:
-      IO.bind(List<&2, U32>, Unit, Files.read(web ++ path), bs => Conn.served(s, path, False{}, bs))
+def Conn.static.go(+gz: Bool, s: Socket, +web: String, +path: String) -> IO(Unit):
+  SHTTP.Static.send(gz, s, web, path)
 
 def Conn.static.k(ok: Bool, s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
   match ok:
