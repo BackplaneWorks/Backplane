@@ -1077,8 +1077,10 @@ def Pv.args.back(xs: List<&2, String>) -> List<String>:
     case x <> t:
       x <> Pv.args.back(t)
 
-def Pv.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
-  match xs:
+# Pv.main.k matches a copy of xs: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def Pv.main.k.by(key: List<&2, String>, xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
+  match key:
     case "--plot" <> k <> f <> i <> _:
       Pv.child(Maybe.default(&2, U32, U32.read(k), 0), f, i)
     case "--plot" <> k <> f <> _:
@@ -1087,8 +1089,11 @@ def Pv.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
       Pv.child.tree(f)
     case "--plot-info" <> f <> sg <> ix <> _:
       Pv.child.info(f, Maybe.default(&2, U32, U32.read(sg), 0), Maybe.default(&2, Nat, Nat.read(ix), 0n))
-    case +a:
-      go(Pv.args.back(a))
+    case _:
+      go(Pv.args.back(xs))
+
+def Pv.main.k(+xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
+  Pv.main.k.by(xs, xs, go)
 
 # the program's arguments: a --plot child's, or the program's own (go)
 def Pv.main(xs: List<String>, go: List<String> -> IO(Unit)) -> IO(Unit):

@@ -12884,12 +12884,17 @@ def Hub.presentation.timeout(mode: String, +inbox: Chan(Msg), client: U32, gen: 
 def Hub.presentation.greeting(+mode: String, gen: U32) -> String:
   J.Json.show(J.Json.obj([J.KV{"t", J.Str{mode}}, J.KV{"protocol", J.Json.nat(1n)}, J.KV{"generation", J.Str{U32.show(gen)}}]))
 
-def Hub.presentation.first(mode: String, gen: U32, epoch: String) -> String:
-  match mode:
+# Hub.presentation.first matches a copy of mode: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def Hub.presentation.first.by(key: String, mode: String, gen: U32, epoch: String) -> String:
+  match key:
     case "view-mobile": J.Json.show(TVW.Wire.greeting("mobile", U32.show(gen), epoch))
     case "view-web": J.Json.show(TVW.Wire.greeting("web", U32.show(gen), epoch))
     case "view-invalid": J.Json.show(J.Json.obj([J.KV{"t", J.Str{"view.error"}}, J.KV{"error", TVW.Wire.error("INVALID_REQUEST")}]))
     case _: Hub.presentation.greeting(mode, gen)
+
+def Hub.presentation.first(+mode: String, gen: U32, epoch: String) -> String:
+  Hub.presentation.first.by(mode, mode, gen, epoch)
 
 def Hub.mobile.join(h: Hub, +client: U32, out: Chan(WIRE.Wire), since: Nat, origin: String, +gen: U32, sock: U32, +mode: String) -> IO(Hub):
   match h:
