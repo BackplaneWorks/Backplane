@@ -11,8 +11,8 @@
   "zipSHA256": "55f84153c3ba6f9a8e7e005558a02b9c2fa72dd5deeed0211f908336c830870c",
   "archiveRoot": "backplane-kicad-windows-x86_64-10.99.0-bp.6",
   "cli": "bin/kicad-cli.exe",
-  "runtimeCliSHA256": null,
-  "runtimeCliSHA256State": "UNMEASURED: hash the actual CLI member after archive SHA256 verification",
+  "runtimeCliSHA256": "23b81e721e0a38ec8c277837badf4507e5518c4f5ddc9f89ec3d83a7a9ae2d43",
+  "runtimeCliSHA256State": "Measured from the actual SHA256-verified vendor archive on Windows in GitHub run 41889805718; CLI execution not yet checked",
   "nativeWindowsChecked": false,
   "applicationPackageReceived": true,
   "applicationPackageSHA256": "de613310949b72b0a70bebf9a07aff021cdea98f894856fabdc42134d678cd22"
