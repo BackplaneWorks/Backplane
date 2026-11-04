@@ -27,6 +27,7 @@ def main() -> IO(Unit):
     C.Check.str("no empty address", CF.Cef.url("  "), "")
     C.Check.str("browser owner", U.Browse.owner(ui()), "t1")
     C.Check.str("new tab targets thread", sent(U.Ui.act(ui(), "br-new", "")), "{\"id\":0,\"m\":\"bots.browser\",\"p\":{\"bot\":\"t1\",\"op\":\"toolbar\",\"command\":\"tabs\",\"new\":true}}")
+    C.Check.str("new tab opens Google on every client", J.Json.show(CF.Cef.toolbar.tab(True{}, J.Null{})), "{\"new\":\"https://www.google.com/\"}")
     C.Check.str("stable select id", sent(U.Ui.act(ui(), "br-select", "tab-42")), "{\"id\":0,\"m\":\"bots.browser\",\"p\":{\"bot\":\"t1\",\"op\":\"toolbar\",\"command\":\"tabs\",\"selectId\":\"tab-42\"}}")
     C.Check.str("current URL displayed", U.Browse.address(U.Ui.info_set(ui(), "browser.tabs.t1", "{\"url\":\"https://example.com\",\"tabs\":[]}"), "t1"), "https://example.com")
     C.Check.str("address draft preserves empty edit", U.Browse.address(U.Ui.scratch_set(U.Ui.info_set(ui(), "browser.tabs.t1", "{\"url\":\"https://example.com\"}"), "@browse.edit", "brurl:t1"), "t1"), "")

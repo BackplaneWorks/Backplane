@@ -12083,6 +12083,10 @@ law browser_toolbar_no_eval:
 
 law browser_toolbar_tabs_allowed:
   {CEF.Cef.toolbar.allowed("tabs") == True{} : Bool}
+
+law browser_new_tab_google:
+  for +input: J.Json
+  {J.Json.get_str(CEF.Cef.toolbar.tab(True{}, input), "new", "") == "https://www.google.com/" : String}
 # --- end browser controls ---
 # Schematic refresh compares revisions even when size is unchanged.
 law refresh_revision_changed:

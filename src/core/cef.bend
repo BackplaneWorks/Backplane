@@ -475,6 +475,9 @@ def Cef.url(+s: String) -> String:
 def Cef.toolbar.allowed(+op: String) -> Bool:
   Bool.or(Bool.or(String.eq(op, "navigate"), String.eq(op, "back")), Bool.or(Bool.or(String.eq(op, "forward"), String.eq(op, "reload")), String.eq(op, "tabs")))
 
+def Cef.home_url() -> String:
+  "https://www.google.com/"
+
 def Cef.toolbar.tab.close(+o: J.Json) -> J.Json:
   J.Json.obj([J.KV{"closeId", J.Str{J.Json.get_str(o, "closeId", "")}}])
 
@@ -485,7 +488,7 @@ def Cef.toolbar.tab.select(has: Bool, +o: J.Json) -> J.Json:
 
 def Cef.toolbar.tab(new: Bool, +o: J.Json) -> J.Json:
   match new:
-    case True{}: J.Json.obj([J.KV{"new", J.Flag{True{}}}])
+    case True{}: J.Json.obj([J.KV{"new", J.Str{Cef.home_url()}}])
     case False{}: Cef.toolbar.tab.select(Bool.not(String.is_empty(J.Json.get_str(o, "selectId", ""))), o)
 
 def Cef.toolbar.args.k(nav: Bool, tabs: Bool, +o: J.Json) -> J.Json:
