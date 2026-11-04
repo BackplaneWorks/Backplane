@@ -20,6 +20,7 @@
 // it probes (the canvas's data-probe comes back); the probed part or net is
 // drawn over the rest, which dims.
 
+import { softFocus } from "./touch-focus.js";
 import App from "./app.bend";
 import { wheelKind, viewDpr, coarse } from "./solid.js";
 import * as P from "./probe.js";
@@ -1339,7 +1340,7 @@ function pickerKeys() {
   document.addEventListener("toggle", (event) => {
     const menu = event.target;
     if (menu.matches?.("#viewer .board-selector[open]") && menu.closest("#viewer")?.querySelector("canvas.plot2d")) {
-      menu.querySelector("[data-board-filter]")?.focus({ preventScroll: true });
+      softFocus(menu.querySelector("[data-board-filter]"), { preventScroll: true });
     }
   }, true);
   document.addEventListener("keydown", (event) => {
@@ -1388,9 +1389,10 @@ export function mount(canvases) {
   const list = (Array.isArray(canvases) ? canvases : [canvases]).filter(Boolean);
   for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); park(v); v.dispose(); views.delete(c); }
   for (const canvas of list) mountOne(canvas);
-  // a note form that has just come up takes the keyboard
+  // a note form that has just come up takes the keyboard (on a touch
+  // screen, the tap on its field does: touch-focus.js)
   const note = document.querySelector(".rc-note input");
-  if (note && !noteSeen) note.focus();
+  if (note && !noteSeen) softFocus(note);
   noteSeen = !!note;
   for (const w of drawnWaits) w.mounted = true;
   drawnCheck();
