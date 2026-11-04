@@ -59,8 +59,9 @@ desktop or a narrow desktop window never gets any of it.
 ## Terminal
 
 Full screen above the keyboard, with a key row: Esc, Tab, a sticky Ctrl
-(the next letter typed goes as Ctrl+letter), ^C, the arrows, `| ~ / -` and
-Paste. A swipe on the screen scrolls its history. On a phone on its side
+(the next letter typed goes as Ctrl+letter), ^C, ⌫, the arrows, `| ~ / -`
+and Paste (where the clipboard cannot be read, as in a WebView, a field
+takes the system's own Paste). A swipe on the screen scrolls its history. On a phone on its side
 with the keyboard up, the path and title bar give way.
 
 ## Settings, bots, rooms, projects
@@ -78,7 +79,8 @@ with the keyboard up, the path and title bar give way.
 
 ## Signals
 
-- **Settings → Threads → Notifications on this phone** asks for permission
+- **Settings → Threads → Notifications on this phone** (not in the phone
+  app's WebView, where the app notifies) asks for permission
   (a phone is never asked on its first tap). The hub's notifications are
   shown through the service worker (sw.js), the only way Android Chrome and
   iOS allow; a tap opens the thread. On an iPhone they work once Backplane
