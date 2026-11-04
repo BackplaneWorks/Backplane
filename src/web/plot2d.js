@@ -1119,7 +1119,7 @@ function inspectCard(view, pick) {
   head.className = "ph-inspect-head";
   title.textContent = info.arg ? `${info.kind[0].toUpperCase()}${info.kind.slice(1)} ${info.arg}` : info.kind[0].toUpperCase() + info.kind.slice(1);
   close.type = "button"; close.className = "ph-inspect-close"; close.textContent = "✕"; close.setAttribute("aria-label", "Close");
-  close.addEventListener("click", () => { inspectCard(view, null); if (view.probe) view.publishProbe(""); });
+  close.addEventListener("click", () => { inspectCard(view, null); if (view?.probe) view.publishProbe(""); else if (!view) probed?.(""); });
   head.append(title, close);
   const dl = document.createElement("dl");
   for (const [k, v] of info.kv) {
@@ -1138,6 +1138,14 @@ function inspectCard(view, pick) {
   card = { el, view };
 }
 
+// a part tapped in 3D (host.js, from solid.js's probe): the same card, for
+// the part; it goes when the 3D view does
+export function inspectPart(ref) {
+  if (!coarse?.matches) return;
+  if (!ref) { if (card && !card.view) inspectCard(null, null); return; }
+  inspectCard(null, { info: { kind: "part", arg: ref, kv: new Map([["ref", ref]]) } });
+}
+
 // the page's answer to "Mention in chat" on a tapped piece (host.js)
 export function onMention(fn) {
   mentioned = fn;
@@ -1145,7 +1153,7 @@ export function onMention(fn) {
 
 // a card whose view has left the page goes with it (host.js, after a render)
 export function inspectGone() {
-  if (card && (card.view.disposed || !card.view.canvas.isConnected)) { card.el.remove(); card = null; }
+  if (card && (card.view ? card.view.disposed || !card.view.canvas.isConnected : !document.querySelector("canvas#solid"))) { card.el.remove(); card = null; }
 }
 
 // the page's answer to a tap on a sheet symbol (host.js)

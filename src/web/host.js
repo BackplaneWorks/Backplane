@@ -1794,7 +1794,7 @@ Plot2d.onMention((text) => {
 // a tap that probes a part or a net (probe.js) tells the hub, which keeps it
 // (client.bend's Probe); the 3D view finds parts on the board's plot
 Plot2d.onProbe((value) => { Solid.setProbe(value); dispatch("probe", value); });
-Solid.onProbe((value) => { Plot2d.setProbe(value); dispatch("probe", value); });
+Solid.onProbe((value) => { Plot2d.setProbe(value); dispatch("probe", value); Plot2d.inspectPart(value.startsWith("c\t") ? value.slice(2).split("\t")[0] : ""); });
 Solid.useBoard({ parts: (key) => Plot2d.parts(key), thick: (key) => Plot2d.thick(key), need: (key) => Plot2d.need(key) });
 Plot2d.onPlotted(() => Solid.relight());
 // the probe's chip: its name brings it into view

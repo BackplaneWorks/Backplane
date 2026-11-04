@@ -3253,7 +3253,7 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .review-body.rp-bom td:first-child { white-space: normal; min-width: 11em; max-width: 15em; }
 .app.phone .review-body.rp-bom th:first-child { width: auto; }
 /* the 3D status line keeps to one line (the whole of it is its tooltip) */
-.app.phone .solid-render-status:not(:empty) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 16px); }
+.app.phone .solid-render-status:not(:empty) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 72px); }
 /* split: a phone has room for two panes, the main one and the first beside
    it (schematic over board, for cross-probing); 3D has its own chip */
 .app.phone .viewer.split .combo { --split-handle-size: 24px; }
