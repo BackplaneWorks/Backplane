@@ -1,11 +1,10 @@
 # Combined copied-store and active-load preparation
 
-Status: **aggregate test diagnostics released for one producer-only Boat run**.
-The `bdd09fe794`, `27e9056464` and corrected `2f88220d84` packets all failed.
-The last observed a real mixed cycle but failed its compound receipt/cohort
-assertion; the cause remains unestablished. Only bounded test diagnostics are
-added next; producer source, policy, clocks, phases, budgets and assertions
-remain unchanged. There is no whole-harness, actual-hub cleanup,
+Status: **shared-kernel-clock source preparation; no execution released**.
+The latest `39a3c2fb8d` diagnostic failed and established different Bun process
+clock origins. The old host-shared hrtime assumption was wrong in both test
+and MAIN timing, not only the short stand-in control. A Linux clock correction
+and new regressions are prepared for static review only. There is no whole-harness, actual-hub cleanup,
 memory, CPU, latency, startup or package PASS. The memory owner `t1793648028-1245355`
 retains sole packaged before/after evaluation. Send the frozen source and check
 scope to that owner before executing even the self-tests. Existing recovery,
@@ -172,9 +171,9 @@ and closed log streams, with each result included in `report.checks`.
 Delegate/kill permissions and the revised implementation remain unqualified
 until the owner releases and reviews the synthetic Boat controls.
 
-The evaluator released one corrected Bun self-test packet; no run on the new
-freeze has occurred yet. Reuse the unchanged fence PASS only after exact
-pinned input/tool audit; rerun it only if a relevant input/tool changes:
+Historical self-test commands (all complete packets below remained FAIL;
+these commands grant no new execution authorization). Reuse any unchanged
+focused PASS only with an exact pinned input/tool audit:
 
 ```sh
 REAL_ACTIVE_FENCE_PREREQUISITE=/private/staged/FENCE-PREREQUISITE.json node test/tools/real_store_active_fence_test.cjs
@@ -254,10 +253,11 @@ were unchanged; worker peak 83,615,744 bytes, controller peak 350,978,048 bytes,
 OOM/swap zero, no remaining worker children, clean temp and verified sandbox
 deletion. This is not a producer, scope or performance qualification.
 
-The next released packet is **producer-only diagnostic**, with an untracked
-entrypoint that extracts and hashes the unchanged `String.raw` producer body
-without importing the executable harness top level. It invokes only the same
-producer test; none of the fence, policy, tar, pump or scope tests are rerun.
+The subsequent `39a3` released packet was **producer-only diagnostic**, with
+an untracked entrypoint that extracted and hashed the then-unchanged
+`String.raw` producer body without importing the executable harness top level.
+It invoked only the producer test; fence, policy, tar, pump and scope tests
+were not rerun.
 Passed groups are reused solely by exact pinned source/input/tool receipt audit,
 with their original overall failures retained. The test adds two fixed epoch
 aggregates and at most three controller control publications/four numeric
@@ -270,6 +270,69 @@ producer, policy, clocks, phase behavior, budgets and all original assertions
 are unchanged. A diagnostic failure requires terminal evaluation, not a
 behavioral fix or automatic retry. Actual scope permissions/cleanup and
 packaged startup/CPU/RSS/p99 remain unqualified; merge remains held.
+
+The diagnostic packet is preserved in
+[`extra/hub-real-active-qualification/39a3`](../../extra/hub-real-active-qualification/39a3/FAILURE.json):
+work `1577977`, job `j20261104085734-1165528`, overall exit 1. Positive mixed21
+and pure12 matched, but the delayed suppressed child emitted113 markers while
+its receipt counted36; exactly77 markers preceded controller start1916.633ms
+in the child's clock, which began near14ms. Parsing/byte/sequence aggregates
+identify different process origins. The evaluator confirmed that this also
+invalidates MAIN window membership, lag and attribution timing. Original
+producer extraction was exact4262B, and the executable harness was not
+imported. All25 inputs/tools unchanged, worker peak49,590,272B, controller
+349,925,376B, no OOM/swap, remaining children0, clean temp and verified VM
+deletion. Passed helper evidence was audited/reused only; all scope controls
+remained unexecuted. All prior failed receipts remain failed and unchanged.
+
+The prepared clock contract is explicit:
+
+- `real_store_active_clock.cjs` calls glibc `clock_gettime(CLOCK_MONOTONIC=1)`
+  and `clock_getres` through Bun's existing FFI API on Linux x64/arm64. A
+  timespec is two signed64-bit longs. ABI/return/sample/resolution failures
+  stop the harness; no process-relative, wall/epoch clock or offset fallback.
+- A domain SHA256 binds clock kind, kernel boot ID and `/proc/self/ns/time`.
+  `time_for_children` must match at initialization. Every controller control
+  frame and producer receipt carries this domain; producers reject mismatched
+  controls, and the controller rejects mismatched receipts before comparison.
+  Raw boot IDs/namespace names are not reported. Linux documents a shared
+  clock within a time namespace; no cross-process offset calibration is used.
+- Nanoseconds are checked as BigInt, projected to absolute milliseconds under
+  `2^40`ms with <0.001ms conversion error. Reported kernel resolution must be
+  positive and <=1000ns. Equal readings are legal; backward/missing/invalid
+  samples permanently fail the reader. The original <1ms marker flooring and
+  latency rounding remain conservative; no budget or acceptance gate changes.
+- MAIN startup/phase/receipt/rate/delivery/attribution clocks, extracted producer
+  and test/diagnostic use this same reader. Wall dates remain only event dates
+  or labelled diagnostics; local timeout timers do not compare process origins.
+  No before-window deltas are filtered away to conceal a mismatch.
+
+Primary references: [Linux clock_gettime](https://man7.org/linux/man-pages/man2/clock_gettime.2.html),
+[time namespaces](https://man7.org/linux/man-pages/man7/time_namespaces.7.html),
+[Bun FFI](https://bun.sh/docs/runtime/ffi). The FFI backend is experimental in
+Bun's documentation. This harness binding/ABI and its resource behavior are
+unqualified until the approved narrow Boat checks actually execute. Existing
+hub effects already use this FFI mechanism; no shared effect is changed here.
+
+Proposed narrow checks for **static review, not execution**: a fresh pinned
+producer-only entry extracts/hashes the revised producer without importing
+MAIN, runs `real_store_active_clock_test.cjs` (20 cases:14 deterministic plus
+six checks over two synthetic children launched with0/300ms delay), then the
+original16 producer assertions with the corrected shared clock. Deterministic
+controls cover exact/invalid native samples, precision range, equal/regressed
+and sticky failed reads, missing/foreign domains, arbitrary launch origins,
+phase boundaries and exact lag. Real children must keep all16 samples in the
+published window with receipt/sequence agreement, no missing delivery,
+nonnegative p99<=2000ms and parent/child time bracketing; no guessed origin
+subtraction. Logs and collections are bounded. Keep controller512MiB and
+worker<=3.7e9/swap0, normal/default Boat, no hub/store/app/Bend/scope trees.
+
+Changing the whole load source invalidates the old whole-harness identity.
+Unchanged policy/tar/pump/fence helpers may be reused only with an exact
+revision/input/tool audit. They do not qualify the new clock, new producer,
+whole harness or packaged startup/CPU/RSS/p99. The source is prepared only;
+no native call, probe, compile, local test or new Boat packet has run. Merge
+and actual scope/permission/performance qualification remain held.
 
 The evaluator's later acceptance command supplies `--bin`, `--artifact-receipt`,
 `--sha256`, `--fixture`, `--fixture-sha256`, `--fixture-receipt-sha256`,
