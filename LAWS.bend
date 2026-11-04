@@ -1,3 +1,4 @@
+import ./src/core/kicad-project.bend as KPROJECT
 import ./src/core/cad-install.bend as CADINSTALL
 
 import ./src/core/msgs-lookup.bend as MLOOK
@@ -16347,3 +16348,18 @@ law fm_zip_skips_vault:
 
 law fm_zip_credentials_ignore_case:
   {FMG.Fm.zip.within(".AWS/CREDENTIALS") == True{} : Bool}
+
+# Worktree identity comes from Git, never from a matching folder name.
+law kicad_worktree_project_root:
+  for cwd: String
+  for root: String
+  {KPROJECT.Project.root(True{}, cwd, root) == root : String}
+
+# Without an explicit absolute thread override, main owns project selection.
+law kicad_main_project_config:
+  for main: J.Json
+  {KPROJECT.Project.setting(main, J.Null{}, "project") == J.KV{"project", J.Str{J.Json.get_str(main, "project", "")}} : J.KV}
+
+law kicad_absolute_project_override:
+  for main: J.Json
+  {KPROJECT.Project.setting(main, J.Json.obj([J.KV{"project", J.Str{"/explicit/design.kicad_pro"}}]), "project") == J.KV{"project", J.Str{"/explicit/design.kicad_pro"}} : J.KV}

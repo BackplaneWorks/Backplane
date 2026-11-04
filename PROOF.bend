@@ -16061,3 +16061,12 @@ def Laws.fm_zip_skips_vault():
 
 def Laws.fm_zip_credentials_ignore_case():
   {==}
+
+def Laws.kicad_worktree_project_root(cwd, root):
+  {==}
+
+def Laws.kicad_main_project_config(main):
+  {==}
+
+def Laws.kicad_absolute_project_override(main):
+  {==}

@@ -1,3 +1,4 @@
+import ../core/kicad-project.bend as KP
 import ./auth-cache.bend as AUTHCACHE
 import ./wire.bend as WIRE
 import ./adopt-plan.bend as ADOPTPLAN
@@ -3137,26 +3138,44 @@ def Ticker.loop(fuel: Nat, +inbox: Chan(Msg)) -> IO(Unit):
         IO.sleep(WK.Wake.tick.ms(delay))
         Ticker.loop(f, inbox)
 
-def KiCadJob.selected(ok: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rt: K.Rt) -> IO(Unit):
+def KiCadJob.project(fs: K.Files) -> String:
+  match fs:
+    case K.Files{pro, _, _, _}: pro
+
+def KiCadJob.open(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +rt: K.Rt, fs: K.Files) -> IO(Unit):
+  do IO<Unit>:
+    +err : String <- K.KiCad.open(rt, fs)
+    GitJob.reply(inbox, client, id, String.is_empty(err), J.Json.obj([J.KV{"text", J.Str{err}}, J.KV{"thread", J.Str{thread}}]))
+
+def KiCadJob.choice(ask: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +rt: K.Rt, main: K.Files, local: K.Files, +choice: String) -> IO(Unit):
+  match ask:
+    case True{}:
+      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"kicadCopy", J.Flag{True{}}}, J.KV{"thread", J.Str{thread}},
+        J.KV{"main", J.Str{KiCadJob.project(main)}}, J.KV{"copy", J.Str{KiCadJob.project(local)}}]))
+    case False{}:
+      KiCadJob.open(inbox, client, id, thread, rt, Bool.pick(K.Files, String.eq(choice, "thread"), local, main))
+
+def KiCadJob.selected(ok: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rt: K.Rt, +choice: String) -> IO(Unit):
   match ok:
     case False{}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"kicad", J.Str{K.Rt.status(rt)}}, J.KV{"thread", J.Str{thread}}]))
     case True{}:
       do IO<Unit>:
-        fs : K.Files <- K.Files.read(cwd)
-        +err : String <- K.KiCad.open(rt, fs)
-        GitJob.reply(inbox, client, id, String.is_empty(err), J.Json.obj([J.KV{"text", J.Str{err}}, J.KV{"thread", J.Str{thread}}]))
+        +main : K.Files <- K.Files.read(cwd)
+        +local : K.Files <- K.Files.read.local(cwd)
+        changed : Bool <- K.Files.changed(main, local)
+        KiCadJob.choice(KP.Project.choose(choice, changed), inbox, client, id, thread, rt, main, local, choice)
 
 # Compatibility for non-hub jobs; normal Open uses the hub's cached Rt.
 def KiCadJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +cwd: String, +home: String) -> IO(Unit):
   do IO<Unit>:
     text : String <- K.Io.text(home ++ "/kicad-health.json")
     +rt : K.Rt = K.Rt.cached(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
-    KiCadJob.selected(String.eq(K.Rt.status(rt), "ok"), inbox, client, id, "", cwd, rt)
+    KiCadJob.selected(String.eq(K.Rt.status(rt), "ok"), inbox, client, id, "", cwd, rt, "")
 
-def KiCadJob.route(kicad: Bool, +inbox: Chan(Msg), client: U32, id: String, thread: String, cwd: String, +rt: K.Rt, other: IO(Unit)) -> IO(Unit):
+def KiCadJob.route(kicad: Bool, +inbox: Chan(Msg), client: U32, id: String, thread: String, cwd: String, +rt: K.Rt, +choice: String, other: IO(Unit)) -> IO(Unit):
   match kicad:
-    case True{}: IO.spawn(Unit, KiCadJob.selected(String.eq(K.Rt.status(rt), "ok"), inbox, client, id, thread, cwd, rt))
+    case True{}: IO.spawn(Unit, KiCadJob.selected(String.eq(K.Rt.status(rt), "ok"), inbox, client, id, thread, cwd, rt, choice))
     case False{}: other
 
 # Export jobs use the hub's cached health and run outside the event loop.
@@ -5690,8 +5709,16 @@ def KIpc.go(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: C
   +plain = KIpc.check(KIpc.type(o), KIpc.path(o), pro, KIpc.msg(J.Json.get_obj(KIpc.args(o), "message")), KIpc.caps(rt))
   KIpc.go.k(String.is_empty(plain), plain, KIpc.gate(rt, setting), m, rt, inbox, thread, o, reply, pro)
 
-def KIpc.job(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Unit):
-  IO.bind(String, Unit, KIpc.pro(KIpc.path(o)), pro => KIpc.go(m, rt, setting, inbox, thread, o, reply, pro))
+def KIpc.request(+o: J.Json, args: J.Json) -> J.Json:
+  J.Json.obj([J.KV{"id", J.Json.get_obj(o, "id")}, J.KV{"method", J.Str{"tools/call"}},
+    J.KV{"params", J.Json.obj([J.KV{"name", J.Str{J.Json.get_str(J.Json.get_obj(o, "params"), "name", "")}}, J.KV{"arguments", args}])}])
+
+def KIpc.job(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), cwd: String) -> IO(Unit):
+  do IO<Unit>:
+    args : J.Json <- K.Files.request(cwd, KIpc.args(o), "project")
+    +resolved : J.Json = KIpc.request(o, args)
+    pro : String <- KIpc.pro(KIpc.path(resolved))
+    KIpc.go(m, rt, setting, inbox, thread, resolved, reply, pro)
 
 # Retry
 def KIpc.clear(m: Maybe<&2, Chan(KSV.KMsg)>) -> IO(Unit):
@@ -5705,7 +5732,7 @@ def Hub.kicad_ipc(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> 
   match h:
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, KIpc.job(Cfg.ks(cfg), Cfg.rt(cfg), M.Setting.get(st, "kicad.ipc", "on"), inbox, thread, o, reply))
+        IO.spawn(Unit, KIpc.job(Cfg.ks(cfg), Cfg.rt(cfg), M.Setting.get(st, "kicad.ipc", "on"), inbox, thread, o, reply, B.Hub.cwd(st, B.Hub.thread(st, thread))))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # (a check's answer keeps the headless servers' lines the hub holds)
@@ -11090,7 +11117,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), PCB.Pcb.scope(String.eq(job, "step"), b, M.Metrics.allowed(st), M.Setting.get(st, "telemetry.usage.generation", "")), Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread), M.Setting.get(st, AT.Att.key(), ""))))
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), a, Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), PCB.Pcb.scope(String.eq(job, "step"), b, M.Metrics.allowed(st), M.Setting.get(st, "telemetry.usage.generation", "")), Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread), M.Setting.get(st, AT.Att.key(), ""))))
         return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
@@ -18044,12 +18071,22 @@ def Hub.mcp.route(pv: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +
     case False{}:
       Hub.mcp.od(OR.Order.is(o), h, thread, o, body, reply, now)
 
+# Resolve viewer_show before its pure broadcast, so the response and every
+# client's saved viewer path name the same main document.
+def Hub.mcp.viewer(show: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match show h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        args : J.Json <- K.Files.request(B.Hub.cwd(st, B.Hub.thread(st, thread)), KIpc.args(o), J.Json.get_str(KIpc.args(o), "kind", "board"))
+        Hub.mcp.k(MC.Mcp.reply(J.Json.get_obj(o, "id"), MC.Mcp.view(thread, J.Json.get_str(args, "path", ""), J.Json.get_str(args, "kind", ""))), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body)
+    case False{} _: Hub.mcp.route(Preview.is(o), h, thread, o, body, reply, now)
+
 def Hub.mcp.ki(ki: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match ki:
     case True{}:
       Hub.kicad_ipc(h, thread, o, reply)
     case False{}:
-      Hub.mcp.route(Preview.is(o), h, thread, o, body, reply, now)
+      Hub.mcp.viewer(Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"), String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "viewer_show")), h, thread, o, body, reply, now)
 
 def Hub.mcp.tr(tr: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match tr:
