@@ -22,9 +22,11 @@ written only by trusted main builds), and nothing here claims to provide that.
       JSON: {"hit": [...], "miss": [...], "uncacheable": {...}}. --plan P
       saves the keys as taken BEFORE the check runs, and the misses.
   content-cache.py run-check --plan P [--cache D]
-      needs the inherited heavy-guard lock and admission (it is run by
+      Standalone PRE-CHECK ONLY: exit3 even when every entry passes. Does not
+      establish check.sh's aggregate verdict; cross-module fills/templates can
+      make that verdict different. Needs inherited heavy-guard admission (via
       scripts/cached-check.sh); re-reads the tool identity before and after
-      bend runs; check the plan's misses with bend (one manifest; LAWS.bend alone) under
+      bend runs; check each miss as its exact root in a fresh process under
       the verdict policy, then record only those whose key is still the
       planned one. LAWS.bend counts only on a clean verdict (a TODO or any
       other line fails); scripts/check.sh stays the gate for a LAWS with TODO.
@@ -37,8 +39,8 @@ written only by trusted main builds), and nothing here claims to provide that.
   content-cache.py audit [--cache D]
       every entry must be whole and authentic; prints the others
 
---all ignores the cache for planning (what a nightly full run would use; no
-nightly job runs these scripts yet).
+--all ignores cached standalone entries. Nightly gates must still run the
+original aggregate check and full proof suite; this pre-check is not a gate.
 Local cache: $BP_CONTENT_CACHE or ~/.cache/backplane-bend/content.
 """
 import argparse
@@ -49,10 +51,9 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
+import resource
 import subprocess
 import sys
-import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -215,10 +216,19 @@ def tracked_modules(root):
 def check_units(root, files=None):
     tree = Tree(root)
     tool = tool_identity()
+    execution = {'schema': 2, 'process': 'fresh-bend-entry', 'cwd': 'repository-root',
+                 'python_sha256': sha(Path(sys.executable).resolve().read_bytes()),
+                 'stack_limit': list(resource.getrlimit(resource.RLIMIT_STACK)),
+                 'jsc': {name: os.environ.get(name, '') for name in
+                         ('BUN_JSC_forceRAMSize', 'BUN_JSC_maxPerThreadStackUsage')}}
     units = {}
     for f in files if files is not None else tracked_modules(root):
         try:
-            key, body = unit_key('check', f, tree.closure(f), tool)
+            # A successful aggregate manifest is NOT an independent module
+            # pass: earlier fills/template instances can affect later checks.
+            # Each key names the exact entry used in a fresh checker process.
+            entry_tool = {**tool, 'check_execution': {**execution, 'argv': ['bend', f, '--check-only']}}
+            key, body = unit_key('check-entry-v2', f, tree.closure(f), entry_tool)
         except Uncacheable as error:
             units[f] = (None, str(error))
             continue
@@ -264,6 +274,9 @@ def valid_entry(entry, key, secret_key):
         return (secret_key is not None and isinstance(entry, dict) and entry.get('schema') == SCHEMA
                 and entry.get('verdict') == 'passed' and entry.get('key') == key
                 and isinstance(entry.get('body'), dict)
+                # Legacy check passes came from a different aggregate context.
+                # They are invalid even with an intact same-user MAC.
+                and entry['body'].get('gate') != 'check'
                 and sha(canonical(entry['body'])) == key
                 and isinstance(entry.get('mac'), str)
                 and hmac.compare_digest(entry['mac'], mac(secret_key, key, entry['body'])))
@@ -293,6 +306,8 @@ def _record(key, body, local=None):
     """Internal: run-check and the owned proof-cache worker call this after a pass."""
     if key is None or sha(canonical(body)) != key:
         raise CacheError('record: body does not hash to its key')
+    if body.get('gate') == 'check':
+        raise CacheError('retired aggregate-derived check entries cannot be recorded')
     local = local_dir() if local is None else Path(local)
     entry = {'schema': SCHEMA, 'key': key, 'verdict': 'passed', 'body': body,
              'mac': mac(secret(local, True), key, body), 'recorded': int(time.time())}
@@ -348,7 +363,7 @@ def validate_check_plan(root, planned, local=None):
 
 
 def run_check(root, plan_file, local=None):
-    """Check the planned misses with bend and record the ones that pass."""
+    """Check misses as separate exact entries, never in an aggregate context."""
     planned = json.loads(Path(plan_file).read_text())
     check_plan_fields(planned)
     todo = list(planned['miss'])  # an uncacheable module is checked, never recorded
@@ -369,43 +384,24 @@ def run_check(root, plan_file, local=None):
     # while bend runs (checked again below)
     validate_check_plan(root, planned, local)
     env = {**os.environ, 'BEND_NO_TELEMETRY': '1'}
-    work = Path(tempfile.mkdtemp(prefix='.bend-check.', dir=root))
-    try:
-        rest = [m for m in todo if m != 'LAWS.bend']
-        results = {}
-        if rest:
-            (work/'m').mkdir()
-            for step in ('generate', 'verify'):
-                cmd = [sys.executable, str(ROOT/'scripts/check-manifest.py'), step, str(work/'m')]
-                if step == 'generate':
-                    cmd.append('1')
-                subprocess.run(cmd + rest, cwd=root, check=True, capture_output=True)
-            r = subprocess.run(['bend', str(work/'m/manifest-0.bend'), '--check-only'], cwd=root,
-                               env=env, capture_output=True, text=True)
-            out = r.stdout + r.stderr
-            if not verdict(r.returncode, out):
-                print(out, file=sys.stderr)
-                return 1
-            results.update({m: True for m in rest})
-        if 'LAWS.bend' in todo:
-            r = subprocess.run(['bend', 'LAWS.bend', '--check-only'], cwd=root, env=env,
-                               capture_output=True, text=True)
-            out = r.stdout + r.stderr
-            if not verdict(r.returncode, out):  # a TODO is no pass here, and no error is hidden by one
-                print(out, file=sys.stderr)
-                return 1
-            results['LAWS.bend'] = True
-        # A hit may change while an unrelated miss runs. Revalidate ALL planned
-        # units and hit MACs before recording anything or returning success.
-        now = validate_check_plan(root, planned, local)
-        # Records retain these exact validated keys. A later source edit gets
-        # a different key; it cannot consume this pass for the old content.
-        for m in results:
-            if now[m][0] is not None:
-                _record(now[m][0], now[m][1], local)
-        return 0
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    passed, failed = [], False
+    for module in todo:
+        # Every process starts with exactly this root's import/fill/template
+        # context. No preceding miss or cached module can supply extra state.
+        r = subprocess.run(['bend', module, '--check-only'], cwd=root, env=env,
+                           capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        if not verdict(r.returncode, out):  # TODO remains no pass, including LAWS
+            print(out, file=sys.stderr)
+            failed = True
+            break
+        passed.append(module)
+    # Revalidate ALL units and hit MACs before recording any new entry.
+    now = validate_check_plan(root, planned, local)
+    for module in passed:
+        if now[module][0] is not None:
+            _record(now[module][0], now[module][1], local)
+    return 1 if failed else 0
 
 
 # ---- proof shards ----
@@ -485,12 +481,16 @@ def main(argv=None):
             a.plan.write_text(json.dumps({'schema': 1, 'modules': sorted(units),
                                          'keys': {n: k for n, (k, _) in units.items()},
                                          'miss': miss}, sort_keys=True))
-        print(json.dumps({'hit': hit, 'miss': miss,
+        print(json.dumps({'kind': 'standalone-module-plan', 'gate_qualified': False, 'hit': hit, 'miss': miss,
                           'uncacheable': {n: b for n, (k, b) in units.items() if k is None}}))
     elif a.action == 'run-check':
         if not a.plan:
             raise CacheError('run-check needs --plan')
-        return run_check(root, a.plan, a.cache)
+        status = run_check(root, a.plan, a.cache)
+        print(json.dumps({'kind': 'standalone-module-precheck',
+                          'status': 'pass-standalone' if status == 0 else 'inconclusive-standalone',
+                          'gate_qualified': False, 'next': 'scripts/check.sh aggregate gate remains required'}))
+        return 3 if status == 0 else 4  # Scoped pass/failure, never aggregate green.
     elif a.action == 'plan-proof':
         if len(a.paths) != 1:
             raise CacheError('plan-proof needs the partition folder')
