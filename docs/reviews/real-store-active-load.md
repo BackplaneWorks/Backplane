@@ -1,8 +1,9 @@
 # Combined copied-store and active-load preparation
 
-Status: **revised preparation, held for review**. The first no-hub packet on
-`bdd09fe794` failed its producer assertion; the revised producer and execution
-scope controls have not run. There is no whole-harness, actual-hub cleanup,
+Status: **one-character correction released for one no-hub packet**. The
+`bdd09fe794` packet failed its producer assertion; the `27e9056464` packet
+failed parsing the producer diagnostic before any producer/scope controls.
+The extra closing parenthesis is corrected; no other executable source is changed. There is no whole-harness, actual-hub cleanup,
 memory, CPU, latency, startup or package PASS. The memory owner `t1793648028-1245355`
 retains sole packaged before/after evaluation. Send the frozen source and check
 scope to that owner before executing even the self-tests. Existing recovery,
@@ -169,7 +170,9 @@ and closed log streams, with each result included in `report.checks`.
 Delegate/kill permissions and the revised implementation remain unqualified
 until the owner releases and reviews the synthetic Boat controls.
 
-Proposed next checks, **not released or executed on the revised source**:
+The evaluator released one corrected Bun self-test packet; no run on the new
+freeze has occurred yet. Reuse the unchanged fence PASS only after exact
+pinned input/tool audit; rerun it only if a relevant input/tool changes:
 
 ```sh
 REAL_ACTIVE_FENCE_PREREQUISITE=/private/staged/FENCE-PREREQUISITE.json node test/tools/real_store_active_fence_test.cjs
@@ -220,7 +223,23 @@ All 26 staged inputs and tool hashes were unchanged. Worker peaks were
 zero OOM/swap events, no remaining worker children, clean synthetic temp and
 verified VM deletion. The original failed fence provenance remains failed.
 Raw receipt bytes and log hashes are retained; raw logs and private overlay
-receipt bodies are not published. No second packet has run.
+receipt bodies are not published. This failure remains a failure.
+
+The second released packet is preserved in
+[`extra/hub-real-active-qualification/27e905`](../../extra/hub-real-active-qualification/27e905/FAILURE.json):
+work `1576980`, job `j20261104084549-1097971`, overall exit 1. Node fence mocks
+passed again, along with policy54, tar29 and pump20000/max1. Bun rejected the
+extra closing parenthesis at producer diagnostic line 94. No producer16,
+scope49/21 mocks or synthetic execution-scope trees ran; exit, exact groups
+and terminal sentinel failed. All 30 staged inputs and tools were unchanged;
+worker peaks were 23,203,840 and 72,019,968 bytes, controller peak 349,749,248
+bytes, swap/OOM zero, remaining worker children zero and synthetic temp clean.
+Boat verified deletion of the enclosing sandbox. Raw receipts are preserved
+byte-for-byte with raw log hashes; no logs/private overlay bodies are published.
+The sole permitted executable correction removes that one parenthesis.
+Neither this correction release nor either partial result qualifies runtime
+cleanup, packaged performance or merge. A new failure requires terminal
+evaluation; it does not authorize automatic retry.
 
 The evaluator's later acceptance command supplies `--bin`, `--artifact-receipt`,
 `--sha256`, `--fixture`, `--fixture-sha256`, `--fixture-receipt-sha256`,

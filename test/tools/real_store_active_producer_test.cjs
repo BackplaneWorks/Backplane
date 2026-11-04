@@ -91,7 +91,7 @@ module.exports.run = async function run(source) {
     } catch (e) {
       // Aggregate diagnostics only; no body, input text, argv or private path.
       console.error(JSON.stringify({ scope: 'stand-in-control-failure', suppressedCycle: suppressed, outputRows: rows.length,
-        completed: rows.filter(r => r.type === 'assistant' && r.message?.content?.some(c => c.type === 'text'))).length,
+        completed: rows.filter(r => r.type === 'assistant' && r.message?.content?.some(c => c.type === 'text')).length,
         tools: rows.filter(r => r.message?.content?.some(c => c.type === 'tool_use')).length,
         results: rows.filter(r => r.message?.content?.some(c => c.type === 'tool_result')).length,
         states: receipt()?.states?.map(s => ({ epoch: s.epoch, count: s.count, spanMs: s.last - s.first, completed: s.completed, tools: s.tools, results: s.results })) }));
