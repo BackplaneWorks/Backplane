@@ -26,7 +26,8 @@ desktop or a narrow desktop window never gets any of it.
   badge is the need-you count), **Projects** (the project tree, whatever the
   sidebar view setting), **Bots** (bots and rooms; badge: rooms with unread)
   and **Settings**. Which tab is open is this browser's own; other clients
-  never follow it.
+  never follow it. Now groups its rows as Needs you, Finished, At work and
+  Idle. Tapping the open tab again goes back to the top of its list.
 - **Screens push and pop**: a thread, a project's home, a bot or room or a
   Settings page opens over the tab with a ‹ in its header; the viewer opens
   over its thread. ‹, the system back (Android's key, the browser's) and a
@@ -39,7 +40,8 @@ desktop or a narrow desktop window never gets any of it.
   Rename from the menu opens a sheet above the keyboard.
 - **Headers**: Now and Projects have New thread (in the project at the top of
   the list), search and the command palette; a thread's has ⏮ Go to the
-  start (every earlier page, then the top), ▾ its menu and its views.
+  start (every earlier page, then the top; a line under the header counts
+  the pages, with Cancel, then offers Newest ↓), ▾ its menu and its views.
 - Every menu is a bottom sheet; a tap on the dimmed page or back shuts it.
   The first open on a slow network shows "Backplane / Loading…" until the
   page is drawn.
