@@ -3260,7 +3260,7 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .layer-list .layer-row .swatch { width: 44px; height: 44px; padding: 9px; background-clip: content-box !important; }
 .app.phone .layer-list .layer-row .lname { min-height: var(--ph-tap, 44px); font-size: 15px; }
 /* what a tap picked: the chip and its clear button big enough to hit */
-.app.phone .viewer-stage > .probe-chip { min-height: var(--ph-tap, 44px); }
+.app.phone .viewer-stage > .probe-chip > button { min-height: var(--ph-tap, 44px); }
 .app.phone .probe-chip .probe-name { padding: 0 6px 0 12px; max-width: 70vw; }
 .app.phone .probe-chip .probe-clear { min-width: var(--ph-tap, 44px); }
 /* a part's details (the 3D inspector) rise from the bottom over the model */
