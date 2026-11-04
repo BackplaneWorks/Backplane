@@ -33,3 +33,13 @@ test('search by title: every word of the query in a sidebar row, each thread onc
   assert.equal(titleHits(doc,'pull',1).length,1);
 });
 
+
+test('a native app\'s WebView is told from a phone browser',async()=>{
+  const {inWebView}=await load();
+  assert.equal(inWebView({userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UQ1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0 Mobile Safari/537.36'},{}),true);
+  assert.equal(inWebView({userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148'},{}),true);
+  assert.equal(inWebView({userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'},{}),false);
+  assert.equal(inWebView({userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36'},{}),false);
+  assert.equal(inWebView({userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',standalone:true},{}),false);
+  assert.equal(inWebView({userAgent:'anything'},{backplaneApp:{}}),true);
+});
