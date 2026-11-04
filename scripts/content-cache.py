@@ -9,9 +9,9 @@ environment bend reads, and the verdict logic.
 
 Trust boundary. An entry is a pass only if it carries a MAC, made with a
 secret key that lives beside the local cache (mode 0600, created on first
-use), over its key and body. The only code that records an entry is `run-check`
-below, which runs bend itself and applies scripts/bendok.sh's verdict; there
-is no command that records a caller-declared pass. The boundary is therefore
+use), over its key and body. Only the admitted `run-check` and the owned
+`proof-cache.py run` execution record passes, after Bend and the existing
+verdict policy succeed; no command imports a caller-declared pass. The boundary is therefore
 the local user account that owns the cache folder: anyone who can read that
 key can forge entries, and entries copied from another cache (another key) are
 misses. There is NO shared or CI-seeded cache yet: a shared cache needs
@@ -29,11 +29,11 @@ written only by trusted main builds), and nothing here claims to provide that.
       planned one. LAWS.bend counts only on a clean verdict (a TODO or any
       other line fails); scripts/check.sh stays the gate for a LAWS with TODO.
   content-cache.py plan-proof PARTITION_DIR [--cache D] [--all]
-  content-cache.py record-proof PARTITION_DIR --receipt R...
-      proof shards of a verified canonical partition; a receipt is recorded
-      only if it is a passing receipt for that partition. Receipts are read
-      from trusted same-user inputs; this code does not authenticate them
-      (the worker that wrote one is not proven here)
+      proof shards of a verified canonical partition (planning only).
+  scripts/proof-cache.py plan|run|join
+      one original missing shard per admitted execution, then a complete
+      cached/fresh join. Only the owned worker execution records proof passes.
+      The old record-proof receipt import is refused: JSON is not execution.
   content-cache.py audit [--cache D]
       every entry must be whole and authentic; prints the others
 
@@ -290,7 +290,7 @@ def _write(path, entry):
 
 
 def _record(key, body, local=None):
-    """Internal: only run-check and record-proof call this, after a real pass."""
+    """Internal: run-check and the owned proof-cache worker call this after a pass."""
     if key is None or sha(canonical(body)) != key:
         raise CacheError('record: body does not hash to its key')
     local = local_dir() if local is None else Path(local)
@@ -426,7 +426,10 @@ def shard_units(root, folder):
         # proof-shards.py uses this helper for its independent root inventory.
         'closure_sha256': sha((ROOT/'scripts/bend-closure.py').read_bytes()),
         'canonical_modes': {n: manifest['source_modes'][n]
-                            for n in ('LAWS.bend', 'PROOF.bend')}}
+                            for n in ('LAWS.bend', 'PROOF.bend')},
+        # Invalidate legacy entries made by importing caller-declared JSON.
+        'proof_cache_execution': {'schema': 'owned-original-worker-v1',
+                                 'sha256': sha((ROOT/'scripts/proof-cache.py').read_bytes())}}
     tree = Tree(root)
     units = {}
     for s in manifest['shards']:
@@ -455,6 +458,8 @@ def shard_units(root, folder):
 
 
 def receipt_passes(receipt, manifest_sha, ps):
+    # Legacy format check only. This never authenticates execution or records a
+    # pass; the former caller-supplied receipt import command is now refused.
     return (receipt.get('state') == 'passed' and receipt.get('manifest_sha256') == manifest_sha
             and receipt.get('inputs_unchanged') is True
             and ps.verdict(receipt.get('exit'), receipt.get('output', '')))
@@ -493,18 +498,7 @@ def main(argv=None):
         hit, miss = plan(units, not a.all, a.cache)
         print(json.dumps({'hit': hit, 'miss': miss}))
     elif a.action == 'record-proof':
-        if len(a.paths) != 1 or not a.receipt:
-            raise CacheError('record-proof needs the partition folder and receipts')
-        folder = Path(a.paths[0]).resolve()
-        units, manifest = shard_units(root, folder)
-        ps = _module('proof-shards.py')
-        msha = ps.sha(ps.encoded(manifest))
-        for r in a.receipt:
-            receipt = json.loads(r.read_text())
-            name = receipt.get('shard')
-            if name not in units or not receipt_passes(receipt, msha, ps):
-                raise CacheError('receipt is not a pass for this partition: %s' % r)
-            _record(units[name][0], units[name][1], a.cache)
+        raise CacheError('record-proof cannot import caller-declared passes; use proof-cache.py run')
     else:
         bad = []
         folder = a.cache or local_dir()
