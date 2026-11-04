@@ -2920,6 +2920,9 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 .app.phone > .ph-cells .kv > .k { color: var(--dim); }
 .app.phone > .ph-cells .kv > .v { color: var(--text); }
 .app.phone > .ph-cells .kv[aria-expanded="true"] { border-color: var(--accent); }
+/* nothing but a state with nothing to press (finished, idle): the row
+   gives its 44 px back to the thread (the thread list shows the state) */
+.app.phone > .ph-cells:has(> .kv.state:only-child):not(:has(button)) { display: none; }
 /* (a short screen, a phone on its side: the row gives back 8 px) */
 @media (max-height: 500px) { .app.phone > .ph-cells { min-height: 36px; } .app.phone > .ph-cells .kv, .app.phone > .ph-cells .kv.state button.tool { min-height: 32px; } }
 /* (36 px to see, 44 to hit: the row is 44 px tall) */
