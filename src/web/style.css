@@ -3231,7 +3231,7 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone #viewer { touch-action: pan-x pan-y; overscroll-behavior: contain; }
 /* the views as chips over the pane (view.bend's View.viewer.chips) */
 .app.phone .ph-views { flex: none; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--bg); overscroll-behavior-x: contain; }
-.app.phone .ph-views > .tab { display: inline-flex; align-items: center; gap: 6px; min-height: var(--ph-tap, 44px); padding: 0 14px; border: 1px solid var(--line); border-radius: 22px; background: var(--raise); color: var(--dim); white-space: nowrap; }
+.app.phone .ph-views > .tab { display: inline-flex; align-items: center; gap: 6px; min-height: var(--ph-tap, 44px); padding: 0 14px; border: 1px solid var(--line); border-radius: 0; background: var(--raise); color: var(--dim); white-space: nowrap; }
 .app.phone .ph-views > .tab.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg)); }
 .app.phone .ph-views .keycap { display: none; }
 /* each toolbar is one row that scrolls sideways, every control a thumb's size;
