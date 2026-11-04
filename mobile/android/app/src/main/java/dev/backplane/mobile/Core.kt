@@ -940,7 +940,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 shownHub = next.hub
                 plots.reset()
             }
-            if (contentReady && foreground && next.sel.isNotEmpty() && next.sel != was) Notes.clear(app, next.sel)
+            if (!webMode && contentReady && foreground && next.sel.isNotEmpty() && next.sel != was) Notes.clear(app, next.sel)
             if (contentReady) LiveService.sync(app, next.island, foreground)
         }
         if (contentReady) screen?.sel?.let { sel -> localDrafts.remove(sel)?.let { text ->
@@ -980,7 +980,10 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
             // dictation (bridge.js's voiceHeard): where the hub takes the audio, and when it is done
             "voice-audio" -> if (c.path.isNotEmpty()) recorder.address(c.hub, c.path)
             "voice-stop" -> recorder.gone(c.hub)
-            "notify" -> if (!(foreground && screen?.sel == c.thread)) notify(c)
+            "notify" -> {
+                android.util.Log.i("Backplane", "alert ${c.kind} ${c.thread} front=$foreground shown=${shownThread()}")
+                if (!(foreground && shownThread() == c.thread)) notify(c)
+            }
         }
         jumping?.let { id ->
             val t = screen?.thread ?: return@let
@@ -1032,9 +1035,30 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         prefs.edit().putString("drafts", o.toString()).commit()
     }
 
+    // The WebView shell (WebShell.kt) shows the hub's page instead of these
+    // screens: the thread on show is the page's (setState), qualified by
+    // its hub as alerts are, so it raises no alert while it is on screen
+    var webMode = false
+    private var webShown = ""
+    private fun shownThread(): String? = if (webMode) webShown else screen?.sel
+
+    // an alert the page was given by its hub (it is the desk used last);
+    // none for the thread it shows while the app is in front
+    fun webAlert(c: Cmd) {
+        android.util.Log.i("Backplane", "alert (page) ${c.kind} ${c.thread} front=$foreground shown=$webShown")
+        if (!(foreground && webShown == c.thread)) notify(c)
+    }
+
+    fun webThread(q: String) {
+        if (q == webShown) return
+        webShown = q
+        if (foreground && q.isNotEmpty()) { Notes.clear(app, q); Notes.clear(app, q.substringAfter('|')) }
+    }
+
     override fun onActivityStarted(activity: Activity) {
         started += 1
-        if (contentReady) screen?.sel?.let { if (it.isNotEmpty()) Notes.clear(app, it) }
+        if (webMode) { if (webShown.isNotEmpty()) Notes.clear(app, webShown) }
+        else if (contentReady) screen?.sel?.let { if (it.isNotEmpty()) Notes.clear(app, it) }
     }
 
     // being in front is when the live service may start

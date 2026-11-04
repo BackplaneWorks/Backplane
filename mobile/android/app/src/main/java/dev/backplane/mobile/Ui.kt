@@ -446,6 +446,11 @@ private fun Pair(tag: String, link: String, cancel: (() -> Unit)?, status: Strin
                 Icon(Icons.Filled.QrCodeScanner, null)
                 Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
             }
+            val photo = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+                if (uri != null) pairingFromImage(ctx, uri)?.let(done)
+                    ?: android.widget.Toast.makeText(ctx, NativeMessages.native_pair_scanner_invalid(tag), android.widget.Toast.LENGTH_SHORT).show()
+            }
+            OutlinedButton(onClick = { photo.launch("image/*") }) { Text("Choose a photo of the code") }
             Text("On your paired computer, open Settings → Devices → Add a device.",
                 style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), singleLine = true,
@@ -459,6 +464,14 @@ private fun Pair(tag: String, link: String, cancel: (() -> Unit)?, status: Strin
         }
     }
 }
+
+// the pairing screen and the hub list for the WebView shell (WebShell.kt)
+@Composable
+internal fun PairScreen(tag: String, cancel: (() -> Unit)?, status: String = "", repair: Boolean = false, done: (String) -> Unit) =
+    Pair(tag, "", cancel, status, repair, done)
+
+@Composable
+internal fun HubsScreen(m: AppModel, s: Screen, back: () -> Unit) = Hubs(m, s, back)
 
 // the hubs this phone is paired with (the cross unpairs), the owner's
 // other machines they know of (one tap pairs), and a field for a new link
