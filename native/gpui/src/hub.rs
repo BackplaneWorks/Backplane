@@ -8,17 +8,21 @@ use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Select(String), Send(String), Draft(String), Action(String,String) }
 #[derive(Debug)] pub enum Event { Picture(Value), Status(String), Accepted, Error(String) }
-#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf }
+#[derive(Clone)] pub struct Config { pub hub:String, pub token_file:PathBuf, pub exit_after:Option<f64>, pub script:Option<PathBuf> }
 impl Config {
     pub fn parse() -> Result<Self> {
         let home=std::env::var("HOME")?;
-        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token")};
+        let mut config=Self{hub:"ws://100.64.84.41:3799".into(),token_file:PathBuf::from(&home).join(".backplane-gpui/token"),exit_after:None,script:std::env::var_os("BACKPLANE_GPUI_SCRIPT").map(PathBuf::from)};
         let mut args=std::env::args().skip(1);
         while let Some(arg)=args.next() { match arg.as_str() {
-            "--hub"=>config.hub=args.next().context("--hub needs a URL")?,
+            "--hub"|"--url"=>config.hub=args.next().context("--url needs a URL")?,
+            "--exit-after"=>config.exit_after=Some(args.next().context("--exit-after needs seconds")?.parse()?),
+            "--script"=>config.script=Some(PathBuf::from(args.next().context("--script needs a file")?)),
             "--token-file"=>config.token_file=PathBuf::from(args.next().context("--token-file needs a path")?),
-            _=>anyhow::bail!("usage: backplane-gpui [--hub ws://HOST:PORT] [--token-file FILE]")
+            _=>anyhow::bail!("usage: backplane-gpui [--url http://HOST:PORT] [--token-file FILE] [--exit-after SECONDS] [--script FILE]")
         }}
+        config.hub=config.hub.trim_end_matches('/').to_string();
+        if let Some(rest)=config.hub.strip_prefix("http://") {config.hub=format!("ws://{rest}");}
         ensure!(config.hub.starts_with("ws://") && !config.hub.contains(['?','#','@']) && !config.hub.trim_end_matches('/').ends_with(":3787"),"experiment needs an explicit ws:// hub on a separate port");
         let token_path=std::fs::canonicalize(&config.token_file).context("experiment token file missing; start its hub first")?;
         ensure!(!token_path.starts_with(PathBuf::from(home).join(".backplane-bend")),"live home refused");
