@@ -1336,8 +1336,9 @@ function mountOne(canvas) {
   if (place !== view.place || board !== view.board) { view.place = place; view.board = board; view.relight(); }
   // the probe the hub keeps (data-probe); a tap's own shows until it comes
   const probe = canvas.dataset.probe ?? "";
-  if (probe !== view.hubProbe) { view.hubProbe = probe; if (probe !== view.probe) view.follow = true; view.probe = probe; view.relight(); }
-  if (!probe && card?.view === view) inspectCard(view, null);
+  // (the card goes when the hub's probe is cleared, not on a render that
+  // still carries the probe from before the tap)
+  if (probe !== view.hubProbe) { view.hubProbe = probe; if (probe !== view.probe) view.follow = true; view.probe = probe; view.relight(); if (!probe && card?.view === view) inspectCard(view, null); }
   present(view);
   view.pins();
   const fade = Number(canvas.dataset.fade || 0);
