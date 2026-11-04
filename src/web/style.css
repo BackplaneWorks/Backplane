@@ -3070,6 +3070,10 @@ html.phone .mailroom .mail-row { min-height: 56px; }
 .app.phone .room-view > .thread-head > .back, .app.phone .room-view > .thread-head > .title { display: none; }
 .app.phone .bot-head { padding: 6px 12px; }
 .app.phone .bot-head .cat { width: 40px; height: 40px; }
+.app.phone .bot-head :is(.mood, .bot-model) { font-size: 13px; }
+/* typing to a bot with the keyboard up: its cat row and hint give their
+   room to the conversation and the composer */
+html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-hint) { display: none; }
 .app.phone .room-view > .thread-head { min-height: 44px; padding: 4px 12px; }
 .app.phone .room-view > .thread-head .tools button { min-height: 44px; min-width: 44px; }
 .app.phone .room-view .composer :is(button, textarea) { min-height: 44px; }
