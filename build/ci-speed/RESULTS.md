@@ -1343,5 +1343,6 @@ Fresh rebased-code Python controls:94/94 passed4.830s on normal Boat
 cgroup peak109,281,280B/VmHWM40,720KiB, zero limit/OOM events. Whole worker
 12.96s,19credit-s/$0.00019, deletion verified. These are mock-based tooling
 controls, not Bend/proof/gate qualification; no actual-repo pass was seeded.
-Approved daily-runner/premerge transport compatibility is the remaining
-landing dependency; no runner exception or guard relaxation is assumed.
+The approved daily-runner/premerge dependency landed in PR906; the rebased
+cache code/helper bytes remain exact to the tested source. Fresh final-head
+Boat merged-shape validation is still required, with no guard exception.
