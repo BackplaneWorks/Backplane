@@ -5804,12 +5804,13 @@ def View.chrome.order(buying: Bool) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
-# a phone's one top bar also holds the rail's views (its menu, as the rail
-# shows it) and Buy it; style.css shows them only where the rail is hidden
+# a phone's one top bar also holds Buy it and the rail's views (its menu,
+# as the rail shows it, in the corner); style.css shows them only where
+# the rail is hidden
 def View.chrome.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
   D.El{"div", "top-views", [D.At{"class", "top-views"}],
-    View.workspace.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))
-      <> View.workspace.buy(U.Fab.rail(u))}
+    List.append(&2, D.Node, View.workspace.buy(U.Fab.rail(u)),
+      [View.workspace.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))])}
 
 # a thread: its project, its title (a click renames it) and ▾ its menu, then
 # its cells; a project name cut short ends in "…" and its tooltip is whole
@@ -5974,11 +5975,11 @@ def View.phone.views.menu(+lc: I.Loc, +cur: String, term: Bool, palette: Bool) -
 
 def View.phone.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
   D.El{"div", "top-views", [D.At{"class", "top-views"}],
-    View.phone.views.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))
-      <> View.workspace.buy(U.Fab.rail(u))}
+    List.append(&2, D.Node, View.workspace.buy(U.Fab.rail(u)),
+      [View.phone.views.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))])}
 
-# a thread: ‹, its title (a tap renames it) over its project, ▾ its menu and
-# its views; its state's cells (B's) ride in a row under the header
+# a thread: ‹, its title (a tap renames it) over its project, ▾ its menu,
+# Buy it and its views (in the corner); its state's cells (B's) ride in a row under the header
 def View.phone.head.thread(+lc: I.Loc, +back: List<&2, D.Node>, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
   match u t:
     case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, pending, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, gone}:
