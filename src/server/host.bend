@@ -48,6 +48,25 @@ def Sock.send_preview(sock: Socket, path: String, ctype: String, range: String) 
   IO(Socket & Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
+# Static route policy is chosen in Bend; the effect owns only opening the
+# preferred gzip/plain file and streaming its HTTP bytes. No payload cache.
+type StaticFile is Data:
+  StaticFile{path: String, ctype: String, cache: String, extra: String, coding: U32, piece: U32}
+
+def Static.coding(gzip: Bool) -> U32:
+  Bool.pick(U32, gzip, 1, 0)
+
+def Static.piece() -> U32:
+  65536
+
+# Successful regular, nonempty files have the original HTTP headers and
+# exact bytes. A missing/unopenable/empty preferred gzip falls back to plain;
+# no usable candidate gives the existing 404. Yield after each bounded piece,
+# park on backpressure, and release the descriptor on error or 30s stall.
+def Sock.send_static(sock: Socket, request: StaticFile) ->
+  IO(Socket & Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
 
 # Stream an immutable bounded binary asset without a Bend list per byte.
 # The caller owns authorization, the HTTP header and a validated cache path.
