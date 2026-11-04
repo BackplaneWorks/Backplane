@@ -2199,6 +2199,16 @@ def View.settings.scale(vs: List<&2, String>, +cur: U32) -> List<&2, D.Node>:
     case +v <> t:
       D.Dom.button(Bool.pick(String, U32.is_eq(TS.Scale.read(v), cur), "on", ""), "setting", "ui.text_scale=" ++ v, TS.Scale.label(v), TS.Scale.label(v)) <> View.settings.scale(t, cur)
 
+# a phone's way out of the phone layout (phone-other.js's
+# [data-ph-layout]: kept for this browser, as ?phone=0 is); a phone on the
+# computer layout gets a "Phone layout" button back
+def View.settings.phone.layout(phone: Bool) -> List<&2, D.Node>:
+  match phone:
+    case True{}:
+      [View.setrow("Layout on this phone", "The phone layout shows one screen at a time. The computer layout shows the sidebar, thread and viewer together, small; a Phone layout button brings this one back.",
+        [D.El{"button", "", [D.At{"type", "button"}, D.At{"data-ph-layout", "0"}], [D.Txt{"Use the computer layout"}]}])]
+    case False{}: Nil{}
+
 # a phone's own notifications: the browser asks only on a tap on Allow
 # (phone-other.js's [data-ph-notify]), and html's ph-notify-* class says
 # which of the words shows (granted, denied, unavailable here)
@@ -2226,7 +2236,8 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
     case 0n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.theme(lc), MSG.T.settings.theme.note(lc), View.chips.loc(lc, ["dark", "light"], Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), "light", "dark"), "ui.theme"))],
       View.lang.loc(lc, u),
       [View.setrow(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), View.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view"))],
-      [View.setrow(MSG.T.settings.textsize(lc), MSG.T.settings.textsize.note(lc), View.settings.scale(TS.Scale.options(), TS.Scale.of(st)))]])
+      [View.setrow(MSG.T.settings.textsize(lc), MSG.T.settings.textsize.note(lc), View.settings.scale(TS.Scale.options(), TS.Scale.of(st)))],
+      View.settings.phone.layout(PHN.Phone.on(u))])
     case 1n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.settle(lc), U.Settings.settle.note(lc, st), View.chips.loc(lc, ["0", "5", "10", "15", "30", "60"], M.Setting.get(st, "settle.idle.minutes", "15"), "settle.idle.minutes"))],
       [View.setrow(MSG.T.settings.settle.personal(lc), MSG.T.settings.settle.personal.note(lc), View.chips.loc(lc, ["0", "60", "120", "240", "480"], M.Setting.get(st, "settle.personal.minutes", "240"), "settle.personal.minutes"))],
       [View.setrow(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],

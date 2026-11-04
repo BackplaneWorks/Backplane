@@ -3139,6 +3139,8 @@ html.ph-kb .app.phone .room-view > .composer { padding-bottom: 6px; }
    button sits (the hub's toasts: phone: shell) */
 html.phone #reconnect-note { top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + 52px) !important; bottom: auto !important; left: 0 !important; right: 0 !important; max-width: none !important; opacity: 1 !important; padding: 10px 16px !important; font-size: 14px !important; text-align: center; border-width: 0 0 1px !important; z-index: 150 !important; }
 html.phone.ph-short #reconnect-note { top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + 40px) !important; }
+/* a phone that chose the computer layout: the way back (phone-other.js) */
+.ph-layout-back { position: fixed; z-index: 12001; left: max(8px, env(safe-area-inset-left)); bottom: max(8px, env(safe-area-inset-bottom)); min-height: 44px; padding: 0 14px; border: 1px solid var(--accent); background: var(--raise); color: var(--accent); font-size: 14px; }
 /* the Bots tab with no bot yet: what one is and how to make one */
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child { flex-wrap: wrap; }
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child::after { content: "No bots yet. A bot is an agent that stays between chats, with a name, a cat and a memory: mention it in any message (@scout look at the BOM). Tap + to make one."; flex: 1 1 100%; padding: 8px 0 12px; color: var(--dim); font-size: 14px; font-weight: normal; text-transform: none; letter-spacing: normal; line-height: 1.5; white-space: normal; }
