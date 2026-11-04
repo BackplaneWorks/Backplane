@@ -21,11 +21,12 @@ def Static.sent(r: Socket & Result<&1, &1, U32 & String, Unit>) -> IO(Socket):
   (s, _) = r
   IO.pure(Socket, s)
 
-# Path policy and gzip preference still come from the existing server route.
-# The host opens one candidate, writes the original headers and streams bytes.
-def Static.send(+gz: Bool, s: Socket, +web: String, +path: String) -> IO(Unit):
+# Path policy and the encoding preference (H.Static.coding) still come from
+# the existing server route. The host opens one candidate (.br, .gz, plain),
+# writes the original headers and streams bytes.
+def Static.send(+coding: U32, s: Socket, +web: String, +path: String) -> IO(Unit):
   do IO<Unit>:
     sent : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_static(s,
-      H.StaticFile{web ++ path, W.Http.ctype(path), Static.cache(path), Static.frames(path), H.Static.coding(gz), H.Static.piece()})
+      H.StaticFile{web ++ path, W.Http.ctype(path), Static.cache(path), Static.frames(path), coding, H.Static.piece()})
     s2 : Socket <- Static.sent(sent)
     Socket.close(s2)

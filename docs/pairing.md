@@ -8,7 +8,9 @@ Web clients show Pairing link, QR code and Short code as equal choices. The
 QR choice includes an app-styled image picker; images are decoded locally.
 Connection and device screens use the same light/dark theme as Settings.
 Device names start with the advertised OS and browser (or Desktop) and remain
-editable; no permission or network lookup is needed.
+editable; no permission or network lookup is needed. A browser's enrolment answers its own device id
+(never its credential), so a phone's Devices list marks and lists first This
+device.
 
 An invitation expires after ten minutes and works once, whether redeemed by
 link, QR or code. Create a separate invitation for each device. Wrong, expired,

@@ -10,12 +10,12 @@ def T.plain.nrrrlrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, S
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.item.hierlabel(l)}
+      Some{CAT_0.T.viewer.item.sheet(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlllll.cmp(String.cmp(key, "viewer.item.hierlabel"), l)
+  T.plain.nrrrlrlllll.cmp(String.cmp(key, "viewer.item.sheet"), l)
 
 def T.plain.nrrrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -23,12 +23,12 @@ def T.plain.nrrrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       T.plain.nrrrlrlllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.item.label(l)}
+      Some{CAT_0.T.viewer.item.sheetpin(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrllll.cmp(String.cmp(key, "viewer.item.label"), l)
+  T.plain.nrrrlrllll.cmp(String.cmp(key, "viewer.item.sheetpin"), l)
 
 def T.plain.nrrrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -36,12 +36,12 @@ def T.plain.nrrrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.item.sheet(l)}
+      Some{CAT_0.T.viewer.item.track(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlllr.cmp(String.cmp(key, "viewer.item.sheet"), l)
+  T.plain.nrrrlrlllr.cmp(String.cmp(key, "viewer.item.track"), l)
 
 def T.plain.nrrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -49,12 +49,12 @@ def T.plain.nrrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlrllll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.item.netclassflag(l)}
+      Some{CAT_0.T.viewer.item.symbol(l)}
     case GT{}:
       T.plain.nrrrlrlllr(l, key)
 
 def T.plain.nrrrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlll.cmp(String.cmp(key, "viewer.item.netclassflag"), l)
+  T.plain.nrrrlrlll.cmp(String.cmp(key, "viewer.item.symbol"), l)
 
 def T.plain.nrrrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -62,12 +62,12 @@ def T.plain.nrrrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.item.symbol(l)}
+      Some{CAT_0.T.viewer.item.zone(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrllrl.cmp(String.cmp(key, "viewer.item.symbol"), l)
+  T.plain.nrrrlrllrl.cmp(String.cmp(key, "viewer.item.zone"), l)
 
 def T.plain.nrrrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -75,12 +75,12 @@ def T.plain.nrrrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.item.via(l)}
+      Some{CAT_0.T.viewer.kicad10(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrllrr.cmp(String.cmp(key, "viewer.item.via"), l)
+  T.plain.nrrrlrllrr.cmp(String.cmp(key, "viewer.kicad10"), l)
 
 def T.plain.nrrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -88,12 +88,12 @@ def T.plain.nrrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlrllrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.item.track(l)}
+      Some{CAT_0.T.viewer.kicad.tip(l)}
     case GT{}:
       T.plain.nrrrlrllrr(l, key)
 
 def T.plain.nrrrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrllr.cmp(String.cmp(key, "viewer.item.track"), l)
+  T.plain.nrrrlrllr.cmp(String.cmp(key, "viewer.kicad.tip"), l)
 
 def T.plain.nrrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -101,12 +101,12 @@ def T.plain.nrrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrlrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.item.sheetpin(l)}
+      Some{CAT_0.T.viewer.item.via(l)}
     case GT{}:
       T.plain.nrrrlrllr(l, key)
 
 def T.plain.nrrrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrll.cmp(String.cmp(key, "viewer.item.sheetpin"), l)
+  T.plain.nrrrlrll.cmp(String.cmp(key, "viewer.item.via"), l)
 
 def T.plain.nrrrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -114,12 +114,12 @@ def T.plain.nrrrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.kicad.tip(l)}
+      Some{CAT_0.T.viewer.layers(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlrll.cmp(String.cmp(key, "viewer.kicad.tip"), l)
+  T.plain.nrrrlrlrll.cmp(String.cmp(key, "viewer.layers"), l)
 
 def T.plain.nrrrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -127,12 +127,12 @@ def T.plain.nrrrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.kicad10.tip(l)}
+      Some{CAT_0.T.viewer.layers.all.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlrlr.cmp(String.cmp(key, "viewer.kicad10.tip"), l)
+  T.plain.nrrrlrlrlr.cmp(String.cmp(key, "viewer.layers.all.tip"), l)
 
 def T.plain.nrrrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -140,12 +140,12 @@ def T.plain.nrrrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlrlrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.kicad10(l)}
+      Some{CAT_0.T.viewer.layers.all(l)}
     case GT{}:
       T.plain.nrrrlrlrlr(l, key)
 
 def T.plain.nrrrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlrl.cmp(String.cmp(key, "viewer.kicad10"), l)
+  T.plain.nrrrlrlrl.cmp(String.cmp(key, "viewer.layers.all"), l)
 
 def T.plain.nrrrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -153,12 +153,12 @@ def T.plain.nrrrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.layers.all(l)}
+      Some{CAT_0.T.viewer.layers.dim.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlrrl.cmp(String.cmp(key, "viewer.layers.all"), l)
+  T.plain.nrrrlrlrrl.cmp(String.cmp(key, "viewer.layers.dim.tip"), l)
 
 def T.plain.nrrrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -166,12 +166,12 @@ def T.plain.nrrrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.layers.dim(l)}
+      Some{CAT_0.T.viewer.layers.only.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlrrr.cmp(String.cmp(key, "viewer.layers.dim"), l)
+  T.plain.nrrrlrlrrr.cmp(String.cmp(key, "viewer.layers.only.tip"), l)
 
 def T.plain.nrrrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -179,12 +179,12 @@ def T.plain.nrrrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlrlrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.layers.all.tip(l)}
+      Some{CAT_0.T.viewer.layers.only(l)}
     case GT{}:
       T.plain.nrrrlrlrrr(l, key)
 
 def T.plain.nrrrlrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlrr.cmp(String.cmp(key, "viewer.layers.all.tip"), l)
+  T.plain.nrrrlrlrr.cmp(String.cmp(key, "viewer.layers.only"), l)
 
 def T.plain.nrrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -192,12 +192,12 @@ def T.plain.nrrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrlrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.layers(l)}
+      Some{CAT_0.T.viewer.layers.dim(l)}
     case GT{}:
       T.plain.nrrrlrlrr(l, key)
 
 def T.plain.nrrrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrlr.cmp(String.cmp(key, "viewer.layers"), l)
+  T.plain.nrrrlrlr.cmp(String.cmp(key, "viewer.layers.dim"), l)
 
 def T.plain.nrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -205,40 +205,14 @@ def T.plain.nrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrrlrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.item.zone(l)}
+      Some{CAT_0.T.viewer.kicad10.tip(l)}
     case GT{}:
       T.plain.nrrrlrlr(l, key)
 
 def T.plain.nrrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrl.cmp(String.cmp(key, "viewer.item.zone"), l)
+  T.plain.nrrrlrl.cmp(String.cmp(key, "viewer.kicad10.tip"), l)
 
 def T.plain.nrrrlrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
-  ((key, _), c) = r
-  match c:
-    case LT{}:
-      None{}
-    case EQ{}:
-      Some{CAT_0.T.viewer.layers.only(l)}
-    case GT{}:
-      None{}
-
-def T.plain.nrrrlrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrllll.cmp(String.cmp(key, "viewer.layers.only"), l)
-
-def T.plain.nrrrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
-  ((key, _), c) = r
-  match c:
-    case LT{}:
-      T.plain.nrrrlrrllll(l, key)
-    case EQ{}:
-      Some{CAT_0.T.viewer.layers.only.tip(l)}
-    case GT{}:
-      None{}
-
-def T.plain.nrrrlrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrlll.cmp(String.cmp(key, "viewer.layers.only.tip"), l)
-
-def T.plain.nrrrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
   match c:
     case LT{}:
@@ -248,8 +222,34 @@ def T.plain.nrrrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case GT{}:
       None{}
 
+def T.plain.nrrrlrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nrrrlrrllll.cmp(String.cmp(key, "viewer.layers.restore"), l)
+
+def T.plain.nrrrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      T.plain.nrrrlrrllll(l, key)
+    case EQ{}:
+      Some{CAT_0.T.viewer.layers.tip(l)}
+    case GT{}:
+      None{}
+
+def T.plain.nrrrlrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nrrrlrrlll.cmp(String.cmp(key, "viewer.layers.tip"), l)
+
+def T.plain.nrrrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      None{}
+    case EQ{}:
+      Some{CAT_0.T.viewer.mech(l)}
+    case GT{}:
+      None{}
+
 def T.plain.nrrrlrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrllr.cmp(String.cmp(key, "viewer.layers.restore"), l)
+  T.plain.nrrrlrrllr.cmp(String.cmp(key, "viewer.mech"), l)
 
 def T.plain.nrrrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -257,12 +257,12 @@ def T.plain.nrrrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlrrlll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.layers.reset(l)}
+      Some{CAT_0.T.viewer.loading(l)}
     case GT{}:
       T.plain.nrrrlrrllr(l, key)
 
 def T.plain.nrrrlrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrll.cmp(String.cmp(key, "viewer.layers.reset"), l)
+  T.plain.nrrrlrrll.cmp(String.cmp(key, "viewer.loading"), l)
 
 def T.plain.nrrrlrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -270,12 +270,12 @@ def T.plain.nrrrlrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.loading(l)}
+      Some{CAT_0.T.viewer.mech.renders(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrlrl.cmp(String.cmp(key, "viewer.loading"), l)
+  T.plain.nrrrlrrlrl.cmp(String.cmp(key, "viewer.mech.renders"), l)
 
 def T.plain.nrrrlrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -283,12 +283,12 @@ def T.plain.nrrrlrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.mech.loading(l)}
+      Some{CAT_0.T.viewer.mention(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrlrr.cmp(String.cmp(key, "viewer.mech.loading"), l)
+  T.plain.nrrrlrrlrr.cmp(String.cmp(key, "viewer.mention"), l)
 
 def T.plain.nrrrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -296,12 +296,12 @@ def T.plain.nrrrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlrrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.mech(l)}
+      Some{CAT_0.T.viewer.mech.tip(l)}
     case GT{}:
       T.plain.nrrrlrrlrr(l, key)
 
 def T.plain.nrrrlrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrlr.cmp(String.cmp(key, "viewer.mech"), l)
+  T.plain.nrrrlrrlr.cmp(String.cmp(key, "viewer.mech.tip"), l)
 
 def T.plain.nrrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -309,12 +309,12 @@ def T.plain.nrrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrlrrll(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.layers.tip(l)}
+      Some{CAT_0.T.viewer.mech.loading(l)}
     case GT{}:
       T.plain.nrrrlrrlr(l, key)
 
 def T.plain.nrrrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrl.cmp(String.cmp(key, "viewer.layers.tip"), l)
+  T.plain.nrrrlrrl.cmp(String.cmp(key, "viewer.mech.loading"), l)
 
 def T.plain.nrrrlrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -322,40 +322,14 @@ def T.plain.nrrrlrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{CAT_0.T.viewer.mech.tip(l)}
+      Some{CAT_0.T.viewer.orbit.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrrlrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrrll.cmp(String.cmp(key, "viewer.mech.tip"), l)
+  T.plain.nrrrlrrrll.cmp(String.cmp(key, "viewer.orbit.tip"), l)
 
 def T.plain.nrrrlrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
-  ((key, _), c) = r
-  match c:
-    case LT{}:
-      None{}
-    case EQ{}:
-      Some{CAT_0.T.viewer.mesh.failed(l)}
-    case GT{}:
-      None{}
-
-def T.plain.nrrrlrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrrlr.cmp(String.cmp(key, "viewer.mesh.failed"), l)
-
-def T.plain.nrrrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
-  ((key, _), c) = r
-  match c:
-    case LT{}:
-      T.plain.nrrrlrrrll(l, key)
-    case EQ{}:
-      Some{CAT_0.T.viewer.mention(l)}
-    case GT{}:
-      T.plain.nrrrlrrrlr(l, key)
-
-def T.plain.nrrrlrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrrl.cmp(String.cmp(key, "viewer.mention"), l)
-
-def T.plain.nrrrlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
   match c:
     case LT{}:
@@ -365,10 +339,23 @@ def T.plain.nrrrlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case GT{}:
       None{}
 
-def T.plain.nrrrlrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrrrl.cmp(String.cmp(key, "viewer.page.empty"), l)
+def T.plain.nrrrlrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nrrrlrrrlr.cmp(String.cmp(key, "viewer.page.empty"), l)
 
-def T.plain.nrrrlrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+def T.plain.nrrrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      T.plain.nrrrlrrrll(l, key)
+    case EQ{}:
+      Some{CAT_0.T.viewer.orbit.touch(l)}
+    case GT{}:
+      T.plain.nrrrlrrrlr(l, key)
+
+def T.plain.nrrrlrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nrrrlrrrl.cmp(String.cmp(key, "viewer.orbit.touch"), l)
+
+def T.plain.nrrrlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
   match c:
     case LT{}:
@@ -378,8 +365,21 @@ def T.plain.nrrrlrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case GT{}:
       None{}
 
+def T.plain.nrrrlrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nrrrlrrrrl.cmp(String.cmp(key, "viewer.pan.tip"), l)
+
+def T.plain.nrrrlrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      None{}
+    case EQ{}:
+      Some{CAT_0.T.viewer.parts3d.tip(l)}
+    case GT{}:
+      None{}
+
 def T.plain.nrrrlrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrrrr.cmp(String.cmp(key, "viewer.pan.tip"), l)
+  T.plain.nrrrlrrrrr.cmp(String.cmp(key, "viewer.parts3d.tip"), l)
 
 def T.plain.nrrrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -387,12 +387,12 @@ def T.plain.nrrrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrrlrrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.page.loading(l)}
+      Some{CAT_0.T.viewer.pan.touch(l)}
     case GT{}:
       T.plain.nrrrlrrrrr(l, key)
 
 def T.plain.nrrrlrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrrr.cmp(String.cmp(key, "viewer.page.loading"), l)
+  T.plain.nrrrlrrrr.cmp(String.cmp(key, "viewer.pan.touch"), l)
 
 def T.plain.nrrrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -400,12 +400,12 @@ def T.plain.nrrrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrrlrrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.orbit.tip(l)}
+      Some{CAT_0.T.viewer.page.loading(l)}
     case GT{}:
       T.plain.nrrrlrrrr(l, key)
 
 def T.plain.nrrrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrrr.cmp(String.cmp(key, "viewer.orbit.tip"), l)
+  T.plain.nrrrlrrr.cmp(String.cmp(key, "viewer.page.loading"), l)
 
 def T.plain.nrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -413,12 +413,12 @@ def T.plain.nrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrrlrrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.mech.renders(l)}
+      Some{CAT_0.T.viewer.mesh.failed(l)}
     case GT{}:
       T.plain.nrrrlrrr(l, key)
 
 def T.plain.nrrrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlrr.cmp(String.cmp(key, "viewer.mech.renders"), l)
+  T.plain.nrrrlrr.cmp(String.cmp(key, "viewer.mesh.failed"), l)
 
 def T.plain.nrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -426,9 +426,9 @@ def T.plain.nrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrrrlrl(l, key)
     case EQ{}:
-      Some{CAT_0.T.viewer.layers.dim.tip(l)}
+      Some{CAT_0.T.viewer.layers.reset(l)}
     case GT{}:
       T.plain.nrrrlrr(l, key)
 
 def T.plain.nrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrrlr.cmp(String.cmp(key, "viewer.layers.dim.tip"), l)
+  T.plain.nrrrlr.cmp(String.cmp(key, "viewer.layers.reset"), l)

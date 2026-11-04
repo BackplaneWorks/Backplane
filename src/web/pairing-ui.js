@@ -21,7 +21,7 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     document.getElementById('root')?.setAttribute('inert', '');
     const card = element('section', '', panel, {class: 'pairing-card'});
     element('h1', title, card);element('p', lead, card, {class: 'pairing-lead'});
-    if (dismissible) { button(card, 'Back', close);panel.dataset.dismissible = '1'; }
+    if (dismissible) { button(card, 'Back', close).classList.add('pairing-back');panel.dataset.dismissible = '1'; }
     return card;
   }
   // Esc leaves a screen that has Back (Devices), before any other key
@@ -42,6 +42,9 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       const r = await fetch('/auth/enroll', {method: 'POST', cache: 'no-store', credentials: 'same-origin', redirect: 'error', signal: abort.signal,
         headers: {Authorization: 'Bearer ' + secret, 'X-Backplane-Name': name.replace(/[^\x20-\x7e]/g, '').slice(0, 80)}});
       const result = await r.json();if (!r.ok || result.error) throw Error(result.error || 'pairing_required');
+      // which device this browser is, for Devices' "This device" (an id
+      // /auth/devices lists anyway; never the credential)
+      try { if (typeof result.device === 'string' && result.device) globalThis.localStorage?.setItem('backplane-device', result.device); } catch {}
       close();onPaired();
     } catch (e) { throw Error(pairingErrors[e.message] ? e.message : 'hub_unreachable'); }
     finally { clearTimeout(timer); }
@@ -141,12 +144,20 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     const connectCode = () => { try { void connect(codeLink(address.value, code.value)); } catch (e) { error(status, e.message); } };
     button(codes, 'Connect with code', connectCode).classList.add('primary');
     code.addEventListener('keydown', e => { if (e.key === 'Enter') connectCode(); });
-    selectMethod(0);
+    // a home-screen app (its own cookies, so it pairs again) cannot be
+    // opened by a pairing link: it starts on the short code
+    const standalone = !pending && (navigator?.standalone === true || !!globalThis.matchMedia?.('(display-mode: standalone)')?.matches);
+    selectMethod(standalone ? 2 : 0);
+    if (standalone) element('p', 'Opened from the Home Screen: enter the short code from Settings → Devices → Add a device on your paired device.', card, {class: 'pairing-help pairing-standalone'});
     if (pending) {
-      button(card, 'Connect this device', async () => { status.classList.remove('bad');status.textContent = 'Connecting…';try { await enroll(pending.secret, name.value); } catch(e) { error(status,e.message); } }).classList.add('primary');
-      element('a', 'Open in Backplane', card, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
+      const actions = element('div', '', card, {class: 'pairing-pending'});
+      element('p', 'Or connect another way:', card, {class: 'pairing-or'});
+      button(actions, 'Connect this device', async () => { status.classList.remove('bad');status.textContent = 'Connecting…';try { await enroll(pending.secret, name.value); } catch(e) { error(status,e.message); } }).classList.add('primary');
+      element('a', 'Open in Backplane', actions, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
     }
-    link.focus();
+    // (a phone raises its keyboard for it, over a pairing link's Connect)
+    if (standalone) code.focus({preventScroll: true});
+    else if (!pending || !document.documentElement.classList.contains('phone')) link.focus();
   }
   function invitationState(x) {
     const thing = x.kind === 'machine' ? 'a machine' : 'a device', its = x.kind === 'machine' ? 'the machine it linked' : 'the device it paired';
@@ -193,10 +204,13 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       try {
         const result = await request('/auth/devices');if (!panel?.contains(card)) return;
         list.replaceChildren();element('h2', 'Paired devices', list);
-        const active = result.devices.filter(d => !d.revoked);
+        // (a phone marks itself, first: every phone is "iPhone / Safari")
+        let mine = '';try { mine = document.documentElement.classList.contains('phone') ? globalThis.localStorage?.getItem('backplane-device') || '' : ''; } catch {}
+        const active = result.devices.filter(d => !d.revoked).sort((a, b) => (b.id === mine) - (a.id === mine));
         if (!active.length) element('p', 'Existing pairings are preserved. Devices added with new invitations appear here.', list);
         for (const d of active) {
           const row = element('div', '', list, {class: 'pairing-device'});element('strong', d.name, row);
+          if (mine && d.id === mine) element('span', 'This device', row, {class: 'pairing-this'});
           element('p', 'Last seen ' + new Date(d.lastSeen).toLocaleString(), row);
           button(row, 'Revoke', async () => { if (!globalThis.confirm('Revoke access for ' + d.name + '?')) return;try { await request('/auth/revoke', 'POST', {'X-Backplane-Device': d.id});await refresh(); } catch(e) { error(status, e.message); } });
         }

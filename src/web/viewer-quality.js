@@ -118,7 +118,7 @@ export class ViewerQuality {
     return promise;
   }
   settle(delay = 80) { clearTimeout(this.settleTimer); this.settleTimer = setTimeout(() => { if (this.alive) this.renderer?.setInteractive(false); }, delay); }
-  message(text) { if (this.note && this.note.textContent !== text) this.note.textContent = text; }
+  message(text) { if (this.note && this.note.textContent !== text) { this.note.textContent = text; this.note.title = text; } }
   show(on) {
     const changed = this.visible !== !!on;
     this.visible = !!on;

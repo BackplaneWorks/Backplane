@@ -20,6 +20,8 @@ body.pairing-pending #root { visibility: hidden; }
 .pairing-method[hidden], .pairing-file { display: none; }
 .pairing-status { margin: 12px 0; color: var(--dim); }
 .pairing-status:empty { display: none; }
+/* (a phone shows it between a pairing link's Connect and the other ways in) */
+.pairing-or { display: none; }
 .pairing-status.bad { color: var(--bad); }
 .pairing-code { font: 700 32px var(--mono); letter-spacing: .12em; color: var(--text); }
 /* QR modules require a light quiet zone in either theme, independent of UI

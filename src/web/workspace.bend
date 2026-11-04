@@ -291,8 +291,50 @@ def WS.stop.k(running: Bool, u: U.Ui) -> U.Act:
 def WS.stop(+u: U.Ui) -> U.Act:
   WS.stop.k(WS.stop.available(u), u)
 
+# a command that acts on the open thread (its terminal, viewers, name,
+# pin, settle, snooze, to-dos...) or its project, or a keyboard's key list:
+# a phone's palette on a root tab, no thread open, leaves these out
+# instead of offering them only to say "select a thread first"
+def WS.scoped(+a: String) -> Bool:
+  match a:
+    case "ws-term-here": True{}
+    case "ws-term-hide": True{}
+    case "row-rename": True{}
+    case "fork": True{}
+    case "delete": True{}
+    case "view-kind": True{}
+    case "mech": True{}
+    case "diff": True{}
+    case "rv-page": True{}
+    case "panel": True{}
+    case "fm": True{}
+    case "thread-child": True{}
+    case "pin": True{}
+    case "unpin": True{}
+    case "settle": True{}
+    case "unsettle": True{}
+    case "archive": True{}
+    case "unarchive": True{}
+    case "snooze": True{}
+    case "proj-remove": True{}
+    case "ws-keys": True{}
+    case "": True{}
+    case "fold": True{}
+    case _: False{}
+
+def WS.unscoped(xs: List<&2, U.PItem>) -> List<&2, U.PItem>:
+  match xs:
+    case Nil{}: Nil{}
+    case U.PItem{+l, +a, +v} <> t: U.Palette.filter.k(Bool.not(WS.scoped(a)), U.PItem{l, a, v}, WS.unscoped(t))
+
+def WS.commands.for(bare: Bool, xs: List<&2, U.PItem>) -> List<&2, U.PItem>:
+  match bare:
+    case True{}: WS.unscoped(xs)
+    case False{}: xs
+
 def WS.commands(+u: U.Ui) -> List<&2, U.PItem>:
-  List.append(&2, U.PItem, WS.stop.command(WS.stop.available(u)), WS.commands.k(u, WS.cmds(u)))
+  WS.commands.for(Bool.and(String.eq(U.Ui.info(u, "local.workspace.form"), "phone"), String.is_empty(U.Ui.sel(u))),
+    List.append(&2, U.PItem, WS.stop.command(WS.stop.available(u)), WS.commands.k(u, WS.cmds(u))))
 
 def WS.projects(xs: List<&2, M.Project>) -> List<&2, U.PItem>:
   match xs:
@@ -399,9 +441,16 @@ def WS.row.thread(+u: U.Ui, +dot: String, +t: M.Thread, +label: String, +place: 
 # title, what it wants (a red row's question, approval or failure: the
 # sidebar's word) and its project (U.Palette.place), so it can't pass for a
 # command
+# (a phone has no keyboard to press them with: its rows are the names
+# alone, client.bend's Palette.name, "New thread" for "New thread · Ctrl+N")
+def WS.row.text(phone: Bool, +label: String) -> String:
+  match phone:
+    case True{}: U.Palette.name(label)
+    case False{}: label
+
 def WS.row.face(thread: Bool, +u: U.Ui, +label: String, +place: String, +v: String) -> List<&2, D.Node>:
   match thread:
-    case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{label}])
+    case False{}: Bool.pick(List<&2, D.Node>, String.starts_with(label, "Stop the running turn ·"), [D.Txt{"Stop the running turn "}, D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl+."}]}], [D.Txt{WS.row.text(String.eq(U.Ui.info(u, "local.workspace.form"), "phone"), label)}])
     case True{}:
       +t = U.Ui.thread(U.Ui.state(u), v)
       WS.row.thread(u, U.Palette.dot(u, t), t, label, place)

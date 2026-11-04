@@ -949,8 +949,49 @@ def KN.ipc(n: Maybe<&2, KH.KNote>, +servers: String) -> Maybe<&2, KH.KNote>:
     case Some{x}: Some{x}
     case None{}: KH.KH.ipc.notice(KSV.KS.failed.project(servers), KSV.KS.name(KSV.KS.failed.project(servers)), KSV.KS.failed.why(servers))
 
-def KN.of(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
+# Installing Backplane KiCad: info kicad.install is "installing" from the
+# press (Ui.act 21) until the hub says "installed" or "failed" (server
+# Install.go, why in kicad.install.why), and the notice says which at once
+def KN.install.act(+state: String, +l: String) -> KH.KAct:
+  match state:
+    case "installing": KH.KAct{"Installing…", "kicad-installing", ""}
+    case "installed": KH.KAct{"Installed", "kicad-installed", ""}
+    case "failed": KH.KAct{"Retry install", "kicad-install", ""}
+    case _: KH.KAct{l, "kicad-install", ""}
+
+def KN.install.acts(+state: String, as: List<&2, KH.KAct>) -> List<&2, KH.KAct>:
+  match as:
+    case Nil{}: Nil{}
+    case KH.KAct{+l, "kicad-install", _} <> t: KN.install.act(state, l) <> KN.install.acts(state, t)
+    case KH.KAct{+l, "kicad-retry", v} <> t: KH.KAct{Bool.pick(String, String.is_empty(state), l, "Check again"), "kicad-retry", v} <> KN.install.acts(state, t)
+    case a <> t: a <> KN.install.acts(state, t)
+
+def KN.install.title(+state: String, +title: String) -> String:
+  match state:
+    case "installing": "Installing Backplane KiCad…"
+    case "installed": "Backplane KiCad installed"
+    case "failed": "Backplane KiCad didn't install"
+    case _: title
+
+def KN.install.body(+state: String, +why: String, +body: String) -> String:
+  match state:
+    case "installing": "Downloading, verifying and unpacking it. This takes a minute or two; you can keep working."
+    case "installed": "Backplane restarts to use it as soon as no agent is working; this notice goes away then."
+    case "failed": Bool.pick(String, String.is_empty(why), "The install stopped without saying why.", why)
+    case _: body
+
+def KN.install(+state: String, +why: String, n: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  match n:
+    case Some{KH.KNote{key, +title, +body, KH.KAct{+l, "kicad-install", +v} <> t}}:
+      Some{KH.KNote{key, KN.install.title(state, title), KN.install.body(state, why, body), KN.install.acts(state, KH.KAct{l, "kicad-install", v} <> t)}}
+    case Some{n}: Some{n}
+    case None{}: None{}
+
+def KN.of.k(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
   KN.ipc(KH.KH.notice(Str.get(info, "kicad.status"), Str.get(info, "kicad.cli"), Str.get(info, "kicad.version"), Str.get(info, "kicad.why"), String.eq(Str.get(info, "kicad.can_install"), "1")), Str.get(info, "kicad.ipc.servers"))
+
+def KN.of(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
+  KN.install(Str.get(info, "kicad.install"), Str.get(info, "kicad.install.why"), KN.of.k(info, st))
 
 def KN.visible.k(n: Maybe<&2, KH.KNote>, +st: M.State) -> Maybe<&2, KH.KNote>:
   match n:
@@ -1047,11 +1088,24 @@ def Update.btn(+st: M.State, +nf: Map<&2, String>, +note: String) -> Nat:
   Bool.pick(Nat, Update.packaged(nf), 0n, Bool.pick(Nat, Nat.is_gt(Update.waits(st), 0n), 3n, Bool.pick(Nat, String.starts_with(note, "update "), 1n, 2n)))
 
 # an update notice: a version to offer, or the progress of one being applied
-def Ui.update(u: Ui, +o: J.Json) -> Ui:
+def Ui.update.k(u: Ui, +o: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, _, nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w,
         J.Json.get_str(o, "error", ""), Ui.update.note(J.Json.get_str(o, "version", ""), J.Json.get_str(o, "state", "")), nf, ob, tr}
+
+# a KiCad install's news (server Install.go: "kicad") goes to its notice
+# (KN.install), not to the app's update line or error banner
+def Ui.update.kicad(plain: Bool, u: Ui, +k: String, +o: J.Json) -> Ui:
+  match plain:
+    case True{}: Ui.update.k(u, o)
+    case False{}:
+      match u:
+        case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+          Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Map.set(&2, String, nf, "kicad.install", k), "kicad.install.why", J.Json.get_str(o, "error", "")), ob, tr}
+
+def Ui.update(u: Ui, +o: J.Json) -> Ui:
+  Ui.update.kicad(String.is_empty(J.Json.get_str(o, "kicad", "")), u, J.Json.get_str(o, "kicad", ""), o)
 
 # the kind an agent's viewer_show takes: a part shown on Mech ("mech" and
 # a model) opens in 3D, where Mech shows its parts
@@ -1785,8 +1839,12 @@ def Ui.reply.diff(has: Bool, u: Ui, +o: J.Json) -> Ui:
 # while that thread's viewer has shown nothing and its panel was never
 # opened or shut by hand ("panel.hand:t"); an agent's viewer_show always
 # opens it (laws viewer_auto_*)
+# (never on a phone's web page, thin-view's Session.renderer "phone": there
+# the panel is the whole screen, and the person who just sent a message
+# would lose the thread for the board; its views menu opens it)
 def Viewer.auto(+u: Ui, +th: String) -> Bool:
-  Bool.and(String.is_empty(Ui.info(u, "view.kind:" ++ th)), Bool.not(String.eq(Ui.info(u, "panel.hand:" ++ th), "1")))
+  Bool.and(Bool.and(String.is_empty(Ui.info(u, "view.kind:" ++ th)), Bool.not(String.eq(Ui.info(u, "panel.hand:" ++ th), "1"))),
+    Bool.not(String.eq(Ui.info(u, "local.workspace.form"), "phone")))
 
 def Ui.view.auto(go: Bool, +u: Ui, +th: String, +o: J.Json) -> Ui:
   match go:
@@ -16646,7 +16704,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 20n:
       Ui.also(Ui.model(u, value), [FocusField{"composer"}])
     case 21n:
-      Ui.rpc(u, "kicad.install", Nil{})
+      Ui.rpc(Ui.info_set(Ui.info_set(u, "kicad.install", "installing"), "kicad.install.why", ""), "kicad.install", Nil{})
     case 22n:
       Ui.answer(u, value)
     case 23n:

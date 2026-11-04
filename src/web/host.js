@@ -8,6 +8,10 @@ installMessageImages();
 // is dumb).
 
 import App from "./app.bend";
+import { phoneForm, phoneRequest, installPhoneShell } from "./phone-shell.js";
+// a phone gets the phone arrangement (phone-shell.js, view.bend's View.phone)
+const PHONE = phoneForm();
+const phoneShell = installPhoneShell({ on: PHONE, dispatch: (action, value) => dispatch(action, value) });
 import { SecretSaveHost } from "./secret-save.js";
 import { starAttention } from "./star-attention.js";
 const starAttentionSync = starAttention();
@@ -41,6 +45,7 @@ function bubMoveSync() {
 document.addEventListener("visibilitychange", () => { bubMoves.disconnect(location.origin); });
 import { installUsageTabs } from "./usage-tabs.js";
 import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js";
+import { installPhoneThread, phoneKeepsReturn, phoneClickAction } from "./phone-thread.js";
 import { installImprovements } from "./improvements.js";
 import { ImprovementsRpc } from "./improvements-rpc.js";
 import { improvementOrigin, improvementContext } from "./improvements-context.js";
@@ -61,10 +66,22 @@ import { installWorkspaceHints } from "./workspace-hints.js";
 // Esc's choice of what to put away (workspace.bend's WS.esc.next); the
 // probe goes off its plots at once, as its chip's x does through the hub
 const composerKeeper = installComposerFocus({ phone: () => composerPhone() });
+installPhoneThread({ list: el => timelineList(el), latest: () => holdBottom(), newest: () => thin?.atNewest?.() !== false });
 installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
   clearProbe: () => { Plot2d.setProbe("");Solid.setProbe("");dispatch("probe", ""); } });
 installWorkspaceHints();
 installFloatingTerminal({ dispatch });
+import { installPhoneOther, titleHits } from "./phone-other.js";
+// (imported, so the bundle ships it hashed and index.html's link to it
+// names that file: the home-screen icon, a notification's)
+import touchIcon from "./apple-touch-icon.png";
+// the home-screen app's icons (the phone's manifest names them)
+import icon192 from "./icon-192.png";
+import icon512 from "./icon-512.png";
+import iconMask from "./icon-maskable-512.png";
+const PHONE_TITLES = () => document.documentElement.classList.contains("phone");
+const phoneOther = installPhoneOther({ dispatch: (action, value) => dispatch(action, value), touchIcon,
+  appIcons: [{ src: icon192, size: 192 }, { src: icon512, size: 512 }, { src: iconMask, size: 512, purpose: "maskable" }] });
 import { ConnectionLog } from "./connection-log.js";
 import { frameSummary } from "./frame-summary.js";
 import { pairBrowser } from "./auth.js";
@@ -466,6 +483,7 @@ const KEYS = listOf(App.cbor_keys());
 const WORDS = listOf(App.cbor_words());
 
 let ui = App.page(App.init(now(), cid), location.origin);
+if (PHONE) ui = App.phone_form(ui, "phone");
 if (window.backplaneDesktop) ui = App.desktop(ui);
 if (window.backplaneDesktop?.browser) ui = App.desktop_browser(ui);
 const desktopBrowser = installDesktopBrowser({bridge:window.backplaneDesktop?.browser,
@@ -711,7 +729,7 @@ function focusedScope() {
     language: App.lang(ui), selected: currentSession().sel };
 }
 function transitionScope(target = presentationTarget(currentSession())) {
-  return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui),
+  return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui) + (PHONE ? "/phone" : ""),
     epoch: thin?.epoch || remoteEpoch, bundle: import.meta.url, target, selected:currentSession().sel, settings:currentSession().open?.settings===true, route: currentSession().route || null };
 }
 const previewViews = new ViewPrefetch({
@@ -719,7 +737,7 @@ const previewViews = new ViewPrefetch({
   has:target=>!!transitionViews.destination(transitionScope(), target),
   idle:()=>remoteReady && !document.hidden && !thin?.active && !thin?.paging,
   socket:()=>new WebSocket(location.origin.replace(/^http/, "ws") + "/ws?view=1&frontend=1"),
-  encode:request=>fromList(App.wire_out_json(Wire.json(request))),
+  encode:request=>fromList(App.wire_out_json(Wire.json(PHONE ? {...request,p:{...request.p,...phoneRequest(PHONE)}} : request))),
   decode:data=>Wire.plain(Wire.cbor(new Uint8Array(data), KEYS, WORDS)),
   picture:(shown, session, target, scope)=>{
     transitionViews.put({...scope,target,selected:session.sel,route:session.route||null,settings:false},shown);
@@ -854,6 +872,20 @@ let jump = null;
 // thread shows it, paging back through the history while it is not there
 // yet (at most 40 pages)
 let searchJump = null;
+// a phone thread header's "Go to the start" (view.bend's View.phone.head.thread):
+// a line under the header says how far it got, with Cancel, then Newest
+let startJump = null, startNote = null, startNoteTimer = 0;
+function startSay(text, action, label) {
+  clearTimeout(startNoteTimer);
+  if (!startNote) { startNote = document.createElement("div");startNote.className = "ph-note";startNote.setAttribute("role", "status");document.body.append(startNote); }
+  startNote.replaceChildren(document.createTextNode(text));
+  if (action) {
+    const b = document.createElement("button");b.type = "button";b.textContent = label;
+    b.addEventListener("click", () => { startSay("");if (action === "cancel") startJump = null;else holdBottom(); });
+    startNote.append(b);
+  }
+  if (!text) { startNote.remove();startNote = null; }
+}
 let earlierAsked = false;
 
 // TanStack virtual-core 3.19.9's layout model is ported in timeline-plan.bend.
@@ -1134,6 +1166,7 @@ function render() {
   starAttentionSync(root);
   bubMoveSync();
   terminalOutput.apply(true);
+  phoneOther.rendered();
   if (PERF) PERF.render.push([t1 - t0, pnow() - t1]);
   if (RR) { RR.n("render.full");RR.t("render.view", t1 - t0);RR.t("render.patch", pnow() - t1); }
   if (frontendNode || canonicalBoot && App.synced(ui)) themeSeen(root.querySelector(".app"));
@@ -1191,6 +1224,17 @@ function render() {
       if (!searchJump.asked) { searchJump.asked = true; requestAnimationFrame(() => { if (searchJump) { searchJump.asked = false; if (thin.ahead("older")) searchJump.pages++; } }); }
     } else if (thin?.ready) searchJump = null;
   }
+  // "Go to the start": every earlier page, one after another, then the top
+  // (two pages a request; the view shows the oldest page in as it comes)
+  if (startJump && tl2 && startJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
+    if (thin?.hasAhead?.("older") && startJump.pages < 400) {
+      if (startJump.pages) tl2.scrollTop = 0;
+      if (!startJump.asked) { startJump.asked = true; requestAnimationFrame(() => { if (startJump) { startJump.asked = false; if (thin.ahead("older", { two: true })) startJump.pages += 2; } }); }
+    } else if (thin?.ready) {
+      tl2.scrollTop = 0;startJump = null;
+      startSay("The start of the thread", "newest", "Newest ↓");startNoteTimer = setTimeout(() => startSay(""), 8000);
+    }
+  } else if (startJump && startJump.thread !== (thin?.session?.sel ?? App.sel(ui))) { startJump = null;startSay(""); }
   searchLight(tl2);
   panes();
   secretSaves.paint();
@@ -1198,6 +1242,9 @@ function render() {
   Solid.mount(document.getElementById("solid"));
   ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
+  ViewerTools.chipInView();
+  ViewerTools.focusToggle();
+  Plot2d.inspectGone();
   attachmentPreviews();
   previewTextFiles();
   previewMarkdownFiles((text, node) => create(App.md(text, App.lang(ui), node.dataset.mdRoot || "", node.dataset.mdPath || "")));
@@ -1223,6 +1270,7 @@ function render() {
   if (reclaim && remoteReady) { reclaim = false;composerKeeper.claim(); } else composerKeeper.check();
   tourSync();
   settingsSync();
+  phoneShell.rendered();
   saveFocusedSoon();
 }
 
@@ -1261,7 +1309,7 @@ function landPathIn(shown, region) {
 function historyRegion(detail, projection) {
   const landing = detail.page && ["older", "newer"].includes(projection);
   const update = !detail.page && projection === "update" && !detail.historyReset && !detail.position;
-  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || jump || scroll) return "page";
+  if (!(landing || update) || !Array.isArray(detail.changed) || detail.changed.some(p => !p.length) || searchJump || startJump || jump || scroll) return "page";
   const lines = [];
   for (const r of LAND_REGIONS) { const p = landPathIn(detail.shown, r);if (p) lines.push([r.name, "shown", ...p].join("\t")); }
   if (!lines.length) return "page";
@@ -1478,20 +1526,27 @@ for (const ev of ["pointerdown", "keydown", "wheel"]) document.addEventListener(
 // the browser asks the person once, on a first click or key (the only time
 // browsers let a page ask)
 function askNotify() {
+  // (a phone asks from Settings → Threads instead, phone-other.js)
+  if (PHONE_TITLES()) return;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
 }
 for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, askNotify, { once: true, capture: true });
 
 function notify(c) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
+  // (a phone's browser shows a page's notifications only through its
+  // service worker, Android Chrome's constructor throws; sw.js's
+  // notificationclick sends the tap back as "bp-open")
+  const viaWorker = () => navigator.serviceWorker?.ready?.then(r => r.showNotification(c.title, { body: c.body, tag: c.key || c.thread, icon: document.querySelector("link[rel=apple-touch-icon]")?.href || "./apple-touch-icon.png", data: { thread: c.thread || "" } })).catch(() => {});
+  if (PHONE_TITLES() && navigator.serviceWorker?.controller) { viaWorker();return; }
   try {
-    const n = new Notification(c.title, { body: c.body, tag: c.key || c.thread, icon: "./apple-touch-icon.png" });
+    const n = new Notification(c.title, { body: c.body, tag: c.key || c.thread, icon: document.querySelector("link[rel=apple-touch-icon]")?.href || "./apple-touch-icon.png" });
     n.onclick = () => {
       window.focus();
       if (c.thread) dispatch("select", c.thread);
       n.close();
     };
-  } catch {}
+  } catch { viaWorker(); }
 }
 
 // run an action; answers whether it did anything (a key it did nothing
@@ -1647,6 +1702,8 @@ function dispatch(action, value, timer) {
       transitionViews.savePosition(transitionScope(), timelineList(timeline).position());
     }
   }
+  // (the host pages back itself: render's startJump, as a search jump does)
+  if (action === "ph-start") { startJump = { thread: currentSession().sel, pages: 0, asked: false };startSay("Going back to the start…", "cancel", "Cancel");thin?.start?.();later();return true; }
   if (action === "thin-search-open") {
     // (value: a query the command palette could not match: the palette
     // closes first, and the search opens running it once it is gone, render)
@@ -1757,10 +1814,36 @@ function dispatch(action, value, timer) {
 Plot2d.onPlace((place) => dispatch("rv-note", place));
 // a tap on a sheet symbol opens that sheet instance (client.bend's Sch)
 Plot2d.onSheet((value) => dispatch("sch-go", value));
+// a phone's tap card (plot2d.js) on a part: its saved component, read
+// once per board version (kicad.components, as the 3D inspector reads it)
+const partDetails = new Map();
+Plot2d.onDetails((scope, key, ref) => {
+  const path = key.split("|").slice(2).join("|");
+  if (!scope) return null;
+  const at = `${scope}|${path}|${Plot2d.version(key)}`;
+  if (!partDetails.has(at)) {
+    if (partDetails.size > 8) partDetails.delete(partDetails.keys().next().value);
+    partDetails.set(at, viewerRpc.components(scope, { path }).catch(() => { partDetails.delete(at); return null; }));
+  }
+  return partDetails.get(at).then((data) => data?.components?.find((c) => c.reference === ref) || null);
+});
+Plot2d.onShow((kind) => dispatch("view-kind", kind));
+// a phone's tap card (plot2d.js): "Mention in chat" adds the piece to the
+// thread's draft and goes back to the thread
+Plot2d.onMention((text) => {
+  const session = currentSession(), th = session?.sel;
+  if (!th) return;
+  const field = document.getElementById("composer");
+  let draft = "";
+  try { draft = field ? field.value : (session?.drafts?.[th] ?? localStorage.getItem(DRAFT + th) ?? ""); } catch {}
+  const next = draft + (draft && !/\s$/.test(draft) ? " " : "") + text + " ";
+  if (thin) thin.draftAt(th, next); else dispatch("draft", next);
+  dispatch("panel", "");
+});
 // a tap that probes a part or a net (probe.js) tells the hub, which keeps it
 // (client.bend's Probe); the 3D view finds parts on the board's plot
 Plot2d.onProbe((value) => { Solid.setProbe(value); dispatch("probe", value); });
-Solid.onProbe((value) => { Plot2d.setProbe(value); dispatch("probe", value); });
+Solid.onProbe((value) => { Plot2d.setProbe(value); dispatch("probe", value); const solid = document.querySelector("canvas#solid"); Plot2d.inspectPart(value.startsWith("c\t") ? value.slice(2).split("\t")[0] : "", solid?.dataset.scope || "", solid?.dataset.key ? `0|${solid.dataset.key.slice(2)}` : ""); });
 Solid.useBoard({ parts: (key) => Plot2d.parts(key), thick: (key) => Plot2d.thick(key), need: (key) => Plot2d.need(key) });
 Plot2d.onPlotted(() => Solid.relight());
 // the probe's chip: its name brings it into view
@@ -2164,7 +2247,7 @@ for (const ev of EVENTS) {
       document.documentElement.style.setProperty("--mx", Math.min(e.clientX, innerWidth - 216) + "px");
       document.documentElement.style.setProperty("--my", e.clientY + "px");
     }
-    dispatch(action, ev === "input" ? inputValue(el) : valueOf(el));
+    dispatch(ev === "click" ? phoneClickAction(document, el, action) : action, ev === "input" ? inputValue(el) : valueOf(el));
     // A mouse send or stop leaves the next keystroke in the message box.
     if (ev === "click" && el.closest(".composer") && ["send", "send-alt", "interrupt"].includes(action)) composerKeeper.activate(e);
   });
@@ -2277,7 +2360,7 @@ document.addEventListener("keydown", (e) => {
   // an empty data-enter leaves Enter to the field (a new line: an intent being edited)
   const alt = (e.ctrlKey || e.metaKey) && el.getAttribute("data-enter-alt");
   const action = alt || el.getAttribute("data-enter");
-  if (!action) return;
+  if (!action || phoneKeepsReturn(document, el, action, e)) return;
   e.preventDefault();
   dispatch(action, valueOf(el));
 });
@@ -2557,7 +2640,9 @@ function earlierCheck(tl) {
     // boundary even if its geometry did not produce another scroll event.
     const list = timelineList(tl);if (list) timelineChanged(list);
   } else entryHistory.cancel();
-  historyFillMore(tl, thin.hasAhead("older") && (tl.scrollHeight <= tl.clientHeight + 10 || !historyHasMessage(tl)));
+  // (a timeline with no box, e.g. behind the phone's full-screen viewer, has
+  // no range either: its fixed button would sit over that screen's header)
+  historyFillMore(tl, thin.hasAhead("older") && tl.clientHeight > 0 && (tl.scrollHeight <= tl.clientHeight + 10 || !historyHasMessage(tl)));
   if (historyDirection !== "older" || historyOlderDemand <= 0) return;
   const gap = historyGap("older"), runway = historyRunway(tl), two = historyOlderDemand > 1 && runway > tl.clientHeight * 3;
   if (thin.paging ? !two || !!thin.pagingNext : earlierAsked) return;
@@ -2997,7 +3082,7 @@ function refusedView(target, reason) {
   trace("thin-refused", { reason });
   const back = refusedFallback(target, shownTarget, refusedViews);
   if (back === null || !thin) return false;
-  searchJump = null;
+  searchJump = null;startJump = null;startSay("");
   try { if (localStorage.getItem("backplane-selected") === target.id) localStorage.removeItem("backplane-selected"); } catch {}
   clearTimeout(viewNoteTimer);
   viewNote = back ? "That conversation can't be opened; back to the one before." : "That conversation can't be opened; here are your projects.";
@@ -3024,6 +3109,11 @@ function connectingStatus() {
 const connectionLog = new ConnectionLog({ storage: localStorage, bundle: CONNECTION_BUNDLE,
   visibility: () => document.visibilityState || "unknown", online: () => navigator.onLine !== false });
 const thinBackoff = new Backoff(), thinRetry = new Retry();
+// How long a connect step may take: the base on a first try (a hub that is
+// down shows at once), and on a phone twice that after each failed retry, up
+// to 4x, so a link whose answers take seconds (weak signal, a busy relay)
+// still connects; success or a wake starts over.
+const patience = () => PHONE_TITLES() ? Math.min(4, 2 ** Math.max(0, thinBackoff.tries - 1)) : 1;
 // a view request's deadline (thin-host.js), and the view failures in a row
 // that slow the next attempt (viewRecover)
 const VIEW_TIMEOUT_MS = 30000, VIEW_CALM_MS = 120000;
@@ -3092,7 +3182,7 @@ function thinReconnect() {
   const attempt = thinAttempt;
   thinRetry.schedule(thinBackoff.next(), async () => {
     if (viewMode === "compatibility" || attempt !== thinAttempt) return;
-    const hub = await probeHub(window.fetch.bind(window));
+    const hub = await probeHub(window.fetch.bind(window), { timeoutMs: 2000 * patience() });
     // A Retry/wake/new connection can win while the old HTTP probe waits.
     // Its late answer must never replace that newer healthy socket.
     if (viewMode === "compatibility" || attempt !== thinAttempt) { connectionLog.record("retry-discarded", { cause: "stale-retry" });return; }
@@ -3213,6 +3303,24 @@ function showThinSearch(search) {
   const rows = document.createElement("div");rows.id = "find-rows";rows.className = "find-rows";rows.setAttribute("role", "listbox");
   const foot = document.createElement("footer");foot.textContent = "↑↓ choose · Enter open · Esc close";
   panel.append(query, note, rows, foot);
+  // (a phone: threads whose titles match, above what was said in them)
+  const titles = PHONE_TITLES() ? document.createElement("div") : null;
+  if (titles) { titles.className = "find-titles";rows.before(titles); }
+  // (the sidebar's rows at once, then the hub's answer's titles, every
+  // thread's: Search.titles in server/thin-view.bend)
+  const showTitles = (hub = []) => {
+    if (!titles) return;
+    titles.replaceChildren();
+    const seen = new Set(), hits = [];
+    for (const hit of [...titleHits(document, query.value), ...hub]) if (hit && typeof hit.id === "string" && !seen.has(hit.id) && hits.length < 8) { seen.add(hit.id);hits.push(hit); }
+    for (const hit of hits) {
+      const b = document.createElement("button");b.type = "button";b.className = "find-title";
+      const t = document.createElement("span");t.className = "find-thread";t.textContent = hit.title;b.append(t);
+      if (hit.project) { const p = document.createElement("span");p.className = "find-project";p.textContent = hit.project;b.append(p); }
+      b.addEventListener("click", () => { close();thinFind = null;dispatch("select", hit.id);later(); });
+      titles.append(b);
+    }
+  };
   // asked: the search on its way (its query and cursor); next: what to ask
   // once it is answered; shown: the query whose results are on screen
   const f = { asked: null, next: null, shown: null, hits: [], at: -1, group: null, timer: 0, more: null };
@@ -3258,7 +3366,8 @@ function showThinSearch(search) {
       button.addEventListener("click", () => { ask(search.query, search.cursor);query.focus(); });rows.append(button);f.more = button;
     }
     f.shown = search.query;
-    note.textContent = f.hits.length ? "" : `Nothing matches “${search.query.trim()}”.`;
+    if (!more && Array.isArray(search.titles)) showTitles(search.titles);
+    note.textContent = f.hits.length || titles?.childElementCount ? "" : `Nothing matches “${search.query.trim()}”.`;
     if (!more && f.hits.length) choose(0);
   };
   thinFind = {
@@ -3280,6 +3389,7 @@ function showThinSearch(search) {
     },
   };
   query.addEventListener("input", () => {
+    showTitles();
     clearTimeout(f.timer);
     if (!query.value.trim()) { ask("", "");return; }
     f.timer = setTimeout(() => ask(query.value, ""), 180);
@@ -3295,6 +3405,7 @@ function showThinSearch(search) {
       else ask(query.value, "");
     }
   });
+  showTitles();
   if (search.rows?.length) draw(search, false);
   else if (search.query) ask(search.query, "");
   else note.textContent = "Type a word said in any thread.";
@@ -3351,7 +3462,7 @@ async function startThin(again = false, reason = "initial") {
   if (downSince) downStatus(downNote);
   else connectingStatus();
   later();
-  const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability });
+  const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability, timeoutMs: 2000 * patience() });
   if (attempt !== thinAttempt || viewMode === "compatibility") return;
   if (capability.unauthorized) {
     stopThin(false, "auth-denied");viewMode = "read-only";focusedView.invalidate();
@@ -3413,12 +3524,13 @@ async function startThin(again = false, reason = "initial") {
       send: request => {
         if (!current() || s.readyState !== 1) throw Error("View connection closed");
         trace("send", { id: request.id, method: request.m });
+        phoneReplyWatch(s, request);
         RR?.sent?.(request.id, request.m === "view.action" && typeof request.p?.action === "string" ? request.m + ":" + request.p.action : request.m);
         // the session's tree goes into the request as it is (known), not built again from its plain copy
         const tree = request.p?.session ? App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session)) : null;
         const session = tree ? Wire.plain(tree) : null, known = new WeakMap();
         if (session && typeof session === "object") known.set(session, tree);
-        s.send(fromList(App.wire_out_json(Wire.json({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1", plotStamp: "v1" } }, known))));
+        s.send(fromList(App.wire_out_json(Wire.json({ ...request, p: { ...request.p, ...(session ? { session } : {}), workspaceLayout: "rail-v1", workspaceChrome: "top-v1", terminalOutput: "pane-v1", plotStamp: "v1", ...phoneRequest(PHONE) } }, known))));
       },
       choice: choosePresentation, prepare: (session, input, action) => preservePresentationRoute(
         action === "send" || action === "send-alt" ? input : session,
@@ -3516,6 +3628,10 @@ async function startThin(again = false, reason = "initial") {
       blocked: () => showViewStatus("Wait for the current conversation to connect."),
       viewerChoice: choice => viewerFeedback.choice(choice),
       warning: message => showViewStatus(message),
+      // a Send the dropped link never took is back in the field: "Not sent"
+      // now, and once connected again that it is still there to send
+      // (the words a Send pressed while offline gets)
+      sendLost: () => { if (remoteReady) return; offlineSend = true; showViewStatus(App.host_message(ui, "offline-send")); },
       pageState: historyPageState,
       letGo: historyLetGo,
       refused: refusedView,
@@ -3533,8 +3649,12 @@ async function startThin(again = false, reason = "initial") {
           resumedConversation = null;
         }
         const previous = historyNode || node;
-        const projection = historyNode ? detail.page?.direction || "update" : "reset";
+        // (the start of the thread, thin-host's start(): a page of its own, as the newest is)
+        const projection = historyNode ? (detail.page?.direction === "start" ? "newest" : detail.page?.direction || "update") : "reset";
         if (RR && historyNode && projection === "older") RR.n("land.block." + History.why(previous, node, projection));
+        // "Go to the start" counts the earlier pages as they land (most come
+        // through the ordinary paging at the top, not its own requests)
+        if (startJump && projection === "older") { startJump.landed = (startJump.landed || 0) + 1;startSay(`Going back to the start… ${startJump.landed} ${startJump.landed === 1 ? "page" : "pages"}`, "cancel", "Cancel"); }
         const p0 = RR ? pnow() : 0;
         // historyNode is a merge's own result, prepared already and marked with
         // where its last non-entry row is: an older page is added as a block,
@@ -3614,6 +3734,7 @@ async function startThin(again = false, reason = "initial") {
     const bytes = new Uint8Array(event.data);
     diagnostic.frame(bytes.byteLength);
     if (Solid.isPlot(bytes)) {
+      plotHeard = Date.now();
       const o = Solid.cbor(bytes), at = { bytes: bytes.length, t: performance.now() };
       if (o && typeof o.none === "string") o.none = App.plot_error(ui, o.none);
       const key = typeof o?.key === "string" ? o.key : "";
@@ -3654,7 +3775,7 @@ async function startThin(again = false, reason = "initial") {
   s.thin = true;
   s.dead = reason => { disconnect(reason || "heartbeat-expired");try { s.close(); } catch {} };
   // Include the HTTP Upgrade/connect phase in the greeting deadline.
-  thinGreetingTimer = setTimeout(() => { disconnect("greeting-timeout");try { s.close(); } catch {} }, 4000);
+  thinGreetingTimer = setTimeout(() => { disconnect("greeting-timeout");try { s.close(); } catch {} }, 4000 * patience());
   thinExpiry = setInterval(() => { if (current()) thin.expire(); }, 250);
 }
 
@@ -3673,9 +3794,45 @@ setInterval(() => {
   if (socket && (slept || !socket.thin || socket.hb) && App.alive_due(heard, BigInt(t))) socket.dead("heartbeat-expired");
 }, 5000);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") hiddenAt = Date.now(); }, true);
-watchWake(window, document, why => {
+// A phone that slept or changed networks often keeps a socket that is dead
+// without a close, and the lease above takes up to 40 s to say so while
+// the page looks live. So on a phone a wake asks the hub for a view, and a
+// link that brings nothing at all within 6 s is replaced (cheap: a bounded
+// view; "Reconnecting" shows only if that takes a while too).
+// (Both stand down while a viewer is drawing: its pictures can be megabytes,
+// minutes on a slow link, and no frame shows until all of one is in; the
+// lease above still judges such a link.)
+let wakeProbe = 0, plotHeard = 0;
+const viewerBusy = () => Date.now() - plotHeard < 60000;
+function phoneWakeProbe() {
+  if (!PHONE_TITLES() || !socket || wakeProbe || viewerBusy()) return;
+  const asked = BigInt(Date.now()), s = socket;
+  if (remoteReady) thin?.update();
+  wakeProbe = setTimeout(() => {
+    wakeProbe = 0;
+    if (socket === s && heard < asked && Date.now() >= heldUntil && !viewerBusy()) s.dead("wake-quiet");
+  }, 6000);
+}
+// The same holds for a Send or an answer: the hub answers it at once with a
+// small frame, so a link that brings nothing within 12 s of the oldest one
+// not answered since is dead, not slow (a real history on a slow phone
+// answered every request within 5.5 s). (Not other requests: their answer
+// can be a viewer's picture.)
+const REPLY_WATCHED = new Set(["send", "send-alt", "answer"]);
+let replyWatch = 0, replyFrom = 0n;
+function phoneReplyWatch(s, request) {
+  if (!PHONE_TITLES() || s !== socket || request.m !== "view.action" || !REPLY_WATCHED.has(request.p?.action) || viewerBusy()) return;
+  if (replyWatch && heard < replyFrom) return;
+  clearTimeout(replyWatch);replyFrom = BigInt(Date.now());
+  replyWatch = setTimeout(() => {
+    replyWatch = 0;
+    if (socket === s && heard < replyFrom && Date.now() >= heldUntil && !viewerBusy()) s.dead("reply-quiet");
+  }, 12000);
+}
+const onWake = why => {
   const away = hiddenAt ? Date.now() - hiddenAt : 0;
   if (why === "visible") hiddenAt = 0;
+  if (why === "online" || why === "network" || why === "pageshow" || (why === "visible" && away > 5000)) phoneWakeProbe();
   // the network changed, or the page slept a while: a socket may be dead
   // without a close, so a quiet one is replaced (cheap: a bounded view)
   if (socket && (why === "online" || (why === "visible" && away > 60000) || why === "pageshow")) {
@@ -3684,7 +3841,10 @@ watchWake(window, document, why => {
     if (App.alive_due(heard, BigInt(Date.now()))) socket.dead("wake-expired");
   }
   if (thinRetry.pending) { thinBackoff.reset();thinRetry.wake(); }
-});
+};
+watchWake(window, document, onWake);
+// Android's Chrome says when the phone moves between Wi-Fi and mobile data
+navigator.connection?.addEventListener?.("change", () => { if (PHONE_TITLES()) onWake("network"); });
 
 function clockTick() {
   ui = App.tick(ui, now());
@@ -3739,6 +3899,7 @@ async function checkDeploy() {
 // the app shell works offline where the browser allows it (HTTPS or localhost)
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", e => { if (e.data?.t === "bp-open" && typeof e.data.thread === "string" && e.data.thread) dispatch("select", e.data.thread); });
 }
 
 // A category change starts at its heading; Back restores its category button.

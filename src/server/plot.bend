@@ -846,8 +846,86 @@ def Pv.child.diff(+kind: U32, +path: String, +infos: String) -> IO(Unit):
     +b : List<&2, U32> <- GT.Git.version(HS.Hist.new(path))
     Pv.child.k(Pv.plot(Pv.mark(HS.Hist.bits(path), Pv.side(kind, a), Pv.side(kind, b)), U32.or(kind, LO.Look.diff())), 0, infos)
 
+# A live board is read as text forms (effects/plot_board.js), never as one
+# byte list: an 85 MB board took 4 GB of list cells as bytes and as much
+# again as forms, and its child ran out of memory at 12 GB. None is a file
+# still being written, [] an empty or missing one, else its first 8192
+# bytes (for the thickness) and its forms.
+def PlotFx.board(path: String) -> IO(Maybe<&2, List<&2, String>>):
+  import "./effects/plot_board.js"
+
+# the same for a file's text (a version in a commit, from git show)
+def PlotFx.forms(text: String) -> IO(Maybe<&2, List<&2, String>>):
+  import "./effects/plot_board.js"
+
+def Pv.forms.got(m: Maybe<&2, String>) -> IO(Maybe<&2, List<&2, String>>):
+  match m:
+    case Some{t}:
+      PlotFx.forms(t)
+    case None{}:
+      IO.pure(Maybe<&2, List<&2, String>>, Some{Nil{}})
+
+def Pv.forms.k(k: Nat, +path: String) -> IO(Maybe<&2, List<&2, String>>):
+  match k:
+    case 1n:
+      IO.bind(Maybe<&2, String>, Maybe<&2, List<&2, String>>, GT.Git.show(HS.Hist.git.dir(path), HS.Hist.git.obj(path)), Pv.forms.got)
+    case _:
+      PlotFx.board(path)
+
+# a board version's text forms: a live file's, or a file in a commit (one
+# not there has none, as Git.version reads it)
+def Pv.forms(+path: String) -> IO(Maybe<&2, List<&2, String>>):
+  Pv.forms.k(HS.Hist.kind(path), path)
+
+def Pv.child.board.k(fs: List<&2, String>, +path: String, +infos: String) -> IO(Unit):
+  match fs:
+    case Nil{}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & String>, Unit, H.FS.revision(path), r => Pv.child.empty(r, path))
+    case +h <> t:
+      Pv.child.k(Some{P.Plot.of(P2.Pcb2.items.text(t), 0)}, Pv.thick(P2.Pcb2.bytes(h)), infos)
+
+# (an unfinished live file is read again; a version in a commit that does
+# not parse is unread, as Pv.child.v has it)
+def Pv.child.board.got(m: Maybe<&2, List<&2, String>>, +fixed: Bool, +path: String, +infos: String) -> IO(Unit):
+  match m:
+    case None{}:
+      Pv.child.v(None{}, fixed, 0, infos)
+    case Some{fs}:
+      Pv.child.board.k(fs, path, infos)
+
+def Pv.child.board(+path: String, +infos: String) -> IO(Unit):
+  IO.bind(Maybe<&2, List<&2, String>>, Unit, Pv.forms(path), m => Pv.child.board.got(m, Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), path, infos))
+
+# one side of a board comparison (Pv.side's)
+def Pv.side.text.k(fs: List<&2, String>) -> Maybe<&2, List<&2, B.Item>>:
+  match fs:
+    case Nil{}:
+      Some{Nil{}}
+    case _ <> t:
+      Some{P2.Pcb2.items.text(t)}
+
+def Pv.side.text(m: Maybe<&2, List<&2, String>>) -> Maybe<&2, List<&2, B.Item>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{fs}:
+      Pv.side.text.k(fs)
+
+# a board comparison (Pv.child.diff's) from both versions' text forms
+def Pv.child.diff.board(+kind: U32, +path: String, +infos: String) -> IO(Unit):
+  do IO<Unit>:
+    a : Maybe<&2, List<&2, String>> <- Pv.forms(HS.Hist.old(path))
+    b : Maybe<&2, List<&2, String>> <- Pv.forms(HS.Hist.new(path))
+    Pv.child.k(Pv.plot(Pv.mark(HS.Hist.bits(path), Pv.side.text(a), Pv.side.text(b)), U32.or(kind, LO.Look.diff())), 0, infos)
+
+def Pv.child.live(+kind: U32, +path: String, +infos: String) -> IO(Unit):
+  Bool.pick(IO(Unit), U32.is_eq(kind, 0), Pv.child.board(path, infos), Pv.child.one(kind, path, infos))
+
+def Pv.child.cmp(+kind: U32, +path: String, +infos: String) -> IO(Unit):
+  Bool.pick(IO(Unit), U32.is_eq(kind, 0), Pv.child.diff.board(kind, path, infos), Pv.child.diff(kind, path, infos))
+
 def Pv.child.plot(+kind: U32, +path: String, +infos: String) -> IO(Unit):
-  Bool.pick(IO(Unit), Nat.is_eq(HS.Hist.kind(path), 2n), Pv.child.diff(kind, path, infos), Pv.child.one(kind, path, infos))
+  Bool.pick(IO(Unit), Nat.is_eq(HS.Hist.kind(path), 2n), Pv.child.cmp(kind, path, infos), Pv.child.live(kind, path, infos))
 
 def Pv.child(+kind: U32, +path: String, +infos: String) -> IO(Unit):
   Bool.pick(IO(Unit), Pv.solid.kind(kind), Pv.child.solid(U32.is_eq(kind, 3), U32.is_eq(kind, 4), path, infos), Pv.child.plot(kind, path, infos))
@@ -1134,11 +1212,27 @@ def Pv.argv(low: Bool, +exe: String, +args: List<&2, String>) -> List<&2, String
 def Pv.lock.sh() -> String:
   "if command -v flock >/dev/null 2>&1 && mkdir -p \"${0%/*}\" 2>/dev/null && : >> \"$0\" 2>/dev/null; then exec flock \"$0\" \"$@\"; fi; exec \"$@\""
 
-def Pv.locked(solid: Bool, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
-  match solid:
-    case True{}:
-      "sh" <> "-c" <> Pv.lock.sh() <> (dir ++ "/solid.lock") <> argv
-    case False{}:
+def Pv.locked.k(+sh: String, +lock: String, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
+  "sh" <> "-c" <> sh <> (dir ++ "/" ++ lock) <> argv
+
+# The board's child is told to keep its heap near 2 GB: the runtime (Bun's
+# JavaScriptCore) otherwise sizes its heap by the machine's memory and
+# collects late. An 85 MB board peaked at 6 GB without it and 2.5 GB with it
+# (34 s instead of 22); a 4 MB one 570 MB and 410 MB, the same speed.
+def Pv.lock.board.sh() -> String:
+  "export BUN_JSC_forceRAMSize=2147483648; " ++ Pv.lock.sh()
+
+# A board's 2D plot holds board.lock the same way: a big board's read
+# takes gigabytes too, and two views of it (a phone and a page, its 2D and
+# 3D views, a source dropped and asked for again while its read was under
+# way) started two at once (14 + 8 GB for an 85 MB board)
+def Pv.locked(solid: Bool, board: Bool, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
+  match solid board:
+    case True{} _:
+      Pv.locked.k(Pv.lock.sh(), "solid.lock", dir, argv)
+    case False{} True{}:
+      Pv.locked.k(Pv.lock.board.sh(), "board.lock", dir, argv)
+    case False{} False{}:
       argv
 
 def Pv.run(argv: List<&2, String>) -> IO(PR.Ran):
@@ -1175,7 +1269,7 @@ def Pv.read.run(fits: Bool, +size: U32, st: U32 & String, low: Bool, +key: Strin
     case True{}:
       do IO<Unit>:
         exe : String <- H.Sys.exe_path()
-        r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
+        r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), U32.is_eq(kind, 0), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
         after : U32 & String <- Pv.stamp.of(path)
         Pv.read.checked(st, after, r, key, kind, q)
     case False{}:
