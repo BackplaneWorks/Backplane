@@ -1162,6 +1162,15 @@ async function bp_idle(io) {
     ms = Math.min(ms, io.tick);
     io.tick = Math.min(io.tick * 2, 8);
   }
+  // A deadline that is already due is a cooperative yield, not a sleep.
+  // Timers impose a minimum delay even at zero; static files hit this once
+  // per 64 KiB. Keep an event-loop turn for sockets and timers, without
+  // charging that timer floor to every piece. Future deadlines still sleep.
+  if (ms === 0) {
+    await new Promise((res) => setImmediate(res));
+    bp_due(io);
+    return;
+  }
   await new Promise((res) => {
     io.wake = res;
     if (ms !== Infinity) {
