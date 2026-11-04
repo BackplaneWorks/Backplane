@@ -178,7 +178,7 @@ import ./src/app/side_row_types.bend as SRT
 
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
 # ---- native phone i18n imports ----
-import ./src/mobile/app.bend as NATIVEI18N
+import ./src/core/client-language.bend as NATIVEI18N
 # ---- end native phone i18n imports ----
 import ./src/core/fallback.bend as FALL
 
@@ -10520,26 +10520,26 @@ law order_on_when_asked:
 
 # ---- i18n lang ----
 law lang_default_auto:
-  {U.Lang.resolve("", "en_US.UTF-8", False{}) == "en" : String}
+  {NATIVEI18N.Lang.resolve("", "en_US.UTF-8", False{}) == "en" : String}
 
 law lang_default_unknown:
-  {U.Lang.resolve("garbage", "en_US.UTF-8", False{}) == "en" : String}
+  {NATIVEI18N.Lang.resolve("garbage", "en_US.UTF-8", False{}) == "en" : String}
 
 law lang_gate:
   for os: String
-  {U.Lang.resolve("ja", os, False{}) == "en" : String}
+  {NATIVEI18N.Lang.resolve("ja", os, False{}) == "en" : String}
 
 law lang_gate_preview:
   for os: String
-  {U.Lang.resolve("ja", os, True{}) == "ja" : String}
+  {NATIVEI18N.Lang.resolve("ja", os, True{}) == "ja" : String}
 
 law lang_auto_preview:
-  {U.Lang.resolve("auto", "ja_JP.UTF-8", True{}) == "ja" : String}
+  {NATIVEI18N.Lang.resolve("auto", "ja_JP.UTF-8", True{}) == "ja" : String}
 
 law lang_override_en:
   for os: String
   for p: Bool
-  {U.Lang.resolve("en", os, p) == "en" : String}
+  {NATIVEI18N.Lang.resolve("en", os, p) == "en" : String}
 
 law prompt_lang_off:
   {PM.Prompt.lang("off") == "" : String}
@@ -16132,3 +16132,10 @@ law auth_cache_key_sequence:
 law auth_empty_threads_waits_none:
   for st: M.State
   {AUTHCACHE.Auth.any([], st) == False{} : Bool}
+
+# Native entry points and client settings use this same pure composition.
+law native_locale_composition:
+  for +setting: String
+  for +os: String
+  for +preview: String
+  {NATIVEI18N.native_locale(setting, os, preview) == NATIVEI18N.Lang.resolve(NATIVEI18N.Lang.normalize(setting), os, String.eq(preview, "1")) : String}

@@ -13183,13 +13183,19 @@ def Laws.mail_log_count_committed(c, fresh):
       {==}
 
 # ---- native phone i18n ----
-def Laws.native_language_english(): {==}
+def Laws.native_locale_composition(setting, os, preview): {==}
 
-def Laws.native_language_preview(): {==}
+def Laws.native_language_english():
+  Laws.native_locale_composition("en", "ja-JP", "1")
 
-def Laws.native_language_system(): {==}
+def Laws.native_language_preview():
+  Laws.native_locale_composition("ja", "en-US", "1")
 
-def Laws.native_language_fallback(): {==}
+def Laws.native_language_system():
+  Laws.native_locale_composition("auto", "ja_JP.UTF-8", "1")
+
+def Laws.native_language_fallback():
+  Laws.native_locale_composition("auto", "de-DE", "1")
 # ---- end native phone i18n ----
 # ---- build-speed: one executable, exact entry selection ----
 def Laws.exe_server_name():
