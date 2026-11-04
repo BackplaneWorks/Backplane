@@ -1114,3 +1114,28 @@ controller peak471,326,720 B. Job692.33 s, 703 credit-s/$0.00703, sandbox
 deleted verified. This is a single shard feasibility observation, not a
 measured speedup, full-proof/CI/release qualification or pass-cache seed.
 No installer, app, emit, full proof or workflow change.
+
+### Graph2 focused `.js` and `.mjs`: spill reduction is not full-build qualification
+
+| Workload / change | Earlier observation | Graph2 observation |
+|---|---:|---:|
+| Focused `.js`, D versus D+interface-sharing+graph2 | 71.297 s; 2,841,160 KiB RSS; 1,012,539,236 stored B | 56.898 s; 2,934,736 KiB RSS; 562,262,792 stored B |
+| Focused `.mjs`, interface-sharing context versus graph2 composition | 140.770 s; 3,107,580 KiB RSS; 1,012,512,326 stored B | 211.284 s; 3,022,820 KiB RSS; 562,250,832 stored B |
+| Large `Card.of` blob in `.mjs` | 822,532,769 B; owner diagnostic ~26.7 s decode | 436,041,027 B; saved reads 28.997+40.118 =69.115 s |
+
+[Reconciled receipts and exact limits](graph2-review/README.md),
+[recomputed observations](graph2-review/OBSERVATIONS.json),
+[indexed raw evidence](graph2-review/EVIDENCE.json). One sample each on
+separate VMs; `.js` adds two changes, and `.mjs` differs in both comp.ts and
+offload.ts instrumentation. No causal speedup is established. Both emitted
+outputs match their saved reference digests; all packet inputs unchanged.
+
+Actual compiler+controller caps3,699,998,720+536,870,912 B <4 GiB, swap0.
+`.mjs` sampled total cgroup peak3,655,557,120 B leaves only44,441,600 B
+(42.4MiB) below the cap at that peak; the anonymous-only ~0.65GB gap excludes
+file/kernel and is not spare total headroom. Sampled max/OOM/OOM-kill0.
+The two successful jobs cost327credit-s/$0.00327; both sandboxes deleted
+verified. Two failed preflights add39credit-s/$0.00039, total366credit-s
+/$0.00366; their cleanup logs are preserved, not counted as passes.
+Graph2 controls have26 assertions+1 informational row. No rerun for this
+audit; no full hub/web, proof, shared-cache gate or release qualification.
