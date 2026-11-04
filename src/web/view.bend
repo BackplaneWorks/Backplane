@@ -71,6 +71,7 @@ import ../core/tz.bend as TZ
 import ../core/stamp.bend as STP
 import ../core/order.bend as OR
 import ../core/modelpick.bend as MPK
+import ../core/model-catalog.bend as MCat
 import ../core/draftbound.bend as DB
 import ../core/fm.bend as FM
 
@@ -1289,27 +1290,34 @@ def View.mp.more.at(open: Bool) -> List<&2, D.Attr>:
 def View.mp.more.label(+lc: I.Loc, +n: Nat) -> String:
   SM.Menu.text(lc, "More models (" ++ Nat.show(n) ++ ")", "その他のモデル（" ++ Nat.show(n) ++ "）")
 
-def View.mp.rows(fold: Bool, +lc: I.Loc, +ms: List<&2, String>, +cur: String, +own: String, +mi: String, +prov: String) -> List<&2, D.Node>:
+def View.mp.rows.labels(fold: Bool, +lc: I.Loc, +ms: List<&2, String>, +cur: String, +own: String, +labels: J.Json) -> List<&2, D.Node>:
   match fold:
     case False{}:
-      [D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, ms, cur, own, mi, prov)}]
+      [D.El{"div", "", [D.At{"class", "rows"}], View.models.labels.loc(lc, ms, cur, own, labels)}]
     case True{}:
       +rest = List.drop(&2, String, ms, View.mp.few())
-      [D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, List.take(&2, String, ms, View.mp.few()), cur, own, mi, prov)},
+      [D.El{"div", "", [D.At{"class", "rows"}], View.models.labels.loc(lc, List.take(&2, String, ms, View.mp.few()), cur, own, labels)},
        D.El{"details", "mp-more", View.mp.more.at(Bool.or(List.contains(~String, ~String.eq, rest, cur), List.contains(~String, ~String.eq, rest, own))),
          [D.El{"summary", "", Nil{}, [D.Txt{View.mp.more.label(lc, List.length(&2, String, rest))}]},
-          D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, rest, cur, own, mi, prov)}]}]
+          D.El{"div", "", [D.At{"class", "rows"}], View.models.labels.loc(lc, rest, cur, own, labels)}]}]
+
+# Compatibility callers supply serialized metadata; resolve it only once.
+def View.mp.rows(fold: Bool, lc: I.Loc, ms: List<&2, String>, cur: String, own: String, mi: String, prov: String) -> List<&2, D.Node>:
+  View.mp.rows.labels(fold, lc, ms, cur, own, U.Models.labels(mi, prov))
 
 # the three columns: agent | model | effort (fold: View.mp.rows)
-def View.mp.cols(+lc: I.Loc, +ms: List<&2, String>, +mi: String, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool, fold: Bool) -> List<&2, D.Node>:
+def View.mp.cols.labels(+lc: I.Loc, +ms: List<&2, String>, +labels: J.Json, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool, fold: Bool) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "mp-col mp-agents"}], [View.mp.head(MSG.T.model.col.agent(lc), MPK.ModelPick.cap(0n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 0n)),
      D.El{"div", "", [D.At{"class", "rows"}], View.mp.agents(lc, U.Mpk.agents(), MPK.MpCur.agent(c), MPK.MpCur.agent(now))}]},
    D.El{"div", "", [D.At{"class", "mp-col mp-models"}, D.At{"style", "--namew:" ++ Nat.show(View.namew(ms)) ++ "ch"}], D.Dom.cat(
      [View.mp.head(MSG.T.model.col.model(lc), MPK.ModelPick.cap(1n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 1n))], D.Dom.cat(View.menu.find(lc, srch, q),
-     View.mp.rows(fold, lc, ms, MPK.MpCur.model(c), Bool.pick(String, String.eq(MPK.MpCur.agent(c), MPK.MpCur.agent(now)), MPK.MpCur.model(now), "\u{1f}"), mi, MPK.MpCur.agent(c))))},
+     View.mp.rows.labels(fold, lc, ms, MPK.MpCur.model(c), Bool.pick(String, String.eq(MPK.MpCur.agent(c), MPK.MpCur.agent(now)), MPK.MpCur.model(now), "\u{1f}"), labels)))},
    D.El{"div", "", [D.At{"class", "mp-col mp-effort"}], [View.mp.head(MSG.T.model.col.effort(lc), MPK.ModelPick.cap(2n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 2n)),
      D.El{"div", "", [D.At{"class", "meter"}], View.mp.bars(lc, MPK.ModelPick.bars(ss, MPK.MpCur.effort(c)))},
      D.Dom.span("note", View.mp.note(lc, List.is_empty(&2, String, MPK.ModelPick.levels(ss)), MPK.MpCur.agent(c), MPK.MpCur.effort(now)))]}]
+
+def View.mp.cols(lc: I.Loc, ms: List<&2, String>, mi: String, +c: MPK.MpCur, now: MPK.MpCur, ss: List<&2, MPK.MpStep>, q: String, srch: Bool, fold: Bool) -> List<&2, D.Node>:
+  View.mp.cols.labels(lc, ms, U.Models.labels(mi, MPK.MpCur.agent(c)), c, now, ss, q, srch, fold)
 
 # a phone's picker is a sheet: a head saying what it is with a close (the
 # shade's flag), then the columns stacked in a body that scrolls under it
@@ -1329,16 +1337,32 @@ def View.mp.body(phone: Bool, +lc: I.Loc, cols: List<&2, D.Node>) -> List<&2, D.
 # of the cursor's agent the search finds (Mpk.models), mi the models info
 # cut to them, so each row's label is read from a few KB (Models.view);
 # ss its meter (Mpk.steps); phone: a phone's sheet (View.mp.top, .rows)
-def View.mp.open(+lc: I.Loc, +ms: List<&2, String>, +mi: String, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool, +phone: Bool) -> List<&2, D.Node>:
+def View.mp.open.labels(+lc: I.Loc, +ms: List<&2, String>, +labels: J.Json, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool, +phone: Bool) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "shade"}, D.At{"data-value", "models"}, D.On{"click", "flag"}], Nil{}},
    D.El{"div", "", [D.At{"class", Bool.pick(String, phone, "model-menu mp mp-phone", "model-menu mp")}, D.At{"role", "dialog"}, D.At{"aria-label", MSG.T.composer.model.tip(lc)}, D.At{"title", MSG.T.model.keys(lc)}],
-     View.mp.body(phone, lc, View.mp.cols(lc, ms, mi, c, now, ss, q, srch,
+     View.mp.body(phone, lc, View.mp.cols.labels(lc, ms, labels, c, now, ss, q, srch,
        Bool.and(phone, Bool.and(String.is_empty(String.trim(q)), Nat.is_gt(List.length(&2, String, ms), Nat.add(View.mp.few(), 1n))))))}]
 
+# Keep the phone sheet and folded model groups when reusing parsed labels.
+def View.mp.open(lc: I.Loc, ms: List<&2, String>, mi: String, +c: MPK.MpCur, now: MPK.MpCur, ss: List<&2, MPK.MpStep>, q: String, srch: Bool, phone: Bool) -> List<&2, D.Node>:
+  View.mp.open.labels(lc, ms, U.Models.labels(mi, MPK.MpCur.agent(c)), c, now, ss, q, srch, phone)
+
+# Parse the chosen provider's catalog once per render. Labels stay as Json;
+# serializing a trimmed catalog and parsing it again cost another full pass.
+# Efforts retain their existing source (models, even for opencode).
+def View.mp.catalog(+lc: I.Loc, +catalog: J.Json, +efforts: J.Json, +c: MPK.MpCur, +now: MPK.MpCur, +q: String, phone: Bool) -> List<&2, D.Node>:
+  +agent = MPK.MpCur.agent(c)
+  +prepared = MCat.Catalog.prepare.given(catalog, agent, MPK.MpCur.model(now), String.eq(agent, MPK.MpCur.agent(now)), q)
+  View.mp.open.labels(lc, MCat.ModelCatalog.models(prepared), MCat.ModelCatalog.labels(prepared), c, now,
+    MPK.ModelPick.steps(U.Effort.chips.about(U.Models.about.given(efforts, agent), agent, MPK.MpCur.model(c))), q, MCat.ModelCatalog.search(prepared), phone)
+
+def View.mp.catalog.of(oc: Bool, lc: I.Loc, +nf: Map<&2, String>, +catalog: J.Json, c: MPK.MpCur, now: MPK.MpCur, q: String, phone: Bool) -> List<&2, D.Node>:
+  match oc:
+    case False{}: View.mp.catalog(lc, catalog, catalog, c, now, q, phone)
+    case True{}: View.mp.catalog(lc, catalog, U.Models.parse(U.Str.get(nf, "models")), c, now, q, phone)
+
 def View.mp.shown(+lc: I.Loc, +nf: Map<&2, String>, +c: MPK.MpCur, +now: MPK.MpCur, +q: String) -> List<&2, D.Node>:
-  +ms = U.Mpk.models(nf, c, now, q)
-  View.mp.open(lc, ms, U.Models.view(U.Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c), ms), c, now, U.Mpk.steps(nf, c), q,
-    U.Models.search(U.Models.menu(U.Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c))), String.eq(U.Str.get(nf, "local.workspace.form"), "phone"))
+  View.mp.catalog.of(String.eq(MPK.MpCur.agent(c), "opencode"), lc, nf, U.Models.parse(U.Models.of(nf, MPK.MpCur.agent(c))), c, now, q, String.eq(U.Str.get(nf, "local.workspace.form"), "phone"))
 
 # the picker, open or not, with cursor c over the thread's own (now); its
 # layer carries data-draft while a cursor is kept, so the web shuts and

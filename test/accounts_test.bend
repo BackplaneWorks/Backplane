@@ -26,6 +26,8 @@ def deleting_default(+snapshot: String) -> M.State:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("legacy model catalog bypasses parse and serialization", A.Accounts.overlay(" { \"codex\": [\"one\"] }\n", state(), "t"), " { \"codex\": [\"one\"] }\n")
+    C.Check.str("invalid named model binding cannot expose legacy models", J.Json.show(J.Json.get_obj(A.Accounts.parse(A.Accounts.overlay("{\"codex\":[\"legacy\"]}", M.State.replay([M.SettingSet{A.Accounts.binding.key("t", "codex"), "broken", 2n}], state()), "t")), "codex")), "[]")
     C.Check.str("missing account has a clear selection reason", A.Accounts.unavailable(J.Null{}, 1n), "This saved account is no longer available. Choose another account.")
     C.Check.str("unchecked sign-in asks for refresh rather than authentication", A.Accounts.unavailable(A.Accounts.parse("{\"id\":\"A\",\"state\":\"unchecked\"}"), 1n), "This saved sign-in has not been checked yet. Reopen the account menu to refresh it.")
     C.Check.str("disconnected account has an authentication next step", A.Accounts.unavailable(A.Accounts.parse("{\"id\":\"A\",\"state\":\"disconnected\"}"), 1n), "This account is not connected. Use Status / Refresh or Connect / Login in Settings → Agents.")
