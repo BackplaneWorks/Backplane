@@ -35,14 +35,18 @@ assertions and the in-app download/extraction run as the standard user.
 
 Resource prerequisite: place the PowerShell/Node/app subtree in an actual
 Windows Job Object before the consumer starts, with job-wide committed
-memory at most 8 GiB, no breakaway, and no active page files. Query the actual
-kernel limits/peak and membership, and CIM pagefile state before and after.
+memory at most 8 GiB and no breakaway. The person explicitly authorizes the
+hosted runner's existing pagefile for this #927/#946 attempt only. Query the
+actual kernel limits/peak and membership, CIM pagefile state and host-wide raw
+paging counters before/after and every five seconds during the consumer.
 Write resources-start.json under out with jobMemoryLimitBytes, pageFiles
-(an empty array), and the observed membership/limit flags. A caller-created
+(the actual observed array), and the observed membership/limit flags. A caller-created
 receipt alone is not resource attestation: the hosted bootstrap must enforce
-and reread the job configuration. If no-pagefile or job setup cannot be
-established, report BLOCKED before running acceptance. Do not silently alter
-host paging or exceed the cap. Record the final job high-water and cleanup.
+and reread the job configuration. If job setup or paging observations cannot
+be established, report BLOCKED before running acceptance. Do not alter host
+paging or exceed the cap. Record the explicit pagefile exception, raw paging
+samples, final job high-water and cleanup. Host-wide counters are not attributed
+to the tested process; record their actual scope.
 Job committed-memory semantics: Microsoft's JOBOBJECT_EXTENDED_LIMIT_INFORMATION
 and JOBOBJECT_BASIC_LIMIT_INFORMATION documentation.
 
@@ -69,7 +73,7 @@ and the verified fix ships; 0.14.2 publication remains on user-confirmation HOLD
 The dedicated kicad-windows-927-native.yml workflow consumes authenticated
 Actions artifact 13352107148 from producer run 41886983230 and verifies the
 exact handed-off ZIP and receipt digests. bootstrap.ps1 enforces the actual
-Windows Job Object cap and no-pagefile gate before dependency setup, runtime
+Windows Job Object cap and authorized paging policy before dependency setup, runtime
 fixtures or application execution. It creates and retires one disposable
 standard account. user.ps1 rereads inherited kernel limits under that account,
 fixes its profile environment, and invokes the consumer. No native verdict
@@ -78,8 +82,10 @@ if resource setup blocks the application test. The workflow runs once when
 its file is pushed on this consumer branch; any rerun needs a diagnosed reason.
 
 The first hosted attempt 41888522683 was BLOCKED before app launch by the
-runner's active pagefile; see evidence/run-41888522683. The consumer retains
-swap=0 until the person resolves that constraint. No native pass is claimed.
+runner's active pagefile; see evidence/run-41888522683. The person subsequently
+selected option 1, permitting that existing pagefile while retaining the cap
+and requiring paging observations. The original refusal is retained unchanged.
+No native pass is implied by that policy exception.
 
 canonical-946.py prepares a separate native ABI verdict using unchanged
 merged verifier 2823fe4641bbadcb41a6cf49f91fe2c7fbc77978, script SHA256
