@@ -2956,3 +2956,21 @@ html.phone .lightbox .lb-close { top: max(12px, env(safe-area-inset-top)); right
 html.phone .lightbox .lb-tools { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); right: calc(68px + env(safe-area-inset-right)); }
 html.phone .lightbox .lb-tools button { min-height: 44px; padding: 0 14px; }
 html.phone .lightbox .lb-status { bottom: max(20px, env(safe-area-inset-bottom)); }
+
+/* bots and rooms on a phone: the bot's pages as a row of chips that
+   scrolls sideways (one tap, always in sight) instead of the Pages menu */
+html.phone .bot-mobile-menu { display: none; }
+html.phone .bot-primary-tabs, html.phone .bot-primary-tabs .bot-desktop-tabs { display: flex; }
+html.phone .bot-tabs { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; gap: 6px; padding: 6px 12px; -webkit-overflow-scrolling: touch; }
+html.phone .bot-tabs::-webkit-scrollbar { display: none; }
+html.phone .bot-desktop-tabs { gap: 6px; flex-wrap: nowrap; }
+html.phone .bot-tabs .tab { flex: none; min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 0; color: var(--dim); }
+html.phone .bot-tabs .tab.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+/* a bot's pages (Mailroom, Browser, Routines, Webhooks, ...) and a room:
+   thumb-sized controls, 16 px fields; the bot's Chat composer is the thread's (B) */
+html.phone :is(.bot-body, .mailroom) :is(button, summary, select) { min-height: 44px; min-width: 44px; }
+html.phone :is(.bot-body, .mailroom) :is(input:not([type=checkbox]):not([type=radio]), select, textarea) { font-size: 16px; min-height: 44px; }
+/* the Mailroom's filters: one line each that scrolls sideways */
+html.phone .mailroom :is(.mail-machines, .mail-bots, .mail-filters, .mail-columns, .mail-targets) { display: flex; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; gap: 8px; }
+html.phone .mailroom :is(.mail-machines, .mail-bots, .mail-filters, .mail-columns, .mail-targets) > * { flex: none; }
+html.phone .mailroom .mail-row { min-height: 56px; }
