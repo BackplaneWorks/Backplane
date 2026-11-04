@@ -1,7 +1,7 @@
 {
   "state": "passed",
   "kind": "four exact canonical review window laws + full small IO/fold interface type-check",
-  "source_head": "bab3fe485f3879227655f43046503e9e5c0ad010",
+  "source_head": "9ac6c179d28eb24aaf3f7da1da0432d2aab2fabf",
   "law_names": [
     "review_window_budget",
     "review_window_progress",
@@ -9,10 +9,10 @@
     "review_window_cursor_failure"
   ],
   "source_sha256": {
-    "LAWS.bend": "425f7106de91526363d12ba546d42d7db753ba32bfde210b8912d84c4d77abe4",
-    "PROOF.bend": "f6b215911f84ad3669a2f55961555b5f7a9e7abf23a254a2b94acf605e7d7961",
+    "LAWS.bend": "583e0c57bde1f0efe183c5b1506531cc1476cd67e5b02743f54c71a7dd01c148",
+    "PROOF.bend": "941843c9d3942aed62cd51ed62038935eca1cbbae2e1e8d9e1a8943867aa952c",
     "src/server/db.bend": "5dc6681183d5ac3eb8c942d91a9eab7a3354eea05dc8177f7440d62dd73a823a",
-    "src/server/effects/db.js": "97af1b2b01d4dd91389eadc3398343924dd029d925d90fecdb9057a119692f2a",
+    "src/server/effects/db.js": "1472da9b675e8b0d9badc4da87a36f339865d9c008ea27220875ac77661c4f40",
     "src/server/review-window.bend": "a031ab5d54ce79c82fb1ad7abe1491ee3ad883079925299ac74e7a12c50f68d2",
     "test/check.bend": "b4bb620e7dea63f8652cb9e320cbae787231a078e9f37138aab8c21c21ffa791",
     "test/review_window_test.bend": "a834797f5904a2267ff6a0e21c40b2f2d9ef0f9347fb6698e6eaf64c6fb7a6e3",
@@ -22,11 +22,11 @@
     "scripts/bend-closure.py": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
     "scripts/laws-shape.py": "3f71e08f706c03b1d4df4b7f8c5a6bb65f91cd07107bdbf2f31b3cd8e873fe90",
     "scripts/bendok.sh": "3f3e17c4ba1a0d90fe541c077f233dd3b75f3c66147d6038a91f192e3354c86c",
-    "scripts/heavy-guard.py": "3c4b8caf11992aee6b57969ab4087eb467c86c8e6134c190c01ee847a5ec630f",
+    "scripts/heavy-guard.py": "6daa79058976a721e9fb468264aee27524e2483a8197cd2e85d70c8a2337ca27",
     "scripts/local-phase.py": "5edf28b7f91bf938576e818cca50491b27d4a3b84c74050bc91ebf4524ef5e17",
     "test/tools/review_window_scope.py": "62a815188668b85866815cb0b1a33a67f5e7283eaaeed293c7e7e1f53d3c0f6d",
     "src/server/review-history.bend": "35256bcbd65756daedf5180ddbceb6ee3e8bd67b143ada9ac3b93c18f4ddddd7",
-    "test/tools/review_window_test.cjs": "bba128b6261d134d70744a9dbff802caa2bfac2fd4cce20ba4fb25174158999e",
+    "test/tools/review_window_test.cjs": "0387bde8e54fda58dcde37e9f51f72c9afb366992940ccab53353af475a53597",
     "test/fixtures/review_history_reference.txt": "a1ba90dd34fb872d26737d67730e5d5d194fe744bfe3d8f9e88b34f57e6a036d"
   },
   "bun_boundary_cases": 7,
@@ -53,7 +53,7 @@
   },
   "controller_memory_max_bytes": 536870912,
   "controller_swap_max_bytes": 0,
-  "controller_memory_peak_bytes": 134348800,
+  "controller_memory_peak_bytes": 136159232,
   "controller_events": {
     "low": 0,
     "high": 0,
@@ -67,18 +67,18 @@
     3699998720
   ],
   "worker_peak_rss_kib": [
-    120960,
-    118784
+    121344,
+    128768
   ],
   "worker_seconds": [
-    0.10848436700001685,
-    0.11507995900001333
+    0.07910040199999457,
+    0.07758523699999387
   ],
   "worker_scope_resources": [
     {
       "memory_max_bytes": 3699998720,
       "swap_max_bytes": 0,
-      "memory_peak_bytes": 105807872,
+      "memory_peak_bytes": 106151936,
       "events_before": {
         "low": 0,
         "high": 0,
@@ -99,7 +99,7 @@
     {
       "memory_max_bytes": 3699998720,
       "swap_max_bytes": 0,
-      "memory_peak_bytes": 102195200,
+      "memory_peak_bytes": 112410624,
       "events_before": {
         "low": 0,
         "high": 0,
