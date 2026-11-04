@@ -265,7 +265,7 @@ type Msg is Data:
   JoinMore{client: U32, gen: U32}
   # a client pinged (its reader passes on at most one a second)
   Ping{client: U32, payload: List<&2, U32>}
-  Leave{client: U32}
+  PeerLeave{client: U32}
   Rpc{client: U32, text: String}
   JobReported{receipt: JobReceipt}
   AgentLine{thread: String, line: String}
@@ -1571,7 +1571,7 @@ def Conn.leave(s: Socket, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     PAIR.Pairing.forget(id)
     Socket.close(s)
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{id})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PeerLeave{id})
     return Unit{}
 
 # a request's CBOR as the JSON text the hub reads
@@ -16685,7 +16685,7 @@ def Conn.devices.left(xs: List<&2, J.Json>, +inbox: Chan(Msg)) -> IO(Unit):
     case Nil{}: IO.pure(Unit, Unit{})
     case x <> rest:
       do IO<Unit>:
-        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{U32.from_nat(J.Json.get_nat(J.Json.obj([J.KV{"id", x}]), "id", 0n))})
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PeerLeave{U32.from_nat(J.Json.get_nat(J.Json.obj([J.KV{"id", x}]), "id", 0n))})
         Conn.devices.left(rest, inbox)
 
 # a revoked hub-to-hub invite that had made a link: the link is removed as
@@ -18041,7 +18041,7 @@ def Msg.kind(m: Msg) -> String:
       "join_more"
     case Ping{_, _}:
       "ping"
-    case Leave{_}:
+    case PeerLeave{_}:
       "leave"
     case ThinRead{_, _, _, _, _}:
       "thin-read"
@@ -19418,7 +19418,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.boot(h, client, gen)
     case Ping{client, p}:
       Hub.pong(h, client, p)
-    case Leave{client}:
+    case PeerLeave{client}:
       Hub.leave(h, client, now)
     case ThinRead{client, gen, view, target, text}:
       Hub.thin.read_job(h, client, gen, view, target, text, now)

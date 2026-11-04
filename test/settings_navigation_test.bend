@@ -17,7 +17,7 @@ def state(a: U.Act) -> U.Ui:
 def sends(cs: List<&2, U.Cmd>) -> Bool:
   match cs:
     case Nil{}: False{}
-    case U.Focus{_} <> t: sends(t)
+    case U.FocusField{_} <> t: sends(t)
     case _ <> _: True{}
 
 def commands(a: U.Act) -> Bool:
