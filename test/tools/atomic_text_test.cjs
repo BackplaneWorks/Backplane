@@ -6,6 +6,13 @@ const path = require('node:path');
 const os = require('node:os');
 const source = fs.readFileSync(path.join(__dirname, '../../src/server/effects/host.js'), 'utf8')
   .replace(/CID\(([^)]+)\)/g, '"$1"');
+// POSIX argv would hide a caller-only reversion to the original shell writer.
+// Keep this assertion in the small gate as well as exercising the native effect.
+const saveDefinition = fs.readFileSync(path.join(__dirname, '../../src/server/kicad.bend'), 'utf8')
+  .split(/^def /m).find(definition => definition.startsWith('Rt.save('));
+assert(saveDefinition, 'Production Rt.save definition is missing');
+assert.match(saveDefinition, /\bH\.FS\.write_atomic\(/, 'Rt.save must use the native atomic writer');
+assert.doesNotMatch(saveDefinition, /\b(?:P\.)?Proc\.run\(/, 'Rt.save must never transport JSON through child argv');
 function writer(io = fs) {
   const effects = new Map();
   new Function('require', 'io_eff', 'io_done', 'io_fail', source)(
@@ -41,5 +48,5 @@ try {
   }
   assert.equal(write(path.join(folder, 'absent', 'cache.json'), 'x').ok, false);
   assert.equal(fs.readFileSync(target, 'utf8'), previous);
-  console.log('ok native atomic UTF-8 text: Windows escapes, replacement, private mode, failure preservation and cleanup');
+  console.log('ok native atomic UTF-8 text: caller has no shell transport; Windows escapes, replacement, private mode, failure preservation and cleanup');
 } finally { fs.rmSync(folder, { recursive: true, force: true }); }
