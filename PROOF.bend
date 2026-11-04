@@ -15896,3 +15896,21 @@ def Laws.review_window_cursor_failure(value): {==}
 def Laws.auth_cache_key_sequence(st): {==}
 
 def Laws.auth_empty_threads_waits_none(st): {==}
+
+def Laws.catalog_lookup_common_cancel(lc):
+  match lc:
+    case I18.En{}: {==}
+    case I18.Ja{}: {==}
+
+def Laws.catalog_lookup_parameterized_absent(lc): {==}
+
+def Laws.catalog_lookup_unknown_absent(lc): {==}
+
+def Laws.catalog_lookup_root(lc, key): {==}
+
+def Laws.catalog_metadata_complete(lc):
+  match lc:
+    case I18.En{}: {==}
+    case I18.Ja{}: {==}
+
+def Laws.catalog_keys_nonempty(): {==}
