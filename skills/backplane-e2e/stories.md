@@ -391,8 +391,7 @@ Split, pick `beta`: every pane shows beta, Sheets lists beta's sheets (no
 Open a thread: the bar reads "Backplane / PROJ / title ▾" with a State cell
 and no separate thread header. ▾ lists Pin, Settle, Snooze, Archive, Delete,
 Fork; a click on the title renames it. Send a message: State reads "working"
-with Stop, Stop interrupts; then "finished". Design changes counts saved
-board and schematic edit steps; its tooltip explains the viewer history. Opening a finished thread
+with Stop, Stop interrupts; then "finished". Opening a finished thread
 from an idle one never shows "idle" first. The gear opens Settings (the
 bar reads "Settings / page") and closes it. The "Jump or run a command" field
 (Ctrl+K) opens the palette. At 420 px wide: the list shows the mark and

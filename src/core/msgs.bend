@@ -1606,20 +1606,6 @@ def T.history.comparing(l: I.Loc) -> String:
     case I.Ja{}:
       "比較中"
 
-def T.history.count.label(l: I.Loc) -> String:
-  match l:
-    case I.En{}:
-      "Design changes"
-    case I.Ja{}:
-      "設計の変更"
-
-def T.history.count.tip(l: I.Loc) -> String:
-  match l:
-    case I.En{}:
-      "Saved board and schematic changes in this thread, captured after tool calls. Click to browse them in the viewer's history, which counts the board's or the schematic's alone."
-    case I.Ja{}:
-      "このスレッドでツール実行後に保存された基板・回路図の変更です。クリックするとビューアの履歴で確認できます。履歴は基板または回路図の変更だけを数えます。"
-
 def T.history.file.tip(l: I.Loc) -> String:
   match l:
     case I.En{}:
