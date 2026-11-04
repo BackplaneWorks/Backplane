@@ -34,11 +34,19 @@ Unicode units, disconnects, original cast traces and 60,000 churn/overwrite
 operations. Eight cache checks pass under Node and Bun; three performance
 counter checks pass under Node.
 
-Scoped Bend qualification is pending. `test/tools/cache_effect_scope.py`
+Scoped Bend qualification passed at source head `1ba75edef` in normal Boat
+job `j20261104014800-1235111`. `test/tools/cache_effect_scope.py`
 copies the exact three new canonical law/proof blocks and unchanged small
 cache/cast/type-test modules into an isolated packet. It uses the original
 shard executor under a 3.7 GB no-swap worker and separate 512 MiB no-swap
-controller, with a changed-budget false theorem control. It records complete
+controller, with a changed-budget false theorem control that was rejected.
+Positive compiler RSS peaked at 114,816 KiB; the negative control peaked at
+119,616 KiB. The controller peaked at 33,464,320 bytes. All recorded OOM and
+swap activity counters were zero. A prior SMALL admission refusal
+(`j20261104014641-1218692`) ran no Bend and remains a separate incomplete
+attempt; the successful run kept the same worker/controller caps.
+
+[Receipts](../../extra/hub-cache-qualification/SUMMARY.json) record complete
 source/block hashes and the pushed source head. Its interface type-check does
 not execute the IO test's main or qualify the server/application closure.
 
