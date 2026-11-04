@@ -281,6 +281,35 @@ class Slices(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not a static or single string-literal'):
             s.write_shard(s.blocks('src/c.bend', 'C.f'), self.root/'oc')
 
+    def test_template_interpolations_are_scanned_as_code(self):
+        deps = lambda src: sl.js_dependencies(src, 't')
+        self.assertEqual(deps('const x = `${require("./dep.js")}`;'), ['./dep.js'])
+        self.assertEqual(deps('const x = `${import("./dep.js")}`;'), ['./dep.js'])
+        self.assertEqual(deps('const x = `a${`b${require("./d.js")}c`}e`;'), ['./d.js'])
+        self.assertEqual(deps('const x = `${ {a: 1}.a }${require("./a.js")}`;'), ['./a.js'])
+        self.assertEqual(deps('const x = `plain ${y} text`; // require(p)'), [])
+        self.assertEqual(deps('require(`./a.js`)'), ['./a.js'])
+        for src in ('`${require(p)}`', '`${import(n)}`', '`${require("./a.js" + s)}`', 'require(`./a${s}.js`)',
+                    '`${`${require(p)}`}`', 'const x = `${require("./a.js")', 'const x = `${ unterminated', '`${"open}`'):
+            with self.assertRaises(ValueError, msg=src):
+                deps(src)
+
+    def test_effect_closure_follows_a_template_interpolated_require(self):
+        (self.root/'src/effects').mkdir()
+        self.write('src/effects/t.js', 'module.exports = `${require("./dep.js")}`;\n')
+        self.write('src/effects/dep.js', 'x\n')
+        self.write('src/t.bend', 'import Base\n\ndef T.f():\n  import "./effects/t.js"\n  0\n')
+        s = self.slicer('src/t.bend')
+        out = self.root/'ot'
+        kept = s.write_shard(s.blocks('src/t.bend', 'T.f'), out)
+        self.assertTrue((out/'t/src/effects/dep.js').is_file())
+        (out/'t/src/effects/dep.js').unlink()
+        with self.assertRaisesRegex(ValueError, 'effect companion'):
+            sl.verify_output(out, kept, self.root)
+        self.write('src/effects/t.js', 'module.exports = `${require(p)}`;\n')
+        with self.assertRaisesRegex(ValueError, 'string-literal'):
+            s.write_shard(s.blocks('src/t.bend', 'T.f'), self.root/'ot2')
+
     def test_every_module_in_the_canonical_closure_parses_strictly(self):
         import subprocess
         import sys
