@@ -2986,6 +2986,9 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 .app.phone .msg .shot.image-unavailable { aspect-ratio: auto; height: 44px; width: 100%; }
 /* an API error's "› details" and a restart's "› what it was told" */
 .app.phone :is(.apierr-raw, .carry-told) > summary { display: inline-flex; align-items: center; min-height: 40px; padding: 0 8px; }
+/* a message this thread sent to another ("→ thread: …", View.link "out"):
+   one line cut to the screen, a thumb tall (it ran 870 px wide) */
+.app.phone .timeline button.link.out { display: block; max-width: 100%; min-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 /* a turn's tool calls and its activity rows: a row a thumb can open */
 /* (padding on its row: a margin collapses through the row, which the
    timeline's planner measures, and the next row overlapped it) */
