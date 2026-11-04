@@ -108,11 +108,15 @@ def Phone.tool(+action: String, +value: String, +label: String, +icon: String) -
 # a sheet the hub draws (open while "@ph.sheet" names it); the backdrop and
 # a drag down on its grab shut it. Menus (<details class="local-menu">) are
 # shown as sheets by style.css alone and need none of this.
-def Phone.sheet(+name: String, +title: String, body: List<&2, D.Node>) -> D.Node:
+# (close: what the backdrop, a drag down and the system back send)
+def Phone.sheet.on(+name: String, +title: String, +close: String, body: List<&2, D.Node>) -> D.Node:
   D.El{"div", "ph-sheet:" ++ name, [D.At{"class", "ph-sheet-layer"}], [
-    D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "ph-sheet-back"}, D.At{"aria-label", "Close"}, D.At{"data-value", ""}, D.On{"click", "ph-sheet"}], Nil{}},
+    D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "ph-sheet-back"}, D.At{"aria-label", "Close"}, D.At{"data-value", ""}, D.On{"click", close}], Nil{}},
     D.El{"section", "", [D.At{"class", "ph-sheet"}, D.At{"role", "dialog"}, D.At{"aria-modal", "true"}, D.At{"aria-label", title}],
-      List.append(&2, D.Node, [D.El{"div", "", [D.At{"class", "ph-sheet-grab"}, D.At{"data-ph-close", "ph-sheet"}], Nil{}}, D.El{"header", "", [D.At{"class", "ph-sheet-title"}], [D.Txt{title}]}], body)}]}
+      List.append(&2, D.Node, [D.El{"div", "", [D.At{"class", "ph-sheet-grab"}], Nil{}}, D.El{"header", "", [D.At{"class", "ph-sheet-title"}], [D.Txt{title}]}], body)}]}
+
+def Phone.sheet(+name: String, +title: String, body: List<&2, D.Node>) -> D.Node:
+  Phone.sheet.on(name, title, "ph-sheet", body)
 
 def Phone.sheet.if(open: Bool, +name: String, +title: String, body: List<&2, D.Node>) -> List<&2, D.Node>:
   match open:

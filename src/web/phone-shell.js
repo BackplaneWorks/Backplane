@@ -132,7 +132,8 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     const menu = doc.querySelector(".local-menu[open]:not([data-inline='true'])");
     if (menu) return () => { menu.open = false; };
     if (doc.querySelector(".rowmenu")) return () => dispatch("menu-close", "");
-    if (doc.querySelector(".ph-sheet-layer")) return () => dispatch("ph-sheet", "");
+    const sheet = doc.querySelector(".ph-sheet-layer .ph-sheet-back");
+    if (sheet) return () => sheet.click();
     const search = doc.querySelector("#thin-result .phead button");
     if (search) return () => search.click();
     if (doc.querySelector(".workspace-palette")) return () => dispatch("ws-palette-close", "");
