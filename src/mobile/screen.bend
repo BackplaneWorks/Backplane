@@ -2128,7 +2128,7 @@ def Mob.cad.note.at(acts: List<&2, KH.KAct>) -> J.Json:
 def Mob.kn(n: Maybe<&2, KH.KNote>) -> List<&2, J.Json>:
   match n:
     case None{}: Nil{}
-    case Some{KH.KNote{_, title, body, acts}}: [Mob.cad.note(title, body, acts, Mob.cad.note.at(acts))]
+    case Some{KH.KNote{_, title, body, +acts}}: [Mob.cad.note(title, body, acts, Mob.cad.note.at(acts))]
 
 def Mob.lang.chips(+lc: I.Loc, vs: List<&2, String>, +u: U.Ui) -> List<&2, J.Json>:
   match vs:
