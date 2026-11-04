@@ -16189,3 +16189,23 @@ law cad_install_monotonic:
   for +old: Nat
   for next: Nat
   {Nat.is_ge(CADINSTALL.Cad.advance(True{}, old, next), old) == True{} : Bool}
+
+# A new continuing subthread persists its launcher as the actual parent.
+# A later manual move is authoritative; report settings never recreate links.
+law mcp_subthread_link:
+  for +c: Char
+  for +tail: String
+  for +child: String
+  for +now: Nat
+  for cs: List<&2, M.Change>
+  {MC.Mcp.launch.link(SCon{c, tail}, child, now, cs) == List.append(&2, M.Change, cs, [M.ThreadParentSet{child, SCon{c, tail}, now}, M.SettingSet{LEG.Tree.open_key(SCon{c, tail}), "1", now}]) : List<&2, M.Change>}
+
+law mcp_subthread_parent:
+  {M.Setting.get(M.State.replay(MC.Res.changes(MC.Mcp.launch(H.Demo.state("claude", M.Completed{}), 5n, "t1", J.Json.obj([J.KV{"prompt", J.Str{"lane"}}]))), H.Demo.state("claude", M.Completed{})), "thread.parent.t5-3", "") == "t1" : String}
+
+law mcp_subthread_manual_move_wins:
+  {M.Setting.get(M.State.replay(List.append(&2, M.Change, MC.Mcp.launch.link("parent", "child", 1n, []), [M.ThreadParentSet{"child", "", 2n}, M.ThreadLaunched{"child", "parent", False{}, 3n}]), M.State.empty()), "thread.parent.child", "unset") == "" : String}
+
+# A launch seed is visible to messages later in the very same commit.
+law mcp_subthread_seed_batch:
+  {M.Setting.get(M.State.replay(AUTOS.Auto.messages.metadata([M.SettingSet{"autosettle.seed.child", "seed", 1n}, M.MessagePosted{"child", "seed", M.User{}, "lane", 1n}], M.State.empty()), M.State.empty()), "autosettle.audience.child", "") == "worker" : String}
