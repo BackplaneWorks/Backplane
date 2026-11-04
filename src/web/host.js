@@ -872,8 +872,20 @@ let jump = null;
 // thread shows it, paging back through the history while it is not there
 // yet (at most 40 pages)
 let searchJump = null;
-// a phone thread header's "Go to the start" (view.bend's View.phone.head.thread)
-let startJump = null;
+// a phone thread header's "Go to the start" (view.bend's View.phone.head.thread):
+// a line under the header says how far it got, with Cancel, then Newest
+let startJump = null, startNote = null, startNoteTimer = 0;
+function startSay(text, action, label) {
+  clearTimeout(startNoteTimer);
+  if (!startNote) { startNote = document.createElement("div");startNote.className = "ph-note";startNote.setAttribute("role", "status");document.body.append(startNote); }
+  startNote.replaceChildren(document.createTextNode(text));
+  if (action) {
+    const b = document.createElement("button");b.type = "button";b.textContent = label;
+    b.addEventListener("click", () => { startSay("");if (action === "cancel") startJump = null;else holdBottom(); });
+    startNote.append(b);
+  }
+  if (!text) { startNote.remove();startNote = null; }
+}
 let earlierAsked = false;
 
 // TanStack virtual-core 3.19.9's layout model is ported in timeline-plan.bend.
@@ -1213,11 +1225,16 @@ function render() {
     } else if (thin?.ready) searchJump = null;
   }
   // "Go to the start": every earlier page, one after another, then the top
+  // (two pages a request; the view shows the oldest page in as it comes)
   if (startJump && tl2 && startJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
-    if (thin?.hasAhead?.("older") && startJump.pages < 200) {
-      if (!startJump.asked) { startJump.asked = true; requestAnimationFrame(() => { if (startJump) { startJump.asked = false; if (thin.ahead("older")) startJump.pages++; } }); }
-    } else if (thin?.ready) { tl2.scrollTop = 0; startJump = null; }
-  } else if (startJump && startJump.thread !== (thin?.session?.sel ?? App.sel(ui))) startJump = null;
+    if (thin?.hasAhead?.("older") && startJump.pages < 400) {
+      if (startJump.pages) tl2.scrollTop = 0;
+      if (!startJump.asked) { startJump.asked = true; requestAnimationFrame(() => { if (startJump) { startJump.asked = false; if (thin.ahead("older", { two: true })) { startJump.pages += 2;startSay(`Going back to the start… ${startJump.pages} pages`, "cancel", "Cancel"); } } }); }
+    } else if (thin?.ready) {
+      tl2.scrollTop = 0;startJump = null;
+      startSay("The start of the thread", "newest", "Newest ↓");startNoteTimer = setTimeout(() => startSay(""), 8000);
+    }
+  } else if (startJump && startJump.thread !== (thin?.session?.sel ?? App.sel(ui))) { startJump = null;startSay(""); }
   searchLight(tl2);
   panes();
   secretSaves.paint();
@@ -1686,7 +1703,7 @@ function dispatch(action, value, timer) {
     }
   }
   // (the host pages back itself: render's startJump, as a search jump does)
-  if (action === "ph-start") { startJump = { thread: currentSession().sel, pages: 0, asked: false };later();return true; }
+  if (action === "ph-start") { startJump = { thread: currentSession().sel, pages: 0, asked: false };startSay("Going back to the start…", "cancel", "Cancel");later();return true; }
   if (action === "thin-search-open") {
     // (value: a query the command palette could not match: the palette
     // closes first, and the search opens running it once it is gone, render)
@@ -3065,7 +3082,7 @@ function refusedView(target, reason) {
   trace("thin-refused", { reason });
   const back = refusedFallback(target, shownTarget, refusedViews);
   if (back === null || !thin) return false;
-  searchJump = null;startJump = null;
+  searchJump = null;startJump = null;startSay("");
   try { if (localStorage.getItem("backplane-selected") === target.id) localStorage.removeItem("backplane-selected"); } catch {}
   clearTimeout(viewNoteTimer);
   viewNote = back ? "That conversation can't be opened; back to the one before." : "That conversation can't be opened; here are your projects.";
