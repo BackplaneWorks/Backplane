@@ -15857,3 +15857,7 @@ def Laws.static_http_frame_policy(): {==}
 def Laws.review_window_budget(): {==}
 
 def Laws.review_window_progress(): {==}
+
+def Laws.review_window_read_failure(value): {==}
+
+def Laws.review_window_cursor_failure(value): {==}

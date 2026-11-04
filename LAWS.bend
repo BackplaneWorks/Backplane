@@ -16074,3 +16074,11 @@ law review_window_budget:
 
 law review_window_progress:
   {[REVIEWWINDOW.ReviewWindow.progress(5n, 5n, False{}), REVIEWWINDOW.ReviewWindow.progress(5n, 4n, False{}), REVIEWWINDOW.ReviewWindow.progress(5n, 6n, False{}), REVIEWWINDOW.ReviewWindow.progress(5n, 5n, True{})] == [False{}, False{}, True{}, True{}] : List<&2, Bool>}
+
+law review_window_read_failure:
+  for value: Nat
+  {REVIEWWINDOW.ReviewWindow.check(Nat, 128n, 256n, False{}, "read failed", value) == None{} : Maybe<&1, Nat>}
+
+law review_window_cursor_failure:
+  for value: Nat
+  {REVIEWWINDOW.ReviewWindow.check(Nat, 128n, 128n, False{}, "", value) == None{} : Maybe<&1, Nat>}
