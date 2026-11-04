@@ -33,7 +33,7 @@ function fake(failure = '') {
     assert.equal(done, 0); gates.open(); await turn(); assert.deepEqual(order, ['sync']); assert.equal(done, 0);
     gates.sync(); await turn(); assert.deepEqual(order, ['sync', 'close']); assert.equal(done, 0);
     gates.close(); await turn(); await turn(); assert.equal(done, 1); assert.equal(result, 'ok');
-    assert.equal(h.stats.resumes, 1); assert.equal(h.stats.parks, 1); assert.equal(h.context.BEND_IO.pend, 0);
+    assert.equal(h.stats.resumes, 1, 'resume count'); assert.equal(h.stats.parks, 1, 'park count'); assert.equal(h.context.BEND_IO.pend, 0, 'pending count');
   });
   for (const failure of ['', 'open', 'sync', 'close']) await test('async lifecycle ' + (failure || 'success'), async () => {
     const f = fake(failure), h = load({ io: f.io }), answer = await invoke(h, false, 'component');
