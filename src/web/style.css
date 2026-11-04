@@ -2804,6 +2804,8 @@ html.phone .settings-view .settings { padding: 12px 12px calc(24px + env(safe-ar
 html.phone.ph-kb .settings-view .settings { padding-bottom: calc(24px + var(--ph-kb, 0px)); }
 html.phone .settings-view .set-row { padding: 14px 12px; }
 html.phone .settings-view .settings-category { min-height: 64px; }
+html.phone .settings-view .settings :is(a[href], summary) { display: inline-flex; align-items: center; min-height: 44px; }
+html.phone .settings-view .settings summary { display: flex; }
 /* the phone's header names the page and has ‹; the page's own path line
    would say it twice */
 .app.phone .settings-view .settings-path { display: none; }
