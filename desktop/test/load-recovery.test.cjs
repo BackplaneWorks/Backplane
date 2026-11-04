@@ -24,3 +24,9 @@ test('closing or leaving recovery cancels probing and cannot reopen a window',as
     const f=fixture();f.fail();await settle();const probes=f.state.probes;change(f);await f.tick();assert.equal(f.state.probes,probes);assert.equal(f.state.reconnects,0);
   }
 });
+test('a persistent outage ends with a visible diagnostic and no scheduled retry',async()=>{
+  const f=fixture();f.fail();await settle();
+  for(let i=0;i<35;i++)await f.tick();
+  assert.equal(f.state.probes,30);assert.equal(f.state.timers.size,0);
+  assert.equal(f.state.status.at(-1)[0],'error');assert.match(f.state.status.at(-1)[1],/Retry/);
+});
