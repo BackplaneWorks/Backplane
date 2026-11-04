@@ -422,11 +422,26 @@ class View {
       this.drag = this.pts.size === 1 ? { x: e.clientX, y: e.clientY } : null;
       this.pinch = this.pts.size === 2 ? mid() : null;
       canvas.classList.add("dragging");
+      // a finger held still is a right click: comment there (not every
+      // touch browser sends contextmenu for it; iOS does not)
+      clearTimeout(this.pressing);
+      if (this.tap && e.pointerType === "touch") {
+        const at = this.tap;
+        // (a busy page runs the timer late with the lift still queued: let
+        // queued input go first, as phone-shell.js's long press does)
+        this.pressing = setTimeout(() => { this.pressing = setTimeout(() => {
+          if (this.tap !== at || this.pts.size !== 1) return;
+          this.tap = null;
+          this.longPressed = performance.now();
+          navigator.vibrate?.(10);
+          this.placeAt(at.x, at.y);
+        }, 0); }, 500);
+      }
     });
     on("pointermove", (e) => {
       if (!this.pts.has(e.pointerId)) { this.hover(e);return; }
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) this.tap = null;
+      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) { this.tap = null; clearTimeout(this.pressing); }
       if (this.pinch && this.pts.size === 2) {
         const m = mid(), f = this.zoomFactor(m.d / Math.max(this.pinch.d, 1));
         this.ox = m.x - (this.pinch.x - this.ox) * f; this.oy = m.y - (this.pinch.y - this.oy) * f;
@@ -450,6 +465,7 @@ class View {
       record.onSelect?.(selected?.id || '');
     };
     const up = (e) => {
+      clearTimeout(this.pressing);
       const tap = !this.treeWaiting() && e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
       this.mouseTap = !!tap && e.pointerType === "mouse";
@@ -531,10 +547,9 @@ class View {
     // coordinates); the page decides what to do (host.js)
     on("contextmenu", (e) => {
       e.preventDefault();
-      const b = canvas.getBoundingClientRect();
-      // the plot's units are thousandths of a mm
-      const x = (e.clientX - b.left - this.ox) / this.scale / 1000, y = (e.clientY - b.top - this.oy) / this.scale / 1000;
-      if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
+      // (a long press already answered: pointerdown)
+      if (this.longPressed !== undefined && performance.now() - this.longPressed < 1500) return;
+      this.placeAt(e.clientX, e.clientY);
     });
     // A schematic opens and resizes to its whole sheet. Boards retain the
     // person's inspected point when their pane changes size.
@@ -556,6 +571,14 @@ class View {
     this.watchDpr();
   }
 
+  // a comment asked for at a point of the page: the place in mm
+  placeAt(cx, cy) {
+    const b = this.canvas.getBoundingClientRect();
+    // the plot's units are thousandths of a mm
+    const x = (cx - b.left - this.ox) / this.scale / 1000, y = (cy - b.top - this.oy) / this.scale / 1000;
+    if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
+  }
+
   watchDpr() {
     this.dprQuery?.removeEventListener("change", this.dprChanged);
     this.dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
@@ -572,6 +595,7 @@ class View {
     cancelAnimationFrame(this.frame);
     clearTimeout(this.baking);
     clearTimeout(this.resting);
+    clearTimeout(this.pressing);
     if (this.idling) cancelIdleCallback(this.idling);
     clearInterval(this.tick); this.tick = null;
     this.canvas.classList.remove("dragging");
