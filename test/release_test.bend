@@ -28,7 +28,7 @@ def plan.s(p: R.Plan) -> String:
     case R.Plan{t, d, ss}:
       t ++ " " ++ d ++ "\n" ++ steps(ss)
 
-def plan.k(m: Maybe<&2, D.Tool>, ids: List<&2, String>, +pcb: String, +sch: String) -> String:
+def plan.k(m: Maybe<&2, D.CadTool>, ids: List<&2, String>, +pcb: String, +sch: String) -> String:
   match m:
     case Some{+t}:
       plan.s(R.Release.plan(t, ids, "/r", "v1", "kicad-cli", pcb, sch))
@@ -38,7 +38,7 @@ def plan.k(m: Maybe<&2, D.Tool>, ids: List<&2, String>, +pcb: String, +sch: Stri
 def plan(ids: List<&2, String>, +pcb: String, +sch: String) -> String:
   plan.k(D.Cad.find(D.Cad.tools(), "kicad"), ids, pcb, sch)
 
-def defaults.k(m: Maybe<&2, D.Tool>) -> String:
+def defaults.k(m: Maybe<&2, D.CadTool>) -> String:
   match m:
     case Some{t}:
       argv(R.Release.defaults(t))
