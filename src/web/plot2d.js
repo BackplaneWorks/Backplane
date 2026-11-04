@@ -884,7 +884,7 @@ class View {
       const f = this.scale / b.scale, k = f * dpr / b.dpr;
       g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr)));
       g.drawImage(b.canvas, 0, 0);
-    } else if (this.sliced && this.sliced.view === view && this.sliced.look === look && (this.sliced.done || b)) {
+    } else if (this.sliced && this.sliced.view === view && this.sliced.look === look && this.sliced.mark === this.marks() && (this.sliced.done || b)) {
       // a sliced rested frame: done, it is shown; under way, the bitmap
       // stays up meanwhile
       if (this.sliced.done) { g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.sliced.canvas, 0, 0); this.sliced = null; this.idle(); }
@@ -934,6 +934,12 @@ class View {
   // at a time, about 12 ms of work a slice, so a finger that comes back is
   // answered at once; the stretched bitmap shows meanwhile. A move or a new
   // look drops it (draw starts another when the view rests again).
+  // what a frame lights over the layers (a probe, a selected part): a sliced
+  // frame painted before it changed is not shown
+  marks() {
+    return `${this.probe}|${componentSources.get(this.key)?.selected || ""}|${this.place}|${tables.size}`;
+  }
+
   slice(view, look, w, h, dpr) {
     const c = this.sliceCanvas ||= document.createElement("canvas");
     if (c.width !== w) c.width = w;
@@ -942,11 +948,11 @@ class View {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = this.bg;
     g.fillRect(0, 0, w, h);
-    const job = { view, look, canvas: c, done: false, steps: this.paintSteps(g, dpr, 0), spent: 0 };
+    const job = { view, look, mark: this.marks(), canvas: c, done: false, steps: this.paintSteps(g, dpr, 0), spent: 0 };
     this.sliced = job;
     const step = () => {
       if (this.sliced !== job || this.disposed) return;
-      if (this.shown !== view || this.look !== look || this.moving) { this.sliced = null; return; }
+      if (this.shown !== view || this.look !== look || this.marks() !== job.mark || this.moving) { this.sliced = null; return; }
       const t = performance.now();
       let r = job.steps.next();
       while (!r.done && performance.now() - t < 12) r = job.steps.next();
@@ -1163,7 +1169,8 @@ function inspectCard(view, pick, src = null) {
   for (const [k, v] of info.kv) {
     if (k === "g" || !v) continue;
     const dt = document.createElement("dt"), dd = document.createElement("dd");
-    dt.textContent = k[0].toUpperCase() + k.slice(1); dd.textContent = v;
+    // (a footprint without its library: "sim72", not "footprints:sim72")
+    dt.textContent = k[0].toUpperCase() + k.slice(1); dd.textContent = k === "footprint" ? v.split(":").pop() : v;
     dl.append(dt, dd);
   }
   const acts = document.createElement("div"), mention = document.createElement("button");
