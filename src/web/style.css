@@ -3002,6 +3002,8 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
    thread gone; a quarter each, an eighth with both) */
 @media (max-height: 500px) {
   .app.phone .thread-content > :is(.subs, .todos).dock :is(.subs-body, .todos-body) { max-height: calc(var(--ph-vh, 100dvh) * 0.25); }
+  .app.phone .thread-content:has(> .subs.dock:not(.shut)):has(> .todos.dock:not(.shut)) > :is(.subs, .todos).dock :is(.subs-body, .todos-body) { max-height: calc(var(--ph-vh, 100dvh) * 0.125); }
+}
 .app.phone .sub-row { min-height: 44px; }
 .app.phone :is(.sub-step, .sub-ask) .kind, .app.phone .sub-ask .label { width: auto; min-width: 6ch; white-space: nowrap; }
 /* the screen: the timeline takes what the header and the composer leave,
@@ -3084,7 +3086,15 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 .app.phone .composer textarea { font-size: 16px; line-height: 1.4; min-height: 44px; max-height: calc(var(--ph-vh, 100vh) * 0.33); padding: 10px 12px; }
 .app.phone .composer-foot kbd, .app.phone .model-chip kbd { display: none; }
 .app.phone .composer-foot { gap: 4px; }
-.app.phone .composer-foot > .attach, .app.phone .composer-foot > .foot-end > .mic, .app.phone .composer-more > summary { min-width: 44px; width: 44px; height: 44px; min-height: 44px; }
+/* (a phone on its side is wider than the composer's 700 px fold, and its
+   options went inline, each a labelled row as in the ⋯ sheet: they pushed
+   attach, the mic and Send past the screen's right edge. A phone keeps
+   its ⋯ at any width.) */
+.app.phone .composer-foot .composer-more { display: block; position: static; flex: none; }
+.app.phone .composer-more > summary { display: flex; align-items: center; justify-content: center; padding: 0; box-sizing: border-box; font-size: 22px; }
+.app.phone .composer-foot .composer-options { display: none; }
+.app.phone .composer-foot .composer-more[open] > .composer-options { display: flex; flex-direction: column; position: absolute; top: auto; bottom: calc(100% + 6px); right: 0; width: min(260px, calc(100vw - 32px)); max-height: min(60dvh, var(--composer-top, 60dvh)); overflow-y: auto; }
+.app.phone .composer-foot > .attach, .app.phone .composer-foot > .foot-end > .mic, .app.phone .composer-more > summary { min-width: 44px; width: 44px; height: 44px; min-height: 44px; align-items: center; justify-content: center; }
 /* the composer's ⋯ (a sheet on a phone): its tools as labelled rows */
 .app.phone .composer-options > :is(button, .attach) { display: flex; align-items: center; justify-content: flex-start; gap: 12px; width: 100%; min-height: 48px; height: auto; margin: 0; padding: 0 16px; border: 0; background: none; color: var(--text); font-size: calc(15px * var(--text-scale, 100) / 100); text-align: left; }
 .app.phone .composer-options > .account-chip .acct-v { display: none; }
@@ -3094,7 +3104,7 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 .app.phone .composer-foot .model-chip, .app.phone .composer-foot .composer-model .model-chip { height: 44px; }
 .app.phone .composer .foot-end > button.primary:last-child { height: 44px; min-width: 64px; padding: 0 14px; font-size: calc(15px * var(--text-scale, 100) / 100); }
 /* a short screen (a phone on its side) with the keyboard up leaves about
-   130 px: the composer is one line, the field and Send, and the cells row
+   130 px: the composer is one line, the field, ⋯ and Send, and the cells row
    gives way, so the draft and a line of the thread stay in view (keyed on
    the draft's focus, which on a phone is the keyboard: iOS pans rather
    than shrinks the page, so a keyboard inset can read 0; and on the
@@ -3103,10 +3113,11 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 @media (orientation: landscape) {
   html.phone.ph-short .app.phone:is(:has(#composer:focus), html.ph-hold .app) > .ph-cells { display: none; }
   html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) { padding-top: 4px; padding-bottom: 4px; }
-  html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) textarea { min-height: 40px; max-height: 64px; padding-right: 84px; }
+  html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) textarea { min-height: 40px; max-height: 64px; padding-right: 136px; }
   html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-foot { position: absolute; right: max(10px, env(safe-area-inset-right)); bottom: 6px; }
-  html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-foot > :not(.foot-end), html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-foot .foot-end > :not(button.primary) { display: none; }
+  html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-foot > :not(.foot-end, .composer-more), html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-foot .foot-end > :not(button.primary) { display: none; }
   html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .foot-end > button.primary:last-child { height: 36px; min-width: 64px; }
+  html.phone.ph-short .app.phone .composer:is(:has(#composer:focus), html.ph-hold .composer) .composer-more > summary { height: 36px; min-height: 36px; }
 }
 /* (no microphone this page can use: phone-thread.js's ph-nomic) */
 html.ph-nomic .app.phone .composer .mic { display: none; }
