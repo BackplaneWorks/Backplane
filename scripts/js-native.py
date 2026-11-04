@@ -38,6 +38,11 @@ TextEncoder would replace them and is deliberately not used. The original
 Enc.head writes the length, so header limits and byte order stay unchanged.
 No decoder, dictionary, wire format, cache, client or action state changes.
 
+Server-only `String.drop(s, n)`: finds the offset by code points as Base
+does and slices once. Base slices a fresh tail for every character dropped,
+and the hub's control chunks drop 5461 characters off a 1.3 MB view text for
+each packet: a third of every view reply on a large sidebar (2026-11-04).
+
 Server-only `Json.parse(s)`: remembered for repeated texts of 1 KB or
 more (the last 8). The hub's views parse the same models info (every
 provider's models, opencode's hundreds) several times a render, every
@@ -275,6 +280,7 @@ TEXT_DEFS = {
     "$Char$to_lower$": "a882f9514c243fb49890e458e03f422632d970100a6e2834e74f851514d68c61",
     "$Char$is_upper$": "cd25201f239e1b822957470ab197fc16973d6e677ff2a3b05b8a30d5e2710fac",
     "$String$take$": "8ce2088bba133bf0a09fe1a4aa357a4e1235eac7bc5c268276ee68503ab64daa",
+    "$String$drop$": "e1e25ef4c2edfdb17b6148e820cd4c2f5cc4d2d9f6e20ad2b917edfc2d8fc427",
 }
 
 # Match the whole unchanged Json.show body and its exact Json.emit callee.
@@ -398,7 +404,7 @@ if server:
 found = {}
 found["Map.bit"] = found["Map.diff"] = int(server)
 found["Map.get"] = found["Map.has"] = found["Map.set"] = int(server)
-found["String.to_lower"] = found["String.take"] = int(server)
+found["String.to_lower"] = found["String.take"] = found["String.drop"] = int(server)
 for name, rx, required in (("String.cmp", CMP, True), ("Map.bit.go", BIT, True),
                            ("String.split", SPLIT, server), ("List.length", LEN, server),
                            ("String.starts_with", PRE, server), ("String.contains", HAS, server)):
@@ -585,6 +591,7 @@ for f, s in srcs.items():
     if server:
         s = map_def("$String$to_lower$").sub(lambda m: 'function $String$to_lower$(_s_0){return __bpLower(_s_0,$bpLowerRaw)}' + m.group().replace('$String$to_lower$', '$bpLowerRaw'), s)
         s = map_def("$String$take$").sub('function $String$take$(_s_0,_n_0){return __bpTake(_s_0,_n_0)}', s)
+        s = map_def("$String$drop$").sub('function $String$drop$(_s_0,_n_0){return __bpDrop(_s_0,_n_0)}', s)
         s = FOLD_TEXT.sub(lambda m: 'function %s(%s){return __bpFoldText(%s,%s$raw)}function %s$raw(%s){return %s(%s,"")}' %
             (m.group(1), m.group(2), m.group(2), m.group(1), m.group(1), m.group(2), m.group(3), m.group(2)), s)
         s = UTF8_ENCODE.sub(lambda m: 'function %s(%s){return __bpUtf8Encode(%s)}' % (m.group(1), m.group(2), m.group(2)), s)
@@ -653,6 +660,7 @@ for name, call in (("Map.bit", "{return __bpMapBit("), ("Map.diff", "{return __b
                    ("Cbor.Enc.text", "return __bpCborText("), ("Json.parse", "){return __bpParsed("),
                    ("Json.lex", "){return __bpJsonLex("), ("String.reverse.go", '{return Array.from($0).reverse().join("")+$1}'),
                    ("String.to_lower", "){return __bpLower("), ("String.take", "){return __bpTake("),
+                   ("String.drop", "){return __bpDrop("),
                    ("Utf8.encode", "){return __bpUtf8Encode("), ("Fold.text", "){return __bpFoldText("),
                    ("Utf8.decode", "){return __bpUtf8Decode("), ("Lines.feed", "){return __bpLinesFeed("),
                    ("Json.show", "){return __bpJsonShow("), ("ContentEq.same", "){return __bpContentEq("),
