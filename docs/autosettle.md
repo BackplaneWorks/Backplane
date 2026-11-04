@@ -46,6 +46,15 @@ subscriptions allow the completed owner to settle after its normal grace;
 the next status tick retires inactive subscriptions of a settled owner.
 Subscriptions targeting real work are preserved.
 
+Work targets have immutable IDs. Once a subscription is at least one worker grace old and its target is
+absent from both background and watched-work indexes, it retires even
+while the subscriber remains active. A new
+subscription gets the full grace for registration races. Timed-out work
+whose outcome is still unknown retains its index row and its subscription.
+Active file, PR and thread subscriptions are preserved; passive subscriptions
+still do not count as owned running work. Setting the worker timer to zero
+disables this orphan-work cleanup too.
+
 Read receipts identify the actual reply, so a later reply in the same
 second is still unread. Focused desktop desk.look and explicitly opening
 the latest conversation on a phone acknowledge it. Background polling,

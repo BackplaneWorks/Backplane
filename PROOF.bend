@@ -15896,3 +15896,9 @@ def Laws.review_window_cursor_failure(value): {==}
 def Laws.auth_cache_key_sequence(st): {==}
 
 def Laws.auth_empty_threads_waits_none(st): {==}
+
+def Laws.autosettle_live_work_subscription_never_expires(old):
+  {==}
+
+def Laws.autosettle_active_file_subscription_never_expires(live, old):
+  {==}
