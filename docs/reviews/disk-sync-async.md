@@ -46,8 +46,10 @@ Plan: two excluded warmups per variant, then 32 alternating paired rounds,
 128 sequential real append+fsync completions per burst. There is no artificial
 fsync delay. A verified shared Linux CLOCK_MONOTONIC domain requires both
 probe issuance windows to lie inside the active burst. Every response body
-and the entire ordered UTF-8 append file are checked. The original helper's
-process-local RTT is retained alongside shared-clock observation brackets.
+and the entire ordered UTF-8 append file are checked. The request helper is
+unchanged; reported RTTs use the shared-clock brackets around its completion.
+Its redundant process-local `ms` result is not persisted or claimed as a
+second measurement.
 Report median/p95/nearest-rank p99/max, per-append modeled durable ACK and
 whole-burst time, park/resume/duplicate counters, caps/OOM/swap and cleanup.
 At n=32, nearest-rank p99 is the largest round observation.
