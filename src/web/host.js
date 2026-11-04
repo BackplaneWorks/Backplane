@@ -72,8 +72,11 @@ installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(
 installWorkspaceHints();
 installFloatingTerminal({ dispatch });
 import { installPhoneOther, titleHits } from "./phone-other.js";
+// (imported, so the bundle ships it hashed and index.html's link to it
+// names that file: the home-screen icon, a notification's)
+import touchIcon from "./apple-touch-icon.png";
 const PHONE_TITLES = () => document.documentElement.classList.contains("phone");
-const phoneOther = installPhoneOther({ dispatch: (action, value) => dispatch(action, value) });
+const phoneOther = installPhoneOther({ dispatch: (action, value) => dispatch(action, value), touchIcon });
 import { ConnectionLog } from "./connection-log.js";
 import { frameSummary } from "./frame-summary.js";
 import { pairBrowser } from "./auth.js";
@@ -1504,10 +1507,10 @@ function notify(c) {
   // (a phone's browser shows a page's notifications only through its
   // service worker, Android Chrome's constructor throws; sw.js's
   // notificationclick sends the tap back as "bp-open")
-  const viaWorker = () => navigator.serviceWorker?.ready?.then(r => r.showNotification(c.title, { body: c.body, tag: c.key || c.thread, icon: "./apple-touch-icon.png", data: { thread: c.thread || "" } })).catch(() => {});
+  const viaWorker = () => navigator.serviceWorker?.ready?.then(r => r.showNotification(c.title, { body: c.body, tag: c.key || c.thread, icon: document.querySelector("link[rel=apple-touch-icon]")?.href || "./apple-touch-icon.png", data: { thread: c.thread || "" } })).catch(() => {});
   if (PHONE_TITLES() && navigator.serviceWorker?.controller) { viaWorker();return; }
   try {
-    const n = new Notification(c.title, { body: c.body, tag: c.key || c.thread, icon: "./apple-touch-icon.png" });
+    const n = new Notification(c.title, { body: c.body, tag: c.key || c.thread, icon: document.querySelector("link[rel=apple-touch-icon]")?.href || "./apple-touch-icon.png" });
     n.onclick = () => {
       window.focus();
       if (c.thread) dispatch("select", c.thread);
