@@ -26,13 +26,13 @@ def identities(inputs, commit, tree):
     service = read(inputs / 'component/SERVICE.json')
     components = read(inputs / 'components/COMPONENT-INPUTS.json')
     freeze = read(inputs / 'freeze/FREEZE.json')
-    expected = {'commit': commit, 'tree': tree, 'version': '0.14.0',
-                'channel': 'release', 'tag': 'v0.14.0'}
+    expected = {'commit': commit, 'tree': tree, 'version': '0.14.2',
+                'channel': 'release', 'tag': 'v0.14.2'}
     assert components['release'] == expected
     assert all(freeze[k] == v for k, v in expected.items())
     assert (service['sourceCommit'], service['sourceTree'], service['version'],
             service['channel'], service['target'], service['status']) == (
-                commit, tree, '0.14.0', 'release', 'windows-x64', 'VERIFIED')
+                commit, tree, '0.14.2', 'release', 'windows-x64', 'VERIFIED')
     assert components['target'] == 'windows-x64' and freeze['status'] == 'FROZEN'
     return service, freeze
 
@@ -48,7 +48,7 @@ def main():
     out.mkdir(parents=True)
     commit, tree = os.environ['PRODUCT_COMMIT'], os.environ['PRODUCT_TREE']
     result = {'status': 'INCOMPLETE', 'phase': 'inputs', 'commit': commit, 'tree': tree,
-              'target': 'windows-x64', 'version': '0.14.0', 'published': False,
+              'target': 'windows-x64', 'version': '0.14.2', 'published': False,
               'compilerInvoked': False, 'nativeAbiReplayed': False,
               'signing': 'unsigned-portable; no Backplane Authenticode identity',
               'toolSha256': sha(__file__)}
