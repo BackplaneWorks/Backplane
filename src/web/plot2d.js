@@ -723,6 +723,9 @@ class View {
     const h = this.lit();
     if (!h || !h.box) return;
     const w = this.canvas.clientWidth, ht = this.canvas.clientHeight;
+    // (a canvas not laid out yet, a pane being opened: a zoom of 0 would
+    // stick, the view being "touched"; it waits for its size)
+    if (!w || !ht) return;
     const [x0, y0, x1, y1] = h.box;
     this.scale = 0.8 * Math.min(w / Math.max(x1 - x0, 6000), ht / Math.max(y1 - y0, 6000));
     this.ox = w / 2 - (x0 + x1) / 2 * this.scale;
@@ -737,6 +740,8 @@ class View {
   follow_probe(h) {
     if (!h.box) return;
     const w = this.canvas.clientWidth, ht = this.canvas.clientHeight;
+    // (followed once the canvas has a size: show_probe)
+    if (!w || !ht) return;
     const [x0, y0, x1, y1] = h.box;
     const sx0 = this.ox + x0 * this.scale, sy0 = this.oy + y0 * this.scale, sx1 = this.ox + x1 * this.scale, sy1 = this.oy + y1 * this.scale;
     this.follow = false;
