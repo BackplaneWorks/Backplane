@@ -1,5 +1,9 @@
+import ./src/core/cad-install.bend as CADINSTALL
+
 import ./src/core/msgs-lookup.bend as MLOOK
+
 import ./src/core/msgs-meta.bend as MMETA
+
 import ./src/server/auth-cache.bend as AUTHCACHE
 
 import ./src/server/wire.bend as WIRE
@@ -5319,6 +5323,117 @@ law fm_parent_down:
 
 law fm_join_root:
   {FMG.Fm.join("", "hw") == "hw" : String}
+
+# Downloads from the Files tab: a zip leaves out git, the hub's own
+# history, KiCad's backups and locks, and keeps the design and its notes
+law fm_zip_skips_git:
+  {FMG.Fm.zip.skip("boards/.git") == True{} : Bool}
+
+law fm_zip_skips_history:
+  {FMG.Fm.zip.skip(".backplane/history.git") == True{} : Bool}
+
+# the threads' worktrees are copies of the project: a zip of it holds one
+law fm_zip_skips_worktrees:
+  {FMG.Fm.zip.skip(".backplane/worktrees") == True{} : Bool}
+
+law fm_zip_keeps_checklist:
+  {FMG.Fm.zip.skip(".backplane/checklist.md") == False{} : Bool}
+
+law fm_zip_skips_backups:
+  {FMG.Fm.zip.skip("boards/ecc83-backups") == True{} : Bool}
+
+law fm_zip_skips_locks:
+  {FMG.Fm.zip.skip("~ecc83-pp.kicad_sch.lck") == True{} : Bool}
+
+law fm_zip_skips_modules:
+  {FMG.Fm.zip.skip("tools/node_modules") == True{} : Bool}
+
+law fm_zip_keeps_board:
+  {FMG.Fm.zip.skip("boards/ecc83-pp.kicad_pcb") == False{} : Bool}
+
+# a git folder named only like one is kept (a rule is a whole name)
+law fm_zip_keeps_lookalike:
+  {FMG.Fm.zip.skip("docs/.github") == False{} : Bool}
+
+# the zip is named for the folder, or for the project at its root
+law fm_zip_name_root:
+  {FMG.Fm.zip.name("ecc83", "") == "ecc83.zip" : String}
+
+law fm_zip_name_folder:
+  {FMG.Fm.zip.name("ecc83", "mfg/gerbers") == "gerbers.zip" : String}
+
+# its folder is one name, never one that climbs out where it is unpacked
+law fm_zip_top_never_up:
+  {FMG.Fm.zip.top("..", "") == "project" : String}
+
+law fm_zip_top_one_name:
+  {FMG.Fm.zip.top("a/b:c", "") == "a_b_c" : String}
+
+# the addresses: thread and path percent-encoded as UTF-8, the path's
+# slashes kept
+law fm_zip_url_encodes:
+  {FMG.Fm.zip.url("t 1", "docs/a b") == "/files/zip?thread=t%201&path=docs/a%20b" : String}
+
+law fm_get_url_encodes:
+  {FMG.Fm.get.url("t1", "docs/é&x.txt") == "/files/get?thread=t1&path=docs/%C3%A9%26x.txt" : String}
+
+# the attachment's name: ASCII for old browsers, exact as RFC 5987 UTF-8,
+# and one header line whatever the name holds
+law fm_zip_disposition:
+  {FMG.Fm.disposition("é \"x\".zip") == "attachment; filename=\"_ _x_.zip\"; filename*=UTF-8''%C3%A9%20%22x%22.zip" : String}
+
+law fm_zip_disposition_one_line:
+  {FMG.Fm.disposition("a\r\nb") == "attachment; filename=\"a__b\"; filename*=UTF-8''a%0D%0Ab" : String}
+
+# environment files hold secrets: a zip leaves .env and .env.* out, and
+# keeps the project's other dotfiles
+law fm_zip_skips_env:
+  {FMG.Fm.zip.skip("firmware/.env") == True{} : Bool}
+
+law fm_zip_skips_env_variants:
+  {FMG.Fm.zip.skip(".env.production") == True{} : Bool}
+
+law fm_zip_keeps_dotfiles:
+  {FMG.Fm.zip.skip(".gitignore") == False{} : Bool}
+
+# every rule is of a kind the hub's writer reads (it refuses any other)
+law fm_zip_rules_known:
+  {FMG.Fm.zip.known(FMG.Fm.zip.rules()) == True{} : Bool}
+
+# what lies inside something left out is never served either
+law fm_zip_within_history:
+  {FMG.Fm.zip.within(".backplane/history.git/objects/ab") == True{} : Bool}
+
+law fm_zip_within_notes:
+  {FMG.Fm.zip.within(".backplane/checklist.md") == False{} : Bool}
+
+# compressed files are stored as they are, the design deflates
+law fm_zip_stores_compressed:
+  {FMG.Fm.zip.store("mfg/Gerbers.ZIP") == True{} : Bool}
+
+law fm_zip_deflates_boards:
+  {FMG.Fm.zip.store("boards/ecc83-pp.kicad_pcb") == False{} : Bool}
+
+# a backslash in a name never becomes a folder on Windows
+law fm_zip_entry_backslash:
+  {FMG.Fm.zip.entry("..\\..\\evil.bat") == ".._.._evil.bat" : String}
+
+# the zip's folder holds nothing Windows refuses in a name
+law fm_zip_top_windows:
+  {FMG.Fm.zip.top("a?b*c<d>e|f\"g", "") == "a_b_c_d_e_f_g" : String}
+
+# a download names no other place on Windows: no backslash, drive or share
+law fm_files_safe_backslash:
+  {FMG.Fm.files.safe("docs\\..\\..\\secret") == False{} : Bool}
+
+law fm_files_safe_drive:
+  {FMG.Fm.files.safe("C:/Users") == False{} : Bool}
+
+law fm_files_safe_share:
+  {FMG.Fm.files.safe("//host/share") == False{} : Bool}
+
+law fm_files_safe_down:
+  {FMG.Fm.files.safe("mfg/gerbers") == True{} : Bool}
 
 # Terminals in the chat (core/emb.bend)
 # -------------------------------------
@@ -16146,6 +16261,15 @@ law native_locale_composition:
   for +preview: String
   {NATIVEI18N.native_locale(setting, os, preview) == NATIVEI18N.Lang.resolve(NATIVEI18N.Lang.normalize(setting), os, String.eq(preview, "1")) : String}
 
+law autosettle_live_work_subscription_never_expires:
+  for old: Bool
+  {AUTOS.Auto.expired.work("work", True{}, old) == False{} : Bool}
+
+law autosettle_active_file_subscription_never_expires:
+  for live: Bool
+  for old: Bool
+  {AUTOS.Auto.expired.work("file", live, old) == False{} : Bool}
+
 law catalog_lookup_common_cancel:
   for +lc: I18.Loc
   {MLOOK.T.plain(lc, "common.cancel") == Some{MSG.T.common.cancel(lc)} : Maybe<&2, String>}
@@ -16169,3 +16293,50 @@ law catalog_metadata_complete:
 
 law catalog_keys_nonempty:
   {List.is_empty(&2, String, MMETA.T.keys()) == False{} : Bool}
+
+# Each CAD install phase has a status and a reachable action; an in-phase
+# byte reading never decreases (new phases/attempts explicitly reset).
+law cad_install_visible_action:
+  for p: CADINSTALL.CadPhase
+  {CADINSTALL.Cad.covered(p) == True{} : Bool}
+
+law cad_install_monotonic:
+  for +old: Nat
+  for next: Nat
+  {Nat.is_ge(CADINSTALL.Cad.advance(True{}, old, next), old) == True{} : Bool}
+
+# A new continuing subthread persists its launcher as the actual parent.
+# A later manual move is authoritative; report settings never recreate links.
+law mcp_subthread_link:
+  for +c: Char
+  for +tail: String
+  for +child: String
+  for +now: Nat
+  for cs: List<&2, M.Change>
+  {MC.Mcp.launch.link(SCon{c, tail}, child, now, cs) == List.append(&2, M.Change, cs, [M.ThreadParentSet{child, SCon{c, tail}, now}, M.SettingSet{LEG.Tree.open_key(SCon{c, tail}), "1", now}]) : List<&2, M.Change>}
+
+law mcp_subthread_parent:
+  {M.Setting.get(M.State.replay(MC.Res.changes(MC.Mcp.launch(H.Demo.state("claude", M.Completed{}), 5n, "t1", J.Json.obj([J.KV{"prompt", J.Str{"lane"}}]))), H.Demo.state("claude", M.Completed{})), "thread.parent.t5-3", "") == "t1" : String}
+
+law mcp_subthread_manual_move_wins:
+  {M.Setting.get(M.State.replay(List.append(&2, M.Change, MC.Mcp.launch.link("parent", "child", 1n, []), [M.ThreadParentSet{"child", "", 2n}, M.ThreadLaunched{"child", "parent", False{}, 3n}]), M.State.empty()), "thread.parent.child", "unset") == "" : String}
+
+# A launch seed is visible to messages later in the very same commit.
+law mcp_subthread_seed_batch:
+  {M.Setting.get(M.State.replay(AUTOS.Auto.messages.metadata([M.SettingSet{"autosettle.seed.child", "seed", 1n}, M.MessagePosted{"child", "seed", M.User{}, "lane", 1n}], M.State.empty()), M.State.empty()), "autosettle.audience.child", "") == "worker" : String}
+
+# Files downloads must be bounded and must omit credential stores.
+law fm_zip_bounded_bytes:
+  {FMG.Fm.zip.max_bytes() == 1073741824 : U32}
+
+law fm_zip_bounded_entries:
+  {FMG.Fm.zip.max_entries() == 10000 : U32}
+
+law fm_zip_skips_credentials:
+  {FMG.Fm.zip.within(".aws/credentials") == True{} : Bool}
+
+law fm_zip_skips_vault:
+  {FMG.Fm.zip.within("secrets/master.key") == True{} : Bool}
+
+law fm_zip_credentials_ignore_case:
+  {FMG.Fm.zip.within(".AWS/CREDENTIALS") == True{} : Bool}

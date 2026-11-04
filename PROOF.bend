@@ -1,3 +1,5 @@
+import ./src/core/cad-install.bend as CADINSTALL
+
 import ./src/server/wire.bend as WIRE
 
 import ./src/server/watch-plan.bend as WATCHPLAN
@@ -7409,6 +7411,99 @@ def Laws.fm_parent_down():
 def Laws.fm_join_root():
   {==}
 
+def Laws.fm_zip_skips_git():
+  {==}
+
+def Laws.fm_zip_skips_history():
+  {==}
+
+def Laws.fm_zip_skips_worktrees():
+  {==}
+
+def Laws.fm_zip_keeps_checklist():
+  {==}
+
+def Laws.fm_zip_skips_backups():
+  {==}
+
+def Laws.fm_zip_skips_locks():
+  {==}
+
+def Laws.fm_zip_skips_modules():
+  {==}
+
+def Laws.fm_zip_keeps_board():
+  {==}
+
+def Laws.fm_zip_keeps_lookalike():
+  {==}
+
+def Laws.fm_zip_name_root():
+  {==}
+
+def Laws.fm_zip_name_folder():
+  {==}
+
+def Laws.fm_zip_top_never_up():
+  {==}
+
+def Laws.fm_zip_top_one_name():
+  {==}
+
+def Laws.fm_zip_url_encodes():
+  {==}
+
+def Laws.fm_get_url_encodes():
+  {==}
+
+def Laws.fm_zip_disposition():
+  {==}
+
+def Laws.fm_zip_disposition_one_line():
+  {==}
+
+def Laws.fm_zip_skips_env():
+  {==}
+
+def Laws.fm_zip_skips_env_variants():
+  {==}
+
+def Laws.fm_zip_keeps_dotfiles():
+  {==}
+
+def Laws.fm_zip_rules_known():
+  {==}
+
+def Laws.fm_zip_within_history():
+  {==}
+
+def Laws.fm_zip_within_notes():
+  {==}
+
+def Laws.fm_zip_stores_compressed():
+  {==}
+
+def Laws.fm_zip_deflates_boards():
+  {==}
+
+def Laws.fm_zip_entry_backslash():
+  {==}
+
+def Laws.fm_zip_top_windows():
+  {==}
+
+def Laws.fm_files_safe_backslash():
+  {==}
+
+def Laws.fm_files_safe_drive():
+  {==}
+
+def Laws.fm_files_safe_share():
+  {==}
+
+def Laws.fm_files_safe_down():
+  {==}
+
 def Laws.emb_summary_round():
   {==}
 
@@ -13174,12 +13269,12 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts, cad}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, dq}, managed, link, freecad, ks}, telemetry, views, accounts, cad}:
       {==}
 
 # ---- native phone i18n ----
@@ -15897,6 +15992,12 @@ def Laws.auth_cache_key_sequence(st): {==}
 
 def Laws.auth_empty_threads_waits_none(st): {==}
 
+def Laws.autosettle_live_work_subscription_never_expires(old):
+  {==}
+
+def Laws.autosettle_active_file_subscription_never_expires(live, old):
+  {==}
+
 def Laws.catalog_lookup_common_cancel(lc):
   match lc:
     case I18.En{}: {==}
@@ -15916,3 +16017,45 @@ def Laws.catalog_metadata_complete(lc):
 def Laws.catalog_keys_nonempty(): {==}
 
 def Laws.browser_new_tab_google(input): {==}
+
+def Laws.cad_install_visible_action(p):
+  match p:
+    case CADINSTALL.CadIdle{}: {==}
+    case CADINSTALL.CadDownload{}: {==}
+    case CADINSTALL.CadVerify{}: {==}
+    case CADINSTALL.CadExtract{}: {==}
+    case CADINSTALL.CadConfigure{}: {==}
+    case CADINSTALL.CadReady{}: {==}
+    case CADINSTALL.CadFailed{}: {==}
+    case CADINSTALL.CadCancelled{}: {==}
+    case CADINSTALL.CadUnavailable{}: {==}
+
+def Laws.cad_install_monotonic(old, next):
+  Nat.max_ge_l(old, next)
+
+def Laws.mcp_subthread_link(c, tail, child, now, cs):
+  {==}
+
+def Laws.mcp_subthread_parent():
+  {==}
+
+def Laws.mcp_subthread_manual_move_wins():
+  {==}
+
+def Laws.mcp_subthread_seed_batch():
+  {==}
+
+def Laws.fm_zip_bounded_bytes():
+  {==}
+
+def Laws.fm_zip_bounded_entries():
+  {==}
+
+def Laws.fm_zip_skips_credentials():
+  {==}
+
+def Laws.fm_zip_skips_vault():
+  {==}
+
+def Laws.fm_zip_credentials_ignore_case():
+  {==}

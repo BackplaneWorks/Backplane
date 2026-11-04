@@ -20,8 +20,9 @@
 // it probes (the canvas's data-probe comes back); the probed part or net is
 // drawn over the rest, which dims.
 
+import { softFocus } from "./touch-focus.js";
 import App from "./app.bend";
-import { wheelKind } from "./solid.js";
+import { wheelKind, viewDpr, coarse } from "./solid.js";
 import * as P from "./probe.js";
 
 // the page's own font (style.css's), for what is written on the canvas
@@ -409,6 +410,9 @@ class View {
     };
     on("pointerdown", (e) => {
       this.gesture++;
+      // (a finger that stops a coasting view only stops it: no tap)
+      const coasting = !!this.coasting;
+      this.coast(null);
       if (this.side === "schematic" && (e.button === 3 || e.button === 4)) {
         canvas.closest("#viewer")?.querySelector(`[data-on-click="${e.button === 3 ? "sch-back" : "sch-fwd"}"]`)?.click();
         return;
@@ -418,15 +422,36 @@ class View {
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       // a press that stays put is a tap (a sheet symbol opens, anything
       // else is probed), unless a second finger joins it
-      this.tap = this.pts.size === 1 && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+      this.tap = this.pts.size === 1 && e.button === 0 && !coasting ? { x: e.clientX, y: e.clientY } : null;
       this.drag = this.pts.size === 1 ? { x: e.clientX, y: e.clientY } : null;
       this.pinch = this.pts.size === 2 ? mid() : null;
       canvas.classList.add("dragging");
+      // a finger held still is a right click: comment there (not every
+      // touch browser sends contextmenu for it; iOS does not)
+      clearTimeout(this.pressing);
+      this.pointerKind = e.pointerType;
+      this.armed = null;
+      if (this.tap && e.pointerType === "touch") {
+        const at = this.tap, id = e.pointerId;
+        // Held 500 ms it is armed (a short vibration), and lifted where it
+        // started it comments there (up). Deciding on the lift: a WebView
+        // may hold back a slow drag's first moves, and a drag lifts far away.
+        // (a busy page runs the timer late with the lift still queued: let
+        // queued input go first, as phone-shell.js's long press does)
+        this.pressing = setTimeout(() => { this.pressing = setTimeout(() => {
+          const now = this.pts.get(id);
+          if (this.tap !== at || this.pts.size !== 1 || !now || Math.hypot(now.x - at.x, now.y - at.y) > 8) return;
+          this.tap = null;
+          this.armed = { id, x: at.x, y: at.y };
+          navigator.vibrate?.(10);
+        }, 0); }, 500);
+      }
     });
     on("pointermove", (e) => {
       if (!this.pts.has(e.pointerId)) { this.hover(e);return; }
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) this.tap = null;
+      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) { this.tap = null; clearTimeout(this.pressing); }
+      if (this.armed && Math.hypot(e.clientX - this.armed.x, e.clientY - this.armed.y) > 12) this.armed = null;
       if (this.pinch && this.pts.size === 2) {
         const m = mid(), f = this.zoomFactor(m.d / Math.max(this.pinch.d, 1));
         this.ox = m.x - (this.pinch.x - this.ox) * f; this.oy = m.y - (this.pinch.y - this.oy) * f;
@@ -435,6 +460,8 @@ class View {
       } else if (this.drag) {
         this.ox += e.clientX - this.drag.x; this.oy += e.clientY - this.drag.y;
         this.drag.x = e.clientX; this.drag.y = e.clientY;
+        // (a finger's last moves, for the coast when it lifts)
+        if (e.pointerType === "touch") { (this.trail ||= []).push({ t: e.timeStamp, x: e.clientX, y: e.clientY }); if (this.trail.length > 6) this.trail.shift(); }
       } else return;
       this.touched = true;
       this.follow = false;
@@ -450,6 +477,16 @@ class View {
       record.onSelect?.(selected?.id || '');
     };
     const up = (e) => {
+      clearTimeout(this.pressing);
+      const armed = this.armed;
+      this.armed = null;
+      if (armed && e.type === "pointerup" && e.pointerId === armed.id && Math.hypot(e.clientX - armed.x, e.clientY - armed.y) <= 12) {
+        this.longPressed = performance.now();
+        this.placeAt(armed.x, armed.y);
+      }
+      // (a lift far from where the finger came down is no tap, even if its
+      // moves never came)
+      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 12) this.tap = null;
       const tap = !this.treeWaiting() && e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
       this.mouseTap = !!tap && e.pointerType === "mouse";
@@ -457,10 +494,24 @@ class View {
       if (tap) {
         const s = this.sheetAt(e.clientX, e.clientY);
         if (s && sheeted) sheeted(s.value);
-        else {
-          // Cross-probe (main) and saved-component inspection (viewer lane)
-          // both follow the same click.
-          if (e.pointerType !== "mouse") { this.pick(e.clientX, e.clientY);inspect(e); }
+        else if (e.pointerType !== "mouse") {
+          // A second tap close by soon after is a double tap: it gives back
+          // the probe and part the first tap took, then zooms (doubleTap).
+          const last = this.lastTap;
+          if (last && e.timeStamp - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 32) {
+            this.lastTap = null;
+            this.touchDouble = e.timeStamp;
+            inspectCard(this, null);
+            if (this.probe !== last.probe) this.publishProbe(last.probe);
+            const record = componentSources.get(this.key);
+            if (record && record.selected !== last.part) { selectComponent(last.part, this.key); record.onSelect?.(last.part); }
+            this.doubleTap(e.clientX, e.clientY);
+          } else {
+            this.lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY, probe: this.probe, part: componentSources.get(this.key)?.selected || "" };
+            // Cross-probe (main) and saved-component inspection (viewer lane)
+            // both follow the same click.
+            this.pick(e.clientX, e.clientY);inspect(e);
+          }
         }
       }
       this.pinch = null;
@@ -468,6 +519,13 @@ class View {
       const [rest] = [...this.pts.values()];
       this.drag = rest ? { x: rest.x, y: rest.y } : null;
       if (!rest) canvas.classList.remove("dragging");
+      // a one-finger pan flicked off keeps going a moment, as a map does
+      const trail = this.trail;
+      this.trail = null;
+      if (!rest && !tap && e.type === "pointerup" && e.pointerType === "touch" && trail?.length > 1) {
+        const a = trail.find((p) => e.timeStamp - p.t < 100) || trail.at(-1), b = trail.at(-1), dt = b.t - a.t;
+        if (dt > 0 && e.timeStamp - b.t < 50) this.coast({ vx: (b.x - a.x) / dt, vy: (b.y - a.y) / dt });
+      }
     };
     // Cancel native Back on the mouse events. Cancelling pointerdown
     // would suppress those events before Chromium handles navigation.
@@ -476,6 +534,7 @@ class View {
     });
     on("pointerup", up);
     on("pointercancel", up);
+    on("lostpointercapture", () => clearTimeout(this.pressing));
     // Use the browser's click count, including its platform double-click
     // interval. A second click restores the probe that preceded the gesture.
     on("click", e => {
@@ -488,6 +547,7 @@ class View {
     });
     on("wheel", (e) => {
       this.gesture++;
+      this.coast(null);
       e.preventDefault();
       const b = canvas.getBoundingClientRect();
       const mx = e.clientX - b.left, my = e.clientY - b.top;
@@ -505,7 +565,9 @@ class View {
       this.follow = false;
       this.later();
     }, { passive: false });
-    on("dblclick", () => {
+    on("dblclick", (e) => {
+      // a touch double tap was answered on its second tap (up)
+      if (this.touchDouble !== undefined && e.timeStamp - this.touchDouble < 600) return;
       this.gesture++;
       if (this.mouseTap && this.beforeClick !== undefined) this.publishProbe(this.beforeClick);
       this.beforeClick = undefined;
@@ -515,10 +577,10 @@ class View {
     // coordinates); the page decides what to do (host.js)
     on("contextmenu", (e) => {
       e.preventDefault();
-      const b = canvas.getBoundingClientRect();
-      // the plot's units are thousandths of a mm
-      const x = (e.clientX - b.left - this.ox) / this.scale / 1000, y = (e.clientY - b.top - this.oy) / this.scale / 1000;
-      if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
+      // (a finger's long press is the timer's, pointerdown: the system's own
+      // long press, which Android's WebView also sends in a slow drag, is not)
+      if (this.pointerKind === "touch") return;
+      this.placeAt(e.clientX, e.clientY);
     });
     // A schematic opens and resizes to its whole sheet. Boards retain the
     // person's inspected point when their pane changes size.
@@ -540,6 +602,35 @@ class View {
     this.watchDpr();
   }
 
+  // the view keeps moving at v (px/ms), slowing to a stop in about half a
+  // second; null stops it (a finger down, a wheel, a fit)
+  coast(v) {
+    cancelAnimationFrame(this.coasting);
+    this.coasting = 0;
+    if (!v || Math.hypot(v.vx, v.vy) < 0.25) return;
+    let { vx, vy } = v, last = performance.now();
+    const step = (t) => {
+      const dt = Math.min(48, t - last); last = t;
+      const k = Math.pow(0.994, dt);
+      vx *= k; vy *= k;
+      if (this.disposed || Math.hypot(vx, vy) < 0.02) { this.coasting = 0; return; }
+      this.ox += vx * dt; this.oy += vy * dt;
+      this.touched = true;
+      this.follow = false;
+      this.later();
+      this.coasting = requestAnimationFrame(step);
+    };
+    this.coasting = requestAnimationFrame(step);
+  }
+
+  // a comment asked for at a point of the page: the place in mm
+  placeAt(cx, cy) {
+    const b = this.canvas.getBoundingClientRect();
+    // the plot's units are thousandths of a mm
+    const x = (cx - b.left - this.ox) / this.scale / 1000, y = (cy - b.top - this.oy) / this.scale / 1000;
+    if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
+  }
+
   watchDpr() {
     this.dprQuery?.removeEventListener("change", this.dprChanged);
     this.dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
@@ -548,6 +639,7 @@ class View {
 
   dispose() {
     this.disposed = true;
+    if (card?.view === this) inspectCard(this, null);
     this.gesture++;
     this.events.abort();
     this.resize.disconnect();
@@ -555,6 +647,9 @@ class View {
     cancelAnimationFrame(this.frame);
     clearTimeout(this.baking);
     clearTimeout(this.resting);
+    clearTimeout(this.pressing);
+    clearTimeout(this.slicing);
+    cancelAnimationFrame(this.coasting);
     if (this.idling) cancelIdleCallback(this.idling);
     clearInterval(this.tick); this.tick = null;
     this.canvas.classList.remove("dragging");
@@ -593,6 +688,7 @@ class View {
     const ctx = this.side === "board" ? {} : { groups: groupsOf(this.plot), nets: this.board ? boardNets(this.board) : null, place: this.place };
     const v = P.clickProbe(pick, this.side, ctx);
     this.publishProbe(v);
+    if (phone()) inspectCard(this, pick, null, { x: cx, y: cy });
   }
 
   publishProbe(v) {
@@ -645,6 +741,9 @@ class View {
     const h = this.lit();
     if (!h || !h.box) return;
     const w = this.canvas.clientWidth, ht = this.canvas.clientHeight;
+    // (a canvas not laid out yet, a pane being opened: a zoom of 0 would
+    // stick, the view being "touched"; it waits for its size)
+    if (!w || !ht) return;
     const [x0, y0, x1, y1] = h.box;
     this.scale = 0.8 * Math.min(w / Math.max(x1 - x0, 6000), ht / Math.max(y1 - y0, 6000));
     this.ox = w / 2 - (x0 + x1) / 2 * this.scale;
@@ -659,6 +758,8 @@ class View {
   follow_probe(h) {
     if (!h.box) return;
     const w = this.canvas.clientWidth, ht = this.canvas.clientHeight;
+    // (followed once the canvas has a size: show_probe)
+    if (!w || !ht) return;
     const [x0, y0, x1, y1] = h.box;
     const sx0 = this.ox + x0 * this.scale, sy0 = this.oy + y0 * this.scale, sx1 = this.ox + x1 * this.scale, sy1 = this.oy + y1 * this.scale;
     this.follow = false;
@@ -667,6 +768,21 @@ class View {
     this.ox = w / 2 - (x0 + x1) / 2 * this.scale;
     this.oy = ht / 2 - (y0 + y1) / 2 * this.scale;
     this.touched = true;
+  }
+
+  // a touch double tap: the whole plot in view zooms in about the finger,
+  // as a map does; zoomed in, it fits the whole plot again
+  doubleTap(cx, cy) {
+    if (!this.plot?.box) return;
+    if (this.touched) { this.fit(); return; }
+    this.gesture++;
+    const b = this.canvas.getBoundingClientRect(), mx = cx - b.left, my = cy - b.top, f = this.zoomFactor(2.5);
+    this.ox = mx - (mx - this.ox) * f; this.oy = my - (my - this.oy) * f;
+    this.scale *= f;
+    this.touched = true;
+    this.follow = false;
+    this.rest = true;
+    this.later();
   }
 
   // the whole plot in view, centred, with a margin
@@ -687,6 +803,7 @@ class View {
 
   fit() {
     this.gesture++;
+    this.coast(null);
     const { width: w, height: h } = this.viewport;
     if (!this.plot || !this.plot.box || w <= 0 || h <= 0) { this.later(); return; }
     const [x0, y0, x1, y1] = this.plot.box;
@@ -743,7 +860,7 @@ class View {
 
   draw() {
     this.pins();
-    const c = this.canvas, dpr = window.devicePixelRatio || 1;
+    const c = this.canvas, dpr = viewDpr();
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const g = c.getContext("2d");
@@ -786,13 +903,27 @@ class View {
     }
     if (this.rest) this.moving = false;
     if (b && this.moving) {
-      const f = this.scale / b.scale;
-      g.setTransform(f, 0, 0, f, this.ox * dpr - f * (b.ox * dpr + b.m), this.oy * dpr - f * (b.oy * dpr + b.m));
+      // (the bitmap may hold fewer pixels per CSS pixel than the page: bake)
+      const f = this.scale / b.scale, k = f * dpr / b.dpr;
+      g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr)));
       g.drawImage(b.canvas, 0, 0);
+    } else if (this.sliced && this.sliced.view === view && this.sliced.look === look && this.sliced.mark === this.marks() && (this.sliced.done || b)) {
+      // a sliced rested frame: done, it is shown; under way, the bitmap
+      // stays up meanwhile
+      if (this.sliced.done) { g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(this.sliced.canvas, 0, 0); this.sliced = null; this.idle(); }
+      else { const f = this.scale / b.scale, k = f * dpr / b.dpr; g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr))); g.drawImage(b.canvas, 0, 0); }
+    } else if (b && coarse?.matches && this.drew > SLICE_MS && !this.fading) {
+      const f = this.scale / b.scale, k = f * dpr / b.dpr;
+      g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr)));
+      g.drawImage(b.canvas, 0, 0);
+      this.slice(view, look, w, h, dpr);
     } else {
       const t = performance.now();
       this.fading = this.paint(g, dpr, 0);
       this.drew = performance.now() - t;
+      // the browser rasterizes the paths after this returns: on a touch
+      // screen the frame's whole time (to the next frame, less one) counts
+      if (coarse?.matches) requestAnimationFrame(() => { this.drew = Math.max(this.drew, performance.now() - t - 17); });
       // only while something fades in does it ask for the next frame
       if (this.fading) this.later();
       else this.idle();
@@ -821,23 +952,93 @@ class View {
 
   // the layers at the current view into the bitmap, kept for the next frames
   // unless something is still fading in (then the next frame draws again)
+  // A touch screen's rested frame of a board that paints slowly (a phone's
+  // CPU: a large board takes seconds) is painted off screen a layer chunk
+  // at a time, about 12 ms of work a slice, so a finger that comes back is
+  // answered at once; the stretched bitmap shows meanwhile. A move or a new
+  // look drops it (draw starts another when the view rests again).
+  // what a frame lights over the layers (a probe, a selected part): a sliced
+  // frame painted before it changed is not shown
+  marks() {
+    return `${this.probe}|${componentSources.get(this.key)?.selected || ""}|${this.place}|${tables.size}`;
+  }
+
+  slice(view, look, w, h, dpr) {
+    const c = this.sliceCanvas ||= document.createElement("canvas");
+    if (c.width !== w) c.width = w;
+    if (c.height !== h) c.height = h;
+    const g = c.getContext("2d");
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = this.bg;
+    g.fillRect(0, 0, w, h);
+    const job = { view, look, mark: this.marks(), canvas: c, done: false, steps: this.paintSteps(g, dpr, 0), spent: 0 };
+    this.sliced = job;
+    const step = () => {
+      if (this.sliced !== job || this.disposed) return;
+      if (this.shown !== view || this.look !== look || this.marks() !== job.mark || this.moving) { this.sliced = null; return; }
+      const t = performance.now();
+      let r = job.steps.next();
+      while (!r.done && performance.now() - t < 12) r = job.steps.next();
+      // (reading a pixel makes the canvas rasterize this slice's paths now)
+      g.getImageData(0, 0, 1, 1);
+      job.spent += performance.now() - t;
+      if (!r.done) { clearTimeout(this.slicing); this.slicing = setTimeout(step, 0); return; }
+      this.drew = job.spent;
+      this.fading = r.value;
+      job.done = true;
+      this.later();
+    };
+    clearTimeout(this.slicing);
+    this.slicing = setTimeout(step, 0);
+  }
+
+  // On a touch screen a board whose rested frame took long to paint gets a
+  // bitmap at half the page's pixels: a moving view is blurred a moment, and the idle bake,
+  // which fills several screens' worth, no longer blocks a phone for seconds.
   bake(p, look, w, h, dpr) {
-    const m = Math.round(256 * dpr);
-    const b = this.cache && this.cache.canvas.width === w + 2 * m && this.cache.canvas.height === h + 2 * m ? this.cache : { canvas: document.createElement("canvas") };
-    if (b.canvas.width !== w + 2 * m) b.canvas.width = w + 2 * m;
-    if (b.canvas.height !== h + 2 * m) b.canvas.height = h + 2 * m;
+    const bd = coarse?.matches && this.drew > HEAVY_MS && dpr > 1 ? Math.max(1, dpr / 2) : dpr;
+    const m = Math.round(256 * bd), bw = Math.round(w * bd / dpr) + 2 * m, bh = Math.round(h * bd / dpr) + 2 * m;
+    const at = { plot: p, look, scale: this.scale, ox: this.ox, oy: this.oy, m, dpr: bd };
+    // a slow board on a touch screen bakes in slices, into a canvas of its
+    // own (the last bitmap serves a move meanwhile), kept if nothing moved
+    if (coarse?.matches && this.drew > SLICE_MS) {
+      const own = document.createElement("canvas");
+      own.width = bw; own.height = bh;
+      return this.bakeSliced({ canvas: own }, at, bd, m, p);
+    }
+    const b = this.cache && this.cache.canvas.width === bw && this.cache.canvas.height === bh ? this.cache : { canvas: document.createElement("canvas") };
+    if (b.canvas.width !== bw) b.canvas.width = bw;
+    if (b.canvas.height !== bh) b.canvas.height = bh;
     const g = b.canvas.getContext("2d");
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = this.bg;
     g.fillRect(0, 0, b.canvas.width, b.canvas.height);
-    const t = performance.now();
-    const fading = this.paint(g, dpr, m);
-    this.drew = performance.now() - t;
-    Object.assign(b, { plot: fading ? null : p, look, scale: this.scale, ox: this.ox, oy: this.oy, m });
+    const fading = this.paint(g, bd, m);
+    Object.assign(b, at, { plot: fading ? null : p });
     this.cache = b;
     this.fading = fading;
     // only while something fades in does it ask for the next frame
     if (fading) this.later();
+    return b;
+  }
+
+  bakeSliced(b, at, bd, m, p) {
+    const g = b.canvas.getContext("2d");
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = this.bg;
+    g.fillRect(0, 0, g.canvas.width, g.canvas.height);
+    const steps = this.paintSteps(g, bd, m), view = this.shown;
+    const step = () => {
+      if (this.disposed || this.shown !== view || this.moving || this.plot !== p) return;
+      const t = performance.now();
+      let r = steps.next();
+      while (!r.done && performance.now() - t < 12) r = steps.next();
+      g.getImageData(0, 0, 1, 1);
+      if (!r.done) { this.baking = setTimeout(step, 0); return; }
+      Object.assign(b, at, { plot: r.value ? null : p });
+      this.cache = b;
+    };
+    step();
     return b;
   }
 
@@ -851,7 +1052,7 @@ class View {
       // can change Canvas2D's clipping/antialiasing by a few pixels.
       const go = () => {
         if (!this.disposed && !this.fading && !this.moving && !this.probe && !componentSources.get(this.key)?.selected && this.plot && this.plot.chunks) {
-          const dpr = window.devicePixelRatio || 1;
+          const dpr = viewDpr();
           this.bake(this.plot, this.look, this.canvas.width, this.canvas.height, dpr);
         }
       };
@@ -862,6 +1063,14 @@ class View {
   // every layer at the current view, shifted by the bitmap's margin; whether
   // something is still fading in
   paint(g, dpr, m) {
+    const steps = this.paintSteps(g, dpr, m);
+    let r = steps.next();
+    while (!r.done) r = steps.next();
+    return r.value;
+  }
+
+  // paint, a layer chunk at a time (yield between them: sliced)
+  *paintSteps(g, dpr, m) {
     const p = this.plot;
     g.setTransform(this.scale * dpr, 0, 0, this.scale * dpr, this.ox * dpr + m, this.oy * dpr + m);
     g.lineCap = "round";
@@ -889,6 +1098,7 @@ class View {
       // a line never thinner than a pixel, however far out the view is
       g.lineWidth = Math.max(k.r * 2, thin);
       g.stroke(k.line);
+      yield;
     }
     if (dimAll !== 1) {
       // what the probe lights: in its own colours, full strength (a line
@@ -931,6 +1141,11 @@ class View {
   }
 }
 
+// a rested frame painted slower than this (ms) makes the bitmap half size
+const HEAVY_MS = 60;
+// and slower than this, on a touch screen, the next rested frames come in
+// slices (View.slice)
+const SLICE_MS = 100;
 // how far the rest dims under a probe, and the edge drawn round what it lights
 const DIM = 0.28;
 // fills under this many square micrometres (25 mm²) get the edge
@@ -948,6 +1163,150 @@ let sheeted = null;
 let probed = null;
 // where each thread left its sources moved by hand (a few dozen kept)
 const left = new Map();
+
+// On a touch screen a tap also shows what lies under the finger in a card
+// at the foot of the screen, as the phone app's inspector, kept small so
+// the drawing stays in sight: a line naming it (its ref and value, else
+// its kind), a line of its other fields (the footprint first, cut short),
+// and "Mention", which puts it in the thread's draft (host.js, onMention),
+// as chips beside them; a tap on the lines opens all its fields (net, ref,
+// value, pin...) under them. It lives outside the hub's tree (on <body>),
+// so a render never takes it; leaving the view, clearing the probe or a
+// double tap closes it.
+let card = null;
+let mentioned = null;
+// (the card is the phone arrangement's: phone-shell.js's html.phone; a
+// wide touch browser keeps the page as it was)
+const phone = () => document.documentElement.classList.contains("phone");
+const lang = () => document.documentElement.lang;
+const cap = (t) => t ? t[0].toUpperCase() + t.slice(1) : t;
+const short = (k, v) => k === "footprint" ? String(v).split(":").pop() : String(v);
+function inspectCard(view, pick, src = null, tapped = null) {
+  const info = pick ? (typeof pick.info === "object" && pick.info ? pick.info : P.parseInfo(pick.text || pick.info || "")) : null;
+  if (!info || !info.kind) { card?.el.remove(); card = null; return; }
+  const raw = [info.arg ? `${info.kind} ${info.arg}` : info.kind, ...[...info.kv].filter(([k]) => k !== "g").map(([k, v]) => `${k}=${v}`)].join(";");
+  const el = card?.el || document.createElement("section");
+  el.className = "ph-inspect";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "What you tapped");
+  const head = document.createElement("div"), sum = document.createElement("button"), close = document.createElement("button");
+  head.className = "ph-inspect-head";
+  // (a footprint is named as the part it is: "Part U1", as a 3D tap's;
+  // the words are the catalog's, the page's language)
+  const word = info.kind === "footprint" && info.kv.get("ref") ? "part" : info.kind, arg = word === "part" && !info.arg ? info.kv.get("ref") : info.arg;
+  const title = cap(App.viewer_item(lang(), word, arg || "") || (arg ? `${word} ${arg}` : word));
+  // the first line: a symbol or part by its ref ("U1 · nRF52832"), else
+  // its kind ("Pad 3"); the second, the other fields' values
+  const ref = info.kv.get("ref"), named = ref && (word === "part" || word === "symbol"), value = info.kv.get("value") || "";
+  const l1 = document.createElement("span"), name = document.createElement("strong"), val = document.createElement("span"), l2 = document.createElement("span");
+  l1.className = "ph-inspect-l1"; val.className = "ph-inspect-val"; l2.className = "ph-inspect-l2";
+  name.textContent = named ? ref : title;
+  const line = (v) => { val.textContent = v ? ` · ${v}` : ""; };
+  line(value);
+  const rest = [...info.kv].filter(([k, v]) => v && k !== "g" && k !== "value" && !(named && k === "ref"));
+  rest.sort(([a], [b]) => (b === "footprint") - (a === "footprint"));
+  l2.textContent = rest.map(([k, v]) => short(k, v)).join(" · ");
+  l1.append(name, val);
+  sum.type = "button"; sum.className = "ph-inspect-sum"; sum.title = title; sum.append(l1, l2);
+  sum.setAttribute("aria-expanded", "false");
+  sum.addEventListener("click", () => { const open = !el.classList.contains("open"); el.classList.toggle("open", open); sum.setAttribute("aria-expanded", String(open)); });
+  close.type = "button"; close.className = "ph-inspect-close"; close.textContent = "✕"; close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", () => { inspectCard(view, null); if (view?.probe) view.publishProbe(""); else if (!view) probed?.(""); });
+  const chip = (text, label, fn) => {
+    const b = document.createElement("button"), t = document.createElement("span");
+    b.type = "button"; b.className = "ph-inspect-chip"; t.textContent = text; b.append(t);
+    if (label) b.setAttribute("aria-label", label);
+    b.addEventListener("click", fn);
+    return b;
+  };
+  const chips = [chip(App.viewer_mention_short(lang()), App.viewer_mention(lang()), () => { inspectCard(view, null); mentioned?.(`[${raw}]`); })];
+  // a part or net on the board shows on the schematic too, and back: the
+  // probe stays, so the other view lights it (and says which sheet)
+  // (a part tapped in 3D shows on both)
+  const others = !view ? (src?.key ? ["board", "schematic"] : []) : view.side === "board" ? ["schematic"] : view.side === "schematic" ? ["board"] : [];
+  if (showing && (!view || P.parseProbe(view.probe).kind) && !document.querySelector("#viewer.split")) for (const other of others)
+    chips.push(chip(`${App.viewer_kind(lang(), other)} →`, "", () => { inspectCard(view, null); showing(other); }));
+  head.append(sum, ...chips, close);
+  // all of its fields, when the lines are tapped open
+  const dl = document.createElement("dl");
+  dl.className = "ph-inspect-all";
+  for (const [k, v] of info.kv) {
+    if (k === "g" || !v) continue;
+    const dt = document.createElement("dt"), dd = document.createElement("dd");
+    // (a footprint without its library: "sim72", not "footprints:sim72")
+    dt.textContent = cap(App.viewer_field(lang(), k) || k); dd.textContent = short(k, v);
+    dl.append(dt, dd);
+  }
+  el.classList.remove("open");
+  el.replaceChildren(head, dl);
+  if (!el.isConnected) document.body.append(el);
+  card = { el, view };
+  // what was tapped stays in sight: the drawing moves up out from under
+  // the card when the finger was where the card now is (once a double
+  // tap can no longer come)
+  const shown = card;
+  if (view && tapped) setTimeout(() => {
+    const r = el.getBoundingClientRect();
+    if (card !== shown || tapped.x < r.left || tapped.x > r.right || tapped.y < r.top) return;
+    // (at the foot it moves the drawing up; at the side, a phone on its
+    // side, to the left)
+    if (r.left > 0) view.ox -= tapped.x - (r.left - 32); else view.oy -= tapped.y - (r.top - 32);
+    view.touched = true; view.follow = false; view.later();
+  }, 340);
+  // a part on a board: its saved component's fields too (the 3D
+  // inspector's data, host.js's onDetails), once they come
+  const mine = card, at = view ? { scope: view.canvas.dataset.scope || "", key: view.key } : src;
+  if (at?.key?.startsWith("0|") && ref && detailsFor) Promise.resolve(detailsFor(at.scope, at.key, ref)).then((c) => {
+    if (card !== mine || !c) return;
+    const shown = new Set([...info.kv.keys()]);
+    if (!value && c.value) line(c.value);
+    const more = [];
+    for (const [k, v] of [["value", c.value], ["mpn", c.mpn], ["footprint", String(c.footprint || "").split(":").pop()], ["side", c.layer === "B.Cu" ? cap(App.viewer_field(lang(), "@bottom") || "bottom") : c.layer ? cap(App.viewer_field(lang(), "@top") || "top") : ""], ["pads", c.pads?.length ? String(c.pads.length) : ""]]) {
+      if (!v || shown.has(k)) continue;
+      const dt = document.createElement("dt"), dd = document.createElement("dd");
+      dt.textContent = k === "mpn" ? "MPN" : cap(App.viewer_field(lang(), k) || k); dd.textContent = v;
+      dl.append(dt, dd);
+      if (k === "footprint" || k === "mpn") more.push(v);
+    }
+    if (more.length) l2.textContent = [...more, l2.textContent].filter(Boolean).join(" · ");
+  }).catch(() => {});
+}
+
+// the page's answer to a part's details (host.js): its saved component
+// ({value, mpn, footprint, layer, pads}) or nothing
+let detailsFor = null;
+export function onDetails(fn) {
+  detailsFor = fn;
+}
+
+// a part tapped in 3D (host.js, from solid.js's probe): the same card, for
+// the part; it goes when the 3D view does
+export function inspectPart(ref, scope = "", key = "") {
+  if (!phone()) return;
+  if (!ref) { if (card && !card.view) inspectCard(null, null); return; }
+  inspectCard(null, { info: { kind: "part", arg: ref, kv: new Map([["ref", ref]]) } }, { scope, key });
+}
+
+// how many times a source's plot has come (a new version of the file)
+export function version(key) {
+  return plots.get(key)?.n ?? 0;
+}
+
+// the page's answer to the card's other view (host.js: view-kind)
+let showing = null;
+export function onShow(fn) {
+  showing = fn;
+}
+
+// the page's answer to "Mention in chat" on a tapped piece (host.js)
+export function onMention(fn) {
+  mentioned = fn;
+}
+
+// a card whose view has left the page goes with it (host.js, after a render)
+export function inspectGone() {
+  if (card && (card.view ? card.view.disposed || !card.view.canvas.isConnected : !document.querySelector("canvas#solid"))) { card.el.remove(); card = null; }
+}
 
 // the page's answer to a tap on a sheet symbol (host.js)
 export function onSheet(fn) {
@@ -981,7 +1340,7 @@ function pickerKeys() {
   document.addEventListener("toggle", (event) => {
     const menu = event.target;
     if (menu.matches?.("#viewer .board-selector[open]") && menu.closest("#viewer")?.querySelector("canvas.plot2d")) {
-      menu.querySelector("[data-board-filter]")?.focus({ preventScroll: true });
+      softFocus(menu.querySelector("[data-board-filter]"), { preventScroll: true });
     }
   }, true);
   document.addEventListener("keydown", (event) => {
@@ -1030,9 +1389,10 @@ export function mount(canvases) {
   const list = (Array.isArray(canvases) ? canvases : [canvases]).filter(Boolean);
   for (const c of [...views.keys()]) if (!list.includes(c)) { const v = views.get(c); park(v); v.dispose(); views.delete(c); }
   for (const canvas of list) mountOne(canvas);
-  // a note form that has just come up takes the keyboard
+  // a note form that has just come up takes the keyboard (on a touch
+  // screen, the tap on its field does: touch-focus.js)
   const note = document.querySelector(".rc-note input");
-  if (note && !noteSeen) note.focus();
+  if (note && !noteSeen) softFocus(note);
   noteSeen = !!note;
   for (const w of drawnWaits) w.mounted = true;
   drawnCheck();
@@ -1066,7 +1426,9 @@ function mountOne(canvas) {
   if (place !== view.place || board !== view.board) { view.place = place; view.board = board; view.relight(); }
   // the probe the hub keeps (data-probe); a tap's own shows until it comes
   const probe = canvas.dataset.probe ?? "";
-  if (probe !== view.hubProbe) { view.hubProbe = probe; if (probe !== view.probe) view.follow = true; view.probe = probe; view.relight(); }
+  // (the card goes when the hub's probe is cleared, not on a render that
+  // still carries the probe from before the tap)
+  if (probe !== view.hubProbe) { view.hubProbe = probe; if (probe !== view.probe) view.follow = true; view.probe = probe; view.relight(); if (!probe && card?.view === view) inspectCard(view, null); }
   present(view);
   view.pins();
   const fade = Number(canvas.dataset.fade || 0);

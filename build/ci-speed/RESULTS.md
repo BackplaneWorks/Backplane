@@ -1456,3 +1456,34 @@ swap0/native flock/zero cap or OOM events, all identities unchanged, deletion
 verified. Combined investigation with the remaining-guard profile91credit-s/
 $0.00091 before merge guard. No production/test/scheduler/pin/compiler change
 is retained. Complete CI/build/proof and two-minute PR targets remain open.
+
+### Standalone deterministic test-cache eligibility: hardened research inventory
+
+Coordinator-assigned metadata only on frozen29c5; no native test/compiler/proof,
+pass record, cache implementation or skip wiring. The initial labels were
+provisional; main and conservative driver checks remove76 and add none.
+
+| Research scanner | Before | After hardening |
+|---|---|---|
+| Potential candidates /606 tests | 370 | 294 |
+| Required candidate roots /9 | 7 | 3 |
+| Metadata controls | none | 81 passed |
+| Known historical candidate test-seconds | not reported | 5,830.8 /16,438.1 (35.47%) |
+| Known required candidate test-seconds | not reported | 35.1 /195.2 (17.98%) |
+
+Only513/606 tests have historical timings;93 unknown durations are not imputed.
+Required candidates are mailcontinuity, mailrun_model and r1_copy. mailboot and
+mailtriage remain opaque; broader driver spelling checks also exclude
+maildisposition, routing, mailrun and secret_box. Prefix overapproximation is
+documented: a matching related tool is not proof it is a driver. These are
+necessary metadata conditions, not native soundness/resource fitness or
+permission to skip. [Full required list, reason histogram, timing provenance,
+resource-regression design and raw controls](test-cache-eligibility/README.md).
+
+V2 j20261104072250-574869/work1566331:81 scanner assertions pass; classification
+1.796s, whole13.71s,22credit-s/$0.00022, actual512MiB/swap0/CPU1,
+peak388,624,384B, zero limit/OOM events, input/tool identities unchanged,
+deletion verified. Prior V1 costs46credit-s/$0.00046; total$0.00068 before
+merge guard. Cached passes would require native resource receipts and future
+rotating samples/full nightlies; none of that is implemented. Full CI/build,
+under4GiB cold hub/web and two-minute PR targets remain unqualified.

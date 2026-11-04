@@ -23,7 +23,7 @@ function harness() {
     window: { devicePixelRatio: 1, matchMedia: () => ({ addEventListener() {}, removeEventListener() {} }) },
     document: { documentElement: { lang: 'en' }, addEventListener() {}, querySelector: () => null, querySelectorAll: () => [] },
     getComputedStyle: () => ({ fontFamily: 'monospace' }),
-    App: { plot_stats: () => '', plot_loading: () => '' }, P: {}, wheelKind: () => 'wheel',
+    App: { plot_stats: () => '', plot_loading: () => '' }, P: {}, wheelKind: () => 'wheel', viewDpr: () => 1, coarse: null, inspectCard() {}, card: null,
   };
   vm.createContext(context);
   vm.runInContext(source + '\nglobalThis.plot = { mount, got, views };', context);

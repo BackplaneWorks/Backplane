@@ -8,15 +8,27 @@ and draw the screen with native lists, toolbars and text fields; they make
 no product decisions. iOS runs the bridge in JavaScriptCore, Android in
 QuickJS.
 
+The main screen is the hub's own phone web page in a WebView (Android
+`WebShell.kt`, iOS `WebShell.swift`; docs/phone-app-shell.md; building the
+iOS app: docs/ios-build.md): the app keeps pairing,
+notifications and the live status, the camera, files, links, Back and the
+`window.backplaneApp` bridge (`mobile/shell/backplane-app.js`, the same
+script on both platforms). The native screens below are still there while
+nothing is paired (the pairing screen), while a hub refuses the phone (re-pair)
+and, for one release, behind App settings → **Classic screens**.
+
 ```sh
 scripts/build-mobile.sh           # bridge.js + dist/backplane-android.apk
 scripts/build-ios.sh sim          # build on the Mac, run in the Simulator
+scripts/build-ios.sh device       # build on the Mac, install on its connected iPhone
 scripts/build-ios.sh archive      # sign and upload to TestFlight
+mobile/ios/build.sh sim|device|archive   # the same, on the Mac in a checkout
 ```
 
-`build-ios.sh` bundles bridge.js here (bend), rsyncs `mobile/ios` to
+`build-ios.sh` bundles bridge.js and the web shell's bridge
+(`mobile/shell/backplane-app.js`) here (bend), rsyncs `mobile/ios` to
 `~/backplane-ios` on the Mac (`BACKPLANE_MAC`, default `hs-mac-mini`) and
-runs xcodebuild there. Debug builds read `BACKPLANE_LINK` and
+runs `mobile/ios/build.sh` (xcodebuild) there. Debug builds read `BACKPLANE_LINK` and
 `BACKPLANE_SELECT` from the environment (`SIMCTL_CHILD_…`) to pair and open
 a thread without taps.
 

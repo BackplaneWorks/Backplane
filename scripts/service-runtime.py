@@ -43,9 +43,9 @@ APPLE_SYSTEM = {'/usr/lib/libSystem.B.dylib', '/usr/lib/libc++.1.dylib',
 # TODO (fast-hub L1/J4): measure these from the running service on each
 # target instead of declaring them (docs/service-runtime.md).
 # What the JS service may dlopen through bun:ffi, per platform. The Bend JS
-# runtime (pinned bend) and the server's effects (src/**/*.js, checked by
-# ffi_libraries) open the C library and nothing else.
-FFI_APPROVED = {'linux': {'libc.so.6'}, 'darwin': {'libSystem.dylib', '/usr/lib/libSystem.B.dylib'}, 'windows': {'kernel32.dll'}}
+# runtime (pinned bend) and server effects (src/**/*.js) declare these exact
+# system libraries. zip.js uses the Windows CRT's _get_osfhandle export.
+FFI_APPROVED = {'linux': {'libc.so.6'}, 'darwin': {'libSystem.dylib', '/usr/lib/libSystem.B.dylib'}, 'windows': {'kernel32.dll', 'msvcrt.dll'}}
 BEND_RUNTIME_FFI = {'linux': ['libc.so.6'], 'darwin': ['libSystem.dylib'], 'windows': []}
 
 
@@ -259,11 +259,37 @@ def windows_system(name):
     return name.lower().removesuffix('.dll') in SYSTEM_DLLS or bool(APISET.fullmatch(name.lower()))
 
 
+def windows_system_directory():
+    kernel = ctypes.WinDLL('kernel32.dll', winmode=0x800)
+    get = kernel.GetSystemDirectoryW
+    get.argtypes, get.restype = [ctypes.c_wchar_p, ctypes.c_uint], ctypes.c_uint
+    buffer = ctypes.create_unicode_buffer(32768)
+    count = get(buffer, len(buffer))
+    require(0 < count < len(buffer), 'Cannot resolve native Windows system directory')
+    return Path(buffer.value).resolve(strict=True)
+
+
+def windows_observed_exports(path, names):
+    # Resolve exports without invoking them; confirm the loaded image is the
+    # exact absolute OS file measured below, rather than a same-name DLL.
+    library = ctypes.WinDLL(str(path), winmode=0x800)
+    kernel = ctypes.WinDLL('kernel32.dll', winmode=0x800)
+    get = kernel.GetModuleFileNameW
+    get.argtypes, get.restype = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint], ctypes.c_uint
+    buffer = ctypes.create_unicode_buffer(32768)
+    count = get(library._handle, buffer, len(buffer))
+    require(0 < count < len(buffer) and Path(buffer.value).resolve(strict=True) == path.resolve(strict=True),
+            'Loaded system DLL path differs from measured file')
+    for name in names:
+        require(getattr(library, name, None) is not None, 'Required system DLL export missing: ' + name)
+    return list(names)
+
+
 def windows_measure(binary, target, dynamic, system32=None):
-    # Static PE imports (normal and delay) of the service, every one an OS DLL.
+    # Measure static imports and declared dynamic loads as OS-owned leaves.
     service = pe(Path(binary).read_bytes())
     require(service['imports'], 'PE imports nothing')
-    system32 = Path(system32 or os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32'))
+    system32 = Path(system32).resolve(strict=True) if system32 is not None else windows_system_directory()
     nodes, edges, seen = [], [], set()
     for mode, kind in (('imports', 'normal'), ('delayImports', 'delay')):
         for dep in service[mode]:
@@ -282,6 +308,21 @@ def windows_measure(binary, target, dynamic, system32=None):
             pe(path.read_bytes())
             nodes.append({'name': dep.lower(), 'path': str(path), 'sha256': sha(path), 'bytes': path.stat().st_size,
                           'architecture': target, 'classification': 'approved-system', 'redistributed': False})
+    for item in dynamic or []:
+        dep = item['name']
+        require(dep in FFI_APPROVED['windows'], 'Unapproved dynamically loaded library: ' + dep)
+        path = system32 / dep
+        require(path.is_file() and not path.is_symlink() and path.resolve(strict=True).parent == system32,
+                'Dynamic system DLL is not a regular native system file: ' + dep)
+        pe(path.read_bytes())
+        exports = windows_observed_exports(path, ['_get_osfhandle']) if dep == 'msvcrt.dll' else []
+        edges.append({'from': 'service', 'name': dep, 'kind': 'dynamic', 'resolvedSystemPath': str(path)})
+        if dep not in seen:
+            seen.add(dep)
+            nodes.append({'name': dep, 'path': str(path), 'sha256': sha(path), 'bytes': path.stat().st_size,
+                          'architecture': target, 'classification': 'approved-system', 'redistributed': False})
+        if exports:
+            next(n for n in nodes if n['name'] == dep)['observedExports'] = exports
     return {'platform': 'Windows', 'release': platform.release(), 'windowsVersion': platform.version(),
         'peImports': service, 'systemLibraries': nodes, 'dependencyGraph': edges, 'runtimeLoaderImports': [],
         'dynamicLoads': dynamic,

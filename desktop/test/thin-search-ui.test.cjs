@@ -1,5 +1,6 @@
 'use strict';
-const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const {test,before}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+let softFocus;before(async()=>{({softFocus}=await import('../../src/web/touch-focus.js'));});
 const source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
 function trigger(mode,ready){
  const a=source.indexOf('function dispatch('),b=source.indexOf('  if (viewMode !== "compatibility")',a),panels=[],status=[];
@@ -24,9 +25,12 @@ function panelFixture(){
  }
  const panel=new Element('section'),calls=[],select=[];let closes=0;
  const ctx={resultPanel:()=>({panel,close:()=>{closes++;connected=false;}}),
-  document:{createElement:tag=>new Element(tag),createTextNode:text=>({tag:'#text',textContent:text}),getElementById:id=>id==='find-rows'?panel.children[2]:null},
-  thin:{search:(...args)=>{calls.push(args);return true;}},dispatch:(...args)=>select.push(args),later:()=>{},setTimeout,clearTimeout,Date};
- const a=source.indexOf('let thinFind = null;'),b=source.indexOf('function showThinMessage(',a);vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);
+  document:{documentElement:{classList:{contains:()=>false}},createElement:tag=>new Element(tag),createTextNode:text=>({tag:'#text',textContent:text}),getElementById:id=>id==='find-rows'?panel.children[2]:null},
+  thin:{search:(...args)=>{calls.push(args);return true;}},dispatch:(...args)=>select.push(args),later:()=>{},softFocus,setTimeout,clearTimeout,Date};
+ const a=source.indexOf('let thinFind = null;'),b=source.indexOf('function showThinMessage(',a);vm.createContext(ctx);
+ // A top-level name of host.js that the slice reads, taken from host.js itself.
+ const phoneFrom=source.indexOf('const PHONE_TITLES ='),phoneTo=source.indexOf('\n',phoneFrom);assert(phoneFrom>0&&phoneTo>phoneFrom);vm.runInContext(source.slice(phoneFrom,phoneTo),ctx);
+ vm.runInContext(source.slice(a,b),ctx);
  const parts=()=>({query:panel.children[0],note:panel.children[1],rows:panel.children[2]});
  const key=(k,more={})=>parts().query.handlers.keydown({key:k,isComposing:false,preventDefault(){},...more});
  return{ctx,panel,calls,select,parts,key,closes:()=>closes};

@@ -249,6 +249,15 @@ export class Orbit {
   }
 }
 
+// the canvas's pixels per CSS pixel. A touch screen at 3x draws 2x: the
+// difference is hard to see at arm's length, and every repaint of a large
+// board fills 2.25 times fewer pixels on a phone's CPU
+export const coarse = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
+export function viewDpr() {
+  const dpr = window.devicePixelRatio || 1;
+  return coarse?.matches ? Math.min(dpr, 2) : dpr;
+}
+
 // a wheel event from a touchpad (two fingers scrolling: pan) or from a mouse
 // wheel (zoom). A pinch comes as a wheel with ctrl. Touchpads scroll in small
 // pixel steps, sideways too; a wheel in notches of about 100 px, or in lines.
@@ -311,12 +320,15 @@ class View {
       return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y), a: Math.atan2(b.y - a.y, b.x - a.x) };
     };
     listen("pointerdown", (e) => {
+      // (a finger that stops a coasting turn only stops it: no tap)
+      const coasting = !!this.coasting;
+      this.coast(null);
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       this.pts.set(e.pointerId, local(e));
       canvas.focus({preventScroll:true});
       const p = local(e);
       // a press that stays put is a tap: it probes the part under it
-      this.tap = this.pts.size === 1 && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+      this.tap = this.pts.size === 1 && e.button === 0 && !coasting ? { x: e.clientX, y: e.clientY } : null;
       const mode = e.pointerType === "touch" ? "turn"
         : e.button === 1 || e.button === 2 || e.shiftKey || e.ctrlKey || e.metaKey ? "pan" : e.altKey ? "roll" : "turn";
       this.drag = this.pts.size === 1 ? { x: p.x, y: p.y, mode } : null;
@@ -345,21 +357,39 @@ class View {
       if (this.drag.mode === "pan") this.cam.pan(dx, dy, this.cam.unit(h));
       else if (this.drag.mode === "roll") this.cam.roll(dx * 0.008);
       else this.cam.spin(dx, dy);
+      // (a finger's last turns, for the coast when it lifts)
+      if (e.pointerType === "touch" && this.drag.mode === "turn") { (this.trail ||= []).push({ t: e.timeStamp, x: p.x, y: p.y }); if (this.trail.length > 6) this.trail.shift(); }
       this.later();
     });
     const up = (e) => {
       const tap = e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
-      if (tap) this.pick(e.clientX, e.clientY);
+      // a finger's second tap close by soon after fits the model (as a
+      // double click does; not every touch browser sends dblclick)
+      const last = this.lastTap;
+      if (tap && e.pointerType !== "mouse" && last && e.timeStamp - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 32) {
+        this.lastTap = null; this.fit(); this.later();
+      } else if (tap) {
+        if (e.pointerType !== "mouse") this.lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+        this.pick(e.clientX, e.clientY);
+      }
       this.pts.delete(e.pointerId);
       this.gesture = null;
       const [rest] = [...this.pts.values()];
       this.drag = rest ? { x: rest.x, y: rest.y, mode: "turn" } : null;
       if (!rest) canvas.classList.remove("dragging");
+      // a one-finger turn flicked off keeps turning a moment (plot2d.js's coast)
+      const trail = this.trail;
+      this.trail = null;
+      if (!rest && !tap && e.type === "pointerup" && e.pointerType === "touch" && trail?.length > 1) {
+        const a = trail.find((q) => e.timeStamp - q.t < 100) || trail.at(-1), b = trail.at(-1), dt = b.t - a.t;
+        if (dt > 0 && e.timeStamp - b.t < 50) this.coast({ vx: (b.x - a.x) / dt, vy: (b.y - a.y) / dt });
+      }
     };
     listen("pointerup", up);
     listen("pointercancel", up);
     listen("wheel", (e) => {
+      this.coast(null);
       e.preventDefault();
       const kind = wheelKind(e, this.wheelLast);
       this.wheelLast = { kind, t: e.timeStamp };
@@ -412,7 +442,27 @@ class View {
     this.cam.zoom(k, (x - w / 2) * s, (h / 2 - y) * s);
   }
 
+  // the model keeps turning at v (px/ms of a finger), slowing to a stop;
+  // null stops it
+  coast(v) {
+    cancelAnimationFrame(this.coasting);
+    this.coasting = 0;
+    if (!v || Math.hypot(v.vx, v.vy) < 0.25) return;
+    let { vx, vy } = v, last = performance.now();
+    const step = (t) => {
+      const dt = Math.min(48, t - last); last = t;
+      const k = Math.pow(0.994, dt);
+      vx *= k; vy *= k;
+      if (this.disposed || this.contextLost || Math.hypot(vx, vy) < 0.02) { this.coasting = 0; return; }
+      this.cam.spin(vx * dt, vy * dt);
+      this.later();
+      this.coasting = requestAnimationFrame(step);
+    };
+    this.coasting = requestAnimationFrame(step);
+  }
+
   fit() {
+    this.coast(null);
     const [x0, y0, z0, x1, y1, z1] = this.box;
     this.r = Math.max(Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2, 1);
     // the field of view is vertical: a narrow canvas fits the width instead
@@ -531,7 +581,7 @@ class View {
     const gl = this.gl, c = this.canvas;
     if (this.disposed || this.contextLost || gl?.isContextLost() || this.previewVisible === false || !c.isConnected || !c.clientWidth || !c.clientHeight) return;
     if (!gl) { if (this.note) this.note.textContent = "3D unavailable: WebGL could not start"; return; }
-    const dpr = window.devicePixelRatio || 1;
+        const dpr = viewDpr();
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
@@ -627,6 +677,7 @@ View.prototype.dispose = function() {
   this.disposed = true;
   this.ticking(false); this.resize?.disconnect(); this.events?.abort(); this.canvas.classList.remove("dragging"); this.dof?.dispose();
   if (this.frame) cancelAnimationFrame(this.frame);
+  cancelAnimationFrame(this.coasting);
   if (this.gl) { for (const {b} of this.bufs || []) this.gl.deleteBuffer(b); this.gl.deleteProgram(this.prog); }
   this.frame = null; this.queued = false; this.gl = null; this.pos = null;
 };
@@ -722,6 +773,7 @@ export function assetState() {
 const bounded = (value, lo, hi, fallback) => Number.isFinite(Number(value)) ? Math.max(lo, Math.min(hi, Number(value))) : fallback;
 export function cameraAction(action, value) {
   if (!view) return;
+  view.coast?.(null);
   const poses = { iso: [-0.6,0.5], top: [0,Math.PI/2], bottom: [Math.PI,-Math.PI/2],
     front: [0,0], back: [Math.PI,0], left: [-Math.PI/2,0], right: [Math.PI/2,0] };
   if (action === "fit") { if(view.box) view.fit(); }

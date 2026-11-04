@@ -66,6 +66,12 @@ check() {
   bend_check "$1" || exit 1
 }
 
+# brotli copies of the bundle beside the gzip ones, where the tool is: the
+# hub sends them to a browser that takes br (over HTTPS), 29 % smaller
+web_brotli() {
+  command -v brotli >/dev/null 2>&1 || return 0
+  for f in "$1"/chunk-*.js "$1"/chunk-*.css; do brotli -q 11 -k -f "$f"; done
+}
 build_web() {
   check src/web/app.bend
   rm -rf "$dev/web.new"
@@ -75,6 +81,7 @@ build_web() {
   cp src/web/sw.js "$dev/web.new/sw.js"
   sh scripts/build-viewer.sh "$dev/web.new/viewer/vendor"
   for f in "$dev"/web.new/*.js "$dev"/web.new/*.css "$dev"/web.new/*.html; do gzip -9 -k -n -f "$f"; done
+  web_brotli "$dev/web.new"
   rm -rf "$dev/web" && mv "$dev/web.new" "$dev/web"
 }
 
@@ -172,6 +179,7 @@ build_web_dist() {
   cp src/web/sw.js dist/web/sw.js
   sh scripts/build-viewer.sh dist/web/viewer/vendor
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
+  web_brotli dist/web
   # kept only if nothing it read changed while it was built
   if [ -n "$wkey" ] && [ "$(scripts/web-key.sh 2>/dev/null || true)" = "$wkey" ]; then
     mkdir -p "$wcache"

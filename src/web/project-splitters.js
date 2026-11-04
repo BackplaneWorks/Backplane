@@ -9,7 +9,8 @@ const attr = (el, name, value) => {
 
 export function splitLimits(space, handle) {
   const available = Math.max(1, space - handle);
-  const min = Math.min(0.45, 96 / available);
+  // (a pane keeps room for its head and some of its drawing)
+  const min = Math.min(0.45, 140 / available);
   return { available, min, max: 1 - min };
 }
 

@@ -1,5 +1,7 @@
 import ./client-language.bend as CLANG
 import Base
+import ./cad-install.bend as CIP
+import ./json-object.bend as CIJO
 import ./project-home.bend as PH
 import ./pathrecords.bend as PR
 import ./rpcout.bend as RPO
@@ -949,8 +951,67 @@ def KN.ipc(n: Maybe<&2, KH.KNote>, +servers: String) -> Maybe<&2, KH.KNote>:
     case Some{x}: Some{x}
     case None{}: KH.KH.ipc.notice(KSV.KS.failed.project(servers), KSV.KS.name(KSV.KS.failed.project(servers)), KSV.KS.failed.why(servers))
 
-def KN.of(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
+# Installing Backplane KiCad: info kicad.install is "installing" from the
+# press (Ui.act 21) until the hub says "installed" or "failed" (server
+# Install.go, why in kicad.install.why), and the notice says which at once
+def KN.install.act(+state: String, +l: String) -> KH.KAct:
+  match state:
+    case "installing": KH.KAct{"Installing…", "kicad-installing", ""}
+    case "installed": KH.KAct{"Installed", "kicad-installed", ""}
+    case "failed": KH.KAct{"Retry install", "kicad-install", ""}
+    case _: KH.KAct{l, "kicad-install", ""}
+
+def KN.install.acts(+state: String, as: List<&2, KH.KAct>) -> List<&2, KH.KAct>:
+  match as:
+    case Nil{}: Nil{}
+    case KH.KAct{+l, "kicad-install", _} <> t: KN.install.act(state, l) <> KN.install.acts(state, t)
+    case KH.KAct{+l, "kicad-retry", v} <> t: KH.KAct{Bool.pick(String, String.is_empty(state), l, "Check again"), "kicad-retry", v} <> KN.install.acts(state, t)
+    case a <> t: a <> KN.install.acts(state, t)
+
+def KN.install.title(+state: String, +title: String) -> String:
+  match state:
+    case "installing": "Installing Backplane KiCad…"
+    case "installed": "Backplane KiCad installed"
+    case "failed": "Backplane KiCad didn't install"
+    case _: title
+
+def KN.install.body(+state: String, +why: String, +body: String) -> String:
+  match state:
+    case "installing": "Downloading, verifying and unpacking it. This takes a minute or two; you can keep working."
+    case "installed": "Backplane restarts to use it as soon as no agent is working; this notice goes away then."
+    case "failed": Bool.pick(String, String.is_empty(why), "The install stopped without saying why.", why)
+    case _: body
+
+def KN.install(+state: String, +why: String, n: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  match n:
+    case Some{KH.KNote{key, +title, +body, KH.KAct{+l, "kicad-install", +v} <> t}}:
+      Some{KH.KNote{key, KN.install.title(state, title), KN.install.body(state, why, body), KN.install.acts(state, KH.KAct{l, "kicad-install", v} <> t)}}
+    case Some{n}: Some{n}
+    case None{}: None{}
+
+def KN.of.k(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
   KN.ipc(KH.KH.notice(Str.get(info, "kicad.status"), Str.get(info, "kicad.cli"), Str.get(info, "kicad.version"), Str.get(info, "kicad.why"), String.eq(Str.get(info, "kicad.can_install"), "1")), Str.get(info, "kicad.ipc.servers"))
+
+# Hub-owned CAD jobs. The snapshot is part of info, not a page's scratch.
+def Cadview.at(+info: Map<&2, String>, +tool: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(Str.get(info, "cad.install")), J.Null{}), tool),
+    J.Json.obj([J.KV{"phase", J.Str{Bool.pick(String, Bool.pick(Bool, String.eq(tool, "freecad"), Bool.not(String.is_empty(Str.get(info, "freecad"))), String.eq(Str.get(info, "kicad.status"), "ok")), "ready", "idle")}}]))
+
+def Cadview.phase(+info: Map<&2, String>, +tool: String) -> CIP.CadPhase:
+  CIP.Cad.phase(J.Json.get_str(Cadview.at(info, tool), "phase", "idle"))
+
+def Cadview.value(+info: Map<&2, String>, +tool: String) -> String:
+  J.Json.show(CIJO.Obj.put(Cadview.at(info, tool), "tool", J.Str{tool}))
+
+def Cadview.btn(+info: Map<&2, String>, +tool: String) -> KH.KAct:
+  KH.KAct{CIP.Cad.button(Cadview.phase(info, tool)), CIP.Cad.action(Cadview.phase(info, tool)), Cadview.value(info, tool)}
+
+def Cadview.notice(+info: Map<&2, String>, fallback: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  Bool.pick(Maybe<&2, KH.KNote>, Bool.and(Bool.not(String.is_empty(J.Json.get_str(Cadview.at(info, "kicad"), "attempt", ""))), Bool.not(String.eq(J.Json.get_str(Cadview.at(info, "kicad"), "phase", ""), "ready"))),
+    Some{KH.KNote{"cad.install:" ++ J.Json.get_str(Cadview.at(info, "kicad"), "attempt", ""), "Backplane KiCad", CIP.Cad.note(Cadview.at(info, "kicad")), [Cadview.btn(info, "kicad")]}}, fallback)
+
+def KN.of(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
+  Cadview.notice(info, KN.install(Str.get(info, "kicad.install"), Str.get(info, "kicad.install.why"), KN.of.k(info, st)))
 
 def KN.visible.k(n: Maybe<&2, KH.KNote>, +st: M.State) -> Maybe<&2, KH.KNote>:
   match n:
@@ -1047,11 +1108,24 @@ def Update.btn(+st: M.State, +nf: Map<&2, String>, +note: String) -> Nat:
   Bool.pick(Nat, Update.packaged(nf), 0n, Bool.pick(Nat, Nat.is_gt(Update.waits(st), 0n), 3n, Bool.pick(Nat, String.starts_with(note, "update "), 1n, 2n)))
 
 # an update notice: a version to offer, or the progress of one being applied
-def Ui.update(u: Ui, +o: J.Json) -> Ui:
+def Ui.update.k(u: Ui, +o: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, _, nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w,
         J.Json.get_str(o, "error", ""), Ui.update.note(J.Json.get_str(o, "version", ""), J.Json.get_str(o, "state", "")), nf, ob, tr}
+
+# a KiCad install's news (server Install.go: "kicad") goes to its notice
+# (KN.install), not to the app's update line or error banner
+def Ui.update.kicad(plain: Bool, u: Ui, +k: String, +o: J.Json) -> Ui:
+  match plain:
+    case True{}: Ui.update.k(u, o)
+    case False{}:
+      match u:
+        case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+          Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Map.set(&2, String, nf, "kicad.install", k), "kicad.install.why", J.Json.get_str(o, "error", "")), ob, tr}
+
+def Ui.update(u: Ui, +o: J.Json) -> Ui:
+  Ui.update.kicad(String.is_empty(J.Json.get_str(o, "kicad", "")), u, J.Json.get_str(o, "kicad", ""), o)
 
 # the kind an agent's viewer_show takes: a part shown on Mech ("mech" and
 # a model) opens in 3D, where Mech shows its parts
@@ -1785,8 +1859,12 @@ def Ui.reply.diff(has: Bool, u: Ui, +o: J.Json) -> Ui:
 # while that thread's viewer has shown nothing and its panel was never
 # opened or shut by hand ("panel.hand:t"); an agent's viewer_show always
 # opens it (laws viewer_auto_*)
+# (never on a phone's web page, thin-view's Session.renderer "phone": there
+# the panel is the whole screen, and the person who just sent a message
+# would lose the thread for the board; its views menu opens it)
 def Viewer.auto(+u: Ui, +th: String) -> Bool:
-  Bool.and(String.is_empty(Ui.info(u, "view.kind:" ++ th)), Bool.not(String.eq(Ui.info(u, "panel.hand:" ++ th), "1")))
+  Bool.and(Bool.and(String.is_empty(Ui.info(u, "view.kind:" ++ th)), Bool.not(String.eq(Ui.info(u, "panel.hand:" ++ th), "1"))),
+    Bool.not(String.eq(Ui.info(u, "local.workspace.form"), "phone")))
 
 def Ui.view.auto(go: Bool, +u: Ui, +th: String, +o: J.Json) -> Ui:
   match go:
@@ -6090,6 +6168,43 @@ def Fm.top(+u: Ui) -> Nat:
 def Fm.name(+u: Ui) -> String:
   FM.Fm.last(Ui.view_get(u, "view.path"))
 
+def Fm.down.url(folder: Bool, +thread: String, +rel: String) -> String:
+  match folder:
+    case True{}: FM.Fm.zip.url(thread, rel)
+    case False{}: FM.Fm.get.url(thread, rel)
+
+def Fm.down.k(none: Bool, folder: Bool, +thread: String, +rel: String) -> String:
+  match none:
+    case True{}: ""
+    case False{}: Fm.down.url(folder, thread, rel)
+
+# where a Files entry downloads from (core/fm.bend's Fm.zip.url for a
+# folder, Fm.get.url for a file; the folder on show is dir "" from its
+# root): "" with no thread, on a thread elsewhere, whose files are another
+# hub's (its listing is that hub's; this hub holds only a cache), and for
+# what a download never holds (Fm.zip.within: a backups folder, a lock)
+def Fm.down(+u: Ui, folder: Bool, +rel: String) -> String:
+  Fm.down.k(Bool.or(Bool.or(String.is_empty(Ui.sel(u)), FR.Fr.is(Ui.sel(u))), FM.Fm.zip.within(rel)), folder, Ui.sel(u), rel)
+
+# the selected thread's project title (a project home's own), the zip's
+# name at the root as the hub names it (core/hub.bend's Hub.files.of)
+def Fm.down.title.k(home: Bool, +st: M.State, +sel: String) -> String:
+  match home:
+    case True{}: Ui.project_title(st, PH.Home.project(sel))
+    case False{}: Ui.project_title(st, Ui.thread_project(Ui.thread(st, sel)))
+
+def Fm.down.title(u: Ui) -> String:
+  match u:
+    case Ui{+st, +sel, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Fm.down.title.k(PH.Home.is(sel), st, sel)
+
+# the name a download saves as, as the hub's answer names it: a file's own
+# name, a folder's zip (the phones save under it: Mob's Files.json)
+def Fm.down.name(+u: Ui, folder: Bool, +rel: String) -> String:
+  match folder:
+    case True{}: FM.Fm.zip.name(Fm.down.title(u), rel)
+    case False{}: FM.Fm.last(rel)
+
 # Mech opened (Mpage.open marks "@mech.to3d:<t>"; it shows at once what
 # the parts last listed give, and asks for them again, Mpage.sync): once
 # the fresh listing is in, the thread's viewer shows what it gives
@@ -6487,16 +6602,16 @@ def Bd.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
 
 # The combined view
 # -----------------
-# Kind "split": the schematic beside the board and its 3D model at once,
-# each pane named, put away and brought back on its own (the setting
-# "split.hide": the panes put away, words of "sch pcb 3d"; one always
-# stays, test/split_test.bend). Its board is the viewer's file, as the Board tab's
-# (the board picked, else the project's own); its sheet is kept per thread
-# ("@split.sheet:<t>"): the board's own schematic until another is opened
-# there.
-
-def Split.panes() -> List<&2, String>:
-  ["sch", "pcb", "3d"]
+# Kind "split": the schematic beside the board or its 3D model, at most
+# two panes: the board and the 3D share the side, one at a time (showing
+# one puts the other away), each pane named, put away and brought back on
+# its own (the setting "split.hide": the panes put away, words of
+# "sch pcb 3d"; the 3D shows only when the board is put away and it is
+# not, so no setting gives the schematic and the board; one pane always
+# stays, test/split_test.bend). Its board is the viewer's file, as the
+# Board tab's (the board picked, else the project's own); its sheet is
+# kept per thread ("@split.sheet:<t>"): the board's own schematic until
+# another is opened there.
 
 def Split.hide(+u: Ui) -> String:
   M.Setting.get(Ui.state(u), "split.hide", "")
@@ -6504,30 +6619,32 @@ def Split.hide(+u: Ui) -> String:
 def Split.has(+hide: String, +p: String) -> Bool:
   String.contains(" " ++ hide ++ " ", " " ++ p ++ " ")
 
-def Split.flip.keep(on: Bool, +q: String, rest: List<&2, String>) -> List<&2, String>:
-  match on:
-    case True{}:
-      q <> rest
-    case False{}:
-      rest
+# whether pane p shows, by the panes put away
+def Split.shows(+hide: String, +p: String) -> Bool:
+  Bool.pick(Bool, String.eq(p, "3d"), Bool.and(Split.has(hide, "pcb"), Bool.not(Split.has(hide, "3d"))), Bool.not(Split.has(hide, p)))
 
-def Split.flip.go(ps: List<&2, String>, +hide: String, +p: String) -> List<&2, String>:
-  match ps:
-    case Nil{}:
-      Nil{}
-    case +q <> t:
-      Split.flip.keep(Bool.xor(Split.has(hide, q), String.eq(q, p)), q, Split.flip.go(t, hide, p))
+# the panes put away when these show (the schematic, the board, the 3D)
+def Split.words(s: Bool, b: Bool, t: Bool) -> String:
+  String.trim(Bool.pick(String, s, "", "sch ") ++ Bool.pick(String, b, "", "pcb ") ++ Bool.pick(String, t, "", "3d"))
 
-def Split.flip.k(+hs: List<&2, String>, +hide: String) -> String:
-  Bool.pick(String, Nat.is_ge(List.length(&2, String, hs), 3n), hide, String.join(hs, " "))
+def Split.flip.k(none: Bool, +hide: String, +next: String) -> String:
+  Bool.pick(String, none, hide, next)
 
-# the panes put away once pane p is flipped, in order; the last one shown
-# stays
+def Split.flip.to(+hide: String, +s: Bool, +b: Bool, +t: Bool) -> String:
+  Split.flip.k(Bool.not(Bool.or(s, Bool.or(b, t))), hide, Split.words(s, b, t))
+
+# the panes put away once pane p is flipped: the schematic on its own;
+# the board or the 3D shown puts the other away; the last one shown stays
 def Split.flip(+hide: String, +p: String) -> String:
-  Split.flip.k(Split.flip.go(Split.panes(), hide, p), hide)
+  +s = Split.shows(hide, "sch")
+  +b = Split.shows(hide, "pcb")
+  +t = Split.shows(hide, "3d")
+  Bool.pick(String, String.eq(p, "sch"), Split.flip.to(hide, Bool.not(s), b, t),
+    Bool.pick(String, String.eq(p, "pcb"), Split.flip.to(hide, s, Bool.not(b), False{}),
+      Bool.pick(String, String.eq(p, "3d"), Split.flip.to(hide, s, False{}, Bool.not(t)), hide)))
 
 def Split.on(+u: Ui, +p: String) -> Bool:
-  Bool.not(Split.has(Split.hide(u), p))
+  Split.shows(Split.hide(u), p)
 
 def Split.is(+u: Ui) -> Bool:
   String.eq(Ui.view_get(u, "view.kind"), "split")
@@ -11039,8 +11156,8 @@ def Hs.bar.pos(+l: I.Loc, first: Bool, +at: Nat, +n: Nat) -> String:
     case False{}: MSG.T.history.position(l, Nat.show(at), Nat.show(n))
 
 # the live bar's words: its track's changes, and the thread's all when
-# those are more (the top bar's Design changes counts the board's and the
-# schematic's together: "Live · 98 of 181 changes")
+# those are more (Hist.changes counts the board's and the schematic's
+# together: "Live · 98 of 181 changes")
 def Hs.live.words(+l: I.Loc, +c: Nat, +all: Nat) -> String:
   Bool.pick(String, Nat.is_eq(c, 0n), MSG.T.history.live(l),
     Bool.pick(String, Nat.is_lt(c, all), MSG.T.history.live.steps.of(l, Nat.show(c), Nat.show(all)), MSG.T.history.live.steps(l, Nat.show(c), Bool.pick(String, Nat.is_eq(c, 1n), "one", "other"))))
@@ -11552,6 +11669,17 @@ type AgRow is Data:
   AgRow{label: String, note: String, fields: List<&2, AgField>, btns: List<&2, AgBtn>}
 
 # a form's argument ("agykey:GEMINI_API_KEY" has "GEMINI_API_KEY")
+def Ui.infos(u: Ui) -> Map<&2, String>:
+  match u:
+    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
+      nf
+
+def Cadview.row(+u: Ui, +tool: String) -> AgRow:
+  +nf = Ui.infos(u)
+  +phase = Cadview.phase(nf, tool)
+  AgRow{Bool.pick(String, String.eq(tool, "kicad"), "Backplane KiCad", "FreeCAD"), CIP.Cad.note(Cadview.at(nf, tool)), Nil{},
+    [AgBtn{CIP.Cad.button(phase), CIP.Cad.action(phase), Cadview.value(nf, tool), False{}}]}
+
 def Sealed.arg(+form: String) -> String:
   String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
 
@@ -12507,11 +12635,6 @@ def HubCache.get(vs: List<&2, HubView>, +hub: String) -> Maybe<&2, HubView>:
       None{}
     case +v <> t:
       HubCache.get.k(String.eq(HubView.hub(v), hub), v, HubCache.get(t, hub))
-
-def Ui.infos(u: Ui) -> Map<&2, String>:
-  match u:
-    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
-      nf
 
 def HubCache.save.k(installed: Bool, +u: Ui, vs: List<&2, HubView>) -> List<&2, HubView>:
   match installed:
@@ -16646,7 +16769,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 20n:
       Ui.also(Ui.model(u, value), [FocusField{"composer"}])
     case 21n:
-      Ui.rpc(u, "kicad.install", Nil{})
+      Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{"kicad"}}, J.KV{"op", J.Str{"start"}}])
     case 22n:
       Ui.answer(u, value)
     case 23n:
@@ -17304,8 +17427,27 @@ def Ui.act.home(home: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}: Bool.pick(Act, String.eq(action, "home-bom"), Rp.open(u, "bom"), Home.dispatch(u, action, value))
     case False{}: Ui.act.own(String.eq(action, "peer-own"), u, action, value)
 
+def Cadview.tool(value: String) -> String:
+  Bool.pick(String, String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}), "tool", ""), "freecad"), "freecad", "kicad")
+
+def Cadview.rpc(+u: Ui, value: String, op: String) -> Act:
+  Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{Cadview.tool(value)}}, J.KV{"op", J.Str{op}}])
+
+# Match a separate key so string-pattern fallthrough never rebuilds the
+# original action used by the existing default row.
+def Cadview.dispatch.by(key: String, +u: Ui, +action: String, +value: String) -> Act:
+  match key:
+    case "cad-install": Cadview.rpc(u, value, "start")
+    case "cad-cancel": Cadview.rpc(u, value, "cancel")
+    case "cad-refresh": Cadview.rpc(u, value, "refresh")
+    case "cad-guide": Ui.act.home(False{}, u, "open-url", Bool.pick(String, String.eq(Cadview.tool(value), "freecad"), "https://www.freecad.org/downloads.php", "https://github.com/i2cjak/Backplane_KiCad/releases"))
+    case _: Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)
+
+def Cadview.dispatch(+u: Ui, +action: String, +value: String) -> Act:
+  Cadview.dispatch.by(action, u, action, value)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)
+  Cadview.dispatch(u, action, value)
 
 def Home.sent.clear(clear: Bool, +u: Ui, +owner: String, cs: List<&2, Cmd>) -> Act:
   match clear:

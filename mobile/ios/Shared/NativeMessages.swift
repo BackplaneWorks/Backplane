@@ -194,6 +194,31 @@ enum NativeMessages {
     tag == "ja" ? ((arg0 == 0 ? "変更なし" : "変更ファイル" + number(arg0) + "件")) : ((arg0 == 0 ? "No files changed" : (arg0 == 1 ? number(arg0) + " file changed" : number(arg0) + " files changed")))
   }
 
+  // files.download
+  static func files_download(_ tag: String) -> String {
+    tag == "ja" ? ("ダウンロード") : ("Download")
+  }
+
+  // files.download.failed
+  static func files_download_failed(_ tag: String) -> String {
+    tag == "ja" ? ("ダウンロードが完了しませんでした") : ("The download did not finish")
+  }
+
+  // files.download.file
+  static func files_download_file(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? (arg0 + "をダウンロード") : ("Download " + arg0)
+  }
+
+  // files.download.folder
+  static func files_download_folder(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? (arg0 + "をzipでダウンロード") : ("Download " + arg0 + " as a zip")
+  }
+
+  // files.download.tip
+  static func files_download_tip(_ tag: String) -> String {
+    tag == "ja" ? ("このフォルダをzipでダウンロード") : ("Download this folder as a zip")
+  }
+
   // google.client.own
   static func google_client_own(_ tag: String) -> String {
     tag == "ja" ? ("独自クライアント") : ("Own client")

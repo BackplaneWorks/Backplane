@@ -70,14 +70,23 @@ test('cache restore never writes draft storage and a new local draft remains ind
  const {m,record}=await picture();const draft={text:'new unsent 日本語'};const view=new m.FocusedView({scope:()=>scope,cache:{get:async()=>record},hide(){},view(){}});
  await view.restore();assert.equal(draft.text,'new unsent 日本語');assert.equal(Object.hasOwn(record,'drafts'),false);assert.equal(Object.hasOwn(record,'session'),false);
 });
-// This DOM shim follows the real normal live renderer: msg assistant live,
-// body child, and NO data-id. A memo key is not a DOM data-id attribute.
+// The web's own live row is a static pending bubble (View.pending.node, the
+// product's static pending contract: docs/active-threads-load.md). This shim is
+// the other stream row capture accepts: msg assistant live, body child, and NO
+// data-id. A memo key is not a DOM data-id attribute.
 function normalLive(body) { return el('div',{class:'msg assistant live'},[el('div',{class:'body'},[text(body)])]); }
 test('normal live DOM shape matches the renderer rather than assuming a committed-message data-id',()=>{
  const fs=require('node:fs'),path=require('node:path');const source=fs.readFileSync(path.resolve(__dirname,'../../src/web/view.bend'),'utf8');
  const live=source.slice(source.indexOf('def View.live.n.loc('),source.indexOf('def View.live.n(',source.indexOf('def View.live.n.loc(')));
- assert(live.includes('D.At{"class", "msg assistant live"}'));assert(live.includes('D.At{"class", "body"}'));assert(!live.includes('data-id'));
+ assert(live.includes('View.pending.node(lc, key)'));
+ const pending=source.slice(source.indexOf('def View.pending.node('),source.indexOf('def View.pending.rows(',source.indexOf('def View.pending.node(')));
+ assert(pending.includes('D.At{"class", "msg assistant pending"}'));assert(pending.includes('D.At{"class", "body"}'));assert(!pending.includes('data-id'));
  assert.equal(normalLive('x').hasAttribute('data-id'),false);
+});
+test('the static pending bubble the renderer draws stays out of a saved picture',async()=>{
+ const {m,timeline}=await picture();timeline.children.push(el('div',{class:'msg assistant pending',role:'status'},[el('div',{class:'body'},[text('STATIC PENDING')])]));
+ const record=m.captureFocused({main:el('main'),timeline,title:el('span',{},[text('title')]),scope,epoch:'actual'});
+ assert.equal(record.rows,1);assert(!JSON.stringify(record).includes('STATIC PENDING'));
 });
 test('a stream-only normal assistant row persists current partial Unicode as a readonly picture',async()=>{
  const {m,timeline}=await picture();timeline.children=[normalLive('途中の返答 👩‍💻 é CURRENT')];

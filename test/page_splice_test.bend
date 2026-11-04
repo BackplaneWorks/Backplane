@@ -10,9 +10,8 @@ import ../src/server/thin-splice.bend as S
 # A view.page answered from the last view with only its timeline drawn
 # again (thin-splice.bend's Page.splice) is the full render of that page:
 # from the newest page to an older one and back, with and without a live
-# row, and the same page again, on a thread long enough for three pages.
-# Design steps are spread over it, so the top bar's count of changes is the
-# thread's on every page. The driver (test/tools/page_splice.mjs) compares
+# row, and the same page again, on a thread long enough for three pages,
+# with design steps spread over it. The driver (test/tools/page_splice.mjs) compares
 # each case's two pictures: Bend's String.eq on them overflows its stack.
 
 def z(+s: String) -> String:

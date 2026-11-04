@@ -886,7 +886,7 @@ def Hist.row(e: M.Entry) -> String:
 # the design as the agent found it: every file shows as new, yet nothing
 # changed. It stays a version for the viewer's history to compare with,
 # but it is no design change: the timeline leaves it out (Hist.seen) and
-# the top bar's count does not count it (Hist.changes). A first step taken
+# the history bar's count does not count it (Hist.changes). A first step taken
 # after a tool call (the agent made the first board) is a change. Records
 # from before "w" was written say only that they are first.
 
