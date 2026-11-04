@@ -102,6 +102,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -1308,6 +1309,10 @@ fun LazyListScope.hubSettingsRows(m: AppModel, rows: List<SetRow>, notify: Boole
             Text(r.label, style = MaterialTheme.typography.bodyLarge,
                 color = if (r.buttons.isEmpty() && r.fields.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
             if (r.note.isNotEmpty()) Text(r.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            r.installProgress?.takeIf { it.busy }?.let { p ->
+                if (p.known) LinearProgressIndicator(progress = { p.fraction.coerceIn(0, 1000) / 1000f }, modifier = Modifier.fillMaxWidth())
+                else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
             if (r.chart.isNotEmpty()) UsageDayChart(r.chart)
             for (f in r.fields) {
                 var t by remember(r.label, f.name) { mutableStateOf(f.value) }

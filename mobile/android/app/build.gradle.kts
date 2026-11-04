@@ -66,6 +66,8 @@ android {
     }
     // bridge.js is copied in by scripts/build-mobile.sh
     sourceSets["main"].assets.srcDir("../../build/assets")
+    // window.backplaneApp, the same script the iOS app injects
+    sourceSets["main"].assets.srcDir("../../shell")
 }
 
 dependencies {
@@ -79,6 +81,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("wang.harlon.quickjs:wrapper-android:3.2.3")
     implementation("androidx.javascriptengine:javascriptengine:1.0.0")
+    // the WebView shell's bridge (message listener, document-start script)
+    implementation("androidx.webkit:webkit:1.12.1")
+    // a photo of a pairing code, read on the phone (Pair.kt's pairingFromImage)
+    implementation("com.google.zxing:core:3.5.3")
     // the pairing code scanner (Google Play services, no camera permission)
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     // it brings an old Fragment; the ActivityResult APIs need 1.3 or later

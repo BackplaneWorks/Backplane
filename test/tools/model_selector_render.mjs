@@ -13,8 +13,8 @@ function catalog(n) {
 }
 let checks = 0;
 for (const data of [catalog(0), catalog(4), catalog(64), 'not json', '{"codex":["a",17,"a"],"about":{"codex":{"labels":{"a":9},"efforts":null}}}']) {
-  for (const p of providers) for (const q of ['', '日本語 model-1', 'unmatched']) {
-    const args = [data, catalog(2), p, 'unlisted-current', 'model-1', 'low', q, checks % 2 ? 'ja' : 'en', checks % 3 ? p : 'claude'];
+  for (const p of providers) for (const q of ['', '日本語 model-1', 'unmatched']) for (const phone of ['', 'phone']) {
+    const args = [data, catalog(2), p, 'unlisted-current', 'model-1', 'low', q, checks % 2 ? 'ja' : 'en', checks % 3 ? p : 'claude', phone];
     assert.equal(lib.fresh(...args), lib.old(...args), `${p}: ${q}: ${data.length} bytes`);
     checks++;
   }
@@ -37,7 +37,7 @@ assert.equal(lib['fresh.overlay'](raw, '', ''), raw);
 // Alternate order and compare the complete DOM on every run.
 const large = catalog(300), times = {old:[], fresh:[]};
 for (let pass = 0; pass < 8; pass++) {
-  const args = [large, catalog(2), 'codex', 'model-0', 'model-' + pass, 'low', '', 'en', 'codex'];
+  const args = [large, catalog(2), 'codex', 'model-0', 'model-' + pass, 'low', '', 'en', 'codex', ''];
   const output = {};
   for (const name of pass % 2 ? ['fresh','old'] : ['old','fresh']) {
     const start = performance.now();output[name] = lib[name](...args);times[name].push(performance.now() - start);

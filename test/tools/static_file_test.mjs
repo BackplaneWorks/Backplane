@@ -4,7 +4,7 @@ import {test,after} from 'node:test';
 import * as fs from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {gzipSync} from 'node:zlib';
+import {gzipSync,brotliCompressSync} from 'node:zlib';
 import {runInNewContext} from 'node:vm';
 const source=fs.readFileSync('src/server/effects/host.js','utf8');
 const start=source.indexOf('function sock_send_static('),end=source.indexOf('\nfunction sock_send_preview(',start);
@@ -40,8 +40,8 @@ function sender({backend='bun',platform=process.platform,maxWrite=Infinity,write
     response(){const b=Buffer.concat(sent),at=b.indexOf('\r\n\r\n');assert.ok(at>0);return{head:b.subarray(0,at+4).toString(),body:b.subarray(at+4)};},
   };
 }
-function header({status='200 OK',type='text/javascript; charset=utf-8',length=bytes.length,cache='no-cache',extra='',gzip=false}={}){
-  return `HTTP/1.1 ${status}\r\nContent-Type: ${type}\r\nContent-Length: ${length}\r\nCache-Control: ${cache}\r\nConnection: close\r\n${extra}${status==='200 OK'?`${gzip?'Content-Encoding: gzip\r\n':''}Vary: Accept-Encoding\r\n`:''}\r\n`;
+function header({status='200 OK',type='text/javascript; charset=utf-8',length=bytes.length,cache='no-cache',extra='',gzip=false,br=false}={}){
+  return `HTTP/1.1 ${status}\r\nContent-Type: ${type}\r\nContent-Length: ${length}\r\nCache-Control: ${cache}\r\nConnection: close\r\n${extra}${status==='200 OK'?`${br?'Content-Encoding: br\r\n':gzip?'Content-Encoding: gzip\r\n':''}Vary: Accept-Encoding\r\n`:''}\r\n`;
 }
 for(const options of [{backend:'bun'},{backend:'posix'},{backend:'bun',platform:'win32'},{backend:'bun',platform:'darwin'},{backend:'posix',platform:'darwin'}]){
   test(`${options.backend}/${options.platform||process.platform}: exact body/headers, bounded pieces and fair yields`,()=>{
@@ -96,6 +96,13 @@ test('open descriptor pins replacement and initial length despite path changes',
   const p=join(dir,'replaced.js');fs.writeFileSync(p,bytes);const s=sender();const r=s.start(spec({path:p}));fs.renameSync(p,p+'.old');fs.writeFileSync(p,'new');fs.appendFileSync(p+'.old','appended');
   assert.equal(s.drain(r).result.ok,true);assert.deepEqual(s.response().body,bytes);
 });
-for(const bad of [{piece:0},{piece:65537},{piece:NaN},{coding:2},{ctype:'text/html\r\nInjected: true'},{cache:'\0'},{extra:'\0'}]){
+for(const bad of [{piece:0},{piece:65537},{piece:NaN},{coding:3},{ctype:'text/html\r\nInjected: true'},{cache:'\0'},{extra:'\0'}]){
   test(`invalid typed metadata ${JSON.stringify(bad)} fails before opening/sending`,()=>{const s=sender();assert.equal(s.start(spec(bad)).result.errno,22);assert.equal(s.sent.length,0);assert.equal(s.opened.size,0);});
 }
+test('brotli preference: .br first, else .gz, else plain bytes',()=>{
+  const p=join(dir,'brotli.js');fs.writeFileSync(p,bytes);const gz=gzipSync(bytes),br=brotliCompressSync(bytes);fs.writeFileSync(p+'.gz',gz);fs.writeFileSync(p+'.br',br);
+  let s=sender();assert.equal(s.drain(s.start(spec({path:p,coding:2}))).result.ok,true);assert.equal(s.response().head,header({br:true,length:br.length}));assert.deepEqual(s.response().body,br);
+  s=sender();assert.equal(s.drain(s.start(spec({path:p,coding:1}))).result.ok,true);assert.equal(s.response().head,header({gzip:true,length:gz.length}));
+  fs.rmSync(p+'.br');s=sender();assert.equal(s.drain(s.start(spec({path:p,coding:2}))).result.ok,true);assert.equal(s.response().head,header({gzip:true,length:gz.length}));assert.deepEqual(s.response().body,gz);
+  fs.rmSync(p+'.gz');s=sender();assert.equal(s.drain(s.start(spec({path:p,coding:2}))).result.ok,true);assert.equal(s.response().head,header());assert.deepEqual(s.response().body,bytes);
+});

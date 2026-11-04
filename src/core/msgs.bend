@@ -1305,6 +1305,41 @@ def T.files.changed(l: I.Loc, +arg0: Nat) -> String:
     case I.Ja{}:
       I.I18n.exact(arg0, Nat.add(Nat.mul(0n, 10n), 0n), "変更なし", I.I18n.pick(I.I18n.plural(I.Ja{}, arg0), "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件"))
 
+def T.files.download(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Download"
+    case I.Ja{}:
+      "ダウンロード"
+
+def T.files.download.failed(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "The download did not finish"
+    case I.Ja{}:
+      "ダウンロードが完了しませんでした"
+
+def T.files.download.file(l: I.Loc, arg0: String) -> String:
+  match l:
+    case I.En{}:
+      "Download " ++ arg0
+    case I.Ja{}:
+      arg0 ++ "をダウンロード"
+
+def T.files.download.folder(l: I.Loc, arg0: String) -> String:
+  match l:
+    case I.En{}:
+      "Download " ++ arg0 ++ " as a zip"
+    case I.Ja{}:
+      arg0 ++ "をzipでダウンロード"
+
+def T.files.download.tip(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Download this folder as a zip"
+    case I.Ja{}:
+      "このフォルダをzipでダウンロード"
+
 def T.files.preview.none(l: I.Loc, arg0: String) -> String:
   match l:
     case I.En{}:
@@ -1570,20 +1605,6 @@ def T.history.comparing(l: I.Loc) -> String:
       "Comparing"
     case I.Ja{}:
       "比較中"
-
-def T.history.count.label(l: I.Loc) -> String:
-  match l:
-    case I.En{}:
-      "Design changes"
-    case I.Ja{}:
-      "設計の変更"
-
-def T.history.count.tip(l: I.Loc) -> String:
-  match l:
-    case I.En{}:
-      "Saved board and schematic changes in this thread, captured after tool calls. Click to browse them in the viewer's history, which counts the board's or the schematic's alone."
-    case I.Ja{}:
-      "このスレッドでツール実行後に保存された基板・回路図の変更です。クリックするとビューアの履歴で確認できます。履歴は基板または回路図の変更だけを数えます。"
 
 def T.history.file.tip(l: I.Loc) -> String:
   match l:
@@ -8172,6 +8193,13 @@ def T.viewer.browser.tip(l: I.Loc) -> String:
     case I.Ja{}:
       "このスレッドのブラウザー"
 
+def T.viewer.card.part(l: I.Loc, arg0: String) -> String:
+  match l:
+    case I.En{}:
+      "part " ++ arg0
+    case I.Ja{}:
+      "部品 " ++ arg0
+
 def T.viewer.close(l: I.Loc) -> String:
   match l:
     case I.En{}:
@@ -8347,6 +8375,13 @@ def T.viewer.field.netclass(l: I.Loc) -> String:
     case I.Ja{}:
       "ネットクラス"
 
+def T.viewer.field.pads(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "pads"
+    case I.Ja{}:
+      "パッド数"
+
 def T.viewer.field.ref(l: I.Loc) -> String:
   match l:
     case I.En{}:
@@ -8367,6 +8402,13 @@ def T.viewer.field.sheet(l: I.Loc) -> String:
       "sheet"
     case I.Ja{}:
       "シート"
+
+def T.viewer.field.side(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "side"
+    case I.Ja{}:
+      "面"
 
 def T.viewer.field.size(l: I.Loc) -> String:
   match l:
@@ -8823,6 +8865,13 @@ def T.viewer.mention(l: I.Loc) -> String:
     case I.Ja{}:
       "チャットで参照"
 
+def T.viewer.mention.short(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Mention"
+    case I.Ja{}:
+      "参照"
+
 def T.viewer.mesh.failed(l: I.Loc) -> String:
   match l:
     case I.En{}:
@@ -8836,6 +8885,13 @@ def T.viewer.orbit.tip(l: I.Loc) -> String:
       "drag to turn · right-drag or two fingers to move · wheel or pinch to zoom · double-click to fit"
     case I.Ja{}:
       "ドラッグで回転・右ドラッグか2本指で移動・ホイールかピンチで拡大縮小・ダブルクリックで全体表示"
+
+def T.viewer.orbit.touch(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "one finger turns · two fingers move, pinch and twist · double-tap to fit · tap a part to inspect"
+    case I.Ja{}:
+      "1本指で回転・2本指で移動、ピンチ、ひねり・ダブルタップで全体表示・部品をタップで詳細"
 
 def T.viewer.page.empty(l: I.Loc) -> String:
   match l:
@@ -8857,6 +8913,13 @@ def T.viewer.pan.tip(l: I.Loc) -> String:
       "drag or two fingers to pan · wheel or pinch to zoom · double-click to fit"
     case I.Ja{}:
       "ドラッグか2本指で移動・ホイールかピンチで拡大縮小・ダブルクリックで全体表示"
+
+def T.viewer.pan.touch(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "one finger pans · pinch to zoom · double-tap to zoom in or fit · tap to inspect · hold to comment"
+    case I.Ja{}:
+      "1本指で移動・ピンチで拡大縮小・ダブルタップで拡大か全体表示・タップで詳細・長押しでコメント"
 
 def T.viewer.parts3d.tip(l: I.Loc) -> String:
   match l:
@@ -9067,6 +9130,20 @@ def T.viewer.sheet.top(l: I.Loc) -> String:
       "Top sheet"
     case I.Ja{}:
       "最上位シート"
+
+def T.viewer.side.bottom(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "bottom"
+    case I.Ja{}:
+      "裏面"
+
+def T.viewer.side.top(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "top"
+    case I.Ja{}:
+      "表面"
 
 def T.viewer.solid(l: I.Loc) -> String:
   match l:

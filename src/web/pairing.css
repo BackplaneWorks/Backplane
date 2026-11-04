@@ -20,6 +20,8 @@ body.pairing-pending #root { visibility: hidden; }
 .pairing-method[hidden], .pairing-file { display: none; }
 .pairing-status { margin: 12px 0; color: var(--dim); }
 .pairing-status:empty { display: none; }
+/* (a phone shows it between a pairing link's Connect and the other ways in) */
+.pairing-or { display: none; }
 .pairing-status.bad { color: var(--bad); }
 .pairing-code { font: 700 32px var(--mono); letter-spacing: .12em; color: var(--text); }
 /* QR modules require a light quiet zone in either theme, independent of UI
@@ -28,3 +30,16 @@ body.pairing-pending #root { visibility: hidden; }
 .pairing-device { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .pairing-camera { display: block; width: 100%; max-height: 320px; object-fit: contain; }
 .pairing-invitation:not(:empty) { padding: 0 16px 16px; margin: 16px 0; border: 1px solid var(--line); background: var(--panel); }
+/* the QR scanner (pairing-scanner.js): the rear camera full screen, a
+   square to aim with, Close and Torch at the top in reach of a thumb's
+   stretch and clear of the notch, what to do at the bottom over the home bar */
+.pairing-scanner { position: fixed; inset: 0; z-index: 12010; overflow: hidden; background: #000; color: #fff; font: 16px/1.4 var(--sans); }
+.pairing-scanner-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pairing-scanner-frame { position: absolute; left: 50%; top: 50%; width: min(72vw, 60vh, 320px); aspect-ratio: 1; transform: translate(-50%, -50%); border: 3px solid #fff; border-radius: 18px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45); pointer-events: none; }
+.pairing-scanner-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 12px; padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 12px calc(12px + env(safe-area-inset-left)); }
+.pairing-scanner-bar button { min-width: 44px; min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; background: rgba(0, 0, 0, .6); color: #fff; font: 600 16px var(--sans); }
+.pairing-scanner-bar button[hidden] { display: none; }
+.pairing-scanner-torch.on { background: #fff; color: #000; }
+.pairing-scanner-say { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 32px calc(20px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left)); text-align: center; background: linear-gradient(transparent, rgba(0, 0, 0, .75)); }
+/* no camera on this page (plain http://, an old browser): what to do instead */
+.pairing-nocam { margin: 12px 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--bg); color: var(--text); }

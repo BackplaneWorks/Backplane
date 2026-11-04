@@ -1,4 +1,5 @@
 import { captureApp } from './improvements-capture.js';
+import { softFocus } from './touch-focus.js';
 import { ImprovementsStore } from './improvements-store.js';
 import { ImprovementsFlow, improvementThread } from './improvements-flow.js';
 import { backplaneProject } from './improvements-context.js';
@@ -155,7 +156,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     if (url) URL.revokeObjectURL(url);url = draft?.image ? URL.createObjectURL(draft.image) : null;
     preview.hidden = !url;if (url) preview.src = url;else preview.removeAttribute('src');controls();place();
   }
-  function show() { popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();showPreview();input.focus({ preventScroll: true }); }
+  function show() { popup.hidden = false;popup.setAttribute('aria-modal', 'true');overlayChanged();showPreview();softFocus(input, { preventScroll: true }); }
   function hide() {
     openEpoch++;operation++;captureController?.abort();recordingAbort?.abort();recording?.cancel();recordingBar.hidden = true;recordingActive = recordingPicking = false;videoPreview.pause?.();capturing = false;opening = false;
     popup.hidden = true;popup.removeAttribute('aria-modal');overlayChanged();
@@ -462,7 +463,7 @@ export function installImprovements({ rpc, context, identity, ready, select, bef
     }
     if (capturing && e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();e.stopImmediatePropagation();operation++;captureController?.abort();capturing=false;
-      popup.hidden=false;popup.setAttribute('aria-modal','true');overlayChanged();showPreview();input.focus();
+      popup.hidden=false;popup.setAttribute('aria-modal','true');overlayChanged();showPreview();softFocus(input);
       announce('Capture canceled. Your draft and previous image are kept.');return;
     }
     if (!popup.hidden) {

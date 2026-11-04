@@ -49,12 +49,14 @@ def Sock.send_preview(sock: Socket, path: String, ctype: String, range: String) 
   import "./effects/host.js"
 
 # Static route policy is chosen in Bend; the effect owns only opening the
-# preferred gzip/plain file and streaming its HTTP bytes. No payload cache.
+# preferred brotli/gzip/plain file and streaming its HTTP bytes. No payload cache.
 type StaticFile is Data:
   StaticFile{path: String, ctype: String, cache: String, extra: String, coding: U32, piece: U32}
 
-def Static.coding(gzip: Bool) -> U32:
-  Bool.pick(U32, gzip, 1, 0)
+# what the browser's Accept-Encoding takes: 2 brotli and gzip, 1 gzip, 0
+# neither (browsers send br only over HTTPS, always beside gzip)
+def Static.coding(+accept: String) -> U32:
+  Bool.pick(U32, String.contains(accept, "gzip"), Bool.pick(U32, String.contains(accept, "br"), 2, 1), 0)
 
 def Static.piece() -> U32:
   65536
@@ -220,6 +222,11 @@ def FS.mkdtemp(prefix: String) -> IO(Result<&1, &1, U32 & String, String>):
   import "./effects/host.js"
 
 def FS.rename(from: String, to: String) -> IO(Result<&1, &1, U32 & String, Unit>):
+  import "./effects/host.js"
+
+# Replace a UTF-8 text file through a private same-directory temporary file.
+# Text and paths never pass through a shell or a child argument parser.
+def FS.write_atomic(path: String, text: String) -> IO(Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
 def FS.remove(path: String) -> IO(Result<&1, &1, U32 & String, Unit>):

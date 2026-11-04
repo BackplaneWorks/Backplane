@@ -22,7 +22,7 @@ struct BackplaneApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
+            AppRoot(model: model)
                 .sheet(isPresented: $model.showingDevices) { if let link = model.devicesLink { DeviceManagerView(link: link) } }
                 .tint(BackplaneDesign.accent)
                 .accentColor(BackplaneDesign.accent)
@@ -58,8 +58,9 @@ struct BackplaneApp: App {
                     }
                 }
                 #endif
-                // this device's appearance (App settings); the hub's theme is not read
-                .preferredColorScheme(model.settings.colorScheme)
+                // this device's appearance (App settings); the hub's theme is not
+                // read, except by the web screen, whose page says its theme
+                .preferredColorScheme(model.webShown ? model.web.theme ?? model.settings.colorScheme : model.settings.colorScheme)
                 // Canonical references and legacy notification links share message-tap routing.
                 .onOpenURL { model.open($0) }
                 .onAppear { delegate.model = model }

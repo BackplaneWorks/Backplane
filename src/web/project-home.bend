@@ -3,6 +3,8 @@ import ../core/json.bend as J
 import ../core/project-home.bend as PH
 import ../core/client.bend as U
 import ../core/model.bend as M
+import ../core/subthreads.bend as ST
+import ../core/subs.bend as SB
 import ../core/signal.bend as SG
 import ../core/codec.bend as C
 import ../core/images.bend as IM
@@ -90,29 +92,43 @@ def HomeView.panels(+u: U.Ui, ps: List<&2, PH.Panel>, +c: J.Json, +embedded: Boo
     case PH.Panel{+k, p, t, s} <> rest:
       List.append(&2, D.Node, HomeView.panel.keep(u, Bool.or(String.eq(k, "intent"), Bool.and(embedded, Bool.or(String.eq(k, "board"), String.eq(k, "schematic")))), PH.Panel{k, p, t, s}, c), HomeView.panels(u, rest, c, embedded))
 
-def HomeView.thread(+u: U.Ui, +t: M.Thread) -> D.Node:
+# One hierarchy for web/desktop and the phones' native home cards.
+# The branch marker is text too, so native renderers retain the relationship.
+def HomeView.thread.at(+u: U.Ui, +t: M.Thread, +depth: Nat) -> D.Node:
   match t:
     case M.Thread{+id, _, title, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      D.El{"div", id, [D.At{"class", "home-thread"}], [HomeView.name(u, "thread", id, title), D.Dom.button("home-thread-state", "select", id, "Open thread", SG.Signal.display.name(U.Side.signal(u, t), U.Ui.state(u), id) ++ " →")]}
+      +indent = Nat.min(depth, 4n)
+      +badge = SB.Subs.badge(SB.Subs.count(U.Ui.state(u), id))
+      D.El{"div", id, [D.At{"class", "home-thread"}, D.At{"data-depth", Nat.show(depth)}, D.At{"style", "padding-inline-start:" ++ Nat.show(Nat.mul(indent, 16n)) ++ "px"}],
+        [HomeView.name(u, "thread", id, String.repeat("↳ ", indent) ++ title),
+         D.Dom.button("home-thread-state", "select", id, "Open thread", SG.Signal.display.name(U.Side.signal(u, t), U.Ui.state(u), id) ++ Bool.pick(String, String.is_empty(badge), "", " · " ++ badge) ++ " →")]}
 
-def HomeView.thread.keep(keep: Bool, +u: U.Ui, t: M.Thread, rest: List<&2, D.Node>) -> List<&2, D.Node>:
-  match keep:
-    case True{}: HomeView.thread(u, t) <> rest
-    case False{}: rest
+def HomeView.thread(+u: U.Ui, t: M.Thread) -> D.Node:
+  HomeView.thread.at(u, t, 0n)
 
 def HomeView.thread.live(t: M.Thread, +project: String) -> Bool:
   match t:
     case M.Thread{_, p, _, _, _, _, _, archived, _, _, _, _, _, _, _, _, _, _, _, _, deleted}:
       Bool.and(String.eq(p, project), Bool.not(Bool.or(archived, deleted)))
 
-def HomeView.threads(+u: U.Ui, ts: List<&2, M.Thread>, +project: String, +skip: Nat, +left: Nat) -> List<&2, D.Node>:
-  match ts skip left:
-    case _ _ 0n: Nil{}
-    case Nil{} _ _: Nil{}
-    case +t <> rest _ 1n+n:
-      +live = HomeView.thread.live(t, project)
-      HomeView.thread.keep(Bool.and(live, Nat.is_eq(skip, 0n)), u, t,
-        HomeView.threads(u, rest, project, Nat.sub(skip, Bool.pick(Nat, live, 1n, 0n)), Bool.pick(Nat, Bool.and(live, Nat.is_eq(skip, 0n)), n, 1n+n)))
+def HomeView.trows(+u: U.Ui, rows: List<&2, ST.TRow>) -> List<&2, D.Node>:
+  match rows:
+    case Nil{}: Nil{}
+    case ST.TRow{t, depth, _, _} <> rest:
+      HomeView.thread.at(u, t, depth) <> HomeView.trows(u, rest)
+
+# Rank roots as before, then traverse each subtree once. Home shows every
+# child even when its sidebar branch is collapsed. Page the flattened rows.
+def HomeView.thread.rows(+s: M.State, ts: List<&2, M.Thread>) -> List<&2, ST.TRow>:
+  ST.Tree.rows.k(ST.Tree.roots.go(ts, s, Nil{}), s, "", True{})
+
+def HomeView.thread.project(ts: List<&2, M.Thread>, +project: String) -> List<&2, M.Thread>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> rest: ST.Tree.roots.add(Bool.not(HomeView.thread.live(t, project)), t, HomeView.thread.project(rest, project))
+
+def HomeView.threads(+u: U.Ui, ts: List<&2, M.Thread>, +project: String, skip: Nat, left: Nat) -> List<&2, D.Node>:
+  HomeView.trows(u, List.take(&2, ST.TRow, List.drop(&2, ST.TRow, HomeView.thread.rows(U.Ui.state(u), HomeView.thread.project(ts, project)), skip), left))
 
 # Rank with the same urgency/pinning/recency decisions as the sidebar.
 def HomeView.ordered(rows: List<&2, U.ARow>) -> List<&2, M.Thread>:

@@ -78,7 +78,7 @@ test('actual held/wait markers reach the dataset and unchanged renders do not re
  const data={},writes=[];const ctx={document:{documentElement:{dataset:new Proxy(data,{set:(o,k,v)=>{writes.push(k);o[k]=v;return true;}})}},
   frontendNode:null,transitionNode:{},transitionFor:'thread:A',focusedNode:null,canonicalBoot:false,heldAt:5000,QUIET_MS:1200,
   performance:{now:()=>5000},currentSession:()=>({sel:'B'}),presentationTarget:s=>({kind:'thread',id:s.sel}),targetKey:t=>t.kind+':'+t.id};
- const a=source.indexOf('function htmlData('),b=source.indexOf('function render()',a),c=source.indexOf('  const heldFor =',b),d=source.indexOf('  retireAllowance(',c);assert(a>0&&b>a&&c>b&&d>c);
+ const a=source.indexOf('function htmlData('),b=source.indexOf('function render()',a),c=source.indexOf('  const heldFor =',b),d=source.indexOf('  trace("dom",',c);assert(a>0&&b>a&&c>b&&d>c);
  vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);const mark=()=>vm.runInContext('{'+source.slice(c,d)+'}',ctx);
  mark();assert.deepEqual(data,{backplaneHeld:'true',backplaneWait:'false'});mark();assert.equal(writes.length,2);
  ctx.performance.now=()=>6200;mark();assert.equal(data.backplaneHeld,'quiet');
