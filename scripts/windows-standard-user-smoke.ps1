@@ -1,20 +1,21 @@
-param([string]$PackageUrl='', [string]$PackageSHA256='', [string]$ExpectedVersion='')
+param([string]$PackageUrl='', [string]$PackagePath='', [string]$PackageSHA256='', [string]$ExpectedVersion='')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $out = Join-Path $root 'build\windows-standard-user'
 New-Item -ItemType Directory -Force $out | Out-Null
 $exe = ''
-if ($PackageUrl) {
-    if ($PackageUrl -notmatch '^https://' -or $PackageSHA256 -notmatch '^[a-f0-9]{64}$' -or !$ExpectedVersion) { throw 'Supply HTTPS package URL, SHA256 and expected version' }
+if ($PackageUrl -or $PackagePath) {
+    if (($PackageUrl -and $PackageUrl -notmatch '^https://') -or ($PackageUrl -and $PackagePath) -or $PackageSHA256 -notmatch '^[a-f0-9]{64}$' -or !$ExpectedVersion) { throw 'Supply one HTTPS URL or local ZIP, SHA256 and expected version' }
     $zip = Join-Path $out 'package.zip'
-    Invoke-WebRequest $PackageUrl -OutFile $zip
+    if ($PackageUrl) { Invoke-WebRequest $PackageUrl -OutFile $zip }
+    else { Copy-Item (Resolve-Path $PackagePath).Path $zip }
     if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $PackageSHA256) { throw 'Package SHA256 mismatch' }
     $package = Join-Path $out 'package'
     Expand-Archive $zip -DestinationPath $package
     $found = @(Get-ChildItem $package -Recurse -File -Filter Backplane.exe)
     if ($found.Count -ne 1) { throw 'Expected exactly one packaged Backplane.exe' }
     $exe = $found[0].FullName
-    @{url=$PackageUrl;sha256=$PackageSHA256;version=$ExpectedVersion} | ConvertTo-Json | Set-Content (Join-Path $out 'package.json')
+    @{url=$PackageUrl;sourcePath=$PackagePath;sha256=$PackageSHA256;version=$ExpectedVersion} | ConvertTo-Json | Set-Content (Join-Path $out 'package.json')
 }
 # This bootstrap runs on a disposable hosted runner. Only it is elevated;
 # every assertion, native filesystem effect and Electron process runs below
