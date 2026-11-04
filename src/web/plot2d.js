@@ -1164,11 +1164,14 @@ let probed = null;
 const left = new Map();
 
 // On a touch screen a tap also shows what lies under the finger in a card
-// at the foot of the screen, as the phone app's inspector: its kind, then
-// its fields (net, ref, value, pin...), and "Mention in chat", which puts
-// it in the thread's draft (host.js, onMention). It lives outside the
-// hub's tree (on <body>), so a render never takes it; leaving the view,
-// clearing the probe or a double tap closes it.
+// at the foot of the screen, as the phone app's inspector, kept small so
+// the drawing stays in sight: a line naming it (its ref and value, else
+// its kind), a line of its other fields (the footprint first, cut short),
+// and "Mention", which puts it in the thread's draft (host.js, onMention),
+// as chips beside them; a tap on the lines opens all its fields (net, ref,
+// value, pin...) under them. It lives outside the hub's tree (on <body>),
+// so a render never takes it; leaving the view, clearing the probe or a
+// double tap closes it.
 let card = null;
 let mentioned = null;
 // (the card is the phone arrangement's: phone-shell.js's html.phone; a
@@ -1176,6 +1179,7 @@ let mentioned = null;
 const phone = () => document.documentElement.classList.contains("phone");
 const lang = () => document.documentElement.lang;
 const cap = (t) => t ? t[0].toUpperCase() + t.slice(1) : t;
+const short = (k, v) => k === "footprint" ? String(v).split(":").pop() : String(v);
 function inspectCard(view, pick, src = null, tapped = null) {
   const info = pick ? (typeof pick.info === "object" && pick.info ? pick.info : P.parseInfo(pick.text || pick.info || "")) : null;
   if (!info || !info.kind) { card?.el.remove(); card = null; return; }
@@ -1184,39 +1188,56 @@ function inspectCard(view, pick, src = null, tapped = null) {
   el.className = "ph-inspect";
   el.setAttribute("role", "dialog");
   el.setAttribute("aria-label", "What you tapped");
-  const head = document.createElement("div"), title = document.createElement("strong"), close = document.createElement("button");
+  const head = document.createElement("div"), sum = document.createElement("button"), close = document.createElement("button");
   head.className = "ph-inspect-head";
   // (a footprint is named as the part it is: "Part U1", as a 3D tap's;
   // the words are the catalog's, the page's language)
   const word = info.kind === "footprint" && info.kv.get("ref") ? "part" : info.kind, arg = word === "part" && !info.arg ? info.kv.get("ref") : info.arg;
-  title.textContent = cap(App.viewer_item(lang(), word, arg || "") || (arg ? `${word} ${arg}` : word));
+  const title = cap(App.viewer_item(lang(), word, arg || "") || (arg ? `${word} ${arg}` : word));
+  // the first line: a symbol or part by its ref ("U1 · nRF52832"), else
+  // its kind ("Pad 3"); the second, the other fields' values
+  const ref = info.kv.get("ref"), named = ref && (word === "part" || word === "symbol"), value = info.kv.get("value") || "";
+  const l1 = document.createElement("span"), name = document.createElement("strong"), val = document.createElement("span"), l2 = document.createElement("span");
+  l1.className = "ph-inspect-l1"; val.className = "ph-inspect-val"; l2.className = "ph-inspect-l2";
+  name.textContent = named ? ref : title;
+  const line = (v) => { val.textContent = v ? ` · ${v}` : ""; };
+  line(value);
+  const rest = [...info.kv].filter(([k, v]) => v && k !== "g" && k !== "value" && !(named && k === "ref"));
+  rest.sort(([a], [b]) => (b === "footprint") - (a === "footprint"));
+  l2.textContent = rest.map(([k, v]) => short(k, v)).join(" · ");
+  l1.append(name, val);
+  sum.type = "button"; sum.className = "ph-inspect-sum"; sum.title = title; sum.append(l1, l2);
+  sum.setAttribute("aria-expanded", "false");
+  sum.addEventListener("click", () => { const open = !el.classList.contains("open"); el.classList.toggle("open", open); sum.setAttribute("aria-expanded", String(open)); });
   close.type = "button"; close.className = "ph-inspect-close"; close.textContent = "✕"; close.setAttribute("aria-label", "Close");
   close.addEventListener("click", () => { inspectCard(view, null); if (view?.probe) view.publishProbe(""); else if (!view) probed?.(""); });
-  head.append(title, close);
-  const dl = document.createElement("dl");
-  for (const [k, v] of info.kv) {
-    if (k === "g" || !v) continue;
-    const dt = document.createElement("dt"), dd = document.createElement("dd");
-    // (a footprint without its library: "sim72", not "footprints:sim72")
-    dt.textContent = cap(App.viewer_field(lang(), k) || k); dd.textContent = k === "footprint" ? v.split(":").pop() : v;
-    dl.append(dt, dd);
-  }
-  const acts = document.createElement("div"), mention = document.createElement("button");
-  acts.className = "ph-inspect-acts";
-  mention.type = "button"; mention.textContent = App.viewer_mention(lang());
-  mention.addEventListener("click", () => { inspectCard(view, null); mentioned?.(`[${raw}]`); });
-  acts.append(mention);
+  const chip = (text, label, fn) => {
+    const b = document.createElement("button"), t = document.createElement("span");
+    b.type = "button"; b.className = "ph-inspect-chip"; t.textContent = text; b.append(t);
+    if (label) b.setAttribute("aria-label", label);
+    b.addEventListener("click", fn);
+    return b;
+  };
+  const chips = [chip(App.viewer_mention_short(lang()), App.viewer_mention(lang()), () => { inspectCard(view, null); mentioned?.(`[${raw}]`); })];
   // a part or net on the board shows on the schematic too, and back: the
   // probe stays, so the other view lights it (and says which sheet)
   // (a part tapped in 3D shows on both)
   const others = !view ? (src?.key ? ["board", "schematic"] : []) : view.side === "board" ? ["schematic"] : view.side === "schematic" ? ["board"] : [];
-  if (showing && (!view || P.parseProbe(view.probe).kind) && !document.querySelector("#viewer.split")) for (const other of others) {
-    const go = document.createElement("button");
-    go.type = "button"; go.textContent = `${App.viewer_kind(lang(), other)} →`;
-    go.addEventListener("click", () => { inspectCard(view, null); showing(other); });
-    acts.append(go);
+  if (showing && (!view || P.parseProbe(view.probe).kind) && !document.querySelector("#viewer.split")) for (const other of others)
+    chips.push(chip(`${App.viewer_kind(lang(), other)} →`, "", () => { inspectCard(view, null); showing(other); }));
+  head.append(sum, ...chips, close);
+  // all of its fields, when the lines are tapped open
+  const dl = document.createElement("dl");
+  dl.className = "ph-inspect-all";
+  for (const [k, v] of info.kv) {
+    if (k === "g" || !v) continue;
+    const dt = document.createElement("dt"), dd = document.createElement("dd");
+    // (a footprint without its library: "sim72", not "footprints:sim72")
+    dt.textContent = cap(App.viewer_field(lang(), k) || k); dd.textContent = short(k, v);
+    dl.append(dt, dd);
   }
-  el.replaceChildren(head, dl, acts);
+  el.classList.remove("open");
+  el.replaceChildren(head, dl);
   if (!el.isConnected) document.body.append(el);
   card = { el, view };
   // what was tapped stays in sight: the drawing moves up out from under
@@ -1233,16 +1254,20 @@ function inspectCard(view, pick, src = null, tapped = null) {
   }, 340);
   // a part on a board: its saved component's fields too (the 3D
   // inspector's data, host.js's onDetails), once they come
-  const ref = info.kv.get("ref"), mine = card, at = view ? { scope: view.canvas.dataset.scope || "", key: view.key } : src;
+  const mine = card, at = view ? { scope: view.canvas.dataset.scope || "", key: view.key } : src;
   if (at?.key?.startsWith("0|") && ref && detailsFor) Promise.resolve(detailsFor(at.scope, at.key, ref)).then((c) => {
     if (card !== mine || !c) return;
     const shown = new Set([...info.kv.keys()]);
+    if (!value && c.value) line(c.value);
+    const more = [];
     for (const [k, v] of [["value", c.value], ["mpn", c.mpn], ["footprint", String(c.footprint || "").split(":").pop()], ["side", c.layer === "B.Cu" ? cap(App.viewer_field(lang(), "@bottom") || "bottom") : c.layer ? cap(App.viewer_field(lang(), "@top") || "top") : ""], ["pads", c.pads?.length ? String(c.pads.length) : ""]]) {
       if (!v || shown.has(k)) continue;
       const dt = document.createElement("dt"), dd = document.createElement("dd");
       dt.textContent = k === "mpn" ? "MPN" : cap(App.viewer_field(lang(), k) || k); dd.textContent = v;
       dl.append(dt, dd);
+      if (k === "footprint" || k === "mpn") more.push(v);
     }
+    if (more.length) l2.textContent = [...more, l2.textContent].filter(Boolean).join(" · ");
   }).catch(() => {});
 }
 

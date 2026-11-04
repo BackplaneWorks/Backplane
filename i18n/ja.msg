@@ -543,6 +543,7 @@ settings.channel.note = 安定版はリリースのみ、ナイトリーは日�
 settings.channel.nightly = ナイトリー
 settings.channel.stable = 安定版
 viewer.mention = チャットで参照
+viewer.mention.short = 参照
 viewer.sheet.open = シートを開く
 viewer.help.scroll = ホイールでスクロール
 viewer.help.browser = このスレッドのブラウザをライブ表示
