@@ -711,6 +711,11 @@ struct UsageDay: Codable, Hashable {
     let fraction: Int
 }
 
+struct InstallProgress: Codable, Hashable {
+    let busy, known: Bool
+    let fraction: Int
+}
+
 struct SetRow: Codable, Hashable {
     let label, note: String
     let buttons: [SetButton]
@@ -719,6 +724,7 @@ struct SetRow: Codable, Hashable {
     let qr: [String]?
     let qrnote: String?
     var chart: [UsageDay]? = nil
+    var installProgress: InstallProgress? = nil
     // about this device, not the hub: App settings has it, the hub's page skips it
     let local: Bool?
     // notif-policy's "Notify me for": drawn in App settings' Notifications section, not on the hub's page

@@ -192,12 +192,13 @@ data class SetButton(val label: String, val action: String, val value: String, v
 data class SetField(val name: String, val hint: String, val secret: Boolean, val value: String, val vault: Boolean = false)
 // qr: the pairing code's rows ('1' dark) while it is shown
 data class UsageDay(val date: String, val reading: String, val known: Boolean, val fraction: Int)
+data class InstallProgress(val busy: Boolean, val known: Boolean, val fraction: Int)
 data class SetRow(val label: String, val note: String, val buttons: List<SetButton>, val fields: List<SetField> = emptyList(),
                   val qr: List<String> = emptyList(), val qrnote: String = "",
                   // about this device, not the hub: App settings has it, the hub's page skips it
                   val local: Boolean = false,
                   // notif-policy's "Notify me for": drawn in App settings' Notifications section, not on the hub's page
-                  val notify: Boolean = false, val chart: List<UsageDay> = emptyList())
+                  val notify: Boolean = false, val chart: List<UsageDay> = emptyList(), val installProgress: InstallProgress? = null)
 data class Settings(val rows: List<SetRow>)
 
 // the tab bar's badges and every bot's routines (src/mobile/tabs.bend)
@@ -922,7 +923,8 @@ fun parseSettings(st: JSONObject) = Settings(st.optJSONArray("rows").map { r ->
         r.optJSONArray("buttons").map { SetButton(it.optString("label"), it.optString("action"), it.optString("value"), it.optBoolean("on")) },
         r.optJSONArray("fields").map { SetField(it.optString("name"), it.optString("hint"), it.optBoolean("secret"), it.optString("value"), it.optBoolean("vault")) },
         r.optJSONArray("qr")?.let { q -> List(q.length()) { q.optString(it) } } ?: emptyList(), r.optString("qrnote"), r.optBoolean("local"), r.optBoolean("notify"),
-        r.optJSONArray("chart").map { UsageDay(it.optString("date"), it.optString("reading"), it.optBoolean("known"), it.optInt("fraction")) })
+        r.optJSONArray("chart").map { UsageDay(it.optString("date"), it.optString("reading"), it.optBoolean("known"), it.optInt("fraction")) },
+        r.optJSONObject("installProgress")?.let { InstallProgress(it.optBoolean("busy"), it.optBoolean("known"), it.optInt("fraction")) })
 })
 
 // settings written back as the JSON the screen carries them in (the hub page's cache)
@@ -931,6 +933,7 @@ fun settingsJson(st: Settings): JSONObject = JSONObject().put("rows", JSONArray(
         .put("buttons", JSONArray(r.buttons.map { JSONObject().put("label", it.label).put("action", it.action).put("value", it.value).put("on", it.on) }))
         .put("fields", JSONArray(r.fields.map { JSONObject().put("name", it.name).put("hint", it.hint).put("secret", it.secret).put("value", it.value).put("vault", it.vault) }))
         .put("chart", JSONArray(r.chart.map { JSONObject().put("date", it.date).put("reading", it.reading).put("known", it.known).put("fraction", it.fraction) }))
+        .put("installProgress", r.installProgress?.let { JSONObject().put("busy", it.busy).put("known", it.known).put("fraction", it.fraction) })
         .put("qr", JSONArray(r.qr))
 }))
 
