@@ -10,6 +10,12 @@ import ../core/json.bend as J
 # strings in SideIndex remain shared canonical data under its existing cap.
 # The bounded prefix is accounting only: an accepted item is wholly present;
 # oversized inputs use the unchanged fresh projection, never truncated text.
+# Catalogs above eight thousand threads must still be able to reuse a bounded
+# projection. Byte ceilings remain independent and unchanged; excessive keys
+# or values still return the fresh complete projection without retaining it.
+def CacheBudget.entries() -> Nat:
+  16384n
+
 def CacheBudget.item(s: String) -> Nat:
   J.Json.bytes.str(String.take(s, 1025n), 0n)
 
@@ -50,7 +56,7 @@ def SignalCache.bounded(c: SignalCache) -> Bool:
     case SignalCache{_, _, _, bounded}: bounded
 
 def SignalCache.build(epoch: String, seq: Nat, +signals: Map<&2, Nat>) -> SignalCache:
-  SignalCache{epoch, seq, signals, CacheBudget.scalars(Map.to_list(&2, Nat, signals), 8192n, 524288n, True{})}
+  SignalCache{epoch, seq, signals, CacheBudget.scalars(Map.to_list(&2, Nat, signals), CacheBudget.entries(), 524288n, True{})}
 
 def SignalCache.hit(c: SignalCache, +epoch: String, +seq: Nat) -> Bool:
   match c:
