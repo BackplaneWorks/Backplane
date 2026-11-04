@@ -2102,7 +2102,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .thread-content > .subs.dock .subs-body { border-top: 0; }
 @media (max-width: 1300px) { .topbar .kv.branch { display: none; } }
 @media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; container-type: normal; } .topbar .cmd-long { display: none; } .topbar .cmd-short { display: inline; } }
-@media (max-width: 960px) { .topbar .name, .topbar .kv.changes { display: none; } }
+@media (max-width: 960px) { .topbar .name { display: none; } }
 /* folded under the top bar: a 44 px strip (view.bend's View.strip), the
    button that unfolds it over the projects' badges, each in its colour */
 .side-strip { display: none; }
@@ -2987,7 +2987,7 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
    desktop window are unchanged. */
 /* the thread's cells in their row under the header (the shell's
    .ph-cells): its state as a dot and a word with Stop or Retry, then its
-   subagents, to-do list and design changes as chips that open them */
+   subagents and to-do list as chips that open them */
 .app.phone > .ph-cells { min-height: 44px; gap: 6px; }
 .app.phone > .ph-cells .kv { display: inline-flex; align-items: center; gap: 6px; width: auto; flex: none; min-height: 36px; margin: 0; padding: 0 10px; border: 1px solid var(--line); background: var(--bg); color: var(--dim); font-size: calc(13px * var(--text-scale, 100) / 100); white-space: nowrap; }
 .app.phone > .ph-cells .kv.state { border: 0; background: none; padding: 0 4px 0 2px; }
