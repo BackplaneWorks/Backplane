@@ -21,7 +21,7 @@
 // drawn over the rest, which dims.
 
 import App from "./app.bend";
-import { wheelKind } from "./solid.js";
+import { wheelKind, viewDpr, coarse } from "./solid.js";
 import * as P from "./probe.js";
 
 // the page's own font (style.css's), for what is written on the canvas
@@ -457,10 +457,23 @@ class View {
       if (tap) {
         const s = this.sheetAt(e.clientX, e.clientY);
         if (s && sheeted) sheeted(s.value);
-        else {
-          // Cross-probe (main) and saved-component inspection (viewer lane)
-          // both follow the same click.
-          if (e.pointerType !== "mouse") { this.pick(e.clientX, e.clientY);inspect(e); }
+        else if (e.pointerType !== "mouse") {
+          // A second tap close by soon after is a double tap: it gives back
+          // the probe and part the first tap took, then zooms (doubleTap).
+          const last = this.lastTap;
+          if (last && e.timeStamp - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 32) {
+            this.lastTap = null;
+            this.touchDouble = e.timeStamp;
+            if (this.probe !== last.probe) this.publishProbe(last.probe);
+            const record = componentSources.get(this.key);
+            if (record && record.selected !== last.part) { selectComponent(last.part, this.key); record.onSelect?.(last.part); }
+            this.doubleTap(e.clientX, e.clientY);
+          } else {
+            this.lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY, probe: this.probe, part: componentSources.get(this.key)?.selected || "" };
+            // Cross-probe (main) and saved-component inspection (viewer lane)
+            // both follow the same click.
+            this.pick(e.clientX, e.clientY);inspect(e);
+          }
         }
       }
       this.pinch = null;
@@ -505,7 +518,9 @@ class View {
       this.follow = false;
       this.later();
     }, { passive: false });
-    on("dblclick", () => {
+    on("dblclick", (e) => {
+      // a touch double tap was answered on its second tap (up)
+      if (this.touchDouble !== undefined && e.timeStamp - this.touchDouble < 600) return;
       this.gesture++;
       if (this.mouseTap && this.beforeClick !== undefined) this.publishProbe(this.beforeClick);
       this.beforeClick = undefined;
@@ -669,6 +684,21 @@ class View {
     this.touched = true;
   }
 
+  // a touch double tap: the whole plot in view zooms in about the finger,
+  // as a map does; zoomed in, it fits the whole plot again
+  doubleTap(cx, cy) {
+    if (!this.plot?.box) return;
+    if (this.touched) { this.fit(); return; }
+    this.gesture++;
+    const b = this.canvas.getBoundingClientRect(), mx = cx - b.left, my = cy - b.top, f = this.zoomFactor(2.5);
+    this.ox = mx - (mx - this.ox) * f; this.oy = my - (my - this.oy) * f;
+    this.scale *= f;
+    this.touched = true;
+    this.follow = false;
+    this.rest = true;
+    this.later();
+  }
+
   // the whole plot in view, centred, with a margin
   zoomFactor(factor) {
     const box = this.plot?.box;
@@ -743,7 +773,7 @@ class View {
 
   draw() {
     this.pins();
-    const c = this.canvas, dpr = window.devicePixelRatio || 1;
+    const c = this.canvas, dpr = viewDpr();
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const g = c.getContext("2d");
@@ -786,8 +816,9 @@ class View {
     }
     if (this.rest) this.moving = false;
     if (b && this.moving) {
-      const f = this.scale / b.scale;
-      g.setTransform(f, 0, 0, f, this.ox * dpr - f * (b.ox * dpr + b.m), this.oy * dpr - f * (b.oy * dpr + b.m));
+      // (the bitmap may hold fewer pixels per CSS pixel than the page: bake)
+      const f = this.scale / b.scale, k = f * dpr / b.dpr;
+      g.setTransform(k, 0, 0, k, dpr * (this.ox - f * (b.ox + b.m / b.dpr)), dpr * (this.oy - f * (b.oy + b.m / b.dpr)));
       g.drawImage(b.canvas, 0, 0);
     } else {
       const t = performance.now();
@@ -821,19 +852,21 @@ class View {
 
   // the layers at the current view into the bitmap, kept for the next frames
   // unless something is still fading in (then the next frame draws again)
+  // On a touch screen a board whose rested frame took long to paint gets a
+  // bitmap at half the page's pixels: a moving view is blurred a moment, and the idle bake,
+  // which fills several screens' worth, no longer blocks a phone for seconds.
   bake(p, look, w, h, dpr) {
-    const m = Math.round(256 * dpr);
-    const b = this.cache && this.cache.canvas.width === w + 2 * m && this.cache.canvas.height === h + 2 * m ? this.cache : { canvas: document.createElement("canvas") };
-    if (b.canvas.width !== w + 2 * m) b.canvas.width = w + 2 * m;
-    if (b.canvas.height !== h + 2 * m) b.canvas.height = h + 2 * m;
+    const bd = coarse?.matches && this.drew > HEAVY_MS && dpr > 1 ? Math.max(1, dpr / 2) : dpr;
+    const m = Math.round(256 * bd), bw = Math.round(w * bd / dpr) + 2 * m, bh = Math.round(h * bd / dpr) + 2 * m;
+    const b = this.cache && this.cache.canvas.width === bw && this.cache.canvas.height === bh ? this.cache : { canvas: document.createElement("canvas") };
+    if (b.canvas.width !== bw) b.canvas.width = bw;
+    if (b.canvas.height !== bh) b.canvas.height = bh;
     const g = b.canvas.getContext("2d");
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = this.bg;
     g.fillRect(0, 0, b.canvas.width, b.canvas.height);
-    const t = performance.now();
-    const fading = this.paint(g, dpr, m);
-    this.drew = performance.now() - t;
-    Object.assign(b, { plot: fading ? null : p, look, scale: this.scale, ox: this.ox, oy: this.oy, m });
+    const fading = this.paint(g, bd, m);
+    Object.assign(b, { plot: fading ? null : p, look, scale: this.scale, ox: this.ox, oy: this.oy, m, dpr: bd });
     this.cache = b;
     this.fading = fading;
     // only while something fades in does it ask for the next frame
@@ -851,7 +884,7 @@ class View {
       // can change Canvas2D's clipping/antialiasing by a few pixels.
       const go = () => {
         if (!this.disposed && !this.fading && !this.moving && !this.probe && !componentSources.get(this.key)?.selected && this.plot && this.plot.chunks) {
-          const dpr = window.devicePixelRatio || 1;
+          const dpr = viewDpr();
           this.bake(this.plot, this.look, this.canvas.width, this.canvas.height, dpr);
         }
       };
@@ -931,6 +964,8 @@ class View {
   }
 }
 
+// a rested frame painted slower than this (ms) makes the bitmap half size
+const HEAVY_MS = 60;
 // how far the rest dims under a probe, and the edge drawn round what it lights
 const DIM = 0.28;
 // fills under this many square micrometres (25 mm²) get the edge

@@ -13,7 +13,8 @@ function harness() {
     views: new Map(), left: new Map(), componentSources: new Map(), sheeted: null, need: () => wait,
     hitComponent: () => ({ id: 'U1' }), selectComponent() {},
     probed: value => probes.push(value), under: (_, x, y) => { hits.push([x,y]);return []; }, partAt: () => null,
-    groupsOf: () => [], P: { pickBoard: () => null, pickSheet: () => null, clickProbe: () => 'r:new' }, wheelKind: () => 'wheel' };
+    groupsOf: () => [], P: { pickBoard: () => null, pickSheet: () => null, clickProbe: () => 'r:new' }, wheelKind: () => 'wheel',
+    window: { devicePixelRatio: 1, matchMedia: () => ({ addEventListener() {}, removeEventListener() {} }) }, coarse: null, viewDpr: () => 1 };
   vm.runInNewContext(source.slice(start, end) + '\n' + park + '\nglobalThis.View = View;', context);
   const view = new context.View(canvas, '');context.views.set(canvas, view);
   view.plot = { chunks: [], box: [0, 0, 100, 100] };view.key = 'board';view.probe = 'r:old';
@@ -100,4 +101,20 @@ test('opening the component inspector keeps the net hit at the clicked board poi
   h.inspect(() => { h.setRect({ left: 100, top: 200 });h.view.ox = 400;h.view.oy = 500; });
   h.click(1);await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(h.hits, [[20,30],[20,30]], 'inspection can resize and move the PCB before its net information arrives');
+});
+
+test('a touch double tap gives back the first tap\'s probe, zooms in, then fits again', async () => {
+  const h = harness();
+  h.view.fit();
+  const fitted = h.view.scale;
+  const tap = (t) => { h.fire('pointerdown', { pointerType: 'touch', timeStamp: t });h.fire('pointerup', { pointerType: 'touch', timeStamp: t + 40 }); };
+  tap(1000);await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.view.probe, 'r:new');
+  tap(1200);
+  assert.equal(h.view.probe, 'r:old');
+  assert(h.view.scale > fitted * 2, 'the second tap zooms in about the finger');
+  h.fire('dblclick', { timeStamp: 1300 });
+  assert(h.view.scale > fitted * 2, "the browser's own dblclick after it does not fit again");
+  tap(3000);tap(3200);
+  assert.equal(h.view.scale, fitted, 'zoomed in, a double tap fits the plot');
 });
