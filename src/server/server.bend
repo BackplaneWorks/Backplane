@@ -16709,7 +16709,7 @@ def Conn.devices.reply(+j: J.Json, s: Socket, +native: Bool, +https: Bool, +op: 
     +credential : String = J.Json.get_str(j, "token", "")
     +link : String = J.Json.get_str(j, "link", "")
     +body : J.Json = Bool.pick(J.Json, String.eq(op, "enroll"),
-      Bool.pick(J.Json, Bool.or(native, Bool.not(String.is_empty(error))), j, J.Json.obj([J.KV{"ok", J.Flag{True{}}}])),
+      Bool.pick(J.Json, Bool.or(native, Bool.not(String.is_empty(error))), j, J.Json.obj([J.KV{"ok", J.Flag{True{}}}, J.KV{"device", J.Str{J.Json.get_str(j, "id", "")}}])),
       Bool.pick(J.Json, String.is_empty(link), j, TV.Obj.put(j, "qr", J.Str{QR.Qr.text(link)})))
     Conn.finish(s, W.Http.response(Bool.pick(String, String.is_empty(error), "200 OK", Bool.pick(String, String.eq(error, "rate_limited"), "429 Too Many Requests", "400 Bad Request")),
       "application/json", U.Utf8.encode(J.Json.show(body)), "Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n" ++

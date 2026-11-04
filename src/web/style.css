@@ -3101,6 +3101,7 @@ html.phone .pairing-card > .pairing-back { order: -1; align-self: flex-start; ma
 html.phone .pairing-card > .pairing-back::before { content: "‹ "; font-size: 22px; }
 html.phone .pairing-device { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: 56px; }
 html.phone .pairing-device > p { flex: 1 1 100%; margin: 0; color: var(--dim); }
+html.phone .pairing-this { padding: 2px 8px; border: 1px solid var(--accent); color: var(--accent); font-size: 13px; }
 
 /* bots and rooms on a phone: the bot's pages as a row of chips that
    scrolls sideways (one tap, always in sight) instead of the Pages menu */
