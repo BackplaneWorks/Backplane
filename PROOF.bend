@@ -16018,6 +16018,8 @@ def Laws.catalog_keys_nonempty(): {==}
 
 def Laws.browser_new_tab_google(input): {==}
 
+def Laws.model_catalog_legacy_passthrough(text, st, thread): {==}
+
 def Laws.cad_install_visible_action(p):
   match p:
     case CADINSTALL.CadIdle{}: {==}
