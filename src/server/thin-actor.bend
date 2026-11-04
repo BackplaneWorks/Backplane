@@ -1142,8 +1142,16 @@ def Actor.view.mark(a: Actor) -> Actor:
 def Actor.view(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
   Actor.view.mark(Actor.reply_if(True{}, a, web, key, o))
 
+# A KiCad install's news (server.bend Install.go: an "update" with "kicad")
+# goes into every connection's Ui, as a legacy client takes it, so the
+# notice a hub-drawn page shows follows (client.bend KN.install); the app's
+# own update notes are left as they were
+def Actor.update(+a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:
+  Actor.reply_if(Bool.not(String.is_empty(J.Json.get_str(o, "kicad", ""))), a, web, key, o)
+
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
+    case "update": Actor.update(a, web, key, o)
     case "term": Actor.terminal(a, web, key, o)
     case "reply": Actor.reply(a, web, key, o)
     case "info": Actor.info(a, o)
