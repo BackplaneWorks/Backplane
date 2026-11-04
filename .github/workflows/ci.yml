@@ -307,6 +307,11 @@ jobs:
           python3 test/tools/service_release_test.py
           python3 scripts/kicad-library-header.py build/kicad-library-test.js
           bun test/tools/kicad_library_test.ts build/kicad-library-test.js
+      - name: KiCad Windows path and installer fixtures
+        run: |
+          python3 test/tools/kicad_install_test.py
+          python3 test/tools/kicad_discovery_test.py
+          python3 test/tools/kicad_open_script_test.py
       # the whole of test/smoke.ts (threads, agents), as scripts/smoke.sh
       # runs it
       - name: Full smoke

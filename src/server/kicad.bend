@@ -141,10 +141,28 @@ def Rt.manifest(+cli: String, text: String) -> Rt:
 def Rt.empty() -> Rt:
   Rt.manifest("", "")
 
+# Native Windows paths are filesystem text, never JSON/string escapes.
+# Normalize separators once, before appending a filename or entering sh.
+def Rt.drive(p: String) -> Bool:
+  String.starts_with(String.drop(p, 1n), ":")
+
+def Rt.native(+p: String) -> Bool:
+  Bool.or(Rt.drive(p), Bool.or(String.starts_with(p, "\\\\"), String.starts_with(p, "//")))
+
+def Rt.normal(+p: String) -> String:
+  Bool.pick(String, Rt.native(p), String.join(String.split(p, '\\'), "/"), p)
+
+def Rt.join(+dir: String, name: String) -> String:
+  dir ++ Bool.pick(String, String.ends_with(dir, "/"), "", "/") ++ name
+
 # A CLI path or runtime root. Missing explicit roots stay explicit.
-def Rt.candidate(+p: String) -> String:
+def Rt.candidate.normal(+p: String) -> String:
   Bool.pick(String, String.ends_with(p, ".app"), p ++ "/Contents/MacOS/kicad-cli",
-    Bool.pick(String, Bool.or(String.ends_with(p, "kicad-cli"), String.ends_with(p, "kicad-cli.exe")), p, p ++ "/bin/kicad-cli"))
+    Bool.pick(String, Bool.or(String.ends_with(p, "kicad-cli"), String.ends_with(p, "kicad-cli.exe")), p,
+      Rt.join(p, Bool.pick(String, Rt.native(p), "bin/kicad-cli.exe", "bin/kicad-cli"))))
+
+def Rt.candidate(p: String) -> String:
+  Rt.candidate.normal(Rt.normal(p))
 
 def Rt.root.stem(+cli: String) -> String:
   Bool.pick(String, String.ends_with(cli, "/Contents/MacOS/kicad-cli"),
@@ -197,11 +215,30 @@ def Rt.env(name: String) -> IO(String):
 type KCandidate is Data:
   KCandidate{path: String, source: String}
 
-def Rt.paths(ps: List<&2, String>) -> List<&2, KCandidate>:
+def Rt.windows.os(os: String) -> Bool:
+  match os:
+    case "windows": True{}
+    case "windows_nt": True{}
+    case "win32": True{}
+    case _: False{}
+
+def Rt.windows(platform: String) -> Bool:
+  Rt.windows.os(KI.Install.os(String.to_lower(Maybe.default(&2, String, List.head(&2, String, String.split(platform, ' ')), ""))))
+
+def Rt.paths.on(ps: List<&2, String>, +win: Bool) -> List<&2, KCandidate>:
   match ps:
     case Nil{}: Nil{}
     case +p <> t:
-      KCandidate{Bool.pick(String, String.is_empty(p), "./kicad-cli", p ++ "/kicad-cli"), "path"} <> Rt.paths(t)
+      KCandidate{Bool.pick(String, String.is_empty(p), Bool.pick(String, win, "./kicad-cli.exe", "./kicad-cli"),
+        Rt.join(Rt.normal(p), Bool.pick(String, win, "kicad-cli.exe", "kicad-cli"))), "path"} <> Rt.paths.on(t, win)
+
+def Rt.paths(ps: List<&2, String>) -> List<&2, KCandidate>:
+  Rt.paths.on(ps, False{})
+
+# The native Bun hub has a semicolon PATH; Cygwin callers can still supply
+# a POSIX colon PATH. A single drive path must not split at its drive colon.
+def Rt.path_dirs(win: Bool, +path: String) -> List<&2, String>:
+  String.split(path, Bool.pick(Char, Bool.and(win, Bool.or(String.contains(path, ";"), Rt.drive(path))), ';', ':'))
 
 # Keep older managed installs discoverable so the health notice offers
 # Update. The pinned install stays first; the rest are newest-first.
@@ -232,7 +269,7 @@ def Rt.candidates(+setting: String, +root: String, +explicit: String, +exe: Stri
     [KCandidate{exe ++ "/kicad/bin/kicad-cli", "bundled"}, KCandidate{data ++ "/kicad/" ++ KI.Install.installed(KI.Install.platform(platform)), "installed"}],
     older,
     Bool.pick(List<&2, KCandidate>, String.starts_with(platform, "Darwin"), [KCandidate{"/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "app"}, KCandidate{user ++ "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "app"}], Nil{}),
-    Rt.paths(String.split(path, ':')), [KCandidate{"/usr/bin/kicad-cli", "system"}, KCandidate{"/usr/local/bin/kicad-cli", "system"}]])
+    Rt.paths.on(Rt.path_dirs(Rt.windows(platform), path), Rt.windows(platform)), [KCandidate{"/usr/bin/kicad-cli", "system"}, KCandidate{"/usr/local/bin/kicad-cli", "system"}]])
 
 def Rt.platform(r: P.Ran) -> String:
   match r:
@@ -243,7 +280,46 @@ def Rt.explicit.k(file: Bool, +p: String) -> String:
   Bool.pick(String, Bool.or(file, String.is_empty(p)), p, Rt.candidate(p))
 
 def Rt.explicit(+p: String) -> IO(String):
-  IO.bind(Bool, String, Io.is_file(p), file => IO.pure(String, Rt.explicit.k(file, p)))
+  IO.bind(Bool, String, Io.is_file(Rt.normal(p)), file => IO.pure(String, Rt.explicit.k(file, Rt.normal(p))))
+
+# Native FS.stat does not apply Cygwin's implicit .exe lookup. Resolve the
+# suffix before choosing/stamping, so older/bundled POSIX candidates work too.
+def Rt.executable.suffix(found: Bool, +p: String) -> String:
+  Bool.pick(String, found, p ++ ".exe", p)
+
+def Rt.executable.found(found: Bool, +p: String) -> IO(String):
+  match found:
+    case True{}: IO.pure(String, p)
+    case False{}: IO.bind(Bool, String, Io.is_file(p ++ ".exe"), f => IO.pure(String, Rt.executable.suffix(f, p)))
+
+def Rt.executable(+p: String) -> IO(String):
+  IO.bind(Bool, String, Io.is_file(p), f => Rt.executable.found(f, p))
+
+def Rt.executables(cs: List<&2, KCandidate>) -> IO(List<&2, KCandidate>):
+  match cs:
+    case Nil{}: IO.pure(List<&2, KCandidate>, Nil{})
+    case KCandidate{p, source} <> t:
+      do IO<List<&2, KCandidate>>:
+        actual : String <- Rt.executable(p)
+        rest : List<&2, KCandidate> <- Rt.executables(t)
+        return KCandidate{actual, source} <> rest
+
+def Rt.windows.versions(ns: List<&2, String>, +base: String) -> List<&2, KCandidate>:
+  match ns:
+    case Nil{}: Nil{}
+    case n <> t:
+      KCandidate{base ++ "/" ++ n ++ "/bin/kicad-cli.exe", "system"} <> Rt.windows.versions(t, base)
+
+def Rt.windows.system(win: Bool) -> IO(List<&2, KCandidate>):
+  match win:
+    case False{}: IO.pure(List<&2, KCandidate>, Nil{})
+    case True{}:
+      do IO<List<&2, KCandidate>>:
+        +pf : String <- Rt.env("ProgramFiles")
+        +base : String = Rt.normal(pf) ++ "/KiCad"
+        ns : List<&2, String> <- Io.names(base)
+        return Bool.pick(List<&2, KCandidate>, String.is_empty(pf), Nil{},
+          KCandidate{base ++ "/bin/kicad-cli.exe", "system"} <> Rt.windows.versions(List.sort(~String, ~Rt.installed.before, ns), base))
 
 def Rt.list(+setting: String, +explicit: String, +exe: String, +data: String) -> IO(List<&2, KCandidate>):
   do IO<List<&2, KCandidate>>:
@@ -253,9 +329,11 @@ def Rt.list(+setting: String, +explicit: String, +exe: String, +data: String) ->
     explicit2 : String <- Rt.explicit(explicit)
     user : String <- Rt.env("HOME")
     path : String <- Rt.env("PATH")
-    os : P.Ran <- P.Proc.run("uname", ["-sm"], "/")
-    installed : List<&2, String> <- Io.names(data ++ "/kicad")
-    return Rt.candidates(setting2, root, explicit2, exe, data, user, path, Rt.platform(os), Rt.installed(installed, data))
+    +os : P.Ran <- P.Proc.run("uname", ["-sm"], "/")
+    installed : List<&2, String> <- Io.names(Rt.normal(data) ++ "/kicad")
+    system : List<&2, KCandidate> <- Rt.windows.system(Rt.windows(Rt.platform(os)))
+    Rt.executables(List.append(&2, KCandidate,
+      Rt.candidates(setting2, root, explicit2, Rt.normal(exe), Rt.normal(data), Rt.normal(user), path, Rt.platform(os), Rt.installed(installed, Rt.normal(data))), system))
 
 def Rt.stamp.k(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> String:
   match r:
