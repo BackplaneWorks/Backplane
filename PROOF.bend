@@ -12367,7 +12367,12 @@ law MailProof.keeps:
 def MailProof.keeps(on, st, s, now, o, to, text, msg):
   match on st:
     case False{} _: {==}
-    case True{} H.Step{cs, os}: MailProof.append_nil(cs)
+    case True{} H.Step{cs, os}:
+      # Step.cat selects its empty-step fast paths before appending changes.
+      match cs os:
+        case Nil{} Nil{}: {==}
+        case Nil{} _ <> _: {==}
+        case h <> t _: MailProof.append_nil(h <> t)
 
 law MailProof.pending_one:
   for missing: Bool
@@ -13905,9 +13910,15 @@ def Laws.locks_after_idle_none(): {==}
 def Laws.locks_idle_text_exact(): {==}
 
 # --- J2: the sign-in wait asked again only when the log moved ---
-def Laws.auth_beat_kept(): {==}
+def Laws.auth_cache_hit(kept, st): {==}
 
-def Laws.auth_beat_asked(): {==}
+def Laws.auth_cache_miss(kept, st): {==}
+
+def Laws.auth_beat_kept():
+  Laws.auth_cache_hit("1 1", M.State.empty())
+
+def Laws.auth_beat_asked():
+  Laws.auth_cache_miss("7 1", M.State.empty())
 
 def Laws.triage_duplicate_delivery_quiet(s, now, bot, conv, text, input): {==}
 
@@ -15875,3 +15886,7 @@ def Laws.review_window_progress(): {==}
 def Laws.review_window_read_failure(value): {==}
 
 def Laws.review_window_cursor_failure(value): {==}
+
+def Laws.auth_cache_key_sequence(st): {==}
+
+def Laws.auth_empty_threads_waits_none(st): {==}

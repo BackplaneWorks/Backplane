@@ -30,9 +30,9 @@ def outs(os: List<&2, D.Out>, +id: String) -> String:
     case D.Out{+i, _, +a, on} <> t:
       outs.pick(String.eq(i, id), a, on, outs(t, id))
 
-def kicad.out.k(m: Maybe<&2, D.Tool>, +id: String) -> String:
+def kicad.out.k(m: Maybe<&2, D.CadTool>, +id: String) -> String:
   match m:
-    case Some{D.Tool{_, _, _, _, os}}:
+    case Some{D.CadTool{_, _, _, _, os}}:
       outs(os, id)
     case None{}:
       "no kicad"
@@ -54,9 +54,9 @@ def chks(cs: List<&2, D.Chk>, +id: String) -> String:
     case D.Chk{+i, _, +a, +r, +p} <> t:
       chks.pick(String.eq(i, id), a, r ++ " " ++ p, chks(t, id))
 
-def chk.k(m: Maybe<&2, D.Tool>, +id: String) -> String:
+def chk.k(m: Maybe<&2, D.CadTool>, +id: String) -> String:
   match m:
-    case Some{D.Tool{_, _, _, cs, _}}:
+    case Some{D.CadTool{_, _, _, cs, _}}:
       chks(cs, id)
     case None{}:
       "no kicad"
@@ -64,9 +64,9 @@ def chk.k(m: Maybe<&2, D.Tool>, +id: String) -> String:
 def chk(+id: String) -> String:
   chk.k(D.Cad.find(D.Cad.tools(), "kicad"), id)
 
-def nout(m: Maybe<&2, D.Tool>) -> String:
+def nout(m: Maybe<&2, D.CadTool>) -> String:
   match m:
-    case Some{D.Tool{_, _, d, cs, os}}:
+    case Some{D.CadTool{_, _, d, cs, os}}:
       Bool.show(d) ++ Nat.show(List.length(&2, D.Chk, cs)) ++ Nat.show(List.length(&2, D.Out, os))
     case None{}:
       "none"

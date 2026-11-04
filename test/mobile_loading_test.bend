@@ -114,4 +114,4 @@ def main() -> IO(Unit):
     C.Check.str("return to original owner after disconnect remains unresolved", MA.MA.get(MA.MA.online(P.Session.adopt(foreign, snapshot), False{}), "state"), "unknown")
     C.Check.str("command transport preserves Unicode and ordinary method bytes", J.Json.get_str(P.Session.command(U.Send{"exact 日本語"}), "text", ""), "exact 日本語")
     C.Check.str("command transport preserves typed copied text", J.Json.get_str(P.Session.command(U.Copy{"copy 日本語"}), "type", ""), "copy")
-    C.Check.str("command transport retains all nine command variants", Nat.show(List.length(&2, J.Json, P.Session.commands([U.Send{"s"}, U.Copy{"c"}, U.Focus{"f"}, U.ScrollEnd{}, U.Connect{"http://paired"}, U.Keep{"t", "d"}, U.Notify{"t", "title", "body", "k"}, U.Later{1n, "a", "v"}, U.Jump{"e"}]))), "9")
+    C.Check.str("command transport retains all nine command variants", Nat.show(List.length(&2, J.Json, P.Session.commands([U.Send{"s"}, U.Copy{"c"}, U.FocusField{"f"}, U.ScrollEnd{}, U.Connect{"http://paired"}, U.Keep{"t", "d"}, U.Notify{"t", "title", "body", "k"}, U.Later{1n, "a", "v"}, U.Jump{"e"}]))), "9")

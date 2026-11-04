@@ -843,13 +843,13 @@ def Mob.entries(+lc: I.Loc, es: List<&2, M.Entry>, +st: M.State, +sel: String, +
 
 # a toolbar button (core/tools.bend): its icon, what it says, what it does
 # (tip) and the action it sends
-def Mob.tool(t: TO.Tool) -> J.Json:
+def Mob.tool(t: TO.HeaderTool) -> J.Json:
   match t:
-    case TO.Tool{i, l, tip, a, v, on, dg, _}:
+    case TO.HeaderTool{i, l, tip, a, v, on, dg, _}:
       J.Json.obj([J.KV{"icon", J.Json.str(i)}, J.KV{"label", J.Json.str(l)}, J.KV{"tip", J.Json.str(tip)}, J.KV{"action", J.Json.str(a)},
         J.KV{"value", J.Json.str(v)}, J.KV{"on", J.Json.bool(on)}, J.KV{"danger", J.Json.bool(dg)}])
 
-def Mob.tools(ts: List<&2, TO.Tool>) -> List<&2, J.Json>:
+def Mob.tools(ts: List<&2, TO.HeaderTool>) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
@@ -858,7 +858,7 @@ def Mob.tools(ts: List<&2, TO.Tool>) -> List<&2, J.Json>:
 
 # the toolbar's: stop, then under the menu where it sits and forking
 def Mob.head.loc(+lc: I.Loc, turn: M.TurnState, pinned: Bool, settled: Bool, archived: Bool, forked: Bool) -> List<&2, J.Json>:
-  Mob.tools(List.concat(&2, TO.Tool, [TO.Tools.turn.loc(lc, turn), [TO.Tools.pin.loc(lc, pinned), TO.Tools.settle.loc(lc, settled), TO.Tools.archive.loc(lc, archived), TO.Tools.fork.loc(lc)], TO.Tools.back.loc(lc, forked)]))
+  Mob.tools(List.concat(&2, TO.HeaderTool, [TO.Tools.turn.loc(lc, turn), [TO.Tools.pin.loc(lc, pinned), TO.Tools.settle.loc(lc, settled), TO.Tools.archive.loc(lc, archived), TO.Tools.fork.loc(lc)], TO.Tools.back.loc(lc, forked)]))
 
 def Mob.head(turn: M.TurnState, pinned: Bool, settled: Bool, archived: Bool, forked: Bool) -> List<&2, J.Json>:
   Mob.head.loc(I.En{}, turn, pinned, settled, archived, forked)
@@ -1423,17 +1423,17 @@ def Mob.snooze.loc(+lc: I.Loc, snoozed: Bool) -> J.Json:
       Mob.item("clock", MSG.T.tools.snooze(lc), "snooze", "", False{}, False{}, [Mob.opt(MSG.T.common.hour(lc), "1h"), Mob.opt(MSG.T.common.tomorrow(lc), "tomorrow"), Mob.opt(MSG.T.common.week(lc), "1w")])
 
 # the put-away Ready row's Buy it (client.bend's Fab.mini.tools), first
-def Mob.menu.tools(ts: List<&2, TO.Tool>) -> List<&2, J.Json>:
+def Mob.menu.tools(ts: List<&2, TO.HeaderTool>) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
-    case TO.Tool{+icon, +label, _, +action, +value, _, _, _} <> r:
+    case TO.HeaderTool{+icon, +label, _, +action, +value, _, _, _} <> r:
       Mob.item(icon, label, action, value, False{}, False{}, Nil{}) <> Mob.menu.tools(r)
 
 def Mob.snooze(snoozed: Bool) -> J.Json:
   Mob.snooze.loc(I.En{}, snoozed)
 
-def Mob.menu.loc(+lc: I.Loc, +id: String, snoozed: Bool, mini: List<&2, TO.Tool>) -> List<&2, J.Json>:
+def Mob.menu.loc(+lc: I.Loc, +id: String, snoozed: Bool, mini: List<&2, TO.HeaderTool>) -> List<&2, J.Json>:
   List.append(&2, J.Json, Mob.menu.tools(mini), [Mob.item("diff", MSG.T.viewer.diff(lc), "diff", "", False{}, False{}, Nil{}), Mob.item("terminal", MSG.T.palette.terminal(lc), "term-toggle", "", False{}, False{}, Nil{}),
    Mob.item("search", MSG.T.palette.findfile(lc), "find-open", "files", False{}, False{}, Nil{}), Mob.snooze.loc(lc, snoozed),
    Mob.item("trash", MSG.T.common.delete(lc), "row-delete", id, False{}, True{}, Nil{})])
@@ -1443,7 +1443,7 @@ def Mob.menu.loc(+lc: I.Loc, +id: String, snoozed: Bool, mini: List<&2, TO.Tool>
 # the most of what opening a thread costs there); "earlier" adds pages
 # of core's size (U.Page.size)
 
-def Mob.menu(+id: String, snoozed: Bool, mini: List<&2, TO.Tool>) -> List<&2, J.Json>:
+def Mob.menu(+id: String, snoozed: Bool, mini: List<&2, TO.HeaderTool>) -> List<&2, J.Json>:
   Mob.menu.loc(I.En{}, id, snoozed, mini)
 
 def Mob.count(+more: Nat) -> Nat:

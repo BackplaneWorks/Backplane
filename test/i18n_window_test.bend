@@ -76,10 +76,10 @@ def busy(v: V.Vw) -> String:
 def heads() -> TO.Head:
   TO.Head{True{}, True{}, True{}, True{}, True{}, True{}, True{}, True{}, True{}}
 
-def captions.tools(ts: List<&2, TO.Tool>) -> String:
+def captions.tools(ts: List<&2, TO.HeaderTool>) -> String:
   match ts:
     case Nil{}: ""
-    case TO.Tool{_, l, _, _, _, _, _, _} <> t: l ++ "|" ++ captions.tools(t)
+    case TO.HeaderTool{_, l, _, _, _, _, _, _} <> t: l ++ "|" ++ captions.tools(t)
 
 def settings() -> L.Out:
   L.Lay.settings(ty(I.Ja{}), state(), N.Nui.init(ui.of(ja()), 1400, 10000), Map.new(&2, String), "test", "", 264, 1400, 10000, 0)

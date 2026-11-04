@@ -43,7 +43,7 @@ def focus.go(cs: List<&2, U.Cmd>) -> String:
   match cs:
     case Nil{}:
       ""
-    case U.Focus{f} <> _:
+    case U.FocusField{f} <> _:
       f
     case _ <> r:
       focus.go(r)

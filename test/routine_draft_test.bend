@@ -11,7 +11,7 @@ def form(+when: String) -> U.Ui:
 def focus(cs: List<&2, U.Cmd>) -> String:
   match cs:
     case Nil{}: ""
-    case U.Focus{id} <> _: id
+    case U.FocusField{id} <> _: id
     case _ <> t: focus(t)
 
 def main() -> IO(Unit):

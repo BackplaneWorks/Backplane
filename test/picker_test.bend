@@ -62,7 +62,7 @@ def focused(cs: List<&2, U.Cmd>) -> String:
   match cs:
     case Nil{}:
       ""
-    case U.Focus{f} <> r:
+    case U.FocusField{f} <> r:
       f ++ ";" ++ focused(r)
     case _ <> r:
       focused(r)

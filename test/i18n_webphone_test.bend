@@ -170,7 +170,7 @@ def main() -> IO(Unit):
     C.Check.str("web upload confirmation ja", seen(words(D.Dom.div("", W.View.ask.btns.loc(I.Ja{}, "send", "a", "", ""))), "今はしない"), "今はしない")
     C.Check.str("phone upload confirmation ja", J.Json.get_str(first(S.Mob.ask.btns.loc(I.Ja{}, 2n, "a", "", "")), "label", "?"), "送信")
     C.Check.str("phone upload action preserved", J.Json.get_str(first(S.Mob.ask.btns.loc(I.Ja{}, 2n, "a", "", "")), "value", "?"), "a|accept")
-    C.Check.str("phone minimized order route preserved", J.Json.get_str(first(S.Mob.menu.loc(I.Ja{}, "t", False{}, [TO.Tool{"shopping-bag", "Buy it", "", "fab-show", "t", False{}, False{}, False{}}])), "action", "?"), "fab-show")
+    C.Check.str("phone minimized order route preserved", J.Json.get_str(first(S.Mob.menu.loc(I.Ja{}, "t", False{}, [TO.HeaderTool{"shopping-bag", "Buy it", "", "fab-show", "t", False{}, False{}, False{}}])), "action", "?"), "fab-show")
     C.Check.str("ordering toggle localized", W.VLabel.option(I.Ja{}, "order.enabled", "off"), "オフ")
     C.Check.str("phone live drawer en", J.Json.show(first(S.Mob.entries(I.En{}, [M.Act{"a", "t", "tool", "Bash", "make drc", 0n}], M.State.empty(), "t", Map.new(&2, String), Map.new(&2, String), True{}))),
       "{\"id\":\"fold:a\",\"kind\":\"fold\",\"text\":\"1 tool call · running: make drc\",\"open\":false,\"live\":true,\"value\":\"1a\"}")

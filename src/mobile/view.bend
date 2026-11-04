@@ -455,14 +455,14 @@ def View.layer(+u: U.Ui, +v: String) -> U.Act:
 def View.focus.key(+u: U.Ui) -> String:
   "@view.focus." ++ View.kind(u)
 
-def View.focus(+u: U.Ui) -> LY.Focus:
+def View.focus(+u: U.Ui) -> LY.LayerFocus:
   LY.Lyr.read(U.Ui.scratch(u, View.focus.key(u)))
 
 # the look kind (0 a board, 1 a schematic)
 def View.lkind(+u: U.Ui) -> U32:
   Bool.pick(U32, String.eq(View.kind(u), "schematic"), 1, 0)
 
-def View.focus.put(+u: U.Ui, +f: LY.Focus) -> U.Act:
+def View.focus.put(+u: U.Ui, +f: LY.LayerFocus) -> U.Act:
   View.hist.act(Pick.clear(U.Ui.scratch_set(u, View.focus.key(u), LY.Lyr.show(f))), "rv-bits", U32.show(U.Rv.bits(View.lkind(u), f)))
 
 def View.layer.pick(+u: U.Ui, +v: String) -> U.Act:
@@ -496,7 +496,7 @@ def View.layer.row(shown: Bool, +i: U32, +name: String, +off: U32, +act: Bool, r
     case False{}:
       rest
 
-def View.layer.rows(ls: List<&2, U32>, +k: U32, +off: U32, +f: LY.Focus) -> List<&2, J.Json>:
+def View.layer.rows(ls: List<&2, U32>, +k: U32, +off: U32, +f: LY.LayerFocus) -> List<&2, J.Json>:
   match ls:
     case Nil{}:
       Nil{}

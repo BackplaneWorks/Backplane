@@ -65,7 +65,7 @@ def git(+c: String) -> String:
 def main() -> IO(Unit):
   +u = base()
   +cmp = act(u, "cmp-pick", "a\tc1\tv1\t/r/.git\t/r")
-  +f = {LY.Focus{12, 1} : LY.Focus}
+  +f = {LY.LayerFocus{12, 1} : LY.LayerFocus}
   +sch = act(U.Ui.view_put(u, "schematic", "/r/root.kicad_sch"), "cmp-pick", "a\tc1\tv1\t/r/.git\t/r")
   do IO<Unit>:
     # paths
@@ -101,7 +101,7 @@ def main() -> IO(Unit):
     # layers
     C.Check.str("bits of a focus", U32.show(U.Rv.bits(0, f)), U32.show(LY.Lyr.kept(0, f)))
     C.Check.str("no bits without a focus", U32.show(U.Rv.bits(0, LY.Lyr.plain())), "0")
-    C.Check.str("no bits on a schematic", U32.show(U.Rv.bits(1, LY.Focus{3, 1})), "0")
+    C.Check.str("no bits on a schematic", U32.show(U.Rv.bits(1, LY.LayerFocus{3, 1})), "0")
     C.Check.str("bits narrow a comparison", path(act(cmp, "rv-bits", "4096")), H.Hist.diff.on(git("c1"), "/r/b.kicad_pcb", 4096))
     C.Check.str("bits 0 widen it again", path(act(act(cmp, "rv-bits", "4096"), "rv-bits", "0")), H.Hist.diff(git("c1"), "/r/b.kicad_pcb"))
     C.Check.str("bits kept for the next comparison", path(act(act(u, "rv-bits", "32"), "cmp-pick", "a\tc1\tv1\t/r/.git\t/r")), H.Hist.diff.on(git("c1"), "/r/b.kicad_pcb", 32))

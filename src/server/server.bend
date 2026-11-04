@@ -1,3 +1,4 @@
+import ./auth-cache.bend as AUTHCACHE
 import ./wire.bend as WIRE
 import ./adopt-plan.bend as ADOPTPLAN
 import ./static-http.bend as SHTTP
@@ -265,7 +266,7 @@ type Msg is Data:
   JoinMore{client: U32, gen: U32}
   # a client pinged (its reader passes on at most one a second)
   Ping{client: U32, payload: List<&2, U32>}
-  Leave{client: U32}
+  PeerLeave{client: U32}
   Rpc{client: U32, text: String}
   JobReported{receipt: JobReceipt}
   AgentLine{thread: String, line: String}
@@ -1571,7 +1572,7 @@ def Conn.leave(s: Socket, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     PAIR.Pairing.forget(id)
     Socket.close(s)
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{id})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PeerLeave{id})
     return Unit{}
 
 # a request's CBOR as the JSON text the hub reads
@@ -16685,7 +16686,7 @@ def Conn.devices.left(xs: List<&2, J.Json>, +inbox: Chan(Msg)) -> IO(Unit):
     case Nil{}: IO.pure(Unit, Unit{})
     case x <> rest:
       do IO<Unit>:
-        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Leave{U32.from_nat(J.Json.get_nat(J.Json.obj([J.KV{"id", x}]), "id", 0n))})
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PeerLeave{U32.from_nat(J.Json.get_nat(J.Json.obj([J.KV{"id", x}]), "id", 0n))})
         Conn.devices.left(rest, inbox)
 
 # a revoked hub-to-hub invite that had made a link: the link is removed as
@@ -18041,7 +18042,7 @@ def Msg.kind(m: Msg) -> String:
       "join_more"
     case Ping{_, _}:
       "ping"
-    case Leave{_}:
+    case PeerLeave{_}:
       "leave"
     case ThinRead{_, _, _, _, _}:
       "thin-read"
@@ -18875,30 +18876,20 @@ def Hub.auth.beat.k(wait: Bool, h: Hub, +now: Nat) -> IO(Hub):
 # commit can change it: the answer is kept in Bn with the state's sequence
 # and asked again only when the log moved (law auth_beat_kept). On the JS
 # hub the walk was most of an idle hub's CPU.
-def Auth.kept.key(+st: M.State) -> String:
-  Nat.show(1n+M.State.seq(st)) ++ " "
 
-def Auth.kept.k(hit: Bool, +kept: String, +st: M.State) -> Bool:
-  match hit:
-    case True{}:
-      String.ends_with(kept, " 1")
-    case False{}:
-      B.Auth.any(B.Rec.threads(st), st)
 
 # the answer for st: the one kept for its sequence, else asked
-def Auth.kept(+kept: String, +st: M.State) -> Bool:
-  Auth.kept.k(String.starts_with(kept, Auth.kept.key(st)), kept, st)
 
 def Hub.auth.beat.any(+any: Bool, h: Hub, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.auth.beat.k(Bool.and(any, Bool.not(J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "auth.probe", False{}))),
-        Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_auth(Cfg.bn(cfg), Auth.kept.key(st) ++ Bool.pick(String, any, "1", "0"))), note}, now)
+        Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_auth(Cfg.bn(cfg), AUTHCACHE.Auth.kept.key(st) ++ Bool.pick(String, any, "1", "0"))), note}, now)
 
 def Hub.auth.beat(h: Hub, now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.auth.beat.any(Auth.kept(BN.Bn.auth(Cfg.bn(cfg)), st), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+      Hub.auth.beat.any(AUTHCACHE.Auth.kept(BN.Bn.auth(Cfg.bn(cfg)), st), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
 
 def Hub.auth.ready.clear(h: Hub, st: M.State, open: Bool, now: Nat) -> IO(Hub):
   match h:
@@ -19418,7 +19409,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.boot(h, client, gen)
     case Ping{client, p}:
       Hub.pong(h, client, p)
-    case Leave{client}:
+    case PeerLeave{client}:
       Hub.leave(h, client, now)
     case ThinRead{client, gen, view, target, text}:
       Hub.thin.read_job(h, client, gen, view, target, text, now)
