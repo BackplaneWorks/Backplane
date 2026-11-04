@@ -174,7 +174,7 @@ performance conclusion. No API/model calls in load tests.
 | CPU | Delta process-tree user+system CPU / monotonic wall over equal idle and load intervals; report in core-percent (100% = one core). |
 | Input | Sidebar click, thread switch, popup open and typing. Timestamp injected event → next frame that shows expected state; median/p95 over at least 30 events, idle and load. Processing time is labeled separately from input-to-pixels. |
 | Size | Stripped binary bytes, compressed download, installed runtime closure including assets/libraries/helpers. Do not compare GPUI client alone with Electron + hub. |
-| Build | Mac or Boat, clean dependency/cold build and warm incremental build separately, elapsed time, peak RSS, cap, compiler and cache state. Artifact retrieval excluded. |
+| Build | Boat, clean dependency/cold build and warm incremental build separately, elapsed time, peak RSS, cap, compiler and cache state. Artifact retrieval excluded. |
 
 20-agent validity: all 20 stand-ins must actually stream decoded deltas,
 each at least 1/s, longest gap ≤2 s; equal duration, rates and conversation
@@ -217,22 +217,22 @@ invitation. Preserve native viewer and composer code and tokens. The web
 endpoint may remain available for comparison, but it is not the phone
 experience delivered by this experiment.
 
-**Updated user decision: where builds run.** `hs-mac-mini` (M-series, 10
-cores, 16 GiB, Xcode 26.6, iOS 26.5 runtime) builds only what needs a Mac: the
-macOS GPUI client and iOS. Android builds run on Boat or on the desktop, and
-Bend builds on Boat. An Android build on the desktop runs in its own capped
-scope; nothing else compiles there. The Mac is shared with release threads,
-so heavy jobs there take the named lock `mac-heavy`, each stream keeps its
-own directory and simulator, and work stops if free space falls under 20 GiB.
-`xcode-select` points at the command line tools and stays that way: use
-`DEVELOPER_DIR`. Do not publish or replace the production TestFlight app
-implicitly.
+**Updated user decision: where work runs.** Linux is the desktop target: the
+GPUI client is built on Boat and tested on this machine, on an isolated
+display, with the Electron comparison run here too. `hs-mac-mini` is for iOS
+only, because it has no graphical login session and the person chose not to
+pursue one. Android builds run on Boat or on the desktop, in a capped scope
+there; Bend builds run on Boat; nothing else compiles on the desktop. On the
+Mac, heavy jobs take the named lock `mac-heavy`, each stream keeps its own
+directory and simulator, work stops if free space falls under 20 GiB, and
+`xcode-select` stays as it is (use `DEVELOPER_DIR`). Do not publish or replace
+the production TestFlight app implicitly.
 
 ## Gates and deliverables
 
 1. Commit this plan and intent on `gpui`; publish the feasibility finding.
-2. Build the minimal client on the Mac. Run it against the fresh isolated hub
-   over the tailnet. Verify real sidebar/history and composer round trip.
+2. Build the minimal Linux client on Boat. Run it on this machine against the
+   fresh isolated hub. Verify real sidebar/history and composer round trip.
 3. Bring up native phone variants; verify isolated identity, native screen selection, pairing and tailnet reachability.
 4. Collect paired baseline/prototype measurements, retain raw samples,
    screenshots and method in `docs/gpui/RESULTS.md`; distinguish smoke,
