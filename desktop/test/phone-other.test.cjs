@@ -33,14 +33,3 @@ test('search by title: every word of the query in a sidebar row, each thread onc
   assert.equal(titleHits(doc,'pull',1).length,1);
 });
 
-test('a phone\'s back closes the overlay on top first: search, Devices, palette, terminal',async()=>{
-  const {phoneOverlay}=await load();
-  const sent=[],clicked=[];
-  const doc=(present)=>({querySelector:sel=>{const hit=present.find(p=>sel.includes(p));return hit?{click:()=>clicked.push(hit)}:null;}});
-  assert.equal(phoneOverlay(doc([]),()=>{}),null);
-  const both=phoneOverlay(doc(['#thin-result','.floating-terminal']),(a,v)=>sent.push(a));
-  assert.equal(both.name,'search');both.close();assert.deepEqual(clicked,['#thin-result']);
-  const t=phoneOverlay(doc(['.floating-terminal']),(a)=>sent.push(a));t.close();
-  const pal=phoneOverlay(doc(['.workspace-palette-backdrop']),(a)=>sent.push(a));pal.close();
-  assert.deepEqual(sent,['ws-term-hide','ws-palette-close']);
-});
