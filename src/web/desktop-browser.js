@@ -32,13 +32,16 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
   function status(node){
     const label=node?.querySelector('.desktop-browser-status');
     if(label){
+      // This bridge owns the status between page renders too. The DOM
+      // patcher must not flash its initial connecting text over live state.
+      label.__desktopBrowserStatus=true;
       // A selected owner's ready state says nothing about a different page.
       const selected=!state.owner||state.owner===ownerOf(node);
       const message=selected?(state.phase==='ready'?'':String(state.message||'Browser unavailable').slice(0,240)):'Connecting Browser…';
       // Keep the text node tracked by the DOM patcher. Replacing it with
       // textContent strands its reference and can duplicate the placeholder.
-      if(label.firstChild?.nodeType===3&&label.childNodes.length===1)label.firstChild.nodeValue=message;
-      else label.textContent=message;
+      if(label.firstChild?.nodeType===3&&label.childNodes.length===1){if(label.firstChild.nodeValue!==message)label.firstChild.nodeValue=message;}
+      else if(label.textContent!==message)label.textContent=message;
     }
 
   }

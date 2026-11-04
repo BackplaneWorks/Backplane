@@ -1,5 +1,6 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
+const fs=require('node:fs'),vm=require('node:vm');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
 // Run the actual renderer controller with Settings in front and no guest
@@ -120,6 +121,28 @@ test('status updates preserve the text node tracked by the DOM patcher',async()=
   Object.defineProperty(h.label,'textContent',{get:()=>text.nodeValue,set:()=>assert.fail('Replacing the managed text node strands the DOM patcher')});
   h.controller.sync();h.frame();assert.equal(text.nodeValue,'');
   h.state({phase:'error',message:'Connection unavailable'});assert.equal(text.nodeValue,'Connection unavailable');assert.equal(h.label.firstChild,text);
+ }finally{h.controller.dispose();}
+});
+
+test('real page patches leave live Browser status unchanged before the next animation frame',async()=>{
+ const h=await fixture({phase:'ready',surface:true});
+ try{
+  await tick();
+  const source=fs.readFileSync(require.resolve('../../src/web/host.js'),'utf8');
+  const patchSource=source.slice(source.indexOf('function patch(el, v) {'),source.indexOf('// Timing, for a bench only:'));
+  const patch=vm.runInNewContext(patchSource+';patch',{RR:null,setAttrs(){}});
+  const text={nodeType:3,nodeValue:h.label.textContent};h.label.firstChild=text;h.label.childNodes=[text];
+  h.label.__v={attrs:[]};
+  for(const state of [null,{phase:'ready',owner:'self'}, {phase:'error',message:'Connection unavailable'}]){
+   if(state)h.state(state);
+   const before=text.nodeValue;
+   const vnode={attrs:[],kids:[{text:'Connecting Browser…'}]};
+   for(let i=0;i<30;i++){
+    patch(h.label,vnode);
+    assert.equal(text.nodeValue,before,'status stays steady synchronously, even before rAF');
+    assert.equal(h.label.__v,vnode);
+   }
+  }
  }finally{h.controller.dispose();}
 });
 
