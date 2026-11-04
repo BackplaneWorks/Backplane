@@ -1,0 +1,47 @@
+name: Issue 927 exact Windows package consumer
+on:
+  push:
+    branches: [backplane/verify-kicad-windows-927]
+    paths: [.github/workflows/kicad-windows-927-native.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: kicad-windows-927-native
+  cancel-in-progress: false
+jobs:
+  standard-user:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download exact producer artifact through authenticated Actions
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '41886983230'
+          artifact-ids: '13352107148'
+          merge-multiple: true
+          path: build/927-input
+      - name: Enforce resource gate, then native standard-user package acceptance
+        shell: pwsh
+        run: ./extra/kicad-927-consumer/bootstrap.ps1 -ArtifactDirectory '${{ github.workspace }}\build\927-input'
+      - name: Preserve evidence even on failure or resource refusal
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kicad-927-windows-native-evidence
+          path: |
+            build/kicad-927-native/*.json
+            build/kicad-927-native/*.log
+            build/kicad-927-native/*.txt
+            build/kicad-927-native/*.png
+            build/kicad-927-native/home-*/kicad-health.json
+          if-no-files-found: error
+          retention-days: 30

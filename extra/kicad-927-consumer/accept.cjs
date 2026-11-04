@@ -53,10 +53,15 @@ async function openCase(name, pathRoot) {
   const {_electron}=require(path.resolve(cfg.playwrightModule));
   const app=await _electron.launch({executablePath:cfg.executable,args:[],env,chromiumSandbox:true,timeout:90000});
   apps.push(app);
+  const entry={name,home,pid:app.process().pid,phase:'launching'};result.cases.push(entry);save();
   const page=await app.firstWindow();
-  await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true',null,{timeout:120000});
+  try { await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true',null,{timeout:120000}); }
+  catch(e) {
+    entry.url=page.url();entry.visibleText=await page.locator('body').innerText().catch(()=>'<unavailable>');save();
+    await page.screenshot({path:path.join(out,name+'-startup-failed.png')}).catch(()=>{});throw e;
+  }
   const url=new URL(page.url());assert.equal(url.hostname,'127.0.0.1');
-  const entry={name,home,origin:url.origin,pid:app.process().pid};result.cases.push(entry);save();
+  Object.assign(entry,{origin:url.origin,phase:'ready'});save();
   // Dismiss the fresh home's onboarding through its real visible control.
   // It holds input while open; seeding a setting would bypass this boundary.
   const skip=page.locator('#tour [data-on-click="ob-skip"]');
@@ -102,6 +107,14 @@ async function detected(context, expectedRoot, expectedSource) {
   assert.equal(setting(context.home),'','Detection must have no explicit setting');
   context.entry.health=h;save();
 }
+async function check(name,fn) {
+  try { await fn(); }
+  catch(e) {
+    (result.failures??=[]).push({name,error:e.stack});
+    for(const entry of result.cases) {try{entry.lastHealth=health(entry.home);}catch{}}
+    save();
+  }
+}
 async function main() {
   assert.equal(process.platform,'win32','Real Windows required');
   assert.equal(process.env.GITHUB_ACTIONS,'true','Hosted acceptance only');
@@ -124,20 +137,32 @@ async function main() {
   assert.equal(build.sourceCommit,cfg.sourceCommit,'Package source commit mismatch');
   assert.equal(build.sourceTree,cfg.sourceTree,'Package source tree mismatch');
   assert.equal(build.serviceVersion,cfg.version,'Package version mismatch');
+  assert.equal(build.testOnly,true);assert.equal(build.releaseQualified,false);
+  assert.equal(build.buildProvenance.releaseBuildApproved,false);
+  assert.deepEqual(build.buildProvenance,cfg.buildProvenance,'Compiler provenance mismatch');
   result.package={sourceCommit:build.sourceCommit,sourceTree:build.sourceTree,version:build.serviceVersion,zipSHA256:cfg.packageSHA256,executableSHA256:sha(cfg.executable)};
+  const serviceDir=path.join(path.dirname(cfg.executable),'resources','backplane-service');
+  const serviceBuild=json(path.join(serviceDir,'BUILD.json'));
+  assert.deepEqual(serviceBuild.buildProvenance,cfg.buildProvenance);
+  const serviceSHA=sha(path.join(serviceDir,'backplane-serve.exe'));
+  assert.equal(serviceSHA,'11f53c9619d095e0ccd520c5616743155ee240b9637021d4d5a0bea4707aadd1');
+  assert.equal(serviceSHA,serviceBuild.binary_sha256);result.package.serviceSHA256=serviceSHA;
   assert(normal(cfg.programFilesRoot).startsWith(normal(process.env.ProgramFiles)+'/kicad/'),'Program Files fixture must be under actual Program Files');
   for(const root of [cfg.programFilesRoot,cfg.pathRoot,...cfg.manualRoots]) {
     assert.equal(sha(path.join(root,'bin/kicad-cli.exe')),cfg.runtimeCliSHA256,'Fixture must contain exact real vendor runtime');
   }
   save();
-  const first=await openCase('program-files');
-  await detected(first,cfg.programFilesRoot,'system');
-  const second=await openCase('native-path',cfg.pathRoot);
-  await detected(second,cfg.pathRoot,'path');
+  await check('program-files',async()=>{
+    const first=await openCase('program-files');await detected(first,cfg.programFilesRoot,'system');
+  });
+  await check('native-path',async()=>{
+    const second=await openCase('native-path',cfg.pathRoot);await detected(second,cfg.pathRoot,'path');
+  });
   // Assert the exact reported spelling is included; also exercise literal \n/\t and spaces.
   assert(cfg.manualRoots.some(p=>p==='C:\\backplane_kicad\\'));
   assert(cfg.manualRoots.some(p=>p.includes('\\new')&&p.includes('\\test')&&p.includes(' ')));
   for(let i=0;i<cfg.manualRoots.length;i++) {
+    await check('manual-'+i,async()=>{
     const context=await openCase('manual-'+i);
     const typed=cfg.manualRoots[i], h=await typePath(context,typed);
     assert.equal(normal(h.cli),normal(path.join(typed,'bin/kicad-cli.exe')));
@@ -147,7 +172,9 @@ async function main() {
     await cadSettings(context.page);
     assert.equal(await context.page.locator('#kicad-path').inputValue(),typed,'Saved path changed after a real page reload');
     context.entry.reloadPreserved=true;save();
+    });
   }
+  await check('real-install',async()=>{
   const install=await openCase('real-install');
   // Force a genuine missing runtime notice without changing Program Files or
   // substituting a download. After install, clear the explicit missing setting.
@@ -162,13 +189,19 @@ async function main() {
   install.entry.installedCli=installed;install.entry.installedCliSHA256=sha(installed);
   const h=await typePath(install,'');
   assert.equal(h.source,'installed');assert.equal(normal(h.cli),normal(installed));
+  assert.equal(json(path.join(install.home,'kicad',cfg.runtimeVersion,'manifest.json')).version,cfg.runtimeVersion);
   install.entry.version=execFileSync(installed,['version'],{encoding:'utf8',timeout:30000}).trim();
-  assert(install.entry.version.includes(cfg.runtimeVersion),'Installed real CLI version mismatch');
+  assert(install.entry.version.includes(cfg.runtimeVersion.split('-bp.')[0]),'Installed real CLI version mismatch');
   install.entry.installCompletedAt=new Date().toISOString();
   await install.page.screenshot({path:path.join(out,'real-install-complete.png')});
+  });
+  assert.equal(result.failures?.length||0,0,'One or more native acceptance cases failed; see failures and partial evidence');
   result.status='PASS';result.scope='Exact packaged source; native Program Files/PATH discovery, literal UI typing/persistence/reload, real in-app install and CLI launch as standard user';save();
 }
-main().catch(e=>{result.status='FAIL';result.error=e.stack;process.exitCode=1;}).finally(async()=>{
+main().catch(e=>{
+  result.status='FAIL';result.error=e.stack;process.exitCode=1;
+  for(const entry of result.cases) {try{entry.lastHealth=health(entry.home);}catch{}}
+}).finally(async()=>{
   for(const app of apps.reverse()) {
     const child=app.process(), row={pid:child.pid};
     try { await Promise.race([app.close(),new Promise((_,reject)=>setTimeout(()=>reject(Error('close timeout')),5000))]); }
