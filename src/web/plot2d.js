@@ -1171,6 +1171,15 @@ function inspectCard(view, pick, src = null) {
   mention.type = "button"; mention.textContent = App.viewer_mention(document.documentElement.lang);
   mention.addEventListener("click", () => { inspectCard(view, null); mentioned?.(`[${raw}]`); });
   acts.append(mention);
+  // a part or net on the board shows on the schematic too, and back: the
+  // probe stays, so the other view lights it (and says which sheet)
+  const other = view?.side === "board" ? "schematic" : view?.side === "schematic" ? "board" : "";
+  if (other && showing && P.parseProbe(view.probe).kind && !view.canvas.closest("#viewer.split")) {
+    const go = document.createElement("button");
+    go.type = "button"; go.textContent = `${App.viewer_kind(document.documentElement.lang, other)} →`;
+    go.addEventListener("click", () => { inspectCard(view, null); showing(other); });
+    acts.append(go);
+  }
   el.replaceChildren(head, dl, acts);
   if (!el.isConnected) document.body.append(el);
   card = { el, view };
@@ -1207,6 +1216,12 @@ export function inspectPart(ref, scope = "", key = "") {
 // how many times a source's plot has come (a new version of the file)
 export function version(key) {
   return plots.get(key)?.n ?? 0;
+}
+
+// the page's answer to the card's other view (host.js: view-kind)
+let showing = null;
+export function onShow(fn) {
+  showing = fn;
 }
 
 // the page's answer to "Mention in chat" on a tapped piece (host.js)

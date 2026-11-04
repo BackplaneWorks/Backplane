@@ -1795,6 +1795,7 @@ Plot2d.onDetails((scope, key, ref) => {
   }
   return partDetails.get(at).then((data) => data?.components?.find((c) => c.reference === ref) || null);
 });
+Plot2d.onShow((kind) => dispatch("view-kind", kind));
 // a phone's tap card (plot2d.js): "Mention in chat" adds the piece to the
 // thread's draft and goes back to the thread
 Plot2d.onMention((text) => {

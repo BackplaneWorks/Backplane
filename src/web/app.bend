@@ -575,6 +575,10 @@ def plot_stats(tag: String, size: String, waited: String, delayed: Bool) -> Stri
 def viewer_mention(tag: String) -> String:
   MSG.T.viewer.mention(I.I18n.of_tag(tag))
 
+# and its other one, the view that shows it too ("schematic" or "board")
+def viewer_kind(+tag: String, +kind: String) -> String:
+  Bool.pick(String, String.eq(kind, "schematic"), MSG.T.viewer.schematic(I.I18n.of_tag(tag)), MSG.T.viewer.board(I.I18n.of_tag(tag)))
+
 # the same corner while another version of the file on show is read (a
 # step of the design history): the last one stays up until it comes
 def plot_loading(tag: String) -> String:
