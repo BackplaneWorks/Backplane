@@ -291,8 +291,50 @@ def WS.stop.k(running: Bool, u: U.Ui) -> U.Act:
 def WS.stop(+u: U.Ui) -> U.Act:
   WS.stop.k(WS.stop.available(u), u)
 
+# a command that acts on the open thread (its terminal, viewers, name,
+# pin, settle, snooze, to-dos...) or its project, or a keyboard's key list:
+# a phone's palette on a root tab, no thread open, leaves these out
+# instead of offering them only to say "select a thread first"
+def WS.scoped(+a: String) -> Bool:
+  match a:
+    case "ws-term-here": True{}
+    case "ws-term-hide": True{}
+    case "row-rename": True{}
+    case "fork": True{}
+    case "delete": True{}
+    case "view-kind": True{}
+    case "mech": True{}
+    case "diff": True{}
+    case "rv-page": True{}
+    case "panel": True{}
+    case "fm": True{}
+    case "thread-child": True{}
+    case "pin": True{}
+    case "unpin": True{}
+    case "settle": True{}
+    case "unsettle": True{}
+    case "archive": True{}
+    case "unarchive": True{}
+    case "snooze": True{}
+    case "proj-remove": True{}
+    case "ws-keys": True{}
+    case "": True{}
+    case "fold": True{}
+    case _: False{}
+
+def WS.unscoped(xs: List<&2, U.PItem>) -> List<&2, U.PItem>:
+  match xs:
+    case Nil{}: Nil{}
+    case U.PItem{+l, +a, +v} <> t: U.Palette.filter.k(Bool.not(WS.scoped(a)), U.PItem{l, a, v}, WS.unscoped(t))
+
+def WS.commands.for(bare: Bool, xs: List<&2, U.PItem>) -> List<&2, U.PItem>:
+  match bare:
+    case True{}: WS.unscoped(xs)
+    case False{}: xs
+
 def WS.commands(+u: U.Ui) -> List<&2, U.PItem>:
-  List.append(&2, U.PItem, WS.stop.command(WS.stop.available(u)), WS.commands.k(u, WS.cmds(u)))
+  WS.commands.for(Bool.and(String.eq(U.Ui.info(u, "local.workspace.form"), "phone"), String.is_empty(U.Ui.sel(u))),
+    List.append(&2, U.PItem, WS.stop.command(WS.stop.available(u)), WS.commands.k(u, WS.cmds(u))))
 
 def WS.projects(xs: List<&2, M.Project>) -> List<&2, U.PItem>:
   match xs:
