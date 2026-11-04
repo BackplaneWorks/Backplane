@@ -103,7 +103,7 @@ for (const backend of ['bun', 'posix']) {
     assert.equal(r.headers['content-length'], String(bytes.length));
     assert.equal(r.headers['content-type'], 'image/png');
     assert.equal(r.headers['accept-ranges'], 'bytes');
-    assert.equal(r.headers['cache-control'], 'no-cache');
+    assert.equal(r.headers['cache-control'], 'private, no-cache');
     assert.equal(r.headers['x-content-type-options'], 'nosniff');
     assert.equal(c.parks, Math.ceil(bytes.length / 65536)); assert.equal(c.closed, 1);
   });
