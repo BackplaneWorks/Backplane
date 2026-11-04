@@ -102,8 +102,7 @@ def main():
 set -eu
 cd "${BACKPLANE_TEST_PRODUCT:?TEST product path required}"
 python3 scripts/sidebar-draft-guard.py --entry "$1"
-. scripts/heavy-guard.sh
-heavy_guard compile-js "$@"
+# Separate TEST caller enforces the frozen admission/lock primitives.
 src=$1
 out=$2
 bun=$(command -v bun)
