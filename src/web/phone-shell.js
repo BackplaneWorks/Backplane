@@ -167,6 +167,10 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   // (search and the palette open in the page too, after a tap)
   doc.addEventListener("click", () => setTimeout(guard, 0));
 
+  // the element that is the screen on show (what a push or a back swipe moves)
+  const screenEl = app => app.querySelector(":scope > .viewer") && app.classList.contains("ph-l2") ? app.querySelector(":scope > .viewer")
+    : app.querySelector(app.classList.contains("ph-now") ? ":scope > .ph-now" : app.classList.contains("ph-l0") && !app.classList.contains("ph-settings") ? ":scope > .sidebar" : ":scope > main");
+
   // touches: the back edge swipe, long press, row swipes
   let t = null, longFired = false, openRow = null, touchedAt = 0;
   const closeRow = () => {
@@ -219,11 +223,20 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     const p = e.touches[0], dx = p.clientX - t.x, dy = p.clientY - t.y;
     if (!t.axis && Math.hypot(dx, dy) > SLOP) { t.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";clearTimeout(t.timer); }
     if (t.axis === "x" && t.swipeEl && !t.edge) t.swipeEl.style.transform = `translateX(${Math.max(-120, Math.min(120, dx))}px)`;
+    // the back swipe: the screen follows the finger
+    if (t.axis === "x" && t.edge) {
+      const app = doc.querySelector(".app.phone"), el = app && screenEl(app);
+      if (el) { t.edgeEl = el;el.style.transform = `translateX(${Math.max(0, dx)}px)`;el.style.transition = "none"; }
+    }
   }, { passive: true, capture: true });
   doc.addEventListener("touchend", e => {
     if (!t) return;
     clearTimeout(t.timer);
     const p = e.changedTouches[0], dx = p.clientX - t.x, dy = p.clientY - t.y, s = t;t = null;
+    if (s.edgeEl) {
+      const el = s.edgeEl;el.style.transition = "transform .15s ease-out";el.style.transform = "";
+      setTimeout(() => { el.style.transition = ""; }, 200);
+    }
     if (s.axis !== "x") return;
     if (s.edge && dx > BACK_DX && Math.abs(dy) < dx / 2) { back();return; }
     if (s.swipeEl) {
@@ -232,7 +245,7 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
       if (Math.abs(dx) > SWIPE_OPEN && items.length) showStrip(s.swipeEl, side, items);
     }
   }, { passive: true, capture: true });
-  doc.addEventListener("touchcancel", () => { if (t) clearTimeout(t.timer);t = null; }, { passive: true, capture: true });
+  doc.addEventListener("touchcancel", () => { if (t) { clearTimeout(t.timer);if (t.edgeEl) t.edgeEl.style.transform = ""; } t = null; }, { passive: true, capture: true });
   // a long press's lifting click and the browser's own menu do nothing more
   doc.addEventListener("click", e => {
     if (longFired) { longFired = false;e.preventDefault();e.stopPropagation();return; }
@@ -259,8 +272,6 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
 
   // the screen on show: its level and what it is, to animate a push or pop
   let shown = null;
-  const screenEl = app => app.querySelector(":scope > .viewer") && app.classList.contains("ph-l2") ? app.querySelector(":scope > .viewer")
-    : app.querySelector(app.classList.contains("ph-now") ? ":scope > .ph-now" : app.classList.contains("ph-l0") && !app.classList.contains("ph-settings") ? ":scope > .sidebar" : ":scope > main");
   const animate = () => {
     const app = doc.querySelector(".app.phone");
     if (!app) return;
