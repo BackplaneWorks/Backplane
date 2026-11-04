@@ -50,17 +50,20 @@ spec=importlib.util.spec_from_file_location('slicer',ROOT/'scripts/proof-slice.p
 sl=importlib.util.module_from_spec(spec);spec.loader.exec_module(sl)
 cfg_helpers=[b['name'] for b in sl.Slicer(ROOT).blocks('src/server/server.bend') if b['kind']=='def' and b['name'].startswith('Cfg.') and 'Cfg{' in b['text']]
 slices={
-  'laws': [('LAWS.bend','mail_log_count_set'),('PROOF.bend','Laws.mail_log_count_set'),('LAWS.bend','mail_log_count_committed'),('PROOF.bend','Laws.mail_log_count_committed'),('LAWS.bend','cad_install_visible_action'),('PROOF.bend','Laws.cad_install_visible_action'),('LAWS.bend','cad_install_monotonic'),('PROOF.bend','Laws.cad_install_monotonic')],
+  'laws': [('LAWS.bend','mail_log_count_set'),('PROOF.bend','Laws.mail_log_count_set'),('LAWS.bend','mail_log_count_committed'),('PROOF.bend','Laws.mail_log_count_committed'),('LAWS.bend','cad_install_rejected_snapshot'),('PROOF.bend','Laws.cad_install_rejected_snapshot'),('LAWS.bend','cad_install_visible_action'),('PROOF.bend','Laws.cad_install_visible_action'),('LAWS.bend','cad_install_monotonic'),('PROOF.bend','Laws.cad_install_monotonic')],
   'cfg-shape': [('src/server/server.bend',n) for n in cfg_helpers if n not in ['Cfg.thin.committed','Cfg.thin.stored']],
-  'server': [('src/server/server.bend',n) for n in ['CadJob.ask','Cfg.with_cad','Cfg.cad','Cfg.with_freecad','Hub.info','Hub.cad.request','Cfg.cad.apply']],
+  'server': [('src/server/server.bend',n) for n in ['CadJob.start','Cfg.with_cad','Cfg.cad','Cfg.with_freecad','Hub.info','Cfg.cad.apply','Cfg.cad.clear']],
   'ui': [('test/cad_install_ui_test.bend','main')],
+  'handoff': [('test/cad_install_handoff_test.bend','main')],
 }
 for name,roots in slices.items():
     s=sl.Slicer(ROOT);seeds=[]
     for rel,n in roots:seeds+=s.blocks(rel,n)
     out=OUT/('slice-'+name);kept=s.write_shard(seeds,out)
     run('slice-'+name,['bend',str(out/'PROOF.bend'),'--check-only'],'bend')
-    if name=='ui':run('ui-assertions',['bend',str(out/'t/test/cad_install_ui_test.bend')])
+    if name in ['ui','handoff']:
+        testfile='cad_install_ui_test.bend' if name=='ui' else 'cad_install_handoff_test.bend'
+        run(name+'-assertions',['bend',str(out/'t/test'/testfile)])
 # One canonical proof attempt, with kernel evidence; never call OOM a pass.
 if '--focused' not in sys.argv:
     run('canonical-proof',['bend','PROOF.bend'],'bend')

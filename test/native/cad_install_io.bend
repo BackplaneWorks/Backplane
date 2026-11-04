@@ -20,9 +20,9 @@ def watch(fuel: Nat, busy: Bool, +home: String, +attempt: String, +phase: String
         +next : String = J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "phase", "failed")
         watch(rest, CI.Cad.busy(CI.Cad.phase(next)), home, attempt, next, wanted)
 
-def cancel(yes: Bool, home: String) -> IO(Unit):
+def cancel(yes: Bool, home: String, attempt: String) -> IO(Unit):
   match yes:
-    case True{}: FX.CadFx.cancel(home, "kicad")
+    case True{}: FX.CadFx.cancel(home, "kicad", attempt)
     case False{}: IO.pure(Unit, Unit{})
 
 def main() -> IO(Unit):
@@ -32,7 +32,9 @@ def main() -> IO(Unit):
     +home : String <- env("TEST_CAD_HOME")
     spec : String <- env("TEST_CAD_SPEC")
     +wanted : String <- env("TEST_CAD_WANTED")
-    +attempt : String <- FX.CadFx.start(home, "kicad", spec)
+    reserved : Bool <- FX.CadFx.reserve(home, "kicad", "1")
+    C.Check.str("compiled immediate reserve", Bool.show(reserved), "True")
+    +attempt : String <- FX.CadFx.start(home, "kicad", "1", spec)
     text : String <- FX.CadFx.next(home, "kicad", attempt)
-    cancel(String.eq(wanted, "cancelled"), home)
+    cancel(String.eq(wanted, "cancelled"), home, attempt)
     watch(60n, True{}, home, attempt, "download", wanted)

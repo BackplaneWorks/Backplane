@@ -10,10 +10,23 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync('src/server/effects/cad-install.js', 'utf8');
-const api = vm.runInNewContext(source + '\n({start:bp_cad_start,next:bp_cad_next_async,cancel:bp_cad_cancel,jobs:bp_cad_jobs})', {
-  require, process, Buffer, fetch, AbortController, performance, setTimeout, clearTimeout,
-  CadFx: {start:1,next:2,cancel:3}, CID: x=>x, io_eff() {},
+const syncCalls = [];
+const effectFS = new Proxy(fs, { get(target, name) {
+  if (String(name).endsWith('Sync')) return () => { syncCalls.push(name); throw Error('synchronous filesystem call in CAD effect: ' + name); };
+  return target[name];
+}});
+const effectRequire = name => name === 'node:fs' ? effectFS : require(name);
+const api = vm.runInNewContext(source + '\n({reserve:bp_cad_reserve,start:bp_cad_start,next:bp_cad_next_async,cancel:bp_cad_cancel,dismiss:bp_cad_dismiss,frame:bp_cad_frame,progress:bp_cad_progress,jobs:bp_cad_jobs})', {
+  require:effectRequire, process, Buffer, fetch, AbortController, performance, setTimeout, clearTimeout,
+  BEND_ASYNC:true, io_park_promise() {}, CadFx: {reserve:0,start:1,next:2,cancel:3,dismiss:4,frame:5}, CID: x=>x, io_eff() {},
 });
+let serial = 0;
+function start(h,tool,spec,attempt=String(++serial)) {
+  if (api.reserve(h,tool,attempt).$ !== 'True') return '';
+  assert.equal(api.jobs.get(h+'\n'+tool).state.phase,'starting','reservation is immediately visible');
+  return api.start(h,tool,attempt,spec);
+}
+function cancel(h,tool,attempt=api.jobs.get(h+'\n'+tool)?.state.attempt) { return api.cancel(h,tool,attempt); }
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bp-cad-progress-'));
 const compiled=path.join(root,'cad-io.js');
 const emit=cp.spawnSync('bend',['test/native/cad_install_io.bend','-o',compiled],{encoding:'utf8',timeout:90000});
@@ -54,8 +67,8 @@ async function collect(h, tool='kicad') {
   assert.fail('installation silently hung');
 }
 try {
-  assert(api.start(home('slow'),'kicad',make()));
-  assert.equal(api.start(home('slow'),'kicad',make()), '','duplicate clients must share a job');
+  assert(start(home('slow'),'kicad',make()));
+  assert.equal(start(home('slow'),'kicad',make()), '','duplicate clients must share a job');
   const progress=await collect(home('slow'));
   assert.equal(progress.at(-1).phase,'ready');
   const downloads=progress.filter(p=>p.phase==='download');
@@ -67,45 +80,117 @@ try {
   // A second client/reload gets the current job, with its same attempt id.
   assert.equal(JSON.parse(await api.next(home('slow'),'kicad')).attempt, progress[0].attempt);
   console.log('ok slow Content-Length download, rate/ETA, phases, duplicate/reload snapshot and throttle');
-  api.start(home('error'),'kicad',make('/error'));
+  start(home('error'),'kicad',make('/error'));
   const error=await collect(home('error')); assert.equal(error.at(-1).phase,'failed'); assert.match(error.at(-1).error,/HTTP 503/);
-  const second = api.start(home('error'),'kicad',make());
+  const second = start(home('error'),'kicad',make());
   assert.equal(await api.next(home('error'),'kicad',error[0].attempt), '', 'old watcher is fenced from a retry');
   assert(second);
   const retry=await collect(home('error')); assert.equal(retry.at(-1).phase,'ready'); assert.notEqual(error[0].attempt,retry[0].attempt);
   console.log('ok HTTP failure is visible and Retry creates a new attempt');
-  api.start(home('cancel'),'kicad',make());
+  start(home('cancel'),'kicad',make());
   const before=JSON.parse(await api.next(home('cancel'),'kicad')); assert.equal(before.phase,'download');
-  api.cancel(home('cancel'),'kicad'); const cancelled=await collect(home('cancel')); assert.equal(cancelled.at(-1).phase,'cancelled');
+  cancel(home('cancel'),'kicad'); const cancelled=await collect(home('cancel')); assert.equal(cancelled.at(-1).phase,'cancelled');
   assert(!fs.readdirSync(home('cancel')).some(n=>n.startsWith('.cad-install-')));
-  api.start(home('cancel'),'kicad',make()); assert.equal((await collect(home('cancel'))).at(-1).phase,'ready');
+  start(home('cancel'),'kicad',make()); assert.equal((await collect(home('cancel'))).at(-1).phase,'ready');
   console.log('ok download Cancel aborts request, cleans staging and permits Retry');
-  api.start(home('extract-cancel'),'kicad',make('/slow','echo "BP_INSTALL extract"; sleep 10; echo unexpected > escaped-child'));
+  start(home('extract-cancel'),'kicad',make('/slow','echo "BP_INSTALL extract"; sleep 10; echo unexpected > escaped-child'));
   let phase=''; for(let i=0;i<10 && phase!=='extract';i++) phase=JSON.parse(await api.next(home('extract-cancel'),'kicad')).phase;
-  assert.equal(phase,'extract'); api.cancel(home('extract-cancel'),'kicad');
+  assert.equal(phase,'extract'); cancel(home('extract-cancel'),'kicad');
   assert.equal((await collect(home('extract-cancel'))).at(-1).phase,'cancelled');
   assert(!fs.readdirSync(home('extract-cancel')).some(n=>n.startsWith('.cad-install-')));
   console.log('ok Cancel during extraction reaps the captured child tree');
-  api.start(home('unknown'),'kicad',make('/unknown'));
+  start(home('unknown'),'kicad',make('/unknown'));
   const unknown=await collect(home('unknown')); assert.equal(unknown.at(-1).phase,'ready');
   assert(unknown.filter(p=>p.phase==='download').every(p=>p.total===0 && !p.known));
   console.log('ok missing Content-Length stays indeterminate');
-  const bad=JSON.parse(make());bad.sha256='0'.repeat(64);api.start(home('digest'),'kicad',JSON.stringify(bad));
+  const bad=JSON.parse(make());bad.sha256='0'.repeat(64);start(home('digest'),'kicad',JSON.stringify(bad));
   assert.match((await collect(home('digest'))).at(-1).error,/checksum mismatch/);
   console.log('ok invalid checksum cannot install');
   await compiledRun(home('compiled-ready'),make(),'ready');
   await compiledRun(home('compiled-error'),make('/error'),'failed');
   await compiledRun(home('compiled-cancel'),make(),'cancelled');
   console.log('ok compiled Bend async effect start/snapshot/error/cancel ABI');
-  const timed=vm.runInNewContext(source+'\n({start:bp_cad_start,next:bp_cad_next_async})',{
-    require,process,Buffer,fetch,AbortController,performance,clearTimeout,
+  const timed=vm.runInNewContext(source+'\n({reserve:bp_cad_reserve,start:bp_cad_start,next:bp_cad_next_async})',{
+    require:effectRequire,process,Buffer,fetch,AbortController,performance,clearTimeout,
     setTimeout:(fn,ms)=>setTimeout(fn,ms===30000?100:ms),
-    CadFx:{start:1,next:2,cancel:3},CID:x=>x,io_eff(){},
+    BEND_ASYNC:true,io_park_promise(){},CadFx:{reserve:0,start:1,next:2,cancel:3,dismiss:4,frame:5},CID:x=>x,io_eff(){},
   });
-  timed.start(home('stalled'),'kicad',make('/stall'));
-  const stalled=JSON.parse(await timed.next(home('stalled'),'kicad'));
+  timed.reserve(home('stalled'),'kicad','1');
+  timed.start(home('stalled'),'kicad','1',make('/stall'));
+  let stalled;
+  for (let i=0;i<20;i++) {
+    stalled=JSON.parse(await timed.next(home('stalled'),'kicad'));
+    if (['failed','cancelled','unavailable','ready'].includes(stalled.phase)) break;
+  }
   assert.equal(stalled.phase,'failed');assert.match(stalled.error,/stalled/);
   console.log('ok stalled HTTP headers terminate with actionable error');
+  const reserved = home('cancel-reservation');
+  assert.equal(api.reserve(reserved,'kicad','1').$,'True');
+  api.dismiss(reserved,'kicad','1');
+  assert(api.jobs.has(reserved+'\nkicad'),'active reserve cannot be dismissed');
+  api.cancel(reserved,'kicad','1');
+  api.start(reserved,'kicad','1',make());
+  assert.equal(JSON.parse(await api.next(reserved,'kicad','1')).phase,'cancelled');
+  assert(!fs.existsSync(reserved),'cancel before platform/setup must not create files');
+  api.dismiss(reserved,'kicad','1');
+  assert(!api.jobs.has(reserved+'\nkicad'),'terminal dismissal clears the effect record');
+  assert.equal(api.reserve(reserved,'kicad','2').$,'True');
+  api.cancel(reserved,'kicad','1');
+  assert(!api.jobs.get(reserved+'\nkicad').controller.signal.aborted,'stale cancel cannot touch a retry');
+  api.cancel(reserved,'kicad','2');api.dismiss(reserved,'kicad','2');
+  console.log('ok immediate reserve, early Cancel, terminal Dismiss and stale controls');
+  const escaped = ('\u0000"\\🚀\ud800').repeat(20000);
+  start(home('catalog-error'),'kicad',JSON.stringify({error:escaped}));
+  const bounded=(await collect(home('catalog-error'))).at(-1);
+  assert.equal(bounded.phase,'unavailable');
+  assert(Buffer.byteLength(JSON.stringify(bounded),'utf8')<=4096);
+  assert(Buffer.byteLength(JSON.stringify(bounded.error),'utf8')<=2048);
+  assert(!/[\ud800-\udfff]/u.test(bounded.error),'no lone surrogate escapes reach Bend JSON');
+  const payload={kicad:bounded,freecad:{...bounded,attempt:'2'}};
+  const envelope=JSON.stringify({t:'info',info:{'cad.install':JSON.stringify(payload)}});
+  assert(Buffer.byteLength(api.frame(envelope),'utf8')<=16384);
+  payload.kicad.error='MASKED'.repeat(20000);payload.freecad.error='MASKED'.repeat(20000);
+  const clipped=api.frame(JSON.stringify({t:'info',info:{'cad.install':JSON.stringify(payload)}}));
+  assert(Buffer.byteLength(clipped,'utf8')<=16384);
+  assert.equal(JSON.parse(JSON.parse(clipped).info['cad.install']).kicad.attempt,bounded.attempt);
+  const malformed=start(home('parse-error'),'kicad','{'+escaped);
+  assert(malformed);assert.equal((await collect(home('parse-error'))).at(-1).phase,'failed');
+  const freecad=JSON.parse(make('/slow','mkdir -p "$1/freecad"; printf "%s\\n" "$1/fixture-freecadcmd" > "$1/freecad/command"'));
+  freecad.platform='linux-x86_64';freecad.version='fixture';
+  start(home('freecad-configure'),'freecad',JSON.stringify(freecad));
+  assert.equal((await collect(home('freecad-configure'),'freecad')).at(-1).phase,'ready');
+  assert.equal(syncCalls.length,0,'entire CAD lifetime must use async fs, including configure and cleanup');
+  console.log('ok central escaped UTF-8 error/state/envelope ceilings and async complete lifetime');
+  let releaseCleanup, cleanupEntered;
+  const cleanupGate = new Promise(resolve => { releaseCleanup = resolve; });
+  const cleanupReady = new Promise(resolve => { cleanupEntered = resolve; });
+  const gatedPromises = new Proxy(fs.promises, { get(target,name) {
+    if (name === 'rm') return async (...args) => { cleanupEntered(); await cleanupGate; return target.rm(...args); };
+    return target[name];
+  }});
+  const gatedFS = new Proxy(effectFS, { get(target,name) { return name === 'promises' ? gatedPromises : target[name]; } });
+  const gated = vm.runInNewContext(source+'\n({reserve:bp_cad_reserve,start:bp_cad_start,next:bp_cad_next_async,cancel:bp_cad_cancel,dismiss:bp_cad_dismiss,jobs:bp_cad_jobs})', {
+    require:name => name === 'node:fs' ? gatedFS : require(name), process, Buffer, fetch, AbortController, performance, setTimeout, clearTimeout,
+    BEND_ASYNC:true,io_park_promise(){},CadFx:{reserve:0,start:1,next:2,cancel:3,dismiss:4,frame:5},CID:x=>x,io_eff(){},
+  });
+  const gatedHome=home('cleanup-gate');
+  gated.reserve(gatedHome,'kicad','1');gated.start(gatedHome,'kicad','1',make('/slow','echo "BP_INSTALL configure"'));
+  let limit;
+  try {
+    await Promise.race([cleanupReady,new Promise((_,reject)=>{limit=setTimeout(()=>reject(Error('cleanup did not start')),5000);})]);
+    assert.equal(JSON.parse(await gated.next(gatedHome,'kicad','1')).phase,'cleanup');
+    assert.equal(gated.jobs.get(gatedHome+'\nkicad').settled,false);
+    assert.equal(gated.reserve(gatedHome,'kicad','2').$,'False','cannot retry during unsettled cleanup');
+    gated.dismiss(gatedHome,'kicad','1');assert(gated.jobs.has(gatedHome+'\nkicad'),'cleanup cannot be dismissed');
+    gated.cancel(gatedHome,'kicad','1');
+  } finally { clearTimeout(limit);releaseCleanup(); }
+  await gated.jobs.get(gatedHome+'\nkicad').promise;
+  assert.equal(JSON.parse(await gated.next(gatedHome,'kicad','1')).phase,'cancelled');
+  assert(!fs.readdirSync(gatedHome).some(n=>n.startsWith('.cad-install-')));
+  assert.equal(syncCalls.length,0);
+  console.log('ok terminal state waits for awaited cleanup; cleanup Cancel/Retry/Dismiss contract');
+
+
 } finally {
   server.closeAllConnections(); await new Promise(resolve=>server.close(resolve));
   fs.rmSync(root,{recursive:true,force:true});

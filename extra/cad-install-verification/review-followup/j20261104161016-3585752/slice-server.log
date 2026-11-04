@@ -1,0 +1,9 @@
+SOME PROOFS FAIL
+Error:
+- expected : a nat literal up to 4294967295n (got 8589934592n)
+- observed : ','
+Location:
+75 |     J.KV{"phase", J.Str{String.take(J.Json.get_str(next, "phase", "failed"), 16n)}},
+76>|     J.KV{"done", J.Json.nat(Nat.min(8589934592n, J.Json.get_nat(next, "done", 0n)))},
+   |                                                ^
+77 |     J.KV{"total", J.Json.nat(Nat.min(8589934592n, J.Json.get_nat(next, "total", 0n)))},

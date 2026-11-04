@@ -16189,3 +16189,10 @@ law cad_install_monotonic:
   for +old: Nat
   for next: Nat
   {Nat.is_ge(CADINSTALL.Cad.advance(True{}, old, next), old) == True{} : Bool}
+
+# Consumer-side rejection leaves the snapshot byte-for-byte unchanged.
+law cad_install_rejected_snapshot:
+  for +current: J.Json
+  for +next: J.Json
+  for h: {CADINSTALL.Cad.accepts(current, next) == False{} : Bool}
+  {CADINSTALL.Cad.receive(current, next) == current : J.Json}

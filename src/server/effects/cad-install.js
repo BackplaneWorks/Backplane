@@ -2,10 +2,38 @@
 // One bounded streaming download and one captured child tree per tool.
 const bp_cad_jobs = new Map();
 const bp_cad_terminal = new Set(['ready', 'failed', 'cancelled', 'unavailable']);
+const BP_CAD_STATE_BYTES = 4096;
+const BP_CAD_FRAME_BYTES = 16384;
 function bp_cad_key(home, tool) { return home + '\n' + tool; }
+// Clamp at the one state-construction boundary, including catalog, parse,
+// timeout, cleanup and effect-wrapper errors. Count JSON's escaped UTF-8,
+// not JS string length: one control character occupies six wire bytes.
+function bp_cad_error(value) {
+  let text = '';
+  let readable;
+  try { readable = String(value ?? ''); } catch (_) { readable = 'Installation failed without readable error details.'; }
+  for (const char of readable.slice(-2048)) {
+    const scalar = char.codePointAt(0);
+    text += scalar >= 0xd800 && scalar <= 0xdfff ? '\ufffd' : char;
+  }
+  const scalars = Array.from(text);
+  while (Buffer.byteLength(JSON.stringify(scalars.join('')), 'utf8') > 2048) scalars.shift();
+  text = scalars.join('');
+  return text;
+}
+function bp_cad_number(value) {
+  return Number.isSafeInteger(value) ? Math.max(0, Math.min(8 * 1024 ** 3, value)) : 0;
+}
+function bp_cad_wire(state) {
+  const text = JSON.stringify(state);
+  if (Buffer.byteLength(text, 'utf8') > BP_CAD_STATE_BYTES) throw new Error('CAD state exceeds its serialized UTF-8 ceiling');
+  return text;
+}
 function bp_cad_progress(job, phase, fields = {}) {
-  const done = phase === job.state.phase ? Math.max(job.state.done, fields.done || 0) : fields.done || 0;
-  job.state = { attempt: job.state.attempt, phase, done, total: 0, speed: 0, eta: 0, known: false, error: '', ...fields, done };
+  const reading = bp_cad_number(fields.done);
+  const done = phase === job.state.phase ? Math.max(job.state.done, reading) : reading;
+  job.state = { attempt: job.state.attempt, phase, done, total: bp_cad_number(fields.total), speed: bp_cad_number(fields.speed), eta: bp_cad_number(fields.eta), known: fields.known === true, error: bp_cad_error(fields.error) };
+  bp_cad_wire(job.state);
 }
 function bp_cad_check(job) {
   if (job.controller.signal.aborted && !job.committed) throw new Error(job.reason || 'Cancelled');
@@ -97,12 +125,15 @@ async function bp_cad_run(job, program, args, cwd) {
 }
 async function bp_cad_execute(job, home, tool, spec) {
   const fs = require('node:fs'), path = require('node:path');
-  let stage, timeout;
+  let stage, timeout, outcome = ['ready', {}];
   try {
-    if (spec.error) { bp_cad_progress(job, 'unavailable', { error: spec.error }); return; }
+    bp_cad_check(job);
+    if (spec.error) { outcome = ['unavailable', { error: spec.error }]; return; }
     if (!['kicad', 'freecad'].includes(tool)) throw new Error('Unknown CAD tool');
-    fs.mkdirSync(home, { recursive: true });
-    stage = fs.mkdtempSync(path.join(home, '.cad-install-'));
+    await fs.promises.mkdir(home, { recursive: true });
+    bp_cad_check(job);
+    stage = await fs.promises.mkdtemp(path.join(home, '.cad-install-'));
+    bp_cad_check(job);
     timeout = setTimeout(() => { job.reason = 'Installation timed out after 30 minutes. Retry to start again.'; job.controller.abort(); }, 1800000);
     const archive = path.join(stage, spec.asset);
     await bp_cad_download(job, spec.url, archive, spec.sha256);
@@ -114,53 +145,113 @@ async function bp_cad_execute(job, home, tool, spec) {
       bp_cad_progress(job, 'extract');
       await bp_cad_run(job, 'sh', ['-c', spec.script, 'sh', home, archive, spec.platform, spec.version], stage);
       bp_cad_progress(job, 'configure');
-      const command = fs.readFileSync(path.join(home, 'freecad', 'command'), 'utf8').trim();
+      const command = (await fs.promises.readFile(path.join(home, 'freecad', 'command'), 'utf8')).trim();
       if (!command) throw new Error('FreeCAD command was not configured');
       process.env.BACKPLANE_FREECAD = command;
     }
     bp_cad_check(job);
-    bp_cad_progress(job, 'ready');
   } catch (e) {
     // An explicit cancel differs from a timeout/network error and remains retryable.
-    bp_cad_progress(job, job.cancelled ? 'cancelled' : 'failed', { error: job.cancelled ? '' : String(job.reason || e.message || e).slice(-2048) });
+    outcome = [job.cancelled ? 'cancelled' : 'failed', { error: job.cancelled ? '' : job.reason || e.message || e }];
   } finally {
     clearTimeout(timeout); clearTimeout(job.killTimer);
-    if (stage) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch (_) {} }
+    if (stage) {
+      bp_cad_progress(job, 'cleanup');
+      try { await fs.promises.rm(stage, { recursive: true, force: true }); }
+      catch (error) { outcome = ['failed', { error: 'Could not remove installation staging files: ' + String(error.message || error) }]; }
+    }
+    if (job.cancelled && !job.committed && outcome[0] === 'ready') outcome = ['cancelled', {}];
+    // Retry and terminal dismissal are available only after cleanup settles.
+    job.settled = true;
+    bp_cad_progress(job, ...outcome);
   }
 }
-function bp_cad_start(home, tool, text) {
+function bp_cad_reserve(home, tool, attempt) {
   const key = bp_cad_key(home, tool), previous = bp_cad_jobs.get(key);
-  if (previous && !bp_cad_terminal.has(previous.state.phase)) return '';
-  const job = { controller: new AbortController(), cancelled: false, state: { attempt: require('node:crypto').randomUUID(), phase: 'download', done: 0 } };
+  if (!['kicad', 'freecad'].includes(tool) || !/^[1-9][0-9]{0,15}$/.test(attempt)) return { $: 'False' };
+  if (previous && !previous.settled) return { $: 'False' };
+  const job = { controller: new AbortController(), cancelled: false, started: false, settled: false, state: { attempt, phase: 'starting', done: 0 } };
+  bp_cad_progress(job, 'starting');
   bp_cad_jobs.set(key, job);
+  return { $: 'True' };
+}
+function bp_cad_start(home, tool, attempt, text) {
+  const job = bp_cad_jobs.get(bp_cad_key(home, tool));
+  if (!job || job.state.attempt !== attempt || job.started) return '';
+  job.started = true;
+  if (job.controller.signal.aborted) return attempt;
+  if (globalThis.BEND_ASYNC !== true || typeof io_park_promise !== 'function') {
+    job.settled = true;
+    bp_cad_progress(job, 'failed', { error: 'CAD installation needs the async hub loop. Remove BACKPLANE_JS_LOOP=sync and restart Backplane, then retry.' });
+    return attempt;
+  }
   // Parsing and filesystem/network failures become a terminal snapshot too.
-  job.promise = Promise.resolve().then(() => bp_cad_execute(job, home, tool, JSON.parse(text))).catch(e => bp_cad_progress(job, 'failed', { error: String(e.message || e) }));
+  job.promise = Promise.resolve().then(() => bp_cad_execute(job, home, tool, JSON.parse(text))).catch(e => {
+    job.settled = true;
+    bp_cad_progress(job, 'failed', { error: e.message || e });
+  });
   return job.state.attempt;
 }
 async function bp_cad_next_async(home, tool, attempt) {
   // Exactly one watcher per active job. Its snapshots, including phase edges,
-  // are published at most 4/s; no timer or repaint remains after completion.
+  // are sampled at most 4/s per tool (8/s with both active). Phase edges
+  // and the immediate hub reservation are separate control transitions.
   await new Promise(resolve => setTimeout(resolve, 250));
   const state = bp_cad_jobs.get(bp_cad_key(home, tool))?.state;
   if (attempt && state?.attempt !== attempt) return '';
-  return JSON.stringify(state || { phase: 'failed', error: 'Installation job is missing. Retry.' });
+  if (!state) return '';
+  return bp_cad_wire(state);
 }
 // Bend effects park their continuation; returning a Promise is not a String.
 function bp_cad_next(home, tool, attempt, k) {
   if (globalThis.BEND_ASYNC === false || typeof io_park_promise !== 'function') {
     const job = bp_cad_jobs.get(bp_cad_key(home, tool));
     const error = 'CAD installation needs the async hub loop. Remove BACKPLANE_JS_LOOP=sync and restart Backplane, then retry.';
-    if (job) { job.reason = error; job.controller.abort(); bp_cad_progress(job, 'failed', { error }); }
-    return JSON.stringify(job?.state || { attempt, phase: 'failed', error });
+    if (job && !job.promise) { job.settled = true; bp_cad_progress(job, 'failed', { error }); }
+    return job ? bp_cad_wire(job.state) : '';
   }
   return io_park_promise(bp_cad_next_async(home, tool, attempt), k,
-    (value, error) => error === undefined ? value : JSON.stringify({ attempt, phase: 'failed', error: 'Could not read installation progress. Retry.' }));
+    (value, error) => {
+      if (error === undefined) return value;
+      const job = bp_cad_jobs.get(bp_cad_key(home, tool));
+      if (!job || job.state.attempt !== attempt) return '';
+      job.reason = 'Could not read installation progress. Retry.';
+      job.controller.abort();
+      return io_park_promise(job.promise || Promise.resolve(), k, () => bp_cad_wire(job.state));
+    });
 }
-function bp_cad_cancel(home, tool) {
+function bp_cad_cancel(home, tool, attempt) {
   const job = bp_cad_jobs.get(bp_cad_key(home, tool));
-  if (job && !job.committing && !bp_cad_terminal.has(job.state.phase)) { job.cancelled = true; job.controller.abort(); }
+  if (job && job.state.attempt === attempt && !job.committing && !bp_cad_terminal.has(job.state.phase)) {
+    job.cancelled = true; job.controller.abort();
+    if (!job.started) { job.settled = true; bp_cad_progress(job, 'cancelled'); }
+  }
   return { $: 'Unit' };
 }
+function bp_cad_dismiss(home, tool, attempt) {
+  const key = bp_cad_key(home, tool), job = bp_cad_jobs.get(key);
+  if (job && job.state.attempt === attempt && job.settled && bp_cad_terminal.has(job.state.phase)) bp_cad_jobs.delete(key);
+  return { $: 'Unit' };
+}
+// The argument has ALREADY passed through Info.json/Vault masking. Limit
+// the CAD-specific progress envelope, without bypassing secret masking or
+// claiming a bound on generic join frames containing unrelated hub info.
+function bp_cad_frame(text) {
+  if (Buffer.byteLength(text, 'utf8') <= BP_CAD_FRAME_BYTES) return text;
+  const frame = JSON.parse(text), states = JSON.parse(frame.info['cad.install']);
+  const bounded = {};
+  for (const tool of ['kicad', 'freecad']) {
+    if (!states[tool]) continue;
+    const state = states[tool];
+    bounded[tool] = { attempt: String(state.attempt || '').slice(0, 64), phase: String(state.phase || 'failed').slice(0, 32), done: bp_cad_number(state.done), total: bp_cad_number(state.total), speed: bp_cad_number(state.speed), eta: bp_cad_number(state.eta), known: state.known === true, error: 'Installation details exceeded the message size limit.' };
+  }
+  const result = JSON.stringify({ t: 'info', info: { 'cad.install': JSON.stringify(bounded) } });
+  if (Buffer.byteLength(result, 'utf8') > BP_CAD_FRAME_BYTES) throw new Error('CAD envelope exceeds its serialized UTF-8 ceiling');
+  return result;
+}
+io_eff(CID(CadFx.reserve), bp_cad_reserve);
 io_eff(CID(CadFx.start), bp_cad_start);
 io_eff(CID(CadFx.next), bp_cad_next);
 io_eff(CID(CadFx.cancel), bp_cad_cancel);
+io_eff(CID(CadFx.dismiss), bp_cad_dismiss);
+io_eff(CID(CadFx.frame), bp_cad_frame);

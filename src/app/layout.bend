@@ -3537,7 +3537,7 @@ def Kn.close(on: Bool, +key: String, +ty: Ty, +x: U32, +y: U32) -> Out:
 
 def Cadbar.draw(+p: J.Json, +x: U32, +y: U32, +w: U32) -> Out:
   +phase = J.Json.get_str(p, "phase", "idle")
-  +portion = Bool.pick(Nat, CIP.Cad.known(p), CIP.Cad.fraction(p), Bool.pick(Nat, String.eq(phase, "configure"), 900n, Bool.pick(Nat, String.eq(phase, "extract"), 650n, 350n)))
+  +portion = Bool.pick(Nat, CIP.Cad.known(p), CIP.Cad.fraction(p), Bool.pick(Nat, String.eq(phase, "starting"), 0n, Bool.pick(Nat, String.eq(phase, "cleanup"), 950n, Bool.pick(Nat, String.eq(phase, "configure"), 900n, Bool.pick(Nat, String.eq(phase, "extract"), 650n, 350n)))))
   Bool.pick(Out, CIP.Cad.busy(CIP.Cad.phase(phase)), Out.ops([
     D.Draw.rect(D.Clip.all(), x, y, w, 6, T.Th.faint(), 255),
     D.Draw.rect(D.Clip.all(), x, y, U32.from_nat(Nat.div(Nat.mul(U32.to_nat(w), portion), 1000n)), 6, T.Th.accent(), 255)]), Out.none())
@@ -3546,6 +3546,9 @@ def Cadbar.note(acts: List<&2, KH.KAct>) -> J.Json:
   match acts:
     case KH.KAct{_, _, v} <> _: Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{})
     case _: J.Null{}
+
+def Kn.dismiss(+on: Bool, +key: String, +ty: Ty, +x: U32, +y: U32) -> Out:
+  Bool.pick(Out, String.starts_with(key, "cad.install:"), Out.none(), Kn.close(on, key, ty, x, y))
 
 def Kn.draw(n: Maybe<&2, KH.KNote>, dismiss: Bool, +ty: Ty, +x: U32, +y: U32, +w: U32) -> Out:
   match n:
@@ -3557,7 +3560,7 @@ def Kn.draw(n: Maybe<&2, KH.KNote>, dismiss: Bool, +ty: Ty, +x: U32, +y: U32, +w
       +by = {(y + 12 + U32.from_nat(List.length(&2, String, ts)) * 24 : U32) : U32}
       Out.all([Out.ops(List.concat(&2, R.Op, [Lay.box(D.Clip.all(), x, y, w, h, 0, T.Th.panel(), T.Th.warn()),
         Kn.lines(ts, ty, 1n, (x + 16 : U32), (y + 10 : U32), 24, T.Th.text()), Kn.lines(bs, ty, 2n, (x + 16 : U32), by, 20, T.Th.dim())])),
-        Kn.acts(acts, ty, (x + 16 : U32), (y + h - 42 : U32)), Cadbar.draw(Cadbar.note(acts), (x + 16 : U32), (y + h - 53 : U32), (w - 32 : U32)), Kn.close(dismiss, key, ty, (x + w - 42 : U32), (y + 6 : U32))])
+        Kn.acts(acts, ty, (x + 16 : U32), (y + h - 42 : U32)), Cadbar.draw(Cadbar.note(acts), (x + 16 : U32), (y + h - 53 : U32), (w - 32 : U32)), Kn.dismiss(dismiss, key, ty, (x + w - 42 : U32), (y + 6 : U32))])
 
 def Kn.path(+ty: Ty, +n: S.Nui, +x: U32, +y: U32, +w: U32) -> Out:
   Lay.field(ty, D.Clip.all(), x, y, w, U.Ui.scratch(S.Nui.ui(n), "@f.kpath"), String.eq(S.Nui.focus_of(n), S.Fld.id("kpath", "setting", "kicad.path=")), S.Blink.on(n), S.Nui.caret_of(n), S.Nui.mark(n),

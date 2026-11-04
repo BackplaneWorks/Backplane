@@ -1781,12 +1781,15 @@ def View.kn.close.loc(+lc: I.Loc, on: Bool, +key: String) -> List<&2, D.Node>:
 def View.kn.close(on: Bool, +key: String) -> List<&2, D.Node>:
   View.kn.close.loc(I.En{}, on, key)
 
+def View.kn.dismiss.loc(+lc: I.Loc, +on: Bool, +key: String, +acts: List<&2, KH.KAct>) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, String.starts_with(key, "cad.install:"), Nil{}, View.kn.close.loc(lc, on, key))
+
 def View.kn.loc(+lc: I.Loc, n: Maybe<&2, KH.KNote>, dismiss: Bool) -> List<&2, D.Node>:
   match n:
     case None{}: Nil{}
     case Some{KH.KNote{key, title, body, acts}}:
       [D.El{"div", "kicad-notice", [D.At{"class", "kicad-notice"}], List.concat(&2, D.Node, [
-        [D.El{"strong", "", Nil{}, [D.Txt{title}]}, D.El{"p", "", Nil{}, [D.Txt{body}]}, D.El{"div", "", [D.At{"class", "kn-actions"}], View.kn.acts(acts)}], View.kn.close.loc(lc, dismiss, key)])}]
+        [D.El{"strong", "", Nil{}, [D.Txt{title}]}, D.El{"p", "", Nil{}, [D.Txt{body}]}, D.El{"div", "", [D.At{"class", "kn-actions"}], View.kn.acts(acts)}], View.kn.dismiss.loc(lc, dismiss, key, acts)])}]
 
 def View.kn(n: Maybe<&2, KH.KNote>, dismiss: Bool) -> List<&2, D.Node>:
   View.kn.loc(I.En{}, n, dismiss)

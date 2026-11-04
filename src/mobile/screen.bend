@@ -2193,7 +2193,7 @@ def Mob.voice.terms(+lc: I.Loc, ts: List<&2, String>) -> List<&2, J.Json>:
 
 def Mob.cad.row(+u: U.Ui, +tool: String) -> J.Json:
   +nf = U.Ui.infos(u)
-  Mob.cad.note(Bool.pick(String, String.eq(tool, "kicad"), "Backplane KiCad", "FreeCAD"), CIP.Cad.note(U.Cadview.at(nf, tool)), [U.Cadview.btn(nf, tool)], U.Cadview.at(nf, tool))
+  Mob.cad.note(Bool.pick(String, String.eq(tool, "kicad"), "Backplane KiCad", "FreeCAD"), CIP.Cad.note(U.Cadview.at(nf, tool)), U.Cadview.acts(nf, tool), U.Cadview.at(nf, tool))
 
 # Keep main's shared model/progress and learned-rule rows; the phone adds
 # the dictionary editor without recreating older download controls.

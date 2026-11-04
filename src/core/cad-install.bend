@@ -6,10 +6,12 @@ import ./json-object.bend as JO
 # is a visible recoverable error, never a blank row or a disabled action.
 type CadPhase is Data:
   CadIdle{}
+  CadStarting{}
   CadDownload{}
   CadVerify{}
   CadExtract{}
   CadConfigure{}
+  CadCleanup{}
   CadReady{}
   CadFailed{}
   CadCancelled{}
@@ -18,10 +20,12 @@ type CadPhase is Data:
 def Cad.phase(s: String) -> CadPhase:
   match s:
     case "idle": CadIdle{}
+    case "starting": CadStarting{}
     case "download": CadDownload{}
     case "verify": CadVerify{}
     case "extract": CadExtract{}
     case "configure": CadConfigure{}
+    case "cleanup": CadCleanup{}
     case "ready": CadReady{}
     case "cancelled": CadCancelled{}
     case "unavailable": CadUnavailable{}
@@ -29,19 +33,23 @@ def Cad.phase(s: String) -> CadPhase:
 
 def Cad.busy(p: CadPhase) -> Bool:
   match p:
+    case CadStarting{}: True{}
     case CadDownload{}: True{}
     case CadVerify{}: True{}
     case CadExtract{}: True{}
     case CadConfigure{}: True{}
+    case CadCleanup{}: True{}
     case _: False{}
 
 def Cad.status(p: CadPhase) -> String:
   match p:
     case CadIdle{}: "Ready to install on this hub"
+    case CadStarting{}: "Preparing installation…"
     case CadDownload{}: "Downloading…"
     case CadVerify{}: "Verifying checksum…"
     case CadExtract{}: "Extracting…"
     case CadConfigure{}: "Configuring…"
+    case CadCleanup{}: "Cleaning up…"
     case CadReady{}: "Installed"
     case CadFailed{}: "Installation failed"
     case CadCancelled{}: "Installation cancelled"
@@ -75,6 +83,71 @@ def Cad.advance(same: Bool, old: Nat, next: Nat) -> Nat:
 def Cad.merge(+old: J.Json, +next: J.Json) -> J.Json:
   JO.Obj.put(next, "done", J.Json.nat(Cad.advance(Bool.and(String.eq(J.Json.get_str(old, "attempt", ""), J.Json.get_str(next, "attempt", "")),
     String.eq(J.Json.get_str(old, "phase", ""), J.Json.get_str(next, "phase", ""))), J.Json.get_nat(old, "done", 0n), J.Json.get_nat(next, "done", 0n))))
+
+# A reservation, not a polling watcher, creates the next generation. Retain
+# the counter even after terminal dismissal, so captured old messages can
+# never replace an accepted retry or resurrect a dismissed result.
+def Cad.begin(+old: J.Json) -> J.Json:
+  +generation : Nat = Nat.add(1n, J.Json.get_nat(old, "generation", 0n))
+  J.Json.obj([J.KV{"attempt", J.Str{Nat.show(generation)}}, J.KV{"generation", J.Json.nat(generation)},
+    J.KV{"phase", J.Str{"starting"}}, J.KV{"done", J.Num{"0"}}])
+
+def Cad.dismiss(+old: J.Json) -> J.Json:
+  J.Json.obj([J.KV{"attempt", J.Str{J.Json.get_str(old, "attempt", "")}}, J.KV{"generation", J.Json.nat(J.Json.get_nat(old, "generation", 0n))},
+    J.KV{"phase", J.Str{"dismissed"}}])
+
+def Cad.terminal(+p: J.Json) -> Bool:
+  List.contains(~String, ~String.eq, ["ready", "failed", "cancelled", "unavailable"], J.Json.get_str(p, "phase", ""))
+
+def Cad.expected(+current: J.Json, +attempt: String) -> Bool:
+  String.eq(J.Json.get_str(current, "attempt", ""), attempt)
+
+def Cad.accepts(+current: J.Json, +next: J.Json) -> Bool:
+  Bool.and(Bool.not(String.is_empty(J.Json.get_str(current, "attempt", ""))),
+    Bool.and(Cad.expected(current, J.Json.get_str(next, "attempt", "")),
+      Bool.and(Bool.not(String.eq(J.Json.get_str(current, "phase", ""), "dismissed")), Bool.not(Cad.terminal(current)))))
+
+# Reconstruct from known fields only. This also bounds snapshots arriving at
+# the consumer; producer-side clamping alone cannot constrain a queue input.
+# Error text: <=256 scalar values, <=1536 escaped UTF-8 bytes in JSON.
+def Cad.clean(+current: J.Json, +next: J.Json) -> J.Json:
+  J.Json.obj([J.KV{"attempt", J.Str{String.take(J.Json.get_str(current, "attempt", ""), 64n)}},
+    J.KV{"generation", J.Json.nat(J.Json.get_nat(current, "generation", 0n))},
+    J.KV{"phase", J.Str{String.take(J.Json.get_str(next, "phase", "failed"), 16n)}},
+    J.KV{"done", J.Json.nat(Nat.min(Nat.mul(8n, 1073741824n), J.Json.get_nat(next, "done", 0n)))},
+    J.KV{"total", J.Json.nat(Nat.min(Nat.mul(8n, 1073741824n), J.Json.get_nat(next, "total", 0n)))},
+    J.KV{"speed", J.Json.nat(Nat.min(Nat.mul(8n, 1073741824n), J.Json.get_nat(next, "speed", 0n)))},
+    J.KV{"eta", J.Json.nat(Nat.min(Nat.mul(8n, 1073741824n), J.Json.get_nat(next, "eta", 0n)))},
+    J.KV{"known", J.Flag{J.Json.get_bool(next, "known", False{})}},
+    J.KV{"error", J.Str{String.take(J.Json.get_str(next, "error", ""), 256n)}}])
+
+def Cad.receive.k(accepted: Bool, +current: J.Json, next: J.Json) -> J.Json:
+  match accepted:
+    case False{}: current
+    case True{}: Cad.merge(current, Cad.clean(current, next))
+
+def Cad.receive(+current: J.Json, +next: J.Json) -> J.Json:
+  Cad.receive.k(Cad.accepts(current, next), current, next)
+
+def Cad.can_start(+current: J.Json, +expected: String) -> Bool:
+  Bool.and(Bool.not(Cad.busy(Cad.phase(J.Json.get_str(current, "phase", "idle")))), Bool.or(String.is_empty(expected), Cad.expected(current, expected)))
+
+def Cad.can_cancel(+current: J.Json, expected: String) -> Bool:
+  Bool.and(Cad.busy(Cad.phase(J.Json.get_str(current, "phase", "idle"))), Cad.expected(current, expected))
+
+def Cad.can_dismiss(+current: J.Json, expected: String) -> Bool:
+  Bool.and(Cad.terminal(current), Cad.expected(current, expected))
+
+def Cad.clear.k(allowed: Bool, +current: J.Json) -> J.Json:
+  match allowed:
+    case False{}: current
+    case True{}: Cad.dismiss(current)
+
+def Cad.clear(+current: J.Json, expected: String) -> J.Json:
+  Cad.clear.k(Cad.can_dismiss(current, expected), current)
+
+def Cad.tool(+tool: String) -> Bool:
+  Bool.or(String.eq(tool, "kicad"), String.eq(tool, "freecad"))
 
 def Cad.mb(n: Nat) -> String:
   Nat.show(Nat.div(n, 1000000n))

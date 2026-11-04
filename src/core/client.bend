@@ -953,7 +953,7 @@ def KN.ipc(n: Maybe<&2, KH.KNote>, +servers: String) -> Maybe<&2, KH.KNote>:
 
 # Installing Backplane KiCad: info kicad.install is "installing" from the
 # press (Ui.act 21) until the hub says "installed" or "failed" (server
-# Install.go, why in kicad.install.why), and the notice says which at once
+# legacy update messages, why in kicad.install.why), and the notice says which at once
 def KN.install.act(+state: String, +l: String) -> KH.KAct:
   match state:
     case "installing": KH.KAct{"Installing…", "kicad-installing", ""}
@@ -993,8 +993,17 @@ def KN.of.k(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
   KN.ipc(KH.KH.notice(Str.get(info, "kicad.status"), Str.get(info, "kicad.cli"), Str.get(info, "kicad.version"), Str.get(info, "kicad.why"), String.eq(Str.get(info, "kicad.can_install"), "1")), Str.get(info, "kicad.ipc.servers"))
 
 # Hub-owned CAD jobs. The snapshot is part of info, not a page's scratch.
+def Cadview.raw(+info: Map<&2, String>, tool: String) -> J.Json:
+  J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Str.get(info, "cad.install")), J.Null{}), tool)
+
+def Cadview.at.k(cleared: Bool, current: J.Json, fallback: J.Json) -> J.Json:
+  match cleared:
+    case True{}: fallback
+    case False{}: current
+
 def Cadview.at(+info: Map<&2, String>, +tool: String) -> J.Json:
-  Maybe.default(&2, J.Json, J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(Str.get(info, "cad.install")), J.Null{}), tool),
+  +current = Cadview.raw(info, tool)
+  Cadview.at.k(Bool.or(String.is_empty(J.Json.get_str(current, "phase", "")), String.eq(J.Json.get_str(current, "phase", ""), "dismissed")), current,
     J.Json.obj([J.KV{"phase", J.Str{Bool.pick(String, Bool.pick(Bool, String.eq(tool, "freecad"), Bool.not(String.is_empty(Str.get(info, "freecad"))), String.eq(Str.get(info, "kicad.status"), "ok")), "ready", "idle")}}]))
 
 def Cadview.phase(+info: Map<&2, String>, +tool: String) -> CIP.CadPhase:
@@ -1006,9 +1015,15 @@ def Cadview.value(+info: Map<&2, String>, +tool: String) -> String:
 def Cadview.btn(+info: Map<&2, String>, +tool: String) -> KH.KAct:
   KH.KAct{CIP.Cad.button(Cadview.phase(info, tool)), CIP.Cad.action(Cadview.phase(info, tool)), Cadview.value(info, tool)}
 
+def Cadview.acts(+info: Map<&2, String>, +tool: String) -> List<&2, KH.KAct>:
+  List.append(&2, KH.KAct, [Cadview.btn(info, tool)],
+    Bool.pick(List<&2, KH.KAct>, CIP.Cad.terminal(Cadview.raw(info, tool)), [KH.KAct{"Dismiss", "cad-dismiss", Cadview.value(info, tool)}], Nil{}))
+
+# Used by each notice renderer: active jobs have Cancel, terminal jobs have
+# the shared Dismiss action. No CAD close writes a persistent hidden setting.
 def Cadview.notice(+info: Map<&2, String>, fallback: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
   Bool.pick(Maybe<&2, KH.KNote>, Bool.and(Bool.not(String.is_empty(J.Json.get_str(Cadview.at(info, "kicad"), "attempt", ""))), Bool.not(String.eq(J.Json.get_str(Cadview.at(info, "kicad"), "phase", ""), "ready"))),
-    Some{KH.KNote{"cad.install:" ++ J.Json.get_str(Cadview.at(info, "kicad"), "attempt", ""), "Backplane KiCad", CIP.Cad.note(Cadview.at(info, "kicad")), [Cadview.btn(info, "kicad")]}}, fallback)
+    Some{KH.KNote{"cad.install:" ++ J.Json.get_str(Cadview.at(info, "kicad"), "attempt", ""), "Backplane KiCad", CIP.Cad.note(Cadview.at(info, "kicad")), Cadview.acts(info, "kicad")}}, fallback)
 
 def KN.of(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
   Cadview.notice(info, KN.install(Str.get(info, "kicad.install"), Str.get(info, "kicad.install.why"), KN.of.k(info, st)))
@@ -1114,7 +1129,7 @@ def Ui.update.k(u: Ui, +o: J.Json) -> Ui:
       Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w,
         J.Json.get_str(o, "error", ""), Ui.update.note(J.Json.get_str(o, "version", ""), J.Json.get_str(o, "state", "")), nf, ob, tr}
 
-# a KiCad install's news (server Install.go: "kicad") goes to its notice
+# a legacy KiCad install update ("kicad") goes to its notice
 # (KN.install), not to the app's update line or error banner
 def Ui.update.kicad(plain: Bool, u: Ui, +k: String, +o: J.Json) -> Ui:
   match plain:
@@ -11635,11 +11650,15 @@ def Ui.infos(u: Ui) -> Map<&2, String>:
     case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
       nf
 
+def Cadview.buttons(acts: List<&2, KH.KAct>) -> List<&2, AgBtn>:
+  match acts:
+    case Nil{}: Nil{}
+    case KH.KAct{label, action, value} <> rest: AgBtn{label, action, value, False{}} <> Cadview.buttons(rest)
+
 def Cadview.row(+u: Ui, +tool: String) -> AgRow:
   +nf = Ui.infos(u)
-  +phase = Cadview.phase(nf, tool)
   AgRow{Bool.pick(String, String.eq(tool, "kicad"), "Backplane KiCad", "FreeCAD"), CIP.Cad.note(Cadview.at(nf, tool)), Nil{},
-    [AgBtn{CIP.Cad.button(phase), CIP.Cad.action(phase), Cadview.value(nf, tool), False{}}]}
+    Cadview.buttons(Cadview.acts(nf, tool))}
 
 def Sealed.arg(+form: String) -> String:
   String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
@@ -17391,14 +17410,15 @@ def Ui.act.home(home: Bool, +u: Ui, +action: String, +value: String) -> Act:
 def Cadview.tool(value: String) -> String:
   Bool.pick(String, String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}), "tool", ""), "freecad"), "freecad", "kicad")
 
-def Cadview.rpc(+u: Ui, value: String, op: String) -> Act:
-  Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{Cadview.tool(value)}}, J.KV{"op", J.Str{op}}])
+def Cadview.rpc(+u: Ui, +value: String, op: String) -> Act:
+  Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{Cadview.tool(value)}}, J.KV{"op", J.Str{op}}, J.KV{"attempt", J.Str{J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}), "attempt", "")}}])
 
 def Cadview.dispatch(+u: Ui, action: String, +value: String) -> Act:
   match action:
     case "cad-install": Cadview.rpc(u, value, "start")
     case "cad-cancel": Cadview.rpc(u, value, "cancel")
     case "cad-refresh": Cadview.rpc(u, value, "refresh")
+    case "cad-dismiss": Cadview.rpc(u, value, "dismiss")
     case "cad-guide": Ui.act.home(False{}, u, "open-url", Bool.pick(String, String.eq(Cadview.tool(value), "freecad"), "https://www.freecad.org/downloads.php", "https://github.com/i2cjak/Backplane_KiCad/releases"))
     case _: Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)
 
