@@ -231,6 +231,15 @@ function perf_take() {
     perf_put(s, v);
     row(name, s);
   };
+  // Fixed registered names and numeric counters only; no cache keys/values.
+  const caches = globalThis.BACKPLANE_CACHES?.metrics();
+  if (caches) {
+    g('cache.charged_bytes', caches.chargedBytes);
+    g('cache.max_bytes', caches.maxBytes);
+    for (const c of caches.slots) {
+      for (const key of ['entries','chargedBytes','hits','misses','evictions','expired','rejected']) g('cache.' + c.name + '.' + key, c[key]);
+    }
+  }
   const memory = typeof process !== "undefined" ? process.memoryUsage() : {};
   const heap = perf_heap(memory);
   const ru = typeof process !== "undefined" && process.resourceUsage ? process.resourceUsage() : null;
