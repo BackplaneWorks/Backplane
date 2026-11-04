@@ -339,8 +339,9 @@ type Msg is Data:
   ChecksAsk{thread: String, hash: String, text: String}
   MachinesFound{machines: String}
   # time to ask the machines this hub should pair with (Machines.loop:
-  # right after each machines list and once between two)
-  PairDue{}
+  # right after each machines list and once between two); the round sends
+  # on ack once it is over (TN.Pairing.ask)
+  PairDue{ack: Chan(Unit)}
   # the tailnet listener is up: the pairing link clients show in Settings
   LinkFound{link: String}
   # a Codex or Grok turn's process started: the one the hub now hears (and
@@ -6170,9 +6171,9 @@ def Machines.tell(+inbox: Chan(Msg), +now: String, +last: String) -> IO(String):
 # comes, and the first no longer waits for a minute tick that ran before
 # any list was found (two hubs paired 60.5 s after start with the list
 # ready at 0.58 s: lane B's far_latency).
-def Machines.pair(+inbox: Chan(Msg)) -> IO(Unit):
+def Machines.pair(+inbox: Chan(Msg), +ack: Chan(Unit)) -> IO(Unit):
   do IO<Unit>:
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PairDue{})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PairDue{ack})
     return Unit{}
 
 # `tailscale status --json`, only on the tailnet: a hub started with
@@ -6185,7 +6186,7 @@ def Machines.status(on: Bool) -> IO(String):
       IO.pure(String, "")
 
 # one period of TN.Pairing.plan; the machines list it last sent
-def Machines.run(ps: List<&2, TN.PStep>, +inbox: Chan(Msg), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(String):
+def Machines.run(ps: List<&2, TN.PStep>, +inbox: Chan(Msg), +ack: Chan(Unit), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(String):
   match ps:
     case Nil{}:
       IO.pure(String, last)
@@ -6194,29 +6195,30 @@ def Machines.run(ps: List<&2, TN.PStep>, +inbox: Chan(Msg), +on: Bool, +port: U3
         +st : String <- Machines.status(on)
         found : String <- Machines.ask(on, st, port, extra)
         now : String <- Machines.tell(inbox, found, last)
-        Machines.run(t, inbox, on, port, extra, now)
+        Machines.run(t, inbox, ack, on, port, extra, now)
     case TN.PAsk{} <> t:
       do IO<String>:
-        Machines.pair(inbox)
-        Machines.run(t, inbox, on, port, extra, last)
+        TN.Pairing.ask(u => Machines.pair(inbox, ack), ack)
+        Machines.run(t, inbox, ack, on, port, extra, last)
     case TN.PWait{ms} <> t:
       do IO<String>:
         IO.sleep(U32.from_nat(ms))
-        Machines.run(t, inbox, on, port, extra, last)
+        Machines.run(t, inbox, ack, on, port, extra, last)
 
-def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(Unit):
+def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +ack: Chan(Unit), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
       do IO<Unit>:
-        now : String <- Machines.run(TN.Pairing.plan(), inbox, on, port, extra, last)
-        Machines.loop(f, inbox, on, port, extra, now)
+        now : String <- Machines.run(TN.Pairing.plan(), inbox, ack, on, port, extra, last)
+        Machines.loop(f, inbox, ack, on, port, extra, now)
 
 def Machines.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   do IO<Unit>:
     extra : String <- Env.get("BACKPLANE_PEERS", "")
-    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, Cfg.tailnet(cfg), Cfg.port(cfg), extra, ""))
+    +ack : Chan(Unit) <- Chan.new(Unit, 1)
+    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, ack, Cfg.tailnet(cfg), Cfg.port(cfg), extra, ""))
 
 def Main.version() -> String:
   VR.Version.current()
@@ -15217,21 +15219,30 @@ def Pair.named(ms: List<&2, J.Json>, +url: String) -> Bool:
     case +m <> t:
       Bool.or(Bool.and(String.eq(J.Json.get_str(m, "url", ""), url), J.Json.get_bool(m, "named", False{})), Pair.named(t, url))
 
-def Pair.go(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
+# one round: each machine asked in turn, each ask (and the link it joins,
+# committed through the inbox) over before the next; then ack, last, so
+# the machines loop posts no next round before this one is done
+# (TN.Pairing.ask)
+def Pair.round(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg, +ack: Chan(Unit)) -> IO(Unit):
   match ms:
     case Nil{}:
-      IO.pure(Unit, Unit{})
+      do IO<Unit>:
+        ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
+        return Unit{}
     case UC.MRow{_, +url, _} <> t:
       do IO<Unit>:
-        IO.spawn(Unit, Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg),
-          Net.token(Cfg.net(cfg)), Pair.named(J.Json.elems(J.Json.get_obj(Far.machines(cfg), "peers")), url)))
-        Pair.go(t, inbox, cfg)
+        Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg),
+          Net.token(Cfg.net(cfg)), Pair.named(J.Json.elems(J.Json.get_obj(Far.machines(cfg), "peers")), url))
+        Pair.round(t, inbox, cfg, ack)
 
-def Hub.pair(h: Hub) -> IO(Hub):
+# (the machines to ask are read now, after every link an earlier round
+# joined was committed: that round's Commit reached the inbox before its
+# ack, so before this PairDue)
+def Hub.pair(h: Hub, +ack: Chan(Unit)) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        Pair.go(UC.Mate.due(Cfg.tailnet(cfg), Far.machines(cfg), BO.World.peers(M.State.bots(st)), st), inbox, cfg)
+        IO.spawn(Unit, Pair.round(UC.Mate.due(Cfg.tailnet(cfg), Far.machines(cfg), BO.World.peers(M.State.bots(st)), st), inbox, cfg, ack))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # The uberbot's sync (core/ubersync.bend, docs/uber.md)
@@ -18633,7 +18644,7 @@ def Msg.kind(m: Msg) -> String:
       "checks_ask"
     case MachinesFound{_}:
       "machines"
-    case PairDue{}:
+    case PairDue{_}:
       "pair_due"
     case LinkFound{_}:
       "link"
@@ -20024,8 +20035,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.checks.ask(h, thread, hash, text, now)
     case MachinesFound{mc}:
       Hub.dir.returned(h, mc)
-    case PairDue{}:
-      Hub.pair(h)
+    case PairDue{ack}:
+      Hub.pair(h, ack)
     case LinkFound{lk}:
       Hub.link(h, lk)
     case MailRecovered{changes}: Hub.mail.recovered(h, changes, now)

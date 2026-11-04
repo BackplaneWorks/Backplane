@@ -38,8 +38,66 @@ def nats(ts: List<&2, Nat>) -> String:
 def yes(b: Bool) -> String:
   Bool.pick(String, b, "yes", "no")
 
+# A hub whose handling stalls (TN.Pairing.ask): the machines loop posts a
+# round, the hub holds it 300 ms and its ask fails, then acks; the loop's
+# next round is posted only after that ack, and is the retry
+def say(+log: Chan(String), +x: String) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, String, Unit> <- Chan.send(String, log, x)
+    return Unit{}
+
+def post(+log: Chan(String), +inbox: Chan(Unit), +n: String) -> IO(Unit):
+  do IO<Unit>:
+    say(log, "post" ++ n)
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, inbox, Unit{})
+    return Unit{}
+
+def loop2(+log: Chan(String), +inbox: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    TN.Pairing.ask(u => post(log, inbox, "1"), ack)
+    say(log, "back1")
+    TN.Pairing.ask(u => post(log, inbox, "2"), ack)
+    say(log, "back2")
+
+def hub2(+log: Chan(String), +inbox: Chan(Unit), +ack: Chan(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    a : Maybe<&1, Unit> <- Chan.recv(Unit, inbox)
+    say(log, "due1")
+    IO.sleep(300)
+    say(log, "failed1")
+    o1 : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
+    b : Maybe<&1, Unit> <- Chan.recv(Unit, inbox)
+    say(log, "due2")
+    o2 : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, ack, Unit{})
+    return Unit{}
+
+def got(m: Maybe<&1, String>) -> String:
+  match m:
+    case Some{x}:
+      x
+    case None{}:
+      "?"
+
+def lines(n: Nat, +log: Chan(String)) -> IO(String):
+  match n:
+    case 0n:
+      IO.pure(String, "")
+    case 1n+m:
+      IO.bind(Maybe<&1, String>, String, Chan.recv(String, log), x => IO.bind(String, String, lines(m, log), rest => IO.pure(String, got(x) ++ "|" ++ rest)))
+
+def stalled() -> IO(String):
+  do IO<String>:
+    +log : Chan(String) <- Chan.new(String, 16)
+    +inbox : Chan(Unit) <- Chan.new(Unit, 16)
+    +ack : Chan(Unit) <- Chan.new(Unit, 1)
+    IO.spawn(Unit, loop2(log, inbox, ack))
+    IO.spawn(Unit, hub2(log, inbox, ack))
+    lines(7n, log)
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    +order : String <- stalled()
+    C.Check.str("a stalled round: the next is posted only after it ends (failed), then retried", order, "post1|due1|failed1|back1|post2|due2|back2|")
     C.Check.str("on the tailnet: the owner's online machines are asked", ips(TN.Tailnet.asked(True{}, status())), "desk=100.2.2.2|box=100.3.3.3|")
     C.Check.str("--no-tailscale: no tailnet machine is asked", ips(TN.Tailnet.asked(False{}, status())), "")
     C.Check.str("--no-tailscale: the status is not used at all", TN.Tailnet.seen(False{}, status()), "")
