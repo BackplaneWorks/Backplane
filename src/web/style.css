@@ -2789,6 +2789,8 @@ html.phone.ph-kb .app.phone .local-menu[open]:not([data-inline="true"]) > .local
 .app.phone :is(.sidebar, .ph-now) .thread-expander { min-width: 36px; min-height: var(--ph-row); }
 .app.phone :is(.sidebar, .ph-now) .thread-create button { min-height: var(--ph-tap); font-size: calc(14px * var(--text-scale, 100) / 100); }
 .app.phone :is(.sidebar, .ph-now) .project-threads button:not(.thread-expander), .app.phone :is(.sidebar, .ph-now) .fold, .app.phone :is(.sidebar, .ph-now) .older { min-height: var(--ph-tap); }
+.app.phone :is(.sidebar, .ph-now) .shelf { display: flex; align-items: center; min-height: var(--ph-tap); padding-left: max(12px, env(safe-area-inset-left)); font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone :is(.sidebar, .ph-now) .shelf-label { display: block; padding: 16px; font-size: calc(14px * var(--text-scale, 100) / 100); }
 .app.phone :is(.sidebar, .ph-now) .bots { padding-top: 6px; }
 .app.phone :is(.sidebar, .ph-now) .bots > * { min-height: var(--ph-tap); }
 

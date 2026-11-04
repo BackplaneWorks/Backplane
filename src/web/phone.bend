@@ -67,7 +67,7 @@ def Phone.act(+u: U.Ui, +action: String, +value: String) -> U.Act:
 def Phone.badge(none: Bool, +n: Nat) -> List<&2, D.Node>:
   match none:
     case True{}: Nil{}
-    case False{}: [D.El{"span", "", [D.At{"class", "ph-badge"}, D.At{"aria-label", Nat.show(n) ++ " need you"}], [D.Txt{Bool.pick(String, Nat.is_gt(n, 99n), "99+", Nat.show(n))}]}]
+    case False{}: [D.El{"span", "", [D.At{"class", "ph-badge"}, D.At{"aria-label", Nat.show(n)}], [D.Txt{Bool.pick(String, Nat.is_gt(n, 99n), "99+", Nat.show(n))}]}]
 
 def Phone.tab.button(+cur: String, +name: String, +label: String, +icon: String, +badge: Nat) -> D.Node:
   D.El{"button", "ph-tab:" ++ name, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, String.eq(cur, name), "ph-tab on", "ph-tab")},
