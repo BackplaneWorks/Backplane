@@ -2194,6 +2194,15 @@ def View.settings.scale(vs: List<&2, String>, +cur: U32) -> List<&2, D.Node>:
     case +v <> t:
       D.Dom.button(Bool.pick(String, U32.is_eq(TS.Scale.read(v), cur), "on", ""), "setting", "ui.text_scale=" ++ v, TS.Scale.label(v), TS.Scale.label(v)) <> View.settings.scale(t, cur)
 
+# a phone's way to Improvements (improvements.js opens it from any
+# [data-improvements]; the desktop's is in the top bar, which a phone has not)
+def View.settings.improve(phone: Bool) -> List<&2, D.Node>:
+  match phone:
+    case True{}:
+      [View.setrow("Improvements", "Tell us what to fix or add, with a screenshot of what you see.",
+        [D.El{"button", "", [D.At{"type", "button"}, D.At{"data-improvements", ""}], [D.Txt{"Send an improvement"}]}])]
+    case False{}: Nil{}
+
 def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +prov: String, +ipc: String) -> List<&2, D.Node>:
   match i:
     case 0n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.theme(lc), MSG.T.settings.theme.note(lc), View.chips.loc(lc, ["dark", "light"], Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), "light", "dark"), "ui.theme"))],
@@ -2230,7 +2239,7 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
     case 8n: List.concat(&2, D.Node, [View.agy.rows(u, U.Agv.rows.loc(lc, u))])
     case 9n: List.concat(&2, D.Node, [View.tz.set(lc, u)])
     case 10n: View.tok.set(lc, st) <> View.usage.page(lc, u)
-    case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])]])
+    case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])], View.settings.improve(PHN.Phone.on(u))])
     case 12n: View.agy.rows(u, U.Share.rows(u))
     case 14n: [View.setrow("Devices", "Create a one-time invitation, see last activity, or revoke a device.", [D.Dom.button("primary", "devices-open", "", "", "Manage devices")])]
     case 13n: List.concat(&2, D.Node, [[D.El{"p", "", [D.At{"class", "set-about"}], [D.Txt{U.Fab.set.about()}]}],
@@ -5508,10 +5517,16 @@ def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, example: List<&2, D.Node>
       D.El{"div", "", [D.At{"class", "tour-btns"}], View.tour.footer(Nat.is_eq(i, OB.Ob.share()), lc, back, fwd)}]}]
 
 
+# which client's words and targets the tour has (onboard.bend's k): the
+# web page's, or on a phone the phone's (no keys to press, nothing in a
+# sidebar to point at)
+def View.tour.kind(+u: U.Ui) -> Nat:
+  Bool.pick(Nat, PHN.Phone.on(u), 2n, 1n)
+
 def View.tour.k(+lc: I.Loc, on: Bool, +i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case True{}:
-      View.tour.card(lc, i, U.Tour.body.loc(lc, 1n, u), View.tour.example(U.Tour.example(i), lc), U.Tour.choices(u), U.Tour.counter.loc(lc, u), U.Tour.back(u), U.Tour.forward(u))
+      View.tour.card(lc, i, U.Tour.body.loc(lc, View.tour.kind(u), u), View.tour.example(U.Tour.example(i), lc), U.Tour.choices(u), U.Tour.counter.loc(lc, u), U.Tour.back(u), U.Tour.forward(u))
     case False{}:
       Nil{}
 
@@ -5526,7 +5541,7 @@ def View.tour.cls.k(on: Bool, +g: String) -> String:
       ""
 
 def View.tour.cls(+u: U.Ui) -> String:
-  View.tour.cls.k(U.Tour.on(u), U.Tour.target(1n, u))
+  View.tour.cls.k(U.Tour.on(u), U.Tour.target(View.tour.kind(u), u))
 
 # The window's top bar (View.chrome): the mark with the hub's dot, where you
 # are as a breadcrumb (a thread: its project, its title, which a click
