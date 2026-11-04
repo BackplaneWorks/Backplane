@@ -724,8 +724,10 @@ def Rvc.args.back(xs: List<&2, String>) -> List<String>:
     case x <> t:
       x <> Rvc.args.back(t)
 
-def Rvc.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
-  match xs:
+# Rvc.main.k matches a copy of xs: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def Rvc.main.k.by(key: List<&2, String>, xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
+  match key:
     case "--review" <> "bom" <> a <> b <> _:
       Rvc.bom(a, b)
     case "--review" <> "checks" <> d <> c <> h <> t <> _:
@@ -742,8 +744,11 @@ def Rvc.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
       COMP.Components.page.child(d, Maybe.default(&2, Nat, Nat.read(offset), 0n), pcb, sch)
     case "--review" <> "renderasset" <> d <> p <> k <> r <> _:
       RA.RenderAsset.child(d, p, k, r)
-    case +x:
-      go(Rvc.args.back(x))
+    case _:
+      go(Rvc.args.back(xs))
+
+def Rvc.main.k(+xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
+  Rvc.main.k.by(xs, xs, go)
 
 # the arguments after the program's name: Bend 2.0.36's IO.args() starts
 # with argv[0], which the --plot and --review children (and every flag
