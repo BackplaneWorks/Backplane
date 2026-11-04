@@ -1,0 +1,28 @@
+#!/bin/sh
+# Sync native/gpui to the Mac and build there. Never compiles locally.
+# usage: scripts/gpui/mac-build.sh [cold] [extra cargo args...]
+# Run under the `mac-heavy` lock (work_run lock:"mac-heavy").
+set -eu
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+SSH="$ROOT/build/gpui/mac-ssh"; HOST=hs-mac-mini; DEST=bp-gpui-desktop
+COLD=0; [ "${1:-}" = cold ] && { COLD=1; shift; }
+export RSYNC_RSH="$SSH"
+$SSH $HOST "mkdir -p ~/$DEST/src/native ~/$DEST/src/src/core ~/$DEST/src/src/web ~/$DEST/dist ~/$DEST/logs"
+rsync -a --delete --exclude target --exclude '*.rs.bk' "$ROOT/native/gpui/" $HOST:$DEST/src/native/gpui/
+rsync -a "$ROOT/src/core/cbor.bend" $HOST:$DEST/src/src/core/
+rsync -a "$ROOT/src/web/style.css" $HOST:$DEST/src/src/web/
+$SSH $HOST "sh -s" -- "$COLD" "$@" <<'REMOTE'
+set -eu
+COLD=$1; shift
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer PATH="$HOME/.cargo/bin:$PATH"
+cd ~/bp-gpui-desktop/src/native/gpui
+export CARGO_TARGET_DIR=$HOME/bp-gpui-desktop/target
+[ "$COLD" = 1 ] && rm -rf "$CARGO_TARGET_DIR"
+df -h /System/Volumes/Data | tail -1
+rustc --version; cargo --version
+/usr/bin/time -l cargo build --release "$@" 2> ~/bp-gpui-desktop/logs/build.err || { tail -60 ~/bp-gpui-desktop/logs/build.err; exit 1; }
+tail -25 ~/bp-gpui-desktop/logs/build.err
+cp "$CARGO_TARGET_DIR/release/backplane-gpui" ~/bp-gpui-desktop/dist/backplane-gpui
+ls -l ~/bp-gpui-desktop/dist/backplane-gpui
+otool -L ~/bp-gpui-desktop/dist/backplane-gpui
+REMOTE
