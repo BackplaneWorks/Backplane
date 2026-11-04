@@ -45,16 +45,17 @@ globalThis.BEND_ASYNC = BP_ASYNC;
 // Linux's on Windows (Bend code shows them, never branches on a Windows one)
 const BP_LINUX_ERRNO = { EPERM: 1, ENOENT: 2, EINTR: 4, EIO: 5, EBADF: 9,
   EAGAIN: 11, ENOMEM: 12, EACCES: 13, EEXIST: 17, ENOTDIR: 20, EISDIR: 21,
-  EINVAL: 22, EMFILE: 24, ENOSPC: 28, EPIPE: 32, ENOSYS: 38, ENOTEMPTY: 39,
+  E2BIG: 7, EINVAL: 22, EMFILE: 24, ENOSPC: 28, EPIPE: 32, ENAMETOOLONG: 36, ENOSYS: 38, ENOTEMPTY: 39,
   ENOTSOCK: 88, EADDRINUSE: 98, EADDRNOTAVAIL: 99, ENETUNREACH: 101,
   ECONNABORTED: 103, ECONNRESET: 104, ENOTCONN: 107, ETIMEDOUT: 110,
   ECONNREFUSED: 111, EHOSTUNREACH: 113, EFBIG: 27, EOVERFLOW: 75 };
 const BP_ERRNO = BP_WIN ? BP_LINUX_ERRNO
   : { ...BP_LINUX_ERRNO, ...require("os").constants.errno };
 const BP_TEXT = { 1: "Operation not permitted", 2: "No such file or directory",
-  4: "Interrupted system call", 5: "Input/output error", 9: "Bad file descriptor",
+  4: "Interrupted system call", 5: "Input/output error", 7: "Argument list too long", 9: "Bad file descriptor",
   11: "Resource temporarily unavailable", 13: "Permission denied",
   17: "File exists", 22: "Invalid argument", 32: "Broken pipe",
+  36: "Executable path or command line too long (ENAMETOOLONG)",
   38: "Function not implemented", 98: "Address already in use",
   99: "Cannot assign requested address", 104: "Connection reset by peer",
   107: "Transport endpoint is not connected", 110: "Connection timed out",
