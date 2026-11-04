@@ -206,9 +206,75 @@ def move(src, dst):
         os.unlink(src)
 
 
+class InstallError(Exception):
+    pass
+
+
+def fault(point):
+    """Test hook: COMPILER_GUARD_TEST_FAULT=<point> makes install fail at that point. It can only make it fail."""
+    if os.environ.get('COMPILER_GUARD_TEST_FAULT') == point:
+        raise RuntimeError('injected fault at ' + point)
+
+
+def write_atomic(path, text, mode=None):
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.guard-')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        if mode is not None:
+            os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def save_state(hg, state):
+    hg.mkdir(parents=True, exist_ok=True)
+    write_atomic(manifest_path(hg), json.dumps(state, indent=1, sort_keys=True) + '\n')
+
+
+def recover(hg, state):
+    """Roll back an interrupted install (a journal entry still marked 'installing'); anything unclear fails closed."""
+    for name, entry in sorted(state.items()):
+        if entry.get('state') != 'installing':
+            continue
+        path, real = Path(entry['path']), Path(entry['real'])
+        if real.is_file() and sha(real) == entry['original_sha256'] and (not path.exists() or is_shim(path)):
+            if path.exists():
+                os.unlink(path)
+            os.replace(real, path)
+            os.chmod(path, entry['mode'])
+            backup = real.with_name(real.name + '.prev')
+            if entry.get('had_previous') and backup.is_file():
+                os.replace(backup, real)
+            if entry.get('previous'):
+                state[name] = entry['previous']
+            else:
+                state.pop(name)
+        elif path.is_file() and not is_shim(path) and sha(path) == entry['original_sha256'] and not real.exists():
+            if entry.get('previous'):
+                state[name] = entry['previous']
+            else:
+                state.pop(name)                       # nothing had moved yet
+        else:
+            raise InstallError('%s: an interrupted install left %s / %s in an unexpected state; not touching them' % (name, path, real))
+        save_state(hg, state)
+
+
 def install(home, tools, apply, env=None, paths=None):
+    """Transactional per tool: the unexpected-.real check comes first, a journal entry is durable before anything moves,
+    the shim is prepared before the original is renamed, and any failure afterwards puts the original back."""
     hg = guard_home(env)
     state = load(hg)
+    if apply:
+        recover(hg, state)
     actions = []
     for item in plan(home, tools, env, paths):
         name, path, real = item['name'], item['path'], item['real']
@@ -221,27 +287,63 @@ def install(home, tools, apply, env=None, paths=None):
         if is_shim(path):
             actions.append((name, 'already guarded'))
             continue
-        actions.append((name, 'move %s -> %s and write shim' % (path, real)))
-        if apply:
-            mode = stat.S_IMODE(path.stat().st_mode)
-            digest = sha(path)
-            hg.mkdir(parents=True, exist_ok=True)
-            move(path, real)
-            os.chmod(real, mode | 0o111)
-            guard = hg/'compiler-guard.py'
-            if not guard.exists() or sha(guard) != sha(SELF):
-                shutil.copyfile(SELF, guard)        # a stable copy: worktrees come and go
-                os.chmod(guard, 0o644)
-            text = shim_text(name, real, guard)
-            fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.guard-')
-            with os.fdopen(fd, 'w') as f:
-                f.write(text)
-            os.chmod(tmp, 0o755)
-            os.replace(tmp, path)
-            state[name] = {'path': str(path), 'real': str(real), 'real_sha256': digest, 'mode': mode}
-    if apply:
+        previous = state.get(name)
+        update = False
+        if real.exists() or real.is_symlink():
+            if previous and previous.get('state') == 'installed' and real.is_file() and sha(real) == previous.get('real_sha256'):
+                update = True                         # our own earlier backup: the tool was replaced (bend update)
+            else:
+                actions.append((name, 'REFUSED: %s already exists and is not the recorded backup; not overwriting it' % real))
+                if apply:
+                    raise InstallError('%s: %s already exists and is not the recorded backup; refusing to overwrite it' % (name, real))
+                continue
+        actions.append((name, '%s%s -> %s and write shim' % ('update: keep the previous backup as .prev, move ' if update else 'move ', path, real)))
+        if not apply:
+            continue
+        mode, digest = stat.S_IMODE(path.stat().st_mode), sha(path)
+        guard = hg/'compiler-guard.py'
         hg.mkdir(parents=True, exist_ok=True)
-        manifest_path(hg).write_text(json.dumps(state, indent=1, sort_keys=True) + '\n')
+        if not guard.exists() or sha(guard) != sha(SELF):
+            shutil.copyfile(SELF, guard)               # a stable copy: worktrees come and go
+            os.chmod(guard, 0o644)
+        installed = {'path': str(path), 'real': str(real), 'real_sha256': digest, 'mode': mode, 'state': 'installed'}
+        state[name] = {'path': str(path), 'real': str(real), 'original_sha256': digest, 'mode': mode, 'state': 'installing',
+                       'previous': previous, 'had_previous': update}
+        save_state(hg, state)                          # durable before anything moves
+        backup = real.with_name(real.name + '.prev')
+        shim_tmp = None
+        try:
+            fault('after-journal')
+            shim_tmp = write_atomic(path.with_name('.guard-shim-' + path.name), shim_text(name, real, guard), 0o755)
+            if update:
+                os.replace(real, backup)               # the previous real binary stays recoverable
+            os.rename(path, real)
+            fault('after-move')
+            os.replace(shim_tmp, path)
+            fault('after-shim')
+            os.chmod(real, mode | 0o111)
+            fault('before-manifest')
+            state[name] = installed
+            save_state(hg, state)
+        except BaseException:
+            if is_shim(path):
+                os.unlink(path)
+            if real.exists() and not path.exists():
+                os.replace(real, path)
+                os.chmod(path, mode)
+            if update and backup.exists() and not real.exists():
+                os.replace(backup, real)
+            if shim_tmp is not None:
+                try:
+                    os.unlink(shim_tmp)
+                except OSError:
+                    pass
+            if previous:
+                state[name] = previous
+            else:
+                state.pop(name, None)
+            save_state(hg, state)
+            raise
     return actions
 
 
@@ -271,7 +373,8 @@ def uninstall(home, tools, apply, env=None, paths=None):
 def check(home, tools, env=None, paths=None):
     hg = guard_home(env)
     state = load(hg)
-    problems = []
+    problems = ['%s: an interrupted install is journalled (run install --apply to roll it back)' % n
+                for n, e in sorted(state.items()) if e.get('state') == 'installing']
     for item in plan(home, tools, env, paths):
         name, path, real = item['name'], item['path'], item['real']
         if not path.exists() and not path.is_symlink():
@@ -318,7 +421,11 @@ def main(argv):
         for line in problems:
             print(line, file=sys.stderr)
         return 1 if problems else 0
-    actions = (install if a.cmd == 'install' else uninstall)(a.home, tools, a.apply, None, paths)
+    try:
+        actions = (install if a.cmd == 'install' else uninstall)(a.home, tools, a.apply, None, paths)
+    except (InstallError, RuntimeError, OSError) as error:
+        print('compiler-guard: %s: %s' % (a.cmd, error), file=sys.stderr)
+        return 1
     for name, text in actions:
         print('%s%s: %s' % ('' if a.apply else '[dry run] ', name, text))
     return 0
