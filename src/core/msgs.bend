@@ -1305,6 +1305,41 @@ def T.files.changed(l: I.Loc, +arg0: Nat) -> String:
     case I.Ja{}:
       I.I18n.exact(arg0, Nat.add(Nat.mul(0n, 10n), 0n), "変更なし", I.I18n.pick(I.I18n.plural(I.Ja{}, arg0), "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件"))
 
+def T.files.download(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Download"
+    case I.Ja{}:
+      "ダウンロード"
+
+def T.files.download.failed(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "The download did not finish"
+    case I.Ja{}:
+      "ダウンロードが完了しませんでした"
+
+def T.files.download.file(l: I.Loc, arg0: String) -> String:
+  match l:
+    case I.En{}:
+      "Download " ++ arg0
+    case I.Ja{}:
+      arg0 ++ "をダウンロード"
+
+def T.files.download.folder(l: I.Loc, arg0: String) -> String:
+  match l:
+    case I.En{}:
+      "Download " ++ arg0 ++ " as a zip"
+    case I.Ja{}:
+      arg0 ++ "をzipでダウンロード"
+
+def T.files.download.tip(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Download this folder as a zip"
+    case I.Ja{}:
+      "このフォルダをzipでダウンロード"
+
 def T.files.preview.none(l: I.Loc, arg0: String) -> String:
   match l:
     case I.En{}:
