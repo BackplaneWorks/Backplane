@@ -5894,8 +5894,18 @@ def View.phone.back(+lc: I.Loc) -> List<&2, D.Node>:
   [PHN.Phone.back("select", "", MSG.T.tour.back(lc))]
 
 # the views a thread can show (the rail's, as its menu); C's to shape
+# its summary on a phone: the open view's icon, or "layers" for the
+# thread's own chat (the chat bubble read as a second message button)
+def View.phone.views.menu(+lc: I.Loc, +cur: String, term: Bool, palette: Bool) -> D.Node:
+  D.El{"details", "view-menu", [D.At{"class", "local-menu workspace-menu"}], [
+    D.El{"summary", "", [D.At{"aria-label", "Views"}, D.At{"title", "Views: board, schematic, 3D, files, diff, review, browser, terminal"}], [
+      WI.WIcon.svg(Bool.pick(String, String.is_empty(cur), "layers", View.workspace.icon(cur)), 20), D.Dom.span("workspace-current", "")]},
+    D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices(False{}, lc, cur, term, palette)}]}
+
 def View.phone.views(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
-  View.chrome.views(lc, u, id)
+  D.El{"div", "top-views", [D.At{"class", "top-views"}],
+    View.phone.views.menu(lc, Bool.pick(String, U.Ui.panel(u), U.Rail.tab.of(U.Ui.panel(u), U.Ui.info(u, "view.kind:" ++ id), U.Ui.info(u, "view.path:" ++ id)), ""), U.Ui.flag(u, "term"), U.Ui.flag(u, "palette"))
+      <> View.workspace.buy(U.Fab.rail(u))}
 
 # a thread: ‹, its title (a tap renames it) over its project, ▾ its menu and
 # its views; its state's cells (B's) ride in a row under the header
