@@ -3266,7 +3266,7 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .ph-inspect dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0 0 10px; font-size: 14px; }
 .ph-inspect dt { color: var(--faint); }
 .ph-inspect dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-family: var(--mono); }
-.ph-inspect-acts { display: flex; gap: 8px; }
+.ph-inspect-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .ph-inspect-acts button { min-height: 44px; padding: 0 16px; }
 /* the design history: one row (transport, version, the rest by scrolling) and the scrub */
 .app.phone .hist { padding: 2px 8px 4px; gap: 2px; }
