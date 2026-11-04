@@ -160,11 +160,29 @@ export function installPhoneOther({ doc = document, win = window, dispatch }) {
     doc.head.append(link);
   }
 
+  // the Now tab's count of threads that need the person (phone.bend's
+  // tab badge, drawn on root screens): the home-screen app's badge and the
+  // page's title, so a phone shows it from the home screen or tab list
+  let need = -1;
+  const baseTitle = doc.title || "Backplane";
+  const needSync = () => {
+    const tabs = doc.querySelector(".app.phone .ph-tabs");
+    if (!tabs) return;
+    const n = parseInt(tabs.querySelector(".ph-tab[data-value=now] .ph-badge")?.textContent || "0", 10) || 0;
+    if (n === need) return;
+    need = n;
+    doc.title = n ? "(" + n + ") " + baseTitle : baseTitle;
+    const nav = win.navigator;
+    if (n) nav.setAppBadge?.(n)?.catch?.(() => {});
+    else nav.clearAppBadge?.()?.catch?.(() => {});
+  };
+
   return {
     // after every render: the key row shows while a terminal is open
     rendered() {
       if (!on()) return;
       notifyState();
+      needSync();
       const open = !!field();
       if (open && !row) build();
       if (row) row.hidden = !open;
