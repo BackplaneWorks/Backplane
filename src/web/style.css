@@ -2836,22 +2836,41 @@ html.phone .pairing-card > button { align-self: flex-start; }
 html.phone .pairing-pending a { display: inline-flex; align-items: center; min-height: 44px; }
 html.phone .pairing-invitation button { min-width: 44px; }
 html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
-=======
 /* phone: thread (agent B). The thread screen in the phone arrangement
    (DESIGN.md: B); everything under .app.phone, so desktop and a narrow
    desktop window are unchanged. */
+/* the thread's cells in their row under the header (the shell's
+   .ph-cells): its state as a dot and a word with Stop or Retry, then its
+   subagents, to-do list and design changes as chips that open them */
+.app.phone > .ph-cells { min-height: 44px; gap: 6px; }
+.app.phone > .ph-cells .kv { display: inline-flex; align-items: center; gap: 6px; width: auto; flex: none; min-height: 36px; margin: 0; padding: 0 10px; border: 1px solid var(--line); background: var(--bg); color: var(--dim); font-size: calc(13px * var(--text-scale, 100) / 100); white-space: nowrap; }
+.app.phone > .ph-cells .kv.state { border: 0; background: none; padding: 0 4px 0 2px; }
+.app.phone > .ph-cells .kv.state > .k, .app.phone > .ph-cells .kv.branch { display: none; }
+.app.phone > .ph-cells .kv.state > .v { color: var(--text); }
+.app.phone > .ph-cells .kv.state button.tool { min-height: 36px; padding: 0 10px; margin-left: 4px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone > .ph-cells .kv > .k { color: var(--dim); }
+.app.phone > .ph-cells .kv > .v { color: var(--text); }
+.app.phone > .ph-cells .kv[aria-expanded="true"] { border-color: var(--accent); }
+/* (a short screen, a phone on its side: the row gives back 8 px) */
+@media (max-height: 500px) { .app.phone > .ph-cells { min-height: 36px; } .app.phone > .ph-cells .kv, .app.phone > .ph-cells .kv.state button.tool { min-height: 32px; } }
+/* (36 px to see, 44 to hit: the row is 44 px tall) */
+.app.phone > .ph-cells :is(button.kv, .kv.state button.tool) { position: relative; }
+.app.phone > .ph-cells :is(button.kv, .kv.state button.tool)::after { content: ""; position: absolute; inset: -4px 0; }
 /* the screen: the timeline takes what the header and the composer leave,
    the composer sits on the keyboard (the shell sizes .app.phone to the
    visual viewport, --ph-vh) */
 .app.phone .thread-view { min-height: 0; }
 .app.phone .thread-content { min-height: 0; }
-.app.phone .timeline { overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+.app.phone .timeline { overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.app.phone .asks, .app.phone .queue { margin-left: env(safe-area-inset-left); margin-right: env(safe-area-inset-right); }
 /* messages: their time and actions on one quiet line under them, each a
    whole thumb wide; nothing waits for a hover */
 .app.phone .msg { font-size: calc(15px * var(--text-scale, 100) / 100); line-height: 1.5; }
 .app.phone .msg.user { max-width: 88%; }
 .app.phone .msg :is(.copy, .reply) { position: static; float: right; opacity: 1; min-width: 44px; min-height: 36px; margin: 2px -6px 0 4px; padding: 0 10px; border: 0; background: none; color: var(--dim); font-size: calc(13px * var(--text-scale, 100) / 100); }
 .app.phone .msg :is(.copy, .reply):active { color: var(--accent); background: var(--raise); }
+.app.phone .msg > :is(.copy, .reply)::after { content: ""; position: absolute; inset: -4px 0; }
+.app.phone .msg > :is(.copy, .reply) { position: relative; }
 .app.phone .msg .stamp { display: inline-block; margin-top: 2px; line-height: 36px; font-size: calc(12px * var(--text-scale, 100) / 100); }
 .app.phone .msg.assistant .stamp.mid { display: inline-block; }
 .app.phone .msg.user .stamp { text-align: left; }
@@ -2880,7 +2899,8 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone .ask input, .app.phone .ask textarea { font-size: 16px; min-height: 44px; }
 /* the composer: the field grows with the draft up to a third of the
    screen; under it one row of the model and the tools, Send at the thumb */
-.app.phone .composer { --composer-button: 44px; flex: none; gap: 6px; padding: 6px max(8px, env(safe-area-inset-right)) max(6px, calc(env(safe-area-inset-bottom) - var(--ph-kb, 0px))) max(8px, env(safe-area-inset-left)); background: var(--bg); }
+.app.phone .composer { --composer-button: 44px; flex: none; gap: 6px; padding: 6px max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left)); background: var(--bg); }
+/* (the shell's main pads the home bar under it, html.ph-kb drops that) */
 .app.phone .composer textarea { font-size: 16px; line-height: 1.4; min-height: 44px; max-height: calc(var(--ph-vh, 100vh) * 0.33); padding: 10px 12px; }
 .app.phone .composer-foot kbd, .app.phone .model-chip kbd { display: none; }
 .app.phone .composer-foot { gap: 4px; }
@@ -2893,6 +2913,8 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone .composer-options > .tok-chip .tok-n { display: inline; }
 .app.phone .composer-foot .model-chip, .app.phone .composer-foot .composer-model .model-chip { height: 44px; }
 .app.phone .composer .foot-end > button.primary:last-child { height: 44px; min-width: 64px; padding: 0 14px; font-size: calc(15px * var(--text-scale, 100) / 100); }
+/* (no microphone this page can use: phone-thread.js's ph-nomic) */
+html.ph-nomic .app.phone .composer .mic { display: none; }
 /* what $ @ > % # complete to: rows a thumb can pick, over the composer */
 .app.phone .composer .skills { left: 0; right: 0; max-height: calc(var(--ph-vh, 100vh) * 0.4); overflow-y: auto; padding: 4px 0; z-index: 32; }
 .app.phone .composer .skills button { min-height: 44px; align-items: center; padding: 0 14px; }

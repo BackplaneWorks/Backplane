@@ -22,6 +22,10 @@ export function phoneKeepsReturn(doc, el, action, event) {
 // planner's own observer (made later), which keeps the top on a resize.
 const NEAR = 48, FINGER_MS = 700;
 export function installPhoneThread({ document: doc = document, window: win = window } = {}) {
+  // A page that cannot record (no getUserMedia: a plain-http origin) would
+  // dictate with the hub machine's microphone, far from the phone; the
+  // phone's keyboard has its own dictation (style.css hides the mic)
+  if (!win.navigator?.mediaDevices?.getUserMedia) doc.documentElement?.classList.add('ph-nomic');
   const RO = win.ResizeObserver;
   if (!RO) return null;
   let el = null, height = 0, seen = null, end = false, finger = 0;
