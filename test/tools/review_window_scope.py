@@ -1,4 +1,4 @@
-"""Two canonical review-window laws + full unchanged small IO/fold closure.
+"""Four canonical review-window laws + full unchanged small IO/fold closure.
 
 Run once on normal Boat. No application compile, full/root proof, cache seed,
 live data or compiler substitution. The whole typed generic page fold is checked;
@@ -17,7 +17,7 @@ import time
 
 ROOT = Path.cwd()
 OUT = ROOT / 'build/hub-review-scope'
-NAMES = ['review_window_budget', 'review_window_progress']
+NAMES = ['review_window_budget', 'review_window_progress', 'review_window_read_failure', 'review_window_cursor_failure']
 FILES = ['LAWS.bend', 'PROOF.bend', *subprocess.check_output(
     [sys.executable, 'scripts/bend-closure.py', 'test/review_window_test.bend'], text=True).splitlines()]
 RUNNERS = ['scripts/proof-shards.py', 'scripts/proof-slice.py', 'scripts/ci-packet.py',
@@ -125,7 +125,7 @@ def main():
         assert sha(ROOT / p) == digest, 'source changed during scoped qualification: ' + p
     events = {k: int(v) for k, v in (line.split() for line in (group / 'memory.events').read_text().splitlines())}
     assert events['oom'] == events['oom_kill'] == 0
-    summary = {'state': 'passed', 'kind': 'two exact canonical review window laws + full small IO/fold interface type-check',
+    summary = {'state': 'passed', 'kind': 'four exact canonical review window laws + full small IO/fold interface type-check',
                'source_head': head, 'law_names': NAMES, 'source_sha256': sources,
                'bun_boundary_cases':7,
                'source_policy_audit_passed':True, 'node_version':subprocess.check_output(['node','--version'],text=True).strip(),
