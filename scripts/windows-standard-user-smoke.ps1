@@ -1,0 +1,58 @@
+param([string]$PackageUrl='', [string]$PackageSHA256='', [string]$ExpectedVersion='')
+$ErrorActionPreference = 'Stop'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$out = Join-Path $root 'build\windows-standard-user'
+New-Item -ItemType Directory -Force $out | Out-Null
+$exe = ''
+if ($PackageUrl) {
+    if ($PackageUrl -notmatch '^https://' -or $PackageSHA256 -notmatch '^[a-f0-9]{64}$' -or !$ExpectedVersion) { throw 'Supply HTTPS package URL, SHA256 and expected version' }
+    $zip = Join-Path $out 'package.zip'
+    Invoke-WebRequest $PackageUrl -OutFile $zip
+    if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $PackageSHA256) { throw 'Package SHA256 mismatch' }
+    $package = Join-Path $out 'package'
+    Expand-Archive $zip -DestinationPath $package
+    $found = @(Get-ChildItem $package -Recurse -File -Filter Backplane.exe)
+    if ($found.Count -ne 1) { throw 'Expected exactly one packaged Backplane.exe' }
+    $exe = $found[0].FullName
+    @{url=$PackageUrl;sha256=$PackageSHA256;version=$ExpectedVersion} | ConvertTo-Json | Set-Content (Join-Path $out 'package.json')
+}
+# This bootstrap runs on a disposable hosted runner. Only it is elevated;
+# every assertion, native filesystem effect and Electron process runs below
+# as a newly created user that has never belonged to Administrators.
+$key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock'
+New-Item $key -Force | Out-Null
+New-ItemProperty $key -Name AllowDevelopmentWithoutDevLicense -Value 0 -PropertyType DWord -Force | Out-Null
+$name = 'bp_smoke_' + [Guid]::NewGuid().ToString('N').Substring(0,8)
+$password = ConvertTo-SecureString ('Bp!9' + [Guid]::NewGuid().ToString('N')) -AsPlainText -Force
+$user = New-LocalUser -Name $name -Password $password -AccountNeverExpires
+$users = Get-LocalGroup -SID 'S-1-5-32-545'
+Add-LocalGroupMember -Group $users -Member $name
+try {
+    # Read checkout/dependencies/package; write only the disposable smoke area.
+    & icacls $root /grant "${name}:(OI)(CI)RX" /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot grant checkout read access' }
+    & icacls $out /grant "${name}:(OI)(CI)M" /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot grant evidence write access' }
+    $node = (Get-Command node.exe).Source
+    $test = Join-Path $root 'desktop\test\windows-standard-user.cjs'
+    $arguments = @('"'+$test+'"','"'+$out+'"')
+    if ($exe) { $arguments += @('"'+$exe+'"','"'+$ExpectedVersion+'"') }
+    $credential = [PSCredential]::new("$env:COMPUTERNAME\$name",$password)
+    $p = Start-Process -FilePath $node -ArgumentList $arguments -Credential $credential -LoadUserProfile -WorkingDirectory $out -PassThru
+    if (!$p.WaitForExit(240000)) { Stop-Process -Id $p.Id;throw 'Standard-user smoke exceeded four minutes' }
+    if ($p.ExitCode -ne 0) { throw "Standard-user smoke failed ($($p.ExitCode)); see result.json" }
+    $result = Get-Content (Join-Path $out 'result.json') -Raw | ConvertFrom-Json
+    if ($result.status -ne 'PASS') { throw 'Standard-user smoke did not pass' }
+    $result | ConvertTo-Json -Depth 10
+} finally {
+    # Retire only this disposable account's processes, including its resident
+    # hub. Never signal a process by name or a PID parsed from hub.lock.
+    Get-CimInstance Win32_Process | ForEach-Object {
+        $process = $_
+        try {
+            $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction Stop
+            if ($owner.Sid -eq $user.SID.Value) { Stop-Process -Id $process.ProcessId -ErrorAction SilentlyContinue }
+        } catch {}
+    }
+    Remove-LocalUser -Name $name
+}
