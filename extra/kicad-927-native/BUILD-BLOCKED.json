@@ -1,0 +1,44 @@
+{
+  "status": "BLOCKED_NO_CURRENT_MAIN_PACKAGE",
+  "issue": 927,
+  "priorFixPR": 930,
+  "actualSourceCommit": "2a87e6526abfedda9378567642a9675660293b60",
+  "actualSourceTree": "ccd53c6ab6b0cc323b0ebc4349794b054732bc97",
+  "job": "j20261104164046-3848506",
+  "manifestSHA256": "1f2e7be5eaad1fe0f98b262fa0db620af5134fa0ada8e22e1ddae6bb048cd0e4",
+  "sourceIdentity": "Actual Boat provenance revision and production source hashes; raw requested-source label contains a SHA transcription error, retained unchanged",
+  "rawRequestedSourceLabel": "2a87e6526575254d536591b29bf511ea6dbef9dc",
+  "reason": "cgroup_oom_kill",
+  "compilerExit": -9,
+  "seconds": 11.267,
+  "resources": {
+    "memory_max": 3699998720,
+    "swap_max": 0,
+    "peak_bytes": 3699998720,
+    "events": {
+      "low": 0,
+      "high": 0,
+      "max": 885,
+      "oom": 1,
+      "oom_kill": 1,
+      "oom_group_kill": 0
+    }
+  },
+  "timeoutSeconds": 180,
+  "timeoutFired": false,
+  "emissionProduced": false,
+  "webEmissionAttempted": false,
+  "windowsLinkAttempted": false,
+  "packageProduced": false,
+  "nativeWindowsStandardUserRun": false,
+  "remaining": [
+    "Packaged current-main Windows standard-user run",
+    "Program Files auto-detection",
+    "Native PATH auto-detection",
+    "Real GUI manual C:\\backplane_kicad\\ path and transport/persisted byte capture",
+    "Real in-app KiCad download, verification and PowerShell extraction",
+    "Reported backslash-b corruption reproduction"
+  ],
+  "releaseDisposition": "Keep #927 open. No claim resolved or shipped. Installer t1792701529-415584 receives blocked handoff; close only after a real native pass and release shipment.",
+  "constraints": "Boat/GitHub only; memory ceiling unchanged, swap0; no xlarge, no exception request, no local compiler/tests/builds, no source overlay or stale package substitution."
+}

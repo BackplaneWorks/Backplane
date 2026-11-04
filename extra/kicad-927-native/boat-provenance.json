@@ -1,0 +1,16 @@
+{
+ "job": "j20261104164046-3848506",
+ "sandbox": "bx_gzmnj928",
+ "size": "default",
+ "ttl": 1020,
+ "source": "/home/h/Documents/i2cjak/backplane-bend/.backplane/worktrees/backplane-fix-kicad-windows-paths",
+ "revision": "2a87e6526abfedda9378567642a9675660293b60",
+ "dirty": "yes",
+ "manifest_sha256": "1f2e7be5eaad1fe0f98b262fa0db620af5134fa0ada8e22e1ddae6bb048cd0e4",
+ "manifest_files": 3606,
+ "bend": "2.0.36",
+ "bend_sha256": "02089dc0eed0fd5fd6d73c74cc9cffcb2c6638dd3b02ae83f7b8cc57fbe381ba",
+ "command": "systemd-run --user --scope --quiet -p MemoryMax=3700000000 -p MemorySwapMax=0 -p OOMPolicy=continue -- sh scripts/heavy-boat.sh python3 extra/kicad-927-native/emit-current-main.py 2a87e6526575254d536591b29bf511ea6dbef9dc",
+ "exit": 0,
+ "started": 1793810486
+}
