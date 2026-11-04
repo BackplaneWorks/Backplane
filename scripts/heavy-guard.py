@@ -20,12 +20,14 @@ FLOORS = {'check': 14 * GIB, 'proof': 19 * GIB, 'test': 14 * GIB,
           # not a cap: the worker must also sit in a verified, no-swap cgroup.
           'proof-shard': 3 * GIB, 'compile-shard': 3 * GIB,
           # sepcomp-fixtures.py run only: same floor as the shard profiles, nothing lowered.
-          'fixture-check': 3 * GIB}
+          'fixture-check': 3 * GIB,
+          # a closed table of exact `bend FILE --check-only` commands (FILE_CHECK_COMMANDS), nothing else
+          'file-check': 3 * GIB}
 # Compiler cap: 3.7 GB (decimal). The lane-6 controller (512 MiB) is accounted
 # separately; 3.7e9 + 536870912 stays under the 4 GiB combined ceiling.
 SHARD_CAP = 3_700_000_000
 CONTROLLER_CAP = 536_870_912
-SHARD_PROFILES = ('proof-shard', 'compile-shard', 'fixture-check')
+SHARD_PROFILES = ('proof-shard', 'compile-shard', 'fixture-check', 'file-check')
 # compile-shard runs only these exact compiler invocations ({out} is substituted
 # by the worker); nothing else can use the lower floor.
 COMPILE_COMMANDS = (
@@ -142,6 +144,26 @@ def cached_proof_run_ok(command):
     return {'--plan', '--shard', '--result'} <= set(seen) and re.fullmatch(r'[0-9]{3}', seen['--shard']) is not None
 
 
+# file-check admits exactly these argv lists, run from the repository root. Adding a command is a reviewed change to
+# this table; PROOF.bend, LAWS.bend, a directory or any option such as --verdict is never admitted.
+FILE_CHECK_COMMANDS = (
+    ('bend', 'test/stream_step_proof.bend', '--check-only'),
+)
+
+
+def file_check_ok(command):
+    """Exactly one of FILE_CHECK_COMMANDS, the file a regular non-symlink inside the repo, cwd = the repo root."""
+    root = Path(__file__).resolve().parent.parent
+    if tuple(command) not in FILE_CHECK_COMMANDS:
+        return False
+    try:
+        target = root/command[1]
+        return (Path.cwd().resolve() == root and target.is_file() and not target.is_symlink()
+                and target.resolve().relative_to(root).as_posix() == command[1])
+    except (OSError, ValueError):
+        return False
+
+
 def fixture_run_ok(command):
     """Exactly `python3 scripts/sepcomp-fixtures.py run`: no other action, option or compiler override."""
     script = Path(__file__).resolve().parent / 'sepcomp-fixtures.py'
@@ -161,6 +183,8 @@ def worker_contract(profile, command):
     """
     if profile not in SHARD_PROFILES or not command:
         return None
+    if profile == 'file-check':
+        return list(command) if file_check_ok(command) else None     # run as `bend` from PATH, argv unchanged
     python = trusted_python(command[0])
     if not python:
         return None
