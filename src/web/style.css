@@ -2964,8 +2964,10 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 .app.phone .msg :is(.copy, .reply) { position: static; float: right; opacity: 1; min-width: 44px; min-height: 36px; margin: 2px -6px 0 4px; padding: 0 10px; border: 0; background: none; color: var(--dim); font-size: calc(13px * var(--text-scale, 100) / 100); }
 .app.phone .msg :is(.copy, .reply):active { color: var(--accent); background: var(--raise); }
 .app.phone .msg > :is(.copy, .reply)::after { content: ""; position: absolute; inset: -4px 0; }
-.app.phone .msg > :is(.copy, .reply) { position: relative; }
-.app.phone .msg .stamp { display: inline-block; margin-top: 2px; line-height: 36px; font-size: calc(12px * var(--text-scale, 100) / 100); }
+.app.phone .msg > :is(.copy, .reply) { position: relative; inset: auto; }
+.app.phone .msg .stamp { display: block; float: left; margin-top: 2px; line-height: 36px; font-size: calc(12px * var(--text-scale, 100) / 100); }
+/* (the time floats left and Copy/Reply right, so all three share a line) */
+.app.phone .msg::after { content: ""; display: block; clear: both; }
 .app.phone .msg.assistant .stamp.mid { display: inline-block; }
 .app.phone .msg.user .stamp { text-align: left; }
 /* code: a box of its own that scrolls sideways inside the message (the
