@@ -11156,8 +11156,8 @@ def Hs.bar.pos(+l: I.Loc, first: Bool, +at: Nat, +n: Nat) -> String:
     case False{}: MSG.T.history.position(l, Nat.show(at), Nat.show(n))
 
 # the live bar's words: its track's changes, and the thread's all when
-# those are more (the top bar's Design changes counts the board's and the
-# schematic's together: "Live · 98 of 181 changes")
+# those are more (Hist.changes counts the board's and the schematic's
+# together: "Live · 98 of 181 changes")
 def Hs.live.words(+l: I.Loc, +c: Nat, +all: Nat) -> String:
   Bool.pick(String, Nat.is_eq(c, 0n), MSG.T.history.live(l),
     Bool.pick(String, Nat.is_lt(c, all), MSG.T.history.live.steps.of(l, Nat.show(c), Nat.show(all)), MSG.T.history.live.steps(l, Nat.show(c), Bool.pick(String, Nat.is_eq(c, 1n), "one", "other"))))

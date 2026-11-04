@@ -23,4 +23,4 @@ def main() -> IO(Unit):
     C.Check.str("thin renderer keeps the selected snapshot", Nat.show(U.Hs.at(rendered, U.Hs.track(rendered))), "2")
     C.Check.str("thin renderer never imports old chat bodies", Nat.show(List.length(&2, M.Entry, M.State.mine(U.Ui.state(rendered), "t"))), "0")
     C.Check.str("thin renderer retains the off-page tool label", H.Hist.label(U.Hs.entries(rendered), "a1"), "Bash  python place.py")
-    C.Check.str("thin renderer does not duplicate the top-bar count", Nat.show(H.Hist.changes(M.State.steps(U.Ui.state(rendered), "t"))), "3")
+    C.Check.str("thin renderer does not duplicate the history bar's count", Nat.show(H.Hist.changes(M.State.steps(U.Ui.state(rendered), "t"))), "3")
