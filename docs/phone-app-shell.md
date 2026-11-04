@@ -28,23 +28,28 @@ app's settings.
   (here, the page) of a finished or waiting thread, and the page hands that
   to the app (`notify`). (On current hubs the app's own client runs in
   thin mode, which raises the live status but no turn alerts; the page's
-  are what alert on Android. iOS also has the hub's APNs push.) The rest
+  are what alert on Android. iOS also has the hub's APNs push, shown in
+  front too unless the same alert just showed.) The rest
   as before (src/mobile/notify.bend: a turn that ends,
   an ask, a reminder; the ongoing "agents are working" notification / Live
   Activity). A tapped alert brings the app up on that hub and sends the
   page `open-thread`. The page tells the app which thread it shows
   (`setState`), so that thread raises no alert while it is on screen.
-- **Back** (Android's key, iOS's edge swipe): the app calls
-  `window.backplaneBack()` (phone-shell.js: true when the page shut
-  something or went back a screen); false leaves the app (Android) or does
-  nothing (iOS).
+- **Back**: Android's key calls `window.backplaneBack()` (phone-shell.js:
+  true when the page shut something or went back a screen); false leaves
+  the app. iOS leaves Back to the page: its ‹ and its own swipe in from the
+  left edge (the screen follows the finger); WebKit's back gesture is off,
+  so the two never race.
 - **Files**: a page's `<input type=file>` gets the system picker, and the
   camera when the input asks for `capture`. Downloads of hub files go to the
   system's downloads with the page's cookie.
 - **Links**: the hub's own origin stays in the WebView; any other address,
-  `target=_blank` and `window.open` go to the system browser.
+  `target=_blank` and `window.open` go to the system browser (iOS: a new
+  window on the hub's own origin opens in a sheet with the page's cookie,
+  and a link to another paired hub's page switches to that hub).
 - **Text size**: Android passes the system font scale as the WebView's text
-  zoom; iOS maps Dynamic Type to `-webkit-text-size-adjust` at document start.
+  zoom; iOS zooms the page with Dynamic Type (`WKWebView.pageZoom`, 85 % to
+  125 %, so the phone layout still fits).
 - **Keyboard and insets**: the page draws edge to edge (`viewport-fit=cover`
   with the safe-area insets); Android resizes the WebView for the keyboard
   (`adjustResize`), iOS shrinks the visual viewport; the page follows both.
@@ -102,7 +107,8 @@ page awaits an answer). App → page: `{"id": 7, "ok": true, "value": …}` or
 Events: `open-thread` `{thread}` (a tapped notification; the page selects
 it), `share-in` `{text, files: [{name, type, data (base64)}]}` (shared into
 the app: the page puts the text in the composer and attaches the files),
-`resume` `{awayMs}` and `pause` `{}`.
+`resume` `{awayMs}` and `pause` `{}`. (iOS has no Share Extension yet, so
+no `share-in` there.)
 
 The page uses each op only when `backplaneApp` and the op are present
 (`features`), so the same page works in a browser, in an older app and in
