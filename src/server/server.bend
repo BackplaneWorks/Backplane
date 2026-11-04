@@ -4263,12 +4263,26 @@ def Upgrade.done.k(ok: Bool, force: Bool, +err: String, +inbox: Chan(Msg)) -> IO
 def Upgrade.done(force: Bool, +err: String, +inbox: Chan(Msg)) -> IO(Unit):
   Upgrade.done.k(String.is_empty(err), force, err, inbox)
 
+# how it went, for the KiCad notice ("kicad": client KN.install) and for
+# clients that only read state/error; success restarts to pick it up
+def Install.done(ok: Bool, +err: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case True{}:
+      do IO<Unit>:
+        Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"installed"}}, J.KV{"state", J.Str{"Backplane KiCad installed"}}]))
+        Upgrade.done(False{}, err, inbox)
+    case False{}:
+      Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"failed"}}, J.KV{"error", J.Str{err}}]))
+
+def Install.said(+err: String, +inbox: Chan(Msg)) -> IO(Unit):
+  Install.done(String.is_empty(err), err, inbox)
+
 # install Backplane KiCad beside our data and restart to pick it up
 def Install.go(+home: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
-    Upgrade.say(inbox, Upgrade.note([J.KV{"state", J.Str{"installing Backplane KiCad"}}]))
+    Upgrade.say(inbox, Upgrade.note([J.KV{"kicad", J.Str{"installing"}}, J.KV{"state", J.Str{"installing Backplane KiCad"}}]))
     err : String <- K.KiCad.install(home)
-    Upgrade.done(False{}, err, inbox)
+    Install.said(err, inbox)
 
 # install the channel's newest release and restart into it
 def Upgrade.go.k(force: Bool, +home: String, +channel: String, +inbox: Chan(Msg)) -> IO(Unit):

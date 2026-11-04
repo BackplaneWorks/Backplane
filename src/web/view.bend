@@ -1758,6 +1758,10 @@ def View.kn.acts(as: List<&2, KH.KAct>) -> List<&2, D.Node>:
     case Nil{}: Nil{}
     case KH.KAct{+l, "link", v} <> t:
       D.El{"a", "", [D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener"}], [D.Txt{l}]} <> View.kn.acts(t)
+    case KH.KAct{+l, "kicad-installing", _} <> t:
+      D.El{"button", "", [D.At{"class", "kn-busy"}, D.At{"disabled", "disabled"}, D.At{"aria-busy", "true"}, D.At{"aria-live", "polite"}], [D.Txt{l}]} <> View.kn.acts(t)
+    case KH.KAct{+l, "kicad-installed", _} <> t:
+      D.El{"button", "", [D.At{"class", "kn-done"}, D.At{"disabled", "disabled"}, D.At{"aria-live", "polite"}], [D.Txt{"✓ " ++ l}]} <> View.kn.acts(t)
     case KH.KAct{+l, a, v} <> t: D.Dom.button("", a, v, l, l) <> View.kn.acts(t)
 
 def View.kn.close.loc(+lc: I.Loc, on: Bool, +key: String) -> List<&2, D.Node>:
@@ -4779,7 +4783,7 @@ def View.hist.legend(on: Bool) -> List<&2, D.Node>:
 
 def View.hist.disabled(on: Bool) -> List<&2, D.Attr>:
   match on:
-    case True{}: [D.At{"disabled", ""}]
+    case True{}: [D.At{"disabled", "disabled"}]
     case False{}: Nil{}
 
 def View.hist.changes(+lc: I.Loc, +on: Bool, n: Nat) -> D.Node:
@@ -5268,7 +5272,7 @@ def View.fm.row.loc(+lc: I.Loc, r: U.FmRow) -> D.Node:
   match r:
     case U.FmRow{+l, +a, +v, +d, +k}:
       D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", "fm-row " ++ Bool.pick(String, String.is_empty(a), "off", k)}, D.At{"title", Bool.pick(String, String.is_empty(a), MSG.T.files.preview.none(lc, l), l)}],
-          Bool.pick(List<&2, D.Attr>, String.is_empty(a), [D.At{"disabled", ""}], [D.At{"data-value", v}, D.On{"click", a}])),
+          Bool.pick(List<&2, D.Attr>, String.is_empty(a), [D.At{"disabled", "disabled"}], [D.At{"data-value", v}, D.On{"click", a}])),
         [WI.WIcon.svg(U.Fm.icon(k), 16), D.Dom.span("fm-name", l), D.Dom.span("fm-size", d)]}
 
 def View.fm.row(r: U.FmRow) -> D.Node:

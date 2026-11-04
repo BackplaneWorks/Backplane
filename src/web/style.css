@@ -1384,6 +1384,12 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 .kicad-notice p { color: var(--dim); margin: 8px 0 12px; }
 .kn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .kn-actions button, .kn-actions a { border-radius: 0; }
+/* KiCad install: the pressed button turns into a working state at once (client.bend KN.install) */
+.kn-actions button.kn-busy, .kn-actions button.kn-done { display: inline-flex; align-items: center; gap: 8px; cursor: default; opacity: 1; }
+.kn-actions button.kn-busy::before { content: ""; width: 9px; height: 9px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: kn-spin .8s linear infinite; }
+.kn-actions button.kn-done { color: var(--ok); border-color: var(--ok); }
+@keyframes kn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .kn-actions button.kn-busy::before { animation-duration: 2.4s; } }
 .kn-close { position: absolute; top: 4px; right: 4px; }
 .empty { flex-direction: column; gap: 16px; }
 #kicad-path { min-width: 0; width: 100%; }
