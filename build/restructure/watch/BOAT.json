@@ -1,0 +1,16 @@
+{
+ "job": "j20261104013154-1092717",
+ "sandbox": "bx_rkmc9u75",
+ "size": "default",
+ "ttl": 1500,
+ "source": "/home/h/Documents/i2cjak/backplane-bend/.backplane/worktrees/backplane-f683a1f3",
+ "revision": "2789dddeb86f159893ab835c8071d4094eab1310",
+ "dirty": "yes",
+ "manifest_sha256": "7a4cf7468514335c10ed64b237c27825797a6718063b02aa7436ad2b91376cc7",
+ "manifest_files": 3211,
+ "bend": "2.0.36",
+ "bend_sha256": "02089dc0eed0fd5fd6d73c74cc9cffcb2c6638dd3b02ae83f7b8cc57fbe381ba",
+ "command": "env BACKPLANE_HEAVY_BOAT_SANDBOX=1 BACKPLANE_HEAVY_OFFLOADED=1 PYTHONDONTWRITEBYTECODE=1 python3 extra/restructure/run-watch-proofs.py",
+ "exit": 0,
+ "started": 1793755961
+}

@@ -1,0 +1,25 @@
+{
+  "actual_bend_flock_held": true,
+  "aggregate_peak_bytes": 131624960,
+  "cap_origin": "isolated Boat VM",
+  "cgroup": "user.slice/user-1000.slice/user@1000.service/app.slice/restructure-watch-124-5909.scope",
+  "executor_pid": 5971,
+  "exit": 1,
+  "inputs_unchanged": true,
+  "manifest_sha256": "d4a34fb96ddd2f06f37547ade07e2604f5656bb1cf448a801e457129b521c03a",
+  "memory_max_bytes": 3699998720,
+  "output": "SOME PROOFS FAIL\nError: 18 defs rely on unsafe or foreign code:\n- ../../../../src/app/win.Win.open\n- ../../../../src/app/win.Win.words\n- ../../../../src/app/win.Win.present\n- ../../../../src/app/win.Win.show\n- ../../../../src/app/win.Win.copy\n- ../../../../src/app/win.Win.paste\n- ../../../../src/app/win.Win.pasted\n- ../../../../src/app/win.Win.pasted_image\n- ../../../../src/app/win.Win.dropped\n- ../../../../src/app/win.Win.size\n- ../../../../src/app/win.Win.twin\n- ../../../../src/app/win.Win.title\n- ../../../../src/app/win.Win.ime\n- ../../../../src/app/win.Win.ime_reset\n- ../../../../src/app/win.Win.ime_spot\n- ../../../../src/app/win.Win.payload\n- ../../../../src/app/win.Win.ime_inject\n- ../../../../src/app/win.Win.xid\n",
+  "peak_rss_kib": 146728,
+  "seconds": 0.20208388899999363,
+  "shard": "124",
+  "state": "passed",
+  "swap_after": {
+    "pswpin": 0,
+    "pswpout": 0
+  },
+  "swap_before": {
+    "pswpin": 0,
+    "pswpout": 0
+  },
+  "swap_total_bytes": 2147479552
+}

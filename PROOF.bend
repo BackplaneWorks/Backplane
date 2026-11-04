@@ -1,3 +1,5 @@
+import ./src/server/watch-plan.bend as WATCHPLAN
+
 import ./test/conversation-proof/window_final.bend as CONVROOT
 
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
@@ -13821,13 +13823,21 @@ def Laws.ws_unmask_take_go(bs, n, key, i, acc):
 
 # --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
 
-def Laws.watch_copy_launch_none(home, id, cwd, target): {==}
+def Laws.watch_copy_gate_none(xs): {==}
 
-def Laws.watch_copy_check_none(kind, target, ident, home, id): {==}
+def Laws.watch_live_gate_kept(xs): {==}
 
-def Laws.watch_copy_stop_none(kind, target, ident, home, id): {==}
+def Laws.watch_copy_launch_none(home, id, cwd, target):
+  Laws.watch_copy_gate_none(["-c", WATCHPLAN.Watch.launch.sh(), "sh", WATCHPLAN.Watch.dir(home, id), cwd, target])
 
-def Laws.watch_copy_intent_none(home, id): {==}
+def Laws.watch_copy_check_none(kind, target, ident, home, id):
+  Laws.watch_copy_gate_none(["-c", WATCHPLAN.Watch.check.sh(), "sh", kind, target, ident, WATCHPLAN.Watch.dir(home, id)])
+
+def Laws.watch_copy_stop_none(kind, target, ident, home, id):
+  Laws.watch_copy_gate_none(["-c", WATCHPLAN.Watch.stop.sh(), "sh", kind, target, ident, WATCHPLAN.Watch.dir(home, id)])
+
+def Laws.watch_copy_intent_none(home, id):
+  Laws.watch_copy_gate_none(["-c", "mkdir -p \"$1\" && : > \"$1/intent\"", "sh", WATCHPLAN.Watch.dir(home, id)])
 
 def Laws.copy_off_runs_all(os): {==}
 

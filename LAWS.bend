@@ -1,3 +1,5 @@
+import ./src/server/watch-plan.bend as WATCHPLAN
+
 import ./src/core/message-context.bend as MSGCONTEXT
 
 import ./src/core/ws-fragments.bend as WSFRAG
@@ -12609,12 +12611,22 @@ law ws_unmask_take_go:
 # --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
 # Its watch scripts are none (no launch, check, stop or intent shell: every
 # watch reads as gone, nothing the log names is signalled)
+# Each production planner composes with this gate; these two laws cover every
+# offered command list, including future scripts and argument combinations.
+law watch_copy_gate_none:
+  for xs: List<&2, String>
+  {WATCHPLAN.Watch.argv.k(True{}, xs) == [] : List<&2, String>}
+
+law watch_live_gate_kept:
+  for +xs: List<&2, String>
+  {WATCHPLAN.Watch.argv.k(False{}, xs) == xs : List<&2, String>}
+
 law watch_copy_launch_none:
   for +home: String
   for +id: String
   for +cwd: String
   for +target: String
-  {MPCREDIT.Watch.launch.argv(True{}, home, id, cwd, target) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.launch.argv(True{}, home, id, cwd, target) == [] : List<&2, String>}
 
 law watch_copy_check_none:
   for +kind: String
@@ -12622,7 +12634,7 @@ law watch_copy_check_none:
   for +ident: String
   for +home: String
   for +id: String
-  {MPCREDIT.Watch.check.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.check.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
 
 law watch_copy_stop_none:
   for +kind: String
@@ -12630,12 +12642,12 @@ law watch_copy_stop_none:
   for +ident: String
   for +home: String
   for +id: String
-  {MPCREDIT.Watch.stop.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.stop.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
 
 law watch_copy_intent_none:
   for +home: String
   for +id: String
-  {MPCREDIT.Watch.intent.argv(True{}, home, id) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.intent.argv(True{}, home, id) == [] : List<&2, String>}
 
 # a hub that is no copy runs every out it made
 law copy_off_runs_all:
