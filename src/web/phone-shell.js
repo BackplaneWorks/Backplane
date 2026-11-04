@@ -137,6 +137,12 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     const menu = doc.querySelector(".local-menu[open]:not([data-inline='true'])");
     if (menu) return () => { menu.open = false; };
     if (doc.querySelector(".rowmenu")) return () => dispatch("menu-close", "");
+    // the image lightbox (outside .app) first, then the composer's pop-ups
+    // (the model picker, token use, allowance): each as its × or shade does
+    const lightbox = doc.querySelector(".lightbox .lb-close");
+    if (lightbox) return () => lightbox.click();
+    const shade = doc.querySelector(".app.phone .composer .shade[data-on-click]");
+    if (shade) return () => shade.click();
     const sheet = doc.querySelector(".ph-sheet-layer .ph-sheet-back");
     if (sheet) return () => sheet.click();
     // the project picker (Projects' +), the hub's own layer
