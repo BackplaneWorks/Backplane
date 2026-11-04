@@ -1779,6 +1779,19 @@ function dispatch(action, value, timer) {
 Plot2d.onPlace((place) => dispatch("rv-note", place));
 // a tap on a sheet symbol opens that sheet instance (client.bend's Sch)
 Plot2d.onSheet((value) => dispatch("sch-go", value));
+// a phone's tap card (plot2d.js) on a part: its saved component, read
+// once per board version (kicad.components, as the 3D inspector reads it)
+const partDetails = new Map();
+Plot2d.onDetails((scope, key, ref) => {
+  const path = key.split("|").slice(2).join("|");
+  if (!scope) return null;
+  const at = `${scope}|${path}|${Plot2d.version(key)}`;
+  if (!partDetails.has(at)) {
+    if (partDetails.size > 8) partDetails.delete(partDetails.keys().next().value);
+    partDetails.set(at, viewerRpc.components(scope, { path }).catch(() => { partDetails.delete(at); return null; }));
+  }
+  return partDetails.get(at).then((data) => data?.components?.find((c) => c.reference === ref) || null);
+});
 // a phone's tap card (plot2d.js): "Mention in chat" adds the piece to the
 // thread's draft and goes back to the thread
 Plot2d.onMention((text) => {
@@ -1794,7 +1807,7 @@ Plot2d.onMention((text) => {
 // a tap that probes a part or a net (probe.js) tells the hub, which keeps it
 // (client.bend's Probe); the 3D view finds parts on the board's plot
 Plot2d.onProbe((value) => { Solid.setProbe(value); dispatch("probe", value); });
-Solid.onProbe((value) => { Plot2d.setProbe(value); dispatch("probe", value); Plot2d.inspectPart(value.startsWith("c\t") ? value.slice(2).split("\t")[0] : ""); });
+Solid.onProbe((value) => { Plot2d.setProbe(value); dispatch("probe", value); const solid = document.querySelector("canvas#solid"); Plot2d.inspectPart(value.startsWith("c\t") ? value.slice(2).split("\t")[0] : "", solid?.dataset.scope || "", solid?.dataset.key ? `0|${solid.dataset.key.slice(2)}` : ""); });
 Solid.useBoard({ parts: (key) => Plot2d.parts(key), thick: (key) => Plot2d.thick(key), need: (key) => Plot2d.need(key) });
 Plot2d.onPlotted(() => Solid.relight());
 // the probe's chip: its name brings it into view
