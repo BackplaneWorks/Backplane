@@ -237,6 +237,11 @@ def inherited_lock(path):
         return None
 
 
+def local_cap_ok():
+    """True when this process's own cgroup is a verified <=3.7e9 B, swap-0 cap (the admission of last resort)."""
+    return verify_shard_cgroup()
+
+
 def admit(profile):
     try:
         host = host_available()
@@ -250,6 +255,11 @@ def admit(profile):
     in_boat = os.environ.get(BOAT_VAR) == '1' and os.environ.get('BACKPLANE_HEAVY_OFFLOADED') == '1'
     if not in_boat and host < FLOORS[profile] + HOST_RESERVE:
         print(f'heavy-guard: {profile} needs {FLOORS[profile] / GIB:.0f} GiB expected peak plus {HOST_RESERVE / GIB:.0f} GiB host reserve; {host / GIB:.2f} GiB host available', file=sys.stderr)
+        return False
+    if not in_boat and profile not in SHARD_PROFILES and not local_cap_ok():
+        # Admission is not a cap. A whole-workload profile on this machine would run the compiler uncapped, and the
+        # installed bend/bun shims (scripts/compiler-guard.py) refuse that anyway: send it to Boat instead.
+        print(f'heavy-guard: {profile} would run uncapped here (own cgroup memory.max must be finite and <= 3700000000 with swap 0); use Boat', file=sys.stderr)
         return False
     return True
 
