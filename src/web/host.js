@@ -1496,6 +1496,11 @@ for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, askNo
 
 function notify(c) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
+  // (a phone's browser shows a page's notifications only through its
+  // service worker, Android Chrome's constructor throws; sw.js's
+  // notificationclick sends the tap back as "bp-open")
+  const viaWorker = () => navigator.serviceWorker?.ready?.then(r => r.showNotification(c.title, { body: c.body, tag: c.key || c.thread, icon: "./apple-touch-icon.png", data: { thread: c.thread || "" } })).catch(() => {});
+  if (PHONE_TITLES() && navigator.serviceWorker?.controller) { viaWorker();return; }
   try {
     const n = new Notification(c.title, { body: c.body, tag: c.key || c.thread, icon: "./apple-touch-icon.png" });
     n.onclick = () => {
@@ -1503,7 +1508,7 @@ function notify(c) {
       if (c.thread) dispatch("select", c.thread);
       n.close();
     };
-  } catch {}
+  } catch { viaWorker(); }
 }
 
 // run an action; answers whether it did anything (a key it did nothing
@@ -3769,6 +3774,7 @@ async function checkDeploy() {
 // the app shell works offline where the browser allows it (HTTPS or localhost)
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", e => { if (e.data?.t === "bp-open" && typeof e.data.thread === "string" && e.data.thread) dispatch("select", e.data.thread); });
 }
 
 // A category change starts at its heading; Back restores its category button.
