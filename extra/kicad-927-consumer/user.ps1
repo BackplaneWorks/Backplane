@@ -42,7 +42,7 @@ try {
     catch { $_ | Out-String | Set-Content (Join-Path $cfg.out 'argv-probe-node-error.txt') }
     try { & $cfg.bunProbe (Join-Path $PSScriptRoot 'argv-probe.cjs') $ConfigPath 'bun' *> (Join-Path $cfg.out 'argv-probe-bun.log') }
     catch { $_ | Out-String | Set-Content (Join-Path $cfg.out 'argv-probe-bun-error.txt') }
-    & $cfg.python (Join-Path $PSScriptRoot 'canonical-946.py') $ConfigPath *> (Join-Path $cfg.out 'canonical-946.log')
+    & $cfg.python -X utf8 (Join-Path $PSScriptRoot 'canonical-946.py') $ConfigPath *> (Join-Path $cfg.out 'canonical-946.log')
     $abiCode = $LASTEXITCODE
     & $cfg.node (Join-Path $PSScriptRoot 'accept.cjs') $ConfigPath *> (Join-Path $cfg.out 'consumer.log')
     $code = $LASTEXITCODE

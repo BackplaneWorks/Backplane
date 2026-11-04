@@ -20,7 +20,7 @@ const points = value => Array.from(value, c => c.codePointAt(0));
 const wait = ms => new Promise(resolve => setTimeout(resolve,ms));
 async function until(label, fn, ms=120000) {
   const end=Date.now()+ms; let last;
-  while(Date.now()<end) { try { const value=await fn(); if(value)return value; } catch(e){if(e.code==='HEALTH_JSON_INVALID')throw e;last=e.message;} await wait(250); }
+  while(Date.now()<end) { try { const value=await fn(); if(value)return value; } catch(e){if(['HEALTH_JSON_INVALID','INSTALL_FAILED'].includes(e.code))throw e;last=e.message;} await wait(250); }
   throw Error(label+' timed out'+(last?': '+last:''));
 }
 function setting(home) {
@@ -90,10 +90,16 @@ async function typePath(context, typed, expectedStatus='ok') {
   const {page,home,entry}=context;
   await cadSettings(page);
   const field=page.locator('#kicad-path');
+  await field.click();
   await field.fill('');
+  // Allow the just-opened Settings view's initial health render to settle.
+  await page.waitForTimeout(500);
+  assert.equal(await field.inputValue(),'','Fresh field changed before typing');
   // Real key/text events, including each literal backslash; no dispatch shortcut.
   if(typed) await field.pressSequentially(typed,{delay:20});
-  const dom=await field.inputValue();assert.equal(dom,typed,'DOM input corruption');
+  const dom=await field.inputValue();
+  (entry.inputAttempts??=[]).push({typed,dom,codePoints:points(dom)});save();
+  assert.equal(dom,typed,'DOM input corruption');
   entry.typed=typed;entry.dom=dom;entry.domCodePoints=points(dom);save();
   await page.screenshot({path:path.join(out,entry.name+'-typed.png')});
   await field.press('Enter');
@@ -194,24 +200,46 @@ async function main() {
   }
   await check('real-install',async()=>{
   const install=await openCase('real-install');
+  async function installInput(value,status) {
+    for(let attempt=0;attempt<2;attempt++) {
+      try {return await typePath(install,value,status);}
+      catch(e) {
+        if(e.code==='HEALTH_JSON_INVALID') {(result.failures??=[]).push({name:'install-health-json',error:e.message});save();return null;}
+        if(e.code==='ERR_ASSERTION'&&e.message.includes('DOM input corruption')) {
+          (result.failures??=[]).push({name:'install-input-update',error:e.message});save();
+          if(attempt===0)continue;
+        }
+        throw e;
+      }
+    }
+  }
   // Force a genuine missing runtime notice without changing Program Files or
   // substituting a download. After install, clear the explicit missing setting.
   const missing=path.join(out,'absent-runtime')+'\\';
   assert(!fs.existsSync(missing));
-  try {await typePath(install,missing,'missing');}
-  catch(e) {if(e.code!=='HEALTH_JSON_INVALID')throw e;(result.failures??=[]).push({name:'install-health-json',error:e.message});save();}
+  await installInput(missing,'missing');
   const button=install.page.locator('[data-on-click="kicad-install"], [data-on-click="cad-install"][data-value="kicad"]').first();
   await button.waitFor({state:'visible',timeout:30000});
   install.entry.installStartedAt=new Date().toISOString();save();await button.click();
   const installed=path.join(install.home,'kicad',cfg.runtimeVersion,'bin','kicad-cli.exe');
-  await until('real in-app download / verify / extract / promote',()=>fs.existsSync(installed),1200000);
+  await until('real in-app download / verify / extract / promote',async()=>{
+    if(fs.existsSync(installed))return true;
+    const notices=await install.page.locator('.kicad-notice').allTextContents();
+    const failed=notices.find(t=>t.includes("KiCad didn't install")||t.includes('KiCad install failed:'));
+    if(failed) {
+      install.entry.installErrorNotice=failed;save();
+      await install.page.screenshot({path:path.join(out,'real-install-failed.png')});
+      const e=Error(failed);e.code='INSTALL_FAILED';throw e;
+    }
+    return false;
+  },1200000);
   assert.equal(sha(installed),cfg.runtimeCliSHA256,'Installed native CLI differs from the pinned runtime');
   install.entry.installedCli=installed;install.entry.installedCliSHA256=sha(installed);
-  try {
-    const h=await typePath(install,'');
+  const h=await installInput('','ok');
+  if(h) {
     assert.equal(h.source,'installed');assert.equal(normal(h.cli),normal(installed));
     install.entry.installedResolverVerified=true;
-  } catch(e) {if(e.code!=='HEALTH_JSON_INVALID')throw e;(result.failures??=[]).push({name:'installed-health-json',error:e.message});save();}
+  }
   assert.equal(json(path.join(install.home,'kicad',cfg.runtimeVersion,'manifest.json')).version,cfg.runtimeVersion);
   install.entry.version=execFileSync(installed,['version'],{encoding:'utf8',timeout:30000}).trim();
   assert(install.entry.version.includes(cfg.runtimeVersion.split('-bp.')[0]),'Installed real CLI version mismatch');
