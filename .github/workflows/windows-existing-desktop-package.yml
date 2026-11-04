@@ -15,6 +15,12 @@ on:
       packet_sha256:
         type: string
         required: true
+      target:
+        description: Windows runs the mandatory ZIP gate; Unix performs packaging only by direct user instruction
+        type: choice
+        options: [windows-x64, linux-x64, linux-arm64, darwin-arm64]
+        default: windows-x64
+        required: false
 
 permissions:
   contents: read
@@ -25,6 +31,7 @@ concurrency:
 
 jobs:
   package:
+    if: inputs.target == '' || inputs.target == 'windows-x64'
     runs-on: windows-2025
     timeout-minutes: 20
     env:
@@ -108,5 +115,45 @@ jobs:
             product/build/windows-standard-user/package.json
             product/build/windows-standard-user/unit-tests.txt
             product/build/windows-standard-user/*.png
+          if-no-files-found: warn
+          retention-days: 30
+
+  unix-package:
+    if: inputs.target != '' && inputs.target != 'windows-x64'
+    runs-on: ${{ inputs.target == 'linux-x64' && 'ubuntu-24.04' || inputs.target == 'linux-arm64' && 'ubuntu-24.04-arm' || 'macos-15' }}
+    timeout-minutes: 20
+    env:
+      TARGET: ${{ inputs.target }}
+      PACKET_URL: ${{ inputs.packet_url }}
+      PACKET_SHA256: ${{ inputs.packet_sha256 }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      BACKPLANE_TELEMETRY: 'off'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tools
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.product_commit }}
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package existing honest-version inputs; no payload launch or fresh runtime claim
+        run: python tools/scripts/unix-existing-desktop-package.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unix-existing-desktop-${{ inputs.target }}
+          path: |
+            build/unix-existing/dist/
+            build/unix-existing/RESULT.json
+            build/unix-existing/MACOS-INTEGRITY.json
+            build/unix-existing/stage/STAGE.json
           if-no-files-found: warn
           retention-days: 30
