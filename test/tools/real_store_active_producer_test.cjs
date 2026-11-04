@@ -1,7 +1,8 @@
 // Synthetic processes only. No hub, store, auth, network or fixed-delay phase switch.
 const fs = require('node:fs'), { join, resolve } = require('node:path'), { tmpdir } = require('node:os');
 const assert = require('node:assert/strict');
-const now = () => Number(process.hrtime.bigint()) / 1e6, sleep = ms => new Promise(r => setTimeout(r, ms));
+const Clock = require('./real_store_active_clock.cjs'), clock = Clock.hostClock();
+const now = clock.nowMs, sleep = ms => new Promise(r => setTimeout(r, ms));
 // Readiness requires independently observed output and the producer's receipt.
 function mixedReady(rows, receipt) {
   const s = receipt?.states?.find(s => s.epoch === 1);
@@ -31,11 +32,14 @@ module.exports.run = async function run(source) {
     const clockSample = stage => { if (clockSamples.length < 4) clockSamples.push({ stage,
       monoMs: now(), performanceMs: performance.now(), performanceOriginMs: performance.timeOrigin, wallMs: Date.now() }); };
     const control = (epoch, mode) => {
-      const start = now(); fs.writeFileSync(join(root, 'control.next'), JSON.stringify({ epoch, mode, start, end: start + 10000 }));
+      const start = now(); fs.writeFileSync(join(root, 'control.next'), JSON.stringify({ epoch, mode, start, end: start + 10000, clockDomain: clock.contract.domain }));
       fs.renameSync(join(root, 'control.next'), join(root, 'control.json'));
       if (controls.length < 3) controls.push({ epoch, mode, start, end: start + 10000, publishedMonoMs: now() });
     };
-    const receipt = () => fs.existsSync(receiptPath) ? JSON.parse(fs.readFileSync(receiptPath, 'utf8')) : null;
+    const receipt = () => {
+      const r = fs.existsSync(receiptPath) ? JSON.parse(fs.readFileSync(receiptPath, 'utf8')) : null;
+      if (r) Clock.assertDomain(clock, r.clockDomain); return r;
+    };
     function diagnostic() {
       let r = null, receiptReadFailed = false;
       try { r = receipt(); } catch { receiptReadFailed = true; }
@@ -62,6 +66,7 @@ module.exports.run = async function run(source) {
       }
       return { scope: 'stand-in-cohort-diagnostic', suppressedCycle: suppressed, assertionsCompleted: cases,
         hubStarted: false, outputRows: rows.length, unparsedDeltas, unknownEpochMarkers, controls, clockSamples,
+        clockContract: clock.contract, producerClockDomain: r?.clockDomain ?? null,
         controllerSnapshotMonoMs: now(), producerReceiptAtMs: r?.at ?? null, receiptReadFailed,
         epochs: observed.map((o, i) => {
           const s = r?.states?.find(s => s.epoch === o.epoch), bucketSum = Array.isArray(s?.buckets) ? s.buckets.reduce((a, b) => a + b, 0) : null;

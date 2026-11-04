@@ -12,9 +12,10 @@ import { ThinViews } from '../../src/web/thin.js';
 const P = require('./real_store_active_policy.cjs');
 const { TarStream } = require('./real_store_active_tar.cjs');
 const { LinuxScope } = require('./real_store_active_scope.cjs');
+const Clock = require('./real_store_active_clock.cjs'), clock = Clock.hostClock();
 type Row = Record<string, any>;
 const ensure = (v: any, code: string) => { if (!v) throw Error(code); };
-const mono = () => Number(process.hrtime.bigint()) / 1e6;
+const mono = clock.nowMs;
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 const sha = (b: string | Uint8Array) => createHash('sha256').update(b).digest('hex');
 async function hashFile(path: string, end?: number) {
@@ -53,11 +54,13 @@ function encode(value: any): Uint8Array {
 }
 // Constant-size overwrite receipts, not a growing per-delta controller log.
 // The two retained epochs allow the controller to finish the previous window
-// while all producers continue emitting in the next one. hrtime is one host's
-// monotonic clock, shared by the hub's owned children and this controller.
+// while all producers continue emitting in the next one. Every process uses
+// the same explicitly verified Linux CLOCK_MONOTONIC domain.
 const producer = String.raw`
 const fs = require('node:fs'), readline = require('node:readline');
-const P = require(process.env.REAL_ACTIVE_POLICY), now = () => Number(process.hrtime.bigint()) / 1e6;
+const P = require(process.env.REAL_ACTIVE_POLICY);
+const Clock = require(require('node:path').join(require('node:path').dirname(process.env.REAL_ACTIVE_POLICY),'real_store_active_clock.cjs'));
+const clock = Clock.hostClock(), now = clock.nowMs;
 if (process.argv.includes('--version')) { console.log('2.1.286 (owned stand-in)'); process.exit(0); }
 // Verification still launches the stand-in; no credential store is supplied.
 if (process.argv.includes('auth')) process.exit(127);
@@ -74,7 +77,7 @@ async function go(input) {
   const states = [], file = root + '/producer-' + index + '.json';
   let seq = 0, block = 0, text = '', cycle = now(), lastWrite = 0, next = now();
   const receipt = () => {
-    const row = {schema:1,run,index,pid:process.pid,at:now(),states:states.map(s => ({epoch:s.epoch,
+    const row = {schema:1,run,index,pid:process.pid,clockDomain:clock.contract.domain,at:now(),states:states.map(s => ({epoch:s.epoch,
       count:s.a.count,first:s.a.first,last:s.a.last,maxInteriorGapMs:s.a.maxInteriorGapMs,buckets:[...s.a.buckets],
       bytes:s.bytes,firstSeq:s.firstSeq,lastSeq:s.lastSeq,mode:s.mode,completed:s.completed,tools:s.tools,results:s.results}))};
     fs.writeFileSync(file + '.new', JSON.stringify(row), {mode:0o600});fs.renameSync(file + '.new', file);
@@ -86,6 +89,7 @@ async function go(input) {
   }; start();
   for (;;) {
     const c = JSON.parse(fs.readFileSync(root + '/control.json','utf8'));
+    Clock.assertDomain(clock,c.clockDomain);
     if (c.mode === 'stop') break;
     if (!['mixed','pure'].includes(c.mode)) throw Error('owned-producer-phase');
     const at = now(), marker = '~ra:' + run + ':' + index + ':' + (++seq) + ':' + Math.floor(at) + ':' + c.epoch + ':' + c.mode + '~';
@@ -157,6 +161,7 @@ const report: Row = { schema: 1, scope: 'private-RC3-copy-plus-20-active-produce
   limits: P.LIMITS, requestedLoadedMs: o.seconds * 1000, checks: {}, phases: [], samplesFileSuffix: '.samples.jsonl',
   cpuScope: 'captured live hub PID utime+stime; 100% = one core; no normalization or subtraction',
   startedAt: new Date().toISOString() };
+report.clock = clock.contract;
 let hub: ReturnType<typeof Bun.spawn> | undefined, fault: string | undefined, cleaning = false, bootAt = 0;
 let port = 0, token = '', logBytes = 0, logTail = '', listening = false, stackError = false;
 let birth = 0, originalBytes = 0, loadedStart = 0, loadedEnd = 0, current: Row | undefined;
@@ -175,7 +180,7 @@ function remember(set: Set<string>, key: string) {
   ownershipCharge += 128 + key.length * 2;
   ensure(ownershipCharge <= 128 * 1024 * 1024 && set.size < 300000, 'ownership-metadata-bound'); set.add(key);
 }
-const control = (c: Row) => { writeFileSync(join(root, 'control.next'), JSON.stringify(c), { mode: 0o600 }); renameSync(join(root, 'control.next'), join(root, 'control.json')); };
+const control = (c: Row) => { writeFileSync(join(root, 'control.next'), JSON.stringify({ ...c, clockDomain: clock.contract.domain }), { mode: 0o600 }); renameSync(join(root, 'control.next'), join(root, 'control.json')); };
 const failed = (code: string) => { fault ??= code; };
 function guard() { ensure(!fault, fault ?? 'fault'); ensure(ownedScope.leaderAlive(), 'child-exited'); }
 async function until(check: () => boolean, ms: number) {
@@ -474,6 +479,7 @@ function finishWindow(w: Row, tickHz: number) {
   const { start, end, mode, index } = w;
   const threads = ids.map((_, i) => {
     const r = smallJson(join(root, `producer-${i}.json`)), state = r.states?.find((s: Row) => s.epoch === w.epoch);
+    Clock.assertDomain(clock, r.clockDomain);
     ensure(r.schema === 1 && r.run === run && r.index === i && r.at >= end - 1000 && r.at <= mono() + 10 && state, 'producer-receipt');
     registerProducer(r);
     const delivered = w.threads[i].cohort.finish(state);
@@ -523,6 +529,7 @@ async function runLoaded(tickHz: number) {
 
 const producerPids = new Map<number, number>();
 function registerProducer(r: Row) {
+  Clock.assertDomain(clock, r.clockDomain);
   ensure(r.run === run && r.schema === 1 && Number.isInteger(r.index) && r.index >= 0 && r.index < 20 && Number.isInteger(r.pid) && r.pid > 0, 'producer-receipt');
   const s = readFileSync(`/proc/${r.pid}/stat`, 'utf8'), f = s.slice(s.lastIndexOf(') ') + 2).trim().split(/\s+/), born = Number(f[19]);
   ensure(Number.isSafeInteger(born) && born > 0 && readFileSync(`/proc/${r.pid}/cmdline`, 'utf8').split('\0').includes(join(agents, 'producer.cjs')), 'producer-identity');
@@ -542,7 +549,7 @@ try {
   ensure(await hashFile(bin) === o['--sha256'], 'service-sha');
   await stageFence(); // Missing/mismatched prerequisite fails before extraction.
   report.fixtureArchiveSha256 = await hashFile(fixture); ensure(report.fixtureArchiveSha256 === o['--fixture-sha256'], 'archive-sha');
-  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_policy.cjs', 'test/tools/real_store_active_tar.cjs', 'test/tools/real_store_active_scope.cjs',
+  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_clock.cjs', 'test/tools/real_store_active_policy.cjs', 'test/tools/real_store_active_tar.cjs', 'test/tools/real_store_active_scope.cjs',
     'src/core/model.bend', 'src/core/cbor.bend', 'src/web/wire.js', 'src/web/thin.js', 'src/web/sidebar-region.js', 'src/web/view-delta.js',
     'src/web/conversation-frame.js', 'src/web/terminal-input.js', 'src/web/model-menu-input.js', 'src/web/startup.js'];
   sourceHashes = Object.fromEntries(sourcePaths.map(p => [p, sha(readFileSync(resolve(import.meta.dir, '../..', p)))])); report.sourceHashes = sourceHashes;
@@ -634,7 +641,7 @@ try {
   guard();
 } catch (e) {
   // Never serialize exception messages/stacks from SQLite, RPCs or copied data.
-  report.failureCode = P.failureCode(e);
+  report.failureCode = Clock.failureCode(e) ?? P.failureCode(e);
   report.failurePhase = loadedStart > 0 ? 'loaded' : hub ? 'startup' : 'prepare';
   if (loadedStart > 0) {
     loadedEnd = mono() - bootAt; report.loadedEndMs = loadedEnd; report.actualLoadedMs = loadedEnd - loadedStart;
