@@ -429,18 +429,20 @@ class View {
       // touch browser sends contextmenu for it; iOS does not)
       clearTimeout(this.pressing);
       this.pointerKind = e.pointerType;
+      this.armed = null;
       if (this.tap && e.pointerType === "touch") {
         const at = this.tap, id = e.pointerId;
+        // Held 500 ms it is armed (a short vibration), and lifted where it
+        // started it comments there (up). Deciding on the lift: a WebView
+        // may hold back a slow drag's first moves, and a drag lifts far away.
         // (a busy page runs the timer late with the lift still queued: let
         // queued input go first, as phone-shell.js's long press does)
         this.pressing = setTimeout(() => { this.pressing = setTimeout(() => {
-          // (still down, and still where it was: a slow drag is no press)
           const now = this.pts.get(id);
           if (this.tap !== at || this.pts.size !== 1 || !now || Math.hypot(now.x - at.x, now.y - at.y) > 8) return;
           this.tap = null;
-          this.longPressed = performance.now();
+          this.armed = { id, x: at.x, y: at.y };
           navigator.vibrate?.(10);
-          this.placeAt(at.x, at.y);
         }, 0); }, 500);
       }
     });
@@ -448,6 +450,7 @@ class View {
       if (!this.pts.has(e.pointerId)) { this.hover(e);return; }
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) { this.tap = null; clearTimeout(this.pressing); }
+      if (this.armed && Math.hypot(e.clientX - this.armed.x, e.clientY - this.armed.y) > 12) this.armed = null;
       if (this.pinch && this.pts.size === 2) {
         const m = mid(), f = this.zoomFactor(m.d / Math.max(this.pinch.d, 1));
         this.ox = m.x - (this.pinch.x - this.ox) * f; this.oy = m.y - (this.pinch.y - this.oy) * f;
@@ -474,6 +477,15 @@ class View {
     };
     const up = (e) => {
       clearTimeout(this.pressing);
+      const armed = this.armed;
+      this.armed = null;
+      if (armed && e.type === "pointerup" && e.pointerId === armed.id && Math.hypot(e.clientX - armed.x, e.clientY - armed.y) <= 12) {
+        this.longPressed = performance.now();
+        this.placeAt(armed.x, armed.y);
+      }
+      // (a lift far from where the finger came down is no tap, even if its
+      // moves never came)
+      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 12) this.tap = null;
       const tap = !this.treeWaiting() && e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
       this.mouseTap = !!tap && e.pointerType === "mouse";
