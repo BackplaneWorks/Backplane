@@ -630,7 +630,7 @@ function commandList(cmds, alerts) {
     const c = h.cmd;
     if (is(c, "Send")) cs.push({ type: "send", hub: h.hub, data: App.wire(c.text) });
     else if (is(c, "Copy")) cs.push({ type: "copy", text: c.text });
-    else if (is(c, "Focus")) cs.push({ type: "focus", id: c.id });
+    else if (is(c, "FocusField")) cs.push({ type: "focus", id: c.id });
     else if (is(c, "ScrollEnd")) cs.push({ type: "scroll" });
     // a client action come due (the design history playing), back to the hub that asked
     else if (is(c, "Later")) cs.push({ type: "later", ms: Number(c.ms), action: c.action, value: h.hub + "|" + c.value });

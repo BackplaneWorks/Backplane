@@ -23,7 +23,7 @@ def sent.go(cs: List<&2, U.Cmd>) -> String:
       ""
     case U.Send{t} <> r:
       t ++ "\n" ++ sent.go(r)
-    case U.Focus{f} <> r:
+    case U.FocusField{f} <> r:
       "focus " ++ f ++ "\n" ++ sent.go(r)
     case _ <> r:
       sent.go(r)

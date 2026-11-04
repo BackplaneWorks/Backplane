@@ -25,8 +25,8 @@ type Chk is Data:
 type Out is Data:
   Out{id: String, label: String, argv: List<&2, String>, on: Bool}
 
-type Tool is Data:
-  Tool{name: String, exts: List<&2, Ext>, draw: Bool, checks: List<&2, Chk>, outs: List<&2, Out>}
+type CadTool is Data:
+  CadTool{name: String, exts: List<&2, Ext>, draw: Bool, checks: List<&2, Chk>, outs: List<&2, Out>}
 
 # what a file is: its tool's name and its role, "" for both when no tool
 # knows it
@@ -67,32 +67,32 @@ def Cad.kicad.outs() -> List<&2, Out>:
     Out{"odb", "ODB++", ["{cli}", "pcb", "export", "odb", "-o", "{out}/{name}-odb.zip", "{pcb}"], False{}}
   ]
 
-def Cad.kicad() -> Tool:
-  Tool{"kicad", Cad.kicad.exts(), True{}, Cad.kicad.checks(), Cad.kicad.outs()}
+def Cad.kicad() -> CadTool:
+  CadTool{"kicad", Cad.kicad.exts(), True{}, Cad.kicad.checks(), Cad.kicad.outs()}
 
 # Others (listed so the UI can name them; nothing runs)
 # -----------------------------------------------------
 
-def Cad.listed(name: String, exts: List<&2, Ext>) -> Tool:
-  Tool{name, exts, False{}, Nil{}, Nil{}}
+def Cad.listed(name: String, exts: List<&2, Ext>) -> CadTool:
+  CadTool{name, exts, False{}, Nil{}, Nil{}}
 
-def Cad.altium() -> Tool:
+def Cad.altium() -> CadTool:
   Cad.listed("altium", [Ext{"pcbdoc", "board"}, Ext{"schdoc", "schematic"}, Ext{"prjpcb", "project"}])
 
-def Cad.orcad() -> Tool:
+def Cad.orcad() -> CadTool:
   Cad.listed("orcad", [Ext{"dsn", "schematic"}, Ext{"opj", "project"}])
 
-def Cad.allegro() -> Tool:
+def Cad.allegro() -> CadTool:
   Cad.listed("allegro", [Ext{"brd", "board"}])
 
 # Eagle's .brd and .sch are ambiguous with Allegro's .brd: a file by its
 # extension alone is Allegro's .brd (listed first); Eagle is told apart by
 # content later
-def Cad.eagle() -> Tool:
+def Cad.eagle() -> CadTool:
   Cad.listed("eagle", [Ext{"brd", "board"}, Ext{"sch", "schematic"}])
 
 # every tool, KiCad first
-def Cad.tools() -> List<&2, Tool>:
+def Cad.tools() -> List<&2, CadTool>:
   [Cad.kicad(), Cad.altium(), Cad.orcad(), Cad.allegro(), Cad.eagle()]
 
 # The tool and role of a file
@@ -143,23 +143,23 @@ def Cad.of.pick.k(none: Bool, +r: String, +n: String, d: Bool, rest: Hit) -> Hit
 def Cad.of.pick(+r: String, +n: String, d: Bool, rest: Hit) -> Hit:
   Cad.of.pick.k(String.is_empty(r), r, n, d, rest)
 
-def Cad.of.tool(ts: List<&2, Tool>, +e: String) -> Hit:
+def Cad.of.tool(ts: List<&2, CadTool>, +e: String) -> Hit:
   match ts:
     case Nil{}:
       Cad.none()
-    case Tool{+n, +xs, +d, _, _} <> t:
+    case CadTool{+n, +xs, +d, _, _} <> t:
       Cad.of.pick(Cad.role.go(xs, e), n, d, Cad.of.tool(t, e))
 
 # which tool and role a file is, by its extension (case ignored)
 def Cad.of(+path: String) -> Hit:
   Cad.of.tool(Cad.tools(), Cad.ext(path))
 
-def Cad.tool.name(t: Tool) -> String:
+def Cad.tool.name(t: CadTool) -> String:
   match t:
-    case Tool{n, _, _, _, _}:
+    case CadTool{n, _, _, _, _}:
       n
 
-def Cad.find.pick(hit: Bool, +t: Tool, rest: Maybe<&2, Tool>) -> Maybe<&2, Tool>:
+def Cad.find.pick(hit: Bool, +t: CadTool, rest: Maybe<&2, CadTool>) -> Maybe<&2, CadTool>:
   match hit:
     case True{}:
       Some{t}
@@ -167,7 +167,7 @@ def Cad.find.pick(hit: Bool, +t: Tool, rest: Maybe<&2, Tool>) -> Maybe<&2, Tool>
       rest
 
 # the tool by name
-def Cad.find(ts: List<&2, Tool>, +name: String) -> Maybe<&2, Tool>:
+def Cad.find(ts: List<&2, CadTool>, +name: String) -> Maybe<&2, CadTool>:
   match ts:
     case Nil{}:
       None{}

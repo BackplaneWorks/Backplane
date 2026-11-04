@@ -95,45 +95,45 @@ def Lyr.name(+kind: U32, +i: U32) -> String:
 # The focus
 # ---------
 
-type Focus is Data:
-  Focus{active: U32, mode: U32}
+type LayerFocus is Data:
+  LayerFocus{active: U32, mode: U32}
 
 # no active layer
 def Lyr.none() -> U32:
   255
 
-def Lyr.plain() -> Focus:
-  Focus{Lyr.none(), 0}
+def Lyr.plain() -> LayerFocus:
+  LayerFocus{Lyr.none(), 0}
 
-def Lyr.active(f: Focus) -> U32:
+def Lyr.active(f: LayerFocus) -> U32:
   match f:
-    case Focus{a, _}:
+    case LayerFocus{a, _}:
       a
 
-def Lyr.mode(f: Focus) -> U32:
+def Lyr.mode(f: LayerFocus) -> U32:
   match f:
-    case Focus{_, m}:
+    case LayerFocus{_, m}:
       m
 
 # whether the focus changes anything
-def Lyr.on(+f: Focus) -> Bool:
+def Lyr.on(+f: LayerFocus) -> Bool:
   Bool.and(U32.is_gt(Lyr.mode(f), 0), Bool.not(U32.is_eq(Lyr.active(f), Lyr.none())))
 
 # kept as text in each client's state: "<active>|<mode>"
-def Lyr.show(+f: Focus) -> String:
+def Lyr.show(+f: LayerFocus) -> String:
   U32.show(Lyr.active(f)) ++ "|" ++ U32.show(Lyr.mode(f))
 
 def Lyr.num(+s: String, +d: U32) -> U32:
   Maybe.default(&2, U32, U32.read(s), d)
 
-def Lyr.read.k(ps: List<&2, String>) -> Focus:
+def Lyr.read.k(ps: List<&2, String>) -> LayerFocus:
   match ps:
     case +a <> +m <> _:
-      Focus{Lyr.num(a, Lyr.none()), U32.min(Lyr.num(m, 0), 2)}
+      LayerFocus{Lyr.num(a, Lyr.none()), U32.min(Lyr.num(m, 0), 2)}
     case _:
       Lyr.plain()
 
-def Lyr.read(+s: String) -> Focus:
+def Lyr.read(+s: String) -> LayerFocus:
   Lyr.read.k(String.split(s, '|'))
 
 # the copper layers (pads, vias and holes stay with them)
@@ -144,7 +144,7 @@ def Lyr.bit(+l: U32) -> U32:
   U32.shln(1, U32.to_nat(U32.min(l, 31)))
 
 # the layers that stay as they are beside the active one, as bits
-def Lyr.kept(+kind: U32, +f: Focus) -> U32:
+def Lyr.kept(+kind: U32, +f: LayerFocus) -> U32:
   U32.or(U32.or(Lyr.bit(Lyr.active(f)),
       Bool.pick(U32, Lyr.copper(kind, Lyr.active(f)), U32.or(U32.or(Lyr.bit(13), Lyr.bit(23)), Lyr.bit(24)), 0)),
     U32.or(Bool.pick(U32, Lyr.sch(kind), 0, Lyr.bit(22)), U32.or(U32.or(Lyr.bit(26), Lyr.bit(27)), Lyr.bit(28))))
@@ -172,7 +172,7 @@ def Lyr.shade.k(on: Bool, active: Bool, kept: Bool, +mode: U32, look: U32 & U32)
 # a layer's colour and opacity under the focus: the active layer always
 # shows, those kept with it as they are, the rest dimmed to a quarter or
 # hidden
-def Lyr.shade(+kind: U32, +f: Focus, +l: U32, look: U32 & U32) -> U32 & U32:
+def Lyr.shade(+kind: U32, +f: LayerFocus, +l: U32, look: U32 & U32) -> U32 & U32:
   Lyr.shade.k(Lyr.on(f), U32.is_eq(l, Lyr.active(f)), Lyr.has(Lyr.kept(kind, f), l), Lyr.mode(f), look)
 
 type Masks is Data:
@@ -181,7 +181,7 @@ type Masks is Data:
 # for the clients that draw from bits (the web, the phones): the layers
 # not drawn (the person's own, those the focus hides, never the active
 # one) and those drawn dimmed
-def Lyr.masks.k(on: Bool, +kind: U32, +off: U32, +f: Focus) -> Masks:
+def Lyr.masks.k(on: Bool, +kind: U32, +off: U32, +f: LayerFocus) -> Masks:
   match on:
     case False{}:
       Masks{off, 0}
@@ -192,7 +192,7 @@ def Lyr.masks.k(on: Bool, +kind: U32, +off: U32, +f: Focus) -> Masks:
         Masks{U32.and(off, act), U32.and(rest, U32.not(off))},
         Masks{U32.and(U32.or(off, rest), act), 0})
 
-def Lyr.masks(+kind: U32, +off: U32, +f: Focus) -> Masks:
+def Lyr.masks(+kind: U32, +off: U32, +f: LayerFocus) -> Masks:
   Lyr.masks.k(Lyr.on(f), kind, off, f)
 
 def Masks.off(m: Masks) -> U32:
@@ -219,34 +219,34 @@ def Lyr.or.first(+kind: U32, +a: U32) -> U32:
 # a click on a layer's name: it becomes the active one and the others dim
 # (or stay hidden, in that mode); a click on the active one again puts
 # every layer back as it was
-def Lyr.pick.k(again: Bool, +f: Focus, +l: U32) -> Focus:
+def Lyr.pick.k(again: Bool, +f: LayerFocus, +l: U32) -> LayerFocus:
   match again:
     case True{}:
-      Focus{l, 0}
+      LayerFocus{l, 0}
     case False{}:
-      Focus{l, Bool.pick(U32, U32.is_eq(Lyr.mode(f), 0), 1, Lyr.mode(f))}
+      LayerFocus{l, Bool.pick(U32, U32.is_eq(Lyr.mode(f), 0), 1, Lyr.mode(f))}
 
-def Lyr.pick(+f: Focus, +l: U32) -> Focus:
+def Lyr.pick(+f: LayerFocus, +l: U32) -> LayerFocus:
   Lyr.pick.k(Bool.and(Lyr.on(f), U32.is_eq(Lyr.active(f), l)), f, l)
 
 # the list's mode switch (All, Dim, Only)
-def Lyr.set(+kind: U32, +f: Focus, +mode: U32) -> Focus:
-  Focus{Lyr.or.first(kind, Lyr.active(f)), U32.min(mode, 2)}
+def Lyr.set(+kind: U32, +f: LayerFocus, +mode: U32) -> LayerFocus:
+  LayerFocus{Lyr.or.first(kind, Lyr.active(f)), U32.min(mode, 2)}
 
 # ctrl+H, as in KiCad: as they are, dimmed, hidden, and around again
-def Lyr.cycle(+kind: U32, +f: Focus) -> Focus:
+def Lyr.cycle(+kind: U32, +f: LayerFocus) -> LayerFocus:
   Lyr.set(kind, f, Bool.pick(U32, U32.is_eq(Lyr.mode(f), 2), 0, (Lyr.mode(f) + 1 : U32)))
 
 # The window draws from a kind word: its kind and comparison flag in the
 # low byte, the focus above (active in bits 8-15, mode in 16-17)
-def Lyr.kind.with(+kind: U32, +f: Focus) -> U32:
+def Lyr.kind.with(+kind: U32, +f: LayerFocus) -> U32:
   U32.or(U32.and(kind, 255), U32.or(U32.shln(U32.and(Lyr.active(f), 255), 8n), U32.shln(U32.and(Lyr.mode(f), 3), 16n)))
 
 def Lyr.kind.base(+kind: U32) -> U32:
   U32.and(kind, 255)
 
-def Lyr.kind.focus(+kind: U32) -> Focus:
-  Focus{U32.and(U32.shrn(kind, 8n), 255), U32.and(U32.shrn(kind, 16n), 3)}
+def Lyr.kind.focus(+kind: U32) -> LayerFocus:
+  LayerFocus{U32.and(U32.shrn(kind, 8n), 255), U32.and(U32.shrn(kind, 16n), 3)}
 
 # The active layer drawn on top
 # ------------------------------
@@ -257,15 +257,15 @@ def Lyr.kind.focus(+kind: U32) -> Focus:
 def Lyr.lift.none() -> U32:
   255
 
-def Lyr.lift.under(+f: Focus) -> U32:
+def Lyr.lift.under(+f: LayerFocus) -> U32:
   U32.min(Lyr.active(f), 254)
 
-def Lyr.lift.over(+f: Focus) -> U32:
+def Lyr.lift.over(+f: LayerFocus) -> U32:
   (U32.min(Lyr.active(f), 254) + 256 : U32)
 
 def Lyr.lift.ok(+lift: U32, +l: U32) -> Bool:
   Bool.pick(Bool, U32.is_eq(lift, 255), True{}, Bool.pick(Bool, U32.is_lt(lift, 255), Bool.not(U32.is_eq(l, lift)), U32.is_eq(l, (lift - 256 : U32))))
 
 # the layer the web and phones draw last (255 none)
-def Lyr.top(+f: Focus) -> U32:
+def Lyr.top(+f: LayerFocus) -> U32:
   Bool.pick(U32, Lyr.on(f), Lyr.active(f), Lyr.none())
