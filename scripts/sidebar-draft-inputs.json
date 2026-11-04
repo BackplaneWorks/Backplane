@@ -189,7 +189,7 @@
     "src/web/list-windows.bend": "965be3f9f1a13e97dd7dc36a4f21827d51e1a666fc37d13a619ae66cf8584dcc",
     "src/web/mail-actions.bend": "da52f4d849410a7dbfe2484db0d1d07b010ff99e126668fdd05b30b12f495c8f",
     "src/web/mailroom.bend": "2b3fee92a16cc6f11df0fdcddecd19c2ec5f7e2212fefe72c300e198870c9270",
-    "src/web/phone.bend": "ae8edeb48b499a4bc078ac33e097c0a63147826c4705ae41f39ed54bc93e31e5",
+    "src/web/phone.bend": "394396cfd58379f627559e3acaee29a9d2ecf75aa1d68c3e97909d0c8bcc230f",
     "src/web/project-home.bend": "03a9e71aabce370b7dc5d9e5dfcb4daac05ef2eea5e970d31c5fa22007286a08",
     "src/web/settings-menu.bend": "231b31eae65cf8598d9ea78265e19a6e56169cb6a2361cacac6251e9573dd4cb",
     "src/web/sidebar-slot.bend": "1104967b7a84470cb9afcf6e1efdd911469de1cbef52c7ad34a16cad73754950",
@@ -197,7 +197,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "415ba4ebad4445ebf586ea4f9d871410bc0118e0b5f737068b973734694ca070"
+    "src/web/view.bend": "5e83bd82e982fcdcac7bd385a63d237454ae985f5ddbdc7fe7fdf41d9919f787"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",

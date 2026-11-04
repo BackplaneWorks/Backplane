@@ -2803,6 +2803,8 @@ html.phone.ph-kb .app.phone .local-menu[open]:not([data-inline="true"]) > .local
 .app.phone > .ph-now { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px; }
 .app.phone.ph-now > main { display: none !important; }
 .app.phone > .ph-now .project.active { padding-top: 4px; }
+.app.phone > .ph-now .ph-group { padding: 14px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); text-transform: uppercase; letter-spacing: 0.06em; }
+.app.phone > .ph-now .ph-group:first-child { padding-top: 8px; }
 .app.phone :is(.sidebar, .ph-now) { font-size: calc(15px * var(--text-scale, 100) / 100); padding-bottom: 12px; }
 .app.phone :is(.sidebar, .ph-now) .find.with-add { position: sticky; top: 0; z-index: 6; gap: 6px; padding: 8px max(8px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); }
 .app.phone :is(.sidebar, .ph-now) .find input { min-height: 40px; font-size: 16px; padding: 6px 10px; }
