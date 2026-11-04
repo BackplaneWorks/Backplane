@@ -51,6 +51,10 @@ design step's record (core/hist.bend's Step.of, a few hundred bytes) is
 parsed for every step of the thread, two or three times a render, while
 the viewer is open (2026-11-02, a real 181-step thread: over half of the
 viewer's render time, the viewer half of every view the hub sent).
+The combined memo is charged at most16MiB including input and conservatively
+counted expanded objects/strings; a single entry over2MiB or input over256Ki
+UTF16 units parses uncached. Eligible input storage is owned before parsing,
+so cached substring views cannot retain arbitrarily large parent strings.
 
 Server-only `Json.lex(s)` scans token boundaries and unescaped string slices
 without a new tail string and continuation for each character. It preserves
@@ -185,10 +189,35 @@ PARSE = re.compile(
     r'function (' + I + r'\$058Json\$parse\$)\((' + I + r')\)\{(?=return ' + I + r'\$058Parse\$fin\$\()'
 )
 PARSE_HELPER = (
-    "const __bpParseMemo=new Map(),__bpParseSmall=new Map();function __bpParsed(s,f){if(typeof s!==\"string\"||s.length<64)return f(s);"
-    "const m=s.length<1024?__bpParseSmall:__bpParseMemo,cap=s.length<1024?4096:8;"
-    "let v=m.get(s);if(v===undefined){v=f(s);if(m.size>=cap)m.delete(m.keys().next().value);"
-    "m.set(s,v)}return v}\n"
+    "const __bpParseMemo=new Map(),__bpParseSmall=new Map(),__bpParseOrder=new Map();\n"
+    "let __bpParseRetained=0;\n"
+    "const __bpParseLimit=16777216,__bpParseEntryLimit=2097152,__bpParseInputLimit=262144;\n"
+    "function __bpParseWeight(s,v){\n"
+    " let n=512+s.length*2;const todo=[v],seen=new Set();\n"
+    " while(todo.length){const x=todo.pop();\n"
+    "  if(typeof x===\"string\")n+=32+x.length*2;\n"
+    "  else if(x&&typeof x===\"object\"){\n"
+    "   if(seen.has(x)){n+=16;continue}seen.add(x);n+=64;\n"
+    "   if(Array.isArray(x)){n+=x.length*16;if(n>__bpParseEntryLimit)return n;for(const y of x)todo.push(y)}\n"
+    "   else for(const k of Object.keys(x)){n+=16+k.length*2;todo.push(x[k])}\n"
+    "  }else n+=16;\n"
+    "  if(n>__bpParseEntryLimit)return n;\n"
+    " }return n;\n"
+    "}\n"
+    "function __bpParseDrop(k){const e=__bpParseOrder.get(k);if(e){e.m.delete(k);__bpParseOrder.delete(k);__bpParseRetained-=e.n}}\n"
+    "function __bpParsed(s,f){\n"
+    " if(typeof s!==\"string\"||s.length<64||s.length>__bpParseInputLimit)return f(s);\n"
+    " const m=s.length<1024?__bpParseSmall:__bpParseMemo,cap=s.length<1024?4096:8;\n"
+    " const found=m.get(s);if(found!==undefined)return found;\n"
+    " // Own the eligible text before parsing: substring keys and parsed slices\n"
+    " // must not pin a much larger backing string. UTF16 preserves lone units.\n"
+    " const key=Buffer.from(s,\"utf16le\").toString(\"utf16le\"),v=f(key),n=__bpParseWeight(key,v);\n"
+    " if(n>__bpParseEntryLimit)return v;\n"
+    " if(m.size>=cap)__bpParseDrop(m.keys().next().value);\n"
+    " while(__bpParseRetained+n>__bpParseLimit&&__bpParseOrder.size)__bpParseDrop(__bpParseOrder.keys().next().value);\n"
+    " m.set(key,v);__bpParseOrder.set(key,{m,n});__bpParseRetained+=n;return v;\n"
+    "}\n"
+    "globalThis.BACKPLANE_PARSE_MEMO_STATS=()=>({large:__bpParseMemo.size,small:__bpParseSmall.size,chargedBytes:__bpParseRetained,maxChargedBytes:__bpParseLimit,maxInputCodeUnits:__bpParseInputLimit,maxEntryChargedBytes:__bpParseEntryLimit});\n"
 )
 
 # Exact pure lexer entry and state constructors; the full JSON module hash
