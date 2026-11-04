@@ -778,7 +778,7 @@ def Shell.connect.k(t: Tie, a: Shell, +url: String) -> IO(Shell):
     case Tie{+home, _, _, +n, ks} Shell{+nu, w, d, qd, +q, +i, Aux{ws, ty, _, fr}}:
       do IO<Shell>:
         +cache : List<&2, U.HubView> = TieKeep.cache(ks)
-        ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, i, S.Leave{0})
+        ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, i, S.PeerLeave{0})
         +tag : String = url ++ "#" ++ Nat.show(n)
         +pre : String <- RW.Rvw.pre(url)
         +nu2 : N.Nui = Shell.remote.set(N.Nui.connection(nu, tag, U.HubCache.get(cache, url)), url, pre)

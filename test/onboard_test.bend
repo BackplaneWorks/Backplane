@@ -28,7 +28,7 @@ def sent(a: U.Act) -> String:
 # the focus a step leaves: "composer", "" or none
 def focus.of(cs: List<&2, U.Cmd>) -> String:
   match cs:
-    case U.Focus{id} <> _:
+    case U.FocusField{id} <> _:
       "focus:" ++ id
     case _:
       "none"
@@ -114,7 +114,7 @@ def labels(cs: List<&2, U.TChoice>) -> String:
 # every focus a step leaves, in order
 def focuses.of(cs: List<&2, U.Cmd>) -> String:
   match cs:
-    case U.Focus{id} <> r:
+    case U.FocusField{id} <> r:
       "focus:" ++ id ++ " " ++ focuses.of(r)
     case _ <> r:
       focuses.of(r)

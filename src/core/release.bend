@@ -344,9 +344,9 @@ def Release.defaults.go(os: List<&2, C.Out>) -> List<&2, String>:
     case C.Out{+i, _, _, on} <> t:
       Rel.keep(on, i, Release.defaults.go(t))
 
-def Release.defaults(t: C.Tool) -> List<&2, String>:
+def Release.defaults(t: C.CadTool) -> List<&2, String>:
   match t:
-    case C.Tool{_, _, _, _, os}:
+    case C.CadTool{_, _, _, _, os}:
       Release.defaults.go(os)
 
 # does a command use a placeholder whose value is missing
@@ -390,15 +390,15 @@ def Rel.plan.k(os: List<&2, C.Out>, ids: List<&2, String>, +tag: String, +dir: S
 # whose ids were chosen, in the tool's order, with {cli} {pcb} {sch} {out}
 # {name} put in; outputs that need a board or schematic that was not given
 # are left out. The caller makes the folder and runs the steps there.
-def Release.plan(t: C.Tool, ids: List<&2, String>, +repo: String, +tag: String, +cli: String, +pcb: String, +sch: String) -> Plan:
+def Release.plan(t: C.CadTool, ids: List<&2, String>, +repo: String, +tag: String, +cli: String, +pcb: String, +sch: String) -> Plan:
   match t:
-    case C.Tool{_, _, _, _, os}:
+    case C.CadTool{_, _, _, _, os}:
       Rel.plan.k(os, ids, tag, Release.dir(repo, tag), cli, pcb, sch)
 
 # A transaction can build the same plan in a private staging directory.
-def Release.plan_at(t: C.Tool, ids: List<&2, String>, +out: String, +tag: String, +cli: String, +pcb: String, +sch: String) -> Plan:
+def Release.plan_at(t: C.CadTool, ids: List<&2, String>, +out: String, +tag: String, +cli: String, +pcb: String, +sch: String) -> Plan:
   match t:
-    case C.Tool{_, _, _, _, os}:
+    case C.CadTool{_, _, _, _, os}:
       Rel.plan.k(os, ids, tag, out, cli, pcb, sch)
 
 # The manifest

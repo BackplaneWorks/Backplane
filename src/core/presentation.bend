@@ -314,7 +314,7 @@ def Session.command(c: U.Cmd) -> J.Json:
   match c:
     case U.Send{text}: J.Json.obj([J.KV{"type", J.Str{"send"}}, J.KV{"text", J.Str{text}}])
     case U.Copy{text}: J.Json.obj([J.KV{"type", J.Str{"copy"}}, J.KV{"text", J.Str{text}}])
-    case U.Focus{id}: J.Json.obj([J.KV{"type", J.Str{"focus"}}, J.KV{"id", J.Str{id}}])
+    case U.FocusField{id}: J.Json.obj([J.KV{"type", J.Str{"focus"}}, J.KV{"id", J.Str{id}}])
     case U.ScrollEnd{}: J.Json.obj([J.KV{"type", J.Str{"scroll"}}])
     case U.Connect{url}: J.Json.obj([J.KV{"type", J.Str{"connect"}}, J.KV{"url", J.Str{url}}])
     case U.Keep{thread, text}: J.Json.obj([J.KV{"type", J.Str{"keep"}}, J.KV{"thread", J.Str{thread}}, J.KV{"text", J.Str{text}}])

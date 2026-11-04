@@ -5,6 +5,7 @@ test process tree runs in the Boat command's verified 512 MiB/no-swap cgroup.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,51 @@ import time
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def source_audit(root, identity):
+    """Optional mechanical declaration/law equivalence checks, on Boat only."""
+    requested = identity.get('source_audit')
+    if requested is None:
+        return None
+    spec = importlib.util.spec_from_file_location('source_reader', root/'scripts/proof-slice.py')
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+
+    def normalized(text, replacements):
+        result, offset = [], 0
+        for token in reader.LEX.finditer(text):
+            if token[1] in replacements:
+                result.extend([text[offset:token.start(1)], replacements[token[1]]])
+                offset = token.end(1)
+        return ''.join(result)+text[offset:]
+
+    def declarations(name, replacements=None):
+        text = (root/name).read_text()
+        return reader.scan_module(normalized(text, replacements or {}), name)[1]
+
+    equivalent = []
+    for entry in requested['declarations']:
+        before = declarations(entry['before'], entry.get('before_replacements'))
+        after = declarations(entry['after'], entry.get('after_replacements'))
+        for kind, name in entry['names']:
+            assert before[(kind, name)] == after[(kind, name)], (entry['after'], kind, name)
+            equivalent.append([entry['after'], kind, name, after[(kind, name)]])
+    for entry in requested.get('remaining', []):
+        before = declarations(entry['before'])
+        after = declarations(entry['after'], entry.get('after_replacements'))
+        removed = {tuple(k) for k in entry['removed']}
+        assert set(after) == set(before)-removed
+        for key, digest in after.items():
+            assert before[key] == digest, (entry['after'], key)
+    laws = requested['laws']
+    before = declarations(laws['before'])
+    after = declarations(laws['after'], laws['after_replacements'])
+    for key, digest in before.items():
+        assert after[key] == digest, key
+    assert set(after)-set(before) == {('law', n) for n in laws['added']}
+    return {'equivalent_declarations': equivalent, 'remaining_declarations_unchanged': True,
+            'all_original_law_statements_preserved': True, 'added_laws': laws['added']}
 
 
 def main():
@@ -40,6 +86,7 @@ def main():
     identity = json.loads(identity_path.read_text())
     for name, digest in identity['files'].items():
         assert sha(root/name) == digest, name
+    audit = source_audit(root, identity)
     for name, snapshot in identity['base_files'].items():
         target = out/'base'/name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +124,7 @@ def main():
               'memory_peak_bytes': int((group/'memory.peak').read_text()), 'memory_events': events,
               'peak_child_rss_kib': resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
               'inputs_unchanged': True, 'observations': observations, 'full_gate_qualified': False}
+    report['source_audit'] = audit
     (out/'RESULT.json').write_text(json.dumps(report, indent=2)+'\n')
     print(json.dumps({k: v for k, v in report.items() if k != 'observations'}))
     return 1 if failed else 0

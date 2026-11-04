@@ -169,7 +169,7 @@ def Nui.effects(cs: List<&2, U.Cmd>, n: Nui) -> Nui:
   match cs n:
     case Nil{} _:
       n
-    case U.Focus{+id} <> t Nui{u, w, h, mx, my, sd, sc, ca, _, pa, hi, ms, vw}:
+    case U.FocusField{+id} <> t Nui{u, w, h, mx, my, sd, sc, ca, _, pa, hi, ms, vw}:
       Nui.effects(t, Nui{u, w, h, mx, my, sd, sc, ca, Fld.alias(id), pa, hi, ms, vw})
     case U.ScrollEnd{} <> t Nui{u, w, h, mx, my, sd, _, ca, fo, pa, hi, ms, vw}:
       Nui.effects(t, Nui{U.Hold.end(u, ""), w, h, mx, my, sd, 0, ca, fo, pa, hi, ms, vw})
@@ -866,7 +866,7 @@ def Nui.flip(+n: Nui) -> U32:
 def Nui.lfocus.key(+n: Nui) -> String:
   "@vw.focus." ++ U32.show(Vw.kind(Nui.vw(n)))
 
-def Nui.lfocus(+n: Nui) -> LY.Focus:
+def Nui.lfocus(+n: Nui) -> LY.LayerFocus:
   LY.Lyr.read(U.Ui.scratch(Nui.ui(n), Nui.lfocus.key(n)))
 
 # the focus as the viewer's kind word carries it (LY.Lyr.kind.with)
@@ -875,7 +875,7 @@ def Nui.lfocus.bits(+n: Nui) -> U32:
 
 # Design review: a comparison's marks follow the active layer (client.bend's
 # Rv.bits through the core action rv-bits)
-def Rvw.bits(+n: Nui, +f: LY.Focus) -> Step:
+def Rvw.bits(+n: Nui, +f: LY.LayerFocus) -> Step:
   Nui.act(n, "rv-bits", U32.show(U.Rv.bits(Vw.kind(Nui.vw(n)), f)))
 
 def Rvw.cat(cs: List<&2, NCmd>, s: Step) -> Step:
@@ -1675,7 +1675,7 @@ def Nui.goto(+n: Nui, +pid: String) -> Step:
   Bool.pick(Step, String.is_empty(pid), Step{n, Nil{}, False{}}, Nui.goto.k(String.is_empty(U.Side.home(Nui.ui(n), pid)), n, pid, U.Side.home(Nui.ui(n), pid)))
 
 # the focus changed: the scene is drawn again under it
-def Nui.lfocus.set(+n: Nui, +f: LY.Focus) -> Step:
+def Nui.lfocus.set(+n: Nui, +f: LY.LayerFocus) -> Step:
   Rvw.bits(Nui.with_vw(Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), Nui.lfocus.key(n), LY.Lyr.show(f))), Vw.stale(Nui.vw(n))), f)
 
 # the kind of the scene on show (0 a board, 1 a schematic)

@@ -1269,3 +1269,80 @@ independent diff of its three source files; trusted-base `--head` mode is not
 implemented. No local tests/merge-tree ran. This is enforcement, not a proof,
 compiler, full CI or two-minute PR qualification. A fresh guard remains
 required for the final receipt-documentation head.
+
+### MailProof.keeps: proof body handles Step.cat empty-step cases
+
+Only the proof body changes: split `cs`/`os` emptiness before applying
+`append_nil`. Existing law statement, quantifiers and runtime code stay exact.
+The old proof did not convert through Step.cat's earlier empty-step patterns.
+
+| Change / exact canonical037 experiment | Before | After |
+|---|---|---|
+| Source | main345a9f395 | candidate957a50435 |
+| Checker result | Typed proof mismatch, exit1 | `ALL PROOFS CHECK`, exit0; completed trace covers MailProof.keeps |
+| Checker wall / GNU peak RSS | 59.0196s /2,956,136KiB | 42.9686s /2,787,664KiB |
+| Actual worker cgroup peak | 3,329,044,480B | 3,157,594,112B |
+| Whole job / paid cost | 83.40s /$0.00092 | 67.84s /$0.00077 |
+
+[Receipts, exact identities and limits](mailproof-keeps/README.md).
+Same original canonical25-law shard and85 whole source dependencies, frozen
+#877 source loader/unchanged kernel, normal Boat, actual3.7GB worker plus
+512MiB controller caps (sum<4GiB), swap0/native admission+flock, zero limit/OOM
+events. Fresh typed false theorem rejected; no laws/proofs removed or weakened.
+These are single observations with fail/pass outcomes, not a matched speedup.
+The selector's pre-worker preparation failure cost$0.00032; total$0.00201.
+No stock/full-proof/CI/build/release qualification or cache pass is implied.
+Fresh final-head merged-shape guard remains required; no local validation ran.
+
+### Premerge supports the explicitly pinned normal daily runner
+
+The approved runner lacks `--include-file`. Explicit SHA-pinned private
+runner snapshots and literal exclusion transport preserve the one-worker
+payload, actual manifest verification and existing source/base/guard fences.
+
+| Tooling compatibility | Before | After |
+|---|---|---|
+| Approved daily runner transport | Unsupported include-file option; no qualification | Exact one-worker upload via exclude, identity/manifest/controller verified |
+| Guard controls | 14 | 26 passed0.254s |
+| Worker wall / peak RSS | Not measured for unsupported route | 9.14s /26,240KiB |
+| Actual cgroup peak / cap | No successful approved-route receipt | 41,091,072 /536,870,912B, swap0/events0 |
+| Paid qualification cost | None | 16credit-s/$0.00016; default VM deleted |
+
+[Exact7127f7f5c receipt and limits](premerge-runner/README.md),
+Boat`j20261104041114-793634`/work1529849. Independent review confirmed the
+boundary delta and approved-runner byte identity, with partial runner audit
+scope stated. No budget/start/size/memory guard changed, no exception runner,
+no local tests/merge-tree or Bend execution. This is transport compatibility,
+not a full CI/proof/build speedup claim. Fresh final-head guard remains needed.
+
+### Check-cache entries bind a fresh standalone context
+
+Aggregate manifest passes cannot be recorded as independent module passes:
+earlier imports can fill declarations used by later modules. The opt-in
+pre-check now checks each miss as its exact fresh-process entry, retires old
+aggregate-derived entries, and returns advisory3 (failure/inconclusive4),
+never aggregate-green. Original full check/proof gates and guard floors stay.
+
+| Frozen1,185-module key metadata only | Before | After |
+|---|---|---|
+| Median of three key-plan samples | 0.195583s | 0.194275s |
+| Process VmHWM | 58,576KiB | 64,976KiB |
+| Actual cgroup peak / cap | 426,598,400 /536,870,912B | 334,839,808 /536,870,912B |
+| Bend/proofs/pass seeds/paid cost | 0/0/0/$0 | 0/0/0/$0 |
+
+[Exact old candidate/corpus identities, receipts and limitations](check-entry-context/README.md).
+These preserved measurements are metadata only, not native check throughput
+or a speedup claim; both actual512MiB/swap0 runs had zero limit/OOM events.
+Historical94 mock-based Python controls predate the Boat-only rule and are
+not real-Bend proof evidence. The cold-check14GiB admission floor is unchanged
+and still refuses on a normal capped Boat; this correctness correction is
+not a bounded cold worker or a CI gate. Fresh Boat checks remain required.
+
+Fresh rebased-code Python controls:94/94 passed4.830s on normal Boat
+`j20261104035728-695281` (head5b3f52424), actual512MiB/swap0,
+cgroup peak109,281,280B/VmHWM40,720KiB, zero limit/OOM events. Whole worker
+12.96s,19credit-s/$0.00019, deletion verified. These are mock-based tooling
+controls, not Bend/proof/gate qualification; no actual-repo pass was seeded.
+The approved daily-runner/premerge dependency landed in PR906; the rebased
+cache code/helper bytes remain exact to the tested source. Fresh final-head
+Boat merged-shape validation is still required, with no guard exception.
