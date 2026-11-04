@@ -3249,10 +3249,14 @@ function showThinSearch(search) {
   // (a phone: threads whose titles match, above what was said in them)
   const titles = PHONE_TITLES() ? document.createElement("div") : null;
   if (titles) { titles.className = "find-titles";rows.before(titles); }
-  const showTitles = () => {
+  // (the sidebar's rows at once, then the hub's answer's titles, every
+  // thread's: Search.titles in server/thin-view.bend)
+  const showTitles = (hub = []) => {
     if (!titles) return;
     titles.replaceChildren();
-    for (const hit of titleHits(document, query.value)) {
+    const seen = new Set(), hits = [];
+    for (const hit of [...titleHits(document, query.value), ...hub]) if (hit && typeof hit.id === "string" && !seen.has(hit.id) && hits.length < 8) { seen.add(hit.id);hits.push(hit); }
+    for (const hit of hits) {
       const b = document.createElement("button");b.type = "button";b.className = "find-title";
       const t = document.createElement("span");t.className = "find-thread";t.textContent = hit.title;b.append(t);
       if (hit.project) { const p = document.createElement("span");p.className = "find-project";p.textContent = hit.project;b.append(p); }
@@ -3305,6 +3309,7 @@ function showThinSearch(search) {
       button.addEventListener("click", () => { ask(search.query, search.cursor);query.focus(); });rows.append(button);f.more = button;
     }
     f.shown = search.query;
+    if (!more && Array.isArray(search.titles)) showTitles(search.titles);
     note.textContent = f.hits.length || titles?.childElementCount ? "" : `Nothing matches “${search.query.trim()}”.`;
     if (!more && f.hits.length) choose(0);
   };
