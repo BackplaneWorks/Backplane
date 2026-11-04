@@ -5,6 +5,8 @@ name: Issue 927 exact Windows package consumer
 # its independent guard; an observed zero job limit remains a hard refusal.
 # Query the exact capped ancestor through a query-only duplicated handle,
 # rather than relying on Windows' implicit current-job lookup.
+# Pass actual non-secret hosted-run metadata across the standard-user logon;
+# preserve its real identity/profile rather than inheriting the admin profile.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]

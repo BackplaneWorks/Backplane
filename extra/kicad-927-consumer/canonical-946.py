@@ -27,7 +27,7 @@ def digest(path):
 
 
 def git(root, *args):
-    return subprocess.check_output(["git", "-c", "safe.directory=" + str(root.resolve()), "-C", str(root), *args])
+    return subprocess.check_output([cfg["git"], "-c", "safe.directory=" + str(root.resolve()), "-C", str(root), *args])
 
 
 try:
@@ -96,6 +96,7 @@ try:
                    factorySHA256=factory_sha, productCommit=cfg["sourceCommit"], productTree=cfg["sourceTree"],
                    packageSHA256=cfg["packageSHA256"], serviceSHA256=binary_sha,
                    originalBuildSHA256=original_build_sha, buildProvenance=original["buildProvenance"],
+                   hostedRun=cfg["hostedRun"],
                    sourceJS=members, canonicalMeasurement=measurement,
                    msvcrtObservation={"nativeSystemDirectory": str(system32), "measuredPath": str(crt),
                                       "loadedImagePath": str(loaded), "sha256": digest(crt),

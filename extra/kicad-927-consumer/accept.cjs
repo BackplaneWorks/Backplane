@@ -118,6 +118,8 @@ async function check(name,fn) {
 async function main() {
   assert.equal(process.platform,'win32','Real Windows required');
   assert.equal(process.env.GITHUB_ACTIONS,'true','Hosted acceptance only');
+  assert.equal(process.env.GITHUB_RUN_ID,cfg.hostedRun.runId,'Actual hosted-run identity mismatch');
+  result.hostedRun=cfg.hostedRun;
   assert(cfg.buildProvenance && typeof cfg.buildProvenance.compilerMode==='string' && cfg.buildProvenance.compilerMode.length>0,'Actual compiler mode required in test evidence');
   assert(typeof cfg.buildProvenance.producerWorkId==='string' && cfg.buildProvenance.producerWorkId.length>0,'Actual producer work identity required');
   result.buildProvenance=cfg.buildProvenance;
