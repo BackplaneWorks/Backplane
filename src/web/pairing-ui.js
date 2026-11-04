@@ -143,10 +143,13 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     code.addEventListener('keydown', e => { if (e.key === 'Enter') connectCode(); });
     selectMethod(0);
     if (pending) {
-      button(card, 'Connect this device', async () => { status.classList.remove('bad');status.textContent = 'Connecting…';try { await enroll(pending.secret, name.value); } catch(e) { error(status,e.message); } }).classList.add('primary');
-      element('a', 'Open in Backplane', card, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
+      const actions = element('div', '', card, {class: 'pairing-pending'});
+      element('p', 'Or connect another way:', card, {class: 'pairing-or'});
+      button(actions, 'Connect this device', async () => { status.classList.remove('bad');status.textContent = 'Connecting…';try { await enroll(pending.secret, name.value); } catch(e) { error(status,e.message); } }).classList.add('primary');
+      element('a', 'Open in Backplane', actions, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
     }
-    link.focus();
+    // (a phone raises its keyboard for it, over a pairing link's Connect)
+    if (!pending || !document.documentElement.classList.contains('phone')) link.focus();
   }
   function invitationState(x) {
     const thing = x.kind === 'machine' ? 'a machine' : 'a device', its = x.kind === 'machine' ? 'the machine it linked' : 'the device it paired';
