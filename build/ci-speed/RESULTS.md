@@ -1218,3 +1218,25 @@ trust, fresh-nightly proof or production/full-suite qualification. No workflow,
 full-proof, compiler-memory or release gate changed. The two-minute full PR
 and every-job-under4GiB targets remain unachieved; heavy shards and signed
 shared reuse remain follow-ups with their owners.
+
+
+### Move the actual merged-law pre-merge check to capped Boat
+
+The new hard rule forbids local tests and checks, including merge-tree and
+Python shape validation. `pre-merge.sh` now transports a pushed HEAD; every
+merge computation, guard test and shape check runs on normal Boat with actual
+512MiB/swap0 enforcement. Conflicts anywhere, source/base drift, missing
+receipts and resource violations fail closed; no local fallback.
+
+| Actual structural gate | Before | After |
+|---|---|---|
+| Execution site | Local merge-tree + Python, now prohibited | Normal Boat,512MiB/swap0 |
+| Worker wall / process peak RSS | Not isolated | 6.20s /24,952KiB |
+| Guard controls | Original local shape only | 8 controls0.049s + actual merged shape |
+| Paid cost | $0 | 12credit-s/$0.00012; sandbox deleted |
+
+[Receipt/limits](premerge-boat/README.md), [exact result](premerge-boat/RESULT.json),
+[measurement](premerge-boat/MEASURE.json). Cgroup peak33,906,688B; max/OOM0;
+wait1s, push2s, setup0s, one16KiB source file. No Bend/compiler/proof/build,
+account/auth change, guard-floor change, installer action or release trigger.
+This adds required enforcement/network overhead, not a speedup/full-gate claim.
