@@ -1160,3 +1160,30 @@ ran them. Floors,8GiB reserve, native flock and shard contracts unchanged.
 No real Bend/Bun execution, proof, build, installer or release run; cost$0.
 This closes an admission-routing gap, not full-build memory qualification
 and not commands that bypass the guard.
+
+### Verify raw emission cache bytes, including warm checks and imports
+
+`build-js.sh` and `local.py` accepted same-size modified JS using numeric
+`.js.ok` receipts. A shared helper now binds source key/size/SHA256 and
+checks the actual copied bytes before atomic restore. Publish writes complete
+data before the receipt; imports also bind the expected transferred digest.
+
+| Same fixture / workload | Before | After |
+|---|---|---|
+| Same-size corrupted cached JS in real shell cache branch | Reused; fake Bun reached | Miss; fake Bend requested, corrupt bytes not copied |
+| Local warm-cache hint after that corruption | true | false |
+| Valid cache | Reused | Reused |
+| Legacy numeric receipt | Accepted | Miss; fresh producer required |
+| 1,959,238 B saved output byte workload, fake runtimes | 0.0208 s | 0.0482 s |
+
+[Measured fixture](emit-cache/MEASURE.json), [GNU time](emit-cache/MEASURE.time),
+[68-control results](emit-cache/TESTS.json), [migration/trust limits](emit-cache/README.md).
+One observation each; whole fixture0.36s/32,856KiB, cost$0. No actual Bend/Bun
+execution or real cache seed. This adds integrity checks, not a build-speed
+claim or proof/producer attestation.
+
+Old size-only entries miss once; CI uses a versioned cache prefix to avoid
+immutable legacy-entry shadowing. The emit source key and retained-producer
+identities, memory floors and installer/release paths remain unchanged.
+Concurrent LRU touches cannot force false misses; partial publishes fail
+safe. Full hub/web/proof/CI/release qualification remains incomplete.
