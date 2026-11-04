@@ -304,6 +304,72 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'not on this host'):
                 R.windows_measure(binary, 'windows-x64', [], system32)
 
+    def test_windows_crt_declaration_is_exact_not_a_wildcard(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'src').mkdir()
+            file = root/'src/zip.js'
+            file.write_text('ffi.dlopen("msvcrt.dll", { _get_osfhandle: {} });')
+            self.assertEqual(R.ffi_libraries(root, ['src/zip.js'], 'windows-x64'),
+                [{'name': 'msvcrt.dll', 'declaredBy': ['src/zip.js']}])
+            for foreign in ('user32.dll', 'foreign.dll', '../msvcrt.dll', 'C:/tmp/msvcrt.dll'):
+                file.write_text('ffi.dlopen("' + foreign + '", {});')
+                with self.subTest(foreign=foreign), self.assertRaises(ValueError):
+                    R.ffi_libraries(root, ['src/zip.js'], 'windows-x64')
+
+    def test_dynamic_windows_crt_is_measured_once_with_distinct_edges(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); system = root/'System32'; system.mkdir()
+            binary = root/'service.exe'; binary.write_bytes(pe_image(['msvcrt.dll', 'kernel32.dll']))
+            for name in ('msvcrt.dll', 'kernel32.dll'):
+                (system/name).write_bytes(pe_image())
+            dynamic = [{'name': 'msvcrt.dll', 'declaredBy': ['src/server/effects/zip.js']}]
+            with patch.object(R, 'windows_observed_exports', return_value=['_get_osfhandle']) as observe:
+                value = R.windows_measure(binary, 'windows-x64', dynamic, system)
+            observe.assert_called_once_with(system/'msvcrt.dll', ['_get_osfhandle'])
+            nodes = [n for n in value['systemLibraries'] if n['name'] == 'msvcrt.dll']
+            self.assertEqual(len(nodes), 1)
+            self.assertEqual(nodes[0]['sha256'], R.sha(system/'msvcrt.dll'))
+            self.assertEqual(nodes[0]['observedExports'], ['_get_osfhandle'])
+            self.assertFalse(nodes[0]['redistributed'])
+            self.assertEqual([e['kind'] for e in value['dependencyGraph'] if e['name'] == 'msvcrt.dll'],
+                             ['normal', 'dynamic'])
+
+    def test_dynamic_windows_missing_foreign_wrong_pe_and_symlink_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); system = root/'System32'; system.mkdir()
+            binary = root/'service.exe'; binary.write_bytes(pe_image(['kernel32.dll']))
+            (system/'kernel32.dll').write_bytes(pe_image())
+            def measure(name='msvcrt.dll'):
+                return R.windows_measure(binary, 'windows-x64', [{'name': name}], system)
+            with self.assertRaisesRegex(ValueError, 'regular native system file'):
+                measure()
+            with self.assertRaisesRegex(ValueError, 'Unapproved'):
+                measure('user32.dll')
+            for data in (b'not a PE', pe_image(machine=0xaa64)):
+                (system/'msvcrt.dll').write_bytes(data)
+                with self.subTest(data=data[:8]), self.assertRaises(ValueError):
+                    measure()
+            (system/'msvcrt.dll').unlink()
+            (root/'foreign.dll').write_bytes(pe_image())
+            (system/'msvcrt.dll').symlink_to(root/'foreign.dll')
+            with self.assertRaisesRegex(ValueError, 'regular native system file'):
+                measure()
+            (system/'msvcrt.dll').unlink()
+            (system/'msvcrt.dll').write_bytes(pe_image())
+            with patch.object(R, 'windows_observed_exports', side_effect=ValueError('export missing')):
+                with self.assertRaisesRegex(ValueError, 'export missing'):
+                    measure()
+
+    def test_dynamic_windows_uses_native_system_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            binary = root/'service.exe'; binary.write_bytes(pe_image(['kernel32.dll']))
+            (root/'kernel32.dll').write_bytes(pe_image())
+            with patch.object(R, 'windows_system_directory', return_value=root) as get:
+                R.windows_measure(binary, 'windows-x64', [])
+            get.assert_called_once_with()
+
     def test_macho_foreign_framework_rpath_and_empty_not_approved(self):
         for name in ['/opt/homebrew/lib/libSystem.B.dylib', '@rpath/libSystem.B.dylib', '/tmp/libx.dylib', '/usr/lib/libforeign.dylib']:
             with self.assertRaises(ValueError):
