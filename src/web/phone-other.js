@@ -11,6 +11,10 @@
 // it (host.js's [data-keys] handler: "<key>\t<mods>"); with Ctrl held, the
 // next letter typed on the phone's keyboard goes as Ctrl+<letter>.
 
+// (the bundler hashes and ships it; index.html's own link to it is not
+// rewritten, so the file it names is not served)
+import touchIcon from "./apple-touch-icon.png";
+
 export const TERM_KEYS = [
   { label: "Esc", key: "Escape" },
   { label: "Tab", key: "Tab" },
@@ -192,8 +196,10 @@ export function installPhoneOther({ doc = document, win = window, dispatch }) {
     meta("apple-mobile-web-app-capable", "yes");meta("mobile-web-app-capable", "yes");
     meta("apple-mobile-web-app-title", "Backplane");meta("apple-mobile-web-app-status-bar-style", "black-translucent");
     const origin = win.location.origin;
+    const icon = new URL(touchIcon, win.location.href).href;
+    for (const l of doc.querySelectorAll("link[rel=apple-touch-icon]")) l.href = icon;
     const manifest = { name: "Backplane", short_name: "Backplane", start_url: origin + "/", scope: origin + "/", display: "standalone", background_color: "#0d0f12", theme_color: "#0d0f12",
-      icons: [{ src: doc.querySelector("link[rel=icon]")?.href || origin + "/favicon.svg", sizes: "any", type: "image/svg+xml" }] };
+      icons: [{ src: icon, sizes: "180x180", type: "image/png" }, { src: doc.querySelector("link[rel=icon]")?.href || origin + "/favicon.svg", sizes: "any", type: "image/svg+xml" }] };
     const link = doc.createElement("link");link.rel = "manifest";link.href = "data:application/manifest+json," + encodeURIComponent(JSON.stringify(manifest));
     doc.head.append(link);
   }
