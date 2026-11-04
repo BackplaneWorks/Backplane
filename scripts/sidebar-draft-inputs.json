@@ -25,7 +25,7 @@
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
     "src/core/account-fallback.bend": "05ba18dd4ee4f3c1787f69711e376e9934f6782e12454f7fe25bb1d18f2f82fc",
-    "src/core/accounts.bend": "c477544bc0984a54d7b80d3a0abdad2784efa5f46043f4070e6e500865892f34",
+    "src/core/accounts.bend": "e2e3f9fa340eb1a8571150a0b265c970aa5b5e7bf96dda582e6dee8eb673a52e",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "4cd526064adf54dc37b7b3fef4272d3ed0767c4e302e459cbd9097a1c7b5f28c",
     "src/core/agy.bend": "db6a8932469dd0848dc808bd5fe51dffdf9a3c209438798efe254ab6244c7e36",
@@ -40,14 +40,13 @@
     "src/core/browser-frame.bend": "0c21c1a5fecccc093ac349ba6d5723279b59a4605f6ad3c69d3f064f3e87ce86",
     "src/core/browser-tabs.bend": "005221bc7077a405f82e375dd04cf2783620ff485734a8eafb79b8cfa3c64c53",
     "src/core/bub-move.bend": "d898f633015acd0406a965b5f069db09e37b6c7fd6fc07f1151b7847c839dc14",
-    "src/core/cad-install.bend": "c27afcbe168c402eebf12621dff91b0564caf75a069c1558b6a5f5e0b1a4b77a",
     "src/core/cad.bend": "e53b068b417096d323f15aeec8fbaaa1c61410c2d34a83b47238c7fcb6b91775",
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
-    "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
+    "src/core/cef.bend": "c79232d201183cd013ff5dc943d76561705b6728f2ac19cb87698919d523721c",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
     "src/core/chat-pending.bend": "4a6dcabdd6b5653d664729a07d7ff044488732a9e684a7832c18e20502442db1",
     "src/core/client-language.bend": "9315c77e9837deac6813974c711e52a2b4b885df7ecd1fa28ad8b84fb0bc4bac",
-    "src/core/client.bend": "4cbb7194de35393c575142a6a934afb33ae0069ae471950be7741d0eb7c717b0",
+    "src/core/client.bend": "d266f7d33bea5037a0f95e0d95afcefc0a20bd6ba402bc615a67580f86058e13",
     "src/core/codec.bend": "75de46900a06e39152c37d4ac5c433a9fbabd522ff20baab18eb5ea5b0ae2bd2",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -72,7 +71,6 @@
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "b1b9bb922bd5996ed842952306462efb3bf1b6d81e7d9b29cd04b8a054514c2e",
     "src/core/images.bend": "99025ca6b7562c0ef3cf71e8d2e4ec6e40299603bb5e60de8044c33f485e2bac",
-    "src/core/json-object.bend": "438933c99dd4316d5c7c7de0763e2a302bfac30b1b2d46fba5cdd13bd4697df1",
     "src/core/json.bend": "f500b30686fc4eea0f6d7ac00bda03e524676f59dd00c6244696e678536560af",
     "src/core/kexport.bend": "2ce372d77c5342db79c501bfe60e33123d205b468fd84035e6089d0b2ae65d36",
     "src/core/kihealth.bend": "0f31f804fddef557d7a038dd39022219455d5b9e0990fa19ccef5a388e511460",
@@ -93,12 +91,13 @@
     "src/core/mech.bend": "be262b768558a21e6c401c48e2158e6156d2db6c7d174f14cda55e379d3d88f4",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/message-context.bend": "7e19596b3acec6ec7a1a10e6643c423ada897a6ee490a58b4a2b39a9767b677d",
+    "src/core/model-catalog.bend": "bdde44f85e11cf510a613d976a84c1964635c7f58efb1d64dae8a728a82e2a6e",
     "src/core/model.bend": "6aad79770639632f859b8c7f70e886fa715d1722e64e013df9585942bba77965",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
     "src/core/msgs.bend": "915c00db8275e7bef10a80cbe4c61d593f41ada6ecd6b5602c5b14ae4178e023",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "dc5868fa0118a858b9b92bdc67b39660a05919c8beb9ee23f8e30fcfcfb7cd21",
-    "src/core/onboard.bend": "8fc5313d4cda3ddd7fac2aebd6d7c38027c0ed5c7931dcc9dc67bb62d43bf705",
+    "src/core/onboard.bend": "fc10cb988f4fa6e8b2780e3ea3c4ebfea0088256daf5f65abebd10dfe2d746c8",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
     "src/core/order.bend": "2162673c946ff086ad96d3c28ba101f00c161b35c7f87ccecd615265688f0c39",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
@@ -172,7 +171,7 @@
     "src/core/winnote.bend": "f0cbd29916ff64103799874c96b8eee4945c05b1a83fbb3ba083bc1673031255",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "e8d78ec982828a8018c0845a36d03123c47bf9c94b5d4cee855f9358ccc293a3",
-    "src/mobile/screen.bend": "a4df008dd196cfbd6f7e877098bf86e41636947aeca15f76ed9db9be22a67912",
+    "src/mobile/screen.bend": "7fed72d4c25f19b0641b4f661cbfa872c395e786155b2c6086b9da59e941f416",
     "src/server/thin-actor.bend": "2e91a6abd414d026cff5da6838c25b313c6b321dbcc663fa351878c028fe4e15",
     "src/server/thin-body.bend": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -184,7 +183,7 @@
     "src/server/thin-view.bend": "c9bfaf9bac65d287fd70d3b804bb7b9bcb20cddd93324f7e477301a9f57382ae",
     "src/server/thinstore.bend": "07a7bbcfe3f3813f80925c0229e16653e362567d86ff4fb1369de22dbd262572",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
-    "src/web/bots.bend": "f265768306a1bc1edc14f53d1d6f9c7f7e0362afe236c8edd59f8813bd12aa0c",
+    "src/web/bots.bend": "ca233856e989d9803c62521b9ced614e1681b461aae630ca3c71c30903b59ed2",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
     "src/web/composer-bar.bend": "fd6b6110ff409c090bf03f7ccbe64ed59f5474d548dfd804d8d1a0a441c1f863",
     "src/web/dom.bend": "6e0ddb26a372a07cf2af0bbccdae476087fb50d6e2af5da9c6f8d6b9cc1ca0b5",
@@ -200,7 +199,7 @@
     "src/web/terminal-cells.bend": "398447910b3ffe4645874d8e96198e9008bcb58202f16be95fd0177aa6a0bc63",
     "src/web/usage-graph.bend": "b41a1ffd14194cb6f95703852d238d9401d7aaa42589382bd13203d94d33523d",
     "src/web/usage-page.bend": "40ebb901b56f8c28f2b7eef5551c14b409333c0ef739c4d3df4ed44df581e876",
-    "src/web/view.bend": "769d3fb9f716ef44f8c5fe6d9abd94f6e9da038615a96debb17a0b0d0a0eafd0"
+    "src/web/view.bend": "4f29edcea78fd99c18ef584ff21792cd31f725e3d35aa48045f116b912b24f3a"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -458,6 +457,28 @@
       "work": "w-t1793774605-1546729-1648158",
       "compiler": "composite 41262875, direct, no --check-only, 3.7e9 cap, swap 0",
       "qualifiedHead": "4529c0dee45846a4554274677ad47126730d6050, tree 0f058f2917f8425d080687261644a95d1b52cd17"
+    },
+    "recut0142Final": {
+      "source": "main 7c9b3c22 + #932/#947 exclusion 90a17064 + version metadata fca244d6, tree 9dc6facb69f440411bfb2ab60f91d68ea1616da7",
+      "changedClosureFiles": [
+        "src/core/accounts.bend",
+        "src/core/cef.bend",
+        "src/core/client.bend",
+        "src/core/onboard.bend",
+        "src/mobile/screen.bend",
+        "src/web/bots.bend",
+        "src/web/view.bend"
+      ],
+      "removedClosureFiles": [
+        "src/core/cad-install.bend",
+        "src/core/json-object.bend"
+      ],
+      "addedClosureFiles": [
+        "src/core/model-catalog.bend"
+      ],
+      "scope": "Exclusion of #932/#947: CAD readers and projections removed from client, onboard, mobile/screen and view, restoring the earlier FreeCAD row and kicad.install path; cad-install.bend and json-object.bend leave the closure. UI PRs merged without a re-pin, reviewed here: #928 accounts, view (View.mp.* catalog, new read of info models on the model picker path) and new pure model-catalog.bend; #923 cef (Cef.home_url); #954 bots (stable header and tab DOM). No sidebar draft reader, unknown @ retention, private image key, bridge authority or scanner change.",
+      "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+      "qualification": "PENDING on this tree. No earlier pass is inherited."
     }
   },
   "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged; 2026-11-01 combined main622/desktop dictation/Improvements: speech-only Vdict and @voice scratch, topbar/voice controls, existing wire privacy retained; no ordinary draft reader/key/filter/fallback change; all24 full-output cases PASS. Receipt MAIN-ALL-SOURCE-QUALIFICATION-CONTINUE-1.json.; 2026-11-01 catalog scope: retain only sidebar-global @f.pq across target changes; all other thread forms/mail replies still cleared;256KiBunchanged. Scope13/sidebar24PASS, CATALOG-FIX-SOURCE-QUALIFICATION.json.\n2026-11-02 ASAP scope review: Account state/picker; static pending chat; approved Settings/Voice presentation; durable opt-out choice and tour state; bounded tool-title projection and detail reads. Existing sidebar draft filter, unknown scratch retention, image key and authority/scanner implementations are unchanged. @voice and pending scratch remain conservative; no new draft readers. New lazy-tools helper operates only selected raw history/fold metadata and adds no sidebar draft read. Full24 output equivalence remains required before any pin refresh.",
