@@ -11,6 +11,7 @@ import { cbor, plain } from '../../src/web/wire.js';
 import { ThinViews } from '../../src/web/thin.js';
 const P = require('./real_store_active_policy.cjs');
 const { TarStream } = require('./real_store_active_tar.cjs');
+const { LinuxScope } = require('./real_store_active_scope.cjs');
 type Row = Record<string, any>;
 const ensure = (v: any, code: string) => { if (!v) throw Error(code); };
 const mono = () => Number(process.hrtime.bigint()) / 1e6;
@@ -75,7 +76,7 @@ async function go(input) {
   const receipt = () => {
     const row = {schema:1,run,index,pid:process.pid,at:now(),states:states.map(s => ({epoch:s.epoch,
       count:s.a.count,first:s.a.first,last:s.a.last,maxInteriorGapMs:s.a.maxInteriorGapMs,buckets:[...s.a.buckets],
-      bytes:s.bytes,firstSeq:s.firstSeq,lastSeq:s.lastSeq}))};
+      bytes:s.bytes,firstSeq:s.firstSeq,lastSeq:s.lastSeq,mode:s.mode,completed:s.completed,tools:s.tools,results:s.results}))};
     fs.writeFileSync(file + '.new', JSON.stringify(row), {mode:0o600});fs.renameSync(file + '.new', file);
   };
   emit({type:'system',subtype:'init',cwd:process.cwd(),tools:['Bash'],model:'fixture',permissionMode:'default'});
@@ -91,18 +92,22 @@ async function go(input) {
     if (marker.length >= 96) throw Error('owned-marker-bound');
     const delta = marker.padEnd(95,'x') + ' ';
     emit({type:'stream_event',event:{type:'content_block_delta',index:0,delta:{type:'text_delta',text:delta}}});
+    let s;
     if (at >= c.start && at < c.end) {
-      let s = states.find(s => s.epoch === c.epoch);
-      if (!s) {s={epoch:c.epoch,a:new P.Activity(c.start,c.end),bytes:0,firstSeq:seq,lastSeq:seq};states.push(s);if(states.length>2)states.shift();}
+      s = states.find(s => s.epoch === c.epoch);
+      if (!s) {s={epoch:c.epoch,mode:c.mode,a:new P.Activity(c.start,c.end),bytes:0,firstSeq:seq,lastSeq:seq,completed:0,tools:0,results:0};states.push(s);if(states.length>2)states.shift();}
       s.a.add(at);s.bytes+=Buffer.byteLength(delta);s.lastSeq=seq;
     }
     text += delta;
     if (c.mode === 'mixed' && at - cycle >= 500) {
       emit({type:'stream_event',event:{type:'content_block_stop',index:0}});
       emit({type:'assistant',message:{id:id+'-'+block,role:'assistant',content:[{type:'text',text}],usage:{input_tokens:10,output_tokens:seq}}});
+      if(s)s.completed++;
       const tool=id+'-tool-'+block;
       emit({type:'assistant',message:{id:tool,role:'assistant',content:[{type:'tool_use',id:tool,name:'Bash',input:{command:'echo owned-fixture',description:'Owned synthetic cycle'}}]}});
+      if(s)s.tools++;
       emit({type:'user',message:{role:'user',content:[{type:'tool_result',tool_use_id:tool,content:'owned synthetic result',is_error:false}]}});
+      if(s)s.results++;
       cycle=at;start();
     }
     if (text.length > 1024*1024) throw Error('owned-producer-text-bound');
@@ -128,7 +133,8 @@ if (process.argv.slice(2).includes('--self-test')) {
   const v = { id: 2 ** 47 + 17, m: 'view.open', p: { a: [1, '✓', false, null] } };
   ensure(JSON.stringify(plain(cbor(encode(v), keys, words))) === JSON.stringify(v), 'codec-roundtrip');
   await require('./real_store_active_producer_test.cjs').run(producer);
-  console.log('ok combined policy, streamed tar/gzip, iterative pump, codec and actual producer controls; no hub started');
+  await require('./real_store_active_scope_test.cjs').run();
+  console.log('ok combined policy, streamed tar/gzip, iterative pump, codec, producer and owned scope controls; no hub started');
   process.exit(0);
 }
 
@@ -145,6 +151,7 @@ for (const p of [home, user, agents, project, join(root, 'locks')]) mkdirSync(p,
 mkdirSync(dirname(out), { recursive: true });
 const samplesFd = openSync(out + '.samples.jsonl', 'wx', 0o600);
 const run = randomBytes(6).toString('hex'), prefix = 'ra-' + run + '-', ids = Array.from({ length: 20 }, (_, i) => prefix + i);
+const ownedScope = new LinuxScope(`bp-real-active-${run}-${process.pid}.scope`);
 const report: Row = { schema: 1, scope: 'private-RC3-copy-plus-20-active-producers', preparation: false,
   ok: false, forcedGC: false, inspector: false,
   limits: P.LIMITS, requestedLoadedMs: o.seconds * 1000, checks: {}, phases: [], samplesFileSuffix: '.samples.jsonl',
@@ -170,7 +177,7 @@ function remember(set: Set<string>, key: string) {
 }
 const control = (c: Row) => { writeFileSync(join(root, 'control.next'), JSON.stringify(c), { mode: 0o600 }); renameSync(join(root, 'control.next'), join(root, 'control.json')); };
 const failed = (code: string) => { fault ??= code; };
-function guard() { ensure(!fault, fault ?? 'fault'); ensure(hub?.exitCode === null, 'child-exited'); }
+function guard() { ensure(!fault, fault ?? 'fault'); ensure(ownedScope.leaderAlive(), 'child-exited'); }
 async function until(check: () => boolean, ms: number) {
   const end = mono() + ms;
   while (!check()) { guard(); ensure(mono() < end, 'deadline'); if (mono() - lastSample >= 5000) sample(); await sleep(25); }
@@ -182,8 +189,9 @@ function identity(pid: number, executable: string, argvItem: string) {
 }
 function sample() {
   guard(); const at = mono() - bootAt;
-  const s = P.processSample(readFileSync(`/proc/${hub!.pid}/stat`, 'utf8'), readFileSync(`/proc/${hub!.pid}/status`, 'utf8'),
-    hub!.pid, identity(hub!.pid, bin, bin), hub!.exitCode === null, at);
+  const pid = ownedScope.leaderPid;
+  const s = P.processSample(readFileSync(`/proc/${pid}/stat`, 'utf8'), readFileSync(`/proc/${pid}/status`, 'utf8'),
+    pid, identity(pid, bin, bin), ownedScope.leaderAlive(), at);
   if (birth) ensure(s.birth === birth, 'child-replaced'); else birth = s.birth;
   ensure(samples.length < 900, 'sample-bound'); samples.push(s); lastSample = mono();
   writeSync(samplesFd, JSON.stringify(s) + '\n');
@@ -518,73 +526,11 @@ function registerProducer(r: Row) {
   ensure(r.run === run && r.schema === 1 && Number.isInteger(r.index) && r.index >= 0 && r.index < 20 && Number.isInteger(r.pid) && r.pid > 0, 'producer-receipt');
   const s = readFileSync(`/proc/${r.pid}/stat`, 'utf8'), f = s.slice(s.lastIndexOf(') ') + 2).trim().split(/\s+/), born = Number(f[19]);
   ensure(Number.isSafeInteger(born) && born > 0 && readFileSync(`/proc/${r.pid}/cmdline`, 'utf8').split('\0').includes(join(agents, 'producer.cjs')), 'producer-identity');
+  ensure(ownedScope.contains(r.pid), 'producer-scope');
   const oldPid = producerPids.get(r.index), oldBirth = producerIdentities.get(r.pid);
   ensure((!oldPid || oldPid === r.pid) && (!oldBirth || oldBirth === born) &&
     ![...producerPids].some(([i, pid]) => i !== r.index && pid === r.pid), 'producer-replaced');
   producerPids.set(r.index, r.pid); producerIdentities.set(r.pid, born);
-}
-function producerAlive(pid: number, born: number) {
-  try {
-    const s = readFileSync(`/proc/${pid}/stat`, 'utf8'), f = s.slice(s.lastIndexOf(') ') + 2).trim().split(/\s+/);
-    ensure(Number.isSafeInteger(Number(f[19])) && Number(f[19]) > 0, 'cleanup-producer-sample');
-    if (Number(f[19]) !== born) return false;
-    // A zombie can no longer access the home, and its parent reaps it.
-    if (f[0] === 'Z') return false;
-    ensure(ownedCliScope(pid), 'cleanup-producer-identity'); return true;
-  } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ESRCH') return false; throw e; }
-}
-function ownedCliScope(pid: number) {
-  const argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-  if (argv.split('\0').some(a => a.includes(root))) return true;
-  const env = readFileSync(`/proc/${pid}/environ`); ensure(env.length <= 2097152, 'cleanup-environment-bound');
-  return env.includes(Buffer.from('REAL_ACTIVE_ROOT=' + root + '\0'));
-}
-async function stopProducers() {
-  // Discover any newly started stand-ins even if warmup failed before every
-  // receipt was registered. Only this run's paths/nonces/argv are accepted.
-  for (let i = 0; i < 20; i++) {
-    const path = join(root, `producer-${i}.json`);
-    if (existsSync(path)) try {
-      const r = smallJson(path); ensure(r.run === run && r.index === i, 'cleanup-producer-receipt');
-      if (producerPids.get(i) !== r.pid) {
-        const stat = readFileSync(`/proc/${r.pid}/stat`, 'utf8');
-        if (stat.slice(stat.lastIndexOf(') ') + 2).split(' ')[0] !== 'Z') registerProducer(r);
-      }
-    } catch (e) {
-      if (!['ENOENT', 'ESRCH'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e;
-    }
-  }
-  const alive = () => [...producerIdentities].filter(([pid, born]) => producerAlive(pid, born));
-  for (const signal of [null, 'SIGTERM', 'SIGKILL'] as const) {
-    collectOwnedCliChildren();
-    for (const [pid, born] of alive()) if (signal && producerAlive(pid, born)) {
-      try { process.kill(pid, signal); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e; }
-    }
-    const deadline = mono() + 1000;
-    while (alive().length && mono() < deadline) { await sleep(25); collectOwnedCliChildren(); }
-    if (!alive().length) return true;
-  }
-  return false;
-}
-function collectOwnedCliChildren() {
-  if (!hub || hub.exitCode !== null) return;
-  const todo = [hub.pid], seen = new Set<number>();
-  while (todo.length) {
-    const pid = todo.pop()!; if (seen.has(pid)) continue; seen.add(pid); ensure(seen.size <= 512, 'cleanup-process-bound');
-    try {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8'), fields = stat.slice(stat.lastIndexOf(') ') + 2).trim().split(/\s+/);
-      if (pid === hub.pid) ensure(Number(fields[19]) === birth, 'cleanup-hub-identity');
-      // Birth + actual ancestry + this fresh private namespace include exec
-      // wrappers and verification stand-ins that have not written a receipt.
-      // No PID imported from the copied store is inspected or signalled.
-      if (pid !== hub.pid && fields[0] !== 'Z' && ownedCliScope(pid)) {
-        ensure(producerIdentities.size < 128 || producerIdentities.has(pid), 'cleanup-process-bound');
-        const born = Number(fields[19]); ensure(Number.isSafeInteger(born) && born > 0, 'cleanup-producer-identity');
-        producerIdentities.set(pid, born);
-      }
-      for (const x of readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean)) todo.push(Number(x));
-    } catch (e) { if (!['ENOENT', 'ESRCH'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e; }
-  }
 }
 
 let drains: Promise<void>[] = [];
@@ -596,7 +542,7 @@ try {
   ensure(await hashFile(bin) === o['--sha256'], 'service-sha');
   await stageFence(); // Missing/mismatched prerequisite fails before extraction.
   report.fixtureArchiveSha256 = await hashFile(fixture); ensure(report.fixtureArchiveSha256 === o['--fixture-sha256'], 'archive-sha');
-  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_policy.cjs', 'test/tools/real_store_active_tar.cjs',
+  const sourcePaths = ['test/tools/real_store_active_load.ts', 'test/tools/real_store_active_policy.cjs', 'test/tools/real_store_active_tar.cjs', 'test/tools/real_store_active_scope.cjs',
     'src/core/model.bend', 'src/core/cbor.bend', 'src/web/wire.js', 'src/web/thin.js', 'src/web/sidebar-region.js', 'src/web/view-delta.js',
     'src/web/conversation-frame.js', 'src/web/terminal-input.js', 'src/web/model-menu-input.js', 'src/web/startup.js'];
   sourceHashes = Object.fromEntries(sourcePaths.map(p => [p, sha(readFileSync(resolve(import.meta.dir, '../..', p)))])); report.sourceHashes = sourceHashes;
@@ -634,19 +580,27 @@ try {
   const clk = Bun.spawnSync(['getconf', 'CLK_TCK'], { stdout: 'pipe', stderr: 'ignore', env: { PATH: '/usr/bin:/bin' } });
   const tickHz = Number(clk.stdout.toString().trim()); ensure(clk.exitCode === 0 && tickHz > 0, 'clock-ticks'); report.tickHz = tickHz;
   bootAt = mono();
-  hub = Bun.spawn([bin, '--home', home, '--host', '127.0.0.1', '--port', String(port), '--no-tailscale', '--headless', '--foreground'], {
-    cwd: project, env: { HOME: user, USERPROFILE: user, XDG_CONFIG_HOME: join(user, 'config'), XDG_CACHE_HOME: join(user, 'cache'), XDG_DATA_HOME: join(user, 'data'),
+  const childEnv = { HOME: user, USERPROFILE: user, XDG_CONFIG_HOME: join(user, 'config'), XDG_CACHE_HOME: join(user, 'cache'), XDG_DATA_HOME: join(user, 'data'),
       CODEX_HOME: join(user, 'codex'), CLAUDE_CONFIG_DIR: join(user, 'claude'), GEMINI_HOME: join(user, 'gemini'),
       PATH: `${agents}:${dirname(process.execPath)}:/usr/bin:/bin`, TMPDIR: root, DISPLAY: '', WAYLAND_DISPLAY: '', CI: '1', DO_NOT_TRACK: '1',
       BACKPLANE_HOME: home, BACKPLANE_COPY: '1', BACKPLANE_AGENTS: agents, BACKPLANE_PEERS: '', BACKPLANE_NO_UPDATE: '1',
       BACKPLANE_KISTACK_SYNC: '0', BACKPLANE_TELEMETRY: 'off', BEND_NO_TELEMETRY: '1', BACKPLANE_GOOGLE_BAKE: '0', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9',
       BACKPLANE_LOCK_DIR: join(root, 'locks'), BACKPLANE_OWNED_FENCE_RECEIPT: join(root, 'fence.json'),
       BUN_OPTIONS: `--preload=${fence}`,
-      REAL_ACTIVE_ROOT: root, REAL_ACTIVE_RUN: run, REAL_ACTIVE_IDS: JSON.stringify(ids), REAL_ACTIVE_POLICY: resolve(import.meta.dir, 'real_store_active_policy.cjs') },
+      REAL_ACTIVE_ROOT: root, REAL_ACTIVE_RUN: run, REAL_ACTIVE_IDS: JSON.stringify(ids), REAL_ACTIVE_POLICY: resolve(import.meta.dir, 'real_store_active_policy.cjs') };
+  // The scope manager needs its user bus; only the payload receives the fresh
+  // credential-free environment. No preload is installed in systemd itself.
+  const launch = ownedScope.command(['/usr/bin/env', '-i', ...Object.entries(childEnv).map(([k, v]) => k + '=' + v),
+    bin, '--home', home, '--host', '127.0.0.1', '--port', String(port), '--no-tailscale', '--headless', '--foreground'], join(root, 'scope-admitted'));
+  hub = Bun.spawn(launch, { cwd: project, env: { PATH: '/usr/bin:/bin',
+    XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR ?? '', DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS ?? '' },
     stdout: 'pipe', stderr: 'pipe' });
-  report.hubPid = hub.pid; drains = [drain(hub.stdout), drain(hub.stderr)].map(p => p.catch(() => { failed('child-log-stream'); }));
+  drains = [drain(hub.stdout), drain(hub.stderr)].map(p => p.catch(() => { failed('child-log-stream'); }));
   // Sample as soon as the actual executable is admitted; never time a shell.
-  sample(); report.childIdentity = { pid: hub.pid, birth, executableMatchesPackagedService: true };
+  report.hubPid = await ownedScope.attach((pid: number) => identity(pid, bin, bin) &&
+    readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').includes(home));
+  sample(); report.childIdentity = { pid: ownedScope.leaderPid, birth, executableMatchesPackagedService: true };
+  report.executionScope = { memoryMaxBytes: 3700000000, swapMaxBytes: 0, descendantAccounting: 'kernel-cgroup-v2' };
   await until(() => listening, 120000); report.listenMs = mono() - bootAt;
   ensure(existsSync(join(root, 'fence.json')), 'fence-receipt-missing');
   const installed = smallJson(join(root, 'fence.json'));
@@ -696,19 +650,24 @@ try {
     for (const p of c.pending.values()) { clearTimeout(p.timer); p.reject(Error('owned-stop')); }
     c.ws.close();
   }
-  try { report.cleanupBeforeHubStop = await stopProducers(); } catch { report.cleanupBeforeHubStop = false; }
-  if (hub && hub.exitCode === null) {
-    hub.kill('SIGTERM'); const timer = setTimeout(() => { if (hub!.exitCode === null) hub!.kill('SIGKILL'); }, 3000);
-    try { await hub.exited; } finally { clearTimeout(timer); }
-  }
-  try { report.checks.producersStopped = await stopProducers(); } catch { report.checks.producersStopped = false; }
+  // A dead leader is never evidence that its descendants are gone. Stop the
+  // identity-bound complete scope; cgroup.kill handles concurrent task forks.
+  const cleanup = await ownedScope.stop(); report.cleanup = cleanup;
+  report.checks.ownedScopeStopped = cleanup.safeToRemove;
+  report.executionScopeResources = { observations: ownedScope.resourceObservations, missing: ownedScope.resourceObservationMissing,
+    interval: 'admission and immediately before kernel kill; no fabricated post-retirement counters' };
+  report.checks.executionScopeResources = !cleanup.submitted || ownedScope.resourcesHealthy();
+  let exitTimer: ReturnType<typeof setTimeout> | undefined;
+  const launcherExited = !hub || await Promise.race([hub.exited.then(() => true),
+    new Promise<boolean>(r => { exitTimer = setTimeout(() => r(false), 3000); })]);
+  clearTimeout(exitTimer); report.checks.launcherExited = launcherExited;
   let drainTimer: ReturnType<typeof setTimeout> | undefined;
   const drained = await Promise.race([Promise.allSettled(drains).then(() => true),
     new Promise<boolean>(r => { drainTimer = setTimeout(() => r(false), 3000); })]);
   clearTimeout(drainTimer); report.checks.logStreamsClosed = drained;
   if (!drained) for (const r of logReaders) void r.cancel().catch(() => {});
   try {
-    if (before) {
+    if (before && cleanup.safeToRemove && launcherExited) {
       const after = await storeCounts(); report.after = countReport(after);
       report.checks.catalogPreserved = after.originalThreads === before.originalThreads && after.originalCatalogSha256 === before.originalCatalogSha256;
       report.checks.historyPreserved = after.originalEntryRows === before.originalEntryRows && after.originalEntrySha256 === before.originalEntrySha256;
@@ -733,9 +692,10 @@ try {
   report.checks.noFault = !fault && !report.failureCode;
   closeSync(samplesFd);
   report.checks.ownedHomeRemoved = false;
-  if (report.checks.producersStopped && drained && (!hub || hub.exitCode !== null)) {
+  if (cleanup.safeToRemove && drained && launcherExited) {
     try { rmSync(root, { recursive: true, force: true }); report.checks.ownedHomeRemoved = true; } catch {}
   }
+  ownedScope.close();
   report.ok = Object.keys(report.checks).length >= 10 && Object.values(report.checks).every(v => v === true);
   report.finishedAt = new Date().toISOString();
   writeFileSync(out, JSON.stringify(report, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
