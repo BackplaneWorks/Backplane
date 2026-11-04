@@ -3088,6 +3088,9 @@ html.phone .bot-tabs::-webkit-scrollbar { display: none; }
 html.phone .bot-desktop-tabs { gap: 6px; flex-wrap: nowrap; }
 html.phone .bot-tabs .tab { flex: none; min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 0; color: var(--dim); }
 html.phone .bot-tabs .tab.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+/* the Bots tab with no bot yet: what one is and how to make one */
+.app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child { flex-wrap: wrap; }
+.app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child::after { content: "No bots yet. A bot is an agent that stays between chats, with a name, a cat and a memory: mention it in any message (@scout look at the BOM). Tap + to make one."; flex: 1 1 100%; padding: 8px 0 12px; color: var(--dim); font-size: 14px; font-weight: normal; text-transform: none; letter-spacing: normal; line-height: 1.5; white-space: normal; }
 /* a bot's pages (Mailroom, Browser, Routines, Webhooks, ...) and a room:
    thumb-sized controls, 16 px fields; the bot's Chat composer is the thread's (B) */
 html.phone :is(.bot-body, .mailroom) :is(button, summary, select) { min-height: 44px; min-width: 44px; }
