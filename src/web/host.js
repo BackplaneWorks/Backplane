@@ -3801,8 +3801,9 @@ function phoneWakeProbe() {
   }, 6000);
 }
 // The same holds for a Send or an answer: the hub answers it at once with a
-// small frame, so a link that brings nothing within 8 s of the oldest one
-// not answered since is dead, not slow. (Not other requests: their answer
+// small frame, so a link that brings nothing within 12 s of the oldest one
+// not answered since is dead, not slow (a real history on a slow phone
+// answered every request within 5.5 s). (Not other requests: their answer
 // can be a viewer's picture.)
 const REPLY_WATCHED = new Set(["send", "send-alt", "answer"]);
 let replyWatch = 0, replyFrom = 0n;
@@ -3813,7 +3814,7 @@ function phoneReplyWatch(s, request) {
   replyWatch = setTimeout(() => {
     replyWatch = 0;
     if (socket === s && heard < replyFrom && Date.now() >= heldUntil && !viewerBusy()) s.dead("reply-quiet");
-  }, 8000);
+  }, 12000);
 }
 const onWake = why => {
   const away = hiddenAt ? Date.now() - hiddenAt : 0;

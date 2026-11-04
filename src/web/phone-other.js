@@ -191,7 +191,9 @@ export function installPhoneOther({ doc = document, win = window, dispatch, touc
   if (on() && !doc.querySelector("link[rel=manifest]")) win.setTimeout(() => {
     const meta = (name, content) => { const m = doc.createElement("meta");m.name = name;m.content = content;doc.head.append(m); };
     meta("apple-mobile-web-app-capable", "yes");meta("mobile-web-app-capable", "yes");
-    meta("apple-mobile-web-app-title", "Backplane");meta("apple-mobile-web-app-status-bar-style", "black-translucent");
+    // (black-translucent writes the clock in white over the page's top: on
+    // a light theme a plain bar with dark text instead)
+    meta("apple-mobile-web-app-title", "Backplane");meta("apple-mobile-web-app-status-bar-style", html.classList.contains("light") ? "default" : "black-translucent");
     const origin = win.location.origin;
     const icon = new URL(touchIcon || doc.querySelector("link[rel=apple-touch-icon]")?.getAttribute("href") || "apple-touch-icon.png", win.location.href).href;
     // the splash and the status bar in the theme the page has now; Android
