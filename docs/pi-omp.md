@@ -18,6 +18,11 @@ not OpenCode's and not each other's.
 
 Backplane never writes either agent's settings or credentials. They stay in `~/.pi/agent` and `~/.omp`. Pi's sessions stay there too; omp's for Backplane's threads live in Backplane's home, a folder per thread (`<home>/omp/sessions/<thread>`).
 
+OMP receives Backplane's masked system prompt through a private UTF-8 file
+passed to `--append-system-prompt`. Each turn has independent launch files,
+removed after its process exits. This preserves large skill lists without
+exceeding Windows' command-line limit; no symlink or Developer Mode is needed.
+
 Each provider appears in every model picker once its CLI is on PATH. The models come from `pi --list-models` (run offline) and from `omp models --json`. Both list only models they have credentials for. If no models show, sign in first.
 
 ## What a thread gets
