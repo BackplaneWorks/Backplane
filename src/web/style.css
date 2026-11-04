@@ -2887,6 +2887,8 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone .body table { display: block; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .app.phone .body :is(td, th) { overflow-wrap: break-word; word-break: normal; min-width: 4ch; max-width: 70vw; }
 .app.phone .body img, .app.phone .msg .shot { max-width: 100%; }
+/* an image the hub could not give: one line, not a 4:3 box */
+.app.phone .msg .shot.image-unavailable { aspect-ratio: auto; height: 44px; width: 100%; }
 /* an API error's "› details" and a restart's "› what it was told" */
 .app.phone :is(.apierr-raw, .carry-told) > summary { display: inline-flex; align-items: center; min-height: 40px; padding: 0 8px; }
 /* a turn's tool calls and its activity rows: a row a thumb can open */
