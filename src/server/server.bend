@@ -18087,7 +18087,7 @@ def Hub.mcp.viewer(show: Bool, h: Hub, +thread: String, +o: J.Json, body: String
   match show h:
     case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        args : J.Json <- K.Files.request(B.Hub.cwd(st, B.Hub.thread(st, thread)), KIpc.args(o), J.Json.get_str(KIpc.args(o), "kind", "board"))
+        +args : J.Json <- K.Files.request(B.Hub.cwd(st, B.Hub.thread(st, thread)), KIpc.args(o), J.Json.get_str(KIpc.args(o), "kind", "board"))
         Hub.mcp.k(MC.Mcp.reply(J.Json.get_obj(o, "id"), MC.Mcp.view(thread, J.Json.get_str(args, "path", ""), J.Json.get_str(args, "kind", ""))), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body)
     case False{} _: Hub.mcp.route(Preview.is(o), h, thread, o, body, reply, now)
 
