@@ -3762,9 +3762,25 @@ setInterval(() => {
   if (socket && (slept || !socket.thin || socket.hb) && App.alive_due(heard, BigInt(t))) socket.dead("heartbeat-expired");
 }, 5000);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") hiddenAt = Date.now(); }, true);
-watchWake(window, document, why => {
+// A phone that slept or changed networks often keeps a socket that is dead
+// without a close, and the lease above takes up to 40 s to say so while
+// the page looks live. So on a phone a wake asks the hub for a view, and a
+// link that brings nothing at all within 6 s is replaced (cheap: a bounded
+// view; "Reconnecting" shows only if that takes a while too).
+let wakeProbe = 0;
+function phoneWakeProbe() {
+  if (!PHONE_TITLES() || !socket || wakeProbe) return;
+  const asked = BigInt(Date.now()), s = socket;
+  if (remoteReady) thin?.update();
+  wakeProbe = setTimeout(() => {
+    wakeProbe = 0;
+    if (socket === s && heard < asked && Date.now() >= heldUntil) s.dead("wake-quiet");
+  }, 6000);
+}
+const onWake = why => {
   const away = hiddenAt ? Date.now() - hiddenAt : 0;
   if (why === "visible") hiddenAt = 0;
+  if (why === "online" || why === "network" || why === "pageshow" || (why === "visible" && away > 5000)) phoneWakeProbe();
   // the network changed, or the page slept a while: a socket may be dead
   // without a close, so a quiet one is replaced (cheap: a bounded view)
   if (socket && (why === "online" || (why === "visible" && away > 60000) || why === "pageshow")) {
@@ -3773,7 +3789,10 @@ watchWake(window, document, why => {
     if (App.alive_due(heard, BigInt(Date.now()))) socket.dead("wake-expired");
   }
   if (thinRetry.pending) { thinBackoff.reset();thinRetry.wake(); }
-});
+};
+watchWake(window, document, onWake);
+// Android's Chrome says when the phone moves between Wi-Fi and mobile data
+navigator.connection?.addEventListener?.("change", () => { if (PHONE_TITLES()) onWake("network"); });
 
 function clockTick() {
   ui = App.tick(ui, now());
