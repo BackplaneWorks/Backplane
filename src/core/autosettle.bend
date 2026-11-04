@@ -468,35 +468,46 @@ def Auto.index(+s: M.State) -> Index:
     case M.State{_, _, _, _, tasks, _, _, _, _, _, _}:
       Auto.index.tasks(Auto.tasks(Map.values(&2, M.Task, tasks), Map.new(&2, Nat), Map.new(&2, Nat)), s)
 
-def Auto.expired.ids(ids: List<&2, String>, +s: M.State, +now: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, +acc: List<&2, M.Change>) -> List<&2, M.Change>:
+# A work dependency cannot fire after its immutable target has left the
+# running-work index. Allow the normal worker grace for registration races,
+# then retire it even if its subscriber is still working on something else.
+# Passive file/PR subscriptions of active owners retain their usual contract.
+def Auto.expired.work(kind: String, live: Bool, old: Bool) -> Bool:
+  match kind live old:
+    case "work" False{} True{}: True{}
+    case _ _ _: False{}
+
+def Auto.expired.drop(retired: Bool, +o: J.Json, +now: Nat, +window: Nat, +work: Map<&2, Nat>, owned: Map<&2, Nat>) -> Bool:
+  match retired:
+    case True{}: Bool.not(Auto.wake.active(o, work, owned))
+    case False{}: Auto.expired.work(J.Json.get_str(o, "kind", ""),
+      Nat.is_gt(Auto.get(work, J.Json.get_str(o, "target", "")), 0n),
+      Bool.and(Nat.is_gt(window, 0n), M.Settle.stale(now, J.Json.get_nat(o, "created", now), window)))
+
+def Auto.expired.ids(ids: List<&2, String>, +s: M.State, +now: Nat, +window: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, +retired: Bool, +acc: List<&2, M.Change>) -> List<&2, M.Change>:
   match ids:
     case Nil{}: acc
-    case +id <> rest: Auto.expired.ids(rest, s, now, work, owned,
-      Bool.pick(List<&2, M.Change>, Auto.wake.active(M.Wake.get(s, id), work, owned), acc, M.WakeDropped{id, now} <> acc))
-
-def Auto.expired.owner(eligible: Bool, ids: List<&2, String>, +s: M.State, +now: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
-  match eligible:
-    case False{}: acc
-    case True{}: Auto.expired.ids(ids, s, now, work, owned, acc)
+    case +id <> rest: Auto.expired.ids(rest, s, now, window, work, owned, retired,
+      Bool.pick(List<&2, M.Change>, Auto.expired.drop(retired, M.Wake.get(s, id), now, window, work, owned), M.WakeDropped{id, now} <> acc, acc))
 
 def Auto.expired.done(shelf: M.Shelf, turn: M.TurnState) -> Bool:
   match shelf turn:
     case M.Settled{} M.Completed{}: True{}
     case _ _: False{}
 
-def Auto.expired.go(keys: List<&2, String>, +s: M.State, +now: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+def Auto.expired.go(keys: List<&2, String>, +s: M.State, +now: Nat, +window: Nat, +work: Map<&2, Nat>, +owned: Map<&2, Nat>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
   match keys:
     case Nil{}: List.reverse(&2, M.Change, acc)
     case +key <> rest:
       +th = String.drop(key, 9n)
       +t = M.State.thread.get(s, th)
-      Auto.expired.go(rest, s, now, work, owned, Auto.expired.owner(
-        Bool.and(Auto.expired.done(M.Shelf.of(t), M.Thread.turn(t)), Nat.is_eq(Auto.get(owned, th), 0n)), M.Wake.ids(s, key), s, now, work, owned, acc))
+      Auto.expired.go(rest, s, now, window, work, owned, Auto.expired.ids(M.Wake.ids(s, key), s, now, window, work, owned,
+        Bool.and(Auto.expired.done(M.Shelf.of(t), M.Thread.turn(t)), Nat.is_eq(Auto.get(owned, th), 0n)), acc))
 
 def Auto.changes.index(+ix: Index, +s: M.State, +now: Nat) -> List<&2, M.Change>:
   match ix s:
     case Index{_, _, _, owned} M.State{_, ts, _, _, _, _, _, _, _, _, _}:
-      List.append(&2, M.Change, Auto.go(Map.values(&2, M.Thread, ts), s, now, ix), Auto.expired.go(M.Setting.keys.pre(s, "wakes.by."), s, now,
+      List.append(&2, M.Change, Auto.go(Map.values(&2, M.Thread, ts), s, now, ix), Auto.expired.go(M.Setting.keys.pre(s, "wakes.by."), s, now, Auto.seconds(s, "settle.idle.minutes", 15n),
         Auto.work.ids(List.append(&2, String, M.Setting.keys.pre(s, "watch."), M.Setting.keys.pre(s, "bg.")), s, Map.new(&2, Nat)), owned, Nil{}))
 
 def Auto.changes(+s: M.State, +now: Nat) -> List<&2, M.Change>:
@@ -558,9 +569,9 @@ def Auto.message.metadata(c: M.Change, +s: M.State) -> List<&2, M.Change>:
 def Auto.messages.metadata.acc(cs: List<&2, M.Change>, +s: M.State, acc: List<&2, M.Change>) -> List<&2, M.Change>:
   match cs:
     case Nil{}: List.reverse(&2, M.Change, acc)
-    case c <> rest:
+    case +c <> rest:
       +one = Auto.message.metadata(c, s)
-      Auto.messages.metadata.acc(rest, M.State.replay(one, s), List.append(&2, M.Change, List.reverse(&2, M.Change, one), acc))
+      Auto.messages.metadata.acc(rest, M.State.replay(one, M.State.apply(s, c)), List.append(&2, M.Change, List.reverse(&2, M.Change, one), acc))
 
 def Auto.messages.metadata(cs: List<&2, M.Change>, +s: M.State) -> List<&2, M.Change>:
   Auto.messages.metadata.acc(cs, s, Nil{})

@@ -415,14 +415,19 @@ struct FileCrumb: Decodable, Hashable {
     let label, action, value: String
 }
 
+// down: where the row downloads from ("" none; client.bend's Fm.down),
+// downName: the name it saves under
 struct FileRow: Decodable, Hashable {
     let label, action, value, detail, kind, icon: String
+    let down, downName: String?
 }
 
+// zip, zipName: the folder on show as a zip, and its name
 struct FilesPage: Decodable {
     let trail: [FileCrumb]
     let rows: [FileRow]
     let ready: Bool
+    let zip, zipName: String?
 }
 
 // an image or a PDF from the Files tab: its name, "image" or "pdf", where
@@ -711,6 +716,11 @@ struct UsageDay: Codable, Hashable {
     let fraction: Int
 }
 
+struct InstallProgress: Codable, Hashable {
+    let busy, known: Bool
+    let fraction: Int
+}
+
 struct SetRow: Codable, Hashable {
     let label, note: String
     let buttons: [SetButton]
@@ -719,6 +729,7 @@ struct SetRow: Codable, Hashable {
     let qr: [String]?
     let qrnote: String?
     var chart: [UsageDay]? = nil
+    var installProgress: InstallProgress? = nil
     // about this device, not the hub: App settings has it, the hub's page skips it
     let local: Bool?
     // notif-policy's "Notify me for": drawn in App settings' Notifications section, not on the hub's page

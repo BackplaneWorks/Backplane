@@ -379,12 +379,17 @@ def One.act.mail(i: Nat, +u: U.Ui, +action: String, +value: String) -> U.Act:
     case 2n: One.mail.send(u, Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}))
     case _: One.act.k(C.Codec.pos(["view", "view-mention", "view-pick", "view-unpick", "picker-open", "picker-type", "picker-mkdir", "find-open", "find-q", "find-close", "form-close", "view-sheet", "view-layer", "view-parts", "mech-3d", "mech-renders", "fm", "fm-cd", "fm-up", "fm-open", "fm-page", "view-layer-pick", "view-layer-mode", "hub-settings"], action), u, action, value)
 
-def One.act.home(+u: U.Ui, +action: String, +value: String) -> U.Act:
-  match action:
+# One.act.home matches a copy of action: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def One.act.home.by(key: String, +u: U.Ui, +action: String, +value: String) -> U.Act:
+  match key:
     case "home-view": VW.View.open(u, value)
     case "home-model": VW.View.fm.to(U.Home.dispatch(u, action, value), "3d", value)
     case "home-bom": VW.View.open(u, "review")
     case _: One.act.mail(C.Codec.pos(["mail-window", "mail-body-window", "mailroom-send"], action), u, action, value)
+
+def One.act.home(+u: U.Ui, +action: String, +value: String) -> U.Act:
+  One.act.home.by(action, u, action, value)
 
 def One.act(+u: U.Ui, +action: String, +value: String) -> U.Act:
   U.Rc.sync.of(One.act.home(u, action, value))

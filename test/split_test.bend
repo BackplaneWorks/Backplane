@@ -3,15 +3,22 @@ import ./check.bend as C
 import ../src/core/client.bend as U
 
 # The combined view (client.bend's Split): which panes are put away when
-# one is flipped (one always stays), and which sheet its schematic shows.
+# one is flipped (the board and the 3D one at a time, one pane always
+# stays), and which sheet its schematic shows.
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    C.Check.str("all shown, the 3D put away", U.Split.flip("", "3d"), "3d")
-    C.Check.str("and brought back", U.Split.flip("3d", "3d"), "")
-    C.Check.str("put away in the panes' order", U.Split.flip("3d", "sch"), "sch 3d")
+    C.Check.str("at first: the schematic and the board", Bool.show(Bool.and(U.Split.shows("", "pcb"), Bool.not(U.Split.shows("", "3d")))), "True")
+    C.Check.str("the 3D shown puts the board away", U.Split.flip("", "3d"), "pcb")
+    C.Check.str("and the board shown puts the 3D away", U.Split.flip("pcb", "pcb"), "3d")
+    C.Check.str("the 3D put away leaves the schematic", U.Split.flip("pcb", "3d"), "pcb 3d")
+    C.Check.str("the board put away leaves the schematic", U.Split.flip("", "pcb"), "pcb 3d")
+    C.Check.str("the schematic on its own", U.Split.flip("pcb", "sch"), "sch pcb")
+    C.Check.str("the schematic put away leaves the board", U.Split.flip("", "sch"), "sch 3d")
     C.Check.str("the last pane shown stays", U.Split.flip("pcb 3d", "sch"), "pcb 3d")
-    C.Check.str("so does any last one", U.Split.flip("sch 3d", "pcb"), "sch 3d")
+    C.Check.str("so does any last one", U.Split.flip("sch pcb", "3d"), "sch pcb")
+    C.Check.str("the 3D alone gives way to the board alone", U.Split.flip("sch pcb", "pcb"), "sch 3d")
+    C.Check.str("never the board and the 3D together", Bool.show(U.Split.shows("3d", "3d")), "False")
     C.Check.str("a word that is no pane changes nothing", U.Split.flip("pcb", "x"), "pcb")
     C.Check.str("a pane is found by its word", Bool.show(U.Split.has("sch 3d", "3d")), "True")
     C.Check.str("not by a part of one", Bool.show(U.Split.has("sch", "s")), "False")

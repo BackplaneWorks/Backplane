@@ -131,7 +131,7 @@ def Ob.body.s4(+l: I.Loc, +k: Nat) -> String:
   Bool.pick(String, Ob.phone(k), MSG.T.tour.body.bots.phone(l), MSG.T.tour.body.bots.desktop(l))
 
 def Ob.body.s5(+l: I.Loc) -> String:
-  MSG.T.tour.body.agents(l)
+  MSG.T.tour.body.agents(l) ++ " Set up KiCad and FreeCAD in Settings → CAD. Downloads run on the hub; you can watch progress or cancel from any connected device."
 
 def Ob.body.s6(+l: I.Loc, +k: Nat) -> String:
   Bool.pick(String, Ob.phone(k), MSG.T.tour.body.keys.phone(l), MSG.T.tour.body.keys.desktop(l))

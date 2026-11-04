@@ -20,6 +20,22 @@ function store_sync(path) {
   catch(e) { return 'fail '+e.message; }
   finally { if(fd!==undefined)fs.closeSync(fd); }
 }
+// Promotion/adoption call store_sync directly and remain synchronous. Only
+// Disk.sync parks its Bend continuation; success still waits for full fsync
+// and close, before Sto.write may commit the derived checkpoint.
+function store_sync_effect(path, k) {
+  if (globalThis.BEND_ASYNC === false || process.env.BACKPLANE_JS_LOOP === 'sync') {
+    try { return store_sync(path); } catch (e) { return 'fail ' + e.message; }
+  }
+  if (typeof io_park_promise !== 'function') return 'fail async IO loop unavailable';
+  const sync = async () => {
+    const file = await require('fs').promises.open(path, process.platform === 'win32' ? 'r+' : 'r');
+    try { await file.sync(); }
+    finally { await file.close(); }
+    return 'ok';
+  };
+  return io_park_promise(sync(), k, (value, error) => error === undefined ? value : 'fail ' + error.message);
+}
 function store_prepare(home,codec,from) {
   const fs=require('fs'),path=require('path');let fd;
   try {
@@ -67,7 +83,7 @@ function store_promote(home,temp) {
 }
 io_eff(CID(Disk.temp),store_temp);
 io_eff(CID(Disk.promote),store_promote);
-io_eff(CID(Disk.sync),store_sync);
+io_eff(CID(Disk.sync),store_sync_effect);
 io_eff(CID(Disk.prepare),store_prepare);
 // The complete lines before byte `to` that contain any needle, oldest first
 // (storeio.bend's Disk.pick, for Sto.upgrade). Each needle is found across

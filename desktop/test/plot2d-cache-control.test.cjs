@@ -15,7 +15,7 @@ function fixture() {
   const canvas = { clientWidth: 480, clientHeight: 320, width: 480, height: 320, getContext: () => context };
   const plot = { chunks: [{}] };
   const View = vm.runInNewContext(body + '\nView;', {
-    window: { devicePixelRatio: 1 }, document: { createElement: () => ({ width: 0, height: 0, getContext: () => context }) },
+    window: { devicePixelRatio: 1 }, viewDpr: () => 1, coarse: null, inspectCard() {}, card: null, document: { createElement: () => ({ width: 0, height: 0, getContext: () => context }) },
     performance: { now: () => 0 }, stats: new Map(), plots: new Map([['fixture', plot]]), componentSources: components,
     setTimeout(fn) { timers.set(++timer, fn); return timer; }, clearTimeout(id) { timers.delete(id); },
     clearInterval() {}, cancelAnimationFrame() {}, cancelIdleCallback() {},

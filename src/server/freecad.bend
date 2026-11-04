@@ -8,7 +8,7 @@ import ./proc.bend as P
 # there is none, and Settings and the agents say where to get it.
 
 def FreeCAD.sh() -> String:
-  "for c in \"$BACKPLANE_FREECAD\" freecadcmd FreeCADCmd freecad.cmd /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd; do [ -n \"$c\" ] || continue; if command -v cygpath >/dev/null 2>&1; then c=$(cygpath -u \"$c\"); fi; p=$(command -v \"$c\" 2>/dev/null) && [ -n \"$p\" ] && { echo \"$p\"; exit 0; }; done; exit 1"
+  "managed=; if [ -f \"$1/freecad/command\" ]; then IFS= read -r managed < \"$1/freecad/command\"; fi; for c in \"$BACKPLANE_FREECAD\" \"$managed\" freecadcmd FreeCADCmd freecad.cmd /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd; do [ -n \"$c\" ] || continue; if command -v cygpath >/dev/null 2>&1; then c=$(cygpath -u \"$c\"); fi; p=$(command -v \"$c\" 2>/dev/null) && [ -n \"$p\" ] && { echo \"$p\"; exit 0; }; done; exit 1"
 
 def FreeCAD.found(r: P.Ran) -> String:
   match r:
@@ -17,5 +17,5 @@ def FreeCAD.found(r: P.Ran) -> String:
     case _:
       ""
 
-def FreeCAD.find() -> IO(String):
-  IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", FreeCAD.sh()], "/"), r => IO.pure(String, FreeCAD.found(r)))
+def FreeCAD.find(home: String) -> IO(String):
+  IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", FreeCAD.sh(), "sh", home], "/"), r => IO.pure(String, FreeCAD.found(r)))

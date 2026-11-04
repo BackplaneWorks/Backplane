@@ -85,6 +85,36 @@ export function watchWake(target, doc, wake) {
   };
 }
 
+// What a wake (watchWake) does while the link is down. A retry waiting on
+// its timer runs now. A try already under way is left alone for a moment
+// (it is likely the one that brings the page back), but one older than
+// WAKE_STALE_MS was started while the page was away: on a phone that came
+// back, it waits out a timeout set by the failures in the background (up to
+// 4x, seconds each step) on a socket the network has since dropped, so a
+// fresh try starts now, with a first try's patience. A link down with
+// nothing under way at all starts one too: nothing else would.
+export const WAKE_STALE_MS = 1500;
+export function wakeAction({ down, pending, since, now }) {
+  if (!down) return "none";
+  if (pending) return "retry";
+  if (since && now - since < WAKE_STALE_MS) return "none";
+  return "restart";
+}
+
+// Whether a reconnect goes straight to the socket, without asking /hello
+// and the hub's capabilities first. A phone back from the background (a
+// WebView, a browser tab) keeps HTTP connections the network dropped while
+// it was away, and its first requests go out on them and hang until they
+// time out (seconds each, measured on Android's WebView: every fetch for 6 s
+// after coming back), while a new socket opens at once (0.9 s). A page that
+// has had a view from this hub tries its socket first, DIRECT_TRIES times
+// in a row at most; a socket that fails before its greeting each time (the
+// hub down, a pairing revoked) goes back to asking, which can tell why.
+export const DIRECT_TRIES = 2;
+export function directReconnect({ again, viewsEver, directFails }) {
+  return !!again && !!viewsEver && directFails < DIRECT_TRIES;
+}
+
 // The hub's state as /hello tells it: up, starting (503, maybe with
 // Retry-After), or unreachable (refused, a timeout). Any 2xx counts as up.
 export async function probeHub(fetch, { timeoutMs = 2000, now = Date.now } = {}) {

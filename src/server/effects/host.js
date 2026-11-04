@@ -286,10 +286,12 @@ function sock_send_static(socket, request, k) {
     if (!request || typeof request.path !== 'string' || typeof request.ctype !== 'string'
         || typeof request.cache !== 'string' || typeof request.extra !== 'string'
         || /[\0\r\n]/.test(request.ctype + request.cache) || request.extra.includes('\0')
-        || ![0,1].includes(request.coding) || !Number.isInteger(request.piece)
+        || ![0,1,2].includes(request.coding) || !Number.isInteger(request.piece)
         || request.piece < 1 || request.piece > 65536) return finish(22);
-    const candidates = request.coding === 1 ? [request.path + '.gz', request.path] : [request.path];
-    let gzip = false;
+    // coding 2: the browser takes brotli and gzip, 1: gzip, 0: neither
+    const candidates = request.coding === 2 ? [request.path + '.br', request.path + '.gz', request.path]
+      : request.coding === 1 ? [request.path + '.gz', request.path] : [request.path];
+    let coding = '';
     if (!request.path.includes('\0')) for (const candidate of candidates) {
       try {
         // Preserve static assets' existing symlink support. O_NONBLOCK keeps a
@@ -297,14 +299,14 @@ function sock_send_static(socket, request, k) {
         fd = fs.openSync(candidate, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
         const st = fs.fstatSync(fd);
         if (st.isFile() && Number.isSafeInteger(st.size) && st.size > 0) {
-          size = st.size;gzip = candidate !== request.path;break;
+          size = st.size;coding = candidate === request.path ? '' : candidate.endsWith('.br') ? 'br' : 'gzip';break;
         }
         close();
       } catch (_) {try {close();} catch (_) {}}
     }
     if (fd >= 0) {
       pending = head('200 OK', request.ctype, size, request.cache,
-        request.extra + (gzip ? 'Content-Encoding: gzip\r\n' : '') + 'Vary: Accept-Encoding\r\n');
+        request.extra + (coding ? 'Content-Encoding: ' + coding + '\r\n' : '') + 'Vary: Accept-Encoding\r\n');
     } else {
       const body = Buffer.from('not found');
       pending = Buffer.concat([head('404 Not Found', 'text/plain; charset=utf-8', body.length, 'no-cache', ''),body]);
@@ -1875,6 +1877,27 @@ function fs_rename(from, to) {
   }
 }
 
+function fs_write_atomic(destination, text) {
+  const fs = require("fs"), path = require("path");
+  let stage, fd;
+  try {
+    stage = fs.mkdtempSync(path.join(path.dirname(destination), ".backplane-write-"));
+    const file = path.join(stage, "text");
+    fd = fs.openSync(file, "wx", 0o600);
+    fs.writeFileSync(fd, text, { encoding: "utf8" });
+    fs.closeSync(fd); fd = undefined;
+    // Same filesystem, so readers see either the previous complete file or
+    // this complete file. A failed write/rename preserves the previous cache.
+    fs.renameSync(file, destination);
+    return io_done({ $: "Unit" });
+  } catch (e) {
+    return io_fail(host_errno(e));
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
+    if (stage) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch (_) {} }
+  }
+}
+
 function fs_remove(path) {
   try {
     require("fs").rmSync(path);
@@ -2339,6 +2362,7 @@ io_eff(CID(FS.list), fs_list);
 io_eff(CID(FS.mkdirs), fs_mkdirs);
 io_eff(CID(FS.mkdtemp), fs_mkdtemp);
 io_eff(CID(FS.rename), fs_rename);
+io_eff(CID(FS.write_atomic), fs_write_atomic);
 io_eff(CID(FS.remove), fs_remove);
 io_eff(CID(FS.chmod), fs_chmod);
 io_eff(CID(FS.pairing_token), fs_pairing_token);

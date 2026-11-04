@@ -37,6 +37,8 @@ mkdir -p dist build
   sh scripts/build-viewer.sh dist/web/viewer/vendor
   # precompressed copies: the server sends these to browsers that take gzip
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
+  # and brotli ones of the bundle, for browsers that take br (over HTTPS)
+  if command -v brotli >/dev/null 2>&1; then for f in dist/web/chunk-*.js dist/web/chunk-*.css; do brotli -q 11 -k -f "$f"; done; fi
 ) > build/web-dist.log 2>&1 &
 webpid=$!
 hubrc=0
