@@ -1,3 +1,13 @@
+import ./src/core/json-object.bend as JSONOBJECT
+
+import ./src/server/adopt-plan.bend as ADOPTPLAN
+
+import ./src/server/desktop-info.bend as DESKINFO
+
+import ./src/server/pairing-info.bend as PAIRINFO
+
+import ./src/server/watch-plan.bend as WATCHPLAN
+
 import ./src/core/message-context.bend as MSGCONTEXT
 
 import ./src/core/ws-fragments.bend as WSFRAG
@@ -498,6 +508,7 @@ import ./src/server/thin-still-picture.bend as STILLPICTURE
 import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
 
 import ./src/core/secret.bend as SEC
+
 import ./src/core/secret-box.bend as SBOX
 
 import ./src/server/thin-mirror.bend as TMR
@@ -511,6 +522,8 @@ import ./src/server/hotboot.bend as BOOTWARM
 import ./src/core/snapshot.bend as BOOTSNAP
 
 import ./src/core/landing.bend as LAND
+
+import ./src/server/cacheio.bend as CACHEIO
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -12367,13 +12380,13 @@ law desktop_connection_frame_bytes_unchanged:
   for +text: String
   for +version: String
   for +hub: String
-  {MPCREDIT.Desktop.connection_info("frame", text, version, hub) == text : String}
+  {DESKINFO.Desktop.connection_info("frame", text, version, hub) == text : String}
 
 law desktop_connection_close_bytes_unchanged:
   for +text: String
   for +version: String
   for +hub: String
-  {MPCREDIT.Desktop.connection_info("closed", text, version, hub) == text : String}
+  {DESKINFO.Desktop.connection_info("closed", text, version, hub) == text : String}
 
 # Presentation preferences never replace canonical state, bodies or writer credit.
 
@@ -12609,12 +12622,22 @@ law ws_unmask_take_go:
 # --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
 # Its watch scripts are none (no launch, check, stop or intent shell: every
 # watch reads as gone, nothing the log names is signalled)
+# Each production planner composes with this gate; these two laws cover every
+# offered command list, including future scripts and argument combinations.
+law watch_copy_gate_none:
+  for xs: List<&2, String>
+  {WATCHPLAN.Watch.argv.k(True{}, xs) == [] : List<&2, String>}
+
+law watch_live_gate_kept:
+  for +xs: List<&2, String>
+  {WATCHPLAN.Watch.argv.k(False{}, xs) == xs : List<&2, String>}
+
 law watch_copy_launch_none:
   for +home: String
   for +id: String
   for +cwd: String
   for +target: String
-  {MPCREDIT.Watch.launch.argv(True{}, home, id, cwd, target) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.launch.argv(True{}, home, id, cwd, target) == [] : List<&2, String>}
 
 law watch_copy_check_none:
   for +kind: String
@@ -12622,7 +12645,7 @@ law watch_copy_check_none:
   for +ident: String
   for +home: String
   for +id: String
-  {MPCREDIT.Watch.check.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.check.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
 
 law watch_copy_stop_none:
   for +kind: String
@@ -12630,12 +12653,12 @@ law watch_copy_stop_none:
   for +ident: String
   for +home: String
   for +id: String
-  {MPCREDIT.Watch.stop.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.stop.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
 
 law watch_copy_intent_none:
   for +home: String
   for +id: String
-  {MPCREDIT.Watch.intent.argv(True{}, home, id) == [] : List<&2, String>}
+  {WATCHPLAN.Watch.intent.argv(True{}, home, id) == [] : List<&2, String>}
 
 # a hub that is no copy runs every out it made
 law copy_off_runs_all:
@@ -12669,7 +12692,7 @@ law copy_off_refuses_none:
 law adopt_copy_none:
   for +rec: String
   for +hand: String
-  {MPCREDIT.Adopt.copy.entries(True{}, rec, hand) == [] : List<&2, AD.AEntry>}
+  {ADOPTPLAN.Adopt.copy.entries(True{}, rec, hand) == [] : List<&2, AD.AEntry>}
 
 # and opens no file on the machine (file.open is git job "open"): the
 # client is told
@@ -12679,15 +12702,15 @@ law copy_file_open_told:
 # --- J2: the pairing message made once per link, not per join ---
 # (its QR code took ~2 s on the JS target, for every client that joined)
 law pair_msg_kept:
-  {MPCREDIT.Hub.pair_msg.from("r1\n{m}", "r1") == "{m}" : String}
+  {PAIRINFO.Hub.pair_msg.from("r1\n{m}", "r1") == "{m}" : String}
 
 # a message kept for another link is not used
 law pair_msg_other_link:
-  {MPCREDIT.Hub.pair_msg.from("r1\n{m}", "") == MPCREDIT.Hub.pair_msg.of("") : String}
+  {PAIRINFO.Hub.pair_msg.from("r1\n{m}", "") == PAIRINFO.Hub.pair_msg.of("") : String}
 
 # no link, no QR code
 law pair_msg_no_link_qr:
-  {MPCREDIT.Info.qr("") == "" : String}
+  {PAIRINFO.Info.qr("") == "" : String}
 
 # --- the pairing link in a hub-drawn view (Hub.thin.pair) ---
 # a client that came with the token takes the link and its QR code with
@@ -12695,7 +12718,7 @@ law pair_msg_no_link_qr:
 # found before any window joins, so Wire.pair, which reaches only an open
 # view, never told it, and Settings said there was none)
 law thin_pair_told:
-  {J.Json.show(MPCREDIT.Hub.thin.pair.k("{\"t\":\"info\",\"info\":{\"pair\":\"http://h:1/#token=t\",\"pair.qr\":\"10\"}}", J.Json.obj([J.KV{"a", J.Str{"1"}}]))) == "{\"pair.qr\":\"10\",\"pair\":\"http://h:1/#token=t\",\"a\":\"1\"}" : String}
+  {J.Json.show(PAIRINFO.Hub.thin.pair.k("{\"t\":\"info\",\"info\":{\"pair\":\"http://h:1/#token=t\",\"pair.qr\":\"10\"}}", J.Json.obj([J.KV{"a", J.Str{"1"}}]))) == "{\"pair.qr\":\"10\",\"pair\":\"http://h:1/#token=t\",\"a\":\"1\"}" : String}
 # ---- F1: the far feed made a slice at a time (far.bend Fr.feed.some) ----
 # folding every slice of 2 lines is the feed made from the whole log at once
 law far_feed_sliced:
@@ -15972,3 +15995,48 @@ law timeline_follow_grown_viewport_away:
   for +held: TLVIRTUAL.Px
   for end: TLVIRTUAL.Px
   {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(True{}, TLVIRTUAL.End.at(TLVIRTUAL.Px.int(1000n), TLVIRTUAL.Px.int(400n), TLVIRTUAL.Follow.viewport(TLVIRTUAL.Px.int(200n), TLVIRTUAL.Px.int(400n)))), held, end) == held : TLVIRTUAL.Px}
+
+# Compositional boundaries for JSON updates and pairing cache policy.
+law json_object_put_fields:
+  for +fields: J.Json
+  for +key: String
+  for +value: J.Json
+  {JSONOBJECT.Obj.put(J.Obj{fields}, key, value) == J.Obj{J.Field{key, value, JSONOBJECT.Obj.drop(fields, key)}} : J.Json}
+
+law json_object_put_null:
+  for +key: String
+  for +value: J.Json
+  {JSONOBJECT.Obj.put(J.Null{}, key, value) == J.Json.obj([J.KV{key, value}]) : J.Json}
+
+law pair_cache_hit:
+  for +kept: String
+  for +link: String
+  {PAIRINFO.Hub.pair_msg.k(True{}, kept, link) == String.drop(kept, 1n+String.length(link)) : String}
+
+law pair_cache_miss:
+  for +kept: String
+  for +link: String
+  {PAIRINFO.Hub.pair_msg.k(False{}, kept, link) == PAIRINFO.Hub.pair_msg.of(link) : String}
+
+law desktop_connection_snapshot:
+  for +text: String
+  for +version: String
+  for +hub: String
+  {DESKINFO.Desktop.connection_info("connected", text, version, hub) == J.Json.show(J.Json.obj([J.KV{"version", J.Str{version}}, J.KV{"hub", J.Str{hub}}])) : String}
+
+law adopt_live_entries_kept:
+  for +record: String
+  for +handoff: String
+  {ADOPTPLAN.Adopt.copy.entries(False{}, record, handoff) == AD.Adopt.entries(record, handoff) : List<&2, AD.AEntry>}
+
+# Typed effect slots and budgets. Foreign-code boundary tests separately
+# establish LRU, expiry, accounting and cleanup; these laws fix the policy
+# that Bend supplies rather than assuming an implementation of the effect.
+law cache_effect_slots:
+  {[CACHEIO.CacheSlot.code(CACHEIO.BrowserSeen{}), CACHEIO.CacheSlot.code(CACHEIO.BrowserLease{})] == [0, 1] : List<&2, U32>}
+
+law cache_effect_budget:
+  {CACHEIO.Cache.budget() == CACHEIO.CacheBudget{4096, 524288, 3001} : CACHEIO.CacheBudget}
+
+law cache_effect_global_budget:
+  {CACHEIO.Cache.global_bytes() == 8388608 : U32}

@@ -1,6 +1,7 @@
 import Base
 import ../core/client.bend as U
 import ../core/model.bend as M
+import ./thin-signals.bend as K
 
 # One actor-private metadata projection, fenced by the server epoch and
 # dependency revision. The transient SidebarInput is never retained. This
@@ -45,7 +46,7 @@ def IndexCache.fits(ix: U.SIx) -> Bool:
     case U.SIx{by, asks, kids, work}:
       Nat.is_le(Nat.add(Nat.add(Size.by(Map.to_list(&2, List<&2, M.Thread>, by), 0n),
         Size.open(Map.to_list(&2, List<&2, M.Ask>, asks), 0n)),
-        Nat.add(List.length(&2, String, Map.keys(&2, Nat, kids)), List.length(&2, String, Map.keys(&2, Nat, work)))), 8192n)
+        Nat.add(List.length(&2, String, Map.keys(&2, Nat, kids)), List.length(&2, String, Map.keys(&2, Nat, work)))), K.CacheBudget.entries())
 
 def IndexCache.build(epoch: String, revision: Nat, +ix: U.SIx) -> IndexCache:
   IndexCache{epoch, revision, ix, IndexCache.fits(ix)}
