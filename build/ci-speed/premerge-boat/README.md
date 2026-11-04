@@ -9,7 +9,7 @@ a test. No account credentials are transferred.
 
 The remote uses the public canonical repository and a blobless bare fetch,
 without a shallow clone or full checkout. It checks exact pushed worker bytes,
-installs the repository's actual block-wise law merge driver, computes the
+loads the shape verifier and block-wise law merge driver from the fetched trusted base (never the candidate head), computes the
 actual HEAD+base merged tree, rejects conflicts anywhere, and applies the
 unchanged shape script to that tree's LAWS/PROOF bytes. Head, base, tree and
 script/document hashes are recorded. It refuses a base advance during or
@@ -23,7 +23,7 @@ refusal or conflict stays nonzero; inspect the real result and dependency,
 never fall back locally or widen the machine/cap. This source is specifically
 for BackplaneWorks/Backplane. No heavy-guard floor/reserve/profile changed.
 
-[Initial actual qualification](MEASURE.json): work1507079/job
+[Initial transport experiment](MEASURE.json): work1507079/job
 j20261104025727-178482, head2f080ca6d;8 guard controls0.049s and the real merged
 shape passed. Entire worker6.20s, process peak24,952KiB, actual cgroup peak
 33,906,688B (limit536,870,912B), swap0; max/OOM0. Machine wait1s, push2s,
@@ -39,3 +39,13 @@ policy enforcement, not a CI speedup or proof/compiler/full-suite qualification.
 Original canonical laws/proofs, release files, compiler source and live state
 are untouched. Runtime receipts are public hashes/results; raw job logs stay
 in the local runner's evidence store.
+
+Final implementation uses an outer systemd scope before starting Python; the
+worker reads actual cap/swap back and never raises or self-sets its limit.
+The fetched base's shape verifier and merge driver judge the candidate, so a
+candidate cannot select an always-pass checker or take-ours merge driver.
+Schema2 records the verification base and both verifier/driver digests; the
+local side fetches only immutable source bytes to compare those identities.
+New actual Git/shape controls cover both candidate-tampering cases. The old
+schema1/8-control receipt is preserved as an initial experiment, not final
+trusted-base qualification. The final exact-head Boat guard must pass.

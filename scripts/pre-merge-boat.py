@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parent.parent
 REMOTE = 'https://github.com/BackplaneWorks/Backplane.git'
 CAP = 536870912
 HEX40 = re.compile(r'[0-9a-f]{40}')
+SCOPE_CMD = ('set -eu; unit=bp-premerge-$$.scope; '
+             'exec systemd-run --user --scope --quiet --unit="$unit" '
+             '-p MemoryMax=536870912 -p MemorySwapMax=0 -- '
+             'python3 scripts/pre-merge-boat.py worker --head "$1" --base "$2" --worker-sha "$3"')
 JOB = re.compile(r'^job (j[0-9]{14}-[0-9]+): logs and artifacts in (.+)$')
 
 
@@ -48,10 +52,8 @@ def worker_group():
         raise ValueError('pre-merge worker is Boat-only; no local validation permitted')
     relative = Path('/proc/self/cgroup').read_text().split('0::', 1)[1].strip().lstrip('/')
     group = Path('/sys/fs/cgroup')/relative
-    if not group.name.startswith('ascii-cmd-'):
+    if not group.name.startswith('bp-premerge-'):
         raise ValueError('pre-merge worker does not own an isolated Boat executor scope')
-    subprocess.run(['systemctl', '--user', '--no-ask-password', 'set-property', '--runtime',
-                    group.name, 'MemoryMax='+str(CAP), 'MemorySwapMax=0'], check=True, capture_output=True)
     if (group/'memory.max').read_text().strip() != str(CAP) or (group/'memory.swap.max').read_text().strip() != '0':
         raise ValueError('actual pre-merge cgroup cap/swap contract not enforced')
     return group
@@ -185,7 +187,7 @@ def dispatch(base):
     expected = sha(Path(__file__).read_bytes())
     argv = ['scripts/boat-job.sh', '--size', 'default', '--timeout', '240', '--wait', '0', '--idle', '0', '--no-reuse',
             '--no-setup-bend', '--include-file', 'scripts/pre-merge-boat.py', '--artifact', 'build/pre-merge',
-            '--', 'python3', 'scripts/pre-merge-boat.py', 'worker', '--head', head, '--base', base, '--worker-sha', expected]
+            '--', 'bash', '-c', SCOPE_CMD, 'premerge-scope', head, base, expected]
     process = subprocess.Popen(argv, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     job = location = None
     for line in process.stdout:
