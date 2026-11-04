@@ -670,7 +670,7 @@ class View {
     const ctx = this.side === "board" ? {} : { groups: groupsOf(this.plot), nets: this.board ? boardNets(this.board) : null, place: this.place };
     const v = P.clickProbe(pick, this.side, ctx);
     this.publishProbe(v);
-    if (coarse?.matches) inspectCard(this, pick, null, { x: cx, y: cy });
+    if (phone()) inspectCard(this, pick, null, { x: cx, y: cy });
   }
 
   publishProbe(v) {
@@ -1154,6 +1154,9 @@ const left = new Map();
 // clearing the probe or a double tap closes it.
 let card = null;
 let mentioned = null;
+// (the card is the phone arrangement's: phone-shell.js's html.phone; a
+// wide touch browser keeps the page as it was)
+const phone = () => document.documentElement.classList.contains("phone");
 function inspectCard(view, pick, src = null, tapped = null) {
   const info = pick ? (typeof pick.info === "object" && pick.info ? pick.info : P.parseInfo(pick.text || pick.info || "")) : null;
   if (!info || !info.kind) { card?.el.remove(); card = null; return; }
@@ -1230,7 +1233,7 @@ export function onDetails(fn) {
 // a part tapped in 3D (host.js, from solid.js's probe): the same card, for
 // the part; it goes when the 3D view does
 export function inspectPart(ref, scope = "", key = "") {
-  if (!coarse?.matches) return;
+  if (!phone()) return;
   if (!ref) { if (card && !card.view) inspectCard(null, null); return; }
   inspectCard(null, { info: { kind: "part", arg: ref, kv: new Map([["ref", ref]]) } }, { scope, key });
 }

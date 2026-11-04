@@ -14,7 +14,7 @@ function harness() {
     hitComponent: () => ({ id: 'U1' }), selectComponent() {},
     probed: value => probes.push(value), under: (_, x, y) => { hits.push([x,y]);return []; }, partAt: () => null,
     groupsOf: () => [], P: { pickBoard: () => null, pickSheet: () => null, clickProbe: () => 'r:new' }, wheelKind: () => 'wheel',
-    window: { devicePixelRatio: 1, matchMedia: () => ({ addEventListener() {}, removeEventListener() {} }) }, coarse: null, viewDpr: () => 1, inspectCard() {}, card: null,
+    window: { devicePixelRatio: 1, matchMedia: () => ({ addEventListener() {}, removeEventListener() {} }) }, coarse: null, viewDpr: () => 1, inspectCard() {}, card: null, phone: () => false,
     setTimeout: (fn) => { timers.push(fn);return timers.length; }, clearTimeout: (id) => { if (id) timers[id - 1] = null; }, performance, navigator: {} };
   context.placed = place => places.push(place);
   vm.runInNewContext(source.slice(start, end) + '\n' + park + '\nglobalThis.View = View;', context);
