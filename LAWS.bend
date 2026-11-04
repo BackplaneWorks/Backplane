@@ -16165,3 +16165,10 @@ law catalog_metadata_complete:
 
 law catalog_keys_nonempty:
   {List.is_empty(&2, String, MMETA.T.keys()) == False{} : Bool}
+
+# A legacy model catalog is already effective; no parse/serialize is needed.
+law model_catalog_legacy_passthrough:
+  for +text: String
+  for st: M.State
+  for thread: String
+  {ACCT.Accounts.overlay.needed(False{}, text, st, thread) == text : String}

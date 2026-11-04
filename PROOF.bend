@@ -15914,3 +15914,5 @@ def Laws.catalog_metadata_complete(lc):
     case I18.Ja{}: {==}
 
 def Laws.catalog_keys_nonempty(): {==}
+
+def Laws.model_catalog_legacy_passthrough(text, st, thread): {==}

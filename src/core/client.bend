@@ -80,6 +80,7 @@ import ./thin-chat.bend as TC
 import ./secret.bend as SEC
 import ./secret-box.bend as SBOX
 import ./modelpick.bend as MPK
+import ./model-catalog.bend as MCat
 import ./reply.bend as RTO
 import ./draftbound.bend as DB
 
@@ -1921,40 +1922,32 @@ def Kids.keep(ts: List<&2, M.Thread>, +kids: Map<&2, Bool>) -> List<&2, M.Thread
       Kids.keep.k(Flag.get(kids, id), M.Thread{id, p, ti, c, a, tu, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, Kids.keep(t, kids))
 
 def Models.strs(xs: List<&2, J.Json>) -> List<&2, String>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case J.Str{s} <> t:
-      s <> Models.strs(t)
-    case _ <> t:
-      Models.strs(t)
+  MCat.Catalog.strs(xs)
 
 # the models info a provider's picker reads (opencode's is apart: Info.put)
 def Models.of(+nf: Map<&2, String>, +prov: String) -> String:
   Str.get(nf, Bool.pick(String, String.eq(prov, "opencode"), "models.oc", "models"))
 
-def Models.list(+info: String, +provider: String) -> List<&2, String>:
-  Models.strs(J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(info), J.Null{}), provider)))
+def Models.parse(info: String) -> J.Json:
+  MCat.Catalog.parse(info)
+
+def Models.list.given(info: J.Json, provider: String) -> List<&2, String>:
+  MCat.Catalog.list(info, provider)
+
+def Models.list(info: String, provider: String) -> List<&2, String>:
+  Models.list.given(Models.parse(info), provider)
 
 def Models.menu.k(skip: Bool, +m: String, rest: List<&2, String>) -> List<&2, String>:
-  match skip:
-    case True{}:
-      rest
-    case False{}:
-      m <> rest
+  MCat.Catalog.menu.k(skip, m, rest)
 
 def Models.menu.go(ms: List<&2, String>) -> List<&2, String>:
-  match ms:
-    case Nil{}:
-      Nil{}
-    case +m <> t:
-      Models.menu.k(Bool.or(String.is_empty(m), String.eq(m, "default")), m, Models.menu.go(t))
+  MCat.Catalog.menu.go(ms)
 
 # the model menu's entries: the provider's default ("") first, then each
 # model the CLI reports once (a CLI that lists "default" itself is the
 # same entry)
 def Models.menu(+info: String, +provider: String) -> List<&2, String>:
-  "" <> Models.menu.go(Models.list(info, provider))
+  MCat.Catalog.menu(Models.parse(info), provider)
 
 # The writing model: the small model that titles threads, names branches
 # and writes commit messages (settings text.provider, text.model; each
@@ -4630,13 +4623,19 @@ def Ui.draft(u: Ui, +text: String) -> Act:
 
 # What the machine says about a provider: its CLI version ("" when it is
 # not installed) and a label per model
-def Models.about(+info: String, +provider: String) -> J.Json:
-  J.Json.get_obj(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(info), J.Null{}), "about"), provider)
+def Models.about.given(info: J.Json, provider: String) -> J.Json:
+  MCat.Catalog.about(info, provider)
+
+def Models.about(info: String, provider: String) -> J.Json:
+  Models.about.given(Models.parse(info), provider)
 
 # the effort chips for a thread's model: the levels its CLI says that model
 # takes (Claude reports them per model), else the provider's
-def Effort.chips(+info: String, +provider: String, +model: String) -> List<&2, String>:
-  Effort.chips.of(Effort.known(J.Json.get(J.Json.get_obj(Models.about(info, provider), "efforts"), Bool.pick(String, String.is_empty(model), "default", model)), provider))
+def Effort.chips.about(+about: J.Json, +provider: String, +model: String) -> List<&2, String>:
+  Effort.chips.of(Effort.known(J.Json.get(J.Json.get_obj(about, "efforts"), Bool.pick(String, String.is_empty(model), "default", model)), provider))
+
+def Effort.chips(info: String, +provider: String, model: String) -> List<&2, String>:
+  Effort.chips.about(Models.about(info, provider), provider, model)
 
 # The picker's chips: the providers first ("@claude", "@codex", "@grok", "@muse";
 # a thread goes on with another between turns, V2's provider switch),
@@ -4674,24 +4673,19 @@ def Models.label_of(+info: String, +provider: String, +model: String) -> String:
 # field shows once a provider offers more than Models.searchable() models
 # (opencode, signed in to a few providers, lists hundreds).
 def Models.searchable() -> Nat:
-  12n
+  MCat.Catalog.searchable()
 
 def Models.search(+ms: List<&2, String>) -> Bool:
   Nat.is_gt(List.length(&2, String, ms), Models.searchable())
 
 def Models.words.all(ws: List<&2, String>, +hay: String) -> Bool:
-  match ws:
-    case Nil{}:
-      True{}
-    case +w <> t:
-      Bool.and(Bool.or(String.is_empty(w), String.contains(hay, w)), Models.words.all(t, hay))
+  MCat.Catalog.words.all(ws, hay)
 
 def Models.find.go(ms: List<&2, String>, +ws: List<&2, String>, +labels: J.Json) -> List<&2, String>:
-  match ms:
-    case Nil{}:
-      Nil{}
-    case +m <> t:
-      Models.menu.k(Bool.not(Models.words.all(ws, String.to_lower(m ++ " " ++ J.Json.get_str(labels, Bool.pick(String, String.is_empty(m), "default", m), "")))), m, Models.find.go(t, ws, labels))
+  MCat.Catalog.find.go(ms, ws, labels)
+
+def Models.find.given(all: Bool, ms: List<&2, String>, +q: String, labels: J.Json) -> List<&2, String>:
+  MCat.Catalog.find(all, ms, q, labels)
 
 def Models.find.k(all: Bool, +ms: List<&2, String>, +q: String, +info: String, +prov: String) -> List<&2, String>:
   match all:
@@ -4707,7 +4701,7 @@ def Models.find(+ms: List<&2, String>, +q: String, +info: String, +prov: String)
 # at most Models.cap() (the search narrows the rest), so a frame draws and
 # labels no more than that
 def Models.cap() -> Nat:
-  50n
+  MCat.Catalog.cap()
 
 def Models.shown(+info: String, +prov: String, +q: String) -> List<&2, String>:
   List.take(&2, String, Models.find(Models.menu(info, prov), q, info, prov), Models.cap())
@@ -4715,7 +4709,7 @@ def Models.shown(+info: String, +prov: String, +q: String) -> List<&2, String>:
 # Settings' model chips: the default, the chosen model and what the search
 # finds, a dozen at most
 def Models.with(+cur: String, +ms: List<&2, String>) -> List<&2, String>:
-  Bool.pick(List<&2, String>, Bool.or(String.is_empty(cur), List.contains(~String, ~String.eq, ms, cur)), ms, List.append(&2, String, ms, [cur]))
+  MCat.Catalog.with(cur, ms)
 
 def Models.settings.k(many: Bool, +info: String, +prov: String, +q: String, +cur: String) -> List<&2, String>:
   match many:
