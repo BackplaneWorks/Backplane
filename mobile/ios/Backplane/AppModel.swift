@@ -138,8 +138,7 @@ final class AppModel {
     }
 
     // the pairing links, one per hub, in the order they were paired
-    private(set) var links: [String] = UserDefaults.standard.stringArray(forKey: "links")
-        ?? UserDefaults.standard.string(forKey: "link").map { [$0] } ?? []
+    private(set) var links: [String] = PairingStore.load()
     private(set) var screen: Screen?
     // the last status plane the hub sent, drawn while a screen carries none (the
     // hub builds the plane only for the list and the Status tab, so going back
@@ -229,6 +228,20 @@ final class AppModel {
     #endif
     @ObservationIgnored private var sentView = false
     let settings = AppSettings.shared
+    // the screen unless Classic screens: the hub's phone web client (WebShell.swift)
+    let web = WebShell()
+    var webShown: Bool { !links.isEmpty && !settings.classic && !Self.nativeAutomation }
+    // Debug builds driven from the environment (BACKPLANE_LINK, _ACTS,
+    // _SELECT, _QUALIFICATION...) drive the native screens, unless
+    // BACKPLANE_WEB=1
+    #if DEBUG
+    private static let nativeAutomation: Bool = {
+        let e = ProcessInfo.processInfo.environment
+        return e["BACKPLANE_WEB"] != "1" && e.keys.contains { $0.hasPrefix("BACKPLANE_") && $0 != "BACKPLANE_WEB" }
+    }()
+    #else
+    private static let nativeAutomation = false
+    #endif
     // the hub settings page: each hub's last rows, on disk beside the kept state
     private(set) var hubSettings: [String: Settings] = [:]
     // Clear cached state was pressed: nothing is kept again until the next launch
@@ -420,7 +433,7 @@ final class AppModel {
             } else if let tab = AppTab(rawValue: settings.defaultTab), tab != .settings { self.tab = tab }
             else { tab = cached.uber == nil ? .threads : .home }
         }
-        notifier.open = { [weak self] id in self?.act("select", id) }
+        notifier.open = { [weak self] id in self?.alertOpened(id) }
         paths.pathUpdateHandler = { [weak self] path in
             let names = path.availableInterfaces.map(\.name)
             Task { @MainActor [weak self] in self?.pathChanged(path.status, names) }
@@ -435,7 +448,13 @@ final class AppModel {
                 await self.languageLocal(self.engine)
             }
         }
-        notifier.viewing = { [weak self] id in self?.active == true && self?.tab != .settings && self?.screen?.sel == id }
+        notifier.viewing = { [weak self] id in
+            guard let self, self.active else { return false }
+            if self.webShown { return self.webShows(id) }
+            return self.tab != .settings && self.screen?.sel == id
+        }
+        notifier.remoteInFront = { [weak self] in self?.webShown == true }
+        webWire()
         if let d = try? Data(contentsOf: Self.settingsFile), let m = try? JSONDecoder().decode([String: Settings].self, from: d) { hubSettings = m }
         let e = engine
         Task {
@@ -603,10 +622,82 @@ final class AppModel {
         }
     }
 
+    // in the Keychain; where it refuses, UserDefaults keeps them until it takes them
     private func save() {
-        UserDefaults.standard.set(links, forKey: "links")
+        if PairingStore.save(links) { UserDefaults.standard.removeObject(forKey: "links") }
+        else { UserDefaults.standard.set(links, forKey: "links") }
         UserDefaults.standard.removeObject(forKey: "link")
     }
+
+    // MARK: the web screen
+
+    // A notification's or the island's thread: the page shows it (on its
+    // hub's page: an id the phones' client qualified, "host:port|id",
+    // names its hub), else the native screens select it
+    private func alertOpened(_ id: String) {
+        guard webShown else { act("select", id); return }
+        if let owner = WebShell.owner(id), owner != web.hub, links.contains(where: { Pairing.key($0) == owner }) {
+            showWeb(owner)
+        }
+        web.open(id)
+    }
+
+    // whether the page shows this thread (its alert stays quiet then)
+    private func webShows(_ id: String) -> Bool {
+        let local = WebShell.local(id)
+        return !local.isEmpty && local == web.thread && (WebShell.owner(id) ?? web.hub) == web.hub
+    }
+
+    // a hub's name as its machine calls itself, else its address
+    func hubName(_ key: String) -> String {
+        screen?.hubs.first(where: { $0.key == key })?.name ?? key
+    }
+
+    private func webWire() {
+        web.pair = { [weak self] url in _ = self?.open(url) }
+        web.switchTo = { [weak self] key, url in
+            guard let self, self.links.contains(where: { Pairing.key($0) == key }) else { return false }
+            self.showWeb(key, at: url)
+            return true
+        }
+        web.hubs = { [weak self] in
+            guard let self else { return [] }
+            return self.links.compactMap { l in
+                guard let key = Pairing.key(l), let origin = Pairing.http(l, path: "/", token: false) else { return nil }
+                return ["key": key, "name": self.hubName(key), "origin": origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                        "current": key == self.web.hub, "online": self.conn[key]?.phase == .online]
+            }
+        }
+        web.name = { [weak self] key in self?.hubName(key) ?? key }
+        web.addHub = { [weak self] in self?.webPairing = true }
+        web.enableNotifications = { [weak self] in await self?.enableNotifications() }
+        web.alert = { [weak self] thread, key, title, body in
+            guard let self, !(self.active && self.webShows(thread)) else { return }
+            self.notifier.post(thread: thread, key: key, title: title, body: body)
+        }
+    }
+
+    // the page of Pairing.key prefer (a hub just paired), else of the hub
+    // on screen, else of the one shown last, else of the newest paired
+    func syncWeb(prefer: String? = nil) {
+        guard webShown else { return }
+        let keys = links.compactMap(Pairing.key)
+        let last = UserDefaults.standard.string(forKey: "web.hub")
+        guard let key = [prefer, web.hub, last].compactMap({ $0 }).first(where: { keys.contains($0) }) ?? keys.last else {
+            web.clear()
+            return
+        }
+        showWeb(key)
+    }
+
+    func showWeb(_ key: String, at url: URL? = nil) {
+        guard let link = links.first(where: { Pairing.key($0) == key }) else { return }
+        UserDefaults.standard.set(key, forKey: "web.hub")
+        web.show(key, link: link, at: url)
+    }
+
+    // the hubs sheet over the page (backplaneApp.addHub)
+    var webPairing = false
 
     // an APNs token for this device's alerts (from the app delegate)
     func enableNotifications() async { await notifier.enable() }
@@ -1978,6 +2069,13 @@ final class AppModel {
         #if DEBUG && targetEnvironment(simulator)
         if qualification(url) { return true }
         #endif
+        // the island's tap (backplane://open?thread=…) opens the thread in the page
+        if webShown, url.scheme == "backplane", url.host == "open",
+           let thread = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "thread" })?.value,
+           !thread.isEmpty {
+            alertOpened(thread)
+            return true
+        }
         switch InternalURLRoute.route(url) {
         case let .reference(uri, origin):
             act("ref-open", InternalURLRoute.request(uri, origin: origin, sourceHub: sourceHub))
@@ -2119,6 +2217,7 @@ final class AppModel {
         }
         if yes, contentReady, let s = screen { island?.show(s.islands ?? [], foreground: true) }
         if yes { performanceReady() }
+        if webShown { web.foreground(yes) }
     }
 
     private func observeThinPresenting(_ update: SyncUpdate, epoch: UInt64) {
