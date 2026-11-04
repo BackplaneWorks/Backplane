@@ -1337,3 +1337,11 @@ Historical94 mock-based Python controls predate the Boat-only rule and are
 not real-Bend proof evidence. The cold-check14GiB admission floor is unchanged
 and still refuses on a normal capped Boat; this correctness correction is
 not a bounded cold worker or a CI gate. Fresh Boat checks remain required.
+
+Fresh rebased-code Python controls:94/94 passed4.830s on normal Boat
+`j20261104035728-695281` (head5b3f52424), actual512MiB/swap0,
+cgroup peak109,281,280B/VmHWM40,720KiB, zero limit/OOM events. Whole worker
+12.96s,19credit-s/$0.00019, deletion verified. These are mock-based tooling
+controls, not Bend/proof/gate qualification; no actual-repo pass was seeded.
+Approved daily-runner/premerge transport compatibility is the remaining
+landing dependency; no runner exception or guard relaxation is assumed.
