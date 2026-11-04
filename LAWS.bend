@@ -1,4 +1,6 @@
 import ./src/core/json-object.bend as JSONOBJECT
+import ./src/server/review-window.bend as REVIEWWINDOW
+import ./src/server/db.bend as HISTORYDB
 
 import ./src/server/adopt-plan.bend as ADOPTPLAN
 
@@ -16064,3 +16066,11 @@ law static_http_fresh_pages:
 
 law static_http_frame_policy:
   {[STATICHTTP.Static.frames("/index.html"), STATICHTTP.Static.frames("/main.js")] == ["X-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n", ""] : List<&2, String>}
+
+# Page limits and progress are Bend policy; foreign boundary tests establish
+# indexed selection, exact columns, exhaustion and descriptor/statement cleanup.
+law review_window_budget:
+  {REVIEWWINDOW.ReviewWindow.budget() == HISTORYDB.HistoryBudget{128, 1048576} : HISTORYDB.HistoryBudget}
+
+law review_window_progress:
+  {[REVIEWWINDOW.ReviewWindow.progress(5n, 5n, False{}), REVIEWWINDOW.ReviewWindow.progress(5n, 4n, False{}), REVIEWWINDOW.ReviewWindow.progress(5n, 6n, False{}), REVIEWWINDOW.ReviewWindow.progress(5n, 5n, True{})] == [False{}, False{}, True{}, True{}] : List<&2, Bool>}
