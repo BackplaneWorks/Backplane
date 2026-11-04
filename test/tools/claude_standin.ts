@@ -64,11 +64,15 @@
 // Every line read is appended to $FAKE_LOG ("IN <line>"), and "START pid".
 // BP_EOF_FINISH=1: at the end of stdin the turn in flight is finished
 // before the process exits, as Claude Code does.
+// BP_STANDIN_MODELS=<file>: an `initialize` control request (the hub's
+// model probe) is answered with that file's {"models": [...]}, as Claude
+// Code's /model list (test/fixtures/claude/models-long.json); unset, it
+// goes unanswered and the hub falls back to its own short list.
 //
 //   test/tools/claude_standin.ts is run through a `claude` wrapper:
 //   #!/bin/sh
 //   exec bun /path/to/claude_standin.ts "$@"
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
@@ -524,6 +528,11 @@ rl.on("line", (line) => {
     interrupted = true;
     for (const c of queue.splice(0)) lc(c.uuid, "cancelled");
     log("INT");
+    return;
+  }
+  if (o.type === "control_request" && o.request?.subtype === "initialize" && process.env.BP_STANDIN_MODELS) {
+    const models = JSON.parse(readFileSync(process.env.BP_STANDIN_MODELS, "utf8")).models;
+    emit({ type: "control_response", response: { subtype: "success", request_id: o.request_id, response: { models } } });
     return;
   }
   if (o.type !== "user") return;

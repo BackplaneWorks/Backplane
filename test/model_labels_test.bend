@@ -7,6 +7,7 @@ import ../src/core/msgs.bend as MSG
 import ../src/web/dom.bend as D
 import ../src/web/view.bend as V
 import ../src/web/presentation.bend as WP
+import ../src/core/modelpick.bend as MPK
 
 # Frozen pre-change expression and recursive row builder are the oracle.
 def old.label(+info: String, +provider: String, +model: String) -> String:
@@ -40,6 +41,20 @@ def menu(+lc: I.Loc, +info: String, +prov: String, +q: String) -> String:
   Bool.pick(String, Bool.and(String.contains(whole, String.drop(String.take(rows, Nat.sub(String.length(rows), 2n)), 62n)),
     Bool.and(String.contains(whole, "mp-agent"), String.contains(whole, "mp-effort"))), "same", "different")
 
+# a phone's picker (View.mp.open's phone, from the connection's form): a
+# head with a close, the body, the CLI's first five models and the rest
+# under More models, unfolded when the chosen model is there; the desktop's
+# (no form) has none of it
+def long() -> String:
+  "{\"claude\":[\"default\",\"opus\",\"claude-fable-5-1\",\"sonnet\",\"haiku\",\"claude-sonnet-5\",\"claude-opus-5\",\"claude-opus-4-8\",\"claude-opus-4-7\"],\"about\":{\"claude\":{\"labels\":{\"opus\":\"Opus 5.5 · For complex work\"}}}}"
+
+def picker(+form: String, +cur: String, +q: String) -> String:
+  nodes(V.View.mp.loc(I.En{}, True{}, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.new(&2, String), "models", long()), "models.oc", long()), "local.workspace.form", form),
+    MPK.MpCur{1n, "claude", cur, "high"}, MPK.MpCur{1n, "claude", cur, "high"}, q, False{}))
+
+def has(+hay: String, +needle: String) -> String:
+  Bool.pick(String, String.contains(hay, needle), "yes", "no")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("empty row list stays exact", exact(I.En{}, Nil{}, "", catalog(), "codex"), "same")
@@ -58,3 +73,10 @@ def main() -> IO(Unit):
     C.Check.str("whole searched menu exact", menu(I.En{}, catalog(), "codex", "日本語"), "same")
     C.Check.str("whole Japanese menu exact", menu(I.Ja{}, catalog(), "codex", ""), "same")
     C.Check.str("whole empty search result exact", menu(I.En{}, catalog(), "codex", "unmatched"), "same")
+    C.Check.str("phone picker has a head with a close", has(picker("phone", "opus", ""), "mp-top"), "yes")
+    C.Check.str("phone picker folds the later models", has(picker("phone", "opus", ""), "More models (4)"), "yes")
+    C.Check.str("phone fold shut while the chosen model is above it", has(picker("phone", "opus", ""), "\"open\""), "no")
+    C.Check.str("phone fold open while the chosen model is in it", has(picker("phone", "claude-opus-4-7", ""), "\"open\""), "yes")
+    C.Check.str("phone search lists all it finds, unfolded", has(picker("phone", "opus", "opus"), "More models"), "no")
+    C.Check.str("desktop picker has no phone head", has(picker("", "opus", ""), "mp-top"), "no")
+    C.Check.str("desktop picker folds nothing", has(picker("", "opus", ""), "More models"), "no")
