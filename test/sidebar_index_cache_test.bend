@@ -43,7 +43,7 @@ def large_maps(k: Nat, w: Nat) -> U.SIx:
   U.SIx{Map.new(&2, List<&2, M.Thread>), Map.new(&2, List<&2, M.Ask>), many(k, Map.new(&2, Nat)), many(w, Map.new(&2, Nat))}
 
 def too_big() -> X.IndexCache:
-  X.IndexCache.build("epoch", 2n, large_asks(8192n))
+  X.IndexCache.build("epoch", 2n, large_asks(16384n))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -61,10 +61,11 @@ def main() -> IO(Unit):
     C.Check.str("bot ownership conservatively invalidates", revision(after(M.BotSet{"bot", "Bot", "child", 1n, "", 3n})), "3")
     C.Check.str("mail ownership setting conservatively invalidates", revision(after(M.SettingSet{"mail.on", "1", 3n})), "3")
     C.Check.str("empty metadata is bounded", yes(X.IndexCache.fits(U.Side.ix(M.State.empty()))), "yes")
+    C.Check.str("10841 catalog entries and grouping metadata fit", yes(X.IndexCache.fits(large_maps(10841n, 1n))), "yes")
     C.Check.str("8192 combined metadata entries fit", yes(X.IndexCache.fits(large_maps(4096n, 4096n))), "yes")
-    C.Check.str("8193 combined entries do not fit", yes(X.IndexCache.fits(large_maps(4096n, 4097n))), "no")
+    C.Check.str("16385 combined entries do not fit", yes(X.IndexCache.fits(large_maps(8192n, 8193n))), "no")
     C.Check.str("8191 asks and their grouping key fit", yes(X.IndexCache.fits(large_asks(8191n))), "yes")
-    C.Check.str("ask grouping key counts toward retention cap", yes(X.IndexCache.bounded(too_big())), "no")
+    C.Check.str("16385th ask grouping entry counts toward retention cap", yes(X.IndexCache.bounded(too_big())), "no")
     C.Check.str("oversized projection cannot hit", yes(X.IndexCache.hit(too_big(), "epoch", 2n)), "no")
-    C.Check.str("oversized projection is returned complete", asks(too_big()), "8192")
+    C.Check.str("oversized projection is returned complete", asks(too_big()), "16384")
     C.Check.str("legacy entry uses full canonical sequence", revision(X.IndexCache.obtain("epoch", M.State.apply(state(), M.MessagePosted{"self", "m", M.Assistant{}, "history", 3n}), Some{saved()})), "3")

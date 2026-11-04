@@ -18,7 +18,7 @@ def SignalTextCache.bounded(c: SignalTextCache) -> Bool:
 
 def SignalTextCache.build(epoch: String, revision: Nat, +online: Bool, signals: Map<&2, Nat>) -> SignalTextCache:
   +values = SG.Signal.cache(online, signals, Map.new(&2, String))
-  SignalTextCache{epoch, revision, online, values, K.CacheBudget.strings(Map.to_list(&2, String, values), 8193n, 524288n, True{})}
+  SignalTextCache{epoch, revision, online, values, K.CacheBudget.strings(Map.to_list(&2, String, values), Nat.add(K.CacheBudget.entries(), 1n), 524288n, True{})}
 
 def SignalTextCache.online(saved: Bool, online: Bool) -> Bool:
   match saved:

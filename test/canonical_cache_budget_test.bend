@@ -49,4 +49,4 @@ def main() -> IO(Unit):
     C.Check.str("scalar byte overflow rejects below entry cap", yes(K.SignalCache.bounded(K.SignalCache.build("epoch", 1n, full(1025n, Map.new(&2, Nat))))), "no")
     C.Check.str("text byte overflow rejects below entry cap", yes(X.SignalTextCache.bounded(X.SignalTextCache.build("epoch", 1n, True{}, wide(900n, Map.new(&2, Nat))))), "no")
     C.Check.str("8192 signals plus text online marker fit", yes(X.SignalTextCache.bounded(X.SignalTextCache.build("epoch", 1n, True{}, many(8192n, Map.new(&2, Nat))))), "yes")
-    C.Check.str("8194 text entries exceed entry bound", yes(X.SignalTextCache.bounded(X.SignalTextCache.build("epoch", 1n, True{}, many(8193n, Map.new(&2, Nat))))), "no")
+    C.Check.str("16386 text entries exceed entry bound", yes(X.SignalTextCache.bounded(X.SignalTextCache.build("epoch", 1n, True{}, many(16385n, Map.new(&2, Nat))))), "no")
