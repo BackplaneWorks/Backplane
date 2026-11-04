@@ -1,0 +1,43 @@
+{
+  "phase": "resource-gate",
+  "resourcesEnd": {
+    "observedAt": "2026-11-04T18:35:30.6699152Z",
+    "jobMemoryLimitBytes": 8589934592,
+    "limitFlags": 512,
+    "pid": 3252,
+    "peakJobMemoryBytes": 91090944,
+    "peakProcessMemoryBytes": 91090944,
+    "member": true,
+    "pageFiles": [
+      {
+        "Name": "D:\\pagefile.sys",
+        "AllocatedBaseSize": 2944,
+        "CurrentUsage": 0,
+        "PeakUsage": 0
+      }
+    ]
+  },
+  "error": "Exception: D:\\a\\Backplane\\Backplane\\extra\\kicad-927-consumer\\job.ps1:59\r\nLine |\r\n  59 |          throw 'BLOCKED: enforced <=8 GiB Windows job, no breakaway an …\r\n     |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n     | BLOCKED: enforced <=8 GiB Windows job, no breakaway and no active pagefile required\r\n\r\n",
+  "resourcesStart": {
+    "observedAt": "2026-11-04T18:35:30.4907573Z",
+    "jobMemoryLimitBytes": 8589934592,
+    "limitFlags": 512,
+    "pid": 3252,
+    "peakJobMemoryBytes": 82690048,
+    "peakProcessMemoryBytes": 82690048,
+    "member": true,
+    "pageFiles": [
+      {
+        "Name": "D:\\pagefile.sys",
+        "AllocatedBaseSize": 2944,
+        "CurrentUsage": 0,
+        "PeakUsage": 0
+      }
+    ]
+  },
+  "cleanup": [],
+  "published": false,
+  "releaseBuildApproved": false,
+  "status": "BLOCKED",
+  "resourceError": "Exception: D:\\a\\Backplane\\Backplane\\extra\\kicad-927-consumer\\job.ps1:59\r\nLine |\r\n  59 |          throw 'BLOCKED: enforced <=8 GiB Windows job, no breakaway an …\r\n     |          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n     | BLOCKED: enforced <=8 GiB Windows job, no breakaway and no active pagefile required\r\n\r\n"
+}

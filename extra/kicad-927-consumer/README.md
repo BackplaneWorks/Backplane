@@ -76,3 +76,17 @@ fixes its profile environment, and invokes the consumer. No native verdict
 is implied by preparing these scripts; preserve the resulting evidence even
 if resource setup blocks the application test. The workflow runs once when
 its file is pushed on this consumer branch; any rerun needs a diagnosed reason.
+
+The first hosted attempt 41888522683 was BLOCKED before app launch by the
+runner's active pagefile; see evidence/run-41888522683. The consumer retains
+swap=0 until the person resolves that constraint. No native pass is claimed.
+
+canonical-946.py prepares a separate native ABI verdict using unchanged
+merged verifier 2823fe4641bbadcb41a6cf49f91fe2c7fbc77978, script SHA256
+b1f159e4304d82577a55465891c423e0e9c3fbce063696529ac15ef2a374b823.
+It binds actual frozen product JS and the retained service EXE, invokes the
+canonical ffi_libraries/windows_measure functions, and records native System32,
+AMD64 PE, loaded CRT image path, _get_osfhandle export and dynamic edge evidence.
+It never calls canonical prepare(), modifies the verifier or promotes TEST BUILD
+status. The native measurement is unrun until a compliant/authorized host is
+available; its verdict is independent of the application acceptance result.

@@ -17,8 +17,12 @@ try {
     $resources = Get-BP927Resources
     $resources | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $cfg.out 'resources-start.json')
     Assert-BP927Resources $resources
+    $env:PYTHONDONTWRITEBYTECODE = '1'
+    & $cfg.python (Join-Path $PSScriptRoot 'canonical-946.py') $ConfigPath *> (Join-Path $cfg.out 'canonical-946.log')
+    $abiCode = $LASTEXITCODE
     & $cfg.node (Join-Path $PSScriptRoot 'accept.cjs') $ConfigPath *> (Join-Path $cfg.out 'consumer.log')
     $code = $LASTEXITCODE
+    if ($abiCode -ne 0 -and $code -eq 0) { $code = $abiCode }
 } catch {
     $_ | Out-String | Set-Content -Encoding utf8 (Join-Path $cfg.out 'user-error.txt')
 } finally {
