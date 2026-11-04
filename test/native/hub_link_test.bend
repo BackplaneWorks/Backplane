@@ -52,7 +52,7 @@ def Probe.link(url: String, since: Nat, origin: String) -> IO(Unit):
     IO.print("link elapsed ms=" ++ Nat.show(Nat.sub(t1, t0)) ++ " " ++ text)
     C.Check.str("link returns log or explicit unreachable", Bool.show(Probe.done(Probe.object(text))), "True")
     C.Check.str("connect and handshake are bounded", Bool.show(Nat.is_le(Nat.sub(t1, t0), 11000n)), "True")
-    left : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.Leave{0})
+    left : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.PeerLeave{0})
     return Unit{}
 
 def Probe.accepted(r: Listener & Result<&1, &1, U32 & String, Socket>) -> IO(Unit):

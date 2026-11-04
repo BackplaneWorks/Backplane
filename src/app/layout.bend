@@ -2172,27 +2172,27 @@ def Lay.tool.sep(sep: Bool, +x: U32, +y: U32) -> Out:
 # right of lo (in a narrow main area the rest would slide under the
 # sidebar, drawn where they cannot be clicked); sep: the tool drawn last
 # started a group, so a line goes between it and this one
-def Lay.tools(+ty: Ty, ts: List<&2, TO.Tool>, +y: U32, +x: U32, +lo: U32, +full: Bool, sep: Bool) -> Out:
+def Lay.tools(+ty: Ty, ts: List<&2, TO.HeaderTool>, +y: U32, +x: U32, +lo: U32, +full: Bool, sep: Bool) -> Out:
   match ts:
     case Nil{}:
       Out.none()
-    case TO.Tool{+i, +l, _, a, v, +on, +dg, +gap} <> t:
+    case TO.HeaderTool{+i, +l, _, a, v, +on, +dg, +gap} <> t:
       +w = Lay.tool.w(ty, l, full)
       Lay.buttons.k(U32.is_ge(x, (lo + w : U32)), Out.cat(Lay.tool.sep(sep, x, y), Lay.tool(ty, (x - w : U32), y, i, l, a, v, on, dg, full)),
         Lay.tools(ty, t, y, (x - w - Lay.tool.gap(gap) : U32), lo, full, gap))
 
-def Lay.tools.w(+ty: Ty, ts: List<&2, TO.Tool>, +full: Bool) -> U32:
+def Lay.tools.w(+ty: Ty, ts: List<&2, TO.HeaderTool>, +full: Bool) -> U32:
   match ts:
     case Nil{}:
       0
-    case TO.Tool{_, +l, _, _, _, _, _, +gap} <> t:
+    case TO.HeaderTool{_, +l, _, _, _, _, _, +gap} <> t:
       (Lay.tool.w(ty, l, full) + Lay.tool.gap(gap) + Lay.tools.w(ty, t, full) : U32)
 
-def Lay.header.bs.loc(+l: I.Loc, turn: M.TurnState, override: M.Override, +sa: Nat, +ua: Nat, pinned: Bool, panel: Bool, archived: Bool, snoozed: Bool, del: Bool, forked: Bool, term: Bool) -> List<&2, TO.Tool>:
-  List.reverse(&2, TO.Tool, TO.Tools.head.loc(l, TO.Head{Lay.running(turn), TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del, forked, term, panel},
+def Lay.header.bs.loc(+l: I.Loc, turn: M.TurnState, override: M.Override, +sa: Nat, +ua: Nat, pinned: Bool, panel: Bool, archived: Bool, snoozed: Bool, del: Bool, forked: Bool, term: Bool) -> List<&2, TO.HeaderTool>:
+  List.reverse(&2, TO.HeaderTool, TO.Tools.head.loc(l, TO.Head{Lay.running(turn), TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del, forked, term, panel},
     "vw-find", "snooze", "vw-key", "term"))
 
-def Lay.header.bs(turn: M.TurnState, override: M.Override, +sa: Nat, +ua: Nat, pinned: Bool, panel: Bool, archived: Bool, snoozed: Bool, del: Bool, forked: Bool, term: Bool) -> List<&2, TO.Tool>:
+def Lay.header.bs(turn: M.TurnState, override: M.Override, +sa: Nat, +ua: Nat, pinned: Bool, panel: Bool, archived: Bool, snoozed: Bool, del: Bool, forked: Bool, term: Bool) -> List<&2, TO.HeaderTool>:
   Lay.header.bs.loc(I.En{}, turn, override, sa, ua, pinned, panel, archived, snoozed, del, forked, term)
 
 # the title and branch get what the buttons leave
@@ -2213,7 +2213,7 @@ def Hdr.chip(none: Bool, +ty: Ty, +chip: String, +x: U32, +hy: U32) -> Out:
     case False{}:
       Out{Ty.text(ty, 2n, chip, D.Clip.all(), x, hy, 52, T.Th.accent()), [Lay.hit((x - 4 : U32), (hy + 12 : U32), (Ty.width(ty, 2n, chip) + 8 : U32), 28, "usage-open", "")]}
 
-def Lay.header.k(+ty: Ty, +id: String, +title: String, +branch: String, +chip: String, +icon: String, +tint: U32, +bs: List<&2, TO.Tool>, +x0: U32, +x1: U32, +hy: U32) -> Out:
+def Lay.header.k(+ty: Ty, +id: String, +title: String, +branch: String, +chip: String, +icon: String, +tint: U32, +bs: List<&2, TO.HeaderTool>, +x0: U32, +x1: U32, +hy: U32) -> Out:
   +keep = {U32.min(Ty.width(ty, 0n, title), 160) : U32}
   # labels while they fit beside the title's first 160 px, else icons only
   +full = U32.is_ge(U32.dim((x1 - x0 : U32), 80), (Lay.tools.w(ty, bs, True{}) + keep : U32))
@@ -2253,12 +2253,12 @@ def Ren.field.if(on: Bool, +ty: Ty, +text: String, +focus: String, +blink: Bool,
     case False{}:
       Out.none()
 
-def Lay.header(+ty: Ty, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +x0: U32, +x1: U32, panel: Bool, term: Bool, +snoozed: Bool, del: Bool, +hy: U32) -> Out:
+def Lay.header(+ty: Ty, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.HeaderTool>, +x0: U32, +x1: U32, panel: Bool, term: Bool, +snoozed: Bool, del: Bool, +hy: U32) -> Out:
   match t:
     case M.Thread{+id, +p, +title, _, _, turn, _, +archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, _}:
       Lay.header.k(ty, id, U.Label.title(st, id, TTL.Title.shown(Ty.loc(ty), title)), branch, chip, BG.Badge.icon(st, p), BG.Badge.rgb_of(st, p),
         # (the tools run right to left: the put-away Buy it, last, is leftmost)
-        List.append(&2, TO.Tool, Lay.header.bs.loc(Ty.loc(ty), turn, override, sa, ua, pinned, panel, archived, snoozed, del, Bool.not(String.is_empty(M.Fork.source(st, id))), term), mini), x0, x1, hy)
+        List.append(&2, TO.HeaderTool, Lay.header.bs.loc(Ty.loc(ty), turn, override, sa, ua, pinned, panel, archived, snoozed, del, Bool.not(String.is_empty(M.Fork.source(st, id))), term), mini), x0, x1, hy)
 
 def Lay.lines(+ty: Ty, ls: List<&2, String>, +c: D.Clip, +x: U32, +y: U32) -> Out:
   match ls:
@@ -4993,7 +4993,7 @@ def Side.layer.if(show: Bool, +ty: Ty, +k: U32, +l: U32, +flip: U32, +act: Bool,
       Out.none()
 
 # one row per layer the scene has, in KiCad's order (LY.Lyr.order), from y down
-def Side.layers(ls: List<&2, U32>, +y: U32, +ty: Ty, +k: U32, +present: U32, +flip: U32, +f: LY.Focus, +x: U32, +w: U32, +c: D.Clip) -> List<&2, Out>:
+def Side.layers(ls: List<&2, U32>, +y: U32, +ty: Ty, +k: U32, +present: U32, +flip: U32, +f: LY.LayerFocus, +x: U32, +w: U32, +c: D.Clip) -> List<&2, Out>:
   match ls:
     case Nil{}:
       Nil{}
@@ -5019,7 +5019,7 @@ def Side.mode(+ty: Ty, +m: U32, +cur: U32, +label: String, +x: U32, +y: U32, +w:
       Ty.text(ty, 2n, label, c, (x + (w - Ty.width(ty, 2n, label)) / 2 : U32), y, 24, Bool.pick(U32, U32.is_eq(m, cur), T.Th.text(), T.Th.dim()))),
     [Lay.hit(x, y, w, 24, "vw-layer-mode", U32.show(m))]}
 
-def Side.modes(board: Bool, +ty: Ty, +f: LY.Focus, +x: U32, +y: U32, +w: U32, +c: D.Clip) -> Out:
+def Side.modes(board: Bool, +ty: Ty, +f: LY.LayerFocus, +x: U32, +y: U32, +w: U32, +c: D.Clip) -> Out:
   match board:
     case True{}:
       +cur = {Bool.pick(U32, LY.Lyr.on(f), LY.Lyr.mode(f), 0) : U32}
@@ -5050,7 +5050,7 @@ def Side.reset(+ty: Ty, +x: U32, +y: U32, +c: D.Clip) -> Out:
 
 # the open list: the sheet tree (schematics with sheets), then a board's
 # All/Dim/Only, then the layers
-def Side.list(+ty: Ty, +k: U32, +present: U32, +flip: U32, +f: LY.Focus, +rs: List<&2, HI.Row>, +at: Nat, +x1: U32, +h: U32) -> Out:
+def Side.list(+ty: Ty, +k: U32, +present: U32, +flip: U32, +f: LY.LayerFocus, +rs: List<&2, HI.Row>, +at: Nat, +x1: U32, +h: U32) -> Out:
   +w = {240 : U32}
   +x = {(x1 - 16 - w : U32) : U32}
   +ns = {U32.from_nat(Bool.pick(Nat, Nat.is_gt(List.length(&2, HI.Row, rs), 1n), List.length(&2, HI.Row, rs), 0n)) : U32}
@@ -5070,7 +5070,7 @@ def Side.list(+ty: Ty, +k: U32, +present: U32, +flip: U32, +f: LY.Focus, +rs: Li
     Out.all(Side.layers(Side.order(k), (102 + sh + mh : U32), ty, k, present, flip, f, x, w, c)),
     Out.when(reset, Side.reset(ty, x, (102 + sh + mh + nl * 22 : U32), c))])
 
-def Side.list.if(open: Bool, +ty: Ty, +k: U32, +ss: List<&2, V.Seen>, +flip: U32, +f: LY.Focus, +rs: List<&2, HI.Row>, +at: Nat, +x1: U32, +h: U32) -> Out:
+def Side.list.if(open: Bool, +ty: Ty, +k: U32, +ss: List<&2, V.Seen>, +flip: U32, +f: LY.LayerFocus, +rs: List<&2, HI.Row>, +at: Nat, +x1: U32, +h: U32) -> Out:
   match open:
     case True{}:
       Side.list(ty, k, V.Layers.present(ss, 0), flip, f, rs, at, x1, h)
@@ -5120,10 +5120,10 @@ def Side.ground.if(on: Bool, +ty: Ty, +n: S.Nui, +x1: U32) -> Out:
       Out.none()
 
 # the Layers chip names the active layer while one stands out
-def Side.head.loc(+l: I.Loc, +k: U32, +f: LY.Focus) -> String:
+def Side.head.loc(+l: I.Loc, +k: U32, +f: LY.LayerFocus) -> String:
   Bool.pick(String, LY.Lyr.on(f), MSG.T.viewer.layers.active(l, LY.Lyr.name(k, LY.Lyr.active(f))), MSG.T.viewer.layers(l))
 
-def Side.head(+k: U32, +f: LY.Focus) -> String:
+def Side.head(+k: U32, +f: LY.LayerFocus) -> String:
   Side.head.loc(I.En{}, k, f)
 
 def Side.k(board: Bool, +ty: Ty, +n: S.Nui, +k: U32, +ss: List<&2, V.Seen>, +x0: U32, +x1: U32, +h: U32) -> Out:

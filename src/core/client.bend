@@ -134,7 +134,7 @@ type Ui is Data:
 type Cmd is Data:
   Send{text: String}
   Copy{text: String}
-  Focus{id: String}
+  FocusField{id: String}
   ScrollEnd{}
   # talk to another machine's hub ("" is this machine's own)
   Connect{url: String}
@@ -1541,7 +1541,7 @@ def Ui.add_project(u: Ui) -> Ui:
 def Ui.toggle_add(u: Ui) -> Act:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Act{Ui{st, sel, dr, live, op, on, now, Bool.not(ad), pa, v, rid, w, er, note, nf, ob, tr}, [Focus{"project-path"}]}
+      Act{Ui{st, sel, dr, live, op, on, now, Bool.not(ad), pa, v, rid, w, er, note, nf, ob, tr}, [FocusField{"project-path"}]}
 
 # (the viewer opened by hand comes back on what it showed: on Mech, its
 # parts are listed again, as when Mech is opened, Mpage.sync)
@@ -1723,7 +1723,7 @@ def Ui.select.nav(u: Ui, +id: String) -> Ui:
 
 # (Ui.act brings the thread's own panel)
 def Ui.select(u: Ui, +id: String) -> Act:
-  Draft.stale.after(Act{Ui.select.nav(u, id), [Focus{"composer"}, ScrollEnd{}]})
+  Draft.stale.after(Act{Ui.select.nav(u, id), [FocusField{"composer"}, ScrollEnd{}]})
 
 def Ui.reselect.act(+old: String, a: Act) -> Act:
   match a:
@@ -2811,7 +2811,7 @@ def Ui.mention.sep(+d: String) -> String:
 def Ui.mention(u: Ui, +path: String) -> Act:
   match u:
     case Ui{st, +sel, +dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui.also(Ui.draft.set(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, Str.get(dr, sel) ++ Ui.mention.sep(Str.get(dr, sel)) ++ "@" ++ path ++ " "), [Focus{"composer"}])
+      Ui.also(Ui.draft.set(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, Str.get(dr, sel) ++ Ui.mention.sep(Str.get(dr, sel)) ++ "@" ++ path ++ " "), [FocusField{"composer"}])
 
 # Skills and references in the composer
 # -------------------------------------
@@ -3040,7 +3040,7 @@ def Skills.complete(+draft: String, +word: String) -> String:
 
 # the composer keeps the keyboard (the web draws the page again)
 def Ui.skill.k(+word: String, +u: Ui) -> Act:
-  Bool.pick(Act, String.is_empty(word), Act{u, Nil{}}, Ui.also(Ui.draft.set(u, Skills.complete(Ui.draft_text(u), word)), [Focus{"composer"}]))
+  Bool.pick(Act, String.is_empty(word), Act{u, Nil{}}, Ui.also(Ui.draft.set(u, Skills.complete(Ui.draft_text(u), word)), [FocusField{"composer"}]))
 
 # complete the word being typed
 def Ui.skill(+u: Ui, +v: String) -> Act:
@@ -4366,7 +4366,7 @@ def Ren.clear(+u: Ui) -> Ui:
   Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@ren", ""), "@ren.kind", ""), "@ren.owner", ""), "@ren.inline", ""), "@f.title", "")
 
 def Ren.named(+u: Ui, kind: String, id: String, title: String) -> Act:
-  Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@menu", ""), "@ren", id), "@ren.kind", kind), "@ren.owner", Ui.sel(u)), "@f.title", title), [Focus{"thread-title"}]}
+  Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@menu", ""), "@ren", id), "@ren.kind", kind), "@ren.owner", Ui.sel(u)), "@f.title", title), [FocusField{"thread-title"}]}
 
 def Ren.open(+u: Ui, +id: String) -> Act:
   Ren.named(Ui.scratch_set(u, "@ren.inline", ""), "thread", id, Active.title(Ui.thread(Side.st(u), id)))
@@ -4485,7 +4485,7 @@ def Find.toggle.k(open: Bool, +u: Ui) -> Act:
     case True{}:
       Act{Ui.scratch_set(Ui.flag_off(u, "psearch"), "@f.pq", ""), Nil{}}
     case False{}:
-      Act{Ui.scratch_set(Ui.flag_on(u, "psearch"), "@f.pq", ""), [Focus{"proj-find"}]}
+      Act{Ui.scratch_set(Ui.flag_on(u, "psearch"), "@f.pq", ""), [FocusField{"proj-find"}]}
 
 def Find.toggle(+u: Ui, +v: String) -> Act:
   Find.toggle.k(Bool.pick(Bool, String.is_empty(v), Ui.flag(u, "psearch"), String.eq(v, "off")), u)
@@ -4593,7 +4593,7 @@ def Btw.text(+l: I.Loc, +a: String) -> String:
 
 # the composer keeps the keyboard (the web draws the page again)
 def Skills.close(+u: Ui) -> Act:
-  Act{Ui.info_set(u, "sk.off", Skills.on(Ui.sel(u), Ui.draft_text(u))), [Focus{"composer"}]}
+  Act{Ui.info_set(u, "sk.off", Skills.on(Ui.sel(u), Ui.draft_text(u))), [FocusField{"composer"}]}
 
 def Skills.want(a: Act) -> Act:
   match a:
@@ -4773,7 +4773,7 @@ def Models.phone(+nf: Map<&2, String>, +prov: String, +q: String) -> String:
 def Models.opened.k(open: Bool, oc: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
   match open oc:
     case True{} True{}:
-      Ui.also(Ui.rpc(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "accounts"), "@f.mq", ""), "@mp", ""), "models.refresh", Nil{}), List.append(&2, Cmd, cs, [Focus{"model-q"}]))
+      Ui.also(Ui.rpc(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "accounts"), "@f.mq", ""), "@mp", ""), "models.refresh", Nil{}), List.append(&2, Cmd, cs, [FocusField{"model-q"}]))
     case True{} False{}:
       Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "accounts"), "@f.mq", ""), "@mp", ""), cs}
     case False{} _:
@@ -4789,7 +4789,7 @@ def Models.shut.drop(a: Act) -> Act:
 def Models.shut.k(shut: Bool, a: Act) -> Act:
   match shut:
     case True{}:
-      Ui.also(Models.shut.drop(a), [Focus{"composer"}])
+      Ui.also(Models.shut.drop(a), [FocusField{"composer"}])
     case False{}:
       a
 
@@ -4886,7 +4886,7 @@ def Mpk.apply(+u: Ui, +c: MPK.MpCur) -> Act:
 
 # the picker shut, its cursor and search dropped, the keys back to the composer
 def Mpk.shut(u: Ui) -> Act:
-  Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "models"), "@mp", ""), "@f.mq", ""), [Focus{"composer"}]}
+  Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "models"), "@mp", ""), "@f.mq", ""), [FocusField{"composer"}]}
 
 def Mpk.enter(a: Act) -> Act:
   match a:
@@ -4924,7 +4924,7 @@ def Mpk.click.k(col: Nat, +u: Ui, +v: String, c: MPK.MpCur, +now: MPK.MpCur) -> 
     case 0n:
       Mpk.apply(u, MPK.ModelPick.col(MPK.ModelPick.agent(c, v, now), 0n))
     case 1n:
-      Ui.also(Mpk.apply(u, MPK.ModelPick.col(MPK.ModelPick.model(c, v), 1n)), [Focus{"composer"}])
+      Ui.also(Mpk.apply(u, MPK.ModelPick.col(MPK.ModelPick.model(c, v), 1n)), [FocusField{"composer"}])
     case _:
       Mpk.apply(u, MPK.ModelPick.col(MPK.ModelPick.effort(c, v), 2n))
 
@@ -5077,7 +5077,7 @@ def Proj.mine(+u: Ui, +o: J.Json) -> Bool:
 def Proj.focus(a: Act) -> Act:
   match a:
     case Act{u, cs}:
-      Act{u, List.append(&2, Cmd, cs, [Focus{"proj"}])}
+      Act{u, List.append(&2, Cmd, cs, [FocusField{"proj"}])}
 
 # browsing folders rather than choosing among projects
 def Proj.browsing(+u: Ui) -> Bool:
@@ -5971,14 +5971,14 @@ def Lfocus.kind.of(+u: Ui) -> String:
 def Lfocus.key(+u: Ui) -> String:
   "@focus." ++ Lfocus.kind.of(u)
 
-def Lfocus.of(+u: Ui) -> LY.Focus:
+def Lfocus.of(+u: Ui) -> LY.LayerFocus:
   LY.Lyr.read(Ui.scratch(u, Lfocus.key(u)))
 
 # the look kind of what the web shows (0 a board, 1 a schematic)
 def Lfocus.kind(+u: Ui) -> U32:
   Bool.pick(U32, String.eq(Lfocus.kind.of(u), "schematic"), 1, 0)
 
-def Lfocus.put(+u: Ui, +f: LY.Focus) -> Act:
+def Lfocus.put(+u: Ui, +f: LY.LayerFocus) -> Act:
   Act{Ui.scratch_set(u, Lfocus.key(u), LY.Lyr.show(f)), Nil{}}
 
 def Lfocus.pick(+u: Ui, +value: String) -> Act:
@@ -6309,7 +6309,7 @@ def Solid.off(+u: Ui) -> U32:
 def Solid.off.of(+u: Ui, +kind: String) -> U32:
   Maybe.default(&2, U32, U32.read(Ui.scratch(u, "@off." ++ kind)), 0)
 
-def Lfocus.of.at(+u: Ui, +kind: String) -> LY.Focus:
+def Lfocus.of.at(+u: Ui, +kind: String) -> LY.LayerFocus:
   LY.Lyr.read(Ui.scratch(u, "@focus." ++ kind))
 
 # a sheet picked while a comparison shows: that sheet compared (the same
@@ -7755,9 +7755,9 @@ def Ui.term_paste(+u: Ui, text: String) -> Act:
 def Term.toggle.k(open: Bool, +u: Ui, +c: U32, +r: U32) -> Act:
   match open:
     case True{}:
-      Act{Ui.flag_off(u, "term"), [Focus{"composer"}]}
+      Act{Ui.flag_off(u, "term"), [FocusField{"composer"}]}
     case False{}:
-      Ui.also(Ui.term_open(Ui.flag_on(u, "term"), U32.max(c, 20), U32.max(r, 5)), [Focus{"term"}])
+      Ui.also(Ui.term_open(Ui.flag_on(u, "term"), U32.max(c, 20), U32.max(r, 5)), [FocusField{"term"}])
 
 def Term.toggle.s(sz: U32 & U32, open: Bool, +u: Ui) -> Act:
   (+c, +r) = sz
@@ -8285,10 +8285,10 @@ def Fab.mini.k(min: Bool, +line: String) -> Bool:
 def Fab.mini.label(again: Bool) -> String:
   Bool.pick(String, again, "Ordered", "Buy it")
 
-def Fab.mini.tools.k(show: Bool, again: Bool, +th: String) -> List<&2, TO.Tool>:
+def Fab.mini.tools.k(show: Bool, again: Bool, +th: String) -> List<&2, TO.HeaderTool>:
   match show:
     case True{}:
-      [TO.Tool{"box", Fab.mini.label(again), "Show the Ready to order bar again", "fab-show", th, False{}, False{}, False{}}]
+      [TO.HeaderTool{"box", Fab.mini.label(again), "Show the Ready to order bar again", "fab-show", th, False{}, False{}, False{}}]
     case False{}:
       Nil{}
 
@@ -8312,11 +8312,11 @@ def Fab.rail.price(+label: String) -> String:
   Bool.pick(String, String.starts_with(label, "Buy it · "), String.drop(label, 9n), "")
 
 # the header's tools for the open thread ([] or its Buy it)
-def Fab.mini.tools(+u: Ui) -> List<&2, TO.Tool>:
+def Fab.mini.tools(+u: Ui) -> List<&2, TO.HeaderTool>:
   Fab.mini.tools.k(Fab.mini.k(Fab.min.of(Ui.state.of(u), Ui.sel(u)), Fab.ready.all(u)), String.eq(Ui.info(u, "fab.again:" ++ Ui.sel(u)), "1"), Ui.sel(u))
 
 # the same from the state and the info a window or phone frame has
-def Fab.mini.tools.of(+st: M.State, +nf: Map<&2, String>, +th: String, run: Bool) -> List<&2, TO.Tool>:
+def Fab.mini.tools.of(+st: M.State, +nf: Map<&2, String>, +th: String, run: Bool) -> List<&2, TO.HeaderTool>:
   Fab.mini.tools.k(Fab.mini.k(Fab.min.of(st, th), Fab.ready.k(Fab.buy.of(st, nf, th), Str.get(nf, "fab.ready:" ++ th), Fab.wait(st, th, run))), String.eq(Str.get(nf, "fab.again:" ++ th), "1"), th)
 
 # (nothing for a thread with no project: no fab.min. without one)
@@ -8343,7 +8343,7 @@ def Fab.at(+u: Ui) -> String:
 # Its Edit is the card's: the intent in the composer as "/intent ...",
 # which Send writes (laws intent_*).
 def Intent.look(+u: Ui) -> Act:
-  Ui.also(Ui.rpc(Ui.scratch_set(u, "@fab.at", Fab.at(u)), "fab.look", [J.KV{"thread", J.Str{Ui.sel(u)}}]), [Focus{"intent"}])
+  Ui.also(Ui.rpc(Ui.scratch_set(u, "@fab.at", Fab.at(u)), "fab.look", [J.KV{"thread", J.Str{Ui.sel(u)}}]), [FocusField{"intent"}])
 
 # the intent is on show over the selected thread
 def Intent.on(+u: Ui) -> Bool:
@@ -8375,7 +8375,7 @@ def Intent.open(+u: Ui, +pid: String) -> Act:
   Intent.open.k(Bool.or(String.is_empty(Side.home(u, pid)), FR.Fr.is(pid)), Ui.scratch_set(u, "@menu", ""), Side.home(u, pid))
 
 def Intent.close(+u: Ui) -> Act:
-  Act{Ui.scratch_set(u, "@intent", ""), [Focus{"composer"}]}
+  Act{Ui.scratch_set(u, "@intent", ""), [FocusField{"composer"}]}
 
 # "Intent saved", once the hub has written it (Intent.send.go)
 def Intent.saved(+u: Ui) -> Bool:
@@ -8403,7 +8403,7 @@ def Intent.borrow(+u: Ui, +th: String) -> Ui:
 # new connection's actor), so Save after a reload or a reconnect still
 # gives the conversation's draft back.
 def Intent.kept(+u: Ui, +th: String) -> List<&2, Cmd>:
-  [Keep{"@intent.draft:" ++ th, Ui.scratch(u, "@intent.draft:" ++ th)}, Keep{"@intent.edit:" ++ th, Ui.scratch(u, "@intent.edit:" ++ th)}, Focus{"composer"}]
+  [Keep{"@intent.draft:" ++ th, Ui.scratch(u, "@intent.draft:" ++ th)}, Keep{"@intent.edit:" ++ th, Ui.scratch(u, "@intent.edit:" ++ th)}, FocusField{"composer"}]
 
 def Intent.borrowed(+b: Ui, +text: String, +th: String) -> Act:
   Ui.also(Ui.draft(Ui.scratch_set(b, "@intent", ""), text), Intent.kept(b, th))
@@ -8550,7 +8550,7 @@ def Home.save(+u: Ui) -> Act:
 
 def Home.start.ready(+u: Ui) -> Act:
   +waiting = Bool.not(String.is_empty(Ui.scratch(u, "@home.send.rid")))
-  Bool.pick(Act, Bool.or(waiting, String.is_empty(String.trim(Ui.draft_text(u)))), Act{u, [Focus{"composer"}]},
+  Bool.pick(Act, Bool.or(waiting, String.is_empty(String.trim(Ui.draft_text(u)))), Act{u, [FocusField{"composer"}]},
     Ui.rpc.keep.msg(Made.want(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u,
       "@home.send.owner", Ui.sel(u)), "@home.send.text", Ui.draft_text(u)), "@home.send.rid", Nat.show(Made.rid(u)))),
       "project.start", [J.KV{"project", J.Str{PH.Home.project(Ui.sel(u))}}, J.KV{"text", J.Str{Ui.draft_text(u)}}]))
@@ -8748,7 +8748,7 @@ def Bots.chat.of(+st: M.State, +id: String, +th: String) -> String:
 def Bots.select.k(m: Maybe<&2, BT.Bot>, +u: Ui) -> Act:
   match m:
     case Some{BT.Bot{+i, _, +th, _, _, _, _}}:
-      Draft.stale.after(Act{Ui.flag_off(Bots.views(Bots.sel.set(u, Bots.chat.of(Ui.state.of(u), i, th)), i, "", ""), "settings"), [Focus{"composer"}, ScrollEnd{}]})
+      Draft.stale.after(Act{Ui.flag_off(Bots.views(Bots.sel.set(u, Bots.chat.of(Ui.state.of(u), i, th)), i, "", ""), "settings"), [FocusField{"composer"}, ScrollEnd{}]})
     case None{}:
       Act{u, Nil{}}
 
@@ -8787,7 +8787,7 @@ def Rooms.mark(+n: Nat, a: Act, +id: String) -> Act:
       Rooms.mark.go(a, id)
 
 def Bots.room.select(+u: Ui, +id: String) -> Act:
-  Rooms.mark(Rooms.unread(u, id), Act{Ui.flag_off(Bots.views(u, "", id, ""), "settings"), [Focus{"room-post"}, ScrollEnd{}]}, id)
+  Rooms.mark(Rooms.unread(u, id), Act{Ui.flag_off(Bots.views(u, "", id, ""), "settings"), [FocusField{"room-post"}, ScrollEnd{}]}, id)
 
 # A bot elsewhere on one of the owner's machines opens there: the window
 # switches to that machine's hub and shows the bot with all its tabs (its
@@ -9092,7 +9092,7 @@ def Mate.lead(+u: Ui) -> String:
   Mate.lead.loc(Lang.loc(u), u)
 
 def Far.chat(u: Ui, +id: String) -> Act:
-  Act{Bots.views(u, "", "", id), [Focus{"remote-send"}, ScrollEnd{}]}
+  Act{Bots.views(u, "", "", id), [FocusField{"remote-send"}, ScrollEnd{}]}
 
 # the project picker's query changed: its highlight goes back to the top
 def Bots.bfield.proj(proj: Bool, u: Ui) -> Ui:
@@ -9140,7 +9140,7 @@ def Bots.create.valid(+u: Ui) -> Act:
 def Bots.create.k(valid: Bool, +u: Ui) -> Act:
   match valid:
     case True{}: Bots.create.valid(u)
-    case False{}: Act{u, [Focus{"bot-name"}]}
+    case False{}: Act{u, [FocusField{"bot-name"}]}
 
 def Bots.create(+u: Ui) -> Act:
   Bots.create.k(Bool.and(BT.Bot.name.valid(String.trim(Bots.field(u, "name"))), Bool.not(BT.Maybe.is(BT.Bot, BT.World.find(M.State.bots(Ui.state(u)), String.trim(Bots.field(u, "name")))))), u)
@@ -9313,7 +9313,7 @@ def Bots.routine.save.valid(+u: Ui) -> Act:
 # person's name and prompt, with the keyboard where it can be corrected.
 def Bots.routine.save.k(bad: Bool, u: Ui) -> Act:
   match bad:
-    case True{}: Act{u, [Focus{"routine-cron"}]}
+    case True{}: Act{u, [FocusField{"routine-cron"}]}
     case False{}: Bots.routine.save.valid(u)
 
 def Bots.routine.save(+u: Ui) -> Act:
@@ -9887,7 +9887,7 @@ def Voice.skip(+u: Ui, x: VC.Unsure, +n: String) -> Act:
 
 # "clarify": the word into a field to type its right spelling
 def Voice.clarify(+u: Ui, +x: VC.Unsure, +n: String) -> Act:
-  Act{Ui.scratch_set(Ui.scratch_set(u, "@voice.fix", n), "@f.vfix", Bool.pick(String, String.is_empty(Voice.guess(x)), Voice.word(x), Voice.guess(x))), [Focus{"voice-fix"}]}
+  Act{Ui.scratch_set(Ui.scratch_set(u, "@voice.fix", n), "@f.vfix", Bool.pick(String, String.is_empty(Voice.guess(x)), Voice.word(x), Voice.guess(x))), [FocusField{"voice-fix"}]}
 
 def Voice.fixed.k(none: Bool, +u: Ui, +x: VC.Unsure, +r: String) -> Act:
   match none:
@@ -10478,7 +10478,7 @@ def Rv.showing(+u: Ui) -> String:
 
 # the layers a focus is about, as a comparison's bits (0 when no layer
 # stands out): the active one and those kept with it
-def Rv.bits(+kind: U32, +f: LY.Focus) -> U32:
+def Rv.bits(+kind: U32, +f: LY.LayerFocus) -> U32:
   Bool.pick(U32, Bool.and(LY.Lyr.on(f), Bool.not(U32.is_eq(kind, 1))), LY.Lyr.kept(kind, f), 0)
 
 def Rv.bits.k(diff: Bool, +u: Ui, +bits: String) -> Ui:
@@ -11593,7 +11593,7 @@ def Acv.select(+u: Ui, +id: String) -> Act:
 def Acv.add.k(blank: Bool, +u: Ui) -> Act:
   match blank:
     case True{}:
-      Act{Ui.scratch_set(u, "@acct.label.err", MSG.T.account.label.required(Lang.loc(u))), [Focus{"agy-accountlabel"}]}
+      Act{Ui.scratch_set(u, "@acct.label.err", MSG.T.account.label.required(Lang.loc(u))), [FocusField{"agy-accountlabel"}]}
     case False{}:
       Ui.rpc(Ui.scratch_set(Ui.scratch_set(Bool.pick(Ui, Ui.flag(u, "provider-setup"), Ui.scratch_set(u, "@setup.profile", ""), u), "@f.accountlabel", ""), "@acct.label.err", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{String.trim(Ui.scratch(u, "@f.accountlabel"))}}])
 
@@ -12058,8 +12058,8 @@ def Allowancev.read(+u: Ui) -> Act:
 
 def Allowancev.open(open: Bool, +u: Ui) -> Act:
   match open:
-    case True{}: Act{Ui.flag_on(u, "allowance"), [Focus{"allowance-close"}]}
-    case False{}: Act{Ui.flag_off(u, "allowance"), [Focus{"allowance-chip"}]}
+    case True{}: Act{Ui.flag_on(u, "allowance"), [FocusField{"allowance-close"}]}
+    case False{}: Act{Ui.flag_off(u, "allowance"), [FocusField{"allowance-chip"}]}
 
 def Allowancev.act(i: Nat, +u: Ui) -> Act:
   match i:
@@ -13189,14 +13189,14 @@ def Settings.refresh(voice: Bool, a: Act) -> Act:
 
 def Settings.go.k(+page: String, +before: Ui) -> Act:
   +u = Ui.scratch_set(before, "@keys.rm", "")
-  Settings.refresh(String.eq(page, "voice"), Act{Settings.seed.k(String.eq(page, "threads"), Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", page), "@set.sc", "0"), "@set.focus", "")), [Focus{""}]})
+  Settings.refresh(String.eq(page, "voice"), Act{Settings.seed.k(String.eq(page, "threads"), Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", page), "@set.sc", "0"), "@set.focus", "")), [FocusField{""}]})
 
 def Settings.go(+u: Ui, +page: String) -> Act:
   Settings.go.k(Settings.clean(page), u)
 
 def Settings.focus(a: Act, id: String) -> Act:
   match a:
-    case Act{u, _}: Act{u, [Focus{id}]}
+    case Act{u, _}: Act{u, [FocusField{id}]}
 
 def KN.path(+u: Ui) -> Act:
   Settings.focus(Settings.go(Ui.scratch_set(Settings.on(u), "@f.kpath", M.Setting.get(Ui.state.of(u), "kicad.path", "")), "cad"), "kicad-path")
@@ -13668,7 +13668,7 @@ def Tour.focus(+u: Ui) -> String:
 def Tour.leave(a: Act, +field: String) -> Act:
   match a:
     case Act{u, cs}:
-      Act{u, Focus{field} <> cs}
+      Act{u, FocusField{field} <> cs}
 
 # the tour is over, and its uberbot step answered ("onboard.uber")
 def Tour.finish.cat(a: Act, cs: List<&2, Cmd>) -> Act:
@@ -13800,7 +13800,7 @@ def Psv.open(+u: Ui) -> Act:
   Settings.go(Ui.scratch_set(Ui.scratch_set(Ui.flag_on(Settings.on(u), "provider-setup"), "@f.setq", ""), "@setup.tour", Bool.pick(String, OB.Ob.live(Tour.at(u)), "1", "")), "agents")
 
 def Psv.leave(+u: Ui) -> Act:
-  Act{Ui.scratch_set(Ui.flag_off(Ui.flag_off(u, "provider-setup"), "settings"), "@setup.pass", "1"), [Focus{Tour.focus(Ui.flag_off(u, "settings"))}]}
+  Act{Ui.scratch_set(Ui.flag_off(Ui.flag_off(u, "provider-setup"), "settings"), "@setup.pass", "1"), [FocusField{Tour.focus(Ui.flag_off(u, "settings"))}]}
 
 # Only an explicit choice changes defaults for future threads. Old threads,
 # account bindings, provider sessions and the current draft are untouched.
@@ -14098,7 +14098,7 @@ def Uber.bot.at(+u: Ui, +value: String) -> Act:
 # "uber-new": the new bot form opens for the uberbot (the tour's "Create my
 # uberbot"): Settings shut, "@uber.new" set so the request carries uber
 def Uber.new(+u: Ui) -> Act:
-  Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "settings"), "@bnew", "1"), "@uber.new", "1"), [Focus{"bot-name"}]}
+  Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "settings"), "@bnew", "1"), "@uber.new", "1"), [FocusField{"bot-name"}]}
 
 # "uber-home" asks the hub (bots.uber_home) to make this machine hold the
 # uberbot's conversation (the Status strip's "Make this the home").
@@ -16339,7 +16339,7 @@ def Proj.run.k(i: Nat, +u: Ui, +v: String) -> Act:
     case 6n:
       Proj.focus(Proj.browse(u))
     case 7n:
-      Act{Proj.mode(u, ""), [Focus{"proj"}]}
+      Act{Proj.mode(u, ""), [FocusField{"proj"}]}
     case 8n:
       Proj.machine(u, v)
     case _:
@@ -16459,7 +16459,7 @@ def Bots.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 1n:
       Bots.tab.k(String.eq(value, "settings"), Ui.scratch_set(Ui.scratch_set(u, "@f.delroutine", ""), "@btab", value))
     case 2n:
-      Act{Bots.flag(Ui.scratch_set(u, "@uber.new", ""), "@bnew"), [Focus{"bot-name"}]}
+      Act{Bots.flag(Ui.scratch_set(u, "@uber.new", ""), "@bnew"), [FocusField{"bot-name"}]}
     case 3n:
       Bots.create(u)
     case 4n:
@@ -16471,7 +16471,7 @@ def Bots.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 7n:
       Bots.room.select(u, value)
     case 8n:
-      Act{Bots.flag(Bots.fields.clear(u, ["rname", "rmembers", "rid"]), "@rnew"), [Focus{"room-name"}]}
+      Act{Bots.flag(Bots.fields.clear(u, ["rname", "rmembers", "rid"]), "@rnew"), [FocusField{"room-name"}]}
     case 9n:
       Bots.room.save(u)
     case 10n:
@@ -16513,7 +16513,7 @@ def Bots.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 28n:
       Ui.rpc(Bots.views(u, "", "", ""), "bots.room_delete", [J.KV{"room", J.Str{value}}])
     case 29n:
-      Act{Bots.routine.edit(u, Bots.routine.of(u, value)), [Focus{"routine-name"}]}
+      Act{Bots.routine.edit(u, Bots.routine.of(u, value)), [FocusField{"routine-name"}]}
     case 30n:
       Act{Bots.token.clear(Ui.scratch_set(Ui.scratch_set(u, "@hook.secret", ""), "@hook.id", "")), Nil{}}
     case 31n:
@@ -16652,7 +16652,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 19n:
       Ui.setting(u, value)
     case 20n:
-      Ui.also(Ui.model(u, value), [Focus{"composer"}])
+      Ui.also(Ui.model(u, value), [FocusField{"composer"}])
     case 21n:
       Ui.rpc(u, "kicad.install", Nil{})
     case 22n:
@@ -17211,7 +17211,7 @@ def Ui.act.cpy(cpy: Bool, +u: Ui, +action: String, +value: String) -> Act:
 
 def Ui.act.rpl(rpl: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match rpl:
-    case True{}: Act{Rpl.pick(String.eq(action, "reply-to"), u, value), [Focus{"composer"}]}
+    case True{}: Act{Rpl.pick(String.eq(action, "reply-to"), u, value), [FocusField{"composer"}]}
     case False{}: Ui.act.cpy(String.eq(action, "copy-entry"), u, action, value)
 
 # Setup actions precede the ordinary UI table without changing its indexes.

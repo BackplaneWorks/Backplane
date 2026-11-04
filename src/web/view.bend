@@ -1064,12 +1064,12 @@ def View.failed(t: M.TurnState) -> Bool:
 def View.tool.cls(on: Bool, danger: Bool, gap: Bool) -> String:
   Bool.pick(String, on, "on", "") ++ Bool.pick(String, danger, " danger", "") ++ Bool.pick(String, gap, " gap", "")
 
-def View.tool(t: TO.Tool) -> D.Node:
+def View.tool(t: TO.HeaderTool) -> D.Node:
   match t:
-    case TO.Tool{+i, +l, tip, a, v, on, dg, gap}:
+    case TO.HeaderTool{+i, +l, tip, a, v, on, dg, gap}:
       WI.WIcon.button("tool " ++ View.tool.cls(on, dg, gap), a, v, tip, i, 16, l)
 
-def View.tools(ts: List<&2, TO.Tool>) -> List<&2, D.Node>:
+def View.tools(ts: List<&2, TO.HeaderTool>) -> List<&2, D.Node>:
   match ts:
     case Nil{}:
       Nil{}
@@ -1120,17 +1120,17 @@ def View.header.tool.label(lc: I.Loc, +action: String, label: String) -> String:
     case I.Ja{}:
       Bool.pick(String, String.eq(action, "settle"), "完了にする", Bool.pick(String, String.eq(action, "unsettle"), "アクティブにする", Bool.pick(String, String.eq(action, "snooze"), "スレッドを再開", label)))
 
-def View.header.tool(+lc: I.Loc, t: TO.Tool) -> D.Node:
+def View.header.tool(+lc: I.Loc, t: TO.HeaderTool) -> D.Node:
   match t:
-    case TO.Tool{i, l, tip, +a, v, on, dg, gap}:
-      View.tool(TO.Tool{i, View.header.tool.label(lc, a, l), tip, a, v, on, dg, gap})
+    case TO.HeaderTool{i, l, tip, +a, v, on, dg, gap}:
+      View.tool(TO.HeaderTool{i, View.header.tool.label(lc, a, l), tip, a, v, on, dg, gap})
 
-def View.header.tools(+lc: I.Loc, ts: List<&2, TO.Tool>) -> List<&2, D.Node>:
+def View.header.tools(+lc: I.Loc, ts: List<&2, TO.HeaderTool>) -> List<&2, D.Node>:
   match ts:
     case Nil{}: Nil{}
     case +t <> rest:
       match t:
-        case TO.Tool{_, _, _, +a, _, _, _, _}:
+        case TO.HeaderTool{_, _, _, +a, _, _, _, _}:
           D.Dom.cat(D.Dom.when(Bool.not(Bool.or(String.eq(a, "panel"), Bool.or(String.eq(a, "term-toggle"), String.eq(a, "flag")))), View.header.tool(lc, t)), View.header.tools(lc, rest))
 
 def View.group.label(lc: I.Loc, snooze: Bool) -> String:
@@ -1149,7 +1149,7 @@ def View.thread.actions(+lc: I.Loc, summary: List<&2, D.Node>, +st: M.State, +id
       D.Dom.when(U.ThreadTree.can_route(st, id), D.Dom.button("", "thread-child", id, "Create a conversation beneath this thread", "+ New subthread")),
       [D.Dom.span("control-label", View.group.label(lc, True{}))], List.take(&2, D.Node, View.snoozes.loc(lc, True{}), 3n)])}]}
 
-def View.header(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> D.Node:
+def View.header(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.HeaderTool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> D.Node:
   match t:
     case M.Thread{+id, +p, title, _, _, turn, _, archived, override, +sa, +ua, pinned, _, +branch, _, _, model, _, _, _, _}:
       D.El{"header", "", [D.At{"class", "thread-head"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}], List.concat(&2, D.Node, [[
@@ -1160,7 +1160,7 @@ def View.header(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List
         D.El{"div", "", [D.At{"class", "tools thread-controls"}], [
           View.thread.actions(lc, [D.Dom.span("menu-dots", "⋯")], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del, term, panel)]}]])}
 
-def View.header.legacy(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, del: Bool, +ren: String, +rtext: String) -> D.Node:
+def View.header.legacy(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.HeaderTool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, del: Bool, +ren: String, +rtext: String) -> D.Node:
   match t:
     case M.Thread{+id, +p, title, _, _, turn, _, archived, override, +sa, +ua, pinned, _, +branch, _, _, model, _, _, _, _}:
       D.El{"header", "", [D.At{"class", "thread-head"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}], List.concat(&2, D.Node, [[
@@ -1169,7 +1169,7 @@ def View.header.legacy(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, min
         D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(ren, id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), rtext)},
         D.Dom.span("meta", Bool.pick(String, String.is_empty(branch), "", branch))], View.boat.chip.loc(lc, chip), [
         D.El{"div", "", [D.At{"class", "tools thread-controls"}], D.Dom.span("control-label", View.group.label(lc, False{})) <> List.append(&2, D.Node,
-          View.header.tools(lc, List.append(&2, TO.Tool, mini, TO.Tools.head.loc(lc, TO.Head{False{}, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del,
+          View.header.tools(lc, List.append(&2, TO.HeaderTool, mini, TO.Tools.head.loc(lc, TO.Head{False{}, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del,
             Bool.not(String.is_empty(M.Fork.source(st, id))), term, panel}, "flag", "snooze", "term-toggle", "@term-size"))),
           D.Dom.span("control-label", View.group.label(lc, True{})) <> List.take(&2, D.Node, View.snoozes.loc(lc, True{}), 3n))}]])}
 
@@ -3580,12 +3580,12 @@ def View.send(+act: String, +send: String) -> D.Node:
   View.send.loc(I.En{}, act, send)
 
 # the thread's header, or the one given (a bot's)
-def View.top.header(rail: Bool, +lc: I.Loc, +t: M.Thread, +st: M.State, +chip: String, +mini: List<&2, TO.Tool>, +panel: Bool, +snoozed: Bool, +picking: Bool, +term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> List<&2, D.Node>:
+def View.top.header(rail: Bool, +lc: I.Loc, +t: M.Thread, +st: M.State, +chip: String, +mini: List<&2, TO.HeaderTool>, +panel: Bool, +snoozed: Bool, +picking: Bool, +term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> List<&2, D.Node>:
   match rail:
     case True{}: [View.header(lc, t, st, chip, mini, panel, snoozed, picking, term, diff, del, ren, rtext)]
     case False{}: [View.header.legacy(lc, t, st, chip, mini, panel, snoozed, picking, term, diff, del, ren, rtext)]
 
-def View.top(rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> List<&2, D.Node>:
+def View.top(rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.HeaderTool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> List<&2, D.Node>:
 
   match hd:
     case Nil{}:
@@ -4057,7 +4057,7 @@ def View.workbar(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, 
   +signal = SG.Signal.cached(info, id)
   +shown = SG.Signal.display.shown(signal, turn, pending, st, id)
   D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}],
-    List.append(&2, D.Node, [View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(List.append(&2, TO.Tool, TO.Tools.stop.loc(lc, running), TO.Tools.retry.loc(lc, View.failed(turn)))))}
+    List.append(&2, D.Node, [View.dot.tip(SG.Signal.dot.name(SG.Signal.display.name(signal, st, id), turn, pending), SG.Signal.display.label(lc, signal, shown, st, id)), D.Dom.span("work-state", SG.Signal.display.label(lc, signal, shown, st, id))], View.tools(List.append(&2, TO.HeaderTool, TO.Tools.stop.loc(lc, running), TO.Tools.retry.loc(lc, View.failed(turn)))))}
 
 # Keep a running Stop control, but never reserve a status strip for an
 # idle bot conversation. Ordinary thread workbars retain their summaries.
@@ -4075,7 +4075,7 @@ def View.tabs(+cur: String) -> D.Node:
 
 # what the thread's page draws of its own head: nothing a top bar shows
 # (own: the bar shows this thread), else its header, work line and dock
-def View.top.own(own: Bool, rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> List<&2, D.Node>:
+def View.top.own(own: Bool, rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.HeaderTool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> List<&2, D.Node>:
   match own:
     case True{}: Nil{}
     case False{}: View.top(rail, lc, hd, t, st, chip, mini, panel, snoozed, picking, term, diff, del, ren, rtext)
@@ -4109,7 +4109,7 @@ def View.thread.timeline(+lc: I.Loc, +st: M.State, +id: String, +drafts: Map<&2,
     View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),
     View.sending.loc(lc, pend), View.thread.live.loc(lc, st, nf, live, id), View.hold.pill(pill)])}
 
-def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, +hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.Tool>, +pill: String) -> D.Node:
+def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, +hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.HeaderTool>, +pill: String) -> D.Node:
   match u t:
     case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, +p, ti, c, a, +turn, +pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
       +own = Bool.and(View.chrome(u), List.is_empty(&2, D.Node, hd))
@@ -4597,7 +4597,7 @@ def View.layer.row.loc(+lc: I.Loc, shown: Bool, +i: U32, +name: String, +color: 
 def View.layer.row(shown: Bool, +i: U32, +name: String, +color: U32, +off: U32, +act: Bool, rest: List<&2, D.Node>) -> List<&2, D.Node>:
   View.layer.row.loc(I.En{}, shown, i, name, color, off, act, rest)
 
-def View.layer.rows.loc(+lc: I.Loc, ls: List<&2, U32>, +k: U32, +off: U32, +f: LY.Focus) -> List<&2, D.Node>:
+def View.layer.rows.loc(+lc: I.Loc, ls: List<&2, U32>, +k: U32, +off: U32, +f: LY.LayerFocus) -> List<&2, D.Node>:
   match ls:
     case Nil{}:
       Nil{}
@@ -4605,14 +4605,14 @@ def View.layer.rows.loc(+lc: I.Loc, ls: List<&2, U32>, +k: U32, +off: U32, +f: L
       View.layer.row.loc(lc, U32.is_gt(View.layer.alpha(LO.Look.of.t(False{}, k, i)), 0), i, LY.Lyr.name(k, i), View.layer.color(LO.Look.of.t(False{}, k, i)), off,
         Bool.and(LY.Lyr.on(f), U32.is_eq(i, LY.Lyr.active(f))), View.layer.rows.loc(lc, t, k, off, f))
 
-def View.layer.rows(ls: List<&2, U32>, +k: U32, +off: U32, +f: LY.Focus) -> List<&2, D.Node>:
+def View.layer.rows(ls: List<&2, U32>, +k: U32, +off: U32, +f: LY.LayerFocus) -> List<&2, D.Node>:
   View.layer.rows.loc(I.En{}, ls, k, off, f)
 
 def View.layer.mode(+m: U32, +cur: U32, +label: String, +tip: String) -> D.Node:
   D.El{"button", "", [D.At{"class", Bool.pick(String, U32.is_eq(m, cur), "lmode on", "lmode")}, D.At{"title", tip}, D.At{"data-value", U32.show(m)}, D.On{"click", "view-layer-mode"}], [D.Txt{label}]}
 
 # KiCad's high contrast: the other layers as they are, dimmed, or hidden
-def View.layer.modes.loc(+lc: I.Loc, sch: Bool, +f: LY.Focus) -> List<&2, D.Node>:
+def View.layer.modes.loc(+lc: I.Loc, sch: Bool, +f: LY.LayerFocus) -> List<&2, D.Node>:
   match sch:
     case True{}:
       Nil{}
@@ -4624,15 +4624,15 @@ def View.layer.modes.loc(+lc: I.Loc, sch: Bool, +f: LY.Focus) -> List<&2, D.Node
 
 # the menu's button names the active layer while one stands out
 
-def View.layer.modes(sch: Bool, +f: LY.Focus) -> List<&2, D.Node>:
+def View.layer.modes(sch: Bool, +f: LY.LayerFocus) -> List<&2, D.Node>:
   View.layer.modes.loc(I.En{}, sch, f)
 
-def View.layer.head.loc(+lc: I.Loc, +k: U32, +f: LY.Focus) -> String:
+def View.layer.head.loc(+lc: I.Loc, +k: U32, +f: LY.LayerFocus) -> String:
   Bool.pick(String, LY.Lyr.on(f), MSG.T.web.viewer.layers.active(lc, LY.Lyr.name(k, LY.Lyr.active(f))), MSG.T.viewer.layers(lc))
 
 # the look kind of a plot: a board or schematic, a comparison's marks too
 
-def View.layer.head(+k: U32, +f: LY.Focus) -> String:
+def View.layer.head(+k: U32, +f: LY.LayerFocus) -> String:
   View.layer.head.loc(I.En{}, k, f)
 
 def View.layer.kind(sch: Bool, cmp: Bool) -> U32:
@@ -4641,12 +4641,12 @@ def View.layer.kind(sch: Bool, cmp: Bool) -> U32:
 # the menu's button reads "Layers", or the active layer's name alone (lit)
 # while one is singled out, its title saying both: a long head ("Layers ·
 # User.Comments") made the viewer's bar wrap and the board jump
-def View.layer.button.loc(+lc: I.Loc, +k: U32, +f: LY.Focus) -> D.Node:
+def View.layer.button.loc(+lc: I.Loc, +k: U32, +f: LY.LayerFocus) -> D.Node:
   Bool.pick(D.Node, LY.Lyr.on(f),
     D.El{"summary", "", [D.At{"class", "on"}, D.At{"title", View.layer.head.loc(lc, k, f)}], [D.Txt{LY.Lyr.name(k, LY.Lyr.active(f))}]},
     D.El{"summary", "", [D.At{"title", MSG.T.viewer.layers.tip(lc)}], [D.Txt{MSG.T.viewer.layers(lc)}]})
 
-def View.layers.loc(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus) -> D.Node:
+def View.layers.loc(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.LayerFocus) -> D.Node:
   +k = View.layer.kind(sch, cmp)
   D.El{"details", "", [D.At{"class", "layers"}], [View.layer.button.loc(lc, k, f),
     D.El{"div", "", [D.At{"class", "layer-list"}], List.append(&2, D.Node, View.layer.modes.loc(lc, sch, f), View.layer.rows.loc(lc, LY.Lyr.order(k), k, off, f))}]}
@@ -4657,7 +4657,7 @@ def View.layers.loc(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus)
 # A comparison names its two sides (each opens the menu of versions) over
 # a legend.
 
-def View.layers(+sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus) -> D.Node:
+def View.layers(+sch: Bool, +cmp: Bool, +off: U32, +f: LY.LayerFocus) -> D.Node:
   View.layers.loc(I.En{}, sch, cmp, off, f)
 
 def View.hist.icon(+cls: String, +action: String, +title: String, +name: String) -> D.Node:
@@ -5020,11 +5020,11 @@ def View.rc.checks(+u: U.Ui) -> List<&2, D.Node>:
 
 # The 2D bar keeps its Layers button steady and uses the local menu keys.
 # Other viewers keep their own disclosure and active-layer label.
-def View.plot.layer.button(+lc: I.Loc, +k: U32, +f: LY.Focus) -> D.Node:
+def View.plot.layer.button(+lc: I.Loc, +k: U32, +f: LY.LayerFocus) -> D.Node:
   D.El{"summary", "", [D.At{"class", Bool.pick(String, LY.Lyr.on(f), "on", "")},
     D.At{"title", Bool.pick(String, LY.Lyr.on(f), View.layer.head.loc(lc, k, f), MSG.T.viewer.layers.tip(lc))}], [D.Txt{MSG.T.viewer.layers(lc)}]}
 
-def View.plot.layers(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus) -> D.Node:
+def View.plot.layers(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.LayerFocus) -> D.Node:
   +k = View.layer.kind(sch, cmp)
   D.El{"details", "", [D.At{"class", "layers local-menu"}], [View.plot.layer.button(lc, k, f),
     D.El{"div", "", [D.At{"class", "layer-list"}], List.append(&2, D.Node, View.layer.modes.loc(lc, sch, f), View.layer.rows.loc(lc, LY.Lyr.order(k), k, off, f))}]}
@@ -5500,7 +5500,7 @@ def View.tour.back(on: Bool) -> D.Node:
 
 # The compact header keeps these tools inside a menu. Show their labels
 # in the card so the step also makes sense before there is a thread.
-def View.tour.example.tool(t: TO.Tool) -> D.Node:
+def View.tour.example.tool(t: TO.HeaderTool) -> D.Node:
   D.El{"span", "", Nil{}, [D.Txt{TO.Tools.label(t)}]}
 
 def View.tour.example(show: Bool, +lc: I.Loc) -> List<&2, D.Node>:
