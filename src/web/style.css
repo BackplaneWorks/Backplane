@@ -3123,6 +3123,12 @@ html.phone #history-fill-more { left: 50% !important; transform: translateX(-50%
    no message, the button over the Working row) */
 html.phone .app.phone .thread-content:has(#composer:focus) > .order-card:has(> .oc-line) > :not(.oc-line) { display: none; }
 html.phone:has(#composer:focus) #history-fill-more { display: none !important; }
+/* the ↓ to the latest (phone-thread.js): a thumb's square at the
+   timeline's foot, at the right; not beside the pill, not off the thread
+   screen, not over a sheet or a menu */
+.ph-latest { position: fixed; z-index: 11; right: max(12px, env(safe-area-inset-right)); width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 20px; line-height: 1; box-shadow: 0 2px 8px rgb(0 0 0 / .35); }
+.ph-latest:active { background: var(--raise); }
+:is(.ph-latest[hidden], html:not(:has(.app.phone.ph-thread)) .ph-latest, html:has(.hold-pill, .ph-sheet-layer, .rowmenu, .lightbox, .composer .shade, .composer-more[open], .composer .skills) .ph-latest) { display: none; }
 /* the image lightbox (outside .app): its tools below the notch and a
    thumb wide, its status above the home bar */
 html.phone .lightbox .lb-close { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 44px; height: 44px; }

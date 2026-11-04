@@ -34,7 +34,7 @@ const NEAR = 48, FINGER_MS = 700;
 // place (the planner's own position(): its anchor row and offset) is kept
 // while the timeline shows and given back to the planner (restore) when it
 // shows again. (list: host.js's timelineList, the timeline's planner)
-export function installPhoneThread({ document: doc = document, window: win = window, list = () => null } = {}) {
+export function installPhoneThread({ document: doc = document, window: win = window, list = () => null, latest = () => {}, newest = () => true } = {}) {
   // A page that cannot record (no getUserMedia: a plain-http origin) would
   // dictate with the hub machine's microphone, far from the phone; the
   // phone's keyboard has its own dictation (style.css hides the mic)
@@ -52,6 +52,26 @@ export function installPhoneThread({ document: doc = document, window: win = win
   const shutMore = () => { for (const d of doc.querySelectorAll?.('.composer-more[open]') || []) d.open = false; };
   const keyboard = () => doc.activeElement?.id === 'composer';
   const toEnd = t => { const max = t.scrollHeight - t.clientHeight; if (t.scrollTop < max - 1) t.scrollTop = max; };
+  // Far from the end (a screen and a half, or on an earlier page of the
+  // history), a ↓ at the timeline's foot goes back to the latest, as a
+  // phone's messages do (host.js's holdBottom, the pill's own way down).
+  // The hub's "N new ↓" pill says it when something new came: never both.
+  let down = null;
+  const place = () => {
+    const t = el;
+    const far = !!t && t.isConnected && t.clientHeight > 0 && onPhone(doc) && !doc.querySelector('.hold-pill')
+      && (t.scrollHeight - t.scrollTop - t.clientHeight > t.clientHeight * 1.5 || !newest());
+    if (!far) { if (down) down.hidden = true; return; }
+    if (!down) {
+      down = doc.createElement('button');
+      down.type = 'button'; down.className = 'ph-latest'; down.textContent = '↓';
+      down.title = 'Go to the latest'; down.setAttribute('aria-label', 'Go to the latest');
+      down.addEventListener('click', () => { down.hidden = true; end = true; latest(); });
+      doc.body.appendChild(down);
+    }
+    down.style.top = Math.round(t.getBoundingClientRect().bottom - 56) + 'px';
+    down.hidden = false;
+  };
   const resized = entries => {
     for (const e of entries) {
       const t = e.target, h = t.clientHeight;
@@ -66,6 +86,7 @@ export function installPhoneThread({ document: doc = document, window: win = win
       }
       height = h;
     }
+    place();
   };
   // the timeline on show (a thread opened draws another), with an observer
   // made after the planner's, so it runs after the planner's in a frame
@@ -85,7 +106,7 @@ export function installPhoneThread({ document: doc = document, window: win = win
     watch();
     end = !!el && !!event.target?.closest?.('.composer') && atEnd(el);
   }, { capture: true, passive: true });
-  for (const type of ['touchstart', 'pointerdown', 'focusin']) doc.addEventListener(type, () => { if (onPhone(doc)) watch(); }, { capture: true, passive: true });
+  for (const type of ['touchstart', 'pointerdown', 'focusin']) doc.addEventListener(type, () => { if (onPhone(doc)) { watch(); place(); } }, { capture: true, passive: true });
   for (const type of ['touchmove', 'wheel']) doc.addEventListener(type, moved, { capture: true, passive: true });
   doc.addEventListener('scroll', event => {
     const t = event.target;
@@ -93,6 +114,7 @@ export function installPhoneThread({ document: doc = document, window: win = win
     if (t !== el) { watch(); return; }
     if (end && t.scrollHeight - t.scrollTop - t.clientHeight > 2 && keyboard() && Date.now() - finger > FINGER_MS) { toEnd(t); return; }
     end = atEnd(t);
+    place();
     if (!keeping) keeping = win.setTimeout(keep, 150);
   }, { capture: true, passive: true });
   // Send (or Stop, Steer) pressed while typing gives the draft its focus

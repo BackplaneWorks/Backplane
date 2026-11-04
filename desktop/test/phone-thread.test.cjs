@@ -116,3 +116,34 @@ test('Send pressed while typing on a phone gives the draft its focus back after 
   for (const f of p.won.click || []) f({});
   assert.equal(focused, 1);
 });
+
+test('far from the end a ↓ goes back to the latest, on a phone only, never beside the pill', async () => {
+  const { installPhoneThread } = await import('../../src/web/phone-thread.js');
+  const made = [], setup = (phone, newest = () => true) => {
+    const p = page(phone), calls = [];
+    Object.assign(p.timeline, { isConnected: true, getBoundingClientRect: () => ({ bottom: 600 }) });
+    p.doc.querySelector = s => s === '.hold-pill' ? p.pill : null;
+    p.doc.body = { appendChild: e => made.push(e) };
+    p.doc.createElement = () => { const e = { style: {}, attrs: {}, on: {}, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(t, f) { this.on[t] = f; } }; return e; };
+    installPhoneThread({ document: p.doc, window: p.win, latest: () => calls.push('latest'), newest });
+    p.timeline.scrollTop = 1500; p.fire('touchstart', { closest: () => null });
+    return { p, calls };
+  };
+  const { p, calls } = setup(true);
+  p.timeline.scrollTop = 1400; p.fire('scroll');          // 100 px from the end: none
+  assert.equal(made.length, 0);
+  p.timeline.scrollTop = 600; p.fire('scroll');           // 900 px (1.8 screens) up
+  const down = made[0];
+  assert.equal(down.hidden, false); assert.equal(down.style.top, '544px'); assert.equal(down.attrs['aria-label'], 'Go to the latest');
+  down.on.click(); assert.deepEqual(calls, ['latest']); assert.equal(down.hidden, true);
+  p.pill = {}; p.timeline.scrollTop = 500; p.fire('scroll'); // the hub's "N new ↓" says it
+  assert.equal(down.hidden, true);
+  // on an earlier page of the history, near its foot: still away from the latest
+  const e = setup(true, () => false);
+  e.p.timeline.scrollTop = 1400; e.p.fire('scroll');
+  assert.equal(made[1].hidden, false);
+  // not a phone: nothing
+  const d = setup(false);
+  d.p.timeline.scrollTop = 0; d.p.fire('scroll');
+  assert.equal(made.length, 2);
+});
