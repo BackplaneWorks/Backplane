@@ -3,7 +3,7 @@ import ../core/model.bend as M
 import ../core/far.bend as FR
 import ../core/snapshot.bend as SN
 import ./db.bend as D
-import ./thin-view.bend as V
+import ./window-file.bend as V
 import ./review-window.bend as RW
 
 # Settled threads have no entries in the hot startup state. Read this
