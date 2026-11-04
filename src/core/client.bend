@@ -1784,8 +1784,12 @@ def Ui.reply.diff(has: Bool, u: Ui, +o: J.Json) -> Ui:
 # while that thread's viewer has shown nothing and its panel was never
 # opened or shut by hand ("panel.hand:t"); an agent's viewer_show always
 # opens it (laws viewer_auto_*)
+# (never on a phone's web page, thin-view's Session.renderer "phone": there
+# the panel is the whole screen, and the person who just sent a message
+# would lose the thread for the board; its views menu opens it)
 def Viewer.auto(+u: Ui, +th: String) -> Bool:
-  Bool.and(String.is_empty(Ui.info(u, "view.kind:" ++ th)), Bool.not(String.eq(Ui.info(u, "panel.hand:" ++ th), "1")))
+  Bool.and(Bool.and(String.is_empty(Ui.info(u, "view.kind:" ++ th)), Bool.not(String.eq(Ui.info(u, "panel.hand:" ++ th), "1"))),
+    Bool.not(String.eq(Ui.info(u, "local.workspace.form"), "phone")))
 
 def Ui.view.auto(go: Bool, +u: Ui, +th: String, +o: J.Json) -> Ui:
   match go:
