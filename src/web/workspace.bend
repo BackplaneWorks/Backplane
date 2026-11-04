@@ -48,10 +48,10 @@ def WS.neighbour(+u: U.Ui, +next: Bool) -> U.Act:
   WS.jump(u, WS.after(Bool.pick(List<&2, String>, next, U.Side.visible(u), List.reverse(&2, String, U.Side.visible(u))), U.Ui.sel(u)))
 
 def WS.palette.open(+u: U.Ui, +mode: String) -> U.Act:
-  U.Ui.also(WS.none(U.Palette.open(u, mode)), [U.Focus{"workspace-query"}])
+  U.Ui.also(WS.none(U.Palette.open(u, mode)), [U.FocusField{"workspace-query"}])
 
 def WS.palette.close(u: U.Ui) -> U.Act:
-  U.Act{U.Ui.flag_off(u, "palette"), [U.Focus{"composer"}]}
+  U.Act{U.Ui.flag_off(u, "palette"), [U.FocusField{"composer"}]}
 
 # Commands toggles: pressed (or ctrl+shift+P) while open it shuts the palette
 # (client.bend's Rail.palette)
@@ -69,7 +69,7 @@ def WS.view.key(+u: U.Ui, +kind: String, +action: String) -> U.Act:
   U.Ui.act(u, U.Rail.act(U.Rail.tab(u), kind, action), U.Rail.value(U.Rail.tab(u), kind, ""))
 
 def WS.term.hide(u: U.Ui) -> U.Act:
-  U.Act{U.Ui.flag_off(u, "term"), [U.Focus{"composer"}]}
+  U.Act{U.Ui.flag_off(u, "term"), [U.FocusField{"composer"}]}
 
 # What Esc puts away next once no menu, dialog, picker or palette is open
 # (workspace-keys.js asks, from what the page shows): the floating
@@ -114,7 +114,7 @@ def WS.term.show(valid: Bool, +u: U.Ui, size: String) -> U.Act:
       +fresh = U.Ui.info_set(U.Ui.info_set(u, "local.terminal.pending", ""), "local.terminal.incarnation", Nat.show(Bool.pick(Nat, Nat.is_lt(incarnation, PRESENT.Session.nat.max()), Nat.add(incarnation, 1n), incarnation)))
       +ready = U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.flag_on(fresh, "term"), "@terminal.owner", owner),
         "@terminal.cwd", U.Ui.root(u)), "@terminal.title", U.Active.title(U.Ui.thread(U.Ui.state(u), owner)))
-      U.Ui.also(WS.term.snapshot(Bool.not(U.Emb.has(u, owner)), WS.term.dimensions(U.Term.size.k(String.split(size, 'x')), ready, owner, "term.open"), owner), [U.Focus{"term"}])
+      U.Ui.also(WS.term.snapshot(Bool.not(U.Emb.has(u, owner)), WS.term.dimensions(U.Term.size.k(String.split(size, 'x')), ready, owner, "term.open"), owner), [U.FocusField{"term"}])
 
 def WS.term.toggle(+u: U.Ui, +size: String) -> U.Act:
   Bool.pick(U.Act, Bool.and(U.Ui.flag(u, "term"), String.eq(WS.owner(u), U.Ui.sel(u))), WS.term.hide(u),

@@ -88,5 +88,5 @@ def main() -> IO(Unit):
     replay(m, t1)
     +t4 : Nat <- IO.now()
     seen(0n, "total", t0, t4)
-    ok2 : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.Leave{0})
+    ok2 : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.PeerLeave{0})
     return Unit{}

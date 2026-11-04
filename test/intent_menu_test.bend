@@ -36,7 +36,7 @@ def cmds(cs: List<&2, U.Cmd>) -> String:
   match cs:
     case Nil{}: ""
     case U.Send{t} <> rest: "send " ++ t ++ ";" ++ cmds(rest)
-    case U.Focus{id} <> rest: "focus " ++ id ++ ";" ++ cmds(rest)
+    case U.FocusField{id} <> rest: "focus " ++ id ++ ";" ++ cmds(rest)
     case U.Later{_, a, v} <> rest: "later " ++ a ++ " " ++ v ++ ";" ++ cmds(rest)
     case _ <> rest: "other;" ++ cmds(rest)
 

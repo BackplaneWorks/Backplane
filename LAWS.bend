@@ -7339,42 +7339,42 @@ law lyr_plain_as_is:
 
 # dimmed: the other layers at a quarter
 law lyr_dim_quarter:
-  {LY.Lyr.shade(0, LY.Focus{12, 1}, 16, (7, 200)) == (7, 50) : U32 & U32}
+  {LY.Lyr.shade(0, LY.LayerFocus{12, 1}, 16, (7, 200)) == (7, 50) : U32 & U32}
 
 # only: the other layers hidden
 law lyr_only_hides:
-  {LY.Lyr.shade(0, LY.Focus{12, 2}, 16, (7, 200)) == (7, 0) : U32 & U32}
+  {LY.Lyr.shade(0, LY.LayerFocus{12, 2}, 16, (7, 200)) == (7, 0) : U32 & U32}
 
 # the active layer always shows, even one hidden by default
 law lyr_active_shows:
-  {LY.Lyr.shade(0, LY.Focus{15, 2}, 15, (7, 0)) == (7, 200) : U32 & U32}
+  {LY.Lyr.shade(0, LY.LayerFocus{15, 2}, 15, (7, 0)) == (7, 200) : U32 & U32}
 
 # a copper layer keeps its vias, and every layer the board's outline
 law lyr_copper_keeps_vias:
-  {LY.Lyr.shade(0, LY.Focus{5, 2}, 23, (7, 255)) == (7, 255) : U32 & U32}
+  {LY.Lyr.shade(0, LY.LayerFocus{5, 2}, 23, (7, 255)) == (7, 255) : U32 & U32}
 
 law lyr_outline_stays:
-  {LY.Lyr.shade(0, LY.Focus{16, 2}, 22, (7, 255)) == (7, 255) : U32 & U32}
+  {LY.Lyr.shade(0, LY.LayerFocus{16, 2}, 22, (7, 255)) == (7, 255) : U32 & U32}
 
 # a click on the active layer again puts every layer back
 law lyr_pick_again_all:
-  {LY.Lyr.pick(LY.Focus{16, 1}, 16) == LY.Focus{16, 0} : LY.Focus}
+  {LY.Lyr.pick(LY.LayerFocus{16, 1}, 16) == LY.LayerFocus{16, 0} : LY.LayerFocus}
 
 # ctrl+H goes around: dimmed, hidden, as they are
 law lyr_cycle_round:
-  {LY.Lyr.cycle(0, LY.Lyr.cycle(0, LY.Lyr.cycle(0, LY.Focus{12, 0}))) == LY.Focus{12, 0} : LY.Focus}
+  {LY.Lyr.cycle(0, LY.Lyr.cycle(0, LY.Lyr.cycle(0, LY.LayerFocus{12, 0}))) == LY.LayerFocus{12, 0} : LY.LayerFocus}
 
 # the window's kind word carries the focus and gives the kind back
 law lyr_kind_round:
-  {LY.Lyr.kind.focus(LY.Lyr.kind.with(9, LY.Focus{16, 2})) == LY.Focus{16, 2} : LY.Focus}
+  {LY.Lyr.kind.focus(LY.Lyr.kind.with(9, LY.LayerFocus{16, 2})) == LY.LayerFocus{16, 2} : LY.LayerFocus}
 
 law lyr_kind_base:
-  {LY.Lyr.kind.base(LY.Lyr.kind.with(9, LY.Focus{16, 2})) == 9 : U32}
+  {LY.Lyr.kind.base(LY.Lyr.kind.with(9, LY.LayerFocus{16, 2})) == 9 : U32}
 
 # the masks the web and phones draw from agree: only hides every layer
 # not kept and never the active one
 law lyr_masks_only:
-  {LY.Masks.off(LY.Lyr.masks(0, 4096, LY.Focus{12, 2})) == 37736447 : U32}
+  {LY.Masks.off(LY.Lyr.masks(0, 4096, LY.LayerFocus{12, 2})) == 37736447 : U32}
 
 # Design review: comparing (core/hist.bend, client.bend's Rv.*)
 # ---------------------------------------------------------------
@@ -11203,7 +11203,7 @@ law window_tools_english:
   for +sv: String
   for +ta: String
   for +tv: String
-  {TOOL.Tools.head(h, sa, sv, ta, tv) == TOOL.Tools.head.loc(I18.En{}, h, sa, sv, ta, tv) : List<&2, TOOL.Tool>}
+  {TOOL.Tools.head(h, sa, sv, ta, tv) == TOOL.Tools.head.loc(I18.En{}, h, sa, sv, ta, tv) : List<&2, TOOL.HeaderTool>}
 
 law window_picker_default:
   {L.Picker.name.loc(I18.Ja{}, "") == "既定" : String}
@@ -14219,7 +14219,7 @@ law voice_category_requests_status:
 
 # Regression for c12-5.
 law account_blank_label_no_request:
-  {U.Act.cmds(U.Acv.act(U.Ui.scratch_set(U.Ui.init(0n), "@f.accountlabel", "  "), "acct-add", "")) == [U.Focus{"agy-accountlabel"}] : List<&2, U.Cmd>}
+  {U.Act.cmds(U.Acv.act(U.Ui.scratch_set(U.Ui.init(0n), "@f.accountlabel", "  "), "acct-add", "")) == [U.FocusField{"agy-accountlabel"}] : List<&2, U.Cmd>}
 
 # Regression for c13-1.
 law bot_invalid_name_keeps_persona:

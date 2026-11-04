@@ -151,7 +151,7 @@ def Session.commands(cs: List<&2, H.HCmd>) -> List<&2, J.Json>:
       J.Json.obj([J.KV{"type", J.Json.str("send")}, J.KV{"hub", J.Json.str(k)}, J.KV{"text", J.Json.str(text)}]) <> Session.commands(t)
     case H.HCmd{k, U.Keep{thread, text}} <> t:
       J.Json.obj([J.KV{"type", J.Json.str("keep")}, J.KV{"thread", J.Json.str(k ++ "|" ++ thread)}, J.KV{"text", J.Json.str(text)}]) <> Session.commands(t)
-    case H.HCmd{_, U.Focus{id}} <> t:
+    case H.HCmd{_, U.FocusField{id}} <> t:
       J.Json.obj([J.KV{"type", J.Json.str("focus")}, J.KV{"id", J.Json.str(id)}]) <> Session.commands(t)
     case H.HCmd{_, U.ScrollEnd{}} <> t:
       J.Json.obj([J.KV{"type", J.Json.str("scroll")}]) <> Session.commands(t)
