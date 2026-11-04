@@ -53,3 +53,19 @@ They are not mathematical or actual-Bend gate qualification. Routing-model
 measurements likewise describe a shell fixture only. No test was rerun
 locally after that rule. Fresh final-head Boat validation is still required
 before this correction lands.
+
+Fresh current-code controls ran on normal Boat as work1526433 /
+job`j20261104035728-695281`, exact head
+`5b3f524240022cc1b38ce4f5a6d994244514eb48`. All94 Python controls passed
+in4.830s. Actual512MiB/swap0 cgroup peak109,281,280B, all limit/OOM events0;
+process VmHWM40,720KiB. Whole worker12.96s,19credit-s/$0.00019; sandbox
+deleted verified. The approved normal daily runner transferred one bootstrap
+file; source came from immutable public blobless Git. Raw BOAT receipts and
+`boat-controls.py` are preserved. Mock fixtures still mean no native Bend
+or proof/gate qualification; actual-repository pass seeds remain0. The later
+receipt-only commit changes none of those tested helper/source bytes.
+
+Landing is waiting for a separate premerge transport correction: the approved
+daily runner lacks `--include-file`, which the current premerge dispatcher
+requires. No exception is established and no runner/budget/guard is silently
+substituted. Fresh normal-Boat merged-shape validation remains required.
