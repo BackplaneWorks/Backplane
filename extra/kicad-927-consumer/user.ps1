@@ -16,7 +16,7 @@ try {
     # Child must inherit the bootstrap's real limit. No uncapped fallback.
     $resources = Get-BP927Resources
     $resources | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $cfg.out 'resources-start.json')
-    Assert-BP927Resources $resources
+    Assert-BP927Resources $resources $cfg.resourcePolicy.allowExistingPagefile
     $env:PYTHONDONTWRITEBYTECODE = '1'
     & $cfg.python (Join-Path $PSScriptRoot 'canonical-946.py') $ConfigPath *> (Join-Path $cfg.out 'canonical-946.log')
     $abiCode = $LASTEXITCODE
@@ -29,7 +29,7 @@ try {
     try {
         $resources = Get-BP927Resources
         $resources | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $cfg.out 'resources-end.json')
-        Assert-BP927Resources $resources
+        Assert-BP927Resources $resources $cfg.resourcePolicy.allowExistingPagefile
     } catch { $code = 1; $_ | Out-String | Add-Content (Join-Path $cfg.out 'user-error.txt') }
 }
 exit $code

@@ -21,6 +21,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Frozen product JS for canonical native measurement
+        uses: actions/checkout@v4
+        with:
+          ref: afa9679273206b3e9b1da4c966c9b63fb6f57ab4
+          path: build/frozen-source
+          persist-credentials: false
+          sparse-checkout: src
+      - name: Separately pinned merged canonical verifier
+        uses: actions/checkout@v4
+        with:
+          ref: 2823fe4641bbadcb41a6cf49f91fe2c7fbc77978
+          path: build/canonical-946
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: scripts/service-runtime.py
       - name: Download exact producer artifact through authenticated Actions
         uses: actions/download-artifact@v4
         with:
@@ -39,6 +58,7 @@ jobs:
           name: kicad-927-windows-native-evidence
           path: |
             build/kicad-927-native/*.json
+            build/kicad-927-native/*.jsonl
             build/kicad-927-native/*.log
             build/kicad-927-native/*.txt
             build/kicad-927-native/*.png

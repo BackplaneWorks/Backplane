@@ -42,6 +42,8 @@ public static class BP927Job {
 function Get-BP927Resources {
     $limits = [BP927Job]::Current()
     $paging = @(Get-CimInstance Win32_PageFileUsage -ErrorAction Stop | Select-Object Name,AllocatedBaseSize,CurrentUsage,PeakUsage)
+    $counters = Get-CimInstance Win32_PerfRawData_PerfOS_Memory -ErrorAction Stop |
+        Select-Object PageReadsPersec,PageWritesPersec,PagesInputPersec,PagesOutputPersec,PageFaultsPersec,Timestamp_PerfTime,Frequency_PerfTime,AvailableBytes,CommittedBytes,CommitLimit
     @{
         jobMemoryLimitBytes = $limits.jobMemory.ToUInt64()
         peakJobMemoryBytes = $limits.peakJob.ToUInt64()
@@ -49,13 +51,16 @@ function Get-BP927Resources {
         limitFlags = $limits.basic.flags
         member = [BP927Job]::Member()
         pageFiles = $paging
+        pagingCounters = $counters
+        pagingCounterScope = 'Host-wide raw Windows memory counters; use timestamp/frequency deltas, not process attribution'
         pid = $PID
         observedAt = [DateTime]::UtcNow.ToString('o')
     }
 }
-function Assert-BP927Resources($resources) {
+function Assert-BP927Resources($resources, [bool]$AllowExistingPagefile=$false) {
     if (!$resources.member -or $resources.jobMemoryLimitBytes -le 0 -or $resources.jobMemoryLimitBytes -gt 8589934592 -or
-        ($resources.limitFlags -band 0x200) -eq 0 -or ($resources.limitFlags -band 0x1800) -ne 0 -or $resources.pageFiles.Count -ne 0) {
-        throw 'BLOCKED: enforced <=8 GiB Windows job, no breakaway and no active pagefile required'
+        ($resources.limitFlags -band 0x200) -eq 0 -or ($resources.limitFlags -band 0x1800) -ne 0 -or
+        (!$AllowExistingPagefile -and $resources.pageFiles.Count -ne 0) -or !$resources.pagingCounters) {
+        throw 'BLOCKED: enforced <=8 GiB Windows job, no breakaway and authorized measured paging policy required'
     }
 }

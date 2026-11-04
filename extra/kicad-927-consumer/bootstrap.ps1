@@ -5,6 +5,10 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $out = Join-Path $root 'build\kicad-927-native'
 New-Item -ItemType Directory -Force $out | Out-Null
 $report = @{status='INCOMPLETE';phase='resource-gate';cleanup=@();published=$false;releaseBuildApproved=$false}
+# Explicit person authorization: retain the existing hosted Windows pagefile
+# for this #927/#946 test, keep the same cap, and measure paging throughout.
+$resourcePolicy = @{maxJobMemoryBytes=8589934592;allowExistingPagefile=$true;pagefileModificationAllowed=$false;authorization='User option 1: allow existing GitHub Windows pagefile for #927 test; retain cap and record paging';scope='This #927 consumer and separate #946 native measurement only'}
+$report.resourcePolicy=$resourcePolicy
 $account = $null
 function Save-Report { $report | ConvertTo-Json -Depth 12 | Set-Content -Encoding utf8 (Join-Path $out 'bootstrap.json') }
 function SHA($file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -13,7 +17,7 @@ try {
     . (Join-Path $PSScriptRoot 'job.ps1')
     [BP927Job]::CapSelf()
     $report.resourcesStart = Get-BP927Resources; Save-Report
-    Assert-BP927Resources $report.resourcesStart
+    Assert-BP927Resources $report.resourcesStart $resourcePolicy.allowExistingPagefile
     $report.phase = 'authenticated-artifact-verification'; Save-Report
     $zip = Join-Path $ArtifactDirectory 'dist\backplane-v0.14.2-windows-x64-TEST-ONLY.zip'
     $receipt = Join-Path $ArtifactDirectory 'dist\TEST-PACKAGE.json'
@@ -84,6 +88,7 @@ try {
         python=(Get-Command python.exe).Source
         frozenSourceRoot=(Join-Path $root 'build\frozen-source')
         canonicalFactoryRoot=(Join-Path $root 'build\canonical-946')
+        resourcePolicy=$resourcePolicy
     }
     $configPath = Join-Path $out 'config.json'
     $cfg | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $configPath
@@ -93,7 +98,16 @@ try {
     $credential = [PSCredential]::new("$env:COMPUTERNAME\$name",$password)
     $child = Start-Process -FilePath $shell -ArgumentList $arguments -Credential $credential -LoadUserProfile -WorkingDirectory $out -PassThru
     $report.wrapperPid = $child.Id; Save-Report
-    if (!$child.WaitForExit(2100000)) { $report.timedOut=$true; throw 'Native acceptance exceeded 35 minutes' }
+    $deadline = [DateTime]::UtcNow.AddMinutes(35)
+    $samplesPath = Join-Path $out 'paging-samples.jsonl'
+    $report.resourcesBeforeConsumer=Get-BP927Resources
+    $report.resourcesBeforeConsumer | ConvertTo-Json -Depth 8 -Compress | Add-Content -Encoding utf8 $samplesPath
+    while (!$child.WaitForExit(5000)) {
+        $sample=Get-BP927Resources
+        Assert-BP927Resources $sample $resourcePolicy.allowExistingPagefile
+        $sample | ConvertTo-Json -Depth 8 -Compress | Add-Content -Encoding utf8 $samplesPath
+        if ([DateTime]::UtcNow -gt $deadline) { $report.timedOut=$true; throw 'Native acceptance exceeded 35 minutes' }
+    }
     $child.Refresh(); $report.consumerExitCode=$child.ExitCode
     if ($child.ExitCode -ne 0) { throw 'Native acceptance wrapper failed; preserve partial result/logs' }
     $result = Get-Content (Join-Path $out 'result.json') -Raw | ConvertFrom-Json
@@ -121,7 +135,7 @@ try {
         $report.accountRemoved = !(Get-LocalUser -Name $account.Name -ErrorAction SilentlyContinue)
         if (!$report.accountRemoved -or @($report.cleanup | Where-Object { !$_.stopped }).Count -ne 0) { $report.status='FAIL';$report.cleanupIncomplete=$true }
     }
-    try { $report.resourcesEnd=Get-BP927Resources; Assert-BP927Resources $report.resourcesEnd }
+    try { $report.resourcesEnd=Get-BP927Resources; Assert-BP927Resources $report.resourcesEnd $resourcePolicy.allowExistingPagefile }
     catch { $report.resourceError=$_ | Out-String; if ($report.status -eq 'PASS') {$report.status='FAIL'} }
     Save-Report
 }

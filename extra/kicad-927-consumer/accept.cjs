@@ -131,7 +131,10 @@ async function main() {
   assert.equal(result.identity.admin,false,'All assertions and application processes must be standard-user');
   assert.equal(cfg.standardUserSid,result.identity.sid,'Wrong disposable account');
   const resources=json(path.join(out,'resources-start.json'));
-  assert(resources.jobMemoryLimitBytes>0 && resources.jobMemoryLimitBytes<=8589934592 && resources.pageFiles.length===0,'Kernel job cap / no-pagefile gate missing');
+  assert(resources.jobMemoryLimitBytes>0 && resources.jobMemoryLimitBytes<=8589934592 && resources.member && (resources.limitFlags&512) && !(resources.limitFlags&0x1800),'Kernel job cap / no-breakaway gate missing');
+  assert(Array.isArray(resources.pageFiles) && resources.pagingCounters,'Actual pagefile and paging measurements required');
+  assert(resources.pageFiles.length===0 || cfg.resourcePolicy?.allowExistingPagefile===true,'Existing pagefile exception requires explicit authorization');
+  result.resourcePolicy=cfg.resourcePolicy;
   result.resourcesStart=resources;
   const build=json(path.join(path.dirname(cfg.executable),'resources','DESKTOP-BUILD.json'));
   assert.equal(build.sourceCommit,cfg.sourceCommit,'Package source commit mismatch');
