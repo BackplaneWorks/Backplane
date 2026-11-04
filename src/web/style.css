@@ -2664,6 +2664,12 @@ html[data-backplane-held="quiet"] .allowance-chip { visibility: hidden; }
 html.phone, html.phone body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 html.phone body { position: fixed; inset: 0; }
 html.phone #root { height: var(--ph-vh, 100dvh); }
+/* a long-press on a row, tab or the header opens its menu: it must not also
+   start the WebView's text selection (Android's handles) or iOS's callout,
+   on the row or on the sheet that opens under the finger */
+.app.phone :is(.thread, .project-head, [data-ph-long], .ph-tabs, .ph-head, .ph-swipe-strip, .rowmenu, .ph-sheet, .local-menu-body), html.phone .rowmenu { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* (their fields stay selectable: iOS will not type into a field under user-select: none) */
+.app.phone :is(.thread, .project-head, [data-ph-long], .ph-tabs, .ph-head, .ph-swipe-strip, .rowmenu, .ph-sheet, .local-menu-body) :is(input, textarea, [contenteditable]), html.phone .rowmenu :is(input, textarea) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .app.phone {
   --ph-tap: 44px; --ph-row: 56px; --ph-head: 52px; --ph-tabs: 56px;
   position: fixed; left: 0; right: 0; top: var(--ph-top, 0px); height: var(--ph-vh, 100dvh);
