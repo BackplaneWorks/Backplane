@@ -51,6 +51,7 @@ function fixture() {
     },
     page(after=0,through=10000,b=budget,thread='a') {
       const p=effects.review_page(h,thread,after,through,b);
+      assert.equal(typeof p.done,'boolean','Bend Bool crosses the JS boundary as a primitive');
       assert.equal(stats.active,0,'every prepared statement finalized');
       assert.equal(stats.savepoints,0,'page savepoint released');
       return p;
@@ -65,7 +66,7 @@ test('indexed thread/seq windows preserve every column and ascending seq rather 
     f.add(302,{thread:'private'});f.add(303,{kind:'msg'});f.add(304,{role:'tool'});f.add(305,{thread:'elsewhere',src:'a'});
     const expected=f.db.query("SELECT seq,ord,id,thread,src,kind,role,akind,text,at FROM entry WHERE thread='a' AND kind='act' AND role='review' AND seq>0 AND seq<=305 ORDER BY seq").values().map(r=>r.map(x=>String(x??'')));
     let at=0,got=[],pages=0;
-    for (;;) { const p=f.page(at,305); assert.equal(p.error,'');const xs=rows(p);assert.ok(xs.length<=128);got.push(...xs);pages++; if(p.done.$==='True')break;assert.ok(p.next>at);at=p.next; }
+    for (;;) { const p=f.page(at,305); assert.equal(p.error,'');const xs=rows(p);assert.ok(xs.length<=128);got.push(...xs);pages++; if(p.done)break;assert.ok(p.next>at);at=p.next; }
     assert.equal(pages,3);assert.deepEqual(got,expected);
     const plan=f.db.query("EXPLAIN QUERY PLAN SELECT seq FROM entry INDEXED BY entry_thread WHERE thread='a' AND kind='act' AND role='review' AND seq>0 AND seq<=305 ORDER BY seq LIMIT 129").values();
     assert.match(plan.flat().map(String).join(' '),/entry_thread.*thread=.*seq>/);
@@ -75,33 +76,33 @@ test('indexed thread/seq windows preserve every column and ascending seq rather 
 test('fixed inclusive through excludes later appends between pages',()=>{
   const f=fixture();try {
     for(let n=1;n<=3;n++)f.add(n);
-    const first=f.page(0,3,{rows:2,bytes:1048576});assert.equal(first.next,2);assert.equal(first.done.$,'False');
-    f.add(4);const last=f.page(first.next,3,{rows:2,bytes:1048576});assert.deepEqual(rows(last).map(r=>r[0]),['3']);assert.equal(last.done.$,'True');
-    const empty=f.page(3,3);assert.equal(empty.next,3);assert.equal(empty.done.$,'True');assert.deepEqual(rows(empty),[]);
+    const first=f.page(0,3,{rows:2,bytes:1048576});assert.equal(first.next,2);assert.equal(first.done,false);
+    f.add(4);const last=f.page(first.next,3,{rows:2,bytes:1048576});assert.deepEqual(rows(last).map(r=>r[0]),['3']);assert.equal(last.done,true);
+    const empty=f.page(3,3);assert.equal(empty.next,3);assert.equal(empty.done,true);assert.deepEqual(rows(empty),[]);
   } finally {f.close();}
 });
 
 test('byte-limited short page is a continuation, with payload lookahead kept in SQLite',()=>{
   const f=fixture();try {
     f.add(1,{text:'🛶'.repeat(100)});f.add(2,{text:'y'.repeat(800)});f.add(3,{text:'z'});
-    const p=f.page(0,3,{rows:128,bytes:1024});assert.equal(p.done.$,'False');assert.equal(p.next,1);assert.equal(rows(p).length,1);assert.equal(f.stats.reads,1);
-    const q=f.page(p.next,3,{rows:128,bytes:1024});assert.equal(q.next,2);assert.equal(rows(q).length,1);assert.equal(q.done.$,'False');
-    const r=f.page(q.next,3,{rows:128,bytes:1024});assert.equal(r.next,3);assert.equal(r.done.$,'True');
+    const p=f.page(0,3,{rows:128,bytes:1024});assert.equal(p.done,false);assert.equal(p.next,1);assert.equal(rows(p).length,1);assert.equal(f.stats.reads,1);
+    const q=f.page(p.next,3,{rows:128,bytes:1024});assert.equal(q.next,2);assert.equal(rows(q).length,1);assert.equal(q.done,false);
+    const r=f.page(q.next,3,{rows:128,bytes:1024});assert.equal(r.next,3);assert.equal(r.done,true);
   } finally {f.close();}
 });
 
 test('one indivisible oversized action advances once, without caching or losing its successor',()=>{
   const f=fixture();try {
     const text='🛶'.repeat(300000);f.add(1,{text});f.add(2,{text:'later'});
-    const p=f.page(0,2);assert.equal(rows(p).length,1);assert.equal(rows(p)[0][8],text);assert.equal(p.next,1);assert.equal(p.done.$,'False');
-    const q=f.page(p.next,2);assert.equal(rows(q).length,1);assert.equal(q.next,2);assert.equal(q.done.$,'True');assert.equal(f.stats.reads,2);
+    const p=f.page(0,2);assert.equal(rows(p).length,1);assert.equal(rows(p)[0][8],text);assert.equal(p.next,1);assert.equal(p.done,false);
+    const q=f.page(p.next,2);assert.equal(rows(q).length,1);assert.equal(q.next,2);assert.equal(q.done,true);assert.equal(f.stats.reads,2);
   } finally {f.close();}
 });
 
 test('zero/invalid budgets and invalid range/thread fail without SQL or cursor advancement',()=>{
   const f=fixture();try {
     for(const [a,z,b,th] of [[0,4,{rows:0,bytes:1024},'a'],[0,4,{rows:129,bytes:1024},'a'],[0,4,{rows:1,bytes:255},'a'],[0,4,{rows:1,bytes:1048577},'a'],[4,3,budget,'a'],[-1,3,budget,'a'],[0,3,budget,''],[0,3,budget,'a\0'],[0,Infinity,budget,'a']]) {
-      const p=f.page(a,z,b,th);assert.notEqual(p.error,'');assert.deepEqual(rows(p),[]);assert.equal(p.next,a);assert.equal(p.done.$,'False');
+      const p=f.page(a,z,b,th);assert.notEqual(p.error,'');assert.deepEqual(rows(p),[]);assert.equal(p.next,a);assert.equal(p.done,false);
     }
     assert.equal(f.stats.scans,0);
   } finally {f.close();}
