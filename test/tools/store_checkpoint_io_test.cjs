@@ -10,7 +10,22 @@ const F=[.../def Sdb\.codec\.from\(\) -> List<&2, Nat>:\s*\[([^\]]*)\]/.exec(sto
 const schema=[...schemaSource.matchAll(/"(?:[^"\\]|\\.)*"/g)].map(m=>JSON.parse(m[0])).filter(s=>s.startsWith('CREATE ')).join(';');
 const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 function effects(io=fs){const c={require:n=>n==='fs'?io:require(n),Buffer,process,console:{warn(){}},io_eff(){},CID:x=>x,Nil:'Nil',Con:'Con',Disk:{temp:1,promote:2,sync:3,prepare:4,read:5,cut:6}};vm.createContext(c);vm.runInContext(source,c);return c;}
-function db(file,marker,codec=C) {const d=new Database(file,{create:true});d.exec(schema);for(const [k,v]of Object.entries({schema:'1',codec,applied_seq:'0',applied_off:'0',ord:'1',log_id:'unused',origin:''}))d.query('INSERT INTO meta VALUES (?,?)').run(k,v);d.query('INSERT INTO setting VALUES (?,?,0)').run('test.marker',marker);d.close();}
+function db(file,marker,codec=C) {
+  const d=new Database(file,{create:true});
+  try {
+    // Construct the disposable fixture atomically, on real disk with the
+    // default SQLite durability. Production promotion/sync paths stay real.
+    d.transaction(()=>{
+      d.exec(schema);
+      for(const [k,v]of Object.entries({schema:'1',codec,applied_seq:'0',applied_off:'0',ord:'1',log_id:'unused',origin:''})) {
+        d.query('INSERT INTO meta VALUES (?,?)').run(k,v);
+      }
+      d.query('INSERT INTO setting VALUES (?,?,0)').run('test.marker',marker);
+    })();
+  } finally {
+    d.close();
+  }
+}
 function pending(home,codec=C){const dir=path.join(home,'.store-next');fs.mkdirSync(dir);db(path.join(dir,'store.db'),'new',codec);const m={version:1,codec:Number(codec),schema:1,prefixBytes:0,appliedSeq:0,prefixSha256:hash(path.join(home,'events.jsonl')),storeSha256:hash(path.join(dir,'store.db'))};fs.writeFileSync(path.join(dir,'READY.json'),JSON.stringify(m));return m;}
 function fixture(run){const h=fs.mkdtempSync(path.join(os.tmpdir(),'bp-checkpoint-'));try{fs.writeFileSync(path.join(h,'events.jsonl'),'');db(path.join(h,'store.db'),'old');run(h)}finally{fs.rmSync(h,{recursive:true})}}
 function marker(home){const d=new Database(path.join(home,'store.db'),{readonly:true});try{return d.query("SELECT v FROM setting WHERE k='test.marker'").get().v}finally{d.close()}}
