@@ -1143,7 +1143,7 @@ const left = new Map();
 // clearing the probe or a double tap closes it.
 let card = null;
 let mentioned = null;
-function inspectCard(view, pick) {
+function inspectCard(view, pick, src = null) {
   const info = pick ? (typeof pick.info === "object" && pick.info ? pick.info : P.parseInfo(pick.text || pick.info || "")) : null;
   if (!info || !info.kind) { card?.el.remove(); card = null; return; }
   const raw = [info.arg ? `${info.kind} ${info.arg}` : info.kind, ...[...info.kv].filter(([k]) => k !== "g").map(([k, v]) => `${k}=${v}`)].join(";");
@@ -1153,7 +1153,9 @@ function inspectCard(view, pick) {
   el.setAttribute("aria-label", "What you tapped");
   const head = document.createElement("div"), title = document.createElement("strong"), close = document.createElement("button");
   head.className = "ph-inspect-head";
-  title.textContent = info.arg ? `${info.kind[0].toUpperCase()}${info.kind.slice(1)} ${info.arg}` : info.kind[0].toUpperCase() + info.kind.slice(1);
+  // (a footprint is named as the part it is: "Part U1", as a 3D tap's)
+  const word = info.kind === "footprint" && info.kv.get("ref") ? "part" : info.kind, arg = word === "part" && !info.arg ? info.kv.get("ref") : info.arg;
+  title.textContent = arg ? `${word[0].toUpperCase()}${word.slice(1)} ${arg}` : word[0].toUpperCase() + word.slice(1);
   close.type = "button"; close.className = "ph-inspect-close"; close.textContent = "✕"; close.setAttribute("aria-label", "Close");
   close.addEventListener("click", () => { inspectCard(view, null); if (view?.probe) view.publishProbe(""); else if (!view) probed?.(""); });
   head.append(title, close);
@@ -1172,14 +1174,39 @@ function inspectCard(view, pick) {
   el.replaceChildren(head, dl, acts);
   if (!el.isConnected) document.body.append(el);
   card = { el, view };
+  // a part on a board: its saved component's fields too (the 3D
+  // inspector's data, host.js's onDetails), once they come
+  const ref = info.kv.get("ref"), mine = card, at = view ? { scope: view.canvas.dataset.scope || "", key: view.key } : src;
+  if (at?.key?.startsWith("0|") && ref && detailsFor) Promise.resolve(detailsFor(at.scope, at.key, ref)).then((c) => {
+    if (card !== mine || !c) return;
+    const shown = new Set([...info.kv.keys()]);
+    for (const [k, v] of [["value", c.value], ["mpn", c.mpn], ["footprint", String(c.footprint || "").split(":").pop()], ["side", c.layer === "B.Cu" ? "Bottom" : c.layer ? "Top" : ""], ["pads", c.pads?.length ? String(c.pads.length) : ""]]) {
+      if (!v || shown.has(k)) continue;
+      const dt = document.createElement("dt"), dd = document.createElement("dd");
+      dt.textContent = k === "mpn" ? "MPN" : k[0].toUpperCase() + k.slice(1); dd.textContent = v;
+      dl.append(dt, dd);
+    }
+  }).catch(() => {});
+}
+
+// the page's answer to a part's details (host.js): its saved component
+// ({value, mpn, footprint, layer, pads}) or nothing
+let detailsFor = null;
+export function onDetails(fn) {
+  detailsFor = fn;
 }
 
 // a part tapped in 3D (host.js, from solid.js's probe): the same card, for
 // the part; it goes when the 3D view does
-export function inspectPart(ref) {
+export function inspectPart(ref, scope = "", key = "") {
   if (!coarse?.matches) return;
   if (!ref) { if (card && !card.view) inspectCard(null, null); return; }
-  inspectCard(null, { info: { kind: "part", arg: ref, kv: new Map([["ref", ref]]) } });
+  inspectCard(null, { info: { kind: "part", arg: ref, kv: new Map([["ref", ref]]) } }, { scope, key });
+}
+
+// how many times a source's plot has come (a new version of the file)
+export function version(key) {
+  return plots.get(key)?.n ?? 0;
 }
 
 // the page's answer to "Mention in chat" on a tapped piece (host.js)
