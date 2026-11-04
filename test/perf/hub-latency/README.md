@@ -17,7 +17,7 @@ source-function hashes are in [RESULTS.json](RESULTS.json).
 | 7,119,973 B identity transfer | 218.64 ms | 8.63 ms | 30 |
 | 1,279,817 B gzip transfer | 40.98 ms | 3.56 ms | 30 |
 | Small HTTP reply during four identity transfers | 0.63 ms | 1.61 ms | 15 |
-| Slowest of those four concurrent transfers | 221.99 ms | 37.82 ms | 15 |
+| Median of each four-transfer burst's slowest transfer | 221.99 ms | 37.82 ms | 15 |
 
 Identity range: before 217.61–221.15 ms, after 4.77–14.94 ms. Gzip range:
 40.29–42.27 ms, after 1.45–5.36 ms. Concurrent small-request maximum was
@@ -25,6 +25,8 @@ Identity range: before 217.61–221.15 ms, after 4.77–14.94 ms. Gzip range:
 event-loop turn, but the sender still cooperatively yields every piece. The
 cooperative-park counts stayed equal except four extra backpressure parks in
 one after round. No zero-yield bulk-send shortcut was introduced.
+The overall maximum across those 15 burst maxima was **226.94 ms before and
+54.21 ms after**; 37.82 ms is their after median, not the overall maximum.
 
 Scope: **component experiment, not whole-hub/UI acceptance**. This runs the exact
 production `sock_send_static` and `bp_idle` functions with real files and Bun TCP
@@ -38,11 +40,21 @@ Concurrent load: this runtime-only job used its own `hub-latency` lock while a
 coordinated Bend job could run in another Boat VM. Physical-host placement is
 unknown. Baseline round medians were 218.41/218.96/218.76 ms; after medians
 9.59/8.72/7.69 ms. The static sender used here is byte-identical to PR #897's
-merge `6b031e406`; its function hash is recorded in RESULTS.json. The old
-scheduler body also matches main's original scheduler exactly. The retained
+merge `6b031e406`: measured sender SHA
+`a4ff856f2c97f5af58741403eca2b36bf20ad55d56f7dd80dc073ac09ec2d83f`,
+**post-#897 and pre-brotli**. Current main's brotli sender differs
+(`4c3b21ee467b9b308eca2d58535e01fc19aa5007f5c280ca19166d72b58f1aee`, introduced by `d8029fb`); it retains the per-piece due-now park,
+but these archived numbers do not measure it. The old scheduler body also
+matches main's original scheduler exactly. The retained
 RC4 whole-hub comparison was cancelled because that emission predates #897's
 static sender. A valid whole-hub comparison needs an exact current-source
 artifact; none is claimed here.
+
+Lane C approved the nine-line scheduler change and independently recomputed
+the raw samples in `latency-swarm/C/review-925.md`. The branch is rebased onto
+main; that rebase does not requalify the archived component measurements for
+the brotli sender. The PR remains draft/component-only pending an exact
+current-source artifact pair or the coordinator's acceptance of this scope.
 
 Validation on the same capped Boat job: **8 scheduler regressions + 29 existing
 static-sender tests passed**, including future deadlines, early Bun wakes,
@@ -52,6 +64,14 @@ command wall time 20.52 s. No compiler, proof or test ran on the development
 machine. No laws changed and no new whole-hub emission was made.
 
 ## Reproduce on Boat
+
+Use a separate checkout of the measured candidate `d1621e20cd` to reproduce
+the archived pre-brotli receipt. Running the harness on the rebased branch
+uses its newer sender and constitutes a new component measurement requiring
+separate receipts. The harness pins the baseline scheduler hash and records
+the sender hash; its shape checks do not reject every sender change.
+The unchanged harness SHA `dff6b994…` also remains the pinned public template
+used by PR929's independent fsync component comparison.
 
 Stage public web assets from the same built artifact (never user data) under
 `test/perf/hub-latency/input/web/`. Stage the pinned original scheduler:
