@@ -1,20 +1,24 @@
 mod hub;
 mod input;
+mod script;
 mod theme;
 mod wire;
 use gpui::{prelude::*, *, actions};
 use serde_json::Value;
-use std::{collections::HashMap,time::Instant};
+use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
+use script::{Goal,Pending,Step};
 use hub::{Command,Event};
 actions!(backplane,[Send,ClosePopup]);
-struct Backplane {
-    input:Entity<input::TextInput>, data:Value, status:String, error:String,
+pub struct Backplane {
+    pub input:Entity<input::TextInput>, data:Value, status:String, error:String,
     tx:tokio::sync::mpsc::UnboundedSender<Command>, selected:String,
     drafts:HashMap<String,String>, popup:bool, started:Instant, usable:bool,
+    first_frame:bool, script_done:bool, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize,
 }
 fn string(v:&Value,key:&str)->String {v[key].as_str().unwrap_or("").to_string()}
 impl Backplane {
     fn new(window:&mut Window,cx:&mut Context<Self>,config:hub::Config,started:Instant)->Self {
+        let steps:VecDeque<Step>=config.script.as_ref().map(|p|script::load(p)).unwrap_or_default();let script_total=steps.len();
         let input=cx.new(input::TextInput::new);input.focus_handle(cx).focus(window);
         let(tx,events)=hub::connect(config);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
@@ -25,7 +29,7 @@ impl Backplane {
             if this.popup {let _=this.tx.send(Command::Draft(text));}
             cx.notify();
         }).detach();
-        Self{input,data:Value::Null,status:"Connecting…".into(),error:String::new(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false}
+        Self{input,data:Value::Null,status:"Connecting…".into(),error:String::new(),tx,selected:String::new(),drafts:HashMap::new(),popup:false,started,usable:false,first_frame:false,script_done:false,steps,pending:None,seq:0,want_focus:false,script_total}
     }
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         match event {
@@ -33,7 +37,6 @@ impl Backplane {
                 self.data=r["shown"].clone();
                 let selected=string(&self.data["thread"],"id");
                 if !selected.is_empty() {self.selected=selected;}
-                if !self.usable && self.data["thread"].is_object() {self.usable=true;eprintln!("GPUI_METRIC {{\"event\":\"usable_model\",\"elapsed_ms\":{:.3}}}",self.started.elapsed().as_secs_f64()*1000.);}
             },
             Event::Status(s)=>{self.status=s;if self.status=="Connected"{self.error.clear();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));self.drafts.remove(&self.selected);self.popup=false;},
@@ -41,21 +44,33 @@ impl Backplane {
         }
         cx.notify();
     }
-    fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {
+    fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.input.focus_handle(cx).focus(window);}
+    fn select_id(&mut self,id:String,cx:&mut Context<Self>) {
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
         self.drafts.insert(self.selected.clone(),self.input.read(cx).content.to_string());
         self.selected=raw.clone();let text=self.drafts.get(&raw).cloned().unwrap_or_default();
         self.input.update(cx,|input,cx|input.set(text,cx));self.popup=false;
-        let _=self.tx.send(Command::Select(id));self.input.focus_handle(cx).focus(window);cx.notify();
+        let _=self.tx.send(Command::Select(id));self.want_focus=true;cx.notify();
     }
-    fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {
+    fn send(&mut self,_:&Send,_:&mut Window,cx:&mut Context<Self>) {self.do_send(cx);}
+    fn do_send(&mut self,cx:&mut Context<Self>) {
         let text=self.input.read(cx).content.to_string();
         if !text.trim().is_empty()&&self.status=="Connected" {let _=self.tx.send(Command::Send(text));self.error.clear();}cx.notify();
     }
+    fn thread_ids(&self)->Vec<String> {
+        let mut ids=Vec::new();
+        for project in self.data["projects"].as_array().into_iter().flatten() {
+            for thread in project["threads"].as_array().into_iter().flatten().chain(project["settled"].as_array().into_iter().flatten()) {ids.push(string(thread,"id"));}
+        }
+        ids
+    }
+    fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     fn close_popup(&mut self,_:&ClosePopup,_:&mut Window,cx:&mut Context<Self>){self.popup=false;cx.notify();}
 }
 impl Render for Backplane {
-    fn render(&mut self,_window:&mut Window,cx:&mut Context<Self>)->impl IntoElement {
+    fn render(&mut self,window:&mut Window,cx:&mut Context<Self>)->impl IntoElement {
+        if self.want_focus {self.want_focus=false;self.input.focus_handle(cx).focus(window);}
+        self.frame_marks(window,cx);
         let light=self.data["theme"]=="light";let c=|name|theme::color(light,name);
         let mut rows=Vec::new();
         let projects=self.data["projects"].as_array().cloned().unwrap_or_default();
@@ -105,12 +120,14 @@ impl Render for Backplane {
     }
 }
 fn main()->anyhow::Result<()> {
-    let started=Instant::now();let config=hub::Config::parse()?;
+    let started=Instant::now();let config=hub::Config::parse()?;let exit_after=config.exit_after;
+    script::metric(started,"process_start",serde_json::json!({}));
     Application::new().run(move|cx:&mut App|{
         input::bind(cx);cx.bind_keys([KeyBinding::new("enter",Send,Some("TextInput")),KeyBinding::new("ctrl-enter",Send,Some("TextInput")),KeyBinding::new("escape",ClosePopup,None)]);
         cx.on_window_closed(|cx|if cx.windows().is_empty(){cx.quit();}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
         cx.open_window(WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()},move|window,cx|cx.new(|cx|Backplane::new(window,cx,config,started))).expect("open GPUI window");
         cx.activate(true);
+        if let Some(secs)=exit_after {cx.spawn(async move|cx|{cx.background_executor().timer(Duration::from_secs_f64(secs)).await;let _=cx.update(|cx|cx.quit());}).detach();}
     });Ok(())
 }
