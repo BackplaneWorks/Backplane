@@ -33,6 +33,13 @@ also retain prior failed attempts. Existing pure folds, merge and skip
 policies received a source-preservation audit. The broad review-state
 adapter, its two existing merge-law closures and the tiny emitted-program
 runtime test remain unqualified; this PR is not ready to merge yet.
+One admitted normal-Boat attempt at the complete review integration closure,
+job `j20261104032247-386085`, returned worker-launcher exit -15 after about
+16.6 seconds. The starter marker verifies the 3.7 GB worker cap; there is no
+final verdict or resource receipt, so the termination cause is unknown.
+[The incomplete attempt](../../extra/hub-review-qualification/INTEGRATION-INCOMPLETE.json)
+is retained. No broad retry or larger cap is planned; integration waits for
+the CI owner's qualification route.
 No full/root proof, full application compile, build, installation or live
 store access is authorized. Startup, steady memory, CPU and p99 targets remain
 open pending a qualified packaged artifact and copied-store measurements.
