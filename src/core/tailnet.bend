@@ -215,3 +215,61 @@ def Tailnet.serve.of(o: J.Json, +port: String) -> String:
 # the hub's HTTPS address, "" when no entry proxies to its port
 def Tailnet.serve(+status: String, +port: String) -> String:
   Tailnet.serve.of(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(status), J.Null{}), "Web"), port)
+
+# Pairing's schedule
+# ------------------
+# What server.bend's Machines.loop does each period, in order: find the
+# machines (tailscale status, GET /hello) and hand the list to the hub,
+# ask the hub to pair at once (PairDue: the list is already there, sent
+# first on the same channel), wait half a period, ask again, wait again.
+# Nothing else asks the hub to pair, so two asks are at least half a
+# period (60 s) apart however long finding the machines takes (a late
+# first list included), and the first ask follows the first list at once.
+# An ask and the link it makes take at most 15 s each, so asks never
+# overlap. Tailnet.asks runs this plan on given discovery times (laws:
+# test/tailnet_seen_test.bend).
+type PStep is Data:
+  PFind{}
+  PAsk{}
+  PWait{ms: Nat}
+
+def Pairing.half() -> Nat:
+  60000n
+
+def Pairing.plan() -> List<&2, PStep>:
+  [PFind{}, PAsk{}, PWait{Pairing.half()}, PAsk{}, PWait{Pairing.half()}]
+
+# the times (ms from start) the plan asks, when each period's finding takes
+# the given time; one period per entry of finds
+def Tailnet.asks.go(ps: List<&2, PStep>, +finds: List<&2, Nat>, +t: Nat) -> List<&2, Nat>:
+  match ps:
+    case Nil{}:
+      Tailnet.asks(List.drop(&2, Nat, finds, 1n), t)
+    case PFind{} <> rest:
+      Tailnet.asks.go(rest, finds, Nat.add(t, Maybe.default(&2, Nat, List.head(&2, Nat, finds), 0n)))
+    case PAsk{} <> rest:
+      t <> Tailnet.asks.go(rest, finds, t)
+    case PWait{ms} <> rest:
+      Tailnet.asks.go(rest, finds, Nat.add(t, ms))
+
+def Tailnet.asks(+finds: List<&2, Nat>, +t: Nat) -> List<&2, Nat>:
+  match finds:
+    case Nil{}:
+      Nil{}
+    case _ <> _:
+      Tailnet.asks.go(Pairing.plan(), finds, t)
+
+# every two asks at least `gap` apart (asks in time order)
+def Tailnet.apart.k(+a: Nat, ts: List<&2, Nat>, +gap: Nat) -> Bool:
+  match ts:
+    case Nil{}:
+      True{}
+    case +b <> rest:
+      Bool.and(Nat.is_ge(Nat.sub(b, a), gap), Tailnet.apart.k(b, rest, gap))
+
+def Tailnet.apart(ts: List<&2, Nat>, +gap: Nat) -> Bool:
+  match ts:
+    case Nil{}:
+      True{}
+    case +a <> rest:
+      Tailnet.apart.k(a, rest, gap)

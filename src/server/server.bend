@@ -6065,12 +6065,9 @@ def Net.models(n: Net) -> String:
 
 # Machines
 # --------
-# Every Machines.every() ms: the owner's online tailnet peers (tailscale
+# Every two minutes (TN.Pairing.plan): the owner's online tailnet peers (tailscale
 # status) and any hubs named in BACKPLANE_PEERS, each asked GET /hello;
 # those that answer run Backplane. The list goes to every client.
-
-def Machines.every() -> U32:
-  120000
 
 # a hub that may be there: a name and its base URL
 type Cand is Data:
@@ -6167,17 +6164,12 @@ def Machines.tell(+inbox: Chan(Msg), +now: String, +last: String) -> IO(String):
   Bool.pick(IO(String), String.eq(now, last), IO.pure(String, last),
     IO.bind(Result<&1, &1, Msg, Unit>, String, Chan.send(Msg, inbox, MachinesFound{now}), ok => IO.pure(String, now)))
 
-# Pairing (Hub.pair) is asked for only here, in this one sequential loop:
-# right after each machines list (MachinesFound is posted first, so the
-# hub has the list when it asks) and again half a period later. Two asks
-# are always Machines.half() (60 s) apart, as the minute tick's were, so an
-# ask and its link (15 s each at most) never overlap the next, however
-# late the first list comes; and the first ask no longer waits for a
-# minute tick that ran before any list was found (two hubs paired 60.5 s
-# after start with the list ready at 0.58 s: lane B's far_latency).
-def Machines.half() -> U32:
-  60000
-
+# Pairing (Hub.pair) is asked for only here, by TN.Pairing.plan (its
+# laws: test/tailnet_seen_test.bend): right after each machines list and
+# half a period later, so asks stay a minute apart however late a list
+# comes, and the first no longer waits for a minute tick that ran before
+# any list was found (two hubs paired 60.5 s after start with the list
+# ready at 0.58 s: lane B's far_latency).
 def Machines.pair(+inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, PairDue{})
@@ -6192,19 +6184,33 @@ def Machines.status(on: Bool) -> IO(String):
     case False{}:
       IO.pure(String, "")
 
+# one period of TN.Pairing.plan; the machines list it last sent
+def Machines.run(ps: List<&2, TN.PStep>, +inbox: Chan(Msg), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(String):
+  match ps:
+    case Nil{}:
+      IO.pure(String, last)
+    case TN.PFind{} <> t:
+      do IO<String>:
+        +st : String <- Machines.status(on)
+        found : String <- Machines.ask(on, st, port, extra)
+        now : String <- Machines.tell(inbox, found, last)
+        Machines.run(t, inbox, on, port, extra, now)
+    case TN.PAsk{} <> t:
+      do IO<String>:
+        Machines.pair(inbox)
+        Machines.run(t, inbox, on, port, extra, last)
+    case TN.PWait{ms} <> t:
+      do IO<String>:
+        IO.sleep(U32.from_nat(ms))
+        Machines.run(t, inbox, on, port, extra, last)
+
 def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
       do IO<Unit>:
-        +st : String <- Machines.status(on)
-        found : String <- Machines.ask(on, st, port, extra)
-        now : String <- Machines.tell(inbox, found, last)
-        Machines.pair(inbox)
-        IO.sleep(Machines.half())
-        Machines.pair(inbox)
-        IO.sleep(Machines.half())
+        now : String <- Machines.run(TN.Pairing.plan(), inbox, on, port, extra, last)
         Machines.loop(f, inbox, on, port, extra, now)
 
 def Machines.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
