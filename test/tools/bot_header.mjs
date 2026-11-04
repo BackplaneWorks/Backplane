@@ -64,3 +64,19 @@ for (const rail of [false, true]) {
   ctx.patch(container, {$: 'El', tag: 'section', key: 'fixture', attrs: list([]), kids: list([])});
 }
 console.log(`ok bot header: ${checks} production DOM reconciliations, legacy and rail layouts`);
+
+// Try the reported whole-page symptom as well as isolated control identity.
+// The test DOM leaves timeline children unvirtualized; the production patcher
+// still reconciles every surrounding page, header and composer normally.
+const root = ctx.create({$: 'El', tag: 'div', key: 'root', attrs: list([]), kids: list([])});
+function domAll(n) { return [n, ...n.childNodes.flatMap(domAll)]; }
+let pages = 0;
+for (const rail of [false, true, false, true]) for (const step of [0, 1, 2, 3, 4, 5, 6, 4, 0]) {
+  const page = vnode(JSON.parse(lib.scenario(BigInt(step), rail)));
+  ctx.patch(root, {$: 'El', tag: 'div', key: 'root', attrs: list([]), kids: list([page])});
+  const elements = domAll(root);
+  assert.equal(elements.filter(n => n.getAttribute('class')?.split(/\s+/).includes('bot-head')).length, 1, 'one bot header after whole-page update');
+  assert.equal(elements.filter(n => n.getAttribute('class')?.split(/\s+/).includes('bot-primary-tabs')).length, 1, 'one primary tab row after whole-page update');
+  pages++;
+}
+console.log(`ok bot header: ${pages} complete page updates across layout changes, streams, tabs, viewers and drafts`);
