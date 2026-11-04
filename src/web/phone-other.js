@@ -6,8 +6,8 @@
 // (html.phone); a desktop page never gets the row or the listeners.
 //
 // The key row is the page's own (outside the hub's tree, so patches never
-// touch it): Esc, Tab, a sticky Ctrl, the arrows and the characters a phone
-// keyboard hides. Each key goes to the terminal as the keyboard would send
+// touch it): Esc, Tab, a sticky Ctrl, the arrows, the characters a phone
+// keyboard hides and Paste. Each key goes to the terminal as the keyboard would send
 // it (host.js's [data-keys] handler: "<key>\t<mods>"); with Ctrl held, the
 // next letter typed on the phone's keyboard goes as Ctrl+<letter>.
 
@@ -24,6 +24,7 @@ export const TERM_KEYS = [
   { label: "~", key: "~" },
   { label: "/", key: "/" },
   { label: "-", key: "-" },
+  { label: "Paste", paste: true, aria: "Paste" },
 ];
 
 // what one key of the row sends: the [data-keys] value for host.js
@@ -76,6 +77,13 @@ export function installPhoneOther({ doc = document, win = window, dispatch }) {
       if (k.ctrl) { b.className = "ph-term-ctrl";b.setAttribute("aria-pressed", "false"); }
       b.addEventListener("click", () => {
         if (k.ctrl) { setCtrl(!ctrl);return; }
+        // (the terminal's field is hidden: a phone has no other way to paste
+        // into it; the browser asks or shows its Paste bubble)
+        if (k.paste) {
+          const f = field();
+          win.navigator.clipboard?.readText?.().then(t => { if (t && f) dispatch(f.getAttribute("data-text"), (f.getAttribute("data-for") ? f.getAttribute("data-for") + "\t" : "") + t); }, () => {});
+          return;
+        }
         send(k.key, (k.mods || 0) | (ctrl ? 4 : 0));setCtrl(false);
       });
       row.append(b);
