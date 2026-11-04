@@ -260,6 +260,65 @@ s=importlib.util.spec_from_file_location('g',sys.argv[1]);g=importlib.util.modul
             self.assertEqual(guard.main(['compile-shard', '--', 'bend', 'PROOF.bend']), 2)
             run.assert_not_called()
 
+    FIXTURE = ['python3', str(ROOT / 'scripts/sepcomp-fixtures.py'), 'run']
+
+    def test_fixture_check_has_its_own_floor_and_changes_no_other(self):
+        self.assertEqual(guard.FLOORS['fixture-check'], 3 * guard.GIB)
+        self.assertEqual((guard.FLOORS['proof'], guard.FLOORS['check'], guard.FLOORS['build'], guard.HOST_RESERVE),
+                         (19 * guard.GIB, 14 * guard.GIB, 16 * guard.GIB, 8 * guard.GIB))
+        self.assertIn('fixture-check', guard.SHARD_PROFILES)
+
+    def test_fixture_check_accepts_only_the_exact_run_command(self):
+        pinned = guard.worker_contract('fixture-check', self.FIXTURE)
+        self.assertEqual(pinned[0], str(Path(sys.executable).resolve()))
+        other = Path(self.temp.name) / 'python3'
+        other.write_text('#!/bin/sh\nexit 0\n')
+        other.chmod(0o755)
+        for bad in (self.FIXTURE + ['--bend', '/bin/true'], self.FIXTURE + ['extra'], self.FIXTURE[:2], [*self.FIXTURE[:2], 'list'],
+                    [*self.FIXTURE[:2], 'run', '--bend', 'x'], ['python3', str(ROOT / 'scripts/proof-shards.py'), 'run'],
+                    ['python3', '/tmp/sepcomp-fixtures.py', 'run'], [str(other), *self.FIXTURE[1:]], ['/bin/sh', *self.FIXTURE[1:]],
+                    ['python3', str(ROOT / 'scripts/sepcomp-fixtures.py'), 'run;id'], ['bend', 'PROOF.bend'], [],
+                    self.wrapped(self.FIXTURE), self.wrapped(list(guard.COMPILE_COMMANDS[0]))):
+            self.assertIsNone(guard.worker_contract('fixture-check', bad), bad)
+
+    def test_other_shard_profiles_cannot_run_the_fixture_runner(self):
+        for profile in ('proof-shard', 'compile-shard'):
+            self.assertIsNone(guard.worker_contract(profile, self.FIXTURE), profile)
+            self.assertIsNone(guard.worker_contract(profile, self.wrapped(self.FIXTURE)), profile)
+
+    def test_fixture_check_fails_closed_without_cap_lock_or_exact_command(self):
+        argv = ['fixture-check', '--', *self.FIXTURE]
+        for limit, swap in [('max', '0'), (str(guard.SHARD_CAP + 1), '0'), (str(guard.SHARD_CAP), 'max'), (str(guard.SHARD_CAP), '1')]:
+            with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=self.cgroup(limit, swap)), patch.object(guard.os, 'execvpe') as run, patch.object(guard, 'offload') as off:
+                self.assertEqual(guard.main(argv), 75, (limit, swap))
+                run.assert_not_called()
+                off.assert_not_called()
+        with patch.object(guard, 'own_cgroup', side_effect=ValueError('none')), patch.object(guard.os, 'execvpe') as run:
+            self.assertEqual(guard.main(argv), 75)
+            run.assert_not_called()
+        good = self.cgroup(str(guard.SHARD_CAP), '0')
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+            self.assertEqual(guard.main(['fixture-check', '--held']), 2)
+            self.assertEqual(guard.main(['--held', 'fixture-check']), 2)
+            self.assertEqual(guard.main(['fixture-check', '--', *self.FIXTURE, '--bend', 'x']), 2)
+            self.assertEqual(guard.main(['fixture-check', '--', 'bend', 'PROOF.bend']), 2)
+            run.assert_not_called()
+
+    def test_fixture_check_runs_exactly_once_under_a_good_cap_and_never_offloads_when_busy(self):
+        good = self.cgroup(str(guard.SHARD_CAP), '0')
+        argv = ['fixture-check', '--', *self.FIXTURE]
+        with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run:
+            guard.main(argv)
+            self.assertEqual(run.call_args.args[0], str(Path(sys.executable).resolve()))
+            self.assertEqual(run.call_args.args[1][1:], self.FIXTURE[1:])
+        other = Path(self.temp.name) / 'busy.lock'
+        with open(other, 'w') as held, patch.object(guard, 'lock_path', return_value=other):
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(guard, 'available', return_value=100 * guard.GIB), patch.object(guard, 'own_cgroup', return_value=good), patch.object(guard.os, 'execvpe') as run, patch.object(guard, 'offload') as off:
+                self.assertEqual(guard.main(argv), 75)
+                run.assert_not_called()
+                off.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,3 +1,7 @@
+import ./adopt-plan.bend as ADOPTPLAN
+import ./desktop-info.bend as DESKINFO
+import ./pairing-info.bend as PAIRINFO
+import ./watch-plan.bend as WATCHPLAN
 import ../core/autosettle.bend as AUTO
 import Base
 import ../core/wire-retention.bend as WRET
@@ -1924,16 +1928,8 @@ def Info.kicad(rt: K.Rt) -> List<&2, J.KV>:
        J.KV{"kicad.ipc.servers", J.Str{J.Json.get_str(h, "ipc", "")}}]
 
 # the pairing link as a QR code's rows (core/qr.bend), for Settings
-def Info.qr.k(none: Bool, +lk: String) -> String:
-  match none:
-    case True{}:
-      ""
-    case False{}:
-      QR.Qr.text(QR.Qr.link(lk))
 
 # the pairing link's QR code; none for no link
-def Info.qr(+lk: String) -> String:
-  Info.qr.k(String.is_empty(lk), lk)
 
 # the tailnet side as clients are told it ("tailscale"): off (the flag),
 # checking (no answer yet), unavailable, or reachable
@@ -1998,24 +1994,14 @@ def Info.masked(+text: String) -> IO(String):
 # the JS target, so Cfg.with_link keeps it in Bn and joins reuse it)
 # Shared root credentials never leave the hub in new invitations. Settings
 # requests a private, expiring invite through /auth/invitations instead.
-def Hub.pair_msg.of(+lk: String) -> String:
-  "{\"t\":\"info\",\"info\":{\"pair\":\"\",\"pair.qr\":\"\"}}"
 
-def Hub.pair_msg.k(hit: Bool, +kept: String, +lk: String) -> String:
-  match hit:
-    case True{}:
-      String.drop(kept, 1n+String.length(lk))
-    case False{}:
-      Hub.pair_msg.of(lk)
 
 # the message kept for this link, else made (law pair_msg_kept)
-def Hub.pair_msg.from(+kept: String, +lk: String) -> String:
-  Hub.pair_msg.k(String.starts_with(kept, lk ++ "\n"), kept, lk)
 
 def Hub.pair_msg(c: Cfg) -> String:
   match c:
     case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, +lk, _, _}, _, +views, +accountInfo}:
-      Hub.pair_msg.from(BN.Bn.pair(bnx), lk)
+      PAIRINFO.Hub.pair_msg.from(BN.Bn.pair(bnx), lk)
 
 # The pairing link in a hub-drawn view (the web page, the desktop window
 # and the phones all draw Settings that way). Wire.pair reaches such a
@@ -2025,14 +2011,10 @@ def Hub.pair_msg(c: Cfg) -> String:
 # Hub.info alone never had it, and Settings said "Shown once Backplane
 # listens on your tailnet." on a hub that did. So a client takes the link
 # with the info its view is made from (law thin_pair_told).
-def Hub.thin.pair.put(+kv: J.Json, +info: J.Json) -> J.Json:
-  TV.Obj.put(TV.Obj.put(info, "pair", J.Str{J.Json.get_str(kv, "pair", "")}), "pair.qr", J.Str{J.Json.get_str(kv, "pair.qr", "")})
 
-def Hub.thin.pair.k(+msg: String, +info: J.Json) -> J.Json:
-  Hub.thin.pair.put(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(msg), J.Null{}), "info"), info)
 
 def Hub.thin.pair(c: Cfg, +info: J.Json) -> J.Json:
-  Hub.thin.pair.k(Hub.pair_msg(c), info)
+  PAIRINFO.Hub.thin.pair.k(Hub.pair_msg(c), info)
 
 # A link change is handled after it has been stored, through the inbox,
 # so both sides of an invite refresh immediately (revokes prune rows).
@@ -4671,6 +4653,7 @@ def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
     case Hub{st, f, ls, +cl, as, inbox, +cfg, note}:
       do IO<Hub>:
         Hub.leave.close(Clients.get(cl, client))
+        CST.Cast.drop(client)
         Plot.put(Cfg.pv(cfg), PV.PStop{client})
         +cl2 : List<&2, Client> = Clients.drop(cl, client)
         cl3 : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl), now), cl2, now)
@@ -5237,10 +5220,6 @@ def Desktop.frame_owner(+text: String) -> String:
 
 # This text is internal to the hub actor's authenticated connected message.
 # Ordinary client frames retain their original bytes and cannot supply it.
-def Desktop.connection_info(kind: String, text: String, version: String, hub: String) -> String:
-  match kind:
-    case "connected": J.Json.show(J.Json.obj([J.KV{"version", J.Str{version}}, J.KV{"hub", J.Str{hub}}]))
-    case _: text
 
 def Desktop.forward(m: Maybe<&2, Chan(BR.BMsg)>, client: U32, kind: String, text: String, +out: Chan(String), e: String, l: String, +owner: String, +known: Bool, +tch: TE.TeachSt) -> IO(Unit):
   match m:
@@ -5714,7 +5693,7 @@ def Cfg.with_machines(c: Cfg, +mc: String) -> Cfg:
 def Cfg.with_link(c: Cfg, +lk: String) -> Cfg:
   match c:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, _, fc, ksx}, +tcfg, +views, +accountInfo}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, BN.Bn.with_pair(bnx, lk ++ "\n" ++ Hub.pair_msg.of(lk)), mgd, lk, fc, ksx}, tcfg, views, accountInfo}
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, BN.Bn.with_pair(bnx, lk ++ "\n" ++ PAIRINFO.Hub.pair_msg.of(lk)), mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 # the tailnet listener is up: every client hears the pairing link. Each
 # one either is the owner's own device or came in with the token already,
@@ -8935,43 +8914,6 @@ def Hub.term_read(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> 
 # gone, reads as "gone", outcome unknown, never success. A watcher checks
 # every 2 s.
 
-def Watch.dir(+home: String, +id: String) -> String:
-  home ++ "/work/" ++ id
-
-# The shell each watch script runs as; none for a hub on a copied log
-# (BACKPLANE_COPY=1): it never launches, re-launches or signals anything
-# the log names, and every watch reads as gone (laws watch_copy_*)
-def Watch.argv.k(copy: Bool, xs: List<&2, String>) -> List<&2, String>:
-  match copy:
-    case True{}:
-      Nil{}
-    case False{}:
-      xs
-
-def Watch.launch.sh() -> String:
-  "d=$1; c=$2; cmd=$3\npid_id() { q=$1; if [ -r \"/proc/$q/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20); echo \"$b:$st\"; elif ps -p \"$q\" >/dev/null 2>&1; then ps -o lstart= -p \"$q\" | tr -s ' ' '_'; fi; }\nmkdir -p \"$d\" || { echo gone; exit 0; }\n[ -e \"$d/cancel\" ] && { echo gone; exit 0; }\n[ -e \"$d/code\" ] && { echo running; exit 0; }\nif [ -e \"$d/started\" ]; then { [ -e \"$d/out\" ] || [ -e \"$d/how\" ]; } && { echo running; exit 0; }; fi\nprintf '%s\\n' \"$cmd\" > \"$d/cmd\"\n{ printf ': > \"%s/out\"\\n' \"$d\"; printf 'cd \"%s\" || exit 127\\n' \"$c\"; printf '[ -e \"%s/cancel\" ] && exit 143\\n' \"$d\"; printf 'sh \"%s/cmd\" > \"%s/out\" 2>&1\\n' \"$d\" \"$d\"; printf 'echo $? > \"%s/code.tmp\" && mv \"%s/code.tmp\" \"%s/code\"\\n' \"$d\" \"$d\" \"$d\"; } > \"$d/run.sh\"\n: > \"$d/started\"\nif command -v setsid >/dev/null 2>&1; then setsid nohup sh \"$d/run.sh\" >/dev/null 2>&1 < /dev/null &\nelse perl -MPOSIX -e 'POSIX::setsid(); exec {$ARGV[0]} @ARGV or exit 127' nohup sh \"$d/run.sh\" >/dev/null 2>&1 < /dev/null &\nfi\necho $! > \"$d/pid\"\npid_id $! > \"$d/pidid\"\necho pid > \"$d/how\"\necho running\n"
-
-def Watch.check.sh() -> String:
-  "k=$1; t=$2; id=$3; d=$4\ncase $k in\nrun)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  [ -e \"$d/code\" ] && { echo \"done $(cat \"$d/code\")\"; exit 0; }\n  p=$(cat \"$d/pid\" 2>/dev/null)\n  saved=$(cat \"$d/pidid\" 2>/dev/null)\n  if [ -r \"/proc/$p/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$p/stat\" | cut -d' ' -f20); actual=\"$b:$st\"; case $(sed 's/^.*) //' \"/proc/$p/stat\") in Z\\ *|X\\ *) actual= ;; esac\n  elif [ -n \"$p\" ] && ps -p \"$p\" >/dev/null 2>&1; then actual=$(ps -o lstart= -p \"$p\" | tr -s ' ' '_')\n  else actual=; fi\n  [ -n \"$saved\" ] && [ \"$saved\" = \"$actual\" ] && { echo running; exit 0; }\n  [ -e \"$d/code\" ] && { echo \"done $(cat \"$d/code\")\"; exit 0; }\n  echo gone ;;\npid)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  if [ -r \"/proc/$t/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$t/stat\" | cut -d' ' -f20); n=\"$b:$st\"; case $(sed 's/^.*) //' \"/proc/$t/stat\") in Z\\ *|X\\ *) echo gone; exit 0 ;; esac\n  elif ps -p \"$t\" >/dev/null 2>&1; then n=$(ps -o lstart= -p \"$t\" | tr -s ' ' '_')\n  else echo gone; exit 0; fi\n  [ \"$id\" = - ] && { echo \"ident $n\"; echo running; exit 0; }\n  [ \"$n\" = \"$id\" ] && echo running || echo gone ;;\nfile)\n  [ -e \"$d/stop\" ] && { echo stop; exit 0; }\n  [ -f \"$t\" ] && grep -qF \"$id\" \"$t\" 2>/dev/null && { echo found; exit 0; }\n  echo running ;;\n*) echo gone ;;\nesac\n"
-
-def Watch.stop.sh() -> String:
-  "pid_id() { q=$1; if [ -r \"/proc/$q/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20); echo \"$b:$st\"; elif ps -p \"$q\" >/dev/null 2>&1; then ps -o lstart= -p \"$q\" | tr -s ' ' '_'; fi; }\nk=$1; t=$2; id=$3; d=$4\nmkdir -p \"$d\"\ncase $k in\nunwatch) : > \"$d/stop\" ;;\nrun) : > \"$d/cancel\"; p=$(cat \"$d/pid\" 2>/dev/null); n=$(pid_id \"$p\"); [ -n \"$p\" ] && [ \"$p\" -gt 1 ] && [ -n \"$n\" ] && [ \"$n\" = \"$(cat \"$d/pidid\" 2>/dev/null)\" ] && { kill -TERM \"-$p\" 2>/dev/null; kill -TERM \"$p\" 2>/dev/null; } ;;\npid) [ \"$t\" -gt 1 ] 2>/dev/null && [ \"$id\" != - ] && [ \"$(pid_id \"$t\")\" = \"$id\" ] && kill -TERM \"$t\" 2>/dev/null ;;\nesac\ntrue\n"
-
-def Watch.tail.sh() -> String:
-  "d=$1; [ -e \"$d/out\" ] && tail -c 2048 \"$d/out\"; true\n"
-
-def Watch.launch.argv(copy: Bool, +home: String, +id: String, +cwd: String, +target: String) -> List<&2, String>:
-  Watch.argv.k(copy, ["-c", Watch.launch.sh(), "sh", Watch.dir(home, id), cwd, target])
-
-def Watch.check.argv(copy: Bool, +kind: String, +target: String, +ident: String, +home: String, +id: String) -> List<&2, String>:
-  Watch.argv.k(copy, ["-c", Watch.check.sh(), "sh", kind, target, ident, Watch.dir(home, id)])
-
-def Watch.stop.argv(copy: Bool, +kind: String, +target: String, +ident: String, +home: String, +id: String) -> List<&2, String>:
-  Watch.argv.k(copy, ["-c", Watch.stop.sh(), "sh", kind, target, ident, Watch.dir(home, id)])
-
-def Watch.intent.argv(copy: Bool, +home: String, +id: String) -> List<&2, String>:
-  Watch.argv.k(copy, ["-c", "mkdir -p \"$1\" && : > \"$1/intent\"", "sh", Watch.dir(home, id)])
-
 # a watch script run: none (no argv) answers "gone"
 def Watch.sh(argv: List<&2, String>) -> IO(P.Ran):
   match argv:
@@ -9015,7 +8957,7 @@ def Watch.detail(+kind: String, +status: String, +dir: String, +tail: String) ->
 
 def Watch.report(+inbox: Chan(Msg), +thread: String, +id: String, +kind: String, +status: String, +dir: String) -> IO(Unit):
   do IO<Unit>:
-    tr : P.Ran <- P.Proc.run("sh", ["-c", Watch.tail.sh(), "sh", dir], "/")
+    tr : P.Ran <- P.Proc.run("sh", ["-c", WATCHPLAN.Watch.tail.sh(), "sh", dir], "/")
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, WatchEnded{thread, id, status, Watch.detail(kind, status, dir, Watch.tail.text(tr))})
     return Unit{}
 
@@ -9059,11 +9001,11 @@ def Watch.tick(late: Bool, +locked: Bool, +ident: String, +home: String, +thread
   match late:
     case True{}:
       do IO<Unit>:
-        Watch.report(inbox, thread, id, kind, "timeout", Watch.dir(home, id))
+        Watch.report(inbox, thread, id, kind, "timeout", WATCHPLAN.Watch.dir(home, id))
         Watch.timeout.next(locked, ident, k)
     case False{}:
-      IO.bind(Bool, Unit, P.Proc.copy(), copy => IO.bind(P.Ran, Unit, Watch.sh(Watch.check.argv(copy, kind, target, ident, home, id)),
-        r => Watch.got(r, ident, thread, id, kind, Watch.dir(home, id), inbox, k)))
+      IO.bind(Bool, Unit, P.Proc.copy(), copy => IO.bind(P.Ran, Unit, Watch.sh(WATCHPLAN.Watch.check.argv(copy, kind, target, ident, home, id)),
+        r => Watch.got(r, ident, thread, id, kind, WATCHPLAN.Watch.dir(home, id), inbox, k)))
 
 # the watcher: a check every 2 s until the work ends, its deadline passes,
 # or it is no longer watched
@@ -9092,7 +9034,7 @@ def Watch.start.k(argv: List<&2, String>, +thread: String, +id: String, +inbox: 
 def Watch.start(run: Bool, +home: String, +thread: String, +id: String, +target: String, +cwd: String, +inbox: Chan(Msg)) -> IO(Unit):
   match run:
     case True{}:
-      IO.bind(Bool, Unit, P.Proc.copy(), copy => Watch.start.k(Watch.launch.argv(copy, home, id, cwd, target), thread, id, inbox))
+      IO.bind(Bool, Unit, P.Proc.copy(), copy => Watch.start.k(WATCHPLAN.Watch.launch.argv(copy, home, id, cwd, target), thread, id, inbox))
     case False{}:
       IO.pure(Unit, Unit{})
 
@@ -9134,7 +9076,7 @@ def Watch.intent(locked: Bool, +home: String, +id: String) -> IO(Unit):
     case True{}:
       do IO<Unit>:
         copy : Bool <- P.Proc.copy()
-        r : P.Ran <- Watch.sh(Watch.intent.argv(copy, home, id))
+        r : P.Ran <- Watch.sh(WATCHPLAN.Watch.intent.argv(copy, home, id))
         return Unit{}
     case False{}:
       IO.pure(Unit, Unit{})
@@ -9147,7 +9089,7 @@ def Watch.job(+locked: Bool, +home: String, +thread: String, +id: String, +kind:
 def Watch.stop.job(+home: String, +id: String, +kind: String, +target: String, +ident: String) -> IO(Unit):
   do IO<Unit>:
     copy : Bool <- P.Proc.copy()
-    r : P.Ran <- Watch.sh(Watch.stop.argv(copy, kind, target, ident, home, id))
+    r : P.Ran <- Watch.sh(WATCHPLAN.Watch.stop.argv(copy, kind, target, ident, home, id))
     return Unit{}
 
 # Threads elsewhere (far.bend, docs/bots.md)
@@ -13967,6 +13909,7 @@ def Hub.thin.close_client(h: Hub, +client: U32) -> IO(Hub):
     case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WClose{}, 0n)
+        CST.Cast.drop(client)
         return Hub{st, f, ls, Clients.drop(cl2, client), as, inbox, cfg, note}
 
 def Hub.rpc.thin_short(short: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
@@ -14652,12 +14595,6 @@ def Hub.adopt.es(+es: List<&2, AD.AEntry>, h: Hub, +allow: Bool, +now: Nat) -> I
 
 # the agents a hub takes over or stops at boot: none for a hub on a copied
 # log, whose records name the real hub's agents (law adopt_copy_none)
-def Adopt.copy.entries(copy: Bool, +rec: String, +hand: String) -> List<&2, AD.AEntry>:
-  match copy:
-    case True{}:
-      Nil{}
-    case False{}:
-      AD.Adopt.entries(rec, hand)
 
 def Hub.adopt(h: Hub, +now: Nat) -> IO(Hub):
   match h:
@@ -14670,7 +14607,7 @@ def Hub.adopt(h: Hub, +now: Nat) -> IO(Hub):
         AIO.Adopt.record(Adopt.home.record(home))
         +off : String <- Env.get("BACKPLANE_ADOPT", "")
         copy : Bool <- P.Proc.copy()
-        Hub.adopt.es(Adopt.copy.entries(copy, rec, hand), Hub{st, f, ls, cl, as, inbox, cfg, note}, Bool.not(String.eq(off, "0")), now)
+        Hub.adopt.es(ADOPTPLAN.Adopt.copy.entries(copy, rec, hand), Hub{st, f, ls, cl, as, inbox, cfg, note}, Bool.not(String.eq(off, "0")), now)
 
 def Hub.mail.recover.on(+on: Bool, h: Hub) -> IO(Hub):
   match on h:
@@ -15073,7 +15010,7 @@ def Hub.desktop.forward(h: Hub, client: U32, +kind: String, +text: String, out: 
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.forward(Cfg.br(cfg), client, kind, Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Cef.page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
+        Desktop.forward(Cfg.br(cfg), client, kind, DESKINFO.Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Cef.page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # A brand-new home must establish its real persisted machine identity before

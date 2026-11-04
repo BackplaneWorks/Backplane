@@ -1,3 +1,5 @@
+import ./src/server/watch-plan.bend as WATCHPLAN
+
 import ./test/conversation-proof/window_final.bend as CONVROOT
 
 import ./test/conversation-proof/floor_shape_only.bend as CONVSHAPE
@@ -291,9 +293,12 @@ import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 
 import ./test/secret_proof.bend as SECPROOF
+
 import ./test/secret_box_proof.bend as SECBP
 
 import ./src/core/landing.bend as LAND
+
+import ./src/server/cacheio.bend as CACHEIO
 
 # Lemmas
 # ------
@@ -13821,13 +13826,21 @@ def Laws.ws_unmask_take_go(bs, n, key, i, acc):
 
 # --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
 
-def Laws.watch_copy_launch_none(home, id, cwd, target): {==}
+def Laws.watch_copy_gate_none(xs): {==}
 
-def Laws.watch_copy_check_none(kind, target, ident, home, id): {==}
+def Laws.watch_live_gate_kept(xs): {==}
 
-def Laws.watch_copy_stop_none(kind, target, ident, home, id): {==}
+def Laws.watch_copy_launch_none(home, id, cwd, target):
+  Laws.watch_copy_gate_none(["-c", WATCHPLAN.Watch.launch.sh(), "sh", WATCHPLAN.Watch.dir(home, id), cwd, target])
 
-def Laws.watch_copy_intent_none(home, id): {==}
+def Laws.watch_copy_check_none(kind, target, ident, home, id):
+  Laws.watch_copy_gate_none(["-c", WATCHPLAN.Watch.check.sh(), "sh", kind, target, ident, WATCHPLAN.Watch.dir(home, id)])
+
+def Laws.watch_copy_stop_none(kind, target, ident, home, id):
+  Laws.watch_copy_gate_none(["-c", WATCHPLAN.Watch.stop.sh(), "sh", kind, target, ident, WATCHPLAN.Watch.dir(home, id)])
+
+def Laws.watch_copy_intent_none(home, id):
+  Laws.watch_copy_gate_none(["-c", "mkdir -p \"$1\" && : > \"$1/intent\"", "sh", WATCHPLAN.Watch.dir(home, id)])
 
 def Laws.copy_off_runs_all(os): {==}
 
@@ -13846,9 +13859,15 @@ def Laws.adopt_copy_none(rec, hand): {==}
 def Laws.copy_file_open_told(): {==}
 
 # --- J2: the pairing message made once per link, not per join ---
-def Laws.pair_msg_kept(): {==}
+def Laws.pair_cache_hit(kept, link): {==}
 
-def Laws.pair_msg_other_link(): {==}
+def Laws.pair_cache_miss(kept, link): {==}
+
+def Laws.pair_msg_kept():
+  Laws.pair_cache_hit("r1\n{m}", "r1")
+
+def Laws.pair_msg_other_link():
+  Laws.pair_cache_miss("r1\n{m}", "")
 
 def Laws.pair_msg_no_link_qr(): {==}
 
@@ -15802,3 +15821,17 @@ def Laws.home_viewer_size_is_local(u, value):
 def Laws.timeline_follow_grown_viewport(held, end): {==}
 
 def Laws.timeline_follow_grown_viewport_away(held, end): {==}
+
+def Laws.json_object_put_fields(fields, key, value): {==}
+
+def Laws.json_object_put_null(key, value): {==}
+
+def Laws.desktop_connection_snapshot(text, version, hub): {==}
+
+def Laws.adopt_live_entries_kept(record, handoff): {==}
+
+def Laws.cache_effect_slots(): {==}
+
+def Laws.cache_effect_budget(): {==}
+
+def Laws.cache_effect_global_budget(): {==}

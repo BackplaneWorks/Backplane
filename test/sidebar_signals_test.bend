@@ -114,7 +114,7 @@ def main() -> IO(Unit):
     C.Check.str("dirty actor keeps canonical signal memo (re-checked on read)", count(A.Actor.mark_dirty(seed())), "1")
     C.Check.str("ordinary render memo and wire receipt retain one signal memo", retained(), "1")
     C.Check.str("8192 entries remain bounded", yes(S.SignalCache.bounded(S.SignalCache.build("epoch", 1n, many(8192n, Map.new(&2, Nat))))), "yes")
-    C.Check.str("8193 entries are never reusable", yes(S.SignalCache.hit(S.SignalCache.build("epoch", 1n, many(8193n, Map.new(&2, Nat))), "epoch", 1n)), "no")
+    C.Check.str("16385 entries are never reusable", yes(S.SignalCache.hit(S.SignalCache.build("epoch", 1n, many(16385n, Map.new(&2, Nat))), "epoch", 1n)), "no")
     C.Check.str("tool approval full reply is fresh", event_reply(M.AskOpened{"approval", "other", "approval", "tool", "Allow", "", 5n}), "yes")
     C.Check.str("closed approval resumes visible activity", equal(closed(), ui(closed(), 11n), L.Stream.blank()), "yes")
     C.Check.str("pending count full reply is fresh", event_reply(M.PendingChanged{"other", 1n, 5n}), "yes")

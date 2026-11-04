@@ -18,12 +18,14 @@ FLOORS = {'check': 14 * GIB, 'proof': 19 * GIB, 'test': 14 * GIB,
           'compile-js': 3 * GIB,
           # One bounded shard worker only (see worker_contract). Admission is
           # not a cap: the worker must also sit in a verified, no-swap cgroup.
-          'proof-shard': 3 * GIB, 'compile-shard': 3 * GIB}
+          'proof-shard': 3 * GIB, 'compile-shard': 3 * GIB,
+          # sepcomp-fixtures.py run only: same floor as the shard profiles, nothing lowered.
+          'fixture-check': 3 * GIB}
 # Compiler cap: 3.7 GB (decimal). The lane-6 controller (512 MiB) is accounted
 # separately; 3.7e9 + 536870912 stays under the 4 GiB combined ceiling.
 SHARD_CAP = 3_700_000_000
 CONTROLLER_CAP = 536_870_912
-SHARD_PROFILES = ('proof-shard', 'compile-shard')
+SHARD_PROFILES = ('proof-shard', 'compile-shard', 'fixture-check')
 # compile-shard runs only these exact compiler invocations ({out} is substituted
 # by the worker); nothing else can use the lower floor.
 COMPILE_COMMANDS = (
@@ -120,6 +122,35 @@ def shard_run_ok(command):
     return all(command.count(o) == 1 for o in ('--out', '--shard', '--expect', '--result'))
 
 
+def cached_proof_run_ok(command):
+    """One fixed original-shard cache executor, never arbitrary checker argv."""
+    if len(command) < 3 or not trusted_python(command[0]) or command[2] != 'run':
+        return False
+    try:
+        if Path(command[1]).resolve() != Path(__file__).resolve().parent / 'proof-cache.py':
+            return False
+    except (OSError, ValueError):
+        return False
+    options = command[3:]
+    if len(options) % 2:
+        return False
+    seen = {}
+    for name, value in zip(options[::2], options[1::2]):
+        if name not in {'--plan', '--shard', '--result', '--root', '--cache'} or name in seen or not value:
+            return False
+        seen[name] = value
+    return {'--plan', '--shard', '--result'} <= set(seen) and re.fullmatch(r'[0-9]{3}', seen['--shard']) is not None
+
+
+def fixture_run_ok(command):
+    """Exactly `python3 scripts/sepcomp-fixtures.py run`: no other action, option or compiler override."""
+    script = Path(__file__).resolve().parent / 'sepcomp-fixtures.py'
+    try:
+        return len(command) == 3 and bool(trusted_python(command[0])) and Path(command[1]).resolve() == script and command[2] == 'run'
+    except OSError:
+        return False
+
+
 def worker_contract(profile, command):
     """Return the argv to exec (interpreter pinned to an absolute path) or None.
 
@@ -134,7 +165,9 @@ def worker_contract(profile, command):
     if not python:
         return None
     pinned = [str(Path(sys.executable).resolve()), *command[1:]]
-    if profile == 'proof-shard' and shard_run_ok(command):
+    if profile == 'fixture-check':
+        return pinned if fixture_run_ok(command) else None
+    if profile == 'proof-shard' and (shard_run_ok(command) or cached_proof_run_ok(command)):
         return pinned
     wrapper = Path(__file__).resolve().parent / 'lowmem-build.py'
     try:

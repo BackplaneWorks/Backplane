@@ -343,6 +343,8 @@ jobs:
           node-version: '24'
       - name: Hub retention effects and soak negative controls
         run: |
+          node test/tools/asset_file_test.mjs
+          node --test test/tools/bounded_cache_test.mjs
           node --test test/tools/hotboot_stream_test.cjs test/tools/wire_log_io_test.cjs test/tools/heap_growth_diagnostics_test.cjs test/tools/perf_gauge_test.cjs test/tools/real_store_policy_test.cjs test/tools/real_store_fence_test.cjs
           bun test/tools/wire_log_bun_test.cjs
           bun test/tools/hub_memory_soak.ts --self-test
