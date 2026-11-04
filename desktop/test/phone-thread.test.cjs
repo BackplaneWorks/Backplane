@@ -6,7 +6,7 @@ const page = (phone, mic = true) => {
   const on = {}, observers = [], classes = new Set(phone ? ['phone'] : []);
   const timeline = { id: 'timeline', scrollTop: 0, scrollHeight: 2000, clientHeight: 500 };
   const doc = {
-    documentElement: { classList: { contains: c => classes.has(c), add: c => classes.add(c) } },
+    documentElement: { classList: { contains: c => classes.has(c), add: c => classes.add(c), remove: c => classes.delete(c) } },
     activeElement: null,
     getElementById: id => id === 'timeline' ? timeline : null,
     addEventListener: (type, f) => { (on[type] ||= []).push(f); },
@@ -148,4 +148,23 @@ test('far from the end a ↓ goes back to the latest, on a phone only, never bes
   const d = setup(false);
   d.p.timeline.scrollTop = 0; d.p.fire('scroll');
   assert.equal(made.length, 2);
+});
+
+test('a touch while typing holds the typing layout until its click (a tap\'s blur moved Send and the answers)', async () => {
+  const { installPhoneThread } = await import('../../src/web/phone-thread.js');
+  const p = page(true), q = page(true);
+  installPhoneThread({ document: p.doc, window: p.win });
+  installPhoneThread({ document: q.doc, window: { ...q.win, setTimeout: () => 1, clearTimeout() {} } });
+  // typing: a touch holds, the click lets go
+  q.doc.activeElement = { id: 'composer' };
+  q.fire('touchstart', { closest: () => null });
+  assert.equal(q.classes.has('ph-hold'), true);
+  (q.won.click || []).forEach(f => f({}));
+  assert.equal(q.classes.has('ph-hold'), false);
+  // not typing: nothing held
+  q.doc.activeElement = null; q.fire('touchstart', { closest: () => null });
+  assert.equal(q.classes.has('ph-hold'), false);
+  // (the page's timer lets go by itself: here it runs at once)
+  p.doc.activeElement = { id: 'composer' }; p.fire('touchstart', { closest: () => null });
+  assert.equal(p.classes.has('ph-hold'), false);
 });

@@ -3067,7 +3067,7 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
    open and the keyboard down it may take 60% (on an iPhone SE, 40% cut a
    two-choice question's Dismiss under the composer; typing, 60% left the
    timeline nothing) */
-.app.phone .thread-content:not(:has(> :is(.subs, .todos).dock:not(.shut), #composer:focus)) > .asks { max-height: 60%; }
+html:not(.ph-hold) .app.phone .thread-content:not(:has(> :is(.subs, .todos).dock:not(.shut), #composer:focus)) > .asks { max-height: 60%; }
 .app.phone .ask { padding: 10px 12px; gap: 8px; }
 .app.phone .ask-detail { font-size: calc(14px * var(--text-scale, 100) / 100); max-height: 30vh; }
 .app.phone .ask-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -3167,7 +3167,7 @@ html.phone #history-fill-more { left: 50% !important; transform: translateX(-50%
    for, "Reply below to go on."), and "Load earlier messages" waits, so the
    keyboard leaves the thread room to show (an iPhone 15 kept 70 px of it:
    no message, the button over the Working row) */
-html.phone .app.phone .thread-content:has(#composer:focus) > .order-card:has(> .oc-line) > :not(.oc-line) { display: none; }
+html.phone .app.phone .thread-content:is(:has(#composer:focus), html.ph-hold *) > .order-card:has(> .oc-line) > :not(.oc-line) { display: none; }
 html.phone:has(#composer:focus) #history-fill-more { display: none !important; }
 /* the ↓ to the latest (phone-thread.js): a thumb's square at the
    timeline's foot, at the right; not beside the pill, not off the thread
