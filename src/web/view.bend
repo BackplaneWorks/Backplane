@@ -1274,27 +1274,71 @@ def View.menu.find(+lc: I.Loc, srch: Bool, +q: String) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
+# a phone's picker: the CLI's first View.mp.few() models (its own picks:
+# Claude Code lists default, opus, fable, sonnet, haiku first), the rest
+# folded under "More models", unfolded while the cursor's or the thread's
+# model is one of them; a search lists all it finds, unfolded
+def View.mp.few() -> Nat:
+  5n
+
+def View.mp.more.at(open: Bool) -> List<&2, D.Attr>:
+  match open:
+    case True{}: [D.At{"class", "mp-more"}, D.At{"open", ""}]
+    case False{}: [D.At{"class", "mp-more"}]
+
+def View.mp.more.label(+lc: I.Loc, +n: Nat) -> String:
+  SM.Menu.text(lc, "More models (" ++ Nat.show(n) ++ ")", "その他のモデル（" ++ Nat.show(n) ++ "）")
+
+def View.mp.rows(fold: Bool, +lc: I.Loc, +ms: List<&2, String>, +cur: String, +own: String, +mi: String, +prov: String) -> List<&2, D.Node>:
+  match fold:
+    case False{}:
+      [D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, ms, cur, own, mi, prov)}]
+    case True{}:
+      +rest = List.drop(&2, String, ms, View.mp.few())
+      [D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, List.take(&2, String, ms, View.mp.few()), cur, own, mi, prov)},
+       D.El{"details", "mp-more", View.mp.more.at(Bool.or(List.contains(~String, ~String.eq, rest, cur), List.contains(~String, ~String.eq, rest, own))),
+         [D.El{"summary", "", Nil{}, [D.Txt{View.mp.more.label(lc, List.length(&2, String, rest))}]},
+          D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, rest, cur, own, mi, prov)}]}]
+
+# the three columns: agent | model | effort (fold: View.mp.rows)
+def View.mp.cols(+lc: I.Loc, +ms: List<&2, String>, +mi: String, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool, fold: Bool) -> List<&2, D.Node>:
+  [D.El{"div", "", [D.At{"class", "mp-col mp-agents"}], [View.mp.head(MSG.T.model.col.agent(lc), MPK.ModelPick.cap(0n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 0n)),
+     D.El{"div", "", [D.At{"class", "rows"}], View.mp.agents(lc, U.Mpk.agents(), MPK.MpCur.agent(c), MPK.MpCur.agent(now))}]},
+   D.El{"div", "", [D.At{"class", "mp-col mp-models"}, D.At{"style", "--namew:" ++ Nat.show(View.namew(ms)) ++ "ch"}], D.Dom.cat(
+     [View.mp.head(MSG.T.model.col.model(lc), MPK.ModelPick.cap(1n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 1n))], D.Dom.cat(View.menu.find(lc, srch, q),
+     View.mp.rows(fold, lc, ms, MPK.MpCur.model(c), Bool.pick(String, String.eq(MPK.MpCur.agent(c), MPK.MpCur.agent(now)), MPK.MpCur.model(now), "\u{1f}"), mi, MPK.MpCur.agent(c))))},
+   D.El{"div", "", [D.At{"class", "mp-col mp-effort"}], [View.mp.head(MSG.T.model.col.effort(lc), MPK.ModelPick.cap(2n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 2n)),
+     D.El{"div", "", [D.At{"class", "meter"}], View.mp.bars(lc, MPK.ModelPick.bars(ss, MPK.MpCur.effort(c)))},
+     D.Dom.span("note", View.mp.note(lc, List.is_empty(&2, String, MPK.ModelPick.levels(ss)), MPK.MpCur.agent(c), MPK.MpCur.effort(now)))]}]
+
+# a phone's picker is a sheet: a head saying what it is with a close (the
+# shade's flag), then the columns stacked in a body that scrolls under it
+# (style.css's "phone: the model picker")
+def View.mp.top(+lc: I.Loc) -> D.Node:
+  D.El{"div", "", [D.At{"class", "mp-top"}], [D.Dom.span("mp-title", MSG.T.composer.model.tip(lc)),
+    D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "mp-x"}, D.At{"aria-label", MSG.T.common.close(lc)}, D.At{"title", MSG.T.common.close(lc)},
+      D.At{"data-value", "models"}, D.On{"click", "flag"}], [WI.WIcon.svg("x", 22)]}]}
+
+def View.mp.body(phone: Bool, +lc: I.Loc, cols: List<&2, D.Node>) -> List<&2, D.Node>:
+  match phone:
+    case True{}: [View.mp.top(lc), D.El{"div", "", [D.At{"class", "mp-body"}], cols}]
+    case False{}: cols
+
 # the picker open over the composer, and a shade behind it: a click
 # anywhere off the picker lands on the shade and shuts it. ms: the models
 # of the cursor's agent the search finds (Mpk.models), mi the models info
 # cut to them, so each row's label is read from a few KB (Models.view);
-# ss its meter (Mpk.steps)
-def View.mp.open(+lc: I.Loc, +ms: List<&2, String>, +mi: String, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool) -> List<&2, D.Node>:
+# ss its meter (Mpk.steps); phone: a phone's sheet (View.mp.top, .rows)
+def View.mp.open(+lc: I.Loc, +ms: List<&2, String>, +mi: String, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool, +phone: Bool) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "shade"}, D.At{"data-value", "models"}, D.On{"click", "flag"}], Nil{}},
-   D.El{"div", "", [D.At{"class", "model-menu mp"}, D.At{"role", "dialog"}, D.At{"aria-label", MSG.T.composer.model.tip(lc)}, D.At{"title", MSG.T.model.keys(lc)}], [
-     D.El{"div", "", [D.At{"class", "mp-col mp-agents"}], [View.mp.head(MSG.T.model.col.agent(lc), MPK.ModelPick.cap(0n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 0n)),
-       D.El{"div", "", [D.At{"class", "rows"}], View.mp.agents(lc, U.Mpk.agents(), MPK.MpCur.agent(c), MPK.MpCur.agent(now))}]},
-     D.El{"div", "", [D.At{"class", "mp-col mp-models"}, D.At{"style", "--namew:" ++ Nat.show(View.namew(ms)) ++ "ch"}], D.Dom.cat(
-       [View.mp.head(MSG.T.model.col.model(lc), MPK.ModelPick.cap(1n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 1n))], D.Dom.cat(View.menu.find(lc, srch, q),
-       [D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, ms, MPK.MpCur.model(c), Bool.pick(String, String.eq(MPK.MpCur.agent(c), MPK.MpCur.agent(now)), MPK.MpCur.model(now), "\u{1f}"), mi, MPK.MpCur.agent(c))}]))},
-     D.El{"div", "", [D.At{"class", "mp-col mp-effort"}], [View.mp.head(MSG.T.model.col.effort(lc), MPK.ModelPick.cap(2n, MPK.MpCur.col(c)), Nat.is_eq(MPK.MpCur.col(c), 2n)),
-       D.El{"div", "", [D.At{"class", "meter"}], View.mp.bars(lc, MPK.ModelPick.bars(ss, MPK.MpCur.effort(c)))},
-       D.Dom.span("note", View.mp.note(lc, List.is_empty(&2, String, MPK.ModelPick.levels(ss)), MPK.MpCur.agent(c), MPK.MpCur.effort(now)))]}]}]
+   D.El{"div", "", [D.At{"class", Bool.pick(String, phone, "model-menu mp mp-phone", "model-menu mp")}, D.At{"role", "dialog"}, D.At{"aria-label", MSG.T.composer.model.tip(lc)}, D.At{"title", MSG.T.model.keys(lc)}],
+     View.mp.body(phone, lc, View.mp.cols(lc, ms, mi, c, now, ss, q, srch,
+       Bool.and(phone, Bool.and(String.is_empty(String.trim(q)), Nat.is_gt(List.length(&2, String, ms), Nat.add(View.mp.few(), 1n))))))}]
 
 def View.mp.shown(+lc: I.Loc, +nf: Map<&2, String>, +c: MPK.MpCur, +now: MPK.MpCur, +q: String) -> List<&2, D.Node>:
   +ms = U.Mpk.models(nf, c, now, q)
   View.mp.open(lc, ms, U.Models.view(U.Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c), ms), c, now, U.Mpk.steps(nf, c), q,
-    U.Models.search(U.Models.menu(U.Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c))))
+    U.Models.search(U.Models.menu(U.Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c))), String.eq(U.Str.get(nf, "local.workspace.form"), "phone"))
 
 # the picker, open or not, with cursor c over the thread's own (now); its
 # layer carries data-draft while a cursor is kept, so the web shuts and

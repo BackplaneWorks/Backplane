@@ -3156,23 +3156,48 @@ html.ph-nomic .app.phone .composer .mic { display: none; }
 /* what $ @ > % # complete to: rows a thumb can pick, over the composer */
 .app.phone .composer .skills { left: 0; right: 0; max-height: calc(var(--ph-vh, 100vh) * 0.4); overflow-y: auto; padding: 4px 0; z-index: 32; }
 .app.phone .composer .skills button { min-height: 44px; align-items: center; padding: 0 14px; }
-/* the model picker: a bottom sheet over the composer, its agents a row of
-   chips, its models rows, its effort a meter */
+/* the model picker: a sheet over the composer (view.bend's View.mp.top,
+   .mp-body): a head with what it is and a close that stays put, then the
+   agents (a row of chips), the models and the effort stacked in a body that
+   scrolls, never over one another (the narrow-column container rules' 34dvh
+   model box is undone here: it let the rows run over the effort). A model
+   row is its name over what it is, two lines at most; the CLI's later
+   models fold under More models; the effort is a segmented control. */
 .app.phone .model-layer .shade { background: rgba(0, 0, 0, .5); }
-.app.phone .model-menu.mp { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: calc(var(--ph-vh, 100vh) - 48px); display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; border: 0; border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
-.app.phone .model-menu.mp::before { content: ""; flex: none; align-self: center; width: 40px; height: 4px; margin: 8px 0 2px; background: var(--faint); opacity: .6; }
-.app.phone .model-menu .mp-col { border-right: 0; flex: none; }
-.app.phone .model-menu .mp-h { font-size: 11px; padding: 8px 14px 4px; border-bottom: 0; margin: 0; }
+.app.phone .model-menu.mp { position: fixed; left: 0; right: 0; bottom: var(--ph-kb, 0px); top: auto; width: auto; max-height: min(88dvh, calc(var(--ph-vh, 100dvh) - 40px)); display: flex; flex-direction: column; overflow: hidden; padding: 0; border: 0; border-radius: var(--ph-r-sheet, 22px) var(--ph-r-sheet, 22px) 0 0; box-shadow: 0 -8px 40px #0006; }
+.app.phone.light .model-menu.mp { background: var(--bg); box-shadow: 0 -8px 40px #0002; }
+.app.phone .model-menu .mp-top { position: relative; flex: none; display: flex; align-items: center; gap: 8px; min-height: 56px; padding: 10px max(6px, env(safe-area-inset-right)) 2px max(16px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); }
+.app.phone .model-menu .mp-top::before { content: ""; position: absolute; top: 6px; left: calc(50% - 20px); width: 40px; height: 5px; border-radius: 999px; background: color-mix(in srgb, var(--dim) 55%, transparent); }
+.app.phone .model-menu .mp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(17px * var(--text-scale, 100) / 100); font-weight: 650; color: var(--text); }
+.app.phone .model-menu .mp-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--dim); }
+.app.phone .model-menu .mp-x:active { background: var(--ph-press, var(--raise)); }
+.app.phone .model-menu .mp-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+.app.phone .model-menu .mp-col { flex: none; border: 0; padding-bottom: 4px; }
+.app.phone .model-menu .mp-col + .mp-col { border-top: 1px solid var(--line); }
+.app.phone .model-menu .mp-h { font-size: 11px; padding: 12px 16px 4px; border-bottom: 0; margin: 0; }
 .app.phone .model-menu .mp-h kbd { display: none; }
 .app.phone .model-menu .mp-agents .rows { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding: 4px 12px 8px; scrollbar-width: none; }
-.app.phone .model-menu .mp-agents .row { display: inline-flex; align-items: center; flex: none; min-height: 40px; padding: 0 14px; border: 1px solid var(--line); box-shadow: none; }
+.app.phone .model-menu .mp-agents .row { display: inline-flex; align-items: center; flex: none; min-height: 40px; padding: 0 14px; border: 1px solid var(--line); box-shadow: none; font-size: calc(15px * var(--text-scale, 100) / 100); }
 .app.phone .model-menu .mp-agents .row.on { border-color: var(--accent); }
-.app.phone .model-menu .mp-models .rows { overflow: visible; }
-.app.phone .model-menu .row { min-height: 48px; align-items: center; padding: 0 14px; font-size: calc(15px * var(--text-scale, 100) / 100); }
+.app.phone .model-menu .mp-models .rows { max-height: none; overflow: visible; padding: 0 8px; }
+.app.phone .model-menu .mp-models .row { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 2px; min-height: 52px; padding: 7px 12px; border-radius: var(--ph-r-row, 12px); font-size: calc(15px * var(--text-scale, 100) / 100); }
+.app.phone .model-menu .mp-models .row .label { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: calc(13px * var(--text-scale, 100) / 100); line-height: 1.3; }
+.app.phone .model-menu .mp-models .row.own { box-shadow: inset 3px 0 var(--faint); }
+.app.phone .model-menu .mp-models .row.on { background: var(--ph-on, var(--raise)); box-shadow: inset 3px 0 var(--accent); }
+.app.phone .model-menu .mp-models .row.on .label { color: var(--dim); }
+.app.phone .model-menu .mp-models .row:active { background: var(--ph-press, var(--raise)); }
+.app.phone .model-menu .mp-more > summary { display: flex; align-items: center; justify-content: space-between; min-height: 48px; margin: 0 8px; padding: 0 12px; border-radius: var(--ph-r-row, 12px); list-style: none; cursor: pointer; color: var(--dim); font-size: calc(14px * var(--text-scale, 100) / 100); }
+.app.phone .model-menu .mp-more > summary::-webkit-details-marker { display: none; }
+.app.phone .model-menu .mp-more > summary::after { content: ""; width: 8px; height: 8px; margin-right: 4px; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg) translateY(-2px); }
+.app.phone .model-menu .mp-more[open] > summary::after { transform: rotate(-135deg) translateY(-2px); }
+.app.phone .model-menu .mp-more > summary:active { background: var(--ph-press, var(--raise)); }
 .app.phone .model-menu .find input { font-size: 16px; min-height: 44px; }
-.app.phone .model-menu .meter { height: 100px; padding: 8px 14px 4px; gap: 6px; }
-.app.phone .model-menu .step { min-height: 44px; font-size: 12px; }
-.app.phone .model-menu .note { padding: 6px 14px 12px; font-size: 12px; }
+.app.phone .model-menu .meter { display: flex; gap: 2px; height: auto; margin: 4px 16px 0; padding: 3px; border: 1px solid var(--line); border-radius: var(--ph-r-ctl, 12px); background: var(--bg); }
+.app.phone .model-menu .step { flex: 1 1 0; min-width: 0; min-height: 44px; justify-content: center; border-radius: calc(var(--ph-r-ctl, 12px) - 3px); color: var(--dim); font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone .model-menu .step i { display: none; }
+.app.phone .model-menu .step.on { background: var(--accent); color: var(--bg); font-weight: 650; }
+.app.phone .model-menu .step:not(.on):not(:disabled):active { background: var(--ph-press, var(--raise)); }
+.app.phone .model-menu .note { padding: 8px 16px 12px; font-size: 12px; }
 /* queued messages and the account / token / allowance pop-ups */
 .app.phone .queue { margin: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); }
 .app.phone .queued { min-height: 44px; font-size: calc(13px * var(--text-scale, 100) / 100); }
