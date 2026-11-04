@@ -3519,6 +3519,7 @@ async function startThin(again = false, reason = "initial") {
       send: request => {
         if (!current() || s.readyState !== 1) throw Error("View connection closed");
         trace("send", { id: request.id, method: request.m });
+        phoneReplyWatch(s, request);
         RR?.sent?.(request.id, request.m === "view.action" && typeof request.p?.action === "string" ? request.m + ":" + request.p.action : request.m);
         // the session's tree goes into the request as it is (known), not built again from its plain copy
         const tree = request.p?.session ? App.viewer_input(ui, presentationJson(currentSession().info || {}), presentationJson(request.p.session)) : null;
@@ -3720,6 +3721,7 @@ async function startThin(again = false, reason = "initial") {
     const bytes = new Uint8Array(event.data);
     diagnostic.frame(bytes.byteLength);
     if (Solid.isPlot(bytes)) {
+      plotHeard = Date.now();
       const o = Solid.cbor(bytes), at = { bytes: bytes.length, t: performance.now() };
       if (o && typeof o.none === "string") o.none = App.plot_error(ui, o.none);
       const key = typeof o?.key === "string" ? o.key : "";
@@ -3784,15 +3786,34 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 // the page looks live. So on a phone a wake asks the hub for a view, and a
 // link that brings nothing at all within 6 s is replaced (cheap: a bounded
 // view; "Reconnecting" shows only if that takes a while too).
-let wakeProbe = 0;
+// (Both stand down while a viewer is drawing: its pictures can be megabytes,
+// minutes on a slow link, and no frame shows until all of one is in; the
+// lease above still judges such a link.)
+let wakeProbe = 0, plotHeard = 0;
+const viewerBusy = () => Date.now() - plotHeard < 60000;
 function phoneWakeProbe() {
-  if (!PHONE_TITLES() || !socket || wakeProbe) return;
+  if (!PHONE_TITLES() || !socket || wakeProbe || viewerBusy()) return;
   const asked = BigInt(Date.now()), s = socket;
   if (remoteReady) thin?.update();
   wakeProbe = setTimeout(() => {
     wakeProbe = 0;
-    if (socket === s && heard < asked && Date.now() >= heldUntil) s.dead("wake-quiet");
+    if (socket === s && heard < asked && Date.now() >= heldUntil && !viewerBusy()) s.dead("wake-quiet");
   }, 6000);
+}
+// The same holds for a Send or an answer: the hub answers it at once with a
+// small frame, so a link that brings nothing within 8 s of the oldest one
+// not answered since is dead, not slow. (Not other requests: their answer
+// can be a viewer's picture.)
+const REPLY_WATCHED = new Set(["send", "send-alt", "answer"]);
+let replyWatch = 0, replyFrom = 0n;
+function phoneReplyWatch(s, request) {
+  if (!PHONE_TITLES() || s !== socket || request.m !== "view.action" || !REPLY_WATCHED.has(request.p?.action) || viewerBusy()) return;
+  if (replyWatch && heard < replyFrom) return;
+  clearTimeout(replyWatch);replyFrom = BigInt(Date.now());
+  replyWatch = setTimeout(() => {
+    replyWatch = 0;
+    if (socket === s && heard < replyFrom && Date.now() >= heldUntil && !viewerBusy()) s.dead("reply-quiet");
+  }, 8000);
 }
 const onWake = why => {
   const away = hiddenAt ? Date.now() - hiddenAt : 0;
