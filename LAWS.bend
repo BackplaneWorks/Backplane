@@ -1,3 +1,4 @@
+import ./src/server/wire.bend as WIRE
 import ./src/core/json-object.bend as JSONOBJECT
 import ./src/server/adopt-plan.bend as ADOPTPLAN
 import ./src/server/desktop-info.bend as DESKINFO
@@ -11477,12 +11478,12 @@ law cef_native_link_allowed:
 law mail_credit_carried:
   for text: String
   for charge: Nat
-  {MPCREDIT.Wire.charged(False{}, MPCREDIT.WText{text}, charge) == MPCREDIT.WCharged{text, charge} : MPCREDIT.Wire}
+  {WIRE.Wire.charged(False{}, WIRE.WText{text}, charge) == WIRE.WCharged{text, charge} : WIRE.Wire}
 
 law mail_credit_native_kept:
-  for w: MPCREDIT.Wire
+  for w: WIRE.Wire
   for charge: Nat
-  {MPCREDIT.Wire.charged(True{}, w, charge) == w : MPCREDIT.Wire}
+  {WIRE.Wire.charged(True{}, w, charge) == w : WIRE.Wire}
 # ---- i18n web phone ----
 law webphone_option_english:
   {WPH.VLabel.option(I18.En{}, "ui.theme", "dark") == "dark" : String}
@@ -16021,3 +16022,26 @@ law adopt_live_entries_kept:
   for +record: String
   for +handoff: String
   {ADOPTPLAN.Adopt.copy.entries(False{}, record, handoff) == AD.Adopt.entries(record, handoff) : List<&2, AD.AEntry>}
+
+# Credit policy follows the original offer, independently of encoding.
+law mail_credit_recharged:
+  for +text: String
+  for old: Nat
+  for +charge: Nat
+  {WIRE.Wire.charged(False{}, WIRE.WCharged{text, old}, charge) == WIRE.WCharged{text, charge} : WIRE.Wire}
+
+law mail_json_credit_recharged:
+  for +json: J.Json
+  for old: Nat
+  for +charge: Nat
+  {WIRE.Wire.charged(False{}, WIRE.WJson{json, old}, charge) == WIRE.WJson{json, charge} : WIRE.Wire}
+
+law mail_terminal_credit_recharged:
+  for +json: J.Json
+  for old: Nat
+  for +charge: Nat
+  {WIRE.Wire.charged(False{}, WIRE.WTerminal{json, old}, charge) == WIRE.WTerminal{json, charge} : WIRE.Wire}
+
+law mail_wire_text_charge:
+  for +text: String
+  {WIRE.Wire.text.charge(text) == String.length(text) : Nat}
