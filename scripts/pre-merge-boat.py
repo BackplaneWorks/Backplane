@@ -89,12 +89,29 @@ def inspect_merge(repo, base, head):
     return tree, git(repo, 'show', tree+':LAWS.bend'), git(repo, 'show', tree+':PROOF.bend')
 
 
+
+def trusted_verifiers(repo, base, directory):
+    # Candidate changes must never select the checker/driver that judges them.
+    directory.mkdir(parents=True, exist_ok=True)
+    shape = directory/'laws-shape.py'
+    shape.write_bytes(git(repo, 'show', base+':scripts/laws-shape.py'))
+    driver_path = directory/'merge-laws.py'
+    driver_path.write_bytes(git(repo, 'show', base+':scripts/merge-laws.py'))
+    driver = shlex.join([sys.executable, '-IB', str(driver_path)])+' %O %A %B'
+    git(repo, 'config', 'merge.laws.driver', driver)
+    info = Path(git(repo, 'rev-parse', '--git-path', 'info/attributes').decode().strip())
+    if not info.is_absolute(): info = repo/info
+    info.parent.mkdir(parents=True, exist_ok=True)
+    info.write_text('LAWS.bend merge=laws\nPROOF.bend merge=laws\n')
+    return shape, sha(driver_path.read_bytes())
+
+
 def worker(head, base, expected):
     group = worker_group()
     out = ROOT/'build/pre-merge';out.mkdir(parents=True, exist_ok=True)
     if (out/'RESULT.json').exists():
         raise ValueError('existing pre-merge attempt; inspect it instead of overwriting')
-    report = {'schema': 1, 'kind': 'boat-merged-laws-shape', 'head': head,
+    report = {'schema': 2, 'kind': 'boat-merged-laws-shape', 'head': head,
               'worker_sha256': sha(Path(__file__).read_bytes()), 'state': 'failed'}
     try:
         if HEX40.fullmatch(head) is None or report['worker_sha256'] != expected:
@@ -112,15 +129,13 @@ def worker(head, base, expected):
             boot = git(repo, 'show', head+':scripts/pre-merge-boat.py')
             if sha(boot) != expected:
                 raise ValueError('worker differs from the pushed reviewed source; push HEAD first')
-            # Install the same block-wise merge driver used by the repository.
-            merge_driver = temp/'merge-laws.py'
-            merge_driver.write_bytes(git(repo, 'show', head+':scripts/merge-laws.py'))
-            driver = shlex.join([sys.executable, '-IB', str(merge_driver)])+' %O %A %B'
-            git(repo, 'config', 'merge.laws.driver', driver)
-            (repo/'info/attributes').write_text('LAWS.bend merge=laws\nPROOF.bend merge=laws\n')
+            shape_path, driver_sha = trusted_verifiers(repo, base_oid, temp/'trusted')
+            report.update({'verification_base': base_oid, 'merge_driver_sha256': driver_sha})
             # Dedicated guard controls also run only here, under the same cap.
             tests = temp/'controls';tests.mkdir()
             (tests/'pre-merge-boat.py').write_bytes(boot)
+            (tests/'laws-shape.py').write_bytes(shape_path.read_bytes())
+            (tests/'merge-laws.py').write_bytes((temp/'trusted/merge-laws.py').read_bytes())
             (tests/'pre_merge_boat_test.py').write_bytes(git(repo, 'show', head+':test/tools/pre_merge_boat_test.py'))
             controls = subprocess.run([sys.executable, '-IB', '-m', 'unittest', 'discover', '-s', str(tests),
                                        '-p', 'pre_merge_boat_test.py'], capture_output=True, text=True, timeout=60)
@@ -128,10 +143,9 @@ def worker(head, base, expected):
             if controls.returncode:
                 raise ValueError('pre-merge guard controls failed')
             tree, laws, proof = inspect_merge(repo, base_oid, head)
-            shape = git(repo, 'show', head+':scripts/laws-shape.py')
-            (temp/'laws-shape.py').write_bytes(shape)
+            shape = shape_path.read_bytes()
             (temp/'LAWS.bend').write_bytes(laws);(temp/'PROOF.bend').write_bytes(proof)
-            result = subprocess.run([sys.executable, '-IB', str(temp/'laws-shape.py'),
+            result = subprocess.run([sys.executable, '-IB', str(shape_path),
                                      str(temp/'LAWS.bend'), str(temp/'PROOF.bend')],
                                     capture_output=True, text=True, timeout=60)
             (out/'shape.txt').write_text(result.stdout+result.stderr)
@@ -153,13 +167,14 @@ def worker(head, base, expected):
 
 
 def receipt_ok(report, head, expected):
-    return (isinstance(report, dict) and type(report.get('schema')) is int and report['schema'] == 1
+    return (isinstance(report, dict) and type(report.get('schema')) is int and report['schema'] == 2
             and report.get('kind') == 'boat-merged-laws-shape' and report.get('head') == head
+            and report.get('verification_base') == report.get('base')
             and report.get('worker_sha256') == expected and report.get('state') == 'passed'
             and type(report.get('shape_exit')) is int and report['shape_exit'] == 0
             and all(isinstance(report.get(n), str) and HEX40.fullmatch(report[n]) for n in ('base', 'tree'))
             and all(isinstance(report.get(n), str) and re.fullmatch(r'[0-9a-f]{64}', report[n])
-                    for n in ('laws_sha256', 'proof_sha256', 'shape_sha256'))
+                    for n in ('laws_sha256', 'proof_sha256', 'shape_sha256', 'merge_driver_sha256'))
             and resource_ok(report.get('resources')))
 
 
@@ -194,12 +209,19 @@ def dispatch(base):
         raise ValueError('owned pre-merge execution/receipt identity or verdict failed')
     if git(ROOT, 'rev-parse', 'HEAD').decode().strip() != head or sha(Path(__file__).read_bytes()) != expected:
         raise ValueError('local HEAD/worker changed during Boat validation')
+    # Fetching/reading immutable Git source bytes is a static identity audit,
+    # never local merge-tree or shape execution.
+    git(ROOT, 'fetch', '--no-tags', REMOTE, report['base'])
+    if sha(git(ROOT, 'show', report['base']+':scripts/laws-shape.py')) != report['shape_sha256']:
+        raise ValueError('shape verifier identity differs from the trusted base')
+    if sha(git(ROOT, 'show', report['base']+':scripts/merge-laws.py')) != report['merge_driver_sha256']:
+        raise ValueError('merge driver identity differs from the trusted base')
     if base_local:
         current = git(ROOT, 'ls-remote', REMOTE, base_remote).decode().split()
         if not current or current[0] != report['base']:
             raise ValueError('base advanced after Boat validation; do not merge with this receipt')
-    if sha(git(ROOT, 'show', head+':scripts/laws-shape.py')) != report['shape_sha256']:
-        raise ValueError('shape verifier identity differs from the pushed source')
+    elif report['base'] != base_remote:
+        raise ValueError('explicit base commit differs from the verified immutable base')
     print('pre-merge: merged LAWS/PROOF shape ok (Boat '+job+', tree '+report['tree']+')')
     return 0
 
