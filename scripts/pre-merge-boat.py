@@ -14,11 +14,12 @@ import tempfile
 ROOT = Path(__file__).resolve().parent.parent
 REMOTE = 'https://github.com/BackplaneWorks/Backplane.git'
 CAP = 536870912
+GUARD_FILES = ('scripts/pre-merge.sh', 'scripts/pre-merge-boat.py', 'scripts/boat-job.sh')
 HEX40 = re.compile(r'[0-9a-f]{40}')
 SCOPE_CMD = ('set -eu; unit=bp-premerge-$$.scope; '
              'exec systemd-run --user --scope --quiet --unit="$unit" '
              '-p MemoryMax=536870912 -p MemorySwapMax=0 -- '
-             'python3 scripts/pre-merge-boat.py worker --head "$1" --base "$2" --worker-sha "$3"')
+             'python3 scripts/pre-merge-boat.py worker --head "$1" --base "$2" --worker-sha "$3" --guard-change-ack "$4"')
 JOB = re.compile(r'^job (j[0-9]{14}-[0-9]+): logs and artifacts in (.+)$')
 
 
@@ -92,6 +93,44 @@ def inspect_merge(repo, base, head):
 
 
 
+def guard_files(repo, base, head):
+    def snapshot(commit):
+        entries = {}
+        data = git(repo, 'ls-tree', '-z', commit, '--', *GUARD_FILES)
+        for row in data.split(b'\0'):
+            if not row: continue
+            metadata, name = row.decode().split('\t', 1)
+            mode, kind, _ = metadata.split()
+            if kind != 'blob' or mode not in ('100644', '100755'):
+                raise ValueError('guard file must be a regular source blob')
+            entries[name] = {'mode': mode, 'sha256': sha(git(repo, 'show', commit+':'+name))}
+        return entries
+    before, after = snapshot(base), snapshot(head)
+    matrix = {name: {'base': before.get(name), 'head': after.get(name)} for name in GUARD_FILES}
+    matched = all(row['base'] is not None and row['base'] == row['head'] for row in matrix.values())
+    return matrix, matched
+
+
+def guard_authorized(head, matched, acknowledgement):
+    return matched or (isinstance(acknowledgement, str) and acknowledgement == head and HEX40.fullmatch(head) is not None)
+
+
+def guard_matrix_ok(matrix, matched):
+    if not isinstance(matrix, dict) or set(matrix) != set(GUARD_FILES):
+        return False
+    for row in matrix.values():
+        if not isinstance(row, dict) or set(row) != {'base', 'head'}:
+            return False
+        for item in row.values():
+            if item is not None and (not isinstance(item, dict) or set(item) != {'mode', 'sha256'}
+                    or item['mode'] not in ('100644', '100755')
+                    or not isinstance(item['sha256'], str)
+                    or re.fullmatch(r'[0-9a-f]{64}', item['sha256']) is None):
+                return False
+    actual = all(row['base'] is not None and row['base'] == row['head'] for row in matrix.values())
+    return type(matched) is bool and matched == actual
+
+
 def trusted_verifiers(repo, base, directory):
     # Candidate changes must never select the checker/driver that judges them.
     directory.mkdir(parents=True, exist_ok=True)
@@ -108,12 +147,12 @@ def trusted_verifiers(repo, base, directory):
     return shape, sha(driver_path.read_bytes())
 
 
-def worker(head, base, expected):
+def worker(head, base, expected, acknowledgement):
     group = worker_group()
     out = ROOT/'build/pre-merge';out.mkdir(parents=True, exist_ok=True)
     if (out/'RESULT.json').exists():
         raise ValueError('existing pre-merge attempt; inspect it instead of overwriting')
-    report = {'schema': 2, 'kind': 'boat-merged-laws-shape', 'head': head,
+    report = {'schema': 3, 'kind': 'boat-merged-laws-shape', 'head': head,
               'worker_sha256': sha(Path(__file__).read_bytes()), 'state': 'failed'}
     try:
         if HEX40.fullmatch(head) is None or report['worker_sha256'] != expected:
@@ -131,6 +170,11 @@ def worker(head, base, expected):
             boot = git(repo, 'show', head+':scripts/pre-merge-boat.py')
             if sha(boot) != expected:
                 raise ValueError('worker differs from the pushed reviewed source; push HEAD first')
+            matrix, matched = guard_files(repo, base_oid, head)
+            report.update({'base': base_oid, 'guard_files': matrix, 'guard_files_match_base': matched,
+                           'guard_change_ack': acknowledgement})
+            if not guard_authorized(head, matched, acknowledgement):
+                raise ValueError('guard files differ from base; explicit reviewed exact-head acknowledgement required')
             shape_path, driver_sha = trusted_verifiers(repo, base_oid, temp/'trusted')
             report.update({'verification_base': base_oid, 'merge_driver_sha256': driver_sha})
             # Dedicated guard controls also run only here, under the same cap.
@@ -138,10 +182,14 @@ def worker(head, base, expected):
             (tests/'pre-merge-boat.py').write_bytes(boot)
             (tests/'laws-shape.py').write_bytes(shape_path.read_bytes())
             (tests/'merge-laws.py').write_bytes((temp/'trusted/merge-laws.py').read_bytes())
-            (tests/'pre_merge_boat_test.py').write_bytes(git(repo, 'show', head+':test/tools/pre_merge_boat_test.py'))
+            control_source = git(repo, 'show', head+':test/tools/pre_merge_boat_test.py')
+            (tests/'pre_merge_boat_test.py').write_bytes(control_source)
             controls = subprocess.run([sys.executable, '-IB', '-m', 'unittest', 'discover', '-s', str(tests),
                                        '-p', 'pre_merge_boat_test.py'], capture_output=True, text=True, timeout=60)
-            (out/'controls.txt').write_text(controls.stdout+controls.stderr)
+            control_log = controls.stdout+controls.stderr
+            (out/'controls.txt').write_text(control_log)
+            report.update({'controls_exit': controls.returncode, 'controls_sha256': sha(control_log.encode()),
+                           'controls_source_sha256': sha(control_source)})
             if controls.returncode:
                 raise ValueError('pre-merge guard controls failed')
             tree, laws, proof = inspect_merge(repo, base_oid, head)
@@ -157,7 +205,7 @@ def worker(head, base, expected):
                 raise ValueError('actual merged LAWS/PROOF shape failed')
             if fetch_base(repo, base) != base_oid:
                 raise ValueError('base advanced during Boat validation; no stale merge permission')
-            report['state'] = 'passed'
+            report['state'] = 'passed' if matched else 'passed-reviewed-guard-change'
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         report['error'] = str(error)
     report['resources'] = resources(group)
@@ -165,29 +213,40 @@ def worker(head, base, expected):
         report['state'] = 'failed';report['error'] = 'pre-merge resource/OOM contract failed'
     (out/'RESULT.json').write_text(json.dumps(report, sort_keys=True, indent=2)+'\n')
     print(json.dumps(report, sort_keys=True), flush=True)
-    return 0 if report['state'] == 'passed' else 1
+    return 0 if report['state'] in ('passed', 'passed-reviewed-guard-change') else 1
 
 
-def receipt_ok(report, head, expected):
-    return (isinstance(report, dict) and type(report.get('schema')) is int and report['schema'] == 2
+def receipt_ok(report, head, expected, acknowledgement=''):
+    return (isinstance(report, dict) and type(report.get('schema')) is int and report['schema'] == 3
             and report.get('kind') == 'boat-merged-laws-shape' and report.get('head') == head
             and report.get('verification_base') == report.get('base')
-            and report.get('worker_sha256') == expected and report.get('state') == 'passed'
+            and report.get('worker_sha256') == expected
+            and type(report.get('guard_files_match_base')) is bool
+            and guard_matrix_ok(report.get('guard_files'), report['guard_files_match_base'])
+            and guard_authorized(head, report['guard_files_match_base'], acknowledgement)
+            and report.get('guard_change_ack') == acknowledgement
+            and report.get('state') == ('passed' if report['guard_files_match_base'] else 'passed-reviewed-guard-change')
+            and type(report.get('controls_exit')) is int and report['controls_exit'] == 0
             and type(report.get('shape_exit')) is int and report['shape_exit'] == 0
             and all(isinstance(report.get(n), str) and HEX40.fullmatch(report[n]) for n in ('base', 'tree'))
             and all(isinstance(report.get(n), str) and re.fullmatch(r'[0-9a-f]{64}', report[n])
-                    for n in ('laws_sha256', 'proof_sha256', 'shape_sha256', 'merge_driver_sha256'))
+                    for n in ('laws_sha256', 'proof_sha256', 'shape_sha256', 'merge_driver_sha256', 'controls_sha256', 'controls_source_sha256'))
             and resource_ok(report.get('resources')))
 
 
-def dispatch(base):
+def dispatch(base, acknowledgement=''):
     # Local side: metadata/transport/byte identities only. Never merge or test.
     base_remote, base_local = base_ref(base)
     head = git(ROOT, 'rev-parse', 'HEAD').decode().strip()
     expected = sha(Path(__file__).read_bytes())
+    sources = {name: sha(git(ROOT, 'show', head+':'+name)) for name in GUARD_FILES}
+    if any(sha((ROOT/name).read_bytes()) != digest for name, digest in sources.items()):
+        raise ValueError('guard/transport source differs from pushed HEAD; commit and push first')
+    if acknowledgement and acknowledgement != head:
+        raise ValueError('guard-change acknowledgement must name this exact pushed HEAD')
     argv = ['scripts/boat-job.sh', '--size', 'default', '--timeout', '240', '--wait', '0', '--idle', '0', '--no-reuse',
             '--no-setup-bend', '--include-file', 'scripts/pre-merge-boat.py', '--artifact', 'build/pre-merge',
-            '--', 'bash', '-c', SCOPE_CMD, 'premerge-scope', head, base, expected]
+            '--', 'bash', '-c', SCOPE_CMD, 'premerge-scope', head, base, expected, acknowledgement]
     process = subprocess.Popen(argv, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     job = location = None
     for line in process.stdout:
@@ -207,13 +266,22 @@ def dispatch(base):
     report = json.loads((at/'artifacts/pre-merge/RESULT.json').read_text())
     if (provenance.get('job') != job or provenance.get('size') != 'default' or type(provenance.get('exit')) is not int or provenance['exit'] != 0
             or provenance.get('revision') != head or provenance.get('source') != str(ROOT)
-            or not receipt_ok(report, head, expected)):
+            or not receipt_ok(report, head, expected, acknowledgement)):
         raise ValueError('owned pre-merge execution/receipt identity or verdict failed')
     if git(ROOT, 'rev-parse', 'HEAD').decode().strip() != head or sha(Path(__file__).read_bytes()) != expected:
         raise ValueError('local HEAD/worker changed during Boat validation')
+    if any(sha((ROOT/name).read_bytes()) != digest for name, digest in sources.items()):
+        raise ValueError('local guard/transport source changed during Boat validation')
     # Fetching/reading immutable Git source bytes is a static identity audit,
     # never local merge-tree or shape execution.
     git(ROOT, 'fetch', '--no-tags', REMOTE, report['base'])
+    matrix, matched = guard_files(ROOT, report['base'], head)
+    if matrix != report.get('guard_files') or matched != report['guard_files_match_base']:
+        raise ValueError('guard-source matrix differs from immutable Git bytes')
+    if sha((at/'artifacts/pre-merge/controls.txt').read_bytes()) != report['controls_sha256']:
+        raise ValueError('owned controls log identity differs')
+    if sha(git(ROOT, 'show', head+':test/tools/pre_merge_boat_test.py')) != report['controls_source_sha256']:
+        raise ValueError('controls source differs from pushed head')
     if sha(git(ROOT, 'show', report['base']+':scripts/laws-shape.py')) != report['shape_sha256']:
         raise ValueError('shape verifier identity differs from the trusted base')
     if sha(git(ROOT, 'show', report['base']+':scripts/merge-laws.py')) != report['merge_driver_sha256']:
@@ -224,6 +292,8 @@ def dispatch(base):
             raise ValueError('base advanced after Boat validation; do not merge with this receipt')
     elif report['base'] != base_remote:
         raise ValueError('explicit base commit differs from the verified immutable base')
+    if not matched:
+        print('pre-merge: EXPLICIT REVIEWED GUARD CHANGE ACKNOWLEDGED FOR '+head, flush=True)
     print('pre-merge: merged LAWS/PROOF shape ok (Boat '+job+', tree '+report['tree']+')')
     return 0
 
@@ -232,11 +302,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest='action', required=True)
     local = actions.add_parser('dispatch');local.add_argument('base', nargs='?', default='origin/main')
+    local.add_argument('--allow-reviewed-guard-change', default='', metavar='EXACT_HEAD')
     remote = actions.add_parser('worker');remote.add_argument('--head', required=True)
     remote.add_argument('--base', required=True);remote.add_argument('--worker-sha', required=True)
+    remote.add_argument('--guard-change-ack', default='')
     args = parser.parse_args()
     try:
-        return dispatch(args.base) if args.action == 'dispatch' else worker(args.head, args.base, args.worker_sha)
+        return dispatch(args.base, args.allow_reviewed_guard_change) if args.action == 'dispatch' else worker(args.head, args.base, args.worker_sha, args.guard_change_ack)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print('pre-merge: '+str(error), file=sys.stderr)
         return 1

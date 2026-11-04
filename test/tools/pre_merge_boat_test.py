@@ -32,8 +32,9 @@ class Contracts(unittest.TestCase):
                 'events':{'max':0,'oom':0,'oom_kill':0,'oom_group_kill':0}}
 
     def report(self):
-        return {'schema':2,'kind':'boat-merged-laws-shape','head':'a'*40,'base':'b'*40,'tree':'c'*40,
-                'verification_base':'b'*40,'merge_driver_sha256':'2'*64,'worker_sha256':'d'*64,'state':'passed','shape_exit':0,'laws_sha256':'e'*64,
+        return {'schema':3,'kind':'boat-merged-laws-shape','head':'a'*40,'base':'b'*40,'tree':'c'*40,
+                'guard_files':{name:{'base':{'mode':'100644','sha256':'8'*64},'head':{'mode':'100644','sha256':'8'*64}} for name in pm.GUARD_FILES},
+                'verification_base':'b'*40,'merge_driver_sha256':'2'*64,'guard_files_match_base':True,'guard_change_ack':'','controls_exit':0,'controls_sha256':'6'*64,'controls_source_sha256':'7'*64,'worker_sha256':'d'*64,'state':'passed','shape_exit':0,'laws_sha256':'e'*64,
                 'proof_sha256':'f'*64,'shape_sha256':'1'*64,'resources':self.resources()}
 
     def test_only_closed_remote_ref_or_complete_object_id(self):
@@ -55,7 +56,7 @@ class Contracts(unittest.TestCase):
 
     def test_owned_receipt_requires_exact_head_worker_and_shape_success(self):
         good=self.report();self.assertTrue(pm.receipt_ok(good,'a'*40,'d'*64))
-        for fields in ({'state':'failed'},{'shape_exit':1},{'shape_exit':False},{'schema':True},{'schema':1},{'verification_base':'0'*40},{'merge_driver_sha256':None},
+        for fields in ({'state':'failed'},{'shape_exit':1},{'shape_exit':False},{'schema':True},{'schema':1},{'schema':2},{'controls_exit':1},{'controls_exit':False},{'controls_sha256':None},{'verification_base':'0'*40},{'merge_driver_sha256':None},
                        {'head':'0'*40},{'worker_sha256':'0'*64},{'tree':'not-a-tree'},{'proof_sha256':None}):
             self.assertFalse(pm.receipt_ok({**good,**fields},'a'*40,'d'*64),fields)
         for missing in ('resources','laws_sha256','proof_sha256','tree','base'):
@@ -76,6 +77,18 @@ class Contracts(unittest.TestCase):
         self.assertIn("MemorySwapMax=0",pm.SCOPE_CMD)
         self.assertIn("'--no-setup-bend'",source)
 
+    def test_guard_matrix_and_reviewed_state_cannot_be_omitted_or_mislabelled(self):
+        good=self.report()
+        for value in (None,{},{'extra':{}}, {name:{'base':None,'head':None} for name in pm.GUARD_FILES}):
+            self.assertFalse(pm.receipt_ok({**good,'guard_files':value},'a'*40,'d'*64))
+        changed=copy.deepcopy(good)
+        changed['guard_files']['scripts/boat-job.sh']['head']['sha256']='9'*64
+        changed.update(guard_files_match_base=False,guard_change_ack='a'*40,state='passed-reviewed-guard-change')
+        self.assertFalse(pm.receipt_ok(changed,'a'*40,'d'*64))
+        self.assertTrue(pm.receipt_ok(changed,'a'*40,'d'*64,'a'*40))
+        self.assertFalse(pm.receipt_ok({**changed,'state':'passed'},'a'*40,'d'*64,'a'*40))
+        self.assertFalse(pm.receipt_ok(changed,'a'*40,'d'*64,'a'*39))
+
 
 class ActualGitMerges(unittest.TestCase):
     def setUp(self):
@@ -89,6 +102,7 @@ class ActualGitMerges(unittest.TestCase):
         (self.repo/'LAWS.bend').write_bytes(self.laws);(self.repo/'PROOF.bend').write_bytes(self.proof)
         (self.repo/'other.txt').write_text('base\n')
         (self.repo/'scripts').mkdir()
+        for name in pm.GUARD_FILES:(self.repo/name).write_text('# base guard source fixture\n')
         source_dir=HERE if (HERE/'laws-shape.py').exists() else HERE.parents[1]/'scripts'
         (self.repo/'scripts/laws-shape.py').write_bytes((source_dir/'laws-shape.py').read_bytes())
         (self.repo/'scripts/merge-laws.py').write_bytes((source_dir/'merge-laws.py').read_bytes())
@@ -135,6 +149,18 @@ class ActualGitMerges(unittest.TestCase):
         main=self.commit()
         pm.trusted_verifiers(self.repo,main,Path(self.temp.name)/'trusted')
         with self.assertRaises(ValueError):pm.inspect_merge(self.repo,main,head)
+
+    def test_guard_change_needs_explicit_exact_head_acknowledgement(self):
+        _,same=pm.guard_files(self.repo,self.base,self.base)
+        self.assertTrue(same)
+        (self.repo/'scripts/pre-merge-boat.py').write_text('# changed guard\n')
+        head=self.commit()
+        matrix,same=pm.guard_files(self.repo,self.base,head)
+        self.assertFalse(same)
+        self.assertNotEqual(matrix['scripts/pre-merge-boat.py']['base'],matrix['scripts/pre-merge-boat.py']['head'])
+        self.assertFalse(pm.guard_authorized(head,same,''))
+        self.assertFalse(pm.guard_authorized(head,same,'0'*40))
+        self.assertTrue(pm.guard_authorized(head,same,head))
 
 
 if __name__=='__main__':unittest.main()

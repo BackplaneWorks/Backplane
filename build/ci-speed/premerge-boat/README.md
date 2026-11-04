@@ -44,8 +44,24 @@ Final implementation uses an outer systemd scope before starting Python; the
 worker reads actual cap/swap back and never raises or self-sets its limit.
 The fetched base's shape verifier and merge driver judge the candidate, so a
 candidate cannot select an always-pass checker or take-ours merge driver.
-Schema2 records the verification base and both verifier/driver digests; the
+Schema3 records the verification base and both verifier/driver digests; the
 local side fetches only immutable source bytes to compare those identities.
 New actual Git/shape controls cover both candidate-tampering cases. The old
 schema1/8-control receipt is preserved as an initial experiment, not final
 trusted-base qualification. The final exact-head Boat guard must pass.
+
+The closed guard-source set is `scripts/pre-merge.sh`,
+`scripts/pre-merge-boat.py` and `scripts/boat-job.sh`. The receipt records each
+base/head blob hash and mode, recomputed independently by the dispatcher.
+Any difference refuses by default. A reviewed, intentional guard update uses
+`--allow-reviewed-guard-change FULL_HEAD_SHA`; prefixes and other heads refuse.
+This exception is printed loudly and yields `passed-reviewed-guard-change`,
+never plain `passed`. It applies only to that exact commit. The controls come
+from the candidate, can only block, and have their source hash, output hash
+and exit recorded. BASE shape validation remains mandatory. External Git,
+Python, systemd and Boat installations remain environment trust dependencies;
+this procedural guard is not an independent execution attestation.
+
+The final suite has 12 controls, including checker/driver replacement,
+conflicting ordinary files, altered guard sources, and mislabelled or absent
+acknowledgements. No final schema3 qualification has run yet.
