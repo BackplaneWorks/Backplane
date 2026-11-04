@@ -75,7 +75,7 @@ jobs:
         run: |
           python3 scripts/local-phase.py --record build/relink.resources.json -- python3 build/bootstrap-tools/scripts/service-relink.py build --checkout "$GITHUB_WORKSPACE" --source "$BACKPLANE_FROZEN_COMMIT" --target "$TARGET" --previous "$GITHUB_WORKSPACE/build/previous" --packet "$RUNNER_TEMP/release-inputs" --out "$GITHUB_WORKSPACE/build/bootstrap-js"
           python3 -c 'import json; r=json.load(open("build/relink.resources.json")); assert r["rc"] == 0 and r["peak_rss_kib"] < 3900*1024, "Compile-only memory budget exceeded"'
-          python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.0","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
+          python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.2","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

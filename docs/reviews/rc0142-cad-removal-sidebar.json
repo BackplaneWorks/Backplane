@@ -1,0 +1,99 @@
+{
+  "kind": "source-review-only-cad932-removal-sidebar-dependencies",
+  "source": "e57fde9b0fbf8bb2a957be45ac3a79a13ee784dc",
+  "tree": "b0ad4a3a59d671a81ada99bc9060f729adb1b700",
+  "base": "2a87e6526abfedda9378567642a9675660293b60",
+  "excluded_merge": "397cb47edeb9a5eb4f3eabf44b3be7d56b936591",
+  "changedClosureFiles": [
+    "src/core/client.bend",
+    "src/core/onboard.bend",
+    "src/mobile/screen.bend",
+    "src/web/view.bend"
+  ],
+  "reviewedSourceSHA256": {
+    "src/core/client.bend": "fb16a25e836329eb8beb5af0f93302ef217bb87801a9c1944f445a767bced00e",
+    "src/core/onboard.bend": "fc10cb988f4fa6e8b2780e3ea3c4ebfea0088256daf5f65abebd10dfe2d746c8",
+    "src/mobile/screen.bend": "7fed72d4c25f19b0641b4f661cbfa872c395e786155b2c6086b9da59e941f416",
+    "src/web/view.bend": "550f25f20fea8b0148e84297950d54526fb95701ae087df937c08cfc4a7e8efe"
+  },
+  "removedPinnedFiles": [
+    "src/core/cad-install.bend"
+  ],
+  "disposition": "SOURCE_REVIEW_ONLY; no new ordinary conversation-body draft reader, private key omission, scratch filter, unknown-input retention, cache slot, transport/recipient ownership or authority change introduced by the #932 removal. This review does not cover #934 changes in the overlapping view module.",
+  "readerReview": {
+    "src/core/client.bend": "Removes CIP/CIJO imports and Cadview snapshot/phase/button/row/dispatch helpers. Restores KN.of over existing kicad.install and kicad.install.why plus existing KiCad status/IPC data. Ui.act.k case21 writes those existing info fields and sends legacy kicad.install; no draft read. Ui.infos body is unchanged, moved back to its prior declaration location. KN.visible retains canonical kicad.notice.hidden setting behavior.",
+    "src/mobile/screen.bend": "Removes CIP/Mob.cad.* and installProgress output. Mob.kn renders its supplied KH.KNote through existing Mob.set.row. CAD settings restore FreeCAD.label/note from retained info; existing KiCad path @f.kpath and settings reads remain. No sidebar reader/key/bridge added.",
+    "src/web/view.bend": "Removes CIP/View.cad.meter/View.cad.row and CAD-specific action branch. Existing View.kn notice renderer, Settings rows and generic action flow remain; FreeCAD.label/note replaces CAD rows. Sidebar renderer definitions, private memo implementation and their arguments are not edited by this revert. Later #934 label/key helper changes remain for Lane B review.",
+    "src/core/onboard.bend": "Restores Ob.body.s5 to the existing localized agents text by removing the added static CAD setup sentence; no state, draft or key read added."
+  },
+  "keyBoundaryReview": {
+    "privateSidebar": "Sidebar.info still retains every info field except models.v, so legacy kicad.install / kicad.install.why / kicad.status / freecad data remain exact inputs. No new CAD-specific omission is introduced.",
+    "drafts": "Only ordinary non-@ body drafts are excluded from the private image identity by existing SD.Input.filter; every unknown @ key remains retained subject only to existing explicit Settings-only omissions. No filter edits.",
+    "fullPicture": "Sidebar.key.revision/key.for and full Ui/picture/transport paths keep original full draft inputs and existing canonical sequence/revision/context fences. No key or retained body is moved into a public response.",
+    "nativeAndAuthority": "Native sidebar context/hub/generation/epoch/view/target/member/budget fences, recipient info isolation, bounded-key fallback and cache-slot rules are unchanged. No new authority or transport admission route.",
+    "boundaryFiles": {
+      "src/core/sidebar-drafts.bend": {
+        "sha256": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
+        "identical_to_base": true
+      },
+      "src/core/sidebar-read.bend": {
+        "sha256": "4695576d308745ba70284fb90dee0e4aad99ddce8b64f4400297676932b4d12d",
+        "identical_to_base": true
+      },
+      "src/server/thin-sidebar.bend": {
+        "sha256": "03a4481e05258eaead769ca352081b6782f0b20589fe29d33e3bb1151916844a",
+        "identical_to_base": true
+      },
+      "src/core/native-sidebar.bend": {
+        "sha256": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
+        "identical_to_base": true
+      },
+      "src/server/thin-actor.bend": {
+        "sha256": "2e91a6abd414d026cff5da6838c25b313c6b321dbcc663fa351878c028fe4e15",
+        "identical_to_base": true
+      },
+      "src/server/thin-view.bend": {
+        "sha256": "c9bfaf9bac65d287fd70d3b804bb7b9bcb20cddd93324f7e477301a9f57382ae",
+        "identical_to_base": true
+      },
+      "src/server/thin-mirror.bend": {
+        "sha256": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
+        "identical_to_base": true
+      },
+      "src/server/thin-body.bend": {
+        "sha256": "779e72f8bb69990c74bf4acdd52f50fb1e0ceaa8771cd38044bef81d2c1a3680",
+        "identical_to_base": true
+      },
+      "src/core/thin-wire.bend": {
+        "sha256": "95299885f65f3dea85bf8a3bea4e0e5ae8bcbf3ebfb44b699cacb2cf6690454c",
+        "identical_to_base": true
+      },
+      "src/core/presentation.bend": {
+        "sha256": "cbdc38a38c52cd94fe9af1222e1ce0461b780d3d5d4f32679313d648e702f76a",
+        "identical_to_base": true
+      },
+      "src/app/mm.bend": {
+        "sha256": "164443f03839f5e6812ed75ed2ffc3d2caaed38d16019e556eb79535266ca606",
+        "identical_to_base": true
+      },
+      "scripts/sidebar-draft-guard.py": {
+        "sha256": "ea3fef1eb609053efc3fe0e3e5916c8a31127de1fbfb25d345d410ced06d164e",
+        "identical_to_base": true
+      },
+      "scripts/sidebar-draft-inputs.json": {
+        "sha256": "47078bd2efd2fa6038ed1fd021e0e3f72c6672669b9c0df9df3596266faaca7a",
+        "identical_to_base": true
+      }
+    }
+  },
+  "rootManifestAction": "Root may regenerate the pure dependency HASH/import closure after combining this source-only review with Lane B #934 disposition. Remove the deleted cad-install pin through closure regeneration; preserve all prior review records/guard/scanner implementations. This disposition is not a guard bypass or authorization to claim full-output PASS.",
+  "separateLaneBFiles": [
+    "src/core/kexport.bend",
+    "src/core/refview.bend",
+    "src/mobile/hubs.bend",
+    "src/web/view.bend"
+  ],
+  "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+  "fullOutput24": "UNRUN_ON_CHANGED_SOURCE; no inherited PASS",
+  "validation": "Manual source/diff and Git object byte review only. No tests, scanner/check script, proof, compiler, runtime, build or Boat job executed. Root owns final manifest regeneration/version edits/source freeze/sole compile."
+}

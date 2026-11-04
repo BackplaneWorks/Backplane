@@ -54,8 +54,8 @@ concurrency:
 
 env:
   BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.14.1
-  BACKPLANE_VERSION_STAMP: '0.14.1'
+  BACKPLANE_VERSION: v0.14.2
+  BACKPLANE_VERSION_STAMP: '0.14.2'
   BACKPLANE_TELEMETRY_CHANNEL: release
   # Source scanners and receipts must use UTF-8 on Windows too.
   PYTHONUTF8: '1'
@@ -110,7 +110,7 @@ jobs:
           python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation js --target "$TARGET" --directory "$RUNNER_TEMP/release-inputs"
           # Public receipt for the telemetry release gate: the key ID only. Never the key, the
           # Google secret or the environment; written only after the build above succeeded.
-          python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.1","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
+          python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.2","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -167,7 +167,7 @@ jobs:
           chmod 755 "$SERVICE"  # artifacts drop file modes
           v=$("$SERVICE" --version)
           echo "$v"
-          [ "$v" = "backplane 0.14.1" ]
+          [ "$v" = "backplane 0.14.2" ]
       - name: Measure matching-host system ABI and assemble genuine service component
         shell: bash
         env:
@@ -186,7 +186,7 @@ jobs:
             mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
             set -- --windows-runtime "$RUNNER_TEMP/winrt"
           fi
-          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 29ba06044c73b99c06176a70c2bba557c965798f368e4a686a7642971fc15ab4 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 2740591c3ca9cb056ffddfd4dda94f3988daafe1cd2cdea3ef1638fbe5914360 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

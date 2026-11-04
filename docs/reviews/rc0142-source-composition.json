@@ -1,0 +1,27 @@
+{
+  "kind": "RC0142_COMBINED_MANUAL_SOURCE_REVIEW",
+  "baseMain": "2a87e6526abfedda9378567642a9675660293b60",
+  "compositionBeforeMetadata": "e57fde9b0fbf8bb2a957be45ac3a79a13ee784dc",
+  "held932Excluded": true,
+  "changedDependencyMetadata": [
+    "src/core/cad-install.bend",
+    "src/core/client.bend",
+    "src/core/json-object.bend",
+    "src/core/kexport.bend",
+    "src/core/onboard.bend",
+    "src/core/refview.bend",
+    "src/mobile/hubs.bend",
+    "src/mobile/screen.bend",
+    "src/web/view.bend"
+  ],
+  "sourceReviews": [
+    "docs/reviews/rc0142-934-source-disposition.md",
+    "docs/reviews/rc0142-cad-removal-sidebar.json"
+  ],
+  "rootsBridgesScannerGuardPolicyUnchanged": true,
+  "manifestGenerationOnly": true,
+  "fullOutput24": "UNRUN_ON_CHANGED_SOURCE_NOT_PASS",
+  "sourceReadershipDisposition": "934dispatch relocation and explicit932removal source audits preserve retained draft/key/@/fallback/recipient boundaries. No new private-key omissions or reader dependencies accepted.",
+  "emissionAndPackagedAcceptance": "PENDING_ACTUAL_NEW_ARTIFACT",
+  "noCachedOldOutputAcceptance": true
+}
