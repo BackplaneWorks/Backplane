@@ -4625,6 +4625,7 @@ def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
     case Hub{st, f, ls, +cl, as, inbox, +cfg, note}:
       do IO<Hub>:
         Hub.leave.close(Clients.get(cl, client))
+        CST.Cast.drop(client)
         Plot.put(Cfg.pv(cfg), PV.PStop{client})
         +cl2 : List<&2, Client> = Clients.drop(cl, client)
         cl3 : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl), now), cl2, now)
@@ -13880,6 +13881,7 @@ def Hub.thin.close_client(h: Hub, +client: U32) -> IO(Hub):
     case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WIRE.WClose{}, 0n)
+        CST.Cast.drop(client)
         return Hub{st, f, ls, Clients.drop(cl2, client), as, inbox, cfg, note}
 
 def Hub.rpc.thin_short(short: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):

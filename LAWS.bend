@@ -1,8 +1,13 @@
 import ./src/server/wire.bend as WIRE
+
 import ./src/core/json-object.bend as JSONOBJECT
+
 import ./src/server/adopt-plan.bend as ADOPTPLAN
+
 import ./src/server/desktop-info.bend as DESKINFO
+
 import ./src/server/pairing-info.bend as PAIRINFO
+
 import ./src/server/watch-plan.bend as WATCHPLAN
 
 import ./src/core/message-context.bend as MSGCONTEXT
@@ -505,6 +510,7 @@ import ./src/server/thin-still-picture.bend as STILLPICTURE
 import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
 
 import ./src/core/secret.bend as SEC
+
 import ./src/core/secret-box.bend as SBOX
 
 import ./src/server/thin-mirror.bend as TMR
@@ -518,6 +524,8 @@ import ./src/server/hotboot.bend as BOOTWARM
 import ./src/core/snapshot.bend as BOOTSNAP
 
 import ./src/core/landing.bend as LAND
+
+import ./src/server/cacheio.bend as CACHEIO
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -16045,3 +16053,15 @@ law mail_terminal_credit_recharged:
 law mail_wire_text_charge:
   for +text: String
   {WIRE.Wire.text.charge(text) == String.length(text) : Nat}
+
+# Typed effect slots and budgets. Foreign-code boundary tests separately
+# establish LRU, expiry, accounting and cleanup; these laws fix the policy
+# that Bend supplies rather than assuming an implementation of the effect.
+law cache_effect_slots:
+  {[CACHEIO.CacheSlot.code(CACHEIO.BrowserSeen{}), CACHEIO.CacheSlot.code(CACHEIO.BrowserLease{})] == [0, 1] : List<&2, U32>}
+
+law cache_effect_budget:
+  {CACHEIO.Cache.budget() == CACHEIO.CacheBudget{4096, 524288, 3001} : CACHEIO.CacheBudget}
+
+law cache_effect_global_budget:
+  {CACHEIO.Cache.global_bytes() == 8388608 : U32}
