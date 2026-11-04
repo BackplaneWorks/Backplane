@@ -106,6 +106,10 @@ try {
     }
     $child = [Diagnostics.Process]::new(); $child.StartInfo=$start
     if (!$child.Start()) { throw 'Cannot launch owned standard-user wrapper' }
+    # CreateProcessWithLogonW did not inherit our nested limit in the captured
+    # prior attempt. Explicitly admit its captured handle to this SAME capped
+    # job; the user's wrapper independently rereads its actual inherited limit.
+    $report.childAdmittedToCappedJob=[BP927Job]::Admit($child.Handle)
     $wrapperOut=$child.StandardOutput.ReadToEndAsync(); $wrapperErr=$child.StandardError.ReadToEndAsync()
     $report.wrapperPid = $child.Id; Save-Report
     $deadline = [DateTime]::UtcNow.AddMinutes(35)

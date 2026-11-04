@@ -34,6 +34,13 @@ public static class BP927Job {
   public static Limits Current() {
     Limits value; Check(QueryInformationJobObject(IntPtr.Zero,9,out value,(uint)Marshal.SizeOf(typeof(Limits)),IntPtr.Zero)); return value;
   }
+  public static bool Admit(IntPtr process) {
+    if(owned==IntPtr.Zero) throw new InvalidOperationException("No owned capped job");
+    Check(AssignProcessToJobObject(owned,process));
+    bool member; Check(IsProcessInJob(process,owned,out member));
+    if(!member) throw new InvalidOperationException("Child is outside the capped job");
+    return member;
+  }
   public static bool Member() {
     bool member; Check(IsProcessInJob(Process.GetCurrentProcess().Handle,IntPtr.Zero,out member)); return member;
   }

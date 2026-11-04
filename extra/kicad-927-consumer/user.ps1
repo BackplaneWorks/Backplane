@@ -13,7 +13,8 @@ try {
     $env:TEMP = Join-Path $cfg.out 'temp'; $env:TMP = $env:TEMP
     New-Item -ItemType Directory -Force $env:TEMP | Out-Null
     . (Join-Path $PSScriptRoot 'job.ps1')
-    # Child must inherit the bootstrap's real limit. No uncapped fallback.
+    # Bootstrap explicitly admits this logon-created process to its capped job.
+    # Reread the real limit here; there is no uncapped fallback.
     $resources = Get-BP927Resources
     $resources | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $cfg.out 'resources-start.json')
     Assert-BP927Resources $resources $cfg.resourcePolicy.allowExistingPagefile
