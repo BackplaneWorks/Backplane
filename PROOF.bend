@@ -1,5 +1,9 @@
+import ./src/server/wire.bend as WIRE
+
 import ./src/server/watch-plan.bend as WATCHPLAN
+
 import ./src/server/review-window.bend as REVIEWWINDOW
+
 import ./src/server/db.bend as HISTORYDB
 
 import ./test/conversation-proof/window_final.bend as CONVROOT
@@ -301,7 +305,9 @@ import ./test/secret_box_proof.bend as SECBP
 import ./src/core/landing.bend as LAND
 
 import ./src/server/cacheio.bend as CACHEIO
+
 import ./src/server/static-http.bend as STATICHTTP
+
 import ./src/server/host.bend as STATICIO
 
 # Lemmas
@@ -12986,15 +12992,15 @@ def Laws.mail_credit_carried(text, charge): {==}
 
 def Laws.mail_credit_native_kept(w, charge):
   match w:
-    case MPCREDIT.WText{_}: {==}
-    case MPCREDIT.WCharged{_, _}: {==}
-    case MPCREDIT.WPong{_}: {==}
-    case MPCREDIT.WBin{_}: {==}
-    case MPCREDIT.WClose{}: {==}
-    case MPCREDIT.WState{_, _}: {==}
-    case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
-    case MPCREDIT.WJson{_, _}: {==}
-    case MPCREDIT.WTerminal{_, _}: {==}
+    case WIRE.WText{_}: {==}
+    case WIRE.WCharged{_, _}: {==}
+    case WIRE.WPong{_}: {==}
+    case WIRE.WBin{_}: {==}
+    case WIRE.WClose{}: {==}
+    case WIRE.WState{_, _}: {==}
+    case WIRE.WItems{_, _, _, _, _, _}: {==}
+    case WIRE.WJson{_, _}: {==}
+    case WIRE.WTerminal{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
 
@@ -15833,6 +15839,14 @@ def Laws.json_object_put_null(key, value): {==}
 def Laws.desktop_connection_snapshot(text, version, hub): {==}
 
 def Laws.adopt_live_entries_kept(record, handoff): {==}
+
+def Laws.mail_credit_recharged(text, old, charge): {==}
+
+def Laws.mail_json_credit_recharged(json, old, charge): {==}
+
+def Laws.mail_terminal_credit_recharged(json, old, charge): {==}
+
+def Laws.mail_wire_text_charge(text): {==}
 
 def Laws.cache_effect_slots(): {==}
 

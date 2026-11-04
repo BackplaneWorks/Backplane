@@ -1,3 +1,4 @@
+import ../server/wire.bend as WIRE
 import Base
 import ../server/server.bend as S
 import ../server/host.bend as H
@@ -38,16 +39,16 @@ def Link.host(+url: String) -> String:
 def Link.port(+url: String) -> U32:
   U32.from_nat(Maybe.default(&2, Nat, Nat.read(Maybe.default(&2, String, List.get(&2, String, Link.hostport(url), 1n), "")), 3787n))
 
-def Link.say(+out: Chan(S.Wire), +text: String) -> IO(Unit):
+def Link.say(+out: Chan(WIRE.Wire), +text: String) -> IO(Unit):
   do IO<Unit>:
-    ok : Result<&1, &1, S.Wire, Unit> <- Chan.send(S.Wire, out, S.WText{text})
+    ok : Result<&1, &1, WIRE.Wire, Unit> <- Chan.send(WIRE.Wire, out, WIRE.WText{text})
     return Unit{}
 
 # the link is down: say why (a note the window shows), then hang up
-def Link.down(+out: Chan(S.Wire), +why: String) -> IO(Unit):
+def Link.down(+out: Chan(WIRE.Wire), +why: String) -> IO(Unit):
   do IO<Unit>:
     Link.say(out, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"update"}}, J.KV{"state", J.Str{why}}, J.KV{"error", J.Str{why}}])))
-    Chan.close(S.Wire, out)
+    Chan.close(WIRE.Wire, out)
 
 # Writing: requests from the window become masked binary CBOR frames
 # ------------------------------------------------------------------
@@ -118,7 +119,7 @@ def Link.json(m: Maybe<&2, J.Json>) -> String:
     case None{}:
       ""
 
-def Link.frame.op(bin: Bool, close: Bool, p: List<&2, U32>, rest: List<&2, U32>, s: Socket, +out: Chan(S.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
+def Link.frame.op(bin: Bool, close: Bool, p: List<&2, U32>, rest: List<&2, U32>, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
   match bin close:
     case True{} _:
       IO.bind(Unit, Unit, Link.say(out, Link.json(CB.Cbor.decode(p))), u => k(s, rest))
@@ -129,7 +130,7 @@ def Link.frame.op(bin: Bool, close: Bool, p: List<&2, U32>, rest: List<&2, U32>,
     case False{} False{}:
       k(s, rest)
 
-def Link.frame(g: Maybe<&2, W.Got>, s: Socket, +out: Chan(S.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
+def Link.frame(g: Maybe<&2, W.Got>, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
   match g:
     case Some{W.Got{W.Frame{_, +op, p}, rest}}:
       Link.frame.op(U32.is_eq(op, 2), U32.is_eq(op, 8), p, rest, s, out, k)
@@ -139,7 +140,7 @@ def Link.frame(g: Maybe<&2, W.Got>, s: Socket, +out: Chan(S.Wire), k: Socket -> 
 # the link is dead when nothing at all (a heartbeat included) arrives for
 # Alive.limit() ms: the wait is bounded, and a timeout hangs up like a
 # closed socket (the window decides whether to try again)
-def Link.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>, k: Socket -> List<&2, U32> -> IO(Unit), +out: Chan(S.Wire)) -> IO(Unit):
+def Link.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>, k: Socket -> List<&2, U32> -> IO(Unit), +out: Chan(WIRE.Wire)) -> IO(Unit):
   (s, res) = r
   match res:
     case Done{Some{Nil{}}}:
@@ -157,11 +158,11 @@ def Link.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>,
         Socket.close(s)
         Link.down(out, "")
 
-def Link.more(s: Socket, +out: Chan(S.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
+def Link.more(s: Socket, +out: Chan(WIRE.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
   IO.bind(Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>, Unit, Link.poll(s, U32.from_nat(DK.Alive.limit())), r => Link.got(r, k, out))
 
 # with the whole frame in: cut it out and go on with what follows
-def Link.cut(ready: Bool, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +need: Nat, +out: Chan(S.Wire),
+def Link.cut(ready: Bool, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +need: Nat, +out: Chan(WIRE.Wire),
     k: Socket -> List<&2, U32> -> List<&2, List<&2, U32>> -> Nat -> IO(Unit)) -> IO(Unit):
   match ready:
     case True{}:
@@ -170,7 +171,7 @@ def Link.cut(ready: Bool, s: Socket, +front: List<&2, U32>, back: List<&2, List<
       Link.more(s, out, s2 => +bs => k(s2, front, bs <> back, Nat.add(have, List.length(&2, U32, bs))))
 
 # the header is not all in the front yet: take the chunks in, or wait for more
-def Link.need(more: Bool, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +out: Chan(S.Wire),
+def Link.need(more: Bool, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +out: Chan(WIRE.Wire),
     k: Socket -> List<&2, U32> -> List<&2, List<&2, U32>> -> Nat -> IO(Unit)) -> IO(Unit):
   match more:
     case True{}:
@@ -178,7 +179,7 @@ def Link.need(more: Bool, s: Socket, +front: List<&2, U32>, back: List<&2, List<
     case False{}:
       Link.more(s, out, s2 => +bs => k(s2, front, bs <> back, Nat.add(have, List.length(&2, U32, bs))))
 
-def Link.step.k(m: Maybe<&2, Nat>, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +out: Chan(S.Wire),
+def Link.step.k(m: Maybe<&2, Nat>, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +out: Chan(WIRE.Wire),
     k: Socket -> List<&2, U32> -> List<&2, List<&2, U32>> -> Nat -> IO(Unit)) -> IO(Unit):
   match m:
     case Some{+need}:
@@ -186,14 +187,14 @@ def Link.step.k(m: Maybe<&2, Nat>, s: Socket, +front: List<&2, U32>, back: List<
     case None{}:
       Link.need(Nat.is_gt(have, List.length(&2, U32, front)), s, front, back, have, out, k)
 
-def Link.reader(fuel: Nat, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +out: Chan(S.Wire)) -> IO(Unit):
+def Link.reader(fuel: Nat, s: Socket, +front: List<&2, U32>, back: List<&2, List<&2, U32>>, +have: Nat, +out: Chan(WIRE.Wire)) -> IO(Unit):
   match fuel:
     case 0n:
       Socket.close(s)
     case 1n+f:
       Link.step.k(W.Ws.need(front), s, front, back, have, out, s2 => fr => bk => hv => Link.reader(f, s2, fr, bk, hv, out))
 
-def Link.duped(r: Socket & Result<&1, &1, U32 & String, Socket>, +rest: List<&2, U32>, +inbox: Chan(S.Msg), +out: Chan(S.Wire)) -> IO(Unit):
+def Link.duped(r: Socket & Result<&1, &1, U32 & String, Socket>, +rest: List<&2, U32>, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire)) -> IO(Unit):
   (rd, res) = r
   match res:
     case Done{wr}:
@@ -208,7 +209,7 @@ def Link.duped(r: Socket & Result<&1, &1, U32 & String, Socket>, +rest: List<&2,
 
 # upgraded: any note of an earlier failure goes; one handle reads frames,
 # a second writes requests
-def Link.open(ok: Bool, s: Socket, +rest: List<&2, U32>, +inbox: Chan(S.Msg), +out: Chan(S.Wire)) -> IO(Unit):
+def Link.open(ok: Bool, s: Socket, +rest: List<&2, U32>, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire)) -> IO(Unit):
   match ok:
     case True{}:
       IO.bind(Unit, Unit, Link.say(out, "{\"t\":\"update\",\"state\":\"\"}"),
@@ -222,20 +223,20 @@ def Link.open(ok: Bool, s: Socket, +rest: List<&2, U32>, +inbox: Chan(S.Msg), +o
 # Connecting
 # ----------
 
-def Link.split.k(m: Maybe<&2, W.Split>, s: Socket, +inbox: Chan(S.Msg), +out: Chan(S.Wire), k: Socket -> IO(Unit)) -> IO(Unit):
+def Link.split.k(m: Maybe<&2, W.Split>, s: Socket, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire), k: Socket -> IO(Unit)) -> IO(Unit):
   match m:
     case Some{W.Split{head, rest}}:
       Link.open(String.contains(U.Utf8.decode(head), " 101 "), s, rest, inbox, out)
     case None{}:
       k(s)
 
-def Link.unreachable(s: Socket, +inbox: Chan(S.Msg), +out: Chan(S.Wire)) -> IO(Unit):
+def Link.unreachable(s: Socket, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire)) -> IO(Unit):
   do IO<Unit>:
     Socket.close(s)
     IO.spawn(Unit, Link.drain(Link.fuel(), inbox))
     Link.down(out, NT.Notice.make("nohandshake", ""))
 
-def Link.head.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>, +inbox: Chan(S.Msg), +out: Chan(S.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
+def Link.head.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
   (s, res) = r
   match res:
     case Done{Some{Nil{}}}:
@@ -245,7 +246,7 @@ def Link.head.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U3
     case _:
       Link.unreachable(s, inbox, out)
 
-def Link.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +deadline: Nat, +inbox: Chan(S.Msg), +out: Chan(S.Wire)) -> IO(Unit):
+def Link.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +deadline: Nat, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire)) -> IO(Unit):
   match fuel:
     case 0n:
       Link.unreachable(s, inbox, out)
@@ -254,7 +255,7 @@ def Link.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +deadline: Nat, +inbox:
         s2 => IO.bind(Nat, Unit, IO.now(), now => IO.bind(Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>, Unit,
           Link.poll(s2, U32.from_nat(Nat.sub(deadline, now))), r => Link.head.got(r, inbox, out, s3 => bs => Link.head(f, s3, List.append(&2, U32, buf, bs), deadline, inbox, out)))))
 
-def Link.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +inbox: Chan(S.Msg), +out: Chan(S.Wire)) -> IO(Unit):
+def Link.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire)) -> IO(Unit):
   (s, res) = r
   match res:
     case Done{_}:
@@ -267,7 +268,7 @@ def Link.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +inbox: Chan(S.Msg
 def Link.path(since: Nat, origin: String, +token: String) -> String:
   "/ws?since=" ++ Nat.show(since) ++ "&origin=" ++ origin ++ "&enc=cbor" ++ Bool.pick(String, String.is_empty(token), "", "&token=" ++ token)
 
-def Link.connected(r: Result<&1, &1, U32 & String, Socket>, +url: String, since: Nat, origin: String, +token: String, +inbox: Chan(S.Msg), +out: Chan(S.Wire)) -> IO(Unit):
+def Link.connected(r: Result<&1, &1, U32 & String, Socket>, +url: String, since: Nat, origin: String, +token: String, +inbox: Chan(S.Msg), +out: Chan(WIRE.Wire)) -> IO(Unit):
   match r:
     case Done{s}:
       IO.bind(Socket & Result<&1, &1, U32 & String, Unit>, Unit, H.Sock.send_text(s, W.Ws.request(Link.host(url), Link.port(url), Link.path(since, origin, token))),

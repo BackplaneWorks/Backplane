@@ -1,3 +1,4 @@
+import ../server/wire.bend as WIRE
 import Base
 import ../server/telemetry.bend as TIO
 import ../core/refresh.bend as RF
@@ -179,21 +180,21 @@ def Pump.loop(fuel: Nat, w: Window, +q: Chan(ShellMsg)) -> IO(Unit):
     case 1n+f:
       IO.bind(Window & List<&2, U32>, Unit, W.Win.words(w), r => Pump.got(r, q, w2 => Pump.loop(f, w2, q)))
 
-def Fwd.got(m: Maybe<&1, S.Wire>, +q: Chan(ShellMsg), +tag: String, k: Unit -> IO(Unit)) -> IO(Unit):
+def Fwd.got(m: Maybe<&1, WIRE.Wire>, +q: Chan(ShellMsg), +tag: String, k: Unit -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{S.WText{t}}:
+    case Some{WIRE.WText{t}}:
       do IO<Unit>:
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHub{tag, t})
         k(Unit{})
-    case Some{S.WState{st, h}}:
+    case Some{WIRE.WState{st, h}}:
       do IO<Unit>:
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHubSt{tag, st, h})
         k(Unit{})
-    case Some{S.WJson{j, _}}:
+    case Some{WIRE.WJson{j, _}}:
       do IO<Unit>:
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHub{tag, J.Json.show(j)})
         k(Unit{})
-    case Some{S.WItems{hd, pl, _, xs, tl, _}}:
+    case Some{WIRE.WItems{hd, pl, _, xs, tl, _}}:
       do IO<Unit>:
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHub{tag, hd ++ pl ++ String.join(xs, ",") ++ tl})
         k(Unit{})
@@ -220,12 +221,12 @@ def Fwd.counted(+hub: Chan(S.Msg), +gen: U32, +n: Nat, k: Unit -> IO(Unit)) -> I
   IO.bind(Unit, Unit, Fwd.told(Nat.is_eq(Nat.mod(n, 32n), 0n), hub, gen, n), k)
 
 # a hub's messages for client 0, tagged with the connection
-def Fwd.loop(fuel: Nat, +out: Chan(S.Wire), +q: Chan(ShellMsg), +tag: String, +hub: Chan(S.Msg), +gen: U32, +n: Nat) -> IO(Unit):
+def Fwd.loop(fuel: Nat, +out: Chan(WIRE.Wire), +q: Chan(ShellMsg), +tag: String, +hub: Chan(S.Msg), +gen: U32, +n: Nat) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
-      IO.bind(Maybe<&1, S.Wire>, Unit, Chan.recv(S.Wire, out), m => Fwd.got(m, q, tag, u => Fwd.counted(hub, gen, 1n+n, u2 => Fwd.loop(f, out, q, tag, hub, gen, 1n+n))))
+      IO.bind(Maybe<&1, WIRE.Wire>, Unit, Chan.recv(WIRE.Wire, out), m => Fwd.got(m, q, tag, u => Fwd.counted(hub, gen, 1n+n, u2 => Fwd.loop(f, out, q, tag, hub, gen, 1n+n))))
 
 # a connection's generation for client 0 (the window joins again under
 # the same id; the hub tells the joins apart by this)
@@ -755,7 +756,7 @@ def Shell.hub(local: Bool, +home: Chan(S.Msg), +url: String, +lo: String, +tok: 
 
 def Shell.joined(+i2: Chan(S.Msg), +q: Chan(ShellMsg), +tag: String, since: Nat, origin: String) -> IO(Unit):
   do IO<Unit>:
-    +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
+    +out : Chan(WIRE.Wire) <- Chan.new(WIRE.Wire, 8192)
     +gen : U32 <- Fwd.gen()
     ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, i2, S.Join{0, out, since, origin, gen, 0})
     IO.spawn(Unit, Fwd.loop(S.Fuel.forever(), out, q, tag, i2, gen, 0n))
@@ -3127,14 +3128,14 @@ def Shell.fonts(m: Maybe<&1, L.Ty>) -> IO(L.Ty):
 
 # the first join: the in-process hub hands its state over (JoinHere); a
 # hub joined over a link sends its log like any other machine's
-def Shell.join.first(+inbox: Chan(S.Msg), +out: Chan(S.Wire), +lo: String, +gen: U32) -> IO(Result<&1, &1, S.Msg, Unit>):
+def Shell.join.first(+inbox: Chan(S.Msg), +out: Chan(WIRE.Wire), +lo: String, +gen: U32) -> IO(Result<&1, &1, S.Msg, Unit>):
   Bool.pick(IO(Result<&1, &1, S.Msg, Unit>), String.is_empty(lo), Chan.send(S.Msg, inbox, S.JoinHere{0, out, gen}), Chan.send(S.Msg, inbox, S.Join{0, out, 0n, "", gen, 0}))
 
 def Shell.twin.go(ev: Window, x: Window & U32, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String, +tok: String) -> IO(Unit):
   (pw, +xid) = x
   do IO<Unit>:
     +q : Chan(ShellMsg) <- Chan.new(ShellMsg, 8192)
-    +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
+    +out : Chan(WIRE.Wire) <- Chan.new(WIRE.Wire, 8192)
     t : U32 <- H.Clock.epoch()
     +gen : U32 <- Fwd.gen()
     ok : Result<&1, &1, S.Msg, Unit> <- Shell.join.first(inbox, out, lo, gen)

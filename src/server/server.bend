@@ -1,3 +1,4 @@
+import ./wire.bend as WIRE
 import ./adopt-plan.bend as ADOPTPLAN
 import ./static-http.bend as SHTTP
 import ./desktop-info.bend as DESKINFO
@@ -210,26 +211,6 @@ import ../core/secret.bend as SEC
 # carries out the effects it answers.
 
 # what a connection's writer sends
-type Wire is Data:
-  WText{text: String}
-  # Socket-only text with its original offered credit. Native/link readers
-  # keep WText; compression and batching never redefine this charge.
-  WCharged{text: String, charge: Nat}
-  WPong{payload: List<&2, U32>}
-  # a message already encoded (a board's plot: never parsed again)
-  WBin{cbor: List<&2, U32>}
-  WClose{}
-  # the hub's own window: the read model itself, with the log message's
-  # head (no items), in place of the log as text
-  WState{st: M.State, head: String}
-  # a message made of a log's lines: head, the lines joined by ",", tail;
-  # put together by the writer, off the hub (a join's chunk)
-  WItems{head: String, plain: String, split: String, items: List<&2, String>, tail: String, ends: Bool}
-  # a message as its JSON tree with its charge (a thin view's reply): the
-  # writer encodes the tree, never printing and parsing it again
-  WJson{json: J.Json, charge: Nat}
-  # At most one floating pane in flight; its writer reports credit at once.
-  WTerminal{json: J.Json, charge: Nat}
 
 # Receipts from owned IO jobs are distinct from client RPC, including client 0.
 # Only completed local metadata effects belong here. Worktree readiness also
@@ -272,12 +253,12 @@ type Msg is Data:
   # gen: the connection's generation (a socket's id; the window's client 0
   # joins again under a new one); sock: a raw descriptor on its socket (0
   # for none), shut at once when it falls too far behind (core/outbox.bend)
-  Join{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32}
+  Join{client: U32, out: Chan(WIRE.Wire), since: Nat, origin: String, gen: U32, sock: U32}
   # the window in this process: it takes the read model, not the log
-  MobileJoin{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32, mode: String}
+  MobileJoin{client: U32, out: Chan(WIRE.Wire), since: Nat, origin: String, gen: U32, sock: U32, mode: String}
   MobileTimeout{client: U32, gen: U32}
   ThinRead{client: U32, gen: U32, view: String, target: J.Json, text: String}
-  JoinHere{client: U32, out: Chan(Wire), gen: U32}
+  JoinHere{client: U32, out: Chan(WIRE.Wire), gen: U32}
   # a client's writer has put n frames (bytes bytes) out in all
   Drained{client: U32, gen: U32, n: Nat, bytes: Nat}
   # the next chunk of a joining client's log (OB.Cr: boot)
@@ -661,7 +642,7 @@ type Client is Data:
   # look: what the client last said it shows (desk.look; core/desk.bend);
   # cr: what it was offered and has taken, and whether it still takes its
   # log (core/outbox.bend); sock: a raw descriptor on its socket (0: none)
-  Client{id: U32, out: Chan(Wire), look: DK.Look, cr: OB.Cr, sock: U32, mobile: List<&2, MobileStart>, accounts: Bool}
+  Client{id: U32, out: Chan(WIRE.Wire), look: DK.Look, cr: OB.Cr, sock: U32, mobile: List<&2, MobileStart>, accounts: Bool}
 
 def Client.id(c: Client) -> U32:
   match c:
@@ -962,7 +943,7 @@ def Wire.cut(c: Client) -> IO(Unit):
         PS.Perf.add("hub.client_drop", 1)
         Log.info("client " ++ U32.show(i) ++ " fell too far behind: dropped (it reconnects from its sequence)")
         H.Fd.shut(k)
-        Chan.close(Wire, o)
+        Chan.close(WIRE.Wire, o)
 
 def Wire.kept(over: Bool, c: Client) -> IO(Maybe<&2, Client>):
   match over:
@@ -971,25 +952,18 @@ def Wire.kept(over: Bool, c: Client) -> IO(Maybe<&2, Client>):
     case False{}:
       IO.pure(Maybe<&2, Client>, Some{c})
 
-def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
-  match native w:
-    case False{} WText{t}: WCharged{t, n}
-    case False{} WCharged{t, _}: WCharged{t, n}
-    case False{} WJson{j, _}: WJson{j, n}
-    case False{} WTerminal{j, _}: WTerminal{j, n}
-    case _ _: w
 
-def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
+def Wire.offer.k(c: Client, w: WIRE.Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   match c:
     case Client{i, +o, l, +r, k, mb, +accountCap}:
       do IO<Maybe<&2, Client>>:
         +charge : Nat = Bool.pick(Nat, OB.Cr.native(r), 0n, n)
-        ok : Result<&1, &1, Wire, Unit> <- Chan.send(Wire, o, Wire.charged(OB.Cr.native(r), w, charge))
+        ok : Result<&1, &1, WIRE.Wire, Unit> <- Chan.send(WIRE.Wire, o, WIRE.Wire.charged(OB.Cr.native(r), w, charge))
         +r2 : OB.Cr = OB.Cr.offer(r, charge)
         Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k, mb, accountCap})
 
 # one frame of n bytes for a client: kept, or None when it was dropped
-def Wire.offer(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
+def Wire.offer(c: Client, w: WIRE.Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   Wire.offer.k(c, w, n)
 
 def Wire.native(c: Client) -> Bool:
@@ -998,18 +972,16 @@ def Wire.native(c: Client) -> Bool:
       OB.Cr.native(r)
 
 def Wire.offer.bs(c: Client, +bs: List<&2, U32>) -> IO(Maybe<&2, Client>):
-  Wire.offer(c, WBin{bs}, List.length(&2, U32, bs))
+  Wire.offer(c, WIRE.WBin{bs}, List.length(&2, U32, bs))
 
 # (a message for one client is encoded by its writer, off the hub)
-def Wire.text.charge(+text: String) -> Nat:
-  String.length(text)
 
 def Wire.text.k(native: Bool, c: Client, +text: String) -> IO(Maybe<&2, Client>):
   match native:
     case True{}:
-      Wire.offer(c, WText{text}, 0n)
+      Wire.offer(c, WIRE.WText{text}, 0n)
     case False{}:
-      Wire.offer(c, WText{text}, Wire.text.charge(text))
+      Wire.offer(c, WIRE.WText{text}, WIRE.Wire.text.charge(text))
 
 def Client.thin.reply_actors(xs: List<&2, TA.Actor>, web: Bool, key: String, +o: J.Json) -> List<&2, TA.Actor>:
   match xs:
@@ -1063,7 +1035,7 @@ def Client.is(c: Client, +id: U32) -> Bool:
     case Client{i, _, _, _, _, _, +accountCap}:
       U32.is_eq(i, id)
 
-def Wire.to.one(hit: Bool, text: Bool, c: Client, w: Wire, +n: Nat, +t: String) -> IO(Maybe<&2, Client>):
+def Wire.to.one(hit: Bool, text: Bool, c: Client, w: WIRE.Wire, +n: Nat, +t: String) -> IO(Maybe<&2, Client>):
   match hit text:
     case True{} True{}:
       Wire.text(c, t)
@@ -1072,7 +1044,7 @@ def Wire.to.one(hit: Bool, text: Bool, c: Client, w: Wire, +n: Nat, +t: String) 
     case False{} _:
       IO.pure(Maybe<&2, Client>, Some{c})
 
-def Wire.to.go(cs: List<&2, Client>, +id: U32, +w: Wire, +n: Nat, +text: Bool, +t: String) -> IO(List<&2, Client>):
+def Wire.to.go(cs: List<&2, Client>, +id: U32, +w: WIRE.Wire, +n: Nat, +text: Bool, +t: String) -> IO(List<&2, Client>):
   match cs:
     case Nil{}:
       IO.pure(List<&2, Client>, Nil{})
@@ -1084,31 +1056,31 @@ def Wire.to.go(cs: List<&2, Client>, +id: U32, +w: Wire, +n: Nat, +text: Bool, +
 
 # a message (JSON text) for the client with this id
 def Wire.to(+cs: List<&2, Client>, +id: U32, +text: String) -> IO(List<&2, Client>):
-  Wire.to.go(cs, id, WClose{}, 0n, True{}, text)
+  Wire.to.go(cs, id, WIRE.WClose{}, 0n, True{}, text)
 
 # a frame as it is (a plot's CBOR, a pong) for the client with this id
 # A thin control reply/notification already has validated correlation and
 # cannot settle an ordinary request. Do not parse its rendered tree again
 # through the ordinary reply actor hook.
 def Wire.to.view(+cs: List<&2, Client>, +id: U32, +j: J.Json, +size: Nat) -> IO(List<&2, Client>):
-  Wire.to.go(cs, id, WJson{j, size}, size, False{}, "")
+  Wire.to.go(cs, id, WIRE.WJson{j, size}, size, False{}, "")
 
-def Wire.to.raw(+cs: List<&2, Client>, +id: U32, w: Wire, +n: Nat) -> IO(List<&2, Client>):
+def Wire.to.raw(+cs: List<&2, Client>, +id: U32, w: WIRE.Wire, +n: Nat) -> IO(List<&2, Client>):
   Wire.to.go(cs, id, w, n, False{}, "")
 
 def Wire.all.bin(once: Bool, c: Client, +text: String, +bs: List<&2, U32>, +n: Nat) -> IO(Maybe<&2, Client>):
   match once:
     case True{}:
-      Wire.offer(c, WBin{bs}, n)
+      Wire.offer(c, WIRE.WBin{bs}, n)
     case False{}:
-      Wire.offer(c, WText{text}, String.length(text))
+      Wire.offer(c, WIRE.WText{text}, String.length(text))
 
 # (n = 0: the message was not encoded, as for a single socket client: its
 # writer encodes it)
 def Wire.all.as(native: Bool, c: Client, +text: String, +bs: List<&2, U32>, +n: Nat) -> IO(Maybe<&2, Client>):
   match native:
     case True{}:
-      Wire.offer(c, WText{text}, 0n)
+      Wire.offer(c, WIRE.WText{text}, 0n)
     case False{}:
       Wire.all.bin(Nat.is_gt(n, 0n), c, text, bs, n)
 
@@ -1469,32 +1441,32 @@ def Conn.deadline() -> U32:
 # what was queued for a client whose send failed is taken out, so the
 # closed channel's row is freed (a closed channel is freed only once it is
 # empty) and its frames are not held for good
-def Conn.drain.got(m: Maybe<&1, Wire>, k: Unit -> IO(Unit)) -> IO(Unit):
+def Conn.drain.got(m: Maybe<&1, WIRE.Wire>, k: Unit -> IO(Unit)) -> IO(Unit):
   match m:
     case Some{_}:
       k(Unit{})
     case None{}:
       IO.pure(Unit, Unit{})
 
-def Conn.drain(fuel: Nat, +out: Chan(Wire)) -> IO(Unit):
+def Conn.drain(fuel: Nat, +out: Chan(WIRE.Wire)) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
-      IO.bind(Maybe<&1, Wire>, Unit, Chan.recv(Wire, out), m => Conn.drain.got(m, u => Conn.drain(f, out)))
+      IO.bind(Maybe<&1, WIRE.Wire>, Unit, Chan.recv(WIRE.Wire, out), m => Conn.drain.got(m, u => Conn.drain(f, out)))
 
-def Conn.sent.k(r: Socket & Result<&1, &1, U32 & String, Unit>, +out: Chan(Wire), k: Socket -> IO(Unit)) -> IO(Unit):
+def Conn.sent.k(r: Socket & Result<&1, &1, U32 & String, Unit>, +out: Chan(WIRE.Wire), k: Socket -> IO(Unit)) -> IO(Unit):
   (s, res) = r
   match res:
     case Done{_}:
       k(s)
     case Fail{_}:
       do IO<Unit>:
-        Chan.close(Wire, out)
+        Chan.close(WIRE.Wire, out)
         Conn.drain(Fuel.forever(), out)
         Socket.close(s)
 
-def Conn.out(s: Socket, bs: List<&2, U32>, +out: Chan(Wire), k: Socket -> IO(Unit)) -> IO(Unit):
+def Conn.out(s: Socket, bs: List<&2, U32>, +out: Chan(WIRE.Wire), k: Socket -> IO(Unit)) -> IO(Unit):
   IO.bind(Socket & Result<&1, &1, U32 & String, Unit>, Unit, H.Sock.send_until(s, bs, Conn.deadline()), r => Conn.sent.k(r, out, k))
 
 def Conn.written(s: Socket, size: Nat, credit: Nat, k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
@@ -1503,7 +1475,7 @@ def Conn.written(s: Socket, size: Nat, credit: Nat, k: Socket -> Nat -> IO(Unit)
     k(s, credit)
 
 # a frame out, then k with its size in bytes
-def Conn.put(s: Socket, +bs: List<&2, U32>, +out: Chan(Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.put(s: Socket, +bs: List<&2, U32>, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
   +n = List.length(&2, U32, bs)
   Conn.out(s, bs, out, s2 => Conn.written(s2, n, n, k))
 
@@ -1519,26 +1491,26 @@ def Conn.words() -> String:
 
 # a chunk's frame out: its CBOR made and sent in the host (H.Sock.send_cbor, the
 # same bytes as W.Ws.cbor): Bend's encoder sent a long log's join at ~1.5 MB/s
-def Conn.out.cbor(s: Socket, +t: String, +out: Chan(Wire), k: Socket -> IO(Unit)) -> IO(Unit):
+def Conn.out.cbor(s: Socket, +t: String, +out: Chan(WIRE.Wire), k: Socket -> IO(Unit)) -> IO(Unit):
   IO.bind(Socket & Result<&1, &1, U32 & String, Unit>, Unit, H.Sock.send_cbor(s, t, Conn.keys(), Conn.words(), Conn.deadline()), r => Conn.sent.k(r, out, k))
 
 # a join frame's lines out as OB.Items.texts.s splits them, each frame's
 # CBOR: measured, joined, encoded and sent in the host (H.Sock.send_items, the same
 # bytes, test/native/cbor_frame_test.bend)
-def Conn.out.items(s: Socket, +hd: String, +pl: String, +sp: String, +xs: List<&2, String>, +tl: String, +ends: Bool, +out: Chan(Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.out.items(s: Socket, +hd: String, +pl: String, +sp: String, +xs: List<&2, String>, +tl: String, +ends: Bool, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
   IO.bind(Socket & Result<&1, &1, U32 & String, Unit>, Unit,
     H.Sock.send_items(s, hd, pl, sp, xs, tl, Bool.pick(U32, ends, 1, 0), U32.from_nat(OB.Join.most()), U32.from_nat(OB.Join.bytes()), Conn.keys(), Conn.words(), Conn.deadline()),
     r => Conn.sent.k(r, out, s2 => k(s2, 0n)))
 
-def Conn.json(+j: J.Json, +charge: Nat, s: Socket, +out: Chan(Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.json(+j: J.Json, +charge: Nat, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
   +bs = W.Ws.encode(2, CB.Cbor.encode(j))
   Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
 
-def Conn.write(m: Maybe<&1, Wire>, s: Socket, +out: Chan(Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
+def Conn.write(m: Maybe<&1, WIRE.Wire>, s: Socket, +out: Chan(WIRE.Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{WText{t}}:
+    case Some{WIRE.WText{t}}:
       Conn.put(s, Conn.frame.out(t), out, k)
-    case Some{WCharged{t, charge}}:
+    case Some{WIRE.WCharged{t, charge}}:
       # Credit is in the units offered by Wire.text.k. CBOR compression
       # changes the wire size; refunding that size leaves phantom backlog
       # after enough RPCs, so catch-up and streamed deltas stop forever.
@@ -1546,18 +1518,18 @@ def Conn.write(m: Maybe<&1, Wire>, s: Socket, +out: Chan(Wire), k: Socket -> Nat
       # the connection and Leave retires its credit, as before.
       +bs = Conn.frame.out(t)
       Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
-    case Some{WPong{p}}:
+    case Some{WIRE.WPong{p}}:
       Conn.put(s, W.Ws.encode(10, p), out, k)
-    case Some{WBin{bs}}:
+    case Some{WIRE.WBin{bs}}:
       Conn.put(s, W.Ws.encode(2, bs), out, k)
-    case Some{WClose{}}:
+    case Some{WIRE.WClose{}}:
       Conn.finish(s, W.Ws.encode(8, Nil{}))
-    case Some{WState{_, _}}:
+    case Some{WIRE.WState{_, _}}:
       k(s, 0n)
-    case Some{WItems{hd, pl, sp, xs, tl, ends}}:
+    case Some{WIRE.WItems{hd, pl, sp, xs, tl, ends}}:
       Conn.out.items(s, hd, pl, sp, xs, tl, ends, out, k)
-    case Some{WJson{j, charge}}: Conn.json(j, charge, s, out, k)
-    case Some{WTerminal{j, charge}}: Conn.json(j, charge, s, out, k)
+    case Some{WIRE.WJson{j, charge}}: Conn.json(j, charge, s, out, k)
+    case Some{WIRE.WTerminal{j, charge}}: Conn.json(j, charge, s, out, k)
     case None{}:
       Socket.close(s)
 
@@ -1578,21 +1550,21 @@ def Conn.wrote(+force: Bool, s: Socket, +n: Nat, w: OB.Wr, +id: U32, +gen: U32, 
     w3 : OB.Wr <- Conn.told(Bool.or(force, OB.Wr.due(w2)), w2, id, gen, inbox)
     k(s, w3)
 
-def Conn.writer.one(m: Maybe<&1, Wire>, s: Socket, +out: Chan(Wire), +w: OB.Wr, +id: U32, +gen: U32, +inbox: Chan(Msg), k: Socket -> OB.Wr -> IO(Unit)) -> IO(Unit):
+def Conn.writer.one(m: Maybe<&1, WIRE.Wire>, s: Socket, +out: Chan(WIRE.Wire), +w: OB.Wr, +id: U32, +gen: U32, +inbox: Chan(Msg), k: Socket -> OB.Wr -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{WTerminal{j, charge}}:
-      Conn.write(Some{WJson{j, charge}}, s, out, s2 => n => Conn.wrote(True{}, s2, n, w, id, gen, inbox, k))
+    case Some{WIRE.WTerminal{j, charge}}:
+      Conn.write(Some{WIRE.WJson{j, charge}}, s, out, s2 => n => Conn.wrote(True{}, s2, n, w, id, gen, inbox, k))
     case Some{other}:
       Conn.write(Some{other}, s, out, s2 => n => Conn.wrote(False{}, s2, n, w, id, gen, inbox, k))
     case None{}: Socket.close(s)
 
 # frames from the hub, until it closes our channel
-def Conn.writer(fuel: Nat, s: Socket, +out: Chan(Wire), w: OB.Wr, +id: U32, +gen: U32, +inbox: Chan(Msg)) -> IO(Unit):
+def Conn.writer(fuel: Nat, s: Socket, +out: Chan(WIRE.Wire), w: OB.Wr, +id: U32, +gen: U32, +inbox: Chan(Msg)) -> IO(Unit):
   match fuel:
     case 0n:
       Socket.close(s)
     case 1n+f:
-      IO.bind(Maybe<&1, Wire>, Unit, Chan.recv(Wire, out),
+      IO.bind(Maybe<&1, WIRE.Wire>, Unit, Chan.recv(WIRE.Wire, out),
         m => Conn.writer.one(m, s, out, w, id, gen, inbox, s3 => w2 => Conn.writer(f, s3, out, w2, id, gen, inbox)))
 
 def Conn.leave(s: Socket, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
@@ -1737,7 +1709,7 @@ def Conn.reader(fuel: Nat, s: Socket, buf: List<&2, U32>, pending: WSF.Pending, 
       Conn.scanned(Conn.scan(65536n, Scan{None{}, buf, False{}}, last, now), s, pending, id, inbox, last, now,
         s2 => b2 => p2 => l2 => n2 => Conn.reader(f, s2, b2, p2, id, inbox, l2, n2))
 
-def Conn.join.mobile(mobile: String, +id: U32, out: Chan(Wire), since: Nat, origin: String, fd: U32) -> Msg:
+def Conn.join.mobile(mobile: String, +id: U32, out: Chan(WIRE.Wire), since: Nat, origin: String, fd: U32) -> Msg:
   match mobile:
     case "": Join{id, out, since, origin, id, fd}
     case _: MobileJoin{id, out, since, origin, id, fd, mobile}
@@ -1745,7 +1717,7 @@ def Conn.join.mobile(mobile: String, +id: U32, out: Chan(Wire), since: Nat, orig
 def Conn.raw(r: Socket & U32, rd: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: String) -> IO(Unit):
   (wr, +fd) = r
   do IO<Unit>:
-    +out : Chan(Wire) <- Chan.new(Wire, 1024)
+    +out : Chan(WIRE.Wire) <- Chan.new(WIRE.Wire, 1024)
     IO.spawn(Unit, Conn.writer(Fuel.forever(), wr, out, OB.Wr.new(), id, id, inbox))
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Conn.join.mobile(mobile, id, out, since, origin, fd))
     Conn.reader(Fuel.forever(), rd, rest, WSF.FragIdle{}, id, inbox, 0n, 0n)
@@ -2277,12 +2249,12 @@ def Hub.boot_msg(xs: List<&2, String>, last: Bool) -> String:
   "{\"t\":\"changes\",\"boot\":" ++ Bool.pick(String, last, "false", "true") ++ ",\"items\":[" ++ String.join(xs, ",") ++ "]}"
 
 # the same, put together by the writer
-def Hub.boot_items(xs: List<&2, String>) -> Wire:
-  WItems{"{\"t\":\"changes\",\"boot\":true,\"items\":[", "", "", xs, "]}", False{}}
+def Hub.boot_items(xs: List<&2, String>) -> WIRE.Wire:
+  WIRE.WItems{"{\"t\":\"changes\",\"boot\":true,\"items\":[", "", "", xs, "]}", False{}}
 
 # a join's first frame, put together by the writer
-def Hub.log_items(+origin: String, +cfg: Cfg, +since: Nat, xs: List<&2, String>, +more: Bool, +info: String) -> Wire:
-  WItems{"{\"t\":\"log\",\"since\":" ++ Nat.show(since) ++ ",\"origin\":\"" ++ origin ++ "\",\"version\":" ++ J.Json.show(J.Str{Cfg.version(cfg)}) ++ ",\"info\":" ++ info
+def Hub.log_items(+origin: String, +cfg: Cfg, +since: Nat, xs: List<&2, String>, +more: Bool, +info: String) -> WIRE.Wire:
+  WIRE.WItems{"{\"t\":\"log\",\"since\":" ++ Nat.show(since) ++ ",\"origin\":\"" ++ origin ++ "\",\"version\":" ++ J.Json.show(J.Str{Cfg.version(cfg)}) ++ ",\"info\":" ++ info
     , Bool.pick(String, more, ",\"more\":true,\"items\":[", ",\"items\":["), ",\"more\":true,\"items\":[", xs, "]}", Bool.not(more)}
 
 # Desks
@@ -2317,7 +2289,7 @@ def Hub.leave.close(m: Maybe<&2, Client>) -> IO(Unit):
   match m:
     case Some{Client{_, c, _, _, k, _, +accountCap}}:
       do IO<Unit>:
-        Chan.close(Wire, c)
+        Chan.close(WIRE.Wire, c)
         H.Fd.shut(k)
     case None{}:
       IO.pure(Unit, Unit{})
@@ -2333,7 +2305,7 @@ def Hub.push.bin(h: Hub, +client: U32, +bs: List<&2, U32>) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WBin{bs}, W.Http.count(bs))
+        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WIRE.WBin{bs}, W.Http.count(bs))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 # a ping answered through the client's credit
@@ -2341,7 +2313,7 @@ def Hub.pong(h: Hub, +client: U32, +p: List<&2, U32>) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WPong{p}, List.length(&2, U32, p))
+        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WIRE.WPong{p}, List.length(&2, U32, p))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 def Hub.note(h: Hub, +text: String) -> IO(Hub):
@@ -5316,7 +5288,7 @@ def Wire.terminal.written(cr: OB.Cr) -> Nat:
 def Wire.terminal.fits(fits: Bool, +c: Client, +json: J.Json, +text: String, ordinal: Nat) -> IO(Maybe<&2, Client>):
   match fits:
     case False{}: IO.pure(Maybe<&2, Client>, Some{Wire.terminal.fallback(c)})
-    case True{}: Wire.offer(Wire.terminal.offered(c, ordinal), WTerminal{json, Wire.text.charge(text)}, Wire.text.charge(text))
+    case True{}: Wire.offer(Wire.terminal.offered(c, ordinal), WIRE.WTerminal{json, WIRE.Wire.text.charge(text)}, WIRE.Wire.text.charge(text))
 
 def Wire.terminal.text(+c: Client, +json: J.Json, ordinal: Nat) -> IO(Maybe<&2, Client>):
   +text = J.Json.show(json)
@@ -10995,7 +10967,7 @@ def Far.join.here(ms: List<&2, FR.In>, m: Maybe<&2, Client>) -> IO(Maybe<&2, Cli
 def Hub.join.notes(m: Maybe<&2, Client>, +note: String, +desk: String) -> IO(Maybe<&2, Client>):
   IO.bind(Maybe<&2, Client>, Maybe<&2, Client>, Wire.text.if(String.is_empty(note), m, note), m2 => Wire.text.if(String.is_empty(desk), m2, desk))
 
-def Hub.join.state(c: Client, w: Wire) -> IO(Maybe<&2, Client>):
+def Hub.join.state(c: Client, w: WIRE.Wire) -> IO(Maybe<&2, Client>):
   Wire.offer(c, w, 0n)
 
 # a join in one frame is live at once: the streamed text follows it
@@ -11099,15 +11071,15 @@ def Hub.kick(h: Hub, +id: U32) -> IO(Hub):
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 # a chunk out, then the next one asked for (Hub.kick)
-def Boot.send(h: Hub, c: Client, w: Wire, +n: Nat, +id: U32) -> IO(Hub):
+def Boot.send(h: Hub, c: Client, w: WIRE.Wire, +n: Nat, +id: U32) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
         m : Maybe<&2, Client> <- Wire.offer(c, w, n)
         Hub.kick(Hub{st, f, ls, Clients.swap(cl, id, m), as, inbox, cfg, note}, id)
 
-def Boot.text(+text: String) -> Wire:
-  WText{text}
+def Boot.text(+text: String) -> WIRE.Wire:
+  WIRE.WText{text}
 
 # the last frame of a join (or a catch-up), then every thread's streamed
 # text so far, which replaces the client's (core/live.bend)
@@ -12720,7 +12692,7 @@ def Hub.presentation.first(mode: String, gen: U32, epoch: String) -> String:
     case "view-invalid": J.Json.show(J.Json.obj([J.KV{"t", J.Str{"view.error"}}, J.KV{"error", TVW.Wire.error("INVALID_REQUEST")}]))
     case _: Hub.presentation.greeting(mode, gen)
 
-def Hub.mobile.join(h: Hub, +client: U32, out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32, +mode: String) -> IO(Hub):
+def Hub.mobile.join(h: Hub, +client: U32, out: Chan(WIRE.Wire), since: Nat, origin: String, +gen: U32, sock: U32, +mode: String) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
@@ -13905,7 +13877,7 @@ def Hub.thin.close_client(h: Hub, +client: U32) -> IO(Hub):
   match h:
     case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WClose{}, 0n)
+        cl2 : List<&2, Client> <- Wire.to.raw(cl, client, WIRE.WClose{}, 0n)
         CST.Cast.drop(client)
         return Hub{st, f, ls, Clients.drop(cl2, client), as, inbox, cfg, note}
 
@@ -19162,12 +19134,12 @@ def Desktop.refresh(m: Maybe<&2, Chan(BR.BMsg)>) -> IO(Unit):
 
 # the window in this process: the read model (devices left out, as the
 # wire leaves them) and the log message with no items
-def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) -> IO(Hub):
+def Hub.join.here(h: Hub, +client: U32, +out: Chan(WIRE.Wire), +gen: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, +ls, +cl, as, inbox, +cfg, +note}:
       do IO<Hub>:
         +info : String <- Info.shown(cfg)
-        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, Nil{}, False{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n, info)})
+        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, Nil{}, False{}}, WIRE.WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n, info)})
         m1 : Maybe<&2, Client> <- Far.join.here(Far.mirrors(cfg), m)
         m2 : Maybe<&2, Client> <- Wire.text.m(m1, LV.Live.msg(Live.of(cfg)))
         m3 : Maybe<&2, Client> <- Hub.join.notes(m2, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -19175,7 +19147,7 @@ def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) 
         Desktop.refresh(Cfg.br(cfg))
         return Hub{st, f, ls, Clients.add(m4, cl), as, inbox, cfg, note}
 
-def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +out: Chan(Wire), +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
+def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +out: Chan(WIRE.Wire), +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, +ls, +cl, as, +inbox, +cfg, +note}:
       +k = List.length(&2, String, OB.Join.next(xs))
@@ -19194,16 +19166,16 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
 # a client joined: the log from what it has (`since`, if it came from this
 # log), its first chunk now and the rest a chunk at a time (Hub.boot); the
 # origin and the log's length are found once
-def Hub.join.page(page: WLOG.WirePage, +n: Nat, +s0: Nat, h: Hub, +client: U32, +out: Chan(Wire), +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
+def Hub.join.page(page: WLOG.WirePage, +n: Nat, +s0: Nat, h: Hub, +client: U32, +out: Chan(WIRE.Wire), +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
   match page:
     case WLOG.WirePage{xs, ""}: Hub.join.k(n, s0, xs, h, client, out, origin, gen, sock, now)
     case _:
       do IO<Hub>:
-        Chan.close(Wire, out)
+        Chan.close(WIRE.Wire, out)
         H.Fd.shut(sock)
         return h
 
-def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
+def Hub.join(h: Hub, +client: U32, +out: Chan(WIRE.Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, +ls, cl, as, inbox, +cfg, note}:
       +n = LogCount.n(cfg)
@@ -19213,17 +19185,17 @@ def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: Strin
         History.read(String.is_empty(Cfg.thin.store(cfg)), Cfg.thin.store(cfg), Cfg.home(cfg), ls, n, s0, Nil{}, DQ.Dq.fresh(Hub.dq(cfg))),
         page => Hub.join.page(page, n, s0, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, now))
 
-def Hub.session.admitted(active: Bool, h: Hub, +client: U32, +out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32, mode: String, now: Nat) -> IO(Hub):
+def Hub.session.admitted(active: Bool, h: Hub, +client: U32, +out: Chan(WIRE.Wire), since: Nat, origin: String, +gen: U32, sock: U32, mode: String, now: Nat) -> IO(Hub):
   match active mode:
     case False{} _:
       do IO<Hub>:
-        Chan.close(Wire, out)
+        Chan.close(WIRE.Wire, out)
         H.Fd.shut(sock)
         return h
     case True{} "": Hub.join(h, client, out, since, origin, gen, sock, now)
     case True{} _: Hub.mobile.join(h, client, out, since, origin, gen, sock, mode)
 
-def Hub.session.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +mode: String, +now: Nat) -> IO(Hub):
+def Hub.session.join(h: Hub, +client: U32, +out: Chan(WIRE.Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +mode: String, +now: Nat) -> IO(Hub):
   do IO<Hub>:
     active : Bool <- PAIR.Pairing.active(client)
     Hub.session.admitted(active, h, client, out, since, origin, gen, sock, mode, now)
@@ -19294,8 +19266,8 @@ def Hub.thin.drain(h: Hub) -> IO(Hub):
 # The client coalesces update requests; pages/search/chunks stay gesture-only.
 def Wire.thin.notice_fits(fits: Bool, c: Client, +text: String) -> IO(Maybe<&2, Client>):
   match fits:
-    case True{}: Wire.offer(c, WText{text}, Wire.text.charge(text))
-    case False{}: Wire.offer(c, WClose{}, 0n)
+    case True{}: Wire.offer(c, WIRE.WText{text}, WIRE.Wire.text.charge(text))
+    case False{}: Wire.offer(c, WIRE.WClose{}, 0n)
 
 def Wire.thin.notice_ready(ready: Bool, +c: Client, +epoch: String, +revision: Nat) -> IO(Maybe<&2, Client>):
   match ready:
@@ -19307,7 +19279,7 @@ def Wire.thin.notice_ready(ready: Bool, +c: Client, +epoch: String, +revision: N
 
 def Wire.thin.notice_alive(alive: Bool, +c: Client, epoch: String, revision: Nat) -> IO(Maybe<&2, Client>):
   match alive:
-    case False{}: Wire.offer(c, WClose{}, 0n)
+    case False{}: Wire.offer(c, WIRE.WClose{}, 0n)
     case True{}: Wire.thin.notice_ready(Bool.not(String.is_empty(ThinContext.view(Client.thin.context(c)))), c, epoch, revision)
 
 def Wire.thin.notice_one(thin: Bool, c: Client, epoch: String, +revision: Nat) -> IO(Maybe<&2, Client>):
