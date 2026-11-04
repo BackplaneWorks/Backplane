@@ -138,7 +138,7 @@ def prepare(a, producer, bootstrap):
     producer.require(producer.digest(old / 'BUILD.json') == expected['buildSha256'], 'Prior BUILD pin mismatch')
     producer.require(producer.digest(a.previous / 'bootstrap-service/component/SERVICE.json') ==
         expected['componentSha256'], 'Prior component pin mismatch')
-    producer.require(producer.digest(a.previous / 'bootstrap-service/RUNTIME-QUALIFICATION.json') ==
+    producer.require(producer.digest(a.previous / 'bootstrap-service/component/payload/RUNTIME-QUALIFICATION.json') ==
         expected['runtimeQualificationSha256'], 'Prior ABI qualification pin mismatch')
     producer.require(expected['sourceCommit'] == BASE_COMMIT and expected['sourceTree'] == BASE_TREE,
         'Reuse baseline must be the qualified frozen0.14.0 source')
@@ -232,22 +232,17 @@ def component(a, producer, bootstrap):
     log = a.launch_log.read_text().strip()
     producer.require(log == 'backplane ' + producer.VERSION, 'Actual changed-service version launch missing')
     previous = a.previous / 'bootstrap-service'
-    prior = producer.read(previous / 'RUNTIME-QUALIFICATION.json')
+    qualification = previous / 'component/payload/RUNTIME-QUALIFICATION.json'
+    prior = producer.read(qualification)
     evidence = producer.read(builddir / 'logs/relink-provenance.json')
     producer.require(prior['status'] == 'PASS' and prior['target'] == a.target
         and prior['sourceCommit'] == evidence['previousSourceCommit']
         and prior['sourceTree'] == evidence['originalBuild']['source_tree']
         and prior['binarySha256'] == evidence['previousBinarySha256'], 'Prior ABI qualification mismatch')
-    producer.require(producer.digest(previous / 'RUNTIME-QUALIFICATION.json') ==
+    producer.require(producer.digest(qualification) ==
         evidence['priorRuntimeQualificationSha256'], 'Prior ABI qualification changed')
-    runtime = previous / 'runtime'
-    # Artifact transport drops modes; restore only the modes bound in the old
-    # qualification before verifying that unchanged runtime inventory.
-    for name, item in prior['members'].items():
-        p = runtime / producer.relative(name)
-        if item['type'] == 'file':
-            p.chmod(item['mode'])
-    producer.require(producer.inventory(runtime) == prior['members'], 'Prior runtime changed')
+    runtime = copy_retained_runtime(producer, previous / 'component/payload',
+                                    prior, a.out.parent / 'runtime-reuse')
     # CLOSURE edges start at the service filename, which deliberately is not
     # part of this runtime-only directory. The unchanged component producer
     # validates runtime_closure after combining it with the new service.
@@ -255,7 +250,7 @@ def component(a, producer, bootstrap):
     approval.update(sourceCommit=b['source_commit'], sourceTree=b['source_tree'],
         binarySha256=b['binary_sha256'],
         scope='Prior ABI evidence reused for identical native Bun runtime and native C effects; changed JS service/version launched on matching host',
-        priorABIQualificationSha256=producer.digest(previous / 'RUNTIME-QUALIFICATION.json'),
+        priorABIQualificationSha256=producer.digest(qualification),
         matchingHostLaunch=producer.reference(a.launch_log))
     approval_path = a.out.parent / 'RELINK-RUNTIME-QUALIFICATION.json'
     a.out.parent.mkdir(parents=True, exist_ok=True)
@@ -267,6 +262,30 @@ def component(a, producer, bootstrap):
         'buildDirectory': str(builddir.resolve()), 'runtimeDirectory': str(runtime.resolve()),
         'runtimeQualification': producer.reference(approval_path)}
     print(json.dumps(producer.component(request, a.out.parent, a.out)))
+
+
+def copy_retained_runtime(producer, payload, qualification, output):
+    """Recover only the exact old runtime inventory from a qualified component."""
+    producer.require(not output.exists(), 'Retain existing recovered runtime')
+    output.mkdir(parents=True)
+    for name, item in qualification['members'].items():
+        relative = producer.relative(name)
+        source, target = payload / relative, output / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if item['type'] == 'file':
+            producer.require(source.is_file() and not source.is_symlink()
+                and producer.digest(source) == item['sha256']
+                and source.stat().st_size == item['bytes'], 'Retained runtime member changed')
+            shutil.copyfile(source, target)
+            target.chmod(item['mode'])
+        elif item['type'] == 'symlink':
+            producer.require(source.is_symlink() and os.readlink(source) == item['target'],
+                'Retained runtime link changed')
+            target.symlink_to(item['target'])
+        else:
+            raise ValueError('Unsupported retained runtime member type')
+    producer.require(producer.inventory(output) == qualification['members'], 'Prior runtime changed')
+    return output
 
 
 def main():

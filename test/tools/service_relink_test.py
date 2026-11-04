@@ -64,6 +64,29 @@ class RelinkTests(unittest.TestCase):
                 relink.validate_previous_compile_inputs(producer,
                     {'compileInputs': {**expected, name: value}})
 
+    def test_actual_component_runtime_layout_is_recovered_exactly(self):
+        root = Path(os.environ['BACKPLANE_RELINK_AUDIT'])
+        producer = relink.load('runtime_producer', ROOT / 'scripts/service-release.py')
+        qualification = producer.read(root / 'OLD-RUNTIME-QUALIFICATION.json')
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'runtime'
+            relink.copy_retained_runtime(producer, root / 'runtime-payload', qualification, output)
+            self.assertEqual(producer.inventory(output), qualification['members'])
+            with self.assertRaises(ValueError):
+                relink.copy_retained_runtime(producer, root / 'runtime-payload', qualification, output)
+
+    def test_runtime_member_hash_mismatch_is_rejected(self):
+        producer = relink.load('runtime_negative_producer', ROOT / 'scripts/service-release.py')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = root / 'payload'
+            payload.mkdir()
+            (payload / 'lib').write_bytes(b'tampered')
+            qualification = {'members': {'lib': {'type': 'file', 'sha256': '0' * 64,
+                                                'bytes': 8, 'mode': 0o644}}}
+            with self.assertRaises(ValueError):
+                relink.copy_retained_runtime(producer, payload, qualification, root / 'runtime')
+
     def reviewed_pair(self):
         old = {'src/unchanged.bend': 'same'}
         current = dict(old)
@@ -202,7 +225,8 @@ class RelinkTests(unittest.TestCase):
             args = SimpleNamespace(target='linux-x64', build=build, previous=root / 'previous',
                 source=relink.HOTFIX_COMMIT, launch_log=log, out=root / 'assembled/component')
             with patch.object(platform, 'system', return_value='Linux'), \
-                    patch.object(platform, 'machine', return_value='x86_64'):
+                    patch.object(platform, 'machine', return_value='x86_64'), \
+                    patch.object(relink, 'copy_retained_runtime', return_value=runtime):
                 relink.component(args, producer, None)
             self.assertEqual(calls, [args.out / 'payload'])
 
