@@ -3323,6 +3323,9 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 /* (the colour is an inline background shorthand, which would reset the clip) */
 .app.phone .layer-list .layer-row .swatch { width: 44px; height: 44px; padding: 9px; background-clip: content-box !important; }
 .app.phone .layer-list .layer-row .lname { min-height: var(--ph-tap, 44px); font-size: 15px; }
+/* (in an app's WebView a held finger on a drawing is a comment, not the
+   system's text selection, loupe or callout over its chip and labels) */
+.app.phone #viewer :is(.viewer-stage, .combo) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* what a tap picked: the chip and its clear button big enough to hit */
 .app.phone .viewer-stage > .probe-chip > button { min-height: var(--ph-tap, 44px); }
 .app.phone .probe-chip .probe-name { padding: 0 6px 0 12px; max-width: 70vw; }
