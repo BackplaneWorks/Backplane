@@ -453,7 +453,11 @@
       ],
       "scope": "#934 match-on-a-copy splits in kexport (KX.entry), refview (Cards.deps.object, Card.of) and mobile/hubs (One.act.home), rows and bodies unchanged; #947 the same split for Cadview.dispatch in client, its 5 rows byte-identical; #937 the phone model picker in view (View.mp.*), whose one new read is the recipient info local.workspace.form on the composer path; #943, re-hashed on main without a review entry, removes the Design changes top-bar cell in view with its two strings in msgs and edits comments in client and hist, adding no read; #952 adds a phone-only Settings row in view (View.settings.phone.app). No sidebar draft reader, unknown @ retention, private image key, bridge authority or scanner change.",
       "fullOutputCheck": "test/sidebar_draft_image_test.bend",
-      "qualification": "PENDING on this tree. j20261104185655-814696 passed 24 on source tree 29191b0f only, before #952."
+      "assertions": 24,
+      "job": "j20261104200515-1301877",
+      "work": "w-t1793774605-1546729-1648158",
+      "compiler": "composite 41262875, direct, no --check-only, 3.7e9 cap, swap 0",
+      "qualifiedHead": "4529c0dee45846a4554274677ad47126730d6050, tree 0f058f2917f8425d080687261644a95d1b52cd17"
     }
   },
   "reviewNote": "Rebased history B2-019430113; reviewed sidebar draft rendering unchanged; 2026-11-01 combined main622/desktop dictation/Improvements: speech-only Vdict and @voice scratch, topbar/voice controls, existing wire privacy retained; no ordinary draft reader/key/filter/fallback change; all24 full-output cases PASS. Receipt MAIN-ALL-SOURCE-QUALIFICATION-CONTINUE-1.json.; 2026-11-01 catalog scope: retain only sidebar-global @f.pq across target changes; all other thread forms/mail replies still cleared;256KiBunchanged. Scope13/sidebar24PASS, CATALOG-FIX-SOURCE-QUALIFICATION.json.\n2026-11-02 ASAP scope review: Account state/picker; static pending chat; approved Settings/Voice presentation; durable opt-out choice and tour state; bounded tool-title projection and detail reads. Existing sidebar draft filter, unknown scratch retention, image key and authority/scanner implementations are unchanged. @voice and pending scratch remain conservative; no new draft readers. New lazy-tools helper operates only selected raw history/fold metadata and adds no sidebar draft read. Full24 output equivalence remains required before any pin refresh.",
