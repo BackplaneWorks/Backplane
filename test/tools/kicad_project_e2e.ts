@@ -47,8 +47,7 @@ function design(folder: string) {
 git(project, "init", "-q"); design(project);
 writeFileSync(join(project, "package.json"), "{}"); // Software policy stays independent of #944.
 git(project, "add", "."); git(project, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture");
-const worktree = join(project, ".backplane/worktrees/thread");
-git(project, "worktree", "add", "--detach", "-q", worktree);
+let worktree = "";
 const listen = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const port = listen.port; listen.stop(true);
 if (port === 3787) throw Error("refuse live port");
 const proc = Bun.spawn([resolve(binary), "--foreground", "--home", home, "--port", String(port), "--no-tailscale"], {
@@ -90,8 +89,8 @@ try {
   const pid = (await until(() => changes.find(c => c.$ === "ProjectCreated" && c.root === project))).id;
   await rpc("thread.create", { project: pid, title: "linked", env: "worktree" });
   const thread = (await until(() => changes.find(c => c.$ === "ThreadCreated" && c.title === "linked"))).id;
-  await rpc("thread.worktree", { thread, path: worktree, branch: "fixture" });
-  check("thread uses the linked checkout", !!changes.find(c => c.$ === "WorktreeSet" && c.id === thread && c.worktree === worktree));
+  worktree = (await until(() => changes.find(c => c.$ === "WorktreeSet" && c.id === thread))).worktree;
+  check("thread uses the linked checkout", worktree.includes("/.backplane/worktrees/") && worktree !== project, worktree);
   let response = await rpc("kicad.open", { thread });
   await until(() => lines(opened).length ? true : undefined);
   check("unmodified worktree opens main", lines(opened).at(-1) === join(project, "board.kicad_pro"), response);
