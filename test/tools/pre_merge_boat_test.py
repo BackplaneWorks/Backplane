@@ -14,6 +14,18 @@ spec=importlib.util.spec_from_file_location('premerge_boat_controls',PATH)
 pm=importlib.util.module_from_spec(spec);spec.loader.exec_module(pm)
 
 
+def setUpModule():
+    # Enforce the user rule for accidental direct unittest invocations too.
+    if (os.environ.get('BACKPLANE_HEAVY_BOAT_SANDBOX') != '1'
+            or os.environ.get('BACKPLANE_HEAVY_OFFLOADED') != '1'
+            or os.environ.get('BEND_NO_TELEMETRY') != '1'):
+        raise RuntimeError('pre-merge controls are Boat-only; never run locally')
+    group=Path('/sys/fs/cgroup')/Path('/proc/self/cgroup').read_text().split('0::',1)[1].strip().lstrip('/')
+    maximum=(group/'memory.max').read_text().strip()
+    if maximum=='max' or not 0<int(maximum)<=3700000000 or (group/'memory.swap.max').read_text().strip()!='0':
+        raise RuntimeError('pre-merge controls need actual <=3.7GB/swap0 cgroup')
+
+
 class Contracts(unittest.TestCase):
     def resources(self):
         return {'memory_max_bytes':pm.CAP,'swap_max_bytes':0,'peak_bytes':10000000,
