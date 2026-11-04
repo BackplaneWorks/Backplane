@@ -33,7 +33,7 @@ import ./pi.bend as PI
 # registers each under the name Claude sees (mcp__backplane__<tool>),
 # calling the MCP server for it; they ask for no approval (the hub has its
 # own rules for them). Instructions go in with `--append-system-prompt` at
-# every start, never into the conversation.
+# every start as a private file path, never into argv or the conversation.
 
 # the turn: Grok's (cwd, MCP endpoint, text, session, whether tools ask)
 # with the thread's model ("provider/id", "" for omp's default) and
