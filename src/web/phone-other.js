@@ -122,7 +122,7 @@ export function installPhoneOther({ doc = document, win = window, dispatch }) {
   };
   doc.addEventListener("focusin", e => {
     if (!on() || !e.target.matches?.("input:not([type=checkbox]):not([type=radio]),textarea,select") || e.target.matches("[data-keys], #composer")) return;
-    if (!e.target.closest(".settings-view, .settings, .wb-settings, .bot-settings, .project-home, .pairing-screen")) return;
+    if (!e.target.closest(".settings-view, .settings, .bot-body, .mailroom, .project-home, .pairing-screen")) return;
     focused = e.target;setTimeout(lift, 350);
   });
   win.visualViewport?.addEventListener("resize", () => setTimeout(lift, 60));
