@@ -21,7 +21,8 @@
 #                     removed after; the emitted and kept JS never hold them
 #   BACKPLANE_EMIT_CACHE  the emitted JS kept by a hash of everything bend
 #                     reads (default ~/.cache/backplane-bend/emit-js; 0 =
-#                     none); three are kept
+#                     none); three are kept. Raw bytes are verified against a
+#                     source-key-bound SHA256 receipt; legacy size-only entries miss.
 #   BACKPLANE_PREEMITTED_JS / BACKPLANE_PREEMITTED_SHA256 /
 #   BACKPLANE_PREEMITTED_KEY  exact producer-verified raw JS and its import/tool
 #                     key (service-release.py verifies the producer receipt).
@@ -86,20 +87,20 @@ rm -f "$work/emit.rss" "$work/emit.resources.json" "$work/stamp.resources.json" 
 if [ "$retained" = 1 ]; then
   python3 scripts/retained-js.py --actual-key "$(emit_key "$src")" --output "$work/all.js"
   how=retained-verified
-elif [ -n "$key" ] && [ -f "$EMIT_CACHE/$key.js" ] && [ -f "$EMIT_CACHE/$key.js.ok" ] \
-    && [ "$(cat "$EMIT_CACHE/$key.js.ok")" = "$(wc -c <"$EMIT_CACHE/$key.js" | tr -d ' ')" ]; then
-  cp "$EMIT_CACHE/$key.js" "$work/all.tmp.js" && mv "$work/all.tmp.js" "$work/all.js"
-  touch "$EMIT_CACHE/$key.js" "$EMIT_CACHE/$key.js.ok"
+elif [ -n "$key" ] && python3 scripts/emit-cache.py restore \
+    --cache "$EMIT_CACHE" --key "$key" --file "$work/all.js"; then
   how=reused
 else
   python3 scripts/local-phase.py --record "$work/emit.resources.json" -- nice -n 19 bend "$src" -o "$work/all.tmp.js" >/dev/null
   mv "$work/all.tmp.js" "$work/all.js"
   # kept only if nothing it read changed while it ran
   if [ -n "$key" ] && [ "$(emit_key "$src" 2>/dev/null || true)" = "$key" ]; then
-    mkdir -p "$EMIT_CACHE"
-    cp "$work/all.js" "$EMIT_CACHE/$key.js.$$" && mv "$EMIT_CACHE/$key.js.$$" "$EMIT_CACHE/$key.js" \
-      && wc -c <"$EMIT_CACHE/$key.js" | tr -d ' ' >"$EMIT_CACHE/$key.js.ok.$$" && mv "$EMIT_CACHE/$key.js.ok.$$" "$EMIT_CACHE/$key.js.ok"
-    ls -t "$EMIT_CACHE"/*.js 2>/dev/null | tail -n +4 | while read -r old; do rm -f "$old" "$old.ok"; done
+    if ! python3 scripts/emit-cache.py publish --cache "$EMIT_CACHE" --key "$key" --file "$work/all.js"; then
+      echo 'build-js.sh: emit cache was not saved; using the fresh verified emission' >&2
+    fi
+    if [ -d "$EMIT_CACHE" ]; then
+      ls -t "$EMIT_CACHE"/*.js 2>/dev/null | tail -n +4 | while read -r old; do rm -f "$old" "$old.ok"; done
+    fi
   fi
 fi
 t1=$(now_ms)
