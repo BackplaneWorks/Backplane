@@ -3066,6 +3066,17 @@ html.phone .mailroom .mail-row { min-height: 56px; }
 /* a part's details (the 3D inspector) rise from the bottom over the model */
 .app.phone .solid-inspector:not(:empty):not([hidden]) { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; width: auto; max-width: none; max-height: 50%; border: 0; border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgb(0 0 0 / .35); padding: 12px; }
 .app.phone .solid-inspector :is(button, select) { min-height: var(--ph-tap, 44px); }
+/* a tap's card (plot2d.js's inspectCard, on <body>): what lies under the
+   finger, at the foot of the screen over the history */
+.ph-inspect { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; max-height: 45dvh; overflow-y: auto; overscroll-behavior: contain; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgb(0 0 0 / .35); padding: 4px 12px calc(12px + env(safe-area-inset-bottom)); }
+.ph-inspect-head { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.ph-inspect-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+.ph-inspect-close { min-width: 44px; min-height: 44px; border: 0; background: none; color: var(--dim); font-size: 18px; }
+.ph-inspect dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0 0 10px; font-size: 14px; }
+.ph-inspect dt { color: var(--faint); }
+.ph-inspect dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-family: var(--mono); }
+.ph-inspect-acts { display: flex; gap: 8px; }
+.ph-inspect-acts button { min-height: 44px; padding: 0 16px; }
 /* the design history: one row (transport, version, the rest by scrolling) and the scrub */
 .app.phone .hist { padding: 2px 8px 4px; gap: 2px; }
 .app.phone .hist-row { gap: 2px; }

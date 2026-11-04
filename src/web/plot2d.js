@@ -464,6 +464,7 @@ class View {
           if (last && e.timeStamp - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 32) {
             this.lastTap = null;
             this.touchDouble = e.timeStamp;
+            inspectCard(this, null);
             if (this.probe !== last.probe) this.publishProbe(last.probe);
             const record = componentSources.get(this.key);
             if (record && record.selected !== last.part) { selectComponent(last.part, this.key); record.onSelect?.(last.part); }
@@ -563,6 +564,7 @@ class View {
 
   dispose() {
     this.disposed = true;
+    if (card?.view === this) inspectCard(this, null);
     this.gesture++;
     this.events.abort();
     this.resize.disconnect();
@@ -608,6 +610,7 @@ class View {
     const ctx = this.side === "board" ? {} : { groups: groupsOf(this.plot), nets: this.board ? boardNets(this.board) : null, place: this.place };
     const v = P.clickProbe(pick, this.side, ctx);
     this.publishProbe(v);
+    if (coarse?.matches) inspectCard(this, pick);
   }
 
   publishProbe(v) {
@@ -984,6 +987,55 @@ let probed = null;
 // where each thread left its sources moved by hand (a few dozen kept)
 const left = new Map();
 
+// On a touch screen a tap also shows what lies under the finger in a card
+// at the foot of the screen, as the phone app's inspector: its kind, then
+// its fields (net, ref, value, pin...), and "Mention in chat", which puts
+// it in the thread's draft (host.js, onMention). It lives outside the
+// hub's tree (on <body>), so a render never takes it; leaving the view,
+// clearing the probe or a double tap closes it.
+let card = null;
+let mentioned = null;
+function inspectCard(view, pick) {
+  const info = pick ? (typeof pick.info === "object" && pick.info ? pick.info : P.parseInfo(pick.text || pick.info || "")) : null;
+  if (!info || !info.kind) { card?.el.remove(); card = null; return; }
+  const raw = [info.arg ? `${info.kind} ${info.arg}` : info.kind, ...[...info.kv].filter(([k]) => k !== "g").map(([k, v]) => `${k}=${v}`)].join(";");
+  const el = card?.el || document.createElement("section");
+  el.className = "ph-inspect";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", "What you tapped");
+  const head = document.createElement("div"), title = document.createElement("strong"), close = document.createElement("button");
+  head.className = "ph-inspect-head";
+  title.textContent = info.arg ? `${info.kind[0].toUpperCase()}${info.kind.slice(1)} ${info.arg}` : info.kind[0].toUpperCase() + info.kind.slice(1);
+  close.type = "button"; close.className = "ph-inspect-close"; close.textContent = "✕"; close.setAttribute("aria-label", "Close");
+  close.addEventListener("click", () => { inspectCard(view, null); if (view.probe) view.publishProbe(""); });
+  head.append(title, close);
+  const dl = document.createElement("dl");
+  for (const [k, v] of info.kv) {
+    if (k === "g" || !v) continue;
+    const dt = document.createElement("dt"), dd = document.createElement("dd");
+    dt.textContent = k[0].toUpperCase() + k.slice(1); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  const acts = document.createElement("div"), mention = document.createElement("button");
+  acts.className = "ph-inspect-acts";
+  mention.type = "button"; mention.textContent = "Mention in chat";
+  mention.addEventListener("click", () => { inspectCard(view, null); mentioned?.(`[${raw}]`); });
+  acts.append(mention);
+  el.replaceChildren(head, dl, acts);
+  if (!el.isConnected) document.body.append(el);
+  card = { el, view };
+}
+
+// the page's answer to "Mention in chat" on a tapped piece (host.js)
+export function onMention(fn) {
+  mentioned = fn;
+}
+
+// a card whose view has left the page goes with it (host.js, after a render)
+export function inspectGone() {
+  if (card && (card.view.disposed || !card.view.canvas.isConnected)) { card.el.remove(); card = null; }
+}
+
 // the page's answer to a tap on a sheet symbol (host.js)
 export function onSheet(fn) {
   sheeted = fn;
@@ -1102,6 +1154,7 @@ function mountOne(canvas) {
   // the probe the hub keeps (data-probe); a tap's own shows until it comes
   const probe = canvas.dataset.probe ?? "";
   if (probe !== view.hubProbe) { view.hubProbe = probe; if (probe !== view.probe) view.follow = true; view.probe = probe; view.relight(); }
+  if (!probe && card?.view === view) inspectCard(view, null);
   present(view);
   view.pins();
   const fade = Number(canvas.dataset.fade || 0);

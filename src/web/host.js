@@ -1210,6 +1210,7 @@ function render() {
   ViewerTools.mount(document.getElementById("solid-workbench"), Solid, { components: (thread, options) => viewerRpc.components(thread, options), asset: (thread, path, kind, revision, options) => viewerRpc.renderAsset(thread, path, kind, revision, options), plot: Plot2d });
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
   ViewerTools.chipInView();
+  Plot2d.inspectGone();
   attachmentPreviews();
   previewTextFiles();
   previewMarkdownFiles((text, node) => create(App.md(text, App.lang(ui), node.dataset.mdRoot || "", node.dataset.mdPath || "")));
@@ -1775,6 +1776,18 @@ function dispatch(action, value, timer) {
 Plot2d.onPlace((place) => dispatch("rv-note", place));
 // a tap on a sheet symbol opens that sheet instance (client.bend's Sch)
 Plot2d.onSheet((value) => dispatch("sch-go", value));
+// a phone's tap card (plot2d.js): "Mention in chat" adds the piece to the
+// thread's draft and goes back to the thread
+Plot2d.onMention((text) => {
+  const session = currentSession(), th = session?.sel;
+  if (!th) return;
+  const field = document.getElementById("composer");
+  let draft = "";
+  try { draft = field ? field.value : (session?.drafts?.[th] ?? localStorage.getItem(DRAFT + th) ?? ""); } catch {}
+  const next = draft + (draft && !/\s$/.test(draft) ? " " : "") + text + " ";
+  if (thin) thin.draftAt(th, next); else dispatch("draft", next);
+  dispatch("panel", "");
+});
 // a tap that probes a part or a net (probe.js) tells the hub, which keeps it
 // (client.bend's Probe); the 3D view finds parts on the board's plot
 Plot2d.onProbe((value) => { Solid.setProbe(value); dispatch("probe", value); });
