@@ -3942,7 +3942,7 @@ def View.destinations(+lc: I.Loc, +cur: String) -> List<&2, D.Node>:
     View.tab(cur, "board", "view-kind", "board", MSG.T.viewer.board.tip(lc), MSG.T.viewer.board(lc)),
     View.tab(cur, "schematic", "view-kind", "schematic", MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.schematic(lc)),
     View.tab(cur, "3d", "view-kind", "3d", MSG.T.viewer.parts3d.tip(lc), "3D"),
-    View.tab(cur, "split", "view-kind", "split", "Schematic, board and 3D side by side", "Split"),
+    View.tab(cur, "split", "view-kind", "split", "Schematic beside the board or its 3D", "Split"),
     View.tab(cur, "mech", "mech", "", MSG.T.viewer.mech.tip(lc), MSG.T.viewer.mech(lc)),
     View.tab(cur, "files", "fm", "", MSG.T.viewer.files.tip(lc), MSG.T.viewer.files(lc)),
     View.tab(cur, "diff", "diff", "", MSG.T.viewer.diff.tip(lc), MSG.T.viewer.diff(lc)),
@@ -5176,10 +5176,12 @@ def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
       [View.solid.workbench(lc, u, U.Solid.want(u), View.solid.boardkey(u))])
 
 # The combined view (client.bend's Split): the schematic beside the board
-# and its 3D model, each pane under a head that names it, with a button
-# that puts it away (the bar's toggles bring it back). The panes draw as on
-# their own tabs (plot2d.js, solid.js), with the layers those show; the
-# schematic's head navigates its sheets.
+# or its 3D model (one at a time: the bar's Board and 3D swap them), each
+# pane under a head that names it, with a button that puts it away (the
+# bar's toggles bring it back). The panes draw as on their own tabs
+# (plot2d.js, solid.js), with the layers those show; the schematic's head
+# navigates its sheets; the edge between the two panes resizes them
+# (project-splitters.js).
 
 def View.combo.hide(+pane: String, +name: String) -> D.Node:
   D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "icon combo-hide"}, D.At{"title", "Hide the " ++ name}, D.At{"aria-label", "Hide the " ++ name},
@@ -5188,9 +5190,15 @@ def View.combo.hide(+pane: String, +name: String) -> D.Node:
 def View.combo.head(+pane: String, +name: String, more: List<&2, D.Node>) -> D.Node:
   D.El{"div", "", [D.At{"class", "combo-head"}], List.append(&2, D.Node, D.Dom.span("combo-name", name) <> more, [View.combo.hide(pane, name)])}
 
+# (the board and the 3D take each other's place)
+def View.combo.toggle.tip(+u: U.Ui, +pane: String, +name: String) -> String:
+  Bool.pick(String, U.Split.on(u, pane), "Hide the " ++ name,
+    Bool.pick(String, Bool.and(String.eq(pane, "3d"), U.Split.on(u, "pcb")), "Show the 3D in place of the board",
+      Bool.pick(String, Bool.and(String.eq(pane, "pcb"), U.Split.on(u, "3d")), "Show the board in place of the 3D", "Show the " ++ name)))
+
 def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
   D.El{"button", "", [D.At{"type", "button"}, D.At{"class", Bool.pick(String, U.Split.on(u, pane), "combo-pick on", "combo-pick")},
-    D.At{"aria-pressed", Bool.pick(String, U.Split.on(u, pane), "true", "false")}, D.At{"title", Bool.pick(String, U.Split.on(u, pane), "Hide the ", "Show the ") ++ name},
+    D.At{"aria-pressed", Bool.pick(String, U.Split.on(u, pane), "true", "false")}, D.At{"title", View.combo.toggle.tip(u, pane, name)},
     D.At{"data-value", pane}, D.On{"click", "split-pane"}], [D.Txt{name}]}
 
 def View.combo.separator(+group: String, +first: String, +second: String, controls: String) -> D.Node:
@@ -5264,7 +5272,7 @@ def View.combo.if(on: Bool, +lc: I.Loc, +u: U.Ui, +i: Nat) -> List<&2, D.Node>:
       Nil{}
 
 def View.combo.side.label(+lc: I.Loc, +u: U.Ui) -> String:
-  Bool.pick(String, U.Split.on(u, "pcb"), Bool.pick(String, U.Split.on(u, "3d"), MSG.T.viewer.board(lc) ++ " and 3D", MSG.T.viewer.board(lc)), "3D")
+  Bool.pick(String, U.Split.on(u, "pcb"), MSG.T.viewer.board(lc), "3D")
 
 def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [View.bar.loc(lc, List.append(&2, D.Node, View.boards(u, "Split"), D.El{"span", "", [D.At{"class", "combo-picks"}, D.At{"role", "group"}, D.At{"aria-label", "Panes"}], [
@@ -5273,9 +5281,8 @@ def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
    D.El{"div", "combo", [D.At{"class", "combo"}, D.At{"data-split-project", U.Asset.project(u)}], [D.El{"div", "", [D.At{"class", "combo-in"}],
      List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "sch"), lc, u, 0n),
        D.Dom.when(Bool.and(U.Split.on(u, "sch"), Bool.or(U.Split.on(u, "pcb"), U.Split.on(u, "3d"))), View.combo.separator("primary", MSG.T.viewer.schematic(lc), View.combo.side.label(lc, u), "combo-sch combo-side")),
-       [D.El{"div", "combo-side", [D.At{"id", "combo-side"}, D.At{"class", "combo-side"}], List.concat(&2, D.Node, [View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n),
-         D.Dom.when(Bool.and(U.Split.on(u, "pcb"), U.Split.on(u, "3d")), View.combo.separator("secondary", MSG.T.viewer.board(lc), "3D", "combo-pcb combo-3d")),
-         View.combo.if(U.Split.on(u, "3d"), lc, u, 2n)])}]])}]}]
+       [D.El{"div", "combo-side", [D.At{"id", "combo-side"}, D.At{"class", "combo-side"}], List.append(&2, D.Node, View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n),
+         View.combo.if(U.Split.on(u, "3d"), lc, u, 2n))}]])}]}]
 
 # The viewer pane: a tab for each thing it shows (the one on show lit),
 # Close, then that thing
