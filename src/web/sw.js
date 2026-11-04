@@ -44,18 +44,32 @@ self.addEventListener("fetch", (e) => {
     return;
   }
   e.respondWith(caches.open(SHELL).then(async (c) => {
-    try {
-      const r = await fetch(e.request);
+    const net = fetch(e.request).then((r) => {
       if (r.ok) {
         c.put(e.request, r.clone());
         if (page) e.waitUntil(r.clone().text().then((html) => prune(c, html)).catch(() => {}));
       }
       return r;
-    } catch {
-      return (await c.match(e.request)) ?? (page ? await c.match("/") : null) ?? Response.error();
+    });
+    const cached = async () => (await c.match(e.request)) ?? (page ? await c.match("/") : null);
+    if (page) {
+      // A page on a link that does not answer (a phone's weak signal, a
+      // hub address that times out) is the cached one after PAGE_WAIT_MS;
+      // the fresh page is still saved for the next open, and a page that
+      // runs an earlier build reloads into the new one (host.js checkDeploy).
+      let timer;
+      const late = new Promise((resolve) => { timer = setTimeout(resolve, PAGE_WAIT_MS, null); });
+      const r = await Promise.race([net.catch(() => null), late]);
+      clearTimeout(timer);
+      if (r) return r;
+      const hit = await cached();
+      if (hit) { e.waitUntil(net.catch(() => {})); return hit; }
     }
+    try { return await net; } catch { return (await cached()) ?? Response.error(); }
   }));
 });
+
+const PAGE_WAIT_MS = 2500;
 
 const ASSET = /^\/(?:chunk-|favicon-|apple-touch-icon-)[a-zA-Z0-9_-]+\.(?:js|css|svg|png|woff2?)$/;
 
