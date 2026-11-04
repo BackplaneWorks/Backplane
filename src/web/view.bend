@@ -824,11 +824,16 @@ def View.list.projected(+lc: I.Loc, active: Bool, +rows: List<&2, U.SRow>, raw: 
     case False{}:
       List.append(&2, D.Node, View.groups(lc, U.Side.groups.at(rows, now, U.Side.cur.held(st, sel, now)), q, open, ix, st, sel, now, look, rm), View.history(lc, q, open, ix, st, sel, now))
 
+# the sidebar's Active list (setting sidebar.view): a phone's page keeps the
+# projects in its Projects tab, its Now tab being the Active list
+def View.side.active(+st: M.State, +u: U.Ui) -> Bool:
+  Bool.and(String.eq(U.Side.view(st), "active"), Bool.not(PHN.Phone.on(u)))
+
 def View.sidebar.projected(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, +u: U.Ui, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, _, +open, +on, +now, +adding, _, +v, _, _, _, _, _, _, _}:
       View.sidebar.body.k(View.chrome(u), lc, ms, ix, st, sel, open, on, now, adding, v, U.Str.get(d, "@look"), U.Str.get(d, "@rm"), U.Find.q(open, d), mi, bots, uber,
-        D.Dom.cat(View.sidebar.no_matches(lc, U.Find.q(open, d), Bool.and(Bool.not(String.eq(U.Side.view(st), "active")), List.is_empty(&2, U.SRow, rows))), View.list.projected(lc, String.eq(U.Side.view(st), "active"), rows, raw, U.Find.q(open, d), open, ix, st, sel, now, U.Str.get(d, "@look"), U.Str.get(d, "@rm"))))
+        D.Dom.cat(View.sidebar.no_matches(lc, U.Find.q(open, d), Bool.and(Bool.not(View.side.active(st, u)), List.is_empty(&2, U.SRow, rows))), View.list.projected(lc, View.side.active(st, u), rows, raw, U.Find.q(open, d), open, ix, st, sel, now, U.Str.get(d, "@look"), U.Str.get(d, "@rm"))))
 
 def View.sidebar.threads.kind(active: Bool, +u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> List<&2, String>:
   match active:
@@ -839,7 +844,7 @@ def View.sidebar.threads.kind(active: Bool, +u: U.Ui, ix: U.SIx, rows: List<&2, 
     case False{}: U.Side.visible.tree(U.Side.only(rows, U.Side.cur(u)), U.Side.open(u), U.Ui.state(u), U.Ui.sel(u))
 
 def View.sidebar.threads(+u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> List<&2, String>:
-  List.append(&2, String, View.sidebar.threads.kind(String.eq(U.Side.view(U.Ui.state(u)), "active"), u, ix, rows, raw),
+  List.append(&2, String, View.sidebar.threads.kind(View.side.active(U.Ui.state(u), u), u, ix, rows, raw),
     U.Side.in_project(U.Side.legacy.shown(u), U.Ui.state(u), U.Side.cur(u)))
 
 # Folded (Ctrl+B or the sidebar's own chevron: host.js
