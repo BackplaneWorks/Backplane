@@ -281,6 +281,10 @@ final class AppModel {
 
     // IDs and typed state only. Never include links, drafts, message bodies,
     // Foundation errors or the presentation JSON in qualification output.
+    var qualificationDetailsForLog: String {
+        let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
+        return "ready=\(ready) cached=\(cachedPresentation) screen=\(screen != nil) startup=\(String(describing: startup[key])) phase=\(String(describing: conn[key]?.phase)) stage=\(conn[key]?.stage ?? "-") mark=\(String(describing: thinReady[key])) nav=\(screen.map(Self.nav) ?? "-") awaited=\(awaitedNav ?? "-")"
+    }
     var qualificationDetails: String {
         let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
         let status = conn[key]
@@ -1128,7 +1132,10 @@ final class AppModel {
                     nav: Self.nav(s), epoch: status.epoch, pairing: pairingGeneration))
                 return
             }
-            guard ["select", "bot", "room", "remote", "uber", "uber-bot", "tz-report"].contains(action) else { return }
+            #if DEBUG
+            if !["select", "bot", "room", "remote", "uber", "uber-bot", "tz-report", "ob-next", "ob-back", "ob-skip", "ob-open"].contains(action) { NSLog("Backplane act dropped (content not ready) %@ details=%@", action, qualificationDetailsForLog) }
+            #endif
+            guard ["select", "bot", "room", "remote", "uber", "uber-bot", "tz-report", "ob-next", "ob-back", "ob-skip", "ob-open"].contains(action) else { return }
             earlyActions.removeAll { $0.0 == action }
             let targetHub = links.compactMap(Pairing.key).first { value.hasPrefix($0 + "|") } ?? screen?.hub
             let configured = targetHub.map { startup[$0] == .thin || startup[$0] == .compatibilityChosen } ?? false
@@ -2297,6 +2304,7 @@ final class AppModel {
             if conn[update.hub] != status { conn[update.hub] = status }
             if status.phase == .online { hubs[update.hub]?.ready() }
             if startup[update.hub] == .thin, update.phase == "failed" {
+                NSLog("Backplane view failed detail=%@", update.detail ?? "-")
                 hubs[update.hub]?.reconnect(.view)
             }
         }
