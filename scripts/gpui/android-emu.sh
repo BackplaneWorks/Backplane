@@ -3,7 +3,7 @@
 # usage: scripts/gpui/android-emu.sh create | start | stop | adb ARGS...
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); W=$ROOT/build/gpui/android
-export ANDROID_HOME=$HOME/Android-sdk-writable ANDROID_SDK_ROOT=$ANDROID_HOME JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ANDROID_AVD_HOME=$W/avd
+ANDROID_HOME=$HOME/Android-sdk-writable; export ANDROID_HOME ANDROID_SDK_ROOT=$ANDROID_HOME JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ANDROID_AVD_HOME=$W/avd
 ADB="$ANDROID_HOME/platform-tools/adb -s emulator-5584"; IMG="system-images;android-34;google_apis;x86_64"
 case "${1:-}" in
 create) mkdir -p "$ANDROID_AVD_HOME"
