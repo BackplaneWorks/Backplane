@@ -71,7 +71,11 @@ jobs:
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
           app="$W/stage/runtime/backplane-desktop"
-          wrapper="$W/evidence-$TARGET/wrapper-tmp/**/usr/lib/backplane/runtime/backplane-desktop"
+          # Chromium's singleton socket lives under TMPDIR. Keep this owned
+          # root short rather than inheriting the long checkout/evidence path.
+          wrapper_root=$(mktemp -d /tmp/bpai.XXXXXXXX)
+          echo "BACKPLANE_APPIMAGE_TMPDIR=$wrapper_root" >> "$GITHUB_ENV"
+          wrapper="$wrapper_root/**/usr/lib/backplane/runtime/backplane-desktop"
           [[ $app =~ ^/[-A-Za-z0-9_/.]+$ ]]
           # Same scoped userns allowance as desktop-smoke, including only the
           # actual AppImage child path under this test's owned temporary root.

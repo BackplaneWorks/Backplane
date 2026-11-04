@@ -76,6 +76,13 @@ function wrapperWitness(appimage,appdir,actualExecutable,temporaryRoot){
   assert.equal(actualExecutable,path.join(dir,'usr/lib/backplane/runtime/backplane-desktop'),'Actual UI was not launched by AppImage AppRun');
   return {appimage,appdir:dir,actualExecutable};
 }
+function ownedTemporaryRoot(value){
+  assert(typeof value==='string'&&/^\/tmp\/bpai\.[A-Za-z0-9]{6,12}$/.test(value),'Short owned AppImage temporary root required');
+  const st=fs.lstatSync(value);
+  assert(st.isDirectory()&&!st.isSymbolicLink()&&st.uid===process.getuid()&&(st.mode&0o077)===0,'AppImage temporary root must be exclusively owned');
+  assert.equal(fs.readdirSync(value).length,0,'Fresh AppImage temporary root required');
+  return value;
+}
 async function stopCapturedWrapperMain(identity){
   if(!identity)return {observed:false,closed:false};
   function alive(){try{const stat=fs.readFileSync(`/proc/${identity.pid}/stat`,'utf8').split(')').slice(1).join(')').trim().split(/\s+/);if(stat[0]==='Z')return false;assert.equal(stat[19],identity.birth,'Captured wrapper UI PID was reused');assert.equal(fs.readlinkSync(`/proc/${identity.pid}/exe`),identity.executable,'Captured wrapper UI executable changed');return true;}catch(e){if(e.code==='ENOENT'||e.code==='ESRCH')return false;throw e;}}
@@ -100,7 +107,7 @@ async function main(args){
   const layout=producer.TARGETS[s.target],resources=path.join(stage,layout.resources),appRoot=path.join(resources,'app');
   const binary=path.join(resources,'backplane-service',process.platform==='win32'?'backplane-serve.exe':'backplane-serve');
   const executable=appimage,{Service}=require(path.join(appRoot,'service.cjs'));
-  fs.mkdirSync(out);const wrapperTmp=path.join(out,'wrapper-tmp');fs.mkdirSync(wrapperTmp);const home=fs.mkdtempSync(path.join(os.tmpdir(),'Backplane smoke 日本語 ')),project=path.join(home,'project 日本語'),agents=path.join(home,'agents');
+  fs.mkdirSync(out);const wrapperTmp=ownedTemporaryRoot(process.env.BACKPLANE_APPIMAGE_TMPDIR);const home=fs.mkdtempSync(path.join(os.tmpdir(),'Backplane smoke 日本語 ')),project=path.join(home,'project 日本語'),agents=path.join(home,'agents');
   fs.mkdirSync(project);fs.mkdirSync(agents); // Empty stand-in directory blocks every real provider CLI.
   const marker='FINAL_CURRENT_日本語_👩‍💻_é',at=Math.floor(Date.now()/1000),ev=($,v)=>({$,...v,at});
   const events=[ev('ProjectCreated',{id:'release-smoke',title:'Release smoke 日本語',root:project}),
@@ -177,5 +184,5 @@ async function main(args){
     process.env=originalEnv;save();
   }
 }
-module.exports={hostTarget,journalCheck,linuxSandbox,argumentsFor,windowAuthWitness,childAlive,cleanupOwnedUi,windowsProcessCommand,wrapperWitness};
+module.exports={hostTarget,journalCheck,linuxSandbox,argumentsFor,windowAuthWitness,childAlive,cleanupOwnedUi,windowsProcessCommand,wrapperWitness,ownedTemporaryRoot};
 if(require.main===module)main(process.argv.slice(2)).catch(e=>{console.error(e.message);process.exitCode=1;});

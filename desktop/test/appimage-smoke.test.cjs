@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {argumentsFor,wrapperWitness,linuxSandbox,journalCheck}=require('./appimage-smoke.cjs');
+const {argumentsFor,wrapperWitness,linuxSandbox,journalCheck,ownedTemporaryRoot}=require('./appimage-smoke.cjs');
 test('exact wrapper and digest are required',()=>{
   assert.throws(()=>argumentsFor(['--stage','/stage','--out','/never-existing-evidence']),/Use/);
   assert.throws(()=>argumentsFor(['--stage','/stage','--out','/never-existing-evidence','--appimage','relative','--appimage-sha256','a'.repeat(64)]),/Absolute/);
@@ -24,4 +24,13 @@ test('existing sandbox and no-send journal checks are retained',()=>{
   const before=Buffer.from('');
   assert.throws(()=>journalCheck(before,Buffer.from(JSON.stringify({$: 'MessagePosted'})+'\n')),/send or wake/);
   assert.throws(()=>journalCheck(before,Buffer.from(JSON.stringify({$: 'SettingSet',key:'telemetry.share',value:'on'})+'\n')),/enabled/);
+});
+test('long checkout temporary roots are rejected before launching',()=>{
+  assert.throws(()=>ownedTemporaryRoot('/home/runner/work/Backplane/Backplane/appimage-smoke/evidence-linux-arm64/wrapper-tmp'),/Short owned/);
+  assert.throws(()=>ownedTemporaryRoot('/tmp'),/Short owned/);
+});
+test('only a fresh private short root is accepted',{skip:process.platform!=='linux'},()=>{
+  const fs=require('node:fs'),p=fs.mkdtempSync('/tmp/bpai.');
+  try{assert.equal(ownedTemporaryRoot(p),p);fs.writeFileSync(p+'/occupied','x');assert.throws(()=>ownedTemporaryRoot(p),/Fresh/);}
+  finally{fs.rmSync(p,{recursive:true});}
 });
