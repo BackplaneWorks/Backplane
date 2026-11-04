@@ -101,3 +101,34 @@ receipt-documentation commit requires its own fresh exact-head guard before
 merge. The candidate-dispatcher residual trust root described above remains;
 trusted-base `--head` mode is still unimplemented. No proof or full CI/build
 qualification follows from this structural gate.
+
+## Explicit runner compatibility
+
+The caller can select an approved external runner with `--runner ABSOLUTE_PATH
+--runner-sha256 SHA256 --runner-transport exclude`. A complete digest is
+required; no environment-selected runner or automatic fallback is used.
+`exclude` supports older runners that lack `--include-file`, by excluding
+every other top-level path and script child from the current inventory.
+Glob characters are escaped as literals. It still transfers only the exact
+pushed worker, without full-repository upload. The default repository runner
+keeps its existing include-file transport. A session requiring a different
+runner must explicitly select that approved source; the default is no
+exception to such a policy.
+
+The dispatcher reads the reviewed executable source, checks its digest, and
+executes a private immutable byte snapshot. It lets that owned execution and
+cleanup finish even if output contains ambiguous executor identities, then
+refuses the receipt. The original selected source is rechecked after the job;
+drift refuses merge permission. `premerge-controller.json` in the owned local
+job directory records the selected path, digest, transport, snapshot digest
+and exact worker-result digest after all existing source/base/verdict checks.
+The distinct reviewed-guard-change state is preserved. The runner is a
+caller-reviewed trust dependency, not an independent execution attestation.
+
+No account, budget, concurrency, start, size or memory guard is changed or
+overridden. Command arguments remain explicit default-size, no-reuse, wait0,
+idle0, no Bend setup and outer512MiB/swap0. Trusted BASE shape/merge driver,
+three-file guard matrix, exact-head acknowledgement, worker/source/control
+identities and base-drift fences remain mandatory. The suite now adds10
+runner/transport controls to the existing14. This correction still needs
+independent review and normal-Boat qualification before use for merge gates.

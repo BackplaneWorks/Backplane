@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -240,7 +241,75 @@ def receipt_ok(report, head, expected, acknowledgement=''):
             and resource_ok(report.get('resources')))
 
 
-def dispatch(base, acknowledgement=''):
+def runner_source(path=None, expected='', transport='include-file'):
+    if transport not in ('include-file', 'exclude'):
+        raise ValueError('unsupported runner transport')
+    if path is None:
+        if expected or transport != 'include-file':
+            raise ValueError('runner digest/transport override needs an explicit runner path')
+        path = ROOT/'scripts/boat-job.sh'
+    else:
+        path = Path(path)
+        if not path.is_absolute() or re.fullmatch(r'[0-9a-f]{64}', expected) is None:
+            raise ValueError('explicit runner needs an absolute path and complete SHA256')
+    if path.is_symlink() or not stat.S_ISREG(path.stat().st_mode) or not os.access(path, os.X_OK):
+        raise ValueError('runner must be an executable regular source file, not a symlink')
+    data = path.read_bytes()
+    digest = sha(data)
+    if expected and digest != expected:
+        raise ValueError('runner source differs from the explicitly reviewed SHA256')
+    return {'path': str(path), 'sha256': digest, 'transport': transport}, data
+
+
+def transport_arguments(mode, names):
+    worker = 'scripts/pre-merge-boat.py'
+    if mode == 'include-file':
+        return ['--include-file', worker]
+    if mode != 'exclude' or worker not in names:
+        raise ValueError('exclude transport needs a complete inventory containing the worker')
+    def literal(value):
+        # Escape glob syntax for the old runner's fnmatch exclusions.
+        return ''.join('[[]' if c == '[' else '[*]' if c == '*' else '[?]' if c == '?' else c for c in value)
+    excluded = set()
+    for name in names:
+        if any(ord(c) < 32 for c in name) or name.startswith('/') or '..' in name.split('/'):
+            raise ValueError('unsupported transport inventory path')
+        if name == worker:
+            continue
+        prefix = 'scripts/' if name.startswith('scripts/') else ''
+        tail = name[len(prefix):]
+        part = tail.split('/', 1)[0]
+        excluded.add(literal(prefix+part)+('/*' if '/' in tail else ''))
+    return [argument for pattern in sorted(excluded) for argument in ('--exclude', pattern)]
+
+
+def run_runner(descriptor, data, arguments):
+    # bash reads its script while running. Execute exactly the reviewed bytes
+    # from a private snapshot so edits/rebases cannot alter a productive job.
+    with tempfile.TemporaryDirectory(prefix='bp-premerge-runner-') as folder:
+        snapshot = Path(folder)/'runner.sh'
+        snapshot.write_bytes(data);snapshot.chmod(0o500)
+        if sha(snapshot.read_bytes()) != descriptor['sha256']:
+            raise ValueError('private runner snapshot identity failed')
+        process = subprocess.Popen([str(snapshot), *arguments], cwd=ROOT,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        job = location = None
+        ambiguous = False
+        for line in process.stdout:
+            print(line, end='', flush=True)
+            match = JOB.match(line.strip())
+            if match:
+                if job is not None:
+                    ambiguous = True
+                else:
+                    job, location = match.groups()
+        code = process.wait()  # let the owned runner finish cleanup even on ambiguity
+        if ambiguous:
+            raise ValueError('multiple executor identities; refuse ambiguous pre-merge receipt')
+        return code, job, location
+
+
+def dispatch(base, acknowledgement='', runner_path=None, runner_sha='', transport='include-file'):
     # Local side: metadata/transport/byte identities only. Never merge or test.
     base_remote, base_local = base_ref(base)
     head = git(ROOT, 'rev-parse', 'HEAD').decode().strip()
@@ -250,19 +319,13 @@ def dispatch(base, acknowledgement=''):
         raise ValueError('guard/transport source differs from pushed HEAD; commit and push first')
     if acknowledgement and acknowledgement != head:
         raise ValueError('guard-change acknowledgement must name this exact pushed HEAD')
-    argv = ['scripts/boat-job.sh', '--size', 'default', '--timeout', '240', '--wait', '0', '--idle', '0', '--no-reuse',
-            '--no-setup-bend', '--include-file', 'scripts/pre-merge-boat.py', '--artifact', 'build/pre-merge',
+    runner, runner_bytes = runner_source(runner_path, runner_sha, transport)
+    names = git(ROOT, 'ls-files', '-co', '--exclude-standard', '-z').decode().split('\0')
+    argv = ['--size', 'default', '--timeout', '240', '--wait', '0', '--idle', '0', '--no-reuse',
+            '--no-setup-bend', *transport_arguments(transport, [n for n in names if n]), '--artifact', 'build/pre-merge',
             '--', 'bash', '-c', SCOPE_CMD, 'premerge-scope', head, base, expected, acknowledgement]
-    process = subprocess.Popen(argv, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    job = location = None
-    for line in process.stdout:
-        print(line, end='', flush=True)
-        match = JOB.match(line.strip())
-        if match:
-            if job is not None:
-                raise ValueError('multiple executor identities; refuse ambiguous pre-merge receipt')
-            job, location = match.groups()
-    code = process.wait()
+    print('pre-merge: reviewed runner '+runner['sha256']+'; transport '+transport, flush=True)
+    code, job, location = run_runner(runner, runner_bytes, argv)
     if code:
         return code
     if job is None or Path(location).name != job:
@@ -278,6 +341,9 @@ def dispatch(base, acknowledgement=''):
         raise ValueError('local HEAD/worker changed during Boat validation')
     if any(sha((ROOT/name).read_bytes()) != digest for name, digest in sources.items()):
         raise ValueError('local guard/transport source changed during Boat validation')
+    current_runner, _ = runner_source(runner_path, runner['sha256'] if runner_path else '', transport)
+    if current_runner != runner:
+        raise ValueError('reviewed runner changed during Boat validation')
     # Fetching/reading immutable Git source bytes is a static identity audit,
     # never local merge-tree or shape execution.
     git(ROOT, 'fetch', '--no-tags', REMOTE, report['base'])
@@ -298,6 +364,12 @@ def dispatch(base, acknowledgement=''):
             raise ValueError('base advanced after Boat validation; do not merge with this receipt')
     elif report['base'] != base_remote:
         raise ValueError('explicit base commit differs from the verified immutable base')
+    (at/'premerge-controller.json').write_text(json.dumps({'kind': 'owned-premerge-controller',
+        'job': job, 'head': head, 'base': report['base'], 'tree': report['tree'],
+        'runner': runner, 'private_snapshot_sha256': runner['sha256'],
+        'worker_result_sha256': sha((at/'artifacts/pre-merge/RESULT.json').read_bytes()),
+        'state': report['state'], 'limits': 'Caller-reviewed local runner identity; not independent worker attestation'},
+        sort_keys=True, indent=2)+'\n')
     if not matched:
         print('pre-merge: EXPLICIT REVIEWED GUARD CHANGE ACKNOWLEDGED FOR '+head, flush=True)
     print('pre-merge: merged LAWS/PROOF shape ok (Boat '+job+', tree '+report['tree']+')')
@@ -309,12 +381,15 @@ def main():
     actions = parser.add_subparsers(dest='action', required=True)
     local = actions.add_parser('dispatch');local.add_argument('base', nargs='?', default='origin/main')
     local.add_argument('--allow-reviewed-guard-change', default='', metavar='EXACT_HEAD')
+    local.add_argument('--runner', metavar='ABSOLUTE_PATH')
+    local.add_argument('--runner-sha256', default='', metavar='SHA256')
+    local.add_argument('--runner-transport', choices=('include-file', 'exclude'), default='include-file')
     remote = actions.add_parser('worker');remote.add_argument('--head', required=True)
     remote.add_argument('--base', required=True);remote.add_argument('--worker-sha', required=True)
     remote.add_argument('--guard-change-ack', default='')
     args = parser.parse_args()
     try:
-        return dispatch(args.base, args.allow_reviewed_guard_change) if args.action == 'dispatch' else worker(args.head, args.base, args.worker_sha, args.guard_change_ack)
+        return dispatch(args.base, args.allow_reviewed_guard_change, args.runner, args.runner_sha256, args.runner_transport) if args.action == 'dispatch' else worker(args.head, args.base, args.worker_sha, args.guard_change_ack)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print('pre-merge: '+str(error), file=sys.stderr)
         return 1
