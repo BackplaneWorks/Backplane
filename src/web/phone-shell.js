@@ -10,9 +10,11 @@
 // - Back: the header's ‹ ([data-ph-back]) is also pressed by the system back
 //   (one history entry is kept while a screen is pushed) and by a swipe in
 //   from the left edge.
-// - Rows: a long press sends [data-ph-long] ("action\u001fvalue"); a swipe
-//   shows [data-ph-lead] (swiping right) or [data-ph-trail] (left) buttons,
-//   JSON lists of {label, action, value, tone}.
+// - Rows: a long press sends [data-ph-long] ("action\u001fvalue"), else
+//   what a right-click would ([data-on-contextmenu] with its data-value: a
+//   thread's or project's menu); a swipe shows [data-ph-lead] (swiping
+//   right) or [data-ph-trail] (left) buttons, JSON lists of {label,
+//   action, value, tone}; a sidebar thread row has its own (sidebarSwipes).
 // - Menus are bottom sheets (style.css); a tap on a sheet's backdrop shuts it.
 // Nothing here runs unless the page is a phone's.
 
@@ -69,6 +71,34 @@ function parseList(v) {
   try { const xs = JSON.parse(v);return Array.isArray(xs) ? xs.filter(x => x && typeof x.action === "string") : []; } catch { return []; }
 }
 
+// a sidebar thread row's swipes, as the phone apps' (screen.bend's
+// Mob.lead/Mob.trail): right settles it; left snoozes it an hour, or opens
+// its menu with Delete armed, which asks there
+export function sidebarSwipes(el) {
+  if (!el?.matches?.(':is(.sidebar, .ph-now) .thread[data-on-click="select"]')) return null;
+  const id = el.getAttribute('data-value') || '';
+  if (!id) return null;
+  return {
+    lead: [{ label: 'Settle', action: 'row-settle', value: id, tone: 'settle' }],
+    trail: [{ label: 'Snooze 1h', action: 'row-snooze', value: id + '|1h', tone: '' }, { label: 'Delete', action: 'row-delete', value: id, tone: 'danger', menu: true }],
+  };
+}
+
+function longAction(el) {
+  const own = el.closest?.("[data-ph-long]:not([data-ph-long=''])");
+  if (own) return parseLong(own.getAttribute("data-ph-long"));
+  const menu = el.closest?.("[data-on-contextmenu]");
+  if (menu) return [menu.getAttribute("data-on-contextmenu"), menu.getAttribute("data-value") || ""];
+  return null;
+}
+
+const SWIPE_SEL = "[data-ph-lead]:not([data-ph-lead='']),[data-ph-trail]:not([data-ph-trail='']),:is(.sidebar, .ph-now) .thread[data-on-click='select']";
+function swipeItems(el, side) {
+  const own = parseList(el.getAttribute("data-ph-" + side));
+  if (own.length) return own;
+  return sidebarSwipes(el)?.[side] || [];
+}
+
 export function installPhoneShell({ on, doc = document, win = window, dispatch }) {
   if (!on) return { on: false, rendered() {} };
   const html = doc.documentElement;
@@ -91,6 +121,19 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   win.addEventListener("resize", fit);
   win.addEventListener("orientationchange", () => setTimeout(fit, 250));
 
+  // what the system back shuts before it goes back a screen: a menu, the
+  // row menu, a sheet, search, the palette, the terminal
+  const overlay = () => {
+    const menu = doc.querySelector(".local-menu[open]:not([data-inline='true'])");
+    if (menu) return () => { menu.open = false; };
+    if (doc.querySelector(".rowmenu")) return () => dispatch("menu-close", "");
+    if (doc.querySelector(".ph-sheet-layer")) return () => dispatch("ph-sheet", "");
+    const search = doc.querySelector("#thin-result .phead button");
+    if (search) return () => search.click();
+    if (doc.querySelector(".workspace-palette")) return () => dispatch("ws-palette-close", "");
+    if (doc.querySelector(".floating-terminal")) return () => dispatch("ws-term-hide", "");
+    return null;
+  };
   const back = () => { const b = doc.querySelector(".app.phone .ph-head [data-ph-back]");if (b) { b.click();return true; } return false; };
 
   // the system back: one entry is kept in the history while a screen is
@@ -99,13 +142,20 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   win.addEventListener("popstate", () => {
     if (ignorePop) { ignorePop--;return; }
     guarded = false;
-    if (level(doc) > 0) back();
+    const shut = overlay();
+    if (shut) shut();
+    else if (level(doc) > 0) back();
   });
   const guard = () => {
-    const want = level(doc) > 0;
+    const want = level(doc) > 0 || !!overlay();
     if (want && !guarded) { win.history.pushState({ phone: 1 }, ""); guarded = true; }
     else if (!want && guarded) { guarded = false;ignorePop++;win.history.back(); }
   };
+
+  // a menu opened in the page (no hub frame) keeps a back entry too
+  doc.addEventListener("toggle", () => guard(), true);
+  // (search and the palette open in the page too, after a tap)
+  doc.addEventListener("click", () => setTimeout(guard, 0));
 
   // touches: the back edge swipe, long press, row swipes
   let t = null, longFired = false, openRow = null;
@@ -122,7 +172,12 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     for (const it of items) {
       const b = doc.createElement("button");
       b.type = "button";b.className = "ph-swipe-btn" + (it.tone ? " " + it.tone : "");b.textContent = it.label || it.action;
-      b.addEventListener("click", e => { e.stopPropagation();closeRow();dispatch(it.action, it.value ?? ""); });
+      b.addEventListener("click", e => {
+        e.stopPropagation();closeRow();
+        // Delete asks first, in the row's menu (the menu opens, Delete armed)
+        if (it.menu) dispatch("row-menu", it.value ?? "");
+        dispatch(it.action, it.value ?? "");
+      });
       strip.append(b);
     }
     doc.body.append(strip);
@@ -134,16 +189,15 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     if (e.touches.length !== 1) { t = null;return; }
     const p = e.touches[0], target = e.target;
     if (openRow && !openRow.strip.contains(target)) closeRow();
-    const longEl = target.closest?.("[data-ph-long]:not([data-ph-long=''])");
-    const swipeEl = target.closest?.("[data-ph-lead]:not([data-ph-lead='']),[data-ph-trail]:not([data-ph-trail=''])");
+    const act = longAction(target);
+    const swipeEl = target.closest?.(SWIPE_SEL);
     t = { x: p.clientX, y: p.clientY, edge: p.clientX < EDGE && level(doc) > 0 && !target.closest?.("#viewer canvas, .viewer-stage"), swipeEl, axis: null, timer: 0 };
     longFired = false;
-    if (longEl) {
-      const act = parseLong(longEl.getAttribute("data-ph-long"));
+    if (act) {
       t.timer = setTimeout(() => {
         if (!t || t.axis) return;
         longFired = true;win.navigator.vibrate?.(10);
-        if (act) dispatch(act[0], act[1]);
+        dispatch(act[0], act[1]);
       }, LONG_MS);
     }
   }, { passive: true, capture: true });
@@ -161,7 +215,7 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     if (s.edge && dx > BACK_DX && Math.abs(dy) < dx / 2) { back();return; }
     if (s.swipeEl) {
       s.swipeEl.style.transform = "";
-      const side = dx > 0 ? "lead" : "trail", items = parseList(s.swipeEl.getAttribute("data-ph-" + side));
+      const side = dx > 0 ? "lead" : "trail", items = swipeItems(s.swipeEl, side);
       if (Math.abs(dx) > SWIPE_OPEN && items.length) showStrip(s.swipeEl, side, items);
     }
   }, { passive: true, capture: true });
@@ -173,7 +227,13 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     const t2 = e.target;
     if (t2?.matches?.(".local-menu[open]")) { t2.open = false;e.preventDefault();e.stopPropagation(); }
   }, true);
-  doc.addEventListener("contextmenu", e => { if (e.target.closest?.("[data-ph-long]:not([data-ph-long=''])")) e.preventDefault(); }, true);
+  // a phone's own long-press menu (Chrome's contextmenu) would open the
+  // same menu again on top of ours, and shut it: the long press owns it
+  // (only there: a long press on a reply's text is how one selects it)
+  doc.addEventListener("contextmenu", e => {
+    if (!e.target.closest?.("[data-on-contextmenu],[data-ph-long]:not([data-ph-long=''])")) return;
+    e.preventDefault();e.stopPropagation();
+  }, true);
 
   return {
     on: true,
