@@ -1,5 +1,7 @@
 import ./src/core/msgs-lookup.bend as MLOOK
+
 import ./src/core/msgs-meta.bend as MMETA
+
 import ./src/server/auth-cache.bend as AUTHCACHE
 
 import ./src/server/wire.bend as WIRE
@@ -16141,6 +16143,15 @@ law native_locale_composition:
   for +os: String
   for +preview: String
   {NATIVEI18N.native_locale(setting, os, preview) == NATIVEI18N.Lang.resolve(NATIVEI18N.Lang.normalize(setting), os, String.eq(preview, "1")) : String}
+
+law autosettle_live_work_subscription_never_expires:
+  for old: Bool
+  {AUTOS.Auto.expired.work("work", True{}, old) == False{} : Bool}
+
+law autosettle_active_file_subscription_never_expires:
+  for live: Bool
+  for old: Bool
+  {AUTOS.Auto.expired.work("file", live, old) == False{} : Bool}
 
 law catalog_lookup_common_cancel:
   for +lc: I18.Loc
