@@ -51,6 +51,10 @@ def Sock.send_preview(sock: Socket, path: String, ctype: String, range: String) 
 
 # Stream an immutable bounded binary asset without a Bend list per byte.
 # The caller owns authorization, the HTTP header and a validated cache path.
+# The effect retains at most 64 KiB of file bytes per transfer, yields after
+# each piece, and closes its descriptor on completion, error or 30s stall.
+# Success means the opened file's initial size was sent in order; a file
+# truncated during transfer fails without appending an error body.
 def Sock.send_file(sock: Socket, path: String, cap: U32) ->
   IO(Socket & Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"

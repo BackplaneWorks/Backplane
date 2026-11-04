@@ -375,24 +375,68 @@ function sock_send_preview(socket, path, ctype, range, k) {
 }
 
 function sock_send_file(socket, path, cap, k) {
-  const fs = require('fs'); let fd = -1, bytes;
+  const fs = require('fs');
+  const handles = globalThis.BP_H;
+  const handle = handles?.is(socket);
+  const sys = handle ? null : io_sys();
+  const again = handle ? (handles.EAGAIN ?? 11) : (sys.mac ? 35 : 11);
+  const timeout = process.platform === 'darwin' ? 60 : 110;
+  let fd = -1, size = 0, pos = 0, piece = null, at = 0;
+  let until = performance.now() + 30000;
+  const finish = (code) => {
+    if (fd >= 0) {
+      const was = fd; fd = -1;
+      try { fs.closeSync(was); } catch (e) { code ||= host_errno(e); }
+    }
+    piece = null;
+    return io_tup(socket, code ? io_fail(code) : io_done({ $: 'Unit' }));
+  };
   try {
     if (!Number.isSafeInteger(cap) || cap < 1 || cap > 64 * 1024 * 1024 || path.includes('\0')) throw { errno: 22 };
     const before = fs.lstatSync(path);
     if (!before.isFile() || before.isSymbolicLink()) throw { errno: 22 };
-    fd = fs.openSync(path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    fd = fs.openSync(path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
     const stat = fs.fstatSync(fd);
-    if (!stat.isFile() || stat.size > cap || stat.dev !== before.dev || stat.ino !== before.ino) throw { errno: 27 };
-    bytes = fs.readFileSync(fd);
-    if (bytes.length !== stat.size) throw { errno: 5 };
+    if (!stat.isFile() || !Number.isSafeInteger(stat.size) || stat.size < 0 || stat.size > cap
+        || stat.dev !== before.dev || stat.ino !== before.ino) throw { errno: 27 };
+    size = stat.size;
   } catch (e) {
-    if (fd >= 0) try { fs.closeSync(fd); } catch {}
-    return io_tup(socket, io_fail(Math.abs(e.errno || 5)));
+    return finish(host_errno(e));
   }
-  fs.closeSync(fd);
-  // Bun-loop handles are not POSIX descriptors (Windows has only handles).
-  if (globalThis.BP_H?.is(socket)) return globalThis.BP_H.sendBytes(socket, bytes, k);
-  return host_send(socket, bytes, k);
+  // One 64 KiB buffer per transfer. No Bend byte list or whole-file buffer;
+  // advance only after the current piece drains, yielding between pieces.
+  const go = () => {
+    try {
+      if (performance.now() >= until) return finish(timeout);
+      if (piece === null) {
+        if (pos === size) return finish(0);
+        piece = Buffer.allocUnsafe(Math.min(65536, size - pos));
+        const got = fs.readSync(fd, piece, 0, piece.length, pos);
+        if (got <= 0) return finish(5);
+        piece = piece.subarray(0, got);
+        at = 0;
+      }
+      while (at < piece.length) {
+        const n = handle
+          ? (handles.get(socket)?.write(piece.subarray(at)) ?? -9)
+          : host_write(socket, sys.ptr(piece, at), piece.length - at);
+        const code = n < 0 ? (handle ? -n : sys.errno()) : 0;
+        if (n === 0 || code === again) {
+          io_park_on(socket, true, k, go, Math.min(until, performance.now() + 1000));
+          return undefined;
+        }
+        if (code) return finish(code);
+        at += n;
+        until = performance.now() + 30000;
+      }
+      pos += piece.length;
+      piece = null;
+      if (pos === size) return finish(0);
+      io_park_on(undefined, false, k, go, performance.now());
+      return undefined;
+    } catch (e) { return finish(host_errno(e)); }
+  };
+  return go();
 }
 
 // Sock.send_path: len bytes of the file at path from start, read and sent a
