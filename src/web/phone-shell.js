@@ -139,6 +139,8 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     if (doc.querySelector(".rowmenu")) return () => dispatch("menu-close", "");
     const sheet = doc.querySelector(".ph-sheet-layer .ph-sheet-back");
     if (sheet) return () => sheet.click();
+    // the project picker (Projects' +), the hub's own layer
+    if (doc.querySelector(".app.phone > .picker")) return () => dispatch("proj-close", "");
     const devices = doc.querySelector(".pairing-screen[data-dismissible='1'] .pairing-back");
     if (devices) return () => devices.click();
     const search = doc.querySelector("#thin-result .phead button");
