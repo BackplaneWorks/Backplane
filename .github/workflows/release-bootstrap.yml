@@ -54,8 +54,8 @@ concurrency:
 
 env:
   BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.14.0
-  BACKPLANE_VERSION_STAMP: '0.14.0'
+  BACKPLANE_VERSION: v0.14.1
+  BACKPLANE_VERSION_STAMP: '0.14.1'
   BACKPLANE_TELEMETRY_CHANNEL: release
   # Source scanners and receipts must use UTF-8 on Windows too.
   PYTHONUTF8: '1'
@@ -110,7 +110,7 @@ jobs:
           python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation js --target "$TARGET" --directory "$RUNNER_TEMP/release-inputs"
           # Public receipt for the telemetry release gate: the key ID only. Never the key, the
           # Google secret or the environment; written only after the build above succeeded.
-          python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.0","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
+          python3 -c 'import json,os,sys; kid=os.environ.get("BACKPLANE_TELEMETRY_KID",""); kid or sys.exit("no telemetry key ID"); json.dump({"schema":1,"version":"0.14.1","channel":"release","baked":True,"capability":"signed-release-events","keyId":kid,"endpoint":os.environ["BACKPLANE_TELEMETRY_URL"],"target":os.environ["TARGET"],"sourceCommit":os.environ["BACKPLANE_FROZEN_COMMIT"]},open("build/bootstrap-js/TELEMETRY-CAPABILITY.json","w"),indent=2)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -167,7 +167,7 @@ jobs:
           chmod 755 "$SERVICE"  # artifacts drop file modes
           v=$("$SERVICE" --version)
           echo "$v"
-          [ "$v" = "backplane 0.14.0" ]
+          [ "$v" = "backplane 0.14.1" ]
       - name: Measure matching-host system ABI and assemble genuine service component
         shell: bash
         env:
