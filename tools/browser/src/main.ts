@@ -123,6 +123,7 @@ type Owner = {
   console: Json[];
   shot: Shot;
   opening: Promise<Page> | null;
+  homeOpening: Promise<void> | null;
   // the in-page recorder is on for this owner (record op)
   recording: boolean;
   lastNav: string;
@@ -130,6 +131,8 @@ type Owner = {
 
 const owners = new Map<string, Owner>();
 const ownerOf = new WeakMap<Page, Owner>();
+// Closing an owner must not let the next frame lease reopen its home page.
+const homeStarted = new Set<string>();
 
 function ownerFor(name: string): Owner {
   let o = owners.get(name);
@@ -142,6 +145,7 @@ function ownerFor(name: string): Owner {
       console: [],
       shot: { cdp: null, seq: 0, last: 0, fast: 0, lastAll: 0, lastHash: 0n, pending: null, timer: null, casting: false, capture: null, castTask: null, still: 0, lease: null },
       opening: null,
+      homeOpening: null,
       recording: false,
       lastNav: "",
     };
@@ -1348,6 +1352,16 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
   async cast(a, name) {
     const o = ownerFor(name);
     const ms = Math.max(0, Math.min(10_000, Number(a.ms ?? 2500) || 0));
+    if (ms > 0 && a.homeUrl && !homeStarted.has(name) && !o.tabs.length && !o.opening) {
+      homeStarted.add(name);
+      const opening = (async () => {
+        const p = await ensurePage(name);
+        await p.goto(normalizeUrl(a.homeUrl), { waitUntil: "load", timeout: timeoutOf(a) });
+      })();
+      o.homeOpening = opening;
+      try { await opening; }
+      finally { if (o.homeOpening === opening) o.homeOpening = null; }
+    }
     tellTabs(o); // Includes metadata for newly connected remote viewers.
     const was = performance.now() < o.shot.fast;
     o.shot.fast = performance.now() + ms;
@@ -1383,6 +1397,10 @@ const STILL_QUIET = new Set(["cast", "status", "frames", "frame", "close", "clos
 const CEF_INPUT = new Set(["click", "mouse", "type", "press", "scroll", "select"]);
 async function dispatch(op: string, h: (a: Json, name: string) => Promise<any>, args: Json, name: string): Promise<any> {
   if (op !== "engine" && switching) await switching;
+  // Explicit agent operations follow the initial home navigation, including
+  // a failed load. They must never race it and lose the requested address.
+  const home = owners.get(name)?.homeOpening;
+  if (op !== "cast" && home) await home.catch(() => {});
   if (engine !== "cef" || !CEF_INPUT.has(op)) return h(args, name);
   const p = await ensurePage(name);
   return cef!.input(p, () => h(args, name));
