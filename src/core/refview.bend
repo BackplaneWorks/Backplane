@@ -204,13 +204,18 @@ def Card.work.thread.local(+id: String) -> String:
 def Card.work.thread(+id: String) -> String:
   Bool.pick(String, FR.Fr.is(id), FR.Fr.link(id) ++ "~", "") ++ Card.work.thread.local(FR.Fr.local(id))
 
-def Cards.deps.object(+st: M.State, +r: R.Ref) -> List<&2, String>:
-  match r:
+# Cards.deps.object matches a copy of r: a string pattern splits bit by bit and a
+# row that mentions its scrutinee gets it rebuilt at every split (lane B).
+def Cards.deps.object.by(key: R.Ref, +st: M.State, +r: R.Ref) -> List<&2, String>:
+  match key:
     case R.Ref{"thread", +id <> +tail, _}: [id, Card.thread.project(M.State.thread.get(st, id))]
     case R.Ref{"bot", +id <> +tail, _}: [id, BT.Bot.thread(BT.World.bot(M.State.bots(st), id))]
     case R.Ref{"routine", +id <> +tail, _}: [id, BT.Routine.bot(BT.World.routine(M.State.bots(st), id))]
     case R.Ref{"work", +id <> +tail, _}: [id, Card.work.thread(id)]
     case _: [Card.id(r)]
+
+def Cards.deps.object(+st: M.State, +r: R.Ref) -> List<&2, String>:
+  Cards.deps.object.by(r, st, r)
 
 def Cards.result.cards(+g: CardGot) -> Cards:
   match g:
@@ -274,22 +279,31 @@ def Card.machine.has(r: Map<&2, M.Nav> & Bool) -> Bool:
 def Card.machine.known(st: M.State, id: String) -> Bool:
   Card.machine.has(Map.has(&2, M.Nav, M.State.navs(st), FR.Fr.nav(id)))
 
+# Card.of dispatches on the kind and the rest as their own parameters: a
+# string pattern matches bit by bit, and a match substitutes its rebuilt
+# scrutinee into every row it keeps, so matching `r` itself copied the
+# rebuilt Ref into each fallthrough branch (millions of checked nodes).
+# Rows, their order and their bodies are those of the match on `r`.
+def Card.of.kind(+st: M.State, +r: R.Ref, +k: String, +kind: String, +xs: List<&2, String>, +f: String) -> Maybe<&2, Card>:
+  match kind, xs:
+    case "thread", +id <> +tail: Card.thread(st, R.Ref{"thread", [id], f}, M.State.thread.get(st, id))
+    case "bot", +id <> +tail: Card.bot(st, r, BT.World.bot(M.State.bots(st), id))
+    case "room", +id <> +tail: Card.room(st, r, BT.World.room(M.State.bots(st), id))
+    case "project", +id <> +tail: Card.accept(Card.project.live(st, id), Card.make(st, r, "folder", Card.project.title(st, id), "project", ""))
+    case "routine", +id <> +tail: Card.routine(st, r, BT.World.routine(M.State.bots(st), id))
+    case "task", +id <> +tail: Card.task.json(st, r, J.Json.parse(M.Setting.get(st, "board." ++ id, "")))
+    case "work", +id <> +tail: Card.work(st, r, Card.work.find(M.Work.watch(st, Card.work.thread(id)), FR.Fr.local(id)))
+    case "pr", +repo <> +n <> +tail: Some{Card.make(st, r, "git-fork", "PR #" ++ n, Card.pr.sub(String.contains(repo, "/"), st, repo), "")}
+    case "file", +id <> +path: Card.accept(Card.project.live(st, id), Card.make(st, r, "file", FM.Fm.last(String.join(path, "/")), Card.project.title(st, id), FM.Fm.kind(String.join(path, "/"))))
+    case "machine", +id <> +tail: Card.accept(Card.machine.known(st, id), Card.make(st, r, "box", FR.Fr.name(st, id ++ "~x"), "", ""))
+    case "person", _: Some{Card.make(st, r, "circle-check", "You", "", "")}
+    case "mailroom", +id <> +tail: Card.mailbox(st, r, "mailroom", BT.World.bot(M.State.bots(st), id))
+    case "charter", +id <> +tail: Card.mailbox(st, r, "charter", BT.World.bot(M.State.bots(st), id))
+    case _, _: Card.accept(R.Ref.has(["conv", "mail", "decision"], k), Card.make(st, r, "file-text", k, Card.last(r), ""))
+
 def Card.of(+st: M.State, +r: R.Ref) -> Maybe<&2, Card>:
   match r:
-    case R.Ref{"thread", +id <> +tail, +f}: Card.thread(st, R.Ref{"thread", [id], f}, M.State.thread.get(st, id))
-    case R.Ref{"bot", +id <> +tail, _}: Card.bot(st, r, BT.World.bot(M.State.bots(st), id))
-    case R.Ref{"room", +id <> +tail, _}: Card.room(st, r, BT.World.room(M.State.bots(st), id))
-    case R.Ref{"project", +id <> +tail, _}: Card.accept(Card.project.live(st, id), Card.make(st, r, "folder", Card.project.title(st, id), "project", ""))
-    case R.Ref{"routine", +id <> +tail, _}: Card.routine(st, r, BT.World.routine(M.State.bots(st), id))
-    case R.Ref{"task", +id <> +tail, _}: Card.task.json(st, r, J.Json.parse(M.Setting.get(st, "board." ++ id, "")))
-    case R.Ref{"work", +id <> +tail, _}: Card.work(st, r, Card.work.find(M.Work.watch(st, Card.work.thread(id)), FR.Fr.local(id)))
-    case R.Ref{"pr", +repo <> +n <> +tail, _}: Some{Card.make(st, r, "git-fork", "PR #" ++ n, Card.pr.sub(String.contains(repo, "/"), st, repo), "")}
-    case R.Ref{"file", +id <> +path, _}: Card.accept(Card.project.live(st, id), Card.make(st, r, "file", FM.Fm.last(String.join(path, "/")), Card.project.title(st, id), FM.Fm.kind(String.join(path, "/"))))
-    case R.Ref{"machine", +id <> +tail, _}: Card.accept(Card.machine.known(st, id), Card.make(st, r, "box", FR.Fr.name(st, id ++ "~x"), "", ""))
-    case R.Ref{"person", _, _}: Some{Card.make(st, r, "circle-check", "You", "", "")}
-    case R.Ref{"mailroom", +id <> +tail, _}: Card.mailbox(st, r, "mailroom", BT.World.bot(M.State.bots(st), id))
-    case R.Ref{"charter", +id <> +tail, _}: Card.mailbox(st, r, "charter", BT.World.bot(M.State.bots(st), id))
-    case R.Ref{+k, _, _}: Card.accept(R.Ref.has(["conv", "mail", "decision"], k), Card.make(st, r, "file-text", k, Card.last(r), ""))
+    case R.Ref{+k, +xs, +f}: Card.of.kind(st, r, k, k, xs, f)
 
 def Card.bare.k(+ok: Bool, +st: M.State, +r: R.Ref) -> Maybe<&2, Card>:
   match ok:
