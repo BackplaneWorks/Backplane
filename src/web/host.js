@@ -3109,6 +3109,11 @@ function connectingStatus() {
 const connectionLog = new ConnectionLog({ storage: localStorage, bundle: CONNECTION_BUNDLE,
   visibility: () => document.visibilityState || "unknown", online: () => navigator.onLine !== false });
 const thinBackoff = new Backoff(), thinRetry = new Retry();
+// How long a connect step may take: the base on a first try (a hub that is
+// down shows at once), and on a phone twice that after each failed retry, up
+// to 4x, so a link whose answers take seconds (weak signal, a busy relay)
+// still connects; success or a wake starts over.
+const patience = () => PHONE_TITLES() ? Math.min(4, 2 ** Math.max(0, thinBackoff.tries - 1)) : 1;
 // a view request's deadline (thin-host.js), and the view failures in a row
 // that slow the next attempt (viewRecover)
 const VIEW_TIMEOUT_MS = 30000, VIEW_CALM_MS = 120000;
@@ -3177,7 +3182,7 @@ function thinReconnect() {
   const attempt = thinAttempt;
   thinRetry.schedule(thinBackoff.next(), async () => {
     if (viewMode === "compatibility" || attempt !== thinAttempt) return;
-    const hub = await probeHub(window.fetch.bind(window));
+    const hub = await probeHub(window.fetch.bind(window), { timeoutMs: 2000 * patience() });
     // A Retry/wake/new connection can win while the old HTTP probe waits.
     // Its late answer must never replace that newer healthy socket.
     if (viewMode === "compatibility" || attempt !== thinAttempt) { connectionLog.record("retry-discarded", { cause: "stale-retry" });return; }
@@ -3457,7 +3462,7 @@ async function startThin(again = false, reason = "initial") {
   if (downSince) downStatus(downNote);
   else connectingStatus();
   later();
-  const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability });
+  const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability, timeoutMs: 2000 * patience() });
   if (attempt !== thinAttempt || viewMode === "compatibility") return;
   if (capability.unauthorized) {
     stopThin(false, "auth-denied");viewMode = "read-only";focusedView.invalidate();
@@ -3769,7 +3774,7 @@ async function startThin(again = false, reason = "initial") {
   s.thin = true;
   s.dead = reason => { disconnect(reason || "heartbeat-expired");try { s.close(); } catch {} };
   // Include the HTTP Upgrade/connect phase in the greeting deadline.
-  thinGreetingTimer = setTimeout(() => { disconnect("greeting-timeout");try { s.close(); } catch {} }, 4000);
+  thinGreetingTimer = setTimeout(() => { disconnect("greeting-timeout");try { s.close(); } catch {} }, 4000 * patience());
   thinExpiry = setInterval(() => { if (current()) thin.expire(); }, 250);
 }
 
