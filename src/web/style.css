@@ -3612,7 +3612,3 @@ html.phone .ph-term-keys button[aria-pressed="true"] { background: var(--ph-on);
 .app.phone textarea:not(.xterm-helper-textarea) { background: var(--ph-fill); border: 1px solid transparent; }
 .app.phone textarea:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); outline: none; }
 @media (prefers-reduced-motion: reduce) { .ph-tab > svg { transition: none; } }
-
-.cad-progress { display: block; width: 100%; min-width: 100px; height: 6px; accent-color: var(--accent); }
-.cad-install { min-width: 0; margin-bottom: 12px; }
-.cad-install .set-note { overflow-wrap: anywhere; }

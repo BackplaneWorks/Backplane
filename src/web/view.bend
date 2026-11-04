@@ -1,5 +1,4 @@
 import Base
-import ../core/cad-install.bend as CIP
 import ../core/message-context.bend as CTXT
 import ./project-home.bend as PHV
 import ../core/project-home.bend as PH
@@ -1764,17 +1763,9 @@ def View.days.loc(+lc: I.Loc, +d: String) -> List<&2, D.Node>:
 def View.days(+d: String) -> List<&2, D.Node>:
   View.days.loc(I.En{}, d)
 
-# Same HTML progress element and styling as the local voice model download.
-def View.cad.meter(+p: J.Json) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, CIP.Cad.busy(CIP.Cad.phase(J.Json.get_str(p, "phase", "idle"))),
-    [D.El{"progress", "", List.append(&2, D.Attr, [D.At{"class", "voice-progress cad-progress"}, D.At{"aria-label", "Installation progress"}],
-      Bool.pick(List<&2, D.Attr>, CIP.Cad.known(p), [D.At{"max", "1000"}, D.At{"value", Nat.show(CIP.Cad.fraction(p))}], Nil{})), Nil{}}], Nil{})
-
 def View.kn.acts(as: List<&2, KH.KAct>) -> List<&2, D.Node>:
   match as:
     case Nil{}: Nil{}
-    case KH.KAct{+l, "cad-cancel", +v} <> t:
-      List.append(&2, D.Node, View.cad.meter(Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{})), D.Dom.button("", "cad-cancel", v, l, l) <> View.kn.acts(t))
     case KH.KAct{+l, "link", v} <> t:
       D.El{"a", "", [D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener"}], [D.Txt{l}]} <> View.kn.acts(t)
     case KH.KAct{+l, "kicad-installing", _} <> t:
@@ -1954,10 +1945,6 @@ def View.agy.rows(+u: U.Ui, rs: List<&2, U.AgRow>) -> List<&2, D.Node>:
       Nil{}
     case U.AgRow{+l, +n, fs, bs} <> t:
       View.setrow(l, n, List.append(&2, D.Node, View.agy.fields(u, fs), View.agy.btns(u, bs))) <> View.agy.rows(u, t)
-
-def View.cad.row(+u: U.Ui, +tool: String) -> D.Node:
-  D.El{"div", "cad-" ++ tool, [D.At{"class", "cad-install"}, D.At{"role", "status"}, D.At{"aria-live", "polite"}],
-    List.append(&2, D.Node, View.agy.rows(u, [U.Cadview.row(u, tool)]), View.cad.meter(U.Cadview.at(U.Ui.infos(u), tool)))}
 
 def View.voice.engine(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
   View.agy.rows(u, U.Vlocal.rows(lc, u))
@@ -2291,7 +2278,7 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       [View.setrow(MSG.T.web.settings.writing.model(lc), Bool.pick(String, String.is_empty(U.TextGen.model(st)), MSG.T.common.default(lc), U.TextGen.model(st)) ++ ": " ++ U.Models.label_of(U.Str.get(nf, "models"), U.TextGen.provider(st), U.TextGen.model(st)),
         View.chips.loc(lc, U.Models.menu(U.Str.get(nf, "models"), U.TextGen.provider(st)), U.TextGen.model(st), "text.model"))]])
     case 4n: List.concat(&2, D.Node, [[View.setrow("KiCad", U.KN.summary(nf), View.kn.path.loc(lc, u) <> View.kn.loc(lc, U.KN.of(nf, st), False{}))],
-      [View.cad.row(u, "kicad"), View.cad.row(u, "freecad")],
+      [View.setrow(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{})],
       [View.setrow(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, D.Node>, U.KiCad.ipc.ready(nf), View.chips.loc(lc, ["on", "off"], ipc, "kicad.ipc"), Nil{}))]])
     case 5n: List.concat(&2, D.Node, [[View.setrow(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})],
       View.mates(lc, u),
@@ -2519,9 +2506,11 @@ def View.fold.accessible(open: Bool, node: D.Node) -> D.Node:
     case D.El{tag, key, attrs, kids}: D.El{tag, key, D.At{"aria-expanded", Bool.pick(String, open, "true", "false")} <> attrs, kids}
     case other: other
 
+
 def View.fold.row.live(+lc: I.Loc, +id: String, +label: String, +open: Bool, +live: Bool) -> D.Node:
   View.fold.accessible(open, WI.WIcon.button(View.fold.cls(open, live), "fold", FO.Fold.ask(open, id), MSG.T.fold.tooltip(lc, Bool.pick(String, open, "yes", "no"), Bool.pick(String, String.starts_with(id, "work:"), "work", "tools")),
     Bool.pick(String, open, "chevron-down", "chevron-right"), 14, label))
+
 
 def View.fold.row.loc(+lc: I.Loc, +id: String, +label: String, +open: Bool) -> D.Node:
   View.fold.row.live(lc, id, label, open, False{})
@@ -5617,6 +5606,7 @@ def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, example: List<&2, D.Node>
       D.El{"p", "", [D.At{"class", "tour-body"}], D.Txt{body} <> example},
       D.El{"div", "", [D.At{"class", "tour-choices"}], View.tour.choices(cs)},
       D.El{"div", "", [D.At{"class", "tour-btns"}], View.tour.footer(Nat.is_eq(i, OB.Ob.share()), lc, back, fwd)}]}]
+
 
 # which client's words and targets the tour has (onboard.bend's k): the
 # web page's, or on a phone the phone's (no keys to press, nothing in a

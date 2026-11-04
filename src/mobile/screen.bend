@@ -1,5 +1,4 @@
 import Base
-import ../core/cad-install.bend as CIP
 import ../core/message-context.bend as CTXT
 import ../core/project-home.bend as PH
 import ../core/badge.bend as BG
@@ -2113,22 +2112,10 @@ def Mob.kn.acts(as: List<&2, KH.KAct>) -> List<&2, J.Json>:
     case Nil{}: Nil{}
     case KH.KAct{l, a, v} <> t: Mob.set.btn(l, U.KN.action(a), v, False{}) <> Mob.kn.acts(t)
 
-def Mob.cad.progress(+p: J.Json) -> J.Json:
-  J.Json.obj([J.KV{"busy", J.Flag{CIP.Cad.busy(CIP.Cad.phase(J.Json.get_str(p, "phase", "idle")))}},
-    J.KV{"known", J.Flag{CIP.Cad.known(p)}}, J.KV{"fraction", J.Json.nat(CIP.Cad.fraction(p))}])
-
-def Mob.cad.note(+title: String, +body: String, +acts: List<&2, KH.KAct>, +p: J.Json) -> J.Json:
-  J.Json.obj([J.KV{"label", J.Str{title}}, J.KV{"note", J.Str{body}}, J.KV{"buttons", J.Json.arr(Mob.kn.acts(acts))}, J.KV{"installProgress", Mob.cad.progress(p)}])
-
-def Mob.cad.note.at(acts: List<&2, KH.KAct>) -> J.Json:
-  match acts:
-    case KH.KAct{_, _, v} <> _: Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{})
-    case _: J.Null{}
-
 def Mob.kn(n: Maybe<&2, KH.KNote>) -> List<&2, J.Json>:
   match n:
     case None{}: Nil{}
-    case Some{KH.KNote{_, title, body, acts}}: [Mob.cad.note(title, body, acts, Mob.cad.note.at(acts))]
+    case Some{KH.KNote{_, title, body, acts}}: [Mob.set.row(title, body, Mob.kn.acts(acts))]
 
 def Mob.lang.chips(+lc: I.Loc, vs: List<&2, String>, +u: U.Ui) -> List<&2, J.Json>:
   match vs:
@@ -2191,10 +2178,6 @@ def Mob.voice.terms(+lc: I.Loc, ts: List<&2, String>) -> List<&2, J.Json>:
     case +t <> r:
       Mob.set.btn(t ++ " ×", "voice-unterm", t, False{}) <> Mob.voice.terms(lc, r)
 
-def Mob.cad.row(+u: U.Ui, +tool: String) -> J.Json:
-  +nf = U.Ui.infos(u)
-  Mob.cad.note(Bool.pick(String, String.eq(tool, "kicad"), "Backplane KiCad", "FreeCAD"), CIP.Cad.note(U.Cadview.at(nf, tool)), [U.Cadview.btn(nf, tool)], U.Cadview.at(nf, tool))
-
 # Keep main's shared model/progress and learned-rule rows; the phone adds
 # the dictionary editor without recreating older download controls.
 def Mob.voice.page(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, J.Json>:
@@ -2222,7 +2205,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
     case 3n: List.concat(&2, J.Json, [])
     case 4n: List.concat(&2, J.Json, [[Mob.set.row.f("KiCad", U.KN.summary(nf) ++ " · " ++ U.Str.get(nf, "kicad.cli"), [Mob.set.field("kpath", MSG.T.settings.kicad.path(lc), False{}, U.Ui.scratch(u, "@f.kpath"))], [Mob.set.btn(MSG.T.settings.kicad.path.save(lc), "kicad-path-save", "", False{})])],
       Mob.kn(U.KN.of(nf, st)),
-      [Mob.cad.row(u, "kicad"), Mob.cad.row(u, "freecad")],
+      [Mob.set.row(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{})],
       [Mob.set.row(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, J.Json>, U.KiCad.ipc.ready(nf), Mob.set.chips.loc(lc, ["on", "off"], M.Setting.get(st, "kicad.ipc", "on"), "kicad.ipc"), Nil{}))],
       Mob.kx.settings(u)])
     case 5n: List.concat(&2, J.Json, [[Mob.set.row(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})],

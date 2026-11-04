@@ -1,5 +1,4 @@
 import Base
-import ../core/cad-install.bend as CIP
 import ../core/message-context.bend as CTXT
 import ../core/chat-pending.bend as CP
 import ../core/textscale.bend as TS
@@ -3535,18 +3534,6 @@ def Kn.close(on: Bool, +key: String, +ty: Ty, +x: U32, +y: U32) -> Out:
     case True{}: Kn.button(ty, x, y, "×", "setting", "kicad.notice.hidden=" ++ key)
     case False{}: Out.none()
 
-def Cadbar.draw(+p: J.Json, +x: U32, +y: U32, +w: U32) -> Out:
-  +phase = J.Json.get_str(p, "phase", "idle")
-  +portion = Bool.pick(Nat, CIP.Cad.known(p), CIP.Cad.fraction(p), Bool.pick(Nat, String.eq(phase, "configure"), 900n, Bool.pick(Nat, String.eq(phase, "extract"), 650n, 350n)))
-  Bool.pick(Out, CIP.Cad.busy(CIP.Cad.phase(phase)), Out.ops([
-    D.Draw.rect(D.Clip.all(), x, y, w, 6, T.Th.faint(), 255),
-    D.Draw.rect(D.Clip.all(), x, y, U32.from_nat(Nat.div(Nat.mul(U32.to_nat(w), portion), 1000n)), 6, T.Th.accent(), 255)]), Out.none())
-
-def Cadbar.note(acts: List<&2, KH.KAct>) -> J.Json:
-  match acts:
-    case KH.KAct{_, _, v} <> _: Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{})
-    case _: J.Null{}
-
 def Kn.draw(n: Maybe<&2, KH.KNote>, dismiss: Bool, +ty: Ty, +x: U32, +y: U32, +w: U32) -> Out:
   match n:
     case None{}: Out.none()
@@ -3557,7 +3544,7 @@ def Kn.draw(n: Maybe<&2, KH.KNote>, dismiss: Bool, +ty: Ty, +x: U32, +y: U32, +w
       +by = {(y + 12 + U32.from_nat(List.length(&2, String, ts)) * 24 : U32) : U32}
       Out.all([Out.ops(List.concat(&2, R.Op, [Lay.box(D.Clip.all(), x, y, w, h, 0, T.Th.panel(), T.Th.warn()),
         Kn.lines(ts, ty, 1n, (x + 16 : U32), (y + 10 : U32), 24, T.Th.text()), Kn.lines(bs, ty, 2n, (x + 16 : U32), by, 20, T.Th.dim())])),
-        Kn.acts(acts, ty, (x + 16 : U32), (y + h - 42 : U32)), Cadbar.draw(Cadbar.note(acts), (x + 16 : U32), (y + h - 53 : U32), (w - 32 : U32)), Kn.close(dismiss, key, ty, (x + w - 42 : U32), (y + 6 : U32))])
+        Kn.acts(acts, ty, (x + 16 : U32), (y + h - 42 : U32)), Kn.close(dismiss, key, ty, (x + w - 42 : U32), (y + 6 : U32))])
 
 def Kn.path(+ty: Ty, +n: S.Nui, +x: U32, +y: U32, +w: U32) -> Out:
   Lay.field(ty, D.Clip.all(), x, y, w, U.Ui.scratch(S.Nui.ui(n), "@f.kpath"), String.eq(S.Nui.focus_of(n), S.Fld.id("kpath", "setting", "kicad.path=")), S.Blink.on(n), S.Nui.caret_of(n), S.Nui.mark(n),
@@ -4085,14 +4072,6 @@ def Set.agy.sum(rs: List<&2, U.AgRow>, +ty: Ty, +x: U32, +w: U32) -> U32:
     case +r <> t:
       (Set.agy.rh(r, ty, x, w) + Set.agy.sum(t, ty, x, w) : U32)
 
-def Set.cad.h(+ty: Ty, +u: U.Ui, +tool: String, +x: U32, +w: U32) -> U32:
-  (Set.agy.rh(U.Cadview.row(u, tool), ty, x, w) + 16 : U32)
-
-def Set.cad.row(+ty: Ty, +n: S.Nui, +tool: String, +x: U32, +w: U32, +y: U32) -> Out:
-  +u = S.Nui.ui(n)
-  Out.cat(Set.agy.row(U.Cadview.row(u, tool), ty, n, x, w, y),
-    Cadbar.draw(U.Cadview.at(U.Ui.infos(u), tool), (x + 16 : U32), (y + Set.cad.h(ty, u, tool, x, w) - 16 : U32), (w - 32 : U32)))
-
 # the section's height, its head included
 def Set.agy.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
   (52 + Set.agy.sum(U.Agv.rows.loc(Ty.loc(ty), S.Nui.ui(n)), ty, x, w) : U32)
@@ -4341,30 +4320,25 @@ def Set.page.writing.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>,
   (ey + pr : U32)
 
 def Set.page.cad(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
-  +u = S.Nui.ui(n)
-  +kh0 = Set.cad.h(ty, u, "kicad", x, w)
-  +kh1 = Set.cad.h(ty, u, "freecad", x, w)
-  +ch = (kh0 + kh1 : U32)
   +ipc = M.Setting.get(st, "kicad.ipc", "on")
   +kn = U.KN.of(info, st)
   +kh = {(40 + Kn.h(kn, ty, (w - 32 : U32)) : U32) : U32}
   Out.all([
     Set.head(ty, MSG.T.settings.cad(Ty.loc(ty)), x, (y : U32)),
-    Set.card(x, (y + 32 : U32), w, (252 + kh + ch : U32)),
+    Set.card(x, (y + 32 : U32), w, (252 + kh : U32)),
     Set.row(ty, "KiCad", U.KN.summary(info), x, (y + 34 : U32), w),
     Kn.path(ty, n, (x + 16 : U32), (y + 82 : U32), (w - 32 : U32)),
-    Set.cad.row(ty, n, "kicad", x, w, (y + 122 : U32)),
-    Set.cad.row(ty, n, "freecad", x, w, (y + 122 + kh0 : U32)),
-    Kn.draw(kn, False{}, ty, (x + 16 : U32), (y + 122 + ch : U32), (w - 32 : U32)),
-    Set.row.r(ty, U.KiCad.ipc.label(Ty.loc(ty), info), U.KiCad.ipc.note(Ty.loc(ty), info), x, (y + 118 + kh + ch : U32), w, Bool.pick(U32, U.KiCad.ipc.ready(info), Set.pairw(ty, MSG.T.settings.lang.on(Ty.loc(ty)), MSG.T.settings.lang.off(Ty.loc(ty)), 140), 0)),
-    Bool.pick(Out, U.KiCad.ipc.ready(info), Set.ipc(ty, ipc, x, w, (y + 132 + kh + ch : U32)), Out.none()),
-    Set.browser(ty, CF.Cef.requested(M.Setting.get(st, "browser.engine", CF.Cef.default())), U.Str.get(info, "browser.engine.err"), U.Str.get(info, "browser.engine.live"), x, w, (y + 230 + kh + ch : U32)),
-    Set.order(ty, st, x, w, (y + 306 + kh + ch : U32))])
+    Kn.draw(kn, False{}, ty, (x + 16 : U32), (y + 122 : U32), (w - 32 : U32)),
+    Set.row.r(ty, U.KiCad.ipc.label(Ty.loc(ty), info), U.KiCad.ipc.note(Ty.loc(ty), info), x, (y + 118 + kh : U32), w, Bool.pick(U32, U.KiCad.ipc.ready(info), Set.pairw(ty, MSG.T.settings.lang.on(Ty.loc(ty)), MSG.T.settings.lang.off(Ty.loc(ty)), 140), 0)),
+    Bool.pick(Out, U.KiCad.ipc.ready(info), Set.ipc(ty, ipc, x, w, (y + 132 + kh : U32)), Out.none()),
+    Set.row(ty, U.FreeCAD.label.loc(Ty.loc(ty), info), U.FreeCAD.note(Ty.loc(ty), info), x, (y + 178 + kh : U32), w),
+    Set.browser(ty, CF.Cef.requested(M.Setting.get(st, "browser.engine", CF.Cef.default())), U.Str.get(info, "browser.engine.err"), U.Str.get(info, "browser.engine.live"), x, w, (y + 230 + kh : U32)),
+    Set.order(ty, st, x, w, (y + 306 + kh : U32))])
 
 def Set.page.cad.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
   +kn = U.KN.of(info, st)
   +kh = {(40 + Kn.h(kn, ty, (w - 32 : U32)) : U32) : U32}
-  (500 + kh + Set.cad.h(ty, S.Nui.ui(n), "kicad", x, w) + Set.cad.h(ty, S.Nui.ui(n), "freecad", x, w) : U32)
+  (500 + kh : U32)
 
 def Set.scale.btns(vs: List<&2, String>) -> List<&2, VBtn>:
   match vs:
