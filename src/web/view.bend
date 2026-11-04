@@ -3948,6 +3948,27 @@ def View.workspace.menu(+lc: I.Loc, +cur: String, term: Bool, palette: Bool) -> 
       D.Dom.span("workspace-current", Bool.pick(String, String.is_empty(cur), MSG.T.bots.tab.chat(lc), View.workspace.label(lc, cur))), WI.WIcon.svg("chevron-down", 14)]},
     D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices(False{}, lc, cur, term, palette)}]}
 
+# a phone's viewer screen: every view as a chip in one row that scrolls
+# sideways (the menu's buttons, so a tap picks the view as the menu does),
+# the one on show marked and inert (its action would close the viewer)
+def View.viewer.chip.k(on: Bool, +lc: I.Loc, +kind: String, +action: String, +value: String) -> D.Node:
+  match on:
+    case True{}:
+      D.El{"button", kind, [D.At{"type", "button"}, D.At{"class", "tab on"}, D.At{"aria-label", View.workspace.label(lc, kind)}, D.At{"aria-current", "page"}],
+        [WI.WIcon.svg(View.workspace.icon(kind), 18), D.Dom.span("workspace-label", View.workspace.label(lc, kind))]}
+    case False{}:
+      View.workspace.button(False{}, lc, "", kind, action, value)
+
+def View.viewer.chip(+lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
+  View.viewer.chip.k(String.eq(cur, kind), lc, kind, action, value)
+
+def View.viewer.chips(+lc: I.Loc, +cur: String) -> D.Node:
+  D.El{"nav", "ph-views", [D.At{"class", "ph-chips ph-views"}, D.At{"aria-label", MSG.T.thread.viewer(lc)}], [
+    View.viewer.chip(lc, cur, "board", "view-kind", "board"), View.viewer.chip(lc, cur, "schematic", "view-kind", "schematic"),
+    View.viewer.chip(lc, cur, "3d", "view-kind", "3d"), View.viewer.chip(lc, cur, "split", "view-kind", "split"), View.viewer.chip(lc, cur, "mech", "mech", ""),
+    View.viewer.chip(lc, cur, "files", "fm", ""), View.viewer.chip(lc, cur, "diff", "diff", ""),
+    View.viewer.chip(lc, cur, "review", "rv-page", "bom"), View.viewer.chip(lc, cur, "browser", "view-kind", "browser")]}
+
 # the rail's foot: a toggle host.js answers, its buttons icons only (their
 # names as tooltips), kept in this browser
 def View.workspace(+lc: I.Loc, +cur: String, +panel: Bool, +term: Bool, +palette: Bool) -> D.Node:
@@ -5365,9 +5386,21 @@ def View.home.tabs(home: Bool, +lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
     case True{}: PHV.HomeView.viewer.tabs(u)
     case False{}: View.tabs.for(View.rail(u), lc, Bool.pick(String, U.Mpage.onpart(u), "mech", U.Fm.tab(U.Solid.kind(u))))
 
+# a phone's viewer screen puts its views in a row of chips over the pane
+# (the header has ‹ back); a project's home keeps its own tabs
+def View.aside.tabs.phone(home: Bool, +lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
+  match home:
+    case True{}: View.home.tabs(True{}, lc, kind, u)
+    case False{}: View.viewer.chips(lc, Bool.pick(String, U.Mpage.onpart(u), "mech", U.Fm.tab(U.Solid.kind(u))))
+
+def View.aside.tabs(phone: Bool, +lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
+  match phone:
+    case True{}: View.aside.tabs.phone(PH.Home.is(U.Ui.sel(u)), lc, kind, u)
+    case False{}: View.home.tabs(PH.Home.is(U.Ui.sel(u)), lc, kind, u)
+
 def View.aside(+lc: I.Loc, +kind: String, +u: U.Ui) -> D.Node:
   D.El{"aside", "viewer", [D.At{"class", "viewer " ++ Bool.pick(String, String.is_empty(kind), "board", kind)}, D.At{"id", "viewer"}, D.At{"data-split-project", U.Asset.project(u)}],
-    View.split.loc(lc) <> View.home.tabs(PH.Home.is(U.Ui.sel(u)), lc, kind, u) <> View.aside.k(lc, View.aside.n(kind), u)}
+    View.split.loc(lc) <> View.aside.tabs(PHN.Phone.on(u), lc, kind, u) <> View.aside.k(lc, View.aside.n(kind), u)}
 
 def View.aside.if(+lc: I.Loc, open: Bool, +kind: String, +u: U.Ui) -> List<&2, D.Node>:
   match open:

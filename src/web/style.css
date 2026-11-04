@@ -3033,9 +3033,18 @@ html.phone .mailroom .mail-row { min-height: 56px; }
 .app.phone .project-home .home-details * { font-size: max(1em, 12px); }
 
 /* phone: viewers (C) — the viewer screen of the phone arrangement */
-/* the phone header holds ‹ back and the views, so the pane's own tabs go */
-.app.phone.ph-viewer #viewer > .viewer-tabs { display: none; }
+/* the phone header holds ‹ back and the views, so the pane's own tabs and
+   the thread's state row go */
+.app.phone.ph-viewer #viewer > .viewer-tabs, .app.phone.ph-viewer > .ph-cells { display: none; }
+/* in the screen's column under the header, not fixed over the whole page
+   as a narrow window's viewer is (the header would hide its top) */
+.app.phone > .viewer { position: relative; inset: auto; z-index: auto; }
 .app.phone #viewer { touch-action: manipulation; overscroll-behavior: contain; }
+/* the views as chips over the pane (view.bend's View.viewer.chips) */
+.app.phone .ph-views { flex: none; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--bg); overscroll-behavior-x: contain; }
+.app.phone .ph-views > .tab { display: inline-flex; align-items: center; gap: 6px; min-height: var(--ph-tap, 44px); padding: 0 14px; border: 1px solid var(--line); border-radius: 22px; background: var(--raise); color: var(--dim); white-space: nowrap; }
+.app.phone .ph-views > .tab.on { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg)); }
+.app.phone .ph-views .keycap { display: none; }
 /* each toolbar is one row that scrolls sideways, every control a thumb's size;
    their menus open as sheets (position: fixed, so the row's overflow keeps none) */
 .app.phone :is(.viewer-bar, .solid-toolbar, .hist-row) { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
@@ -3089,3 +3098,9 @@ html.phone .mailroom .mail-row { min-height: 56px; }
 .app.phone .review-body.body :is(td, th) { white-space: nowrap; overflow-wrap: normal; padding: 6px 8px; }
 .app.phone .review-body.rp-bom td:first-child { white-space: normal; min-width: 11em; max-width: 15em; }
 .app.phone .review-body.rp-bom th:first-child { width: auto; }
+/* a phone on its side has ~340 px of height: the views stay in the header's
+   menu, the history keeps its one row, so the drawing keeps most of it */
+@media (max-height: 500px) {
+  .app.phone .ph-views, .app.phone .hist-scrub { display: none; }
+  .app.phone .viewer-bar, .app.phone .solid-toolbar { padding-block: 2px; }
+}

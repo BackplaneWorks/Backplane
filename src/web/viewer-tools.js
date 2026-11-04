@@ -241,3 +241,16 @@ export function sourceStamp(key, revision) {
   if (workbench && key === workbench.boardKey) workbench.stamp();
 }
 export function reset() { workbench?.dispose(); workbench = null; revisions.clear(); stamps.clear(); }
+
+// A phone's row of view chips (view.bend's View.viewer.chips) scrolls
+// sideways: after a render the view on show is brought into the row, once
+// per view, so a later swipe along the row is the person's to keep.
+let chipShown = "";
+export function chipInView() {
+  const on = document.querySelector(".ph-views > .tab.on");
+  const key = on ? on.dataset.key || on.getAttribute("aria-label") || "" : "";
+  if (!on || key === chipShown) { if (!on) chipShown = ""; return; }
+  chipShown = key;
+  const row = on.parentElement, a = on.getBoundingClientRect(), r = row.getBoundingClientRect();
+  if (a.left < r.left || a.right > r.right) row.scrollLeft += a.left - r.left - (r.width - a.width) / 2;
+}
