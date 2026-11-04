@@ -105,7 +105,7 @@ import { restoreCache } from "./replay.js";
 import { FocusedCache, FocusedView, captureFocused, cacheIdentity, mergeFocused, scopeKey } from "./focused-cache.js";
 import { refreshCacheIdentity } from "./cache-identity.js";
 import { discoverViews } from "./thin-discovery.js";
-import { Backoff, Retry, watchWake, probeHub, bundleOf, styleOf, deployed, QUIET_MS } from "./reconnect.js";
+import { Backoff, Retry, watchWake, wakeAction, directReconnect, probeHub, bundleOf, styleOf, deployed, QUIET_MS } from "./reconnect.js";
 import { ThinHost, preservePresentationRoute, presentationTarget, refusedFallback } from "./thin-host.js";
 import { compactRoute } from "./thin.js";
 import { TerminalOutputPane } from "./terminal-output.js";
@@ -3099,6 +3099,12 @@ const patience = () => PHONE_TITLES() ? Math.min(4, 2 ** Math.max(0, thinBackoff
 const VIEW_TIMEOUT_MS = 30000, VIEW_CALM_MS = 120000;
 let viewFailures = 0, viewFailedAt = 0;
 let downSince = 0, downNote = "", downTimer = 0, offlineSend = false, offlineAttach = false;
+// when the try at the hub under way began (a probe, or a connect up to its
+// first view), 0 when none is (onWake's wakeAction)
+let tryingSince = 0;
+// this page has had a view from this hub, and the direct sockets failed
+// before their greeting since (directReconnect)
+let viewsEver = false, directFails = 0;
 // The top bar's dot follows the link while the bar says it is down: the
 // hub drew it green and cannot redraw it now, so the page turns it (the
 // root's hub-down class) and says the words the hub left in data-down.
@@ -3151,7 +3157,7 @@ function dropUnsentBack() {
 }
 function upStatus() {
   const unsent = offlineSend;
-  downSince = 0;clearTimeout(downTimer);downTimer = 0;offlineSend = false;offlineAttach = false;
+  downSince = 0;downNote = "";tryingSince = 0;clearTimeout(downTimer);downTimer = 0;offlineSend = false;offlineAttach = false;
   thinBackoff.reset();thinRetry.cancel();
   reconnectNote("");showViewStatus("");connDot(false);
   if (unsent) { unsentBack = App.host_message(ui, "offline-send-back");holdViewNote(unsentBack, 20000); }
@@ -3159,9 +3165,11 @@ function upStatus() {
 function thinReconnect() {
   if (!pairingAccepted || viewMode === "compatibility" || thinRetry.pending) return;
   downStatus(downNote || "Reconnecting… Your draft is kept.");
-  const attempt = thinAttempt;
+  const attempt = thinAttempt;tryingSince = 0;
   thinRetry.schedule(thinBackoff.next(), async () => {
     if (viewMode === "compatibility" || attempt !== thinAttempt) return;
+    tryingSince = Date.now();
+    if (directReconnect({ again: true, viewsEver, directFails })) { void startThin(true, "reconnect");return; }
     const hub = await probeHub(window.fetch.bind(window), { timeoutMs: 2000 * patience() });
     // A Retry/wake/new connection can win while the old HTTP probe waits.
     // Its late answer must never replace that newer healthy socket.
@@ -3446,11 +3454,12 @@ async function startThin(again = false, reason = "initial") {
   if (!pairingAccepted) return;
   if (viewMode === "compatibility") return;
   stopThin(again || downSince > 0, reason);const attempt = thinAttempt;
-  viewMode = "discovering";
+  viewMode = "discovering";tryingSince = Date.now();
   if (downSince) downStatus(downNote);
   else connectingStatus();
   later();
-  const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability, timeoutMs: 2000 * patience() });
+  const direct = directReconnect({ again: again || downSince > 0, viewsEver, directFails });
+  const capability = direct ? { supported: true } : await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability, timeoutMs: 2000 * patience() });
   if (attempt !== thinAttempt || viewMode === "compatibility") return;
   if (capability.unauthorized) {
     stopThin(false, "auth-denied");viewMode = "read-only";focusedView.invalidate();
@@ -3458,13 +3467,17 @@ async function startThin(again = false, reason = "initial") {
     pairingUI.show({repair, cause: repair ? "pairing_required" : ""});
     void refreshFocusedIdentity();later();return;
   }
-  if (!capability.supported && capability.offline) {
+  // A hub that served views a moment ago and answers this reconnect with
+  // anything but its capabilities (a captive portal's page, a proxy's error,
+  // a body cut off as the network went) is not a hub without views: try
+  // again, rather than settle for read-only with the down note left up.
+  if (!capability.supported && (capability.offline || again || downSince > 0)) {
     viewMode = "offline";later();thinReconnect();return;
   }
   if (!capability.supported) {
     viewMode = "read-only";showViewStatus("This hub needs an update to work with this page. Saved conversation is read-only.");later();return;
   }
-  viewMode = "view-v1";
+  viewMode = "view-v1";viewsEver = true;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const s = new WebSocket(`${proto}//${location.host}/ws?view=1&frontend=1&enc=cbor&since=0&origin=`);
   thinSocket = s;s.binaryType = "arraybuffer";
@@ -3474,6 +3487,9 @@ async function startThin(again = false, reason = "initial") {
   const current = () => !ended && attempt === thinAttempt && viewMode === "view-v1";
   const disconnect = event => {
     if (!current()) return;
+    // a socket gone before its first view: the next reconnects ask first
+    // once this has happened DIRECT_TRIES times (directReconnect)
+    if (direct && !s.up) directFails++;
     previewViews.stop();
     if (typeof event === "string") diagnostic.initiate(event);
     trace("thin-disconnect", { reason: typeof event === "string" ? event : event?.type || "connection-ended", code: event?.code });
@@ -3696,7 +3712,7 @@ async function startThin(again = false, reason = "initial") {
           // validated picture and drafts kept meanwhile.
           viewRecover(state.reason);
         }
-        else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy();enterImprovements(); }
+        else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;directFails = 0;upStatus();outboxFlush();void checkDeploy();enterImprovements(); }
         else if (remoteReady) showViewStatus("");
         if (remoteReady && viewNote) showViewStatus(viewNote);
         // An accepted picture's view callback owns its full or region paint.
@@ -3824,7 +3840,15 @@ const onWake = why => {
     // for more than 3 seconds; use the same 40-second lease as the timer.
     if (App.alive_due(heard, BigInt(Date.now()))) socket.dead("wake-expired");
   }
-  if (thinRetry.pending) { thinBackoff.reset();thinRetry.wake(); }
+  // the link is down: a retry waiting runs now, and a try started while the
+  // page was away (its timeouts stretched by the failures meanwhile) is
+  // replaced by a fresh one with a first try's patience (reconnect.js)
+  const action = !pairingAccepted || viewMode === "compatibility" || viewMode === "read-only" ? "none"
+    : wakeAction({ down: downSince > 0 && !remoteReady, pending: thinRetry.pending, since: tryingSince, now: Date.now() });
+  if (action !== "none") connectionLog.record("wake", { cause: "wake-" + action });
+  if (action !== "none") directFails = 0;
+  if (action === "retry") { thinBackoff.reset();thinRetry.wake(); }
+  else if (action === "restart") { thinBackoff.reset();thinRetry.cancel();void startThin(true, "wake"); }
 };
 watchWake(window, document, onWake);
 // Android's Chrome says when the phone moves between Wi-Fi and mobile data
