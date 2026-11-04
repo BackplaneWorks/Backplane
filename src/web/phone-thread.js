@@ -95,8 +95,22 @@ export function installPhoneThread({ document: doc = document, window: win = win
     end = atEnd(t);
     if (!keeping) keeping = win.setTimeout(keep, 150);
   }, { capture: true, passive: true });
-  // (Send leaves the keyboard to go down: keeping the draft's focus on a
-  // press of Send left an Android keyboard's word being composed out of
-  // what was sent, which only the field's blur commits)
+  // Send (or Stop, Steer) pressed while typing gives the draft its focus
+  // back, so the keyboard stays up for the next message, as a phone's
+  // messages do. The press still takes the focus first: that blur ends an
+  // Android keyboard's composition, which completes the draft that is sent
+  // and lets the page clear it (kept focused, the sent text stayed in the
+  // field and the next message repeated it). The focus comes back in the
+  // same tap (a listener on the window runs after the page's own), which
+  // iOS needs to keep its keyboard.
+  let back = 0;
+  doc.addEventListener('mousedown', event => {
+    back = onPhone(doc) && keyboard() && event.target?.closest?.('.composer .foot-end > button') ? Date.now() : 0;
+  }, true);
+  win.addEventListener?.('click', () => {
+    if (!back || Date.now() - back > 1000) { back = 0;return; }
+    back = 0;
+    doc.getElementById('composer')?.focus?.({ preventScroll: true });
+  });
   return { watch };
 }
