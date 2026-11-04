@@ -18,7 +18,7 @@ if ! sh -c "$CHECK"; then
   command -v systemd-run >/dev/null 2>&1 || refuse "no systemd-run and this cgroup is not capped"
   # the child verifies its own cgroup before exec'ing the command; a fake systemd-run that only runs it fails here
   exec systemd-run --user --scope -q -p MemoryAccounting=yes -p MemoryMax=$CAP -p MemorySwapMax=0 -- \
-    sh -c "$CHECK || { echo 'heavy-boat: the scope is not capped as required; refusing' >&2; exit 75; }; exec sh \"\$0\" \"\$@\"" "$0" "$@"
+    sh -c "( $CHECK ) || { echo 'heavy-boat: the scope is not capped as required; refusing' >&2; exit 75; }; exec sh \"\$0\" \"\$@\"" "$0" "$@"
 fi
 python3 -c "import runpy; runpy.run_path('scripts/local-phase.py')['tools']()"
 export PATH="$HOME/.local/backplane-ci/bin:$PATH" BACKPLANE_HEAVY_OFFLOADED=1
