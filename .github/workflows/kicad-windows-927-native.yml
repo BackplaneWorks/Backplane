@@ -10,6 +10,8 @@ name: Issue 927 exact Windows package consumer
 # Optional diagnostics use a readable exact runtime copy; a probe setup error
 # cannot skip the independent canonical ABI and application checks.
 # Canonical verifier uses Python UTF-8 mode for exact frozen UTF-8 JS bytes.
+# Install-only continuation: no Program Files/PATH/manual runtime fixtures and
+# no artificial manual override. Prior cache corruption remains a known failure.
 on:
   push:
     branches: [backplane/verify-kicad-windows-927]
@@ -67,7 +69,7 @@ jobs:
           path: build/927-input
       - name: Enforce resource gate, then native standard-user package acceptance
         shell: pwsh
-        run: ./extra/kicad-927-consumer/bootstrap.ps1 -ArtifactDirectory '${{ github.workspace }}\build\927-input'
+        run: ./extra/kicad-927-consumer/bootstrap.ps1 -ArtifactDirectory '${{ github.workspace }}\build\927-input' -InstallOnly
       - name: Preserve evidence even on failure or resource refusal
         uses: actions/upload-artifact@v4
         if: always()

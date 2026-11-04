@@ -165,6 +165,8 @@ async function main() {
   const serviceSHA=sha(path.join(serviceDir,'backplane-serve.exe'));
   assert.equal(serviceSHA,'11f53c9619d095e0ccd520c5616743155ee240b9637021d4d5a0bea4707aadd1');
   assert.equal(serviceSHA,serviceBuild.binary_sha256);result.package.serviceSHA256=serviceSHA;
+  result.acceptanceMode=cfg.acceptanceMode||'full';
+  if(cfg.acceptanceMode!=='install-only') {
   assert(normal(cfg.programFilesRoot).startsWith(normal(process.env.ProgramFiles)+'/kicad/'),'Program Files fixture must be under actual Program Files');
   for(const root of [cfg.programFilesRoot,cfg.pathRoot,...cfg.manualRoots]) {
     assert.equal(sha(path.join(root,'bin/kicad-cli.exe')),cfg.runtimeCliSHA256,'Fixture must contain exact real vendor runtime');
@@ -198,6 +200,7 @@ async function main() {
     }
     });
   }
+  }
   await check('real-install',async()=>{
   const install=await openCase('real-install');
   async function installInput(value,status) {
@@ -213,11 +216,18 @@ async function main() {
       }
     }
   }
+  if(cfg.acceptanceMode==='install-only') {
+    assert.equal(setting(install.home),'','Fresh install must have no manual override');
+    assert(!fs.existsSync(cfg.programFilesRoot),'Install-only runner has a Program Files fixture');
+    await cadSettings(install.page);
+    install.entry.noManualOverride=true;save();
+  } else {
   // Force a genuine missing runtime notice without changing Program Files or
   // substituting a download. After install, clear the explicit missing setting.
   const missing=path.join(out,'absent-runtime')+'\\';
   assert(!fs.existsSync(missing));
   await installInput(missing,'missing');
+  }
   const button=install.page.locator('[data-on-click="kicad-install"], [data-on-click="cad-install"][data-value="kicad"]').first();
   await button.waitFor({state:'visible',timeout:30000});
   install.entry.installStartedAt=new Date().toISOString();save();await button.click();
@@ -235,20 +245,24 @@ async function main() {
   },1200000);
   assert.equal(sha(installed),cfg.runtimeCliSHA256,'Installed native CLI differs from the pinned runtime');
   install.entry.installedCli=installed;install.entry.installedCliSHA256=sha(installed);
-  const h=await installInput('','ok');
-  if(h) {
-    assert.equal(h.source,'installed');assert.equal(normal(h.cli),normal(installed));
-    install.entry.installedResolverVerified=true;
-  }
   assert.equal(json(path.join(install.home,'kicad',cfg.runtimeVersion,'manifest.json')).version,cfg.runtimeVersion);
   install.entry.version=execFileSync(installed,['version'],{encoding:'utf8',timeout:30000}).trim();
   assert(install.entry.version.includes(cfg.runtimeVersion.split('-bp.')[0]),'Installed real CLI version mismatch');
   install.entry.installCompletedAt=new Date().toISOString();
   install.entry.realInstallBytesAndCliVerified=true;save();
+  const h=cfg.acceptanceMode==='install-only'
+    ? await until('installed runtime health',()=>{const v=health(install.home);return v.status==='ok'?v:false;})
+    : await installInput('','ok');
+  if(h) {
+    assert.equal(h.source,'installed');assert.equal(normal(h.cli),normal(installed));
+    install.entry.installedResolverVerified=true;save();
+  }
   await install.page.screenshot({path:path.join(out,'real-install-complete.png')});
   });
   assert.equal(result.failures?.length||0,0,'One or more native acceptance cases failed; see failures and partial evidence');
-  result.status='PASS';result.scope='Exact packaged source; native Program Files/PATH discovery, literal UI typing/persistence/reload, real in-app install and CLI launch as standard user';save();
+  result.status='PASS';result.scope=cfg.acceptanceMode==='install-only'
+    ? 'Install-only continuation; exact packaged source and genuine empty home; no full #927 acceptance claim'
+    : 'Exact packaged source; native Program Files/PATH discovery, literal UI typing/persistence/reload, real in-app install and CLI launch as standard user';save();
 }
 main().catch(e=>{
   result.status='FAIL';result.error=e.stack;process.exitCode=1;

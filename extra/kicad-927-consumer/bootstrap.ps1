@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$ArtifactDirectory)
+param([Parameter(Mandatory=$true)][string]$ArtifactDirectory,[switch]$InstallOnly)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows runner only' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -54,7 +54,12 @@ try {
     $programFilesRoot = Join-Path $env:ProgramFiles ('KiCad\'+$pin.version)
     $pathRoot = Join-Path $out 'PATH runtime'
     $manualRoots = @('C:\backplane_kicad\','C:\bp927\new tools\test\')
-    foreach ($destination in @($programFilesRoot,$pathRoot)+$manualRoots) {
+    $destinations = @($programFilesRoot,$pathRoot)+$manualRoots
+    if ($InstallOnly) {
+        if (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'KiCad')) { throw 'Install-only runner must have no Program Files KiCad' }
+        $destinations = @(); $manualRoots = @()
+    }
+    foreach ($destination in $destinations) {
         if (Test-Path -LiteralPath $destination) { throw "Fixture destination already exists: $destination" }
         New-Item -ItemType Directory -Force $destination | Out-Null
         Copy-Item -Path (Join-Path $runtime '*') -Destination $destination -Recurse
@@ -89,6 +94,7 @@ try {
         packagePath=$zip;packageSHA256=(SHA $zip);executable=$exe;out=$out
         sourceCommit=$build.sourceCommit;sourceTree=$build.sourceTree;version=$build.serviceVersion
         buildProvenance=$build.buildProvenance;standardUserSid=$account.SID.Value
+        acceptanceMode=$(if ($InstallOnly) {'install-only'} else {'full'})
         playwrightModule=(Join-Path $root 'desktop\node_modules\playwright-core')
         programFilesRoot=$programFilesRoot;pathRoot=$pathRoot;manualRoots=$manualRoots
         runtimeVersion=$pin.version;runtimeCliSHA256=$cliSHA;node=(Get-Command node.exe).Source
