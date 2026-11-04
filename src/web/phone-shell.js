@@ -257,10 +257,29 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     if (doc.querySelector(".rowmenu, .ph-sheet-layer")) { overlay()?.();e.preventDefault();e.stopPropagation(); }
   }, true);
 
+  // the screen on show: its level and what it is, to animate a push or pop
+  let shown = null;
+  const screenEl = app => app.querySelector(":scope > .viewer") && app.classList.contains("ph-l2") ? app.querySelector(":scope > .viewer")
+    : app.querySelector(app.classList.contains("ph-now") ? ":scope > .ph-now" : app.classList.contains("ph-l0") && !app.classList.contains("ph-settings") ? ":scope > .sidebar" : ":scope > main");
+  const animate = () => {
+    const app = doc.querySelector(".app.phone");
+    if (!app) return;
+    const now = { level: level(doc), screen: app.getAttribute("data-ph-screen") || "" };
+    const was = shown;shown = now;
+    if (!was || was.screen === now.screen) return;
+    const kind = now.level > was.level ? "push" : now.level < was.level ? "pop" : "";
+    const el = kind && screenEl(app);
+    if (!el) return;
+    el.classList.remove("ph-enter-push", "ph-enter-pop");
+    void el.offsetWidth;
+    el.classList.add("ph-enter-" + kind);
+    el.addEventListener("animationend", () => el.classList.remove("ph-enter-" + kind), { once: true });
+  };
+
   return {
     on: true,
     back,
     // after every paint: keep the history entry in step with the screen
-    rendered() { guard();if (openRow && !openRow.row.isConnected) closeRow(); },
+    rendered() { guard();animate();if (openRow && !openRow.row.isConnected) closeRow(); },
   };
 }

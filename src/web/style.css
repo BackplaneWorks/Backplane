@@ -2723,9 +2723,13 @@ html.phone.ph-short .ph-head { min-height: 40px; }
 html.phone.ph-short .ph-head .ph-sub { display: none; }
 html.phone.ph-short.ph-kb .app.phone > .ph-cells { display: none; }
 
-/* the error toast (View.error): under the header, the screen's width, a
-   tap puts it away ("dismiss") */
-.app.phone > .toast { left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + var(--ph-head) + 6px); max-width: none; min-height: var(--ph-tap); box-sizing: border-box; display: flex; align-items: center; padding: 10px 14px; font-size: calc(14px * var(--text-scale, 100) / 100); box-shadow: 0 6px 18px #0006; }
+/* a screen pushed slides in from the right, one popped from the left
+   (phone-shell.js marks it for one animation) */
+@keyframes ph-push { from { transform: translateX(28%); opacity: 0.5; } to { transform: none; opacity: 1; } }
+@keyframes ph-pop { from { transform: translateX(-18%); opacity: 0.6; } to { transform: none; opacity: 1; } }
+.app.phone .ph-enter-push { animation: ph-push .18s cubic-bezier(.2, .7, .3, 1); }
+.app.phone .ph-enter-pop { animation: ph-pop .16s cubic-bezier(.2, .7, .3, 1); }
+@media (prefers-reduced-motion: reduce) { .app.phone .ph-enter-push, .app.phone .ph-enter-pop { animation: none; } }
 
 /* the tab bar */
 .ph-tabs { flex: none; position: relative; z-index: 8; display: flex; background: var(--panel); border-top: 1px solid var(--line);
