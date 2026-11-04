@@ -854,6 +854,29 @@ def Pv.child.diff(+kind: U32, +path: String, +infos: String) -> IO(Unit):
 def PlotFx.board(path: String) -> IO(Maybe<&2, List<&2, String>>):
   import "./effects/plot_board.js"
 
+# the same for a file's text (a version in a commit, from git show)
+def PlotFx.forms(text: String) -> IO(Maybe<&2, List<&2, String>>):
+  import "./effects/plot_board.js"
+
+def Pv.forms.got(m: Maybe<&2, String>) -> IO(Maybe<&2, List<&2, String>>):
+  match m:
+    case Some{t}:
+      PlotFx.forms(t)
+    case None{}:
+      IO.pure(Maybe<&2, List<&2, String>>, Some{Nil{}})
+
+def Pv.forms.k(k: Nat, +path: String) -> IO(Maybe<&2, List<&2, String>>):
+  match k:
+    case 1n:
+      IO.bind(Maybe<&2, String>, Maybe<&2, List<&2, String>>, GT.Git.show(HS.Hist.git.dir(path), HS.Hist.git.obj(path)), Pv.forms.got)
+    case _:
+      PlotFx.board(path)
+
+# a board version's text forms: a live file's, or a file in a commit (one
+# not there has none, as Git.version reads it)
+def Pv.forms(+path: String) -> IO(Maybe<&2, List<&2, String>>):
+  Pv.forms.k(HS.Hist.kind(path), path)
+
 def Pv.child.board.k(fs: List<&2, String>, +path: String, +infos: String) -> IO(Unit):
   match fs:
     case Nil{}:
@@ -861,21 +884,48 @@ def Pv.child.board.k(fs: List<&2, String>, +path: String, +infos: String) -> IO(
     case +h <> t:
       Pv.child.k(Some{P.Plot.of(P2.Pcb2.items.text(t), 0)}, Pv.thick(P2.Pcb2.bytes(h)), infos)
 
-def Pv.child.board.got(m: Maybe<&2, List<&2, String>>, +path: String, +infos: String) -> IO(Unit):
+# (an unfinished live file is read again; a version in a commit that does
+# not parse is unread, as Pv.child.v has it)
+def Pv.child.board.got(m: Maybe<&2, List<&2, String>>, +fixed: Bool, +path: String, +infos: String) -> IO(Unit):
   match m:
     case None{}:
-      IO.die(Unit, 2, "")
+      Pv.child.v(None{}, fixed, 0, infos)
     case Some{fs}:
       Pv.child.board.k(fs, path, infos)
 
 def Pv.child.board(+path: String, +infos: String) -> IO(Unit):
-  IO.bind(Maybe<&2, List<&2, String>>, Unit, PlotFx.board(path), m => Pv.child.board.got(m, path, infos))
+  IO.bind(Maybe<&2, List<&2, String>>, Unit, Pv.forms(path), m => Pv.child.board.got(m, Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)), path, infos))
+
+# one side of a board comparison (Pv.side's)
+def Pv.side.text.k(fs: List<&2, String>) -> Maybe<&2, List<&2, B.Item>>:
+  match fs:
+    case Nil{}:
+      Some{Nil{}}
+    case _ <> t:
+      Some{P2.Pcb2.items.text(t)}
+
+def Pv.side.text(m: Maybe<&2, List<&2, String>>) -> Maybe<&2, List<&2, B.Item>>:
+  match m:
+    case None{}:
+      None{}
+    case Some{fs}:
+      Pv.side.text.k(fs)
+
+# a board comparison (Pv.child.diff's) from both versions' text forms
+def Pv.child.diff.board(+kind: U32, +path: String, +infos: String) -> IO(Unit):
+  do IO<Unit>:
+    a : Maybe<&2, List<&2, String>> <- Pv.forms(HS.Hist.old(path))
+    b : Maybe<&2, List<&2, String>> <- Pv.forms(HS.Hist.new(path))
+    Pv.child.k(Pv.plot(Pv.mark(HS.Hist.bits(path), Pv.side.text(a), Pv.side.text(b)), U32.or(kind, LO.Look.diff())), 0, infos)
 
 def Pv.child.live(+kind: U32, +path: String, +infos: String) -> IO(Unit):
-  Bool.pick(IO(Unit), Bool.and(U32.is_eq(kind, 0), Nat.is_eq(HS.Hist.kind(path), 0n)), Pv.child.board(path, infos), Pv.child.one(kind, path, infos))
+  Bool.pick(IO(Unit), U32.is_eq(kind, 0), Pv.child.board(path, infos), Pv.child.one(kind, path, infos))
+
+def Pv.child.cmp(+kind: U32, +path: String, +infos: String) -> IO(Unit):
+  Bool.pick(IO(Unit), U32.is_eq(kind, 0), Pv.child.diff.board(kind, path, infos), Pv.child.diff(kind, path, infos))
 
 def Pv.child.plot(+kind: U32, +path: String, +infos: String) -> IO(Unit):
-  Bool.pick(IO(Unit), Nat.is_eq(HS.Hist.kind(path), 2n), Pv.child.diff(kind, path, infos), Pv.child.live(kind, path, infos))
+  Bool.pick(IO(Unit), Nat.is_eq(HS.Hist.kind(path), 2n), Pv.child.cmp(kind, path, infos), Pv.child.live(kind, path, infos))
 
 def Pv.child(+kind: U32, +path: String, +infos: String) -> IO(Unit):
   Bool.pick(IO(Unit), Pv.solid.kind(kind), Pv.child.solid(U32.is_eq(kind, 3), U32.is_eq(kind, 4), path, infos), Pv.child.plot(kind, path, infos))

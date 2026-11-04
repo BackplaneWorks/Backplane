@@ -1,14 +1,12 @@
 // A board's top-level forms for its --plot child (src/server/plot.bend's
-// PlotFx.board). Read as a Bend byte list, an 85 MB board took 4 GB of list
+// PlotFx.board, PlotFx.forms). Read as a Bend byte list, an 85 MB board took 4 GB of list
 // cells and its forms as many again, before parsing began: the child ran
 // out of memory at 12 GB. Here the file is cut in one pass over its bytes,
 // the same cut as core/sexpr.bend's Sx.forms, and each form is kept as
 // latin1 text (one char per byte, so its bytes come back exactly), parsed
 // one by one. Answers None for an unfinished file, Some([]) for an empty or
 // unreadable one, else Some(head <> forms) with head the first 8192 bytes.
-function plot_board(path) {
-  let b;
-  try { b = require('node:fs').readFileSync(path); } catch { return {$: CID(Some), value: {$: CID(Nil)}}; }
+function plot_cut(b) {
   if (!b.length) return {$: CID(Some), value: {$: CID(Nil)}};
   // depth (a U32, as Cut's), inside a string, after a backslash, where the
   // form being read starts
@@ -36,4 +34,17 @@ function plot_board(path) {
   return {$: CID(Some), value: {$: CID(Con), head: b.latin1Slice(0, Math.min(b.length, 8192)), tail: xs}};
 }
 
+function plot_board(path) {
+  let b;
+  try { b = require('node:fs').readFileSync(path); } catch { return {$: CID(Some), value: {$: CID(Nil)}}; }
+  return plot_cut(b);
+}
+
+// the same for a file's text as `git show` gave it (a version in a commit):
+// its UTF-8 bytes, as Utf8.encode makes them
+function plot_forms(text) {
+  return plot_cut(Buffer.from(text, 'utf8'));
+}
+
 io_eff(CID(PlotFx.board), plot_board);
+io_eff(CID(PlotFx.forms), plot_forms);
