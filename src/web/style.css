@@ -2967,6 +2967,14 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 /* (36 px to see, 44 to hit: the row is 44 px tall) */
 .app.phone > .ph-cells :is(button.kv, .kv.state button.tool) { position: relative; }
 .app.phone > .ph-cells :is(button.kv, .kv.state button.tool)::after { content: ""; position: absolute; inset: -4px 0; }
+/* renaming the thread (its title box in the shell's header): the field
+   and its Save / Cancel take the header's width, a thumb tall (they were
+   21 px, squeezed to "S… Ca…" beside the tools) */
+.app.phone .ph-head:has(#thread-title) :is(.ph-tools, .ph-sub) { display: none; }
+.app.phone .ph-head .ph-title:has(#thread-title) { flex: 1 1 auto; min-width: 0; }
+.app.phone .ph-head .title-box:has(> #thread-title) { display: flex; align-items: center; gap: 6px; width: 100%; }
+.app.phone .title-box > #thread-title { flex: 1 1 auto; min-width: 0; min-height: 40px; font-size: 16px; }
+.app.phone .title-box:has(> #thread-title) > button { flex: none; min-height: 40px; padding: 0 12px; font-size: calc(14px * var(--text-scale, 100) / 100); }
 /* the subagents' and to-do list's docks, opened from their chips: half
    the screen to read them in (the timeline keeps the rest) */
 .app.phone .thread-content > :is(.subs, .todos).dock :is(.subs-body, .todos-body) { max-height: calc(var(--ph-vh, 100dvh) * 0.5); }
