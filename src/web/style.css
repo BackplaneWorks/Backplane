@@ -3115,11 +3115,11 @@ html.ph-kb .app.phone .room-view > .composer { padding-bottom: 6px; }
   html.phone.ph-kb .find-titles:not(:empty) { max-height: none; }
   html.ph-kb .app.phone .bot-tabs, html.ph-kb .app.phone .room-view > .thread-head { display: none; }
 }
-/* notes over the page on a phone (the hub's error toast, an "Intent
-   saved", the reconnect note): one opaque line under the header, the
-   whole width, where no button sits; a tap puts a toast away */
-.app.phone .toast { top: calc(52px + env(safe-area-inset-top)); left: 0; right: 0; z-index: 150; padding: 12px 16px; font-size: 14px; border-width: 0 0 1px; box-shadow: 0 6px 20px #0008; }
-html.phone #reconnect-note { top: calc(52px + env(safe-area-inset-top)) !important; bottom: auto !important; left: 0 !important; right: 0 !important; max-width: none !important; opacity: 1 !important; padding: 10px 16px !important; font-size: 14px !important; text-align: center; border-width: 0 0 1px !important; z-index: 150 !important; }
+/* the reconnect note on a phone (host.js's #reconnect-note, outside the
+   app): one opaque line under the header, the whole width, where no
+   button sits (the hub's toasts: phone: shell) */
+html.phone #reconnect-note { top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + 52px) !important; bottom: auto !important; left: 0 !important; right: 0 !important; max-width: none !important; opacity: 1 !important; padding: 10px 16px !important; font-size: 14px !important; text-align: center; border-width: 0 0 1px !important; z-index: 150 !important; }
+html.phone.ph-short #reconnect-note { top: calc(var(--ph-top, 0px) + env(safe-area-inset-top) + 40px) !important; }
 /* the Bots tab with no bot yet: what one is and how to make one */
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child { flex-wrap: wrap; }
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child::after { content: "No bots yet. A bot is an agent that stays between chats, with a name, a cat and a memory: mention it in any message (@scout look at the BOM). Tap + to make one."; flex: 1 1 100%; padding: 8px 0 12px; color: var(--dim); font-size: 14px; font-weight: normal; text-transform: none; letter-spacing: normal; line-height: 1.5; white-space: normal; }
