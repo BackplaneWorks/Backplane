@@ -1229,7 +1229,7 @@ function render() {
   if (startJump && tl2 && startJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
     if (thin?.hasAhead?.("older") && startJump.pages < 400) {
       if (startJump.pages) tl2.scrollTop = 0;
-      if (!startJump.asked) { startJump.asked = true; requestAnimationFrame(() => { if (startJump) { startJump.asked = false; if (thin.ahead("older", { two: true })) { startJump.pages += 2;startSay(`Going back to the start… ${startJump.pages} pages`, "cancel", "Cancel"); } } }); }
+      if (!startJump.asked) { startJump.asked = true; requestAnimationFrame(() => { if (startJump) { startJump.asked = false; if (thin.ahead("older", { two: true })) startJump.pages += 2; } }); }
     } else if (thin?.ready) {
       tl2.scrollTop = 0;startJump = null;
       startSay("The start of the thread", "newest", "Newest ↓");startNoteTimer = setTimeout(() => startSay(""), 8000);
@@ -3646,6 +3646,9 @@ async function startThin(again = false, reason = "initial") {
         const previous = historyNode || node;
         const projection = historyNode ? detail.page?.direction || "update" : "reset";
         if (RR && historyNode && projection === "older") RR.n("land.block." + History.why(previous, node, projection));
+        // "Go to the start" counts the earlier pages as they land (most come
+        // through the ordinary paging at the top, not its own requests)
+        if (startJump && projection === "older") { startJump.landed = (startJump.landed || 0) + 1;startSay(`Going back to the start… ${startJump.landed} ${startJump.landed === 1 ? "page" : "pages"}`, "cancel", "Cancel"); }
         const p0 = RR ? pnow() : 0;
         // historyNode is a merge's own result, prepared already and marked with
         // where its last non-entry row is: an older page is added as a block,

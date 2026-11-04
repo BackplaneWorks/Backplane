@@ -155,7 +155,7 @@ test('owning-history reset drops retained DOM rows before normal history project
  for(const reset of [true,false]){
   let resets=0,removed=0;const old={oldHistory:true},fresh={freshHistory:true};
   const ctx={entryHistory:idleEntry,RR:null,current:()=>true,pnow:()=>0,scroll:false,historyNode:old,resumedConversation:'A',currentSession:()=>({sel:'A'}),transitionPosition:null,
-   historyDirection:'older',historyFillMore(){removed++;},historyPageState(){},historyGone:{older:new Set(['old']),newer:new Set()},thin:{heldReset(){resets++;}}};
+   historyDirection:'older',startJump:null,historyFillMore(){removed++;},historyPageState(){},historyGone:{older:new Set(['old']),newer:new Set()},thin:{heldReset(){resets++;}}};
   vm.createContext(ctx);vm.runInContext(clear,ctx);const view=vm.runInContext('('+body+')',ctx),got=view(fresh,{historyReset:reset,epoch:'local',target:{kind:'thread',id:'peer~A'}});
   assert.equal(got.projection,reset?'reset':'update');assert.equal(got.previous,reset?fresh:old);assert.equal(resets,reset?1:0);assert.equal(removed,reset?1:0);
   if(reset){assert.equal(ctx.historyGone.older.size,0);assert.equal(ctx.transitionPosition.atEnd,false);assert.equal(ctx.transitionPosition.top,0);}
@@ -200,7 +200,7 @@ test('presenting newest output retires the earlier gesture and its blank history
   let resets=0,hidden=0;const ctx={entryHistory:idleEntry,current:()=>true,RR:null,resumedConversation:null,historyNode:{old:true},
    History:{project:(_old,n)=>n,project_block:(_old,n)=>n},historyDirection:'older',historyOlderDemand:2,
    historyGone:{older:new Set(['before']),newer:new Set(['after'])},thin:{heldReset(){resets++;}},
-   historyBack(){},historyFillMore(_tl,shown){assert.equal(shown,false);hidden++;}};
+   historyBack(){},startJump:null,historyFillMore(_tl,shown){assert.equal(shown,false);hidden++;}};
   vm.createContext(ctx);const view=vm.runInContext('('+body+')',ctx),fresh={latest:true};
   assert.equal(view(fresh,{page:{direction},window:{ids:['reply']}}),direction);
   assert.equal(ctx.historyNode,fresh);
