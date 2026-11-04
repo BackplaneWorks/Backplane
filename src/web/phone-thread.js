@@ -28,14 +28,26 @@ export function phoneClickAction(doc, el, action) {
 // Only a finger's drag (or a wheel) moves it otherwise. Runs after the timeline
 // planner's own observer (made later), which keeps the top on a resize.
 const NEAR = 48, FINGER_MS = 700;
-export function installPhoneThread({ document: doc = document, window: win = window } = {}) {
+// The thread hidden behind the phone's full-screen viewer (display: none)
+// loses its scroll offset and its planner plans for a view 0 px tall: back
+// from the board, the person was somewhere else in the thread. The reading
+// place (the planner's own position(): its anchor row and offset) is kept
+// while the timeline shows and given back to the planner (restore) when it
+// shows again. (list: host.js's timelineList, the timeline's planner)
+export function installPhoneThread({ document: doc = document, window: win = window, list = () => null } = {}) {
   // A page that cannot record (no getUserMedia: a plain-http origin) would
   // dictate with the hub machine's microphone, far from the phone; the
   // phone's keyboard has its own dictation (style.css hides the mic)
   if (!win.navigator?.mediaDevices?.getUserMedia) doc.documentElement?.classList.add('ph-nomic');
   const RO = win.ResizeObserver;
   if (!RO) return null;
-  let el = null, height = 0, seen = null, end = false, finger = 0;
+  let el = null, height = 0, seen = null, end = false, finger = 0, kept = null, keptEl = null, keeping = 0;
+  const keep = () => {
+    keeping = 0;
+    if (!el || el.clientHeight === 0 || !onPhone(doc)) return;
+    const l = list(el);
+    if (l?.position) { kept = l.position(); keptEl = el; }
+  };
   const atEnd = t => t.scrollHeight - t.scrollTop - t.clientHeight < NEAR;
   const keyboard = () => doc.activeElement?.id === 'composer';
   const toEnd = t => { const max = t.scrollHeight - t.clientHeight; if (t.scrollTop < max - 1) t.scrollTop = max; };
@@ -43,7 +55,9 @@ export function installPhoneThread({ document: doc = document, window: win = win
     for (const e of entries) {
       const t = e.target, h = t.clientHeight;
       if (t !== el) continue;
-      if (height > 0 && h !== height && onPhone(doc)) {
+      // (shown again after being hidden: its reading place back)
+      if (height === 0 && h > 0 && kept && keptEl === t && onPhone(doc)) list(t)?.restore?.(kept);
+      else if (height > 0 && h > 0 && h !== height && onPhone(doc)) {
         if (end) toEnd(t);
         else t.scrollTop = Math.max(0, Math.min(t.scrollHeight - h, t.scrollTop + (height - h)));
       }
@@ -61,7 +75,6 @@ export function installPhoneThread({ document: doc = document, window: win = win
   };
   const moved = () => { finger = Date.now(); };
   // (a tap anywhere but the composer, a reply's "Replying to" going to its
-  // message say, is the person's own move: the end is no longer held)
   // message say, is the person's own move: the end is no longer held; a
   // touch in the composer, before its keyboard comes up, asks afresh)
   doc.addEventListener('touchstart', event => {
@@ -77,6 +90,7 @@ export function installPhoneThread({ document: doc = document, window: win = win
     if (t !== el) { watch(); return; }
     if (end && !atEnd(t) && keyboard() && Date.now() - finger > FINGER_MS) { toEnd(t); return; }
     end = atEnd(t);
+    if (!keeping) keeping = win.setTimeout(keep, 150);
   }, { capture: true, passive: true });
   return { watch };
 }
