@@ -17,6 +17,19 @@ const mapOf = (o: Record<string, any>): number[] => [...hd(0xa0, Object.keys(o).
 const send = (m: string, p: object) => ws.send(new Uint8Array(mapOf({ id: ++id, m, p })));
 await Bun.sleep(1500);
 const th = process.argv[5];
+if (th === "new") { // bun ios-seed.ts HP HOME PROJ new N: N threads, each with a short tool turn
+  const pid = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).find((e) => e.$ === "ProjectCreated")?.id;
+  const n = Number(process.argv[6]); const before = new Set<string>();
+  for (let i = 0; i < n; i++) {
+    send("thread.create", { project: pid, title: `load ${i + 1}`, env: "local", provider: "claude" });
+    await Bun.sleep(1200);
+    const ids = (await Bun.file(`${home}/events.jsonl`).text()).split("\n").map((l) => { try { return JSON.parse(l); } catch { return {}; } }).filter((e) => e.$ === "ThreadCreated" && e.title === `load ${i + 1}`);
+    const t = ids[0]?.id; if (!t) continue; before.add(t);
+    send("turn.start", { thread: t, text: `tools:2 load thread ${i + 1}`, msg: `load-${i}` });
+    await Bun.sleep(2500);
+  }
+  console.log([...before].join(" ")); process.exit(0);
+}
 if (th) { // turns: bun ios-seed.ts HP HOME PROJ THREAD "text" ...
   let n = 0; for (const t of process.argv.slice(6)) { send("turn.start", { thread: th, text: t, msg: `seed-${Date.now()}-${n++}` }); await Bun.sleep(9000); }
   process.exit(0);
