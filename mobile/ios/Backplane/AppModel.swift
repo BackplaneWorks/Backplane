@@ -138,8 +138,7 @@ final class AppModel {
     }
 
     // the pairing links, one per hub, in the order they were paired
-    private(set) var links: [String] = UserDefaults.standard.stringArray(forKey: "links")
-        ?? UserDefaults.standard.string(forKey: "link").map { [$0] } ?? []
+    private(set) var links: [String] = PairingStore.load()
     private(set) var screen: Screen?
     // the last status plane the hub sent, drawn while a screen carries none (the
     // hub builds the plane only for the list and the Status tab, so going back
@@ -603,8 +602,10 @@ final class AppModel {
         }
     }
 
+    // in the Keychain; where it refuses, UserDefaults keeps them until it takes them
     private func save() {
-        UserDefaults.standard.set(links, forKey: "links")
+        if PairingStore.save(links) { UserDefaults.standard.removeObject(forKey: "links") }
+        else { UserDefaults.standard.set(links, forKey: "links") }
         UserDefaults.standard.removeObject(forKey: "link")
     }
 
