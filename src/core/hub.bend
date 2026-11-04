@@ -2970,6 +2970,32 @@ def Hub.thread_project(t: M.Thread) -> String:
     case M.Thread{_, p, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       p
 
+def Hub.project.title(p: M.Project) -> String:
+  match p:
+    case M.Project{_, t, _, _, _}:
+      t
+
+# where a Files download reads from (server.bend's FilesHttp): the folder,
+# "" when there is none, and the project's title (the zip's name)
+type FilesAt is Data:
+  FilesAt{root: String, title: String}
+
+def Hub.files.of.k(i: Nat, +s: M.State, +id: String) -> FilesAt:
+  match i:
+    # a project home: its folder, as Hub.root_for chooses it, but never a
+    # removed project's (Hub.project.home_root, as project.home reads)
+    case 0n:
+      FilesAt{Hub.project.home_root(Hub.project(s, PH.Home.project(id))), Hub.project.title(Hub.project(s, PH.Home.project(id)))}
+    # a thread here: the folder files.dir lists (Hub.root_for's Hub.cwd)
+    case 1n:
+      FilesAt{Bool.pick(String, Bool.and(Hub.owns(s, id), Bool.not(String.is_empty(Hub.project.home_root(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))))), Hub.cwd(s, Hub.thread(s, id)), ""), Hub.project.title(Hub.project(s, Hub.thread_project(Hub.thread(s, id))))}
+    # a thread elsewhere (<link>~<id>): its files are its own hub's
+    case _:
+      FilesAt{"", ""}
+
+def Hub.files.of(+s: M.State, +id: String) -> FilesAt:
+  Hub.files.of.k(Bool.pick(Nat, FR.Fr.is(id), 2n, Bool.pick(Nat, PH.Home.is(id), 0n, 1n)), s, id)
+
 # the worktree made again from a thread's kept branch
 # A thread's worktree folder found missing at its agent's start (removed
 # outside the hub, or by an older hub under a thread sharing it) is made again

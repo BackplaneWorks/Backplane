@@ -944,17 +944,23 @@ def Files.trail(ps: List<&2, U.PItem>) -> List<&2, J.Json>:
     case U.PItem{+l, +a, +v} <> t:
       J.Json.obj([J.KV{"label", J.Str{l}}, J.KV{"action", J.Str{a}}, J.KV{"value", J.Str{v}}]) <> Files.trail(t)
 
-def Files.rows(rs: List<&2, U.FmRow>) -> List<&2, J.Json>:
+# each row's download (client.bend's Fm.down: "" for none; the app adds
+# the hub and its token, never opens it in a browser) and the name it
+# saves under (Fm.down.name)
+def Files.rows(rs: List<&2, U.FmRow>, +u: U.Ui) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case U.FmRow{+l, +a, +v, +d, +k} <> t:
-      J.Json.obj([J.KV{"label", J.Str{l}}, J.KV{"action", J.Str{a}}, J.KV{"value", J.Str{v}}, J.KV{"detail", J.Str{d}}, J.KV{"kind", J.Str{k}}, J.KV{"icon", J.Str{U.Fm.icon(k)}}]) <> Files.rows(t)
+      J.Json.obj([J.KV{"label", J.Str{l}}, J.KV{"action", J.Str{a}}, J.KV{"value", J.Str{v}}, J.KV{"detail", J.Str{d}}, J.KV{"kind", J.Str{k}}, J.KV{"icon", J.Str{U.Fm.icon(k)}},
+        J.KV{"down", J.Str{U.Fm.down(u, String.eq(k, "folder"), v)}}, J.KV{"downName", J.Str{U.Fm.down.name(u, String.eq(k, "folder"), v)}}]) <> Files.rows(t, u)
 
+# the folder on show: its zip and the name it saves under, beside the rows
 def Files.json(+lc: I.Loc, on: Bool, +u: U.Ui) -> J.Json:
   match on:
     case True{}:
-      J.Json.obj([J.KV{"trail", J.Json.arr(Files.trail(U.Fm.trail.loc(lc, u)))}, J.KV{"rows", J.Json.arr(Files.rows(U.Fm.rows(u)))}, J.KV{"ready", J.Json.bool(U.Fm.ready(u))}])
+      J.Json.obj([J.KV{"trail", J.Json.arr(Files.trail(U.Fm.trail.loc(lc, u)))}, J.KV{"rows", J.Json.arr(Files.rows(U.Fm.rows(u), u))}, J.KV{"ready", J.Json.bool(U.Fm.ready(u))},
+        J.KV{"zip", J.Str{U.Fm.down(u, True{}, U.Fm.dir(u))}}, J.KV{"zipName", J.Str{U.Fm.down.name(u, True{}, U.Fm.dir(u))}}])
     case False{}:
       J.Null{}
 

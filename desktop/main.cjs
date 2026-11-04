@@ -234,6 +234,8 @@ function start() {
   };
   ses.setPermissionRequestHandler((wc, permission, callback, details) => callback(permitted(wc, permission, details.requestingUrl, details, 'request')));
   ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => permitted(wc, permission, requestingOrigin, details));
+  require('./downloads.cjs').installDownloads(ses, { origin: () => origin, downloads: () => app.getPath('downloads'), dialog, getWindow: () => window,
+    onDone: (state, file) => { if (state === 'completed') app.dock?.downloadFinished?.(file); } });
   require('./improvements-display-capture.cjs').installDisplayCapture({ electron, session: ses, getWindow: () => window, origin: () => origin });
   try { recordingStore.prune(); } catch {}
   const recordingCleanup = setInterval(() => { try { recordingStore.prune(); } catch {} }, 15 * 60 * 1000);recordingCleanup.unref();

@@ -415,14 +415,19 @@ struct FileCrumb: Decodable, Hashable {
     let label, action, value: String
 }
 
+// down: where the row downloads from ("" none; client.bend's Fm.down),
+// downName: the name it saves under
 struct FileRow: Decodable, Hashable {
     let label, action, value, detail, kind, icon: String
+    let down, downName: String?
 }
 
+// zip, zipName: the folder on show as a zip, and its name
 struct FilesPage: Decodable {
     let trail: [FileCrumb]
     let rows: [FileRow]
     let ready: Bool
+    let zip, zipName: String?
 }
 
 // an image or a PDF from the Files tab: its name, "image" or "pdf", where

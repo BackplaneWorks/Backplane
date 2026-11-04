@@ -19,7 +19,7 @@ function harness(hang=false,{discover,keepOpen=false,token}={}){
     static getAllWindows(){return BrowserWindow.all;}
   }
   BrowserWindow.all=[];
-  const ses={setDisplayMediaRequestHandler(){},setPermissionRequestHandler(){},setPermissionCheckHandler(){},webRequest:{onHeadersReceived(){}},
+  const ses={on(){},setDisplayMediaRequestHandler(){},setPermissionRequestHandler(){},setPermissionCheckHandler(){},webRequest:{onHeadersReceived(){}},
     fetch:async url=>({ok:url.endsWith('/auth/pair')})};
   const paths=new Map();
   const electron={app:{isPackaged:false,setPath:(key,value)=>paths.set(key,value),getPath:key=>paths.get(key),setName(){},requestSingleInstanceLock:()=>true,on(){},quit(){},whenReady:()=>whenReady},
