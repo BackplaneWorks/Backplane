@@ -8,6 +8,14 @@ and draw the screen with native lists, toolbars and text fields; they make
 no product decisions. iOS runs the bridge in JavaScriptCore, Android in
 QuickJS.
 
+The main screen is the hub's own phone web page in a WebView (Android
+`WebShell.kt`; docs/phone-app-shell.md): the app keeps pairing,
+notifications and the live status, the camera, files, links, Back and the
+`window.backplaneApp` bridge (`mobile/shell/backplane-app.js`, the same
+script on both platforms). The native screens below are still there while
+nothing is paired (the pairing screen), while a hub refuses the phone (re-pair)
+and, for one release, behind App settings → **Classic screens**.
+
 ```sh
 scripts/build-mobile.sh           # bridge.js + dist/backplane-android.apk
 scripts/build-ios.sh sim          # build on the Mac, run in the Simulator
