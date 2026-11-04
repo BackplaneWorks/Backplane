@@ -3031,14 +3031,16 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 .app.phone .composer .foot-end > button.primary:last-child { height: 44px; min-width: 64px; padding: 0 14px; font-size: calc(15px * var(--text-scale, 100) / 100); }
 /* a short screen (a phone on its side) with the keyboard up leaves about
    130 px: the composer is one line, the field and Send, and the cells row
-   gives way, so the draft and a line of the thread stay in view */
+   gives way, so the draft and a line of the thread stay in view (keyed on
+   the draft's focus, which on a phone is the keyboard: iOS pans rather
+   than shrinks the page, so a keyboard inset can read 0) */
 @media (max-height: 500px) {
-  html.ph-kb .app.phone > .ph-cells { display: none; }
-  html.ph-kb .app.phone .composer { padding-top: 4px; padding-bottom: 4px; }
-  html.ph-kb .app.phone .composer textarea { min-height: 40px; max-height: 64px; padding-right: 84px; }
-  html.ph-kb .app.phone .composer-foot { position: absolute; right: max(10px, env(safe-area-inset-right)); bottom: 6px; }
-  html.ph-kb .app.phone .composer-foot > :not(.foot-end), html.ph-kb .app.phone .composer-foot .foot-end > :not(button.primary) { display: none; }
-  html.ph-kb .app.phone .composer .foot-end > button.primary:last-child { height: 36px; min-width: 64px; }
+  html.phone .app.phone:has(#composer:focus) > .ph-cells { display: none; }
+  html.phone .app.phone .composer:has(#composer:focus) { padding-top: 4px; padding-bottom: 4px; }
+  html.phone .app.phone .composer:has(#composer:focus) textarea { min-height: 40px; max-height: 64px; padding-right: 84px; }
+  html.phone .app.phone .composer:has(#composer:focus) .composer-foot { position: absolute; right: max(10px, env(safe-area-inset-right)); bottom: 6px; }
+  html.phone .app.phone .composer:has(#composer:focus) .composer-foot > :not(.foot-end), html.phone .app.phone .composer:has(#composer:focus) .composer-foot .foot-end > :not(button.primary) { display: none; }
+  html.phone .app.phone .composer:has(#composer:focus) .foot-end > button.primary:last-child { height: 36px; min-width: 64px; }
 }
 /* (no microphone this page can use: phone-thread.js's ph-nomic) */
 html.ph-nomic .app.phone .composer .mic { display: none; }
