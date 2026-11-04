@@ -97,6 +97,18 @@ def previous_compile_inputs(producer):
     return result
 
 
+def validate_previous_compile_inputs(producer, build):
+    producer.require(build['compileInputs'] == previous_compile_inputs(producer),
+        'Prior configured version/bake inputs mismatch')
+
+
+def validate_raw_change(producer, emitted, prior_emit):
+    producer.require(emitted['files']['server.js'] != prior_emit['files']['server.js'],
+        'Changed storeio effect requires an actual new source-bound server emission')
+    producer.require({k: v for k, v in emitted['files'].items() if k.startswith('web/')} ==
+        {k: v for k, v in prior_emit['files'].items() if k.startswith('web/')}, 'Raw web changed')
+
+
 def helper_reuse(producer, old, build, original_run):
     """Narrow producer hooks: reject unknown helper commands, delegate all others."""
     def run(args, log, env, timeout=2400):
@@ -131,10 +143,10 @@ def prepare(a, producer, bootstrap):
     producer.require(expected['sourceCommit'] == BASE_COMMIT and expected['sourceTree'] == BASE_TREE,
         'Reuse baseline must be the qualified frozen0.14.0 source')
     build = producer.read(old / 'BUILD.json')
+    validate_previous_compile_inputs(producer, build)
     producer.require(build['status'] == 'VERIFIED_GENUINE_SERVICE_ONLY_CONFIGURED_BUILD'
         and build['target'] == a.target and build['source_commit'] == expected['sourceCommit']
-        and build['source_tree'] == expected['sourceTree']
-        and build['compileInputs'] == previous_compile_inputs(producer), 'Prior configured BUILD identity mismatch')
+        and build['source_tree'] == expected['sourceTree'], 'Prior configured BUILD identity mismatch')
     producer.require(producer.digest(old / build['service']) == build['binary_sha256']
         and producer.digest(old / 'SOURCE.json') == build['sourceManifestSha256'], 'Prior build member mismatch')
     old_source = producer.read(old / 'SOURCE.json')['members']
@@ -164,10 +176,7 @@ def prepare(a, producer, bootstrap):
     root, emitted = producer.verified_preemission(request['preEmission'], a.packet,
         request['release'], bend)
     prior_emit = producer.read(old / 'PRE-EMISSION.json')
-    producer.require(emitted['files']['server.js'] != prior_emit['files']['server.js'],
-        'Changed storeio effect requires an actual new source-bound server emission')
-    producer.require({k: v for k, v in emitted['files'].items() if k.startswith('web/')} ==
-        {k: v for k, v in prior_emit['files'].items() if k.startswith('web/')}, 'Raw web changed')
+    validate_raw_change(producer, emitted, prior_emit)
     return request, old, build, changed, expected
 
 
