@@ -121,6 +121,18 @@ with the keyboard up, the path and title bar give way.
 - Each failed retry gives the next one twice the time to connect (up to 4x),
   so a link whose answers take seconds still gets back.
 
+## In the phone app's WebView
+
+The page is meant to live in the phone apps' WebView (Android WebView, iOS
+WKWebView) as much as in a browser. The app opens the hub's page with
+`?phone=1` (kept by the page) and lets it draw edge to edge (the page asks
+for `viewport-fit=cover` and pads with the safe-area insets). Its Back button
+calls `window.backplaneBack()`: true when the page shut something or went
+back a screen, false when there is nothing left (the app may leave then);
+the page also keeps a history entry per pushed screen, so a WebView's own
+goBack works too. A WebView that shrinks its layout for the keyboard (Android)
+and one that shrinks only the visual viewport (iOS) are both followed.
+
 ## Testing
 
 `node --test desktop/test/phone-shell.test.cjs desktop/test/phone-other.test.cjs desktop/test/service-worker-notify.test.cjs desktop/test/service-worker-cache.test.cjs`,
