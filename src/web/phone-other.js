@@ -153,6 +153,26 @@ export function installPhoneOther({ doc = document, win = window, dispatch }) {
   });
   win.visualViewport?.addEventListener("resize", () => setTimeout(lift, 60));
 
+  // the layout: Settings' "Use the computer layout" keeps ?phone=0 for this
+  // browser (phone-shell.js's PHONE_KEY) and reloads; a phone on the
+  // computer layout gets a small "Phone layout" button that forgets it
+  doc.addEventListener("click", e => {
+    const b = on() && e.target.closest?.("[data-ph-layout]");
+    if (!b) return;
+    e.preventDefault();
+    try { win.localStorage.setItem("backplane-phone", b.getAttribute("data-ph-layout") === "1" ? "1" : "0"); } catch {}
+    // (without a ?phone= of the address, which would win over it)
+    win.location.replace(win.location.pathname);
+  });
+  let kept = null;try { kept = win.localStorage.getItem("backplane-phone"); } catch {}
+  const s = win.screen || {};
+  if (!on() && kept === "0" && win.matchMedia?.("(pointer: coarse)").matches && Math.min(s.width || 0, s.height || 0) <= 600) {
+    const back = doc.createElement("button");
+    back.type = "button";back.className = "ph-layout-back";back.textContent = "Phone layout";
+    back.addEventListener("click", () => { try { win.localStorage.removeItem("backplane-phone"); } catch {} win.location.replace(win.location.pathname); });
+    doc.body.append(back);
+  }
+
   // notifications on this phone: which words Settings shows
   // (html.ph-notify-on/-off/-none/-ask), and a tap on Allow asks
   const notifyState = () => {
