@@ -822,12 +822,29 @@ def Search.rows.found(+hs: List<&2, HT.HitAt>, +index: T.Index, +st: M.State, +n
     case Nil{}: Nil{}
     case +h <> tail: Search.row.found(T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), HT.HitAt.id(h))), st, now, here, terms) <> Search.rows.found(tail, index, st, now, here, terms)
 
+# the threads whose titles the query names (the palette's match,
+# client.bend's Palette.hit), at most eight: a phone's search lists them
+# above what was said (host.js's showThinSearch); others read none
+def Search.named(+st: M.State, it: U.PItem) -> J.Json:
+  match it:
+    case U.PItem{+label, _, +id}:
+      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{label}}, J.KV{"project", J.Str{Search.project(HB.Hub.project(st, Search.thread.project(HB.Hub.thread(st, id))))}}])
+
+def Search.titles.go(its: List<&2, U.PItem>, +st: M.State) -> List<&2, J.Json>:
+  match its:
+    case Nil{}: Nil{}
+    case h <> t: Search.named(st, h) <> Search.titles.go(t, st)
+
+def Search.titles(+st: M.State, +q: String) -> List<&2, J.Json>:
+  Search.titles.go(List.take(&2, U.PItem, U.Palette.keep(U.Palette.threads(I.En{}, U.Ui.threads(st)), q), 8n), st)
+
 def Search.found(+page: T.SearchPage, +index: T.Index, +p: J.Json, +epoch: String, +st: M.State, +now: Nat, +here: String) -> J.Json:
   match page:
     case T.SearchPage{+ids, +visited, +last, +more}:
       J.Json.obj([J.KV{"remoteReady", J.Flag{False{}}}, J.KV{"cmds", J.Json.arr(Nil{})}, J.KV{"search", J.Json.obj([
         J.KV{"query", J.Str{J.Json.get_str(p, "query", "")}},
         J.KV{"rows", J.Json.arr(Search.rows.found(HT.Hits.order(Search.hits(ids, index, st), here), index, st, now, here, T.Words.of(J.Json.get_str(p, "query", ""))))},
+        J.KV{"titles", J.Json.arr(Search.titles(st, String.trim(J.Json.get_str(p, "query", ""))))},
         J.KV{"visited", J.Json.nat(visited)}, J.KV{"hasMore", J.Flag{more}}, J.KV{"cursor", J.Str{Bool.pick(String, more, W.Cursor.write(epoch, J.Json.get_obj(p, "target"), J.Json.get_str(p, "query", ""), Page.number(last)), "")}}])}])
 
 def Search.render(+index: T.Index, +st: M.State, +p: J.Json, +epoch: String, +before: Nat) -> J.Json:
