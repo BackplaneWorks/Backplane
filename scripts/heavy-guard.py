@@ -2,6 +2,7 @@
 """Serialize heavy work with Backplane's bend flock and require RAM headroom."""
 import fcntl
 import os
+import re
 import shutil
 from pathlib import Path
 import sys
@@ -166,6 +167,26 @@ def worker_contract(profile, command):
     return pinned if ok else None
 
 
+def retained_compile_contract(command):
+    """Only build-js.sh may use the retained-emission admission floor.
+
+    The entry point checks the actual bytes/import key before admission and
+    again while copying under the native lock. Requiring all retained values
+    here ensures that entry point cannot choose its Bend fallback. This is
+    command routing, not producer attestation or a replacement for those checks.
+    """
+    if len(command) != 3 or not command[1] or command[1].startswith('-') or not command[2]:
+        return False
+    try:
+        if Path(command[0]).resolve() != Path(__file__).resolve().parent / 'build-js.sh':
+            return False
+    except (OSError, ValueError):
+        return False
+    return bool(os.environ.get('BACKPLANE_PREEMITTED_JS')
+                and re.fullmatch(r'[0-9a-f]{64}', os.environ.get('BACKPLANE_PREEMITTED_SHA256', ''))
+                and re.fullmatch(r'[0-9a-f]{40}(?:[0-9a-f]{24})?', os.environ.get('BACKPLANE_PREEMITTED_KEY', '')))
+
+
 def lock_path():
     # The hub's bend guard uses this same host-wide inode. Named-lock and
     # fixture-directory overrides must not create separate heavy-work slots.
@@ -273,6 +294,11 @@ def main(args):
         print('usage: heavy-guard.py [--held] {' + '|'.join(FLOORS) + '} [-- command ...]', file=sys.stderr)
         return 2
     profile, rest = args[0], args[1:]
+    if profile == 'compile-js':
+        command = rest[1:] if rest and rest[0] == '--' else []
+        if not retained_compile_contract(command):
+            print('heavy-guard: compile-js requires the exact build-js.sh SRC OUT retained-emission command', file=sys.stderr)
+            return 2
     if profile in SHARD_PROFILES:
         # Bound to one concrete worker command and a verified cgroup; no --held
         # form (nothing to bind), no Boat/source offload fallback.

@@ -1139,3 +1139,24 @@ verified. Two failed preflights add39credit-s/$0.00039, total366credit-s
 /$0.00366; their cleanup logs are preserved, not counted as passes.
 Graph2 controls have26 assertions+1 informational row. No rerun for this
 audit; no full hub/web, proof, shared-cache gate or release qualification.
+
+### Bind retained-compile admission to the actual retained entry point
+
+The3GiB `compile-js` profile previously accepted arbitrary argv, so a
+misclassified whole-program command could receive the retained-only floor.
+It now permits only this checkout's exact `build-js.sh SRC OUT` route with
+complete retained fields, including in `--held` mode. The real entry point
+still checks exact bytes/import identity before admission and while copying.
+
+| Mocked command routing | Before | After |
+|---|---:|---:|
+| Four unrelated/partial-retained commands reaching mock exec | 4/4 | 0/4, exit2 before admission/exec |
+| Exact retained entry with complete environment | Allowed | Allowed |
+
+[Receipt](retained-guard/MEASURE.json), [GNU time](retained-guard/MEASURE.time),
+[scope/tests](retained-guard/README.md). Whole fixture0.05s/26,868KiB. All45 focused
+controls pass (5new+27guard+13retained); lane4 independently reviewed and
+ran them. Floors,8GiB reserve, native flock and shard contracts unchanged.
+No real Bend/Bun execution, proof, build, installer or release run; cost$0.
+This closes an admission-routing gap, not full-build memory qualification
+and not commands that bypass the guard.
