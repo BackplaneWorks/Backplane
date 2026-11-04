@@ -3117,6 +3117,12 @@ html.ph-nomic .app.phone .composer .mic { display: none; }
    the timeline's top-left): a pill at the top's middle, as "N new" is at
    the foot, over less of what is being read */
 html.phone #history-fill-more { left: 50% !important; transform: translateX(-50%); min-height: 40px !important; padding: 0 16px !important; white-space: nowrap; }
+/* typing: a buy thread's order card is its one line (what the order waits
+   for, "Reply below to go on."), and "Load earlier messages" waits, so the
+   keyboard leaves the thread room to show (an iPhone 15 kept 70 px of it:
+   no message, the button over the Working row) */
+html.phone .app.phone .thread-content:has(#composer:focus) > .order-card:has(> .oc-line) > :not(.oc-line) { display: none; }
+html.phone:has(#composer:focus) #history-fill-more { display: none !important; }
 /* the image lightbox (outside .app): its tools below the notch and a
    thumb wide, its status above the home bar */
 html.phone .lightbox .lb-close { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 44px; height: 44px; }
