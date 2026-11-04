@@ -42,6 +42,9 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       const r = await fetch('/auth/enroll', {method: 'POST', cache: 'no-store', credentials: 'same-origin', redirect: 'error', signal: abort.signal,
         headers: {Authorization: 'Bearer ' + secret, 'X-Backplane-Name': name.replace(/[^\x20-\x7e]/g, '').slice(0, 80)}});
       const result = await r.json();if (!r.ok || result.error) throw Error(result.error || 'pairing_required');
+      // which device this browser is, for Devices' "This device" (an id
+      // /auth/devices lists anyway; never the credential)
+      try { if (typeof result.device === 'string' && result.device) globalThis.localStorage?.setItem('backplane-device', result.device); } catch {}
       close();onPaired();
     } catch (e) { throw Error(pairingErrors[e.message] ? e.message : 'hub_unreachable'); }
     finally { clearTimeout(timer); }
@@ -201,10 +204,13 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       try {
         const result = await request('/auth/devices');if (!panel?.contains(card)) return;
         list.replaceChildren();element('h2', 'Paired devices', list);
-        const active = result.devices.filter(d => !d.revoked);
+        // (a phone marks itself, first: every phone is "iPhone / Safari")
+        let mine = '';try { mine = document.documentElement.classList.contains('phone') ? globalThis.localStorage?.getItem('backplane-device') || '' : ''; } catch {}
+        const active = result.devices.filter(d => !d.revoked).sort((a, b) => (b.id === mine) - (a.id === mine));
         if (!active.length) element('p', 'Existing pairings are preserved. Devices added with new invitations appear here.', list);
         for (const d of active) {
           const row = element('div', '', list, {class: 'pairing-device'});element('strong', d.name, row);
+          if (mine && d.id === mine) element('span', 'This device', row, {class: 'pairing-this'});
           element('p', 'Last seen ' + new Date(d.lastSeen).toLocaleString(), row);
           button(row, 'Revoke', async () => { if (!globalThis.confirm('Revoke access for ' + d.name + '?')) return;try { await request('/auth/revoke', 'POST', {'X-Backplane-Device': d.id});await refresh(); } catch(e) { error(status, e.message); } });
         }
