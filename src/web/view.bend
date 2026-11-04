@@ -2409,16 +2409,23 @@ def View.phead.loc(+lc: I.Loc, dir: Bool, +u: U.Ui) -> D.Node:
 def View.phead(dir: Bool, +u: U.Ui) -> D.Node:
   View.phead.loc(I.En{}, dir, u)
 
+# a phone's picker fills the screen, so its backdrop cannot be tapped:
+# it gets a × of its own (proj-close, as the backdrop and Esc)
+def View.picker.close(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match phone:
+    case True{}: [WI.WIcon.button("picker-close", "proj-close", "", MSG.T.common.close(lc), "x", 22, "")]
+    case False{}: Nil{}
+
 def View.picker(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match open:
     case True{}:
       [D.El{"div", "", [D.At{"class", "modal-back"}, D.On{"click", "proj-close"}], Nil{}},
-        D.El{"div", "picker", [D.At{"class", "picker"}], D.Dom.cat([
+        D.El{"div", "picker", [D.At{"class", "picker"}], D.Dom.cat(List.append(&2, D.Node, View.picker.close(PHN.Phone.on(u), lc), [
           View.phead.loc(lc, U.Proj.browsing(u), u),
           D.Dom.div("subthread-route-note", D.Dom.when(U.ThreadTree.routing(u), D.Dom.span("", U.ThreadTree.route.note()))),
           D.Dom.div("desktop-folder", D.Dom.when(Bool.and(String.eq(U.Ui.scratch(u, "@desktop"), "1"), Bool.not(U.ThreadTree.routing(u))), D.Dom.button("", "desktop-folder", "", "Choose a local folder", "Choose folder…"))),
           D.El{"input", "proj", List.append(&2, D.Attr, [D.At{"id", "proj"}, D.At{"placeholder", Bool.pick(String, U.Proj.browsing(u), MSG.T.picker.folder.placeholder(lc), MSG.T.picker.project.placeholder(lc))},
-            D.At{"autocomplete", "off"}, D.At{"value", U.Proj.query(u)}, D.At{"data-bfield", "proj"}, D.On{"input", "bfield"}, D.At{"data-enter", "proj-enter"}], View.ptab(U.Proj.tab(u))), Nil{}}],
+            D.At{"autocomplete", "off"}, D.At{"value", U.Proj.query(u)}, D.At{"data-bfield", "proj"}, D.On{"input", "bfield"}, D.At{"data-enter", "proj-enter"}], View.ptab(U.Proj.tab(u))), Nil{}}]),
           D.Dom.cat(Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.info(u, "proj.err")), Nil{}, [D.El{"div", "", [D.At{"class", "perr"}], [D.Txt{U.Ui.info(u, "proj.err")}]}]),
             [D.El{"div", "", [D.At{"class", "prows"}], View.prows(u, U.Proj.items.loc(lc, u), 0n, U.Proj.index(u), U.Proj.comps.n(u), U.Proj.typed.n(u))}]))}]
     case False{}:
