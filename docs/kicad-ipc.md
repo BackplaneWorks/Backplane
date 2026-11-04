@@ -29,6 +29,13 @@ The error names both selected paths and both flags. Pass the chosen flag on
 **each** mutating call; it is never remembered for later commands. Passing
 both flags is an error. Absolute configuration overrides remain respected.
 
+When working on the thread copy, pass **`thread_copy: true` on every IPC
+call**, including `GetItems` and other reads, as well as commits, edits and
+saves. Without that flag, reads select main: the returned items and KIIDs may
+not identify the same items in the thread copy. Keep the target consistent
+throughout the workflow. After a write refusal, ask the person which copy is
+current before choosing `main: true`.
+
 Reads still default to main. Identical copies and non-worktree threads keep
 their existing write behavior. The read-only command list is explicit;
 unknown/new commands require the write choice too, including unknown commands
