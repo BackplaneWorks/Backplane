@@ -13,7 +13,7 @@ same shim. `bunx` (a symlink to `bun`) goes through it with its own `argv[0]`. T
 | Context | Rule |
 |---|---|
 | light subcommand | `bend` version/help/guide/base/update and no args; `bun` --version/-v/--revision/--help |
-| Boat sandbox | `BACKPLANE_HEAVY_BOAT_SANDBOX=1` and `BACKPLANE_HEAVY_OFFLOADED=1` on a machine with MemTotal <= 8 GiB (the isolated-VM rule proof-shards.py already uses) AND the process's own cgroup, read from the kernel, has finite `memory.max` <= 3,700,000,000 and `memory.swap.max` 0. No local lock: Boat runs stay parallel. `scripts/heavy-boat.sh` now runs its command in such a scope |
+| Boat sandbox | `BACKPLANE_HEAVY_BOAT_SANDBOX=1` and `BACKPLANE_HEAVY_OFFLOADED=1` on a machine with MemTotal <= 8 GiB (the isolated-VM rule proof-shards.py already uses) AND the process's own cgroup, read from the kernel, has finite `memory.max` <= 3,700,000,000 and `memory.swap.max` 0. No local lock: Boat runs stay parallel. `scripts/heavy-boat.sh` runs its command only inside such a scope: it verifies its own cgroup from the kernel, wraps with `systemd-run` otherwise, re-verifies from inside the new scope (a substitute `systemd-run` that ignores the cap is caught), ignores any `BACKPLANE_HEAVY_SCOPED` variable, and exits 75 before the command or tool setup when no cap can be verified |
 | capped local | the native `/tmp/bp-bend.lock` GENUINELY held through the inherited descriptor (`BACKPLANE_HEAVY_LOCK_FD`; a fresh open of the lock file must be refused the flock while the inherited descriptor can still take it, so an opened but unlocked descriptor fails) AND the same kernel-read cgroup cap |
 
 `bend update` is allowed and re-applies the shim afterwards. `scripts/heavy-guard.py` now also refuses to admit a
@@ -68,3 +68,12 @@ no context, allowed on Boat inside the cap, Boat environment without a cap refus
 native flock, refused with only the cap, only the flock, or an opened-but-unlocked descriptor, byte-exact uninstall).
 First Boat run (head 60462c7) failed the real-executable cases because the relocated bend could not find its Base
 library; that evidence is kept in bp-coord/lowmem-swarm/lane3/guard-boat-evidence/.
+
+## Broad impact on Boat (requested by the current rule: every Boat compiler/test run has a 3.7 GB / swap-0 cap)
+`scripts/heavy-boat.sh` is the wrapper for offloaded Boat jobs, so EVERY command it starts (checks, proofs, tests,
+builds) now runs under `MemoryMax=3700000000`, `MemorySwapMax=0`, whatever the sandbox size. A job that needs more
+(for example the full proof, which needed 14 GB on an xlarge sandbox) will now be OOM-killed instead of succeeding
+on a big VM; that is the intended consequence of the rule, but it changes behaviour for any CI job that relied on
+the larger sandbox, and a Boat image without a user systemd (`systemd-run --user --scope`) refuses everything
+(exit 75). The check applies to the cgroup of the process that starts the command, not to its children's total if a
+command itself creates sibling scopes.
