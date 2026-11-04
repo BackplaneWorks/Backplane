@@ -2867,7 +2867,7 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 .app.phone .thread-view { min-height: 0; }
 .app.phone .thread-content { min-height: 0; }
 .app.phone .timeline { overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
-.app.phone .asks, .app.phone .queue { margin-left: env(safe-area-inset-left); margin-right: env(safe-area-inset-right); }
+.app.phone .asks { margin-left: env(safe-area-inset-left); margin-right: env(safe-area-inset-right); }
 /* messages: their time and actions on one quiet line under them, each a
    whole thumb wide; nothing waits for a hover */
 .app.phone .msg { font-size: calc(15px * var(--text-scale, 100) / 100); line-height: 1.5; }
@@ -2945,7 +2945,7 @@ html.ph-nomic .app.phone .composer .mic { display: none; }
 .app.phone .model-menu .step { min-height: 44px; font-size: 12px; }
 .app.phone .model-menu .note { padding: 6px 14px 12px; font-size: 12px; }
 /* queued messages and the account / token / allowance pop-ups */
-.app.phone .queue { margin: 0 8px; }
+.app.phone .queue { margin: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); }
 .app.phone .queued { min-height: 44px; font-size: calc(13px * var(--text-scale, 100) / 100); }
 .app.phone .queued .q-acts button { min-height: 40px; padding: 0 10px; font-size: calc(13px * var(--text-scale, 100) / 100); }
 /* "N new ↓": back to the latest, over the composer at the thumb */
