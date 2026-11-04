@@ -88,9 +88,12 @@ export function installPhoneThread({ document: doc = document, window: win = win
     const t = event.target;
     if (t?.id !== 'timeline' || !onPhone(doc)) return;
     if (t !== el) { watch(); return; }
-    if (end && !atEnd(t) && keyboard() && Date.now() - finger > FINGER_MS) { toEnd(t); return; }
+    if (end && t.scrollHeight - t.scrollTop - t.clientHeight > 2 && keyboard() && Date.now() - finger > FINGER_MS) { toEnd(t); return; }
     end = atEnd(t);
     if (!keeping) keeping = win.setTimeout(keep, 150);
   }, { capture: true, passive: true });
+  // (Send leaves the keyboard to go down: keeping the draft's focus on a
+  // press of Send left an Android keyboard's word being composed out of
+  // what was sent, which only the field's blur commits)
   return { watch };
 }
