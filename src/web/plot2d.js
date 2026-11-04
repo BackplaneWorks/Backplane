@@ -1173,8 +1173,9 @@ function inspectCard(view, pick, src = null) {
   acts.append(mention);
   // a part or net on the board shows on the schematic too, and back: the
   // probe stays, so the other view lights it (and says which sheet)
-  const other = view?.side === "board" ? "schematic" : view?.side === "schematic" ? "board" : "";
-  if (other && showing && P.parseProbe(view.probe).kind && !view.canvas.closest("#viewer.split")) {
+  // (a part tapped in 3D shows on both)
+  const others = !view ? (src?.key ? ["board", "schematic"] : []) : view.side === "board" ? ["schematic"] : view.side === "schematic" ? ["board"] : [];
+  if (showing && (!view || P.parseProbe(view.probe).kind) && !document.querySelector("#viewer.split")) for (const other of others) {
     const go = document.createElement("button");
     go.type = "button"; go.textContent = `${App.viewer_kind(document.documentElement.lang, other)} →`;
     go.addEventListener("click", () => { inspectCard(view, null); showing(other); });
