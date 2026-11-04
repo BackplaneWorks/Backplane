@@ -36,7 +36,7 @@ def main():
     assert not git('status', '--porcelain', '--untracked-files=no') and not out.exists()
     out.mkdir(parents=True)
     edits = []
-    tracked = git('ls-files', 'scripts', 'desktop').splitlines()
+    tracked = git('ls-files', 'scripts', 'desktop', 'deploy/kistack.lock').splitlines()
     for name in tracked:
         src = source / name
         assert not src.is_symlink() and src.is_file()
