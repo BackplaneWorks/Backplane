@@ -11,6 +11,19 @@ const SHELL = "backplane-shell-v1";
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
+// a notification the page showed through here (a phone's, host.js's
+// notify): a tap brings the page forward and opens its thread there
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const thread = e.notification.data?.thread || "";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cs) => {
+    const c = cs.find((w) => w.focused) || cs[0];
+    if (!c) return self.clients.openWindow("/");
+    c.postMessage({ t: "bp-open", thread });
+    return c.focus();
+  }));
+});
+
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
