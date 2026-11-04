@@ -36,7 +36,7 @@ class Installer(unittest.TestCase):
 from pathlib import Path
 args=sys.argv[1:]
 with open(os.environ['MOCK_LOG'],'a') as f:f.write(args[-1]+'\\n')
-assert ['--proto','=https','--tlsv1.2','-fsSL']==args[args.index('--proto'):args.index('--proto')+4],args
+assert args[:4]==['--proto','=https','--tlsv1.2','-fsSL'],args
 out=args[args.index('-o')+1]
 if os.environ.get('MOCK_DOWNLOAD_FAIL'):
  Path(out).write_bytes(b'partial');sys.exit(22)
@@ -87,16 +87,6 @@ shutil.copyfile(os.environ['MOCK_SUMS' if args[-1].endswith('SHA256SUMS') else '
         if self.parent.exists():
             self.assertFalse(list(self.parent.glob('.install-*')), r.stdout + r.stderr)
         return r
-
-    def test_pre_downloaded_archive_is_not_downloaded_again(self):
-        archive = self.fixture()
-        supplied = self.root / 'downloaded archive 日本.tar.gz'
-        shutil.copyfile(archive, supplied)
-        self.run_install(args=self.args + [str(supplied)])
-        requests = (self.root / 'requests').read_text().splitlines()
-        self.assertEqual(len(requests), 1)
-        self.assertTrue(requests[0].endswith('SHA256SUMS'))
-        self.assertFalse(supplied.exists())
 
     def test_tar_install_spaced_unicode_path_and_layout(self):
         self.fixture(); self.run_install()

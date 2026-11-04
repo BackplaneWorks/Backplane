@@ -1398,10 +1398,6 @@ struct HubSettingsRows: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(r.label).foregroundStyle(r.buttons.isEmpty && (r.fields ?? []).isEmpty ? .secondary : .primary)
                     if !r.note.isEmpty { Text(r.note).font(.footnote).foregroundStyle(.secondary) }
-                    if let p = r.installProgress, p.busy {
-                        if p.known { ProgressView(value: Double(p.fraction), total: 1000).progressViewStyle(.linear).accessibilityLabel("Installation progress") }
-                        else { ProgressView().progressViewStyle(.linear).accessibilityLabel("Installation in progress") }
-                    }
                     if let days = r.chart, !days.isEmpty { UsageDayChart(days: days) }
                     ForEach(r.fields ?? [], id: \.self) { f in SetFieldView(model: model, field: f) }
                     if let q = r.qr, !q.isEmpty {
