@@ -178,9 +178,17 @@ def Accounts.overlay.k(legacy: Bool, +original: J.Json, +s: M.State, +th: String
       Accounts.put(Accounts.put(original, provider, J.Json.arr(Accounts.models(catalog))), "about",
         Accounts.put(about, provider, Accounts.put(Accounts.put(J.Json.get_obj(about, provider), "efforts", J.Json.obj(Accounts.efforts(catalog))), "labels", J.Json.obj(Accounts.labels(catalog)))))
 
+# Without named bindings the catalog already is the exact effective catalog.
+# Do not parse and reserialize it on each picker render or cursor movement.
+def Accounts.overlay.needed(needed: Bool, +original: String, +s: M.State, +th: String) -> String:
+  match needed:
+    case False{}: original
+    case True{}:
+      J.Json.show(Accounts.overlay.k(String.is_empty(Accounts.id(s, th, "claude")),
+        Accounts.overlay.k(String.is_empty(Accounts.id(s, th, "codex")), Accounts.parse(original), s, th, "codex"), s, th, "claude"))
+
 def Accounts.overlay(+original: String, +s: M.State, +th: String) -> String:
-  J.Json.show(Accounts.overlay.k(String.is_empty(Accounts.id(s, th, "claude")),
-    Accounts.overlay.k(String.is_empty(Accounts.id(s, th, "codex")), Accounts.parse(original), s, th, "codex"), s, th, "claude"))
+  Accounts.overlay.needed(Bool.or(Bool.not(String.is_empty(Accounts.id(s, th, "claude"))), Bool.not(String.is_empty(Accounts.id(s, th, "codex")))), original, s, th)
 
 def Accounts.str.result(r: Map<&2, String> & String) -> String:
   (_, s) = r
