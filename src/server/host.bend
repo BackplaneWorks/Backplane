@@ -49,12 +49,14 @@ def Sock.send_preview(sock: Socket, path: String, ctype: String, range: String) 
   import "./effects/host.js"
 
 # Static route policy is chosen in Bend; the effect owns only opening the
-# preferred gzip/plain file and streaming its HTTP bytes. No payload cache.
+# preferred brotli/gzip/plain file and streaming its HTTP bytes. No payload cache.
 type StaticFile is Data:
   StaticFile{path: String, ctype: String, cache: String, extra: String, coding: U32, piece: U32}
 
-def Static.coding(gzip: Bool) -> U32:
-  Bool.pick(U32, gzip, 1, 0)
+# what the browser's Accept-Encoding takes: 2 brotli and gzip, 1 gzip, 0
+# neither (browsers send br only over HTTPS, always beside gzip)
+def Static.coding(+accept: String) -> U32:
+  Bool.pick(U32, String.contains(accept, "gzip"), Bool.pick(U32, String.contains(accept, "br"), 2, 1), 0)
 
 def Static.piece() -> U32:
   65536

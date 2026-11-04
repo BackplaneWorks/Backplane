@@ -6121,18 +6121,18 @@ def Conn.gz(bs: List<&2, U32>, s: Socket, +web: String, +path: String) -> IO(Uni
     case b <> t:
       Conn.served(s, path, True{}, b <> t)
 
-def Conn.static.go(+gz: Bool, s: Socket, +web: String, +path: String) -> IO(Unit):
-  SHTTP.Static.send(gz, s, web, path)
+def Conn.static.go(+coding: U32, s: Socket, +web: String, +path: String) -> IO(Unit):
+  SHTTP.Static.send(coding, s, web, path)
 
-def Conn.static.k(ok: Bool, s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
+def Conn.static.k(ok: Bool, s: Socket, +web: String, +path: String, +coding: U32) -> IO(Unit):
   match ok:
     case True{}:
-      Conn.static.go(gz, s, web, path)
+      Conn.static.go(coding, s, web, path)
     case False{}:
       Conn.finish(s, W.Http.text("400 Bad Request", "bad path"))
 
-def Conn.static(s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
-  Conn.static.k(Conn.safe(path), s, web, Conn.file(path), gz)
+def Conn.static(s: Socket, +web: String, +path: String, +coding: U32) -> IO(Unit):
+  Conn.static.k(Conn.safe(path), s, web, Conn.file(path), coding)
 
 def Conn.pos(xs: List<&2, String>, +x: String, +i: Nat) -> Nat:
   match xs:
@@ -6217,12 +6217,12 @@ def Hello.busy(ss: List<&2, PF.Stat>) -> Nat:
     case +x <> t:
       Bool.pick(Nat, String.eq(PF.Stat.name(x), "hub.busy"), PF.Stat.last(x), Hello.busy(t))
 
-def Conn.get(hello: Bool, s: Socket, +web: String, +path: String, gz: Bool) -> IO(Unit):
+def Conn.get(hello: Bool, s: Socket, +web: String, +path: String, +coding: U32) -> IO(Unit):
   match hello:
     case True{}:
       IO.bind(U32, Unit, PS.Perf.gauge("hub.busy"), busy => Conn.finish(s, W.Http.response("200 OK", "application/cbor", TN.Hello.answer.c(Main.version(), U32.to_nat(busy), VR.Version.commit()), "")))
     case False{}:
-      Conn.static(s, web, path, gz)
+      Conn.static(s, web, path, coding)
 
 # GET /debug/perf (a table), /debug/perf.json and /debug/log (the last
 # log lines): what this process measured since it started (docs/perf.md),
@@ -6291,10 +6291,10 @@ def Info.serve(allowed: Bool, s: Socket, +h: String) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
-def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: Bool, +range: String) -> IO(Unit):
+def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, +coding: U32, +allowed: Bool, +range: String) -> IO(Unit):
   match i:
     case 0n:
-      Conn.get(True{}, s, web, W.Http.route(p), gz)
+      Conn.get(True{}, s, web, W.Http.route(p), coding)
     case 1n:
       Img.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")), range)
     case 2n:
@@ -6312,7 +6312,7 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
     case 8n:
       MessageImageHTTP.serve(allowed, s, ATT.Att.from_uri("file://" ++ W.Http.param(p, "entry")), ATT.Att.from_uri("file://" ++ W.Http.param(p, "path")))
     case _:
-      Conn.get(False{}, s, web, W.Http.route(p), gz)
+      Conn.get(False{}, s, web, W.Http.route(p), coding)
 
 def Conn.view.mode(view: String, +mobile: String, +frontend: String) -> String:
   match view:
@@ -6325,7 +6325,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info", "/viewer-asset", "/debug/diagnostics.json", "/message-image"], W.Http.route(p), 0n), s, web, p, H.Static.coding(W.Http.header_of(hs, "accept-encoding")), Bool.and(Conn.allowed(hs, p, token), Bool.or(Bool.not(String.eq(W.Http.route(p), "/message-image")), AUTH.Auth.credential(hs, p, token))), W.Http.header_of(hs, "range"))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:
