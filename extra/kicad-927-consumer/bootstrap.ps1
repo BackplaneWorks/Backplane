@@ -62,6 +62,13 @@ try {
     $report.phase = 'consumer-dependencies'; Save-Report
     & npm.cmd --prefix (Join-Path $root 'desktop') ci --ignore-scripts --no-audit --no-fund *> (Join-Path $out 'npm.log')
     if ($LASTEXITCODE -ne 0) { throw 'Pinned Playwright dependency setup failed' }
+    # The probe runtime is a tool, not an app overlay. Copy its exact bytes
+    # out of the administrator's private profile for the standard account.
+    $probeDir=Join-Path $out 'diagnostic-tools'
+    New-Item -ItemType Directory -Force $probeDir | Out-Null
+    $probeBun=Join-Path $probeDir 'bun.exe'
+    Copy-Item -LiteralPath (Get-Command bun.exe).Source -Destination $probeBun
+    $report.probeBunSHA256=SHA $probeBun
     $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock'
     New-Item $key -Force | Out-Null
     New-ItemProperty $key -Name AllowDevelopmentWithoutDevLicense -Value 0 -PropertyType DWord -Force | Out-Null
@@ -90,7 +97,7 @@ try {
         canonicalFactoryRoot=(Join-Path $root 'build\canonical-946')
         resourcePolicy=$resourcePolicy
         git=(Get-Command git.exe).Source
-        bunProbe=(Get-Command bun.exe).Source
+        bunProbe=$probeBun
         hostedRun=@{githubActions=$env:GITHUB_ACTIONS;runnerOS=$env:RUNNER_OS;repository=$env:GITHUB_REPOSITORY;runId=$env:GITHUB_RUN_ID;runAttempt=$env:GITHUB_RUN_ATTEMPT}
     }
     $configPath = Join-Path $out 'config.json'
