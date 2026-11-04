@@ -338,8 +338,11 @@ def Session.renderer.go( +web: Bool, +u: U.Ui, +p: J.Json) -> U.Ui:
         "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")), "local.body.pages", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.view.lazy", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.plotstamp", Bool.pick(String, String.eq(J.Json.get_str(p, "plotStamp", ""), "v1"), "1", "")))
     case False{}: Session.native_local(u, p)
 
-def Session.renderer(+web: Bool, u: U.Ui, p: J.Json) -> U.Ui:
-  Session.renderer.go(web, U.Ui.info_set(u, "local.home.renderer", Bool.pick(String, web, "web", "native")), p)
+# A browser on a phone asks for the phone arrangement ("form": "phone",
+# phone-shell.js); any other value or none is the ordinary page.
+def Session.renderer(+web: Bool, u: U.Ui, +p: J.Json) -> U.Ui:
+  Session.renderer.go(web, U.Ui.info_set(U.Ui.info_set(u, "local.home.renderer", Bool.pick(String, web, "web", "native")),
+    "local.workspace.form", Bool.pick(String, Bool.and(web, String.eq(J.Json.get_str(p, "form", ""), "phone")), "phone", "")), p)
 
 def Session.input(+st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json) -> U.Ui:
   Target.bind(U.Ui.scratch_set(P.Session.input(st, info, live, now, J.Json.get_str(p, "cid", ""), J.Json.get_obj(p, "session")), "@presentation", ""), st, J.Json.get_obj(p, "target"))

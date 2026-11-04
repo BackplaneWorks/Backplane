@@ -21,6 +21,7 @@ import ./cat.bend as WC
 import ./note.bend as NT
 import ../core/onboard.bend as OB
 import ./workspace.bend as WS
+import ./phone.bend as PHN
 import ../core/reflow.bend as RF
 import ../core/bub-move.bend as HOP
 
@@ -60,6 +61,10 @@ def stamp(+u: U.Ui) -> U.Ui:
   U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.mailroom", "on"), "local.workspace.layout",
     Bool.pick(String, String.is_empty(U.Ui.info(u, "local.workspace.layout")), "rail-v1", U.Ui.info(u, "local.workspace.layout"))), "local.workspace.chrome",
     Bool.pick(String, String.is_empty(U.Ui.info(u, "local.workspace.chrome")), "top-v1", U.Ui.info(u, "local.workspace.chrome")))
+
+# a page this build draws itself on a phone is the phone's (host.js's PHONE)
+def phone_form(+u: U.Ui, +form: String) -> U.Ui:
+  U.Ui.info_set(u, "local.workspace.form", form)
 
 def ready(a: U.Act) -> U.Act:
   match a:
@@ -179,8 +184,14 @@ def act.workspace(workspace: Bool, u: U.Ui, +action: String, value: String) -> U
     case True{}: U.Solid.sync(WS.WS.act(action, stamp(u), value))
     case False{}: act.mail(U.Keys.pos(["mail-send", "mail-open", "mail-mark"], action), stamp(u), action, value)
 
+# the phone arrangement's own actions (phone.bend: ph-tab, ph-sheet)
+def act.phone(phone: Bool, u: U.Ui, +action: String, +value: String) -> U.Act:
+  match phone:
+    case True{}: PHN.Phone.act(stamp(u), action, value)
+    case False{}: act.workspace(Bool.or(WS.WS.handles(action), Bool.and(String.eq(action, "bfield"), String.starts_with(value, "wspalette\u{1f}"))), u, action, value)
+
 def act(u: U.Ui, +action: String, +value: String) -> U.Act:
-  act.workspace(Bool.or(WS.WS.handles(action), Bool.and(String.eq(action, "bfield"), String.starts_with(value, "wspalette\u{1f}"))), u, action, value)
+  act.phone(PHN.Phone.handles(action), u, action, value)
 
 # a timeline gap px from its end is at the end and follows; further up it
 # holds what is read (client.bend's Hold; host.js's held)
@@ -303,6 +314,7 @@ def presentation_allowed(action: String) -> Bool:
     case "reply-to": True{}
     case "reply-drop": True{}
     case "copy-entry": True{}
+    case "ph-tab": True{}
     case _: False{}
 
 def presentation_wait(u: U.Ui) -> U.Ui:
