@@ -8,7 +8,7 @@ def env(name: String) -> IO(String):
 
 def files(f: K.Files) -> J.Json:
   match f:
-    case K.Files{p, b, s, _}: J.Json.obj([J.KV{"project", J.Str{p}}, J.KV{"pcb", J.Str{b}}, J.KV{"schematic", J.Str{s}}])
+    case K.Files{p, b, s, _, _}: J.Json.obj([J.KV{"project", J.Str{p}}, J.KV{"pcb", J.Str{b}}, J.KV{"schematic", J.Str{s}}])
 
 def main() -> IO(Unit):
   do IO<Unit>:

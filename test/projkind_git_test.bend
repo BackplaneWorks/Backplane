@@ -2,6 +2,7 @@ import Base
 import ./check.bend as C
 import ../src/server/proc.bend as P
 import ../src/server/git.bend as G
+import ../src/server/kicad.bend as KF
 import ../src/core/projkind.bend as K
 
 # A hardware project's clone and the copies of its design outside the
@@ -18,6 +19,16 @@ def setup.sh() -> String:
     "cd .backplane/worktrees/ahead", "printf '(c)\\n' > b.kicad_pcb", "git add .", "git commit -qm c", "cd ../../..",
     "printf '{\"a\":1}\\n' > .backplane/worktrees/noise/b.kicad_pro",
     "echo y > c.txt", "git add c.txt", "git commit -qm two"], "\n")
+
+# a software repository whose thread made the first board in its worktree
+def first.sh() -> String:
+  String.join(["set -e", "cd \"$1\"", "git init -q -b main s", "cd s", "git config user.email t@t", "git config user.name t", "echo x > README.md", "git add .", "git commit -qm one",
+    "git worktree add -q .backplane/worktrees/w -b w", "printf '{}\\n' > .backplane/worktrees/w/first.kicad_pro"], "\n")
+
+# .backplane.json's "kind" against what the folder holds
+def kinds.sh() -> String:
+  String.join(["set -e", "cd \"$1\"", "mkdir soft hard", "printf '{}\\n' > soft/b.kicad_pro", "printf '{\"kind\":\"software\"}\\n' > soft/.backplane.json",
+    "echo x > hard/Cargo.toml", "printf '{\"kind\":\"hardware\"}\\n' > hard/.backplane.json"], "\n")
 
 def out(r: P.Ran) -> String:
   match r:
@@ -64,6 +75,17 @@ def go(+t: String) -> IO(Unit):
     _ : String <- G.Git.hardware(t)
     +left : String <- sh(t, "ls -A")
     C.Check.str("no repository: nothing is written", left, "p")
+    _ : P.Ran <- P.Proc.run("sh", ["-c", first.sh(), "sh", t], "/")
+    +wt : String = t ++ "/s/.backplane/worktrees/w"
+    here : KF.Files <- KF.Files.read.local(wt)
+    main : KF.Files <- KF.Files.read.local(t ++ "/s")
+    C.Check.str("a worktree's first board is seen in its own folder", Bool.show(KF.Files.hardware(here)), "True")
+    C.Check.str("but not in the project's, so detection reads both", Bool.show(KF.Files.hardware(main)), "False")
+    _ : P.Ran <- P.Proc.run("sh", ["-c", kinds.sh(), "sh", t], "/")
+    soft : KF.Files <- KF.Files.read.local(t ++ "/soft")
+    hard : KF.Files <- KF.Files.read.local(t ++ "/hard")
+    C.Check.str("kind software overrules a board", Bool.show(KF.Files.hardware(soft)), "False")
+    C.Check.str("kind hardware overrules a build", Bool.show(KF.Files.hardware(hard)), "True")
     _ : P.Ran <- P.Proc.run("rm", ["-rf", t], "/")
     return Unit{}
 

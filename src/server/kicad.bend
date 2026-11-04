@@ -619,7 +619,9 @@ def Files.read.cfg(+root: String, +cfg: J.Json) -> IO(Files):
     +all : String <- Files.found(root)
     Files.read.at(root, Files.pro(J.Json.get_str(cfg, "project", ""), Files.pick(ns, ".kicad_pro"), all), cfg, all, PK.Pk.hardware(J.Json.get_str(cfg, "kind", ""), ns, all))
 
-# whether the folder is a hardware project (core/projkind.bend)
+# whether the folder is a hardware project (core/projkind.bend). Ask of
+# Files.read.local: Files.read's configuration is Project.config's, which
+# carries only the design paths, so it never sees "kind".
 def Files.hardware(fs: Files) -> Bool:
   match fs:
     case Files{_, _, _, _, hw}:
@@ -655,7 +657,7 @@ def Files.config.main(+cwd: String, +root: String) -> IO(J.Json):
     return KP.Project.config(main, thread)
 
 def Files.read.root(+root: String, cfg: J.Json) -> IO(Files):
-  Bool.pick(IO(Files), String.is_empty(root), IO.pure(Files, Files{"", "", "", ""}), Files.read.cfg(root, cfg))
+  Bool.pick(IO(Files), String.is_empty(root), IO.pure(Files, Files{"", "", "", "", False{}}), Files.read.cfg(root, cfg))
 
 def Files.read(+cwd: String) -> IO(Files):
   do IO<Files>:
@@ -682,7 +684,7 @@ def Files.path(+cwd: String, +path: String, copy: Bool) -> IO(String):
 
 def Files.target(+main: Files, local: Files, +path: String, +kind: String) -> String:
   match main local:
-    case Files{+mp, +mb, +ms, _} Files{+lp, +lb, +ls, _}:
+    case Files{+mp, +mb, +ms, _, _} Files{+lp, +lb, +ls, _, _}:
       Bool.pick(String, String.is_empty(path), Bool.pick(String, String.eq(kind, "project"), mp, Bool.pick(String, String.eq(kind, "schematic"), ms, mb)),
         Bool.pick(String, Bool.and(Bool.not(String.is_empty(lp)), String.eq(path, lp)), mp,
           Bool.pick(String, Bool.and(Bool.not(String.is_empty(lb)), String.eq(path, lb)), mb,
@@ -719,12 +721,12 @@ def Files.changed.sh() -> String:
 
 def Files.changed(a: Files, b: Files) -> IO(Bool):
   match a b:
-    case Files{ap, ab, as, _} Files{bp, bb, bs, _}:
+    case Files{ap, ab, as, _, _} Files{bp, bb, bs, _, _}:
       IO.bind(P.Ran, Bool, P.Proc.run("sh", ["-c", Files.changed.sh(), "sh", ap, bp, ab, bb, as, bs], "/"), r => IO.pure(Bool, Bool.not(String.is_empty(Files.found.out(r)))))
 
 def Files.owns(fs: Files, +path: String) -> Bool:
   match fs:
-    case Files{p, b, s, _}:
+    case Files{p, b, s, _, _}:
       Bool.and(Bool.not(String.is_empty(path)), Bool.or(String.eq(p, path), Bool.or(String.eq(b, path), String.eq(s, path))))
 
 def Files.thread_path(+cwd: String, +root: String, +local: Files, +path: String) -> String:
@@ -739,7 +741,7 @@ def Files.write_guard.changed(+cwd: String, +root: String, +args: J.Json, +ty: S
     +mp : String = Files.path.at(cwd, root, Files.target(main, local, path, "project"), False{}, cfg)
     +tp : String = Files.thread_path(cwd, root, local, Files.target(local, main, path, "project"))
     +changed : Bool <- Files.changed(main, local)
-    selected : Bool <- Files.changed(Files{"", mp, "", ""}, Files{"", tp, "", ""})
+    selected : Bool <- Files.changed(Files{"", mp, "", "", False{}}, Files{"", tp, "", "", False{}})
     return Bool.pick(String, KP.Project.refuse_write(Bool.not(String.eq(cwd, root)), Bool.or(changed, selected), KP.Project.readonly(ty),
       Bool.or(J.Json.get_bool(args, "thread_copy", False{}), J.Json.get_bool(args, "main", False{}))), KP.Project.write_error(mp, tp), "")
 
