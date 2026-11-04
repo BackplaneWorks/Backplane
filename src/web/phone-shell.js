@@ -16,6 +16,8 @@
 //   right) or [data-ph-trail] (left) buttons, JSON lists of {label,
 //   action, value, tone}; a sidebar thread row has its own (sidebarSwipes).
 // - Menus are bottom sheets (style.css); a tap on a sheet's backdrop shuts it.
+// - An app's WebView: window.backplaneBack() is its Back button (true when
+//   the page closed or went back something).
 // Nothing here runs unless the page is a phone's.
 
 export const PHONE_KEY = "backplane-phone";
@@ -179,6 +181,14 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     if (shut) shut();
     else if (level(doc) > 0) back();
   });
+  // for an app that holds this page in its WebView: its Back button calls
+  // backplaneBack() and gets whether the page used it (false: nothing left
+  // to close or go back from, so the app may leave)
+  win.backplaneBack = () => {
+    const shut = overlay();
+    if (shut) { shut();return true; }
+    return level(doc) > 0 ? back() : false;
+  };
   const guard = () => {
     const want = level(doc) > 0 || !!overlay();
     if (want && !guarded) { win.history.pushState({ phone: 1 }, ""); guarded = true; }
