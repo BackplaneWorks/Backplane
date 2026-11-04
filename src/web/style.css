@@ -3118,9 +3118,9 @@ html.phone:not(.ph-notify-ask) .ph-notify-ask { display: none; }
 html.phone.ph-notify-on .ph-notify-on, html.phone.ph-notify-off .ph-notify-off, html.phone.ph-notify-none .ph-notify-none { display: inline; }
 html.phone.ph-notify-on .ph-notify-on { color: var(--ok, var(--text)); }
 /* a room's line to write: the field and Send side by side on a phone */
-.app.phone .room-view > .composer { display: flex; align-items: flex-end; gap: 8px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+.app.phone main.room-view > div.composer { display: flex; flex-direction: row; align-items: flex-end; gap: 8px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
 html.ph-kb .app.phone .room-view > .composer { padding-bottom: 6px; }
-.app.phone .room-view > .composer > textarea { flex: 1; min-width: 0; margin: 0; }
+.app.phone main.room-view > div.composer > textarea { flex: 1 1 auto; width: auto; min-width: 0; margin: 0; }
 .app.phone .room-view > .composer > .composer-foot { flex: none; margin: 0; padding: 0; }
 .app.phone .room-view > .composer > .composer-foot > span:empty { display: none; }
 /* a phone on its side with the keyboard up (about 134 px left): search,
