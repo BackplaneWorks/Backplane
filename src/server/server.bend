@@ -6154,30 +6154,41 @@ def Machines.me(m: TN.Machine, +port: U32, +domain: String) -> J.Json:
 # hubs named in each other's BACKPLANE_PEERS still agree which asks to pair)
 # (domain: the tailnet's MagicDNS domain, how clients know a linked
 # machine's address is one of the owner's)
-def Machines.ask(+status: String, +port: U32, +extra: String) -> IO(String):
-  IO.bind(J.Json, String, Machines.peers(List.append(&2, Cand, Machines.cands(TN.Tailnet.online(TN.Tailnet.peers(status)), port), Machines.static(String.split(extra, ',')))),
-    ps => IO.pure(String, J.Json.show(J.Json.obj([J.KV{"self", Machines.me(TN.Tailnet.self(status), port, TN.Tailnet.domain(status))}, J.KV{"peers", ps}]))))
+# (on: the hub runs on the tailnet; a hub started with --no-tailscale lists
+# and asks only the hubs BACKPLANE_PEERS names: TN.Tailnet.seen)
+def Machines.ask(+on: Bool, +status: String, +port: U32, +extra: String) -> IO(String):
+  IO.bind(J.Json, String, Machines.peers(List.append(&2, Cand, Machines.cands(TN.Tailnet.asked(on, status), port), Machines.static(String.split(extra, ',')))),
+    ps => IO.pure(String, J.Json.show(J.Json.obj([J.KV{"self", Machines.me(TN.Tailnet.self(TN.Tailnet.seen(on, status)), port, TN.Tailnet.domain(TN.Tailnet.seen(on, status)))}, J.KV{"peers", ps}]))))
 
 def Machines.tell(+inbox: Chan(Msg), +now: String, +last: String) -> IO(String):
   Bool.pick(IO(String), String.eq(now, last), IO.pure(String, last),
     IO.bind(Result<&1, &1, Msg, Unit>, String, Chan.send(Msg, inbox, MachinesFound{now}), ok => IO.pure(String, now)))
 
-def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +port: U32, +extra: String, +last: String) -> IO(Unit):
+# `tailscale status --json`, only on the tailnet: a hub started with
+# --no-tailscale never runs Tailscale for its machines list
+def Machines.status(on: Bool) -> IO(String):
+  match on:
+    case True{}:
+      IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v tailscale >/dev/null && tmo 10 tailscale status --json")], "/"), st => IO.pure(String, Tailnet.out(st)))
+    case False{}:
+      IO.pure(String, "")
+
+def Machines.loop(fuel: Nat, +inbox: Chan(Msg), +on: Bool, +port: U32, +extra: String, +last: String) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
       do IO<Unit>:
-        st : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v tailscale >/dev/null && tmo 10 tailscale status --json")], "/")
-        found : String <- Machines.ask(Tailnet.out(st), port, extra)
+        +st : String <- Machines.status(on)
+        found : String <- Machines.ask(on, st, port, extra)
         now : String <- Machines.tell(inbox, found, last)
         IO.sleep(Machines.every())
-        Machines.loop(f, inbox, port, extra, now)
+        Machines.loop(f, inbox, on, port, extra, now)
 
-def Machines.start(+inbox: Chan(Msg), +port: U32) -> IO(Unit):
+def Machines.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   do IO<Unit>:
     extra : String <- Env.get("BACKPLANE_PEERS", "")
-    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, port, extra, ""))
+    IO.spawn(Unit, Machines.loop(Fuel.forever(), inbox, Cfg.tailnet(cfg), Cfg.port(cfg), extra, ""))
 
 def Main.version() -> String:
   VR.Version.current()
@@ -19274,7 +19285,7 @@ def Listen.up(l: Listener, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: St
     Log.info("web server on: " ++ addr)
     IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), "", Nil{}))
     Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
-    Machines.start(inbox, Cfg.port(cfg))
+    Machines.start(inbox, cfg)
 
 def Listen.got(r: Result<&1, &1, U32 & String, Listener>, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String, k: Unit -> IO(Unit)) -> IO(Unit):
   match r:
@@ -20147,7 +20158,7 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})
-    Machines.start(inbox, Cfg.port(cfg))
+    Machines.start(inbox, cfg)
     IO.spawn(Unit, Hub.loop(Fuel.forever(), h, inbox, tok))
     Upgrade.start(cfg, inbox)
     front(inbox)
