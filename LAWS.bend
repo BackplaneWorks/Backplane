@@ -1,3 +1,5 @@
+import ./src/server/auth-cache.bend as AUTHCACHE
+
 import ./src/server/wire.bend as WIRE
 
 import ./src/core/json-object.bend as JSONOBJECT
@@ -12771,10 +12773,10 @@ law locks_idle_text_exact:
 # (Hub.auth.beat: a settings lookup per thread at every beat was most of an
 # idle JS hub's CPU)
 law auth_beat_kept:
-  {MPCREDIT.Auth.kept("1 1", M.State.empty()) == True{} : Bool}
+  {AUTHCACHE.Auth.kept("1 1", M.State.empty()) == True{} : Bool}
 
 law auth_beat_asked:
-  {MPCREDIT.Auth.kept("7 1", M.State.empty()) == False{} : Bool}
+  {AUTHCACHE.Auth.kept("7 1", M.State.empty()) == False{} : Bool}
 
 # Private coordinator triage: a delivered input cannot wake its owner
 # again, and missing authenticated run identity grants no delivery.
@@ -16091,3 +16093,22 @@ law static_http_fresh_pages:
 
 law static_http_frame_policy:
   {[STATICHTTP.Static.frames("/index.html"), STATICHTTP.Static.frames("/main.js")] == ["X-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n", ""] : List<&2, String>}
+
+# Compositional cache branch invariants for every real state and cached value.
+law auth_cache_hit:
+  for +kept: String
+  for st: M.State
+  {AUTHCACHE.Auth.kept.k(True{}, kept, st) == String.ends_with(kept, " 1") : Bool}
+
+law auth_cache_miss:
+  for kept: String
+  for +st: M.State
+  {AUTHCACHE.Auth.kept.k(False{}, kept, st) == AUTHCACHE.Auth.any(AUTHCACHE.Rec.threads(st), st) : Bool}
+
+law auth_cache_key_sequence:
+  for +st: M.State
+  {AUTHCACHE.Auth.kept.key(st) == Nat.show(1n+M.State.seq(st)) ++ " " : String}
+
+law auth_empty_threads_waits_none:
+  for st: M.State
+  {AUTHCACHE.Auth.any([], st) == False{} : Bool}
