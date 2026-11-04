@@ -187,7 +187,8 @@ all-shard qualification remained pending at this first PR. Subsequent milestones
 | #894 | Pairing/desktop/adoption | 359 to 5/2/15 | canonical shards077/105/121 passed; highest RSS431,604 KiB |
 | #896 | Private Wire and writer credit | 359 to 12 | canonical shard088 passed; latest RSS822,064 KiB |
 | #905 | Authentication cache | 367 to 12 | canonical shard088 passed; RSS325,804 KiB |
-| Language leaf | Six shared pure language functions | native186/policy122 to2 | canonical123/124 passed; highest RSS2,894,204 KiB |
+| #912 | Six shared pure language functions | native186/policy122 to2 | canonical123/124 passed; highest RSS2,894,204 KiB |
+| Catalog lookup leaf | Exact lookup/metadata bodies separated from messages | msgs3,597 to1,368 definitions;23,975 to9,580 lines | canonical052/091 passed existing verdicts; highest RSS686,064 KiB |
 
 Each change retains every original law and adds concrete compositional laws;
 boundary-specific REVIEW.md files state the implication arguments and scope.
@@ -205,8 +206,13 @@ delegates increase it to5,502, while its own law imports shrink to2 modules.
 Full before/after per-shard qualification,
 residual runtime coverage, and the whole-project memory target remain open.
 
-The configuration/log-count and catalog-lookup proposals are preserved and
-unmerged after unsuccessful canonical attempts. Their positive mechanical
-audits do not replace native qualification. The strict canonical generator
+The configuration/log-count proposal remains preserved and unmerged after an
+unsuccessful canonical attempt. Its positive mechanical audit does not replace
+native qualification. Catalog lookup was freshly qualified on top of the merged
+language leaf: all3,597 bodies preserved across35 modules,47 Python tests and31
+generator cases passed, plus45 laws in two original native shards. The largest
+global law remains5,502. Ordinary message imports load2,229 fewer unrelated
+definitions; all new lookup/metadata modules are at most447 lines.
+The strict canonical generator
 still permits only1..128 shards; no one-law partition, generator expansion,
 declaration slicing, cap/guard relaxation or cache/gate wiring was introduced.
