@@ -249,6 +249,15 @@ export class Orbit {
   }
 }
 
+// the canvas's pixels per CSS pixel. A touch screen at 3x draws 2x: the
+// difference is hard to see at arm's length, and every repaint of a large
+// board fills 2.25 times fewer pixels on a phone's CPU
+export const coarse = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
+export function viewDpr() {
+  const dpr = window.devicePixelRatio || 1;
+  return coarse?.matches ? Math.min(dpr, 2) : dpr;
+}
+
 // a wheel event from a touchpad (two fingers scrolling: pan) or from a mouse
 // wheel (zoom). A pinch comes as a wheel with ctrl. Touchpads scroll in small
 // pixel steps, sideways too; a wheel in notches of about 100 px, or in lines.
@@ -350,7 +359,15 @@ class View {
     const up = (e) => {
       const tap = e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
       this.tap = null;
-      if (tap) this.pick(e.clientX, e.clientY);
+      // a finger's second tap close by soon after fits the model (as a
+      // double click does; not every touch browser sends dblclick)
+      const last = this.lastTap;
+      if (tap && e.pointerType !== "mouse" && last && e.timeStamp - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 32) {
+        this.lastTap = null; this.fit(); this.later();
+      } else if (tap) {
+        if (e.pointerType !== "mouse") this.lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+        this.pick(e.clientX, e.clientY);
+      }
       this.pts.delete(e.pointerId);
       this.gesture = null;
       const [rest] = [...this.pts.values()];
@@ -531,7 +548,7 @@ class View {
     const gl = this.gl, c = this.canvas;
     if (this.disposed || this.contextLost || gl?.isContextLost() || this.previewVisible === false || !c.isConnected || !c.clientWidth || !c.clientHeight) return;
     if (!gl) { if (this.note) this.note.textContent = "3D unavailable: WebGL could not start"; return; }
-    const dpr = window.devicePixelRatio || 1;
+        const dpr = viewDpr();
     const w = Math.max(1, Math.round(c.clientWidth * dpr)), h = Math.max(1, Math.round(c.clientHeight * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
