@@ -1,8 +1,9 @@
 # Windows CAD tools
 
-Backplane runs as a Cygwin Windows executable. KiCad, FreeCAD and the Bun
-helpers run as native Windows programs. Filesystem paths cross that boundary
-explicitly; message text is never rewritten globally.
+The current Backplane hub runs on native Windows Bun and ships a portable
+Cygwin shell for subprocesses. KiCad, FreeCAD and the Bun helpers are native
+Windows programs. Filesystem paths cross that boundary explicitly; message
+text is never rewritten globally.
 
 Build the two native helpers from Linux with Bun 1.4.3 or newer:
 
@@ -23,6 +24,21 @@ Backplane's IPC capabilities. The runtime's own manifest and handshake
 remain authoritative. Windows runtime builds are prepared in the public
 Backplane_KiCad repository; validate a downloaded package before treating
 that platform as supported.
+
+Settings' KiCad path and `BACKPLANE_KICAD` accept a runtime root (including
+`C:\backplane_kicad\`) or an explicit `bin/kicad-cli.exe` path. Backslashes
+are literal filesystem separators, including `\b`, `\n` and `\t` sequences;
+normalization to forward slashes happens only for filesystem candidates.
+Native Windows PATH entries use semicolons; a Cygwin colon PATH remains
+supported. Discovery checks explicit overrides first, then bundled/managed
+runtimes, PATH and standard version directories below `%ProgramFiles%/KiCad`.
+Older managed runtimes remain discoverable. Stock KiCad is identified as stock
+and does not gain Backplane IPC capabilities by being found.
+
+The in-app installer converts its Windows staging root with `cygpath -u`,
+hashes archive bytes through stdin (avoiding checksum filename escaping),
+and passes native ZIP/extraction paths to PowerShell as environment values.
+Existing installations and failed-install cleanup follow the same guards.
 
 Set `BACKPLANE_FREECAD` to the installed `FreeCADCmd.exe`. For a portable
 FreeCAD archive, select the actual `bin/freecadcmd.exe`. The GUI executable
@@ -76,3 +92,10 @@ requires the actual FreeCAD GLB generator and the original orange material.
 and writes their checksum manifest, WINDOWS-HELPERS.json, beside their
 dependency licenses. FreeCAD and the Backplane KiCad runtime are installed
 separately.
+
+The offline regressions for issue #927 are `test/kicad_paths_test.bend`,
+`test/tools/kicad_discovery_test.py`, and `test/tools/kicad_install_test.py`.
+They exercise the production resolver and installer with disposable filesystem
+entries and archives. Linux fixtures with Windows uname/path text do not
+establish native Windows acceptance; the PowerShell cases run for real on
+Cygwin and are otherwise explicit stand-ins.

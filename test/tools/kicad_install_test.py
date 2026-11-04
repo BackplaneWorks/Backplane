@@ -97,6 +97,11 @@ shutil.copyfile(os.environ['MOCK_SUMS' if args[-1].endswith('SHA256SUMS') else '
         self.assertEqual(len(urls), 2)
         self.assertIn('/backplane-kicad-v10.99.0-bp.4/', urls[0])
 
+    def test_tar_install_backslash_and_escape_sequence_path(self):
+        self.parent = self.root / r'C:\backplane_kicad\new tools\test' / 'kicad'
+        self.fixture(); self.run_install()
+        self.assertTrue((self.parent / self.args[2] / 'bin/kicad-cli').is_file())
+
     @unittest.skipUnless(shutil.which("shasum"), "Darwin-only checksum tool absent; Windows uses sha256sum")
     def test_darwin_tar_without_gnu_sha256sum(self):
         self.fixture('darwin-arm64')
@@ -191,7 +196,10 @@ shutil.copyfile(os.environ['MOCK_SUMS' if args[-1].endswith('SHA256SUMS') else '
             return dict(self.env, PATH=str(tools))
         cygpath.write_text('#!' + sys.executable + '\n' + '''import os,sys
 if sys.argv[1:] == ['-S']: print(os.environ['MOCK_SYSTEM'])
-elif len(sys.argv) == 3 and sys.argv[1] == '-w': print(sys.argv[2])
+elif len(sys.argv) == 3 and sys.argv[1] in ('-w','-u'):
+ p=sys.argv[2]
+ if sys.argv[1]=='-u' and p==os.environ.get('MOCK_NATIVE_PARENT'): p=os.environ['MOCK_POSIX_PARENT']
+ print(p)
 else: sys.exit(89)
 ''')
         cygpath.chmod(0o700)
@@ -220,6 +228,16 @@ with zipfile.ZipFile(os.environ['BP_KICAD_ZIP']) as z:
         self.assertEqual(call['root'], self.args[4][:-4])
         self.assertTrue(call['zip'].endswith(self.args[4]))
         self.assertTrue(call['out'].endswith('/unpack'))
+        self.assertEqual((self.parent / self.args[2] / 'bin/kicad-cli.exe').read_bytes(), b'MZfixture')
+
+    @unittest.skipIf(IS_CYGWIN, 'POSIX stand-ins; real Cygwin coverage below')
+    def test_windows_native_parent_with_backslashes_and_spaces(self):
+        self.fixture('windows-x86_64', 'zip')
+        env = self.windows_tools(stub_powershell=True)
+        native = 'C:\\backplane_kicad\\new tools\\test\\'
+        env.update(MOCK_NATIVE_PARENT=native, MOCK_POSIX_PARENT=str(self.parent))
+        args = [native, *self.args[1:]]
+        self.run_install(args=args, env=env)
         self.assertEqual((self.parent / self.args[2] / 'bin/kicad-cli.exe').read_bytes(), b'MZfixture')
 
     @unittest.skipIf(IS_CYGWIN, 'POSIX stand-ins; real Cygwin coverage below')
