@@ -1,7 +1,8 @@
 // window.backplaneApp, bridge 1 (docs/phone-app-shell.md): what the phone
 // apps give the hub's page. Injected by both apps at document start into
-// the hub's origin only, after the app has put its facts where /*@info*/null
-// stands ({platform, version, build, features, hub, textScale}). The page
+// the hub's origin only, after the app has put its facts in place of the
+// info placeholder below ({platform, version, build, features, hub,
+// textScale}; it occurs once in this file). The page
 // posts {id?, op, args} as JSON; the app answers {id, ok, value|error} and
 // sends events {event, data}.
 // - Android: WebViewCompat.addWebMessageListener's "BackplaneNative" object
