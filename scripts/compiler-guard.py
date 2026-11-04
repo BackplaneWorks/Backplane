@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Refuse to start the Bend/Bun toolchain on this machine outside an approved capped context.
 
-The installed `bend` and `bun` (and `bunx`) paths are replaced by a small shim; the real binaries move to
-$BACKPLANE_GUARD_HOME/real (default ~/.local/share/backplane/guard/real). Because the shim sits at the ORIGINAL
-path, a direct absolute-path call such as /home/USER/.bend/bin/bend or /home/USER/.bun/bin/bun is covered, not only
-PATH lookups. The shim runs the real binary only when one of these holds, and otherwise exits 75 with a message:
+The installed `bend` and `bun` (and `bunx`) paths are replaced by a small shim; the real binary is renamed to
+`<name>.real` in the SAME directory (the Bun-compiled bend finds its Base library and guide relative to its own
+location, so it cannot move elsewhere). Because the shim sits at the ORIGINAL path, a direct absolute-path call such
+as /home/USER/.bend/bin/bend or /home/USER/.bun/bin/bun is covered, not only PATH lookups. The shim runs the real
+binary only when one of these holds, and otherwise exits 75 with a message:
 
   * light, non-compiling subcommands (bend version/help/guide/base/update, bun --version/--revision/--help);
   * a Boat sandbox: BACKPLANE_HEAVY_BOAT_SANDBOX=1 and BACKPLANE_HEAVY_OFFLOADED=1 on a machine whose MemTotal is
-    at most 8 GiB (the same isolated-VM rule scripts/proof-shards.py uses; Boat runs stay parallel, no local lock);
-  * a capped local context: the actual native bend flock inherited from heavy-guard (BACKPLANE_HEAVY_LOCK_FD on
-    /tmp/bp-bend.lock) AND this process's own cgroup has a finite memory.max <= 3,700,000,000 B and swap.max 0.
+    at most 8 GiB (the isolated-VM rule scripts/proof-shards.py uses) AND this process's own cgroup has a finite
+    memory.max <= 3,700,000,000 B and swap.max 0 (read from the kernel; Boat needs no local lock, so runs stay
+    parallel);
+  * a capped local context: the actual native bend flock, genuinely held through the inherited descriptor
+    (BACKPLANE_HEAVY_LOCK_FD on /tmp/bp-bend.lock), AND the same kernel-read cgroup cap.
 
 Commands:  install [--apply] [--tool bend|bun ...] [--home DIR]   (dry run unless --apply)
            uninstall [--apply] ...    check [...]    shim NAME REAL INVOKED -- ARGS...   (called by the shim)
@@ -82,11 +85,31 @@ def capped():
 
 
 def native_lock(env):
+    """The descriptor names the lock file AND its open file description really holds the flock.
+
+    Opening the lock file is not holding it: a fresh open file description must be refused a non-blocking
+    exclusive lock (someone holds it), while the inherited descriptor must still be able to take it (it is the
+    holder). An opened but unlocked descriptor fails the first test (the new description gets the lock)."""
+    import fcntl
+    probe = None
     try:
         fd = int(env['BACKPLANE_HEAVY_LOCK_FD'])
-        return os.fstat(fd).st_ino == LOCK.stat().st_ino and os.fstat(fd).st_dev == LOCK.stat().st_dev
+        info, path = os.fstat(fd), LOCK.stat()
+        if (info.st_ino, info.st_dev) != (path.st_ino, path.st_dev):
+            return False
+        probe = os.open(str(LOCK), os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0))
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return False                      # nobody held it: the inherited descriptor is not a lock holder
+        except BlockingIOError:
+            pass
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)      # held by this description: re-locking succeeds
+        return True
     except (KeyError, OSError, ValueError):
         return False
+    finally:
+        if probe is not None:
+            os.close(probe)
 
 
 def light(name, args):
@@ -98,12 +121,12 @@ def decide(name, args, env):
     """('allow'|'refuse', reason)."""
     if light(name, args):
         return 'allow', 'light subcommand'
-    if boat(env):
-        return 'allow', 'Boat sandbox'
+    if boat(env) and capped():
+        return 'allow', 'Boat sandbox with a kernel-read cap'
     if native_lock(env) and capped():
         return 'allow', 'capped local context with the native flock'
-    return 'refuse', ('%s refused: not in an approved capped context. Run it on Boat (scripts/boat-job.sh -- ...) or '
-                      'through scripts/heavy-guard.py inside a verified cgroup (memory.max <= %d, swap 0).' % (name, CAP))
+    return 'refuse', ('%s refused: not in an approved capped context. Run it on Boat inside a scope with memory.max <= %d '
+                      'and swap 0 (scripts/heavy-boat.sh does this), or through scripts/heavy-guard.py inside a verified cgroup.' % (name, CAP))
 
 
 def shim(name, real, invoked, args, env=None):
@@ -160,12 +183,14 @@ def load(home_guard):
         return {}
 
 
-def plan(home, tools, env=None):
-    home, hg = Path(home), guard_home(env)
+def plan(home, tools, env=None, paths=None):
+    """Where each tool lives. `paths` ({name: path}) overrides the default; the manifest remembers earlier choices.
+    The real binary is renamed beside the shim, never moved: bend finds its Base library relative to itself."""
+    home, state = Path(home), load(guard_home(env))
     items = []
     for name in tools:
-        path = home/TOOLS[name][0]
-        items.append({'name': name, 'path': path, 'real': hg/'real'/name})
+        path = Path((paths or {}).get(name) or state.get(name, {}).get('path') or home/TOOLS[name][0])
+        items.append({'name': name, 'path': path, 'real': path.with_name(path.name + '.real')})
     return items
 
 
@@ -181,11 +206,11 @@ def move(src, dst):
         os.unlink(src)
 
 
-def install(home, tools, apply, env=None):
+def install(home, tools, apply, env=None, paths=None):
     hg = guard_home(env)
     state = load(hg)
     actions = []
-    for item in plan(home, tools, env):
+    for item in plan(home, tools, env, paths):
         name, path, real = item['name'], item['path'], item['real']
         if not path.exists() and not path.is_symlink():
             actions.append((name, 'absent: nothing to guard at %s' % path))
@@ -220,11 +245,11 @@ def install(home, tools, apply, env=None):
     return actions
 
 
-def uninstall(home, tools, apply, env=None):
+def uninstall(home, tools, apply, env=None, paths=None):
     hg = guard_home(env)
     state = load(hg)
     actions = []
-    for item in plan(home, tools, env):
+    for item in plan(home, tools, env, paths):
         name, path, real = item['name'], item['path'], item['real']
         if not is_shim(path):
             actions.append((name, 'not guarded'))
@@ -243,11 +268,11 @@ def uninstall(home, tools, apply, env=None):
     return actions
 
 
-def check(home, tools, env=None):
+def check(home, tools, env=None, paths=None):
     hg = guard_home(env)
     state = load(hg)
     problems = []
-    for item in plan(home, tools, env):
+    for item in plan(home, tools, env, paths):
         name, path, real = item['name'], item['path'], item['real']
         if not path.exists() and not path.is_symlink():
             continue
@@ -278,16 +303,22 @@ def main(argv):
         s = sub.add_parser(cmd)
         s.add_argument('--home', type=Path, default=Path.home())
         s.add_argument('--tool', action='append', choices=sorted(TOOLS))
+        s.add_argument('--path', action='append', default=[], metavar='TOOL=PATH', help='guard this installed path instead of the default (e.g. bun=/usr/local/bin/bun)')
         if cmd != 'check':
             s.add_argument('--apply', action='store_true', help='change files (dry run otherwise)')
     a = p.parse_args(argv)
     tools = a.tool or sorted(TOOLS)
+    paths = dict(item.split('=', 1) for item in a.path)
+    if not set(paths) <= set(TOOLS):
+        print('compiler-guard: --path needs TOOL=PATH with TOOL in %s' % sorted(TOOLS), file=sys.stderr)
+        return 2
+    tools = sorted(set(tools) | set(paths))
     if a.cmd == 'check':
-        problems = check(a.home, tools)
+        problems = check(a.home, tools, None, paths)
         for line in problems:
             print(line, file=sys.stderr)
         return 1 if problems else 0
-    actions = (install if a.cmd == 'install' else uninstall)(a.home, tools, a.apply)
+    actions = (install if a.cmd == 'install' else uninstall)(a.home, tools, a.apply, None, paths)
     for name, text in actions:
         print('%s%s: %s' % ('' if a.apply else '[dry run] ', name, text))
     return 0
