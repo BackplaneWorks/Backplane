@@ -1372,3 +1372,118 @@ Whole remote command42.60s,60credit-s/$0.00060, deletion verified. Three earlier
 fixture/harness failures remain explicitly failed; total122credit-s/$0.00122.
 Twelve dual-path tests were inventoried, only one exercised. The two-minute PR
 and every-job-under4GiB targets remain unachieved.
+
+### Checkpoint fixture setup: batch real SQLite writes, keep durability
+
+Only the checkpoint test's disposable `db()` setup helper changes: identical
+schema/meta/marker writes in one real SQLite transaction, then close in finally.
+All25 original cases/assertions and production validation/fsync/promotion/WAL
+behavior stay. No pragma, memory-fixture, law, proof or source-review pin change.
+
+| Five alternating setup pairs, one normal Boat VM | Before | After |
+|---|---|---|
+| Minimum / median / maximum | 3.939507 /5.024011 /6.783881s | 0.065813 /0.115317 /0.152323s |
+| Logical schema and all table rows | baseline | exact parity |
+| journal_mode / synchronous / page_size | delete /2(FULL) /4096 | same |
+| File/sidecar set; observed size | fixture.db;229,376B | same (sizes informational) |
+| Full original candidate checkpoint suite | earlier original90s timeout, cause unknown | 25/25 pass5.79s;198,720KiB command RSS |
+
+The setup median fell about44x **in this fixture benchmark**, not the whole CI
+job. [Exact source/tool identities, raw receipts and limits](checkpoint-fixture/README.md).
+Full25/mutation checks in j20261104063951-69873 are retained; remaining
+parity/rollback/setup j20261104064434-119474 and reason-bound SQL-error controls
+j20261104064752-157500 do not replay them. Real rollback leaves no partial tables
+and closes the handle. Original/new helpers reject the same broken prefix
+validator; only prefix sensitivity was mutated. The first qualification job's
+schema-harness failure is preserved, not relabeled as success.
+
+Every worker has actual3,699,998,720B cap +512MiB controller, combined
+4,236,870,912B <4GiB, swap0/native flock/zero cap or OOM events; source/tool
+identities unchanged. All5 normal sandboxes deleted; total251credit-s/$0.00251
+before merge guard. Original90s failure is not reproduced/causally fixed; the
+stale sidebar review guard still refuses unchanged pins. Full CI/proof/build,
+release and two-minute PR targets remain unachieved.
+
+### Remaining non-Bend guards: complete the interrupted profile
+
+The earlier frozen22d5 baseline never reached the last five guards. One normal
+Boat run executes only those commands; no prior successful guard is repeated.
+
+| Command / one sequential observation | Before | After / measured baseline |
+|---|---|---|
+| store_promote_test.cjs | not executed in interrupted profile | pass13.04s;73,824KiB command RSS |
+| hotboot_wire_test.cjs | not executed | pass0.02s;48,384KiB |
+| kicad_library_header_test.py | not executed | pass0.14s;24,320KiB |
+| kistack.py verify | not executed | pass0.05s;20,992KiB |
+| kistack_test.py | not executed | pass0.50s;24,832KiB |
+
+This is a completed partial profile, not a speedup/current-main/full-CI claim.
+[Exact source/tool/resource receipts and timeout-harness limits](small-guards-profile/remaining/README.md).
+Job j20261104065843-288456/work1553208: sum13.75s, worker loop14.162s;
+actual worker peak473,722,880B/3,699,998,720B cap, controller375,795,712B/512MiB,
+swap0/native flock/zero cap or OOM events, all input/tool identities unchanged.
+Whole remote command31.81s,38credit-s/$0.00038, deletion verified. Promotion
+accounts for13.04s; the other four total0.71s. No scheduler, runtime, pin,
+compiler or gate change; full PR checks remain unqualified.
+
+### Promotion-fixture transaction experiment: no demonstrated suite win
+
+An isolated owner-approved test-only helper batched the existing real db_exec
+schema plus five metadata writes inside a SQLite transaction. Real WAL/NORMAL
+behavior differs from the earlier checkpoint fixture; the improvement does not
+carry over. The helper change is dropped, preserving the original source.
+
+| Three alternating complete11-case pairs | Before | After |
+|---|---|---|
+| Pair1 | 8.34s | 5.98s (delta -2.36s) |
+| Pair2 | 4.27s | 4.34s (delta +0.07s) |
+| Pair3 | 4.31s | 4.22s (delta -0.09s) |
+| Median | 4.31s | 4.34s |
+| Five open-helper-only setup-pair median | 108.710ms | 98.354ms |
+| Adoption | original helper | candidate dropped |
+
+[Exact immutable receipts, negative controls and decision limits](promote-fixture/README.md).
+All66 original case executions, four WAL-mode logical/PRAGMA/sidecar parity,
+real rollback/slot/handle release, and both missing-WAL-sync negatives pass.
+Mixed timings and a large first-pair warm/cold difference do not demonstrate
+a useful suite win; no numerical adoption rule was registered before launch.
+The read-only final decision is recorded separately from the unchanged scoped
+correctness RESULT. Earlier13.04s from another VM is not a matched comparison.
+
+Normal Boat j20261104070517-376136/work1556329:47.42s remote,53credit-s/$0.00053,
+worker peak473,645,056B/3,699,998,720B cap, controller10,399,744B/512MiB,
+swap0/native flock/zero cap or OOM events, all identities unchanged, deletion
+verified. Combined investigation with the remaining-guard profile91credit-s/
+$0.00091 before merge guard. No production/test/scheduler/pin/compiler change
+is retained. Complete CI/build/proof and two-minute PR targets remain open.
+
+### Standalone deterministic test-cache eligibility: hardened research inventory
+
+Coordinator-assigned metadata only on frozen29c5; no native test/compiler/proof,
+pass record, cache implementation or skip wiring. The initial labels were
+provisional; main and conservative driver checks remove76 and add none.
+
+| Research scanner | Before | After hardening |
+|---|---|---|
+| Potential candidates /606 tests | 370 | 294 |
+| Required candidate roots /9 | 7 | 3 |
+| Metadata controls | none | 81 passed |
+| Known historical candidate test-seconds | not reported | 5,830.8 /16,438.1 (35.47%) |
+| Known required candidate test-seconds | not reported | 35.1 /195.2 (17.98%) |
+
+Only513/606 tests have historical timings;93 unknown durations are not imputed.
+Required candidates are mailcontinuity, mailrun_model and r1_copy. mailboot and
+mailtriage remain opaque; broader driver spelling checks also exclude
+maildisposition, routing, mailrun and secret_box. Prefix overapproximation is
+documented: a matching related tool is not proof it is a driver. These are
+necessary metadata conditions, not native soundness/resource fitness or
+permission to skip. [Full required list, reason histogram, timing provenance,
+resource-regression design and raw controls](test-cache-eligibility/README.md).
+
+V2 j20261104072250-574869/work1566331:81 scanner assertions pass; classification
+1.796s, whole13.71s,22credit-s/$0.00022, actual512MiB/swap0/CPU1,
+peak388,624,384B, zero limit/OOM events, input/tool identities unchanged,
+deletion verified. Prior V1 costs46credit-s/$0.00046; total$0.00068 before
+merge guard. Cached passes would require native resource receipts and future
+rotating samples/full nightlies; none of that is implemented. Full CI/build,
+under4GiB cold hub/web and two-minute PR targets remain unqualified.
