@@ -2893,6 +2893,7 @@ html.phone .pairing-card > label:first-of-type, html.phone .pairing-card > .pair
 html.phone .pairing-card > .pairing-pending { order: 2; }
 html.phone .pairing-card > .pairing-pending button { width: 100%; margin: 8px 0 0; }
 html.phone .pairing-card > .pairing-or { display: block; order: 2; margin: 24px 0 0; color: var(--dim); }
+html.phone .pairing-card > .pairing-standalone { order: 1; margin: 8px 0 0; }
 html.phone .pairing-card > button { align-self: flex-start; }
 html.phone .pairing-pending a { display: inline-flex; align-items: center; min-height: 44px; }
 html.phone .pairing-invitation button { min-width: 44px; }
@@ -3095,6 +3096,21 @@ html.phone :is(.ph-notify-on, .ph-notify-off, .ph-notify-none) { display: none; 
 html.phone:not(.ph-notify-ask) .ph-notify-ask { display: none; }
 html.phone.ph-notify-on .ph-notify-on, html.phone.ph-notify-off .ph-notify-off, html.phone.ph-notify-none .ph-notify-none { display: inline; }
 html.phone.ph-notify-on .ph-notify-on { color: var(--ok, var(--text)); }
+/* a room's line to write: the field and Send side by side on a phone */
+.app.phone .room-view > .composer { display: flex; align-items: flex-end; gap: 8px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+html.ph-kb .app.phone .room-view > .composer { padding-bottom: 6px; }
+.app.phone .room-view > .composer > textarea { flex: 1; min-width: 0; margin: 0; }
+.app.phone .room-view > .composer > .composer-foot { flex: none; margin: 0; padding: 0; }
+.app.phone .room-view > .composer > .composer-foot > span:empty { display: none; }
+/* a phone on its side with the keyboard up (about 134 px left): search,
+   a bot's pages and a room keep only the field being typed in and what
+   it is typed for */
+@media (max-height: 500px) {
+  html.phone.ph-kb .picker .phead { display: none; }
+  html.phone.ph-kb .picker input { margin: 4px 8px; }
+  html.phone.ph-kb .find-titles:not(:empty) { max-height: none; }
+  html.ph-kb .app.phone .bot-tabs, html.ph-kb .app.phone .room-view > .thread-head { display: none; }
+}
 /* the Bots tab with no bot yet: what one is and how to make one */
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child { flex-wrap: wrap; }
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child::after { content: "No bots yet. A bot is an agent that stays between chats, with a name, a cat and a memory: mention it in any message (@scout look at the BOM). Tap + to make one."; flex: 1 1 100%; padding: 8px 0 12px; color: var(--dim); font-size: 14px; font-weight: normal; text-transform: none; letter-spacing: normal; line-height: 1.5; white-space: normal; }

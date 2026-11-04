@@ -141,7 +141,11 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
     const connectCode = () => { try { void connect(codeLink(address.value, code.value)); } catch (e) { error(status, e.message); } };
     button(codes, 'Connect with code', connectCode).classList.add('primary');
     code.addEventListener('keydown', e => { if (e.key === 'Enter') connectCode(); });
-    selectMethod(0);
+    // a home-screen app (its own cookies, so it pairs again) cannot be
+    // opened by a pairing link: it starts on the short code
+    const standalone = !pending && (navigator?.standalone === true || !!globalThis.matchMedia?.('(display-mode: standalone)')?.matches);
+    selectMethod(standalone ? 2 : 0);
+    if (standalone) element('p', 'Opened from the Home Screen: enter the short code from Settings → Devices → Add a device on your paired device.', card, {class: 'pairing-help pairing-standalone'});
     if (pending) {
       const actions = element('div', '', card, {class: 'pairing-pending'});
       element('p', 'Or connect another way:', card, {class: 'pairing-or'});
@@ -149,7 +153,8 @@ export function installPairingUI({document, location, fetch, onPaired, navigator
       element('a', 'Open in Backplane', actions, {href: 'backplane://pair?url=' + encodeURIComponent(location.origin + '/pair' + pending.hash)});
     }
     // (a phone raises its keyboard for it, over a pairing link's Connect)
-    if (!pending || !document.documentElement.classList.contains('phone')) link.focus();
+    if (standalone) code.focus();
+    else if (!pending || !document.documentElement.classList.contains('phone')) link.focus();
   }
   function invitationState(x) {
     const thing = x.kind === 'machine' ? 'a machine' : 'a device', its = x.kind === 'machine' ? 'the machine it linked' : 'the device it paired';
