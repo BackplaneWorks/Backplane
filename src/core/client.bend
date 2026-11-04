@@ -17431,7 +17431,7 @@ def Cadview.tool(value: String) -> String:
 def Cadview.rpc(+u: Ui, value: String, op: String) -> Act:
   Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{Cadview.tool(value)}}, J.KV{"op", J.Str{op}}])
 
-def Cadview.dispatch(+u: Ui, action: String, +value: String) -> Act:
+def Cadview.dispatch(+u: Ui, +action: String, +value: String) -> Act:
   match action:
     case "cad-install": Cadview.rpc(u, value, "start")
     case "cad-cancel": Cadview.rpc(u, value, "cancel")
