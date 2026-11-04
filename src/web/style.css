@@ -2945,6 +2945,8 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 /* the subagents' and to-do list's docks, opened from their chips: half
    the screen to read them in (the timeline keeps the rest) */
 .app.phone .thread-content > :is(.subs, .todos).dock :is(.subs-body, .todos-body) { max-height: calc(var(--ph-vh, 100dvh) * 0.5); }
+/* (both open at once: a fifth of the screen each, the thread keeps the middle) */
+.app.phone .thread-content:has(> .subs.dock:not(.shut)):has(> .todos.dock:not(.shut)) > :is(.subs, .todos).dock :is(.subs-body, .todos-body) { max-height: calc(var(--ph-vh, 100dvh) * 0.2); }
 .app.phone .sub-row { min-height: 44px; }
 .app.phone :is(.sub-step, .sub-ask) .kind, .app.phone .sub-ask .label { width: auto; min-width: 6ch; white-space: nowrap; }
 /* the screen: the timeline takes what the header and the composer leave,
