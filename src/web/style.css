@@ -3564,3 +3564,25 @@ html.phone body, .app.phone { font-family: var(--ph-font); }
 .app.phone > .toast { border-radius: var(--ph-r-card); }
 .ph-note button { border-radius: var(--ph-r-pill); }
 .ph-empty-actions button { border-radius: var(--ph-r-pill); }
+
+/* the screens outside the hub's tree (search, the command palette, the
+   terminal, pairing and Devices) and a few strays: the same look */
+html.phone :is(.picker, .workspace-palette, .floating-terminal, .pairing-screen, .ph-term-keys) :is(button, input, select, textarea, summary) { border-radius: var(--ph-r-ctl); }
+html.phone :is(.picker, .workspace-palette, .pairing-screen) :is(input:not([type=checkbox]):not([type=radio]):not([type=file]), select) { background: var(--ph-fill); border: 1px solid transparent; border-radius: var(--ph-r-pill); padding-inline: 16px; }
+html.phone :is(.picker, .workspace-palette, .pairing-screen) :is(input, select):focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); outline: none; }
+html.phone .pairing-card button { border: 0; background: var(--ph-fill); border-radius: var(--ph-r-pill); padding-inline: 18px; }
+html.phone .pairing-card button.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+html.phone .pairing-card button:active { background: var(--ph-press); }
+html.phone .pairing-card button.primary:active { filter: brightness(0.88); }
+html.phone .pairing-card h1 { font-weight: 750; letter-spacing: -0.01em; }
+html.phone .pairing-invitation:not(:empty) { border: 0; border-radius: var(--ph-r-card); background: var(--ph-card); }
+html.phone .pairing-device { border-bottom-color: var(--ph-sep); }
+html.phone .pairing-qr { border-radius: var(--ph-r-row); }
+html.phone :is(.workspace-command, .find-hit, .find-title) { border-radius: var(--ph-r-row); border-top-color: transparent; }
+html.phone :is(.workspace-command, .find-hit, .find-title):active { background: var(--ph-press); }
+html.phone .ph-term-keys button { border: 0; background: var(--ph-fill); border-radius: 10px; }
+html.phone .ph-term-keys button[aria-pressed="true"] { background: var(--ph-on); color: var(--accent); }
+.app.phone .working { border: 0; border-radius: var(--ph-r-pill); background: var(--ph-fill); }
+.app.phone .project-home .home-header { border-bottom-color: transparent; }
+.app.phone .project-home :is(section, .home-threads, .home-card) { border-radius: var(--ph-r-card); }
+.app.phone .project-home .viewer { border-radius: var(--ph-r-card); overflow: hidden; border-color: var(--ph-sep); }
