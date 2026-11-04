@@ -3090,6 +3090,11 @@ html.phone .bot-tabs::-webkit-scrollbar { display: none; }
 html.phone .bot-desktop-tabs { gap: 6px; flex-wrap: nowrap; }
 html.phone .bot-tabs .tab { flex: none; min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 0; color: var(--dim); }
 html.phone .bot-tabs .tab.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+/* Settings → Threads: this phone's notifications, the words for its state */
+html.phone :is(.ph-notify-on, .ph-notify-off, .ph-notify-none) { display: none; color: var(--dim); }
+html.phone:not(.ph-notify-ask) .ph-notify-ask { display: none; }
+html.phone.ph-notify-on .ph-notify-on, html.phone.ph-notify-off .ph-notify-off, html.phone.ph-notify-none .ph-notify-none { display: inline; }
+html.phone.ph-notify-on .ph-notify-on { color: var(--ok, var(--text)); }
 /* the Bots tab with no bot yet: what one is and how to make one */
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child { flex-wrap: wrap; }
 .app.phone .sidebar .bots:not(:has(.bot-name)) > .bots-head:first-child::after { content: "No bots yet. A bot is an agent that stays between chats, with a name, a cat and a memory: mention it in any message (@scout look at the BOM). Tap + to make one."; flex: 1 1 100%; padding: 8px 0 12px; color: var(--dim); font-size: 14px; font-weight: normal; text-transform: none; letter-spacing: normal; line-height: 1.5; white-space: normal; }

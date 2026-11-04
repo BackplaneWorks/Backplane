@@ -127,10 +127,36 @@ export function installPhoneOther({ doc = document, win = window, dispatch }) {
   });
   win.visualViewport?.addEventListener("resize", () => setTimeout(lift, 60));
 
+  // notifications on this phone: which words Settings shows
+  // (html.ph-notify-on/-off/-none/-ask), and a tap on Allow asks
+  const notifyState = () => {
+    const N = win.Notification;
+    const state = !N || !win.isSecureContext ? "none" : N.permission === "granted" ? "on" : N.permission === "denied" ? "off" : "ask";
+    for (const k of ["on", "off", "none", "ask"]) html.classList.toggle("ph-notify-" + k, k === state);
+  };
+  doc.addEventListener("click", e => {
+    if (!on() || !e.target.closest?.("[data-ph-notify]")) return;
+    e.preventDefault();
+    win.Notification?.requestPermission?.().then(notifyState, notifyState);
+  });
+  // a home-screen app on an iPhone (the only place it shows notifications)
+  // and Android: standalone, with the app's name and icon
+  if (on() && !doc.querySelector("link[rel=manifest]")) {
+    const meta = (name, content) => { const m = doc.createElement("meta");m.name = name;m.content = content;doc.head.append(m); };
+    meta("apple-mobile-web-app-capable", "yes");meta("mobile-web-app-capable", "yes");
+    meta("apple-mobile-web-app-title", "Backplane");meta("apple-mobile-web-app-status-bar-style", "black-translucent");
+    const origin = win.location.origin;
+    const manifest = { name: "Backplane", short_name: "Backplane", start_url: origin + "/", scope: origin + "/", display: "standalone", background_color: "#0d0f12", theme_color: "#0d0f12",
+      icons: [{ src: doc.querySelector("link[rel=icon]")?.href || origin + "/favicon.svg", sizes: "any", type: "image/svg+xml" }] };
+    const link = doc.createElement("link");link.rel = "manifest";link.href = "data:application/manifest+json," + encodeURIComponent(JSON.stringify(manifest));
+    doc.head.append(link);
+  }
+
   return {
     // after every render: the key row shows while a terminal is open
     rendered() {
       if (!on()) return;
+      notifyState();
       const open = !!field();
       if (open && !row) build();
       if (row) row.hidden = !open;

@@ -1493,6 +1493,8 @@ for (const ev of ["pointerdown", "keydown", "wheel"]) document.addEventListener(
 // the browser asks the person once, on a first click or key (the only time
 // browsers let a page ask)
 function askNotify() {
+  // (a phone asks from Settings → Threads instead, phone-other.js)
+  if (PHONE_TITLES()) return;
   if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
 }
 for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, askNotify, { once: true, capture: true });
