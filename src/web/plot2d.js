@@ -1157,6 +1157,8 @@ let mentioned = null;
 // (the card is the phone arrangement's: phone-shell.js's html.phone; a
 // wide touch browser keeps the page as it was)
 const phone = () => document.documentElement.classList.contains("phone");
+const lang = () => document.documentElement.lang;
+const cap = (t) => t ? t[0].toUpperCase() + t.slice(1) : t;
 function inspectCard(view, pick, src = null, tapped = null) {
   const info = pick ? (typeof pick.info === "object" && pick.info ? pick.info : P.parseInfo(pick.text || pick.info || "")) : null;
   if (!info || !info.kind) { card?.el.remove(); card = null; return; }
@@ -1167,9 +1169,10 @@ function inspectCard(view, pick, src = null, tapped = null) {
   el.setAttribute("aria-label", "What you tapped");
   const head = document.createElement("div"), title = document.createElement("strong"), close = document.createElement("button");
   head.className = "ph-inspect-head";
-  // (a footprint is named as the part it is: "Part U1", as a 3D tap's)
+  // (a footprint is named as the part it is: "Part U1", as a 3D tap's;
+  // the words are the catalog's, the page's language)
   const word = info.kind === "footprint" && info.kv.get("ref") ? "part" : info.kind, arg = word === "part" && !info.arg ? info.kv.get("ref") : info.arg;
-  title.textContent = arg ? `${word[0].toUpperCase()}${word.slice(1)} ${arg}` : word[0].toUpperCase() + word.slice(1);
+  title.textContent = cap(App.viewer_item(lang(), word, arg || "") || (arg ? `${word} ${arg}` : word));
   close.type = "button"; close.className = "ph-inspect-close"; close.textContent = "✕"; close.setAttribute("aria-label", "Close");
   close.addEventListener("click", () => { inspectCard(view, null); if (view?.probe) view.publishProbe(""); else if (!view) probed?.(""); });
   head.append(title, close);
@@ -1178,12 +1181,12 @@ function inspectCard(view, pick, src = null, tapped = null) {
     if (k === "g" || !v) continue;
     const dt = document.createElement("dt"), dd = document.createElement("dd");
     // (a footprint without its library: "sim72", not "footprints:sim72")
-    dt.textContent = k[0].toUpperCase() + k.slice(1); dd.textContent = k === "footprint" ? v.split(":").pop() : v;
+    dt.textContent = cap(App.viewer_field(lang(), k) || k); dd.textContent = k === "footprint" ? v.split(":").pop() : v;
     dl.append(dt, dd);
   }
   const acts = document.createElement("div"), mention = document.createElement("button");
   acts.className = "ph-inspect-acts";
-  mention.type = "button"; mention.textContent = App.viewer_mention(document.documentElement.lang);
+  mention.type = "button"; mention.textContent = App.viewer_mention(lang());
   mention.addEventListener("click", () => { inspectCard(view, null); mentioned?.(`[${raw}]`); });
   acts.append(mention);
   // a part or net on the board shows on the schematic too, and back: the
@@ -1192,7 +1195,7 @@ function inspectCard(view, pick, src = null, tapped = null) {
   const others = !view ? (src?.key ? ["board", "schematic"] : []) : view.side === "board" ? ["schematic"] : view.side === "schematic" ? ["board"] : [];
   if (showing && (!view || P.parseProbe(view.probe).kind) && !document.querySelector("#viewer.split")) for (const other of others) {
     const go = document.createElement("button");
-    go.type = "button"; go.textContent = `${App.viewer_kind(document.documentElement.lang, other)} →`;
+    go.type = "button"; go.textContent = `${App.viewer_kind(lang(), other)} →`;
     go.addEventListener("click", () => { inspectCard(view, null); showing(other); });
     acts.append(go);
   }
@@ -1214,10 +1217,10 @@ function inspectCard(view, pick, src = null, tapped = null) {
   if (at?.key?.startsWith("0|") && ref && detailsFor) Promise.resolve(detailsFor(at.scope, at.key, ref)).then((c) => {
     if (card !== mine || !c) return;
     const shown = new Set([...info.kv.keys()]);
-    for (const [k, v] of [["value", c.value], ["mpn", c.mpn], ["footprint", String(c.footprint || "").split(":").pop()], ["side", c.layer === "B.Cu" ? "Bottom" : c.layer ? "Top" : ""], ["pads", c.pads?.length ? String(c.pads.length) : ""]]) {
+    for (const [k, v] of [["value", c.value], ["mpn", c.mpn], ["footprint", String(c.footprint || "").split(":").pop()], ["side", c.layer === "B.Cu" ? cap(App.viewer_field(lang(), "@bottom") || "bottom") : c.layer ? cap(App.viewer_field(lang(), "@top") || "top") : ""], ["pads", c.pads?.length ? String(c.pads.length) : ""]]) {
       if (!v || shown.has(k)) continue;
       const dt = document.createElement("dt"), dd = document.createElement("dd");
-      dt.textContent = k === "mpn" ? "MPN" : k[0].toUpperCase() + k.slice(1); dd.textContent = v;
+      dt.textContent = k === "mpn" ? "MPN" : cap(App.viewer_field(lang(), k) || k); dd.textContent = v;
       dl.append(dt, dd);
     }
   }).catch(() => {});

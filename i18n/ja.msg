@@ -794,6 +794,11 @@ viewer.field.text = テキスト
 viewer.field.sheet = シート
 viewer.field.file = ファイル
 viewer.field.netclass = ネットクラス
+viewer.card.part = 部品 {ref}
+viewer.field.side = 面
+viewer.field.pads = パッド数
+viewer.side.top = 表面
+viewer.side.bottom = 裏面
 
 # ---- i18n web phone ----
 web.viewer.layers.active = レイヤー・{name}
