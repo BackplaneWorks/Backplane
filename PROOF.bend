@@ -16070,3 +16070,6 @@ def Laws.kicad_main_project_config(main):
 
 def Laws.kicad_absolute_project_override(main):
   {==}
+
+def Laws.kicad_divergent_write_requires_choice(explicit):
+  {==}

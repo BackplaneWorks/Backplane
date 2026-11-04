@@ -19,6 +19,7 @@ def main() -> IO(Unit):
     +main : K.Files <- K.Files.read(cwd)
     +local : K.Files <- K.Files.read.local(cwd)
     +changed : Bool <- K.Files.changed(main, local)
+    guard : String <- K.Files.write_guard(cwd, args, J.Json.get_str(args, "type", ""))
     resolved : J.Json <- K.Files.request(cwd, args, J.Json.get_str(args, "kind", "project"))
     IO.print(J.Json.show(J.Json.obj([J.KV{"root", J.Str{root}}, J.KV{"main", files(main)}, J.KV{"local", files(local)}, J.KV{"changed", J.Flag{changed}},
-      J.KV{"prompt", J.Flag{KP.Project.choose(J.Json.get_str(args, "choice", ""), changed)}}, J.KV{"request", resolved}])))
+      J.KV{"prompt", J.Flag{KP.Project.choose(J.Json.get_str(args, "choice", ""), changed)}}, J.KV{"write_error", J.Str{guard}}, J.KV{"request", resolved}])))

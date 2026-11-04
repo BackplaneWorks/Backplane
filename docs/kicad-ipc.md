@@ -20,6 +20,25 @@ selects the canonical project for IPC, or the board/schematic for the viewer.
 `thread_copy: true` explicitly selects the thread's files instead. STEP and
 other non-KiCad files keep their paths. No worktree is merged or copied back.
 
+IPC **writes require an explicit target when the linked designs differ**.
+`BeginCommit`, `CreateItems`, `UpdateItems`, `DeleteItems`, `EndCommit`,
+`SaveDocument`, document lifecycle commands, routing and other mutations are
+refused before reaching the IPC actor unless the request passes
+`thread_copy: true` for this thread or `main: true` for canonical main.
+The error names both selected paths and both flags. Pass the chosen flag on
+**each** mutating call; it is never remembered for later commands. Passing
+both flags is an error. Absolute configuration overrides remain respected.
+
+Reads still default to main. Identical copies and non-worktree threads keep
+their existing write behavior. The read-only command list is explicit;
+unknown/new commands require the write choice too, including unknown commands
+whose names merely start with Get or List.
+
+The exact read-only allowlist is `Project.reads` in
+`src/core/kicad-project.bend`. It matches full protobuf type names, including
+legacy board/schematic GetItems spellings; an unknown namespace is not allowed
+merely because its command has a familiar leaf name.
+
 Regression coverage: `test/kicad_project_test.bend`,
 `test/kicad_copy_ui_test.bend`, `test/tools/kicad_project_test.py` and
 `test/tools/kicad_project_e2e.ts`. The filesystem tests use actual linked Git
