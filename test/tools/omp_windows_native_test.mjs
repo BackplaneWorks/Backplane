@@ -11,7 +11,7 @@ const require=createRequire(import.meta.url);
 const out=path.resolve(process.argv[2]), report={status:'INCOMPLETE',scope:'production OMP launch files + hub pipe spawn + real OMP 18.16.0 RPC handshake; no inference',cleanup:[]};
 const save=()=>fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(report,null,2)+'\n');
 const shell=path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe');
-let api,globals,files;
+let api,globals,files,modelServer;
 try {
   assert.equal(process.platform,'win32');
   report.identity=JSON.parse(execFileSync(shell,['-NoProfile','-NonInteractive','-Command',
@@ -42,6 +42,16 @@ try {
   const prompt='BACKPLANE_949_START\n'+('skill \"quoted\" 日本 😀\n').repeat(6000)+'BACKPLANE_949_END';
   report.promptUTF16Length=prompt.length;
   const home=process.env.BACKPLANE_HOME;fs.mkdirSync(home,{recursive:true});
+  // OMP requires a selected model even for get_state. A credential-free,
+  // loopback-only custom model permits startup; no prompt command is sent.
+  report.modelRequests=[];
+  modelServer=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
+    report.modelRequests.push(new URL(request.url).pathname);
+    return Response.json({error:{message:'The handshake must not request inference'}},{status:503});
+  }});
+  const agentDir=path.join(profile,'.omp/agent');fs.mkdirSync(agentDir,{recursive:true});
+  process.env.PI_CODING_AGENT_DIR=agentDir;
+  fs.writeFileSync(path.join(agentDir,'models.yml'),`providers:\n  backplane-smoke:\n    baseUrl: http://127.0.0.1:${modelServer.port}/v1\n    api: openai-completions\n    auth: none\n    models:\n      - id: local\n        name: No-inference handshake fixture\n        reasoning: false\n        input: [text]\n        contextWindow: 262144\n        maxTokens: 32\n`);
   // Negative control: same actual hub spawn, old inline prompt argv.
   const before=api.spawn('env',['omp','--mode','rpc-ui','--append-system-prompt',prompt],home,1);
   assert.equal(before.ok,false,'Old inline argv must exceed native CreateProcessW limit');
@@ -58,7 +68,7 @@ try {
   const proofPath=path.join(out,'prompt-received.json');
   const extension=`import {writeFileSync} from 'node:fs';export default function(pi){pi.on('session_start',(_e,ctx)=>{const s=ctx.getSystemPrompt().join('\\n');writeFileSync(${JSON.stringify(proofPath)},JSON.stringify({start:s.includes('BACKPLANE_949_START'),end:s.includes('BACKPLANE_949_END'),length:s.length}));});}`;
   const prepared=files.prepare(home,prompt,extension);assert(prepared.ok,JSON.stringify(prepared));
-  const args=expectedArgs('','always-ask',path.join(home,'sessions'),prepared.value);
+  const args=expectedArgs('','always-ask',path.join(home,'sessions'),prepared.value,'backplane-smoke/local');
   assert(args.join(' ').length<4000);
   const started=api.spawn('env',args,home,1);assert(started.ok,JSON.stringify(started));
   report.startedPid=started.value[0];const child=globals.BP_PROCS.get(report.startedPid);
@@ -80,10 +90,12 @@ try {
   child.stdin.end();
   let exitTimer;
   try{report.exitCode=await Promise.race([child.exited,new Promise((_,reject)=>{exitTimer=setTimeout(()=>reject(Error('OMP EOF exit timeout')),15000);})]);}finally{clearTimeout(exitTimer);}
-  assert.equal(report.exitCode,0);files.remove(prepared.value);assert(!fs.existsSync(prepared.value));report.cleanup.push('private turn files removed after exit');
+  assert.equal(report.exitCode,0);assert.deepEqual(report.modelRequests,[],'Handshake must not contact the model endpoint');
+  files.remove(prepared.value);assert(!fs.existsSync(prepared.value));report.cleanup.push('private turn files removed after exit');
   report.status='PASS';
 } catch(error) {report.status='FAIL';report.error=error.stack;process.exitCode=1;console.error(error);}
 finally {
   if(api)for(const pid of globals.BP_PROCS?.keys()??[]){api.retire('smoke',pid);await api.barrier();}
+  modelServer?.stop(true);
   save();
 }
