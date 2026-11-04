@@ -24,17 +24,17 @@ class Fixtures(unittest.TestCase):
 
     def test_dependency_pairs_differ_only_in_the_dependency(self):
         base = ROOT/'test/separate-compilation/cases'
-        self.assertEqual((base/'conversion_ok/B.bend').read_text(), (base/'dependency_body_changed/B.bend').read_text())
-        self.assertNotEqual((base/'conversion_ok/A.bend').read_text(), (base/'dependency_body_changed/A.bend').read_text())
+        self.assertEqual((base/'conversion_ok/B.bend.txt').read_text(), (base/'dependency_body_changed/B.bend.txt').read_text())
+        self.assertNotEqual((base/'conversion_ok/A.bend.txt').read_text(), (base/'dependency_body_changed/A.bend.txt').read_text())
 
     def test_fill_order_pair_differs_only_in_the_entry(self):
         base = ROOT/'test/separate-compilation/cases'
         a, b = base/'filler_loaded_before_user_passes', base/'user_loaded_before_filler_fails'
-        for name in ('L.bend', 'P.bend', 'U.bend'):
+        for name in ('L.bend.txt', 'P.bend.txt', 'U.bend.txt'):
             self.assertEqual((a/name).read_text(), (b/name).read_text())
-        self.assertNotEqual((a/'MAIN.bend').read_text(), (b/'MAIN.bend').read_text())
-        self.assertNotIn('import ./P.bend', (a/'U.bend').read_text())     # U never imports the filler
-        self.assertNotIn('P.bend', (base/'filler_never_loaded_fails/MAIN.bend').read_text())
+        self.assertNotEqual((a/'MAIN.bend.txt').read_text(), (b/'MAIN.bend.txt').read_text())
+        self.assertNotIn('import ./P.bend', (a/'U.bend.txt').read_text())     # U never imports the filler
+        self.assertNotIn('P.bend', (base/'filler_never_loaded_fails/MAIN.bend.txt').read_text())
 
     def test_classification_uses_the_repository_verdict(self):
         self.assertEqual(sc.classify(0, 'ALL PROOFS CHECK\n'), 'pass')
@@ -43,11 +43,30 @@ class Fixtures(unittest.TestCase):
         self.assertEqual(sc.classify(1, ''), 'fail')
         self.assertEqual(sc.classify(0, 'garbage'), 'fail')
 
-    def test_run_refuses_without_a_verified_cap(self):
+    def run_with(self, lock, cgroup, admit):
         with patch.object(sc, 'guard') as g, patch.object(sc.subprocess, 'run') as run:
-            g.return_value.verify_shard_cgroup.return_value = False
-            self.assertEqual(sc.run(), 75)
+            g.return_value.inherited_lock.return_value = 7 if lock else None
+            g.return_value.verify_shard_cgroup.return_value = cgroup
+            g.return_value.admit.return_value = admit
+            return sc.run(), run
+
+    def test_run_refuses_unless_lock_cap_and_admission_all_hold(self):
+        for lock, cgroup, admit in ((False, True, True), (True, False, True), (True, True, False), (False, False, False)):
+            rc, run = self.run_with(lock, cgroup, admit)
+            self.assertEqual(rc, 75, (lock, cgroup, admit))
             run.assert_not_called()
+
+    def test_no_tracked_bend_files_are_ingested_by_check_inventories(self):
+        import subprocess
+        listed = subprocess.check_output(['git', 'ls-files', '-co', '--exclude-standard', '--', '*.bend'], cwd=ROOT, text=True).split()
+        self.assertEqual([n for n in listed if 'separate-compilation' in n], [])
+
+    def test_materialise_strips_the_suffix(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as work:
+            main = sc.materialise('conversion_ok', work)
+            self.assertTrue(main.is_file() and main.name == 'MAIN.bend')
+            self.assertTrue((main.parent/'A.bend').is_file() and (main.parent/'B.bend').is_file())
 
 
 if __name__ == '__main__':
