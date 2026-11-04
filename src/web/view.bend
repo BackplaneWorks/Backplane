@@ -2213,7 +2213,8 @@ def View.settings.phone.layout(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
 
 # a phone's own notifications: the browser asks only on a tap on Allow
 # (phone-other.js's [data-ph-notify]), and html's ph-notify-* class says
-# which of the words shows (granted, denied, unavailable here)
+# which of the words shows (granted, denied, unavailable here, or not
+# over plain http: browsers keep notifications to HTTPS)
 def View.settings.phone.notify(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
   match phone:
     case True{}:
@@ -2223,7 +2224,9 @@ def View.settings.phone.notify(phone: Bool, +lc: I.Loc) -> List<&2, D.Node>:
         [D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "ph-notify-ask"}, D.At{"data-ph-notify", ""}], [D.Txt{SM.Menu.text(lc, "Allow notifications", "通知を許可")}]},
          D.Dom.span("ph-notify-on", SM.Menu.text(lc, "On for this phone", "このスマートフォンでオン")),
          D.Dom.span("ph-notify-off", SM.Menu.text(lc, "Blocked: allow notifications for this site in the browser's settings", "ブロック中：ブラウザの設定でこのサイトの通知を許可してください")),
-         D.Dom.span("ph-notify-none", SM.Menu.text(lc, "This browser can't show notifications here", "このブラウザではここに通知を表示できません"))])]
+         D.Dom.span("ph-notify-none", SM.Menu.text(lc, "This browser can't show notifications here", "このブラウザではここに通知を表示できません")),
+         D.Dom.span("ph-notify-http", SM.Menu.text(lc, "Not over this http:// address: a phone's browser allows notifications only over HTTPS. Start the hub with --tailscale-https and open its https:// address here.",
+           "この http:// アドレスでは使えません：スマートフォンのブラウザは HTTPS でのみ通知を許可します。ハブを --tailscale-https で起動し、その https:// アドレスをここで開いてください。"))])]
     case False{}: Nil{}
 
 # a phone's way to Improvements (improvements.js opens it from any
