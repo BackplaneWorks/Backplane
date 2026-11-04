@@ -1372,3 +1372,34 @@ Whole remote command42.60s,60credit-s/$0.00060, deletion verified. Three earlier
 fixture/harness failures remain explicitly failed; total122credit-s/$0.00122.
 Twelve dual-path tests were inventoried, only one exercised. The two-minute PR
 and every-job-under4GiB targets remain unachieved.
+
+### Checkpoint fixture setup: batch real SQLite writes, keep durability
+
+Only the checkpoint test's disposable `db()` setup helper changes: identical
+schema/meta/marker writes in one real SQLite transaction, then close in finally.
+All25 original cases/assertions and production validation/fsync/promotion/WAL
+behavior stay. No pragma, memory-fixture, law, proof or source-review pin change.
+
+| Five alternating setup pairs, one normal Boat VM | Before | After |
+|---|---|---|
+| Minimum / median / maximum | 3.939507 /5.024011 /6.783881s | 0.065813 /0.115317 /0.152323s |
+| Logical schema and all table rows | baseline | exact parity |
+| journal_mode / synchronous / page_size | delete /2(FULL) /4096 | same |
+| File/sidecar set; observed size | fixture.db;229,376B | same (sizes informational) |
+| Full original candidate checkpoint suite | earlier original90s timeout, cause unknown | 25/25 pass5.79s;198,720KiB command RSS |
+
+The setup median fell about44x **in this fixture benchmark**, not the whole CI
+job. [Exact source/tool identities, raw receipts and limits](checkpoint-fixture/README.md).
+Full25/mutation checks in j20261104063951-69873 are retained; remaining
+parity/rollback/setup j20261104064434-119474 and reason-bound SQL-error controls
+j20261104064752-157500 do not replay them. Real rollback leaves no partial tables
+and closes the handle. Original/new helpers reject the same broken prefix
+validator; only prefix sensitivity was mutated. The first qualification job's
+schema-harness failure is preserved, not relabeled as success.
+
+Every worker has actual3,699,998,720B cap +512MiB controller, combined
+4,236,870,912B <4GiB, swap0/native flock/zero cap or OOM events; source/tool
+identities unchanged. All5 normal sandboxes deleted; total251credit-s/$0.00251
+before merge guard. Original90s failure is not reproduced/causally fixed; the
+stale sidebar review guard still refuses unchanged pins. Full CI/proof/build,
+release and two-minute PR targets remain unachieved.
