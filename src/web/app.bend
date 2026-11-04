@@ -575,6 +575,9 @@ def plot_stats(tag: String, size: String, waited: String, delayed: Bool) -> Stri
 def viewer_mention(tag: String) -> String:
   MSG.T.viewer.mention(I.I18n.of_tag(tag))
 
+def viewer_mention_short(tag: String) -> String:
+  MSG.T.viewer.mention.short(I.I18n.of_tag(tag))
+
 # its title: what was tapped, by its kind in the plot's info ("pad" and
 # its number, "part" and its ref...), "" for a kind the catalog lacks
 def viewer_item_k(+lc: I.Loc, +kind: String, +arg: String) -> String:

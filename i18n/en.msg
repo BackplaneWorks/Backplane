@@ -529,6 +529,7 @@ settings.channel.note = Stable takes releases; nightly also takes the daily buil
 settings.channel.nightly = Nightly
 settings.channel.stable = Stable
 viewer.mention = Mention in chat
+viewer.mention.short = Mention
 viewer.sheet.open = Open sheet
 viewer.help.scroll = wheel scroll
 viewer.help.browser = what this thread's browser shows, live

@@ -3361,19 +3361,30 @@ html.ph-kb .app.phone :is(.thread-content, .thread-view) > :is(.bot-head, .bot-h
 .app.phone .solid-inspector:not(:empty):not([hidden]) { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; width: auto; max-width: none; max-height: 50%; border: 0; border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgb(0 0 0 / .35); padding: 12px; }
 .app.phone .solid-inspector :is(button, select) { min-height: var(--ph-tap, 44px); }
 /* a tap's card (plot2d.js's inspectCard, on <body>): what lies under the
-   finger, at the foot of the screen over the history */
-.ph-inspect { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; max-height: 45dvh; overflow-y: auto; overscroll-behavior: contain; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgb(0 0 0 / .35); padding: 4px 12px calc(12px + env(safe-area-inset-bottom)); }
-.ph-inspect-head { display: flex; align-items: center; gap: 8px; min-height: 44px; }
-.ph-inspect-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
-.ph-inspect-close { min-width: 44px; min-height: 44px; border: 0; background: none; color: var(--dim); font-size: 18px; }
-.ph-inspect dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0 0 10px; font-size: 14px; }
-.ph-inspect dt { color: var(--faint); }
-.ph-inspect dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-family: var(--mono); }
-.ph-inspect-acts { display: flex; flex-wrap: wrap; gap: 8px; }
-.ph-inspect-acts button { min-height: 44px; padding: 0 16px; }
-/* (a phone on its side: at the right, the drawing keeps the height) */
+   finger, at the foot of the screen over the history, two lines high (its
+   name and value, its other fields cut short) beside small chips; a tap
+   on the lines opens all its fields under them */
+.ph-inspect { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; max-height: 45dvh; overflow-y: auto; overscroll-behavior: contain; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -6px 18px rgb(0 0 0 / .3); padding: 2px 4px calc(2px + env(safe-area-inset-bottom)) 12px; }
+.ph-inspect-head { display: flex; align-items: center; gap: 4px; min-height: 48px; }
+.ph-inspect-sum { flex: 1; min-width: 0; min-height: 48px; display: grid; align-content: center; gap: 1px; padding: 2px 0; border: 0; background: none; color: var(--text); text-align: left; font: inherit; }
+.ph-inspect-l1, .ph-inspect-l2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-inspect-l1 { font-size: 15px; }
+.ph-inspect-l1 strong { font-weight: 600; }
+.ph-inspect-val { color: var(--dim); font-family: var(--mono); font-size: 13px; }
+.ph-inspect-l2 { color: var(--faint); font-family: var(--mono); font-size: 12px; }
+.ph-inspect-l2:empty { display: none; }
+.ph-inspect.open .ph-inspect-l2 { white-space: normal; overflow-wrap: anywhere; }
+.ph-inspect-chip { flex: none; min-height: 44px; padding: 0 2px; border: 0; background: none; color: var(--text); }
+.ph-inspect-chip > span { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); font-size: 13px; white-space: nowrap; }
+.ph-inspect-chip:active > span { border-color: var(--accent); }
+.ph-inspect-close { flex: none; min-width: 44px; min-height: 44px; border: 0; background: none; color: var(--dim); font-size: 16px; }
+.ph-inspect-all { display: none; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 2px 8px 10px 0; font-size: 14px; }
+.ph-inspect.open .ph-inspect-all { display: grid; }
+.ph-inspect-all dt { color: var(--faint); }
+.ph-inspect-all dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-family: var(--mono); }
+/* (a phone on its side: at the bottom right, the drawing keeps the height) */
 @media (orientation: landscape) and (max-height: 500px) {
-  .ph-inspect { left: auto; top: var(--ph-head, 52px); width: min(340px, 46vw); max-height: none; border-top: 0; border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgb(0 0 0 / .35); padding: 4px calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) 12px; }
+  .ph-inspect { left: auto; width: min(480px, 62vw); max-height: calc(100dvh - var(--ph-head, 52px)); border-left: 1px solid var(--line); box-shadow: -6px -6px 18px rgb(0 0 0 / .3); padding-right: calc(4px + env(safe-area-inset-right)); }
 }
 /* the design history: one row (transport, version, the rest by scrolling) and the scrub */
 .app.phone .hist { padding: 2px 8px 4px; gap: 2px; }
