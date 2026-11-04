@@ -15,7 +15,8 @@ const page = (phone, mic = true) => {
   const inComposer = { closest: s => s === '.composer' ? {} : null };
   const fire = (type, target = timeline) => (on[type] || []).forEach(f => f({ target }));
   const resize = h => { timeline.clientHeight = h; for (const o of observers) if (o.t) o.f([{ target: o.t }]); };
-  return { on, inComposer, doc, win: { ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined }, setTimeout: f => { f(); return 1; } }, timeline, fire, resize, classes };
+  const won = {};
+  return { on, won, inComposer, doc, win: { addEventListener: (type, f) => { (won[type] ||= []).push(f); }, ResizeObserver: RO, navigator: { mediaDevices: mic ? { getUserMedia() {} } : undefined }, setTimeout: f => { f(); return 1; } }, timeline, fire, resize, classes };
 };
 
 test('Return in the draft is a new line on a phone only, Send still sends', async () => {
@@ -93,4 +94,25 @@ test('the composer\'s ⋯ sheet shuts when the viewer covers the thread', async 
   p.fire('touchstart', { closest: () => null });
   p.resize(0);
   assert.equal(more.open, false);
+});
+
+test('Send pressed while typing on a phone gives the draft its focus back after the tap', async () => {
+  const { installPhoneThread } = await import('../../src/web/phone-thread.js');
+  const p = page(true); let focused = 0;
+  const composer = { id: 'composer', focus: () => focused++ };
+  p.doc.getElementById = id => id === 'composer' ? composer : id === 'timeline' ? p.timeline : null;
+  installPhoneThread({ document: p.doc, window: p.win });
+  p.doc.activeElement = composer;
+  const send = { closest: s => s === '.composer .foot-end > button' ? {} : null };
+  for (const f of p.on.mousedown || []) f({ target: send });
+  p.doc.activeElement = { id: 'send' };            // the press took the focus (the composition ended)
+  for (const f of p.won.click || []) f({});
+  assert.equal(focused, 1, 'focus back once');
+  for (const f of p.won.click || []) f({});
+  assert.equal(focused, 1, 'only for that tap');
+  // a press elsewhere, or with the keyboard down, gives nothing back
+  p.doc.activeElement = { id: 'x' };
+  for (const f of p.on.mousedown || []) f({ target: send });
+  for (const f of p.won.click || []) f({});
+  assert.equal(focused, 1);
 });
