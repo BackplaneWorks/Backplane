@@ -1218,3 +1218,54 @@ trust, fresh-nightly proof or production/full-suite qualification. No workflow,
 full-proof, compiler-memory or release gate changed. The two-minute full PR
 and every-job-under4GiB targets remain unachieved; heavy shards and signed
 shared reuse remain follow-ups with their owners.
+
+
+### Move the actual merged-law pre-merge check to capped Boat
+
+The new hard rule forbids local tests and checks, including merge-tree and
+Python shape validation. `pre-merge.sh` now transports a pushed HEAD; every
+merge computation, guard test and shape check runs on normal Boat with actual
+512MiB/swap0 enforcement. Conflicts anywhere, source/base drift, missing
+receipts and resource violations fail closed; no local fallback.
+
+| Actual structural gate | Before | After |
+|---|---|---|
+| Execution site | Local merge-tree + Python, now prohibited | Normal Boat,512MiB/swap0 |
+| Worker wall / process peak RSS | Not isolated | 6.20s /24,952KiB |
+| Guard controls | Original local shape only | 8 controls0.049s + actual merged shape |
+| Paid cost | $0 | 12credit-s/$0.00012; sandbox deleted |
+
+[Receipt/limits](premerge-boat/README.md), [exact result](premerge-boat/RESULT.json),
+[measurement](premerge-boat/MEASURE.json). Cgroup peak33,906,688B; max/OOM0;
+wait1s, push2s, setup0s, one16KiB source file. No Bend/compiler/proof/build,
+account/auth change, guard-floor change, installer action or release trigger.
+This adds required enforcement/network overhead, not a speedup/full-gate claim.
+
+Pre-merge review correction before landing: final worker starts inside an
+outer512MiB/swap0 scope and reads the kernel limit back; it does not self-set
+or enlarge limits. The shape checker and law merge driver are pinned to the
+fetched base, not the candidate. Two new tampering controls require a fresh
+Boat guard. Above numbers belong to the preserved initial transport experiment,
+not final security-control qualification; no independently attested provider
+resource claim is made.
+
+Reviewed schema3 measurement (exact source0ea8b82ba / mainc499e7f5,
+Boatj20261104032138-375442, work1513291):
+
+| Change | Before | After |
+|---|---|---|
+| Required merge/shape execution | Local execution, now prohibited | Boat-only actual merged tree, BASE verifier/driver, closed guard-source matrix |
+| Worker wall / process peak RSS | Not separately measured | 5.60s /25,600KiB |
+| Guard controls | Initial8-control transport prototype | 14 controls0.116s, shape_exit0 |
+| Actual cgroup peak / limit | No isolated local cap | 39,907,328 /536,870,912B, swap0, all events0 |
+| Paid cost | $0 local | 12credit-s/$0.00012, default VM deleted |
+
+[Exact-head receipt and limitations](premerge-boat/README.md#reviewed-schema3-qualification).
+The deliberate guard update returned `passed-reviewed-guard-change`, never
+plain `passed`; the exact-head acknowledgement and controls identities are
+recorded. Independent read-only review covered code and negative controls.
+The candidate dispatcher remains a procedural trust root requiring an
+independent diff of its three source files; trusted-base `--head` mode is not
+implemented. No local tests/merge-tree ran. This is enforcement, not a proof,
+compiler, full CI or two-minute PR qualification. A fresh guard remains
+required for the final receipt-documentation head.

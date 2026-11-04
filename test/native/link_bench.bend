@@ -1,3 +1,4 @@
+import ../../src/server/wire.bend as WIRE
 import Base
 import ../../src/server/server.bend as S
 import ../../src/core/model.bend as M
@@ -32,9 +33,9 @@ def url(xs: List<String>) -> String:
 def is_log(+t: String) -> Bool:
   String.starts_with(t, "{\"t\":\"log\"")
 
-def got(m: Maybe<&1, S.Wire>, k: Maybe<&2, String> -> IO(Maybe<&2, String>), +t0: Nat) -> IO(Maybe<&2, String>):
+def got(m: Maybe<&1, WIRE.Wire>, k: Maybe<&2, String> -> IO(Maybe<&2, String>), +t0: Nat) -> IO(Maybe<&2, String>):
   match m:
-    case Some{S.WText{+t}}:
+    case Some{WIRE.WText{+t}}:
       do IO<Maybe<&2, String>>:
         +t1 : Nat <- IO.now()
         IO.print("  +" ++ Nat.show(Nat.sub(t1, t0)) ++ " ms: " ++ String.take(t, 60n) ++ " (" ++ Nat.show(String.length(t)) ++ " chars)")
@@ -52,12 +53,12 @@ def found(m: Maybe<&2, String>, loop: Unit -> IO(Maybe<&2, String>)) -> IO(Maybe
       loop(Unit{})
 
 # the messages until the log
-def wait(fuel: Nat, +out: Chan(S.Wire), +t0: Nat) -> IO(Maybe<&2, String>):
+def wait(fuel: Nat, +out: Chan(WIRE.Wire), +t0: Nat) -> IO(Maybe<&2, String>):
   match fuel:
     case 0n:
       IO.pure(Maybe<&2, String>, None{})
     case 1n+f:
-      IO.bind(Maybe<&1, S.Wire>, Maybe<&2, String>, Chan.recv(S.Wire, out),
+      IO.bind(Maybe<&1, WIRE.Wire>, Maybe<&2, String>, Chan.recv(WIRE.Wire, out),
         m => got(m, r => found(r, u => wait(f, out, t0)), t0))
 
 def replay(m: Maybe<&2, String>, +t1: Nat) -> IO(Unit):
@@ -79,7 +80,7 @@ def main() -> IO(Unit):
     +to : String = url(args)
     +t0 : Nat <- IO.now()
     +inbox : Chan(S.Msg) <- LK.Link.start(to)
-    +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
+    +out : Chan(WIRE.Wire) <- Chan.new(WIRE.Wire, 8192)
     ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, inbox, S.Join{0, out, 0n, "", 1, 0})
     +m : Maybe<&2, String> <- wait(64n, out, t0)
     +t1 : Nat <- IO.now()
