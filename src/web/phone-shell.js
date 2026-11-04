@@ -131,6 +131,9 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
   // what the system back shuts before it goes back a screen: a menu, the
   // row menu, a sheet, search, the palette, the terminal
   const overlay = () => {
+    // the viewer's full screen (viewer-tools.js's focusToggle) first
+    const focus = html.classList.contains("ph-focus") && doc.querySelector(".ph-focus-toggle");
+    if (focus) return () => focus.click();
     const menu = doc.querySelector(".local-menu[open]:not([data-inline='true'])");
     if (menu) return () => { menu.open = false; };
     if (doc.querySelector(".rowmenu")) return () => dispatch("menu-close", "");
@@ -287,10 +290,24 @@ export function installPhoneShell({ on, doc = document, win = window, dispatch }
     el.addEventListener("animationend", () => el.classList.remove("ph-enter-" + kind), { once: true });
   };
 
+  // a toast (View.error) stays until tapped on a computer; on a phone it
+  // would sit over the chips or the composer: it goes by itself after 6 s
+  let toast = null, toastTimer = 0;
+  const toasts = () => {
+    const el = doc.querySelector(".app.phone > .toast");
+    const said = el ? el.textContent : null;
+    if (said === toast) return;
+    toast = said;clearTimeout(toastTimer);
+    if (el) toastTimer = setTimeout(() => {
+      const now = doc.querySelector(".app.phone > .toast");
+      if (now && now.textContent === said) now.click();
+    }, 6000);
+  };
+
   return {
     on: true,
     back,
     // after every paint: keep the history entry in step with the screen
-    rendered() { guard();animate();if (openRow && !openRow.row.isConnected) closeRow(); },
+    rendered() { guard();animate();toasts();if (openRow && !openRow.row.isConnected) closeRow(); },
   };
 }
