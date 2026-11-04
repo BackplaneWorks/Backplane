@@ -37,8 +37,12 @@ the timer-floor hypothesis but is not this experiment's paired baseline.
 Concurrent load: this runtime-only job used its own `hub-latency` lock while a
 coordinated Bend job could run in another Boat VM. Physical-host placement is
 unknown. Baseline round medians were 218.41/218.96/218.76 ms; after medians
-9.59/8.72/7.69 ms. A clean retained-emission whole-hub comparison and startup
-probe are queued under `bend`; they are not claimed as passed here.
+9.59/8.72/7.69 ms. The static sender used here is byte-identical to PR #897's
+merge `6b031e406`; its function hash is recorded in RESULTS.json. The old
+scheduler body also matches main's original scheduler exactly. The retained
+RC4 whole-hub comparison was cancelled because that emission predates #897's
+static sender. A valid whole-hub comparison needs an exact current-source
+artifact; none is claimed here.
 
 Validation on the same capped Boat job: **8 scheduler regressions + 29 existing
 static-sender tests passed**, including future deadlines, early Bun wakes,
