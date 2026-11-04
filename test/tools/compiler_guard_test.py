@@ -1,3 +1,4 @@
+import fcntl
 import hashlib
 import importlib.util
 import os
@@ -42,6 +43,11 @@ class CompilerGuard(unittest.TestCase):
         self.env = clean_env(self.home, self.guard, self.marker)
         self.original = {n: (self.home/rel).read_bytes() for n, rel in (('bend', '.bend/bin/bend'), ('bun', '.bun/bin/bun'))}
 
+    REL = {'bend': '.bend/bin/bend', 'bun': '.bun/bin/bun'}
+
+    def real(self, name):
+        return self.home/(self.REL[name] + '.real')           # renamed beside the shim: bend finds its Base relative to itself
+
     def install(self, apply=True):
         return cg.install(self.home, ['bend', 'bun'], apply, self.env)
 
@@ -62,7 +68,7 @@ class CompilerGuard(unittest.TestCase):
             path = self.home/rel
             self.assertTrue(cg.is_shim(path))
             self.assertTrue(os.access(path, os.X_OK))
-            real = self.guard/'real'/name
+            real = self.real(name)
             self.assertEqual(real.read_bytes(), self.original[name])
             self.assertTrue(os.access(real, os.X_OK))
         self.assertTrue((self.home/'.bun/bin/bunx').is_symlink())          # untouched; resolves through the shim
@@ -75,7 +81,7 @@ class CompilerGuard(unittest.TestCase):
         again = self.install()
         self.assertTrue(all('already guarded' in text for _, text in again))
         self.assertEqual((self.home/'.bend/bin/bend').read_bytes(), shim)
-        self.assertEqual((self.guard/'real/bend').read_bytes(), self.original['bend'])
+        self.assertEqual(self.real('bend').read_bytes(), self.original['bend'])
 
     def test_uninstall_restores_the_exact_bytes_and_mode(self):
         modes = {rel: stat.S_IMODE((self.home/rel).stat().st_mode) for rel in ('.bend/bin/bend', '.bun/bin/bun')}
@@ -88,7 +94,7 @@ class CompilerGuard(unittest.TestCase):
 
     def test_uninstall_refuses_when_the_real_binary_changed(self):
         self.install()
-        (self.guard/'real/bend').write_bytes(b'#!/bin/sh\necho tampered\n')
+        self.real('bend').write_bytes(b'#!/bin/sh\necho tampered\n')
         actions = cg.uninstall(self.home, ['bend'], True, self.env)
         self.assertIn('REFUSED', actions[0][1])
         self.assertTrue(cg.is_shim(self.home/'.bend/bin/bend'))
@@ -98,7 +104,7 @@ class CompilerGuard(unittest.TestCase):
         (self.home/'.bend/bin/bend').write_text(FAKE)                       # e.g. an update replaced the shim
         problems = cg.check(self.home, ['bend', 'bun'], self.env)
         self.assertTrue(any('not the guard shim' in p for p in problems))
-        (self.guard/'real/bun').write_bytes(b'x')
+        self.real('bun').write_bytes(b'x')
         self.assertTrue(any('changed' in p for p in cg.check(self.home, ['bun'], self.env)))
 
     # the shim, called by absolute path -------------------------------------------------------------------------
@@ -117,21 +123,56 @@ class CompilerGuard(unittest.TestCase):
         self.assertEqual(self.run_installed('.bun/bin/bun', '--version').returncode, 0)
         self.assertEqual(self.marker.read_text().split('\n')[:2], ['REAL version', 'REAL --version'])
 
-    def test_a_spoofed_boat_environment_on_a_large_machine_is_refused(self):
-        self.install()
+    def test_boat_needs_the_environment_pair_a_small_machine_and_a_kernel_read_cap(self):
         env = {**self.env, 'BACKPLANE_HEAVY_BOAT_SANDBOX': '1', 'BACKPLANE_HEAVY_OFFLOADED': '1'}
-        with patch.object(cg, 'mem_total', return_value=64 * cg.GIB):
-            self.assertEqual(cg.decide('bend', ['x.bend'], env)[0], 'refuse')
-        with patch.object(cg, 'mem_total', return_value=8 * cg.GIB):
-            self.assertEqual(cg.decide('bend', ['x.bend'], env)[0], 'allow')
-        with patch.object(cg, 'mem_total', return_value=8 * cg.GIB):
+        for mem, cap, expect in ((8, True, 'allow'), (64, True, 'refuse'), (8, False, 'refuse'), (64, False, 'refuse')):
+            with patch.object(cg, 'mem_total', return_value=mem * cg.GIB), patch.object(cg, 'capped', return_value=cap), patch.object(cg, 'native_lock', return_value=False):
+                self.assertEqual(cg.decide('bend', ['x.bend'], env)[0], expect, (mem, cap))
+        with patch.object(cg, 'mem_total', return_value=8 * cg.GIB), patch.object(cg, 'capped', return_value=True), patch.object(cg, 'native_lock', return_value=False):
             self.assertEqual(cg.decide('bend', ['x.bend'], {**env, 'BACKPLANE_HEAVY_OFFLOADED': '0'})[0], 'refuse')
+            self.assertEqual(cg.decide('bend', ['x.bend'], self.env)[0], 'refuse')            # no Boat claim, no lock
 
     def test_capped_local_context_needs_both_the_native_lock_and_the_cap(self):
         env = dict(self.env)
         for lock, cap, want in ((True, True, 'allow'), (True, False, 'refuse'), (False, True, 'refuse'), (False, False, 'refuse')):
             with patch.object(cg, 'native_lock', return_value=lock), patch.object(cg, 'capped', return_value=cap), patch.object(cg, 'boat', return_value=False):
                 self.assertEqual(cg.decide('bun', ['build'], env)[0], want, (lock, cap))
+
+    def test_native_lock_requires_a_genuinely_held_flock_not_just_an_open_descriptor(self):
+        lock = Path(self.tmp.name)/'bp-bend.lock'
+        lock.write_text('')
+        with patch.object(cg, 'LOCK', lock):
+            opened = os.open(str(lock), os.O_RDWR)                 # opened, NOT locked
+            self.addCleanup(os.close, opened)
+            self.assertFalse(cg.native_lock({'BACKPLANE_HEAVY_LOCK_FD': str(opened)}))
+            fcntl.flock(opened, fcntl.LOCK_EX | fcntl.LOCK_NB)      # now it really holds the flock
+            self.assertTrue(cg.native_lock({'BACKPLANE_HEAVY_LOCK_FD': str(opened)}))
+            fcntl.flock(opened, fcntl.LOCK_UN)
+            self.assertFalse(cg.native_lock({'BACKPLANE_HEAVY_LOCK_FD': str(opened)}))
+
+    def test_native_lock_refuses_an_unlocked_descriptor_while_another_description_holds_the_lock(self):
+        lock = Path(self.tmp.name)/'bp-bend.lock'
+        lock.write_text('')
+        with patch.object(cg, 'LOCK', lock):
+            holder = os.open(str(lock), os.O_RDWR)
+            unlocked = os.open(str(lock), os.O_RDWR)
+            self.addCleanup(os.close, holder)
+            self.addCleanup(os.close, unlocked)
+            fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertFalse(cg.native_lock({'BACKPLANE_HEAVY_LOCK_FD': str(unlocked)}))
+            self.assertTrue(cg.native_lock({'BACKPLANE_HEAVY_LOCK_FD': str(holder)}))
+
+    def test_native_lock_refuses_wrong_file_missing_or_garbage_descriptors(self):
+        lock = Path(self.tmp.name)/'bp-bend.lock'
+        other = Path(self.tmp.name)/'other.lock'
+        lock.write_text('')
+        other.write_text('')
+        with patch.object(cg, 'LOCK', lock):
+            wrong = os.open(str(other), os.O_RDWR)
+            self.addCleanup(os.close, wrong)
+            fcntl.flock(wrong, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for env in ({}, {'BACKPLANE_HEAVY_LOCK_FD': 'x'}, {'BACKPLANE_HEAVY_LOCK_FD': '9999'}, {'BACKPLANE_HEAVY_LOCK_FD': str(wrong)}):
+                self.assertFalse(cg.native_lock(env), env)
 
     def test_cap_check_requires_a_finite_limit_of_at_most_3_7e9_and_no_swap(self):
         def fake(limit, swap):
@@ -151,6 +192,20 @@ class CompilerGuard(unittest.TestCase):
         self.assertEqual(cg.CAP, hg.SHARD_CAP)
         self.assertEqual(str(cg.LOCK), str(hg.lock_path()))
 
+    def test_a_bun_installed_elsewhere_can_be_guarded_by_explicit_path(self):
+        other = Path(self.tmp.name)/'usr/local/bin/bun'
+        other.parent.mkdir(parents=True)
+        other.write_text(FAKE)
+        other.chmod(0o755)
+        cg.install(self.home, ['bun'], True, self.env, {'bun': str(other)})
+        self.assertTrue(cg.is_shim(other))
+        self.assertEqual(other.with_name('bun.real').read_text(), FAKE)
+        self.assertEqual(cg.check(self.home, ['bun'], self.env), [])
+        result = subprocess.run([str(other), 'build', 'x'], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 75)
+        cg.uninstall(self.home, ['bun'], True, self.env)
+        self.assertEqual(other.read_text(), FAKE)
+
     def test_exec_preserves_the_invoked_name_and_environment(self):
         with patch.object(cg.os, 'execve', side_effect=SystemExit(0)) as run, patch.object(cg.os, 'access', return_value=True):
             with self.assertRaises(SystemExit):
@@ -160,7 +215,7 @@ class CompilerGuard(unittest.TestCase):
 
     def test_a_missing_real_binary_fails_closed(self):
         self.install()
-        (self.guard/'real/bend').unlink()
+        self.real('bend').unlink()
         result = self.run_installed('.bend/bin/bend', 'version')
         self.assertEqual(result.returncode, 127)
 
@@ -172,7 +227,7 @@ class CompilerGuard(unittest.TestCase):
         result = self.run_installed('.bend/bin/bend', 'update')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(cg.is_shim(self.home/'.bend/bin/bend'))
-        self.assertIn('NEW', (self.guard/'real/bend').read_text())
+        self.assertIn('NEW', self.real('bend').read_text())
         self.assertEqual(cg.check(self.home, ['bend'], self.env), [])
         self.assertEqual(self.run_installed('.bend/bin/bend', 'x.bend').returncode, 75)    # still guarded after the update
 
