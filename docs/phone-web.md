@@ -86,10 +86,45 @@ with the keyboard up, the path and title bar give way.
 - The number of threads that need you is the app icon's badge and the
   page's title, "(2) Backplane".
 - With the hub out of reach, "Reconnecting…" is a line under the header.
+- Over a plain http:// address the row says notifications need HTTPS (see
+  below) instead of offering Allow.
+
+## HTTPS, installing, the first open
+
+- A phone usually reaches the hub at its LAN or tailnet address over plain
+  http. Browsers give such a page no service worker, no notifications, no
+  badge and no real install (Android makes only a bookmark). A hub started
+  with `--tailscale-https` is also at `https://<machine>.<tailnet>.ts.net/`
+  (`tailscale serve`); a phone paired at that address gets all of them and a
+  smaller download (brotli, below).
+- Add to Home Screen: the page carries a manifest (standalone, 192/512 px and
+  maskable icons, splash and status bar in the page's theme; an iPhone gets
+  the 180 px touch icon and, on the light theme, a status bar with dark text).
+- The first open downloads the bundle (6.4 MB; 1.22 MB gzip, 0.88 MB brotli,
+  which browsers take only over HTTPS or on localhost; the builds put a .br
+  beside each chunk where the `brotli` tool exists). On a slow phone (CPU
+  4x, 1.6 Mbps) that is 6.75 s over http and 5.1 s over HTTPS; compiling and
+  running it is about 0.3 s. Later opens come from the HTTP cache (0.7 s) or
+  the service worker (0.5 s).
+- The service worker gives the page from its cache when the network has not
+  answered in 2.5 s, so the app opens on a weak signal or with the hub away;
+  a page that arrives late caches its build's chunks, then itself, and the
+  open page reloads into a new build once the link answers.
+
+## Losing the link
+
+- A phone that slept, changed networks or came back online asks the hub for
+  a view at once; a link that brings nothing in 6 s is replaced. After a
+  Send or an answer, nothing for 12 s means the same (the text goes back in
+  the field). Both wait while a viewer is drawing (its pictures can take
+  minutes on a slow link). Desktop keeps the 40 s heartbeat lease.
+- Each failed retry gives the next one twice the time to connect (up to 4x),
+  so a link whose answers take seconds still gets back.
 
 ## Testing
 
-`node --test desktop/test/phone-shell.test.cjs desktop/test/phone-other.test.cjs desktop/test/service-worker-notify.test.cjs`,
+`node --test desktop/test/phone-shell.test.cjs desktop/test/phone-other.test.cjs desktop/test/service-worker-notify.test.cjs desktop/test/service-worker-cache.test.cjs`,
+`node --test test/tools/static_file_test.mjs`,
 `bend test/phone_shell_test.bend`;
 in a browser, `?phone=1` on a desktop Chromium forces the phone layout
 (`?phone=auto` forgets it).
