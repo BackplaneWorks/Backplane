@@ -2986,14 +2986,16 @@ html.phone section.improvements :is(input, select, textarea) { font-size: 16px; 
 .app.phone .msg .shot.image-unavailable { aspect-ratio: auto; height: 44px; width: 100%; }
 /* an API error's "› details" and a restart's "› what it was told" */
 .app.phone :is(.apierr-raw, .carry-told) > summary { display: inline-flex; align-items: center; min-height: 40px; padding: 0 8px; }
-/* a message this thread sent to another ("→ thread: …", View.link "out"):
-   one line cut to the screen, a thumb tall (it ran 870 px wide) */
-.app.phone .timeline button.link.out { display: block; max-width: 100%; min-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+/* a message this thread sent to another ("→ thread: …", View.link "out"),
+   one it got from another ("←", "in") and the thread that launched it
+   ("← launched by", View.parent): one line cut to the screen, a thumb
+   tall (an "out" row ran 870 px wide) */
+.app.phone .timeline :is(button.link.out, button.link.in, button.parent) { display: block; max-width: 100%; min-height: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 /* a turn's tool calls and its activity rows: a row a thumb can open */
 /* (padding on its row: a margin collapses through the row, which the
    timeline's planner measures, and the next row overlapped it) */
 .app.phone .timeline-virtual-row:has(> button.fold) { padding-block: 4px; }
-.app.phone button.fold { min-height: 40px; max-width: 100%; padding: 0 12px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone button.fold { min-height: 44px; max-width: 100%; padding: 0 12px; font-size: calc(13px * var(--text-scale, 100) / 100); }
 .app.phone .act { font-size: calc(12px * var(--text-scale, 100) / 100); line-height: 1.6; align-items: flex-start; }
 .app.phone .act .kind { font-size: calc(12px * var(--text-scale, 100) / 100); }
 /* a long activity row's "Read full activity text": a line of its own under
