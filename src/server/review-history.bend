@@ -65,7 +65,7 @@ def ReviewHistory.read.local(skip: Bool, +db: String, +st: M.State, +thread: Str
     case True{}: IO.pure(M.State, st)
     case False{}:
       do IO<M.State>:
-        loaded : Maybe<&1, M.State> <- RW.ReviewWindow.fold(M.State, db, thread, 0n, M.State.seq(st), M.State.empty(), rows => prior => ReviewHistory.post(rows, prior))
+        loaded : Maybe<&1, M.State> <- RW.ReviewWindow.fold(~M.State, ~(rows => prior => ReviewHistory.post(rows, prior)), db, thread, 0n, M.State.seq(st), M.State.empty())
         return ReviewHistory.complete(loaded, st, thread)
 
 def ReviewHistory.read(+db: String, +st: M.State, +thread: String) -> IO(M.State):

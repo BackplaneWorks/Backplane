@@ -12,20 +12,22 @@ def ReviewWindow.progress(after: Nat, next: Nat, done: Bool) -> Bool:
 def ReviewWindow.read(h: String, thread: String, after: Nat, through: Nat) -> IO(D.HistoryPage):
   D.Db.review_page(h, thread, after, through, ReviewWindow.budget())
 
-# The caller supplies its pure fold. A later read failure discards the
-# private partial fold; it cannot replace the caller's complete baseline.
-def ReviewWindow.fold(-A: Type, +h: String, +thread: String, +after: Nat, +through: Nat, value: A, +step: List<&2, List<&2, String>> -> A -> A) -> IO(Maybe<&1, A>):
+# A later read failure discards the private partial fold; it cannot replace
+# the caller's complete baseline. The pure step is a closed Bend template,
+# rather than a reusable runtime closure (functions are affine in Bend).
+def ReviewWindow.check(-A: Type, after: Nat, next: Nat, done: Bool, error: String, value: A) -> Maybe<&1, A>:
+  match Bool.and(String.is_empty(error), ReviewWindow.progress(after, next, done)):
+    case False{}: None{}
+    case True{}: Some{value}
+
+def ReviewWindow.fold(~A: Type, ~step: List<&2, List<&2, String>> -> A -> A, +h: String, +thread: String, +after: Nat, +through: Nat, value: A) -> IO(Maybe<&1, A>):
   do IO<Maybe<&1, A>>:
     page : D.HistoryPage <- ReviewWindow.read(h, thread, after, through)
-    ReviewWindow.fold.page(A, h, thread, after, through, value, step, page)
-
-def ReviewWindow.fold.page(-A: Type, +h: String, +thread: String, +after: Nat, +through: Nat, value: A, +step: List<&2, List<&2, String>> -> A -> A, page: D.HistoryPage) -> IO(Maybe<&1, A>):
-  match page:
-    case D.HistoryPage{rows, +next, done, error}:
-      ReviewWindow.fold.checked(A, Bool.and(String.is_empty(error), ReviewWindow.progress(after, next, done)), h, thread, next, through, done, value, step, rows)
-
-def ReviewWindow.fold.checked(-A: Type, ok: Bool, +h: String, +thread: String, +next: Nat, +through: Nat, done: Bool, value: A, +step: List<&2, List<&2, String>> -> A -> A, rows: List<&2, List<&2, String>>) -> IO(Maybe<&1, A>):
-  match ok done:
-    case False{} _: IO.pure(Maybe<&1, A>, None{})
-    case True{} True{}: IO.pure(Maybe<&1, A>, Some{step(rows, value)})
-    case True{} False{}: ReviewWindow.fold(A, h, thread, next, through, step(rows, value), step)
+    match page:
+      case D.HistoryPage{rows, +next, +done, error}:
+        match ReviewWindow.check(A, after, next, done, error, value):
+          case None{}: IO.pure(Maybe<&1, A>, None{})
+          case Some{prior}:
+            match done:
+              case True{}: IO.pure(Maybe<&1, A>, Some{step(rows, prior)})
+              case False{}: ReviewWindow.fold(~A, ~step, h, thread, next, through, step(rows, prior))
