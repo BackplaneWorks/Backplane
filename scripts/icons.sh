@@ -14,6 +14,8 @@ trap 'rm -rf "$tmp"' EXIT
 rsvg-convert -w 1024 -h 1024 assets/icon/backplane.svg -o "$tmp/ios.png"
 magick "$tmp/ios.png" -alpha off mobile/ios/Backplane/Assets.xcassets/AppIcon.appiconset/icon.png
 cp assets/icon/backplane.svg src/web/favicon.svg
+# The in-app header follows the selected theme; launcher icons stay fixed.
+sed -e 's/#111410/#ffffff/g' -e 's/#e6e9de/#000000/g' assets/icon/backplane.svg > src/web/favicon-light.svg
 rsvg-convert -w 180 -h 180 assets/icon/backplane.svg -o src/web/apple-touch-icon.png
 for s in 64 128 256 512; do
   rsvg-convert -w $s -h $s assets/icon/backplane.svg -o assets/icon/backplane-$s.png

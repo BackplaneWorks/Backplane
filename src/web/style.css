@@ -19,6 +19,7 @@
   --view: #08090b;
   --add-bg: #11331f;
   --del-bg: #32131a;
+  --brand-image: url("./apple-touch-icon.png");
   --mono: "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: dark;
@@ -46,6 +47,7 @@ html.light, .app.light, .bub-move.light {
   --view: #f5f4ef;
   --add-bg: #dff3e4;
   --del-bg: #fbe4e6;
+  --brand-image: url("./favicon-light.svg");
   --sel: rgba(0,0,0,.06);
   color-scheme: light;
 }
@@ -114,7 +116,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .conn.on { background: var(--ok); }
 .hub-down .conn.on { background: var(--bad); }
 /* Sidebar brand mark. */
-.brand-mark { position: relative; display: block; width: 24px; height: 24px; flex: 0 0 24px; background: url("./apple-touch-icon.png") center / contain no-repeat; }
+.brand-mark { position: relative; display: block; width: 24px; height: 24px; flex: 0 0 24px; background: var(--brand-image) center / contain no-repeat; }
 .brand-mark .conn { position: absolute; right: -2px; bottom: -1px; border: 1px solid var(--panel); box-shadow: 0 0 0 1px var(--panel); }
 /* End sidebar brand mark. */
 .add { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
