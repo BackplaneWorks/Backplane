@@ -34,8 +34,14 @@ def Home.panels.rows(rows: List<&2, J.Json>, left: Nat) -> List<&2, Panel>:
     case row <> rest 1n+n:
       List.append(&2, Panel, Home.artifact(row), Home.panels.rows(rest, n))
 
-def Home.panels(contents: J.Json) -> List<&2, Panel>:
-  Home.panels.rows(J.Json.elems(J.Json.get_obj(contents, "artifacts")), 32n)
+# the copies of a hardware project's design this page does not show (the
+# hub's "outside", core/projkind.bend's Pk.panel), first, since they may
+# hold the current design; none when there are none
+def Home.outside(+text: String) -> List<&2, Panel>:
+  Home.panel.missing(String.is_empty(text), "outside", "outside", "Design outside this folder", text)
+
+def Home.panels(+contents: J.Json) -> List<&2, Panel>:
+  List.append(&2, Panel, Home.outside(J.Json.get_str(contents, "outside", "")), Home.panels.rows(J.Json.elems(J.Json.get_obj(contents, "artifacts")), 32n))
 
 # Exact path lookup supplies viewer actions as well as the panel plan.
 def Home.find(rows: List<&2, J.Json>, +kind: String) -> String:

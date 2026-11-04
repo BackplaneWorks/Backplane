@@ -16,4 +16,4 @@ def cfg() -> S.Cfg:
 # equal it byte for byte. Computed, not a frozen string, so other prompt
 # edits don't break it.
 def recorded() -> String:
-  S.Hub.prompt.base(cfg(), M.State.empty(), "t", "/tmp/lang-project", K.Files{"", "", "", ""}, "")
+  S.Hub.prompt.base(cfg(), M.State.empty(), "t", "/tmp/lang-project", K.Files{"", "", "", "", False{}}, "")

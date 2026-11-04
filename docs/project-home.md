@@ -12,6 +12,10 @@ and available repository information. A saved board adds the existing board,
 schematic and 3D viewers, saved check results and fabrication metadata.
 Mechanical models add their saved thumbnails and a Mech action.
 
+A hardware project's home starts with "Design outside this folder" when any
+copy of its design differs from the canonical folder: uncommitted design files,
+and thread worktrees with their own (`docs/git.md`, Hardware projects).
+
 ## Ownership and data
 
 The presentation target is `{kind:"project", id:projectId}`. Its local draft

@@ -969,7 +969,7 @@ def Tree.root.of(+sch: String, +tree: String) -> String:
 
 def Tree.root(f: K.Files, +path: String, +tree: String) -> String:
   match f:
-    case K.Files{_, _, +sch, _}:
+    case K.Files{_, _, +sch, _, _}:
       Bool.pick(String, String.is_empty(Tree.root.of(sch, tree)), path, HS.Hist.rebase(path, Tree.root.of(sch, tree)))
 
 # each file the tree read, a line of its sheets' boxes (hier.bend's
@@ -1400,7 +1400,7 @@ def Pv.none(+kind: U32) -> String:
 
 def Pv.file.k(f: K.Files, +kind: U32) -> String:
   match f:
-    case K.Files{_, pcb, sch, _}:
+    case K.Files{_, pcb, sch, _, _}:
       Bool.pick(String, U32.is_eq(kind, 1), sch, pcb)
 
 # the file a phone asked for: the explicit path, else the project's

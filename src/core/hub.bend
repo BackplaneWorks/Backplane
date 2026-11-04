@@ -1,6 +1,7 @@
 import ./autosettle.bend as AUTO
 import Base
 import ./project-home.bend as PH
+import ./projkind.bend as PK
 import ./folder.bend as FP
 import ./telemetry.bend as TLM
 import ./mailprivate.bend as PM
@@ -4021,15 +4022,12 @@ def Wt.stale.one.k(t: M.Thread, +now: Nat, +pending: Bool) -> Bool:
 def Wt.stale.one(+t: M.Thread, +now: Nat) -> Bool:
   Wt.stale.one.k(t, now, M.Worktree.pending(t, now))
 
-# a hardware project: KiCad files in the project folder. Its new worktrees
-# bring the folder's uncommitted work along (board work is often not
+# KiCad files in the project folder. A worktree asked for by name there
+# (a hardware project's threads otherwise have none: core/projkind.bend)
+# brings the folder's uncommitted work along (board work is often not
 # committed yet, and boards do not merge by hand)
-def Wt.hardware(ns: List<&2, String>) -> Bool:
-  match ns:
-    case Nil{}:
-      False{}
-    case +n <> t:
-      Bool.or(Bool.or(String.ends_with(n, ".kicad_pro"), String.ends_with(n, ".kicad_pcb")), Bool.or(String.ends_with(n, ".kicad_sch"), Wt.hardware(t)))
+def Wt.hardware(+ns: List<&2, String>) -> Bool:
+  PK.Pk.kicad(ns)
 
 # what the hub tells the clients when an agent starts in a KiCad project:
 # show the thread's board (its schematic when there is no board) as the

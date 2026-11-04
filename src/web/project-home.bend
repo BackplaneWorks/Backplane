@@ -78,6 +78,7 @@ def HomeView.artifact(+u: U.Ui, kind: String, +path: String, +title: String, +su
       HomeView.named.section(u, path, title, List.append(&2, D.Node, HomeView.image(String.is_empty(J.Json.get_str(row, "thumbnail", "")), J.Json.get_str(row, "thumbnail", ""), title),
         [D.Dom.button("", "home-model", path, "Open this model in Mech", "Open in Mech")]))
     case "prs": HomeView.section(title, D.Md.render(String.take(summary, 1200n)))
+    case "outside": HomeView.section(title, D.Md.render(String.take(summary, 2400n)))
     case "changes": HomeView.section(title, [D.El{"pre", "", Nil{}, [D.Txt{summary}]}])
     case _: HomeView.section(title, [D.El{"div", "", [D.At{"class", "body"}], D.Md.render(String.take(summary, 1200n))}, D.Dom.button("", "home-document", path, "Read the full file", "Read file")])
 

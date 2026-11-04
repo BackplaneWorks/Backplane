@@ -1379,7 +1379,7 @@ def Src.kind(+key: String) -> U32:
 
 def Watch.file.k(+kind: U32, f: K.Files, +path: String) -> String:
   match f:
-    case K.Files{_, pcb, sch, _}:
+    case K.Files{_, pcb, sch, _, _}:
       Bool.pick(String, String.is_empty(path), Bool.pick(String, U32.is_eq(kind, 1), sch, pcb), path)
 
 # the file behind a source ("" when the project has none)

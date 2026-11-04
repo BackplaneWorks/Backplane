@@ -160,12 +160,12 @@ def Rvc.cli(+home: String) -> IO(String):
 
 def Rvc.sch(f: K.Files) -> String:
   match f:
-    case K.Files{_, _, +sch, _}:
+    case K.Files{_, _, +sch, _, _}:
       sch
 
 def Rvc.pcb(f: K.Files) -> String:
   match f:
-    case K.Files{_, +pcb, _, _}:
+    case K.Files{_, +pcb, _, _, _}:
       pcb
 
 # a folder for the reports, and the commit's files when one is asked
@@ -365,7 +365,7 @@ def Rvc.bound.files(r: P.Ran, +root: String, +sch: String) -> IO(String):
 def Rvc.bound(+root: String, f: K.Files) -> IO(String):
   match root f:
     case SNil{} _: IO.pure(String, "")
-    case _ K.Files{+pro, +pcb, +sch, _}:
+    case _ K.Files{+pro, +pcb, +sch, _, _}:
       IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Rvc.bound.sh(), "sh", root, pro, pcb, sch], "/"), r => Rvc.bound.files(r, root, sch))
 
 def Rvc.checks.inputs(+out: String, +dir: String, +home: String, +trigger: String, +f: K.Files) -> IO(String):
