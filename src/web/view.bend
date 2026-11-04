@@ -5883,9 +5883,15 @@ def View.phone.need(+u: U.Ui) -> Nat:
   +ix = U.Side.ix(U.Ui.state(u))
   PL.PTally.need(PL.Plane.tally(u, ix, View.phone.raw(u, ix)))
 
+# rooms with something unread (the phone apps' Bots badge, MTab.rooms.unread)
+def View.phone.unread(rs: List<&2, BI.RRow>, +u: U.Ui, acc: Nat) -> Nat:
+  match rs:
+    case Nil{}: acc
+    case BI.RRow{+id, _, _, _} <> t: View.phone.unread(t, u, Nat.add(acc, Bool.pick(Nat, Nat.is_gt(U.Rooms.unread(u, id), 0n), 1n, 0n)))
+
 def View.phone.tabs(+lc: I.Loc, root: Bool, +screen: String, +u: U.Ui) -> List<&2, D.Node>:
   match root:
-    case True{}: [PHN.Phone.tabs(lc, screen, View.phone.need(u), 0n)]
+    case True{}: [PHN.Phone.tabs(lc, screen, View.phone.need(u), View.phone.unread(BI.BU.rooms(u), u, 0n))]
     case False{}: Nil{}
 
 # the Now tab: what needs the person first, then what runs, over every
