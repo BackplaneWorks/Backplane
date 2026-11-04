@@ -91,7 +91,6 @@ type Out is Data:
   UpgradeForce{}
   # the install is ready: end the hub's process into it now
   Restart{}
-  CadInstall{tool: String, op: String}
   KiCadInstall{}
   KiCadRetry{}
   # opencode's models read again for every client (server.bend's OcJob)
@@ -209,7 +208,6 @@ def Out.kind(o: Out) -> String:
     case Upgrade{}: "Upgrade"
     case UpgradeForce{}: "UpgradeForce"
     case Restart{}: "Restart"
-    case CadInstall{_, _}: "CadInstall"
     case KiCadInstall{}: "KiCadInstall"
     case KiCadRetry{}: "KiCadRetry"
     case ModelsRefresh{}: "ModelsRefresh"
@@ -1398,7 +1396,7 @@ def Hub.methods() -> List<&2, String>:
    "thread.pin", "thread.unpin", "thread.rename", "thread.delete", "kicad.watch", "thread.modes", "app.update", "setting.set", "kicad.install",
    "ask.answer", "device.register", "device.drop", "kicad.info", "queue.resume",
    "queue.edit", "queue.remove", "queue.move", "queue.steer", "thread.fork", "thread.back", "thread.provider", "update.now", "work.cancel", "task.cancel", "wake.cancel", "deploy.restart", "deploy.cancel", "deploy.status", "lock.release", "lock.cancel", "kicad.retry", "mail.list", "mail.read", "mail.find", "mail.mark", "mail.tag", "mail.send",
-   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move", "kicad.warm", "project.home", "project.start", "project.rename", "cad.install", "thread.reparent"]
+   "fab.look", "fab.intent", "order.buy", "models.refresh", "thread.detach", "todos.edit", "improvements.context", "improvements.report", "project.move", "kicad.warm", "project.home", "project.start", "project.rename", "thread.reparent"]
 
 # Agent output (Claude stream-json)
 # ---------------------------------
@@ -10645,10 +10643,8 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     # (client.bend's Hs.warm; kind "board" or "schematic")
     case 56n: Home.request(s, client, id, p)
     case 57n: Home.start(s, now, client, id, p)
-    case 60n:
-      Hub.thread_parent(s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "parent", ""))
     case 59n:
-      Step.outs([Reply.ok(client, id), CadInstall{Bool.pick(String, String.eq(J.Json.get_str(p, "tool", ""), "freecad"), "freecad", "kicad"), J.Json.get_str(p, "op", "start")}])
+      Hub.thread_parent(s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "parent", ""))
     case 58n: Step.reply(client, id, Home.rename.project(Hub.project(s, J.Json.get_str(p, "project", "")), J.Json.get_str(p, "title", "")))
     case 55n:
       Step.outs(Reply.ok(client, id) <> Warm.outs(J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), [J.Json.get_str(p, "before", ""), J.Json.get_str(p, "after", "")]))
