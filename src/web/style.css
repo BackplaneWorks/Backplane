@@ -2856,6 +2856,11 @@ html.phone .pairing-qr { margin: 16px auto; width: min(100%, 300px); }
 /* (36 px to see, 44 to hit: the row is 44 px tall) */
 .app.phone > .ph-cells :is(button.kv, .kv.state button.tool) { position: relative; }
 .app.phone > .ph-cells :is(button.kv, .kv.state button.tool)::after { content: ""; position: absolute; inset: -4px 0; }
+/* the subagents' and to-do list's docks, opened from their chips: half
+   the screen to read them in (the timeline keeps the rest) */
+.app.phone .thread-content > :is(.subs, .todos).dock :is(.subs-body, .todos-body) { max-height: calc(var(--ph-vh, 100dvh) * 0.5); }
+.app.phone .sub-row { min-height: 44px; }
+.app.phone :is(.sub-step, .sub-ask) .kind, .app.phone .sub-ask .label { width: auto; min-width: 6ch; white-space: nowrap; }
 /* the screen: the timeline takes what the header and the composer leave,
    the composer sits on the keyboard (the shell sizes .app.phone to the
    visual viewport, --ph-vh) */
@@ -2940,7 +2945,7 @@ html.ph-nomic .app.phone .composer .mic { display: none; }
 /* queued messages and the account / token / allowance pop-ups */
 .app.phone .queue { margin: 0 8px; }
 .app.phone .queued { min-height: 44px; font-size: calc(13px * var(--text-scale, 100) / 100); }
-.app.phone .queued .q-acts button { min-height: 36px; padding: 0 10px; font-size: calc(13px * var(--text-scale, 100) / 100); }
+.app.phone .queued .q-acts button { min-height: 40px; padding: 0 10px; font-size: calc(13px * var(--text-scale, 100) / 100); }
 /* "N new ↓": back to the latest, over the composer at the thumb */
 .app.phone .hold-pill { height: 40px; padding: 0 16px; margin-top: calc(-40px - 10px); line-height: 38px; font-size: calc(14px * var(--text-scale, 100) / 100); }
 /* the image lightbox (outside .app): its tools below the notch and a
