@@ -2956,6 +2956,11 @@ html.phone .lightbox .lb-close { top: max(12px, env(safe-area-inset-top)); right
 html.phone .lightbox .lb-tools { top: max(12px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); right: calc(68px + env(safe-area-inset-right)); }
 html.phone .lightbox .lb-tools button { min-height: 44px; padding: 0 14px; }
 html.phone .lightbox .lb-status { bottom: max(20px, env(safe-area-inset-bottom)); }
+/* Devices: its Back is the screen's first thing, as a phone's ‹ is */
+html.phone .pairing-card > .pairing-back { order: -1; align-self: flex-start; margin: 0 0 8px; padding: 0 12px 0 4px; border: 0; background: none; color: var(--accent); font-size: 17px; }
+html.phone .pairing-card > .pairing-back::before { content: "‹ "; font-size: 22px; }
+html.phone .pairing-device { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: 56px; }
+html.phone .pairing-device > p { flex: 1 1 100%; margin: 0; color: var(--dim); }
 
 /* bots and rooms on a phone: the bot's pages as a row of chips that
    scrolls sideways (one tap, always in sight) instead of the Pages menu */
@@ -2974,3 +2979,25 @@ html.phone :is(.bot-body, .mailroom) :is(input:not([type=checkbox]):not([type=ra
 html.phone .mailroom :is(.mail-machines, .mail-bots, .mail-filters, .mail-columns, .mail-targets) { display: flex; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; gap: 8px; }
 html.phone .mailroom :is(.mail-machines, .mail-bots, .mail-filters, .mail-columns, .mail-targets) > * { flex: none; }
 html.phone .mailroom .mail-row { min-height: 56px; }
+/* the phone's header has ‹ and the name: a bot's and a room's own header
+   keeps only what it adds (the cat, mood and model; the members, Delete) */
+.app.phone .bot-head > .back, .app.phone .bot-head .bot-title,
+.app.phone .room-view > .thread-head > .back, .app.phone .room-view > .thread-head > .title { display: none; }
+.app.phone .bot-head { padding: 6px 12px; }
+.app.phone .bot-head .cat { width: 40px; height: 40px; }
+.app.phone .room-view > .thread-head { min-height: 44px; padding: 4px 12px; }
+.app.phone .room-view > .thread-head .tools button { min-height: 44px; min-width: 44px; }
+.app.phone .room-view .composer :is(button, textarea) { min-height: 44px; }
+.app.phone .room-view .composer textarea { font-size: 16px; }
+/* a project's home on a phone: the header has ‹ and its name; its threads
+   come first, then its viewer (C's) below them */
+.app.phone .project-home > .home-header > .back, .app.phone .project-home .home-eyebrow { display: none; }
+.app.phone .project-home > .home-header { padding: 8px 12px; min-height: 0; }
+.app.phone .project-home .home-layout { display: flex; flex-direction: column; gap: 12px; }
+.app.phone .project-home .home-layout > .home-details { order: -1; }
+.app.phone .project-home .home-layout > .home-resize { display: none; }
+.app.phone .project-home .home-details :is(button, summary, select) { min-height: 44px; }
+.app.phone .project-home .home-details :is(input, textarea, select) { font-size: 16px; }
+.app.phone .project-home > .home-header button { min-height: 44px; min-width: 44px; }
+.app.phone .project-home .home-details { font-size: max(1em, 13px); }
+.app.phone .project-home .home-details * { font-size: max(1em, 12px); }
