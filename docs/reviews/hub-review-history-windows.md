@@ -30,9 +30,8 @@ was rejected. Proof RSS peaked at 128,768 KiB; the controller peaked at
 had a hard 512 MiB/no-swap scope. All OOM, limit and swap activity counters
 remained zero. [Receipts](../../extra/hub-review-qualification/SUMMARY.json)
 also retain prior failed attempts. Existing pure folds, merge and skip
-policies received a source-preservation audit. The broad review-state
-adapter and its two existing merge-law closures remain unqualified;
-this PR is not ready to merge yet.
+policies received a source-preservation audit. This narrow receipt does not
+qualify the actual `M.State` adapter; its later qualification is recorded below.
 The first executable smoke test caught a foreign-ABI mistake: the exhaustion
 flag must be a primitive JS boolean. The corrected boundary suite explicitly
 checks its representation. Pre-fix receipts are retained as historical only.
@@ -82,8 +81,32 @@ discard, resident queued duplicate payload precedence, sequence 522 excluding
 future 524, full review text/order and skip behavior. It imports no renderer.
 The actual executable must return zero, contain no `FAIL`, match all 31 expected
 checks including fixture multiplicities, and end with the close check.
-The old legacy renderer test is preserved. Both new qualification stages remain
-pending on the new frozen source; no claim is made that this closure fits yet.
+The old legacy renderer test is preserved.
+
+Both actual adapter stages passed on exact `ae612f245` in owner-controlled
+work `1531194`, normal Boat job `j20261104041654-838703`. Both unchanged
+canonical merge laws passed and the corrupt-merge negative control was rejected.
+The complete real adapter/test closure passed, and its actual emitted JS/Bun
+program passed all 31 expected checks, no `FAIL`, with the terminal close.
+The evaluator verified every source hash against the isolated exact checkout.
+Proof peak RSS was 545,308 KiB (negative control 403,812 KiB); the adapter emit
+route peaked at 604,992 KiB. Workers stayed under 3.7 GB with an actual native
+flock and the original admission floor; the separate runtime/controller stayed
+under 512 MiB. OOM/limit events and swap activity were zero.
+[The complete scoped receipts](../../extra/hub-review-qualification/adapter-ae612/SCOPE.json)
+and [actual runtime checks](../../extra/hub-review-qualification/adapter-ae612/RUNTIME.json)
+are retained with the earlier failures. The full server and whole thin-view
+type closure remain unqualified; the transparent delegate is exact-source
+audited. This establishes no packaged performance result.
+
+Current main `1e34e4067`, including the qualified #906 runner transport, was
+integrated with the blockwise law merge driver. The
+[Git identity export](../../extra/hub-review-qualification/MAIN-INTEGRATION-IDENTITY.json)
+records unchanged compiled-file blobs/modes, accepted runtime contract, and
+both canonical law/proof blocks against the passed `ae612` source. Only the
+global LAWS/PROOF roots changed among the recorded inputs. This is metadata,
+not a new checker or shape verdict. The evaluator still owns exact post-main
+preservation qualification, fresh capped Boat merged shape and CI-clean merge.
 
 No full/root proof, full application compile, build, installation or live
 store access is authorized. Startup, steady memory, CPU and p99 targets remain
