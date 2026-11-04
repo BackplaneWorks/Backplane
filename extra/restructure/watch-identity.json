@@ -399,7 +399,7 @@
     "src/server/view-capacity.bend": "65b18d981ee18bb9db9687f3be2bd693b883aa0f3e4dac6837dd42f9cc8d8c36",
     "src/server/voice.bend": "bc262ee90db74307bfe808b90accc22d6338a38c55e55aa7c8701c4677f700fb",
     "src/server/wake.bend": "ee93b0366b715d94c65a6a1c92ba88a02f7ce73d52a68132c9377d0d2e2765bc",
-    "src/server/watch-plan.bend": "858a298a9d486ec3d754b15619973dd3abf36aa32c7e1a7cc93ae2a63dab14a6",
+    "src/server/watch-plan.bend": "6c487fe1ccabca8a41dbceb4eb224edd1413cbc6cf0c511db44e8126fa44ef77",
     "src/server/wire-log.bend": "4985402655d585c03e50fa0c3caa688abce826f598f027d96adcf7cd3a17e78c",
     "src/web/allowance.bend": "0e9ee3ab27dd2b3c25a2778a35b300c7333c0878b5215b62c7229fed79ee168b",
     "src/web/app.bend": "e631f71ff6a752184e91bf4c9bd7795031eea7db7b1fb9432b7faefc850eb910",
@@ -457,11 +457,12 @@
     "LAWS.bend": "936ba334280004b62528cdb23d7f1428e1127d2b033af4d667efdfa88390cac1",
     "PROOF.bend": "5e2309a16dfe81b453fc2a6e157e4b4c217473bedde1e1cacc5040906e71d5b7",
     "src/server/server.bend": "46afaa021d96b02b52915b1c52069b8c422a5a7a50deeed5b12cb62a28ef9854",
-    "src/server/watch-plan.bend": "858a298a9d486ec3d754b15619973dd3abf36aa32c7e1a7cc93ae2a63dab14a6",
+    "src/server/watch-plan.bend": "6c487fe1ccabca8a41dbceb4eb224edd1413cbc6cf0c511db44e8126fa44ef77",
     "scripts/proof-shards.py": "68c44203715d84f24e5a9cfabf5353c606b77f8b820cd02522dbb4d99a5db5bd",
     "scripts/heavy-guard.py": "46487f5ff1fd32a2f6f6f7eba9ea575a1bc41cc08c3c1f8f8d15f1871563f557",
     "scripts/bendok.sh": "3f3e17c4ba1a0d90fe541c077f233dd3b75f3c66147d6038a91f192e3354c86c",
-    "extra/restructure/run-watch-proofs.py": "82478c37fed9e4d1d3787af4cc8c04eb368df9757e9903a46654785357bb14ed"
+    "extra/restructure/run-watch-proofs.py": "82478c37fed9e4d1d3787af4cc8c04eb368df9757e9903a46654785357bb14ed",
+    "scripts/laws-shape.py": "3f71e08f706c03b1d4df4b7f8c5a6bb65f91cd07107bdbf2f31b3cd8e873fe90"
   },
   "toolchain": {
     "binary_sha256": "b2b183bddc3c3fa4bc45d99f6a6bdbb192ebc616e6e697777f49e74c545b1643",
