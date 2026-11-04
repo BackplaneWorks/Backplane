@@ -17431,13 +17431,19 @@ def Cadview.tool(value: String) -> String:
 def Cadview.rpc(+u: Ui, value: String, op: String) -> Act:
   Ui.rpc(u, "cad.install", [J.KV{"tool", J.Str{Cadview.tool(value)}}, J.KV{"op", J.Str{op}}])
 
-def Cadview.dispatch(+u: Ui, action: String, +value: String) -> Act:
-  match action:
+# Cadview.dispatch matches a copy of action (its last row reads action
+# again): a string pattern splits bit by bit and a row that mentions its
+# scrutinee gets it rebuilt at every split (hubs.bend's One.act.home.by)
+def Cadview.dispatch.by(key: String, +u: Ui, +action: String, +value: String) -> Act:
+  match key:
     case "cad-install": Cadview.rpc(u, value, "start")
     case "cad-cancel": Cadview.rpc(u, value, "cancel")
     case "cad-refresh": Cadview.rpc(u, value, "refresh")
     case "cad-guide": Ui.act.home(False{}, u, "open-url", Bool.pick(String, String.eq(Cadview.tool(value), "freecad"), "https://www.freecad.org/downloads.php", "https://github.com/i2cjak/Backplane_KiCad/releases"))
     case _: Ui.act.home(Bool.or(Bool.or(String.eq(action, "proj-home"), String.starts_with(action, "home-")), Bool.and(PH.Home.is(Ui.sel(u)), Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")))), u, action, value)
+
+def Cadview.dispatch(+u: Ui, +action: String, +value: String) -> Act:
+  Cadview.dispatch.by(action, u, action, value)
 
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
   Cadview.dispatch(u, action, value)
