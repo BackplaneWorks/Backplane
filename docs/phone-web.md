@@ -15,6 +15,11 @@ desktop or a narrow desktop window never gets any of it.
   the link field, so its keyboard does not cover Connect.
 - A home-screen app keeps its own cookies, so it pairs on its own: it opens
   on **Short code**, with a line saying why.
+- **QR code → Scan with the camera** opens the rear camera full screen (Close
+  and Torch at the top, what to do at the bottom) and pairs on the first
+  invitation it reads. Over a plain http:// address there is no camera for the
+  page (browsers keep it to HTTPS): the QR choice says so and points to the
+  phone's own camera app (it opens the link) or Short code.
 - **Settings → Devices** puts ‹ Back first and lists the phone itself first,
   marked **This device** (the browser keeps the device id `/auth/enroll`
   answers; see docs/pairing.md).
@@ -134,6 +139,18 @@ back a screen, false when there is nothing left (the app may leave then);
 the page also keeps a history entry per pushed screen, so a WebView's own
 goBack works too. A WebView that shrinks its layout for the keyboard (Android)
 and one that shrinks only the visual viewport (iOS) are both followed.
+
+The pairing screen's QR scanner uses `getUserMedia`, so the app must let the
+page have the camera: on Android hold the `CAMERA` runtime permission and
+grant the page's request in `WebChromeClient.onPermissionRequest`
+(`PermissionRequest.RESOURCE_VIDEO_CAPTURE`); on iOS give
+`NSCameraUsageDescription` and allow media capture in
+`WKUIDelegate`'s `webView(_:requestMediaCapturePermissionFor:...)`, with
+`allowsInlineMediaPlayback` on. An app may also offer
+`window.backplaneApp.requestCamera()` (a Promise of true once it holds the
+system permission); the page calls it before asking for the camera, and says
+the camera was refused when it answers false. While the scanner is open,
+`window.backplaneBack()` closes it.
 
 ## Testing
 
